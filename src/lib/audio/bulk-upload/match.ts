@@ -202,7 +202,10 @@ function fileNameKey(name: string): string {
 function readFolders(path: string, index: BookNameIndex): Pick<ReadRecording, "folderBook" | "folderChapter"> {
   const out: Pick<ReadRecording, "folderBook" | "folderChapter"> = {}
   for (const segment of folderSegments(path)) {
-    const r = readName(`${segment}.folder`, index)
+    // A short made-up extension, so the name reader strips it and a dotted
+    // folder ("Gen 3.1") keeps its numbers; a longer one stayed in the name as
+    // a word, and a folder that is just "3" was never read as a chapter.
+    const r = readName(`${segment}.dir`, index)
     if (r.book && !out.folderBook) {
       out.folderBook = { code: r.book.code, segment }
       const chapter = r.numbers.find((n) => n.marker === "chapter") ?? (r.numbers.length === 1 ? r.numbers[0] : undefined)
@@ -334,6 +337,8 @@ interface Interpreted {
   wanted: Wanted
   part?: PartInfo
   take?: number
+  /** The chapter came from the folder's name, not the file's. */
+  folderChapter?: boolean
 }
 
 function partOf(reading: NameReading, extra?: NameNumber): PartInfo | undefined {
@@ -487,7 +492,7 @@ function interpretBible(r: ReadRecording, nums: NameNumber[], singleChapter: boo
   const chapterMark = nums.find((n) => n.marker === "chapter")
   const verseMark = nums.find((n) => n.marker === "verse")
   const plain = nums.filter((n) => !n.marker)
-  const base = { ...(take != null ? { take } : {}) }
+  const base: Pick<Interpreted, "take" | "folderChapter"> = { ...(take != null ? { take } : {}) }
   const withPart = (w: Wanted, extra?: NameNumber, letter?: string): Interpreted => ({
     wanted: w,
     ...base,
@@ -503,7 +508,15 @@ function interpretBible(r: ReadRecording, nums: NameNumber[], singleChapter: boo
     return withPart({ kind: "line", line: lineMark.value })
   }
 
-  let chapter = chapterMark?.value ?? r.folderChapter?.chapter
+  // A name that gives its own chapter and verse wins over a folder named for
+  // a chapter: "Genesis 3/Genesis 1-1" is 1:1, and "Genesis 3/3-5" is 3:5. A
+  // name without a book whose first number isn't the folder's chapter is
+  // read inside it: "Genesis 3/1-4" is verses 1 to 4 of chapter 3.
+  const folderChapter = r.folderChapter?.chapter
+  const ownChapter = !chapterMark && !verseMark && plain.length >= 2 &&
+    (reading.book != null || r.bookFromNumber === true || plain[0].value === folderChapter)
+  let chapter = chapterMark?.value ?? (ownChapter ? undefined : folderChapter)
+  if (chapterMark == null && !ownChapter && folderChapter != null) base.folderChapter = true
   let rest = plain
   if (chapter == null && verseMark) {
     if (plain.length > 0) { chapter = plain[0].value; rest = plain.slice(1) }
@@ -807,9 +820,11 @@ export function matchRecordings(
       continue
     }
     const singleChapter = fi.chapters.size === 1 && fi.chapters.has(1)
-    // Outside a Bible book a name holds no book: "This is 12" is line 12, not Isaiah.
+    // Outside a Bible book a name holds no book: "This is 12" is line 12, not
+    // Isaiah. Inside one, a folder's number that is not one of the book's
+    // chapters ("2023") is not a chapter folder.
     const group = fi.bible
-      ? rawGroup
+      ? rawGroup.map((r) => (r.folderChapter && !fi.chapters.has(r.folderChapter.chapter) ? { ...r, folderChapter: undefined } : r))
       : rawGroup.map((r) => (r.reading.book ? { ...r, reading: readName(r.file.name, NO_BOOKS) } : r))
     const nums = pruneConstants(group, fi.bible)
     // A number alone in a Bible book: chapter or verse, by the folder's count.
@@ -888,7 +903,7 @@ export function matchRecordings(
         ...(part ? { part } : {}),
         ...(interp?.take != null ? { take: interp.take } : {}),
         ...(byLength && lone.has(r.index) ? { byLength } : {}),
-        ...(!r.reading.book && r.folderBook ? { fromFolder: r.folderBook.segment } : r.folderChapter && !r.reading.numbers.some((n) => n.marker === "chapter") ? { fromFolder: r.folderChapter.segment } : {}),
+        ...(!r.reading.book && r.folderBook ? { fromFolder: r.folderBook.segment } : r.folderChapter && interp?.folderChapter ? { fromFolder: r.folderChapter.segment } : {}),
       })
     }
   }

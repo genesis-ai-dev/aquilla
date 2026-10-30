@@ -699,3 +699,22 @@ describe("a verse's place in the book (ETEN's LN)", () => {
     expect(assignments[0].reason).toEqual({ code: "noSuchBookVerse", count: 2000, verses: 1071, book: "Matthew" })
   })
 })
+
+// The Oct 29 code review's cases, each run against the real matcher. They pin
+// what a person would otherwise see land on the wrong verse, or not at all.
+describe("the review's cases (Oct 29)", () => {
+  const GEN = [31, 25, 24, 26, 32]
+  const fileScope = (fileId: string) => ({ kind: "file", fileId }) as const
+  const lineOf = (a: Assignment) => a.cellIds?.join(",") ?? a.reason?.code
+
+  it("a chapter folder never overrides a name that gives its own chapter and verse", () => {
+    const files = ["Genesis 3-5.mp3", "Genesis 3-1.mp3", "Gen 3.6.mp3", "3-7.mp3", "Genesis 1-1.mp3", "8-10.mp3"].map((n) => audio(`Genesis 3/${n}`))
+    const { assignments } = run(files, [book("g", "GEN", "Genesis", GEN)], fileScope("g"))
+    expect(assignments.map(lineOf)).toEqual(["g:3:5", "g:3:1", "g:3:6", "g:3:7", "g:1:1", "g:3:8,g:3:9,g:3:10"])
+  })
+
+  it("a folder that is just a number is that chapter", () => {
+    const files = ["05.mp3", "06.mp3"].map((n) => audio(`3/${n}`))
+    expect(run(files, [book("g", "GEN", "Genesis", GEN)], fileScope("g")).assignments.map(lineOf)).toEqual(["g:3:5", "g:3:6"])
+  })
+})

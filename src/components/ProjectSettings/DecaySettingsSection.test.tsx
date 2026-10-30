@@ -50,9 +50,11 @@ describe("DecaySettingsSection containment (AQU-1197)", () => {
 
   it("still edits the decay tunables through onChange", () => {
     const { onChange } = renderSection()
-    fireEvent.change(screen.getByLabelText("Max hops"), {
-      target: { value: "6" },
-    })
-    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ maxHops: 6 }))
+    const box = screen.getByLabelText("Max hops")
+    fireEvent.change(box, { target: { value: "6" } })
+    // A typing box saves when you leave it, as one change (AQU-2262).
+    expect(onChange).not.toHaveBeenCalled()
+    fireEvent.blur(box)
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ maxHops: 6 }), { from: 4, final: true })
   })
 })

@@ -115,6 +115,7 @@ vi.mock("@/lib/completion/completion-service", async (importOriginal) => {
 vi.mock("@/lib/store/project-index", () => ({
   getProject: vi.fn().mockResolvedValue(null),
   updateProject: vi.fn().mockResolvedValue(undefined),
+  patchProject: vi.fn().mockResolvedValue(null),
 }))
 
 vi.mock("@/lib/progress/read-validation-count", () => ({
@@ -181,7 +182,12 @@ describe("Project settings → Members: who can see the member list and progress
     renderMembers()
     await userEvent.click(progress())
     await userEvent.click(await screen.findByRole("option", { name: "Owners only" }))
-    expect(patchSpy).toHaveBeenCalledExactlyOnceWith({ memberProgressViewMinRole: 700 })
+    // The write says what the person saw, so someone else's newer change to
+    // the same setting is kept (AQU-2262).
+    expect(patchSpy).toHaveBeenCalledExactlyOnceWith(
+      { memberProgressViewMinRole: 700 },
+      { expect: [{ key: "memberProgressViewMinRole", value: undefined }] },
+    )
   })
 
   it("choosing the organization's level removes the project's own value", async () => {
@@ -191,7 +197,10 @@ describe("Project settings → Members: who can see the member list and progress
     expect(roster()).toHaveTextContent("Owners only")
     await userEvent.click(roster())
     await userEvent.click(await screen.findByRole("option", { name: "Organization default (Maintainers and owners)" }))
-    expect(patchSpy).toHaveBeenCalledExactlyOnceWith({ rosterViewMinRole: undefined })
+    expect(patchSpy).toHaveBeenCalledExactlyOnceWith(
+      { rosterViewMinRole: undefined },
+      { expect: [{ key: "rosterViewMinRole", value: 700 }] },
+    )
   })
 
   it("a maintainer cannot loosen an Owners-only value, and is told who can", async () => {

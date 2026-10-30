@@ -10,7 +10,9 @@
 // What these tests hold: for each blob-backed setting, a stored non-default
 // value in the settings blob (NOT on the project record — earlier tests put it
 // there and so could not see this bug) reads back into its control; and the
-// re-sync never stomps an edit the user has already started.
+// re-sync never stomps an edit the user has already started. AQU-2262: every
+// setting saves as it changes, so "an edit started" is a typing field still
+// being typed in, or a language row open for editing.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { fireEvent, screen } from "@testing-library/react"
@@ -20,7 +22,6 @@ import { renameProject } from "@/lib/sync/cloud-projects"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { renderWithTooltips } from "@/test-utils/tooltip"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import userEvent from "@testing-library/user-event"
 import { STALL_WATCHDOG_MS } from "@/test-utils/timeouts"
 
 const PROJECT_ID = "proj-blob-readback"
@@ -148,8 +149,10 @@ vi.mock("@/lib/completion/completion-service", async (importOriginal) => {
 })
 
 vi.mock("@/lib/store/project-index", () => ({
-  getProject: vi.fn().mockResolvedValue(null),
+  getProject: vi.fn(async () => currentProject),
   updateProject: vi.fn().mockResolvedValue(undefined),
+  // This browser's copy of the project, which the page's project read follows.
+  patchProject: vi.fn(async (_id: string, fn: (p: ProjectRecord) => ProjectRecord) => (currentProject = fn(currentProject))),
 }))
 
 vi.mock("@/lib/sync/cloud-projects", async (importOriginal) => {
@@ -311,33 +314,26 @@ describe("ProjectSettings — blob-only settings read back after a reload", () =
 })
 
 describe("ProjectSettings — the re-sync does not stomp an in-progress edit", () => {
-  it("keeps a value the user typed before the settings GET resolved, and saves only that", async () => {
-    const user = userEvent.setup()
-    currentHasFetched = false
+  it("keeps a number still being typed when the settings GET resolves, and saves only that", async () => {
+    currentSettings = { validationCount: 1 }
     const view = renderSettings("validation")
     const count = () => screen.getByRole("spinbutton", { name: "Required validators (text)" })
-    // AQU-1771: with no stored count the project follows the organization's
-    // default, so the user first picks "Set for this project".
-    await user.click(screen.getByRole("combobox", { name: /Text validators: use the organization default/i }))
-    await user.click(await screen.findByRole("option", { name: "Set for this project" }))
-    // The field clamps an empty value back to 1, so set it in one change.
     fireEvent.change(count(), { target: { value: "2" } })
     expect(count()).toHaveValue(2)
 
-    // The GET resolves with a different stored count than both the seed and
-    // the user's edit, plus a setting the user never touched.
+    // A re-sync lands while the box is still being typed in, with a different
+    // stored count and a setting the user never touched.
     currentSettings = { validationCount: 3, allowSelfValidation: false }
-    currentHasFetched = true
-    // Same tree as renderWithTooltips, so React keeps the mounted page.
     view.rerender(<TooltipProvider delay={0}>{settingsTree("validation")}</TooltipProvider>)
 
-    // The user's edit survives; the untouched field adopts the server value.
+    // The user's typing survives; the untouched field adopts the server value.
     expect(count()).toHaveValue(2)
     expect(screen.getByRole("switch", { name: "Allow self-validation (text)" })).not.toBeChecked()
+    expect(patchSpy).not.toHaveBeenCalled()
 
-    // Settling to the server value is not an edit: only the user's change is sent.
-    await user.click(screen.getByRole("button", { name: /save changes/i }))
-    expect(patchSpy).toHaveBeenCalledTimes(1)
+    // Leaving the box saves it (AQU-2262): only the user's change is sent.
+    fireEvent.blur(count())
+    await vi.waitFor(() => expect(patchSpy).toHaveBeenCalledTimes(1))
     expect(patchSpy.mock.calls[0][0]).toEqual({ validationCount: 2 })
   })
 })
@@ -345,56 +341,55 @@ describe("ProjectSettings — the re-sync does not stomp an in-progress edit", (
 /** The source language's Language box, once Change has opened it. */
 const sourceLanguageField = () => screen.getByTestId("lane-language-source-lane")
 
-describe("ProjectSettings — a settings GET that lands after a successful save", () => {
-  it("does not mark the form dirty or revert the saved source language (AQU-1744)", async () => {
-    const user = userEvent.setup()
+describe("ProjectSettings — a settings GET that lands after the name saved", () => {
+  it("does not revert a language being edited, or the saved name (AQU-1744)", async () => {
     currentHasFetched = false
     const view = renderSettings("general")
 
     const renamed = "Blob Readback Test Project renamed"
-    fireEvent.change(screen.getByLabelText("Project name"), { target: { value: renamed } })
+    const nameField = screen.getByLabelText("Project name")
+    fireEvent.change(nameField, { target: { value: renamed } })
+    // The name saves when you leave it (AQU-2262).
+    fireEvent.blur(nameField)
+    await vi.waitFor(() => expect(renameProject).toHaveBeenCalledWith("tok", PROJECT_ID, renamed))
+    expect(await screen.findByTestId("save-status-name")).toHaveTextContent("Saved")
     // The source line's Change opens its fields.
     fireEvent.click(screen.getByTestId("source-language-change"))
     fireEvent.change(sourceLanguageField(), { target: { value: "English (US)" } })
     expect(sourceLanguageField()).toHaveValue("English (US)")
-
-    await user.click(screen.getByRole("button", { name: /save changes/i }))
-    expect(await screen.findByText(/Saved: project name\./i)).toBeInTheDocument()
-    expect(screen.queryByText("Unsaved changes")).toBeNull()
-    // Source language is a lane rename, not a settings-blob write.
+    // Neither the name nor a language is a settings-blob write.
     expect(patchSpy).not.toHaveBeenCalled()
 
-    // The GET resolves after the save. A stale settings key must not revert
-    // the language the user typed. An untouched blob field still adopts the
-    // server value.
+    // The GET resolves after the rename. A stale settings key must not revert
+    // the language the user is typing. An untouched blob field still adopts
+    // the server value.
     currentSettings = { sourceLanguage: "Greek", smartQuotes: true }
     currentHasFetched = true
     view.rerender(<TooltipProvider delay={0}>{settingsTree("general")}</TooltipProvider>)
 
-    expect(screen.queryByText("Unsaved changes")).toBeNull()
-    expect(screen.getByText(/Saved: project name\./i)).toBeInTheDocument()
     expect(sourceLanguageField()).toHaveValue("English (US)")
-    // The untouched field still adopts the server value, and that is not an edit.
+    expect(screen.getByLabelText("Project name")).toHaveValue(renamed)
+    // The untouched field adopts the server value, and that is not an edit.
     expect(screen.getByRole("switch", { name: "Smart quotes" })).toBeChecked()
+    expect(patchSpy).not.toHaveBeenCalled()
   })
 
-  it("keeps the saved source language when the stale GET resolves during the save (AQU-1744)", async () => {
-    const user = userEvent.setup()
+  it("keeps the language being edited when the stale GET resolves during the rename (AQU-1744)", async () => {
     currentHasFetched = false
     const view = renderSettings("general")
 
-    fireEvent.change(screen.getByLabelText("Project name"), { target: { value: "Blob Readback Test Project renamed" } })
     // The source line's Change opens its fields.
     fireEvent.click(screen.getByTestId("source-language-change"))
     fireEvent.change(sourceLanguageField(), { target: { value: "English (US)" } })
 
-    // A title-only save goes through renameProject, not the settings patch.
-    // Hold that call open so the stale GET lands while the save is in flight.
+    // Hold the rename open so the stale GET lands while it is in flight.
     let resolveRename: (value: { id: string; name: string }) => void = () => {}
     vi.mocked(renameProject).mockImplementationOnce(
       () => new Promise((resolve) => { resolveRename = resolve }),
     )
-    const clickDone = user.click(screen.getByRole("button", { name: /save changes/i }))
+    const nameField = screen.getByLabelText("Project name")
+    fireEvent.change(nameField, { target: { value: "Blob Readback Test Project renamed" } })
+    fireEvent.blur(nameField)
     await vi.waitFor(() => expect(renameProject).toHaveBeenCalled(), { timeout: STALL_WATCHDOG_MS })
 
     // The GET was in flight before the rename finished. Its sourceLanguage key
@@ -404,11 +399,9 @@ describe("ProjectSettings — a settings GET that lands after a successful save"
     view.rerender(<TooltipProvider delay={0}>{settingsTree("general")}</TooltipProvider>)
 
     resolveRename({ id: PROJECT_ID, name: "Blob Readback Test Project renamed" })
-    await clickDone
 
-    expect(await screen.findByText(/Saved: project name\./i)).toBeInTheDocument()
+    expect(await screen.findByTestId("save-status-name")).toHaveTextContent("Saved")
     expect(patchSpy).not.toHaveBeenCalled()
-    expect(screen.queryByText("Unsaved changes")).toBeNull()
     expect(sourceLanguageField()).toHaveValue("English (US)")
     expect(screen.getByRole("switch", { name: "Smart quotes" })).toBeChecked()
   })

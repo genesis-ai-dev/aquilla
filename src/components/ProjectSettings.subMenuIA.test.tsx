@@ -155,10 +155,12 @@ vi.mock("@/lib/completion/completion-service", async (importOriginal) => {
   }
 })
 
-vi.mock("@/lib/store/project-index", () => ({
-  getProject: vi.fn().mockResolvedValue(null),
-  updateProject: vi.fn().mockResolvedValue(undefined),
+const projectIndex = vi.hoisted(() => ({
+  getProject: vi.fn(async () => null),
+  updateProject: vi.fn(async () => undefined),
+  patchProject: vi.fn(async () => null),
 }))
+vi.mock("@/lib/store/project-index", () => projectIndex)
 
 vi.mock("@/lib/progress/read-validation-count", () => ({
   readValidationCount: vi.fn(() => 1),
@@ -318,13 +320,15 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     expect(dialog).toHaveClass("max-w-[min(42rem,calc(100%-2rem))]")
     fireEvent.click(screen.getByText("General"))
     fireEvent.change(screen.getByLabelText(/project name/i), {
-      target: { value: "Unsaved modal title" },
+      target: { value: "Typed modal title" },
     })
 
+    // AQU-2262: nothing is left unsaved, so closing asks nothing: what was
+    // being typed saves as the page closes.
     fireEvent.click(screen.getByRole("button", { name: /close/i }))
-    expect(screen.getByRole("heading", { name: "Discard changes?" })).toBeTruthy()
-    fireEvent.click(screen.getByRole("button", { name: "Discard" }))
+    expect(screen.queryByRole("heading", { name: "Discard changes?" })).toBeNull()
     expect(screen.getByTestId("project-overview-background")).toBeTruthy()
+    expect(projectIndex.getProject).toHaveBeenCalled()
   })
 
   it("only expands the modal beyond the content width for wide settings panes", () => {

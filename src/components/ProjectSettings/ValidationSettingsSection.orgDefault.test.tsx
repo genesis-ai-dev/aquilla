@@ -48,14 +48,18 @@ describe("ValidationSettingsSection — organization default", () => {
     const { onChange } = draw()
     await userEvent.click(textSource())
     await userEvent.click(await screen.findByRole("option", { name: "Set for this project" }))
-    expect(onChange).toHaveBeenCalledExactlyOnceWith({ validationCount: 2 })
+    // A pick is a whole change, not a typed one (AQU-2262).
+    expect(onChange).toHaveBeenCalledExactlyOnceWith({ validationCount: 2 }, undefined)
   })
 
   it("typing a number while inheriting sets it for this project in one step (AQU-2263)", () => {
     const { onChange } = draw()
     const box = screen.getByRole("spinbutton", { name: /Required validators \(text\)/i })
     fireEvent.change(box, { target: { value: "3" } })
-    expect(onChange).toHaveBeenCalledExactlyOnceWith({ validationCount: 3 })
+    // It saves when you leave the box, never mid-number (AQU-2262).
+    expect(onChange).not.toHaveBeenCalled()
+    fireEvent.blur(box)
+    expect(onChange).toHaveBeenCalledExactlyOnceWith({ validationCount: 3 }, { from: 2, final: true })
   })
 
   it("the audio box shows 1 while the organization set none", () => {
@@ -68,6 +72,6 @@ describe("ValidationSettingsSection — organization default", () => {
     expect(screen.getByRole("spinbutton", { name: /Required validators \(text\)/i })).toHaveValue(3)
     await userEvent.click(textSource())
     await userEvent.click(await screen.findByRole("option", { name: "Organization default (2)" }))
-    expect(onChange).toHaveBeenCalledExactlyOnceWith({ validationCount: null })
+    expect(onChange).toHaveBeenCalledExactlyOnceWith({ validationCount: null }, undefined)
   })
 })

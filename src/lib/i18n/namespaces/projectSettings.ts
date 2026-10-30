@@ -331,31 +331,14 @@ export const projectSettings = defineNamespace({
     "projectSettings.backLinkLabel": "Settings",
     "projectSettings.breadcrumbEditor": "Editor",
     // "Save changes" → common.saveChanges (identical text)
-    "projectSettings.moreSaveOptionsAriaLabel": "More save options",
-    "projectSettings.saveAndClose": "Save and close",
-    "projectSettings.closeWithoutSaving": "Close without saving",
-    "projectSettings.unsavedChanges": "Unsaved changes",
-    "projectSettings.settingsChangedElsewhere": "Settings changed elsewhere — refresh to reapply.",
-    "projectSettings.dismissConflictAriaLabel": "Dismiss conflict notice",
     "projectSettings.noMatchingSettings": "No matching settings.",
-    "projectSettings.discardDialogTitle": "Discard changes?",
-    "projectSettings.discardDialogDescription":
-      "You have unsaved changes to project settings. They will be lost if you leave now.",
-    "projectSettings.keepEditing": "Keep editing",
 
-    "projectSettings.save.noChanges": "No changes to save.",
-    "projectSettings.save.savedShort": "Saved: {list}.",
-    "projectSettings.save.savedMany": plural({
-      other: "Saved {count} changes: {list}, +{more} more.",
-    }),
 
     // ── Changed-field nouns (AQU-408 "Saved: X, Y, Z." delta message) ──
     // AQU-832: several concepts here reuse an existing FieldLabel/section key
     // instead of a duplicate lowercase noun (no-duplicates.test.ts hard-fails
     // on an unexcused 2+-key collision, and a case-only difference is never a
     // valid exception reason) — see the reused key named in each comment.
-    "projectSettings.field.aiProvider": "AI provider",
-    "projectSettings.field.endpoint": "endpoint",
     "projectSettings.field.apiKey": "API key",
     // AQU-646, keyed 2026-08-20.
     "projectSettings.field.apiKeyRequired": "API key *",
@@ -391,59 +374,19 @@ export const projectSettings = defineNamespace({
     "projectSettings.cellEditing.optionProjectLead": "Project lead",
     "projectSettings.cellEditing.optionMaintainer": "Maintainer",
     // model → projectSettings.advancedLlm.modelLabel
-    "projectSettings.field.temperature": "temperature",
-    "projectSettings.field.examplesRetrieved": "examples retrieved",
     // context window → projectSettings.ai.contextWindowLabel
-    "projectSettings.field.validatedExamplesOnly": "validated examples only",
     // reference example format → projectSettings.ai.referenceExampleFormatLabel
-    "projectSettings.field.assistedLanguage": "assisted language",
     // AI completions batch size → projectSettings.ai.completionBatchSizeLabel
     // batch validation size → projectSettings.ai.validationBatchSizeLabel
     // project name → projectSettings.info.nameLabel
-    "projectSettings.field.decaySettings": "decay settings",
-    "projectSettings.field.audioMediaStrategy": "audio loading",
-    "projectSettings.field.autoSync": "auto-sync",
-    "projectSettings.field.voiceApiKey": "voice API key",
     // source language → projectSettings.info.sourceLanguageLabel
     // target language → projectSettings.info.targetLanguageLabel
-    "projectSettings.field.validationCount": "validation count",
-    "projectSettings.field.audioValidationCount": "audio validation count",
-    "projectSettings.field.validationRoleFloor": "validation role floor",
-    "projectSettings.field.namedValidators": "named validators",
-    "projectSettings.field.selfValidation": "self-validation",
-    "projectSettings.field.harmonizeMinRole": "harmonize min role",
-    "projectSettings.field.usfmFrontMatter": "USFM front matter",
     // draft context → projectSettings.section.draftContext
     // AQU-2261: the rest of the "Saved: …" nouns, so the whole message is translated.
-    "projectSettings.field.model": "model",
-    "projectSettings.field.maxTokens": "max tokens",
-    "projectSettings.field.contextWindow": "context window",
-    "projectSettings.field.referenceExampleFormat": "reference example format",
-    "projectSettings.field.completionBatchSize": "AI completions batch size",
-    "projectSettings.field.validationBatchSize": "batch validation size",
-    "projectSettings.field.projectName": "project name",
-    "projectSettings.field.audioValidationRoleFloor": "minimum role to validate recordings",
-    "projectSettings.field.namedAudioValidators": "named recording validators",
-    "projectSettings.field.selfValidationAudio": "validating your own recordings",
-    "projectSettings.field.cellEditingFloor": "who can add and remove cells",
-    "projectSettings.field.trackEditing": "timeline track editing",
-    "projectSettings.field.timingLock": "the timing lock",
-    "projectSettings.field.bibleData": "Bible data",
-    "projectSettings.field.bibleEnrichments": "Bible data enrichments",
-    "projectSettings.field.importCellUnit": "import cell unit",
-    "projectSettings.field.smartQuotes": "smart quotes",
-    "projectSettings.field.draftContext": "draft context",
-    "projectSettings.field.termMatching": "term matching affixes",
 
     // ── Save-flow errors ──
-    "projectSettings.save.nameRequired": "Enter a project name.",
     "projectSettings.save.signedOutRenameError": "You're signed out. Sign in again to rename this project.",
     "projectSettings.save.renameFailedGeneric": "Renaming the project failed.",
-    "projectSettings.save.conflictToast": "Synced settings update from {username}.",
-    "projectSettings.save.conflictFallbackUsername": "another collaborator",
-    "projectSettings.save.conflictError": "Someone else updated shared settings. Refresh to reapply your edits.",
-    "projectSettings.save.offlineError": "You're offline. Reconnect to save shared fields.",
-    "projectSettings.save.sharedSettingsFailedGeneric": "Saving shared settings failed.",
     "projectSettings.save.projectNotFoundError": "Project not found",
 
     // ── Settings-group index (SETTINGS_GROUPS) ──
@@ -561,6 +504,7 @@ export const projectSettings = defineNamespace({
     // AQU-2263: the team's fallback for the assistant's answers (it was saved
     // but never read). Each person's own choice in Preferences wins over it.
     "projectSettings.ai.assistantLanguageLabel": "The assistant answers the team in",
+    "projectSettings.ai.assistantLanguageName": "Assistant language",
     "projectSettings.ai.assistantLanguagePlaceholder": "e.g. English, Français, Español…",
     "projectSettings.ai.assistantLanguageDescription":
       "For everyone on this project who hasn't chosen their own in Preferences. Left empty, the assistant answers in the language each person writes in.",
@@ -632,6 +576,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.advancedLlm.modelOverrideHelp": "Enter an OpenRouter model (optional), for example {example}.",
     "projectSettings.advancedLlm.maxTokensLabel": "Max tokens",
     "projectSettings.advancedLlm.temperatureLabel": "Temperature ({value})",
+    "projectSettings.advancedLlm.temperatureName": "Temperature",
 
     // ── Voice card ──
     // Oct 29 second pass: the voice card's provider row, hard-coded English before.
@@ -1922,38 +1867,6 @@ export const projectSettings = defineNamespace({
       "projectSettings.searchAriaLabel": {
         description: "Accessible name of the settings search input, which filters section cards by label/keyword as the user types.",
       },
-      "projectSettings.moreSaveOptionsAriaLabel": {
-        description: "Accessible name of the small chevron button beside 'Save changes' that opens the 'Save and close' / 'Close without saving' menu.",
-      },
-      "projectSettings.dismissConflictAriaLabel": {
-        description: "Accessible name of the small × button that dismisses the 'Settings changed elsewhere' banner.",
-      },
-      "projectSettings.save.savedShort": {
-        description:
-          "Success message shown briefly after Save when 3 or fewer fields changed — " +
-          "a plain list of the changed field names.",
-        placeholders: {
-          list: "The changed field names (projectSettings.field.*), already joined into a localized list via formatList() — insert exactly as given.",
-        },
-      },
-      "projectSettings.save.savedMany": {
-        description:
-          "Success message shown briefly after Save when more than 3 fields changed — " +
-          "names the first 3 and counts the rest. count is always > 3 in the English " +
-          "flow (the <=3 case uses savedShort instead), but other locales' plural " +
-          "rules may still select a category other than 'other' for the same number.",
-        placeholders: {
-          count: "Total number of changed fields (always > 3 in the English flow — governs plural selection).",
-          list: "The first 3 changed field names (projectSettings.field.*), already joined into a localized list via formatList() — insert exactly as given.",
-          more: "How many additional changed fields beyond the first 3, as a plain cardinal number. Not separately pluralized.",
-        },
-      },
-      "projectSettings.save.conflictToast": {
-        description: "Toast shown when a background shared-settings update from another collaborator lands while this page is open.",
-        placeholders: {
-          username: "The other collaborator's username (data), or the projectSettings.save.conflictFallbackUsername fallback text if unknown.",
-        },
-      },
       "projectSettings.info.lastEditedBy": {
         description: "Small note under the Project Name field showing who last saved shared settings and when.",
         placeholders: {
@@ -2040,6 +1953,14 @@ export const projectSettings = defineNamespace({
         placeholders: {
           example: "An example OpenRouter model id, e.g. 'anthropic/claude-3.5-sonnet', styled as inline code by the caller — data, not translated.",
         },
+      },
+      "projectSettings.advancedLlm.temperatureName": {
+        description: "The name of the AI temperature setting, without its value: names the slider for screen readers and names an Undo step ('Change: Temperature').",
+        maxLength: 30,
+      },
+      "projectSettings.ai.assistantLanguageName": {
+        description: "Short name of the setting for the language the AI assistant answers the team in, as an Undo step names it ('Change: Assistant language').",
+        maxLength: 40,
       },
       "projectSettings.advancedLlm.temperatureLabel": {
         description: "Field label for the temperature slider, showing its current value live.",

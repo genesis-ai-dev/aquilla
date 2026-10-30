@@ -25,6 +25,7 @@ import { useDraftingSettingsUpload } from "./useDraftingSettingsUpload"
 import { registerSettingsAccessor } from "@/lib/history/settings-access"
 import type { CompletionSettings, ProjectRecord } from "@/lib/parsers/types"
 import type { MediaDefaults } from "../../db/shared/media-setting-defaults"
+import { readSettingAt } from "@/lib/settings/setting-at"
 
 /** AQU-1768: one stable empty value, so an org with no media defaults never re-renders. */
 const EMPTY_MEDIA_DEFAULTS: MediaDefaults = Object.freeze({})
@@ -409,12 +410,6 @@ export interface SettingExpectation {
 }
 
 const sameSettingValue = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null)
-
-function readSettingAt(settings: ProjectWideSettings | undefined, key: string, field?: string): unknown {
-  const holder = (settings as Record<string, unknown> | undefined)?.[key]
-  if (field === undefined) return holder
-  return holder && typeof holder === "object" ? (holder as Record<string, unknown>)[field] : undefined
-}
 
 /** The first expectation the settings no longer meet, if any. */
 export function unmetExpectation(

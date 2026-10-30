@@ -106,3 +106,11 @@ describe("a step's name", () => {
     ).toBe("Change: Who can export")
   })
 })
+
+describe("a settings step's language", () => {
+  it("belongs to none, so undoing it never opens another language first", async () => {
+    const { stepLane } = await import("./step-lane")
+    expect(stepLane("settings.projectName", {}, "es")).toBeUndefined()
+    expect(stepLane("settings.device", {}, "es")).toBeUndefined()
+  })
+})

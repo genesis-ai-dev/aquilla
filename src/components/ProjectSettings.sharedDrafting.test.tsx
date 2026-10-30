@@ -1,8 +1,10 @@
 // AQU-2259: the drafting settings in the "AI Instructions" card, the model
 // choice and the Health penalty are the TEAM's settings. They used to be saved
 // only into this browser's copy of the project (`updateProject`), while the
-// page said changes apply to everyone. Save must send them to the server's
-// shared settings; the AI key stays exactly where it was, on this device.
+// page said changes apply to everyone. A change must go to the server's shared
+// settings; the AI key stays exactly where it was, on this device. AQU-2262:
+// each change saves as it is made, one field of the drafting settings at a
+// time, merged into the team's copy.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
@@ -55,22 +57,23 @@ vi.mock("@/hooks/useProject", () => ({
 const patchSharedMock = vi.fn().mockResolvedValue({ kind: "ok" })
 let sharedBlob: ProjectWideSettings = {}
 let canEdit = true
-vi.mock("@/hooks/useProjectSettings", () => ({
-  useProjectSettings: () => ({
-    canEdit,
-    reasonCannotEdit: canEdit ? null : "role",
-    patch: patchSharedMock,
-    version: 3,
-    updatedAt: null,
-    updatedBy: null,
-    conflict: false,
-    dismissConflict: vi.fn(),
-    settings: sharedBlob,
-    hasFetched: true,
-    isOnline: true,
-    refresh: vi.fn(),
-  }),
-}))
+// A write shows on the page, as the real hook's overlay does (AQU-2262): the
+// provider picked here has to be the one the page then shows.
+vi.mock("@/hooks/useProjectSettings", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks/useProjectSettings")>()
+  const { useLiveProjectSettings } = await import("@/test-utils/live-project-settings")
+  return {
+    ...actual,
+    useProjectSettings: () =>
+      useLiveProjectSettings(() => ({
+        settings: sharedBlob,
+        patch: patchSharedMock,
+        canEdit,
+        reasonCannotEdit: canEdit ? null : "role",
+        version: 3,
+      })),
+  }
+})
 
 vi.mock("@/hooks/useOrg", () => ({ useOrg: () => ({ org: null }) }))
 vi.mock("@/hooks/useFrontierSession", () => ({
@@ -85,9 +88,12 @@ vi.mock("@/lib/completion/completion-service", async (importOriginal) => {
 })
 
 const updateProjectMock = vi.fn(async (_p: ProjectRecord) => {})
+/** This browser's copy after each patch. */
+const patchProjectMock = vi.fn(async (_id: string, fn: (p: ProjectRecord) => ProjectRecord) => fn(makeProject()))
 vi.mock("@/lib/store/project-index", () => ({
   getProject: vi.fn(async () => makeProject()),
   updateProject: (p: ProjectRecord) => updateProjectMock(p),
+  patchProject: (id: string, fn: (p: ProjectRecord) => ProjectRecord) => patchProjectMock(id, fn),
 }))
 vi.mock("@/lib/progress/read-validation-count", () => ({
   readValidationCount: vi.fn(() => 1),
@@ -122,16 +128,22 @@ beforeEach(() => {
 describe("ProjectSettings — the team's drafting settings (AQU-2259)", () => {
   it("sends the drafting settings to the server, never the AI key", async () => {
     renderSettings()
-    fireEvent.change(screen.getByLabelText(/examples retrieved/i), { target: { value: "17" } })
-    fireEvent.click(screen.getByRole("button", { name: /save changes/i }))
+    const box = screen.getByLabelText(/examples retrieved/i)
+    fireEvent.change(box, { target: { value: "17" } })
+    fireEvent.blur(box)
 
     await waitFor(() => expect(patchSharedMock).toHaveBeenCalled())
     const sent = patchSharedMock.mock.calls[0][0] as ProjectWideSettings
-    expect(sent.draftingSettings).toMatchObject({ top_k: 17, contextSize: "medium", temperature: 0.3 })
+    // Just that field, merged into the team's drafting settings.
+    expect(sent).toEqual({ draftingSettings: { top_k: 17 } })
+    expect(patchSharedMock.mock.calls[0][1]).toMatchObject({ mergeKeys: ["draftingSettings"] })
     expect(JSON.stringify(sent)).not.toContain("sk-local-only")
     // Nothing about drafting is written into this browser's copy any more.
     for (const call of updateProjectMock.mock.calls) {
       expect((call[0].completionSettings as CompletionSettings | undefined)?.top_k).not.toBe(17)
+    }
+    for (const result of patchProjectMock.mock.results) {
+      expect(((await result.value) as ProjectRecord).completionSettings?.top_k).not.toBe(17)
     }
   })
 
@@ -145,17 +157,15 @@ describe("ProjectSettings — the team's drafting settings (AQU-2259)", () => {
     renderSettings()
     // Switch to the custom provider to reach the key field.
     fireEvent.click(screen.getByRole("radio", { name: /custom/i }))
-    const keyInput = await waitFor(() => {
-      const el = document.querySelector<HTMLInputElement>(".font-mono input[autocomplete=off]")
-      if (!el) throw new Error("no key field yet")
-      return el
-    })
+    // The drafting key, not the voices' Gemini key further down.
+    const keyInput = await screen.findByPlaceholderText(/Paste your API key|Leave blank for no auth/)
     fireEvent.change(keyInput, { target: { value: "sk-new-local" } })
+    // Leaving the field saves it into this browser's copy (AQU-2262).
     fireEvent.blur(keyInput)
-    fireEvent.click(screen.getByRole("button", { name: /save changes/i }))
-    await waitFor(() => expect(updateProjectMock).toHaveBeenCalled())
-    const local = updateProjectMock.mock.calls.at(-1)![0].completionSettings as CompletionSettings
-    expect(local.apiKey).toBe("sk-new-local")
+    const savedKeys = async () =>
+      (await Promise.all(patchProjectMock.mock.results.map((r) => r.value as Promise<ProjectRecord>)))
+        .map((p) => (p.completionSettings as CompletionSettings | undefined)?.apiKey)
+    await waitFor(async () => expect(await savedKeys()).toContain("sk-new-local"))
     const sent = patchSharedMock.mock.calls.map((c) => JSON.stringify(c[0])).join("\n")
     expect(sent).not.toContain("sk-new-local")
   })

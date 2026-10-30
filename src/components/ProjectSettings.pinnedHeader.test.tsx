@@ -1,14 +1,15 @@
-// AQU-2030 — Project settings: the header and save controls stay pinned.
+// AQU-2030 — Project settings: the header and its controls stay pinned.
 //
 // Why these tests exist: the back link, pane title, and the save controls used
 // to live inside the pane's scrolling flow, so on a long pane (General,
 // Members) they scrolled away with the form. Someone editing a field near the
 // bottom had to scroll back to the top to save, or to get back to the settings
 // index. The fix lifts that block out of the scrolling stack into a pinned,
-// opaque container.
+// opaque container. AQU-2262: settings save as you change them, so the Save
+// bar is gone and Undo, Redo and History sit where it was.
 //
 // These lock the parts that can actually regress:
-//   1. The save controls render inside the pinned container, not in the
+//   1. Undo and History render inside the pinned container, not in the
 //      scrolling content below it — the whole point of the ticket.
 //   2. The modal's "‹ Project settings" back link is pinned with them.
 //   3. The pinned container is sticky with an opaque background, and the form
@@ -167,7 +168,7 @@ function pinnedHeader(): HTMLElement {
   return el
 }
 
-/** Dirty the General pane the way a person does: edit the project title. */
+/** Type in the General pane the way a person does: the project title. */
 function editProjectTitle(value: string) {
   fireEvent.change(screen.getByLabelText("Project name"), { target: { value } })
 }
@@ -178,15 +179,14 @@ beforeEach(() => {
 })
 
 describe("ProjectSettings — pinned header (AQU-2030)", () => {
-  it("keeps the save controls in the pinned header, not in the scrolling form", () => {
+  it("keeps Undo and History in the pinned header, not in the scrolling form", () => {
     renderPage()
     editProjectTitle("Renamed project")
 
-    const save = screen.getByRole("button", { name: /save changes/i })
-    expect(pinnedHeader().contains(save)).toBe(true)
-
-    // The save status reads from the same pinned block.
-    expect(pinnedHeader()).toHaveTextContent("Unsaved changes")
+    expect(pinnedHeader().contains(screen.getByTestId("settings-history-controls"))).toBe(true)
+    expect(pinnedHeader().contains(screen.getByTestId("settings-undo"))).toBe(true)
+    // There is no Save bar any more (AQU-2262).
+    expect(screen.queryByRole("button", { name: /save changes/i })).toBeNull()
 
     // …and the field that was edited is NOT inside it — it scrolls underneath.
     expect(pinnedHeader().contains(screen.getByLabelText("Project name"))).toBe(false)
@@ -218,6 +218,6 @@ describe("ProjectSettings — pinned header (AQU-2030)", () => {
   it("renders the same pinned block in the modal as on the full-page route", () => {
     renderModal()
     editProjectTitle("Renamed from the modal")
-    expect(pinnedHeader().contains(screen.getByRole("button", { name: /save changes/i }))).toBe(true)
+    expect(pinnedHeader().contains(screen.getByTestId("settings-undo"))).toBe(true)
   })
 })

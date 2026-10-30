@@ -22,6 +22,8 @@ const LANE_FREE_KINDS: ReadonlySet<string> = new Set([
   "row.remove",
   "track.patch",
   "settings.project",
+  "settings.projectName",
+  "settings.device",
   "film.link",
   "cue.link",
   "cast.assign",

@@ -9,6 +9,7 @@ import {
   AUDIO_MEDIA_STRATEGY_LABELS, type AudioMediaStrategy,
 } from "@/lib/parsers/types"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { SaveStatus } from "@/lib/settings/save-status"
 
 interface Props {
   value: AudioMediaStrategy
@@ -22,7 +23,10 @@ export function AudioMediaStrategySection({ value, onChange }: Props) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{t("projectSettings.audioMedia.title")}</CardTitle>
+        <CardTitle className="flex items-center justify-between gap-4">
+          {t("projectSettings.audioMedia.title")}
+          <SaveStatus id="audioMediaStrategy" className="font-normal" />
+        </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
         <p className="text-sm text-muted-foreground">

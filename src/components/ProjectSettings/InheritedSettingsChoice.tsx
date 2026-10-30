@@ -8,6 +8,7 @@ import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { SettingsGroup } from "@/components/ui/page"
+import { SaveStatus } from "@/lib/settings/save-status"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
@@ -186,7 +187,15 @@ export function InheritedSettingsSection({
   const name = upstreamName ?? sourceProjectId
 
   return (
-    <SettingsGroup label={t("projectSettings.inherit.title", { upstream: name })} locked={canEdit ? null : locked}>
+    <SettingsGroup
+      label={
+        // AQU-2262: the card is one setting; its quiet "Saved" sits by its name.
+        <span className="flex items-center justify-between gap-4 pr-4">
+          {t("projectSettings.inherit.title", { upstream: name })}
+          <SaveStatus id="inheritedFromLink" className="font-normal" />
+        </span>
+      }
+      locked={canEdit ? null : locked}>
       <div className="px-4 py-3">
         <InheritedSettingsChoice
           title=""

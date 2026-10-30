@@ -3,7 +3,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
 import { laneAccessFor, waitUntilReady } from "./lane-switch"
 
-const base = { available: ["", "sw", "fr"], scoped: null, archived: [], canSwitch: true }
+const base = { available: ["", "sw", "fr"], scoped: null, archived: [], canSwitch: true, loaded: true }
 
 describe("opening a step's language", () => {
   it("opens any language the switcher offers", () => {
@@ -15,6 +15,12 @@ describe("opening a step's language", () => {
     expect(laneAccessFor("sw", { ...base, archived: ["sw"] })).toBe("denied")
     expect(laneAccessFor("fr", { ...base, scoped: ["sw"], canSwitch: false })).toBe("denied")
     expect(laneAccessFor("sw", { ...base, scoped: ["sw"], canSwitch: false })).toBe("ok")
+  })
+
+  // Review, Oct 29: Cmd+Z pressed as the project opens, before its languages
+  // have loaded, must not throw away a step made in French.
+  it("keeps the step waiting while the project's languages are still loading", () => {
+    expect(laneAccessFor("fr", { ...base, available: [""], loaded: false })).toBe("blocked")
   })
 
   it("keeps the step waiting for someone who cannot switch languages here", () => {

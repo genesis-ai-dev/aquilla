@@ -14,6 +14,10 @@ export interface LaneAccess {
   archived: readonly string[] | undefined
   /** Whether this person may use the language switcher at all. */
   canSwitch: boolean
+  /** Whether the project's languages have loaded: until they have, the list
+   *  above is a stand-in, and a language missing from it is not one the
+   *  person lost (review, Oct 29). */
+  loaded: boolean
 }
 
 /**
@@ -21,9 +25,10 @@ export interface LaneAccess {
  * person has lost it for good (it was removed, archived, or lies outside the
  * languages they were limited to), `blocked` when it is theirs but they cannot
  * switch to it from here (a contributor's language opens from their
- * assignment), else `ok`.
+ * assignment) or the languages have not loaded yet, else `ok`.
  */
 export function laneAccessFor(lane: string, access: LaneAccess): "ok" | "denied" | "blocked" {
+  if (!access.loaded) return "blocked"
   if (!access.available.includes(lane)) return "denied"
   if (access.archived?.includes(lane)) return "denied"
   if (access.scoped && access.scoped.length > 0) return access.scoped.includes(lane) ? "ok" : "denied"

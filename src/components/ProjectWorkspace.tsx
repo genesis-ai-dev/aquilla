@@ -275,7 +275,7 @@ import { injectOptimisticAudioTrim,
 import { attachmentOutFrom, canCutAt, newPieceAudioId, pieceLabels } from "@/lib/audio/cut-take"
 import { recordGroup, recordStep, registerStepKinds, setHistoryRemote, setHistoryScope, setLaneSwitcher, setFileNamer, setOpenFileProbe, withGroup, type HistoryResult, type LaneSwitch } from "@/lib/history/history"
 import { httpHistoryRemote } from "@/lib/history/history-remote"
-import { laneAccessFor, waitUntilReady } from "@/lib/history/lane-switch"
+import { laneAccessFor, waitUntilReady, type LaneAccess } from "@/lib/history/lane-switch"
 import { CastStepBuilder, castValueOf, mediaStepHandlers, type CastValue } from "@/lib/history/media-steps"
 import { sourceStepHandlers } from "@/lib/history/source-steps"
 import { recordingLinesStepHandlers } from "@/lib/history/recording-lines-steps"
@@ -14481,14 +14481,21 @@ export function ProjectWorkspace() {
     lane: activeLane,
     ready: !cellsLoading && workspaceAudioLoaded && timelineAudioLoaded && (!audioCueSibling || cueAudioLoaded),
   }
+  // Read through a ref: the switch may first wait for the languages to load,
+  // and must then judge by the loaded list, not the one it started with.
+  const laneAccessRef = useRef<LaneAccess>({ available: [], scoped: null, archived: undefined, canSwitch: false, loaded: false })
+  laneAccessRef.current = {
+    available: availableLanes,
+    scoped: scopedLanes,
+    archived: archivedLaneTags,
+    canSwitch: canSwitchLanes(project?.syncRole?.level),
+    loaded: project?.lanes != null,
+  }
   const laneSwitchRef = useRef<(lane: string) => Promise<LaneSwitch>>(async () => "blocked")
   laneSwitchRef.current = async (lane: string) => {
-    const access = laneAccessFor(lane, {
-      available: availableLanes,
-      scoped: scopedLanes,
-      archived: archivedLaneTags,
-      canSwitch: canSwitchLanes(project?.syncRole?.level),
-    })
+    // Cmd+Z pressed as the project opens: let its languages load first.
+    if (!laneAccessRef.current.loaded && (await waitUntilReady(() => laneAccessRef.current.loaded)) !== "ready") return "blocked"
+    const access = laneAccessFor(lane, laneAccessRef.current)
     if (access !== "ok") return access
     setActiveLane(lane)
     return waitUntilReady(() => laneReadyRef.current.lane === lane && laneReadyRef.current.ready)

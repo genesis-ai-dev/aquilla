@@ -4,6 +4,7 @@ import { useParams, useNavigate, useLocation, Link } from "react-router-dom"
 import { MoreHorizontal, Download, SlidersHorizontal, Archive, PlayCircle, PauseCircle, Settings, Pencil, CloudDownload, CloudOff, HardDriveDownload, Headphones, ChevronDown, ChevronRight, Info } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { InfoNote } from "@/components/ui/info-note"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { ExpandableName } from "@/components/ui/expandable-name"
 import { ShowMoreControls, useShowMore } from "@/components/ui/show-more-controls"
@@ -149,14 +150,7 @@ import {
   type StatKey,
 } from "@/lib/metrics/hidden-stats"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { SearchSelect } from "@/components/ui/search-select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { LoadingTemplate } from "@/components/ui/loading-overlay"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -310,9 +304,13 @@ function StatTile({ label, pct, tone, muted = false, tooltip }: {
   tone: ProgressTone
   /** A cross-language figure while one language is selected: greyed, swatch faded. */
   muted?: boolean
+  /** What the figure measures. AQU-2260 (Sam, Oct 29): it opens on a click of
+   *  the (i) by the label, in a note anchored to it; the tile no longer
+   *  explains itself on hover. */
   tooltip?: string
 }) {
-  const tile = (
+  const t = useT()
+  return (
     <div className="flex flex-col items-center rounded-lg bg-muted/40 px-5 py-3 text-center">
       <p className={`text-2xl font-bold tabular-nums ${muted ? "text-muted-foreground/60" : "text-foreground"}`}>
         {`${progressPercentOfFraction(pct)}%`}
@@ -324,10 +322,14 @@ function StatTile({ label, pct, tone, muted = false, tooltip }: {
           className={cn("h-1.5 w-3.5 shrink-0 rounded-full", PROGRESS_BG[tone], muted && "opacity-40")}
         />
         {label}
+        {tooltip ? (
+          <InfoNote label={t("common.aboutAria", { name: label })} iconClassName="h-3 w-3" align="center">
+            {tooltip}
+          </InfoNote>
+        ) : null}
       </p>
     </div>
   )
-  return tooltip ? <AppTooltip content={tooltip}>{tile}</AppTooltip> : tile
 }
 
 // ── Lane filter tabs (AQU-538 §3.3) ───────────────────────────────────────────
@@ -2317,37 +2319,35 @@ export function ProjectOverview() {
                     <FieldGroup>
                       <Field>
                         <FieldLabel htmlFor="project-pm">{t("org.projectOverview.projectManagerHeading")}</FieldLabel>
-                        <Select
-                          value={pmSelection}
-                          onValueChange={(v) => setPmSelection(v ?? "")}
-                          items={[
-                            { value: "", label: t("org.projectOverview.unassigned") },
+{/* AQU-2260: one candidate per member, so a search box. */}
+                        <SearchSelect
+                          id="project-pm"
+                          aria-label={t("org.projectOverview.projectManagerHeading")}
+                          options={[
+                            { value: "", label: t("org.projectOverview.unassigned"), userId: undefined as number | undefined },
                             ...pmCandidates.map((m) => ({
                               value: String(m.userId),
                               label: m.username,
+                              userId: m.userId,
                             })),
                           ]}
-                        >
-                          <SelectTrigger id="project-pm" aria-label={t("org.projectOverview.projectManagerHeading")}>
-                            <SelectValue placeholder={t("org.projectOverview.selectMemberPlaceholder")} />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectGroup>
-                              <SelectItem value="">{t("org.projectOverview.unassigned")}</SelectItem>
-                              {pmCandidates.map((m) => (
-                                <SelectItem key={m.userId} value={String(m.userId)}>
-                                  <UsernameWithAvatar
-                                    userId={m.userId}
-                                    username={m.username}
-                                    size="xs"
-                                    menuSafe
-                                    nameClassName="text-sm font-normal"
-                                  />
-                                </SelectItem>
-                              ))}
-                            </SelectGroup>
-                          </SelectContent>
-                        </Select>
+                          value={pmSelection}
+                          onValueChange={setPmSelection}
+                          placeholder={t("org.projectOverview.selectMemberPlaceholder")}
+                          renderOption={(o) =>
+                            o.userId == null ? (
+                              o.label
+                            ) : (
+                              <UsernameWithAvatar
+                                userId={o.userId}
+                                username={o.label}
+                                size="xs"
+                                menuSafe
+                                nameClassName="text-sm font-normal"
+                              />
+                            )
+                          }
+                        />
                       </Field>
                     </FieldGroup>
                     <DialogFooter>
@@ -2795,25 +2795,25 @@ export function ProjectOverview() {
                     <h2 className="text-xs font-semibold text-muted-foreground">
                       {t("org.projectOverview.importedOriginalsHeading")}
                     </h2>
-                    <AppTooltip content={t("org.projectOverview.downloadOriginalsTooltip")}>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        data-testid="download-originals-zip"
-                        onClick={() => {
-                          const fileId = project?.files[0]?.id ?? originalFiles[0]?.fileId
-                          if (!fileId) return
-                          void downloadImportedOriginalsZip({
-                            projectId: id,
-                            projectName: project?.name ?? "project",
-                            jwt,
-                            fileId,
-                          })
-                        }}
-                      >
-                        {t("org.projectOverview.downloadOriginals")}
-                      </Button>
-                    </AppTooltip>
+                    {/* AQU-2260: a labelled button, so no hover text; the
+                        heading and its own words say what it downloads. */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      data-testid="download-originals-zip"
+                      onClick={() => {
+                        const fileId = project?.files[0]?.id ?? originalFiles[0]?.fileId
+                        if (!fileId) return
+                        void downloadImportedOriginalsZip({
+                          projectId: id,
+                          projectName: project?.name ?? "project",
+                          jwt,
+                          fileId,
+                        })
+                      }}
+                    >
+                      {t("org.projectOverview.downloadOriginals")}
+                    </Button>
                   </div>
                   <ul
                     id="imported-originals-list"

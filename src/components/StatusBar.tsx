@@ -87,6 +87,7 @@ export function StatusBar({
       <DecayBreakdown
         health={projectHealth}
         scopeLabel="project health"
+        label={t("workspace.statusBar.healthAria", { percent: projectHealth })}
         getHealthByCell={getHealthByCell}
         staleSourceCount={staleSourceCount}
         onJumpToCell={onJumpToCell}

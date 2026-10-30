@@ -185,6 +185,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { InfoNote, NOTE_CONTENT_CLASS, NoteOnClick } from "@/components/ui/info-note"
 import { CellPresenceBadges } from "./CellPresenceBadges"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
@@ -615,8 +616,10 @@ function SynthStatusBadge({
       : pct != null
         ? t("editor.tts.loadingVoiceModelPct", { percent: pct })
         : t("editor.tts.loadingVoiceModel")
+    // What a wordless gutter mark means opens on a click of it, never a
+    // hover (AQU-2260).
     return (
-      <AppTooltip content={tooltip}>
+      <NoteOnClick note={tooltip} side="right">
         <span
           role="img"
           aria-label={tooltip}
@@ -625,12 +628,12 @@ function SynthStatusBadge({
         >
           <Spinner className="h-3 w-3" />
         </span>
-      </AppTooltip>
+      </NoteOnClick>
     )
   }
   if (status.kind === "synthesizing") {
     return (
-      <AppTooltip content={t("editor.tts.generatingAudio")}>
+      <NoteOnClick note={t("editor.tts.generatingAudio")} side="right">
         <span
           role="img"
           aria-label={t("editor.tts.generatingAudio")}
@@ -639,7 +642,7 @@ function SynthStatusBadge({
         >
           <Spinner className="h-3 w-3" />
         </span>
-      </AppTooltip>
+      </NoteOnClick>
     )
   }
   if (status.kind === "error") {
@@ -679,7 +682,7 @@ function SynthStatusBadge({
     // A4: dismissed — muted badge, no popover. Still communicates "not voiced".
     if (dismissed) {
       return (
-        <AppTooltip content={t("editor.tts.failedTooltip")}>
+        <NoteOnClick note={t("editor.tts.failedTooltip")} side="right">
           <span
             role="img"
             aria-label={t("editor.tts.notVoiced")}
@@ -688,7 +691,7 @@ function SynthStatusBadge({
           >
             <MicOff className="h-3 w-3" />
           </span>
-        </AppTooltip>
+        </NoteOnClick>
       )
     }
 
@@ -2918,7 +2921,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         data-cell-kind={isScriptureRow ? "scripture" : undefined}
         data-paragraph-start={showParagraphBoundary ? "true" : undefined}
         aria-label={untimedInTimeLens ? t("editor.row.noTimingAria") : undefined}
-        title={needsSourceReview ? t("editor.reimport.sourceReview") : undefined}
         className={cn(
           "relative",
           needsSourceReview && "ring-2 ring-inset ring-yellow-400",
@@ -2933,6 +2935,25 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           cuePlayingRow && "bg-primary/[0.07] before:pointer-events-none before:absolute before:inset-y-0 before:start-0 before:z-10 before:w-[3px] before:bg-primary",
         )}
       >
+        {/* AQU-2260 third pass: why the row is ringed in yellow opens from an
+            (i) on click, in the ring's top-start corner. It used to be the
+            row's hover title. Not the end corner: the cell's action rail sits
+            over that one and swallowed the click. Below the time lens's "no
+            timing" mark when a row has both. */}
+        {needsSourceReview && (
+          <InfoNote
+            label={t("editor.reimport.sourceReviewInfo")}
+            testId="source-review-info"
+            side="right"
+            className={cn(
+              "absolute start-1 z-10 text-yellow-600 hover:text-yellow-700 dark:text-yellow-400 dark:hover:text-yellow-300",
+              untimedInTimeLens ? "top-5" : "top-1",
+            )}
+            iconClassName="h-3 w-3"
+          >
+            {t("editor.reimport.sourceReview")}
+          </InfoNote>
+        )}
         {untimedInTimeLens && (
           <span className="pointer-events-none absolute start-1 top-1 z-10 rounded bg-amber-400/15 px-1 text-[9px] font-medium text-amber-600 dark:text-amber-400">
             {t("editor.row.noTimingBadge")}
@@ -7577,12 +7598,12 @@ function EditorRow({
     // Box the digit to the source's first line (fontSize × line-height 1.6,
     // both set on the source well below) and center it, so the number keeps
     // riding that line as the reader changes font size. A fixed height only
-    // happens to line up at one size. The tooltip is only there when the
-    // tint means something — a clean line stays a plain number.
-    <AppTooltip
-      content={issueLines.length > 0 ? <CellIssueLines lines={issueLines} /> : issueHint}
+    // happens to line up at one size. The note is only there when the tint
+    // means something — a clean line stays a plain number. It opens on a
+    // click of the number, never a hover (AQU-2260).
+    <NoteOnClick
+      note={issueLines.length > 0 ? <CellIssueLines lines={issueLines} /> : issueHint}
       side="right"
-      className="max-w-xs"
     >
       <span
         className="flex items-center justify-center leading-none"
@@ -7597,7 +7618,7 @@ function EditorRow({
           tint={hasMajorInfraction ? "major" : hasAnyIssue ? "issue" : "none"}
         />
       </span>
-    </AppTooltip>
+    </NoteOnClick>
   )
 
   // ── Hover / focus state for the floating action rail ─────────────────────
@@ -8051,12 +8072,20 @@ function EditorRow({
 
   // AQU-1163: why this cell won't take your text. A peer holding the focus
   // lease makes the target read-only, and until now that was silent — clicking
-  // did nothing and nothing said why. Carried as the read surface's tooltip and
-  // appended to its accessible name, so both a mouse user and a screen-reader
-  // user get the reason from the cell itself.
+  // did nothing and nothing said why. Appended to the read surface's accessible
+  // name, and opened as a note when the cell is clicked (below), so both a
+  // screen-reader user and a mouse user get the reason from the cell itself.
   const targetLockedReason = lockHolderLabel
     ? t("editor.row.lockedBy", { name: lockHolderLabel })
     : null
+  // AQU-2260 third pass: the click that would open the editor on a cell
+  // someone else is editing now says why it did not, in a note anchored to the
+  // cell. It used to be a hover title. The note is keyed to the holder, so it
+  // closes by itself when they leave and does not reopen for the next one.
+  const lockSurfaceRef = useRef<HTMLDivElement | null>(null)
+  const [lockNoteFor, setLockNoteFor] = useState<string | null>(null)
+  const lockNoteOpen = lockHolderLabel !== null && lockNoteFor === lockHolderLabel
+  const toggleLockNote = () => setLockNoteFor((current) => (current === lockHolderLabel ? null : lockHolderLabel))
 
   // FRO-297: Grid-row keydown handler. Fires when the row wrapper div has
   // focus (not TipTap). Arrow keys / j / k navigate between rows; Enter
@@ -8286,30 +8315,29 @@ function EditorRow({
               See: src/components/SelectionBar.tsx, src/lib/audio/selection.ts */}
           <div className="flex w-5 shrink-0 flex-col items-center">
             <div className="mb-1 hidden h-4 shrink-0 md:block" aria-hidden />
-            <AppTooltip content={isMultiSelected ? t("editor.row.selectedTooltip") : t("editor.row.selectTooltip")} side="right">
-              <button
-                type="button"
-                role="checkbox"
-                aria-checked={isMultiSelected}
-                aria-label={isMultiSelected ? t("editor.row.selectedAria") : t("editor.row.selectAria")}
-                onPointerDown={onSelectionPointerDown}
-                onClick={(e) => e.stopPropagation()}
-                className={cn(
-                  "grid h-5 w-5 place-items-center rounded-md border",
-                  "touch-none cursor-ns-resize transition-[opacity,transform,color,background-color] duration-150 ease-out",
-                  "focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2",
-                  isMultiSelected
-                    ? "border-transparent bg-primary text-primary-foreground opacity-100"
-                    : "border-border bg-card text-muted-foreground/70 opacity-60 hover:text-primary [.group:hover:not([data-follow-hover-lock]_*)_&]:opacity-100",
-                )}
-              >
-                {isMultiSelected ? (
-                  <Check className="h-3 w-3" strokeWidth={3} />
-                ) : (
-                  <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
-                )}
-              </button>
-            </AppTooltip>
+            {/* AQU-2260 third pass: no "drag to select" hover hint here. */}
+            <button
+              type="button"
+              role="checkbox"
+              aria-checked={isMultiSelected}
+              aria-label={isMultiSelected ? t("editor.row.selectedAria") : t("editor.row.selectAria")}
+              onPointerDown={onSelectionPointerDown}
+              onClick={(e) => e.stopPropagation()}
+              className={cn(
+                "grid h-5 w-5 place-items-center rounded-md border",
+                "touch-none cursor-ns-resize transition-[opacity,transform,color,background-color] duration-150 ease-out",
+                "focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2",
+                isMultiSelected
+                  ? "border-transparent bg-primary text-primary-foreground opacity-100"
+                  : "border-border bg-card text-muted-foreground/70 opacity-60 hover:text-primary [.group:hover:not([data-follow-hover-lock]_*)_&]:opacity-100",
+              )}
+            >
+              {isMultiSelected ? (
+                <Check className="h-3 w-3" strokeWidth={3} />
+              ) : (
+                <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
+              )}
+            </button>
           </div>
           {/* Badges + verse number — ms-2 opens space after the select. */}
           <div className="flex min-w-0 flex-col items-center gap-0.5 md:ms-2 md:flex-1 md:flex-row md:items-start">
@@ -8333,10 +8361,7 @@ function EditorRow({
                   />
                 )}
                 {showFormattingLossWarning && (
-                  <AppTooltip
-                    content={t("editor.source.formattingLossTooltip")}
-                    className="max-w-xs"
-                  >
+                  <NoteOnClick note={t("editor.source.formattingLossTooltip")} side="right">
                     <span
                       role="img"
                       aria-label={t("editor.source.formattingLossTooltip")}
@@ -8348,7 +8373,7 @@ function EditorRow({
                     >
                       <Bold className="h-3 w-3" />
                     </span>
-                  </AppTooltip>
+                  </NoteOnClick>
                 )}
                 {((isSynthBusy && !audioLens) || isSynthError) && (
                   <SynthStatusBadge status={synthStatus} cellId={cell.id} projectId={project.id} onOpenAudioSetup={onOpenAudioSetup} />
@@ -8588,30 +8613,32 @@ function EditorRow({
                   on the SOURCE line because that is what repeats — the badge
                   answers "you will meet this string N times", which is what
                   makes auto-propagation predictable rather than surprising. */}
+              {/* What the mark means opens on a click of it (AQU-2260). */}
               {typeof repetitionCount === "number" && repetitionCount > 1 && (
-                <AppTooltip content={t("editor.repetition.tooltip", { count: repetitionCount })}>
+                <NoteOnClick note={t("editor.repetition.tooltip", { count: repetitionCount })} className="shrink-0">
                   <span
                     data-testid="source-repetition-count"
                     className="shrink-0 rounded-sm bg-muted px-1 font-medium tabular-nums"
                   >
                     {t("editor.repetition.badge", { count: repetitionCount })}
                   </span>
-                </AppTooltip>
+                </NoteOnClick>
               )}
               {/* AQU-1422: the eye-off badge. Only ever rendered on a row that
                   reached the table while parked, which only happens for a
                   source editor with "Show hidden cells" on — so it needs no
                   permission check of its own. */}
               {cellHidden && (
-                <AppTooltip content={t("editor.row.hiddenBadgeTooltip")}>
+                <NoteOnClick note={t("editor.row.hiddenBadgeTooltip")} className="shrink-0">
                   <span
+                    role="img"
                     data-testid="source-cell-hidden-badge"
                     aria-label={t("editor.row.hiddenBadgeAria")}
                     className="flex shrink-0 items-center"
                   >
                     <EyeOff className="h-3.5 w-3.5" />
                   </span>
-                </AppTooltip>
+                </NoteOnClick>
               )}
               <SourceTagChips metadata={cell.metadata} />
               <MetadataFieldLabels projectId={project.id} metadata={cell.metadata} />
@@ -8841,6 +8868,10 @@ function EditorRow({
               onClick={(event) => {
                 if (isEditorActive) return
                 event.stopPropagation()
+                if (lockHolderLabel) {
+                  toggleLockNote()
+                  return
+                }
                 requestTargetEdit(idmlConfiguration && !idmlPreview
                   ? idmlPointerSelectionFromPoint(event.nativeEvent, targetReadContentRef.current)
                   : null)
@@ -8910,9 +8941,9 @@ function EditorRow({
                   />
                 ) : (
                   <EditorTargetReadSurface
+                    ref={lockSurfaceRef}
                     aria-readonly={!editable || isLoading || Boolean(lockHolderLabel)}
                     aria-label={targetLockedReason ? `${editorAriaLabel} — ${targetLockedReason}` : editorAriaLabel}
-                    title={targetLockedReason ?? undefined}
                     data-target-read-view
                     data-segment-edge-mode={styleSegmentDrag ? "" : undefined}
                     data-target-locked-by={lockHolderLabel ?? undefined}
@@ -8952,6 +8983,10 @@ function EditorRow({
                       event.stopPropagation()
                       // Option/Alt+click seeks (onMouseDown); don't also enter edit.
                       if (isWordSeekClick(event)) return
+                      if (lockHolderLabel) {
+                        toggleLockNote()
+                        return
+                      }
                       requestTargetEdit(idmlConfiguration && !idmlPreview
                         ? idmlPointerSelectionFromPoint(event.nativeEvent, targetReadContentRef.current)
                         : null)
@@ -8960,6 +8995,10 @@ function EditorRow({
                       if (event.key !== "Enter" && event.key !== " ") return
                       event.preventDefault()
                       event.stopPropagation()
+                      if (lockHolderLabel) {
+                        toggleLockNote()
+                        return
+                      }
                       requestTargetEdit()
                     }}
                   >
@@ -9013,6 +9052,30 @@ function EditorRow({
                     />
                   </EditorTargetReadSurface>
                 )}
+              {targetLockedReason && (
+                <Popover
+                  open={lockNoteOpen}
+                  onOpenChange={(next, details) => {
+                    // A press on the cell itself is the toggle above; the
+                    // note's own outside-press close must not race it.
+                    const target = details?.event?.target
+                    if (!next && target instanceof Node && lockSurfaceRef.current?.contains(target)) return
+                    if (!next) setLockNoteFor(null)
+                  }}
+                >
+                  <PopoverContent
+                    anchor={lockSurfaceRef}
+                    side="top"
+                    align="start"
+                    sideOffset={6}
+                    initialFocus={false}
+                    data-testid="target-lock-note"
+                    className={NOTE_CONTENT_CLASS}
+                  >
+                    {targetLockedReason}
+                  </PopoverContent>
+                </Popover>
+              )}
               {/* FRO-204: Terminology highlight popover — controlled via termChipState.
                   Anchored to the highlighted term that was clicked.
                   We pass a dummy <span/> trigger so TermLookupPopover renders

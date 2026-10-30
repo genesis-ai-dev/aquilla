@@ -36,6 +36,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { SearchSelect } from "@/components/ui/search-select"
 import { Spinner } from "@/components/ui/spinner"
 import {
   addAirtableFields,
@@ -413,24 +414,16 @@ export function AirtableSetupWizard({
       ) : bases.length === 0 ? (
         <p className="text-sm text-muted-foreground">{t("projectSettings.airtable.tableListFailed")}</p>
       ) : (
-        <Select
-          items={Object.fromEntries(bases.map((b) => [b.id, b.name]))}
+        // AQU-2260: an account's bases and a base's tables grow with its
+        // data, so both lists have a search box.
+        <SearchSelect
+          aria-label={t("projectSettings.airtable.baseSelectAriaLabel")}
+          className="w-full"
+          options={bases.map((b) => ({ value: b.id, label: b.name }))}
           value={baseId || null}
-          onValueChange={(value) => void pickBase((value as string) ?? "")}
-        >
-          <SelectTrigger aria-label={t("projectSettings.airtable.baseSelectAriaLabel")} className="w-full">
-            <SelectValue placeholder={t("projectSettings.airtable.pickBasePlaceholder")} />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectGroup>
-              {bases.map((b) => (
-                <SelectItem key={b.id} value={b.id}>
-                  {b.name}
-                </SelectItem>
-              ))}
-            </SelectGroup>
-          </SelectContent>
-        </Select>
+          onValueChange={(value) => void pickBase(value)}
+          placeholder={t("projectSettings.airtable.pickBasePlaceholder")}
+        />
       )}
       {baseId &&
         (tables === null ? (
@@ -438,8 +431,10 @@ export function AirtableSetupWizard({
             <Spinner className="h-4 w-4" /> {t("projectSettings.airtable.loadingTables")}
           </p>
         ) : (
-          <Select
-            items={Object.fromEntries(tables.map((tb) => [tb.id, tb.name]))}
+<SearchSelect
+            aria-label={t("projectSettings.airtable.tableSelectAriaLabel")}
+            className="w-full"
+            options={tables.map((tb) => ({ value: tb.id, label: tb.name }))}
             value={target?.baseId === baseId ? target.tableId : null}
             onValueChange={(value) => {
               const table = tables.find((tb) => tb.id === value)
@@ -451,20 +446,8 @@ export function AirtableSetupWizard({
                 void runScan({ baseId, tableId: table.id, ...(baseName ? { baseName } : {}) })
               }
             }}
-          >
-            <SelectTrigger aria-label={t("projectSettings.airtable.tableSelectAriaLabel")} className="w-full">
-              <SelectValue placeholder={t("projectSettings.airtable.pickTablePlaceholder")} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                {tables.map((tb) => (
-                  <SelectItem key={tb.id} value={tb.id}>
-                    {tb.name}
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
+            placeholder={t("projectSettings.airtable.pickTablePlaceholder")}
+          />
         ))}
     </div>
   )

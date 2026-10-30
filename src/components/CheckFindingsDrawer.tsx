@@ -117,7 +117,7 @@ function CellRefButton({ cellId, label, cell, onNavigateToCell, onOpenComments, 
     // punches through the fixed-width drawer; the inner `truncate`s only work
     // once their flex ancestors are allowed to shrink.
     <li className="flex min-w-0 items-start gap-1">
-      <AppTooltip content={t("rules.checkDrawer.goToCell")}>
+      {/* The card shows what it is and is the way to it: no hover (AQU-2260). */}
         <button
           type="button"
           className="min-w-0 flex-1 rounded border-s-2 border-amber-400 bg-amber-50 p-1.5 text-start text-xs hover:bg-amber-100 dark:bg-amber-950/20 dark:hover:bg-amber-950/40"
@@ -134,7 +134,6 @@ function CellRefButton({ cellId, label, cell, onNavigateToCell, onOpenComments, 
           </div>
         )}
       </button>
-      </AppTooltip>
       {onOpenComments && (
         <AppTooltip content={t("rules.checkDrawer.commentOnCell")}>
           <Button

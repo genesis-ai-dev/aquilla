@@ -153,7 +153,10 @@ describe("EditorTable — AQU-687 stable target width", () => {
     // no validation button to show — this is what holds the editor width steady
     // when a prediction later fills the cell.
     expect(gutter.className).toContain("w-6")
-    expect(gutter.querySelector("button")).toBeNull()
+    // No validate button. (AQU-2260: the empty mark says why on click, from a
+    // stand-in that is not a Tab stop.)
+    expect(gutter.querySelector("button:not([data-slot='note-on-click'])")).toBeNull()
+    expect(gutter.querySelector("[data-slot='note-on-click']")?.getAttribute("tabindex")).toBe("-1")
     const untranslatedRibbon = screen.getByTestId("health-ribbon")
     expect(untranslatedRibbon.dataset.healthStage).toBe("untranslated")
     expect(Number(untranslatedRibbon.dataset.healthOpacity)).toBeLessThan(0.5)

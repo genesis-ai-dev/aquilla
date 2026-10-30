@@ -121,6 +121,7 @@ export function OrgSettingsAirtable() {
   return (
     <OrgSettingsDetailPage
       title={ORG_SETTINGS_SECTION_TITLES.airtable}
+      page="airtable"
       description={ORG_SETTINGS_SECTION_DESCRIPTIONS.airtable}
     >
       {notice && (
@@ -207,9 +208,7 @@ export function OrgSettingsAirtable() {
                   submitLabel={t("settings.airtable.saveTokenButton")}
                 />
               )}
-              {!canManage && (
-                <p className="text-xs text-muted-foreground">{t("settings.monday.manageRestrictedNotice")}</p>
-              )}
+              {/* AQU-2260: who can manage it is said once, at the page's top. */}
             </>
           ) : (
             <>

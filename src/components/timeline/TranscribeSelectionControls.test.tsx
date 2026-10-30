@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { act, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 
-import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
+import { renderWithTooltips, expectDisabledNote, expectClickNote } from "@/test-utils/tooltip"
 import { TranscribeSelectionControls } from "./TranscribeSelectionControls"
 
 const props = {
@@ -48,10 +48,12 @@ describe("TranscribeSelectionControls", () => {
   // Stage 3e: the multi-select gesture stopped being a line of text on the far
   // right and became a tooltip on the count — the place where "how do I select
   // more?" is the question you are already asking.
-  it("keeps the multi-select gesture, as a tooltip on the count", async () => {
+  // AQU-2260 (Sam, Oct 29): a note opened by a click of the count, never a
+  // hover.
+  it("keeps the multi-select gesture, as a note on the count", async () => {
     renderWithTooltips(<TranscribeSelectionControls {...props} />)
     expect(screen.queryByText(/Ctrl\/⌘-click or Shift-click chips/)).toBeNull()
-    await expectTooltip(
+    await expectClickNote(
       screen.getByTestId("tl-transcribe-count"),
       /Ctrl\/⌘-click or Shift-click chips/,
     )
@@ -61,13 +63,13 @@ describe("TranscribeSelectionControls", () => {
   // was readable by everyone.
   it("lets the keyboard reach that hint", () => {
     render(<TranscribeSelectionControls {...props} />)
-    expect(screen.getByTestId("tl-transcribe-count")).toHaveAttribute("tabindex", "0")
+    expect(screen.getByTestId("tl-transcribe-count").tagName).toBe("BUTTON")
   })
 
   it("disables with a why when the selection has no audio at all", async () => {
     renderWithTooltips(<TranscribeSelectionControls {...props} selectedCount={2} eligibleCount={0} recordingCount={0} />)
     expect(screen.getByTestId("tl-transcribe-selection")).toBeDisabled()
-    await expectTooltip(
+    await expectDisabledNote(
       screen.getByTestId("tl-transcribe-selection"),
       /None of the selected sections has audio to transcribe/i,
     )
@@ -76,15 +78,15 @@ describe("TranscribeSelectionControls", () => {
   it("disables while another audio batch owns the progress slot", async () => {
     renderWithTooltips(<TranscribeSelectionControls {...props} busy />)
     expect(screen.getByTestId("tl-transcribe-selection")).toBeDisabled()
-    await expectTooltip(screen.getByTestId("tl-transcribe-selection"), /Another audio batch is running/i)
+    await expectDisabledNote(screen.getByTestId("tl-transcribe-selection"), /Another audio batch is running/i)
   })
 
-  it("explains what the run will and will not touch when it is ready", async () => {
+  // AQU-2260: its words name it, so a ready button has no hover.
+  it("has no hover when it is ready", async () => {
     renderWithTooltips(<TranscribeSelectionControls {...props} />)
-    await expectTooltip(
-      screen.getByTestId("tl-transcribe-selection"),
-      /selected sections' audio only — the rest of the file is left alone/i,
-    )
+    await userEvent.setup().hover(screen.getByTestId("tl-transcribe-selection"))
+    await act(() => new Promise((r) => setTimeout(r, 30)))
+    expect(screen.queryByRole("tooltip")).toBeNull()
   })
 
   // Clear is unconditional now. It used to be withheld at zero, which was the
@@ -120,12 +122,13 @@ describe("TranscribeSelectionControls — sections that share a recording", () =
     expect(screen.getByTestId("tl-transcribe-recordings")).toHaveTextContent("1 recording")
   })
 
-  it("explains WHY they differ, on hover", async () => {
+  // AQU-2260: behind the (i) beside the button, on a click.
+  it("explains WHY they differ, behind the (i) beside the button", async () => {
     renderWithTooltips(
       <TranscribeSelectionControls {...props} selectedCount={3} eligibleCount={3} recordingCount={1} />,
     )
-    await expectTooltip(
-      screen.getByTestId("tl-transcribe-selection"),
+    await expectClickNote(
+      screen.getByRole("button", { name: "About Transcribe section" }),
       /performed by the same heard line/i,
     )
   })
@@ -136,6 +139,7 @@ describe("TranscribeSelectionControls — sections that share a recording", () =
   it("says nothing extra when the counts agree", () => {
     render(<TranscribeSelectionControls {...props} selectedCount={3} eligibleCount={3} recordingCount={3} />)
     expect(screen.queryByTestId("tl-transcribe-recordings")).toBeNull()
+    expect(screen.queryByRole("button", { name: /^About / })).toBeNull()
     expect(screen.getByTestId("tl-transcribe-selection")).toHaveTextContent("Transcribe 3 sections")
   })
 })

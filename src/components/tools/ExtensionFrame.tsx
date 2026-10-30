@@ -44,7 +44,7 @@ export function ExtensionFrame({ name, href, variant = "full", className, childr
   )
   const tabClass = "inline-flex max-w-full items-center gap-1 rounded-t-md border border-b-0 border-[var(--extension-accent-line)] bg-[var(--extension-accent-subtle)] px-2 py-px text-[11px] font-medium leading-4 transition-colors hover:border-[var(--extension-accent)]"
   const tab = href ? (
-    <Link to={href} className={tabClass} data-testid="extension-frame-tab" title={t("extensions.identity.open", { name })}>
+    <Link to={href} className={tabClass} data-testid="extension-frame-tab">
       {label}
     </Link>
   ) : (

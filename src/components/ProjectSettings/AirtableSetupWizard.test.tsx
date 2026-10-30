@@ -212,6 +212,35 @@ describe("Airtable setup with AI", () => {
 })
 
 describe("Airtable setup without the AI", () => {
+  // AQU-2260 (Sam, Oct 29, option 2B): an account's bases and a base's tables
+  // grow with its data, so both lists get a search box.
+  it("the base and table lists each have a search box that narrows them", async () => {
+    mocked.fetchAirtableBases.mockResolvedValue([
+      { id: "appCS", name: "Come & See" },
+      { id: "appLOTE", name: "Living on the Edge" },
+    ])
+    mocked.fetchAirtableTables.mockResolvedValue([
+      { id: "tblTRACK", name: "Translation tracker", primaryFieldId: "fldName", fields: STRUCTURE.fields, url: STRUCTURE.url },
+      { id: "tblCAST", name: "Cast list", primaryFieldId: "fldName", fields: STRUCTURE.fields, url: STRUCTURE.url },
+    ])
+    renderWizard({ mode: "manual" })
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Airtable base" })).toBeTruthy())
+    fireEvent.click(screen.getByRole("combobox", { name: "Airtable base" }))
+    const baseSearch = await screen.findByRole("combobox", { name: "Search the list" })
+    fireEvent.change(baseSearch, { target: { value: "edge" } })
+    expect(await screen.findByRole("option", { name: "Living on the Edge" })).toBeTruthy()
+    expect(screen.queryByRole("option", { name: "Come & See" })).toBeNull()
+    fireEvent.keyDown(baseSearch, { key: "Escape" })
+    await waitFor(() => expect(screen.queryByRole("combobox", { name: "Search the list" })).toBeNull())
+    await selectOption(/airtable base/i, /come & see/i)
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Airtable table" })).toBeTruthy())
+    fireEvent.click(screen.getByRole("combobox", { name: "Airtable table" }))
+    const tableSearch = await screen.findByRole("combobox", { name: "Search the list" })
+    fireEvent.change(tableSearch, { target: { value: "cast" } })
+    expect(await screen.findByRole("option", { name: "Cast list" })).toBeTruthy()
+    expect(screen.queryByRole("option", { name: "Translation tracker" })).toBeNull()
+  })
+
   it("picks a base and a table, then shows that table's fields", async () => {
     mocked.fetchAirtableBases.mockResolvedValue([{ id: "appCS", name: "Come & See" }])
     mocked.fetchAirtableTables.mockResolvedValue([

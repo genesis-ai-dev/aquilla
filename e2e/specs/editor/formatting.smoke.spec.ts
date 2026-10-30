@@ -110,10 +110,11 @@ test("formatting bubble menu and loss warning surface session", async ({ alice }
 
     const warningIcon = row.getByTestId("formatting-loss-warning")
     await expect(warningIcon).toBeVisible({ timeout: 8_000 })
-    await warningIcon.hover()
+    // AQU-2260: the warning explains itself on a click, never on hover.
+    await warningIcon.click()
     await expect(
-      alice.getByRole("tooltip", {
-        name: /Source has inline formatting that the target does not preserve/i,
+      alice.locator('[data-slot="popover-content"]').filter({
+        hasText: /Source has inline formatting that the target does not preserve/i,
       }),
     ).toBeVisible({ timeout: 3_000 })
   })

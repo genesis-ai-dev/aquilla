@@ -35,7 +35,6 @@ import {
   Sparkles,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import type { TermRendering } from "@/lib/terminology/types"
 import { renderingStatusLabelKey } from "@/lib/terminology/types"
@@ -121,17 +120,16 @@ function PredictedRow({
 
         <ConfidenceLabel score={prediction.confidenceScore} />
 
+        {/* Its word names it: no hover (AQU-2260). */}
         {canPromote && onPromote && (
-          <AppTooltip content={t("terminology.equivalents.promoteTooltip")}>
-            <Button
-              variant="ghost"
-              size="xs"
-              className="ms-auto h-6 px-1.5 text-[10px]"
-              onClick={() => onPromote(prediction.target)}
-            >
-              {t("terminology.equivalents.promoteButton")}
-            </Button>
-          </AppTooltip>
+          <Button
+            variant="ghost"
+            size="xs"
+            className="ms-auto h-6 px-1.5 text-[10px]"
+            onClick={() => onPromote(prediction.target)}
+          >
+            {t("terminology.equivalents.promoteButton")}
+          </Button>
         )}
       </div>
 

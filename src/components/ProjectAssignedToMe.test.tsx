@@ -1,6 +1,8 @@
 // AQU-192: ProjectAssignedToMe tests — pickup list rendering + jump.
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { renderWithTooltips } from "@/test-utils/tooltip"
 import { ProjectAssignedToMe } from "./ProjectAssignedToMe"
 import type { MyAssignment } from "@/lib/sync/assignments"
 import { fmtDeadlineDate } from "@/lib/format-date"
@@ -156,5 +158,20 @@ describe("ProjectAssignedToMe", () => {
     await waitFor(() => expect(mockGetMyAssignments).toHaveBeenCalledTimes(1))
     rerender(<ProjectAssignedToMe projectId="proj-1" jwt="test-jwt" refreshKey={1} />)
     await waitFor(() => expect(mockGetMyAssignments).toHaveBeenCalledTimes(2))
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): a row says nothing on hover. The assigner's note was
+// only ever in the hover; it is now printed in the row.
+describe("ProjectAssignedToMe row note", () => {
+  it("prints the assignment's note in its row, and shows nothing on hover", async () => {
+    mockGetMyAssignments.mockResolvedValue([makeAssignment({ note: "Start with the genealogies" })])
+    renderWithTooltips(<ProjectAssignedToMe projectId="proj-1" jwt="test-jwt" onJumpToAssignment={vi.fn()} />)
+    await openPopover()
+    const row = (await screen.findByText("Genesis")).closest("button")!
+    expect(row).toHaveTextContent("Start with the genealogies")
+    await userEvent.setup().hover(row)
+    await new Promise((r) => setTimeout(r, 20))
+    expect(screen.queryByRole("tooltip")).toBeNull()
   })
 })

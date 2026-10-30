@@ -109,6 +109,8 @@ export function CastGutterVoice({ voice, explicit, castName, editable, voices, o
     </span>
   )
   const tooltipSide = "right"
+  // AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button. The
+  // gutter's avatar is wordless, so its hover keeps its name.
   if (!editable) {
     return (
       <AppTooltip content={tooltip} side={tooltipSide}>

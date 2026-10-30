@@ -1,5 +1,5 @@
 import { memo, useCallback, useRef, useState } from "react"
-import { AlertTriangle, HelpCircle, FolderOpen, Users } from "lucide-react"
+import { AlertTriangle, FolderOpen, Users } from "lucide-react"
 import { useProjectsMembersMatrix } from "@/hooks/useProjectsMembersMatrix"
 import { useOrg } from "@/hooks/useOrg"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -10,12 +10,8 @@ import { MembersMatrixCellEditor } from "./MembersMatrixCellEditor"
 import { MemberAccessDrillDown } from "./MemberAccessDrillDown"
 import { AccessModelLegend } from "./AccessModelLegend"
 import { MemberLaneScopeEditor } from "./MemberLaneScopeEditor"
-import {
-  AppTooltip,
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
+import { AppTooltip } from "@/components/ui/tooltip"
+import { InfoNote, NoteOnClick } from "@/components/ui/info-note"
 import { Spinner } from "@/components/ui/spinner"
 import { EmptyState } from "@/components/ui/empty"
 import {
@@ -67,7 +63,7 @@ type MemberScopeMap = Map<string, MemberScopeView>
  *   - empty                → no fill
  *
  * Concentration risk: if a project has exactly one Owner, the column header
- * gets a warning indicator. Tooltip surfaces the rationale ("sole Owner —
+ * gets a warning indicator. A click on it gives the rationale ("sole Owner —
  * losing this person locks the project").
  */
 interface SelectedMember { userId: number; username: string }
@@ -183,26 +179,11 @@ export function MembersMatrixView() {
               >
                 <div className="flex items-center gap-1">
                   <span>{t("org.membersMatrixView.memberColumnHeader")}</span>
-                  {/* On-demand model explainer — opens a tooltip with the full explanation */}
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <button
-                          type="button"
-                          className="inline-flex items-center text-muted-foreground hover:text-foreground focus-visible:outline-none"
-                          aria-label={t("org.membersMatrixView.howAccessResolvedAriaLabel")}
-                        />
-                      }
-                    >
-                      <HelpCircle aria-hidden />
-                    </TooltipTrigger>
-                    <TooltipContent
-                      side="bottom"
-                      className="max-w-xs leading-snug"
-                    >
-                      {t("org.membersMatrixView.accessResolutionExplanation")}
-                    </TooltipContent>
-                  </Tooltip>
+                  {/* On-demand model explainer. AQU-2260: it opens on click,
+                      in a note anchored to the (i), never on hover. */}
+                  <InfoNote label={t("org.membersMatrixView.howAccessResolvedAriaLabel")}>
+                    {t("org.membersMatrixView.accessResolutionExplanation")}
+                  </InfoNote>
                 </div>
               </TableHead>
               {matrix.projects.map((p) => (
@@ -269,11 +250,13 @@ function ProjectHeaderCell({
           <span className="truncate">{project.name}</span>
         </AppTooltip>
         {concentrationRisk && (
-          <AppTooltip content={t("org.membersMatrixView.soleOwnerWarning")}>
-            <span className="inline-flex items-center text-amber-600 dark:text-amber-400">
-              <AlertTriangle />
-            </span>
-          </AppTooltip>
+          <NoteOnClick
+            note={t("org.membersMatrixView.soleOwnerWarning")}
+            label={t("org.membersMatrixView.soleOwnerWarning")}
+            className="shrink-0 text-amber-600 dark:text-amber-400"
+          >
+            <AlertTriangle aria-hidden />
+          </NoteOnClick>
         )}
       </div>
       <div className="mt-0.5">
@@ -346,19 +329,22 @@ const MatrixRow = memo(function MatrixRow({
           />
         </button>
         {member.isOrgInherited && (
-          <AppTooltip content={t("org.membersMatrixView.orgInheritedTooltip")}>
-            <span className="ms-1.5 align-middle rounded bg-muted px-1 py-0.5 text-[9px] text-muted-foreground">
+          <NoteOnClick
+            note={t("org.membersMatrixView.orgInheritedTooltip")}
+            className="ms-1.5 align-middle"
+          >
+            <span className="rounded bg-muted px-1 py-0.5 text-[9px] text-muted-foreground">
               org-wide
             </span>
-          </AppTooltip>
+          </NoteOnClick>
         )}
       </TableHead>
       {projects.map((p) => {
         const cell = memberCells?.get(p.id)
         const palette = cell ? colorForRole(cell.role.level) : ""
-        const { label: sourceHint, badge: sourceBadge } = cell
+        const { badge: sourceBadge } = cell
           ? sourceInfo(cell.role.source)
-          : { label: "", badge: "" }
+          : { badge: "" }
         const scopesForCell = memberScopes?.get(p.id)
         return (
             <MembersMatrixCellEditor
@@ -371,7 +357,6 @@ const MatrixRow = memo(function MatrixRow({
             grantLanes={cell ? grantLanesForCell(scopesForCell) : "all"}
             onMutated={onMutated}
             cellClassName={palette}
-            sourceHint={sourceHint}
             sourceBadge={sourceBadge}
             secondarySources={cell?.secondarySources}
             footer={

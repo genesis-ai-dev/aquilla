@@ -5,7 +5,9 @@
 // the original) misleads the translator about which audio is live.
 
 import { describe, it, expect, beforeEach, vi } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { renderWithTooltips } from "@/test-utils/tooltip"
 
 const denoiseTake = vi.fn(async () => ({ audioId: "dn-x.webm", url: "frontier-audio://dn-x.webm", durationMs: 1000 }))
 const emitSelect = vi.fn(async (..._a: unknown[]) => "evt")
@@ -137,5 +139,32 @@ describe("DenoiseButton", () => {
     )
     const btn = screen.getByText("Remove noise").closest("button")!
     expect(btn.disabled).toBe(true)
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button. The
+// badge and both buttons carry their own words, so none has a hover.
+describe("DenoiseButton — no hover", () => {
+  async function expectNoHover(el: Element) {
+    await userEvent.setup().hover(el)
+    await act(() => new Promise((r) => setTimeout(r, 30)))
+    expect(screen.queryByRole("tooltip")).toBeNull()
+  }
+
+  it("Remove noise has no hover", async () => {
+    renderWithTooltips(
+      <DenoiseButton {...base} selectedAudioId="audio-a.webm" selectedUrl="frontier-audio://audio-a.webm"
+        referenceAudioId={null} originalUrl={null} originalDurationMs={null} />,
+    )
+    await expectNoHover(screen.getByRole("button", { name: /Remove noise/ }))
+  })
+
+  it("Noise removed and Revert have no hover", async () => {
+    renderWithTooltips(
+      <DenoiseButton {...base} selectedAudioId="dn-audio-c.webm" selectedUrl="frontier-audio://dn-audio-c.webm"
+        referenceAudioId="audio-a.webm" originalUrl="frontier-audio://audio-a.webm" originalDurationMs={1500} />,
+    )
+    await expectNoHover(screen.getByText("Noise removed"))
+    await expectNoHover(screen.getByRole("button", { name: /Revert/ }))
   })
 })

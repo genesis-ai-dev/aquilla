@@ -189,7 +189,7 @@ const visible = (value: string | null | undefined) => (value ?? "").replace(/[‚Å
 
 async function openDetails(cellId: string): Promise<HTMLElement> {
   const trigger = await chip(cellId)
-  act(() => trigger.focus())
+  fireEvent.click(trigger)
   return screen.findByTestId("voice-details")
 }
 

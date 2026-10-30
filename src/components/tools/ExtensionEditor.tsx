@@ -14,6 +14,7 @@ import type { ToolFrameControl } from "./useToolHost"
 import { Link } from "react-router-dom"
 import { ShieldCheck, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { NoteOnClick } from "@/components/ui/info-note"
 import type { ToolHostServices } from "@/lib/tools/live-data"
 import { useScopeLabel } from "./scope-label"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -99,9 +100,10 @@ export function ExtensionEditorFallbackNotice({ choice }: { choice: ExtensionEdi
   if (!choice.failure) return null
   return (
     <div role="status" data-testid="extension-editor-fallback" className="flex items-center gap-2 border-b bg-amber-50 px-3 py-1.5 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
-      <span className="min-w-0 flex-1 truncate" title={choice.failure.reason}>
-        {t("extensions.editor.fallback", { name: choice.failure.name })}
-      </span>
+      {/* AQU-2260: why it failed opens on click, not as a hover title. */}
+      <NoteOnClick note={choice.failure.reason} className="min-w-0 flex-1" align="start">
+        <span className="min-w-0 truncate">{t("extensions.editor.fallback", { name: choice.failure.name })}</span>
+      </NoteOnClick>
       <Button size="xs" variant="ghost" onClick={choice.retry}>{t("common.retry")}</Button>
     </div>
   )

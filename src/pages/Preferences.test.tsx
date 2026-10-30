@@ -159,6 +159,23 @@ describe("Preferences", () => {
     expect(await screen.findByRole("option", { name: /မြန်မာ/ })).toBeInTheDocument()
   })
 
+  // AQU-2260 (Sam, Oct 29, option 2B): the UI language list grows with the
+  // app's catalogs, so it gets a search box. A reader can find their language
+  // by its own name or by its English one.
+  it("the UI language list has a search box that narrows it, by either name", async () => {
+    const user = userEvent.setup()
+    renderAt("/preferences")
+    await user.click(await screen.findByRole("combobox", { name: "UI language" }))
+    const search = await screen.findByRole("combobox", { name: "Search the list" })
+    await user.type(search, "fran")
+    expect(await screen.findByRole("option", { name: "Français" })).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: "English" })).not.toBeInTheDocument()
+    await user.clear(search)
+    await user.type(search, "burmese")
+    expect(await screen.findByRole("option", { name: /မြန်မာ/ })).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: "Français" })).not.toBeInTheDocument()
+  })
+
   it("shows Default app font size for a fresh user and scales the root immediately", async () => {
     renderAt("/preferences")
     const trigger = screen.getByRole("combobox", { name: "App font size" })

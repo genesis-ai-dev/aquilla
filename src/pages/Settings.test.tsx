@@ -325,3 +325,52 @@ describe("Settings index", () => {
     expect(screen.queryByRole("link", { name: /export permissions/i })).not.toBeInTheDocument()
   })
 })
+
+// AQU-2260 (Sam, Oct 29, Settings cleanup 5c, option A): an org settings page
+// you can open but not change is shown read-only, with one line at its top
+// saying who can, and "View only" beside it in the settings list.
+describe("Org settings you can open but not change (AQU-2260)", () => {
+  const asRole = (level: number, name: string) =>
+    vi.mocked(listMyOrgs).mockResolvedValue([{ id: 1, name: "Come and See", role: { level, name } }])
+
+  it("a Maintainer reads Security with one line saying Owners change it", async () => {
+    asRole(600, "maintainer")
+    renderSettings("/orgs/1/settings/security")
+    expect(await screen.findByTestId("org-settings-locked")).toHaveTextContent("Only Owners can change Security.")
+    expect(screen.getAllByTestId("org-settings-locked")).toHaveLength(1)
+    // Read-only, not hidden: the controls are still there to read.
+    expect(screen.getByLabelText(/who can view the roster/i)).toBeDefined()
+  })
+
+  it("a Contributor reads Identity and Knowledge with the Maintainer line at the top", async () => {
+    asRole(400, "contributor")
+    renderSettings("/orgs/1/settings/identity")
+    expect(await screen.findByTestId("org-settings-locked")).toHaveTextContent("Only Maintainers can change Identity.")
+    expect(screen.getByLabelText(/^Organization name$/i)).toBeDisabled()
+  })
+
+  it("an Owner sees no lock line", async () => {
+    renderSettings("/orgs/1/settings/security")
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Security" })).toBeInTheDocument())
+    expect(screen.queryByTestId("org-settings-locked")).toBeNull()
+  })
+
+  it("the settings list says View only beside each page a Contributor cannot change", async () => {
+    asRole(400, "contributor")
+    renderSettings("/orgs/1/settings")
+    const security = await screen.findByRole("link", { name: /^security/i })
+    await waitFor(() => expect(security).toHaveTextContent("View only"))
+    for (const name of [/^identity/i, /^ai provider keys/i, /^rules/i, /^monday\.com/i, /^airtable/i, /^project defaults/i]) {
+      expect(screen.getByRole("link", { name })).toHaveTextContent("View only")
+    }
+  })
+
+  it("for a Maintainer, only Security says View only", async () => {
+    asRole(600, "maintainer")
+    renderSettings("/orgs/1/settings")
+    const security = await screen.findByRole("link", { name: /^security/i })
+    await waitFor(() => expect(security).toHaveTextContent("View only"))
+    expect(screen.getByRole("link", { name: /^identity/i })).not.toHaveTextContent("View only")
+    expect(screen.getByRole("link", { name: /^project defaults/i })).not.toHaveTextContent("View only")
+  })
+})

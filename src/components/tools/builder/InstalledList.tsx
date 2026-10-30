@@ -2,7 +2,6 @@ import { Link } from "react-router-dom"
 import { Play, ShieldCheck } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import { AppTooltip } from "@/components/ui/tooltip"
 import { OverflowMenu, type OverflowMenuItem } from "@/components/OverflowMenu"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { primaryMount, provenanceOf } from "@/lib/tools/builder-model"
@@ -56,12 +55,12 @@ export function InstalledList({
                   >
                     {tool.name}
                   </Link>
+                  {/* AQU-2260: a mark, not a button, so no hover; the line
+                      below prints what it stands for. */}
                   {tool.firstParty && (
-                    <AppTooltip content={t("extensions.firstParty.badge")}>
-                      <span data-testid="first-party-badge" aria-label={t("extensions.firstParty.badge")} className="relative z-10 inline-flex">
-                        <ShieldCheck className="size-3.5 text-emerald-600 dark:text-emerald-400" aria-hidden />
-                      </span>
-                    </AppTooltip>
+                    <span data-testid="first-party-badge" role="img" aria-label={t("extensions.firstParty.badge")} className="relative z-10 inline-flex">
+                      <ShieldCheck className="size-3.5 text-emerald-600 dark:text-emerald-400" aria-hidden />
+                    </span>
                   )}
                   {tool.upstreamToolId && (
                     <span className="relative z-10 rounded-full bg-amber-500/10 px-1.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">{t("extensions.review.badgeShort")}</span>

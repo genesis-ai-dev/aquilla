@@ -10,6 +10,7 @@ import { useEffect } from "react"
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest"
 import { render, screen, fireEvent, within } from "@testing-library/react"
 import { MemoryRouter, useLocation } from "react-router-dom"
+import { expectDisabledNote } from "@/test-utils/tooltip"
 import type {
   ContextualDecisionsPage,
   ContextualRunPage,
@@ -219,5 +220,41 @@ describe("AgentDockPanel", () => {
     expect(within(list).getAllByRole("button")).toHaveLength(1)
     fireEvent.click(within(list).getByText("Team chat"))
     expect(currentPath).toBe("/project/p1/agent?conversation=team-chat")
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): the Scripture quick actions are labelled buttons,
+// so they say nothing on hover; a greyed Summarize chapter says why on click.
+describe("AgentDockPanel Scripture quick actions", () => {
+  beforeEach(() => {
+    fetchContextualRuns.mockResolvedValue(runsPage([]))
+    fetchContextualDecisions.mockResolvedValue(decisionsPage())
+  })
+
+  function renderWithSummary(chapterRef: string | null) {
+    return render(
+      <MemoryRouter initialEntries={["/project/p1/editor"]}>
+        <AgentDockPanel
+          projectId="p1"
+          author="alice"
+          fileNames={new Map()}
+          bibleSummary={{ bookName: "Genesis", chapterRef }}
+          onSummaryPrompt={() => {}}
+        />
+      </MemoryRouter>,
+    )
+  }
+
+  it("carries no hover title on either button", () => {
+    renderWithSummary("GEN 1")
+    expect(screen.getByRole("button", { name: "Summarize book" })).not.toHaveAttribute("title")
+    expect(screen.getByRole("button", { name: "Summarize chapter" })).not.toHaveAttribute("title")
+  })
+
+  it("says why Summarize chapter is greyed out, on click", async () => {
+    renderWithSummary(null)
+    const chapter = screen.getByRole("button", { name: "Summarize chapter" })
+    expect(chapter).toBeDisabled()
+    await expectDisabledNote(chapter, "Focus a verse to summarize its chapter")
   })
 })

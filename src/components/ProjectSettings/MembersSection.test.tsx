@@ -253,7 +253,7 @@ describe("MembersSection — caller-role gating (AQU-853)", () => {
     openRowMenu("carol")
     expect(screen.queryByRole("menuitem", { name: /change role/i })).toBeNull()
     expect(
-      screen.getByText(/project lead or higher can change member roles/i),
+      within(screen.getByRole("menu")).getByText(/project lead or higher can change member roles/i),
     ).toBeTruthy()
   })
 
@@ -262,7 +262,9 @@ describe("MembersSection — caller-role gating (AQU-853)", () => {
     renderSection()
     const addButton = screen.getByRole("button", { name: /add a member/i })
     expect(addButton).toBeDisabled()
-    expect(addButton.getAttribute("title")).toMatch(
+    // AQU-2260: said once at the top of the section, not as a hover title.
+    expect(addButton.getAttribute("title")).toBeNull()
+    expect(screen.getByTestId("settings-members-locked")).toHaveTextContent(
       /project lead or higher can change member roles/i,
     )
   })

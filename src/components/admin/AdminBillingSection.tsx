@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Section } from "@/components/ui/page"
 import { DateTooltip } from "@/components/ui/date-tooltip"
+import { NoteOnClick } from "@/components/ui/info-note"
 import { OrgWithAvatar } from "@/components/OrgWithAvatar"
 import { AdminSectionSkeleton } from "./shared"
 import { OrgPlanControl, TeamCostLine, WeeklyAllowanceUsd } from "./AdminOrgPlanControls"
@@ -192,9 +193,9 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
                 <DateTooltip value={row.original.periodEnd} label="Period end" />
               </span>
             ) : (
-              <span title="No billing period on record — the allowance applies to the current cycle.">
+              <NoteOnClick note="No billing period on record — the allowance applies to the current cycle.">
                 No period set
-              </span>
+              </NoteOnClick>
             )}
           </div>
         ),

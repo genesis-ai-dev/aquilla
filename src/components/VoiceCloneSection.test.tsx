@@ -2,7 +2,9 @@
  * VoiceCloneSection.test.tsx — empty dropzone vs filled clip; line reuse stays empty.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { VoiceCloneSection } from "./VoiceCloneSection"
 import type { Voice } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -96,5 +98,20 @@ describe("VoiceCloneSection filled state", () => {
     fireEvent.drop(zone, { dataTransfer: { files: [file] } })
     expect(await screen.findByText(/That file isn't audio/)).toBeTruthy()
     expect(uploadVoiceReference).not.toHaveBeenCalled()
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button. Preview
+// carries its own word.
+describe("VoiceCloneSection — Preview has no hover", () => {
+  it("shows nothing on hover over Preview", async () => {
+    render(
+      <TooltipProvider delay={0}>
+        <VoiceCloneSection voice={{ id: "v", name: "N", referenceAudioId: "ref.webm" }} projectId="p" fileId="f" session={session} onChange={vi.fn()} />
+      </TooltipProvider>,
+    )
+    await userEvent.setup().hover(screen.getByRole("button", { name: /Preview/ }))
+    await act(() => new Promise((r) => setTimeout(r, 30)))
+    expect(screen.queryByRole("tooltip")).toBeNull()
   })
 })

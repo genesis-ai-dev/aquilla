@@ -263,17 +263,14 @@ export function OrgRulesPanel({
                           />
                         </p>
                       </div>
+                      {/* AQU-2260: labelled buttons say nothing on hover. */}
                       <div className="flex items-center gap-2 shrink-0">
-                        <AppTooltip content={t("rules.surface.approveRequestTooltip")}>
-                          <Button size="sm" onClick={() => handleApproveRequest(req)}>
-                            {t("rules.surface.approveButton")}
-                          </Button>
-                        </AppTooltip>
-                        <AppTooltip content={t("rules.surface.dismissRequestTooltip")}>
-                          <Button size="sm" variant="ghost" onClick={() => handleDismissRequest(req.id)}>
-                            {t("common.dismiss")}
-                          </Button>
-                        </AppTooltip>
+                        <Button size="sm" onClick={() => handleApproveRequest(req)}>
+                          {t("rules.surface.approveButton")}
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => handleDismissRequest(req.id)}>
+                          {t("common.dismiss")}
+                        </Button>
                       </div>
                     </div>
                   </li>

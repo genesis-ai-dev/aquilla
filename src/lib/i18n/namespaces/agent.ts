@@ -540,13 +540,10 @@ export const agent = defineNamespace({
     "agent.workingSet.emptyStateTargetOnly":
       "The agent’s staged drafts appear here for you to edit, accept, or reject.",
     "agent.workingSet.title": "Working set",
-    "agent.workingSet.acceptAllTooltip": "Accept every pending draft, with your edits (Shift+A)",
     "agent.workingSet.acceptRemaining": "Accept remaining ({count})",
     "agent.workingSet.keyboardHelp":
       "j/k move · Enter accept & next · type to edit · x reject · Shift+A accept remaining",
-    "agent.workingSet.openInEditorTooltip": "Open in editor",
     "agent.workingSet.openLink": "open",
-    "agent.workingSet.editTooltip": "Edit this draft (or just start typing)",
     "agent.workingSet.editingHelp": "Enter accept & next · Esc revert to draft · Shift+Enter newline",
     "agent.workingSet.draftDiscarded": "draft discarded — cell left untranslated",
     "agent.workingSet.inFileTooltip": "In {fileName}",

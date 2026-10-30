@@ -14,6 +14,8 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, waitFor, fireEvent } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { renderWithTooltips, expectClickNote } from "@/test-utils/tooltip"
 import { MembersMatrixView } from "./MembersMatrixView"
 import type { MembersMatrix } from "@/hooks/useProjectsMembersMatrix"
 
@@ -134,5 +136,59 @@ describe("MembersMatrixView", () => {
 
     const trigger = screen.getByTestId("matrix-scope-trigger-1-proj-1")
     expect(trigger).toHaveTextContent("scopes")
+  })
+
+  // AQU-2260 (Sam, Oct 29): nothing in the matrix explains itself on hover.
+  describe("explanations open on click, never on hover", () => {
+    it("the (i) by the Member header opens how access is worked out", async () => {
+      mockMatrix = oneCellMatrix()
+      renderWithTooltips(<MembersMatrixView />)
+      await expectClickNote(
+        screen.getByRole("button", { name: "How access is resolved" }),
+        "Every member's access is the highest role they hold",
+      )
+    })
+
+    it("the sole-Owner warning on a project column opens its note on click", async () => {
+      mockMatrix = oneCellMatrix()
+      renderWithTooltips(<MembersMatrixView />)
+      await expectClickNote(
+        screen.getByRole("button", { name: "Sole Owner: losing this person locks the project" }),
+        "Sole Owner: losing this person locks the project",
+      )
+    })
+
+    it("the org-wide mark on a member opens where their access comes from", async () => {
+      const matrix = oneCellMatrix()
+      matrix.members = [{ userId: 1, username: "alice", isOrgInherited: true }]
+      mockMatrix = matrix
+      renderWithTooltips(<MembersMatrixView />)
+      await expectClickNote(
+        screen.getByRole("button", { name: "org-wide" }),
+        "Access on every project comes from a Maintainer or Owner org role",
+      )
+    })
+
+    it("a cell's other access paths are listed in the cell's own popover, not a hover", async () => {
+      const matrix = oneCellMatrix()
+      matrix.cells.set(1, new Map([["proj-1", {
+        role: { level: 400, name: "contributor", source: "override" as const },
+        secondarySources: [{ source: "group" as const, level: 300, name: "reviewer" }],
+      }]]))
+      mockMatrix = matrix
+      renderWithTooltips(<MembersMatrixView />)
+      const user = userEvent.setup()
+      const cell = screen.getByRole("button", { name: "Edit alice's role on this project" })
+      await user.hover(screen.getByText("D"))
+      expect(screen.queryByRole("tooltip")).toBeNull()
+      await user.click(cell)
+      const popover = await waitFor(() => {
+        const el = document.querySelector<HTMLElement>('[data-slot="popover-content"]')
+        expect(el).not.toBeNull()
+        return el!
+      })
+      expect(popover).toHaveTextContent("Also has access via:")
+      expect(popover).toHaveTextContent(/via group/i)
+    })
   })
 })

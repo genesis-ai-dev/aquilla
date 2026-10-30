@@ -13,6 +13,7 @@ import { AlertTriangle, CheckCircle2, Eye, ListTree, Pause, PencilSparkles, Spar
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { InfoNote, NoteOnClick } from "@/components/ui/info-note"
 import { cn } from "@/lib/utils"
 import { useEditorScroll } from "@/context/EditorScrollContext"
 import {
@@ -30,7 +31,7 @@ import {
 import { useContextualDraftsSummary } from "@/lib/contextual/drafts-store"
 import { installContextualTransport, type ContextualRunRecord } from "@/lib/contextual/transport"
 import { CONVERSATION_PARAM, runThreadId } from "@/lib/agent/team-channel"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 import { AutopilotActivityInspector } from "./AutopilotActivityInspector"
 import { ContextualSteering } from "./ContextualSteering"
 
@@ -85,7 +86,7 @@ function ContextualRunPillScoped({
   canControl = false,
   activeLane = "",
 }: PillProps) {
-  const t = useT()
+  const { t, locale } = useI18n()
   const state = useContextualRunState()
   const storedProgress = useContextualRunProgress()
   const drafts = useContextualDraftsSummary()
@@ -156,16 +157,16 @@ function ContextualRunPillScoped({
   // machinery: a translator wants "12 ready for you", not a span count.
   const pendingChip =
     pendingDrafts > 0 ? (
-      <AppTooltip content={t("autopilot.pill.suggestionsWaiting")}>
-        <span
-          data-testid="contextual-pending-drafts"
-          className="flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-primary"
-          aria-label={t("autopilot.pill.suggestionsReady", { count: pendingDrafts })}
-        >
-          <Sparkles className="h-3 w-3" aria-hidden />
-          <span className="tabular-nums" aria-hidden>{pendingDrafts}</span>
-        </span>
-      </AppTooltip>
+      // AQU-2260: a mark, so what it counts opens on click, never on hover.
+      <NoteOnClick
+        note={t("autopilot.pill.suggestionsWaiting")}
+        label={t("autopilot.pill.suggestionsReady", { count: pendingDrafts })}
+        testId="contextual-pending-drafts"
+        className="gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-primary"
+      >
+        <Sparkles className="h-3 w-3" aria-hidden />
+        <span className="tabular-nums" aria-hidden>{pendingDrafts}</span>
+      </NoteOnClick>
     ) : null
 
   // A wave runs several passages at once. Naming one of them as "the" passage
@@ -325,30 +326,50 @@ function ContextualRunPillScoped({
             : t("autopilot.pill.waitingForYou")}
         </span>
         {pendingChip}
+        {/* AQU-2260: labelled buttons say nothing on hover. What each of
+            the two ways forward does is in one (i) beside them. */}
         {canControl && (
           <>
-            <AppTooltip content={t("autopilot.action.continueHint")}>
-              <Button
-                type="button"
-                size="sm"
-                variant="secondary"
-                className="h-6 px-2 text-xs"
-                onClick={() => void continueContextualRun("batch")}
-              >
-                {t("autopilot.action.continue")}
-              </Button>
-            </AppTooltip>
-            <AppTooltip content={t("autopilot.action.translateEverythingHint")}>
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="h-6 px-2 text-xs"
-                onClick={() => void continueContextualRun("all")}
-              >
-                {t("autopilot.action.translateEverything")}
-              </Button>
-            </AppTooltip>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              className="h-6 px-2 text-xs"
+              onClick={() => void continueContextualRun("batch")}
+            >
+              {t("autopilot.action.continue")}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-6 px-2 text-xs"
+              onClick={() => void continueContextualRun("all")}
+            >
+              {t("autopilot.action.translateEverything")}
+            </Button>
+            <InfoNote
+              label={t("common.aboutAria", {
+                name: new Intl.ListFormat(locale, { style: "long", type: "conjunction" }).format([
+                  t("autopilot.action.continue"),
+                  t("autopilot.action.translateEverything"),
+                ]),
+              })}
+              testId="contextual-continue-info"
+            >
+              <span className="flex flex-col gap-1.5">
+                <span>
+                  <span className="font-medium">{t("autopilot.action.continue")}</span>
+                  {" — "}
+                  {t("autopilot.action.continueHint")}
+                </span>
+                <span>
+                  <span className="font-medium">{t("autopilot.action.translateEverything")}</span>
+                  {" — "}
+                  {t("autopilot.action.translateEverythingHint")}
+                </span>
+              </span>
+            </InfoNote>
           </>
         )}
       </>

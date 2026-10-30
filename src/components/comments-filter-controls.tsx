@@ -120,7 +120,6 @@ function FilterSelectRow({
         <SelectContent
           align="end"
           side={side}
-          alignItemWithTrigger={false}
           sideOffset={FILTER_MENU_GAP_PX}
         >
           <SelectGroup>

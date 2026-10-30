@@ -7,7 +7,7 @@
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 import { EditorTable } from "./EditorTable"
@@ -154,11 +154,14 @@ function renderTable() {
   )
 }
 
-async function tooltipOf(element: HTMLElement) {
-  fireEvent.mouseEnter(element)
-  fireEvent.pointerEnter(element)
-  fireEvent.focus(element)
-  return screen.findByRole("tooltip")
+/** AQU-2260 (Sam, Oct 29): a mark's note opens on a CLICK, never a hover. */
+async function noteOf(element: HTMLElement) {
+  fireEvent.click(element)
+  return waitFor(() => {
+    const notes = [...document.querySelectorAll<HTMLElement>('[data-slot="popover-content"]')]
+    expect(notes.length).toBeGreaterThan(0)
+    return notes[notes.length - 1]
+  })
 }
 
 afterEach(() => {
@@ -175,14 +178,15 @@ describe("EditorTable — integrity flag hover (AQU-757)", () => {
     expect(flag).toHaveAccessibleName(/End punctuation — Terminal punctuation differs from source/)
     expect(flag).toHaveAccessibleName(/No foo — target contains forbidden pattern/)
 
-    const flagTip = await tooltipOf(flag)
+    const flagTip = await noteOf(flag)
     expect(flagTip).toHaveTextContent("Number integrity — Number from source missing in translation")
     expect(flagTip).toHaveTextContent("End punctuation — Terminal punctuation differs from source")
     expect(flagTip).toHaveTextContent("No foo — target contains forbidden pattern")
 
     const ribbon = screen.getByTestId("health-ribbon")
     expect(ribbon).toHaveAccessibleName(/End punctuation — Terminal punctuation differs from source/)
-    const ribbonTip = await tooltipOf(ribbon)
+    fireEvent.click(flag)
+    const ribbonTip = await noteOf(ribbon)
     expect(ribbonTip).toHaveTextContent("Number integrity — Number from source missing in translation")
     expect(ribbonTip).not.toHaveTextContent(/automatic issue/i)
   })

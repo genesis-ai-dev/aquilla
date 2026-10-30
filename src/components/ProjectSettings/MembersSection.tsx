@@ -4,6 +4,7 @@
 // (search + TanStack sort headers). "Add a member" opens a dialog with tabs:
 // add people from the org, or create an invite link.
 
+import { LockedNote } from "@/components/ui/locked-note"
 import { useMemo, useState } from "react"
 import { type ColumnDef } from "@tanstack/react-table"
 import {
@@ -185,6 +186,13 @@ export function MembersSection({ projectId }: { projectId: string }) {
             <ScopeBreadcrumb path={scopePath} />
           </h2>
         )}
+        {/* AQU-2260: below the Project lead floor nothing here can be
+            changed; one line says so, instead of a hover on Add a member. */}
+        {!canManageMembers && (
+          <LockedNote placement="section" testId="settings-members-locked">
+            {t("projectSettings.members.roleChangeNeedsRole", { role: resolveRoleName(t, ROLE.PROJECT_LEAD) })}
+          </LockedNote>
+        )}
         {error && (
           <div className="flex items-center gap-2 rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
             <AlertTriangle className="h-4 w-4 shrink-0" />
@@ -243,16 +251,9 @@ export function MembersSection({ projectId }: { projectId: string }) {
                   className="ml-auto shrink-0"
                   onClick={openAddDialog}
                   // AQU-853 AC-3: below the project_lead floor the server 403s
-                  // every grant, so the control is disabled and says why
-                  // rather than looking available and failing.
+                  // every grant, so the control is disabled; the line at the
+                  // top of the section says why.
                   disabled={!canManageMembers}
-                  title={
-                    canManageMembers
-                      ? undefined
-                      : t("projectSettings.members.roleChangeNeedsRole", {
-                          role: resolveRoleName(t, ROLE.PROJECT_LEAD),
-                        })
-                  }
                 >
                   {t("org.membersPage.orgTable.addMemberTitle")}
                 </Button>

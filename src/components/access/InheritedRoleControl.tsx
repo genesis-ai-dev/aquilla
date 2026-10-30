@@ -12,8 +12,11 @@ import { useT } from "@/lib/i18n/I18nProvider"
  * the control through untouched.
  *
  * A11y: the disabled control is described by visually-hidden text holding the
- * same sentence as the tooltip. When the link is present it is the keyboard
- * route, so the hover wrapper is not an extra tab stop.
+ * same sentence as its note. AQU-2260 (Sam, Oct 29): that sentence opens on
+ * CLICK, in a note anchored to the control, never on hover. AppTooltip does
+ * that for a natively-disabled child, so the child goes to it directly; a
+ * hand-made wrapper span in between would hand it a non-disabled trigger and
+ * bring the hover back.
  */
 export function InheritedRoleControl({
   origin,
@@ -35,16 +38,11 @@ export function InheritedRoleControl({
   const hint = t("org.access.inherited.tooltip", { path })
   return (
     <span className="inline-flex items-center gap-2" data-inherited="true">
-      <AppTooltip content={hint} delay={0}>
-        {/* Disabled controls swallow pointer events; the span is the hover target. */}
-        {/* Without a link it stays focusable (for the tooltip) and is named by the hint. */}
-        <span
-          data-testid="inherited-role-control"
-          {...(href ? {} : { tabIndex: 0, role: "group", "aria-label": hint })}
-        >
+      <span data-testid="inherited-role-control" className="inline-flex">
+        <AppTooltip content={hint}>
           {cloneElement(children, { disabled: true, "aria-describedby": descId })}
-        </span>
-      </AppTooltip>
+        </AppTooltip>
+      </span>
       <span id={descId} className="sr-only">
         {hint}
       </span>

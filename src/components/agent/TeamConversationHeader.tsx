@@ -1,6 +1,7 @@
 import type { ReactNode } from "react"
 import { Link } from "react-router-dom"
 import { buttonVariants } from "@/components/ui/button"
+import { NoteOnClick } from "@/components/ui/info-note"
 import { agentConversationHref } from "@/lib/agent/workspace-location"
 import { runThreadId } from "@/lib/agent/team-channel"
 import { AGENT_PERSONA_IDS } from "@/lib/agent/personas"
@@ -58,10 +59,14 @@ export function TeamConversationHeader({
       <div className="flex items-center gap-3">
         <div className="flex min-w-0 flex-1 items-baseline gap-2">
           <h2 className="min-w-0 truncate text-base font-semibold" title={title}>{title}</h2>
+          {/* AQU-2260: the agent's own state opens on click, not a hover title. */}
           {run && (
-            <span className="shrink-0 text-xs text-muted-foreground" title={t("agentWorkspace.agentState", { state: t(runStatusKey(run)) })}>
+            <NoteOnClick
+              note={t("agentWorkspace.agentState", { state: t(runStatusKey(run)) })}
+              className="shrink-0 text-xs text-muted-foreground"
+            >
               {pendingDrafts > 0 ? t("agentWorkspace.needsReview") : t(runStatusKey(run))}
-            </span>
+            </NoteOnClick>
           )}
         </div>
         <ul

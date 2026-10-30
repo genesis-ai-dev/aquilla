@@ -9,7 +9,7 @@
  * org, signed out, read failed) the latest run's budget % stands in.
  */
 
-import { AppTooltip } from "@/components/ui/tooltip"
+import { NoteOnClick } from "@/components/ui/info-note"
 import { AiMeterCompact, type AiMeterProps } from "@/components/billing/AiMeter"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { AgentBudget, AgentRunUi } from "@/lib/agent/run-state"
@@ -33,17 +33,15 @@ function RunBudgetRing({ budget }: { budget: AgentBudget }) {
   const t = useT()
   const { pct, pctLabel } = budgetPct(budget)
   const label = t("agent.budget.pctUsed", { pct: pctLabel })
+  // AQU-2260: a reading, not a button, so its figure opens on click.
   return (
-    <AppTooltip content={label}>
-      <span
-        role="img"
-        tabIndex={0}
-        aria-label={label}
-        data-testid="run-budget-ring"
-        className="inline-flex size-8 items-center justify-center text-muted-foreground"
-      >
-        <UsageRingIcon pct={pct} />
-      </span>
-    </AppTooltip>
+    <NoteOnClick
+      note={label}
+      label={label}
+      testId="run-budget-ring"
+      className="size-8 justify-center text-muted-foreground"
+    >
+      <UsageRingIcon pct={pct} />
+    </NoteOnClick>
   )
 }

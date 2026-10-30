@@ -1,5 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest"
+import userEvent from "@testing-library/user-event"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { AutopilotProcessGraph } from "./AutopilotProcessGraph"
 import type {
   ContextualOverview,
@@ -171,5 +173,33 @@ describe("AutopilotProcessGraph", () => {
     expect(screen.getByTestId("autopilot-process-graph-mini")).toBeInTheDocument()
     expect(screen.queryByText("Process")).not.toBeInTheDocument()
     expect(screen.queryByText("Now: LUK 1:1–1:8")).not.toBeInTheDocument()
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): hover may only NAME an icon-only button.
+describe("AutopilotProcessGraph explanations", () => {
+  it("opens what a span is in place under the title, on click, never on hover", async () => {
+    render(<TooltipProvider delay={0}><AutopilotProcessGraph run={run} activity={activity} /></TooltipProvider>)
+    const info = screen.getByRole("button", { name: "What a span is" })
+    await userEvent.setup().hover(info)
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    const reveal = document.getElementById(info.getAttribute("aria-controls") ?? "")
+    expect(reveal).not.toBeNull()
+    expect(reveal).toHaveAttribute("data-open", "false")
+    fireEvent.click(info)
+    expect(reveal).toHaveAttribute("data-open", "true")
+    expect(reveal).toHaveTextContent("about 8 to 12 cells")
+    fireEvent.click(info)
+    expect(reveal).toHaveAttribute("data-open", "false")
+  })
+
+  it("a step's hover names it and nothing more; its detail opens on click", async () => {
+    render(<TooltipProvider delay={0}><AutopilotProcessGraph run={run} activity={activity} /></TooltipProvider>)
+    const step = screen.getByRole("button", { name: "Situation" })
+    await userEvent.setup().hover(step)
+    const tip = await screen.findByRole("tooltip")
+    expect(tip.textContent).toBe("Situation")
+    fireEvent.click(step)
+    expect(screen.getByTestId("autopilot-process-graph-inspect")).toHaveTextContent("Read the situation in this piece of text")
   })
 })

@@ -15,11 +15,6 @@ import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Spinner } from "@/components/ui/spinner"
 import { TableCell } from "@/components/ui/table"
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
 import { RoleLabel } from "@/components/RoleLabel"
 import {
   ROLE,
@@ -56,8 +51,6 @@ interface CellEditorProps {
   onMutated: () => Promise<void> | void
   /** Visual styling derived by parent (color tier). */
   cellClassName: string
-  /** Source-label hint used in tooltips (e.g. "org-wide", "direct"). */
-  sourceHint: string
   /** 1-char badge code: D (direct), O (org-wide), G (via group), C (creator). */
   sourceBadge: string
   /** Non-winning contributing paths from the server. Empty = single path. */
@@ -124,7 +117,6 @@ export function MembersMatrixCellEditor({
   grantLanes,
   onMutated,
   cellClassName,
-  sourceHint,
   sourceBadge,
   secondarySources = [],
   footer,
@@ -244,50 +236,27 @@ export function MembersMatrixCellEditor({
           <div className="flex items-center justify-between gap-1">
             <RoleLabel name={cell.role.name} className="truncate" />
             <div className="flex items-center gap-0.5 shrink-0">
+              {/* AQU-2260: these two marks say nothing on hover. The cell is
+                  itself the button, so what they stand for is in the popover
+                  it opens: the legend above the table names each letter, and
+                  the other access paths are listed under the role picker. */}
               {sourceBadge && (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <span
-                        className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-[9px] font-bold cursor-default ${
-                          BADGE_CLASSES[sourceBadge] ?? "bg-muted text-muted-foreground"
-                        }`}
-                        aria-label={sourceHint}
-                      />
-                    }
-                  >
-                    {sourceBadge}
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    {sourceHint}
-                  </TooltipContent>
-                </Tooltip>
+                <span
+                  aria-hidden
+                  className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-[9px] font-bold ${
+                    BADGE_CLASSES[sourceBadge] ?? "bg-muted text-muted-foreground"
+                  }`}
+                >
+                  {sourceBadge}
+                </span>
               )}
               {secondarySources.length > 0 && (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <span
-                        className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded cursor-default text-muted-foreground hover:text-foreground"
-                        aria-label={t("org.membersMatrixCellEditor.alsoHasAccessAriaLabel")}
-                      />
-                    }
-                  >
-                    <GitMerge className="h-2.5 w-2.5" />
-                  </TooltipTrigger>
-                  <TooltipContent className="max-w-[200px]">
-                    <p className="font-medium mb-1 text-[10px]">
-                      {t("org.membersMatrixCellEditor.alsoHasAccessVia")}
-                    </p>
-                    <ul className="space-y-0.5">
-                      {secondarySources.map((s) => (
-                        <li key={s.source} className="text-[10px] capitalize">
-                          {t(SOURCE_LABEL[s.source])} · <RoleLabel name={s.name} />
-                        </li>
-                      ))}
-                    </ul>
-                  </TooltipContent>
-                </Tooltip>
+                <span
+                  aria-hidden
+                  className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground"
+                >
+                  <GitMerge className="h-2.5 w-2.5" />
+                </span>
               )}
             </div>
           </div>
@@ -312,6 +281,23 @@ export function MembersMatrixCellEditor({
               status={status}
               errorMsg={errorMsg}
             />
+          )}
+          {secondarySources.length > 0 && (
+            <div
+              className="mt-1.5 border-t px-1 pt-1.5 text-[10px]"
+              data-testid="matrix-cell-also-via"
+              aria-label={t("org.membersMatrixCellEditor.alsoHasAccessAriaLabel")}
+              role="group"
+            >
+              <p className="mb-1 font-medium">{t("org.membersMatrixCellEditor.alsoHasAccessVia")}</p>
+              <ul className="space-y-0.5">
+                {secondarySources.map((s) => (
+                  <li key={s.source} className="capitalize text-muted-foreground">
+                    {t(SOURCE_LABEL[s.source])} · <RoleLabel name={s.name} />
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
         </PopoverContent>
       </Popover>

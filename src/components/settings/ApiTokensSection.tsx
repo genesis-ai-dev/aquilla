@@ -39,6 +39,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { SearchSelect } from "@/components/ui/search-select"
 import { Spinner } from "@/components/ui/spinner"
 import { SettingsGroup, SettingsRow } from "@/components/ui/page"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -586,8 +587,11 @@ function MintTokenDialog({
     [orgOptions, t],
   )
   const projectItems = useMemo(
-    () => projectOptions.map((p) => ({ value: p.id, label: p.name })),
-    [projectOptions],
+    () => [
+      { value: "", label: t("onboarding.apiTokens.projectPlaceholder") },
+      ...projectOptions.map((p) => ({ value: p.id, label: p.name })),
+    ],
+    [projectOptions, t],
   )
   const expiryItems = useMemo(
     () => EXPIRY_PRESETS.map((p) => ({ value: p.id, label: t(p.labelKey) })),
@@ -767,24 +771,15 @@ function MintTokenDialog({
 
             <Field>
               <FieldLabel htmlFor="token-project">{t("common.project")}</FieldLabel>
-              <Select
-                items={projectItems}
+              {/* AQU-2232: a search box, for someone in many projects. The
+                  first row puts the token back to org-wide. */}
+              <SearchSelect
+                id="token-project"
+                options={projectItems}
                 value={projectId}
-                onValueChange={(value) => setProjectId(value ?? "")}
-              >
-                <SelectTrigger id="token-project" className="w-full">
-                  <SelectValue placeholder={t("onboarding.apiTokens.projectPlaceholder")} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    {projectOptions.map((p) => (
-                      <SelectItem key={p.id} value={p.id}>
-                        {p.name}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
+                onValueChange={setProjectId}
+                placeholder={t("onboarding.apiTokens.projectPlaceholder")}
+              />
             </Field>
 
             <Field>

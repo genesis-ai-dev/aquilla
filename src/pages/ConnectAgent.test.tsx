@@ -90,6 +90,17 @@ describe("agent consent", () => {
     fireEvent.click(authorize)
     await waitFor(() => expect(api).toHaveBeenLastCalledWith("jwt", "decision", { user_code: "ABCD-EFGH", approve: true, mode: "ask", org_id: "1", code_confirmed: true }))
   })
+  // AQU-2260 (Sam, Oct 29, option 2B): the project list grows with the
+  // person's projects, so it gets a search box.
+  it("the Project list has a search box that narrows it", async () => {
+    api.mockResolvedValue({ ...request, requestedProjectId: null })
+    await review()
+    fireEvent.click(screen.getByRole("combobox", { name: "Project" }))
+    const search = await screen.findByRole("combobox", { name: "Search the list" })
+    fireEvent.change(search, { target: { value: "contrib" } })
+    expect(await screen.findByRole("option", { name: "Contributor project" })).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: "Project" })).not.toBeInTheDocument()
+  })
   it("defaults org scope to the only eligible org", async () => {
     api.mockResolvedValue({ ...request, requestedProjectId: null })
     const authorize = await review()

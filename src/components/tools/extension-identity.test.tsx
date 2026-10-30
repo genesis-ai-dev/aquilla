@@ -78,6 +78,8 @@ describe("ExtensionFrame and ExtensionMarker", () => {
     expect(tab.textContent).toContain("Glossary")
     expect(tab.textContent).toContain("Smart Extension")
     expect(tab.getAttribute("href")).toBe("/project/p/extensions/t")
+    // AQU-2260: a labelled link says nothing on hover.
+    expect(tab).not.toHaveAttribute("title")
     expect(tab.querySelector("svg")).not.toBeNull()
     expect(frame.querySelector("iframe")).not.toBeNull()
   })

@@ -442,3 +442,29 @@ describe("a line's own take that stops short, under another track's take (AQU-22
     expect(getQueueProgress().currentTime).toBeCloseTo(2.4, 1)
   })
 })
+
+describe("more layers sounding at once than the players allow (AQU-2252)", () => {
+  // Eight lines of 0.1 s, each with a 3 s take on Track 1, a layer: at 0.75 s
+  // all eight are sounding, over the six players two tracks get.
+  const book = () =>
+    Array.from({ length: 8 }, (_, i) => line(`b${i + 1}`, 100, { durationMs: 3000, targetOffsetMs: 0 }))
+  const layerPlayers = () => FakeAudio.instances.filter((a) => a.src.endsWith("-track.webm"))
+
+  beforeEach(() => setQueueLayerTrackSlots([TRACK]))
+
+  it("the ones sounding keep sounding; the rest wait instead of pushing each other out", async () => {
+    startQueueAtTime(ctxFor(book()), 0.75)
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b8" })
+    const sounding = trackEntries().map((e) => e.cellId)
+    expect(sounding.length).toBeGreaterThan(0)
+    const made = layerPlayers().length
+    await wait(320) // five boundary checks
+    await settle()
+    // No layer was stopped and started again, and none was fetched again.
+    expect(layerPlayers().length).toBe(made)
+    expect(trackEntries().map((e) => e.cellId)).toEqual(sounding)
+    // The earliest ones sound (a music bed under the effects starts first).
+    expect(sounding).toContain("b1")
+  })
+})

@@ -1190,10 +1190,18 @@ function progLayersSync(atSec: number): void {
     else if (!playing && !el.paused) el.pause()
   }
   if (playing) {
+    // At the pool's cap a due layer waits for a player to come free rather
+    // than taking one: firing it would push out another due layer, which the
+    // next beat would fire again, round and round every 60 ms. The earliest
+    // keep theirs (a music bed under the effects starts first); a waiting one
+    // joins at its place when one ends.
+    let room = overlayCapacity() - overlayPool.length
     for (const l of due.values()) {
+      if (room <= 0) break
       if (progLayerFailed.has(layerKey(l))) continue
       const into = Math.max(0, atSec - l.startSec)
       if (into > 0 && l.endSec - atSec < Math.min(LAYER_TAIL_SEC, (l.endSec - l.startSec) / 2)) continue
+      room--
       executeFire({
         kind: "fire",
         cellId: l.cellId,

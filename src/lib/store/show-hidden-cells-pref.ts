@@ -79,8 +79,3 @@ function subscribe(listener: () => void): () => void {
 export function useShowHiddenCells(): boolean {
   return useSyncExternalStore(subscribe, peek, () => false)
 }
-
-/** Test helper: forget the cached snapshot so a fresh localStorage is read. */
-export function resetShowHiddenCellsCacheForTests(): void {
-  cached = undefined
-}

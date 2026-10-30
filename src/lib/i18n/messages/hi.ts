@@ -3437,7 +3437,6 @@ export const hi: Catalog = {
   "org.accessModelLegend.creator.description": "स्वामी भूमिका स्थायी है जब तक परियोजना स्वामित्व स्थानांतरित न हो। परियोजना की सेटिंग → साझा करें में प्रबंधित करें।",
   "org.joinOrgPage.organizationLine": "संगठन: {name}",
   "org.joinOrgPage.unnamedOrgFallback": "बिना नाम संगठन",
-  "org.joinOrgPage.genericInviteFallback": "आपको Aquilla पर एक संगठन में जुड़ने का आमंत्रण मिला है।",
   "org.joinOrgPage.cantJoinTitle": "नहीं जुड़ सकते",
   "org.joinOrgPage.youreInTitle": "आप भीतर हैं",
   "org.joinOrgPage.joinedRedirect": "{org} में जुड़ गए। आपको वहाँ ले जा रहे हैं…",

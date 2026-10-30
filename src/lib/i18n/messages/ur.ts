@@ -3526,7 +3526,6 @@ export const ur: Catalog = {
   "org.accessModelLegend.creator.description": "مالک کا کردار مستقل ہے جب تک منصوبے کی ملکیت منتقل نہ ہو۔ منصوبے کی ترتیبات → شیئر میں سنبھالیں۔",
   "org.joinOrgPage.organizationLine": "تنظیم: {name}",
   "org.joinOrgPage.unnamedOrgFallback": "بے نام تنظیم",
-  "org.joinOrgPage.genericInviteFallback": "آپ کو Aquilla پر ایک تنظیم میں شامل ہونے کی دعوت ہے۔",
   "org.joinOrgPage.cantJoinTitle": "شامل نہیں ہو سکتے",
   "org.joinOrgPage.youreInTitle": "آپ شامل ہو گئے",
   "org.joinOrgPage.joinedRedirect": "{org} میں شامل ہو گئے۔ آپ کو وہاں لے جا رہے ہیں…",

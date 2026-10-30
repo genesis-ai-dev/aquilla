@@ -3528,7 +3528,6 @@ export const am: Catalog = {
   "org.accessModelLegend.creator.description": "የባለቤት ሚና የፕሮጀክት ባለቤትነት እስኪተላለፍ ድረስ ቋሚ ነው። በፕሮጀክቱ ቅንብሮች → አጋራ ያስተዳድሩ።",
   "org.joinOrgPage.organizationLine": "ድርጅት፦ {name}",
   "org.joinOrgPage.unnamedOrgFallback": "ያልተሰየመ ድርጅት",
-  "org.joinOrgPage.genericInviteFallback": "በAquilla ላይ ወደ ድርጅት ለመቀላቀል ተጋብዘዋል።",
   "org.joinOrgPage.cantJoinTitle": "መቀላቀል አይቻልም",
   "org.joinOrgPage.youreInTitle": "ገብተዋል",
   "org.joinOrgPage.joinedRedirect": "{org} ተቀላቅለዋል። ወደዚያ በመውሰድ ላይ…",

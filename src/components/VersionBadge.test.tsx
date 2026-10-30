@@ -25,8 +25,15 @@ describe("VersionTag", () => {
 })
 
 describe("VersionBadge", () => {
+  it("auth pages show one inline build control instead of a floating duplicate", () => {
+    renderWithTooltips(<MemoryRouter initialEntries={["/join"]}>
+      <VersionBadge /><VersionBadge inline />
+    </MemoryRouter>)
+    expect(screen.getAllByRole("button", { name: "Copy build info" })).toHaveLength(1)
+  })
+
   it("the floating build button's hover names the build and nothing more", async () => {
-    renderWithTooltips(<MemoryRouter initialEntries={["/join"]}><VersionBadge /></MemoryRouter>)
+    renderWithTooltips(<MemoryRouter initialEntries={["/not-found"]}><VersionBadge /></MemoryRouter>)
     await userEvent.setup().hover(screen.getByRole("button", { name: "Copy build info" }))
     const tip = await screen.findByRole("tooltip")
     expect(tip.textContent).not.toMatch(/Click to copy/)

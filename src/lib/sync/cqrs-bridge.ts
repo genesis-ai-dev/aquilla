@@ -26,6 +26,13 @@ export interface CqrsOutboxBridge {
    *  role gate) so a guaranteed-403 never enters the outbox. Null = unknown →
    *  fail open and let the server decide. */
   roleLevel?: number | null
+  /** AQU-2304: the org's configurable `file.create` floor for THIS project, as
+   *  the project's settings response resolved it. The emit layer raises the
+   *  static mirror's PROJECT_LEAD bar with it so a `file.create` the org has
+   *  reserved for maintainers never enters the outbox. Null/absent = unknown
+   *  (an older server, or the response not landed yet) → the static bar alone,
+   *  and the server stays authoritative. */
+  importMinRole?: number | null
 }
 
 let bridge: CqrsOutboxBridge | null = null

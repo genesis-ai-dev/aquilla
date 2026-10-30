@@ -387,6 +387,21 @@ export const settings = defineNamespace({
     "settings.languageEdit.ownerOnlyError":
       "Only org owners can change the language permission policy.",
 
+    // ── ImportPermissionsSection (org settings → security) — AQU-2304 ──
+    "settings.importPermissions.label": "Who can import files",
+    "settings.importPermissions.description":
+      "Minimum role required to bring a new source file into a project, " +
+      "including re-importing one. Importing a translation into a file that " +
+      "is already in the project is unaffected and stays open to " +
+      "contributors.",
+    // Open-dropdown option text for the import floor select; see the
+    // roster/progress options above for why the level number is baked in.
+    "settings.importPermissions.optionProjectLead":
+      "Project lead — default. Project managers import their own files",
+    "settings.importPermissions.optionMaintainer": "Maintainer — only maintainers add or replace source files",
+    "settings.importPermissions.ownerOnlyError":
+      "Only org owners can change the import permission policy.",
+
     // ── CommentPermissionsSection (org settings → security) ──
     "settings.commentPermissions.groupLabel": "Comments",
     "settings.commentPermissions.groupDescription":

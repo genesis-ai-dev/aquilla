@@ -2980,7 +2980,6 @@ export const id: Catalog = {
   "org.accessModelLegend.creator.description": "Peran Pemilik bersifat permanen sampai kepemilikan proyek dialihkan. Kelola di Pengaturan → Bagikan pada proyek tersebut.",
   "org.joinOrgPage.organizationLine": "Organisasi: {name}",
   "org.joinOrgPage.unnamedOrgFallback": "Organisasi tanpa nama",
-  "org.joinOrgPage.genericInviteFallback": "Anda diundang untuk bergabung ke sebuah organisasi di Aquilla.",
   "org.joinOrgPage.cantJoinTitle": "Tidak dapat bergabung",
   "org.joinOrgPage.youreInTitle": "Anda sudah bergabung",
   "org.joinOrgPage.joinedRedirect": "Bergabung ke {org}. Mengantar Anda ke sana…",

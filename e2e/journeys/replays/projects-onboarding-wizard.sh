@@ -1,42 +1,18 @@
 #!/usr/bin/env sh
-# Replay of projects-onboarding-wizard.md, the path found on the 2026-09-08
-# cold run. This story does not call login(); it registers a fresh account.
+# AQU-2300: legacy entry now opens direct signup.
 . "$(dirname "$0")/_lib.sh"
-TS=$(date +%H%M%S)
-USER="wizard$TS"
-PROJNAME="Journey onboarding $TS"
-
-ab open "$BASE/onboarding" >/dev/null || fail "open /onboarding"
-ab wait --load networkidle >/dev/null
-ab find role button click --name "Get Started" >/dev/null || fail "Get Started button"
-ab wait --text "Help us improve" >/dev/null || fail "privacy step"
-ab find role button click --name "Continue" >/dev/null || fail "privacy Continue button"
-ab wait --text "Create your Aquilla account" >/dev/null || fail "account step"
-
-ab find label "Username" fill "$USER" >/dev/null || fail "username field"
-ab find label "Email" fill "$USER@example.test" >/dev/null || fail "email field"
-ab find label "Password" fill "wizard-pw-12345" >/dev/null || fail "password field"
-ab find role button click --name "Create account" >/dev/null || fail "Create account button"
-ab wait --text "What should we call you?" >/dev/null || fail "registration did not advance to display-name step"
-
-ab find label "Display name" fill "Wizard Translator" >/dev/null || fail "display name field"
-ab find role button click --name "Continue" >/dev/null || fail "display-name Continue button"
-ab wait --text "How will you use Aquilla?" >/dev/null || fail "usage step"
-ab find role button click --name "Just me" >/dev/null || fail "Just me button"
-ab wait --text "Create your first project" >/dev/null || fail "project step"
-
-ab find label "Project Name" fill "$PROJNAME" >/dev/null || fail "project name field"
-ab find label "Source Language" fill "English" >/dev/null || fail "source language field"
-ab find label "Target language" fill "French" >/dev/null || fail "target language field"
-ab find role button click --name "Create Project" >/dev/null || fail "Create Project button"
-ab wait --text "You're all set" >/dev/null || fail "ready step did not appear"
-
-ab find role button click --name "Start Translating" >/dev/null || fail "Start Translating button"
-ab wait --load networkidle >/dev/null
-url=$(ab get url)
-case "$url" in
-  */editor|*/editor/*|*/editor\?*) ;;
-  *) fail "url after Start Translating: $url" ;;
-esac
-
-pass "signed up as $USER, project '$PROJNAME' created, landed on $url"
+SIGNUP_USER="signup$(date +%s)"
+ab open "$BASE/onboarding" >/dev/null || fail "open signup"
+ab find role button click --name "Get Started" >/dev/null || fail "welcome"
+ab find role button click --name "Continue" >/dev/null || fail "privacy choice"
+ab wait --text "Create an Aquilla Account" >/dev/null || fail "signup heading"
+ab find label "Username" fill "$SIGNUP_USER" >/dev/null || fail "username"
+ab find label "Email" fill "$SIGNUP_USER@example.test" >/dev/null || fail "email"
+ab find label "Password" fill "safe-password-12345" >/dev/null || fail "password"
+ab find role button click --name "Create account" >/dev/null || fail "register"
+ab wait --url '**/orgs/**' >/dev/null || fail "registration did not enter app"
+ab wait --text "$SIGNUP_USER" >/dev/null || fail "signed-in account menu"
+ab reload >/dev/null || fail "reload"
+ab wait --url '**/orgs/**' >/dev/null || fail "session did not survive reload"
+ab wait --text "$SIGNUP_USER" >/dev/null || fail "account menu after reload"
+pass "signed up as $SIGNUP_USER and entered app without onboarding"

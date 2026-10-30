@@ -135,30 +135,14 @@ export function MediaPanelsMenu({ dock, fileName, kind, filmHiddenByTiming }: Me
       </AppTooltip>
       <PopoverContent align="end" className="w-64 gap-1.5 p-2" data-testid="panels-menu">
         {full && dock.canRestore && (
-          // One short line; what full screen folded is in its tooltip.
-          <AppTooltip content={t("editor.dock.fullNote", { folded: foldedNames.join(", ") })} side="left">
-            <div
-              data-testid="panels-full-note"
-              className="flex items-center gap-2 rounded-md bg-sky-50 px-2 py-1 text-xs text-sky-900 dark:bg-sky-950/60 dark:text-sky-200"
-            >
-              <span className="min-w-0 flex-1 truncate">{t("editor.dock.fullOn")}</span>
-              <Button
-                type="button"
-                size="xs"
-                variant="outline"
-                data-testid="panels-restore"
-                aria-label={t("editor.dock.restore")}
-                onClick={() => {
-                  dock.restore()
-                  dock.setPanelsOpen(false)
-                }}
-              >
-                <Shrink />
-                {t("editor.dock.restoreShort")}
-                <span className="font-normal text-muted-foreground">{keys.restore}</span>
-              </Button>
-            </div>
-          </AppTooltip>
+          <FullScreenNote
+            folded={t("editor.dock.fullNote", { folded: foldedNames.join(", ") })}
+            restoreKeys={keys.restore}
+            onRestore={() => {
+              dock.restore()
+              dock.setPanelsOpen(false)
+            }}
+          />
         )}
         <div className="px-2 pt-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground" data-testid="panels-heading">
           {t("editor.dock.panels")}
@@ -175,6 +159,45 @@ export function MediaPanelsMenu({ dock, fileName, kind, filmHiddenByTiming }: Me
         />
       </PopoverContent>
     </Popover>
+  )
+}
+
+/** The one short line while full screen is on, with Restore. Its (i) opens what
+ *  full screen folded beneath it, the same way Reset layout's (i) does: an (i)
+ *  is a click, never a hover (Sam, Oct 28). */
+function FullScreenNote({ folded, restoreKeys, onRestore }: { folded: string; restoreKeys: string; onRestore: () => void }) {
+  const t = useT()
+  const [infoOpen, toggleInfo] = useInfoOpen()
+  return (
+    <div className="flex flex-col rounded-md bg-sky-50 px-2 py-1 text-xs text-sky-900 dark:bg-sky-950/60 dark:text-sky-200">
+      <div data-testid="panels-full-note" className="flex items-center gap-2">
+        <span className="flex min-w-0 flex-1 items-center gap-1">
+          <span className="min-w-0 truncate">{t("editor.dock.fullOn")}</span>
+          <InfoToggle
+            open={infoOpen}
+            onToggle={toggleInfo}
+            label={t("editor.dock.fullInfoAria")}
+            controls="panels-full-info"
+            testId="panels-full-info-toggle"
+          />
+        </span>
+        <Button
+          type="button"
+          size="xs"
+          variant="outline"
+          data-testid="panels-restore"
+          aria-label={t("editor.dock.restore")}
+          onClick={onRestore}
+        >
+          <Shrink />
+          {t("editor.dock.restoreShort")}
+          <span className="font-normal text-muted-foreground">{restoreKeys}</span>
+        </Button>
+      </div>
+      <InfoReveal open={infoOpen} id="panels-full-info" testId="panels-full-info" className="leading-snug">
+        <span className="block pb-0.5">{folded}</span>
+      </InfoReveal>
+    </div>
   )
 }
 

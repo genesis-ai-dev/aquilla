@@ -13652,9 +13652,6 @@ export function ProjectWorkspace() {
   useEffect(() => {
     if (virtualIsTransport) setExternalDubsPlaying(virtualPlaying)
   }, [virtualIsTransport, virtualPlaying])
-  // AQU-2251: with "Skip lines with nothing to play" on, the clock jumps from
-  // the end of one line with a take to the start of the next one.
-  useSkipSilentLinesOnVirtualClock(dubDriverCells, virtualIsTransport)
   /** Which line the playhead is on, for the bar's caption and the table follow. */
   const virtualSoundingCellId = useMemo(
     () => (virtualIsTransport && virtualSec != null ? cellIdAtSec(dubDriverCells, virtualSec) : null),
@@ -14788,6 +14785,11 @@ export function ProjectWorkspace() {
   useEffect(() => {
     setQueueTargetSlots(targetSlots)
   }, [targetSlots])
+  // AQU-2251: with "Skip lines with nothing to play" on, the built-in clock
+  // jumps from the end of one line with a take to the start of the next one.
+  // Handed these tracks rather than the queue's copy, which the effect above
+  // publishes only after this render.
+  useSkipSilentLinesOnVirtualClock(dubDriverCells, targetSlots, virtualIsTransport)
 
   // AQU-2251 (Sam, Oct 29): the timeline's "Skip lines with nothing to play"
   // is offered only where it can change something. Over the whole file — a

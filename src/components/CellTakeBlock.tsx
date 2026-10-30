@@ -652,6 +652,7 @@ function CellTakeBlockView({
               pieces={split ?? undefined}
               originalTake={originalTake}
               selectedUrl={attachment.url}
+              source={attachment}
               referenceAudioId={attachment.referenceAudioId ?? null}
               originalUrl={
                 attachment.referenceAudioId

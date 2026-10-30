@@ -508,7 +508,9 @@ export function TakesStrip({
         author,
         session,
         ...(targetLang ? { targetLang } : {}),
-        history: { selectedBefore: playingIn(RECORDING_SLOT) },
+        // AQU-2327: the cleaned take keeps this one's track, kept part and places.
+        source: att,
+        history: { selectedBefore: playingIn(att.slot ?? RECORDING_SLOT) },
       })
     } catch {
       // Failure leaves the original untouched; the strip simply doesn't gain a

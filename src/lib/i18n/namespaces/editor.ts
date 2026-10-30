@@ -1412,6 +1412,10 @@ export const editor = defineNamespace({
     "editor.station.louder": "Louder",
     "editor.station.louderTip": "Drag the line up, or click: 3 dB louder",
     "editor.station.hLevel": "Volume {db} · fades {fin} in, {fout} out",
+    "editor.station.noiseRunning": "Removing noise… it takes about as long as the recording plays.",
+    "editor.station.noiseDone": "Noise removed: saved as version {n}, used on {line}. The original recording is kept.",
+    "editor.station.voiceStarted": "Changing the voice. The new version appears on the line when it’s ready.",
+    "editor.station.voiceUnavailable": "This line’s voice can’t be changed here.",
     "editor.dock.film": "Film",
     "editor.dock.bottomLeft": "Bottom left",
     "editor.dock.bottomRight": "Bottom right",
@@ -3393,6 +3397,22 @@ export const editor = defineNamespace({
           fin: "Fade-in length.",
           fout: "Fade-out length.",
         },
+      },
+      "editor.station.noiseRunning": {
+        description: "Message while noise removal runs on the open recording.",
+      },
+      "editor.station.noiseDone": {
+        description: "Message after noise removal made a new version.",
+        placeholders: {
+          n: "The version number.",
+          line: "The line it is used on.",
+        },
+      },
+      "editor.station.voiceStarted": {
+        description: "Message after starting a voice change from the Station.",
+      },
+      "editor.station.voiceUnavailable": {
+        description: "Message when the voice change is not possible for this line.",
       },
       "editor.dock.film": {
         description:

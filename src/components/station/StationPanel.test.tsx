@@ -34,6 +34,13 @@ function makeHost(take: StationTake | null, over: Partial<StationHost> = {}): St
     approvalsNeeded: 1,
     pauseOtherPlayback: () => {},
     reportHistory: () => {},
+    setLevel: vi.fn(async () => {}),
+    selectedIn: () => null,
+    fileName: () => null,
+    insertChoices: () => [],
+    placementsOf: () => (take ? [take] : []),
+    removeNoise: async () => null,
+    changeVoice: () => null,
     ...over,
   }
 }

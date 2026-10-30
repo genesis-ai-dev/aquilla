@@ -13173,6 +13173,37 @@ export function ProjectWorkspace() {
       vote: handleVoteTimelineTake,
       trim: handleTrimTarget,
       setLevel: handleGainTarget,
+      removeNoise: async (cellId, audioId) => {
+        const cur = readTake(cellId, audioId)
+        if (!cur || !frontierSession) return null
+        const { denoiseSplitTake, denoiseTake } = await import("@/lib/audio/denoise-take")
+        const atts = cur.owner.cell.attachments ?? {}
+        const group = cur.att.pieceOf ?? audioId
+        const pieces = Object.entries(atts)
+          .filter(([id, a]) => !a.isDeleted && (a.pieceOf ?? id) === group)
+          .map(([id, a]) => attachmentOutFrom(id, a, a.slot ?? "recording"))
+          .sort((a, b) => (a.trimStartMs ?? 0) - (b.trimStartMs ?? 0))
+        const lane = activeLane ? { targetLang: activeLane } : {}
+        const selectedBefore = audioId
+        const res = pieces.length > 1
+          ? await denoiseSplitTake({ projectId: project.id, fileId: cur.owner.fileId, cellId, pieces, author: currentUsername, session: frontierSession, ...lane, history: { selectedBefore } })
+          : await denoiseTake({
+              projectId: project.id, fileId: cur.owner.fileId, cellId,
+              sourceAudioId: audioId, sourceUrl: cur.att.url,
+              author: currentUsername, session: frontierSession, ...lane,
+              source: cur.att,
+              history: { selectedBefore },
+            })
+        return res.audioId
+      },
+      changeVoice: (cellId) => {
+        const state = timelineChangeVoiceState(cellId)
+        if (!state) return t("editor.station.voiceUnavailable")
+        const quality = CHANGE_VOICE_QUALITIES.find((q) => state.blockers[q] == null)
+        if (!quality) return t("editor.station.voiceUnavailable")
+        handleChangeTimelineVoice(cellId, quality)
+        return null
+      },
       approvalsNeeded: Math.max(1, project.validationCountAudio ?? 1),
       pauseOtherPlayback: () => pauseAllTransports(),
       reportHistory,
@@ -13222,7 +13253,7 @@ export function ProjectWorkspace() {
         return out
       },
     }
-  }, [project, currentUsername, frontierSession, readTake, getActiveCells, timelineVoteState, handleVoteTimelineTake, handleTrimTarget, handleGainTarget, reportHistory, t, activeLane, audioCueCells, audioCueSibling, activeFileId, stationCells])
+  }, [project, currentUsername, frontierSession, readTake, getActiveCells, timelineVoteState, handleVoteTimelineTake, handleTrimTarget, handleGainTarget, timelineChangeVoiceState, handleChangeTimelineVoice, reportHistory, t, activeLane, audioCueCells, audioCueSibling, activeFileId, stationCells])
   // AQU-2327 (Q1): open a take in the Station from the timeline's take menu,
   // and — while the Station's tab shows — follow the take you click.
   const handleEditInStation = useCallback((cellId: string, audioId: string) => {

@@ -36,6 +36,12 @@ export interface StationHost {
   trim(cellId: string, audioId: string, trims: { trimStartMs?: number; trimEndMs?: number }): Promise<void>
   /** AQU-2327: the take's volume and fades, as one Undo step (`take.gain`). */
   setLevel(cellId: string, audioId: string, level: TakeLevel): Promise<void>
+  /** Item 2 / slice 9: clean the take's noise into a new version (the Remove
+   *  noise action, keeping its track, kept part and places); its new id. */
+  removeNoise(cellId: string, audioId: string): Promise<string | null>
+  /** Item 2 / slice 9: change the line's voice into a new version; a reason
+   *  when it can't, else null. */
+  changeVoice(cellId: string): string | null
   /** How many approvals a recording needs in this project. */
   approvalsNeeded: number
   /** Stop the timeline and any other player before the Station plays. */

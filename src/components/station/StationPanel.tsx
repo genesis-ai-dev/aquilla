@@ -8,7 +8,7 @@
 // selection brings its own actions; the rest appears where and when it is
 // needed.
 
-import { useCallback, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react"
+import { useCallback, useEffect, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react"
 import { AudioWaveform, Check, Undo2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -17,6 +17,7 @@ import { historyView, newestStepMatches, subscribeHistory, undoLast } from "@/li
 import { useT } from "@/lib/i18n/I18nProvider"
 import { isApplePlatform } from "@/lib/platform"
 import { levelsShown, STATION_PICKS } from "@/lib/station/picks"
+import { setStationUi } from "@/lib/station/ui"
 import { audioCachePutBlob } from "@/lib/audio/bytes-cache"
 import { decodeToMono48k } from "@/lib/audio/decode-mono"
 import { draftKey, readDraft } from "@/lib/station/drafts"
@@ -163,6 +164,26 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
   const line = host.lineName(target.cellId)
   const places = host.placementsOf(take.fileId, take.att.url)
   const placeLines = places.length > 1 ? places.map((p) => host.lineName(p.cell.id)) : [line]
+
+  // Item 2 / slice 9: the ⋯ menu's Remove noise and Change the voice, each
+  // making a new version (the original is kept).
+  const versionNext = versionOf(take) + 1
+  useEffect(() => {
+    if (!editable) return
+    setStationUi({
+      removeNoise: () => {
+        setMessage(t("editor.station.noiseRunning"))
+        void host
+          .removeNoise(target.cellId, target.audioId)
+          .then((id) => {
+            if (id) openInStation({ ...target, audioId: id }, { message: t("editor.station.noiseDone", { n: versionNext, line }) })
+          })
+          .catch((e: unknown) => setMessage(t("editor.station.saveFailed", { message: e instanceof Error ? e.message : String(e) })))
+      },
+      changeVoice: () => setMessage(host.changeVoice(target.cellId) ?? t("editor.station.voiceStarted")),
+    })
+    return () => setStationUi({ removeNoise: null, changeVoice: null })
+  }, [editable, host, target, line, versionNext, t])
 
   const approve = () => {
     const v = host.voteState(target.cellId, target.audioId)

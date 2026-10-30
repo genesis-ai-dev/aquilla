@@ -3096,6 +3096,22 @@ describe("TimelineEditor — rows come from the track model", () => {
     expect(screen.queryByText(/folder/i)).toBeNull()
   })
 
+  // AQU-2235: a track shows its colour as the strip at its far left (and the
+  // dot, and the name bar): chroma 0.14 at the colour's own lightness. The
+  // swatch you pick must be that colour, not the raw palette hex beside it.
+  it("paints each swatch in the colour its track will then show", () => {
+    render(selectable({ onSetTrackColor: vi.fn(), tracks: foldedTracks() }))
+    const named = (name: string) => Array.from(rows()).find((r) => r.textContent?.includes(name))!
+    fireEvent.contextMenu(named("Target audio"))
+    fireEvent.click(screen.getByText("Color"))
+    for (const [name, strip] of [["Cyan", "oklch(0.744 0.140 201.3)"], ["Magenta", "oklch(0.596 0.140 350.5)"]] as const) {
+      const swatch = screen.getByRole("menuitemradio", { name }).querySelector("span")!
+      expect(swatch.style.getPropertyValue("--tl-track-strip"), name).toBe(strip)
+      expect(swatch.className, name).toContain("bg-[color:var(--tl-track-strip)]")
+      expect(swatch.style.backgroundColor, name).toBe("")
+    }
+  })
+
   it("offers no colour without the clearance", () => {
     render(selectable({ onRenameTrack: undefined, tracks: foldedTracks() }))
     const named = (name: string) => Array.from(rows()).find((r) => r.textContent?.includes(name))!

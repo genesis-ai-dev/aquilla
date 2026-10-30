@@ -15,10 +15,10 @@
 // Three states, one shape ("⏱ <choice>", "Timing" on hover — canvas board
 // 55, option E: no "Timing:" label, and no length or (i) in the bar):
 //   - changeable: the choice is a dropdown with the two choices and a line each;
-//   - read-only (below project lead): the choice as plain text, the (i) says who
-//     can change it;
-//   - locked (a file timed to a film): "Follows source" as plain text, the (i)
-//     says the lines are timed to the film.
+//   - read-only (below project lead): the choice as plain text; a click on it
+//     says who can change it (AQU-2260: never on hover);
+//   - locked (a file timed to a film): "Follows source" as plain text; a click
+//     on it says the lines are timed to the film.
 //
 // Board 22 as drawn: the menu opens with "What decides how long each line is",
 // each choice shows how long the file comes out with it, and a last line says
@@ -225,18 +225,20 @@ export function TimingModeControl({
         </DropdownMenu>
       ) : (
         // Read-only: the choice as plain text. What the menu's (i) would say
-        // opens on a click of it, in a small note, and shuts on a second
-        // click (AQU-2260: it was its hover text). Still no (i) in the bar.
+        // — who can change it, or that the film sets the timing — opens in a
+        // small note on a click of the text and shuts on a second click.
+        // AQU-2260 (Sam, Oct 29): nothing explains itself on hover, and a
+        // short label that explains itself is its own button; board 55,
+        // option E keeps the bar free of (i)s, so the text is that button.
         <NoteOnClick
           note={`${infoText}${standInInfo ? ` ${standInInfo}` : ""}`}
-          label={`${t("editor.timeline.timingTip")}: ${name}`}
-          side="bottom"
+          testId="tl-timing-mode-reason"
           align="start"
-          className="rounded-md"
+          className="px-1 text-foreground/70"
         >
           <span
             data-testid={`tl-timing-mode-${shown}`}
-            className={cn("inline-flex items-center gap-1 px-1 text-foreground/70", bar ? "h-7" : "h-6")}
+            className={cn("inline-flex items-center gap-1", bar ? "h-7" : "h-6")}
           >
             <Timer className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
             <span className="font-medium">{name}</span>

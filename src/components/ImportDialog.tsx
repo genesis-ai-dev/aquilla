@@ -203,6 +203,9 @@ export interface RecordingsImportHost {
   languageLabel: string | null
   /** Set when opened from a file's ⋯ menu: recordings for that file only. */
   file: { id: string; name: string } | null
+  /** AQU-2302: a project lead may ask the assistant to work out a folder's
+   *  naming; anyone else who uploads gets the team's saved namings only. */
+  canAskAssistant?: boolean
 }
 
 /**
@@ -1885,6 +1888,7 @@ export function ImportDialog({
               languageLabel={recordings.languageLabel}
               username={username}
               chosen={recordingsChosen}
+              canAskAssistant={recordings.canAskAssistant ?? false}
               onStarted={() => {
                 posthog.capture(IMPORT_STARTED, { import_type: "recordings", project_id: projectId, file_count: recordingsChosen.length })
                 onOpenChange(false)

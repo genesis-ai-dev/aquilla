@@ -56,8 +56,8 @@ import { takesSentence, type LineTakes } from "@/lib/audio/bulk-upload/takes-sum
 import { readLengths } from "@/lib/audio/bulk-upload/read-length"
 import { mapWithConcurrency } from "@/lib/concurrency"
 import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
-import { applyNamingRule, projectOutline, sampleNames, shapesOf, type NamingRule, type RuleFailure } from "@/lib/audio/bulk-upload/naming-rule"
-import { askForNamingRule, loadSavedNamingRules, NamingRuleError, saveNamingRule, type NamingRuleProblem } from "@/lib/audio/bulk-upload/naming-rule-client"
+import { applyNamingRule, judgeRule, projectOutline, ruleEligible, sampleNames, shapesOf, type NamingRule, type RuleFailure } from "@/lib/audio/bulk-upload/naming-rule"
+import { askForNamingRule, forgetSavedNamingRule, loadSavedNamingRules, NamingRuleError, saveNamingRule, type NamingRuleProblem } from "@/lib/audio/bulk-upload/naming-rule-client"
 
 // ── The rule, behind an (i) ──────────────────────────────────────────────────
 
@@ -178,6 +178,9 @@ export interface RecordingsReviewProps {
   languageLabel: string | null
   username: string
   chosen: ChosenFile[]
+  /** AQU-2302: a project lead may ask the assistant to work out the naming;
+   *  everyone else who uploads gets the team's saved namings only. */
+  canAskAssistant?: boolean
   onStarted: () => void
   onCancel: () => void
 }
@@ -244,7 +247,7 @@ const METHOD_KEY = {
 } as const satisfies Record<string, MessageKey>
 
 export function RecordingsReview({
-  projectId, file, projectFiles, getToken, lane, languageLabel, username, chosen, onStarted, onCancel,
+  projectId, file, projectFiles, getToken, lane, languageLabel, username, chosen, canAskAssistant = false, onStarted, onCancel,
 }: RecordingsReviewProps) {
   const t = useT()
   const { locale } = useI18n()
@@ -266,9 +269,28 @@ export function RecordingsReview({
   // Everything after that is the ordinary matching below.
   const [rule, setRule] = useState<AppliedRule | null>(null)
   const [assistant, setAssistant] = useState<AssistantState>({ kind: "idle" })
-  // Asked once per preview. A ref, not state: setting state here would re-run
-  // the effect below and cancel the very request it just made.
+  // The team's saved namings are looked up once per preview. A ref, not state:
+  // setting state here would re-run the effect below and cancel the very
+  // request it just made. The offer waits for the answer (`lookupDone`), and
+  // only the newest lookup's answer is ever used.
   const savedChecked = useRef(false)
+  const lookupId = useRef(0)
+  const [lookupDone, setLookupDone] = useState(false)
+  // Calls for this folder: one ask and one retry at most (review, Oct 30: a
+  // failed retry once asked 37 times in 1.5 s, every call billed). Counted in
+  // a ref that no failure or re-render resets; the preview is remounted for
+  // each folder (Back goes to the picker), so this is per folder per dialog.
+  const callCount = useRef(0)
+  const [callsMade, setCallsMade] = useState(0)
+  // Every request in flight, so Cancel, Back and closing stop them.
+  const inFlight = useRef(new Set<AbortController>())
+  useEffect(() => {
+    const live = inFlight.current
+    return () => {
+      for (const controller of live) controller.abort()
+      live.clear()
+    }
+  }, [])
   const effectiveInputs = useMemo(() => {
     if (!rule) return inputs
     return inputs.map((f, i) => {
@@ -336,76 +358,87 @@ export function RecordingsReview({
   )
   const jobs = useMemo(() => (ready ? planJobs(assignments, ready.read) : []), [ready, assignments])
 
-  // The names a rule may rewrite: placed by none of the app's own readings,
-  // and not refused for what the file is (not audio, too big…).
+  // The names a rule may rewrite: the ones 981 couldn't read. What it refused
+  // on purpose (a verse the book lacks, another book), what the person skipped
+  // and what isn't a recording never go to the assistant (`ruleEligible`).
   const unplaced = useMemo(
-    () => (ready && !rule ? assignments.filter((a) => !a.cellIds && canChooseLine(a)).map((a) => a.index) : []),
+    () => (ready && !rule ? assignments.filter(ruleEligible).map((a) => a.index) : []),
     [ready, rule, assignments],
   )
   // Judged only once the lines were read with the rule's names: the render
   // between setting a rule and that read still holds the old reading.
   const ruleRead = Boolean(ready && rule && [...rule.made].every(([i, name]) => ready.read[i]?.file.name === name))
-  const failures = useMemo<RuleFailure[]>(() => {
-    if (!ready || !rule || !ruleRead) return []
-    const byIndex = new Map(assignments.map((a) => [a.index, a]))
-    return [...rule.eligible].flatMap((i) => {
-      const a = byIndex.get(i)
-      if (a?.cellIds) return []
-      return [{ name: inputs[i].name, made: rule.made.get(i) ?? null, reason: a?.reason?.code ?? "noTemplate" }]
-    })
-  }, [ready, rule, ruleRead, assignments, inputs])
+  const judgement = useMemo(
+    () => (ready && rule && ruleRead ? judgeRule(rule.rule, rule.eligible, rule.made, assignments, (i) => inputs[i].name) : null),
+    [ready, rule, ruleRead, assignments, inputs],
+  )
 
-  const applyRule = useCallback((next: NamingRule, from: AppliedRule["from"], eligible: readonly number[], tries: number) => {
-    const made = new Map<number, string>()
-    for (const i of eligible) {
-      const folder = inputs[i].path.split("/").slice(-2, -1)[0] ?? ""
-      const name = applyNamingRule(next, inputs[i].name, folder)
-      if (name) made.set(i, name)
-    }
-    setRule({ rule: next, from, eligible: new Set(eligible), made, shapes: shapesOf(eligible.map((i) => inputs[i].name)).slice(0, 5), tries })
-  }, [inputs])
-
-  const ask = useCallback(async (eligible: readonly number[], previous?: NamingRule, failed?: readonly RuleFailure[], tries = 1) => {
-    if (!session?.jwt) return
+  const identityToken = session?.jwt
+  const ask = useCallback(async (eligible: readonly number[], retryOf?: { rule: NamingRule; failures: readonly RuleFailure[] }) => {
+    if (!identityToken || !canAskAssistant || callCount.current >= MAX_ASSISTANT_CALLS) return
+    callCount.current += 1
+    setCallsMade(callCount.current)
+    const controller = new AbortController()
+    inFlight.current.add(controller)
     setAssistant({ kind: "asking" })
     try {
       const next = await askForNamingRule({
         projectId,
-        identityToken: session.jwt,
-        names: sampleNames(eligible.map((i) => inputs[i].name)),
+        identityToken,
+        // The retry sends only the names the first rule failed on.
+        names: sampleNames(retryOf ? retryOf.failures.map((f) => f.name) : eligible.map((i) => inputs[i].name)),
         outline: projectOutline(projectFileInfos(projectFiles, new BookNameIndex())),
-        ...(previous && failed ? { previous, failures: failed } : {}),
+        ...(retryOf ? { previous: retryOf.rule, failures: retryOf.failures } : {}),
+        signal: controller.signal,
       })
+      if (controller.signal.aborted) return
       setAssistant({ kind: "idle" })
-      applyRule(next, "assistant", eligible, tries)
+      setRule(appliedRule(next, "assistant", eligible, inputs, { retried: Boolean(retryOf) }))
     } catch (e) {
+      if (controller.signal.aborted) return
       setAssistant({ kind: "problem", problem: e instanceof NamingRuleError ? e.problem : "failed" })
+    } finally {
+      inFlight.current.delete(controller)
     }
-  }, [session?.jwt, projectId, inputs, projectFiles, applyRule])
+  }, [identityToken, canAskAssistant, projectId, inputs, projectFiles])
 
-  // A team's saved rule for these names' shape is used with no call at all.
+  // A team's saved rule for these names' shape is used with no call at all,
+  // for anyone who may upload. A lookup answering late never replaces a rule
+  // already in use, and never one from a newer lookup.
   useEffect(() => {
     if (!ready || rule || savedChecked.current || unplaced.length === 0 || !session?.jwt) return
     savedChecked.current = true
-    const names = unplaced.map((i) => inputs[i].name)
-    void loadSavedNamingRules({ projectId, identityToken: session.jwt }).then((saved) => {
-      const shape = shapesOf(names)[0]
+    const id = ++lookupId.current
+    const controller = new AbortController()
+    inFlight.current.add(controller)
+    const eligible = [...unplaced]
+    const shape = shapesOf(eligible.map((i) => inputs[i].name))[0]
+    void loadSavedNamingRules({ projectId, identityToken: session.jwt, signal: controller.signal }).then((saved) => {
+      inFlight.current.delete(controller)
+      if (controller.signal.aborted || id !== lookupId.current) return
+      setLookupDone(true)
       const hit = shape ? saved.get(shape) : undefined
-      if (hit) applyRule(hit, "saved", unplaced, 0)
+      if (hit) setRule((current) => current ?? appliedRule(hit, "saved", eligible, inputs, { savedShape: shape }))
     })
-  }, [ready, rule, unplaced, session?.jwt, projectId, inputs, applyRule])
+  }, [ready, rule, unplaced, session?.jwt, projectId, inputs])
 
-  // The one retry: only the names the first answer failed on go back. A rule
-  // that still places nothing is set aside, and the files are chosen by hand.
+  // The one retry: only the names the first answer failed on go back, and
+  // only while a call is left. A rule that still places nothing is set aside,
+  // and the files are chosen by hand.
   useEffect(() => {
-    if (!ready || !rule || !ruleRead || rule.from !== "assistant" || assistant.kind === "asking" || failures.length === 0) return
-    if (rule.tries < 2) {
-      void ask([...rule.eligible], rule.rule, failures, rule.tries + 1)
-    } else if (failures.length === rule.eligible.size) {
+    if (!judgement || !rule || rule.from !== "assistant" || assistant.kind === "asking" || judgement.failures.length === 0) return
+    if (!rule.retried && callCount.current < MAX_ASSISTANT_CALLS) {
+      void ask([...rule.eligible], { rule: rule.rule, failures: judgement.failures })
+    } else if (judgement.placed.size === 0) {
       setRule(null)
       setAssistant({ kind: "problem", problem: "noFit" })
     }
-  }, [ready, rule, ruleRead, assistant.kind, failures, ask])
+  }, [judgement, rule, assistant.kind, ask])
+
+  const stopAsking = () => {
+    for (const controller of inFlight.current) controller.abort()
+    inFlight.current.clear()
+  }
 
   if (phase.kind !== "ready") {
     return (
@@ -434,19 +467,31 @@ export function RecordingsReview({
   return (
     <ReviewBody
       ready={ready!}
-      ruleSource={rule ? new Map([...rule.made.keys()].map((i) => [i, rule.from])) : NO_RULE}
+      ruleSource={rule && judgement ? new Map([...judgement.placed].map((i) => [i, rule.from])) : NO_RULE}
       assistant={{
         offer: session?.jwt && !rule ? unplaced.length : 0,
+        canAsk: canAskAssistant,
+        exhausted: callsMade >= MAX_ASSISTANT_CALLS,
+        waiting: !lookupDone,
         state: assistant,
         note: rule && assistant.kind !== "asking"
           ? {
               from: rule.from,
               explanation: rule.rule.explanation ?? rule.rule.templates.map((t) => t.pattern).join(" · "),
-              placed: assignments.filter((a) => a.cellIds && rule.made.has(a.index)).length,
+              placed: judgement?.placed.size ?? 0,
             }
           : null,
         onAsk: () => void ask(unplaced),
-        onUndo: () => { setRule(null); setAssistant({ kind: "idle" }) },
+        onUndo: () => {
+          // A lead setting the team's saved rule aside forgets it for that
+          // naming, so a bad saved rule doesn't stick; a fresh rule, or a
+          // contributor, only sets it aside for this upload.
+          if (rule?.from === "saved" && rule.savedShape && canAskAssistant && session?.jwt) {
+            void forgetSavedNamingRule({ projectId, identityToken: session.jwt, shapes: [rule.savedShape] })
+          }
+          setRule(null)
+          setAssistant({ kind: "idle" })
+        },
       }}
       fileOrder={projectFiles.map((f) => f.id)}
       assignments={assignments}
@@ -468,15 +513,20 @@ export function RecordingsReview({
         setOrderShift((prev) => new Map(prev).set(run, 0))
         setEditing(null)
       }}
-      onCancel={onCancel}
+      onCancel={() => {
+        stopAsking()
+        onCancel()
+      }}
       onConfirm={async () => {
         if (!session?.jwt || jobs.length === 0 || isBulkUploadRunning()) return
         setStarting(true)
         setError(null)
         const labelOf = new Map(assignments.map((a) => [a.index, a.read ?? ""]))
         // The assistant's rule is kept for the team once a person uploads
-        // with it, and only when it placed every name it was asked about.
-        if (rule?.from === "assistant" && failures.length === 0) {
+        // with it, and only when `judgeRule` says so: every name it was asked
+        // about placed by reading it, no two files on one line, and no
+        // constant book, chapter or file.
+        if (rule?.from === "assistant" && judgement?.keep) {
           void saveNamingRule({ projectId, identityToken: session.jwt, shapes: rule.shapes, rule: rule.rule })
         }
         try {
@@ -502,6 +552,9 @@ export function RecordingsReview({
   )
 }
 
+/** One ask and one retry per folder, at most. */
+const MAX_ASSISTANT_CALLS = 2
+
 /** A naming rule in use, and which names it rewrote. */
 interface AppliedRule {
   rule: NamingRule
@@ -512,8 +565,35 @@ interface AppliedRule {
   made: ReadonlyMap<number, string>
   /** The names' shapes the team keeps it under. */
   shapes: string[]
-  /** 1 for the first answer, 2 for the retry; 0 for a saved rule. */
-  tries: number
+  /** The answer to the one retry: no further call follows it. */
+  retried: boolean
+  /** For a saved rule, the shape it was found under (what "Don't use this
+   *  naming" forgets). */
+  savedShape?: string
+}
+
+function appliedRule(
+  next: NamingRule,
+  from: AppliedRule["from"],
+  eligible: readonly number[],
+  inputs: readonly { name: string; path: string }[],
+  extra: { retried?: boolean; savedShape?: string } = {},
+): AppliedRule {
+  const made = new Map<number, string>()
+  for (const i of eligible) {
+    const folder = inputs[i].path.split("/").slice(-2, -1)[0] ?? ""
+    const name = applyNamingRule(next, inputs[i].name, folder)
+    if (name) made.set(i, name)
+  }
+  return {
+    rule: next,
+    from,
+    eligible: new Set(eligible),
+    made,
+    shapes: shapesOf(eligible.map((i) => inputs[i].name)).slice(0, 5),
+    retried: extra.retried ?? false,
+    ...(extra.savedShape ? { savedShape: extra.savedShape } : {}),
+  }
 }
 
 type AssistantState =
@@ -524,6 +604,12 @@ type AssistantState =
 interface AssistantProps {
   /** How many recordings it could help with; 0 hides the offer. */
   offer: number
+  /** A project lead, who may ask; anyone else sees one plain line instead. */
+  canAsk: boolean
+  /** Both calls for this folder are made: the offer doesn't come back. */
+  exhausted: boolean
+  /** The team's saved namings haven't answered yet: no asking until they do. */
+  waiting: boolean
   state: AssistantState
   note: { from: AppliedRule["from"]; explanation: string; placed: number } | null
   onAsk: () => void
@@ -880,7 +966,7 @@ function ReviewBody({
  * AQU-2302: the offer to let the assistant work out the naming, never taken on
  * its own (Sam, Oct 29: as little AI use as possible), and what it found.
  */
-function AssistantBox({ offer, state, note, onAsk, onUndo, canChoose }: AssistantProps & { canChoose: boolean }) {
+function AssistantBox({ offer, canAsk, exhausted, waiting, state, note, onAsk, onUndo, canChoose }: AssistantProps & { canChoose: boolean }) {
   const t = useT()
   const { locale } = useI18n()
   const [infoOpen, toggleInfo] = useInfoOpen()
@@ -903,9 +989,22 @@ function AssistantBox({ offer, state, note, onAsk, onUndo, canChoose }: Assistan
     return <p className="border-b bg-muted/40 p-3 text-xs font-medium" role="status" data-testid="recordings-assistant-asking">{t("recordingsUpload.assistant.asking")}</p>
   }
   if (offer === 0) return null
+  if (!canAsk) {
+    if (waiting) return null
+    return <p className="border-b bg-muted/40 p-3 text-xs text-muted-foreground" data-testid="recordings-assistant-lead-only">{t("recordingsUpload.assistant.leadOnly")}</p>
+  }
+  const failedKey = exhausted
+    ? (canChoose ? "recordingsUpload.assistant.failedFinalChoose" : "recordingsUpload.assistant.failedFinal")
+    : "recordingsUpload.assistant.failed"
   const problemKey = state.kind === "problem"
-    ? ({ noFit: canChoose ? "recordingsUpload.assistant.noFitChoose" : "recordingsUpload.assistant.noFit", limit: "recordingsUpload.assistant.limit", unavailable: "recordingsUpload.assistant.failed", unusable: "recordingsUpload.assistant.failed", failed: "recordingsUpload.assistant.failed" } as const)[state.problem]
+    ? ({ noFit: canChoose ? "recordingsUpload.assistant.noFitChoose" : "recordingsUpload.assistant.noFit", limit: "recordingsUpload.assistant.limit", unavailable: failedKey, unusable: failedKey, failed: failedKey } as const)[state.problem]
     : null
+  const problem = problemKey && <p className="text-amber-700 dark:text-amber-400" role="alert" data-testid="recordings-assistant-problem">{t(problemKey)}</p>
+  // After both calls the offer doesn't come back for this folder: only what
+  // happened is said.
+  if (exhausted) {
+    return problem ? <div className="border-b bg-muted/40 p-3 text-xs" data-testid="recordings-assistant">{problem}</div> : null
+  }
   return (
     <div className="space-y-1.5 border-b bg-muted/40 p-3 text-xs" data-testid="recordings-assistant">
       <p className="flex items-center gap-1 text-foreground/90">
@@ -913,8 +1012,8 @@ function AssistantBox({ offer, state, note, onAsk, onUndo, canChoose }: Assistan
         <InfoToggle open={infoOpen} onToggle={toggleInfo} label={t("recordingsUpload.assistant.infoLabel")} controls="recordings-assistant-info" />
       </p>
       <InfoReveal open={infoOpen} id="recordings-assistant-info" className="text-muted-foreground">{t("recordingsUpload.assistant.info")}</InfoReveal>
-      {problemKey && <p className="text-amber-700 dark:text-amber-400" role="alert" data-testid="recordings-assistant-problem">{t(problemKey)}</p>}
-      <Button type="button" size="xs" variant="outline" onClick={onAsk} data-testid="recordings-assistant-ask">
+      {problem}
+      <Button type="button" size="xs" variant="outline" onClick={onAsk} disabled={waiting} data-testid="recordings-assistant-ask">
         {t("recordingsUpload.assistant.ask")}
       </Button>
     </div>

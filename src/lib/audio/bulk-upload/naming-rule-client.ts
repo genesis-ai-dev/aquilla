@@ -53,7 +53,7 @@ export async function askForNamingRule(opts: Call & {
   const body = await response.json().catch(() => null) as { rule?: unknown } | null
   // Anything that goes wrong reading the answer is an unusable answer, never a
   // crash of the preview.
-  let rule: NamingRule | null = null
+  let rule: NamingRule | null
   try {
     rule = parseNamingRule(body?.rule)
   } catch {

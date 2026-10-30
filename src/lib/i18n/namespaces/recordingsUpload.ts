@@ -252,6 +252,9 @@ const KEYS = {
     "recordingsUpload.assistant.noFitChoose": "The assistant's naming didn't fit these recordings. Choose their lines by hand.",
     "recordingsUpload.assistant.failed": "The assistant couldn't work out the naming just now. Try again in a moment.",
     "recordingsUpload.assistant.limit": "Your team has used its AI allowance for now, so the assistant can't read this folder.",
+    "recordingsUpload.assistant.failedFinal": "The assistant couldn't work out the naming, so these recordings won't be uploaded.",
+    "recordingsUpload.assistant.failedFinalChoose": "The assistant couldn't work out the naming. Choose their lines by hand.",
+    "recordingsUpload.assistant.leadOnly": "A project lead can ask the assistant to work out this naming.",
 } satisfies Record<string, MessageValue>
 
 type Key = keyof typeof KEYS
@@ -268,6 +271,9 @@ const OWN_NOTES: Partial<Record<Key, ContextEntry>> = {
   "recordingsUpload.assistant.noFitChoose": { description: "Shown when the assistant's naming rule didn't place the recordings, even after a second try, and the person can still choose each one's line by hand with the 'Choose a line' button beside it. Full sentences." },
   "recordingsUpload.assistant.failed": { description: "Shown when the assistant couldn't be reached or answered with something unusable. Full sentences." },
   "recordingsUpload.assistant.limit": { description: "Shown when the team's AI allowance is used up, so the assistant can't help. Full sentences." },
+  "recordingsUpload.assistant.failedFinal": { description: "Shown after the assistant has been asked twice for this folder and still couldn't be reached or answered with something unusable; it isn't offered again, and no file's lines are loaded to choose from, so those recordings won't upload. Full sentences." },
+  "recordingsUpload.assistant.failedFinalChoose": { description: "Shown after the assistant has been asked twice for this folder and still couldn't be reached or answered with something unusable; it isn't offered again, and the person can choose each recording's line by hand with the 'Choose a line' button beside it. Full sentences." },
+  "recordingsUpload.assistant.leadOnly": { description: "Shown to a contributor, in place of the offer to ask the AI assistant: only a project lead can ask it to work out how this folder's recordings are named. Full sentence." },
   "recordingsUpload.intent.title": { description: "Title of the third card in the Import dialog's 'What are you importing?' choice: audio recordings for lines already in the project. Short noun.", maxLength: 24 },
   "recordingsUpload.menuItem": { description: "Item in a file's ⋯ menu in the sidebar that opens the upload of many recordings into that file.", maxLength: 32 },
   "recordingsUpload.preview.byName": { description: "Small grey text in a preview row: this recording's line was found from the book and verse in its name.", maxLength: 20 },

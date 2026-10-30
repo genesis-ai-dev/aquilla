@@ -18300,6 +18300,9 @@ export function ProjectWorkspace() {
             disabledReason: recordingsDisabledReason,
             languageLabel: laneLabels[activeLane] || activeLaneTargetLanguage || null,
             file: recordingsTarget,
+            // AQU-2302: asking the assistant is a project lead's, like the
+            // route's own floor (500); contributors get the saved namings.
+            canAskAssistant: (project?.syncRole?.level ?? 0) >= ROLE.PROJECT_LEAD,
           }}
           linkSource={{
             // AQU-1527: the Import dialog's "From another project" tile runs

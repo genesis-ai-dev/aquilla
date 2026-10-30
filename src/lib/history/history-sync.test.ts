@@ -177,6 +177,19 @@ describe("the history follows the person (P13.2)", () => {
     expect(server.copyOf("p1", "asha")?.undo.map((r) => r.labelKey)).toEqual(["Offline trim"])
   })
 
+  // Review, Oct 29: the tab may close before the connection comes back.
+  it("steps made offline reach the server after a reload, even when the server has not changed", async () => {
+    recordStep(step("Online trim"))
+    await settle()
+    server.online = false
+    recordStep(step("Offline trim"))
+    await settle()
+    server.online = true
+    await openSameTabAgain()
+    await settle()
+    expect(server.copyOf("p1", "asha")?.undo.map((r) => r.labelKey)).toEqual(["Online trim", "Offline trim"])
+  })
+
   it("opening the History panel picks up steps made elsewhere since", async () => {
     // Another device of Asha's writes a step after this one opened.
     const other = server.as("asha")

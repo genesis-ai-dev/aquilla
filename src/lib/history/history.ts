@@ -231,7 +231,7 @@ function writeLocal(key: string): Promise<void> {
   const s = stacks.get(key)
   if (!s) return Promise.resolve()
   const [projectId, username] = splitKey(key)
-  return saveHistory(projectId, username, { ...docOf(s), revision: s.revision })
+  return saveHistory(projectId, username, { ...docOf(s), revision: s.revision, unpushed: s.unpushed })
 }
 
 // Saved at the end of the current task, not after a delay: a reload a moment
@@ -284,6 +284,8 @@ async function readScope(key: string): Promise<void> {
   }
   const s = stacksFor(key)
   if (saved && s.revision == null) s.revision = saved.revision
+  // Changes the server never took before the tab closed still go (review, Oct 29).
+  if (saved?.unpushed) s.unpushed = true
   const recordedMeanwhile = s.undo.length + s.redo.length > 0
   mergeIn(key, incoming)
   if (lanes.length > 0) {

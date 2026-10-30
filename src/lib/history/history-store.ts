@@ -21,6 +21,9 @@ const STORE = "stacks"
 export interface StoredHistory extends HistoryDoc {
   /** The server's revision this copy last agreed with; null = never synced. */
   revision: number | null
+  /** It holds changes the server has not taken yet (made offline, say): they
+   *  go after a reload even when the server's copy has not moved since. */
+  unpushed?: boolean
 }
 
 interface Row extends StoredHistory {
@@ -70,7 +73,11 @@ export async function loadHistory(projectId: string, username: string): Promise<
     const db = await openDb()
     const row = await read<Row | undefined>(db, (s) => s.get(keyOf(projectId, username)) as IDBRequest<Row | undefined>)
     if (!row || row.projectId !== projectId || row.username !== username || row.lane !== undefined) return null
-    return { ...normalizeHistoryDoc(row), revision: typeof row.revision === "number" ? row.revision : null }
+    return {
+      ...normalizeHistoryDoc(row),
+      revision: typeof row.revision === "number" ? row.revision : null,
+      ...(row.unpushed === true ? { unpushed: true } : {}),
+    }
   } catch {
     return null
   }

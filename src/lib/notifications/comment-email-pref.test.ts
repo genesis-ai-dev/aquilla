@@ -1,8 +1,8 @@
 // Tests for the comment-email preference client (AQU-1193).
 //
-// The read-modify-write in saveCommentEmailPreference is the load-bearing part:
-// PATCH /api/v2/auth/me replaces the whole preferences object, so a patch that
-// sent only this key would delete every other preference on the account.
+// The save must keep every other preference on the account, including one
+// another device writes while it saves (AQU-2264: it sends only its own key to
+// PATCH /api/v2/auth/me/preferences, which merges).
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import {
@@ -12,6 +12,7 @@ import {
   DEFAULT_COMMENT_EMAIL_PREFERENCE,
   COMMENT_EMAIL_PREFERENCE_KEY,
 } from "./comment-email-pref"
+import { createFakePreferencesServer } from "@/test-utils/fake-preferences-server"
 
 const originalFetch = globalThis.fetch
 
@@ -78,35 +79,44 @@ describe("fetchCommentEmailPreference", () => {
 })
 
 describe("saveCommentEmailPreference", () => {
-  it("merges into the existing blob instead of replacing it", async () => {
-    const calls: { url: string; init?: RequestInit }[] = []
-    globalThis.fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-      calls.push({ url: String(url), init })
-      if (init?.method === "PATCH") {
-        return jsonResponse({
-          preferences: JSON.parse(String(init.body)).preferences as Record<string, unknown>,
-        })
-      }
-      return jsonResponse({ preferences: { theme: "dark", translatorProfile: { age: "40" } } })
-    }) as unknown as typeof fetch
+  it("keeps every other preference on the account", async () => {
+    const server = createFakePreferencesServer({ theme: "dark", translatorProfile: { age: "40" } })
+    globalThis.fetch = server.fetch
 
     expect(await saveCommentEmailPreference("jwt", "all")).toBe("all")
 
-    const patch = calls.find((c) => c.init?.method === "PATCH")
-    expect(patch).toBeDefined()
-    const sent = JSON.parse(String(patch!.init!.body)) as {
-      preferences: Record<string, unknown>
-    }
-    // The other preferences survived the write — this is the whole point.
-    expect(sent.preferences.theme).toBe("dark")
-    expect(sent.preferences.translatorProfile).toEqual({ age: "40" })
-    expect(sent.preferences[COMMENT_EMAIL_PREFERENCE_KEY]).toBe("all")
+    expect(server.record).toEqual({
+      theme: "dark",
+      translatorProfile: { age: "40" },
+      [COMMENT_EMAIL_PREFERENCE_KEY]: "all",
+    })
   })
 
-  it("throws when the patch is rejected", async () => {
-    globalThis.fetch = vi.fn(async (_url: string | URL | Request, init?: RequestInit) =>
-      init?.method === "PATCH" ? jsonResponse({ error: "nope" }, 500) : jsonResponse({ preferences: {} }),
-    ) as unknown as typeof fetch
+  // AQU-2264: the old save read the whole record, changed this key and sent
+  // the whole record back (PATCH /auth/me replaces it). A write from another
+  // device between that read and that write was silently undone.
+  it("does not undo another device's write that lands while it saves", async () => {
+    const server = createFakePreferencesServer({ theme: "dark" })
+    globalThis.fetch = server.fetch
+    // The recorder on another device saves just before this write arrives.
+    server.beforeWrite = () => {
+      server.beforeWrite = null
+      server.record = { ...server.record, "recorder.countdown": "fast" }
+    }
+
+    await saveCommentEmailPreference("jwt", "off")
+
+    expect(server.record).toEqual({
+      theme: "dark",
+      "recorder.countdown": "fast",
+      [COMMENT_EMAIL_PREFERENCE_KEY]: "off",
+    })
+  })
+
+  it("throws when the save is refused", async () => {
+    const server = createFakePreferencesServer({})
+    globalThis.fetch = server.fetch
+    server.failWith = 500
     await expect(saveCommentEmailPreference("jwt", "off")).rejects.toThrow("HTTP 500")
   })
 })

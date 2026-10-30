@@ -3,8 +3,8 @@
 // The toggle mirrors writes to localStorage (via user-api-keys), so the
 // same key works in any other project on this browser. The project-level
 // value always wins at read time. When the project field is empty but a
-// user-saved key exists, the field shows it (masked) and the "Using your
-// saved key" hint appears.
+// user-saved key exists, the field shows it (masked). Which key is in use is
+// said once, by the KeyInUseLine beside the field (AQU-2263).
 
 import { useEffect, useState, type ReactNode } from "react"
 import { RevealableInput } from "@/components/ui/revealable-input"
@@ -40,8 +40,6 @@ export function ApiKeyField({
   useEffect(() => {
     setDraft(projectKey || userKey)
   }, [projectKey, userKey])
-
-  const usingSavedKey = !projectKey && Boolean(userKey)
 
   const persist = (value: string) => {
     const trimmed = value.trim()
@@ -80,11 +78,6 @@ export function ApiKeyField({
         {t("workspace.apiKeyField.saveAcrossProjects")}
       </label>
 
-      {usingSavedKey && (
-        <p className="text-xs text-emerald-600 dark:text-emerald-400">
-          {t("workspace.apiKeyField.usingSavedKey")}
-        </p>
-      )}
       {userKey && (
         <button
           type="button"

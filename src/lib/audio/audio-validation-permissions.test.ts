@@ -138,6 +138,25 @@ describe("audioValidationTakes", () => {
       validatorCount: 0, validators: [], isGenerated: false, canValidate: true,
     })
   })
+
+  // AQU-2296: the seam the date line arrives through. The route sends the
+  // stamps on the attachment; the control reads them off the TAKE, and this
+  // is the one hop between — exactly where a new field gets silently dropped
+  // and leaves every name in the popover undated.
+  it("carries each validator's timestamp through to the take, and absent as empty", () => {
+    const withStamps = entry(
+      { a: { audioId: "a", slot: "recording", validatorCount: 2, validators: ["bo", "cy"], validatorDecidedTs: { bo: 1700, cy: 1800 } } },
+      { recording: "a" },
+    )
+    expect(audioValidationTakes(withStamps, {}, policy(), reason)[0].validatorDecidedTs)
+      .toEqual({ bo: 1700, cy: 1800 })
+
+    const noStamps = entry(
+      { a: { audioId: "a", slot: "recording", validatorCount: 1, validators: ["bo"] } },
+      { recording: "a" },
+    )
+    expect(audioValidationTakes(noStamps, {}, policy(), reason)[0].validatorDecidedTs).toEqual({})
+  })
 })
 
 describe("audioEntryFromCell", () => {

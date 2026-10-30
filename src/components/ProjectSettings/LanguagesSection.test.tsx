@@ -1397,3 +1397,13 @@ describe("LanguagesSection — Delivers per language", () => {
     )
   })
 })
+
+// AQU-2263: Project settings adds a language with the same piece as New Project.
+describe("LanguagesSection — the shared Add language piece", () => {
+  it("opens the add form from the same Add language button New Project uses", () => {
+    renderSection()
+    const add = screen.getByTestId("add-lane-open")
+    expect(add).toHaveTextContent("Add language")
+    expect(add).toHaveAttribute("data-add-language")
+  })
+})

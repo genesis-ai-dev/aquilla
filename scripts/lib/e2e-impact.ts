@@ -59,7 +59,7 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
     // they share, and /join/:token — has its own smoke spec, but none of these
     // files carry a domain keyword above, so they fell through to the core
     // sentinels and PR #882 shipped a stale locator in that spec ungated.
-    source: /^(?:src\/components\/(?:UsernameTypeahead|MemberMultiAddRow|MultiProjectInviteDialog|ProjectMembersPage|ProjectSettings\/AddProjectMemberDialog|SharePanel|JoinPage)\.tsx|src\/hooks\/useUserSearch\.ts|src\/lib\/sync\/invites\.ts|auth-worker\/src\/(?:routes\/invites|services\/invite-scopes)\.ts)$/,
+    source: /^(?:src\/components\/(?:UsernameTypeahead|MemberMultiAddRow|MultiProjectInviteDialog|ProjectSettings\/(?:AddProjectMemberDialog|InviteLinkTab|RevokeAllDialog)|JoinPage)\.tsx|src\/hooks\/useUserSearch\.ts|src\/lib\/sync\/invites\.ts|auth-worker\/src\/(?:routes\/invites|services\/invite-scopes)\.ts)$/,
     sentinels: ["e2e/specs/projects/share-invite.smoke.spec.ts"],
   },
   {

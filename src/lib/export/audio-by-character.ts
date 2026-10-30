@@ -214,9 +214,12 @@ export function groupAudioByCharacter(
     // all of them (2026-08-27).
     const trimStartMs = attachment.trimStartMs ?? null
     const trimEndMs = attachment.trimEndMs ?? null
+    // AQU-981: a range uploaded as one file gives each line it covers a take
+    // of its own over the SAME url, so the clip is known by the bytes it plays
+    // as well as by its id.
     const existing = group.clips.find(
       (c) =>
-        c.audioId === audioId &&
+        (c.audioId === audioId || c.url === attachment.url) &&
         (c.trimStartMs ?? null) === trimStartMs &&
         (c.trimEndMs ?? null) === trimEndMs,
     )
@@ -310,8 +313,10 @@ export function previewAudioByCharacter(
       continue
     }
     const seen = countedClips.get(key)!
-    if (seen.has(audioId)) continue
+    // AQU-981: a range's lines each hold their own id over one url — one clip.
+    if (seen.has(audioId) || seen.has(attachment.url)) continue
     seen.add(audioId)
+    seen.add(attachment.url)
 
     if (cell.startTime == null) {
       row.untimedCount += 1

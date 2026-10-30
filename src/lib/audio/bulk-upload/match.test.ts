@@ -791,6 +791,12 @@ describe("the review's cases (Oct 29)", () => {
     expect(assignments[1].reason).toEqual({ code: "noSuchChapter", book: "Matthew", chapter: 5 })
   })
 
+  it("a recording named after a document in the project goes to that document, even when the name starts like a book", () => {
+    const targets = [doc("song", "Song of the week", 5), doc("mark", "Mark", 5)]
+    const files = ["Song of the week 3.mp3", "Mark 3.mp3"].map((n) => audio(n))
+    expect(run(files, targets, { kind: "project" }).assignments.map(lineOf)).toEqual(["song#3", "mark#3"])
+  })
+
   it("on a bridged line, the same verse twice is two takes; different verses are its pieces", () => {
     const g = book("g", "GEN", "Genesis", [0])
     g.lines.push({ cellId: "g:1:1-2", ref: "GEN 1:1-2", text: "1-2", structural: false, hasRecording: false })

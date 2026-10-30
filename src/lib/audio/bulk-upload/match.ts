@@ -286,6 +286,16 @@ export function readRecordings(files: readonly BulkInputFile[], opts: ReadOption
 
     if (scope.kind === "file") return { ...base, targetFileId: scope.fileId }
 
+    // A file that is not a book, named at the front of the recording or as its
+    // folder. It is looked for first: a document this project calls "Mark" or
+    // "Song of the week" is what "Mark 3" and "Song of the week 3" name, even
+    // though their names start like a book.
+    const stemKey = fileNameKey(reading.stem)
+    const folderKeys = folderSegments(file.path).map(fileNameKey)
+    const named = otherFiles.find(({ key }) =>
+      folderKeys.includes(key) || stemKey === key || (stemKey.startsWith(`${key} `) && /\d/.test(stemKey.slice(key.length))),
+    )
+    if (named) return { ...base, targetFileId: named.f.fileId }
     const book = reading.book?.code ?? folders.folderBook?.code
     if (book) {
       const target = fileForBook(book)
@@ -293,13 +303,6 @@ export function readRecordings(files: readonly BulkInputFile[], opts: ReadOption
         ? { ...base, targetFileId: target.fileId }
         : { ...base, targetReason: { code: "bookNotInProject", book: englishBookName(book) } }
     }
-    // A file that is not a book, named at the front of the recording or as its folder.
-    const stemKey = fileNameKey(reading.stem)
-    const folderKeys = folderSegments(file.path).map(fileNameKey)
-    const named = otherFiles.find(({ key }) =>
-      folderKeys.includes(key) || stemKey === key || (stemKey.startsWith(`${key} `) && /\d/.test(stemKey.slice(key.length))),
-    )
-    if (named) return { ...base, targetFileId: named.f.fileId }
     return { ...base, targetReason: { code: "noBook" } }
   })
 

@@ -23,6 +23,7 @@ import {
   virtualClockSeek,
 } from "./virtual-clock"
 import { RECORDING_SLOT } from "./track-slots"
+import { setQueueTargetSlots } from "@/lib/audio/play-queue"
 import { resetSkipSilentLinesPrefCacheForTests, setSkipSilentLinesPref } from "@/lib/store/skip-silent-lines-pref"
 
 /** A subtitle cue with times; `takeMs` gives it a take that starts on the line. */
@@ -145,7 +146,7 @@ describe("useSkipSilentLinesOnVirtualClock — the built-in clock jumps the sile
   })
 
   it("on (the default): at the end of a recorded line, the clock goes straight to the next recorded line", () => {
-    renderHook(() => useSkipSilentLinesOnVirtualClock(cells, true))
+    renderHook(() => useSkipSilentLinesOnVirtualClock(cells, SLOTS, true))
     act(() => { virtualClockPlay() })
     advance(1)
     expect(getVirtualClockSec()).toBeCloseTo(1, 3)
@@ -155,7 +156,7 @@ describe("useSkipSilentLinesOnVirtualClock — the built-in clock jumps the sile
   })
 
   it("on: pressing play on a silent line starts at the next recorded line", () => {
-    renderHook(() => useSkipSilentLinesOnVirtualClock(cells, true))
+    renderHook(() => useSkipSilentLinesOnVirtualClock(cells, SLOTS, true))
     act(() => { virtualClockSeek(3) })
     expect(getVirtualClockSec()).toBeCloseTo(3, 3) // a seek while stopped lands where it was asked
     act(() => { virtualClockPlay() })
@@ -164,7 +165,7 @@ describe("useSkipSilentLinesOnVirtualClock — the built-in clock jumps the sile
 
   it("on: trailing silent lines run the clock out to its end", () => {
     const tail = [cue("c1", 0, 2, 2_000), cue("c2", 3, 9)]
-    renderHook(() => useSkipSilentLinesOnVirtualClock(tail, true))
+    renderHook(() => useSkipSilentLinesOnVirtualClock(tail, SLOTS, true))
     act(() => { virtualClockPlay() })
     advance(2.05)
     advance(0.05)
@@ -174,7 +175,7 @@ describe("useSkipSilentLinesOnVirtualClock — the built-in clock jumps the sile
 
   it("off: the clock runs across the silent lines, as it always did", () => {
     setSkipSilentLinesPref(false)
-    renderHook(() => useSkipSilentLinesOnVirtualClock(cells, true))
+    renderHook(() => useSkipSilentLinesOnVirtualClock(cells, SLOTS, true))
     act(() => { virtualClockPlay() })
     advance(2.05)
     expect(getVirtualClockSec()).toBeCloseTo(2.05, 3)
@@ -187,7 +188,7 @@ describe("useSkipSilentLinesOnVirtualClock — the built-in clock jumps the sile
   it("off: the clock still jumps a hidden line, and runs across the unrecorded one after it", () => {
     setSkipSilentLinesPref(false)
     const withHidden = [cue("c1", 0, 2, 2_000), cue("c2", 2, 4, 2_000, { hidden: true }), cue("c3", 4, 6), cue("c4", 7, 9, 2_000)]
-    renderHook(() => useSkipSilentLinesOnVirtualClock(withHidden, true))
+    renderHook(() => useSkipSilentLinesOnVirtualClock(withHidden, SLOTS, true))
     act(() => { virtualClockPlay() })
     advance(2.05)
     expect(getVirtualClockSec()).toBeCloseTo(4, 3)
@@ -200,7 +201,7 @@ describe("useSkipSilentLinesOnVirtualClock — the built-in clock jumps the sile
 
   it("on: the clock jumps a hidden line as it does an unrecorded one", () => {
     const withHidden = [cue("c1", 0, 2, 2_000), cue("c2", 2, 4, 2_000, { hidden: true }), cue("c3", 4, 6), cue("c4", 7, 9, 2_000)]
-    renderHook(() => useSkipSilentLinesOnVirtualClock(withHidden, true))
+    renderHook(() => useSkipSilentLinesOnVirtualClock(withHidden, SLOTS, true))
     act(() => { virtualClockPlay() })
     advance(2.05)
     expect(getVirtualClockSec()).toBeCloseTo(7, 3)
@@ -215,7 +216,7 @@ describe("useSkipSilentLinesOnVirtualClock — the built-in clock jumps the sile
   ])("does not jump a hidden line while a film or a recording drives the file (the setting %s)", (_label, on) => {
     setSkipSilentLinesPref(on)
     const withHidden = [cue("c1", 0, 2, 2_000), cue("c2", 2, 4, 2_000, { hidden: true }), cue("c3", 4, 6, 2_000)]
-    renderHook(() => useSkipSilentLinesOnVirtualClock(withHidden, false))
+    renderHook(() => useSkipSilentLinesOnVirtualClock(withHidden, SLOTS, false))
     act(() => { virtualClockPlay() })
     advance(2.05)
     expect(getVirtualClockSec()).toBeCloseTo(2.05, 3)
@@ -223,8 +224,33 @@ describe("useSkipSilentLinesOnVirtualClock — the built-in clock jumps the sile
     expect(getVirtualClockSec()).toBeCloseTo(3.05, 3)
   })
 
+  // Review finding (Oct 29): the hook read the queue's track list itself, so a
+  // track added while the file was open — or the last file's tracks, right
+  // after a switch, before the workspace publishes the new ones — decided what
+  // was silent. It is handed the same tracks the workspace hands the queue.
+  it("hears a take on a track added while the file is open, and does not jump its line", () => {
+    const B = "0192a7e0-0000-7000-8000-00000000000b"
+    const onB = cue("c2", 2.5, 4, undefined, {
+      selectedBySlot: { [B]: "audio-c2-b" },
+      attachments: { "audio-c2-b": { type: "audio", url: "http://audio.test/c2b.webm", durationMs: 1_500 } },
+    } as Partial<CellData>)
+    const lines = [cue("c1", 0, 2, 2_000), onB, cue("c3", 4.5, 6, 1_500)]
+    setQueueTargetSlots([RECORDING_SLOT])
+    const { rerender } = renderHook(({ slots }) => useSkipSilentLinesOnVirtualClock(lines, slots, true), {
+      initialProps: { slots: [RECORDING_SLOT] as readonly string[] },
+    })
+    // Track B is added: the workspace renders with the new list, and only
+    // then publishes it to the queue, from an effect.
+    rerender({ slots: [RECORDING_SLOT, B] })
+    act(() => { setQueueTargetSlots([RECORDING_SLOT, B]) })
+    act(() => { virtualClockPlay() })
+    advance(2.05)
+    expect(getVirtualClockSec()).toBeCloseTo(2.05, 3) // the file's own gap before c2, which sounds on B
+    setQueueTargetSlots([])
+  })
+
   it("does nothing while the built-in clock is not this file's transport", () => {
-    renderHook(() => useSkipSilentLinesOnVirtualClock(cells, false))
+    renderHook(() => useSkipSilentLinesOnVirtualClock(cells, SLOTS, false))
     act(() => { virtualClockPlay() })
     advance(2.05)
     expect(getVirtualClockSec()).toBeCloseTo(2.05, 3)

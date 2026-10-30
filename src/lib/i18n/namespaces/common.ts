@@ -29,6 +29,15 @@ export const common = defineNamespace({
     "common.loadingSpinner": "Loading",
     "common.showMore": "Show more",
     "common.showLess": "Show less",
+    // AQU-2293: the Show more / Show all / Show fewer trio under a capped
+    //   list. Shared by the project overview's imported-originals list and the
+    //   org Overview's Team workload card, so the wording cannot drift apart.
+    "common.listShowMore": plural({
+      one: "Show {count} more",
+      other: "Show {count} more",
+    }),
+    "common.listShowAll": "Show all ({count})",
+    "common.listShowFewer": "Show fewer",
 
     // — Shared vocabulary and status words (AQU-511 wave 4):
     //   promoted here because two or more namespaces render exactly these
@@ -312,6 +321,29 @@ export const common = defineNamespace({
         description:
           "Inline link that collapses text expanded by common.showMore back to its " +
           "truncated form, next to an upward chevron.",
+      },
+      "common.listShowMore": {
+        description:
+          "Text button under a list that starts capped at five rows (the project " +
+          "overview's imported originals, the org Overview's Team workload lists). " +
+          "Reveals the next batch of rows; count is the batch size, not how many are " +
+          "still hidden. Sits beside common.listShowAll and is hidden once fewer than a " +
+          "full batch remains.",
+        placeholders: { count: "Number of additional rows the next batch reveals (always five)." },
+      },
+      "common.listShowAll": {
+        description:
+          "Text button under a capped list that reveals every remaining row at once. " +
+          "Count is that list's total number of rows, not how many are still hidden. " +
+          "Replaced by common.listShowFewer once everything is visible.",
+        placeholders: { count: "Total number of rows in the list, hidden ones included." },
+      },
+      "common.listShowFewer": {
+        description:
+          "Text button that collapses a fully expanded list back to its first five " +
+          "rows. Takes the place of common.listShowAll once nothing is hidden. Distinct " +
+          "from common.showLess, which collapses a truncated block of prose rather than " +
+          "a list of rows.",
       },
       "common.logIn": {
         description:

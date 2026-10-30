@@ -134,7 +134,7 @@ export function PersonalProviderSection() {
             <p className="text-xs text-muted-foreground">
               {hasOverride
                 ? "Active — default for projects without their own API key."
-                : "Optional. Most users should leave this off and use Frontier."}
+                : "Optional. Most users should leave this off and use Aquilla."}
             </p>
           </div>
         </CollapsibleTrigger>

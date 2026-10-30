@@ -33,7 +33,6 @@
 import { useEffect, useMemo } from "react"
 import type { CellData } from "@/hooks/useCells"
 import { resolveTargetPieces } from "@/lib/audio/track-audio"
-import { getQueueTargetSlots } from "@/lib/audio/play-queue"
 import { isHiddenCell } from "@/lib/cells/hidden"
 import type { AudioTimingMode } from "@/lib/parsers/types"
 import { useSkipSilentLinesPref } from "@/lib/store/skip-silent-lines-pref"
@@ -161,28 +160,37 @@ export function skipSilentLinesCanChange(scope: SkipSilentLinesScope): boolean {
     })
   }
   if (!scope.clockCells) return false
-  // The queue's own fallback: no track listed means the recording track.
-  const slots = scope.slots.length > 0 ? scope.slots : [RECORDING_SLOT]
-  return clockSoundMap(scope.clockCells, slots).silent.length > 0
+  return clockSoundMap(scope.clockCells, soundingSlots(scope.slots)).silent.length > 0
+}
+
+/** The queue's own fallback: no track listed means the recording track. */
+function soundingSlots(slots: readonly string[]): readonly string[] {
+  return slots.length > 0 ? slots : [RECORDING_SLOT]
 }
 
 /**
  * Drive the jumps on the built-in clock while it is this file's transport
  * (`active`) and running: every line with nothing to hear with the setting
  * on, only the hidden lines with it off. Handed the same cells the dub driver
- * plays from, so the two agree about what sounds.
+ * plays from, and the same target tracks (`slots`) the workspace hands the
+ * queue — never the queue's own copy, which the workspace publishes only
+ * after it renders — so the two agree about what sounds.
  */
-export function useSkipSilentLinesOnVirtualClock(cells: readonly CellData[], active: boolean): void {
+export function useSkipSilentLinesOnVirtualClock(
+  cells: readonly CellData[],
+  slots: readonly string[],
+  active: boolean,
+): void {
   const skip = useSkipSilentLinesPref()
   const sec = useVirtualClockSec()
   const playing = useVirtualClockPlaying()
   const durationSec = useVirtualClockDuration()
   const map = useMemo(() => {
     if (!active) return null
-    const m = clockSoundMap(cells, getQueueTargetSlots())
+    const m = clockSoundMap(cells, soundingSlots(slots))
     // Off, and no hidden line on the clock: nothing to jump.
     return skip || m.hidden.length > 0 ? m : null
-  }, [active, skip, cells])
+  }, [active, skip, cells, slots])
   useEffect(() => {
     if (!map || !playing || sec == null) return
     const to = silentSkipTarget(map, sec, durationSec, skip)

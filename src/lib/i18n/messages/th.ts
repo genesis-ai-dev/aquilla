@@ -2982,7 +2982,6 @@ export const th: Catalog = {
   "org.accessModelLegend.creator.description": "บทบาทเจ้าของเป็นแบบถาวรจนกว่าการเป็นเจ้าของโครงการจะถูกโอน จัดการในการตั้งค่าโครงการ → แชร์",
   "org.joinOrgPage.organizationLine": "องค์กร: {name}",
   "org.joinOrgPage.unnamedOrgFallback": "องค์กรไม่มีชื่อ",
-  "org.joinOrgPage.genericInviteFallback": "คุณได้รับเชิญให้เข้าร่วมองค์กรใน Aquilla",
   "org.joinOrgPage.cantJoinTitle": "ไม่สามารถเข้าร่วม",
   "org.joinOrgPage.youreInTitle": "คุณอยู่ข้างใน",
   "org.joinOrgPage.joinedRedirect": "เข้าร่วม {org} แล้ว กำลังพาคุณไปที่นั่น…",

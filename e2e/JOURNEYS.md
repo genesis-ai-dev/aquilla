@@ -249,6 +249,10 @@ UI chrome that used to be one smoke file per click is covered under
   anonymous Skip for now was retired; `Signup.test.tsx` covers direct signup,
   hydration, safe destinations and billing continuation. Preferences and in-app
   workspace/project creation replace the removed setup steps.
+  Organization invitation preview gating (unavailable links, retryable failures,
+  pending/stale requests, signed-in/out states) is covered in RTL by
+  `JoinOrgPage.test.tsx` (AQU-2297). Membership acceptance and reopening a used
+  link as its still-member redeemer stay in `share-invite.smoke.spec.ts`.
   Also the refused-sign-up redirection (AQU-1345): a 409 shows the "sign in instead"
   copy with word-for-word identical wording whichever datastore reserved the identity,
   and the Sign in action carries the typed identifier into the login field

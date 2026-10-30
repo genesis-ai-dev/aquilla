@@ -274,6 +274,21 @@ describe("following the recordings, every track's takes set their lines' lengths
     expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
   })
 
+  it("pausing while the line waits on another track's take stops the clock where it is, not at its last beat", async () => {
+    const cells = [line("b1", 400), line("b2", 200, { durationMs: 500, targetOffsetMs: 0 }), line("b3", 400)]
+    startQueue(ctxFor(cells), 1)
+    await settle()
+    el("b2")!.tick(0.2) // the main take is over: the rest of b2 is held from 0.6 s
+    await settle()
+    await wait(130) // past the hold's 100 ms beat, short of its next one
+    pauseQueue()
+    const at = getQueueProgress().currentTime
+    expect(Number.isFinite(at)).toBe(true)
+    // Where the clock is (0.73 s and on), not where the last beat put it (0.7 s).
+    expect(at).toBeGreaterThan(0.72)
+    expect(at).toBeLessThan(0.9)
+  })
+
   it("next line from a line waiting on another track's take goes to the next line", async () => {
     const cells = [line("b1", 400), line("b2", 200, { durationMs: 500, targetOffsetMs: 0 }), line("b3", 400)]
     startQueue(ctxFor(cells), 1)

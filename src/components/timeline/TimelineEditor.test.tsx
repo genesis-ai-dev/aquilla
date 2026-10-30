@@ -11,6 +11,7 @@ import { resetVideoDurationsForTests, setVideoDurationSec } from "@/lib/timeline
 import { deriveTracksForFile } from "@/lib/timeline/tracks"
 import { buildCueLinkIndex } from "@/lib/sync/cell-links-read"
 import { ZOOM_DEFAULT, ZOOM_MAX } from "@/lib/timeline/scale"
+import { getSkipSilentLinesPref, resetSkipSilentLinesPrefCacheForTests } from "@/lib/store/skip-silent-lines-pref"
 
 /**
  * Media redesign, layout: the timeline's settings (snap, follow, original
@@ -576,6 +577,90 @@ describe("TimelineEditor", () => {
     expect(item()).toHaveAttribute("aria-checked", "false")
     expect(localStorage.getItem("aquilla:timelineSnap")).toBe("off")
     localStorage.removeItem("aquilla:timelineSnap")
+  })
+
+  // AQU-2251 (Sam, Oct 28): a playback setting, on by default.
+  it("Skip lines with nothing to play is on by default, toggles, and is remembered on this device", () => {
+    localStorage.removeItem("aq.skip-silent-lines.v1")
+    resetSkipSilentLinesPrefCacheForTests()
+    try {
+      render(
+        <TimelineEditor
+          fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}}
+          skipSilentLinesApplies={() => true}
+        />,
+      )
+      const item = () => inTimelineSettings(() => screen.getByTestId("tl-skip-silent-toggle"))
+      expect(item()).toHaveTextContent("Skip lines with nothing to play")
+      expect(item()).toHaveAttribute("aria-checked", "true")
+      fireEvent.click(item())
+      expect(item()).toHaveAttribute("aria-checked", "false")
+      expect(localStorage.getItem("aq.skip-silent-lines.v1")).toBe("off")
+      expect(getSkipSilentLinesPref()).toBe(false)
+    } finally {
+      localStorage.removeItem("aq.skip-silent-lines.v1")
+      resetSkipSilentLinesPrefCacheForTests()
+    }
+  })
+
+  // AQU-2251 (Sam, Oct 29): the row is shown only where it can change
+  // something — the workspace works that out from the whole file, under its
+  // timing (lib/timeline/silent-lines `skipSilentLinesCanChange`).
+  it("Skip lines with nothing to play is shown only where the file has a line with nothing to play", () => {
+    const { rerender } = render(
+      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
+    )
+    // The ⋯ is open (its quality row is there), and the row is not in it.
+    expect(inTimelineSettings(() => screen.getByTestId("tl-quality-toggle"))).toBeInTheDocument()
+    expect(screen.queryByTestId("tl-skip-silent-toggle")).toBeNull()
+    expect(screen.queryByText("Skip lines with nothing to play")).toBeNull()
+
+    rerender(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}}
+        skipSilentLinesApplies={() => true}
+      />,
+    )
+    expect(inTimelineSettings(() => screen.getByTestId("tl-skip-silent-toggle"))).toHaveTextContent(
+      "Skip lines with nothing to play",
+    )
+  })
+
+  // Review finding (Oct 29): the answer lays out every chapter of a book, so
+  // the workspace worked it out again on every edit. It is asked only when the
+  // ⋯ opens.
+  it("asks whether Skip lines with nothing to play applies only when the ⋯ opens", () => {
+    const applies = vi.fn(() => true)
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}}
+        skipSilentLinesApplies={applies}
+      />,
+    )
+    expect(applies).not.toHaveBeenCalled()
+    expect(inTimelineSettings(() => screen.getByTestId("tl-skip-silent-toggle"))).toBeInTheDocument()
+    expect(applies).toHaveBeenCalled()
+  })
+
+  it("Skip lines with nothing to play reads back off after a reload", () => {
+    localStorage.setItem("aq.skip-silent-lines.v1", "off")
+    resetSkipSilentLinesPrefCacheForTests()
+    try {
+      render(
+        <TimelineEditor
+          fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}}
+          skipSilentLinesApplies={() => true}
+        />,
+      )
+      const item = () => inTimelineSettings(() => screen.getByTestId("tl-skip-silent-toggle"))
+      expect(item()).toHaveAttribute("aria-checked", "false")
+      fireEvent.click(item())
+      expect(item()).toHaveAttribute("aria-checked", "true")
+      expect(localStorage.getItem("aq.skip-silent-lines.v1")).toBeNull()
+    } finally {
+      localStorage.removeItem("aq.skip-silent-lines.v1")
+      resetSkipSilentLinesPrefCacheForTests()
+    }
   })
 
   it("renders the follow toggle, pressed by default, and it toggles", () => {

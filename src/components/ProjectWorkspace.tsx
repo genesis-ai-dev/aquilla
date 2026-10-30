@@ -240,6 +240,7 @@ import {
   virtualClockPlay,
   virtualClockSeekFromTimeline,
 } from "@/lib/timeline/virtual-clock"
+import { skipSilentLinesCanChange, useSkipSilentLinesOnVirtualClock } from "@/lib/timeline/silent-lines"
 import { generateCombinedVoice, type CombinedVoiceResult } from "@/lib/audio/combined-voice"
 import { CombinedBoundaryEditor } from "./voice/CombinedBoundaryEditor"
 import { useProjectTts } from "@/hooks/useProjectTts"
@@ -14820,6 +14821,33 @@ export function ProjectWorkspace() {
     setQueueLayerTrackSlots(layerTrackSlotsKey ? layerTrackSlotsKey.split("\u0000") : [])
   }, [layerTrackSlotsKey])
 
+  // AQU-2251: with "Skip lines with nothing to play" on, the built-in clock
+  // jumps from the end of one line with a take to the start of the next one.
+  // Handed these tracks rather than the queue's copy, which the effect above
+  // publishes only after this render.
+  useSkipSilentLinesOnVirtualClock(dubDriverCells, targetSlots, virtualIsTransport)
+
+  // AQU-2251 (Sam, Oct 29): the timeline's "Skip lines with nothing to play"
+  // is offered only where it can change something. Over the whole file — a
+  // book's every chapter, since Play all carries on into the next — laid out
+  // as the queue plays it, or as the built-in clock does while it drives.
+  // Handed over as a question, which the timeline asks when its ⋯ opens: the
+  // answer lays out every chapter, too much to redo on every edit.
+  const skipSilentLinesApplies = useCallback(
+    () =>
+      skipSilentLinesCanChange({
+        timing: timingMode,
+        runs: timelineScopes.length > 0
+          ? timelineScopes.map((chapter) => scopeCells(timelineLines, chapter))
+          : [timelineLines],
+        clockCells: virtualIsTransport ? dubDriverCells : null,
+        slots: targetSlots,
+        // AQU-2252: laid out with the tracks the queue plays them with.
+        tracks: programmeTracks,
+      }),
+    [timingMode, timelineScopes, timelineLines, virtualIsTransport, dubDriverCells, targetSlots, programmeTracks],
+  )
+
   // Smooth-playback layer 1: while the Media lens is open, quietly stock the
   // on-device byte cache with the open file's dub clips (nearest the selection
   // first, budget-aware, abandoned on lens exit). Clip ids are immutable, so
@@ -17120,6 +17148,7 @@ export function ProjectWorkspace() {
                     // thing playing would ignore a dub's trims — and the
                     // virtual transport honours them, exactly as the film does.
                     virtualIsTransport={virtualIsTransport}
+                    skipSilentLinesApplies={skipSilentLinesApplies}
                     editable={!laneWriteFrozen}
                     fileId={activeFile.id}
                     onRetimeSubtitle={handleRetimeSubtitle}

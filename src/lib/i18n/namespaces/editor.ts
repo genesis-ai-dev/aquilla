@@ -985,6 +985,8 @@ export const editor = defineNamespace({
     "editor.timeline.qualityCompressedTooltip":
       "Compressed playback (smaller, faster). Toggle for original-quality generated voices.",
     "editor.timeline.snapToggleAria": "Snap to neighboring edges",
+    // AQU-2251 (Sam, Oct 28): a playback setting in the timeline's ⋯.
+    "editor.timeline.skipSilentLines": "Skip lines with nothing to play",
     "editor.timeline.snapOnTooltip": "Snapping on — edges magnet to neighbors",
     "editor.timeline.snapOffTooltip": "Snapping off",
     // AQU-1767 phase 1: cutting takes into independent pieces.
@@ -6640,6 +6642,15 @@ export const editor = defineNamespace({
         description:
           "Tooltip of the same toggle while compressed playback is on, naming the " +
           "trade-off (smaller and faster) and what clicking switches to.",
+      },
+      "editor.timeline.skipSilentLines": {
+        description:
+          "Checkbox item in the timeline's settings menu (the ⋯ button), a playback " +
+          "setting that is on by default. A 'line' is one line of the text (a verse, " +
+          "a subtitle). 'Nothing to play' means the line has no recording and no " +
+          "original audio yet. When it is on, playback jumps over such lines; when " +
+          "it is off, playback takes the line's length on the timeline in silence " +
+          "before going on to the next line.",
       },
       "editor.timeline.snapToggleAria": {
         description:

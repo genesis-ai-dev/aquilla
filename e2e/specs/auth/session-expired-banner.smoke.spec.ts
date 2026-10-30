@@ -22,7 +22,7 @@ const banner = (page: Page) => page.getByRole("alert").filter({ hasText: /sessio
 async function loginViaUi(page: Page): Promise<void> {
   await page.getByRole("textbox", { name: "Username or email" }).fill(alice.username)
   await page.getByRole("textbox", { name: "Password" }).fill(alice.password)
-  await page.getByRole("button", { name: "Sign in" }).click()
+  await page.getByRole("button", { name: "Log in" }).click()
 }
 
 /** Post-login org-shell hydration is a multi-service boot — 30s watchdog. */
@@ -125,7 +125,7 @@ test("dead credential raises the banner; it persists, dismisses, and re-login cl
   // AQU-884: client-side navigation must not wipe it — the banner's own
   // "Sign in again" link routes to /login without a reload.
   await banner(page).getByRole("link", { name: /sign in again/i }).click()
-  await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByRole("button", { name: "Log in" })).toBeVisible({ timeout: 10_000 })
   // Login is itself the recovery action, so the global banner is suppressed
   // there rather than linking recursively back to another /login URL.
   await expect(banner(page)).toBeHidden()
@@ -156,7 +156,7 @@ test("naturally expired JWT redirects once and recovers without a forced reauth 
   await expect(page).toHaveURL(
     new RegExp(`/login\\?next=%2Forgs%2F${orgId}%2Fprojects$`),
   )
-  await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Log in" })).toBeVisible()
 
   await loginViaUi(page)
   await expect(page).toHaveURL(

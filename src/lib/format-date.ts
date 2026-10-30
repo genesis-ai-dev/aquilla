@@ -56,6 +56,41 @@ export function fmtShortCalendarDate(
   return formatDate(d, locale, { month: "long", day: "numeric" })
 }
 
+const RECENT_DATETIME_OPTS: Intl.DateTimeFormatOptions = {
+  month: "long",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+}
+
+const OLDER_DATETIME_OPTS: Intl.DateTimeFormatOptions = {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+}
+
+/**
+ * `fmtShortCalendarDate` with the clock time beside it — "October 30 at
+ * 3:02 PM" within the last year, else "Aug 18, 2024, 7:41 PM". For a line
+ * with room to say WHEN and not only which day: the "validated by" popovers
+ * (Matthew, 2026-10-30). Minutes, not seconds — the seconds stay on the hover.
+ * The older form keeps the day, since a time beside a bare "Aug 2024" would
+ * date nothing.
+ */
+export function fmtShortCalendarDateTime(
+  value: number | string | null | undefined,
+  now: number = Date.now(),
+  locale: string = DEFAULT_LOCALE,
+): string {
+  const t = parseTimestamp(value)
+  if (t == null) return "—"
+  const d = new Date(t)
+  const opts = isOlderThanOneYear(t, now) ? OLDER_DATETIME_OPTS : RECENT_DATETIME_OPTS
+  return formatDateTime(d, locale, opts)
+}
+
 const RECENT_DETAIL_OPTS: Intl.DateTimeFormatOptions = {
   month: "long",
   day: "numeric",

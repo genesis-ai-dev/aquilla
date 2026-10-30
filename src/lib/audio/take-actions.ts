@@ -177,7 +177,7 @@ export async function renameWholeTake(args: {
     for (const [i, piece] of pieces.entries()) {
       await renameTake({ ...where, audioId: piece.audioId, label: `${name} · ${i + 1}`, labelBefore: piece.label ?? null })
     }
-  }, { alwaysGroup: true })
+  }, { alwaysGroup: true, owns: { cells: [args.cellId], kinds: ["take."] } })
 }
 
 /**

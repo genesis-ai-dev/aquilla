@@ -452,6 +452,12 @@ export class CellStore {
     countStructural: true,
   }
 
+  /** The language the rows are sorted for now. It follows the hook's `lane`
+   *  one effect pass later (decision 11: an undo waits for it). */
+  get viewLane(): string {
+    return this.ctx.lane ?? ""
+  }
+
   private order: string[] = []
   private sourceOrder: string[] = []
   private targetOrder: string[] = []

@@ -1346,6 +1346,7 @@ export const editor = defineNamespace({
     "editor.station.historyWho": "{row} · {who}, {when}",
     "editor.station.hRecorded": "Recorded",
     "editor.station.hVersionSaved": "Version {n} saved",
+    "editor.station.hVersionSavedWith": "Version {n} saved: {what} · used on {lines}",
     "editor.station.hTrimmed": "Trimmed: Start {a}, End {b}",
     "editor.station.hApproved": "Approved",
     "editor.station.hUnapproved": "Approval withdrawn",
@@ -3168,6 +3169,14 @@ export const editor = defineNamespace({
       },
       "editor.station.hRecorded": {
         description: "History row: the recording was made or added.",
+      },
+      "editor.station.hVersionSavedWith": {
+        description: "A row in the Station's History: a new version of the recording was saved, what was changed in it, and the lines it is used on, e.g. 'Version 2 saved: a part deleted, audio inserted · used on line 331'.",
+        placeholders: {
+          n: "The version's number.",
+          what: "What changed, already worded and joined, e.g. 'a part deleted, audio inserted'.",
+          lines: "The lines it is used on, e.g. 'line 331' or 'line 4, line 9'.",
+        },
       },
       "editor.station.hVersionSaved": {
         description: "History row: an edited version of the recording was saved.",

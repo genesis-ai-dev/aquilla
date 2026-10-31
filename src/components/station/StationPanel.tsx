@@ -21,7 +21,8 @@ import { setStationUi } from "@/lib/station/ui"
 import { audioCachePutBlob } from "@/lib/audio/bytes-cache"
 import { decodeToMono48k } from "@/lib/audio/decode-mono"
 import { draftKey, readDraft } from "@/lib/station/drafts"
-import { mapWindow } from "@/lib/station/edit-list"
+import { mapWindow, type EditOp } from "@/lib/station/edit-list"
+import type { VersionChanges } from "@/lib/sync/outbox-types"
 import { loadStationPcm, pcmKey, putStationPcm } from "@/lib/station/load"
 import { renderSegments } from "@/lib/station/render"
 import { saveStationVersion, type VersionPlacement } from "@/lib/station/save"
@@ -126,6 +127,11 @@ export function StationMessage({ text, onClose }: { text: string; onClose(): voi
 export function approvalState(att: StationTake["att"], needed: number): { approved: boolean; count: number } {
   const count = Math.max(att.validatorCount ?? 0, att.validators?.length ?? 0)
   return { approved: count >= Math.max(1, needed), count }
+}
+
+/** The kinds of change a version holds, each once, in the order they happened. */
+export function versionKinds(ops: readonly EditOp[]): VersionChanges["kinds"] {
+  return changedKinds(ops).filter((k): k is "deleted" | "inserted" => k === "deleted" || k === "inserted")
 }
 
 /** How many saves deep this take is: 1 for an original, 2 for its first
@@ -293,6 +299,8 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
         ...(host.lane ? { targetLang: host.lane } : {}),
         getSyncToken: host.getSyncToken,
         where: { fileId: take.fileId, fileName: host.fileName(take.fileId) },
+        // Item 30: what changed and where it went, for its History row.
+        changes: { kinds: versionKinds(ed.ops), usedOn: targets.map((p) => p.cell.id) },
       })
       const n = versionOf(take) + 1
       ed.clearDraft()

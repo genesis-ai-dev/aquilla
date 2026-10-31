@@ -19,6 +19,7 @@ import { audioCachePutBlob } from "./bytes-cache"
 import { decodeToMono48k } from "./decode-mono"
 import { denoiseMono48k } from "./denoise"
 import { emitCellAudioAttach, emitCellAudioGain, emitCellAudioPlace } from "@/lib/sync/events-emit"
+import type { VersionChanges } from "@/lib/sync/outbox-types"
 import { recordTakeAdded } from "@/lib/history/take-steps"
 import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
 import { newPieceAudioId } from "./cut-take"
@@ -52,6 +53,9 @@ export interface DenoiseTakeArgs {
   /** Decision 11: record an Undo step for the new take, naming the take that
    *  played in its slot before. Omitted by bulk runs, which record none. */
   history?: { selectedBefore: string | null }
+  /** AQU-2327: run from the Station — the cleaned take is a version, and its
+   *  History row says so ("noise removed · used on line 331"). */
+  versionChanges?: VersionChanges
   /**
    * AQU-2327: the take being cleaned, so the cleaned take keeps its track,
    * name, kept part, places and level — cleaning a take on an added track used
@@ -149,6 +153,7 @@ export async function denoiseTake(args: DenoiseTakeArgs): Promise<DenoiseTakeRes
       ...(src?.label ? { label: src.label } : {}),
       ...(src?.trimStartMs != null ? { trimStartMs: src.trimStartMs } : {}),
       ...(src?.trimEndMs != null ? { trimEndMs: src.trimEndMs } : {}),
+      ...(args.versionChanges ? { versionChanges: args.versionChanges } : {}),
       ...(args.targetLang ? { targetLang: args.targetLang } : {}),
       author,
     })
@@ -213,6 +218,8 @@ export interface DenoiseSplitTakeArgs {
   /** Decision 11: record an Undo step for the new take, naming the take that
    *  played in its slot before. Omitted by bulk runs, which record none. */
   history?: { selectedBefore: string | null }
+  /** AQU-2327: run from the Station (see `DenoiseTakeArgs`). */
+  versionChanges?: VersionChanges
 }
 
 /**
@@ -252,6 +259,7 @@ export async function denoiseSplitTake(args: DenoiseSplitTakeArgs): Promise<Deno
         ...(piece.trimStartMs != null ? { trimStartMs: piece.trimStartMs } : {}),
         ...(piece.trimEndMs != null ? { trimEndMs: piece.trimEndMs } : {}),
         ...(audioId !== rootId ? { pieceOf: rootId } : {}),
+        ...(args.versionChanges ? { versionChanges: args.versionChanges } : {}),
         ...lane,
         author,
       })

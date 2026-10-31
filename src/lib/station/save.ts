@@ -17,6 +17,7 @@ import { encodeWavPcm16 } from "@/lib/audio/wav-encode"
 import { recordStep, withGroup } from "@/lib/history/history"
 import { recordTakeAdded, type TakeRemoveData } from "@/lib/history/take-steps"
 import { emitCellAudioAttach, emitCellAudioGain, emitCellAudioPlace, emitCellAudioRemove } from "@/lib/sync/events-emit"
+import type { VersionChanges } from "@/lib/sync/outbox-types"
 
 /** One line the new version goes on, and how it sits there. */
 export interface VersionPlacement {
@@ -54,6 +55,10 @@ export interface SaveVersionArgs {
   getSyncToken: SyncTokenFetcher
   /** The step's file and name (the file the Station's take lives in). */
   where: { fileId: string; fileName?: string | null }
+  /** What the version changed and the lines it goes on, for its History row
+   *  (board 40b: "Version 2 saved: a part deleted, audio inserted · used on
+   *  line 331"). Rides on each line's attach. */
+  changes?: VersionChanges
 }
 
 export interface SavedVersion {
@@ -105,6 +110,7 @@ export async function saveStationVersion(args: SaveVersionArgs): Promise<SavedVe
             ...(p.trimStartMs != null ? { trimStartMs: p.trimStartMs } : {}),
             ...(p.trimEndMs != null ? { trimEndMs: p.trimEndMs } : {}),
             ...(p.pieceOf ? { pieceOf: p.pieceOf } : {}),
+            ...(args.changes ? { versionChanges: args.changes } : {}),
             ...lane,
             author: args.author,
           })

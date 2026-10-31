@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { __resetStationTargetForTests, openInStation } from "@/lib/station/target"
-import { StationHeader, StationPanel, approvalState, versionOf } from "./StationPanel"
+import { StationHeader, StationPanel, approvalState, versionKinds, versionOf } from "./StationPanel"
 import type { StationHost, StationTake } from "./station-host"
 
 vi.mock("@/lib/station/load", () => ({
@@ -113,6 +113,10 @@ describe("the Station", () => {
     await user.click(await screen.findByRole("menuitemradio", { name: "1.5×" }))
     await waitFor(() => expect(screen.queryByRole("menu")).toBeNull())
     expect(screen.getByTestId("station-speed").textContent).toBe("1.5× ▾")
+  })
+
+  it("names a version's kinds of change each once, in the order they happened (item 30)", () => {
+    expect(versionKinds([{ kind: "ins", at: 1, src: "x", len: 0.5, label: "p" }, { kind: "del", a: 0, b: 0.2 }, { kind: "ins", at: 2, src: "y", len: 0.5, label: "q" }])).toEqual(["inserted", "deleted"])
   })
 
   it("counts approvals against the project's need, and versions by the chain", () => {

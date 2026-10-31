@@ -13189,14 +13189,17 @@ export function ProjectWorkspace() {
           .sort((a, b) => (a.trimStartMs ?? 0) - (b.trimStartMs ?? 0))
         const lane = activeLane ? { targetLang: activeLane } : {}
         const selectedBefore = audioId
+        // Item 30: a version the Station made — its History row names it.
+        const versionChanges = { kinds: ["noise" as const], usedOn: [cellId] }
         const res = pieces.length > 1
-          ? await denoiseSplitTake({ projectId: project.id, fileId: cur.owner.fileId, cellId, pieces, author: currentUsername, session: frontierSession, ...lane, history: { selectedBefore } })
+          ? await denoiseSplitTake({ projectId: project.id, fileId: cur.owner.fileId, cellId, pieces, author: currentUsername, session: frontierSession, ...lane, history: { selectedBefore }, versionChanges })
           : await denoiseTake({
               projectId: project.id, fileId: cur.owner.fileId, cellId,
               sourceAudioId: audioId, sourceUrl: cur.att.url,
               author: currentUsername, session: frontierSession, ...lane,
               source: cur.att,
               history: { selectedBefore },
+              versionChanges,
             })
         return res.audioId
       },

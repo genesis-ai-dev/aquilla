@@ -25,6 +25,14 @@ type Payload = {
   gainDb?: number | null
   fadeInMs?: number | null
   fadeOutMs?: number | null
+  /** AQU-2327: a Station version's changes and lines (cell ids). */
+  versionChanges?: { kinds?: string[]; usedOn?: string[] }
+}
+
+/** How History words a version's changes and lines (the panel supplies it). */
+export interface VersionWording {
+  kinds(kinds: readonly string[]): string
+  lines(cellIds: readonly string[]): string
 }
 
 /**
@@ -36,7 +44,15 @@ type Payload = {
 export function historyRowsFromEvents(
   events: readonly CellHistoryEvent[],
   ids: ReadonlySet<string>,
-  opts: { durationSec?: number | null; durationOf?(audioId: string): number | null; versionOf?(audioId: string): number } = {},
+  opts: {
+    durationSec?: number | null
+    durationOf?(audioId: string): number | null
+    versionOf?(audioId: string): number
+    /** Words a saved version's changes and lines; without it, or without the
+     *  details on the event (a version saved before they were recorded), the
+     *  row is "Version 2 saved". */
+    wording?: VersionWording
+  } = {},
 ): HistoryRow[] {
   const rows: HistoryRow[] = []
   const ordered = [...events].sort((a, b) => a.serverSeq - b.serverSeq)
@@ -47,7 +63,17 @@ export function historyRowsFromEvents(
     switch (ev.kind) {
       case "cell.audio.attach":
         if (p.referenceAudioId && ids.has(p.referenceAudioId)) {
-          rows.push({ key: "editor.station.hVersionSaved", params: { n: opts.versionOf?.(p.audioId) ?? 2 }, ...who })
+          // Item 30 (40b): "Version 2 saved: a part deleted, audio inserted ·
+          // used on line 331", when the save recorded what and where.
+          const n = opts.versionOf?.(p.audioId) ?? 2
+          const vc = p.versionChanges
+          const what = opts.wording && vc?.kinds?.length ? opts.wording.kinds(vc.kinds) : ""
+          const lines = opts.wording && vc?.usedOn?.length ? opts.wording.lines(vc.usedOn) : ""
+          rows.push(
+            what && lines
+              ? { key: "editor.station.hVersionSavedWith", params: { n, what, lines }, ...who }
+              : { key: "editor.station.hVersionSaved", params: { n }, ...who },
+          )
         } else rows.push({ key: "editor.station.hRecorded", ...who })
         break
       case "cell.audio.trim": {

@@ -627,6 +627,14 @@ export interface EventPayloads {
      * value: the transcript is no longer the AI's.
      */
     transcriptAi?: { model: string; at: number; changes: number }
+    /**
+     * AQU-2327: a version saved from the Station (or made by its Remove noise):
+     * which kinds of change it holds, each once ('deleted', 'inserted',
+     * 'noise'), and the cells it went on. Read back from the event log by the
+     * Station's History ("Version 2 saved: a part deleted · used on line
+     * 331"); the projection ignores it — nothing about the row depends on it.
+     */
+    versionChanges?: { kinds: Array<'deleted' | 'inserted' | 'noise'>; usedOn: string[] }
     /** AQU-1462: lane the member was working in. Omitted when the clip is shared. */
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */

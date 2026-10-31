@@ -24,6 +24,7 @@ import {
   type OutboxEventKind,
   type OutboxPayloadFor,
   type OutboxRawEvent,
+  type VersionChanges,
   isGenesisKind,
 } from "./outbox-types"
 import posthog from "@/lib/posthog"
@@ -690,6 +691,8 @@ export interface CellAudioAttachInput {
   asr?: { text: string; model: string }
   /** Provenance of an AI cleanup. New timings without it clear the server's mark. */
   transcriptAi?: { model: string; at: number; changes: number }
+  /** AQU-2327: a Station version's changes and lines, for its History row. */
+  versionChanges?: VersionChanges
   /**
    * AQU-1572: which gesture produced this clip — telemetry only, never on the
    * wire. ONLY the originating gesture passes one (an upload or LinkMedia
@@ -762,6 +765,7 @@ export async function emitCellAudioAttach(input: CellAudioAttachInput): Promise<
       ...(input.pieceOf !== undefined ? { pieceOf: input.pieceOf } : {}),
       ...(input.asr !== undefined ? { asr: input.asr } : {}),
       ...(input.transcriptAi !== undefined ? { transcriptAi: input.transcriptAi } : {}),
+      ...(input.versionChanges !== undefined ? { versionChanges: input.versionChanges } : {}),
       ...targetLaneFields(input),
     },
     clientTs: input.clientTs,

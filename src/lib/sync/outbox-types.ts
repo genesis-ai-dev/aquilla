@@ -420,6 +420,11 @@ export interface OutboxEventPayloads {
     asr?: { text: string; model: string }
     /** Provenance of an AI cleanup; new timings without it clear the mark. */
     transcriptAi?: { model: string; at: number; changes: number }
+    /** AQU-2327: a version saved from the Station (or made by its Remove
+     *  noise) — what changed and the lines (cell ids) it went on, which the
+     *  Station's History reads back ("Version 2 saved: a part deleted, audio
+     *  inserted · used on line 331"). History only: nothing is projected. */
+    versionChanges?: VersionChanges
   }
   "cell.audio.select": {
     /** null: leave the slot with nothing selected (2026-09-28) — how a line
@@ -943,4 +948,12 @@ export function isChainMutatingKind(kind: OutboxEventKind): boolean {
 /** True iff the event kind is a genesis event (parentId must be null). */
 export function isGenesisKind(kind: OutboxEventKind): boolean {
   return GENESIS_KINDS.has(kind)
+}
+
+/** AQU-2327: what a version saved from the Station changed, for its History row. */
+export interface VersionChanges {
+  /** Each kind once, in the order they happened. */
+  kinds: Array<"deleted" | "inserted" | "noise">
+  /** The lines (cell ids) the version went on. */
+  usedOn: string[]
 }

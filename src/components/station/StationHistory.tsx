@@ -57,6 +57,13 @@ export function versionChain(take: StationTake, audioId: string): string[] {
   return out
 }
 
+/** A version's kinds of change, in the notice's own words (item 8). */
+const KIND_KEY = {
+  deleted: "editor.station.kindDeleted",
+  inserted: "editor.station.kindInserted",
+  noise: "editor.station.kindNoise",
+} as const
+
 /** Item 30. Loads the line's history while open; counts it for the ⋯ item. */
 export function StationHistory({
   host,
@@ -100,8 +107,17 @@ export function StationHistory({
           const ms = take.cell.attachments?.[id]?.durationMs
           return ms != null ? ms / 1000 : null
         }
+        // Item 30: a version's changes in the notice's words, its lines by name.
+        const wording = {
+          kinds: (kinds: readonly string[]) =>
+            kinds
+              .filter((k): k is keyof typeof KIND_KEY => k in KIND_KEY)
+              .map((k) => t(KIND_KEY[k]))
+              .join(", "),
+          lines: (cellIds: readonly string[]) => cellIds.map((id) => host.lineName(id)).filter(Boolean).join(", "),
+        }
         if (live) {
-          setRows(historyRowsFromEvents(events, ids, { durationSec, durationOf, versionOf: depth }))
+          setRows(historyRowsFromEvents(events, ids, { durationSec, durationOf, versionOf: depth, wording }))
           setFailed(false)
         }
       } catch {
@@ -111,7 +127,7 @@ export function StationHistory({
     return () => {
       live = false
     }
-  }, [projectId, fileId, cellId, chain, durationSec, getSyncToken, refreshKey, audioId, take])
+  }, [projectId, fileId, cellId, chain, durationSec, getSyncToken, refreshKey, audioId, take, t, host])
 
   const all = useMemo(() => [...(rows ?? []), ...draftRows(ops)], [rows, ops])
   useEffect(() => {

@@ -53,6 +53,24 @@ describe("Save as new version", () => {
     expect(calls.remove).toHaveLength(0)
   })
 
+  // Item 30: each line's attach carries what changed and where it went, for
+  // the History row ("Version 2 saved: a part deleted · used on line 331").
+  it("records what the version changed and the lines it goes on, on every line's attach", async () => {
+    const changes = { kinds: ["deleted" as const, "inserted" as const], usedOn: ["c331", "c316"] }
+    await saveStationVersion({
+      projectId: "p",
+      samples: new Float32Array(4800),
+      rate: 48000,
+      placements: [base, { ...base, cellId: "c316", fromAudioId: "t1.webm" }],
+      author: "ana",
+      getSyncToken: async () => "jwt",
+      where: { fileId: "f" },
+      changes,
+    })
+    expect(calls.attach).toHaveLength(2)
+    for (const a of calls.attach) expect(a).toMatchObject({ versionChanges: changes })
+  })
+
   it("replaces a piece of a split take in place, as a piece (Q6)", async () => {
     await saveStationVersion({
       projectId: "p",

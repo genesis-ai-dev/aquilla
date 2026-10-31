@@ -49,6 +49,31 @@ describe("the Station's History rows", () => {
     expect(rows[2].params).toEqual({ a: "0:00.20", b: "0:04.30" })
   })
 
+  // Item 30 (board 40b): a saved version's row says what changed and where.
+  it("words a saved version's changes and lines, as 40b does", () => {
+    const wording = {
+      kinds: (k: readonly string[]) => k.map((x) => (x === "deleted" ? "a part deleted" : x === "inserted" ? "audio inserted" : "noise removed")).join(", "),
+      lines: (ids: readonly string[]) => ids.map((id) => `line ${id.slice(1)}`).join(", "),
+    }
+    const events = [
+      ev(1, "cell.audio.attach", { audioId: "t2" }),
+      ev(2, "cell.audio.attach", { audioId: "t2v2", referenceAudioId: "t2", versionChanges: { kinds: ["deleted", "inserted"], usedOn: ["c331"] } }),
+      ev(3, "cell.audio.attach", { audioId: "t2v3", referenceAudioId: "t2v2", versionChanges: { kinds: ["noise"], usedOn: ["c316", "c329"] } }),
+    ]
+    const rows = historyRowsFromEvents(events, new Set(["t2", "t2v2", "t2v3"]), { versionOf: (id) => (id === "t2v2" ? 2 : 3), wording })
+    expect(rows[1]).toMatchObject({ key: "editor.station.hVersionSavedWith", params: { n: 2, what: "a part deleted, audio inserted", lines: "line 331" } })
+    expect(rows[2]).toMatchObject({ key: "editor.station.hVersionSavedWith", params: { n: 3, what: "noise removed", lines: "line 316, line 329" } })
+  })
+
+  it("keeps an older save, which recorded no details, as \"Version 2 saved\"", () => {
+    const rows = historyRowsFromEvents(
+      [ev(1, "cell.audio.attach", { audioId: "t2v2", referenceAudioId: "t2" })],
+      new Set(["t2", "t2v2"]),
+      { versionOf: () => 2, wording: { kinds: () => "x", lines: () => "y" } },
+    )
+    expect(rows[0]).toMatchObject({ key: "editor.station.hVersionSaved", params: { n: 2 } })
+  })
+
   it("numbers the unsaved edits", () => {
     const rows = draftRows([
       { kind: "del", a: 1, b: 1.5 },

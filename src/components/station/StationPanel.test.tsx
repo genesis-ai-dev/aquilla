@@ -97,6 +97,11 @@ describe("the Station", () => {
     openInStation({ fileId: "f1", cellId: "c331", audioId: "t2.webm" })
     render(<StationPanel host={makeHost(src)} visible />)
     expect(screen.getByTestId("station-source-note").textContent).toMatch(/source recording/)
+    // Named as the source, never "Take", and with no approval status (it is
+    // never approved): found in the browser walk.
+    expect(screen.getByText("Source recording · line 331")).toBeTruthy()
+    expect(screen.queryByTestId("station-status")).toBeNull()
+    expect(screen.queryByTestId("station-approve")).toBeNull()
   })
 
   it("picking a listening speed closes its menu", async () => {

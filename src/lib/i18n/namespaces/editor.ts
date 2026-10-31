@@ -1426,6 +1426,7 @@ export const editor = defineNamespace({
     "editor.station.tooLong": "Too long to cut or insert here yet; trims, volume and fades work.",
     "editor.station.takeVersion": "{take} · version {n}",
     "editor.station.sourceReadOnly": "This is the source recording, so it can’t be edited here.",
+    "editor.station.sourceName": "Source recording",
     "editor.station.hintListen": "Drag across the waveform to select a part. Space plays.",
     "editor.dock.film": "Film",
     "editor.dock.bottomLeft": "Bottom left",
@@ -3440,6 +3441,9 @@ export const editor = defineNamespace({
       },
       "editor.station.sourceReadOnly": {
         description: "Plain line under the Station's heading when the open recording is the imported source (the original everyone's timing follows): it can be played and looped, not edited.",
+      },
+      "editor.station.sourceName": {
+        description: "The Station's heading names the imported source recording this way (it has no take name), followed by ' · ' and the line, e.g. 'Source recording · line 2'.",
       },
       "editor.station.hintListen": {
         description: "One quiet line under the Station's controls when the recording can only be listened to.",

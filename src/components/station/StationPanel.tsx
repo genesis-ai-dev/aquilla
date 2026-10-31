@@ -354,7 +354,7 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
           }}
         />
       ) : null}
-      <StationHeader host={host} take={take} target={target} places={placeLines} unsaved={unsaved} undoUnsaved={ed.undoUnsaved} />
+      <StationHeader host={host} take={take} target={target} places={placeLines} unsaved={unsaved} undoUnsaved={ed.undoUnsaved} isSource={isSource} />
       {isSource && !STATION_PICKS.sourceEditable ? (
         <p data-testid="station-source-note" className="shrink-0 px-3 pb-1 text-[11.5px] text-muted-foreground">
           {t("editor.station.sourceReadOnly")}
@@ -431,6 +431,7 @@ export function StationHeader({
   places,
   unsaved = false,
   undoUnsaved,
+  isSource = false,
 }: {
   host: StationHost
   take: StationTake
@@ -440,11 +441,14 @@ export function StationHeader({
   /** Unsaved sound edits: it waits again (40b), and Undo takes them back first. */
   unsaved?: boolean
   undoUnsaved?(): boolean
+  /** Q10: the imported source recording — named as the source, with no
+   *  approval status (it is never approved) and no "placed on". */
+  isSource?: boolean
 }) {
   const t = useT()
   const { cellId, audioId } = target
   const line = host.lineName(cellId)
-  const name = take.att.label ?? t("audio.takesStrip.takeFallback")
+  const name = isSource ? t("editor.station.sourceName") : (take.att.label ?? t("audio.takesStrip.takeFallback"))
   const character = castNameOf(take.cell)
   const vars = host.trackVars(take.fileId, take.att.slot)
   const counted = approvalState(take.att, host.approvalsNeeded)
@@ -503,18 +507,22 @@ export function StationHeader({
               <span className="font-bold" style={{ color: vars["--tl-track-hue"] }}>
                 {character}
               </span>
-              {" · "}
+              {isSource ? null : " · "}
             </>
           ) : null}
-          {placedText}
-          {" · "}
-          <span
-            data-testid="station-status"
-            className={approved ? "font-semibold text-green-700 dark:text-green-400" : "font-semibold text-sky-700 dark:text-sky-400"}
-          >
-            {statusText}
-          </span>
-          {version > 1 ? ` · ${t("editor.station.version", { n: version })}` : null}
+          {isSource ? null : (
+            <>
+              {placedText}
+              {" · "}
+              <span
+                data-testid="station-status"
+                className={approved ? "font-semibold text-green-700 dark:text-green-400" : "font-semibold text-sky-700 dark:text-sky-400"}
+              >
+                {statusText}
+              </span>
+              {version > 1 ? ` · ${t("editor.station.version", { n: version })}` : null}
+            </>
+          )}
         </span>
       </span>
       <span className="ms-auto inline-flex shrink-0 items-center gap-1">
@@ -532,7 +540,7 @@ export function StationHeader({
             <Undo2 className="size-3.5" />
           </Button>
         </AppTooltip>
-        {vote.canVote && !vote.voted && !approved ? (
+        {vote.canVote && !vote.voted && !approved && !isSource ? (
           <AppTooltip content={t("editor.station.approveTip", { line })}>
             <Button
               type="button"

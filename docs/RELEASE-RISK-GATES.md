@@ -123,6 +123,7 @@ PR → dev            risk-label.yml labels it risk:<areas>; ci.yml runs the sui
 merge to dev        dev-deploy.yml (when on): neon:apply:dev, deploy dev
 :05 every hour      release-cut.yml: plan, cut, push release/YYYY/MM/DD-NN
    push             release-verify.yml (typecheck, lint, all unit, all workers, build) + smart Jev (Hetzner)
+                    — fires only because the cut pushes as RELEASE_BOT_TOKEN; a GITHUB_TOKEN push starts nothing
 :45 every hour      release-deploy.yml (when on): if release-verify=success and Jev≠FAIL on HEAD → deploy:aquilla → tag
    tag              release-cut.yml again (dispatched; a GITHUB_TOKEN tag does not chain on its own)
 ```
@@ -244,12 +245,15 @@ nothing, and `release:approved` is the one label the planner reads.
   factor. Until then the fix is forward: next hour.
 - **`export` as a holding area.** Not on the meeting's list, on the
   draft's. Default here: noted, not holding. Decide.
-- **Tag push from the workflow.** The "release tags" ruleset requires a
-  recorded production Deployment and may refuse `GITHUB_TOKEN`. First
-  enablement needs `RELEASE_BOT_TOKEN` (contents + deployments write,
-  on the ruleset's bypass list) or a one-time test that `GITHUB_TOKEN`
-  is accepted. If the tag fails, production is already live and the tag
-  is a person's job (`scripts/tag-release.sh`).
+- **`RELEASE_BOT_TOKEN`** (done 2026-10-31: a fine-grained PAT, contents +
+  deployments write on this repo, kept in Ryder's Keychain). The "release
+  tags" ruleset needs no bypass: its rule is a recorded production
+  Deployment, which `tag-release.sh` writes first. The token matters for a
+  second reason too: GitHub runs no push-triggered workflow for a push
+  made with `GITHUB_TOKEN`, so the cut's checkout pushes as this token or
+  the release branch never verifies itself. If the tag push fails,
+  production is already live and the tag is a person's job
+  (`scripts/tag-release.sh`).
 - **Dev deploy on merge waits for a green baseline** (Matthew). 22 root
   vitest failures and a red sync-worker pair were on dev as of 2026-10-06;
   `release-verify` runs the full suite, so a red baseline blocks every

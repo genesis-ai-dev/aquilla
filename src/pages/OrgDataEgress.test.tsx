@@ -149,7 +149,7 @@ describe("OrgDataEgress role gate (AQU-907)", () => {
 
     expect(
       screen.getByText(
-        "Data egress is available to organization owners, and to other roles when an owner enables them in Settings.",
+        "Data egress is available to organization owners, and to other roles when an owner enables them in Organization settings.",
       ),
     ).toBeInTheDocument()
     expect(screen.queryByTestId("egress-export-button")).not.toBeInTheDocument()
@@ -169,7 +169,7 @@ describe("OrgDataEgress role gate (AQU-907)", () => {
 
     expect(
       screen.queryByText(
-        "Data egress is available to organization owners, and to other roles when an owner enables them in Settings.",
+        "Data egress is available to organization owners, and to other roles when an owner enables them in Organization settings.",
       ),
     ).not.toBeInTheDocument()
     expect(useOrgEgressData).not.toHaveBeenCalled()

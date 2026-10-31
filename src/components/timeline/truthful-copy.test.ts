@@ -24,6 +24,6 @@ describe("sentences that match the app (AQU-2259)", () => {
     const description = t("editor.timeline.linkVideoDescription")
     expect(description).not.toMatch(/muted and in step/)
     expect(description).toMatch(/uploaded recording/)
-    expect(description).toMatch(/YouTube video keeps its own sound/)
+    expect(description).toMatch(/film on YouTube keeps its own sound/)
   })
 })

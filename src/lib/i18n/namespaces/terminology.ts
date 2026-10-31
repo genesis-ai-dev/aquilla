@@ -50,7 +50,7 @@ export const terminology = defineNamespace({
     "terminology.editor.loadingGlossary": "Loading terminology",
     "terminology.editor.loadingTermDetails": "Loading term details",
     "terminology.editor.errorRequiresProjectLead":
-      "Requires Project Lead role or higher to manage the terminology.",
+      "Requires the Project lead role or higher to manage the terminology.",
     "terminology.editor.errorConflict":
       "The terminology changed elsewhere. Review the latest terms and try again.",
     "terminology.editor.errorOffline": "Terminology changes will sync when you reconnect.",
@@ -132,11 +132,11 @@ export const terminology = defineNamespace({
     "terminology.livingMemory.enterTextPlaceholder": "Enter text…",
     "terminology.livingMemory.offlineTooltip": "You are offline. Reconnect to edit.",
     "terminology.livingMemory.maintainerRequiredTooltip":
-      "Editing requires Maintainer role (600) or above.",
+      "Editing requires the Maintainer role or above.",
     "terminology.livingMemory.contributorRequiredTooltip":
-      "This requires Contributor role (400) or above.",
+      "This requires the Contributor role or above.",
     "terminology.livingMemory.projectLeadRequiredTooltip":
-      "This requires Project lead role (500) or above.",
+      "This requires the Project lead role or above.",
     "terminology.livingMemory.addEntryAria": "Add {section} entry",
     "terminology.livingMemory.exampleLabel": "Example:",
     "terminology.livingMemory.editEntryAria": "Edit entry",
@@ -167,7 +167,7 @@ export const terminology = defineNamespace({
     "terminology.livingMemory.standardsExample":
       '"Always preserve proper nouns untranslated. Numbers in source must appear as ' +
       'numerals in target."',
-    "terminology.livingMemory.recentExamplesTitle": "Recent Examples",
+    "terminology.livingMemory.recentExamplesTitle": "Recent examples",
     "terminology.livingMemory.recentExamplesDescription":
       "Human-validated source→target pairs the AI uses as in-context examples. These " +
       "are the translations your team has agreed on.",
@@ -445,7 +445,7 @@ export const terminology = defineNamespace({
     "terminology.reviewQueue.rejectAria": "Reject concept {term}",
     // "Read-only" permission badge → common.readOnly (identical text)
     "terminology.reviewQueue.readOnlyTooltip":
-      "Requires Project Lead role or higher to approve/reject concepts.",
+      "Requires the Project lead role or higher to approve/reject concepts.",
     "terminology.reviewQueue.emptyTitle": "No concepts awaiting review.",
     "terminology.reviewQueue.emptyDescription":
       "Draft concepts promoted from candidates will appear here.",
@@ -510,7 +510,7 @@ export const terminology = defineNamespace({
     }),
 
     // ── ProjectSettings/TermbaseSharingSection.tsx ───────────────────────────
-    "terminology.sharing.title": "Termbase Sharing",
+    "terminology.sharing.title": "Term base sharing",
     "terminology.sharing.notOrgOwnedDescription":
       "Term base sharing is available for org-owned projects only. Move this project " +
       "into an organization to publish or subscribe to shared term bases.",

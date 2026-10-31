@@ -66,8 +66,8 @@ export const settings = defineNamespace({
       "format it was recorded in. It is also the WAV / COMPRESSED button in the recorder.",
     "settings.preferences.recording.showFilmTitle": "Show the film beside the recorder",
     "settings.preferences.recording.showFilmInfo":
-      "When a line has a film, the recorder shows it on the left. Turn this off to open the " +
-      "narrow recorder instead; its Video button brings the film back.",
+      "When a line has a film, the recorder shows it on the left. Turn this off to open the narrow " +
+      "recorder instead; its Film button brings the film back.",
     "settings.preferences.recording.filmSoundTitle": "Play the film's sound while recording",
     "settings.preferences.recording.filmSoundInfo":
       "Off unless you turn it on. Use it only with headphones: the microphone records without " +
@@ -101,7 +101,8 @@ export const settings = defineNamespace({
     "settings.transcription.localDescription":
       "Download Whisper below. Runs on your device without using hosted AI capacity. Speed depends on your device.",
     "settings.transcription.capacityExceeded":
-      "Your workspace has reached its AI capacity. Try after the reset, update your plan, or select local Whisper in Preferences → Local models.",
+      "Your workspace has reached its AI capacity. Try after the reset, update your plan, or choose " +
+      "Whisper on this device in Preferences → On-device AI models.",
     // ── Omnilingual ASR: hosted model choice, zero-shot warm-up and batches ──
     "settings.transcription.model.legend": "Hosted model",
     "settings.transcription.model.auto": "Automatic",
@@ -246,23 +247,22 @@ export const settings = defineNamespace({
 
     // ── AssignmentAuthoritySection (org settings → security) ──
     "settings.assignmentAuthority.floorLabel": "Who can assign work",
-    "settings.assignmentAuthority.floorDescription":
-      "Minimum project role required to assign, reassign, or unassign file, " +
-      "chapter, target-lane, and AI review tasks. Defaults to Project lead.",
+    // Sam, Oct 29: one short line under each setting; the rest behind its (i).
+    "settings.assignmentAuthority.floorSummary": "The lowest project role that can assign work to other people.",
+    "settings.assignmentAuthority.floorInfo":
+      "That covers assigning, reassigning and unassigning files, chapters, language lanes and " +
+      "AI review. Project lead by default.",
     "settings.assignmentAuthority.label": "Allow self-assignment",
-    "settings.assignmentAuthority.description":
-      "When on, a member (contributor and above) can claim a book/chapter/take " +
-      "for themselves from the assign-work picker — they still can't assign " +
-      "work to anyone else. Leads and maintainers can always assign, to " +
-      "anyone, regardless of this setting.",
-    "settings.laneAssignmentAuthority.label": "Allow lane coordinators to assign work",
-    "settings.laneAssignmentAuthority.description":
-      "When on, a member (contributor and above) who has been restricted to " +
-      "specific target languages can assign work to other people — but only " +
-      "within those languages. Give a mentor or coordinator the languages they " +
-      "look after under Members, and they can hand out chapters there without " +
-      "any other admin rights. Members with no language restriction are " +
-      "unaffected by this setting.",
+    "settings.assignmentAuthority.summary": "Contributors can take work for themselves, but not give it to others.",
+    "settings.assignmentAuthority.info":
+      "A contributor or above can claim a book, chapter or take for themselves. Leads and " +
+      "maintainers can always assign work to anyone, whatever this is set to.",
+    "settings.laneAssignmentAuthority.label": "Allow language lane coordinators to assign work",
+    "settings.laneAssignmentAuthority.summary": "Members limited to some language lanes can assign work inside them.",
+    "settings.laneAssignmentAuthority.info":
+      "Give a mentor or coordinator the language lanes they look after under Members, and they " +
+      "can hand out chapters there without any other admin rights. Members who aren't limited " +
+      "to some language lanes aren't affected.",
 
     // ── OrgProviderSection (org settings → AI provider keys) ──
     "settings.providerKeys.groupLabel": "Provider keys",
@@ -327,10 +327,9 @@ export const settings = defineNamespace({
     // this page (deep link, search) won't have seen the nav row's "Offline only" hint.
     "settings.localLlm.groupLabel": "Offline AI provider",
     "settings.localLlm.description":
-      "Used for AI translations only when this device has no connection — unrelated to the " +
-      "on-device voice models under \"Local models.\" Requests are proxied through a small " +
-      "local server on this device, never sent over the network. Defaults match Ollama " +
-      "running locally.",
+      "Used for AI translations only when this device has no connection — unrelated to the on-device " +
+      "voice models under \"On-device AI models.\" Requests are proxied through a small local server " +
+      "on this device, never sent over the network. Defaults match Ollama running locally.",
     "settings.localLlm.testConnection": "Test connection",
     // "Save" button → common.save (identical text)
     "settings.localLlm.detectModels": "Detect models",
@@ -341,68 +340,64 @@ export const settings = defineNamespace({
     // ── RosterProgressSection (org settings → security) ──
     "settings.rosterProgress.groupLabel": "Visibility",
     "settings.rosterProgress.groupDescription":
-      "Who can see the member roster and per-member progress. Both default to Maintainer.",
-    "settings.rosterProgress.rosterLabel": "Who can view the roster",
+      "Who can see the member list and per-member progress. Both default to Maintainer.",
+    "settings.rosterProgress.rosterLabel": "Who can see the member list",
     "settings.rosterProgress.rosterDescription":
-      "Minimum role required to see the member list and member count, on both " +
-      "the org Members page and each project's Members tab. Below this role, " +
-      "the roster and count are hidden entirely — not shown empty, just absent.",
-    "settings.rosterProgress.progressLabel": "Who can view member progress",
+      "Minimum role required to see the member list and member count, on both the org Members page " +
+      "and each project's Members tab. Below this role, the member list and count are hidden " +
+      "entirely — not shown empty, just absent.",
+    "settings.rosterProgress.progressLabel": "Who can see member progress",
     "settings.rosterProgress.progressDescription":
-      "Minimum role required to see per-member progress/productivity. " +
-      "Independent of roster visibility — a role can see who's on the team " +
-      "without seeing their progress, or vice versa.",
+      "Minimum role required to see per-member progress/productivity. Independent of who can see the " +
+      "member list — a role can see who's on the team without seeing their progress, or vice versa.",
     // Open-dropdown option text for the roster/progress floor selects. FLOOR_LABEL
     // (src/pages/settings/constants.ts) supplies the short closed-trigger text; these
     // are the fuller sentences shown once the dropdown is open. The role name +
     // numeric level are fixed per option (not a runtime placeholder) — same
     // treatment as settings.termbase.option* below.
-    "settings.rosterProgress.optionViewer": "Viewer (100) — anyone with access",
-    "settings.rosterProgress.optionContributor": "Contributor (400)",
-    "settings.rosterProgress.optionProjectLead": "Project lead (500)",
-    "settings.rosterProgress.optionMaintainer": "Maintainer (600) — default",
-    "settings.rosterProgress.optionOwner": "Owner (700) — most restrictive",
+    "settings.rosterProgress.optionViewer": "Viewer — anyone with access",
+    "settings.rosterProgress.optionContributor": "Contributor",
+    "settings.rosterProgress.optionProjectLead": "Project lead",
+    "settings.rosterProgress.optionMaintainer": "Maintainer — default",
+    "settings.rosterProgress.optionOwner": "Owner — most restrictive",
 
     // ── TermbaseEditSection (org settings → security) ──
     "settings.termbase.label": "Who can manage terminology",
-    "settings.termbase.description":
-      "Minimum role required to add, edit, delete, and archive terms in a " +
-      "project's term base. Below this role the term base is read-only. This " +
-      "setting covers terminology only — every other project setting still " +
-      "requires Maintainer.",
+    "settings.termbase.summary": "The lowest role that can change a project's term base.",
+    "settings.termbase.info":
+      "That means adding, editing, deleting and archiving terms; below this role the term base " +
+      "is read-only. It covers terminology only: every other project setting still needs Maintainer.",
     // Open-dropdown option text for the termbase-edit floor select; see the
     // roster/progress options above for why the level number is baked in.
-    "settings.termbase.optionContributor": "Contributor (400) — translators manage terms",
-    "settings.termbase.optionProjectLead": "Project lead (500) — default",
-    "settings.termbase.optionMaintainer": "Maintainer (600) — most restrictive",
+    "settings.termbase.optionContributor": "Contributor — translators manage terms",
+    "settings.termbase.optionProjectLead": "Project lead — default",
+    "settings.termbase.optionMaintainer": "Maintainer — most restrictive",
 
     // ── LanguageEditSection (org settings → security) — AQU-1086 ──
     "settings.languageEdit.label": "Who can change project languages",
-    "settings.languageEdit.description":
-      "Minimum role required to change a project's source and target language " +
-      "and to add or archive extra target languages. This setting covers " +
-      "languages only — every other project setting still requires Maintainer.",
+    "settings.languageEdit.summary": "The lowest role that can change a project's languages.",
+    "settings.languageEdit.info":
+      "That means its source and target languages, and adding or archiving language lanes. It " +
+      "covers languages only: every other project setting still needs Maintainer.",
     // Open-dropdown option text for the language-edit floor select; see the
     // roster/progress options above for why the level number is baked in.
     "settings.languageEdit.optionProjectLead":
-      "Project lead (500) — default. Project managers fix their own languages",
-    "settings.languageEdit.optionMaintainer": "Maintainer (600) — only maintainers change languages",
+      "Project lead — default. Project managers fix their own languages",
+    "settings.languageEdit.optionMaintainer": "Maintainer — only maintainers change languages",
     "settings.languageEdit.ownerOnlyError":
       "Only org owners can change the language permission policy.",
 
     // ── ImportPermissionsSection (org settings → security) — AQU-2304 ──
     "settings.importPermissions.label": "Who can import files",
-    "settings.importPermissions.description":
-      "Minimum role required to bring a new source file into a project, " +
-      "including re-importing one. Importing a translation into a file that " +
-      "is already in the project is unaffected and stays open to " +
-      "contributors.",
+    "settings.importPermissions.summary": "The lowest role that can bring a new source file into a project.",
+    "settings.importPermissions.info":
+      "That includes re-importing one. Importing a translation into a file already in the " +
+      "project stays open to contributors.",
     // Open-dropdown option text for the import floor select; see the
     // roster/progress options above for why the level number is baked in.
     "settings.importPermissions.optionProjectLead":
-      "Project lead (500) — default. Project managers import their own files",
-    "settings.importPermissions.optionMaintainer":
-      "Maintainer (600) — only maintainers add or replace source files",
+      "Project lead — default. Project managers import their own files",
+    "settings.importPermissions.optionMaintainer": "Maintainer — only maintainers add or replace source files",
     "settings.importPermissions.ownerOnlyError":
       "Only org owners can change the import permission policy.",
 
@@ -422,18 +417,16 @@ export const settings = defineNamespace({
       "this is set to.",
     // Open-dropdown option text for both comment floors; see the
     // roster/progress options above for why the level number is baked in.
-    "settings.commentPermissions.createOptionCommenter": "Commenter (200) — default",
-    "settings.commentPermissions.createOptionReviewer": "Reviewer (300) — reviewers and above",
-    "settings.commentPermissions.createOptionContributor":
-      "Contributor (400) — translators and above",
-    "settings.commentPermissions.createOptionProjectLead": "Project lead (500) — leads and above",
-    "settings.commentPermissions.createOptionMaintainer": "Maintainer (600) — most restrictive",
-    "settings.commentPermissions.resolveOptionCommenter":
-      "Commenter (200) — anyone who can comment",
-    "settings.commentPermissions.resolveOptionReviewer": "Reviewer (300) — reviewers and above",
-    "settings.commentPermissions.resolveOptionContributor": "Contributor (400) — default",
-    "settings.commentPermissions.resolveOptionProjectLead": "Project lead (500) — leads and above",
-    "settings.commentPermissions.resolveOptionMaintainer": "Maintainer (600) — most restrictive",
+    "settings.commentPermissions.createOptionCommenter": "Commenter — default",
+    "settings.commentPermissions.createOptionReviewer": "Reviewer — reviewers and above",
+    "settings.commentPermissions.createOptionContributor": "Contributor — translators and above",
+    "settings.commentPermissions.createOptionProjectLead": "Project lead — leads and above",
+    "settings.commentPermissions.createOptionMaintainer": "Maintainer — most restrictive",
+    "settings.commentPermissions.resolveOptionCommenter": "Commenter — anyone who can comment",
+    "settings.commentPermissions.resolveOptionReviewer": "Reviewer — reviewers and above",
+    "settings.commentPermissions.resolveOptionContributor": "Contributor — default",
+    "settings.commentPermissions.resolveOptionProjectLead": "Project lead — leads and above",
+    "settings.commentPermissions.resolveOptionMaintainer": "Maintainer — most restrictive",
 
     // ── UsageSection (Preferences → Usage) ──
     "settings.usage.historyLabel": "7-day audio history",
@@ -481,7 +474,7 @@ export const settings = defineNamespace({
     "settings.orgSettingsIndex.description": "Manage this organization. Personal preferences moved to {link}.",
     "settings.orgSettingsIndex.navIdentity": "Identity",
     "settings.orgSettingsIndex.navSecurity": "Security",
-    "settings.orgSettingsIndex.navGroupPeopleProjects": "People & Projects",
+    "settings.orgSettingsIndex.navGroupPeopleProjects": "People & projects",
     // "Organization settings" page title → editor.navTitle.organizationSettings (identical text)
     // "Organization" nav-group label → onboarding.apiTokens.orgLabel (identical text;
     //   org.breadcrumb.organizationFallback already holds the documented exception

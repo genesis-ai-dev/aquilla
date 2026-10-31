@@ -172,7 +172,7 @@ describe("YouTubeImportPanel", () => {
         videoUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" }),
       expect.anything(),
     )
-    fireEvent.click(screen.getByRole("button", { name: "Link video" }))
+    fireEvent.click(screen.getByRole("button", { name: "Link film" }))
     await waitFor(() => expect(onImported).toHaveBeenCalledOnce())
   })
   it("offers automatic captions from original media with the YouTube picture", async () => {
@@ -187,7 +187,7 @@ describe("YouTubeImportPanel", () => {
     await selectFile(new File(["audio"], "clip.mp3", { type: "audio/mpeg" }))
     fireEvent.click(screen.getByRole("button", { name: "Preview import" }))
     await screen.findByRole("dialog")
-    fireEvent.click(screen.getByRole("button", { name: "Import media and link video" }))
+    fireEvent.click(screen.getByRole("button", { name: "Import media and link the film" }))
     await waitFor(() => expect(onImported).toHaveBeenCalledOnce())
     expect(createMediaFileCommit).toHaveBeenCalledWith(
       expect.objectContaining({ name: "clip.mp3" }), "audio",
@@ -212,7 +212,7 @@ describe("YouTubeImportPanel", () => {
     const wording = screen.getByLabelText("Caption 1 wording")
     expect(wording).toHaveValue("First phrase")
     fireEvent.change(wording, { target: { value: "Reviewed phrase" } })
-    fireEvent.click(screen.getByRole("button", { name: "Import media and link video" }))
+    fireEvent.click(screen.getByRole("button", { name: "Import media and link the film" }))
     await waitFor(() => expect(onImported).toHaveBeenCalledOnce())
     expect(createMediaFileCommit).toHaveBeenCalledWith(
       expect.any(File), "audio", expect.objectContaining({
@@ -229,9 +229,9 @@ describe("YouTubeImportPanel", () => {
     fillYouTubeLink("https://youtu.be/dQw4w9WgXcQ")
     fireEvent.change(screen.getByLabelText("Video name"), { target: { value: "My picture" } })
     fireEvent.click(screen.getByRole("button", { name: "Preview import" }))
-    await screen.findByRole("button", { name: "Link video" })
+    await screen.findByRole("button", { name: "Link film" })
     fireEvent.click(screen.getByLabelText("Import a caption export"))
-    expect(screen.queryByRole("button", { name: "Link video" }))
+    expect(screen.queryByRole("button", { name: "Link film" }))
       .not.toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Preview captions" })).toBeDisabled()
   })

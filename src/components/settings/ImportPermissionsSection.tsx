@@ -76,7 +76,12 @@ export function ImportPermissionsSection({ orgSettings, canEdit }: ImportPermiss
   return (
     <SettingsRow
       label={t("settings.importPermissions.label")}
-      description={t("settings.importPermissions.description")}
+      description={t("settings.importPermissions.summary")}
+      info={{
+        label: t("common.aboutAria", { name: t("settings.importPermissions.label") }),
+        content: t("settings.importPermissions.info"),
+        testId: "settings-info-import-min-role",
+      }}
       control={
         <div className="flex min-w-44 flex-col items-end gap-1">
           <Select

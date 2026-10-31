@@ -1,6 +1,7 @@
 // AQU-2327: the Station's heading, its empty state, and its Approve and Undo.
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { __resetStationTargetForTests, openInStation } from "@/lib/station/target"
 import { StationHeader, StationPanel, approvalState, versionOf } from "./StationPanel"
 import type { StationHost, StationTake } from "./station-host"
@@ -96,6 +97,17 @@ describe("the Station", () => {
     openInStation({ fileId: "f1", cellId: "c331", audioId: "t2.webm" })
     render(<StationPanel host={makeHost(src)} visible />)
     expect(screen.getByTestId("station-source-note").textContent).toMatch(/source recording/)
+  })
+
+  it("picking a listening speed closes its menu", async () => {
+    const take = makeTake()
+    openInStation({ fileId: "f1", cellId: "c331", audioId: "t2.webm" })
+    render(<StationPanel host={makeHost(take)} visible />)
+    const user = userEvent.setup()
+    await user.click(screen.getByTestId("station-speed"))
+    await user.click(await screen.findByRole("menuitemradio", { name: "1.5×" }))
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull())
+    expect(screen.getByTestId("station-speed").textContent).toBe("1.5× ▾")
   })
 
   it("counts approvals against the project's need, and versions by the chain", () => {

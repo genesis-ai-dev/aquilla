@@ -156,7 +156,8 @@ export function StationTransport({
           <DropdownMenuContent align="start" side="top" className="w-[120px]">
             <DropdownMenuRadioGroup value={String(ed.speed)} onValueChange={(v) => ed.setSpeed(Number(v))}>
               {SPEEDS.map((x) => (
-                <DropdownMenuRadioItem key={x} value={String(x)}>
+                // A pick closes the menu (found in the walk: it stayed open).
+                <DropdownMenuRadioItem key={x} value={String(x)} closeOnClick>
                   {x}×
                 </DropdownMenuRadioItem>
               ))}

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react"
+import { SearchSelect } from "@/components/ui/search-select"
 import { SettingMovedNote } from "@/components/settings/SettingMovedNote"
 import { settingMovedNotesShowing } from "@/lib/settings/setting-moved"
 import { authorNameFor, LOCAL_AUTHOR_NAME_SETTING_ID } from "@/lib/store/local-author-name"
@@ -2206,22 +2207,25 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
                       saveId="draftingSettings.model"
                       label={<label htmlFor="mdl">{t("projectSettings.advancedLlm.modelLabel")}</label>}
                       control={
-                        <Select
+                        // AQU-2290: a provider can list hundreds of models, so the
+                        // list searches as you type, like every list that grows
+                        // with your data (AQU-2260). A long model name is cut short
+                        // to fit; hovering over it shows the whole name (Sam, Oct
+                        // 30), and the whole name stays the row's text, so a
+                        // keyboard user's screen reader reads it in full.
+                        // AQU-2262: picking one saves it at once, one Undo step.
+                        <SearchSelect
+                          id="mdl"
+                          aria-label={t("projectSettings.advancedLlm.modelLabel")}
+                          options={models.map((m) => ({ value: m, label: m }))}
                           value={model}
-                          onValueChange={(value) => {
-                            if (value != null && value !== model) setDrafting("model", value)
-                          }}
+                          onValueChange={(value) => setDrafting("model", value)}
                           disabled={!canChangeShared}
-                        >
-                          <SelectTrigger id="mdl" aria-label={t("projectSettings.advancedLlm.modelLabel")} className="w-56 bg-background">
-                            <SelectValue placeholder={t("projectSettings.advancedLlm.modelPlaceholder")} />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectGroup>
-                              {models.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
-                            </SelectGroup>
-                          </SelectContent>
-                        </Select>
+                          placeholder={t("projectSettings.advancedLlm.modelPlaceholder")}
+                          className="w-56 bg-background"
+                          renderOption={(o) => <span className="min-w-0 truncate" title={o.label}>{o.label}</span>}
+                          renderValue={(o) => <span title={o.label}>{o.label}</span>}
+                        />
                       }
                     />
                   )}

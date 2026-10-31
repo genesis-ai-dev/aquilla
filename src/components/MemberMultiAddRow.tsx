@@ -49,7 +49,7 @@ export interface MemberAddRoleOption {
 const sameName = (a: string, b: string) =>
   a.trim().toLowerCase() === b.trim().toLowerCase();
 
-interface MemberMultiAddRowProps {
+export interface MemberMultiAddRowProps {
   /** Roles offered in the picker — pass them already capped to the caller. */
   roleOptions: readonly MemberAddRoleOption[];
   /** Initial value of the role picker (local UI state only). */

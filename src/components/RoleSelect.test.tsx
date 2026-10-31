@@ -1,7 +1,10 @@
-import { describe, it, expect, vi } from "vitest"
+import "@/test-utils/all-catalogs"
+import { describe, it, expect, vi, afterEach } from "vitest"
 import { render, screen, fireEvent, within } from "@testing-library/react"
 import { RoleSelect } from "./RoleSelect"
-import { ALL_ROLE_OPTIONS, LINK_ROLE_OPTIONS, roleDescription } from "@/lib/frontier/roles"
+import { LINK_ROLE_OPTIONS, PROJECT_ROLE_OPTIONS, roleDescription } from "@/lib/frontier/roles"
+import { I18nProvider } from "@/lib/i18n/I18nProvider"
+import { LOCALE_STORAGE_KEY } from "@/lib/i18n/store"
 
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
@@ -45,17 +48,27 @@ describe("RoleSelect", () => {
     expect(onValueChange).toHaveBeenCalledWith(100)
   })
 
-  it("defaults to the full role ladder", async () => {
-    render(
-      <RoleSelect value={100} onValueChange={() => {}} aria-label="Role" />,
-    )
-    fireEvent.click(screen.getByRole("combobox", { name: "Role" }))
-    const listbox = await screen.findByRole("listbox")
-    expect(within(listbox).getAllByRole("option")).toHaveLength(ALL_ROLE_OPTIONS.length)
-    expect(
-      within(listbox).getByRole("option", {
-        name: new RegExp(escapeRegExp(roleDescription(700))),
-      }),
-    ).toBeInTheDocument()
+  // AQU-2289: the closed picker showed "Project Lead", title-cased from the
+  // role's machine name and English in every language. It now shows the
+  // catalog's name, in sentence case and in the reader's language.
+  describe("the chosen role's name", () => {
+    afterEach(() => window.localStorage.clear())
+
+    it("is the catalog's sentence-case name", () => {
+      render(
+        <RoleSelect options={PROJECT_ROLE_OPTIONS} value={500} onValueChange={() => {}} aria-label="Role" />,
+      )
+      expect(screen.getByRole("combobox", { name: "Role" })).toHaveTextContent(/^Project lead/)
+    })
+
+    it("is in the reader's language", () => {
+      window.localStorage.setItem(LOCALE_STORAGE_KEY, "fr")
+      render(
+        <I18nProvider>
+          <RoleSelect options={PROJECT_ROLE_OPTIONS} value={500} onValueChange={() => {}} aria-label="Role" />
+        </I18nProvider>,
+      )
+      expect(screen.getByRole("combobox", { name: "Role" })).toHaveTextContent(/^Chef de projet/)
+    })
   })
 })

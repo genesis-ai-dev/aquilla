@@ -12,7 +12,6 @@ import {
 } from "@/components/ui/dialog"
 import {
   ROLE,
-  PROJECT_ROLE_OPTIONS,
   LINK_ROLE_OPTIONS,
   roleDisplayText,
   roleName,
@@ -24,6 +23,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { toUserFacingError } from "@/lib/errors/user-error"
 import { UsernameTypeahead, type RecipientValue } from "@/components/UsernameTypeahead"
 import { RoleSelect } from "@/components/RoleSelect"
+import { roleChoices as projectRoleChoices } from "@/lib/frontier/role-choices"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { LaneAccessFields } from "@/components/LaneAccessFields"
@@ -62,7 +62,7 @@ interface ProjectChecklistRowProps {
   isDone: boolean
   busy: boolean
   isEmailMode: boolean
-  roleChoices: ComponentProps<typeof RoleSelect>["options"]
+  roleChoices: NonNullable<ComponentProps<typeof RoleSelect>["options"]>
   onToggle: (projectId: string) => void
   onRoleChange: (projectId: string, level: RoleLevel) => void
   laneChoice: LaneAccessChoice | null
@@ -151,7 +151,8 @@ function ProjectChecklistRow({
           </span>
         ) : isSelected ? (
           <RoleSelect
-            options={roleChoices}
+            // AQU-2289: never more than the operator may grant on this project.
+            options={roleChoices.filter((r) => project.role?.level == null || r.level <= project.role.level)}
             value={selectedRole}
             onValueChange={(level) => onRoleChange(project.id, level as RoleLevel)}
             disabled={busy}
@@ -432,10 +433,11 @@ export function MultiProjectInviteDialog({
     onOpenChange(false)
   }
 
-  // Username mode: cap role picker at maintainer; owner is conferred on
-  // creation, never via bulk add. Email mode: link-share invites are capped at
-  // contributor server-side, so only offer the link roles.
-  const roleChoices = isEmailMode ? LINK_ROLE_OPTIONS : PROJECT_ROLE_OPTIONS
+  // Username mode: the one project list (AQU-2289), up to Maintainer; owner
+  // is conferred on creation, never via bulk add. Email mode: link-share
+  // invites are capped at contributor server-side, so only offer the link
+  // roles. Each row then caps the list at the operator's own role there.
+  const roleChoices = isEmailMode ? LINK_ROLE_OPTIONS : projectRoleChoices("project", { callerLevel: null })
 
   const renderProjectRow = useCallback(
     (project: CloudProjectSummary, className?: string) => (

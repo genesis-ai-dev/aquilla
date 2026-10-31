@@ -43,6 +43,26 @@ export const org = defineNamespace({
     "org.access.scope.team": "team",
     "org.access.scope.project": "project",
     "org.access.scope.lane": "language lane",
+
+    // -- AQU-2289 RoleDialog: the one dialog behind every Change role and Add member --
+    "org.roleDialog.addPersonTitle": "Add {name} to {where}",
+    "org.roleDialog.moreAboutRolesAriaLabel": "More about these roles",
+    "org.roleDialog.orgChangeSummary": "Sets their role in the organization.",
+    "org.roleDialog.orgRoleDetails":
+      "Maintainers and Owners see every project in the organization. Everyone else sees a project only once they're added to it, or to a team that has it.",
+    "org.roleDialog.orgAddSummary": "Add people to this organization, or invite them by email.",
+    "org.roleDialog.projectChangeSummary": "Sets their role on this project.",
+    "org.roleDialog.projectExceptionSummary":
+      "Sets a role for this project only. Their organization role still applies everywhere else.",
+    "org.roleDialog.teamAddSummary": "Add people from the organization, or invite someone from outside it.",
+    "org.roleDialog.ownerWarning": "Owners get full control of this organization, and this can't be undone here.",
+    "org.roleDialog.ownerWarningMoreAriaLabel": "More about making someone an Owner",
+    "org.roleDialog.ownerWarningDetails":
+      "That includes billing, members and deleting the organization. You keep your own ownership, so the organization is never left without an owner. Once someone is an Owner, their role is locked in the member list.",
+    "org.roleDialog.orgChangeForbidden": "Only organization owners can change member roles.",
+    "org.roleDialog.orgAddForbidden": "Only organization owners can add members.",
+    "org.roleDialog.setProjectRole": "Set a role for this project…",
+    "org.roleDialog.searchMembersLabel": "Search members",
     // -- AQU-1352 §3.7 roster wiring (ProjectMembersPage) --
     // -- AQU-1352 §3.6 People & access page (AQU-1072) --
     "org.access.page.title": "People & access",
@@ -865,13 +885,7 @@ export const org = defineNamespace({
     "org.rowActionsAriaLabel": "Actions for {name}",
 
     // -- OrgMembersTable: org roster table and member-management dialogs --
-    "org.membersPage.orgTable.changeRoleDescription":
-      "Maintainer and Owner can see every project in the organization. Contributor and below cannot see projects until added to a project or team.",
     "org.membersPage.orgTable.addMemberTitle": "Add a member",
-    "org.membersPage.orgTable.addMemberDescription":
-      "Add someone to this organization, or invite them by email if they don't have an account yet.",
-    "org.membersPage.orgTable.projectAccessNote":
-      "Contributor, Project lead, and Viewer join the organization but cannot see or open projects until they are added to a specific project or team. Only Maintainer and Owner can see every project.",
     "org.membersPage.orgTable.addMethodAriaLabel": "Add member method",
     "org.membersPage.orgTable.addMembersTab": "Add members",
     "org.membersPage.orgTable.inviteByEmailTab": "Invite by email",
@@ -1102,7 +1116,6 @@ export const org = defineNamespace({
     // -- MembersMatrixCellEditor: inline per-cell role editor in the members × projects matrix --
     "org.membersMatrixCellEditor.alsoHasAccessAriaLabel": "Also has access via other paths",
     "org.membersMatrixCellEditor.alsoHasAccessVia": "Also has access via:",
-    "org.membersMatrixCellEditor.currentBadge": "current",
     // "Saving…" → common.saving (identical text)
     "org.membersMatrixCellEditor.removeFromProject": "Remove from project",
     "org.membersMatrixCellEditor.creatorGrantHeading": "Creator grant",
@@ -1116,7 +1129,6 @@ export const org = defineNamespace({
     "org.membersMatrixCellEditor.orgWideHeading": "Effective role: org-wide (max-wins)",
     "org.membersMatrixCellEditor.orgWideDescription":
       "This Maintainer or Owner org role applies to every project. A direct project grant added here will supersede the org-wide grant for this project only (max-wins still applies — only a higher direct role changes the effective role).",
-    "org.membersMatrixCellEditor.setExceptionLabel": "Set a project-level exception (direct grant)…",
     "org.membersMatrixCellEditor.addToProjectAriaLabel": "Add {username} to project",
     // "Add {username}" popover title → workspace.typeahead.addUser (identical text)
     "org.membersMatrixCellEditor.editRoleAriaLabel": "Edit {username}'s role on this project",
@@ -1264,11 +1276,14 @@ export const org = defineNamespace({
     "org.grantScope.sentence.link": "Anyone with this link will join as a {role} {scope}",
     "org.grantScope.sentence.unset": "They will join as a {role} {scope}",
     "org.grantScope.scope.organization": "of the whole organization — every project",
+    // AQU-2289: an org role below Maintainer opens no project (AQU-1107).
+    "org.grantScope.scope.organizationOnly": "of the organization — no projects until added to one",
     "org.grantScope.scope.projectAllLanes": "on {project} — every language lane",
     "org.grantScope.scope.project": "on {project}",
     "org.grantScope.scope.laneOnly": "on {project}, {lane} language lane only",
     "org.grantScope.scope.lanesOnly": "on {project}, {lanes} language lanes only",
     "org.grantScope.echo.organization": "every project",
+    "org.grantScope.echo.organizationOnly": "organization only",
     "org.grantScope.echo.allLanes": "every language lane",
     "org.grantScope.echo.laneOnly": "{lane} language lane only",
     "org.grantScope.echo.lanesOnly": "{lanes} language lanes only",
@@ -1794,6 +1809,30 @@ export const org = defineNamespace({
         "Organizations, teams, members and invitations — the permanent chrome above a project: the org switcher, breadcrumb trail, member and team management, invite flows and permission surfaces. Most of these strings sit in a narrow header or sidebar that is on screen on every route, so they compete for horizontal space with the project's own content.",
     },
     keys: {
+      "org.roleDialog.addPersonTitle": {
+        description:
+          "AQU-2289: title of the role dialog when it adds one known person, e.g. from an empty cell of the members matrix.",
+        placeholders: {
+          name: "The person's username. Not translated.",
+          where: "The project's name. Not translated.",
+        },
+      },
+      "org.roleDialog.moreAboutRolesAriaLabel": {
+        description:
+          "AQU-2289: screen-reader name of the (i) button beside the role dialog's one-line description. It opens the longer explanation in place.",
+      },
+      "org.roleDialog.ownerWarningMoreAriaLabel": {
+        description:
+          "AQU-2289: screen-reader name of the (i) button on the role dialog's Owner warning. It opens what being an Owner means, in place.",
+      },
+      "org.roleDialog.orgRoleDetails": {
+        description:
+          "AQU-2289 (was AQU-1107's add-member note): opened from the (i) in the role dialog for an organization role. States that organization membership below Maintainer opens no project. Role names are the picker's role vocabulary, not placeholders.",
+      },
+      "org.roleDialog.ownerWarning": {
+        description:
+          "AQU-2289: one-line warning in the role dialog when an organization owner picks Owner for someone. The rest is behind an (i).",
+      },
       "org.access.addPeopleTo": {
         description:
           "AQU-1352: header of the add-people dialog on a team or project. {path} is the scope breadcrumb, e.g. 'Biblica › Pattani Malay Bible'.",
@@ -2652,18 +2691,6 @@ export const org = defineNamespace({
         description:
           "Accessible name for the tabs that choose whether the org-member dialog adds an existing Aquilla user or sends an email invitation.",
       },
-      "org.membersPage.orgTable.addMemberDescription": {
-        description:
-          "Dialog subtitle on the org Members 'Add a member' dialog. Explains that the action adds someone to the organization (or invites by email), not that it grants project access.",
-      },
-      "org.membersPage.orgTable.projectAccessNote": {
-        description:
-          "Helper paragraph under the add-member dialog subtitle (AQU-1107). States the rule that Contributor/Project lead/Viewer org membership does not open projects, and that only Maintainer and Owner see every project. Role names stay in this sentence as English role vocabulary matching the picker — they are not placeholders.",
-      },
-      "org.membersPage.orgTable.changeRoleDescription": {
-        description:
-          "Dialog subtitle when an org owner changes a member's organization-level role. Same access rule as org.membersPage.orgTable.projectAccessNote: Maintainer/Owner see every project; Contributor and below do not until added to a project or team.",
-      },
       "org.membersPage.orgTable.copyEmailAriaLabel": {
         description:
           "Accessible name for the small copy-to-clipboard icon button beside a member's " +
@@ -3269,6 +3296,10 @@ export const org = defineNamespace({
         description:
           "Scope phrase for an organization grant: the person joins the whole organization and therefore every project. Begins with 'of' so it reads after 'as a {role}'.",
       },
+      "org.grantScope.scope.organizationOnly": {
+        description:
+          "Scope phrase for an organization grant below Maintainer: the person joins the organization but sees no project until someone adds them to one (or to a team that has it). Begins with 'of' so it reads after 'as a {role}'.",
+      },
       "org.grantScope.scope.projectAllLanes": {
         description:
           "Scope phrase for a project grant with no lane restriction. Begins with 'on'. The em dash clause says the grant is not limited to one lane.",
@@ -3297,6 +3328,10 @@ export const org = defineNamespace({
       },
       "org.grantScope.echo.organization": {
         description: "Short scope echo appended to an organization invite or add button.",
+      },
+      "org.grantScope.echo.organizationOnly": {
+        description:
+          "Short scope echo appended to an organization add button when the role opens no project (below Maintainer): the person joins the organization only.",
       },
       "org.grantScope.echo.allLanes": {
         description: "Short scope echo appended to a button that grants a whole project, every lane.",

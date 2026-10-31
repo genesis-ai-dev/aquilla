@@ -164,6 +164,7 @@ describe("Record now from the Station", () => {
   it("on a line, the recorder has its navigation, the line's takes, Upload and Generate", () => {
     renderWithTooltips(modalEl())
     for (const id of LINE_PARTS) expect(screen.queryAllByTestId(id).length, id).toBeGreaterThan(0)
+    expect(screen.getByText("0:03.6")).toBeInTheDocument()
   })
 
   it("for an insert, it shows only what records: Record, the line to read, the format and the recording settings", () => {
@@ -173,6 +174,13 @@ describe("Record now from the Station", () => {
     expect(screen.getByTestId("rec-read-aloud")).toBeInTheDocument()
     expect(screen.getByTestId("rec-format")).toBeInTheDocument()
     expect(screen.getByTestId("rec-settings")).toBeInTheDocument()
+    // Without the takes it fits what is left, rather than the tall column
+    // whose lower half is the takes drawer.
+    // The line's take (3.6 s here) is not measured on the bar: it starts empty.
+    expect(screen.queryByText("0:03.6")).toBeNull()
+    const panel = document.querySelector("[data-recorder-dialog]")!
+    expect(panel.className).toContain("h-auto")
+    expect(panel.className).not.toContain("h-[620px]")
   })
 
   it("for an insert, the settings keep the countdown and its beep, not the line-to-line ones", async () => {

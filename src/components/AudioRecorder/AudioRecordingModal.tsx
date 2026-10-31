@@ -569,14 +569,16 @@ export function AudioRecordingModal({
   // recorder; CLOSED, only the "Takes" bar shows. Either way its chevron raises
   // the whole list over the line and the instruments — `takesOpen` — as far as
   // the takes need and no further than the header.
-  const takesDrawerOpen = useRecordingTakesDrawerOpen()
-  const [takesOpen, setTakesOpen] = useState(false)
-  const takesSheet = takesOpen
   // AQU-2327: opened by the Station's "Record now" to hand ONE recording back
   // for an insert. Only what records is shown: no line navigation, no line's
   // takes (listed, drawn or in a drawer), no Upload or Generate, and none of
-  // the settings about moving between lines or the takes list.
+  // the settings about moving between lines or the takes list. The panel lays
+  // out as it does with the takes drawer closed, and fits what is left.
   const capture = Boolean(onCaptured)
+  const takesDrawerPref = useRecordingTakesDrawerOpen()
+  const takesDrawerOpen = takesDrawerPref && !capture
+  const [takesOpen, setTakesOpen] = useState(false)
+  const takesSheet = takesOpen
 
   // THE READ-ALOUD BLOCK NEVER SCROLLS AND NEVER CLIPS (Sam, 2026-08-13). It
   // owns the height of five line boxes; a line too long for that gets a smaller
@@ -1970,7 +1972,7 @@ export function AudioRecordingModal({
           "gap-0 overflow-hidden p-0",
           showFilm
             ? "flex flex-row sm:aspect-[16/9] sm:max-w-5xl"
-            : "flex h-[620px] flex-col sm:max-w-[400px]",
+            : cn("flex flex-col sm:max-w-[400px]", capture ? "h-auto" : "h-[620px]"),
         )}
         style={{ maxHeight: "min(92vh, 800px)" }}
         showCloseButton={false}
@@ -2565,7 +2567,9 @@ export function AudioRecordingModal({
                   </div>
                 )}
                 {targetSec != null ? (
-                  <DurationBar elapsedMs={readyKeptMs ?? 0} targetSec={targetSec} />
+                  // AQU-2327: recording an insert, the line's own take isn't
+                  // measured against its window — the bar starts empty.
+                  <DurationBar elapsedMs={capture ? 0 : (readyKeptMs ?? 0)} targetSec={targetSec} />
                 ) : !(readyTakeId && readyAtt && readyKept) ? (
                   // No take to hang the icon on: the note stays a line.
                   <p className="text-xs text-muted-foreground">{t("audio.recordingModal.noTimedWindow")}</p>

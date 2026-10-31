@@ -137,7 +137,8 @@ describe("useMediaDock", () => {
       // …and f1's arrangement was never written under f2, not even for a moment.
       const underF2 = writes.mock.calls.filter(([key]) => key === "aquilla:mediaDock:f2").map(([, raw]) => JSON.parse(raw).areas)
       expect(underF2.length).toBeGreaterThan(0)
-      for (const areas of underF2) expect(areas).toEqual({ ll: ["film"], lr: ["text"] })
+      // (AQU-2327: as every file starts, the Station a tab behind the text.)
+      for (const areas of underF2) expect(areas).toEqual({ ll: ["film"], lr: ["text", "station"] })
     } finally {
       writes.mockRestore()
     }

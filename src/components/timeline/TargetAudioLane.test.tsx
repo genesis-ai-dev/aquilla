@@ -613,7 +613,8 @@ describe("TargetAudioLane — interaction", () => {
     )
     fireEvent.click(screen.getByTestId("tl-target-c1"))
     expect(onSelect).toHaveBeenCalledWith("c1")
-    expect(onSelectTake).toHaveBeenCalledWith("c1")
+    // AQU-2327: with the take's own id, so the Station can follow the click.
+    expect(onSelectTake).toHaveBeenCalledWith("c1", "audio-c1-1700000000-take.webm")
     expect(onSeek).not.toHaveBeenCalled()
   })
 

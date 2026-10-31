@@ -1,0 +1,194 @@
+{
+  "format": 1,
+  "projects": [
+    {
+      "slug": "prod-01",
+      "source": "r2",
+      "file": "prod-01.json",
+      "sha256": "74d41b921e2e7675363c2f26084e3e695cc7351a6a375b0bf5e3abaedb2163d0",
+      "events": 11645,
+      "maxSeq": 17786,
+      "capturedAt": "2026-10-30T21:30:10.698Z"
+    },
+    {
+      "slug": "prod-02",
+      "source": "r2",
+      "file": "prod-02.json",
+      "sha256": "08c96ed27e5f4639b37e4ab39faee57ae670f36d1b89236a56b0825b1070df1f",
+      "events": 3866,
+      "maxSeq": 3866,
+      "capturedAt": "2026-10-30T21:31:56.024Z"
+    },
+    {
+      "slug": "prod-03",
+      "source": "r2",
+      "file": "prod-03.json",
+      "sha256": "35964c74c9e5cc380d389a2a3348e34769d94b79fe79ae2277cf1c15f2b4de76",
+      "events": 22579,
+      "maxSeq": 28256,
+      "capturedAt": "2026-10-30T21:32:40.171Z"
+    },
+    {
+      "slug": "prod-04",
+      "source": "r2",
+      "file": "prod-04.json",
+      "sha256": "72ebb0e42bbd1aedcfbcd6b9b9f0009b7b3b678958c728ff04913716c510222a",
+      "events": 4198,
+      "maxSeq": 4231,
+      "capturedAt": "2026-10-30T21:32:42.858Z"
+    },
+    {
+      "slug": "prod-05",
+      "source": "r2",
+      "file": "prod-05.json",
+      "sha256": "0b1428fa32649059d9d94e499217a792789c2f1b725cf7b9f556453a25cdb561",
+      "events": 13809,
+      "maxSeq": 13809,
+      "capturedAt": "2026-10-30T21:32:46.263Z"
+    },
+    {
+      "slug": "prod-06",
+      "source": "r2",
+      "file": "prod-06.json",
+      "sha256": "b925adb4c1d84406467e7a430764d228b88e977f68fd5d28074d67493b69dde9",
+      "events": 42770,
+      "maxSeq": 43009,
+      "capturedAt": "2026-10-30T21:32:50.824Z"
+    },
+    {
+      "slug": "prod-07",
+      "source": "r2",
+      "file": "prod-07.json",
+      "sha256": "36d5240f5db41fe2e31c5a0b79a2fae1e275757e7667fa4586e4e5779e018482",
+      "events": 35467,
+      "maxSeq": 36466,
+      "capturedAt": "2026-10-30T21:32:54.378Z"
+    },
+    {
+      "slug": "prod-08",
+      "source": "r2",
+      "file": "prod-08.json",
+      "sha256": "98631933f90ab8089caf0a23bcc07c566715704dfbff8639ff91c82bb0545080",
+      "events": 15510,
+      "maxSeq": 15591,
+      "capturedAt": "2026-10-30T21:32:57.793Z"
+    },
+    {
+      "slug": "prod-09",
+      "source": "r2",
+      "file": "prod-09.json",
+      "sha256": "47fff728bbca88e2558feefef3b79c8958036f04b40cf22a3c452d35eaa779d1",
+      "events": 20829,
+      "maxSeq": 20829,
+      "capturedAt": "2026-10-30T21:33:01.656Z"
+    },
+    {
+      "slug": "prod-10",
+      "source": "r2",
+      "file": "prod-10.json",
+      "sha256": "5cd73f85cb16ab7592410730cae01150c8719fe2e609ac81742ca08d9aff49ea",
+      "events": 4488,
+      "maxSeq": 6364,
+      "capturedAt": "2026-10-30T21:33:03.450Z"
+    },
+    {
+      "slug": "prod-11",
+      "source": "r2",
+      "file": "prod-11.json",
+      "sha256": "fced4dc97df16b9e6d08f6fdb7d984e5ff2846a8bdba1fd93ecd7dc7fa88aaf8",
+      "events": 31565,
+      "maxSeq": 31565,
+      "capturedAt": "2026-10-30T21:33:09.210Z"
+    },
+    {
+      "slug": "prod-12",
+      "source": "r2",
+      "file": "prod-12.json",
+      "sha256": "0a696c1225e033ed6cd0bddd2b6a66adf08cbcab7deb49a709a4d9af2216742f",
+      "events": 4083,
+      "maxSeq": 4611,
+      "capturedAt": "2026-10-30T21:33:10.992Z"
+    },
+    {
+      "slug": "prod-13",
+      "source": "r2",
+      "file": "prod-13.json",
+      "sha256": "52cdd2c919455e82e928d341931ace2b5e9e0d8a327f8a04e028fbe0871dabb9",
+      "events": 45943,
+      "maxSeq": 46883,
+      "capturedAt": "2026-10-30T21:33:16.301Z"
+    },
+    {
+      "slug": "prod-14",
+      "source": "r2",
+      "file": "prod-14.json",
+      "sha256": "65b5445a85f9784db2d122fa28ce5921df41d720a802fe716e87f5ca59146bd1",
+      "events": 36728,
+      "maxSeq": 38805,
+      "capturedAt": "2026-10-30T21:33:19.649Z"
+    },
+    {
+      "slug": "prod-15",
+      "source": "r2",
+      "file": "prod-15.json",
+      "sha256": "036599efd27e2b2560ccd1eda145105d5b0621ce27995685a66b05d55d459b8a",
+      "events": 8846,
+      "maxSeq": 9382,
+      "capturedAt": "2026-10-30T21:33:21.964Z"
+    },
+    {
+      "slug": "prod-16",
+      "source": "r2",
+      "file": "prod-16.json",
+      "sha256": "65f73fdaf9e5f24db7222e0081544cda4db84d4d6e9028cc25d0a68c910f77f5",
+      "events": 36839,
+      "maxSeq": 36839,
+      "capturedAt": "2026-10-30T21:33:25.777Z"
+    },
+    {
+      "slug": "prod-17",
+      "source": "r2",
+      "file": "prod-17.json",
+      "sha256": "78b2336b98094a90ba74318303c444ace396000bec3daf6b026aee0165309d0f",
+      "events": 19354,
+      "maxSeq": 19354,
+      "capturedAt": "2026-10-30T21:33:28.116Z"
+    },
+    {
+      "slug": "prod-18",
+      "source": "r2",
+      "file": "prod-18.json",
+      "sha256": "f64ad8e9d1d0a0270b84b23d037a0619345e61fd1d4f840a1956d2a47f74d147",
+      "events": 8583,
+      "maxSeq": 8584,
+      "capturedAt": "2026-10-30T21:33:30.140Z"
+    },
+    {
+      "slug": "prod-19",
+      "source": "r2",
+      "file": "prod-19.json",
+      "sha256": "afb4aae7893205091d7b6636cc05f0132093bc6589d9028b1475d8d6d65c38ae",
+      "events": 34244,
+      "maxSeq": 34244,
+      "capturedAt": "2026-10-30T21:33:34.821Z"
+    },
+    {
+      "slug": "prod-20",
+      "source": "r2",
+      "file": "prod-20.json",
+      "sha256": "0cb9e65cc14d728a3c113788d8fa189463de96ffbe4d016804f68a96ffdcda32",
+      "events": 35999,
+      "maxSeq": 35999,
+      "capturedAt": "2026-10-30T21:33:37.916Z"
+    },
+    {
+      "slug": "synthetic-genesis",
+      "source": "synthetic",
+      "file": "genesis-sample.json",
+      "sha256": "30bd25a765488db02b66f0bd3151811317ced124030dc73135614a83ccbc22aa",
+      "events": 20,
+      "maxSeq": 20,
+      "capturedAt": "2026-10-30T00:00:00.000Z"
+    }
+  ]
+}

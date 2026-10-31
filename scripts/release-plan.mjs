@@ -13,41 +13,31 @@ export function isReleaseBranch(name) {
   return /^release\/\d{4}\/\d{2}\/\d{2}(-\d{2})?$/.test(name)
 }
 
-// migration and infra paths hold the PR on their own: a schema change or a
-// change to the deploy machinery itself needs a person, every time. sync and
-// auth are only noted on the release notes so a person can see them; they do
-// not hold by themselves — see the 2026-09-23 note in the release line plan.
-const HOLDING_AREAS = new Set(["migration", "infra"])
+// Which outcomes a PR's files could cause, and whether that keeps it off
+// the automatic line, is decided in release-risk.mjs (the labeler reads the
+// same table). Re-exported so the plan's consumers have one import.
+import { classifyFiles, holdingAreas } from "./release-risk.mjs"
 
-// "verify-" catches every verify-*.{sh,mjs} script (verify-deploy-branch,
-// verify-dist-host, verify-deployment-artifacts, verify-live-environment,
-// verify-worker-deployment) — all of them run unattended during
-// `deploy:aquilla*` or are imported by scripts/cloudflare-version-deploy.mjs,
-// which does. tag-metadata and record-github-deployment run from
-// tag-release.sh right before the tag push; assert-workers-build-env and
-// ci-build are what Cloudflare's own build trigger runs for every branch,
-// including the production one.
-const AREA_PATTERNS = [
-  ["migration", /^db\/postgres\/(migrations\/|schema\.sql$)/],
-  ["infra", /(^|\/)wrangler\.toml$|^config\/cloudflare-deployments\.json$|^scripts\/(cloudflare-|verify-|resolve-deployment|tag-release|tag-metadata|record-github-deployment|assert-workers-build-env|ci-build)/],
-  ["sync", /^(sync-worker\/src\/|src\/lib\/sync\/|db\/shim\/)/],
-  ["auth", /^auth-worker\/src\//],
-]
+export { classifyFiles }
 
-export function classifyFiles(files) {
-  const areas = new Set()
-  for (const file of files) {
-    for (const [area, pattern] of AREA_PATTERNS) if (pattern.test(file)) areas.add(area)
-  }
-  const sorted = [...areas].sort()
-  return { areas: sorted, pathHolds: sorted.some((area) => HOLDING_AREAS.has(area)) }
+// A PR is off the automatic line when a holding area it touches has no
+// green gate (release-risk.mjs AREA_GATES; `gates` is the list of areas
+// whose gate check passed on the PR's head, from release-plan-walk.mjs),
+// or its walk is not proven: FAIL, FLAKY and BLOCKED all mean the bot
+// could not prove the outcome, and `unknown` (no matching walk comment
+// yet) holds too. The `release:approved` label is a person's sign-off
+// after the manual QA path, and clears both: once a person has signed,
+// the line picks the PR like any other.
+export function prHolds(pr) {
+  if (pr.approved) return false
+  return holdingAreas(pr.areas ?? [], pr.gates).length > 0 || (pr.walk !== "PASS" && pr.walk !== "none")
 }
 
-// FLAKY and BLOCKED both mean the bot could not prove the outcome, so the PR
-// holds like a fail. `unknown` (no matching walk comment found yet) holds
-// too: deploy stays off until the walk lookup fills it in.
-export function prHolds(pr) {
-  return pr.pathHolds || (pr.walk !== "PASS" && pr.walk !== "none")
+// Why a held PR is held, for the release notes and the PR comment.
+export function holdReason(pr) {
+  const areas = holdingAreas(pr.areas ?? [], pr.gates)
+  if (areas.length) return `touches ${areas.join(", ")}`
+  return `walk ${pr.walk}`
 }
 
 // A PR whose diff touches only docs, only test/journey files, or only
@@ -78,65 +68,42 @@ function branchName(now, usedSuffixes) {
   return `release/${date}-${String(n).padStart(2, "0")}`
 }
 
-function cutSlice({ base, slice, reason, hold, now, usedSuffixesToday, floor }) {
-  const tail = slice[slice.length - 1]
-  return {
-    ...base,
-    cut: true,
-    hold,
-    reason,
-    branch: branchName(now, usedSuffixesToday),
-    // A slice that ends behind the floor cuts at the floor instead: the
-    // branch then carries what production already runs plus this slice,
-    // never less (see splitReleased).
-    sha: floor && tail.behindFloor ? floor : tail.sha,
-    areas: [...new Set(slice.flatMap((pr) => pr.areas))].sort(),
-    prs: slice.map(({ pathHolds, holds, behindFloor, ...pr }) => pr),
-  }
-}
-
-// prs must already be sorted oldest merged first. Each PR needs number, sha,
-// mergedAt, areas, and walk (see classifyFiles and the walk lookup).
+// Cherry-pick model (2026-10-30 hourly-release decision, RELEASE-RISK-GATES.md).
 //
 // One release is in flight at a time. The moment it closes (tagged or
-// deleted), the next slice cuts immediately at whatever's ready in dev —
-// there's no ceiling and no wait timer. Waiting for a ceiling or a clock
-// only means a hotfix cherry-picked onto the closed branch has to be
-// re-cherry-picked onto every slice cut before dev catches up; cutting at
-// dev's current head the instant the line is free means dev already carries
-// the fix, so the next slice just picks it up.
+// deleted), the next slice cuts immediately at whatever's ready in dev.
+// Ready PRs are picked, in dev order, onto `base` (the tagged tip production
+// runs). A held PR is skipped, not a wall: everything merged after it still
+// ships, and the held PR joins the line once a person signs it off with the
+// `release:approved` label. That is what keeps the hourly line moving while
+// a schema change or an events-path rewrite waits for manual QA.
 //
-// floor is the newest dev commit production already runs (see splitReleased);
-// no slice cuts below it. PRs marked behindFloor sit before it on dev, so the
-// smallest cut that ships any of them is at the floor, which ships all of
-// them: they are one indivisible head of the queue.
-export function planRelease({ openReleases, prs, now, usedSuffixesToday = [], floor }) {
-  const base = { openReleases, prCount: prs.length, floor }
+// The cost of picking around a held PR is that a later PR can depend on it
+// and still apply cleanly as a patch. The cut (release-cut.mjs) drops any
+// pick that conflicts and the release-verify workflow builds and tests the
+// picked set before anything deploys; a pick that applies but breaks the
+// build holds its PR as "pick failed verify" by hand (RELEASE-CUT.md).
+export function planRelease({ openReleases, prs, now, usedSuffixesToday = [], base }) {
+  const common = { openReleases, prCount: prs.length, base }
   if (openReleases.length) {
-    return { ...base, cut: false, hold: false, reason: `release in flight: ${openReleases.join(", ")}`, prs: [] }
+    return { ...common, cut: false, reason: `release in flight: ${openReleases.join(", ")}`, prs: [], held: [] }
   }
-  if (!prs.length) return { ...base, cut: false, hold: false, reason: "no unreleased PRs", prs: [] }
-
-  const decorated = prs.map((pr) => ({ ...pr, holds: prHolds(pr) }))
-  let behind = 0
-  while (behind < decorated.length && decorated[behind].behindFloor) behind++
-  const head = decorated.slice(0, Math.max(behind, 1))
-
-  // The head of the queue holds: cut it alone, immediately. Everything
-  // behind it has to wait for production order, so the human gate has to
-  // appear at once.
-  if (head.some((pr) => pr.holds)) {
-    const reason = head.length > 1 ? "a PR behind the deployed floor holds" : "oldest unreleased PR holds"
-    return cutSlice({ base, slice: head, reason, hold: true, now, usedSuffixesToday, floor })
+  const strip = ({ pathHolds, behindFloor, ...pr }) => pr
+  const held = prs.filter((pr) => prHolds(pr)).map((pr) => ({ ...strip(pr), why: holdReason(pr) }))
+  const ready = prs.filter((pr) => !prHolds(pr)).map(strip)
+  if (!prs.length) return { ...common, cut: false, reason: "no unreleased PRs", prs: [], held }
+  if (!ready.length) {
+    return { ...common, cut: false, reason: `${held.length} PR(s) waiting on a person, none ready`, prs: [], held }
   }
-
-  const run = []
-  for (const pr of decorated) {
-    if (pr.holds) break
-    run.push(pr)
+  return {
+    ...common,
+    cut: true,
+    reason: `${ready.length} ready PR(s), ${held.length} held, no release in flight`,
+    branch: branchName(now, usedSuffixesToday),
+    areas: [...new Set(ready.flatMap((pr) => pr.areas))].sort(),
+    prs: ready,
+    held,
   }
-
-  return cutSlice({ base, slice: run, reason: `${run.length} ready PR(s), no release in flight`, hold: false, now, usedSuffixesToday, floor })
 }
 
 // Which PR a first-parent commit stands for: GitHub's merge subject, or the
@@ -147,8 +114,8 @@ export function prNumberFromSubject(subject) {
 }
 
 // What a tagged release tip proves it carries from dev. A release branch is
-// built by `git cherry-pick -x -m 1 <dev merge sha>` (DEPLOYMENT-ENVIRONMENTS
-// "Cutting a release"; release/2026/09/28-04 is the shape), so the calver tag
+// built by `git cherry-pick -x -m 1 <dev merge sha>` (release-cut.mjs, and
+// DEPLOYMENT-ENVIRONMENTS "Cutting a release" by hand), so the calver tag
 // sits on a pick, not on dev's first-parent line, and `<tag>..origin/dev`
 // never shrinks on its own. Each pick keeps the dev merge's subject and adds
 // a "(cherry picked from commit <sha>)" line to its body. That line is not a
@@ -235,6 +202,9 @@ export function unreleasedPrs({ cwd } = {}) {
   const marks = releasedMarks(logEntries(`origin/dev..${released}`, cwd))
   const devEntries = logEntries(`${cutPoint}..origin/dev`, cwd).reverse()
   const { unreleased, floor } = splitReleased({ devEntries, marks, cutPoint })
+  // The sha the next release branch starts from: the tagged tip itself, so
+  // every hotfix picked straight onto a release branch is carried forward.
+  const base = git(["rev-parse", `${released}^{commit}`], { cwd })
   const prs = []
   for (const { sha, mergedAt, subject, behindFloor } of unreleased) {
     const number = prNumberFromSubject(subject)
@@ -247,7 +217,7 @@ export function unreleasedPrs({ cwd } = {}) {
     const walk = isDocsOrTestOnly(files) ? "none" : "unknown"
     prs.push({ number, sha, mergedAt, walk, behindFloor, ...classifyFiles(files) })
   }
-  return { prs, floor }
+  return { prs, floor, base }
 }
 
 async function main() {
@@ -268,7 +238,7 @@ async function main() {
     prs,
     now,
     usedSuffixesToday: usedSuffixesToday(now),
-    floor: unreleased.floor,
+    base: unreleased.base,
   })
   console.log(JSON.stringify(plan, null, 2))
 }

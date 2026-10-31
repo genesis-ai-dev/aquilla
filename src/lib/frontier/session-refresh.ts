@@ -23,7 +23,7 @@
  */
 
 import { AUTH_BASE } from "./auth"
-import { loadActiveSession, saveSession } from "./session-store"
+import { loadActiveSession, replaceActiveSessionJwt } from "./session-store"
 
 /** `iat`/`exp`, in seconds, from a JWT's unverified payload. */
 interface JwtLifetime {
@@ -163,16 +163,11 @@ async function runRefresh(): Promise<boolean> {
   // Below the server's half-life gate the endpoint echoes the same token back.
   if (nextJwt === previousJwt) return false
 
-  // Re-read before writing. The user may have logged out, switched accounts or
-  // re-authenticated while the request was in flight; writing blind would
-  // resurrect a session they just left, or clobber a newer credential with a
-  // token minted from the older one.
+  // Compare and replace in the same transaction as logout/account switching.
+  // A separate read followed by saveSession can resurrect a removed account.
   try {
-    const current = await loadActiveSession()
-    if (current?.jwt !== previousJwt) return false
-    await saveSession({ ...current, jwt: nextJwt })
+    return await replaceActiveSessionJwt(previousJwt, nextJwt)
   } catch {
     return false
   }
-  return true
 }

@@ -156,9 +156,10 @@ describe("refreshActiveSession", () => {
     expect((await loadActiveSession())?.jwt).toBe(old)
   })
 
-  it("does not clobber a credential that changed while the request was in flight", async () => {
+  it.each(["logout", "switch", "new credential"])("does not clobber %s while renewal is in flight", async (change) => {
     const old = aged(LIFETIME * 0.75)
-    const reLogin = aged(0, "anna")
+    const username = change === "switch" ? "bob" : "anna"
+    const reLogin = aged(0, username)
     const stale = aged(0, "anna")
     await saveSession({ jwt: old, username: "anna", createdAt: "2026-01-01" })
 
@@ -166,13 +167,14 @@ describe("refreshActiveSession", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => {
-        await saveSession({ jwt: reLogin, username: "anna", createdAt: "2026-02-01" })
+        if (change === "logout") await clearSession()
+        else await saveSession({ jwt: reLogin, username, createdAt: "2026-02-01" })
         return new Response(JSON.stringify({ access_token: stale }), { status: 200 })
       }),
     )
 
     expect(await refreshActiveSession()).toBe(false)
-    expect((await loadActiveSession())?.jwt).toBe(reLogin)
+    expect((await loadActiveSession())?.jwt).toBe(change === "logout" ? undefined : reLogin)
   })
 
   it.each(["request", "body"])("releases a hung %s, preserves the session and retries after account switching", async (stage) => {

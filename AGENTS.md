@@ -20,8 +20,10 @@ and required checks are green. `ci.yml` is that check: lint (including
 pull request is not stacked on an open parent. GitHub Actions does not click
 merge, and auto-merge cannot read `on hold` or a stacked parent, so the agent
 merges. A `FLAKY` or `BLOCKED` walk is a checker bug: fix the journey and walk
-again. `scripts/release-plan.mjs` reads the same comment later and holds a cut
-unless the walk is `PASS` or `none`.
+again. `scripts/release-plan.mjs` reads the same comment later and keeps the
+PR off the hourly release line unless the walk is `PASS` or `none` — as it
+does for a PR whose files touch a holding risk area (`risk:*` labels,
+`docs/RELEASE-RISK-GATES.md`) until a person adds `release:approved`.
 
 | Surface | Trigger | What it proves |
 | --- | --- | --- |

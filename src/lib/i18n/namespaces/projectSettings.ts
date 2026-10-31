@@ -349,9 +349,11 @@ export const projectSettings = defineNamespace({
     "projectSettings.shared.lastEditedOn": "Last edited {date}",
     "projectSettings.shared.nameHint": "Shown across the workspace and project list.",
     "projectSettings.timeline.lockLabel": "Lock the timings against dragging",
+    "projectSettings.timeline.lockInfoAria": "About locking the timings",
     "projectSettings.timeline.lockHint":
       "On by default, and on for everyone \u2014 project leads included. The timings came from the client's own file, and a dragged chip moves a line for the whole team with nothing to compare it against afterwards. While this is on, the handles are gone from every imported line and cue; a line somebody added here still moves, and recordings can still be placed against their lines as usual. Only a maintainer can turn it off, and the timeline says so for as long as it is off.",
     "projectSettings.timeline.trackEditingLabel": "Let maintainers add and edit timeline tracks",
+    "projectSettings.timeline.trackEditingInfoAria": "About adding and editing timeline tracks",
     "projectSettings.timeline.trackEditingHint":
       "On by default. With this on, a maintainer can add extra tracks to a file's timeline, group them into folders, give them colours and delete them. Deleting a track deletes every recording on it, and asks first. Renaming a track and dragging one up or down the list are not affected by this \u2014 a maintainer can always do both. An organization can change that default for all of its projects, and a maintainer can turn it off for this one. Turning it off leaves every track exactly as it is and everything still plays; it only stops the tracks being changed.",
     // AQU-1758 (Sam's decision 7): the dubbing tools, behind one switch.
@@ -733,17 +735,29 @@ export const projectSettings = defineNamespace({
 
     // ── AudioMediaStrategySection.tsx ──
     "projectSettings.audioMedia.title": "Audio loading",
-    "projectSettings.audioMedia.description":
-      "Decide when audio recordings are downloaded from storage to this device. You " +
-      "can switch any time without re-recording — only future loads are affected.",
+    // Sam, Oct 29: each choice says one short phrase; its (i) says the rest.
+    // What the code does (peaks-loader autoLoadsPeaks, eager-peaks): the choice
+    // only decides when the waveforms on a cell's takes load. Playback and the
+    // timeline's own waveforms are the same in all four.
+    "projectSettings.audioMedia.info":
+      "When the waveforms on a cell's takes load. Whatever you pick, playing a take downloads " +
+      "its audio and keeps a copy on this device, and the timeline draws its own waveforms.",
+    "projectSettings.audioMedia.infoAria": "What the audio loading choices do",
     "projectSettings.audioMedia.strategyStreamName": "Stream",
-    "projectSettings.audioMedia.strategyStreamDescription": "Play from the network. No cache on this device, no waveforms unless you opt in.",
+    // Stream and Manual do the same today (both wait for a click), so they
+    // share these two strings.
+    "projectSettings.audioMedia.strategyOnClickSummary": "Waveforms wait for a click",
+    "projectSettings.audioMedia.strategyOnClickInfo": "Each take shows Load waveform in its place until you click it.",
     "projectSettings.audioMedia.strategyLazyName": "Lazy (default)",
-    "projectSettings.audioMedia.strategyLazyDescription": "Download a cell's audio when you scroll to it or press play. Keeps a copy on this device.",
+    "projectSettings.audioMedia.strategyLazySummary": "Waveforms load as they come into view",
+    "projectSettings.audioMedia.strategyLazyInfo":
+      "Each take's waveform loads when the take is shown, from a small saved outline when there is one.",
     "projectSettings.audioMedia.strategyEagerName": "Eager",
-    "projectSettings.audioMedia.strategyEagerDescription": "Prefetch every cell's waveform when the file opens. Best for offline review.",
+    "projectSettings.audioMedia.strategyEagerSummary": "Every waveform loads when a file opens",
+    "projectSettings.audioMedia.strategyEagerInfo":
+      "Like Lazy, and every take's waveform in the file also loads in the background, ready before " +
+      "you scroll to it.",
     "projectSettings.audioMedia.strategyManualName": "Manual",
-    "projectSettings.audioMedia.strategyManualDescription": "Don't auto-download anything. You click a button per cell to load it.",
 
     // ── SourceLinkSection.tsx ──
     "projectSettings.sourceLink.description":
@@ -1544,6 +1558,21 @@ export const projectSettings = defineNamespace({
         "button text.",
     },
     keys: {
+      "projectSettings.timeline.lockInfoAria": {
+        description:
+          "Accessible name of the (i) beside 'Lock the timings against dragging' in Project settings; " +
+          "the (i) holds that setting's longer explanation.",
+      },
+      "projectSettings.timeline.trackEditingInfoAria": {
+        description:
+          "Accessible name of the (i) beside 'Let maintainers add and edit timeline tracks' in Project " +
+          "settings; the (i) holds that setting's longer explanation.",
+      },
+      "projectSettings.audioMedia.infoAria": {
+        description:
+          "Accessible name of the (i) beside the 'Audio loading' card's title in Project settings; the (i) " +
+          "explains what the card is for and what each of its four choices does.",
+      },
       "projectSettings.timeline.filmAndSourcesLabel": {
         description:
           "Label of a checkbox in the project's Timeline settings: whether the media view shows its " +

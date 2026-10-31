@@ -241,17 +241,66 @@ describe("ProjectSettings — the timing lock, which shipped uncovered", () => {
 })
 
 describe("ProjectSettings — media settings follow the organization (AQU-1768)", () => {
-  it("shows the organization's choice, disabled, while the project sets none", () => {
+  it("shows the organization's choice while the project sets none", () => {
     orgMedia = { timingLocked: false, allowTrackEditing: true }
     currentProject = makeProject({ timingLocked: undefined, allowTrackEditing: undefined })
     renderSettings()
     expect(isChecked(box("settings-timing-locked"))).toBe(false)
     expect(isChecked(box("settings-allow-track-editing"))).toBe(true)
-    const lock = box("settings-timing-locked")
-    expect(lock.hasAttribute("disabled") || lock.getAttribute("aria-disabled") === "true" || lock.hasAttribute("data-disabled")).toBe(true)
     expect(box("timing-locked-source").textContent).toContain("Organization default (off)")
     expect(box("allow-track-editing-source").textContent).toContain("Organization default (on)")
     expect(patch).not.toHaveBeenCalled()
+  })
+
+  // Sam, Oct 28: ticking a box while it follows the organization sets the
+  // choice for this project, and the menu beside it follows. AQU-2262: the
+  // tick saves at once, says Saved beside the box, and is one Undo step.
+  it("ticking a box that follows the organization saves it for this project in one Undo step (Sam, Oct 28)", async () => {
+    resetHistoryForTests()
+    await clearHistoryStoreForTests()
+    // The server's copy, as the page's writes have left it.
+    const leave = registerSettingsAccessor(PROJECT_ID, {
+      read: () => Object.assign({}, currentSettings, ...sent()),
+      write: async (p) => { await patch(p) },
+    })
+    try {
+      orgMedia = { timingLocked: false }
+      currentProject = makeProject({ timingLocked: undefined })
+      renderSettings()
+      await historyReady()
+      const lock = box("settings-timing-locked")
+      expect(lock.hasAttribute("disabled") || lock.getAttribute("aria-disabled") === "true" || lock.hasAttribute("data-disabled")).toBe(false)
+      fireEvent.click(lock)
+      await waitFor(() => expect(sent()).toEqual([{ timingLocked: true }]))
+      expect(isChecked(box("settings-timing-locked"))).toBe(true)
+      expect(box("timing-locked-source").textContent).toContain("Set for this project")
+      expect(await screen.findByTestId("save-status-timingLocked")).toHaveTextContent("Saved")
+      expect(screen.queryByRole("button", { name: /save changes/i })).toBeNull()
+      await waitFor(() => expect(historyView().nextUndo?.labelKey).toBe("editor.history.stepChangeSetting"))
+      expect(historyView().nextUndo?.labelParams).toMatchObject({ settingKey: "projectSettings.timeline.lockLabel" })
+      // One step: a single Undo puts the project back to following the organization.
+      await userEvent.click(screen.getByTestId("settings-undo"))
+      await waitFor(() => expect(sent().at(-1)).toEqual({ timingLocked: null }))
+      expect(historyView().nextUndo).toBeFalsy()
+    } finally {
+      leave()
+    }
+  })
+
+  it("each (i) opens its explanation beneath the title on a click, and closes it on another", () => {
+    renderSettings()
+    const info = screen.getByTestId("settings-timing-locked-info")
+    const text = document.getElementById("settings-timing-locked-explanation") as HTMLElement
+    expect(text.dataset.open).toBe("false")
+    fireEvent.click(info)
+    expect(info).toHaveAttribute("aria-expanded", "true")
+    expect(text.dataset.open).toBe("true")
+    expect(text.textContent).toMatch(/the handles are gone from every/)
+    // Clicking the (i) beside a label never ticks its box.
+    expect(isChecked(box("settings-timing-locked"))).toBe(true)
+    fireEvent.click(info)
+    expect(text.dataset.open).toBe("false")
+    expect((document.getElementById("settings-allow-track-editing-explanation") as HTMLElement).dataset.open).toBe("false")
   })
 
   // "Set for this project" saves the organization's value as the project's

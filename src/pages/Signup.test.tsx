@@ -121,3 +121,41 @@ it("resumes at usage sharing when Get Started was passed but no choice was saved
   expect(screen.getByRole("switch", { name: /share usage data/i })).toBeVisible()
   expect(screen.queryByRole("button", { name: /get started/i })).toBeNull()
 })
+
+it.each(["read", "write", "both"])("continues signup and preserves the privacy choice when storage %s is denied", async (denied) => {
+  vi.resetModules()
+  const { Signup: FreshSignup } = await import("./Signup")
+  const { renderWithBrand: freshRender } = await import("@/test-utils/render-with-brand")
+  const { MemoryRouter: FreshRouter, Routes: FreshRoutes, Route: FreshRoute } = await import("react-router-dom")
+  const original = sessionStorage
+  vi.stubGlobal("sessionStorage", {
+    getItem: (key: string) => {
+      if (denied !== "write") throw new DOMException("Storage blocked", "SecurityError")
+      return original.getItem(key)
+    },
+    setItem: (key: string, value: string) => {
+      if (denied !== "read") throw new DOMException("Storage blocked", "SecurityError")
+      original.setItem(key, value)
+    },
+  })
+  const view = freshRender(<FreshRouter initialEntries={["/signup"]}><FreshRoutes>
+    <FreshRoute path="/signup" element={<FreshSignup />} />
+    <FreshRoute path="/app" element={<p>Workspace destination</p>} />
+  </FreshRoutes></FreshRouter>)
+  try {
+    fireEvent.click(screen.getByRole("button", { name: /get started/i }))
+    expect(screen.getByRole("switch", { name: /share usage data/i })).toBeChecked()
+    fireEvent.click(screen.getByRole("switch", { name: /share usage data/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
+    expect(localStorage.getItem("aquilla:analyticsEnabled")).toBe("false")
+    fireEvent.change(screen.getByLabelText("Username"), { target: { value: "new-person" } })
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "new@example.test" } })
+    fireEvent.change(document.getElementById("s-pass")!, { target: { value: "safe-password-123" } })
+    fireEvent.submit(document.getElementById("signup-form")!)
+    await screen.findByText("Workspace destination")
+    expect(auth.register).toHaveBeenCalledExactlyOnceWith("new-person", "new@example.test", "safe-password-123")
+  } finally {
+    view.unmount()
+    vi.unstubAllGlobals()
+  }
+})

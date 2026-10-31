@@ -10,6 +10,7 @@ import {
 } from "@/lib/parsers/types"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { SaveStatus } from "@/lib/settings/save-status"
+import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
 
 interface Props {
   value: AudioMediaStrategy
@@ -20,18 +21,29 @@ const ORDER: AudioMediaStrategy[] = ["lazy", "eager", "stream", "manual"]
 
 export function AudioMediaStrategySection({ value, onChange }: Props) {
   const t = useT()
+  const [infoOpen, toggleInfo] = useInfoOpen()
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center justify-between gap-4">
+        {/* Sam, Oct 28: the card's (i) opens what the card is for beneath the
+            title and more on each choice inside each choice, and closes them
+            again. Oct 29: each choice also says one short phrase, always. */}
+        <CardTitle className="flex items-center gap-1">
           {t("projectSettings.audioMedia.title")}
-          <SaveStatus id="audioMediaStrategy" className="font-normal" />
+          <InfoToggle
+            open={infoOpen}
+            onToggle={toggleInfo}
+            label={t("projectSettings.audioMedia.infoAria")}
+            controls={["settings-audio-media-explanation", ...ORDER.map((id) => `settings-audio-media-${id}-explanation`)].join(" ")}
+            testId="settings-audio-media-info"
+          />
+          <SaveStatus id="audioMediaStrategy" className="ml-auto font-normal" />
         </CardTitle>
+        <InfoReveal open={infoOpen} id="settings-audio-media-explanation">
+          <span className="block text-sm text-muted-foreground">{t("projectSettings.audioMedia.info")}</span>
+        </InfoReveal>
       </CardHeader>
       <CardContent className="space-y-3">
-        <p className="text-sm text-muted-foreground">
-          {t("projectSettings.audioMedia.description")}
-        </p>
         {/* AQU-2259: it depends on this device's connection, so it stays here. */}
         <p className="text-xs text-muted-foreground">{t("projectSettings.deviceOnly")}</p>
         <div className="grid gap-2 sm:grid-cols-2">
@@ -44,7 +56,7 @@ export function AudioMediaStrategySection({ value, onChange }: Props) {
                 type="button"
                 onClick={() => onChange(id)}
                 className={cn(
-                  "flex flex-col items-start gap-1 rounded-md border p-3 text-start text-sm transition-colors",
+                  "flex flex-col items-start rounded-md border p-3 text-start text-sm transition-colors",
                   selected
                     ? "border-primary bg-primary/5"
                     : "border-border bg-background hover:bg-muted/40",
@@ -52,7 +64,10 @@ export function AudioMediaStrategySection({ value, onChange }: Props) {
                 aria-pressed={selected}
               >
                 <span className="font-medium">{t(label.nameKey)}</span>
-                <span className="text-xs text-muted-foreground">{t(label.descriptionKey)}</span>
+                <span className="mt-0.5 block text-xs text-muted-foreground">{t(label.summaryKey)}</span>
+                <InfoReveal open={infoOpen} id={`settings-audio-media-${id}-explanation`}>
+                  <span className="block text-xs text-muted-foreground">{t(label.infoKey)}</span>
+                </InfoReveal>
               </button>
             )
           })}

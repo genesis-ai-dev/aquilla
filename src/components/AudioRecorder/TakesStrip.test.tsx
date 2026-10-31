@@ -248,6 +248,25 @@ describe("TakesStrip", () => {
     expect(container).toBeTruthy()
   })
 
+  // AQU-2327 (Q2): a version saved from the Station keeps its take's name,
+  // and the list tells them apart by "· version N".
+  it("names a saved version after its take, with its version number", () => {
+    render(
+      <TakesStrip
+        {...common}
+        takes={[
+          { ...take("audio-a", 1000), label: "Take 2" },
+          { ...take("st-audio-b", 1000), label: "Take 2", referenceAudioId: "audio-a" },
+          { ...take("st-audio-c", 1000), label: "Take 2", referenceAudioId: "st-audio-b" },
+        ]}
+        selectedAudioId="st-audio-c"
+      />,
+    )
+    expect(screen.getByText("Take 2 · version 3")).toBeTruthy()
+    expect(screen.getByText("Take 2 · version 2")).toBeTruthy()
+    expect(screen.getByText("Take 2")).toBeTruthy()
+  })
+
   it("a cleaned take offers revert that selects the original take", async () => {
     emitSelect.mockResolvedValue("evt-ok")
     render(

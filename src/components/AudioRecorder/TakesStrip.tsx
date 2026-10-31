@@ -551,9 +551,12 @@ export function TakesStrip({
       let n = 1
       let ref = att.referenceAudioId
       const seen = new Set<string>()
+      // Only a NAMED take can be a version: two unnamed takes (an old
+      // "Cleaned" take and its original) are different takes.
+      if (!att.label) return 1
       while (ref && !seen.has(ref) && byId.has(ref)) {
         seen.add(ref)
-        if ((byId.get(ref)!.label ?? null) !== (att.label ?? null)) break
+        if (byId.get(ref)!.label !== att.label) break
         n += 1
         ref = byId.get(ref)!.referenceAudioId
       }

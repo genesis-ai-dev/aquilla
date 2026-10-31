@@ -84,7 +84,7 @@ describe("FilmTrackLane — an imported film, cut into its lines' pieces", () =>
     // An exact fit, a recording 1.8 s longer than its original, and one cut.
     { cellId: "a", atSec: 0, lenSec: 3.5, filmStartSec: 0.5, filmEndSec: 4.0 },
     { cellId: "b", atSec: 3.5, lenSec: 6, filmStartSec: 4.6, filmEndSec: 8.8 },
-    { cellId: "c", atSec: 9.5, lenSec: 2, filmStartSec: 9.2, filmEndSec: 11.2 },
+    { cellId: "c", atSec: 9.5, lenSec: 2, filmStartSec: 9.2, filmEndSec: 11.2, cutSec: 2.3 },
   ]
   const draw = (over: Partial<React.ComponentProps<typeof FilmTrackLane>> = {}) =>
     render(
@@ -134,6 +134,15 @@ describe("FilmTrackLane — an imported film, cut into its lines' pieces", () =>
     expect(heldFrames.length).toBeGreaterThan(0)
     expect(new Set(heldFrames.map((f) => f.getAttribute("data-frame-sec")))).toEqual(new Set(["8.76"]))
     expect(heldFrames.every((f) => f.style.opacity === "0.45")).toBe(true)
+    // Board 56 (chopped): the hold says how long it is.
+    expect(held).toHaveTextContent("held 1.8 s")
+  })
+
+  it("a recording shorter than its original: the piece is cut, with a white edge that says by how much", () => {
+    draw()
+    const [a, , c] = screen.getAllByTestId("tl-film-piece")
+    expect(a.querySelector("[data-testid='tl-film-cut']")).toBeNull()
+    expect(c.querySelector("[data-testid='tl-film-cut']")).toHaveTextContent("cut 2.3 s")
   })
 
   it("a click moves the playhead to that moment of the timeline", () => {

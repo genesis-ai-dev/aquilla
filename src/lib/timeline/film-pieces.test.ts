@@ -124,6 +124,8 @@ describe("filmPiecesFor — the film cut along its source cues", () => {
       [9.2, 11.2],
     ])
     expect(pieces.map((p) => pieceHeldSec(p))).toEqual([0, expect.closeTo(1.8, 6), 0])
+    // c's 4.3 s stretch shows 2.0 s: 2.3 s of it is cut away, as its Source audio is.
+    expect(pieces.map((p) => p.cutSec)).toEqual([undefined, undefined, expect.closeTo(2.3, 6)])
   })
 
   it("is cut exactly where the Source audio is cut: each piece is its line's Source audio window", () => {

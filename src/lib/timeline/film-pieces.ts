@@ -86,6 +86,9 @@ export interface FilmPiece {
   lenSec: number
   filmStartSec: number
   filmEndSec: number
+  /** How much of the line's own stretch is cut away at its end, because its
+   *  recording is shorter than its original (0 or absent for none). */
+  cutSec?: number
 }
 
 /** The last frame of a piece is this far before its stretch ends: one frame
@@ -115,12 +118,14 @@ export function filmPiecesFor(programme: Programme | null | undefined): FilmPiec
   for (const slot of programme.slots) {
     const w = slot.sourceWindow
     if (!w || !(slot.sourceLenSec > 0) || !(slot.slotLenSec > 0)) continue
+    const cutSec = slot.nominalLenSec - slot.sourceLenSec
     out.push({
       cellId: slot.cellId,
       atSec: slot.startSec,
       lenSec: slot.slotLenSec,
       filmStartSec: w.start,
       filmEndSec: w.end,
+      ...(cutSec > 0.01 ? { cutSec } : {}),
     })
   }
   return out

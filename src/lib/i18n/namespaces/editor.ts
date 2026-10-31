@@ -1134,6 +1134,8 @@ export const editor = defineNamespace({
     "editor.history.stepUnknown": "A change made in a newer version of Aquilla",
     "editor.timeline.filmTrack": "Film",
     "editor.timeline.filmStripAria": "The film, {name}",
+    "editor.timeline.filmHeld": "held {sec} s",
+    "editor.timeline.filmCut": "cut {sec} s",
     "editor.timeline.bluetoothPill": "Bluetooth",
     "editor.timeline.bluetoothPillInfo": "About playing through Bluetooth",
     "editor.timeline.outputLatencyNote":
@@ -6896,6 +6898,23 @@ export const editor = defineNamespace({
           "Screen-reader name of the film strip on the timeline's Film row. Clicking the strip " +
           "moves the playhead, and the film, to that moment.",
         placeholders: { name: "The film's name, e.g. 'showcase-film.webm'." },
+      },
+      "editor.timeline.filmHeld": {
+        description:
+          "Small white mark over a film imported as a file, on the timeline's Film row, while " +
+          "the file follows its recordings: this line's recording runs longer than the line's " +
+          "own stretch of film, so the film's last frame is held still for this long. Lower case.",
+        placeholders: { sec: "Seconds, with one decimal, e.g. '1.7'." },
+        maxLength: 18,
+      },
+      "editor.timeline.filmCut": {
+        description:
+          "Small white mark at the right edge of a piece of a film imported as a file, on the " +
+          "timeline's Film row, while the file follows its recordings: this line's recording " +
+          "is shorter than the line's own stretch of film, so this much of the stretch is cut " +
+          "away (as its original sound is). Lower case.",
+        placeholders: { sec: "Seconds, with one decimal, e.g. '0.4'." },
+        maxLength: 18,
       },
       "editor.timeline.bluetoothPill": {
         description:

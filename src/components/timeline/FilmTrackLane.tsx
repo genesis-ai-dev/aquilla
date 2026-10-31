@@ -22,6 +22,7 @@
 // source its pieces sit end to end, which is exactly the one strip above.
 
 import { useEffect, type MouseEvent as ReactMouseEvent } from "react"
+import { Pause, Scissors } from "lucide-react"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { TL_CHIP_BOX_CLASS, TL_ROW_H_CLASS } from "@/lib/timeline/row-metrics"
@@ -35,7 +36,7 @@ import {
   sprocketBackground,
   visibleFilmTiles,
 } from "@/lib/timeline/film-strip"
-import { visibleFilmPieceStrips, type FilmPiece } from "@/lib/timeline/film-pieces"
+import { pieceHeldSec, visibleFilmPieceStrips, type FilmPiece } from "@/lib/timeline/film-pieces"
 import { useRowMetrics } from "./useRowMetrics"
 import { useFilmFrames } from "./useFilmFrames"
 
@@ -74,6 +75,12 @@ const STRIP_EDGE = "0 0 0 1px rgba(17,18,20,0.55)"
  *  faded, under a light diagonal hatch, after a white line where it stops. */
 const HELD_HATCH = "repeating-linear-gradient(135deg, rgba(255,255,255,0) 0 6px, rgba(255,255,255,0.28) 6px 8px)"
 const HELD_FRAME_OPACITY = 0.45
+/** The "held 1.7 s" / "cut 0.4 s" marks, as board 56's chopped version drew them:
+ *  white 10 px semibold over the frames, shown where there is room. */
+const MARK_CLASS = "absolute top-[3px] inline-flex items-center gap-[3px] whitespace-nowrap text-[10px] font-semibold leading-none text-white"
+const MARK_SHADOW = "0 1px 2px rgba(0,0,0,0.75)"
+const MARK_MIN_PX = 56
+const oneDecimal = (sec: number) => (Math.round(sec * 10) / 10).toFixed(1)
 
 export function FilmTrackLane({
   src,
@@ -247,9 +254,27 @@ export function FilmTrackLane({
                 <span
                   data-testid="tl-film-held"
                   aria-hidden
-                  className="pointer-events-none absolute bottom-0 right-0"
+                  className="pointer-events-none absolute bottom-0 right-0 overflow-hidden"
                   style={{ top: `${bandPx}px`, left: `${heldFromPx}px`, background: HELD_HATCH, borderLeft: "2px solid rgba(255,255,255,0.9)" }}
-                />
+                >
+                  {widthPx - heldFromPx >= MARK_MIN_PX && (
+                    <span className={MARK_CLASS} style={{ left: "5px", textShadow: MARK_SHADOW }}>
+                      <Pause className="h-2.5 w-2.5" aria-hidden />
+                      {t("editor.timeline.filmHeld", { sec: oneDecimal(pieceHeldSec(piece)) })}
+                    </span>
+                  )}
+                </span>
+              )}
+              {piece.cutSec != null && piece.cutSec > 0 && (
+                // Board 56 (chopped): a white edge where the stretch is cut.
+                <span data-testid="tl-film-cut" aria-hidden className="pointer-events-none absolute bottom-0 right-0" style={{ top: `${bandPx}px`, width: "3px", background: "#ffffff" }}>
+                  {widthPx >= MARK_MIN_PX && (
+                    <span className={MARK_CLASS} style={{ right: "6px", textShadow: MARK_SHADOW }}>
+                      <Scissors className="h-2.5 w-2.5" aria-hidden />
+                      {t("editor.timeline.filmCut", { sec: oneDecimal(piece.cutSec) })}
+                    </span>
+                  )}
+                </span>
               )}
             </div>
           ))}

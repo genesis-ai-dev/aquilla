@@ -129,6 +129,13 @@ function somethingModalOpen(): boolean {
   return Boolean(document.querySelector('[role="dialog"], [role="alertdialog"], [role="menu"], [data-slot="popover-content"]'))
 }
 
+/** Inside a panel that has something of its own for Esc to dismiss right now
+ *  (the Station's selection or its Insert menu, AQU-2327): that Esc is the
+ *  panel's, not full screen's way back. */
+function panelOwnsEscape(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest('[data-owns-escape="true"]') != null
+}
+
 /** Keep every scroll position under `root` across a DOM move, which resets them. */
 function moveKeepingScroll(root: HTMLElement, into: HTMLElement): void {
   const kept: Array<[Element, number, number]> = []
@@ -669,7 +676,7 @@ export function useMediaDock(input: UseMediaDockInput) {
         else k.fold(region)
         return
       }
-      if (e.key === "Escape" && !mod && !e.altKey && k.canRestore && !isTyping(e.target) && !somethingModalOpen()) {
+      if (e.key === "Escape" && !mod && !e.altKey && k.canRestore && !isTyping(e.target) && !somethingModalOpen() && !panelOwnsEscape(e.target)) {
         e.preventDefault()
         k.restore()
         return

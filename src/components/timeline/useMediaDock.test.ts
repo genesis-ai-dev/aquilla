@@ -96,6 +96,31 @@ describe("useMediaDock", () => {
       expect(result.current.dock.layout.fullUndo).toEqual([])
     })
 
+    // AQU-2327, found in the browser walk: Esc in the Station closed its
+    // Insert menu AND ended full screen. A panel with something of its own to
+    // dismiss keeps that Esc; once it has nothing, Esc restores as before.
+    it("leaves Esc to a panel that has something of its own to dismiss", () => {
+      const { result } = setup()
+      press(FULL_SCREEN)
+      expect(result.current.dock.canRestore).toBe(true)
+      const panel = document.createElement("div")
+      panel.dataset.ownsEscape = "true"
+      const inside = document.createElement("button")
+      panel.appendChild(inside)
+      document.body.appendChild(panel)
+      act(() => {
+        inside.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, ...ESC }))
+      })
+      expect(result.current.dock.canRestore).toBe(true)
+      expect(result.current.dock.fullRegion).toBe("tl")
+      delete panel.dataset.ownsEscape
+      act(() => {
+        inside.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, ...ESC }))
+      })
+      expect(result.current.dock.view.openRegions).toEqual(["tl", "ll", "lr"])
+      panel.remove()
+    })
+
     // Review finding 6: showing the timeline while it is the full-screen
     // region changed nothing on screen but dropped the note.
     it("through Alt+1 while the timeline is the full-screen region", () => {

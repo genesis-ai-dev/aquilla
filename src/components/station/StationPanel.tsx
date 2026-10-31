@@ -342,6 +342,9 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
     <div
       data-testid="station"
       tabIndex={0}
+      // Item 33: Esc here clears the selection and closes Insert; while there
+      // is one of those, full screen's own Esc stands down (useMediaDock).
+      data-owns-escape={ed.sel != null || insertOpen ? "true" : undefined}
       onKeyDown={onKeyDown}
       className="flex h-full min-h-0 flex-col overflow-y-auto outline-none"
     >

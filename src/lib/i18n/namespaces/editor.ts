@@ -1427,6 +1427,7 @@ export const editor = defineNamespace({
     "editor.station.takeVersion": "{take} · version {n}",
     "editor.station.sourceReadOnly": "This is the source recording, so it can’t be edited here.",
     "editor.station.sourceName": "Source recording",
+    "editor.station.moreTip": "More: remove noise, change the voice, history",
     "editor.station.hintListen": "Drag across the waveform to select a part. Space plays.",
     "editor.dock.film": "Film",
     "editor.dock.bottomLeft": "Bottom left",
@@ -3441,6 +3442,9 @@ export const editor = defineNamespace({
       },
       "editor.station.sourceReadOnly": {
         description: "Plain line under the Station's heading when the open recording is the imported source (the original everyone's timing follows): it can be played and looped, not edited.",
+      },
+      "editor.station.moreTip": {
+        description: "Tooltip and accessible name of the ⋯ button on the Station's tab strip: what its menu holds (Remove noise, Change the voice, History).",
       },
       "editor.station.sourceName": {
         description: "The Station's heading names the imported source recording this way (it has no take name), followed by ' · ' and the line, e.g. 'Source recording · line 2'.",

@@ -256,7 +256,8 @@ export function AreaMenu({ dock, area }: { dock: MediaDock; area: DockArea }) {
   const items = own[panel]
   return (
     <DropdownMenu>
-      <MoreTrigger tip={t("editor.dock.moreTip")} testId={`dock-more-${area}`} />
+      {/* AQU-2327, spec item 2: the Station's ⋯ names its own items. */}
+      <MoreTrigger tip={panel === "station" ? t("editor.station.moreTip") : t("editor.dock.moreTip")} testId={`dock-more-${area}`} />
       <DropdownMenuContent align="end" className="w-[270px]">
         <DropdownMenuGroup>
           <DropdownMenuLabel className="text-[11px] uppercase tracking-wide">

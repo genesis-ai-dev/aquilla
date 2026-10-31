@@ -438,6 +438,28 @@ describe("MediaVideoPane", () => {
       expect(video.currentTime).toBeCloseTo(5.1, 6)
     })
 
+    it("opened following the recordings with nothing playing: the first line's piece, not the film's 0:00", () => {
+      render(pane({ followsRecordings: true, filmPieces: pieces }))
+      expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).currentTime).toBe(0.5)
+    })
+
+    it("switching timing while nothing plays puts the picture where the playhead's second is in the new timing", () => {
+      // Paused following the recordings at 5 s: line b's piece, 6.1 s of film.
+      const view = render(pane({ followsRecordings: true, filmPieces: pieces }))
+      const video = media()
+      programmeAt(5, "b", { playing: false, running: false, kind: "paused" })
+      view.rerender(pane({ followsRecordings: true, filmPieces: pieces }))
+      expect(video.currentTime).toBeCloseTo(6.1, 6)
+      // The switch stops the queue; the playhead stays on 5, which following
+      // the source is 5 s of the film.
+      mockQueue = { ...mockQueue, active: false, playing: false, running: false, cellId: null, kind: "idle" }
+      view.rerender(pane())
+      expect(video.currentTime).toBe(5)
+      // …and back: 5 s on the recordings' timeline is line b's piece again.
+      view.rerender(pane({ followsRecordings: true, filmPieces: pieces }))
+      expect(video.currentTime).toBeCloseTo(6.1, 6)
+    })
+
     it("following the source, the film's own clock: the recording's second is the film's", () => {
       const view = render(pane())
       const video = media()

@@ -735,11 +735,16 @@ export function MediaVideoPane({
   const moment = cutFilm && clockIsFileTime ? filmMomentAt(filmPieces!, queueTickSec) : null
   const tickSec = moment ? moment.sec : queueTickSec
   const holding = moment?.held === true
+  /** AQU-2253: the timeline second the playhead was last put at, by the queue
+   *  running or paused on this file, or by a seek — what an imported film's
+   *  picture is placed by while nothing plays (see below). */
+  const playheadSecRef = useRef<number | null>(null)
   useEffect(() => {
     const video = videoRef.current
     if (!video || !slaved || failed) return
     const now = Date.now()
     const prev = prevTickRef.current
+    if (clockIsFileTime && queue.kind !== "idle" && queue.kind !== "error") playheadSecRef.current = queueTickSec
     if (holding && queue.kind !== "idle" && queue.kind !== "error") {
       // The line's recording runs longer than its stretch of the film: the
       // picture stays on that stretch's last frame until the line ends. Paused
@@ -807,7 +812,29 @@ export function MediaVideoPane({
     wantPlayRef.current = queue.playing
     if (queue.playing) requestPlay(video)
     else video.pause()
-  }, [slaved, failed, queue.kind, queue.playing, clockIsFileTime, tickSec, holding, rate, mediaEpoch, requestPlay])
+  }, [slaved, failed, queue.kind, queue.playing, clockIsFileTime, tickSec, queueTickSec, holding, rate, mediaEpoch, requestPlay])
+
+  // AQU-2253: an imported film while nothing plays — the file just opened, or
+  // its timing just switched (which stops the queue). The playhead stays on its
+  // second, which now means a moment of the other timing, so the picture is put
+  // where that second is under the rule in force: the piece under it following
+  // the recordings, that second of the film following the source. Without
+  // this the panel went on showing the frame of the other timing.
+  useEffect(() => {
+    const video = videoRef.current
+    if (!importedFilm || !video || !slaved || failed || queue.kind !== "idle") return
+    const at = playheadSecRef.current ?? 0
+    const sec = cutFilm ? (filmMomentAt(filmPieces!, at)?.sec ?? at) : at
+    if (Math.abs(video.currentTime - sec) <= VIDEO_PAUSED_SNAP_SEC) return
+    video.pause()
+    try {
+      video.currentTime = sec
+      lastSeekAtRef.current = Date.now()
+      prevTickRef.current = null
+    } catch {
+      /* not seekable yet — re-run when the element reloads (mediaEpoch) */
+    }
+  }, [importedFilm, slaved, failed, queue.kind, cutFilm, filmPieces, mediaEpoch])
 
   // Playback speed. Set both, because `defaultPlaybackRate` is what survives a
   // load, and re-apply whenever the element reloads. This is the STARTING
@@ -882,6 +909,7 @@ export function MediaVideoPane({
     if (!video) return
     // AQU-2253: an imported film cut into pieces goes to the piece under the
     // timeline's second, not to that second of the film.
+    playheadSecRef.current = Math.max(0, seekTarget)
     const pieces = filmPiecesRef.current
     const sec = pieces && pieces.length > 0
       ? (filmMomentAt(pieces, Math.max(0, seekTarget))?.sec ?? Math.max(0, seekTarget))

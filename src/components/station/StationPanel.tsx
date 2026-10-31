@@ -501,29 +501,31 @@ export function StationHeader({
         <span className="text-[13px] font-semibold whitespace-nowrap text-foreground">
           {t("editor.station.nameOnLine", { take: name, line })}
         </span>
-        <span data-testid="station-subline" className="truncate text-[11px] text-muted-foreground">
-          {character ? (
-            <>
-              <span className="font-bold" style={{ color: vars["--tl-track-hue"] }}>
-                {character}
-              </span>
-              {isSource ? null : " · "}
-            </>
-          ) : null}
-          {isSource ? null : (
-            <>
-              {placedText}
-              {" · "}
-              <span
-                data-testid="station-status"
-                className={approved ? "font-semibold text-green-700 dark:text-green-400" : "font-semibold text-sky-700 dark:text-sky-400"}
-              >
-                {statusText}
-              </span>
-              {version > 1 ? ` · ${t("editor.station.version", { n: version })}` : null}
-            </>
-          )}
-        </span>
+        {isSource && !character ? null : (
+          <span data-testid="station-subline" className="truncate text-[11px] text-muted-foreground">
+            {character ? (
+              <>
+                <span className="font-bold" style={{ color: vars["--tl-track-hue"] }}>
+                  {character}
+                </span>
+                {isSource ? null : " · "}
+              </>
+            ) : null}
+            {isSource ? null : (
+              <>
+                {placedText}
+                {" · "}
+                <span
+                  data-testid="station-status"
+                  className={approved ? "font-semibold text-green-700 dark:text-green-400" : "font-semibold text-sky-700 dark:text-sky-400"}
+                >
+                  {statusText}
+                </span>
+                {version > 1 ? ` · ${t("editor.station.version", { n: version })}` : null}
+              </>
+            )}
+          </span>
+        )}
       </span>
       <span className="ms-auto inline-flex shrink-0 items-center gap-1">
         <AppTooltip content={undoTip}>

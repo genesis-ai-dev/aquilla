@@ -67,6 +67,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { OverflowMenu, type OverflowMenuItem } from "@/components/OverflowMenu"
 import { SourceRegionLane } from "./SourceRegionLane"
 import { FilmTrackLane } from "./FilmTrackLane"
+import { filmKindOf, filmPiecesFor } from "@/lib/timeline/film-pieces"
 import { VideoSoundSourcePicker } from "./VideoSoundSourcePicker"
 import type { PlaybackSource } from "@/lib/audio/playback-source"
 import type { LaneLinkOverlay } from "./CueLinkOverlay"
@@ -2939,7 +2940,17 @@ export function TimelineEditor({
   // in both timings, so the timeline reaches at least that far: following the
   // recordings the lines can end well before the film does.
   const filmTrackSec = coreMediaUrl && videoDurationSec && videoDurationSec > 0 ? videoDurationSec : 0
-  const durationSec = Math.max(layout.totalSec, independentTextLayout.totalSec, filmTrackSec)
+  // AQU-2253 (Sam, Oct 30): an IMPORTED film is cut along its source cues
+  // (lib/timeline/film-pieces). Following the recordings each line's piece
+  // sits in its line's slot, laid out by the same programme the lanes and the
+  // transport use, so the film lasts as long as its lines and no longer.
+  // Following the source its pieces sit end to end: the one strip.
+  const filmKind = useMemo(() => filmKindOf(coreMediaUrl, cells), [coreMediaUrl, cells])
+  const filmPieces = useMemo(
+    () => (audioFirst && filmKind === "imported" ? filmPiecesFor(layout.programme) : null),
+    [audioFirst, filmKind, layout.programme],
+  )
+  const durationSec = Math.max(layout.totalSec, independentTextLayout.totalSec, filmPieces ? 0 : filmTrackSec)
   const trackWidthPx = secToPx(durationSec, pxPerSec)
   // A short file's timeline still runs to the edge of the view — the ruler and
   // every row's ground — rather than stopping where the file ends (Sam, Oct
@@ -5464,6 +5475,7 @@ export function TimelineEditor({
                   viewEndSec={viewEndSec}
                   name={film?.name ?? t("editor.timeline.filmTrack")}
                   onSeekSec={seekTo}
+                  pieces={filmPieces}
                 />
               )}
               {trackRows.map((row) => {

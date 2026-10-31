@@ -77,6 +77,82 @@ describe("FilmTrackLane", () => {
   })
 })
 
+// AQU-2253 (Sam, Oct 30): an imported film following the recordings is cut
+// along its source cues, each line's piece in that line's slot.
+describe("FilmTrackLane — an imported film, cut into its lines' pieces", () => {
+  const pieces = [
+    // An exact fit, a recording 1.8 s longer than its original, and one cut.
+    { cellId: "a", atSec: 0, lenSec: 3.5, filmStartSec: 0.5, filmEndSec: 4.0 },
+    { cellId: "b", atSec: 3.5, lenSec: 6, filmStartSec: 4.6, filmEndSec: 8.8 },
+    { cellId: "c", atSec: 9.5, lenSec: 2, filmStartSec: 9.2, filmEndSec: 11.2 },
+  ]
+  const draw = (over: Partial<React.ComponentProps<typeof FilmTrackLane>> = {}) =>
+    render(
+      <FilmTrackLane
+        src="frontier-audio://f1/audio-f1-1-film.webm" fileId="f1" filmSec={27.08} pxPerSec={40}
+        viewStartSec={0} viewEndSec={30} name="Imported film.webm" frameFor={(sec) => `data:image/jpeg;base64,${sec}`}
+        pieces={pieces} {...over}
+      />,
+    )
+
+  it("one chip per line, at its line's slot, never the one strip on the film's clock", () => {
+    draw()
+    expect(screen.getByTestId("tl-film-lane")).toHaveAttribute("data-film-kind", "imported-pieces")
+    const chips = screen.getAllByTestId("tl-film-piece")
+    expect(chips.map((c) => [c.getAttribute("data-cell-id"), c.style.left, c.style.width])).toEqual([
+      ["a", "0px", "138px"],
+      ["b", "140px", "238px"],
+      ["c", "380px", "78px"],
+    ])
+    // Each its own chip with the film's sprocket band.
+    expect(screen.getAllByTestId("tl-film-sprockets")).toHaveLength(3)
+    expect(screen.getByTestId("tl-film-strip")).toHaveAccessibleName("The film, Imported film.webm")
+  })
+
+  it("each piece's frames come from its own stretch of the film", () => {
+    draw()
+    for (const chip of screen.getAllByTestId("tl-film-piece")) {
+      const start = Number(chip.getAttribute("data-film-start"))
+      const end = Number(chip.getAttribute("data-film-end"))
+      for (const frame of chip.querySelectorAll("[data-testid='tl-film-frame']")) {
+        const sec = Number(frame.getAttribute("data-frame-sec"))
+        expect(sec).toBeGreaterThanOrEqual(start)
+        expect(sec).toBeLessThanOrEqual(end)
+      }
+    }
+  })
+
+  it("a recording longer than its original: the piece holds its last frame, faded and hatched, to the line's end", () => {
+    draw()
+    const [a, b, c] = screen.getAllByTestId("tl-film-piece")
+    expect(a.querySelector("[data-testid='tl-film-held']")).toBeNull()
+    expect(c.querySelector("[data-testid='tl-film-held']")).toBeNull()
+    const held = b.querySelector("[data-testid='tl-film-held']") as HTMLElement
+    expect(held).not.toBeNull()
+    expect(parseFloat(held.style.left)).toBeCloseTo(4.2 * 40, 1)
+    const heldFrames = [...b.querySelectorAll("[data-testid='tl-film-frame'][data-held]")] as HTMLElement[]
+    expect(heldFrames.length).toBeGreaterThan(0)
+    expect(new Set(heldFrames.map((f) => f.getAttribute("data-frame-sec")))).toEqual(new Set(["8.76"]))
+    expect(heldFrames.every((f) => f.style.opacity === "0.45")).toBe(true)
+  })
+
+  it("a click moves the playhead to that moment of the timeline", () => {
+    const onSeekSec = vi.fn()
+    draw({ onSeekSec })
+    const strip = screen.getByTestId("tl-film-strip")
+    strip.getBoundingClientRect = () => ({ left: 100, top: 0, width: 460, height: 46, right: 560, bottom: 46, x: 100, y: 0, toJSON: () => ({}) })
+    fireEvent.click(strip, { clientX: 100 + 5 * 40 })
+    expect(onSeekSec).toHaveBeenCalledWith(5)
+  })
+
+  it("no pieces given: the one strip, as for a linked film", () => {
+    draw({ pieces: null })
+    expect(screen.getByTestId("tl-film-lane")).toHaveAttribute("data-film-kind", "one-strip")
+    expect(screen.queryAllByTestId("tl-film-piece")).toHaveLength(0)
+    expect(parseFloat(screen.getByTestId("tl-film-strip").style.width)).toBeCloseTo(27.08 * 40 - 2)
+  })
+})
+
 describe("captureSeekSec", () => {
   it("seeks a few frames past a tile's moment, off the stream's segment boundaries", () => {
     // 1780 s is exactly where one of The Chosen 101's 4-second segments starts.

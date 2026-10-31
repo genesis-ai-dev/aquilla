@@ -58,7 +58,8 @@ import {
   type PlaybackSource,
 } from "@/lib/audio/playback-source"
 import { pauseAllTransports } from "@/lib/audio/transport-pause"
-import { VIDEO_END_GUARD_SEC, videoSyncAction } from "./video-sync"
+import { VIDEO_END_GUARD_SEC, VIDEO_PAUSED_SNAP_SEC, videoSyncAction } from "./video-sync"
+import { filmMomentAt, type FilmPiece } from "@/lib/timeline/film-pieces"
 import { nextScrubSeek } from "./video-seek-coalesce"
 import {
   forgetStallSample,
@@ -162,6 +163,21 @@ export interface MediaVideoPaneProps {
    * picture (Sam, Oct 29); the Source audio row's mute silences it.
    */
   followsRecordings?: boolean
+  /**
+   * AQU-2253 (Sam, Oct 30): the film was IMPORTED through the importer (a
+   * video uploaded like any other file), not linked. Its sound is the Source
+   * audio row's, by the rules any uploaded recording follows, so the element
+   * is always muted — in both timings, whatever the Source audio mute says.
+   */
+  importedFilm?: boolean
+  /**
+   * AQU-2253 (Sam, Oct 30): an imported film following the recordings, cut
+   * into its lines' pieces (lib/timeline/film-pieces). The queue's programme
+   * second is a moment of the TIMELINE then, and the picture shows the piece
+   * under it: that line's own stretch of the film, its last frame held while
+   * a longer recording finishes. Null or absent: the film's own clock.
+   */
+  filmPieces?: readonly FilmPiece[] | null
   sourceDirectionMode?: DirectionMode
   targetDirectionMode?: DirectionMode
   sourceTextDirection?: TextDirection
@@ -183,6 +199,8 @@ export function MediaVideoPane({
   onChangeVideo,
   onPictureClick,
   followsRecordings = false,
+  importedFilm = false,
+  filmPieces = null,
   sourceDirectionMode = "auto",
   targetDirectionMode = "auto",
   sourceTextDirection = "ltr",
@@ -707,13 +725,38 @@ export function MediaVideoPane({
 
   // ── The transport. One effect owns play/pause AND position, so the two can
   // never disagree about what the queue is doing.
-  const tickSec = queue.progress.currentTime
+  const queueTickSec = queue.progress.currentTime
   const rate = queue.progress.rate
+  // AQU-2253 (Sam, Oct 30): an imported film following the recordings is cut
+  // into its lines' pieces, so the programme's second is turned into the
+  // film's own: the moment of the piece under the playhead, or that piece's
+  // last frame, held, while a longer recording finishes.
+  const cutFilm = followsRecordings && filmPieces != null && filmPieces.length > 0
+  const moment = cutFilm && clockIsFileTime ? filmMomentAt(filmPieces!, queueTickSec) : null
+  const tickSec = moment ? moment.sec : queueTickSec
+  const holding = moment?.held === true
   useEffect(() => {
     const video = videoRef.current
     if (!video || !slaved || failed) return
     const now = Date.now()
     const prev = prevTickRef.current
+    if (holding && queue.kind !== "idle" && queue.kind !== "error") {
+      // The line's recording runs longer than its stretch of the film: the
+      // picture stays on that stretch's last frame until the line ends. Paused
+      // there, and sent there once if it is anywhere else.
+      prevTickRef.current = null
+      wantPlayRef.current = false
+      video.pause()
+      if (Math.abs(video.currentTime - tickSec) > VIDEO_PAUSED_SNAP_SEC) {
+        try {
+          video.currentTime = tickSec
+          lastSeekAtRef.current = now
+        } catch {
+          /* not seekable yet — the next tick re-issues it */
+        }
+      }
+      return
+    }
     const action = videoSyncAction({
       kind: queue.kind,
       clockIsFileTime,
@@ -764,7 +807,7 @@ export function MediaVideoPane({
     wantPlayRef.current = queue.playing
     if (queue.playing) requestPlay(video)
     else video.pause()
-  }, [slaved, failed, queue.kind, queue.playing, clockIsFileTime, tickSec, rate, mediaEpoch, requestPlay])
+  }, [slaved, failed, queue.kind, queue.playing, clockIsFileTime, tickSec, holding, rate, mediaEpoch, requestPlay])
 
   // Playback speed. Set both, because `defaultPlaybackRate` is what survives a
   // load, and re-apply whenever the element reloads. This is the STARTING
@@ -786,6 +829,14 @@ export function MediaVideoPane({
    *  new nonce also carries the flag that belongs to it. */
   const seekWantsPlayRef = useRef(false)
   seekWantsPlayRef.current = seekSec?.play === true
+  /** AQU-2253: the pieces an explicit seek lands in, read through a ref for
+   *  the same reason (the seek effect is keyed on its nonce alone). Kept by an
+   *  effect declared before that one, so it is current when the seek runs. */
+  const filmPiecesRef = useRef<readonly FilmPiece[] | null>(null)
+  const seekPieces = cutFilm ? filmPieces : null
+  useEffect(() => {
+    filmPiecesRef.current = seekPieces
+  }, [seekPieces])
   /** A target held back because the element was still seeking. */
   const pendingScrubSeekRef = useRef<number | null>(null)
   /** The one place `currentTime` is written for a requested seek, so the
@@ -829,7 +880,12 @@ export function MediaVideoPane({
     // moved the playhead but not the frame would leave the two contradicting
     // each other on screen.
     if (!video) return
-    const sec = Math.max(0, seekTarget)
+    // AQU-2253: an imported film cut into pieces goes to the piece under the
+    // timeline's second, not to that second of the film.
+    const pieces = filmPiecesRef.current
+    const sec = pieces && pieces.length > 0
+      ? (filmMomentAt(pieces, Math.max(0, seekTarget))?.sec ?? Math.max(0, seekTarget))
+      : Math.max(0, seekTarget)
     // AQU-646 stage 5: NEVER TWO SEEKS IN FLIGHT.
     //
     // Dragging the playhead asks the picture to move continuously, and hls.js
@@ -1205,7 +1261,10 @@ export function MediaVideoPane({
           // (AQU-646, 2026-08-11 / 2026-08-13)
           // AQU-2253: following the recordings it is slaved AND keeps its own
           // sound, which plays straight through with the picture.
-          muted={(slaved && !followsRecordings) || !sourceAudible}
+          // AQU-2253 (Sam, Oct 30): an imported film is always silent: its
+          // sound is the Source audio row's, by the rules any uploaded
+          // recording follows in each timing.
+          muted={importedFilm || (slaved && !followsRecordings) || !sourceAudible}
           // NO NATIVE CONTROLS, in either arrangement (2026-08-14, Sam).
           //
           // The standalone picture used to keep them, on the reasoning that it

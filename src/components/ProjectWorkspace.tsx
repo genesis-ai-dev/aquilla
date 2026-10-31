@@ -356,6 +356,8 @@ import {
 } from "@/lib/audio/linked-takes"
 import { deriveSourceRegions, insertSlotsByCell, EMPTY_INSERT_SLOTS } from "@/lib/timeline/source-regions"
 import { deriveTracksForFile } from "@/lib/timeline/tracks"
+import { filmKindOf, filmPiecesFor, filmVoicesProgramme } from "@/lib/timeline/film-pieces"
+import { layOutProgramme } from "@/lib/timeline/programme"
 import { nextFolderName } from "@/lib/timeline/track-names"
 import { applyPendingOrders, renormaliseOrders, settledPendingOrders } from "@/lib/timeline/track-reorder"
 import { folderIdsOf, folderMembers, orderForScopeAppend, trackScope } from "@/lib/timeline/track-groups"
@@ -13857,14 +13859,29 @@ export function ProjectWorkspace() {
   // Driving is gated on the picture owning the file: following the recordings
   // the queue's programme plays the takes and the picture follows it.
   const videoDrivesDubs = videoIsTransport
-  // AQU-2253: following the recordings the film's own sound plays straight
-  // through with its picture, so the programme plays its original muted (it
-  // still clocks the lines) rather than voicing the same speech twice.
-  const filmVoicesProgramme = showVideoPane && timingMode === "audioFirst"
+  // AQU-2253 (Sam, Oct 30): which kind of film this is. A LINKED film (YouTube,
+  // a film link) plays straight through with its own sound; an IMPORTED one (a
+  // video uploaded through the importer, stored once as the film and as every
+  // line's recording) is cut along its source cues, and its sound is the
+  // Source audio row's alone (lib/timeline/film-pieces).
+  const filmKind = useMemo(
+    () => filmKindOf(activeFile?.coreMediaUrl, audioMergedCells),
+    [activeFile?.coreMediaUrl, audioMergedCells],
+  )
+  // AQU-2253: following the recordings a LINKED film's own sound plays
+  // straight through with its picture, so the programme plays its original
+  // muted (it still clocks the lines) rather than voicing the same speech
+  // twice. An imported film is silent: its Source audio row is the sound, by
+  // the rules any uploaded recording follows.
+  const filmVoicesTheProgramme = filmVoicesProgramme({
+    kind: filmKind,
+    paneOnScreen: showVideoPane,
+    followsRecordings: timingMode === "audioFirst",
+  })
   useEffect(() => {
-    setProgrammeSourceVoicedByFilm(filmVoicesProgramme)
+    setProgrammeSourceVoicedByFilm(filmVoicesTheProgramme)
     return () => setProgrammeSourceVoicedByFilm(false)
-  }, [filmVoicesProgramme])
+  }, [filmVoicesTheProgramme])
   // Stage 4: the driver fires takes over the picture at cell boundaries, so it
   // has to be given whichever cells actually hold them — the audio cues once a
   // cue sibling exists. It takes plain CellData, so this is the entire change
@@ -15321,6 +15338,17 @@ export function ProjectWorkspace() {
   const programmeTracks = useMemo(
     () => JSON.parse(programmeTracksKey) as ReturnType<typeof programmeTrackSlots>,
     [programmeTracksKey],
+  )
+  // AQU-2253 (Sam, Oct 30): an imported film following the recordings is cut
+  // into its lines' pieces, laid out by the programme the timeline draws and
+  // the queue plays — the same lines and tracks — so the Film panel shows the
+  // piece under the playhead. Null otherwise: the film's own clock.
+  const filmPieces = useMemo(
+    () =>
+      filmKind === "imported" && timingMode === "audioFirst"
+        ? filmPiecesFor(layOutProgramme(timelineCells, programmeTracks).programme)
+        : null,
+    [filmKind, timingMode, timelineCells, programmeTracks],
   )
   const layerTrackSlotsKey = programmeTracks.layerTrackSlots.join("\u0000")
   useEffect(() => {
@@ -17932,6 +17960,11 @@ export function ProjectWorkspace() {
                   // AQU-2253: following the recordings the film is shown on
                   // its own clock, following the programme's playhead.
                   followsRecordings={timingMode === "audioFirst"}
+                  // AQU-2253 (Sam, Oct 30): an imported film is always
+                  // silent, and following the recordings shows the piece of
+                  // the line under the playhead.
+                  importedFilm={filmKind === "imported"}
+                  filmPieces={filmPieces}
                   sourceDirectionMode={fileMeta.sourceDirectionMode}
                   targetDirectionMode={fileMeta.targetDirectionMode}
                   sourceTextDirection={fileMeta.sourceTextDirection}

@@ -6309,6 +6309,104 @@ describe("TimelineEditor — the film track", () => {
   })
 })
 
+// AQU-2253 (Sam, Oct 30): a film IMPORTED through the importer is stored once,
+// as the film and as every line's recording. Its sound is its Source audio
+// row, cut into source cues as on dev, and its picture is cut along the same
+// cues: end to end following the source, each line's piece in its line's slot
+// following the recordings.
+describe("TimelineEditor — an imported film is cut along its source cues", () => {
+  const UPLOAD = "frontier-audio://ep9/audio-ep9-1690000000-film.webm"
+  const SOURCE_ID = "audio-ep9-1690000000-film.webm"
+  const film = { name: "Imported film.webm", showing: true, onHide: vi.fn(), onShow: vi.fn() }
+  const line = (id: string, start: number, end: number, takeSec?: number) => {
+    const takeId = `audio-${id}-1700000000-take.webm`
+    return cell({
+      id, fileId: "ep9", medium: "media", startTime: start, endTime: end, original: `Line ${id}`,
+      ...(takeSec != null ? { selectedAudioId: takeId } : {}),
+      attachments: {
+        [SOURCE_ID]: { type: "audio", url: UPLOAD, trimStartMs: start * 1000, trimEndMs: end * 1000, durationMs: 27_080 },
+        ...(takeSec != null ? { [takeId]: { type: "audio", url: "frontier-audio://take", durationMs: takeSec * 1000 } } : {}),
+      },
+    } as unknown as Partial<CellData>)
+  }
+  // An exact fit, a dub 1.8 s longer than its line, and one 2.3 s shorter.
+  const lines = [line("a", 0.5, 4.0, 3.5), line("b", 4.6, 8.8, 6.0), line("c", 9.2, 13.5, 2.0)]
+  const draw = (mode: "dubbing" | "audioFirst", over: Record<string, unknown> = {}) =>
+    renderWithTooltips(
+      <TimelineEditor
+        fileId="ep9" coreMediaUrl={UPLOAD} film={film} editable cells={lines} timingMode={mode}
+        tracks={deriveTracksForFile(null, { isSubtitleImport: false, hasMediaCells: true, hasAudioCues: false, hasSourceAudio: true })}
+        onRetimeSubtitle={() => {}}
+        {...over}
+      />,
+    )
+  const gutterNames = () =>
+    Array.from(screen.getByTestId("tl-scroll").previousElementSibling!.querySelectorAll("span.font-semibold")).map((el) => el.textContent)
+
+  beforeEach(() => {
+    topOwner.value = 1
+    resetVideoDurationsForTests()
+    setVideoDurationSec(UPLOAD, 27.08)
+  })
+
+  it.each(["dubbing", "audioFirst"] as const)("keeps its Source audio row, cut into its lines, in %s; the film's row has no mute of its own", (mode) => {
+    draw(mode)
+    expect(gutterNames()[0]).toBe("Film")
+    expect(gutterNames()).toContain("Source audio")
+    expect(gutterNames()).not.toContain("Source cues")
+    expect(within(screen.getByTestId("tl-film-track-label")).queryByRole("button")).toBeNull()
+    expect(screen.getByTestId("tl-speaker-source")).toBeInTheDocument()
+  })
+
+  it("following the source, its pieces sit end to end: the one strip on the film's clock", () => {
+    draw("dubbing")
+    expect(screen.getByTestId("tl-film-lane")).toHaveAttribute("data-film-kind", "one-strip")
+    expect(screen.queryAllByTestId("tl-film-piece")).toHaveLength(0)
+  })
+
+  it("following the recordings, each line's piece of film sits at its line, from its own stretch", () => {
+    draw("audioFirst")
+    expect(screen.getByTestId("tl-film-lane")).toHaveAttribute("data-film-kind", "imported-pieces")
+    const pieces = screen.getAllByTestId("tl-film-piece")
+    expect(pieces.map((p) => [p.getAttribute("data-cell-id"), p.getAttribute("data-film-start"), p.getAttribute("data-film-end")])).toEqual([
+      ["a", "0.5", "4"],
+      ["b", "4.6", "8.8"],
+      // Cut where its line ends, exactly where the Source audio is cut.
+      ["c", "9.2", "11.2"],
+    ])
+    // Each piece starts where its line's Source audio card starts.
+    const dialogue = screen.getAllByTestId("tl-lane").find((lane) => lane.getAttribute("data-variant") === "dialogue")!
+    lines.forEach((l, i) => {
+      const card = within(dialogue).getByTestId(`tl-card-${l.id}`)
+      expect(parseFloat(pieces[i].style.left)).toBeCloseTo(parseFloat(card.style.left), 0)
+    })
+  })
+
+  it("a dub longer than its line: its piece holds the last frame until the line ends", () => {
+    draw("audioFirst")
+    const [a, b, c] = screen.getAllByTestId("tl-film-piece")
+    expect(a.querySelector("[data-testid='tl-film-held']")).toBeNull()
+    expect(b.querySelector("[data-testid='tl-film-held']")).not.toBeNull()
+    expect(c.querySelector("[data-testid='tl-film-held']")).toBeNull()
+  })
+
+  it("following the recordings, the timeline ends with its lines, not at the film's own end", () => {
+    draw("audioFirst")
+    // 3.5 + 6 + 2 = 11.5 s of lines, against a 27 s film.
+    const b = screen.getAllByTestId("tl-film-piece")[1]
+    const pxPerSec = parseFloat(b.style.left) / 3.5
+    const filePx = Number(screen.getByTestId("tl-canvas").getAttribute("data-file-px"))
+    expect(filePx / pxPerSec).toBeLessThan(20)
+    expect(filePx / pxPerSec).toBeGreaterThanOrEqual(11.5)
+  })
+
+  it("a linked film on the same lines stays one strip on its own clock following the recordings", () => {
+    draw("audioFirst", { coreMediaUrl: "https://www.youtube.com/watch?v=aqbHRKZ1bVs" })
+    expect(screen.getByTestId("tl-film-lane")).toHaveAttribute("data-film-kind", "one-strip")
+    expect(screen.queryAllByTestId("tl-film-piece")).toHaveLength(0)
+  })
+})
+
 // AQU-2253: with the film pinned as the first row, a timeline scrolled down
 // slid "Film" up OVER the corner's "Tracks" — the track names sat one layer
 // above the corner they are meant to slide under (the ruler's opposite

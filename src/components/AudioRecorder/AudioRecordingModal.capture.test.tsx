@@ -5,7 +5,7 @@
 
 import userEvent from "@testing-library/user-event"
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { screen } from "@testing-library/react"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
@@ -104,7 +104,7 @@ vi.mock("@/hooks/useCellAudio", () => ({
 }))
 
 import { AudioRecordingModal } from "./AudioRecordingModal"
-import { renderWithTooltips, expectClickNote } from "@/test-utils/tooltip"
+import { renderWithTooltips } from "@/test-utils/tooltip"
 import { setRecordingTakesDrawerOpen } from "@/lib/store/recording-takes-drawer-pref"
 
 const project = { id: "p1", name: "P", ttsSettings: {} } as unknown as ProjectRecord

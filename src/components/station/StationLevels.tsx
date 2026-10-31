@@ -20,7 +20,13 @@ export function StationLevels({ ed, lane, hover }: { ed: StationEditor; lane: HT
   const dragRef = useRef<Drag | null>(null)
   const { va, w } = ed.view
   const pct = (x: number) => `${(((Math.max(va, Math.min(va + w, x)) - va) / w) * 100).toFixed(3)}%`
+  // Zoomed in, a corner whose place is out of view is hidden, as 40b hides a
+  // flag (item 14): pinned to the view's edge it would mark a fade that
+  // isn't there.
+  const inView = (x: number) => x >= va - 1e-6 && x <= va + w + 1e-6
   const lv = ed.level
+  const fadeInAt = ed.trimA + lv.fadeIn
+  const fadeOutAt = ed.trimB - lv.fadeOut
   const kept = ed.trimB - ed.trimA
   const step = kept > 2 ? 0.3 : 0.05
 
@@ -115,31 +121,37 @@ export function StationLevels({ ed, lane, hover }: { ed: StationEditor; lane: HT
         </button>
       </span>
       {/* Item 21: the fade corners, where each fade ends (40b). */}
-      <button
-        type="button"
-        data-testid="station-fade-in"
-        aria-label={fadeInT}
-        title={t("editor.station.fadeTip", { fade: fadeInT })}
-        onPointerDown={down("fadeIn")}
-        onPointerMove={move}
-        onPointerUp={up}
-        className={corner}
-        style={{ left: pct(ed.trimA + lv.fadeIn) }}
-      />
-      <span className="pointer-events-none absolute top-[29px] z-[5] ps-4 text-[10.5px] whitespace-nowrap text-sky-700 dark:text-sky-400" style={{ left: pct(ed.trimA + lv.fadeIn) }}>
-        {fadeInT}
-      </span>
-      <button
-        type="button"
-        data-testid="station-fade-out"
-        aria-label={fadeOutT}
-        title={t("editor.station.fadeTip", { fade: fadeOutT })}
-        onPointerDown={down("fadeOut")}
-        onPointerMove={move}
-        onPointerUp={up}
-        className={`${corner} -translate-x-full`}
-        style={{ left: pct(ed.trimB - lv.fadeOut) }}
-      />
+      {inView(fadeInAt) ? (
+        <>
+          <button
+            type="button"
+            data-testid="station-fade-in"
+            aria-label={fadeInT}
+            title={t("editor.station.fadeTip", { fade: fadeInT })}
+            onPointerDown={down("fadeIn")}
+            onPointerMove={move}
+            onPointerUp={up}
+            className={corner}
+            style={{ left: pct(fadeInAt) }}
+          />
+          <span className="pointer-events-none absolute top-[29px] z-[5] ps-4 text-[10.5px] whitespace-nowrap text-sky-700 dark:text-sky-400" style={{ left: pct(fadeInAt) }}>
+            {fadeInT}
+          </span>
+        </>
+      ) : null}
+      {inView(fadeOutAt) ? (
+        <button
+          type="button"
+          data-testid="station-fade-out"
+          aria-label={fadeOutT}
+          title={t("editor.station.fadeTip", { fade: fadeOutT })}
+          onPointerDown={down("fadeOut")}
+          onPointerMove={move}
+          onPointerUp={up}
+          className={`${corner} -translate-x-full`}
+          style={{ left: pct(fadeOutAt) }}
+        />
+      ) : null}
     </>
   )
 }

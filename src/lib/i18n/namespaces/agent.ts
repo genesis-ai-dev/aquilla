@@ -25,7 +25,7 @@ import { defineNamespace, plural } from "./types"
 export const agent = defineNamespace({
   keys: {
     // ── Dock panel + dock chat view (AgentDockPanel, AgentDockView) ────────
-    "agent.dock.title": "AI Agent",
+    "agent.dock.title": "AI agent",
     "agent.dock.openInEditorTooltip": "Open in editor tab",
     "agent.dock.openInEditorAriaLabel": "Open agent in editor tab",
     "agent.dock.openInEditorNotice": "The agent is open in an editor tab.",
@@ -85,7 +85,7 @@ export const agent = defineNamespace({
     "agent.run.friendly.sql": "Checked the project records",
     "agent.run.friendly.emit": "Staged drafts for review",
     "agent.run.friendly.docs": "Consulted the project documents",
-    "agent.run.friendly.aquifer": "Looked up Bible resources",
+    "agent.run.friendly.aquifer": "Looked up Bible data",
     "agent.run.friendly.read": "Read the passage",
     "agent.run.friendly.examples": "Gathered translation examples",
     "agent.run.friendly.search": "Searched the project",
@@ -124,7 +124,7 @@ export const agent = defineNamespace({
     "agent.card.tool.docs.label": "Consult the project documents",
     "agent.card.tool.docs.description":
       "Reads the project's own reference documents and translation guidance.",
-    "agent.card.tool.aquifer.label": "Look up Bible resources",
+    "agent.card.tool.aquifer.label": "Look up Bible data",
     "agent.card.tool.aquifer.description":
       "Fetches outside reference material such as notes and dictionaries.",
     "agent.card.tool.sql.label": "Check the project records",
@@ -363,7 +363,9 @@ export const agent = defineNamespace({
 
     // ── Run cost-cap meter (BudgetMeter) ────────────────────────────────
     "agent.budget.exhausted": "Run stopped at its {capCredits} credit cap ({spentCredits} spent).",
-    "agent.budget.weeklyExhausted": "Run stopped: this workspace has used its weekly AI allowance. Work already staged is kept. Usage resets weekly; see Billing & usage.",
+    "agent.budget.weeklyExhausted":
+      "Run stopped: this workspace has used its weekly AI allowance. Work already staged is kept. " +
+      "Usage resets weekly; see Billing.",
     "agent.budget.pctUsed": "{pct}% of the run budget used",
 
     // ── Staged changeset review (ChangesetCard, ChangeList, and the

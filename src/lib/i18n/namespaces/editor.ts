@@ -181,7 +181,7 @@ export const editor = defineNamespace({
       "The file is still safe. Check your connection and try loading it again.",
     "editor.file.retryLoad": "Retry loading file",
     "editor.file.loadingFromCloud": "Loading file from the cloud",
-    "editor.file.loadingLanguages": "Loading this project's languages",
+    "editor.file.loadingLanguages": "Loading this project's language lanes",
     "editor.file.noneSelectedTitle": "No file selected",
     "editor.file.noneSelectedBody": "Pick a file from the sidebar to start translating.",
     "editor.file.noFilesTitle": "No files yet",
@@ -215,8 +215,8 @@ export const editor = defineNamespace({
     // — AQU-1565: a time-ordered file whose media is a LINKED video and whose
     //   rows have not arrived yet. Its captions live on the Media view's
     //   timeline, so none of the attach-media copy above applies.
-    "editor.media.linkedVideoTitle": "Linked to a YouTube video",
-    "editor.media.linkedVideoTitleGeneric": "Linked to a video",
+    "editor.media.linkedVideoTitle": "Linked to a film on YouTube",
+    "editor.media.linkedVideoTitleGeneric": "Linked to a film",
     // AQU-1566: shown to everyone below maintainer. Under option b the first
     // captions become this file's rows, and only a maintainer attaches them.
     // Sam's D1 (2026-10-05): one sentence.
@@ -240,12 +240,11 @@ export const editor = defineNamespace({
     // AQU-1565 follow-up: two hints, because only a YouTube picture keeps its
     // own sound after an upload and offers the sound menu.
     "editor.media.linkedVideoUploadHint":
-      "The file has to run to the same timing as the video. Its speech becomes " +
-      "this file's rows. The video keeps playing with its own sound; to hear the " +
-      "file instead, pick it from the Sound menu on the video.",
+      "The file has to run to the same timing as the film. Its speech becomes this file's rows. The " +
+      "film keeps playing with its own sound; to hear the file instead, pick it from the Sound menu " +
+      "on the film.",
     "editor.media.linkedVideoUploadHintGeneric":
-      "The file has to run to the same timing as the linked video. Its speech " +
-      "becomes this file's rows.",
+      "The file has to run to the same timing as the linked film. Its speech becomes this file's rows.",
     // AQU-1566 (option b): on such a file the first captions attached become
     // its OWN rows, so a maintainer gets the action in place, and a caption
     // track that is already on the timeline can be turned into the rows.
@@ -253,38 +252,42 @@ export const editor = defineNamespace({
       "Attach its captions (VTT, SRT or SBV) and they become this file's rows, ready to translate.",
     // Sam, Oct 5: Aquilla can't take a YouTube video's captions or sound, but
     // its owner can download both from YouTube Studio, so the card says where.
-    "editor.media.linkedVideoStudioCaptions": "The video's owner can download its captions from YouTube Studio.",
-    "editor.media.linkedVideoStudioVideo": "The video's owner can download the video file from YouTube Studio.",
+    "editor.media.linkedVideoStudioCaptions":
+      "The film's owner can download its captions from YouTube Studio.",
+    "editor.media.linkedVideoStudioVideo":
+      "The film's owner can download the video file from YouTube Studio.",
     "editor.media.useTrackAsRows": "Use \"{track}\" as this file's rows",
     "editor.media.useTrackAsRowsHint": "Other caption tracks stay on the timeline.",
     // AQU-1681: a linked video NOT on YouTube can give its own sound. Aquilla
     // fetches it, keeps a copy, and splits it into rows like an upload.
-    "editor.media.linkedVideoUseSoundLink": "make rows from the video's own sound",
-    "editor.media.linkedVideoSoundTitle": "Make rows from the video's own sound",
+    "editor.media.linkedVideoUseSoundLink": "make rows from the film's own sound",
+    "editor.media.linkedVideoSoundTitle": "Make rows from the film's own sound",
     "editor.media.linkedVideoSoundHint":
-      "Aquilla saves a copy of the video's sound with this file, splits it into rows " +
-      "where the speech pauses, and transcribes them. The rows are timed to the video.",
-    "editor.media.linkedVideoSoundReadingTracks": "Reading the video's sound tracks…",
+      "Aquilla saves a copy of the film's sound with this file, splits it into rows where the speech " +
+      "pauses, and transcribes them. The rows are timed to the film.",
+    "editor.media.linkedVideoSoundReadingTracks": "Reading the film's sound tracks…",
     "editor.media.linkedVideoSoundTrackLabel": "Sound track",
     "editor.media.linkedVideoSoundStart": "Make rows",
-    "editor.media.linkedVideoSoundDownloading": "Downloading the video's sound…",
-    "editor.media.linkedVideoSoundDownloadingPercent": "Downloading the video's sound… {percent}%",
+    "editor.media.linkedVideoSoundDownloading": "Downloading the film's sound…",
+    "editor.media.linkedVideoSoundDownloadingPercent": "Downloading the film's sound… {percent}%",
     "editor.media.linkedVideoSoundSaving": "Saving a copy of the sound…",
     "editor.media.linkedVideoSoundMakingRows": "Making rows…",
     "editor.media.linkedVideoSoundCancelled": "Stopped. Nothing was saved.",
     "editor.media.videoSound.fetchFailed":
-      "Couldn't download the video's sound. Check your connection and try again.",
+      "Couldn't download the film's sound. Check your connection and try again.",
     "editor.media.videoSound.fileUnreadable":
-      "Couldn't download this video. Its server may not let other sites read it.",
-    "editor.media.videoSound.tooLarge": "This video is too large to keep a copy of.",
-    "editor.media.videoSound.empty": "The video's sound came back empty.",
-    "editor.media.videoSound.noSeparateSound": "This video's stream has no separate sound track to read.",
-    "editor.media.videoSound.encrypted": "This video's sound is encrypted, so Aquilla can't read it.",
-    "editor.media.videoSound.unsupportedFormat": "This video's sound is in a streaming format Aquilla can't read yet.",
-    "editor.media.videoSound.decodeFailed": "This browser couldn't decode the video's sound.",
+      "Couldn't download this film. Its server may not let other sites read it.",
+    "editor.media.videoSound.tooLarge": "This film is too large to keep a copy of.",
+    "editor.media.videoSound.empty": "The film's sound came back empty.",
+    "editor.media.videoSound.noSeparateSound":
+      "This film's stream has no separate sound track to read.",
+    "editor.media.videoSound.encrypted": "This film's sound is encrypted, so Aquilla can't read it.",
+    "editor.media.videoSound.unsupportedFormat":
+      "This film's sound is in a streaming format Aquilla can't read yet.",
+    "editor.media.videoSound.decodeFailed": "This browser couldn't decode the film's sound.",
     "editor.media.videoSound.offset":
-      "The video's sound starts {seconds} s away from its picture, so rows made from it " +
-      "would be out of step with the video.",
+      "The film's sound starts {seconds} s away from its picture, so rows made from it would be out " +
+      "of step with the film.",
 
     // — Footnotes: the inline strip, the bottom tray, and one note's row ——
     "editor.footnotes.label": "Footnotes",
@@ -478,7 +481,7 @@ export const editor = defineNamespace({
     "editor.wordsThatFit.button": "Words that fit here",
     "editor.wordsThatFit.empty": "No suggestions yet",
     "editor.wordsThatFit.replace": "Replace with {word}",
-    "editor.view.healthScoreColorCoding": "Health Score Color Coding",
+    "editor.view.healthScoreColorCoding": "Health score color coding",
     "editor.health.citedExample": "{source} → {target}",
     "editor.view.visibleStyleSegments": "Visible style segments",
     "editor.view.lowMemory": "Low-memory mode",
@@ -492,8 +495,8 @@ export const editor = defineNamespace({
     "editor.view.footnotesHidden": "Hidden",
     "editor.view.footnotesInline": "Inline under cells",
     "editor.view.footnotesTray": "Bottom tray",
-    "editor.view.textDirection": "Text Direction",
-    "editor.view.fontSize": "Font Size",
+    "editor.view.textDirection": "Text direction",
+    "editor.view.fontSize": "Font size",
     // AQU-2263: under the two font size rows. {size} is a number of pixels.
     "editor.view.fontSizeDefault": "Default from Preferences: {size}px",
     "editor.view.fontSizeReset": "Reset to default",
@@ -539,7 +542,7 @@ export const editor = defineNamespace({
     "editor.resources.show": "Show verse resources",
     "editor.resources.hide": "Hide verse resources",
     "editor.resources.edgeTab": "Helps",
-    "editor.resources.title": "Verse Resources",
+    "editor.resources.title": "Verse resources",
     "editor.resources.scrollHint":
       "Scroll the editor to a verse to see the people, places and terms it mentions.",
     "editor.resources.noneForRef": "No linked people, places or terms for {ref}.",
@@ -717,7 +720,7 @@ export const editor = defineNamespace({
       other: "{count} will be skipped — {reasons}",
     }),
     "editor.selection.validateOutOfScope":
-      "Some selected cells are outside your assigned files or lanes",
+      "Some selected cells are outside your assigned files or language lanes",
     "editor.selection.validateAllMine": "All selected cells are already validated by you",
     "editor.selection.validateOwnEdits":
       "You made the latest change to these cells, so someone else must validate them",
@@ -840,8 +843,8 @@ export const editor = defineNamespace({
       other: "{count} have your latest change, so someone else must validate them",
     }),
     "editor.batchValidate.skip.outOfScope": plural({
-      one: "{count} is outside your assigned files or lanes",
-      other: "{count} are outside your assigned files or lanes",
+      one: "{count} is outside your assigned files or language lanes",
+      other: "{count} are outside your assigned files or language lanes",
     }),
     "editor.batchValidate.skip.notCommitted": plural({
       one: "{count} has no saved translation yet",
@@ -874,7 +877,7 @@ export const editor = defineNamespace({
     // — Timeline lens (time-ordered files) ————————————————————————
     "editor.timeline.title": "Timeline",
     "editor.timeline.followPlayhead": "Follow playhead",
-    "editor.timeline.changeVideo": "Change video",
+    "editor.timeline.changeVideo": "Change film",
     "editor.timeline.coreVideoPrompt": "Core video URL (leave blank to clear)",
     "editor.timeline.zoomIn": "Zoom in",
     "editor.timeline.zoomOut": "Zoom out",
@@ -1130,7 +1133,8 @@ export const editor = defineNamespace({
     "editor.history.stepEditSource": "Edit the source text",
     "editor.history.stepUnknown": "A change made in a newer version of Aquilla",
     "editor.timeline.videoHiddenNote":
-      "The linked video is hidden here — it plays on the original recording's timing, which this view no longer follows.",
+      "The linked film is hidden here. It plays to the source's times, and this file now follows its " +
+      "recordings.",
     "editor.timeline.bluetoothPill": "Bluetooth",
     "editor.timeline.bluetoothPillInfo": "About playing through Bluetooth",
     "editor.timeline.outputLatencyNote":
@@ -1188,7 +1192,7 @@ export const editor = defineNamespace({
     // AQU-646: the video pane, the pairing overlay, and the small lane
     // affordances. Keyed 2026-08-20 — these surfaces were authored inline
     // while the dubbing workflow was being designed.
-    "editor.timeline.videoPaneTitle": "Video",
+    "editor.timeline.videoPaneTitle": "Film",
     // The media view's Text panel: its tab, and its name in the Panels menu.
     // (AQU-1119 named it, as a heading over the dialogue table.) It says
     // "Text" and not "Source text" because SOURCE and TARGET are the two
@@ -1197,11 +1201,11 @@ export const editor = defineNamespace({
     // `TRACK_KIND_LABELS` still calls those "Source text" / "Target text",
     // which is right, because a track IS one side.
     "editor.timeline.textPaneTitle": "Text",
-    "editor.timeline.videoPaneLinked": "Linked video",
+    "editor.timeline.videoPaneLinked": "Linked film",
     "editor.timeline.videoPaneStart": "Click to start the picture",
     "editor.timeline.videoPanePicture": "picture",
     "editor.timeline.videoPaneBar": "bar",
-    "editor.timeline.videoPaneErrorTitle": "This video could not be loaded",
+    "editor.timeline.videoPaneErrorTitle": "This film could not be loaded",
     // No `videoPaneRetry` or `videoPaneChangeVideo` here: the pane's two
     // buttons reuse `common.retry` and `editor.timeline.changeVideo`. Minting a
     // second key for a word the catalog already carries gives a translator two
@@ -1218,10 +1222,10 @@ export const editor = defineNamespace({
     "editor.timeline.soundSourceTrigger": "Sound: {source}",
     // Sam, Oct 5: the trigger is a text pill naming the choice, not a speaker
     // icon (which read as mute/unmute), and the menu says what it chooses.
-    "editor.timeline.soundSourcePillVideo": "Sound: Video",
+    "editor.timeline.soundSourcePillVideo": "Sound: Film",
     "editor.timeline.soundSourcePillRecording": "Sound: Recording",
     "editor.timeline.soundSourceHeading": "Playback sound",
-    "editor.timeline.soundSourceVideo": "The video's own sound",
+    "editor.timeline.soundSourceVideo": "The film's own sound",
     // Sam's D3 (2026-10-05): the empty Source text lane of a linked video.
     "editor.timeline.noCaptionsYet": "No captions yet",
     "editor.timeline.soundSourceRecording": "Uploaded recording ({name})",
@@ -1250,16 +1254,19 @@ export const editor = defineNamespace({
     "editor.timeline.addLineHere": "Add a line here",
 
     // The link-video dialog and the chip strip's field labels.
-    "editor.timeline.linkVideoTitleChange": "Change the linked video",
-    "editor.timeline.linkVideoTitleNew": "Link a video",
+    "editor.timeline.linkVideoTitleChange": "Change the linked film",
+    "editor.timeline.linkVideoTitleNew": "Link a film",
     // AQU-2259: it used to say the video always plays muted. It is muted only
     // while the file's uploaded recording is what plays (MediaVideoPane).
     "editor.timeline.linkVideoDescription":
-      "Paste the address of the video this file was dubbed from. It plays beside the text, in step with the timeline. When the file has an uploaded recording, you hear that recording and the video is muted; a YouTube video keeps its own sound until you pick the recording from its Sound menu.",
-    "editor.timeline.linkVideoAddressLabel": "Video address",
+      "Paste the address of the film this file was dubbed from. It plays beside the text, in step " +
+      "with the timeline. When the file has an uploaded recording, you hear that recording and the " +
+      "film is muted; a film on YouTube keeps its own sound until you pick the recording from its " +
+      "Sound menu.",
+    "editor.timeline.linkVideoAddressLabel": "Film address",
     "editor.timeline.linkVideoInvalid":
       "That doesn't look like a web address. It should start with http:// or https://.",
-    "editor.timeline.linkVideoClear": "Clear video",
+    "editor.timeline.linkVideoClear": "Clear film",
     "editor.timeline.chipHeadingSubtitle": "Subtitle",
     "editor.timeline.chipSpeaker": "Speaker",
     "editor.timeline.chipCamera": "Camera",
@@ -1307,7 +1314,7 @@ export const editor = defineNamespace({
     "editor.dock.stateFolded": "folded",
     "editor.dock.stateBehind": "a tab behind {panel}",
     "editor.dock.stateFull": "full screen",
-    "editor.dock.filmHiddenByTiming": "Hidden in Free timing",
+    "editor.dock.filmHiddenByTiming": "Hidden while the file follows its recordings",
     "editor.dock.fullNote": "Full screen folded {folded}. Restoring unfolds just those.",
     "editor.dock.fullOn": "Full screen is on",
     "editor.dock.fullInfoAria": "About full screen",
@@ -1331,7 +1338,7 @@ export const editor = defineNamespace({
     "editor.dock.statusTitle": "{file} · status",
     "editor.dock.lastSaved": "Last saved {when}",
     "editor.dock.statusCloseNote": "Esc or a click elsewhere closes this.",
-    "editor.dock.filmChange": "Change or clear the video…",
+    "editor.dock.filmChange": "Change or clear the film…",
     "editor.dock.filmHide": "Fold the film",
     "editor.dock.filmShow": "Show the film panel",
     "editor.timeline.folderExpandAria": "Show the tracks in {name}",
@@ -1454,7 +1461,7 @@ export const editor = defineNamespace({
     "editor.timeline.badgeImportedCount": "{count} imported",
     // Sam, Oct 5: the Sources menu's track rows are just greyed out when track
     // editing is off; this is what hovering one says.
-    "editor.timeline.trackEditingOffHint": "Track editing is off. Turn it on in Project Settings.",
+    "editor.timeline.trackEditingOffHint": "Track editing is off. Turn it on in Project settings.",
 
     // — Row hover controls + assurance panel (editing table) ——————
     "editor.row.removeLine": "Remove this line",
@@ -1485,8 +1492,8 @@ export const editor = defineNamespace({
     "editor.removeCell.leadNothing":
       "This removes the cell. There is nothing else attached to it.",
     "editor.removeCell.translations": plural({
-      one: "its translation in {count} language",
-      other: "its translations in {count} languages",
+      one: "its translation in {count} language lane",
+      other: "its translations in {count} language lanes",
     }),
     "editor.removeCell.takes": plural({
       one: "{count} recording",
@@ -1533,15 +1540,21 @@ export const editor = defineNamespace({
     "editor.row.splitSourceLockedReason": "Splitting changes the source text, which only a project lead can edit.",
     "editor.splitQuotes.title": "Split this line at its quotation marks?",
     "editor.splitQuotes.description": plural({
-      one: "It becomes {count} line, so each speaker can have their own voice. Every language shares the new lines.",
-      other: "It becomes {count} lines, so each speaker can have their own voice. Every language shares the new lines.",
+      one:
+        "It becomes {count} line, so each speaker can have their own voice. Every language lane " +
+        "shares the new lines.",
+      other:
+        "It becomes {count} lines, so each speaker can have their own voice. Every language lane " +
+        "shares the new lines.",
     }),
     "editor.splitQuotes.narration": "Narration",
     "editor.splitQuotes.quotation": "Quotation",
     "editor.splitQuotes.translationsNote":
       "Every translation of this line is marked for review, so it has to be done again. A translation that splits the same way is divided between the new lines. Any other stays whole on the first line.",
     "editor.splitQuotes.multiLaneWarning":
-      "Splitting changes the source all lanes share. Each lane's translation of this line is marked so it has to be done again, and each lane keeps the voice it already gave this line on the new narration lines.",
+      "Splitting changes the source all language lanes share. Each language lane's translation of " +
+      "this line is marked so it has to be done again, and each language lane keeps the voice it " +
+      "already gave this line on the new narration lines.",
     "editor.splitQuotes.recordingsNote": "Recordings stay on the first line.",
     "editor.splitQuotes.confirm": plural({
       one: "Split into {count} line",
@@ -1973,7 +1986,7 @@ export const editor = defineNamespace({
 
     // — Validation button, validator popover and its history ——————————
     "editor.validation.notValidatedTooltip": "Text not validated — click to validate",
-    "editor.validation.outOfScopeTooltip": "Outside your assigned files or lanes",
+    "editor.validation.outOfScopeTooltip": "Outside your assigned files or language lanes",
     "editor.validation.unavailableTooltip": "Text validation unavailable",
     "editor.validation.ownEditTooltip":
       "You made the latest change to this text, so someone else must validate it",
@@ -1997,9 +2010,8 @@ export const editor = defineNamespace({
     // — Archived lane (AQU-1463): the lane you are in has been frozen ———————
     "editor.laneArchived.title": "{lane} has been archived",
     "editor.laneArchived.body":
-      "A project manager archived {lane}, so it is now read-only. You can still " +
-      "read, search, export and comment on it, and your other languages are " +
-      "unaffected.",
+      "A project manager archived {lane}, so it is now read-only. You can still read, search, export " +
+      "and comment on it, and your other language lanes are unaffected.",
     "editor.laneArchived.acknowledge": "Got it",
     "editor.validation.noActiveValidators": "No active validators",
     "editor.validation.removeYours": "Remove your validation",
@@ -2084,14 +2096,14 @@ export const editor = defineNamespace({
     }),
 
     // — Table header, lane switcher and whole-file empty states ——————
-    "editor.lane.activeAria": "Active translation lane",
+    "editor.lane.activeAria": "Active language lane",
     "editor.lane.setTargetLanguage": "Set target language",
     "editor.lane.changeTargetLanguage": "Change target language",
     "editor.lane.changeTargetLanguageItem": "Change target language…",
-    "editor.lane.addLaneItem": "Add lane…",
-    "editor.lane.searchPlaceholder": "Search lanes…",
-    "editor.lane.searchAriaLabel": "Search lanes",
-    "editor.lane.searchEmpty": "No lanes found.",
+    "editor.lane.addLaneItem": "Add language lane…",
+    "editor.lane.searchPlaceholder": "Search language lanes…",
+    "editor.lane.searchAriaLabel": "Search language lanes",
+    "editor.lane.searchEmpty": "No language lanes found.",
     "editor.lane.showArchived": "Show archived ({count})",
     "editor.empty.noMediaSegments": "No media segments yet",
     "editor.empty.mediaLayerHint":
@@ -2148,9 +2160,10 @@ export const editor = defineNamespace({
     "editor.cellMenu.saveTimestamps": "Save",
     "editor.source.textAria": "Source text",
     "editor.source.editText": "Edit source text",
-    "editor.source.multiLaneTitle": "Change the source every language shares?",
+    "editor.source.multiLaneTitle": "Change the source every language lane shares?",
     "editor.source.multiLaneBody":
-      "All lanes share this source. Changing it marks each lane's translation of this line for review. The words stay, and so does the approval.",
+      "All language lanes share this source. Changing it marks each language lane's translation of " +
+      "this line for review. The words stay, and so does the approval.",
     "editor.source.multiLaneConfirm": "Edit source",
     "editor.source.doneEditing": "Done editing source",
     "editor.source.locked": "Source is locked",
@@ -2176,7 +2189,7 @@ export const editor = defineNamespace({
     "editor.ai.draftParagraph": "Draft paragraph ({count} cells)",
     "editor.ai.regenerate": "Regenerate — another AI variation",
     "editor.ai.alignStyles": "Align styles",
-    "editor.ai.passToStyleSegments": "Pass to Style Segments",
+    "editor.ai.passToStyleSegments": "Pass to style segments",
     "editor.ai.aligningStyles": "Aligning styles…",
     "editor.ai.alignStylesNeedsText": "Translate this cell before aligning styles",
     "editor.ai.alignStylesNeeded": "This cell needs Align styles",
@@ -2940,7 +2953,7 @@ export const editor = defineNamespace({
       "editor.dock.filmHiddenByTiming": {
         description:
           "Where the film is, in the Panels menu and the film button's menu, while " +
-          "the file is in Free timing — which hides the film, because the " +
+          "the file follows its recordings — which hides the film, because the " +
           "re-flowed audio no longer follows the original footage.",
       },
       "editor.dock.fullOn": {

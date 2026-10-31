@@ -128,15 +128,14 @@ export const onboarding = defineNamespace({
     // ═══════════════════════════════════════════════════════════════════════
 
     // — WelcomeStep —
-    "onboarding.step.welcome.getStarted": "Get Started",
+    "onboarding.step.welcome.getStarted": "Get started",
 
     // — PrivacyStep —
     "onboarding.step.privacy.heading": "Help us improve",
     "onboarding.step.privacy.description":
       "We use product analytics to understand which features people use and where things go wrong.",
-    "onboarding.step.privacy.footer":
-      "You can change this anytime in Settings. Read our",
-    "onboarding.step.privacy.policyLink": "Privacy Policy",
+    "onboarding.step.privacy.footer": "You can change this anytime in Preferences. Read our",
+    "onboarding.step.privacy.policyLink": "Privacy policy",
 
     // — SignInStep —
     "onboarding.step.signIn.signedInAs": "Signed in as {username}",
@@ -204,7 +203,7 @@ export const onboarding = defineNamespace({
     // — ReadyStep —
     "onboarding.step.ready.heading": "You're all set!",
     "onboarding.step.ready.description": "{projectName} is ready. We'll walk you through setting up AI and inviting collaborators next.",
-    "onboarding.step.ready.startTranslating": "Start Translating",
+    "onboarding.step.ready.startTranslating": "Start translating",
 
     // ═══════════════════════════════════════════════════════════════════════
     // Setup checklist drawer + steps (project workspace, post-onboarding)
@@ -253,7 +252,8 @@ export const onboarding = defineNamespace({
 
     // — AiProviderStep —
     "onboarding.checklist.aiProvider.description":
-      "AI fills in suggested translations as you go and keeps style consistent across the project. You can change this later in Project Settings.",
+      "AI fills in suggested translations as you go and keeps style consistent across the project. " +
+      "You can change this later in Project settings.",
     "onboarding.checklist.aiProvider.frontierSignInRequired":
       "Sign in with a Aquilla account to use the managed model.",
     // "Endpoint URL is required" reuses `projectSettings.advancedLlm.endpointRequiredError` (identical text)
@@ -274,7 +274,7 @@ export const onboarding = defineNamespace({
     // Whisper blurb reuses `audio.consent.whisper.short` (identical text — AQU-1211)
     "onboarding.checklist.aiModels.mms.label": "MMS multilingual voices",
     "onboarding.checklist.aiModels.mms.blurb":
-      "Local voices for many languages — one language model per download.",
+      "On-device voices for many languages — one language model per download.",
     "onboarding.checklist.aiModels.title": "Configure voice & transcription",
     "onboarding.checklist.aiModels.stepDescription":
       "Gemini TTS is recommended for voice; Whisper transcription runs locally.",
@@ -328,7 +328,8 @@ export const onboarding = defineNamespace({
     "onboarding.checklist.invite.actionLabel": "Inviting collaborators",
     "onboarding.checklist.invite.descriptionPrefix": "Add teammates as",
     "onboarding.checklist.invite.descriptionSuffix":
-      "— they can read, comment, and edit cells. You can change roles or upgrade them in Project → Share.",
+      "— they can read, comment, and edit cells. You can change roles or upgrade them in Project " +
+      "settings → Members.",
     "onboarding.checklist.invite.usernameLabel": "Invite by Aquilla username",
     "onboarding.checklist.invite.usernamePlaceholder": "e.g. mariad",
     "onboarding.checklist.invite.signInRequired": "Sign in to invite by username.",
@@ -417,11 +418,12 @@ export const onboarding = defineNamespace({
       "Follow your system appearance or choose a theme for this device.",
     "onboarding.preferences.fontSize.groupLabel": "App font size",
     "onboarding.preferences.fontSize.rowDescription":
-      "The overall size of menus, sidebars, settings, and editor cell text. A file's View settings can override the cell size; reset there to follow this size again.",
+      "The overall size of menus, sidebars, settings, and editor cell text. A file's Editor settings " +
+      "can override the cell size; reset there to follow this size again.",
     "onboarding.preferences.fontSize.small": "Small",
     "onboarding.preferences.fontSize.default": "Default",
     "onboarding.preferences.fontSize.large": "Large",
-    "onboarding.preferences.fontSize.extraLarge": "Extra Large",
+    "onboarding.preferences.fontSize.extraLarge": "Extra large",
 
     // — LanguageSection — group label reuses `language.label` (identical text)
     "onboarding.preferences.language.rowDescription":
@@ -454,7 +456,7 @@ export const onboarding = defineNamespace({
     "onboarding.preferences.section.providerKeys.title": "AI provider keys",
     "onboarding.preferences.section.providerKeys.description":
       "Optional personal AI provider override for this device only.",
-    "onboarding.preferences.section.localModels.title": "Local models",
+    "onboarding.preferences.section.localModels.title": "On-device AI models",
     "onboarding.preferences.section.localModels.description":
       "Whisper transcription and MMS voices run in your browser — stored once and shared across all projects on this device.",
     // Tauri desktop app only — not shown in the browser SPA (no local proxy to configure
@@ -483,7 +485,7 @@ export const onboarding = defineNamespace({
 
     // — Page chrome — title reuses `nav.account.preferences` (identical text)
     "onboarding.preferences.pageDescription":
-      "Personal preferences that apply to you across all projects on this device.",
+      "Personal preferences that apply to you across all projects.",
     "onboarding.preferences.dialogDescription": "Personal preferences that apply across projects.",
 
     // ═══════════════════════════════════════════════════════════════════════

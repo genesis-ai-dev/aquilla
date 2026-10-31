@@ -99,7 +99,7 @@ describe("AQU-1131 — org rules as a top-level Settings section", () => {
 
     expect(await screen.findByText("No straight quotes")).toBeDefined()
     // The card counts what it holds — proves it read real org settings, not a stub.
-    expect(await screen.findByText(/Org Rules \(1\)/)).toBeDefined()
+    expect(await screen.findByText(/Org rules \(1\)/)).toBeDefined()
   })
 
   it("shows a read-only viewer the empty state rather than a blank page", async () => {
@@ -109,6 +109,6 @@ describe("AQU-1131 — org rules as a top-level Settings section", () => {
     renderAt("/orgs/1/settings/rules", <OrgSettingsRules />, "/orgs/:orgId/settings/rules")
 
     expect(await screen.findByText(/No org-level rules yet/)).toBeDefined()
-    expect(screen.queryByRole("button", { name: /Add Org Rule/ })).toBeNull()
+    expect(screen.queryByRole("button", { name: /Add org rule/ })).toBeNull()
   })
 })

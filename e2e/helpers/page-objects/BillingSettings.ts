@@ -53,7 +53,7 @@ export class BillingSettingsPage {
 
   async openWorkspace(orgId: number) {
     await this.page.goto(`/orgs/${orgId}/settings/billing`)
-    await expect(this.page.getByRole('heading', { name: 'Billing & usage', exact: true })).toBeVisible()
+    await expect(this.page.getByRole('heading', { name: 'Billing', exact: true })).toBeVisible()
     await expect(this.page.getByTestId('billing-workspace')).toBeVisible()
   }
 

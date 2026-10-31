@@ -423,6 +423,10 @@ interface ProjectSettingsProps {
  * goes to the top of the pane, a single field inside a card only moves far
  * enough to be on screen (so a short project does not scroll at all).
  */
+/** The headings the settings index lists its rows under, in order. */
+const HUB_ORDER = ["project", "aiMedia", "quality", "integrations"] as const
+type SettingsHub = (typeof HUB_ORDER)[number]
+
 const SETTINGS_FOCUS_TARGETS: Record<string, { elementId: string; block: ScrollLogicalPosition }> = {
   languages: { elementId: "section-languages", block: "start" },
   "add-lane": { elementId: "add-lane-field", block: "nearest" },
@@ -1239,25 +1243,25 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       // the shared settings below. Only the project's AI key stays on this
       // device, where it always lived.
       const completionUpdates: Partial<CompletionSettings> = {}
-      if (apiKey !== baseline.apiKey) { completionUpdates.apiKey = apiKey || undefined; changedFieldLabels.push("API key") }
+      if (apiKey !== baseline.apiKey) { completionUpdates.apiKey = apiKey || undefined; changedFieldLabels.push(t("projectSettings.field.apiKey")) }
       let draftingChanged = false
       const noteDrafting = (changed: boolean, label: string) => {
         if (!changed) return
         draftingChanged = true
         changedFieldLabels.push(label)
       }
-      noteDrafting(provider !== baseline.provider, "AI provider")
-      noteDrafting(endpoint.trim() !== baseline.endpoint, "endpoint")
-      noteDrafting(model !== baseline.model, "model")
-      noteDrafting(maxTokens !== baseline.maxTokens, "max tokens")
-      noteDrafting(temperature !== baseline.temperature, "temperature")
-      noteDrafting(topK !== baseline.top_k, "examples retrieved")
-      noteDrafting(contextSize !== baseline.contextSize, "context window")
-      noteDrafting(useOnlyValidatedExamples !== baseline.useOnlyValidatedExamples, "validated examples only")
-      noteDrafting(fewShotExampleFormat !== baseline.fewShotExampleFormat, "reference example format")
-      noteDrafting(mainChatLanguage !== baseline.main_chat_language, "assisted language")
-      noteDrafting(completionBatchSize !== baseline.completionBatchSize, "AI completions batch size")
-      noteDrafting(validationBatchSize !== baseline.validationBatchSize, "batch validation size")
+      noteDrafting(provider !== baseline.provider, t("projectSettings.field.aiProvider"))
+      noteDrafting(endpoint.trim() !== baseline.endpoint, t("projectSettings.field.endpoint"))
+      noteDrafting(model !== baseline.model, t("projectSettings.field.model"))
+      noteDrafting(maxTokens !== baseline.maxTokens, t("projectSettings.field.maxTokens"))
+      noteDrafting(temperature !== baseline.temperature, t("projectSettings.field.temperature"))
+      noteDrafting(topK !== baseline.top_k, t("projectSettings.field.examplesRetrieved"))
+      noteDrafting(contextSize !== baseline.contextSize, t("projectSettings.field.contextWindow"))
+      noteDrafting(useOnlyValidatedExamples !== baseline.useOnlyValidatedExamples, t("projectSettings.field.validatedExamplesOnly"))
+      noteDrafting(fewShotExampleFormat !== baseline.fewShotExampleFormat, t("projectSettings.field.referenceExampleFormat"))
+      noteDrafting(mainChatLanguage !== baseline.main_chat_language, t("projectSettings.field.assistedLanguage"))
+      noteDrafting(completionBatchSize !== baseline.completionBatchSize, t("projectSettings.field.completionBatchSize"))
+      noteDrafting(validationBatchSize !== baseline.validationBatchSize, t("projectSettings.field.validationBatchSize"))
 
       const localUpdates: Partial<ProjectRecord> = {}
       // AQU-765: rename. Trim first so a whitespace-only entry is rejected
@@ -1269,13 +1273,13 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       const trimmedName = name.trim()
       if (trimmedName !== baseline.name) {
         if (!trimmedName) {
-          setNameError("Enter a project title.")
+          setNameError(t("projectSettings.save.nameRequired"))
           return false
         }
         if (isCloudProject) {
           const jwt = getJwt()
           if (!jwt) {
-            setSaveError("You're signed out. Sign in again to rename this project.")
+            setSaveError(t("projectSettings.save.signedOutRenameError"))
             return false
           }
           try {
@@ -1286,16 +1290,16 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 role: resolveRoleName(t, ROLE.MAINTAINER, { plural: true }),
               }))
             } else {
-              setSaveError(err instanceof Error ? err.message : "Renaming the project failed.")
+              setSaveError(err instanceof Error ? err.message : t("projectSettings.save.renameFailedGeneric"))
             }
             return false
           }
         }
         localUpdates.name = trimmedName
-        changedFieldLabels.push("project title")
+        changedFieldLabels.push(t("projectSettings.field.projectName"))
       }
-      if (!decayEqual(decaySettings, baseline.decaySettings)) { localUpdates.decaySettings = decaySettings; changedFieldLabels.push("decay settings") }
-      if (audioMediaStrategy !== baseline.audioMediaStrategy) { localUpdates.audioMediaStrategy = audioMediaStrategy; changedFieldLabels.push("audio media strategy") }
+      if (!decayEqual(decaySettings, baseline.decaySettings)) { localUpdates.decaySettings = decaySettings; changedFieldLabels.push(t("projectSettings.field.decaySettings")) }
+      if (audioMediaStrategy !== baseline.audioMediaStrategy) { localUpdates.audioMediaStrategy = audioMediaStrategy; changedFieldLabels.push(t("projectSettings.field.audioMediaStrategy")) }
       // geminiApiKey handled below after `latest` is fetched, so voices/castAssignments are preserved.
       if (
         autoSyncEnabled !== baseline.autoSyncEnabled ||
@@ -1304,11 +1308,11 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         localUpdates.syncSettings = {
           autoSync: { enabled: autoSyncEnabled, intervalMinutes: Math.max(1, autoSyncInterval) },
         }
-        changedFieldLabels.push("auto-sync")
+        changedFieldLabels.push(t("projectSettings.field.autoSync"))
       }
 
       const geminiKeyChanged = geminiApiKey !== baseline.geminiApiKey
-      if (geminiKeyChanged) changedFieldLabels.push("voice API key")
+      if (geminiKeyChanged) changedFieldLabels.push(t("projectSettings.field.voiceApiKey"))
       const hasLocalWork =
         Object.keys(localUpdates).length > 0 || Object.keys(completionUpdates).length > 0 || geminiKeyChanged
         || draftingChanged
@@ -1352,39 +1356,39 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       }
       // AQU-1771: null → undefined, which the merged blob drops: the project
       // goes back to the organization's default.
-      if (validationCount !== baseline.validationCount) { sharedUpdates.validationCount = validationCount ?? undefined; changedFieldLabels.push("validation count") }
+      if (validationCount !== baseline.validationCount) { sharedUpdates.validationCount = validationCount ?? undefined; changedFieldLabels.push(t("projectSettings.field.validationCount")) }
       if (validationCountAudio !== baseline.validationCountAudio) {
         sharedUpdates.validationCountAudio = validationCountAudio ?? undefined
-        changedFieldLabels.push("audio validation count")
+        changedFieldLabels.push(t("projectSettings.field.audioValidationCount"))
       }
-      if (validationRoleFloor !== baseline.validationRoleFloor) { sharedUpdates.validationRoleFloor = validationRoleFloor; changedFieldLabels.push("validation role floor") }
+      if (validationRoleFloor !== baseline.validationRoleFloor) { sharedUpdates.validationRoleFloor = validationRoleFloor; changedFieldLabels.push(t("projectSettings.field.validationRoleFloor")) }
       if (JSON.stringify(validationNamedUsers) !== JSON.stringify(baseline.validationNamedUsers)) {
         sharedUpdates.validationNamedUsers = validationNamedUsers
-        changedFieldLabels.push("named validators")
+        changedFieldLabels.push(t("projectSettings.field.namedValidators"))
       }
-      if (allowSelfValidation !== baseline.allowSelfValidation) { sharedUpdates.allowSelfValidation = allowSelfValidation; changedFieldLabels.push("self-validation") }
+      if (allowSelfValidation !== baseline.allowSelfValidation) { sharedUpdates.allowSelfValidation = allowSelfValidation; changedFieldLabels.push(t("projectSettings.field.selfValidation")) }
       // AQU-1768: null → undefined, which the merged blob drops: the project
       // goes back to the organization's default, as the counts above do.
-      if (validationRoleFloorAudio !== baseline.validationRoleFloorAudio) { sharedUpdates.validationRoleFloorAudio = validationRoleFloorAudio ?? undefined; changedFieldLabels.push("minimum role to validate recordings") }
-      if (JSON.stringify(validationNamedUsersAudio) !== JSON.stringify(baseline.validationNamedUsersAudio)) { sharedUpdates.validationNamedUsersAudio = validationNamedUsersAudio; changedFieldLabels.push("named recording validators") }
-      if (allowSelfValidationAudio !== baseline.allowSelfValidationAudio) { sharedUpdates.allowSelfValidationAudio = allowSelfValidationAudio ?? undefined; changedFieldLabels.push("validating your own recordings") }
-      if (cellEditingFloor !== baseline.cellEditingFloor) { sharedUpdates.cellEditingFloor = cellEditingFloor ?? undefined; changedFieldLabels.push("who can add and remove cells") }
-      if (allowTrackEditing !== baseline.allowTrackEditing) { sharedUpdates.allowTrackEditing = allowTrackEditing ?? undefined; changedFieldLabels.push("timeline track editing") }
-      if (filmAndSources !== baseline.filmAndSources) { sharedUpdates.filmAndSources = filmAndSources ?? undefined; changedFieldLabels.push("film and sources") }
-      if (timingLocked !== baseline.timingLocked) { sharedUpdates.timingLocked = timingLocked ?? undefined; changedFieldLabels.push("the timing lock") }
-      if (harmonizeMinRole !== baseline.harmonize_min_role) { sharedUpdates.harmonize_min_role = harmonizeMinRole; changedFieldLabels.push("harmonize min role") }
-      if (bibleResourcesEnabled !== baseline.bibleResourcesEnabled) { sharedUpdates.bibleResourcesEnabled = bibleResourcesEnabled; changedFieldLabels.push(isBibleDataExperimentOn(project) ? "Bible data" : "Bible resources") }
-      if (!sameSetting(bibleEnrichments, baseline.bibleEnrichments)) { sharedUpdates.bibleEnrichments = bibleEnrichments; changedFieldLabels.push("Bible data enrichments") }
-      if (importExcludeFrontMatter !== baseline.importExcludeFrontMatter) { sharedUpdates.importExcludeFrontMatter = importExcludeFrontMatter; changedFieldLabels.push("USFM front matter") }
-      if (importCellUnit !== baseline.importCellUnit) { sharedUpdates.importCellUnit = importCellUnit; changedFieldLabels.push("import cell unit") }
-      if (smartQuotes !== baseline.smartQuotes) { sharedUpdates.smartQuotes = smartQuotes; changedFieldLabels.push("smart quotes") }
+      if (validationRoleFloorAudio !== baseline.validationRoleFloorAudio) { sharedUpdates.validationRoleFloorAudio = validationRoleFloorAudio ?? undefined; changedFieldLabels.push(t("projectSettings.field.audioValidationRoleFloor")) }
+      if (JSON.stringify(validationNamedUsersAudio) !== JSON.stringify(baseline.validationNamedUsersAudio)) { sharedUpdates.validationNamedUsersAudio = validationNamedUsersAudio; changedFieldLabels.push(t("projectSettings.field.namedAudioValidators")) }
+      if (allowSelfValidationAudio !== baseline.allowSelfValidationAudio) { sharedUpdates.allowSelfValidationAudio = allowSelfValidationAudio ?? undefined; changedFieldLabels.push(t("projectSettings.field.selfValidationAudio")) }
+      if (cellEditingFloor !== baseline.cellEditingFloor) { sharedUpdates.cellEditingFloor = cellEditingFloor ?? undefined; changedFieldLabels.push(t("projectSettings.field.cellEditingFloor")) }
+      if (allowTrackEditing !== baseline.allowTrackEditing) { sharedUpdates.allowTrackEditing = allowTrackEditing ?? undefined; changedFieldLabels.push(t("projectSettings.field.trackEditing")) }
+      if (filmAndSources !== baseline.filmAndSources) { sharedUpdates.filmAndSources = filmAndSources ?? undefined; changedFieldLabels.push(t("projectSettings.field.filmAndSources")) }
+      if (timingLocked !== baseline.timingLocked) { sharedUpdates.timingLocked = timingLocked ?? undefined; changedFieldLabels.push(t("projectSettings.field.timingLock")) }
+      if (harmonizeMinRole !== baseline.harmonize_min_role) { sharedUpdates.harmonize_min_role = harmonizeMinRole; changedFieldLabels.push(t("projectSettings.field.harmonizeMinRole")) }
+      if (bibleResourcesEnabled !== baseline.bibleResourcesEnabled) { sharedUpdates.bibleResourcesEnabled = bibleResourcesEnabled; changedFieldLabels.push(t("projectSettings.field.bibleData")) }
+      if (!sameSetting(bibleEnrichments, baseline.bibleEnrichments)) { sharedUpdates.bibleEnrichments = bibleEnrichments; changedFieldLabels.push(t("projectSettings.field.bibleEnrichments")) }
+      if (importExcludeFrontMatter !== baseline.importExcludeFrontMatter) { sharedUpdates.importExcludeFrontMatter = importExcludeFrontMatter; changedFieldLabels.push(t("projectSettings.field.usfmFrontMatter")) }
+      if (importCellUnit !== baseline.importCellUnit) { sharedUpdates.importCellUnit = importCellUnit; changedFieldLabels.push(t("projectSettings.field.importCellUnit")) }
+      if (smartQuotes !== baseline.smartQuotes) { sharedUpdates.smartQuotes = smartQuotes; changedFieldLabels.push(t("projectSettings.field.smartQuotes")) }
       if (precedingTargetCells !== baseline.precedingTargetCells) {
         sharedUpdates.draftContext = { precedingTargetCells }
-        changedFieldLabels.push("draft context")
+        changedFieldLabels.push(t("projectSettings.field.draftContext"))
       }
       if (JSON.stringify(termMatching) !== JSON.stringify(baseline.termMatching)) {
         sharedUpdates.termMatching = termMatching
-        changedFieldLabels.push("term matching affixes")
+        changedFieldLabels.push(t("projectSettings.field.termMatching"))
       }
 
       if (Object.keys(sharedUpdates).length > 0) {
@@ -1409,12 +1413,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               username: settingsEditorName(out.latest.updatedBy) ?? t("projectSettings.save.conflictFallbackUsername"),
             }),
           })
-          setSaveError("Someone else updated shared settings. Refresh to reapply your edits.")
+          setSaveError(t("projectSettings.save.conflictError"))
           return false
         }
         if (out.kind === "blocked") {
           if (out.reason === "offline") {
-            setSaveError("You're offline. Reconnect to save shared fields.")
+            setSaveError(t("projectSettings.save.offlineError"))
           } else {
             setSaveError(t("projectSettings.permission.onlyRoleCanModify", {
               role: resolveRoleName(t, ROLE.MAINTAINER, { plural: true }),
@@ -1423,7 +1427,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
           return false
         }
         if (out.kind === "error") {
-          setSaveError(out.message || "Saving shared settings failed.")
+          setSaveError(out.message || t("projectSettings.save.sharedSettingsFailedGeneric"))
           return false
         }
       }
@@ -1502,10 +1506,14 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       // to also navigate away (see handleSaveAndClose).
       const message =
         changedFieldLabels.length === 0
-          ? "No changes to save."
+          ? t("projectSettings.save.noChanges")
           : changedFieldLabels.length <= 3
-            ? `Saved: ${changedFieldLabels.join(", ")}.`
-            : `Saved ${changedFieldLabels.length} changes: ${changedFieldLabels.slice(0, 3).join(", ")}, +${changedFieldLabels.length - 3} more.`
+            ? t("projectSettings.save.savedShort", { list: changedFieldLabels.join(", ") })
+            : t("projectSettings.save.savedMany", {
+                count: changedFieldLabels.length,
+                list: changedFieldLabels.slice(0, 3).join(", "),
+                more: changedFieldLabels.length - 3,
+              })
       setSavedMessage(message)
       if (savedMessageTimerRef.current != null) window.clearTimeout(savedMessageTimerRef.current)
       savedMessageTimerRef.current = window.setTimeout(() => setSavedMessage(null), 4000)
@@ -1605,19 +1613,19 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const ALL_SECTIONS: SettingsSection[] = [
     // AQU-1525: the counterpart of section-source-link — exactly one of the two
     // is ever visible, keyed off whether this project already has an upstream.
-    { id: "section-link-source", label: "Link source", keywords: ["source", "link", "linked", "upstream", "attach", "share source", "mirror"], visible: !hasSourceLink },
-    { id: "section-source-link", label: "Source link", keywords: ["source", "linked", "upstream", "detach"], visible: hasSourceLink },
-    { id: "section-inherited-settings", label: "Inherited settings", keywords: ["inherit", "copy", "brief", "knowledge", "workflow", "detach", "upstream"], visible: hasSourceLink },
-    { id: "section-upstream-changes", label: "Upstream changes", keywords: ["upstream", "changes", "repin", "review", "mirror", "stale"], visible: hasLiveSourceLink },
-    { id: "section-dcs-upstream", label: "Door43 upstream", keywords: ["door43", "dcs", "unfoldingword", "upstream", "check for updates", "import changes", "release"], visible: hasDcsUpstream },
-    { id: "section-project-info", label: "Project Info", keywords: ["name", "source language", "target language", "smart quotes", "curly quotes", "quotation marks", "typography"] },
+    { id: "section-link-source", label: t("projectSettings.section.sourceLink"), keywords: ["source", "link", "linked", "upstream", "attach", "share source", "mirror"], visible: !hasSourceLink },
+    { id: "section-source-link", label: t("projectSettings.section.sourceLink"), keywords: ["source", "linked", "upstream", "detach"], visible: hasSourceLink },
+    { id: "section-inherited-settings", label: t("projectSettings.inherit.title", { upstream: inheritedUpstreamName ?? project?.sourceProjectId ?? "" }), keywords: ["settings from", "inherited settings", "inherit", "copy", "brief", "knowledge", "workflow", "detach", "upstream"], visible: hasSourceLink },
+    { id: "section-upstream-changes", label: t("projectSettings.section.upstreamChanges"), keywords: ["upstream", "changes", "repin", "review", "mirror", "stale"], visible: hasLiveSourceLink },
+    { id: "section-dcs-upstream", label: t("projectSettings.section.dcsUpstream"), keywords: ["door43", "dcs", "unfoldingword", "upstream", "check for updates", "import changes", "release"], visible: hasDcsUpstream },
+    { id: "section-project-info", label: t("projectSettings.section.projectInfo"), keywords: ["name", "source language", "target language", "smart quotes", "curly quotes", "quotation marks", "typography"] },
     // AQU-1688: the Language profile for checks lives here too, while this
     // device has the Bible data experiment on (AQU-1685).
     {
       id: "section-languages",
-      label: "Languages",
+      label: t("projectSettings.section.languages"),
       keywords: [
-        "languages", "target lanes", "lane", "target language", "dialect",
+        "languages", "language lanes", "language lane", "target lanes", "lane", "target language", "dialect",
         ...(bibleDataExperiment ? ["language profile", "quotation marks", "quote marks", "bible data checks"] : []),
       ],
     },
@@ -1629,7 +1637,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     bibleDataExperiment
       ? {
           id: "section-bible-resources",
-          label: "Bible data",
+          label: t("bibleData.card.title"),
           keywords: [
             "bible data", "bible resources", "aquifer", "bibletranslation", "reference", "scholarly",
             "enrichments", "voices", "who's who", "passage structure", "original language", "greek",
@@ -1637,43 +1645,43 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             "places", "maps", "checks", "macula", "opentext", "acai", "unfoldingword", "data sources", "license",
           ],
         }
-      : { id: "section-bible-resources", label: "Bible resources", keywords: ["bible resources", "aquifer", "bibletranslation", "reference", "scholarly", "translation notes"] },
-    { id: "section-import", label: "Import", keywords: ["import", "usfm", "front matter", "book title", "book name", "introduction", "toc", "running header", "paratext", "door43"] },
+      : { id: "section-bible-resources", label: t("bibleData.card.title"), keywords: ["bible resources", "aquifer", "bibletranslation", "reference", "scholarly", "translation notes"] },
+    { id: "section-import", label: t("projectSettings.section.import"), keywords: ["import", "usfm", "front matter", "book title", "book name", "introduction", "toc", "running header", "paratext", "door43"] },
     // AQU-2259: only the "this setting moved" note is left here, until it expires.
-    { id: "section-user", label: "User", keywords: ["username", "author"], visible: settingMovedNotesShowing() },
-    { id: "section-members", label: "Team members", keywords: ["members", "invite", "invite link", "link", "join", "share", "access", "role", "roster", "collaborator", "member list", "progress", "visibility", "who can see"], visible: canSeeMembers },
+    { id: "section-user", label: t("projectSettings.section.user"), keywords: ["username", "author"], visible: settingMovedNotesShowing() },
+    { id: "section-members", label: t("projectSettings.section.members"), keywords: ["members", "invite", "invite link", "link", "join", "share", "access", "role", "roster", "collaborator", "member list", "progress", "visibility", "who can see"], visible: canSeeMembers },
     // AQU-1068: a permission, so it lives with the roles rather than in the
     // Timeline card it grew out of — it governs ordinary text files now, not
     // just the timeline's silences.
-    { id: "section-cell-editing", label: "Content structure", keywords: ["add cell", "remove cell", "insert", "delete", "structure", "verse", "line", "row", "restructure", "permission", "role"] },
+    { id: "section-cell-editing", label: t("projectSettings.cellEditing.sectionTitle"), keywords: ["add cell", "remove cell", "insert", "delete", "structure", "verse", "line", "row", "restructure", "permission", "role"] },
     // AQU-1672: the brief gates Autopilot starts (AQU-827) but had no entry of
     // its own anywhere in settings — it was reachable only by opening Living
     // Memory's Instructions pane and clicking the breadcrumb back up to the
     // index. Its own section id gives it a row in the AI & completion pane AND
     // makes a search for "brief" land on it.
-    { id: "section-brief", label: "Translation brief", keywords: ["brief", "translation brief", "skopos", "purpose", "audience", "register", "literalness", "style guide", "living memory"] },
-    { id: "section-ai-instructions", label: "AI Instructions", keywords: ["ai", "llm", "instructions", "batch size", "completions batch", "validation batch", "batch validate", "top_k", "examples", "context window", "assistant language", "few shot"] },
-    { id: "section-draft-context", label: "Draft Context", keywords: ["draft context", "preceding cells", "left context", "paragraph drafting", "context budget"] },
-    { id: "section-advanced-llm", label: "Advanced LLM", keywords: ["provider", "endpoint", "api key", "model", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom"] },
+    { id: "section-brief", label: t("autopilot.readiness.brief.label"), keywords: ["brief", "translation brief", "skopos", "purpose", "audience", "register", "literalness", "style guide", "living memory"] },
+    { id: "section-ai-instructions", label: t("projectSettings.section.aiInstructions"), keywords: ["ai", "llm", "instructions", "batch size", "completions batch", "validation batch", "batch validate", "top_k", "examples", "context window", "assistant language", "few shot", "ai drafting", "drafting", "ai instructions"] },
+    { id: "section-draft-context", label: t("projectSettings.section.draftContext"), keywords: ["draft context", "preceding cells", "left context", "paragraph drafting", "context budget"] },
+    { id: "section-advanced-llm", label: t("projectSettings.section.advancedLlm"), keywords: ["provider", "endpoint", "api key", "model", "ai model", "advanced", "llm", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom"] },
     // AQU-1758: the Voice Studio is the Voices tab now; its old name still finds it.
-    { id: "section-voice", label: "Voice", keywords: ["tts", "voices", "cast", "voice studio", "audio", "gemini", "api key", "tts key"] },
-    { id: "section-local-models", label: "Local AI models", keywords: ["whisper", "mms", "transcription", "model", "download", "offline", "local ai"] },
-    { id: "section-validation", label: "Validation", keywords: ["validation count", "approvals", "audio validation"] },
-    { id: "section-decay", label: "Health", keywords: ["health", "decay", "decay threshold", "half life", "retrieval support", "max hops", "attention threshold"] },
-    { id: "section-audio-media", label: "Audio Media", keywords: ["audio media strategy", "lazy", "eager"] },
-    { id: "section-timeline", label: "Timeline", keywords: ["timeline", "add line", "create cell", "silence", "dubbing", "lines", "track", "tracks", "multi-track", "folder", "colour", "color", "film", "video", "sources"] },
-    { id: "section-git-sync", label: "Git Sync", keywords: ["git", "sync", "auto sync", "interval", "branch", "clone"], visible: hasGitOrigin },
+    { id: "section-voice", label: t("projectSettings.section.voice"), keywords: ["tts", "voices", "cast", "voice studio", "audio", "gemini", "api key", "tts key"] },
+    { id: "section-local-models", label: t("projectSettings.section.localModels"), keywords: ["whisper", "mms", "transcription", "model", "download", "offline", "local ai", "local models", "on-device"] },
+    { id: "section-validation", label: t("projectSettings.section.validation"), keywords: ["validation count", "approvals", "audio validation"] },
+    { id: "section-decay", label: t("projectSettings.decay.summary"), keywords: ["health", "decay", "decay threshold", "half life", "retrieval support", "max hops", "attention threshold"] },
+    { id: "section-audio-media", label: t("projectSettings.section.audioMedia"), keywords: ["audio loading", "media", "audio media", "lazy", "eager", "stream"] },
+    { id: "section-timeline", label: t("editor.timeline.title"), keywords: ["timeline", "add line", "create cell", "silence", "dubbing", "lines", "track", "tracks", "multi-track", "folder", "colour", "color", "film", "video", "sources"] },
+    { id: "section-git-sync", label: t("projectSettings.section.gitSync"), keywords: ["git", "sync", "auto sync", "interval", "branch", "clone"], visible: hasGitOrigin },
     // AQU-1272: the affix inventory and fold defaults live in this section, so
     // the words a user searches for them by have to reach it.
-    { id: "section-terminology", label: "Terminology", keywords: ["terminology", "termbase", "glossary", "concepts", "matching", "prefix", "prefixes", "suffix", "suffixes", "affix", "affixes", "marks", "vowel points", "forms"] },
-    { id: "section-termbase-sharing", label: "Term Base Sharing", keywords: ["term base", "termbase", "publish", "subscribe", "org", "shared", "glossary"], visible: SHOW_TERMBASE_SHARING_IN_SETTINGS },
-    { id: "section-ai-metrics", label: "AI Metrics", keywords: ["post-edit", "edit distance", "ai metrics", "magnitude", "levenshtein", "ned", "biblica"] },
+    { id: "section-terminology", label: t("projectSettings.section.terminology"), keywords: ["terminology", "termbase", "glossary", "concepts", "matching", "prefix", "prefixes", "suffix", "suffixes", "affix", "affixes", "marks", "vowel points", "forms"] },
+    { id: "section-termbase-sharing", label: t("projectSettings.section.termbaseSharing"), keywords: ["term base", "termbase", "publish", "subscribe", "org", "shared", "glossary"], visible: SHOW_TERMBASE_SHARING_IN_SETTINGS },
+    { id: "section-ai-metrics", label: t("projectSettings.section.aiMetrics"), keywords: ["post-edit", "edit distance", "ai metrics", "magnitude", "levenshtein", "ned", "biblica"] },
     // Monday.com board sync — cloud (synced) projects only: the link lives on
     // the server against the project's org connection.
-    { id: "section-monday", label: "Monday.com", keywords: ["monday", "integration", "board", "push", "progress sync", "project management"], visible: isCloudProject },
+    { id: "section-monday", label: t("projectSettings.section.monday"), keywords: ["monday", "integration", "board", "push", "progress sync", "project management"], visible: isCloudProject },
     // AQU-804: Airtable table sync, the same shape (and the same cloud-only rule).
-    { id: "section-airtable", label: "Airtable", keywords: ["airtable", "integration", "table", "base", "push", "progress sync", "episodes", "project management"], visible: isCloudProject },
-    { id: "section-experimental", label: "Experimental", keywords: ["experimental", "flags", "beta", "preview", "contextual", "contextual drafting"] },
+    { id: "section-airtable", label: t("projectSettings.section.airtable"), keywords: ["airtable", "integration", "table", "base", "push", "progress sync", "episodes", "project management"], visible: isCloudProject },
+    { id: "section-experimental", label: t("projectSettings.section.experimental"), keywords: ["experimental", "flags", "beta", "preview", "contextual", "contextual drafting"] },
   ]
 
   // ── Search filter ──────────────────────────────────────────────────────────
@@ -1721,8 +1729,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     sectionIds: string[]
     /** Roster / DataTable panes use Page `wide` (max-w-6xl); form panes stay default. */
     wide?: boolean
-    /** Hub group label on the settings index (NavList). */
-    hub: string
+    /** Which heading the settings index lists it under (HUB_LABEL). */
+    hub: SettingsHub
     /** Omit from the settings index (still deep-linkable as a pane). */
     hideFromIndex?: boolean
     /** Parent group id when this is a nested detail pane (breadcrumb trail). */
@@ -1730,27 +1738,27 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   }[] = [
     {
       id: "general",
-      label: "General",
-      description: `Name, languages, content structure, ${bibleDataExperiment ? "Bible data" : "Bible resources"}`,
+      label: t("common.general"),
+      description: t("projectSettings.group.generalDescription"),
       icon: SlidersHorizontal,
-      hub: "Project",
+      hub: "project",
       sectionIds: ["section-project-info", "section-languages", "section-cell-editing", "section-bible-resources", "section-import", "section-user"],
     },
     {
       id: "members",
-      label: "Members",
-      description: "Who can access this project, invites, and roles",
+      label: t("projectSettings.group.membersLabel"),
+      description: t("projectSettings.group.membersDescription"),
       icon: Users,
-      hub: "Project",
+      hub: "project",
       wide: true,
       sectionIds: ["section-members"],
     },
     {
       id: "source-sync",
-      label: "Source & sync",
-      description: "Linked source project, upstream changes, git sync",
+      label: t("projectSettings.group.sourceSyncLabel"),
+      description: t("projectSettings.group.sourceSyncDescription"),
       icon: Link2,
-      hub: "Project",
+      hub: "project",
       sectionIds: [
         "section-link-source",
         "section-source-link",
@@ -1762,10 +1770,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     },
     {
       id: "ai",
-      label: "AI & completion",
-      description: "Instructions, draft context, provider, voice, terminology",
+      label: t("projectSettings.group.aiLabel"),
+      description: t("projectSettings.group.aiDescription"),
       icon: Sparkles,
-      hub: "AI & media",
+      hub: "aiMedia",
       // The system prompt (and the rest of Living Memory) lives on the
       // standalone /project/:id/memory surface; this pane keeps a cross-link
       // NavRow to memory/instructions instead of a nested settings page.
@@ -1777,47 +1785,52 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     },
     {
       id: "validation",
-      label: "Validation & health",
-      description: "Approvals, harmonization, staleness decay",
+      label: t("projectSettings.group.validationLabel"),
+      description: t("projectSettings.group.validationDescription"),
       icon: ShieldCheck,
-      hub: "Quality",
+      hub: "quality",
       sectionIds: ["section-validation", "section-decay"],
     },
     {
       id: "audio-media",
-      label: "Audio media",
-      description: "How audio is fetched from storage",
+      label: t("projectSettings.group.audioMediaLabel"),
+      description: t("projectSettings.group.audioMediaDescription"),
       icon: AudioLines,
-      hub: "AI & media",
+      hub: "aiMedia",
       sectionIds: ["section-audio-media", "section-timeline"],
     },
     {
       id: "metrics",
-      label: "AI metrics",
-      description: "Post-edit distance and AI usage",
+      label: t("projectSettings.group.metricsLabel"),
+      description: t("projectSettings.group.metricsDescription"),
       icon: BarChart3,
-      hub: "AI & media",
+      hub: "aiMedia",
       sectionIds: ["section-ai-metrics"],
     },
     {
       id: "integrations",
-      label: "Integrations",
-      description: "Monday.com and Airtable sync",
+      label: t("projectSettings.group.integrationsLabel"),
+      description: t("projectSettings.group.integrationsDescription"),
       icon: Plug,
-      hub: "Integrations",
+      hub: "integrations",
       sectionIds: ["section-monday", "section-airtable"],
     },
     {
       id: "experimental",
-      label: "Experimental",
-      description: "Autopilot, extensions, and other early features",
+      label: t("projectSettings.section.experimental"),
+      description: t("projectSettings.group.experimentalDescription"),
       icon: FlaskConical,
-      hub: "Integrations",
+      hub: "integrations",
       sectionIds: ["section-experimental"],
     },
   ]
 
-  const HUB_ORDER = ["Project", "AI & media", "Quality", "Integrations"] as const
+  const HUB_LABEL: Record<SettingsHub, string> = {
+    project: t("projectSettings.hub.project"),
+    aiMedia: t("projectSettings.hub.aiMedia"),
+    quality: t("projectSettings.hub.quality"),
+    integrations: t("projectSettings.group.integrationsLabel"),
+  }
 
   const visibleSectionIdSet = new Set(visibleSections.map((s) => s.id))
   const visibleGroups = SETTINGS_GROUPS
@@ -1940,10 +1953,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   }
 
   const pageTitle = lowerQuery || !activeGroup
-    ? "Project settings"
+    ? t("projectSettings.pageTitle")
     : activeGroup.label
   const pageDescription = lowerQuery || !activeGroup
-    ? "Configure this project. Changes apply to everyone with access."
+    ? t("projectSettings.pageDescription")
     : activeGroup.description
   // Table panes (Members roster) need the wider content well; form panes stay
   // intentional/narrow. Search flattens across groups → keep default width.
@@ -1954,14 +1967,18 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
 
   // Hints for index NavRows — short current-value summaries (org / Preferences pattern).
   const groupHints: Record<string, string> = {
-    general: name.trim() || "Untitled",
-    members: "Roles & invites",
-    "source-sync": hasSourceLink ? "Linked" : hasGitOrigin ? "Git" : "None",
-    ai: provider === "frontier" ? "Aquilla" : "Custom",
+    general: name.trim() || t("projectSettings.hint.untitled"),
+    members: t("projectSettings.hint.rolesInvites"),
+    "source-sync": hasSourceLink
+      ? t("projectSettings.hint.linked")
+      : hasGitOrigin ? t("projectSettings.hint.git") : t("common.none"),
+    ai: provider === "frontier"
+      ? t("projectSettings.advancedLlm.providerFrontierName")
+      : t("projectSettings.hint.custom"),
     validation: resolveRoleName(t, validationRoleFloor),
     "audio-media": t(AUDIO_MEDIA_STRATEGY_LABELS[audioMediaStrategy].nameKey),
-    metrics: "Post-edit",
-    integrations: "Monday.com, Airtable",
+    metrics: t("projectSettings.hint.postEdit"),
+    integrations: t("projectSettings.hint.integrations"),
   }
 
   const headerActions = (
@@ -2032,11 +2049,11 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       orgId={project?.orgId}
       trail={[
         ...(fromEditor
-          ? [{ label: "Editor", onClick: () => requestNavigate(editorPath) }]
+          ? [{ label: t("projectSettings.breadcrumbEditor"), onClick: () => requestNavigate(editorPath) }]
           : []),
         onSettingsPane
-          ? { label: "Settings", to: settingsHref() }
-          : { label: "Settings" },
+          ? { label: t("projectSettings.backLinkLabel"), to: settingsHref() }
+          : { label: t("projectSettings.backLinkLabel") },
         ...(breadcrumbParent
           ? [{ label: breadcrumbParent.label, to: settingsHref(breadcrumbParent.id) }]
           : []),
@@ -2147,7 +2164,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                   const rows = indexGroups.filter((g) => g.hub === hub)
                   if (rows.length === 0) return null
                   return (
-                    <NavList key={hub} label={hub}>
+                    <NavList key={hub} label={HUB_LABEL[hub]}>
                       {rows.map((g) => (
                         <NavRow
                           key={g.id}
@@ -2561,8 +2578,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                   description={t("projectSettings.systemPrompt.navDescription")}
                   hint={
                     savedSystemPrompt.trim() && savedSystemPrompt !== DEFAULT_SYSTEM_PROMPT
-                      ? "Custom"
-                      : "Default"
+                      ? t("terminology.livingMemory.prompt.customBadge")
+                      : t("terminology.livingMemory.prompt.defaultBadge")
                   }
                 />
               </NavList>

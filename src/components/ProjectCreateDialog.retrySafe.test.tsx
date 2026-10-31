@@ -95,7 +95,7 @@ function createdIdAt(call: number): string {
 }
 
 function fillBasics(name = "Russian BSB") {
-  fireEvent.change(screen.getByPlaceholderText("My Translation Project"), {
+  fireEvent.change(screen.getByPlaceholderText("My translation project"), {
     target: { value: name },
   })
   fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), {
@@ -107,7 +107,7 @@ function fillBasics(name = "Russian BSB") {
 }
 
 function clickCreate() {
-  fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
+  fireEvent.click(screen.getByRole("button", { name: /Create project/i }))
 }
 
 describe("ProjectCreateDialog — retry-safe project creation (AQU-712)", () => {
@@ -125,7 +125,7 @@ describe("ProjectCreateDialog — retry-safe project creation (AQU-712)", () => 
       .mockResolvedValue(undefined)
 
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
-    fireEvent.click(screen.getByRole("button", { name: "New Project" }))
+    fireEvent.click(screen.getByRole("button", { name: "New project" }))
     await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
     fillBasics()
 
@@ -135,7 +135,7 @@ describe("ProjectCreateDialog — retry-safe project creation (AQU-712)", () => 
     })
     // The create failed, so the dialog stays open (not the local-create path)
     // and no local project row was written yet.
-    expect(screen.getByText("Create New Project")).toBeTruthy()
+    expect(screen.getByText("Create new project")).toBeTruthy()
     expect(mockCreateProject).not.toHaveBeenCalled()
 
     clickCreate()
@@ -156,7 +156,7 @@ describe("ProjectCreateDialog — retry-safe project creation (AQU-712)", () => 
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
 
     // Session 1: create "Russian BSB" successfully → dialog closes.
-    fireEvent.click(screen.getByRole("button", { name: "New Project" }))
+    fireEvent.click(screen.getByRole("button", { name: "New project" }))
     await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
     fillBasics("Russian BSB")
     clickCreate()
@@ -164,11 +164,11 @@ describe("ProjectCreateDialog — retry-safe project creation (AQU-712)", () => 
       expect(mockCreateCloudProject).toHaveBeenCalledTimes(1)
     })
     await waitFor(() => {
-      expect(screen.queryByText("Create New Project")).toBeNull()
+      expect(screen.queryByText("Create new project")).toBeNull()
     })
 
     // Session 2: reopen and create a project with the SAME name.
-    fireEvent.click(screen.getByRole("button", { name: "New Project" }))
+    fireEvent.click(screen.getByRole("button", { name: "New project" }))
     await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
     fillBasics("Russian BSB")
     clickCreate()

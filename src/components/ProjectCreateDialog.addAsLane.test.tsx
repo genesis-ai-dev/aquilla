@@ -7,7 +7,7 @@
 // (linked-target, consumes="source") with an upstream chosen, never for the
 // chain case (consumes="target"); clicking "Add as lane" PATCHes the
 // UPSTREAM project's settings.targetLanes (not the new project) and does
-// NOT create a project; the classic linked-project ("Create & Link") path
+// NOT create a project; the classic linked-project ("Create & link") path
 // stays available alongside it.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
@@ -123,7 +123,7 @@ async function openLinkedTargetWithUpstream(optionName: RegExp) {
   render(<ProjectCreateDialog onCreated={vi.fn()} />)
   fireEvent.click(screen.getByRole("button", { name: /new project/i }))
 
-  fireEvent.change(screen.getByPlaceholderText("My Translation Project"), {
+  fireEvent.change(screen.getByPlaceholderText("My translation project"), {
     target: { value: "French Episode 1" },
   })
   fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), {
@@ -165,7 +165,7 @@ describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)",
     expect(panel).toBeTruthy()
     expect(screen.getByTestId("add-as-lane-btn")).toBeTruthy()
     // Sam, Oct 29: a lane is always a "Language lane", never a "target lane".
-    expect(screen.getByText(/Add it as a Language lane on/)).toBeTruthy()
+    expect(screen.getByText(/Add it as a language lane on/)).toBeTruthy()
     expect(within(panel).queryByText(/target lane/i)).toBeNull()
     // "English Source" appears both in the panel copy and the button label;
     // scope to the panel and accept either/both.
@@ -209,7 +209,7 @@ describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)",
     expect(screen.queryByTestId("add-as-lane-panel")).toBeNull()
     expect(screen.queryByTestId("add-as-lane-btn")).toBeNull()
     // The classic linked path stays fully available alongside the steer.
-    expect(screen.getByRole("button", { name: /Create & Link/i })).toBeTruthy()
+    expect(screen.getByRole("button", { name: /Create & link/i })).toBeTruthy()
   })
 
   it("does not render when no upstream project is chosen yet", () => {
@@ -224,7 +224,7 @@ describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)",
   it("does not show the recommendation on self-contained clone + Its Source", async () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
-    fireEvent.change(screen.getByPlaceholderText("My Translation Project"), {
+    fireEvent.change(screen.getByPlaceholderText("My translation project"), {
       target: { value: "French Episode 1" },
     })
     fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), {
@@ -268,7 +268,7 @@ describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)",
     // Dialog closes shortly after the success hint (deferred so the hint is
     // actually perceivable — see AddAsLaneRecommendation's closeTimerRef).
     await waitFor(() => {
-      expect(screen.queryByText("Create New Project")).toBeNull()
+      expect(screen.queryByText("Create new project")).toBeNull()
     })
   })
 
@@ -295,7 +295,7 @@ describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)",
 
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
-    fireEvent.change(screen.getByPlaceholderText("My Translation Project"), {
+    fireEvent.change(screen.getByPlaceholderText("My translation project"), {
       target: { value: "English Episode 1" },
     })
     fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), {
@@ -332,7 +332,7 @@ describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)",
     fireEvent.click(screen.getByTestId("add-as-lane-btn"))
 
     await waitFor(() => {
-      expect(screen.getByText(/already a lane on English Source/i)).toBeTruthy()
+      expect(screen.getByText(/already a language lane on English Source/i)).toBeTruthy()
     })
     expect(mockCreateProjectLane).not.toHaveBeenCalled()
   })

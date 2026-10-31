@@ -55,20 +55,20 @@ const PERSONAL: CreateTarget = { kind: "personal", orgId: null, name: "tim's wor
 const BIBLICA: CreateTarget = { kind: "org", orgId: 10, name: "Biblica ETT", path: ["Biblica ETT"], role: 600, teams: [] }
 
 function fill() {
-  fireEvent.change(screen.getByPlaceholderText("My Translation Project"), { target: { value: "Pattani" } })
+  fireEvent.change(screen.getByPlaceholderText("My translation project"), { target: { value: "Pattani" } })
   fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), { target: { value: "English" } })
   fireEvent.change(screen.getByPlaceholderText(/French, conversational Swahili/i), { target: { value: "Malay" } })
 }
 
 async function openAndFill(orgId?: number) {
   const view = render(<ProjectCreateDialog onCreated={vi.fn()} orgId={orgId} />)
-  fireEvent.click(screen.getByRole("button", { name: "New Project" }))
+  fireEvent.click(screen.getByRole("button", { name: "New project" }))
   await screen.findByTestId("project-create-destination")
   fill()
   return view
 }
 
-const submitButton = () => screen.getByRole("button", { name: /Create Project/i })
+const submitButton = () => screen.getByRole("button", { name: /Create project/i })
 
 describe("ProjectCreateDialog — destination picker (AQU-1352)", () => {
   beforeEach(() => {
@@ -82,7 +82,7 @@ describe("ProjectCreateDialog — destination picker (AQU-1352)", () => {
     await openAndFill(10)
     expect(screen.getByTestId("project-create-destination")).toHaveTextContent("Biblica ETT")
     expect(screen.queryByTestId("project-create-destination-hint")).toBeNull()
-    fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create project/i }))
     await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
     expect(mockCreate.mock.calls[0][1]).toMatchObject({ orgId: 10 })
   })
@@ -95,7 +95,7 @@ describe("ProjectCreateDialog — destination picker (AQU-1352)", () => {
     expect(hint).toHaveTextContent(/Contributor/)
     expect(hint).toHaveTextContent(/Biblica ETT/)
     expect(hint).toHaveTextContent(/Personal/)
-    fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create project/i }))
     await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
     // Omitted orgId → server creates in (and lazily creates) the personal org
     // instead of 403ing on the org Tim can't create in.
@@ -122,7 +122,7 @@ describe("ProjectCreateDialog — destination picker (AQU-1352)", () => {
     fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
     await waitFor(() => expect(screen.queryByTestId("project-create-destination")).toBeNull())
     mockTargets.mockReturnValueOnce(new Promise(() => {}))
-    fireEvent.click(screen.getByRole("button", { name: "New Project" }))
+    fireEvent.click(screen.getByRole("button", { name: "New project" }))
     fill()
     expect(submitButton()).toBeDisabled()
   })
@@ -130,7 +130,7 @@ describe("ProjectCreateDialog — destination picker (AQU-1352)", () => {
   it("a failed targets load blocks submit instead of silently using the page org", async () => {
     mockTargets.mockRejectedValue(new Error("boom"))
     render(<ProjectCreateDialog onCreated={vi.fn()} orgId={10} />)
-    fireEvent.click(screen.getByRole("button", { name: "New Project" }))
+    fireEvent.click(screen.getByRole("button", { name: "New project" }))
     await screen.findByTestId("project-create-destination-error")
     fill()
     expect(submitButton()).toBeDisabled()

@@ -308,12 +308,12 @@ export function ArchivedProjects() {
   return (
     <AppShell
       sidebar={<OrgSidebar />}
-      header={<OrgBreadcrumb section="Archived" />}
+      header={<OrgBreadcrumb section={t("editor.navTitle.archivedProjects")} />}
       statusBar={null}
       main={
         <Page size="wide" data-testid="archived-projects-scroll">
           <PageHeader
-            title={t("org.orgSidebar.archived")}
+            title={t("editor.navTitle.archivedProjects")}
             description={
               tab === "files"
                 ? "Files deleted from projects in this organization. Restore one to put it back in its project."

@@ -194,7 +194,7 @@ type LinkConsumes = "source" | "target" | ""
 
 const projectSchema = z
   .object({
-    name: requiredString("Project title"),
+    name: requiredString("Project name"),
     sourceLanguage: requiredString("Source language"),
     targetLanguage: optionalString,
     // Self-contained shape only (spec §5 / AQU-1240): extras beyond the
@@ -1149,7 +1149,9 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
 
                         {showCorpusChoice && (chosenConsumes === "source" || chosenConsumes === "target") ? (
                           <InheritedSettingsChoice
-                            title={t("projectSettings.inherit.linkTitle")}
+                            title={t("projectSettings.inherit.title", {
+                              upstream: upstreamOptions.find((p) => p.id === chosenUpstreamId)?.name ?? "",
+                            })}
                             description={t("projectSettings.inherit.linkDescription")}
                             receive={inheritReceive}
                             detached={inheritDetached}
@@ -1350,13 +1352,13 @@ function AddAsLaneRecommendation({
     // Both of these are validation, checked before anything locks.
     if (!jwt) {
       setStatus("error")
-      setMessage("You need to be signed in to add a lane.")
+      setMessage(t("projectSettings.create.laneRecommendationSignInError"))
       return
     }
     const trimmed = targetLanguage.trim()
     if (!trimmed) {
       setStatus("error")
-      setMessage("Enter a target language above first.")
+      setMessage(t("projectSettings.create.laneRecommendationEmptyTargetError"))
       return
     }
 
@@ -1377,14 +1379,14 @@ function AddAsLaneRecommendation({
       const registry = known.length > 0 ? known : (current?.settings.targetLanes ?? [])
       const already = registry.some((language) => isPrimaryRegistryLane(trimmed, language))
       if (already) {
-        fail(`"${trimmed}" is already a lane on ${project.name}.`)
+        fail(t("projectSettings.create.laneRecommendationAlreadyLaneError", { lane: trimmed, projectName: project.name }))
         return
       }
 
       const result = await createProjectLane(jwt, project.id, { name: "", language: trimmed })
       if (result.kind === "ok") {
         setStatus("success")
-        setMessage(`Added "${trimmed}" as a lane on ${project.name}. Open that project to start translating.`)
+        setMessage(t("projectSettings.create.laneRecommendationSuccess", { lane: trimmed, projectName: project.name }))
         posthog.capture("sibling lane added from create dialog", {
           upstream_project_id: project.id,
           lane: trimmed,
@@ -1396,16 +1398,16 @@ function AddAsLaneRecommendation({
         return
       }
       if (result.kind === "duplicate") {
-        fail(`"${trimmed}" is already a lane on ${project.name}.`)
+        fail(t("projectSettings.create.laneRecommendationAlreadyLaneError", { lane: trimmed, projectName: project.name }))
         return
       }
       if (result.kind === "error" && result.message.includes("(403)")) {
-        fail(`You need maintainer access on ${project.name} to add a lane there.`)
+        fail(t("projectSettings.create.laneRecommendationForbiddenError", { projectName: project.name }))
         return
       }
-      fail("Couldn't add the lane. Please try again.")
+      fail(t("projectSettings.create.laneRecommendationGenericError"))
     } catch (err) {
-      fail(err instanceof Error ? err.message : "Couldn't add the lane. Please try again.")
+      fail(err instanceof Error ? err.message : t("projectSettings.create.laneRecommendationGenericError"))
     }
   }
 

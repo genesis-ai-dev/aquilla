@@ -28,7 +28,7 @@ import { defineNamespace, plural } from "./types"
 export const bibleData = defineNamespace({
   keys: {
     // ── Experimental switch (Project settings → Experimental, AQU-1685) ──
-    "bibleData.experiment.label": "Bible data enrichments",
+    "bibleData.experiment.label": "Bible data",
     "bibleData.experiment.description":
       "Shows Bible data while a Bible book is open: who speaks to whom, who is who, original-language context, translation helps and Bible data checks. Only on this device.",
 
@@ -36,7 +36,9 @@ export const bibleData = defineNamespace({
     "bibleData.card.title": "Bible data",
     "bibleData.card.enableLabel": "Enable Bible data",
     "bibleData.card.description":
-      "Bible reference data from bibletranslation.org, built from Macula, OpenText, ACAI and unfoldingWord. It powers Verse Resources, Bible search, the agent's Bible lookups and the enrichments below.",
+      "Bible reference data from bibletranslation.org, built from Macula, OpenText, ACAI and " +
+      "unfoldingWord. It powers Verse resources, Bible search, the agent's Bible lookups and the " +
+      "enrichments below.",
 
     // ── Enrichment rows (one label + one sentence each) ──
     "bibleData.enrichment.voices.label": "Voices",

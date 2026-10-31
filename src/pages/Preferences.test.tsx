@@ -61,6 +61,9 @@ describe("Preferences", () => {
   it("index shows General controls inline, then nav rows for nested sections", () => {
     renderAt("/preferences")
     expect(screen.getByRole("heading", { name: "Preferences" })).toBeInTheDocument()
+    // AQU-2261: Recording and Notifications follow you across devices now, so
+    // the page no longer says its preferences stay on this device.
+    expect(screen.getByText("Personal preferences that apply to you across all projects.")).toBeInTheDocument()
     expect(screen.getByText("General")).toBeInTheDocument()
     expect(screen.getByRole("combobox", { name: "Theme" })).toBeInTheDocument()
     expect(screen.getByRole("combobox", { name: "App font size" })).toBeInTheDocument()
@@ -74,7 +77,7 @@ describe("Preferences", () => {
       [/Workspace/, "/preferences/workspace"],
       [/Translator profile/, "/preferences/profile"],
       [/AI provider keys/, "/preferences/provider-keys"],
-      [/Local models/, "/preferences/local-models"],
+      [/On-device AI models/, "/preferences/local-models"],
       [/Usage/, "/preferences/usage"],
     ]
     for (const [name, href] of rows) {
@@ -202,7 +205,7 @@ describe("Preferences", () => {
     expect(document.documentElement.style.fontSize).toBe("14px")
 
     await userEvent.click(screen.getByRole("combobox", { name: "App font size" }))
-    await userEvent.click(await screen.findByRole("option", { name: "Extra Large" }))
+    await userEvent.click(await screen.findByRole("option", { name: "Extra large" }))
     expect(window.localStorage.getItem(FONT_SIZE_STORAGE_KEY)).toBe("extra-large")
     expect(document.documentElement.style.fontSize).toBe("20px")
   })

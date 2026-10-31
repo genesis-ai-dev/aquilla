@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url"
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 
-// AQU-1566 (Sam's option b): a "Link video only" import has a video and no
+// AQU-1566 (Sam's option b): a "Link the film only" import has a video and no
 // rows; the first captions attached become its OWN rows (no track-editing
 // switch needed), the same as a caption export imported with the video. A
 // second caption file, once the file has rows, stays a timeline-only track.

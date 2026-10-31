@@ -12,7 +12,7 @@ export const importExport = defineNamespace({
     "importExport.mediaPreview.embedded": "Embedded captions {number}",
     "importExport.mediaPreview.embeddedLanguage": "Embedded captions {number} ({language})",
     "importExport.captionTrack.attach": "Attach captions",
-    "importExport.captionTrack.enableTracks": "Enable track editing in Project Settings",
+    "importExport.captionTrack.enableTracks": "Enable track editing in Project settings",
     "importExport.captionTrack.title": "Attach captions to {name}",
     "importExport.captionTrack.description": "Add captions as a new text track, or replace the content in an existing track.",
     "importExport.captionTrack.file": "Caption file",
@@ -105,7 +105,7 @@ export const importExport = defineNamespace({
     "importExport.direction.targetLabel": "Target language",
     "importExport.direction.targetPlaceholder": "e.g. Spanish, fra, swh",
     "importExport.direction.changeLaterHint": "You can change these later in {path}.",
-    "importExport.direction.settingsBreadcrumb": "Project Settings → Project Info",
+    "importExport.direction.settingsBreadcrumb": "Project settings → Project info",
     "importExport.direction.setting": "Setting…",
     "importExport.direction.setDirection": "Set direction",
 
@@ -165,7 +165,7 @@ export const importExport = defineNamespace({
     "importExport.obs.parsingFrames": "Parsing frames…",
     "importExport.obs.uploadingFrames": "Uploading frames: {enqueued} / {total}",
     "importExport.obs.uploadingToProject": "Uploading to project…",
-    "importExport.obs.downloadAndImport": "Download & Import",
+    "importExport.obs.downloadAndImport": "Download & import",
 
     // — SDBH Hebrew lexicon panel —
     "importExport.sdbh.description":
@@ -355,7 +355,7 @@ export const importExport = defineNamespace({
     "importExport.landing.upload.title": "Upload files",
     "importExport.landing.upload.description":
       "USFM, DOCX, PPTX, IDML, TXT, subtitles, spreadsheets, audio/video, or a Paratext project.",
-    "importExport.landing.ebible.title": "eBible Corpus",
+    "importExport.landing.ebible.title": "eBible corpus",
     "importExport.landing.ebible.hint": "public library",
     "importExport.landing.ebible.description": "Bible translations with open licenses. Import them with no download.",
     "importExport.landing.helloao.title": "Bible API",
@@ -402,23 +402,24 @@ export const importExport = defineNamespace({
     "importExport.landing.dcs.description":
       "Import any released Door43 resource as source and pin it to a release — pull upstream changes later.",
     "importExport.landing.youtube.title": "YouTube video",
-    "importExport.landing.youtube.description": "Link a video, bring captions, or generate them from your original media.",
+    "importExport.landing.youtube.description":
+      "Link a film, bring captions, or generate them from your original media.",
     "importExport.youtube.description": "Link a YouTube picture now, or add a text source for timed segments.",
     "importExport.youtube.source": "Caption source",
     "importExport.youtube.aboutCaptions": "About YouTube captions",
-    "importExport.youtube.pictureOnly": "Link video only",
+    "importExport.youtube.pictureOnly": "Link the film only",
     "importExport.youtube.captionExport": "Import a caption export",
     "importExport.youtube.originalMedia": "Use original audio or video",
     "importExport.youtube.name": "Video name",
     "importExport.youtube.previewImport": "Preview import",
-    "importExport.youtube.linkVideo": "Link video",
+    "importExport.youtube.linkVideo": "Link film",
     // AQU-1566 (option b): a link-only file's first captions become its rows,
     // attached by a maintainer from its Text view, with no track-editing switch.
     "importExport.youtube.pictureHint": "A maintainer can attach captions later from this file's Text view. They become its rows, ready to translate.",
     "importExport.youtube.media": "Your original audio or video",
     "importExport.youtube.mediaHint": "Upload the original recording with the same timing as the YouTube video. Generate captions using your ASR settings, or review embedded caption tracks if present.",
     "importExport.youtube.captionHint": "Export your captions from YouTube Studio as VTT, SRT, or SBV. YouTube’s player can display captions, but does not share caption text or audio with Aquilla. Text drawn into the video picture is not a subtitle track.",
-    "importExport.youtube.importMedia": "Import media and link video",
+    "importExport.youtube.importMedia": "Import media and link the film",
     "importExport.youtube.link": "YouTube video link",
     "importExport.youtube.captions": "Your caption export",
     "importExport.youtube.preview": "Preview captions",
@@ -445,7 +446,8 @@ export const importExport = defineNamespace({
     "importExport.landing.linkProject.description":
       "Read another Aquilla project's source files here. The link is live, so later upstream edits keep flowing through.",
     "importExport.landing.linkProject.alreadyLinkedTooltip":
-      "This project already reads its source from another project, and it can only follow one. Manage or detach that link in Project Settings → Source & sync.",
+      "This project already reads its source from another project, and it can only follow one. " +
+      "Manage or detach that link in Project settings → Source & sync.",
     "importExport.landing.linkProject.roleTooltip":
       "Project lead or above required to link a source project.",
 
@@ -583,8 +585,8 @@ export const importExport = defineNamespace({
     "importExport.upload.importFinalizationLabel": "Import finalization",
     "importExport.upload.cellsProgress": "{count} / {total} cells",
     "importExport.upload.dragDropHint": "Drag & drop files here, or",
-    "importExport.upload.chooseFiles": "Choose Files",
-    "importExport.upload.chooseFolder": "Choose Folder",
+    "importExport.upload.chooseFiles": "Choose files",
+    "importExport.upload.chooseFolder": "Choose folder",
     "importExport.upload.categoryScripture": "Scripture",
     "importExport.upload.categoryTranslation": "Translation",
     "importExport.upload.formatsTranslation": "XLIFF/XLF, TMX, CSV/TSV",
@@ -610,7 +612,7 @@ export const importExport = defineNamespace({
     "importExport.dialog.titleTn": "Translation Notes (TSV)",
     "importExport.dialog.titleSpreadsheet": "Spreadsheet (CSV / XLSX)",
     "importExport.dialog.titleJsonKeys": "JSON keys",
-    "importExport.dialog.titlePaired": "Paired Translation Import",
+    "importExport.dialog.titlePaired": "Paired translation import",
     "importExport.dialog.finishSaveFailed": "Couldn't finish saving your import — please try again. ({message})",
     "importExport.dialog.saveFailed": "Couldn't save your import — please try again. ({message})",
     "importExport.dialog.pairedNeedsSourceCells":
@@ -1152,7 +1154,7 @@ export const importExport = defineNamespace({
     }),
     "importExport.dcs.applyResyncConfirmTitle": "Apply re-sync?",
     "importExport.dcs.applyResyncEllipsis": "Apply re-sync…",
-    "importExport.dcs.badgeAriaLabel": "Door43 source link — open Project Settings",
+    "importExport.dcs.badgeAriaLabel": "Door43 source link — open Project settings",
     "importExport.dcs.catalogIntro": "Browse released resources on {link}. Importing pins the project to the " +
       "chosen release; you can pull later changes from the project's settings. " +
       "Bible (USFM) resources import today; more resource types are rolling " +
@@ -1196,12 +1198,13 @@ export const importExport = defineNamespace({
     }),
     "importExport.dcs.notYetSupportedBadge": "Not yet supported",
     "importExport.dcs.ownerFilterLabel": "Owner",
-    "importExport.dcs.panelDescription": "This project mirrors a Door43 resource. Check for a newer published " +
-      "release and import upstream changes into the source lane.",
+    "importExport.dcs.panelDescription":
+      "This project mirrors a Door43 resource. Check for a newer published release and import " +
+      "upstream changes into the source.",
     "importExport.dcs.pinnedRefBadge": "pinned {ref}",
-    "importExport.dcs.pinTooltip": "Source synced from {repo} ({subject}) @ {ref} · imported {imported}. " +
-      "Source cells are managed by this link — update or detach in Project " +
-      "Settings.",
+    "importExport.dcs.pinTooltip":
+      "Source synced from {repo} ({subject}) @ {ref} · imported {imported}. Source cells are managed " +
+      "by this link — update or detach in Project settings.",
     "importExport.dcs.repairStaleCursorError": "the upstream link changed while confirming (detached or re-imported in " +
       "another tab). Nothing was applied — run the scan again.",
     "importExport.dcs.resyncButton": "Re-sync content",
@@ -1280,9 +1283,11 @@ export const importExport = defineNamespace({
       "subtitle file. Source text is never changed. You'll review every match " +
       "before anything is saved.",
     "importExport.fileTarget.dropZoneHint": "Drop a file here, or",
-    "importExport.fileTarget.laneLabel": "Fill which language",
-    "importExport.fileTarget.laneHint": "The translations go into this language. Choosing another one opens it in the editor.",
-    "importExport.fileTarget.laneLoading": "Opening this language… you can choose a file in a moment.",
+    "importExport.fileTarget.laneLabel": "Fill which language lane",
+    "importExport.fileTarget.laneHint":
+      "The translations go into this language lane. Choosing another one opens it in the editor.",
+    "importExport.fileTarget.laneLoading":
+      "Opening this language lane… you can choose a file in a moment.",
     "importExport.fileTarget.noCuesInSubtitle": "No subtitle cues found in this file.",
     "importExport.fileTarget.noCuesInVtt": "No cues found in this VTT file.",
     "importExport.fileTarget.noVersesInUsfm": "No verses found in this USFM file.",
@@ -1524,7 +1529,7 @@ export const importExport = defineNamespace({
     "importExport.spreadsheet.sourceUnavailable": "The selected spreadsheet is no longer available",
     "importExport.spreadsheet.title": "Spreadsheet import",
     "importExport.declaredLanguage.laneMismatch":
-      "This file says {declared} — you imported into the {lane} lane.",
+      "This file says {declared} — you imported into the {lane} language lane.",
     // AQU-1365: the Import dialog's "What are you importing?" choice and its
     // translation path.
     "importExport.intent.groupLabel": "What are you importing?",
@@ -1577,14 +1582,22 @@ export const importExport = defineNamespace({
     "importExport.translationCheck.sameBookPlain": "{fileName} is for {book}, and {book} is already in this project.",
     "importExport.translationCheck.severalSameBookPlain": "{fileName} is for {book}, and this project already has more than one {book}.",
     "importExport.translationCheck.formatSourceOnly": "A translation can only be imported from USFM, a spreadsheet or subtitles, so this file can only come in as source text.",
-    "importExport.translationCheck.otherLane": "It says it's in {language}, which this project translates into in another language lane. To import it as that translation, switch to that lane in the editor, then start again from Import.",
-    "importExport.translationCheck.otherLaneBody": "{fileName} says it's in {language}, which this project translates into in another language lane. To import it as that translation, switch to that lane in the editor, then start again from Import.",
+    "importExport.translationCheck.otherLane":
+      "It says it's in {language}, which this project translates into in another language lane. To " +
+      "import it as that translation, switch to that language lane in the editor, then start again " +
+      "from Import.",
+    "importExport.translationCheck.otherLaneBody":
+      "{fileName} says it's in {language}, which this project translates into in another language " +
+      "lane. To import it as that translation, switch to that language lane in the editor, then " +
+      "start again from Import.",
     "importExport.intent.translation.noFilesLead": "A project lead needs to add a source text first. A translation goes into a file that's already here.",
     // AQU-2304: the same sentence for an org that has reserved source imports
     // for maintainers. "A project lead needs to…" would tell a project lead to
     // do the thing their org has just stopped them doing.
     "importExport.intent.translation.noFilesMaintainer": "A maintainer needs to add a source text first. A translation goes into a file that's already here.",
-    "importExport.intent.translation.laneArchived": "{lane} has been archived and is read-only. Switch to another language to import a translation.",
+    "importExport.intent.translation.laneArchived":
+      "{lane} has been archived and is read-only. Switch to another language lane to import a " +
+      "translation.",
     "importExport.translationCheck.manyTitle": "Some of these look like translations",
     "importExport.translationCheck.manyBody": plural({
       one: "{count} of these files may be a translation of a file already in this project: {files}. To bring in a translation, choose \"A translation\" and add one file at a time.",

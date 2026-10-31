@@ -9,12 +9,12 @@ ab open "$BASE/orgs/$ORG/settings" >/dev/null && ab wait --load networkidle >/de
 # Sidebar links miss find-by-role; click by href instead.
 ab click 'a[href$="/settings/billing"]' >/dev/null 2>&1 || {
   # Fall back to a DOM click on the element whose text is the link label.
-  r=$(ab eval 'const el=[...document.querySelectorAll("a,button")].find(e=>e.textContent.trim()==="Billing & usage"); el ? (el.click(), "clicked") : "missing"')
-  case "$r" in *clicked*) ;; *) fail "Billing & usage link ($r)";; esac
+  r=$(ab eval 'const el=[...document.querySelectorAll("a,button")].find(e=>e.textContent.trim().startsWith("Billing")); el ? (el.click(), "clicked") : "missing"')
+  case "$r" in *clicked*) ;; *) fail "Billing link ($r)";; esac
 }
 ab wait --load networkidle >/dev/null
-url=$(ab get url); case "$url" in */orgs/$ORG/settings/billing) ;; *) fail "url after Billing & usage click: $url";; esac
-[ "$(count 'heading "Billing & usage"')" -ge 1 ] || fail "no Billing & usage heading"
+url=$(ab get url); case "$url" in */orgs/$ORG/settings/billing) ;; *) fail "url after Billing click: $url";; esac
+[ "$(count 'heading "Billing"')" -ge 1 ] || fail "no Billing heading"
 
 plan=$(ab get count '[data-testid="billing-plan"]')
 [ "$plan" -ge 1 ] || fail "billing-plan panel not present"
@@ -23,4 +23,4 @@ usage=$(ab get count '[data-testid="billing-usage"]')
 # The CTA is plain text, so an interactive snapshot never lists it; read the page text (case-insensitive, as the smoke spec does).
 ab get text "main" | grep -qi "field plan" || fail "Field Plan text not present"
 
-pass "Billing & usage shows plan panel, usage panel, and Field Plan CTA"
+pass "Billing shows plan panel, usage panel, and Field Plan CTA"

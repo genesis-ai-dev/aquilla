@@ -7,7 +7,7 @@ import { type Page, type Locator, expect } from "@playwright/test"
  * (`ProjectSettings.tsx`'s `SETTINGS_GROUPS`, `/settings/<groupId>`). The
  * Languages section (`LanguagesSection.tsx`, `id="section-languages"`,
  * AQU-538 slice 2) lives in the "General" group alongside Project info /
- * Bible resources / User.
+ * Bible data / User.
  */
 export class ProjectSettings {
   private readonly page: Page
@@ -66,7 +66,7 @@ export class ProjectSettings {
     await expect(setting).toBeChecked()
   }
 
-  /** Add a target lane via the Languages section's "Add language" form. */
+  /** Add a target lane via the Languages section's "Add language lane" form. */
   async addTargetLanguage(tag: string): Promise<void> {
     const open = this.page.getByTestId("add-lane-open")
     if (await open.isVisible()) await open.click()

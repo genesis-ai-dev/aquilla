@@ -179,7 +179,7 @@ describe("ProjectSettings — Bible resources (AQU-460 derive-on-read)", () => {
       bibleResourcesEnabled: undefined,
     })
     renderSettings()
-    const toggle = screen.getByRole("switch", { name: /enable bible resources/i })
+    const toggle = screen.getByRole("switch", { name: /enable bible data/i })
     expect(toggle).toHaveAttribute("aria-checked", "true")
     // Nothing was toggled by the user — the page must not report unsaved changes
     // just from rendering the derived state.
@@ -192,7 +192,7 @@ describe("ProjectSettings — Bible resources (AQU-460 derive-on-read)", () => {
       bibleResourcesEnabled: false,
     })
     renderSettings()
-    const toggle = screen.getByRole("switch", { name: /enable bible resources/i })
+    const toggle = screen.getByRole("switch", { name: /enable bible data/i })
     expect(toggle).toHaveAttribute("aria-checked", "false")
   })
 
@@ -202,7 +202,7 @@ describe("ProjectSettings — Bible resources (AQU-460 derive-on-read)", () => {
       bibleResourcesEnabled: undefined,
     })
     renderSettings()
-    const toggle = screen.getByRole("switch", { name: /enable bible resources/i })
+    const toggle = screen.getByRole("switch", { name: /enable bible data/i })
     expect(toggle).toHaveAttribute("aria-checked", "false")
   })
 
@@ -212,7 +212,7 @@ describe("ProjectSettings — Bible resources (AQU-460 derive-on-read)", () => {
       bibleResourcesEnabled: undefined,
     })
     renderSettings()
-    const toggle = screen.getByRole("switch", { name: /enable bible resources/i })
+    const toggle = screen.getByRole("switch", { name: /enable bible data/i })
     fireEvent.click(toggle)
     expect(screen.getByRole("button", { name: /save changes/i })).toBeTruthy()
   })
@@ -259,7 +259,7 @@ describe("ProjectSettings — Bible resources (AQU-460 derive-on-read)", () => {
     currentHasFetched = true
     rerenderSettings()
 
-    const toggle = screen.getByRole("switch", { name: /enable bible resources/i })
+    const toggle = screen.getByRole("switch", { name: /enable bible data/i })
     expect(toggle).toHaveAttribute("aria-checked", "false")
     // Settling to the real value must not itself count as a user edit.
     expect(screen.queryByRole("button", { name: /save changes/i })).toBeNull()
@@ -276,17 +276,19 @@ describe("ProjectSettings — Bible data enrichments (AQU-1686)", () => {
   // A project's stored enrichment choices must not leak the experiment onto a
   // device that never opted in: the card stays the old one, with no rows and
   // no Data sources link, even when choices are stored.
-  it("keeps the old Bible resources card, with no enrichment rows, while this device has the experiment off", () => {
+  it("keeps the card to its switch, with no enrichment rows, while this device has the experiment off", () => {
     currentProject = makeProject({ files: SCRIPTURE_FILES as ProjectRecord["files"] })
     currentSettings = { bibleEnrichments: { voices: false } }
     renderSettings()
-    expect(document.getElementById("section-bible-resources")).toHaveTextContent(/^Bible resources/)
-    expect(screen.getByRole("switch", { name: /enable bible resources/i })).toBeInTheDocument()
+    // AQU-2261: one name, Bible data, with the experiment off or on.
+    expect(document.getElementById("section-bible-resources")).toHaveTextContent(/^Bible data/)
+    expect(document.getElementById("section-bible-resources")).not.toHaveTextContent(/bible resources/i)
+    expect(screen.getByRole("switch", { name: /enable bible data/i })).toBeInTheDocument()
     expect(screen.queryByRole("switch", { name: "Voices" })).toBeNull()
     expect(screen.queryByRole("button", { name: "Data sources" })).toBeNull()
   })
 
-  it("renames the card to Bible data", () => {
+  it("calls the card Bible data with the experiment on too", () => {
     currentProject = makeProject({ files: SCRIPTURE_FILES as ProjectRecord["files"], experimentalFlags: EXPERIMENT_ON })
     renderSettings()
     expect(document.getElementById("section-bible-resources")).toHaveTextContent(/^Bible data/)

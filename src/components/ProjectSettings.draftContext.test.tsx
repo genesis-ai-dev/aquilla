@@ -130,7 +130,7 @@ vi.mock("@/lib/metrics/use-post-edit-metrics", () => ({
 
 // ─── Render helper ───────────────────────────────────────────────────────────
 
-// AQU-501: Draft Context lives in the "AI & completion" sub-menu pane —
+// AQU-501: Draft Context lives in the "AI" sub-menu pane —
 // deep-link straight there via `?section=`.
 function renderSettings() {
   return render(

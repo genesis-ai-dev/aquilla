@@ -55,7 +55,7 @@ function renderList(files: FileReference[], props: Partial<React.ComponentProps<
   )
 }
 
-const jumpGroup = () => screen.getByRole("group", { name: "Jump to Testament" })
+const jumpGroup = () => screen.getByRole("group", { name: "Jump to testament" })
 const jumpButton = (name: "Old Testament" | "New Testament") =>
   within(jumpGroup()).getByRole("button", { name })
 // Group headers expose their state through the accessible name of their toggle.
@@ -143,11 +143,11 @@ describe("ExpandableFileList — Jump to Testament control (AQU-1084)", () => {
     unmount()
 
     renderList([file("notes", { type: "txt" }), file("Season 1 ep 1", { corpusMarker: "Season 1" })])
-    expect(screen.queryByRole("group", { name: "Jump to Testament" })).toBeNull()
+    expect(screen.queryByRole("group", { name: "Jump to testament" })).toBeNull()
     unmount()
 
     renderList([file("Matthew", { bookCode: "MAT" }), file("Mark", { bookCode: "MRK" })])
-    expect(screen.queryByRole("group", { name: "Jump to Testament" })).toBeNull()
+    expect(screen.queryByRole("group", { name: "Jump to testament" })).toBeNull()
   })
 
   it("scrolls the chosen group's header into view without touching the other group", () => {

@@ -33,8 +33,8 @@ import type { FrontierSession } from "@/lib/frontier/types"
 // override supplied it.
 const NO_PROVIDER_HINTS = {
   project: {
-    endpoint: "Add an endpoint under Project Settings → AI & completion, or switch back to the default Aquilla provider.",
-    apiKey: "Add the API key for your custom endpoint under Project Settings → AI & completion.",
+    endpoint: "Add an endpoint under Project settings → AI → AI model (advanced), or switch back to the default Aquilla provider.",
+    apiKey: "Add the API key for your custom endpoint under Project settings → AI → AI model (advanced).",
   },
   "personal-override": {
     endpoint: "Your personal AI provider has no endpoint. Fix or clear it under Settings → Personal AI provider.",

@@ -42,7 +42,7 @@ test("language fields suggest from the catalog and still accept custom text", as
 
   const name = `LangPicker ${Date.now()}`
   const dialog = await dash.openCreateProjectDialog()
-  await dialog.getByLabel(/^Project title$/i).fill(name)
+  await dialog.getByLabel(/^Project name$/i).fill(name)
 
   // 1. Source language — typing surfaces the dropdown; picking stores the name.
   const source = dialog.getByLabel(/^Source language$/i)

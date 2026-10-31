@@ -355,7 +355,7 @@ describe("ImportDialog — From another project (AQU-1527)", () => {
 
     const card = tile()
     expect(card.getAttribute("aria-disabled")).toBe("true")
-    expect(card.getAttribute("data-tooltip")).toContain("Project Settings → Source & sync")
+    expect(card.getAttribute("data-tooltip")).toContain("Project settings → Source & sync")
 
     await act(async () => {
       fireEvent.click(card)

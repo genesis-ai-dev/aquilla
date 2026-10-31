@@ -63,7 +63,7 @@ function inspection(release: boolean): LangQuestInspection {
 
 async function openLangQuestPath() {
   render(<ProjectCreateDialog onCreated={vi.fn()} orgId={10} />)
-  fireEvent.click(screen.getByRole("button", { name: "New Project" }))
+  fireEvent.click(screen.getByRole("button", { name: "New project" }))
   fireEvent.click(await screen.findByTestId("project-create-langquest"))
   fireEvent.change(await screen.findByLabelText("LangQuest access token"), { target: { value: TOKEN } })
   fireEvent.click(screen.getByRole("button", { name: "Check token" }))
@@ -106,7 +106,7 @@ describe("ProjectCreateDialog — Import from LangQuest (AQU-2105)", () => {
   it("refuses something that is not a LangQuest token without asking LangQuest", async () => {
     vi.mocked(inspectLangQuestToken).mockClear()
     render(<ProjectCreateDialog onCreated={vi.fn()} orgId={10} />)
-    fireEvent.click(screen.getByRole("button", { name: "New Project" }))
+    fireEvent.click(screen.getByRole("button", { name: "New project" }))
     fireEvent.click(await screen.findByTestId("project-create-langquest"))
     fireEvent.change(await screen.findByLabelText("LangQuest access token"), { target: { value: "sk-not-a-token" } })
     fireEvent.click(screen.getByRole("button", { name: "Check token" }))

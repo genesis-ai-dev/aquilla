@@ -285,8 +285,10 @@ describe("AudioRecordingModal — reasons open on click, text buttons have no ho
 
   it("says what the recording format costs behind its (i)", async () => {
     renderWithTooltips(modal())
+    // AQU-2261: its own words, not the export dialog's "Format" legend.
+    expect(screen.queryByRole("button", { name: "About Format" })).toBeNull()
     await expectClickNote(
-      screen.getByRole("button", { name: "About Format" }),
+      screen.getByRole("button", { name: "About the recording format" }),
       /three times the file size|much smaller files/,
     )
   })
@@ -311,6 +313,6 @@ describe("AudioRecordingModal — reasons open on click, text buttons have no ho
     }
     renderWithTooltips(modal())
     await expectDisabledNote(screen.getByTestId("rec-format"), "already captured")
-    expect(screen.queryByRole("button", { name: "About Format" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "About the recording format" })).toBeNull()
   })
 })

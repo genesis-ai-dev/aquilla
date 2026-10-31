@@ -44,7 +44,7 @@ test("org invitation grants membership and remains usable by its member redeemer
 
 /** A project with a target lane will not mint a link until this is chosen. */
 async function chooseEveryCurrentLane(dialog: Locator) {
-  const every = dialog.getByRole("radio", { name: /Every current target lane/i })
+  const every = dialog.getByRole("radio", { name: /Every current language lane/i })
   await expect(every).toBeVisible({ timeout: 10_000 })
   await every.check()
 }

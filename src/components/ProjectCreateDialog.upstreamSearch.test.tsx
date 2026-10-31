@@ -166,7 +166,7 @@ describe("ProjectCreateDialog — searchable upstream picker (AQU-1518)", () => 
   it("links to the project found by typing, not to whatever the list happened to show first", async () => {
     openLinkedShape()
 
-    fireEvent.change(screen.getByPlaceholderText("My Translation Project"), {
+    fireEvent.change(screen.getByPlaceholderText("My translation project"), {
       target: { value: "Swahili Episode 1" },
     })
     fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), {
@@ -181,11 +181,11 @@ describe("ProjectCreateDialog — searchable upstream picker (AQU-1518)", () => 
     // Picking an upstream still reveals the corpus follow-up question.
     const corpus = await screen.findByText(/Which corpus should become this project's source\?/i)
     expect(corpus).toBeInTheDocument()
-    fireEvent.click(screen.getByText(/One of its Targets/i))
+    fireEvent.click(screen.getByText(/One of its targets/i))
     // AQU-1605: and waits for the lane list, which is pre-filled at one lane.
     await screen.findByRole("combobox", { name: /Which of its translations\?/i })
 
-    fireEvent.click(screen.getByRole("button", { name: /Create & Link/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create & link/i }))
     await waitFor(() => expect(mockLinkProjectSource).toHaveBeenCalledTimes(1))
     const [, , linkInput] = mockLinkProjectSource.mock.calls[0]!
     expect(linkInput).toMatchObject({
@@ -199,7 +199,7 @@ describe("ProjectCreateDialog — searchable upstream picker (AQU-1518)", () => 
     const user = userEvent.setup()
     openLinkedShape()
 
-    fireEvent.change(screen.getByPlaceholderText("My Translation Project"), {
+    fireEvent.change(screen.getByPlaceholderText("My translation project"), {
       target: { value: "Swahili Episode 1" },
     })
     const search = await openCombobox(UPSTREAM, SEARCH)
@@ -209,8 +209,8 @@ describe("ProjectCreateDialog — searchable upstream picker (AQU-1518)", () => 
     await user.keyboard("{Escape}")
 
     await waitFor(() => expect(screen.queryByRole("option")).not.toBeInTheDocument())
-    expect(screen.getByRole("heading", { name: "Create New Project" })).toBeInTheDocument()
-    expect(screen.getByPlaceholderText("My Translation Project")).toHaveValue("Swahili Episode 1")
+    expect(screen.getByRole("heading", { name: "Create new project" })).toBeInTheDocument()
+    expect(screen.getByPlaceholderText("My translation project")).toHaveValue("Swahili Episode 1")
   })
 
   it("clearing the upstream on a self-contained project drops the corpus question again", async () => {

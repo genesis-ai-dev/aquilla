@@ -38,8 +38,7 @@ export const segmentation = defineNamespace({
       "Segmentation settings are not available on this server yet.",
     "segmentation.loadFailed": "Could not load this file's segmentation.",
     "segmentation.saveFailed": "Could not save. {message}",
-    "segmentation.readOnly":
-      "Changing how a file is divided requires the Project Lead role or above.",
+    "segmentation.readOnly": "Changing how a file is divided requires the Project lead role or above.",
   },
   context: {
     _context: {

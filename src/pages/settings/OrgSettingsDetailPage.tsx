@@ -30,7 +30,7 @@ export function OrgSettingsDetailPage({
   return (
     <OrgSettingsShell
       header={
-        <OrgBreadcrumb parent={{ label: "Settings", to: settingsIndex }} section={title} />
+        <OrgBreadcrumb parent={{ label: t("editor.navTitle.organizationSettings"), to: settingsIndex }} section={title} />
       }
     >
       <div className="flex flex-col gap-12">

@@ -264,6 +264,6 @@ describe("RuleImportDialog trigger", () => {
     )
     const trigger = screen.getByRole("button", { name: /import from doc/i })
     expect(trigger).toBeDisabled()
-    await expectDisabledNote(trigger, "Configure LLM in settings first")
+    await expectDisabledNote(trigger, "Set up an AI model in project settings first")
   })
 })

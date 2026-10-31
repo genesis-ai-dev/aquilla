@@ -25,8 +25,7 @@ export const fileDetails = defineNamespace({
     "fileDetails.renameDialogTitle": "Rename file",
     "fileDetails.moveToCorpus": "Move to corpus…",
     "fileDetails.downloadOriginal": "Download original",
-    "fileDetails.deleteRequiresRole":
-      "Deleting files requires the Project Lead role or above.",
+    "fileDetails.deleteRequiresRole": "Deleting files requires the Project lead role or above.",
   },
   context: {
     _context: {

@@ -169,7 +169,7 @@ function pinnedHeader(): HTMLElement {
 
 /** Dirty the General pane the way a person does: edit the project title. */
 function editProjectTitle(value: string) {
-  fireEvent.change(screen.getByLabelText("Project title"), { target: { value } })
+  fireEvent.change(screen.getByLabelText("Project name"), { target: { value } })
 }
 
 beforeEach(() => {
@@ -189,7 +189,7 @@ describe("ProjectSettings — pinned header (AQU-2030)", () => {
     expect(pinnedHeader()).toHaveTextContent("Unsaved changes")
 
     // …and the field that was edited is NOT inside it — it scrolls underneath.
-    expect(pinnedHeader().contains(screen.getByLabelText("Project title"))).toBe(false)
+    expect(pinnedHeader().contains(screen.getByLabelText("Project name"))).toBe(false)
   })
 
   it("pins the modal's back link alongside the title", () => {
@@ -212,7 +212,7 @@ describe("ProjectSettings — pinned header (AQU-2030)", () => {
     // instead of carrying it along.
     const content = header.nextElementSibling as HTMLElement | null
     expect(content).toBeTruthy()
-    expect(content!.contains(screen.getByLabelText("Project title"))).toBe(true)
+    expect(content!.contains(screen.getByLabelText("Project name"))).toBe(true)
   })
 
   it("renders the same pinned block in the modal as on the full-page route", () => {

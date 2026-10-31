@@ -214,7 +214,7 @@ describe("RuleEditor lane scope (AQU-609)", () => {
     const trigger = screen.getByRole("combobox", { name: "Applies to" })
     await user.click(trigger)
     // All scopes are offered: every lane, the labeled default lane, both tags.
-    expect(await screen.findByRole("option", { name: "All lanes" })).toBeInTheDocument()
+    expect(await screen.findByRole("option", { name: "All language lanes" })).toBeInTheDocument()
     expect(screen.getByRole("option", { name: "Spanish (base)" })).toBeInTheDocument()
     expect(screen.getByRole("option", { name: "es" })).toBeInTheDocument()
     fillRequired()
@@ -240,10 +240,10 @@ describe("RuleEditor lane scope (AQU-609)", () => {
       />,
     )
     const summary = screen.getByTestId("rule-editor-lane-summary")
-    expect(summary).toHaveTextContent("This rule will apply in every lane.")
+    expect(summary).toHaveTextContent("This rule will apply in every language lane.")
     await user.click(screen.getByRole("combobox", { name: "Applies to" }))
     await user.click(await screen.findByRole("option", { name: "French" }))
-    expect(summary).toHaveTextContent("This rule will apply only in French. Other lanes ignore it.")
+    expect(summary).toHaveTextContent("This rule will apply only in French. Other language lanes ignore it.")
   })
 
   it("clears the lane pin when switching a lane rule back to All lanes", async () => {
@@ -265,7 +265,7 @@ describe("RuleEditor lane scope (AQU-609)", () => {
       />,
     )
     await user.click(screen.getByRole("combobox", { name: "Applies to" }))
-    await user.click(await screen.findByRole("option", { name: "All lanes" }))
+    await user.click(await screen.findByRole("option", { name: "All language lanes" }))
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
     expect(onSave).toHaveBeenCalledWith(
       expect.objectContaining({ scope: "project", lane: undefined }),

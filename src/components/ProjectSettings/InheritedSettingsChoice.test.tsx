@@ -13,7 +13,7 @@ function renderChoice(
   render(
     <I18nProvider>
       <InheritedSettingsChoice
-        title="Copy these from the upstream project"
+        title="Settings from Upstream"
         description="Turn on what this project should receive."
         receive={{ ...INHERIT_DEFAULTS }}
         detached={{}}
@@ -26,14 +26,14 @@ function renderChoice(
 }
 
 describe("InheritedSettingsChoice (AQU-1075)", () => {
-  it("leaves AI instructions unticked by default", () => {
+  it("leaves the instructions unticked by default", () => {
     renderChoice()
     expect(screen.getByRole("checkbox", { name: "Translation brief" })).toBeChecked()
     expect(screen.getByRole("checkbox", { name: "Knowledge-base documents" })).toBeChecked()
     expect(screen.getByRole("checkbox", { name: /^Workflow policy/ })).toBeChecked()
     expect(screen.getByRole("checkbox", { name: "Living-memory notes" })).not.toBeChecked()
     expect(screen.getByRole("checkbox", { name: "Smart quotes" })).not.toBeChecked()
-    expect(screen.getByRole("checkbox", { name: "AI instructions" })).not.toBeChecked()
+    expect(screen.getByRole("checkbox", { name: "Instructions" })).not.toBeChecked()
   })
 
   it("names the upstream and detaches the field", async () => {

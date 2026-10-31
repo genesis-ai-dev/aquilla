@@ -218,7 +218,7 @@ describe("DocumentGenres — role gate", () => {
     renderSection({ canEdit: false, reasonCannotEdit: "role", assignments: { "f-psa": "wisdom" } })
 
     expect(screen.queryByRole("button", { name: /Suggest genres/ })).not.toBeInTheDocument()
-    expect(screen.getAllByLabelText(/requires Maintainer role/i).length).toBeGreaterThan(0)
+    expect(screen.getAllByLabelText(/requires the Maintainer role/i).length).toBeGreaterThan(0)
     expect(screen.getByRole("combobox", { name: "Genre for Psalms" })).toBeDisabled()
     expect(
       screen.getByRole("button", { name: "Clear the genre assigned to Psalms" }),

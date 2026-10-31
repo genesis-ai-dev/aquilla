@@ -63,7 +63,7 @@ describe("access audit labels and CSV", () => {
   it("writes one row per lane, and still a row when a person has no project", () => {
     const csv = accessAuditCsv(t, report)
     const lines = csv.trim().split("\r\n")
-    expect(lines[0]).toBe("Person,Organization role,Teams,Project,Effective role,Comes from,Lane,Lane role")
+    expect(lines[0]).toBe("Person,Organization role,Teams,Project,Effective role,Comes from,Language lane,Language lane role")
     expect(lines[1]).toBe('"Anna, Jr",Viewer,Translators (Project lead),John,Contributor,Team,Spanish,Viewer')
     expect(lines[2]).toBe('"Anna, Jr",Viewer,Translators (Project lead),John,Contributor,Team,French,Reviewer')
     expect(lines[3]).toBe('"Anna, Jr",Viewer,Translators (Project lead),Mark,Owner,Creator,,')

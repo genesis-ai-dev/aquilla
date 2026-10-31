@@ -508,9 +508,9 @@ describe("MediaVideoPane", () => {
     fireEvent.error(screen.getByTestId("video-pane-media"))
 
     expect(screen.getByTestId("tl-video-pane")).toHaveAttribute("data-video-state", "error")
-    expect(screen.getByText("This video could not be loaded")).toBeInTheDocument()
+    expect(screen.getByText("This film could not be loaded")).toBeInTheDocument()
     expect(screen.getByText("https://cdn/episode.webm")).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "Change video" }))
+    fireEvent.click(screen.getByRole("button", { name: "Change film" }))
     expect(onChangeVideo).toHaveBeenCalledTimes(1)
   })
 

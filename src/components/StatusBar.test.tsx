@@ -66,10 +66,12 @@ describe("StatusBar health breakdown", () => {
     fireEvent.mouseEnter(trigger(container))
     fireEvent.mouseMove(trigger(container))
     await new Promise((resolve) => setTimeout(resolve, 500))
-    expect(screen.queryByText("project health")).toBeNull()
+    expect(screen.queryByText("Project health")).toBeNull()
     expect(screen.getByRole("button", { name: "Project health: 100%" })).toBe(trigger(container))
     fireEvent.click(trigger(container))
-    expect(await screen.findByText("project health")).toBeTruthy()
+    // AQU-2261: the card's title comes from the catalog, in sentence case.
+    expect(await screen.findByText("Project health", { exact: true })).toBeTruthy()
+    expect(screen.queryByText("project health", { exact: true })).toBeNull()
     expect(screen.queryByRole("button", { name: /Genesis/ })).toBeNull()
   })
 

@@ -1,7 +1,7 @@
 // AQU-1605: Create New Project — WHICH of the upstream's translations a chain
 // link consumes.
 //
-// The chain case ("One of its Targets") used to send no lane at all, and the
+// The chain case ("One of its targets") used to send no lane at all, and the
 // server read whichever of the upstream's lanes carried the empty legacy tag. An
 // upstream translating into three languages could therefore only be chained from
 // on one of them, by accident. The dialog now asks, offering only the lanes the
@@ -104,7 +104,7 @@ const LANES_TWO = [
 
 function fillBasics(): void {
   fireEvent.click(screen.getByRole("button", { name: /new project/i }))
-  fireEvent.change(screen.getByPlaceholderText("My Translation Project"), {
+  fireEvent.change(screen.getByPlaceholderText("My translation project"), {
     target: { value: "Chaluba NT" },
   })
   fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), {
@@ -148,7 +148,7 @@ describe("ProjectCreateDialog — which upstream translation (AQU-1605)", () => 
     await screen.findByRole("combobox", { name: /Which of its translations\?/i })
     await pickSelectOption(/Which of its translations\?/i, "France French")
 
-    fireEvent.click(screen.getByRole("button", { name: /Create & Link/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create & link/i }))
     await waitFor(() => expect(mockLink).toHaveBeenCalledTimes(1))
     expect(mockLink.mock.calls[0]![2]).toMatchObject({
       sourceProjectId: "upstream-1",
@@ -163,7 +163,7 @@ describe("ProjectCreateDialog — which upstream translation (AQU-1605)", () => 
     await reachLaneQuestion(/^Its Source/i)
 
     expect(screen.queryByText(/Which of its translations\?/i)).toBeNull()
-    fireEvent.click(screen.getByRole("button", { name: /Create & Link/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create & link/i }))
     await waitFor(() => expect(mockLink).toHaveBeenCalledTimes(1))
     expect(mockLink.mock.calls[0]![2]).not.toHaveProperty("laneId")
     // The lane list is never even read for a link that consumes the source.
@@ -180,7 +180,7 @@ describe("ProjectCreateDialog — which upstream translation (AQU-1605)", () => 
     const select = await screen.findByRole("combobox", { name: /Which of its translations\?/i })
     await waitFor(() => expect(select.textContent).toMatch(/French/))
 
-    fireEvent.click(screen.getByRole("button", { name: /Create & Link/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create & link/i }))
     await waitFor(() => expect(mockLink).toHaveBeenCalledTimes(1))
     expect(mockLink.mock.calls[0]![2]).toMatchObject({ laneId: "lane-only" })
   })
@@ -205,7 +205,7 @@ describe("ProjectCreateDialog — which upstream translation (AQU-1605)", () => 
     await reachLaneQuestion()
     await screen.findByRole("combobox", { name: /Which of its translations\?/i })
 
-    fireEvent.click(screen.getByRole("button", { name: /Create & Link/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create & link/i }))
     expect(
       await screen.findByText(/Choose which of the upstream project's translations to use/i),
     ).toBeTruthy()

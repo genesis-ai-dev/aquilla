@@ -35,7 +35,7 @@ export function OrgSettingsIndex() {
     )
 
   return (
-    <OrgSettingsShell header={<OrgBreadcrumb section="Settings" />}>
+    <OrgSettingsShell header={<OrgBreadcrumb section={t("editor.navTitle.organizationSettings")} />}>
       <PageHeader
         title={t("editor.navTitle.organizationSettings")}
         description={

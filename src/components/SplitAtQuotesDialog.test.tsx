@@ -91,7 +91,7 @@ describe("SplitAtQuotesDialog preview text (AQU-2089)", () => {
     unmount()
     renderDialog(pieces, vi.fn(), 2)
     const warning = screen.getByTestId("split-quotes-lane-warning")
-    expect(warning).toHaveTextContent(/all lanes/i)
+    expect(warning).toHaveTextContent(/all language lanes/i)
     expect(warning.textContent ?? "").not.toMatch(/\d/)
   })
 })

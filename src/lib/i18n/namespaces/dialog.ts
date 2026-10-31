@@ -25,8 +25,8 @@ export const dialog = defineNamespace({
     "dialog.assign.laneLabel": "Language lane",
     "dialog.assign.defaultLaneFallback": "Default language",
     "dialog.assign.laneDescription":
-      "Routes this work to a language lane. Restricting who {can} edit a lane is " +
-      "separate (staffing).",
+      "Routes this work to a language lane. Restricting who {can} edit a language lane is separate " +
+      "(staffing).",
     "dialog.assign.filesLabel": "Files / books",
     "dialog.assign.filesDescription":
       "Files sharing a season/testament are grouped — use \"Select all\" to assign a " +

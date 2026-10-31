@@ -51,7 +51,7 @@ function baseProps(
 }
 
 /**
- * Get the "Replace All" / "Replace N" apply button, excluding the mode pill
+ * Get the "Replace all" / "Replace N" apply button, excluding the mode pill
  * button (which also has "Replace" as text). The apply button has aria-busy.
  */
 function getApplyButton() {
@@ -71,7 +71,7 @@ describe("ParallelPassagesPanel — smoke", () => {
   it("renders the dialog open without crashing", () => {
     render(<ParallelPassagesPanel {...baseProps()} />)
     expect(screen.getByRole("dialog")).toBeInTheDocument()
-    expect(screen.getByRole("heading", { level: 1, name: "Search and Replace" })).toBeInTheDocument()
+    expect(screen.getByRole("heading", { level: 1, name: "Search and replace" })).toBeInTheDocument()
   })
 
   it("puts the replace field with the notes under it, and does not add a second diff list", () => {

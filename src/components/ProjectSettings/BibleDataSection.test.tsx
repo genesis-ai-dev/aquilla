@@ -58,9 +58,10 @@ describe("BibleDataSection", () => {
   // AQU-1685: a device that never opted in sees the card it had before the
   // pack existed. Only the master switch, under its old name; no row, reason
   // or Data sources link that would advertise an experiment.
-  it("is the old Bible resources card while the experiment is off", () => {
+  it("is only its switch while the experiment is off", () => {
     renderSection({ experimentOn: false, switchValue: false })
-    expect(screen.getByRole("switch", { name: "Enable Bible resources" })).toBeInTheDocument()
+    // AQU-2261: one name, Bible data, whether the experiment is on or off.
+    expect(screen.getByRole("switch", { name: "Enable Bible data" })).toBeInTheDocument()
     expect(screen.getAllByRole("switch")).toHaveLength(1)
     expect(screen.queryByText(SWITCH_OFF_REASON)).toBeNull()
     expect(screen.queryByRole("button", { name: english("bibleData.sources.open") })).toBeNull()

@@ -42,7 +42,7 @@ export const org = defineNamespace({
     "org.access.scope.org": "org",
     "org.access.scope.team": "team",
     "org.access.scope.project": "project",
-    "org.access.scope.lane": "lane",
+    "org.access.scope.lane": "language lane",
     // -- AQU-1352 §3.7 roster wiring (ProjectMembersPage) --
     // -- AQU-1352 §3.6 People & access page (AQU-1072) --
     "org.access.page.title": "People & access",
@@ -58,7 +58,8 @@ export const org = defineNamespace({
     // -- AQU-1072 access audit: owners and maintainers, one tree per person --
     "org.accessAudit.title": "Access audit",
     "org.accessAudit.description":
-      "Each person's organization role, the teams they belong to, and the role they actually have on each project — the same answer the access checks use — plus their lane grants.",
+      "Each person's organization role, the teams they belong to, and the role they actually have on " +
+      "each project — the same answer the access checks use — plus their language lane grants.",
     "org.accessAudit.print": "Print",
     "org.accessAudit.loadError": "Couldn't load the access audit for this organization.",
     "org.accessAudit.roleRequired":
@@ -66,13 +67,13 @@ export const org = defineNamespace({
     "org.accessAudit.empty": "No people to list in this access audit.",
     "org.accessAudit.noTeams": "No teams",
     "org.accessAudit.noProjects": "No project access",
-    "org.accessAudit.noLanes": "No lane grants",
+    "org.accessAudit.noLanes": "No language lane grants",
     "org.accessAudit.notOrgMember": "Not an organization member",
     "org.accessAudit.csvOrgRole": "Organization role",
     "org.accessAudit.csvEffectiveRole": "Effective role",
     "org.accessAudit.csvSource": "Comes from",
-    "org.accessAudit.csvLane": "Lane",
-    "org.accessAudit.csvLaneRole": "Lane role",
+    "org.accessAudit.csvLane": "Language lane",
+    "org.accessAudit.csvLaneRole": "Language lane role",
     "org.accessAudit.generatedAt": "Generated {when}",
     "org.accessAudit.teamMembership": "{name} ({role})",
     "org.accessAudit.projectAccess": "{role} ({source})",
@@ -83,15 +84,17 @@ export const org = defineNamespace({
     "org.egress.description": "Everything your organization has stored — review it, filter it, and take it with you as one zip archive.",
     "org.egress.selectOrgDescription": "Data egress is managed within a single organization.",
     "org.egress.roleRequired":
-      "Data egress is available to organization owners, and to other roles when an owner enables them in Settings.",
+      "Data egress is available to organization owners, and to other roles when an owner enables " +
+      "them in Organization settings.",
     "org.egress.exportCount": plural({ one: "Export {count} file", other: "Export {count} files" }),
     "org.egress.loading": "Loading organization files",
     "org.egress.loadFailed": "Couldn’t load files",
-    "org.egress.portfolioUnavailable": "Portfolio stats are unavailable — lane, audio, and last-edit columns may be incomplete.",
+    "org.egress.portfolioUnavailable":
+      "Portfolio stats are unavailable — language lane, audio, and last-edit columns may be incomplete.",
     "org.egress.policyRestricted": "Export restricted by org policy",
     "org.egress.selectAll": "Select all files",
     "org.egress.selectFile": "Select {file}",
-    "org.egress.column.lanes": "Lanes",
+    "org.egress.column.lanes": "Language lanes",
     "org.egress.column.lastEdit": "Last edit",
     "org.egress.filterPlaceholder": "Filter files…",
     "org.egress.selectedCount": "{selected} of {total} selected",
@@ -104,8 +107,8 @@ export const org = defineNamespace({
     "org.egress.options.text.none.label": "Text off",
     "org.egress.options.text.none.description": "No text entries in the export.",
     "org.egress.options.conversionFormat": "Conversion format",
-    "org.egress.options.targetLanes": "Target lanes",
-    "org.egress.options.lane": "Lane {lane}",
+    "org.egress.options.targetLanes": "Language lanes",
+    "org.egress.options.lane": "Language lane {lane}",
     "org.egress.options.includeSources": "Include original source documents",
     "org.egress.options.includeSourcesDescription": "The raw files you uploaded, as stored.",
     "org.egress.options.audioMode": "Audio export mode",
@@ -123,7 +126,8 @@ export const org = defineNamespace({
     "org.egress.options.audioWavDescription":
       "For broadcast delivery. Off copies each clip as it was saved, which may be compressed or at a lower sample rate.",
     "org.egress.options.useCache": "Reuse cached exports for unchanged projects",
-    "org.egress.options.empty": "These options would export nothing — pick a lane, an audio mode, or source documents.",
+    "org.egress.options.empty":
+      "These options would export nothing — pick a language lane, an audio mode, or source documents.",
     "org.egress.options.estimate": "{fileCount} · {cellCount}",
     "org.egress.options.estimateAudio": " · ~{minutes} min recorded audio",
     "org.egress.results.preparing": "Preparing",
@@ -184,8 +188,8 @@ export const org = defineNamespace({
 
     "org.orgHome.organizations": "Organizations",
     // AQU-1071 / AQU-1598: the enterprise billing band — active target lanes.
-    "org.orgHome.activeLanguages": "Active lanes",
-    "org.orgHome.activeLanguagesHint": "Target lanes",
+    "org.orgHome.activeLanguages": "Active language lanes",
+    "org.orgHome.activeLanguagesHint": "Language lanes",
     "org.orgHome.avgTranslated": "Avg translated",
     "org.orgHome.avgValidated": "Avg validated",
     "org.orgHome.avgAudio": "Avg audio",
@@ -255,10 +259,12 @@ export const org = defineNamespace({
     // AQU-1771: the org overview's Team workload / Team usage cards list
     // people by name, so they can never be more open than the member list.
     "org.orgHome.teamVisibilityRosterFloorHint":
-      "This card lists members by name, and the member list is set to “{floor}”. To go lower, lower the member list in Settings → Security first.",
+      "This card lists members by name, and the member list is set to “{floor}”. To go lower, lower " +
+      "the member list in Organization settings → Security first.",
 
     "org.orgHome.lens.recentDescription": "Latest project activity across all organizations",
-    "org.orgHome.lens.attentionDescription": "Highest-priority projects by deadline, activity, and progress",
+    "org.orgHome.lens.attentionDescription":
+      "Highest-priority projects by project deadline, activity, and progress",
     "org.orgHome.lens.leastTranslatedDescription": "Projects with the lowest translation progress",
     "org.orgHome.lens.mostProgressLabel": "Most progress",
     "org.orgHome.lens.mostProgressDescription": "Projects with the highest translation progress",
@@ -274,7 +280,7 @@ export const org = defineNamespace({
     // recordings under org.projectOverview.audioValidated, whose tile on the
     // same page shows the very same figure. Title case follows those tiles, so
     // the pair reads alike wherever both are on screen.
-    "org.orgHome.table.textValidatedHeaderLabel": "Text Validated",
+    "org.orgHome.table.textValidatedHeaderLabel": "Text validated",
     "org.orgHome.table.audioHeaderLabel": "Has audio",
     "org.orgHome.table.audioPctAria": "{pct}% audio",
     // Media redesign slice 1: a project whose languages all deliver audio has
@@ -298,7 +304,7 @@ export const org = defineNamespace({
     // org.membersPage.sourceProjectCreator's duplicate-exceptions.ts entry for the lowercase
     // badge-fragment sibling that stays distinct)
     "org.membersPage.remove": "Remove",
-    "org.membersPage.rosterHiddenTitle": "Roster hidden",
+    "org.membersPage.rosterHiddenTitle": "Member list hidden",
     "org.membersPage.allOrgMembersAdded": "All org members are already on this project.",
     "org.membersPage.addMembersAction": "add members to this project",
     "org.membersPage.accessRevokedTitle": "Access revoked",
@@ -414,19 +420,22 @@ export const org = defineNamespace({
     "org.teamDetail.removeRequiresMaintainerTooltip":
       "Only maintainers and org owners can remove members from a team. Ask a maintainer to remove someone.",
     "org.teamDetail.roleDescriptionViewer":
-      "Viewer (100) — read-only access. No edit or management actions. Org membership at this level does not open projects until the person is added to a project or team.",
+      "Viewer — read-only access. No edit or management actions. Org membership at this level does " +
+      "not open projects until the person is added to a project or team.",
     "org.teamDetail.roleDescriptionCommenter":
-      "Commenter (200) — can read and leave comments. Cannot edit content.",
+      "Commenter — can read and leave comments. Cannot edit content.",
     "org.teamDetail.roleDescriptionReviewer":
-      "Reviewer (300) — can read, comment, and review. Cannot make direct edits.",
+      "Reviewer — can read, comment, and review. Cannot make direct edits.",
     "org.teamDetail.roleDescriptionContributor":
-      "Contributor (400) — can edit project content. Maximum level grantable via share link.",
+      "Contributor — can edit project content. Maximum level grantable via share link.",
     "org.teamDetail.roleDescriptionProjectLead":
-      "Project Lead (500) — can add members to projects, mint share-link invites, and lead project work.",
+      "Project lead — can add members to projects, mint share-link invites, and lead project work.",
     "org.teamDetail.roleDescriptionMaintainer":
-      "Maintainer (600) — can create/manage teams, rename the org, set project deadlines, and remove project members.",
+      "Maintainer — can create/manage teams, rename the org, set project deadlines, and remove " +
+      "project members.",
     "org.teamDetail.roleDescriptionOwner":
-      "Owner (700) — full control: add/remove org members, archive/restore projects, and all maintainer actions.",
+      "Owner — full control: add/remove org members, archive/restore projects, and all maintainer " +
+      "actions.",
     "org.teamDetail.lockedOrgRoleUnknownDescription": "This member's org-level role is unknown.",
     "org.teamDetail.lockedOrgRoleTooltip":
       "{description} This permission is set at the org level and can only be changed by an org owner.",
@@ -508,8 +517,8 @@ export const org = defineNamespace({
     // "Restore" → common.restore (identical text)
     "org.projectOverview.moreActionsAria": "More actions",
     "org.projectOverview.downloadDeliverable": "Download deliverable",
-    "org.projectOverview.markAsActive": "Mark as Active",
-    "org.projectOverview.markAsInactive": "Mark as Inactive",
+    "org.projectOverview.markAsActive": "Mark as active",
+    "org.projectOverview.markAsInactive": "Mark as inactive",
     "org.projectOverview.archive": "Archive",
     // Project Download UI (Phase 5) — Tauri desktop only.
     "org.projectOverview.makeAvailableOffline": "Make available offline",
@@ -532,20 +541,23 @@ export const org = defineNamespace({
     "org.projectOverview.customizeStatsAria": "Customize stats",
     // "Customize" → common.customize (identical text)
     "org.projectOverview.showStats": "Show stats",
-    "org.projectOverview.aiDrafted": "AI Drafted",
+    "org.projectOverview.aiDrafted": "AI drafted",
     "org.projectOverview.aiDraftedTooltip":
       "Cells drafted by AI (via 'Translate all') that have not yet been human-edited or validated. A human edit or validation will move them into the Translated or Validated counts. Only cells committed after this marker was introduced are tracked — earlier AI commits are indistinguishable from human edits.",
     "org.projectOverview.hasAudioTooltip":
-      "Percentage of cells that have at least one audio recording attached. This is coverage, not validation — see 'Audio Validated' for review status.",
-    "org.projectOverview.audioValidated": "Audio Validated",
+      "Percentage of cells that have at least one audio recording attached. This is coverage, not " +
+      "validation — see 'Audio validated' for review status.",
+    "org.projectOverview.audioValidated": "Audio validated",
     "org.projectOverview.audioValidatedTooltip":
       "Share of every cell whose selected recording has been validated. Counted against every cell, the same way as Validated, so it agrees with the Plan below.",
     "org.projectOverview.audioValidatedOfRecorded":
       "Of the audio recorded, {percent}% is validated.",
-    "org.projectOverview.crossLaneTooltip": "Cross-language stat — not broken down per language.",
+    "org.projectOverview.crossLaneTooltip":
+      "Across all language lanes — not broken down per language lane.",
     // AQU-1954: a language tab whose language is off and has no recordings.
     "org.projectOverview.laneNoAudioTooltip":
-      "This language doesn't record audio. Turn on Records audio for it in Project settings → Languages.",
+      "This language lane doesn't deliver audio. Choose Audio, or Text and audio, under Delivers in " +
+      "Project settings → Languages.",
     "org.projectOverview.cellsSuffix": "cells",
     "org.projectOverview.laneDefaultFallback": "Default",
     "org.projectOverview.legendTranslated": "translated",
@@ -580,15 +592,15 @@ export const org = defineNamespace({
       one: "+{count} more file — show all",
       other: "+{count} more files — show all",
     }),
-    "org.projectOverview.deadlineHeading": "Deadline",
-    "org.projectOverview.noDeadlineSet": "No deadline set",
+    "org.projectOverview.deadlineHeading": "Project deadline",
+    "org.projectOverview.noDeadlineSet": "No project deadline set",
     "org.projectOverview.change": "Change",
-    "org.projectOverview.setDeadline": "Set deadline",
+    "org.projectOverview.setDeadline": "Set project deadline",
     "org.projectOverview.changeDeadlineDialogTitle": "Change project deadline",
     "org.projectOverview.setDeadlineDialogTitle": "Set project deadline",
     "org.projectOverview.deadlineDialogDescription":
-      "The deadline is inclusive through the end of that day anywhere on Earth.",
-    "org.projectOverview.deadlineDateLabel": "Deadline date",
+      "The project deadline runs to the end of that day anywhere on Earth.",
+    "org.projectOverview.deadlineDateLabel": "Date",
     "org.projectOverview.deadlineDatePlaceholder": "July 03, 2026",
     "org.projectOverview.projectManagerHeading": "Project manager",
     "org.projectOverview.unassigned": "Unassigned",
@@ -605,13 +617,13 @@ export const org = defineNamespace({
     "org.projectOverview.selectMemberPlaceholder": "Select a member",
     "org.projectOverview.teamVisibilityDescription":
       "Who can see each teammate's assignment progress on this project.",
-    "org.projectOverview.membersVisibilityDescription":
-      "Who can see the member roster on this project.",
+    "org.projectOverview.membersVisibilityDescription": "Who can see the member list on this project.",
     // AQU-1779: under the Team card's "Who can see this section" picker when
     // the lower options are disabled. The Team card lists people, so it can
     // never be more open than the member list.
     "org.projectOverview.teamVisibilityRosterFloorHint":
-      "This card lists members, and the member list is set to “{floor}”. To go lower, lower it on the Members card or in Settings → Security first.",
+      "This card lists members, and the member list is set to “{floor}”. To go lower, lower it on " +
+      "the Members card or in Organization settings → Security first.",
     // AQU-1771: amber line under the Team card's visibility badge right after a
     // Members change moved the Team card's level with it.
     "org.projectOverview.teamVisibilityAdjusted": "Visibility adjusted",
@@ -621,7 +633,8 @@ export const org = defineNamespace({
     // AQU-1771: under a project's Team / Members visibility picker when the
     // options below the organization's setting are greyed out.
     "org.projectOverview.visibilityOrgFloorHint":
-      "A project can only be stricter than its organization, which is set to “{floor}”. To go lower, an org owner lowers it in Settings → Security first.",
+      "A project can only be stricter than its organization, which is set to “{floor}”. To go lower, " +
+      "an org owner lowers it in Organization settings → Security first.",
     // AQU-1771: a toast when a project's Team / Members visibility change was not saved.
     "org.projectOverview.visibilitySaveFailed": "Couldn't change who can see this section",
     "org.projectOverview.visibilitySaveOffline": "You're offline. Reconnect, then change it again.",
@@ -689,26 +702,28 @@ export const org = defineNamespace({
     // -- OrgSettingsExport: who may export a project's deliverables --
     "org.exportSettings.deliverablesGroupLabel": "Deliverables",
     "org.exportSettings.whoCanExportLabel": "Who can export",
-    "org.exportSettings.whoCanExportDescription":
-      "Lower the floor to let translators export their own work; raise it to " +
-      "keep deliverables with leads. Client-side formats (CSV, TSV) operate on " +
-      "already-loaded cells and can't be enforced here.",
+    // Sam, Oct 29: one short line under each setting; the rest behind its (i).
+    "org.exportSettings.whoCanExportSummary": "The lowest role that can export a project's deliverables.",
+    "org.exportSettings.whoCanExportInfo":
+      "Lower it to let translators export their own work, or raise it to keep deliverables " +
+      "with leads. CSV and TSV files are made in the browser from cells already loaded, so " +
+      "this setting can't block them.",
     "org.exportSettings.ownersOnlyPolicyNote": "Only org owners can change the export permission policy.",
-    "org.exportSettings.roleOptionPlain": "{role} ({level})",
-    "org.exportSettings.roleOptionViewer": "{role} ({level}) — anyone with project access",
-    "org.exportSettings.roleOptionMaintainer": "{role} ({level}) — default",
-    "org.exportSettings.roleOptionOwner": "{role} ({level}) — most restrictive",
+    "org.exportSettings.roleOptionPlain": "{role}",
+    "org.exportSettings.roleOptionViewer": "{role} — anyone with project access",
+    "org.exportSettings.roleOptionMaintainer": "{role} — default",
+    "org.exportSettings.roleOptionOwner": "{role} — most restrictive",
     "org.exportSettings.saveFailedFallback": "Couldn't save the export permission.",
 
     // -- OrgSettingsSecurity › EgressAccessSection: who may use Data egress (AQU-907) --
     "org.egressSettings.whoCanEgressLabel": "Who can use Data egress",
-    "org.egressSettings.whoCanEgressDescription":
-      "Minimum role that can open the organization-wide Data egress page and " +
-      "download everything as one archive. Owners always can; each project's " +
-      "export permission still applies to what ends up in the archive.",
+    "org.egressSettings.whoCanEgressSummary": "The lowest role that can download every project as one archive.",
+    "org.egressSettings.whoCanEgressInfo":
+      "That happens on the Data egress page. Owners can always use it, and each project's " +
+      "export setting still decides what goes into the archive.",
     "org.egressSettings.ownersOnlyPolicyNote": "Only org owners can change who can use Data egress.",
-    "org.egressSettings.roleOptionViewer": "{role} ({level}) — anyone with project access",
-    "org.egressSettings.roleOptionOwner": "{role} ({level}) — default",
+    "org.egressSettings.roleOptionViewer": "{role} — anyone with project access",
+    "org.egressSettings.roleOptionOwner": "{role} — default",
     "org.egressSettings.saveFailedFallback": "Couldn't save the egress permission.",
 
     // -- AddLanguagePopover: "+ Language" quick action on an OrgHome project row --
@@ -802,7 +817,7 @@ export const org = defineNamespace({
       "Add someone to specific projects without granting org-wide access.",
     "org.membersPage.orgPage.addToProjectsButton": "Add to projects",
     "org.membersPage.orgPage.tabsAriaLabel": "Members views",
-    "org.membersPage.orgPage.roster": "Roster",
+    "org.membersPage.orgPage.roster": "Member list",
     "org.membersPage.orgPage.matrixTab": "Matrix",
     "org.membersPage.orgPage.inviteSectionTitle": "Invite a teammate by email",
     "org.membersPage.orgPage.inviteSectionDescription":
@@ -813,7 +828,8 @@ export const org = defineNamespace({
     "org.membersPage.orgPage.projectAccessTitle": "Project access",
     "org.membersPage.orgPage.projectAccessDescription": "Expand a member to see their per-project roles.",
     "org.membersPage.orgPage.matrixHint":
-      "Every member × every project you can see, at a glance. Click a cell to change a role; hover a row to load its lane scopes.",
+      "Every member × every project you can see, at a glance. Click a cell to change a role; hover a " +
+      "row to load its language lane scopes.",
     "org.membersPage.orgPage.pendingInvitesDescription":
       "Share-link invitations that haven't been redeemed yet. Revoke to cancel.",
     "org.membersPage.orgPage.invitedByLabel": "by {username}",
@@ -888,7 +904,7 @@ export const org = defineNamespace({
     "org.overviewLaneTable.noActivityYet": "No activity yet",
     "org.overviewLaneTable.openAction": "Open",
     "org.overviewLaneTable.staffAction": "Staff…",
-    "org.overviewLaneTable.addLanguageAction": "Add language",
+    "org.overviewLaneTable.addLanguageAction": "Add language lane",
     "org.overviewLaneTable.archivedGroup": "Archived ({count})",
     "org.overviewLaneTable.archivedBadge": "Archived",
 
@@ -931,7 +947,8 @@ export const org = defineNamespace({
     // AQU-1994: the lane field offers only lanes someone on the project is on.
     // When that is none, there is nothing truthful to offer.
     "org.assignWork.noStaffedLanes":
-      "No one on this project is on any of its languages yet, so there is no language to assign work in. Staff someone on a language first.",
+      "No one on this project is on any of its language lanes yet, so there is no language lane to " +
+      "assign work in. Staff someone on a language lane first.",
     // AQU-1308: the assignee picker must never render an empty "Select
     // member…" when the roster fetch failed — say which failure it was.
     "org.assignWork.rosterHiddenError":
@@ -1010,7 +1027,8 @@ export const org = defineNamespace({
       "A Maintainer or Owner org role that applies to every project in this org. Contributor and below do not get project access from org membership — add them to a project or team instead.",
     "org.accessModelLegend.creator.label": "Creator",
     "org.accessModelLegend.creator.description":
-      "Owner role is permanent until project ownership is transferred. Manage in the project's Settings → Share.",
+      "Owner role is permanent until project ownership is transferred. Manage it in Project settings " +
+      "→ Members.",
 
     // -- JoinOrgPage: org-invite landing page (/join-org/:token) --
     "org.joinOrgPage.organizationLine": "Organization: {name}",
@@ -1054,25 +1072,28 @@ export const org = defineNamespace({
     "org.memberAccessDrillDown.pathOrgLevel": "org-level · {role}",
 
     // -- MemberLaneScopeEditor: freeform lane/file scope editor popover (matrix) --
-    "org.memberLaneScopeEditor.editScopesAriaLabel": "Edit {username}'s lane scopes on this project",
+    "org.memberLaneScopeEditor.editScopesAriaLabel":
+      "Edit {username}'s language lane scopes on this project",
     "org.memberLaneScopeEditor.scopesHeading": "{username}'s scopes",
     "org.memberLaneScopeEditor.unscopedFullAccess": "Unscoped — full access",
-    "org.memberLaneScopeEditor.languagesLegend": "Languages they can work in",
+    "org.memberLaneScopeEditor.languagesLegend": "Language lanes they can work in",
     "org.memberLaneScopeEditor.mainLanguageFallback": "Main language",
-    "org.memberLaneScopeEditor.unknownLane": "{lane} (not a language in this project)",
-    "org.memberLaneScopeEditor.laneCodePlaceholder": "Lane code (e.g. es)",
-    "org.memberLaneScopeEditor.newLaneCodeAriaLabel": "New lane code",
+    "org.memberLaneScopeEditor.unknownLane": "{lane} (not a language lane in this project)",
+    "org.memberLaneScopeEditor.laneCodePlaceholder": "Language lane code (e.g. es)",
+    "org.memberLaneScopeEditor.newLaneCodeAriaLabel": "New language lane code",
     // "Add" → common.add (identical text)
     "org.memberLaneScopeEditor.saveScopesButton": "Save scopes",
     // AQU-1783: the read wall decides from lane GRANTS, not from these scopes,
     // so the inspector reports the grants rather than claiming "full access".
-    "org.memberLaneScopeEditor.grantsLegend": "Lanes they can read",
+    "org.memberLaneScopeEditor.grantsLegend": "Language lanes they can read",
     "org.memberLaneScopeEditor.laneNoAccess": "no access",
     "org.memberLaneScopeEditor.grantGapWarning":
-      "This member is unscoped, but has no grant for every lane. The lanes marked \u201cno access\u201d read as empty for them.",
-    "org.memberLaneScopeEditor.grantAllButton": "Grant all current lanes",
+      "This member is unscoped, but has no grant for every language lane. The language lanes marked " +
+      "“no access” read as empty for them.",
+    "org.memberLaneScopeEditor.grantAllButton": "Grant all current language lanes",
     "org.memberLaneScopeEditor.grantAllHint": "Takes effect for them within 15 minutes, or on their next sign-in.",
-    "org.memberLaneScopeEditor.visibleByRole": "Every lane is visible to this member through their role.",
+    "org.memberLaneScopeEditor.visibleByRole":
+      "Every language lane is visible to this member through their role.",
 
     // -- MemberMultiAddRow: shared staged-multi-add affordance (AQU-734) --
     "org.memberMultiAddRow.peopleToAddAriaLabel": "People to add",
@@ -1086,7 +1107,9 @@ export const org = defineNamespace({
     "org.membersMatrixCellEditor.removeFromProject": "Remove from project",
     "org.membersMatrixCellEditor.creatorGrantHeading": "Creator grant",
     "org.membersMatrixCellEditor.creatorGrantDescription":
-      "This person created the project. Their Owner role is permanent until project ownership is transferred. The effective role here is Owner (max-wins). Manage in the project's Settings → Share.",
+      "This person created the project. Their Owner role is permanent until project ownership is " +
+      "transferred. The effective role here is Owner (max-wins). Manage it in Project settings → " +
+      "Members.",
     "org.membersMatrixCellEditor.viaGroupHeading": "Effective role: via group (max-wins)",
     "org.membersMatrixCellEditor.viaGroupDescription":
       "This role comes from a group attached to this project. Edit the group's membership to change or remove this grant. To override for this project only, add a direct grant below.",
@@ -1117,8 +1140,8 @@ export const org = defineNamespace({
     // AQU-2054: a project lead can be limited to lanes, and can grant only
     // the lanes they hold. Someone who already has every lane stays read-only
     // for that caller, because changing them would remove other languages.
-    "org.membersPanel.lanesLegend": "Lanes",
-    "org.membersPanel.laneCheckboxAriaLabel": "Lane {lane}",
+    "org.membersPanel.lanesLegend": "Language lanes",
+    "org.membersPanel.laneCheckboxAriaLabel": "Language lane {lane}",
     // "Files" fieldset legend → nav.dock.filesTab (identical text)
     // File checkbox aria-label → comments.scope.file (identical "File {file}" text)
 
@@ -1165,24 +1188,28 @@ export const org = defineNamespace({
     // AQU-2048: {member} names both groups the search actually covers. Someone
     // in neither is still a project invite (searchScopeNote + inviteToProjectLink).
     "org.staffLanePopover.orgMemberPhrase": "org member or someone already invited",
-    "org.staffLanePopover.addOrgMemberDescription": "Add an {member} to this project, scoped to this lane.",
+    "org.staffLanePopover.addOrgMemberDescription":
+      "Add an {member} to this project, scoped to this language lane.",
     "org.staffLanePopover.searchPlaceholder": "Search org members and project invitees",
     // AQU-731: the four ways the org roster comes back unusable, each named
     // rather than collapsed into "no one in your organization yet".
     "org.staffLanePopover.rosterLoading": "Loading your organization…",
     "org.staffLanePopover.rosterNoOrg":
-      "No organization is selected, so there is no roster to search. Invite the person to the project instead.",
+      "No organization is selected, so there is no member list to search. Invite the person to the " +
+      "project instead.",
     "org.staffLanePopover.rosterHidden":
       "Your organization hides its member list. Invite the person to the project instead.",
     "org.staffLanePopover.rosterNoAccess":
-      "You can staff this lane, but you can’t see this organization’s member list. Invite the person to the project instead.",
+      "You can staff this language lane, but you can’t see this organization’s member list. Invite " +
+      "the person to the project instead.",
     // Same two blocks, but only when people already on the project are listed
     // under the note. "Invite instead" would be false there — those people
     // are the list. Anyone in neither group still uses the footer invite.
     "org.staffLanePopover.rosterHiddenWithInvitees":
       "Your organization hides its member list. People already on this project are listed below.",
     "org.staffLanePopover.rosterNoAccessWithInvitees":
-      "You can staff this lane, but you can’t see this organization’s member list. People already on this project are listed below.",
+      "You can staff this language lane, but you can’t see this organization’s member list. People " +
+      "already on this project are listed below.",
     "org.staffLanePopover.rosterLoadFailed": "Couldn’t load your organization’s members.",
     "org.staffLanePopover.rosterEmpty": "No one in your organization yet.",
     "org.staffLanePopover.rosterNoMatch": "No org members or project invitees match.",
@@ -1194,31 +1221,39 @@ export const org = defineNamespace({
     // AQU-1998: the popover's unstaff half — who is on this lane now, and the
     // guard that refuses the last one. "Remove" itself reuses
     // org.membersPage.remove (identical text).
-    "org.staffLanePopover.staffedHeading": "On this lane",
-    "org.staffLanePopover.staffedEmpty": "No one is staffed on this lane yet.",
+    "org.staffLanePopover.staffedHeading": "On this language lane",
+    "org.staffLanePopover.staffedEmpty": "No one is staffed on this language lane yet.",
     "org.staffLanePopover.removeFromLaneAriaLabel": "Remove {name} from {lane}",
     "org.staffLanePopover.lastLaneNote":
-      "This is {name}’s only language. Taking it away here would leave them with no language limit at all — which the project reads as every language, not none — so it would widen their access instead of narrowing it. To take {name} off the project, go to:",
-    "org.staffLanePopover.teamMembersLink": "Project Settings → Team members",
+      "This is {name}’s only language lane. Taking it away here would leave them with no language " +
+      "lane limit at all — which the project reads as every language lane, not none — so it would " +
+      "widen their access instead of narrowing it. To take {name} off the project, go to:",
+    "org.staffLanePopover.teamMembersLink": "Project settings → Members",
     "org.staffLanePopover.lastLaneRefused":
-      "This is now their only language. Removing it would leave them with no language limit at all — which means every language, not none — so nothing was saved.",
+      "This is now their only language lane. Removing it would leave them with no language lane " +
+      "limit at all — which means every language lane, not none — so nothing was saved.",
     // AQU-1999: the decided answer for the two cases AQU-1998 left open — the
     // last lane stays blocked (the note above), and open assignments in the
     // lane are closed with the removal, after a confirmation that says how
     // many. A lane the person holds no open assignment in is removed in one
     // press, with no extra step.
     "org.staffLanePopover.removeClosesAssignments": plural({
-      one: "{name} has {count} open assignment in {lane}. Removing them from this language closes it. Work they have already finished stays as it is.",
-      other: "{name} has {count} open assignments in {lane}. Removing them from this language closes them. Work they have already finished stays as it is.",
+      one:
+        "{name} has {count} open assignment in {lane}. Removing them from this language lane closes " +
+        "it. Work they have already finished stays as it is.",
+      other:
+        "{name} has {count} open assignments in {lane}. Removing them from this language lane closes " +
+        "them. Work they have already finished stays as it is.",
     }),
     "org.staffLanePopover.removeClosesAssignmentsConfirm": "Remove and close",
     "org.staffLanePopover.assignmentCheckFailed":
-      "Couldn’t check what {name} has open in this language, so nothing was removed. Try again.",
+      "Couldn’t check what {name} has open in this language lane, so nothing was removed. Try again.",
     "org.staffLanePopover.addToLaneButton": "Add to {lane}",
     // AQU-2027: picking someone who is maintainer or above. The server refuses
     // to lane-limit them, because they see every language already.
     "org.staffLanePopover.alreadySeesEveryLanguage":
-      "{name} is a Maintainer or above on this project, so they already see every language. No lane limit is needed.",
+      "{name} is a Maintainer or above on this project, so they already see every language lane. No " +
+      "language lane limit is needed.",
 
     // AQU-1030: one sentence for the grant the form will make, shared by every
     // add/invite submit. {scope} is one of the scope.* phrases below.
@@ -1229,14 +1264,14 @@ export const org = defineNamespace({
     "org.grantScope.sentence.link": "Anyone with this link will join as a {role} {scope}",
     "org.grantScope.sentence.unset": "They will join as a {role} {scope}",
     "org.grantScope.scope.organization": "of the whole organization — every project",
-    "org.grantScope.scope.projectAllLanes": "on {project} — every lane",
+    "org.grantScope.scope.projectAllLanes": "on {project} — every language lane",
     "org.grantScope.scope.project": "on {project}",
-    "org.grantScope.scope.laneOnly": "on {project}, {lane} lane only",
-    "org.grantScope.scope.lanesOnly": "on {project}, {lanes} lanes only",
+    "org.grantScope.scope.laneOnly": "on {project}, {lane} language lane only",
+    "org.grantScope.scope.lanesOnly": "on {project}, {lanes} language lanes only",
     "org.grantScope.echo.organization": "every project",
-    "org.grantScope.echo.allLanes": "every lane",
-    "org.grantScope.echo.laneOnly": "{lane} lane only",
-    "org.grantScope.echo.lanesOnly": "{lanes} lanes only",
+    "org.grantScope.echo.allLanes": "every language lane",
+    "org.grantScope.echo.laneOnly": "{lane} language lane only",
+    "org.grantScope.echo.lanesOnly": "{lanes} language lanes only",
     "org.grantScope.button": "{action} — {scope}",
     "org.grantScope.thisProject": "this project",
 
@@ -1422,13 +1457,13 @@ export const org = defineNamespace({
     "org.projectOverview.chapterAbbrevLabel": "Ch {chapter}",
     // "Project settings" aria-label → editor.navTitle.projectSettings (identical text)
     "org.projectOverview.archiveDialogTitle": "Archive project",
-    "org.projectOverview.filterProgressByLanguageAriaLabel": "Filter progress by language",
+    "org.projectOverview.filterProgressByLanguageAriaLabel": "Filter progress by language lane",
     // ── AQU-1092…1098: the plan board ──────────────────────────────────
     // Copy is deliberately unit-agnostic. A planning unit is a Bible book in
     // one project, a dub episode in another, a document in a third — so
     // nothing here may say "books".
     "org.projectOverview.plan.heading": "Plan",
-    "org.projectOverview.plan.laneMenuAria": "Language shown: {language}. Choose another.",
+    "org.projectOverview.plan.laneMenuAria": "Language lane shown: {language}. Choose another.",
     "org.projectOverview.plan.regionAria": "Planning units, grouped by status",
     "org.projectOverview.plan.summaryDoneLabel": "of {total} done",
     "org.projectOverview.plan.summaryOverdueLabel": plural({ one: "overdue", other: "overdue" }),
@@ -1443,9 +1478,11 @@ export const org = defineNamespace({
     // never resolve, so it has to say WHY there is nothing here.
     "org.projectOverview.archived.title": "This project is archived",
     "org.projectOverview.archived.bodyCanRestore":
-      "Its plan and team are hidden while it sits in Trash. Nothing has been deleted — choose Restore above to bring it back.",
+      "Its plan and team are hidden while it is archived. Nothing has been deleted — choose Restore " +
+      "above to bring it back.",
     "org.projectOverview.archived.bodyAskManager":
-      "Its plan and team are hidden while it sits in Trash. Nothing has been deleted — a maintainer can restore it.",
+      "Its plan and team are hidden while it is archived. Nothing has been deleted — a maintainer " +
+      "can restore it.",
     "org.projectOverview.plan.emptyTitle": "Nothing to plan yet",
     "org.projectOverview.plan.loading": "Loading the plan\u2026",
     "org.projectOverview.plan.saveFailed": "That change could not be saved, so it has been undone. Try again.",
@@ -2451,9 +2488,13 @@ export const org = defineNamespace({
         description:
           "Label for the dropdown that sets the lowest team role allowed to export files from any project in this organization, and also the name read aloud for that dropdown by screen readers. A question-shaped noun phrase with no question mark — it names the choice rather than asking one, so avoid turning it into a full question.",
       },
-      "org.exportSettings.whoCanExportDescription": {
+      "org.exportSettings.whoCanExportSummary": {
         description:
-          "Explanatory paragraph under the export-permission dropdown on an organization's export settings page, addressed to the administrator making the choice. Two sentences: the first says what moving the minimum role down or up achieves, the second warns that two spreadsheet formats are produced entirely inside the reader's own browser and so cannot be blocked by this setting. The two abbreviations in brackets are file-format names and stay exactly as they are.",
+          "The one short line always shown under 'Who can export' on the organization's Security settings page, beside the dropdown of roles. It says the chosen role and every role above it can export the finished files of any project in this organization. Keep it to one short line.",
+      },
+      "org.exportSettings.whoCanExportInfo": {
+        description:
+          "The longer explanation that opens beneath 'Who can export' when the reader clicks the small (i) beside its title, addressed to the administrator making the choice. Two sentences: the first says what moving the role down or up achieves, the second warns that two spreadsheet formats are produced entirely inside the reader's own browser and so cannot be blocked by this setting. CSV and TSV are file-format names and stay exactly as they are.",
       },
       "org.exportSettings.ownersOnlyPolicyNote": {
         description:
@@ -2461,11 +2502,9 @@ export const org = defineNamespace({
       },
       "org.exportSettings.roleOptionPlain": {
         description:
-          "One entry in the export-permission dropdown, for the two roles that need no further explanation (contributor and project lead). Just the role's own name followed by its numeric level in brackets — the level is shown so administrators can see the ladder these roles sit on.",
+          "One entry in the export-permission dropdown, for the two roles that need no further explanation (contributor and project lead). Just the role's own name, with no level number (AQU-2261).",
         placeholders: {
           role: "The role's already-translated display name, resolved from common.role.* — do not translate it again here.",
-          level:
-            "The role's numeric level (100–700), a fixed permission code shared with the server. Keep it in Western digits and do not localize the numerals.",
         },
       },
       "org.exportSettings.roleOptionViewer": {
@@ -2473,8 +2512,6 @@ export const org = defineNamespace({
           "The lowest entry in the export-permission dropdown. Same shape as org.exportSettings.roleOptionPlain, with a note after the dash saying that choosing it lets everyone who can open the project export from it — i.e. the most permissive setting.",
         placeholders: {
           role: "The role's already-translated display name, resolved from common.role.* — do not translate it again here.",
-          level:
-            "The role's numeric level (100–700), a fixed permission code shared with the server. Keep it in Western digits and do not localize the numerals.",
         },
       },
       "org.exportSettings.roleOptionMaintainer": {
@@ -2482,8 +2519,6 @@ export const org = defineNamespace({
           "Entry in the export-permission dropdown for the level a new organization starts on. Same shape as org.exportSettings.roleOptionPlain, with a one-word note after the dash marking it as the value in force unless somebody changes it.",
         placeholders: {
           role: "The role's already-translated display name, resolved from common.role.* — do not translate it again here.",
-          level:
-            "The role's numeric level (100–700), a fixed permission code shared with the server. Keep it in Western digits and do not localize the numerals.",
         },
       },
       "org.exportSettings.roleOptionOwner": {
@@ -2491,8 +2526,6 @@ export const org = defineNamespace({
           "The highest entry in the export-permission dropdown. Same shape as org.exportSettings.roleOptionPlain, with a note after the dash saying this choice narrows exporting to the fewest people — the opposite end of the ladder from org.exportSettings.roleOptionViewer.",
         placeholders: {
           role: "The role's already-translated display name, resolved from common.role.* — do not translate it again here.",
-          level:
-            "The role's numeric level (100–700), a fixed permission code shared with the server. Keep it in Western digits and do not localize the numerals.",
         },
       },
       "org.orgSettings.noSessionError": {
@@ -2510,9 +2543,13 @@ export const org = defineNamespace({
         description:
           "Label for the dropdown that sets the lowest organization role allowed to open the Data egress page (the organization-wide bulk download), and also the name read aloud for that dropdown by screen readers. A question-shaped noun phrase with no question mark — it names the choice rather than asking one. 'Data egress' is the page's own title (org.egress.title) and must match it.",
       },
-      "org.egressSettings.whoCanEgressDescription": {
+      "org.egressSettings.whoCanEgressSummary": {
         description:
-          "Explanatory paragraph under the Data-egress permission dropdown, addressed to the administrator making the choice. Two statements: owners always have access regardless of the chosen floor, and each project's separate export permission still filters what the archive can contain.",
+          "The one short line always shown under 'Who can use Data egress' on the organization's Security settings page, beside the dropdown of roles. It says the chosen role and every role above it can download all of this organization's projects together as a single archive file. Keep it to one short line.",
+      },
+      "org.egressSettings.whoCanEgressInfo": {
+        description:
+          "The longer explanation that opens beneath 'Who can use Data egress' when the reader clicks the small (i) beside its title. It names the page this setting opens ('Data egress' is that page's own title, org.egress.title, and must match it), then makes two statements: owners always have access whatever role is chosen, and each project's separate export setting still decides what the archive can contain.",
       },
       "org.egressSettings.ownersOnlyPolicyNote": {
         description:
@@ -2523,8 +2560,6 @@ export const org = defineNamespace({
           "The lowest entry in the Data-egress permission dropdown. Same shape as org.exportSettings.roleOptionPlain, with a note after the dash saying that choosing it lets everyone with project access use Data egress — the most permissive setting.",
         placeholders: {
           role: "The role's already-translated display name, resolved from common.role.* — do not translate it again here.",
-          level:
-            "The role's numeric level (100–700), a fixed permission code shared with the server. Keep it in Western digits and do not localize the numerals.",
         },
       },
       "org.egressSettings.roleOptionOwner": {
@@ -2532,8 +2567,6 @@ export const org = defineNamespace({
           "The highest entry in the Data-egress permission dropdown. Same shape as org.exportSettings.roleOptionPlain, with a one-word note after the dash marking it as the value in force unless somebody changes it — for this setting the owner level is the default, unlike the export dropdown where maintainer is.",
         placeholders: {
           role: "The role's already-translated display name, resolved from common.role.* — do not translate it again here.",
-          level:
-            "The role's numeric level (100–700), a fixed permission code shared with the server. Keep it in Western digits and do not localize the numerals.",
         },
       },
       "org.egressSettings.saveFailedFallback": {

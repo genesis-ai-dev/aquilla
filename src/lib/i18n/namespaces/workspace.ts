@@ -110,7 +110,7 @@ export const workspace = defineNamespace({
     "workspace.sidebar.collapse": "Collapse sidebar",
     "workspace.readOnlyGitBanner": "Read-only — imported from git. Push is coming in Phase 2.",
     // AQU-1902: edits wait for the project's languages so none lands on the wrong lane.
-    "workspace.loadingLanguagesBanner": "Loading languages… editing starts in a moment.",
+    "workspace.loadingLanguagesBanner": "Loading language lanes… editing starts in a moment.",
     "workspace.staleSibling.viewInHistory": "View in history",
     // AQU-1340: a failed concepts read compiles to an EMPTY terminology rule
     // set, which silently switches off every term check in the editor. Say so
@@ -149,7 +149,8 @@ export const workspace = defineNamespace({
     // same sentence-case label for the same underlying value; the create dialog
     // already reuses projectSettings.create.* for the rest of its fields.
     "workspace.createDialog.targetChipsHint":
-      "The first language is the project's primary target; each one you add below becomes its own lane.",
+      "The first language is the project's primary target; each one you add below becomes its own " +
+      "language lane.",
 
     // -- UsernameTypeahead --
     "workspace.typeahead.usernameModeTooltip": "Invite an existing Aquilla user",
@@ -190,7 +191,7 @@ export const workspace = defineNamespace({
     "workspace.metrics.emptyNoCloud.title": "Cloud sync required",
     "workspace.metrics.emptyNoCloud.description":
       "Metrics require a cloud-synced project. Sync this project to see AI post-edit statistics.",
-    "workspace.metrics.cardTitle": "Approved AI Review Effort",
+    "workspace.metrics.cardTitle": "Approved AI review effort",
     "workspace.metrics.cardSubtitle":
       "Edit distance and elapsed time between machine drafts and final approved text.",
     "workspace.metrics.nedScale": "0% = accepted as-is · 100% = completely replaced.",
@@ -227,7 +228,7 @@ export const workspace = defineNamespace({
     "workspace.aiConsent.downloadProgressNote":
       "While the model downloads, you'll see a progress percentage on the cell. The page won't reload.",
     "workspace.aiConsent.oncePerBrowser": "You'll only see this prompt once per browser.",
-    "workspace.aiConsent.enableAllButton": "Enable all local models",
+    "workspace.aiConsent.enableAllButton": "Enable all on-device AI models",
     "workspace.aiConsent.justThisButton": "Just {model}",
     "workspace.aiConsent.sizeNote":
       "One-time download of about {size} MB — it stays on this device.",
@@ -327,6 +328,9 @@ export const workspace = defineNamespace({
     "workspace.alignment.rejectAriaLabel":
       "Reject alignment: {srcToken} does not translate as {tgtToken}. This penalizes the glosser " +
       "suggestion.",
+    // AQU-2261: the ✓ and ✕ hovers' own words, not common.confirm / agent.reject.
+    "workspace.alignment.confirmTooltip": "Confirm this alignment",
+    "workspace.alignment.rejectTooltip": "Reject this alignment",
     "workspace.alignment.contributorRequired":
       "Contributor+ required to confirm or reject alignments",
 
@@ -380,6 +384,7 @@ export const workspace = defineNamespace({
     // -- StatusBar --
     "workspace.statusBar.summary": "{total} cells · {translated} translated {pct}",
     "workspace.statusBar.healthAria": "Project health: {percent}%",
+    "workspace.statusBar.healthTitle": "Project health",
     "workspace.statusBar.unvalidatedBadge": "{count} unvalidated",
     "workspace.statusBar.audioSummary": "{total} lines · {translated} recorded {pct}",
     "workspace.statusBar.unvalidatedAudioBadge": "{count} recorded, not validated",
@@ -392,6 +397,8 @@ export const workspace = defineNamespace({
 
     // -- UpdateBanner --
     "workspace.updateBanner.updateAvailable": "Update available",
+    "workspace.updateIndicator.short": "Update",
+    "workspace.updateIndicator.tooltip": "A newer build is deployed. Click to reload now, or it loads the next time you leave the editor.",
 
     // -- ProjectWorkspace: legacy-measure batch toast (pre-merge takes with
     // no captured duration; "Measure all" runs a fix-it batch) --
@@ -1533,6 +1540,18 @@ export const workspace = defineNamespace({
           tgtToken: "The target-language word/token (the translator's own text) — not translated.",
         },
       },
+      "workspace.alignment.confirmTooltip": {
+        description:
+          "Hover name of the ✓ button on a word-alignment pair in the alignment panel. " +
+          "Confirming tells the glosser the pairing is right.",
+        maxLength: 32,
+      },
+      "workspace.alignment.rejectTooltip": {
+        description:
+          "Hover name of the ✕ button on a word-alignment pair in the alignment panel. " +
+          "Rejecting tells the glosser the pairing is wrong.",
+        maxLength: 32,
+      },
       "workspace.alignment.rejectAriaLabel": {
         description:
           "Accessible name for the same X reject button as workspace.alignment." +
@@ -1704,6 +1723,12 @@ export const workspace = defineNamespace({
           "A click on it opens the cells that need attention most.",
         placeholders: { percent: "The project's health score, 0 to 100." },
       },
+      "workspace.statusBar.healthTitle": {
+        description:
+          "Title of the card the editor status bar's health ring opens on a click, beside the " +
+          "project's health percentage. The card lists the cells that need attention most.",
+        maxLength: 28,
+      },
       "workspace.statusBar.summary": {
         description:
           "Main status line in the bottom footer bar, reporting overall " +
@@ -1777,9 +1802,23 @@ export const workspace = defineNamespace({
 
       "workspace.updateBanner.updateAvailable": {
         description:
-          "Floating pill shown when a new build of the app has been " +
-          "deployed; clicking it reloads the page to pick it up.",
+          "Accessible name of the small mark next to the version string " +
+          "shown when a newer build of the app has been deployed; clicking " +
+          "it reloads the page to pick it up.",
         maxLength: 24,
+      },
+      "workspace.updateIndicator.short": {
+        description:
+          "One-word visible label of that mark, next to a pulsing dot in " +
+          "the version footer. Very little room: keep it short.",
+        maxLength: 12,
+      },
+      "workspace.updateIndicator.tooltip": {
+        description:
+          "Tooltip of the update mark. Says a newer build exists, that a " +
+          "click reloads now, and that otherwise it loads when the user " +
+          "leaves the editor.",
+        maxLength: 140,
       },
       "workspace.legacyMeasure.partialSuccessToast": {
         description:

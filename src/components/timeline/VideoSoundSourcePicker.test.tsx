@@ -4,21 +4,21 @@ import { fireEvent, render, screen } from "@testing-library/react"
 import { VideoSoundSourcePicker } from "./VideoSoundSourcePicker"
 
 // AQU-1565 follow-up. WHY: this is the ONE place a person can move a YouTube
-// file off the video's own sound, so it has to say which sound is on, name the
+// file off the film's own sound, so it has to say which sound is on, name the
 // recording, and report a change exactly once.
 
 describe("VideoSoundSourcePicker", () => {
   it("names the current sound on the trigger", () => {
     render(<VideoSoundSourcePicker value="video" recordingName="episode.wav" onChange={() => {}} />)
     expect(screen.getByTestId("video-sound-source-picker"))
-      .toHaveAttribute("aria-label", "Sound: The video's own sound")
+      .toHaveAttribute("aria-label", "Sound: The film's own sound")
   })
 
   // Sam, Oct 5: a speaker icon read as a mute button. The trigger says, in
   // words, which sound is on, and the menu says what it chooses.
   it("is a text pill naming the choice, and its menu is headed Playback sound", async () => {
     const { rerender } = render(<VideoSoundSourcePicker value="video" recordingName="episode.wav" onChange={() => {}} />)
-    expect(screen.getByTestId("video-sound-source-picker")).toHaveTextContent(/^Sound: Video$/)
+    expect(screen.getByTestId("video-sound-source-picker")).toHaveTextContent(/^Sound: Film$/)
     rerender(<VideoSoundSourcePicker value="recording" recordingName="episode.wav" onChange={() => {}} />)
     expect(screen.getByTestId("video-sound-source-picker")).toHaveTextContent(/^Sound: Recording$/)
     fireEvent.click(screen.getByTestId("video-sound-source-picker"))

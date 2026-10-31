@@ -126,3 +126,7 @@ perf-report/
 
 # Fault-injection state for `pnpm tauri:dev:mitm` — per-session, deleted on clean shutdown.
 .mitm-state.json
+
+# Replay corpus: real project logs are fetched from R2, never committed
+sync-worker/replay-corpus/cache/
+sync-worker/replay-corpus/out/

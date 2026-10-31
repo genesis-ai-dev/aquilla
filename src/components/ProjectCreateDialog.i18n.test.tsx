@@ -56,7 +56,7 @@ describe("New Project's submit button goes through translation (AQU-2259)", () =
   it("labels the submit button from the catalog", async () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     screen.getAllByRole("button")[0].click()
-    const submit = await screen.findByRole("button", { name: /Create Project/ })
-    expect(submit.textContent).toBe("⟦Create Project⟧")
+    const submit = await screen.findByRole("button", { name: /Create project/ })
+    expect(submit.textContent).toBe("⟦Create project⟧")
   })
 })

@@ -138,7 +138,7 @@ async function openDialog(orgId?: number) {
 }
 
 function fillBasics(title = "Russian BSB") {
-  fireEvent.change(screen.getByPlaceholderText("My Translation Project"), {
+  fireEvent.change(screen.getByPlaceholderText("My translation project"), {
     target: { value: title },
   })
   fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), {
@@ -170,7 +170,7 @@ function expectRadioDisabled(radio: HTMLElement) {
   expect(radio).toHaveAttribute("aria-disabled", "true")
   expect(radio).toHaveAttribute("data-disabled")
 }
-const dialogIsOpen = () => screen.queryByText("Create New Project") != null
+const dialogIsOpen = () => screen.queryByText("Create new project") != null
 
 /** Every way out of the dialog, fired in turn. */
 function tryEveryWayOut() {
@@ -200,15 +200,15 @@ describe("ProjectCreateDialog — locks while it works (AQU-1519)", () => {
     await openDialog()
     fillBasics()
 
-    fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create project/i }))
     await waitFor(() => expect(mockCreateCloudProject).toHaveBeenCalledTimes(1))
 
     // One disabled fieldset carries the lock, so jest-dom reports every form
     // control inside it as disabled — fields, radios and buttons alike.
     expect(screen.getByTestId("create-project-fields")).toBeDisabled()
-    expect(screen.getByLabelText(/^Project title$/i)).toBeDisabled()
+    expect(screen.getByLabelText(/^Project name$/i)).toBeDisabled()
     expect(screen.getByLabelText(/^Source language$/i)).toBeDisabled()
-    expect(screen.getByLabelText(/^Target language/i)).toBeDisabled()
+    expect(screen.getByLabelText(/^Language lanes/i)).toBeDisabled()
     expectRadioDisabled(screen.getByTestId("create-shape-linked-target"))
     expect(screen.getByRole("combobox", { name: /Upstream project/i })).toBeDisabled()
     // AQU-1352: where the project lives is part of the request in flight too.
@@ -231,7 +231,7 @@ describe("ProjectCreateDialog — locks while it works (AQU-1519)", () => {
     expect(screen.getByTestId("project-create-destination")).toBeEnabled()
     expect(screen.getByTestId("project-create-teams")).toBeEnabled()
 
-    fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create project/i }))
     await waitFor(() => expect(mockCreateCloudProject).toHaveBeenCalledTimes(1))
 
     expect(screen.getByTestId("project-create-destination")).toBeDisabled()
@@ -248,7 +248,7 @@ describe("ProjectCreateDialog — locks while it works (AQU-1519)", () => {
     await openDialog()
     fillBasics()
 
-    fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create project/i }))
     await waitFor(() => expect(mockCreateCloudProject).toHaveBeenCalledTimes(1))
 
     tryEveryWayOut()
@@ -270,7 +270,7 @@ describe("ProjectCreateDialog — locks while it works (AQU-1519)", () => {
 
     expect(screen.getByTestId("add-as-lane-btn")).toBeEnabled()
 
-    fireEvent.click(screen.getByRole("button", { name: /Create & Link/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create & link/i }))
     await waitFor(() => expect(mockCreateCloudProject).toHaveBeenCalledTimes(1))
 
     // The headline regression: a stray click here used to add a lane to the
@@ -310,13 +310,13 @@ describe("ProjectCreateDialog — locks while it works (AQU-1519)", () => {
     fireEvent.click(screen.getByTestId("add-as-lane-btn"))
     await waitFor(() => expect(mockFetchProjectSettings).toHaveBeenCalledTimes(1))
 
-    const submit = screen.getByRole("button", { name: /Create & Link/i })
+    const submit = screen.getByRole("button", { name: /Create & link/i })
     expect(submit).toBeDisabled()
     fireEvent.click(submit)
     fireEvent.submit(document.getElementById("project-create-form")!)
     expect(mockCreateCloudProject).not.toHaveBeenCalled()
 
-    expect(screen.getByLabelText(/^Project title$/i)).toBeDisabled()
+    expect(screen.getByLabelText(/^Project name$/i)).toBeDisabled()
     tryEveryWayOut()
     expect(dialogIsOpen()).toBe(true)
 
@@ -332,13 +332,13 @@ describe("ProjectCreateDialog — locks while it works (AQU-1519)", () => {
     await pickComboboxOption(/Upstream project/i, /English Source/i)
     fireEvent.click(screen.getByRole("radio", { name: /^Its Source/i }))
 
-    fireEvent.click(screen.getByRole("button", { name: /Create & Link/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create & link/i }))
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/network blip/i))
 
     expect(screen.getByTestId("create-project-fields")).toBeEnabled()
     expect(closeButton()).toBeEnabled()
     // Nothing the user entered was thrown away by the failure.
-    expect(screen.getByLabelText(/^Project title$/i)).toHaveValue("Russian BSB")
+    expect(screen.getByLabelText(/^Project name$/i)).toHaveValue("Russian BSB")
     expect(screen.getByRole("radio", { name: /^Its Source/i })).toBeChecked()
     expect(screen.getByRole("combobox", { name: /Upstream project/i })).toHaveTextContent(
       /English Source/i,
@@ -348,7 +348,7 @@ describe("ProjectCreateDialog — locks while it works (AQU-1519)", () => {
   it("never locks on a create that a validation error stopped before it started", async () => {
     await openDialog()
     // No title, no languages: the form rejects it, so nothing goes in flight.
-    fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create project/i }))
 
     expect(mockCreateCloudProject).not.toHaveBeenCalled()
     expect(screen.getByTestId("create-project-fields")).toBeEnabled()
@@ -362,7 +362,7 @@ describe("ProjectCreateDialog — locks while it works (AQU-1519)", () => {
     await openDialog()
     fillBasics()
 
-    fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create project/i }))
     await waitFor(() => expect(mockCreateCloudProject).toHaveBeenCalledTimes(1))
     expect(screen.queryByTestId("create-taking-long")).toBeNull()
 
@@ -381,7 +381,7 @@ describe("ProjectCreateDialog — locks while it works (AQU-1519)", () => {
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
     await destinationLoaded()
     expect(screen.getByTestId("create-project-fields")).toBeEnabled()
-    expect(screen.getByLabelText(/^Project title$/i)).toHaveValue("")
+    expect(screen.getByLabelText(/^Project name$/i)).toHaveValue("")
     expect(screen.queryByTestId("create-taking-long")).toBeNull()
 
     release()

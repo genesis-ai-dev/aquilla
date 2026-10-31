@@ -42,7 +42,7 @@ export const ORG_SETTINGS_SECTION_TITLES: Record<OrgSettingsSection, string> = {
   identity: "Identity",
   security: "Security",
   "project-defaults": "Project defaults",
-  billing: "Billing & usage",
+  billing: "Billing",
   providers: "AI provider keys",
   monday: "Monday.com",
   airtable: "Airtable",

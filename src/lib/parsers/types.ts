@@ -273,22 +273,30 @@ export type AudioMediaStrategy =
 // keys a component resolves with `t()` — same "return a descriptor, let the
 // caller localize" shape as `roleNameKey()`/`roleDescriptionKey()` in
 // src/lib/frontier/roles.ts. Only AudioMediaStrategySection.tsx renders these.
-export const AUDIO_MEDIA_STRATEGY_LABELS: Record<AudioMediaStrategy, { nameKey: MessageKey; descriptionKey: MessageKey }> = {
+// `summaryKey` is the short phrase always shown under the name; `infoKey` is
+// what the card's (i) opens beneath it (Sam, Oct 29). Stream and Manual share
+// theirs: both only wait for a click before drawing a take's waveform
+// (autoLoadsPeaks), and nothing else reads the difference.
+export const AUDIO_MEDIA_STRATEGY_LABELS: Record<AudioMediaStrategy, { nameKey: MessageKey; summaryKey: MessageKey; infoKey: MessageKey }> = {
   stream: {
     nameKey: "projectSettings.audioMedia.strategyStreamName",
-    descriptionKey: "projectSettings.audioMedia.strategyStreamDescription",
+    summaryKey: "projectSettings.audioMedia.strategyOnClickSummary",
+    infoKey: "projectSettings.audioMedia.strategyOnClickInfo",
   },
   lazy: {
     nameKey: "projectSettings.audioMedia.strategyLazyName",
-    descriptionKey: "projectSettings.audioMedia.strategyLazyDescription",
+    summaryKey: "projectSettings.audioMedia.strategyLazySummary",
+    infoKey: "projectSettings.audioMedia.strategyLazyInfo",
   },
   eager: {
     nameKey: "projectSettings.audioMedia.strategyEagerName",
-    descriptionKey: "projectSettings.audioMedia.strategyEagerDescription",
+    summaryKey: "projectSettings.audioMedia.strategyEagerSummary",
+    infoKey: "projectSettings.audioMedia.strategyEagerInfo",
   },
   manual: {
     nameKey: "projectSettings.audioMedia.strategyManualName",
-    descriptionKey: "projectSettings.audioMedia.strategyManualDescription",
+    summaryKey: "projectSettings.audioMedia.strategyOnClickSummary",
+    infoKey: "projectSettings.audioMedia.strategyOnClickInfo",
   },
 }
 

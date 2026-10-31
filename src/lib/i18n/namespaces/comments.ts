@@ -20,7 +20,7 @@ export const comments = defineNamespace({
     "comments.mention.typeMore": "Type more to search…",
     "comments.mention.noResults": "No users found.",
     "comments.mention.noMembers": "No one on this project to mention.",
-    "comments.mention.restricted": "No one in your lanes to mention yet.",
+    "comments.mention.restricted": "No one in your language lanes to mention yet.",
     "comments.mention.suggestionsAria": "Project members",
     "comments.composer.editPlaceholder": "Edit comment…",
     "comments.composer.replyPlaceholder": "Leave a reply...",

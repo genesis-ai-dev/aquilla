@@ -19,24 +19,20 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { SettingsGroup, SettingsRow } from "@/components/ui/page"
+import { CommitNumberInput } from "@/components/settings/CommitInput"
+import { SaveStatus } from "@/lib/settings/save-status"
+import type { CommitInfo } from "@/lib/settings/useCommitOnPause"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { AFFIX_PRESETS } from "@/lib/terminology/affix-presets"
 import type { TermMatchingSettings } from "@/lib/terminology/types"
 
 interface Props {
   value: TermMatchingSettings
-  onChange: (next: TermMatchingSettings) => void
+  /** AQU-2262: `typed` for the number box, which saves on a pause or on leaving it. */
+  onChange: (next: TermMatchingSettings, typed?: CommitInfo<unknown>) => void
   disabled: boolean
   /** Why it is disabled, said once under the card's heading (AQU-2260). */
   locked?: ReactNode
-}
-
-function clampMaxAffixes(raw: string): number {
-  const n = Math.floor(Number(raw))
-  if (!Number.isFinite(n)) return 1
-  if (n < 1) return 1
-  if (n > 4) return 4
-  return n
 }
 
 function AffixTagInput({
@@ -117,7 +113,17 @@ export function TermMatchingSection({ value, onChange, disabled, locked }: Props
   }
 
   return (
-    <SettingsGroup label={t("projectSettings.termMatching.title")} description={t("projectSettings.termMatching.description")} locked={disabled ? locked : null}>
+    <SettingsGroup
+      // AQU-2262: the card is one setting; its quiet "Saved" sits by its name.
+      label={
+        <span className="flex items-center justify-between gap-4 pr-4">
+          {t("projectSettings.termMatching.title")}
+          <SaveStatus id="termMatching" className="font-normal" />
+        </span>
+      }
+      description={t("projectSettings.termMatching.description")}
+      locked={disabled ? locked : null}
+    >
       <SettingsRow
         label={t("projectSettings.termMatching.loadPreset")}
         control={
@@ -164,14 +170,13 @@ export function TermMatchingSection({ value, onChange, disabled, locked }: Props
       <SettingsRow
         label={<label htmlFor="term-matching-max-affixes">{t("projectSettings.termMatching.maxAffixes")}</label>}
         control={
-          <Input
+          <CommitNumberInput
             id="term-matching-max-affixes"
-            type="number"
             min={1}
             max={4}
             disabled={disabled}
             value={value.maxAffixes ?? 2}
-            onChange={(e) => onChange({ ...value, maxAffixes: clampMaxAffixes(e.target.value) })}
+            onCommit={(next, info) => onChange({ ...value, maxAffixes: next }, info)}
             className="w-24 bg-background"
             aria-label={t("projectSettings.termMatching.maxAffixes")}
           />

@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { SettingsBlock, SettingsGroup } from "@/components/ui/page"
+import { SaveStatus } from "@/lib/settings/save-status"
 import type { PatchOutcome } from "@/hooks/useProjectSettings"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
@@ -173,7 +174,15 @@ export function ProjectDecisionsSection({ value, canEdit, disabledTooltip, usern
   }
 
   return (
-    <SettingsGroup label={t("projectDecisions.title")} description={t("projectDecisions.description")} locked={canEdit ? null : disabledTooltip}>
+    <SettingsGroup
+      label={
+        // AQU-2262: the card is one setting; its quiet "Saved" sits by its name.
+        <span className="flex items-center justify-between gap-4 pr-4">
+          {t("projectDecisions.title")}
+          <SaveStatus id="projectFacts" className="font-normal" />
+        </span>
+      }
+      description={t("projectDecisions.description")} locked={canEdit ? null : disabledTooltip}>
       {facts.length === 0 ? (
         <SettingsBlock>
           <p className="text-sm text-muted-foreground">{t("projectDecisions.empty")}</p>

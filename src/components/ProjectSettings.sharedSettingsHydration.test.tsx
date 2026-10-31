@@ -12,10 +12,13 @@
 // and Save sent nothing. Only languages (AQU-1115) and Bible resources
 // (AQU-460) were ever re-synced.
 //
+// AQU-2262: settings save as you change them, so every control shows the saved
+// value, and the shared ones wait (disabled) until the settings GET lands:
+// nothing can be changed from a default the project never had.
+//
 // `read-validation-count` is deliberately NOT mocked here, so the counts go
 // through the real reader.
 
-import userEvent from "@testing-library/user-event"
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
@@ -78,22 +81,22 @@ vi.mock("@/hooks/useProject", () => ({
   }),
 }))
 
-vi.mock("@/hooks/useProjectSettings", () => ({
-  useProjectSettings: () => ({
-    canEdit: true,
-    reasonCannotEdit: null,
-    patch,
-    version: 1,
-    updatedAt: currentUpdatedAt,
-    updatedBy: currentUpdatedBy,
-    conflict: false,
-    dismissConflict: vi.fn(),
-    settings: currentSettings,
-    hasFetched: currentHasFetched,
-    isOnline: true,
-    refresh: vi.fn(),
-  }),
-}))
+// A write shows on the page, as the real hook's overlay does.
+vi.mock("@/hooks/useProjectSettings", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks/useProjectSettings")>()
+  const { useLiveProjectSettings } = await import("@/test-utils/live-project-settings")
+  return {
+    ...actual,
+    useProjectSettings: () =>
+      useLiveProjectSettings(() => ({
+        settings: currentSettings,
+        patch,
+        hasFetched: currentHasFetched,
+        updatedAt: currentUpdatedAt,
+        updatedBy: currentUpdatedBy,
+      })),
+  }
+})
 
 vi.mock("@/hooks/useOrg", () => ({
   useOrg: () => ({ org: null }),
@@ -124,6 +127,7 @@ vi.mock("@/lib/completion/completion-service", async (importOriginal) => {
 vi.mock("@/lib/store/project-index", () => ({
   getProject: vi.fn().mockResolvedValue(null),
   updateProject: vi.fn().mockResolvedValue(undefined),
+  patchProject: vi.fn().mockResolvedValue(null),
 }))
 
 vi.mock("@/lib/store/user-api-keys", () => ({
@@ -169,7 +173,6 @@ const tree = (pane: string) => (
 const isOn = (el: HTMLElement) =>
   el.getAttribute("aria-checked") === "true" || el.getAttribute("data-state") === "checked"
 const selfValidation = () => screen.getByRole("switch", { name: /^allow self-validation \(text\)$/i })
-const saveButton = () => screen.queryByRole("button", { name: /save changes/i })
 
 /** The validation pane: both validation policies and the harmonize floor. */
 function expectStoredValidationPane() {
@@ -196,7 +199,7 @@ describe("ProjectSettings — stored shared settings on a direct load (PR1 lefto
     currentSettings = STORED
     render(tree("validation"))
     expectStoredValidationPane()
-    expect(saveButton()).toBeNull()
+    expect(patch).not.toHaveBeenCalled()
   })
 
   it("shows the stored timeline and cell-editing values on their panes", () => {
@@ -204,12 +207,12 @@ describe("ProjectSettings — stored shared settings on a direct load (PR1 lefto
     const { unmount } = render(tree("audio-media"))
     expect(isOn(screen.getByTestId("settings-allow-track-editing"))).toBe(false)
     expect(isOn(screen.getByTestId("settings-timing-locked"))).toBe(false)
-    expect(saveButton()).toBeNull()
+    expect(patch).not.toHaveBeenCalled()
     unmount()
 
     render(tree("general"))
     expect(screen.getByTestId("settings-cell-editing-floor")).toHaveTextContent("Contributor")
-    expect(saveButton()).toBeNull()
+    expect(patch).not.toHaveBeenCalled()
   })
 
   it("settles to the stored values when the settings arrive after the record", () => {
@@ -225,28 +228,32 @@ describe("ProjectSettings — stored shared settings on a direct load (PR1 lefto
 
     expectStoredValidationPane()
     // Settling to the stored values is not an edit.
-    expect(saveButton()).toBeNull()
+    expect(patch).not.toHaveBeenCalled()
   })
 
-  it("keeps a value the user changed before the settings arrived", async () => {
+  // AQU-2262: a change saves at once, so it must start from the stored value.
+  // Until the settings arrive the shared controls wait, and nothing is written
+  // over a stored value the person never saw.
+  it("waits for the settings before a shared setting can be changed", async () => {
     currentHasFetched = false
     const { rerender } = render(tree("validation"))
     const textCount = () => screen.getByRole("spinbutton", { name: /required validators \(text\)/i }) as HTMLInputElement
-    // AQU-1771: unset follows the organization's default; the user picks
-    // "Set for this project" (which shows 1), then asks for 3, before the GET lands.
-    await userEvent.click(screen.getByRole("combobox", { name: /Text validators: use the organization default/i }))
-    await userEvent.click(await screen.findByRole("option", { name: "Set for this project" }))
-    fireEvent.change(textCount(), { target: { value: "3" } })
-    expect(textCount().value).toBe("3")
+    expect(textCount()).toBeDisabled()
+    expect(selfValidation()).toHaveAttribute("aria-disabled", "true")
 
     // The GET lands with a stored 2.
     currentSettings = STORED
     currentHasFetched = true
     rerender(tree("validation"))
 
-    // The user's 3 wins, and it is a real change against the stored 2.
-    expect(textCount().value).toBe("3")
-    expect(saveButton()).toBeTruthy()
+    expect(textCount()).not.toBeDisabled()
+    expect(textCount().value).toBe("2")
+    fireEvent.change(textCount(), { target: { value: "3" } })
+    fireEvent.blur(textCount())
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(1))
+    expect(patch.mock.calls[0]?.[0]).toEqual({ validationCount: 3 })
+    // It was told the person saw the stored 2.
+    expect(patch.mock.calls[0]?.[1]).toMatchObject({ expect: [{ key: "validationCount", value: 2 }] })
     // Untouched fields still settled.
     expect(isOn(selfValidation())).toBe(false)
     expect(document.getElementById("harmonize-min-role")).toHaveTextContent("Maintainer")
@@ -262,7 +269,7 @@ describe("ProjectSettings — stored shared settings on a direct load (PR1 lefto
     currentHasFetched = true
     rerender(tree("validation"))
     expectStoredValidationPane()
-    expect(saveButton()).toBeNull()
+    expect(patch).not.toHaveBeenCalled()
   })
 
   it("turning a stored OFF back ON saves exactly that one field", async () => {
@@ -274,11 +281,10 @@ describe("ProjectSettings — stored shared settings on a direct load (PR1 lefto
     expect(isOn(selfValidation())).toBe(false)
 
     fireEvent.click(selfValidation())
-    expect(isOn(selfValidation())).toBe(true)
-    fireEvent.click(saveButton() as HTMLElement)
 
     await waitFor(() => expect(patch).toHaveBeenCalledTimes(1))
     expect(patch.mock.calls[0]?.[0]).toEqual({ allowSelfValidation: true })
+    expect(isOn(selfValidation())).toBe(true)
   })
 })
 

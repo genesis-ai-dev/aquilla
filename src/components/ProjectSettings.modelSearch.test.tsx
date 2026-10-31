@@ -70,22 +70,13 @@ vi.mock("@/hooks/useProject", () => ({
 }))
 
 const patchSharedMock = vi.fn().mockResolvedValue({ kind: "ok" })
-vi.mock("@/hooks/useProjectSettings", () => ({
-  useProjectSettings: () => ({
-    canEdit: true,
-    reasonCannotEdit: null,
-    patch: patchSharedMock,
-    version: 1,
-    updatedAt: null,
-    updatedBy: null,
-    conflict: false,
-    dismissConflict: vi.fn(),
-    settings: {},
-    hasFetched: true,
-    isOnline: true,
-    refresh: vi.fn(),
-  }),
-}))
+// AQU-2262: the page shows the SAVED value, so a pick shows once its write
+// lands, as the real hook's overlay does.
+vi.mock("@/hooks/useProjectSettings", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks/useProjectSettings")>()
+  const { useLiveProjectSettings } = await import("@/test-utils/live-project-settings")
+  return { ...actual, useProjectSettings: () => useLiveProjectSettings(() => ({ settings: {}, patch: patchSharedMock })) }
+})
 
 vi.mock("@/hooks/useOrg", () => ({
   useOrg: () => ({ org: null }),
@@ -157,7 +148,7 @@ beforeEach(() => {
 
 // AQU-2290: the model list grows with the provider (OpenRouter lists hundreds),
 // so it gets the same search box as every other list that grows with your
-// data (AQU-2260).
+// data (AQU-2260). Picking a model saves it at once (AQU-2262).
 describe("ProjectSettings — the AI model list can be searched (AQU-2290)", () => {
   it("narrows the model list as you type, and picking one sets the model", async () => {
     const user = userEvent.setup()
@@ -171,6 +162,9 @@ describe("ProjectSettings — the AI model list can be searched (AQU-2290)", () 
     expect(screen.getByRole("option", { name: "anthropic/claude-sonnet-5-5" })).toBeInTheDocument()
     await user.click(screen.getByRole("option", { name: "anthropic/claude-sonnet-5-5" }))
     await waitFor(() => expect(trigger).toHaveTextContent("anthropic/claude-sonnet-5-5"))
+    // AQU-2262: picking it saves it, with no Save bar.
+    expect(patchSharedMock.mock.calls.at(-1)?.[0]).toMatchObject({ draftingSettings: { model: "anthropic/claude-sonnet-5-5" } })
+    expect(screen.queryByRole("button", { name: /save changes/i })).toBeNull()
   })
 
   // Sam, Oct 30: a long name may be cut short, but hovering over it shows the

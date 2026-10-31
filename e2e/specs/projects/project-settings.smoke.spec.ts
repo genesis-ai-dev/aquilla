@@ -54,14 +54,17 @@ test("project settings renames the project and edits a lane language", async ({ 
 
   // Name-only. Language is a lane row, edited below, so this save does not
   // touch the settings blob (and must not depend on the settings-save race).
-  const saveBtn = alice.getByRole("button", { name: /Save changes/i })
-  await expect(saveBtn).toBeVisible({ timeout: 5_000 })
-
-  await saveBtn.click()
+  // AQU-2262: no Save bar; the name saves when you leave the field.
+  const renamed = alice.waitForResponse(
+    (r) => r.url().includes(`/api/v2/projects/${projectId}`)
+      && (r.request().method() === "PATCH" || r.request().method() === "PUT"),
+    { timeout: 15_000 },
+  )
+  await nameInput.press("Tab")
+  expect((await renamed).ok(), "the rename should save").toBe(true)
   // AQU-501: the General pane is expressed via `?section=general`, so match
   // the path prefix rather than anchoring on end-of-string.
   await expect(alice).toHaveURL(new RegExp(`/project/${projectId}/settings(?:/|\\?|$)`), { timeout: 10_000 })
-  await expect(alice.getByText(/Saved: project name\./i)).toBeVisible({ timeout: 10_000 })
   await expect(nameInput).toHaveValue(renamedName, { timeout: 5_000 })
 
   // The rename must have landed on the server row, not just local state —

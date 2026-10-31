@@ -3,14 +3,15 @@
 // Why these tests exist:
 //   1. The "Preceding committed-target cells" input renders when the section is
 //      visible — confirms the field is wired up in the DOM.
-//   2. Changing the value from 3 → 0 marks the form dirty.
-//   3. The input clamps to [0, 10].
+//   2. Changing the value from 3 → 0 saves it when you leave the box, and only
+//      that field of draftContext (AQU-2262: settings save as you change them).
+//   3. The input clamps to [0, 10] when you leave it.
 //
 // ProjectSettings mounts a large tree (useProject, useProjectSettings, many
 // hooks). We stub every hook to keep the test fast and focused on D10 only.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { ProjectSettings } from "./ProjectSettings"
 
@@ -57,22 +58,16 @@ vi.mock("@/hooks/useProject", () => ({
   }),
 }))
 
-vi.mock("@/hooks/useProjectSettings", () => ({
-  useProjectSettings: () => ({
-    canEdit: true,
-    reasonCannotEdit: null,
-    patch: vi.fn().mockResolvedValue({ kind: "ok" }),
-    version: 1,
-    updatedAt: null,
-    updatedBy: null,
-    conflict: false,
-    dismissConflict: vi.fn(),
-    settings: { draftContext: { precedingTargetCells: 3 } },
-    hasFetched: true,
-    isOnline: true,
-    refresh: vi.fn(),
-  }),
-}))
+const patch = vi.hoisted(() => vi.fn())
+vi.mock("@/hooks/useProjectSettings", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks/useProjectSettings")>()
+  const { useLiveProjectSettings } = await import("@/test-utils/live-project-settings")
+  return {
+    ...actual,
+    useProjectSettings: () =>
+      useLiveProjectSettings(() => ({ settings: { draftContext: { precedingTargetCells: 3 } }, patch })),
+  }
+})
 
 vi.mock("@/hooks/useOrg", () => ({
   useOrg: () => ({ org: null }),
@@ -107,6 +102,7 @@ vi.mock("@/lib/completion/completion-service", async (importOriginal) => {
 vi.mock("@/lib/store/project-index", () => ({
   getProject: vi.fn().mockResolvedValue(null),
   updateProject: vi.fn().mockResolvedValue(undefined),
+  patchProject: vi.fn().mockResolvedValue(null),
 }))
 
 vi.mock("@/lib/progress/read-validation-count", () => ({
@@ -147,6 +143,7 @@ function renderSettings() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  patch.mockResolvedValue({ kind: "ok" })
 })
 
 describe("ProjectSettings — Draft Context section (D10)", () => {
@@ -164,25 +161,32 @@ describe("ProjectSettings — Draft Context section (D10)", () => {
     expect(Number(input.value)).toBe(3)
   })
 
-  it("changing the value marks the form dirty (Save button appears)", () => {
+  it("saves a changed value when you leave the box, and only that field", async () => {
     renderSettings()
     const input = screen.getByLabelText(/preceding committed-target cells/i)
     fireEvent.change(input, { target: { value: "0" } })
-    // When dirty, the header shows "Save changes" button.
-    expect(screen.getByRole("button", { name: /save changes/i })).toBeTruthy()
+    expect(patch).not.toHaveBeenCalled()
+    fireEvent.blur(input)
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(1))
+    expect(patch.mock.calls[0][0]).toEqual({ draftContext: { precedingTargetCells: 0 } })
+    expect(patch.mock.calls[0][1]).toMatchObject({ mergeKeys: ["draftContext"] })
   })
 
-  it("clamps input to minimum 0", () => {
+  it("clamps input to minimum 0", async () => {
     renderSettings()
     const input = screen.getByLabelText(/preceding committed-target cells/i) as HTMLInputElement
     fireEvent.change(input, { target: { value: "-5" } })
-    expect(Number(input.value)).toBe(0)
+    fireEvent.blur(input)
+    await waitFor(() => expect(Number(input.value)).toBe(0))
+    expect(patch.mock.calls[0][0]).toEqual({ draftContext: { precedingTargetCells: 0 } })
   })
 
-  it("clamps input to maximum 10", () => {
+  it("clamps input to maximum 10", async () => {
     renderSettings()
     const input = screen.getByLabelText(/preceding committed-target cells/i) as HTMLInputElement
     fireEvent.change(input, { target: { value: "99" } })
-    expect(Number(input.value)).toBe(10)
+    fireEvent.blur(input)
+    await waitFor(() => expect(Number(input.value)).toBe(10))
+    expect(patch.mock.calls[0][0]).toEqual({ draftContext: { precedingTargetCells: 10 } })
   })
 })

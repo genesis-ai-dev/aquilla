@@ -129,12 +129,6 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "audio.recordingModal.recordingStatus is the present participle shown beside a " +
     "pulsing dot while the microphone is live. Noun vs progressive verb: English " +
     "spells both 'Recording', almost nothing else does.",
-  "projectSettings.gitSync.autoSyncSwitch":
-    "The label of the Git sync card's on/off switch, a standalone noun phrase at the " +
-    "start of a row ('Auto-sync'). projectSettings.field.autoSync is the lower-case " +
-    "name of the same setting read inside the 'Saved …' sentence that lists what " +
-    "changed. A capitalized label and a mid-sentence list item differ in case and, " +
-    "in many languages, in grammatical form.",
   "auth.login.submitDefault":
     "The submit button of the sign-in form. auth.login.title is the heading naming " +
     "the whole form. Languages that nominalize headings ('Anmeldung') while keeping " +

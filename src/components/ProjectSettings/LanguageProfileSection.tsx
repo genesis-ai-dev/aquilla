@@ -15,6 +15,7 @@ import { useState, type ReactNode } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { SettingsBlock, SettingsGroup, SettingsRow } from "@/components/ui/page"
+import { SaveStatus } from "@/lib/settings/save-status"
 import {
   Select,
   SelectContent,
@@ -121,7 +122,15 @@ export function LanguageProfileSection({ value, targetLanguage, canEdit, disable
   }
 
   return (
-    <SettingsGroup label={t("bibleData.profile.title")} description={t("bibleData.profile.description")} locked={canEdit ? null : disabledTooltip}>
+    <SettingsGroup
+      label={
+        // AQU-2262: the card is one setting; its quiet "Saved" sits by its name.
+        <span className="flex items-center justify-between gap-4 pr-4">
+          {t("bibleData.profile.title")}
+          <SaveStatus id="languageProfile" className="font-normal" />
+        </span>
+      }
+      description={t("bibleData.profile.description")} locked={canEdit ? null : disabledTooltip}>
       <SettingsRow
         block
         label={t("bibleData.profile.quoteMarks.label")}

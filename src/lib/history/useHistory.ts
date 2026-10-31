@@ -27,6 +27,9 @@ export function useHistoryShortcuts(onResult: (which: "undo" | "redo", result: H
   }, [onResult])
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
+      // AQU-2262: the workspace and Project settings over it both listen; the
+      // first to act marks the press, so one press is one step.
+      if (event.defaultPrevented) return
       if (event.repeat || event.altKey) return
       if (!event.ctrlKey && !event.metaKey) return
       if (isTextEntryTarget(event.target)) return

@@ -281,8 +281,7 @@ import { injectOptimisticAudioTrim,
   injectOptimisticAudioPlace, injectOptimisticAudioAttachment, injectOptimisticAudioRemove, injectOptimisticAudioDeselect,
   notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { attachmentOutFrom, canCutAt, newPieceAudioId, pieceLabels } from "@/lib/audio/cut-take"
-import { recordGroup, recordStep, registerStepKinds, setHistoryRemote, setHistoryScope, setLaneSwitcher, setFileNamer, setOpenFileProbe, withGroup, type HistoryResult, type LaneSwitch } from "@/lib/history/history"
-import { stepLabel } from "@/lib/history/step-label"
+import { recordGroup, recordStep, registerStepKinds, setHistoryRemote, setHistoryScope, setLaneSwitcher, setFileNamer, setOpenFileProbe, withGroup, type LaneSwitch } from "@/lib/history/history"
 import { httpHistoryRemote } from "@/lib/history/history-remote"
 import { laneAccessFor, laneShownReady, waitUntilReady, type LaneAccess } from "@/lib/history/lane-switch"
 import { CastStepBuilder, castValueOf, filmNow, mediaStepHandlers, type CastValue, type CueLinksData, type CueLinkWrite, type PendingFilm } from "@/lib/history/media-steps"
@@ -294,6 +293,8 @@ import { editStepHandlers } from "@/lib/history/edit-steps"
 import { trackStepHandlers, trackFieldsOf, type TrackFields, type TrackTake } from "@/lib/history/track-steps"
 import { readProjectSettingsFor, writeProjectSettingsFor } from "@/lib/history/settings-access"
 import { useHistoryShortcuts } from "@/lib/history/useHistory"
+import { useHistoryReporter } from "@/components/history/useHistoryReporter"
+import { useSettingsStepKinds } from "@/components/ProjectSettings/useSettingsStepKinds"
 import { playingInSlot, takeStepHandlers, type CutRecord, type StoredTakePlace } from "@/lib/history/take-steps"
 import type { TakePlace } from "@/lib/timeline/take-place"
 import { enqueueTakeRemovals, hasOwnRecordingLeft, removeTake, renameTake, renameWholeTake } from "@/lib/audio/take-actions"
@@ -4232,57 +4233,10 @@ export function ProjectWorkspace() {
     (tag: string) => laneLabels[tag] || (tag === "" ? activeTargetLanguage || "Target" : tag),
     [laneLabels, activeTargetLanguage],
   )
-  const reportHistory = useCallback(
-    (which: "undo" | "redo", result: HistoryResult) => {
-      const name = stepLabel(t as never, result.step)
-      const o = result.outcome
-      if (o.kind === "done" && o.partial) {
-        toast.add({
-          type: "info",
-          title: t(which === "undo" ? "editor.history.undonePartly" : "editor.history.redonePartly", { step: name, count: o.partial.skipped }),
-        })
-      } else if (o.kind === "done") {
-        toast.add({ type: "info", title: t(which === "undo" ? "editor.history.undone" : "editor.history.redone", { step: name }) })
-      } else if (o.kind === "blocked" && o.reason === "elsewhere") {
-        // AQU-1767 phase 2: made in another file; it waits on the stack.
-        toast.add({
-          type: "info",
-          title: result.step.fileName
-            ? t("editor.history.blockedElsewhere", { file: result.step.fileName, step: name })
-            : t("editor.history.blockedElsewhereNoName", { step: name }),
-        })
-      } else if (o.kind === "blocked" && o.reason === "language") {
-        toast.add({
-          type: "info",
-          title: t("editor.history.blockedLanguage", { step: name, language: historyLaneName(result.step.lane ?? "") }),
-        })
-      } else if (o.kind === "moved") {
-        // Decision 11: another of this person's devices got there first.
-        toast.add({ type: "info", title: t(which === "undo" ? "editor.history.movedUndo" : "editor.history.movedRedo", { step: name }) })
-      } else if (o.kind === "skipped" && o.reason === "approved") {
-        toast.add({ type: "warning", title: t("editor.history.skippedApproved", { step: name, name: o.by ?? "" }) })
-      } else if (o.kind === "skipped") {
-        toast.add({
-          type: "warning",
-          title: t(
-            o.reason === "gone"
-              ? "editor.history.skippedGone"
-              : o.reason === "unavailable"
-                ? "editor.history.skippedUnavailable"
-                : o.reason === "notAllowed"
-                  ? "editor.history.skippedNotAllowed"
-                  : o.reason === "linesChanged"
-                    ? "editor.history.skippedLinesChanged"
-                    : "editor.history.skippedChanged",
-            { step: name },
-          ),
-        })
-      } else {
-        toast.add({ type: "error", title: t("editor.history.failed", { step: name }) })
-      }
-    },
-    [t, historyLaneName],
-  )
+  // AQU-2262: shared with Project settings, which report their undos too.
+  const reportHistory = useHistoryReporter(historyLaneName)
+  // AQU-2262: changes made in Project settings are undone from here too.
+  useSettingsStepKinds(project?.id ?? null)
   useHistoryShortcuts(reportHistory)
 
   // Timeline editor: set/clear the file's core video URL. coreMediaUrl lives on
@@ -15232,7 +15186,7 @@ export function ProjectWorkspace() {
           await commitAudioValidation([owner.fileId], { getTokenForFile: getTokenForProjectFile })
         },
         readSettings: (keys) => readProjectSettingsFor(project?.id ?? null, keys),
-        writeSettings: (patch) => writeProjectSettingsFor(project?.id ?? null, patch),
+        writeSettings: (patch, opts) => writeProjectSettingsFor(project?.id ?? null, patch, opts),
       }),
       ...trackStepHandlers({
         readTrack: (trackId) => {

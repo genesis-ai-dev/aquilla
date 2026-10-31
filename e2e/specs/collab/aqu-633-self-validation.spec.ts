@@ -56,20 +56,19 @@ test("AQU-633: a self-validate 403 surfaces the reason banner (not a silent reve
   // clickable control is the sibling role="switch" carrying aria-checked.
   const selfSwitch = alice.getByRole("switch").first()
   await expect(selfSwitch).toBeVisible({ timeout: 10_000 })
+  // AQU-2262: no Save bar; the switch saves as it is flipped.
   if ((await selfSwitch.getAttribute("aria-checked")) === "true") {
+    const savePatch = alice.waitForResponse(
+      (r) =>
+        /\/api\/v2\/projects\/[^/]+\/settings/.test(r.url()) &&
+        (r.request().method() === "PATCH" || r.request().method() === "PUT"),
+      { timeout: 15_000 },
+    )
     await selfSwitch.click()
+    const patchResp = await savePatch
+    expect(patchResp.status(), "settings PATCH should persist").toBeLessThan(300)
   }
   await expect(selfSwitch).toHaveAttribute("aria-checked", "false")
-
-  const savePatch = alice.waitForResponse(
-    (r) =>
-      /\/api\/v2\/projects\/[^/]+\/settings/.test(r.url()) &&
-      (r.request().method() === "PATCH" || r.request().method() === "PUT"),
-    { timeout: 15_000 },
-  )
-  await alice.getByRole("button", { name: /Save changes/i }).click()
-  const patchResp = await savePatch
-  expect(patchResp.status(), "settings PATCH should persist").toBeLessThan(300)
 
   // ── 3. Bob edits while self-validation is disabled ─────────────────────────
   // Navigate directly to the imported file and let Workspace's editor and

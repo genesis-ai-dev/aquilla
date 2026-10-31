@@ -300,9 +300,9 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "English participle; collapsing them would leak review-workflow wording into " +
     "a plain stats column in languages that lexicalize the two differently.",
   "org.orgSidebar.archived":
-    "Sidebar nav-link text AND breadcrumb section name for the org's permanent " +
-    "archived-projects route — a page/section identity, the same grammatical " +
-    "role as the editor.navTitle.* page titles it sits beside in the sidebar. " +
+    "Column heading AND date label for when a project was archived, on the org's " +
+    "archived-projects page (AQU-2261 moved the sidebar link and page title onto " +
+    "editor.navTitle.archivedProjects) — a heading naming a moment. " +
     "autopilot.evidence.status.archived is a lifecycle state of one piece of AI " +
     "evidence in the same stable status enum as .approved above. A destination " +
     "name and an item's lifecycle status are different concepts sharing one " +
@@ -314,7 +314,7 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "archived. autopilot.evidence.status.archived is one value of the fixed " +
     "evidence-review lifecycle enum (Proposed/Applied/Rejected/Superseded/Approved/" +
     "Archived/Unknown) badging a piece of AI-gathered EVIDENCE, and " +
-    "org.orgSidebar.archived above names a destination. A language lane and an " +
+    "org.orgSidebar.archived above heads a date column. A language lane and an " +
     "evidence item are unrelated referents, and where a participle agrees with the " +
     "noun it describes the two cannot share a form — the ar catalog already gives " +
     "the evidence state and the sidebar name different genders, and ru renders " +
@@ -437,11 +437,6 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "new file import. A settings-card noun heading vs an action-triggering verb " +
     "button — languages that nominalize headings but keep buttons imperative " +
     "need both spelled differently even though English collapses them.",
-  "projectSettings.section.bibleResources":
-    "Card heading toggling this project's Bible-resources (bibletranslation.org) " +
-    "integration on/off. search.mode.bibleTooltip is the tooltip on the search " +
-    "panel's Bible-resources search-mode toggle. A settings on/off card heading " +
-    "vs a tooltip naming a search filter mode for the same underlying dataset.",
   "importExport.landing.badgeBeta":
     "Per-format maturity pill on one import-option card on the landing screen " +
     "('this specific importer is beta'). nav.beta.badge is the app-chrome pill " +
@@ -587,13 +582,6 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "picker, sitting beside 'Source' and 'Audio' as a kind-of-thing label. A " +
     "specific instance and a category name take different forms wherever nouns " +
     "inflect for definiteness.",
-  "importExport.paratext.languageLabel":
-    "Labels the SOURCE LANGUAGE detected in a Paratext project during import — a " +
-    "property of the file being read. autopilot.inspector.run.lane names the " +
-    "language LANE an Autopilot run targeted, i.e. which translation track the " +
-    "run wrote into. One describes an input's language, the other identifies a " +
-    "destination track; languages that mark that difference with case or an " +
-    "adposition cannot share a single rendering.",
   "agent.approve":
     "Imperative button that accepts a translation agent's staged, human-gated " +
     "proposal (a changeset, a memory, or a brief update) — reused across the " +

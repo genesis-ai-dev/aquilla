@@ -208,6 +208,7 @@ const defaultOrgSettingsMock = (): OrgSettingsMock => ({
   // AQU-822: default termbase-edit floor (project_lead), as the server resolves it.
   termbaseEditMinRole: 500,
   languageEditMinRole: 600,
+  importMinRole: 500,
   commentCreateMinRole: 200,
   commentResolveMinRole: 400,
   refresh: vi.fn(async () => null),
@@ -555,11 +556,11 @@ describe("OrgOverview / OrgProjects", () => {
   it("shows the org's active-lane count in the rollup strip", async () => {
     renderMemberOverview()
     await waitFor(() => expect(screen.getByText("Avg translated")).toBeInTheDocument())
-    const label = screen.getAllByText("Active lanes").find((el) => !el.closest("nav"))!
+    const label = screen.getAllByText("Active language lanes").find((el) => !el.closest("nav"))!
     const tile = label.parentElement?.parentElement
     if (!tile) throw new Error("lanes tile root not found")
     expect(within(tile).getByText(String(ORG_ACTIVE_LANGUAGES))).toBeInTheDocument()
-    expect(within(tile).getByText("Target lanes")).toBeInTheDocument()
+    expect(within(tile).getByText("Language lanes")).toBeInTheDocument()
   })
 
   it("shows the overdue rollup card and at-risk rows on overview", async () => {

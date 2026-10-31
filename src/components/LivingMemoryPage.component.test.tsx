@@ -427,10 +427,10 @@ describe("LivingMemoryPage — examples pane", () => {
     renderPage("/project/proj-1/memory/examples")
 
     expect(
-      document.querySelector('section[aria-label="Recent Examples"]'),
+      document.querySelector('section[aria-label="Recent examples"]'),
     ).toBeInTheDocument()
 
-    const trigger = screen.getByRole("button", { name: /Recent Examples/i })
+    const trigger = screen.getByRole("button", { name: /Recent examples/i })
     expect(trigger).toBeVisible()
     expect(trigger).toHaveAttribute("aria-expanded", "false")
 
@@ -440,10 +440,10 @@ describe("LivingMemoryPage — examples pane", () => {
 
   it("keeps the Recent Examples section and role=status empty state once expanded", () => {
     renderPage("/project/proj-1/memory/examples")
-    fireEvent.click(screen.getByRole("button", { name: /Recent Examples/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Recent examples/i }))
 
     expect(
-      screen.getByRole("button", { name: /Recent Examples/i }),
+      screen.getByRole("button", { name: /Recent examples/i }),
     ).toHaveAttribute("aria-expanded", "true")
     expect(
       screen.getByRole("status", { name: /No validated translations/i }),
@@ -464,7 +464,7 @@ describe("LivingMemoryPage — examples pane", () => {
     // Collapsed first: the cell list is rendered but not exposed.
     expect(screen.getByText("In the beginning")).not.toBeVisible()
 
-    fireEvent.click(screen.getByRole("button", { name: /Recent Examples/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Recent examples/i }))
     expect(screen.getByText("Genesis")).toBeVisible()
     expect(screen.getByText("In the beginning")).toBeVisible()
     expect(screen.getByText("Mwanzoni")).toBeVisible()
@@ -481,7 +481,7 @@ describe("LivingMemoryPage — examples pane", () => {
       expect.objectContaining({ enabled: true }),
     )
     expect(
-      screen.getByRole("button", { name: /Recent Examples/i }),
+      screen.getByRole("button", { name: /Recent examples/i }),
     ).toHaveAttribute("aria-expanded", "false")
   })
 })

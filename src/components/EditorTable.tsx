@@ -519,6 +519,10 @@ export function applyRowOverlays(
         ...(attachment.label != null ? { label: attachment.label } : {}),
         ...(attachment.validatorCount != null ? { validatorCount: attachment.validatorCount } : {}),
         ...(attachment.validators ? { validators: attachment.validators } : {}),
+        // AQU-2296: WHEN each of them voted — the date under each name in
+        // "Audio validated by". Left off this list, the names arrived and the
+        // dates did not: the silent drop described above, one more time.
+        ...(attachment.validatorDecidedTs ? { validatorDecidedTs: attachment.validatorDecidedTs } : {}),
         ...(attachment.role ? { role: attachment.role } : {}),
         ...(attachment.recordedBy != null ? { recordedBy: attachment.recordedBy } : {}),
         // AQU-1767: see mergeCellsWithAudio — the same list, the same rule.

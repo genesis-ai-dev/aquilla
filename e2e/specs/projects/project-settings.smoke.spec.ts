@@ -61,7 +61,7 @@ test("project settings renames the project and edits a lane language", async ({ 
   // AQU-501: the General pane is expressed via `?section=general`, so match
   // the path prefix rather than anchoring on end-of-string.
   await expect(alice).toHaveURL(new RegExp(`/project/${projectId}/settings(?:/|\\?|$)`), { timeout: 10_000 })
-  await expect(alice.getByText(/Saved: project title\./i)).toBeVisible({ timeout: 10_000 })
+  await expect(alice.getByText(/Saved: project name\./i)).toBeVisible({ timeout: 10_000 })
   await expect(nameInput).toHaveValue(renamedName, { timeout: 5_000 })
 
   // The rename must have landed on the server row, not just local state —

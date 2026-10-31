@@ -24,7 +24,7 @@ export interface PersistTakeTrimInput {
   fileId: string
   cellId: string
   audioId: string
-  att: Pick<CodexCellAttachment, "url" | "slot" | "voiceId" | "referenceAudioId" | "durationMs" | "validatorCount" | "validators">
+  att: Pick<CodexCellAttachment, "url" | "slot" | "voiceId" | "referenceAudioId" | "durationMs" | "validatorCount" | "validators" | "validatorDecidedTs">
   /** The owner's recorded selection, only to infer a slot the clip lacks. */
   selectedAudioId?: string
   trimStartMs: number | null
@@ -58,6 +58,7 @@ export function persistTakeTrim(input: PersistTakeTrimInput): Promise<string> {
     // lives — the line would flicker to unvalidated on every trim.
     ...(att.validatorCount != null ? { validatorCount: att.validatorCount } : {}),
     ...(att.validators ? { validators: att.validators } : {}),
+    ...(att.validatorDecidedTs ? { validatorDecidedTs: att.validatorDecidedTs } : {}),
     trimStartMs,
     trimEndMs,
   }, trimP)

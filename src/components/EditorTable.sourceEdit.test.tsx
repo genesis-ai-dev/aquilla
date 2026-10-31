@@ -275,7 +275,7 @@ describe("EditorTable — source-edit affordance", () => {
     }))
     fireEvent.click(await openCellMenu())
     const warning = screen.getByTestId("source-edit-lane-warning")
-    expect(warning).toHaveTextContent(/all lanes/i)
+    expect(warning).toHaveTextContent(/all language lanes/i)
     expect(warning).toHaveTextContent(/approval/i)
     expect(warning.textContent ?? "").not.toMatch(/\d/)
     expect(warning.textContent ?? "").not.toMatch(/done again/i)

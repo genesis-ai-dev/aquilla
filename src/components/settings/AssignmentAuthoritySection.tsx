@@ -69,12 +69,17 @@ export function AssignmentAuthoritySection({ orgSettings, canEdit }: AssignmentA
     <>
       <SettingsRow
         label={t("settings.assignmentAuthority.floorLabel")}
-        description={t("settings.assignmentAuthority.floorDescription")}
+        description={t("settings.assignmentAuthority.floorSummary")}
+        info={{
+          label: t("common.aboutAria", { name: t("settings.assignmentAuthority.floorLabel") }),
+          content: t("settings.assignmentAuthority.floorInfo"),
+          testId: "settings-info-assignment-min-role",
+        }}
         control={
           <Select
             items={ALL_ROLE_LEVELS.map((level) => ({
               value: String(level),
-              label: `${resolveRoleName(t, level)} (${level})`,
+              label: resolveRoleName(t, level),
             }))}
             value={String(assignmentMinRole)}
             onValueChange={(value) => {
@@ -93,7 +98,7 @@ export function AssignmentAuthoritySection({ orgSettings, canEdit }: AssignmentA
               <SelectGroup>
                 {ALL_ROLE_LEVELS.map((level) => (
                   <SelectItem key={level} value={String(level)}>
-                    {resolveRoleName(t, level)} ({level})
+                    {resolveRoleName(t, level)}
                   </SelectItem>
                 ))}
               </SelectGroup>
@@ -103,9 +108,15 @@ export function AssignmentAuthoritySection({ orgSettings, canEdit }: AssignmentA
       />
       <SettingsRow
         label={t("settings.assignmentAuthority.label")}
-        description={t("settings.assignmentAuthority.description")}
+        description={t("settings.assignmentAuthority.summary")}
+        info={{
+          label: t("common.aboutAria", { name: t("settings.assignmentAuthority.label") }),
+          content: t("settings.assignmentAuthority.info"),
+          testId: "settings-info-allow-self-assignment",
+        }}
         control={
-          <div className="flex min-w-44 flex-col items-end gap-1">
+          // A switch needs no wider column: the text runs up to it (Sam, Oct 29).
+          <div className="flex flex-col items-end gap-1">
             <Switch
               id="allow-self-assignment"
               checked={allowSelfAssignment}
@@ -115,15 +126,20 @@ export function AssignmentAuthoritySection({ orgSettings, canEdit }: AssignmentA
               disabled={!canEdit || busyKey !== null}
               aria-label={t("settings.assignmentAuthority.label")}
             />
-            {error && <FieldError className="text-xs">{error}</FieldError>}
+            {error && <FieldError className="max-w-44 text-end text-xs">{error}</FieldError>}
           </div>
         }
       />
       <SettingsRow
         label={t("settings.laneAssignmentAuthority.label")}
-        description={t("settings.laneAssignmentAuthority.description")}
+        description={t("settings.laneAssignmentAuthority.summary")}
+        info={{
+          label: t("common.aboutAria", { name: t("settings.laneAssignmentAuthority.label") }),
+          content: t("settings.laneAssignmentAuthority.info"),
+          testId: "settings-info-allow-scoped-lane-assignment",
+        }}
         control={
-          <div className="flex min-w-44 flex-col items-end gap-1">
+          <div className="flex flex-col items-end gap-1">
             <Switch
               id="allow-scoped-lane-assignment"
               checked={allowScopedLaneAssignment}

@@ -35,7 +35,10 @@ export function FrontierForgotPasswordForm({
       .string()
       .trim()
       .min(1, t("auth.resetPassword.emailRequired"))
-      .email(t("auth.resetPassword.emailInvalid")),
+      .refine(
+        (value) => value.length === 0 || z.string().email().safeParse(value).success,
+        t("auth.resetPassword.emailInvalid"),
+      ),
   })
 
   const form = useForm({
@@ -105,7 +108,7 @@ export function FrontierForgotPasswordForm({
         />
       </FieldGroup>
       {submitError && <FieldError>{submitError}</FieldError>}
-      <Button type="submit" form="forgot-password-form" className="w-full">
+      <Button type="submit" size="lg" form="forgot-password-form" className="w-full">
         {form.state.isSubmitting && <Spinner data-icon="inline-start" />}
         {form.state.isSubmitting
           ? t("auth.resetPassword.sending")

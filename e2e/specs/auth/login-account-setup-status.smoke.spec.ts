@@ -43,9 +43,9 @@ test("sign-in only explains migration after the server confirms it", async ({ pa
   await page.goto("/login")
   await page.getByLabel("Username or email").fill("legacy-user")
   await page.getByRole("textbox", { name: "Password" }).fill("legacy-password")
-  await page.getByRole("button", { name: "Sign in" }).click()
+  await page.getByRole("button", { name: "Log in" }).click()
 
-  await expect(page.getByRole("button", { name: "Signing in…" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Logging in…" })).toBeVisible()
   await expect(page.getByRole("status")).toHaveCount(0)
 
   releaseHandshake()
@@ -68,14 +68,14 @@ test("explicit add-account login preserves both accounts and activates the new o
   await page.goto("/login")
   await page.getByLabel("Username or email").fill(alice.username)
   await page.getByRole("textbox", { name: "Password" }).fill(alice.password)
-  await page.getByRole("button", { name: "Sign in" }).click()
+  await page.getByRole("button", { name: "Log in" }).click()
   await expect(page.getByRole("button", { name: /Account menu: alice/i })).toBeVisible({ timeout: 30_000 })
 
   await page.goto("/login?add=1&next=%2Forgs%2Fall")
-  await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Log in" })).toBeVisible()
   await page.getByLabel("Username or email").fill(bob.username)
   await page.getByRole("textbox", { name: "Password" }).fill(bob.password)
-  await page.getByRole("button", { name: "Sign in" }).click()
+  await page.getByRole("button", { name: "Log in" }).click()
   await expect(page.getByRole("button", { name: /Account menu: bob/i })).toBeVisible({ timeout: 30_000 })
 
   const envelope = await page.evaluate(() => new Promise<{

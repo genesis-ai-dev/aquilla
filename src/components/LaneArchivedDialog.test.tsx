@@ -26,7 +26,7 @@ describe("LaneArchivedDialog", () => {
 
   it("says the member's other languages are unaffected", () => {
     render(<LaneArchivedDialog laneLabel="Spanish" open onAcknowledge={() => {}} />)
-    expect(screen.getByRole("dialog")).toHaveTextContent(/other languages are unaffected/i)
+    expect(screen.getByRole("dialog")).toHaveTextContent(/other language lanes are unaffected/i)
   })
 
   it("offers no close button — the acknowledge button is the only exit", () => {

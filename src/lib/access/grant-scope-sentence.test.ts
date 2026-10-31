@@ -10,9 +10,9 @@ describe("describeGrant", () => {
       roleLevel: ROLE.CONTRIBUTOR,
       scope: { kind: "project", projectName: "Mark", lanes: ["French"] },
     })
-    expect(copy.sentence).toBe("Maria will join as a Contributor on Mark, French lane only")
-    expect(copy.scopeEcho).toBe("French lane only")
-    expect(grantButtonLabel(t, "Add", copy.scopeEcho)).toBe("Add — French lane only")
+    expect(copy.sentence).toBe("Maria will join as a Contributor on Mark, French language lane only")
+    expect(copy.scopeEcho).toBe("French language lane only")
+    expect(grantButtonLabel(t, "Add", copy.scopeEcho)).toBe("Add — French language lane only")
   })
 
   // AQU-2027: someone already on the project at or above the picked role keeps
@@ -24,8 +24,8 @@ describe("describeGrant", () => {
       stays: true,
       scope: { kind: "project", projectName: "Mark", lanes: ["French"] },
     })
-    expect(copy.sentence).toBe("Maria stays a Project lead on Mark, French lane only")
-    expect(copy.scopeEcho).toBe("French lane only")
+    expect(copy.sentence).toBe("Maria stays a Project lead on Mark, French language lane only")
+    expect(copy.scopeEcho).toBe("French language lane only")
   })
 
   it("names a maintainer of the whole organization", () => {
@@ -46,8 +46,8 @@ describe("describeGrant", () => {
       roleLevel: ROLE.CONTRIBUTOR,
       scope: { kind: "project", projectName: "Mark", lanes: "all" },
     })
-    expect(copy.sentence).toBe("Maria will join as a Contributor on Mark — every lane")
-    expect(copy.scopeEcho).toBe("every lane")
+    expect(copy.sentence).toBe("Maria will join as a Contributor on Mark — every language lane")
+    expect(copy.scopeEcho).toBe("every language lane")
   })
 
   it("names an open link and an email", () => {
@@ -57,7 +57,7 @@ describe("describeGrant", () => {
         roleLevel: ROLE.CONTRIBUTOR,
         scope: { kind: "project", projectName: "Mark", lanes: "all" },
       }).sentence,
-    ).toBe("Anyone with this link will join as a Contributor on Mark — every lane")
+    ).toBe("Anyone with this link will join as a Contributor on Mark — every language lane")
     expect(
       describeGrant(t, {
         names: ["ada@example.com"],
@@ -76,7 +76,7 @@ describe("describeGrant", () => {
         roleLevel: ROLE.CONTRIBUTOR,
         scope: { kind: "project", projectName: "Mark", lanes: ["French", "Spanish"] },
       }).sentence,
-    ).toBe("Maria and Luis will join as Contributors on Mark, French and Spanish lanes only")
+    ).toBe("Maria and Luis will join as Contributors on Mark, French and Spanish language lanes only")
   })
 
   it("stays live before a person is chosen, and does not invent a lane list", () => {

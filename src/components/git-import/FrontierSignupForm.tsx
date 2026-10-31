@@ -107,12 +107,12 @@ function buildSignupSchema(t: TFunction) {
         .string()
         .trim()
         .min(1, t("auth.resetPassword.emailRequired"))
-        .email(t("auth.resetPassword.emailInvalid")),
+        .refine(value => value.length === 0 || z.string().email().safeParse(value).success, t("auth.resetPassword.emailInvalid")),
       password: z.string().min(1, t("auth.signup.passwordRequired")),
     })
     .superRefine((data, ctx) => {
       const checks = checkPasswordRequirements(data.password, data.email)
-      if (!checks.minLength) {
+      if (data.password.length > 0 && !checks.minLength) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           message: t("auth.resetPassword.passwordTooShort"),
@@ -308,7 +308,7 @@ export function FrontierSignupForm({ onSuccess, initialEmail, onSwitchToLogin }:
           )}
         </div>
       )}
-      <Button type="submit" form="signup-form" className="w-full">
+      <Button type="submit" size="lg" form="signup-form" className="w-full">
         {form.state.isSubmitting && <Spinner data-icon="inline-start" />}
         {form.state.isSubmitting ? t("auth.signup.submitCreating") : t("auth.signup.submitDefault")}
       </Button>

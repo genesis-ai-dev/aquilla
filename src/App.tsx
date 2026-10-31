@@ -54,7 +54,7 @@ import { SessionHydrationError } from "@/components/SessionHydrationError"
 import { AccountTransitionError } from "@/components/AccountTransitionError"
 import { isSessionHydrationRequiredPath } from "@/lib/navigation/session-routes"
 import { VersionBadge } from "@/components/VersionBadge"
-import { UpdateBanner } from "@/components/UpdateBanner"
+import { UpdateOnNavigate } from "@/components/UpdateIndicator"
 import { hydratePrefetchStatus } from "@/lib/audio/prefetch"
 import { probeOpfsAvailability } from "@/lib/storage/opfs-availability"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -91,8 +91,8 @@ const JoinOrgPage = lazy(() =>
 const VerifyEmailPage = lazy(() =>
   import("@/components/VerifyEmailPage").then((m) => ({ default: m.VerifyEmailPage })),
 )
-const OnboardingWizard = lazy(() =>
-  import("@/components/onboarding/OnboardingWizard").then((m) => ({ default: m.OnboardingWizard })),
+const Signup = lazy(() =>
+  import("@/pages/Signup").then((m) => ({ default: m.Signup })),
 )
 const BillingSelection = lazy(() =>
   import("@/pages/BillingSelection").then((m) => ({ default: m.BillingSelection })),
@@ -418,7 +418,7 @@ export default function App() {
           <AudioBulkProgressBanner />
           <GlobalAudioShortcuts />
           <VersionBadge />
-          <UpdateBanner />
+          <UpdateOnNavigate />
           <Toaster />
         </SyncingProvider>
       </TooltipProvider>
@@ -460,7 +460,9 @@ function AppRoutes() {
         <Route path="/approve/:changesetId" element={<LazyRoute><ApproveChangeset /></LazyRoute>} />
         <Route path="/join-org/:token" element={<JoinOrgPage />} />
         <Route path="/verify-email" element={<VerifyEmailPage />} />
-        <Route path="/onboarding" element={<OnboardingWizard />} />
+        <Route path="/signup" element={<Signup />} />
+        {/* Old marketing links/bookmarks retain their query and signup destination. */}
+        <Route path="/onboarding" element={<Signup />} />
         {/* AQU-282: dedicated login — eagerly loaded (public, no auth required) */}
         <Route path="/login" element={<Login />} />
         <Route path="/billing/select" element={<BillingSelection />} />

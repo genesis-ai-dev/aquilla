@@ -368,6 +368,21 @@ export async function loadActiveSession(): Promise<FrontierSession | null> {
   return env.sessions[env.active] ?? null
 }
 
+/** Replace a renewed credential only while that exact session is still active.
+ * The comparison and write share the envelope transaction with logout/switching.
+ * Unlike saveSession, renewal must never add or activate an account.
+ */
+export async function replaceActiveSessionJwt(previousJwt: string, nextJwt: string): Promise<boolean> {
+  let replaced = false
+  await mutateEnvelope((env) => {
+    const current = env.active ? env.sessions[env.active] : undefined
+    if (!current || current.jwt !== previousJwt) return false
+    current.jwt = nextJwt
+    replaced = true
+  })
+  return replaced
+}
+
 // Backward-compat: existing login path uses saveSession. It adds-and-activates.
 export async function saveSession(s: FrontierSession): Promise<void> {
   return mutateEnvelope((env) => {

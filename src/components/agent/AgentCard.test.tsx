@@ -68,7 +68,7 @@ describe("AgentCard", () => {
       "Search the project",
       "Draft a translation",
       "Consult the project documents",
-      "Look up Bible resources",
+      "Look up Bible data",
     ]) {
       expect(screen.getByText(tool)).toBeInTheDocument()
     }

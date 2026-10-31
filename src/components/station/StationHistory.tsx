@@ -94,8 +94,14 @@ export function StationHistory({
         const events = await fetchCellHistory(projectId, fileId, cellId, jwt, { limit: 200 })
         const ids = new Set(chain)
         const depth = (id: string) => chain.length - chain.indexOf(id)
+        // Each version's own length, for a trim that ran to its edge.
+        const durationOf = (id: string) => {
+          if (id === audioId) return durationSec
+          const ms = take.cell.attachments?.[id]?.durationMs
+          return ms != null ? ms / 1000 : null
+        }
         if (live) {
-          setRows(historyRowsFromEvents(events, ids, { durationSec, versionOf: depth }))
+          setRows(historyRowsFromEvents(events, ids, { durationSec, durationOf, versionOf: depth }))
           setFailed(false)
         }
       } catch {
@@ -105,7 +111,7 @@ export function StationHistory({
     return () => {
       live = false
     }
-  }, [projectId, fileId, cellId, chain, durationSec, getSyncToken, refreshKey])
+  }, [projectId, fileId, cellId, chain, durationSec, getSyncToken, refreshKey, audioId, take])
 
   const all = useMemo(() => [...(rows ?? []), ...draftRows(ops)], [rows, ops])
   useEffect(() => {

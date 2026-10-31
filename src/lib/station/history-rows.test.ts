@@ -35,6 +35,20 @@ describe("the Station's History rows", () => {
     expect(rows[2].who).toBe("rita")
   })
 
+  it("names an earlier version's open end from that version's own length", () => {
+    const rows = historyRowsFromEvents(
+      [
+        ev(1, "cell.audio.trim", { audioId: "t2", trimStartMs: 400, trimEndMs: null }),
+        ev(2, "cell.audio.attach", { audioId: "t2v2", referenceAudioId: "t2" }),
+        ev(3, "cell.audio.trim", { audioId: "t2v2", trimStartMs: 200, trimEndMs: null }),
+      ],
+      new Set(["t2", "t2v2"]),
+      { durationSec: 4.3, durationOf: (id) => (id === "t2" ? 4.2 : 4.3), versionOf: () => 2 },
+    )
+    expect(rows[0].params).toEqual({ a: "0:00.40", b: "0:04.20" })
+    expect(rows[2].params).toEqual({ a: "0:00.20", b: "0:04.30" })
+  })
+
   it("numbers the unsaved edits", () => {
     const rows = draftRows([
       { kind: "del", a: 1, b: 1.5 },

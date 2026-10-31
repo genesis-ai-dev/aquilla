@@ -30,12 +30,13 @@ type Payload = {
 /**
  * The rows for one recording: `ids` is the open take and the versions it was
  * made from (its `referenceAudioId` chain), oldest event first. A trim to the
- * recording's edge names the edge's time from `durationSec`.
+ * recording's edge names the edge's time from that version's own length
+ * (`durationOf`), or `durationSec` when it isn't known.
  */
 export function historyRowsFromEvents(
   events: readonly CellHistoryEvent[],
   ids: ReadonlySet<string>,
-  opts: { durationSec?: number | null; versionOf?(audioId: string): number } = {},
+  opts: { durationSec?: number | null; durationOf?(audioId: string): number | null; versionOf?(audioId: string): number } = {},
 ): HistoryRow[] {
   const rows: HistoryRow[] = []
   const ordered = [...events].sort((a, b) => a.serverSeq - b.serverSeq)
@@ -50,7 +51,11 @@ export function historyRowsFromEvents(
         } else rows.push({ key: "editor.station.hRecorded", ...who })
         break
       case "cell.audio.trim": {
-        const end = p.trimEndMs != null ? p.trimEndMs / 1000 : (opts.durationSec ?? null)
+        // An open end is THAT version's edge: an earlier version's trim must
+        // not read the open version's length (found in the browser walk:
+        // "End 0:04.30" on a 4.20 s take, after a 4.30 s version was saved).
+        const edge = opts.durationOf?.(p.audioId) ?? opts.durationSec ?? null
+        const end = p.trimEndMs != null ? p.trimEndMs / 1000 : edge
         rows.push({
           key: "editor.station.hTrimmed",
           params: { a: formatStationTime((p.trimStartMs ?? 0) / 1000), b: end != null ? formatStationTime(end) : "—" },

@@ -251,6 +251,12 @@ export function scriptMockResponse(messages: ChatMessage[]) {
   //     folder but is never kept (a constant book and chapter);
   //   - "worse-Mt-ch19_v01": the right rule, then on the retry the chapter and
   //     the verse swapped, which places fewer, so the first is kept in use;
+  //   - "Mt-ch19_v01-03": with a range after a verse, a template that reads
+  //     the first and last verse ({toVerse}), kept too;
+  //   - "Sermon-ch20_v01": "Sermon" as Matthew, a book word that names no
+  //     book; it places the folder but is never kept;
+  //   - "swap-Mt-ch05_v01": the chapter and the verse swapped on the first
+  //     answer; it places every file, far apart, and is never kept;
   //   - "fail-…": a rule that fits nothing, then a retry that fails outright;
   //   - anything else: a rule that fits nothing, twice ("didn't fit").
   const namesSystemPrompt = messages.some((message) =>
@@ -283,16 +289,35 @@ export function scriptMockResponse(messages: ChatMessage[]) {
         ? { templates: [{ pattern: "worse-{book}-ch{verse}_v{chapter}" }], books: { Mt: "MAT" }, explanation: "Mt is Matthew, then the verse and the chapter." }
         : { templates: [{ pattern: "worse-{book}-ch{chapter}_v{verse}" }], books: { Mt: "MAT" }, explanation: "Mt is Matthew, then the chapter and the verse." }))
     }
+    if (/^sermon-ch\d+_v\d+/i.test(first)) {
+      return respond(JSON.stringify({
+        templates: [{ pattern: "{book}-ch{chapter}_v{verse}" }],
+        books: { Sermon: "MAT" },
+        explanation: "Sermon is Matthew, then the chapter and the verse.",
+      }))
+    }
+    if (/^swap-/i.test(first)) {
+      return respond(JSON.stringify({
+        templates: [{ pattern: "swap-{book}-ch{verse}_v{chapter}" }],
+        books: { Mt: "MAT" },
+        explanation: "Mt is Matthew, then the verse and the chapter.",
+      }))
+    }
     const pieces = names.some((name) => /_v\d+[a-h]\.[A-Za-z0-9]+$/.test(name))
+    const ranges = names.some((name) => /_v\d+-\d+\.[A-Za-z0-9]+$/.test(name))
     return respond(JSON.stringify(/^[A-Za-z]{2}-ch\d+_v\d+/.test(first)
       ? {
           templates: pieces
             ? [{ pattern: "{book}-ch{chapter}_v{verse}{part}" }, { pattern: "{book}-ch{chapter}_v{verse}" }]
-            : [{ pattern: "{book}-ch{chapter}_v{verse}" }],
+            : ranges
+              ? [{ pattern: "{book}-ch{chapter}_v{verse}-{toVerse}" }, { pattern: "{book}-ch{chapter}_v{verse}" }]
+              : [{ pattern: "{book}-ch{chapter}_v{verse}" }],
           books: { Mt: "MAT", Mk: "MRK" },
           explanation: pieces
             ? "Mt is Matthew, then the chapter, the verse, and a letter for each piece of a verse."
-            : "Mt is Matthew, then the chapter and the verse.",
+            : ranges
+              ? "Mt is Matthew, then the chapter, and the first and last verse of each recording."
+              : "Mt is Matthew, then the chapter and the verse.",
         }
       : { templates: [{ pattern: "rec-{verse}" }], explanation: "rec- then the verse." }))
   }

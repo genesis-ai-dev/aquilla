@@ -185,12 +185,19 @@ describe("the bar's right end", () => {
   const session = { jwt: "t", username: "sam" } as never
   const approved = () => item({ validatorCount: 1, validators: ["sam"] })
 
-  it("carries the approval check in the approved green", () => {
-    render(<TargetAudioLane {...base} items={[approved()]} session={session} />)
-    const check = screen.getByTestId("tl-target-c1-validated")
-    expect(bar()!.contains(check)).toBe(true)
-    expect(check.className).toContain("text-green-700")
-  })
+  it.each(["green", "violet", "magenta", "cyan", "azure", "amber"])(
+    "carries the approval check in the bar's own dark ink on %s, as board 54 draws it",
+    (color) => {
+      render(<TargetAudioLane {...base} color={color} items={[approved()]} session={session} />)
+      const check = screen.getByTestId("tl-target-c1-validated")
+      expect(bar()!.contains(check)).toBe(true)
+      // No colour of its own (green on the green track's bar read faintly):
+      // it takes the bar's ink.
+      expect(check.className).not.toMatch(/(^|\s)(dark:)?text-/)
+      expect(bar()!.className).toContain("text-[color:var(--tl-track-bar-ink)]")
+      expect(screen.getByTestId("tl-target-lane").style.getPropertyValue("--tl-track-bar-ink")).toBe("#1c1f24")
+    },
+  )
 
   // Before the bar, a validated take's corner tick showed at every width. A
   // narrow take (or one drawn short where it collides) must still say so.

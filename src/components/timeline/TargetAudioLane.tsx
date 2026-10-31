@@ -1676,7 +1676,11 @@ function TargetAudioChip({
                 ? t("workspace.targetAudioLane.takeValidated")
                 : t("workspace.targetAudioLane.takeValidatedByYou")}
               className={cn(
-                "flex-none items-center text-green-700 dark:text-green-400",
+                // In the bar's own ink, as board 54 draws it: a green check
+                // on the green track's bar read faintly. The colour comes
+                // from the bar (TRACK_BAR_CLASS), so it is dark on every
+                // palette colour and light on a dark custom one.
+                "flex-none items-center",
                 // The hover glyphs take its place.
                 !barHasHover ? "inline-flex" : hovered ? "hidden" : "inline-flex group-hover/chip:hidden",
               )}

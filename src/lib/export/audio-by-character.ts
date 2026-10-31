@@ -350,6 +350,9 @@ export function previewAudioByCharacter(
 export interface PlacedClip {
   pcm: Float32Array
   startSec: number
+  /** AQU-2327: the take was raised above its recorded level, so its own
+   *  peaks go through the peak guard even where nothing overlaps it. */
+  raised?: boolean
 }
 
 /** Silence after the last take, so a lossy encoder or a player's fade cannot
@@ -408,11 +411,16 @@ export function placeClips(
     const n = Math.min(clip.pcm.length, total - offset)
     for (let i = 0; i < n; i += 1) {
       const at = offset + i
-      // AQU-2327: summed in float and through a peak guard rather than a hard
-      // clip — raised takes overlap loud more often than recorded ones did.
-      // (Two loud takes must still never wrap round to the opposite sign.)
-      const sum = track[at] / 32768 + clip.pcm[i]
-      const sample = quantisePcm16(guardPeak(sum))
+      // AQU-2327: where takes SUM, or a take was raised, the peak guard
+      // (as the playback mixer has) rather than a hard clip. A take on its
+      // own at its recorded level lands on exactly the samples a live take
+      // does — the guard never touches it. (Two loud takes must still never
+      // wrap round to the opposite sign.)
+      const under = track[at]
+      const sample =
+        under === 0 && !clip.raised
+          ? quantisePcm16(clip.pcm[i])
+          : quantisePcm16(guardPeak(under / 32768 + clip.pcm[i]))
       track[at] = sample > 32767 ? 32767 : sample < -32768 ? -32768 : sample
     }
   }
@@ -480,7 +488,7 @@ export async function exportAudioByCharacter(
   const pcmByClip = new Map<string, Promise<Float32Array | null>>()
 
   for (const group of groups) {
-    const placed: { pcm: Float32Array; startSec: number; endSec: number | null }[] = []
+    const placed: { pcm: Float32Array; startSec: number; endSec: number | null; raised?: boolean }[] = []
     for (const clip of group.clips) {
       const cell = args.cells.find((c) => c.id === clip.cellId)!
       const parsed = parseFrontierAudioUrl(clip.url)
@@ -532,7 +540,7 @@ export async function exportAudioByCharacter(
           const kept = win.isFull ? pcm : pcm.subarray(win.start, win.end)
           // AQU-2327: its volume and fades, as the timeline plays them.
           const audible = applyClipLevelPcm(kept, TARGET_RATE, clip)
-          placed.push({ pcm: audible, startSec: clip.startSec!, endSec: clip.endSec })
+          placed.push({ pcm: audible, startSec: clip.startSec!, endSec: clip.endSec, ...((clip.gainDb ?? 0) > 0 ? { raised: true } : {}) })
         }
       } catch (err) {
         console.warn(`[audio-by-character] skipping clip ${clip.audioId} (${clip.cellId}):`, err)

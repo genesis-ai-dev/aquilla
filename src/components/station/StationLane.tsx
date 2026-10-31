@@ -202,7 +202,7 @@ export function StationLane({ ed, editable, trackVars, generated, onDelete, onIn
         ))}
 
         {/* Item 15: the selected range. */}
-        {range ? (
+        {sel && range ? (
           <span
             aria-hidden
             data-testid="station-selection"

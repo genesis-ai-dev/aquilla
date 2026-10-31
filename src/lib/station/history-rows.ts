@@ -99,7 +99,7 @@ export function historyRowsFromEvents(
 
 /** The unsaved edits, numbered as 40b numbers them ("1. Deleted 0.50 s at 0:01.00 · not saved yet"). */
 export function draftRows(ops: readonly EditOp[]): HistoryRow[] {
-  return ops.map((op, i) =>
+  return ops.map((op, i): HistoryRow =>
     op.kind === "del"
       ? { key: "editor.station.hDraftDeleted", params: { n: i + 1, len: formatStationLength(op.b - op.a), time: formatStationTime(op.a) } }
       : { key: "editor.station.hDraftInserted", params: { n: i + 1, label: op.label, len: formatStationLength(op.len), time: formatStationTime(op.at) } },

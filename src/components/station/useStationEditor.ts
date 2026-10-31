@@ -42,7 +42,12 @@ export interface Selection {
   b: number
 }
 
-export const isRange = (s: Selection | null): s is Selection => s != null && s.b - s.a > 0.005
+/**
+ * A selection wider than a point. Deliberately not a type guard: "not a
+ * range" still leaves a point selection, so a guard's false branch (which
+ * would narrow `sel` to null) is wrong.
+ */
+export const isRange = (s: Selection | null): boolean => s != null && s.b - s.a > 0.005
 
 /** The kept part after one edit, keeping its sound (40b). null = the stored
  *  trim carried through, when End was still at the recording's edge. */
@@ -274,7 +279,7 @@ export function useStationEditor(host: StationHost, take: StationTake, target: S
       pause()
       return
     }
-    if (isRange(sel) && sel.b - sel.a > 0.02) {
+    if (sel && isRange(sel) && sel.b - sel.a > 0.02) {
       playRange(sel.a, sel.b)
       return
     }
@@ -296,7 +301,7 @@ export function useStationEditor(host: StationHost, take: StationTake, target: S
   const toggleLoop = useCallback(() => {
     setLoop((on) => {
       const next = !on
-      if (playing) preview.setLoop(next ? (isRange(sel) ? sel.a : trimA) : null)
+      if (playing) preview.setLoop(next ? (sel && isRange(sel) ? sel.a : trimA) : null)
       return next
     })
   }, [playing, preview, sel, trimA])
@@ -325,7 +330,7 @@ export function useStationEditor(host: StationHost, take: StationTake, target: S
 
   /** Keep this (item 17): the selection becomes the kept part, one Undo step. */
   const keepSelection = useCallback(async () => {
-    if (!isRange(sel)) return
+    if (!sel || !isRange(sel)) return
     pause()
     const a = round2(sel.a)
     const b = round2(sel.b)
@@ -338,7 +343,7 @@ export function useStationEditor(host: StationHost, take: StationTake, target: S
   // An End still at the recording's own edge stays at the edge.
   const atEdge = trimB >= length - 1e-6 && storedB < 0 && draft.trim == null
   const deleteSelection = useCallback(() => {
-    if (!isRange(sel)) return
+    if (!sel || !isRange(sel)) return
     pause()
     const op: EditOp = { kind: "del", a: round3(sel.a), b: round3(sel.b) }
     const tr = shiftTrim(op, trimA, trimB, atEdge)

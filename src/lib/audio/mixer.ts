@@ -62,7 +62,9 @@ export function levelAt(t: number, l: ClipLevel): number {
 interface Graph {
   ctx: AudioContext
   master: GainNode
-  guard: DynamicsCompressorNode
+  /** Null where the context has no compressor: the main volume then goes
+   *  straight out, unguarded, rather than the whole graph failing. */
+  guard: DynamicsCompressorNode | null
   tracks: Map<string, GainNode>
 }
 
@@ -82,17 +84,26 @@ function ensureGraph(): Graph | null {
   if (!ctx || typeof ctx.createGain !== "function") return null
   if (graph && graph.ctx === ctx) return graph
   // The peak guard: a hard-kneed, fast limiter just under full scale, so a
-  // raised take (or two overlapping) never clips the output.
-  const guard = ctx.createDynamicsCompressor()
-  guard.threshold.value = -1
-  guard.knee.value = 0
-  guard.ratio.value = 20
-  guard.attack.value = 0.003
-  guard.release.value = 0.1
+  // raised take (or two overlapping) never clips the output. A context
+  // without a compressor still plays, unguarded: a missing guard must never
+  // take every chip's Play down with it.
+  let guard: DynamicsCompressorNode | null = null
+  if (typeof ctx.createDynamicsCompressor === "function") {
+    guard = ctx.createDynamicsCompressor()
+    guard.threshold.value = -1
+    guard.knee.value = 0
+    guard.ratio.value = 20
+    guard.attack.value = 0.003
+    guard.release.value = 0.1
+  }
   const master = ctx.createGain()
   master.gain.value = masterVolume
-  master.connect(guard)
-  guard.connect(ctx.destination)
+  if (guard) {
+    master.connect(guard)
+    guard.connect(ctx.destination)
+  } else {
+    master.connect(ctx.destination)
+  }
   graph = { ctx, master, guard, tracks: new Map() }
   return graph
 }

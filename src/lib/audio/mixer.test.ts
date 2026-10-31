@@ -1,8 +1,15 @@
 // AQU-2327 slice 8: the one mixer's level arithmetic, and that nothing is
 // routed where there is no AudioContext (every element keeps its volume).
-import { describe, expect, it } from "vitest"
-import { clipLevelOf, levelAt, mixElement, isMixed } from "./mixer"
+import { afterEach, describe, expect, it, vi } from "vitest"
+import { __resetMixerForTests, clipLevelOf, levelAt, mixElement, mixerInput, isMixed } from "./mixer"
+import { resetOutputContextForTests } from "./output-context"
 import { applyClipLevelPcm, guardPeak, hasClipLevel } from "@/lib/export/clip-level"
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+  __resetMixerForTests()
+  resetOutputContextForTests()
+})
 
 describe("a take's level", () => {
   it("is read off the take, and absent when flat", () => {
@@ -17,6 +24,19 @@ describe("a take's level", () => {
     expect(levelAt(1.25, l)).toBeCloseTo(g / 2, 5)
     expect(levelAt(2, l)).toBeCloseTo(g, 5)
     expect(levelAt(3, l)).toBe(0)
+  })
+
+  it("still gives a one-off player somewhere to play when the context has no compressor", () => {
+    // The chip's Play goes through mixerInput(); a context without
+    // createDynamicsCompressor used to throw there and silence every chip.
+    const connections: string[] = []
+    const node = (name: string) => ({ name, gain: { value: 1 }, connect: (to: { name?: string }) => connections.push(`${name}→${to.name ?? "out"}`) })
+    vi.stubGlobal("AudioContext", function AC(this: unknown) {
+      return { state: "running", currentTime: 0, destination: { name: "out" }, createGain: () => node("gain"), resume: () => Promise.resolve() }
+    } as unknown as typeof AudioContext)
+    expect(() => mixerInput()).not.toThrow()
+    expect(mixerInput()).not.toBeNull()
+    expect(connections).toEqual(["gain→out"])
   })
 
   it("routes nothing without an AudioContext", () => {

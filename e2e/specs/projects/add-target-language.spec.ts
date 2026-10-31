@@ -23,7 +23,7 @@
  *   9. Switch to "es" again — the Spanish text is intact.
  *
  * AQU-602 / AQU-1601: the lane switcher is the TARGET language tag in the
- * editor's column header. A maintainer sees it at one lane, with "Add lane…".
+ * editor's column header. A maintainer sees it at one lane, with "Add language lane…".
  * The earlier `overlaySettings()` blocker (targetLanes not merged onto the
  * workspace `project` record) is resolved — see `src/hooks/useProject.ts`
  * (`assign("targetLanes", …)`).

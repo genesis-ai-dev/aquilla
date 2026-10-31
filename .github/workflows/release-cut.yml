@@ -3,7 +3,10 @@ name: Release cut
 # Cuts the next production release branch. Steps and hard stops are in
 # e2e/journeys/RELEASE-CUT.md.
 #
-# Two triggers:
+# Three triggers:
+# - On the hour. The hourly release line (docs/RELEASE-RISK-GATES.md):
+#   with no release in flight and ready PRs on dev, this cuts the next
+#   slice; release-deploy.yml deploys it at :45 once it is verified.
 # - A calver tag push. scripts/tag-release.sh pushes it at the end of
 #   `pnpm run deploy:aquilla`, once production serves the release, so the
 #   next slice is cut the moment the in-flight release closes. GitHub reads
@@ -13,10 +16,14 @@ name: Release cut
 #   see the plan without pushing.
 #
 # scripts/release-plan.mjs decides whether to cut and what; this workflow
-# only acts on its JSON. It never deploys and never tags. The branch push is
-# what starts smart Jev (docs/runbooks/smart-testing-webhook.md).
+# only acts on its JSON. It never deploys and never tags (release-deploy.yml
+# does, hourly, once the branch is verified). The branch push is what
+# starts smart Jev (docs/runbooks/smart-testing-webhook.md) and
+# release-verify.yml.
 
 on:
+  schedule:
+    - cron: '5 * * * *'
   push:
     # Calver only: YYYY.MM.DD.NN, as tag-release.sh writes it.
     tags: ['20[0-9][0-9].[0-9][0-9].[0-9][0-9].[0-9][0-9]']
@@ -28,6 +35,9 @@ on:
         type: boolean
         default: false
 
+# The cut builds the release branch by cherry-pick (scripts/release-cut.mjs),
+# so the checkout needs a git identity.
+#
 # Two runs at once would plan the same branch name. Queue the second run;
 # it then sees the first release in flight and stops.
 concurrency:
@@ -59,6 +69,10 @@ jobs:
         run: |
           git fetch origin --tags
           git fetch origin 'refs/heads/release/*:refs/remotes/origin/release/*'
+
+      - run: |
+          git config user.name "aquilla-release-bot"
+          git config user.email "release-bot@aquilla.app"
 
       - name: Plan
         env:

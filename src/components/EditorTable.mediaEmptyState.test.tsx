@@ -123,7 +123,7 @@ describe("EditorTable — empty time-ordered file", () => {
   it("a linked-video file says so instead, with no attach-media prompt and no URL field", async () => {
     renderTable({ linkedVideoEmptyState: { isYouTube: true, captionTracks: [] } })
     expect(await screen.findByTestId("linked-video-empty")).toBeInTheDocument()
-    expect(screen.getByText("Linked to a YouTube video")).toBeInTheDocument()
+    expect(screen.getByText("Linked to a film on YouTube")).toBeInTheDocument()
     expect(screen.getByText("When a maintainer attaches captions, they become this file's rows.")).toBeInTheDocument()
     expect(screen.queryByText("No media on this file yet")).toBeNull()
     expect(screen.queryByLabelText("Media URL")).toBeNull()
@@ -140,22 +140,22 @@ describe("EditorTable — empty time-ordered file", () => {
     expect(onOpenMediaView).toHaveBeenCalledTimes(1)
     // Sam's D1: the recording, and its explanation, wait behind a quiet link.
     expect(screen.queryByText("Choose media file")).toBeNull()
-    expect(screen.queryByText(/same timing as the video/)).toBeNull()
+    expect(screen.queryByText(/same timing as the film/)).toBeNull()
     fireEvent.click(screen.getByRole("button", { name: "make rows from an audio or video file" }))
     expect(screen.getByText("Make rows from an audio or video file")).toBeInTheDocument()
     expect(screen.getByText("Choose media file")).toBeInTheDocument()
     // AQU-1565 follow-up: the caveat says the video keeps its own sound and
     // where to switch to the recording (the sound menu on the video).
-    expect(screen.getByText(/same timing as the video/)).toBeInTheDocument()
+    expect(screen.getByText(/same timing as the film/)).toBeInTheDocument()
     expect(screen.getByText(/keeps playing with its own sound/)).toBeInTheDocument()
-    expect(screen.getByText(/Sound menu on the video/)).toBeInTheDocument()
+    expect(screen.getByText(/Sound menu on the film/)).toBeInTheDocument()
   })
 
   it("a non-YouTube picture's caveat has no sound menu to point to", async () => {
     renderTable({ linkedVideoEmptyState: { isYouTube: false, captionTracks: [] } })
     // With no caption action above it, the link stands on its own.
     fireEvent.click(await screen.findByRole("button", { name: "Make rows from an audio or video file" }))
-    expect(screen.getByText(/same timing as the linked video/)).toBeInTheDocument()
+    expect(screen.getByText(/same timing as the linked film/)).toBeInTheDocument()
     expect(screen.queryByText(/Sound menu/i)).toBeNull()
   })
 
@@ -220,7 +220,7 @@ describe("EditorTable — empty time-ordered file", () => {
 
   it("a non-YouTube linked picture is called a video, not a YouTube video", async () => {
     renderTable({ linkedVideoEmptyState: { isYouTube: false, captionTracks: [] } })
-    expect(await screen.findByText("Linked to a video")).toBeInTheDocument()
+    expect(await screen.findByText("Linked to a film")).toBeInTheDocument()
   })
 
   it("a Viewer gets the sentence and nothing to click", async () => {
@@ -229,7 +229,7 @@ describe("EditorTable — empty time-ordered file", () => {
       linkedVideoEmptyState: { isYouTube: true, captionTracks: [] },
     })
     await screen.findByTestId("linked-video-empty")
-    expect(screen.getByText("Linked to a YouTube video")).toBeInTheDocument()
+    expect(screen.getByText("Linked to a film on YouTube")).toBeInTheDocument()
     expect(screen.queryByText("Choose media file")).toBeNull()
     expect(screen.queryByRole("button", { name: /audio or video file/ })).toBeNull()
     expect(screen.queryByLabelText("Media URL")).toBeNull()
@@ -358,9 +358,9 @@ describe("EditorTable — empty time-ordered file", () => {
     expect(screen.getByRole("button", { name: "make rows from an audio or video file" }).parentElement)
       .toHaveTextContent(/^or make rows from an audio or video file$/)
     // The recording's explanation waits on its own step...
-    expect(screen.queryByText(/same timing as the video/)).toBeNull()
+    expect(screen.queryByText(/same timing as the film/)).toBeNull()
     fireEvent.click(screen.getByRole("button", { name: "make rows from an audio or video file" }))
-    expect(screen.getByText(/same timing as the video/)).toBeInTheDocument()
+    expect(screen.getByText(/same timing as the film/)).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Attach captions" })).toBeNull()
     // ...and the way back is right there.
     expect(screen.getByRole("button", { name: "Back to captions" }).className).toMatch(/decoration-dashed/)
@@ -376,9 +376,9 @@ describe("EditorTable — empty time-ordered file", () => {
       onAttachCaptions: () => {},
     })
     await screen.findByTestId("linked-video-empty")
-    expect(screen.getByText("The video's owner can download its captions from YouTube Studio.")).toBeInTheDocument()
+    expect(screen.getByText("The film's owner can download its captions from YouTube Studio.")).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "make rows from an audio or video file" }))
-    expect(screen.getByText("The video's owner can download the video file from YouTube Studio.")).toBeInTheDocument()
+    expect(screen.getByText("The film's owner can download the video file from YouTube Studio.")).toBeInTheDocument()
   })
 
   it("names YouTube Studio only for a YouTube video", async () => {
@@ -402,7 +402,7 @@ describe("EditorTable — empty time-ordered file", () => {
     })
     const card = await screen.findByTestId("linked-video-empty")
     expect(card).toHaveAttribute("data-placement", "media")
-    expect(screen.getByText("Linked to a YouTube video")).toBeInTheDocument()
+    expect(screen.getByText("Linked to a film on YouTube")).toBeInTheDocument()
     expect(screen.getAllByRole("button").map(button => button.textContent)).toEqual([
       "Attach captions", "make rows from an audio or video file",
     ])
@@ -426,9 +426,9 @@ describe("EditorTable — empty time-ordered file", () => {
     expect(screen.queryAllByRole("button")).toHaveLength(0)
   })
 
-  // ── AQU-1681: rows from the video's own sound ──
+  // ── AQU-1681: rows from the film's own sound ──
 
-  describe("rows from the video's own sound", () => {
+  describe("rows from the film's own sound", () => {
     const EN = "https://cdn.example.test/ep/audio_en.m3u8"
     const ES = "https://cdn.example.test/ep/audio_es.m3u8"
 
@@ -470,11 +470,11 @@ describe("EditorTable — empty time-ordered file", () => {
       renderWithSound(soundActions().actions)
       await screen.findByTestId("linked-video-empty")
       expect(screen.getAllByRole("button").map(button => button.textContent)).toEqual([
-        "Attach captions", "make rows from an audio or video file", "make rows from the video's own sound",
+        "Attach captions", "make rows from an audio or video file", "make rows from the film's own sound",
       ])
-      const link = screen.getByRole("button", { name: "make rows from the video's own sound" })
+      const link = screen.getByRole("button", { name: "make rows from the film's own sound" })
       expect(link).toHaveAttribute("data-variant", "link")
-      expect(link.parentElement).toHaveTextContent(/^or make rows from the video's own sound$/)
+      expect(link.parentElement).toHaveTextContent(/^or make rows from the film's own sound$/)
     })
 
     it("is not offered when the workspace withholds it (YouTube, or below maintainer)", async () => {
@@ -486,14 +486,14 @@ describe("EditorTable — empty time-ordered file", () => {
     it("starts on the source language's track and makes the rows from it, with progress", async () => {
       const sound = soundActions()
       renderWithSound(sound.actions)
-      fireEvent.click(await screen.findByRole("button", { name: "make rows from the video's own sound" }))
-      expect(screen.getByText("Make rows from the video's own sound")).toBeInTheDocument()
-      expect(screen.getByText(/saves a copy of the video's sound/)).toBeInTheDocument()
+      fireEvent.click(await screen.findByRole("button", { name: "make rows from the film's own sound" }))
+      expect(screen.getByText("Make rows from the film's own sound")).toBeInTheDocument()
+      expect(screen.getByText(/saves a copy of the film's sound/)).toBeInTheDocument()
       expect(await screen.findByTestId("linked-video-sound-track")).toHaveTextContent("Spanish (Latin America)")
       fireEvent.click(screen.getByRole("button", { name: "Make rows" }))
       expect(sound.actions.run).toHaveBeenCalledWith(ES, expect.anything())
       sound.progress({ phase: "download", fraction: 0.42 })
-      expect(screen.getByText("Downloading the video's sound… 42%")).toBeInTheDocument()
+      expect(screen.getByText("Downloading the film's sound… 42%")).toBeInTheDocument()
       expect(screen.queryByRole("button", { name: "Make rows" })).toBeNull()
       sound.progress({ phase: "save" })
       expect(screen.getByText("Saving a copy of the sound…")).toBeInTheDocument()
@@ -510,7 +510,7 @@ describe("EditorTable — empty time-ordered file", () => {
     it("runs the track the maintainer picks from the searchable list instead", async () => {
       const sound = soundActions()
       renderWithSound(sound.actions)
-      fireEvent.click(await screen.findByRole("button", { name: "make rows from the video's own sound" }))
+      fireEvent.click(await screen.findByRole("button", { name: "make rows from the film's own sound" }))
       fireEvent.click(await screen.findByTestId("linked-video-sound-track"))
       const menu = await screen.findByTestId("linked-video-sound-track-menu")
       fireEvent.click(within(menu).getByText("English"))
@@ -522,7 +522,7 @@ describe("EditorTable — empty time-ordered file", () => {
     it("cancels a download and says nothing was kept", async () => {
       const sound = soundActions()
       renderWithSound(sound.actions)
-      fireEvent.click(await screen.findByRole("button", { name: "make rows from the video's own sound" }))
+      fireEvent.click(await screen.findByRole("button", { name: "make rows from the film's own sound" }))
       fireEvent.click(await screen.findByRole("button", { name: "Make rows" }))
       sound.progress({ phase: "download", fraction: 0.1 })
       await act(async () => fireEvent.click(screen.getByRole("button", { name: "Cancel" })))
@@ -534,7 +534,7 @@ describe("EditorTable — empty time-ordered file", () => {
     it("shows why a run failed and offers it again", async () => {
       const sound = soundActions()
       renderWithSound(sound.actions)
-      fireEvent.click(await screen.findByRole("button", { name: "make rows from the video's own sound" }))
+      fireEvent.click(await screen.findByRole("button", { name: "make rows from the film's own sound" }))
       fireEvent.click(await screen.findByRole("button", { name: "Make rows" }))
       await sound.finish(new Error("This video's sound is encrypted, so Aquilla can't read it."))
       expect(screen.getByRole("alert")).toHaveTextContent("This video's sound is encrypted")
@@ -547,7 +547,7 @@ describe("EditorTable — empty time-ordered file", () => {
         run: vi.fn(async () => {}),
       }
       renderWithSound(actions)
-      fireEvent.click(await screen.findByRole("button", { name: "make rows from the video's own sound" }))
+      fireEvent.click(await screen.findByRole("button", { name: "make rows from the film's own sound" }))
       fireEvent.click(await screen.findByRole("button", { name: "Make rows" }))
       expect(screen.queryByTestId("linked-video-sound-track")).toBeNull()
       expect(actions.run).toHaveBeenCalledWith(null, expect.anything())

@@ -213,7 +213,7 @@ describe("extractVideoSound — a streamed film", () => {
       decode: fixtureDecoder(),
       yieldToEventLoop: noYield,
       chunkMs: 2000,
-    })).rejects.toThrow("The video's sound starts 4.0 s away from its picture")
+    })).rejects.toThrow("The film's sound starts 4.0 s away from its picture")
     expect(s.fetched).toContain(`${BASE}v/s0.m4s`)
     expect(s.fetched).not.toContain(`${BASE}a/en/s7.m4s`)
   })
@@ -285,6 +285,6 @@ describe("extractVideoSound — a direct link to a video file", () => {
       baseName: "x",
       fetchFn,
       retryDelaysMs: [0, 0],
-    })).rejects.toThrow("Couldn't download this video")
+    })).rejects.toThrow("Couldn't download this film")
   })
 })

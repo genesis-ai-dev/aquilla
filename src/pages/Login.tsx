@@ -1,6 +1,6 @@
 import { useForm } from "@tanstack/react-form"
 import { z } from "zod"
-import { useNavigate, useSearchParams, Navigate } from "react-router-dom"
+import { useNavigate, useSearchParams, Navigate, Link } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { AuthPage, AuthPanel } from "@/components/auth/AuthPage"
 import { CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -198,12 +198,12 @@ export function Login() {
           {mode === "login" && (
             <p className="text-center text-sm text-muted-foreground">
               {t("auth.login.newHerePrefix")}{" "}
-              <a
-                href={onboardingForBillingNext(next)}
+              <Link
+                to={onboardingForBillingNext(next)}
                 className="font-medium text-foreground underline-offset-4 hover:underline"
               >
                 {t("auth.login.createAccountLink")}
-              </a>
+              </Link>
             </p>
           )}
         </CardContent>

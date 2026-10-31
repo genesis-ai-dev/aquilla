@@ -310,12 +310,24 @@ export function bookForWord(rule: NamingRule, word: string): string | undefined 
  * the project's files, the browser from the same list.
  */
 export function isSavableRule(rule: NamingRule, opts: { projectBooks?: ProjectBooks } = {}): boolean {
-  if (rule.book !== undefined || rule.chapter !== undefined || rule.file !== undefined) return false
-  if (rule.books && Object.entries(rule.books).some(([word, code]) => !bookWordNames(word, code, opts.projectBooks))) return false
-  return rule.templates.every((template) => {
+  return whyNotSavable(rule, opts) === null
+}
+
+/** Why the team may not keep a rule, whatever it placed: "fixed" when it
+ *  leans on a book, chapter or file it was told, or its names don't say the
+ *  book and the chapter; "bookWord" when a book word names no book. Null when
+ *  the rule itself may be kept. The preview says which (Sam, Oct 30). */
+export type UnsavableReason = "fixed" | "bookWord"
+
+export function whyNotSavable(rule: NamingRule, opts: { projectBooks?: ProjectBooks } = {}): UnsavableReason | null {
+  if (rule.book !== undefined || rule.chapter !== undefined || rule.file !== undefined) return "fixed"
+  const sayBookAndChapter = rule.templates.every((template) => {
     const compiled = compileTemplate(template)
     if (!compiled) return false
     const says = new Set<Placeholder>(compiled.names)
     return says.has("book") && (says.has("chapter") || says.has("verseInBook"))
   })
+  if (!sayBookAndChapter) return "fixed"
+  if (rule.books && Object.entries(rule.books).some(([word, code]) => !bookWordNames(word, code, opts.projectBooks))) return "bookWord"
+  return null
 }

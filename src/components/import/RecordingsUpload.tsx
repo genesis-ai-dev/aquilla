@@ -56,7 +56,7 @@ import { takesSentence, type LineTakes } from "@/lib/audio/bulk-upload/takes-sum
 import { readLengths } from "@/lib/audio/bulk-upload/read-length"
 import { mapWithConcurrency } from "@/lib/concurrency"
 import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
-import { applyNamingRule, judgeRule, projectBooksOf, projectOutline, ruleEligible, sampleNames, shapesOf, type NamingRule, type RuleContext, type RuleFailure } from "@/lib/audio/bulk-upload/naming-rule"
+import { applyNamingRule, judgeRule, projectBooksOf, projectOutline, ruleEligible, sampleNames, shapesOf, type NamingRule, type NotKeptReason, type RuleContext, type RuleFailure } from "@/lib/audio/bulk-upload/naming-rule"
 import { askForNamingRule, forgetSavedNamingRule, loadSavedNamingRules, NamingRuleError, saveNamingRule, type NamingRuleProblem } from "@/lib/audio/bulk-upload/naming-rule-client"
 
 // ── The rule, behind an (i) ──────────────────────────────────────────────────
@@ -276,6 +276,14 @@ export function RecordingsReview({
   const savedChecked = useRef(false)
   const lookupId = useRef(0)
   const [lookupDone, setLookupDone] = useState(false)
+  // Whether the server lets this person keep and forget the team's namings: a
+  // project lead who is also in the project's organization (Sam, Oct 30).
+  // Null until the saved namings answer, or when they don't.
+  const [teamCanKeep, setTeamCanKeep] = useState<boolean | null>(null)
+  // "Forget this naming for the team": in flight, and whether the last try
+  // failed. On a refusal or a network failure the naming stays as it was.
+  const [forgetting, setForgetting] = useState(false)
+  const [forgetFailed, setForgetFailed] = useState(false)
   // Calls for this folder: one ask and one retry at most (review, Oct 30: a
   // failed retry once asked 37 times in 1.5 s, every call billed). Counted in
   // a ref that no failure or re-render resets; the preview is remounted for
@@ -452,7 +460,8 @@ export function RecordingsReview({
       inFlight.current.delete(controller)
       if (controller.signal.aborted || id !== lookupId.current) return
       setLookupDone(true)
-      const hit = shape ? saved.get(shape) : undefined
+      setTeamCanKeep(saved.canKeep)
+      const hit = shape ? saved.rules.get(shape) : undefined
       if (hit) setRule((current) => current ?? appliedRule(hit, "saved", eligible, inputs, { savedShape: shape }))
     })
   }, [ready, rule, unplaced, session?.jwt, projectId, inputs, projectBooks])
@@ -526,8 +535,14 @@ export function RecordingsReview({
   // with a team's saved rule in use, the names it left (review, Oct 30). That
   // ask is weighed against the saved rule like a retry, and is its last call.
   const askAbout = !rule ? unplaced.length : rule.from === "saved" && !rule.retried && judgement ? judgement.failures.length : 0
-  const forgetSaved = rule?.from === "saved" && rule.savedShape && canAskAssistant && session?.jwt
+  // Offered only to someone the server will let forget it (Sam, Oct 30).
+  const forgetSaved = rule?.from === "saved" && rule.savedShape && canAskAssistant && teamCanKeep === true && session?.jwt
     ? { shape: rule.savedShape, identityToken: session.jwt }
+    : null
+  // Whether the assistant's rule in use will be kept for the team, and why
+  // not: the rule's own reasons, then a lead the server won't let keep it.
+  const keepReasons: KeepReason[] | null = rule?.from === "assistant" && judgement
+    ? [...judgement.notKept, ...(teamCanKeep === false ? ["notInOrg" as const] : [])]
     : null
 
   return (
@@ -545,8 +560,11 @@ export function RecordingsReview({
               from: rule.from,
               explanation: rule.rule.explanation ?? rule.rule.templates.map((t) => t.pattern).join(" · "),
               placed: judgement?.placed.size ?? 0,
+              keep: keepReasons,
+              forgetFailed,
             }
           : null,
+        forgetting,
         onAsk: () => {
           if (rule && judgement) void ask([...rule.eligible], { first: rule, placed: judgement.placed.size, failures: judgement.failures })
           else void ask(unplaced)
@@ -556,15 +574,28 @@ export function RecordingsReview({
         onUndo: () => {
           setRule(null)
           setAssistant({ kind: "idle" })
+          setForgetFailed(false)
         },
         // A lead may forget the team's saved rule, on its own plainly
         // labelled button: the server forgets it under every shape it is
         // kept under.
+        // On a refusal or a network failure the naming stays in use, and the
+        // note says plainly that it wasn't forgotten (Sam, Oct 30).
         onForget: forgetSaved
           ? () => {
-              void forgetSavedNamingRule({ projectId, identityToken: forgetSaved.identityToken, shapes: [forgetSaved.shape] })
-              setRule(null)
-              setAssistant({ kind: "idle" })
+              setForgetting(true)
+              setForgetFailed(false)
+              void forgetSavedNamingRule({ projectId, identityToken: forgetSaved.identityToken, shapes: [forgetSaved.shape] }).then((forgotten) => {
+                setForgetting(false)
+                if (!forgotten) {
+                  setForgetFailed(true)
+                  return
+                }
+                // Only the saved naming it was asked about; never a rule the
+                // lead has asked for meanwhile.
+                setRule((current) => (current?.from === "saved" && current.savedShape === forgetSaved.shape ? null : current))
+                setAssistant({ kind: "idle" })
+              })
             }
           : undefined,
       }}
@@ -605,7 +636,7 @@ export function RecordingsReview({
         // its pieces ("v04a" and "v04b"; verses 4 and 5 on a joined line).
         // Two files on the same spot with no part between them are takes of
         // one another, and stop the keep.
-        if (rule?.from === "assistant" && judgement?.keep) {
+        if (rule?.from === "assistant" && judgement?.keep && teamCanKeep !== false) {
           void saveNamingRule({ projectId, identityToken: session.jwt, shapes: rule.shapes, rule: rule.rule })
         }
         try {
@@ -698,12 +729,36 @@ interface AssistantProps {
   /** The team's saved namings haven't answered yet: no asking until they do. */
   waiting: boolean
   state: AssistantState
-  note: { from: AppliedRule["from"]; explanation: string; placed: number } | null
+  note: {
+    from: AppliedRule["from"]
+    explanation: string
+    placed: number
+    /** The assistant's rule: why it won't be kept for the team, empty when it
+     *  will. Null for a team's saved rule, which is kept already. */
+    keep: KeepReason[] | null
+    /** "Forget this naming for the team" didn't go through. */
+    forgetFailed: boolean
+  } | null
+  /** "Forget this naming for the team" is in flight. */
+  forgetting: boolean
   onAsk: () => void
   onUndo: () => void
   /** A lead, on a team's saved rule: forget it for the team. */
   onForget?: () => void
 }
+
+/** Why the assistant's rule won't be kept: the rule's own reasons, and a lead
+ *  who isn't in the project's organization (Sam, Oct 30). */
+type KeepReason = NotKeptReason | "notInOrg"
+
+const KEEP_REASON_KEYS = {
+  fixed: "recordingsUpload.assistant.notKept.fixed",
+  bookWord: "recordingsUpload.assistant.notKept.bookWord",
+  notAllPlaced: "recordingsUpload.assistant.notKept.notAllPlaced",
+  sharedLine: "recordingsUpload.assistant.notKept.sharedLine",
+  scattered: "recordingsUpload.assistant.notKept.scattered",
+  notInOrg: "recordingsUpload.assistant.notKept.notInOrg",
+} as const satisfies Record<KeepReason, string>
 
 const NO_RULE: ReadonlyMap<number, AppliedRule["from"]> = new Map()
 
@@ -1055,10 +1110,11 @@ function ReviewBody({
  * AQU-2302: the offer to let the assistant work out the naming, never taken on
  * its own (Sam, Oct 29: as little AI use as possible), and what it found.
  */
-function AssistantBox({ offer, canAsk, exhausted, waiting, state, note, onAsk, onUndo, onForget, canChoose }: AssistantProps & { canChoose: boolean }) {
+function AssistantBox({ offer, canAsk, exhausted, waiting, state, note, forgetting, onAsk, onUndo, onForget, canChoose }: AssistantProps & { canChoose: boolean }) {
   const t = useT()
   const { locale } = useI18n()
   const [infoOpen, toggleInfo] = useInfoOpen()
+  const [whyOpen, toggleWhy] = useInfoOpen()
   if (state.kind === "asking") {
     return <p className="border-b bg-muted/40 p-3 text-xs font-medium" role="status" data-testid="recordings-assistant-asking">{t("recordingsUpload.assistant.asking")}</p>
   }
@@ -1069,10 +1125,26 @@ function AssistantBox({ offer, canAsk, exhausted, waiting, state, note, onAsk, o
           {t(note.from === "saved" ? "recordingsUpload.assistant.readSaved" : "recordingsUpload.assistant.read", { explanation: note.explanation })}
         </span>
         <span className="block text-muted-foreground">{t("recordingsUpload.assistant.placed", { count: formatNumber(note.placed, locale) })}</span>
+        {note.keep && (note.keep.length === 0 ? (
+          <span className="block text-muted-foreground" data-testid="recordings-assistant-keep" data-keep="true">{t("recordingsUpload.assistant.keeps")}</span>
+        ) : (
+          <span className="block text-muted-foreground" data-testid="recordings-assistant-keep" data-keep="false">
+            <span className="flex items-center gap-1">
+              {t("recordingsUpload.assistant.thisUploadOnly")}
+              <InfoToggle open={whyOpen} onToggle={toggleWhy} label={t("recordingsUpload.assistant.whyNotKeptLabel")} controls="recordings-assistant-why" testId="recordings-assistant-why-toggle" />
+            </span>
+            <InfoReveal open={whyOpen} id="recordings-assistant-why" testId="recordings-assistant-why">
+              {note.keep.map((reason) => t(KEEP_REASON_KEYS[reason])).join(" ")}
+            </InfoReveal>
+          </span>
+        ))}
+        {note.forgetFailed && (
+          <span className="block text-amber-700 dark:text-amber-400" role="alert" data-testid="recordings-assistant-forget-failed">{t("recordingsUpload.assistant.forgetFailed")}</span>
+        )}
       </span>
       <span className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
         {onForget && (
-          <Button type="button" size="xs" variant="ghost" onClick={onForget} data-testid="recordings-assistant-forget">
+          <Button type="button" size="xs" variant="ghost" onClick={onForget} disabled={forgetting} data-testid="recordings-assistant-forget">
             {t("recordingsUpload.assistant.forget")}
           </Button>
         )}

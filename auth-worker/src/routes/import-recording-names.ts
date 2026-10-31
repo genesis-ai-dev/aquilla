@@ -365,7 +365,10 @@ async function updateSaved(env: Env, orgId: number, userId: number, change: (sav
 // bulk upload recordings may use them. Every rule is checked again with the
 // full shared checks, read with this project's Bible files: a rule that leans
 // on a constant, or on a book word that names no book, is never handed back,
-// whoever wrote it into the settings.
+// whoever wrote it into the settings. `canKeep` says whether this person may
+// keep and forget the team's rules, by the same gate as those routes, so the
+// preview offers "Forget this naming for the team" only to someone it will
+// allow, and says when a naming can't be kept (Sam, Oct 30).
 names.get("/recording-names/saved", authMiddleware, async (c) => {
   const projectId = (c.req.query("projectId") ?? "").trim()
   if (!projectId) return c.json({ error: "projectId required" }, 400)
@@ -375,13 +378,14 @@ names.get("/recording-names/saved", authMiddleware, async (c) => {
     return c.json({ error: "contributor_required", message: "Contributor access is required to upload recordings." }, 403)
   }
   const orgId = await projectOrg(c.env, projectId)
-  if (!orgId) return c.json({ rules: {} })
+  if (!orgId) return c.json({ rules: {}, canKeep: false })
+  const canKeep = role.level >= MIN_ASK_ROLE && (await getEffectiveOrgRole(c.env, orgId, user)) != null
   const row = await c.env.AQUILLA_PG.prepare("SELECT settings FROM org_settings WHERE org_id = ?").bind(orgId).first<{ settings: string }>()
   const books = await projectBooks(c.env, projectId)
   const rules = [...savedFrom(row?.settings)]
     .filter(([, entry]) => isSavableRule(entry.rule, { projectBooks: books }))
     .map(([shape, entry]) => [shape, withoutVersion(entry.rule)] as const)
-  return c.json({ rules: Object.fromEntries(rules) })
+  return c.json({ rules: Object.fromEntries(rules), canKeep })
 })
 
 // Keep a rule the person confirmed an upload with. The browser sends only a

@@ -14,6 +14,7 @@ import {
   ruleEligible,
   sampleNames,
   shapesOf,
+  whyNotSavable,
   type NamingRule,
 } from "./naming-rule"
 import { askForNamingRule, loadSavedNamingRules, NamingRuleError } from "./naming-rule-client"
@@ -199,7 +200,16 @@ describe("a rule can't reach the app's own code by its names (review, Oct 30)", 
     const rules = { "mt-ch#_v#.ogg": good, "x#.ogg": { templates: [{ pattern: "{constructor}" }] }, "y#.ogg": "junk" }
     const fetchImpl = (async () => new Response(JSON.stringify({ rules }), { status: 200 })) as unknown as typeof fetch
     const saved = await loadSavedNamingRules({ projectId: "p", identityToken: "t", fetchImpl })
-    expect([...saved.keys()]).toEqual(["mt-ch#_v#.ogg"])
+    expect([...saved.rules.keys()]).toEqual(["mt-ch#_v#.ogg"])
+  })
+
+  it("passes on whether the server lets this person keep and forget the team's rules, and nothing it didn't say (Sam, Oct 30)", async () => {
+    const answer = (body: unknown, status = 200) => (async () => new Response(JSON.stringify(body), { status })) as unknown as typeof fetch
+    expect((await loadSavedNamingRules({ projectId: "p", identityToken: "t", fetchImpl: answer({ rules: {}, canKeep: true }) })).canKeep).toBe(true)
+    expect((await loadSavedNamingRules({ projectId: "p", identityToken: "t", fetchImpl: answer({ rules: {}, canKeep: false }) })).canKeep).toBe(false)
+    expect((await loadSavedNamingRules({ projectId: "p", identityToken: "t", fetchImpl: answer({ rules: {} }) })).canKeep).toBeNull()
+    expect((await loadSavedNamingRules({ projectId: "p", identityToken: "t", fetchImpl: answer({ rules: {}, canKeep: "yes" }) })).canKeep).toBeNull()
+    expect((await loadSavedNamingRules({ projectId: "p", identityToken: "t", fetchImpl: answer({ error: "x" }, 403) })).canKeep).toBeNull()
   })
 
   it("counts an answer that breaks the compiler as unusable, not as a crash", async () => {
@@ -578,5 +588,54 @@ describe("a rule is kept only when where it put the files looks like a reading (
     const rule = parseNamingRule({ templates: [{ pattern: "{book}-ch{chapter}_v{verse}" }], books: { Mt: "MAT" } })!
     expect(judged(rule, ["B/Mt-ch19_v01.ogg", "A/Mt-ch19_v02.ogg"]).j.keep).toBe(false)
     expect(judged(rule, ["A/Mt-ch19_v01.ogg", "B/Mt-ch19_v02.ogg"]).j.keep).toBe(true)
+  })
+})
+
+// Sam, Oct 30: the preview says whether a naming will be kept, and why not.
+describe("why a rule isn't kept", () => {
+  const mat = [book("mat", "MAT", "Matthew", MAT)]
+  const why = (answer: unknown, paths: string[]) => {
+    const rule = parseNamingRule(answer)!
+    const landed = landAll(rule, paths, mat)
+    return judgeRule(rule, new Set(landed.made.keys()), landed.made, landed.assignments, landed.names, landed.where)
+  }
+  const chapterVerse = { templates: [{ pattern: "{book}-ch{chapter}_v{verse}" }], books: { Mt: "MAT" } }
+
+  it("gives no reason for a rule that is kept", () => {
+    const j = why(chapterVerse, ["Files/Mt-ch19_v01.ogg", "Files/Mt-ch19_v02.ogg"])
+    expect(j.keep).toBe(true)
+    expect(j.notKept).toEqual([])
+  })
+
+  it("says a book or chapter it was told, or names that don't say them, as \"fixed\"", () => {
+    expect(why({ templates: [{ pattern: "sermon_{verse}" }], book: "MAT", chapter: 20 }, ["Files/sermon_01.ogg", "Files/sermon_02.ogg"]).notKept).toEqual(["fixed"])
+    expect(whyNotSavable(parseNamingRule({ templates: [{ pattern: "IMG_{line}" }], file: "Welcome letter" })!)).toBe("fixed")
+    expect(whyNotSavable(parseNamingRule({ templates: [{ pattern: "line {line}" }] })!)).toBe("fixed")
+  })
+
+  it("says a book word that names no book as \"bookWord\"", () => {
+    const j = why({ templates: [{ pattern: "{book}-ch{chapter}_v{verse}" }], books: { Sermon: "MAT" } }, ["Files/Sermon-ch20_v01.ogg", "Files/Sermon-ch20_v02.ogg"])
+    expect(j.placed.size).toBe(2)
+    expect(j.notKept).toEqual(["bookWord"])
+    expect(whyNotSavable(parseNamingRule(chapterVerse)!)).toBeNull()
+  })
+
+  it("says names it didn't place as \"notAllPlaced\"", () => {
+    expect(why(chapterVerse, ["Files/Mt-ch19_v01.ogg", "Files/Mt-ch19_v02.ogg", "Files/Mt-ch19_v99.ogg"]).notKept).toEqual(["notAllPlaced"])
+  })
+
+  it("says two files on one line as \"sharedLine\"", () => {
+    const j = why({ templates: [{ pattern: "{book}{chapter}-{take}_t{verse}" }], books: { Mt: "MAT" } }, ["Files/Mt5-1_t1.ogg", "Files/Mt5-2_t1.ogg", "Files/Mt5-3_t1.ogg"])
+    expect(j.notKept).toEqual(["sharedLine"])
+  })
+
+  it("says files out of order or scattered as \"scattered\"", () => {
+    const swapped = { templates: [{ pattern: "{book}-ch{verse}_v{chapter}" }], books: { Mt: "MAT" } }
+    expect(why(swapped, ["Files/Mt-ch05_v01.ogg", "Files/Mt-ch05_v02.ogg", "Files/Mt-ch05_v03.ogg", "Files/Mt-ch05_v04.ogg"]).notKept).toEqual(["scattered"])
+  })
+
+  it("gives every reason that holds, in the order the preview says them", () => {
+    const j = why({ templates: [{ pattern: "{book}-ch{chapter}_v{verse}" }], books: { Sermon: "MAT" } }, ["Files/Sermon-ch19_v01.ogg", "Files/Sermon-ch19_v20.ogg", "Files/Sermon-ch19_v99.ogg"])
+    expect(j.notKept).toEqual(["bookWord", "notAllPlaced", "scattered"])
   })
 })

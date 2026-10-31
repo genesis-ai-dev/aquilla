@@ -69,6 +69,13 @@ export async function askForNamingRule(opts: Call & {
   return rule
 }
 
+/** The team's saved rules by names' shape, and whether this person may keep
+ *  and forget them: the server's own answer, null when it didn't give one. */
+export interface SavedNamingRules {
+  rules: Map<string, NamingRule>
+  canKeep: boolean | null
+}
+
 /**
  * The team's saved rules by names' shape. Never throws: no saved rules is fine.
  * Each entry is read on its own, so one bad entry is dropped and the rest still
@@ -76,20 +83,23 @@ export async function askForNamingRule(opts: Call & {
  * (read with the project's Bible files, as the server read them), is never
  * applied, even if an older version of the app saved one.
  */
-export async function loadSavedNamingRules(opts: Call & { projectBooks?: ProjectBooks }): Promise<Map<string, NamingRule>> {
+export async function loadSavedNamingRules(opts: Call & { projectBooks?: ProjectBooks }): Promise<SavedNamingRules> {
   let rules: unknown
+  let canKeep: boolean | null
   try {
     const response = await (opts.fetchImpl ?? fetch)(`${NAMING_RULE_URL}/saved?projectId=${encodeURIComponent(opts.projectId)}`, {
       headers: { Authorization: `Bearer ${opts.identityToken}` },
       signal: opts.signal,
     })
-    if (!response.ok) return new Map()
-    rules = ((await response.json()) as { rules?: unknown } | null)?.rules
+    if (!response.ok) return { rules: new Map(), canKeep: null }
+    const body = (await response.json()) as { rules?: unknown; canKeep?: unknown } | null
+    rules = body?.rules
+    canKeep = typeof body?.canKeep === "boolean" ? body.canKeep : null
   } catch {
-    return new Map()
+    return { rules: new Map(), canKeep: null }
   }
   const out = new Map<string, NamingRule>()
-  if (!rules || typeof rules !== "object" || Array.isArray(rules)) return out
+  if (!rules || typeof rules !== "object" || Array.isArray(rules)) return { rules: out, canKeep }
   for (const [shape, value] of Object.entries(rules as Record<string, unknown>)) {
     try {
       const rule = parseNamingRule(value)
@@ -98,7 +108,7 @@ export async function loadSavedNamingRules(opts: Call & { projectBooks?: Project
       // dropped; the others still apply
     }
   }
-  return out
+  return { rules: out, canKeep }
 }
 
 /** Keep a rule the person confirmed an upload with. Never throws. */

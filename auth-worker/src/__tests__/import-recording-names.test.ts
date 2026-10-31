@@ -49,10 +49,10 @@ function save(jwt: string, rule: unknown = GOOD_RULE, shapes: string[] = ["mt-ch
   return app.request(SAVED, { method: "POST", headers: authHeader(jwt), body: JSON.stringify({ projectId, shapes, rule }) }, at)
 }
 
-async function readSaved(jwt: string, projectId = PROJECT_ID): Promise<{ status: number; rules: Record<string, unknown> }> {
+async function readSaved(jwt: string, projectId = PROJECT_ID): Promise<{ status: number; rules: Record<string, unknown>; canKeep?: boolean }> {
   const response = await app.request(`${SAVED}?projectId=${projectId}`, { headers: authHeader(jwt) }, testEnv())
-  const body = await response.json().catch(() => ({})) as { rules?: Record<string, unknown> }
-  return { status: response.status, rules: body.rules ?? {} }
+  const body = await response.json().catch(() => ({})) as { rules?: Record<string, unknown>; canKeep?: boolean }
+  return { status: response.status, rules: body.rules ?? {}, canKeep: body.canKeep }
 }
 
 async function storedShapes(orgId = 71): Promise<string[]> {
@@ -227,6 +227,21 @@ describe("the organization's saved naming rules", () => {
     expect(await storedShapes()).toEqual([])
     expect((await save(lead)).status).toBe(200)
     expect(await storedShapes()).toEqual(["mt-ch#_v#.ogg"])
+  })
+
+  it("says who may keep and forget the team's rules, by the same gate as those routes (Sam, Oct 30)", async () => {
+    const lead = await seedLead()
+    const projectOnlyLead = await seedProjectMember(3, "project-only-lead", 500)
+    const contributor = await seedProjectMember(4, "contributor", 400)
+    expect((await readSaved(lead)).canKeep).toBe(true)
+    // A lead added only to the project may read and use the rules, but the
+    // server won't let them keep or forget one, so the preview mustn't offer it.
+    const projectOnly = await readSaved(projectOnlyLead)
+    expect(projectOnly.status).toBe(200)
+    expect(projectOnly.canKeep).toBe(false)
+    const forget = await app.request(SAVED, { method: "DELETE", headers: authHeader(projectOnlyLead), body: JSON.stringify({ projectId: PROJECT_ID, shapes: ["mt-ch#_v#.ogg"] }) }, testEnv())
+    expect(forget.status).toBe(403)
+    expect((await readSaved(contributor)).canKeep).toBe(false)
   })
 
   it("lets anyone who may upload recordings read the team's rules, so a contributor's upload uses them too", async () => {

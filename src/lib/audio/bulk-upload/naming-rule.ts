@@ -28,12 +28,13 @@
 import {
   bookForWord,
   compileRule,
-  isSavableRule,
   MAX_OUTLINE_CHARS,
   normalizeName,
+  whyNotSavable,
   type NamingRule,
   type Placeholder,
   type ProjectBooks,
+  type UnsavableReason,
 } from "../../../../shared/recording-naming-rule"
 import { englishBookName } from "./book-names"
 import { LAST_VERSES } from "./verse-counts"
@@ -50,6 +51,8 @@ export {
   type NamingRule,
   type Placeholder,
   type ProjectBooks,
+  type UnsavableReason,
+  whyNotSavable,
 } from "../../../../shared/recording-naming-rule"
 
 function extension(name: string): string {
@@ -224,6 +227,13 @@ export function ruleEligible(a: Assignment): boolean {
   return !a.reason || !NOT_FOR_RULE.has(a.reason.code)
 }
 
+/** Why a rule isn't kept for the team, in the order the preview says them
+ *  (Sam, Oct 30): the rule leans on a book, chapter or file it was told, or
+ *  its names don't say them; a book word names no book; not every name was
+ *  placed by reading it; two files landed on one line as takes; the files
+ *  landed out of order or scattered. */
+export type NotKeptReason = UnsavableReason | "notAllPlaced" | "sharedLine" | "scattered"
+
 export interface RuleJudgement {
   /** The names the matcher placed by reading the rule's name for them. */
   placed: ReadonlySet<number>
@@ -232,6 +242,8 @@ export interface RuleJudgement {
   failures: RuleFailure[]
   /** True when the team may keep the rule for the next folder named this way. */
   keep: boolean
+  /** Why it isn't kept: empty exactly when `keep` is true. */
+  notKept: NotKeptReason[]
 }
 
 /** Where the files sit and where their lines are, for judging a rule. */
@@ -323,8 +335,11 @@ export function judgeRule(
     if (a?.chosen || a?.reason?.code === "skipped") continue
     failures.push({ name: nameOf(index), made: made.get(index) ?? null, reason: a?.method === "order" ? "byOrder" : a?.reason?.code ?? "noTemplate" })
   }
-  const keep = eligible.size > 0 && placed.size === eligible.size && !shared
-    && isSavableRule(rule, { projectBooks: where.projectBooks })
-    && looksRead([...placed].map((i) => byIndex.get(i)!), where)
-  return { placed, failures, keep }
+  const notKept: NotKeptReason[] = []
+  const unsavable = whyNotSavable(rule, { projectBooks: where.projectBooks })
+  if (unsavable) notKept.push(unsavable)
+  if (eligible.size === 0 || placed.size !== eligible.size) notKept.push("notAllPlaced")
+  if (shared) notKept.push("sharedLine")
+  if (!looksRead([...placed].map((i) => byIndex.get(i)!), where)) notKept.push("scattered")
+  return { placed, failures, keep: notKept.length === 0, notKept }
 }

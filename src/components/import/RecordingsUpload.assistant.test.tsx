@@ -58,12 +58,17 @@ let calls: Route[] = []
 let answers: unknown[] = []
 let saved: Record<string, unknown> = {}
 let lookupDelay = 30
+/** What the server says about keeping and forgetting the team's namings. */
+let canKeep: boolean | undefined = true
+let forgetAnswer: "ok" | "refused" | "offline" = "ok"
 
 beforeEach(() => {
   calls = []
   answers = [RULE]
   saved = {}
   lookupDelay = 30
+  canKeep = true
+  forgetAnswer = "ok"
   started.mockClear()
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input)
@@ -78,9 +83,13 @@ beforeEach(() => {
         })
       }
       await new Promise((r) => setTimeout(r, lookupDelay))
-      return new Response(JSON.stringify({ rules: saved }), { status: 200 })
+      return new Response(JSON.stringify({ rules: saved, canKeep }), { status: 200 })
     }
-    if (url.includes("/recording-names/saved") && method === "DELETE") return new Response(JSON.stringify({ forgotten: true }), { status: 200 })
+    if (url.includes("/recording-names/saved") && method === "DELETE") {
+      if (forgetAnswer === "offline") throw new TypeError("Failed to fetch")
+      if (forgetAnswer === "refused") return new Response(JSON.stringify({ error: "org_member_required" }), { status: 403 })
+      return new Response(JSON.stringify({ forgotten: true }), { status: 200 })
+    }
     if (url.includes("/recording-names/saved")) return new Response(JSON.stringify({ saved: true }), { status: 200 })
     if (url.includes("/recording-names")) {
       // Out of answers means the model failed: never a good rule by default.
@@ -653,5 +662,130 @@ describe("smaller review items (review, Oct 30)", () => {
     await settle()
     expect(screen.getAllByTestId("recordings-row")).toHaveLength(2)
     expect(vi.mocked(loadTargetFile)).toHaveBeenCalledTimes(1)
+  })
+})
+
+// Sam, Oct 30: "Forget this naming for the team" only for someone the server
+// will let forget it, and a plain word when it didn't go through.
+describe("forgetting a team's naming", () => {
+  it("doesn't offer Forget to a lead the server won't let forget it, only Don't use", async () => {
+    saved = { "mt-ch#_v#": RULE }
+    canKeep = false
+    review()
+    await screen.findByTestId("recordings-assistant-undo")
+    await settle()
+    expect(screen.queryByTestId("recordings-assistant-forget")).toBeNull()
+  })
+
+  it("doesn't offer Forget before the server has said", async () => {
+    saved = { "mt-ch#_v#": RULE }
+    canKeep = undefined
+    review()
+    await screen.findByTestId("recordings-assistant-undo")
+    await settle()
+    expect(screen.queryByTestId("recordings-assistant-forget")).toBeNull()
+  })
+
+  for (const failure of ["refused", "offline"] as const) {
+    it(`says the naming wasn't forgotten, and keeps it in use, when the server ${failure === "refused" ? "refuses" : "can't be reached"}`, async () => {
+      saved = { "mt-ch#_v#": RULE }
+      forgetAnswer = failure
+      review()
+      fireEvent.click(await screen.findByTestId("recordings-assistant-forget"))
+      expect(await screen.findByTestId("recordings-assistant-forget-failed")).toHaveTextContent("The naming wasn't forgotten, so your team still has it.")
+      expect(forgets()).toHaveLength(1)
+      const rows = screen.getAllByTestId("recordings-row")
+      expect(rows).toHaveLength(3)
+      expect(within(rows[0]).getByTestId("recordings-how")).toHaveTextContent("by your team's saved rule")
+      expect(screen.queryAllByTestId("recordings-unmatched-row")).toHaveLength(0)
+      expect(screen.getByTestId("recordings-assistant-forget")).toBeEnabled()
+    })
+  }
+
+  it("sets the naming aside only once the server has forgotten it", async () => {
+    saved = { "mt-ch#_v#": RULE }
+    review()
+    fireEvent.click(await screen.findByTestId("recordings-assistant-forget"))
+    await waitFor(() => expect(screen.getAllByTestId("recordings-unmatched-row")).toHaveLength(3))
+    expect(screen.queryByTestId("recordings-assistant-forget-failed")).toBeNull()
+  })
+})
+
+// Sam, Oct 30: one quiet line under the assistant's note says whether the
+// team will keep the naming, and an (i) says why not.
+describe("whether the naming will be kept", () => {
+  const keepLine = () => screen.findByTestId("recordings-assistant-keep")
+  const CONSTANT = { templates: [{ pattern: "sermon_{verse}" }], book: "MAT", chapter: 20, explanation: "Every recording is Matthew 20." }
+
+  it("says the team will keep a naming it will keep", async () => {
+    review(DENSE)
+    fireEvent.click(await enabledAsk())
+    const line = await keepLine()
+    expect(line).toHaveTextContent("Your team will keep this naming for next time.")
+    expect(line).toHaveAttribute("data-keep", "true")
+    expect(screen.queryByTestId("recordings-assistant-why-toggle")).toBeNull()
+  })
+
+  it("says a naming is for this upload only, with the reason behind an (i) that opens in place", async () => {
+    answers = [CONSTANT]
+    review(["sermon_01.ogg", "sermon_02.ogg"])
+    fireEvent.click(await enabledAsk())
+    const line = await keepLine()
+    expect(line).toHaveTextContent("This naming is used for this upload only.")
+    expect(line).toHaveAttribute("data-keep", "false")
+    const why = screen.getByTestId("recordings-assistant-why")
+    expect(why).toHaveAttribute("data-open", "false")
+    const toggle = screen.getByTestId("recordings-assistant-why-toggle")
+    expect(toggle).toHaveAccessibleName("Why this naming isn't kept")
+    fireEvent.click(toggle)
+    expect(why).toHaveAttribute("data-open", "true")
+    expect(why).toHaveTextContent("The names don't say the book and the chapter themselves.")
+    fireEvent.click(toggle)
+    expect(why).toHaveAttribute("data-open", "false")
+  })
+
+  it("gives a made-up book word as the reason", async () => {
+    answers = [{ templates: [{ pattern: "{book}-ch{chapter}_v{verse}" }], books: { Sermon: "MAT" }, explanation: "Sermon is Matthew." }]
+    review(["Sermon-ch20_v01.ogg", "Sermon-ch20_v02.ogg"])
+    fireEvent.click(await enabledAsk())
+    await keepLine()
+    expect(screen.getByTestId("recordings-assistant-why")).toHaveTextContent("A word in the names stands for a book here, but it isn't a name of that book.")
+  })
+
+  it("gives files out of order or scattered as the reason", async () => {
+    answers = [{ templates: [{ pattern: "{book}-ch{verse}_v{chapter}" }], books: { Mt: "MAT" }, explanation: "The verse, then the chapter." }]
+    review(["Mt-ch05_v01.ogg", "Mt-ch05_v02.ogg", "Mt-ch05_v03.ogg"])
+    fireEvent.click(await enabledAsk())
+    await keepLine()
+    expect(screen.getByTestId("recordings-assistant-why")).toHaveTextContent("The recordings didn't land in order on lines close together")
+  })
+
+  it("changes to this upload only when a line is chosen by hand", async () => {
+    review(DENSE)
+    fireEvent.click(await enabledAsk())
+    expect(await keepLine()).toHaveAttribute("data-keep", "true")
+    await chooseByHand(1, "Matthew 19:9")
+    await waitFor(() => expect(screen.getByTestId("recordings-assistant-keep")).toHaveAttribute("data-keep", "false"))
+    expect(screen.getByTestId("recordings-assistant-why")).toHaveTextContent("Not every recording was placed by reading its name.")
+  })
+
+  it("tells a lead who isn't in the organization that it's for this upload only, and keeps nothing", async () => {
+    canKeep = false
+    review(DENSE)
+    fireEvent.click(await enabledAsk())
+    expect(await keepLine()).toHaveTextContent("This naming is used for this upload only.")
+    expect(screen.getByTestId("recordings-assistant-why")).toHaveTextContent("Only a project lead who is also in the project's organization can keep a naming for the team.")
+    fireEvent.click(screen.getByTestId("recordings-confirm"))
+    await waitFor(() => expect(started).toHaveBeenCalled())
+    await settle()
+    expect(saves()).toHaveLength(0)
+  })
+
+  it("says nothing about keeping a naming the team already keeps", async () => {
+    saved = { "mt-ch#_v#": RULE }
+    review()
+    await screen.findByTestId("recordings-assistant-note")
+    await settle()
+    expect(screen.queryByTestId("recordings-assistant-keep")).toBeNull()
   })
 })

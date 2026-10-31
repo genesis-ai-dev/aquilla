@@ -7,12 +7,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { RoleLabel } from "@/components/RoleLabel"
-import {
-  ALL_ROLE_OPTIONS,
-  roleDescription,
-  roleDisplayText,
-  roleName,
-} from "@/lib/frontier/roles"
+import { resolveRoleName, roleDescription, roleName } from "@/lib/frontier/roles"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { cn } from "@/lib/utils"
 
 export type RoleSelectOption = {
@@ -24,8 +20,11 @@ export type RoleSelectOption = {
 export interface RoleSelectProps {
   value: number | null | undefined
   onValueChange: (level: number) => void
-  /** Roles offered in the menu. Defaults to the full seven-rung ladder. */
-  options?: readonly RoleSelectOption[]
+  /**
+   * Roles offered in the menu. Required: each door passes its level's list
+   * from `roleChoices()` (AQU-2289), so no picker can fall back to all seven.
+   */
+  options: readonly RoleSelectOption[]
   /**
    * When the current value sits outside `options` (e.g. Owner above a
    * grantable cap), include it so the closed trigger still shows a name.
@@ -55,7 +54,7 @@ function resolveOption(opt: RoleSelectOption): Required<RoleSelectOption> {
 export function RoleSelect({
   value,
   onValueChange,
-  options = ALL_ROLE_OPTIONS,
+  options,
   currentOption = null,
   size = "default",
   disabled,
@@ -64,6 +63,7 @@ export function RoleSelect({
   className,
   contentClassName,
 }: RoleSelectProps) {
+  const t = useT()
   const resolved = options.map(resolveOption)
   const valueStr = value != null ? String(value) : ""
   const valueInOptions = resolved.some((o) => o.level === value)
@@ -72,13 +72,15 @@ export function RoleSelect({
       ? resolveOption(currentOption)
       : null
 
+  // The closed trigger shows these labels: the catalog's name, so it reads
+  // in sentence case and in the reader's language, like the open list.
   const items = [
     ...(extra
-      ? [{ value: String(extra.level), label: roleDisplayText(extra.name) }]
+      ? [{ value: String(extra.level), label: resolveRoleName(t, extra.name) }]
       : []),
     ...resolved.map((o) => ({
       value: String(o.level),
-      label: roleDisplayText(o.name),
+      label: resolveRoleName(t, o.name),
     })),
   ]
 
@@ -108,7 +110,7 @@ export function RoleSelect({
           {resolved.map((o) => (
             <SelectItem key={o.level} value={String(o.level)} multiline>
               <span className="flex min-w-0 flex-col gap-0.5">
-                <RoleLabel name={o.name} plain className="font-medium" />
+                <RoleLabel name={o.name} plain className="font-medium normal-case" />
                 {o.description ? (
                   <span className="text-xs font-normal whitespace-normal text-muted-foreground normal-case">
                     {o.description}

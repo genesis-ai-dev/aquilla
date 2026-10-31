@@ -19,7 +19,8 @@ export function setStationUi(patch: Partial<StationUi>): void {
   const next = { ...ui, ...patch }
   if ((Object.keys(patch) as Array<keyof StationUi>).every((k) => next[k] === ui[k])) return
   ui = next
-  for (const l of listeners) l()
+  // A copy: a listener re-subscribing as it runs must not be called again.
+  for (const l of [...listeners]) l()
 }
 
 export function getStationUi(): StationUi {

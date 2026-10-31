@@ -22,8 +22,13 @@ let target: StationTarget | null = null
 const listeners = new Set<() => void>()
 const showListeners = new Set<() => void>()
 
+// Every loop over listeners walks a copy: a listener that re-subscribes while
+// it runs (an effect re-running inside a flushSync) is added back to the live
+// set, and a Set's iterator visits what is added during the walk. Walking the
+// set itself called the dock's "show the Station" again and again, forever,
+// and froze the page on "Edit in the Station".
 function notify(): void {
-  for (const l of listeners) l()
+  for (const l of [...listeners]) l()
 }
 
 let available = false
@@ -58,7 +63,7 @@ export function openInStation(next: StationTarget | null, opts: { show?: boolean
     message = opts.message ?? null
     notify()
   }
-  if (opts.show) for (const l of showListeners) l()
+  if (opts.show) for (const l of [...showListeners]) l()
 }
 
 export function useStationMessage(): string | null {

@@ -155,7 +155,7 @@ import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
 import type { CellEditingTier, ProjectWideSettings } from "@/lib/sync/project-settings"
 import { FLOOR_LABEL } from "@/pages/settings/constants"
 import { CELL_EDITING_FLOOR_OPTIONS, cellEditingTierLabel } from "@/components/ProjectSettings/cell-editing-floor-options"
-import { OrgDefaultSource, SELECT_LIST_BELOW, orgBooleanOptionLabel } from "@/components/ProjectSettings/OrgDefaultSource"
+import { OrgDefaultSource, orgBooleanOptionLabel } from "@/components/ProjectSettings/OrgDefaultSource"
 import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { PERMISSION_DOCS_URL } from "@/components/PermissionDeniedAlert"
@@ -2412,7 +2412,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                       >
                         <SelectValue />
                       </SelectTrigger>
-                      <SelectContent {...SELECT_LIST_BELOW}>
+                      <SelectContent>
                         <SelectGroup>
                           {CELL_EDITING_FLOOR_OPTIONS.map((o) => (
                             <SelectItem key={o.value} value={o.value}>{t(o.labelKey)}</SelectItem>

@@ -4,13 +4,13 @@ Smoke twin: `e2e/specs/collab/cross-user-comment.smoke.spec.ts`
 
 ## Preconditions
 
-- `alice` is logged in and is a maintainer of Dev Org (org id 9).
+- `alice` is logged in and is a maintainer of Dev Org (org id 1).
 - `bob` is logged in in a separate session.
 - The fixture `e2e/fixtures/sample.md` is on disk.
 
 ## Steps
 
-1. **Alice** creates a project from `/orgs/9/projects`: click **New Project**, fill **Project title**, **Source Language** (`en`), **Target language(s)** (`fr`), click **Create Project**.
+1. **Alice** creates a project from `/orgs/1/projects`: click **New project**, fill **Project name**, **Source language** (`en`), **Language lanes** (`fr`), click **Create project**.
 2. **Alice** clicks **Project settings**, then **Members** (the tab reads **Members Roles & invites**), then **Add a member**. She types `bob` into the **Aquilla username** field and clicks **Add**. A `bob` suggestion checkbox appears while typing; leave it alone (see notes). The Members table shows a row for bob with role **Contributor**. Navigating away closes the dialog.
 3. **Alice** clicks **Open project**, clicks **Import**, then the **Upload files** card, then uploads `sample.md`. The **Import preview** shows. She clicks **Confirm import**. The editor shows seven cells.
 4. **Alice** clicks the first row's **Open cell details** button. The row expands and its action buttons stay visible. She clicks that row's **Add comment** button. A comments drawer opens on the right, with a **Start a new comment thread...** textbox and a **Post** button.

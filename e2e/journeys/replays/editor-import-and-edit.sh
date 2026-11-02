@@ -6,11 +6,11 @@ TEXT="Hello agent $(date +%H%M%S)"
 FIXTURE="$(cd "$(dirname "$0")/../../fixtures" && pwd)/sample.md"
 login alice || fail "login"
 ab open "$BASE/orgs/$ORG/projects" >/dev/null && ab wait --load networkidle >/dev/null
-ab find role button click --name "New Project" >/dev/null || fail "New Project button"
-ab wait --text "Create New Project" >/dev/null || fail "dialog"
+ab find role button click --name "New project" >/dev/null || fail "New project button"
+ab wait --text "Create new project" >/dev/null || fail "dialog"
 ab wait 'input' >/dev/null; ab wait 300 >/dev/null
-ab find label "Project title" fill "$NAME" >/dev/null && ab find label "Source Language" fill "en" >/dev/null && ab find label "Target language(s)" fill "fr" >/dev/null || fail "fill"
-ab find role button click --name "Create Project" >/dev/null || fail "Create Project button"
+ab find label "Project name" fill "$NAME" >/dev/null && ab find label "Source language" fill "en" >/dev/null && ab find label "Language lanes" fill "fr" >/dev/null || fail "fill"
+ab find role button click --name "Create project" >/dev/null || fail "Create project button"
 ab wait --text "Open project" >/dev/null || fail "overview"
 ab find role button click --name "Open project" >/dev/null || fail "Open project button"
 ab wait --load networkidle >/dev/null

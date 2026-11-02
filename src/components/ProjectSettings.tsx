@@ -399,6 +399,10 @@ export function ProjectSettings(props: ProjectSettingsProps = {}) {
 
 function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
   const t = useT()
+  // The dialog opens with the focus on itself, not on its first button: that
+  // is the settings Undo, so Space or Enter on opening would undo a settings
+  // change, even one from an earlier session (Nov 2 shortcut review).
+  const surfaceRef = useRef<HTMLDivElement>(null)
   const { id, section: sectionParam } = useParams<{ id: string; section?: string }>()
   const navigate = useNavigate()
   const location = useLocation()
@@ -1382,6 +1386,8 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
       return (
         <Dialog open onOpenChange={(open) => { if (!open) closeSettings() }}>
           <DialogContent
+            ref={surfaceRef}
+            initialFocus={surfaceRef}
             className={`h-[min(90dvh,56rem)] gap-0 p-0 ${modalWidthClass}`}
             data-testid="project-settings-dialog"
           >
@@ -2803,6 +2809,8 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
   const shell = modal ? (
     <Dialog open onOpenChange={(open) => { if (!open) closeSettings() }}>
       <DialogContent
+        ref={surfaceRef}
+        initialFocus={surfaceRef}
         className={`h-[min(90dvh,56rem)] gap-0 p-0 ${modalWidthClass}`}
         data-testid="project-settings-dialog"
       >

@@ -6,6 +6,8 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { MembersMatrixCellEditor } from "./MembersMatrixCellEditor"
 import { ROLE, roleDescription } from "@/lib/frontier/roles"
 import type { MatrixCell } from "@/hooks/useProjectsMembersMatrix"
+import { shownCase } from "@/test-utils/shown-case"
+import type { SecondarySrc } from "@/lib/frontier/members"
 
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "jwt-pm", username: "pm", createdAt: "x" }, loading: false }),
@@ -27,7 +29,12 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }
 
-function renderCell(cell: MatrixCell | undefined, callerLevel: number | null, username = "carol") {
+function renderCell(
+  cell: MatrixCell | undefined,
+  callerLevel: number | null,
+  username = "carol",
+  secondarySources: SecondarySrc[] = [],
+) {
   const onMutated = vi.fn()
   render(
     <table>
@@ -44,6 +51,7 @@ function renderCell(cell: MatrixCell | undefined, callerLevel: number | null, us
             onMutated={onMutated}
             cellClassName=""
             sourceBadge={cell ? "D" : ""}
+            secondarySources={secondarySources}
           />
         </tr>
       </tbody>
@@ -111,5 +119,18 @@ describe("MembersMatrixCellEditor — the one role dialog (AQU-2289)", () => {
     fireEvent.click(await screen.findByRole("button", { name: /remove from project/i }))
     await waitFor(() => expect(removeProjectMember).toHaveBeenCalledWith("jwt-pm", "gen", 4))
     await waitFor(() => expect(onMutated).toHaveBeenCalled())
+  })
+})
+
+// AQU-2332: the "Also has access via" list capitalised every word of each
+// line, so its role chips read "Project Lead".
+describe("MembersMatrixCellEditor — role chips (AQU-2332)", () => {
+  it("names a second way in with the catalog's sentence-case role", async () => {
+    renderCell(direct(ROLE.CONTRIBUTOR), ROLE.OWNER, "carol", [
+      { source: "group", level: ROLE.PROJECT_LEAD, name: "project_lead" },
+    ])
+    fireEvent.click(screen.getByRole("button", { name: "Edit carol's role on this project" }))
+    const also = await screen.findByTestId("matrix-cell-also-via")
+    expect(shownCase(within(also).getByText("Project lead"))).toBe("as written")
   })
 })

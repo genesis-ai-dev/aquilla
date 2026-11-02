@@ -1,7 +1,11 @@
+import "@/test-utils/all-catalogs"
 import { render, screen } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it } from "vitest"
 import { RoleLabel } from "./RoleLabel"
 import { ROLE } from "@/lib/frontier/roles"
+import { I18nProvider } from "@/lib/i18n/I18nProvider"
+import { LOCALE_STORAGE_KEY } from "@/lib/i18n/store"
+import { shownCase } from "@/test-utils/shown-case"
 
 describe("RoleLabel", () => {
   it("renders a muted grey badge for every role", () => {
@@ -27,8 +31,27 @@ describe("RoleLabel", () => {
     expect(label.tagName).toBe("SPAN")
   })
 
-  it("title-cases each word, including multi-word roles", () => {
-    render(<RoleLabel name="project_lead" />)
-    expect(screen.getByText("Project lead")).toHaveClass("capitalize")
+  // AQU-2332: the chip's CSS `capitalize` turned the catalog's "Project lead"
+  // into "Project Lead" on screen. It shows the catalog's name as written, in
+  // sentence case and in the reader's language, like the role dialog (AQU-2289).
+  describe("the role's name", () => {
+    afterEach(() => window.localStorage.clear())
+
+    it("is the catalog's sentence-case name, as a chip and plain", () => {
+      const { rerender } = render(<RoleLabel name="project_lead" />)
+      expect(shownCase(screen.getByText("Project lead"))).toBe("as written")
+      rerender(<RoleLabel name={ROLE.PROJECT_LEAD} plain />)
+      expect(shownCase(screen.getByText("Project lead"))).toBe("as written")
+    })
+
+    it("is in the reader's language", () => {
+      window.localStorage.setItem(LOCALE_STORAGE_KEY, "fr")
+      render(
+        <I18nProvider>
+          <RoleLabel name={ROLE.PROJECT_LEAD} />
+        </I18nProvider>,
+      )
+      expect(shownCase(screen.getByText("Chef de projet"))).toBe("as written")
+    })
   })
 })

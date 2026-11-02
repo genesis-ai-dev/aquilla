@@ -27,6 +27,8 @@ import type { VersionChanges } from "@/lib/sync/outbox-types"
 import { loadStationPcm, pcmKey, putStationPcm } from "@/lib/station/load"
 import { renderSegments } from "@/lib/station/render"
 import { formatStationTime } from "@/lib/station/time"
+import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
+import { isApplePlatform } from "@/lib/platform"
 import { versionOfId } from "@/lib/station/version"
 import { saveStationVersion, type VersionPlacement } from "@/lib/station/save"
 import {
@@ -341,32 +343,46 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     const el = e.target as HTMLElement | null
     if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return
+    // The Station's own menus (Save's, the speed's) are drawn elsewhere on
+    // the page but still pass their keys up here: they keep them, so Esc
+    // closes the menu and a letter never runs a Station command (Nov 2
+    // shortcut review).
+    if (el?.closest('[role="menu"], [role="listbox"], [role="dialog"]')) return
     const k = e.key
-    // Slice 14: while recording, Space and Esc stop it and other keys wait;
-    // after, Enter keeps it and Esc takes it out.
-    if (recording || (rec.phase.kind === "pending" && (k === "Enter" || k === "Escape"))) {
+    // A letter as typed, or the key's place when the layout types no Latin
+    // letter (Russian, Arabic, Thai…), so K, I, A, L, ⌘Z and ⌘S still work.
+    const letter = /^[a-z]$/i.test(k) ? k.toLowerCase() : /^Key[A-Z]$/.test(e.code) ? e.code.slice(3).toLowerCase() : ""
+    // Slice 14: while recording, Space and Esc stop it and other keys wait.
+    // After, Enter keeps it; Esc never throws it away (the recording window
+    // asks before it does): Record again or Undo takes it out.
+    if (recording || (rec.phase.kind === "pending" && k === "Enter")) {
       if (recording) {
         if (k === " " || k === "Escape") rec.stop()
-      } else if (k === "Enter") rec.keep()
-      else rec.drop()
+      } else rec.keep()
       e.preventDefault()
       e.stopPropagation()
       return
     }
     const mod = e.metaKey || e.ctrlKey
     let handled = true
-    if (mod && !e.shiftKey && (k === "z" || k === "Z")) handled = ed.undoUnsaved()
+    if (mod && !e.shiftKey && letter === "z") handled = ed.undoUnsaved()
     // ⌘S is Save: over the take, wherever it is used (Sam, Nov 2).
-    else if (mod && (k === "s" || k === "S")) void save({ mode: "over", scope: "all" })
+    else if (mod && letter === "s") void save({ mode: "over", scope: "all" })
     else if (mod || e.altKey) handled = false
-    else if (k === " ") ed.togglePlay()
-    else if (k === "k" || k === "K") void ed.keepSelection()
+    // Space presses a focused button rather than playing (playback-keys.ts).
+    else if (k === " ") {
+      if (spacebarShouldToggle(e.nativeEvent)) ed.togglePlay()
+      else handled = false
+    } else if (letter === "k") void ed.keepSelection()
     else if ((k === "Backspace" || k === "Delete") && editable && !tooLong) ed.deleteSelection()
-    else if ((k === "i" || k === "I") && editable && !tooLong && ed.sel) setInsertOpen(true)
-    else if (k === "a" || k === "A") approve()
+    else if (letter === "i" && editable && !tooLong && ed.sel) setInsertOpen(true)
+    else if (letter === "a") approve()
     else if (k === "=" || k === "+") ed.zoomBy(2)
     else if (k === "-") ed.zoomBy(0.5)
-    else if (k === "l" || k === "L") ed.toggleLoop()
+    else if (letter === "l") ed.toggleLoop()
+    // The timeline's S (split) and B (blade) listen on the whole window: from
+    // the Station they would cut the take open here, unseen. They stop here.
+    else if (letter === "s" || letter === "b") handled = true
     else if (k === "Escape") {
       ed.clearSel()
       setInsertOpen(false)
@@ -462,7 +478,7 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
             locked={recording}
             {...(rec.busy ? { status: <StationRecordBar rec={rec} /> } : {})}
             calm={calm}
-            hint={editable ? t("editor.station.hint") : t("editor.station.hintListen")}
+            hint={editable ? t("editor.station.hint", { mod: modKey() }) : t("editor.station.hintListen")}
             onMessage={setMessage}
           />
           <StationHistory
@@ -649,6 +665,9 @@ export function StationHeader({
   )
 }
 
+/** ⌘ on a Mac, Ctrl+ elsewhere, before a letter in the Station's key lists. */
+const modKey = () => (isApplePlatform() ? "⌘" : "Ctrl+")
+
 /** What the (i) opens: each control in one plain line, then the keys. */
 function StationControlsHelp() {
   const t = useT()
@@ -660,7 +679,7 @@ function StationControlsHelp() {
     [t("editor.station.helpVolumeTerm"), t("editor.station.helpVolume")],
     [t("editor.station.helpFadesTerm"), t("editor.station.helpFades")],
     [t("editor.station.helpSaveTerm"), t("editor.station.helpSave")],
-    [t("editor.station.helpKeysTerm"), t("editor.station.helpKeys")],
+    [t("editor.station.helpKeysTerm"), t("editor.station.helpKeys", { mod: modKey() })],
   ]
   return (
     <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 pt-1.5 pb-0.5 text-[11.5px] leading-[1.45]">

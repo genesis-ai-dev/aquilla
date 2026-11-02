@@ -139,6 +139,26 @@ describe("the Station", () => {
     expect(help.getAttribute("data-open")).toBe("false")
   })
 
+  it("keeps its keys from the timeline, and leaves Space to a focused button (Nov 2 shortcut review)", () => {
+    const take = makeTake()
+    openInStation({ fileId: "f1", cellId: "c331", audioId: "t2.webm" })
+    render(<StationPanel host={makeHost(take)} visible />)
+    const onWindow = vi.fn()
+    window.addEventListener("keydown", onWindow)
+    try {
+      // S and B are the timeline's split and blade: they stop at the Station.
+      expect(fireEvent.keyDown(screen.getByTestId("station"), { key: "s", code: "KeyS" })).toBe(false)
+      expect(fireEvent.keyDown(screen.getByTestId("station"), { key: "b", code: "KeyB" })).toBe(false)
+      expect(onWindow).not.toHaveBeenCalled()
+      // Space on a focused button is the button's.
+      expect(fireEvent.keyDown(screen.getByTestId("station-undo"), { key: " ", code: "Space" })).toBe(true)
+      // A Russian layout types "л" on the L key: it still loops.
+      expect(fireEvent.keyDown(screen.getByTestId("station"), { key: "л", code: "KeyL" })).toBe(false)
+    } finally {
+      window.removeEventListener("keydown", onWindow)
+    }
+  })
+
   it("opens on the take the store names, and shows its heading", () => {
     const take = makeTake()
     openInStation({ fileId: "f1", cellId: "c331", audioId: "t2.webm" })

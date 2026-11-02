@@ -1322,7 +1322,7 @@ export const editor = defineNamespace({
     "editor.station.helpSaveTerm": "Saving",
     "editor.station.helpSave": "Cuts and inserts wait until you choose Save as new version. The original recording is always kept.",
     "editor.station.helpKeysTerm": "Keys",
-    "editor.station.helpKeys": "Space plays, K keeps, ⌫ deletes, I inserts, L loops, + and − zoom, ⌘Z undoes, ⌘S saves.",
+    "editor.station.helpKeys": "Space plays, K keeps, ⌫ deletes, I inserts, A approves, L loops, + and − zoom, {mod}Z undoes, {mod}S saves. After Record now, Enter keeps the new recording.",
     "editor.station.startFlag": "Start {time}",
     "editor.station.endFlag": "End {time}",
     "editor.station.dragStart": "Drag to trim the start",
@@ -1395,7 +1395,7 @@ export const editor = defineNamespace({
     "editor.station.makesVersion": "Makes a new version",
     "editor.station.hDraftDeleted": "{n}. Deleted {len} at {time} · not saved yet",
     "editor.station.hDraftInserted": "{n}. Inserted {label} ({len}) at {time} · not saved yet",
-    "editor.station.hint": "Drag across the waveform to select a part; click to place the cursor. Drag Start or End to trim. Space plays; K keeps, ⌫ deletes, I inserts, ⌘Z undoes.",
+    "editor.station.hint": "Drag across the waveform to select a part; click to place the cursor. Drag Start or End to trim. Space plays; K keeps, ⌫ deletes, I inserts, {mod}Z undoes.",
     "editor.station.fromLibrary": "From the library",
     "editor.station.libraryEmpty": "No other recordings in this file yet.",
     "editor.station.fromFile": "From a file…",
@@ -3079,6 +3079,7 @@ export const editor = defineNamespace({
       "editor.station.helpKeysTerm": { description: "Term in the Station's (i) explanation: keyboard shortcuts." },
       "editor.station.helpKeys": {
         description: "The Station's (i) explanation: its keyboard shortcuts. Keep the key symbols as they are.",
+        placeholders: { mod: "⌘ on a Mac, 'Ctrl+' elsewhere." },
       },
       "editor.station.laneTip": {
         description: "Tooltip and screen-reader name of the Station's waveform.",
@@ -3334,6 +3335,7 @@ export const editor = defineNamespace({
       },
       "editor.station.hint": {
         description: "One quiet line under the Station's controls when nothing is selected, naming the shortcuts.",
+        placeholders: { mod: "⌘ on a Mac, 'Ctrl+' elsewhere." },
       },
       "editor.station.fromLibrary": {
         description: "First choice in the Insert menu: insert another recording. Until the project has a recordings library it lists this file's other recordings.",

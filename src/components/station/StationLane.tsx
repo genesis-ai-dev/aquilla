@@ -54,11 +54,14 @@ export function StationLane({ ed, editable, trackVars, generated, onDelete, onIn
   const inView = (x: number) => x >= va - 1e-6 && x <= vb + 1e-6
 
   // Item 11: one peak per 2 px, against the recording's loudest sample with
-  // 5% headroom, shaped by its volume and fades.
+  // 5% headroom, shaped by its fades. The volume is never drawn into it: it
+  // shows as its line only, so the shape you edit by holds still while you
+  // change it (Sam, Nov 2).
   const bins = Math.max(8, Math.round(size.width / 2))
+  const { trimA, trimB, fadeIn, fadeOut } = ed.clip
   const peaks = useMemo(
-    () => (ed.pcm ? viewPeaks(ed.placed, ed.lookup, va, vb, bins, ed.pcm.peak * 1.05, ed.clip) : null),
-    [ed.pcm, ed.placed, ed.lookup, va, vb, bins, ed.clip],
+    () => (ed.pcm ? viewPeaks(ed.placed, ed.lookup, va, vb, bins, ed.pcm.peak * 1.05, { trimA, trimB, fadeIn, fadeOut, gainDb: 0 }) : null),
+    [ed.pcm, ed.placed, ed.lookup, va, vb, bins, trimA, trimB, fadeIn, fadeOut],
   )
 
   const timeAt = (clientX: number) => {

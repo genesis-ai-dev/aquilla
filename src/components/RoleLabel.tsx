@@ -31,7 +31,13 @@ interface RoleLabelProps {
   plain?: boolean
 }
 
-/** Assigned-role chip matching `/project/:id/settings/members`. */
+/**
+ * Assigned-role chip matching `/project/:id/settings/members`.
+ *
+ * Shows the catalog's name exactly as written: sentence case, in the reader's
+ * language ("Project lead", "Chef de projet"). No CSS case class (AQU-2332):
+ * `capitalize` turned "Project lead" into "Project Lead".
+ */
 export function RoleLabel({
   name,
   plural,
@@ -41,12 +47,12 @@ export function RoleLabel({
 }: RoleLabelProps) {
   const label = useRoleDisplayName(name, plural)
   if (plain) {
-    return <Tag className={cn("capitalize", className)}>{label}</Tag>
+    return <Tag className={className}>{label}</Tag>
   }
   return (
     <Badge
       variant="secondary"
-      className={cn("font-normal capitalize bg-muted text-muted-foreground", className)}
+      className={cn("font-normal bg-muted text-muted-foreground", className)}
     >
       {label}
     </Badge>

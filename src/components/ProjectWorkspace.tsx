@@ -295,7 +295,7 @@ import { readProjectSettingsFor, writeProjectSettingsFor } from "@/lib/history/s
 import { useHistoryShortcuts } from "@/lib/history/useHistory"
 import { useHistoryReporter } from "@/components/history/useHistoryReporter"
 import { useSettingsStepKinds } from "@/components/ProjectSettings/useSettingsStepKinds"
-import { playingInSlot, takeStepHandlers, type CutRecord, type StoredTakePlace } from "@/lib/history/take-steps"
+import { playingInSlot, takeStepHandlers, type CutRecord, type StoredTakePlace, type TakeLevel } from "@/lib/history/take-steps"
 import type { TakePlace } from "@/lib/timeline/take-place"
 import { enqueueTakeRemovals, hasOwnRecordingLeft, removeTake, renameTake, renameWholeTake } from "@/lib/audio/take-actions"
 import { regenerateVoiceTake } from "./AudioRecorder/regenerate-voice"
@@ -307,7 +307,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { canHarmonize, emitCastAssign, emitSourceCellCommit, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitCellGlossSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellAudioUnvalidate, emitCellAudioSelect, emitCellAudioDeselect, emitSourceCellRestore, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellAudioCut, emitCellAudioUncut, emitCellAudioRemove, emitCellAudioRename, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, emitTermUpdate, enqueueEvents } from "@/lib/sync/events-emit"
+import { canHarmonize, emitCastAssign, emitSourceCellCommit, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitCellGlossSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellAudioUnvalidate, emitCellAudioSelect, emitCellAudioDeselect, emitSourceCellRestore, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioGain, emitCellAudioPlace, emitCellAudioCut, emitCellAudioUncut, emitCellAudioRemove, emitCellAudioRename, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, emitTermUpdate, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
 import { postSplitCastCopies, resolveCellEditingFloor, resolveTimingLocked } from "@/lib/sync/project-settings"
@@ -500,9 +500,17 @@ import { MediaPanelsMenu } from "@/components/timeline/MediaPanelsMenu"
 import { mediaFileKind, startingLayout } from "@/components/timeline/media-layout-start"
 import { useMediaDock } from "@/components/timeline/useMediaDock"
 import { MediaDockBody } from "@/components/timeline/MediaDockBody"
+import { StationPanel } from "@/components/station/StationPanel"
+import { StationMenuItems } from "@/components/station/StationHistory"
+import type { StationHost, StationTake } from "@/components/station/station-host"
+import type { InsertChoice } from "@/components/station/StationEdits"
+import { onStationShowRequest, openInStation, setStationAvailable } from "@/lib/station/target"
+import { STATION_PICKS } from "@/lib/station/picks"
+import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
+import { takeTrackVars } from "@/lib/timeline/take-colors"
 import { filmLabelFor, MediaTopBar } from "@/components/timeline/MediaTopBar"
 import { MediaStatusRing } from "@/components/timeline/MediaStatusRing"
-import { regionControls } from "@/components/timeline/MediaPanelChrome"
+import { PanelMenuItemsContext, regionControls } from "@/components/timeline/MediaPanelChrome"
 import { TimingModeChangedDialog } from "./timeline/TimingModeChangedDialog"
 import { useTimingModeAck } from "@/hooks/useTimingModeAck"
 import { PeerPresence } from "./PeerPresence"
@@ -3911,6 +3919,50 @@ export function ProjectWorkspace() {
       await applyTakeTrim(cellId, audioId, trims)
     },
     [applyTakeTrim, readTake, activeFileId],
+  )
+
+  // AQU-2327: a take's volume and fades — the trim's sibling, same order:
+  // optimistic overlay, the durable event, flush, then the bus poke.
+  const applyTakeGain = useCallback(
+    async (cellId: string, audioId: string, level: TakeLevel) => {
+      if (!project?.id) return
+      const owner = resolveTakeCellRef.current(cellId)
+      const att = owner?.cell.attachments?.[audioId]
+      if (!owner || !att) return
+      const slot = att.slot ?? (audioId === owner.cell.selectedAudioId ? "recording" : "generatedVoice")
+      const p = emitCellAudioGain({
+        projectId: project.id,
+        fileId: owner.fileId,
+        cellId,
+        audioId,
+        gainDb: level.gainDb,
+        fadeInMs: level.fadeInMs,
+        fadeOutMs: level.fadeOutMs,
+        ...(activeLane ? { targetLang: activeLane } : {}),
+        author: currentUsername,
+      })
+      injectOptimisticAudioTrim(owner.fileId, cellId, { ...attachmentOutFrom(audioId, att, slot), ...level }, p)
+      await p
+      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      notifyAudioAttachmentsChanged(owner.fileId)
+    },
+    [project?.id, currentUsername, getTokenForProjectFile, activeLane],
+  )
+  const handleGainTarget = useCallback(
+    async (cellId: string, audioId: string, level: TakeLevel) => {
+      const before = readTake(cellId, audioId)
+      if (!before) return
+      const was: TakeLevel = { gainDb: before.att.gainDb ?? null, fadeInMs: before.att.fadeInMs ?? null, fadeOutMs: before.att.fadeOutMs ?? null }
+      recordStep({
+        kind: "take.gain",
+        data: { cellId, audioId, before: was, after: level },
+        labelKey: "editor.history.stepTakeLevel",
+        fileId: activeFileId,
+        fileName: activeFileNameRef.current,
+      })
+      await applyTakeGain(cellId, audioId, level)
+    },
+    [applyTakeGain, readTake, activeFileId],
   )
 
   // Round 6 (SUB-38), re-homed 2026-08-07: assign a voice/character from the
@@ -13045,6 +13097,133 @@ export function ProjectWorkspace() {
     () => (audioCueCells && audioCueCells.length > 0 ? [...audioMergedCells, ...audioCueCells] : audioMergedCells),
     [audioMergedCells, audioCueCells],
   )
+  // AQU-2327: what the Station needs — the same reads and writes the timeline
+  // uses, so a trim or a vote in the Station is the timeline's own.
+  const stationCells = cloneVoiceCells
+  const stationHost = useMemo<StationHost | null>(() => {
+    if (!project) return null
+    const lineName = (cellId: string) => {
+      const owner = resolveTakeCellRef.current(cellId)
+      const label = owner?.cell.cellLabel?.trim()
+      if (label && /^\d+$/.test(label)) return t("editor.station.lineNumber", { n: label })
+      if (label) return label
+      const index = getActiveCells().findIndex((c) => c.id === cellId)
+      return index >= 0 ? t("editor.station.lineNumber", { n: index + 1 }) : ""
+    }
+    const fileOf = (id: string, fallback: string) =>
+      audioCueCells?.some((c) => c.id === id) && audioCueSibling ? audioCueSibling.id : (activeFileId ?? fallback)
+    return {
+      project,
+      username: currentUsername,
+      editable: canPerform("cell.audio.trim", project.syncRole?.level ?? null),
+      getSyncToken: audioSyncTokenFetcherForSession(frontierSession ?? null),
+      readTake: (cellId, audioId) => {
+        const r = readTake(cellId, audioId)
+        return r ? { fileId: r.owner.fileId, cell: r.owner.cell, att: r.att } : null
+      },
+      lineName,
+      trackVars: (fileId, slot) => takeTrackVars({ files: project.files, fileId, slot }),
+      voteState: timelineVoteState,
+      vote: handleVoteTimelineTake,
+      trim: handleTrimTarget,
+      setLevel: handleGainTarget,
+      removeNoise: async (cellId, audioId) => {
+        const cur = readTake(cellId, audioId)
+        if (!cur || !frontierSession) return null
+        const { denoiseSplitTake, denoiseTake } = await import("@/lib/audio/denoise-take")
+        const atts = cur.owner.cell.attachments ?? {}
+        const group = cur.att.pieceOf ?? audioId
+        const pieces = Object.entries(atts)
+          .filter(([id, a]) => !a.isDeleted && (a.pieceOf ?? id) === group)
+          .map(([id, a]) => attachmentOutFrom(id, a, a.slot ?? "recording"))
+          .sort((a, b) => (a.trimStartMs ?? 0) - (b.trimStartMs ?? 0))
+        const lane = activeLane ? { targetLang: activeLane } : {}
+        const selectedBefore = audioId
+        // Item 30: a version the Station made — its History row names it.
+        const versionChanges = { kinds: ["noise" as const], usedOn: [cellId] }
+        const res = pieces.length > 1
+          ? await denoiseSplitTake({ projectId: project.id, fileId: cur.owner.fileId, cellId, pieces, author: currentUsername, session: frontierSession, ...lane, history: { selectedBefore }, versionChanges })
+          : await denoiseTake({
+              projectId: project.id, fileId: cur.owner.fileId, cellId,
+              sourceAudioId: audioId, sourceUrl: cur.att.url,
+              author: currentUsername, session: frontierSession, ...lane,
+              source: cur.att,
+              history: { selectedBefore },
+              versionChanges,
+            })
+        return res.audioId
+      },
+      changeVoice: (cellId) => {
+        const state = timelineChangeVoiceState(cellId)
+        if (!state) return t("editor.station.voiceUnavailable")
+        const quality = CHANGE_VOICE_QUALITIES.find((q) => state.blockers[q] == null)
+        if (!quality) return t("editor.station.voiceUnavailable")
+        handleChangeTimelineVoice(cellId, quality)
+        return null
+      },
+      approvalsNeeded: Math.max(1, project.validationCountAudio ?? 1),
+      pauseOtherPlayback: () => pauseAllTransports(),
+      reportHistory,
+      ...(activeLane ? { lane: activeLane } : {}),
+      selectedIn: (cellId, slot) => {
+        const owner = resolveTakeCellRef.current(cellId)
+        if (!owner) return null
+        return slotSelections({
+          selectedBySlot: owner.cell.selectedBySlot,
+          selectedAudioId: owner.cell.selectedAudioId ?? null,
+          selectedGeneratedVoiceAudioId: owner.cell.selectedGeneratedVoiceAudioId ?? null,
+        })[slot] ?? null
+      },
+      fileName: (fileId) => project.files?.find((f) => f.id === fileId)?.name ?? null,
+      // Q3: until there is a recordings library, this file's other takes —
+      // the open line's own first, then the rest, newest first.
+      insertChoices: (fileId, cellId, exceptUrl) => {
+        const items: Array<InsertChoice & { own: boolean; at: number }> = []
+        const seen = new Set<string>([exceptUrl])
+        for (const cell of stationCells) {
+          for (const att of Object.values(cell.attachments ?? {})) {
+            if (att.isDeleted || att.role === "source" || !att.url.startsWith("frontier-audio://") || seen.has(att.url)) continue
+            seen.add(att.url)
+            items.push({
+              id: att.url,
+              url: att.url,
+              fileId: fileOf(cell.id, fileId),
+              label: `${att.label ?? t("audio.takesStrip.takeFallback")} · ${lineName(cell.id)}`,
+              durationSec: att.durationMs != null ? att.durationMs / 1000 : null,
+              own: cell.id === cellId,
+              at: att.createdAt ?? 0,
+            })
+          }
+        }
+        items.sort((a, b) => Number(b.own) - Number(a.own) || b.at - a.at)
+        return items.slice(0, 40).map(({ own: _own, at: _at, ...c }) => c)
+      },
+      placementsOf: (fileId, url) => {
+        // One per LINE: the pieces of a split take share their recording on
+        // one line, and that is one place, not several.
+        const out: StationTake[] = []
+        for (const cell of stationCells) {
+          const atts = Object.values(cell.attachments ?? {}).filter((att) => !att.isDeleted && att.url === url && att.role !== "source")
+          const att = atts.find((a) => !a.pieceOf) ?? atts[0]
+          if (att) out.push({ fileId: fileOf(cell.id, fileId), cell, att })
+        }
+        return out
+      },
+    }
+  }, [project, currentUsername, frontierSession, readTake, getActiveCells, timelineVoteState, handleVoteTimelineTake, handleTrimTarget, handleGainTarget, timelineChangeVoiceState, handleChangeTimelineVoice, reportHistory, t, activeLane, audioCueCells, audioCueSibling, activeFileId, stationCells])
+  // AQU-2327 (Q1): open a take in the Station from the timeline's take menu,
+  // and — while the Station's tab shows — follow the take you click.
+  const handleEditInStation = useCallback((cellId: string, audioId: string) => {
+    const owner = resolveTakeCellRef.current(cellId)
+    if (owner) openInStation({ fileId: owner.fileId, cellId, audioId }, { show: true })
+  }, [])
+  const stationMenuItems = useMemo(() => ({ station: <StationMenuItems /> }), [])
+  const stationShowingRef = useRef(false)
+  const handleTakeChosen = useCallback((cellId: string, audioId: string) => {
+    if (!STATION_PICKS.wayIn.followTimelineSelection || !stationShowingRef.current) return
+    const owner = resolveTakeCellRef.current(cellId)
+    if (owner) openInStation({ fileId: owner.fileId, cellId, audioId })
+  }, [])
   // AQU-928: transcribe EXACTLY the sections selected on the timeline. Same
   // per-cell path (and same post-run flush/revalidate) as transcribe-all, only
   // the cell list is the user's selection instead of the whole file — so the
@@ -13760,6 +13939,19 @@ export function ProjectWorkspace() {
       }
     },
   })
+
+  // AQU-2327: a way in asked to show the Station — bring its tab forward.
+  const dockShow = dock.show
+  useEffect(() => onStationShowRequest(() => dockShow("station")), [dockShow])
+  // Read by the timeline's take click (Q1: the Station follows it while it shows).
+  const stationShowing = timelineStacked && dock.view.isShowing("station")
+  useEffect(() => {
+    stationShowingRef.current = stationShowing
+  }, [stationShowing])
+  useEffect(() => {
+    setStationAvailable(timelineStacked)
+    return () => setStationAvailable(false)
+  }, [timelineStacked])
 
   const anyCellClockIsFileTime = useMemo(
     () => audioMergedCells.some((c) => queueClockIsFileTime(c)),
@@ -15076,6 +15268,7 @@ export function ProjectWorkspace() {
           return owner.cell.attachments?.[id]?.pieceOf ?? id
         },
         applyTrim: (cellId, audioId, w) => applyTakeTrim(cellId, audioId, w),
+        applyGain: (cellId, audioId, level) => applyTakeGain(cellId, audioId, level),
         applyPlace: (cellId, audioId, place) => applyTakePlace(cellId, audioId, place),
         cut: (c, newAudioId) => applyTakeCut(c.cellId, c.audioId, c.atMs, newAudioId),
         uncut: applyTakeUncut,
@@ -15213,7 +15406,7 @@ export function ProjectWorkspace() {
     })
     return unregister
   }, [
-    readTake, applyTakeTrim, applyTakePlace, applyTakeCut, applyTakeUncut, applyTakeRemove, applyTakeRename, applyTakeSelect,
+    readTake, applyTakeTrim, applyTakeGain, applyTakePlace, applyTakeCut, applyTakeUncut, applyTakeRemove, applyTakeRename, applyTakeSelect,
     handleLastTakeRemoved, handleTakeSaved,
     getActiveCell, readRowTiming, cellStore, applyRetimeSubtitle, applyCellHidden, removeLineCore, applyRestoreRow, applyRepoint,
     activeLane, applyTargetText, project?.id, currentUsername, getTokenForProjectFile, revalidateAuditStats, revalidateCell,
@@ -17681,6 +17874,8 @@ export function ProjectWorkspace() {
                     onRemoveTake={handleRemoveTimelineTake}
                     onVoteTake={handleVoteTimelineTake}
                     voteStateFor={timelineVoteState}
+                    onEditInStation={STATION_PICKS.wayIn.takeMenuItem ? handleEditInStation : undefined}
+                    onTakeChosen={handleTakeChosen}
                     onHistoryResult={reportHistory}
                     onTogglePlay={handleTimelineTogglePlay}
                     onRequestLinkVideo={() => setLinkVideoOpen(true)}
@@ -17862,7 +18057,10 @@ export function ProjectWorkspace() {
                 style={timelineStacked && !dock.view.bodyOpen ? { overflow: "hidden" } : undefined}
                 className={timelineStacked && dock.view.isOpen("tl") ? "border-t border-border" : undefined}
               >
-                <MediaDockBody dock={dock} stacked={timelineStacked} />
+                {/* AQU-2327: the Station's own items in its area's ⋯ menu (item 2). */}
+                <PanelMenuItemsContext.Provider value={stationMenuItems}>
+                  <MediaDockBody dock={dock} stacked={timelineStacked} />
+                </PanelMenuItemsContext.Provider>
               </ResizablePanel>
               </ResizablePanelGroup>
               {/* Where a host waits while its area is not on screen. */}
@@ -18122,6 +18320,10 @@ export function ProjectWorkspace() {
               </>,
                     dock.hosts.text,
                   )
+                : null}
+              {/* AQU-2327: the Station, once — a tab beside Lines (the text). */}
+              {dock.hosts.station && timelineStacked
+                ? createPortal(<StationPanel host={stationHost} visible={dock.view.isShowing("station")} />, dock.hosts.station)
                 : null}
               </ForecastProvider>
               </EditorActionsProvider>

@@ -28,6 +28,12 @@ export interface UnreleasedPr extends FileClassification {
   approved?: boolean
   /** Areas whose gate check (release-risk.mjs AREA_GATES) passed on the PR's head. */
   gates?: string[]
+  /**
+   * Every path the merged diff touches (first parent → merge commit), as
+   * classified. The cut reads these to name the held PR a pick that did
+   * not land was built on; absent only in a hand-built plan.
+   */
+  files?: string[]
 }
 
 /** Off the automatic line: an ungated holding area or an unproven walk, unless a person approved it. */

@@ -79,10 +79,12 @@ function branchName(now, usedSuffixes) {
 // a schema change or an events-path rewrite waits for manual QA.
 //
 // The cost of picking around a held PR is that a later PR can depend on it
-// and still apply cleanly as a patch. The cut (release-cut.mjs) drops any
-// pick that conflicts and the release-verify workflow builds and tests the
-// picked set before anything deploys; a pick that applies but breaks the
-// build holds its PR as "pick failed verify" by hand (RELEASE-CUT.md).
+// and still apply cleanly as a patch. The cut (release-cut.mjs) holds any
+// pick that conflicts or comes out empty, naming the held PR it most likely
+// needs from the `files` each PR carries here, and the release-verify
+// workflow builds and tests the picked set before anything deploys; a pick
+// that applies but breaks the build holds its PR as "pick failed verify" by
+// hand (RELEASE-CUT.md).
 export function planRelease({ openReleases, prs, now, usedSuffixesToday = [], base }) {
   const common = { openReleases, prCount: prs.length, base }
   if (openReleases.length) {
@@ -215,7 +217,9 @@ export function unreleasedPrs({ cwd } = {}) {
     // release-plan-walk.mjs) to fill in walk; the git-only command here
     // always leaves those unknown, which holds.
     const walk = isDocsOrTestOnly(files) ? "none" : "unknown"
-    prs.push({ number, sha, mergedAt, walk, behindFloor, ...classifyFiles(files) })
+    // files rides along so the cut can say which held PR a pick that did
+    // not land was built on, without a GitHub call of its own.
+    prs.push({ number, sha, mergedAt, walk, behindFloor, files, ...classifyFiles(files) })
   }
   return { prs, floor, base }
 }

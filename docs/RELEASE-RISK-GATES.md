@@ -133,7 +133,11 @@ production tip does not carry (by `(cherry picked from commit …)`
 provenance or PR number), classifies each by the files its merge touched,
 and reads its walk verdict and the `release:approved` label from GitHub.
 A PR is *held* when a holding area it touches has no green gate (below)
-or its walk is not `PASS`/`none`; the label clears both. Held PRs are
+or its walk is not `PASS`/`none`; the label clears both. A walk may be
+posted after the merge: the planner takes the newest walk that names the
+PR's head sha, which is how a dev re-walk (`e2e/journeys/PR-BOT.md`,
+*Re-walk on dev after merge*, for a PR whose preview walk a pending
+migration blocked) replaces the BLOCKED comment before it. Held PRs are
 skipped, not a wall: the plan is the ready PRs in dev order plus the held
 list with a reason each.
 
@@ -165,14 +169,74 @@ today:
   `__tests__`, `scripts/replay-corpus.mjs`, the workflow) is classified
   as `infra`, which holds with no gate, so a PR cannot edit the harness
   or the golden and pass itself.
-- **`auth` → permission matrix**: not built (open items).
+- **`auth` → `auth-matrix`** (`risk-label.yml`, only for PRs touching the
+  auth area). A table-driven permission matrix in two halves, one per
+  worker, each a test that sends real requests through the worker's
+  handlers against a PGlite fixture and compares every answer to a
+  committed golden (`auth-worker/permission-matrix/golden.json`,
+  `sync-worker/permission-matrix/golden.json`; harness
+  `auth-worker/src/__tests__/permission-matrix.test.ts`,
+  `sync-worker/src/__tests__/permission-matrix.test.ts`). The auth-worker
+  half drives the session routes with the shared access fixture
+  (`helpers/access-fixture.ts`: one org with every membership shape, a
+  second personal org as the cross-org target, a platform admin, a removed
+  member, an anonymous caller) over project reads and writes, member
+  management, invites, sync-token mint, PAT mint, org and user access, and
+  `/admin/*`. The sync-worker half drives sync tokens (contributor, viewer,
+  lead, platform, wrong project, removed member with a still-valid token,
+  missing project row, expired, wrong secret), Agent API credentials
+  (unscoped, org-scoped, cross-org, cross-project, read-only, revoked, a
+  user with no grant) and the admin bearer over project reads, `POST
+  /events`, the external reads, changeset prepare, export and `/admin/*`.
+  The golden row is the status, plus the ids returned for list routes and
+  accepted/rejected for the event write, so "sees another org's data" is a
+  diff and not a guess. `UPDATE_AUTH_MATRIX=1` regenerates; the job fails
+  when either golden changed in the PR, so an intentional permission
+  change is the case that goes to a person, with the golden diff as what
+  they review. Same honesty rules as the replay gate: GitHub Actions runs
+  only, and the matrix's own chain (both `permission-matrix/`, both
+  harnesses, auth-worker's test helpers, setup file and vitest/tsconfig/
+  dependency set, `db/shared/test-lane-fill.ts`) is `infra`.
+
+  **`events/membership.ts` fails open on purpose, and the matrix pins it.**
+  The write-perimeter re-check reports `ok` for a project with no row and
+  for a thrown query (its header comment). Decision: keep both. The
+  sync-token route 403s an unknown `projectId` (AQU-299), so no live token
+  exists for a project without a row and closing that case would only break
+  fixtures; the thrown-query case degrades to the 15-minute token TTL
+  rather than 500ing every write in a partial outage. Both are golden rows
+  (`membership-fail-open …`, and `token_missing_project POST /events`), so
+  a PR that changes either flips the golden and goes to a person.
 
 **Cut.** `release-cut.mjs` starts a branch at the tagged tip and
 `git cherry-pick -x` each ready PR onto it (`-m 1` for merge commits).
-This is what Matthew did by hand, mechanised. A pick that conflicts is
-aborted and reported as held (`pick conflict`); the cut continues. The
-branch is pushed and the release notes posted as a commit comment with the
-picked table and the held line.
+This is what Matthew did by hand, mechanised. A pick that does not land
+is reported as held with a reason a person can act on, and the cut
+continues with the rest:
+
+- `pick conflict in <paths>; needs #N`: git stopped on unmerged paths and
+  the pick is aborted. `needs #N` is the newest held PR merged before it
+  whose diff touches one of those paths, read off the `files` the plan
+  carries per PR (no GitHub call), which is almost always the PR it was
+  built on; approving that PR is the fix. With no such PR the entry stops
+  at the paths.
+- `empty pick: already in base, or needs #N`: git stopped with nothing to
+  commit ("The previous cherry-pick is now empty"). Either production
+  already carries the change, or the change only exists relative to a
+  held PR and is a no-op against the base. The pick is skipped, never
+  committed empty: an empty commit with `-x` provenance would tell the
+  planner production carries the PR while it does not. The PR is listed
+  on every cut until the held PR ships or, for a change production really
+  has, until a person records it by hand.
+
+Each reason appears in the run summary as a `- #N: <reason>` line, in the
+held line of the release notes, and in the commit comment. When nothing
+could be picked, the summary lists each PR with its reason instead of the
+bare "every ready PR conflicted" line that, from 2026-10-31, hid an empty
+pick (#1752, built on held #1750) behind a real conflict (#1744 on held
+#1743). The branch is pushed and the release notes posted as a commit
+comment with the picked table and the held line. None of this changes who
+deploys or the `release:approved` sign-off.
 
 **Verify.** The push runs the whole suite (`release-verify`) and smart
 Jev. This is where "a ready PR that depended on a held one and still
@@ -206,7 +270,8 @@ self-heal through `chunk-reload.ts` as before.
 2. It merges to dev like any other (ci.yml, walk, review agent).
 3. Every hourly cut skips it and lists it under **Held, not in this
    release** with the reason. An events-only PR whose `replay-gate` check
-   is green is not held at all: it never reaches this list.
+   is green, or an auth-only PR whose `auth-matrix` check is green, is not
+   held at all: it never reaches this list.
 4. Manual QA as today (the dev deploy carries it). When satisfied, a
    person adds `release:approved` to the PR.
 5. The next cut picks it. If the manual QA finds a problem, the fix is a
@@ -227,15 +292,11 @@ nothing, and `release:approved` is the one label the planner reads.
   projects are in, the gate proves the harness and the chain rules it
   pins, not production shapes. The `fetch` step in `risk-label.yml` needs
   `CLOUDFLARE_API_TOKEN` with R2 read on `aquilla-snapshots`.
-- **Permission matrix for `auth` PRs** (meeting: "send requests to the
-  auth API and record what it does"). Candidates to grow into the
-  table-driven gate: `auth-worker/src/__tests__/access-attacks-parity`,
-  `access-characterization`, `members-matrix-batched`,
-  `permission-semantics`; sync-worker `foreign-role-enforcement`,
-  `external-project-reads`, `member-removed`. Not confirmed table-driven
-  in this pass. The gap found while mapping: `events/membership.ts` fails
-  open on a missing project row and on a thrown error (by design, with a
-  comment); worth a deliberate decision.
+- **Auth matrix: breadth.** The gate runs (section 3) over the route
+  families named there. Not yet in the table: member-scopes writes,
+  access-links, changeset approvals, the MCP tools/call adapter, and the
+  lane read wall (`LANE_READ_WALL=1`). Each is one more probe row; add it
+  and regenerate the golden in a PR of its own so the diff is the review.
 - **Automatic rollback on error-rate rise.** `cloudflare-version-deploy.mjs`
   promotes `${versionId}@100%` and keeps no previous version id; there is
   no rollback script. Design: record the previous Worker version id per

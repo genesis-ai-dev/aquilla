@@ -52,7 +52,7 @@ vi.mock("@/lib/audio/upload", async (importOriginal) => ({
   uploadCellAudio: vi.fn(async () => ({ audioId: "audio-c1-1-new", ext: "webm", url: "frontier-audio://audio-c1-1-new.webm" })),
   deleteCellAudio: vi.fn(async () => {}),
 }))
-vi.mock("@/lib/audio/bytes-cache", () => ({ audioCachePutBlob: vi.fn(async () => {}) }))
+vi.mock("@/lib/audio/bytes-cache", () => ({ audioCacheGet: vi.fn(async () => null), audioCachePutBlob: vi.fn(async () => {}) }))
 vi.mock("@/lib/audio/project-audio-state", () => ({ markProjectHasAudioDataSoon: vi.fn() }))
 vi.mock("@/lib/audio/transcribe-status", () => ({ setTranscribeStatus: vi.fn() }))
 vi.mock("@/lib/audio/transcribe", () => ({ transcribeCell: vi.fn(async () => {}) }))

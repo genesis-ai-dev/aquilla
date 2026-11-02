@@ -4340,6 +4340,8 @@ export function TimelineEditor({
             // single vote, on a project asking for two.
             validationRequirementAudio={project ? readValidationCountAudio(project) : 1}
             color={track.color}
+            // AQU-2235: a muted dub row's takes at half strength.
+            muted={!trackAudible(audibility, "target")}
           />
         )
       // ── The two kinds a USER makes (stage 2) ────────────────────────────
@@ -4408,6 +4410,8 @@ export function TimelineEditor({
             validationRequirementAudio={project ? readValidationCountAudio(project) : 1}
             color={track.color}
             laneTestId={`tl-target-lane-${track.id}`}
+            // AQU-2235: …and an added track's, by its own slot's flag.
+            muted={!trackAudible(audibility, slotForTrack(track.id))}
           />
         )
       }

@@ -3,7 +3,7 @@
 // master/overlay playback elements rely on.
 
 import { describe, expect, it } from "vitest"
-import { activeTargetForCell, resolveTargetAudio, sourceClipAudioForCell } from "./track-audio"
+import { activeTargetForCell, isGeneratedTake, resolveTargetAudio, sourceClipAudioForCell } from "./track-audio"
 import type { CellData } from "@/hooks/useCells"
 
 const SOURCE_ID = "audio-file-9-1700000000-src1.mp3"
@@ -135,6 +135,34 @@ describe("activeTargetForCell", () => {
 // of its own, so what a take IS comes off the attachment rather than off which
 // slot it sits in. These cases pin both halves of that, plus the thing that
 // must NOT change: the default track's resolution is byte-for-byte what it was.
+
+// AQU-2235: an AI voice's only mark is its sparkle, so the timeline, the
+// recording window, the takes list and the Recording tab ask ONE question.
+describe("isGeneratedTake", () => {
+  it("is true for any take a TTS path stamped with a voice, in any slot", () => {
+    const c = cell({})
+    expect(isGeneratedTake(c, TAKE_ID, { voiceId: "v1", slot: "recording" })).toBe(true)
+    expect(isGeneratedTake(c, TAKE_ID, { voiceId: "v1", slot: "trk-es" })).toBe(true)
+  })
+
+  it("is true for an older generated take known only by its slot or by the line's pick", () => {
+    expect(isGeneratedTake(cell({}), GEN_ID, { slot: "generatedVoice" })).toBe(true)
+    expect(isGeneratedTake(cell({ selectedGeneratedVoiceAudioId: GEN_ID }), GEN_ID, {})).toBe(true)
+  })
+
+  it("is false for a recording, and for nothing", () => {
+    expect(isGeneratedTake(cell({}), TAKE_ID, { slot: "recording" })).toBe(false)
+    expect(isGeneratedTake(cell({}), null, { voiceId: "v1" })).toBe(false)
+  })
+
+  it("is what the timeline draws: a voice regenerated into the recording slot is generated", () => {
+    const c = cell({
+      selectedAudioId: TAKE_ID,
+      attachments: { [TAKE_ID]: { ...att("frontier-audio://take"), slot: "recording", voiceId: "v1" } },
+    })
+    expect(activeTargetForCell(c)?.kind).toBe("generated")
+  })
+})
 
 describe("resolveTargetAudio — an added track's own slot", () => {
   const TRK = "019fd21a-a5a4-75d1-b8c4-3b60072a4fc2"

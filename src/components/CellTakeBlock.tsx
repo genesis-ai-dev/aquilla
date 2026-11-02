@@ -22,8 +22,8 @@
 // `onUseAsCellText`, which fills the ROW's target text — that is the text
 // surface the reader is looking at.
 
-import { useCallback, useMemo, useRef, useState } from "react"
-import { Combine, CopyPlus, FileClock, Mic, Pencil, Sparkles, Trash2 } from "lucide-react"
+import { useCallback, useMemo, useRef, useState, type CSSProperties } from "react"
+import { Combine, CopyPlus, FileClock, Mic, Pencil, Trash2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -39,10 +39,12 @@ import { DenoiseButton } from "./audio/DenoiseButton"
 import { useCellAudio, type UseCellAudioResult } from "@/hooks/useCellAudio"
 import { keptWindowSec, piecesWindowSec, type KeptWindow } from "@/lib/audio/kept-window"
 import { takeTrackVars } from "@/lib/timeline/take-colors"
+import { TRACK_DOT_CLASS } from "@/lib/timeline/track-colors"
 import { persistTakeTrim, trimMs } from "@/lib/audio/persist-trim"
 import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
 import { transcribeCell } from "@/lib/audio/transcribe"
 import { isSourceSegmentSelected } from "@/lib/audio/batch-audio"
+import { isGeneratedTake } from "@/lib/audio/track-audio"
 import { laneLanguageForTag } from "@/lib/lanes/lane-language"
 import { laneLanguage } from "@/lib/lanes/lane-display"
 import { saveTranscript } from "@/lib/transcript-cleanup/save"
@@ -262,7 +264,9 @@ function CellTakeBlockView({
   const kept: KeptWindow = piecesWindow
     ? { start: piecesWindow.start, end: piecesWindow.end, kind: "trim" }
     : keptWindowSec(owner, selectedAudioId, attachment)
-  const isGenerated = Boolean(selectedAudioId && selectedAudioId === owner.selectedGeneratedVoiceAudioId)
+  // AQU-2235: the one rule the timeline and the takes list ask too — an added
+  // track's AI voice sits in its single slot, known by its `voiceId`.
+  const isGenerated = isGeneratedTake(owner, selectedAudioId, attachment)
   // Trimmed where it is shown (Sam, 2026-09-25): the edit lands on the cell
   // that HOLDS the take — a linked heard-line take writes to its cue.
   const commitTrim = useCallback((start: number | null, end: number | null) => {
@@ -486,12 +490,13 @@ function CellTakeBlockView({
       <div data-testid="cell-take-head" className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
         {trackName && !isSection && (
           <span data-testid="cell-take-track" className="flex items-center gap-1.5 font-medium">
-            <span aria-hidden className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: trackVars["--tl-track-hue"] }} />
+            <span aria-hidden className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${TRACK_DOT_CLASS}`} style={trackVars as CSSProperties} />
             {trackName}
             <span aria-hidden className="font-normal text-muted-foreground">·</span>
           </span>
         )}
-        {isGenerated && <Sparkles className="h-3 w-3 shrink-0 text-violet-600 dark:text-violet-400" />}
+        {/* AQU-2235: no star here — the one in the waveform's corner below
+            is an AI voice's only mark (Sam, Oct 25). */}
         {renaming ? (
           <input
             autoFocus
@@ -722,8 +727,10 @@ function CellTakeBlockView({
         kept={kept}
         height={56}
         // In its track's colour (Sam, 2026-09-26): a source section in the
-        // source row's lighter blue, a take in its own track's.
-        kind={isGenerated || isSection ? "generated" : "take"}
+        // source row's blue, a take in its own track's. AQU-2235: "generated"
+        // now only adds the sparkle — the two kinds are drawn alike — so a
+        // source section, which is no AI voice, is drawn as a take.
+        kind={isGenerated ? "generated" : "take"}
         trackVars={trackVars}
         strategy={project.audioMediaStrategy ?? "lazy"}
         {...(piecesWindow ? { pieces: piecesWindow } : {})}

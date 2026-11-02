@@ -43,6 +43,13 @@ vi.mock("@/hooks/useRecordingTextDrift", () => ({
   useRecordingTextDrift: () => driftResult,
 }))
 
+// AQU-2235: every list now draws each take's shape, which reads its peaks.
+const loadPeaks = vi.fn(async () => null)
+vi.mock("@/lib/audio/peaks-loader", async (orig) => ({
+  ...(await orig<typeof import("@/lib/audio/peaks-loader")>()),
+  loadPeaksFor: (...args: unknown[]) => loadPeaks(...(args as [])),
+}))
+
 import { TakesStrip, nextTakeLabel } from "./TakesStrip"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
@@ -83,6 +90,26 @@ describe("TakesStrip", () => {
   it("renders nothing when there are no takes", () => {
     const { container } = render(<TakesStrip {...common} takes={[]} selectedAudioId={null} />)
     expect(container.firstChild).toBeNull()
+  })
+
+  // AQU-2235 (Sam's board 52): the recording window's list carries each
+  // take's shape at 56 × 20, as the Recording tab's always has.
+  it("draws each take's 56 × 20 shape in the recording window's list too", () => {
+    render(<TakesStrip {...common} chromeless takes={[take("a", 1500), take("b", 2300)]} selectedAudioId="b" />)
+    for (const id of ["a", "b"]) {
+      const shape = screen.getByTestId(`take-row-wave-${id}`)
+      expect(shape.style.height).toBe("20px")
+      expect(shape.className).toContain("w-14")
+    }
+  })
+
+  // Sam, Oct 25: "make the only distinction between AI and non-AI the little
+  // star in the corner" — ONE star, the one in the take's shape.
+  it("marks a generated take with one star, in its shape's corner", () => {
+    const voiced = { ...take("g", 1500), voiceId: "v-ana" }
+    render(<TakesStrip {...common} chromeless takes={[voiced, take("a", 1500)]} selectedAudioId="a" />)
+    expect(screen.getByTestId("take-row-g").querySelectorAll(".lucide-sparkles")).toHaveLength(1)
+    expect(screen.getByTestId("take-row-wave-g-generated")).toBeInTheDocument()
   })
 
   it("lists every take with its (backfilled) name and duration", async () => {

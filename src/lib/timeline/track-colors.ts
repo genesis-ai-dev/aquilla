@@ -44,6 +44,8 @@
 // has had. What syncs between clients is a token; what a token looks like is
 // decided here, by whichever build happens to be drawing.
 
+import { WAVE_C, hexToOklch, oklchCss, playLineColorCss, stripColorCss, waveColorCss } from "./track-oklch"
+
 /** One selectable hue. Just an identity and a colour now — no class recipes. */
 export interface TrackHue {
   /** Persisted inside a track's `color`. Never a colour value. */
@@ -92,15 +94,38 @@ export const TRACK_HUES: readonly TrackHue[] = [
   { id: "violet", labelKey: "editor.timeline.colorViolet", hex: "#865deb" },
   // Sam, 2026-08-27, tuning by eye: asked for magenta shifted toward red with
   // more saturation, then set the value himself — a deeper, far more saturated
-  // rose than the computed step landed on (S 68%, L 51%).
-  { id: "magenta", labelKey: "editor.timeline.colorMagenta", hex: "#da2b84" },
+  // rose than the computed step landed on (S 68%, L 51%). Sam, Oct 28:
+  // "Magenta needs a small nudge away from red" — hue 355.7 → 350.5, the
+  // lightness and chroma unchanged (#da2b84 → #d62e90), the same size of step
+  // the green took. Tracks store the id "magenta", so every one follows.
+  { id: "magenta", labelKey: "editor.timeline.colorMagenta", hex: "#d62e90" },
   // …"increase the brightness of amber to about 92%" — HSB brightness 77%→92%,
   // hue and saturation untouched, so it gets more luminous rather than paler.
   { id: "amber", labelKey: "editor.timeline.colorAmber", hex: "#eba720" },
-  { id: "green", labelKey: "editor.timeline.colorGreen", hex: "#40c06e" },
+  // AQU-2235 (Sam, Oct 25, board 53): green moved to the recording progress
+  // bar's hue at its old lightness, with the chroma eased just enough to stay
+  // on screen — so its strip, dot, ground, frame and waveform all share one
+  // hue instead of an olive waveform on a green chip. Sam, Oct 28: "back the
+  // green hue a little back away from blue… just like a hair" — emerald-500's
+  // 162.5 read ever so slightly teal, so it sits at hue 157.0, the lightness
+  // and chroma unchanged (#0cc187 → #23c179); the recording window's timing
+  // bar moved with it. Was #40c06e before Oct 25. Tracks store the id
+  // "green", never the hex, so every stored track keeps its colour id and
+  // simply draws the new green.
+  { id: "green", labelKey: "editor.timeline.colorGreen", hex: "#23c179" },
 ]
 
 const BY_ID = new Map(TRACK_HUES.map((h) => [h.id, h]))
+
+/**
+ * The recorder's timing bar while a take is inside its window (AQU-2235; Sam,
+ * Oct 28): the green track's hue at emerald-500's own lightness and chroma,
+ * the bar's green until then. Derived from the track rather than written out,
+ * so the next change to the palette's green moves the timing bar with it.
+ */
+export const RECORDING_OK_GREEN = oklchCss(0.696, 0.149, hexToOklch(BY_ID.get("green")!.hex).h)
+/** The palette's own hexes: only these get the strip colour (AQU-2235). */
+const PALETTE_HEXES: ReadonlySet<string> = new Set(TRACK_HUES.map((h) => h.hex))
 
 /**
  * THE DERIVED ROWS' OWN HUES — fixed, and not in the palette above.
@@ -124,7 +149,10 @@ const BY_ID = new Map(TRACK_HUES.map((h) => [h.id, h]))
 const DERIVED_HUES: Record<string, string> = {
   "source-subtitles": "#8b93a3",
   "source-audio": "#0e9bd6",
-  "target-subtitles": "#40c06e",
+  // The palette's own green, BY REFERENCE (AQU-2235): "the same green as an
+  // untouched dub row" was a copied hex, so moving the green would have split
+  // the two halves of the dub side apart.
+  "target-subtitles": BY_ID.get("green")!.hex,
 }
 
 /**
@@ -157,7 +185,8 @@ export function trackHueVarsFor(
   kind: string,
   color: string | null | undefined,
 ): Record<string, string> {
-  return hueVarsFromHex(hueForTrack(kind, color), { ...ALPHA, ...ALPHA_BY_KIND[kind] })
+  const hex = hueForTrack(kind, color)
+  return cachedHueVars(`${kind}:${hex}`, hex, ALPHA_BY_KIND[kind] ? { ...ALPHA, ...ALPHA_BY_KIND[kind] } : ALPHA)
 }
 
 /** An untouched track. Green because it is the nearest thing in this palette to
@@ -284,17 +313,121 @@ export function hexToRgba(hex: string, alpha: number): string {
  * reads the same hue with no prop threading at all.
  */
 export function trackHueVars(color: string | null | undefined): Record<string, string> {
-  return hueVarsFromHex(parseTrackHue(color), ALPHA)
+  const hex = parseTrackHue(color)
+  return cachedHueVars(hex, hex, ALPHA)
+}
+
+/**
+ * Every row, every lane and every takes-list row asks for these on every
+ * render, and since AQU-2235 each answer costs three OKLab conversions and up
+ * to three P3 gamut walks. It depends only on the colour and the row's kind's
+ * alphas, so each one is worked out once and kept — a handful of entries, the
+ * palette's six and whatever few other colours a project uses. Frozen, because
+ * one object is now handed to every caller.
+ */
+const HUE_VARS = new Map<string, Record<string, string>>()
+function cachedHueVars(key: string, hex: string, alpha: TrackAlpha): Record<string, string> {
+  let vars = HUE_VARS.get(key)
+  if (!vars) {
+    vars = Object.freeze(hueVarsFromHex(hex, alpha)) as Record<string, string>
+    HUE_VARS.set(key, vars)
+  }
+  return vars
 }
 
 function hueVarsFromHex(hex: string, alpha: TrackAlpha): Record<string, string> {
+  const strip = stripColorFor(hex)
   return {
     "--tl-track-hue": hex,
     "--tl-track-hover": hexToRgba(hex, alpha.hover),
     "--tl-track-hover-fill": hexToRgba(hex, alpha.hoverFill),
     "--tl-track-gen": hexToRgba(hex, alpha.generated),
     "--tl-track-take": hexToRgba(hex, alpha.take),
+    // AQU-2235: the waveform look (see WAVE_LOOK).
+    "--tl-track-ground": hexToRgba(hex, WAVE_LOOK.ground),
+    "--tl-track-played": hexToRgba(hex, WAVE_LOOK.played),
+    "--tl-track-frame": hexToRgba(hex, WAVE_LOOK.frame),
+    // Sam, Oct 28: the name bar takes the track's strip colour, matching the
+    // strip at the track's far left, at 90% opacity (first chosen as the hue
+    // at 34%).
+    "--tl-track-bar": barColorFor(strip),
+    "--tl-track-bar-ink": barInkFor(hex),
+    "--tl-track-wave": waveColorFor(hex),
+    "--tl-track-line": playLineColorCss(hex),
+    "--tl-track-strip": strip,
   }
+}
+
+/**
+ * THE WAVEFORM LOOK (AQU-2235; Sam, Oct 25, boards 51–53, and the name bar of
+ * Oct 28, board 54). A take is a deeper shade of its track's hue on a light
+ * wash of it, with a really faint frame instead of the old solid edge:
+ *
+ *   ground  12%   a recorded take AND a generated voice — "make the only
+ *                 distinction between AI and non-AI the little star in the
+ *                 corner", so the two strengths of the old ladder are one
+ *   played  27%   the part of a playing take already heard
+ *   frame   26%   1 px
+ *
+ * and the waveform itself is its track's colour 0.167 darker, chroma 0.14
+ * (track-oklch; Oct 28 — it was oklch(0.55 0.14 <hue>) for every track) at
+ * `wave`, dropping to `unplayed` on the part of a playing take not yet heard.
+ * Like the ladder above, every value is an alpha over the theme's own ground,
+ * so dark mode follows by itself.
+ */
+export const WAVE_LOOK = {
+  ground: 0.12,
+  played: 0.27,
+  frame: 0.26,
+  /** The waveform's opacity, at rest and on the part already played. */
+  wave: 0.9,
+  /** …and on the part of a playing take not yet played. */
+  unplayed: 0.3,
+  /** A muted track's clips, whole (Sam's board 51 suggestion). */
+  muted: 0.5,
+} as const
+
+/**
+ * A track's strip and dot: the waveform's chroma at the track's own lightness
+ * (Sam, Oct 25: "the strip should match the waveform's saturation, not its
+ * lightness"). For the six palette hues only — the derived rows' fixed
+ * colours (the source text's grey, the source audio's aquilla blue) are
+ * statements about what the row is, and stay exactly as they are.
+ */
+function stripColorFor(hex: string): string {
+  return PALETTE_HEXES.has(hex) ? stripColorCss(hex) : hex
+}
+
+/**
+ * A track's waveform: for the six palette hues, Sam's chroma 0.14; any other
+ * colour (the source rows', a hex the briefly shipped picker wrote) is never
+ * made MORE saturated than it is. A grey has no hue to raise, so lifting its
+ * chroma painted it in whatever hue its rounding pointed at.
+ */
+function waveColorFor(hex: string): string {
+  return waveColorCss(hex, PALETTE_HEXES.has(hex) ? WAVE_C : Math.min(WAVE_C, hexToOklch(hex).c))
+}
+
+/** The name bar: a strip colour at 90% opacity (Sam, Oct 28). */
+export const NAME_BAR_OPACITY = 0.9
+function barColorFor(strip: string): string {
+  return `color-mix(in oklab, ${strip} ${Math.round(NAME_BAR_OPACITY * 100)}%, transparent)`
+}
+
+/**
+ * The name bar's text on its strip colour. The palette's strips all sit at
+ * oklch lightness 0.60–0.77, where dark ink reads at 4:1 or better and white
+ * falls under 3.5:1, in either theme. Any other colour picks by its own
+ * luminance.
+ */
+function barInkFor(hex: string): string {
+  if (PALETTE_HEXES.has(hex)) return "#1c1f24"
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex)
+  if (!m) return "#1c1f24"
+  const n = parseInt(m[1], 16)
+  const lin = (c: number) => { const v = c / 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4 }
+  const lum = 0.2126 * lin((n >> 16) & 255) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255)
+  return lum > 0.18 ? "#1c1f24" : "#ffffff"
 }
 
 // The class vocabulary, in the one module that also owns the variables so the
@@ -314,16 +447,23 @@ export const TRACK_LANE_TINT_CLASS = ""
 // and where a generated voice at 33% was barely a shape at all. It is also the
 // same solid the gutter accent, the colour dot and the dashed placeholder's
 // edge already use, so one hue now says "this track" at four places on a row.
-/** A recorded take: the hue at 67%, outlined in the hue itself. */
-export const TRACK_CHIP_TAKE_CLASS =
-  "border-[color:var(--tl-track-hue)] bg-[color:var(--tl-track-take)] text-foreground"
-/** A generated voice: the same hue at 33% — derived, so lighter — outlined the
- *  same way, because it belongs to the same track. */
-export const TRACK_CHIP_GENERATED_CLASS =
-  "border-[color:var(--tl-track-hue)] bg-[color:var(--tl-track-gen)] text-foreground"
+//
+// AQU-2235 (Sam, Oct 25): THAT EDGE IS NOW FAINT — the frame is the hue at 26%
+// over a 12% ground — and a generated voice wears exactly what a recorded take
+// does; only its sparkle marks it. See WAVE_LOOK.
+/** An audio clip, recorded or generated alike (AQU-2235): the hue at 12% in a
+ *  1 px frame at 26%. */
+export const TRACK_CHIP_CLASS =
+  "border-[color:var(--tl-track-frame)] bg-[color:var(--tl-track-ground)] text-foreground"
+/** The waveform's fill: its track 0.167 darker (track-oklch). Opacity is the caller's
+ *  (`WAVE_LOOK.wave`, or `unplayed` on the part not yet played). */
+export const TRACK_WAVE_FILL_CLASS = "fill-[color:var(--tl-track-wave)]"
+/** The name bar along a timeline clip's top (AQU-2235, board 54). */
+export const TRACK_BAR_CLASS = "bg-[color:var(--tl-track-bar)] text-[color:var(--tl-track-bar-ink)]"
 /** The gutter's 4px identity bar. A CLASS ON THE ROW'S ROOT, never a new
- *  element — see the note at its call site in TimelineEditor. */
-export const TRACK_ACCENT_CLASS = "border-l-4 border-l-[color:var(--tl-track-hue)]"
+ *  element — see the note at its call site in TimelineEditor. AQU-2235: in the
+ *  strip colour, the waveform's chroma at the track's own lightness. */
+export const TRACK_ACCENT_CLASS = "border-l-4 border-l-[color:var(--tl-track-strip)]"
 /** What anything on a coloured row does under the pointer. */
 export const TRACK_HOVER_CLASS = "hover:bg-[color:var(--tl-track-hover)]"
 
@@ -331,8 +471,8 @@ export const TRACK_HOVER_CLASS = "hover:bg-[color:var(--tl-track-hover)]"
  *  the two are the same CSS property, so the hover replaces the fill rather
  *  than layering over it, and the lighter rung made a hovered chip fainter. */
 export const TRACK_HOVER_FILL_CLASS = "hover:bg-[color:var(--tl-track-hover-fill)]"
-/** The gutter dot, at full strength. */
-export const TRACK_DOT_CLASS = "bg-[color:var(--tl-track-hue)]"
+/** The gutter dot, in the strip colour (AQU-2235). */
+export const TRACK_DOT_CLASS = "bg-[color:var(--tl-track-strip)]"
 /**
  * A PLACEHOLDER chip — a stretch the row could hold something in but does not.
  *
@@ -361,11 +501,15 @@ export const NEUTRAL_TRACK_VARS: Record<string, string> = {
   "--tl-track-hover-fill": "color-mix(in oklab, var(--foreground) 12%, var(--background))",
   "--tl-track-gen": "color-mix(in oklab, var(--foreground) 5%, var(--background))",
   "--tl-track-take": "color-mix(in oklab, var(--foreground) 9%, var(--background))",
-}
-
-/** The chip's identity classes for one clip. */
-export function trackChipClass(kind: "take" | "generated"): string {
-  return kind === "take" ? TRACK_CHIP_TAKE_CLASS : TRACK_CHIP_GENERATED_CLASS
+  // AQU-2235: the waveform look's grey, for a take with no track to colour it.
+  "--tl-track-ground": "color-mix(in oklab, var(--foreground) 5%, var(--background))",
+  "--tl-track-played": "color-mix(in oklab, var(--foreground) 11%, var(--background))",
+  "--tl-track-frame": "color-mix(in oklab, var(--foreground) 12%, var(--background))",
+  "--tl-track-bar": "color-mix(in oklab, color-mix(in oklab, var(--foreground) 24%, var(--background)) 90%, transparent)",
+  "--tl-track-bar-ink": "var(--foreground)",
+  "--tl-track-wave": "color-mix(in oklab, var(--foreground) 62%, var(--background))",
+  "--tl-track-line": "color-mix(in oklab, var(--foreground) 80%, var(--background))",
+  "--tl-track-strip": "color-mix(in oklab, var(--foreground) 24%, var(--background))",
 }
 
 // 2026-08-27 (Sam): the preview PROGRESS FILL. While a chip's own preview
@@ -378,15 +522,14 @@ export function trackChipClass(kind: "take" | "generated"): string {
 // feedback while the decode is still in flight. `bg-transparent` mutes the
 // identity colour underneath, because the gradient's stops are the same
 // semi-transparent washes and would otherwise stack on it.
-export const TRACK_CHIP_PLAYING_TAKE_CLASS =
-  "bg-transparent bg-[image:linear-gradient(to_right,var(--tl-track-take)_var(--tl-play-x,0px),var(--tl-track-hover)_var(--tl-play-x,0px))]"
-export const TRACK_CHIP_PLAYING_GENERATED_CLASS =
-  "bg-transparent bg-[image:linear-gradient(to_right,var(--tl-track-gen)_var(--tl-play-x,0px),var(--tl-track-hover)_var(--tl-play-x,0px))]"
-
+//
+// AQU-2235 (Sam, Oct 25): the played side moves one rung UP instead — ground
+// 27% against the resting 12% — and the waveform does the rest of the work:
+// full strength where it has played, 30% where it has not (the caller draws
+// that split). One gradient for both kinds, as they now look the same.
 /** The playing chip's fill — a progress split in the chip's own two rungs. */
-export function trackChipPlayingClass(kind: "take" | "generated"): string {
-  return kind === "take" ? TRACK_CHIP_PLAYING_TAKE_CLASS : TRACK_CHIP_PLAYING_GENERATED_CLASS
-}
+export const TRACK_CHIP_PLAYING_CLASS =
+  "bg-transparent bg-[image:linear-gradient(to_right,var(--tl-track-played)_var(--tl-play-x,0px),var(--tl-track-ground)_var(--tl-play-x,0px))]"
 
 /** Whether a track of this KIND may be recoloured at all.
  *

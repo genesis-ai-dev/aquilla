@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { recordStep } from "@/lib/history/history"
-import { Bird, Check, CloudAlert, CloudUpload, FileClock, Pause, Pencil, Play, RotateCcw, Sparkles, Trash2 } from "lucide-react"
+import { Bird, Check, CloudAlert, CloudUpload, FileClock, Pause, Pencil, Play, RotateCcw, Trash2 } from "lucide-react"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { fmtShortCalendarDate } from "@/lib/format-date"
 import { DateTooltip } from "@/components/ui/date-tooltip"
@@ -22,6 +22,7 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import { fetchCellAudio, isDenoisedAudioId, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { audioMimeForExt } from "@/lib/audio/mime"
+import { isGeneratedTake } from "@/lib/audio/track-audio"
 import { claimActiveAudio, clearActiveAudioIf, type ActiveAudioController } from "@/lib/audio/audio-coordinator"
 import { emitCellAudioDeselect, emitCellAudioSelect, emitCellAudioRename } from "@/lib/sync/events-emit"
 import {
@@ -679,9 +680,9 @@ export function TakesStrip({
             ? pieces.map((p) => ({ startSec: (p.trimStartMs ?? 0) / 1000, endSec: p.trimEndMs == null ? null : p.trimEndMs / 1000 }))
             : undefined
             // AQU-646 stage 3: synthetic-ness comes off the TAKE, not off its slot —
-    // an added track's single slot holds both kinds. `voiceId` is set by all
-    // three paths that mint a generated voice.
-    const isGenerated = Boolean(att.voiceId) || att.slot === GENERATED_VOICE_SLOT
+    // an added track's single slot holds both kinds. AQU-2235: the one rule
+    // every surface that draws the sparkle asks.
+    const isGenerated = isGeneratedTake({ selectedGeneratedVoiceAudioId: selectedGeneratedAudioId }, att.audioId, att)
           // AQU-1372: when this take was made and who made it. Absent — never
           // guessed — while the history read is still in flight, or when the
           // 200-event window does not reach back to this take's attach.
@@ -742,23 +743,25 @@ export function TakesStrip({
                     : <Play className="h-3.5 w-3.5" />}
                 </Button>
               </AppTooltip>
-              {(tab || piecesList) && (
-                <TakeRowWave
-                  projectId={projectId}
-                  fileId={fileId}
-                  // A split take's shape runs from its first piece to its last.
-                  att={isSplit
-                    ? { ...att, trimStartMs: Math.min(...pieces.map((p) => p.trimStartMs ?? 0)), trimEndMs: pieces[pieces.length - 1].trimEndMs }
-                    : att}
-                  session={session}
-                  strategy={project.audioMediaStrategy}
-                  generated={isGenerated}
-                  trackVars={takeTrackVars({ files: project.files, fileId: trackFileId ?? fileId, slot: att.slot })}
-                />
-              )}
+              {/* AQU-2235 (Sam's board 52): every takes list carries the take's
+                  56 × 20 shape — the recording window's too, not only the
+                  Recording tab's. */}
+              <TakeRowWave
+                projectId={projectId}
+                fileId={fileId}
+                // A split take's shape runs from its first piece to its last.
+                att={isSplit
+                  ? { ...att, trimStartMs: Math.min(...pieces.map((p) => p.trimStartMs ?? 0)), trimEndMs: pieces[pieces.length - 1].trimEndMs }
+                  : att}
+                session={session}
+                strategy={project.audioMediaStrategy}
+                generated={isGenerated}
+                trackVars={takeTrackVars({ files: project.files, fileId: trackFileId ?? fileId, slot: att.slot })}
+              />
               <span className="flex min-w-0 flex-1 items-center gap-1 tabular-nums">
                 {isCleaned && <Bird className="h-3 w-3 shrink-0 text-emerald-600 dark:text-emerald-400" />}
-                {isGenerated && <Sparkles className="h-3 w-3 shrink-0 text-violet-600 dark:text-violet-400" />}
+                {/* AQU-2235: no second star beside the name — the one in the
+                    take's shape is the only mark (Sam, Oct 25). */}
                 {renamingId === att.audioId ? (
                   <input
                     autoFocus

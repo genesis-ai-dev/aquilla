@@ -413,6 +413,23 @@ export interface Voice {
   /** Preset voices shipped with the app. Cannot be deleted, only forked. */
   builtIn?: boolean
   /**
+   * Inworld instant ("quick") clone: the short reference clip (object name incl.
+   * ext) stored project-scoped in R2 (`projects/{p}/voices/{id}`). The
+   * sync-worker's /api/v1/voice/tts clones it once through Inworld's
+   * `voices:clone` (cached beside the clip as `{id}.inworld.json`) and reads the
+   * line with the cloned voice. Meaningful ONLY on a voice whose provider is
+   * "inworld" — read it through `inworldCloneReferenceId`. Voices from before
+   * AQU-2291 may carry one on Gemini/MMS (those clones needed Seed-VC, now
+   * removed); it is ignored there. An instant clone reads text; it cannot
+   * re-voice a take (Change voice).
+   */
+  referenceAudioId?: string
+  /**
+   * When the clone reference was copied from a line's take, `${cellId}:${audioId}`
+   * of that take. Absent for a clip recorded or uploaded in the Clone voice tab.
+   */
+  referenceTakeKey?: string
+  /**
    * R2 object name (incl. ext) of the Voice Design sample the user picked.
    * The editor plays this clip so it matches the preview, instead of
    * synthesizing the script again. Voices saved before this field existed

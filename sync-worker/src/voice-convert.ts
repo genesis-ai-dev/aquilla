@@ -19,11 +19,12 @@
 //
 // AQU-2291: this route used to have a second, short-clip path — Seed-VC
 // re-voicing against a project-scoped reference clip (`referenceAudioId`).
-// Short-clip clone voices were removed product-wide; a real person's voice now
-// has to be trained as a custom voice (custom-voice.ts). A request still
+// Seed-VC was removed; a short clip now only makes an Inworld quick clone,
+// which reads text (/tts) and cannot re-voice speech. Re-voicing a recording
+// needs a character or trained custom voice (custom-voice.ts). A request still
 // carrying `referenceAudioId` gets a 400 that says so. The project-scoped
-// reference-clip store below stays: custom-voice training reads its recordings
-// from it and Inworld voice-design previews are kept there.
+// reference-clip store below stays: quick-clone clips, custom-voice training
+// recordings and Inworld voice-design previews are kept there.
 
 import { audioObjectKey, isPathSafeId, r2KeyPrefix, safeAudioContentType } from "./audio"
 import { verifyTokenForFile, verifyTokenForProject, WRITE_ROLE_LEVEL } from "./auth"
@@ -276,12 +277,12 @@ export async function handleVoiceConvertRequest(
   const libraryVoiceId = String(form.get("libraryVoiceId") ?? "")
   const sourceAudioId = form.get("sourceAudioId")
   const sourceEntry = form.get("source")
-  // AQU-2291: a stale client still re-voicing through a short-clip clone voice.
+  // AQU-2291: a stale client still re-voicing through a short-clip clone clip.
   // Checked first so it gets the actionable message rather than "missing
   // libraryVoiceId".
   if (form.get("referenceAudioId")) {
     return new Response(
-      "clone voices were removed; train a custom voice from at least 5 minutes of recordings",
+      "short-clip clones can't re-voice recordings; use a character voice or train a custom voice from at least 5 minutes of recordings",
       { status: 400 },
     )
   }

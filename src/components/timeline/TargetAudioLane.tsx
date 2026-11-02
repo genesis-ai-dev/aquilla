@@ -1594,7 +1594,7 @@ function TargetAudioChip({
   // is the only take a voice can be trained from.
   const isHumanTake = chipAtt != null && !chipAtt.voiceId && !isVoiceChangedAudioId(chip.item.audioId)
   const changeVoiceReason = changeVoiceBlocked === "not-trained"
-    ? t("editor.voice.changeVoiceNeedsTraining", { name: changeVoice?.voiceName ?? "" })
+    ? t("editor.voice.changeVoiceCantRevoice", { name: changeVoice?.voiceName ?? "" })
     : changeVoiceBlocked === "up-to-date"
       ? t("editor.voice.changeVoiceUpToDate", { name: changeVoice?.voiceName ?? "" })
       : null

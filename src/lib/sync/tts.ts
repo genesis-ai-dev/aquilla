@@ -28,6 +28,10 @@ export interface SynthesizeCellTtsArgs {
   /** Inworld stock voice id (e.g. "Dennis"), an Instant Clone id made in
    *  Inworld, or a published Voice Design id. */
   voiceId?: string
+  /** Inworld instant clone: the voice's reference clip (from
+   *  /api/v1/voice/reference/*). The worker clones it once (cached) and reads
+   *  the line with the cloned voice instead of `voiceId`. */
+  referenceAudioId?: string
   /** BCP-47 language tag. */
   language?: string
   /** Talking speed in [0.5, 1.5]. */
@@ -74,6 +78,7 @@ export async function synthesizeCellTts(
   }
   if (args.cellId !== undefined) body.cellId = args.cellId
   if (args.voiceId !== undefined) body.voiceId = args.voiceId
+  if (args.referenceAudioId !== undefined) body.referenceAudioId = args.referenceAudioId
   if (args.language !== undefined) body.language = args.language
   if (args.speakingRate !== undefined) body.speakingRate = args.speakingRate
   if (args.deliveryMode !== undefined) body.deliveryMode = args.deliveryMode

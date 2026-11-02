@@ -173,11 +173,15 @@ describe("changeVoiceBlocker", () => {
     expect(changeVoiceBlocker(cell(), anna)).toBeNull()
   })
 
-  it("blocks a plain TTS voice even when it still carries a removed short-clip clone field", () => {
-    // AQU-2291: stored voices may keep `referenceAudioId`; it no longer makes them convertible.
-    const legacyClone = { ...stock, id: "v-old", referenceAudioId: "ref1.wav" } as Voice
+  it("blocks an Inworld quick clone: it reads text but cannot re-voice a take", () => {
+    // Instant clones synthesize from text (Inworld voices:clone); only character,
+    // trained and ElevenLabs voices convert speech to speech.
+    const quickClone = { ...stock, id: "v-clone", provider: "inworld", referenceAudioId: "ref1.wav" } as Voice
+    expect(changeVoiceBlocker(cell(), quickClone)).toBe("not-trained")
+    expect(voiceConversionKey(quickClone)).toBeNull()
+    // …and so is a pre-AQU-2291 Gemini clone, whose clip is now ignored.
+    const legacyClone = { ...stock, id: "v-old", provider: "gemini", referenceAudioId: "ref1.wav" } as Voice
     expect(changeVoiceBlocker(cell(), legacyClone)).toBe("not-trained")
-    expect(voiceConversionKey(legacyClone)).toBeNull()
   })
 
   it("is up to date only when the selected take is already in THIS voice", () => {
@@ -245,7 +249,7 @@ describe("changeVoiceForCell", () => {
 
   it("refuses a voice with no trained model before calling the worker", async () => {
     await expect(changeVoiceForCell({ projectId: "p1", cell: cell(), voice: stock, session, author: "dev" }))
-      .rejects.toThrow("Stock has no trained voice model yet — Change voice works with character voices, trained voices and ElevenLabs voices.")
+      .rejects.toThrow("Stock can read text but can't re-voice recordings — Change voice works with character, trained and ElevenLabs voices.")
     expect(convertToLibraryVoice).not.toHaveBeenCalled()
   })
 })

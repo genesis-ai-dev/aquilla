@@ -24,8 +24,7 @@ describe("generateAndAttachCellVoice routing", () => {
     const convert = vi.fn()
     vi.doMock("./voice-clone", () => ({ convertToLibraryVoice: convert }))
     vi.doMock("./voices", () => ({
-      // AQU-2291: a stored voice may still carry a removed short-clip clone id.
-      resolveVoice: () => ({ id: "v", name: "N", provider: "inworld", voiceName: "Dennis", referenceAudioId: "ref-old.wav" }),
+      resolveVoice: () => ({ id: "v", name: "N", provider: "inworld", voiceName: "Dennis" }),
     }))
     const { generateAndAttachCellVoice } = await import("./generate-voice")
     await generateAndAttachCellVoice({
@@ -56,10 +55,46 @@ describe("generateAndAttachCellVoice routing", () => {
     expect(emitAttach).toHaveBeenCalledWith(
       expect.objectContaining({ audioId: "audio-tts-1.wav", slot: "generatedVoice", durationMs: 1200 }),
     )
-    // …and is a plain TTS voice: no native clone, no conversion, and the
-    // voice's old clip is never stamped onto the take as its lineage.
+    // …and is a plain TTS voice: no instant clone, no conversion.
     expect((synthCellTts.mock.calls[0] as unknown[])[0]).not.toHaveProperty("referenceAudioId")
     expect(convert).not.toHaveBeenCalled()
+    expect((emitAttach.mock.calls[0] as unknown[])[0]).not.toHaveProperty("referenceAudioId")
+  })
+
+  it("an Inworld quick clone sends its reference clip to /tts, with no conversion step", async () => {
+    vi.resetModules()
+    const synthCellTts = vi.fn(async () => ({
+      audioId: "audio-tts-2", durationSeconds: 1,
+      objectName: "audio-tts-2.wav", url: "frontier-audio://audio-tts-2.wav",
+    }))
+    const emitAttach = vi.fn(async () => {})
+    vi.doMock("@/lib/sync/tts", () => ({ synthesizeCellTts: synthCellTts }))
+    vi.doMock("./tts", () => ({ synthesizeForCell: vi.fn(), setTtsStatus: vi.fn(), ttsStatusKey: (s: string) => s }))
+    vi.doMock("@/lib/sync/events-emit", () => ({ emitCellAudioAttach: emitAttach }))
+    vi.doMock("./audio-attachments-bus", () => ({ notifyAudioAttachmentsChanged: vi.fn(), injectOptimisticAudioAttachment: vi.fn() }))
+    vi.doMock("./sync-token-fetcher", () => ({ audioSyncTokenFetcherForSession: () => async () => "tok" }))
+    vi.doMock("./upload", () => ({
+      buildAudioId: () => "id", uploadCellAudio: vi.fn(),
+      fetchCellAudio: vi.fn(async () => new ArrayBuffer(4)),
+    }))
+    const convert = vi.fn()
+    vi.doMock("./voice-clone", () => ({ convertToLibraryVoice: convert }))
+    vi.doMock("./voices", () => ({
+      resolveVoice: () => ({ id: "v-c", name: "Ana", provider: "inworld", voiceName: "Dennis", referenceAudioId: "ref-ana.webm" }),
+    }))
+    const { generateAndAttachCellVoice } = await import("./generate-voice")
+    await generateAndAttachCellVoice({
+      projectId: "p", fileId: "f", cellId: "c", text: "hello",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      session: { jwt: "j", username: "u" } as any, username: "u",
+    })
+    expect(synthCellTts).toHaveBeenCalledWith(
+      expect.objectContaining({ text: "hello", referenceAudioId: "ref-ana.webm" }),
+      expect.any(Function),
+    )
+    expect(convert).not.toHaveBeenCalled()
+    // The voice's clip is not the take's lineage (`referenceAudioId` on an
+    // attachment names the take it was made from — denoise, Change voice).
     expect((emitAttach.mock.calls[0] as unknown[])[0]).not.toHaveProperty("referenceAudioId")
   })
 

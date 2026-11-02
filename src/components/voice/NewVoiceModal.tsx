@@ -1,4 +1,4 @@
-// NewVoiceModal — one modal, three ways to make a voice:
+// NewVoiceModal — one modal, four ways to make a voice:
 //   • TTS voice — name it, pick the engine (Inworld / Gemini / ElevenLabs / MMS —
 //     seeded from the project's configured engine), and fill that engine's
 //     knobs (Gemini: describe how it sounds; MMS: language; Inworld: prebuilt
@@ -7,10 +7,14 @@
 //     your own key, then pick or clone an account voice — ElevenLabsVoiceFields).
 //     Gemini's base timbre stays a smart default (rotated so each new voice
 //     sounds distinct). Leftover Kokoro project defaults remap to Inworld.
+//   • Clone voice — an Inworld quick clone from one short clip (record, upload
+//     or reuse a line's recording; CloneVoicePanel). Always Inworld, so no
+//     engine picker. Reads text only: it cannot re-voice takes. Same org
+//     consent confirmation as Train voice before it is saved.
 //   • Train voice — a custom voice from the org's recordings of a real person
 //     (TrainVoicePanel); consent is the org's, confirmed and kept on record.
-//     The only way to a real person's voice: short-clip cloning was removed
-//     (AQU-2291). Opened from a line's take, that take is the first recording.
+//     The closer match than a quick clone, and what Change voice can use.
+//     Opened from a line's take, that take is the first recording.
 //   • Character — one click adds a ready-made synthetic character voice
 //     (CharacterVoicePicker, src/lib/audio/character-voices.ts). Change voice
 //     re-voices takes into it; no engine or reference clip to set up.
@@ -19,7 +23,7 @@
 // Deliberately de-purpled: TTS uses the brand accent.
 
 import { useCallback, useMemo, useState } from "react"
-import { AudioLines, Drama, GraduationCap, Sparkles, Star, Trash2 } from "lucide-react"
+import { AudioLines, Drama, GraduationCap, Sparkles, Star, Trash2, UserRound } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { Dialog, DialogBody, DialogContent } from "@/components/ui/dialog"
 import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
@@ -41,6 +45,7 @@ import {
 } from "@/components/ui/select"
 import { CharacterVoicePicker } from "@/components/voice/CharacterVoicePicker"
 import { TrainVoicePanel } from "@/components/voice/TrainVoicePanel"
+import { CloneVoicePanel } from "@/components/voice/CloneVoicePanel"
 import { ElevenLabsVoiceFields } from "@/components/voice/elevenlabs/ElevenLabsVoiceFields"
 import { voiceFromCharacter } from "@/lib/audio/character-voices"
 import { cn } from "@/lib/utils"
@@ -56,6 +61,7 @@ import {
   isInworldVoiceName,
   normalizeVoiceForProvider,
   effectiveTtsProvider,
+  inworldCloneReferenceId,
   type TtsProviderInfo,
 } from "@/lib/audio/tts-providers"
 import {
@@ -87,7 +93,7 @@ import type { TtsProvider, Voice } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
 
-type Mode = "tts" | "character" | "train"
+type Mode = "tts" | "clone" | "character" | "train"
 
 export interface NewVoiceModalProps {
   open: boolean
@@ -167,13 +173,20 @@ function NewVoiceModalBody({
   const t = useT()
   const isNew = voice === null
   const lockedMode: Mode | null = voice
-    ? (voice.customVoice ? "train" : voice.libraryVoiceId ? "character" : "tts")
+    ? (voice.customVoice
+        ? "train"
+        : voice.libraryVoiceId
+          ? "character"
+          : inworldCloneReferenceId(voice) ? "clone" : "tts")
     : null
   const charactersInCast = useMemo(
     () => new Set((existingVoices ?? []).flatMap((v) => (v.libraryVoiceId ? [v.libraryVoiceId] : []))),
     [existingVoices],
   )
   const [mode, setMode] = useState<Mode>(lockedMode ?? initialMode ?? "tts")
+  // A quick clone is a real person's voice: the org confirms consent before it
+  // is saved — again whenever its clip changes.
+  const [cloneConsent, setCloneConsent] = useState(false)
 
   const projectProvider = effectiveTtsProvider(provider ?? DEFAULT_TTS_PROVIDER)
   const catalogLanguages = useMemo(
@@ -186,15 +199,17 @@ function NewVoiceModalBody({
   const rotatedGeminiVoice =
     GEMINI_TTS_VOICES[paletteIndex % GEMINI_TTS_VOICES.length]?.name ?? DEFAULT_GEMINI_VOICE
 
-  const [draft, setDraft] = useState<Voice>(() =>
-    seedDraft({
+  const [draft, setDraft] = useState<Voice>(() => {
+    const seeded = seedDraft({
       voice,
       projectProvider,
       targetLanguage,
       paletteIndex,
       rotatedGeminiVoice,
-    }),
-  )
+    })
+    // Opened straight on Clone voice: a quick clone is always Inworld.
+    return !voice && initialMode === "clone" ? normalizeVoiceForProvider(seeded, "inworld", { targetLanguage }) : seeded
+  })
   const update = useCallback((patch: Partial<Voice>) => setDraft((d) => ({ ...d, ...patch })), [])
   // AQU-2032: the Language/Accent fields own `language`. A speaker pick may only
   // seed it when the draft has none — it must never overwrite the accent the
@@ -259,6 +274,29 @@ function NewVoiceModalBody({
       onClose()
       return
     }
+    if (mode === "clone") {
+      if (!draft.referenceAudioId) {
+        setTakeError(t("audio.newVoice.errorReferenceRequired"))
+        return
+      }
+      if (!cloneConsent && draft.referenceAudioId !== voice?.referenceAudioId) {
+        setTakeError(t("audio.newVoice.errorCloneConsentRequired"))
+        return
+      }
+      if (languagePicker && !toInworldLanguage(draft.language) && catalogLanguages.every((lane) => !toInworldLanguage(lane))) {
+        setTakeError(t("audio.newVoice.errorInworldLanguageRequired"))
+        return
+      }
+      setTakeError(null)
+      // Always Inworld: the worker clones the clip with Inworld's instant
+      // cloning and reads with that voice. Voice Design knobs do not apply.
+      const clone = normalizeVoiceForProvider({ ...draft, name: draft.name.trim() }, "inworld", { targetLanguage })
+      delete clone.prompt
+      delete clone.designPreviewAudioId
+      onSave(clone)
+      onClose()
+      return
+    }
     if (mode === "character") {
       // Only reachable while editing: a new character is added straight from
       // its card. Keep identity + name, drop every engine knob.
@@ -298,6 +336,10 @@ function NewVoiceModalBody({
     }
     setTakeError(null)
     let next: Voice = { ...draft, name: draft.name.trim() || "New voice" }
+    // A TTS voice never carries a clone clip (one added on the Clone voice tab
+    // and then abandoned) — a lingering one would silently make it a clone.
+    delete next.referenceAudioId
+    delete next.referenceTakeKey
     if (designing && designSelection) {
       let voiceName = designSelection.voiceId
       let designPreviewAudioId = next.designPreviewAudioId
@@ -346,7 +388,7 @@ function NewVoiceModalBody({
     onSave(next)
     onClose()
   }, [
-    mode, draft, projectProvider, languagePicker, catalogLanguages,
+    mode, draft, voice, cloneConsent, targetLanguage, projectProvider, languagePicker, catalogLanguages,
     inworldSource, designSelection, projectId, fileId, session, onSave, onClose, t,
   ])
 
@@ -366,12 +408,20 @@ function NewVoiceModalBody({
           {isNew && (
             <Tabs
               value={mode}
-              onValueChange={(value) => setMode(value as Mode)}
+              onValueChange={(value) => {
+                const next = value as Mode
+                setMode(next)
+                // A quick clone is always Inworld.
+                if (next === "clone" && activeProvider !== "inworld") pickProvider("inworld")
+              }}
               className="w-full gap-0"
             >
-              <TabsList size="lg" className="grid w-full grid-cols-3" aria-label={t("audio.newVoice.kindGroupLabel")}>
+              <TabsList size="lg" className="grid w-full grid-cols-4" aria-label={t("audio.newVoice.kindGroupLabel")}>
                 <TabsTrigger value="tts">
                   <Sparkles /> {t("audio.newVoice.tabTts")}
+                </TabsTrigger>
+                <TabsTrigger value="clone">
+                  <UserRound /> {t("audio.newVoice.tabClone")}
                 </TabsTrigger>
                 <TabsTrigger value="character">
                   <Drama /> {t("audio.newVoice.tabCharacter")}
@@ -396,6 +446,22 @@ function NewVoiceModalBody({
                 onStarted={(started) => { onSave(started); onClose() }}
                 seedRecording={isNew ? seedRecording : undefined}
               />
+            ) : mode === "clone" ? (
+                <CloneVoicePanel
+                  draft={draft}
+                  onChange={update}
+                  projectId={projectId}
+                  fileId={fileId}
+                  session={session}
+                  cells={cells}
+                  language={inworldLocaleLanguage}
+                  onLanguageChange={setInworldLanguage}
+                  consent={cloneConsent}
+                  onConsentChange={setCloneConsent}
+                  onError={setTakeError}
+                >
+                  <InworldVoiceSettings voice={draft} onChange={update} />
+                </CloneVoicePanel>
             ) : mode === "character" ? (
               <CharacterVoicePicker
                 editing={!isNew}

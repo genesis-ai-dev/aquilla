@@ -249,7 +249,7 @@ describe("TargetAudioLane — per-line Change voice (AQU-2026)", () => {
   })
 
   it.each([
-    ["not-trained" as const, "Narrator has no trained voice model yet — Change voice works with character, trained and ElevenLabs voices."],
+    ["not-trained" as const, "Narrator can read text but can't re-voice recordings — Change voice works with character, trained and ElevenLabs voices."],
     ["up-to-date" as const, "This take is already in Narrator's voice"],
     ["busy" as const, "Change voice"],
   ])("greys the item and gives the reason when it cannot run (%s)", async (blocker, reason) => {

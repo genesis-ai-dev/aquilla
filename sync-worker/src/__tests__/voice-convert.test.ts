@@ -273,8 +273,9 @@ describe("POST /api/v1/voice/convert", () => {
     expect(calls).toHaveLength(0)
   })
 
-  // AQU-2291: short-clip clone voices were removed. A stale client still
-  // sending one is told what to do instead, and no GPU is started.
+  // AQU-2291: Seed-VC was removed; a short clip only makes an Inworld quick
+  // clone, which reads text and cannot re-voice. A stale client still sending
+  // one is told what to do instead, and no GPU is started.
   it("400 telling the caller to train a custom voice when referenceAudioId is sent", async () => {
     const env = makeEnv()
     env.SNAPSHOTS._seed(voiceRefObjectKey(env, "p1", "ref1.wav"), new Uint8Array([9]), "audio/wav")
@@ -286,7 +287,7 @@ describe("POST /api/v1/voice/convert", () => {
     form.append("source", new Blob([new Uint8Array([1])], { type: "audio/wav" }), "source")
     const res = (await call(env, convertReq(form, await makeToken())))!
     expect(res.status).toBe(400)
-    expect(await res.text()).toMatch(/clone voices were removed; train a custom voice/)
+    expect(await res.text()).toMatch(/short-clip clones can't re-voice recordings; .*train a custom voice/)
     expect(calls).toHaveLength(0)
   })
 

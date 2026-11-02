@@ -1892,8 +1892,8 @@ export const editor = defineNamespace({
     "editor.voice.recordedBy": "Recorded by {name}",
     "editor.voice.originalAudio": "Original audio",
     "editor.voice.changeVoice": "Change voice",
-    "editor.voice.changeVoiceNeedsTraining":
-      "{name} has no trained voice model yet — Change voice works with character, trained and ElevenLabs voices.",
+    "editor.voice.changeVoiceCantRevoice":
+      "{name} can read text but can't re-voice recordings — Change voice works with character, trained and ElevenLabs voices.",
     "editor.voice.changeVoiceUpToDate": "This take is already in {name}'s voice",
     "editor.voice.voicing": "Voicing…",
     "editor.voice.choose": "Choose a voice",
@@ -7035,12 +7035,15 @@ export const editor = defineNamespace({
           "like the assigned character or trained voice. No new speech is generated from text.",
         maxLength: 18,
       },
-      "editor.voice.changeVoiceNeedsTraining": {
+      "editor.voice.changeVoiceCantRevoice": {
         description:
           "Tooltip on the disabled 'Change voice' button (and the disabled timeline " +
-          "menu item) when the line's voice is a plain text-to-speech voice. Change " +
-          "voice re-voices an existing take, and only ready-made character voices and " +
-          "voices trained from a real person's recordings can do that.",
+          "menu item) when the line's voice is a text-to-speech voice or a quick " +
+          "(Inworld) clone: it can speak typed text, but it cannot turn an existing " +
+          "recording into its voice. Change voice keeps a take's words and timing and " +
+          "only changes who it sounds like; only ready-made character voices, voices " +
+          "trained from a real person's recordings, and ElevenLabs voices can do that. " +
+          "'Change voice' is the name of the button.",
         placeholders: {
           name: "The assigned voice's name from the project's cast — user data, never translate it.",
         },

@@ -12,7 +12,7 @@
 /** What `aquilla.audio.clone` rejects with since short-clip cloning was
  *  removed (AQU-2291). The method stays so rev4 extensions get a clear answer
  *  instead of an unknown-method error. */
-export const CLONE_REMOVED_MESSAGE = "Voice cloning was removed — train a voice in the New voice dialog"
+export const CLONE_REMOVED_MESSAGE = "Extensions can't clone voices — clone or train a voice in the New voice dialog"
 
 /** One take on a line that can be validated (AudioValidationControl). */
 export interface ToolAudioTake {

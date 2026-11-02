@@ -67,6 +67,11 @@ export function findVoice(settings: ProjectTtsSettings | undefined, voiceId: str
   return getVoiceLibrary(settings).find((v) => v.id === voiceId)
 }
 
+/** An instant clone whose clip was recorded or uploaded — not copied from a line's take. */
+export function isRecordedCloneClip(voice: Pick<Voice, "referenceAudioId" | "referenceTakeKey">): boolean {
+  return Boolean(voice.referenceAudioId) && !voice.referenceTakeKey
+}
+
 /**
  * Resolve which voice to use for a cell.
  * Order: cell.voiceId -> project.defaultVoiceId -> first preset.

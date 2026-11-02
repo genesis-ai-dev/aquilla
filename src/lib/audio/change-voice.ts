@@ -187,7 +187,7 @@ export async function changeVoiceForCell(args: ChangeVoiceArgs): Promise<ChangeV
   if (!take) throw new Error("This line has no take to change.")
   const elevenLabs = isElevenLabsVoice(voice) ? voice.elevenLabs : undefined
   if (!voice.libraryVoiceId && !elevenLabs) {
-    throw new Error(`${voice.name} has no trained voice model yet — Change voice works with character voices, trained voices and ElevenLabs voices.`)
+    throw new Error(`${voice.name} can read text but can't re-voice recordings — Change voice works with character, trained and ElevenLabs voices.`)
   }
 
   const sourceAudioId = originalTakeId(cell.attachments, take.audioId)

@@ -1,6 +1,6 @@
 # Inworld TTS 2 Flash (AQU-1189)
 
-Aquilla's default cloud TTS engine is **Inworld TTS 2**
+Aquilla's default cloud TTS / quick-clone engine is **Inworld TTS 2**
 (`inworld-tts-2`). New voices default to Highest quality; Standard selects
 Flash (`inworld-tts-2-flash`).
 
@@ -9,8 +9,9 @@ Flash (`inworld-tts-2-flash`).
 The browser never holds this secret. Only **sync-worker** calls Inworld.
 
 1. Create a **read-write** API key in the [Inworld Portal](https://platform.inworld.ai/)
-   (`inworld workspace add-key`, or Portal → API Keys). Voice Design needs
-   write access on `voices`; a read-only key fails design and publish.
+   (`inworld workspace add-key`, or Portal → API Keys). Instant Voice Cloning
+   and Voice Design both need write access on `voices`; a read-only key fails
+   clone, design and publish alike.
 2. Copy the key **as-is** (do not prefix `Basic ` — the worker adds that).
 
 ### Local `pnpm dev`
@@ -55,6 +56,7 @@ Do **not** put the key in `VITE_*`, the SPA, or auth-worker.
 | Purpose | Method | Path |
 | --- | --- | --- |
 | Synthesize | `POST` | `https://api.inworld.ai/tts/v1/voice` |
+| Instant clone | `POST` | `https://api.inworld.ai/voices/v1/voices:clone` |
 | Voice design | `POST` | `https://api.inworld.ai/voices/v1/voices:design` |
 | Publish designed voice | `POST` | `https://api.inworld.ai/voices/v1/voices/{voiceId}:publish` |
 | List voices | `GET` | `https://api.inworld.ai/voices/v1/voices` |
@@ -128,7 +130,18 @@ becomes `inworld`, leftover language tags (`eng`, `French`, `en`) become
 Inworld BCP-47 (`en-US`, `fr-FR`), and empty catalog names become Dennis.
 Runtime still remaps unread copies so generate uses the hosted Inworld path.
 
-Instant cloning from a short reference clip was removed (AQU-2291). A real
-person's voice is a trained custom voice (`infra/modal/voice_forge.py`, at
-least 5 minutes of recordings) applied with Change voice; `/api/v1/voice/tts`
-ignores a `referenceAudioId` a stale client still sends.
+## Quick clone (Inworld instant cloning)
+
+New voice → **Clone voice** makes a quick clone from one short clip (record,
+upload, or a line's recording). The clip is uploaded project-scoped to R2
+(`/api/v1/voice/reference`) and stored on `Voice.referenceAudioId`, which is
+only meaningful on a voice whose provider is `inworld`
+(`inworldCloneReferenceId`; a clip left on a pre-AQU-2291 Gemini/MMS clone is
+ignored). Generate sends it as `referenceAudioId` to `/api/v1/voice/tts`; the
+worker clones it once through `voices:clone` (free on the price card,
+`INWORLD_VOICE_CLONE_CENTS`), caches the cloned id beside the clip as
+`projects/{p}/voices/{ref}.inworld.json`, and synthesizes with it. The org
+confirms the speaker's consent before a clone is saved (same statement as
+Train voice). A quick clone reads text only — it cannot re-voice a take;
+Change voice needs a character, trained (`infra/modal/voice_forge.py`, at
+least 5 minutes of recordings) or ElevenLabs voice.

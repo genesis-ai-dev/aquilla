@@ -50,6 +50,8 @@ vi.mock("@/lib/audio/upload", () => ({
   parseFrontierAudioUrl: vi.fn(),
   fetchCellAudio: vi.fn(),
   getCellAudioStreamUrl: vi.fn(),
+  // The Clone voice tab's recorder reads the upload ceiling at import.
+  MAX_AUDIO_UPLOAD_BYTES: 95 * 1024 * 1024,
 }))
 
 function renderCreate({
@@ -348,13 +350,14 @@ describe("NewVoiceModal engine selection", () => {
   })
 })
 
-describe("NewVoiceModal kinds (AQU-2291)", () => {
-  it("offers TTS, Characters and Train voice — no short-clip Clone tab", () => {
+describe("NewVoiceModal kinds", () => {
+  it("offers TTS voice, Clone voice, Characters and Train voice, in that order", () => {
     renderCreate({ provider: "inworld" })
-    expect(screen.getAllByRole("tab").map((tab) => tab.textContent?.trim())).toEqual(
-      expect.arrayContaining(["TTS voice", "Characters", "Train voice"]),
+    const kinds = screen.getByRole("tablist", { name: "Voice kind" })
+    expect(Array.from(kinds.querySelectorAll("[role=tab]")).map((tab) => tab.textContent?.trim())).toEqual(
+      ["TTS voice", "Clone voice", "Characters", "Train voice"],
     )
-    expect(screen.queryByRole("tab", { name: /Clone/ })).toBeNull()
+    // The TTS tab itself says nothing about reference clips.
     expect(screen.queryByText(/reference clip/i)).toBeNull()
   })
 

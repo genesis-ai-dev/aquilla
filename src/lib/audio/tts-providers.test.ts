@@ -9,6 +9,7 @@ import {
   defaultVoiceNameForProvider,
   effectiveTtsProvider,
   inferMmsLanguageCode,
+  inworldCloneReferenceId,
   isInworldVoiceName,
   isLegacyKokoroVoiceName,
   isServerTtsProvider,
@@ -185,5 +186,30 @@ describe("TTS provider normalization", () => {
       .toBe(DEFAULT_INWORLD_VOICE)
     expect(isInworldVoiceName("eng")).toBe(false)
     expect(isInworldVoiceName("fra")).toBe(false)
+  })
+})
+
+describe("Inworld quick clones (inworldCloneReferenceId)", () => {
+  const ref = { referenceAudioId: "ref.webm" }
+  it("is the clip only for a voice on Inworld", () => {
+    expect(inworldCloneReferenceId({ provider: "inworld", ...ref })).toBe("ref.webm")
+    // Leftover hosted ids still run on Inworld.
+    expect(inworldCloneReferenceId({ provider: "omnivoice", ...ref })).toBe("ref.webm")
+  })
+
+  it("ignores a clip on Gemini/MMS (pre-AQU-2291 Seed-VC clones) and on non-TTS voices", () => {
+    expect(inworldCloneReferenceId({ provider: "gemini", ...ref })).toBeUndefined()
+    expect(inworldCloneReferenceId({ provider: "mms", ...ref })).toBeUndefined()
+    expect(inworldCloneReferenceId({ ...ref })).toBeUndefined()
+    expect(inworldCloneReferenceId({ provider: "inworld", libraryVoiceId: "narrator-hearth", ...ref })).toBeUndefined()
+    expect(inworldCloneReferenceId({ provider: "inworld" })).toBeUndefined()
+  })
+
+  it("normalizing onto another engine drops the clip; onto Inworld keeps it", () => {
+    const clone = { id: "v", name: "Ana", provider: "inworld" as const, referenceAudioId: "ref.webm", referenceTakeKey: "c1:a1" }
+    expect(normalizeVoiceForProvider(clone, "inworld").referenceAudioId).toBe("ref.webm")
+    const gemini = normalizeVoiceForProvider(clone, "gemini")
+    expect(gemini.referenceAudioId).toBeUndefined()
+    expect(gemini.referenceTakeKey).toBeUndefined()
   })
 })

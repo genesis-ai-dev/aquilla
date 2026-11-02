@@ -330,11 +330,11 @@ describe("sweepOrphanedR2Objects", () => {
     expect(bucket._has("projects/p1/files/f1/audio/take-orig.webm")).toBe(false)
   })
 
-  it("keeps a legacy clone clip a voice in the project library still points at", async () => {
+  it("keeps a quick-clone clip a voice in the project library still points at", async () => {
     // AC2, the case that is only visible in the settings blob: the user
     // uploaded a reference clip and assigned it to a voice, but has not voiced
-    // a single line yet, so nothing in cell_audio mentions it. AQU-2291 removed
-    // clone voices; a blob not yet rewritten still keeps its clip.
+    // a single line yet, so nothing in cell_audio mentions it (an Inworld quick
+    // clone, or a pre-AQU-2291 clone whose blob has not been rewritten).
     await seed("project_settings", [settingsWithVoiceRef("ref-in-use.webm")])
     const bucket = makeStubBucket([
       { key: "projects/p1/voices/ref-in-use.webm" },
@@ -352,8 +352,8 @@ describe("sweepOrphanedR2Objects", () => {
     expect(report.byNamespace.voice.orphaned).toBe(2)
   })
 
-  // AQU-2291: with clone voices gone, the settings blob's remaining voices/
-  // reference is the Inworld voice-design preview a voice plays when opened.
+  // The settings blob's other voices/ reference: the Inworld voice-design
+  // preview a voice plays when opened.
   it("keeps a voice-design preview clip a voice in the project library points at", async () => {
     await seed("project_settings", [{
       project_id: "p1",

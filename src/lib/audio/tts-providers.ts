@@ -171,6 +171,21 @@ export function effectiveTtsProvider(provider: TtsProvider | undefined): TtsProv
   return provider
 }
 
+/**
+ * The reference clip an Inworld instant ("quick") clone reads from, or
+ * undefined when the voice is not one. Only a voice whose provider is Inworld
+ * can be an instant clone: a `referenceAudioId` on any other voice — a
+ * Gemini/MMS clone from before AQU-2291, which needed Seed-VC — is ignored, as
+ * it is on a character, trained or ElevenLabs voice.
+ */
+export function inworldCloneReferenceId(
+  voice: Pick<Voice, "provider" | "referenceAudioId" | "libraryVoiceId" | "customVoice" | "elevenLabs">,
+): string | undefined {
+  if (!voice.referenceAudioId || !voice.provider) return undefined
+  if (voice.libraryVoiceId || voice.customVoice || voice.elevenLabs) return undefined
+  return effectiveTtsProvider(voice.provider) === "inworld" ? voice.referenceAudioId : undefined
+}
+
 /** Engines that synthesize in the sync-worker (no client-side synth path):
  *  hosted Inworld, and BYOK ElevenLabs (AQU-2299). */
 export function isServerTtsProvider(provider: TtsProvider | undefined): boolean {
@@ -256,6 +271,12 @@ export function normalizeVoiceForProvider(
   if (engine !== "elevenlabs") {
     delete next.elevenLabs
     delete next.elevenLabsClone
+  }
+  if (engine !== "inworld") {
+    // Only Inworld can instant-clone a reference clip; on any other engine a
+    // leftover clip (a pre-AQU-2291 Gemini clone) means nothing.
+    delete next.referenceAudioId
+    delete next.referenceTakeKey
   }
   if (engine === "inworld") {
     if (!isInworldVoiceName(next.voiceName)) next.voiceName = DEFAULT_INWORLD_VOICE

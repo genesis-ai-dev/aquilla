@@ -22,9 +22,10 @@ export function inworldTtsRawCents(characters: number, modelId?: string): number
   return characters * rate
 }
 
-/** Voice publish carries no Inworld charge on the card. It still passes the
- *  entitlement check, so the ceiling and allowance gate it and each one
- *  leaves a row. */
+/** Instant voice clone and voice publish carry no Inworld charge on the card.
+ *  They still pass the entitlement check, so the ceiling and allowance gate
+ *  them and each one leaves a row. */
+export const INWORLD_VOICE_CLONE_CENTS = 0
 export const INWORLD_VOICE_PUBLISH_CENTS = 0
 /** The ledger refuses a zero reservation, so a free call reserves this and
  *  settles at its card price. */

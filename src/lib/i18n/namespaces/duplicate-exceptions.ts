@@ -365,6 +365,17 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
   // duplicate can only be resolved on this side. Within projectSettings itself
   // the equivalent same-string duplicates were consolidated onto one shared
   // key instead of excepted — see the namespace file's "AQU-832" comments.
+  "projectSettings.sourceLink.modeClone":
+    "Badge naming the AD-9 link-mode ('Clone' vs 'Live') on a linked project's " +
+    "Source Link card, and reused for the same radio option in the create-project " +
+    "dialog. audio.library.cloneEngineLabel labels a quick-cloned voice (a copy of " +
+    "a real person's voice) in the Voices panel. A project-linking term of art and " +
+    "a kind-of-voice label that happen to share the English word 'Clone'.",
+  "audio.newVoice.tabClone":
+    "Tab label naming a kind of voice in the New voice dialog (a quick clone, " +
+    "next to TTS voice / Characters / Train voice) — a noun phrase in most " +
+    "languages. audio.elevenLabs.cloneButton is the imperative action button that " +
+    "starts an ElevenLabs clone. A tab name and a command.",
   "projectSettings.section.experimental":
     "Section/nav-group heading for this project's device-local experimental " +
     "feature flags. autopilot.settings.experimentalTitle is the same heading for " +

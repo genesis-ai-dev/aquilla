@@ -10,6 +10,8 @@ export const audio = defineNamespace({
     "audio.newVoice.createLabel": "New voice",
     "audio.newVoice.titleEdit": "Edit voice",
     "audio.newVoice.tabTts": "TTS voice",
+    "audio.newVoice.tabClone": "Clone voice",
+    "audio.newVoice.cloneIntro": "Quick clone from a short clip (Inworld). For a closer match, train a voice.",
     "audio.newVoice.tabCharacter": "Characters",
     "audio.newVoice.tabTrain": "Train voice",
 
@@ -174,6 +176,8 @@ export const audio = defineNamespace({
     "audio.newVoice.reuseTakeSummary": "Or reuse audio from a line",
     "audio.newVoice.takeRecorded": "Recorded",
     "audio.newVoice.errorNameRequired": "Name the voice",
+    "audio.newVoice.errorReferenceRequired": "Add a reference clip before creating a cloned voice",
+    "audio.newVoice.errorCloneConsentRequired": "Confirm the speaker's consent before creating a cloned voice",
     "audio.newVoice.makeNarratorHint":
       "Make this the narrator — used for lines without an explicit speaker.",
     "audio.newVoice.makeNarratorButton": "Make narrator",
@@ -423,14 +427,31 @@ export const audio = defineNamespace({
     "audio.library.setNarrator": "Make narrator",
     "audio.library.voicedStats": "{voiced}/{assigned} voiced",
     "audio.library.noLinesYet": "no lines yet",
+    "audio.library.cloneEngineLabel": "Clone",
     "audio.library.characterEngineLabel": "Character",
     "audio.library.customEngineLabel": "Custom",
     "audio.library.trainingEngineLabel": "Training",
     "audio.library.trainingFailedLabel": "Training failed",
 
     // A plain "Replace" button (GenerateOverwriteDialog, onboarding's saved
-    // key). The key name is left from the removed voice-clone section.
+    // key, the Clone voice tab's clip).
     "audio.clone.replaceButton": "Replace",
+    // VoiceCloneSection — record/upload the short clip an Inworld quick clone
+    // is made from (Clone voice tab).
+    "audio.clone.activeBadge": "Active",
+    "audio.clone.needsContext":
+      "Open this from a project workspace to record or upload a reference clip.",
+    "audio.clone.stopRecordingButton": "Stop ({seconds}s)",
+    "audio.clone.recordButton": "Record reference",
+    "audio.clone.uploadButton": "Upload audio",
+    "audio.clone.dropzoneTitle": "Add a reference clip",
+    "audio.clone.dropzoneHint": "5–15 seconds of one clear speaker, with no music or background noise.",
+    "audio.clone.dropzoneDrop": "Drop to use as the reference",
+    "audio.clone.errorNotAudio": "That file isn't audio. Use a short recording.",
+    "audio.clone.errorNoContext": "No project context for upload.",
+    "audio.clone.errorTooLarge": "Reference clip too large (max 8 MB). Use a few seconds.",
+    "audio.clone.previewTooltip": "Preview reference clip",
+    "audio.clone.previewFailed": "Preview failed",
 
     // AudioBulkProgressBanner — batch transcribe-all / synth-all progress.
     "audio.bulkProgress.cancelTooltip": "Cancel batch",
@@ -824,10 +845,25 @@ export const audio = defineNamespace({
           "it out briefly.",
         maxLength: 18,
       },
+      "audio.newVoice.tabClone": {
+        description:
+          "Tab label for the 'quick clone of a real person's voice from one short " +
+          "clip' way of making a voice (Inworld instant cloning), next to the TTS " +
+          "voice, Characters and Train voice tabs. A tab naming a kind of voice, not " +
+          "the ElevenLabs 'Clone voice' action button.",
+        maxLength: 18,
+      },
+      "audio.newVoice.cloneIntro": {
+        description:
+          "One-line intro at the top of the Clone voice tab. A quick clone copies a " +
+          "speaker's voice from a single short clip using Inworld (a company name — " +
+          "do not translate). 'train a voice' points to the Train voice tab, which " +
+          "makes a closer copy from longer recordings.",
+      },
       "audio.newVoice.tabCharacter": {
         description:
           "Tab label for picking a ready-made character voice from a built-in list, " +
-          "next to the TTS voice and Train voice tabs.",
+          "next to the TTS voice, Clone voice and Train voice tabs.",
         maxLength: 18,
       },
       "audio.newVoice.tabTrain": {
@@ -1440,6 +1476,18 @@ export const audio = defineNamespace({
         description:
           "Inline validation error shown when the user tries to save a voice without " +
           "typing a name first.",
+      },
+      "audio.newVoice.errorReferenceRequired": {
+        description:
+          "Inline validation error shown when the user tries to save a Clone voice " +
+          "tab voice before attaching a reference clip (the short recording of the " +
+          "speaker it copies).",
+      },
+      "audio.newVoice.errorCloneConsentRequired": {
+        description:
+          "Inline validation error shown when the user tries to save a Clone voice " +
+          "tab voice before ticking the organization's confirmation that the speaker " +
+          "consented to an AI copy of their voice.",
       },
       "audio.newVoice.makeNarratorHint": {
         description:
@@ -2515,6 +2563,12 @@ export const audio = defineNamespace({
         description: "Same slot, when training a custom voice failed.",
         maxLength: 16,
       },
+      "audio.library.cloneEngineLabel": {
+        description:
+          "Same slot as audio.library.customEngineLabel, shown for a quick clone: a " +
+          "voice copied from one short clip of a real person (Inworld instant cloning).",
+        maxLength: 12,
+      },
       "audio.library.characterEngineLabel": {
         description:
           "Same slot as audio.library.customEngineLabel, shown for voices picked from " +
@@ -2525,8 +2579,79 @@ export const audio = defineNamespace({
         description:
           "Everyday imperative 'Replace' button: swaps something already set for a new " +
           "one — existing audio in the Generate overwrite dialog, a saved API key in " +
-          "onboarding. (The key name is historical.)",
+          "onboarding, a quick clone's reference clip.",
         maxLength: 16,
+      },
+      "audio.clone.activeBadge": {
+        description:
+          "Small badge on the Clone voice tab once a reference clip is attached, " +
+          "confirming the clone has its clip.",
+        maxLength: 12,
+      },
+      "audio.clone.needsContext": {
+        description:
+          "Message shown instead of the record/upload controls when the Clone voice " +
+          "tab is opened without a project/file to upload into (e.g. a detached preview).",
+      },
+      "audio.clone.stopRecordingButton": {
+        description:
+          "Button shown while recording a reference clip that stops the capture, " +
+          "with the elapsed time counting up beside the label.",
+        placeholders: {
+          seconds: "Elapsed recording time in seconds, to one decimal place.",
+        },
+      },
+      "audio.clone.recordButton": {
+        description:
+          "Button that starts recording a fresh reference clip from the microphone, " +
+          "shown when no clip is attached yet.",
+        maxLength: 20,
+      },
+      "audio.clone.uploadButton": {
+        description:
+          "Button that opens a file picker to upload an existing audio file as the " +
+          "reference clip, shown when no clip is attached yet.",
+        maxLength: 20,
+      },
+      "audio.clone.dropzoneTitle": {
+        description:
+          "Heading inside the empty dashed dropzone on the Clone voice tab, inviting " +
+          "the user to attach the short clip the voice is copied from.",
+      },
+      "audio.clone.dropzoneHint": {
+        description:
+          "Subtitle under audio.clone.dropzoneTitle: what makes a good reference clip. " +
+          "Record, upload, and drag-and-drop are the zone itself.",
+      },
+      "audio.clone.dropzoneDrop": {
+        description:
+          "Temporary subtitle shown while an audio file is dragged over the " +
+          "reference dropzone, replacing audio.clone.dropzoneHint.",
+      },
+      "audio.clone.errorNotAudio": {
+        description:
+          "Inline error when a dropped or picked file is not audio (e.g. an image " +
+          "or document), telling the user to use a short recording instead.",
+      },
+      "audio.clone.errorNoContext": {
+        description:
+          "Inline error shown if an upload is attempted with no project/file to " +
+          "upload into (an unexpected state, not a normal user mistake).",
+      },
+      "audio.clone.errorTooLarge": {
+        description:
+          "Inline error shown when the chosen reference file exceeds the 8 MB size " +
+          "limit, with guidance that only a short clip is actually needed.",
+      },
+      "audio.clone.previewTooltip": {
+        description:
+          "Tooltip on the small play button next to an attached reference clip, " +
+          "offering to play it back so the user can confirm it's the right audio.",
+      },
+      "audio.clone.previewFailed": {
+        description:
+          "Visible label the preview button switches to if playback of the " +
+          "reference clip fails to load.",
       },
       "audio.bulkProgress.cancelTooltip": {
         description:
@@ -2907,7 +3032,7 @@ export const audio = defineNamespace({
         description: "Muted tips inside the drop zone for cloning samples. Keep the separator and the number.",
       },
       "audio.elevenLabs.cloneFromLines": {
-        description: "Muted lead-in, lowercase, inside the clone drop zone under 'Add recordings of the speaker': below it, chips name this project's recorded lines by their text; tapping one adds that recording as a cloning sample.",
+        description: "Muted lead-in, lowercase, inside a clone drop zone (ElevenLabs clone step, and the Clone voice tab): below it, chips name this project's recorded lines by their text; tapping one adds that recording as a cloning sample (on the Clone voice tab, uses it as the one reference clip).",
       },
       "audio.elevenLabs.cloneFromLinesAriaLabel": {
         description: "Screen-reader name of the list of chips for this project's recorded lines that can be added as cloning samples.",

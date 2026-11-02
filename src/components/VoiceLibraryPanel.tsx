@@ -1,7 +1,7 @@
 // The Audio lens' Voices panel — a pure SELECTOR. One simple job: see your
 // voices, pick which one is active, set the narrator. Making a voice is a single
 // "New voice" button → NewVoiceModal, which carries every way to make one
-// (TTS / Character / Train) behind tabs, seeded with the project's configured
+// (TTS / Clone / Character / Train) behind tabs, seeded with the project's configured
 // engine. Training from a line's take is hosted at the workspace root
 // (CloneVoiceModalHost) so the modal does not depend on this panel being mounted.
 //
@@ -42,7 +42,7 @@ import type { CellData } from "@/hooks/useCells"
 import { PRESET_VOICES, upsertVoice } from "@/lib/audio/voices"
 import { voicesForLane } from "@/lib/audio/voice-lanes"
 import { formatVoiceLanguageName, languageForVoiceDescription } from "@/lib/audio/inworld-languages"
-import { providerInfo, resolveTtsProvider } from "@/lib/audio/tts-providers"
+import { inworldCloneReferenceId, providerInfo, resolveTtsProvider } from "@/lib/audio/tts-providers"
 import { useCustomVoiceStatus } from "@/hooks/useCustomVoiceStatus"
 import { NewVoiceModal } from "@/components/voice/NewVoiceModal"
 import { VoiceNameWithLanguage } from "@/components/voice/VoiceLanguageBadge"
@@ -464,7 +464,9 @@ function VoiceRow({
         : t("audio.library.trainingEngineLabel")
     : voice.libraryVoiceId
     ? t("audio.library.characterEngineLabel")
-    : providerInfo(voice.provider ?? projectProvider).shortTitle
+    : inworldCloneReferenceId(voice)
+      ? t("audio.library.cloneEngineLabel")
+      : providerInfo(voice.provider ?? projectProvider).shortTitle
   const languageTag = languageForVoiceDescription(voice.language)
   const languageName = languageTag ? formatVoiceLanguageName(languageTag, locale) : ""
   const actions = (

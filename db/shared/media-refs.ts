@@ -20,9 +20,9 @@ import type { AquillaDb } from "../shim/postgres"
 
 export type GcNamespace = "audio" | "voice" | "artifact"
 
-/** Suffix of the Inworld clone-id cache that rode alongside a reference clip.
- *  Nothing writes it since AQU-2291 removed Inworld cloning; legacy sidecars
- *  still map onto their clip so they are collected with it. */
+/** Suffix of the Inworld instant-clone id cache that rides alongside a quick
+ *  clone's reference clip (sync-worker/src/tts.ts); it maps onto its clip so it
+ *  lives or dies with it. */
 export const CLONE_CACHE_SUFFIX = ".inworld.json"
 /** AQU-2095: suffix of the stored-waveform sidecar that rides alongside a clip.
  *  Mirrors PEAKS_SIDECAR_SUFFIX in src/lib/audio/peaks-sidecar.ts. */
@@ -50,8 +50,8 @@ export function classifyKey(rest: string): { namespace: GcNamespace; projectId: 
       if (!ref) return null
       return { namespace: "audio", projectId, ref: `${fileId}/${ref}` }
     }
-    // projects/{pid}/voices/{refId} and the legacy {refId}.inworld.json clone
-    // cache, which lives or dies with the clip it was derived from. Custom-voice
+    // projects/{pid}/voices/{refId} and the {refId}.inworld.json clone cache,
+    // which lives or dies with the clip it was derived from. Custom-voice
     // consent records (voices/custom/{voiceId}/consent.json) are deeper and
     // never classified, so never swept.
     if (parts.length === 4 && parts[2] === "voices") {
@@ -161,9 +161,9 @@ export async function loadVoiceRefs(db: AquillaDb, projectId: string): Promise<S
   // to a voice is in use even before it has voiced a single line:
   //   • designPreviewAudioId — the Inworld voice-design preview the voice
   //     plays back when opened (docs/INWORLD-TTS.md);
-  //   • referenceAudioId — the short-clip clone voices AQU-2291 removed. Still
-  //     read so a settings blob that has not been rewritten yet keeps its clip:
-  //     a false KEEP costs storage, a false DELETE costs someone's audio.
+  //   • referenceAudioId — an Inworld quick clone's clip (and, on voices from
+  //     before AQU-2291, a Seed-VC clone's: kept too — a false KEEP costs
+  //     storage, a false DELETE costs someone's audio).
   const voices = await db
     .prepare(
       `SELECT DISTINCT r.ref

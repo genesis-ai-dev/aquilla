@@ -1,7 +1,7 @@
 // Host for the in-cell New voice entry points (AQU-1001): "Train a voice from
 // this recording" on a line's take, and "Add a voice…" from a line's voice
-// dropdown. (The file keeps its name from the short-clip "Clone voice" entry
-// point it began as; cloning was removed in AQU-2291.)
+// dropdown. (The file keeps its name from the "Clone voice from take" entry
+// point it began as; a line's take now trains a voice — AQU-2291.)
 //
 // NewVoiceModal used to live only inside VoiceLibraryPanel, which LeftDock
 // mounts solely while the Voices tab is active. Clicking a line's entry point

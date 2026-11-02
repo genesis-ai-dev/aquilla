@@ -15,10 +15,9 @@
 //                                               previews, custom-voice training
 //                                               recordings (kept while their
 //                                               consent record names them), and
-//                                               legacy clone clips + their
-//     projects/{pid}/voices/{refId}.inworld.json Inworld clone-id cache (AQU-2291
-//                                               removed both). Nothing else has
-//                                               ever deleted these.
+//                                               Inworld quick-clone clips + their
+//     projects/{pid}/voices/{refId}.inworld.json clone-id cache. Nothing else
+//                                               has ever deleted these.
 //   artifacts/{pid}/{artifactId}[/original.ext] uploaded originals preserved for
 //                                               round-trip fidelity; an upload
 //                                               whose artifacts row never landed

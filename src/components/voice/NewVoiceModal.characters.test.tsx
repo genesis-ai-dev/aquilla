@@ -18,6 +18,8 @@ vi.mock("@/lib/audio/sync-token-fetcher", () => ({ audioSyncTokenFetcherForSessi
 vi.mock("@/lib/audio/voice-clone", () => ({ buildVoiceReferenceId: vi.fn(), uploadVoiceReference: vi.fn() }))
 vi.mock("@/lib/audio/upload", () => ({
   parseFrontierAudioUrl: vi.fn(), fetchCellAudio: vi.fn(), getCellAudioStreamUrl: vi.fn(),
+  // The Clone voice tab's recorder reads the upload ceiling at import.
+  MAX_AUDIO_UPLOAD_BYTES: 95 * 1024 * 1024,
 }))
 
 function renderModal(props: { voice?: Voice | null; existingVoices?: Voice[] } = {}) {

@@ -2,11 +2,14 @@
 // Inworld and BYOK ElevenLabs, AQU-2299). Both store the clip in R2 and answer
 // with the same `SynthesizeCellTtsResult`, so a caller (generate-voice,
 // combined-voice) only needs to know the stored clip's extension and type.
+// An Inworld instant clone (`inworldCloneReferenceId`) sends its reference clip
+// so the worker clones and reads with it — no conversion step.
 
 import { synthesizeCellTts, type SynthesizeCellTtsResult } from "@/lib/sync/tts"
 import { synthesizeElevenLabsTts } from "@/lib/sync/elevenlabs"
 import { inworldSynthFieldsFromVoice } from "./inworld-voice-settings"
 import { inworldLanguageForRequest } from "./inworld-languages"
+import { inworldCloneReferenceId } from "./tts-providers"
 import { ElevenLabsError } from "./elevenlabs/errors"
 import { elevenLabsLanguageCode, elevenLabsSettingsOf, DEFAULT_ELEVENLABS_MODEL } from "./elevenlabs/settings"
 import type { TtsProvider, Voice } from "@/lib/parsers/types"
@@ -54,6 +57,9 @@ export async function synthesizeServerTts(args: ServerTtsArgs): Promise<ServerTt
     return { result, ext: "mp3", mimeType: "audio/mpeg" }
   }
   const language = inworldLanguageForRequest(voice, args.targetLanguage)
+  // An Inworld instant clone: the worker clones the reference clip (once,
+  // cached) and reads with that voice. Never sent for any other voice.
+  const referenceAudioId = inworldCloneReferenceId(voice)
   const result = await synthesizeCellTts(
     {
       projectId: args.projectId,
@@ -62,6 +68,7 @@ export async function synthesizeServerTts(args: ServerTtsArgs): Promise<ServerTt
       text: args.text,
       ...(language ? { language } : {}),
       ...(voice.voiceName ? { voiceId: voice.voiceName } : {}),
+      ...(referenceAudioId ? { referenceAudioId } : {}),
       ...inworldSynthFieldsFromVoice(voice),
     },
     args.getSyncToken,

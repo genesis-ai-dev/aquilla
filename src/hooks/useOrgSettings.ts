@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { ROLE } from "@/lib/frontier/roles"
-import { resolveLanguageEditFloor } from "@/lib/sync/role-policy"
+import { resolveImportFloor, resolveLanguageEditFloor } from "@/lib/sync/role-policy"
 import {
   fetchOrgSettings,
   patchOrgSettings,
@@ -141,6 +141,16 @@ const DEFAULT_TERMBASE_EDIT_MIN_ROLE = ROLE.PROJECT_LEAD
 // gate) and in auth-worker/src/services/org-permissions.ts (the server
 // default) — all three must agree.
 const LANGUAGE_FLOOR_WRITE_MIN_ROLE = ROLE.OWNER
+
+// AQU-2304: importMinRole is the third write-gating permission-policy key on
+// this plumbing (who may bring a NEW source file into a project). Same
+// OWNER-only write gate; absent, the floor is PROJECT_LEAD, which is what
+// every org does today. See DEFAULT_IMPORT_MIN_ROLE in
+// src/lib/sync/role-policy.ts (the client gate),
+// auth-worker/src/services/org-permissions.ts (the server default) and
+// sync-worker/src/events/import-authority.ts (the enforcement) — all four
+// must agree.
+const IMPORT_FLOOR_WRITE_MIN_ROLE = ROLE.OWNER
 const EMPTY_RULES: TranslationRule[] = []
 
 // AQU-1002: the two comment floors are the same OWNER-only permission-policy
@@ -339,6 +349,14 @@ export interface UseOrgSettings {
    * so this is here for the org Settings UI.
    */
   languageEditMinRole: number
+  /**
+   * AQU-2304: the org's effective `importMinRole` — the minimum role allowed
+   * to import a NEW source file into any project of this org. The per-project
+   * gate reads the same floor off the project's settings response
+   * (`orgPolicy.importMinRole`, via `resolveProjectPolicy`), so this is here
+   * for the org Settings UI.
+   */
+  importMinRole: number
   /**
    * AQU-907: True when the caller may use the org-wide Data egress surface.
    * Owners always may (700 meets every valid floor, so they never wait for
@@ -593,6 +611,14 @@ export function useOrgSettings(
       : null,
   )
 
+  // AQU-2304: effective import floor — explicit org setting, or PROJECT_LEAD
+  // when unset / out of the role ladder.
+  const importMinRole = resolveImportFloor(
+    typeof server?.settings?.importMinRole === "number"
+      ? (server.settings.importMinRole as number)
+      : null,
+  )
+
   // AQU-907: effective egress floor — explicit org setting, or the OWNER
   // default when unset / out of the role ladder.
   const egressMinRole = (() => {
@@ -813,6 +839,7 @@ export function useOrgSettings(
     assignmentMinRole,
     termbaseEditMinRole,
     languageEditMinRole,
+    importMinRole,
     canEgress,
     egressMinRole,
     commentCreateMinRole,
@@ -860,6 +887,16 @@ export function canEditTermbaseFloor(callerRoleLevel: number | null | undefined)
  */
 export function canEditLanguageFloor(callerRoleLevel: number | null | undefined): boolean {
   return (callerRoleLevel ?? 0) >= LANGUAGE_FLOOR_WRITE_MIN_ROLE
+}
+
+/**
+ * AQU-2304: True when `callerRoleLevel` is allowed to CHANGE the
+ * importMinRole floor (OWNER-only, same rationale as the helpers above — a
+ * maintainer must not be able to take file imports away from every project
+ * lead in the org, or hand them back, on their own authority).
+ */
+export function canEditImportFloor(callerRoleLevel: number | null | undefined): boolean {
+  return (callerRoleLevel ?? 0) >= IMPORT_FLOOR_WRITE_MIN_ROLE
 }
 
 /**

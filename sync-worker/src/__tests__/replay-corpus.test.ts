@@ -21,6 +21,7 @@ import {
   CORPUS_DIR,
   OUTPUT_TABLES,
   corpusPath,
+  corpusProjectId,
   diffDigest,
   loadCorpus,
   readGolden,
@@ -66,7 +67,7 @@ describe("replay corpus gate", () => {
       async () => {
         expect(present, `${entry.file} missing under ${CORPUS_DIR}; the gate requires every corpus`).toBe(true)
         const corpus = loadCorpus(entry)
-        const result = await replayCorpus(entry.projectId, corpus)
+        const result = await replayCorpus(corpusProjectId(corpus), corpus)
         expect(result.rebuild.eventsRead).toBe(entry.events)
         if (entry.source === "synthetic") {
           // The synthetic log's sibling race is decided by chain_claims, not

@@ -198,7 +198,7 @@ describe("step 2: what the board shows", () => {
   it("shows what each column means under its name, with no (i) buttons", async () => {
     renderWizard()
     await toColumns()
-    expect(screen.getByTestId("monday-column-deadline").textContent).toMatch(/the project's deadline/i)
+    expect(screen.getByTestId("monday-column-deadline").textContent).toMatch(/the project deadline/i)
     expect(box(/^Deadline$/).getAttribute("aria-describedby")).toBeTruthy()
     expect(screen.queryByRole("button", { name: /what “.*” shows/i })).toBeNull()
   })

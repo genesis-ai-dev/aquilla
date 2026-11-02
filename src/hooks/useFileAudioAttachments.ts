@@ -608,6 +608,8 @@ export function mergeCellsWithAudio(
         ...(a.label != null ? { label: a.label } : {}),
         ...(a.validatorCount != null ? { validatorCount: a.validatorCount } : {}),
         ...(a.validators ? { validators: a.validators } : {}),
+        // AQU-2296: WHEN each of them voted, for the date under each name.
+        ...(a.validatorDecidedTs ? { validatorDecidedTs: a.validatorDecidedTs } : {}),
         ...(a.role ? { role: a.role } : {}),
         ...(a.recordedBy != null ? { recordedBy: a.recordedBy } : {}),
         // AQU-1767: which take a piece was cut from — the chips, the playback

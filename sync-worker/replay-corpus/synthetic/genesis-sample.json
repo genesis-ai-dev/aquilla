@@ -1,13 +1,4 @@
 {
- "projects": [
-  {
-   "id": "replay-synthetic-1",
-   "name": "Replay synthetic",
-   "created_by": 1,
-   "created_at": "2026-01-01T00:00:00.000Z",
-   "updated_at": "2026-01-01T00:00:00.000Z"
-  }
- ],
  "lanes": [
   {
    "id": "aa000001",

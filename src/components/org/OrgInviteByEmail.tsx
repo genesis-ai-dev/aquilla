@@ -12,7 +12,8 @@ import {
 import { Input } from "@/components/ui/input"
 import { RoleSelect } from "@/components/RoleSelect"
 import { createOrgInvite } from "@/lib/frontier/orgs"
-import { ROLE, ORG_ROLE_OPTIONS } from "@/lib/frontier/roles"
+import { ROLE } from "@/lib/frontier/roles"
+import { roleChoices } from "@/lib/frontier/role-choices"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { describeGrant, grantButtonLabel } from "@/lib/access/grant-scope-sentence"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -122,7 +123,8 @@ export function OrgInviteByEmail({ orgId }: { orgId: number }) {
           <FieldLabel htmlFor="org-invite-role">{t("org.inviteByEmail.roleLabel")}</FieldLabel>
           <RoleSelect
             id="org-invite-role"
-            options={ORG_ROLE_OPTIONS}
+            // AQU-2289: the organization add list; the invite route caps at Maintainer.
+            options={roleChoices("org", { callerLevel: null, purpose: "add" })}
             value={role}
             onValueChange={setRole}
             aria-label={t("org.inviteByEmail.roleLabel")}

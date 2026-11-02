@@ -30,8 +30,8 @@ async function openEditor() {
   render(
     <MemberLaneScopeEditor jwt="jwt" projectId="p1" userId={7} username="carol" trigger={<span>scopes</span>} onSaved={onSaved} />,
   )
-  fireEvent.click(screen.getByRole("button", { name: "Edit carol's lane scopes on this project" }))
-  await screen.findByText("Languages they can work in")
+  fireEvent.click(screen.getByRole("button", { name: "Edit carol's language lane scopes on this project" }))
+  await screen.findByText("Language lanes they can work in")
   return onSaved
 }
 
@@ -45,9 +45,9 @@ describe("MemberLaneScopeEditor — the project's languages as checkboxes", () =
     // AQU-1595: targetLanguage is not a lane. The default option keeps value ""
     // and the fallback label; a registry tag is still offered.
     expect(screen.queryByLabelText("Lane German")).toBeNull()
-    expect(screen.getByLabelText("Lane Main language")).not.toBeChecked()
-    expect(screen.getByLabelText("Lane Spanish")).not.toBeChecked()
-    expect(screen.queryByPlaceholderText("Lane code (e.g. es)")).toBeNull()
+    expect(screen.getByLabelText("Language lane Main language")).not.toBeChecked()
+    expect(screen.getByLabelText("Language lane Spanish")).not.toBeChecked()
+    expect(screen.queryByPlaceholderText("Language lane code (e.g. es)")).toBeNull()
 
     fireEvent.click(screen.getByText("Main language"))
     fireEvent.click(screen.getByRole("button", { name: "Save scopes" }))
@@ -59,9 +59,9 @@ describe("MemberLaneScopeEditor — the project's languages as checkboxes", () =
     vi.mocked(fetchMemberScopeView).mockResolvedValue({ scopes: [{ kind: "lane", value: "Spansih" }], laneNames: {} })
     vi.mocked(fetchProjectSettings).mockResolvedValue(settings("German", ["Spanish"]))
     const onSaved = await openEditor()
-    const stray = screen.getByLabelText("Lane Spansih (not a language in this project)")
+    const stray = screen.getByLabelText("Language lane Spansih (not a language lane in this project)")
     expect(stray).toBeChecked()
-    fireEvent.click(screen.getByText("Spansih (not a language in this project)"))
+    fireEvent.click(screen.getByText("Spansih (not a language lane in this project)"))
     fireEvent.click(screen.getByText("Spanish"))
     fireEvent.click(screen.getByRole("button", { name: "Save scopes" }))
     await vi.waitFor(() => expect(onSaved).toHaveBeenCalled(), { timeout: STALL_WATCHDOG_MS })
@@ -74,9 +74,9 @@ describe("MemberLaneScopeEditor — the project's languages as checkboxes", () =
     render(
       <MemberLaneScopeEditor jwt="jwt" projectId="p1" userId={7} username="carol" trigger={<span>scopes</span>} onSaved={vi.fn()} />,
     )
-    fireEvent.click(screen.getByRole("button", { name: "Edit carol's lane scopes on this project" }))
-    expect(await screen.findByPlaceholderText("Lane code (e.g. es)")).toBeInTheDocument()
-    expect(screen.queryByText("Languages they can work in")).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Edit carol's language lane scopes on this project" }))
+    expect(await screen.findByPlaceholderText("Language lane code (e.g. es)")).toBeInTheDocument()
+    expect(screen.queryByText("Language lanes they can work in")).toBeNull()
   })
 })
 
@@ -120,8 +120,8 @@ describe("MemberLaneScopeEditor — lane rows and lane ids", () => {
     vi.mocked(fetchMemberScopeView).mockResolvedValue({ scopes: [{ kind: "lane", value: "es-MX" }], laneNames: {} })
     vi.mocked(fetchProjectSettings).mockResolvedValue(withLanes())
     const onSaved = await openEditor()
-    expect(screen.getByLabelText("Lane Spanish (Mexico)")).toBeChecked()
-    expect(screen.getByLabelText("Lane Spanish")).not.toBeChecked()
+    expect(screen.getByLabelText("Language lane Spanish (Mexico)")).toBeChecked()
+    expect(screen.getByLabelText("Language lane Spanish")).not.toBeChecked()
 
     fireEvent.click(screen.getByRole("button", { name: "Save scopes" }))
     await vi.waitFor(() => expect(onSaved).toHaveBeenCalled(), { timeout: STALL_WATCHDOG_MS })
@@ -132,8 +132,8 @@ describe("MemberLaneScopeEditor — lane rows and lane ids", () => {
     vi.mocked(fetchMemberScopeView).mockResolvedValue({ scopes: [{ kind: "lane", value: "" }], laneNames: {} })
     vi.mocked(fetchProjectSettings).mockResolvedValue(withLanes())
     await openEditor()
-    expect(screen.getByLabelText("Lane Spanish")).toBeChecked()
-    expect(screen.getByLabelText("Lane Spanish (Mexico)")).not.toBeChecked()
+    expect(screen.getByLabelText("Language lane Spanish")).toBeChecked()
+    expect(screen.getByLabelText("Language lane Spanish (Mexico)")).not.toBeChecked()
   })
 
   // AQU-1586: a second lane of a language is tagged with its own opaque id, so
@@ -151,7 +151,7 @@ describe("MemberLaneScopeEditor — lane rows and lane ids", () => {
       ],
     } as never)
     await openEditor()
-    expect(screen.getByLabelText("Lane es-MX")).toBeInTheDocument()
+    expect(screen.getByLabelText("Language lane es-MX")).toBeInTheDocument()
     expect(screen.queryByLabelText("Lane a3f09c1e")).toBeNull()
   })
 })
@@ -214,7 +214,7 @@ describe("MemberLaneScopeEditor — lane grants, not scopes (AQU-1783)", () => {
     await openEditor()
     expect(screen.getByTestId("member-lane-grants")).toHaveTextContent("Spanish")
     expect(screen.getByText("no access")).toBeInTheDocument()
-    expect(screen.getByRole("alert")).toHaveTextContent("has no grant for every lane")
+    expect(screen.getByRole("alert")).toHaveTextContent("has no grant for every language lane")
     // The lie this issue is about is gone.
     expect(screen.queryByText("Unscoped — full access")).toBeNull()
   })
@@ -232,7 +232,7 @@ describe("MemberLaneScopeEditor — lane grants, not scopes (AQU-1783)", () => {
       laneAccess: laneAccess(["ln-fr", "ln-es"]),
     })
     await openEditor()
-    fireEvent.click(screen.getByRole("button", { name: "Grant all current lanes" }))
+    fireEvent.click(screen.getByRole("button", { name: "Grant all current language lanes" }))
     await vi.waitFor(() => expect(putMemberScopes).toHaveBeenCalled(), { timeout: STALL_WATCHDOG_MS })
     // File scopes are preserved; the empty LANE set is what re-grants every lane.
     expect(vi.mocked(putMemberScopes).mock.calls[0][3]).toEqual([{ kind: "file", value: "f1" }])
@@ -251,7 +251,7 @@ describe("MemberLaneScopeEditor — lane grants, not scopes (AQU-1783)", () => {
     await openEditor()
     expect(screen.getByText("no access")).toBeInTheDocument()
     expect(screen.queryByRole("alert")).toBeNull()
-    expect(screen.queryByRole("button", { name: "Grant all current lanes" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Grant all current language lanes" })).toBeNull()
   })
 
   it("maintainer: says every lane is visible by role, and shows no grant list", async () => {

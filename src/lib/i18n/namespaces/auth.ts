@@ -113,7 +113,7 @@ export const auth = defineNamespace({
 
     // --- Join / invite (/join/:token) ---------------------------------------
     "auth.join.invitedTitle": "You're invited",
-    "auth.join.joiningTitle": "Joining Project",
+    "auth.join.joiningTitle": "Joining project",
     "auth.join.couldntLoad": "Couldn't load invitation",
     "auth.join.checkConnection": "Check your connection and try again.",
     "auth.join.alreadyUsedTitle": "This link has already been used",

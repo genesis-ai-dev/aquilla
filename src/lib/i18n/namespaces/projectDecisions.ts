@@ -45,10 +45,12 @@ export const projectDecisions = defineNamespace({
     "projectDecisions.card.needsMaintainer":
       "Only a maintainer can answer this question, because the answer changes the Language profile.",
     "projectDecisions.card.reason.notStorable":
-      "This answer doesn't fit the Language profile. Choose one of the answers above, or change the profile in Settings.",
+      "This answer doesn't fit the Language profile. Choose one of the answers above, or change the " +
+      "profile in Project settings.",
     "projectDecisions.card.reason.tooLong": "This answer is too long to keep as a project decision.",
     "projectDecisions.card.reason.full":
-      "The project already keeps as many decisions as it can. Remove one in Settings, then answer again.",
+      "The project already keeps as many decisions as it can. Remove one in Project settings, then " +
+      "answer again.",
   },
   context: {
     _context: {

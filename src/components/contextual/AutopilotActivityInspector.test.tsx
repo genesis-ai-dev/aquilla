@@ -923,7 +923,7 @@ describe("AutopilotActivityInspector", () => {
 
     renderInspector()
 
-    expect(await screen.findByText("Language: fr")).toBeInTheDocument()
+    expect(await screen.findByText("Language lane: fr")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Resume" })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument()
     expect(await screen.findByText("3 reviewable drafts staged")).toBeInTheDocument()

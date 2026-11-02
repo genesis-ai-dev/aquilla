@@ -104,7 +104,7 @@ const A2_FILES = [
 ]
 
 function fillRequiredFields() {
-  fireEvent.change(screen.getByPlaceholderText("My Translation Project"), {
+  fireEvent.change(screen.getByPlaceholderText("My translation project"), {
     target: { value: "Burmese Gospels" },
   })
   fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), {
@@ -196,7 +196,7 @@ describe("ProjectCreateDialog — picking the upstream's files (AQU-1561)", () =
       expect((await screen.findByRole("checkbox", { name })).getAttribute("aria-checked")).toBe("false")
     }
     expect(await screen.findByText(/Pick at least one file to bring in/i)).toBeTruthy()
-    const create = screen.getByRole("button", { name: /Create & Link/i })
+    const create = screen.getByRole("button", { name: /Create & link/i })
     await waitFor(() => expect(create).toHaveProperty("disabled", true))
 
     // The check-all control is the way back: pressing it again re-arms the create.
@@ -213,7 +213,7 @@ describe("ProjectCreateDialog — picking the upstream's files (AQU-1561)", () =
     await user.click(await screen.findByRole("checkbox", { name: "LUK" }))
 
     fireEvent.click(screen.getByRole("radio", { name: /^Its Source/i }))
-    fireEvent.click(screen.getByRole("button", { name: /Create & Link/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create & link/i }))
 
     await waitFor(() => expect(mockLink).toHaveBeenCalledTimes(1))
     const [, , input] = mockLink.mock.calls[0]!
@@ -230,7 +230,7 @@ describe("ProjectCreateDialog — picking the upstream's files (AQU-1561)", () =
 
     fireEvent.click(screen.getByRole("radio", { name: /^One of its Targets/i }))
     await screen.findByRole("combobox", { name: /Which of its translations\?/i })
-    fireEvent.click(screen.getByRole("button", { name: /Create & Link/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create & link/i }))
 
     await waitFor(() => expect(mockLink).toHaveBeenCalledTimes(1))
     const [, , input] = mockLink.mock.calls[0]!
@@ -248,7 +248,7 @@ describe("ProjectCreateDialog — picking the upstream's files (AQU-1561)", () =
     await screen.findByRole("checkbox", { name: "All files" })
 
     fireEvent.click(screen.getByRole("radio", { name: /^Its Source/i }))
-    fireEvent.click(screen.getByRole("button", { name: /Create & Link/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create & link/i }))
 
     await waitFor(() => expect(mockLink).toHaveBeenCalledTimes(1))
     const [, , input] = mockLink.mock.calls[0]!
@@ -274,7 +274,7 @@ describe("ProjectCreateDialog — picking the upstream's files (AQU-1561)", () =
     await user.click(await screen.findByRole("checkbox", { name: "MRK" }))
 
     fireEvent.click(screen.getByRole("radio", { name: /^Its Source/i }))
-    fireEvent.click(screen.getByRole("button", { name: /Create & Link/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create & link/i }))
 
     await waitFor(() => expect(mockLink).toHaveBeenCalledTimes(1))
     const [, , input] = mockLink.mock.calls[0]!
@@ -291,7 +291,7 @@ describe("ProjectCreateDialog — picking the upstream's files (AQU-1561)", () =
     expect(screen.queryByRole("checkbox", { name: "All files" })).toBeNull()
 
     fireEvent.click(screen.getByRole("radio", { name: /^Its Source/i }))
-    fireEvent.click(screen.getByRole("button", { name: /Create & Link/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create & link/i }))
 
     await waitFor(() => expect(mockLink).toHaveBeenCalledTimes(1))
     const [, , input] = mockLink.mock.calls[0]!
@@ -309,7 +309,7 @@ describe("ProjectCreateDialog — picking the upstream's files (AQU-1561)", () =
     expect(screen.queryByRole("checkbox", { name: "All files" })).toBeNull()
     expect(screen.queryByText(/has no files yet/i)).toBeNull()
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: /Create & Link/i })).toHaveProperty("disabled", true),
+      expect(screen.getByRole("button", { name: /Create & link/i })).toHaveProperty("disabled", true),
     )
 
     fireEvent.click(screen.getByRole("button", { name: /Try again/i }))
@@ -317,7 +317,7 @@ describe("ProjectCreateDialog — picking the upstream's files (AQU-1561)", () =
     // The retry re-reads the same upstream and the list arrives.
     expect(await screen.findByRole("checkbox", { name: "MAT" })).toBeTruthy()
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: /Create & Link/i })).toHaveProperty("disabled", false),
+      expect(screen.getByRole("button", { name: /Create & link/i })).toHaveProperty("disabled", false),
     )
   })
 
@@ -325,7 +325,7 @@ describe("ProjectCreateDialog — picking the upstream's files (AQU-1561)", () =
     openAdvanced()
 
     expect(screen.queryByRole("checkbox", { name: "All files" })).toBeNull()
-    fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create project/i }))
 
     await waitFor(() => expect(mockLoadFiles).not.toHaveBeenCalled())
     expect(mockLink).not.toHaveBeenCalled()

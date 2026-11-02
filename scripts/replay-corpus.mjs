@@ -5,7 +5,8 @@
 //       Regenerates the committed synthetic corpora and pins them in the
 //       manifest. Deterministic: same bytes every run.
 //   node scripts/replay-corpus.mjs export --url <postgres url> --project <id> [--slug <name>]
-//       Captures one real project (events + the rows the rebuild reads) into
+//       Captures one real project (events + the rows the rebuild reads; no
+//       projects row: the rebuild never reads it and it names the client) into
 //       replay-corpus/cache/<slug>.json and pins it in the manifest as an
 //       `r2` entry. Client content: never commit the file, upload it.
 //   node scripts/replay-corpus.mjs upload [--slug <name>]
@@ -25,7 +26,7 @@ import { fileURLToPath, pathToFileURL } from "node:url"
 export const CORPUS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../sync-worker/replay-corpus")
 export const R2_BUCKET = "aquilla-snapshots"
 export const R2_PREFIX = "replay-corpus/"
-export const INPUT_TABLES = ["projects", "lanes", "project_seq_counters", "chain_claims", "events"]
+export const INPUT_TABLES = ["lanes", "project_seq_counters", "chain_claims", "events"]
 
 export function sha256Hex(bytes) {
   return createHash("sha256").update(bytes).digest("hex")
@@ -54,9 +55,11 @@ export function corpusBytes(rows) {
   return `${JSON.stringify(ordered, null, 1)}\n`
 }
 
-export function manifestEntry({ slug, projectId, source, file, bytes, events, capturedAt }) {
+// No project id in the manifest: the repo is public, and the id names a
+// client's production project. The harness reads it off the corpus events.
+export function manifestEntry({ slug, source, file, bytes, events, capturedAt }) {
   const maxSeq = events.reduce((max, event) => Math.max(max, Number(event.server_seq ?? 0)), 0)
-  return { slug, projectId, source, file, sha256: sha256Hex(bytes), events: events.length, maxSeq, capturedAt }
+  return { slug, source, file, sha256: sha256Hex(bytes), events: events.length, maxSeq, capturedAt }
 }
 
 export function upsertEntry(manifest, entry) {
@@ -143,7 +146,6 @@ export function buildSyntheticCorpus() {
   return {
     projectId,
     rows: {
-      projects: [{ id: projectId, name: "Replay synthetic", created_by: 1, created_at: "2026-01-01T00:00:00.000Z", updated_at: "2026-01-01T00:00:00.000Z" }],
       lanes,
       project_seq_counters: [{ project_id: projectId, last_seq: seq, rebuilt_seq: 0, project_epoch: 1 }],
       chain_claims: chainClaims,
@@ -156,7 +158,6 @@ export function buildSyntheticCorpus() {
 
 export async function exportProject(sql, projectId) {
   const rows = {}
-  rows.projects = (await sql.unsafe("SELECT * FROM projects WHERE id = $1", [projectId])).map(serializeRow)
   rows.lanes = (await sql.unsafe("SELECT * FROM lanes WHERE project_id = $1 ORDER BY position, id", [projectId])).map(serializeRow)
   rows.project_seq_counters = (await sql.unsafe("SELECT * FROM project_seq_counters WHERE project_id = $1", [projectId])).map(serializeRow)
   rows.chain_claims = (
@@ -179,12 +180,12 @@ async function main() {
   const command = process.argv[2]
   const manifest = readManifest()
   if (command === "synthetic") {
-    const { projectId, rows } = buildSyntheticCorpus()
+    const { rows } = buildSyntheticCorpus()
     const file = "genesis-sample.json"
     const bytes = corpusBytes(rows)
     mkdirSync(path.join(CORPUS_DIR, "synthetic"), { recursive: true })
     writeFileSync(path.join(CORPUS_DIR, "synthetic", file), bytes)
-    const entry = manifestEntry({ slug: "synthetic-genesis", projectId, source: "synthetic", file, bytes, events: rows.events, capturedAt: "2026-10-30T00:00:00.000Z" })
+    const entry = manifestEntry({ slug: "synthetic-genesis", source: "synthetic", file, bytes, events: rows.events, capturedAt: "2026-10-30T00:00:00.000Z" })
     writeManifest(upsertEntry(manifest, entry))
     console.log(JSON.stringify(entry))
     return
@@ -202,7 +203,7 @@ async function main() {
       const bytes = corpusBytes(rows)
       mkdirSync(path.join(CORPUS_DIR, "cache"), { recursive: true })
       writeFileSync(path.join(CORPUS_DIR, "cache", file), bytes)
-      const entry = manifestEntry({ slug, projectId, source: "r2", file, bytes, events: rows.events, capturedAt: new Date().toISOString() })
+      const entry = manifestEntry({ slug, source: "r2", file, bytes, events: rows.events, capturedAt: new Date().toISOString() })
       writeManifest(upsertEntry(manifest, entry))
       console.log(JSON.stringify(entry))
     } finally {

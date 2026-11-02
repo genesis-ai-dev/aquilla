@@ -96,14 +96,14 @@ export function FrontierLoginForm({
         e.preventDefault()
         void form.handleSubmit()
       }}
-      className="flex flex-col gap-3"
+      className="flex flex-col gap-4"
     >
       {!isOnline && (
         <p className="rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
           {t("auth.login.offlineNotice")}
         </p>
       )}
-      <FieldGroup className="gap-3">
+      <FieldGroup className="gap-4">
         <form.Field
           name="username"
           children={(field) => {
@@ -140,7 +140,7 @@ export function FrontierLoginForm({
                     <button
                       type="button"
                       onClick={onForgotPassword}
-                      className="text-xs text-muted-foreground underline-offset-4 hover:underline"
+                      className="min-h-8 text-xs text-muted-foreground underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-ring"
                     >
                       {t("auth.login.forgotPasswordLink")}
                     </button>
@@ -164,7 +164,7 @@ export function FrontierLoginForm({
       {submitError && (
         <p className="text-sm text-destructive">{submitError}</p>
       )}
-      <Button type="submit" form="frontier-login-form" className="w-full">
+      <Button type="submit" size="lg" form="frontier-login-form" className="w-full">
         {form.state.isSubmitting && <Spinner data-icon="inline-start" />}
         {form.state.isSubmitting ? t("auth.login.submitLoggingIn") : t("common.logIn")}
       </Button>

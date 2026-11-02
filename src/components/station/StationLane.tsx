@@ -9,7 +9,7 @@ import { Check, Plus, Trash2 } from "lucide-react"
 import { WaveformRect } from "@/components/audio/WaveformRect"
 import { TRIM_NUDGE_COARSE_SEC, TRIM_NUDGE_SEC } from "@/lib/audio/trim-edit"
 import { useT } from "@/lib/i18n/I18nProvider"
-import { joinsOf, round2 } from "@/lib/station/edit-list"
+import { joinsOf, round2, type ClipMix } from "@/lib/station/edit-list"
 import { viewPeaks } from "@/lib/station/render"
 import { formatStationLength, formatStationTime, rulerTicks } from "@/lib/station/time"
 import { cn } from "@/lib/utils"
@@ -79,7 +79,7 @@ export function StationLane({ ed, editable, trackVars, generated, onDelete, onIn
     ed.select(t0, t0)
     e.currentTarget.focus({ preventScroll: true })
   }
-  const onFlagDown = (kind: "trimA" | "trimB") => (e: PointerEvent<HTMLButtonElement>) => {
+  const onFlagDown = (kind: "trimA" | "trimB") => (e: PointerEvent<HTMLElement>) => {
     if (e.button !== 0 || !editable) return
     e.preventDefault()
     e.stopPropagation()
@@ -194,6 +194,9 @@ export function StationLane({ ed, editable, trackVars, generated, onDelete, onIn
             style={{ left: pct(g.t0), width: `${((Math.min(vb, g.t1) - Math.max(va, g.t0)) / w) * 100}%` }}
           />
         ))}
+        {/* Item 21: a fade, always shown — a line from the bottom of the kept
+            part's edge up to where the fade ends, the part it quiets shaded. */}
+        {ed.clip.fadeIn > 0 || ed.clip.fadeOut > 0 ? <FadeShapes clip={ed.clip} va={va} w={w} /> : null}
         {/* Item 20: where a part was deleted. */}
         {joins.map((j) => (
           <span
@@ -335,6 +338,40 @@ function ActionButton({
   )
 }
 
+/** Item 21: each fade as a line from silence at the kept part's edge up to
+ *  full level where the fade ends, and the part it quiets shaded above the
+ *  line. The waveform under it is already drawn faded (viewPeaks). */
+export function FadeShapes({ clip, va, w }: { clip: ClipMix; va: number; w: number }) {
+  const x = (t: number) => ((t - va) / w) * 1000
+  const fades: { edge: number; end: number }[] = []
+  if (clip.fadeIn > 0) fades.push({ edge: x(clip.trimA), end: x(clip.trimA + clip.fadeIn) })
+  if (clip.fadeOut > 0) fades.push({ edge: x(clip.trimB), end: x(clip.trimB - clip.fadeOut) })
+  return (
+    <svg
+      aria-hidden
+      data-testid="station-fades"
+      viewBox="0 0 1000 100"
+      preserveAspectRatio="none"
+      className="pointer-events-none absolute inset-0 z-[2] h-full w-full overflow-hidden rounded-[6px]"
+    >
+      {fades.map((f) => (
+        <g key={f.edge}>
+          <polygon points={`${f.edge},0 ${f.end},0 ${f.edge},100`} className="fill-background/55" />
+          <line
+            x1={f.edge}
+            y1={100}
+            x2={f.end}
+            y2={0}
+            strokeWidth={1.5}
+            vectorEffect="non-scaling-stroke"
+            className="stroke-sky-700 dark:stroke-sky-400"
+          />
+        </g>
+      ))}
+    </svg>
+  )
+}
+
 /** Start and End are blue, the cursor amber, and a recording being made red. */
 const FLAG_INK = {
   start: { bg: "bg-sky-700", point: "border-t-sky-700" },
@@ -360,21 +397,30 @@ function Flag({
   label: string
   aria?: string
   editable?: boolean
-  onPointerDown?(e: PointerEvent<HTMLButtonElement>): void
-  onPointerMove?(e: PointerEvent<HTMLButtonElement>): void
-  onPointerUp?(e: PointerEvent<HTMLButtonElement>): void
+  onPointerDown?(e: PointerEvent<HTMLElement>): void
+  onPointerMove?(e: PointerEvent<HTMLElement>): void
+  onPointerUp?(e: PointerEvent<HTMLElement>): void
   onKeyDown?(e: KeyboardEvent<HTMLButtonElement>): void
 }) {
   const ink = FLAG_INK[side]
+  const edge = side === "start" || side === "end"
+  // Start and End are a flag on a pole: the tab, its point and the line share
+  // one straight side, on the kept part's side of the edge. The cursor's and
+  // a recording's flags stand centred on their line.
   const tab = cn(
     "absolute top-0 h-[18px] rounded-[3px] px-1.5 text-[10.5px] leading-[18px] font-semibold whitespace-nowrap text-white",
-    (side === "mid" || side === "rec") && "left-0 -translate-x-1/2",
     ink.bg,
-    side === "start" && "-left-px",
-    side === "end" && "-right-px",
+    side === "start" ? "left-0 rounded-bl-none" : side === "end" ? "right-0 rounded-br-none" : "left-0 -translate-x-1/2",
   )
+  const point =
+    side === "start"
+      ? "left-0 border-t-[5px] border-r-[5px] border-r-transparent"
+      : side === "end"
+        ? "-left-[5px] border-t-[5px] border-l-[5px] border-l-transparent"
+        : "-left-[5px] border-x-[5px] border-t-[5px] border-x-transparent"
+  const pole = side === "start" ? "left-0" : side === "end" ? "-left-[1.5px]" : "-left-[0.75px]"
   return (
-    <span className="absolute -top-[23px] bottom-0 z-[5] w-0" style={{ left: at }} data-testid={`station-flag-${side}`}>
+    <span className="group/flag absolute -top-[23px] bottom-0 z-[5] w-0" style={{ left: at }} data-testid={`station-flag-${side}`}>
       {onPointerDown ? (
         <button
           type="button"
@@ -392,14 +438,33 @@ function Flag({
       ) : (
         <span className={tab}>{label}</span>
       )}
+      <span aria-hidden className={cn("absolute top-[18px] h-0 w-0", point, ink.point)} />
       <span
         aria-hidden
         className={cn(
-          "absolute top-[18px] -left-[5px] h-0 w-0 border-x-[5px] border-t-[5px] border-x-transparent",
-          ink.point,
+          "pointer-events-none absolute top-[18px] bottom-0 w-[1.5px] transition-[width]",
+          pole,
+          ink.bg,
+          edge && editable && "group-hover/flag:w-[3px]",
+          edge && editable && side === "end" && "group-hover/flag:-left-[3px]",
         )}
       />
-      <span aria-hidden className={cn("pointer-events-none absolute top-[18px] bottom-0 -left-[0.75px] w-[1.5px]", ink.bg)} />
+      {/* Sam, Nov 2: the edge itself drags, the whole height of the lane,
+          not only the tab above it. */}
+      {edge && onPointerDown ? (
+        <span
+          aria-hidden
+          data-testid={`station-edge-${side}`}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          className={cn(
+            "absolute top-[23px] bottom-0 w-3 touch-none",
+            side === "start" ? "-left-1" : "-left-2",
+            editable ? "cursor-ew-resize" : "pointer-events-none",
+          )}
+        />
+      ) : null}
     </span>
   )
 }

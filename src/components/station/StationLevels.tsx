@@ -1,7 +1,12 @@
-// The fade corners and the volume line (AQU-2327, spec items 21–22), shown
+// The fade handles and the volume line (AQU-2327, spec items 21–22), shown
 // while the pointer is over the lane: board 40 drawing 6, with 40b's working
 // drags. Both are the clip's own data (cell.audio.gain) — they never change
 // the recording, and each change is one Undo step (`take.gain`).
+//
+// Sam, Nov 2: a fade handle is a round knob on the waveform's top edge, where
+// the fade reaches full level; the fade itself is drawn on the lane always
+// (StationLane's FadeShapes), a line from the bottom corner up to the knob.
+// With no fade the knob waits just inside the top corner.
 
 import { useRef, type PointerEvent } from "react"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -11,6 +16,9 @@ import type { StationEditor } from "./useStationEditor"
 /** 40b: the line sits 4% higher for each dB (0 dB at the middle). */
 const PCT_PER_DB = 4
 const MIN_DB = -12
+/** With no fade, how far inside its corner a knob sits, clear of the edge's
+ *  own drag strip and the Start / End flag's point. */
+const KNOB_INSET_PX = 12
 const MAX_DB = 6
 
 type Drag = { kind: "fadeIn" | "fadeOut" | "vol"; x: number; y: number; moved: boolean }
@@ -72,7 +80,12 @@ export function StationLevels({ ed, lane, hover }: { ed: StationEditor; lane: HT
   const fadeOutT = lv.fadeOut > 0 ? t("editor.station.fadeOutLen", { len: lv.fadeOut.toFixed(2) }) : t("editor.station.fadeOut")
   const volTop = `${50 - lv.gainDb * PCT_PER_DB}%`
   const volT = `${lv.gainDb > 0 ? "+" : lv.gainDb < 0 ? "−" : ""}${Math.abs(lv.gainDb)} dB`
-  const corner = "absolute top-[15px] z-[5] size-3 cursor-pointer touch-none rounded-[2px] border-[1.5px] border-sky-700 bg-white p-0 dark:bg-background"
+  const knob =
+    "absolute top-0 z-[6] size-[11px] -translate-x-1/2 -translate-y-1/2 cursor-ew-resize touch-none rounded-full border-[1.5px] border-sky-700 bg-white p-0 shadow-sm transition-transform hover:scale-125 dark:border-sky-400 dark:bg-background"
+  const label = "pointer-events-none absolute top-[17px] z-[6] text-[10.5px] whitespace-nowrap text-sky-700 dark:text-sky-400"
+  // Where each knob sits: on the fade's end, or just inside its corner.
+  const fadeInLeft = lv.fadeIn > 0 ? pct(fadeInAt) : `calc(${pct(ed.trimA)} + ${KNOB_INSET_PX}px)`
+  const fadeOutLeft = lv.fadeOut > 0 ? pct(fadeOutAt) : `calc(${pct(ed.trimB)} - ${KNOB_INSET_PX}px)`
   return (
     <>
       {/* Item 22: the volume line and its readout. */}
@@ -120,7 +133,8 @@ export function StationLevels({ ed, lane, hover }: { ed: StationEditor; lane: HT
           +
         </button>
       </span>
-      {/* Item 21: the fade corners, where each fade ends (40b). */}
+      {/* Item 21: the fade knobs, where each fade reaches full level (40b),
+          each with its length beside it. */}
       {inView(fadeInAt) ? (
         <>
           <button
@@ -131,26 +145,31 @@ export function StationLevels({ ed, lane, hover }: { ed: StationEditor; lane: HT
             onPointerDown={down("fadeIn")}
             onPointerMove={move}
             onPointerUp={up}
-            className={corner}
-            style={{ left: pct(fadeInAt) }}
+            className={knob}
+            style={{ left: fadeInLeft }}
           />
-          <span className="pointer-events-none absolute top-[29px] z-[5] ps-4 text-[10.5px] whitespace-nowrap text-sky-700 dark:text-sky-400" style={{ left: pct(fadeInAt) }}>
+          <span className={`${label} -translate-x-1/2`} style={{ left: `max(${fadeInLeft}, calc(${pct(ed.trimA)} + 40px))` }}>
             {fadeInT}
           </span>
         </>
       ) : null}
       {inView(fadeOutAt) ? (
-        <button
-          type="button"
-          data-testid="station-fade-out"
-          aria-label={fadeOutT}
-          title={t("editor.station.fadeTip", { fade: fadeOutT })}
-          onPointerDown={down("fadeOut")}
-          onPointerMove={move}
-          onPointerUp={up}
-          className={`${corner} -translate-x-full`}
-          style={{ left: pct(fadeOutAt) }}
-        />
+        <>
+          <button
+            type="button"
+            data-testid="station-fade-out"
+            aria-label={fadeOutT}
+            title={t("editor.station.fadeTip", { fade: fadeOutT })}
+            onPointerDown={down("fadeOut")}
+            onPointerMove={move}
+            onPointerUp={up}
+            className={knob}
+            style={{ left: fadeOutLeft }}
+          />
+          <span className={`${label} -translate-x-1/2`} style={{ left: `min(${fadeOutLeft}, calc(${pct(ed.trimB)} - 44px))` }}>
+            {fadeOutT}
+          </span>
+        </>
       ) : null}
     </>
   )

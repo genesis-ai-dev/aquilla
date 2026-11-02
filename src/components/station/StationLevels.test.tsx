@@ -50,8 +50,13 @@ describe("the Station's fade corners and volume line", () => {
 describe("a fade drawn on the lane", () => {
   it("is a line from silence at the edge up to full level, with the quieted part shaded above it", () => {
     const { container } = render(<FadeShapes clip={{ trimA: 0, trimB: 4, fadeIn: 1, fadeOut: 2, gainDb: 0 }} va={0} w={4} />)
-    const polys = [...container.querySelectorAll("polygon")].map((p) => p.getAttribute("points"))
-    expect(polys).toEqual(["0,0 250,0 0,100", "1000,0 500,0 1000,100"])
+    const polys = [...container.querySelectorAll("polygon")]
+    expect(polys.map((p) => p.getAttribute("points"))).toEqual(["0,0 250,0 0,100", "1000,0 500,0 1000,100"])
+    // Tinted the fade's blue, never washed out like a trimmed part (Nov 2).
+    for (const p of polys) {
+      expect(p.getAttribute("class")).toContain("fill-sky-500")
+      expect(p.getAttribute("class")).not.toContain("fill-background")
+    }
     const lines = [...container.querySelectorAll("line")].map((l) => [l.getAttribute("x1"), l.getAttribute("y1"), l.getAttribute("x2"), l.getAttribute("y2")])
     expect(lines).toEqual([
       ["0", "100", "250", "0"],

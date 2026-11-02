@@ -340,8 +340,10 @@ function ActionButton({
 }
 
 /** Item 21: each fade as a line from silence at the kept part's edge up to
- *  full level where the fade ends, and the part it quiets shaded above the
- *  line. The waveform under it is already drawn faded (viewPeaks). */
+ *  full level where the fade ends, and the part it quiets tinted above the
+ *  line. The tint is the fade controls' blue, never the trim's wash: trimmed
+ *  audio doesn't play, faded audio does, and the two must not look alike
+ *  (Sam, Nov 2). The waveform under it is already drawn faded (viewPeaks). */
 export function FadeShapes({ clip, va, w }: { clip: ClipMix; va: number; w: number }) {
   const x = (t: number) => ((t - va) / w) * 1000
   const fades: { edge: number; end: number }[] = []
@@ -357,7 +359,7 @@ export function FadeShapes({ clip, va, w }: { clip: ClipMix; va: number; w: numb
     >
       {fades.map((f) => (
         <g key={f.edge}>
-          <polygon points={`${f.edge},0 ${f.end},0 ${f.edge},100`} className="fill-background/55" />
+          <polygon points={`${f.edge},0 ${f.end},0 ${f.edge},100`} className="fill-sky-500/12 dark:fill-sky-400/16" />
           <line
             x1={f.edge}
             y1={100}

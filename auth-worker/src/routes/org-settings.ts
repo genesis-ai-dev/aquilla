@@ -137,6 +137,14 @@ const PERMISSION_POLICY_KEYS: Record<string, string> = {
   // AQU-1086: who may change a project's source/target language and its extra
   // target lanes. Role-ladder valued, OWNER-only on write like the rest.
   languageEditMinRole: "languageEditMinRole",
+  // AQU-2304: who may bring a NEW source file into a project (`file.create`).
+  // Role-ladder valued, OWNER-only on write like the rest of this table — a
+  // maintainer must not be able to hand out (or take away) import rights on
+  // their own authority. Defaults to PROJECT_LEAD, which is what every org
+  // does today. Enforced in sync-worker, which owns the event log — see
+  // sync-worker/src/events/import-authority.ts; this route only governs who
+  // may SET the policy.
+  importMinRole: "importMinRole",
   // AQU-907: who may use the org-wide Data egress surface. Role-ladder
   // valued, OWNER-only on write like the rest of this table.
   egressMinRole: "egressMinRole",
@@ -167,6 +175,8 @@ const BOOLEAN_POLICY_KEYS = new Set(["allowSelfAssignment", "allowScopedLaneAssi
  * may override it; absent on both means count them.
  */
 const COUNT_STRUCTURAL_KEY = "countStructuralCells"
+/** AQU-1391: the repetition default, which a project may also set for itself. */
+const AUTO_PROPAGATE_KEY = "autoPropagateRepetitions"
 
 /**
  * Omnilingual ASR: `{ zeroShotEnabled?: boolean }`. Lets an org turn off the
@@ -203,6 +213,8 @@ const INHERITED_KEY_COLUMNS: Record<string, string> = {
   // project's own value still wins, and the enforcement helpers read the org's
   // only for a project that sets none.
   ...MEDIA_DEFAULT_COLUMNS,
+  // AQU-2263: whether validating a cell fills in its repetitions (AQU-1391).
+  [AUTO_PROPAGATE_KEY]: "auto_propagate_repetitions",
 }
 
 /** URL slug → settings key for the per-key "reset project overrides" endpoint. */
@@ -211,6 +223,7 @@ const RESET_SLUGS: Record<string, string> = {
   "validation-count": "validationCount",
   "validation-count-audio": "validationCountAudio",
   ...MEDIA_DEFAULT_SLUGS,
+  "auto-propagate-repetitions": AUTO_PROPAGATE_KEY,
 }
 
 /**
@@ -432,10 +445,12 @@ async function loadOverrideCounts(
   orgId: number,
   viewer: ProjectNameViewer,
 ) {
-  const [countStructuralCells, validationCount, validationCountAudio, ...media] = await Promise.all([
+  const [countStructuralCells, validationCount, validationCountAudio, autoPropagateRepetitions, ...media] = await Promise.all([
     listOverrideProjects(env, orgId, INHERITED_KEY_COLUMNS[COUNT_STRUCTURAL_KEY], viewer),
     listOverrideProjects(env, orgId, VALIDATION_THRESHOLD_COLUMNS.validationCount, viewer),
     listOverrideProjects(env, orgId, VALIDATION_THRESHOLD_COLUMNS.validationCountAudio, viewer),
+    // AQU-2263: the repetition default too.
+    listOverrideProjects(env, orgId, INHERITED_KEY_COLUMNS[AUTO_PROPAGATE_KEY], viewer),
     // AQU-1768: and one per media default.
     ...MEDIA_DEFAULT_KEYS.map((key) => listOverrideProjects(env, orgId, MEDIA_DEFAULT_COLUMNS[key], viewer)),
   ])
@@ -444,9 +459,10 @@ async function loadOverrideCounts(
     countStructuralOverrides: countStructuralCells.total,
     validationCountOverrides: validationCount.total,
     validationCountAudioOverrides: validationCountAudio.total,
+    autoPropagateRepetitionsOverrides: autoPropagateRepetitions.total,
     mediaDefaultOverrides: Object.fromEntries(MEDIA_DEFAULT_KEYS.map((key, i) => [key, media[i].total])),
     // AQU-1938: which projects those are, keyed by the setting they override.
-    overrideProjects: { countStructuralCells, validationCount, validationCountAudio, ...mediaLists },
+    overrideProjects: { countStructuralCells, validationCount, validationCountAudio, autoPropagateRepetitions, ...mediaLists },
   }
 }
 

@@ -204,6 +204,9 @@ export interface OutboxEventPayloads {
   "source.cell.delete": {
     /** Smart Extensions apiRev 7: an extension's file write (verified server-side). */
     tool_origin?: { origin: "tool"; toolId: string; version: number; codeHash: string; session?: string }
+    /** Slice 13: the undo of "make rows from a recording" names the line's
+     *  creating event, so its author may take it back below Maintainer. */
+    undoOfEventId?: string
   }
   "source.cell.reorder": {
     anchorCellId: string | null
@@ -481,7 +484,15 @@ export interface OutboxEventPayloads {
    */
   "cell.audio.place": {
     audioId: string
+    /** Its place following the source. */
     targetOffsetMs: number | null
+    /**
+     * AQU-2267: its place following the recordings. Every move states both
+     * (`emitCellAudioPlace` requires it); optional here because an event queued
+     * before AQU-2267 has none, and the server reads that as null — one place
+     * for both timings, as when it was queued.
+     */
+    recordingsOffsetMs?: number | null
     /** AQU-1462: see `cell.audio.attach`. */
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
@@ -813,6 +824,8 @@ export interface OutboxEventPayloads {
       groupId?: string | null
       color?: string | null
       sourceTrackId?: string | null
+      /** AQU-2252: false makes an added track a layer; null clears it. */
+      setsLineLengths?: boolean | null
     } | null
   }
   // Timeline editor: set/clear a file's core video URL (timeline preview).

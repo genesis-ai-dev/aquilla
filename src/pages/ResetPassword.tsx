@@ -1,3 +1,4 @@
+import { orgInviteReturnTo } from "../../shared/org-invite-return-to"
 /**
  * AQU-270: /reset-password page
  *
@@ -21,6 +22,8 @@ import { z } from "zod"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { Check, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { AuthPage, AuthPanel } from "@/components/auth/AuthPage"
+import { CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Field,
   FieldError,
@@ -99,7 +102,7 @@ function PasswordChecklist({ password }: { password: string }) {
 // ---------------------------------------------------------------------------
 // Recovery form — shown when the token is invalid/expired.
 // ---------------------------------------------------------------------------
-function TokenExpiredView({ username }: { username: string }) {
+function TokenExpiredView({ username, returnTo }: { username: string; returnTo?: string }) {
   const t = useT()
   const [sentEmail, setSentEmail] = useState<string | null>(null)
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
@@ -118,7 +121,7 @@ function TokenExpiredView({ username }: { username: string }) {
     onSubmit: async ({ value }) => {
       clearSubmitError()
       try {
-        await requestPasswordReset(value.email.trim())
+        await requestPasswordReset(value.email.trim(), returnTo)
         setSentEmail(value.email.trim())
       } catch (err) {
         setSubmitError(
@@ -136,7 +139,7 @@ function TokenExpiredView({ username }: { username: string }) {
           <span className="font-medium">{sentEmail}</span>. {t("auth.resetPassword.sentSuffix")}
         </p>
         <a
-          href="/"
+          href={returnTo ?? "/"}
           className="inline-flex w-full items-center justify-center rounded-xl border px-3 py-1.5 text-sm font-medium hover:bg-muted"
         >
           {t("auth.resetPassword.backToApp")}
@@ -191,14 +194,14 @@ function TokenExpiredView({ username }: { username: string }) {
           />
         </FieldGroup>
         {submitError && <FieldError>{submitError}</FieldError>}
-        <Button type="submit" form="token-expired-form" className="w-full">
+        <Button type="submit" size="lg" form="token-expired-form" className="w-full">
           {form.state.isSubmitting && <Spinner data-icon="inline-start" />}
           {form.state.isSubmitting
             ? t("auth.resetPassword.sending")
             : t("auth.resetPassword.requestNewLink")}
         </Button>
         <a
-          href="/"
+          href={returnTo ?? "/"}
           className="inline-flex w-full items-center justify-center text-sm text-muted-foreground hover:underline underline-offset-4"
         >
           {t("auth.resetPassword.backToApp")}
@@ -221,6 +224,7 @@ export function ResetPassword() {
 
   const token = searchParams.get("token") ?? ""
   const username = searchParams.get("username") ?? ""
+  const returnTo = orgInviteReturnTo(searchParams.get("returnTo"))
 
   const [verifyState, setVerifyState] = useState<VerifyState>("loading")
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
@@ -237,7 +241,7 @@ export function ResetPassword() {
       try {
         await resetPassword(token, username, value.password)
         await login(username, value.password)
-        navigate("/", { replace: true })
+        navigate(returnTo ?? "/", { replace: true })
       } catch (err) {
         setSubmitError(
           err instanceof FrontierAuthError ? err.message : t("auth.resetPassword.failedToReset"),
@@ -267,72 +271,74 @@ export function ResetPassword() {
   }, [token, username])
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-8">
-      <div className="w-full max-w-sm flex flex-col gap-6">
-        <div className="flex flex-col gap-1 text-center">
-          <h1 className="text-2xl font-semibold">{t("auth.resetPassword.title")}</h1>
+    <AuthPage>
+      <AuthPanel>
+        <CardHeader>
+          <CardTitle role="heading" aria-level={1}>{t("auth.resetPassword.title")}</CardTitle>
           {username && (
             <p className="text-sm text-muted-foreground">
               {t("auth.resetPassword.accountPrefix")}{" "}
               <span className="font-medium text-foreground">{username}</span>
             </p>
           )}
-        </div>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-6">
 
-        {verifyState === "loading" && (
-          <p className="text-center text-sm text-muted-foreground">
-            {t("auth.resetPassword.verifyingLink")}
-          </p>
-        )}
+          {verifyState === "loading" && (
+            <p className="text-center text-sm text-muted-foreground">
+              {t("auth.resetPassword.verifyingLink")}
+            </p>
+          )}
 
-        {verifyState === "invalid" && <TokenExpiredView username={username} />}
+        {verifyState === "invalid" && <TokenExpiredView username={username} returnTo={returnTo} />}
 
-        {verifyState === "valid" && (
-          <form
-            id="reset-password-form"
-            onSubmit={(e) => {
-              e.preventDefault()
-              void form.handleSubmit()
-            }}
-            className="flex flex-col gap-4"
-          >
-            <FieldGroup>
-              <form.Field
-                name="password"
-                children={(field) => {
-                  const invalid = isFieldInvalid(field)
-                  return (
-                    <Field data-invalid={invalid}>
-                      <FieldLabel htmlFor="rp-new-password">
-                        {t("auth.resetPassword.newPasswordLabel")}
-                      </FieldLabel>
-                      <RevealableInput
-                        id="rp-new-password"
-                        name={field.name}
-                        value={field.state.value}
-                        onBlur={field.handleBlur}
-                        onChange={(e) => field.handleChange(e.target.value)}
-                        aria-invalid={invalid}
-                        autoComplete="new-password"
-                        autoFocus
-                      />
-                      <PasswordChecklist password={field.state.value} />
-                      {invalid && <FieldError errors={field.state.meta.errors} />}
-                    </Field>
-                  )
-                }}
-              />
-            </FieldGroup>
-            {submitError && <FieldError>{submitError}</FieldError>}
-            <Button type="submit" form="reset-password-form" className="w-full">
-              {form.state.isSubmitting && <Spinner data-icon="inline-start" />}
-              {form.state.isSubmitting
-                ? t("auth.resetPassword.submitSetting")
-                : t("auth.resetPassword.submitDefault")}
-            </Button>
-          </form>
-        )}
-      </div>
-    </div>
+          {verifyState === "valid" && (
+            <form
+              id="reset-password-form"
+              onSubmit={(e) => {
+                e.preventDefault()
+                void form.handleSubmit()
+              }}
+              className="flex flex-col gap-4"
+            >
+              <FieldGroup>
+                <form.Field
+                  name="password"
+                  children={(field) => {
+                    const invalid = isFieldInvalid(field)
+                    return (
+                      <Field data-invalid={invalid}>
+                        <FieldLabel htmlFor="rp-new-password">
+                          {t("auth.resetPassword.newPasswordLabel")}
+                        </FieldLabel>
+                        <RevealableInput
+                          id="rp-new-password"
+                          name={field.name}
+                          value={field.state.value}
+                          onBlur={field.handleBlur}
+                          onChange={(e) => field.handleChange(e.target.value)}
+                          aria-invalid={invalid}
+                          autoComplete="new-password"
+                          autoFocus
+                        />
+                        <PasswordChecklist password={field.state.value} />
+                        {invalid && <FieldError errors={field.state.meta.errors} />}
+                      </Field>
+                    )
+                  }}
+                />
+              </FieldGroup>
+              {submitError && <FieldError>{submitError}</FieldError>}
+              <Button type="submit" size="lg" form="reset-password-form" className="w-full">
+                {form.state.isSubmitting && <Spinner data-icon="inline-start" />}
+                {form.state.isSubmitting
+                  ? t("auth.resetPassword.submitSetting")
+                  : t("auth.resetPassword.submitDefault")}
+              </Button>
+            </form>
+          )}
+        </CardContent>
+      </AuthPanel>
+    </AuthPage>
   )
 }

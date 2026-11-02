@@ -10,7 +10,7 @@
  */
 
 import { afterEach, describe, it, expect, vi } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 import { EditorTable } from "./EditorTable"
@@ -148,11 +148,15 @@ function renderTable(project: ProjectRecord, store: CellStore, activeLane = "") 
   )
 }
 
-async function tooltipOf(button: HTMLElement) {
-  fireEvent.mouseEnter(button)
-  fireEvent.pointerEnter(button)
-  fireEvent.focus(button)
-  return screen.findByRole("tooltip")
+/** AQU-2260 (Sam, Oct 29): why a vote is refused opens on a CLICK of the
+ *  check, in a note anchored to it — never a hover. */
+async function reasonOf(button: HTMLElement) {
+  fireEvent.click(button)
+  return waitFor(() => {
+    const note = document.querySelector<HTMLElement>('[data-slot="disabled-reason-note"]')
+    expect(note).not.toBeNull()
+    return note!
+  })
 }
 
 afterEach(() => {
@@ -166,7 +170,7 @@ describe("EditorTable — text validation blocked where the server would refuse 
     renderTable(projectWith({ allowSelfValidation: false }), makeStore([target("bonjour", "tester")]))
     const button = await screen.findByRole("button", { name: /^Not validated — .*\.$/ })
     expect(button).toHaveAttribute("aria-disabled", "true")
-    expect(await tooltipOf(button)).toHaveTextContent(OWN_EDIT)
+    expect(await reasonOf(button)).toHaveTextContent(OWN_EDIT)
     fireEvent.click(button)
     expect(emitCellValidate).not.toHaveBeenCalled()
   })
@@ -213,7 +217,7 @@ describe("EditorTable — text validation blocked where the server would refuse 
     renderTable(projectWith({ validationRoleFloor: "project_lead" }, ROLE.CONTRIBUTOR), makeStore([target("bonjour", "alice")]))
     const button = await screen.findByRole("button", { name: /^Not validated — .*\.$/ })
     expect(button).toHaveAttribute("aria-disabled", "true")
-    expect(await tooltipOf(button)).toHaveTextContent("Text validation unavailable")
+    expect(await reasonOf(button)).toHaveTextContent("Text validation unavailable")
     fireEvent.click(button)
     expect(emitCellValidate).not.toHaveBeenCalled()
   })
@@ -221,7 +225,7 @@ describe("EditorTable — text validation blocked where the server would refuse 
   it("reads as unavailable to a reader left off the named-validator list", async () => {
     renderTable(projectWith({ validationNamedUsers: ["alice"] }), makeStore([target("bonjour", "alice")]))
     const button = await screen.findByRole("button", { name: /^Not validated — .*\.$/ })
-    expect(await tooltipOf(button)).toHaveTextContent("Text validation unavailable")
+    expect(await reasonOf(button)).toHaveTextContent("Text validation unavailable")
     fireEvent.click(button)
     expect(emitCellValidate).not.toHaveBeenCalled()
   })

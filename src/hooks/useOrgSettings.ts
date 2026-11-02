@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { ROLE } from "@/lib/frontier/roles"
-import { resolveLanguageEditFloor } from "@/lib/sync/role-policy"
+import { resolveImportFloor, resolveLanguageEditFloor } from "@/lib/sync/role-policy"
 import {
   fetchOrgSettings,
   patchOrgSettings,
@@ -141,6 +141,16 @@ const DEFAULT_TERMBASE_EDIT_MIN_ROLE = ROLE.PROJECT_LEAD
 // gate) and in auth-worker/src/services/org-permissions.ts (the server
 // default) — all three must agree.
 const LANGUAGE_FLOOR_WRITE_MIN_ROLE = ROLE.OWNER
+
+// AQU-2304: importMinRole is the third write-gating permission-policy key on
+// this plumbing (who may bring a NEW source file into a project). Same
+// OWNER-only write gate; absent, the floor is PROJECT_LEAD, which is what
+// every org does today. See DEFAULT_IMPORT_MIN_ROLE in
+// src/lib/sync/role-policy.ts (the client gate),
+// auth-worker/src/services/org-permissions.ts (the server default) and
+// sync-worker/src/events/import-authority.ts (the enforcement) — all four
+// must agree.
+const IMPORT_FLOOR_WRITE_MIN_ROLE = ROLE.OWNER
 const EMPTY_RULES: TranslationRule[] = []
 
 // AQU-1002: the two comment floors are the same OWNER-only permission-policy
@@ -277,6 +287,10 @@ export interface UseOrgSettings {
    * org opts out; a project may still override it in either direction.
    */
   autoPropagateRepetitions: boolean
+  /** AQU-2263: how many projects set their own repetition answer and ignore it. */
+  autoPropagateRepetitionsOverrides: number
+  /** AQU-2263: put those projects back on the org's repetition default. */
+  resetAutoPropagateRepetitionsOverrides: () => Promise<{ ok: boolean; cleared: number; message?: string }>
   /** Put those projects back on the org default. Clears their own key. */
   resetCountStructuralOverrides: () => Promise<{ ok: boolean; cleared: number; message?: string }>
   /**
@@ -293,7 +307,10 @@ export interface UseOrgSettings {
    * the caller may see, at most 50. Null where the server did not say (an
    * older server), and the line then shows its bare count.
    */
-  overrideProjects: Record<InheritedOverrideKey, OverrideProjectList | null>
+  overrideProjects: Record<InheritedOverrideKey, OverrideProjectList | null> & {
+    /** AQU-2263: and "Auto-propagate repetitions" (absent from older callers' stand-ins). */
+    autoPropagateRepetitions?: OverrideProjectList | null
+  }
   /** AQU-1768: the same, for each media default's "N projects set their own". */
   mediaOverrideProjects: Partial<Record<MediaDefaultKey, OverrideProjectList | null>>
   /** Put the projects that set their own count back on the org default. */
@@ -332,6 +349,14 @@ export interface UseOrgSettings {
    * so this is here for the org Settings UI.
    */
   languageEditMinRole: number
+  /**
+   * AQU-2304: the org's effective `importMinRole` — the minimum role allowed
+   * to import a NEW source file into any project of this org. The per-project
+   * gate reads the same floor off the project's settings response
+   * (`orgPolicy.importMinRole`, via `resolveProjectPolicy`), so this is here
+   * for the org Settings UI.
+   */
+  importMinRole: number
   /**
    * AQU-907: True when the caller may use the org-wide Data egress surface.
    * Owners always may (700 meets every valid floor, so they never wait for
@@ -383,6 +408,7 @@ const OVERRIDE_COUNT_KEYS = [
   "countStructuralOverrides",
   "validationCountOverrides",
   "validationCountAudioOverrides",
+  "autoPropagateRepetitionsOverrides",
   // AQU-1938: the projects behind those counts, kept for the same reason.
   "overrideProjects",
   "mediaDefaultOverrides",
@@ -490,6 +516,15 @@ export function useOrgSettings(
     return { ok: true, cleared: result.cleared }
   }, [orgId, jwt, refresh])
 
+  /** AQU-2263: the same reset for "Auto-propagate repetitions". */
+  const resetRepetitionOverrides = useCallback(async () => {
+    if (!orgId || !jwt) return { ok: false, cleared: 0, message: "no session" }
+    const result = await resetProjectOverrides(jwt, orgId, "auto-propagate-repetitions")
+    if (result.kind === "error") return { ok: false, cleared: 0, message: result.message }
+    await refresh()
+    return { ok: true, cleared: result.cleared }
+  }, [orgId, jwt, refresh])
+
   /** AQU-1768: the same reset for one media default. */
   const resetMediaOverrides = useCallback(async (key: MediaDefaultKey) => {
     if (!orgId || !jwt) return { ok: false, cleared: 0, message: "no session" }
@@ -576,6 +611,14 @@ export function useOrgSettings(
       : null,
   )
 
+  // AQU-2304: effective import floor — explicit org setting, or PROJECT_LEAD
+  // when unset / out of the role ladder.
+  const importMinRole = resolveImportFloor(
+    typeof server?.settings?.importMinRole === "number"
+      ? (server.settings.importMinRole as number)
+      : null,
+  )
+
   // AQU-907: effective egress floor — explicit org setting, or the OWNER
   // default when unset / out of the role ladder.
   const egressMinRole = (() => {
@@ -612,10 +655,11 @@ export function useOrgSettings(
   const validationCountOverrides = server?.validationCountOverrides ?? 0
   const validationCountAudioOverrides = server?.validationCountAudioOverrides ?? 0
   // AQU-1938: the projects behind each count, read defensively.
-  const overrideProjects: Record<InheritedOverrideKey, OverrideProjectList | null> = {
+  const overrideProjects: UseOrgSettings["overrideProjects"] = {
     countStructuralCells: parseOverrideProjectList(server?.overrideProjects?.countStructuralCells),
     validationCount: parseOverrideProjectList(server?.overrideProjects?.validationCount),
     validationCountAudio: parseOverrideProjectList(server?.overrideProjects?.validationCountAudio),
+    autoPropagateRepetitions: parseOverrideProjectList(server?.overrideProjects?.autoPropagateRepetitions),
   }
   // AQU-1768: valid values only, the same filter the server applies.
   const mediaDefaults = useMemo(() => mediaDefaultsFromOrgSettings(server?.settings), [server?.settings])
@@ -631,6 +675,7 @@ export function useOrgSettings(
   // AQU-1391: same `!== false` shape and for the same reason — unset is ON,
   // and only an explicit opt-out turns repetition propagation off org-wide.
   const autoPropagateRepetitions = server?.settings?.autoPropagateRepetitions !== false
+  const autoPropagateRepetitionsOverrides = server?.autoPropagateRepetitionsOverrides ?? 0
   const allowSelfAssignment = server?.settings?.allowSelfAssignment === true
     ? true
     : DEFAULT_ALLOW_SELF_ASSIGNMENT
@@ -778,6 +823,8 @@ export function useOrgSettings(
     countStructuralCells,
     countStructuralOverrides,
     autoPropagateRepetitions,
+    autoPropagateRepetitionsOverrides,
+    resetAutoPropagateRepetitionsOverrides: resetRepetitionOverrides,
     resetCountStructuralOverrides: resetOverrides,
     validationCountDefault,
     validationCountAudioDefault,
@@ -792,6 +839,7 @@ export function useOrgSettings(
     assignmentMinRole,
     termbaseEditMinRole,
     languageEditMinRole,
+    importMinRole,
     canEgress,
     egressMinRole,
     commentCreateMinRole,
@@ -839,6 +887,16 @@ export function canEditTermbaseFloor(callerRoleLevel: number | null | undefined)
  */
 export function canEditLanguageFloor(callerRoleLevel: number | null | undefined): boolean {
   return (callerRoleLevel ?? 0) >= LANGUAGE_FLOOR_WRITE_MIN_ROLE
+}
+
+/**
+ * AQU-2304: True when `callerRoleLevel` is allowed to CHANGE the
+ * importMinRole floor (OWNER-only, same rationale as the helpers above — a
+ * maintainer must not be able to take file imports away from every project
+ * lead in the org, or hand them back, on their own authority).
+ */
+export function canEditImportFloor(callerRoleLevel: number | null | undefined): boolean {
+  return (callerRoleLevel ?? 0) >= IMPORT_FLOOR_WRITE_MIN_ROLE
 }
 
 /**

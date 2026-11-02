@@ -20,18 +20,21 @@ export const MAX_COMPLETION_BATCH_SIZE = 50
 /**
  * Resolve the configured batch size from a project's settings blob.
  *
- * The SPA writes this key under `completionSettings.completionBatchSize`;
- * both that nested shape and a top-level `completionBatchSize` are accepted so
- * the server reads the same number regardless of which surface stored it.
- * Anything absent, non-numeric, or non-positive falls back to the default.
+ * The SPA writes this key under `draftingSettings.completionBatchSize`
+ * (AQU-2259: before that it never left the browser). The older nested
+ * `completionSettings.completionBatchSize` and a top-level
+ * `completionBatchSize` are still accepted, in that order, so the server reads
+ * the same number regardless of which surface stored it. Anything absent,
+ * non-numeric, or non-positive falls back to the default.
  */
 export function completionBatchSizeFromSettings(settings: Record<string, unknown> | null | undefined): number {
-  const nested = settings?.completionSettings
-  const fromNested =
-    nested && typeof nested === 'object' && !Array.isArray(nested)
+  const nestedField = (key: string): unknown => {
+    const nested = settings?.[key]
+    return nested && typeof nested === 'object' && !Array.isArray(nested)
       ? (nested as Record<string, unknown>).completionBatchSize
       : undefined
-  const raw = fromNested ?? settings?.completionBatchSize
+  }
+  const raw = nestedField('draftingSettings') ?? nestedField('completionSettings') ?? settings?.completionBatchSize
   if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) {
     return Math.min(MAX_COMPLETION_BATCH_SIZE, Math.floor(raw))
   }

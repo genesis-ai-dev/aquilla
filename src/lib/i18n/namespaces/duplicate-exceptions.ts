@@ -54,10 +54,9 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "renamed the other.",
   "importExport.dialog.audioSectionTitle":
     "Title of the export dialog's .zip card, naming a KIND OF DELIVERABLE the " +
-    "user is about to download. nav.lens.audio names the editor's Audio lens — " +
-    "a mode you switch into — and its own context pins it as shared by every " +
-    "entry point that toggles that lens so the name can never drift. Reusing it " +
-    "here would tie a file-format label to a UI mode's name, and a later edit " +
+    "user is about to download. nav.lens.audio is a bare 'Audio' heading on " +
+    "other surfaces (a project-table column, a side of the character check). " +
+    "Reusing it here would tie a file-format label to those headings, and a later edit " +
     "for one would silently change the other.",
   "nav.sidebarSection.more":
     "Expands a collapsed sidebar section. common.moreBreadcrumbs is screen-reader " +
@@ -91,7 +90,7 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
   "audio.newVoice.inworldVoiceLabel":
     "Field label for the Inworld stock-voice dropdown in the New voice modal — " +
     "which catalog voice this engine should speak with. editor.navTitle.voice is " +
-    "the editor's own audio-lens tab label naming a workspace mode. A form-field " +
+    "the label of the editor's Voice route naming a workspace mode. A form-field " +
     "label and a navigation tab are different UI roles that happen to share the " +
     "word 'Voice' and diverge in most target languages.",
   "audio.newVoice.inworldLanguageLabel":
@@ -130,13 +129,12 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "audio.recordingModal.recordingStatus is the present participle shown beside a " +
     "pulsing dot while the microphone is live. Noun vs progressive verb: English " +
     "spells both 'Recording', almost nothing else does.",
-  "auth.signup.usernameLabel":
-    "Labels the account identifier being chosen at sign-up and sent to the identity " +
-    "server — the name this person will type to sign in from then on. " +
-    "projectSettings.user.usernameLabel labels the local author name recorded " +
-    "against edits in a project's history, a per-device display preference that " +
-    "never authenticates anything. Languages that distinguish a chosen login " +
-    "handle from a displayed personal name need the two separately.",
+  "projectSettings.gitSync.autoSyncSwitch":
+    "The label of the Git sync card's on/off switch, a standalone noun phrase at the " +
+    "start of a row ('Auto-sync'). projectSettings.field.autoSync is the lower-case " +
+    "name of the same setting read inside the 'Saved …' sentence that lists what " +
+    "changed. A capitalized label and a mid-sentence list item differ in case and, " +
+    "in many languages, in grammatical form.",
   "auth.login.submitDefault":
     "The submit button of the sign-in form. auth.login.title is the heading naming " +
     "the whole form. Languages that nominalize headings ('Anmeldung') while keeping " +
@@ -220,8 +218,8 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "export card's 'Audio' would tie a deliverable choice to a UI mode or a file " +
     "label, and an edit to either would silently break the set.",
   "nav.lens.audio":
-    "Standalone tab label of the header Text/Audio segmented lens switch — a " +
-    "primary navigation control read on its own, alongside its sibling 'Text'. " +
+    "A standalone heading — the Audio column of the organization's project table " +
+    "and the Audio side of the character check — read on its own. " +
     "nav.outbox.previewAudio is a one-word fallback preview for an audio-attach " +
     "event row deep in the outbox diagnostics popover, standing in for a missing " +
     "text body among noun-phrase siblings like 'edit {id}'. A standalone control " +
@@ -302,9 +300,9 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "English participle; collapsing them would leak review-workflow wording into " +
     "a plain stats column in languages that lexicalize the two differently.",
   "org.orgSidebar.archived":
-    "Sidebar nav-link text AND breadcrumb section name for the org's permanent " +
-    "archived-projects route — a page/section identity, the same grammatical " +
-    "role as the editor.navTitle.* page titles it sits beside in the sidebar. " +
+    "Column heading AND date label for when a project was archived, on the org's " +
+    "archived-projects page (AQU-2261 moved the sidebar link and page title onto " +
+    "editor.navTitle.archivedProjects) — a heading naming a moment. " +
     "autopilot.evidence.status.archived is a lifecycle state of one piece of AI " +
     "evidence in the same stable status enum as .approved above. A destination " +
     "name and an item's lifecycle status are different concepts sharing one " +
@@ -316,7 +314,7 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "archived. autopilot.evidence.status.archived is one value of the fixed " +
     "evidence-review lifecycle enum (Proposed/Applied/Rejected/Superseded/Approved/" +
     "Archived/Unknown) badging a piece of AI-gathered EVIDENCE, and " +
-    "org.orgSidebar.archived above names a destination. A language lane and an " +
+    "org.orgSidebar.archived above heads a date column. A language lane and an " +
     "evidence item are unrelated referents, and where a participle agrees with the " +
     "noun it describes the two cannot share a form — the ar catalog already gives " +
     "the evidence state and the sidebar name different genders, and ru renders " +
@@ -330,15 +328,6 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "context). A lower-case mid-sentence filler and a capitalized standalone " +
     "enum/badge value take different forms in languages that case- or " +
     "register-mark that distinction.",
-  "org.membersPage.addMemberHeading":
-    "Static <h2> SECTION HEADING introducing the add-member area of the " +
-    "per-project Members page — a nominal label naming what's below it. " +
-    "org.teamDetail.addMemberButton is the imperative text of an actual clickable " +
-    "button/menu item that starts the add-member flow. This is the same " +
-    "nominalized-heading-vs-imperative-button split already documented for " +
-    "auth.login.title vs auth.login.submitDefault above: languages that " +
-    "nominalize headings while keeping buttons imperative need both forms even " +
-    "though English spells them identically.",
   "org.membersPage.orgPage.noExpiry":
     "Lower-case inline status caption ('no expiry') standing in for a computed " +
     "relative-time phrase on a pending-invite row, in the same register as its " +
@@ -394,11 +383,6 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "is the cell-level health badge shown on an individual cell's expansion " +
     "panel. A settings-panel heading and a per-cell status badge naming the same " +
     "feature at two different granularities read as different parts of speech.",
-  "projectSettings.share.tabMembers":
-    "Tab label in the Share dialog switching to the per-project member list. " +
-    "editor.navTitle.members is the breadcrumb/nav title for the standalone " +
-    "Members page. A tab within a dialog and a full page's nav title are " +
-    "different UI roles that happen to share the plain noun 'Members'.",
   "projectSettings.breadcrumbEditor":
     "Breadcrumb trail segment in Project Settings linking back to the workspace " +
     "editor. editor.navTitle.editor is the editor's own nav-title/tab label when " +
@@ -410,7 +394,7 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "settings. A page naming itself vs a link naming its destination.",
   "projectSettings.section.voice":
     "Card heading for this project's Voice/TTS API-key configuration. " +
-    "editor.navTitle.voice is the editor's own audio-lens tab label. A settings " +
+    "editor.navTitle.voice is the label of the editor's Voice route. A settings " +
     "card and a workspace lens switch that happen to share the word 'Voice'.",
   "projectSettings.sourceLink.modeLive":
     "Badge naming the AD-9 link-mode ('Live' vs 'Clone') on a linked project's " +
@@ -447,16 +431,6 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "new file import. A settings-card noun heading vs an action-triggering verb " +
     "button — languages that nominalize headings but keep buttons imperative " +
     "need both spelled differently even though English collapses them.",
-  "projectSettings.share.copied":
-    "Transient confirmation after copying a minted invite link's URL in the " +
-    "Share dialog. nav.report.copied is the equivalent confirmation for the " +
-    "unrelated diagnostics-report copy action. Two independent copy-to-clipboard " +
-    "confirmations that happen to share the same short exclamation.",
-  "projectSettings.section.bibleResources":
-    "Card heading toggling this project's Bible-resources (bibletranslation.org) " +
-    "integration on/off. search.mode.bibleTooltip is the tooltip on the search " +
-    "panel's Bible-resources search-mode toggle. A settings on/off card heading " +
-    "vs a tooltip naming a search filter mode for the same underlying dataset.",
   "importExport.landing.badgeBeta":
     "Per-format maturity pill on one import-option card on the landing screen " +
     "('this specific importer is beta'). nav.beta.badge is the app-chrome pill " +
@@ -537,16 +511,6 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "shadcn Badge component on a personal API-token row. A lower-case inline " +
     "status word and a capitalized standalone badge take different forms in " +
     "languages that case- or register-mark that distinction.",
-  "onboarding.preferences.profile.responseLanguage.label":
-    "Field label in the personal Translator Profile (Preferences page) for " +
-    "the language the AI assistant should use when replying to THIS person in " +
-    "chat — a device-local, per-person override. projectSettings.ai." +
-    "assistantLanguageLabel is the PROJECT-WIDE default for the same-named " +
-    "setting, shared by everyone on the project, configured in Project " +
-    "Settings' AI card. Same surface word, different scope and different " +
-    "underlying data (personal profile field vs shared project setting) — " +
-    "collapsing them would risk a translator conflating a personal override " +
-    "with a shared team default.",
   "onboarding.preferences.hint.notSet":
     "Standalone Title-Case index-row hint on the Preferences page ('Not set'), " +
     "alongside sibling Title-Case hints 'Personal'/'On-device'/'Sharing on'. " +
@@ -612,13 +576,6 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "picker, sitting beside 'Source' and 'Audio' as a kind-of-thing label. A " +
     "specific instance and a category name take different forms wherever nouns " +
     "inflect for definiteness.",
-  "importExport.paratext.languageLabel":
-    "Labels the SOURCE LANGUAGE detected in a Paratext project during import — a " +
-    "property of the file being read. autopilot.inspector.run.lane names the " +
-    "language LANE an Autopilot run targeted, i.e. which translation track the " +
-    "run wrote into. One describes an input's language, the other identifies a " +
-    "destination track; languages that mark that difference with case or an " +
-    "adposition cannot share a single rendering.",
   "agent.approve":
     "Imperative button that accepts a translation agent's staged, human-gated " +
     "proposal (a changeset, a memory, or a brief update) — reused across the " +

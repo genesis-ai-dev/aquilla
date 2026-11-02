@@ -17,6 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { SearchSelect } from "@/components/ui/search-select"
 import { Checkbox } from "@/components/ui/checkbox"
 import type { AdminOrg, AdminProject, AdminUser } from "@/lib/frontier/admin"
 import {
@@ -368,18 +369,14 @@ function AccessLinksSection({
                 <Label htmlFor="project" className="text-sm">
                   Project
                 </Label>
-                <Select value={selectedProjectId} onValueChange={(v) => setSelectedProjectId(v || "")}>
-                  <SelectTrigger id="project">
-                    <SelectValue placeholder="Select a project" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {projects.map((p) => (
-                      <SelectItem key={p.id} value={p.id}>
-                        {p.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {/* AQU-2260: every project on the platform, so a search box. */}
+                <SearchSelect
+                  id="project"
+                  options={projects.map((p) => ({ value: p.id, label: p.name }))}
+                  value={selectedProjectId}
+                  onValueChange={setSelectedProjectId}
+                  placeholder="Select a project"
+                />
               </div>
 
               <div>

@@ -2,6 +2,9 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { act, render, screen, waitFor, fireEvent, within } from "@testing-library/react"
 import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
+import userEvent from "@testing-library/user-event"
+import { TooltipProvider } from "@/components/ui/tooltip"
+import { expectClickNote } from "@/test-utils/tooltip"
 import { ProjectOverview, deriveProjectStatus } from "./ProjectOverview"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { ROLE } from "@/lib/frontier/roles"
@@ -80,9 +83,10 @@ vi.mock("@/hooks/useProject", () => ({
 // real. The overview Members card (AQU-1171) mounts the same hook via
 // MembersSection once expanded; an empty roster is enough to prove the
 // surface is present without hitting identity.
+const pmMembers: { members: unknown[] } = { members: [] }
 vi.mock("@/hooks/useProjectMembers", () => ({
   useProjectMembers: () => ({
-    members: [],
+    members: pmMembers.members,
     isLoading: false,
     error: null,
     rosterHidden: false,
@@ -332,6 +336,8 @@ const defaultOrgSettingsMock = (): OrgSettingsMock => ({
   allowScopedLaneAssignment: false,
   countStructuralCells: true,
   autoPropagateRepetitions: true,
+  autoPropagateRepetitionsOverrides: 0,
+  resetAutoPropagateRepetitionsOverrides: vi.fn(),
   countStructuralOverrides: 0,
   resetCountStructuralOverrides: vi.fn(),
   validationCountDefault: null,
@@ -349,6 +355,7 @@ const defaultOrgSettingsMock = (): OrgSettingsMock => ({
   // AQU-822: default termbase-edit floor (project_lead), as the server resolves it.
   termbaseEditMinRole: 500,
   languageEditMinRole: 600,
+  importMinRole: 500,
   commentCreateMinRole: 200,
   commentResolveMinRole: 400,
   refresh: vi.fn(async () => null),
@@ -751,10 +758,10 @@ describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
     await waitFor(() => expect(screen.getAllByText("Translated").length).toBeGreaterThan(0))
     expect(screen.getAllByText("Validated").length).toBeGreaterThan(0)
     // Neither audio tile may appear (audioCells === 0) — AQU-490: this also
-    // guards against a false-positive "Audio Validated" figure on a
+    // guards against a false-positive "Audio validated" figure on a
     // text-only project, since neither field exists to fabricate one from.
     expect(screen.queryByText("Has audio")).not.toBeInTheDocument()
-    expect(screen.queryByText("Audio Validated")).not.toBeInTheDocument()
+    expect(screen.queryByText("Audio validated")).not.toBeInTheDocument()
   })
 
   it("AQU-1954: a project that records audio shows its audio at 0% before the first take", async () => {
@@ -815,7 +822,7 @@ describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
     // — the tile and the plan board's audio bar must report the same share.
     // AQU-1764 gave the measure a bar of its own, so the tile and its bar
     // both say it.
-    expect(screen.getAllByText("Audio Validated")).toHaveLength(2)
+    expect(screen.getAllByText("Audio validated")).toHaveLength(2)
     expect(screen.getAllByText("15%")).toHaveLength(2)
     expect(screen.queryByText("N/A")).not.toBeInTheDocument()
 
@@ -824,6 +831,30 @@ describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
     await screen.findByTestId("customize-stat-audio-validated")
     expect(screen.queryByTestId("customize-stat-translated")).not.toBeInTheDocument()
     expect(screen.queryByTestId("customize-stat-validated")).not.toBeInTheDocument()
+  })
+
+  // AQU-2260 (Sam, Oct 29): a stat tile's explanation opens on click of the
+  // (i) by its label, never on hover of the tile.
+  it("explains the audio tiles behind an (i), on click", async () => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] }),
+      status: "ready", refresh,
+    })
+    getPortfolio.mockResolvedValue([{
+      id: "p1", name: "John", totalCells: 100,
+      filledCells: 0, validatedCells: 0, aiDraftedCells: 0,
+      audioCells: 60, validatedAudioCells: 15,
+      recordedMs: 90000, lastEditAt: null, deadlineAt: null,
+      sourceLanguage: null, targetLanguage: null,
+    }])
+    render(<TooltipProvider delay={0}>{overviewTree()}</TooltipProvider>)
+    await waitFor(() => expect(screen.getAllByText("Has audio").length).toBeGreaterThan(0))
+    await userEvent.setup().hover(screen.getAllByText("Audio validated")[0])
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    await expectClickNote(screen.getByRole("button", { name: "About Has audio" }), /at least one audio recording attached/)
+    await expectClickNote(screen.getByRole("button", { name: "About Audio validated" }), /Of the audio recorded, 25% is validated/)
   })
 
   it("AQU-2116: one target cell of text brings Translated/Validated back", async () => {
@@ -902,7 +933,7 @@ describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
     renderOverview()
 
     await waitFor(() => expect(screen.getAllByText("Has audio").length).toBeGreaterThan(0))
-    expect(screen.getAllByText("Audio Validated").length).toBeGreaterThan(0)
+    expect(screen.getAllByText("Audio validated").length).toBeGreaterThan(0)
     // 9 of 45 lines approved: 20%. 17 of 45 recorded: 38%.
     expect(screen.getAllByText("20%").length).toBeGreaterThan(0)
     expect(screen.getAllByText("38%").length).toBeGreaterThan(0)
@@ -950,7 +981,7 @@ describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
   // each progress number means without hovering. Every tile/bar label below
   // is rendered as plain visible text (not just a `title`/tooltip attribute)
   // — hover (AppTooltip) adds extra detail on top, it is never the only
-  // source of meaning. Terminology ("Has Audio" / "Audio Validated") must
+  // source of meaning. Terminology ("Has Audio" / "Audio validated") must
   // match OrgHome.tsx's project table (see OrgHome.test.tsx AQU-489 test).
   it("labels every progress number visibly, without requiring hover (AQU-489)", async () => {
     fetchSyncToken.mockResolvedValue({ token: "tok" })
@@ -969,7 +1000,7 @@ describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
     }])
     renderOverview()
 
-    for (const label of ["Translated", "Validated", "Has audio", "Audio Validated"]) {
+    for (const label of ["Translated", "Validated", "Has audio", "Audio validated"]) {
       await waitFor(() => expect(screen.getAllByText(label).length).toBeGreaterThan(0))
     }
   })
@@ -1317,6 +1348,29 @@ describe("ProjectOverview PM assignment", () => {
     )
   })
 
+  // AQU-2260 (Sam, Oct 29, option 2B): one candidate per member, so the
+  // project manager list gets a search box.
+  it("the project manager list has a search box that narrows it", async () => {
+    pmMembers.members = [
+      { userId: 7, username: "wendi", role: { level: 500, name: "project_lead", source: "override" }, secondarySources: [] },
+      { userId: 8, username: "tomas", role: { level: 400, name: "contributor", source: "override" }, secondarySources: [] },
+    ]
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 600 }),
+      status: "ready",
+      refresh,
+      pm: { id: 7, username: "wendi" },
+    })
+    renderOverview()
+    fireEvent.click(await screen.findByRole("button", { name: "Change project manager" }))
+    fireEvent.click(await screen.findByRole("combobox", { name: "Project manager" }))
+    const search = await screen.findByRole("combobox", { name: "Search the list" })
+    fireEvent.change(search, { target: { value: "tom" } })
+    expect(await screen.findByRole("option", { name: /tomas/ })).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: /wendi/ })).toBeNull()
+    pmMembers.members = []
+  })
+
   it("clears the deadline from the edit-dialog Clear control", async () => {
     useProject.mockReturnValue({
       project: projectRecord({ level: 600 }),
@@ -1427,7 +1481,7 @@ describe("ProjectOverview audio progress (AQU-160)", () => {
     await waitFor(() => expect(screen.getAllByText("Translated").length).toBeGreaterThan(0))
     // Audio tiles should be hidden
     expect(screen.queryByText("Has audio")).not.toBeInTheDocument()
-    expect(screen.queryByText("Audio Validated")).not.toBeInTheDocument()
+    expect(screen.queryByText("Audio validated")).not.toBeInTheDocument()
   })
 })
 
@@ -1604,8 +1658,8 @@ describe("ProjectOverview AI-drafted segment (AQU-292)", () => {
     }])
     renderOverview()
 
-    // "AI Drafted" tile and bar must appear when aiDraftedCells > 0
-    await waitFor(() => expect(screen.getAllByText("AI Drafted").length).toBeGreaterThan(0))
+    // "AI drafted" tile and bar must appear when aiDraftedCells > 0
+    await waitFor(() => expect(screen.getAllByText("AI drafted").length).toBeGreaterThan(0))
     // 40/100 = 40% should appear somewhere in the progress section
     const pctLabels = screen.getAllByText(/^\d+%$/)
     expect(pctLabels.map((el) => el.textContent)).toContain("40%")
@@ -1630,8 +1684,8 @@ describe("ProjectOverview AI-drafted segment (AQU-292)", () => {
     renderOverview()
 
     await waitFor(() => expect(screen.getAllByText("Translated").length).toBeGreaterThan(0))
-    // "AI Drafted" must NOT appear when count is 0 (forward-only honest rendering)
-    expect(screen.queryByText("AI Drafted")).not.toBeInTheDocument()
+    // "AI drafted" must NOT appear when count is 0 (forward-only honest rendering)
+    expect(screen.queryByText("AI drafted")).not.toBeInTheDocument()
   })
 })
 
@@ -1672,7 +1726,7 @@ describe("ProjectOverview Progress card colours (AQU-1764)", () => {
       ["stat-bar-audioRecorded", "60%", true],
       ["stat-bar-audioValidated", "15%", true],
     ])
-    expect(within(card).getByTestId("stat-bar-audioValidated")).toHaveTextContent("Audio Validated15%15/100 cells")
+    expect(within(card).getByTestId("stat-bar-audioValidated")).toHaveTextContent("Audio validated15%15/100 cells")
 
     const swatches = [...card.querySelectorAll<HTMLElement>("[data-progress-swatch]")]
     expect(swatches.map((s) => s.dataset.progressSwatch)).toEqual([
@@ -2408,7 +2462,7 @@ describe("ProjectOverview Team card collapse (AQU-1172)", () => {
     fireEvent.click(screen.getByRole("button", { name: /why some options are unavailable/i }))
     expect(screen.getByTestId("section-visibility-min-hint")).toHaveAttribute("data-state", "open")
     expect(screen.getByTestId("section-visibility-min-hint")).toHaveTextContent(
-      "A project can only be stricter than its organization, which is set to “Maintainers and owners”. To go lower, an org owner lowers it in Settings → Security first.",
+      "A project can only be stricter than its organization, which is set to “Maintainers and owners”. To go lower, an org owner lowers it in Organization settings → Security first.",
     )
   })
 
@@ -2418,7 +2472,7 @@ describe("ProjectOverview Team card collapse (AQU-1172)", () => {
     expect(await screen.findByRole("option", { name: /project leads and up/i })).toHaveAttribute("aria-disabled", "true")
     fireEvent.click(screen.getByRole("button", { name: /why some options are unavailable/i }))
     expect(screen.getByTestId("section-visibility-min-hint")).toHaveTextContent(
-      "This card lists members, and the member list is set to “Maintainers and owners”. To go lower, lower it on the Members card or in Settings → Security first.",
+      "This card lists members, and the member list is set to “Maintainers and owners”. To go lower, lower it on the Members card or in Organization settings → Security first.",
     )
   })
 
@@ -2808,7 +2862,7 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Bambara" }))
     await waitFor(() => expect(within(card).queryByText("Translated")).not.toBeInTheDocument())
     expect(within(card).queryByTestId("stat-bar-textValidated")).not.toBeInTheDocument()
-    expect(statTile("Audio Validated")).toHaveTextContent("20%") // 40 of 200 cells
+    expect(statTile("Audio validated")).toHaveTextContent("20%") // 40 of 200 cells
 
     // es: has text, owes no audio → its text figures are untouched.
     fireEvent.click(screen.getByRole("tab", { name: "es" }))
@@ -2834,16 +2888,16 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
 
     // All: the project's 60 and 16 of 200 cells.
     expect(statTile("Has audio")).toHaveTextContent("30%")
-    expect(statTile("Audio Validated")).toHaveTextContent("8%")
+    expect(statTile("Audio validated")).toHaveTextContent("8%")
 
     // es: its own 10 and 4, still of the project's 200 cells.
     fireEvent.click(screen.getByRole("tab", { name: "es" }))
     await waitFor(() => expect(statTile("Has audio")).toHaveTextContent("5%"))
-    expect(statTile("Audio Validated")).toHaveTextContent("2%")
-    for (const label of ["Has audio", "Audio Validated"]) {
+    expect(statTile("Audio validated")).toHaveTextContent("2%")
+    for (const label of ["Has audio", "Audio validated"]) {
       expect(statTile(label).firstElementChild!.className, label).not.toContain("text-muted-foreground/60")
     }
-    expect(statTile("AI Drafted").firstElementChild!.className).toContain("text-muted-foreground/60")
+    expect(statTile("AI drafted").firstElementChild!.className).toContain("text-muted-foreground/60")
     expect(bars()).toEqual([
       "stat-bar-textTranslated", "stat-bar-textValidated", "stat-bar-audioRecorded", "stat-bar-audioValidated",
     ])
@@ -2889,7 +2943,7 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
     fireEvent.click(screen.getByRole("tab", { name: "es" }))
     await waitFor(() => expect(bars()).not.toContain("stat-bar-audioRecorded"))
     expect(bars()).not.toContain("stat-bar-audioValidated")
-    for (const label of ["Has audio", "Audio Validated"]) {
+    for (const label of ["Has audio", "Audio validated"]) {
       expect(statTile(label).firstElementChild!.className, label).toContain("text-muted-foreground/60")
     }
   })
@@ -2908,7 +2962,7 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "es" }))
     await waitFor(() => expect(bars()).toEqual(["stat-bar-textTranslated", "stat-bar-textValidated"]))
-    for (const label of ["AI Drafted", "Has audio", "Audio Validated"]) {
+    for (const label of ["AI drafted", "Has audio", "Audio validated"]) {
       const tile = statTile(label)
       expect(tile.firstElementChild!.className, label).toContain("text-muted-foreground/60")
       expect(tile.querySelector("[data-progress-swatch]")!.className, label).toContain("opacity-40")
@@ -3450,10 +3504,14 @@ describe("imported originals on the overview (AQU-656)", () => {
       fileWith("f2", "Notes.md"),
     ])
 
-    renderOverview()
+    render(<TooltipProvider delay={0}>{overviewTree()}</TooltipProvider>)
 
     expect(await screen.findByTestId("imported-originals")).toBeInTheDocument()
     expect(screen.getByTestId("download-originals-zip")).toHaveTextContent("Download all originals")
+    // AQU-2260: a labelled button, so it says nothing on hover.
+    await userEvent.setup().hover(screen.getByTestId("download-originals-zip"))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(screen.queryByRole("tooltip")).toBeNull()
     const original = screen.getByTestId("download-original-file")
     expect(original.tagName).toBe("BUTTON")
     expect(original).toHaveAttribute("aria-label", "Download original Genesis.usfm")

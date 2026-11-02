@@ -19,6 +19,9 @@ import { DEFAULT_MMS_LANGUAGE, DEFAULT_TTS_PROVIDER } from "@/lib/audio/tts-prov
 import { cn } from "@/lib/utils"
 import { isValidGeminiKey, describeModelDownload } from "./ai-setup-utils"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { KeyInUseLine } from "@/components/settings/KeyInUseLine"
+import { geminiKeyInUse } from "@/lib/settings/key-in-use"
+import { useUserApiKey } from "@/lib/store/user-api-keys"
 
 type VoiceChoice = "none" | TtsProvider
 
@@ -82,6 +85,10 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
   const savedGeminiKey = (project.ttsSettings?.apiKey ?? "").trim()
   const hasSavedGeminiKey =
     project.ttsSettings?.provider === "gemini" && isValidGeminiKey(savedGeminiKey)
+  // AQU-2263: which Gemini key voices use right now. The organization's is
+  // never passed to a voice, so it is left out (see key-in-use.ts).
+  const personalGeminiKey = useUserApiKey("gemini-tts")
+  const geminiInUse = geminiKeyInUse({ projectKey: savedGeminiKey, personalKey: personalGeminiKey, orgHasKey: false })
 
   const totalSizeMb = useMemo(() => {
     let mb = 0
@@ -277,6 +284,9 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
                     )}
                   </div>
                 )
+              )}
+              {voiceChoice === "gemini" && (
+                <KeyInUseLine purpose="gemini" kind={geminiInUse} testId="setup-gemini-key-in-use" className="ms-6" />
               )}
               <ModelRadioRow
                 value="mms"

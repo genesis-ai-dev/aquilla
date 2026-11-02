@@ -10,7 +10,7 @@
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, within } from "@testing-library/react"
 import { VoiceLibraryPanel } from "./VoiceLibraryPanel"
-import { renderWithTooltips, expectTooltip } from "@/test-utils/tooltip"
+import { renderWithTooltips, expectTooltip, expectDisabledNote } from "@/test-utils/tooltip"
 import type { NewVoiceModalProps } from "@/components/voice/NewVoiceModal"
 import type { ProjectTtsSettings, Voice } from "@/lib/parsers/types"
 import { ROLE } from "@/lib/frontier/roles"
@@ -72,7 +72,7 @@ describe("VoiceLibraryPanel (selector)", () => {
   // hover would prove nothing (happy-dom dispatches on disabled elements and a
   // browser does not) — assert that the tooltip's trigger is a real, focusable
   // element that is not the disabled button.
-  it("explains why New voice is dead for a contributor instead of going silent", () => {
+  it("explains why New voice is dead for a contributor instead of going silent", async () => {
     const narrator = makeVoice()
     renderWithTooltips(
       <VoiceLibraryPanel
@@ -92,6 +92,8 @@ describe("VoiceLibraryPanel (selector)", () => {
     expect(standIn).toContainElement(button)
     // Full-width button: the stand-in must carry the width or the row collapses.
     expect(standIn).toHaveClass("w-full")
+    // AQU-2260 (Sam, Oct 29): the reason opens on a click, never a hover.
+    await expectDisabledNote(button, /Maintainer/i)
   })
 
   // The other half of the AC: a user who CAN create voices gains no new chrome.

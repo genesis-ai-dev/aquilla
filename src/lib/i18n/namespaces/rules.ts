@@ -124,20 +124,16 @@ export const rules = defineNamespace({
     // AQU-1906: these switches are per-lane once a project has several lanes,
     // and the two punctuation rows say which conventions they are applying.
     "rules.builtinChecks.laneScopeNote":
-      "These switches apply to the {lane} lane only. Other lanes keep their own.",
+      "These switches apply to the {lane} language lane only. Other language lanes keep their own.",
     "rules.builtinChecks.punctuation.fromLanguage": "Using {language} punctuation conventions.",
     "rules.builtinChecks.punctuation.fromProfile": "Using the punctuation from the Language profile.",
     "rules.builtinChecks.punctuation.noSpecialConventions":
       "Judged by the source's own marks. {language} has no special punctuation conventions.",
     "rules.builtinChecks.punctuation.sourceRelative":
-      "Judged by the source's own marks — this lane records no language.",
+      "Judged by the source's own marks — this language lane records no language.",
     "rules.builtinChecks.violationCount": plural({
       one: "{count} violation",
       other: "{count} violations",
-    }),
-    "rules.builtinChecks.harmonizeAllTooltip": plural({
-      one: "Harmonize all {count} violation for this check",
-      other: "Harmonize all {count} violations for this check",
     }),
     "rules.builtinChecks.harmonizeAllButton": "Harmonize all ({count})",
     "rules.builtinChecks.manageNeedsMaintainer": "Only maintainers and owners can change built-in checks",
@@ -172,7 +168,6 @@ export const rules = defineNamespace({
       one: "{count} other term checked with no issues.",
       other: "{count} other terms checked with no issues.",
     }),
-    "rules.checkDrawer.goToCell": "Go to cell",
     "rules.checkDrawer.commentOnCell": "Comment on this cell",
     "rules.checkDrawer.commentOnCellAriaLabel": "Comment on {label}",
     "rules.checkDrawer.matchedDetail": 'matched "{text}"',
@@ -210,30 +205,33 @@ export const rules = defineNamespace({
     "rules.promotion.requested": "Requested ✓",
     "rules.promotion.alreadyRequested": "Already requested",
     "rules.promotion.requestFailed": "Failed — try again",
-    "rules.surface.addRuleButton": "Add Rule",
+    "rules.surface.addRuleButton": "Add rule",
     "rules.surface.createRuleDialog.title": "Create translation rule",
     "rules.surface.createRuleDialog.description": "Create a project translation rule.",
     "rules.surface.createOrgRuleDialog.title": "Create org rule",
     "rules.surface.createOrgRuleDialog.description": "Create an org-scoped translation rule.",
     "rules.surface.usageTooltip": "LLM usage on this project",
-    "rules.surface.laneScope.ariaLabel": "Lane scope",
-    "rules.surface.laneScope.viewingLabel": "Viewing lane",
-    "rules.surface.laneScope.chooseLaneAriaLabel": "Viewing lane: {lane}. Choose another lane",
+    "rules.surface.laneScope.ariaLabel": "Language lane scope",
+    "rules.surface.laneScope.viewingLabel": "Viewing language lane",
+    "rules.surface.laneScope.chooseLaneAriaLabel":
+      "Viewing language lane: {lane}. Choose another language lane",
     "rules.surface.laneScope.explainer":
-      "Rules marked All lanes, org rules and built-in checks apply in every lane. Rules marked This lane apply only in {lane}.",
-    "rules.surface.laneScope.sharedWithEditor": "Switching lanes here also switches the editor.",
-    "rules.surface.laneScope.badgeAll": "All lanes",
-    "rules.surface.laneScope.badgeThis": "This lane: {lane}",
-    "rules.surface.laneScope.badgeOther": "Other lane: {lane}",
+      "Rules marked All language lanes, org rules and built-in checks apply in every language lane. " +
+      "Rules marked This language lane apply only in {lane}.",
+    "rules.surface.laneScope.sharedWithEditor":
+      "Switching language lanes here also switches the editor.",
+    "rules.surface.laneScope.badgeAll": "All language lanes",
+    "rules.surface.laneScope.badgeThis": "This language lane: {lane}",
+    "rules.surface.laneScope.badgeOther": "Other language lane: {lane}",
     "rules.surface.laneScope.notAppliedHere": "Not applied in {lane}.",
     "rules.surface.laneScope.showOtherLanes": plural({
-      one: "Show {count} rule from other lanes",
-      other: "Show {count} rules from other lanes",
+      one: "Show {count} rule from other language lanes",
+      other: "Show {count} rules from other language lanes",
     }),
-    "rules.surface.laneScope.hideOtherLanes": "Hide rules from other lanes",
+    "rules.surface.laneScope.hideOtherLanes": "Hide rules from other language lanes",
     "rules.surface.laneScope.noRulesInLane": "No project rules apply in {lane}.",
-    "rules.surface.orgRulesCardTitle": "Org Rules ({count})",
-    "rules.surface.addOrgRuleButton": "Add Org Rule",
+    "rules.surface.orgRulesCardTitle": "Org rules ({count})",
+    "rules.surface.addOrgRuleButton": "Add org rule",
     // "Read-only" permission badge → common.readOnly (identical text)
     "rules.surface.noOrgRules.title": "No org-level rules yet",
     "rules.surface.noOrgRules.description": "Add one or promote a project rule.",
@@ -245,25 +243,20 @@ export const rules = defineNamespace({
     "rules.surface.pendingRequests": "Pending requests ({count})",
     "rules.surface.requestedBy": "Requested by {requester}",
     "rules.surface.requestedByFallback": "user {userId}",
-    "rules.surface.approveRequestTooltip": "Promote this rule to org scope",
     "rules.surface.approveButton": "Approve",
-    "rules.surface.dismissRequestTooltip": "Dismiss this request",
     "rules.surface.promoteDialog.title": "Promote rule to org?",
     "rules.surface.promoteDialog.body":
       "A copy of {name} will be added to the org's rule library. The project copy is kept.",
     "rules.surface.promoteDialog.promoting": "Promoting…",
-    "rules.surface.projectRulesCardTitle": "Project Rules ({count})",
+    "rules.surface.projectRulesCardTitle": "Project rules ({count})",
     "rules.surface.noProjectRules.title": "No project rules yet",
     "rules.surface.noProjectRules.description":
       "Add a rule or import a style guide using the buttons above, or suggest rules from your edits below.",
     "rules.surface.noProjectRules.orgRulesNote": "Org rules above also apply to this project.",
     "rules.surface.autofixBadge": "autofix",
-    "rules.surface.tryToFixAllTooltip": "Opens the editor with this rule's drawer",
     "rules.surface.tryToFixAllButton": "Try to fix all",
-    "rules.surface.promoteToOrgTooltip": "Copy this rule to the org's rule library",
     "rules.surface.promoteToOrgButton": "Promote to org",
     "rules.surface.requestedBadge": "Requested",
-    "rules.surface.requestPromotionTooltip": "Ask an org maintainer to promote this rule to org scope",
     "rules.surface.requestingButton": "Requesting…",
     "rules.surface.requestPromotionButton": "Request promotion",
     "rules.surface.disableRuleAriaLabel": "Disable rule: {name}",
@@ -280,7 +273,6 @@ export const rules = defineNamespace({
     "rules.drawer.openCellAriaLabel": "Open cell {cellId} in the editor",
     "rules.drawer.fixCellTooltip": "Propose a fix for this cell",
     "rules.drawer.fixCellAriaLabel": "Fix this cell with AI",
-    "rules.drawer.tryToFixAllTooltip": "Propose a fix for every cell breaking this rule",
     "rules.drawer.proposingFix": "Proposing…",
     "rules.drawer.aiNotConfigured": "Set up AI to propose fixes",
     "rules.drawer.fixNotPermitted": "You do not have permission to apply fixes in this project",
@@ -331,10 +323,11 @@ export const rules = defineNamespace({
     "rules.editor.sideTargetOnlyNote":
       "Forbidden and Required checks constrain the target. Use Must match for a rule that spans both sides.",
     "rules.editor.laneLabel": "Applies to",
-    "rules.editor.lane.allLanes": "All lanes",
-    "rules.editor.lane.defaultLane": "Default lane",
-    "rules.editor.lane.summaryAll": "This rule will apply in every lane.",
-    "rules.editor.lane.summaryOne": "This rule will apply only in {lane}. Other lanes ignore it.",
+    "rules.editor.lane.allLanes": "All language lanes",
+    "rules.editor.lane.defaultLane": "Default language",
+    "rules.editor.lane.summaryAll": "This rule will apply in every language lane.",
+    "rules.editor.lane.summaryOne":
+      "This rule will apply only in {lane}. Other language lanes ignore it.",
     "rules.editor.severityLabel": "Severity",
     "rules.editor.sourcePatternLabel": "Source pattern — when source contains this…",
     "rules.editor.targetPatternLabel": "…target must contain this pattern",
@@ -380,8 +373,7 @@ export const rules = defineNamespace({
     "rules.importDialog.fileEmpty": "File appears to be empty.",
     "rules.importDialog.extractingRules": "Extracting rules from document…",
     "rules.importDialog.structuring": "Structuring {structured} / {candidates} rules…",
-    "rules.importDialog.tooltip": "Import rules from a document",
-    "rules.importDialog.tooltipUnconfigured": "Configure LLM in settings first",
+    "rules.importDialog.tooltipUnconfigured": "Set up an AI model in project settings first",
     "rules.importDialog.triggerButton": "Import from doc",
     "rules.importDialog.reviewTitle": plural({
       one: "Review {count} extracted rule",
@@ -394,7 +386,7 @@ export const rules = defineNamespace({
     "rules.importDialog.browseButton": "Browse file",
     "rules.importDialog.pasteZoneLabel": "Or paste document text:",
     "rules.importDialog.pastePlaceholder": "Paste text here to process it…",
-    "rules.importDialog.configureLlmFirst": "Configure your LLM endpoint in project settings first.",
+    "rules.importDialog.configureLlmFirst": "Set up an AI model in project settings first.",
     "rules.importDialog.candidatesProcessed": "{structured} of {candidates} candidates processed",
     "rules.importDialog.documentTooLarge": "Document is too large ({kb} KB). Please keep it under 200 KB of text.",
 
@@ -420,13 +412,13 @@ export const rules = defineNamespace({
 
     // ── completion-service.ts (LLM completion request errors, lib/) ────────
     "rules.completion.failedToFetchModels": "Failed to fetch models: {status} {statusText}",
-    "rules.completion.frontierLimitReached": "Frontier AI limit reached: {detail}",
+    "rules.completion.frontierLimitReached": "Aquilla AI limit reached: {detail}",
     "rules.completion.outOfCredits": "Out of credits.",
     "rules.completion.completionFailed": "Completion failed: {status} {text}",
     "rules.completion.requestTimedOut": "The AI request timed out. Please try again.",
     "rules.completion.streamError": "Completion stream error",
     "rules.completion.completionAborted": "Completion aborted",
-    "rules.completion.signInRequired": "Sign in to use Frontier AI.",
+    "rules.completion.signInRequired": "Sign in to use Aquilla AI.",
     "rules.completion.noCustomEndpoint": "No custom endpoint configured.",
 
     // ── autofix.ts (LLM autofix proposal, lib/) — fallbacks only; the LLM's
@@ -609,11 +601,6 @@ export const rules = defineNamespace({
         description:
           "Badge on a built-in check's row in the checks list, counting how many cells currently violate it.",
         placeholders: { count: "Number of cells currently violating this check." },
-      },
-      "rules.builtinChecks.harmonizeAllTooltip": {
-        description:
-          "Tooltip on the 'Harmonize all' button for a built-in check, stating how many violations a harmonization sweep would fix.",
-        placeholders: { count: "Number of violations the sweep would fix." },
       },
       "rules.builtinChecks.harmonizeAllButton": {
         description:
@@ -833,10 +820,6 @@ export const rules = defineNamespace({
       "rules.drawer.fixCellAriaLabel": {
         description: "Accessible label for the per-cell AI fix button in the rule drawer.",
       },
-      "rules.drawer.tryToFixAllTooltip": {
-        description:
-          "Hover text for the rule drawer's button that proposes one fix across every cell breaking the rule.",
-      },
       "rules.drawer.proposingFix": {
         description: "Busy label while the model is being asked for a fix.",
       },
@@ -953,7 +936,7 @@ export const rules = defineNamespace({
       },
       "rules.completion.frontierLimitReached": {
         description:
-          "Thrown error when a Frontier completion request 402s (subscription/credits exhausted).",
+          "Thrown error when a Aquilla completion request 402s (subscription/credits exhausted).",
         placeholders: { detail: "Server-provided detail text, or rules.completion.outOfCredits as a fallback." },
       },
       "rules.completion.completionFailed": {

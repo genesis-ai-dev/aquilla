@@ -12,6 +12,7 @@
  * leaves a valid notes-only IDML.
  */
 
+import { releaseOversizedNoBreak } from "@aquilla/idml-roundtrip"
 import JSZip from "jszip"
 import {
   applyBibleSwapWithShared,
@@ -207,8 +208,9 @@ async function spliceBibleSwapIntoZip(
     for (const result of results) {
       const original =
         storyInputs.find((s) => s.storyKey === result.storyKey)?.studyStoryXml ?? ""
-      if (result.xml !== original) studyZip.file(result.storyKey, result.xml)
-      aggregateSwapResult(result.storyKey, original, result.xml, result.stats, swapMode, totals)
+      const xml = releaseOversizedNoBreak(result.xml)
+      if (xml !== original) studyZip.file(result.storyKey, xml)
+      aggregateSwapResult(result.storyKey, original, xml, result.stats, swapMode, totals)
     }
   } else {
     const shared = buildBibleSwapSharedResources(bibleStoryXml, swapMode, language)
@@ -216,15 +218,16 @@ async function spliceBibleSwapIntoZip(
       ? deserializeVersificationPlan(serializedPlan)
       : undefined
     for (const { storyKey, studyStoryXml } of storyInputs) {
-      const { xml, stats } = applyBibleSwapWithShared(
+      const swapped = applyBibleSwapWithShared(
         studyStoryXml,
         bibleStoryXml,
         swapMode,
         shared,
         { versificationPlan, language, studyVolume },
       )
+      const xml = releaseOversizedNoBreak(swapped.xml)
       if (xml !== studyStoryXml) studyZip.file(storyKey, xml)
-      aggregateSwapResult(storyKey, studyStoryXml, xml, stats, swapMode, totals)
+      aggregateSwapResult(storyKey, studyStoryXml, xml, swapped.stats, swapMode, totals)
     }
   }
 

@@ -69,7 +69,7 @@ describe("suggestRulesFromPairs usage callback", () => {
     const onLlmCall = vi.fn()
     await suggestRulesFromPairs(
       [{ source: "a", target: "b" }],
-      { endpoint: "", model: "m", maxTokens: 512, temperature: 0.2, systemPrompt: "", llmHealthPenalty: 0.1, provider: "custom" },
+      { endpoint: "", model: "m", maxTokens: 512, temperature: 0.2, systemPrompt: "", provider: "custom" },
       null,
       onLlmCall,
     )
@@ -84,7 +84,7 @@ describe("suggestRulesFromPairs usage callback", () => {
 describe("suggestRulesFromCandidates batching", () => {
   beforeEach(() => vi.mocked(complete).mockReset())
 
-  const settings = { endpoint: "", model: "m", maxTokens: 512, temperature: 0.2, systemPrompt: "", llmHealthPenalty: 0.1, provider: "custom" as const }
+  const settings = { endpoint: "", model: "m", maxTokens: 512, temperature: 0.2, systemPrompt: "", provider: "custom" as const }
   const candidates: EditCandidate[] = Array.from({ length: 50 }, (_, i) => ({
     kind: "human-authored",
     evidence: `edit ${i}`,

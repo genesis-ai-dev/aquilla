@@ -63,27 +63,41 @@ function wavLayout(bytes: Uint8Array): { dataStart: number; dataBytes: number; s
   return null
 }
 
+/** A span of a recording to join, and the silence to put before it. */
+export interface JoinSpan {
+  start: number
+  end: number
+  /** AQU-1758: silence before this span, in seconds — a gap someone dragged
+   *  open between two pieces of a take. Absent: the spans touch. */
+  gapBeforeSec?: number
+}
+
 /**
  * A PCM WAV's audio between each span's start and end (seconds on its own
- * clock), joined in the order given into one WAV of the same format. Null
- * when it is not a WAV this can read or a span is empty.
+ * clock), joined in the order given into one WAV of the same format, with
+ * each span's `gapBeforeSec` of silence before it. Null when it is not a WAV
+ * this can read or a span is empty.
  */
-export function joinWavSpans(bytes: Uint8Array, spans: readonly { start: number; end: number }[]): Uint8Array | null {
+export function joinWavSpans(bytes: Uint8Array, spans: readonly JoinSpan[]): Uint8Array | null {
   const w = wavLayout(bytes)
   if (!w || spans.length === 0) return null
-  const ranges: [number, number][] = []
+  const ranges: [number, number, number][] = []
   let total = 0
   for (const s of spans) {
     const a = Math.min(w.dataBytes, Math.max(0, Math.round(s.start * w.sampleRate)) * w.blockAlign)
     const b = Math.min(w.dataBytes, Math.max(0, Math.round(s.end * w.sampleRate)) * w.blockAlign)
     if (b <= a) return null
-    ranges.push([a, b])
-    total += b - a
+    const gap = s.gapBeforeSec != null && s.gapBeforeSec > 0 ? Math.round(s.gapBeforeSec * w.sampleRate) * w.blockAlign : 0
+    ranges.push([a, b, gap])
+    total += gap + b - a
   }
+  // Zero bytes are silence for 16-, 24- and 32-bit PCM and for float, which
+  // is every WAV the recorder and the generators write.
   const out = new Uint8Array(w.dataStart + total)
   out.set(bytes.subarray(0, w.dataStart))
   let at = w.dataStart
-  for (const [a, b] of ranges) {
+  for (const [a, b, gap] of ranges) {
+    at += gap
     out.set(bytes.subarray(w.dataStart + a, w.dataStart + b), at)
     at += b - a
   }
@@ -126,20 +140,23 @@ async function tailCutDecoded(bytes: Uint8Array, endSec: number): Promise<Blob |
  * between them (and so can never overrun into the audio between pieces).
  * A WAV is joined by bytes; any other format is decoded and re-encoded.
  */
-export async function joinedClip(bytes: Uint8Array, ext: string, spans: readonly { start: number; end: number }[]): Promise<Blob | null> {
+export async function joinedClip(bytes: Uint8Array, ext: string, spans: readonly JoinSpan[]): Promise<Blob | null> {
   if (ext.toLowerCase() === "wav") {
     const joined = joinWavSpans(bytes, spans)
     if (joined) return new Blob([joined as BlobPart], { type: "audio/wav" })
   }
   const d = await decodeMono(bytes)
   if (!d) return null
-  const parts = spans.map((s) => d.pcm.subarray(
-    Math.max(0, Math.round(s.start * d.sampleRate)),
-    Math.min(d.pcm.length, Math.round(s.end * d.sampleRate)),
-  ))
-  const out = new Float32Array(parts.reduce((n, p) => n + p.length, 0))
+  const parts = spans.map((s) => ({
+    gap: s.gapBeforeSec != null && s.gapBeforeSec > 0 ? Math.round(s.gapBeforeSec * d.sampleRate) : 0,
+    pcm: d.pcm.subarray(
+      Math.max(0, Math.round(s.start * d.sampleRate)),
+      Math.min(d.pcm.length, Math.round(s.end * d.sampleRate)),
+    ),
+  }))
+  const out = new Float32Array(parts.reduce((n, p) => n + p.gap + p.pcm.length, 0))
   let at = 0
-  for (const p of parts) { out.set(p, at); at += p.length }
+  for (const p of parts) { at += p.gap; out.set(p.pcm, at); at += p.pcm.length }
   return out.length > 0 ? encodeWavPcm16(out, d.sampleRate) : null
 }
 

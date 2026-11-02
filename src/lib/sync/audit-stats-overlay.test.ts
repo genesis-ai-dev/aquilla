@@ -125,6 +125,7 @@ const baseStats = (overrides: Partial<CellAuditStats> = {}): CellAuditStats => (
   lastEditAt: 1000,
   lastEditEventId: "ev-base",
   activeValidators: ["carol"],
+  validatorDecidedTs: { carol: 1050 },
   waivers: [],
   ...overrides,
 })
@@ -236,6 +237,44 @@ describe("applyOutboxOverlay", () => {
       pending: [rec(unvalidate("u1", "c1", "carol", "ev-base", 1100), 1100)],
     })
     expect(out.get("c1")?.activeValidators).toEqual(["dan"])
+  })
+
+  // AQU-2296: the popover's date line follows the same three rules as the name
+  // beside it, so a queued vote carries today's date straight away and a
+  // withdrawn or invalidated one leaves no stamp behind to date a name that is
+  // no longer there.
+  it("keeps validatorDecidedTs in step with activeValidators", () => {
+    const base = () => new Map([
+      [
+        "c1",
+        baseStats({
+          lastEditEventId: "ev-base",
+          activeValidators: ["carol", "dan"],
+          validatorDecidedTs: { carol: 1050, dan: 1060 },
+        }),
+      ],
+    ])
+
+    const voted = applyOutboxOverlay({
+      base: base(),
+      pending: [rec(validate("v1", "c1", "alice", "ev-base", 1100), 1100)],
+    })
+    expect(voted.get("c1")?.activeValidators).toEqual(["carol", "dan", "alice"])
+    expect(voted.get("c1")?.validatorDecidedTs).toEqual({ carol: 1050, dan: 1060, alice: 1100 })
+
+    const withdrawn = applyOutboxOverlay({
+      base: base(),
+      pending: [rec(unvalidate("u1", "c1", "carol", "ev-base", 1100), 1100)],
+    })
+    expect(withdrawn.get("c1")?.activeValidators).toEqual(["dan"])
+    expect(withdrawn.get("c1")?.validatorDecidedTs).toEqual({ dan: 1060 })
+
+    const recommitted = applyOutboxOverlay({
+      base: base(),
+      pending: [rec(commit("e1", "c1", "alice", 1100), 1100)],
+    })
+    expect(recommitted.get("c1")?.activeValidators).toEqual([])
+    expect(recommitted.get("c1")?.validatorDecidedTs).toEqual({})
   })
 
   it("cell.unvalidate against a non-current edit is a no-op", () => {

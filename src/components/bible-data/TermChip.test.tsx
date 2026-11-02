@@ -12,8 +12,8 @@
 
 // Every catalog, synchronously: this file asserts translated text (AQU-1991).
 import "@/test-utils/all-catalogs"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { act, cleanup, render, screen } from "@testing-library/react"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { TermChip } from "./TermChip"
 import { rutTerms } from "@/lib/bible-data/__fixtures__/ot-pack12"
 import type { BkpTerm } from "@/lib/bible-data/pack-types"
@@ -40,7 +40,7 @@ function titleOf(chip: HTMLElement): { text: string | null; lang: string | null 
 }
 
 async function openDetails(chip: HTMLElement): Promise<HTMLElement> {
-  act(() => chip.focus())
+  fireEvent.click(chip)
   return screen.findByTestId("term-details")
 }
 
@@ -51,6 +51,23 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+})
+
+// AQU-2260 (Oct 29, fourth pass): the details open on a click (Enter or Space
+// from the keyboard), never on hover and never on focus alone.
+describe("a key term's details", () => {
+  it("open on a click, not on hover or on keyboard focus", async () => {
+    const chip = renderChip("en", forsaken)
+    fireEvent.pointerEnter(chip, { pointerType: "mouse" })
+    fireEvent.mouseEnter(chip)
+    fireEvent.mouseMove(chip)
+    act(() => chip.focus())
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    expect(screen.queryByTestId("term-details")).toBeNull()
+    await openDetails(chip)
+    fireEvent.click(chip)
+    await vi.waitFor(() => expect(screen.queryByTestId("term-details")).toBeNull())
+  })
 })
 
 describe("a key term's title in Chinese", () => {

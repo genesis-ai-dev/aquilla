@@ -28,8 +28,9 @@
 // AND IF NOTHING IS OFFERED, THE MENU DOES NOT OPEN. See `trackMenuIsEmpty`.
 
 import type { ReactNode } from "react"
-import { EyeOff, FolderPlus, FolderMinus, Palette, Pencil, Rows3, Trash2 } from "lucide-react"
+import { EyeOff, FolderPlus, FolderMinus, Palette, Pencil, Ruler, Rows3, Trash2 } from "lucide-react"
 import {
+  ContextMenuCheckboxItem,
   ContextMenuItem,
   ContextMenuRadioGroup,
   ContextMenuSeparator,
@@ -61,6 +62,13 @@ export interface TrackEditingActions {
   onLeaveFolder(trackIds: readonly string[]): void
   onCreateFolderFrom(trackIds: readonly string[]): void
   onDelete(trackIds: readonly string[]): void
+  /**
+   * AQU-2252 (Sam, Oct 29): whether these tracks' takes set their lines'
+   * lengths — `false` makes them layers. Track editing, so it rides this
+   * clearance; absent while the file follows its source, where nothing sets a
+   * line's length.
+   */
+  onSetLineLengths?(trackIds: readonly string[], sets: boolean): void
 }
 
 /**
@@ -93,12 +101,15 @@ export function trackMenuScopes({
   canEdit,
   canPromote = false,
   canHide = false,
+  canSetLengths = false,
   busyIds,
 }: {
   targets: readonly TimelineTrack[]
   canRename: boolean
   canColour: boolean
   canEdit: boolean
+  /** AQU-2252: track editing, while the file follows its recordings. */
+  canSetLengths?: boolean
   /** AQU-1566: the file is a linked video with no rows and the person is a
    *  maintainer, so a caption track may become its rows. */
   canPromote?: boolean
@@ -135,6 +146,16 @@ export function trackMenuScopes({
 
   const deletable = targets.filter(isAddedTrack)
 
+  // AQU-2252 (Sam, Oct 29): "Sets line lengths", on added AUDIO tracks only —
+  // the main track always sets them, and a folder or a text track holds no
+  // takes. All or nothing over the selection, like colour, and ticked only
+  // when every one of them sets them, so the tick never claims more than is
+  // true.
+  const allAudio = targets.length > 0 && targets.every((tr) => tr.kind === "audio")
+  const lengths = canSetLengths && allAudio
+    ? { tracks: [...targets], checked: targets.every((tr) => tr.setsLineLengths !== false) }
+    : null
+
   // THE FOLDERING VERBS ARE ALL-OR-NONE TOO, and for a sharper reason than
   // colour's. A folder is never inside another folder (track-groups never reads
   // a folder's own groupId), so neither verb is offered on one; and a track that
@@ -165,6 +186,7 @@ export function trackMenuScopes({
     foldable: canEdit ? foldable : [],
     inAFolder: canEdit ? inAFolder : [],
     deletable: canEdit ? deletable : [],
+    lengths: canEdit ? lengths : null,
   }
 }
 
@@ -177,7 +199,8 @@ export function trackMenuIsEmpty(scopes: ReturnType<typeof trackMenuScopes>): bo
     scopes.colourable.length === 0 &&
     scopes.foldable.length === 0 &&
     scopes.inAFolder.length === 0 &&
-    scopes.deletable.length === 0
+    scopes.deletable.length === 0 &&
+    scopes.lengths == null
   )
 }
 
@@ -215,16 +238,17 @@ export function trackMenuItems({
   busyTrackIds?: ReadonlySet<string>
 }): ReactNode {
   // ONE AUTHORITY, read here and by the trigger that decided to open at all.
-  const { promotable, hideable, hideBusy, rename, colourable, foldable, inAFolder, deletable } = trackMenuScopes({
+  const { promotable, hideable, hideBusy, rename, colourable, foldable, inAFolder, deletable, lengths } = trackMenuScopes({
     targets,
     canRename: Boolean(onRename),
     canColour: Boolean(onSetColor),
     canEdit: Boolean(editing),
     canPromote: Boolean(onPromote),
     canHide: Boolean(onHide),
+    canSetLengths: Boolean(editing?.onSetLineLengths),
     busyIds: busyTrackIds,
   })
-  const anythingBelowPromote = rename != null || colourable.length > 0 || foldable.length > 0
+  const anythingBelowPromote = rename != null || colourable.length > 0 || lengths != null || foldable.length > 0
     || inAFolder.length > 0 || deletable.length > 0
 
   const ids = (list: readonly TimelineTrack[]) => list.map((tr) => tr.id)
@@ -269,7 +293,7 @@ export function trackMenuItems({
       )}
       {/* Only when something actually follows it — a separator under the last
           item is a line with nothing beneath it. */}
-      {onRename && rename && (colourable.length > 0 || foldable.length > 0
+      {onRename && rename && (colourable.length > 0 || lengths != null || foldable.length > 0
         || inAFolder.length > 0 || deletable.length > 0) && <ContextMenuSeparator />}
 
       {/* AQU-646 stage 7: SIX SWATCHES, AND NOTHING ELSE (Sam, 2026-08-27:
@@ -323,6 +347,21 @@ export function trackMenuItems({
             </ContextMenuRadioGroup>
           </ContextMenuSubContent>
         </ContextMenuSub>
+      )}
+
+      {/* AQU-2252 (Sam, Oct 29): ticked, the tracks' takes set their lines'
+          lengths (every track's do by default — a new track is most often
+          another voice); unticked, they are layers — music, sound effects,
+          ambience — and play over the lines without changing them. */}
+      {editing?.onSetLineLengths && lengths && (
+        <ContextMenuCheckboxItem
+          checked={lengths.checked}
+          data-testid="tl-track-sets-line-lengths"
+          onCheckedChange={() => editing.onSetLineLengths?.(ids(lengths.tracks), !lengths.checked)}
+        >
+          <Ruler className="h-3.5 w-3.5" />
+          {t("editor.timeline.trackSetsLineLengths")}
+        </ContextMenuCheckboxItem>
       )}
 
       {/* Stage 2b: "Move to folder" is GONE. Sam, 2026-08-24: "there shouldn't

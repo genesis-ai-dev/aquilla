@@ -21,11 +21,12 @@
 
 import { useCallback, useState } from "react"
 import {
-  AlertTriangle, Check, ChevronRight, FileText, Info, Pencil, RefreshCw, Sparkles,
+  AlertTriangle, Check, ChevronRight, FileText, Pencil, RefreshCw, Sparkles,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { InfoNote } from "@/components/ui/info-note"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { CellData } from "@/hooks/useCells"
@@ -207,19 +208,17 @@ export function BacktranslationPanel({
                 </Button>
               </AppTooltip>
             ) : (
-              <AppTooltip content={t("editor.bt.glossContributorRequired")}>
-                <span className="inline-flex shrink-0">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-xs"
-                    disabled
-                    aria-label={t("editor.bt.glossContributorRequired")}
-                    className="rounded-full text-muted-foreground"
-                  >
-                    <Pencil />
-                  </Button>
-                </span>
+              <AppTooltip content={t("editor.bt.glossContributorRequired")} disabledTriggerClassName="shrink-0">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  disabled
+                  aria-label={t("editor.bt.glossContributorRequired")}
+                  className="rounded-full text-muted-foreground"
+                >
+                  <Pencil />
+                </Button>
               </AppTooltip>
             ))}
           </div>
@@ -289,9 +288,13 @@ export function BacktranslationPanel({
         <div className="flex min-w-0 flex-col">
           <div className="flex items-center gap-1.5">
             <span className="text-xs font-medium text-foreground">{t("editor.bt.aiHeading")}</span>
-            <AppTooltip content={t("editor.bt.explainTooltip")}>
-              <Info className="h-3 w-3 cursor-help text-muted-foreground/50 transition-colors hover:text-muted-foreground" />
-            </AppTooltip>
+            <InfoNote
+              label={t("common.aboutAria", { name: t("editor.bt.aiHeading") })}
+              className="text-muted-foreground/50"
+              iconClassName="h-3 w-3"
+            >
+              {t("editor.bt.explainTooltip")}
+            </InfoNote>
           </div>
           <p className="text-[10px] leading-relaxed text-muted-foreground">
             {t("editor.bt.aiDescriptor")}
@@ -333,18 +336,16 @@ export function BacktranslationPanel({
               </AppTooltip>
             ) : (
               <AppTooltip content={t("editor.bt.contributorRequired")}>
-                <span className="inline-flex">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-xs"
-                    disabled
-                    aria-label={t("editor.bt.contributorRequired")}
-                    className="rounded-full text-muted-foreground"
-                  >
-                    <Pencil />
-                  </Button>
-                </span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  disabled
+                  aria-label={t("editor.bt.contributorRequired")}
+                  className="rounded-full text-muted-foreground"
+                >
+                  <Pencil />
+                </Button>
               </AppTooltip>
             )}
           </div>

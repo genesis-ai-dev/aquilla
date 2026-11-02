@@ -173,7 +173,7 @@ export function ProjectDecisionsSection({ value, canEdit, disabledTooltip, usern
   }
 
   return (
-    <SettingsGroup label={t("projectDecisions.title")} description={t("projectDecisions.description")}>
+    <SettingsGroup label={t("projectDecisions.title")} description={t("projectDecisions.description")} locked={canEdit ? null : disabledTooltip}>
       {facts.length === 0 ? (
         <SettingsBlock>
           <p className="text-sm text-muted-foreground">{t("projectDecisions.empty")}</p>

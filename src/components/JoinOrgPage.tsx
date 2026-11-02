@@ -4,7 +4,8 @@ import { AlertCircle, Users, CheckCircle2 } from "lucide-react"
 import { orgHomePath } from "@/lib/navigation/org-paths"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { AuthPage, AuthPanel } from "@/components/auth/AuthPage"
 import {
   acceptOrgInvite,
   previewOrgInvite,
@@ -14,6 +15,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { isJwtExpired } from "@/lib/frontier/auth"
 import { FrontierLoginForm } from "@/components/git-import/FrontierLoginForm"
 import { FrontierSignupForm } from "@/components/git-import/FrontierSignupForm"
+import { FrontierForgotPasswordForm } from "@/components/git-import/FrontierForgotPasswordForm"
 import { UserError } from "@/lib/errors/user-error"
 import posthog from "@/lib/posthog"
 import { INVITE_REDEEMED } from "@/lib/event-names"
@@ -22,7 +24,11 @@ import { RichMessage } from "@/lib/i18n/RichMessage"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 
 type Phase = "initial" | "redeeming" | "done" | "error"
-type AuthMode = "login" | "signup"
+type AuthMode = "login" | "signup" | "forgot"
+type PreviewState = { jwt?: string } & (
+  | { status: "loading" | "unavailable" | "error" }
+  | { status: "ready"; preview: OrgInvitePreview }
+)
 
 /** Which whole-sentence role-line variant to render, mirroring JoinPage's
  * roleLineKey — one key per combination so word order can move freely in
@@ -39,9 +45,9 @@ function roleLineKey(hasInviter: boolean, hasEmail: boolean): MessageKey {
 
 function JoinOrgShell({ children }: { children: ReactNode }) {
   return (
-    <div className="flex min-h-screen items-center justify-center p-4">
-      <Card className="w-full max-w-md">{children}</Card>
-    </div>
+    <AuthPage>
+      <AuthPanel>{children}</AuthPanel>
+    </AuthPage>
   )
 }
 
@@ -50,12 +56,17 @@ function JoinOrgShell({ children }: { children: ReactNode }) {
  * org_invites row; redeeming it adds the caller to org_members at the invited
  * role. Like the project JoinPage, membership requires a signed-in account, so
  * signed-out users get inline auth first. A public preview (AQU-471) names the
- * org, the inviter, and the role before accepting; if it fails we fall back to
- * the old generic copy — the accept endpoint stays the authority on validity.
+ * org, the inviter, and the role before authentication or acceptance. Invalid
+ * links stop here; temporary failures can be retried. Accept rechecks validity.
  */
 export function JoinOrgPage() {
-  const { t } = useI18n()
   const { token } = useParams<{ token: string }>()
+  // A different invite must never inherit the prior invite's auth/preview state.
+  return <OrgInvitation key={token} token={token} />
+}
+
+function OrgInvitation({ token }: { token?: string }) {
+  const { t } = useI18n()
   const navigate = useNavigate()
   const { session, loading: sessionLoading } = useFrontierSession()
   const [phase, setPhase] = useState<Phase>("initial")
@@ -64,23 +75,31 @@ export function JoinOrgPage() {
   const [authMode, setAuthMode] = useState<AuthMode>("login")
   // AQU-1345: the identifier sign-up refused, carried into the sign-in form.
   const [loginPrefill, setLoginPrefill] = useState<string | null>(null)
-  const [preview, setPreview] = useState<OrgInvitePreview | null>(null)
-  const [previewLoading, setPreviewLoading] = useState(true)
+  const [previewState, setPreviewState] = useState<PreviewState>({ status: "loading" })
+  const [previewAttempt, setPreviewAttempt] = useState(0)
   const [rejectedJwt, setRejectedJwt] = useState<string | null>(null)
+  const sessionExpired = !!session?.jwt && (isJwtExpired(session.jwt) || rejectedJwt === session.jwt)
+  const hasValidSession = !!session?.jwt && !sessionExpired
+  const previewJwt = hasValidSession ? session?.jwt : undefined
+  const previewLoading = sessionLoading || previewState.jwt !== previewJwt || previewState.status === "loading"
+  const preview = !previewLoading && previewState.status === "ready" ? previewState.preview : null
 
   // Public preview — who invited you, to which org, at what role (AQU-471).
   useEffect(() => {
-    if (!token) return
+    if (!token || sessionLoading) return
     let cancelled = false
-    void previewOrgInvite(token).then((p) => {
+    void previewOrgInvite(token, previewJwt).then((p) => {
       if (cancelled) return
-      setPreview(p)
-      setPreviewLoading(false)
+      setPreviewState(p
+        ? { status: "ready", preview: p, jwt: previewJwt }
+        : { status: "unavailable", jwt: previewJwt })
+    }).catch(() => {
+      if (!cancelled) setPreviewState({ status: "error", jwt: previewJwt })
     })
     return () => {
       cancelled = true
     }
-  }, [token])
+  }, [token, previewJwt, sessionLoading, previewAttempt])
 
   const previewSummary = preview ? (
     <div className="rounded-md border bg-muted/30 p-3 space-y-1.5">
@@ -113,17 +132,7 @@ export function JoinOrgPage() {
         />
       </p>
     </div>
-  ) : previewLoading ? (
-    <div className="flex items-center gap-2 py-1">
-      <Spinner className="text-muted-foreground" />
-      <p className="text-xs text-muted-foreground">{t("auth.join.loadingDetails")}</p>
-    </div>
-  ) : (
-    <p className="text-sm text-muted-foreground">{t("org.joinOrgPage.genericInviteFallback")}</p>
-  )
-
-  const sessionExpired = !!session?.jwt && (isJwtExpired(session.jwt) || rejectedJwt === session.jwt)
-  const hasValidSession = !!session?.jwt && !sessionExpired
+  ) : null
 
   async function accept(jwt: string) {
     if (!token) return
@@ -158,7 +167,7 @@ export function JoinOrgPage() {
     return (
       <JoinOrgShell>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
+          <CardTitle role="heading" aria-level={1} className="flex items-center gap-2">
             <AlertCircle className="size-5 text-destructive" /> {t("auth.join.invalidInviteLink")}
           </CardTitle>
         </CardHeader>
@@ -173,7 +182,7 @@ export function JoinOrgPage() {
     return (
       <JoinOrgShell>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
+          <CardTitle role="heading" aria-level={1} className="flex items-center gap-2">
             <AlertCircle className="size-5 text-destructive" /> {t("org.joinOrgPage.cantJoinTitle")}
           </CardTitle>
         </CardHeader>
@@ -189,7 +198,7 @@ export function JoinOrgPage() {
     return (
       <JoinOrgShell>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
+          <CardTitle role="heading" aria-level={1} className="flex items-center gap-2">
             <CheckCircle2 className="size-5 text-green-600" /> {t("org.joinOrgPage.youreInTitle")}
           </CardTitle>
         </CardHeader>
@@ -204,11 +213,38 @@ export function JoinOrgPage() {
     )
   }
 
-  if (sessionLoading) {
+  if (previewLoading) {
     return (
       <JoinOrgShell>
-        <CardContent className="flex items-center justify-center py-10">
+        <CardContent className="flex items-center justify-center gap-2 py-10">
           <Spinner />
+          <p className="text-sm text-muted-foreground">{t("auth.join.loadingDetails")}</p>
+        </CardContent>
+      </JoinOrgShell>
+    )
+  }
+
+  if (!preview) {
+    const unavailable = previewState.status === "unavailable"
+    return (
+      <JoinOrgShell>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <AlertCircle className="size-5 text-destructive" />
+            {t(unavailable ? "org.joinOrgPage.unavailableTitle" : "org.joinOrgPage.previewErrorTitle")}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p role="alert" className="text-sm text-muted-foreground">
+            {t(unavailable ? "org.joinOrgPage.unavailableDescription" : "org.joinOrgPage.previewErrorDescription")}
+          </p>
+          {!unavailable && (
+            <Button onClick={() => {
+              setPreviewState({ status: "loading", jwt: previewJwt })
+              setPreviewAttempt((attempt) => attempt + 1)
+            }}>{t("common.retry")}</Button>
+          )}
+          <Button variant="outline" onClick={() => navigate("/")}>{t("error.notFound.goHome")}</Button>
         </CardContent>
       </JoinOrgShell>
     )
@@ -219,7 +255,7 @@ export function JoinOrgPage() {
     return (
       <JoinOrgShell>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
+          <CardTitle role="heading" aria-level={1} className="flex items-center gap-2">
             <Users className="size-5" />{" "}
             {preview?.orgName ? `Join ${preview.orgName}` : "Join organization"}
           </CardTitle>
@@ -242,20 +278,31 @@ export function JoinOrgPage() {
   return (
     <JoinOrgShell>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
+        <CardTitle role="heading" aria-level={1} className="flex items-center gap-2">
           <Users className="size-5" />{" "}
           {preview?.orgName ? `Join ${preview.orgName}` : "Join organization"}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         {previewSummary}
-        <p className="text-sm text-muted-foreground">
-          {authMode === "login"
-            ? "Sign in to accept your invitation."
-            : "Create an account to accept your invitation."}
-        </p>
+        {authMode !== "forgot" && (
+          <p className="text-sm text-muted-foreground">
+            {authMode === "login"
+              ? "Sign in to accept your invitation."
+              : "Create an account to accept your invitation."}
+          </p>
+        )}
         {authMode === "login" ? (
-          <FrontierLoginForm onSuccess={() => {}} initialUsername={loginPrefill} />
+          <FrontierLoginForm
+            onSuccess={() => {}}
+            initialUsername={loginPrefill}
+            onForgotPassword={() => setAuthMode("forgot")}
+          />
+        ) : authMode === "forgot" ? (
+          <FrontierForgotPasswordForm
+            onBack={() => setAuthMode("login")}
+            returnTo={`/join-org/${token}`}
+          />
         ) : (
           <FrontierSignupForm
             onSuccess={() => {}}
@@ -265,15 +312,17 @@ export function JoinOrgPage() {
             }}
           />
         )}
-        <button
-          type="button"
-          className="text-xs text-muted-foreground hover:text-foreground"
-          onClick={() => setAuthMode((m) => (m === "login" ? "signup" : "login"))}
-        >
-          {authMode === "login"
-            ? "Need an account? Sign up"
-            : "Already have an account? Sign in"}
-        </button>
+        {authMode !== "forgot" && (
+          <button
+            type="button"
+            className="text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => setAuthMode((m) => (m === "login" ? "signup" : "login"))}
+          >
+            {authMode === "login"
+              ? "Need an account? Sign up"
+              : "Already have an account? Sign in"}
+          </button>
+        )}
       </CardContent>
     </JoinOrgShell>
   )

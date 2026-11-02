@@ -6,6 +6,7 @@ const CORE_SENTINELS = [
 ]
 
 const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
+  { source: /^src\/(?:pages\/Signup|lib\/navigation\/login-path)/, sentinels: ["e2e/specs/projects/onboarding.smoke.spec.ts"] },
   {
     source: /^(?:src\/(?:components|lib)\/checking\/|sync-worker\/src\/checking\/|db\/postgres\/migrations\/0162_community_checking)/,
     sentinels: ["e2e/specs/collab/cross-user-comment.smoke.spec.ts"],
@@ -24,7 +25,7 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
     sentinels: ["e2e/specs/editor/import-and-edit.smoke.spec.ts"],
   },
   {
-    source: /^(?:src\/pages\/Login\.tsx|src\/components\/onboarding\/OnboardingWizard\.tsx|src\/.*billing|auth-worker\/.*billing|auth-worker\/src\/routes\/(?:chat|import-classify|agent|contextual|transcription)\.ts|auth-worker\/src\/lib\/agent\/(?:upstream|tools\/draft)\.ts|auth-worker\/src\/lib\/contextual\/tick\.ts|db\/shared\/(?:billing|workspace-access)|config\/pricing\/|auth-worker\/src\/services\/org-permissions\.ts|db\/postgres\/migrations\/.*(?:workspace_(?:billing|checkout|subscription|plan_change|usage)|weekly_allowance|live_workspace_checkout))/i,
+    source: /^(?:src\/pages\/(?:Login|Signup)\.tsx|src\/components\/onboarding\/OnboardingWizard\.tsx|src\/.*billing|auth-worker\/.*billing|auth-worker\/src\/routes\/(?:chat|import-classify|agent|contextual|transcription)\.ts|auth-worker\/src\/lib\/agent\/(?:upstream|tools\/draft)\.ts|auth-worker\/src\/lib\/contextual\/tick\.ts|db\/shared\/(?:billing|workspace-access)|config\/pricing\/|auth-worker\/src\/services\/org-permissions\.ts|db\/postgres\/migrations\/.*(?:workspace_(?:billing|checkout|subscription|plan_change|usage)|weekly_allowance|live_workspace_checkout))/i,
     sentinels: ["e2e/specs/orgs/org-settings-billing.smoke.spec.ts"],
   },
   {
@@ -59,7 +60,7 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
     // they share, and /join/:token — has its own smoke spec, but none of these
     // files carry a domain keyword above, so they fell through to the core
     // sentinels and PR #882 shipped a stale locator in that spec ungated.
-    source: /^(?:src\/components\/(?:UsernameTypeahead|MemberMultiAddRow|MultiProjectInviteDialog|ProjectMembersPage|ProjectSettings\/AddProjectMemberDialog|SharePanel|JoinPage)\.tsx|src\/hooks\/useUserSearch\.ts|src\/lib\/sync\/invites\.ts|auth-worker\/src\/(?:routes\/invites|services\/invite-scopes)\.ts)$/,
+    source: /^(?:src\/components\/(?:UsernameTypeahead|MemberMultiAddRow|MultiProjectInviteDialog|ProjectSettings\/(?:AddProjectMemberDialog|InviteLinkTab|RevokeAllDialog)|JoinPage)\.tsx|src\/hooks\/useUserSearch\.ts|src\/lib\/sync\/invites\.ts|auth-worker\/src\/(?:routes\/invites|services\/invite-scopes)\.ts)$/,
     sentinels: ["e2e/specs/projects/share-invite.smoke.spec.ts"],
   },
   {

@@ -42,7 +42,7 @@ export const ORG_SETTINGS_SECTION_TITLES: Record<OrgSettingsSection, string> = {
   identity: "Identity",
   security: "Security",
   "project-defaults": "Project defaults",
-  billing: "Billing & usage",
+  billing: "Billing",
   providers: "AI provider keys",
   monday: "Monday.com",
   airtable: "Airtable",
@@ -51,7 +51,7 @@ export const ORG_SETTINGS_SECTION_TITLES: Record<OrgSettingsSection, string> = {
 export const ORG_SETTINGS_SECTION_DESCRIPTIONS: Record<OrgSettingsSection, string> = {
   identity: "The organization's display name, shown across the workspace.",
   security:
-    "Who can see members and who can export, assign, manage terms, and change project languages.",
+    "Who can see members and who can export, assign, manage terms, import files, and change project languages.",
   "project-defaults":
     "Settings every project in this organization follows unless it chooses its own.",
   billing:

@@ -12,6 +12,7 @@
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { ParallelPassagesPanel, type ReplaceAllPayload } from "./ParallelPassagesPanel"
+import { expectDisabledNote } from "@/test-utils/tooltip"
 import { toast } from "@/components/ui/toast"
 import type { WorkspaceSearchResult } from "@/lib/search/workspace-index"
 
@@ -50,7 +51,7 @@ function baseProps(
 }
 
 /**
- * Get the "Replace All" / "Replace N" apply button, excluding the mode pill
+ * Get the "Replace all" / "Replace N" apply button, excluding the mode pill
  * button (which also has "Replace" as text). The apply button has aria-busy.
  */
 function getApplyButton() {
@@ -70,7 +71,7 @@ describe("ParallelPassagesPanel — smoke", () => {
   it("renders the dialog open without crashing", () => {
     render(<ParallelPassagesPanel {...baseProps()} />)
     expect(screen.getByRole("dialog")).toBeInTheDocument()
-    expect(screen.getByRole("heading", { level: 1, name: "Search and Replace" })).toBeInTheDocument()
+    expect(screen.getByRole("heading", { level: 1, name: "Search and replace" })).toBeInTheDocument()
   })
 
   it("puts the replace field with the notes under it, and does not add a second diff list", () => {
@@ -464,6 +465,12 @@ describe("ParallelPassagesPanel — Replace button state", () => {
     })
 
     expect(getApplyButton()).toBeDisabled()
+  })
+
+  // AQU-2260 (Sam, Oct 29): why it is greyed out opens on a click, never a hover.
+  it("says why it is greyed out on a click when the files are read-only", async () => {
+    render(<ParallelPassagesPanel {...baseProps({ isReadOnly: true })} />)
+    await expectDisabledNote(getApplyButton(), "Replace requires contributor access on these files")
   })
 
   it("calls onReplaceAll with diffs including correct before/after values", async () => {

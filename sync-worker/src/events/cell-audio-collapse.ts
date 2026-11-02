@@ -26,6 +26,9 @@ interface AudioRowRaw {
   trim_start_ms: number | null
   trim_end_ms: number | null
   target_offset_ms: number | null
+  /** AQU-2267 (0189). Optional, like the AQU-490 fields below, so a row built
+   *  by hand need not know it; absent reads as NULL. */
+  recordings_offset_ms?: number | null
   timings_json: string | null
   selected: number
   created_ts: number
@@ -37,6 +40,9 @@ interface AudioRowRaw {
   created_by?: string | null
   /** Who has validated THIS take, newest vote first. Joined in by the route. */
   validators?: string[]
+  /** AQU-2296: username → the server clock of that person's vote, as the
+   *  route's `jsonb_object_agg(...)::text`. Absent on a hand-built row. */
+  validator_decided_ts?: string | Record<string, unknown> | null
   /** AQU-1767: the take this row was cut from (its group's root), or null. */
   piece_of?: string | null
   /** 0186: what ASR heard, and the AI-cleanup provenance (JSON text). */
@@ -68,6 +74,13 @@ export interface AttachmentOut {
    */
   targetOffsetMs: number | null
   /**
+   * AQU-2267: where this take sits FOLLOWING THE RECORDINGS, measured the same
+   * way as `targetOffsetMs` (its place following the source) from its line's
+   * start in that layout. NULL = no place of its own there: that timing reads
+   * `targetOffsetMs`, as every take placed before the column existed does.
+   */
+  recordingsOffsetMs: number | null
+  /**
    * AQU-490: how many people have validated this take, and who.
    *
    * The count is denormalized onto cell_audio and `validators` is joined from
@@ -79,6 +92,12 @@ export interface AttachmentOut {
    */
   validatorCount: number
   validators: string[]
+  /**
+   * AQU-2296: username → when that person validated this take (server clock,
+   * ms). A name missing from it has no known stamp — the popover then shows
+   * the name with no date line rather than an "Invalid Date".
+   */
+  validatorDecidedTs: Record<string, number>
   /**
    * 'dub' — somebody's translation of this line. 'source' — the shared
    * programme audio an import attached, which sits SELECTED on every cell of a
@@ -141,6 +160,37 @@ function normalizeValidators(raw: unknown): string[] {
   return inner.split(",").map((v) => v.trim().replace(/^"|"$/g, "")).filter(Boolean)
 }
 
+/**
+ * AQU-2296: `jsonb_object_agg(...)::text` → `{ username: ms }`.
+ *
+ * Tolerant on purpose: null/absent (no votes, or a worker that predates the
+ * column) reads as an empty record, and a value that is not a finite number is
+ * dropped rather than carried to the UI, where it would render as
+ * "Invalid Date". A driver that hands back an already-parsed object still works.
+ */
+function normalizeValidatorStamps(raw: unknown): Record<string, number> {
+  let parsed: unknown = raw
+  if (typeof raw === "string") {
+    if (raw.trim() === "") return {}
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      return {}
+    }
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {}
+  const out: Record<string, number> = {}
+  for (const [username, value] of Object.entries(parsed as Record<string, unknown>)) {
+    // `Number(null)` and `Number("")` are both 0, a finite number that would
+    // date the vote to 1970 — so absent and blank are rejected by value, not
+    // left to the finite check.
+    if (value == null || value === "") continue
+    const ts = Number(value)
+    if (Number.isFinite(ts) && ts > 0) out[username] = ts
+  }
+  return out
+}
+
 export interface CellAudioOut {
   attachments: Record<string, AttachmentOut>
   /**
@@ -194,12 +244,14 @@ export function collapseCellAudioRows(rows: readonly AudioRowRaw[]): Record<stri
       trimStartMs: r.trim_start_ms,
       trimEndMs: r.trim_end_ms,
       targetOffsetMs: r.target_offset_ms,
+      recordingsOffsetMs: r.recordings_offset_ms ?? null,
       // AQU-490. The defaults are the pre-0096 reading of a row: no votes, a
       // dub, no known recorder. `role` is narrowed rather than cast, so a
       // value the schema's CHECK could not produce still lands on 'dub' — the
       // safe side, since 'source' is what excludes a take from being counted.
       validatorCount: Number(r.validator_count ?? 0) || 0,
       validators: normalizeValidators(r.validators),
+      validatorDecidedTs: normalizeValidatorStamps(r.validator_decided_ts),
       role: r.role === "source" ? "source" : "dub",
       recordedBy: r.created_by ?? null,
       pieceOf: r.piece_of ?? null,

@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { ParallelBiblesSidebar } from "./ParallelBiblesSidebar"
 import {
   fetchHelloaoChapter,
@@ -173,5 +175,19 @@ describe("ParallelBiblesSidebar failure recovery (AQU-849)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry" }))
 
     await waitFor(() => expect(screen.getByText("Parallel Bibles")).toBeInTheDocument())
+  })
+})
+
+/** AQU-2260 (Sam, Oct 29): a control that carries its own words has no hover. */
+async function expectNoHoverTip(el: Element) {
+  await userEvent.setup().hover(el)
+  await act(() => new Promise((r) => setTimeout(r, 30)))
+  expect(screen.queryByRole("tooltip")).toBeNull()
+}
+
+describe("ParallelBiblesSidebar — the closed edge tab", () => {
+  it("carries its own word, so it has no hover", async () => {
+    render(<TooltipProvider delay={0}><ParallelBiblesSidebar trackedRef="GEN 1:1" open={false} onToggle={() => {}} /></TooltipProvider>)
+    await expectNoHoverTip(screen.getByRole("button", { name: "Show parallel bibles" }))
   })
 })

@@ -89,7 +89,9 @@ export async function findPersonalOrg(
 }
 
 /**
- * Return the user's personal organization, lazy-creating one if absent.
+ * Return the user's personal organization, creating one if absent. Call it
+ * only where the person CHOSE a personal workspace (POST /orgs/personal, a
+ * personal project): a read never creates one (AQU-2259).
  * Owning a team org does not count: only billing_scope 'personal' matches.
  * Personal orgs are created without a Stripe customer. The caller becomes
  * a role-700 owner.
@@ -156,8 +158,8 @@ export type DeleteOrganizationResult =
  *   translation data. `projects.org_id` is never left pointing at a missing org.
  * - Members, teams, invites, org-scoped PATs, device grants, integrations,
  *   billing, and usage rows are removed in the same transaction.
- * - The personal workspace may be deleted. `GET /orgs/me` and an empty
- *   `listUserOrgs` lazily create a fresh one.
+ * - The personal workspace may be deleted. Nothing recreates it until the
+ *   person chooses one again (POST /orgs/personal, a personal project).
  *
  * Caller authorization stays in the route: membership role >= owner, with no
  * platform-admin elevation.
@@ -232,8 +234,9 @@ export interface UserOrgSummary {
 
 /**
  * Every org the user belongs to: owned orgs (role 700) unioned with
- * org_members rows (role per row). Owner wins on conflict. Lazy-creates the
- * personal org if the user has none yet, so the switcher always has >=1 entry.
+ * org_members rows (role per row). Owner wins on conflict. Empty for an
+ * account with no organization: this is a read, and since AQU-2259 a read
+ * never creates one.
  */
 export async function listUserOrgs(env: Env, user: AuthUser): Promise<UserOrgSummary[]> {
   const byId = new Map<number, UserOrgSummary>()
@@ -258,10 +261,8 @@ export async function listUserOrgs(env: Env, user: AuthUser): Promise<UserOrgSum
     }
   }
 
-  if (byId.size === 0) {
-    const personal = await getOrCreateUserOrg(env, user)
-    byId.set(personal.id, { id: personal.id, name: personal.name, role: personal.role })
-  }
+  // AQU-2259: no auto-create. An account with no organization lists none;
+  // listing is a read, and a read never creates anything (see GET /orgs/me).
 
   return Array.from(byId.values()).sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""))
 }
@@ -3352,6 +3353,13 @@ export interface ProjectOrgPolicy {
   autoPropagateRepetitions: boolean
   /** Null when the org set none (the client applies no export gate then). */
   exportMinRole: number | null
+  /**
+   * AQU-2304: the org's import floor (`file.create`), defaults applied. Unlike
+   * `exportMinRole` this is never null — the floor always has a value, and the
+   * default IS the behaviour (PROJECT_LEAD), so a project surface can gate on
+   * it without first asking whether the org expressed a preference.
+   */
+  importMinRole: number
 }
 
 export async function getProjectOrgPolicy(
@@ -3392,6 +3400,9 @@ export async function getProjectOrgPolicy(
         typeof exportRaw === "number" && Number.isFinite(exportRaw) && exportRaw >= 100 && exportRaw <= 700
           ? exportRaw
           : null,
+      // AQU-2304: the import floor rides the same bundle so a project member
+      // outside the org gates on the org's real value instead of the default.
+      importMinRole: extractRoleFloor(settings, "importMinRole", DEFAULT_IMPORT_MIN_ROLE),
     },
     visibility: combineVisibilityFloors(org, own),
   }
@@ -3447,6 +3458,38 @@ export async function getLanguageEditMinRoleForProject(
   if (!project?.org_id) return DEFAULT_LANGUAGE_EDIT_MIN_ROLE
   return getLanguageEditMinRole(env, project.org_id)
 }
+
+// ──────────────────────────────────────────────────────────────────────────
+// AQU-2304: configurable import floor
+//
+// Who may bring a NEW source file into a project — `file.create`, which the
+// sync-worker's static role table floors at PROJECT_LEAD. Same org_settings
+// plumbing as the two floors above, same OWNER-only write gate, same
+// PROJECT_LEAD default, so an org that never touches the key behaves exactly
+// as it did before the key existed.
+//
+// ENFORCEMENT LIVES IN SYNC-WORKER, which owns the event log — see
+// sync-worker/src/events/import-authority.ts, which reads this key with this
+// default. auth-worker resolves it here so the floor can travel with the
+// project's settings response for client gating (getProjectOrgPolicy above),
+// exactly as the assignment floor does: a project member who is not a member
+// of the org cannot read the org's settings, so without the carried value
+// their browser would fall back to the built-in PROJECT_LEAD and offer an
+// import the server was always going to refuse.
+//
+// Scope is `file.create` ONLY. Importing a translation into an existing file
+// commits target cells and creates nothing, so it stays at Contributor; the
+// Door43 upstream panel stays hard-wired to Maintainer either way.
+// ──────────────────────────────────────────────────────────────────────────
+
+// Deliberately NO getImportMinRole[ForProject] sibling of the two resolvers
+// above: nothing in auth-worker enforces this floor, so a per-org resolver here
+// would be a fourth reader of the key with no caller. The default below is all
+// this worker needs — `getProjectOrgPolicy` resolves the value onto the
+// project's settings response, and sync-worker does the enforcing.
+
+/** Default floor for importing a new source file when the org hasn't set one. */
+export const DEFAULT_IMPORT_MIN_ROLE = 500 // ROLE.PROJECT_LEAD
 
 // ──────────────────────────────────────────────────────────────────────────
 // AQU-1002: configurable comment floors

@@ -1,4 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type Dispatch, type ReactNode, type SetStateAction } from "react"
+import { SearchSelect } from "@/components/ui/search-select"
+import { SettingMovedNote } from "@/components/settings/SettingMovedNote"
+import { settingMovedNotesShowing } from "@/lib/settings/setting-moved"
+import { authorNameFor, LOCAL_AUTHOR_NAME_SETTING_ID } from "@/lib/store/local-author-name"
 import { notifySmartExtensionsChanged } from "@/lib/tools/smart-extensions-enabled"
 import { recordStep } from "@/lib/history/history"
 import { Navigate, useLocation, useParams, useNavigate, useSearchParams, type Location } from "react-router-dom"
@@ -16,6 +20,7 @@ import {
 } from "lucide-react"
 import { toast } from "@/components/ui/toast"
 import { Button } from "@/components/ui/button"
+import { filmAndSourcesShown } from "@/lib/media/film-and-sources"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { ButtonGroup, ButtonGroupSeparator } from "@/components/ui/button-group"
 import {
@@ -80,6 +85,7 @@ import {
   presetLabel,
 } from "@/lib/completion/provider-presets"
 import { buildCompletionSettings, DEFAULT_SYSTEM_PROMPT } from "@/hooks/useCompletionSettings"
+import { draftingSettingsFrom } from "@/lib/completion/drafting-settings"
 import { MAX_BATCH_COMPLETIONS } from "@/lib/workspace-actions/registry"
 import type {
   AudioMediaStrategy,
@@ -128,6 +134,10 @@ import { ExperimentalFlagsSection } from "./ProjectSettings/ExperimentalFlagsSec
 import { LanguagesSection, type LaneDeliversOutcome } from "./ProjectSettings/LanguagesSection"
 import type { LaneDelivers } from "@/lib/lanes/lane-delivers"
 import { MembersSection } from "./ProjectSettings/MembersSection"
+import { ProjectVisibilitySection } from "./ProjectSettings/ProjectVisibilitySection"
+import { KeyInUseLine } from "@/components/settings/KeyInUseLine"
+import { completionKeyInUse, geminiKeyInUse } from "@/lib/settings/key-in-use"
+import { useUserProviderOverride } from "@/lib/store/user-provider-override"
 import { BRIEF_ICON, LIVING_MEMORY_ICON } from "./LivingMemoryButton"
 import { briefStatus } from "@/lib/brief/brief"
 import { DcsUpstreamPanel } from "@/components/dcs/DcsUpstreamPanel"
@@ -147,6 +157,7 @@ import type { CellEditingTier, ProjectWideSettings } from "@/lib/sync/project-se
 import { FLOOR_LABEL } from "@/pages/settings/constants"
 import { CELL_EDITING_FLOOR_OPTIONS, cellEditingTierLabel } from "@/components/ProjectSettings/cell-editing-floor-options"
 import { OrgDefaultSource, orgBooleanOptionLabel } from "@/components/ProjectSettings/OrgDefaultSource"
+import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { ElevenLabsConnectCard } from "@/components/voice/elevenlabs/ElevenLabsConnectCard"
 import { PERMISSION_DOCS_URL } from "@/components/PermissionDeniedAlert"
@@ -229,14 +240,12 @@ function withStyledTerms(
 
 interface Baseline {
   name: string
-  username: string
   provider: CompletionProvider
   endpoint: string
   apiKey: string
   model: string
   maxTokens: number
   temperature: number
-  llmHealthPenalty: number
   top_k: number
   contextSize: ContextSize
   useOnlyValidatedExamples: boolean
@@ -263,6 +272,8 @@ interface Baseline {
   cellEditingFloor: CellEditingTier | null
   /** AQU-646 stage 2: may this project's timelines be restructured? */
   allowTrackEditing: boolean | null
+  /** AQU-1758: Film and Sources in the media view; null = the project's kind decides. */
+  filmAndSources: boolean | null
   timingLocked: boolean | null
   harmonize_min_role: "project_lead" | "maintainer"
   /** AQU-460: EXPLICIT persisted value only. `undefined` = no explicit choice
@@ -288,7 +299,6 @@ interface Baseline {
 function buildBaseline(project: ProjectRecord): Baseline {
   return {
     name: project.name,
-    username: project.username || "local",
     provider: project.completionSettings ? resolveProvider(project.completionSettings) : "frontier",
     endpoint: project.completionSettings?.endpoint ?? "",
     apiKey: project.completionSettings?.apiKey ?? "",
@@ -297,7 +307,6 @@ function buildBaseline(project: ProjectRecord): Baseline {
     // default snapshots (512/4096) are upgraded to the current default.
     maxTokens: normalizeCompletionMaxTokens(project.completionSettings?.maxTokens),
     temperature: project.completionSettings?.temperature ?? 0.3,
-    llmHealthPenalty: project.completionSettings?.llmHealthPenalty ?? 0.1,
     top_k: project.completionSettings?.top_k ?? DEFAULT_APPROVED_EXAMPLE_COUNT,
     contextSize: project.completionSettings?.contextSize ?? "medium",
     useOnlyValidatedExamples: true,
@@ -325,6 +334,7 @@ function buildBaseline(project: ProjectRecord): Baseline {
     allowSelfValidationAudio: typeof project.allowSelfValidationAudio === "boolean" ? project.allowSelfValidationAudio : null,
     cellEditingFloor: project.cellEditingFloor ?? null,
     allowTrackEditing: typeof project.allowTrackEditing === "boolean" ? project.allowTrackEditing : null,
+    filmAndSources: typeof project.filmAndSources === "boolean" ? project.filmAndSources : null,
     timingLocked: typeof project.timingLocked === "boolean" ? project.timingLocked : null,
     harmonize_min_role: project.harmonize_min_role ?? "project_lead",
     // AQU-460: preserve "unset" — do NOT default to false here, that would
@@ -347,6 +357,18 @@ function buildBaseline(project: ProjectRecord): Baseline {
 /** Baseline fields whose stored value lives only in the shared settings blob.
  *  Each is written to the blob on Save, so each must be read back from it. */
 const BLOB_BACKED_KEYS = [
+  // AQU-2259: the team's drafting settings and model choice.
+  "provider",
+  "endpoint",
+  "model",
+  "maxTokens",
+  "temperature",
+  "top_k",
+  "contextSize",
+  "main_chat_language",
+  "fewShotExampleFormat",
+  "completionBatchSize",
+  "validationBatchSize",
   "validationCount",
   "validationCountAudio",
   "validationRoleFloor",
@@ -357,6 +379,7 @@ const BLOB_BACKED_KEYS = [
   "allowSelfValidationAudio",
   "cellEditingFloor",
   "allowTrackEditing",
+  "filmAndSources",
   "timingLocked",
   "harmonize_min_role",
   "bibleResourcesEnabled",
@@ -402,6 +425,10 @@ interface ProjectSettingsProps {
  * goes to the top of the pane, a single field inside a card only moves far
  * enough to be on screen (so a short project does not scroll at all).
  */
+/** The headings the settings index lists its rows under, in order. */
+const HUB_ORDER = ["project", "aiMedia", "quality", "integrations"] as const
+type SettingsHub = (typeof HUB_ORDER)[number]
+
 const SETTINGS_FOCUS_TARGETS: Record<string, { elementId: string; block: ScrollLogicalPosition }> = {
   languages: { elementId: "section-languages", block: "start" },
   "add-lane": { elementId: "add-lane-field", block: "nearest" },
@@ -658,14 +685,13 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     [getJwt, id],
   )
 
-  // Server enforces MAINTAINER (600) for settings writes. Explain the lock on
-  // the control itself (GitHub-style hint), not with a page-level banner.
+  // Server enforces MAINTAINER (600) for settings writes. AQU-2260: a card
+  // locked as a whole says so once under its heading; a single locked control
+  // says so beneath it — never on hover.
   const privilegedRole = resolveRoleName(t, ROLE.MAINTAINER, { plural: true })
   const roleLockHint = (
     <PermissionLockHint
-      title={t("projectSettings.permission.onlyRoleCanModify", {
-        role: privilegedRole,
-      })}
+      role={privilegedRole}
       onView={id ? () => setPrivilegedOpen(true) : undefined}
       href={id ? undefined : PERMISSION_DOCS_URL}
       linkLabel={
@@ -681,6 +707,11 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     reasonCannotEdit === "offline" ? t("projectSettings.permission.reconnectToEdit")
     : reasonCannotEdit === "role" ? roleLockHint
     : null
+  // AQU-2259: the AI cards are shared now, so a locked one says why once, at
+  // its top, rather than on a hover over each of its fourteen controls.
+  const sharedLockedLine = canEditShared ? null
+    : reasonCannotEdit === "offline" ? t("projectSettings.permission.reconnectToEdit")
+    : t("projectSettings.permission.onlyRoleCanModify", { role: privilegedRole })
 
   // AQU-1086: the language fields sit behind the org's configurable
   // languageEditMinRole, so their lock hint must name the role the user
@@ -689,9 +720,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const languagePrivilegedRole = resolveRoleName(t, languageEditFloor, { plural: true })
   const languageRoleLockHint = (
     <PermissionLockHint
-      title={t("projectSettings.permission.onlyRoleCanModify", {
-        role: languagePrivilegedRole,
-      })}
+      role={languagePrivilegedRole}
       onView={id ? () => setPrivilegedOpen(true) : undefined}
       href={id ? undefined : PERMISSION_DOCS_URL}
       linkLabel={
@@ -713,9 +742,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const structuralPrivilegedRole = resolveRoleName(t, ROLE.PROJECT_LEAD, { plural: true })
   const structuralRoleLockHint = (
     <PermissionLockHint
-      title={t("projectSettings.permission.onlyRoleCanModify", {
-        role: structuralPrivilegedRole,
-      })}
+      role={structuralPrivilegedRole}
       onView={id ? () => setPrivilegedOpen(true) : undefined}
       href={id ? undefined : PERMISSION_DOCS_URL}
       linkLabel={
@@ -753,7 +780,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const [name, setName] = useState("")
   // AQU-765: inline validation for an empty/whitespace-only rename.
   const [nameError, setNameError] = useState<string | null>(null)
-  const [username, setUsername] = useState("")
   const [provider, setProvider] = useState<CompletionProvider>("frontier")
   const [endpoint, setEndpoint] = useState("")
   const [apiKey, setApiKey] = useState("")
@@ -761,7 +787,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const [model, setModel] = useState("")
   const [maxTokens, setMaxTokens] = useState(DEFAULT_COMPLETION_MAX_TOKENS)
   const [temperature, setTemperature] = useState(0.3)
-  const [llmHealthPenalty, setLlmHealthPenalty] = useState(0.1)
   const [topK, setTopK] = useState(DEFAULT_APPROVED_EXAMPLE_COUNT)
   const [contextSize, setContextSize] = useState<ContextSize>("medium")
   const [useOnlyValidatedExamples, setUseOnlyValidatedExamples] = useState(true)
@@ -782,7 +807,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const [allowSelfValidationAudio, setAllowSelfValidationAudio] = useState<boolean | null>(null)
   const [cellEditingFloor, setCellEditingFloor] = useState<CellEditingTier | null>(null)
   const [allowTrackEditing, setAllowTrackEditing] = useState<boolean | null>(null)
+  const [filmAndSources, setFilmAndSources] = useState<boolean | null>(null)
   const [timingLocked, setTimingLocked] = useState<boolean | null>(null)
+  // Sam, Oct 28: each (i) opens its explanation beneath the setting's title.
+  const [lockInfoOpen, toggleLockInfo] = useInfoOpen()
+  const [trackEditingInfoOpen, toggleTrackEditingInfo] = useInfoOpen()
+  const [filmInfoOpen, toggleFilmInfo] = useInfoOpen()
   // AQU-1768: the value in force for each — the project's own, else the
   // organization's default, else the built-in one. What the disabled control
   // shows while the project follows the organization, and where "Set for this
@@ -823,6 +853,19 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
 
   // Gemini TTS API key — stored in ttsSettings.apiKey (project-level).
   const [geminiApiKey, setGeminiApiKey] = useState("")
+  // AQU-2263: which key drafts and voices use right now — from what is SAVED
+  // (the baseline), the Preferences override and this browser's own keys.
+  const providerOverride = useUserProviderOverride()
+  const completionInUse = completionKeyInUse({
+    settings: baseline ? { provider: baseline.provider, endpoint: baseline.endpoint, apiKey: baseline.apiKey } : undefined,
+    override: providerOverride,
+    personalKey: completionUserKey,
+  })
+  const geminiInUse = geminiKeyInUse({
+    projectKey: baseline?.geminiApiKey,
+    personalKey: geminiUserKey,
+    orgHasKey: Boolean(orgSettingsForProject.orgProviderKeys?.["gemini-tts"]),
+  })
 
   const [models, setModels] = useState<string[]>([])
   const [connecting, setConnecting] = useState(false)
@@ -837,7 +880,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
 
   const applyBaseline = useCallback((b: Baseline) => {
     setName(b.name)
-    setUsername(b.username)
     setProvider(b.provider)
     setEndpoint(b.endpoint)
     setApiKey(b.apiKey)
@@ -845,7 +887,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     setModel(b.model)
     setMaxTokens(b.maxTokens)
     setTemperature(b.temperature)
-    setLlmHealthPenalty(b.llmHealthPenalty)
     setTopK(b.top_k)
     setContextSize(b.contextSize)
     setUseOnlyValidatedExamples(true)
@@ -865,6 +906,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     setAllowSelfValidationAudio(b.allowSelfValidationAudio)
     setCellEditingFloor(b.cellEditingFloor)
     setAllowTrackEditing(b.allowTrackEditing)
+    setFilmAndSources(b.filmAndSources)
     setTimingLocked(b.timingLocked)
     setHarmonizeMinRole(b.harmonize_min_role)
     setBibleResourcesEnabled(b.bibleResourcesEnabled)
@@ -932,6 +974,17 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     const changed = BLOB_BACKED_KEYS.filter((key) => !sameSetting(hydrated[key], seed[key]))
     if (changed.length === 0) return
     const draftSetters: { [K in BlobBackedKey]: Dispatch<SetStateAction<Baseline[K]>> } = {
+      provider: setProvider,
+      endpoint: setEndpoint,
+      model: setModel,
+      maxTokens: setMaxTokens,
+      temperature: setTemperature,
+      top_k: setTopK,
+      contextSize: setContextSize,
+      main_chat_language: setMainChatLanguage,
+      fewShotExampleFormat: setFewShotExampleFormat,
+      completionBatchSize: setCompletionBatchSize,
+      validationBatchSize: setValidationBatchSize,
       validationCount: setValidationCount,
       validationCountAudio: setValidationCountAudio,
       validationRoleFloor: setValidationRoleFloor,
@@ -942,6 +995,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       allowSelfValidationAudio: setAllowSelfValidationAudio,
       cellEditingFloor: setCellEditingFloor,
       allowTrackEditing: setAllowTrackEditing,
+      filmAndSources: setFilmAndSources,
       timingLocked: setTimingLocked,
       harmonize_min_role: setHarmonizeMinRole,
       bibleResourcesEnabled: setBibleResourcesEnabled,
@@ -970,6 +1024,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       setter((prev) => (sameSetting(prev, seed[key]) ? hydrated[key] : prev))
     }
     for (const key of changed) adoptDraft(key)
+    // The preset picker follows the endpoint, as it does when the page seeds.
+    if (changed.includes("endpoint")) {
+      setPresetId((prev) =>
+        sameSetting(prev, presetIdForEndpoint(seed.endpoint)) ? presetIdForEndpoint(hydrated.endpoint) : prev,
+      )
+    }
   }, [project, baseline, sharedSettingsFetched, sharedSettingsBlob])
 
   const effectiveCompletionApiKey = apiKey.trim() || completionUserKey.trim()
@@ -987,36 +1047,26 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       if (lastModelFetchKeyRef.current !== fetchKey) return
       setModels(list)
       setConnected(true)
-      const chosenModel = model || list[0] || ""
       if (list.length > 0 && !model) setModel(list[0])
       // Connect (and the auto-probe after a key/endpoint pause) is the moment
-      // the user believes BYOK is ready. Persist immediately so the workspace
-      // sparkle gate sees Custom OpenRouter without a second "Save changes".
-      if (id && provider === "custom") {
+      // the user believes BYOK is ready. Persist this DEVICE's part at once —
+      // the project's AI key and the "chooser answered" flag — so the
+      // workspace sparkle gate stops asking. AQU-2259: the provider, endpoint
+      // and model are the team's settings now, so they wait for "Save
+      // changes" like every other shared field, rather than changing what
+      // everyone drafts with because someone pressed Connect.
+      if (id && provider === "custom" && apiKey.trim()) {
         const latest = (await getProject(id)) ?? project ?? undefined
         if (latest) {
           const nextCompletion = buildCompletionSettings(latest.completionSettings, {
-            provider: "custom",
-            endpoint: trimmedEndpoint,
-            ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
-            model: chosenModel,
+            apiKey: apiKey.trim(),
           })
           await updateProject({
             ...latest,
             completionSettings: nextCompletion,
             aiProviderChosen: true,
           })
-          setBaseline((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  provider: "custom",
-                  endpoint: trimmedEndpoint,
-                  apiKey,
-                  model: chosenModel,
-                }
-              : prev,
-          )
+          setBaseline((prev) => (prev ? { ...prev, apiKey } : prev))
         }
       }
     } catch (err) {
@@ -1033,14 +1083,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     if (!baseline) return false
     return (
       name !== baseline.name ||
-      username !== baseline.username ||
       provider !== baseline.provider ||
       endpoint !== baseline.endpoint ||
       apiKey !== baseline.apiKey ||
       model !== baseline.model ||
       maxTokens !== baseline.maxTokens ||
       temperature !== baseline.temperature ||
-      llmHealthPenalty !== baseline.llmHealthPenalty ||
       topK !== baseline.top_k ||
       contextSize !== baseline.contextSize ||
       useOnlyValidatedExamples !== baseline.useOnlyValidatedExamples ||
@@ -1060,6 +1108,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       allowSelfValidationAudio !== baseline.allowSelfValidationAudio ||
       cellEditingFloor !== baseline.cellEditingFloor ||
       allowTrackEditing !== baseline.allowTrackEditing ||
+      filmAndSources !== baseline.filmAndSources ||
       timingLocked !== baseline.timingLocked ||
       harmonizeMinRole !== baseline.harmonize_min_role ||
       bibleResourcesEnabled !== baseline.bibleResourcesEnabled ||
@@ -1074,14 +1123,15 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       JSON.stringify(termMatching) !== JSON.stringify(baseline.termMatching)
     )
   }, [
-    baseline, name, username, provider, endpoint, apiKey,
-    model, maxTokens, temperature, llmHealthPenalty,
+    baseline, name, provider, endpoint, apiKey,
+    model, maxTokens, temperature,
     topK, contextSize, useOnlyValidatedExamples, fewShotExampleFormat, mainChatLanguage,
     completionBatchSize, validationBatchSize,
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
     validationRoleFloor, validationNamedUsers, allowSelfValidation, cellEditingFloor,
     validationRoleFloorAudio, validationNamedUsersAudio, allowSelfValidationAudio,
     allowTrackEditing,
+    filmAndSources,
     timingLocked,
     harmonizeMinRole, bibleResourcesEnabled, bibleEnrichments, audioMediaStrategy, decaySettings, geminiApiKey,
     precedingTargetCells, importExcludeFrontMatter, importCellUnit, smartQuotes, termMatching,
@@ -1192,21 +1242,30 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     // everything on the page was written.
     const changedFieldLabels: string[] = []
     try {
+      // AQU-2259: the drafting settings (the AI Instructions card), the model
+      // choice and the Health penalty are the team's settings, so they go to
+      // the shared settings below. Only the project's AI key stays on this
+      // device, where it always lived.
       const completionUpdates: Partial<CompletionSettings> = {}
-      if (provider !== baseline.provider) { completionUpdates.provider = provider; changedFieldLabels.push("AI provider") }
-      if (endpoint.trim() !== baseline.endpoint) { completionUpdates.endpoint = endpoint.trim(); changedFieldLabels.push("endpoint") }
-      if (apiKey !== baseline.apiKey) { completionUpdates.apiKey = apiKey || undefined; changedFieldLabels.push("API key") }
-      if (model !== baseline.model) { completionUpdates.model = model; changedFieldLabels.push("model") }
-      if (maxTokens !== baseline.maxTokens) { completionUpdates.maxTokens = maxTokens; changedFieldLabels.push("max tokens") }
-      if (temperature !== baseline.temperature) { completionUpdates.temperature = temperature; changedFieldLabels.push("temperature") }
-      if (llmHealthPenalty !== baseline.llmHealthPenalty) { completionUpdates.llmHealthPenalty = llmHealthPenalty; changedFieldLabels.push("health penalty") }
-      if (topK !== baseline.top_k) { completionUpdates.top_k = topK; changedFieldLabels.push("examples retrieved") }
-      if (contextSize !== baseline.contextSize) { completionUpdates.contextSize = contextSize; changedFieldLabels.push("context window") }
-      if (useOnlyValidatedExamples !== baseline.useOnlyValidatedExamples) { completionUpdates.useOnlyValidatedExamples = useOnlyValidatedExamples; changedFieldLabels.push("validated examples only") }
-      if (fewShotExampleFormat !== baseline.fewShotExampleFormat) { completionUpdates.fewShotExampleFormat = fewShotExampleFormat; changedFieldLabels.push("reference example format") }
-      if (mainChatLanguage !== baseline.main_chat_language) { completionUpdates.main_chat_language = mainChatLanguage || undefined; changedFieldLabels.push("assisted language") }
-      if (completionBatchSize !== baseline.completionBatchSize) { completionUpdates.completionBatchSize = completionBatchSize; changedFieldLabels.push("AI completions batch size") }
-      if (validationBatchSize !== baseline.validationBatchSize) { completionUpdates.validationBatchSize = validationBatchSize; changedFieldLabels.push("batch validation size") }
+      if (apiKey !== baseline.apiKey) { completionUpdates.apiKey = apiKey || undefined; changedFieldLabels.push(t("projectSettings.field.apiKey")) }
+      let draftingChanged = false
+      const noteDrafting = (changed: boolean, label: string) => {
+        if (!changed) return
+        draftingChanged = true
+        changedFieldLabels.push(label)
+      }
+      noteDrafting(provider !== baseline.provider, t("projectSettings.field.aiProvider"))
+      noteDrafting(endpoint.trim() !== baseline.endpoint, t("projectSettings.field.endpoint"))
+      noteDrafting(model !== baseline.model, t("projectSettings.field.model"))
+      noteDrafting(maxTokens !== baseline.maxTokens, t("projectSettings.field.maxTokens"))
+      noteDrafting(temperature !== baseline.temperature, t("projectSettings.field.temperature"))
+      noteDrafting(topK !== baseline.top_k, t("projectSettings.field.examplesRetrieved"))
+      noteDrafting(contextSize !== baseline.contextSize, t("projectSettings.field.contextWindow"))
+      noteDrafting(useOnlyValidatedExamples !== baseline.useOnlyValidatedExamples, t("projectSettings.field.validatedExamplesOnly"))
+      noteDrafting(fewShotExampleFormat !== baseline.fewShotExampleFormat, t("projectSettings.field.referenceExampleFormat"))
+      noteDrafting(mainChatLanguage !== baseline.main_chat_language, t("projectSettings.field.assistedLanguage"))
+      noteDrafting(completionBatchSize !== baseline.completionBatchSize, t("projectSettings.field.completionBatchSize"))
+      noteDrafting(validationBatchSize !== baseline.validationBatchSize, t("projectSettings.field.validationBatchSize"))
 
       const localUpdates: Partial<ProjectRecord> = {}
       // AQU-765: rename. Trim first so a whitespace-only entry is rejected
@@ -1218,13 +1277,13 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       const trimmedName = name.trim()
       if (trimmedName !== baseline.name) {
         if (!trimmedName) {
-          setNameError("Enter a project title.")
+          setNameError(t("projectSettings.save.nameRequired"))
           return false
         }
         if (isCloudProject) {
           const jwt = getJwt()
           if (!jwt) {
-            setSaveError("You're signed out. Sign in again to rename this project.")
+            setSaveError(t("projectSettings.save.signedOutRenameError"))
             return false
           }
           try {
@@ -1235,17 +1294,16 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 role: resolveRoleName(t, ROLE.MAINTAINER, { plural: true }),
               }))
             } else {
-              setSaveError(err instanceof Error ? err.message : "Renaming the project failed.")
+              setSaveError(err instanceof Error ? err.message : t("projectSettings.save.renameFailedGeneric"))
             }
             return false
           }
         }
         localUpdates.name = trimmedName
-        changedFieldLabels.push("project title")
+        changedFieldLabels.push(t("projectSettings.field.projectName"))
       }
-      if (username !== baseline.username) { localUpdates.username = username; changedFieldLabels.push("username") }
-      if (!decayEqual(decaySettings, baseline.decaySettings)) { localUpdates.decaySettings = decaySettings; changedFieldLabels.push("decay settings") }
-      if (audioMediaStrategy !== baseline.audioMediaStrategy) { localUpdates.audioMediaStrategy = audioMediaStrategy; changedFieldLabels.push("audio media strategy") }
+      if (!decayEqual(decaySettings, baseline.decaySettings)) { localUpdates.decaySettings = decaySettings; changedFieldLabels.push(t("projectSettings.field.decaySettings")) }
+      if (audioMediaStrategy !== baseline.audioMediaStrategy) { localUpdates.audioMediaStrategy = audioMediaStrategy; changedFieldLabels.push(t("projectSettings.field.audioMediaStrategy")) }
       // geminiApiKey handled below after `latest` is fetched, so voices/castAssignments are preserved.
       if (
         autoSyncEnabled !== baseline.autoSyncEnabled ||
@@ -1254,13 +1312,14 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         localUpdates.syncSettings = {
           autoSync: { enabled: autoSyncEnabled, intervalMinutes: Math.max(1, autoSyncInterval) },
         }
-        changedFieldLabels.push("auto-sync")
+        changedFieldLabels.push(t("projectSettings.field.autoSync"))
       }
 
       const geminiKeyChanged = geminiApiKey !== baseline.geminiApiKey
-      if (geminiKeyChanged) changedFieldLabels.push("voice API key")
+      if (geminiKeyChanged) changedFieldLabels.push(t("projectSettings.field.voiceApiKey"))
       const hasLocalWork =
         Object.keys(localUpdates).length > 0 || Object.keys(completionUpdates).length > 0 || geminiKeyChanged
+        || draftingChanged
       if (hasLocalWork) {
         const latest = (await getProject(id)) ?? project ?? undefined
         if (!latest) throw new Error("Project not found")
@@ -1276,45 +1335,64 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
           ...localUpdates,
           completionSettings: nextCompletion,
           ttsSettings: nextTtsSettings,
-          ...(Object.keys(completionUpdates).length > 0 ? { aiProviderChosen: true } : {}),
+          ...(Object.keys(completionUpdates).length > 0 || draftingChanged ? { aiProviderChosen: true } : {}),
         })
       }
 
       const sharedUpdates: ProjectWideSettings = {}
+      // AQU-2259: the whole drafting value, not only the changed fields — the
+      // key is replaced as one object, so a partial one would reset the rest.
+      if (draftingChanged) {
+        sharedUpdates.draftingSettings = draftingSettingsFrom({
+          provider,
+          endpoint: endpoint.trim(),
+          model,
+          maxTokens,
+          temperature,
+          top_k: topK,
+          contextSize,
+          useOnlyValidatedExamples,
+          main_chat_language: mainChatLanguage,
+          fewShotExampleFormat,
+          completionBatchSize,
+          validationBatchSize,
+        })
+      }
       // AQU-1771: null → undefined, which the merged blob drops: the project
       // goes back to the organization's default.
-      if (validationCount !== baseline.validationCount) { sharedUpdates.validationCount = validationCount ?? undefined; changedFieldLabels.push("validation count") }
+      if (validationCount !== baseline.validationCount) { sharedUpdates.validationCount = validationCount ?? undefined; changedFieldLabels.push(t("projectSettings.field.validationCount")) }
       if (validationCountAudio !== baseline.validationCountAudio) {
         sharedUpdates.validationCountAudio = validationCountAudio ?? undefined
-        changedFieldLabels.push("audio validation count")
+        changedFieldLabels.push(t("projectSettings.field.audioValidationCount"))
       }
-      if (validationRoleFloor !== baseline.validationRoleFloor) { sharedUpdates.validationRoleFloor = validationRoleFloor; changedFieldLabels.push("validation role floor") }
+      if (validationRoleFloor !== baseline.validationRoleFloor) { sharedUpdates.validationRoleFloor = validationRoleFloor; changedFieldLabels.push(t("projectSettings.field.validationRoleFloor")) }
       if (JSON.stringify(validationNamedUsers) !== JSON.stringify(baseline.validationNamedUsers)) {
         sharedUpdates.validationNamedUsers = validationNamedUsers
-        changedFieldLabels.push("named validators")
+        changedFieldLabels.push(t("projectSettings.field.namedValidators"))
       }
-      if (allowSelfValidation !== baseline.allowSelfValidation) { sharedUpdates.allowSelfValidation = allowSelfValidation; changedFieldLabels.push("self-validation") }
+      if (allowSelfValidation !== baseline.allowSelfValidation) { sharedUpdates.allowSelfValidation = allowSelfValidation; changedFieldLabels.push(t("projectSettings.field.selfValidation")) }
       // AQU-1768: null → undefined, which the merged blob drops: the project
       // goes back to the organization's default, as the counts above do.
-      if (validationRoleFloorAudio !== baseline.validationRoleFloorAudio) { sharedUpdates.validationRoleFloorAudio = validationRoleFloorAudio ?? undefined; changedFieldLabels.push("minimum role to validate recordings") }
-      if (JSON.stringify(validationNamedUsersAudio) !== JSON.stringify(baseline.validationNamedUsersAudio)) { sharedUpdates.validationNamedUsersAudio = validationNamedUsersAudio; changedFieldLabels.push("named recording validators") }
-      if (allowSelfValidationAudio !== baseline.allowSelfValidationAudio) { sharedUpdates.allowSelfValidationAudio = allowSelfValidationAudio ?? undefined; changedFieldLabels.push("validating your own recordings") }
-      if (cellEditingFloor !== baseline.cellEditingFloor) { sharedUpdates.cellEditingFloor = cellEditingFloor ?? undefined; changedFieldLabels.push("who can add and remove cells") }
-      if (allowTrackEditing !== baseline.allowTrackEditing) { sharedUpdates.allowTrackEditing = allowTrackEditing ?? undefined; changedFieldLabels.push("timeline track editing") }
-      if (timingLocked !== baseline.timingLocked) { sharedUpdates.timingLocked = timingLocked ?? undefined; changedFieldLabels.push("the timing lock") }
-      if (harmonizeMinRole !== baseline.harmonize_min_role) { sharedUpdates.harmonize_min_role = harmonizeMinRole; changedFieldLabels.push("harmonize min role") }
-      if (bibleResourcesEnabled !== baseline.bibleResourcesEnabled) { sharedUpdates.bibleResourcesEnabled = bibleResourcesEnabled; changedFieldLabels.push(isBibleDataExperimentOn(project) ? "Bible data" : "Bible resources") }
-      if (!sameSetting(bibleEnrichments, baseline.bibleEnrichments)) { sharedUpdates.bibleEnrichments = bibleEnrichments; changedFieldLabels.push("Bible data enrichments") }
-      if (importExcludeFrontMatter !== baseline.importExcludeFrontMatter) { sharedUpdates.importExcludeFrontMatter = importExcludeFrontMatter; changedFieldLabels.push("USFM front matter") }
-      if (importCellUnit !== baseline.importCellUnit) { sharedUpdates.importCellUnit = importCellUnit; changedFieldLabels.push("import cell unit") }
-      if (smartQuotes !== baseline.smartQuotes) { sharedUpdates.smartQuotes = smartQuotes; changedFieldLabels.push("smart quotes") }
+      if (validationRoleFloorAudio !== baseline.validationRoleFloorAudio) { sharedUpdates.validationRoleFloorAudio = validationRoleFloorAudio ?? undefined; changedFieldLabels.push(t("projectSettings.field.audioValidationRoleFloor")) }
+      if (JSON.stringify(validationNamedUsersAudio) !== JSON.stringify(baseline.validationNamedUsersAudio)) { sharedUpdates.validationNamedUsersAudio = validationNamedUsersAudio; changedFieldLabels.push(t("projectSettings.field.namedAudioValidators")) }
+      if (allowSelfValidationAudio !== baseline.allowSelfValidationAudio) { sharedUpdates.allowSelfValidationAudio = allowSelfValidationAudio ?? undefined; changedFieldLabels.push(t("projectSettings.field.selfValidationAudio")) }
+      if (cellEditingFloor !== baseline.cellEditingFloor) { sharedUpdates.cellEditingFloor = cellEditingFloor ?? undefined; changedFieldLabels.push(t("projectSettings.field.cellEditingFloor")) }
+      if (allowTrackEditing !== baseline.allowTrackEditing) { sharedUpdates.allowTrackEditing = allowTrackEditing ?? undefined; changedFieldLabels.push(t("projectSettings.field.trackEditing")) }
+      if (filmAndSources !== baseline.filmAndSources) { sharedUpdates.filmAndSources = filmAndSources ?? undefined; changedFieldLabels.push(t("projectSettings.field.filmAndSources")) }
+      if (timingLocked !== baseline.timingLocked) { sharedUpdates.timingLocked = timingLocked ?? undefined; changedFieldLabels.push(t("projectSettings.field.timingLock")) }
+      if (harmonizeMinRole !== baseline.harmonize_min_role) { sharedUpdates.harmonize_min_role = harmonizeMinRole; changedFieldLabels.push(t("projectSettings.field.harmonizeMinRole")) }
+      if (bibleResourcesEnabled !== baseline.bibleResourcesEnabled) { sharedUpdates.bibleResourcesEnabled = bibleResourcesEnabled; changedFieldLabels.push(t("projectSettings.field.bibleData")) }
+      if (!sameSetting(bibleEnrichments, baseline.bibleEnrichments)) { sharedUpdates.bibleEnrichments = bibleEnrichments; changedFieldLabels.push(t("projectSettings.field.bibleEnrichments")) }
+      if (importExcludeFrontMatter !== baseline.importExcludeFrontMatter) { sharedUpdates.importExcludeFrontMatter = importExcludeFrontMatter; changedFieldLabels.push(t("projectSettings.field.usfmFrontMatter")) }
+      if (importCellUnit !== baseline.importCellUnit) { sharedUpdates.importCellUnit = importCellUnit; changedFieldLabels.push(t("projectSettings.field.importCellUnit")) }
+      if (smartQuotes !== baseline.smartQuotes) { sharedUpdates.smartQuotes = smartQuotes; changedFieldLabels.push(t("projectSettings.field.smartQuotes")) }
       if (precedingTargetCells !== baseline.precedingTargetCells) {
         sharedUpdates.draftContext = { precedingTargetCells }
-        changedFieldLabels.push("draft context")
+        changedFieldLabels.push(t("projectSettings.field.draftContext"))
       }
       if (JSON.stringify(termMatching) !== JSON.stringify(baseline.termMatching)) {
         sharedUpdates.termMatching = termMatching
-        changedFieldLabels.push("term matching affixes")
+        changedFieldLabels.push(t("projectSettings.field.termMatching"))
       }
 
       if (Object.keys(sharedUpdates).length > 0) {
@@ -1330,7 +1408,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             },
             labelKey: "editor.history.stepSettings",
             labelParams: { count: Object.keys(sharedUpdates).length },
-          }, id ? { projectId: id, username: session?.username || project?.username || "local" } : undefined)
+          }, id ? { projectId: id, username: authorNameFor(session?.username, project?.username) } : undefined)
         }
         if (out.kind === "conflict") {
           toast.add({
@@ -1339,12 +1417,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               username: settingsEditorName(out.latest.updatedBy) ?? t("projectSettings.save.conflictFallbackUsername"),
             }),
           })
-          setSaveError("Someone else updated shared settings. Refresh to reapply your edits.")
+          setSaveError(t("projectSettings.save.conflictError"))
           return false
         }
         if (out.kind === "blocked") {
           if (out.reason === "offline") {
-            setSaveError("You're offline. Reconnect to save shared fields.")
+            setSaveError(t("projectSettings.save.offlineError"))
           } else {
             setSaveError(t("projectSettings.permission.onlyRoleCanModify", {
               role: resolveRoleName(t, ROLE.MAINTAINER, { plural: true }),
@@ -1353,7 +1431,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
           return false
         }
         if (out.kind === "error") {
-          setSaveError(out.message || "Saving shared settings failed.")
+          setSaveError(out.message || t("projectSettings.save.sharedSettingsFailedGeneric"))
           return false
         }
       }
@@ -1373,14 +1451,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       // the seed and leave the form dirty (AQU-1744).
       const newBaseline: Baseline = {
         name: trimmedName,
-        username,
         provider,
         endpoint: endpoint.trim(),
         apiKey,
         model,
         maxTokens,
         temperature,
-        llmHealthPenalty,
         top_k: topK,
         contextSize,
         useOnlyValidatedExamples,
@@ -1400,6 +1476,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         allowSelfValidationAudio,
         cellEditingFloor,
         allowTrackEditing,
+        filmAndSources,
         timingLocked,
         harmonize_min_role: harmonizeMinRole,
         bibleResourcesEnabled,
@@ -1433,10 +1510,14 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       // to also navigate away (see handleSaveAndClose).
       const message =
         changedFieldLabels.length === 0
-          ? "No changes to save."
+          ? t("projectSettings.save.noChanges")
           : changedFieldLabels.length <= 3
-            ? `Saved: ${changedFieldLabels.join(", ")}.`
-            : `Saved ${changedFieldLabels.length} changes: ${changedFieldLabels.slice(0, 3).join(", ")}, +${changedFieldLabels.length - 3} more.`
+            ? t("projectSettings.save.savedShort", { list: changedFieldLabels.join(", ") })
+            : t("projectSettings.save.savedMany", {
+                count: changedFieldLabels.length,
+                list: changedFieldLabels.slice(0, 3).join(", "),
+                more: changedFieldLabels.length - 3,
+              })
       setSavedMessage(message)
       if (savedMessageTimerRef.current != null) window.clearTimeout(savedMessageTimerRef.current)
       savedMessageTimerRef.current = window.setTimeout(() => setSavedMessage(null), 4000)
@@ -1448,8 +1529,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       setSaving(false)
     }
   }, [
-    id, baseline, name, username, provider, endpoint, apiKey,
-    model, maxTokens, temperature, llmHealthPenalty,
+    id, baseline, name, provider, endpoint, apiKey,
+    model, maxTokens, temperature,
     topK, contextSize, useOnlyValidatedExamples, fewShotExampleFormat, mainChatLanguage,
     completionBatchSize, validationBatchSize,
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
@@ -1470,7 +1551,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     // `allowTrackEditing` arrived with PR #474 carrying the same hole, and the
     // merge that brought it here is where it became visible — dev's own
     // handleSave list never named it either.
-    cellEditingFloor, timingLocked, allowTrackEditing,
+    cellEditingFloor, timingLocked, allowTrackEditing, filmAndSources,
     bibleResourcesEnabled, bibleEnrichments, audioMediaStrategy, decaySettings, geminiApiKey, patchShared, refresh, applyBaseline, project,
     precedingTargetCells, importExcludeFrontMatter, importCellUnit, smartQuotes, termMatching, getJwt, isCloudProject, t,
   ])
@@ -1536,19 +1617,19 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const ALL_SECTIONS: SettingsSection[] = [
     // AQU-1525: the counterpart of section-source-link — exactly one of the two
     // is ever visible, keyed off whether this project already has an upstream.
-    { id: "section-link-source", label: "Link source", keywords: ["source", "link", "linked", "upstream", "attach", "share source", "mirror"], visible: !hasSourceLink },
-    { id: "section-source-link", label: "Source link", keywords: ["source", "linked", "upstream", "detach"], visible: hasSourceLink },
-    { id: "section-inherited-settings", label: "Inherited settings", keywords: ["inherit", "copy", "brief", "knowledge", "workflow", "detach", "upstream"], visible: hasSourceLink },
-    { id: "section-upstream-changes", label: "Upstream changes", keywords: ["upstream", "changes", "repin", "review", "mirror", "stale"], visible: hasLiveSourceLink },
-    { id: "section-dcs-upstream", label: "Door43 upstream", keywords: ["door43", "dcs", "unfoldingword", "upstream", "check for updates", "import changes", "release"], visible: hasDcsUpstream },
-    { id: "section-project-info", label: "Project Info", keywords: ["name", "source language", "target language", "smart quotes", "curly quotes", "quotation marks", "typography"] },
+    { id: "section-link-source", label: t("projectSettings.section.sourceLink"), keywords: ["source", "link", "linked", "upstream", "attach", "share source", "mirror"], visible: !hasSourceLink },
+    { id: "section-source-link", label: t("projectSettings.section.sourceLink"), keywords: ["source", "linked", "upstream", "detach"], visible: hasSourceLink },
+    { id: "section-inherited-settings", label: t("projectSettings.inherit.title", { upstream: inheritedUpstreamName ?? project?.sourceProjectId ?? "" }), keywords: ["settings from", "inherited settings", "inherit", "copy", "brief", "knowledge", "workflow", "detach", "upstream"], visible: hasSourceLink },
+    { id: "section-upstream-changes", label: t("projectSettings.section.upstreamChanges"), keywords: ["upstream", "changes", "repin", "review", "mirror", "stale"], visible: hasLiveSourceLink },
+    { id: "section-dcs-upstream", label: t("projectSettings.section.dcsUpstream"), keywords: ["door43", "dcs", "unfoldingword", "upstream", "check for updates", "import changes", "release"], visible: hasDcsUpstream },
+    { id: "section-project-info", label: t("projectSettings.section.projectInfo"), keywords: ["name", "source language", "target language", "smart quotes", "curly quotes", "quotation marks", "typography"] },
     // AQU-1688: the Language profile for checks lives here too, while this
     // device has the Bible data experiment on (AQU-1685).
     {
       id: "section-languages",
-      label: "Languages",
+      label: t("projectSettings.section.languages"),
       keywords: [
-        "languages", "target lanes", "lane", "target language", "dialect",
+        "languages", "language lanes", "language lane", "target lanes", "lane", "target language", "dialect",
         ...(bibleDataExperiment ? ["language profile", "quotation marks", "quote marks", "bible data checks"] : []),
       ],
     },
@@ -1560,7 +1641,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     bibleDataExperiment
       ? {
           id: "section-bible-resources",
-          label: "Bible data",
+          label: t("bibleData.card.title"),
           keywords: [
             "bible data", "bible resources", "aquifer", "bibletranslation", "reference", "scholarly",
             "enrichments", "voices", "who's who", "passage structure", "original language", "greek",
@@ -1568,41 +1649,43 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             "places", "maps", "checks", "macula", "opentext", "acai", "unfoldingword", "data sources", "license",
           ],
         }
-      : { id: "section-bible-resources", label: "Bible resources", keywords: ["bible resources", "aquifer", "bibletranslation", "reference", "scholarly", "translation notes"] },
-    { id: "section-import", label: "Import", keywords: ["import", "usfm", "front matter", "book title", "book name", "introduction", "toc", "running header", "paratext", "door43"] },
-    { id: "section-user", label: "User", keywords: ["username", "author"] },
-    { id: "section-members", label: "Team members", keywords: ["members", "invite", "invite link", "link", "join", "share", "access", "role", "roster", "collaborator"], visible: canSeeMembers },
+      : { id: "section-bible-resources", label: t("bibleData.card.title"), keywords: ["bible resources", "aquifer", "bibletranslation", "reference", "scholarly", "translation notes"] },
+    { id: "section-import", label: t("projectSettings.section.import"), keywords: ["import", "usfm", "front matter", "book title", "book name", "introduction", "toc", "running header", "paratext", "door43"] },
+    // AQU-2259: only the "this setting moved" note is left here, until it expires.
+    { id: "section-user", label: t("projectSettings.section.user"), keywords: ["username", "author"], visible: settingMovedNotesShowing() },
+    { id: "section-members", label: t("projectSettings.section.members"), keywords: ["members", "invite", "invite link", "link", "join", "share", "access", "role", "roster", "collaborator", "member list", "progress", "visibility", "who can see"], visible: canSeeMembers },
     // AQU-1068: a permission, so it lives with the roles rather than in the
     // Timeline card it grew out of — it governs ordinary text files now, not
     // just the timeline's silences.
-    { id: "section-cell-editing", label: "Content structure", keywords: ["add cell", "remove cell", "insert", "delete", "structure", "verse", "line", "row", "restructure", "permission", "role"] },
+    { id: "section-cell-editing", label: t("projectSettings.cellEditing.sectionTitle"), keywords: ["add cell", "remove cell", "insert", "delete", "structure", "verse", "line", "row", "restructure", "permission", "role"] },
     // AQU-1672: the brief gates Autopilot starts (AQU-827) but had no entry of
     // its own anywhere in settings — it was reachable only by opening Living
     // Memory's Instructions pane and clicking the breadcrumb back up to the
     // index. Its own section id gives it a row in the AI & completion pane AND
     // makes a search for "brief" land on it.
-    { id: "section-brief", label: "Translation brief", keywords: ["brief", "translation brief", "skopos", "purpose", "audience", "register", "literalness", "style guide", "living memory"] },
-    { id: "section-ai-instructions", label: "AI Instructions", keywords: ["ai", "llm", "instructions", "batch size", "completions batch", "validation batch", "batch validate", "top_k", "examples", "context window", "assistant language", "few shot"] },
-    { id: "section-draft-context", label: "Draft Context", keywords: ["draft context", "preceding cells", "left context", "paragraph drafting", "context budget"] },
-    { id: "section-advanced-llm", label: "Advanced LLM", keywords: ["provider", "endpoint", "api key", "model", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom"] },
-    { id: "section-voice", label: "Voice", keywords: ["tts", "voice studio", "audio", "gemini", "elevenlabs", "api key", "tts key"] },
-    { id: "section-local-models", label: "Local AI models", keywords: ["whisper", "mms", "transcription", "model", "download", "offline", "local ai"] },
-    { id: "section-validation", label: "Validation", keywords: ["validation count", "approvals", "audio validation"] },
-    { id: "section-decay", label: "Health", keywords: ["health", "decay", "decay threshold", "half life", "retrieval support", "max hops", "attention threshold"] },
-    { id: "section-audio-media", label: "Audio Media", keywords: ["audio media strategy", "lazy", "eager"] },
-    { id: "section-timeline", label: "Timeline", keywords: ["timeline", "add line", "create cell", "silence", "dubbing", "lines", "track", "tracks", "multi-track", "folder", "colour", "color"] },
-    { id: "section-git-sync", label: "Git Sync", keywords: ["git", "sync", "auto sync", "interval", "branch", "clone"], visible: hasGitOrigin },
+    { id: "section-brief", label: t("autopilot.readiness.brief.label"), keywords: ["brief", "translation brief", "skopos", "purpose", "audience", "register", "literalness", "style guide", "living memory"] },
+    { id: "section-ai-instructions", label: t("projectSettings.section.aiInstructions"), keywords: ["ai", "llm", "instructions", "batch size", "completions batch", "validation batch", "batch validate", "top_k", "examples", "context window", "assistant language", "few shot", "ai drafting", "drafting", "ai instructions"] },
+    { id: "section-draft-context", label: t("projectSettings.section.draftContext"), keywords: ["draft context", "preceding cells", "left context", "paragraph drafting", "context budget"] },
+    { id: "section-advanced-llm", label: t("projectSettings.section.advancedLlm"), keywords: ["provider", "endpoint", "api key", "model", "ai model", "advanced", "llm", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom"] },
+    // AQU-1758: the Voice Studio is the Voices tab now; its old name still finds it.
+    { id: "section-voice", label: t("projectSettings.section.voice"), keywords: ["tts", "voices", "cast", "voice studio", "audio", "gemini", "elevenlabs", "api key", "tts key"] },
+    { id: "section-local-models", label: t("projectSettings.section.localModels"), keywords: ["whisper", "mms", "transcription", "model", "download", "offline", "local ai", "local models", "on-device"] },
+    { id: "section-validation", label: t("projectSettings.section.validation"), keywords: ["validation count", "approvals", "audio validation"] },
+    { id: "section-decay", label: t("projectSettings.decay.summary"), keywords: ["health", "decay", "decay threshold", "half life", "retrieval support", "max hops", "attention threshold"] },
+    { id: "section-audio-media", label: t("projectSettings.section.audioMedia"), keywords: ["audio loading", "media", "audio media", "lazy", "eager", "stream"] },
+    { id: "section-timeline", label: t("editor.timeline.title"), keywords: ["timeline", "add line", "create cell", "silence", "dubbing", "lines", "track", "tracks", "multi-track", "folder", "colour", "color", "film", "video", "sources"] },
+    { id: "section-git-sync", label: t("projectSettings.section.gitSync"), keywords: ["git", "sync", "auto sync", "interval", "branch", "clone"], visible: hasGitOrigin },
     // AQU-1272: the affix inventory and fold defaults live in this section, so
     // the words a user searches for them by have to reach it.
-    { id: "section-terminology", label: "Terminology", keywords: ["terminology", "termbase", "glossary", "concepts", "matching", "prefix", "prefixes", "suffix", "suffixes", "affix", "affixes", "marks", "vowel points", "forms"] },
-    { id: "section-termbase-sharing", label: "Term Base Sharing", keywords: ["term base", "termbase", "publish", "subscribe", "org", "shared", "glossary"], visible: SHOW_TERMBASE_SHARING_IN_SETTINGS },
-    { id: "section-ai-metrics", label: "AI Metrics", keywords: ["post-edit", "edit distance", "ai metrics", "magnitude", "levenshtein", "ned", "biblica"] },
+    { id: "section-terminology", label: t("projectSettings.section.terminology"), keywords: ["terminology", "termbase", "glossary", "concepts", "matching", "prefix", "prefixes", "suffix", "suffixes", "affix", "affixes", "marks", "vowel points", "forms"] },
+    { id: "section-termbase-sharing", label: t("projectSettings.section.termbaseSharing"), keywords: ["term base", "termbase", "publish", "subscribe", "org", "shared", "glossary"], visible: SHOW_TERMBASE_SHARING_IN_SETTINGS },
+    { id: "section-ai-metrics", label: t("projectSettings.section.aiMetrics"), keywords: ["post-edit", "edit distance", "ai metrics", "magnitude", "levenshtein", "ned", "biblica"] },
     // Monday.com board sync — cloud (synced) projects only: the link lives on
     // the server against the project's org connection.
-    { id: "section-monday", label: "Monday.com", keywords: ["monday", "integration", "board", "push", "progress sync", "project management"], visible: isCloudProject },
+    { id: "section-monday", label: t("projectSettings.section.monday"), keywords: ["monday", "integration", "board", "push", "progress sync", "project management"], visible: isCloudProject },
     // AQU-804: Airtable table sync, the same shape (and the same cloud-only rule).
-    { id: "section-airtable", label: "Airtable", keywords: ["airtable", "integration", "table", "base", "push", "progress sync", "episodes", "project management"], visible: isCloudProject },
-    { id: "section-experimental", label: "Experimental", keywords: ["experimental", "flags", "beta", "preview", "contextual", "contextual drafting"] },
+    { id: "section-airtable", label: t("projectSettings.section.airtable"), keywords: ["airtable", "integration", "table", "base", "push", "progress sync", "episodes", "project management"], visible: isCloudProject },
+    { id: "section-experimental", label: t("projectSettings.section.experimental"), keywords: ["experimental", "flags", "beta", "preview", "contextual", "contextual drafting"] },
   ]
 
   // ── Search filter ──────────────────────────────────────────────────────────
@@ -1650,8 +1733,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     sectionIds: string[]
     /** Roster / DataTable panes use Page `wide` (max-w-6xl); form panes stay default. */
     wide?: boolean
-    /** Hub group label on the settings index (NavList). */
-    hub: string
+    /** Which heading the settings index lists it under (HUB_LABEL). */
+    hub: SettingsHub
     /** Omit from the settings index (still deep-linkable as a pane). */
     hideFromIndex?: boolean
     /** Parent group id when this is a nested detail pane (breadcrumb trail). */
@@ -1659,27 +1742,27 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   }[] = [
     {
       id: "general",
-      label: "General",
-      description: `Name, languages, content structure, username, ${bibleDataExperiment ? "Bible data" : "Bible resources"}`,
+      label: t("common.general"),
+      description: t("projectSettings.group.generalDescription"),
       icon: SlidersHorizontal,
-      hub: "Project",
+      hub: "project",
       sectionIds: ["section-project-info", "section-languages", "section-cell-editing", "section-bible-resources", "section-import", "section-user"],
     },
     {
       id: "members",
-      label: "Members",
-      description: "Who can access this project, invites, and roles",
+      label: t("projectSettings.group.membersLabel"),
+      description: t("projectSettings.group.membersDescription"),
       icon: Users,
-      hub: "Project",
+      hub: "project",
       wide: true,
       sectionIds: ["section-members"],
     },
     {
       id: "source-sync",
-      label: "Source & sync",
-      description: "Linked source project, upstream changes, git sync",
+      label: t("projectSettings.group.sourceSyncLabel"),
+      description: t("projectSettings.group.sourceSyncDescription"),
       icon: Link2,
-      hub: "Project",
+      hub: "project",
       sectionIds: [
         "section-link-source",
         "section-source-link",
@@ -1691,10 +1774,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     },
     {
       id: "ai",
-      label: "AI & completion",
-      description: "Instructions, draft context, provider, voice, terminology",
+      label: t("projectSettings.group.aiLabel"),
+      description: t("projectSettings.group.aiDescription"),
       icon: Sparkles,
-      hub: "AI & media",
+      hub: "aiMedia",
       // The system prompt (and the rest of Living Memory) lives on the
       // standalone /project/:id/memory surface; this pane keeps a cross-link
       // NavRow to memory/instructions instead of a nested settings page.
@@ -1706,47 +1789,52 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     },
     {
       id: "validation",
-      label: "Validation & health",
-      description: "Approvals, harmonization, staleness decay",
+      label: t("projectSettings.group.validationLabel"),
+      description: t("projectSettings.group.validationDescription"),
       icon: ShieldCheck,
-      hub: "Quality",
+      hub: "quality",
       sectionIds: ["section-validation", "section-decay"],
     },
     {
       id: "audio-media",
-      label: "Audio media",
-      description: "How audio is fetched from storage",
+      label: t("projectSettings.group.audioMediaLabel"),
+      description: t("projectSettings.group.audioMediaDescription"),
       icon: AudioLines,
-      hub: "AI & media",
+      hub: "aiMedia",
       sectionIds: ["section-audio-media", "section-timeline"],
     },
     {
       id: "metrics",
-      label: "AI metrics",
-      description: "Post-edit distance and AI usage",
+      label: t("projectSettings.group.metricsLabel"),
+      description: t("projectSettings.group.metricsDescription"),
       icon: BarChart3,
-      hub: "AI & media",
+      hub: "aiMedia",
       sectionIds: ["section-ai-metrics"],
     },
     {
       id: "integrations",
-      label: "Integrations",
-      description: "Monday.com and Airtable sync",
+      label: t("projectSettings.group.integrationsLabel"),
+      description: t("projectSettings.group.integrationsDescription"),
       icon: Plug,
-      hub: "Integrations",
+      hub: "integrations",
       sectionIds: ["section-monday", "section-airtable"],
     },
     {
       id: "experimental",
-      label: "Experimental",
-      description: "Autopilot, extensions, and other early features",
+      label: t("projectSettings.section.experimental"),
+      description: t("projectSettings.group.experimentalDescription"),
       icon: FlaskConical,
-      hub: "Integrations",
+      hub: "integrations",
       sectionIds: ["section-experimental"],
     },
   ]
 
-  const HUB_ORDER = ["Project", "AI & media", "Quality", "Integrations"] as const
+  const HUB_LABEL: Record<SettingsHub, string> = {
+    project: t("projectSettings.hub.project"),
+    aiMedia: t("projectSettings.hub.aiMedia"),
+    quality: t("projectSettings.hub.quality"),
+    integrations: t("projectSettings.group.integrationsLabel"),
+  }
 
   const visibleSectionIdSet = new Set(visibleSections.map((s) => s.id))
   const visibleGroups = SETTINGS_GROUPS
@@ -1869,10 +1957,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   }
 
   const pageTitle = lowerQuery || !activeGroup
-    ? "Project settings"
+    ? t("projectSettings.pageTitle")
     : activeGroup.label
   const pageDescription = lowerQuery || !activeGroup
-    ? "Configure this project. Changes apply to everyone with access."
+    ? t("projectSettings.pageDescription")
     : activeGroup.description
   // Table panes (Members roster) need the wider content well; form panes stay
   // intentional/narrow. Search flattens across groups → keep default width.
@@ -1883,14 +1971,18 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
 
   // Hints for index NavRows — short current-value summaries (org / Preferences pattern).
   const groupHints: Record<string, string> = {
-    general: name.trim() || "Untitled",
-    members: "Roles & invites",
-    "source-sync": hasSourceLink ? "Linked" : hasGitOrigin ? "Git" : "None",
-    ai: provider === "frontier" ? "Frontier" : "Custom",
+    general: name.trim() || t("projectSettings.hint.untitled"),
+    members: t("projectSettings.hint.rolesInvites"),
+    "source-sync": hasSourceLink
+      ? t("projectSettings.hint.linked")
+      : hasGitOrigin ? t("projectSettings.hint.git") : t("common.none"),
+    ai: provider === "frontier"
+      ? t("projectSettings.advancedLlm.providerFrontierName")
+      : t("projectSettings.hint.custom"),
     validation: resolveRoleName(t, validationRoleFloor),
     "audio-media": t(AUDIO_MEDIA_STRATEGY_LABELS[audioMediaStrategy].nameKey),
-    metrics: "Post-edit",
-    integrations: "Monday.com, Airtable",
+    metrics: t("projectSettings.hint.postEdit"),
+    integrations: t("projectSettings.hint.integrations"),
   }
 
   const headerActions = (
@@ -1961,11 +2053,11 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       orgId={project?.orgId}
       trail={[
         ...(fromEditor
-          ? [{ label: "Editor", onClick: () => requestNavigate(editorPath) }]
+          ? [{ label: t("projectSettings.breadcrumbEditor"), onClick: () => requestNavigate(editorPath) }]
           : []),
         onSettingsPane
-          ? { label: "Settings", to: settingsHref() }
-          : { label: "Settings" },
+          ? { label: t("projectSettings.backLinkLabel"), to: settingsHref() }
+          : { label: t("projectSettings.backLinkLabel") },
         ...(breadcrumbParent
           ? [{ label: breadcrumbParent.label, to: settingsHref(breadcrumbParent.id) }]
           : []),
@@ -2076,7 +2168,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                   const rows = indexGroups.filter((g) => g.hub === hub)
                   if (rows.length === 0) return null
                   return (
-                    <NavList key={hub} label={hub}>
+                    <NavList key={hub} label={HUB_LABEL[hub]}>
                       {rows.map((g) => (
                         <NavRow
                           key={g.id}
@@ -2145,6 +2237,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               sourceProjectId={project.sourceProjectId}
               settings={sharedSettingsBlob}
               canEdit={canEditShared}
+              locked={sharedDisabledTooltip}
               onPatch={patchShared}
             />
           </div>
@@ -2166,7 +2259,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         {searchGroupLabel("section-project-info")}
         {sectionsToRender.some((s) => s.id === "section-project-info") && (
           <div id="section-project-info">
-            <SettingsGroup label={t("projectSettings.section.projectInfo")}>
+            <SettingsGroup label={t("projectSettings.section.projectInfo")} locked={!canRenameProject ? sharedDisabledTooltip : null}>
               <SettingsRow
                 label={<label htmlFor="pname">{t("projectSettings.info.titleLabel")}</label>}
                 description={
@@ -2284,7 +2377,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             {/* AQU-1068. One setting answers WHO; the file's own nature answers
                 WHERE — a text file takes a cell anywhere, a subtitle file only
                 in a gap — so nothing here mentions timings or media. */}
-            <SettingsGroup label={t("projectSettings.cellEditing.sectionTitle")}>
+            <SettingsGroup label={t("projectSettings.cellEditing.sectionTitle")} locked={sharedDisabledTooltip}>
               <SettingsRow
                 label={<label htmlFor="cell-editing-floor">{t("projectSettings.cellEditing.label")}</label>}
                 description={t("projectSettings.cellEditing.description")}
@@ -2307,7 +2400,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                         value: o.value,
                         label: (o.level != null ? FLOOR_LABEL[o.level] : undefined) ?? t(o.labelKey),
                       }))}
-                      disabled={!canEditShared || cellEditingFloor == null}
+                      disabled={!canEditShared}
                       value={effectiveCellEditingFloor}
                       onValueChange={(value) =>
                         setCellEditingFloor((value ?? effectiveCellEditingFloor) as CellEditingTier)
@@ -2366,7 +2459,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         {searchGroupLabel("section-import")}
         {sectionsToRender.some((s) => s.id === "section-import") && (
           <div id="section-import">
-            <SettingsGroup label={t("projectSettings.section.import")}>
+            <SettingsGroup label={t("projectSettings.section.import")} locked={sharedDisabledTooltip}>
               <SettingsRow
                 label={<label htmlFor="import-exclude-front-matter">{t("projectSettings.import.excludeFrontMatterLabel")}</label>}
                 description={t("projectSettings.import.excludeFrontMatterDescription")}
@@ -2422,19 +2515,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         {sectionsToRender.some((s) => s.id === "section-user") && (
           <div id="section-user">
             <SettingsGroup label={t("projectSettings.section.user")}>
-              <SettingsRow
-                label={<label htmlFor="un">{t("projectSettings.user.usernameLabel")}</label>}
-                description={t("projectSettings.user.usernameDescription")}
-                control={
-                  <Input
-                    id="un"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    placeholder={t("projectSettings.user.usernamePlaceholder")}
-                    aria-label={t("projectSettings.user.usernameLabel")}
-                    className="w-40 bg-background"
-                  />
-                }
+              {/* AQU-2259: a person's own setting, so it lives in Preferences now. */}
+              <SettingMovedNote
+                to="/preferences"
+                target={LOCAL_AUTHOR_NAME_SETTING_ID}
+                where={[t("nav.account.preferences"), t("common.general")]}
+                onNavigate={requestNavigate}
               />
             </SettingsGroup>
           </div>
@@ -2443,6 +2529,21 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         {searchGroupLabel("section-members")}
         {id && sectionsToRender.some((s) => s.id === "section-members") && (
           <MembersSection projectId={id} />
+        )}
+        {/* AQU-2263: who sees the member list and each member's progress. The
+            organization's policy, which a project may only make stricter; a
+            second home beside the dashboard's badges, which stay. */}
+        {id && isCloudProject && projectPolicy.ready && sectionsToRender.some((s) => s.id === "section-members") && (
+          <div id="section-member-visibility">
+            <ProjectVisibilitySection
+              roster={projectPolicy.rosterViewMinRole}
+              progress={projectPolicy.memberProgressViewMinRole}
+              roleLevel={project?.syncRole?.level ?? 0}
+              canEdit={canEditShared}
+              disabledTooltip={sharedDisabledTooltip ?? undefined}
+              onPatch={patchShared}
+            />
+          </div>
         )}
 
         {/* AQU-1672: a direct, first-class entry to the translation brief.
@@ -2481,19 +2582,20 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                   description={t("projectSettings.systemPrompt.navDescription")}
                   hint={
                     savedSystemPrompt.trim() && savedSystemPrompt !== DEFAULT_SYSTEM_PROMPT
-                      ? "Custom"
-                      : "Default"
+                      ? t("terminology.livingMemory.prompt.customBadge")
+                      : t("terminology.livingMemory.prompt.defaultBadge")
                   }
                 />
               </NavList>
             ) : null}
-            <SettingsGroup label={t("projectSettings.section.aiInstructions")}>
+            <SettingsGroup label={t("projectSettings.section.aiInstructions")} description={sharedLockedLine}>
               <SettingsRow
                 label={<label htmlFor="top-k">{t("projectSettings.ai.topKLabel")}</label>}
                 description={t("projectSettings.ai.topKDescription", { defaultCount: DEFAULT_APPROVED_EXAMPLE_COUNT })}
                 control={
                   <Input
                     id="top-k"
+                    disabled={!canEditShared}
                     type="number"
                     min={1}
                     max={20}
@@ -2511,6 +2613,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
 
                   <Input
                     id="completion-batch-size"
+                    disabled={!canEditShared}
                     type="number"
                     min={1}
                     max={50}
@@ -2534,6 +2637,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 control={
                   <Input
                     id="validation-batch-size"
+                    disabled={!canEditShared}
                     type="number"
                     min={0}
                     max={500}
@@ -2558,6 +2662,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                     }}
                     value={contextSize}
                     onValueChange={(value) => setContextSize(value as ContextSize)}
+                    disabled={!canEditShared}
                   >
                     <SelectTrigger id="context-size" aria-label={t("projectSettings.ai.contextWindowLabel")} className="w-56 bg-background">
                       <SelectValue />
@@ -2578,6 +2683,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 control={
                   <Input
                     id="main-chat-language"
+                    disabled={!canEditShared}
                     value={mainChatLanguage}
                     onChange={(e) => setMainChatLanguage(e.target.value)}
                     placeholder={t("projectSettings.ai.assistantLanguagePlaceholder")}
@@ -2609,6 +2715,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                     }}
                     value={fewShotExampleFormat}
                     onValueChange={(value) => setFewShotExampleFormat(value as "source-and-target" | "target-only")}
+                    disabled={!canEditShared}
                   >
                     <SelectTrigger id="few-shot-example-format" aria-label={t("projectSettings.ai.referenceExampleFormatLabel")} className="w-56 bg-background">
                       <SelectValue />
@@ -2660,6 +2767,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         {sectionsToRender.some((s) => s.id === "section-advanced-llm") && (
           <div id="section-advanced-llm">
             <SettingsGroup
+              description={sharedLockedLine}
               label={
                 <span className="inline-flex w-full items-center justify-between gap-4 pr-4">
                   <span>{t("projectSettings.advancedLlm.summary")}</span>
@@ -2673,11 +2781,16 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 </span>
               }
             >
-              <SettingsRow label={t("projectSettings.advancedLlm.providerLabel")} block>
+              <SettingsRow
+                label={t("projectSettings.advancedLlm.providerLabel")}
+                description={<KeyInUseLine purpose="completion" kind={completionInUse} testId="completion-key-in-use" />}
+                block
+              >
                 <RadioGroup
                   name="provider"
                   value={provider}
                   onValueChange={(value) => setProvider(value as CompletionProvider)}
+                  disabled={!canEditShared}
                   className="flex flex-col gap-2"
                 >
                   <label className="flex items-start gap-2 text-sm">
@@ -2686,11 +2799,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                       {withStyledTerms(
                         t("projectSettings.advancedLlm.providerFrontier", {
                           name: t("projectSettings.advancedLlm.providerFrontierName"),
-                          domain: "api.frontierrnd.com",
                         }),
                         [
                           { text: t("projectSettings.advancedLlm.providerFrontierName"), as: "strong" },
-                          { text: "api.frontierrnd.com", as: "code" },
                         ],
                       )}
                     </span>
@@ -2719,6 +2830,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                         items={CUSTOM_PRESETS.map((p) => ({ value: p.id, label: presetLabel(t, p) }))}
                         value={presetId}
                         onValueChange={(value) => handlePresetChange(value ?? "")}
+                        disabled={!canEditShared}
                       >
                         <SelectTrigger id="preset" aria-label={t("projectSettings.advancedLlm.presetLabel")} className="w-56 bg-background">
                           <SelectValue />
@@ -2760,6 +2872,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                           lastModelFetchKeyRef.current = null
                         }}
                         placeholder="http://localhost:8000"
+                        disabled={!canEditShared}
                         className="flex-1 bg-background"
                         aria-label={t("projectSettings.advancedLlm.endpointLabel")}
                       />
@@ -2780,7 +2893,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                         </>
                       )
                     }
-                    description={t("projectSettings.advancedLlm.apiKeyDeviceOnlyNote")}
+                    description={t("projectSettings.deviceOnly")}
                     block
                   >
                     <ApiKeyField
@@ -2798,23 +2911,30 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                       userKey={completionUserKey}
                       onProjectKeyChange={setApiKey}
                       onUserKeyChange={(v) => setUserApiKey("completion", v)}
-                      help="Sent as Authorization: Bearer <key>. Stored locally in your browser; never uploaded to Frontier."
+                      help="Sent as Authorization: Bearer <key>. Stored locally in your browser; never uploaded to Aquilla."
                     />
                   </SettingsRow>
                   {models.length > 0 && (
                     <SettingsRow
                       label={<label htmlFor="mdl">{t("projectSettings.advancedLlm.modelLabel")}</label>}
                       control={
-                        <Select value={model} onValueChange={(value) => setModel(value ?? "")}>
-                          <SelectTrigger id="mdl" aria-label={t("projectSettings.advancedLlm.modelLabel")} className="w-56 bg-background">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectGroup>
-                              {models.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
-                            </SelectGroup>
-                          </SelectContent>
-                        </Select>
+                        // AQU-2290: a provider can list hundreds of models, so the
+                        // list searches as you type, like every list that grows
+                        // with your data (AQU-2260). A long model name is cut short
+                        // to fit; hovering over it shows the whole name (Sam, Oct
+                        // 30), and the whole name stays the row's text, so a
+                        // keyboard user's screen reader reads it in full.
+                        <SearchSelect
+                          id="mdl"
+                          aria-label={t("projectSettings.advancedLlm.modelLabel")}
+                          options={models.map((m) => ({ value: m, label: m }))}
+                          value={model}
+                          onValueChange={(value) => setModel(value)}
+                          disabled={!canEditShared}
+                          className="w-56 bg-background"
+                          renderOption={(o) => <span className="min-w-0 truncate" title={o.label}>{o.label}</span>}
+                          renderValue={(o) => <span title={o.label}>{o.label}</span>}
+                        />
                       }
                     />
                   )}
@@ -2828,6 +2948,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                       control={
                         <Input
                           id="mdl-manual"
+                    disabled={!canEditShared}
                           value={model}
                           onChange={(e) => setModel(e.target.value)}
                           placeholder={presetId === "openrouter" ? "anthropic/claude-3.5-sonnet" : t("projectSettings.advancedLlm.modelPlaceholder")}
@@ -2855,6 +2976,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                   control={
                     <Input
                       id="mdl-frontier"
+                    disabled={!canEditShared}
                       value={model}
                       onChange={(e) => setModel(e.target.value)}
                       placeholder={t("projectSettings.advancedLlm.modelOverridePlaceholder")}
@@ -2870,6 +2992,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 control={
                   <Input
                     id="mt"
+                    disabled={!canEditShared}
                     type="number"
                     value={maxTokens}
                     onChange={(e) => setMaxTokens(Number(e.target.value))}
@@ -2888,21 +3011,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                       step={0.05}
                       value={[temperature]}
                       onValueChange={(next) => setTemperature(Array.isArray(next) ? next[0] : next)}
-                    />
-                  </div>
-                }
-              />
-              <SettingsRow
-                label={t("projectSettings.advancedLlm.healthPenaltyLabel", { percent: Math.round(llmHealthPenalty * 100) })}
-                description={t("projectSettings.advancedLlm.healthPenaltyDescription")}
-                control={
-                  <div className="w-40">
-                    <Slider
-                      min={0}
-                      max={0.5}
-                      step={0.05}
-                      value={[llmHealthPenalty]}
-                      onValueChange={(next) => setLlmHealthPenalty(Array.isArray(next) ? next[0] : next)}
+                      disabled={!canEditShared}
                     />
                   </div>
                 }
@@ -2930,8 +3039,14 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 }
               />
               <SettingsRow
-                label="Gemini TTS"
-                description={t("projectSettings.voice.geminiKeyHelp")}
+                label={t("projectSettings.voice.geminiTtsLabel")}
+                description={
+                  <>
+                    {t("projectSettings.voice.geminiKeyHelp")}
+                    <span className="mt-1 block">{t("projectSettings.deviceOnly")}</span>
+                    <KeyInUseLine purpose="gemini" kind={geminiInUse} testId="gemini-key-in-use" />
+                  </>
+                }
                 block
               >
                 <ApiKeyField
@@ -2955,14 +3070,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 <ElevenLabsConnectCard projectId={id} session={session} />
               </SettingsRow>
               <SettingsRow
-                label={t("projectSettings.voice.studioLabel")}
-                description={t("projectSettings.voice.libraryNote")}
+                label={t("common.voices")}
+                description={t("projectSettings.voice.voicesNote")}
                 control={
-                  <Button variant="outline" onClick={() => {
-                    try { window.localStorage.setItem(`aquilla:editorLens:${id}`, "audio") } catch { /* ignore */ }
-                    requestNavigate(`/project/${id}/editor`)
-                  }}>
-                    {t("projectSettings.voice.openStudioButton")}
+                  // AQU-1758: Media, with the Voices tab open (the /voice route).
+                  <Button variant="outline" onClick={() => requestNavigate(`/project/${id}/voice`)}>
+                    {t("projectSettings.voice.openVoicesButton")}
                   </Button>
                 }
               />
@@ -3056,7 +3169,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               }}
             />
             {/* AQU-186: Harmonization settings — harmonize_min_role floor. */}
-            <SettingsGroup label={t("projectSettings.harmonization.title")}>
+            <SettingsGroup label={t("projectSettings.harmonization.title")} locked={sharedDisabledTooltip}>
               <SettingsRow
                 label={<label htmlFor="harmonize-min-role">{t("projectSettings.harmonization.minRoleLabel")}</label>}
                 description={t("projectSettings.harmonization.description")}
@@ -3123,20 +3236,32 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                   below it — the pencil under it is moot while nothing moves. */}
               <div className="flex flex-wrap items-start gap-2">
                 {/* AQU-1768: while the project follows the organization the
-                    box shows the organization's choice and cannot be ticked. */}
+                    box shows the organization's choice. Ticking it sets the
+                    choice for this project, and the menu beside it follows
+                    (Sam, Oct 28). The (i) opens the long explanation beneath
+                    the title, and closes it again. */}
                 <Checkbox
                   id="timing-locked"
                   data-testid="settings-timing-locked"
                   checked={effectiveTimingLocked}
-                  disabled={!canEditShared || timingLocked == null}
+                  disabled={!canEditShared}
                   onCheckedChange={(checked) => setTimingLocked(checked)}
                 />
-                <label htmlFor="timing-locked" className="min-w-0 flex-1 text-sm">
-                  {t("projectSettings.timeline.lockLabel")}
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {t("projectSettings.timeline.lockHint")}
-                  </p>
-                </label>
+                <span className="flex min-w-0 flex-1 flex-col text-sm">
+                  <span className="flex items-center gap-1">
+                    <label htmlFor="timing-locked">{t("projectSettings.timeline.lockLabel")}</label>
+                    <InfoToggle
+                      open={lockInfoOpen}
+                      onToggle={toggleLockInfo}
+                      label={t("projectSettings.timeline.lockInfoAria")}
+                      controls="settings-timing-locked-explanation"
+                      testId="settings-timing-locked-info"
+                    />
+                  </span>
+                  <InfoReveal open={lockInfoOpen} id="settings-timing-locked-explanation">
+                    <span className="block text-xs text-muted-foreground">{t("projectSettings.timeline.lockHint")}</span>
+                  </InfoReveal>
+                </span>
                 <OrgDefaultSource
                   id="timing-locked-source"
                   settingLabel={t("projectSettings.timeline.lockLabel")}
@@ -3157,15 +3282,24 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                   id="allow-track-editing"
                   data-testid="settings-allow-track-editing"
                   checked={effectiveAllowTrackEditing}
-                  disabled={!canEditShared || allowTrackEditing == null}
+                  disabled={!canEditShared}
                   onCheckedChange={(checked) => setAllowTrackEditing(checked)}
                 />
-                <label htmlFor="allow-track-editing" className="min-w-0 flex-1 text-sm">
-                  {t("projectSettings.timeline.trackEditingLabel")}
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {t("projectSettings.timeline.trackEditingHint")}
-                  </p>
-                </label>
+                <span className="flex min-w-0 flex-1 flex-col text-sm">
+                  <span className="flex items-center gap-1">
+                    <label htmlFor="allow-track-editing">{t("projectSettings.timeline.trackEditingLabel")}</label>
+                    <InfoToggle
+                      open={trackEditingInfoOpen}
+                      onToggle={toggleTrackEditingInfo}
+                      label={t("projectSettings.timeline.trackEditingInfoAria")}
+                      controls="settings-allow-track-editing-explanation"
+                      testId="settings-allow-track-editing-info"
+                    />
+                  </span>
+                  <InfoReveal open={trackEditingInfoOpen} id="settings-allow-track-editing-explanation">
+                    <span className="block text-xs text-muted-foreground">{t("projectSettings.timeline.trackEditingHint")}</span>
+                  </InfoReveal>
+                </span>
                 <OrgDefaultSource
                   id="allow-track-editing-source"
                   settingLabel={t("projectSettings.timeline.trackEditingLabel")}
@@ -3175,6 +3309,35 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                   onChange={(inherit) => setAllowTrackEditing(inherit ? null : effectiveAllowTrackEditing)}
                 />
               </div>
+              {/* AQU-1758 (Sam's decision 7): the media view's dubbing tools —
+                  the Film button and the timeline's Sources menu — together.
+                  Unset, a project of books and documents hides them and any
+                  other shows them. Not a permission: nothing on the server
+                  reads it. The long explanation sits behind the (i). */}
+              <div className="flex flex-wrap items-start gap-2">
+                <Checkbox
+                  id="film-and-sources"
+                  data-testid="settings-film-and-sources"
+                  checked={filmAndSourcesShown(filmAndSources, project?.files)}
+                  disabled={!canEditShared}
+                  onCheckedChange={(checked) => setFilmAndSources(checked)}
+                />
+                <span className="flex min-w-0 flex-1 flex-col text-sm">
+                  <span className="flex items-center gap-1">
+                    <label htmlFor="film-and-sources">{t("projectSettings.timeline.filmAndSourcesLabel")}</label>
+                    <InfoToggle
+                      open={filmInfoOpen}
+                      onToggle={toggleFilmInfo}
+                      label={t("projectSettings.timeline.filmAndSourcesInfoAria")}
+                      controls="settings-film-and-sources-explanation"
+                      testId="settings-film-and-sources-info"
+                    />
+                  </span>
+                  <InfoReveal open={filmInfoOpen} id="settings-film-and-sources-explanation">
+                    <span className="block text-xs text-muted-foreground">{t("projectSettings.timeline.filmAndSourcesInfo")}</span>
+                  </InfoReveal>
+                </span>
+              </div>
             </CardContent>
           </Card>
         )}
@@ -3183,7 +3346,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         {/* i18n-exempt "git" is a project-origin kind, not copy */}
         {project?.origin?.kind === "git" && sectionsToRender.some((s) => s.id === "section-git-sync") && (
           <div id="section-git-sync">
-            <SettingsGroup label={t("projectSettings.section.gitSync")}>
+            <SettingsGroup label={t("projectSettings.section.gitSync")} description={t("projectSettings.deviceOnly")}>
               <SettingsRow
                 label={withStyledTerms(
                   t("projectSettings.gitSync.originLabel", {
@@ -3197,7 +3360,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 )}
               />
               <SettingsRow
-                label={<label htmlFor="auto-sync">Auto-sync</label>}
+                label={<label htmlFor="auto-sync">{t("projectSettings.gitSync.autoSyncSwitch")}</label>}
                 description={t("projectSettings.gitSync.intervalNote")}
                 control={
                   <div className="flex items-center gap-2">
@@ -3205,7 +3368,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                       id="auto-sync"
                       checked={autoSyncEnabled}
                       onCheckedChange={(checked) => setAutoSyncEnabled(checked)}
-                      aria-label="Auto-sync"
+                      aria-label={t("projectSettings.gitSync.autoSyncSwitch")}
                     />
                     <Input
                       type="number"
@@ -3237,7 +3400,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 }
               />
             </SettingsGroup>
-            <TermMatchingSection value={termMatching} onChange={setTermMatching} disabled={!canEditShared} />
+            <TermMatchingSection value={termMatching} onChange={setTermMatching} disabled={!canEditShared} locked={sharedDisabledTooltip} />
           </div>
         )}
         {searchGroupLabel("section-termbase-sharing")}

@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
-  Pause, Play, SkipBack, SkipForward, Volume2, VolumeX,
+  ChevronDown, Pause, Play, SkipBack, SkipForward, Volume2, VolumeX,
 } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { Spinner } from "@/components/ui/spinner"
@@ -28,6 +28,7 @@ import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
 import { isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { resolveCastVoice } from "@/lib/audio/voices"
 import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
+import { layOutProgramme, playedProgramme, type BuildProgrammeOptions } from "@/lib/timeline/programme"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -60,14 +61,27 @@ interface Props {
   virtualSoundingCellId?: string | null
   /** AQU-1704: the file is in Free timing, so the queue plays it (see `virtualOwnsFile`). */
   freeTiming?: boolean
+  /** AQU-2252: the file's added tracks and which are layers
+   *  (`programmeTrackSlots`), so the length shown before anything plays is
+   *  the one the timeline lays out. Absent, every added track sets lengths. */
+  programmeTracks?: Pick<BuildProgrammeOptions, "layerSlots" | "layerTrackSlots">
   /** Status chips / stats nested under "now playing" so transport stays vertically centered. */
   below?: ReactNode
   /** AQU-1591: the active target-language lane. The bar plays this lane's takes
    *  (plus the shared programme audio), so a line voiced only in another
    *  language reads as unvoiced here, which is what it is. */
   lane?: string
+  /**
+   * Media redesign, layout: "strip" is the same transport as a thin 32 px
+   * strip along the bottom of the media view (Sam, Oct 27: the controls back
+   * at the bottom, in a very narrow footprint) — the time at the left,
+   * previous · play · next in the centre, speed and volume at the right, and
+   * nothing else: the status lives in the top bar's ring.
+   */
+  variant?: "bar" | "strip"
 }
 
+/** A running clock: the whole seconds gone by. */
 function fmtTime(s: number): string {
   if (!Number.isFinite(s) || s <= 0) return "0:00"
   const m = Math.floor(s / 60)
@@ -75,10 +89,21 @@ function fmtTime(s: number): string {
   return `${m}:${sec.toString().padStart(2, "0")}`
 }
 
+/**
+ * AQU-1758: a LENGTH, to the nearest second — the rounding the Timing control
+ * states it with ("1 min 28 s long"). Floored like the clock, an 87.6 s
+ * chapter read "1:27" here beside "1 min 28 s" there.
+ */
+function fmtLength(s: number): string {
+  if (!Number.isFinite(s) || s <= 0) return "0:00"
+  const whole = Math.round(s)
+  return `${Math.floor(whole / 60)}:${(whole % 60).toString().padStart(2, "0")}`
+}
+
 export function VoicePlaybackBar({
   cells: rawCells, projectId, session, settings, onActiveCell, startCellId, coreMediaUrl,
   videoPaneOnScreen = false, timelineDurationSec = 0, virtualSoundingCellId = null, freeTiming = false, below,
-  lane,
+  lane, variant = "bar", programmeTracks,
 }: Props) {
   const t = useT()
 
@@ -125,6 +150,31 @@ export function VoicePlaybackBar({
   const drivesVideo = transport.source !== "queue"
   const sourceAudible = useQueueAudibility().source
   const { currentTime, duration, rate, volume } = transport.progress
+  // AQU-1758: before anything plays, the queue has no length to report, and a
+  // book read "0:00 / 0:00". A file that follows its recordings shows how long
+  // its lines come out laid end to end — the layout the timeline draws and the
+  // Timing control states (`layOutProgramme`), which is also what the queue
+  // reports once it plays. So only until then: while the queue runs, a take
+  // landing would otherwise lay a long book out here a third time over, beside
+  // the timeline and the queue's own.
+  //
+  // Not the timeline's total, though it is the same number: this bar also
+  // stands where no timeline is drawn, its lines carry its own read of the
+  // audio (what the queue plays from it), and handing the timeline's total
+  // down to it would be a workspace state change on every take.
+  //
+  // AQU-2252: laid out as the queue PLAYS it (`playedProgramme`), with the
+  // hidden lines' takes taken out — a hidden last line's music running on
+  // past it read 0:20 here before play and 0:18 once it played. A book whose
+  // takes the queue cannot measure yet keeps the plain layout, as it does.
+  const showsLaidOut = freeTiming && transport.source === "queue" && !transport.active
+  const laidOutSec = useMemo(
+    () => (showsLaidOut
+      ? (playedProgramme(cells, programmeTracks)?.programme ?? layOutProgramme(cells, programmeTracks).programme).totalSec
+      : 0),
+    [showsLaidOut, cells, programmeTracks],
+  )
+  const shownLengthSec = showsLaidOut ? laidOutSec : duration
 
   // A picture is always playable; the queue needs a clip to play. Neither is
   // knowable before the file's attachments are read: a source clip arriving
@@ -251,6 +301,68 @@ export function VoicePlaybackBar({
 
   const progressFraction = duration > 0 ? Math.min(1, currentTime / duration) : 0
 
+  if (variant === "strip") {
+    // The same controls as the bar below, wired identically (the comments on
+    // each are there). A container query drops the time first when the view
+    // is narrow; the buttons stay. No scrubber: the timeline is the scrubber.
+    return (
+      <div
+        data-testid="media-play-strip"
+        className="@container relative flex h-8 shrink-0 items-center border-t border-border bg-muted/30 px-2"
+      >
+        <span className="hidden shrink-0 text-[11.5px] tabular-nums text-muted-foreground @md:inline" data-testid="transport-time">
+          {fmtTime(currentTime)} / {fmtLength(shownLengthSec)}
+        </span>
+        <div className="absolute left-1/2 flex -translate-x-1/2 items-center gap-1" data-testid="top-transport">
+          <IconButton small title={t("audio.playbackBar.previousLine")} disabled={!canPlay} onClick={() => stepLine(-1)}>
+            <SkipBack className="h-3.5 w-3.5" />
+          </IconButton>
+          <AppTooltip content={isPlaying ? t("common.pause") : t("audio.playbackBar.playAllSpace")}>
+            <Button
+              type="button"
+              size="icon-xs"
+              variant="default"
+              onClick={onPlayPause}
+              disabled={!canPlay}
+              aria-label={isPlaying ? t("common.pause") : t("audio.playbackBar.playAll")}
+              data-testid="transport-play"
+              className="bg-foreground text-background hover:bg-foreground/90"
+            >
+              {isLoading ? <Spinner /> : isPlaying ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5 translate-x-px" />}
+            </Button>
+          </AppTooltip>
+          <IconButton small title={t("audio.playbackBar.nextLine")} disabled={!canPlay} onClick={() => stepLine(1)}>
+            <SkipForward className="h-3.5 w-3.5" />
+          </IconButton>
+        </div>
+        <div className="ms-auto flex shrink-0 items-center gap-1">
+          <SpeedButton
+            compact
+            rate={rate}
+            onChange={(r) => {
+              setQueueRate(r)
+              if (drivesVideo) videoController?.setRate(r)
+            }}
+          />
+          <VolumeControl
+            compact
+            volume={volume}
+            muted={drivesVideo ? !sourceAudible : volume === 0}
+            what={drivesVideo ? "the film's own sound" : "playback"}
+            onChange={(v) => (drivesVideo ? videoController?.setVolume(v) : setQueueVolume(v))}
+            onToggleMute={() => {
+              if (drivesVideo && fileId) {
+                toggleAudibility(fileId, "source")
+                return
+              }
+              setQueueVolume(volume === 0 ? 1 : 0)
+            }}
+          />
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="border-t">
       {/* Full-width progress line doubling as a scrubber. */}
@@ -327,7 +439,7 @@ export function VoicePlaybackBar({
             <SkipForward className="h-4 w-4" />
           </IconButton>
           <span className="ms-1.5 shrink-0 text-[11px] tabular-nums text-muted-foreground">
-            {fmtTime(currentTime)} / {fmtTime(duration)}
+            {fmtTime(currentTime)} / {fmtLength(shownLengthSec)}
           </span>
         </div>
 
@@ -361,18 +473,20 @@ export function VoicePlaybackBar({
 }
 
 function IconButton({
-  children, title, onClick, disabled,
+  children, title, onClick, disabled, small = false,
 }: {
   children: ReactNode
   title: string
   onClick: () => void
   disabled?: boolean
+  /** The media view's 32 px strip (28 until Sam's "ever so slightly" taller, Oct 28). */
+  small?: boolean
 }) {
   return (
     <AppTooltip content={title}>
       <Button
         type="button"
-        size="icon-sm"
+        size={small ? "icon-xs" : "icon-sm"}
         variant="ghost"
         aria-label={title}
         onClick={onClick}
@@ -418,7 +532,7 @@ function BarScrubber({ fraction, onSeek, disabled }: {
   )
 }
 
-function SpeedButton({ rate, onChange }: { rate: number; onChange: (r: number) => void }) {
+function SpeedButton({ rate, onChange, compact = false }: { rate: number; onChange: (r: number) => void; compact?: boolean }) {
   const t = useT()
   const [open, setOpen] = useState(false)
   return (
@@ -426,13 +540,27 @@ function SpeedButton({ rate, onChange }: { rate: number; onChange: (r: number) =
       <AppTooltip content={t("audio.playbackBar.playbackSpeed")}>
         <PopoverTrigger
           render={
-            <Button
-              type="button"
-              variant="ghost"
-              className="min-w-9 px-1.5 tabular-nums"
-            >
-              {rate}x
-            </Button>
+            compact ? (
+              // The strip's outlined "1× ⌄", 22 px tall.
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                className="h-[22px] gap-0.5 px-1.5 tabular-nums"
+                data-testid="transport-speed"
+              >
+                {rate}×
+                <ChevronDown className="size-3" />
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="ghost"
+                className="min-w-9 px-1.5 tabular-nums"
+              >
+                {rate}x
+              </Button>
+            )
           }
         />
       </AppTooltip>
@@ -472,6 +600,7 @@ function VolumeControl({
   what,
   onChange,
   onToggleMute,
+  compact = false,
 }: {
   volume: number
   muted: boolean
@@ -482,10 +611,12 @@ function VolumeControl({
   what: string
   onChange: (v: number) => void
   onToggleMute: () => void
+  /** The media view's strip: the speaker alone, opening these two controls. */
+  compact?: boolean
 }) {
   const t = useT()
   const label = `${muted ? t("audio.playbackBar.unmute") : t("audio.playbackBar.mute")} ${what}`
-  return (
+  const controls = (
     <div className="flex items-center gap-2">
       <AppTooltip content={label}>
         <Button
@@ -513,8 +644,25 @@ function VolumeControl({
           if (muted && v > 0) onToggleMute()
         }}
         aria-label={t("common.volume")}
-        className="hidden w-24 sm:block"
+        className={compact ? "w-28" : "hidden w-24 sm:block"}
       />
     </div>
+  )
+  if (!compact) return controls
+  return (
+    <Popover>
+      <AppTooltip content={t("common.volume")}>
+        <PopoverTrigger
+          render={
+            <Button type="button" size="icon-xs" variant="ghost" aria-label={t("common.volume")} data-testid="transport-volume">
+              {muted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
+            </Button>
+          }
+        />
+      </AppTooltip>
+      <PopoverContent align="end" side="top" className="w-auto p-1.5">
+        {controls}
+      </PopoverContent>
+    </Popover>
   )
 }

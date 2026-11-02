@@ -218,7 +218,7 @@ it.each(manifest.bindings.map(b => [b.offer, b.interval] as const))(
       checkoutEnabled: false, usagePercent: 0,
       usageResetsAt: new Date(payment.event.created * 1000 + 7 * 86400000).toISOString() })
     expect((await getWorkspace(1, 'bob')).status).toBe(403)
-    expect((await app.request('/api/v2/orgs/me', { headers: authHeader(await jwtFor('bob')) }, env)).status).toBe(200)
+    expect((await app.request('/api/v2/orgs/personal', { method: 'POST', headers: authHeader(await jwtFor('bob')) }, env)).status).toBe(200)
     expect(await (await getWorkspace(2, 'bob')).json()).toMatchObject({ entitlement: null })
     expect(await env.AQUILLA_PG.prepare('SELECT count(*)::int AS n FROM org_billing').first()).toEqual({ n: 0 })
     expect(await (await payment.send()).json()).toEqual({ ok: true, duplicate: true })

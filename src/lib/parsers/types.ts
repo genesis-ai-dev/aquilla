@@ -273,22 +273,30 @@ export type AudioMediaStrategy =
 // keys a component resolves with `t()` — same "return a descriptor, let the
 // caller localize" shape as `roleNameKey()`/`roleDescriptionKey()` in
 // src/lib/frontier/roles.ts. Only AudioMediaStrategySection.tsx renders these.
-export const AUDIO_MEDIA_STRATEGY_LABELS: Record<AudioMediaStrategy, { nameKey: MessageKey; descriptionKey: MessageKey }> = {
+// `summaryKey` is the short phrase always shown under the name; `infoKey` is
+// what the card's (i) opens beneath it (Sam, Oct 29). Stream and Manual share
+// theirs: both only wait for a click before drawing a take's waveform
+// (autoLoadsPeaks), and nothing else reads the difference.
+export const AUDIO_MEDIA_STRATEGY_LABELS: Record<AudioMediaStrategy, { nameKey: MessageKey; summaryKey: MessageKey; infoKey: MessageKey }> = {
   stream: {
     nameKey: "projectSettings.audioMedia.strategyStreamName",
-    descriptionKey: "projectSettings.audioMedia.strategyStreamDescription",
+    summaryKey: "projectSettings.audioMedia.strategyOnClickSummary",
+    infoKey: "projectSettings.audioMedia.strategyOnClickInfo",
   },
   lazy: {
     nameKey: "projectSettings.audioMedia.strategyLazyName",
-    descriptionKey: "projectSettings.audioMedia.strategyLazyDescription",
+    summaryKey: "projectSettings.audioMedia.strategyLazySummary",
+    infoKey: "projectSettings.audioMedia.strategyLazyInfo",
   },
   eager: {
     nameKey: "projectSettings.audioMedia.strategyEagerName",
-    descriptionKey: "projectSettings.audioMedia.strategyEagerDescription",
+    summaryKey: "projectSettings.audioMedia.strategyEagerSummary",
+    infoKey: "projectSettings.audioMedia.strategyEagerInfo",
   },
   manual: {
     nameKey: "projectSettings.audioMedia.strategyManualName",
-    descriptionKey: "projectSettings.audioMedia.strategyManualDescription",
+    summaryKey: "projectSettings.audioMedia.strategyOnClickSummary",
+    infoKey: "projectSettings.audioMedia.strategyOnClickInfo",
   },
 }
 
@@ -711,6 +719,9 @@ export interface ProjectRecord {
    *  See ProjectWideSettings.allowTrackEditing for why switching it off is
    *  allowed to strand tracks that are already there. */
   allowTrackEditing?: boolean
+  /** AQU-1758: show the Film button and the timeline's Sources menu (see
+   *  ProjectWideSettings.filmAndSources). Unset: the project's kind decides. */
+  filmAndSources?: boolean
   /**
    * AQU-701: set when the user explicitly skips the voice & transcription setup
    * step ("we don't use voice or transcription"). Marks that step complete in
@@ -1244,7 +1255,7 @@ export type CompletionProvider = "frontier" | "custom"
 export type ContextSize = "small" | "medium" | "large"
 
 export interface CompletionSettings {
-  provider?: CompletionProvider // "frontier" (default, uses api.frontierrnd.com) or "custom" (self-hosted, local, or third-party OpenAI-compatible endpoint like OpenRouter, OpenAI, Groq, etc.)
+  provider?: CompletionProvider // "frontier" (default, uses the Aquilla chat proxy at api.aquilla.app/chat) or "custom" (self-hosted, local, or third-party OpenAI-compatible endpoint like OpenRouter, OpenAI, Groq, etc.)
   endpoint: string              // only used when provider === "custom". Base URL (e.g. "http://localhost:8000" or "https://openrouter.ai/api/v1"). Trailing "/v1" or "/chat/completions" is tolerated and normalized.
   apiKey?: string               // only used when provider === "custom". Sent as "Authorization: Bearer <key>". Leave blank for unauthenticated local endpoints.
   model: string                 // blank = provider's default (e.g. Frontier picks DEFAULT_LLM_MODEL server-side)
@@ -1255,8 +1266,6 @@ export interface CompletionSettings {
    * internal clarity; the two names refer to the same concept.
    */
   systemPrompt: string
-  /** 0-1, default 0.1. Only consumed by the legacy health engine (flag-off path). Will be removed once the composite-health flag is default-on. */
-  llmHealthPenalty?: number
 
   // ── v1 AI retrieval-tuning settings (spec: ai-copilot.md config table) ────
 

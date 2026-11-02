@@ -1,6 +1,8 @@
 import * as React from "react"
 
 import { EmptyState, NotFoundIcon, TableEmptyState } from "@/components/ui/empty"
+import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
+import { LockedNote, LockedSection } from "@/components/ui/locked-note"
 import { cn } from "@/lib/utils"
 
 /**
@@ -260,17 +262,22 @@ function StatTile({
 function SettingsGroup({
   label,
   description,
+  locked,
   className,
   children,
 }: {
   label?: React.ReactNode
   description?: React.ReactNode
+  /** Why the whole card is locked for you (AQU-2260): one line under its
+   *  heading. Controls inside given this same reason say nothing more; one
+   *  locked for another reason still says its own. Null when you can edit. */
+  locked?: React.ReactNode
   className?: string
   children: React.ReactNode
 }) {
   return (
     <div className={cn("space-y-2", className)}>
-      {label || description ? (
+      {label || description || locked ? (
         <div className="space-y-1 pl-4">
           {label ? (
             <p className="font-heading text-base font-medium tracking-tight text-foreground">
@@ -280,23 +287,43 @@ function SettingsGroup({
           {description ? (
             <p className="text-sm text-muted-foreground">{description}</p>
           ) : null}
+          {locked ? (
+            <LockedNote placement="section" testId="settings-group-locked">
+              {locked}
+            </LockedNote>
+          ) : null}
         </div>
       ) : null}
       <div data-slot="settings-card" className="divide-y overflow-hidden rounded-lg border bg-card">
-        {children}
+        <LockedSection reason={locked}>{children}</LockedSection>
       </div>
     </div>
   )
+}
+
+/** The longer explanation a SettingsRow keeps behind an (i) beside its title. */
+interface SettingsRowInfo {
+  /** The (i)'s accessible name: a few words saying what the text is about. */
+  label: string
+  /** What opens under the row's one visible line. */
+  content: React.ReactNode
+  /** Names the (i) `testId` and its text `${testId}-text`. */
+  testId?: string
 }
 
 /**
  * One setting inside a SettingsGroup card. Default layout is label/description
  * on the left and a control on the right; pass `block` (or `children`) when the
  * control needs the full row width (a select, a form, etc.).
+ *
+ * Sam, Oct 29: a setting shows one short line saying what it does, or none
+ * when its title already says it. Anything longer goes in `info`: an (i)
+ * beside the title opens it in place beneath that line, and closes it again.
  */
 function SettingsRow({
   label,
   description,
+  info,
   control,
   children,
   block = false,
@@ -304,21 +331,48 @@ function SettingsRow({
 }: {
   label: React.ReactNode
   description?: React.ReactNode
+  info?: SettingsRowInfo
   control?: React.ReactNode
   children?: React.ReactNode
   block?: boolean
   className?: string
 }) {
+  const infoId = React.useId()
+  const [infoOpen, toggleInfo] = useInfoOpen()
   const body = children ?? control
+  const text = (
+    <>
+      <p className="flex items-center gap-1 text-sm font-medium text-foreground">
+        {label}
+        {info ? (
+          <InfoToggle
+            open={infoOpen}
+            onToggle={toggleInfo}
+            label={info.label}
+            controls={infoId}
+            testId={info.testId}
+          />
+        ) : null}
+      </p>
+      {description ? (
+        <p className="mt-1 text-xs text-muted-foreground">{description}</p>
+      ) : null}
+      {info ? (
+        <InfoReveal
+          open={infoOpen}
+          id={infoId}
+          testId={info.testId ? `${info.testId}-text` : undefined}
+          className="text-xs text-muted-foreground"
+        >
+          {info.content}
+        </InfoReveal>
+      ) : null}
+    </>
+  )
   if (block || children) {
     return (
       <div className={cn("space-y-3 px-4 py-3", className)}>
-        <div className="min-w-0 space-y-1">
-          <p className="text-sm font-medium text-foreground">{label}</p>
-          {description ? (
-            <p className="text-xs text-muted-foreground">{description}</p>
-          ) : null}
-        </div>
+        <div className="min-w-0">{text}</div>
         {body}
       </div>
     )
@@ -327,14 +381,10 @@ function SettingsRow({
   // A description can grow while the page is open (a "N projects set their
   // own setting" list opening under it), and a centred control slid down to
   // the new middle each time.
+  // Sam, Oct 29: the text takes the whole width up to the control.
   return (
     <div className={cn("flex items-start justify-between gap-4 px-4 py-3", className)}>
-      <div className="min-w-0 space-y-1">
-        <p className="text-sm font-medium text-foreground">{label}</p>
-        {description ? (
-          <p className="text-xs text-muted-foreground">{description}</p>
-        ) : null}
-      </div>
+      <div className="min-w-0 flex-1">{text}</div>
       {body ? <div className="shrink-0">{body}</div> : null}
     </div>
   )

@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useForm, useStore } from "@tanstack/react-form"
 import { z } from "zod"
 import { v4 as uuid } from "uuid"
-import { Info, Plus, X } from "lucide-react"
+import { X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -16,6 +16,7 @@ import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/c
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { LanguageComboboxInput } from "@/components/LanguageComboboxInput"
+import { AddLanguageButton } from "@/components/AddLanguageButton"
 import { ProjectCombobox } from "@/components/ProjectCombobox"
 import { UpstreamFileChoiceList } from "@/components/UpstreamFileChoiceList"
 import { UpstreamLaneChoiceField } from "@/components/UpstreamLaneChoiceField"
@@ -23,11 +24,7 @@ import { useUpstreamLaneChoices } from "@/hooks/useUpstreamLaneChoices"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Spinner } from "@/components/ui/spinner"
 import { toast } from "@/components/ui/toast"
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip"
+import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
 import { cn } from "@/lib/utils"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
@@ -147,10 +144,6 @@ const EXTRA_LANGUAGES_WARNING =
  */
 const LONG_RUNNING_WORK_MS = 120_000
 
-const LONG_RUNNING_WORK_MESSAGE =
-  "This is taking longer than expected. You can close this dialog — the project " +
-  "may still finish and show up in your projects list."
-
 /**
  * AQU-1519: what the dialog is busy doing. Anything non-null locks every
  * control in the body AND every way of closing, so a stray click mid-create
@@ -201,7 +194,7 @@ type LinkConsumes = "source" | "target" | ""
 
 const projectSchema = z
   .object({
-    name: requiredString("Project title"),
+    name: requiredString("Project name"),
     sourceLanguage: requiredString("Source language"),
     targetLanguage: optionalString,
     // Self-contained shape only (spec §5 / AQU-1240): extras beyond the
@@ -779,10 +772,9 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                     const invalid = isFieldInvalid(field)
                     return (
                       <Field data-invalid={invalid}>
-                        <div className="flex items-center gap-1.5">
-                          <FieldLabel htmlFor="project-create-source">{t("projectSettings.info.sourceLanguageLabel")}</FieldLabel>
-                          <LanguageFieldHint />
-                        </div>
+                        <LanguageFieldLabel htmlFor="project-create-source" infoId="project-create-source-info">
+                          {t("projectSettings.info.sourceLanguageLabel")}
+                        </LanguageFieldLabel>
                         <LanguageComboboxInput
                           id="project-create-source"
                           name="aquilla-project-source-language"
@@ -810,12 +802,9 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                     const invalid = isFieldInvalid(field)
                     return (
                       <Field data-invalid={invalid}>
-                        <div className="flex items-center gap-1.5">
-                          <FieldLabel htmlFor="project-create-target">
-                            {t("projectSettings.create.targetLanguagesLabel")}
-                          </FieldLabel>
-                          <LanguageFieldHint />
-                        </div>
+                        <LanguageFieldLabel htmlFor="project-create-target" infoId="project-create-target-info">
+                          {t("projectSettings.create.targetLanguagesLabel")}
+                        </LanguageFieldLabel>
                         <form.Field
                           name="extraLanguages"
                           children={(extrasField) => (
@@ -1160,7 +1149,9 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
 
                         {showCorpusChoice && (chosenConsumes === "source" || chosenConsumes === "target") ? (
                           <InheritedSettingsChoice
-                            title={t("projectSettings.inherit.linkTitle")}
+                            title={t("projectSettings.inherit.title", {
+                              upstream: upstreamOptions.find((p) => p.id === chosenUpstreamId)?.name ?? "",
+                            })}
                             description={t("projectSettings.inherit.linkDescription")}
                             receive={inheritReceive}
                             detached={inheritDetached}
@@ -1226,7 +1217,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
               className="shrink-0 text-xs text-amber-600"
               data-testid="create-taking-long"
             >
-              {LONG_RUNNING_WORK_MESSAGE}
+              {t("projectSettings.create.longRunningNote")}
             </p>
           )}
 
@@ -1261,8 +1252,8 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                 >
                   {isSubmitting && <Spinner data-icon="inline-start" />}
                   {isSubmitting
-                    ? (willLink ? "Creating & linking…" : "Creating…")
-                    : (willLink ? "Create & Link" : "Create Project")}
+                    ? (willLink ? t("projectSettings.create.submitCreatingAndLinking") : t("common.creating"))
+                    : (willLink ? t("projectSettings.create.submitCreateAndLink") : t("projectSettings.create.submitCreate"))}
                 </Button>
               )
             }}
@@ -1361,13 +1352,13 @@ function AddAsLaneRecommendation({
     // Both of these are validation, checked before anything locks.
     if (!jwt) {
       setStatus("error")
-      setMessage("You need to be signed in to add a lane.")
+      setMessage(t("projectSettings.create.laneRecommendationSignInError"))
       return
     }
     const trimmed = targetLanguage.trim()
     if (!trimmed) {
       setStatus("error")
-      setMessage("Enter a target language above first.")
+      setMessage(t("projectSettings.create.laneRecommendationEmptyTargetError"))
       return
     }
 
@@ -1388,14 +1379,14 @@ function AddAsLaneRecommendation({
       const registry = known.length > 0 ? known : (current?.settings.targetLanes ?? [])
       const already = registry.some((language) => isPrimaryRegistryLane(trimmed, language))
       if (already) {
-        fail(`"${trimmed}" is already a lane on ${project.name}.`)
+        fail(t("projectSettings.create.laneRecommendationAlreadyLaneError", { lane: trimmed, projectName: project.name }))
         return
       }
 
       const result = await createProjectLane(jwt, project.id, { name: "", language: trimmed })
       if (result.kind === "ok") {
         setStatus("success")
-        setMessage(`Added "${trimmed}" as a lane on ${project.name}. Open that project to start translating.`)
+        setMessage(t("projectSettings.create.laneRecommendationSuccess", { lane: trimmed, projectName: project.name }))
         posthog.capture("sibling lane added from create dialog", {
           upstream_project_id: project.id,
           lane: trimmed,
@@ -1407,16 +1398,16 @@ function AddAsLaneRecommendation({
         return
       }
       if (result.kind === "duplicate") {
-        fail(`"${trimmed}" is already a lane on ${project.name}.`)
+        fail(t("projectSettings.create.laneRecommendationAlreadyLaneError", { lane: trimmed, projectName: project.name }))
         return
       }
       if (result.kind === "error" && result.message.includes("(403)")) {
-        fail(`You need maintainer access on ${project.name} to add a lane there.`)
+        fail(t("projectSettings.create.laneRecommendationForbiddenError", { projectName: project.name }))
         return
       }
-      fail("Couldn't add the lane. Please try again.")
+      fail(t("projectSettings.create.laneRecommendationGenericError"))
     } catch (err) {
-      fail(err instanceof Error ? err.message : "Couldn't add the lane. Please try again.")
+      fail(err instanceof Error ? err.message : t("projectSettings.create.laneRecommendationGenericError"))
     }
   }
 
@@ -1445,7 +1436,9 @@ function AddAsLaneRecommendation({
           onClick={() => void handleAddAsLane()}
         >
           {status === "loading" && <Spinner data-icon="inline-start" />}
-          {status === "loading" ? "Adding lane…" : `Add as lane on ${upstreamProject.name}`}
+          {status === "loading"
+            ? t("projectSettings.create.laneRecommendationAdding")
+            : t("projectSettings.create.laneRecommendationAddButton", { projectName: upstreamProject.name })}
         </Button>
       </div>
       {message && status === "error" && (
@@ -1724,43 +1717,39 @@ function TargetLanguageInputs({
         </div>
       ) : (
         <div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
+          <AddLanguageButton
             disabled={disabled || !canAddMore}
-            data-testid="create-add-target-lang"
+            testId="create-add-target-lang"
             onClick={() =>
               sync([...lanes, { id: nextLaneId.current++, value: "", delivers: "text" }], bulk)
             }
-          >
-            <Plus className="size-4" aria-hidden="true" />
-            {t("projectSettings.create.addTargetLanguageAction")}
-          </Button>
+          />
         </div>
       )}
     </div>
   )
 }
 
-function LanguageFieldHint() {
+/** A language field's label with its (i): a click opens what you can enter
+ *  in place, under the label, and a second click shuts it (AQU-2260; it was
+ *  a hover). */
+function LanguageFieldLabel({ htmlFor, infoId, children }: { htmlFor: string; infoId: string; children: ReactNode }) {
   const t = useT()
+  const [open, toggle] = useInfoOpen()
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <button
-            type="button"
-            aria-label={t("projectSettings.create.languageHintAriaLabel")}
-            className="text-muted-foreground hover:text-foreground"
-          />
-        }
-      >
-        <Info className="h-3.5 w-3.5" aria-hidden="true" />
-      </TooltipTrigger>
-      <TooltipContent className="max-w-xs">
+    <div className="flex flex-col">
+      <div className="flex items-center gap-1.5">
+        <FieldLabel htmlFor={htmlFor}>{children}</FieldLabel>
+        <InfoToggle
+          open={open}
+          onToggle={toggle}
+          label={t("projectSettings.create.languageHintAriaLabel")}
+          controls={infoId}
+        />
+      </div>
+      <InfoReveal open={open} id={infoId} className="text-xs text-muted-foreground">
         {t("projectSettings.create.languageHintTooltip")}
-      </TooltipContent>
-    </Tooltip>
+      </InfoReveal>
+    </div>
   )
 }

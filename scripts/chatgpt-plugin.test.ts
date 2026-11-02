@@ -1,4 +1,4 @@
-// Contract test for the ChatGPT / Codex plugin package (plugins/aquilla).
+// Contract test for the shared Claude / ChatGPT / Codex plugin package.
 //
 // The package is static files that no build step reads, so nothing else
 // notices when it drifts: a renamed MCP tool leaves the skills calling a tool
@@ -64,6 +64,35 @@ describe("MCP server", () => {
     const servers = (JSON.parse(read(".mcp.json")) as { mcpServers: Record<string, { url: string }> }).mcpServers
     const apiHost = deploymentManifest.surfaces.sync.environments.production.apiHost
     expect(servers.aquilla.url).toBe(`https://${apiHost}/sync/api/v1/external/mcp`)
+  })
+})
+
+describe("Claude package compatibility", () => {
+  it("loads the shared OAuth server and skills without OpenAI-only manifest fields", () => {
+    const claude = JSON.parse(read(".claude-plugin", "plugin.json"))
+    expect(claude.name).toBe(manifest.name)
+    expect(claude.version).toBe(manifest.version)
+    expect(claude.author).toEqual(manifest.author)
+    expect(claude).not.toHaveProperty("interface")
+    expect(claude).not.toHaveProperty("extensions")
+    // Claude discovers these default locations relative to the plugin root.
+    const config = JSON.parse(read(".mcp.json"))
+    expect(config.mcpServers.aquilla).toEqual({
+      type: "http",
+      url: "https://api.aquilla.app/sync/api/v1/external/mcp",
+    })
+    expect(skillDirs.sort()).toEqual([
+      "attention-queue", "terminology-drift", "translation-status-report",
+    ])
+    for (const dir of skillDirs) {
+      expect(read("skills", dir, "SKILL.md")).not.toMatch(/ChatGPT|Codex/)
+    }
+    // Claude consumes the same OAuth catalog as ChatGPT, regardless of host.
+    for (const tool of MCP_TOOLS) {
+      expect(tool.annotations.title, tool.name).toBeTruthy()
+      expect(tool.annotations.readOnlyHint, tool.name).toBeTypeOf("boolean")
+      expect(tool.annotations.destructiveHint, tool.name).toBeTypeOf("boolean")
+    }
   })
 })
 

@@ -34,6 +34,20 @@ interface StatusBarProps {
   className?: string
 }
 
+/**
+ * The one figure the footer leads with, as a fraction, and whether it counts
+ * recordings rather than text. The media view's status ring draws the same
+ * number, so the ring and the counts it opens onto can never disagree.
+ */
+export function statusBarFigure(progress: FileStats): { fraction: number; audio: boolean } {
+  const view = fileProgressView(progress)
+  const bothDone = view === "both" && progress.delivers === "text_and_audio"
+  const audioOnly = view === "audio"
+  const recorded = progress.recorded ?? (progress.delivers === "audio" ? progress.translated : 0)
+  const done = bothDone ? progress.validated : audioOnly ? recorded : progress.translated
+  return { fraction: progressPercent(done, progress.total) / 100, audio: audioOnly }
+}
+
 export function StatusBar({
   progress, getHealthByCell, projectHealth, staleSourceCount, onJumpToCell, className,
 }: StatusBarProps) {
@@ -56,7 +70,7 @@ export function StatusBar({
   const showText = !audioOnly && !bothDone
   const showAudio = !bothDone && view !== "text" && recorded > 0
   // AQU-1493: never "100%" while a cell is still blank — 251 of 252 is 99%.
-  const fraction = progressPercent(bothDone ? validated : audioOnly ? recorded : translated, total) / 100
+  const { fraction } = statusBarFigure(progress)
   // The ratio/percent run reorders under Arabic's bidi algorithm when this
   // footer sits inside an <html dir="rtl"> page (a user photographed exactly
   // this) even though the surrounding words stay English — isolate each
@@ -64,25 +78,42 @@ export function StatusBar({
   const totalDisplay = bidiIsolate(formatNumber(total, locale))
   const translatedDisplay = bidiIsolate(formatNumber(audioOnly ? recorded : translated, locale))
   const pctDisplay = bidiIsolate(`(${formatPercent(fraction, locale)})`)
+  // AQU-2337: the legend badges get their own wrapping row so the summary
+  // keeps its line. The badges are `shrink-0 whitespace-nowrap`, so when they
+  // shared a non-wrapping group with the summary the summary was the only
+  // element that could give way, and inside the media view's 320 px status
+  // popover (where the footer itself wraps) it collapsed to one word per line
+  // while the health ring was pushed onto a line of its own. A flex line
+  // breaks on a group's whole content, so the ring and the summary now travel
+  // together in one group and the badges drop below them. An empty group
+  // would still eat a gap, so the legend row is drawn only when it has a
+  // badge in it.
+  const needsText = bothDone ? (progress.needsText ?? 0) : 0
+  const needsAudio = bothDone ? (progress.needsAudio ?? 0) : 0
+  const hasLegend =
+    needsText > 0 || needsAudio > 0 ||
+    (showText && (unvalidated > 0 || validated > 0)) ||
+    (showAudio && (unvalidatedAudio > 0 || audioValidated > 0))
 
   return (
     <footer className={cn(
-      "relative z-10 flex items-center gap-2.5 px-4 py-2 text-sm text-muted-foreground",
+      "relative z-10 flex items-center gap-2 px-4 py-2 text-sm text-muted-foreground",
       className,
     )}>
-      <DecayBreakdown
-        health={projectHealth}
-        scopeLabel="project health"
-        getHealthByCell={getHealthByCell}
-        staleSourceCount={staleSourceCount}
-        onJumpToCell={onJumpToCell}
-      >
-        <HealthRing health={projectHealth} size={18} strokeWidth={2}>
-          <span className="text-[7px] font-bold">{projectHealth}</span>
-        </HealthRing>
-      </DecayBreakdown>
-      <span className="flex items-center gap-2">
-        <span data-testid="status-bar-summary">
+      <span className="flex items-center gap-2.5" data-testid="status-bar-counts">
+        <DecayBreakdown
+          health={projectHealth}
+          scopeLabel={t("workspace.statusBar.healthTitle")}
+          label={t("workspace.statusBar.healthAria", { percent: projectHealth })}
+          getHealthByCell={getHealthByCell}
+          staleSourceCount={staleSourceCount}
+          onJumpToCell={onJumpToCell}
+        >
+          <HealthRing health={projectHealth} size={18} strokeWidth={2}>
+            <span className="text-[7px] font-bold">{projectHealth}</span>
+          </HealthRing>
+        </DecayBreakdown>
+        <span className="whitespace-nowrap" data-testid="status-bar-summary">
           {bothDone
             ? t("workspace.statusBar.bothSummary", {
                 total: totalDisplay,
@@ -95,59 +126,63 @@ export function StatusBar({
                 pct: pctDisplay,
               })}
         </span>
-        {/* Media redesign: Text and audio says how much of each half is left. */}
-        {bothDone && (progress.needsText ?? 0) > 0 && (
-          <Badge variant="secondary" className="text-foreground" data-testid="status-bar-text-left">
-            <span aria-hidden className={`size-2 shrink-0 rounded-[2px] ${PROGRESS_BG.textTranslated}`} />
-            {t("workspace.statusBar.textLeftBadge", { count: bidiIsolate(formatNumber(progress.needsText ?? 0, locale)) })}
-          </Badge>
-        )}
-        {bothDone && (progress.needsAudio ?? 0) > 0 && (
-          <Badge variant="secondary" className="text-foreground" data-testid="status-bar-audio-left">
-            <span aria-hidden className={`size-2 shrink-0 rounded-[2px] ${PROGRESS_BG.audioRecorded}`} />
-            {t("workspace.statusBar.audioLeftBadge", { count: bidiIsolate(formatNumber(progress.needsAudio ?? 0, locale)) })}
-          </Badge>
-        )}
-        {/* Grouped like the counts beside them ("1,207 validated", not
-            "1207"); the plural form still reads the digits.
-            AQU-1764: the words are in the text colour and the colour sits in
-            a swatch before them, the same light and dark blue the file's bar
-            in the sidebar is drawn in. They were amber and green. */}
-        {showText && unvalidated > 0 && (
-          <Badge variant="secondary" className="text-foreground" data-testid="status-bar-unvalidated">
-            <span aria-hidden className={`size-2 shrink-0 rounded-[2px] ${PROGRESS_BG.textTranslated}`} />
-            {t("workspace.statusBar.unvalidatedBadge", {
-              count: bidiIsolate(formatNumber(unvalidated, locale)),
-            })}
-          </Badge>
-        )}
-        {showText && validated > 0 && (
-          <Badge variant="secondary" className="text-foreground" data-testid="status-bar-validated">
-            <span aria-hidden className={`size-2 shrink-0 rounded-[2px] ${PROGRESS_BG.textValidated}`} />
-            {t("terminology.livingMemory.validatedCount", {
-              count: bidiIsolate(formatNumber(validated, locale)),
-            })}
-          </Badge>
-        )}
-        {/* AQU-2111: the audio twins, in the palette's magenta tones — light
-            for recorded but not validated, dark for audio validated. */}
-        {showAudio && unvalidatedAudio > 0 && (
-          <Badge variant="secondary" className="text-foreground" data-testid="status-bar-unvalidated-audio">
-            <span aria-hidden className={`size-2 shrink-0 rounded-[2px] ${PROGRESS_BG.audioRecorded}`} />
-            {t("workspace.statusBar.unvalidatedAudioBadge", {
-              count: bidiIsolate(formatNumber(unvalidatedAudio, locale)),
-            })}
-          </Badge>
-        )}
-        {showAudio && audioValidated > 0 && (
-          <Badge variant="secondary" className="text-foreground" data-testid="status-bar-validated-audio">
-            <span aria-hidden className={`size-2 shrink-0 rounded-[2px] ${PROGRESS_BG.audioValidated}`} />
-            {t("workspace.statusBar.audioValidatedBadge", {
-              count: bidiIsolate(formatNumber(audioValidated, locale)),
-            })}
-          </Badge>
-        )}
       </span>
+      {hasLegend && (
+        <span className="flex flex-wrap items-center gap-2" data-testid="status-bar-legend">
+          {/* Media redesign: Text and audio says how much of each half is left. */}
+          {needsText > 0 && (
+            <Badge variant="secondary" className="text-foreground" data-testid="status-bar-text-left">
+              <span aria-hidden className={`size-2 shrink-0 rounded-[2px] ${PROGRESS_BG.textTranslated}`} />
+              {t("workspace.statusBar.textLeftBadge", { count: bidiIsolate(formatNumber(needsText, locale)) })}
+            </Badge>
+          )}
+          {needsAudio > 0 && (
+            <Badge variant="secondary" className="text-foreground" data-testid="status-bar-audio-left">
+              <span aria-hidden className={`size-2 shrink-0 rounded-[2px] ${PROGRESS_BG.audioRecorded}`} />
+              {t("workspace.statusBar.audioLeftBadge", { count: bidiIsolate(formatNumber(needsAudio, locale)) })}
+            </Badge>
+          )}
+          {/* Grouped like the counts beside them ("1,207 validated", not
+              "1207"); the plural form still reads the digits.
+              AQU-1764: the words are in the text colour and the colour sits in
+              a swatch before them, the same light and dark blue the file's bar
+              in the sidebar is drawn in. They were amber and green. */}
+          {showText && unvalidated > 0 && (
+            <Badge variant="secondary" className="text-foreground" data-testid="status-bar-unvalidated">
+              <span aria-hidden className={`size-2 shrink-0 rounded-[2px] ${PROGRESS_BG.textTranslated}`} />
+              {t("workspace.statusBar.unvalidatedBadge", {
+                count: bidiIsolate(formatNumber(unvalidated, locale)),
+              })}
+            </Badge>
+          )}
+          {showText && validated > 0 && (
+            <Badge variant="secondary" className="text-foreground" data-testid="status-bar-validated">
+              <span aria-hidden className={`size-2 shrink-0 rounded-[2px] ${PROGRESS_BG.textValidated}`} />
+              {t("terminology.livingMemory.validatedCount", {
+                count: bidiIsolate(formatNumber(validated, locale)),
+              })}
+            </Badge>
+          )}
+          {/* AQU-2111: the audio twins, in the palette's magenta tones — light
+              for recorded but not validated, dark for audio validated. */}
+          {showAudio && unvalidatedAudio > 0 && (
+            <Badge variant="secondary" className="text-foreground" data-testid="status-bar-unvalidated-audio">
+              <span aria-hidden className={`size-2 shrink-0 rounded-[2px] ${PROGRESS_BG.audioRecorded}`} />
+              {t("workspace.statusBar.unvalidatedAudioBadge", {
+                count: bidiIsolate(formatNumber(unvalidatedAudio, locale)),
+              })}
+            </Badge>
+          )}
+          {showAudio && audioValidated > 0 && (
+            <Badge variant="secondary" className="text-foreground" data-testid="status-bar-validated-audio">
+              <span aria-hidden className={`size-2 shrink-0 rounded-[2px] ${PROGRESS_BG.audioValidated}`} />
+              {t("workspace.statusBar.audioValidatedBadge", {
+                count: bidiIsolate(formatNumber(audioValidated, locale)),
+              })}
+            </Badge>
+          )}
+        </span>
+      )}
     </footer>
   )
 }

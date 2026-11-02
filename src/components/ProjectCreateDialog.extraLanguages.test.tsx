@@ -131,7 +131,7 @@ function openDialogWithBasics(opts?: { name?: string; source?: string; target?: 
   render(<ProjectCreateDialog onCreated={vi.fn()} />)
   fireEvent.click(screen.getByRole("button", { name: /new project/i }))
 
-  fireEvent.change(screen.getByPlaceholderText("My Translation Project"), {
+  fireEvent.change(screen.getByPlaceholderText("My translation project"), {
     target: { value: opts?.name ?? "Multilingual Episode 1" },
   })
   fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), {
@@ -147,6 +147,17 @@ function addExtraLanguage(tag: string) {
   const extras = screen.getAllByTestId(/^create-target-lang-input-\d+$/)
   fireEvent.change(extras[extras.length - 1]!, { target: { value: tag } })
 }
+
+// AQU-2263: New Project adds a language with the same "Add language lane" piece as
+// Project settings → Languages, in the same words.
+describe("ProjectCreateDialog — the shared Add language piece", () => {
+  it("is the same Add language button Project settings uses", () => {
+    openDialogWithBasics()
+    const add = addLaneButton()
+    expect(add).toHaveTextContent("Add language lane")
+    expect(add).toHaveAttribute("data-add-language")
+  })
+})
 
 describe("ProjectCreateDialog — self-contained target language chips (AQU-538)", () => {
   beforeEach(() => {
@@ -177,9 +188,9 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     })
   })
 
-  it("labels the field 'Target Language(s)' on the default self-contained shape", () => {
+  it("labels the field 'Language lanes' on the default self-contained shape", () => {
     openDialogWithBasics()
-    expect(screen.getByText("Target Language(s)")).toBeTruthy()
+    expect(screen.getByText("Language lanes")).toBeTruthy()
     expect(targetLangInput()).toBeTruthy()
     expect(screen.getByTestId("create-target-lang-inputs")).toBeTruthy()
   })
@@ -188,39 +199,39 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     openDialogWithBasics()
     fireEvent.click(screen.getByText("Advanced: project shape"))
 
-    expect(screen.getByText("Target Language(s)")).toBeTruthy()
+    expect(screen.getByText("Language lanes")).toBeTruthy()
     expect(
       screen.getByText(/owns both its source and its target\./),
     ).toBeTruthy()
     expect(
       screen.getByTestId("create-shape-linked-target").closest("label")?.textContent,
-    ).toMatch(/Linked Target/)
+    ).toMatch(/Linked target/)
     expect(
       screen.getByTestId("create-shape-linked-target").closest("label")?.textContent,
-    ).not.toMatch(/Linked Targets/)
+    ).not.toMatch(/Linked targets/)
 
     addExtraLanguage("es")
 
-    expect(screen.getByText("Target Language(s)")).toBeTruthy()
+    expect(screen.getByText("Language lanes")).toBeTruthy()
     expect(
       screen.getByText(/owns both its source and its targets\./),
     ).toBeTruthy()
     expect(
       screen.getByTestId("create-shape-linked-target").closest("label")?.textContent,
-    ).toMatch(/Linked Targets/)
+    ).toMatch(/Linked targets/)
 
     fireEvent.click(screen.getByTestId("create-target-lang-remove-1"))
 
-    expect(screen.getByText("Target Language(s)")).toBeTruthy()
+    expect(screen.getByText("Language lanes")).toBeTruthy()
     expect(
       screen.getByText(/owns both its source and its target\./),
     ).toBeTruthy()
     expect(
       screen.getByTestId("create-shape-linked-target").closest("label")?.textContent,
-    ).toMatch(/Linked Target/)
+    ).toMatch(/Linked target/)
     expect(
       screen.getByTestId("create-shape-linked-target").closest("label")?.textContent,
-    ).not.toMatch(/Linked Targets/)
+    ).not.toMatch(/Linked targets/)
   })
 
   it("appends one box per language via the plus button", () => {
@@ -290,7 +301,7 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     expect(screen.getByTestId("create-bulk-target-langs-count").textContent).toContain("3")
 
     await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
-    fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create project/i }))
 
     await waitFor(() => {
       expect(mockCreateCloudProject).toHaveBeenCalledTimes(1)
@@ -345,7 +356,7 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     addExtraLanguage("pt-BR")
 
     await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
-    fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create project/i }))
 
     await waitFor(() => {
       expect(mockCreateCloudProject).toHaveBeenCalledTimes(1)
@@ -375,7 +386,7 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
   it("submits with no extras and still creates the primary target lane", async () => {
     openDialogWithBasics()
     await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
-    fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create project/i }))
 
     await waitFor(() => {
       expect(mockCreateCloudProject).toHaveBeenCalledTimes(1)
@@ -393,7 +404,7 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
   it("creates with only the primary box filled and no lanes added", async () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
-    fireEvent.change(screen.getByPlaceholderText("My Translation Project"), {
+    fireEvent.change(screen.getByPlaceholderText("My translation project"), {
       target: { value: "Draft Primary" },
     })
     fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), {
@@ -401,7 +412,7 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     })
     fireEvent.change(targetLangInput(), { target: { value: "Swahili" } })
     await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
-    fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create project/i }))
 
     await waitFor(() => {
       expect(mockCreateCloudProject).toHaveBeenCalledTimes(1)
@@ -423,7 +434,7 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     addExtraLanguage("es")
 
     await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
-    fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create project/i }))
 
     await waitFor(() => {
       expect(mockCreateProject).toHaveBeenCalledTimes(1)
@@ -433,7 +444,7 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     // The project exists, so the dialog closes and the warning survives the
     // close on a toast instead of being wiped by it.
     await waitFor(() => {
-      expect(screen.queryByText("Create New Project")).toBeNull()
+      expect(screen.queryByText("Create new project")).toBeNull()
     })
     expect(vi.mocked(toast.add)).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -461,7 +472,7 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     // A linked target is the Biblica case — one upstream source, several
     // languages — so it needs lanes at creation just as much as a
     // self-contained project does.
-    expect(screen.getByText("Target Language(s)")).toBeTruthy()
+    expect(screen.getByText("Language lanes")).toBeTruthy()
     expect(screen.getByTestId("create-extra-lang-input")).toBeTruthy()
     expect(screen.getByTestId("create-add-target-lang")).toBeTruthy()
   })
@@ -481,14 +492,14 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     // Corpus choice stays hidden until an upstream is picked on self-contained.
     expect(screen.queryByText(/Which corpus should become/i)).toBeNull()
 
-    fireEvent.click(screen.getByText(/Linked Target/i))
+    fireEvent.click(screen.getByText(/Linked target/i))
     expect(linkedTarget().getAttribute("data-checked")).toBe("")
     expect(screen.getByText(/creating a/i)).toBeTruthy()
     expect(screen.getByText("Upstream project")).toBeTruthy()
     expect(screen.getByText(/Which corpus should become/i)).toBeTruthy()
     expect(screen.getByTestId("create-extra-lang-input")).toBeTruthy()
 
-    fireEvent.click(screen.getByText(/Self Contained/i))
+    fireEvent.click(screen.getByText(/Self-contained/i))
     expect(selfContained().getAttribute("data-checked")).toBe("")
     expect(screen.getByText(/import a/i)).toBeTruthy()
     expect(screen.getByText("Upstream project")).toBeTruthy()
@@ -508,7 +519,7 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     expect(screen.getByTestId("create-target-lang-delivers-0")).toHaveTextContent("Audio")
 
     await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
-    fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create project/i }))
     await waitFor(() => {
       expect(mockCreateProjectLane).toHaveBeenCalledTimes(2)
     })
@@ -534,7 +545,7 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     await user.click(await screen.findByRole("option", { name: "Text and audio" }))
 
     await screen.findByTestId("project-create-destination")
-    fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create project/i }))
     await waitFor(() => {
       expect(mockCreateProjectLane).toHaveBeenCalledTimes(12)
     })
@@ -543,5 +554,26 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
       { name: "", language: "Swahili", delivers: "text" },
       { name: "", language: "Yoruba", delivers: "text_and_audio" },
     ])
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): the language fields' (i) opens its text in place,
+// under the label, on click — and closes on a second click. No hover.
+describe("ProjectCreateDialog — the language fields' (i) (AQU-2260)", () => {
+  it("opens what you can enter, under the label, on click, and shuts it again", async () => {
+    render(<ProjectCreateDialog onCreated={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+    const [sourceInfo] = screen.getAllByRole("button", { name: "What can I enter here?" })
+    await userEvent.setup().hover(sourceInfo!)
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    expect(sourceInfo).toHaveAttribute("aria-expanded", "false")
+    const note = document.getElementById(sourceInfo!.getAttribute("aria-controls")!)!
+    expect(note).toHaveAttribute("data-open", "false")
+    fireEvent.click(sourceInfo!)
+    expect(sourceInfo).toHaveAttribute("aria-expanded", "true")
+    expect(note).toHaveAttribute("data-open", "true")
+    expect(note).toHaveTextContent(/Type a language name or a description/)
+    fireEvent.click(sourceInfo!)
+    expect(note).toHaveAttribute("data-open", "false")
   })
 })

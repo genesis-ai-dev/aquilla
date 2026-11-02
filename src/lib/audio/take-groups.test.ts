@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
-import { groupSelection, groupTakesByTrack, originalRecordingId, pieceNames, piecesOf, playingTakeId, takeBaseLabel, takeRows } from "./take-groups"
+import { groupSelection, groupTakesByTrack, listedTakeCount, originalRecordingId, pieceNames, piecesOf, playingTakeId, takeBaseLabel, takeRows } from "./take-groups"
 
 const att = (audioId: string, slot: string, over: Partial<AudioAttachmentOut> = {}): AudioAttachmentOut => ({
   audioId, url: `frontier-audio://${audioId}`, slot, mimeType: null, voiceId: null, referenceAudioId: null,
@@ -129,5 +129,20 @@ describe("originalRecordingId", () => {
   })
   it("stops at a cleaned copy whose original is gone", () => {
     expect(originalRecordingId({ "dn-audio-c1-1.wav": { referenceAudioId: "audio-c1-1.wav" } }, "dn-audio-c1-1.wav")).toBe("dn-audio-c1-1.wav")
+  })
+})
+
+// AQU-981 (Sam, Oct 29): a take split into pieces is one take. The recorder's
+// "Takes 5" counted a split take once per piece, while its list showed 4.
+describe("listedTakeCount", () => {
+  it("counts takes as the list shows them: a split take once, on every track", () => {
+    const groups = groupTakesByTrack({
+      "audio-c1-1.wav": att("audio-c1-1.wav", "recording", { label: "Take 1" }),
+      "audio-c1-2.wav": att("audio-c1-2.wav", "recording", { label: "Take 2 · 1", trimEndMs: 400 }),
+      "audio-c1-3.wav": att("audio-c1-3.wav", "recording", { label: "Take 2 · 2", trimStartMs: 400, pieceOf: "audio-c1-2.wav" }),
+      "audio-c1-4.wav": att("audio-c1-4.wav", "recording", { label: "Take 3" }),
+      "audio-c1-5.wav": att("audio-c1-5.wav", "trk-2", { label: "Take 1" }),
+    }, "f1", tracks)
+    expect(listedTakeCount(groups)).toBe(4)
   })
 })

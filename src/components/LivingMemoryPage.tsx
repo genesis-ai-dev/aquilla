@@ -16,6 +16,7 @@
  */
 
 import { useCallback, useMemo } from "react"
+import { overlaySettings } from "@/hooks/project-settings-overlay"
 import type { ComponentType } from "react"
 import { useParams, useNavigate, useLocation } from "react-router-dom"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
@@ -31,7 +32,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { NoteOnClick } from "@/components/ui/info-note"
 import { BackLink, NavList, NavRow } from "@/components/ui/nav-list"
 import { BRIEF_ICON, LIVING_MEMORY_ICON } from "@/components/LivingMemoryButton"
 import { useLivingMemory } from "@/hooks/useLivingMemory"
@@ -252,7 +253,17 @@ export function LivingMemoryPage({
   // overlaySettings). Undefined while the record hydrates, and for a project
   // that never customized AI — the brief pane resolves both to the Frontier
   // platform default rather than reading them as "no provider" (AQU-1671).
-  const completionSettings = project?.completionSettings
+  // AQU-2259: a standalone visit's record carries no shared settings, so lay
+  // the team's drafting settings over it here (a no-op on the workspace's
+  // record, which already has them).
+  const completionSettings = useMemo(
+    () => (project ? overlaySettings(project, settings).completionSettings : undefined),
+    [project, settings],
+  )
+  const projectWithDrafting = useMemo(
+    () => (project && completionSettings !== project.completionSettings ? { ...project, completionSettings } : project),
+    [project, completionSettings],
+  )
 
   async function handleAdd(kind: LivingMemoryEntry["kind"], text: string) {
     const next = addEntry(entries, kind, text, author)
@@ -316,9 +327,10 @@ export function LivingMemoryPage({
 
   const statusAndActions = (
     <>
-      <AppTooltip content={livenessLabel}>
+      {/* AQU-2260: a coloured mark, so its state opens on click, not hover. */}
+      <NoteOnClick note={livenessLabel} label={livenessLabel} className="shrink-0 p-1">
         <span
-          aria-label={livenessLabel}
+          aria-hidden
           className={[
             "h-2 w-2 shrink-0 rounded-full transition-colors",
             livenessState === "offline"
@@ -328,7 +340,7 @@ export function LivingMemoryPage({
                 : "bg-emerald-500",
           ].join(" ")}
         />
-      </AppTooltip>
+      </NoteOnClick>
       {validatedExamplesEnabled ? (
         isLoading ? (
           <Skeleton
@@ -475,7 +487,7 @@ export function LivingMemoryPage({
                 </h2>
                 <RulesSettingsSection
                   projectId={projectId}
-                  project={project}
+                  project={projectWithDrafting}
                   refreshProject={refreshProject}
                   patchSettings={patchSettings}
                   roleLevel={roleLevel}

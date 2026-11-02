@@ -55,6 +55,8 @@ export interface GenerateCellVoiceArgs {
   targetLang?: string
   /** AQU-1572: see `GenerateAndAttachArgs.surface`. */
   surface?: TelemetrySurface
+  /** Decision 11: see `GenerateAndAttachArgs.history`. */
+  history?: { selectedBefore: string | null }
 }
 
 /**
@@ -132,6 +134,7 @@ export async function generateCellVoice(args: GenerateCellVoiceArgs): Promise<bo
       ...(args.targetLang ? { targetLang: args.targetLang } : {}),
       onProgress,
       ...(args.surface ? { surface: args.surface } : {}),
+      ...(args.history ? { history: args.history } : {}),
     })
     setTtsStatus(statusKey, { kind: "idle" })
     return true

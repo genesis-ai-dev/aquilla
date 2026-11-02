@@ -18,6 +18,10 @@ import { getCqrsOutboxBridge } from "@/lib/sync/cqrs-bridge"
 import { canAttachSourceAudio, SOURCE_AUDIO_ATTACH_FLOOR } from "@/lib/sync/role-policy"
 import { primeSharedClipPcm } from "@/lib/audio/shared-clip-pcm"
 
+/** A line the recording became, and the event that made it (decision 11:
+ *  the caller records "Make lines from a recording" as an Undo step). */
+export interface MadeLine { cellId: string; eventId: string }
+
 export interface AttachMediaContext {
   projectId: string
   /** The existing time-ordered file receiving the media segments. */
@@ -51,7 +55,7 @@ export async function attachMediaFileToTimeline(
   file: File,
   ctx: AttachMediaContext,
   opts: AttachMediaFileOptions = {},
-): Promise<{ segments: number }> {
+): Promise<{ segments: number; lines: MadeLine[] }> {
   assertMayAttachSourceAudio()
   const { durationMs, specs } = opts.analysis
     ? {
@@ -76,10 +80,11 @@ export async function attachMediaFileToTimeline(
   // Keyed the way transcription names a shared clip: its stored object.
   if (opts.analysis?.pcm16k) primeSharedClipPcm(`${upload.audioId}.${upload.ext}`, opts.analysis.pcm16k)
 
+  const lines: MadeLine[] = []
   try {
     let prevCellId: string | null = null
     for (const [i, s] of specs.entries()) {
-      await emitSourceCellCreate({
+      const eventId = await emitSourceCellCreate({
         projectId: ctx.projectId,
         fileId: ctx.fileId,
         cellId: s.cellId,
@@ -111,6 +116,7 @@ export async function attachMediaFileToTimeline(
         role: "source",
         author: ctx.author,
       })
+      lines.push({ cellId: s.cellId, eventId })
       prevCellId = s.cellId
     }
   } catch (err) {
@@ -140,7 +146,7 @@ export async function attachMediaFileToTimeline(
     }),
   })
 
-  return { segments: specs.length }
+  return { segments: specs.length, lines }
 }
 
 /**
@@ -151,7 +157,7 @@ export async function attachMediaFileToTimeline(
 export async function attachMediaUrlToTimeline(
   url: string,
   ctx: AttachMediaContext,
-): Promise<{ durationMs: number }> {
+): Promise<{ durationMs: number; lines: MadeLine[] }> {
   assertMayAttachSourceAudio()
   const trimmed = url.trim()
   let parsed: URL
@@ -167,7 +173,7 @@ export async function attachMediaUrlToTimeline(
   const durationMs = await probeRemoteMediaDurationMs(trimmed)
 
   const cellId = uuidv7()
-  await emitSourceCellCreate({
+  const eventId = await emitSourceCellCreate({
     projectId: ctx.projectId,
     fileId: ctx.fileId,
     cellId,
@@ -194,7 +200,7 @@ export async function attachMediaUrlToTimeline(
     author: ctx.author,
   })
 
-  return { durationMs }
+  return { durationMs, lines: [{ cellId, eventId }] }
 }
 
 /**

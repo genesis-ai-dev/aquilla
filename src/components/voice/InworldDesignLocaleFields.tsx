@@ -286,7 +286,6 @@ export function InworldDesignLocaleFields({
           <SelectContent
             side="bottom"
             align="start"
-            alignItemWithTrigger={false}
             collisionAvoidance={{ side: "shift", align: "shift", fallbackAxisSide: "none" }}
             className="max-h-80"
           >

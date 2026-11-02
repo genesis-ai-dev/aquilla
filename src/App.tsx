@@ -1,4 +1,5 @@
 import { CheckingPage } from "@/components/checking/CheckingPage"
+import { SettingHighlighter } from "@/hooks/useSettingHighlight"
 import { Suspense, lazy, useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { Navigate, Routes, Route, useParams, useLocation, type Location } from "react-router-dom"
 import { OrgHome } from "@/components/org/OrgHome"
@@ -23,6 +24,7 @@ import { UnsyncedOfflineWorkGuard } from "@/components/UnsyncedOfflineWorkGuard"
 import { OfflineShutdownGuard } from "@/components/OfflineShutdownGuard"
 import { OfflineLaunchResume } from "@/components/OfflineLaunchResume"
 import { LocalLlmConfigMount } from "@/components/LocalLlmConfigMount"
+import { PersonPrefsSyncMount } from "@/components/PersonPrefsSyncMount"
 import { ConflictToast } from "@/components/ConflictToast"
 import { OfflineLeaderWatchdog } from "@/components/OfflineLeaderWatchdog"
 import { DesktopUpdatePrompt } from "@/components/DesktopUpdatePrompt"
@@ -52,7 +54,7 @@ import { SessionHydrationError } from "@/components/SessionHydrationError"
 import { AccountTransitionError } from "@/components/AccountTransitionError"
 import { isSessionHydrationRequiredPath } from "@/lib/navigation/session-routes"
 import { VersionBadge } from "@/components/VersionBadge"
-import { UpdateBanner } from "@/components/UpdateBanner"
+import { UpdateOnNavigate } from "@/components/UpdateIndicator"
 import { hydratePrefetchStatus } from "@/lib/audio/prefetch"
 import { probeOpfsAvailability } from "@/lib/storage/opfs-availability"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -89,8 +91,8 @@ const JoinOrgPage = lazy(() =>
 const VerifyEmailPage = lazy(() =>
   import("@/components/VerifyEmailPage").then((m) => ({ default: m.VerifyEmailPage })),
 )
-const OnboardingWizard = lazy(() =>
-  import("@/components/onboarding/OnboardingWizard").then((m) => ({ default: m.OnboardingWizard })),
+const Signup = lazy(() =>
+  import("@/pages/Signup").then((m) => ({ default: m.Signup })),
 )
 const BillingSelection = lazy(() =>
   import("@/pages/BillingSelection").then((m) => ({ default: m.BillingSelection })),
@@ -378,6 +380,7 @@ export default function App() {
       <OfflineShutdownGuard />
       <OfflineLaunchResume />
       <LocalLlmConfigMount />
+      <PersonPrefsSyncMount />
       <TooltipProvider delay={600}>
         <SyncingProvider>
           <PrivateModeBanner />
@@ -415,7 +418,7 @@ export default function App() {
           <AudioBulkProgressBanner />
           <GlobalAudioShortcuts />
           <VersionBadge />
-          <UpdateBanner />
+          <UpdateOnNavigate />
           <Toaster />
         </SyncingProvider>
       </TooltipProvider>
@@ -430,6 +433,8 @@ function AppRoutes() {
   return (
     <>
       <BuildJobNotifier />
+      {/* AQU-2265: `?highlight=<id>` scrolls to one setting and flashes it. */}
+      <SettingHighlighter />
       {/* Workspace routes intentionally suspend to this outer boundary: when
           entered through useOpenWorkspace's transition, React keeps the source
           project overview mounted so its blocking "Opening project" overlay
@@ -455,7 +460,9 @@ function AppRoutes() {
         <Route path="/approve/:changesetId" element={<LazyRoute><ApproveChangeset /></LazyRoute>} />
         <Route path="/join-org/:token" element={<JoinOrgPage />} />
         <Route path="/verify-email" element={<VerifyEmailPage />} />
-        <Route path="/onboarding" element={<OnboardingWizard />} />
+        <Route path="/signup" element={<Signup />} />
+        {/* Old marketing links/bookmarks retain their query and signup destination. */}
+        <Route path="/onboarding" element={<Signup />} />
         {/* AQU-282: dedicated login — eagerly loaded (public, no auth required) */}
         <Route path="/login" element={<Login />} />
         <Route path="/billing/select" element={<BillingSelection />} />

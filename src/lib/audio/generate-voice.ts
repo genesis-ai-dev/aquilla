@@ -25,6 +25,7 @@ import { uploadLosslessSiblingBestEffort } from "./lossless-sibling"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { convertToLibraryVoice } from "./voice-clone"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
+import { recordTakeAdded } from "@/lib/history/take-steps"
 import { injectOptimisticAudioAttachment, notifyAudioAttachmentsChanged } from "./audio-attachments-bus"
 import { probeDurationMsSafe } from "@/lib/import"
 import { synthesizeServerTts } from "./server-tts"
@@ -63,6 +64,9 @@ export interface GenerateAndAttachArgs {
   onProgress?: SynthOptions["onProgress"]
   /** AQU-1572: where the generation was asked for ("recorder", "cell"…). Telemetry only. */
   surface?: TelemetrySurface
+  /** Decision 11: record an Undo step for the new take, naming the take that
+   *  played in its slot before. Omitted by bulk runs, which record none. */
+  history?: { selectedBefore: string | null }
 }
 
 export interface GenerateAndAttachResult {
@@ -156,6 +160,9 @@ export async function generateAndAttachCellVoice(
       trimEndMs: null,
     }, attachEventId)
     notifyAudioAttachmentsChanged(args.fileId)
+    // The take that was attached: the re-voiced clip for a character voice,
+    // or the server-synthesized ElevenLabs take.
+    recordGenerated(args, objectName)
     const playExt = voice.libraryVoiceId ? "wav" : serverExt
     const bytes = await fetchCellAudio({
       projectId: args.projectId,
@@ -314,6 +321,17 @@ export async function generateAndAttachCellVoice(
     trimEndMs: null,
   }, attachEventId)
   notifyAudioAttachmentsChanged(args.fileId)
+  recordGenerated(args, objectName)
 
   return { audioId: objectName, url, blob: playable }
+}
+
+/** Decision 11: the generated take is an Undo step, when the caller asks. */
+function recordGenerated(args: GenerateAndAttachArgs, audioId: string): void {
+  if (!args.history) return
+  recordTakeAdded(
+    "generate",
+    { cellId: args.cellId, audioId, slot: args.slot ?? GENERATED_VOICE_SLOT, selectedBefore: args.history.selectedBefore },
+    { fileId: args.fileId },
+  )
 }

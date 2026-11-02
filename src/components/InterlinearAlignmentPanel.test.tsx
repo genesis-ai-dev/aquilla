@@ -77,8 +77,9 @@ describe("InterlinearAlignmentPanel — insufficient data (AQU-241)", () => {
         onSeedChange={noop}
       />,
     )
-    // No ✓/✕ buttons when in the empty state.
-    expect(screen.queryByRole("button")).not.toBeInTheDocument()
+    // No ✓/✕ buttons when in the empty state (the section's (i) is the only
+    // button, AQU-2260).
+    expect(screen.queryByRole("button", { name: /confirm|reject/i })).not.toBeInTheDocument()
   })
 
   it("renders normally (or returns null) when pairCount >= MIN_PAIRS_FOR_MEANINGFUL_ALIGNMENT", () => {
@@ -297,14 +298,11 @@ describe("InterlinearAlignmentPanel — section header tooltip (AQU-241)", () =>
         onSeedChange={noop}
       />,
     )
-    // AppTooltip is mocked to render its content unconditionally (see mock above) —
-    // Base UI's real hover/focus tooltip isn't reliably driveable in happy-dom.
-    // The text must mention both confirm and reject/invalidate to satisfy AQU-240.
-    const tooltipContents = screen.getAllByTestId("tooltip-content")
-    const helpTooltip = tooltipContents.find((el) =>
-      /confirm.*reject|reject.*confirm/i.test(el.textContent ?? ""),
-    )
-    expect(helpTooltip).toBeTruthy()
+    // AQU-2260: the help is behind the section's (i), on a click. The text
+    // must mention both confirm and reject/invalidate to satisfy AQU-240.
+    fireEvent.click(screen.getByRole("button", { name: "About Alignment" }))
+    const note = document.querySelector('[data-slot="popover-content"]')
+    expect(note?.textContent ?? "").toMatch(/confirm.*reject|reject.*confirm/i)
   })
 })
 

@@ -3,6 +3,7 @@ import { Building2, Folder } from "lucide-react"
 import { Field, FieldLabel, FieldDescription } from "@/components/ui/field"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectGroup, SelectItem } from "@/components/ui/select"
+import { SearchSelect } from "@/components/ui/search-select"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { ROLE } from "@/lib/frontier/roles"
 import type { OrgSummary } from "@/lib/frontier/orgs"
@@ -139,12 +140,15 @@ export function AgentAccessFields({ access, requestedMode, pinnedProjectId, busy
       {scopeKind === "project" ? (
         <Field>
           <FieldLabel>{t("onboarding.connect.project")}</FieldLabel>
-          <Select value={projectId} onValueChange={v => setProjectId(v ?? "")} disabled={busy}>
-            <SelectTrigger aria-label={t("onboarding.connect.project")}>
-              <SelectValue placeholder={t("onboarding.connect.choose")}>{projectOptions.find(p => p.id === projectId)?.name}</SelectValue>
-            </SelectTrigger>
-            <SelectContent><SelectGroup>{projectOptions.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectGroup></SelectContent>
-          </Select>
+          {/* AQU-2260: the person's projects, so a search box. */}
+          <SearchSelect
+            aria-label={t("onboarding.connect.project")}
+            options={projectOptions.map(p => ({ value: p.id, label: p.name }))}
+            value={projectId}
+            onValueChange={setProjectId}
+            disabled={busy}
+            placeholder={t("onboarding.connect.choose")}
+          />
           {!projectOptions.length && <p role="status">{t("onboarding.connect.noProjects")}</p>}
         </Field>
       ) : (

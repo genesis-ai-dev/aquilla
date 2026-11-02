@@ -4,6 +4,7 @@
 // (search + TanStack sort headers). "Add a member" opens a dialog with tabs:
 // add people from the org, or create an invite link.
 
+import { LockedNote } from "@/components/ui/locked-note"
 import { useMemo, useState } from "react"
 import { type ColumnDef } from "@tanstack/react-table"
 import {
@@ -18,32 +19,24 @@ import {
 } from "@/components/ui/data-table"
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
 import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
-import {
-  MenuItem,
-  MenuSeparator,
-  MenuSub,
-  MenuSubContent,
-  MenuSubTrigger,
-} from "@/components/ui/menu-parts"
+import { MenuItem, MenuSeparator } from "@/components/ui/menu-parts"
 import {
   Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
 import { RoleLabel } from "@/components/RoleLabel"
-import { RevokeAllDialog } from "@/components/ProjectMembersPage"
+import { RevokeAllDialog } from "@/components/ProjectSettings/RevokeAllDialog"
 import { AddProjectMemberDialog } from "@/components/ProjectSettings/AddProjectMemberDialog"
+import { RoleDialog } from "@/components/access/RoleDialog"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useProjectScopePath } from "@/hooks/useProjectScopePath"
 import { ScopeBreadcrumb } from "@/components/access/ScopeBreadcrumb"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { type ProjectMember } from "@/lib/frontier/members"
+import { ROLE, resolveRoleName } from "@/lib/frontier/roles"
 import {
-  ROLE, resolveRoleName, roleDescription,
-} from "@/lib/frontier/roles"
-import {
-  callerLevelFromRoster, canManageProjectMembers, grantableProjectRoles,
-  roleChangeBlock,
+  callerLevelFromRoster, canManageProjectMembers, roleChangeBlock,
 } from "@/lib/frontier/member-grants"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
@@ -98,11 +91,9 @@ export function MembersSection({ projectId }: { projectId: string }) {
   const [addOpen, setAddOpen] = useState(false)
   const [removeTarget, setRemoveTarget] = useState<ProjectMember | null>(null)
   const [revokeTarget, setRevokeTarget] = useState<ProjectMember | null>(null)
-
-  const grantableRoles = useMemo(
-    () => grantableProjectRoles(callerLevel),
-    [callerLevel],
-  )
+  // AQU-2289: Change role opens the one RoleDialog (project list, capped at
+  // the caller's own role) instead of a submenu that saved on first click.
+  const [roleTarget, setRoleTarget] = useState<ProjectMember | null>(null)
 
   const tableData = useMemo(
     () => members.filter((m) => memberMatchesFilter(m, accessFilter)),
@@ -185,6 +176,13 @@ export function MembersSection({ projectId }: { projectId: string }) {
             <ScopeBreadcrumb path={scopePath} />
           </h2>
         )}
+        {/* AQU-2260: below the Project lead floor nothing here can be
+            changed; one line says so, instead of a hover on Add a member. */}
+        {!canManageMembers && (
+          <LockedNote placement="section" testId="settings-members-locked">
+            {t("projectSettings.members.roleChangeNeedsRole", { role: resolveRoleName(t, ROLE.PROJECT_LEAD) })}
+          </LockedNote>
+        )}
         {error && (
           <div className="flex items-center gap-2 rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
             <AlertTriangle className="h-4 w-4 shrink-0" />
@@ -243,16 +241,9 @@ export function MembersSection({ projectId }: { projectId: string }) {
                   className="ml-auto shrink-0"
                   onClick={openAddDialog}
                   // AQU-853 AC-3: below the project_lead floor the server 403s
-                  // every grant, so the control is disabled and says why
-                  // rather than looking available and failing.
+                  // every grant, so the control is disabled; the line at the
+                  // top of the section says why.
                   disabled={!canManageMembers}
-                  title={
-                    canManageMembers
-                      ? undefined
-                      : t("projectSettings.members.roleChangeNeedsRole", {
-                          role: resolveRoleName(t, ROLE.PROJECT_LEAD),
-                        })
-                  }
                 >
                   {t("org.membersPage.orgTable.addMemberTitle")}
                 </Button>
@@ -285,31 +276,10 @@ export function MembersSection({ projectId }: { projectId: string }) {
               return (
                 <>
                   {canChangeRole && (
-                    <MenuSub>
-                      <MenuSubTrigger>
-                        <ShieldUser className="size-4" />
-                        {t("org.membersPage.changeRoleAria")}
-                      </MenuSubTrigger>
-                      <MenuSubContent className="min-w-72 max-w-96">
-                        {grantableRoles.map((r) => (
-                          <MenuItem
-                            key={r.level}
-                            onClick={() => void add(m.username, r.level)}
-                            className="items-start"
-                          >
-                            <span className="flex min-w-0 flex-col gap-0.5">
-                              <span>
-                                <RoleLabel name={r.name} plain className="font-medium" />
-                                {r.level === m.role.level ? " (current)" : ""}
-                              </span>
-                              <span className="text-xs font-normal whitespace-normal text-muted-foreground">
-                                {roleDescription(r.level)}
-                              </span>
-                            </span>
-                          </MenuItem>
-                        ))}
-                      </MenuSubContent>
-                    </MenuSub>
+                    <MenuItem onClick={() => setRoleTarget(m)}>
+                      <ShieldUser className="size-4" />
+                      {t("org.membersPage.changeRoleAria")}
+                    </MenuItem>
                   )}
                   {roleBlockNote && (
                     <MenuItem disabled className="items-start">
@@ -363,6 +333,20 @@ export function MembersSection({ projectId }: { projectId: string }) {
         members={members}
         addMany={addMany}
         callerLevel={callerLevel}
+      />
+
+      <RoleDialog
+        open={roleTarget !== null}
+        onOpenChange={(open) => { if (!open) setRoleTarget(null) }}
+        mode="change"
+        level="project"
+        callerLevel={callerLevel}
+        name={roleTarget?.username ?? ""}
+        currentLevel={roleTarget?.role.level ?? null}
+        summary={t("org.roleDialog.projectChangeSummary")}
+        onSave={async (level) => {
+          if (roleTarget) await add(roleTarget.username, level)
+        }}
       />
 
       <ConfirmActionDialog

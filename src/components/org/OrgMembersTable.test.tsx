@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom"
 import { OrgMembersTable } from "./OrgMembersTable"
 import { ROLE, roleDescription } from "@/lib/frontier/roles"
 import type { OrgMember } from "@/lib/frontier/orgs"
+import { expectClickNote } from "@/test-utils/tooltip"
 
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "jwt", username: "joel", createdAt: "x" }, loading: false }),
@@ -67,10 +68,12 @@ describe("OrgMembersTable — org role change (AQU-952)", () => {
 
     await pickRoleOption(ROLE.OWNER)
 
-    // Owner is a governance escalation — the dialog says so before saving.
-    expect(await screen.findByText(/Owners get full control of this workspace/i)).toBeInTheDocument()
-    expect(screen.getByText(/You keep your own ownership/i)).toBeInTheDocument()
-    expect(screen.getByText(/cannot be undone here/i)).toBeInTheDocument()
+    // Owner is a governance escalation — the dialog says so before saving,
+    // in one line, with the rest behind its (i) (AQU-2289).
+    const warning = await screen.findByTestId("role-dialog-owner-warning")
+    expect(warning).toHaveTextContent(/Owners get full control of this organization/i)
+    expect(warning).toHaveTextContent(/can't be undone here/i)
+    expect(warning).toHaveTextContent(/You keep your own ownership/i)
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
     await waitFor(() => expect(add).toHaveBeenCalledWith("esther", ROLE.OWNER))
@@ -83,15 +86,72 @@ describe("OrgMembersTable — org role change (AQU-952)", () => {
     fireEvent.click(await screen.findByRole("combobox", { name: /role for esther/i }))
     await pickRoleOption(ROLE.MAINTAINER)
 
-    expect(screen.queryByText(/Owners get full control of this workspace/i)).not.toBeInTheDocument()
+    expect(screen.queryByTestId("role-dialog-owner-warning")).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Save" }))
     await waitFor(() => expect(add).toHaveBeenCalledWith("esther", ROLE.MAINTAINER))
+  })
+
+  // AQU-2260 (Sam, Oct 29): why a member's org role is read-only here is a
+  // status note on the role itself, opened by a click, never a hover.
+  it("says on click why a non-owner cannot change an org role", async () => {
+    renderTable({ callerOrgRoleLevel: ROLE.MAINTAINER })
+    await expectClickNote(
+      await screen.findByRole("button", { name: /org-level role: contributor/i }),
+      /can only be changed by an org owner/,
+    )
   })
 
   it("does not offer Change role to a non-owner caller", async () => {
     renderTable({ callerOrgRoleLevel: ROLE.MAINTAINER })
     fireEvent.click(await screen.findByRole("button", { name: "Actions for esther" }))
     expect(screen.queryByRole("menuitem", { name: /change role/i })).not.toBeInTheDocument()
+  })
+})
+
+// AQU-2289: the member list's Change role and Add a member open the one role
+// dialog, with the organization's list.
+describe("OrgMembersTable — the one role dialog (AQU-2289)", () => {
+  it("Change role opens the one role dialog at the organization level", async () => {
+    renderTable()
+    await openChangeRole("esther")
+    const dialog = await screen.findByTestId("role-dialog")
+    expect(dialog).toHaveAttribute("data-role-dialog-mode", "change")
+    expect(dialog).toHaveAttribute("data-role-level", "org")
+    expect(within(dialog).getByRole("heading", { name: "Change role for esther" })).toBeInTheDocument()
+  })
+
+  it("Add a member opens the same dialog, with Invite by email beside it", async () => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter>
+          <OrgMembersTable
+            orgId={7}
+            members={MEMBERS}
+            callerOrgRoleLevel={ROLE.OWNER}
+            canAddToProjects={false}
+            onAddToProjects={() => {}}
+            add={vi.fn()}
+            addMany={vi.fn(async () => [])}
+            onRequestRemove={() => {}}
+          />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Add a member" }))
+    const dialog = await screen.findByTestId("role-dialog")
+    expect(dialog).toHaveAttribute("data-role-dialog-mode", "add")
+    expect(dialog).toHaveAttribute("data-role-level", "org")
+    expect(within(dialog).getByRole("tab", { name: "Invite by email" })).toBeInTheDocument()
+  })
+
+  it("says why a save was refused in plain words", async () => {
+    const add = vi.fn(async () => { throw Object.assign(new Error("forbidden"), { status: 403 }) })
+    renderTable({ add })
+    await openChangeRole("esther")
+    fireEvent.click(await screen.findByRole("combobox", { name: /role for esther/i }))
+    await pickRoleOption(ROLE.MAINTAINER)
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+    expect(await screen.findByRole("alert")).toBeInTheDocument()
   })
 })
 

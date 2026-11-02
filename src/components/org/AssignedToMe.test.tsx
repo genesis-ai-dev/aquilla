@@ -3,6 +3,7 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { fmtDeadlineDate } from "@/lib/format-date"
+import { expectClickNote } from "@/test-utils/tooltip"
 import { AssignedToMe } from "./AssignedToMe"
 
 const navigate = vi.fn()
@@ -356,5 +357,19 @@ describe("AssignedToMe", () => {
     fireEvent.change(screen.getByPlaceholderText("Search assignments…"), { target: { value: "01-JHN" } })
     await waitFor(() => expect(screen.getByText("John scope")).toBeInTheDocument())
     expect(screen.queryByText("MRK 1")).toBeNull()
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): the cell count says what it counts on a click,
+// never on hover, and that click stays on the count: it does not open the row.
+describe("AssignedToMe cell count note", () => {
+  it("opens what the count covers on click, without opening the assignment", async () => {
+    mockGetMy.mockResolvedValue([
+      { assignmentId: "a1", projectId: "pa", projectName: "John", fileId: "f1", fileName: "01-JHN.usfm", scopeKind: "books", scopeLabel: "John", targetLang: "", deadline: null, note: null, cellsTotal: 10, cellsDone: 4, createdAt: 200 },
+    ])
+    renderInbox()
+    const count = await screen.findByRole("button", { name: "4/10 cells · 40%" })
+    await expectClickNote(count, "4 of the 10 cells in this assignment are done")
+    expect(navigate).not.toHaveBeenCalled()
   })
 })

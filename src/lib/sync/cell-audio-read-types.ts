@@ -32,6 +32,12 @@ export interface AudioAttachmentOut {
    * every take made before this column existed.
    */
   targetOffsetMs?: number | null
+  /**
+   * AQU-2267: where this take sits FOLLOWING THE RECORDINGS, measured the same
+   * way from its line's start in that layout. NULL = no place of its own there:
+   * that timing reads `targetOffsetMs`, as every take before AQU-2267 does.
+   */
+  recordingsOffsetMs?: number | null
   /** SUB-48: set by the optimistic overlay while this clip's event is still
    *  sitting in the outbox — i.e. saved on this device but not yet at the
    *  server. Never sent by the server; UI renders a "saving…" hint from it so
@@ -60,6 +66,13 @@ export interface AudioAttachmentOut {
    */
   validatorCount?: number
   validators?: string[]
+  /**
+   * AQU-2296: username → when that person validated this take (server clock,
+   * ms). Optional for the same reason `validators` is — a worker that predates
+   * it must read as "no stamps known", which the popover draws as a name with
+   * no date line rather than an "Invalid Date".
+   */
+  validatorDecidedTs?: Record<string, number>
   /**
    * 'dub' is somebody's translation of this line. 'source' is the shared
    * programme audio an import attached — it sits SELECTED in the recording

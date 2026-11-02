@@ -291,6 +291,12 @@ export interface OrgAssignmentRow {
   cellsTotal: number
   cellsDone: number
   deadline: string | null
+  /**
+   * AQU-2294: when the assignment was handed out — `assignments.created_at`,
+   * epoch ms. The list was already ORDERED by it; the manager card needs to
+   * show it, beside the deadline, so a row says how long it has been out.
+   */
+  createdAt: number
   /** AQU-1969: what the assignment hands out. */
   kind: AssignmentKind
   /** AQU-1969: a validate assignment's own-approval progress; absent on a translate one. */
@@ -319,6 +325,7 @@ export async function getOrgAssignmentWorkload(
             ${CELLS_TOTAL_SUBQUERY} AS cells_total,
             ${CELLS_DONE_SUBQUERY} AS cells_done,
             a.deadline         AS deadline,
+            a.created_at       AS created_at,
             a.kind             AS kind,
             (SELECT ac.file_id FROM assignment_member_cells ac
               WHERE ac.assignment_id = a.assignment_id LIMIT 1) AS file_id
@@ -345,6 +352,7 @@ export async function getOrgAssignmentWorkload(
       cells_total: number
       cells_done: number
       deadline: string | null
+      created_at: number
       kind: string | null
       file_id: string | null
     }>()
@@ -363,6 +371,7 @@ export async function getOrgAssignmentWorkload(
     cellsTotal: r.cells_total,
     cellsDone: r.cells_done,
     deadline: r.deadline,
+    createdAt: r.created_at,
     kind: assignmentKind(r.kind),
   })))
 }

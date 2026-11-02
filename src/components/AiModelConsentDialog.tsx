@@ -5,7 +5,6 @@
 import { useEffect, useId, useRef, useState } from "react"
 import { ChevronDown } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { AppTooltip } from "@/components/ui/tooltip"
 import {
   Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog"
@@ -179,19 +178,18 @@ export function AiModelConsentDialog() {
           >
             {justThisLabel}
           </Button>
-          <AppTooltip content={t("workspace.aiConsent.enableAllTooltip")}>
-            <Button
-              type="button"
-              className="w-full sm:w-auto"
-              onPointerDown={(event) => {
-                event.preventDefault()
-                handleAcceptAll()
-              }}
-              onClick={handleAcceptAll}
-            >
-              {t("workspace.aiConsent.enableAllButton")}
-            </Button>
-          </AppTooltip>
+          {/* Its words name it: no hover (AQU-2260). */}
+          <Button
+            type="button"
+            className="w-full sm:w-auto"
+            onPointerDown={(event) => {
+              event.preventDefault()
+              handleAcceptAll()
+            }}
+            onClick={handleAcceptAll}
+          >
+            {t("workspace.aiConsent.enableAllButton")}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

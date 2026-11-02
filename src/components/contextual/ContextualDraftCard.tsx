@@ -21,6 +21,7 @@ import { useState } from "react"
 import { Check, Sparkles, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { NoteOnClick } from "@/components/ui/info-note"
 import { cn } from "@/lib/utils"
 import {
   resolveContextualDraft,
@@ -143,14 +144,18 @@ export function ContextualDraftCard({
         {draft.text}
       </p>
       <div className="flex items-center gap-1">
-        <AppTooltip content={draft.spanLabel
-          ? t("autopilot.draft.draftedFrom", { spanLabel: draft.spanLabel })
-          : t("autopilot.draft.draftedForYou")}>
+        {/* AQU-2260: where the draft came from opens on click, not hover. */}
+        <NoteOnClick
+          note={draft.spanLabel
+            ? t("autopilot.draft.draftedFrom", { spanLabel: draft.spanLabel })
+            : t("autopilot.draft.draftedForYou")}
+          align="start"
+        >
           <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
             <Sparkles className="h-3 w-3" aria-hidden />
             {t("autopilot.draft.suggested")}
           </span>
-        </AppTooltip>
+        </NoteOnClick>
         <div className="ms-auto flex items-center gap-0.5">
           {editable && (
             <AppTooltip content={t("autopilot.draft.useTranslation")}>

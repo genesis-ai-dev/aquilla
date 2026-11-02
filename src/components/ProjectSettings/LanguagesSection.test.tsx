@@ -6,7 +6,7 @@
 // up the whole ProjectSettings tree or a network layer.
 //
 // Media redesign (Sam, Oct 25, design B): the card is a compact table. A row's
-// ⋯ menu holds Rename, Language and code…, and Archive; "Add language" opens a
+// ⋯ menu holds Rename, Language and code…, and Archive; "Add language lane" opens a
 // small form; archived languages sit in a collapsed "Archived (n)" group; and
 // explanations live behind (i) icons, which is why several tests hover one.
 
@@ -17,7 +17,7 @@ import { LanguagesSection, type LaneDeliversOutcome } from "./LanguagesSection"
 import type { LaneDelivers } from "@/lib/lanes/lane-delivers"
 import type { PatchOutcome } from "@/hooks/useProjectSettings"
 import type { LaneLastChangeResult, ProjectLaneView } from "@/lib/sync/project-settings"
-import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
+import { renderWithTooltips } from "@/test-utils/tooltip"
 
 function renderSection(overrides: Partial<Parameters<typeof LanguagesSection>[0]> = {}) {
   const patch = vi.fn(async (): Promise<PatchOutcome> => ({ kind: "ok" }))
@@ -33,7 +33,7 @@ function renderSection(overrides: Partial<Parameters<typeof LanguagesSection>[0]
   return { ...utils, patch }
 }
 
-/** "Add language" opens the add form. */
+/** "Add language lane" opens the add form. */
 function openAddForm() {
   fireEvent.click(screen.getByTestId("add-lane-open"))
 }
@@ -56,6 +56,22 @@ function openArchived() {
 beforeEach(() => {
   vi.clearAllMocks()
 })
+
+/** AQU-2260 (Sam, Oct 29): an (i) opens its text in place on CLICK and shuts it
+ *  on a second click. Hovering it shows nothing. */
+async function expectInPlaceInfo(button: HTMLElement, text: RegExp | string) {
+  await userEvent.setup().hover(button)
+  expect(screen.queryByRole("tooltip")).toBeNull()
+  const reveal = document.getElementById(button.getAttribute("aria-controls") ?? "")
+  expect(reveal).not.toBeNull()
+  expect(reveal).toHaveAttribute("data-open", "false")
+  fireEvent.click(button)
+  expect(button).toHaveAttribute("aria-expanded", "true")
+  expect(reveal).toHaveAttribute("data-open", "true")
+  expect(reveal).toHaveTextContent(text)
+  fireEvent.click(button)
+  expect(reveal).toHaveAttribute("data-open", "false")
+}
 
 describe("LanguagesSection", () => {
   it("lists the project's target language with the other target lanes", () => {
@@ -82,7 +98,7 @@ describe("LanguagesSection", () => {
   it("shows an empty state when there are no target lanes", () => {
     renderSection({ defaultTargetLanguage: "", targetLanes: [] })
     expect(screen.queryByTestId("target-lanes-list")).toBeNull()
-    expect(screen.getByText(/no target languages yet/i)).toBeTruthy()
+    expect(screen.getByText(/no language lanes yet/i)).toBeTruthy()
   })
 
   it("keeps the add form closed behind one Add language button", () => {
@@ -90,7 +106,7 @@ describe("LanguagesSection", () => {
     expect(screen.queryByTestId("add-lane-form")).toBeNull()
     openAddForm()
     expect(screen.getByTestId("add-lane-form")).toBeTruthy()
-    expect(screen.getByText("Add a language")).toBeTruthy()
+    expect(screen.getByText("Add a language lane")).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }))
     expect(screen.queryByTestId("add-lane-form")).toBeNull()
   })
@@ -245,14 +261,16 @@ describe("LanguagesSection", () => {
     expect(screen.queryByTestId("archived-lanes-toggle")).toBeNull()
   })
 
-  it("disables write controls (add, the row menu, restore) below the role floor, and says View only", () => {
+  it("disables write controls (add, the row menu, restore) below the role floor, and says why once at the top", () => {
     renderSection({
       canEdit: false,
       targetLanes: ["fr-CA", "fr-BE"],
       archivedLanes: ["fr-BE"],
       disabledTooltip: "Maintainer or higher can edit shared settings.",
     })
-    expect(screen.getByTestId("languages-view-only").textContent).toContain("View only")
+    // AQU-2260: one line under the card's title, not a View only (i).
+    expect(screen.getByTestId("languages-view-only").textContent).toContain("Maintainer or higher can edit shared settings.")
+    expect(screen.getAllByText("Maintainer or higher can edit shared settings.")).toHaveLength(1)
     expect((screen.getByTestId("add-lane-open") as HTMLButtonElement).disabled).toBe(true)
     expect((screen.getByTestId("lane-menu-fr-CA") as HTMLButtonElement).disabled).toBe(true)
     // Looking is not a write: the archived group still opens.
@@ -260,28 +278,20 @@ describe("LanguagesSection", () => {
     expect((screen.getByTestId("restore-lane-fr-BE") as HTMLButtonElement).disabled).toBe(true)
   })
 
-  it("says nothing about View only to someone who can edit", () => {
+  it("every other (i) in the card opens its text in place, on click (AQU-2260)", async () => {
+    renderSection({ targetLanes: ["fr-CA", "fr-BE"], archivedLanes: ["fr-BE"] })
+    await expectInPlaceInfo(screen.getByRole("button", { name: "About language lanes" }), /./)
+    await expectInPlaceInfo(screen.getByRole("button", { name: "About archived language lanes" }), /./)
+  })
+
+  it("says nothing about a lock to someone who can edit", () => {
     renderSection()
     expect(screen.queryByTestId("languages-view-only")).toBeNull()
   })
 
-  it("shows the disabled-reason hint on a locked write control", async () => {
-    renderWithTooltips(
-      <LanguagesSection
-        defaultTargetLanguage="French"
-        targetLanes={[]}
-        canEdit={false}
-        disabledTooltip="Maintainer or higher can edit shared settings."
-        patch={vi.fn(async (): Promise<PatchOutcome> => ({ kind: "ok" }))}
-      />,
-    )
-    await expectTooltip(
-      screen.getByTestId("add-lane-open"),
-      /maintainer or higher can edit shared settings/i,
-    )
-  })
-
-  it("puts the reason behind the View only (i)", async () => {
+  // AQU-2260 (Sam, Oct 29): the reason is on the page, never a hover, and
+  // there is no (i) to find it behind.
+  it("says why the card is locked on the page, with no hover and no (i)", async () => {
     renderWithTooltips(
       <LanguagesSection
         defaultTargetLanguage="French"
@@ -291,10 +301,10 @@ describe("LanguagesSection", () => {
         patch={vi.fn(async (): Promise<PatchOutcome> => ({ kind: "ok" }))}
       />,
     )
-    await expectTooltip(
-      screen.getByRole("button", { name: "Why you can't change languages" }),
-      /you need project lead to change languages/i,
-    )
+    expect(screen.getByTestId("languages-view-only")).toHaveTextContent("You need Project lead to change languages.")
+    expect(screen.queryByRole("button", { name: "Why you can't change languages" })).toBeNull()
+    await userEvent.setup().hover(screen.getByTestId("add-lane-open"))
+    expect(screen.queryByRole("tooltip")).toBeNull()
   })
 })
 
@@ -373,8 +383,8 @@ describe("LanguagesSection — lane last-change in the archive confirmation (AQU
     askToArchive("lane-es")
     const confirm = await screen.findByTestId("archive-confirm-lane-es")
     expect(confirm.textContent).toContain('Archive "Spanish"?')
-    expect(confirm.textContent).not.toMatch(/restore it at any time/)
-    await expectTooltip(screen.getByRole("button", { name: "About archiving" }), /restore it at any time/)
+    // AQU-2260: shut until its (i) is clicked, then open in place.
+    await expectInPlaceInfo(screen.getByRole("button", { name: "About archiving" }), /restore it at any time/)
   })
 
   it("puts the archive confirmation on its own line, under the lane's row", async () => {
@@ -442,7 +452,7 @@ describe("LanguagesSection — lane last-change in the archive confirmation (AQU
     askToArchive("lane-es")
     const note = await screen.findByTestId("lane-last-change-lane-es")
     // The default lane has a fresh edit; Spanish does not. Spanish must say so.
-    await waitFor(() => expect(note.textContent).toMatch(/no changes in this lane yet/i))
+    await waitFor(() => expect(note.textContent).toMatch(/no changes in this language lane yet/i))
     expect(load).toHaveBeenCalledTimes(1)
     expect(load).toHaveBeenCalledWith("lane-es")
   })
@@ -452,7 +462,7 @@ describe("LanguagesSection — lane last-change in the archive confirmation (AQU
     renderRows(load)
     askToArchive("lane-es")
     const note = await screen.findByTestId("lane-last-change-lane-es")
-    await waitFor(() => expect(note.textContent).toMatch(/no changes in this lane yet/i))
+    await waitFor(() => expect(note.textContent).toMatch(/no changes in this language lane yet/i))
     expect(note.textContent).not.toMatch(/1970|Invalid Date/i)
   })
 
@@ -467,7 +477,7 @@ describe("LanguagesSection — lane last-change in the archive confirmation (AQU
     await waitFor(() => expect(note.textContent).toMatch(/last change unavailable/i))
     // "No changes yet" would read as "dormant, safe to archive" — a conclusion
     // the server never gave us.
-    expect(note.textContent).not.toMatch(/no changes in this lane yet/i)
+    expect(note.textContent).not.toMatch(/no changes in this language lane yet/i)
     // The confirmation is not blocked by the failed read.
     fireEvent.click(screen.getByRole("button", { name: /confirm archive/i }))
     await waitFor(() => expect(onSetLaneArchived).toHaveBeenCalledWith("lane-es", true))
@@ -800,8 +810,7 @@ describe("LanguagesSection — lane identity fields (AQU-1592)", () => {
     const code = screen.getByTestId("lane-code-lane-yo") as HTMLInputElement
     expect(code.value).toBe("")
     expect(code.placeholder).toBe("es")
-    expect(screen.queryByText(/derive the code from the language/)).toBeNull()
-    await expectTooltip(screen.getByRole("button", { name: "About the code" }), /derive the code from the language/)
+    await expectInPlaceInfo(screen.getByRole("button", { name: "About the code" }), /derive the code from the language/)
   })
 
   it("shows a code override in the code field", () => {
@@ -866,7 +875,7 @@ describe("LanguagesSection — lane identity fields (AQU-1592)", () => {
       />,
     )
     expect(screen.queryByText("Spanish")).toBeNull()
-    expect(screen.getByText(/no target languages yet/i)).toBeTruthy()
+    expect(screen.getByText(/no language lanes yet/i)).toBeTruthy()
     openAddForm()
     fireEvent.change(screen.getByTestId("add-target-lang-input"), {
       target: { value: "French" },
@@ -919,7 +928,7 @@ describe("LanguagesSection — lane identity fields (AQU-1592)", () => {
     expect((screen.getByTestId("add-lane-name-input") as HTMLInputElement).placeholder).toBe(
       "Swahili",
     )
-    await expectTooltip(screen.getByRole("button", { name: "About the name" }), /starts as the language's name/i)
+    await expectInPlaceInfo(screen.getByRole("button", { name: "About the name" }), /starts as the language's name/i)
   })
 
   it("offers the new lane's optional code in the form and submits it", async () => {
@@ -1059,7 +1068,8 @@ describe("LanguagesSection — the former default lane archives like any other (
     openRowMenu("lane-default")
     const item = screen.getByTestId("archive-lane-lane-default")
     expect(item).toHaveAttribute("aria-disabled", "true")
-    await expectTooltip(item, /only active lane/i)
+    // AQU-2260: the reason sits under the item in the menu, not on hover.
+    expect(item.parentElement).toHaveTextContent(/only active language lane/i)
     expect(onSetLaneArchived).not.toHaveBeenCalled()
   })
 
@@ -1073,7 +1083,7 @@ describe("LanguagesSection — the former default lane archives like any other (
     renderLanes([DEFAULT_LANE, SPANISH], false)
     const menu = screen.getByTestId("lane-menu-lane-default")
     expect(menu.hasAttribute("disabled")).toBe(true)
-    await expectTooltip(menu, /project lead/i)
+    expect(screen.getByTestId("languages-view-only")).toHaveTextContent(/project lead/i)
   })
 })
 
@@ -1133,7 +1143,7 @@ describe("LanguagesSection — lanes that read the same (AQU-1784)", () => {
     expect(screen.queryByTestId("lane-shown-as-lane-a")).toBeNull()
     const hint = screen.getByTestId("lane-shown-as-lane-b")
     expect(hint).toHaveAccessibleName('Shown as "Tshangla · 2"')
-    await expectTooltip(hint, 'Shown as "Tshangla · 2"')
+    await expectInPlaceInfo(hint, 'Shown as "Tshangla · 2"')
   })
 
   it("prefers a colliding lane's code override to its position", () => {
@@ -1152,9 +1162,9 @@ describe("LanguagesSection — lanes that read the same (AQU-1784)", () => {
   it("warns above the table when two languages share a name, and marks both rows", () => {
     renderLanes([SOURCE, TSHANGLA_A, TSHANGLA_B])
     expect(screen.getByTestId("lane-duplicate-warning").textContent).toContain(
-      'Two languages are both named "Tshangla"',
+      'Two language lanes are both named "Tshangla"',
     )
-    expect(screen.getByTestId("lane-same-name-lane-a").textContent).toBe("Same name as another language")
+    expect(screen.getByTestId("lane-same-name-lane-a").textContent).toBe("Same name as another language lane")
     expect(screen.getByTestId("lane-same-name-lane-b")).toBeTruthy()
   })
 
@@ -1180,7 +1190,7 @@ describe("LanguagesSection — lanes that read the same (AQU-1784)", () => {
     const rename = screen.getByTestId("lane-duplicate-rename")
     expect(rename).toBeDisabled()
     expect(screen.getByTestId("lane-duplicate-archive")).toBeDisabled()
-    await expectTooltip(rename, /project lead/i)
+    expect(screen.getByTestId("languages-view-only")).toHaveTextContent(/project lead/i)
   })
 
   it("warns inline while a duplicate name is typed, before anything is saved", () => {
@@ -1303,9 +1313,9 @@ describe("LanguagesSection — Delivers per language", () => {
     expect(screen.getByRole("combobox", { name: "What Tok Pisin delivers" })).toHaveTextContent("Audio")
     expect(screen.queryByRole("switch")).toBeNull()
     expect(screen.queryByText(/Records audio/)).toBeNull()
-    // The explanation is not on the card itself, only behind the (i).
-    expect(screen.queryByText(/a line is done/)).toBeNull()
-    await expectTooltip(
+    // The explanation is not on the card itself, only behind the (i)
+    // (expectInPlaceInfo checks it starts shut).
+    await expectInPlaceInfo(
       screen.getByTestId("lane-delivers-hint"),
       /Text and audio: a line is done only when both/,
     )
@@ -1318,7 +1328,7 @@ describe("LanguagesSection — Delivers per language", () => {
     expect(swahili).toHaveAttribute("data-needs-choice", "true")
     const why = screen.getByTestId("lane-delivers-needs-choice-lane-sw")
     expect(why).toHaveAccessibleName("Why Swahili needs a choice")
-    await expectTooltip(why, /Choose whether it delivers Text, or Text and audio/)
+    await expectInPlaceInfo(why, /Choose whether it delivers Text, or Text and audio/)
     expect(screen.queryByTestId("lane-delivers-needs-choice-lane-de")).toBeNull()
     expect(screen.queryByTestId("lane-delivers-needs-choice-lane-tpi")).toBeNull()
   })
@@ -1369,7 +1379,7 @@ describe("LanguagesSection — Delivers per language", () => {
   it("lets the add form choose what the new language delivers, Text unless changed", async () => {
     const { onCreateLane } = renderRows(vi.fn(async () => "ok" as const))
     openAddForm()
-    const delivers = screen.getByRole("combobox", { name: "What the new language delivers" })
+    const delivers = screen.getByRole("combobox", { name: "What the new language lane delivers" })
     expect(delivers).toHaveTextContent("Text")
     fireEvent.change(screen.getByTestId("add-target-lang-input"), { target: { value: "Zulu" } })
     const user = userEvent.setup()
@@ -1395,5 +1405,15 @@ describe("LanguagesSection — Delivers per language", () => {
     await waitFor(() =>
       expect(onCreateLane).toHaveBeenCalledWith(expect.objectContaining({ language: "Zulu", delivers: "text" })),
     )
+  })
+})
+
+// AQU-2263: Project settings adds a language with the same piece as New Project.
+describe("LanguagesSection — the shared Add language piece", () => {
+  it("opens the add form from the same Add language button New Project uses", () => {
+    renderSection()
+    const add = screen.getByTestId("add-lane-open")
+    expect(add).toHaveTextContent("Add language lane")
+    expect(add).toHaveAttribute("data-add-language")
   })
 })

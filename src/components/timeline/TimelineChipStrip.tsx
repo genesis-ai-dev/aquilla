@@ -20,12 +20,7 @@
 import { VolumeX } from "lucide-react"
 import { fmtClock } from "./format"
 import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
-import { AppTooltip } from "@/components/ui/tooltip"
-import {
-  MEDIA_HEADER_ROW,
-  MediaSectionCollapseButton,
-  MediaSectionFullscreenButton,
-} from "./MediaSectionRail"
+import { NoteOnClick } from "@/components/ui/info-note"
 import { uiSlotRef } from "@/lib/ui-slots"
 import type { CellData } from "@/hooks/useCells"
 import type { CameraState } from "@/lib/sync/cells-read-types"
@@ -215,8 +210,10 @@ export function TimelineTimingRow({ cell, chipStats, audioMissing }: TimelineChi
             ].filter((part): part is string => part !== null)
             return (
               <Pill>
-                <AppTooltip
-                  content={
+                {/* Where it differs opens on a click of it, never a hover
+                    (AQU-2260). */}
+                <NoteOnClick
+                  note={
                     parts.length > 0
                       ? t("workspace.chipStrip.durationDiffTooltipWithDetail", { detail: parts.join(" · ") })
                       : t("workspace.chipStrip.durationDiffTooltip")
@@ -225,7 +222,7 @@ export function TimelineTimingRow({ cell, chipStats, audioMissing }: TimelineChi
                   <span data-testid="tl-detail-diff" className="font-mono tabular-nums">
                     {t("workspace.chipStrip.diffLabel")} {signedSec(chipStats.durationDiffSec)}
                   </span>
-                </AppTooltip>
+                </NoteOnClick>
               </Pill>
             )
           })()}
@@ -237,23 +234,27 @@ export function TimelineTimingRow({ cell, chipStats, audioMissing }: TimelineChi
           chipStats.headOverlapSec != null &&
           chipStats.tailOverlapSec != null && (
             <>
+              {/* Which neighbour it runs over opens on a click of the pill,
+                  never a hover (AQU-2260). */}
               <Pill>
-                <span
-                  data-testid="tl-detail-overlap-start"
-                  title={t("workspace.chipStrip.startOverlapTooltip")}
-                  className="font-mono tabular-nums font-semibold text-red-600 dark:text-red-400"
-                >
-                  {t("workspace.chipStrip.startOverlapValue", { sec: chipStats.headOverlapSec.toFixed(1) })}
-                </span>
+                <NoteOnClick note={t("workspace.chipStrip.startOverlapTooltip")}>
+                  <span
+                    data-testid="tl-detail-overlap-start"
+                    className="font-mono tabular-nums font-semibold text-red-600 dark:text-red-400"
+                  >
+                    {t("workspace.chipStrip.startOverlapValue", { sec: chipStats.headOverlapSec.toFixed(1) })}
+                  </span>
+                </NoteOnClick>
               </Pill>
               <Pill>
-                <span
-                  data-testid="tl-detail-overlap-end"
-                  title={t("workspace.chipStrip.endOverlapTooltip")}
-                  className="font-mono tabular-nums font-semibold text-red-600 dark:text-red-400"
-                >
-                  {t("workspace.chipStrip.endOverlapValue", { sec: chipStats.tailOverlapSec.toFixed(1) })}
-                </span>
+                <NoteOnClick note={t("workspace.chipStrip.endOverlapTooltip")}>
+                  <span
+                    data-testid="tl-detail-overlap-end"
+                    className="font-mono tabular-nums font-semibold text-red-600 dark:text-red-400"
+                  >
+                    {t("workspace.chipStrip.endOverlapValue", { sec: chipStats.tailOverlapSec.toFixed(1) })}
+                  </span>
+                </NoteOnClick>
               </Pill>
             </>
           )}
@@ -261,15 +262,16 @@ export function TimelineTimingRow({ cell, chipStats, audioMissing }: TimelineChi
         {chipStats?.kind === "dubbing" &&
           (chipStats.headOverlapSec == null) !== (chipStats.tailOverlapSec == null) && (
             <Pill>
-              <span
-                data-testid="tl-detail-overlap"
-                title={t("workspace.chipStrip.eitherOverlapTooltip")}
-                className="font-mono tabular-nums font-semibold text-red-600 dark:text-red-400"
-              >
-                {t("workspace.chipStrip.overlapValue", {
-                  sec: (chipStats.headOverlapSec ?? chipStats.tailOverlapSec ?? 0).toFixed(1),
-                })}
-              </span>
+              <NoteOnClick note={t("workspace.chipStrip.eitherOverlapTooltip")}>
+                <span
+                  data-testid="tl-detail-overlap"
+                  className="font-mono tabular-nums font-semibold text-red-600 dark:text-red-400"
+                >
+                  {t("workspace.chipStrip.overlapValue", {
+                    sec: (chipStats.headOverlapSec ?? chipStats.tailOverlapSec ?? 0).toFixed(1),
+                  })}
+                </span>
+              </NoteOnClick>
             </Pill>
           )}
         {audioMissing && (
@@ -291,34 +293,23 @@ export function TimelineTimingRow({ cell, chipStats, audioMissing }: TimelineChi
 }
 
 /**
- * The text column's header, opposite the video pane's. Carries the section
- * label, whatever the current line says about ITSELF (who speaks it, how it is
- * shot) and the segment navigator — deliberately NOT the timings, which belong
- * to the timeline, and deliberately still the navigator, which walks this list.
+ * The text panel's context row, under its strip: whatever the current line
+ * says about ITSELF (who speaks it, how it is shot), the transcribe controls
+ * while chips are selected, and the segment navigator — deliberately NOT the
+ * timings, which belong to the timeline, and deliberately still the
+ * navigator, which walks this list.
+ *
+ * Media redesign, layout: no heading and no layout controls any more. The
+ * panel's strip above names it ("Text") and carries Full screen, Fold and ⋯,
+ * and the row hides itself when it has nothing to say.
  */
 export function MediaTextHeader({
   cell,
-  headingLabel,
   castName: castNameOverride,
   cameraState: cameraStateOverride,
   transcribe,
-  onCollapse,
-  onToggleFullscreen,
-  isFullscreen = false,
 }: {
   cell: CellData | null
-  /**
-   * AQU-646 round 8: pin the section label instead of deriving it from the
-   * selected chip. In the VTT-plus-footage workflow every cell is a text cell,
-   * so the heading read "Subtitle" and changed under you as you clicked around
-   * — Sam asked for it to stay "Dialogue" for now, in BOTH states, since with a
-   * chip selected and with none it is the same heading to the eye.
-   *
-   * A separate value on purpose: `isDialogue` below also gates the Camera pill,
-   * which is correctly hidden for text cells, so the two must not be the same
-   * boolean.
-   */
-  headingLabel?: string
   /**
    * AQU-646 stage 6: the character, resolved through the cue's LINKS by
    * `resolveCueCharacter` (already "A / B" when a heard line covers two
@@ -345,19 +336,6 @@ export function MediaTextHeader({
    * timing readout below acts on chips and stays where it is.
    */
   transcribe?: TranscribeSelectionControlsProps | null
-  /**
-   * AQU-1119: collapse the whole text section to a rail.
-   *
-   * Absent means no button, which is what keeps every caller outside the media
-   * lens — and every existing test — rendering exactly what it did before.
-   */
-  onCollapse?: () => void
-  /**
-   * AQU-1119: fold the OTHER sections so the cells have the lens to
-   * themselves, and put them back. Absent handler, absent button.
-   */
-  onToggleFullscreen?: () => void
-  isFullscreen?: boolean
 }) {
   const t = useT()
   const isDialogue = (cell?.medium ?? "media") === "media"
@@ -377,29 +355,10 @@ export function MediaTextHeader({
   return (
     <div
       data-testid="tl-dialogue-header"
-      // MEDIA_HEADER_ROW: one height with the video header beside this and the
-      // rail that replaces it, so the collapse control never changes row.
-      className={`flex items-center gap-2 border-t border-border bg-muted/20 px-4 py-1.5 ${MEDIA_HEADER_ROW}`}
+      // Hidden while every child is empty — nothing selected, no navigator
+      // (a file without chapters) — so an empty row never sits under the strip.
+      className="flex items-center gap-2 border-b border-border bg-muted/20 px-3 py-1 [&:not(:has(>:not(:empty)))]:hidden"
     >
-      {/* Same heading treatment as the toolbar's "Timeline" and the video
-          pane's "Video" — a section label, not a data pill. It still names the
-          KIND of the current chip (a subtitle chip reads "Subtitle"), and falls
-          back to the section's own name when nothing is selected so the header
-          doesn't blink in and out. */}
-      <span className="shrink-0 text-sm font-semibold tracking-wide text-muted-foreground">
-        {headingLabel ?? (isDialogue ? t("editor.timeline.chipHeadingDialogue") : t("editor.timeline.chipHeadingSubtitle"))}
-      </span>
-      {/* AQU-1119: beside the heading, pointing the way the section folds —
-          the gutter's own idiom, and where a reader looks for a disclosure
-          control. Absent handler, absent button. */}
-      {onCollapse && <MediaSectionCollapseButton section="text" onCollapse={onCollapse} />}
-      {onToggleFullscreen && (
-        <MediaSectionFullscreenButton
-          section="text"
-          isFullscreen={isFullscreen}
-          onToggle={onToggleFullscreen}
-        />
-      )}
       {castName && (
         <Pill>
           {t("editor.timeline.chipSpeaker")} <b className="font-semibold text-foreground">{castName}</b>

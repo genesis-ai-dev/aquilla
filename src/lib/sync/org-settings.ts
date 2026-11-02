@@ -163,6 +163,23 @@ export interface OrgWideSettings {
    */
   languageEditMinRole?: number
   /**
+   * AQU-2304: minimum org/project role allowed to bring a NEW source file
+   * into any project of this org — `file.create`, which the Import dialog's
+   * "New source text", the sidebar re-import and the IDML copy repair all
+   * emit. Unset ⇒ PROJECT_LEAD (500), the behaviour before this setting
+   * existed; an org opts in to maintainer-only imports by raising it to 600.
+   *
+   * It does NOT touch importing a TRANSLATION into a file already in the
+   * project (that commits target cells and creates nothing, so it stays at
+   * CONTRIBUTOR), and the Door43 upstream panel stays Maintainer-only either
+   * way.
+   *
+   * Enforced by sync-worker, which owns the event log
+   * (events/import-authority.ts). Same OWNER-only write gate as
+   * languageEditMinRole / termbaseEditMinRole / exportMinRole.
+   */
+  importMinRole?: number
+  /**
    * AQU-1002: Minimum role level allowed to OPEN a comment thread or post a
    * reply. Default (when absent) = COMMENTER (200), the static
    * `comment.create` floor the app has always enforced.
@@ -221,12 +238,14 @@ export interface OrgSettingsResponse {
   /** AQU-1771: the same count for the two validation defaults. */
   validationCountOverrides?: number
   validationCountAudioOverrides?: number
+  /** AQU-2263: and for "Auto-propagate repetitions". */
+  autoPropagateRepetitionsOverrides?: number
   /**
    * AQU-1938: which projects those counts are, keyed by the setting they set
    * their own value for. Absent from an older server: the line then shows the
    * bare count, as it did before. AQU-1768: and the five media defaults.
    */
-  overrideProjects?: Partial<Record<InheritedOverrideKey | MediaDefaultKey, OverrideProjectList>>
+  overrideProjects?: Partial<Record<InheritedOverrideKey | MediaDefaultKey | "autoPropagateRepetitions", OverrideProjectList>>
   /** AQU-1768: per media default, how many projects set their own value. */
   mediaDefaultOverrides?: Partial<Record<MediaDefaultKey, number>>
 }
@@ -364,6 +383,8 @@ export type ProjectOverrideSlug =
   | "cell-editing-floor"
   | "allow-self-validation-audio"
   | "validation-role-floor-audio"
+  // AQU-2263: "Auto-propagate repetitions".
+  | "auto-propagate-repetitions"
 
 /**
  * POST .../settings/<slug>/reset-project-overrides — put every project in the

@@ -1,7 +1,7 @@
-import { describe, it, expect, vi } from "vitest"
+import { describe, it, expect } from "vitest"
 import { render, screen } from "@testing-library/react"
 
-import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
+import { expectClickNote, renderWithTooltips } from "@/test-utils/tooltip"
 import { MediaTextHeader, TimelineTimingRow } from "./TimelineChipStrip"
 import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
 import type { CellData } from "@/hooks/useCells"
@@ -65,7 +65,8 @@ describe("TimelineTimingRow", () => {
     expect(screen.getByTestId("tl-detail-diff")).toHaveTextContent("Diff: −1.4s")
   })
 
-  it("the Diff hover breaks the difference into its start and end halves", async () => {
+  // AQU-2260 (Sam, Oct 29): on a click of the pill, never a hover.
+  it("the Diff note breaks the difference into its start and end halves", async () => {
     renderWithTooltips(
       <TimelineTimingRow
         cell={cell({ original: "x", startTime: 10, endTime: 15 })}
@@ -76,7 +77,7 @@ describe("TimelineTimingRow", () => {
         }}
       />,
     )
-    await expectTooltip(screen.getByTestId("tl-detail-diff"), /Start: −0\.6s · End: −0\.8s/)
+    await expectClickNote(screen.getByTestId("tl-detail-diff"), /Start: −0\.6s · End: −0\.8s/)
   })
 
   it("a negative Diff is INFORMATIONAL — labeled, never red (2026-08-06)", () => {
@@ -108,6 +109,8 @@ describe("TimelineTimingRow", () => {
     const overlap = screen.getByTestId("tl-detail-overlap")
     expect(overlap).toHaveTextContent("Overlap: −1.8s")
     expect(overlap.className).toContain("text-red-600")
+    // AQU-2260: which neighbour it runs over opens on a click, never a hover.
+    expect(overlap).not.toHaveAttribute("title")
     // …and the informational Diff stays neutral beside it.
     expect(screen.getByTestId("tl-detail-diff").className).not.toContain("text-red")
     // One side only → no labeled pills.
@@ -148,6 +151,8 @@ describe("TimelineTimingRow", () => {
     expect(end).toHaveTextContent("End overlap: −1.1s")
     expect(start.className).toContain("text-red-600")
     expect(end.className).toContain("text-red-600")
+    expect(start).not.toHaveAttribute("title")
+    expect(end).not.toHaveAttribute("title")
     // The undifferentiated pill must NOT also render.
     expect(screen.queryByTestId("tl-detail-overlap")).toBeNull()
   })
@@ -235,54 +240,20 @@ describe("MediaTextHeader", () => {
     expect(screen.getByText("on")).toBeInTheDocument()
   })
 
-  it("labels the section, and keeps labelling it with nothing selected", () => {
-    const { rerender } = render(<MediaTextHeader cell={cell({ startTime: 1, endTime: 3 })} />)
-    expect(screen.getByTestId("tl-dialogue-header")).toHaveTextContent("Dialogue")
-    // A subtitle chip renames it; an empty selection falls back to the section
-    // name rather than blinking the label out of existence.
-    rerender(<MediaTextHeader cell={cell({ medium: "text", startTime: 1, endTime: 3 })} />)
-    expect(screen.getByTestId("tl-dialogue-header")).toHaveTextContent("Subtitle")
-    rerender(<MediaTextHeader cell={null} />)
-    expect(screen.getByTestId("tl-dialogue-header")).toHaveTextContent("Dialogue")
+  // Media redesign, layout: the row lost its heading and its layout controls.
+  // The Text panel's strip above names the panel and carries Full screen,
+  // Fold and ⋯; this row says only what the current line says about itself.
+  it("has no heading and no layout controls of its own", () => {
+    render(<MediaTextHeader cell={cell({ startTime: 1, endTime: 3 })} />)
+    const row = screen.getByTestId("tl-dialogue-header")
+    expect(row).not.toHaveTextContent("Dialogue")
+    expect(row).not.toHaveTextContent("Subtitle")
+    expect(row.querySelector("button")).toBeNull()
   })
 
-  // AQU-646 round 8: in the VTT-plus-footage workflow every cell is a text
-  // cell, so the derived label read "Subtitle" and changed under you as you
-  // clicked around. Sam asked for it to stay "Dialogue" for now — in BOTH
-  // states, since with a chip selected and with none it is the same heading.
-  it("a pinned label overrides the derived one, in both states", () => {
-    const { rerender } = render(
-      <MediaTextHeader cell={cell({ medium: "text", startTime: 1, endTime: 3 })} headingLabel="Dialogue" />,
-    )
-    expect(screen.getByTestId("tl-dialogue-header")).toHaveTextContent("Dialogue")
-    rerender(<MediaTextHeader cell={null} headingLabel="Dialogue" />)
-    expect(screen.getByTestId("tl-dialogue-header")).toHaveTextContent("Dialogue")
-  })
-
-  it("offers a collapse control only when the workspace hands it one", () => {
-    // AQU-1119. Every optional control in this area works this way: no handler
-    // means no button, not a disabled one — outside the media lens there is
-    // nothing to collapse into, and a control the reader cannot act on is
-    // worse than none. It is also what keeps every other caller of this
-    // header rendering exactly what it rendered before.
-    const { rerender } = render(<MediaTextHeader cell={null} />)
-    expect(screen.queryByTestId("media-collapse-text")).toBeNull()
-
-    const onCollapse = vi.fn()
-    rerender(<MediaTextHeader cell={null} onCollapse={onCollapse} />)
-    const button = screen.getByRole("button", { name: "Hide the text" })
-    expect(button).toHaveAttribute("aria-expanded", "true")
-  })
-
-  it("pinning the label does NOT bring back the Camera pill for a text cell", () => {
-    // The label became its own value precisely so it could stop being derived
-    // from `isDialogue`, which still (correctly) gates this pill.
-    render(
-      <MediaTextHeader
-        cell={cell({ medium: "text", startTime: 1, endTime: 3, cameraState: "on" })}
-        headingLabel="Dialogue"
-      />,
-    )
+  it("keeps the Camera pill hidden for a text cell", () => {
+    // `isDialogue` still (correctly) gates this pill.
+    render(<MediaTextHeader cell={cell({ medium: "text", startTime: 1, endTime: 3, cameraState: "on" })} />)
     expect(screen.queryByText("on")).toBeNull()
   })
 
@@ -328,7 +299,6 @@ describe("MediaTextHeader", () => {
 
     it("names nobody for an unlinked cue rather than guessing", () => {
       render(<MediaTextHeader cell={cueCell} castName={null} cameraState={null} />)
-      expect(screen.getByTestId("tl-dialogue-header")).toHaveTextContent("Subtitle")
       expect(screen.queryByText(/Speaker/)).toBeNull()
       expect(screen.queryByText(/Camera/)).toBeNull()
     })
@@ -348,5 +318,37 @@ describe("MediaTextHeader", () => {
     // Same node across a selection change — the table portals into it, and a
     // remount would tear that portal down.
     expect(screen.getByTestId("tl-strip-nav")).toBe(slot)
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): an overlap pill says which neighbour it runs over on
+// a click of it.
+describe("TimelineTimingRow — overlap pills explain themselves on a click", () => {
+  it("the single pill says it sounds over a neighbour", async () => {
+    renderWithTooltips(
+      <TimelineTimingRow
+        cell={cell({ original: "x", startTime: 10, endTime: 15 })}
+        chipStats={{
+          kind: "dubbing", startSec: 9, endSec: 14, durationSec: 5,
+          startDiffSec: -1, endDiffSec: 1, durationDiffSec: 0,
+          headOverlapSec: 1.8, tailOverlapSec: null,
+        }}
+      />,
+    )
+    await expectClickNote(screen.getByTestId("tl-detail-overlap"), "neighbouring verse")
+  })
+
+  it("the start and end pills each name their neighbour", async () => {
+    renderWithTooltips(
+      <TimelineTimingRow
+        cell={cell({ original: "x", startTime: 10, endTime: 15 })}
+        chipStats={{
+          kind: "dubbing", startSec: 9.3, endSec: 16.1, durationSec: 6.8,
+          startDiffSec: -0.7, endDiffSec: -1.1, durationDiffSec: -1.8,
+          headOverlapSec: 0.7, tailOverlapSec: 1.1,
+        }}
+      />,
+    )
+    await expectClickNote(screen.getByTestId("tl-detail-overlap-start"), "PREVIOUS verse")
   })
 })

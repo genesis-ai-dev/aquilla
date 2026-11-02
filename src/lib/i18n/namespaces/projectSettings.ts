@@ -98,8 +98,8 @@ export const projectSettings = defineNamespace({
     "projectSettings.permission.privilegedDialogError": "Couldn't load {role}.",
 
     // ── Project creation dialog ──
-    "projectSettings.create.trigger": "New Project",
-    "projectSettings.create.dialogTitle": "Create New Project",
+    "projectSettings.create.trigger": "New project",
+    "projectSettings.create.dialogTitle": "Create new project",
     // AQU-1352: destination picker at the top of the create dialog.
     "projectSettings.create.destinationLabel": "Create in",
     "projectSettings.create.destinationPersonal": "Personal",
@@ -121,19 +121,18 @@ export const projectSettings = defineNamespace({
     // AQU-832: create.nameLabel/sourceLanguageLabel still reuse
     // projectSettings.info.{nameLabel,sourceLanguageLabel}. Target label is
     // create-dialog-only and stays "Target Language(s)" for any lane count.
-    "projectSettings.create.namePlaceholder": "My Translation Project",
+    "projectSettings.create.namePlaceholder": "My translation project",
     "projectSettings.create.sourceLanguagePlaceholder": "English, Grade 7 English…",
-    "projectSettings.create.targetLanguagesLabel": "Target Language(s)",
+    "projectSettings.create.targetLanguagesLabel": "Language lanes",
     "projectSettings.create.targetLanguagePlaceholder": "French, conversational Swahili, Traditional Han…",
     "projectSettings.create.additionalTargetPlaceholder": "Add another…",
-    "projectSettings.create.addTargetLanguageAction": "Add another language",
     "projectSettings.create.bulkTargetLanguagesHint":
       "That's all {max} boxes. Add any remaining languages here, separated by commas.",
     "projectSettings.create.bulkTargetLanguagesPlaceholder":
       "Swahili, Yoruba, Hausa, Traditional Han…",
     "projectSettings.create.bulkTargetLanguagesCount": plural({
-      one: "Adds {count} more lane.",
-      other: "Adds {count} more lanes.",
+      one: "Adds {count} more language lane.",
+      other: "Adds {count} more language lanes.",
     }),
     "projectSettings.create.languageHintAriaLabel": "What can I enter here?",
     "projectSettings.create.languageHintTooltip":
@@ -141,14 +140,14 @@ export const projectSettings = defineNamespace({
       "\"conversational Swahili\"). The language code is filled in from the name, " +
       "and you can edit that code if it is wrong.",
     "projectSettings.create.advancedShapeSummary": "Advanced: project shape",
-    "projectSettings.create.shapeSelfContainedName": "Self Contained (Default)",
+    "projectSettings.create.shapeSelfContainedName": "Self-contained (default)",
     "projectSettings.create.shapeSelfContained": plural({
       one: "{name} — this project owns both its source and its target.",
       other: "{name} — this project owns both its source and its targets.",
     }),
     "projectSettings.create.shapeLinkedTargetName": plural({
-      one: "Linked Target",
-      other: "Linked Targets",
+      one: "Linked target",
+      other: "Linked targets",
     }),
     "projectSettings.create.shapeLinkedTarget": plural({
       one:
@@ -177,18 +176,18 @@ export const projectSettings = defineNamespace({
     "projectSettings.create.upstreamProjectNone": "No upstream project",
     "projectSettings.create.linkConsumesLabel":
       "Which corpus should become this project's source?",
-    "projectSettings.create.linkConsumesSourceName": "Its Source",
+    "projectSettings.create.linkConsumesSourceName": "Its source",
     "projectSettings.create.linkConsumesSource": plural({
       one:
-        "{name} — sibling-translation case (this project translates the same original " +
-        "text). For same-org sibling languages, a target lane on the upstream project " +
-        "is the recommended shape instead.",
+        "{name} — sibling-translation case (this project translates the same original text). For " +
+        "same-org sibling languages, a language lane on the upstream project is the recommended " +
+        "shape instead.",
       other:
-        "{name} — sibling-translation case (this project translates the same original " +
-        "text). For same-org sibling languages, target lanes on the upstream project " +
-        "are the recommended shape instead.",
+        "{name} — sibling-translation case (this project translates the same original text). For " +
+        "same-org sibling languages, language lanes on the upstream project are the recommended " +
+        "shape instead.",
     }),
-    "projectSettings.create.linkConsumesTargetName": "One of its Targets",
+    "projectSettings.create.linkConsumesTargetName": "One of its targets",
     "projectSettings.create.linkConsumesTarget":
       "{name} — chain case (this project translates one of the upstream project's " +
       "targets, e.g. French → Chaluba).",
@@ -200,7 +199,7 @@ export const projectSettings = defineNamespace({
     // the user may see, and pre-filled when that is a single lane.
     "projectSettings.create.upstreamLaneLabel": "Which of its translations?",
     "projectSettings.create.upstreamLanePlaceholder": "Choose a translation…",
-    "projectSettings.create.upstreamLaneUnnamed": "Untitled lane",
+    "projectSettings.create.upstreamLaneUnnamed": "Untitled language lane",
     "projectSettings.create.upstreamLaneLoading": "Loading translations…",
     "projectSettings.create.upstreamLaneNone":
       "This project has no translation you can use as a source. Choose its source " +
@@ -244,12 +243,15 @@ export const projectSettings = defineNamespace({
       "follow the source project afterwards.",
     // "Creating…" busy label → common.creating (identical text)
     "projectSettings.create.submitCreatingAndLinking": "Creating & linking…",
-    "projectSettings.create.submitCreate": "Create Project",
-    "projectSettings.create.submitCreateAndLink": "Create & Link",
+    "projectSettings.create.submitCreate": "Create project",
+    "projectSettings.create.longRunningNote":
+      "This is taking longer than expected. You can close this dialog — the project " +
+      "may still finish and show up in your projects list.",
+    "projectSettings.create.submitCreateAndLink": "Create & link",
     "projectSettings.create.errorSignInRequired": "You need to be signed in to create a project.",
     "projectSettings.create.errorGeneric": "Failed to create project. Please try again.",
     "projectSettings.create.extraLanguagesWarning":
-      "Project created; adding extra languages failed — add them in Settings → Languages.",
+      "Project created; adding extra languages failed — add them in Project settings → Languages.",
     "projectSettings.create.extraLanguagesDescription":
       "Optional — add more target languages for this project (e.g. dialect variants " +
       "or parallel drafts of the same source).",
@@ -263,82 +265,63 @@ export const projectSettings = defineNamespace({
     "projectSettings.create.validationTargetLanguageRequired": "Target language is required",
     "projectSettings.create.validationUpstreamProjectRequired": "Choose an upstream project",
     "projectSettings.create.laneRecommendationHeading": "Same source, new language?",
+    // Sam, Oct 29: a lane is always a "Language lane" in the interface.
     "projectSettings.create.laneRecommendation":
-      "{heading} Add it as a target lane on {projectName} instead — no separate " +
-      "project to keep in sync.",
-    "projectSettings.create.laneRecommendationAdding": "Adding lane…",
-    "projectSettings.create.laneRecommendationAddButton": "Add as lane on {projectName}",
+      "{heading} Add it as a language lane on {projectName} instead — no separate project to keep in " +
+      "sync.",
+    // AQU-2259: the dialog showed these as hard-coded English. A lane is a
+    // "Language lane" in the interface (Sam, Oct 29).
+    "projectSettings.create.laneRecommendationAdding": "Adding language lane…",
+    "projectSettings.create.laneRecommendationAddButton": "Add as a language lane on {projectName}",
     "projectSettings.create.laneRecommendationSignInError":
-      "You need to be signed in to add a lane.",
+      "You need to be signed in to add a language lane.",
     "projectSettings.create.laneRecommendationEmptyTargetError":
       "Enter a target language above first.",
     "projectSettings.create.laneRecommendationAlreadyDefaultError":
       "\"{lane}\" is already {projectName}'s default target language.",
     "projectSettings.create.laneRecommendationAlreadyLaneError":
-      "\"{lane}\" is already a lane on {projectName}.",
+      "\"{lane}\" is already a language lane on {projectName}.",
     "projectSettings.create.laneRecommendationSuccess":
-      "Added \"{lane}\" as a lane on {projectName}. Open that project to start translating.",
+      "Added \"{lane}\" as a language lane on {projectName}. Open that project to start translating.",
     "projectSettings.create.laneRecommendationConflictError":
       "Someone else updated that project's settings just now. Try again.",
     "projectSettings.create.laneRecommendationForbiddenError":
-      "You need maintainer access on {projectName} to add a lane there.",
+      "You need maintainer access on {projectName} to add a language lane there.",
     "projectSettings.create.laneRecommendationGenericError":
-      "Couldn't add the lane. Please try again.",
+      "Couldn't add the language lane. Please try again.",
 
     // ── Share panel ──
-    "projectSettings.share.dialogTitle": "Share Project",
-    "projectSettings.share.tabMembers": "Members",
     "projectSettings.share.tabInviteLink": "Invite link",
-    "projectSettings.share.lockedHintOrg": "Remove from org to revoke",
     "projectSettings.share.lockedHintCreator": "Project creator",
-    "projectSettings.share.emptySuggestionsHint":
-      "All org members already have access to this project.",
     "projectSettings.share.inviteEmailInvalid":
       "Enter a valid email address, or leave blank for an open link.",
     "projectSettings.share.signInToInvite": "Sign in to create an invite link.",
     "projectSettings.share.createInviteFailed":
       "Couldn't create invite. You may not have permission, or the server is unreachable.",
-    "projectSettings.share.laneChoiceLegend": "Target lanes",
-    "projectSettings.share.laneChoiceAll": "Every current target lane",
-    "projectSettings.share.laneChoiceSome": "Only selected lanes",
-    "projectSettings.share.laneChoiceRequired": "Choose the lanes before adding this person.",
-    "projectSettings.share.laneChoiceLeadNote": "A maintainer sees every target lane.",
+    "projectSettings.share.laneChoiceLegend": "Language lanes",
+    "projectSettings.share.laneChoiceAll": "Every current language lane",
+    "projectSettings.share.laneChoiceSome": "Only selected language lanes",
+    "projectSettings.share.laneChoiceRequired": "Choose the language lanes before adding this person.",
+    "projectSettings.share.laneChoiceLeadNote": "A maintainer sees every language lane.",
     "projectSettings.share.laneChoiceAdminHint":
-      "To limit someone to some lanes, use that project's share panel.",
-    "projectSettings.share.inviteLinkReady": "Invite link ready. Send it to the recipient.",
+      "To limit someone to some language lanes, use Project settings → Members on that project.",
     "projectSettings.share.copyUrlLabel": "Copy URL",
-    "projectSettings.share.copied": "Copied!",
-    "projectSettings.share.recipientJoinsAs":
-      "The recipient signs in (or signs up) and is added as {role}.",
     "projectSettings.share.recipientJoinsAsFallbackRole": "a member",
-    "projectSettings.share.singleUseNote":
-      "This link is single-use — once redeemed, click {createAnotherLink} to generate " +
-      "a fresh one for the next person.",
-    "projectSettings.share.revokeBeforeRedeemedNote":
-      "To revoke before it is redeemed, use the Active links list below.",
     "projectSettings.share.createAnotherLinkButton": "Create another link",
     // "Role" field label → common.roleLabel (identical text)
     "projectSettings.share.signInToCreateLink": "Sign in to create an invite link",
-    "projectSettings.share.recipientEmailLabel": "Recipient email",
     // "(optional)" → common.optionalFieldNote (identical text)
     "projectSettings.share.emailPlaceholder": "name@example.com",
-    "projectSettings.share.emailRestrictedNote":
-      "Only an account with this email can redeem this link.",
     "projectSettings.share.openLinkNote":
       "Leave blank for an open link anyone signed in can redeem.",
     "projectSettings.share.linkExpiresLabel": "Link expires",
     "projectSettings.share.expiryOneDay": "1 day",
-    "projectSettings.share.expirySevenDays": "7 days",
-    "projectSettings.share.expiryThirtyDaysDefault": "30 days (default)",
     // "No expiry" → common.noExpiry (identical text)
     // "Creating…" button-busy label → common.creating (identical text)
     "projectSettings.share.createInviteLinkButton": "Create invite link",
-    "projectSettings.share.loadingActiveLinks": "Loading active links…",
-    "projectSettings.share.activeLinksHeading": "Active links",
     "projectSettings.share.openLinkConnector": "open link",
     // "Expires {date}" → common.expiresOn (identical text)
     // "Revoke" button → common.revoke (identical text)
-    "projectSettings.share.revokeLinkAriaLabel": "Revoke this invite link",
 
     // ── Page chrome (nav, groups, save bar, discard dialog) ──
     "projectSettings.pageTitle": "Project settings",
@@ -383,11 +366,18 @@ export const projectSettings = defineNamespace({
     "projectSettings.shared.lastEditedOn": "Last edited {date}",
     "projectSettings.shared.nameHint": "Shown across the workspace and project list.",
     "projectSettings.timeline.lockLabel": "Lock the timings against dragging",
+    "projectSettings.timeline.lockInfoAria": "About locking the timings",
     "projectSettings.timeline.lockHint":
       "On by default, and on for everyone \u2014 project leads included. The timings came from the client's own file, and a dragged chip moves a line for the whole team with nothing to compare it against afterwards. While this is on, the handles are gone from every imported line and cue; a line somebody added here still moves, and recordings can still be placed against their lines as usual. Only a maintainer can turn it off, and the timeline says so for as long as it is off.",
     "projectSettings.timeline.trackEditingLabel": "Let maintainers add and edit timeline tracks",
+    "projectSettings.timeline.trackEditingInfoAria": "About adding and editing timeline tracks",
     "projectSettings.timeline.trackEditingHint":
       "On by default. With this on, a maintainer can add extra tracks to a file's timeline, group them into folders, give them colours and delete them. Deleting a track deletes every recording on it, and asks first. Renaming a track and dragging one up or down the list are not affected by this \u2014 a maintainer can always do both. An organization can change that default for all of its projects, and a maintainer can turn it off for this one. Turning it off leaves every track exactly as it is and everything still plays; it only stops the tracks being changed.",
+    // AQU-1758 (Sam's decision 7): the dubbing tools, behind one switch.
+    "projectSettings.timeline.filmAndSourcesLabel": "Show the film and sources tools in the media view",
+    "projectSettings.timeline.filmAndSourcesInfoAria": "About the film and sources tools",
+    "projectSettings.timeline.filmAndSourcesInfo":
+      "Shows the Sources menu in the media view's top bar. Its first item is the film, for linking a video, and the rest import audio cues, character sheets and subtitles. These are dubbing tools, so a project made of books and documents starts with them hidden and any other project with them shown. Hiding them removes nothing that is already attached.",
     "projectSettings.cellEditing.sectionTitle": "Content structure",
     "projectSettings.cellEditing.label": "Who can add and remove cells",
     "projectSettings.cellEditing.description":
@@ -402,14 +392,13 @@ export const projectSettings = defineNamespace({
     // can edit") and are now the product's standard ladder, so a project admin
     // reads the same names here as on the Members panel.
     "projectSettings.cellEditing.optionNone": "No one — default",
-    "projectSettings.cellEditing.optionCommenter": "Commenter (200)",
-    "projectSettings.cellEditing.optionReviewer": "Reviewer (300)",
-    "projectSettings.cellEditing.optionContributor": "Contributor (400)",
-    "projectSettings.cellEditing.optionProjectLead": "Project lead (500)",
-    "projectSettings.cellEditing.optionMaintainer": "Maintainer (600)",
+    "projectSettings.cellEditing.optionCommenter": "Commenter",
+    "projectSettings.cellEditing.optionReviewer": "Reviewer",
+    "projectSettings.cellEditing.optionContributor": "Contributor",
+    "projectSettings.cellEditing.optionProjectLead": "Project lead",
+    "projectSettings.cellEditing.optionMaintainer": "Maintainer",
     // model → projectSettings.advancedLlm.modelLabel
     "projectSettings.field.temperature": "temperature",
-    "projectSettings.field.healthPenalty": "health penalty",
     "projectSettings.field.examplesRetrieved": "examples retrieved",
     // context window → projectSettings.ai.contextWindowLabel
     "projectSettings.field.validatedExamplesOnly": "validated examples only",
@@ -418,23 +407,41 @@ export const projectSettings = defineNamespace({
     // AI completions batch size → projectSettings.ai.completionBatchSizeLabel
     // batch validation size → projectSettings.ai.validationBatchSizeLabel
     // project name → projectSettings.info.nameLabel
-    // username → projectSettings.user.usernameLabel
     "projectSettings.field.decaySettings": "decay settings",
-    "projectSettings.field.audioMediaStrategy": "audio media strategy",
+    "projectSettings.field.audioMediaStrategy": "audio loading",
     "projectSettings.field.autoSync": "auto-sync",
     "projectSettings.field.voiceApiKey": "voice API key",
     // source language → projectSettings.info.sourceLanguageLabel
     // target language → projectSettings.info.targetLanguageLabel
-    // AI instructions → projectSettings.section.aiInstructions
     "projectSettings.field.validationCount": "validation count",
     "projectSettings.field.audioValidationCount": "audio validation count",
     "projectSettings.field.validationRoleFloor": "validation role floor",
     "projectSettings.field.namedValidators": "named validators",
     "projectSettings.field.selfValidation": "self-validation",
     "projectSettings.field.harmonizeMinRole": "harmonize min role",
-    // Bible resources → projectSettings.section.bibleResources
     "projectSettings.field.usfmFrontMatter": "USFM front matter",
     // draft context → projectSettings.section.draftContext
+    // AQU-2261: the rest of the "Saved: …" nouns, so the whole message is translated.
+    "projectSettings.field.model": "model",
+    "projectSettings.field.maxTokens": "max tokens",
+    "projectSettings.field.contextWindow": "context window",
+    "projectSettings.field.referenceExampleFormat": "reference example format",
+    "projectSettings.field.completionBatchSize": "AI completions batch size",
+    "projectSettings.field.validationBatchSize": "batch validation size",
+    "projectSettings.field.projectName": "project name",
+    "projectSettings.field.audioValidationRoleFloor": "minimum role to validate recordings",
+    "projectSettings.field.namedAudioValidators": "named recording validators",
+    "projectSettings.field.selfValidationAudio": "validating your own recordings",
+    "projectSettings.field.cellEditingFloor": "who can add and remove cells",
+    "projectSettings.field.trackEditing": "timeline track editing",
+    "projectSettings.field.timingLock": "the timing lock",
+    "projectSettings.field.filmAndSources": "film and sources",
+    "projectSettings.field.bibleData": "Bible data",
+    "projectSettings.field.bibleEnrichments": "Bible data enrichments",
+    "projectSettings.field.importCellUnit": "import cell unit",
+    "projectSettings.field.smartQuotes": "smart quotes",
+    "projectSettings.field.draftContext": "draft context",
+    "projectSettings.field.termMatching": "term matching affixes",
 
     // ── Save-flow errors ──
     "projectSettings.save.nameRequired": "Enter a project name.",
@@ -449,56 +456,71 @@ export const projectSettings = defineNamespace({
 
     // ── Settings-group index (SETTINGS_GROUPS) ──
     // "General" group label → common.general (identical text)
-    "projectSettings.group.generalDescription": "Name, languages, username, Bible resources",
+    "projectSettings.group.generalDescription": "Name, languages, content structure, Bible data",
+    "projectSettings.group.membersLabel": "Members",
+    "projectSettings.group.membersDescription": "Who can access this project, invites, and roles",
     "projectSettings.group.sourceSyncLabel": "Source & sync",
-    "projectSettings.group.sourceSyncDescription": "Linked source project, upstream changes, git sync",
-    "projectSettings.group.aiLabel": "AI & completion",
-    "projectSettings.group.aiDescription": "Instructions, draft context, provider, voice, terminology",
+    "projectSettings.group.sourceSyncDescription": "Source link, upstream changes, git sync",
+    "projectSettings.group.aiLabel": "AI",
+    "projectSettings.group.aiDescription": "Brief, instructions, drafting, model, voice, terminology",
     "projectSettings.group.validationLabel": "Validation & health",
     "projectSettings.group.validationDescription": "Approvals, harmonization, staleness decay",
-    // audio-media group label → projectSettings.section.audioMedia (identical text)
-    "projectSettings.group.audioMediaDescription": "How audio is fetched from storage",
-    // metrics group label → projectSettings.section.aiMetrics (identical text)
+    "projectSettings.group.audioMediaLabel": "Media",
+    "projectSettings.group.audioMediaDescription": "How audio loads, and the timeline",
+    "projectSettings.group.metricsLabel": "AI metrics",
     "projectSettings.group.metricsDescription": "Post-edit distance and AI usage",
     "projectSettings.group.integrationsLabel": "Integrations",
-    "projectSettings.group.integrationsDescription": "Monday.com board sync",
+    "projectSettings.group.integrationsDescription": "Monday.com and Airtable sync",
     // experimental group label → projectSettings.section.experimental (identical text)
     "projectSettings.group.experimentalDescription": "Autopilot, extensions, and other early features",
+    // The headings the index groups its rows under. "Integrations" →
+    // projectSettings.group.integrationsLabel (identical text).
+    "projectSettings.hub.project": "Project",
+    "projectSettings.hub.aiMedia": "AI & media",
+    "projectSettings.hub.quality": "Quality",
+    // The short current value at the end of an index row, or a nav row.
+    "projectSettings.hint.untitled": "Untitled",
+    "projectSettings.hint.rolesInvites": "Roles & invites",
+    "projectSettings.hint.linked": "Linked",
+    "projectSettings.hint.git": "Git",
+    "projectSettings.hint.custom": "Custom",
+    "projectSettings.hint.postEdit": "Post-edit",
+    "projectSettings.hint.integrations": "Monday.com, Airtable",
 
     // ── Section labels (ALL_SECTIONS + reused as the matching card titles) ──
     "projectSettings.section.sourceLink": "Source link",
     "projectSettings.section.upstreamChanges": "Upstream changes",
     "projectSettings.section.dcsUpstream": "Door43 upstream",
-    "projectSettings.section.projectInfo": "Project Info",
+    "projectSettings.section.projectInfo": "Project info",
     "projectSettings.section.languages": "Languages",
-    "projectSettings.section.bibleResources": "Bible resources",
     "projectSettings.section.import": "Import",
     "projectSettings.section.user": "User",
-    "projectSettings.section.aiInstructions": "AI Instructions",
-    "projectSettings.section.draftContext": "Draft Context",
-    "projectSettings.section.advancedLlm": "Advanced LLM",
+    "projectSettings.section.members": "Team members",
+    "projectSettings.section.aiInstructions": "AI drafting",
+    "projectSettings.section.draftContext": "Draft context",
+    "projectSettings.section.advancedLlm": "AI model (advanced)",
     "projectSettings.section.voice": "Voice",
-    "projectSettings.section.localModels": "Local AI models",
+    "projectSettings.section.localModels": "On-device AI models",
     "projectSettings.section.decay": "Decay",
     "projectSettings.section.validation": "Validation",
-    "projectSettings.section.audioMedia": "Audio Media",
-    "projectSettings.section.gitSync": "Git Sync",
+    "projectSettings.section.audioMedia": "Audio loading",
+    "projectSettings.section.gitSync": "Git sync",
     "projectSettings.section.terminology": "Terminology",
-    "projectSettings.section.termbaseSharing": "Term Base Sharing",
-    "projectSettings.section.aiMetrics": "AI Metrics",
+    "projectSettings.section.termbaseSharing": "Term base sharing",
+    "projectSettings.section.aiMetrics": "AI metrics",
     "projectSettings.section.monday": "Monday.com",
+    "projectSettings.section.airtable": "Airtable",
     "projectSettings.section.experimental": "Experimental",
 
     // ── Project Info card ──
-    "projectSettings.info.nameLabel": "Project Name",
+    "projectSettings.info.nameLabel": "Project name",
     "projectSettings.info.lastEditedBy": "Last edited by {username} · {date}",
-    "projectSettings.info.sourceLanguageLabel": "Source Language",
-    "projectSettings.info.targetLanguageLabel": "Target Language",
+    "projectSettings.info.sourceLanguageLabel": "Source language",
+    "projectSettings.info.targetLanguageLabel": "Target language",
     "projectSettings.info.smartQuotesLabel": "Smart quotes",
     "projectSettings.info.smartQuotesDescription": "Turn straight quotes into curly quotes as you type, in the target language's style. Press Backspace right after to keep a straight quote.",
 
     // ── Bible resources card ──
-    "projectSettings.bible.enableLabel": "Enable Bible resources",
     "projectSettings.bible.description": "Scholarly reference data from bibletranslation.org in Search and the agent.",
     "projectSettings.bible.scriptureDefaultHint": "Available by default for scripture projects — turn off to disable.",
     "projectSettings.bible.nonScriptureDefaultHint": "Off by default for non-scripture projects — turn on to enable.",
@@ -521,9 +543,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.import.cellUnitOptionParagraph": "Paragraph (one cell per paragraph)",
 
     // ── User card ──
-    "projectSettings.user.usernameLabel": "Username",
     "projectSettings.user.usernamePlaceholder": "local",
-    "projectSettings.user.usernameDescription": "Used as author name in translation history.",
 
     // ── AI Instructions card ──
     "projectSettings.ai.instructionsHelp":
@@ -546,9 +566,12 @@ export const projectSettings = defineNamespace({
     "projectSettings.ai.contextWindowMedium": "Medium — paragraph (default)",
     "projectSettings.ai.contextWindowLarge": "Large — chapter",
     "projectSettings.ai.contextWindowDescription": "Controls how much surrounding passage context is included.",
-    "projectSettings.ai.assistantLanguageLabel": "Assistant language",
+    // AQU-2263: the team's fallback for the assistant's answers (it was saved
+    // but never read). Each person's own choice in Preferences wins over it.
+    "projectSettings.ai.assistantLanguageLabel": "The assistant answers the team in",
     "projectSettings.ai.assistantLanguagePlaceholder": "e.g. English, Français, Español…",
-    "projectSettings.ai.assistantLanguageDescription": "Language the AI assistant uses in chat responses. Independent of the UI locale.",
+    "projectSettings.ai.assistantLanguageDescription":
+      "For everyone on this project who hasn't chosen their own in Preferences. Left empty, the assistant answers in the language each person writes in.",
     "projectSettings.ai.approvedExamplesOnlyLabel": "Approved examples only",
     "projectSettings.ai.approvedExamplesOnlyDescription":
       "Drafting always retrieves human-validated project translations. Raw machine " +
@@ -568,14 +591,14 @@ export const projectSettings = defineNamespace({
       "left-context when drafting. 0 disables preceding-context. Default: {defaultCount}.",
 
     // ── Advanced LLM details ──
-    "projectSettings.advancedLlm.summary": "Advanced LLM settings",
-    "projectSettings.advancedLlm.frontierDefaultStatus": "Frontier (default)",
+    "projectSettings.advancedLlm.summary": "AI model (advanced)",
+    "projectSettings.advancedLlm.frontierDefaultStatus": "Aquilla (default)",
     "projectSettings.advancedLlm.customEndpointStatus": "Custom: {endpoint}",
     "projectSettings.advancedLlm.notSet": "not set",
     "projectSettings.advancedLlm.providerLabel": "Provider",
-    "projectSettings.advancedLlm.providerFrontierName": "Frontier",
+    "projectSettings.advancedLlm.providerFrontierName": "Aquilla",
     "projectSettings.advancedLlm.providerFrontier":
-      "{name} (recommended) — calls {domain} using your Frontier login. Works out of the box.",
+      "{name} (recommended) — uses your Aquilla login. Works out of the box.",
     "projectSettings.advancedLlm.providerCustomName": "Custom endpoint",
     "projectSettings.advancedLlm.providerCustom":
       "{name} — localhost, self-hosted, or a third-party OpenAI-compatible API " +
@@ -600,8 +623,11 @@ export const projectSettings = defineNamespace({
     "projectSettings.advancedLlm.apiKeyLabelOptional": "API key (optional)",
     "projectSettings.advancedLlm.apiKeyPlaceholderRequired": "Paste your API key",
     "projectSettings.advancedLlm.apiKeyPlaceholderNoAuth": "Leave blank for no auth",
-    "projectSettings.advancedLlm.apiKeyHelp": "Sent as Authorization: Bearer <key>. Stored in your browser; never uploaded to Frontier.",
-    "projectSettings.advancedLlm.apiKeyDeviceOnlyNote": "Stays on this device — not shared with collaborators.",
+    "projectSettings.advancedLlm.apiKeyHelp": "Sent as Authorization: Bearer <key>. Stored in your browser; never uploaded to Aquilla.",
+    // AQU-2259: the one label for a setting that stays in this browser — the
+    // project AI keys, Audio loading, Git auto-sync. The same words AQU-2053
+    // gave the experimental switches.
+    "projectSettings.deviceOnly": "Only on this device.",
     "projectSettings.advancedLlm.modelLabel": "Model",
     "projectSettings.advancedLlm.modelManualLabel": "Model (if not listed)",
     "projectSettings.advancedLlm.modelManualPlaceholderOpenRouter": "anthropic/claude-3.5-sonnet",
@@ -610,34 +636,34 @@ export const projectSettings = defineNamespace({
       "Click Connect to discover models, or type one manually (required for providers " +
       "that don't expose {modelsPath}).",
     "projectSettings.advancedLlm.modelOverrideLabel": "Model override (optional)",
-    "projectSettings.advancedLlm.modelOverridePlaceholder": "Leave blank for Frontier's default",
+    "projectSettings.advancedLlm.modelOverridePlaceholder": "Leave blank for Aquilla's default",
     "projectSettings.advancedLlm.modelOverrideHelp": "Enter an OpenRouter model (optional), for example {example}.",
-    "projectSettings.advancedLlm.maxTokensLabel": "Max Tokens",
+    "projectSettings.advancedLlm.maxTokensLabel": "Max tokens",
     "projectSettings.advancedLlm.temperatureLabel": "Temperature ({value})",
-    "projectSettings.advancedLlm.healthPenaltyLabel": "LLM Health Penalty ({percent}%)",
-    "projectSettings.advancedLlm.healthPenaltyDescription":
-      "LLM translations are penalized by this amount in health calculations. 0% = full " +
-      "trust, 50% = heavy penalty. Default: 10%.",
 
     // ── Voice card ──
+    // Oct 29 second pass: the voice card's provider row, hard-coded English before.
+    "projectSettings.voice.geminiTtsLabel": "Gemini TTS",
     "projectSettings.voice.geminiKeyLabel": "Gemini API key",
     "projectSettings.voice.geminiKeyPlaceholder": "AIza...",
     "projectSettings.voice.geminiKeyHelp":
       "Used for Gemini-powered text-to-speech. Get a key at aistudio.google.com/apikey. " +
-      "Sent directly to Google; never uploaded to Frontier.",
+      "Sent directly to Google; never uploaded to Aquilla.",
     "projectSettings.voice.elevenLabsHelp":
       "Your own ElevenLabs key, for ElevenLabs voices. It stays on this device for you only and is never shared with the project.",
-    "projectSettings.voice.libraryNote": "Voice library and cast assignments live in the Voice Studio.",
-    "projectSettings.voice.openStudioButton": "Open Voice Studio",
+    // AQU-1758: the Voice Studio (the Audio view) is gone; the library and the
+    // cast are in Media's Voices tab.
+    "projectSettings.voice.voicesNote": "The voice library and cast assignments are in the Voices tab of the Media view.",
+    "projectSettings.voice.openVoicesButton": "Open Voices",
     "projectSettings.voice.leadsManageLabel": "Project leads can manage voices",
     "projectSettings.voice.leadsManageDescription":
-      "When this is on, a project lead can create, edit, and assign voices on the lanes they can write. " +
-      "When it is off, only a maintainer can. Voices already created stay either way.",
+      "When this is on, a project lead can create, edit, and assign voices on the language lanes " +
+      "they can write. When it is off, only a maintainer can. Voices already created stay either way.",
 
     // ── Local AI models card (device-shared; downloads managed in Preferences) ──
     "projectSettings.localModels.description":
-      "Whisper transcription and the local voices run in your browser and are shared " +
-      "across every project on this device. Manage downloads in your personal preferences.",
+      "Whisper transcription and the on-device voices run in your browser and are shared across " +
+      "every project on this device. Manage downloads in your personal preferences.",
     "projectSettings.localModels.manageButton": "Manage models",
 
     // ── Harmonization card ──
@@ -648,19 +674,20 @@ export const projectSettings = defineNamespace({
     // of minting duplicates. "(default)" is the only project-settings-owned text.
     "projectSettings.harmonization.defaultRoleSuffix": "{role} (default)",
     "projectSettings.harmonization.description":
-      "Only users with at least this role can open a harmonization sweep on this " +
-      "project. The floor cannot be lowered below Project Lead (hard floor per spec).",
+      "Only users with at least this role can open a harmonization sweep on this project. The floor " +
+      "cannot be lowered below Project lead (hard floor per spec).",
 
     // ── Git Sync card ──
     "projectSettings.gitSync.originLabel": "Origin: {url} (branch: {branch})",
-    "projectSettings.gitSync.autoSyncLabel": "Auto-sync every",
     "projectSettings.gitSync.minutesSuffix": "minutes (only when there are changes)",
+    // Oct 29 second pass: the switch's label, hard-coded English before.
+    "projectSettings.gitSync.autoSyncSwitch": "Auto-sync",
     "projectSettings.gitSync.intervalNote": "Interval is floored at 1 minute. Sync will only push when there are local changes.",
 
     // ── Terminology card ──
-    "projectSettings.terminology.title": "Terminology Library",
+    "projectSettings.terminology.title": "Terminology library",
     "projectSettings.terminology.description": "Manage approved terms, renderings, and the project terminology (term base).",
-    "projectSettings.terminology.openButton": "Open Terminology Library",
+    "projectSettings.terminology.openButton": "Open terminology library",
 
     // ── ValidationSettingsSection.tsx ──
     // Card headings: the text and audio rules each get their own card.
@@ -689,28 +716,28 @@ export const projectSettings = defineNamespace({
       "Whether chapter headings, section titles and book names count toward " +
       "this project's translation and validation percentages. Leaving them " +
       "out means a book reads 100% once every verse is done.",
-    "projectSettings.structuralCells.inherit": "Organization default",
-    "projectSettings.structuralCells.currentlyCounting":
-      "The organization currently counts them",
-    "projectSettings.structuralCells.currentlyExcluding":
-      "The organization currently leaves them out",
-    "projectSettings.structuralCells.count": "Count them",
-    "projectSettings.structuralCells.exclude": "Leave them out",
     "projectSettings.structuralCells.saveFailed": "Could not save that change",
 
-    // AQU-1391 — repetition auto-propagation, same tri-state shape as above.
+    // ── ProjectVisibilitySection ── AQU-2263: who sees this project's member
+    // list and each member's progress; a second home for the dashboard badges.
+    "projectSettings.visibility.groupLabel": "Member list and progress",
+    "projectSettings.visibility.groupDescription":
+      "Your organization decides who can see these. A project can make them stricter, never looser.",
+    "projectSettings.visibility.rosterLabel": "Who can see the member list",
+    "projectSettings.visibility.rosterDescription":
+      "The member list and member count, here and on the project's dashboard.",
+    "projectSettings.visibility.progressLabel": "Who can see each member's progress",
+    "projectSettings.visibility.progressDescription":
+      "Each member's progress on the project's dashboard. They also need to see the member list.",
+    // {role} is a plural role name: "Owners".
+    "projectSettings.visibility.onlyRoleLoosens": "Only {role} can make this less strict.",
+
+    // AQU-1391 — repetition auto-propagation, same shape as above.
     "projectSettings.autoPropagateRepetitions.label": "Auto-propagate repetitions",
     "projectSettings.autoPropagateRepetitions.description":
       "Whether validating a cell copies its translation into the other cells in " +
       "the same file whose source text is identical. Filled-in cells are left " +
       "unvalidated, and cells someone has already validated are never changed.",
-    "projectSettings.autoPropagateRepetitions.inherit": "Organization default",
-    "projectSettings.autoPropagateRepetitions.currentlyOn":
-      "The organization currently propagates them",
-    "projectSettings.autoPropagateRepetitions.currentlyOff":
-      "The organization currently leaves them alone",
-    "projectSettings.autoPropagateRepetitions.on": "Propagate",
-    "projectSettings.autoPropagateRepetitions.off": "Don't propagate",
     "projectSettings.autoPropagateRepetitions.saveFailed": "Could not save that change",
 
     // AQU-1768: "(text)", like "Required validators (text)" above it — the
@@ -766,17 +793,29 @@ export const projectSettings = defineNamespace({
 
     // ── AudioMediaStrategySection.tsx ──
     "projectSettings.audioMedia.title": "Audio loading",
-    "projectSettings.audioMedia.description":
-      "Decide when audio recordings are downloaded from storage to this device. You " +
-      "can switch any time without re-recording — only future loads are affected.",
+    // Sam, Oct 29: each choice says one short phrase; its (i) says the rest.
+    // What the code does (peaks-loader autoLoadsPeaks, eager-peaks): the choice
+    // only decides when the waveforms on a cell's takes load. Playback and the
+    // timeline's own waveforms are the same in all four.
+    "projectSettings.audioMedia.info":
+      "When the waveforms on a cell's takes load. Whatever you pick, playing a take downloads " +
+      "its audio and keeps a copy on this device, and the timeline draws its own waveforms.",
+    "projectSettings.audioMedia.infoAria": "What the audio loading choices do",
     "projectSettings.audioMedia.strategyStreamName": "Stream",
-    "projectSettings.audioMedia.strategyStreamDescription": "Play from the network. No cache on this device, no waveforms unless you opt in.",
+    // Stream and Manual do the same today (both wait for a click), so they
+    // share these two strings.
+    "projectSettings.audioMedia.strategyOnClickSummary": "Waveforms wait for a click",
+    "projectSettings.audioMedia.strategyOnClickInfo": "Each take shows Load waveform in its place until you click it.",
     "projectSettings.audioMedia.strategyLazyName": "Lazy (default)",
-    "projectSettings.audioMedia.strategyLazyDescription": "Download a cell's audio when you scroll to it or press play. Keeps a copy on this device.",
+    "projectSettings.audioMedia.strategyLazySummary": "Waveforms load as they come into view",
+    "projectSettings.audioMedia.strategyLazyInfo":
+      "Each take's waveform loads when the take is shown, from a small saved outline when there is one.",
     "projectSettings.audioMedia.strategyEagerName": "Eager",
-    "projectSettings.audioMedia.strategyEagerDescription": "Prefetch every cell's waveform when the file opens. Best for offline review.",
+    "projectSettings.audioMedia.strategyEagerSummary": "Every waveform loads when a file opens",
+    "projectSettings.audioMedia.strategyEagerInfo":
+      "Like Lazy, and every take's waveform in the file also loads in the background, ready before " +
+      "you scroll to it.",
     "projectSettings.audioMedia.strategyManualName": "Manual",
-    "projectSettings.audioMedia.strategyManualDescription": "Don't auto-download anything. You click a button per cell to load it.",
 
     // ── SourceLinkSection.tsx ──
     "projectSettings.sourceLink.description":
@@ -1068,13 +1107,13 @@ export const projectSettings = defineNamespace({
 
     // ── LanguagesSection.tsx ──
     "projectSettings.languages.defaultTargetLabel": "Default target language",
-    "projectSettings.languages.laneNamePlaceholder": "Name this lane",
+    "projectSettings.languages.laneNamePlaceholder": "Name this language lane",
     // AQU-1592: a lane stores the language the user typed, an OPTIONAL display
     // name, and an OPTIONAL code override. The name's placeholder is the
     // language itself, because that is what the lane shows when no name is set.
-    "projectSettings.languages.laneLanguagePlaceholder": "Language this lane translates into",
+    "projectSettings.languages.laneLanguagePlaceholder": "The language it translates into",
     "projectSettings.languages.laneLanguageRequiredError":
-      "A lane needs a language. Type the language it translates into.",
+      "A language lane needs a language. Type the language it translates into.",
     "projectSettings.languages.laneCodeNote":
       "Leave blank to derive the code from the language. Set it only when the " +
       "derived code is wrong.",
@@ -1082,26 +1121,27 @@ export const projectSettings = defineNamespace({
     "projectSettings.languages.laneCodeMalformedError":
       "That is not a valid language code. Use a BCP 47 tag such as \"es\" or \"es-MX\".",
     "projectSettings.languages.duplicateNameError":
-      "Another lane already has this name. Change one of them.",
+      "Another language lane already has this name. Change one of them.",
     // AQU-1784: the label a lane that shares its name is shown under elsewhere.
     "projectSettings.languages.laneShownAs": "Shown as \"{label}\"",
     "projectSettings.languages.nameTooLongError": "That name is too long.",
-    "projectSettings.languages.noAdditionalLanes": "No target lanes yet.",
+    "projectSettings.languages.noAdditionalLanes": "No language lanes yet.",
     // AQU-1464: "is anyone still working in here?" — shown inside the archive
     // confirmation, above the Confirm button.
     "projectSettings.languages.lastChangeLoading": "Checking recent activity…",
-    "projectSettings.languages.lastChange": "Last change in this lane: {date} by {editor}",
-    "projectSettings.languages.lastChangeUnknownEditor": "Last change in this lane: {date}",
-    "projectSettings.languages.lastChangeNone": "No changes in this lane yet.",
+    "projectSettings.languages.lastChange": "Last change in this language lane: {date} by {editor}",
+    "projectSettings.languages.lastChangeUnknownEditor": "Last change in this language lane: {date}",
+    "projectSettings.languages.lastChangeNone": "No changes in this language lane yet.",
     "projectSettings.languages.lastChangeUnavailable": "Last change unavailable.",
     // AQU-1600: every target lane is archivable, including the former default
     // one — but a project must keep one active, so the last one's archive
     // control is disabled with this reason.
     "projectSettings.languages.lastActiveLaneTooltip":
-      "This is the project's only active lane. Add another target lane before archiving this one.",
+      "This is the project's only active language lane. Add another language lane before archiving " +
+      "this one.",
     "projectSettings.languages.archivingButton": "Archiving…",
     "projectSettings.languages.confirmArchiveButton": "Confirm archive",
-    "projectSettings.languages.archiveLaneAriaLabel": "Archive lane {lane}",
+    "projectSettings.languages.archiveLaneAriaLabel": "Archive language lane {lane}",
     // Media redesign slice 1 — each language row's "Delivers" choice, which
     // replaced AQU-1954's "Records audio" switch. Also used by the create dialog.
     "projectSettings.languages.deliversLabel": "Delivers",
@@ -1111,21 +1151,19 @@ export const projectSettings = defineNamespace({
     "projectSettings.languages.deliversTextAndAudio": "Text and audio",
     "projectSettings.languages.deliversChoose": "Choose",
     "projectSettings.languages.deliversHint":
-      "Delivers decides how a language's progress is counted. Text: a line is done " +
-      "when its text is validated. Audio: a line is done when its recording is " +
-      "approved, and no text is needed. Text and audio: a line is done only when " +
-      "both its text and its recording are approved.",
+      "Delivers decides how a language lane's progress is counted. Text: a line is done when its " +
+      "text is validated. Audio: a line is done when its recording is approved, and no text is " +
+      "needed. Text and audio: a line is done only when both its text and its recording are approved.",
     "projectSettings.languages.deliversNeedsChoice":
-      "This language had \"Records audio\" turned on. Choose whether it delivers Text, " +
-      "or Text and audio. Until you choose, its progress is counted as before.",
+      "This language lane had \"Records audio\" turned on. Choose whether it delivers Text, or Text " +
+      "and audio. Until you choose, its progress is counted as before.",
     "projectSettings.languages.restoringButton": "Restoring…",
     // "Restore" button → common.restore (identical text)
-    "projectSettings.languages.restoreLaneAriaLabel": "Restore lane {lane}",
+    "projectSettings.languages.restoreLaneAriaLabel": "Restore language lane {lane}",
     "projectSettings.languages.suggestionsAriaLabel": "Language suggestions",
     // "e.g. Traditional Han" placeholder → projectSettings.create.extraLanguagesPlaceholder (identical text)
     // "Adding…" busy label → common.adding (identical text)
-    "projectSettings.languages.alreadyDefaultError": "This is already the default target language.",
-    "projectSettings.languages.alreadyExistsError": "This lane already exists.",
+    "projectSettings.languages.alreadyExistsError": "This language lane already exists.",
     "projectSettings.languages.conflictError": "Someone else updated shared settings. Refresh to reapply your change.",
     "projectSettings.languages.offlineError": "You're offline. Reconnect to save language lanes.",
     "projectSettings.languages.permissionError": "You don't have permission to change shared settings.",
@@ -1133,12 +1171,12 @@ export const projectSettings = defineNamespace({
     // Media redesign (Sam, Oct 25): design B, the compact table — Name |
     // Language | Code | Delivers | ⋯. Explanations and long sub-text sit behind
     // small (i) icons, so each "…AriaLabel" here names one of those icons.
-    "projectSettings.languages.targetLanguagesHeading": "Target languages",
+    "projectSettings.languages.targetLanguagesHeading": "Language lanes",
     "projectSettings.languages.targetLanguagesHint":
-      "The languages this project translates into. Add one entry per dialect, or per " +
-      "team when two teams draft the same language.",
-    "projectSettings.languages.targetLanguagesHintAriaLabel": "About target languages",
-    "projectSettings.languages.noTargetLanguages": "No target languages yet.",
+      "The language lanes this project translates into. Add one per dialect, or one per team when " +
+      "two teams draft the same language.",
+    "projectSettings.languages.targetLanguagesHintAriaLabel": "About language lanes",
+    "projectSettings.languages.noTargetLanguages": "No language lanes yet.",
     "projectSettings.languages.codeColumn": "Code",
     "projectSettings.languages.noLanguageSet": "No language set",
     "projectSettings.languages.codeOptionalLabel": "Code (optional)",
@@ -1147,24 +1185,24 @@ export const projectSettings = defineNamespace({
     "projectSettings.languages.deliversNeedsChoiceAriaLabel": "Why {lane} needs a choice",
     "projectSettings.languages.renameLaneAriaLabel": "Rename {lane}",
     "projectSettings.languages.rowMenuAriaLabel": "More for {lane}",
-    "projectSettings.languages.sameNameMarker": "Same name as another language",
+    "projectSettings.languages.sameNameMarker": "Same name as another language lane",
     "projectSettings.languages.duplicateBannerTwo":
-      "Two languages are both named \"{lane}\", so they are hard to tell apart in the " +
-      "language switcher and on the Overview.",
+      "Two language lanes are both named \"{lane}\", so they are hard to tell apart in the language " +
+      "switcher and on the Overview.",
     "projectSettings.languages.duplicateBannerMany":
-      "Several languages are named \"{lane}\", so they are hard to tell apart in the " +
-      "language switcher and on the Overview.",
+      "Several language lanes are named \"{lane}\", so they are hard to tell apart in the language " +
+      "switcher and on the Overview.",
     "projectSettings.languages.duplicateRenameAction": "Rename the second one",
     "projectSettings.languages.duplicateArchiveAction": "Archive it",
-    "projectSettings.languages.addLanguageHeading": "Add a language",
+    "projectSettings.languages.addLanguageHeading": "Add a language lane",
     "projectSettings.languages.addNameHint":
-      "Starts as the language's name. Give it a name of its own to tell two entries " +
-      "in one language apart.",
+      "Starts as the language's name. Give it a name of its own to tell two language lanes in one " +
+      "language apart.",
     "projectSettings.languages.addNameHintAriaLabel": "About the name",
-    "projectSettings.languages.newLanguageLabel": "the new language",
+    "projectSettings.languages.newLanguageLabel": "the new language lane",
     "projectSettings.languages.addDuplicateNotice":
-      "Another language is already named \"{lane}\". You can still add this one; the " +
-      "language switcher numbers them.",
+      "Another language lane is already named \"{lane}\". You can still add this one; the language " +
+      "switcher numbers them.",
     "projectSettings.languages.archiveConfirmShort": "Archive \"{lane}\"?",
     "projectSettings.languages.archiveHint":
       "It leaves the language switcher, but nothing is deleted: its work is kept and " +
@@ -1173,20 +1211,17 @@ export const projectSettings = defineNamespace({
     "projectSettings.languages.archivedHint":
       "Hidden from the language switcher. Their work is kept; restore one to make it " +
       "active again.",
-    "projectSettings.languages.archivedHintAriaLabel": "About archived languages",
-    "projectSettings.languages.viewOnly": "View only",
-    "projectSettings.languages.viewOnlyAriaLabel": "Why you can't change languages",
+    "projectSettings.languages.archivedHintAriaLabel": "About archived language lanes",
     "projectSettings.languages.changeSourceAriaLabel": "Change the source language",
 
     // ── ProjectSettings.tsx — misc call sites without a pre-existing key ──
-    "projectSettings.info.titleLabel": "Project title",
+    "projectSettings.info.titleLabel": "Project name",
     "projectSettings.systemPrompt.label": "System prompt",
     "projectSettings.systemPrompt.navDescription":
       "The standing instructions behind every AI draft — how the AI should write, " +
       "not what the project is for.",
     "projectSettings.advancedLlm.modelOverrideName": "Model override",
-    "projectSettings.voice.studioLabel": "Voice Studio",
-    "projectSettings.localModels.onDeviceLabel": "On-device models",
+    "projectSettings.localModels.onDeviceLabel": "Transcription and voices",
     "projectSettings.gitSync.autoSyncIntervalAriaLabel": "Auto-sync interval minutes",
     "projectSettings.gitSync.minutesAbbrev": "min",
 
@@ -1335,14 +1370,17 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.columnInfo.has_audio_pct": "How many lines have a recording, as a percentage.",
     "projectSettings.monday.columnInfo.audio_validated_pct": "How many lines have an approved recording, as a percentage.",
     "projectSettings.monday.columnInfo.status_auto": "Not started, In progress or Complete, worked out from the translation progress.",
-    "projectSettings.monday.columnInfo.deadline": "The project's deadline. Empty when the project has none.",
+    "projectSettings.monday.columnInfo.deadline":
+      "The project deadline. Empty when the project has none.",
     "projectSettings.monday.columnInfo.last_activity": "The date someone last worked on the project.",
     "projectSettings.monday.columnInfo.translators": "The names of the people who can translate in the project.",
     "projectSettings.monday.columnInfo.filled_count": "How many lines are translated.",
     "projectSettings.monday.columnInfo.validated_count": "How many lines are translated and approved.",
     "projectSettings.monday.columnInfo.total_count": "How many lines there are to translate.",
     "projectSettings.monday.columnInfo.project_link": "A link that opens the project in Aquilla. On a row per file, it opens that file.",
-    "projectSettings.monday.columnInfo.schedule_status": "On track, Due soon, Overdue or Behind plan, from the deadline and the plan's target dates.",
+    "projectSettings.monday.columnInfo.schedule_status":
+      "On track, Due soon, Overdue or Behind plan, from the project deadline and the plan's target " +
+      "dates.",
     "projectSettings.monday.columnInfo.books_done": "How many books (or files) are marked Done on the plan, like \"12 of 27\".",
     "projectSettings.monday.columnInfo.next_target_date": "The nearest target date on the plan that isn't done or past yet.",
     "projectSettings.monday.columnInfo.days_since_activity": "How many days since anyone last worked on the project.",
@@ -1556,7 +1594,6 @@ export const projectSettings = defineNamespace({
     "projectSettings.inherit.title": "Settings from {upstream}",
     "projectSettings.inherit.description":
       "This project keeps a copy of what you turn on. When {upstream} saves one of them, the copy updates, and so does the next project in the chain. Detach a field to keep your own.",
-    "projectSettings.inherit.linkTitle": "Copy these from the upstream project",
     "projectSettings.inherit.linkDescription":
       "Turn on what this project should receive. You can detach any of them later in its settings.",
     "projectSettings.inherit.field.translationBrief": "Translation brief",
@@ -1566,7 +1603,7 @@ export const projectSettings = defineNamespace({
       "Who may validate, self-validation, autopilot and agent mode, and check penalties.",
     "projectSettings.inherit.field.livingMemory": "Living-memory notes",
     "projectSettings.inherit.field.smartQuotes": "Smart quotes",
-    "projectSettings.inherit.field.systemPrompt": "AI instructions",
+    "projectSettings.inherit.field.systemPrompt": "Instructions",
     "projectSettings.inherit.fromUpstream": "from {upstream}",
     "projectSettings.inherit.detach": "Detach",
   },
@@ -1579,6 +1616,36 @@ export const projectSettings = defineNamespace({
         "button text.",
     },
     keys: {
+      "projectSettings.timeline.lockInfoAria": {
+        description:
+          "Accessible name of the (i) beside 'Lock the timings against dragging' in Project settings; " +
+          "the (i) holds that setting's longer explanation.",
+      },
+      "projectSettings.timeline.trackEditingInfoAria": {
+        description:
+          "Accessible name of the (i) beside 'Let maintainers add and edit timeline tracks' in Project " +
+          "settings; the (i) holds that setting's longer explanation.",
+      },
+      "projectSettings.audioMedia.infoAria": {
+        description:
+          "Accessible name of the (i) beside the 'Audio loading' card's title in Project settings; the (i) " +
+          "explains what the card is for and what each of its four choices does.",
+      },
+      "projectSettings.timeline.filmAndSourcesLabel": {
+        description:
+          "Label of a checkbox in the project's Timeline settings: whether the media view shows its " +
+          "dubbing tools — the Sources menu in its top bar, whose first item is the film (link a video).",
+      },
+      "projectSettings.timeline.filmAndSourcesInfoAria": {
+        description:
+          "Screen-reader name of the small (i) button beside that checkbox, which opens the longer " +
+          "explanation (projectSettings.timeline.filmAndSourcesInfo).",
+      },
+      "projectSettings.timeline.filmAndSourcesInfo": {
+        description:
+          "The explanation behind the (i) beside the film and sources checkbox. 'Sources' is the name " +
+          "of a menu in the media view's top bar, and the film is the first item in that menu.",
+      },
       "projectSettings.shared.lastEdited": {
         description:
           "Sub-line under the project-name field recording who last changed the " +
@@ -1726,24 +1793,19 @@ export const projectSettings = defineNamespace({
       "projectSettings.create.targetLanguagesLabel": {
         description:
           "Field label above the target-language boxes in the create dialog. " +
-          "Always 'Target Language(s)' — the parenthetical covers one or many " +
-          "lanes without swapping the label as boxes fill.",
+          "Always 'Language lanes' (AQU-2261), however many boxes are filled — " +
+          "each box becomes one language lane.",
       },
       "projectSettings.create.shapeLinkedTargetName": {
         description:
           "Bold name of the linked-target project-shape radio. Inflects with how " +
           "many target-language lanes the user has filled in on this create pass " +
-          "('Linked Target' vs 'Linked Targets'). Count is not shown as a numeral.",
+          "('Linked target' vs 'Linked targets'). Count is not shown as a numeral.",
       },
       "projectSettings.create.additionalTargetPlaceholder": {
         description:
           "Placeholder in the second and subsequent target-language boxes of the " +
           "create dialog, where the first box carries the full example placeholder.",
-      },
-      "projectSettings.create.addTargetLanguageAction": {
-        description:
-          "Label of the button under the target-language boxes in the create dialog " +
-          "that appends one more empty box (one per additional target lane).",
       },
       "projectSettings.create.bulkTargetLanguagesHint": {
         description:
@@ -1769,7 +1831,7 @@ export const projectSettings = defineNamespace({
         },
       },
       "projectSettings.create.languageHintAriaLabel": {
-        description: "Accessible name of the small info-icon button beside a source/target language field that opens an explanatory tooltip.",
+        description: "Accessible name of the small (i) button beside a source/target language field. A click opens an explanation in place under the label.",
       },
       "projectSettings.create.shapeSelfContained": {
         description:
@@ -1904,36 +1966,11 @@ export const projectSettings = defineNamespace({
           projectName: "The upstream project's name (data, not translated).",
         },
       },
-      "projectSettings.share.lockedHintOrg": {
-        description: "Tooltip on a locked (non-editable) role row in the Share dialog's Members tab, for a member whose access comes from org membership.",
-      },
       "projectSettings.share.lockedHintCreator": {
         description: "Tooltip on a locked role row for the project's creator, whose role can't be changed here.",
       },
-      "projectSettings.share.recipientJoinsAs": {
-        description:
-          "Sentence shown after an invite link is minted, naming the role the " +
-          "recipient will hold once they redeem it.",
-        placeholders: {
-          role: "The already-localized role display name (via resolveRoleName), or the projectSettings.share.recipientJoinsAsFallbackRole fallback text if the role option can't be resolved.",
-        },
-      },
-      "projectSettings.share.singleUseNote": {
-        description:
-          "Note explaining an invite link is single-use, naming the button that " +
-          "mints a fresh one for the next recipient.",
-        placeholders: {
-          createAnotherLink: "The rendered projectSettings.share.createAnotherLinkButton label, wrapped in <strong> by the caller — insert exactly as given.",
-        },
-      },
-      "projectSettings.share.recipientEmailLabel": {
-        description: "Field label for the optional recipient-email input on the invite-link form. The '(optional)' qualifier is a separate, smaller-styled span using common.optionalFieldNote.",
-      },
       "projectSettings.share.openLinkConnector": {
         description: "Short connector text on an active-invite-link row shown instead of the recipient's email, when the link has no email restriction (anyone can redeem it).",
-      },
-      "projectSettings.share.revokeLinkAriaLabel": {
-        description: "Accessible name of the trash-icon button that starts the revoke-confirmation flow for one active invite link.",
       },
       "projectSettings.searchAriaLabel": {
         description: "Accessible name of the settings search input, which filters section cards by label/keyword as the user types.",
@@ -2017,10 +2054,9 @@ export const projectSettings = defineNamespace({
         },
       },
       "projectSettings.advancedLlm.providerFrontier": {
-        description: "Radio-option description for the Frontier (recommended, default) completion provider.",
+        description: "Radio-option description for the Aquilla (recommended, default) completion provider.",
         placeholders: {
           name: "The bold provider name, already translated via projectSettings.advancedLlm.providerFrontierName and wrapped in <strong> by the caller.",
-          domain: "The literal, untranslated hostname 'api.frontierrnd.com', styled as inline code by the caller — insert exactly as given.",
         },
       },
       "projectSettings.advancedLlm.providerCustom": {
@@ -2052,7 +2088,7 @@ export const projectSettings = defineNamespace({
         },
       },
       "projectSettings.advancedLlm.modelOverrideHelp": {
-        description: "Help text under the optional model-override input for the Frontier provider.",
+        description: "Help text under the optional model-override input for the Aquilla provider.",
         placeholders: {
           example: "An example OpenRouter model id, e.g. 'anthropic/claude-3.5-sonnet', styled as inline code by the caller — data, not translated.",
         },
@@ -2061,12 +2097,6 @@ export const projectSettings = defineNamespace({
         description: "Field label for the temperature slider, showing its current value live.",
         placeholders: {
           value: "The current temperature value, e.g. '0.3'.",
-        },
-      },
-      "projectSettings.advancedLlm.healthPenaltyLabel": {
-        description: "Field label for the LLM health-penalty slider, showing its current value live.",
-        placeholders: {
-          percent: "The current penalty as a whole-number percentage, e.g. '10'.",
         },
       },
       "projectSettings.cellEditing.optionNone": {
@@ -2177,37 +2207,32 @@ export const projectSettings = defineNamespace({
       "projectSettings.languages.targetLanguagesHintAriaLabel": {
         description:
           "Accessible name of a small (i) icon on Project settings → Languages beside the Target languages heading. " +
-          "Hovering or focusing it shows the explanation as a tooltip.",
+          "A click opens the explanation in place under it; a second click closes it.",
       },
       "projectSettings.languages.codeHintAriaLabel": {
         description:
           "Accessible name of a small (i) icon on Project settings → Languages beside a language's Code field, explaining that the code comes from the language. " +
-          "Hovering or focusing it shows the explanation as a tooltip.",
+          "A click opens the explanation in place under it; a second click closes it.",
       },
       "projectSettings.languages.deliversHintAriaLabel": {
         description:
           "Accessible name of a small (i) icon on Project settings → Languages beside the Delivers column heading and the add form's Delivers field. " +
-          "Hovering or focusing it shows the explanation as a tooltip.",
+          "A click opens the explanation in place under it; a second click closes it.",
       },
       "projectSettings.languages.addNameHintAriaLabel": {
         description:
           "Accessible name of a small (i) icon on Project settings → Languages beside the Name field of the Add a language form. " +
-          "Hovering or focusing it shows the explanation as a tooltip.",
+          "A click opens the explanation in place under it; a second click closes it.",
       },
       "projectSettings.languages.archiveHintAriaLabel": {
         description:
           "Accessible name of a small (i) icon on Project settings → Languages inside the confirmation shown before archiving a language. " +
-          "Hovering or focusing it shows the explanation as a tooltip.",
+          "A click opens the explanation in place under it; a second click closes it.",
       },
       "projectSettings.languages.archivedHintAriaLabel": {
         description:
           "Accessible name of a small (i) icon on Project settings → Languages beside the collapsed Archived (n) group of archived languages. " +
-          "Hovering or focusing it shows the explanation as a tooltip.",
-      },
-      "projectSettings.languages.viewOnlyAriaLabel": {
-        description:
-          "Accessible name of a small (i) icon on Project settings → Languages beside \"View only\", shown to people who may not change the project's languages; the tooltip says which role can. " +
-          "Hovering or focusing it shows the explanation as a tooltip.",
+          "A click opens the explanation in place under it; a second click closes it.",
       },
       "projectSettings.languages.changeSourceAriaLabel": {
         description:
@@ -3289,10 +3314,6 @@ export const projectSettings = defineNamespace({
           upstream: "The upstream project's name, as its maintainers named it — never translated.",
         },
       },
-      "projectSettings.inherit.linkTitle": {
-        description:
-          "Heading of the same choice on the link confirm step, before the link exists. The checkboxes under it are what this new link will copy.",
-      },
       "projectSettings.inherit.linkDescription": {
         description:
           "One sentence under that heading: the choice can be changed later, per field, from the downstream project's settings.",
@@ -3354,6 +3375,15 @@ export const projectSettings = defineNamespace({
           "Choosing it means this project follows its organization's choice, shown in brackets.",
         placeholders: {
           value: "The organization's current choice, e.g. 'Project lead' or 'No one', already translated.",
+        },
+      },
+      "projectSettings.visibility.onlyRoleLoosens": {
+        description:
+          "Under 'Who can see the member list' or 'Who can see each member's progress' in Project settings → Members, " +
+          "when this project set a stricter value than the reader's own role: only people with that role or higher may " +
+          "make it less strict again.",
+        placeholders: {
+          role: "A plural role name, already translated, e.g. 'Owners'.",
         },
       },
       "projectSettings.mediaDefaults.cellEditingNobody": {

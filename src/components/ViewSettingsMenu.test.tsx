@@ -107,8 +107,8 @@ describe("ViewSettingsMenu popover", () => {
     expect(screen.getByText("Show line numbers")).toBeTruthy()
     expect(screen.getByText("Show cell labels")).toBeTruthy()
     expect(screen.getByText("Target key terms")).toBeTruthy()
-    expect(screen.getByText("Text Direction")).toBeTruthy()
-    expect(screen.getByText("Font Size")).toBeTruthy()
+    expect(screen.getByText("Text direction")).toBeTruthy()
+    expect(screen.getByText("Font size")).toBeTruthy()
 
     fireEvent.click(screen.getByRole("switch", { name: /Show line numbers/i }))
     expect(handlers.onLineNumbersChange).toHaveBeenCalledWith(false)
@@ -219,7 +219,7 @@ describe("ViewSettingsMenu popover", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Decrease source font size" }))
     expect(handlers.onSourceFontSizeChange).toHaveBeenCalledWith(15)
-    expect(screen.queryByRole("button", { name: "Use app font size for target" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Reset to default" })).toBeNull()
   })
 
   it("steps font size from the Small scaled default (AQU-1170)", () => {
@@ -243,9 +243,30 @@ describe("ViewSettingsMenu popover", () => {
     fireEvent.click(screen.getByRole("button", { name: "Increase source font size" }))
     expect(handlers.onSourceFontSizeChange).toHaveBeenCalledWith(19)
 
-    fireEvent.click(screen.getByRole("button", { name: "Use app font size for target" }))
+    // AQU-2263: one "Reset to default" puts the pinned column back; the
+    // column that already follows Preferences is left alone.
+    fireEvent.click(screen.getByRole("button", { name: "Reset to default" }))
     expect(handlers.onTargetFontSizeReset).toHaveBeenCalledTimes(1)
-    expect(screen.queryByRole("button", { name: "Use app font size for source" })).toBeNull()
+    expect(handlers.onSourceFontSizeReset).not.toHaveBeenCalled()
+  })
+
+  // AQU-2263: the file's size is an override of the app font size in
+  // Preferences, so the menu says what that default is.
+  it("says the default from Preferences, and offers Reset to default only once a size is changed", () => {
+    renderViewSettings({ sourceFontSize: 14, targetFontSize: 14 })
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    expect(screen.getByTestId("font-size-default")).toHaveTextContent("Default from Preferences: 14px")
+    expect(screen.queryByRole("button", { name: "Reset to default" })).toBeNull()
+  })
+
+  it("Reset to default puts both columns back when both were changed", () => {
+    const handlers = renderViewSettings({
+      sourceFontSize: 20, targetFontSize: 22, sourceFontSizeExplicit: true, targetFontSizeExplicit: true,
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    fireEvent.click(screen.getByRole("button", { name: "Reset to default" }))
+    expect(handlers.onSourceFontSizeReset).toHaveBeenCalledTimes(1)
+    expect(handlers.onTargetFontSizeReset).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -538,7 +559,7 @@ describe("ViewSettingsMenu — health score color coding", () => {
     renderViewSettings()
 
     fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
-    const toggle = screen.getByRole("switch", { name: "Health Score Color Coding" })
+    const toggle = screen.getByRole("switch", { name: "Health score color coding" })
     expect(toggle.getAttribute("aria-checked")).toBe("false")
     expect(getHealthScoreColorCoding()).toBe(false)
 
@@ -546,7 +567,7 @@ describe("ViewSettingsMenu — health score color coding", () => {
 
     expect(getHealthScoreColorCoding()).toBe(true)
     expect(
-      screen.getByRole("switch", { name: "Health Score Color Coding" }).getAttribute("aria-checked"),
+      screen.getByRole("switch", { name: "Health score color coding" }).getAttribute("aria-checked"),
     ).toBe("true")
   })
 
@@ -555,7 +576,7 @@ describe("ViewSettingsMenu — health score color coding", () => {
     renderViewSettings()
 
     fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
-    const toggle = screen.getByRole("switch", { name: "Health Score Color Coding" })
+    const toggle = screen.getByRole("switch", { name: "Health score color coding" })
     expect(toggle.getAttribute("aria-checked")).toBe("true")
 
     fireEvent.click(toggle)
@@ -568,7 +589,7 @@ describe("ViewSettingsMenu — health score color coding", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
 
-    const toggle = screen.getByRole("switch", { name: "Health Score Color Coding" })
+    const toggle = screen.getByRole("switch", { name: "Health score color coding" })
     expect(toggle.getAttribute("aria-disabled")).toBe("true")
 
     fireEvent.click(toggle)

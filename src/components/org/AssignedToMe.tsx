@@ -11,6 +11,7 @@ import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { NoteOnClick } from "@/components/ui/info-note"
 import { EmptyState, Page, PageHeader, TableEmptyState } from "@/components/ui/page"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
@@ -260,12 +261,19 @@ export function AssignedToMe() {
               <div className="h-1.5 w-full max-w-[7.5rem] overflow-hidden rounded-full bg-muted">
                 <div className={`h-full rounded-full ${PROGRESS_BG.textValidated}`} style={{ width: `${pct}%` }} />
               </div>
-              {/* AQU-1510: the count is this assignment's cells, not the file's. */}
-              <AppTooltip content={t("org.assignedToMe.cellsProgressHint", { done: a.cellsDone, total: a.cellsTotal })}>
-                <span className="text-xs tabular-nums text-muted-foreground">
-                  {t("org.assignedToMe.cellsProgress", { done: a.cellsDone, total: a.cellsTotal, pct })}
-                </span>
-              </AppTooltip>
+              {/* AQU-1510: the count is this assignment's cells, not the file's.
+                  AQU-2260: that note opens on click, never on hover, and the
+                  click stays here rather than opening the row. */}
+              <span className="inline-flex" onClick={(e) => e.stopPropagation()}>
+                <NoteOnClick
+                  note={t("org.assignedToMe.cellsProgressHint", { done: a.cellsDone, total: a.cellsTotal })}
+                  align="end"
+                >
+                  <span className="text-xs tabular-nums text-muted-foreground">
+                    {t("org.assignedToMe.cellsProgress", { done: a.cellsDone, total: a.cellsTotal, pct })}
+                  </span>
+                </NoteOnClick>
+              </span>
             </div>
           )
         },

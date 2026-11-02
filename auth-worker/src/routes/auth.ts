@@ -26,6 +26,7 @@ import {
 // email-verification tokens are bearer credentials of the same kind and had
 // no reason to be the only ones kept in plaintext at rest.
 import { sha256Hex } from "../../../db/shared/api-credentials"
+import { orgInviteReturnTo } from "../../../shared/org-invite-return-to"
 import {
   countRecentEvents,
   ipIdentifier,
@@ -102,6 +103,7 @@ const loginSchema = z.object({
 
 const passwordResetRequestSchema = z.object({
   email: z.string().email(),
+  return_to: z.string().max(512).optional(),
 })
 
 const passwordResetSchema = z.object({
@@ -523,6 +525,23 @@ auth.post("/token", async (c) => {
       return c.json({ error: "Incorrect username/email or password" }, 401)
     }
 
+    // [Pen test] Auth & session mgmt (2026-11-02): the per-identifier lockout
+    // above keys on whatever string the caller typed, and login resolves a
+    // username OR an email (case-insensitively) to the same account — so one
+    // account has at least two lockout buckets, and alternating between its
+    // username and its email doubled the guesses per window (more with
+    // surrounding whitespace variants the DB lookup tolerates). Also count
+    // failures against the resolved account id, which the typed string cannot
+    // vary. Same threshold, no new friction for a real user.
+    const accountIdent = `acct:${user.id}`
+    if (
+      !passwordAlreadyVerified &&
+      (await countRecentEvents(c.env.AQUILLA_PG, "login", accountIdent, { onlyFailures: true })) >=
+        LOGIN_MAX_FAILURES_PER_IDENTIFIER
+    ) {
+      return c.json({ error: "Too many login attempts. Please try again later." }, 429)
+    }
+
     let isValidPassword = passwordAlreadyVerified
     try {
       const result = passwordAlreadyVerified
@@ -550,6 +569,7 @@ auth.post("/token", async (c) => {
       await Promise.all([
         recordAuthEvent(c.env.AQUILLA_PG, "login", identifier, false),
         recordAuthEvent(c.env.AQUILLA_PG, "login", ipIdent, false),
+        recordAuthEvent(c.env.AQUILLA_PG, "login", accountIdent, false),
         logActivity(c.env.AQUILLA_PG, user.id, "login_failed", "Incorrect password"),
       ])
       return c.json({ error: "Incorrect username/email or password" }, 401)
@@ -708,11 +728,19 @@ auth.post("/logout", authMiddleware, async (c) => {
 // translator who has lost email access, a new admin route is needed. Track
 // separately.
 
+/** AQU-2259: the longest display name PATCH /auth/me accepts, after trimming. */
+const DISPLAY_NAME_MAX_LENGTH = 80
+
 const patchMeSchema = z.object({
   // Only safe, non-identity fields may be updated by the user themselves.
   // Username and password fields are explicitly rejected below even if they
   // somehow pass schema validation, to make the policy unmistakable.
   preferences: z.record(z.string(), z.unknown()).optional(),
+  // AQU-2259: the name shown for this person (onboarding's "What should we
+  // call you?"). Checked in the handler: trimmed, at most
+  // DISPLAY_NAME_MAX_LENGTH, no control characters; empty clears it, so
+  // COALESCE(display_name, username) readers fall back to the username.
+  display_name: z.string().max(1000).optional(),
   // Explicitly reject identity-change fields so a client sending them gets
   // a clear 403 rather than a silent no-op.
   username: z.string().optional(),
@@ -751,9 +779,40 @@ auth.patch("/me", authMiddleware, zValidator("json", patchMeSchema), async (c) =
     )
   }
 
-  // Safe update: preferences only.
+  // AQU-2259: the display name. Validated before anything is written, so a
+  // refused name never half-applies a request that also carries preferences.
+  let displayName: string | null | undefined
+  if (body.display_name !== undefined) {
+    const trimmed = body.display_name.trim()
+    if (trimmed.length > DISPLAY_NAME_MAX_LENGTH) {
+      return c.json({ error: `display_name must be at most ${DISPLAY_NAME_MAX_LENGTH} characters` }, 400)
+    }
+    // eslint-disable-next-line no-control-regex
+    if (/[\u0000-\u001f\u007f]/.test(trimmed)) {
+      return c.json({ error: "display_name must not contain control characters" }, 400)
+    }
+    displayName = trimmed === "" ? null : trimmed
+  }
+
+  // Safe updates: preferences and the display name.
+  if (displayName !== undefined) {
+    await c.env.AQUILLA_PG.prepare(
+      "UPDATE users SET display_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+    )
+      .bind(displayName, user.id)
+      .run()
+    evictUserSessions(user.id)
+  }
   if (body.preferences !== undefined) {
     const preferencesJson = JSON.stringify(body.preferences)
+    // [Pen test] Auth & session mgmt (2026-11-02): this replace-style write had
+    // no size bound, unlike PATCH /auth/me/preferences. The blob is read back
+    // by `SELECT * FROM users` on every session hydration, so an oversized one
+    // (own account, or a stolen token) slows every authenticated request for
+    // that user and bloats the per-isolate session cache. Same 256 KB ceiling.
+    if (new TextEncoder().encode(preferencesJson).length > PREFERENCES_STORED_MAX_BYTES) {
+      return c.json({ error: "preferences too large" }, 413)
+    }
     await c.env.AQUILLA_PG.prepare(
       "UPDATE users SET preferences = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
     )
@@ -764,10 +823,10 @@ auth.patch("/me", authMiddleware, zValidator("json", patchMeSchema), async (c) =
 
   // Re-fetch to return the canonical record.
   const updated = await c.env.AQUILLA_PG.prepare(
-    "SELECT id, username, email, preferences FROM users WHERE id = ?",
+    "SELECT id, username, email, preferences, display_name FROM users WHERE id = ?",
   )
     .bind(user.id)
-    .first<{ id: number; username: string; email: string; preferences: string }>()
+    .first<{ id: number; username: string; email: string; preferences: string; display_name: string | null }>()
 
   if (!updated) return c.json({ error: "user not found" }, 404)
 
@@ -783,8 +842,114 @@ auth.patch("/me", authMiddleware, zValidator("json", patchMeSchema), async (c) =
     username: updated.username,
     email: updated.email,
     preferences,
+    display_name: updated.display_name ?? null,
   })
 })
+
+// AQU-2264: a person's preferences, merged rather than replaced.
+//
+// PATCH /auth/me above REPLACES the whole `users.preferences` blob, so every
+// caller had to read it, change one key and send it all back — and two
+// devices, or two features, doing that at once lose one of the writes. Here a
+// caller sends only the keys it is changing, and one UPDATE merges them into
+// the row as it stands at that moment, so writers that touch different keys
+// never undo each other. (PATCH /auth/me keeps replacing for older clients.)
+//
+//   set          — written over whatever is stored.
+//   setIfAbsent  — written only for keys the person has none of yet: the
+//                  first device's values become theirs, and later devices
+//                  take those instead of offering their own.
+//
+// GET /auth/me/preferences reads the row itself. GET /auth/me answers from the
+// isolate's session cache, which can be up to 30 s behind a write made through
+// another isolate — too stale for a second device opening the recorder.
+
+/** Most keys one request may write. */
+const PREFERENCES_PATCH_MAX_KEYS = 64
+/** Longest key name. */
+const PREFERENCES_KEY_MAX_LENGTH = 100
+/** Most bytes of JSON one request may write. */
+const PREFERENCES_PATCH_MAX_BYTES = 16 * 1024
+/** A record already this large takes no more writes. */
+const PREFERENCES_STORED_MAX_BYTES = 256 * 1024
+
+const preferenceEntriesSchema = z.record(
+  z.string().min(1).max(PREFERENCES_KEY_MAX_LENGTH),
+  z.unknown(),
+)
+const patchPreferencesSchema = z.object({
+  set: preferenceEntriesSchema.optional(),
+  setIfAbsent: preferenceEntriesSchema.optional(),
+}).strict()
+
+/** The stored text as an object; anything that is not a JSON object reads as {}. */
+function parseStoredPreferences(text: string | null | undefined): Record<string, unknown> {
+  if (!text) return {}
+  try {
+    const parsed = JSON.parse(text) as unknown
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {}
+  } catch {
+    return {}
+  }
+}
+
+auth.get("/me/preferences", authMiddleware, async (c) => {
+  const user = c.get("user")
+  const row = await c.env.AQUILLA_PG.prepare("SELECT preferences FROM users WHERE id = ?")
+    .bind(user.id)
+    .first<{ preferences: string }>()
+  if (!row) return c.json({ error: "user not found" }, 404)
+  return c.json({ preferences: parseStoredPreferences(row.preferences) })
+})
+
+auth.patch(
+  "/me/preferences",
+  authMiddleware,
+  zValidator("json", patchPreferencesSchema),
+  async (c) => {
+    const { set = {}, setIfAbsent = {} } = c.req.valid("json")
+    const keyCount = Object.keys(set).length + Object.keys(setIfAbsent).length
+    if (keyCount === 0) return c.json({ error: "nothing to save" }, 400)
+    if (keyCount > PREFERENCES_PATCH_MAX_KEYS) {
+      return c.json({ error: `at most ${PREFERENCES_PATCH_MAX_KEYS} preferences per request` }, 400)
+    }
+    const setJson = JSON.stringify(set)
+    const absentJson = JSON.stringify(setIfAbsent)
+    if (new TextEncoder().encode(setJson + absentJson).length > PREFERENCES_PATCH_MAX_BYTES) {
+      return c.json({ error: "preferences too large" }, 413)
+    }
+
+    const user = c.get("user")
+    // One statement, so the merge reads the row as it is when the write
+    // lands — a write from another device in between is kept, not undone.
+    // `absent || stored || set`: stored keys beat setIfAbsent, set beats both.
+    // The nested CASE (evaluation order is guaranteed only inside CASE) turns a
+    // record that is not a JSON object into {} rather than failing the write.
+    const row = await c.env.AQUILLA_PG.prepare(
+      `UPDATE users
+          SET preferences = (
+                ?::text::jsonb
+                || CASE
+                     WHEN NOT pg_input_is_valid(preferences, 'jsonb') THEN '{}'::jsonb
+                     WHEN jsonb_typeof(preferences::jsonb) <> 'object' THEN '{}'::jsonb
+                     ELSE preferences::jsonb
+                   END
+                || ?::text::jsonb
+              )::text,
+              updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND length(preferences) <= ?
+        RETURNING preferences`,
+    )
+      .bind(absentJson, setJson, user.id, PREFERENCES_STORED_MAX_BYTES)
+      .first<{ preferences: string }>()
+    if (!row) return c.json({ error: "preferences are full" }, 413)
+    // The session cache holds the row, preferences included.
+    evictUserSessions(user.id)
+    return c.json({ preferences: parseStoredPreferences(row.preferences) })
+  },
+)
 
 const verifyEmailSchema = z.object({ token: z.string().min(8) })
 
@@ -876,7 +1041,7 @@ auth.post(
   "/password-reset/request",
   zValidator("json", passwordResetRequestSchema),
   async (c) => {
-    const { email } = c.req.valid("json")
+    const { email, return_to } = c.req.valid("json")
     // The one response every outcome below returns. Whether the address is
     // registered, whether it was throttled, and whether the token mint or the
     // send failed must all be indistinguishable from here — see the
@@ -940,48 +1105,66 @@ auth.post(
     // the log line is loud, retrying is cheap, and the threat model
     // (docs/OPSEC.md §2, D3 identity linkage) puts "is this person a user of
     // this product" above a rare misleading success message.
-    try {
-      // [Pen test] Auth & session mgmt (2026-08-24): the token is stored as a
-      // SHA-256 digest, never in plaintext. Anyone holding a read-only copy
-      // of this table (a snapshot, a replica, a support query, a backup)
-      // previously held a 24-hour account-takeover credential for every
-      // pending reset.
-      const token = crypto.randomUUID()
-      const tokenHash = await sha256Hex(token)
-      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
-      // [Pen test] Auth & session mgmt (2026-10-12): a fresh request supersedes
-      // earlier links, so a stale/leaked older email can't be redeemed.
-      await c.env.AQUILLA_PG.prepare(`DELETE FROM password_reset_tokens WHERE user_id = ?`)
-        .bind(user.id)
-        .run()
-      await c.env.AQUILLA_PG.prepare(
-        `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
-         VALUES (?, ?, ?)
-         ON CONFLICT (token_hash) DO UPDATE SET user_id = excluded.user_id, expires_at = excluded.expires_at`,
-      )
-        .bind(user.id, tokenHash, expiresAt.toISOString())
-        .run()
-
-      const encodedUsername = encodeURIComponent(user.username)
-      const baseUrl = c.env.BASE_URL || "https://aquilla.app"
-      const resetUrl = `${baseUrl}/reset-password?token=${token}&username=${encodedUsername}`
-      // [Pen test] Auth & session mgmt (2026-07-20): a delivery failure here
-      // used to fall through to the catch below and return a 500 with an
-      // error message — distinguishable from the generic 200 an unregistered
-      // address gets, i.e. a secondary user-enumeration oracle (observable
-      // whenever the email provider hiccups). The token is already minted and
-      // usable via the emailed link regardless of whether the SEND itself
-      // succeeds, so a delivery failure shouldn't change the response.
+    //
+    // [Pen test] Auth & session mgmt (2026-11-02): the work below (two DB
+    // writes plus an outbound email send) is the *slow* path, and it used to
+    // be awaited before responding, while an unregistered or throttled
+    // address returned right after the lookup. Identical bodies, but a
+    // response-time gap of hundreds of ms — a reliable "is this email
+    // registered" oracle. It now runs after the response is sent
+    // (executionCtx.waitUntil), so both paths answer in the same time.
+    const deliverResetEmail = async (): Promise<void> => {
       try {
-        // Send to the address of record (user.email), not the requester-typed
-        // casing, so the mail always targets the account's canonical email.
-        await sendPasswordResetEmail(c.env, user.email, resetUrl)
-      } catch (err) {
-        console.warn("[password-reset] email send failed (non-fatal):", err)
+        // [Pen test] Auth & session mgmt (2026-08-24): the token is stored as a
+        // SHA-256 digest, never in plaintext. Anyone holding a read-only copy
+        // of this table (a snapshot, a replica, a support query, a backup)
+        // previously held a 24-hour account-takeover credential for every
+        // pending reset.
+        const token = crypto.randomUUID()
+        const tokenHash = await sha256Hex(token)
+        const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
+        // [Pen test] Auth & session mgmt (2026-10-12): a fresh request supersedes
+        // earlier links, so a stale/leaked older email can't be redeemed.
+        await c.env.AQUILLA_PG.prepare(`DELETE FROM password_reset_tokens WHERE user_id = ?`)
+          .bind(user.id)
+          .run()
+        await c.env.AQUILLA_PG.prepare(
+          `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
+           VALUES (?, ?, ?)
+           ON CONFLICT (token_hash) DO UPDATE SET user_id = excluded.user_id, expires_at = excluded.expires_at`,
+        )
+          .bind(user.id, tokenHash, expiresAt.toISOString())
+          .run()
+
+        const encodedUsername = encodeURIComponent(user.username)
+        const baseUrl = c.env.BASE_URL || "https://aquilla.app"
+        const returnTo = orgInviteReturnTo(return_to)
+        const resetUrl = `${baseUrl}/reset-password?token=${token}&username=${encodedUsername}`
+          + (returnTo ? `&returnTo=${encodeURIComponent(returnTo)}` : "")
+        // [Pen test] Auth & session mgmt (2026-07-20): a delivery failure here
+        // used to fall through to the catch below and return a 500 with an
+        // error message — distinguishable from the generic 200 an unregistered
+        // address gets, i.e. a secondary user-enumeration oracle (observable
+        // whenever the email provider hiccups). The token is already minted and
+        // usable via the emailed link regardless of whether the SEND itself
+        // succeeds, so a delivery failure shouldn't change the response.
+        try {
+          // Send to the address of record (user.email), not the requester-typed
+          // casing, so the mail always targets the account's canonical email.
+          await sendPasswordResetEmail(c.env, user.email, resetUrl)
+        } catch (err) {
+          console.warn("[password-reset] email send failed (non-fatal):", err)
+        }
+        await logActivity(c.env.AQUILLA_PG, user.id, "password_reset_requested", "Password reset email sent")
+      } catch (error) {
+        console.error("Password reset request error (post-lookup, response unchanged):", error)
       }
-      await logActivity(c.env.AQUILLA_PG, user.id, "password_reset_requested", "Password reset email sent")
-    } catch (error) {
-      console.error("Password reset request error (post-lookup, response unchanged):", error)
+    }
+    try {
+      c.executionCtx.waitUntil(deliverResetEmail())
+    } catch {
+      // No execution context (unit tests call app.request directly): run inline.
+      await deliverResetEmail()
     }
 
     return c.json(genericResponse)

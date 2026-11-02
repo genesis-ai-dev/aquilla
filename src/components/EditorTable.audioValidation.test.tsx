@@ -257,10 +257,12 @@ describe("EditorTable — a line with only audio", () => {
     const audioOnly = Array.from(document.querySelectorAll<HTMLElement>("[data-grid-row]"))
       .find((r) => !r.textContent?.includes("bonjour cell-2"))!
     expect(audioOnly).toBeDefined()
-    // Its text gutter holds only the faded circle — no button to press; its
-    // audio slot is live.
+    // Its text gutter holds only the faded circle — no validate button; its
+    // audio slot is live. (AQU-2260: the circle says why on click, from a
+    // stand-in that is not a Tab stop.)
     const textGutter = audioOnly.querySelector('[data-testid="validation-gutter"]')
-    expect(textGutter?.querySelector("button")).toBeNull()
+    expect(textGutter?.querySelector("button:not([data-slot='note-on-click'])")).toBeNull()
+    expect(textGutter?.querySelector("[data-slot='note-on-click']")?.getAttribute("tabindex")).toBe("-1")
     expect(textGutter?.querySelector('[data-testid="validation-unavailable"]')).not.toBeNull()
     expect(within(audioOnly).getByTestId("audio-validation-button")).toBeInTheDocument()
   })

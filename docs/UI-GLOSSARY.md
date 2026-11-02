@@ -9,6 +9,37 @@ the "Banned" alternatives or internal spec IDs in the UI.
 
 ---
 
+## The interface's word list (AQU-2261, Oct 29)
+
+Agreed by Sam on Oct 29 and swept into every English message. The retired
+words are enforced: `pnpm i18n:check` (and `src/lib/i18n/retired-terms.test.ts`)
+fails an English message that uses one, naming the word to write instead. The
+list the check reads is `src/lib/i18n/retired-terms.ts`; add a retired word
+there, not here alone.
+
+| Say | Never say |
+|---|---|
+| **Editor settings** | ~~View settings~~ |
+| **Media** (the Project settings pane), with its cards **Audio loading** and **Timeline** | ~~Audio media~~, ~~audio media strategy~~ |
+| **Follows source** · **Follows recordings** | ~~Free timing~~, ~~Original timing~~, ~~the original recording's timing~~ |
+| **AI model (advanced)** (the card); the pane holding it is **AI** | ~~AI & completion~~, ~~Advanced LLM settings~~, ~~Advanced LLM~~ |
+| **AI drafting** (the card of drafting settings); the written instructions are **Instructions** | ~~AI Instructions~~ |
+| **On-device AI models** | ~~Local AI models~~, ~~Local models~~ |
+| **Bible data** · **Source link** · **Settings from {project}** | ~~Bible resources~~, ~~Linked source project~~, ~~Inherited settings~~, ~~Copy these from the upstream project~~ |
+| **Project deadline** (the project) · **Target date** (a plan item) | never swapped; an assignment's own date stays its deadline |
+| **Language lane** / **Language lanes** (lower case mid-sentence) | ~~lane~~, ~~target lane~~, ~~translation lane~~, "language" meaning a lane |
+| Role names alone (**Project lead**) | ~~Project lead (500)~~ |
+| **Film** (the video linked to a file) | ~~Link video~~, ~~Change video~~, ~~Linked video~~ on the film's own controls |
+| **Organization settings** · **Billing** · **Archived projects** · **Member list** · **Project name** | ~~Settings~~ (for the org's), ~~Billing & usage~~, ~~Archived~~ (the page), ~~roster~~, ~~Project title~~, ~~Project Name~~ |
+| Sentence case everywhere (**Font size**) | ~~Font Size~~ |
+
+The check can't see case, or "language" used to mean a lane, so those two rows
+are kept by reading. Names of products, resources, plans and named features
+(Open Bible Stories, Bible Swap, Smart Extensions, Voice Studio, Field Plan)
+keep their capitals.
+
+---
+
 ## Concept names
 
 | Concept | Canonical UI name | Banned / replaced |
@@ -21,7 +52,7 @@ the "Banned" alternatives or internal spec IDs in the UI.
 | Sync status chip tooltip (synced) | **All changes synced** | ~~All audit events synced~~ |
 | Sync status chip tooltip (failed) | **Could not sync changes to the server** | ~~Could not sync audit events~~ |
 | Project glossary / terminology store | **term base** (two words) | ~~termbase~~ (one word) |
-| Term base sharing section | **Term Base Sharing** | ~~Termbase Sharing~~ |
+| Term base sharing section | **Term base sharing** | ~~Termbase Sharing~~, ~~Term Base Sharing~~ |
 | AI reference examples (for translation) | **reference examples** | ~~few-shot examples~~ |
 | Word-level audio timing data | **word timings** | ~~karaoke timings~~ |
 | Original file stored on server for round-trip export | **original file data** | ~~side-car bytes~~ |

@@ -138,6 +138,25 @@ describe("audioValidationTakes", () => {
       validatorCount: 0, validators: [], isGenerated: false, canValidate: true,
     })
   })
+
+  // AQU-2296: the seam the date line arrives through. The route sends the
+  // stamps on the attachment; the control reads them off the TAKE, and this
+  // is the one hop between — exactly where a new field gets silently dropped
+  // and leaves every name in the popover undated.
+  it("carries each validator's timestamp through to the take, and absent as empty", () => {
+    const withStamps = entry(
+      { a: { audioId: "a", slot: "recording", validatorCount: 2, validators: ["bo", "cy"], validatorDecidedTs: { bo: 1700, cy: 1800 } } },
+      { recording: "a" },
+    )
+    expect(audioValidationTakes(withStamps, {}, policy(), reason)[0].validatorDecidedTs)
+      .toEqual({ bo: 1700, cy: 1800 })
+
+    const noStamps = entry(
+      { a: { audioId: "a", slot: "recording", validatorCount: 1, validators: ["bo"] } },
+      { recording: "a" },
+    )
+    expect(audioValidationTakes(noStamps, {}, policy(), reason)[0].validatorDecidedTs).toEqual({})
+  })
 })
 
 describe("audioEntryFromCell", () => {
@@ -151,6 +170,20 @@ describe("audioEntryFromCell", () => {
     expect(audioValidationTakes(entry, {}, policy(), reason)[0]).toMatchObject({
       audioId: "take-1", validatorCount: 2, validators: ["bo"],
     })
+  })
+
+  // AQU-2296, second pass: the stamps were on the wire and in the control,
+  // and dropped HERE in between — so the audio popover shipped with names and
+  // no dates while the text popover beside it had both.
+  it("carries each validator's stamp through, for the date under their name", () => {
+    const entry = audioEntryFromCell({
+      attachments: {
+        "take-1": { slot: "recording", validatorCount: 1, validators: ["bo"], validatorDecidedTs: { bo: 1700 } },
+      },
+      selectedBySlot: { recording: "take-1" },
+      selectedAudioId: "take-1",
+    })!
+    expect(audioValidationTakes(entry, {}, policy(), reason)[0].validatorDecidedTs).toEqual({ bo: 1700 })
   })
 
   it("carries role through, so a source clip still does not count", () => {

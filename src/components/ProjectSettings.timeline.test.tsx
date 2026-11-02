@@ -114,7 +114,7 @@ vi.mock("@/lib/metrics/use-post-edit-metrics", () => ({
   usePostEditMetrics: () => ({ metrics: null, isLoading: false, isError: false, revalidate: vi.fn() }),
 }))
 
-/** The Timeline card lives in the "Audio media" pane; deep-link straight to it
+/** The Timeline card lives in the "Media" pane; deep-link straight to it
  *  rather than clicking through the settings index. */
 function renderSettings() {
   return render(
@@ -262,17 +262,45 @@ describe("ProjectSettings — the timing lock, which shipped uncovered", () => {
 })
 
 describe("ProjectSettings — media settings follow the organization (AQU-1768)", () => {
-  it("shows the organization's choice, disabled, while the project sets none", () => {
+  it("shows the organization's choice while the project sets none", () => {
     orgMedia = { timingLocked: false, allowTrackEditing: true }
     currentProject = makeProject({ timingLocked: undefined, allowTrackEditing: undefined })
     renderSettings()
     expect(isChecked(box("settings-timing-locked"))).toBe(false)
     expect(isChecked(box("settings-allow-track-editing"))).toBe(true)
-    const lock = box("settings-timing-locked")
-    expect(lock.hasAttribute("disabled") || lock.getAttribute("aria-disabled") === "true" || lock.hasAttribute("data-disabled")).toBe(true)
     expect(box("timing-locked-source").textContent).toContain("Organization default (off)")
     expect(box("allow-track-editing-source").textContent).toContain("Organization default (on)")
     expect(saveButton()).toBeNull()
+  })
+
+  it("ticking a box that follows the organization sets it for this project in one step (Sam, Oct 28)", async () => {
+    orgMedia = { timingLocked: false }
+    currentProject = makeProject({ timingLocked: undefined })
+    renderSettings()
+    const lock = box("settings-timing-locked")
+    expect(lock.hasAttribute("disabled") || lock.getAttribute("aria-disabled") === "true" || lock.hasAttribute("data-disabled")).toBe(false)
+    fireEvent.click(lock)
+    expect(isChecked(box("settings-timing-locked"))).toBe(true)
+    expect(box("timing-locked-source").textContent).toContain("Set for this project")
+    fireEvent.click(saveButton() as HTMLElement)
+    await waitFor(() => expect(patch).toHaveBeenCalled())
+    expect((patch.mock.calls[0]?.[0] as Record<string, unknown>).timingLocked).toBe(true)
+  })
+
+  it("each (i) opens its explanation beneath the title on a click, and closes it on another", () => {
+    renderSettings()
+    const info = screen.getByTestId("settings-timing-locked-info")
+    const text = document.getElementById("settings-timing-locked-explanation") as HTMLElement
+    expect(text.dataset.open).toBe("false")
+    fireEvent.click(info)
+    expect(info).toHaveAttribute("aria-expanded", "true")
+    expect(text.dataset.open).toBe("true")
+    expect(text.textContent).toMatch(/the handles are gone from every/)
+    // Clicking the (i) beside a label never ticks its box.
+    expect(isChecked(box("settings-timing-locked"))).toBe(true)
+    fireEvent.click(info)
+    expect(text.dataset.open).toBe("false")
+    expect((document.getElementById("settings-allow-track-editing-explanation") as HTMLElement).dataset.open).toBe("false")
   })
 
   it("'Set for this project' starts from the organization's value and saves only once edited", async () => {
@@ -295,5 +323,61 @@ describe("ProjectSettings — media settings follow the organization (AQU-1768)"
     await waitFor(() => expect(patch).toHaveBeenCalled())
     const sent = patch.mock.calls[0]?.[0] as Record<string, unknown>
     expect("timingLocked" in sent && sent.timingLocked === undefined).toBe(true)
+  })
+})
+
+// AQU-1758 (Sam's decision 7): the Sources menu in the media view's top bar,
+// the film first in it, behind one setting beside track editing. Unset, a project of
+// books and documents hides them and any other shows them.
+describe("ProjectSettings — film and sources (AQU-1758)", () => {
+  const bookFiles = [{ id: "f1", name: "Ruth", type: "usfm", orderedBy: "sequence" }]
+  const filmFiles = [{ id: "f2", name: "Episode 1.vtt", type: "vtt", orderedBy: "time" }]
+
+  it("reads OFF on a book project that never chose", () => {
+    currentProject = makeProject({ files: bookFiles as unknown as ProjectRecord["files"] })
+    renderSettings()
+    expect(isChecked(box("settings-film-and-sources"))).toBe(false)
+    expect(box("settings-film-and-sources-info")).toHaveAttribute("aria-label", "About the film and sources tools")
+    expect(saveButton()).toBeNull()
+  })
+
+  it("reads ON on any other project that never chose", () => {
+    currentProject = makeProject({ files: filmFiles as unknown as ProjectRecord["files"] })
+    renderSettings()
+    expect(isChecked(box("settings-film-and-sources"))).toBe(true)
+  })
+
+  // AQU-1758: on this layout there is no Film button; the film is the first
+  // item in the Sources menu in the media view's top bar, and the (i) says so.
+  // Sam, Oct 28: an (i) is a button that opens its text in place beneath the
+  // title on a click, and closes it on another — never a hover.
+  it("its (i) opens, on a click, the film being the first item in the top bar's Sources menu", () => {
+    currentProject = makeProject({ files: filmFiles as unknown as ProjectRecord["files"] })
+    renderSettings()
+    const info = box("settings-film-and-sources-info")
+    const text = document.getElementById("settings-film-and-sources-explanation") as HTMLElement
+    expect(info).toHaveAttribute("aria-expanded", "false")
+    expect(info).toHaveAttribute("aria-controls", "settings-film-and-sources-explanation")
+    expect(text.dataset.open).toBe("false")
+    fireEvent.click(info)
+    expect(info).toHaveAttribute("aria-expanded", "true")
+    expect(text.dataset.open).toBe("true")
+    expect(text).toHaveTextContent("Shows the Sources menu in the media view's top bar.")
+    expect(text).toHaveTextContent("Its first item is the film, for linking a video")
+    expect(text).not.toHaveTextContent(/Film button/)
+    // Clicking the (i) beside the label never ticks its box.
+    expect(isChecked(box("settings-film-and-sources"))).toBe(true)
+    fireEvent.click(info)
+    expect(text.dataset.open).toBe("false")
+  })
+
+  it("saves the choice a maintainer makes", async () => {
+    currentProject = makeProject({ files: bookFiles as unknown as ProjectRecord["files"] })
+    renderSettings()
+    fireEvent.click(box("settings-film-and-sources"))
+    expect(isChecked(box("settings-film-and-sources"))).toBe(true)
+    fireEvent.click(saveButton() as HTMLElement)
+    await waitFor(() => expect(patch).toHaveBeenCalled())
+    expect((patch.mock.calls[0]?.[0] as Record<string, unknown>).filmAndSources).toBe(true)
   })
 })

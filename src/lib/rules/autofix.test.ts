@@ -171,7 +171,7 @@ describe("buildPerCellProposal", () => {
 })
 
 const settings: CompletionSettings = {
-  endpoint: "", model: "m", maxTokens: 1024, temperature: 0.2, systemPrompt: "", llmHealthPenalty: 0.1,
+  endpoint: "", model: "m", maxTokens: 1024, temperature: 0.2, systemPrompt: "",
 }
 
 const sampleRule: TranslationRule = {

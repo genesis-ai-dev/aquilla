@@ -9,6 +9,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
+import { expectClickNote } from "@/test-utils/tooltip"
 import { LivingMemoryPage } from "./LivingMemoryPage"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { LivingMemoryEntry } from "@/lib/parsers/types"
@@ -426,10 +427,10 @@ describe("LivingMemoryPage — examples pane", () => {
     renderPage("/project/proj-1/memory/examples")
 
     expect(
-      document.querySelector('section[aria-label="Recent Examples"]'),
+      document.querySelector('section[aria-label="Recent examples"]'),
     ).toBeInTheDocument()
 
-    const trigger = screen.getByRole("button", { name: /Recent Examples/i })
+    const trigger = screen.getByRole("button", { name: /Recent examples/i })
     expect(trigger).toBeVisible()
     expect(trigger).toHaveAttribute("aria-expanded", "false")
 
@@ -439,10 +440,10 @@ describe("LivingMemoryPage — examples pane", () => {
 
   it("keeps the Recent Examples section and role=status empty state once expanded", () => {
     renderPage("/project/proj-1/memory/examples")
-    fireEvent.click(screen.getByRole("button", { name: /Recent Examples/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Recent examples/i }))
 
     expect(
-      screen.getByRole("button", { name: /Recent Examples/i }),
+      screen.getByRole("button", { name: /Recent examples/i }),
     ).toHaveAttribute("aria-expanded", "true")
     expect(
       screen.getByRole("status", { name: /No validated translations/i }),
@@ -463,7 +464,7 @@ describe("LivingMemoryPage — examples pane", () => {
     // Collapsed first: the cell list is rendered but not exposed.
     expect(screen.getByText("In the beginning")).not.toBeVisible()
 
-    fireEvent.click(screen.getByRole("button", { name: /Recent Examples/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Recent examples/i }))
     expect(screen.getByText("Genesis")).toBeVisible()
     expect(screen.getByText("In the beginning")).toBeVisible()
     expect(screen.getByText("Mwanzoni")).toBeVisible()
@@ -480,7 +481,7 @@ describe("LivingMemoryPage — examples pane", () => {
       expect.objectContaining({ enabled: true }),
     )
     expect(
-      screen.getByRole("button", { name: /Recent Examples/i }),
+      screen.getByRole("button", { name: /Recent examples/i }),
     ).toHaveAttribute("aria-expanded", "false")
   })
 })
@@ -509,5 +510,14 @@ describe("LivingMemoryPage — knowledge pane", () => {
     expect(
       screen.queryByRole("button", { name: /Upload document/i }),
     ).not.toBeInTheDocument()
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): the coloured liveness dot is a mark, not a button,
+// so what it means opens on click, never on hover.
+describe("LivingMemoryPage — liveness dot", () => {
+  it("says the memory's state on click", async () => {
+    renderPage()
+    await expectClickNote(screen.getByRole("button", { name: "Live" }), "Live")
   })
 })

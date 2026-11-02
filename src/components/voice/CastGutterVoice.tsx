@@ -16,17 +16,14 @@
 // A VTT import with speakers writes castAssignments, so imported cues
 // correctly read as explicit.
 //
-// The Audio view opens the SAME picker from a field under each line's waveform
-// (`variant="field"`, Sam, 2026-09-28): a gutter of circles beside every row
-// unbalanced that page, and in narration nearly every circle is the Narrator.
-//
-// AQU-2212: in the field, a line nobody cast whose take is a person's recording
-// names that recording ("Your recording"), not "Narrator (default)". The list
-// ends with "Add a voice…", which opens New voice without leaving the line.
+// AQU-2212: the list ends with "Add a voice…", which opens New voice without
+// leaving the line. A line nobody cast whose take is a person's recording
+// names that recording ("Your recording"), with a microphone for its mark,
+// not the default voice — the Audio view's field did; the circle does now
+// (AQU-1758).
 
 import { useState } from "react"
-import { ChevronsUpDown, Mic, Plus } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { Mic, Plus } from "lucide-react"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { NoCharacterAvatar, VoiceAvatar } from "./VoiceAvatar"
@@ -57,17 +54,14 @@ export interface CastGutterVoiceProps {
   /** How many lines in this file share this line's cast name — asked when the
    *  picker opens, so the "this file" choice can say what it would change. */
   countSpeakerLines?(): number
-  /** "circle" (default): the 32px circle in the Media view's gutter. "field":
-   *  a field naming the voice, under a line's waveform in the Audio view. */
-  variant?: "circle" | "field"
-  /** Field only: what to call an uncast line's take when it is a person's
-   *  recording ("Your recording"). The default voice is named otherwise. */
-  takeLabel?: string
   /** Offer "Add a voice…" at the end of the list. */
   onAddVoice?(): void
+  /** What to call an uncast line's take when it is a person's recording
+   *  ("Your recording"). The default voice is named otherwise. */
+  takeLabel?: string
 }
 
-export function CastGutterVoice({ voice, explicit, castName, editable, voices, onPick, onClear, countSpeakerLines, showLanguageBadge = false, variant = "circle", takeLabel, onAddVoice }: CastGutterVoiceProps) {
+export function CastGutterVoice({ voice, explicit, castName, editable, voices, onPick, onClear, countSpeakerLines, showLanguageBadge = false, onAddVoice, takeLabel }: CastGutterVoiceProps) {
   const t = useT()
   const [open, setOpenState] = useState(false)
   const [speakerLines, setSpeakerLines] = useState<number | null>(null)
@@ -88,14 +82,13 @@ export function CastGutterVoice({ voice, explicit, castName, editable, voices, o
     ? castName && castName !== voice.name
       ? t("audio.castGutter.namedTooltip", { castName, voiceName: voice.name })
       : voice.name
-    : variant === "field" && takeLabel
+    : takeLabel
       ? t("audio.castGutter.recordingTooltip", { label: takeLabel })
       : t("audio.castGutter.defaultTooltip", { voiceName: voice.name })
-  const field = variant === "field"
-  const recording = field && !explicit && Boolean(takeLabel)
-  const avatarPx = field ? 20 : 32
+  const recording = !explicit && Boolean(takeLabel)
+  const avatarPx = 32
   const trigger = (
-    <span className={cn("grid place-items-center rounded-md", field && "shrink-0")}>
+    <span className="grid place-items-center rounded-md">
       {/* Nothing is drawn for a line nobody cast — no face, no colour, no
           initial. The empty dashed ring IS the state; a faded orb read as a
           weak assignment rather than as none. */}
@@ -104,6 +97,7 @@ export function CastGutterVoice({ voice, explicit, castName, editable, voices, o
       ) : recording ? (
         <span
           aria-hidden
+          data-testid="gutter-voice-recording"
           className="grid place-items-center rounded-full bg-muted text-muted-foreground"
           style={{ width: avatarPx, height: avatarPx }}
         >
@@ -114,25 +108,18 @@ export function CastGutterVoice({ voice, explicit, castName, editable, voices, o
       )}
     </span>
   )
-  // The field names the voice beside its mark; nobody cast reads as the
-  // default voice, muted.
-  const fieldLabel = (
-    <span className={cn("min-w-0 truncate", !explicit && "text-muted-foreground")}>
-      {explicit ? voice.name : recording ? takeLabel : t("audio.castGutter.defaultVoiceLabel", { voiceName: voice.name })}
-    </span>
-  )
-  const tooltipSide = field ? "top" : "right"
+  const tooltipSide = "right"
+  // AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button. The
+  // gutter's avatar is wordless, so its hover keeps its name.
   if (!editable) {
     return (
       <AppTooltip content={tooltip} side={tooltipSide}>
         <span
-          data-testid={field ? "voice-field" : "gutter-voice"}
+          data-testid="gutter-voice"
           data-explicit={String(explicit)}
           aria-label={tooltip}
-          className={cn(field && "flex h-7 min-w-0 items-center gap-1.5 px-1 text-xs text-muted-foreground")}
         >
           {trigger}
-          {field && fieldLabel}
         </span>
       </AppTooltip>
     )
@@ -144,27 +131,17 @@ export function CastGutterVoice({ voice, explicit, castName, editable, voices, o
           render={
             <button
               type="button"
-              data-testid={field ? "voice-field" : "gutter-voice"}
+              data-testid="gutter-voice"
               data-explicit={String(explicit)}
               aria-label={t("audio.castGutter.chooseCharacterAriaLabel", { tooltip })}
-              className={
-                field
-                  ? "flex h-7 w-56 min-w-0 max-w-full items-center gap-1.5 rounded-md border border-input bg-background px-2 text-xs transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-popup-open:bg-accent/50"
-                  : "rounded-md opacity-90 transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-1"
-              }
+              className="rounded-md opacity-90 transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-1"
             />
           }
         >
           {trigger}
-          {field && (
-            <>
-              {fieldLabel}
-              <ChevronsUpDown className="ms-auto size-3 shrink-0 text-muted-foreground" />
-            </>
-          )}
         </PopoverTrigger>
       </AppTooltip>
-      <PopoverContent align="start" side={field ? "bottom" : "right"} className="w-60 p-2">
+      <PopoverContent align="start" side="right" className="w-60 p-2">
         <VoicePickerContent
           voices={voices}
           activeId={explicit ? voice.id : undefined}

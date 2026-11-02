@@ -9,11 +9,11 @@ import {
 } from "@/components/ui/input-group"
 import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { InfoNote, NoteOnClick } from "@/components/ui/info-note"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { useUserSearch, type UserSearchResult } from "@/hooks/useUserSearch"
 import { useExactUserLookup } from "@/hooks/useExactUserLookup"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 
 /**
@@ -110,7 +110,7 @@ export function UsernameTypeahead({
   suggestions,
   emptySuggestionsHint,
 }: Props) {
-  const t = useT()
+  const { t, locale } = useI18n()
   const [open, setOpen] = useState(false)
   // Anchored below the input by default (`top`), flipped above (`bottom`)
   // when the viewport can't fit the dropdown underneath — e.g. an add-member
@@ -269,26 +269,47 @@ export function UsernameTypeahead({
         {showModeToggle && (
           // AQU-1153: the mode switch is the app's shared Tabs control, not a
           // hand-rolled pill pair, so it reads identically to every other
-          // two-way switch (cf. the voice-design mode tabs). Tooltips and the
-          // clear-on-switch behaviour are unchanged.
-          <Tabs
-            value={value.mode}
-            onValueChange={(next) => handleSwitchMode(next as RecipientMode)}
-            className="shrink-0 gap-0"
-          >
-            <TabsList>
-              <AppTooltip content={t("workspace.typeahead.usernameModeTooltip")}>
+          // two-way switch (cf. the voice-design mode tabs). AQU-2260 (Sam,
+          // Oct 29): labelled tabs say nothing on hover; what each mode does
+          // is one (i) beside them, opened on click.
+          <>
+            <Tabs
+              value={value.mode}
+              onValueChange={(next) => handleSwitchMode(next as RecipientMode)}
+              className="shrink-0 gap-0"
+            >
+              <TabsList>
                 <TabsTrigger value="username" disabled={disabled}>
                   {t("workspace.typeahead.usernameModeLabel")}
                 </TabsTrigger>
-              </AppTooltip>
-              <AppTooltip content={t("workspace.typeahead.emailModeTooltip")} className="max-w-xs">
                 <TabsTrigger value="email" disabled={disabled}>
                   {t("common.email")}
                 </TabsTrigger>
-              </AppTooltip>
-            </TabsList>
-          </Tabs>
+              </TabsList>
+            </Tabs>
+            <InfoNote
+              label={t("common.aboutAria", {
+                name: new Intl.ListFormat(locale, { style: "long", type: "conjunction" }).format([
+                  t("workspace.typeahead.usernameModeLabel"),
+                  t("common.email"),
+                ]),
+              })}
+              testId="typeahead-mode-info"
+            >
+              <span className="flex flex-col gap-1.5">
+                <span>
+                  <span className="font-medium">{t("workspace.typeahead.usernameModeLabel")}</span>
+                  {" — "}
+                  {t("workspace.typeahead.usernameModeTooltip")}
+                </span>
+                <span>
+                  <span className="font-medium">{t("common.email")}</span>
+                  {" — "}
+                  {t("workspace.typeahead.emailModeTooltip")}
+                </span>
+              </span>
+            </InfoNote>
+          </>
         )}
 
         <InputGroup className="flex-1">
@@ -328,11 +349,12 @@ export function UsernameTypeahead({
           />
           {value.mode === "username" && value.resolved && (
             <InputGroupAddon align="inline-end">
-              <AppTooltip content={t("workspace.typeahead.verifiedTooltip")}>
+              {/* AQU-2260: what the mark means opens on click, not hover. */}
+              <NoteOnClick note={t("workspace.typeahead.verifiedTooltip")} align="end">
                 <InputGroupText className="rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 text-[10px]">
                   <Check /> {t("workspace.typeahead.verifiedBadge")}
                 </InputGroupText>
-              </AppTooltip>
+              </NoteOnClick>
             </InputGroupAddon>
           )}
         </InputGroup>

@@ -1,6 +1,6 @@
 import type { LucideIcon } from "lucide-react"
 import { AppWindow, AudioLines, BookOpen, CheckCheck, Database, Eye, FilePlus, Globe, MessageSquare, PanelRight, PenLine, Rows3, Sparkles, SquarePen, Type } from "lucide-react"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { NoteOnClick } from "@/components/ui/info-note"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { primaryMount } from "@/lib/tools/builder-model"
 import { cn } from "@/lib/utils"
@@ -49,7 +49,8 @@ export function MountIcon({ mounts, className }: { mounts: readonly ToolMount[];
 
 const chip = "inline-flex h-7 items-center gap-1.5 rounded-full border bg-background px-2.5 text-xs text-foreground/80 dark:bg-transparent"
 
-/** Where it appears + what it may do, as icon chips; the rule is in the tooltip. */
+/** Where it appears + what it may do, as icon chips; a chip's rule opens on a
+ *  click of it (AQU-2260: never on hover). */
 export function MetaChips({ mounts, scopes, web }: { mounts: readonly ToolMount[]; scopes: readonly ToolScope[]; web?: readonly string[] }) {
   const t = useT()
   const permLabel = usePermLabel()
@@ -67,12 +68,12 @@ export function MetaChips({ mounts, scopes, web }: { mounts: readonly ToolMount[
       {perms.map((s) => {
         const p = PERM[s]
         return (
-          <AppTooltip key={s} content={t(HINT[p.kind])}>
-            <li className={chip} tabIndex={0} data-scope-kind={p.kind}>
+          <li key={s} className="inline-flex" data-scope-kind={p.kind}>
+            <NoteOnClick note={t(HINT[p.kind])} className={cn(chip, "rounded-full")}>
               <p.icon className={cn("size-3.5", p.kind === "write" ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground")} aria-hidden />
               {permLabel(s, web)}
-            </li>
-          </AppTooltip>
+            </NoteOnClick>
+          </li>
         )
       })}
       {perms.length === 0 && <li className={cn(chip, "text-muted-foreground")}>{t("extensions.perm.none")}</li>}

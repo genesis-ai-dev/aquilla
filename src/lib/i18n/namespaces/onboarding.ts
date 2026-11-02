@@ -128,17 +128,14 @@ export const onboarding = defineNamespace({
     // ═══════════════════════════════════════════════════════════════════════
 
     // — WelcomeStep —
-    "onboarding.step.welcome.getStarted": "Get Started",
+    "onboarding.step.welcome.getStarted": "Get started",
 
     // — PrivacyStep —
     "onboarding.step.privacy.heading": "Help us improve",
     "onboarding.step.privacy.description":
       "We use product analytics to understand which features people use and where things go wrong.",
-    "onboarding.step.privacy.shareDescription":
-      "Helps us provide support and improve Aquilla for everyone. Includes usage events and session recordings for diagnosing issues.",
-    "onboarding.step.privacy.footer":
-      "You can change this anytime in Settings. Read our",
-    "onboarding.step.privacy.policyLink": "Privacy Policy",
+    "onboarding.step.privacy.footer": "You can change this anytime in Preferences. Read our",
+    "onboarding.step.privacy.policyLink": "Privacy policy",
 
     // — SignInStep —
     "onboarding.step.signIn.signedInAs": "Signed in as {username}",
@@ -146,13 +143,13 @@ export const onboarding = defineNamespace({
       "AI translations, sync, and cloud import are available.",
     "onboarding.step.signIn.orgCheckFailed":
       "You're signed in, but we couldn't check whether this account has finished setup. Check your connection and try again.",
-    "onboarding.step.signIn.headingSignup": "Create your Frontier account",
-    "onboarding.step.signIn.headingLogin": "Sign in to Frontier",
+    "onboarding.step.signIn.headingSignup": "Create your Aquilla account",
+    "onboarding.step.signIn.headingLogin": "Sign in to Aquilla",
     // "Reset your password" reuses `auth.resetPassword.title`
     "onboarding.step.signIn.unlockBlurb":
       "Unlock AI-powered translations, sync across devices, and import projects from the cloud.",
     // "Already have an account?" reuses `auth.join.alreadyHaveAccount`
-    // "New to Frontier?" reuses `nav.account.newToFrontier`
+    // "New to Aquilla?" reuses `nav.account.newToFrontier`
     "onboarding.step.signIn.createOne": "Create one",
     "onboarding.step.signIn.devLogin": "Dev login (skip auth)",
 
@@ -206,7 +203,7 @@ export const onboarding = defineNamespace({
     // — ReadyStep —
     "onboarding.step.ready.heading": "You're all set!",
     "onboarding.step.ready.description": "{projectName} is ready. We'll walk you through setting up AI and inviting collaborators next.",
-    "onboarding.step.ready.startTranslating": "Start Translating",
+    "onboarding.step.ready.startTranslating": "Start translating",
 
     // ═══════════════════════════════════════════════════════════════════════
     // Setup checklist drawer + steps (project workspace, post-onboarding)
@@ -255,11 +252,12 @@ export const onboarding = defineNamespace({
 
     // — AiProviderStep —
     "onboarding.checklist.aiProvider.description":
-      "AI fills in suggested translations as you go and keeps style consistent across the project. You can change this later in Project Settings.",
+      "AI fills in suggested translations as you go and keeps style consistent across the project. " +
+      "You can change this later in Project settings.",
     "onboarding.checklist.aiProvider.frontierSignInRequired":
-      "Sign in with a Frontier account to use the managed model.",
+      "Sign in with a Aquilla account to use the managed model.",
     // "Endpoint URL is required" reuses `projectSettings.advancedLlm.endpointRequiredError` (identical text)
-    "onboarding.checklist.aiProvider.frontierLabel": "Frontier AI",
+    "onboarding.checklist.aiProvider.frontierLabel": "Aquilla AI",
     "onboarding.checklist.aiProvider.recommendedBadge": "Recommended",
     "onboarding.checklist.aiProvider.frontierSignedIn":
       "Signed in as {username} — no setup needed.",
@@ -276,7 +274,7 @@ export const onboarding = defineNamespace({
     // Whisper blurb reuses `audio.consent.whisper.short` (identical text — AQU-1211)
     "onboarding.checklist.aiModels.mms.label": "MMS multilingual voices",
     "onboarding.checklist.aiModels.mms.blurb":
-      "Local voices for many languages — one language model per download.",
+      "On-device voices for many languages — one language model per download.",
     "onboarding.checklist.aiModels.title": "Configure voice & transcription",
     "onboarding.checklist.aiModels.stepDescription":
       "Gemini TTS is recommended for voice; Whisper transcription runs locally.",
@@ -330,7 +328,8 @@ export const onboarding = defineNamespace({
     "onboarding.checklist.invite.actionLabel": "Inviting collaborators",
     "onboarding.checklist.invite.descriptionPrefix": "Add teammates as",
     "onboarding.checklist.invite.descriptionSuffix":
-      "— they can read, comment, and edit cells. You can change roles or upgrade them in Project → Share.",
+      "— they can read, comment, and edit cells. You can change roles or upgrade them in Project " +
+      "settings → Members.",
     "onboarding.checklist.invite.usernameLabel": "Invite by Aquilla username",
     "onboarding.checklist.invite.usernamePlaceholder": "e.g. mariad",
     "onboarding.checklist.invite.signInRequired": "Sign in to invite by username.",
@@ -383,7 +382,8 @@ export const onboarding = defineNamespace({
     "onboarding.preferences.group.account": "Account",
 
     // — Translator profile fields (was PROFILE_TEXT_FIELDS) —
-    "onboarding.preferences.profile.responseLanguage.label": "Assistant language",
+    // AQU-2263: says what it does; "Assistant language" stays the project-wide one.
+    "onboarding.preferences.profile.responseLanguage.label": "The assistant answers me in",
     "onboarding.preferences.profile.responseLanguage.placeholder":
       "e.g. Tagalog — the AI replies in this language",
     "onboarding.preferences.profile.age.label": "Age",
@@ -418,11 +418,12 @@ export const onboarding = defineNamespace({
       "Follow your system appearance or choose a theme for this device.",
     "onboarding.preferences.fontSize.groupLabel": "App font size",
     "onboarding.preferences.fontSize.rowDescription":
-      "The overall size of menus, sidebars, settings, and editor cell text. A file's View settings can override the cell size; reset there to follow this size again.",
+      "The overall size of menus, sidebars, settings, and editor cell text. A file's Editor settings " +
+      "can override the cell size; reset there to follow this size again.",
     "onboarding.preferences.fontSize.small": "Small",
     "onboarding.preferences.fontSize.default": "Default",
     "onboarding.preferences.fontSize.large": "Large",
-    "onboarding.preferences.fontSize.extraLarge": "Extra Large",
+    "onboarding.preferences.fontSize.extraLarge": "Extra large",
 
     // — LanguageSection — group label reuses `language.label` (identical text)
     "onboarding.preferences.language.rowDescription":
@@ -430,8 +431,6 @@ export const onboarding = defineNamespace({
 
     // — PrivacySection —
     "onboarding.preferences.privacy.groupLabel": "Analytics",
-    "onboarding.preferences.privacy.rowDescription":
-      "Events like project creation, exports, and AI translations. Never the contents of your translations or files.",
 
     // — TranslatorProfileSection —
     "onboarding.preferences.profileSection.groupLabel": "About you",
@@ -457,7 +456,7 @@ export const onboarding = defineNamespace({
     "onboarding.preferences.section.providerKeys.title": "AI provider keys",
     "onboarding.preferences.section.providerKeys.description":
       "Optional personal AI provider override for this device only.",
-    "onboarding.preferences.section.localModels.title": "Local models",
+    "onboarding.preferences.section.localModels.title": "On-device AI models",
     "onboarding.preferences.section.localModels.description":
       "Whisper transcription and MMS voices run in your browser — stored once and shared across all projects on this device.",
     // Tauri desktop app only — not shown in the browser SPA (no local proxy to configure
@@ -486,7 +485,7 @@ export const onboarding = defineNamespace({
 
     // — Page chrome — title reuses `nav.account.preferences` (identical text)
     "onboarding.preferences.pageDescription":
-      "Personal preferences that apply to you across all projects on this device.",
+      "Personal preferences that apply to you across all projects.",
     "onboarding.preferences.dialogDescription": "Personal preferences that apply across projects.",
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -665,7 +664,7 @@ export const onboarding = defineNamespace({
       },
       "onboarding.checklist.aiProvider.frontierSignedIn": {
         description:
-          "Description under the 'Frontier AI' provider option once the viewer is signed in, naming their account.",
+          "Description under the 'Aquilla AI' provider option once the viewer is signed in, naming their account.",
         placeholders: { username: "The signed-in user's handle. Not translated." },
       },
       "onboarding.checklist.aiModels.downloadNotice": {

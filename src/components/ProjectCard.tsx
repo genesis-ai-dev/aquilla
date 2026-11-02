@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge"
 import { Spinner } from "@/components/ui/spinner"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { NoteOnClick } from "@/components/ui/info-note"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { MembershipAvatars } from "./MembershipAvatars"
 import { HealthRing } from "./HealthRing"
@@ -148,18 +148,25 @@ export function ProjectCard({
                 </span>
               </HealthRing>
             )}
+            {/* AQU-2260 (Sam, Oct 29): these explain themselves on click, not
+                hover, and the click stays on the badge: the card itself opens
+                the project. */}
             {!isTrashed && isInactive && (
-              <AppTooltip content={t("workspace.projectCard.inactiveTooltip")}>
-                <Badge variant="secondary" data-testid="inactive-badge">
-                  <PauseCircle data-icon="inline-start" />
-                  {t("org.projectOverview.inactiveBadge")}
-                </Badge>
-              </AppTooltip>
+              <span className="inline-flex" onClick={(e) => e.stopPropagation()}>
+                <NoteOnClick note={t("workspace.projectCard.inactiveTooltip")}>
+                  <Badge variant="secondary" data-testid="inactive-badge">
+                    <PauseCircle data-icon="inline-start" />
+                    {t("org.projectOverview.inactiveBadge")}
+                  </Badge>
+                </NoteOnClick>
+              </span>
             )}
             {!isTrashed && myRoleLabel && (
-              <AppTooltip content={t("workspace.projectCard.yourRoleTooltip")}>
-                <RoleLabel name={myRoleLabel} />
-              </AppTooltip>
+              <span className="inline-flex" onClick={(e) => e.stopPropagation()}>
+                <NoteOnClick note={t("workspace.projectCard.yourRoleTooltip")}>
+                  <RoleLabel name={myRoleLabel} />
+                </NoteOnClick>
+              </span>
             )}
             {isGit && (
               <Badge variant="secondary">

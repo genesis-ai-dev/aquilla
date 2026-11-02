@@ -19,6 +19,7 @@ import type { DraftContextSettings } from "@/lib/completion/draft-context"
 import type { DirectionMode } from "@/lib/text-direction"
 import type { MediaDefaults } from "../../../db/shared/media-setting-defaults"
 import type { LaneDelivers } from "@/lib/lanes/lane-delivers"
+import type { DraftingSettings } from "../../../db/shared/drafting-settings"
 
 /** Initial server version for projects with no settings row. */
 export const PROJECT_SETTINGS_VERSION_INITIAL = 0
@@ -49,8 +50,8 @@ export type CellEditingTier =
  * The synced subset of project-wide fields. Mirrors the server's settings
  * JSON. Top-level keys only — replacing `rules` replaces the whole array.
  *
- * Device-local fields (apiKey, endpoint, audio strategy, experimental flags,
- * TTS, dismissed-banner state) are deliberately absent.
+ * Device-local fields (every AI key, audio loading, Git auto-sync,
+ * experimental flags, dismissed-banner state) are deliberately absent.
  */
 export interface ProjectWideSettings {
   sourceLanguage?: string
@@ -70,6 +71,20 @@ export interface ProjectWideSettings {
   sourceTextDirection?: DirectionMode
   targetTextDirection?: DirectionMode
   systemPrompt?: string
+  /**
+   * AQU-2259: the team's AI drafting settings — the "AI Instructions" card
+   * (examples retrieved, context window, batch sizes, example format,
+   * assistant language), the model choice (provider, endpoint, model, max
+   * tokens, temperature) and the Health penalty. Every reader takes them from
+   * here through the overlay (src/hooks/project-settings-overlay.ts), which
+   * lays them over the record's `completionSettings`. NEVER an AI key: those
+   * stay on the device, in Preferences or with the organization, and the
+   * server refuses one here (db/shared/drafting-settings.ts). Absent until a
+   * maintainer saves one or this browser's old values are uploaded once
+   * (src/lib/completion/drafting-settings.ts); until then each browser keeps
+   * reading its own copy, as before.
+   */
+  draftingSettings?: DraftingSettings
   rules?: TranslationRule[]
   rulePenalties?: RulePenalties
   /** Built-in check overrides (enable/severity). Synced like `rules` —
@@ -196,6 +211,14 @@ export interface ProjectWideSettings {
    * track editing off" should mean.
    */
   allowTrackEditing?: boolean
+  /**
+   * AQU-1758 (Sam's decision 7): does the media view show its dubbing tools —
+   * the top bar's Film button and the timeline's Sources menu? Unset, a
+   * project of books and documents hides them and any other shows them
+   * (lib/media/film-and-sources.ts). Only shows or hides controls; it is not
+   * a permission, and nothing on the server reads it.
+   */
+  filmAndSources?: boolean
   /**
    * AQU-1246: does this project get the experimental Autopilot surface at all?
    *

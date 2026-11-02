@@ -154,12 +154,13 @@ export const audio = defineNamespace({
     "audio.newVoice.steeringBestPractices": "Best practices",
     "audio.newVoice.deliveryLabel": "Delivery",
     "audio.newVoice.deliveryHint":
-      "How varied the reading is. More Stable stays consistent; More Creative has a wider emotional range.",
+      "How varied the reading is. More stable stays consistent; more creative has a wider emotional " +
+      "range.",
     "audio.newVoice.deliveryNeedsHighest":
       "Delivery is available with Highest audio quality (Inworld TTS 2). Flash ignores this control.",
-    "audio.newVoice.deliveryStable": "More Stable",
+    "audio.newVoice.deliveryStable": "More stable",
     "audio.newVoice.deliveryBalanced": "Balanced",
-    "audio.newVoice.deliveryCreative": "More Creative",
+    "audio.newVoice.deliveryCreative": "More creative",
     "audio.newVoice.talkingSpeedLabel": "Talking speed",
     "audio.newVoice.talkingSpeedHint":
       "How fast the voice speaks. 1.0 is the voice's native speed. Values below 0.8 can sound less natural.",
@@ -188,7 +189,7 @@ export const audio = defineNamespace({
     "audio.newVoice.mmsOtherCode": "Other MMS code",
     "audio.newVoice.mmsCodeLabel": "MMS code",
 
-    // VoicePlaybackBar — the Audio lens' bottom transport bar.
+    // VoicePlaybackBar — the Media view's bottom playback strip.
     "audio.playbackBar.lineFallback": "Line",
     "audio.playbackBar.nothingPlaying": "Nothing playing",
     "audio.playbackBar.pressPlayToListen": "Press play to listen",
@@ -196,6 +197,9 @@ export const audio = defineNamespace({
     "audio.playbackBar.previousLine": "Previous line",
     "audio.playbackBar.nextLine": "Next line",
     "audio.playbackBar.playAll": "Play all",
+    // Media redesign, layout: the same button in the media view's top bar,
+    // whose tooltip names its key.
+    "audio.playbackBar.playAllSpace": "Play all (Space)",
     "audio.playbackBar.playbackSpeed": "Playback speed",
     "audio.playbackBar.unmute": "Unmute",
     "audio.playbackBar.mute": "Mute",
@@ -226,8 +230,8 @@ export const audio = defineNamespace({
     "audio.recordingModal.autoAdvanceEnableLabel": "Move to the next line after saving",
     "audio.recordingModal.muteBeepTooltip": "Mute countdown beep",
     "audio.recordingModal.unmuteBeepTooltip": "Enable countdown beep",
-    "audio.recordingModal.muteVideoTooltip": "Mute the scene video",
-    "audio.recordingModal.unmuteVideoTooltip": "Unmute the scene video",
+    "audio.recordingModal.muteVideoTooltip": "Mute the film",
+    "audio.recordingModal.unmuteVideoTooltip": "Unmute the film",
     "audio.recordingModal.videoMutedBadge": "Muted",
     "audio.recordingModal.videoMutedWhileRecording":
       "The scene plays muted while recording so it can't bleed into your take.",
@@ -235,6 +239,7 @@ export const audio = defineNamespace({
     "audio.recordingModal.closeTooltip": "Close (Esc)",
     "audio.recordingModal.emptySource": "empty",
     "audio.recordingModal.readAloudLabel": "Read aloud",
+    "audio.recordingModal.editTextTooltip": "Edit this text",
     "audio.recordingModal.notTranslated": "not translated",
     "audio.recordingModal.countingHint": "Recording starts in…",
     "audio.recordingModal.countingGo": "GO",
@@ -256,15 +261,11 @@ export const audio = defineNamespace({
     "audio.recordingModal.nextCellTooltip": "Next cell (→)",
     "audio.recordingModal.retakeTooltip": "Retake (Esc)",
     "audio.recordingModal.retakeButton": "Retake",
-    "audio.recordingModal.saveTooltip": "Save (Enter)",
     "audio.recordingModal.stopTooltip": "Stop (Space or Esc)",
     "audio.recordingModal.startButton": "Start",
-    "audio.recordingModal.startTooltip": "Start recording (Space)",
     "audio.recordingModal.generateTtsButton": "Generate TTS",
-    "audio.recordingModal.ttsTooltip": "Generate this line's voice with the project's engine",
     "audio.recordingModal.ttsNeedsTranslation": "Translate this line first to generate voice",
     "audio.recordingModal.ttsNoLinkedLine": "No subtitle is linked to this heard line, so there are no words to speak. Pair it with a subtitle first.",
-    "audio.recordingModal.ttsDoneTooltip": "Voice generated — it plays on the Target track",
     // AQU-646: leaving the recorder with a take that was never attached.
     "audio.recordingModal.unsavedTakeTitle": "Keep this take?",
     "audio.recordingModal.unsavedTakeBody":
@@ -283,10 +284,8 @@ export const audio = defineNamespace({
     // strip along the bottom (takes / recording format / recorder settings).
     // Keys above with near-identical wording belong to the pre-rebuild layout
     // and are still translated; these are the strings the dialog renders now.
-    "audio.recordingModal.collapseFilmTooltip": "Hide the film and use the narrow recorder",
     "audio.recordingModal.collapseFilmAriaLabel": "Hide the film",
-    "audio.recordingModal.collapseFilmButton": "Collapse video",
-    "audio.recordingModal.expandFilmTooltip": "Show the film for this line beside the recorder",
+    "audio.recordingModal.collapseFilmButton": "Collapse film",
     "audio.recordingModal.expandFilmAriaLabel": "Show the film",
     "audio.recordingModal.prevLineTooltip": "Previous line (⌥←)",
     "audio.recordingModal.nextLineTooltip": "Next line (⌥→)",
@@ -337,12 +336,9 @@ export const audio = defineNamespace({
     "audio.recordingModal.trimReset": "Reset trim",
     "audio.recordingModal.trimHint": "Space plays · drag a line to trim",
     "audio.recordingModal.takesDrawerTitle": "Keep the takes drawer open",
-    "audio.recordingModal.takesDrawerOnDescription": "The takes that fit show under the recorder; the arrow beside Takes brings up the rest.",
-    "audio.recordingModal.takesDrawerOffDescription": "Only the Takes bar shows; the arrow beside it brings up the list.",
     "audio.recordingModal.takesExpand": "Show all takes",
     "audio.recordingModal.takesCollapse": "Put the takes back",
     "audio.recordingModal.generateButton": "Generate",
-    "audio.recordingModal.uploadTooltip": "Attach an audio file as a take",
     "audio.recordingModal.uploadButton": "Upload",
     "audio.recordingModal.takesLabel": "Takes",
     "audio.recordingModal.formatLockedTooltip":
@@ -356,36 +352,35 @@ export const audio = defineNamespace({
     "audio.recordingModal.formatWavAriaLabel": "Recording format: WAV — click to record compressed",
     "audio.recordingModal.formatCompressedAriaLabel":
       "Recording format: compressed — click to record in WAV",
+    // AQU-2261: the format (i)'s own name, not the export dialog's "Format".
+    "audio.recordingModal.formatInfoAria": "About the recording format",
     "audio.recordingModal.settingsAriaLabel": "Recorder settings",
     "audio.recordingModal.autoAdvanceTitle": "Move on after saving a recording",
-    "audio.recordingModal.autoAdvanceOnDescription":
-      "Saved recordings jump to the next line. Uploaded files stay here.",
-    "audio.recordingModal.autoAdvanceOffDescription":
-      "Saved recordings stay on this line, and so do uploaded files.",
     "audio.recordingModal.countdownTitle": "Countdown",
-    "audio.recordingModal.countdownFastDescription": "3-2-1, half a second each",
-    "audio.recordingModal.countdownNormalDescription": "3-2-1, one second each",
-    "audio.recordingModal.countdownSlowDescription": "3-2-1, a second and a half each",
+    "audio.recordingModal.countdownInfo":
+      "Counts down 3, 2, 1 before recording starts, so you can get ready. Fast, Normal and " +
+      "Slow give each number half a second, a second, or a second and a half. Off starts " +
+      "recording the moment you press Record.",
+    "audio.recordingModal.beepInfo":
+      "Plays a short beep on each number of the countdown, so you can keep your eyes on the " +
+      "text. It does nothing while the countdown is off.",
+    "audio.recordingModal.autoAdvanceInfo":
+      "When on, saving a recording takes you to the next line, and on the last line closes " +
+      "the recorder. A file you upload always stays on its line.",
+    "audio.recordingModal.takesDrawerInfo":
+      "When on, this line's takes are listed under the recorder, as many as fit, and the " +
+      "arrow beside Takes brings up the rest. When off, only the Takes bar shows, and its " +
+      "arrow brings up the list.",
     "audio.recordingModal.countdownSpeedOff": "Off",
     "audio.recordingModal.countdownSpeedFast": "Fast",
     "audio.recordingModal.countdownSpeedNormal": "Normal",
     "audio.recordingModal.countdownSpeedSlow": "Slow",
-    "audio.recordingModal.countdownOffDescription": "Starts recording straight away",
     "audio.recordingModal.beepTitle": "Countdown beep",
-    "audio.recordingModal.beepOnDescription": "3-2-1 tones before recording",
-    "audio.recordingModal.beepOffDescription": "Silent countdown",
-    "audio.recordingModal.beepNotApplicableDescription": "No countdown to beep",
     "audio.recordingModal.noTakesYet": "No takes yet — record one and it lands here.",
 
     // RecordingVideoSurface — the film panel inside that dialog, and the
     // headphones-only control that lets its sound out.
     "audio.recordingModal.filmAriaLabel": "Film for the line being recorded",
-    "audio.recordingModal.filmAudibleTooltip":
-      "The film is playing out loud. Unless you are on headphones it is going into your take " +
-      "— click to mute it.",
-    "audio.recordingModal.filmMutedTooltip":
-      "The film is muted. Unmuting is for headphones only — the mic records with echo " +
-      "cancellation off, so on speakers the film goes into your take.",
     "audio.recordingModal.filmMuteAriaLabel": "Mute the film",
     "audio.recordingModal.filmUnmuteAriaLabel": "Unmute the film (headphones only)",
     "audio.recordingModal.filmAudibleWarning":
@@ -674,7 +669,6 @@ export const audio = defineNamespace({
     "audio.castGutter.noCharacter": "No character",
     "audio.castGutter.addVoice": "Add a voice…",
     "audio.castGutter.recordingTooltip": "{label} · pick a voice to re-voice it",
-    "audio.castGutter.defaultVoiceLabel": "{voiceName} (default)",
 
     // useCellAudio — errors surfaced while loading/streaming a cell's audio.
     "audio.error.noAttachment": "No audio attachment on this cell",
@@ -704,11 +698,16 @@ export const audio = defineNamespace({
     "audio.consent.whisper.short":
       "After you save a recording, this device transcribes it automatically. The spoken words then light up in the cell as the recording plays. Recordings never leave this device.",
     "audio.consent.whisper.learnMore":
-      "A transcript preview under the cell shows whether the recording matches your text, sounds a little different (you can adopt what was heard), or that you edited after recording.\n\n{modifier}+click a word in the cell itself — not the transcript preview — to jump playback there. A plain click in the cell still places the cursor.\n\nManage or remove this model later in Preferences → Local models.",
+      "A transcript preview under the cell shows whether the recording matches your text, sounds a " +
+      "little different (you can adopt what was heard), or that you edited after " +
+      "recording.\n\n{modifier}+click a word in the cell itself — not the transcript preview — to " +
+      "jump playback there. A plain click in the cell still places the cursor.\n\nManage or remove " +
+      "this model later in Preferences → On-device AI models.",
     "audio.consent.mms.short":
       "Reads the cell's text aloud on this device in many languages. Your text isn't sent to any server.",
     "audio.consent.mms.learnMore":
-      "Each language is downloaded the first time you use it. Manage or remove this model later in Preferences → Local models.",
+      "Each language is downloaded the first time you use it. Manage or remove this model later in " +
+      "Preferences → On-device AI models.",
 
     // ai-error.ts categorizeAiError() — plain-language heading for each
     // failure category, shown as the popover title (InlineAiError et al.).
@@ -771,7 +770,8 @@ export const audio = defineNamespace({
       "The AI provider is rate-limiting requests. Wait a moment and try again.",
     "audio.aiError.transcriptionModelUnavailableTitle": "The transcription model isn't responding",
     "audio.aiError.transcriptionModelUnavailableBody":
-      "Try again in a moment. If it keeps failing, choose a different model in Preferences → Local models → Transcription, or transcribe on this device instead.",
+      "Try again in a moment. If it keeps failing, choose a different model in Preferences → " +
+      "On-device AI models → Transcription, or transcribe on this device instead.",
     "audio.aiError.providerUnavailableBody":
       "The AI provider returned a server error. This is usually temporary — try again in a moment.",
     "audio.aiError.providerRejectedBody":
@@ -782,7 +782,7 @@ export const audio = defineNamespace({
   context: {
     _context: {
       description:
-        "The Audio Studio (\"Audio lens\") — recording, TTS generation, voice " +
+        "Audio in the Media view — recording, TTS generation, voice " +
         "management, and playback for turning a translated project into narrated " +
         "audio. Domain terms translators will not know from the English alone: a " +
         "'take' is one recorded or generated audio attempt for a line (there can be " +
@@ -870,8 +870,8 @@ export const audio = defineNamespace({
       },
       "audio.castGutter.addVoice": { description: "Last row of a line's voice dropdown: opens the New voice dialog to add a voice to the cast." },
       "audio.castGutter.recordingTooltip": {
-        description: "Tooltip of a line's voice field when its audio is a person's recording and no voice is assigned.",
-        placeholders: { label: "What the field shows, e.g. 'Your recording' or 'Recorded by Ana'." },
+        description: "Tooltip of a line's voice circle in the Media table when its audio is a person's recording and no voice is assigned.",
+        placeholders: { label: "What the circle names the take, e.g. 'Your recording' or 'Recorded by Ana'." },
       },
       "audio.characters.filterGroupAriaLabel": {
         description:
@@ -1553,6 +1553,12 @@ export const audio = defineNamespace({
           "while audio is stopped or paused (pressing it plays every line in " +
           "sequence, not just one).",
       },
+      "audio.playbackBar.playAllSpace": {
+        description:
+          "Tooltip of the same play button in the media view's top bar, naming " +
+          "the key that does the same (the space bar). Keep the key's name as " +
+          "the keyboard labels it.",
+      },
       "audio.playbackBar.playbackSpeed": {
         description:
           "Tooltip for the speed control button (labelled e.g. '1x', '1.5x') that " +
@@ -1614,16 +1620,6 @@ export const audio = defineNamespace({
           "the list of recorded takes rests open under the recorder, or closed to " +
           "just its header bar.",
         maxLength: 40,
-      },
-      "audio.recordingModal.takesDrawerOnDescription": {
-        description:
-          "Hover text for that setting while it is on: some takes show under the " +
-          "recorder, and the small arrow beside 'Takes' shows the rest.",
-      },
-      "audio.recordingModal.takesDrawerOffDescription": {
-        description:
-          "Hover text for that setting while it is off: only the 'Takes' bar shows, " +
-          "and the small arrow beside it shows the list.",
       },
       "audio.recordingModal.takesExpand": {
         description:
@@ -1802,6 +1798,12 @@ export const audio = defineNamespace({
           "Small caption above the translated text the user should read aloud into " +
           "the microphone — this is the actual script for the recording.",
       },
+      "audio.recordingModal.editTextTooltip": {
+        description:
+          "Tooltip and screen-reader label on the small pencil beside the 'Read aloud' " +
+          "caption. Clicking it closes the recorder and puts the cursor in this line's " +
+          "translation in the editor, so a mistake in the script can be fixed right away.",
+      },
       "audio.recordingModal.notTranslated": {
         description:
           "Italic placeholder shown instead of the read-aloud script when the line " +
@@ -1912,12 +1914,6 @@ export const audio = defineNamespace({
           "preview and starting a fresh recording.",
         maxLength: 14,
       },
-      "audio.recordingModal.saveTooltip": {
-        description:
-          "Tooltip for the button that saves the previewed recording as the line's " +
-          "take, including its keyboard shortcut hint. The button's own visible " +
-          "label reuses common.save.",
-      },
       "audio.recordingModal.stopTooltip": {
         description:
           "Tooltip for the button that stops an in-progress recording, including " +
@@ -1929,12 +1925,6 @@ export const audio = defineNamespace({
           "from the idle or error state.",
         maxLength: 14,
       },
-      "audio.recordingModal.startTooltip": {
-        description:
-          "Tooltip for the Start button, naming its keyboard shortcut. 'Space' is " +
-          "the space bar and is kept as printed on the key, like the other key " +
-          "hints in this dialog.",
-      },
       "audio.recordingModal.generateTtsButton": {
         description:
           "Visible label of the button beside Start that synthesizes this line's " +
@@ -1942,12 +1932,6 @@ export const audio = defineNamespace({
           "'TTS' is the industry abbreviation for text-to-speech; keep it if it is " +
           "recognised in the target language, otherwise use the local short form.",
         maxLength: 18,
-      },
-      "audio.recordingModal.ttsTooltip": {
-        description:
-          "Tooltip for that synthesize button in its ready state. 'The project's " +
-          "engine' means the text-to-speech service configured for this project, so " +
-          "the user knows no choice is being asked of them here.",
       },
       "audio.tts.voicedSeveral": {
         description:
@@ -2121,13 +2105,6 @@ export const audio = defineNamespace({
         placeholders: { percent: "Whole-number download progress, 0 to 100, without the % sign." },
         maxLength: 18,
       },
-      "audio.recordingModal.ttsDoneTooltip": {
-        description:
-          "Tooltip for the synthesize button right after it succeeded, saying where " +
-          "the result can be heard. 'Target track' is the name of the timeline lane " +
-          "holding the translated audio — translate it the same way as the lane's " +
-          "own label.",
-      },
       "audio.recordingModal.cancelCountdown": {
         description:
           "Button shown only during the 3-2-1 countdown that aborts it before " +
@@ -2209,6 +2186,11 @@ export const audio = defineNamespace({
             "How many minutes in total the recorder allows before stopping by itself.",
         },
       },
+      "audio.recordingModal.formatInfoAria": {
+        description:
+          "Screen-reader name of the small (i) beside the recorder's WAV / compressed " +
+          "toggle. A click opens a note on what each format costs in file size and detail.",
+      },
       "audio.recordingModal.formatWavAriaLabel": {
         description:
           "Screen-reader name of the recording-format toggle while it is set to " +
@@ -2221,6 +2203,29 @@ export const audio = defineNamespace({
           "Screen-reader name of the same toggle while it is set to the " +
           "compressed format, stating the current setting and what pressing it " +
           "would do. The visible caption is the single word 'COMPRESSED'.",
+      },
+      "audio.recordingModal.countdownInfo": {
+        description:
+          "Opens under the recorder settings' Countdown row when its (i) is clicked. Says what " +
+          "the count before recording is for and what its four speeds (Off, Fast, Normal, Slow) " +
+          "do. Plain, short sentences.",
+      },
+      "audio.recordingModal.beepInfo": {
+        description:
+          "Opens under the recorder settings' Countdown beep switch when its (i) is clicked: " +
+          "what the beep is, and that it needs the countdown on.",
+      },
+      "audio.recordingModal.autoAdvanceInfo": {
+        description:
+          "Opens under the recorder settings' 'Move on after saving a recording' switch when its " +
+          "(i) is clicked: what happens after a recording is saved with it on, and that an " +
+          "uploaded file never moves you on.",
+      },
+      "audio.recordingModal.takesDrawerInfo": {
+        description:
+          "Opens under the recorder settings' 'Keep the takes drawer open' switch when its (i) is " +
+          "clicked: where the line's takes are shown with it on, and with it off. 'Takes' is the " +
+          "name of the bar under the recorder; 'the arrow' is the small chevron on that bar.",
       },
       "audio.recordingModal.settingsAriaLabel": {
         description:
@@ -2236,27 +2241,6 @@ export const audio = defineNamespace({
           "whether a 3-2-1 countdown runs before each take. The noun for the " +
           "count-in itself, not an instruction.",
         maxLength: 24,
-      },
-      "audio.recordingModal.countdownFastDescription": {
-        description:
-          "One-line description under that preference while the FAST count is " +
-          "chosen: pressing Record counts three, two, one at half a second per " +
-          "number, then starts capturing.",
-        maxLength: 40,
-      },
-      "audio.recordingModal.countdownNormalDescription": {
-        description:
-          "One-line description under that preference while the NORMAL count is " +
-          "chosen (the default): pressing Record counts three, two, one at one " +
-          "second per number, then starts capturing.",
-        maxLength: 40,
-      },
-      "audio.recordingModal.countdownSlowDescription": {
-        description:
-          "One-line description under that preference while the SLOW count is " +
-          "chosen: pressing Record counts three, two, one at a second and a half " +
-          "per number, then starts capturing.",
-        maxLength: 40,
       },
       "audio.recordingModal.countdownSpeedOff": {
         description:
@@ -2282,20 +2266,6 @@ export const audio = defineNamespace({
           "Fourth of the four countdown choices: count three, two, one at a second " +
           "and a half per number. One short word; the row is narrow.",
         maxLength: 8,
-      },
-      "audio.recordingModal.countdownOffDescription": {
-        description:
-          "One-line description under the same preference while the countdown is " +
-          "OFF: pressing Record begins capturing immediately, with no count-in.",
-        maxLength: 40,
-      },
-      "audio.recordingModal.beepNotApplicableDescription": {
-        description:
-          "One-line description under the 'Countdown beep' preference while the " +
-          "countdown itself has been turned off, which is why the beep control is " +
-          "greyed out and cannot be pressed: there is no countdown left for it to " +
-          "sound during. States the reason, does not instruct.",
-        maxLength: 40,
       },
       "audio.recordingModal.filmAriaLabel": {
         description:
@@ -3057,16 +3027,6 @@ export const audio = defineNamespace({
           voiceName: "The fallback voice's own name (e.g. 'Kore'). Proper name — do not translate.",
         },
       },
-      "audio.castGutter.defaultVoiceLabel": {
-        description:
-          "The voice field under a line's waveform in the Audio view, when nobody " +
-          "chose a character for the line and it falls back to the default voice — " +
-          "e.g. 'Narrator (default)'. Clicking it opens the character picker.",
-        placeholders: {
-          voiceName: "The fallback voice's own name (e.g. 'Narrator'). Proper name — do not translate.",
-        },
-        maxLength: 32,
-      },
       "audio.castGutter.chooseCharacterAriaLabel": {
         description:
           "Accessible name of the cast-gutter avatar's popover-trigger button, which " +
@@ -3473,12 +3433,12 @@ export const audio = defineNamespace({
   surfaces: [
     {
       id: "audio-studio",
-      title: "Audio Studio",
+      title: "Media view",
       route: "/project/:projectId/voice",
       notes:
-        "The Audio lens: left Voices sidebar (select/create/edit/delete voices), " +
-        "center editor rows with per-line record/generate controls, and a bottom " +
-        "transport bar for playback. Take chips, record dialog, and New voice " +
+        "The Media view: left Voices sidebar (select/create/edit/delete voices), " +
+        "the timeline over the editor rows with per-line record/generate controls, " +
+        "and a bottom playback strip. Take chips, record dialog, and New voice " +
         "controls all nest inside this surface's dialogs and panels.",
     },
   ],

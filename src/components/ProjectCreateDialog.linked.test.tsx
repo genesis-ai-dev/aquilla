@@ -173,7 +173,7 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
 
-    fireEvent.change(screen.getByPlaceholderText("My Translation Project"), { target: { value: "French Episode 1" } })
+    fireEvent.change(screen.getByPlaceholderText("My translation project"), { target: { value: "French Episode 1" } })
     fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), { target: { value: "English" } })
     fireEvent.change(screen.getByPlaceholderText(/French, conversational Swahili/i), { target: { value: "French" } })
 
@@ -182,9 +182,9 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
 
     await pickComboboxOption(/Upstream project/i, /English Source/i)
 
-    // Corpus choice is no longer prefilled — pick "Its Source" explicitly.
+    // Corpus choice is no longer prefilled — pick "Its source" explicitly.
     fireEvent.click(screen.getByRole("radio", { name: /^Its Source/i }))
-    fireEvent.click(screen.getByRole("button", { name: /Create & Link/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create & link/i }))
 
     await waitFor(() => {
       expect(mockCreateCloudProject).toHaveBeenCalledTimes(1)
@@ -214,7 +214,7 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
 
-    fireEvent.change(screen.getByPlaceholderText("My Translation Project"), { target: { value: "Multilingual Linked" } })
+    fireEvent.change(screen.getByPlaceholderText("My translation project"), { target: { value: "Multilingual Linked" } })
     fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), { target: { value: "English" } })
     fireEvent.change(screen.getByTestId("create-extra-lang-input"), { target: { value: "French" } })
 
@@ -226,7 +226,7 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
     await pickComboboxOption(/Upstream project/i, /English Source/i)
 
     fireEvent.click(screen.getByRole("radio", { name: /^Its Source/i }))
-    fireEvent.click(screen.getByRole("button", { name: /Create & Link/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create & link/i }))
 
     await waitFor(() => {
       expect(mockLinkProjectSource).toHaveBeenCalledTimes(1)
@@ -252,7 +252,7 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
 
-    fireEvent.change(screen.getByPlaceholderText("My Translation Project"), { target: { value: "French Episode 1" } })
+    fireEvent.change(screen.getByPlaceholderText("My translation project"), { target: { value: "French Episode 1" } })
     fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), { target: { value: "English" } })
     fireEvent.change(screen.getByPlaceholderText(/French, conversational Swahili/i), { target: { value: "French" } })
 
@@ -261,7 +261,7 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
 
     await pickComboboxOption(/Upstream project/i, /English Source/i)
     fireEvent.click(screen.getByRole("radio", { name: /^Its Source/i }))
-    fireEvent.click(screen.getByRole("button", { name: /Create & Link/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create & link/i }))
 
     await waitFor(() => {
       expect(mockLinkProjectSource).toHaveBeenCalledTimes(1)
@@ -301,14 +301,14 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
 
     async function createLinkedTarget() {
       fireEvent.click(screen.getByRole("button", { name: /new project/i }))
-      fireEvent.change(screen.getByPlaceholderText("My Translation Project"), { target: { value: "French Episode 1" } })
+      fireEvent.change(screen.getByPlaceholderText("My translation project"), { target: { value: "French Episode 1" } })
       fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), { target: { value: "English" } })
       fireEvent.change(screen.getByPlaceholderText(/French, conversational Swahili/i), { target: { value: "French" } })
       fireEvent.click(screen.getByText("Advanced: project shape"))
       fireEvent.click(screen.getByText(/Linked target/i))
       await pickComboboxOption(/Upstream project/i, /English Source/i)
       fireEvent.click(screen.getByRole("radio", { name: /^Its Source/i }))
-      fireEvent.click(screen.getByRole("button", { name: /Create & Link/i }))
+      fireEvent.click(screen.getByRole("button", { name: /Create & link/i }))
     }
 
     it("lands on a message with a retry instead of an unexplained empty project", async () => {
@@ -358,7 +358,7 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
 
       await waitFor(() => expect(mockTriggerLinkSync).toHaveBeenCalledTimes(1))
       await waitFor(() =>
-        expect(screen.queryByRole("button", { name: /Create & Link/i })).toBeNull(),
+        expect(screen.queryByRole("button", { name: /Create & link/i })).toBeNull(),
       )
       expect(screen.queryByText(SEED_FAILED)).toBeNull()
       expect(isLinkSeedFailed(mockTriggerLinkSync.mock.calls[0]![1])).toBe(false)
@@ -368,7 +368,7 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
   it("shows validation when upstream project is missing for linked-target", async () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
-    fireEvent.change(screen.getByPlaceholderText("My Translation Project"), { target: { value: "X" } })
+    fireEvent.change(screen.getByPlaceholderText("My translation project"), { target: { value: "X" } })
     fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), { target: { value: "English" } })
     fireEvent.change(screen.getByPlaceholderText(/French, conversational Swahili/i), { target: { value: "French" } })
     fireEvent.click(screen.getByText("Advanced: project shape"))
@@ -383,7 +383,7 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
   it("shows validation when corpus choice is missing for linked-target", async () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
-    fireEvent.change(screen.getByPlaceholderText("My Translation Project"), { target: { value: "X" } })
+    fireEvent.change(screen.getByPlaceholderText("My translation project"), { target: { value: "X" } })
     fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), { target: { value: "English" } })
     fireEvent.change(screen.getByPlaceholderText(/French, conversational Swahili/i), { target: { value: "French" } })
     fireEvent.click(screen.getByText("Advanced: project shape"))

@@ -1,5 +1,8 @@
 import { describe, it, expect, vi } from "vitest"
-import { render, screen, fireEvent, within } from "@testing-library/react"
+import { render, screen, fireEvent, within, act } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { TooltipProvider } from "@/components/ui/tooltip"
+import { expectDisabledNote } from "@/test-utils/tooltip"
 import { BuiltinChecksList } from "./BuiltinChecksList"
 import { resolveBuiltinRules } from "@/lib/lqa/builtin-resolver"
 
@@ -223,5 +226,36 @@ describe("BuiltinChecksList — punctuation conventions and lane scope", () => {
       />,
     )
     expect(screen.getByTestId("builtin-checks-lane-note").textContent).toMatch(/Thai lane only/)
+  })
+})
+
+// AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button. Why a
+// control is greyed out opens on a click; a text button has no hover.
+describe("BuiltinChecksList — no hover explanations", () => {
+  const builtinRules = resolveBuiltinRules(undefined)
+  const infractions = new Map([
+    ["c1", [{ ruleId: "builtin:empty-target", cellId: "c1", fileId: "f1", reason: "builtin:empty-target" as const, spans: [] }]],
+  ])
+
+  it("Harmonize all has no hover when it is open", async () => {
+    render(
+      <TooltipProvider delay={0}>
+        <BuiltinChecksList builtinRules={builtinRules} infractions={infractions} onSetOverride={() => {}} onHarmonize={vi.fn()} canHarmonize />
+      </TooltipProvider>,
+    )
+    await userEvent.setup().hover(screen.getByTestId("harmonize-all-btn"))
+    await act(() => new Promise((r) => setTimeout(r, 30)))
+    expect(screen.queryByRole("tooltip")).toBeNull()
+  })
+
+  it("a locked severity says why on a click", async () => {
+    render(
+      <TooltipProvider delay={0}>
+        <BuiltinChecksList builtinRules={builtinRules} infractions={new Map()} onSetOverride={() => {}} canManage={false} />
+      </TooltipProvider>,
+    )
+    const row = screen.getByText("Empty translation").closest("[data-testid='builtin-row']") as HTMLElement
+    const severity = within(row).getByRole("combobox")
+    await expectDisabledNote(severity, "Only maintainers and owners can change built-in checks")
   })
 })

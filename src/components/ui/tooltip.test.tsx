@@ -122,15 +122,23 @@ describe("AppTooltip", () => {
       )
     })
 
-    it("opens on the stand-in trigger, carrying the reason", async () => {
+    // AQU-2260 (Sam, Oct 29): why a control is greyed out is an explanation,
+    // and hover may only NAME an icon-only button. The reason opens on CLICK,
+    // in a small note anchored to the control.
+    it("opens the reason on a click of the stand-in, never on hover", async () => {
       renderDisabled()
       const standIn = document.querySelector('[data-slot="tooltip-disabled-trigger"]')!
       fireEvent.pointerEnter(standIn, { pointerType: "mouse" })
       fireEvent.mouseEnter(standIn)
-
+      await new Promise((r) => setTimeout(r, 50))
+      expect(screen.queryByRole("tooltip")).toBeNull()
+      fireEvent.click(standIn)
       await waitFor(() => {
-        expect(screen.getByRole("tooltip")).toHaveTextContent(/at least Maintainer access/)
+        expect(document.querySelector('[data-slot="disabled-reason-note"]')).toHaveTextContent(/at least Maintainer access/)
       })
+      // A second click shuts it.
+      fireEvent.click(standIn)
+      await waitFor(() => expect(document.querySelector('[data-slot="disabled-reason-note"]')).toBeNull())
     })
 
     /**
@@ -170,16 +178,15 @@ describe("AppTooltip", () => {
         }, { timeout: 500 })
       })
 
-      it("opens on hover after an enabled control becomes disabled", async () => {
+      it("opens its note on click after an enabled control becomes disabled", async () => {
         const { rerender } = render(<Bar disabled={false} />)
         rerender(<Bar disabled />)
         const standIn = document.querySelector('[data-slot="tooltip-disabled-trigger"]')!
         expect(standIn).not.toBeNull()
-        fireEvent.pointerEnter(standIn, { pointerType: "mouse" })
-        fireEvent.mouseEnter(standIn)
+        fireEvent.click(standIn)
 
         await waitFor(() => {
-          expect(screen.getByRole("tooltip")).toHaveTextContent(tip)
+          expect(document.querySelector('[data-slot="disabled-reason-note"]')).toHaveTextContent(tip)
         }, { timeout: 500 })
       })
     })

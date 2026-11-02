@@ -62,7 +62,7 @@ test("sparkle button fills target cell from mock LLM (config injected via IDB)",
   // projection catches up, then remain pressed after the server round-trip.
   await ws.validateCell(0)
   await expect(
-    ws.cellRow(0).getByRole("button", { name: /Validated/i }).first(),
+    ws.validationToggle(0),
   ).toHaveAttribute("aria-pressed", "true", { timeout: 15_000 })
 })
 

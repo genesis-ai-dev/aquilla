@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest"
 import { screen, fireEvent } from "@testing-library/react"
-import { renderWithTooltips } from "@/test-utils/tooltip"
+import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 import { CastGutterVoice } from "./CastGutterVoice"
 import type { Voice } from "@/lib/parsers/types"
 
@@ -162,63 +162,39 @@ describe("CastGutterVoice", () => {
     })
   })
 
-  // Sam, 2026-09-28: the Audio view opens the same picker from a field under
-  // each line's waveform.
-  describe("the field form, under a waveform", () => {
-    it("names the voice beside its mark and opens the same picker below it", () => {
-      const onPick = vi.fn()
-      ui(
-        <CastGutterVoice variant="field" voice={mary} explicit castName="Mary" editable voices={VOICES} onPick={onPick} countSpeakerLines={() => 3} />,
-      )
-      const field = screen.getByTestId("voice-field")
-      expect(field.tagName).toBe("BUTTON")
-      expect(field).toHaveTextContent("Mary")
-      expect(field).toHaveAttribute("aria-label", "Mary. Choose a character")
-      fireEvent.click(field)
-      expect(screen.getByPlaceholderText("Search voices…")).toBeInTheDocument()
-      expect(screen.getByTestId("gutter-voice-scope-file").closest("label")).toHaveTextContent("Every «Mary» line in this file (3)")
-      fireEvent.click(screen.getByRole("button", { name: /John/ }))
-      expect(onPick).toHaveBeenCalledWith("v-john", { scope: "line" })
-    })
+  // AQU-2212: the picker's list ends with "Add a voice…", which opens New
+  // voice without leaving the line. (The Audio view's field form is gone with
+  // the Audio view, AQU-1758; the circle keeps the footer.)
+  it("ends the list with Add a voice…", () => {
+    const onAddVoice = vi.fn()
+    ui(
+      <CastGutterVoice voice={mary} explicit castName={null} editable voices={VOICES} onPick={() => {}} onAddVoice={onAddVoice} />,
+    )
+    fireEvent.click(screen.getByTestId("gutter-voice"))
+    fireEvent.click(screen.getByTestId("gutter-voice-add"))
+    expect(onAddVoice).toHaveBeenCalledTimes(1)
+    expect(screen.queryByPlaceholderText("Search voices…")).toBeNull()
+  })
 
-    it("reads as the default voice, with the NC mark, when nobody was cast", () => {
-      ui(
-        <CastGutterVoice variant="field" voice={narrator} explicit={false} castName={null} editable voices={VOICES} onPick={() => {}} />,
-      )
-      const field = screen.getByTestId("voice-field")
-      expect(field).toHaveTextContent("NCNarrator (default)")
-    })
+  // AQU-2212: the Audio view's field named a person's recording; the circle
+  // does now (AQU-1758).
+  it("names a person's recording, not the default voice, when nobody was cast", () => {
+    ui(
+      <CastGutterVoice voice={narrator} explicit={false} castName={null} editable voices={VOICES} onPick={() => {}} takeLabel="Your recording" />,
+    )
+    const circle = screen.getByTestId("gutter-voice")
+    expect(circle.getAttribute("aria-label")).toContain("Your recording · pick a voice to re-voice it")
+    expect(circle.getAttribute("aria-label")).not.toContain("Narrator")
+    expect(screen.getByTestId("gutter-voice-recording")).toBeInTheDocument()
+    expect(circle).not.toHaveTextContent("NC")
+  })
 
-    it("names a person's recording, not the default voice, when nobody was cast (AQU-2212)", () => {
-      ui(
-        <CastGutterVoice variant="field" voice={narrator} explicit={false} castName={null} editable voices={VOICES} onPick={() => {}} takeLabel="Your recording" />,
-      )
-      const field = screen.getByTestId("voice-field")
-      expect(field).toHaveTextContent("Your recording")
-      expect(field).not.toHaveTextContent("Narrator")
-    })
-
-    it("ends the list with Add a voice…", () => {
-      const onAddVoice = vi.fn()
-      ui(
-        <CastGutterVoice variant="field" voice={mary} explicit castName={null} editable voices={VOICES} onPick={() => {}} onAddVoice={onAddVoice} />,
-      )
-      fireEvent.click(screen.getByTestId("voice-field"))
-      fireEvent.click(screen.getByTestId("gutter-voice-add"))
-      expect(onAddVoice).toHaveBeenCalledTimes(1)
-      expect(screen.queryByPlaceholderText("Search voices…")).toBeNull()
-    })
-
-    it("read-only, names the voice with no picker", () => {
-      ui(
-        <CastGutterVoice variant="field" voice={mary} explicit castName="Mary" editable={false} voices={VOICES} onPick={() => {}} />,
-      )
-      const field = screen.getByTestId("voice-field")
-      expect(field.tagName).not.toBe("BUTTON")
-      expect(field).toHaveTextContent("Mary")
-      fireEvent.click(field)
-      expect(screen.queryByPlaceholderText("Search voices…")).toBeNull()
-    })
+  it("names the cast voice, not the recording, once someone chose one", () => {
+    ui(
+      <CastGutterVoice voice={mary} explicit castName="Mary" editable voices={VOICES} onPick={() => {}} takeLabel="Your recording" />,
+    )
+    expect(screen.queryByTestId("gutter-voice-recording")).toBeNull()
+    expect(screen.getByTestId("gutter-voice").getAttribute("aria-label")).not.toContain("Your recording")
   })
 
   it("read-only surfaces show the identity but no picker", () => {
@@ -229,5 +205,12 @@ describe("CastGutterVoice", () => {
     expect(el.tagName).not.toBe("BUTTON")
     fireEvent.click(el)
     expect(screen.queryByPlaceholderText("Search voices…")).toBeNull()
+  })
+})
+
+describe("CastGutterVoice — the gutter avatar keeps its name on hover (AQU-2260)", () => {
+  it("names the voice and who it voices", async () => {
+    ui(<CastGutterVoice voice={mary} explicit castName="Mary" editable voices={VOICES} onPick={() => {}} />)
+    await expectTooltip(screen.getByTestId("gutter-voice"), "Mary")
   })
 })

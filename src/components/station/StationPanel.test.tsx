@@ -1,9 +1,9 @@
 // AQU-2327: the Station's heading, its empty state, and its Undo, Save and Approve.
 import { useState } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { __resetStationTargetForTests, openInStation } from "@/lib/station/target"
+import { __resetStationTargetForTests, getStationTarget, openInStation } from "@/lib/station/target"
 import { StationSave } from "./StationEdits"
 import { StationHeader, StationPanel, approvalState, versionKinds, versionOf } from "./StationPanel"
 import type { StationHost, StationTake } from "./station-host"
@@ -157,6 +157,46 @@ describe("the Station", () => {
     } finally {
       window.removeEventListener("keydown", onWindow)
     }
+  })
+
+  // Found in the Nov 2 browser check: Undo of a Save took the saved take away
+  // and brought back the one it was made from, but the Station said "This
+  // recording is no longer here."
+  it("when Undo takes a saved take away, it opens the take it was made from again", () => {
+    const orig = makeTake()
+    const savedAtt = { url: "frontier-audio://v.wav", type: "audio", label: "Take 2", validators: [], validatorCount: 0, referenceAudioId: "t2.webm" }
+    const cell = { id: "c331", castName: "JESUS", attachments: { "t2.webm": orig.att, "v.wav": savedAtt } } as unknown as StationTake["cell"]
+    let savedGone = false
+    let origGone = true
+    const readTake = (_cellId: string, audioId: string): StationTake | null =>
+      audioId === "v.wav" && !savedGone
+        ? { fileId: "f1", cell, att: savedAtt as StationTake["att"] }
+        : audioId === "t2.webm" && !origGone
+          ? { fileId: "f1", cell, att: orig.att }
+          : null
+    openInStation({ fileId: "f1", cellId: "c331", audioId: "v.wav" })
+    const { rerender } = render(<StationPanel host={makeHost(null, { readTake })} visible />)
+    expect(screen.getByText("Take 2 · line 331")).toBeTruthy()
+    // Undo: the saved take goes, and the take it was saved over comes back.
+    savedGone = true
+    origGone = false
+    act(() => rerender(<StationPanel host={makeHost(null, { readTake })} visible />))
+    expect(getStationTarget()?.audioId).toBe("t2.webm")
+    expect(screen.queryByTestId("station-note")).toBeNull()
+    expect(screen.getByText("Take 2 · line 331")).toBeTruthy()
+  })
+
+  it("when a take and the one it was made from are both gone, it says so", () => {
+    const savedAtt = { url: "frontier-audio://v.wav", type: "audio", label: "Take 2", validators: [], validatorCount: 0, referenceAudioId: "t2.webm" }
+    const cell = { id: "c331", attachments: { "v.wav": savedAtt } } as unknown as StationTake["cell"]
+    let gone = false
+    const readTake = (_c: string, audioId: string): StationTake | null => (audioId === "v.wav" && !gone ? { fileId: "f1", cell, att: savedAtt as StationTake["att"] } : null)
+    openInStation({ fileId: "f1", cellId: "c331", audioId: "v.wav" })
+    const { rerender } = render(<StationPanel host={makeHost(null, { readTake })} visible />)
+    gone = true
+    act(() => rerender(<StationPanel host={makeHost(null, { readTake })} visible />))
+    expect(getStationTarget()?.audioId).toBe("v.wav")
+    expect(screen.getByTestId("station-note").textContent).toMatch(/no longer here/)
   })
 
   it("opens on the take the store names, and shows its heading", () => {

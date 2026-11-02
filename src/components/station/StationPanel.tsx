@@ -69,8 +69,20 @@ export function StationPanel({ host, visible }: { host: StationHost | null; visi
     )
   }
   const take = target && host ? host.readTake(target.cellId, target.audioId) : null
+  // Undo of a Save takes the saved take away and brings back the one it was
+  // made from: the Station opens that one again rather than saying the
+  // recording is gone (found in the Nov 2 browser check).
+  const madeFrom = take?.att.referenceAudioId ?? null
+  const [origin, setOrigin] = useState<{ audioId: string; from: string } | null>(null)
+  if (target && madeFrom && (origin?.audioId !== target.audioId || origin.from !== madeFrom)) {
+    setOrigin({ audioId: target.audioId, from: madeFrom })
+  }
+  const backTo = !take && target && host && origin?.audioId === target.audioId && host.readTake(target.cellId, origin.from) ? origin.from : null
+  useEffect(() => {
+    if (backTo && target) openInStation({ ...target, audioId: backTo })
+  }, [backTo, target])
   if (!target || !host) return <StationEmpty />
-  if (!take) return <StationNote>{<GoneText />}</StationNote>
+  if (!take) return backTo ? null : <StationNote>{<GoneText />}</StationNote>
   return (
     <StationOpen
       key={`${target.fileId}|${target.cellId}|${target.audioId}`}

@@ -786,6 +786,53 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "same operation-name-vs-imperative-button split already documented for " +
     "nav.outbox.eventEdit above — a different feature (the outbox diagnostics feed) " +
     "with the identical register distinction.",
+  "editor.station.helpEditTerm":
+    "Term heading (a <dt>) in the Station's (i) explanation, naming the group of " +
+    "cut-and-insert controls (Keep this, Delete this, Insert audio here) beside its " +
+    "sibling headings 'Select', 'Trim', 'Volume', 'Fades', 'Saving' and 'Keys' — a " +
+    "nominalized glossary label, not an action. common.edit is the imperative " +
+    "button that opens editing. The same heading-against-imperative split " +
+    "documented for nav.outbox.eventEdit and agent.proposal.kind.edit above: a " +
+    "language that nominalizes the heading writes it differently from the button.",
+  "editor.station.start":
+    "Noun label in the Station's transport, before the kept part's start time and " +
+    "paired with 'End' — 'the start' of the kept part, clicked to type a time. " +
+    "audio.recordingModal.startButton is the imperative button that begins " +
+    "recording. The same noun-against-verb split documented for " +
+    "editor.milestone.vocab.startLabel above; languages that spell the noun and " +
+    "the imperative differently need the two apart.",
+  "editor.station.approved":
+    "State adjective in the Station's heading after a check mark ('✓ Approved', " +
+    "beside 'Waiting' and 'Waiting · 1 of 2'): the open recording has the approvals " +
+    "the project asks for, a term of the audio-validation vote. " +
+    "autopilot.evidence.status.approved is one member of an AI agent's evidence-" +
+    "review enum — the unrelated review pipeline documented at " +
+    "org.projectOverview.columnApproved above; a recording's validation state and " +
+    "an evidence item's review state are different referents.",
+  "editor.station.hApproved":
+    "History row in the Station naming an EVENT — someone approved the recording — " +
+    "read with who and when ('Approved · Ana · Oct 30'), a past-tense act beside " +
+    "sibling rows 'Recorded', 'Trimmed', 'Deleted'. editor.station.approved " +
+    "is the current STATE in the heading; autopilot.evidence.status.approved is an " +
+    "AI evidence-review status. Languages that inflect an act done by someone " +
+    "differently from a state label (and from a review-pipeline enum) write the " +
+    "three apart, so none can borrow another's translation.",
+  "editor.station.approve":
+    "Imperative button in the Station's heading that casts this person's approval " +
+    "vote on the open recording — the audio-validation act the project counts " +
+    "('Waiting · 1 of 2' → '✓ Approved'), the same act as the take's vote on the " +
+    "timeline. rules.surface.approveButton promotes a project-level translation " +
+    "rule up to org scope and agent.approve accepts an agent's staged proposal: " +
+    "the three independent human-gate actions already split at agent.approve " +
+    "above, sharing only the English verb.",
+  "editor.station.hDeleted":
+    "Title-case History row in the Station naming what happened to the recording " +
+    "— it was deleted — read with who and when beside 'Trimmed'/'Approved' rows. " +
+    "comments.file.deletedBadge is lower-case 'deleted', a small inline status " +
+    "badge on a file reference inside a comment thread. A past-tense event line " +
+    "and a lower-case inline badge take different forms in languages that case- " +
+    "or register-mark that distinction, the split already documented for " +
+    "org.archivedProjects.deletedColumnLabel above.",
   "agent.proposal.kind.validate":
     "Badge naming the KIND of a staged agent-authored proposal row ('cell.validate') " +
     "in ProposalCard, the same noun-phrase operation-name register as its sibling " +

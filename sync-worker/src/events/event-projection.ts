@@ -2302,6 +2302,34 @@ case 'cell.audio.attach': {
       return ['cell_audio']
     }
 
+    case 'cell.audio.gain': {
+      // AQU-2327: the clip's volume and fades, and nothing else — the trim's
+      // sibling and the same discipline: all three always stated, null meaning
+      // none. Like a trim it keeps the take's votes: the same take, the
+      // samples untouched; only how this clip plays changes.
+      const p = event.payload as EventPayloads['cell.audio.gain']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`cell.audio.gain event ${event.id} is missing fileId or cellId`)
+      }
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cell_audio SET gain_db = ?, fade_in_ms = ?, fade_out_ms = ?
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+          )
+          .bind(
+            p.gainDb ?? null,
+            p.fadeInMs ?? null,
+            p.fadeOutMs ?? null,
+            event.projectId,
+            event.fileId,
+            event.cellId,
+            p.audioId,
+          ),
+      )
+      return ['cell_audio']
+    }
+
     case 'cell.audio.place': {
       // WHERE THIS TAKE SITS, and nothing else. (AQU-646 stage 3)
       //

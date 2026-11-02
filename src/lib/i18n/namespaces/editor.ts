@@ -1893,7 +1893,7 @@ export const editor = defineNamespace({
     "editor.voice.originalAudio": "Original audio",
     "editor.voice.changeVoice": "Change voice",
     "editor.voice.changeVoiceNeedsTraining":
-      "{name} has no trained voice model yet — Change voice works with character voices and trained voices.",
+      "{name} has no trained voice model yet — Change voice works with character, trained and ElevenLabs voices.",
     "editor.voice.changeVoiceUpToDate": "This take is already in {name}'s voice",
     "editor.voice.voicing": "Voicing…",
     "editor.voice.choose": "Choose a voice",

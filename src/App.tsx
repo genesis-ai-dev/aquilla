@@ -54,7 +54,7 @@ import { SessionHydrationError } from "@/components/SessionHydrationError"
 import { AccountTransitionError } from "@/components/AccountTransitionError"
 import { isSessionHydrationRequiredPath } from "@/lib/navigation/session-routes"
 import { VersionBadge } from "@/components/VersionBadge"
-import { UpdateBanner } from "@/components/UpdateBanner"
+import { UpdateOnNavigate } from "@/components/UpdateIndicator"
 import { hydratePrefetchStatus } from "@/lib/audio/prefetch"
 import { probeOpfsAvailability } from "@/lib/storage/opfs-availability"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -418,7 +418,7 @@ export default function App() {
           <AudioBulkProgressBanner />
           <GlobalAudioShortcuts />
           <VersionBadge />
-          <UpdateBanner />
+          <UpdateOnNavigate />
           <Toaster />
         </SyncingProvider>
       </TooltipProvider>

@@ -635,7 +635,7 @@ describe("lane select (AQU-538)", () => {
     const emphasised = screen.getByText("can", { selector: "em" })
     expect(emphasised.tagName).toBe("EM")
     expect(screen.getByText(/Restricting who/)).toBeInTheDocument()
-    expect(screen.getByText(/edit a lane is separate/)).toBeInTheDocument()
+    expect(screen.getByText(/edit a language lane is separate/)).toBeInTheDocument()
   })
 
   it("threads the pre-filled lane into createAssignment as targetLang", async () => {
@@ -655,7 +655,7 @@ describe("lane select (AQU-538)", () => {
   })
 
   // ── AQU-1977: a project made since AQU-1594 has no '' lane ────────────────
-  // Offering "Default language" there, and submitting it, saved an assignment
+  // Offering "Default language lane" there, and submitting it, saved an assignment
   // that belongs to no lane, whose progress reads 0% for ever.
   it("offers only the project's own lanes, and opens a '' default on the first", async () => {
     render(
@@ -686,9 +686,9 @@ describe("lane select (AQU-538)", () => {
   // ── AQU-728: the default ('') lane must be labeled by its real language ──────
   // The default lane IS a real language lane (the project's own default target
   // language). Launched from a Portuguese-default project it previously showed
-  // "Default language" and preselected "default", so Portuguese was neither
+  // "Default language lane" and preselected "default", so Portuguese was neither
   // listed nor preselected while extra lanes (Swahili) were.
-  it("labels the default ('') lane with defaultLaneLabel instead of the generic 'Default language'", () => {
+  it("labels the default ('') lane with defaultLaneLabel instead of the generic 'Default language lane'", () => {
     render(
       <AssignModal
         {...BASE_PROPS}
@@ -779,7 +779,7 @@ describe("lane select (AQU-538)", () => {
     expect(mockCreate.mock.calls[0][0].targetLang).toBe("Swahili")
   })
 
-  it("falls back to 'Default language' when defaultLaneLabel is unknown/empty", () => {
+  it("falls back to 'Default language lane' when defaultLaneLabel is unknown/empty", () => {
     render(
       <AssignModal
         {...BASE_PROPS}
@@ -965,7 +965,7 @@ describe("only the lanes the project's people are on (AQU-1994)", () => {
     render(<AssignModal {...BASE_PROPS} lanes={LANES} staffedLaneIds={new Set<string>()} />)
 
     expect(screen.getByTestId("assign-modal-no-staffed-lanes")).toHaveTextContent(
-      /no one on this project is on any of its languages/i,
+      /no one on this project is on any of its language lanes/i,
     )
     const submit = screen.getByRole("button", { name: "Assign" })
     expect(submit).toBeDisabled()

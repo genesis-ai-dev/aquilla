@@ -272,12 +272,12 @@ export function roleDescription(level: number): string {
   return key ? tStandalone(key) : ""
 }
 
-/** Full "Viewer (100) — …" string for tooltips and help affordances. */
+/** Full "Viewer — …" string for tooltips and help affordances (no level number, AQU-2261). */
 export function roleHelpText(level: number): string {
   const description = roleDescription(level)
   if (!description) return ""
   const blurb = description.charAt(0).toLowerCase() + description.slice(1)
-  return `${roleDisplayLabel(level)} (${level}) — ${blurb}`
+  return `${roleDisplayLabel(level)} — ${blurb}`
 }
 
 /**

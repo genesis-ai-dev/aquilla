@@ -396,7 +396,7 @@ describe("AQU-1365: Is this a translation?", () => {
     await upload([new File(["WEBVTT\nLanguage: ru\n\n00:00.000 --> 00:01.000\nПривет\n"], "episode-ru.vtt")])
     const check = await screen.findByTestId("translation-check")
     expect(check).toHaveTextContent(
-      "episode-ru.vtt says it's in Russian, which this project translates into in another language lane. To import it as that translation, switch to that lane in the editor, then start again from Import.",
+      "episode-ru.vtt says it's in Russian, which this project translates into in another language lane. To import it as that translation, switch to that language lane in the editor, then start again from Import.",
     )
     expect(within(check).queryByTestId("translation-check-choose-file")).not.toBeInTheDocument()
     expect(within(check).getByRole("button", { name: /^New source text/ })).toBeInTheDocument()

@@ -298,7 +298,7 @@ describe("SelectionBar — bulk Validate eligibility messaging", () => {
     )
     const btn = validateButton()
     expect(btn).toBeDisabled()
-    await expectDisabledNote(btn, "Some selected cells are outside your assigned files or lanes")
+    await expectDisabledNote(btn, "Some selected cells are outside your assigned files or language lanes")
     vi.restoreAllMocks()
   })
 

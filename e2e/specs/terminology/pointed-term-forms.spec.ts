@@ -54,7 +54,7 @@ test("pointed term matches variant pointing and prefixes; exclusion sticks", asy
   await expect(glossary.formChip(VARIANT_POINTING, "included")).toBeVisible()
   await expect(glossary.formsChips()).toHaveCount(1)
 
-  // ── Project affix inventory (settings → AI & completion → Terminology) ─────
+  // ── Project affix inventory (settings → AI → Terminology) ─────
   await alice.goto(`/project/${seeded.projectId}/settings/ai`)
   // The "Prefixes and suffixes" group renders its label as body text, not a
   // heading — the preset trigger is the section's stable landmark.

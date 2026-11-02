@@ -19,6 +19,28 @@ import { loginPath, safeLoginNext } from "@/lib/navigation/login-path"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 const SIGNUP_STARTED_KEY = "aquilla:signupStarted"
+// Progress is a convenience, not a prerequisite for creating an account.
+// Keep it across client-side navigation even when browser storage is denied.
+let signupStartedInMemory = false
+let signupStorageReadFailed = false
+
+function hasStartedSignup(): boolean {
+  try {
+    return sessionStorage.getItem(SIGNUP_STARTED_KEY) === "true" || signupStartedInMemory
+  } catch {
+    signupStorageReadFailed = true
+    return signupStartedInMemory
+  }
+}
+
+function markSignupStarted(): void {
+  if (signupStorageReadFailed) signupStartedInMemory = true
+  try {
+    sessionStorage.setItem(SIGNUP_STARTED_KEY, "true")
+  } catch {
+    signupStartedInMemory = true
+  }
+}
 
 /** Welcome and privacy precede signup; workspace setup happens in the app. */
 export function Signup() {
@@ -28,7 +50,7 @@ export function Signup() {
   const { session, loading, sessionLoadError, retrySessionLoad } = useFrontierSession()
   const [mode, setMode] = useState<"signup" | "login" | "forgot">("signup")
   const [step, setStep] = useState<1 | 2 | 3>(() =>
-    sessionStorage.getItem(SIGNUP_STARTED_KEY) === "true"
+    hasStartedSignup()
       ? hasAnalyticsConsentBeenSet() ? 3 : 2
       : 1,
   )
@@ -50,7 +72,7 @@ export function Signup() {
     <div className="mb-8 flex justify-center gap-2" aria-label={t("onboarding.wizard.stepProgress", { step, total: 3 })}>
       {[1, 2, 3].map(n => <span key={n} className={`size-2 rounded-full ${n <= step ? "bg-primary" : "bg-muted"}`} />)}
     </div>
-    {step === 1 && <><WelcomeStep onNext={() => { sessionStorage.setItem(SIGNUP_STARTED_KEY, "true"); if (hasAnalyticsConsentBeenSet()) openSignup(); else setStep(2) }} /><p className="mt-6 text-center text-sm"><Link to={loginPath({ next })}>{t("auth.join.alreadyHaveAccount")} {t("common.logIn")}</Link></p></>}
+    {step === 1 && <><WelcomeStep onNext={() => { markSignupStarted(); if (hasAnalyticsConsentBeenSet()) openSignup(); else setStep(2) }} /><p className="mt-6 text-center text-sm"><Link to={loginPath({ next })}>{t("auth.join.alreadyHaveAccount")} {t("common.logIn")}</Link></p></>}
     {step === 2 && <PrivacyStep onNext={openSignup} onBack={() => setStep(1)} />}
     {visitedSignup && <div hidden={step !== 3}>
     <h1 className="mb-6 text-center text-2xl font-semibold">

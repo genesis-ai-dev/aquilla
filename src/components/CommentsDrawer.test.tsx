@@ -176,7 +176,7 @@ describe("CommentsDrawer — lane-scoped mention list (AQU-1815)", () => {
       />,
     )
     await user.type(screen.getByRole("textbox", { name: "New thread" }), "@")
-    expect(screen.getByText("No one in your lanes to mention yet.")).toBeInTheDocument()
+    expect(screen.getByText("No one in your language lanes to mention yet.")).toBeInTheDocument()
     expect(screen.queryByText("No one on this project to mention.")).not.toBeInTheDocument()
   })
 

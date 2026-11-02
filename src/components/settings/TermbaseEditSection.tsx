@@ -70,7 +70,12 @@ export function TermbaseEditSection({ orgSettings, canEdit }: TermbaseEditSectio
   return (
     <SettingsRow
       label={t("settings.termbase.label")}
-      description={t("settings.termbase.description")}
+      description={t("settings.termbase.summary")}
+      info={{
+        label: t("common.aboutAria", { name: t("settings.termbase.label") }),
+        content: t("settings.termbase.info"),
+        testId: "settings-info-termbase-min-role",
+      }}
       control={
         <div className="flex min-w-44 flex-col items-end gap-1">
           <Select

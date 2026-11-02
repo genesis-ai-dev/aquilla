@@ -155,12 +155,13 @@ export const audio = defineNamespace({
     "audio.newVoice.steeringBestPractices": "Best practices",
     "audio.newVoice.deliveryLabel": "Delivery",
     "audio.newVoice.deliveryHint":
-      "How varied the reading is. More Stable stays consistent; More Creative has a wider emotional range.",
+      "How varied the reading is. More stable stays consistent; more creative has a wider emotional " +
+      "range.",
     "audio.newVoice.deliveryNeedsHighest":
       "Delivery is available with Highest audio quality (Inworld TTS 2). Flash ignores this control.",
-    "audio.newVoice.deliveryStable": "More Stable",
+    "audio.newVoice.deliveryStable": "More stable",
     "audio.newVoice.deliveryBalanced": "Balanced",
-    "audio.newVoice.deliveryCreative": "More Creative",
+    "audio.newVoice.deliveryCreative": "More creative",
     "audio.newVoice.talkingSpeedLabel": "Talking speed",
     "audio.newVoice.talkingSpeedHint":
       "How fast the voice speaks. 1.0 is the voice's native speed. Values below 0.8 can sound less natural.",
@@ -242,8 +243,8 @@ export const audio = defineNamespace({
     "audio.recordingModal.autoAdvanceEnableLabel": "Move to the next line after saving",
     "audio.recordingModal.muteBeepTooltip": "Mute countdown beep",
     "audio.recordingModal.unmuteBeepTooltip": "Enable countdown beep",
-    "audio.recordingModal.muteVideoTooltip": "Mute the scene video",
-    "audio.recordingModal.unmuteVideoTooltip": "Unmute the scene video",
+    "audio.recordingModal.muteVideoTooltip": "Mute the film",
+    "audio.recordingModal.unmuteVideoTooltip": "Unmute the film",
     "audio.recordingModal.videoMutedBadge": "Muted",
     "audio.recordingModal.videoMutedWhileRecording":
       "The scene plays muted while recording so it can't bleed into your take.",
@@ -297,7 +298,7 @@ export const audio = defineNamespace({
     // Keys above with near-identical wording belong to the pre-rebuild layout
     // and are still translated; these are the strings the dialog renders now.
     "audio.recordingModal.collapseFilmAriaLabel": "Hide the film",
-    "audio.recordingModal.collapseFilmButton": "Collapse video",
+    "audio.recordingModal.collapseFilmButton": "Collapse film",
     "audio.recordingModal.expandFilmAriaLabel": "Show the film",
     "audio.recordingModal.prevLineTooltip": "Previous line (⌥←)",
     "audio.recordingModal.nextLineTooltip": "Next line (⌥→)",
@@ -364,6 +365,8 @@ export const audio = defineNamespace({
     "audio.recordingModal.formatWavAriaLabel": "Recording format: WAV — click to record compressed",
     "audio.recordingModal.formatCompressedAriaLabel":
       "Recording format: compressed — click to record in WAV",
+    // AQU-2261: the format (i)'s own name, not the export dialog's "Format".
+    "audio.recordingModal.formatInfoAria": "About the recording format",
     "audio.recordingModal.settingsAriaLabel": "Recorder settings",
     "audio.recordingModal.autoAdvanceTitle": "Move on after saving a recording",
     "audio.recordingModal.countdownTitle": "Countdown",
@@ -671,11 +674,16 @@ export const audio = defineNamespace({
     "audio.consent.whisper.short":
       "After you save a recording, this device transcribes it automatically. The spoken words then light up in the cell as the recording plays. Recordings never leave this device.",
     "audio.consent.whisper.learnMore":
-      "A transcript preview under the cell shows whether the recording matches your text, sounds a little different (you can adopt what was heard), or that you edited after recording.\n\n{modifier}+click a word in the cell itself — not the transcript preview — to jump playback there. A plain click in the cell still places the cursor.\n\nManage or remove this model later in Preferences → Local models.",
+      "A transcript preview under the cell shows whether the recording matches your text, sounds a " +
+      "little different (you can adopt what was heard), or that you edited after " +
+      "recording.\n\n{modifier}+click a word in the cell itself — not the transcript preview — to " +
+      "jump playback there. A plain click in the cell still places the cursor.\n\nManage or remove " +
+      "this model later in Preferences → On-device AI models.",
     "audio.consent.mms.short":
       "Reads the cell's text aloud on this device in many languages. Your text isn't sent to any server.",
     "audio.consent.mms.learnMore":
-      "Each language is downloaded the first time you use it. Manage or remove this model later in Preferences → Local models.",
+      "Each language is downloaded the first time you use it. Manage or remove this model later in " +
+      "Preferences → On-device AI models.",
 
     // ai-error.ts categorizeAiError() — plain-language heading for each
     // failure category, shown as the popover title (InlineAiError et al.).
@@ -738,7 +746,8 @@ export const audio = defineNamespace({
       "The AI provider is rate-limiting requests. Wait a moment and try again.",
     "audio.aiError.transcriptionModelUnavailableTitle": "The transcription model isn't responding",
     "audio.aiError.transcriptionModelUnavailableBody":
-      "Try again in a moment. If it keeps failing, choose a different model in Preferences → Local models → Transcription, or transcribe on this device instead.",
+      "Try again in a moment. If it keeps failing, choose a different model in Preferences → " +
+      "On-device AI models → Transcription, or transcribe on this device instead.",
     "audio.aiError.providerUnavailableBody":
       "The AI provider returned a server error. This is usually temporary — try again in a moment.",
     "audio.aiError.providerRejectedBody":
@@ -2228,6 +2237,11 @@ export const audio = defineNamespace({
           hardStopMinutes:
             "How many minutes in total the recorder allows before stopping by itself.",
         },
+      },
+      "audio.recordingModal.formatInfoAria": {
+        description:
+          "Screen-reader name of the small (i) beside the recorder's WAV / compressed " +
+          "toggle. A click opens a note on what each format costs in file size and detail.",
       },
       "audio.recordingModal.formatWavAriaLabel": {
         description:

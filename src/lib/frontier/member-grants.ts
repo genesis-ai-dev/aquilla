@@ -11,13 +11,14 @@
  * row menu said nothing about why. This module is the single place those
  * rules live on the client so the three member surfaces (settings
  * MembersSection, SharePanel, the org members matrix) cannot drift from the
- * server or from each other again.
+ * server or from each other again. The roles a caller may grant are
+ * `roleChoices()` in ./role-choices (AQU-2289), the one list every door uses.
  *
  * The server remains the security boundary — everything here is a UX hint
  * that keeps the UI from offering an action it knows will be refused, and
  * lets it explain the refusal instead of rendering nothing.
  */
-import { PROJECT_ROLE_OPTIONS, ROLE, type RoleOption } from "./roles"
+import { ROLE } from "./roles"
 
 /**
  * Role floor for managing project membership at all. Mirrors the route guard
@@ -84,16 +85,6 @@ export function roleChangeBlock(ctx: RoleChangeContext): RoleChangeBlock | null 
     return "target-outranks-caller"
   }
   return null
-}
-
-/**
- * The project-picker roles this caller may actually grant — never above
- * their own level, mirroring the server's `role > callerRole.level` refusal.
- * A `null` caller level keeps the full picker (see `RoleChangeContext`).
- */
-export function grantableProjectRoles(callerLevel: number | null): RoleOption[] {
-  if (callerLevel === null) return [...PROJECT_ROLE_OPTIONS]
-  return PROJECT_ROLE_OPTIONS.filter((r) => r.level <= callerLevel)
 }
 
 /** True when this caller may manage project membership at all. */

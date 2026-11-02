@@ -958,6 +958,8 @@ export const editor = defineNamespace({
     "editor.timeline.timingLengthSeconds": "{seconds} s",
     "editor.timeline.timingLengthMinutes": "{minutes} min {seconds} s",
     "editor.timeline.timingLengthHours": "{hours} h {minutes} min",
+    // AQU-2235: a piece's name in its name bar on the timeline.
+    "editor.timeline.takePieceName": "{name} · {n} of {total}",
     "editor.timeline.qualityToggleAria": "Play generated voices at original quality",
     // AQU-646: "Recordings are always compressed" stopped being true when
     // capture began following the device's WAV preference — a take now plays
@@ -7404,6 +7406,18 @@ export const editor = defineNamespace({
       "editor.timeline.timingLengthHours": {
         description: "A file's length of an hour or more, e.g. '1 h 3 min'.",
         placeholders: { hours: "Whole hours.", minutes: "Whole minutes left over, 0 to 59." },
+      },
+      "editor.timeline.takePieceName": {
+        description:
+          "The name shown in the thin bar along the top of one piece of a recording on the " +
+          "timeline, after the recording was cut into pieces. For example 'Take 2 · 1 of 2' " +
+          "for the first of two pieces of Take 2.",
+        placeholders: {
+          name: "The recording's own name, e.g. 'Take 2'. User data, never translated.",
+          n: "Which piece this is, counting from 1.",
+          total: "How many pieces the recording was cut into.",
+        },
+        maxLength: 40,
       },
       "editor.timeline.qualityToggleAria": {
         description:

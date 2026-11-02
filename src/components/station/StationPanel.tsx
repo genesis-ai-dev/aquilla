@@ -17,6 +17,7 @@ import { castNameOf } from "@/lib/audio/voices"
 import { historyView, newestMatchingStep, subscribeHistory, undoLast, undoStepById } from "@/lib/history/history"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { audioIdSeededWith } from "@/lib/audio/upload"
+import { isGeneratedTake } from "@/lib/audio/track-audio"
 import { levelsShown, STATION_PICKS } from "@/lib/station/picks"
 import { setStationUi } from "@/lib/station/ui"
 import { audioCachePutBlob } from "@/lib/audio/bytes-cache"
@@ -451,7 +452,10 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
             editable={editable && !rec.busy}
             {...(recPart ? { recording: recPart } : {})}
             trackVars={host.trackVars(take.fileId, take.att.slot)}
-            generated={Boolean(take.att.voiceId)}
+            // AQU-2235 (merged in): the one rule every surface asks before it
+            // draws an AI voice's sparkle, so the Station agrees with the timeline
+            // and the takes lists about which takes wear it.
+            generated={isGeneratedTake(take.cell, target.audioId, take.att)}
             onHover={setHovering}
             {...(editable && levelsShown() ? { hoverLayer: (h: boolean, lane: HTMLElement | null) => <StationLevels ed={ed} lane={lane} hover={h} /> } : {})}
             {...(editable && tooLong ? { editNote: t("editor.station.tooLong") } : {})}

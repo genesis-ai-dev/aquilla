@@ -6,6 +6,8 @@ vi.mock("@/lib/audio/transport-pause", () => ({ pauseAllTransports: vi.fn() }))
 
 import { TargetAudioLane, type TakeMenuActions } from "./TargetAudioLane"
 import type { CellData } from "@/hooks/useCells"
+import { RowMetricsContext } from "./useRowMetrics"
+import { chipHeightPx, chipPadPx } from "@/lib/timeline/row-metrics"
 import { __resetVoicingAsForTests, whileVoicingAs } from "@/lib/audio/voicing-as"
 
 const TAKE = "audio-c1-1700000000-take.wav"
@@ -98,6 +100,27 @@ describe("TargetAudioLane — the line's voice and its take (AQU-2212)", () => {
     expect(screen.getByTestId("tl-target-c1-working")).toHaveTextContent("Voicing as Hearth…")
     // It speaks in the take-voice label's place.
     expect(screen.queryByTestId("tl-target-c1-take-voice")).toBeNull()
+    await act(async () => { done(); await voicing })
+    expect(screen.queryByTestId("tl-target-c1-working")).toBeNull()
+  })
+
+  // AQU-2235: the name bar needs a 30px clip. A shorter row has no bar, and
+  // "Voicing as …" must still say the line is being voiced there, as it did
+  // at every height before the bar.
+  it("still says Voicing as … on a row too short for a name bar", async () => {
+    const rowH = 40
+    expect(chipHeightPx(rowH)).toBeLessThan(30)
+    render(
+      <RowMetricsContext.Provider value={{ rowH, chipH: chipHeightPx(rowH), chipPad: chipPadPx(rowH) }}>
+        <TargetAudioLane {...base} items={[{ cell: oneTake(), kind: "take", audioId: TAKE }]} />
+      </RowMetricsContext.Provider>,
+    )
+    expect(screen.queryByTestId("tl-target-c1-bar")).toBeNull()
+    let done!: () => void
+    let voicing!: Promise<void>
+    act(() => { voicing = whileVoicingAs("c1", "Hearth", () => new Promise<void>((r) => { done = r })) })
+    expect(screen.getByTestId("tl-target-c1-working")).toHaveTextContent("Voicing as Hearth…")
+    expect(screen.getByTestId("tl-target-c1-working")).toHaveAttribute("role", "status")
     await act(async () => { done(); await voicing })
     expect(screen.queryByTestId("tl-target-c1-working")).toBeNull()
   })

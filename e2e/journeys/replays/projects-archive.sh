@@ -4,10 +4,10 @@
 NAME="Journey archive $(date +%H%M%S)"
 login alice || fail "login"
 ab open "$BASE/orgs/$ORG/projects" >/dev/null && ab wait --load networkidle >/dev/null
-ab find role button click --name "New Project" >/dev/null || fail "New Project button"
-ab wait --text "Create New Project" >/dev/null || fail "dialog"
-ab find label "Project title" fill "$NAME" >/dev/null && ab find label "Source Language" fill "en" >/dev/null && ab find label "Target language(s)" fill "fr" >/dev/null || fail "fill"
-ab find role button click --name "Create Project" >/dev/null || fail "Create Project button"
+ab find role button click --name "New project" >/dev/null || fail "New project button"
+ab wait --text "Create new project" >/dev/null || fail "dialog"
+ab find label "Project name" fill "$NAME" >/dev/null && ab find label "Source language" fill "en" >/dev/null && ab find label "Language lanes" fill "fr" >/dev/null || fail "fill"
+ab find role button click --name "Create project" >/dev/null || fail "Create project button"
 ab wait --text "Open project" >/dev/null || fail "overview did not load"
 overview=$(ab get url)
 # Header overflow menu, then the Archive item and its confirm dialog.

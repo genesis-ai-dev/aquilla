@@ -1290,6 +1290,14 @@ export interface EventPayloads {
     /** Passed through to files.meta (JSON) — same shape as file.create's
      *  language/orderedBy fields, merged rather than replacing wholesale. */
     meta?: Record<string, unknown>
+    /** AQU-2345: the upstream file's type columns, so the copy reads as what
+     *  it was imported as (the read side derives `fileType` as
+     *  `kind ?? role ?? 'codex'`). Absent on events mirrored before this
+     *  slice; the projection fills a NULL column from these and never
+     *  overwrites one that is set. */
+    role?: string | null
+    kind?: string | null
+    bookCode?: string | null
     upstream: {
       projectId: string
       eventId: string

@@ -18,7 +18,7 @@
 # `elevate_admin` instead — platform admin is an email allowlist, not a role the
 # ordinary QA account can reach. See those functions below.
 BASE="${AQUILLA_BASE:-http://127.0.0.1:5173}"
-ORG="${AQUILLA_ORG_ID:-9}"
+ORG="${AQUILLA_ORG_ID:-1}"
 S="${AGENT_BROWSER_SESSION:-replay-$$}"
 ab() { agent-browser --session "$S" "$@"; }
 # One retry: the first open after a session was just closed sometimes fails

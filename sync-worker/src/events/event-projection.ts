@@ -3637,6 +3637,13 @@ case 'cell.audio.attach': {
       if (!event.fileId) {
         throw new Error(`file.mirror event ${event.id} is missing fileId`)
       }
+      // AQU-2345: the copy is the upstream file's material, so it carries the
+      // upstream's `role`/`kind`/`book_code` — the read side derives
+      // `fileType` from them, and a NULL `kind` read every mirrored file as
+      // `codex`, which hid the IDML/DOCX/PPTX export for it. On conflict (a
+      // rename, or a replay over a row mirrored before this slice) a NULL
+      // column is filled and a set one is kept: the mirror names a file's
+      // type once and never argues with a row that already has one.
       stmts.push(
         db
           .prepare(
@@ -3649,7 +3656,7 @@ case 'cell.audio.attach': {
               meta
             ) VALUES (
               ?, ?, ?,
-              NULL, NULL, NULL, NULL, NULL,
+              ?, ?, ?, NULL, NULL,
               ?,
               0, 0, 0, NULL,
               ?, (extract(epoch from now()) * 1000)::bigint, (extract(epoch from now()) * 1000)::bigint,
@@ -3657,6 +3664,9 @@ case 'cell.audio.attach': {
             )
             ON CONFLICT (id) DO UPDATE SET
               name = excluded.name,
+              role = COALESCE(files.role, excluded.role),
+              kind = COALESCE(files.kind, excluded.kind),
+              book_code = COALESCE(files.book_code, excluded.book_code),
               event_id = excluded.event_id,
               updated_at = (extract(epoch from now()) * 1000)::bigint`,
           )
@@ -3664,6 +3674,9 @@ case 'cell.audio.attach': {
             event.fileId,
             event.projectId,
             p.name,
+            p.role ?? null,
+            p.kind ?? null,
+            p.bookCode ?? null,
             event.id,
             event.author,
             JSON.stringify(p.meta ?? {}),

@@ -3,7 +3,7 @@
 // Every source is mono at the same rate (the app decodes everything to
 // 48 kHz mono, decode-mono.ts), so a segment is a plain copy.
 
-import { gainAt, type ClipMix, type PlacedSegment } from "./edit-list"
+import { dbToGain, gainAt, type ClipMix, type PlacedSegment } from "./edit-list"
 
 export interface PcmSource {
   data: Float32Array
@@ -67,9 +67,10 @@ export function peakOf(data: Float32Array): number {
 
 /**
  * `n` columns of peaks over [va, vb] of the edited recording, each the loudest
- * moment in its slice against `norm`, shaped by the clip's volume and fades
- * inside the kept part (40b: the waveform shows them live). Long slices are
- * read with a stride, so a zoomed-out hour stays cheap.
+ * moment in its slice against `norm`, drawn as mixWhole plays it: the clip's
+ * volume everywhere, and its fades inside the kept part (40b: the waveform
+ * shows them live). Long slices are read with a stride, so a zoomed-out hour
+ * stays cheap.
  */
 export function viewPeaks(
   placed: readonly PlacedSegment[],
@@ -102,8 +103,8 @@ export function viewPeaks(
       }
     }
     const t = (c0 + c1) / 2
-    const inKept = clip ? t >= clip.trimA && t <= clip.trimB : false
-    out[i] = Math.min(1, m * scale * (clip && inKept ? gainAt(t, clip) : 1))
+    const g = !clip ? 1 : t >= clip.trimA && t <= clip.trimB ? gainAt(t, clip) : dbToGain(clip.gainDb)
+    out[i] = Math.min(1, m * scale * g)
   }
   return out
 }

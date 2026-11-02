@@ -101,6 +101,13 @@ describe("the Station's samples", () => {
     const p = viewPeaks(placed, lookup, 0, 3, 3, 1)
     expect(Array.from(p)).toEqual([0.5, 1, 0.25])
   })
+
+  it("the volume scales the whole waveform, past Start and End too (Sam, Nov 2)", () => {
+    const placed = placeSegments(segmentsOf("take", 3, []))
+    // Kept part 1–2 s, 6 dB down: every column halves, inside and outside it.
+    const p = viewPeaks(placed, lookup, 0, 3, 3, 1, { trimA: 1, trimB: 2, fadeIn: 0, fadeOut: 0, gainDb: -6.0206 })
+    expect(Array.from(p).map((v) => Math.round(v * 1000) / 1000)).toEqual([0.25, 0.5, 0.125])
+  })
 })
 
 describe("the Station's times", () => {

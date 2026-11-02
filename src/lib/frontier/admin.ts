@@ -756,3 +756,64 @@ export async function getAdminWouldBlock(jwt: string): Promise<{ meterMode: Bill
   if (!res.ok) throw new UserError(res.status, await readError(res))
   return (await res.json()) as { meterMode: BillingMeterMode; orgs: WouldBlockOrg[] }
 }
+
+// --- Feedback routes: who is emailed when a user sends "Report a problem" ---
+
+export interface AdminFeedbackRoute {
+  id: number
+  orgId: number
+  orgName: string | null
+  /** Empty = the whole org. */
+  projectIds: string[]
+  projects: { id: string; name: string }[]
+  emails: string[]
+  label: string | null
+  enabled: boolean
+  createdAt: string | null
+}
+
+export interface FeedbackRouteInput {
+  orgId: number
+  projectIds: string[]
+  emails: string[]
+  label: string | null
+  enabled: boolean
+}
+
+export async function getAdminFeedbackRoutes(jwt: string): Promise<AdminFeedbackRoute[]> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/feedback-routes`, { headers: authHeaders(jwt) })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+  return ((await res.json()) as { routes: AdminFeedbackRoute[] }).routes
+}
+
+export async function createAdminFeedbackRoute(jwt: string, input: FeedbackRouteInput): Promise<AdminFeedbackRoute> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/feedback-routes`, {
+    method: "POST",
+    headers: { ...authHeaders(jwt), "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+  return ((await res.json()) as { route: AdminFeedbackRoute }).route
+}
+
+export async function updateAdminFeedbackRoute(
+  jwt: string,
+  id: number,
+  patch: Partial<Omit<FeedbackRouteInput, "orgId">>,
+): Promise<AdminFeedbackRoute> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/feedback-routes/${id}`, {
+    method: "PATCH",
+    headers: { ...authHeaders(jwt), "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+  return ((await res.json()) as { route: AdminFeedbackRoute }).route
+}
+
+export async function deleteAdminFeedbackRoute(jwt: string, id: number): Promise<void> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/feedback-routes/${id}`, {
+    method: "DELETE",
+    headers: authHeaders(jwt),
+  })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+}

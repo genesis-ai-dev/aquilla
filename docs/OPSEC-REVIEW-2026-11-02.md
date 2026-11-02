@@ -298,7 +298,13 @@ decisive check.
   `no-useless-assignment` warning on `seeded` in `source-linking.ts` moved from
   line 441 to 485 with the inserted guard; confirmed present on `origin/dev` by
   stashing the change and re-running.
-* Full `auth-worker` suite (`npx vitest run`): see the note below.
+* Full `auth-worker` suite (`npx vitest run`): **392 files, 4599 passing, 2
+  expected-fail, 0 failures** (1480 s). Nothing red remains in this package to
+  distinguish from the change under review — the condition that makes a suite
+  run worth anything as evidence — and it is clean for the third pass running,
+  after 10-19 recorded the three files 10-12 had found red as repaired. 10-26
+  measured 378 files / 4447 passing; the 14 new files and 152 new tests since
+  include this pass's own, and the two expected-fails are the same two.
 
 Environment note, for whoever re-runs this: **no dependencies were installed in
 this container at session start.** `pnpm install` in `auth-worker` (its own pnpm

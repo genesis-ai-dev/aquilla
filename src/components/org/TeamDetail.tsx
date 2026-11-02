@@ -62,9 +62,10 @@ import {
 import { SearchSelect } from "@/components/ui/search-select"
 import { RoleLabel } from "@/components/RoleLabel"
 import { RoleSelect } from "@/components/RoleSelect"
+import { RoleDialog } from "@/components/access/RoleDialog"
+import { roleChoices } from "@/lib/frontier/role-choices"
 import {
   ALL_ROLE_LEVELS,
-  ALL_ROLE_OPTIONS,
   ROLE,
   humanRoleName,
   roleDisplayText,
@@ -178,15 +179,14 @@ export function TeamDetail() {
   // straight to the team as a guest, leaving the org roster untouched.
   const [externalIdentifier, setExternalIdentifier] = useState("")
 
-  // Change-role dialog (owners only) — opened from the row actions menu.
+  // AQU-2289: Change role on a member (their organization role, owners only)
+  // and on an attached project (the team's grant) both open the one
+  // RoleDialog, with the organization's or the project's list of roles.
   const [roleChangeTarget, setRoleChangeTarget] = useState<TeamMember | null>(null)
-  const [roleChangeLevel, setRoleChangeLevel] = useState("")
-  const [roleChangeBusy, setRoleChangeBusy] = useState(false)
-
-  // Change team-grant role on an attached project — opened from the projects row menu.
   const [projectRoleTarget, setProjectRoleTarget] = useState<TeamProject | null>(null)
-  const [projectRoleLevel, setProjectRoleLevel] = useState("")
-  const [projectRoleBusy, setProjectRoleBusy] = useState(false)
+  // The chooser's organization role caps both lists (the server refuses a
+  // team grant above it).
+  const callerOrgLevel = activeOrg?.role.level ?? null
 
   const [laneEditTarget, setLaneEditTarget] = useState<TeamProject | null>(null)
   const [laneEditIds, setLaneEditIds] = useState<string[]>([])
@@ -401,48 +401,15 @@ export function TeamDetail() {
     await refetch()
   }, [jwt, activeOrgId, refetch])
 
-  function openRoleChange(member: TeamMember) {
-    setRoleChangeTarget(member)
-    setRoleChangeLevel(member.roleLevel != null ? String(member.roleLevel) : String(ROLE.VIEWER))
-  }
-
-  function closeRoleChange() {
-    setRoleChangeTarget(null)
-    setRoleChangeLevel("")
-    setRoleChangeBusy(false)
-  }
-
-  async function confirmRoleChange() {
-    if (!roleChangeTarget || !roleChangeLevel) return
-    setRoleChangeBusy(true)
-    try {
-      await handleChangeMemberRole(roleChangeTarget.username, Number(roleChangeLevel))
-      closeRoleChange()
-    } finally {
-      setRoleChangeBusy(false)
-    }
-  }
-
-  function openProjectRoleChange(project: TeamProject) {
-    setProjectRoleTarget(project)
-    setProjectRoleLevel(String(project.grantedRoleLevel))
-  }
-
-  function closeProjectRoleChange() {
-    setProjectRoleTarget(null)
-    setProjectRoleLevel("")
-    setProjectRoleBusy(false)
-  }
-
-  async function confirmProjectRoleChange() {
-    if (!projectRoleTarget || !projectRoleLevel) return
-    setProjectRoleBusy(true)
-    try {
-      await handleChangeProjectRole(projectRoleTarget.id, Number(projectRoleLevel))
-      closeProjectRoleChange()
-    } finally {
-      setProjectRoleBusy(false)
-    }
+  /**
+   * AQU-2289: who has an organization Change role here — the same rule as the
+   * org member list. Owners only; never for an organization Owner, whose role
+   * is locked once granted (AQU-952); and never for someone outside the org
+   * (AQU-2238): an organization role is saved by adding them to the org, which
+   * would quietly undo their team-only invite.
+   */
+  function canChangeOrgRole(member: TeamMember): boolean {
+    return isOwner && member.roleLevel != null && member.roleLevel !== ROLE.OWNER
   }
 
   function openLaneEdit(project: TeamProject) {
@@ -749,98 +716,38 @@ export function TeamDetail() {
               />
             ) : (
             <>
-              {isOwner && (
-                <Dialog
-                  open={roleChangeTarget !== null}
-                  onOpenChange={(open) => { if (!open) closeRoleChange() }}
-                >
-                  <DialogContent className="max-w-md">
-                    <DialogHeader>
-                      <DialogTitle>
-                        {roleChangeTarget
-                          ? t("org.teamDetail.changeRoleTitleFor", { name: roleChangeTarget.username })
-                          : t("org.membersPage.changeRoleAria")}
-                      </DialogTitle>
-                      <DialogDescription>
-                        {t("org.membersPage.orgTable.changeRoleDescription")}
-                      </DialogDescription>
-                    </DialogHeader>
-                    <RoleSelect
-                      options={ALL_ROLE_OPTIONS}
-                      value={roleChangeLevel ? Number(roleChangeLevel) : null}
-                      onValueChange={(level) => setRoleChangeLevel(String(level))}
-                      className="w-full!"
-                      aria-label={
-                        roleChangeTarget
-                          ? `Role for ${roleChangeTarget.username}`
-                          : "New role"
-                      }
-                    />
-                    <DialogFooter>
-                      <Button type="button" variant="outline" onClick={closeRoleChange} disabled={roleChangeBusy}>
-                        {t("common.cancel")}
-                      </Button>
-                      <Button
-                        type="button"
-                        onClick={() => void confirmRoleChange()}
-                        disabled={!roleChangeLevel || roleChangeBusy}
-                      >
-                        {roleChangeBusy && <Spinner data-icon="inline-start" />}
-                        {roleChangeBusy ? "Saving…" : "Save"}
-                      </Button>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
-              )}
+              <RoleDialog
+                open={roleChangeTarget !== null}
+                onOpenChange={(open) => { if (!open) setRoleChangeTarget(null) }}
+                mode="change"
+                level="org"
+                callerLevel={callerOrgLevel}
+                name={roleChangeTarget?.username ?? ""}
+                currentLevel={roleChangeTarget?.roleLevel ?? null}
+                summary={t("org.roleDialog.orgChangeSummary")}
+                details={t("org.roleDialog.orgRoleDetails")}
+                onSave={async (level) => {
+                  if (roleChangeTarget) await handleChangeMemberRole(roleChangeTarget.username, level)
+                }}
+                errorMessage={(e) => {
+                  const uf = toUserFacingError(e, "org")
+                  return uf.category === "forbidden" ? t("org.roleDialog.orgChangeForbidden") : uf.message
+                }}
+              />
 
-              {isAdmin && (
-                <Dialog
-                  open={projectRoleTarget !== null}
-                  onOpenChange={(open) => { if (!open) closeProjectRoleChange() }}
-                >
-                  <DialogContent className="max-w-md">
-                    <DialogHeader>
-                      <DialogTitle>
-                        {projectRoleTarget
-                          ? t("org.teamDetail.changeRoleTitleFor", { name: projectRoleTarget.name })
-                          : t("org.membersPage.changeRoleAria")}
-                      </DialogTitle>
-                      <DialogDescription>
-                        {t("org.teamDetail.projectRoleDialogDescription")}
-                      </DialogDescription>
-                    </DialogHeader>
-                    <RoleSelect
-                      options={ALL_ROLE_OPTIONS}
-                      value={projectRoleLevel ? Number(projectRoleLevel) : null}
-                      onValueChange={(level) => setProjectRoleLevel(String(level))}
-                      className="w-full!"
-                      aria-label={
-                        projectRoleTarget
-                          ? `Role for ${projectRoleTarget.name}`
-                          : "Granted role"
-                      }
-                    />
-                    <DialogFooter>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={closeProjectRoleChange}
-                        disabled={projectRoleBusy}
-                      >
-                        {t("common.cancel")}
-                      </Button>
-                      <Button
-                        type="button"
-                        onClick={() => void confirmProjectRoleChange()}
-                        disabled={!projectRoleLevel || projectRoleBusy}
-                      >
-                        {projectRoleBusy && <Spinner data-icon="inline-start" />}
-                        {projectRoleBusy ? "Saving…" : "Save"}
-                      </Button>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
-              )}
+              <RoleDialog
+                open={projectRoleTarget !== null}
+                onOpenChange={(open) => { if (!open) setProjectRoleTarget(null) }}
+                mode="change"
+                level="project"
+                callerLevel={callerOrgLevel}
+                name={projectRoleTarget?.name ?? ""}
+                currentLevel={projectRoleTarget?.grantedRoleLevel ?? null}
+                summary={t("org.teamDetail.projectRoleDialogDescription")}
+                onSave={async (level) => {
+                  if (projectRoleTarget) await handleChangeProjectRole(projectRoleTarget.id, level)
+                }}
+              />
 
               {isAdmin && (
                 <Dialog
@@ -988,7 +895,7 @@ export function TeamDetail() {
                             placeholder={t("org.teamDetail.selectProjectPlaceholder")}
                           />
                           <RoleSelect
-                            options={ALL_ROLE_OPTIONS}
+                            options={roleChoices("project", { callerLevel: callerOrgLevel })}
                             value={selectedRole}
                             onValueChange={setSelectedRole}
                             aria-label={t("org.teamDetail.grantedRoleAriaLabel")}
@@ -1053,7 +960,7 @@ export function TeamDetail() {
                       renderRowMenuItems={(p) =>
                         isAdmin ? (
                           <>
-                            <MenuItem onClick={() => openProjectRoleChange(p)}>
+                            <MenuItem onClick={() => setProjectRoleTarget(p)}>
                               <ShieldUser className="size-4" />
                               {t("org.membersPage.changeRoleAria")}
                             </MenuItem>
@@ -1103,85 +1010,96 @@ export function TeamDetail() {
                   </div>
 
                   {isAdmin && (
-                    <Dialog open={addingMember} onOpenChange={(o) => { if (!o) closeAddMember() }}>
-                      <DialogContent className="max-w-md gap-4">
-                        <DialogHeader>
-                          <DialogTitle>
-                            {t("org.access.addPeopleTo", { path: formatScopePath(teamScopePath) })}
-                          </DialogTitle>
-                        </DialogHeader>
-                        <div className="flex w-full flex-col gap-2">
-                          <div className="w-full">
-                            <MemberMultiSelect
-                              id="team-add-members"
-                              aria-label={t("org.teamDetail.membersToAddAriaLabel")}
-                              className="w-full!"
-                              members={availableOrgMembers.map((m) => m.username)}
-                              value={stagedUsernames}
-                              disabled={availableOrgMembers.length === 0}
-                              placeholder={t("org.teamDetail.selectMembersPlaceholder")}
-                              searchPlaceholder="Search members…"
-                              searchLabel="Search members"
-                              emptyMessage={t("org.teamDetail.noMembersMatch")}
-                              onValueChange={(next) => {
-                                setAddError(null)
-                                setStagedUsernames(next)
-                              }}
-                            />
+                    // AQU-2289: the one RoleDialog. A team has no role to pick
+                    // here: new members take the team's project grants, and
+                    // their team role is set afterwards in the Team role
+                    // column (the team's own three roles).
+                    <RoleDialog
+                      open={addingMember}
+                      onOpenChange={(o) => { if (!o) closeAddMember() }}
+                      mode="add"
+                      level="team"
+                      callerLevel={callerOrgLevel}
+                      title={t("org.access.addPeopleTo", { path: formatScopePath(teamScopePath) })}
+                      summary={t("org.roleDialog.teamAddSummary")}
+                      people={{
+                        kind: "custom",
+                        body: (
+                          <div className="flex w-full flex-col gap-2">
+                            <div className="w-full">
+                              <MemberMultiSelect
+                                id="team-add-members"
+                                aria-label={t("org.teamDetail.membersToAddAriaLabel")}
+                                className="w-full!"
+                                members={availableOrgMembers.map((m) => m.username)}
+                                value={stagedUsernames}
+                                disabled={availableOrgMembers.length === 0}
+                                placeholder={t("org.teamDetail.selectMembersPlaceholder")}
+                                searchPlaceholder={t("org.teamDetail.searchMembersPlaceholder")}
+                                searchLabel={t("org.roleDialog.searchMembersLabel")}
+                                emptyMessage={t("org.teamDetail.noMembersMatch")}
+                                onValueChange={(next) => {
+                                  setAddError(null)
+                                  setStagedUsernames(next)
+                                }}
+                              />
+                            </div>
+                            {availableOrgMembers.length === 0 && stagedUsernames.length === 0 && (
+                              <p className="text-xs text-muted-foreground">
+                                {t("org.teamDetail.allMembersAddedNotice")}
+                              </p>
+                            )}
+                            {/* AQU-2238: the picker lists org members only, so an
+                                outside person is unreachable through it. This is
+                                the direct invite-to-team path — a team-scoped
+                                guest grant, no org-roster entry. AQU-1030: the
+                                scope sentence names exactly what they will and
+                                won't see. */}
+                            <FieldSeparator />
+                            <Field>
+                              <FieldLabel htmlFor="team-add-external">
+                                {t("org.teamDetail.outsideOrgLabel")}
+                              </FieldLabel>
+                              <Input
+                                id="team-add-external"
+                                autoComplete="off"
+                                value={externalIdentifier}
+                                placeholder={t("org.teamDetail.outsideOrgPlaceholder")}
+                                className="h-9"
+                                onChange={(e) => {
+                                  setAddError(null)
+                                  setExternalIdentifier(e.target.value)
+                                }}
+                              />
+                            </Field>
+                            <GrantScopeNotice sentence={externalGrantSentence} />
+                            {addError && (
+                              <p role="alert" className="text-xs text-destructive">
+                                {t("org.teamDetail.addErrorPrefix", { error: addError })}
+                              </p>
+                            )}
                           </div>
-                          {availableOrgMembers.length === 0 && stagedUsernames.length === 0 && (
-                            <p className="text-xs text-muted-foreground">
-                              {t("org.teamDetail.allMembersAddedNotice")}
-                            </p>
-                          )}
-                          {/* AQU-2238: the picker lists org members only, so an
-                              outside person is unreachable through it. This is
-                              the direct invite-to-team path — a team-scoped
-                              guest grant, no org-roster entry. AQU-1030: the
-                              scope sentence names exactly what they will and
-                              won't see. */}
-                          <FieldSeparator />
-                          <Field>
-                            <FieldLabel htmlFor="team-add-external">
-                              {t("org.teamDetail.outsideOrgLabel")}
-                            </FieldLabel>
-                            <Input
-                              id="team-add-external"
-                              autoComplete="off"
-                              value={externalIdentifier}
-                              placeholder={t("org.teamDetail.outsideOrgPlaceholder")}
-                              className="h-9"
-                              onChange={(e) => {
-                                setAddError(null)
-                                setExternalIdentifier(e.target.value)
-                              }}
-                            />
-                          </Field>
-                          <GrantScopeNotice sentence={externalGrantSentence} />
-                          {addError && (
-                            <p role="alert" className="text-xs text-destructive">
-                              {t("org.teamDetail.addErrorPrefix", { error: addError })}
-                            </p>
-                          )}
-                        </div>
-                        <DialogFooter className="mt-0">
-                          <Button type="button" variant="outline" onClick={closeAddMember}>
-                            {t("common.cancel")}
-                          </Button>
-                          <Button
-                            type="button"
-                            onClick={handleAddMembers}
-                            disabled={
-                              (stagedUsernames.length === 0 && externalIdentifier.trim().length === 0) ||
-                              addBusy
-                            }
-                          >
-                            {addBusy && <Spinner data-icon="inline-start" />}
-                            {addBusy ? "Adding…" : "Add"}
-                          </Button>
-                        </DialogFooter>
-                      </DialogContent>
-                    </Dialog>
+                        ),
+                        footer: (
+                          <DialogFooter className="mt-0">
+                            <Button type="button" variant="outline" onClick={closeAddMember}>
+                              {t("common.cancel")}
+                            </Button>
+                            <Button
+                              type="button"
+                              onClick={handleAddMembers}
+                              disabled={
+                                (stagedUsernames.length === 0 && externalIdentifier.trim().length === 0) ||
+                                addBusy
+                              }
+                            >
+                              {addBusy && <Spinner data-icon="inline-start" />}
+                              {addBusy ? t("common.adding") : t("common.add")}
+                            </Button>
+                          </DialogFooter>
+                        ),
+                      }}
+                    />
                   )}
 
                   <DataTable
@@ -1212,9 +1130,9 @@ export function TeamDetail() {
                       rowClassName="group"
                       renderRowMenuItems={(m) => (
                         <>
-                          {isOwner && (
+                          {canChangeOrgRole(m) && (
                             <>
-                              <MenuItem onClick={() => openRoleChange(m)}>
+                              <MenuItem onClick={() => setRoleChangeTarget(m)}>
                                 <ShieldUser className="size-4" />
                                 {t("org.membersPage.changeRoleAria")}
                               </MenuItem>

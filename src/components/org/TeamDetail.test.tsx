@@ -637,6 +637,91 @@ describe("TeamDetail member role editing (AQU-139)", () => {
   })
 })
 
+// AQU-2289 (Sam, Oct 29, settings cleanup 4c option A): every Change role and
+// Add member opens the same dialog, with the same roles for the same level.
+describe("TeamDetail one role dialog (AQU-2289)", () => {
+  const ALL = ["Viewer", "Commenter", "Reviewer", "Contributor", "Project lead", "Maintainer", "Owner"]
+
+  async function offered(comboName: RegExp): Promise<string[]> {
+    fireEvent.click(screen.getByRole("combobox", { name: comboName }))
+    const listbox = await screen.findByRole("listbox")
+    return ALL.filter((name) =>
+      within(listbox).queryAllByRole("option").some((o) => o.textContent?.toLowerCase().startsWith(name.toLowerCase())),
+    )
+  }
+
+  async function openMemberMenu(name: string) {
+    await openTeamTab(/^members$/i)
+    await waitFor(() => expect(screen.getByText(name)).toBeInTheDocument())
+    await act(async () => { (await screen.findByRole("button", { name: new RegExp(`actions for ${name}`, "i") })).click() })
+  }
+
+  it("a member's Change role sets their organization role from the five, never Commenter or Reviewer", async () => {
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 700, name: "owner" } }])
+    getTeam.mockResolvedValue({ id: 10, name: "WA", members: [{ userId: 2, username: "anna", roleLevel: 100 }], projects: [] })
+    renderDetail()
+    await openMemberMenu("anna")
+    await act(async () => { (await screen.findByRole("menuitem", { name: /change role/i })).click() })
+    expect(screen.getByTestId("role-dialog")).toHaveAttribute("data-role-level", "org")
+    expect(await offered(/role for anna/i)).toEqual(["Viewer", "Contributor", "Project lead", "Maintainer", "Owner"])
+  })
+
+  it("offers no organization Change role for someone outside the org: saving it would add them to the org", async () => {
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 700, name: "owner" } }])
+    getTeam.mockResolvedValue({ id: 10, name: "WA", members: [{ userId: 9, username: "gus", roleLevel: null }], projects: [] })
+    renderDetail()
+    await openMemberMenu("gus")
+    expect(screen.queryByRole("menuitem", { name: /change role/i })).toBeNull()
+    expect(screen.getByRole("menuitem", { name: /remove from team/i })).toBeInTheDocument()
+  })
+
+  it("keeps an organization Owner's role locked, as the member list does", async () => {
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 700, name: "owner" } }])
+    getTeam.mockResolvedValue({ id: 10, name: "WA", members: [{ userId: 5, username: "olga", roleLevel: 700 }], projects: [] })
+    renderDetail()
+    await openMemberMenu("olga")
+    expect(screen.queryByRole("menuitem", { name: /change role/i })).toBeNull()
+  })
+
+  it("a team's project grant offers the project list, never Owner", async () => {
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 700, name: "owner" } }])
+    getTeam.mockResolvedValue({ id: 10, name: "WA", members: [], projects: [{ id: "pa", name: "Bambara", grantedRoleLevel: 400 }] })
+    renderDetail()
+    await openTeamTab(/^projects$/i)
+    await waitFor(() => expect(screen.getByText("Bambara")).toBeInTheDocument())
+    await act(async () => { screen.getByRole("button", { name: /actions for bambara/i }).click() })
+    await act(async () => { screen.getByRole("menuitem", { name: /^change role$/i }).click() })
+    expect(screen.getByTestId("role-dialog")).toHaveAttribute("data-role-level", "project")
+    expect(await offered(/role for bambara/i)).toEqual([
+      "Viewer", "Commenter", "Reviewer", "Contributor", "Project lead", "Maintainer",
+    ])
+  })
+
+  it("attaching a project offers the project list too", async () => {
+    const cp = await import("@/lib/sync/cloud-projects")
+    ;(cp.fetchAccessibleProjectsResult as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      projects: [{ id: "pa", name: "Bambara", orgId: 1, role: { level: 700, name: "owner", source: "creator" }, files: [] }],
+    })
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 700, name: "owner" } }])
+    getTeam.mockResolvedValue({ id: 10, name: "WA", members: [], projects: [] })
+    renderDetail()
+    await openTeamTab(/^projects$/i)
+    await act(async () => { (await screen.findByRole("button", { name: /attach project/i })).click() })
+    expect(await offered(/granted role/i)).not.toContain("Owner")
+  })
+
+  it("Add member opens the same dialog, keeping the outside-the-org invite", async () => {
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 700, name: "owner" } }])
+    renderDetail()
+    await openTeamTab(/^members$/i)
+    await act(async () => { (await screen.findByRole("button", { name: /add a member/i })).click() })
+    const dialog = screen.getByTestId("role-dialog")
+    expect(dialog).toHaveAttribute("data-role-dialog-mode", "add")
+    expect(within(dialog).getByLabelText(/invite someone outside the organization/i)).toBeInTheDocument()
+  })
+})
+
 describe("TeamDetail not found", () => {
   it("shows the shared SearchX not-found state when the team cannot be loaded", async () => {
     getTeam.mockRejectedValue(new UserError(404, "", "team"))

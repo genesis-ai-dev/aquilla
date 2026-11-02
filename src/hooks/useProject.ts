@@ -26,6 +26,16 @@ import { subscribeProjectRecordChanged } from "@/lib/sync/project-record-changed
 import { clearProjectTargetLanes, setProjectTargetLanes } from "@/lib/sync/project-target-lanes"
 
 /**
+ * The settings each browser keeps for itself, only in its own copy of the
+ * project and never on the server: Audio loading, Git auto-sync and Health.
+ * (AQU-2331) A cloud project's record comes from the server, which never has
+ * them, so this browser's copy is their only home: the record takes each one
+ * from it, and goes without one the copy no longer has (put back to its
+ * default), rather than keeping a value from an earlier read.
+ */
+const DEVICE_ONLY_KEYS = ["audioMediaStrategy", "syncSettings", "decaySettings"] as const
+
+/**
  * Overlay the DEVICE-LOCAL fields (the ones that live only on the IDB record,
  * never on the server) onto a record. Returns the input by reference when the
  * local copy carries nothing new: the workspace stamps this IDB record on
@@ -37,24 +47,26 @@ function applyDeviceLocalSettings(
   record: ProjectRecord,
   local: ProjectRecord | undefined,
 ): ProjectRecord {
-  if (
-    !local ||
-    (!local.completionSettings &&
-      !local.experimentalFlags &&
-      local.aiProviderChosen === undefined)
-  ) {
-    return record
-  }
+  if (!local) return record
   const next: ProjectRecord = {
     ...record,
     ...(local.completionSettings ? { completionSettings: local.completionSettings } : {}),
     ...(local.experimentalFlags ? { experimentalFlags: local.experimentalFlags } : {}),
     ...(local.aiProviderChosen !== undefined ? { aiProviderChosen: local.aiProviderChosen } : {}),
   }
+  // AQU-2331: before, only the three above were laid over the server's copy,
+  // so on a cloud project these showed their default again after a reload (in
+  // Project settings, and to the editor: Audio loading never reached it).
+  for (const key of DEVICE_ONLY_KEYS) {
+    if (local[key] !== undefined) (next as unknown as Record<string, unknown>)[key] = local[key]
+    else delete next[key]
+  }
+  const same = (key: keyof ProjectRecord) => JSON.stringify(record[key] ?? null) === JSON.stringify(next[key] ?? null)
   const unchanged =
-    JSON.stringify(record.completionSettings ?? null) === JSON.stringify(next.completionSettings ?? null) &&
-    JSON.stringify(record.experimentalFlags ?? null) === JSON.stringify(next.experimentalFlags ?? null) &&
-    record.aiProviderChosen === next.aiProviderChosen
+    same("completionSettings") &&
+    same("experimentalFlags") &&
+    record.aiProviderChosen === next.aiProviderChosen &&
+    DEVICE_ONLY_KEYS.every(same)
   return unchanged ? record : next
 }
 
@@ -224,7 +236,8 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
   }, [projectId, refresh])
 
   // AQU-1103 / AQU-1158: device-local fields (experimentalFlags,
-  // completionSettings, aiProviderChosen) are written by Project settings /
+  // completionSettings, aiProviderChosen, and since AQU-2331 Audio loading,
+  // Git auto-sync and Health) are written by Project settings /
   // Set up AI, which open as a route-modal OVER a still-mounted
   // overview/workspace (App.tsx `backgroundLocation`), so nothing re-runs
   // `refresh` for them. Re-overlay whenever this project's local record changes

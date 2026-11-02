@@ -317,7 +317,7 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     const dialog = screen.getByTestId("project-settings-dialog")
     expect(dialog).toHaveClass("max-w-[min(42rem,calc(100%-2rem))]")
     fireEvent.click(screen.getByText("General"))
-    fireEvent.change(screen.getByLabelText(/project title/i), {
+    fireEvent.change(screen.getByLabelText(/project name/i), {
       target: { value: "Unsaved modal title" },
     })
 
@@ -343,8 +343,11 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     // The index is a NavList of groups...
     expect(screen.getByText("General")).toBeTruthy()
     expect(screen.getByText("Members")).toBeTruthy()
-    expect(screen.getByText("AI & completion")).toBeTruthy()
+    expect(screen.getByText("AI", { exact: true })).toBeTruthy()
     expect(screen.getByText("Validation & health")).toBeTruthy()
+    // AQU-2261: the pane holding Audio loading and Timeline is "Media".
+    expect(screen.getByText("Media")).toBeTruthy()
+    expect(screen.queryByText(/audio media/i)).toBeNull()
     // ...minus the sections that moved to the standalone Living Memory
     // surface (/project/:id/memory) — they must NOT be index rows anymore.
     // The Quality hub still renders with Validation & health alone.
@@ -357,9 +360,9 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     expect(screen.getByText("Lazy (default)")).toBeTruthy()
 
     // ...not the controls themselves. Project Title (General) and AI
-    // Instructions (AI & completion) must NOT both be in the document at once
+    // Instructions (AI) must NOT both be in the document at once
     // on the index — proving this isn't still one long scroll.
-    expect(screen.queryByLabelText(/project title/i)).toBeNull()
+    expect(screen.queryByLabelText(/project name/i)).toBeNull()
     expect(screen.queryByLabelText(/username/i)).toBeNull()
   })
 
@@ -369,11 +372,11 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     fireEvent.click(screen.getByText("General"))
 
     // General's own controls are present...
-    expect(screen.getByLabelText(/project title/i)).toBeTruthy()
+    expect(screen.getByLabelText(/project name/i)).toBeTruthy()
     // AQU-2259: the username moved to Preferences; a note is left here.
     expect(screen.getByText(/this setting moved to preferences/i)).toBeTruthy()
 
-    // ...but a control that lives in a different group (AI & completion) is
+    // ...but a control that lives in a different group (AI) is
     // NOT rendered at the same time. This is the core "no more one long
     // scroll" assertion — every field used to be simultaneously in the DOM.
     expect(screen.queryByLabelText(/examples retrieved/i)).toBeNull()
@@ -384,7 +387,7 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     renderAt(`/project/${PROJECT_ID}/settings/ai`)
 
     expect(screen.getByLabelText(/examples retrieved/i)).toBeTruthy()
-    expect(screen.queryByLabelText(/project title/i)).toBeNull()
+    expect(screen.queryByLabelText(/project name/i)).toBeNull()
   })
 
   // AQU-2031: the editor's TARGET header used to reach these cards through a
@@ -446,12 +449,12 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
 
   it("the Settings breadcrumb returns to the settings index", () => {
     renderAt(`/project/${PROJECT_ID}/settings/general`)
-    expect(screen.getByLabelText(/project title/i)).toBeTruthy()
+    expect(screen.getByLabelText(/project name/i)).toBeTruthy()
 
     fireEvent.click(screen.getByRole("link", { name: /^Settings$/i }))
 
-    expect(screen.getByText("AI & completion")).toBeTruthy()
-    expect(screen.queryByLabelText(/project title/i)).toBeNull()
+    expect(screen.getByText("AI", { exact: true })).toBeTruthy()
+    expect(screen.queryByLabelText(/project name/i)).toBeNull()
   })
 
   it("omits Editor from the breadcrumb unless settings was opened from the editor", () => {
@@ -481,7 +484,7 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
 
     // Matching cards appear under their index section label — not a flat dump.
     expect(screen.getByText("General")).toBeTruthy()
-    expect(screen.getByLabelText(/project title/i)).toBeTruthy()
+    expect(screen.getByLabelText(/project name/i)).toBeTruthy()
     // Unrelated groups that have no keyword match stay out of the document.
     expect(screen.queryByText("AI metrics")).toBeNull()
     expect(screen.queryByText(/approved ai review effort/i)).toBeNull()
@@ -491,12 +494,12 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
   // still reachable through exactly one sub-menu pane.
   it("every settings group renders its expected controls (no section dropped)", () => {
     renderAt(`/project/${PROJECT_ID}/settings/general`)
-    expect(screen.getByLabelText(/project title/i)).toBeTruthy()
-    expect(screen.getByRole("switch", { name: /enable bible resources/i })).toBeTruthy()
+    expect(screen.getByLabelText(/project name/i)).toBeTruthy()
+    expect(screen.getByRole("switch", { name: /enable bible data/i })).toBeTruthy()
     expect(screen.getByText(/this setting moved to preferences/i)).toBeTruthy()
     // Form panes stay on Page size="default" (max-w-2xl, left-aligned).
-    expect(screen.getByLabelText(/project title/i).closest(".max-w-2xl")).toBeTruthy()
-    expect(screen.getByLabelText(/project title/i).closest(".max-w-6xl")).toBeNull()
+    expect(screen.getByLabelText(/project name/i).closest(".max-w-2xl")).toBeTruthy()
+    expect(screen.getByLabelText(/project name/i).closest(".max-w-6xl")).toBeNull()
 
     renderAt(`/project/${PROJECT_ID}/settings/members`)
     expect(screen.getByTestId("settings-members-section")).toBeTruthy()
@@ -516,7 +519,7 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     // mounts correctly when some of its member sections are conditionally
     // hidden. PageHeader description also mentions "git sync", so match the
     // card title exactly.
-    expect(screen.getByText("Git Sync")).toBeTruthy()
+    expect(screen.getByText("Git sync")).toBeTruthy()
     expect(screen.getByText("Link to a source project")).toBeTruthy()
     expect(screen.queryByText("Source link")).toBeNull()
 

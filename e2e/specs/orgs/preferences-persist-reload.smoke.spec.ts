@@ -58,8 +58,8 @@ test("preferences app font size persists across reload without flashing Default"
   await expect(trigger).toBeVisible({ timeout: 10_000 })
   await expectSelectValue(trigger, "Default")
 
-  await pickSelectOption(alice, trigger, "Extra Large")
-  await expectSelectValue(trigger, "Extra Large")
+  await pickSelectOption(alice, trigger, "Extra large")
+  await expectSelectValue(trigger, "Extra large")
   expect(await alice.evaluate(() => document.documentElement.style.fontSize)).toBe("20px")
 
   await alice.reload()
@@ -69,7 +69,7 @@ test("preferences app font size persists across reload without flashing Default"
 
   const triggerAfterReload = alice.getByRole("combobox", { name: "App font size" })
   await expect(triggerAfterReload).toBeVisible({ timeout: 10_000 })
-  await expectSelectValue(triggerAfterReload, "Extra Large")
+  await expectSelectValue(triggerAfterReload, "Extra large")
 
   await pickSelectOption(alice, triggerAfterReload, "Default")
   await expectSelectValue(triggerAfterReload, "Default")

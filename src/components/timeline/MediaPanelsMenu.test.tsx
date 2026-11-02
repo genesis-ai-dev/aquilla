@@ -130,7 +130,7 @@ describe("MediaPanelsMenu", () => {
     expect(dock.restore).toHaveBeenCalled()
   })
 
-  it("leaves the film out on a file without one, and says why under Free timing", async () => {
+  it("leaves the film out on a file without one, and says why when the file follows its recordings", async () => {
     const { rerender } = draw(fakeDock(startDockLayout(), { film: false }), { kind: "scripture", fileName: "Ruth" })
     expect(screen.queryByTestId("panels-row-film")).toBeNull()
     rerender(
@@ -139,7 +139,7 @@ describe("MediaPanelsMenu", () => {
     const film = screen.getByTestId("panels-row-film")
     expect(film).toBeDisabled()
     expect(film).toHaveAttribute("aria-pressed", "false")
-    expect(film).toHaveAttribute("aria-description", "Hidden in Free timing")
+    expect(film).toHaveAttribute("aria-description", "Hidden while the file follows its recordings")
   })
 
   it("resets the layout; its (i) opens what Reset does and the keys beneath it, and closes them (Sam, Oct 28)", () => {

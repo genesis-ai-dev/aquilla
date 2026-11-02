@@ -44,7 +44,7 @@ import {
 /** Shown when hosted drafting has no OpenRouter key. Names the setting to
  *  change and states that a user-supplied key is not Aquilla-billed. */
 const OPENROUTER_KEY_REQUIRED_BODY =
-  "This server has no OpenRouter key for hosted AI. In Project Settings → Advanced LLM, switch the provider to Custom, choose OpenRouter, and paste your key. Your key is sent from this browser to OpenRouter and is not billed as Aquilla usage."
+  "This server has no OpenRouter key for hosted AI. In Project settings → AI → AI model (advanced), switch the provider to Custom, choose OpenRouter, and paste your key. Your key is sent from this browser to OpenRouter and is not billed as Aquilla usage."
 
 /** Drafting/chat-proxy failures. Must not be classified as TTS/voice errors. */
 function isTextGenerationFailure(lowered: string): boolean {

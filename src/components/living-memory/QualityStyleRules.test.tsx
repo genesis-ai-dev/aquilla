@@ -388,8 +388,8 @@ describe("QualityStyleRules — gates and empty states", () => {
     ).not.toBeInTheDocument()
     // The lock must name the floor it actually gates on (Contributor for
     // extraction), not the maintainer floor the entry sections use.
-    expect(screen.getAllByLabelText(/requires Contributor role/i).length).toBeGreaterThan(0)
-    expect(screen.queryByLabelText(/requires Maintainer role/i)).not.toBeInTheDocument()
+    expect(screen.getAllByLabelText(/requires the Contributor role/i).length).toBeGreaterThan(0)
+    expect(screen.queryByLabelText(/requires the Maintainer role/i)).not.toBeInTheDocument()
   })
 
   it("keeps the review actions disabled below PROJECT_LEAD", async () => {

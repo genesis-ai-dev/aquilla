@@ -114,7 +114,7 @@ vi.mock("@/lib/metrics/use-post-edit-metrics", () => ({
   usePostEditMetrics: () => ({ metrics: null, isLoading: false, isError: false, revalidate: vi.fn() }),
 }))
 
-/** The Timeline card lives in the "Audio media" pane; deep-link straight to it
+/** The Timeline card lives in the "Media" pane; deep-link straight to it
  *  rather than clicking through the settings index. */
 function renderSettings() {
   return render(

@@ -54,9 +54,9 @@ const MAINT_ORG: CreateTarget = { ...TIM_ORG, role: 600, teams: [TEAM, { teamId:
 
 async function openAndFill() {
   render(<ProjectCreateDialog onCreated={vi.fn()} orgId={10} />)
-  fireEvent.click(screen.getByRole("button", { name: "New Project" }))
+  fireEvent.click(screen.getByRole("button", { name: "New project" }))
   await screen.findByTestId("project-create-teams")
-  fireEvent.change(screen.getByPlaceholderText("My Translation Project"), { target: { value: "Pattani" } })
+  fireEvent.change(screen.getByPlaceholderText("My translation project"), { target: { value: "Pattani" } })
   fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), { target: { value: "English" } })
   fireEvent.change(screen.getByPlaceholderText(/French, conversational Swahili/i), { target: { value: "Malay" } })
 }
@@ -71,7 +71,7 @@ describe("ProjectCreateDialog — teams multi-select (AQU-1352 P2)", () => {
     mockTargets.mockResolvedValue([TIM_ORG])
     await openAndFill()
     expect(screen.getByTestId("project-create-teams-hint")).toBeTruthy()
-    fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create project/i }))
     expect(await screen.findByText(/Choose at least one team/)).toBeTruthy()
     expect(mockCreate).not.toHaveBeenCalled()
   })
@@ -81,7 +81,7 @@ describe("ProjectCreateDialog — teams multi-select (AQU-1352 P2)", () => {
     await openAndFill()
     fireEvent.click(screen.getByTestId("project-create-teams"))
     fireEvent.click(await screen.findByRole("option", { name: "Pattani Malay" }))
-    fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create project/i }))
     await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
     expect(mockCreate.mock.calls[0][1]).toMatchObject({ orgId: 10, teamIds: [1] })
   })
@@ -90,7 +90,7 @@ describe("ProjectCreateDialog — teams multi-select (AQU-1352 P2)", () => {
     mockTargets.mockResolvedValue([MAINT_ORG])
     await openAndFill()
     expect(screen.queryByTestId("project-create-teams-hint")).toBeNull()
-    fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
+    fireEvent.click(screen.getByRole("button", { name: /Create project/i }))
     await waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(1))
     expect(mockCreate.mock.calls[0][1]).toMatchObject({ orgId: 10, teamIds: [] })
   })

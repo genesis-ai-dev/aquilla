@@ -19,6 +19,7 @@
 // the fields.
 
 import { ROLE } from "@/lib/frontier/roles"
+import { DEFAULT_IMPORT_MIN_ROLE, resolveImportFloor } from "@/lib/sync/role-policy"
 
 /** The org values carried on the project's settings response. */
 export interface ProjectOrgPolicy {
@@ -31,6 +32,12 @@ export interface ProjectOrgPolicy {
   autoPropagateRepetitions: boolean
   /** Null when the org set none: no client export gate. */
   exportMinRole: number | null
+  /**
+   * AQU-2304: the org's `file.create` floor. Absent on a server that predates
+   * the field, which `resolveProjectPolicy` reads as the PROJECT_LEAD default
+   * — i.e. the behaviour before the key existed.
+   */
+  importMinRole?: number
 }
 
 /** One visibility floor: the org's, the project's own (null = follows the org), and the one enforced. */
@@ -58,6 +65,8 @@ export interface OrgSettingsFallback {
   autoPropagateRepetitions: boolean
   exportMinRole: number | null
   canExport: boolean
+  /** AQU-2304: the org's import floor, defaults applied. */
+  importMinRole: number
 }
 
 export interface ResolvedProjectPolicy {
@@ -75,6 +84,13 @@ export interface ResolvedProjectPolicy {
   exportMinRole: number | null
   /** Whether the caller's project role meets the export floor (see useOrgSettings.canExport). */
   canExport: boolean
+  /**
+   * AQU-2304: the floor to import a NEW source file, defaults applied. Pair it
+   * with the caller's role through `canImportSourceFiles` (role-policy.ts),
+   * which also keeps the static `file.create` bar — this value alone is only
+   * half the gate.
+   */
+  importMinRole: number
 }
 
 const LADDER: readonly number[] = Object.values(ROLE)
@@ -121,6 +137,9 @@ export function resolveProjectPolicy(input: {
       autoPropagateRepetitions: orgPolicy.autoPropagateRepetitions,
       exportMinRole,
       canExport: exportMinRole == null || roleLevel == null || roleLevel >= exportMinRole,
+      // AQU-2304: a server that predates the field sends nothing, which
+      // resolves to the PROJECT_LEAD default — the behaviour before the key.
+      importMinRole: resolveImportFloor(orgPolicy.importMinRole),
     }
   }
   return {
@@ -140,6 +159,12 @@ export function resolveProjectPolicy(input: {
     autoPropagateRepetitions: org.version != null ? org.autoPropagateRepetitions : false,
     exportMinRole: org.exportMinRole,
     canExport: org.canExport,
+    // Fail SAFE in the permissive direction here, unlike autoPropagateRepetitions
+    // above: an unknown floor reads as the PROJECT_LEAD default, which is what
+    // every org that never set the key means. Closing it instead would hide
+    // Import from the leads of every org on an older server, and the server
+    // refuses the write regardless — this value only decides affordances.
+    importMinRole: org.version != null ? org.importMinRole : DEFAULT_IMPORT_MIN_ROLE,
   }
 }
 

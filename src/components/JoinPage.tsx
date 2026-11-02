@@ -3,7 +3,8 @@ import { useParams, useNavigate } from "react-router-dom"
 import { AlertCircle, Users } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { AuthPage, AuthPanel } from "@/components/auth/AuthPage"
 import {
   acceptServerInvite,
   previewServerInvite,
@@ -251,10 +252,10 @@ export function JoinPage() {
     ) : null
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-md">
+    <AuthPage>
+      <AuthPanel>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-lg">
+          <CardTitle role="heading" aria-level={1} className="flex items-center gap-2">
             <Users className="h-5 w-5" />
             {(showPreviewCard || showConfirmCard) && !previewFailed
               ? t("auth.join.invitedTitle")
@@ -426,8 +427,8 @@ export function JoinPage() {
             <p className="text-sm text-muted-foreground">{t("auth.join.initializing")}</p>
           )}
         </CardContent>
-      </Card>
-    </div>
+      </AuthPanel>
+    </AuthPage>
   )
 }
 

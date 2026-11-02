@@ -451,3 +451,26 @@ describe("MultiProjectInviteDialog list virtualization (AQU-1151)", () => {
     expect(await screen.findByText(/nope|couldn't|could not/i)).toBeInTheDocument()
   })
 })
+
+// AQU-2289: "Add to projects" is the member list's project-level add door, so
+// each project's role list is the one project list, capped at the operator's
+// own role on that project.
+describe("MultiProjectInviteDialog role list (AQU-2289)", () => {
+  it("never offers a project role above the operator's own role on that project", async () => {
+    render(
+      <MultiProjectInviteDialog
+        open={true}
+        onOpenChange={() => {}}
+        projects={[
+          { id: "pa", name: "John", role: { level: 500, name: "project_lead", source: "override" } },
+        ] as CloudProjectSummary[]}
+      />,
+    )
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select John" }))
+    fireEvent.click(screen.getByRole("combobox", { name: /role for john/i }))
+    const listbox = await screen.findByRole("listbox")
+    const names = Array.from(listbox.querySelectorAll('[role="option"]')).map((o) => o.textContent ?? "")
+    expect(names.some((n) => /^project lead/i.test(n))).toBe(true)
+    expect(names.some((n) => /^maintainer/i.test(n))).toBe(false)
+  })
+})

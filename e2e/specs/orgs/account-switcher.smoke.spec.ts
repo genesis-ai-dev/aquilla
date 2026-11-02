@@ -226,7 +226,7 @@ test("logout and second-user sign-in survive unavailable private storage", async
 
   await alice.getByLabel("Username or email").fill(bob.username)
   await alice.getByRole("textbox", { name: "Password" }).fill(bob.password)
-  await alice.getByRole("button", { name: "Sign in" }).click()
+  await alice.getByRole("button", { name: "Log in" }).click()
 
   await expect(alice.getByRole("button", { name: /Account menu: bob/i })).toBeVisible({
     timeout: 30_000,

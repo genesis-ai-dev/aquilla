@@ -188,7 +188,7 @@ describe("ProjectSettings — who can add and remove cells (AQU-1068)", () => {
     await setForThisProject(user)
 
     await user.click(screen.getByTestId("settings-cell-editing-floor"))
-    await user.click(await screen.findByRole("option", { name: "Maintainer (600)" }))
+    await user.click(await screen.findByRole("option", { name: "Maintainer" }))
     await user.click(screen.getByRole("button", { name: /save changes/i }))
 
     expect(patchSpy).toHaveBeenCalledTimes(1)
@@ -203,7 +203,7 @@ describe("ProjectSettings — who can add and remove cells (AQU-1068)", () => {
     await setForThisProject(user)
 
     await user.click(screen.getByTestId("settings-cell-editing-floor"))
-    await user.click(await screen.findByRole("option", { name: "Reviewer (300)" }))
+    await user.click(await screen.findByRole("option", { name: "Reviewer" }))
     await user.click(screen.getByRole("button", { name: /save changes/i }))
 
     const sent = patchSpy.mock.calls[0][0] as Record<string, unknown>
@@ -217,7 +217,7 @@ describe("ProjectSettings — who can add and remove cells (AQU-1068)", () => {
     expect(screen.getByTestId("settings-cell-editing-floor")).not.toBeDisabled()
 
     await user.click(screen.getByTestId("settings-cell-editing-floor"))
-    await user.click(await screen.findByRole("option", { name: "Contributor (400)" }))
+    await user.click(await screen.findByRole("option", { name: "Contributor" }))
     expect(screen.getByTestId("cell-editing-floor-source")).toHaveTextContent("Set for this project")
     await user.click(screen.getByRole("button", { name: /save changes/i }))
 
@@ -233,18 +233,17 @@ describe("ProjectSettings — who can add and remove cells (AQU-1068)", () => {
     const labels = (await screen.findAllByRole("option")).map((o) => o.textContent)
     expect(labels).toEqual([
       "No one — default",
-      "Commenter (200)",
-      "Reviewer (300)",
-      "Contributor (400)",
-      "Project lead (500)",
-      "Maintainer (600)",
+      "Commenter",
+      "Reviewer",
+      "Contributor",
+      "Project lead",
+      "Maintainer",
     ])
   })
 
-  it("shows the short role word in the closed trigger, the ladder line in the open row", async () => {
-    // The two-tier labelling copied from RosterProgressSection: FLOOR_LABEL for
-    // the trigger, the message key for the row. Collapse the two and the
-    // trigger reads "Contributor (400)" in a 16rem box.
+  it("names roles without level numbers, closed and open (AQU-2261)", async () => {
+    // FLOOR_LABEL for the trigger, the message key for the row; neither
+    // carries a level number since AQU-2261.
     const user = userEvent.setup()
     currentProject = makeProject({ cellEditingFloor: "contributor" } as Partial<ProjectRecord>)
     renderSettings(PANE)
@@ -254,7 +253,8 @@ describe("ProjectSettings — who can add and remove cells (AQU-1068)", () => {
     expect(trigger.textContent).not.toContain("(400)")
 
     await user.click(trigger)
-    expect(await screen.findByRole("option", { name: "Contributor (400)" })).toBeInTheDocument()
+    expect(await screen.findByRole("option", { name: "Contributor" })).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: /\(\d00\)/ })).toBeNull()
   })
 
   it("locks the control for a member below the settings floor", () => {

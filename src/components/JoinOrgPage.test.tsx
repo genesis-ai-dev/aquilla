@@ -1,7 +1,8 @@
+import { renderWithBrand as render } from "@/test-utils/render-with-brand"
 // AQU-471: the org-invite landing page must say which org, who invited you,
 // and at what role — Biblica pilot feedback was that it named none of them.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, waitFor, fireEvent, act } from "@testing-library/react"
+import { screen, waitFor, fireEvent, act } from "@testing-library/react"
 import { MemoryRouter, Routes, Route, Link, useLocation } from "react-router-dom"
 import { JoinOrgPage } from "./JoinOrgPage"
 import { acceptOrgInvite } from "@/lib/frontier/orgs"

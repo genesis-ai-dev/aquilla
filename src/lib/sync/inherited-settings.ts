@@ -72,6 +72,15 @@ export const INHERIT_NEVER_KEYS = [
   "terminology",
   "termMatching",
   "alignmentSeeds",
+  // AQU-2348: lane-keyed Living Memory. Lane ids are project-local, so copying
+  // these downstream would key that project's memory by lanes it does not
+  // have — the override would simply never resolve, and a "Customize for this
+  // lane" the downstream team never asked for would sit in its settings blob.
+  // `systemPrompt` and `translationBrief` still copy: it is the PROJECT-wide
+  // value that is inheritable, and the downstream project customizes its own
+  // lanes itself.
+  "systemPromptByLane",
+  "translationBriefByLane",
   "sourceTextDirection",
   "targetTextDirection",
   "ttsSettings",

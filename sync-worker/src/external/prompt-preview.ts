@@ -54,6 +54,11 @@ import {
   loadBranchingSearchSettings,
 } from "../lib/branching-search/settings"
 import { resolveLane } from "../../../db/shared/lane-ref"
+import {
+  resolveLaneMemory,
+  targetLaneIdForTag,
+  type LaneMemorySource,
+} from "../../../db/shared/lane-memory"
 import { loadProjectSettings } from "../../../db/shared/projects"
 import { listProjectLanes } from "../../../db/shared/lanes"
 import { listRulesForProject } from "../../../db/shared/style-rules"
@@ -175,6 +180,29 @@ function stringSetting(settings: Record<string, unknown>, key: string): string {
   return typeof value === "string" ? value : ""
 }
 
+/** AQU-2348: a per-lane override map, keeping only entries of the right shape.
+ *  Junk is dropped rather than failing the read — a preview must still answer
+ *  for a project whose settings blob some older writer bent. */
+function laneMapSetting<T>(
+  settings: Record<string, unknown>,
+  key: string,
+  keep: (value: unknown) => value is T,
+): Record<string, T> {
+  const out: Record<string, T> = {}
+  for (const [laneId, value] of Object.entries(objectSetting(settings, key))) {
+    if (keep(value)) out[laneId] = value
+  }
+  return out
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === "string"
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
 /** A prompt-injectable rule that also carries the AQU-609 lane scoping fields.
  *  `TranslationRule` (and the compiled terminology rules) satisfy this. */
 type ScopedPromptRule = PromptRule & { scope?: string; lane?: string }
@@ -235,6 +263,15 @@ export interface PromptPreviewBody {
     injectedTerms: InjectedTerm[]
     examples: ValidatedPair[]
     precedingContext: { source: string; target: string }[]
+    /**
+     * AQU-2348: which level each resolved part came from — `"lane"` when this
+     * lane owns its own copy of that section, `"project"` when it inherits
+     * (which is every lane of a project nobody has customized). This is the
+     * AQU-1230 contract's answer to "whose instructions am I seeing": a
+     * caller comparing two lanes' previews can tell a shared value from a
+     * customized one that happens to read the same.
+     */
+    sources: { base: LaneMemorySource; brief: LaneMemorySource }
   }
   /** What the draft call would be made WITH (project configuration; a
    *  per-device provider override in user Settings is invisible here). */
@@ -343,7 +380,6 @@ export async function buildPromptPreview(
     ...objectSetting(settings, "completionSettings"),
     ...objectSetting(settings, "draftingSettings"),
   }
-  const brief = objectSetting(settings, "translationBrief")
   const draftContext = objectSetting(settings, "draftContext")
 
   // AQU-1593 / AQU-1595: both languages come from the lane row. `targetLang`
@@ -356,17 +392,40 @@ export async function buildPromptPreview(
   })
   const targetLanguage = laneLanguageForTag(targetLang, lanes) ?? ""
 
+  // AQU-2348: the prose sections resolve PER LANE through the one shared
+  // resolver, so this preview cannot drift from what the copilot sends. The
+  // lane is addressed by `lanes.id`; `targetLang` is the lane's legacy tag, so
+  // it comes through `laneIdForTag`. A tag no row carries resolves to no lane,
+  // which reads as "inherit" — the pre-AQU-2348 answer.
+  const laneId = targetLaneIdForTag(targetLang, lanes)
+  const laneMemory = resolveLaneMemory(
+    {
+      systemPrompt: stringSetting(settings, "systemPrompt") || undefined,
+      systemPromptByLane: laneMapSetting(settings, "systemPromptByLane", isString),
+      translationBrief: objectSetting(settings, "translationBrief"),
+      translationBriefByLane: laneMapSetting(settings, "translationBriefByLane", isRecord),
+    },
+    laneId,
+  )
+  const brief = laneMemory.brief.value ?? {}
+
   // Top-level `systemPrompt` is what PatchSettings writes and what the SPA
   // syncs into completionSettings.systemPrompt (useProject.ts) — so it wins;
   // the nested copy is the fallback for projects that only ever set it there.
+  // An EMPTY lane prompt falls through the same chain a blank project prompt
+  // always did, so `base` is only reported as the lane's when the lane's text
+  // is what actually reached the prompt.
+  const laneSystemPrompt = laneMemory.systemPrompt.value ?? ""
   const systemPrompt =
-    stringSetting(settings, "systemPrompt") ||
-    stringSetting(completion, "systemPrompt") ||
-    DEFAULT_SYSTEM_PROMPT
+    laneSystemPrompt || stringSetting(completion, "systemPrompt") || DEFAULT_SYSTEM_PROMPT
+  const baseSource: LaneMemorySource =
+    laneSystemPrompt && laneMemory.systemPrompt.source === "lane" ? "lane" : "project"
   const topK = clampInt(completion.top_k, DEFAULT_APPROVED_EXAMPLE_COUNT, 1, MAX_TOP_K)
   const exampleFormat =
     completion.fewShotExampleFormat === "target-only" ? "target-only" : "source-and-target"
   const briefSummary = stringSetting(brief, "l1Summary")
+  const briefSource: LaneMemorySource =
+    briefSummary && laneMemory.brief.source === "lane" ? "lane" : "project"
   const precedingCount = clampInt(
     draftContext.precedingTargetCells,
     DEFAULT_PRECEDING_TARGET_CELLS,
@@ -627,6 +686,7 @@ export async function buildPromptPreview(
           .replace(/\{sourceLanguage\}/g, sourceLanguage)
           .replace(/\{targetLanguage\}/g, targetLanguage),
         brief: buildBriefBlock(briefSummary),
+        sources: { base: baseSource, brief: briefSource },
         rules: buildRulesBlock(rules, { sourceText }),
         styleRules: buildStyleRulesBlock(styleInstructions),
         injectedTerms,

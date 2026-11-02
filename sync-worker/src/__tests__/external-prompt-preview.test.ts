@@ -55,6 +55,7 @@ interface PreviewBody {
     }[]
     examples: { cellId?: string; source: string; target: string }[]
     precedingContext: { source: string; target: string }[]
+    sources: { base: "lane" | "project"; brief: "lane" | "project" }
   }
   generation: {
     provider: string
@@ -840,6 +841,124 @@ describe("external prompt preview", () => {
       })
 
       expect(body.messages).toEqual(expected)
+    })
+  })
+
+  // AQU-2348: Living Memory resolves PER LANE. The project's prompt and brief
+  // stay the DEFAULT for every lane; a lane that owns its own copy replaces
+  // them for itself and for nothing else. `parts.sources` is how a caller
+  // tells a shared value from a customized one that happens to read the same.
+  describe("per-lane Living Memory", () => {
+    const ES_LANE = "0f0f0f0f"
+
+    async function seedTwoLanes() {
+      await testDb.pg.query(
+        `INSERT INTO lanes (id, project_id, role, language, legacy_tag, position)
+         VALUES ($1, 'proj-a', 'target', 'Spanish', 'es', 2)`,
+        [ES_LANE],
+      )
+      await insertCell(testDb, { cellId: "cell-live", seq: 1, source: "God saw the light" })
+    }
+
+    const PROJECT_MEMORY = {
+      sourceLanguage: "English",
+      targetLanguage: "French",
+      systemPrompt: "Project prompt.",
+      translationBrief: { l1Summary: "Project brief." },
+    }
+
+    it("gives an uncustomized lane the project's prompt and brief, sourced to the project", async () => {
+      await seedTwoLanes()
+      await putSettings(testDb, "proj-a", PROJECT_MEMORY)
+
+      const { body } = await preview(testDb, token, "cell-live", `?targetLang=${ES_LANE}`)
+
+      expect(body.parts.base).toBe("Project prompt.")
+      expect(body.parts.brief).toContain("Project brief.")
+      expect(body.parts.sources).toEqual({ base: "project", brief: "project" })
+    })
+
+    it("gives a customized lane its own prompt and brief, sourced to the lane", async () => {
+      await seedTwoLanes()
+      await putSettings(testDb, "proj-a", {
+        ...PROJECT_MEMORY,
+        systemPromptByLane: { [ES_LANE]: "Spanish-lane prompt." },
+        translationBriefByLane: { [ES_LANE]: { l1Summary: "Spanish-lane brief." } },
+      })
+
+      const { body } = await preview(testDb, token, "cell-live", `?targetLang=${ES_LANE}`)
+
+      expect(body.parts.base).toBe("Spanish-lane prompt.")
+      expect(body.parts.brief).toContain("Spanish-lane brief.")
+      expect(body.parts.brief).not.toContain("Project brief.")
+      expect(body.parts.sources).toEqual({ base: "lane", brief: "lane" })
+    })
+
+    it("leaves every other lane reading the project's values", async () => {
+      await seedTwoLanes()
+      await putSettings(testDb, "proj-a", {
+        ...PROJECT_MEMORY,
+        systemPromptByLane: { [ES_LANE]: "Spanish-lane prompt." },
+        translationBriefByLane: { [ES_LANE]: { l1Summary: "Spanish-lane brief." } },
+      })
+
+      const { body } = await preview(testDb, token, "cell-live", "?targetLang=deflane1")
+
+      expect(body.parts.base).toBe("Project prompt.")
+      expect(body.parts.brief).toContain("Project brief.")
+      expect(body.parts.brief).not.toContain("Spanish-lane")
+      expect(body.parts.sources).toEqual({ base: "project", brief: "project" })
+    })
+
+    it("still equals what the copilot sends — in the customized lane", async () => {
+      await seedTwoLanes()
+      await putSettings(testDb, "proj-a", {
+        ...PROJECT_MEMORY,
+        systemPromptByLane: { [ES_LANE]: "Spanish-lane prompt." },
+        translationBriefByLane: { [ES_LANE]: { l1Summary: "Spanish-lane brief." } },
+      })
+
+      const { body } = await preview(testDb, token, "cell-live", `?targetLang=${ES_LANE}`)
+
+      // The route and the editor read the lane through ONE resolver
+      // (db/shared/lane-memory.ts), so the lane's values must come out of the
+      // shared builder byte-for-byte — that is what stops the preview drifting
+      // from the prompt a lane is actually drafted with (AQU-1230).
+      const expected = buildPrompt({
+        sourceLanguage: "English",
+        targetLanguage: "Spanish",
+        systemPrompt: "Spanish-lane prompt.",
+        sourceText: "God saw the light",
+        examples: [],
+        rules: [],
+        validatedPairs: body.parts.examples,
+        exampleFormat: "source-and-target",
+        briefSummary: "Spanish-lane brief.",
+        precedingContext: body.parts.precedingContext,
+      })
+
+      expect(body.messages).toEqual(expected)
+    })
+
+    it("reports the project as the source when a lane's own prompt is blank", async () => {
+      await seedTwoLanes()
+      await putSettings(testDb, "proj-a", {
+        ...PROJECT_MEMORY,
+        systemPromptByLane: { [ES_LANE]: "" },
+      })
+
+      const { body } = await preview(testDb, token, "cell-live", `?targetLang=${ES_LANE}`)
+
+      // An empty lane prompt falls through the same chain a blank project
+      // prompt always did, so the reported source must follow the text that
+      // actually reached the prompt rather than the key that existed.
+      expect(body.parts.base).toBe(
+        DEFAULT_SYSTEM_PROMPT.replace(/\{sourceLanguage\}/g, "English").replace(
+          /\{targetLanguage\}/g,
+          "Spanish",
+        ),
+      )
+      expect(body.parts.sources.base).toBe("project")
     })
   })
 

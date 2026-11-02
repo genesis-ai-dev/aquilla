@@ -6,6 +6,7 @@ import { recordModelCall, type RecordModelCall } from "@/lib/ai-interventions/cl
 import { useCharacterSheetCells } from "@/hooks/useCharacterSheetCells"
 import { confirmedTargetHeadKeys } from "@/lib/sync/confirmed-target-heads"
 import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
+import { resolveLaneMemory } from "../../db/shared/lane-memory"
 import { Suspense, cloneElement, isValidElement, lazy, useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback } from "react"
 import { createPortal } from "react-dom"
 import { useParams, useNavigate, useSearchParams, useLocation } from "react-router-dom"
@@ -7039,12 +7040,53 @@ export function ProjectWorkspace() {
     if (!project?.id || !aiTrailToken) return
     void recordModelCall(project.id, activeLane, call, aiTrailToken)
   }, [project?.id, activeLane, aiTrailToken])
+  // AQU-2348: Living Memory resolves PER LANE, through the SAME resolver the
+  // Agent API's prompt preview uses (db/shared/lane-memory.ts) — so what the
+  // preview reports is what this draft call actually sends, which is the
+  // AQU-1230 contract. A lane that owns no copy of a section inherits the
+  // project's, which is what every lane did before this key existed, so a
+  // single-lane project and an uncustomized lane are byte-identical to before.
+  // Keyed by `lanes.id` — `activeLaneId` above, the open lane's ROW id, which
+  // is `null` on a project with no target lane rows: no lane, so inherit.
+  const laneMemory = useMemo(
+    () =>
+      resolveLaneMemory(
+        {
+          ...(project?.completionSettings?.systemPrompt
+            ? { systemPrompt: project.completionSettings.systemPrompt }
+            : {}),
+          ...(project?.systemPromptByLane ? { systemPromptByLane: project.systemPromptByLane } : {}),
+          ...(project?.translationBrief ? { translationBrief: project.translationBrief } : {}),
+          ...(project?.translationBriefByLane
+            ? { translationBriefByLane: project.translationBriefByLane }
+            : {}),
+        },
+        activeLaneId ?? undefined,
+      ),
+    [
+      project?.completionSettings?.systemPrompt,
+      project?.systemPromptByLane,
+      project?.translationBrief,
+      project?.translationBriefByLane,
+      activeLaneId,
+    ],
+  )
+  // The lane's prompt replaces `completionSettings.systemPrompt` for the draft
+  // call only. Nothing is written back: the stored project-wide value is still
+  // what Living Memory edits and what an uncustomized lane reads.
+  const laneCompletionSettings = useMemo(() => {
+    const base = project?.completionSettings
+    if (!base) return base
+    const resolved = laneMemory.systemPrompt.value ?? ""
+    return resolved === (base.systemPrompt ?? "") ? base : { ...base, systemPrompt: resolved }
+  }, [project?.completionSettings, laneMemory.systemPrompt.value])
+
   const { completeSingle, alignCellStyles, askAlignStyles, alignStylesModel, prepareSingleEvidence, prefetchSingleEvidence, completeBatch, completeParagraph, clearCellError, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
     // AQU-538/AQU-602: when a non-default lane is active, its tag IS the target
     // language for few-shot/completion; default lane falls back to the file's
     // (then project's) targetLanguage exactly as before. Shares the same
     // lane-aware derivation as the editor project + file metadata.
-    project?.completionSettings, activeSourceLanguage || "", activeLaneTargetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell, rules, getActiveCells, project?.translationBrief?.l1Summary ?? undefined,
+    laneCompletionSettings, activeSourceLanguage || "", activeLaneTargetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell, rules, getActiveCells, laneMemory.brief.value?.l1Summary ?? undefined,
     project?.draftContext ?? DEFAULT_DRAFT_CONTEXT,
     activeLane,
     commitCompletedCells,

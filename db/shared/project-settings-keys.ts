@@ -34,6 +34,12 @@ import {
   rulePenaltiesProblem,
   rulesProblem,
 } from './rules-settings'
+import {
+  SYSTEM_PROMPT_BY_LANE_TYPE_NAME,
+  TRANSLATION_BRIEF_BY_LANE_TYPE_NAME,
+  systemPromptByLaneProblem,
+  translationBriefByLaneProblem,
+} from './lane-memory'
 import { parseProjectVisibilityFloor, VISIBILITY_FLOOR_LEVELS } from './visibility-floors'
 
 const VISIBILITY_FLOOR_TYPE_NAME = `${VISIBILITY_FLOOR_LEVELS.join(' | ')} (a role level: 100 viewer … 700 owner)`
@@ -140,6 +146,23 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
   draftContext: { kind: 'object' },
   translationBrief: { kind: 'object' },
   livingMemoryEntries: { kind: 'object[]' },
+  // AQU-2348: per-target-lane Living Memory. A lane entry REPLACES the
+  // project's value for that lane (`systemPrompt` / `translationBrief`); an
+  // absent entry means the lane inherits, which is what every project did
+  // before these keys existed. Keyed by the lane's opaque 8-hex id, never a
+  // language or a legacy tag (db/shared/lane-memory.ts resolves both keys).
+  // Authored entries are a LIST, so they union instead: an entry carries an
+  // optional `laneId` and `livingMemoryEntries` stays the one key.
+  systemPromptByLane: {
+    kind: 'object',
+    problem: (value) => systemPromptByLaneProblem(value),
+    typeName: SYSTEM_PROMPT_BY_LANE_TYPE_NAME,
+  },
+  translationBriefByLane: {
+    kind: 'object',
+    problem: (value) => translationBriefByLaneProblem(value),
+    typeName: TRANSLATION_BRIEF_BY_LANE_TYPE_NAME,
+  },
   alignmentSeeds: { kind: 'object[]' },
 
   // Rules / checks (AQU-2192: real validators; shapes in db/shared/rules-settings.ts)

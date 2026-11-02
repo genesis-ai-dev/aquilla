@@ -395,7 +395,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.cellEditing.optionCommenter": "Commenter",
     "projectSettings.cellEditing.optionReviewer": "Reviewer",
     "projectSettings.cellEditing.optionContributor": "Contributor",
-    "projectSettings.cellEditing.optionProjectLead": "Project lead",
+    "projectSettings.cellEditing.optionProjectLead": "Project Lead",
     "projectSettings.cellEditing.optionMaintainer": "Maintainer",
     // model → projectSettings.advancedLlm.modelLabel
     "projectSettings.field.temperature": "temperature",
@@ -653,7 +653,7 @@ export const projectSettings = defineNamespace({
     // cast are in Media's Voices tab.
     "projectSettings.voice.voicesNote": "The voice library and cast assignments are in the Voices tab of the Media view.",
     "projectSettings.voice.openVoicesButton": "Open Voices",
-    "projectSettings.voice.leadsManageLabel": "Project leads can manage voices",
+    "projectSettings.voice.leadsManageLabel": "Project Leads can manage voices",
     "projectSettings.voice.leadsManageDescription":
       "When this is on, a project lead can create, edit, and assign voices on the language lanes " +
       "they can write. When it is off, only a maintainer can. Voices already created stay either way.",
@@ -673,7 +673,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.harmonization.defaultRoleSuffix": "{role} (default)",
     "projectSettings.harmonization.description":
       "Only users with at least this role can open a harmonization sweep on this project. The floor " +
-      "cannot be lowered below Project lead (hard floor per spec).",
+      "cannot be lowered below Project Lead (hard floor per spec).",
 
     // ── Git Sync card ──
     "projectSettings.gitSync.originLabel": "Origin: {url} (branch: {branch})",
@@ -960,7 +960,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.sourceLink.irreversibleDescription":
       "Detaching snapshots the current upstream source cells into this project and " +
       "severs the live link. Stale-source markers will clear. This action cannot be undone.",
-    "projectSettings.sourceLink.roleGateNote": "Project lead or above required to detach from source.",
+    "projectSettings.sourceLink.roleGateNote": "Project Lead or above required to detach from source.",
     "projectSettings.sourceLink.detachButton": "Detach from source",
     "projectSettings.sourceLink.detachDialogTitle": "Detach from source project?",
     "projectSettings.sourceLink.detachDialogDescription":
@@ -998,7 +998,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.linkSource.linkButton": "Link source project",
     "projectSettings.linkSource.linkingButton": "Linking…",
     "projectSettings.linkSource.roleGateNote":
-      "Project lead or above required to link a source project.",
+      "Project Lead or above required to link a source project.",
     "projectSettings.linkSource.cycleError":
       "That project already reads its source from this one, so linking would " +
       "create a loop. This project is still unlinked — choose a different project.",
@@ -2143,7 +2143,7 @@ export const projectSettings = defineNamespace({
           "Marks a role option in the harmonization minimum-role select as the " +
           "current default.",
         placeholders: {
-          role: "The already-localized role display name (via resolveRoleName/common.role.*), e.g. 'Project lead'.",
+          role: "The already-localized role display name (via resolveRoleName/common.role.*), e.g. 'Project Lead'.",
         },
       },
       "projectSettings.gitSync.originLabel": {
@@ -2848,7 +2848,7 @@ export const projectSettings = defineNamespace({
           "as the project creator stays. This dialog does not revoke those paths.",
         placeholders: {
           username: "The member's username — not translated.",
-          role: "The direct membership's role name, already localized (for example 'Project lead').",
+          role: "The direct membership's role name, already localized (for example 'Project Lead').",
         },
       },
       "projectSettings.members.actionsForRow": {
@@ -2866,7 +2866,7 @@ export const projectSettings = defineNamespace({
           "'Change role', and as the tooltip on the disabled 'Add a member' button. " +
           "States the required role rather than leaving the control silently missing.",
         placeholders: {
-          role: "The localized name of the required role (today 'Project lead'), resolved from the role ladder — insert exactly as given.",
+          role: "The localized name of the required role (today 'Project Lead'), resolved from the role ladder — insert exactly as given.",
         },
       },
       "projectSettings.members.roleChangeOutranked": {
@@ -3372,7 +3372,7 @@ export const projectSettings = defineNamespace({
           "Same dropdown beside a role setting ('Who can add and remove cells', 'Minimum role to validate recordings'). " +
           "Choosing it means this project follows its organization's choice, shown in brackets.",
         placeholders: {
-          value: "The organization's current choice, e.g. 'Project lead' or 'No one', already translated.",
+          value: "The organization's current choice, e.g. 'Project Lead' or 'No one', already translated.",
         },
       },
       "projectSettings.visibility.onlyRoleLoosens": {

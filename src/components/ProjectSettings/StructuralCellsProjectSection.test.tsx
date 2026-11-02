@@ -14,7 +14,7 @@ import { SettingsGroup } from "@/components/ui/page"
 import { StructuralCellsProjectSection } from "./StructuralCellsProjectSection"
 import { RepetitionPropagationProjectSection } from "./RepetitionPropagationProjectSection"
 
-const LOCK = "Only Project leads can modify"
+const LOCK = "Only Project Leads can modify"
 const isOn = (el: HTMLElement) => el.getAttribute("aria-checked") === "true" || el.hasAttribute("data-checked")
 const isDisabled = (el: HTMLElement) =>
   el.hasAttribute("disabled") || el.getAttribute("aria-disabled") === "true" || el.hasAttribute("data-disabled")
@@ -83,10 +83,10 @@ describe("StructuralCellsProjectSection", () => {
   })
 
   it("says why when the save is refused", async () => {
-    const onPatch = vi.fn(async () => ({ kind: "blocked", message: "Only Project leads can change this." }))
+    const onPatch = vi.fn(async () => ({ kind: "blocked", message: "Only Project Leads can change this." }))
     renderWithTooltips(<StructuralCellsProjectSection value={undefined} orgDefault onPatch={onPatch} />)
     await userEvent.click(headingsSwitch())
-    expect(await screen.findByText("Only Project leads can change this.")).toBeInTheDocument()
+    expect(await screen.findByText("Only Project Leads can change this.")).toBeInTheDocument()
   })
 })
 

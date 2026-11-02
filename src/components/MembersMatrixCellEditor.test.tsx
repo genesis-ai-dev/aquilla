@@ -131,6 +131,6 @@ describe("MembersMatrixCellEditor — role chips (AQU-2332)", () => {
     ])
     fireEvent.click(screen.getByRole("button", { name: "Edit carol's role on this project" }))
     const also = await screen.findByTestId("matrix-cell-also-via")
-    expect(shownCase(within(also).getByText("Project lead"))).toBe("as written")
+    expect(shownCase(within(also).getByText("Project Lead"))).toBe("as written")
   })
 })

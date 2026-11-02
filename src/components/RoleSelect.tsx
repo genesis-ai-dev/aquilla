@@ -73,7 +73,7 @@ export function RoleSelect({
       : null
 
   // The closed trigger shows these labels: the catalog's name, so it reads
-  // in sentence case and in the reader's language, like the open list.
+  // as written and in the reader's language, like the open list.
   const items = [
     ...(extra
       ? [{ value: String(extra.level), label: resolveRoleName(t, extra.name) }]

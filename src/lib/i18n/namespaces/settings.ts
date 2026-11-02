@@ -251,7 +251,7 @@ export const settings = defineNamespace({
     "settings.assignmentAuthority.floorSummary": "The lowest project role that can assign work to other people.",
     "settings.assignmentAuthority.floorInfo":
       "That covers assigning, reassigning and unassigning files, chapters, language lanes and " +
-      "AI review. Project lead by default.",
+      "AI review. Project Lead by default.",
     "settings.assignmentAuthority.label": "Allow self-assignment",
     "settings.assignmentAuthority.summary": "Contributors can take work for themselves, but not give it to others.",
     "settings.assignmentAuthority.info":
@@ -357,7 +357,7 @@ export const settings = defineNamespace({
     // treatment as settings.termbase.option* below.
     "settings.rosterProgress.optionViewer": "Viewer — anyone with access",
     "settings.rosterProgress.optionContributor": "Contributor",
-    "settings.rosterProgress.optionProjectLead": "Project lead",
+    "settings.rosterProgress.optionProjectLead": "Project Lead",
     "settings.rosterProgress.optionMaintainer": "Maintainer — default",
     "settings.rosterProgress.optionOwner": "Owner — most restrictive",
 
@@ -370,7 +370,7 @@ export const settings = defineNamespace({
     // Open-dropdown option text for the termbase-edit floor select; see the
     // roster/progress options above for why the level number is baked in.
     "settings.termbase.optionContributor": "Contributor — translators manage terms",
-    "settings.termbase.optionProjectLead": "Project lead — default",
+    "settings.termbase.optionProjectLead": "Project Lead — default",
     "settings.termbase.optionMaintainer": "Maintainer — most restrictive",
 
     // ── LanguageEditSection (org settings → security) — AQU-1086 ──
@@ -382,7 +382,7 @@ export const settings = defineNamespace({
     // Open-dropdown option text for the language-edit floor select; see the
     // roster/progress options above for why the level number is baked in.
     "settings.languageEdit.optionProjectLead":
-      "Project lead — default. Project managers fix their own languages",
+      "Project Lead — default. Project managers fix their own languages",
     "settings.languageEdit.optionMaintainer": "Maintainer — only maintainers change languages",
     "settings.languageEdit.ownerOnlyError":
       "Only org owners can change the language permission policy.",
@@ -396,7 +396,7 @@ export const settings = defineNamespace({
     // Open-dropdown option text for the import floor select; see the
     // roster/progress options above for why the level number is baked in.
     "settings.importPermissions.optionProjectLead":
-      "Project lead — default. Project managers import their own files",
+      "Project Lead — default. Project managers import their own files",
     "settings.importPermissions.optionMaintainer": "Maintainer — only maintainers add or replace source files",
     "settings.importPermissions.ownerOnlyError":
       "Only org owners can change the import permission policy.",
@@ -420,12 +420,12 @@ export const settings = defineNamespace({
     "settings.commentPermissions.createOptionCommenter": "Commenter — default",
     "settings.commentPermissions.createOptionReviewer": "Reviewer — reviewers and above",
     "settings.commentPermissions.createOptionContributor": "Contributor — translators and above",
-    "settings.commentPermissions.createOptionProjectLead": "Project lead — leads and above",
+    "settings.commentPermissions.createOptionProjectLead": "Project Lead — leads and above",
     "settings.commentPermissions.createOptionMaintainer": "Maintainer — most restrictive",
     "settings.commentPermissions.resolveOptionCommenter": "Commenter — anyone who can comment",
     "settings.commentPermissions.resolveOptionReviewer": "Reviewer — reviewers and above",
     "settings.commentPermissions.resolveOptionContributor": "Contributor — default",
-    "settings.commentPermissions.resolveOptionProjectLead": "Project lead — leads and above",
+    "settings.commentPermissions.resolveOptionProjectLead": "Project Lead — leads and above",
     "settings.commentPermissions.resolveOptionMaintainer": "Maintainer — most restrictive",
 
     // ── UsageSection (Preferences → Usage) ──
@@ -612,7 +612,7 @@ export const settings = defineNamespace({
           "Shown once for the whole card, instead of a note on every greyed-out control in it. " +
           "A sentence, with its period.",
         placeholders: {
-          role: "Plural role name, already translated, e.g. 'Maintainers' or 'Project leads'.",
+          role: "Plural role name, already translated, e.g. 'Maintainers' or 'Project Leads'.",
         },
       },
       "settings.locked.control": {
@@ -620,7 +620,7 @@ export const settings = defineNamespace({
           "One short line beneath a single greyed-out setting the reader cannot change, saying " +
           "who can. 'this' is that one setting. A sentence, with its period.",
         placeholders: {
-          role: "Plural role name, already translated, e.g. 'Maintainers' or 'Project leads'.",
+          role: "Plural role name, already translated, e.g. 'Maintainers' or 'Project Leads'.",
         },
       },
       "settings.locked.page": {

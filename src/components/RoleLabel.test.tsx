@@ -31,17 +31,17 @@ describe("RoleLabel", () => {
     expect(label.tagName).toBe("SPAN")
   })
 
-  // AQU-2332: the chip's CSS `capitalize` turned the catalog's "Project lead"
-  // into "Project Lead" on screen. It shows the catalog's name as written, in
-  // sentence case and in the reader's language, like the role dialog (AQU-2289).
+  // AQU-2332: the chip once used CSS `capitalize`, which retitled the catalog's
+  // name on screen. It shows the name as written ("Project Lead", "Chef de
+  // Projet"), in the reader's language, like the role dialog (AQU-2289).
   describe("the role's name", () => {
     afterEach(() => window.localStorage.clear())
 
-    it("is the catalog's sentence-case name, as a chip and plain", () => {
+    it("is the catalog's name as written, as a chip and plain", () => {
       const { rerender } = render(<RoleLabel name="project_lead" />)
-      expect(shownCase(screen.getByText("Project lead"))).toBe("as written")
+      expect(shownCase(screen.getByText("Project Lead"))).toBe("as written")
       rerender(<RoleLabel name={ROLE.PROJECT_LEAD} plain />)
-      expect(shownCase(screen.getByText("Project lead"))).toBe("as written")
+      expect(shownCase(screen.getByText("Project Lead"))).toBe("as written")
     })
 
     it("is in the reader's language", () => {
@@ -51,7 +51,7 @@ describe("RoleLabel", () => {
           <RoleLabel name={ROLE.PROJECT_LEAD} />
         </I18nProvider>,
       )
-      expect(shownCase(screen.getByText("Chef de projet"))).toBe("as written")
+      expect(shownCase(screen.getByText("Chef de Projet"))).toBe("as written")
     })
   })
 })

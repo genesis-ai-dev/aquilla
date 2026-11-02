@@ -173,7 +173,7 @@ describe("ProjectSettings — who can add and remove cells (AQU-1068)", () => {
   it("reads back a stored tier", () => {
     currentProject = makeProject({ cellEditingFloor: "project_lead" } as Partial<ProjectRecord>)
     renderSettings(PANE)
-    expect(screen.getByTestId("settings-cell-editing-floor")).toHaveTextContent("Project lead")
+    expect(screen.getByTestId("settings-cell-editing-floor")).toHaveTextContent("Project Lead")
   })
 
   it("reads back a tier below contributor — the rungs the static floor drop made real", () => {
@@ -236,7 +236,7 @@ describe("ProjectSettings — who can add and remove cells (AQU-1068)", () => {
       "Commenter",
       "Reviewer",
       "Contributor",
-      "Project lead",
+      "Project Lead",
       "Maintainer",
     ])
   })

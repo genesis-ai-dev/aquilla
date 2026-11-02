@@ -83,7 +83,7 @@ describe("OrgAccessAuditPage", () => {
     await act(async () => pending.get(1)?.({ ok: true, report: report("Alpha") }))
     expect(screen.getByTestId("access-audit-person-2")).toHaveTextContent("Anna")
     expect(screen.getByTestId("access-audit-person-2")).toHaveTextContent("Viewer")
-    expect(screen.getByTestId("access-audit-person-2")).toHaveTextContent("Translators (Project lead)")
+    expect(screen.getByTestId("access-audit-person-2")).toHaveTextContent("Translators (Project Lead)")
     expect(screen.getByTestId("access-audit-project-2-pa")).toHaveTextContent("John")
     expect(screen.getByTestId("access-audit-project-2-pa")).toHaveTextContent("Contributor (Team)")
     expect(screen.getByTestId("access-audit-project-2-pa")).toHaveTextContent("French (Reviewer)")

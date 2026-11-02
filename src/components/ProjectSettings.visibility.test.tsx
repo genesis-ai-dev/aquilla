@@ -167,7 +167,7 @@ describe("Project settings → Members: who can see the member list and progress
     expect(screen.getByTestId("members-table-stub")).toBeInTheDocument()
     expect(screen.getByText("Who can see the member list")).toBeInTheDocument()
     expect(roster()).toHaveTextContent("Organization default (Maintainers and owners)")
-    expect(progress()).toHaveTextContent("Organization default (Project leads and up)")
+    expect(progress()).toHaveTextContent("Organization default (Project Leads and up)")
   })
 
   it("offers only the organization's level and stricter ones", async () => {
@@ -201,7 +201,7 @@ describe("Project settings → Members: who can see the member list and progress
     renderMembers()
     expect(screen.getByTestId("project-progress-visibility-binds")).toHaveTextContent("Only Owners can make this less strict.")
     await userEvent.click(progress())
-    const lead = await screen.findByRole("option", { name: "Organization default (Project leads and up)" })
+    const lead = await screen.findByRole("option", { name: "Organization default (Project Leads and up)" })
     expect(lead).toHaveAttribute("aria-disabled", "true")
   })
 

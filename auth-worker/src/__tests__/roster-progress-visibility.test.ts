@@ -527,7 +527,7 @@ describe("saving a project's own visibility floors (AQU-1771)", () => {
 
   it("lets a maintainer raise it, and loosen a value at their own level", async () => {
     await seedSettings({ rosterViewMinRole: 600 }, { rosterViewMinRole: 400 })
-    // Lower their own Maintainers value to Project leads: allowed (600 ≥ 600).
+    // Lower their own Maintainers value to Project Leads: allowed (600 ≥ 600).
     const lowered = await patchProject("anna", { rosterViewMinRole: 500 })
     expect(lowered.status).toBe(200)
     const raised = await app.request(

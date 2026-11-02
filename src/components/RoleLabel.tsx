@@ -34,9 +34,9 @@ interface RoleLabelProps {
 /**
  * Assigned-role chip matching `/project/:id/settings/members`.
  *
- * Shows the catalog's name exactly as written: sentence case, in the reader's
- * language ("Project lead", "Chef de projet"). No CSS case class (AQU-2332):
- * `capitalize` turned "Project lead" into "Project Lead".
+ * Shows the catalog's name exactly as written, in the reader's language
+ * ("Project Lead", "Chef de Projet"). No CSS case class (AQU-2332): `capitalize`
+ * would turn "Chef de Projet" into "Chef De Projet".
  */
 export function RoleLabel({
   name,

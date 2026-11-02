@@ -46,9 +46,12 @@ export function StationTransport({
   calm,
   hint,
   onMessage,
+  locked = false,
 }: {
   ed: StationEditor
   editable: boolean
+  /** Slice 14: Play waits while Record now runs. */
+  locked?: boolean
   /** Item 29: nothing selected, typed, hovered or unsaved. */
   calm: boolean
   hint: string
@@ -133,7 +136,7 @@ export function StationTransport({
           data-testid="station-play"
           aria-label={playTip}
           title={playTip}
-          disabled={ed.status !== "ready"}
+          disabled={ed.status !== "ready" || locked}
           onClick={ed.togglePlay}
           className="inline-flex size-8 shrink-0 items-center justify-center rounded-md bg-foreground text-background disabled:opacity-50"
         >

@@ -211,11 +211,6 @@ interface Props {
    */
   onEditText?: (cellId: string) => void
   onClose: () => void
-  /**
-   * AQU-2327: hand the recording back instead of saving it as a take — the
-   * Station's "Record now" inserts it at its cursor.
-   */
-  onCaptured?: (blob: Blob, ext: string) => void
 }
 
 // There is deliberately NO "saved" phase (Sam, 2026-08-13). Saving a take is
@@ -439,7 +434,6 @@ export function AudioRecordingModal({
   open, project, cells: allCells, activeCellId, targetSlot = RECORDING_SLOT, laneTag, timelineTracks, username,
   onActiveCellChange, onTakeSaved, onLastTakeRemoved, readAloudFor, filmFileId, onEditText, onClose,
   deliversAudioOnly = false,
-  onCaptured,
 }: Props) {
   const t = useT()
   // Sam's decision (hidden lines on the timeline): Next, Previous, the
@@ -569,14 +563,7 @@ export function AudioRecordingModal({
   // recorder; CLOSED, only the "Takes" bar shows. Either way its chevron raises
   // the whole list over the line and the instruments — `takesOpen` — as far as
   // the takes need and no further than the header.
-  // AQU-2327: opened by the Station's "Record now" to hand ONE recording back
-  // for an insert. Only what records is shown: no line navigation, no line's
-  // takes (listed, drawn or in a drawer), no Upload or Generate, and none of
-  // the settings about moving between lines or the takes list. The panel lays
-  // out as it does with the takes drawer closed, and fits what is left.
-  const capture = Boolean(onCaptured)
-  const takesDrawerPref = useRecordingTakesDrawerOpen()
-  const takesDrawerOpen = takesDrawerPref && !capture
+  const takesDrawerOpen = useRecordingTakesDrawerOpen()
   const [takesOpen, setTakesOpen] = useState(false)
   const takesSheet = takesOpen
 
@@ -1351,13 +1338,6 @@ export function AudioRecordingModal({
     try {
       const blob = recorder.state.blob
       const ext = recorder.state.ext
-      // AQU-2327: "Record now" from the Station's Insert menu — the recording
-      // goes back to the Station, to be inserted at its cursor. No take.
-      if (onCaptured) {
-        onCaptured(blob, ext)
-        setPhase("idle")
-        return
-      }
       // The armed recorder keeps ~200ms of the countdown as the take's head so
       // an early entrance — the count-in working — is IN the file. Read here,
       // used after the attach to anchor the take that much before its line.
@@ -1644,7 +1624,7 @@ export function AudioRecordingModal({
       // that struck mid-upload retries with the SAME take after reconnect.
       setPhase(recorder.state.kind === "stopped" ? "preview" : "error")
     }
-  }, [recorder.state, online, session, activeCell, project.id, project.lanes, username, recordingTakes, scheduleAutoAdvance, returnToReady, laneTag, previewTrim, audioEntry, targetSlot, onCaptured])
+  }, [recorder.state, online, session, activeCell, project.id, project.lanes, username, recordingTakes, scheduleAutoAdvance, returnToReady, laneTag, previewTrim, audioEntry, targetSlot])
 
   // Attach an existing FILE as a take, through this dialog's phase machine.
   //
@@ -1773,7 +1753,7 @@ export function AudioRecordingModal({
   // Deliberately still true in `preview`: the arrows have to stay pressable in
   // order to ASK. Disabling them there would answer the question by refusing to
   // pose it, and strand someone who wants to move on.
-  const canNav = !capture && (phase === "idle" || phase === "preview" || phase === "error")
+  const canNav = phase === "idle" || phase === "preview" || phase === "error"
   const gotoIndex = useCallback((idx: number) => {
     if (!canNav) return
     if (idx < 0 || idx >= cells.length) return
@@ -1972,7 +1952,7 @@ export function AudioRecordingModal({
           "gap-0 overflow-hidden p-0",
           showFilm
             ? "flex flex-row sm:aspect-[16/9] sm:max-w-5xl"
-            : cn("flex flex-col sm:max-w-[400px]", capture ? "h-auto" : "h-[620px]"),
+            : "flex h-[620px] flex-col sm:max-w-[400px]",
         )}
         style={{ maxHeight: "min(92vh, 800px)" }}
         showCloseButton={false}
@@ -2061,7 +2041,6 @@ export function AudioRecordingModal({
             {/* The arrows FLANK the counter rather than sitting at the row's
                 edges: together they read as one navigation control, and they
                 stay put when the counter's width changes between lines. */}
-            {!capture && (
             <div className="mt-1.5 flex items-center gap-0.5">
               <AppTooltip content={t("audio.recordingModal.prevLineTooltip")}>
                 <Button
@@ -2131,7 +2110,6 @@ export function AudioRecordingModal({
                 </Button>
               </AppTooltip>
             </div>
-            )}
           </div>
 
           {/* Everything under the header, positioned so the takes sheet can
@@ -2524,7 +2502,7 @@ export function AudioRecordingModal({
                 {/* AQU-1217: the selected take, drawn as its timeline chip, so
                     the operator can see and hear what they are about to record
                     over. Its trim is shown (grey lines), not edited here. */}
-                {!capture && readyTakeId && readyAtt && readyKept && (
+                {readyTakeId && readyAtt && readyKept && (
                   <div data-testid="rec-ready-take" className="space-y-1">
                     <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                       {t("audio.recordingModal.readyTakeCaption", {
@@ -2567,9 +2545,7 @@ export function AudioRecordingModal({
                   </div>
                 )}
                 {targetSec != null ? (
-                  // AQU-2327: recording an insert, the line's own take isn't
-                  // measured against its window — the bar starts empty.
-                  <DurationBar elapsedMs={capture ? 0 : (readyKeptMs ?? 0)} targetSec={targetSec} />
+                  <DurationBar elapsedMs={readyKeptMs ?? 0} targetSec={targetSec} />
                 ) : !(readyTakeId && readyAtt && readyKept) ? (
                   // No take to hang the icon on: the note stays a line.
                   <p className="text-xs text-muted-foreground">{t("audio.recordingModal.noTimedWindow")}</p>
@@ -2655,7 +2631,7 @@ export function AudioRecordingModal({
                 microphone lands and where "let me upload instead" earns its
                 place. */}
             {/* i18n-exempt "idle"/"error" are RecorderPhase union tags, not copy */}
-            {!capture && (displayPhase === "idle" || displayPhase === "error") && (
+            {(displayPhase === "idle" || displayPhase === "error") && (
               // AQU-646 stage 4c: the row and the reason beneath it are one
               // group, so the parent's `space-y-3` separates the GROUP from the
               // anchor above while the explanation stays tucked under the
@@ -2809,7 +2785,7 @@ export function AudioRecordingModal({
               rest of the panel. `relative` so the raised list can anchor to it. */}
           <div className="relative shrink-0 border-t bg-muted/20">
             <div className="flex items-center gap-2 px-4 py-2">
-              {capture ? null : takesDrawerOpen && takesFit && !takesOpen ? (
+              {takesDrawerOpen && takesFit && !takesOpen ? (
                 // Resting open with every take already showing: nothing to
                 // pull up.
                 <span data-testid="rec-takes-count" className="shrink-0 px-1 text-xs font-medium">
@@ -2938,8 +2914,6 @@ export function AudioRecordingModal({
                   {/* Sam, 2026-09-28: every setting but the countdown's speed is
                       a real switch. What it does is behind its (i), on click
                       (AQU-2260), rather than in a line always on show. */}
-                  {!capture && (
-                  <>
                   <SettingSwitch
                     testId="rec-auto-advance"
                     icon={<ChevronsRight />}
@@ -2956,8 +2930,6 @@ export function AudioRecordingModal({
                     checked={takesDrawerOpen}
                     onCheckedChange={(next) => { setTakesOpen(false); setRecordingTakesDrawerOpen(next) }}
                   />
-                  </>
-                  )}
                 </PopoverContent>
               </Popover>
             </div>
@@ -2968,7 +2940,7 @@ export function AudioRecordingModal({
               drawer left the strip above floating with dead space beneath it,
               and made the whole bottom jump as takes came and went between
               phases. Resting closed it exists only while raised. */}
-          {!capture && (takesDrawerOpen || takesSheet) && (
+          {(takesDrawerOpen || takesSheet) && (
             <div ref={setDrawerEl} data-testid="rec-takes-drawer" className="min-h-0 flex-1 overflow-y-auto bg-muted/20">
               {listedTakeCount > 0 && activeCell ? (
                 <GroupedTakes

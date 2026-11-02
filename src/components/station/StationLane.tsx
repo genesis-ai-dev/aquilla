@@ -34,13 +34,16 @@ interface LaneProps {
   onHover?(hover: boolean): void
   /** Slice 12: why Delete and Insert aren't offered (a very long recording). */
   editNote?: string
+  /** Slice 14: Record now, at `at`, with its flag's words. `t1` is where the
+   *  recording so far ends, once it runs. The selection's actions step aside. */
+  recording?: { at: number; t1: number | null; flag: string }
 }
 
 type Drag =
   | { kind: "sel"; x: number; y: number; t0: number; moved: boolean }
   | { kind: "trimA" | "trimB"; x: number; y: number; moved: boolean }
 
-export function StationLane({ ed, editable, trackVars, generated, onDelete, onInsert, insertOpen, insertMenu, hoverLayer, onHover, editNote }: LaneProps) {
+export function StationLane({ ed, editable, trackVars, generated, onDelete, onInsert, insertOpen, insertMenu, hoverLayer, onHover, editNote, recording }: LaneProps) {
   const t = useT()
   const [box, setBox] = useState<HTMLDivElement | null>(null)
   const size = useBox(box)
@@ -238,15 +241,31 @@ export function StationLane({ ed, editable, trackVars, generated, onDelete, onIn
             onKeyDown={onFlagKey("trimB")}
           />
         ) : null}
+        {/* Slice 14: the recording being made, red, growing from the cursor. */}
+        {recording && recording.t1 != null ? (
+          <span
+            aria-hidden
+            data-testid="station-rec-part"
+            className="pointer-events-none absolute top-0 bottom-0 z-[3] bg-red-500/16 shadow-[inset_-2px_0_0_var(--color-red-600)]"
+            style={{ left: pct(recording.at), width: `${((Math.min(vb, recording.t1) - Math.max(va, recording.at)) / w) * 100}%` }}
+          />
+        ) : null}
+        {recording && inView(recording.at) ? (
+          <Flag
+            at={pct(recording.at)}
+            side="rec"
+            label={recording.flag}
+          />
+        ) : null}
         {/* Item 16: the cursor. */}
-        {point && inView(sel.a) ? (
+        {!recording && point && inView(sel.a) ? (
           <Flag at={pct(sel.a)} side="mid" label={t("editor.station.insertFlag", { time: formatStationTime(sel.a) })} />
         ) : null}
 
         {hoverLayer?.(hover, box)}
 
         {/* Item 17: the actions at the selection. */}
-        {sel && (range || onInsert) ? (
+        {!recording && sel && (range || onInsert) ? (
           <div
             data-testid="station-actions"
             onPointerDown={(e) => e.stopPropagation()}
@@ -316,6 +335,14 @@ function ActionButton({
   )
 }
 
+/** Start and End are blue, the cursor amber, and a recording being made red. */
+const FLAG_INK = {
+  start: { bg: "bg-sky-700", point: "border-t-sky-700" },
+  end: { bg: "bg-sky-700", point: "border-t-sky-700" },
+  mid: { bg: "bg-amber-700", point: "border-t-amber-700" },
+  rec: { bg: "bg-red-600", point: "border-t-red-600" },
+} as const
+
 /** Item 14 and 16: a flag above the lane, with its line down through it. */
 function Flag({
   at,
@@ -329,7 +356,7 @@ function Flag({
   onKeyDown,
 }: {
   at: string
-  side: "start" | "end" | "mid"
+  side: "start" | "end" | "mid" | "rec"
   label: string
   aria?: string
   editable?: boolean
@@ -338,10 +365,11 @@ function Flag({
   onPointerUp?(e: PointerEvent<HTMLButtonElement>): void
   onKeyDown?(e: KeyboardEvent<HTMLButtonElement>): void
 }) {
-  const amber = side === "mid"
+  const ink = FLAG_INK[side]
   const tab = cn(
     "absolute top-0 h-[18px] rounded-[3px] px-1.5 text-[10.5px] leading-[18px] font-semibold whitespace-nowrap text-white",
-    amber ? "left-0 -translate-x-1/2 bg-amber-700" : "bg-sky-700",
+    (side === "mid" || side === "rec") && "left-0 -translate-x-1/2",
+    ink.bg,
     side === "start" && "-left-px",
     side === "end" && "-right-px",
   )
@@ -368,10 +396,10 @@ function Flag({
         aria-hidden
         className={cn(
           "absolute top-[18px] -left-[5px] h-0 w-0 border-x-[5px] border-t-[5px] border-x-transparent",
-          amber ? "border-t-amber-700" : "border-t-sky-700",
+          ink.point,
         )}
       />
-      <span aria-hidden className={cn("pointer-events-none absolute top-[18px] bottom-0 -left-[0.75px] w-[1.5px]", amber ? "bg-amber-700" : "bg-sky-700")} />
+      <span aria-hidden className={cn("pointer-events-none absolute top-[18px] bottom-0 -left-[0.75px] w-[1.5px]", ink.bg)} />
     </span>
   )
 }

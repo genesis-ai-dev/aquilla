@@ -29,6 +29,8 @@ import type { StationTarget } from "@/lib/station/target"
 import type { StationHost, StationTake } from "./station-host"
 
 export const BASE_SRC = "base"
+/** The recording being made with Record now, while it runs (slice 14). */
+export const LIVE_SRC = "live"
 /** Slice 12: past this, a recording plays from its own bytes. */
 export const STATION_LONG_SEC = 120
 /** Slice 12: past this, deleting and inserting wait for block-by-block
@@ -90,9 +92,13 @@ export function useStationEditor(host: StationHost, take: StationTake, target: S
 
   // Inserted audio's samples, by the key its operation names.
   const [sources, setSources] = useState<Record<string, PcmSource>>({})
+  // Slice 14 (Sam, Nov 2): Record now records here. While it runs, the
+  // recording so far is drawn at the cursor as its own part and what comes
+  // after slides along; it is not an edit until it stops.
+  const [live, setLive] = useState<{ at: number; src: PcmSource } | null>(null)
   const lookup = useCallback(
-    (src: string): PcmSource | null => (src === BASE_SRC ? pcm : (sources[src] ?? null)),
-    [pcm, sources],
+    (src: string): PcmSource | null => (src === BASE_SRC ? pcm : src === LIVE_SRC ? (live?.src ?? null) : (sources[src] ?? null)),
+    [pcm, sources, live],
   )
   // A draft brought back after a reload: load its inserted audio again.
   const restoring = useRef(new Set<string>())
@@ -113,10 +119,10 @@ export function useStationEditor(host: StationHost, take: StationTake, target: S
     }
   }, [draft.sources, sources, project.id, getSyncToken])
 
-  const placed: PlacedSegment[] = useMemo(
-    () => placeSegments(segmentsOf(BASE_SRC, pcm?.duration ?? 0, ops)),
-    [pcm, ops],
-  )
+  const placed: PlacedSegment[] = useMemo(() => {
+    const shown: EditOp[] = live ? [...ops, { kind: "ins", at: live.at, src: LIVE_SRC, len: live.src.data.length / live.src.rate, label: "" }] : [...ops]
+    return placeSegments(segmentsOf(BASE_SRC, pcm?.duration ?? 0, shown))
+  }, [pcm, ops, live])
   const length = useMemo(() => Math.max(MIN_KEPT_SEC, lengthOf(placed)), [placed])
 
   // ——— The kept part: the take's stored trim (carried through any unsaved
@@ -384,6 +390,8 @@ export function useStationEditor(host: StationHost, take: StationTake, target: S
     draft,
     deleteSelection,
     insertAudio,
+    live,
+    setLive,
     undoUnsaved,
     setScope,
     clearDraft,

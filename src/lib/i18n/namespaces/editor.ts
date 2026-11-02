@@ -1384,6 +1384,16 @@ export const editor = defineNamespace({
     "editor.station.fromFile": "From a file…",
     "editor.station.recordNow": "Record now",
     "editor.station.recordLater": "Recording straight into an insert comes next.",
+    "editor.station.recordFlagIn": "Recording in {n}",
+    "editor.station.recordFlagReady": "Get ready",
+    "editor.station.recordFlag": "Recording at {time}",
+    "editor.station.recordingFor": "Recording · {len}",
+    "editor.station.recordStop": "Stop",
+    "editor.station.newRecording": "New recording",
+    "editor.station.keepRecording": "Keep",
+    "editor.station.recordAgain": "Record again",
+    "editor.station.micDenied": "The microphone is blocked for this site. Allow it in the browser's site settings, then choose Record now again.",
+    "editor.station.recordFailed": "The recording couldn't be made: {message}",
     "editor.station.kindDeleted": "a part deleted",
     "editor.station.kindInserted": "audio inserted",
     "editor.station.kindNoise": "noise removed",
@@ -3289,6 +3299,40 @@ export const editor = defineNamespace({
       },
       "editor.station.recordLater": {
         description: "Grey line under the greyed 'Record now' while it is not available yet.",
+      },
+      "editor.station.recordFlagIn": {
+        description: "Red flag on the waveform at the cursor, and the line under it, during the count-in before Record now records. Counts down.",
+        placeholders: { n: "Seconds left, 3, 2, 1." },
+      },
+      "editor.station.recordFlagReady": {
+        description: "The same red flag in the instant before the count-in starts.",
+      },
+      "editor.station.recordFlag": {
+        description: "Red flag on the waveform where Record now is recording.",
+        placeholders: { time: "Where in the recording, e.g. 0:05.48." },
+      },
+      "editor.station.recordingFor": {
+        description: "Red text under the waveform while Record now records.",
+        placeholders: { len: "How long so far, e.g. 3.10 s." },
+      },
+      "editor.station.recordStop": {
+        description: "Button under the waveform that stops Record now.",
+      },
+      "editor.station.newRecording": {
+        description: "After Record now stops: the red flag on the new recording, and the start of the line under the waveform that asks to keep it.",
+      },
+      "editor.station.keepRecording": {
+        description: "Button after Record now stops: keep the new recording where it was put in.",
+      },
+      "editor.station.recordAgain": {
+        description: "Text button after Record now stops: throw the new recording away and record again at the same place.",
+      },
+      "editor.station.micDenied": {
+        description: "Message when Record now can't use the microphone because the browser blocks it.",
+      },
+      "editor.station.recordFailed": {
+        description: "Message when Record now fails.",
+        placeholders: { message: "The error, as the browser gives it." },
       },
       "editor.station.kindDeleted": {
         description: "What changed, in 'Not saved: …' under the recording's name. Lowercase; joined by commas with the others.",

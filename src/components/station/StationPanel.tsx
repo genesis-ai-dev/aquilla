@@ -25,6 +25,7 @@ import { mapWindow, type EditOp } from "@/lib/station/edit-list"
 import type { VersionChanges } from "@/lib/sync/outbox-types"
 import { loadStationPcm, pcmKey, putStationPcm } from "@/lib/station/load"
 import { renderSegments } from "@/lib/station/render"
+import { formatStationTime } from "@/lib/station/time"
 import { saveStationVersion, type VersionPlacement } from "@/lib/station/save"
 import {
   clearStationMessage,
@@ -39,6 +40,7 @@ import { changedKinds, StationInsertMenu, StationSave, useChangedText, type Inse
 import { StationHistory } from "./StationHistory"
 import { StationLane } from "./StationLane"
 import { StationLevels } from "./StationLevels"
+import { StationRecordBar, useStationRecorder } from "./StationRecorder"
 import { StationScroll, StationTransport } from "./StationTransport"
 import { STATION_EDIT_MAX_SEC, useStationEditor } from "./useStationEditor"
 
@@ -230,22 +232,34 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
       })
       .catch(() => setMessage(t("editor.station.notAudio", { name: file.name })))
   }
-  // Slice 10: Record now — the recorder opens on this line and hands its
-  // recording back; it goes in at the cursor.
+  // Slice 14 (Sam, Nov 2): Record now records here, at the cursor, with no
+  // recording window (StationRecorder.tsx).
+  const rec = useStationRecorder(ed, setMessage)
+  const recording = rec.phase.kind === "counting" || rec.phase.kind === "recording" || rec.phase.kind === "finishing"
   const insertRecording = () => {
     setInsertOpen(false)
-    void host.recordInsert(target.cellId).then(async (r) => {
-      if (!r) return
-      const cacheId = `station-rec-${Date.now().toString(36)}`
-      try {
-        const data = await decodeToMono48k(new Uint8Array(await r.blob.arrayBuffer()))
-        void audioCachePutBlob(cacheId, r.ext, r.blob)
-        edRef.current.insertAudio(cacheId, putStationPcm(cacheId, data), { kind: "recording", cacheId, ext: r.ext, label: t("editor.station.recordedInsert") })
-      } catch {
-        setMessage(t("editor.station.loadFailed"))
-      }
-    })
+    if (ed.sel) rec.start(ed.sel.a)
   }
+  const recPart =
+    rec.phase.kind === "idle"
+      ? undefined
+      : {
+          at: rec.phase.at,
+          t1:
+            rec.phase.kind === "pending"
+              ? rec.phase.at + rec.phase.len
+              : ed.live
+                ? rec.phase.at + ed.live.src.data.length / ed.live.src.rate
+                : null,
+          flag:
+            rec.phase.kind === "counting"
+              ? rec.count != null
+                ? t("editor.station.recordFlagIn", { n: rec.count })
+                : t("editor.station.recordFlagReady")
+              : rec.phase.kind === "pending"
+                ? t("editor.station.newRecording")
+                : t("editor.station.recordFlag", { time: formatStationTime(rec.phase.at) }),
+        }
 
   // Item 35: render the edited recording and save it as a new version, on
   // this line only or everywhere it is placed (slice 6).
@@ -326,6 +340,17 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
     const el = e.target as HTMLElement | null
     if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return
     const k = e.key
+    // Slice 14: while recording, Space and Esc stop it and other keys wait;
+    // after, Enter keeps it and Esc takes it out.
+    if (recording || (rec.phase.kind === "pending" && (k === "Enter" || k === "Escape"))) {
+      if (recording) {
+        if (k === " " || k === "Escape") rec.stop()
+      } else if (k === "Enter") rec.keep()
+      else rec.drop()
+      e.preventDefault()
+      e.stopPropagation()
+      return
+    }
     const mod = e.metaKey || e.ctrlKey
     let handled = true
     if (mod && !e.shiftKey && (k === "z" || k === "Z")) handled = ed.undoUnsaved()
@@ -360,7 +385,7 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
       tabIndex={0}
       // Item 33: Esc here clears the selection and closes Insert; while there
       // is one of those, full screen's own Esc stands down (useMediaDock).
-      data-owns-escape={ed.sel != null || insertOpen ? "true" : undefined}
+      data-owns-escape={ed.sel != null || insertOpen || rec.busy ? "true" : undefined}
       onKeyDown={onKeyDown}
       className="flex h-full min-h-0 flex-col overflow-y-auto outline-none"
     >
@@ -408,7 +433,8 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
         <>
           <StationLane
             ed={ed}
-            editable={editable}
+            editable={editable && !rec.busy}
+            {...(recPart ? { recording: recPart } : {})}
             trackVars={host.trackVars(take.fileId, take.att.slot)}
             generated={Boolean(take.att.voiceId)}
             onHover={setHovering}
@@ -430,10 +456,12 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
                 }
               : {})}
           />
+          <StationRecordBar rec={rec} />
           <StationScroll ed={ed} />
           <StationTransport
             ed={ed}
-            editable={editable}
+            editable={editable && !recording}
+            locked={recording}
             calm={calm}
             hint={editable ? t("editor.station.hint") : t("editor.station.hintListen")}
             onMessage={setMessage}

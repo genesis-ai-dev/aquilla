@@ -351,16 +351,25 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
   }
 
   // A button pressed in the Station that goes away when pressed (Insert ›
-  // Record now, Stop, Keep, Record again, Delete this, the message's Close)
-  // took the focus with it, so Space, Esc, Enter and ⌘S stopped reaching the
-  // Station (found in the Nov 2 browser check). When the element that had
-  // the focus here is gone and nothing else has it, the Station takes it back.
+  // Record now, Keep, Record again, Delete this, the message's Close), or is
+  // disabled for a moment (Stop, while the recording finishes), took the
+  // focus with it, so Space, Esc, Enter and ⌘S stopped reaching the Station
+  // (found in the Nov 2 browser check). When the focus was last in the
+  // Station and has fallen to nothing, without a press somewhere else on the
+  // page, the Station takes it back.
   const rootRef = useRef<HTMLDivElement | null>(null)
   const lastFocused = useRef<HTMLElement | null>(null)
   useEffect(() => {
+    const onDown = (e: globalThis.PointerEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) lastFocused.current = null
+    }
+    document.addEventListener("pointerdown", onDown, true)
+    return () => document.removeEventListener("pointerdown", onDown, true)
+  }, [])
+  useEffect(() => {
     const was = lastFocused.current
     const now = document.activeElement
-    if (was && !was.isConnected && (now == null || now === document.body)) rootRef.current?.focus({ preventScroll: true })
+    if (was && was !== now && (now == null || now === document.body)) rootRef.current?.focus({ preventScroll: true })
   })
 
   // Item 33: the keys, while the Station has the focus. A text field keeps

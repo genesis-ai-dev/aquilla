@@ -219,6 +219,33 @@ describe("the Station", () => {
     expect(document.activeElement).toBe(screen.getByTestId("station"))
   })
 
+  // Found in the Nov 2 browser re-check: Stop is disabled while the recording
+  // finishes, which drops the focus without removing the button (React then
+  // reuses it as Keep), so Enter didn't keep the new recording.
+  it("takes the focus back when a control in it loses the focus to nothing, though it is still there", () => {
+    const take = makeTake()
+    openInStation({ fileId: "f1", cellId: "c331", audioId: "t2.webm" })
+    const { rerender } = render(<StationPanel host={makeHost(take)} visible />)
+    const undo = screen.getByTestId("station-undo")
+    undo.focus()
+    undo.blur()
+    expect(document.activeElement).toBe(document.body)
+    rerender(<StationPanel host={makeHost(take)} visible />)
+    expect(document.activeElement).toBe(screen.getByTestId("station"))
+  })
+
+  it("leaves the focus alone after a press outside the Station", () => {
+    const take = makeTake()
+    openInStation({ fileId: "f1", cellId: "c331", audioId: "t2.webm" })
+    const { rerender } = render(<StationPanel host={makeHost(take)} visible />)
+    const undo = screen.getByTestId("station-undo")
+    undo.focus()
+    fireEvent.pointerDown(document.body)
+    undo.blur()
+    rerender(<StationPanel host={makeHost(take)} visible />)
+    expect(document.activeElement).toBe(document.body)
+  })
+
   it("leaves the focus alone when you move it out of the Station", () => {
     const take = makeTake()
     openInStation({ fileId: "f1", cellId: "c331", audioId: "t2.webm" })

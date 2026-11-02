@@ -7,7 +7,7 @@
 //                             one file; otherwise the lowest-ordered match wins
 //
 // Why this exists: an agent can already PATCH the prompt-shaping settings
-// (systemPrompt, completionSettings, translationBrief, rules — see
+// (translationInstructions, draftingSettings, rules — see
 // commands-patch-settings.ts) but had no way to see what the copilot actually
 // receives after injection. Tuning was change-a-setting-then-guess. This route
 // closes the loop: it returns the assembled messages plus the labeled parts
@@ -34,9 +34,10 @@
 // Per-device provider overrides (user Settings, localStorage) are likewise
 // invisible to the server; `generation` reports the PROJECT's configuration.
 //
-// The system prompt resolves top-level `settings.systemPrompt` first (the key
-// PatchSettings writes), then `completionSettings.systemPrompt` (the copy the
-// SPA keeps in sync), then DEFAULT_SYSTEM_PROMPT (AQU-1283).
+// AQU-2342: the role text is always DEFAULT_SYSTEM_PROMPT (no longer
+// project-editable); the project's own guidance is the ONE instructions block
+// (`settings.translationInstructions`, or the legacy sources composed on read
+// by resolveTranslationInstructions — the same call the editor makes).
 //
 // Role floor: VIEWER, same as every other external read — this is a read of
 // configuration the caller can already read piecemeal (/projects, settings),
@@ -55,6 +56,7 @@ import {
 } from "../lib/branching-search/settings"
 import { resolveLane } from "../../../db/shared/lane-ref"
 import { loadProjectSettings } from "../../../db/shared/projects"
+import { loadTranslationInstructions } from "../../../db/shared/load-translation-instructions"
 import { listProjectLanes } from "../../../db/shared/lanes"
 import { listRulesForProject } from "../../../db/shared/style-rules"
 import {
@@ -69,13 +71,13 @@ import type {
 import { bookGenre } from "../../../src/lib/scripture/book-genres"
 import { conceptsForLane, mapSubscribedConceptLanes } from "../../../src/lib/terminology/rendering-lane"
 import {
-  buildBriefBlock,
   buildPrompt,
   buildRulesBlock,
   buildStyleRulesBlock,
   DEFAULT_APPROVED_EXAMPLE_COUNT,
   DEFAULT_MAX_INJECTED_TERMS,
   DEFAULT_SYSTEM_PROMPT,
+  instructionsPromptBlock,
   selectApprovedExamples,
   selectInjectedTerms,
   type ChatMessage,
@@ -225,8 +227,9 @@ export interface PromptPreviewBody {
     /** Base instructions after {sourceLanguage}/{targetLanguage} substitution,
      *  before any injection. */
     base: string
-    /** The brief block, or "" when the project has no L1 summary. */
-    brief: string
+    /** The project-instructions block (AQU-2342), or "" when the project has
+     *  none. Sits right after `base`. */
+    instructions: string
     /** The rules block (terminology and your own regex rules), or "" when nothing injects. */
     rules: string
     /** The style-rules block (approved, enabled style rules in force for this
@@ -338,12 +341,11 @@ export async function buildPromptPreview(
   // AQU-2259: the team's drafting settings (`draftingSettings`: retrieval,
   // example format, provider, model, sampling). Each of its fields wins over
   // the older nested `completionSettings` copy, which the SPA no longer
-  // writes; that copy still supplies `systemPrompt` below.
+  // writes.
   const completion = {
     ...objectSetting(settings, "completionSettings"),
     ...objectSetting(settings, "draftingSettings"),
   }
-  const brief = objectSetting(settings, "translationBrief")
   const draftContext = objectSetting(settings, "draftContext")
 
   // AQU-1593 / AQU-1595: both languages come from the lane row. `targetLang`
@@ -356,17 +358,19 @@ export async function buildPromptPreview(
   })
   const targetLanguage = laneLanguageForTag(targetLang, lanes) ?? ""
 
-  // Top-level `systemPrompt` is what PatchSettings writes and what the SPA
-  // syncs into completionSettings.systemPrompt (useProject.ts) — so it wins;
-  // the nested copy is the fallback for projects that only ever set it there.
-  const systemPrompt =
-    stringSetting(settings, "systemPrompt") ||
-    stringSetting(completion, "systemPrompt") ||
-    DEFAULT_SYSTEM_PROMPT
+  // AQU-2342: fixed role text + the one instructions text. A legacy prompt
+  // that only ever lived in the nested completionSettings copy still feeds
+  // migrate-on-read, exactly as the SPA's record overlay does.
+  const systemPrompt = DEFAULT_SYSTEM_PROMPT
+  // The legacy agent brief is read too, exactly as the editor gets it from the
+  // settings GET, so the preview and every server path resolve the same text.
+  const { text: instructions } = await loadTranslationInstructions(db, projectId, {
+    ...settings,
+    systemPrompt: stringSetting(settings, "systemPrompt") || stringSetting(completion, "systemPrompt"),
+  })
   const topK = clampInt(completion.top_k, DEFAULT_APPROVED_EXAMPLE_COUNT, 1, MAX_TOP_K)
   const exampleFormat =
     completion.fewShotExampleFormat === "target-only" ? "target-only" : "source-and-target"
-  const briefSummary = stringSetting(brief, "l1Summary")
   const precedingCount = clampInt(
     draftContext.precedingTargetCells,
     DEFAULT_PRECEDING_TARGET_CELLS,
@@ -579,7 +583,7 @@ export async function buildPromptPreview(
     styleInstructions,
     validatedPairs: examples,
     exampleFormat,
-    briefSummary,
+    instructions,
     precedingContext,
   })
 
@@ -626,7 +630,9 @@ export async function buildPromptPreview(
         base: systemPrompt
           .replace(/\{sourceLanguage\}/g, sourceLanguage)
           .replace(/\{targetLanguage\}/g, targetLanguage),
-        brief: buildBriefBlock(briefSummary),
+        instructions: instructionsPromptBlock(instructions)
+          .replace(/\{sourceLanguage\}/g, sourceLanguage)
+          .replace(/\{targetLanguage\}/g, targetLanguage),
         rules: buildRulesBlock(rules, { sourceText }),
         styleRules: buildStyleRulesBlock(styleInstructions),
         injectedTerms,

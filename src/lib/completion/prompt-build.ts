@@ -27,6 +27,10 @@
 // site and test keeps importing from where it always did.
 
 import { stripTrailingBareMarkers } from "./strip-trailing-usfm-markers"
+import {
+  DEFAULT_SYSTEM_PROMPT,
+  instructionsPromptBlock,
+} from "../../../db/shared/translation-instructions"
 
 /** One OpenAI-style chat message. The copilot prompt is always exactly two:
  *  a system message then a user message. */
@@ -389,38 +393,17 @@ export function buildStyleRulesBlock(instructions: string[] | undefined | null):
   return "Style rules that apply to this passage (MUST follow):\n" + lines.join("\n")
 }
 
-/**
- * Render the brief's L1 summary as a labeled block for the system prompt.
- * Empty/blank input → "" (caller skips injection). The brief states the
- * project's purpose, audience, register, and constraints; it sits ABOVE the
- * mechanical rules block so the model reads intent before specifics.
- */
-export function buildBriefBlock(summary: string | undefined | null): string {
-  const s = (summary ?? "").trim()
-  if (!s) return ""
-  return "Translation brief (the project's purpose and standards — follow it):\n" + s
-}
-
-export const DEFAULT_SYSTEM_PROMPT =
-  "You are a translation assistant completing a project that translates from {sourceLanguage} into {targetLanguage}.\n\n" +
-  "The translation examples the user provides are your PRIMARY source of truth. Treat every observable convention in them as binding: reproduce the project's wording, spelling, tone, register, punctuation, formatting, and style rather than substituting defaults associated with the {targetLanguage} label. This may be an ultra-low-resource language, so follow the project's own evidence above general knowledge.\n\n" +
-  "Always translate from {sourceLanguage} to {targetLanguage}, relying strictly on the reference data and context provided. The language may be an ultra-low-resource language, so it is critical to follow the patterns and style of the provided reference data closely.\n\n" +
-  "To produce the translation, follow these steps:\n" +
-  "1. Analyze the provided reference data to understand the translation patterns and style.\n" +
-  "2. Complete the translation of the given source line or passage.\n" +
-  "3. Ensure your translation is consistent with the existing partial translation and surrounding context.\n" +
-  "4. Pay careful attention to the provided reference data — match its terminology, register, and conventions as closely as possible.\n" +
-  "5. Translate only into {targetLanguage}.\n" +
-  "6. When unsure, err on the side of literalness and stay consistent with the examples.\n" +
-  "7. Preserve the line breaks and any inline formatting present in the source.\n\n" +
-  "Output rules (strictly enforced):\n" +
-  "- Output ONLY the {targetLanguage} translation of the final source line — nothing else.\n" +
-  "- No commentary, explanations, labels, headers, markdown, language names, or restated source text. Just the translated text."
+// AQU-2342: the fixed role text and the one project-instructions block live in
+// db/shared so every drafting path (and the migrate-on-read resolver) shares
+// them. The copilot's role text is no longer user-editable.
+export { DEFAULT_SYSTEM_PROMPT, instructionsPromptBlock }
 
 export interface BuildPromptOptions {
   sourceLanguage: string
   targetLanguage: string
-  systemPrompt: string
+  /** The fixed role text. Defaults to DEFAULT_SYSTEM_PROMPT; the copilot never
+   *  passes a project-authored prompt here (AQU-2342). */
+  systemPrompt?: string
   sourceText: string
   examples: { source: string; target: string }[]
   /** Active project rules — injected as a "must follow" block in the system prompt. */
@@ -432,8 +415,9 @@ export interface BuildPromptOptions {
   validatedPairs?: ValidatedPair[]
   /** How to render few-shot examples. Default "source-and-target". */
   exampleFormat?: "source-and-target" | "target-only"
-  /** The project brief's L1 summary — injected before the rules block. */
-  briefSummary?: string
+  /** The project instructions (resolveTranslationInstructions) — injected
+   *  right after the role text, before the rules block. */
+  instructions?: string
   /** Committed target of the immediately preceding cells (document order) — the
    *  discourse window. Rendered last (closest to the live source) because it is
    *  real continuity, not a retrieved example. Left-context is the TARGET, not the
@@ -453,12 +437,12 @@ export interface BuildPromptOptions {
 }
 
 export function buildPrompt(options: BuildPromptOptions): ChatMessage[] {
-  let sys = options.systemPrompt
+  // Instructions ride with the role text through the placeholder pass: text
+  // migrated from a customized system prompt may still say "{targetLanguage}".
+  const instructionsBlock = instructionsPromptBlock(options.instructions)
+  let sys = ((options.systemPrompt ?? DEFAULT_SYSTEM_PROMPT) + (instructionsBlock ? "\n\n" + instructionsBlock : ""))
     .replace(/\{sourceLanguage\}/g, options.sourceLanguage)
     .replace(/\{targetLanguage\}/g, options.targetLanguage)
-
-  const briefBlock = buildBriefBlock(options.briefSummary)
-  if (briefBlock) sys = sys + "\n\n" + briefBlock
 
   // Inject rules block after the base system prompt so it is always visible.
   // The source goes in so terminology narrows to this cell (AQU-2209).

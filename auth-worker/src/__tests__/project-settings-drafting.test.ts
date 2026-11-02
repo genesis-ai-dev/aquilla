@@ -6,6 +6,8 @@ import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
+import { loadTranslationInstructions } from "../../../db/shared/load-translation-instructions"
+import { resolveTranslationInstructions } from "../../../db/shared/translation-instructions"
 
 async function seed(projectSettings: Record<string, unknown> = { sourceLanguage: "en" }) {
   await seedUser(1, "alice") // org owner
@@ -100,5 +102,38 @@ describe("project settings: draftingSettings (AQU-2259)", () => {
     const res = await save({ systemPrompt: "Keep it plain.", draftingSettings: { top_k: 900 } })
     expect(res.status).toBe(200)
     expect((await storedSettings()).systemPrompt).toBe("Keep it plain.")
+  })
+})
+
+// AQU-2342: the copilot resolves the project instructions in the browser, which
+// cannot read the agent's legacy `project_briefs` row. The settings GET carries
+// it, so a project whose ONLY guidance is that row drafts with the same text in
+// the editor as on every server path.
+describe("project settings GET: legacy brief for the instructions (AQU-2342)", () => {
+  async function getSettings(): Promise<{ settings: Record<string, unknown>; legacyProjectBriefText?: string }> {
+    const res = await app.request("/api/v2/projects/p1/settings", { headers: authHeader(await jwtFor("alice")) }, env)
+    expect(res.status).toBe(200)
+    return res.json()
+  }
+
+  it("the editor resolves the same text the server paths do, and stops sending it once instructions are stored", async () => {
+    await seed()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_briefs (project_id, content, updated_by, version, updated_at)
+       VALUES ('p1', 'Keep divine names as in the 1999 Bible.', NULL, 1, now())`,
+    ).run()
+
+    const body = await getSettings()
+    expect(body.legacyProjectBriefText).toBe("Keep divine names as in the 1999 Bible.")
+    // What src/lib/instructions/project-instructions.ts computes from this response…
+    const editor = resolveTranslationInstructions(body.settings, { projectBriefText: body.legacyProjectBriefText })
+    // …equals what the copilot preview, the agent and Autopilot load.
+    const server = await loadTranslationInstructions(env.AQUILLA_PG, "p1")
+    expect(editor).toBe("Keep divine names as in the 1999 Bible.")
+    expect(editor).toBe(server.text)
+
+    expect((await save({ translationInstructions: "x".repeat(8001) })).status).toBe(400)
+    expect((await save({ translationInstructions: "Ours now." })).status).toBe(200)
+    expect((await getSettings()).legacyProjectBriefText).toBe("")
   })
 })

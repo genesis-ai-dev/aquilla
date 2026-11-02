@@ -8,7 +8,7 @@ vi.mock("@/lib/offline/local-llm-client", () => ({
   completeWithLocalLlm: (...args: unknown[]) => completeWithLocalLlm(...args),
 }))
 
-import { buildPrompt, buildBatchPrompt, complete, fetchModels, normalizeOpenAIBaseUrl, resolveProvider, resolveEffectiveCompletionSettings, isCompletionConfigured, resolveCompletionTarget, DEFAULT_COMPLETION_SETTINGS, shouldPromptAiSetup, DEFAULT_APPROVED_EXAMPLE_COUNT, DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL, OPENROUTER_BYOK_ENDPOINT, isHostedOpenRouterUnconfigured, collectValidatedPairs, retainTranslationPairs, selectApprovedExamples, buildRulesBlock, buildStyleRulesBlock, buildBriefBlock, activeProjectIdFromPath, normalizeCompletionMaxTokens, DEFAULT_MAX_INJECTED_TERMS, selectInjectedTerms } from "./completion-service"
+import { buildPrompt, buildBatchPrompt, complete, fetchModels, normalizeOpenAIBaseUrl, resolveProvider, resolveEffectiveCompletionSettings, isCompletionConfigured, resolveCompletionTarget, DEFAULT_COMPLETION_SETTINGS, shouldPromptAiSetup, DEFAULT_APPROVED_EXAMPLE_COUNT, DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL, OPENROUTER_BYOK_ENDPOINT, isHostedOpenRouterUnconfigured, collectValidatedPairs, retainTranslationPairs, selectApprovedExamples, buildRulesBlock, buildStyleRulesBlock, activeProjectIdFromPath, normalizeCompletionMaxTokens, DEFAULT_MAX_INJECTED_TERMS, selectInjectedTerms } from "./completion-service"
 import { compileConceptsToRules } from "@/lib/terminology/compile"
 import { setUserApiKey } from "@/lib/store/user-api-keys"
 import {
@@ -1644,17 +1644,6 @@ describe("buildBatchPrompt — target-only format", () => {
   })
 })
 
-describe("buildBriefBlock", () => {
-  it("wraps a non-empty summary in a labeled block", () => {
-    expect(buildBriefBlock("Translate for youth.")).toContain("Translation brief")
-    expect(buildBriefBlock("Translate for youth.")).toContain("Translate for youth.")
-  })
-  it("returns empty string for blank input", () => {
-    expect(buildBriefBlock("")).toBe("")
-    expect(buildBriefBlock("   ")).toBe("")
-  })
-})
-
 // ---------------------------------------------------------------------------
 // AQU-934: per-passage style-rule instructions resolved from the applicability
 // graph. Unlike buildRulesBlock these are natural language, so a rule that no
@@ -1745,20 +1734,35 @@ describe("style instructions in the prompt builders", () => {
   })
 })
 
-describe("buildPrompt with brief summary", () => {
-  it("injects the brief block into the system message when present", () => {
-    const [sys] = buildPrompt({
-      sourceLanguage: "Greek", targetLanguage: "X", systemPrompt: "Base.",
-      sourceText: "logos", examples: [], briefSummary: "Prefer natural phrasing.",
-    })
-    expect(sys.content).toContain("Prefer natural phrasing.")
-  })
-  it("omits the brief block when absent", () => {
-    const [sys] = buildPrompt({
-      sourceLanguage: "Greek", targetLanguage: "X", systemPrompt: "Base.",
-      sourceText: "logos", examples: [],
-    })
-    expect(sys.content).not.toContain("Translation brief")
+// AQU-2342: every copilot recipe carries the fixed role text, then the ONE
+// project-instructions block, then rules — and nothing else project-authored.
+describe("project instructions in every copilot recipe", () => {
+  const rule: TranslationRule = {
+    id: "r1", name: "r1", description: "", severity: "minor", source: "user", scope: "project",
+    check: { type: "target-forbids", targetPattern: "forbidden_word" }, enabled: true, createdAt: "2026-01-01",
+  }
+  const recipes: [string, (instructions?: string) => string][] = [
+    ["single", (instructions) => buildPrompt({
+      sourceLanguage: "Greek", targetLanguage: "Kala", sourceText: "logos", examples: [], rules: [rule], instructions,
+    })[0].content],
+    ["batch", (instructions) => buildBatchPrompt({
+      sourceLanguage: "Greek", targetLanguage: "Kala", cells: [{ source: "logos" }], examples: [], rules: [rule], instructions,
+    })[0].content],
+    ["paragraph", (instructions) => buildParagraphPrompt({
+      sourceLanguage: "Greek", targetLanguage: "Kala", cells: [{ cellId: "c1", source: "logos" }], examples: [], rules: [rule], instructions,
+    })[0].content],
+  ]
+  it.each(recipes)("%s: default role text, then instructions, then rules", (_name, build) => {
+    const sys = build("Prefer natural phrasing for {targetLanguage}.")
+    const role = sys.indexOf("You are a translation assistant completing a project that translates from Greek into Kala.")
+    const block = sys.indexOf("Project instructions (follow these):\nPrefer natural phrasing for Kala.")
+    const rules = sys.indexOf("Project terminology and style rules (MUST follow):")
+    expect(role).toBeGreaterThanOrEqual(0)
+    expect(block).toBeGreaterThan(role)
+    expect(rules).toBeGreaterThan(block)
+    expect(sys.split("Prefer natural phrasing").length - 1).toBe(1)
+    expect(sys).not.toContain("Translation brief")
+    expect(build(undefined)).not.toContain("Project instructions")
   })
 })
 
@@ -1923,16 +1927,6 @@ describe("buildParagraphPrompt", () => {
       examples: [], rules: [rule],
     })
     expect(sys.content).toContain("forbidden_word")
-  })
-
-  it("injects brief summary into the system prompt", () => {
-    const [sys] = buildParagraphPrompt({
-      sourceLanguage: "English", targetLanguage: "French",
-      systemPrompt: DEFAULT_SYSTEM_PROMPT,
-      cells: [{ cellId: ID_A, source: "test" }],
-      examples: [], briefSummary: "Prefer natural phrasing.",
-    })
-    expect(sys.content).toContain("Prefer natural phrasing.")
   })
 
   it("substitutes language placeholders and none remain in output", () => {

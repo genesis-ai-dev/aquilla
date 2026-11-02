@@ -23,6 +23,7 @@ import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE } from "../types"
 import { resolveProjectRole } from "../services/project-permissions"
 import { loadProjectSettings } from "../../../db/shared/projects"
+import { resolveTranslationInstructions } from "../../../db/shared/translation-instructions"
 import type { AquillaDb } from "../../../db/shim/postgres"
 import {
   createProposal,
@@ -329,12 +330,19 @@ agentMemory.patch(
 // ──────────────────────────────────────────────────────────────────────────
 
 // GET /:projectId/brief — read the brief (VIEWER+).
+// AQU-2342: `content` is the project's RESOLVED translation instructions — the
+// one text every drafting prompt carries — so an old reader of "the brief the
+// agent sees" keeps reading the truth. The shape is unchanged, and `version` is
+// still the `project_briefs` row's, so PUT's ifMatchVersion keeps working.
 agentMemory.get("/:projectId/brief", authMiddleware, async (c) => {
   const projectId = c.req.param("projectId") ?? ""
   const gate = await requireRole(c, projectId, ROLE.VIEWER)
   if (!gate.ok) return gate.res
-  const brief = await getBrief(c.env.AQUILLA_PG, projectId)
-  return c.json({ brief })
+  const db = c.env.AQUILLA_PG
+  const brief = await getBrief(db, projectId)
+  const { settings } = await loadProjectSettings(db, projectId)
+  const content = resolveTranslationInstructions(settings, { projectBriefText: brief.content })
+  return c.json({ brief: { ...brief, content } })
 })
 
 const putBriefSchema = z.object({

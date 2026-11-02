@@ -28,6 +28,8 @@ describe("inherited settings vocabulary (AQU-1075)", () => {
     }
     expect(copied.has("systemPrompt")).toBe(true)
     expect(copied.has("translationBrief")).toBe(true)
+    // AQU-2342: the one instructions text rides with the brief field.
+    expect(INHERIT_FIELD_KEYS.translationBrief).toContain("translationInstructions")
     expect(copied.has("validationNamedUsers")).toBe(false)
     expect(copied.has("rules")).toBe(false)
   })

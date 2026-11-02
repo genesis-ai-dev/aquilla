@@ -7,7 +7,7 @@ import { emptyBrief } from "@/lib/brief/brief"
 function noopAsync() { return Promise.resolve(undefined) }
 function noGenerate() { return Promise.resolve(false) }
 
-/** Advance the wizard to the notes step where "Save & generate summary" lives. */
+/** Advance the wizard to the notes step where the finish button lives. */
 async function gotoGenerateStep() {
   let next = screen.queryByRole("button", { name: /next/i })
   while (next) {
@@ -15,7 +15,7 @@ async function gotoGenerateStep() {
     next = screen.queryByRole("button", { name: /next/i })
   }
   await waitFor(() =>
-    expect(screen.getByRole("button", { name: /save & generate summary/i })).toBeTruthy(),
+    expect(screen.getByRole("button", { name: /add to instructions/i })).toBeTruthy(),
   )
 }
 
@@ -24,7 +24,7 @@ describe("BriefBuilder", () => {
     const onSave = vi.fn().mockResolvedValue(emptyBrief("a"))
     render(
       <BriefBuilder
-        open
+        open title="Help me write instructions" finishLabel="Add to instructions"
         brief={emptyBrief("a")}
         canEdit
         onSaveDraft={onSave}
@@ -44,7 +44,7 @@ describe("BriefBuilder", () => {
 
   it("disables editing affordances when canEdit is false", () => {
     render(
-      <BriefBuilder open brief={emptyBrief("a")} canEdit={false}
+      <BriefBuilder open title="Help me write instructions" finishLabel="Add to instructions" brief={emptyBrief("a")} canEdit={false}
         onSaveDraft={noopAsync} onGenerateL1={noGenerate} onClose={() => {}} />,
     )
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).readOnly).toBe(true)
@@ -52,15 +52,15 @@ describe("BriefBuilder", () => {
 
   // AQU-968: the wizard must close on a successful generation and stay open
   // otherwise (e.g. no AI provider configured, so nothing was generated).
-  it("closes after Save & generate summary succeeds", async () => {
+  it("closes after the finish step succeeds", async () => {
     const onClose = vi.fn()
     const onGenerateL1 = vi.fn().mockResolvedValue(true)
     render(
-      <BriefBuilder open brief={emptyBrief("a")} canEdit
+      <BriefBuilder open title="Help me write instructions" finishLabel="Add to instructions" brief={emptyBrief("a")} canEdit
         onSaveDraft={noopAsync} onGenerateL1={onGenerateL1} onClose={onClose} />,
     )
     await gotoGenerateStep()
-    fireEvent.click(screen.getByRole("button", { name: /save & generate summary/i }))
+    fireEvent.click(screen.getByRole("button", { name: /add to instructions/i }))
     await waitFor(() => expect(onGenerateL1).toHaveBeenCalled())
     await waitFor(() => expect(onClose).toHaveBeenCalled())
   })
@@ -69,11 +69,11 @@ describe("BriefBuilder", () => {
     const onClose = vi.fn()
     const onGenerateL1 = vi.fn().mockResolvedValue(false)
     render(
-      <BriefBuilder open brief={emptyBrief("a")} canEdit
+      <BriefBuilder open title="Help me write instructions" finishLabel="Add to instructions" brief={emptyBrief("a")} canEdit
         onSaveDraft={noopAsync} onGenerateL1={onGenerateL1} onClose={onClose} />,
     )
     await gotoGenerateStep()
-    fireEvent.click(screen.getByRole("button", { name: /save & generate summary/i }))
+    fireEvent.click(screen.getByRole("button", { name: /add to instructions/i }))
     await waitFor(() => expect(onGenerateL1).toHaveBeenCalled())
     expect(onClose).not.toHaveBeenCalled()
   })

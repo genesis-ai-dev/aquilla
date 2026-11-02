@@ -12,6 +12,7 @@
 import { stripTrailingBareMarkers } from "../../../../../src/lib/completion/strip-trailing-usfm-markers"
 import { isRefusalReply } from "../../../../../src/lib/completion/refusal"
 import { resolveLaneIdOrTag } from "../../../../../db/shared/lane-ref"
+import { instructionsPromptBlock } from "../../../../../db/shared/translation-instructions"
 import { AliasMap } from "../compress"
 import { stageEvents, type AgentProposal, type EmitStageContext } from "../emit-stage"
 import { executeExamples } from "./examples"
@@ -56,7 +57,9 @@ export interface DraftGenerationContext {
   aliases: AliasMap
   sourceLanguage?: string
   targetLanguage?: string
-  briefSummary?: string
+  /** AQU-2342: the project's resolved translation instructions — the ONE
+   *  instructions block, right after the fixed role text. */
+  translationInstructions?: string
   signal: AbortSignal
   sendProgress: (label: string, done: number, total: number) => void
   addUsage: (usage: { prompt_tokens?: number; completion_tokens?: number; cost?: number }) => void
@@ -114,16 +117,17 @@ const MAX_LIMIT = 10
 const PRECEDING_CONTEXT = 5
 const EXAMPLES_N = 10
 const RESEARCH_RECORD_MAX_CHARS = 12_000
-const PROMPT_VERSION = "agent-draft-v3-staged-research"
+const PROMPT_VERSION = "agent-draft-v4-instructions"
 
 function groundingPrompt(ctx: DraftGenerationContext, examplesBlock: string, precedingBlock: string): string {
   const pair = ctx.targetLanguage
     ? `You translate${ctx.sourceLanguage ? ` from ${ctx.sourceLanguage}` : ""} into ${ctx.targetLanguage}.`
     : "You translate into the project's target language — infer it from the example pairs."
+  const instructions = instructionsPromptBlock(ctx.translationInstructions)
   return `${pair} You draft for a scripture translation project.
-
+${instructions ? `\n${instructions}\n` : ""}
 The translation pairs below are your PRIMARY source of truth: they carry this team's exact terminology, tone, register, punctuation, and stylistic conventions. This may be an ultra-low-resource language — imitate the project's own patterns above general knowledge of the language.
-${ctx.briefSummary ? `\nProject brief (honour it): ${ctx.briefSummary}\n` : ""}${examplesBlock}${precedingBlock}`
+${examplesBlock}${precedingBlock}`
 }
 
 function researchSystemPrompt(ctx: DraftGenerationContext, examplesBlock: string, precedingBlock: string): string {
@@ -333,7 +337,7 @@ export async function generateDrafts(
 
   const instructions =
     typeof args.instructions === "string" && args.instructions.trim()
-      ? `\nExtra instructions for this batch: ${args.instructions.trim()}`
+      ? `\nDirections for this run: ${args.instructions.trim()}`
       : ""
   const numbered = work
     .map((p, i) => `${i + 1}. ${p.canonicalRef ? `[${p.canonicalRef}] ` : ""}${stripTrailingBareMarkers(p.source)}`)

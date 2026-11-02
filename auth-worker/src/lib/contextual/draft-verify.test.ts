@@ -48,6 +48,30 @@ describe("performSpan", () => {
     expect(calls[0].user).toContain("imitate them")
   })
 
+  // AQU-2342: the performer carries the ONE instructions block right after its
+  // fixed role text — before the scene brief, terms, decisions and rules — and
+  // no longer a "Project brief" line of its own.
+  it("injects the project instructions once, after the role text and before rules", async () => {
+    const { llm, calls } = scriptedLlm([draftJson([{ i: 1, t: "one" }])])
+    await performSpan({
+      sceneBrief,
+      pairs: [pair("c1")],
+      examples: [],
+      precedingValidated: [],
+      translationInstructions: "Plain register for rural youth.",
+      rules: [{ id: "r1", name: "No quotes", enabled: true, check: { type: "target-forbids", targetPattern: '"' } }],
+      llm,
+      budget: createRunBudget(),
+    })
+    const system = calls[0].system
+    const block = "Project instructions (follow these):\nPlain register for rural youth."
+    expect(system.split(block)).toHaveLength(2)
+    expect(system.indexOf("You are the PERFORMER")).toBeLessThan(system.indexOf(block))
+    expect(system.indexOf(block)).toBeLessThan(system.indexOf("Scene brief:"))
+    expect(system.indexOf(block)).toBeLessThan(system.indexOf("Project rules"))
+    expect(system).not.toContain("Project brief")
+  })
+
   it("names cells the model skipped (missedCellIds) instead of inventing them", async () => {
     const { llm } = scriptedLlm([draftJson([{ i: 1, t: "only one" }])])
     const result = await performSpan({

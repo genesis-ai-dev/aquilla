@@ -12,9 +12,8 @@
  * page): proposing/extracting needs CONTRIBUTOR (400); reviewing, editing,
  * enabling and applicability writes need PROJECT_LEAD (500) — the same floors
  * the server enforces. The extract action is hidden below its floor with a
- * `RoleLockTooltip` beside the heading (matching the sibling Standards
- * section); row-level controls stay visible but disabled so the state they
- * carry is still readable.
+ * `RoleLockTooltip` beside the heading; row-level controls stay visible but
+ * disabled so the state they carry is still readable.
  */
 
 import { useEffect, useMemo, useState } from "react"
@@ -39,7 +38,7 @@ import type {
   StyleRuleScope,
 } from "@/lib/rules/style-rule-types"
 import { suggestFileGenres } from "@/lib/rules/file-genre"
-import { RoleLockTooltip } from "./AuthoredEntriesSection"
+import { RoleLockTooltip } from "./RoleLockTooltip"
 import { DocumentGenres, type GenreFile } from "./DocumentGenres"
 import { ExtractRulesDialog } from "./ExtractRulesDialog"
 import { RefineApplicabilityDialog, type RefineSegment } from "./RefineApplicabilityDialog"

@@ -7,12 +7,15 @@
 // read. Nothing on the server ever saw it. So autopilot drafted every passage
 // blind to the single most consequential professional constraint in the
 // project, and its lint could not catch a violation it had never been told
-// about. Same for the translation brief: only the compressed L1 summary
-// reached the model, and only if somebody had generated one — the structured
-// skopos parameters (register, literalness, key-term strategy, constraints,
-// quality bar) sat unused in the same settings blob.
+// about.
 //
-// The brief and the rules are read from ONE `project_settings` row. The
+// AQU-2342: the project's guidance reaches the performer as ONE text, the
+// resolved translation instructions (db/shared/translation-instructions.ts) —
+// the same block the copilot, the agent and its draft tool carry. The brief's
+// summary and answered sections only feed it on read, until a maintainer
+// writes the instructions themselves.
+//
+// The instructions and the rules are read from ONE `project_settings` row. The
 // project's own key terms, and those of the termbases it subscribes to, come
 // from the `concepts` table, where the editor reads them (AQU-1710, AQU-1715;
 // lib/concepts-read.ts). Terminology hits reuse the client's compiled rule ids
@@ -22,6 +25,7 @@
 
 import { readLanguageProfile, type LanguageProfile } from "../../../../db/shared/language-profile"
 import { readProjectFacts, type ProjectFact } from "../../../../db/shared/project-facts"
+import { loadTranslationInstructions } from "../../../../db/shared/load-translation-instructions"
 import {
   compileRulePattern,
   countMatches,
@@ -43,7 +47,7 @@ import { readProjectConcepts } from "../concepts-read"
 import type { LaneLanguageRow } from "../../../../src/lib/lanes/lane-language"
 import { languagesForLanes, loadLaneRows } from "../read-lane-language"
 
-// ── Shapes (mirrors of src/lib/terminology/types.ts + src/lib/brief/types.ts) ─
+// ── Shapes (mirrors of src/lib/terminology/types.ts) ─
 
 export type RenderingStatus = "preferred" | "admitted" | "forbidden"
 
@@ -66,38 +70,6 @@ export interface Concept {
   match?: TermMatchOptions
 }
 
-export interface TranslationBriefParameters {
-  purpose?: string
-  audience?: string
-  useAndMedium?: string
-  motiveSponsor?: string
-  sourceTexts?: string
-  targetVariety?: string
-  registerNaturalness?: string
-  literalness?: string
-  keyTerms?: string
-  constraints?: string
-  qualityBar?: string
-  [k: string]: string | undefined
-}
-
-/** Brief fields that change how a line is WORDED, in prompt order. The purpose
- *  group (motive, sponsor) matters to humans planning the work but does not
- *  alter a rendering, so it stays out of the performer's context budget. */
-export const PERFORMER_BRIEF_FIELDS: { id: string; label: string }[] = [
-  { id: "audience", label: "Audience" },
-  { id: "useAndMedium", label: "Use & medium" },
-  { id: "targetVariety", label: "Variety & orthography" },
-  { id: "registerNaturalness", label: "Register & naturalness" },
-  { id: "literalness", label: "Literalness" },
-  { id: "keyTerms", label: "Key-term strategy" },
-  { id: "constraints", label: "Constraints & sensitivities" },
-  { id: "qualityBar", label: "Quality bar" },
-]
-
-/** Per-field clip so a rambling brief cannot crowd out the scene itself. */
-const BRIEF_FIELD_MAX_CHARS = 400
-
 export interface TermGuidance {
   conceptId: string
   sourceTerm: string
@@ -116,10 +88,10 @@ export interface ProjectContext {
    * the former default lane.
    */
   lanes?: LaneLanguageRow[]
-  /** Model-generated compression of the whole brief, when one exists. */
-  projectBriefL1?: string
-  /** The brief's structured answers — used verbatim when there is no L1. */
-  briefParameters: TranslationBriefParameters
+  /** AQU-2342: the project's resolved translation instructions ("" when it
+   *  has none) — what every drafting prompt carries and what the start gate
+   *  asks for. */
+  translationInstructions: string
   /** Active concepts, the project's own plus any it subscribes to. */
   concepts: Concept[]
   /** The project's affix inventory for source-term matching
@@ -193,16 +165,6 @@ function parseAuthoredRules(raw: unknown): LintRule[] {
       !!r && typeof r === "object" && typeof (r as LintRule).id === "string" &&
       (r as LintRule).enabled === true && !!(r as LintRule).check,
   )
-}
-
-function parseBriefParameters(raw: unknown): TranslationBriefParameters {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {}
-  const out: TranslationBriefParameters = {}
-  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
-    const s = asString(v)
-    if (s) out[k] = s.slice(0, BRIEF_FIELD_MAX_CHARS)
-  }
-  return out
 }
 
 /** `ProjectWideSettings.termMatching`, which the editor passes to the matcher
@@ -397,7 +359,7 @@ export async function loadProjectContext(
   lane?: { laneId?: string | null; targetLang?: string | null },
 ): Promise<ProjectContext> {
   const empty: ProjectContext = {
-    briefParameters: {},
+    translationInstructions: "",
     concepts: [],
     authoredRules: [],
     projectFacts: [],
@@ -414,14 +376,11 @@ export async function loadProjectContext(
   } catch {
     return empty
   }
-  if (!row) return empty
+  // No settings row still resolves: the legacy brief alone can carry them.
+  if (!row) return { ...empty, translationInstructions: (await loadTranslationInstructions(db, projectId, {})).text }
 
   const settings = parseSettings(row.settings)
-  const brief = settings.translationBrief
-  const briefObj =
-    brief && typeof brief === "object" && !Array.isArray(brief)
-      ? (brief as Record<string, unknown>)
-      : {}
+  const { text: translationInstructions } = await loadTranslationInstructions(db, projectId, settings)
 
   const lanes: LaneLanguageRow[] = await loadLaneRows(db, projectId).catch(() => [])
   const loaded = [
@@ -438,8 +397,7 @@ export async function loadProjectContext(
     ...(sourceLanguage ? { sourceLanguage } : {}),
     ...(targetLanguage ? { targetLanguage } : {}),
     lanes,
-    ...(asString(briefObj.l1Summary) ? { projectBriefL1: asString(briefObj.l1Summary) } : {}),
-    briefParameters: parseBriefParameters(briefObj.parameters),
+    translationInstructions,
     concepts,
     ...(termMatching ? { termMatching } : {}),
     authoredRules: parseAuthoredRules(settings.rules),

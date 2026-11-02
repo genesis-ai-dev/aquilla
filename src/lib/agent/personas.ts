@@ -26,7 +26,6 @@ import {
   Scale,
   Search,
   ShieldCheck,
-  Sparkles,
   Split,
   Target,
   type LucideIcon,
@@ -175,18 +174,12 @@ export interface AgentPersonaCapabilities {
  * one and the card copy stays in a single place.
  */
 export const AGENT_READ_SOURCES = {
-  brief: {
-    id: "brief",
-    labelKey: "agent.card.read.brief.label",
-    descriptionKey: "agent.card.read.brief.description",
+  // AQU-2342: the one project-instructions text every drafting path reads.
+  instructions: {
+    id: "instructions",
+    labelKey: "agent.card.read.instructions.label",
+    descriptionKey: "agent.card.read.instructions.description",
     icon: Target,
-    route: (projectId: string) => projectMemoryPath(projectId, "brief"),
-  },
-  styleGuide: {
-    id: "styleGuide",
-    labelKey: "agent.card.read.styleGuide.label",
-    descriptionKey: "agent.card.read.styleGuide.description",
-    icon: Sparkles,
     route: (projectId: string) => projectMemoryPath(projectId, "instructions"),
   },
   termbase: {
@@ -260,8 +253,7 @@ export const AGENT_PERSONA_CAPABILITIES: Record<AgentPersonaId, AgentPersonaCapa
       },
     ],
     reads: [
-      AGENT_READ_SOURCES.brief,
-      AGENT_READ_SOURCES.styleGuide,
+      AGENT_READ_SOURCES.instructions,
       AGENT_READ_SOURCES.termbase,
       AGENT_READ_SOURCES.livingMemory,
     ],
@@ -303,7 +295,7 @@ export const AGENT_PERSONA_CAPABILITIES: Record<AgentPersonaId, AgentPersonaCapa
     ],
     reads: [
       AGENT_READ_SOURCES.rules,
-      AGENT_READ_SOURCES.brief,
+      AGENT_READ_SOURCES.instructions,
       AGENT_READ_SOURCES.termbase,
     ],
     writeKey: "agent.card.writes.reviewer",
@@ -326,7 +318,7 @@ export const AGENT_PERSONA_CAPABILITIES: Record<AgentPersonaId, AgentPersonaCapa
       },
     ],
     reads: [
-      AGENT_READ_SOURCES.brief,
+      AGENT_READ_SOURCES.instructions,
       AGENT_READ_SOURCES.livingMemory,
       AGENT_READ_SOURCES.rules,
     ],

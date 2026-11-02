@@ -15,11 +15,7 @@ import { statusOf, type CellPair } from "../agent/tools/select-cells"
 import { construeScene, type ClosureContext, type ClosureResult } from "./closure"
 import { performSpan, type ExamplePair, type PerformSpanResult } from "./draft"
 import { classifyRisk } from "./router"
-import {
-  termGuidanceForSpan,
-  type Concept,
-  type TranslationBriefParameters,
-} from "./project-context"
+import { termGuidanceForSpan, type Concept } from "./project-context"
 import { projectDecisionLines } from "./project-decisions"
 import { checkSpanBible, newBibleMetrics, recordBible, type SpanBible } from "./bible-span"
 import { repairExpectations, type RepairCell } from "./bible-repair"
@@ -69,9 +65,8 @@ export interface RunSpanDeps {
   neighborBriefs: ClosureContext["neighborBriefs"]
   layerAbove: ClosureContext["layerAbove"]
   examples: ExamplePair[]
-  projectBriefL1?: string
-  /** The brief's structured answers, used when there is no L1 summary. */
-  briefParameters?: TranslationBriefParameters
+  /** AQU-2342: the project's resolved translation instructions. */
+  translationInstructions?: string
   /** Active key-term concepts for the project (scoped to the span in here). */
   concepts?: Concept[]
   /** AQU-1691: the decision log (scoped to the span in here) and the Language profile. */
@@ -320,8 +315,7 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
       examples: deps.examples,
       precedingValidated: preceding,
       ...(deps.steeringDirections ? { steeringDirections: deps.steeringDirections } : {}),
-      ...(deps.projectBriefL1 ? { projectBriefL1: deps.projectBriefL1 } : {}),
-      ...(deps.briefParameters ? { briefParameters: deps.briefParameters } : {}),
+      ...(deps.translationInstructions ? { translationInstructions: deps.translationInstructions } : {}),
       ...(spanTerms.length > 0 ? { terms: spanTerms } : {}),
       ...(spanDecisions.length > 0 ? { decisions: spanDecisions } : {}),
       ...(deps.rules ? { rules: deps.rules } : {}),

@@ -44,7 +44,7 @@ interface PreviewBody {
   messages: ChatMessage[]
   parts: {
     base: string
-    brief: string
+    instructions: string
     rules: string
     styleRules: string
     injectedTerms: {
@@ -242,7 +242,7 @@ describe("external prompt preview", () => {
 
       // Parts are labeled and, with nothing configured, empty rather than absent.
       expect(body.parts.base).toContain("English")
-      expect(body.parts.brief).toBe("")
+      expect(body.parts.instructions).toBe("")
       expect(body.parts.rules).toBe("")
       expect(body.parts.injectedTerms).toEqual([])
       expect(body.retrieval.primitive).toBe("branching-search")
@@ -297,44 +297,49 @@ describe("external prompt preview", () => {
       expect(body.retrieval.topK).toBe(3)
     })
 
-    it("injects a custom system prompt and the translation brief", async () => {
+    // AQU-2342: the role text is fixed; the project's guidance is the ONE
+    // instructions block, exactly as the editor assembles it.
+    it("injects the stored instructions once, right after the fixed role text", async () => {
       await putSettings(testDb, "proj-a", {
         sourceLanguage: "English",
         targetLanguage: "French",
-        completionSettings: { systemPrompt: "Translate {sourceLanguage}→{targetLanguage} tersely." },
+        translationInstructions: "Aimed at oral communities in {targetLanguage}.",
+        systemPrompt: "LEGACY PROMPT",
+        translationBrief: { l1Summary: "LEGACY BRIEF" },
+      })
+      const { body } = await preview(testDb, token)
+      const sys = body.messages[0].content
+      expect(body.parts.base).toContain("You are a translation assistant completing a project that translates from English into French.")
+      expect(body.parts.instructions).toBe("Project instructions (follow these):\nAimed at oral communities in French.")
+      expect(sys.startsWith(`${body.parts.base}\n\n${body.parts.instructions}`)).toBe(true)
+      expect(sys).not.toContain("LEGACY")
+    })
+
+    it("migrates the legacy prompt and brief into the block when no instructions are stored", async () => {
+      await putSettings(testDb, "proj-a", {
+        sourceLanguage: "English",
+        targetLanguage: "French",
+        completionSettings: { systemPrompt: "Translate tersely." },
         translationBrief: { l1Summary: "Aimed at oral communities." },
       })
       const { body } = await preview(testDb, token)
-      expect(body.parts.base).toBe("Translate English→French tersely.")
-      expect(body.parts.brief).toContain("Aimed at oral communities.")
-      expect(body.messages[0].content).toContain("Translate English→French tersely.")
-      expect(body.messages[0].content).toContain("Aimed at oral communities.")
+      expect(body.parts.base).not.toContain("tersely")
+      expect(body.parts.instructions).toBe(
+        "Project instructions (follow these):\nAimed at oral communities.\n\nTranslate tersely.",
+      )
+      expect(body.messages[0].content.split("Translate tersely.").length - 1).toBe(1)
     })
 
-    // AQU-1283: PatchSettings writes the TOP-LEVEL `systemPrompt` key (the SPA
-    // syncs it into completionSettings.systemPrompt on its next load); the
-    // preview must read it from there or an agent's edit is invisible.
-    it("reads the top-level systemPrompt key PatchSettings writes", async () => {
-      await putSettings(testDb, "proj-a", {
-        sourceLanguage: "English",
-        targetLanguage: "French",
-        systemPrompt: "Top-level {sourceLanguage}→{targetLanguage} prompt.",
-      })
+    it("migrates the agent's legacy project brief exactly as the server paths do", async () => {
+      await putSettings(testDb, "proj-a", { sourceLanguage: "English", targetLanguage: "French" })
+      await testDb.pg.query(
+        `INSERT INTO project_briefs (project_id, content, updated_by, version, updated_at)
+         VALUES ('proj-a', 'Keep divine names as in the 1999 Bible.', NULL, 1, now())`,
+      )
       const { body } = await preview(testDb, token)
-      expect(body.parts.base).toBe("Top-level English→French prompt.")
-      expect(body.messages[0].content).toContain("Top-level English→French prompt.")
-    })
-
-    it("top-level systemPrompt wins over the nested completionSettings copy", async () => {
-      await putSettings(testDb, "proj-a", {
-        sourceLanguage: "English",
-        targetLanguage: "French",
-        systemPrompt: "Top-level wins.",
-        completionSettings: { systemPrompt: "Nested loses." },
-      })
-      const { body } = await preview(testDb, token)
-      expect(body.parts.base).toBe("Top-level wins.")
-      expect(body.messages[0].content).not.toContain("Nested loses.")
+      expect(body.parts.instructions).toBe(
+        "Project instructions (follow these):\nKeep divine names as in the 1999 Bible.",
+      )
     })
 
     it("404s a cell with no source row in this project", async () => {
@@ -835,7 +840,7 @@ describe("external prompt preview", () => {
         ),
         validatedPairs: body.parts.examples,
         exampleFormat: "source-and-target",
-        briefSummary: "Plain register.",
+        instructions: "Plain register.",
         precedingContext: body.parts.precedingContext,
       })
 

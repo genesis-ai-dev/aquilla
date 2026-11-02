@@ -542,6 +542,20 @@ describe("project brief", () => {
     expect(w2.status).toBe(200)
     const { brief: b2 } = (await w2.json()) as { brief: { version: number } }
     expect(b2.version).toBe(2)
+
+    // AQU-2342: GET reads the RESOLVED project instructions (same shape, the
+    // row's version) — the legacy text until stored instructions replace it.
+    const readContent = async () =>
+      ((await (await req("GET", `${PROJECT}/brief`, leadJwt)).json()) as {
+        brief: { content: string; version: number }
+      }).brief
+    expect(await readContent()).toMatchObject({ content: "Revised brief.", version: 2 })
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_settings (project_id, settings, version, updated_by) VALUES (?, ?, 1, 1)",
+    )
+      .bind(PROJECT, JSON.stringify({ translationInstructions: "Plain register." }))
+      .run()
+    expect(await readContent()).toMatchObject({ content: "Plain register.", version: 2 })
   })
 
   it("brief PUT via the agent channel → 403 brief_human_only", async () => {

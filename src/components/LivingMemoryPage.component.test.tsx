@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { expectClickNote } from "@/test-utils/tooltip"
 import { LivingMemoryPage } from "./LivingMemoryPage"
@@ -15,7 +15,7 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 import type { LivingMemoryEntry } from "@/lib/parsers/types"
 import type { LivingMemoryCell } from "@/hooks/useLivingMemory"
 import { ROLE } from "@/lib/frontier/roles"
-import { DEFAULT_SYSTEM_PROMPT } from "@/lib/completion/completion-service"
+import { INSTRUCTIONS_SAVE_DEBOUNCE_MS } from "@/components/living-memory/instructions-merge"
 
 // ── Mocks ──────────────────────────────────────────────────────────────────
 
@@ -192,19 +192,16 @@ beforeEach(() => {
 // ── Tests ──────────────────────────────────────────────────────────────────
 
 describe("LivingMemoryPage — index", () => {
-  // AQU-912: Mariette (Biblica GP, 2026-08-12) and Josseline (ETT, 2026-08-13)
-  // each read the translation brief and the AI instructions as the same thing,
-  // one day apart, and ETT writes no briefs at all. This index is where the two
-  // sit side by side, so it is where the distinction has to be legible without
-  // support: the brief row says it is OPTIONAL and describes the translation's
-  // purpose; the instructions row says it governs how the AI drafts.
-  it("distinguishes the optional brief from the AI instructions", () => {
+  // AQU-2342: the brief, the system prompt and the instruction entries were
+  // four answers to one question. The index now has ONE row for it, and that
+  // row says plainly that every AI draft reads it.
+  it("points the Instructions row at the one text every AI draft reads", () => {
     renderPage()
 
-    expect(
-      screen.getByText(/optional — who this translation is for and what it must achieve/i),
-    ).toBeTruthy()
-    expect(screen.getByText(/how the AI should behave when drafting/i)).toBeTruthy()
+    const row = screen.getByRole("link", { name: /Instructions/ })
+    expect(row).toHaveTextContent(/Every AI draft reads this/)
+    expect(row).toHaveAttribute("href", "/project/proj-1/memory/instructions")
+    expect(screen.queryByRole("link", { name: /Brief/ })).not.toBeInTheDocument()
   })
 
   it("does not load the complete cell corpus before Examples is opened", () => {
@@ -242,18 +239,27 @@ describe("LivingMemoryPage — index", () => {
     expect(screen.getByText(/Your team's encoded voice/i)).toBeInTheDocument()
   })
 
-  it("lists the five section rows by accessible name", () => {
+  it("lists the four section rows by accessible name", () => {
     renderPage()
-    expect(screen.getByRole("link", { name: /Brief/ })).toBeInTheDocument()
     expect(screen.getByRole("link", { name: /Instructions/ })).toBeInTheDocument()
     expect(screen.getByRole("link", { name: /Translation quality/ })).toBeInTheDocument()
     expect(screen.getByRole("link", { name: /Knowledge base/i })).toBeInTheDocument()
     expect(screen.getByRole("link", { name: /Examples/ })).toBeInTheDocument()
+    expect(screen.getAllByRole("link").filter((l) => l.getAttribute("href")?.includes("/memory/"))).toHaveLength(4)
   })
 
-  it("shows no pane controls on the index (no Add buttons, no textarea)", () => {
+  it("says the instructions are not written yet, until they are", () => {
+    const { unmount } = renderPage()
+    expect(screen.getByRole("link", { name: /Instructions/ })).toHaveTextContent("Not written yet")
+    unmount()
+
+    mockSettings({ settings: { translationInstructions: "Plain register." } })
     renderPage()
-    expect(screen.queryAllByRole("button", { name: /^Add/i })).toHaveLength(0)
+    expect(screen.getByRole("link", { name: /Instructions/ })).not.toHaveTextContent("Not written yet")
+  })
+
+  it("shows no pane controls on the index (no textarea)", () => {
+    renderPage()
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument()
   })
 
@@ -262,7 +268,13 @@ describe("LivingMemoryPage — index", () => {
     expect(screen.getByText(/Your team's encoded voice/i)).toBeInTheDocument()
     expect(screen.getByRole("link", { name: /Translation quality/ })).toBeInTheDocument()
     // No pane content leaked through.
-    expect(screen.queryByText(/No instructions yet\./i)).not.toBeInTheDocument()
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument()
+  })
+
+  it("redirects the retired brief section to the instructions pane", () => {
+    renderPage("/project/proj-1/memory/brief")
+    expect(screen.getByRole("heading", { level: 2, name: "Instructions" })).toBeInTheDocument()
+    expect(screen.getByRole("textbox", { name: "Instructions" })).toBeInTheDocument()
   })
 
   it("keeps the Terminology cross-link with its aria-label", () => {
@@ -272,12 +284,15 @@ describe("LivingMemoryPage — index", () => {
 })
 
 describe("LivingMemoryPage — instructions pane", () => {
-  it("deep link renders the instructions section but not standards or rules", () => {
+  it("is one heading, one sentence, one text box and one secondary button", () => {
     renderPage("/project/proj-1/memory/instructions")
     expect(screen.getByRole("heading", { level: 2, name: "Instructions" })).toBeInTheDocument()
-    expect(screen.getByText(/No instructions yet\./i)).toBeInTheDocument()
-    expect(screen.queryByRole("heading", { name: "Standards" })).not.toBeInTheDocument()
-    expect(screen.queryByText(/No standards yet\./i)).not.toBeInTheDocument()
+    expect(screen.getByText(/How the AI should translate this project\. Every AI draft reads this/)).toBeInTheDocument()
+    expect(screen.getAllByRole("textbox")).toHaveLength(1)
+    expect(screen.getByRole("button", { name: "Help me write this" })).toBeInTheDocument()
+    // The retired surfaces are gone.
+    expect(screen.queryByRole("button", { name: /System prompt/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /^Add/i })).not.toBeInTheDocument()
     expect(screen.queryByTestId("rules-settings-section")).not.toBeInTheDocument()
   })
 
@@ -289,101 +304,94 @@ describe("LivingMemoryPage — instructions pane", () => {
     expect(screen.getByRole("link", { name: /Translation quality/ })).toBeInTheDocument()
   })
 
-  it("shows entries with edit/delete controls when canEdit=true", () => {
+  it("prefills the migrated text from the old sources when nothing is stored", () => {
     mockProject({ livingMemoryEntries: [makeEntry({ text: "Formal tone" })] })
+    mockSettings({ settings: { systemPrompt: "Keep divine names as in the 1999 Bible." } })
     renderPage("/project/proj-1/memory/instructions")
-    expect(screen.getByText("Formal tone")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /Edit entry/i })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /Delete entry/i })).toBeInTheDocument()
-  })
-})
 
-describe("LivingMemoryPage — prediction prompt block", () => {
-  it("is collapsed by default and expands via the aria-expanded trigger", () => {
-    renderPage("/project/proj-1/memory/instructions")
-    expect(
-      screen.queryByRole("textbox", { name: "System prompt" }),
-    ).not.toBeInTheDocument()
-
-    const trigger = screen.getByRole("button", { name: /System prompt/i })
-    expect(trigger).toHaveAttribute("aria-expanded", "false")
-
-    fireEvent.click(trigger)
-    expect(trigger).toHaveAttribute("aria-expanded", "true")
-    const textarea = screen.getByRole("textbox", { name: "System prompt" })
-    expect(textarea).toHaveValue(DEFAULT_SYSTEM_PROMPT)
+    const field = screen.getByRole("textbox", { name: "Instructions" })
+    expect(field).toHaveValue("Keep divine names as in the 1999 Bible.\n\nFormal tone")
+    // Nothing is written back until someone edits it.
+    expect(mockPatch).not.toHaveBeenCalled()
   })
 
-  it("shows the Default badge for the default prompt and no reset button", () => {
+  it("shows the stored instructions, ignoring the old sources", () => {
+    mockProject({ livingMemoryEntries: [makeEntry({ text: "Formal tone" })] })
+    mockSettings({ settings: { translationInstructions: "Plain register for youth." } })
     renderPage("/project/proj-1/memory/instructions")
-    expect(screen.getByText("Default")).toBeInTheDocument()
-    expect(screen.queryByText("Custom")).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: /System prompt/i }))
-    expect(
-      screen.queryByRole("button", { name: /Reset to default/i }),
-    ).not.toBeInTheDocument()
+
+    expect(screen.getByRole("textbox", { name: "Instructions" })).toHaveValue("Plain register for youth.")
   })
 
-  it("shows the Custom badge and reset button for a custom stored prompt", () => {
-    mockSettings({ settings: { systemPrompt: "Translate like a pirate." } })
-    renderPage("/project/proj-1/memory/instructions")
-    expect(screen.getByText("Custom")).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole("button", { name: /System prompt/i }))
-    expect(screen.getByRole("textbox", { name: "System prompt" })).toHaveValue(
-      "Translate like a pirate.",
-    )
-    expect(screen.getByRole("button", { name: /Reset to default/i })).toBeInTheDocument()
+  it("auto-saves the edited text to translationInstructions", async () => {
+    vi.useFakeTimers()
+    try {
+      renderPage("/project/proj-1/memory/instructions")
+      fireEvent.change(screen.getByRole("textbox", { name: "Instructions" }), {
+        target: { value: "Short sentences." },
+      })
+      expect(mockPatch).not.toHaveBeenCalled()
+      await act(async () => {
+        vi.advanceTimersByTime(INSTRUCTIONS_SAVE_DEBOUNCE_MS)
+      })
+      expect(mockPatch).toHaveBeenCalledTimes(1)
+      expect(mockPatch).toHaveBeenCalledWith({ translationInstructions: "Short sentences." })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
-  it("saves an edited prompt via patch", async () => {
+  it("saves at once when the field loses focus", async () => {
     renderPage("/project/proj-1/memory/instructions")
-    fireEvent.click(screen.getByRole("button", { name: /System prompt/i }))
-    const textarea = screen.getByRole("textbox", { name: "System prompt" })
-    const save = screen.getByRole("button", { name: "Save" })
-    expect(save).toBeDisabled()
-
-    fireEvent.change(textarea, { target: { value: "New prompt text" } })
-    expect(save).toBeEnabled()
-    fireEvent.click(save)
+    const field = screen.getByRole("textbox", { name: "Instructions" })
+    fireEvent.change(field, { target: { value: "Use informal you." } })
+    fireEvent.blur(field)
     await waitFor(() =>
-      expect(mockPatch).toHaveBeenCalledWith({ systemPrompt: "New prompt text" }),
+      expect(mockPatch).toHaveBeenCalledWith({ translationInstructions: "Use informal you." }),
     )
+    expect(await screen.findByText("Saved")).toBeInTheDocument()
+  })
+
+  it("counts characters against the 8000-character limit", () => {
+    mockSettings({ settings: { translationInstructions: "Plain." } })
+    renderPage("/project/proj-1/memory/instructions")
+    expect(screen.getByRole("textbox", { name: "Instructions" })).toHaveAttribute("maxLength", "8000")
+    expect(screen.getByText("6 / 8,000 characters")).toBeInTheDocument()
+  })
+
+  it("opens the brief interview from 'Help me write this'", () => {
+    renderPage("/project/proj-1/memory/instructions")
+    fireEvent.click(screen.getByRole("button", { name: "Help me write this" }))
+    expect(screen.getByRole("dialog", { name: "Help writing the instructions" })).toBeInTheDocument()
   })
 })
 
 describe("LivingMemoryPage — role-gated edit affordances", () => {
-  it("hides Add buttons and the prompt editor's save when canEdit=false", () => {
+  it("shows the instructions read-only, with a note, below Maintainer", async () => {
     mockProject({
       syncRole: { level: ROLE.CONTRIBUTOR, source: "override" },
     } as unknown as Partial<ProjectRecord>)
-    mockSettings({ canEdit: false, reasonCannotEdit: "role" })
+    mockSettings({
+      canEdit: false,
+      reasonCannotEdit: "role",
+      settings: { translationInstructions: "Plain register." },
+    })
     renderPage("/project/proj-1/memory/instructions")
 
-    expect(screen.queryAllByRole("button", { name: /^Add/i })).toHaveLength(0)
-
-    fireEvent.click(screen.getByRole("button", { name: /System prompt/i }))
-    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument()
-    expect(screen.getByRole("textbox", { name: "System prompt" })).toBeDisabled()
+    const field = screen.getByRole("textbox", { name: "Instructions" })
+    expect(field).toHaveAttribute("readonly")
+    expect(field).toHaveValue("Plain register.")
+    expect(screen.queryByRole("button", { name: "Help me write this" })).not.toBeInTheDocument()
+    expect(screen.getByText("Editing requires the Maintainer role or above.")).toBeInTheDocument()
+    fireEvent.change(field, { target: { value: "Changed" } })
+    fireEvent.blur(field)
+    expect(mockPatch).not.toHaveBeenCalled()
   })
 
-  it("hides the Add button on the quality pane when canEdit=false", () => {
-    mockProject({
-      syncRole: { level: ROLE.REVIEWER, source: "override" },
-    } as unknown as Partial<ProjectRecord>)
-    mockSettings({ canEdit: false, reasonCannotEdit: "role" })
+  it("mounts the Rules and style-rule surfaces on the quality pane, with no Standards block", () => {
     renderPage("/project/proj-1/memory/quality")
-
-    expect(screen.getByRole("heading", { name: "Standards" })).toBeInTheDocument()
-    expect(screen.queryAllByRole("button", { name: /^Add/i })).toHaveLength(0)
-  })
-
-  it("shows standards Add button and mounts the Rules surface when canEdit=true", () => {
-    renderPage("/project/proj-1/memory/quality")
-    expect(screen.getByRole("heading", { name: "Standards" })).toBeInTheDocument()
-    expect(
-      screen.getByRole("button", { name: /Add standards entry/i }),
-    ).toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "Standards" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Add standards entry/i })).not.toBeInTheDocument()
     expect(screen.getByRole("heading", { name: "Rules" })).toBeInTheDocument()
     expect(screen.getByTestId("rules-settings-section")).toBeInTheDocument()
     expect(screen.getByTestId("quality-style-rules")).toBeInTheDocument()

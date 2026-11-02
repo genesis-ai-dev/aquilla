@@ -49,6 +49,8 @@ import { callerMayReadLane } from "../../../db/shared/lane-visibility"
 import { resolveLaneIdOrTag } from "../../../db/shared/lane-ref"
 import { languageOfTargetLane } from "../../../db/shared/lane-language"
 import { readDraftingSettings } from "../../../db/shared/drafting-settings"
+import { settingsObject } from "../../../db/shared/load-translation-instructions"
+import { resolveTranslationInstructions } from "../../../db/shared/translation-instructions"
 import { resolveAnswerLanguage } from "../lib/agent/answer-language"
 import { enforceRateLimit, userRateLimitIdentifier } from "../../../db/shared/rate-limit"
 import { buildAugmentSystemPrompt } from "../lib/agent/prompt-augment"
@@ -251,14 +253,14 @@ function buildTools(bibleResourcesEnabled: boolean) {
       function: {
         name: "draft",
         description:
-          "Draft untranslated cells with a separate evidence-research pass followed by generation from validated exemplars, discourse context, the project brief, and rules; then STAGE the results for user approval. Preferred over writing translations yourself. One call handles up to 10 cells; the result says how many remain.",
+          "Draft untranslated cells with a separate evidence-research pass followed by generation from validated exemplars, preceding validated context, and the project instructions; then STAGE the results for user approval, where the project's rules lint them (violations come back in the verdict). Key terms are not in the drafting prompt: name term choices in instructions. Preferred over writing translations yourself. One call handles up to 10 cells; the result says how many remain.",
         parameters: {
           type: "object",
           properties: {
             ...SCOPE_PROPS,
             cellIds: { type: "array", items: { type: "string" }, description: "Draft exactly these cells (ids or #c-aliases) instead of every untranslated cell in scope." },
             limit: { type: "number", description: "Max cells this call (default 10, cap 10)." },
-            instructions: { type: "string", description: "Extra guidance for this batch (tone, term choices, fixes from lint)." },
+            instructions: { type: "string", description: "Directions for this run only (tone, term choices, fixes from lint) — on top of the project instructions, which every draft already carries." },
           },
         },
       },
@@ -826,7 +828,9 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
   // run to ask "what language?". Best-effort, cheap lookups.
   let focusedFile: { name?: string; kind?: string } = {}
   let languages: { sourceLanguage?: string; targetLanguage?: string } = {}
-  let briefSummary: string | undefined
+  // AQU-2342: the settings blob, read once — the project instructions resolve
+  // from it (plus the legacy brief) after the memory context loads below.
+  let settingsBlob: Record<string, unknown> = {}
   // AQU-2263: the project's "The assistant answers the team in …".
   let teamLanguage: string | undefined
   try {
@@ -839,23 +843,19 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
       if (row) focusedFile = { name: row.name, kind: row.kind ?? undefined }
     }
     const settings = await env.AQUILLA_PG.prepare(
-      `SELECT settings::jsonb -> 'translationBrief' ->> 'l1Summary' AS brief_summary,
-              settings::jsonb -> 'draftingSettings' AS drafting_settings
-       FROM project_settings WHERE project_id = ?`,
+      `SELECT settings FROM project_settings WHERE project_id = ?`,
     )
       .bind(body.projectId)
-      .first<{ brief_summary: string | null; drafting_settings: unknown }>()
+      .first<{ settings: unknown }>()
     if (settings) {
+      settingsBlob = settingsObject(settings.settings)
+      teamLanguage = readDraftingSettings(settingsBlob.draftingSettings)?.main_chat_language
       const lanes = await loadLaneRows(env.AQUILLA_PG, body.projectId)
       languages = languagesForLanes(lanes, body.context?.lane ?? "")
       const fromLane = resolvedLaneId
         ? await languageOfTargetLane(env.AQUILLA_PG, body.projectId, resolvedLaneId)
         : null
       if (fromLane) languages = { ...languages, targetLanguage: fromLane }
-      briefSummary = settings.brief_summary ?? undefined
-      const rawDrafting = settings.drafting_settings
-      const drafting = typeof rawDrafting === "string" ? (() => { try { return JSON.parse(rawDrafting) as unknown } catch { return null } })() : rawDrafting
-      teamLanguage = readDraftingSettings(drafting)?.main_chat_language
     }
   } catch {
     /* prompt grounding is best-effort — the run proceeds without it */
@@ -883,6 +883,12 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
   } catch {
     /* memory grounding is best-effort */
   }
+  // AQU-2342: THE project instructions — one block, carried by the schema card
+  // and the draft tool alike. The legacy brief already loaded with the memory
+  // context is only a migrate-on-read source here, never a second block.
+  const translationInstructions = resolveTranslationInstructions(settingsBlob, {
+    projectBriefText: memory.brief,
+  })
 
   const convo: ConvoMessage[] = [
     {
@@ -904,11 +910,12 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
         // to follow the user's latest message (the app's language only when
         // that can't be told) — never the project's translation target.
         responseLanguage: answerLanguage.reply,
-        briefSummary,
+        translationInstructions,
       }),
     },
-    // AQU-AGENT §2 — second system message: verbatim brief + approved-memory
-    // index + new-tool guidance + conversation-language rule. Kept separate so the
+    // AQU-AGENT §2 — second system message: approved-memory index + new-tool
+    // guidance + conversation-language rule (the legacy brief now reaches the
+    // model only through the instructions block above — AQU-2342). Kept separate so the
     // existing schema-card prompt stays byte-identical.
     {
       role: "system" as const,
@@ -1239,7 +1246,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
             ...(usage ? { maxTokens: usage.maxOutputTokens } : {}),
             sourceLanguage: languages.sourceLanguage,
             targetLanguage: languages.targetLanguage,
-            briefSummary,
+            translationInstructions,
           },
           addUsage: (u) => {
             promptTokens += u.prompt_tokens ?? 0
@@ -1407,7 +1414,7 @@ interface ToolCallEnv {
     maxTokens?: number
     sourceLanguage?: string
     targetLanguage?: string
-    briefSummary?: string
+    translationInstructions?: string
   }
   /** Folds a tool-internal model call's usage into the run totals. */
   addUsage: (usage: { prompt_tokens?: number; completion_tokens?: number; cost?: number }) => void
@@ -1567,7 +1574,7 @@ async function runDraftTool(args: DraftArgs, t: ToolCallEnv): Promise<string> {
       stageCtx: t.stageCtx,
       sourceLanguage: t.draft.sourceLanguage,
       targetLanguage: t.draft.targetLanguage,
-      briefSummary: t.draft.briefSummary,
+      translationInstructions: t.draft.translationInstructions,
       signal: t.signal,
       sendProgress: (label, done, total) => t.send({ type: "progress", label, done, total }),
       addUsage: t.addUsage,

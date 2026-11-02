@@ -189,7 +189,6 @@ describe("persona capabilities (agent cards)", () => {
     }
     expect(new Set(routes)).toEqual(
       new Set([
-        "/project/proj-1/memory/brief",
         "/project/proj-1/memory/instructions",
         "/project/proj-1/terminology",
         "/project/proj-1/memory",

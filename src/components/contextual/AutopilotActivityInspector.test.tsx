@@ -843,7 +843,7 @@ describe("AutopilotActivityInspector", () => {
     expect(screen.queryByText(/Could not refresh detailed activity/)).not.toBeInTheDocument()
   })
 
-  it("links missing terminology and brief context to their real project surfaces", async () => {
+  it("links missing terminology and instructions context to their real project surfaces", async () => {
     renderInspector({
       initialSection: "context",
       readiness: {
@@ -851,7 +851,7 @@ describe("AutopilotActivityInspector", () => {
         blockingGaps: 2,
         items: [
           { id: "terminology", label: "Key terms", level: "missing", detail: "Missing", href: "terminology" },
-          { id: "brief", label: "Translation brief", level: "missing", detail: "Missing", href: "memory/brief" },
+          { id: "instructions", label: "Translation instructions", level: "missing", detail: "Missing", href: "memory/instructions" },
         ],
       },
     })
@@ -860,16 +860,17 @@ describe("AutopilotActivityInspector", () => {
       "href",
       "/project/p1/terminology",
     )
-    expect(screen.getByRole("link", { name: "Set up Translation brief" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Set up Translation instructions" })).toHaveAttribute(
       "href",
-      "/project/p1/memory/brief",
+      "/project/p1/memory/instructions",
     )
   })
 
   // AQU-1672: the "Set up" link renders only while an item is unfinished, so a
   // project past first setup had no route left to the surface behind it. That
-  // mattered most for the translation brief — this list was its only path from
-  // the dashboard, and a reviewer wanting to re-read or revise it found none.
+  // mattered most for the translation brief (now the project instructions) —
+  // this list was its only path from the dashboard, and a reviewer wanting to
+  // re-read or revise it found none.
   it("keeps a route to a finished context item from its own title", async () => {
     renderInspector({
       initialSection: "context",
@@ -877,14 +878,14 @@ describe("AutopilotActivityInspector", () => {
         ready: true,
         blockingGaps: 0,
         items: [
-          { id: "brief", label: "Translation brief", level: "ready", detail: "Answered", href: "memory/brief" },
+          { id: "instructions", label: "Translation instructions", level: "ready", detail: "Written", href: "memory/instructions" },
         ],
       },
     })
 
-    expect(await screen.findByRole("link", { name: "Translation brief" })).toHaveAttribute(
+    expect(await screen.findByRole("link", { name: "Translation instructions" })).toHaveAttribute(
       "href",
-      "/project/p1/memory/brief",
+      "/project/p1/memory/instructions",
     )
   })
 

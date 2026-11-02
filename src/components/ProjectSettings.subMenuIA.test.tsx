@@ -23,8 +23,8 @@
 //      (page AND route-modal) to the standalone /project/:id/memory surface —
 //      memory → /memory, rules → /memory/quality, system-prompt →
 //      /memory/instructions — preserving the query string.
-//   7. The AI pane keeps a cross-link NavRow to Living Memory (instructions)
-//      with the old Custom/Default system-prompt hint semantics.
+//   7. The AI pane keeps one NavRow to the project instructions
+//      (memory/instructions) with a preview of the text (AQU-2342).
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, cleanup } from "@testing-library/react"
@@ -524,10 +524,10 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     expect(screen.queryByText("Source link")).toBeNull()
 
     renderAt(`/project/${PROJECT_ID}/settings/ai`)
-    // The system prompt moved to Living Memory (memory/instructions) — the AI
-    // pane cross-links there instead of nesting a settings pane, and no
+    // The project instructions live in Living Memory (memory/instructions) —
+    // the AI pane links there instead of nesting a settings pane, and no
     // system-prompt textarea exists anywhere in settings anymore.
-    expect(screen.getByRole("link", { name: /living memory/i })).toBeTruthy()
+    expect(screen.getByRole("link", { name: /^instructions/i })).toBeTruthy()
     expect(screen.queryByLabelText(/^system prompt$/i)).toBeNull()
     expect(screen.getByLabelText(/examples retrieved/i)).toBeTruthy()
     expect(screen.getByLabelText(/preceding committed-target cells/i)).toBeTruthy()
@@ -595,15 +595,14 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     expect(screen.queryByTestId("project-settings-dialog")).toBeNull()
   })
 
-  // Entry point kept alive: the AI pane cross-links to Living Memory where
-  // the system prompt now lives, reusing the old Custom/Default hint. It is a
+  // AQU-2342: the AI pane's one entry to the project instructions. It is a
   // plain navigation (no modal state) since it leaves settings entirely.
-  it("the AI pane shows a Living Memory cross-link with a Default hint by default", () => {
+  it("the AI pane links to the instructions, saying when none are written", () => {
     renderAt(`/project/${PROJECT_ID}/settings/ai`)
 
-    const link = screen.getByRole("link", { name: /living memory/i })
+    const link = screen.getByRole("link", { name: /^instructions/i })
     expect(link).toHaveAttribute("href", `/project/${PROJECT_ID}/memory/instructions`)
-    expect(link).toHaveTextContent("Default")
+    expect(link).toHaveTextContent("Not written yet")
   })
 
   // The hidden termbase-sharing section (SHOW_TERMBASE_SHARING_IN_SETTINGS

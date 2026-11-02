@@ -1060,10 +1060,9 @@ async function processSpan(
         EXAMPLES_TARGET,
         shared.bible.state === "ready" ? shared.bible.data.facts : undefined,
       ),
-      ...(shared.ctx.projectBriefL1 ? { projectBriefL1: shared.ctx.projectBriefL1 } : {}),
-      // The brief's own answers carry when nobody generated an L1 summary, and
-      // the concepts get scoped to this span's source text inside runSpan.
-      briefParameters: shared.ctx.briefParameters,
+      // AQU-2342: the one instructions text; the concepts get scoped to this
+      // span's source text inside runSpan.
+      ...(shared.ctx.translationInstructions ? { translationInstructions: shared.ctx.translationInstructions } : {}),
       ...(shared.ctx.concepts.length > 0 ? { concepts: shared.ctx.concepts } : {}),
       // AQU-1691: durable decisions, re-read every wave (never consumed).
       projectFacts: shared.ctx.projectFacts,
@@ -1466,8 +1465,10 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
     laneId: run.laneId,
     targetLang: run.targetLang,
   })
-  const layerAbove: LayerAboveBlock[] = ctx.projectBriefL1
-    ? [{ ref: "project-brief", text: ctx.projectBriefL1 }]
+  // AQU-2342: the analyzer's layer above is the same instructions text the
+  // performer carries (it used to be the brief's L1 summary alone).
+  const layerAbove: LayerAboveBlock[] = ctx.translationInstructions
+    ? [{ ref: "project-instructions", text: ctx.translationInstructions }]
     : []
   // AQU-609: lane-scoped rules only constrain their own lane's drafts.
   const rules: LintRule[] = rulesForLane(ctx.authoredRules, run.targetLang)

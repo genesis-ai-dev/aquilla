@@ -848,8 +848,15 @@ export interface ProjectRecord {
    *  compiled to TranslationRule instances at rule-evaluation time — violations
    *  are DERIVED on read, no materialized verdicts. */
   terminology?: import("@/lib/terminology/types").Concept[]
-  /** Authored living-memory entries (instructions + standards). Persisted and
-   *  synced via ProjectWideSettings the same way as `rules` / `terminology`. */
+  /** AQU-2342: THE project instructions every AI draft reads. Synced via
+   *  ProjectWideSettings. Absent → resolved on read from the legacy sources
+   *  (see `projectTranslationInstructions` in src/lib/instructions). */
+  translationInstructions?: string
+  /** AQU-2342: the agent's legacy free-text brief, from the settings GET
+   *  (never persisted). Only a migrate-on-read source for the instructions. */
+  legacyProjectBriefText?: string
+  /** Authored living-memory entries. Legacy (AQU-2342): "instruction" entries
+   *  only feed `translationInstructions` on read until it is written. */
   livingMemoryEntries?: LivingMemoryEntry[]
   /** AQU-934: per-file genre assignment (fileId → genre id). Synced settings. */
   fileGenres?: Record<string, string>

@@ -30,11 +30,15 @@ export interface BriefBuilderProps {
   onHelpDraft?: (fieldId: string, draft: BriefDraft) => Promise<string>
   /** Optional: document pre-fill. Absent → upload step hidden. */
   onExtractDocument?: (text: string) => Promise<Record<string, string>>
+  /** Dialog title. */
+  title: string
+  /** Label of the last step's finish button (it calls onGenerateL1). */
+  finishLabel: string
 }
 
 export function BriefBuilder(props: BriefBuilderProps) {
   const t = useT()
-  const { open, brief, canEdit, onSaveDraft, onGenerateL1, onClose, onHelpDraft, onExtractDocument } = props
+  const { open, brief, canEdit, onSaveDraft, onGenerateL1, onClose, onHelpDraft, onExtractDocument, title, finishLabel } = props
   const [params, setParams] = useState<Record<string, string>>({ ...brief.parameters })
   const [notes, setNotes] = useState(brief.freeformNotes)
   // Resume at the first unanswered field (or 0). +1 slot is the notes step.
@@ -59,7 +63,7 @@ export function BriefBuilder(props: BriefBuilderProps) {
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
       <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>{t("autopilot.readiness.brief.label")}</DialogTitle>
+          <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
 
         {onExtractDocument && step === 0 && (
@@ -120,7 +124,7 @@ export function BriefBuilder(props: BriefBuilderProps) {
                   // summary was actually generated (AQU-968).
                   try { if (await onGenerateL1(draft)) onClose() } finally { setBusy(false) }
                 }}>
-                {t("agent.brief.saveAndGenerate")}
+                {finishLabel}
               </Button>
             ) : (
               <Button disabled={busy} onClick={() => setStep((s) => s + 1)}>{t("common.next")}</Button>

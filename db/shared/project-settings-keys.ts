@@ -35,6 +35,7 @@ import {
   rulesProblem,
 } from './rules-settings'
 import { parseProjectVisibilityFloor, VISIBILITY_FLOOR_LEVELS } from './visibility-floors'
+import { TRANSLATION_INSTRUCTIONS_MAX_CHARS, translationInstructionsProblem } from './translation-instructions'
 
 const VISIBILITY_FLOOR_TYPE_NAME = `${VISIBILITY_FLOOR_LEVELS.join(' | ')} (a role level: 100 viewer … 700 owner)`
 
@@ -88,7 +89,7 @@ export function settingsTypeName(spec: SettingsKeySpec): string {
 function matchesSpec(spec: SettingsKeySpec, value: unknown): boolean {
   switch (spec.kind) {
     case 'string':
-      return typeof value === 'string'
+      return typeof value === 'string' && (!spec.problem || spec.problem(value) === null)
     case 'number':
       return typeof value === 'number' && Number.isFinite(value) && (!spec.problem || spec.problem(value) === null)
     case 'boolean':
@@ -128,6 +129,18 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
   targetTextDirection: { kind: 'enum', values: TEXT_DIRECTION_SETTING_VALUES },
 
   // Drafting
+  // AQU-2342: THE project instructions — the one text every drafting path
+  // (copilot, prompt preview, agent chat, agent draft, Autopilot) injects
+  // (db/shared/translation-instructions.ts). Unset, it is composed on read
+  // from the older sources below (brief summary, a customized systemPrompt,
+  // Living Memory instruction entries, the agent's legacy project brief).
+  translationInstructions: {
+    kind: 'string',
+    problem: (value) => translationInstructionsProblem(value),
+    typeName: `string (at most ${TRANSLATION_INSTRUCTIONS_MAX_CHARS} characters)`,
+  },
+  // AQU-2342: legacy. No prompt reads it any more except as a migrate-on-read
+  // source for translationInstructions; the copilot's role text is fixed.
   systemPrompt: { kind: 'string' },
   // AQU-2259: the team's AI drafting settings — retrieval tuning, batch sizes,
   // the model choice and the Health penalty (db/shared/drafting-settings.ts).
@@ -138,6 +151,8 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
     typeName: DRAFTING_SETTINGS_TYPE_NAME,
   },
   draftContext: { kind: 'object' },
+  // AQU-2342: the brief interview's answers. Prompts read translationInstructions;
+  // the brief only feeds it on read until instructions are written.
   translationBrief: { kind: 'object' },
   livingMemoryEntries: { kind: 'object[]' },
   alignmentSeeds: { kind: 'object[]' },
@@ -307,7 +322,7 @@ export function validateSettingsKeyValue(key: string, value: unknown): string | 
   if (value === null) return null
   if (!matchesSpec(spec, value)) {
     // A structural problem names the field at fault, not only the expected type.
-    const detail = spec.problem && (isPlainObject(value) || Array.isArray(value) || typeof value === 'number')
+    const detail = spec.problem && (isPlainObject(value) || Array.isArray(value) || typeof value === 'number' || typeof value === 'string')
       ? spec.problem(value)
       : null
     return `settings key "${key}" expects ${settingsTypeName(spec)}${detail ? ` (${detail})` : ''}`

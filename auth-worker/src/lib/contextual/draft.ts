@@ -10,15 +10,13 @@
 import { parseDraftReply } from "../agent/tools/draft"
 import type { LintRule } from "../agent/lint"
 import type { CellPair } from "../agent/tools/select-cells"
-import {
-  PERFORMER_BRIEF_FIELDS,
-  type TermGuidance,
-  type TranslationBriefParameters,
-} from "./project-context"
+import type { TermGuidance } from "./project-context"
+import { instructionsPromptBlock } from "../../../../db/shared/translation-instructions"
 import { chargeBudget, type AmbiguityEntry, type LlmCall, type RunBudget, type SpanDraft } from "./types"
 
 // v3 (AQU-1691): the "Project decisions" block.
 // v4 (AQU-1690): per-cell Bible facts lines, and examples chosen by pack features.
+// (AQU-2342's instructions block needs no bump: the fingerprint suffix moves.)
 export const CONTEXTUAL_PROMPT_VERSION = "contextual-draft-v4"
 
 export interface ExamplePair {
@@ -41,9 +39,8 @@ export interface PerformSpanDeps {
   /** Validated pairs immediately preceding the span (discourse left-context). */
   precedingValidated: CellPair[]
   steeringDirections?: string[]
-  projectBriefL1?: string
-  /** The brief's structured answers, used when there is no L1 summary. */
-  briefParameters?: TranslationBriefParameters
+  /** AQU-2342: the project's resolved translation instructions. */
+  translationInstructions?: string
   /** Approved/forbidden renderings for the key terms that appear in THIS span. */
   terms?: TermGuidance[]
   /** AQU-1691: the Language profile and the decision-log facts in scope for THIS span, one line each (./project-decisions.ts). */
@@ -131,20 +128,9 @@ function performerSystemPrompt(deps: PerformSpanDeps): string {
           .join("\n")}\n`
       : ""
 
-  // The brief's own answers, used when nobody has generated the L1 summary —
-  // an un-summarised brief is still a brief, and drafting without audience,
-  // register, or literalness means guessing the decisions that shape every
-  // sentence.
-  const briefFallbackBlock =
-    !deps.projectBriefL1 && deps.briefParameters
-      ? (() => {
-          const lines = PERFORMER_BRIEF_FIELDS.flatMap((f) => {
-            const v = deps.briefParameters?.[f.id]
-            return v ? [`- ${f.label}: ${clip(v, 300)}`] : []
-          })
-          return lines.length > 0 ? `\nProject brief (honour it):\n${lines.join("\n")}\n` : ""
-        })()
-      : ""
+  // AQU-2342: the ONE project instructions block, right after the role text.
+  const instructions = instructionsPromptBlock(deps.translationInstructions)
+  const instructionsBlock = instructions ? `\n${instructions}\n` : ""
 
   const steeringBlock =
     deps.steeringDirections && deps.steeringDirections.length > 0
@@ -158,7 +144,7 @@ function performerSystemPrompt(deps: PerformSpanDeps): string {
 
   // [[ctx:draft]] routes the scripted e2e mock (scripts/mock-openrouter.ts).
   return `[[ctx:draft]] ${pair} You are the PERFORMER in a two-role translation pipeline: an analyzer has already construed the scene below. Work from the scene brief — translate the scene's moves, not word by word. Target-language idioms are explicitly licensed where they carry the same move with the same social force.
-${deps.projectBriefL1 ? `\nProject brief (honour it): ${deps.projectBriefL1}\n` : briefFallbackBlock}
+${instructionsBlock}
 Scene brief: ${deps.sceneBrief.l1Summary}
 ${registerBlock}${termsBlock}${decisionsBlock}${rulesBlock}${factsBlock}${steeringBlock}
 Rules:

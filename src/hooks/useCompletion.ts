@@ -296,8 +296,9 @@ export function useCompletion(
   // e.g.:  useCompletion(...existingArgs, frontierSession, commitCompletedCell, rules, fileCells)
   rules?: TranslationRule[],
   allCells?: CellData[] | (() => CellData[]),
-  /** The project brief's L1 summary — injected into every prompt (Task 6). */
-  briefSummary?: string,
+  /** The project instructions (AQU-2342, resolveTranslationInstructions) —
+   *  injected right after the fixed role text of every prompt. */
+  instructions?: string,
   draftContext: DraftContextSettings = DEFAULT_DRAFT_CONTEXT,
   /** Active target lane tag (`activeLane`). Default `""`. */
   lane = "",
@@ -424,7 +425,7 @@ export function useCompletion(
     ...(interventionId ? { interventionId } : {}),
     model: modelName,
     provider,
-    promptVersion: `${PROMPT_VERSION}:${promptFingerprint(effectiveSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT)}`,
+    promptVersion: `${PROMPT_VERSION}:${promptFingerprint(instructions ? `${DEFAULT_SYSTEM_PROMPT}\n\n${instructions}` : DEFAULT_SYSTEM_PROMPT)}`,
     exampleIds: uniqueExampleIds(approvedExamples.map((example) => example.cellId)),
     exampleTexts: approvedExamples.map((example, index) => ({
       cellId: example.cellId ?? `example-${index}`,
@@ -442,7 +443,7 @@ export function useCompletion(
         evidenceWeight: evidence.weight,
       } : {}),
     },
-  }), [effectiveSettings.systemPrompt, modelName, provider, sourceLanguage, targetLanguage])
+  }), [instructions, modelName, provider, sourceLanguage, targetLanguage])
 
   // AQU-670: resolves `true` only when the draft actually committed (the outbox
   // enqueue succeeded), and `false` on any failure — commit/enqueue rejection,
@@ -499,14 +500,14 @@ export function useCompletion(
 
       const messages = buildPrompt({
         sourceLanguage, targetLanguage,
-        systemPrompt: effectiveSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT,
+        systemPrompt: DEFAULT_SYSTEM_PROMPT,
         sourceText: idmlCompletionPromptSource(cell, prepared.promptSource),
         examples: [],
         rules,
         ...(styleInstructionsFor && { styleInstructions: styleInstructionsFor(cell) }),
         validatedPairs: approvedExamples,
         exampleFormat: effectiveSettings.fewShotExampleFormat,
-        briefSummary,
+        instructions,
         precedingContext,
         ...(systemAddendum && { systemAddendum }),
         ...(!idmlAddendum && prepared.footnoteCount > 0 && {
@@ -667,7 +668,7 @@ export function useCompletion(
       putLaneEntry(setErrors, lk(cell.id), err instanceof Error ? err.message : "Failed")
       return false
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, briefSummary, draftProvenance, prepareSingleEvidence, lk, recordModelCall])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, instructions, draftProvenance, prepareSingleEvidence, lk, recordModelCall])
 
   // Move an existing translation into the source cell's style runs. The model
   // does not rewrite the words; a placement that would change them is refused.
@@ -993,7 +994,7 @@ export function useCompletion(
         )
         const messages = buildBatchPrompt({
           sourceLanguage, targetLanguage,
-          systemPrompt: effectiveSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT,
+          systemPrompt: DEFAULT_SYSTEM_PROMPT,
           cells: chunk.map((c) => ({
             source: idmlCompletionPromptSource(c, effectiveSourceText(c)),
           })),
@@ -1004,7 +1005,7 @@ export function useCompletion(
           }),
           validatedPairs: batchApprovedExamples,
           exampleFormat: effectiveSettings.fewShotExampleFormat,
-          briefSummary,
+          instructions,
           precedingContext,
           systemAddendum: idmlCompletionSystemAddendum(chunk),
         })
@@ -1286,7 +1287,7 @@ export function useCompletion(
       clearBatchCompletionProgress(runId)
       memMark(`completeBatch.end(${cells.length}c)`)
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, completeSingle, commitCompletedCell, commitCompletedCells, rules, styleInstructionsFor, getAllCells, briefSummary, draftContext, draftProvenance, lk, recordModelCall])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, completeSingle, commitCompletedCell, commitCompletedCells, rules, styleInstructionsFor, getAllCells, instructions, draftContext, draftProvenance, lk, recordModelCall])
 
   // completeParagraph: draft a whole paragraph group as ONE model call, fan results
   // out to per-cell commits via the existing commitCompletedCell path (D3, D11).
@@ -1367,7 +1368,7 @@ export function useCompletion(
       const messages = buildParagraphPrompt({
         sourceLanguage,
         targetLanguage,
-        systemPrompt: effectiveSettings.systemPrompt || DEFAULT_SYSTEM_PROMPT,
+        systemPrompt: DEFAULT_SYSTEM_PROMPT,
         // Full group, IN POSITION (coordinator adjudication): a validated
         // cell mid-group must not leave a silent gap that makes its drafted
         // neighbors read as artificially adjacent. Locked (validated) cells
@@ -1385,7 +1386,7 @@ export function useCompletion(
         ...(styleInstructionsFor && {
           styleInstructions: unionStyleInstructions(groupCells, styleInstructionsFor),
         }),
-        briefSummary,
+        instructions,
         exampleFormat: effectiveSettings.fewShotExampleFormat,
         precedingContext,
         // Following-source context (right side of discourse window, D4): the
@@ -1558,7 +1559,7 @@ export function useCompletion(
         putLaneEntry(setErrors, lk(c.id), msg)
       }
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, getAllCells, briefSummary, draftContext, draftProvenance, lk, recordModelCall])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, getAllCells, instructions, draftContext, draftProvenance, lk, recordModelCall])
 
   /**
    * AQU-913: forget a cell's failure entirely — the visible message AND the

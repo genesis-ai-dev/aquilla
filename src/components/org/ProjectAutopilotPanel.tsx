@@ -349,10 +349,11 @@ function StartGateNotice({
       label: t("autopilot.startGate.settingsLink"),
       detail: t("autopilot.startGate.languages"),
     },
-    brief: {
-      to: `/project/${projectId}/memory/brief`,
-      label: t("autopilot.startGate.briefLink"),
-      detail: t("autopilot.startGate.brief"),
+    // AQU-2342: the gate asks for project instructions.
+    instructions: {
+      to: `/project/${projectId}/memory/instructions`,
+      label: t("autopilot.startGate.instructionsLink"),
+      detail: t("autopilot.startGate.instructions"),
     },
   }
   return (

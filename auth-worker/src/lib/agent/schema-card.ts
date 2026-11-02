@@ -8,6 +8,7 @@
 // re-validates role on every staged event regardless (emit-stage.ts).
 
 import { catalogIndexLines } from "../../../../db/shared/command-catalog"
+import { instructionsPromptBlock } from "../../../../db/shared/translation-instructions"
 
 // ── Role table ──────────────────────────────────────────────────────────────
 // Mirrored as data from sync-worker/src/events/role-policy.ts (REQUIRED_ROLE).
@@ -141,7 +142,7 @@ All tables carry project_id; ALWAYS filter with :project.
 // three short calls.
 const DRAFTING_RECIPE = `## Canonical drafting recipe (the 80% case — use this, do not re-derive it)
 1. read({ref:"<BOOK> 4", filter:"untranslated"}) — see what needs work (or skip straight to 2 when the user named the scope).
-2. draft({ref:"<BOOK> 4"}) — the drafting pipeline runs a separate evidence-research pass, then translates from that record with the project's validated exemplars, discourse context, brief, and rules, and STAGES a proposal. Its verdict reports lint violations and how many cells remain; call draft again with instructions to fix violations, or again on the same scope to continue a big job.
+2. draft({ref:"<BOOK> 4"}) — the drafting pipeline runs a separate evidence-research pass, then translates from that record with the project's validated exemplars, discourse context, and project instructions, and STAGES a proposal (the project's rules lint it at staging). Its verdict reports lint violations and how many cells remain; call draft again with instructions to fix violations, or again on the same scope to continue a big job.
 3. Summarise for the user: what you staged, anything NEEDS REVIEW, what remains.
 Do NOT hand-write translations with propose unless the user asks for a specific wording — draft uses the project's own patterns.`
 
@@ -237,8 +238,9 @@ export interface AgentPromptContext {
   }
   /** Language the agent should reply in (driven by the profile). */
   responseLanguage?: string
-  /** project_settings.translationBrief.l1Summary — the brief's resident summary. */
-  briefSummary?: string
+  /** AQU-2342: the project's resolved translation instructions
+   *  (db/shared/translation-instructions.ts) — the ONE instructions block. */
+  translationInstructions?: string
 }
 
 // MIRROR of src/lib/translator-profile.ts translatorProfilePromptBlock — the
@@ -281,10 +283,12 @@ function translatorProfileBlock(ctx: AgentPromptContext): string {
   return block
 }
 
-function briefBlock(ctx: AgentPromptContext): string {
-  const s = (ctx.briefSummary ?? "").trim()
-  if (!s) return ""
-  return `\n\n## Project translation brief (purpose & standards — honour it)\n${s}\nFor the full brief (sources, key terms, constraints) fetch docs('brief').`
+// AQU-2342: the same block every drafting path carries, right after the fixed
+// role text. It replaces the brief summary here AND the verbatim legacy brief
+// the augmentation message used to add, so the agent reads one text, once.
+function instructionsBlock(ctx: AgentPromptContext): string {
+  const block = instructionsPromptBlock(ctx.translationInstructions)
+  return block ? `\n\n${block}` : ""
 }
 
 /** Event kinds the given role may stage (drives both prompt + emit-stage). */
@@ -328,7 +332,7 @@ ${kinds.map((k) => `- ${EVENT_LINES[k]}`).join("\n")}${
     ? ` The project translates ${ctx.sourceLanguage ? `from ${ctx.sourceLanguage} ` : ""}into ${ctx.targetLanguage} — never ask the user what language to translate into.`
     : ` The project has no target language configured — infer it from the project's existing target text and say which you inferred; do not stall the run to ask.`
 
-  return `You are the Aquilla translation agent for project :project, acting on behalf of user "${ctx.username}" (role: ${roleName}). You help translate, check, and manage a translation project whose entire state lives in an append-only event log and SQL projections.${languagePair} You act ONLY through your tools; every write is an event, staged for the user's approval.${translatorProfileBlock(ctx)}${briefBlock(ctx)}
+  return `You are the Aquilla translation agent for project :project, acting on behalf of user "${ctx.username}" (role: ${roleName}). You help translate, check, and manage a translation project whose entire state lives in an append-only event log and SQL projections.${languagePair} You act ONLY through your tools; every write is an event, staged for the user's approval.${instructionsBlock(ctx)}${translatorProfileBlock(ctx)}
 
 ${TOOLS_CONTRACT}${commandIndexBlock(ctx.roleLevel)}
 ${ctx.bibleResourcesEnabled ? `\n${AQUIFER_CONTRACT}\n` : ""}

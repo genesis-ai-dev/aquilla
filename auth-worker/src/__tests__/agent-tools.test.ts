@@ -889,7 +889,7 @@ describe("executeDraft", () => {
         stageCtx,
         sourceLanguage: "English",
         targetLanguage: "Spanish",
-        briefSummary: "A clear, natural Spanish translation.",
+        translationInstructions: "A clear, natural Spanish translation.",
         signal: new AbortController().signal,
         sendProgress: (label: string, done: number, total: number) => progress.push({ label, done, total }),
         addUsage: (u: unknown) => usage.push(u),
@@ -925,7 +925,7 @@ describe("executeDraft", () => {
     const { ctx, progress, usage } = draftCtx()
     const out = await executeDraft(
       env.AQUILLA_PG,
-      { ref: "MRK 4" },
+      { ref: "MRK 4", instructions: "Use vosotros." },
       ctx,
       { model: "test/drafter", apiKey: "k", url: "https://mock/chat/completions" },
     )
@@ -942,7 +942,7 @@ describe("executeDraft", () => {
         ai_draft: {
           model: "test/drafter",
           provider: "platform",
-          promptVersion: "agent-draft-v3-staged-research",
+          promptVersion: "agent-draft-v4-instructions",
           mode: "agent",
           projectState: {
             sourceLanguage: "English",
@@ -981,6 +981,18 @@ describe("executeDraft", () => {
     expect(draftRequests[1].messages[1].content).toContain("Evidence record from the completed research pass")
     expect(draftRequests[1].messages[1].content).toContain("preserve command, sower")
     expect(draftRequests[1].messages[1].content).toContain("1. [MRK 4:3]")
+
+    // AQU-2342: both passes carry the ONE instructions block right after the
+    // role line (before the example pairs), no separate brief line, and the
+    // per-call argument is labelled as this run's directions.
+    const block = "Project instructions (follow these):\nA clear, natural Spanish translation."
+    for (const req of draftRequests) {
+      const system = req.messages[0].content
+      expect(system.indexOf("You draft for a scripture translation project.")).toBeLessThan(system.indexOf(block))
+      expect(system.indexOf(block)).toBeLessThan(system.indexOf("Translation pairs from this project"))
+      expect(system).not.toContain("Project brief")
+      expect(req.messages[1].content).toContain("Directions for this run: Use vosotros.")
+    }
   })
 
   it("strips trailing bare markers from prompt source and from the model reply (AQU-1465)", async () => {

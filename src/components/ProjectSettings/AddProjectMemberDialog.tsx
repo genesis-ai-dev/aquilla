@@ -1,9 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import {
-  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
-} from "@/components/ui/dialog"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { MemberMultiAddRow } from "@/components/MemberMultiAddRow"
+import { RoleDialog } from "@/components/access/RoleDialog"
 import { PermissionDeniedAlert } from "@/components/PermissionDeniedAlert"
 import { InviteLinkTab } from "@/components/ProjectSettings/InviteLinkTab"
 import { useProjectOrgId } from "@/hooks/useProjectOrgId"
@@ -13,9 +9,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { listOrgMembers, type OrgMember } from "@/lib/frontier/orgs"
 import { partitionMembers, type ProjectMember } from "@/lib/frontier/members"
 import { ROLE } from "@/lib/frontier/roles"
-import {
-  MEMBER_GRANT_MIN_ROLE, grantableProjectRoles,
-} from "@/lib/frontier/member-grants"
+import { MEMBER_GRANT_MIN_ROLE } from "@/lib/frontier/member-grants"
 import { toUserFacingError } from "@/lib/errors/user-error"
 import type { UseProjectMembers } from "@/hooks/useProjectMembers"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -23,12 +17,14 @@ import { formatScopePath } from "@/lib/access/scope-path"
 import { grantProjectName } from "@/lib/access/grant-scope-sentence"
 import type { ScopePath } from "@/lib/access/types"
 
-type AddDialogTab = "members" | "invite"
-
 /**
- * The "Add a member" dialog from project settings. Nested inside the setup
+ * The "Add a member" dialog from project settings (also the dashboard's
+ * Members card and the onboarding invite step). Nested inside the setup
  * sheet it overlays that sheet (Base UI nested dialogs) instead of replacing
  * it with a one-off invite form.
+ *
+ * AQU-2289: it is the one RoleDialog in its add mode, so its roles are the
+ * project list capped at the caller's own role, like every other door.
  */
 export function AddProjectMemberDialog({
   projectId,
@@ -67,7 +63,6 @@ export function AddProjectMemberDialog({
     members: OrgMember[]
     error: string | null
   }>({ key: null, members: [], error: null })
-  const [addTab, setAddTab] = useState<AddDialogTab>("members")
   const [addForbidden, setAddForbidden] = useState(false)
   const rosterKey = open && session?.username && rosterOrgId != null
     ? `${session.username}\u0000${rosterOrgId}`
@@ -114,10 +109,6 @@ export function AddProjectMemberDialog({
   )
 
   const { lanes: targetLanes } = useCurrentTargetLanes(open ? projectId : null)
-  const grantableRoles = useMemo(
-    () => grantableProjectRoles(callerLevel),
-    [callerLevel],
-  )
   const projectName = grantProjectName(
     t,
     scopePath?.find((crumb) => crumb.type === "project" && !crumb.hidden)?.name,
@@ -141,85 +132,67 @@ export function AddProjectMemberDialog({
   }, [addMany])
 
   return (
-    <Dialog
+    <RoleDialog
       open={open}
       onOpenChange={(next) => {
         onOpenChange(next)
-        if (!next) {
-          setAddForbidden(false)
-          setAddTab("members")
-        }
+        if (!next) setAddForbidden(false)
       }}
-    >
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>
-            {scopePath?.length
-              ? t("org.access.addPeopleTo", { path: formatScopePath(scopePath) })
-              : t("org.membersPage.orgTable.addMemberTitle")}
-          </DialogTitle>
-          <DialogDescription>
-            {t("projectSettings.members.addDialogDescription")}
-          </DialogDescription>
-        </DialogHeader>
-        <Tabs
-          value={addTab}
-          onValueChange={(v) => setAddTab((v as AddDialogTab) ?? "members")}
-          className="gap-3"
-        >
-          <TabsList size="lg" className="w-full" aria-label={t("org.membersPage.orgTable.addMethodAriaLabel")}>
-            <TabsTrigger value="members">{t("org.membersPage.orgTable.addMembersTab")}</TabsTrigger>
-            <TabsTrigger value="invite">{t("projectSettings.share.tabInviteLink")}</TabsTrigger>
-          </TabsList>
-          <TabsContent value="members" className="space-y-3">
-            {(projectOrgError ?? rosterError) && (
-              <p role="alert" className="text-xs text-destructive">
-                {projectOrgError ?? rosterError}
-              </p>
-            )}
-            <MemberMultiAddRow
-              roleOptions={grantableRoles}
-              defaultRole={ROLE.CONTRIBUTOR}
-              grantScope={{ kind: "project", projectName, lanes: "all" }}
-              targetLanes={targetLanes}
-              onAdd={async (usernames, role, laneAccess) => {
-                const outcomes = await handleAddMany(usernames, role, laneAccess)
-                if (outcomes.some((o) => o.ok)) onAdded?.()
-                if (outcomes.every((o) => o.ok)) onOpenChange(false)
-                return outcomes
-              }}
-              excludedUserIds={[...directGrantUserIds]}
-              suggestions={
-                visibleOrgMembers.length > 0
-                  ? eligibleOrgMembers.map((m) => ({ id: m.userId, username: m.username }))
-                  : undefined
-              }
-              emptySuggestionsHint={t("org.membersPage.allOrgMembersAdded")}
-              onAddStart={() => setAddForbidden(false)}
-              onBatchErrorMessage={(e) => {
-                const uf = toUserFacingError(e, "project")
-                if (uf.category === "forbidden") {
-                  setAddForbidden(true)
-                  return null
-                }
-                return uf.message
-              }}
-            />
-            {addForbidden && (
-              <PermissionDeniedAlert
-                action="org.membersPage.addMembersAction"
-                // AQU-853: the server's floor for granting membership is
-                // project_lead (500), not maintainer — naming the wrong role
-                // sends the user to ask for more access than they need.
-                requiredRoleLevel={MEMBER_GRANT_MIN_ROLE}
-              />
-            )}
-          </TabsContent>
-          <TabsContent value="invite">
-            <InviteLinkTab projectId={projectId} projectName={projectName} embedded />
-          </TabsContent>
-        </Tabs>
-      </DialogContent>
-    </Dialog>
+      mode="add"
+      level="project"
+      callerLevel={callerLevel}
+      title={scopePath?.length
+        ? t("org.access.addPeopleTo", { path: formatScopePath(scopePath) })
+        : t("org.membersPage.orgTable.addMemberTitle")}
+      summary={t("projectSettings.members.addDialogDescription")}
+      lead={(projectOrgError ?? rosterError) ? (
+        <p role="alert" className="text-xs text-destructive">
+          {projectOrgError ?? rosterError}
+        </p>
+      ) : null}
+      people={{
+        kind: "row",
+        row: {
+          defaultRole: ROLE.CONTRIBUTOR,
+          grantScope: { kind: "project", projectName, lanes: "all" },
+          targetLanes,
+          onAdd: async (usernames, role, laneAccess) => {
+            const outcomes = await handleAddMany(usernames, role, laneAccess)
+            if (outcomes.some((o) => o.ok)) onAdded?.()
+            if (outcomes.every((o) => o.ok)) onOpenChange(false)
+            return outcomes
+          },
+          excludedUserIds: [...directGrantUserIds],
+          suggestions:
+            visibleOrgMembers.length > 0
+              ? eligibleOrgMembers.map((m) => ({ id: m.userId, username: m.username }))
+              : undefined,
+          emptySuggestionsHint: t("org.membersPage.allOrgMembersAdded"),
+          onAddStart: () => setAddForbidden(false),
+          onBatchErrorMessage: (e) => {
+            const uf = toUserFacingError(e, "project")
+            if (uf.category === "forbidden") {
+              setAddForbidden(true)
+              return null
+            }
+            return uf.message
+          },
+        },
+      }}
+      note={addForbidden ? (
+        <PermissionDeniedAlert
+          action="org.membersPage.addMembersAction"
+          // AQU-853: the server's floor for granting membership is
+          // project_lead (500), not maintainer — naming the wrong role
+          // sends the user to ask for more access than they need.
+          requiredRoleLevel={MEMBER_GRANT_MIN_ROLE}
+        />
+      ) : null}
+      otherTabs={[{
+        value: "invite",
+        label: t("projectSettings.share.tabInviteLink"),
+        content: <InviteLinkTab projectId={projectId} projectName={projectName} embedded />,
+      }]}
+    />
   )
 }

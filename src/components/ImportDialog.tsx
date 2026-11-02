@@ -74,6 +74,7 @@ import { prepareEmbeddedSubtitleSources } from "@/lib/import/embedded-subtitle-s
 import type { MediaTextSource, MediaTextSourceOption } from "@/lib/import/media-cues"
 import { importSdbh, type SdbhImportProgress } from "@/lib/import-sdbh"
 import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
+import { MAX_SOURCE_ARTIFACT_BYTES } from "../../shared/import-contract"
 import { PreviewPanel, type ImportUploadProgress, type PreviewConfirmOptions } from "@/components/import/PreviewPanel"
 import { UsfmStructureFindings } from "@/components/import/UsfmStructureFindings"
 import { formatBytesProgress } from "@/lib/format-bytes"
@@ -2502,7 +2503,15 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       }
       // A Paratext project (zipped, or a folder/multi-select containing
       // Settings.xml) is imported as one unit — but first ask source vs target.
-      const entries = await filesToProjectEntries(list)
+      // A selection the guards refuse says why; it used to fail silently on a
+      // drop (AQU-2344).
+      let entries: Awaited<ReturnType<typeof filesToProjectEntries>>
+      try {
+        entries = await filesToProjectEntries(list)
+      } catch (failure) {
+        setError(failure instanceof Error ? failure.message : t("importExport.upload.parseFailed"))
+        return
+      }
       const detected = detectParatextProject(entries)
       if (detected) {
         if (reimportTarget) {
@@ -2677,7 +2686,11 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
         }, async media => {
           if (!/\.(mp4|m4a)$/i.test(media.name)) return []
           parseController.signal.throwIfAborted()
-          assertSourceUploadByteLength(media.size)
+          // Finding its captions reads the whole file into memory, so only a
+          // file within the source ceiling is read for them. A larger one (a
+          // whole episode) imports without its embedded captions instead of
+          // being refused with the text-file limit (AQU-2344).
+          if (media.size > MAX_SOURCE_ARTIFACT_BYTES) return []
           const bytes = await media.arrayBuffer()
           parseController.signal.throwIfAborted()
           return prepareEmbeddedSubtitleSources(bytes).map((source, index) => ({

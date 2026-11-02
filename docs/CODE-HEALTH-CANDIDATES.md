@@ -3173,13 +3173,17 @@ Two things worth adding:
 
 ### Gates recorded 2026-11-02 (`origin/dev` `1385d515`)
 
-- **`pnpm lint`** — exit 0 at baseline, **0 errors / 992 warnings**. The final run was made
-  comparable by `rm -rf packages/*/dist` first: the baseline lint ran before any build in a
-  fresh container, so it never saw the git-ignored `packages/idml-roundtrip/dist` output that
-  the baseline `pnpm build` then generated. That is the nested-`dist` `globalIgnores`
-  candidate at the top of this file, reproduced for the third run in a row — the ignore gap
-  makes any lint-warning count in this repo order-sensitive, and every code-health run now
-  has to work around it by hand.
+- **`pnpm lint`** — exit 0 both times, **0 errors / 992 warnings** both times, and the
+  output is *identical* once `line:col` is normalized (same files, same rules, same order).
+  The only raw-text delta is four pre-existing warnings in the touched file moving by exactly
+  the diff's arithmetic: `605→637`, `628→660`, `823→855` (+32, the inserted table) and
+  `2944→2963` (+19 = +32 − 13, the ladder shrinking 16 lines to 3).
+  The final run was made comparable by `rm -rf packages/*/dist` first: the baseline lint ran
+  before any build in a fresh container, so it never saw the git-ignored
+  `packages/idml-roundtrip/dist` output that the baseline `pnpm build` then generated. That is
+  the nested-`dist` `globalIgnores` candidate at the top of this file, reproduced for the
+  third run in a row — the ignore gap makes any lint-warning count in this repo
+  order-sensitive, and every code-health run now has to work around it by hand.
 - **`pnpm build`** — exit 0, baseline and final (`check-app-build` SPA-only output OK,
   `check-brand-build aquilla` OK).
 - **`pnpm test`** — **baseline is red, pre-existing, and out of scope**: 1 failed / 2230
@@ -3191,7 +3195,11 @@ Two things worth adding:
   container the commit does not fail, so nothing is thrown (`expected [Function] to throw an
   error`). Environment-dependent (the container's git/gpg behavior), reproduced with a zero
   diff, in a test file this routine may not touch. `scripts/release-cut.test.ts` is therefore
-  frozen for this run. No worker suite was run: no worker package is in the diff.
+  frozen for this run. **The final run reproduced the baseline exactly** — same single
+  failing test, same totals to the digit (1 failed / 2230 passed / 2 skipped files; 1 failed /
+  25394 passed / 2 expected-fail / 23 skipped tests) — so the green-to-green proof holds, with
+  the one pre-existing failure identically red on both sides. No worker suite was run: no
+  worker package is in the diff.
 - **`pnpm test:e2e:smoke`** — **not runnable in this container**, same hard no-result as the
   2026-08-10/12/14, 2026-09-18 and 2026-10-30 runs: no Docker daemon, and the `psql` fallback
   found no Postgres on 127.0.0.1:5432 (`connection refused`), so `e2e-up` refuses to run

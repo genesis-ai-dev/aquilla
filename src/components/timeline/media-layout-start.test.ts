@@ -29,12 +29,22 @@ describe("mediaFileKind", () => {
 })
 
 describe("startingLayout", () => {
-  it("opens a dubbing file with the picture large", () => {
-    expect(startingLayout("dub")).toEqual({ timelineHeight: 304, videoWidth: 480 })
+  // AQU-2343 (Sam, Nov 2): a file whose film shows starts with the timeline at
+  // 45% of the media view and the film at 38% of the row below, whatever its kind.
+  const film = { timelineHeight: "45%", videoWidth: "38%" }
+
+  it("opens a dubbing file and a subtitles file with the film arrangement", () => {
+    expect(startingLayout("dub")).toEqual(film)
+    expect(startingLayout("subtitles")).toEqual(film)
   })
 
-  it("opens a subtitles file with the text large and the timeline shorter", () => {
-    expect(startingLayout("subtitles")).toEqual({ timelineHeight: 220, videoWidth: 288 })
+  it("opens any other file with a film the same way", () => {
+    expect(startingLayout("plain", true)).toEqual(film)
+    expect(startingLayout("scripture", true)).toEqual(film)
+  })
+
+  it("keeps a dubbing or subtitles file whose film is hidden (Follows recordings) on pixel sizes", () => {
+    expect(startingLayout("subtitles", false)).toEqual({ timelineHeight: 304, videoWidth: 288 })
   })
 
   it("gives a scripture book's timeline the room", () => {

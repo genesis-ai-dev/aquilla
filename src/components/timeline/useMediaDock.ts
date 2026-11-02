@@ -607,11 +607,17 @@ export function useMediaDock(input: UseMediaDockInput) {
         if (!both) {
           safeResize(r, "100%")
         } else if (filmArea) {
-          // The film at its remembered width, leaving the text its minimum.
+          // The film at its remembered width, leaving the text its minimum. A
+          // starting width can be a share of the row (AQU-2343).
           const other = filmArea === "ll" ? "lr" : "ll"
           const row = (safeSize("ll") ?? 0) + (safeSize("lr") ?? 0)
-          const room = row > 0 ? row - minWidthOf(other) : filmWidth()
-          safeResize(filmArea, Math.max(minWidthOf(filmArea), Math.min(filmWidth(), room)))
+          const fw = filmWidth()
+          const fwPx = typeof fw === "number" ? fw : row > 0 ? (row * parseFloat(fw)) / 100 : null
+          if (fwPx === null) safeResize(filmArea, fw)
+          else {
+            const room = row > 0 ? row - minWidthOf(other) : fwPx
+            safeResize(filmArea, Math.max(minWidthOf(filmArea), Math.min(fwPx, room)))
+          }
         } else {
           safeResize(r, "50%")
         }

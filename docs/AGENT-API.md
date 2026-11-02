@@ -1379,6 +1379,34 @@ and PatchSettings accepted any object for `rules`, `rulePenalties`,
 - **Source of truth.** Check ids, English names and defaults live in
   `db/shared/builtin-checks.ts`; the Rules page and this read both resolve from it.
 
+## Status addendum (2026-11-02, AQU-2348 — Living Memory resolves per lane)
+
+A project's Living Memory is the **default** for every target lane; a lane may now own its
+own copy of the two prose sections and that copy replaces the project's for that lane only.
+
+- **Two new `PatchSettings` keys**, both keyed by the lane's opaque 8-hex **`lanes.id`** —
+  never a language and never a legacy tag, because a rename must not strand a lane's own
+  instructions. `describe_command("PatchSettings")` lists them with that rule, and a
+  non-id key is refused by name rather than silently stored:
+  - `systemPromptByLane: { [laneId]: string }` — replaces `systemPrompt` for that lane.
+  - `translationBriefByLane: { [laneId]: object } ` — replaces `translationBrief` for that lane.
+  Authored entries are a **list**, so they do not get a second key: a `livingMemoryEntries`
+  entry carries an optional `laneId`, and a lane sees the project's entries **plus** its own
+  and never another lane's.
+- **Absent means inherit.** A lane with no entry, a single-lane project, and a legacy project
+  whose default lane carries only the `''` tag all resolve exactly as they did before these
+  keys existed. Nothing migrates.
+- **Prompt preview reports the level.** `parts.sources` is `{ base, brief }`, each `"lane"`
+  or `"project"`. A caller comparing two lanes cannot otherwise tell a shared value from a
+  customized one that happens to read the same. The source names the project whenever the
+  project's text is what actually reached the prompt — a lane whose own prompt is empty falls
+  through the same chain a blank project prompt always did.
+- **One resolver** (`db/shared/lane-memory.ts`) serves the editor's drafting call and this
+  preview, so the preview cannot drift from what the copilot sends — the AQU-1230 contract.
+- Lane overrides are **never copied across a source link** (`INHERIT_NEVER_KEYS`): lane ids
+  are project-local, so a copied override would key the downstream project's memory by lanes
+  it does not have. The project-wide `systemPrompt` / `translationBrief` still inherit.
+
 ## Status addendum (2026-10-27, AQU-2195 — style rules: list and review)
 
 "Extract from knowledge base" can propose hundreds of style rules, and until now only a

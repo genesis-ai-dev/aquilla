@@ -6,6 +6,7 @@ import { OrgMembersTable } from "./OrgMembersTable"
 import { ROLE, roleDescription } from "@/lib/frontier/roles"
 import type { OrgMember } from "@/lib/frontier/orgs"
 import { expectClickNote } from "@/test-utils/tooltip"
+import { shownCase } from "@/test-utils/shown-case"
 
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "jwt", username: "joel", createdAt: "x" }, loading: false }),
@@ -183,5 +184,19 @@ describe("OrgMembersTable origin badge (AQU-1352)", () => {
     expect(await screen.findByText("ben")).toBeInTheDocument()
     const origins = Array.from(container.querySelectorAll("[data-origin]")).map((el) => el.getAttribute("data-origin"))
     expect(origins).toEqual(["direct", "direct"])
+  })
+})
+
+// AQU-2332: the role chip, and the name its note button reads out, are the
+// catalog's sentence-case name, never "Project Lead".
+describe("OrgMembersTable — role chips (AQU-2332)", () => {
+  it("names a project lead \"Project lead\", on the chip and on its note button", async () => {
+    renderTable({
+      callerOrgRoleLevel: ROLE.MAINTAINER,
+      members: [...MEMBERS, { userId: 3, username: "ruth", role: { level: ROLE.PROJECT_LEAD, name: "project_lead" } }],
+    })
+    const note = await screen.findByRole("button", { name: /org-level role: project lead/i })
+    expect(note.getAttribute("aria-label")).toBe("Org-level role: Project lead")
+    expect(shownCase(within(note).getByText("Project lead"))).toBe("as written")
   })
 })

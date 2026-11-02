@@ -41,6 +41,7 @@ import {
 import { revokeSessionFamily, revokeToken } from "../utils/token-revocation"
 import { parseAdminEmails } from "../middleware/platform-admin"
 import { evictUserSessions } from "../lib/session-cache"
+import { withPostResponseDb } from "../lib/post-response-db"
 import {
   LegacyUserMigrationError,
   migrateLegacyUserCandidate,
@@ -1113,49 +1114,62 @@ auth.post(
     // response-time gap of hundreds of ms — a reliable "is this email
     // registered" oracle. It now runs after the response is sent
     // (executionCtx.waitUntil), so both paths answer in the same time.
+    //
+    // Post-response work must own its Postgres connection. index.ts closes
+    // the request-scoped AQUILLA_PG shim in its `finally` the moment the
+    // Response returns, so when this block first moved off the response its
+    // writes landed on a dead connection (`write CONNECTION_ENDED`): no token
+    // was minted, no mail went out, and "Forgot password" silently did
+    // nothing (caught by e2e/specs/projects/share-invite.smoke.spec.ts,
+    // 2026-11-02). withPostResponseDb opens its own handle from
+    // PG_CONNECTION_STRING and releases it once the work settles; without one
+    // (tests, which run this inline) it uses AQUILLA_PG, which the harness
+    // keeps alive.
     const deliverResetEmail = async (): Promise<void> => {
       try {
-        // [Pen test] Auth & session mgmt (2026-08-24): the token is stored as a
-        // SHA-256 digest, never in plaintext. Anyone holding a read-only copy
-        // of this table (a snapshot, a replica, a support query, a backup)
-        // previously held a 24-hour account-takeover credential for every
-        // pending reset.
-        const token = crypto.randomUUID()
-        const tokenHash = await sha256Hex(token)
-        const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
-        // [Pen test] Auth & session mgmt (2026-10-12): a fresh request supersedes
-        // earlier links, so a stale/leaked older email can't be redeemed.
-        await c.env.AQUILLA_PG.prepare(`DELETE FROM password_reset_tokens WHERE user_id = ?`)
-          .bind(user.id)
-          .run()
-        await c.env.AQUILLA_PG.prepare(
-          `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
-           VALUES (?, ?, ?)
-           ON CONFLICT (token_hash) DO UPDATE SET user_id = excluded.user_id, expires_at = excluded.expires_at`,
-        )
-          .bind(user.id, tokenHash, expiresAt.toISOString())
-          .run()
+        await withPostResponseDb(c.env, async (db) => {
+          // [Pen test] Auth & session mgmt (2026-08-24): the token is stored as a
+          // SHA-256 digest, never in plaintext. Anyone holding a read-only copy
+          // of this table (a snapshot, a replica, a support query, a backup)
+          // previously held a 24-hour account-takeover credential for every
+          // pending reset.
+          const token = crypto.randomUUID()
+          const tokenHash = await sha256Hex(token)
+          const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
+          // [Pen test] Auth & session mgmt (2026-10-12): a fresh request supersedes
+          // earlier links, so a stale/leaked older email can't be redeemed.
+          await db.prepare(`DELETE FROM password_reset_tokens WHERE user_id = ?`)
+            .bind(user.id)
+            .run()
+          await db.prepare(
+            `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
+             VALUES (?, ?, ?)
+             ON CONFLICT (token_hash) DO UPDATE SET user_id = excluded.user_id, expires_at = excluded.expires_at`,
+          )
+            .bind(user.id, tokenHash, expiresAt.toISOString())
+            .run()
 
-        const encodedUsername = encodeURIComponent(user.username)
-        const baseUrl = c.env.BASE_URL || "https://aquilla.app"
-        const returnTo = orgInviteReturnTo(return_to)
-        const resetUrl = `${baseUrl}/reset-password?token=${token}&username=${encodedUsername}`
-          + (returnTo ? `&returnTo=${encodeURIComponent(returnTo)}` : "")
-        // [Pen test] Auth & session mgmt (2026-07-20): a delivery failure here
-        // used to fall through to the catch below and return a 500 with an
-        // error message — distinguishable from the generic 200 an unregistered
-        // address gets, i.e. a secondary user-enumeration oracle (observable
-        // whenever the email provider hiccups). The token is already minted and
-        // usable via the emailed link regardless of whether the SEND itself
-        // succeeds, so a delivery failure shouldn't change the response.
-        try {
-          // Send to the address of record (user.email), not the requester-typed
-          // casing, so the mail always targets the account's canonical email.
-          await sendPasswordResetEmail(c.env, user.email, resetUrl)
-        } catch (err) {
-          console.warn("[password-reset] email send failed (non-fatal):", err)
-        }
-        await logActivity(c.env.AQUILLA_PG, user.id, "password_reset_requested", "Password reset email sent")
+          const encodedUsername = encodeURIComponent(user.username)
+          const baseUrl = c.env.BASE_URL || "https://aquilla.app"
+          const returnTo = orgInviteReturnTo(return_to)
+          const resetUrl = `${baseUrl}/reset-password?token=${token}&username=${encodedUsername}`
+            + (returnTo ? `&returnTo=${encodeURIComponent(returnTo)}` : "")
+          // [Pen test] Auth & session mgmt (2026-07-20): a delivery failure here
+          // used to fall through to the catch below and return a 500 with an
+          // error message — distinguishable from the generic 200 an unregistered
+          // address gets, i.e. a secondary user-enumeration oracle (observable
+          // whenever the email provider hiccups). The token is already minted and
+          // usable via the emailed link regardless of whether the SEND itself
+          // succeeds, so a delivery failure shouldn't change the response.
+          try {
+            // Send to the address of record (user.email), not the requester-typed
+            // casing, so the mail always targets the account's canonical email.
+            await sendPasswordResetEmail(c.env, user.email, resetUrl)
+          } catch (err) {
+            console.warn("[password-reset] email send failed (non-fatal):", err)
+          }
+          await logActivity(db, user.id, "password_reset_requested", "Password reset email sent")
+        })
       } catch (error) {
         console.error("Password reset request error (post-lookup, response unchanged):", error)
       }

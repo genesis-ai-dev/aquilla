@@ -248,6 +248,18 @@ describe("the Station", () => {
     expect(hint.className).toContain("opacity-0")
   })
 
+  // Found in the Nov 2 browser check: the row was 28 px at rest and 30 px
+  // with Record now's line or the typing help in it (their 24 px buttons and
+  // the row's 6 px under them), so the lane lost 2 px each time they showed.
+  it("sizes the hint's row for the tallest line it holds, so the lane keeps its height when Record now's line shows", () => {
+    const take = makeTake()
+    openInStation({ fileId: "f1", cellId: "c331", audioId: "t2.webm" })
+    render(<StationPanel host={makeHost(take)} visible />)
+    const row = screen.getByTestId("station-status-row")
+    expect(row.className).toMatch(/(^|\s)min-h-\[30px\](\s|$)/)
+    expect(row.className).toMatch(/(^|\s)pb-1\.5(\s|$)/)
+  })
+
   it("opens the source recording to listen only, and says why (Q10)", () => {
     const src = makeTake({ role: "source" } as never)
     openInStation({ fileId: "f1", cellId: "c331", audioId: "t2.webm" })

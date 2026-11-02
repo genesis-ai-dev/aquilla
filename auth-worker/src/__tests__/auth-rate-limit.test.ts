@@ -190,3 +190,30 @@ async function seedToken(username: string, token: string, expiresAt: string): Pr
 }
 
 const soon = () => new Date(Date.now() + 3600_000).toISOString()
+
+// [Pen test] Auth & session mgmt (2026-11-02): username and email resolve to the
+// same account, so the lockout must be shared between them.
+describe("login lockout is per account, not per typed identifier", () => {
+  it("counts failures made via email and via username against one budget", async () => {
+    const username = "lockshared"
+    const email = "lockshared@example.com"
+    const reg = await app.request(
+      "/api/v2/auth/register",
+      { method: "POST", headers: { "Content-Type": "application/json", "CF-Connecting-IP": "10.9.0.1" }, body: JSON.stringify({ username, email, password: "correct-horse-1" }) },
+      env,
+    )
+    expect(reg.status).toBe(200)
+    const attempt = (who: string, ip: string) =>
+      app.request(
+        "/api/v2/auth/token",
+        { method: "POST", headers: { "Content-Type": "application/json", "CF-Connecting-IP": ip }, body: JSON.stringify({ username: who, password: "wrong-password" }) },
+        env,
+      )
+    // 4 by username + 4 by email = 8 failures, each from a fresh IP.
+    for (let i = 0; i < 4; i++) expect((await attempt(username, `10.9.1.${i}`)).status).toBe(401)
+    for (let i = 0; i < 4; i++) expect((await attempt(email, `10.9.2.${i}`)).status).toBe(401)
+    // 9th attempt through either spelling is now locked out.
+    expect((await attempt(email, "10.9.3.1")).status).toBe(429)
+    expect((await attempt(username.toUpperCase(), "10.9.3.2")).status).toBe(429)
+  })
+})

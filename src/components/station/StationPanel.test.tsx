@@ -199,6 +199,36 @@ describe("the Station", () => {
     expect(screen.getByTestId("station-note").textContent).toMatch(/no longer here/)
   })
 
+  // Found in the Nov 2 browser check: after Insert › Record now (or Stop,
+  // Keep, Record again) the button pressed went away and the focus with it,
+  // so Space and Esc no longer stopped the recording.
+  it("keeps the focus in the Station when a button pressed in it goes away", () => {
+    const take = makeTake()
+    openInStation({ fileId: "f1", cellId: "c331", audioId: "t2.webm" }, { message: "Saved over Take 2 on line 331." })
+    render(<StationPanel host={makeHost(take)} visible />)
+    const close = within(screen.getByTestId("station-message")).getByRole("button")
+    close.focus()
+    fireEvent.click(close)
+    expect(screen.queryByTestId("station-message")).toBeNull()
+    expect(document.activeElement).toBe(screen.getByTestId("station"))
+  })
+
+  it("leaves the focus alone when you move it out of the Station", () => {
+    const take = makeTake()
+    openInStation({ fileId: "f1", cellId: "c331", audioId: "t2.webm" })
+    const outside = document.createElement("button")
+    document.body.appendChild(outside)
+    try {
+      render(<StationPanel host={makeHost(take)} visible />)
+      screen.getByTestId("station-undo").focus()
+      outside.focus()
+      fireEvent.click(screen.getByTestId("station-info"))
+      expect(document.activeElement).toBe(outside)
+    } finally {
+      outside.remove()
+    }
+  })
+
   it("opens on the take the store names, and shows its heading", () => {
     const take = makeTake()
     openInStation({ fileId: "f1", cellId: "c331", audioId: "t2.webm" })

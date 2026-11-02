@@ -350,6 +350,19 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
     }
   }
 
+  // A button pressed in the Station that goes away when pressed (Insert ›
+  // Record now, Stop, Keep, Record again, Delete this, the message's Close)
+  // took the focus with it, so Space, Esc, Enter and ⌘S stopped reaching the
+  // Station (found in the Nov 2 browser check). When the element that had
+  // the focus here is gone and nothing else has it, the Station takes it back.
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  const lastFocused = useRef<HTMLElement | null>(null)
+  useEffect(() => {
+    const was = lastFocused.current
+    const now = document.activeElement
+    if (was && !was.isConnected && (now == null || now === document.body)) rootRef.current?.focus({ preventScroll: true })
+  })
+
   // Item 33: the keys, while the Station has the focus. A text field keeps
   // its own. ⌘Z takes back an unsaved edit first; otherwise it is the
   // project's own Undo (Q4), which the window's shortcut runs.
@@ -408,8 +421,12 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
 
   return (
     <div
+      ref={rootRef}
       data-testid="station"
       tabIndex={0}
+      onFocus={(e) => {
+        lastFocused.current = e.target as HTMLElement
+      }}
       // Item 33: Esc here clears the selection and closes Insert; while there
       // is one of those, full screen's own Esc stands down (useMediaDock).
       data-owns-escape={ed.sel != null || insertOpen || rec.busy ? "true" : undefined}

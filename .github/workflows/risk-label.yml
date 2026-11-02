@@ -122,8 +122,17 @@ jobs:
           node-version: 22
           cache: pnpm
           cache-dependency-path: |
+            pnpm-lock.yaml
             auth-worker/pnpm-lock.yaml
             sync-worker/pnpm-lock.yaml
+      # Both workers import repo-root source (auth-worker's legacy-user
+      # migration service reaches src/lib/migrate, whose ids.ts needs `uuid`;
+      # sync-worker's read routes reach src/lib too), and those modules resolve
+      # their packages from the ROOT node_modules. Without this install the
+      # auth-worker half died on "Cannot find package 'uuid'" before running a
+      # test — on every risk:auth PR since the gate landed. Same three installs
+      # as ci.yml's auth-worker-tests / sync-worker-tests.
+      - run: pnpm install --frozen-lockfile
       - run: pnpm install --frozen-lockfile
         working-directory: auth-worker
       - run: pnpm install --frozen-lockfile

@@ -456,12 +456,12 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
                 }
               : {})}
           />
-          <StationRecordBar rec={rec} />
           <StationScroll ed={ed} />
           <StationTransport
             ed={ed}
             editable={editable && !recording}
             locked={recording}
+            {...(rec.busy ? { status: <StationRecordBar rec={rec} /> } : {})}
             calm={calm}
             hint={editable ? t("editor.station.hint") : t("editor.station.hintListen")}
             onMessage={setMessage}

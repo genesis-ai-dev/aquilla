@@ -269,12 +269,13 @@ export function useStationRecorder(ed: StationEditor, onMessage: (text: string) 
 
 export type StationRec = ReturnType<typeof useStationRecorder>
 
-/** Under the lane while recording, and after Stop: Keep or Record again. */
+/** Under the play controls, in the hint's row, while recording and after
+ *  Stop: Keep or Record again. */
 export function StationRecordBar({ rec }: { rec: StationRec }) {
   const t = useT()
   const p = rec.phase
   if (p.kind === "idle") return null
-  const row = "flex shrink-0 items-center gap-2 px-3 pt-2 text-[12.5px]"
+  const row = "flex items-center gap-2 text-[12.5px]"
   if (p.kind === "pending") {
     return (
       <div data-testid="station-rec-bar" className={row}>
@@ -282,7 +283,7 @@ export function StationRecordBar({ rec }: { rec: StationRec }) {
           {t("editor.station.newRecording")}
           <span className="ms-1.5 font-mono text-[11.5px] text-muted-foreground">{formatStationLength(p.len)}</span>
         </span>
-        <Button type="button" size="sm" data-testid="station-rec-keep" onClick={rec.keep} className="text-[12.5px] font-medium">
+        <Button type="button" size="xs" data-testid="station-rec-keep" onClick={rec.keep} className="text-[12px] font-medium">
           {t("editor.station.keepRecording")}
         </Button>
         <button
@@ -309,12 +310,12 @@ export function StationRecordBar({ rec }: { rec: StationRec }) {
       </span>
       <Button
         type="button"
-        size="sm"
+        size="xs"
         variant="outline"
         data-testid="station-rec-stop"
         disabled={p.kind === "finishing"}
         onClick={rec.stop}
-        className="text-[12.5px] font-medium"
+        className="text-[12px] font-medium"
       >
         <Square className="size-3 fill-current text-red-600" />
         {t("editor.station.recordStop")}

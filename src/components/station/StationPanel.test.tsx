@@ -129,6 +129,18 @@ describe("the Station", () => {
     expect(screen.getByTestId("station-header")).toBeTruthy()
   })
 
+  it("keeps the hint's row laid out while the pointer is over the lane, so the lane never changes height (Nov 2)", () => {
+    const take = makeTake()
+    openInStation({ fileId: "f1", cellId: "c331", audioId: "t2.webm" })
+    render(<StationPanel host={makeHost(take)} visible />)
+    const hint = screen.getByText(/Drag across the waveform/)
+    expect(hint.className).toContain("opacity-100")
+    fireEvent.pointerEnter(screen.getByTestId("station-lane"))
+    expect(screen.getByText(/Drag across the waveform/)).toBe(hint)
+    expect(hint.className).toContain("opacity-0")
+    expect(screen.getByTestId("station-status-row").contains(hint)).toBe(true)
+  })
+
   it("opens the source recording to listen only, and says why (Q10)", () => {
     const src = makeTake({ role: "source" } as never)
     openInStation({ fileId: "f1", cellId: "c331", audioId: "t2.webm" })

@@ -3,7 +3,7 @@
 // kept length (click to type), the typing help row, the zoom scroll bar and
 // the quiet hint.
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import { Pause, Play, Repeat } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -47,11 +47,14 @@ export function StationTransport({
   hint,
   onMessage,
   locked = false,
+  status,
 }: {
   ed: StationEditor
   editable: boolean
   /** Slice 14: Play waits while Record now runs. */
   locked?: boolean
+  /** Slice 14: Record now's line, in the hint's place while it runs. */
+  status?: ReactNode
   /** Item 29: nothing selected, typed, hovered or unsaved. */
   calm: boolean
   hint: string
@@ -219,20 +222,35 @@ export function StationTransport({
           </span>
         </span>
       </div>
-      {/* Item 28: the typing help row. */}
-      {typing ? (
-        <div className="flex shrink-0 items-center justify-end gap-2 px-3 pb-1.5">
-          <span className="text-[11.5px] text-muted-foreground">{t("editor.station.typeHelp")}</span>
-          <Button type="button" size="xs" onClick={setTypedTime}>
-            {t("editor.station.set")}
-          </Button>
-          <Button type="button" size="xs" variant="outline" onClick={() => setTyping(null)}>
-            {t("common.cancel")}
-          </Button>
+      {/* Items 28–29 and Record now share one row that never changes height:
+          the hint is always laid out and only fades, and the typing help or
+          Record now's line sits over it. The lane above fills what is left,
+          so a row that came and went made it jump (Sam, Nov 2: it grew on
+          hover, when the hint stepped aside). */}
+      <div data-testid="station-status-row" className="grid min-h-7 shrink-0 items-center px-3 pb-1.5">
+        <div
+          aria-hidden={!calm || typing != null || status != null}
+          className={cn(
+            "[grid-area:1/1] text-[11.5px] text-muted-foreground/70 transition-opacity",
+            calm && !typing && !status ? "opacity-100" : "pointer-events-none opacity-0",
+          )}
+        >
+          {hint}
         </div>
-      ) : null}
-      {/* Item 29 */}
-      {calm && !typing ? <div className="shrink-0 px-3 pb-1.5 text-[11.5px] text-muted-foreground/70">{hint}</div> : null}
+        {typing ? (
+          <div className="flex items-center justify-end gap-2 [grid-area:1/1]">
+            <span className="text-[11.5px] text-muted-foreground">{t("editor.station.typeHelp")}</span>
+            <Button type="button" size="xs" onClick={setTypedTime}>
+              {t("editor.station.set")}
+            </Button>
+            <Button type="button" size="xs" variant="outline" onClick={() => setTyping(null)}>
+              {t("common.cancel")}
+            </Button>
+          </div>
+        ) : status ? (
+          <div className="[grid-area:1/1]">{status}</div>
+        ) : null}
+      </div>
     </>
   )
 }

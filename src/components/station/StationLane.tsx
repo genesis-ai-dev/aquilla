@@ -177,7 +177,7 @@ export function StationLane({ ed, editable, trackVars, generated, onDelete, onIn
                 className="pointer-events-none absolute top-0 bottom-0 w-px bg-foreground/10"
                 style={{ left: pct(tk) }}
               >
-                <span className="absolute top-[3px] left-1 font-mono text-[9.5px] leading-[11px] whitespace-nowrap text-muted-foreground/70">
+                <span className="absolute top-[7px] left-1 font-mono text-[9.5px] leading-[11px] whitespace-nowrap text-muted-foreground/70">
                   {formatStationTime(tk)}
                 </span>
               </span>

@@ -1,13 +1,15 @@
 // The Station's sound edits (AQU-2327): the Insert menu (spec item 18) and
-// the unsaved-change notice with "Save as new version" (item 8), as board 40
-// draws them — the notice in its "polished in place" form (Oct 25): the
-// label on the left, the two choices stacked when the recording is placed
-// more than once, Save on the right. No Discard: Undo is the way back.
+// "Save as new version" (item 8). Board 40 drew the unsaved change as a
+// banner over the waveform; Sam dropped it (Nov 2): Save sits in the header
+// beside Undo and Approve, and the line under the name says what isn't
+// saved. A recording placed more than once picks where to save from Save's
+// own menu. No Discard: Undo is the way back.
 
 import { useRef, useState } from "react"
-import { Library, Mic, TriangleAlert, Upload } from "lucide-react"
+import { ChevronDown, Library, Mic, Upload } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { isApplePlatform } from "@/lib/platform"
 import { STATION_PICKS } from "@/lib/station/picks"
@@ -107,74 +109,68 @@ export function changedKinds(ops: readonly EditOp[], extra: readonly string[] = 
   return out
 }
 
-/** Item 8. */
-export function StationNotice({
-  kinds,
+/** Item 8: what isn't saved yet, for the line under the name. */
+export function useChangedText(): (kinds: readonly string[]) => string {
+  const t = useT()
+  return (kinds) =>
+    kinds
+      .map((k) => (k === "deleted" ? t("editor.station.kindDeleted") : k === "inserted" ? t("editor.station.kindInserted") : t("editor.station.kindNoise")))
+      .join(", ")
+}
+
+/** Item 8: Save, in the header. Placed on one line it saves; placed on more,
+ *  it opens a menu: this clip only, or everywhere. */
+export function StationSave({
   places,
-  scope,
-  onScope,
   openLine,
   saving,
   onSave,
+  menuOpen,
+  onMenuOpen,
 }: {
-  kinds: readonly string[]
-  /** The lines it is placed on; the choice shows only for more than one. */
+  /** The lines it is placed on; the menu shows only for more than one. */
   places: readonly string[]
-  scope: "clip" | "all"
-  onScope(s: "clip" | "all"): void
   openLine: string
   saving: boolean
-  onSave(): void
+  onSave(scope: "clip" | "all"): void
+  menuOpen: boolean
+  onMenuOpen(open: boolean): void
 }) {
   const t = useT()
-  const what = kinds
-    .map((k) => (k === "deleted" ? t("editor.station.kindDeleted") : k === "inserted" ? t("editor.station.kindInserted") : t("editor.station.kindNoise")))
-    .join(", ")
-  const many = places.length > 1
+  const tip = t("editor.station.saveTip", { keys: isApplePlatform() ? "⌘S" : "Ctrl+S" })
+  const label = saving ? t("editor.station.saving") : t("editor.station.save")
+  const cls = "text-[12.5px] font-medium"
+  if (places.length <= 1) {
+    return (
+      <AppTooltip content={tip}>
+        <Button type="button" size="sm" data-testid="station-save" disabled={saving} onClick={() => onSave("clip")} className={cls}>
+          {label}
+        </Button>
+      </AppTooltip>
+    )
+  }
   return (
-    <div
-      data-testid="station-notice"
-      className="mx-3 flex shrink-0 flex-wrap items-start gap-x-4 gap-y-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2"
-    >
-      <span className="inline-flex h-6 shrink-0 items-center gap-1.5 text-amber-700 dark:text-amber-400">
-        <TriangleAlert className="size-[13px]" aria-hidden />
-        <span className="text-[12.5px] font-semibold whitespace-nowrap">{t("editor.station.changed", { what })}</span>
-      </span>
-      {many ? (
-        <RadioGroup
-          aria-label={t("editor.station.applyTo")}
-          value={scope}
-          onValueChange={(v) => onScope(v as "clip" | "all")}
-          className="flex w-auto flex-col items-start gap-2"
-        >
-          <label className="flex h-6 cursor-pointer items-center gap-2 whitespace-nowrap">
-            <RadioGroupItem value="clip" data-testid="station-scope-clip" />
-            <span className="text-[12.5px] font-medium text-foreground">
-              {t("editor.station.clipOnly")}
-              <span className="font-normal text-muted-foreground"> · {openLine}</span>
-            </span>
-          </label>
-          <label className="flex h-6 cursor-pointer items-center gap-2 whitespace-nowrap">
-            <RadioGroupItem value="all" data-testid="station-scope-all" />
-            <span className="text-[12.5px] font-medium text-foreground">
-              {t("editor.station.everywhere")}
-              <span className="font-normal text-muted-foreground"> · {t("editor.station.placesCount", { count: places.length })}</span>
-            </span>
-          </label>
-        </RadioGroup>
-      ) : null}
-      <Button
-        type="button"
-        size="sm"
-        data-testid="station-save"
-        title={t("editor.station.saveTip", { keys: isApplePlatform() ? "⌘S" : "Ctrl+S" })}
-        disabled={saving}
-        onClick={onSave}
-        className="ms-auto self-center text-[12.5px] font-semibold"
-      >
-        {saving ? t("editor.station.saving") : t("editor.station.save")}
-      </Button>
-    </div>
+    <DropdownMenu open={menuOpen} onOpenChange={(o) => onMenuOpen(o)}>
+      <AppTooltip content={tip}>
+        <DropdownMenuTrigger
+          render={
+            <Button type="button" size="sm" data-testid="station-save" disabled={saving} className={cls}>
+              {label}
+              <ChevronDown className="size-3.5" />
+            </Button>
+          }
+        />
+      </AppTooltip>
+      <DropdownMenuContent align="end" aria-label={t("editor.station.applyTo")} className="w-auto">
+        <DropdownMenuItem onClick={() => onSave("clip")} data-testid="station-scope-clip">
+          {t("editor.station.clipOnly")}
+          <span className="text-muted-foreground"> · {openLine}</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onSave("all")} data-testid="station-scope-all">
+          {t("editor.station.everywhere")}
+          <span className="text-muted-foreground"> · {t("editor.station.placesCount", { count: places.length })}</span>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
-

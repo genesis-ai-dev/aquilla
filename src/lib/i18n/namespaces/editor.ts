@@ -1387,10 +1387,10 @@ export const editor = defineNamespace({
     "editor.station.kindDeleted": "a part deleted",
     "editor.station.kindInserted": "audio inserted",
     "editor.station.kindNoise": "noise removed",
-    "editor.station.changed": "Changed: {what}.",
-    "editor.station.applyTo": "Apply the change to",
-    "editor.station.clipOnly": "Use for this clip only",
-    "editor.station.everywhere": "Update everywhere",
+    "editor.station.notSaved": "Not saved: {what}",
+    "editor.station.applyTo": "Where to use the new version",
+    "editor.station.clipOnly": "Save for this clip only",
+    "editor.station.everywhere": "Save everywhere",
     "editor.station.placesCount": plural(
       {
         one: "{count} place",
@@ -3291,37 +3291,37 @@ export const editor = defineNamespace({
         description: "Grey line under the greyed 'Record now' while it is not available yet.",
       },
       "editor.station.kindDeleted": {
-        description: "What changed, in the notice 'Changed: …'. Lowercase; joined by commas with the others.",
+        description: "What changed, in 'Not saved: …' under the recording's name. Lowercase; joined by commas with the others.",
       },
       "editor.station.kindInserted": {
-        description: "What changed, in the notice 'Changed: …'. Lowercase.",
+        description: "What changed, in 'Not saved: …' under the recording's name. Lowercase.",
       },
       "editor.station.kindNoise": {
-        description: "What changed, in the notice 'Changed: …'. Lowercase.",
+        description: "What changed, in 'Not saved: …' under the recording's name. Lowercase.",
       },
-      "editor.station.changed": {
-        description: "Title of the notice that appears after a change to a recording's sound that is not saved yet.",
+      "editor.station.notSaved": {
+        description: "Amber text at the end of the line under the recording's name, after a change to its sound that is not saved yet.",
         placeholders: {
           what: "What changed, e.g. 'a part deleted, audio inserted'.",
         },
       },
       "editor.station.applyTo": {
-        description: "Screen-reader name of the choice between this clip only and everywhere the recording is used.",
+        description: "Screen-reader name of Save's menu, shown when the recording is used on more than one line.",
       },
       "editor.station.clipOnly": {
-        description: "Choice: the new version is used only where the Station opened the recording.",
+        description: "Item in Save's menu: save, and use the new version only where the Station opened the recording.",
       },
       "editor.station.everywhere": {
-        description: "Choice: the new version is used on every line the recording is placed on.",
+        description: "Item in Save's menu: save, and use the new version on every line the recording is placed on.",
       },
       "editor.station.placesCount": {
-        description: "After 'Update everywhere': how many lines use the recording.",
+        description: "After 'Save everywhere': how many lines use the recording.",
         placeholders: {
           count: "Number of lines.",
         },
       },
       "editor.station.save": {
-        description: "Button in the notice: save the edited recording as a new version; the original is kept.",
+        description: "Button beside Undo and Approve while a change isn't saved: save the edited recording as a new version; the original is kept.",
       },
       "editor.station.saveTip": {
         description: "Tooltip of Save as new version.",

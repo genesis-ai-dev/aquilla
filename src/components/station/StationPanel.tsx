@@ -35,7 +35,7 @@ import {
   type StationTarget,
 } from "@/lib/station/target"
 import type { StationHost, StationTake } from "./station-host"
-import { changedKinds, StationInsertMenu, StationNotice, type InsertChoice } from "./StationEdits"
+import { changedKinds, StationInsertMenu, StationSave, useChangedText, type InsertChoice } from "./StationEdits"
 import { StationHistory } from "./StationHistory"
 import { StationLane } from "./StationLane"
 import { StationLevels } from "./StationLevels"
@@ -169,6 +169,8 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
   const [hovering, setHovering] = useState(false)
   const [insertOpen, setInsertOpen] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [saveMenu, setSaveMenu] = useState(false)
+  const changedText = useChangedText()
   const unsaved = ed.ops.length > 0
   const calm = ed.sel == null && !hovering && !unsaved
   const tooLong = (ed.pcm?.duration ?? 0) > STATION_EDIT_MAX_SEC
@@ -247,14 +249,15 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
 
   // Item 35: render the edited recording and save it as a new version, on
   // this line only or everywhere it is placed (slice 6).
-  const save = async () => {
+  const save = async (scope: "clip" | "all") => {
     if (!ed.pcm || !unsaved || saving) return
     setSaving(true)
+    setSaveMenu(false)
     ed.pause()
     try {
       const samples = renderSegments(ed.placed, ed.lookup, ed.pcm.rate)
       const L = samples.length / ed.pcm.rate
-      const everywhere = ed.draft.scope === "all" && places.length > 1
+      const everywhere = scope === "all" && places.length > 1
       const targets = everywhere ? places.map((p) => (p.cell.id === target.cellId ? take : p)) : [take]
       // Q6: a piece of a split take is replaced in place, as a piece.
       const atts = take.cell.attachments ?? {}
@@ -326,7 +329,12 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
     const mod = e.metaKey || e.ctrlKey
     let handled = true
     if (mod && !e.shiftKey && (k === "z" || k === "Z")) handled = ed.undoUnsaved()
-    else if (mod && (k === "s" || k === "S")) void save()
+    // Placed on more than one line, ⌘S opens Save's menu: where it goes is
+    // always chosen, never assumed.
+    else if (mod && (k === "s" || k === "S")) {
+      if (placeLines.length > 1) setSaveMenu(unsaved && !saving)
+      else void save("clip")
+    }
     else if (mod || e.altKey) handled = false
     else if (k === " ") ed.togglePlay()
     else if (k === "k" || k === "K") void ed.keepSelection()
@@ -365,22 +373,34 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
           }}
         />
       ) : null}
-      <StationHeader host={host} take={take} target={target} places={placeLines} unsaved={unsaved} undoUnsaved={ed.undoUnsaved} isSource={isSource} />
+      <StationHeader
+        host={host}
+        take={take}
+        target={target}
+        places={placeLines}
+        unsaved={unsaved}
+        undoUnsaved={ed.undoUnsaved}
+        isSource={isSource}
+        {...(unsaved
+          ? {
+              notSaved: changedText(changedKinds(ed.ops)),
+              save: (
+                <StationSave
+                  places={placeLines}
+                  openLine={line}
+                  saving={saving}
+                  onSave={(scope) => void save(scope)}
+                  menuOpen={saveMenu}
+                  onMenuOpen={setSaveMenu}
+                />
+              ),
+            }
+          : {})}
+      />
       {isSource && !STATION_PICKS.sourceEditable ? (
         <p data-testid="station-source-note" className="shrink-0 px-3 pb-1 text-[11.5px] text-muted-foreground">
           {t("editor.station.sourceReadOnly")}
         </p>
-      ) : null}
-      {unsaved ? (
-        <StationNotice
-          kinds={changedKinds(ed.ops)}
-          places={placeLines}
-          scope={ed.draft.scope}
-          onScope={ed.setScope}
-          openLine={line}
-          saving={saving}
-          onSave={() => void save()}
-        />
       ) : null}
       {ed.status === "error" ? (
         <StationNote>{t("editor.station.loadFailed")}</StationNote>
@@ -434,7 +454,7 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
 }
 
 /** Items 4–7: the recording's name, where it is placed, its status and
- *  version; Undo and Approve. */
+ *  version; Undo, Save (item 8, while a change isn't saved) and Approve. */
 export function StationHeader({
   host,
   take,
@@ -443,6 +463,8 @@ export function StationHeader({
   unsaved = false,
   undoUnsaved,
   isSource = false,
+  notSaved,
+  save,
 }: {
   host: StationHost
   take: StationTake
@@ -455,6 +477,10 @@ export function StationHeader({
   /** Q10: the imported source recording — named as the source, with no
    *  approval status (it is never approved) and no "placed on". */
   isSource?: boolean
+  /** Item 8: what isn't saved yet ("a part deleted, audio inserted"). */
+  notSaved?: string
+  /** Item 8: the Save button, between Undo and Approve. */
+  save?: ReactNode
 }) {
   const t = useT()
   const { cellId, audioId } = target
@@ -533,6 +559,14 @@ export function StationHeader({
                   {statusText}
                 </span>
                 {version > 1 ? ` · ${t("editor.station.version", { n: version })}` : null}
+                {notSaved ? (
+                  <>
+                    {" · "}
+                    <span data-testid="station-not-saved" className="font-semibold text-amber-700 dark:text-amber-400">
+                      {t("editor.station.notSaved", { what: notSaved })}
+                    </span>
+                  </>
+                ) : null}
               </>
             )}
           </span>
@@ -553,6 +587,7 @@ export function StationHeader({
             <Undo2 className="size-3.5" />
           </Button>
         </AppTooltip>
+        {save}
         {vote.canVote && !vote.voted && !approved && !isSource ? (
           <AppTooltip content={t("editor.station.approveTip", { line })}>
             <Button

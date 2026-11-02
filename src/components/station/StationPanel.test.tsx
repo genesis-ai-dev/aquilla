@@ -1,8 +1,10 @@
-// AQU-2327: the Station's heading, its empty state, and its Approve and Undo.
+// AQU-2327: the Station's heading, its empty state, and its Undo, Save and Approve.
+import { useState } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { __resetStationTargetForTests, openInStation } from "@/lib/station/target"
+import { StationSave } from "./StationEdits"
 import { StationHeader, StationPanel, approvalState, versionKinds, versionOf } from "./StationPanel"
 import type { StationHost, StationTake } from "./station-host"
 
@@ -83,6 +85,42 @@ describe("the Station", () => {
     const take = makeTake()
     render(<StationHeader host={makeHost(take)} take={take} target={{ fileId: "f1", cellId: "c331", audioId: "t2.webm" }} />)
     expect(screen.getByTestId("station-undo").getAttribute("aria-disabled")).toBe("true")
+  })
+
+  it("an unsaved change shows as text under the name and Save sits between Undo and Approve, with no banner (Nov 2)", () => {
+    const take = makeTake()
+    const onSave = vi.fn()
+    render(
+      <StationHeader
+        host={makeHost(take)}
+        take={take}
+        target={{ fileId: "f1", cellId: "c331", audioId: "t2.webm" }}
+        unsaved
+        notSaved="a part deleted, audio inserted"
+        save={<StationSave places={["line 331"]} openLine="line 331" saving={false} onSave={onSave} menuOpen={false} onMenuOpen={() => {}} />}
+      />,
+    )
+    expect(screen.getByTestId("station-not-saved").textContent).toBe("Not saved: a part deleted, audio inserted")
+    expect(screen.queryByTestId("station-notice")).toBeNull()
+    const order = [...screen.getByTestId("station-header").querySelectorAll("[data-testid]")].map((el) => el.getAttribute("data-testid"))
+    expect(order.filter((id) => ["station-undo", "station-save", "station-approve"].includes(id ?? ""))).toEqual(["station-undo", "station-save", "station-approve"])
+    fireEvent.click(screen.getByTestId("station-save"))
+    expect(onSave).toHaveBeenCalledWith("clip")
+  })
+
+  it("placed on two lines, Save opens a menu: this clip only, or everywhere", async () => {
+    const onSave = vi.fn()
+    function Harness() {
+      const [open, setOpen] = useState(false)
+      return <StationSave places={["line 9", "line 12"]} openLine="line 9" saving={false} onSave={onSave} menuOpen={open} onMenuOpen={setOpen} />
+    }
+    render(<Harness />)
+    const user = userEvent.setup()
+    await user.click(screen.getByTestId("station-save"))
+    expect((await screen.findByTestId("station-scope-clip")).textContent).toBe("Save for this clip only · line 9")
+    expect(screen.getByTestId("station-scope-all").textContent).toBe("Save everywhere · 2 places")
+    await user.click(screen.getByTestId("station-scope-all"))
+    expect(onSave).toHaveBeenCalledWith("all")
   })
 
   it("opens on the take the store names, and shows its heading", () => {

@@ -169,10 +169,33 @@ today:
 
 **Cut.** `release-cut.mjs` starts a branch at the tagged tip and
 `git cherry-pick -x` each ready PR onto it (`-m 1` for merge commits).
-This is what Matthew did by hand, mechanised. A pick that conflicts is
-aborted and reported as held (`pick conflict`); the cut continues. The
-branch is pushed and the release notes posted as a commit comment with the
-picked table and the held line.
+This is what Matthew did by hand, mechanised. A pick that does not land
+is reported as held with a reason a person can act on, and the cut
+continues with the rest:
+
+- `pick conflict in <paths>; needs #N`: git stopped on unmerged paths and
+  the pick is aborted. `needs #N` is the newest held PR merged before it
+  whose diff touches one of those paths, read off the `files` the plan
+  carries per PR (no GitHub call), which is almost always the PR it was
+  built on; approving that PR is the fix. With no such PR the entry stops
+  at the paths.
+- `empty pick: already in base, or needs #N`: git stopped with nothing to
+  commit ("The previous cherry-pick is now empty"). Either production
+  already carries the change, or the change only exists relative to a
+  held PR and is a no-op against the base. The pick is skipped, never
+  committed empty: an empty commit with `-x` provenance would tell the
+  planner production carries the PR while it does not. The PR is listed
+  on every cut until the held PR ships or, for a change production really
+  has, until a person records it by hand.
+
+Each reason appears in the run summary as a `- #N: <reason>` line, in the
+held line of the release notes, and in the commit comment. When nothing
+could be picked, the summary lists each PR with its reason instead of the
+bare "every ready PR conflicted" line that, from 2026-10-31, hid an empty
+pick (#1752, built on held #1750) behind a real conflict (#1744 on held
+#1743). The branch is pushed and the release notes posted as a commit
+comment with the picked table and the held line. None of this changes who
+deploys or the `release:approved` sign-off.
 
 **Verify.** The push runs the whole suite (`release-verify`) and smart
 Jev. This is where "a ready PR that depended on a held one and still

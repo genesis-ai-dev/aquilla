@@ -122,6 +122,15 @@ describe("planRelease", () => {
     expect(plan.prs[0]).not.toHaveProperty("pathHolds")
     expect(plan.held[0]).not.toHaveProperty("pathHolds")
   })
+
+  // The cut names the held PR a pick that did not land was built on from
+  // these, with no GitHub call of its own.
+  it("carries each PR's files through to the ready and held lists", () => {
+    const prs = [{ ...pr(1, recent), files: ["src/a.ts"] }, { ...migration(2, recent), files: ["db/postgres/migrations/0199_x.sql"] }]
+    const plan = planRelease({ openReleases: [], prs, now: NOW })
+    expect(plan.prs[0].files).toEqual(["src/a.ts"])
+    expect(plan.held[0].files).toEqual(["db/postgres/migrations/0199_x.sql"])
+  })
 })
 
 describe("prHolds", () => {
@@ -368,6 +377,7 @@ describe("unreleasedPrs against a scratch repo", () => {
     const { prs, floor, base } = unreleasedPrs({ cwd: root })
     expect(prs.map((p) => p.number)).toEqual([2, 3])
     expect(prs.map((p) => p.behindFloor)).toEqual([false, false])
+    expect(prs.map((p) => p.files)).toEqual([["docs/two.md"], ["docs/three.md"]])
     expect(floor).toBe(m1)
     expect(base).toBe(m1)
   })

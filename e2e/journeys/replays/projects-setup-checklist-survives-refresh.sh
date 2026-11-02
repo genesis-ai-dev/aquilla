@@ -10,12 +10,12 @@ NAME="Journey checklist $(date +%H%M%S)"
 
 login alice || fail "login"
 ab open "$BASE/orgs/$ORG/projects" >/dev/null && ab wait --load networkidle >/dev/null
-ab find role button click --name "New Project" >/dev/null || fail "New Project button"
-ab wait --text "Create New Project" >/dev/null || fail "dialog"
-ab find label "Project title" fill "$NAME" >/dev/null || fail "title field"
-ab find label "Source Language" fill "en" >/dev/null || fail "source field"
-ab find label "Target language(s)" fill "fr" >/dev/null || fail "target field"
-ab find role button click --name "Create Project" >/dev/null || fail "Create Project button"
+ab find role button click --name "New project" >/dev/null || fail "New project button"
+ab wait --text "Create new project" >/dev/null || fail "dialog"
+ab find label "Project name" fill "$NAME" >/dev/null || fail "name field"
+ab find label "Source language" fill "en" >/dev/null || fail "source field"
+ab find label "Language lanes" fill "fr" >/dev/null || fail "lanes field"
+ab find role button click --name "Create project" >/dev/null || fail "Create project button"
 ab wait --text "Open project" >/dev/null || fail "overview did not load"
 ab find role button click --name "Open project" >/dev/null || fail "Open project button"
 ab wait --load networkidle >/dev/null

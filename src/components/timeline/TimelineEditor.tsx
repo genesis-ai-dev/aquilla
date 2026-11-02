@@ -1174,17 +1174,20 @@ function LaneLabel({
               // typed name to a stray click is the worse mistake — Escape is
               // right there and says "throw it away" unambiguously.
               onBlur={(e) => { if (renameFocused.current) renaming.onCommit(e.currentTarget.value) }}
+              // A name keeps its own direction inside the left-to-right grid
+              // (AQU-2340): an Arabic name is typed and read right to left.
+              dir="auto"
               className="min-w-0 flex-1 rounded-sm border border-input bg-background px-1 py-0 text-xs font-semibold outline-none focus:ring-1 focus:ring-sky-500"
             />
           ) : (
-            <span className="truncate">{name}</span>
+            <span dir="auto" className="truncate">{name}</span>
           )}
         </span>
         {/* The sublabel is the first thing to go as the row shrinks — see
             MIN_LABEL_SUB_H_PX — and it is gone outright when the gutter is a
             strip, where even the NAME does not fit. */}
         {!collapsed && ownRowH >= MIN_LABEL_SUB_H_PX && (
-          subSlot ?? <span className="truncate text-[10px] text-muted-foreground">{sub}</span>
+          subSlot ?? <span dir="auto" className="truncate text-[10px] text-muted-foreground">{sub}</span>
         )}
       </div>
       {/* ONE FLEX CHILD, NOT A FRAGMENT'S WORTH.
@@ -5010,8 +5013,27 @@ export function TimelineEditor({
             no CSS at all and the column would silently fall back to auto width.
             The two literal alternatives (`grid-cols-[44px_1fr]` /
             `grid-cols-[240px_1fr]`) would work, but then the widths live in two
-            places and the module that names them is no longer the authority. */}
+            places and the module that names them is no longer the authority.
+
+            `dir="ltr"` (AQU-2340): TIME RUNS LEFT TO RIGHT IN EVERY LANGUAGE,
+            as it does in every audio and video editor. In an Arabic or Urdu
+            interface `<html dir="rtl">` used to reach in here and flip the
+            grid: the track names went to the right, the corner's controls
+            reversed, and the track column, now a right-to-left scroller,
+            opened at its far END with 0:00 and the playhead off to the left.
+            The ruler, the chips and the playhead never flipped (they are
+            placed with `left:`), so the two halves disagreed — and worse,
+            a right-to-left scroller reports a NEGATIVE scrollLeft, which the
+            windowing below reads as a time before zero: zoomed in, the ruler
+            and every chip on screen simply were not drawn. Everything in here
+            is time-shaped, so the whole grid is pinned. Words keep their own
+            direction where they are written — the track names and the line
+            text on the chips carry `dir="auto"` — and the menus and tooltips
+            opened from in here render in a portal, under `<html>`, so they
+            still follow the interface. */}
         <div
+          dir="ltr"
+          data-testid="tl-grid"
           className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)]"
           style={{ gridTemplateColumns: `${gutterWidthPx(gutterCollapsed)}px 1fr` }}
         >
@@ -5067,11 +5089,11 @@ export function TimelineEditor({
                 the ruler. Above the divider rule too, so the header draws that
                 pixel itself (`border-e`, on the rule's own column).
 
-                LOGICAL SIDES, here and on the rule: Arabic and
-                Urdu flip `<html dir>`, the grid puts this column on the RIGHT,
-                and the edge it shares with the lanes is then its left one.
-                `border-e` and `end-0` follow that edge; `border-r` and
-                `right-0` would draw the divider on the column's outer edge. */}
+                LOGICAL SIDES, here and on the rule: `border-e` and `end-0`
+                name the edge this column shares with the lanes. The grid is
+                pinned left to right (AQU-2340), so that is always the right
+                edge today; the logical names keep it true if that ever
+                changes. */}
             <div ref={gutterHeaderRef} className="relative z-40 h-7 border-b border-e border-border bg-background">
               <div className="absolute inset-0 bg-muted/20" />
               {/* THE CORNER CELL (media redesign, layout): "Tracks", and the
@@ -5089,7 +5111,7 @@ export function TimelineEditor({
                   those out by that much. Absolute contributes no layout. */}
               <div data-testid="tl-corner" className="absolute inset-0 flex items-center gap-1 ps-3 pe-1">
                 {!gutterCollapsed && (
-                  <span className="truncate text-xs text-muted-foreground">{t("editor.dock.tracks")}</span>
+                  <span dir="auto" className="truncate text-xs text-muted-foreground">{t("editor.dock.tracks")}</span>
                 )}
                 {layoutControls ? (
                   <PanelControlButtons
@@ -5517,6 +5539,8 @@ export function TimelineEditor({
                       key={c.id}
                       type="button"
                       data-testid={`tl-untimed-${c.id}`}
+                      // The line's own words, in their own direction (AQU-2340).
+                      dir="auto"
                       onClick={() => selectLine(c.id)}
                       className={cn(
                         "shrink-0 rounded-md border border-dashed border-zinc-400 bg-background px-2 py-1 text-[10px] text-foreground/80 hover:bg-muted dark:border-zinc-600",

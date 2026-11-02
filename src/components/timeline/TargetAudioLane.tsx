@@ -1376,12 +1376,14 @@ function TargetAudioChip({
           className="pointer-events-none absolute bottom-1 left-6 z-10 flex max-w-[calc(100%-2rem)] min-w-0 items-center gap-1 rounded bg-background/70 px-1 text-[10px] leading-4 text-muted-foreground"
         >
           <Spinner className="size-3 shrink-0" />
-          <span className="truncate">{t("editor.voice.workingAs", { voice: voicingAs })}</span>
+          <span dir="auto" className="truncate">{t("editor.voice.workingAs", { voice: voicingAs })}</span>
         </span>
       )}
       {!voicingAs && takeVoice && chipH >= TAKE_VOICE_LABEL_MIN_H_PX && paintedPx >= TAKE_VOICE_LABEL_MIN_W_PX && (
         <span
           data-testid={`tl-target-${testKey}-take-voice`}
+          // A voice's name, in its own direction (AQU-2340).
+          dir="auto"
           className="pointer-events-none absolute bottom-1 left-6 z-10 max-w-[calc(100%-2rem)] truncate rounded bg-background/70 px-1 text-[10px] leading-4 text-muted-foreground"
         >
           {takeVoice.takeVoiceName ?? t("editor.voice.removedVoice")}

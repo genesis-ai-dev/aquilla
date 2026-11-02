@@ -135,6 +135,12 @@ describe("the Station", () => {
     expect(help.getAttribute("data-open")).toBe("true")
     expect(help.textContent).toContain("Drag the round knob at a top corner inward")
     expect(help.textContent).toContain("Space plays")
+    // Saving says what Save does now (found in the Nov 2 browser check: it
+    // still said edits wait for Save as new version, and the original is
+    // always kept).
+    expect(help.textContent).toContain("Save saves over the take")
+    expect(help.textContent).toContain("Save's ▾ saves a new version")
+    expect(help.textContent).not.toContain("always kept")
     fireEvent.click(info)
     expect(help.getAttribute("data-open")).toBe("false")
   })

@@ -1319,7 +1319,7 @@ export const editor = defineNamespace({
     "editor.station.helpFadesTerm": "Fades",
     "editor.station.helpFades": "Drag the round knob at a top corner inward to fade in or out. Click it to turn the fade on or off.",
     "editor.station.helpSaveTerm": "Saving",
-    "editor.station.helpSave": "Cuts and inserts wait until you choose Save as new version. The original recording is always kept.",
+    "editor.station.helpSave": "Cuts and inserts wait until you save. Save saves over the take, and Undo brings the old sound back. Save's ▾ saves a new version instead and keeps the original.",
     "editor.station.helpKeysTerm": "Keys",
     "editor.station.helpKeys": "Space plays, K keeps, ⌫ deletes, I inserts, A approves, L loops, + and − zoom, {mod}Z undoes, {mod}S saves. After Record now, Enter keeps the new recording.",
     "editor.station.startFlag": "Start {time}",
@@ -3063,7 +3063,7 @@ export const editor = defineNamespace({
       "editor.station.helpFadesTerm": { description: "Term in the Station's (i) explanation: fades." },
       "editor.station.helpFades": { description: "The Station's (i) explanation: the round fade knobs at the waveform's top corners." },
       "editor.station.helpSaveTerm": { description: "Term in the Station's (i) explanation: saving a new version." },
-      "editor.station.helpSave": { description: "The Station's (i) explanation: unsaved edits and Save as new version." },
+      "editor.station.helpSave": { description: "The Station's (i) explanation: unsaved edits; Save, which saves over the take; and Save's ▾ menu, which saves a new version instead. Keep the ▾ symbol as it is." },
       "editor.station.helpKeysTerm": { description: "Term in the Station's (i) explanation: keyboard shortcuts." },
       "editor.station.helpKeys": {
         description: "The Station's (i) explanation: its keyboard shortcuts. Keep the key symbols as they are.",

@@ -48,13 +48,13 @@ const storedRow = async () =>
     .first<{ settings: string; version: number }>()
 
 /**
- * The database, with `between` run once just before the billing writer's
- * first write to org_settings: a settings save that lands after the billing
+ * The database, with `between` run just before the billing writer's first
+ * `times` writes to org_settings: a settings save that lands after the billing
  * writer read the row and before it wrote it back.
  */
-function withSaveBetweenReadAndWrite(between: () => Promise<void>): typeof env.AQUILLA_PG {
+function withSaveBetweenReadAndWrite(between: () => Promise<void>, times = 1): typeof env.AQUILLA_PG {
   const db = env.AQUILLA_PG
-  let fired = false
+  let fired = 0
   return new Proxy(db, {
     get(target, prop, receiver) {
       if (prop !== "prepare") return Reflect.get(target, prop, receiver)
@@ -70,8 +70,8 @@ function withSaveBetweenReadAndWrite(between: () => Promise<void>): typeof env.A
                 get(b, q, rr) {
                   if (q !== "run") return Reflect.get(b, q, rr)
                   return async () => {
-                    if (!fired) {
-                      fired = true
+                    if (fired < times) {
+                      fired++
                       await between()
                     }
                     return b.run()
@@ -142,5 +142,23 @@ describe("AQU-2328: saving billing overrides bumps and checks the settings versi
     expect(settings.countStructuralCells).toBe(true)
     expect(settings.billing).toEqual({ billedLanguageCount: 2 })
     expect(row!.version).toBe(2)
+  })
+
+  it("when settings saves keep landing, it writes nothing and reports a conflict", async () => {
+    await seedOrg()
+    expect((await putSettings({ rules: [] }, 0)).status).toBe(200)
+
+    let n = 0
+    const racing = withSaveBetweenReadAndWrite(async () => {
+      const opened = await getSettings()
+      expect((await putSettings({ ...opened.settings, rules: [], saves: ++n }, opened.version)).status).toBe(200)
+    }, 2)
+    expect(await writeOrgBillingOverrides(racing, 1, { includedCredits: 40 })).toBe("conflict")
+
+    const row = await storedRow()
+    const settings = JSON.parse(row!.settings) as Record<string, unknown>
+    expect(settings.saves).toBe(2)
+    expect(settings.billing).toBeUndefined()
+    expect(row!.version).toBe(3)
   })
 })

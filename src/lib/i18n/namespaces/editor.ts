@@ -1362,6 +1362,8 @@ export const editor = defineNamespace({
     "editor.station.hRecorded": "Recorded",
     "editor.station.hVersionSaved": "Version {n} saved",
     "editor.station.hVersionSavedWith": "Version {n} saved: {what} · used on {lines}",
+    "editor.station.hSavedOver": "Saved over",
+    "editor.station.hSavedOverWith": "Saved over: {what} · used on {lines}",
     "editor.station.hTrimmed": "Trimmed: Start {a}, End {b}",
     "editor.station.hApproved": "Approved",
     "editor.station.hUnapproved": "Approval withdrawn",
@@ -1414,8 +1416,8 @@ export const editor = defineNamespace({
     "editor.station.kindNoise": "noise removed",
     "editor.station.notSaved": "Not saved: {what}",
     "editor.station.applyTo": "Where to use the new version",
-    "editor.station.clipOnly": "Save for this clip only",
-    "editor.station.everywhere": "Save everywhere",
+    "editor.station.clipOnly": "For this clip only",
+    "editor.station.everywhere": "Everywhere",
     "editor.station.placesCount": plural(
       {
         one: "{count} place",
@@ -1423,8 +1425,12 @@ export const editor = defineNamespace({
       },
       "count",
     ),
-    "editor.station.save": "Save as new version",
-    "editor.station.saveTip": "Save as a new version; the original stays ({keys})",
+    "editor.station.save": "Save",
+    "editor.station.saveTip": "Save over this take. Undo brings the old sound back ({keys})",
+    "editor.station.saveMenu": "More ways to save",
+    "editor.station.saveOver": "Save over this take",
+    "editor.station.saveNew": "Save as new version",
+    "editor.station.savedOver": "Saved over {take} on {lines}. Its history is kept, and Undo brings the old sound back.",
     "editor.station.saving": "Saving…",
     "editor.station.saved": "Saved as version {n}, used on {line}. The original recording is kept.",
     "editor.station.savedEverywhere": "Saved as version {n}, used everywhere ({lines}). The original recording is kept.",
@@ -3222,6 +3228,16 @@ export const editor = defineNamespace({
           lines: "The lines it is used on, e.g. 'line 331' or 'line 4, line 9'.",
         },
       },
+      "editor.station.hSavedOver": {
+        description: "History row: the edited recording was saved over the take, which kept its name.",
+      },
+      "editor.station.hSavedOverWith": {
+        description: "History row: the edited recording was saved over the take, with what changed and where it is used.",
+        placeholders: {
+          what: "What changed, already worded and joined, e.g. 'a part deleted, audio inserted'.",
+          lines: "The lines it is used on, e.g. 'line 331' or 'line 4, line 9'.",
+        },
+      },
       "editor.station.hVersionSaved": {
         description: "History row: an edited version of the recording was saved.",
         placeholders: {
@@ -3387,10 +3403,10 @@ export const editor = defineNamespace({
         description: "Screen-reader name of Save's menu, shown when the recording is used on more than one line.",
       },
       "editor.station.clipOnly": {
-        description: "Item in Save's menu: save, and use the new version only where the Station opened the recording.",
+        description: "Item in Save's menu, under 'Save as new version': use the new version only where the Station opened the recording.",
       },
       "editor.station.everywhere": {
-        description: "Item in Save's menu: save, and use the new version on every line the recording is placed on.",
+        description: "Item in Save's menu, under 'Save as new version': use the new version on every line the recording is placed on.",
       },
       "editor.station.placesCount": {
         description: "After 'Save everywhere': how many lines use the recording.",
@@ -3399,10 +3415,26 @@ export const editor = defineNamespace({
         },
       },
       "editor.station.save": {
-        description: "Button beside Undo and Approve while a change isn't saved: save the edited recording as a new version; the original is kept.",
+        description: "Button beside Undo and Approve while a change isn't saved: save the edited recording over the take.",
+      },
+      "editor.station.saveMenu": {
+        description: "Tooltip and screen-reader name of the small ▾ beside Save, which opens the other ways to save.",
+      },
+      "editor.station.saveOver": {
+        description: "Item in Save's menu: save the edited recording over the take, on every line it is used on. It keeps its name and its history.",
+      },
+      "editor.station.saveNew": {
+        description: "Item in Save's menu (or its heading, when the recording is used on more than one line): save the edited recording as a new take; the original is kept.",
+      },
+      "editor.station.savedOver": {
+        description: "Message after saving over a take.",
+        placeholders: {
+          take: "The take's name, e.g. 'Take 2'.",
+          lines: "The lines it is used on, e.g. 'line 4' or 'line 4, line 9'.",
+        },
       },
       "editor.station.saveTip": {
-        description: "Tooltip of Save as new version.",
+        description: "Tooltip of Save.",
         placeholders: {
           keys: "The shortcut, e.g. ⌘S.",
         },

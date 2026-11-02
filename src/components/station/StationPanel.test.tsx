@@ -103,11 +103,12 @@ describe("the Station", () => {
     expect(screen.queryByTestId("station-notice")).toBeNull()
     const order = [...screen.getByTestId("station-header").querySelectorAll("[data-testid]")].map((el) => el.getAttribute("data-testid"))
     expect(order.filter((id) => ["station-undo", "station-save", "station-approve"].includes(id ?? ""))).toEqual(["station-undo", "station-save", "station-approve"])
+    // One click saves over the take (Nov 2).
     fireEvent.click(screen.getByTestId("station-save"))
-    expect(onSave).toHaveBeenCalledWith("clip")
+    expect(onSave).toHaveBeenCalledWith({ mode: "over", scope: "all" })
   })
 
-  it("placed on two lines, Save opens a menu: this clip only, or everywhere", async () => {
+  it("Save's ▾ saves a new version instead; placed on two lines, on this clip only or everywhere", async () => {
     const onSave = vi.fn()
     function Harness() {
       const [open, setOpen] = useState(false)
@@ -115,11 +116,13 @@ describe("the Station", () => {
     }
     render(<Harness />)
     const user = userEvent.setup()
-    await user.click(screen.getByTestId("station-save"))
-    expect((await screen.findByTestId("station-scope-clip")).textContent).toBe("Save for this clip only · line 9")
-    expect(screen.getByTestId("station-scope-all").textContent).toBe("Save everywhere · 2 places")
+    await user.click(screen.getByTestId("station-save-more"))
+    expect((await screen.findByTestId("station-save-over")).textContent).toContain("Save over this take")
+    expect(screen.getByText("Save as new version")).toBeTruthy()
+    expect(screen.getByTestId("station-scope-clip").textContent).toBe("For this clip only · line 9")
+    expect(screen.getByTestId("station-scope-all").textContent).toBe("Everywhere · 2 places")
     await user.click(screen.getByTestId("station-scope-all"))
-    expect(onSave).toHaveBeenCalledWith("all")
+    expect(onSave).toHaveBeenCalledWith({ mode: "new", scope: "all" })
   })
 
   it("an (i) beside the name opens how the controls work, in place, and closes it again (Nov 2)", () => {

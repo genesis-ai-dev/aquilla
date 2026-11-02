@@ -74,6 +74,18 @@ describe("the Station's History rows", () => {
     expect(rows[0]).toMatchObject({ key: "editor.station.hVersionSaved", params: { n: 2 } })
   })
 
+  it("says a take was saved over, with no row for the take it replaced (Nov 2)", () => {
+    const wording = { kinds: () => "a part deleted", lines: () => "line 331" }
+    const events = [
+      ev(1, "cell.audio.attach", { audioId: "t2" }),
+      ev(2, "cell.audio.attach", { audioId: "t2b", referenceAudioId: "t2", versionChanges: { kinds: ["deleted"], usedOn: ["c331"], over: true } }),
+      ev(3, "cell.audio.remove", { audioId: "t2" }),
+    ]
+    const rows = historyRowsFromEvents(events, new Set(["t2", "t2b"]), { wording })
+    expect(rows.map((r) => r.key)).toEqual(["editor.station.hRecorded", "editor.station.hSavedOverWith"])
+    expect(rows[1].params).toEqual({ what: "a part deleted", lines: "line 331" })
+  })
+
   it("numbers the unsaved edits", () => {
     const rows = draftRows([
       { kind: "del", a: 1, b: 1.5 },

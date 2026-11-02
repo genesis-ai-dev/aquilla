@@ -956,4 +956,7 @@ export interface VersionChanges {
   kinds: Array<"deleted" | "inserted" | "noise">
   /** The lines (cell ids) the version went on. */
   usedOn: string[]
+  /** Saved over the take (Station "Save"): the take it replaced was removed in
+   *  the same step, and keeps its name. Absent: saved as a new version. */
+  over?: boolean
 }

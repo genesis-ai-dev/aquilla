@@ -27,6 +27,7 @@ import type { VersionChanges } from "@/lib/sync/outbox-types"
 import { loadStationPcm, pcmKey, putStationPcm } from "@/lib/station/load"
 import { renderSegments } from "@/lib/station/render"
 import { formatStationTime } from "@/lib/station/time"
+import { versionOfId } from "@/lib/station/version"
 import { saveStationVersion, type VersionPlacement } from "@/lib/station/save"
 import {
   clearStationMessage,
@@ -37,7 +38,7 @@ import {
   type StationTarget,
 } from "@/lib/station/target"
 import type { StationHost, StationTake } from "./station-host"
-import { changedKinds, StationInsertMenu, StationSave, useChangedText, type InsertChoice } from "./StationEdits"
+import { changedKinds, StationInsertMenu, StationSave, useChangedText, type InsertChoice, type SaveHow } from "./StationEdits"
 import { StationHistory } from "./StationHistory"
 import { StationLane } from "./StationLane"
 import { StationLevels } from "./StationLevels"
@@ -137,19 +138,11 @@ export function versionKinds(ops: readonly EditOp[]): VersionChanges["kinds"] {
   return changedKinds(ops).filter((k): k is "deleted" | "inserted" => k === "deleted" || k === "inserted")
 }
 
-/** How many saves deep this take is: 1 for an original, 2 for its first
- *  saved version (Q2: the take keeps its name, "Version 2" beside it). */
+/** Which version this take is: 1 for an original, 2 for its first saved
+ *  version (Q2: the take keeps its name, "Version 2" beside it). A take saved
+ *  over isn't counted (lib/station/version.ts). */
 export function versionOf(take: StationTake): number {
-  const atts = take.cell.attachments ?? {}
-  let n = 1
-  let ref = take.att.referenceAudioId
-  const seen = new Set<string>()
-  while (ref && !seen.has(ref) && atts[ref]) {
-    seen.add(ref)
-    n += 1
-    ref = atts[ref].referenceAudioId
-  }
-  return n
+  return versionOfId(take.cell.attachments ?? {}, take.att.referenceAudioId)
 }
 
 interface OpenProps {
@@ -262,9 +255,10 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
                 : t("editor.station.recordFlag", { time: formatStationTime(rec.phase.at) }),
         }
 
-  // Item 35: render the edited recording and save it as a new version, on
-  // this line only or everywhere it is placed (slice 6).
-  const save = async (scope: "clip" | "all") => {
+  // Item 35: render the edited recording and save it — over the take on
+  // every line it is used on (Sam, Nov 2), or as a new version on this line
+  // only or everywhere it is placed (slice 6).
+  const save = async (how: SaveHow) => {
     if (!ed.pcm || !unsaved || saving) return
     setSaving(true)
     setSaveMenu(false)
@@ -272,7 +266,7 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
     try {
       const samples = renderSegments(ed.placed, ed.lookup, ed.pcm.rate)
       const L = samples.length / ed.pcm.rate
-      const everywhere = scope === "all" && places.length > 1
+      const everywhere = how.scope === "all" && places.length > 1
       const targets = everywhere ? places.map((p) => (p.cell.id === target.cellId ? take : p)) : [take]
       // Q6: a piece of a split take is replaced in place, as a piece.
       const atts = take.cell.attachments ?? {}
@@ -319,12 +313,19 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
         where: { fileId: take.fileId, fileName: host.fileName(take.fileId) },
         // Item 30: what changed and where it went, for its History row.
         changes: { kinds: versionKinds(ed.ops), usedOn: targets.map((p) => p.cell.id) },
+        mode: how.mode,
       })
       const n = versionOf(take) + 1
       ed.clearDraft()
-      const text = everywhere
-        ? t("editor.station.savedEverywhere", { n, lines: placeLines.join(", ") })
-        : t("editor.station.saved", { n, line })
+      const text =
+        how.mode === "over"
+          ? t("editor.station.savedOver", {
+              take: take.att.label ?? t("audio.takesStrip.takeFallback"),
+              lines: everywhere ? placeLines.join(", ") : line,
+            })
+          : everywhere
+            ? t("editor.station.savedEverywhere", { n, lines: placeLines.join(", ") })
+            : t("editor.station.saved", { n, line })
       const openIdx = targets.findIndex((p) => p.cell.id === target.cellId)
       openInStation({ fileId: take.fileId, cellId: target.cellId, audioId: res.audioIds[Math.max(0, openIdx)] }, { message: text })
     } catch (e) {
@@ -355,12 +356,8 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
     const mod = e.metaKey || e.ctrlKey
     let handled = true
     if (mod && !e.shiftKey && (k === "z" || k === "Z")) handled = ed.undoUnsaved()
-    // Placed on more than one line, ⌘S opens Save's menu: where it goes is
-    // always chosen, never assumed.
-    else if (mod && (k === "s" || k === "S")) {
-      if (placeLines.length > 1) setSaveMenu(unsaved && !saving)
-      else void save("clip")
-    }
+    // ⌘S is Save: over the take, wherever it is used (Sam, Nov 2).
+    else if (mod && (k === "s" || k === "S")) void save({ mode: "over", scope: "all" })
     else if (mod || e.altKey) handled = false
     else if (k === " ") ed.togglePlay()
     else if (k === "k" || k === "K") void ed.keepSelection()
@@ -416,7 +413,7 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
                   places={placeLines}
                   openLine={line}
                   saving={saving}
-                  onSave={(scope) => void save(scope)}
+                  onSave={(how) => void save(how)}
                   menuOpen={saveMenu}
                   onMenuOpen={setSaveMenu}
                 />

@@ -25,8 +25,9 @@ type Payload = {
   gainDb?: number | null
   fadeInMs?: number | null
   fadeOutMs?: number | null
-  /** AQU-2327: a Station version's changes and lines (cell ids). */
-  versionChanges?: { kinds?: string[]; usedOn?: string[] }
+  /** AQU-2327: a Station version's changes and lines (cell ids), and whether
+   *  it was saved over the take. */
+  versionChanges?: { kinds?: string[]; usedOn?: string[]; over?: boolean }
 }
 
 /** How History words a version's changes and lines (the panel supplies it). */
@@ -56,6 +57,13 @@ export function historyRowsFromEvents(
 ): HistoryRow[] {
   const rows: HistoryRow[] = []
   const ordered = [...events].sort((a, b) => a.serverSeq - b.serverSeq)
+  // A take saved over is removed in the same step: its "Saved over" row says
+  // so, and no "Deleted" row follows it.
+  const savedOver = new Set<string>()
+  for (const ev of ordered) {
+    const p = (ev.payload ?? {}) as Payload
+    if (ev.kind === "cell.audio.attach" && p.versionChanges?.over && p.referenceAudioId) savedOver.add(p.referenceAudioId)
+  }
   for (const ev of ordered) {
     const p = (ev.payload ?? {}) as Payload
     if (!p.audioId || !ids.has(p.audioId)) continue
@@ -69,6 +77,15 @@ export function historyRowsFromEvents(
           const vc = p.versionChanges
           const what = opts.wording && vc?.kinds?.length ? opts.wording.kinds(vc.kinds) : ""
           const lines = opts.wording && vc?.usedOn?.length ? opts.wording.lines(vc.usedOn) : ""
+          if (vc?.over) {
+            // Sam, Nov 2: "Save" saves over the take, which keeps its name.
+            rows.push(
+              what && lines
+                ? { key: "editor.station.hSavedOverWith", params: { what, lines }, ...who }
+                : { key: "editor.station.hSavedOver", ...who },
+            )
+            break
+          }
           rows.push(
             what && lines
               ? { key: "editor.station.hVersionSavedWith", params: { n, what, lines }, ...who }
@@ -119,7 +136,7 @@ export function historyRowsFromEvents(
         rows.push({ key: "editor.station.hChosen", ...who })
         break
       case "cell.audio.remove":
-        rows.push({ key: "editor.station.hDeleted", ...who })
+        if (!savedOver.has(p.audioId)) rows.push({ key: "editor.station.hDeleted", ...who })
         break
       default:
         break

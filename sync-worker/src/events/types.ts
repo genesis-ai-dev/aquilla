@@ -634,7 +634,7 @@ export interface EventPayloads {
      * Station's History ("Version 2 saved: a part deleted · used on line
      * 331"); the projection ignores it — nothing about the row depends on it.
      */
-    versionChanges?: { kinds: Array<'deleted' | 'inserted' | 'noise'>; usedOn: string[] }
+    versionChanges?: { kinds: Array<'deleted' | 'inserted' | 'noise'>; usedOn: string[]; over?: boolean }
     /** AQU-1462: lane the member was working in. Omitted when the clip is shared. */
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */

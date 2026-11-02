@@ -1,14 +1,22 @@
 // The Station's sound edits (AQU-2327): the Insert menu (spec item 18) and
-// "Save as new version" (item 8). Board 40 drew the unsaved change as a
-// banner over the waveform; Sam dropped it (Nov 2): Save sits in the header
-// beside Undo and Approve, and the line under the name says what isn't
-// saved. A recording placed more than once picks where to save from Save's
-// own menu. No Discard: Undo is the way back.
+// Save (item 8). Board 40 drew the unsaved change as a banner over the
+// waveform; Sam dropped it (Nov 2): Save sits in the header beside Undo and
+// Approve, and the line under the name says what isn't saved. Save saves over
+// the take; its ▾ saves a new version instead. No Discard: Undo is the way
+// back.
 
 import { useRef, useState } from "react"
 import { ChevronDown, Library, Mic, Upload } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuShortcut,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { isApplePlatform } from "@/lib/platform"
@@ -118,8 +126,16 @@ export function useChangedText(): (kinds: readonly string[]) => string {
       .join(", ")
 }
 
-/** Item 8: Save, in the header. Placed on one line it saves; placed on more,
- *  it opens a menu: this clip only, or everywhere. */
+/** How a save goes: over the take, or as a new version on this clip or
+ *  everywhere the recording is used. */
+export interface SaveHow {
+  mode: "over" | "new"
+  scope: "clip" | "all"
+}
+
+/** Item 8: Save, in the header (Sam, Nov 2). One click saves over the take,
+ *  on every line it is used on; the ▾ beside it saves a new version instead,
+ *  on this clip only or everywhere when the recording is used twice. */
 export function StationSave({
   places,
   openLine,
@@ -128,49 +144,71 @@ export function StationSave({
   menuOpen,
   onMenuOpen,
 }: {
-  /** The lines it is placed on; the menu shows only for more than one. */
+  /** The lines it is placed on; a new version asks where only for more than one. */
   places: readonly string[]
   openLine: string
   saving: boolean
-  onSave(scope: "clip" | "all"): void
+  onSave(how: SaveHow): void
   menuOpen: boolean
   onMenuOpen(open: boolean): void
 }) {
   const t = useT()
-  const tip = t("editor.station.saveTip", { keys: isApplePlatform() ? "⌘S" : "Ctrl+S" })
-  const label = saving ? t("editor.station.saving") : t("editor.station.save")
+  const keys = isApplePlatform() ? "⌘S" : "Ctrl+S"
   const cls = "text-[12.5px] font-medium"
-  if (places.length <= 1) {
-    return (
-      <AppTooltip content={tip}>
-        <Button type="button" size="sm" data-testid="station-save" disabled={saving} onClick={() => onSave("clip")} className={cls}>
-          {label}
+  return (
+    <span className="inline-flex">
+      <AppTooltip content={t("editor.station.saveTip", { keys })}>
+        <Button
+          type="button"
+          size="sm"
+          data-testid="station-save"
+          disabled={saving}
+          onClick={() => onSave({ mode: "over", scope: "all" })}
+          className={`${cls} rounded-e-none`}
+        >
+          {saving ? t("editor.station.saving") : t("editor.station.save")}
         </Button>
       </AppTooltip>
-    )
-  }
-  return (
-    <DropdownMenu open={menuOpen} onOpenChange={(o) => onMenuOpen(o)}>
-      <AppTooltip content={tip}>
+      <DropdownMenu open={menuOpen} onOpenChange={(o) => onMenuOpen(o)}>
         <DropdownMenuTrigger
           render={
-            <Button type="button" size="sm" data-testid="station-save" disabled={saving} className={cls}>
-              {label}
+            <Button
+              type="button"
+              size="sm"
+              data-testid="station-save-more"
+              aria-label={t("editor.station.saveMenu")}
+              title={t("editor.station.saveMenu")}
+              disabled={saving}
+              className="rounded-s-none border-s border-primary-foreground/25 px-1.5"
+            >
               <ChevronDown className="size-3.5" />
             </Button>
           }
         />
-      </AppTooltip>
-      <DropdownMenuContent align="end" aria-label={t("editor.station.applyTo")} className="w-auto">
-        <DropdownMenuItem onClick={() => onSave("clip")} data-testid="station-scope-clip">
-          {t("editor.station.clipOnly")}
-          <span className="text-muted-foreground"> · {openLine}</span>
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => onSave("all")} data-testid="station-scope-all">
-          {t("editor.station.everywhere")}
-          <span className="text-muted-foreground"> · {t("editor.station.placesCount", { count: places.length })}</span>
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+        <DropdownMenuContent align="end" className="w-auto min-w-[230px]">
+          <DropdownMenuItem onClick={() => onSave({ mode: "over", scope: "all" })} data-testid="station-save-over">
+            {t("editor.station.saveOver")}
+            <DropdownMenuShortcut>{keys}</DropdownMenuShortcut>
+          </DropdownMenuItem>
+          {places.length > 1 ? (
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>{t("editor.station.saveNew")}</DropdownMenuLabel>
+              <DropdownMenuItem onClick={() => onSave({ mode: "new", scope: "clip" })} data-testid="station-scope-clip" className="ps-4">
+                {t("editor.station.clipOnly")}
+                <span className="text-muted-foreground"> · {openLine}</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onSave({ mode: "new", scope: "all" })} data-testid="station-scope-all" className="ps-4">
+                {t("editor.station.everywhere")}
+                <span className="text-muted-foreground"> · {t("editor.station.placesCount", { count: places.length })}</span>
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
+          ) : (
+            <DropdownMenuItem onClick={() => onSave({ mode: "new", scope: "clip" })} data-testid="station-save-new">
+              {t("editor.station.saveNew")}
+            </DropdownMenuItem>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </span>
   )
 }

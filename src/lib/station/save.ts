@@ -1,9 +1,15 @@
-// "Save as new version" (AQU-2327, spec item 35). The edited recording is
+// The Station's Save (AQU-2327, spec item 35). The edited recording is
 // rendered whole (its trim, fades and volume stay on the clip — they never
 // change the recording), written as 16-bit 48 kHz mono WAV, uploaded, and
-// attached as a NEW take on each line that uses it: the original is kept, and
-// the new one points back at it (`referenceAudioId`), the way Remove noise
-// already makes a cleaned take (denoise-take.ts).
+// attached as a NEW take on each line that uses it, pointing back at the take
+// it was made from (`referenceAudioId`), the way Remove noise already makes a
+// cleaned take (denoise-take.ts).
+//
+// Two ways (Sam, Nov 2): "Save" saves over the take — the take it replaces is
+// removed in the same step, as a split take's piece always was (Q6), so the
+// line keeps one take, with its name, and its History runs on through the
+// removed one; Undo brings it back. "Save as new version" keeps the original
+// beside it.
 //
 // Each placement keeps its track, its place in both timings and its own kept
 // part, mapped through the edits so it keeps the same sound. Attaching
@@ -59,6 +65,9 @@ export interface SaveVersionArgs {
    *  (board 40b: "Version 2 saved: a part deleted, audio inserted · used on
    *  line 331"). Rides on each line's attach. */
   changes?: VersionChanges
+  /** "over": the take each line had is removed in the same step (Save);
+   *  "new" (the default): it is kept (Save as new version). */
+  mode?: "over" | "new"
 }
 
 export interface SavedVersion {
@@ -87,6 +96,8 @@ export async function saveStationVersion(args: SaveVersionArgs): Promise<SavedVe
   const url = up.url
   const objectId = `${up.audioId}.${up.ext}`
   const lane = args.targetLang ? { targetLang: args.targetLang } : {}
+  const over = args.mode === "over"
+  const changes = args.changes ? { ...args.changes, ...(over ? { over: true } : {}) } : over ? { kinds: [], usedOn: args.placements.map((p) => p.cellId), over: true } : null
   const ids: string[] = []
   let attached = 0
   try {
@@ -110,7 +121,7 @@ export async function saveStationVersion(args: SaveVersionArgs): Promise<SavedVe
             ...(p.trimStartMs != null ? { trimStartMs: p.trimStartMs } : {}),
             ...(p.trimEndMs != null ? { trimEndMs: p.trimEndMs } : {}),
             ...(p.pieceOf ? { pieceOf: p.pieceOf } : {}),
-            ...(args.changes ? { versionChanges: args.changes } : {}),
+            ...(changes ? { versionChanges: changes } : {}),
             ...lane,
             author: args.author,
           })
@@ -161,8 +172,9 @@ export async function saveStationVersion(args: SaveVersionArgs): Promise<SavedVe
             { cellId: p.cellId, audioId, slot: p.slot, selectedBefore: p.selectedBefore },
             { fileId: p.fileId },
           )
-          if (p.pieceOf) {
-            // The piece it replaces goes, in the same step; Undo brings it back.
+          if (p.pieceOf || over) {
+            // The take (or piece) it replaces goes, in the same step; Undo
+            // brings it back.
             await emitCellAudioRemove({ projectId: args.projectId, fileId: p.fileId, cellId: p.cellId, audioId: p.fromAudioId, ...lane, author: args.author })
             recordStep<TakeRemoveData>({
               kind: "take.remove",
@@ -173,7 +185,7 @@ export async function saveStationVersion(args: SaveVersionArgs): Promise<SavedVe
           }
         }
       },
-      { alwaysGroup: args.placements.length > 1 || args.placements.some((p) => p.pieceOf) },
+      { alwaysGroup: over || args.placements.length > 1 || args.placements.some((p) => p.pieceOf) },
     )
   } catch (err) {
     // Nothing reached the outbox: the upload goes too. Once one line has it,

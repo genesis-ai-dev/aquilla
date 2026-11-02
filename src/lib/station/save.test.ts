@@ -84,4 +84,38 @@ describe("Save as new version", () => {
     expect(calls.attach[0]).toMatchObject({ pieceOf: "t3.webm" })
     expect(calls.remove[0]).toMatchObject({ audioId: "piece2.webm" })
   })
+
+  it("Save saves over the take: the take it replaces goes in the same step, and the attach says so (Nov 2)", async () => {
+    const changes = { kinds: ["deleted" as const], usedOn: ["c331", "c316"] }
+    await saveStationVersion({
+      projectId: "p",
+      samples: new Float32Array(4800),
+      rate: 48000,
+      placements: [base, { ...base, cellId: "c316", fromAudioId: "t1.webm" }],
+      author: "ana",
+      getSyncToken: async () => "jwt",
+      where: { fileId: "f" },
+      changes,
+      mode: "over",
+    })
+    expect(calls.attach).toHaveLength(2)
+    for (const a of calls.attach) expect(a).toMatchObject({ label: "Take 2", versionChanges: { ...changes, over: true } })
+    expect(calls.remove.map((r) => (r as { audioId: string }).audioId)).toEqual(["t2.webm", "t1.webm"])
+  })
+
+  it("Save as new version keeps the original", async () => {
+    await saveStationVersion({
+      projectId: "p",
+      samples: new Float32Array(4800),
+      rate: 48000,
+      placements: [base],
+      author: "ana",
+      getSyncToken: async () => "jwt",
+      where: { fileId: "f" },
+      changes: { kinds: ["deleted"], usedOn: ["c331"] },
+      mode: "new",
+    })
+    expect(calls.remove).toHaveLength(0)
+    expect(calls.attach[0]).not.toMatchObject({ versionChanges: { over: true } })
+  })
 })

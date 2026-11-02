@@ -8,6 +8,7 @@ import type { EditOp } from "@/lib/station/edit-list"
 import { draftRows, historyRowsFromEvents, historyWhen, type HistoryRow } from "@/lib/station/history-rows"
 import { STATION_PICKS } from "@/lib/station/picks"
 import { setStationUi, useStationUi } from "@/lib/station/ui"
+import { versionOfId } from "@/lib/station/version"
 import { fetchCellHistory } from "@/lib/sync/history-read"
 import type { StationHost, StationTake } from "./station-host"
 
@@ -100,7 +101,9 @@ export function StationHistory({
         if (!jwt) throw new Error("no token")
         const events = await fetchCellHistory(projectId, fileId, cellId, jwt, { limit: 200 })
         const ids = new Set(chain)
-        const depth = (id: string) => chain.length - chain.indexOf(id)
+        // The number the take's name shows: a take saved over isn't counted.
+        const atts = take.cell.attachments ?? {}
+        const depth = (id: string) => versionOfId(atts, atts[id]?.referenceAudioId)
         // Each version's own length, for a trim that ran to its edge.
         const durationOf = (id: string) => {
           if (id === audioId) return durationSec

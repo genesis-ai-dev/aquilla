@@ -160,6 +160,10 @@ describe("the Station", () => {
       expect(fireEvent.keyDown(screen.getByTestId("station-undo"), { key: " ", code: "Space" })).toBe(true)
       // A Russian layout types "л" on the L key: it still loops.
       expect(fireEvent.keyDown(screen.getByTestId("station"), { key: "л", code: "KeyL" })).toBe(false)
+      // AltGr+S (Polish ś) arrives as Ctrl+Alt+S: it isn't Save, and stays the page's.
+      expect(fireEvent.keyDown(screen.getByTestId("station"), { key: "ś", code: "KeyS", ctrlKey: true, altKey: true })).toBe(true)
+      // ⌘Enter stops at the Station: the timeline would rewind.
+      expect(fireEvent.keyDown(screen.getByTestId("station"), { key: "Enter", code: "Enter", metaKey: true })).toBe(false)
     } finally {
       window.removeEventListener("keydown", onWindow)
     }

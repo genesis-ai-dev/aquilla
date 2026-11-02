@@ -400,9 +400,13 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
     }
     const mod = e.metaKey || e.ctrlKey
     let handled = true
-    if (mod && !e.shiftKey && letter === "z") handled = ed.undoUnsaved()
+    // Never with Alt: AltGr on a Windows layout arrives as Ctrl+Alt, and
+    // AltGr+S types ś in Polish (Nov 2 shortcut review).
+    if (mod && !e.altKey && !e.shiftKey && letter === "z") handled = ed.undoUnsaved()
     // ⌘S is Save: over the take, wherever it is used (Sam, Nov 2).
-    else if (mod && letter === "s") void save({ mode: "over", scope: "all" })
+    else if (mod && !e.altKey && letter === "s") void save({ mode: "over", scope: "all" })
+    // The timeline's ⌘Enter (back to the start) would rewind it from here.
+    else if (mod && k === "Enter") handled = true
     else if (mod || e.altKey) handled = false
     // Space presses a focused button rather than playing (playback-keys.ts).
     else if (k === " ") {

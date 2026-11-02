@@ -67,14 +67,15 @@ describe("ROLE constants", () => {
   it("provides a description key for every canonical level, resolving to non-empty text", () => {
     for (const level of ALL_ROLE_LEVELS) {
       expect(roleDescription(level)).not.toBe("")
-      expect(roleHelpText(level)).toContain(String(level))
+      // AQU-2261: role names carry no level numbers in the interface.
+      expect(roleHelpText(level)).not.toContain(`(${level})`)
     }
   })
 
   it("keeps the AD-6 viewer help text", () => {
     expect(roleDescription(100)).toMatch(/read-only access/i)
     expect(roleHelpText(100)).toBe(
-      "Viewer (100) — read-only access. No edit or management actions.",
+      "Viewer — read-only access. No edit or management actions.",
     )
   })
 

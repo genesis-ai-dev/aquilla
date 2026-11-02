@@ -895,7 +895,7 @@ describe("ProjectAutopilotPanel", () => {
 
     const panel = await screen.findByTestId("project-autopilot-panel")
     expect(within(panel).getByTestId("autopilot-lane-static")).toHaveTextContent("Burmese")
-    expect(within(panel).queryByRole("combobox", { name: "Target language Autopilot will draft" }))
+    expect(within(panel).queryByRole("combobox", { name: "Language lane Autopilot will draft" }))
       .not.toBeInTheDocument()
   })
 
@@ -913,7 +913,7 @@ describe("ProjectAutopilotPanel", () => {
 
     const panel = await screen.findByTestId("project-autopilot-panel")
     const user = userEvent.setup()
-    const select = within(panel).getByRole("combobox", { name: "Target language Autopilot will draft" })
+    const select = within(panel).getByRole("combobox", { name: "Language lane Autopilot will draft" })
     expect(select).toHaveTextContent("Burmese")
     expect(within(panel).getByTestId("autopilot-lane")).toBeInTheDocument()
 
@@ -944,7 +944,7 @@ describe("ProjectAutopilotPanel", () => {
 
     const panel = await screen.findByTestId("project-autopilot-panel")
     expect(within(panel).getByTestId("autopilot-lane-static")).toHaveTextContent("Burmese")
-    expect(within(panel).queryByRole("combobox", { name: "Target language Autopilot will draft" }))
+    expect(within(panel).queryByRole("combobox", { name: "Language lane Autopilot will draft" }))
       .not.toBeInTheDocument()
     expect(within(panel).queryByRole("button", { name: "Run Autopilot" })).not.toBeInTheDocument()
   })
@@ -962,7 +962,7 @@ describe("ProjectAutopilotPanel", () => {
     expect(within(panel).queryByRole("button", { name: "Run Autopilot" })).not.toBeInTheDocument()
 
     const user = userEvent.setup()
-    await user.click(within(panel).getByRole("combobox", { name: "Target language Autopilot will draft" }))
+    await user.click(within(panel).getByRole("combobox", { name: "Language lane Autopilot will draft" }))
     await user.click(await screen.findByRole("option", { name: "th" }))
 
     await waitFor(() =>
@@ -989,7 +989,7 @@ describe("ProjectAutopilotPanel", () => {
 
     const panel = await screen.findByTestId("project-autopilot-panel")
     const user = userEvent.setup()
-    const select = within(panel).getByRole("combobox", { name: "Target language Autopilot will draft" })
+    const select = within(panel).getByRole("combobox", { name: "Language lane Autopilot will draft" })
     await user.click(select)
     await user.click(await screen.findByRole("option", { name: "th" }))
     await waitFor(() => expect(select).toHaveTextContent("th"))

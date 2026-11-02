@@ -28,6 +28,7 @@ beforeEach(async () => {
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.unstubAllGlobals()
 })
 
@@ -155,9 +156,10 @@ describe("refreshActiveSession", () => {
     expect((await loadActiveSession())?.jwt).toBe(old)
   })
 
-  it("does not clobber a credential that changed while the request was in flight", async () => {
+  it.each(["logout", "switch", "new credential"])("does not clobber %s while renewal is in flight", async (change) => {
     const old = aged(LIFETIME * 0.75)
-    const reLogin = aged(0, "anna")
+    const username = change === "switch" ? "bob" : "anna"
+    const reLogin = aged(0, username)
     const stale = aged(0, "anna")
     await saveSession({ jwt: old, username: "anna", createdAt: "2026-01-01" })
 
@@ -165,13 +167,46 @@ describe("refreshActiveSession", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => {
-        await saveSession({ jwt: reLogin, username: "anna", createdAt: "2026-02-01" })
+        if (change === "logout") await clearSession()
+        else await saveSession({ jwt: reLogin, username, createdAt: "2026-02-01" })
         return new Response(JSON.stringify({ access_token: stale }), { status: 200 })
       }),
     )
 
     expect(await refreshActiveSession()).toBe(false)
-    expect((await loadActiveSession())?.jwt).toBe(reLogin)
+    expect((await loadActiveSession())?.jwt).toBe(change === "logout" ? undefined : reLogin)
+  })
+
+  it.each(["request", "body"])("releases a hung %s, preserves the session and retries after account switching", async (stage) => {
+    const old = aged(LIFETIME * 0.75)
+    await saveSession({ jwt: old, username: "anna", createdAt: "2026-01-01" })
+    let finish!: (value: unknown) => void
+    const pending = new Promise(resolve => { finish = resolve })
+    const fetchMock = vi.fn().mockImplementationOnce(() => stage === "request"
+      ? pending : Promise.resolve({ ok: true, json: () => pending }))
+    vi.stubGlobal("fetch", fetchMock)
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    const first = refreshActiveSession()
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    const signal = fetchMock.mock.calls[0][1].signal as AbortSignal
+    await vi.advanceTimersByTimeAsync(15_000)
+    expect(await first).toBe(false)
+    expect(signal.aborted).toBe(true)
+    expect((await loadActiveSession())?.jwt).toBe(old)
+
+    const other = aged(LIFETIME * 0.75, "bob")
+    const renewed = aged(0, "bob")
+    await saveSession({ jwt: other, username: "bob", createdAt: "2026-01-01" })
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ access_token: renewed })))
+    expect(await refreshActiveSession()).toBe(true)
+    expect((await loadActiveSession())?.jwt).toBe(renewed)
+    // Even a transport ignoring abort must not write a late response.
+    const late = { access_token: aged(0) }
+    finish(stage === "request" ? { ok: true, json: async () => late } : late)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect((await loadActiveSession())?.jwt).toBe(renewed)
+    expect(vi.getTimerCount()).toBe(0)
   })
 
   it("de-dupes concurrent triggers into a single request", async () => {

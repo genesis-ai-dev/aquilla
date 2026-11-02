@@ -74,7 +74,7 @@ const KEYS = {
     "recordingsUpload.intent.title": "Recordings",
     "recordingsUpload.intent.description": "Audio for lines already here. Each file finds its line by its name.",
     "recordingsUpload.intent.noFiles": "Add a source text first. Recordings go onto lines that are already here.",
-    "recordingsUpload.intent.laneArchived": "{lane} has been archived and is read-only. Switch to another language to upload recordings.",
+    "recordingsUpload.intent.laneArchived": "{lane} has been archived and is read-only. Switch to another language lane to upload recordings.",
     "recordingsUpload.menuItem": "Upload recordings…",
     "recordingsUpload.title": "Upload recordings",
     "recordingsUpload.titleInto": "Upload recordings into {fileName}",

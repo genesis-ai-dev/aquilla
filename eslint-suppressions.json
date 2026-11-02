@@ -71,7 +71,7 @@
   },
   "src/components/ProjectSettings/MembersSection.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 3
+      "count": 2
     }
   },
   "src/components/ProjectSettings/MondayIntegrationSection.tsx": {
@@ -186,7 +186,7 @@
   },
   "src/components/org/OrgMembersTable.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 7
+      "count": 2
     }
   },
   "src/components/org/OrgOverview.tsx": {
@@ -197,11 +197,6 @@
   "src/components/org/ProjectOverview.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 2
-    }
-  },
-  "src/components/org/TeamDetail.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 10
     }
   },
   "src/components/org/TeamsList.tsx": {

@@ -98,7 +98,7 @@ describe("VerseResourcesSidebar failure recovery (AQU-849)", () => {
     loadEntities.mockReset().mockResolvedValue([])
     fireEvent.click(screen.getByRole("button", { name: "Retry" }))
 
-    await waitFor(() => expect(screen.getByText("Verse Resources")).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText("Verse resources")).toBeInTheDocument())
   })
 })
 

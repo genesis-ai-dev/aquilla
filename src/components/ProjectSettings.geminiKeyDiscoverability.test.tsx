@@ -134,7 +134,7 @@ describe("ProjectSettings — Gemini key discoverability (AQU-522)", () => {
     // The buried key entry is visible immediately — no pane click-through.
     expect(screen.getByText(/gemini api key/i)).toBeTruthy()
     // Search results are grouped under the main section header.
-    expect(screen.getByText("AI & completion")).toBeTruthy()
+    expect(screen.getByText("AI", { exact: true })).toBeTruthy()
   })
 
   it("the deep link filters to the Voice card — no unrelated section is shown", () => {
@@ -142,7 +142,7 @@ describe("ProjectSettings — Gemini key discoverability (AQU-522)", () => {
 
     // A control from a different section (General → Project Title) must NOT be in
     // the document: proving the user landed on the key, not the top of the page.
-    expect(screen.queryByLabelText(/project title/i)).toBeNull()
+    expect(screen.queryByLabelText(/project name/i)).toBeNull()
     // And General's group header must not appear either (no matches in that group).
     expect(screen.queryByText("General")).toBeNull()
   })
@@ -158,7 +158,7 @@ describe("ProjectSettings — Gemini key discoverability (AQU-522)", () => {
     renderAt(`/project/${PROJECT_ID}/settings`)
 
     // Default landing still shows the grouped index, not a pre-filtered pane.
-    expect(screen.getByText("AI & completion")).toBeTruthy()
+    expect(screen.getByText("AI", { exact: true })).toBeTruthy()
     const search = screen.getByLabelText(/search settings/i) as HTMLInputElement
     expect(search.value).toBe("")
   })

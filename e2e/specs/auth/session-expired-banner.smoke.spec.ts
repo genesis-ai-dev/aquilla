@@ -117,7 +117,7 @@ test("dead credential raises the banner; it persists, dismisses, and re-login cl
   await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeVisible()
 
   // Dismiss lowers it; the next 401 (from the in-place Retry) re-raises it.
-  await page.getByRole("button", { name: "Dismiss" }).click()
+  await banner(page).getByRole("button", { name: "Dismiss" }).click()
   await expect(banner(page)).toBeHidden()
   await page.getByRole("button", { name: "Retry", exact: true }).click()
   await expect(banner(page)).toBeVisible({ timeout: 10_000 })

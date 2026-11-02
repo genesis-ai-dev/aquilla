@@ -26,7 +26,7 @@ describe("InworldVoiceSettings", () => {
   it("links Highest quality to Inworld steering best practices", () => {
     renderSettings()
     const slider = screen.getByRole("group", { name: "Delivery" })
-    const captions = screen.getByText("More Creative")
+    const captions = screen.getByText("More creative")
     const link = screen.getByRole("link", { name: "Best practices" })
     expect(link.getAttribute("href")).toBe("https://docs.inworld.ai/tts/capabilities/steering")
     expect(link.getAttribute("target")).toBe("_blank")

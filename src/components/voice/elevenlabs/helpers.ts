@@ -1,10 +1,8 @@
 // Pure helpers behind the ElevenLabs voice UI (AQU-2299), kept out of the
 // component files so they stay fast-refresh friendly and unit-testable.
 import { isVoiceChangedAudioId, originalTakeId } from "@/lib/audio/change-voice"
-import { DEFAULT_ELEVENLABS_SETTINGS } from "@/lib/audio/elevenlabs/settings"
 import type { CellData } from "@/hooks/useCells"
-import type { ElevenLabsVoiceSettings } from "@/lib/parsers/types"
-import type { ElevenLabsVoiceCategory, ElevenLabsVoiceRow } from "@/lib/sync/elevenlabs"
+import type { ElevenLabsVoiceCategory } from "@/lib/sync/elevenlabs"
 
 export const ELEVENLABS_CATEGORY_LABEL_KEYS = {
   premade: "audio.elevenLabs.categoryPremade",
@@ -13,26 +11,13 @@ export const ELEVENLABS_CATEGORY_LABEL_KEYS = {
   professional: "audio.elevenLabs.categoryProfessional",
 } as const satisfies Record<ElevenLabsVoiceCategory, string>
 
-/** Labels worth a chip, in the order they say most about a voice. */
+/** Labels worth showing, in the order they say most about a voice. */
 const LABEL_ORDER = ["accent", "gender", "age", "language", "descriptive", "use_case", "use case"]
 
-/** Up to two of a voice's labels, most telling first. */
+/** Up to two of a voice's labels, most telling first (the card's subtitle). */
 export function voiceLabelChips(labels: Record<string, string>): string[] {
   const keys = [...LABEL_ORDER.filter((k) => labels[k]), ...Object.keys(labels).filter((k) => !LABEL_ORDER.includes(k))]
   return keys.slice(0, 2).map((k) => labels[k])
-}
-
-/** Client-side kind filter over the fetched page (search runs server-side). */
-export function filterElevenLabsVoices(
-  voices: readonly ElevenLabsVoiceRow[],
-  category: ElevenLabsVoiceCategory | null,
-): ElevenLabsVoiceRow[] {
-  return category ? voices.filter((v) => v.category === category) : [...voices]
-}
-
-export function isDefaultElevenLabsSettings(s: ElevenLabsVoiceSettings): boolean {
-  return (Object.keys(DEFAULT_ELEVENLABS_SETTINGS) as (keyof ElevenLabsVoiceSettings)[])
-    .every((k) => s[k] === DEFAULT_ELEVENLABS_SETTINGS[k])
 }
 
 /**
@@ -52,7 +37,7 @@ export function linesWithTakes(cells: readonly CellData[]): { cell: CellData; au
   return out
 }
 
-/** What a line is called in the take picker: the start of its text. */
+/** What a line is called in the clone step's recordings list: the start of its text. */
 export function lineSnippet(cell: Pick<CellData, "cellLabel" | "original" | "translated" | "id">): string {
   const raw = (cell.translated || cell.original || cell.cellLabel || "").trim()
   if (!raw) return cell.cellLabel || cell.id

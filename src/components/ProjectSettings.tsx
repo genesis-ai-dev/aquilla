@@ -2945,7 +2945,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 />
               </SettingsRow>
               {/* AQU-2299: the user's own ElevenLabs key, per user + device
-                  (never project settings) — the same card New voice shows. */}
+                  (never project settings) — the same key row / connected line
+                  New voice shows. */}
               <SettingsRow
                 label="ElevenLabs"
                 description={t("projectSettings.voice.elevenLabsHelp")}

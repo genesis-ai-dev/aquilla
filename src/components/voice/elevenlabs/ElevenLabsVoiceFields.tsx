@@ -1,10 +1,9 @@
-// The ElevenLabs engine's fields in New voice (AQU-2299). Connect first (the
-// key is the user's own), then either pick one of the account's voices or
-// clone one, then tune model + settings. A fresh clone comes back selected,
-// marked "Cloned", on the "Use a voice" side, ready to Save.
+// The ElevenLabs engine's fields in New voice (AQU-2299). Not connected → the
+// key row only. Connected → one muted account line, then the voice grid; its
+// last card, "Clone a voice", swaps the grid for the clone step. A fresh clone
+// comes back to the grid selected, marked "Cloned", ready to Create. "Adjust"
+// (model, stability, speed) appears once a voice is picked.
 import { useCallback, useEffect, useState } from "react"
-import { useT } from "@/lib/i18n/I18nProvider"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { DEFAULT_ELEVENLABS_MODEL, elevenLabsSettingsOf } from "@/lib/audio/elevenlabs/settings"
 import { CUSTOM_VOICE_CONSENT_VERSION } from "@/lib/audio/custom-voice"
 import type { CellData } from "@/hooks/useCells"
@@ -28,7 +27,7 @@ export interface ElevenLabsVoiceFieldsProps {
   targetLanguage?: string
   /** Editing an existing voice: cloning is a new voice, so only "Use" shows. */
   editing?: boolean
-  /** True while "Clone a voice" is showing: its own Clone button is the action,
+  /** True while the clone step is showing: its own Clone button is the action,
    *  so the dialog hides Create voice until the clone comes back selected. */
   onCloningChange?: (cloning: boolean) => void
 }
@@ -36,13 +35,12 @@ export interface ElevenLabsVoiceFieldsProps {
 export function ElevenLabsVoiceFields({
   draft, onChange, projectId, fileId, session, cells, targetLanguage, editing = false, onCloningChange,
 }: ElevenLabsVoiceFieldsProps) {
-  const t = useT()
   const connection = useElevenLabsAccount({ projectId, fileId, session })
   const [source, setSource] = useState<"use" | "clone">("use")
   const [reloadToken, setReloadToken] = useState(0)
   useEffect(() => {
-    onCloningChange?.(source === "clone" && !editing)
-  }, [source, editing, onCloningChange])
+    onCloningChange?.(source === "clone" && !editing && Boolean(connection.key))
+  }, [source, editing, connection.key, onCloningChange])
   useEffect(() => () => onCloningChange?.(false), [onCloningChange])
   const [pinned, setPinned] = useState<ElevenLabsVoiceRow | null>(null)
   const ref = draft.elevenLabs
@@ -85,58 +83,52 @@ export function ElevenLabsVoiceFields({
   }, [draft.name, onChange, ref, session?.username])
 
   const canClone = connection.state.status === "ready" ? connection.state.account.canClone : undefined
+  const cloning = source === "clone" && !editing
+
+  if (!connection.key) {
+    return <ElevenLabsConnect connection={connection} projectId={projectId} fileId={fileId} session={session} />
+  }
 
   return (
-    <div className="space-y-3.5">
+    <div className="space-y-2.5">
       <ElevenLabsConnect connection={connection} projectId={projectId} fileId={fileId} session={session} />
 
-      {connection.key && (
+      {cloning ? (
+        <ElevenLabsClonePanel
+          name={draft.name}
+          projectId={projectId}
+          fileId={fileId}
+          session={session}
+          cells={cells}
+          canClone={canClone}
+          onCloned={cloned}
+          onBack={() => setSource("use")}
+        />
+      ) : (
         <>
-          {!editing && (
-            <Tabs value={source} onValueChange={(v) => setSource(v as "use" | "clone")} className="gap-0">
-              <TabsList aria-label={t("audio.elevenLabs.sourceGroupLabel")}>
-                <TabsTrigger value="use">{t("audio.elevenLabs.tabUse")}</TabsTrigger>
-                <TabsTrigger value="clone">{t("audio.elevenLabs.tabClone")}</TabsTrigger>
-              </TabsList>
-            </Tabs>
-          )}
-
-          {source === "clone" && !editing ? (
-            <ElevenLabsClonePanel
-              name={draft.name}
+          <ElevenLabsVoiceBrowser
+            projectId={projectId}
+            fileId={fileId}
+            session={session}
+            apiKey={connection.key}
+            selectedId={ref?.voiceId}
+            onSelect={select}
+            onClone={editing ? undefined : () => setSource("clone")}
+            reloadToken={reloadToken}
+            pinned={pinned}
+          />
+          {ref?.voiceId && (
+            <ElevenLabsVoiceTuning
+              modelId={ref.modelId}
+              settings={elevenLabsSettingsOf(draft)}
+              onModelChange={(modelId) => onChange({ elevenLabs: { ...ref, modelId } })}
+              onSettingsChange={(settings) => onChange({ elevenLabs: { ...ref, settings } })}
+              voiceId={ref.voiceId}
               projectId={projectId}
               fileId={fileId}
               session={session}
-              cells={cells}
-              canClone={canClone}
-              onCloned={cloned}
+              language={draft.language ?? targetLanguage}
             />
-          ) : (
-            <>
-              <ElevenLabsVoiceBrowser
-                projectId={projectId}
-                fileId={fileId}
-                session={session}
-                apiKey={connection.key}
-                selectedId={ref?.voiceId}
-                onSelect={select}
-                reloadToken={reloadToken}
-                pinned={pinned}
-              />
-              {ref?.voiceId && (
-                <ElevenLabsVoiceTuning
-                  modelId={ref.modelId}
-                  settings={elevenLabsSettingsOf(draft)}
-                  onModelChange={(modelId) => onChange({ elevenLabs: { ...ref, modelId } })}
-                  onSettingsChange={(settings) => onChange({ elevenLabs: { ...ref, settings } })}
-                  voiceId={ref.voiceId}
-                  projectId={projectId}
-                  fileId={fileId}
-                  session={session}
-                  language={draft.language ?? targetLanguage}
-                />
-              )}
-            </>
           )}
         </>
       )}

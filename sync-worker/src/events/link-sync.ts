@@ -83,6 +83,7 @@ import {
 } from '../../../db/shared/source-link-backfill'
 import { parseSourceLinkAdoption } from '../../../db/shared/source-link-adopt'
 import { loadAdoptedCellIds, runAdoption } from './link-adopt'
+import { linkSourceBlobPointers } from '../../../db/shared/link-source-blob'
 import { selectByCellKeys, type CellKey } from '../lib/cell-key-lookup'
 
 const BATCH_LIMIT = 100
@@ -1785,6 +1786,26 @@ export async function mirrorSync(
   // that consumes the upstream's SOURCE has any — see link-adopt.ts.
   let adoption = consumes === 'source' ? parseSourceLinkAdoption(link.source_link_adopt) : null
   const adoptionPending = adoption != null && adoption.pending.length > 0
+  // AQU-2345: point any linked file with no side-car row at its upstream
+  // file's original artifact, BEFORE the "nothing to mirror" return below —
+  // that is the path a project whose link already ran takes, so this is also
+  // what backfills one. See linkSourceBlobPointers: it writes nothing but
+  // missing `file_source_blobs` rows, so it is safe on every sync.
+  const sweepSourceBlobs = async (): Promise<void> => {
+    try {
+      await linkSourceBlobPointers(db, {
+        upstreamProjectId,
+        downstreamProjectId,
+        downstreamFileIdOf: (upstreamFileId) =>
+          deterministicDownstreamFileId(downstreamProjectId, upstreamFileId),
+      })
+    } catch (err) {
+      // Export provenance is not worth failing a sync over: the next sweep
+      // retries, and the mirror itself is unaffected either way.
+      console.warn(`[link-sync] ${downstreamProjectId}: source-blob sweep failed:`, err)
+    }
+  }
+  await sweepSourceBlobs()
   // AQU-1560: a pending backfill is work even when the link is not behind —
   // the files being added have their history BELOW the cursor. AQU-1679: so is
   // a file still waiting to be joined to its upstream.
@@ -1873,7 +1894,11 @@ export async function mirrorSync(
     followedFileIds = outcome.followedFileIds
     total.ranSync = true
   }
-  if (head <= cursor) return total
+  if (head <= cursor) {
+    // AQU-2345: a backfill-only run mirrored its files above and stops here.
+    if (total.filesMirrored > 0) await sweepSourceBlobs()
+    return total
+  }
 
   total.ranSync = true
   let sinceSeq = cursor
@@ -1900,6 +1925,10 @@ export async function mirrorSync(
     total.toSeq = untilSeq
     sinceSeq = untilSeq
   }
+  // AQU-2345: again now that this run's own files exist — a first sync's files
+  // are mirrored in above, after the sweep at the top of the run saw nothing,
+  // and a file linked today must export today without manual intervention.
+  if (total.filesMirrored > 0) await sweepSourceBlobs()
   return total
 }
 

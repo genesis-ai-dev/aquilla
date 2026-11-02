@@ -1,4 +1,5 @@
 import type { InfractionSpan } from "@/lib/parsers/types"
+import { toWesternDigits } from "../../../../shared/decimal-digits"
 
 export const MESSAGE = "Number from source missing in translation"
 
@@ -17,34 +18,8 @@ const DIGIT = "\\p{Nd}"
 const GROUP_SEPARATOR = "[.,\\u066B\\u066C]"
 const NUMBER_RE = new RegExp(`-?${DIGIT}+(?:${GROUP_SEPARATOR}${DIGIT}+)*`, "gu")
 
-const ANY_DIGIT_RE = /\p{Nd}/gu
-const IS_DIGIT = /^\p{Nd}$/u
-
-/** A decimal digit's value, 0–9, in any script.
- *
- *  Unicode's stability policy keeps every script's decimal digits in one run of
- *  ten consecutive code points, 0 first. Some runs sit back to back (the five
- *  mathematical digit styles fill U+1D7CE–1D7FF), so the value is the distance
- *  from the start of the run, mod 10. Runs are at most 50 long, and each code
- *  point is worked out once. */
-const digitValues = new Map<number, number>()
-function digitValue(cp: number): number {
-  const known = digitValues.get(cp)
-  if (known !== undefined) return known
-  let start = cp
-  while (start > 0 && IS_DIGIT.test(String.fromCodePoint(start - 1))) start--
-  const value = (cp - start) % 10
-  digitValues.set(cp, value)
-  return value
-}
-
-/** ٤, ۴, ၄, ๔ and 4 all become "4". */
-function toWesternDigit(ch: string): string {
-  return String(digitValue(ch.codePointAt(0)!))
-}
-
 function canonicalize(raw: string): string {
-  const western = raw.replace(ANY_DIGIT_RE, toWesternDigit)
+  const western = toWesternDigits(raw)
   if (western.startsWith("-")) return "-" + western.slice(1).replace(/[^0-9]/g, "")
   return western.replace(/[^0-9]/g, "")
 }

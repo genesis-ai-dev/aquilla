@@ -41,8 +41,9 @@ describe("the Station's fade corners and volume line", () => {
     expect(fadeIn.className).toContain("top-0")
     expect(fadeIn.style.left).toBe("7.143%")
     expect(screen.getByTestId("station-fade-out").style.left).toBe("calc(100.000% - 12px)")
-    expect(screen.getByText("Fade in 0.30 s")).toBeTruthy()
-    expect(screen.getByText("Fade out")).toBeTruthy()
+    // No words on the waveform (Nov 2): each knob is named for screen readers only.
+    expect(screen.queryByText("Fade in 0.30 s")).toBeNull()
+    expect(fadeIn.getAttribute("aria-label")).toBe("Fade in 0.30 s")
   })
 })
 

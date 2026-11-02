@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react"
 import { AudioWaveform, Check, Undo2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { castNameOf } from "@/lib/audio/voices"
 import { historyView, newestMatchingStep, subscribeHistory, undoLast, undoStepById } from "@/lib/history/history"
@@ -406,6 +407,7 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
         unsaved={unsaved}
         undoUnsaved={ed.undoUnsaved}
         isSource={isSource}
+        controlsInfo={editable}
         {...(unsaved
           ? {
               notSaved: changedText(changedKinds(ed.ops)),
@@ -493,6 +495,7 @@ export function StationHeader({
   isSource = false,
   notSaved,
   save,
+  controlsInfo = false,
 }: {
   host: StationHost
   take: StationTake
@@ -509,8 +512,11 @@ export function StationHeader({
   notSaved?: string
   /** Item 8: the Save button, between Undo and Approve. */
   save?: ReactNode
+  /** The (i) beside the name that explains the controls (Sam, Nov 2). */
+  controlsInfo?: boolean
 }) {
   const t = useT()
+  const [infoOpen, toggleInfo] = useInfoOpen()
   const { cellId, audioId } = target
   const line = host.lineName(cellId)
   const name = isSource ? t("editor.station.sourceName") : (take.att.label ?? t("audio.takesStrip.takeFallback"))
@@ -561,77 +567,112 @@ export function StationHeader({
   }
 
   return (
-    <div data-testid="station-header" className="flex shrink-0 items-center gap-2 pt-2 pb-1.5 ps-3 pe-2">
-      <span className="flex min-w-0 flex-col">
-        <span className="text-[13px] font-semibold whitespace-nowrap text-foreground">
-          {t("editor.station.nameOnLine", { take: name, line })}
-        </span>
-        {isSource && !character ? null : (
-          <span data-testid="station-subline" className="truncate text-[11px] text-muted-foreground">
-            {character ? (
-              <>
-                <span className="font-bold" style={{ color: vars["--tl-track-hue"] }}>
-                  {character}
-                </span>
-                {isSource ? null : " · "}
-              </>
+    <div data-testid="station-header" className="shrink-0 pt-2 pb-1.5 ps-3 pe-2">
+      <div className="flex items-center gap-2">
+        <span className="flex min-w-0 flex-col">
+          <span className="inline-flex items-center gap-1 text-[13px] font-semibold whitespace-nowrap text-foreground">
+            {t("editor.station.nameOnLine", { take: name, line })}
+            {controlsInfo ? (
+              <InfoToggle open={infoOpen} onToggle={toggleInfo} label={t("editor.station.controlsInfo")} controls="station-controls-info" testId="station-info" />
             ) : null}
-            {isSource ? null : (
-              <>
-                {placedText}
-                {" · "}
-                <span
-                  data-testid="station-status"
-                  className={approved ? "font-semibold text-green-700 dark:text-green-400" : "font-semibold text-sky-700 dark:text-sky-400"}
-                >
-                  {statusText}
-                </span>
-                {version > 1 ? ` · ${t("editor.station.version", { n: version })}` : null}
-                {notSaved ? (
-                  <>
-                    {" · "}
-                    <span data-testid="station-not-saved" className="font-semibold text-amber-700 dark:text-amber-400">
-                      {t("editor.station.notSaved", { what: notSaved })}
-                    </span>
-                  </>
-                ) : null}
-              </>
-            )}
           </span>
-        )}
-      </span>
-      <span className="ms-auto inline-flex shrink-0 items-center gap-1">
-        <AppTooltip content={undoTip}>
-          <Button
-            type="button"
-            variant="outline"
-            size="icon-sm"
-            data-testid="station-undo"
-            aria-label={undoTip}
-            aria-disabled={!canUndo}
-            onClick={undo}
-            className={canUndo ? "text-foreground" : "text-muted-foreground/40 hover:bg-background"}
-          >
-            <Undo2 className="size-3.5" />
-          </Button>
-        </AppTooltip>
-        {save}
-        {vote.canVote && !vote.voted && !approved && !isSource ? (
-          <AppTooltip content={t("editor.station.approveTip", { line })}>
+          {isSource && !character ? null : (
+            <span data-testid="station-subline" className="truncate text-[11px] text-muted-foreground">
+              {character ? (
+                <>
+                  <span className="font-bold" style={{ color: vars["--tl-track-hue"] }}>
+                    {character}
+                  </span>
+                  {isSource ? null : " · "}
+                </>
+              ) : null}
+              {isSource ? null : (
+                <>
+                  {placedText}
+                  {" · "}
+                  <span
+                    data-testid="station-status"
+                    className={approved ? "font-semibold text-green-700 dark:text-green-400" : "font-semibold text-sky-700 dark:text-sky-400"}
+                  >
+                    {statusText}
+                  </span>
+                  {version > 1 ? ` · ${t("editor.station.version", { n: version })}` : null}
+                  {notSaved ? (
+                    <>
+                      {" · "}
+                      <span data-testid="station-not-saved" className="font-semibold text-amber-700 dark:text-amber-400">
+                        {t("editor.station.notSaved", { what: notSaved })}
+                      </span>
+                    </>
+                  ) : null}
+                </>
+              )}
+            </span>
+          )}
+        </span>
+        <span className="ms-auto inline-flex shrink-0 items-center gap-1">
+          <AppTooltip content={undoTip}>
             <Button
               type="button"
               variant="outline"
-              size="sm"
-              data-testid="station-approve"
-              onClick={() => void host.vote(cellId, audioId, true)}
-              className="text-[12.5px] font-medium"
+              size="icon-sm"
+              data-testid="station-undo"
+              aria-label={undoTip}
+              aria-disabled={!canUndo}
+              onClick={undo}
+              className={canUndo ? "text-foreground" : "text-muted-foreground/40 hover:bg-background"}
             >
-              <Check className="size-[13px]" />
-              {t("editor.station.approve")}
+              <Undo2 className="size-3.5" />
             </Button>
           </AppTooltip>
-        ) : null}
-      </span>
+          {save}
+          {vote.canVote && !vote.voted && !approved && !isSource ? (
+            <AppTooltip content={t("editor.station.approveTip", { line })}>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                data-testid="station-approve"
+                onClick={() => void host.vote(cellId, audioId, true)}
+                className="text-[12.5px] font-medium"
+              >
+                <Check className="size-[13px]" />
+                {t("editor.station.approve")}
+              </Button>
+            </AppTooltip>
+          ) : null}
+        </span>
+      </div>
+      {controlsInfo ? (
+        <InfoReveal open={infoOpen} id="station-controls-info" testId="station-controls-info">
+          <StationControlsHelp />
+        </InfoReveal>
+      ) : null}
     </div>
+  )
+}
+
+/** What the (i) opens: each control in one plain line, then the keys. */
+function StationControlsHelp() {
+  const t = useT()
+  // Full keys, so the word check finds every one.
+  const rows = [
+    [t("editor.station.helpSelectTerm"), t("editor.station.helpSelect")],
+    [t("editor.station.helpTrimTerm"), t("editor.station.helpTrim")],
+    [t("editor.station.helpEditTerm"), t("editor.station.helpEdit")],
+    [t("editor.station.helpVolumeTerm"), t("editor.station.helpVolume")],
+    [t("editor.station.helpFadesTerm"), t("editor.station.helpFades")],
+    [t("editor.station.helpSaveTerm"), t("editor.station.helpSave")],
+    [t("editor.station.helpKeysTerm"), t("editor.station.helpKeys")],
+  ]
+  return (
+    <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 pt-1.5 pb-0.5 text-[11.5px] leading-[1.45]">
+      {rows.map(([term, text]) => (
+        <div key={term} className="contents">
+          <dt className="font-semibold text-foreground">{term}</dt>
+          <dd className="m-0 text-muted-foreground">{text}</dd>
+        </div>
+      ))}
+    </dl>
   )
 }

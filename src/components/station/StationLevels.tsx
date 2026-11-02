@@ -82,7 +82,6 @@ export function StationLevels({ ed, lane, hover }: { ed: StationEditor; lane: HT
   const volT = `${lv.gainDb > 0 ? "+" : lv.gainDb < 0 ? "−" : ""}${Math.abs(lv.gainDb)} dB`
   const knob =
     "absolute top-0 z-[6] size-[11px] -translate-x-1/2 -translate-y-1/2 cursor-ew-resize touch-none rounded-full border-[1.5px] border-sky-700 bg-white p-0 shadow-sm transition-transform hover:scale-125 dark:border-sky-400 dark:bg-background"
-  const label = "pointer-events-none absolute top-[21px] z-[6] text-[10.5px] whitespace-nowrap text-sky-700 dark:text-sky-400"
   // Where each knob sits: on the fade's end, or just inside its corner.
   const fadeInLeft = lv.fadeIn > 0 ? pct(fadeInAt) : `calc(${pct(ed.trimA)} + ${KNOB_INSET_PX}px)`
   const fadeOutLeft = lv.fadeOut > 0 ? pct(fadeOutAt) : `calc(${pct(ed.trimB)} - ${KNOB_INSET_PX}px)`
@@ -133,43 +132,33 @@ export function StationLevels({ ed, lane, hover }: { ed: StationEditor; lane: HT
           +
         </button>
       </span>
-      {/* Item 21: the fade knobs, where each fade reaches full level (40b),
-          each with its length beside it. */}
+      {/* Item 21: the fade knobs, where each fade reaches full level (40b).
+          No words on the waveform: the Station's (i) explains them (Sam, Nov 2). */}
       {inView(fadeInAt) ? (
-        <>
-          <button
-            type="button"
-            data-testid="station-fade-in"
-            aria-label={fadeInT}
-            title={t("editor.station.fadeTip", { fade: fadeInT })}
-            onPointerDown={down("fadeIn")}
-            onPointerMove={move}
-            onPointerUp={up}
-            className={knob}
-            style={{ left: fadeInLeft }}
-          />
-          <span className={`${label} -translate-x-1/2`} style={{ left: `max(${fadeInLeft}, calc(${pct(ed.trimA)} + 40px))` }}>
-            {fadeInT}
-          </span>
-        </>
+        <button
+          type="button"
+          data-testid="station-fade-in"
+          aria-label={fadeInT}
+          title={t("editor.station.fadeTip", { fade: fadeInT })}
+          onPointerDown={down("fadeIn")}
+          onPointerMove={move}
+          onPointerUp={up}
+          className={knob}
+          style={{ left: fadeInLeft }}
+        />
       ) : null}
       {inView(fadeOutAt) ? (
-        <>
-          <button
-            type="button"
-            data-testid="station-fade-out"
-            aria-label={fadeOutT}
-            title={t("editor.station.fadeTip", { fade: fadeOutT })}
-            onPointerDown={down("fadeOut")}
-            onPointerMove={move}
-            onPointerUp={up}
-            className={knob}
-            style={{ left: fadeOutLeft }}
-          />
-          <span className={`${label} -translate-x-1/2`} style={{ left: `min(${fadeOutLeft}, calc(${pct(ed.trimB)} - 44px))` }}>
-            {fadeOutT}
-          </span>
-        </>
+        <button
+          type="button"
+          data-testid="station-fade-out"
+          aria-label={fadeOutT}
+          title={t("editor.station.fadeTip", { fade: fadeOutT })}
+          onPointerDown={down("fadeOut")}
+          onPointerMove={move}
+          onPointerUp={up}
+          className={knob}
+          style={{ left: fadeOutLeft }}
+        />
       ) : null}
     </>
   )

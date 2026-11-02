@@ -141,7 +141,6 @@ export function StationLane({ ed, editable, trackVars, generated, onDelete, onIn
         role="group"
         tabIndex={-1}
         aria-label={t("editor.station.laneTip")}
-        title={t("editor.station.laneTip")}
         data-testid="station-lane"
         onPointerDown={onLaneDown}
         onPointerMove={onMove}

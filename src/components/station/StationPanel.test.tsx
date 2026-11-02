@@ -1,7 +1,7 @@
 // AQU-2327: the Station's heading, its empty state, and its Undo, Save and Approve.
 import { useState } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { __resetStationTargetForTests, openInStation } from "@/lib/station/target"
 import { StationSave } from "./StationEdits"
@@ -122,6 +122,20 @@ describe("the Station", () => {
     expect(onSave).toHaveBeenCalledWith("all")
   })
 
+  it("an (i) beside the name opens how the controls work, in place, and closes it again (Nov 2)", () => {
+    const take = makeTake()
+    render(<StationHeader host={makeHost(take)} take={take} target={{ fileId: "f1", cellId: "c331", audioId: "t2.webm" }} controlsInfo />)
+    const info = screen.getByTestId("station-info")
+    const help = screen.getByTestId("station-controls-info")
+    expect(help.getAttribute("data-open")).toBe("false")
+    fireEvent.click(info)
+    expect(help.getAttribute("data-open")).toBe("true")
+    expect(help.textContent).toContain("Drag the round knob at a top corner inward")
+    expect(help.textContent).toContain("Space plays")
+    fireEvent.click(info)
+    expect(help.getAttribute("data-open")).toBe("false")
+  })
+
   it("opens on the take the store names, and shows its heading", () => {
     const take = makeTake()
     openInStation({ fileId: "f1", cellId: "c331", audioId: "t2.webm" })
@@ -133,12 +147,12 @@ describe("the Station", () => {
     const take = makeTake()
     openInStation({ fileId: "f1", cellId: "c331", audioId: "t2.webm" })
     render(<StationPanel host={makeHost(take)} visible />)
-    const hint = screen.getByText(/Drag across the waveform/)
+    const row = screen.getByTestId("station-status-row")
+    const hint = within(row).getByText(/Drag across the waveform/)
     expect(hint.className).toContain("opacity-100")
     fireEvent.pointerEnter(screen.getByTestId("station-lane"))
-    expect(screen.getByText(/Drag across the waveform/)).toBe(hint)
+    expect(within(row).getByText(/Drag across the waveform/)).toBe(hint)
     expect(hint.className).toContain("opacity-0")
-    expect(screen.getByTestId("station-status-row").contains(hint)).toBe(true)
   })
 
   it("opens the source recording to listen only, and says why (Q10)", () => {

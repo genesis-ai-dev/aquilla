@@ -61,14 +61,18 @@ describe("the stored choice", () => {
   })
 
   it("falls back to the default when storage cannot be read, and a pick still holds", () => {
-    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+    const getItem = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
       throw new Error("blocked")
     })
-    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new Error("blocked")
     })
     expect(readPlaybackSource("f1", YT)).toBe("video")
+    // AQU-2334: the blocked reads and writes must actually happen, or this
+    // passes without reaching the fallback.
+    expect(getItem).toHaveBeenCalled()
     setPlaybackSource("f1", "recording")
+    expect(setItem).toHaveBeenCalled()
     expect(readPlaybackSource("f1", YT)).toBe("recording")
   })
 })

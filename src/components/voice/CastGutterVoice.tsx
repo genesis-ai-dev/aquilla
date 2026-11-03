@@ -189,7 +189,7 @@ export function CastGutterVoice({ voice, explicit, castName, editable, voices, o
                 }}
                 className="mt-1 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-sm font-medium transition-colors hover:bg-accent/50"
               >
-                <span className="grid size-5 place-items-center rounded-full border border-dashed border-muted-foreground text-muted-foreground">
+                <span className="grid size-5 place-items-center rounded-md border border-dashed border-muted-foreground text-muted-foreground">
                   <Plus className="size-3" />
                 </span>
                 {t("audio.castGutter.addVoice")}

@@ -81,6 +81,12 @@ jobs:
     environment:
       name: production
     env:
+      # This job runs on a schedule, so GITHUB_REF_NAME is `dev` while the
+      # checkout below is the release branch the check job chose. The deploy
+      # guard, the build stamp and the Cloudflare version label read the
+      # deploy ref from here instead (scripts/verify-deploy-branch.sh,
+      # scripts/build-info.ts, scripts/cloudflare-version-deploy.mjs).
+      DEPLOY_REF_NAME: ${{ needs.check.outputs.branch }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: 6a80496d1e59948a9cbaa3c643ba81d7
       NEON_PG_HOST: ${{ secrets.NEON_PG_HOST }}

@@ -60,19 +60,17 @@ test("pointed term matches variant pointing and prefixes; exclusion sticks", asy
   // heading — the preset trigger is the section's stable landmark.
   const loadPreset = alice.getByRole("button", { name: "Load preset", exact: true })
   await expect(loadPreset).toBeVisible({ timeout: 15_000 })
-  await loadPreset.click()
-  await alice.getByRole("menuitem", { name: "Hebrew", exact: true }).click()
-  // The preset is loaded into the form, not yet persisted. Assert on the
-  // inseparable ב: the waw this journey actually needs appears in BOTH the
-  // prefix and suffix lists, so its chip is not a unique locator.
-  await expect(alice.getByRole("button", { name: "Remove ב", exact: true })).toBeVisible()
-
+  // AQU-2262: no Save bar; loading the preset saves it.
   const settingsSaved = alice.waitForResponse(
     (response) =>
       response.request().method() === "PATCH"
       && /\/api\/v2\/projects\/[^/]+\/settings$/.test(new URL(response.url()).pathname),
   )
-  await alice.getByRole("button", { name: "Save changes", exact: true }).click()
+  await loadPreset.click()
+  await alice.getByRole("menuitem", { name: "Hebrew", exact: true }).click()
+  // Assert on the inseparable ב: the waw this journey actually needs appears
+  // in BOTH the prefix and suffix lists, so its chip is not a unique locator.
+  await expect(alice.getByRole("button", { name: "Remove ב", exact: true })).toBeVisible()
   expect(
     (await settingsSaved).ok(),
     "project shared-settings PATCH (termMatching) failed",

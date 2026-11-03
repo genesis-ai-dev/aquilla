@@ -4,6 +4,7 @@
 // curly quotes rewrite what translators type, so nobody gets them without
 // asking; a stored `true` reads back ON; and flipping the switch patches
 // `smartQuotes` and nothing else, so saving it cannot disturb another setting.
+// The switch saves as it flips (AQU-2262).
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { screen } from "@testing-library/react"
@@ -166,8 +167,8 @@ describe("ProjectSettings — smart quotes", () => {
     const user = userEvent.setup()
     renderSettings(PANE)
 
+    // The switch saves the moment it flips; there is no Save bar (AQU-2262).
     await user.click(screen.getByRole("switch", { name: "Smart quotes" }))
-    await user.click(screen.getByRole("button", { name: /save changes/i }))
 
     expect(patchSpy).toHaveBeenCalledTimes(1)
     const sent = patchSpy.mock.calls[0][0] as Record<string, unknown>

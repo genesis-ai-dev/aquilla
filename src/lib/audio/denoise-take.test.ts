@@ -64,6 +64,25 @@ beforeEach(() => {
   )
 })
 
+describe("Remove noise from the Station (AQU-2327, item 30)", () => {
+  it("records the change and the line on the cleaned take, for its History row", async () => {
+    await denoiseTake({
+      projectId: "p1", fileId: "f1", cellId: "c1",
+      sourceAudioId: "audio-c1-1.wav", sourceUrl: "frontier-audio://audio-c1-1.wav",
+      author: "sam", session: { jwt: "jwt" } as FrontierSession,
+      versionChanges: { kinds: ["noise"], usedOn: ["c1"] },
+    })
+    expect(vi.mocked(emitCellAudioAttach)).toHaveBeenCalledWith(
+      expect.objectContaining({ versionChanges: { kinds: ["noise"], usedOn: ["c1"] } }),
+    )
+  })
+
+  it("records nothing of the kind when run from anywhere else", async () => {
+    await run("wav")
+    expect(vi.mocked(emitCellAudioAttach).mock.calls[0][0]).not.toHaveProperty("versionChanges")
+  })
+})
+
 describe("the format of a cleaned take (AQU-1575)", () => {
   it("keeps a WAV take a WAV", async () => {
     const result = await run("wav")

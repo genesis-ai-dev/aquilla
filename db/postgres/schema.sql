@@ -358,6 +358,11 @@ CREATE TABLE project_settings (
     wp_validation_named_users_audio JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'validationNamedUsersAudio') STORED,
     wp_allow_self_validation_audio JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'allowSelfValidationAudio') STORED,
     wp_harmonize_min_role JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'harmonize_min_role') STORED,
+    -- AQU-2305 (0192): this project's own import floor, stricter-only over its
+    -- org's `importMinRole` (AQU-2304). Read by the `file.create` perimeter on
+    -- every source import, so it joins this projection rather than being the
+    -- one write-path read that reopens the blob (db/shared/import-floor.ts).
+    wp_import_min_role JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'importMinRole') STORED,
     -- AQU-1771 (0174): this project's own, stricter-only floors for who sees
     -- its member list and each member's progress — read on every roster and
     -- named-progress check (members, mentions, assignments, activity), so they
@@ -703,7 +708,7 @@ CREATE TABLE IF NOT EXISTS edit_histories (
     PRIMARY KEY (project_id, user_id)
 );
 
--- Migration 0192: admin-defined email routes for "Report a problem". An org
+-- Migration 0195: admin-defined email routes for "Report a problem". An org
 -- (optionally narrowed to some of its projects) and the inboxes that get mail
 -- when a matching report arrives. project_ids and emails are JSON arrays in
 -- TEXT; NULL or '[]' project_ids means the whole org.
@@ -1116,6 +1121,12 @@ CREATE TABLE cell_audio (
     -- limits. NULL = no place of its own there: that timing reads
     -- target_offset_ms, as every take before 0189 does.
     recordings_offset_ms BIGINT,
+    -- AQU-2327 (0193): the clip's volume (dB) and fades (ms), written only by
+    -- cell.audio.gain. Like the trim they never change the recording; NULL =
+    -- as recorded, no fade.
+    gain_db            REAL,
+    fade_in_ms         BIGINT,
+    fade_out_ms        BIGINT,
     PRIMARY KEY (project_id, file_id, cell_id, audio_id)
 );
 

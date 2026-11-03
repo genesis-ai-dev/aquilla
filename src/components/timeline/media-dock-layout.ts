@@ -15,13 +15,17 @@
 // just those. Anything else that unfolds a region ends full screen and drops
 // the note.
 
-export type DockPanel = "film" | "text"
+// The Station (AQU-2327) is a tab beside Lines (the text): Sam, Oct 28.
+export type DockPanel = "film" | "text" | "station"
 export type DockArea = "ll" | "lr"
 export type DockRegion = "tl" | DockArea
 
 export const DOCK_AREAS: readonly DockArea[] = ["ll", "lr"]
 export const DOCK_REGIONS: readonly DockRegion[] = ["tl", "ll", "lr"]
-export const DOCK_PANELS: readonly DockPanel[] = ["film", "text"]
+export const DOCK_PANELS: readonly DockPanel[] = ["film", "text", "station"]
+
+/** The Station's narrowest width (AQU-2327, spec item 42). */
+export const STATION_MIN_WIDTH = 480
 
 /** Dispatched on a panel's host element just before the dock moves it to
  *  another area, for anything inside that cannot survive a DOM move (an
@@ -45,10 +49,11 @@ export interface DockLayout {
 // (video-pane-layout.ts), so nobody's remembered sizes are lost to this. With
 // neither, a file starts from its kind's sizes (media-layout-start.ts).
 
-/** Every file starts here: the film bottom left, the text bottom right. */
+/** Every file starts here: the film bottom left, the text bottom right, and
+ *  the Station a tab behind the text (AQU-2327). */
 export function startDockLayout(): DockLayout {
   return {
-    areas: { ll: ["film"], lr: ["text"] },
+    areas: { ll: ["film"], lr: ["text", "station"] },
     active: { ll: "film", lr: "text" },
     folded: { tl: false, ll: false, lr: false },
     fullUndo: [],
@@ -56,9 +61,11 @@ export function startDockLayout(): DockLayout {
 }
 
 /** Which panels this file has right now. Text always; the film only when one
- *  is linked and shown (`shouldShowVideoPane`). */
+ *  is linked and shown (`shouldShowVideoPane`); the Station unless a caller
+ *  says otherwise (Q1 pick: always there, a quiet tab until chosen). */
 export interface DockPresence {
   film: boolean
+  station?: boolean
 }
 
 export interface DockView {
@@ -84,7 +91,7 @@ export interface DockView {
 }
 
 export function dockView(layout: DockLayout, presence: DockPresence): DockView {
-  const present = DOCK_PANELS.filter((p) => p === "text" || presence.film)
+  const present = DOCK_PANELS.filter((p) => (p === "film" ? presence.film : p === "station" ? presence.station !== false : true))
   const list = (area: DockArea) => layout.areas[area].filter((p) => present.includes(p))
   const areaOf = (panel: DockPanel) => DOCK_AREAS.find((a) => layout.areas[a].includes(panel)) ?? null
   const activeOf = (area: DockArea) => {
@@ -233,7 +240,7 @@ export function undoTargets(layout: DockLayout): Array<DockRegion | "left"> {
 const KEY_PREFIX = "aquilla:mediaDock:"
 
 function isPanel(x: unknown): x is DockPanel {
-  return x === "film" || x === "text"
+  return x === "film" || x === "text" || x === "station"
 }
 
 /** The stored arrangement, or null for anything missing or malformed — the
@@ -252,7 +259,11 @@ export function readStoredDock(fileId: string | null | undefined): DockLayout | 
     // Each panel in exactly one area; a panel lost by a bad write goes home.
     areas.lr = areas.lr.filter((p) => !areas.ll.includes(p))
     for (const p of DOCK_PANELS) {
-      if (!areas.ll.includes(p) && !areas.lr.includes(p)) areas[p === "film" ? "ll" : "lr"].push(p)
+      if (areas.ll.includes(p) || areas.lr.includes(p)) continue
+      // The Station's home is wherever the text is (an arrangement saved
+      // before it existed gains it there, behind the text).
+      const home: DockArea = p === "film" ? "ll" : p === "station" ? (areas.ll.includes("text") ? "ll" : "lr") : "lr"
+      areas[home].push(p)
     }
     const active = {
       ll: isPanel(o.active?.ll) ? o.active!.ll : (areas.ll[0] ?? null),

@@ -16,7 +16,7 @@
 //    the library through `getVoiceLibrary`/`resolveVoice`/`findVoice`.
 //  - `stampNewVoiceLanes` is the WRITE rule, applied once in `useProjectTts`'s
 //    `saveTts`. Every mint site writes the FULL next library through there, so
-//    stamping in that one place covers New voice / Clone / voice design, an
+//    stamping in that one place covers New voice / training / voice design, an
 //    import with speaker labels, diarization and "Adopt voices as cast" — and
 //    keeps each of those sites free of lane plumbing.
 //

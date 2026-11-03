@@ -130,7 +130,7 @@ const UNCOVERED: Record<string, string> = {
   // Decision 11 (0191): each person's undo history for a project, read and
   // written only by auth-worker's /edit-history route for the caller's own row.
   edit_histories: "never granted to app_runtime",
-  // 0192: admin-defined email routes for feedback; admin console and feedback route only.
+  // 0195: admin-defined email routes for feedback; admin console and feedback route only.
   feedback_routes: "never granted to app_runtime",
   style_rules: "never granted to app_runtime",
   workspace_usage_requests: "never granted to app_runtime",

@@ -4,8 +4,9 @@
 //
 // AQU-1210 (Sam, 2026-09-25): this used to be a trace scrolling past. It is
 // now the same rectangle every saved take is drawn as — the timeline chip's
-// body, outline and 40% ink, in the colour of the track being recorded onto
-// (Sam, 2026-09-26) — filling from the left as you speak,
+// body, frame and waveform ink (AQU-2235: the take look of Oct 25), in the
+// colour of the track being recorded onto (Sam, 2026-09-26) — filling from
+// the left as you speak,
 // with a red line at the growing edge. During the countdown the mic is hot but
 // no take has begun, so the rectangle is an empty body. The span matches the
 // target bar below it, and widens once the take runs past it. Its shape is
@@ -29,7 +30,7 @@ import { cn } from "@/lib/utils"
 import { WAV_SAMPLE_RATE } from "@/lib/audio/recording-limits"
 import { VERTICAL_INSET_PX } from "@/lib/audio/waveform-shape"
 import { columnPeaks, LIVE_PEAK_FLOOR, liveSpanSec } from "@/lib/audio/live-take-shape"
-import { NEUTRAL_TRACK_VARS, trackChipClass, trackChipPlayingClass } from "@/lib/timeline/track-colors"
+import { NEUTRAL_TRACK_VARS, TRACK_CHIP_CLASS, TRACK_CHIP_PLAYING_CLASS, WAVE_LOOK } from "@/lib/timeline/track-colors"
 
 interface Props {
   stream: MediaStream | null
@@ -199,7 +200,9 @@ export function AudioWaveform({
       const usable = Math.max(1, h - VERTICAL_INSET_PX)
       const mid = h / 2
       ctx.clearRect(0, 0, w, h)
-      ctx.globalAlpha = 0.4
+      // AQU-2235: the take look's waveform — the track's deep shade at 90% —
+      // so Stop hands over to a preview drawn the same way.
+      ctx.globalAlpha = WAVE_LOOK.wave
       ctx.fillStyle = ink
       ctx.beginPath()
       ctx.moveTo(0, mid)
@@ -237,16 +240,18 @@ export function AudioWaveform({
       className={cn(
         // The chip's body in its track's colour, with its playing split doing the growing:
         // the recorded part at the body's own strength, the rest not yet.
-        "relative overflow-hidden rounded-[6px] border",
-        trackChipClass("take"),
-        trackChipPlayingClass("take"),
+        "relative overflow-hidden border",
+        height < 24 ? "rounded-[4px]" : "rounded-[6px]",
+        TRACK_CHIP_CLASS,
+        TRACK_CHIP_PLAYING_CLASS,
         className,
       )}
       style={{ ...trackVars, height, "--tl-play-x": "0%" } as CSSProperties}
     >
       <canvas
         ref={canvasRef}
-        className="absolute inset-0 block h-full w-full"
+        // Its ink is read off its text colour: the track's waveform colour.
+        className="absolute inset-0 block h-full w-full text-[color:var(--tl-track-wave)]"
         data-tone={tone}
         aria-hidden="true"
       />

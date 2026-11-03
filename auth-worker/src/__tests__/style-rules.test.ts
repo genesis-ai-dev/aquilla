@@ -10,6 +10,7 @@ import { describe, it, expect } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 import { ROLE } from "../types"
+import { listRulesForProject } from "../../../db/shared/style-rules"
 
 const PROJECT = "proj-style"
 const ORG = 7
@@ -643,5 +644,150 @@ describe("style-rule validation", () => {
       })
       expect(ok.status).toBe(201)
     }
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────
+// A rule one lane owns (AQU-2348)
+// ──────────────────────────────────────────────────────────────────────────
+//
+// A project's style rules are the default for every target lane; a rule may
+// instead be written for ONE lane, and is then compiled only for that lane's
+// cells. The management list keeps showing every rule — a maintainer must be
+// able to see what the other lane is held to — so the narrowing lives in
+// `listRulesForProject`'s lane option, which the prompt builder and the health
+// checks use, and in the client's `laneScopedRows`.
+
+const LANE_ES = "0f0f0f0f"
+const LANE_FR = "a1b2c3d4"
+const LANE_ARCHIVED = "beefbeef"
+
+async function seedStyleLanes(): Promise<void> {
+  await env.AQUILLA_PG.prepare(
+    `INSERT INTO lanes (id, project_id, role, name, legacy_tag, position) VALUES
+       (?, ?, 'target', 'Spanish', 'es', 1),
+       (?, ?, 'target', 'French', 'fr', 2),
+       ('5ce00000', ?, 'source', 'Greek', '', 0)`,
+  )
+    .bind(LANE_ES, PROJECT, LANE_FR, PROJECT, PROJECT)
+    .run()
+}
+
+describe("style rules a lane owns (AQU-2348)", () => {
+  it("stores the owning lane and reports it on the wire", async () => {
+    const leadJwt = await leadSetup()
+    await seedStyleLanes()
+    const { rule, res } = await createRuleVia(leadJwt, { laneId: LANE_ES })
+    expect(res.status).toBe(201)
+    expect((rule as WireRule & { laneId: string | null }).laneId).toBe(LANE_ES)
+  })
+
+  it("compiles a lane's rule only for that lane, and the project's for every lane", async () => {
+    const leadJwt = await leadSetup()
+    await seedStyleLanes()
+    const { rule: projectRule } = await createRuleVia(leadJwt, {
+      instruction: "Keep sentences short.",
+    })
+    const { rule: esRule } = await createRuleVia(leadJwt, {
+      instruction: "Use the formal register.",
+      laneId: LANE_ES,
+    })
+
+    const inEs = await listRulesForProject(env.AQUILLA_PG, PROJECT, undefined, { laneId: LANE_ES })
+    expect(inEs.rules.map((r) => r.id).sort()).toEqual([projectRule.id, esRule.id].sort())
+    const inFr = await listRulesForProject(env.AQUILLA_PG, PROJECT, undefined, { laneId: LANE_FR })
+    expect(inFr.rules.map((r) => r.id)).toEqual([projectRule.id])
+
+    // No lane resolved → the project's rules only, which is every rule a
+    // project had before a lane could own one.
+    const noLane = await listRulesForProject(env.AQUILLA_PG, PROJECT, undefined, {})
+    expect(noLane.rules.map((r) => r.id)).toEqual([projectRule.id])
+
+    // …while the management list (no lane option) still shows both.
+    const listed = await listRulesForProject(env.AQUILLA_PG, PROJECT)
+    expect(listed.rules).toHaveLength(2)
+  })
+
+  it("restricts the applicability rows to the rules the lane filter kept", async () => {
+    const leadJwt = await leadSetup()
+    await seedStyleLanes()
+    const { rule: esRule } = await createRuleVia(leadJwt, {
+      laneId: LANE_ES,
+      applicability: [{ targetType: "book", targetId: "PSA", relationship: "applies", assignedBy: "human" }],
+    })
+    const inFr = await listRulesForProject(env.AQUILLA_PG, PROJECT, undefined, { laneId: LANE_FR })
+    expect(inFr.rules).toHaveLength(0)
+    expect(inFr.applicability.filter((r) => r.ruleId === esRule.id)).toHaveLength(0)
+    const inEs = await listRulesForProject(env.AQUILLA_PG, PROJECT, undefined, { laneId: LANE_ES })
+    expect(inEs.applicability.filter((r) => r.ruleId === esRule.id)).toHaveLength(1)
+  })
+
+  it("answers identically in every lane for a project with no lane-owned rules", async () => {
+    const leadJwt = await leadSetup()
+    await seedStyleLanes()
+    await createRuleVia(leadJwt, { instruction: "Keep sentences short." })
+    const all = (await listRulesForProject(env.AQUILLA_PG, PROJECT)).rules.map((r) => r.id)
+    for (const laneId of [LANE_ES, LANE_FR, undefined]) {
+      const forLane = await listRulesForProject(env.AQUILLA_PG, PROJECT, undefined, { laneId })
+      expect(forLane.rules.map((r) => r.id)).toEqual(all)
+    }
+  })
+
+  it("refuses a laneId that is not a live target lane of this project, naming the rule", async () => {
+    const leadJwt = await leadSetup()
+    await seedStyleLanes()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, legacy_tag, position, archived_at)
+         VALUES (?, ?, 'target', 'Oromo', 'om', 3, now())`,
+    )
+      .bind(LANE_ARCHIVED, PROJECT)
+      .run()
+
+    // A language, not a lane id.
+    const lang = await req("POST", `${PROJECT}/style-rules`, leadJwt, {
+      instruction: "x", category: "style", scope: "global", laneId: "es",
+    })
+    expect(lang.status).toBe(400)
+    expect(JSON.stringify(await lang.json())).toMatch(/not a lane id/)
+
+    // The source lane is not a target lane.
+    const source = await req("POST", `${PROJECT}/style-rules`, leadJwt, {
+      instruction: "x", category: "style", scope: "global", laneId: "5ce00000",
+    })
+    expect(source.status).toBe(400)
+    expect(JSON.stringify(await source.json())).toMatch(/not a target lane/)
+
+    // An archived lane accepts no new rows (its existing ones are untouched).
+    const archived = await req("POST", `${PROJECT}/style-rules`, leadJwt, {
+      instruction: "x", category: "style", scope: "global", laneId: LANE_ARCHIVED,
+    })
+    expect(archived.status).toBe(400)
+    expect(JSON.stringify(await archived.json())).toMatch(/archived/)
+
+    // Nothing was staged by any of the three.
+    expect((await listRulesForProject(env.AQUILLA_PG, PROJECT)).rules).toHaveLength(0)
+  })
+
+  it("archiving a lane keeps its rules, and restoring brings them back", async () => {
+    const leadJwt = await leadSetup()
+    await seedStyleLanes()
+    const { rule: esRule } = await createRuleVia(leadJwt, { laneId: LANE_ES })
+
+    await env.AQUILLA_PG.prepare("UPDATE lanes SET archived_at = now() WHERE project_id = ? AND id = ?")
+      .bind(PROJECT, LANE_ES)
+      .run()
+    // The row is untouched by archiving — only new writes are refused.
+    const whileArchived = await listRulesForProject(env.AQUILLA_PG, PROJECT, undefined, {
+      laneId: LANE_ES,
+    })
+    expect(whileArchived.rules.map((r) => r.id)).toEqual([esRule.id])
+
+    await env.AQUILLA_PG.prepare("UPDATE lanes SET archived_at = NULL WHERE project_id = ? AND id = ?")
+      .bind(PROJECT, LANE_ES)
+      .run()
+    const restored = await createRuleVia(leadJwt, { laneId: LANE_ES, instruction: "Another." })
+    expect(restored.res.status).toBe(201)
+    const after = await listRulesForProject(env.AQUILLA_PG, PROJECT, undefined, { laneId: LANE_ES })
+    expect(after.rules).toHaveLength(2)
   })
 })

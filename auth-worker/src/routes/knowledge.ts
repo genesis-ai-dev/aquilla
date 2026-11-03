@@ -17,6 +17,7 @@ import { indexKnowledgeDoc, KB_INDEX_BUDGET_MS } from "../lib/knowledge/index-do
 import { kickKnowledgeIndexDriver } from "../lib/knowledge/index-driver"
 import { propagateKnowledgeDocs } from "../../../db/shared/inherited-settings"
 import { makePostgres, type AquillaDb } from "../../../db/shim/postgres"
+import { projectLaneOwnerProblem } from "../lib/lane-owned-row"
 import {
   createDoc,
   listProjectDocs,
@@ -299,6 +300,9 @@ export async function handleUpload(
   c: Context<AuthHonoEnv>,
   scope: KnowledgeScopeRef,
   createdBy: string,
+  /** AQU-2348: the one target lane this document belongs to, or null/omitted
+   *  for a document the whole project reads. Validated by the caller. */
+  laneId?: string | null,
 ): Promise<Response> {
   const bucket = c.env.SNAPSHOTS
   if (!bucket) {
@@ -381,6 +385,7 @@ export async function handleUpload(
       r2Key,
       extractedText: extracted.text,
       createdBy,
+      ...(laneId ? { laneId } : {}),
     })
   } catch (err) {
     // Roll back the orphaned R2 object so a failed insert leaves no dangling blob.
@@ -548,7 +553,15 @@ projectKnowledge.get("/:projectId/knowledge/search", authMiddleware, async (c) =
   if (!gate.ok) return gate.res
   const q = c.req.query("q") ?? ""
   const limit = Math.min(Number.parseInt(c.req.query("limit") ?? "5", 10) || 5, 20)
-  return c.json({ snippets: await searchKnowledge(c.env.AQUILLA_PG, projectId, q, limit) })
+  // AQU-2348: retrieval is lane-scoped. `?laneId=` asks for the set in force
+  // in that lane — the project's documents plus that lane's own. Omitted keeps
+  // ONLY the project's: a lane's own document must not reach a retrieval that
+  // did not name the lane, and every project predating the column has nothing
+  // but project-wide documents, so the answer is unchanged there.
+  const laneId = c.req.query("laneId") || undefined
+  return c.json({
+    snippets: await searchKnowledge(c.env.AQUILLA_PG, projectId, q, limit, { laneId }),
+  })
 })
 
 projectKnowledge.get("/:projectId/knowledge/:docId", authMiddleware, async (c) => {
@@ -600,12 +613,21 @@ projectKnowledge.get("/:projectId/knowledge/:docId/original", authMiddleware, as
   return handleOriginal(c, doc)
 })
 
+// `?laneId=` (AQU-2348) gives the document to ONE target lane: it is then
+// retrieved only for that lane's cells. Omitted = the project's own document,
+// read in every lane, which is what every upload was before this parameter.
 projectKnowledge.post("/:projectId/knowledge", authMiddleware, async (c) => {
   const projectId = c.req.param("projectId") ?? ""
   const gate = await requireRole(c, projectId, ROLE.PROJECT_LEAD)
   if (!gate.ok) return gate.res
+  const laneId = c.req.query("laneId") ?? null
+  const laneProblem = await projectLaneOwnerProblem(c.env.AQUILLA_PG, projectId, laneId)
+  if (laneProblem) {
+    const { body, status } = errorJson("validation_failed", laneProblem, 400)
+    return c.json(body, status)
+  }
   const user = c.get("user")
-  return handleUpload(c, { projectId }, user.username ?? String(user.id))
+  return handleUpload(c, { projectId }, user.username ?? String(user.id), laneId)
 })
 
 projectKnowledge.delete("/:projectId/knowledge/:docId", authMiddleware, async (c) => {

@@ -1423,6 +1423,32 @@ own copy of the two prose sections and that copy replaces the project's for that
     design; `plan_stale` means re-read and retry, as it always did. The approval page names
     the lane (`translationBriefByLane.<laneId>.<section>`), so a human approving a lane write
     can see it is not the project's brief.
+- **Rows a lane owns: knowledge documents and style rules.** The prose sections above are
+  values a lane *overrides*; a document and a rule are ROWS, so a lane does not override them
+  — it ADDS one. `knowledge_docs.lane_id` and `style_rules.lane_id` (migration 0192, nullable,
+  nothing to backfill) carry the owning lane's `lanes.id`; `NULL` is the project's own row,
+  in force in every lane, which is what every row written before the column was.
+  - **Retrieval is the project's rows plus this lane's, never another lane's.** One rule,
+    stated once in `db/shared/lane-memory.ts` as both the SQL filter (`laneRowFilterSql`) and
+    the in-memory predicate (`laneScopedRows`), so what the database hands the health checks
+    is what the prompt builder compiles.
+  - `GET .../style-rules` rows now carry `laneId` (`null` = a project rule). The list itself
+    is unnarrowed on purpose — it is a management view, and a maintainer must be able to see
+    what the other lane is held to. `prompt-preview` IS narrowed: a rule written for another
+    lane never appears in this lane's preview or in the prompt the copilot sends.
+  - An **org-shared** row can never carry a lane: lane ids are project-local, so a shared row
+    keyed by one project's lane would name a lane the next project does not have.
+  - Writing one: `POST /api/v2/projects/:projectId/style-rules` and the knowledge upload
+    `POST /api/v2/projects/:projectId/knowledge?laneId=<lanes.id>` take the lane and refuse a
+    language, a legacy tag, a source lane and an archived lane with `validation_failed`,
+    exactly as `SetBrief` does. Nothing is written when they refuse.
+  - **Archiving a lane keeps its memory.** `archived_at` moves and nothing else: the lane's
+    settings keys and its rows stay exactly as they were, so restoring the lane brings its
+    brief, instructions, documents and rules back. A closed lane simply accepts no new ones.
+- **Autopilot and the server-side draft resolve the brief per lane too** — the contextual run
+  (`loadProjectContext`), `/api/v1/ai/agent/run` and the internal `DraftCells` endpoint all
+  read through the same `readBriefForLane`, so a run cannot be grounded in a brief the prompt
+  preview says it would not use.
 
 ## Status addendum (2026-10-27, AQU-2195 — style rules: list and review)
 

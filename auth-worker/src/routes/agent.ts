@@ -48,6 +48,7 @@ import { buildMemoryContext, type MemoryContext } from "../../../db/shared/agent
 import { callerMayReadLane } from "../../../db/shared/lane-visibility"
 import { resolveLaneIdOrTag } from "../../../db/shared/lane-ref"
 import { languageOfTargetLane } from "../../../db/shared/lane-language"
+import { readBriefForLane } from "../../../db/shared/brief"
 import { readDraftingSettings } from "../../../db/shared/drafting-settings"
 import { resolveAnswerLanguage } from "../lib/agent/answer-language"
 import { enforceRateLimit, userRateLimitIdentifier } from "../../../db/shared/rate-limit"
@@ -839,12 +840,12 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
       if (row) focusedFile = { name: row.name, kind: row.kind ?? undefined }
     }
     const settings = await env.AQUILLA_PG.prepare(
-      `SELECT settings::jsonb -> 'translationBrief' ->> 'l1Summary' AS brief_summary,
+      `SELECT settings AS raw,
               settings::jsonb -> 'draftingSettings' AS drafting_settings
        FROM project_settings WHERE project_id = ?`,
     )
       .bind(body.projectId)
-      .first<{ brief_summary: string | null; drafting_settings: unknown }>()
+      .first<{ raw: unknown; drafting_settings: unknown }>()
     if (settings) {
       const lanes = await loadLaneRows(env.AQUILLA_PG, body.projectId)
       languages = languagesForLanes(lanes, body.context?.lane ?? "")
@@ -852,7 +853,21 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
         ? await languageOfTargetLane(env.AQUILLA_PG, body.projectId, resolvedLaneId)
         : null
       if (fromLane) languages = { ...languages, targetLanguage: fromLane }
-      briefSummary = settings.brief_summary ?? undefined
+      // AQU-2348: the brief the run is grounded in is the one in force for the
+      // lane it is working in — the lane's own when it has one, the project's
+      // otherwise (which is every lane of an uncustomized project).
+      const rawSettings =
+        typeof settings.raw === "string"
+          ? (() => { try { return JSON.parse(settings.raw as string) as unknown } catch { return null } })()
+          : settings.raw
+      const parsedSettings =
+        rawSettings && typeof rawSettings === "object" && !Array.isArray(rawSettings)
+          ? (rawSettings as Record<string, unknown>)
+          : null
+      briefSummary = parsedSettings
+        ? (readBriefForLane(parsedSettings, resolvedLaneId || undefined).brief?.l1Summary ??
+          undefined)
+        : undefined
       const rawDrafting = settings.drafting_settings
       const drafting = typeof rawDrafting === "string" ? (() => { try { return JSON.parse(rawDrafting) as unknown } catch { return null } })() : rawDrafting
       teamLanguage = readDraftingSettings(drafting)?.main_chat_language

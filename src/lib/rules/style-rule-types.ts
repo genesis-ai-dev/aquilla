@@ -50,6 +50,15 @@ export interface StyleRule {
   /** Exactly one of orgId/projectId is set (org XOR project scope). */
   orgId: number | null
   projectId: string | null
+  /**
+   * AQU-2348: the one target lane this rule was written for — the lane's
+   * opaque `lanes.id` — or null for a rule the whole project is held to.
+   * Optional on the wire so a fixture or an older response without the field
+   * reads as project-wide, which is what every rule was before a lane could
+   * own one. Filter with `laneScopedRows` (db/shared/lane-memory.ts) before
+   * compiling: a lane's rule must not lint or steer another lane's cells.
+   */
+  laneId?: string | null
   /** Normalized imperative rule text — what prompt injection renders. */
   instruction: string
   category: StyleRuleCategory
@@ -143,6 +152,9 @@ export interface UpsertApplicabilityInput {
  * any initial `applicability` rows atomically with the rule.
  */
 export interface CreateStyleRuleInput {
+  /** AQU-2348: write the rule for ONE target lane (its `lanes.id`). Omitted =
+   *  a project rule, in force in every lane. */
+  laneId?: string | null
   instruction: string
   category: StyleRuleCategory
   scope: StyleRuleScope

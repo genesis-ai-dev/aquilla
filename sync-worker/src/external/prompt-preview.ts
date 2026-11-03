@@ -301,6 +301,13 @@ export interface PromptPreviewBody {
  * the applicability graph exactly as the editor does. Only `approved` and
  * `enabled` rules participate (resolveEffectiveRules), so proposed, rejected
  * and archived rules never reach the prompt.
+ *
+ * AQU-2348: scoped to `laneId` first — the project's rules plus the ones
+ * written for THIS lane. A rule written for another lane is not guidance for
+ * this cell, and a project with no lane-owned rules (every project before this
+ * column) gets exactly the list it got before. The lane narrows *for whom* the
+ * rule was written; the applicability graph then answers *where in the text*
+ * it bites.
  */
 async function styleInstructionsFor(
   db: AquillaDb,
@@ -310,9 +317,12 @@ async function styleInstructionsFor(
     cellId: string
     canonicalRef: string | null
     settings: Record<string, unknown>
+    laneId: string | undefined
   },
 ): Promise<string[]> {
-  const { rules, applicability } = await listRulesForProject(db, args.projectId)
+  const { rules, applicability } = await listRulesForProject(db, args.projectId, undefined, {
+    laneId: args.laneId,
+  })
   if (rules.length === 0) return []
 
   const file = await db
@@ -626,6 +636,7 @@ export async function buildPromptPreview(
     cellId,
     canonicalRef: cell.canonical_ref,
     settings,
+    laneId,
   })
 
   const messages = buildPrompt({

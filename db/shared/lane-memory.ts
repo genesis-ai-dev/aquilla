@@ -228,3 +228,85 @@ export function translationBriefByLaneProblem(value: unknown): string | null {
   }
   return null
 }
+
+// ── lane-scoped ROWS (knowledge documents, style rules) ─────────────────────
+//
+// The settings sections above are VALUES a lane overrides. Knowledge documents
+// and style rules are ROWS, so a lane does not override them — it ADDS to
+// them: a row either belongs to the project (`lane_id IS NULL`) and is in
+// force for every lane, or belongs to ONE lane and is in force only there.
+// Union, for the same reason the authored entries union: dropping the
+// project's reference documents the moment a lane gains its own would make
+// adding one lane's glossary silently un-ground every other section.
+//
+// One rule, two forms — the SQL a retrieval query filters with and the
+// predicate an in-memory list filters with — so the DB and the client cannot
+// answer "is this row in force here?" differently.
+
+/** A stored row that may belong to one lane. `null`/absent = project-wide. */
+export interface LaneOwnedRow {
+  laneId?: string | null
+}
+
+/** Is `rowLaneId` in force in `laneId`? A project-wide row always is. */
+export function laneRowApplies(
+  rowLaneId: string | null | undefined,
+  laneId: string | undefined,
+): boolean {
+  if (rowLaneId == null || rowLaneId === '') return true
+  return laneId !== undefined && rowLaneId === laneId
+}
+
+/**
+ * The rows in force in `laneId`: the project's plus that lane's own, in the
+ * order given. Another lane's rows never appear.
+ *
+ * `laneId === undefined` — no lane resolved, or a management surface asking
+ * for the project-wide set — keeps only the project's rows, which is every row
+ * a project had before lanes could own one.
+ */
+export function laneScopedRows<Row extends LaneOwnedRow>(
+  rows: readonly Row[],
+  laneId: string | undefined,
+): Row[] {
+  return rows.filter((row) => laneRowApplies(row.laneId, laneId))
+}
+
+/**
+ * The same rule as SQL, for a retrieval query: a fragment to AND into a WHERE
+ * clause plus the binds it consumes, in order.
+ *
+ * The empty string is treated as "project-wide" on the way out as well, so a
+ * row written with `''` — which no writer should produce, but a hand-run SQL
+ * fix might — reads as the project's rather than as a lane nobody can name.
+ */
+export function laneRowFilterSql(
+  column: string,
+  laneId: string | undefined,
+): { sql: string; binds: string[] } {
+  const projectWide = `(${column} IS NULL OR ${column} = '')`
+  if (laneId === undefined) return { sql: projectWide, binds: [] }
+  return { sql: `(${projectWide} OR ${column} = ?)`, binds: [laneId] }
+}
+
+/**
+ * The lane a row may be written with, or a problem naming the rule.
+ *
+ * Shared by every writer that accepts a `laneId` so one message describes the
+ * key: an org-owned row can never carry a lane (lane ids are project-local, so
+ * a shared row keyed by one project's lane would be unreadable in the next),
+ * and the key is the opaque 8-hex id, never a language or a legacy tag.
+ */
+export function laneOwnedRowProblem(
+  laneId: string | null | undefined,
+  opts: { orgOwned: boolean },
+): string | null {
+  if (laneId == null || laneId === '') return null
+  if (opts.orgOwned) {
+    return (
+      'laneId cannot be set on an organization-wide row: lane ids belong to one project, so a ' +
+      'shared row keyed by a lane would name a lane the next project does not have'
+    )
+  }
+  return laneKeyProblem(laneId, 'laneId')
+}

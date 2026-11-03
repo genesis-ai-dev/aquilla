@@ -15,6 +15,7 @@
 // from either a route, the harness, or sync-worker's external reads — the
 // same handle each inject as `env.AQUILLA_PG`.
 
+import { laneRowFilterSql } from "./lane-memory"
 import type { AquillaDb } from "../shim/postgres"
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -49,6 +50,10 @@ export interface KnowledgeDocMeta {
    *  too: a doc whose structure landed without summaries is indexed *and* has
    *  something to say about it. */
   indexError: string | null
+  /** The one target lane that owns this document, or null for a document the
+   *  whole project reads (AQU-2348). The lane's opaque `lanes.id`; an
+   *  org-shared document is always null. */
+  laneId: string | null
   createdBy: string
   createdAt: string
   updatedAt: string
@@ -72,7 +77,7 @@ export type KnowledgeScopeRef = { projectId: string } | { orgId: number }
 // ──────────────────────────────────────────────────────────────────────────
 
 const META_COLS = `id, org_id, project_id, name, content_type, size_bytes, sha256,
-  r2_key, doc_summary, index_status, index_error, created_by, created_at, updated_at`
+  r2_key, doc_summary, index_status, index_error, lane_id, created_by, created_at, updated_at`
 
 interface Row {
   id: string
@@ -86,6 +91,7 @@ interface Row {
   doc_summary: string | null
   index_status: string
   index_error: string | null
+  lane_id: string | null
   created_by: string
   created_at: string
   updated_at: string
@@ -105,6 +111,7 @@ function rowToMeta(r: Row): KnowledgeDocMeta {
     docSummary: r.doc_summary,
     indexStatus: r.index_status as KnowledgeIndexStatus,
     indexError: r.index_error ?? null,
+    laneId: r.lane_id ?? null,
     createdBy: r.created_by,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -171,6 +178,11 @@ export interface CreateDocInput {
   r2Key: string
   extractedText: string
   createdBy: string
+  /** AQU-2348: give the document to ONE target lane — its opaque `lanes.id`.
+   *  Omitted/null = the project's own document, read in every lane, which is
+   *  what every document was before lanes could own one. Only valid on a
+   *  project-scoped document (`laneOwnedRowProblem` is the shared gate). */
+  laneId?: string | null
 }
 
 export async function createDoc(db: AquillaDb, doc: CreateDocInput): Promise<void> {
@@ -179,8 +191,8 @@ export async function createDoc(db: AquillaDb, doc: CreateDocInput): Promise<voi
   await db
     .prepare(
       `INSERT INTO knowledge_docs
-         (id, org_id, project_id, name, content_type, size_bytes, sha256, r2_key, extracted_text, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, org_id, project_id, name, content_type, size_bytes, sha256, r2_key, extracted_text, created_by, lane_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       doc.id,
@@ -193,6 +205,7 @@ export async function createDoc(db: AquillaDb, doc: CreateDocInput): Promise<voi
       doc.r2Key,
       doc.extractedText,
       doc.createdBy,
+      projectId != null ? (doc.laneId ?? null) : null,
     )
     .run()
 }
@@ -234,6 +247,47 @@ export async function listProjectDocsWithNodeCounts(
     ...rowToMeta(r),
     nodeCount: flattenNodes(parseTree(r.index_tree)).length,
   }))
+}
+
+/**
+ * Which documents a RETRIEVAL may see (AQU-2348).
+ *
+ * Omitted — every caller that existed before lanes could own a document — is
+ * "all of them", so a management list and the agent's own SQL keep answering
+ * what they always answered. `{ laneId }` narrows to the set in force for one
+ * lane: the project's documents plus that lane's own, never another lane's.
+ * `{ laneId: undefined }` with the key present is a lane that resolved to no
+ * row, which reads as project-wide — a project whose lane rows have not
+ * arrived must still be able to retrieve.
+ */
+export interface KnowledgeLaneFilter {
+  laneId?: string | undefined
+}
+
+function knowledgeLaneFilter(opts?: KnowledgeLaneFilter): { sql: string; binds: string[] } {
+  if (!opts) return { sql: "TRUE", binds: [] }
+  return laneRowFilterSql("lane_id", opts.laneId)
+}
+
+/** Project + org-inherited documents in force in `laneId` — the retrieval
+ *  view, as opposed to `listProjectDocs`'s management view. */
+export async function listProjectDocsForLane(
+  db: AquillaDb,
+  projectId: string,
+  laneId: string | undefined,
+): Promise<KnowledgeDocMeta[]> {
+  const lane = laneRowFilterSql("lane_id", laneId)
+  const { results } = await db
+    .prepare(
+      `SELECT ${META_COLS} FROM knowledge_docs
+       WHERE (project_id = ?
+          OR org_id = (SELECT org_id FROM projects WHERE id = ?))
+         AND ${lane.sql}
+       ORDER BY created_at DESC`,
+    )
+    .bind(projectId, projectId, ...lane.binds)
+    .all<Row>()
+  return results.map(rowToMeta)
 }
 
 export async function listOrgDocs(db: AquillaDb, orgId: number): Promise<KnowledgeDocMeta[]> {
@@ -331,9 +385,11 @@ export async function searchKnowledge(
   projectId: string,
   q: string,
   limit = 5,
+  opts?: KnowledgeLaneFilter,
 ): Promise<KnowledgeSnippet[]> {
   const needle = q.trim().toLowerCase()
   if (!needle) return []
+  const lane = knowledgeLaneFilter(opts)
   const { results } = await db
     .prepare(
       `SELECT id, name,
@@ -342,11 +398,12 @@ export async function searchKnowledge(
                      560) AS snippet
        FROM knowledge_docs
        WHERE (project_id = ? OR org_id = (SELECT org_id FROM projects WHERE id = ?))
+         AND ${lane.sql}
          AND position(? in lower(extracted_text)) > 0
        ORDER BY updated_at DESC
        LIMIT ?`,
     )
-    .bind(needle, projectId, projectId, needle, limit)
+    .bind(needle, projectId, projectId, ...lane.binds, needle, limit)
     .all<{ id: string; name: string; snippet: string }>()
   return results.map((r) => ({ docId: r.id, docName: r.name, snippet: r.snippet.trim() }))
 }

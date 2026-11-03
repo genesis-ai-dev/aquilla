@@ -401,6 +401,46 @@ describe("external prompt preview", () => {
       const { body } = await preview(testDb, token)
       expect(body.parts.styleRules).toBe("")
     })
+
+    // AQU-2348: a rule may be written for ONE target lane. The preview is the
+    // AQU-1230 contract — "what would the copilot send for this cell" — so a
+    // rule written for another audience must not show up here, and the
+    // project's rules must still show up in both.
+    it("compiles a lane's own rule only in that lane's preview", async () => {
+      await testDb.pg.query(
+        `INSERT INTO lanes (id, project_id, role, language, legacy_tag, position)
+           VALUES ('eslane01', 'proj-a', 'target', 'Spanish', 'es', 2)`,
+      )
+      await styleRule("sr-project", "approved", "Use short sentences.")
+      await testDb.pg.query(
+        `INSERT INTO style_rules (id, project_id, lane_id, instruction, status, enabled)
+           VALUES ('sr-es', 'proj-a', 'eslane01', 'Use the formal register.', 'approved', true)`,
+      )
+
+      const spanish = await preview(testDb, token, "cell-live", "?targetLang=eslane01")
+      expect(spanish.body.parts.styleRules).toContain("Use the formal register.")
+      expect(spanish.body.parts.styleRules).toContain("Use short sentences.")
+
+      const french = await preview(testDb, token)
+      expect(french.body.parts.styleRules).toContain("Use short sentences.")
+      expect(french.body.parts.styleRules).not.toContain("formal register")
+      // The whole assembled prompt, not just the labelled part.
+      expect(french.body.messages[0].content).not.toContain("formal register")
+    })
+
+    it("is unchanged for a project where no rule belongs to a lane", async () => {
+      await testDb.pg.query(
+        `INSERT INTO lanes (id, project_id, role, language, legacy_tag, position)
+           VALUES ('eslane01', 'proj-a', 'target', 'Spanish', 'es', 2)`,
+      )
+      await styleRule("sr-project", "approved", "Use short sentences.")
+      const spanish = await preview(testDb, token, "cell-live", "?targetLang=eslane01")
+      const french = await preview(testDb, token)
+      expect(spanish.body.parts.styleRules).toBe(french.body.parts.styleRules)
+      expect(french.body.parts.styleRules).toBe(
+        "Style rules that apply to this passage (MUST follow):\n- Use short sentences.",
+      )
+    })
   })
 
   describe("terminology cause→effect", () => {

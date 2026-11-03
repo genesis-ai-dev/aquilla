@@ -7,6 +7,10 @@
 
 import { describe, expect, it } from "vitest"
 import {
+  laneOwnedRowProblem,
+  laneRowApplies,
+  laneRowFilterSql,
+  laneScopedRows,
   targetLaneIdForTag,
   resolveLaneEntries,
   resolveLaneMemory,
@@ -197,5 +201,104 @@ describe("settings-key validation", () => {
     const lines = settingsKeyDocLines()
     expect(lines.some((line) => line.startsWith("systemPromptByLane:"))).toBe(true)
     expect(lines.some((line) => line.startsWith("translationBriefByLane:"))).toBe(true)
+  })
+})
+
+// ── lane-OWNED rows (knowledge documents, style rules) ──────────────────────
+//
+// Rows union rather than override, and the SQL filter and the in-memory filter
+// must answer identically — a rule the database hands the health check must be
+// the same rule the prompt builder compiles.
+
+describe("laneRowApplies", () => {
+  it("puts a project-wide row in force in every lane", () => {
+    expect(laneRowApplies(null, FR)).toBe(true)
+    expect(laneRowApplies(undefined, ES)).toBe(true)
+    expect(laneRowApplies(null, undefined)).toBe(true)
+  })
+
+  it("puts a lane's own row in force only in that lane", () => {
+    expect(laneRowApplies(ES, ES)).toBe(true)
+    expect(laneRowApplies(ES, FR)).toBe(false)
+    expect(laneRowApplies(ES, undefined)).toBe(false)
+  })
+
+  it("reads an empty owner as project-wide rather than as a lane nobody can name", () => {
+    expect(laneRowApplies("", FR)).toBe(true)
+  })
+})
+
+describe("laneScopedRows", () => {
+  const rows = [
+    { id: "p", laneId: null },
+    { id: "es", laneId: ES },
+    { id: "fr", laneId: FR },
+    { id: "legacy", laneId: undefined },
+  ]
+
+  it("keeps the project's rows plus this lane's, in the order given", () => {
+    expect(laneScopedRows(rows, ES).map((r) => r.id)).toEqual(["p", "es", "legacy"])
+  })
+
+  it("never leaks another lane's row", () => {
+    expect(laneScopedRows(rows, FR).map((r) => r.id)).not.toContain("es")
+  })
+
+  it("keeps only the project's rows when no lane resolved — the pre-AQU-2348 set", () => {
+    expect(laneScopedRows(rows, undefined).map((r) => r.id)).toEqual(["p", "legacy"])
+  })
+
+  it("is the whole list for a project where no row belongs to a lane", () => {
+    const projectOnly = [{ id: "a", laneId: null }, { id: "b" }]
+    expect(laneScopedRows(projectOnly, ES)).toEqual(projectOnly)
+    expect(laneScopedRows(projectOnly, undefined)).toEqual(projectOnly)
+  })
+})
+
+describe("laneRowFilterSql", () => {
+  it("binds the lane and keeps the project's rows alongside it", () => {
+    const { sql, binds } = laneRowFilterSql("lane_id", ES)
+    expect(binds).toEqual([ES])
+    expect(sql).toBe("((lane_id IS NULL OR lane_id = '') OR lane_id = ?)")
+  })
+
+  it("asks for project-wide rows only, with no binds, when no lane resolved", () => {
+    expect(laneRowFilterSql("lane_id", undefined)).toEqual({
+      sql: "(lane_id IS NULL OR lane_id = '')",
+      binds: [],
+    })
+  })
+
+  it("agrees with the in-memory predicate on every case", () => {
+    // The pair is the contract: whatever the DB filters out, the client filter
+    // must also drop, or a rule reaches the prompt that the health check
+    // never lints (and the other way round).
+    for (const lane of [ES, FR, undefined]) {
+      const { binds } = laneRowFilterSql("lane_id", lane)
+      for (const owner of [null, "", ES, FR]) {
+        const sqlKeeps = owner == null || owner === "" || binds.includes(owner)
+        expect(laneRowApplies(owner, lane)).toBe(sqlKeeps)
+      }
+    }
+  })
+})
+
+describe("laneOwnedRowProblem", () => {
+  it("accepts a project row with no lane — what every row was before", () => {
+    expect(laneOwnedRowProblem(null, { orgOwned: false })).toBeNull()
+    expect(laneOwnedRowProblem(undefined, { orgOwned: false })).toBeNull()
+    expect(laneOwnedRowProblem("", { orgOwned: false })).toBeNull()
+  })
+
+  it("accepts a lane id on a project row", () => {
+    expect(laneOwnedRowProblem(ES, { orgOwned: false })).toBeNull()
+  })
+
+  it("refuses a language or a legacy tag, naming the rule", () => {
+    expect(laneOwnedRowProblem("es", { orgOwned: false })).toMatch(/not a lane id/)
+  })
+
+  it("refuses a lane on an org-shared row, because lane ids are project-local", () => {
+    expect(laneOwnedRowProblem(ES, { orgOwned: true })).toMatch(/organization-wide/)
   })
 })

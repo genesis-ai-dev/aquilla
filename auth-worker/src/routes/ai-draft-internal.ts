@@ -42,6 +42,7 @@ import {
 import { languagesForLanes, loadLaneRows } from "../lib/read-lane-language"
 import { resolveLaneIdOrTag } from "../../../db/shared/lane-ref"
 import { languageOfTargetLane } from "../../../db/shared/lane-language"
+import { readBriefForLane } from "../../../db/shared/brief"
 import type { PaidCallRefusal } from "../lib/billing/paid-call"
 import { admitLlmCall, legacyLedgers, projectOrgId } from "../lib/billing/paid-llm"
 import { METERED_MAX_OUTPUT_TOKENS } from "../lib/billing/chat-usage"
@@ -128,6 +129,24 @@ aiDraftInternal.post("/internal/draft-cells", zValidator("json", bodySchema), as
     )
   }
 
+  // AQU-2348: the brief is resolved for the lane being drafted, so a lane that
+  // owns its own brief drafts against ITS skopos and every other lane keeps the
+  // project's. Resolved BEFORE the grounding read below because the lane row's
+  // id is what the brief is keyed by — `body.laneId` may be a legacy tag.
+  let resolvedLaneId: string | undefined
+  let lane = body.laneId ?? ""
+  if (lane) {
+    try {
+      const resolved = await resolveLaneIdOrTag(db, body.projectId, lane)
+      if (resolved.laneId) {
+        lane = resolved.laneId
+        resolvedLaneId = resolved.laneId
+      }
+    } catch {
+      /* an unresolvable lane reads as "no lane": the project's brief, as before */
+    }
+  }
+
   // Prompt grounding — best-effort, identical to the agent run's.
   let sourceLanguage: string | undefined
   let targetLanguage: string | undefined
@@ -135,22 +154,17 @@ aiDraftInternal.post("/internal/draft-cells", zValidator("json", bodySchema), as
   let batchCap = completionBatchSizeFromSettings(null)
   try {
     const settings = await db
-      .prepare(
-        `SELECT settings::jsonb -> 'translationBrief' ->> 'l1Summary' AS brief_summary,
-                settings AS raw
-           FROM project_settings WHERE project_id = ?`,
-      )
+      .prepare(`SELECT settings AS raw FROM project_settings WHERE project_id = ?`)
       .bind(body.projectId)
-      .first<{
-        brief_summary: string | null
-        raw: unknown
-      }>()
+      .first<{ raw: unknown }>()
     if (settings) {
-      briefSummary = settings.brief_summary ?? undefined
       const raw = typeof settings.raw === "string" ? JSON.parse(settings.raw) : settings.raw
       const parsed =
         raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : null
       batchCap = completionBatchSizeFromSettings(parsed)
+      briefSummary = parsed
+        ? (readBriefForLane(parsed, resolvedLaneId).brief?.l1Summary ?? undefined)
+        : undefined
       const lanes = await loadLaneRows(db, body.projectId)
       const languages = languagesForLanes(lanes, body.laneId ?? "")
       sourceLanguage = languages.sourceLanguage
@@ -170,14 +184,9 @@ aiDraftInternal.post("/internal/draft-cells", zValidator("json", bodySchema), as
   }
 
   let costCents = 0
-  let lane = body.laneId ?? ""
-  if (lane) {
-    const resolved = await resolveLaneIdOrTag(db, body.projectId, lane)
-    if (resolved.laneId) {
-      lane = resolved.laneId
-      const fromLane = await languageOfTargetLane(db, body.projectId, resolved.laneId)
-      if (fromLane) targetLanguage = fromLane
-    }
+  if (resolvedLaneId) {
+    const fromLane = await languageOfTargetLane(db, body.projectId, resolvedLaneId)
+    if (fromLane) targetLanguage = fromLane
   }
   // AQU-2063: every paid pass (research, then generation) is admitted on its
   // own and settles its own reported cost. A pass the check refuses is kept

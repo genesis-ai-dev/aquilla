@@ -17,6 +17,7 @@
 // Takes the bare `AquillaDb` handle (db/shim/postgres.ts) — the same handle
 // callers inject as `env.AQUILLA_PG`.
 
+import { laneRowFilterSql } from "./lane-memory"
 import type { AquillaDb } from "../shim/postgres"
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -91,6 +92,12 @@ export interface StyleRule {
   /** Exactly one of orgId/projectId is set (org XOR project scope). */
   orgId: number | null
   projectId: string | null
+  /** The one target lane this rule was written for, or null for a rule the
+   *  whole project is held to (AQU-2348). The lane's opaque `lanes.id`; an
+   *  org-shared rule is always null, since lane ids are project-local. A lane
+   *  answers *for whom* the rule was written — `applicability` answers *where
+   *  in the text* it bites. */
+  laneId: string | null
   instruction: string
   category: StyleRuleCategory
   scope: StyleRuleScope
@@ -160,6 +167,7 @@ interface RuleRow {
   id: string
   org_id: number | null
   project_id: string | null
+  lane_id: string | null
   instruction: string
   category: string
   scope: string
@@ -194,7 +202,7 @@ interface ApplicabilityRow {
   updated_at: unknown
 }
 
-const RULE_COLS = `id, org_id, project_id, instruction, category, scope, conditions,
+const RULE_COLS = `id, org_id, project_id, lane_id, instruction, category, scope, conditions,
   examples, exceptions, source, check_spec, severity, enabled, status, human_edited,
   provenance, created_by, reviewed_by, version, created_at, updated_at`
 
@@ -230,6 +238,7 @@ function rowToRule(r: RuleRow): StyleRule {
     id: r.id,
     orgId: r.org_id == null ? null : Number(r.org_id),
     projectId: r.project_id,
+    laneId: r.lane_id ?? null,
     instruction: r.instruction,
     category: r.category as StyleRuleCategory,
     scope: r.scope as StyleRuleScope,
@@ -282,6 +291,11 @@ export interface InitialApplicabilityInput {
 
 export interface CreateStyleRuleInput {
   owner: StyleRuleOwnerRef
+  /** AQU-2348: write the rule for ONE target lane — its opaque `lanes.id`.
+   *  Omitted/null = a project rule, compiled in every lane, which is what
+   *  every rule was before lanes could own one. Ignored on an org-owned rule
+   *  (`laneOwnedRowProblem` is the shared gate callers validate with). */
+  laneId?: string | null
   instruction: string
   category: StyleRuleCategory
   scope: StyleRuleScope
@@ -323,16 +337,17 @@ export async function createRule(
     db
       .prepare(
         `INSERT INTO style_rules
-            (id, org_id, project_id, instruction, category, scope, conditions,
+            (id, org_id, project_id, lane_id, instruction, category, scope, conditions,
              examples, exceptions, source, check_spec, severity, status,
              provenance, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?::jsonb, ?::jsonb, ?, 'proposed', ?::jsonb, ?)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?::jsonb, ?::jsonb, ?, 'proposed', ?::jsonb, ?)
          RETURNING ${RULE_COLS}`,
       )
       .bind(
         ruleId,
         orgId,
         projectId,
+        projectId != null ? (input.laneId ?? null) : null,
         input.instruction,
         input.category,
         input.scope,
@@ -384,15 +399,26 @@ export async function createRule(
  * A project's own rules PLUS its org's shared rules (same org-inheritance
  * query shape as knowledge.ts listProjectDocs), with the applicability rows
  * covering exactly the returned rules.
+ *
+ * `opts.laneId` narrows to the rules in force in ONE lane — the project's
+ * plus that lane's own, never another lane's (AQU-2348). Omit `opts` for the
+ * management view, which lists every rule whatever lane owns it: that is what
+ * the Rules page and the Agent API's read route show, and it is what this
+ * function answered before a rule could belong to a lane.
  */
 export async function listRulesForProject(
   db: AquillaDb,
   projectId: string,
   status?: StyleRuleStatus,
+  opts?: { laneId?: string | undefined },
 ): Promise<{ rules: StyleRule[]; applicability: RuleApplicability[] }> {
+  const lane = opts ? laneRowFilterSql("lane_id", opts.laneId) : { sql: "TRUE", binds: [] }
   const ruleWhere = `(project_id = ? OR org_id = (SELECT org_id FROM projects WHERE id = ?))
+       AND ${lane.sql}
        ${status ? "AND status = ?" : ""}`
-  const ruleBinds = status ? [projectId, projectId, status] : [projectId, projectId]
+  const ruleBinds = status
+    ? [projectId, projectId, ...lane.binds, status]
+    : [projectId, projectId, ...lane.binds]
 
   const rulesStmt = db
     .prepare(

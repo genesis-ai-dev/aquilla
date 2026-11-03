@@ -756,3 +756,115 @@ describe("knowledge routes — indexing handoff (AQU-2051)", () => {
     expect(row?.index_status).toBe("pending")
   })
 })
+
+// AQU-2348: `?laneId=` gives the uploaded document to ONE target lane, after
+// which only that lane's retrievals see it. The refusals matter as much as the
+// happy path: a document filed under an id nothing can resolve is a document
+// the team believes is grounding their drafts and which never reaches a prompt.
+describe("knowledge routes — a document one lane owns (AQU-2348)", () => {
+  const LANE_ES = "0f0f0f0f"
+  const LANE_SOURCE = "5ce00000"
+  const LANE_ARCHIVED = "beefbeef"
+
+  async function leadWithLanes(): Promise<string> {
+    await seedUser(1, "owner")
+    await seedUser(2, "lead")
+    await seedProject(PROJECT, 1)
+    await grant(PROJECT, 2, ROLE.PROJECT_LEAD)
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, legacy_tag, position) VALUES
+         (?, ?, 'target', 'Spanish', 'es', 1),
+         (?, ?, 'source', 'Greek', NULL, 0)`,
+    )
+      .bind(LANE_ES, PROJECT, LANE_SOURCE, PROJECT)
+      .run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, legacy_tag, position, archived_at)
+         VALUES (?, ?, 'target', 'Oromo', 'om', 2, now())`,
+    )
+      .bind(LANE_ARCHIVED, PROJECT)
+      .run()
+    return jwtFor("lead")
+  }
+
+  async function upload(jwt: string, qs: string, bucket: FakeBucket): Promise<Response> {
+    return app.request(
+      `/api/v2/projects/${PROJECT}/knowledge${qs}`,
+      {
+        method: "POST",
+        headers: { ...authHeader(jwt), "x-doc-name": "lane-guide.md" },
+        body: new TextEncoder().encode("# Guide\nformal register notes"),
+      },
+      testEnvWith(bucket, { OPENROUTER_API_KEY: "k" }),
+    )
+  }
+
+  it("stores the lane and reports it; the lane's retrieval sees it and no other does", async () => {
+    const jwt = await leadWithLanes()
+    stubIndexingFetch()
+    const res = await upload(jwt, `?laneId=${LANE_ES}`, new FakeBucket())
+    expect(res.status).toBe(201)
+    const out = (await res.json()) as { doc: { id: string; laneId: string | null } }
+    expect(out.doc.laneId).toBe(LANE_ES)
+
+    const row = await env.AQUILLA_PG.prepare("SELECT lane_id FROM knowledge_docs WHERE id = ?")
+      .bind(out.doc.id)
+      .first<{ lane_id: string | null }>()
+    expect(row?.lane_id).toBe(LANE_ES)
+
+    const inLane = await app.request(
+      `/api/v2/projects/${PROJECT}/knowledge/search?q=formal&laneId=${LANE_ES}`,
+      { headers: authHeader(jwt) },
+      testEnvWith(),
+    )
+    expect(((await inLane.json()) as { snippets: unknown[] }).snippets).toHaveLength(1)
+
+    // A search that named no lane asks for the PROJECT's documents, and this
+    // one belongs to a lane — so it must not come back.
+    const noLane = await app.request(
+      `/api/v2/projects/${PROJECT}/knowledge/search?q=formal`,
+      { headers: authHeader(jwt) },
+      testEnvWith(),
+    )
+    expect(((await noLane.json()) as { snippets: unknown[] }).snippets).toHaveLength(0)
+  })
+
+  it("a project document is retrieved in every lane, exactly as before", async () => {
+    const jwt = await leadWithLanes()
+    stubIndexingFetch()
+    expect((await upload(jwt, "", new FakeBucket())).status).toBe(201)
+    for (const qs of [`?q=formal&laneId=${LANE_ES}`, "?q=formal"]) {
+      const res = await app.request(
+        `/api/v2/projects/${PROJECT}/knowledge/search${qs}`,
+        { headers: authHeader(jwt) },
+        testEnvWith(),
+      )
+      expect(((await res.json()) as { snippets: unknown[] }).snippets).toHaveLength(1)
+    }
+  })
+
+  it("refuses a language, a source lane and an archived lane, and stores nothing", async () => {
+    const jwt = await leadWithLanes()
+    stubIndexingFetch()
+    const cases: [string, RegExp][] = [
+      ["es", /not a lane id/],
+      [LANE_SOURCE, /not a target lane/],
+      [LANE_ARCHIVED, /archived/],
+      ["00000000", /not a target lane/],
+    ]
+    for (const [laneId, expected] of cases) {
+      const bucket = new FakeBucket()
+      const res = await upload(jwt, `?laneId=${laneId}`, bucket)
+      expect(res.status).toBe(400)
+      expect(JSON.stringify(await res.json())).toMatch(expected)
+      // The refusal happens before the bytes are stored, so no orphan blob.
+      expect(bucket.store.size).toBe(0)
+    }
+    const count = await env.AQUILLA_PG.prepare(
+      "SELECT count(*)::int AS n FROM knowledge_docs WHERE project_id = ?",
+    )
+      .bind(PROJECT)
+      .first<{ n: number }>()
+    expect(count?.n).toBe(0)
+  })
+})

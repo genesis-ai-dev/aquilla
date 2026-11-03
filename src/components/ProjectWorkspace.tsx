@@ -6,7 +6,7 @@ import { recordModelCall, type RecordModelCall } from "@/lib/ai-interventions/cl
 import { useCharacterSheetCells } from "@/hooks/useCharacterSheetCells"
 import { confirmedTargetHeadKeys } from "@/lib/sync/confirmed-target-heads"
 import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
-import { resolveLaneMemory } from "../../db/shared/lane-memory"
+import { laneScopedRows, resolveLaneMemory } from "../../db/shared/lane-memory"
 import { Suspense, cloneElement, isValidElement, lazy, useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback } from "react"
 import { createPortal } from "react-dom"
 import { useParams, useNavigate, useSearchParams, useLocation } from "react-router-dom"
@@ -6166,13 +6166,24 @@ export function ProjectWorkspace() {
   // "which rules apply to THIS cell", so a draft prompt carries only the
   // guidance in force for its passage instead of the whole library.
   const { rules: styleRules, applicability: styleApplicability } = useStyleRules(projectId ?? null)
+  // AQU-2348: the library is the project's rules PLUS the open lane's own. A
+  // rule written for another lane steers and lints nothing here — it was
+  // written for a different audience. The management list (Living Memory →
+  // Translation quality) keeps showing every rule; this is the compile-time
+  // set, so the draft prompt and the health checks agree on it. On a project
+  // with no lane-owned rules — every project before this column — this is the
+  // whole library, unchanged.
+  const laneStyleRules = useMemo(
+    () => laneScopedRows(styleRules, activeLaneId ?? undefined),
+    [styleRules, activeLaneId],
+  )
   const styleApplicabilityIndex = useMemo(
     () => buildApplicabilityIndex(styleApplicability),
     [styleApplicability],
   )
   const fileGenres = project?.fileGenres
   const styleInstructionsFor = useCallback((cell: CellData): string[] => {
-    if (styleRules.length === 0) return []
+    if (laneStyleRules.length === 0) return []
     const file = projectFiles.find((f) => f.id === cell.fileId)
     const genre = resolveFileGenre(cell.fileId, file?.bookCode, fileGenres)
     const coords = cellCoordinates(
@@ -6184,9 +6195,9 @@ export function ProjectWorkspace() {
       },
       bookGenre,
     )
-    return resolveEffectiveRules(styleRules, styleApplicabilityIndex, coords)
+    return resolveEffectiveRules(laneStyleRules, styleApplicabilityIndex, coords)
       .map((effective) => effective.rule.instruction)
-  }, [styleRules, styleApplicabilityIndex, projectFiles, fileGenres])
+  }, [laneStyleRules, styleApplicabilityIndex, projectFiles, fileGenres])
 
   const bookCodeByFileId = useMemo(() => {
     const map = new Map<string, string>()
@@ -6200,7 +6211,7 @@ export function ProjectWorkspace() {
   // rebuilding per render would be correct but throw that away.
   const libraryLint = useMemo(
     () => buildLibraryLintResolver({
-      styleRules,
+      styleRules: laneStyleRules,
       applicability: styleApplicability,
       coordsFor: (cell) => {
         const bookCode = bookCodeByFileId.get(cell.fileId)
@@ -6216,7 +6227,7 @@ export function ProjectWorkspace() {
         )
       },
     }),
-    [styleRules, styleApplicability, bookCodeByFileId, fileGenres],
+    [laneStyleRules, styleApplicability, bookCodeByFileId, fileGenres],
   )
   const {
     comments: allProjectComments,

@@ -8,8 +8,8 @@
 import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
 import {
-  createDoc, listProjectDocs, listOrgDocs, getDocMeta, getDocTree, getDocText,
-  deleteDoc, setIndexResult, searchKnowledge, resolveNode, kbExtension, kbR2Key,
+  createDoc, listProjectDocs, listProjectDocsForLane, listOrgDocs, getDocMeta, getDocTree,
+  getDocText, deleteDoc, setIndexResult, searchKnowledge, resolveNode, kbExtension, kbR2Key,
   type KnowledgeNode,
 } from "../../../db/shared/knowledge"
 
@@ -97,5 +97,112 @@ describe("knowledge shared primitives", () => {
       children: [{ id: "n1.1", title: "A1", charStart: 0, charEnd: 5 }] }]
     expect(resolveNode(tree, "n1.1")?.title).toBe("A1")
     expect(resolveNode(tree, "nx")).toBeNull()
+  })
+})
+
+// AQU-2348: a knowledge document may belong to ONE target lane. Retrieval then
+// sees the project's documents plus that lane's own — never another lane's.
+// The guard that matters most is the LAST test: a project where nobody has
+// given a document to a lane must retrieve exactly what it retrieved before
+// the column existed, in every lane, with no migration.
+const ES = "0f0f0f0f"
+const FR = "a1b2c3d4"
+
+async function seedLanes() {
+  await env.AQUILLA_PG.prepare(
+    `INSERT INTO lanes (id, project_id, role, name, legacy_tag, position) VALUES
+       (?, 'proj-kb', 'target', 'Spanish', 'es', 1),
+       (?, 'proj-kb', 'target', 'French', 'fr', 2)`,
+  )
+    .bind(ES, FR)
+    .run()
+}
+
+describe("knowledge documents a lane owns (AQU-2348)", () => {
+  it("retrieves a lane's own document in that lane and never in another", async () => {
+    await seedScope()
+    await seedLanes()
+    await seedDoc("aaaaaaaa-0000-0000-0000-000000000001", { projectId: "proj-kb" }, "project.md")
+    await createDoc(env.AQUILLA_PG, {
+      id: "aaaaaaaa-0000-0000-0000-000000000002",
+      scope: { projectId: "proj-kb" },
+      name: "es-only.md",
+      contentType: "text/markdown",
+      sizeBytes: TEXT.length,
+      sha256: "abc",
+      r2Key: "kb/x/es-only",
+      extractedText: TEXT,
+      createdBy: "test-user",
+      laneId: ES,
+    })
+
+    const inEs = await listProjectDocsForLane(env.AQUILLA_PG, "proj-kb", ES)
+    expect(inEs.map((d) => d.name).sort()).toEqual(["es-only.md", "project.md"])
+    const inFr = await listProjectDocsForLane(env.AQUILLA_PG, "proj-kb", FR)
+    expect(inFr.map((d) => d.name)).toEqual(["project.md"])
+
+    // Search is the agent's retrieval surface and answers the same way.
+    const esHits = await searchKnowledge(env.AQUILLA_PG, "proj-kb", "lazy dog", 5, { laneId: ES })
+    expect(esHits.map((h) => h.docName).sort()).toEqual(["es-only.md", "project.md"])
+    const frHits = await searchKnowledge(env.AQUILLA_PG, "proj-kb", "lazy dog", 5, { laneId: FR })
+    expect(frHits.map((h) => h.docName)).toEqual(["project.md"])
+  })
+
+  it("keeps a lane's document out of a retrieval that named no lane", async () => {
+    await seedScope()
+    await seedLanes()
+    await createDoc(env.AQUILLA_PG, {
+      id: "aaaaaaaa-0000-0000-0000-000000000003",
+      scope: { projectId: "proj-kb" },
+      name: "es-only.md",
+      contentType: "text/markdown",
+      sizeBytes: TEXT.length,
+      sha256: "abc",
+      r2Key: "kb/x/es-only-2",
+      extractedText: TEXT,
+      createdBy: "test-user",
+      laneId: ES,
+    })
+    expect(await searchKnowledge(env.AQUILLA_PG, "proj-kb", "lazy dog", 5, {})).toEqual([])
+    expect(await listProjectDocsForLane(env.AQUILLA_PG, "proj-kb", undefined)).toEqual([])
+    // …while the management list still shows it, with the owning lane on it.
+    const managed = await listProjectDocs(env.AQUILLA_PG, "proj-kb")
+    expect(managed.map((d) => [d.name, d.laneId])).toEqual([["es-only.md", ES]])
+  })
+
+  it("never stamps a lane on an org-shared document — lane ids are project-local", async () => {
+    await seedScope()
+    await seedLanes()
+    await createDoc(env.AQUILLA_PG, {
+      id: "aaaaaaaa-0000-0000-0000-000000000004",
+      scope: { orgId: 77 },
+      name: "org.md",
+      contentType: "text/markdown",
+      sizeBytes: TEXT.length,
+      sha256: "abc",
+      r2Key: "kb/x/org",
+      extractedText: TEXT,
+      createdBy: "test-user",
+      laneId: ES,
+    })
+    const meta = await getDocMeta(env.AQUILLA_PG, "aaaaaaaa-0000-0000-0000-000000000004")
+    expect(meta?.laneId).toBeNull()
+    // So it is still inherited by every lane, as an org document must be.
+    const inFr = await listProjectDocsForLane(env.AQUILLA_PG, "proj-kb", FR)
+    expect(inFr.map((d) => d.name)).toEqual(["org.md"])
+  })
+
+  it("answers identically in every lane for a project where no document belongs to a lane", async () => {
+    await seedScope()
+    await seedLanes()
+    await seedDoc("aaaaaaaa-0000-0000-0000-000000000005", { projectId: "proj-kb" }, "project.md")
+    await seedDoc("aaaaaaaa-0000-0000-0000-000000000006", { orgId: 77 }, "org.md")
+    const all = (await listProjectDocs(env.AQUILLA_PG, "proj-kb")).map((d) => d.name).sort()
+    for (const lane of [ES, FR, undefined]) {
+      const forLane = (await listProjectDocsForLane(env.AQUILLA_PG, "proj-kb", lane))
+        .map((d) => d.name)
+        .sort()
+      expect(forLane).toEqual(all)
+    }
   })
 })

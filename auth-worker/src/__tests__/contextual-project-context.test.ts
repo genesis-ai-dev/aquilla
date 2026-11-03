@@ -623,3 +623,108 @@ describe("several target lanes (AQU-1699)", () => {
     expect((await loadProjectContext(db, "proj-ctx-two-lanes")).multiLane).toBeUndefined()
   })
 })
+
+// AQU-2348: the brief a run is grounded in belongs to the LANE it is drafting.
+// Autopilot reading the project's brief while the Agent API's prompt preview
+// reports the lane's would be the worst of both worlds — the preview would
+// promise a register the run never sees — so both go through
+// `readBriefForLane`. A run with no lane, and every lane of a project nobody
+// has customized, must read exactly what it read before.
+describe("loadProjectContext resolves the brief per lane (AQU-2348)", () => {
+  const PROJECT = "proj-ctx-lane-brief"
+  const ES = "0f0f0f0f"
+  const FR = "a1b2c3d4"
+
+  async function seedLaneBrief(): Promise<void> {
+    await db
+      .prepare("INSERT INTO projects (id, name, created_by) VALUES (?, 'Lane brief', 1)")
+      .bind(PROJECT)
+      .run()
+    await db
+      .prepare(
+        `INSERT INTO lanes (id, project_id, role, language, legacy_tag, position) VALUES
+           (?, ?, 'target', 'Spanish', 'es', 1),
+           (?, ?, 'target', 'French', 'fr', 2)`,
+      )
+      .bind(ES, PROJECT, FR, PROJECT)
+      .run()
+    await seedSettings(PROJECT, {
+      translationBrief: {
+        version: 1,
+        updatedAt: "2026-11-01T00:00:00.000Z",
+        updatedBy: "pm",
+        l1Summary: "Project: a natural-register translation.",
+        parameters: { registerNaturalness: "Informal" },
+      },
+      translationBriefByLane: {
+        [ES]: {
+          version: 1,
+          updatedAt: "2026-11-02T00:00:00.000Z",
+          updatedBy: "pm",
+          l1Summary: "Spanish lane: formal liturgical register.",
+          parameters: { registerNaturalness: "Formal liturgical" },
+        },
+      },
+    })
+  }
+
+  it("grounds a run in the lane's own brief when that lane owns one", async () => {
+    await seedLaneBrief()
+    const ctx = await loadProjectContext(db, PROJECT, { laneId: ES })
+    expect(ctx.projectBriefL1).toBe("Spanish lane: formal liturgical register.")
+    expect(ctx.briefParameters.registerNaturalness).toBe("Formal liturgical")
+  })
+
+  it("grounds every other lane, and a run with no lane, in the project's brief", async () => {
+    await seedLaneBrief()
+    for (const lane of [{ laneId: FR }, undefined]) {
+      const ctx = await loadProjectContext(db, PROJECT, lane)
+      expect(ctx.projectBriefL1).toBe("Project: a natural-register translation.")
+      expect(ctx.briefParameters.registerNaturalness).toBe("Informal")
+    }
+  })
+
+  it("reads the project's brief in every lane when no lane owns one — the pre-AQU-2348 answer", async () => {
+    await db
+      .prepare("INSERT INTO projects (id, name, created_by) VALUES (?, 'No lane brief', 1)")
+      .bind("proj-ctx-no-lane-brief")
+      .run()
+    await db
+      .prepare(
+        `INSERT INTO lanes (id, project_id, role, language, legacy_tag, position)
+           VALUES (?, ?, 'target', 'Spanish', 'es', 1)`,
+      )
+      .bind(ES, "proj-ctx-no-lane-brief")
+      .run()
+    await seedSettings("proj-ctx-no-lane-brief", {
+      translationBrief: {
+        version: 1,
+        updatedAt: "2026-11-01T00:00:00.000Z",
+        updatedBy: "pm",
+        l1Summary: "Only the project's.",
+        parameters: { audience: "Youth" },
+      },
+    })
+    for (const lane of [{ laneId: ES }, { targetLang: "es" }, undefined]) {
+      const ctx = await loadProjectContext(db, "proj-ctx-no-lane-brief", lane)
+      expect(ctx.projectBriefL1).toBe("Only the project's.")
+      expect(ctx.briefParameters.audience).toBe("Youth")
+    }
+  })
+
+  it("falls back to the project's brief when the lane's entry is junk rather than losing the brief", async () => {
+    await seedLaneBrief()
+    await seedSettings(PROJECT, {
+      translationBrief: {
+        version: 1,
+        updatedAt: "2026-11-01T00:00:00.000Z",
+        updatedBy: "pm",
+        l1Summary: "Project: a natural-register translation.",
+        parameters: { registerNaturalness: "Informal" },
+      },
+      translationBriefByLane: { [ES]: "not a brief" },
+    })
+    const ctx = await loadProjectContext(db, PROJECT, { laneId: ES })
+    expect(ctx.projectBriefL1).toBe("Project: a natural-register translation.")
+  })
+})

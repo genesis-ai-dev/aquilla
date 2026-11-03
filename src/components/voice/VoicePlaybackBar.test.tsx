@@ -358,6 +358,17 @@ describe("VoicePlaybackBar — the media view's strip", () => {
     expect(strip).not.toHaveTextContent(/Nothing playing|Press play/)
   })
 
+  it("mutes from the speaker itself, without opening a volume popover", () => {
+    render(<VoicePlaybackBar variant="strip" cells={[cell()]} projectId="p" session={null} settings={undefined} />)
+    const speaker = screen.getByTestId("transport-volume")
+    expect(speaker).toHaveAttribute("aria-pressed", "false")
+    fireEvent.click(speaker)
+    expect(screen.queryByRole("slider", { name: "Volume" })).toBeNull()
+    expect(screen.getByTestId("transport-volume")).toHaveAttribute("aria-pressed", "true")
+    fireEvent.click(screen.getByTestId("transport-volume"))
+    expect(screen.getByTestId("transport-volume")).toHaveAttribute("aria-pressed", "false")
+  })
+
   it("drops the time first on a narrow view (a container query), never the buttons", () => {
     render(<VoicePlaybackBar variant="strip" cells={[cell()]} projectId="p" session={null} settings={undefined} />)
     expect(screen.getByTestId("transport-time").className).toMatch(/\bhidden\b.*@md:inline/)

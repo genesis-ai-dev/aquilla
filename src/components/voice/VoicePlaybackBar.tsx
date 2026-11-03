@@ -611,25 +611,32 @@ function VolumeControl({
   what: string
   onChange: (v: number) => void
   onToggleMute: () => void
-  /** The media view's strip: the speaker alone, opening these two controls. */
+  /** The media view's strip: the speaker alone, and it mutes where it sits. */
   compact?: boolean
 }) {
   const t = useT()
   const label = `${muted ? t("audio.playbackBar.unmute") : t("audio.playbackBar.mute")} ${what}`
-  const controls = (
+  const speaker = (
+    <AppTooltip content={label}>
+      <Button
+        type="button"
+        size={compact ? "icon-xs" : "icon-sm"}
+        variant="ghost"
+        aria-label={label}
+        aria-pressed={muted}
+        data-testid={compact ? "transport-volume" : undefined}
+        onClick={onToggleMute}
+      >
+        {muted ? <VolumeX className={compact ? "size-4" : "h-4 w-4"} /> : <Volume2 className={compact ? "size-4" : "h-4 w-4"} />}
+      </Button>
+    </AppTooltip>
+  )
+  // The strip has no room for a slider, and opening one hid the mute behind a
+  // second click. The speaker itself is the mute.
+  if (compact) return speaker
+  return (
     <div className="flex items-center gap-2">
-      <AppTooltip content={label}>
-        <Button
-          type="button"
-          size="icon-sm"
-          variant="ghost"
-          aria-label={label}
-          aria-pressed={muted}
-          onClick={onToggleMute}
-        >
-          {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
-        </Button>
-      </AppTooltip>
+      {speaker}
       <Slider
         min={0}
         max={1}
@@ -644,25 +651,8 @@ function VolumeControl({
           if (muted && v > 0) onToggleMute()
         }}
         aria-label={t("common.volume")}
-        className={compact ? "w-28" : "hidden w-24 sm:block"}
+        className="hidden w-24 sm:block"
       />
     </div>
-  )
-  if (!compact) return controls
-  return (
-    <Popover>
-      <AppTooltip content={t("common.volume")}>
-        <PopoverTrigger
-          render={
-            <Button type="button" size="icon-xs" variant="ghost" aria-label={t("common.volume")} data-testid="transport-volume">
-              {muted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
-            </Button>
-          }
-        />
-      </AppTooltip>
-      <PopoverContent align="end" side="top" className="w-auto p-1.5">
-        {controls}
-      </PopoverContent>
-    </Popover>
   )
 }

@@ -136,4 +136,28 @@ describe("project settings GET: legacy brief for the instructions (AQU-2342)", (
     expect((await save({ translationInstructions: "Ours now." })).status).toBe(200)
     expect((await getSettings()).legacyProjectBriefText).toBe("")
   })
+
+  // The FRO-234 guard, for the one text that replaced systemPrompt: below the
+  // maintainer floor a write of the instructions — a wipe included — is refused
+  // server-side, whatever the client sends.
+  it("refuses the instructions from below maintainer, an empty wipe included", async () => {
+    await seed({ translationInstructions: "Plain register." })
+    await seedUser(2, "lena")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('p1', 2, 500, 1)",
+    ).run()
+    for (const value of ["", "Lead's own text."]) {
+      const res = await app.request(
+        "/api/v2/projects/p1/settings",
+        {
+          method: "PATCH",
+          headers: authHeader(await jwtFor("lena")),
+          body: JSON.stringify({ settings: { translationInstructions: value }, ifMatchVersion: 1 }),
+        },
+        env,
+      )
+      expect(res.status).toBe(403)
+    }
+    expect((await storedSettings()).translationInstructions).toBe("Plain register.")
+  })
 })

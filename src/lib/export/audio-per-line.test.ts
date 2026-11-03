@@ -802,12 +802,12 @@ describe("where a take is placed in the export", () => {
   })
 
   // AQU-1575: the timestamp is a count of the FILE'S samples. Inworld takes
-  // are stored at 24 kHz and Seed-VC takes at 22.05 kHz; stamped as if every
+  // are stored at 24 kHz and converted takes at 22.05 kHz; stamped as if every
   // WAV were 48 kHz, a DAW placed them at about twice their real time.
   it("stamps a 24 kHz and a 22.05 kHz take at their own sample rates", async () => {
-    const rates: Record<string, number> = { "a-inworld": 24_000, "a-seedvc": 22_050 }
+    const rates: Record<string, number> = { "a-inworld": 24_000, "a-converted": 22_050 }
     const result = await exportAudioPerLine({
-      cells: [withTake("inworld", 10), withTake("seedvc", 20)],
+      cells: [withTake("inworld", 10), withTake("converted", 20)],
       settings: SETTINGS, projectId: "p1", langCode: "es",
       fetchBytes: async ({ audioId }) => makeWav(8, rates[audioId]),
     })
@@ -854,7 +854,7 @@ describe("where a take is placed in the export", () => {
 // ── AQU-1575: every take as 16-bit / 48 kHz / mono WAV ─────────────────────
 //
 // LOTE's broadcast vendor needs exactly that file, and the stored takes are a
-// mix: 24 kHz Inworld WAVs, 22.05 kHz Seed-VC WAVs, compressed webm for Gemini
+// mix: 24 kHz Inworld WAVs, 22.05 kHz converted WAVs, compressed webm for Gemini
 // and MMS and for denoised takes. The WAV choice decodes each one and writes it
 // again on the chapter export's path.
 describe("the WAV format", () => {

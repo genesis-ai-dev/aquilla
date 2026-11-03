@@ -593,6 +593,8 @@ export const projectSettings = defineNamespace({
     "projectSettings.voice.geminiKeyHelp":
       "Used for Gemini-powered text-to-speech. Get a key at aistudio.google.com/apikey. " +
       "Sent directly to Google; never uploaded to Aquilla.",
+    "projectSettings.voice.elevenLabsHelp":
+      "Your own ElevenLabs key, for ElevenLabs voices. It stays on this device for you only and is never shared with the project.",
     // AQU-1758: the Voice Studio (the Audio view) is gone; the library and the
     // cast are in Media's Voices tab.
     "projectSettings.voice.voicesNote": "The voice library and cast assignments are in the Voices tab of the Media view.",

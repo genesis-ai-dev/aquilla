@@ -27,15 +27,28 @@ export const VENDOR_TIMEOUT_MS = {
   /** Modal diarization kick-off. Modal spawns the GPU job and answers at once;
    *  the turns arrive later on the callback, so this bounds the handshake only. */
   modalDiarizationStart: 20_000,
-  /** Modal voice conversion: Seed-VC (AQU-1854) or the voice forge's RVC
-   *  (character/custom voices). A cold call starts TWO containers — the web
-   *  endpoint, then the GPU one, which loads weights off the Volume — and took
-   *  over 120 s in practice (AQU-2212), failing the first Change voice after
-   *  idle. Still well below Modal's own 600 s function timeout. */
+  /** Modal voice conversion: the voice forge's RVC (character/custom voices),
+   *  the only path since AQU-2291 removed Seed-VC (AQU-1854). A cold call
+   *  starts TWO containers — the web endpoint, then the GPU one, which loads
+   *  weights off the Volume — and took over 120 s in practice (AQU-2212),
+   *  failing the first Change voice after idle. Still well below Modal's own
+   *  600 s function timeout. */
   modalVoiceConvert: 240_000,
   /** Inworld TTS synthesis (AQU-1156). Above a real TTS-2 run on the longest
    *  text we accept, below the SPA's own `TTS_REQUEST_TIMEOUT_MS`. */
   inworldTts: 60_000,
+  /** ElevenLabs synthesis and speech-to-speech (AQU-2299, BYOK): one
+   *  non-streaming `POST /v1/text-to-speech/{voice_id}` or
+   *  `POST /v1/voice-changer/{voice_id}` that answers with the whole mp3.
+   *  Same ceiling as Inworld TTS — below the SPA's `TTS_REQUEST_TIMEOUT_MS`. */
+  elevenLabsAudio: 60_000,
+  /** ElevenLabs Instant Voice Clone (`POST /v1/voices/add`): uploads every
+   *  sample in one multipart body, optionally with background-noise removal,
+   *  so it is the slowest ElevenLabs call we make. */
+  elevenLabsClone: 120_000,
+  /** ElevenLabs metadata reads (`/v1/user/subscription`, `/v2/voices`,
+   *  `/v1/models`). Small JSON; a translator is waiting on the picker. */
+  elevenLabsMetadata: 15_000,
   /** Monday GraphQL API. One request carries up to ~10 aliased mutations; the
    *  client may also sleep on a 429 *between* attempts, which this does not
    *  cover (each attempt gets its own deadline). */

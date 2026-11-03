@@ -76,8 +76,8 @@ Worker. D1 and the old GitLab identity bridge are not required for a new install
 | Transactional email | Required for complete account operations | Password recovery, invitations, verification, and administrator elevation |
 | OpenRouter | Optional | Hosted AI completion, translation agents, contextual processing, and AI import classification |
 | Cloudflare Sandbox containers | Optional | Agent code execution and AI parsing of unfamiliar import formats |
-| Inworld | Optional | Hosted speech generation and instant voice cloning |
-| Modal GPU services | Optional | Speaker diarization and Seed-VC voice conversion |
+| Inworld | Optional | Hosted speech generation and voice design |
+| Modal GPU services | Optional | Speaker diarization, voice conversion and custom voice training |
 | Hugging Face or a model mirror | Optional | Browser-loaded MMS speech models and model downloads |
 | PostHog | Optional | Analytics and Worker log shipping |
 | Monday.com, Google Drive, Stripe | Optional | Project integration, Drive import, and subscription billing |
@@ -701,9 +701,9 @@ which processing features you enable:
 
 | Feature | Service and configuration |
 | --- | --- |
-| Hosted Inworld TTS and voice cloning | `INWORLD_API_KEY` on sync; optional `INWORLD_API_BASE`, `INWORLD_TTS_MODEL`, and `INWORLD_DEFAULT_VOICE` |
+| Hosted Inworld TTS and voice design | `INWORLD_API_KEY` on sync; optional `INWORLD_API_BASE`, `INWORLD_TTS_MODEL`, and `INWORLD_DEFAULT_VOICE` |
 | Speaker diarization | Modal service in `infra/modal/diarization.py`; `DIARIZATION_MODAL_URL`, `DIARIZATION_SHARED_SECRET`, and `DIARIZATION_PUBLIC_BASE` on sync |
-| Seed-VC voice conversion | Modal service in `infra/modal/seed_vc.py`; `SEED_VC_URL` and `SEED_VC_TOKEN` on sync |
+| Voice conversion and custom voice training | Modal service in `infra/modal/voice_forge.py`; `VOICE_FORGE_URL` and `VOICE_FORGE_TOKEN` on sync |
 | Omnilingual ASR (languages Whisper lacks; zero-shot) | Self-hosted server in `infra/selfhost/`, Modal service in `infra/modal/omni_asr.py`, or both; `OMNI_ASR_PRIMARY_URL`, `OMNI_ASR_MODAL_URL` and the `OMNI_SHARED_SECRET` secret on identity |
 | Whisper transcription | Browser worker and downloaded model; no dedicated transcription server required for this path |
 | Browser MMS speech models | Hugging Face downloads or a public model mirror configured with `VITE_MMS_*` |
@@ -726,14 +726,15 @@ Use the URL printed by your deployment. Set `DIARIZATION_PUBLIC_BASE` to
 input audio and calls back to your sync API; test both directions and shared
 secret verification.
 
-For Seed-VC, provision Modal's `seed-vc-auth` secret with the matching
-`SEED_VC_TOKEN`, then deploy:
+For voice conversion (Change voice into a library or custom voice) and custom
+voice training, provision Modal's `voice-forge-auth` secret with the matching
+`VOICE_FORGE_TOKEN`, then deploy:
 
 ```bash
-modal deploy infra/modal/seed_vc.py
+modal deploy infra/modal/voice_forge.py
 ```
 
-Preserve its persistent model-cache volume. A replacement GPU service must
+Preserve its persistent voice volume: trained voice models live there. A replacement GPU service must
 implement the same authenticated API and audio contract; the Modal wrappers
 are not ready-made Docker services for a private server.
 

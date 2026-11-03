@@ -196,8 +196,20 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
   }, [enabled, projectId, session?.jwt, sessionLoading])
 
   useEffect(() => {
-    const cleanup = refresh()
-    return cleanup
+    let cancelInFlight = refresh()
+    // Account switching can mount this hook while offline. Revalidate using
+    // the current session on reconnect, including when the offline request
+    // has not settled yet. Cancel the older read so it cannot overwrite the
+    // recovered result. One read per online event; no error-driven retry loop.
+    const reconnect = () => {
+      cancelInFlight()
+      cancelInFlight = refresh()
+    }
+    window.addEventListener("online", reconnect)
+    return () => {
+      window.removeEventListener("online", reconnect)
+      cancelInFlight()
+    }
   }, [refresh])
 
   // Desktop, offline: a cold open can outrun the offline store (a rebuild after

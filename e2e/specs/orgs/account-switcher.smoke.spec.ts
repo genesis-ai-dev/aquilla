@@ -280,3 +280,25 @@ test("logout clears local access when revocation never responds", async ({ alice
     await alice.unrouteAll({ behavior: "wait" })
   }
 })
+
+// AQU-2372: the account switch remounts project resolution while disconnected.
+test("offline account switch recovers the project on reconnect without Retry", async ({ alice }) => {
+  const bobSession = await ensureAuthState("bob")
+  const seeded = await seedProjectWithFile(bobSession.jwt, { name: "Account reconnect recovery" })
+  await alice.goto("/orgs/all")
+  await injectAdditionalSession(alice, bobSession)
+  // Alice is the seeded platform admin; both accounts can read Bob's project.
+  await openSeededProject(alice, seeded)
+  await alice.context().setOffline(true)
+  try {
+    await new AccountSwitcherPage(alice).openMenu("alice")
+    await alice.getByRole("menuitem", { name: /bob/i }).click()
+    await expect(alice.getByText("Can't reach the server — your project may still be available.")).toBeVisible()
+  } finally {
+    await alice.context().setOffline(false)
+  }
+  // Deliberately no Retry or navigation: the online event must recover it.
+  await expect(alice.getByRole("button", { name: "Account menu: bob" })).toBeVisible({ timeout: 30_000 })
+  await expect(alice.getByText("Can't reach the server — your project may still be available.")).toHaveCount(0)
+  await expect(alice.getByTestId("shell-dock").getByRole("button", { name: seeded.fileName, exact: true })).toBeVisible()
+})

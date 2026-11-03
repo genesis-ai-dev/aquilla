@@ -172,3 +172,23 @@ describe("useProject status distinction", () => {
     expect(result.current.project?.id).toBe("p-retry")
   })
 })
+
+// AQU-2372: reconnect can race the request that failed during account switching.
+it.each(["unreachable", "forbidden", "not-found"] as const)(
+  "revalidates once on reconnect and preserves the server's %s outcome",
+  async (reason) => {
+    let settleOld!: (value: ResolveProjectResult) => void
+    mockResolve.mockImplementationOnce(() => new Promise((resolve) => { settleOld = resolve }))
+    const { result, unmount } = renderHook(() => useProject(`reconnect-${reason}`))
+    await waitFor(() => expect(mockResolve).toHaveBeenCalledTimes(1))
+    setResolveMock({ ok: false, reason })
+    act(() => window.dispatchEvent(new Event("online")))
+    await waitFor(() => expect(result.current.status).toBe(reason))
+    await act(async () => settleOld({ ok: false, reason: "not-found" }))
+    expect(result.current.status).toBe(reason)
+    expect(mockResolve).toHaveBeenCalledTimes(2)
+    unmount()
+    act(() => window.dispatchEvent(new Event("online")))
+    expect(mockResolve).toHaveBeenCalledTimes(2)
+  },
+)

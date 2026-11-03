@@ -57,7 +57,8 @@ changes. A dedicated GitHub App installation credential can replace it later.
 ## Resource limits and parallelism
 
 This host also serves Koine Greek. QA uses a separate 24 GB container filesystem,
-a shared cgroup capped at 1.5 CPUs and 2500 MB RAM, and at most 512 MB swap.
+a shared cgroup capped at 2.5 CPUs and 2900 MB RAM, and at most 512 MB swap
+(the quota rose from 1.5 CPUs / 2500 MB on 2026-11-03 after the measurements below).
 Containers have process limits, bounded logs, no Linux capabilities, and no
 privilege escalation. The QA bridge cannot reach host or private-network
 addresses. Host Node and the existing application service remain unchanged.
@@ -71,7 +72,7 @@ sampled from the cgroup, dev at `1a5121ab5`:
 | -------------------------------------------------- | --------- | ------- |
 | `pnpm install` after a dependency-cache miss       | ~1.1 GB (+1.5 GB page cache) | 40–130 s |
 | Worker stack alone (2× wrangler, 2× esbuild, workerd, tsx, mocks) | ~1.5 GB | — |
-| `vite build --mode test` alone                     | ~1.75 GB  | 17–20 s |
+| `vite build --mode test` alone                     | ~1.75 GB sampled; ~1.9 GB RSS at the OOM kill | 17–20 s |
 | Worker stack **plus** the build (old order)        | > 2.8 GB → exit 137 or a 10-minute swap thrash | — |
 
 `NODE_OPTIONS=--max-old-space-size` does not lower the build peak (1024, 1536
@@ -82,14 +83,51 @@ runs the test-mode build with the baked browser URLs and sets
 serving `dist` instead of building again. Install, build and stack then
 happen one after another and each stays under the 2200 MB container cap.
 
+The first real job on this order (1853, 2026-11-03) showed the build's true
+peak is ~1.9 GB anon RSS plus page cache, which still overflowed a 2200 MB
+container (the 1.75 GB above was a 5-second sample). The host now runs
+`container_memory_mb: 2600`, `container_swap_mb: 300` under a slice of
+`MemoryHigh=2700M` / `MemoryMax=2900M`; with that the job completed in 474 s.
+
 `runner.json` may override the per-container limits: `container_memory_mb`
 (default 2200), `container_swap_mb` (default 400) and `build_node_options`
 (default empty). The `aquillaqa.slice` `MemoryMax` is the ceiling for all QA
 containers together; raising only the container limits changes nothing.
 
-A dependency-cache miss (`QA dependencies: changed inputs` in `app.log`) means
-the harness image's lockfile no longer matches the branch under test. Every job
-then pays the install column above. Rebuild the harness at a current commit.
+A dependency-cache miss (`QA dependencies: changed inputs` in `app.log`) costs
+every job the install column above (170 s on job 1853). It happens when the
+harness image's manifests, lockfiles or pnpm patch files differ from the branch
+under test, or when any `package.json` declares an install hook or an `.npmrc` /
+`.pnpmfile` exists (those always reinstall). Patch files under
+`patchedDependencies` are hashed like lockfiles since 2026-11-03; before that
+the root patch alone forced a reinstall on every job. Rebuild the harness at a
+current commit when the miss is a real manifest change.
+
+### Where a job's time goes (job 1853, release/2026/11/03-01)
+
+| Phase                                   | Wall  |
+| --------------------------------------- | ----- |
+| dependency reinstall (cache miss)       | 170 s |
+| test-mode build                         | 21 s  |
+| worker stack + preview up               | ~30 s |
+| 12 Jev journeys, one worker             | 252 s |
+| evidence + report                       | ~10 s |
+
+With the cache hit the first row disappears. The journeys run serially
+(`workers: 1` in `smart-tests/config.ts`); a second worker needs the test
+phase's memory measured first (stack ~1.5 GB + db + chromium under the slice).
+
+### Live progress in the release comment
+
+The runner updates the commit comment while the job runs, not only at the end.
+The bootstrap appends each finished step (`dependencies`, `build`) with its
+seconds to `/tmp/aquilla-qa-progress.json` inside the app container; the runner
+polls that file once a second during setup, adds `stack` when the ready file
+appears, then tails Playwright's line reporter in `tests.log` and re-renders
+after every `[n/N]` header (a journey started, the previous one finished) and
+every indented `Error:` line (the running journey failed). Progress lines are
+advisory: a failed PATCH is logged and ignored, and the strict `finished`
+report still decides the deploy.
 
 The suite already supports four isolated stacks on a larger machine through
 `SMART_TEST_SHARDS=4`. This host deliberately runs one stack. Starting four

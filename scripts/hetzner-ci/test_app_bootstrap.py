@@ -3,7 +3,22 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
+import app_bootstrap
 from app_bootstrap import dependency_identity, clear_source, prebuild
+
+
+class ProgressFileTests(unittest.TestCase):
+    def test_each_finished_step_is_appended_for_the_host_runner(self):
+        # The runner polls this file to update the release comment while the
+        # container works; it must be valid JSON after every step.
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(app_bootstrap, 'PROGRESS', Path(tmp) / 'progress.json'), \
+                mock.patch.object(app_bootstrap, 'STEPS', []):
+            app_bootstrap.progress('dependencies', 169.64, 'installed')
+            app_bootstrap.progress('build', 20.7, 'test-mode dist')
+            steps = json.loads((Path(tmp) / 'progress.json').read_text())
+            self.assertEqual([s['name'] for s in steps], ['dependencies', 'build'])
+            self.assertEqual(steps[0], {'name': 'dependencies', 'seconds': 169.6, 'detail': 'installed'})
 
 
 class DependencyCacheTests(unittest.TestCase):
@@ -22,11 +37,23 @@ class DependencyCacheTests(unittest.TestCase):
             manifest.write_text(json.dumps({'scripts': {'postinstall': 'node generate.js'}}))
             self.assertFalse(dependency_identity(root)[1])
 
-    def test_custom_configuration_and_patches_disable_reuse(self):
+    def test_identical_patches_reuse_and_changed_patches_reinstall(self):
+        # A pnpm patch is an exact input like the lockfile. The harness installed
+        # with the same patch applied, so an identical patch must not cost every
+        # job a ~170 s reinstall; a changed patch must.
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / 'package.json').write_text('{"pnpm":{"patchedDependencies":{"x":"x.patch"}}}')
-            self.assertFalse(dependency_identity(root)[1])
+            (root / 'package.json').write_text('{"pnpm":{"patchedDependencies":{"x@1.0.0":"patches/x@1.0.0.patch"}}}')
+            (root / 'patches').mkdir()
+            (root / 'patches/x@1.0.0.patch').write_text('--- a\n+++ b\n')
+            before = dependency_identity(root)
+            self.assertTrue(before[1])
+            (root / 'patches/x@1.0.0.patch').write_text('--- a\n+++ b\n+changed\n')
+            self.assertNotEqual(before[0], dependency_identity(root)[0])
+
+    def test_custom_configuration_disables_reuse(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
             (root / 'package.json').write_text('{}')
             for name in ('.npmrc', '.pnpmfile.cjs'):
                 (root / name).write_text('custom')

@@ -32,6 +32,7 @@ import { DragTimeChip } from "./DragTimeChip"
 import type { CellData } from "@/hooks/useCells"
 import { isHiddenCell } from "@/lib/cells/hidden"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { AppTooltip } from "@/components/ui/tooltip"
 
 const MIN_DUR_SEC = 0.2
 
@@ -392,7 +393,9 @@ export function TimelineCard({
         beginDrag("move", e)
       }}
       className={cn(
-        "group absolute flex touch-none select-none flex-col justify-center gap-0.5 border transition-colors",
+        // Hover fill stays. No colour transition: the pointer is already on
+        // the card, so a fade only lags the wash behind it.
+        "group absolute flex touch-none select-none flex-col justify-center gap-0.5 border",
         // The row's live geometry, or 10-46-10 outside a timeline.
         TL_CHIP_BOX_CLASS,
         // The padding comes off before the chip gets narrow enough for it to
@@ -473,26 +476,27 @@ export function TimelineCard({
         // Same manners as the slot buttons: nothing at rest, faint on the
         // chip's hover. It must not reach the card's own click, which would
         // select and seek on the way out.
-        <button
-          type="button"
-          title={t("editor.timeline.removeThisLine")}
-          aria-label={t("editor.timeline.removeThisLine")}
-          data-testid={`tl-card-${cell.id}-remove`}
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => {
-            e.stopPropagation()
-            onRemove(cell.id)
-          }}
-          className="absolute right-1 top-1 z-20 flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground opacity-0 transition-opacity hover:bg-background hover:text-foreground group-hover:opacity-70 focus-visible:opacity-100"
-        >
-          <X className="h-3 w-3" />
-        </button>
+        <AppTooltip content={t("editor.timeline.removeThisLine")}>
+          <button
+            type="button"
+            aria-label={t("editor.timeline.removeThisLine")}
+            data-testid={`tl-card-${cell.id}-remove`}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation()
+              onRemove(cell.id)
+            }}
+            className="absolute right-1 top-1 z-20 flex h-4 w-4 items-center justify-center rounded-lg text-muted-foreground opacity-0 hover:bg-background hover:text-foreground group-hover:opacity-70 focus-visible:opacity-100"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </AppTooltip>
       )}
       {showsGrips && (
         <span
           aria-hidden
           onPointerDown={(e) => beginDrag("resize-l", e)}
-          className="absolute inset-y-0 flex w-2 cursor-ew-resize items-center justify-center opacity-0 transition-opacity group-hover:opacity-100"
+          className="absolute inset-y-0 flex w-2 cursor-ew-resize items-center justify-center opacity-0 group-hover:opacity-100"
           // Starts where the accent bar ENDS. At left-0 its line landed flush
           // against the stripe, and the two read as one thick left edge — which
           // is what made the handle look mis-set to the left next to a right
@@ -535,7 +539,7 @@ export function TimelineCard({
         <span
           aria-hidden
           onPointerDown={(e) => beginDrag("resize-r", e)}
-          className="absolute inset-y-0 right-0 flex w-2 cursor-ew-resize items-center justify-center opacity-0 transition-opacity group-hover:opacity-100"
+          className="absolute inset-y-0 right-0 flex w-2 cursor-ew-resize items-center justify-center opacity-0 group-hover:opacity-100"
         >
           <span className="h-4 w-0.5 rounded bg-foreground/30" />
         </span>

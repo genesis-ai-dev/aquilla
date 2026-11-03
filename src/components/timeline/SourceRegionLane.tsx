@@ -196,7 +196,7 @@ function SourceRegionLaneImpl({
           // it (the old `bg-sky-50/30` was nearly nothing for the same reason).
           // No `dark:` pair anywhere: an alpha over the page is already right
           // in both themes.
-          className={`absolute ${TL_CHIP_BOX_CLASS} overflow-hidden border ${TRACK_DASH_CLASS} transition-colors`}
+          className={`absolute ${TL_CHIP_BOX_CLASS} overflow-hidden border ${TRACK_DASH_CLASS}`}
           // The radius shrinks with the chip. A narrow silence flush against a
           // solid-walled cue is exactly where the two used to read as one
           // interlocked shape.

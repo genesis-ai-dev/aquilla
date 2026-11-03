@@ -59,11 +59,15 @@ export const INHERIT_FIELD_KEYS: Record<InheritFieldId, readonly string[]> = {
  * Explicitly never copied, even when a neighbouring workflow key is.
  * Named validators are people on the upstream project. Lanes, languages,
  * rules, terminology, direction, speech, and media timing belong to that
- * project, not to the next one in the chain.
+ * project, not to the next one in the chain. AQU-2305: so does the import
+ * floor — it is a permission, resolved against the DOWNSTREAM project's own
+ * org (a link can cross orgs), and copying it would let an upstream maintainer
+ * lock the people of another project out of their imports.
  */
 export const INHERIT_NEVER_KEYS = [
   "validationNamedUsers",
   "validationNamedUsersAudio",
+  "importMinRole",
   "sourceLanguage",
   "targetLanguage",
   "targetLanes",

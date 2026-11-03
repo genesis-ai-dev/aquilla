@@ -20,6 +20,7 @@
  * bound is asserted in tests and recordable in the browser (see memMark).
  */
 
+import { applyClipLevelPcm, hasClipLevel } from "@/lib/export/clip-level"
 import type { CellData } from "@/hooks/useCells"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import type { ProjectTtsSettings, Voice } from "@/lib/parsers/types"
@@ -214,7 +215,8 @@ function linePartsFor(clip: ResolvedClip): LinePart[] | null {
         audioId: parsed.audioId,
         ext: parsed.ext,
         clipKey: `${parsed.audioId}.${parsed.ext}`,
-        trimmed: (attachment.trimStartMs ?? 0) > 0 || attachment.trimEndMs != null,
+        // A take at its own volume or fades is re-encoded like a trimmed one.
+        trimmed: (attachment.trimStartMs ?? 0) > 0 || attachment.trimEndMs != null || hasClipLevel(attachment),
       },
     })
   }
@@ -262,7 +264,7 @@ export async function assembleAudioEntries(args: AudioAssemblyArgs): Promise<Aud
       ext: parsed.ext,
       clipKey: `${parsed.audioId}.${parsed.ext}`,
       voice: resolveCastVoice(args.settings, cell, cell.ttsSettings?.voiceId),
-      trimmed: (attachment.trimStartMs ?? 0) > 0 || attachment.trimEndMs != null,
+      trimmed: (attachment.trimStartMs ?? 0) > 0 || attachment.trimEndMs != null || hasClipLevel(attachment),
     }
     // AQU-1758: the modes that join takes end to end lay a book's line out as
     // playback does. Separate clips are one file per take, as before.
@@ -374,7 +376,8 @@ export async function assembleAudioEntries(args: AudioAssemblyArgs): Promise<Aud
       consumed(clip, pcm)
       return null
     }
-    const trimmed = applyTrimPcm(pcm, TARGET_RATE, clip.attachment.trimStartMs, clip.attachment.trimEndMs)
+    // AQU-2327: the kept part at its volume and fades, as the timeline plays it.
+    const trimmed = applyClipLevelPcm(applyTrimPcm(pcm, TARGET_RATE, clip.attachment.trimStartMs, clip.attachment.trimEndMs), TARGET_RATE, clip.attachment)
     // Quantise, hand the bytes to blob storage, drop both arrays: from here on
     // the clip costs the heap nothing, whatever the mode does with it.
     const quantised = toPcm16(trimmed)

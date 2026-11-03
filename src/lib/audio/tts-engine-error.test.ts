@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   HOSTED_TTS_NOT_CONFIGURED_BODY,
-  SEED_VC_NOT_CONFIGURED_BODY,
+  VOICE_CONVERT_NOT_CONFIGURED_BODY,
   errorFromHostedTts,
   errorFromVoiceConvert,
 } from "./tts-engine-error"
@@ -56,9 +56,9 @@ describe("errorFromHostedTts", () => {
 })
 
 describe("errorFromVoiceConvert", () => {
-  it("names Seed-VC when conversion isn't wired", () => {
+  it("says voice conversion isn't set up when the worker has no voice forge", () => {
     expect(errorFromVoiceConvert(503, "voice conversion not configured").message).toBe(
-      SEED_VC_NOT_CONFIGURED_BODY,
+      VOICE_CONVERT_NOT_CONFIGURED_BODY,
     )
   })
 

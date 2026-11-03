@@ -1627,7 +1627,11 @@ export function ExportDialog({
         setStatus({ kind: "busy", msg: lineWav ? t("importExport.status.decodingAudio") : "Collecting recordings…" })
         const { exportAudioPerLine } = await import("@/lib/export/audio-per-line")
         const { fetchCellAudio } = await import("@/lib/audio/upload")
-        const decode = lineWav ? (await import("@/lib/audio/decode-mono")).decodeToMono48k : undefined
+        // AQU-2327: the decoder goes along either way — a take at its own
+        // volume or fades is decoded and written as WAV even when the rest
+        // are copied as stored (an export contains what you hear). Without
+        // the WAV box nothing else is decoded.
+        const decode = (await import("@/lib/audio/decode-mono")).decodeToMono48k
         const getSyncToken = (_pid: string, fileId: string) => getToken(fileId)
         const result = await exportAudioPerLine({
           cells: audioExportCells,

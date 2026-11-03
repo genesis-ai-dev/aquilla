@@ -6,7 +6,8 @@
 //
 // What these tests hold: the control renders "No one" for a project that has
 // never set it (the default is refusal, not a rank); a stored tier round-trips
-// into the control; changing it patches `cellEditingFloor` and nothing else;
+// into the control; changing it patches `cellEditingFloor` and nothing else,
+// the moment it changes (AQU-2262);
 // and the retired checkbox is gone from the Timeline card.
 //
 // The tier list is the product's standard permission ladder (Matthew's review,
@@ -52,22 +53,21 @@ vi.mock("@/hooks/useProject", () => ({
   }),
 }))
 
-vi.mock("@/hooks/useProjectSettings", () => ({
-  useProjectSettings: () => ({
-    canEdit: currentCanEdit,
-    reasonCannotEdit: currentReasonCannotEdit,
-    patch: patchSpy,
-    version: 1,
-    updatedAt: null,
-    updatedBy: null,
-    conflict: false,
-    dismissConflict: vi.fn(),
-    settings: {},
-    hasFetched: true,
-    isOnline: true,
-    refresh: vi.fn(),
-  }),
-}))
+// AQU-2262: a write shows on the page, as the real hook's overlay does.
+vi.mock("@/hooks/useProjectSettings", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks/useProjectSettings")>()
+  const { useLiveProjectSettings } = await import("@/test-utils/live-project-settings")
+  return {
+    ...actual,
+    useProjectSettings: () =>
+      useLiveProjectSettings(() => ({
+        settings: {},
+        patch: patchSpy,
+        canEdit: currentCanEdit,
+        reasonCannotEdit: currentReasonCannotEdit,
+      })),
+  }
+})
 
 vi.mock("@/hooks/useOrg", () => ({
   useOrg: () => ({ org: null }),
@@ -115,6 +115,7 @@ vi.mock("@/lib/completion/completion-service", async (importOriginal) => {
 vi.mock("@/lib/store/project-index", () => ({
   getProject: vi.fn().mockResolvedValue(null),
   updateProject: vi.fn().mockResolvedValue(undefined),
+  patchProject: vi.fn().mockResolvedValue(null),
 }))
 
 vi.mock("@/lib/progress/read-validation-count", () => ({
@@ -189,12 +190,13 @@ describe("ProjectSettings — who can add and remove cells (AQU-1068)", () => {
 
     await user.click(screen.getByTestId("settings-cell-editing-floor"))
     await user.click(await screen.findByRole("option", { name: "Maintainer" }))
-    await user.click(screen.getByRole("button", { name: /save changes/i }))
 
-    expect(patchSpy).toHaveBeenCalledTimes(1)
-    const sent = patchSpy.mock.calls[0][0] as Record<string, unknown>
+    // "Set for this project" saved the tier in force; the pick saves at once
+    // (AQU-2262). Each write is that one key.
+    expect(patchSpy).toHaveBeenCalledTimes(2)
+    const sent = patchSpy.mock.calls[1][0] as Record<string, unknown>
     expect(sent.cellEditingFloor).toBe("maintainer")
-    expect(Object.keys(sent)).toEqual(["cellEditingFloor"])
+    for (const [write] of patchSpy.mock.calls) expect(Object.keys(write as object)).toEqual(["cellEditingFloor"])
   })
 
   it("saves a below-contributor tier — the new rungs reach the wire, not just the list", async () => {
@@ -204,9 +206,8 @@ describe("ProjectSettings — who can add and remove cells (AQU-1068)", () => {
 
     await user.click(screen.getByTestId("settings-cell-editing-floor"))
     await user.click(await screen.findByRole("option", { name: "Reviewer" }))
-    await user.click(screen.getByRole("button", { name: /save changes/i }))
 
-    const sent = patchSpy.mock.calls[0][0] as Record<string, unknown>
+    const sent = patchSpy.mock.calls.at(-1)?.[0] as Record<string, unknown>
     expect(sent.cellEditingFloor).toBe("reviewer")
   })
 
@@ -219,8 +220,9 @@ describe("ProjectSettings — who can add and remove cells (AQU-1068)", () => {
     await user.click(screen.getByTestId("settings-cell-editing-floor"))
     await user.click(await screen.findByRole("option", { name: "Contributor" }))
     expect(screen.getByTestId("cell-editing-floor-source")).toHaveTextContent("Set for this project")
-    await user.click(screen.getByRole("button", { name: /save changes/i }))
 
+    // One write, saved at once (AQU-2262).
+    expect(patchSpy).toHaveBeenCalledTimes(1)
     const sent = patchSpy.mock.calls[0][0] as Record<string, unknown>
     expect(sent.cellEditingFloor).toBe("contributor")
   })

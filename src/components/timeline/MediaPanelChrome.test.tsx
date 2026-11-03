@@ -82,6 +82,17 @@ describe("an area's strip", () => {
   })
 })
 
+describe("the Station's ⋯ (AQU-2327, spec item 2)", () => {
+  it("names the Station's own items; another panel's ⋯ keeps the area's words", () => {
+    const station = { ...startDockLayout(), active: { ll: "film" as const, lr: "station" as const } }
+    const { unmount } = render(<MediaAreaStrip dock={fakeDock(station)} area="lr" />)
+    expect(screen.getByTestId("dock-more-lr")).toHaveAccessibleName("More: remove noise, change the voice, history")
+    unmount()
+    render(<MediaAreaStrip dock={fakeDock(startDockLayout())} area="lr" />)
+    expect(screen.getByTestId("dock-more-lr")).toHaveAccessibleName("Move this panel, or more")
+  })
+})
+
 describe("the timeline's corner controls", () => {
   it("the narrow track names leave room for Full screen and ⋯ only", () => {
     const controls = { isFull: false, canFold: true, onToggleFull: vi.fn(), onFold: vi.fn() }

@@ -1,6 +1,6 @@
 // Client lib for the hosted Inworld TTS endpoint (sync-worker).
 //
-// Mirrors voice-clone.ts (convertToCloneVoice): uses syncWorkerHttpOrigin() for
+// Mirrors voice-clone.ts (convertToLibraryVoice): uses syncWorkerHttpOrigin() for
 // the base URL and a sync token (scoped to projectId+fileId) for auth.
 //
 // The returned audioId is a valid cell-audio object in R2 — callers can:
@@ -25,9 +25,12 @@ export interface SynthesizeCellTtsArgs {
   cellId?: string
   /** The text to synthesize. */
   text: string
-  /** Inworld stock voice id (e.g. "Dennis") or a previously cloned voiceId. */
+  /** Inworld stock voice id (e.g. "Dennis"), an Instant Clone id made in
+   *  Inworld, or a published Voice Design id. */
   voiceId?: string
-  /** Reference clip id for voice cloning (from /api/v1/voice/reference/*). */
+  /** Inworld instant clone: the voice's reference clip (from
+   *  /api/v1/voice/reference/*). The worker clones it once (cached) and reads
+   *  the line with the cloned voice instead of `voiceId`. */
   referenceAudioId?: string
   /** BCP-47 language tag. */
   language?: string

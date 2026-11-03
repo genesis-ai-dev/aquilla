@@ -117,6 +117,7 @@ function FloorRow({
 
   return (
     <SettingsRow
+      saveId={floorKey}
       label={<label htmlFor={id}>{label}</label>}
       description={description}
       control={

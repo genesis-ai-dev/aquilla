@@ -56,6 +56,15 @@ vi.mock("@/lib/posthog", () => ({
   default: new Proxy({}, { get: () => vi.fn() }),
 }))
 
+// AQU-2262: Project settings host the undo history when no workspace does, and
+// the history reads and writes its copy on the server as it opens. Every
+// settings test would make that request. Here the server copy answers as if
+// offline (the history stays on the device); a test of the real one calls
+// vi.unmock("@/lib/history/history-remote").
+vi.mock("@/lib/history/history-remote", () => ({
+  httpHistoryRemote: () => ({ read: async () => null, write: async () => null }),
+}))
+
 // happy-dom has no layout engine, so the real LegendList may paint zero items.
 // Directory tables (and EditorTable, unless a file supplies a richer mock)
 // render every row so RTL can still query names/cells.

@@ -21,7 +21,7 @@ export function stubRev4Data(populated: boolean): ToolRev4HostData {
       ? { audioId: "a1", durationMs: 4200, trimStartMs: null, trimEndMs: null, trimmable: true, peaks: Array.from({ length: 64 }, (_, i) => Math.abs(Math.sin(i / 5))), isGenerated: true, takeVoiceName: null }
       : null,
     trimAudio: yes,
-    voices: async () => ({ voices: [{ id: "v1", name: "Narrator" }, { id: "v2", name: "Jesus" }], current: { c1: { id: "v1", name: "Narrator", explicit: false } }, canClone: true }),
+    voices: async () => ({ voices: [{ id: "v1", name: "Narrator" }, { id: "v2", name: "Jesus" }], current: { c1: { id: "v1", name: "Narrator", explicit: false } }, canClone: false }),
     assignVoice: yes,
     cloneVoice: yes,
     sourceActions: async () => ({ edit: null, hide: { reason: null, hidden: false }, insertAbove: null, insertBelow: null, remove: null }),

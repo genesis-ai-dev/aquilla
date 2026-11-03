@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react"
-import { useNavigate } from "react-router-dom"
+import { Link, useNavigate } from "react-router-dom"
 import { type ColumnDef } from "@tanstack/react-table"
 import { FolderOpen } from "lucide-react"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
@@ -22,9 +22,10 @@ import { OrgWithAvatar } from "@/components/OrgWithAvatar"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { Badge } from "@/components/ui/badge"
 import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
+import { adminOrgHref } from "@/lib/admin/drilldown-paths"
 import { useT } from "@/lib/i18n/I18nProvider"
 
-type Lens = "all" | "needs-attention" | "active" | "archived"
+export type Lens = "all" | "needs-attention" | "active" | "archived"
 const LENSES: { value: Lens; label: string }[] = [
   { value: "all", label: "All" },
   { value: "needs-attention", label: "Needs attention" },
@@ -38,11 +39,24 @@ const LENSES: { value: Lens; label: string }[] = [
  * (overdue / due-soon / stalled) instead of a bare "Active", turning the old
  * flat table into something an operator can triage from.
  */
-export function AdminProjectsSection({ projects }: { projects: AdminProject[] }) {
+export function AdminProjectsSection({
+  projects,
+  initialLens = "all",
+  hideOrg = false,
+  onSelectOrg,
+}: {
+  projects: AdminProject[]
+  /** Starting filter, e.g. "needs-attention" when a stat tile opened this tab. */
+  initialLens?: Lens
+  /** Drop the Org column, for a list already scoped to one org. */
+  hideOrg?: boolean
+  /** Makes the Org cell a link to that org's admin page. */
+  onSelectOrg?: (orgId: number) => void
+}) {
   const t = useT()
   const navigate = useNavigate()
   const [now] = useState(() => Date.now())
-  const [lens, setLens] = useState<Lens>("all")
+  const [lens, setLens] = useState<Lens>(initialLens)
 
   const data = useMemo(() => {
     switch (lens) {
@@ -83,12 +97,28 @@ export function AdminProjectsSection({ projects }: { projects: AdminProject[] })
         accessorFn: (p) => missingLast((p.orgName ?? "").toLowerCase()),
         sortUndefined: SORT_MISSING_LAST,
         header: ({ column }) => <DataTableColumnHeader column={column} title="Org" />,
-        cell: ({ row }) =>
-          row.original.orgName ? (
-            <OrgWithAvatar name={row.original.orgName} size="xs" nameClassName="font-normal" />
-          ) : (
-            "—"
-          ),
+        cell: ({ row }) => {
+          const { orgName, orgId } = row.original
+          if (!orgName) return "—"
+          const chip = <OrgWithAvatar name={orgName} size="xs" nameClassName="font-normal" />
+          if (orgId == null || !onSelectOrg) return chip
+          return (
+            <Link
+              to={adminOrgHref(orgId)}
+              className="inline-flex max-w-full hover:underline"
+              onClick={(e) => {
+                // Row click opens the project; this link opens the org.
+                e.stopPropagation()
+                if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+                  e.preventDefault()
+                  onSelectOrg(orgId)
+                }
+              }}
+            >
+              {chip}
+            </Link>
+          )
+        },
       },
       {
         id: "creator",
@@ -150,7 +180,11 @@ export function AdminProjectsSection({ projects }: { projects: AdminProject[] })
         },
       },
     ],
-    [now, t],
+    [now, t, onSelectOrg],
+  )
+  const visibleColumns = useMemo(
+    () => (hideOrg ? columns.filter((c) => c.id !== "org") : columns),
+    [columns, hideOrg],
   )
 
   const emptyCopy = useMemo(() => {
@@ -199,12 +233,13 @@ export function AdminProjectsSection({ projects }: { projects: AdminProject[] })
       // Remount when the lens changes so sort resets to the lens default
       // (status urgency for needs-attention; name A→Z otherwise).
       key={lens}
-      columns={columns}
+      columns={visibleColumns}
       data={data}
       getRowId={(p) => p.id}
       onRowClick={(p) => {
         if (!p.archived) navigate(`/projects/${p.id}`)
       }}
+      rowLink={{ columnId: "name", to: (p) => `/projects/${p.id}` }}
       initialSorting={initialSorting}
       searchPlaceholder="Search projects…"
       globalFilterFn={(row, _columnId, filterValue) => {

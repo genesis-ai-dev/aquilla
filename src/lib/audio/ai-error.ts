@@ -25,8 +25,8 @@
 //      threw ourselves. Localizing it means localizing each throw site.
 //   3. The four `*_BODY` constants imported below. They are match keys as well
 //      as copy: tts-engine-error.ts THROWS them, and the branches above select
-//      on English substrings of them ("this line uses inworld", "this clone
-//      voice needs seed-vc"). Translating them would break the matching that
+//      on English substrings of them ("this line uses inworld", "voice
+//      conversion isn't set up"). Translating them would break the matching that
 //      picks their own branch, so the throw sites and the matcher must change
 //      together.
 // `src/lib/errors/localized-error-text.test.ts` pins 2 and 3 so they cannot
@@ -37,9 +37,11 @@ import { isAiAllowanceMessage } from "@/lib/billing/ai-refusal"
 import {
   HOSTED_TTS_FAILED_BODY,
   HOSTED_TTS_NOT_CONFIGURED_BODY,
-  SEED_VC_FAILED_BODY,
-  SEED_VC_NOT_CONFIGURED_BODY,
+  VOICE_CONVERT_FAILED_BODY,
+  VOICE_CONVERT_NOT_CONFIGURED_BODY,
 } from "./tts-engine-error"
+import { ELEVENLABS_ERROR_RE, type ElevenLabsFailure } from "./elevenlabs/errors"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 
 /** Shown when hosted drafting has no OpenRouter key. Names the setting to
  *  change and states that a user-supplied key is not Aquilla-billed. */
@@ -58,8 +60,14 @@ export type ErrorCategory =
   | "hosted-tts-not-configured"
   | "hosted-tts-failed"
   | "ai-allowance-exhausted"
-  | "seed-vc-not-configured"
-  | "seed-vc-failed"
+  | "voice-convert-not-configured"
+  | "voice-convert-failed"
+  | "elevenlabs-key-missing"
+  | "elevenlabs-invalid-key"
+  | "elevenlabs-quota"
+  | "elevenlabs-clone-not-allowed"
+  | "elevenlabs-rate-limited"
+  | "elevenlabs-failed"
   | "consent-denied"
   | "no-source-text"
   | "translation-not-configured"
@@ -101,6 +109,18 @@ function extractStatus(lowered: string): number | null {
   return match ? Number(match[1]) : null
 }
 
+/** ElevenLabs (AQU-2299, BYOK) failures by their message lead-in
+ *  (elevenlabs/errors.ts). Every title and body names ElevenLabs and only
+ *  ElevenLabs — the user's own key and account, never another engine. */
+const ELEVENLABS_CATEGORIES: Record<ElevenLabsFailure, { category: ErrorCategory; titleKey: MessageKey; bodyKey: MessageKey }> = {
+  "no key": { category: "elevenlabs-key-missing", titleKey: "audio.aiError.elevenLabsNoKeyTitle", bodyKey: "audio.aiError.elevenLabsNoKeyBody" },
+  "invalid key": { category: "elevenlabs-invalid-key", titleKey: "audio.aiError.elevenLabsInvalidKeyTitle", bodyKey: "audio.aiError.elevenLabsInvalidKeyBody" },
+  "out of characters": { category: "elevenlabs-quota", titleKey: "audio.aiError.elevenLabsQuotaTitle", bodyKey: "audio.aiError.elevenLabsQuotaBody" },
+  "cloning not allowed": { category: "elevenlabs-clone-not-allowed", titleKey: "audio.aiError.elevenLabsCloneNotAllowedTitle", bodyKey: "audio.aiError.elevenLabsCloneNotAllowedBody" },
+  "rate limited": { category: "elevenlabs-rate-limited", titleKey: "audio.aiError.elevenLabsRateLimitedTitle", bodyKey: "audio.aiError.elevenLabsRateLimitedBody" },
+  failed: { category: "elevenlabs-failed", titleKey: "audio.aiError.elevenLabsFailedTitle", bodyKey: "audio.aiError.elevenLabsFailedBody" },
+}
+
 export interface ActionableError {
   category: ErrorCategory
   /** One-line heading for the popover. Plain English, no jargon. */
@@ -126,6 +146,15 @@ export function categorizeAiError(rawMessage: string): ActionableError {
       body: t("audio.aiError.transcriptionModelUnavailableBody"),
       raw,
     }
+  }
+
+  // ElevenLabs is bring-your-own-key: its failures are about the user's own
+  // key and account, so they are matched before every platform branch (none of
+  // the platform's budgets or ceilings apply to it).
+  const elevenLabs = raw.match(ELEVENLABS_ERROR_RE)
+  if (elevenLabs) {
+    const entry = ELEVENLABS_CATEGORIES[elevenLabs[1].toLowerCase() as ElevenLabsFailure]
+    return { category: entry.category, title: t(entry.titleKey), body: t(entry.bodyKey), raw }
   }
 
   // Platform daily SPEND ceiling (AQU-1869): a 503 from any paid AI path once
@@ -254,7 +283,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
     }
   }
 
-  // Hosted TTS / clone conversion — name the engine BEFORE the Gemini-key
+  // Hosted TTS / voice conversion — name the engine BEFORE the Gemini-key
   // heuristic. A local sync-worker 503 ("TTS not configured") is Inworld,
   // not a missing Google key; sending people to Gemini settings is a lie.
   // Text-generation failures must not take these branches either.
@@ -283,19 +312,19 @@ export function categorizeAiError(rawMessage: string): ActionableError {
     }
   }
   if (
-    m.includes("this clone voice needs seed-vc") ||
+    m.includes("voice conversion isn't set up") ||
     m.includes("voice conversion not configured")
   ) {
     return {
-      category: "seed-vc-not-configured",
-      title: t("audio.aiError.seedVcNotConfiguredTitle"),
-      body: SEED_VC_NOT_CONFIGURED_BODY,
+      category: "voice-convert-not-configured",
+      title: t("audio.aiError.voiceConvertNotConfiguredTitle"),
+      body: VOICE_CONVERT_NOT_CONFIGURED_BODY,
       raw,
     }
   }
   if (m.includes("voice service took too long")) {
     return {
-      category: "seed-vc-failed",
+      category: "voice-convert-failed",
       title: t("audio.aiError.voiceConvertSlowTitle"),
       body: t("audio.aiError.voiceConvertSlowBody"),
       raw,
@@ -304,14 +333,12 @@ export function categorizeAiError(rawMessage: string): ActionableError {
   if (
     m.includes("voice conversion failed") ||
     m.includes("voice conversion couldn't") ||
-    m.includes("voice cloning (seed-vc) failed") ||
-    m.includes("voice cloning (seed-vc) couldn't") ||
     m.includes("voice convert failed")
   ) {
     return {
-      category: "seed-vc-failed",
-      title: t("audio.aiError.seedVcFailedTitle"),
-      body: SEED_VC_FAILED_BODY,
+      category: "voice-convert-failed",
+      title: t("audio.aiError.voiceConvertFailedTitle"),
+      body: VOICE_CONVERT_FAILED_BODY,
       raw,
     }
   }

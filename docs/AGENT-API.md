@@ -1425,7 +1425,7 @@ own copy of the two prose sections and that copy replaces the project's for that
     can see it is not the project's brief.
 - **Rows a lane owns: knowledge documents and style rules.** The prose sections above are
   values a lane *overrides*; a document and a rule are ROWS, so a lane does not override them
-  — it ADDS one. `knowledge_docs.lane_id` and `style_rules.lane_id` (migration 0192, nullable,
+  — it ADDS one. `knowledge_docs.lane_id` and `style_rules.lane_id` (migration 0196, nullable,
   nothing to backfill) carry the owning lane's `lanes.id`; `NULL` is the project's own row,
   in force in every lane, which is what every row written before the column was.
   - **Retrieval is the project's rows plus this lane's, never another lane's.** One rule,

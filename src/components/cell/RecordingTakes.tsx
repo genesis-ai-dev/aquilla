@@ -20,9 +20,8 @@ import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord, ProjectTtsSettings } from "@/lib/parsers/types"
-import { cloneNameSuggestion, lineVoicePending } from "@/lib/audio/line-voice"
+import { lineVoicePending } from "@/lib/audio/line-voice"
 import { useVoicingAs } from "@/lib/audio/voicing-as"
-import { takeUsedByVoice } from "@/lib/audio/change-voice-batch"
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { useOnline } from "@/hooks/useOnline"
 import { useConnectivity } from "@/lib/offline/connectivity"
@@ -131,9 +130,9 @@ function OwnerTakes({
    *  than draw nothing (Sam, 2026-09-29 — a line split across heard lines). */
   offerWhenEmpty?: boolean
 }) {
-  // AQU-1758: the take's "Make a character from this voice", when offered —
-  // in one step (AQU-2212), the dialog its More options.
-  const { onMakeCharacter, onCloneTake } = useEditorActions()
+  // AQU-1758 / AQU-2291: the take's "Train a voice from this recording",
+  // when offered.
+  const { onTrainFromTake } = useEditorActions()
   const t = useT()
   const shared: Shared = { ...rest, project, session }
   const { attachments, selectedAudioId, selectedGeneratedVoiceAudioId, fileId, id: cellId } = owner
@@ -269,9 +268,7 @@ function OwnerTakes({
                 pieces={split}
                 takesHistory={history}
                 onLastTakeRemoved={shared.onLastTakeRemoved}
-                onMakeCharacter={onMakeCharacter ? () => onMakeCharacter(owner.id) : undefined}
-                onCloneTake={onCloneTake ? (name) => onCloneTake(owner.id, playing, name) : undefined}
-                cloneSuggestedName={cloneNameSuggestion(owner, shared.username)}
+                onTrainFromTake={onTrainFromTake ? () => onTrainFromTake(owner.id, playing) : undefined}
                 trackName={showTracks ? group.name || t("editor.recordingTab.addedTrack") : null}
                 trackFileId={trackFileId}
               />
@@ -318,7 +315,7 @@ function LineVoiceRow({ cell, settings, editable, voiceFromText }: {
   voiceFromText: boolean
 }) {
   const t = useT()
-  const { onApplyLineVoice, allTtsSettings } = useEditorActions()
+  const { onApplyLineVoice } = useEditorActions()
   const voicingAs = useVoicingAs(cell.id)
   const status = useTtsStatus(ttsStatusKey(cell.id))
   const online = useOnline()
@@ -334,9 +331,6 @@ function LineVoiceRow({ cell, settings, editable, voiceFromText }: {
   if (!onApplyLineVoice) return null
   const pending = lineVoicePending(settings, cell, {
     generateReady: voiceFromText && Boolean(cell.translated?.trim()) && cell.type !== "paratext" && online && reachable !== false,
-    // The whole library, as the click is run (AQU-2037): a voice on another
-    // lane cloned from this take would be changed just the same.
-    takeIsReference: takeUsedByVoice(cell, allTtsSettings ?? settings),
     canEdit: editable,
     busy: status.kind === "loading" || status.kind === "synthesizing",
   })

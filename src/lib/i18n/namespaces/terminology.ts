@@ -50,7 +50,7 @@ export const terminology = defineNamespace({
     "terminology.editor.loadingGlossary": "Loading terminology",
     "terminology.editor.loadingTermDetails": "Loading term details",
     "terminology.editor.errorRequiresProjectLead":
-      "Requires the Project lead role or higher to manage the terminology.",
+      "Requires the Project Lead role or higher to manage the terminology.",
     "terminology.editor.errorConflict":
       "The terminology changed elsewhere. Review the latest terms and try again.",
     "terminology.editor.errorOffline": "Terminology changes will sync when you reconnect.",
@@ -136,7 +136,7 @@ export const terminology = defineNamespace({
     "terminology.livingMemory.contributorRequiredTooltip":
       "This requires the Contributor role or above.",
     "terminology.livingMemory.projectLeadRequiredTooltip":
-      "This requires the Project lead role or above.",
+      "This requires the Project Lead role or above.",
     "terminology.livingMemory.addEntryAria": "Add {section} entry",
     "terminology.livingMemory.exampleLabel": "Example:",
     "terminology.livingMemory.editEntryAria": "Edit entry",
@@ -445,7 +445,7 @@ export const terminology = defineNamespace({
     "terminology.reviewQueue.rejectAria": "Reject concept {term}",
     // "Read-only" permission badge → common.readOnly (identical text)
     "terminology.reviewQueue.readOnlyTooltip":
-      "Requires the Project lead role or higher to approve/reject concepts.",
+      "Requires the Project Lead role or higher to approve/reject concepts.",
     "terminology.reviewQueue.emptyTitle": "No concepts awaiting review.",
     "terminology.reviewQueue.emptyDescription":
       "Draft concepts promoted from candidates will appear here.",

@@ -38,7 +38,7 @@ afterEach(() => {
 /**
  * Owner (700) and maintainer (600) of the org; a project lead (500) and a
  * contributor (400) on the project. `floor` is the org's languageEditMinRole,
- * absent by default (Project lead).
+ * absent by default (Project Lead).
  */
 async function seed(floor?: number) {
   await seedUser(1, "owner")
@@ -169,7 +169,7 @@ describe("POST /projects/:id/lanes/:laneId/delivers", () => {
 })
 
 describe("the Delivers choice under a stricter language floor", () => {
-  it("refuses a Project lead when the org asks for a Maintainer", async () => {
+  it("refuses a Project Lead when the org asks for a Maintainer", async () => {
     await seed(600)
     expect((await setDelivers("lee", "ln-sw", "audio")).status).toBe(403)
     expect(await stored("ln-sw")).toEqual({ delivers: "text", records_audio: false })

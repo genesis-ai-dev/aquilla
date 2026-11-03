@@ -440,6 +440,15 @@ UI chrome that used to be one smoke file per click is covered under
   had no Docker, hence no local Postgres and no runnable stack. It is on the ticket's QA checklist
   rather than written blind — same call as the AQU-1187 row below. There is no existing org-floor
   smoke to extend (no spec drives `/settings/security` today), so this would be a new journey file.
+  AQU-2306 adds the row's disclosure of which projects require MORE than the org: the count, the
+  zero state, the loading state that says nothing, the capped and visibility-filtered list with its
+  "and N more" remainder, the absence of a reset, and the re-read when the org's floor moves are in
+  `ImportPermissionsSection.test.tsx`; the server side of the count — name-visibility filtering, the
+  50 cap beside the exact total, the number-only read of AQU-2305's `wp_import_min_role` column, and the count falling to zero when the ORG
+  rises past a project with nothing written to that project — in auth-worker
+  `org-stricter-import-projects.test.ts`. It shares the walk above's gap for the same reason, and
+  the cross-project version of it (project A goes stricter → the org's Security row names A → the
+  link lands on A's Import card) is on AQU-2306's QA checklist.
 - Project import floor (AQU-2305): a project may make that same floor **stricter and never looser**.
   A maintainer sets **Project settings → Import → "Who can import files"** from "Organization default
   (Project lead)" to "Set for this project" → Maintainer, and in that project alone a project lead

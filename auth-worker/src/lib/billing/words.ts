@@ -249,46 +249,75 @@ export function parseBillingOverrides(settings: string | null | undefined): OrgB
   }
 }
 
+/**
+ * What a billing override save did. "conflict": another organization settings
+ * save won the race twice, so nothing was written. "error": the write failed
+ * and was logged.
+ */
+export type BillingOverridesWrite = "saved" | "conflict" | "error"
+
+/**
+ * Save an org's billing overrides into the `billing` key of its settings row.
+ *
+ * AQU-2328: the row is shared with every organization setting, so this checks
+ * and bumps `version` like the other org_settings writers. A settings save
+ * made from an older read is then refused instead of putting the old overrides
+ * back, and a settings save that lands between this read and write makes the
+ * write miss, so it reads the row again and tries once more.
+ */
 export async function writeOrgBillingOverrides(
   db: AquillaDb,
   orgId: number,
   patch: Partial<OrgBillingOverrides>,
-): Promise<void> {
-  const current = await readOrgBillingOverrides(db, orgId)
-  const next: OrgBillingOverrides = {
-    includedCredits: patch.includedCredits === undefined ? current.includedCredits : patch.includedCredits,
-    billedLanguageCount:
-      patch.billedLanguageCount === undefined ? current.billedLanguageCount : patch.billedLanguageCount,
+): Promise<BillingOverridesWrite> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const row = await db
+        .prepare(`SELECT settings, version FROM org_settings WHERE org_id = ?`)
+        .bind(orgId)
+        .first<{ settings: string; version: number }>()
+      const current = parseBillingOverrides(row?.settings)
+      const next: OrgBillingOverrides = {
+        includedCredits: patch.includedCredits === undefined ? current.includedCredits : patch.includedCredits,
+        billedLanguageCount:
+          patch.billedLanguageCount === undefined ? current.billedLanguageCount : patch.billedLanguageCount,
+      }
+      const parsed = row?.settings ? (JSON.parse(row.settings) as Record<string, unknown>) : {}
+      const billing =
+        parsed.billing && typeof parsed.billing === "object" && !Array.isArray(parsed.billing)
+          ? { ...(parsed.billing as Record<string, unknown>) }
+          : {}
+      if (next.includedCredits == null) delete billing.includedCredits
+      else billing.includedCredits = next.includedCredits
+      if (next.billedLanguageCount == null) delete billing.billedLanguageCount
+      else billing.billedLanguageCount = next.billedLanguageCount
+      const settings = JSON.stringify({ ...parsed, billing })
+      const result = row
+        ? await db
+            .prepare(
+              `UPDATE org_settings
+                  SET settings = ?, version = version + 1, updated_at = now()
+                WHERE org_id = ? AND version = ?`,
+            )
+            .bind(settings, orgId, row.version)
+            .run()
+        : await db
+            .prepare(
+              `INSERT INTO org_settings (org_id, settings, version, updated_at)
+               VALUES (?, ?, 1, now())
+               ON CONFLICT (org_id) DO NOTHING`,
+            )
+            .bind(orgId, settings)
+            .run()
+      // Same reading as the other writers: only a reported 0 is a lost race.
+      const changes = result.meta?.changes
+      if (typeof changes !== "number" || changes > 0) return "saved"
+    } catch (err) {
+      if (!isMissingTableError(err)) console.error("[billing] writeOrgBillingOverrides error:", err)
+      return "error"
+    }
   }
-  try {
-    const row = await db
-      .prepare(`SELECT settings FROM org_settings WHERE org_id = ?`)
-      .bind(orgId)
-      .first<{ settings: string }>()
-    const parsed = row?.settings ? (JSON.parse(row.settings) as Record<string, unknown>) : {}
-    const billing =
-      parsed.billing && typeof parsed.billing === "object" && !Array.isArray(parsed.billing)
-        ? { ...(parsed.billing as Record<string, unknown>) }
-        : {}
-    if (next.includedCredits == null) delete billing.includedCredits
-    else billing.includedCredits = next.includedCredits
-    if (next.billedLanguageCount == null) delete billing.billedLanguageCount
-    else billing.billedLanguageCount = next.billedLanguageCount
-    const settings = JSON.stringify({ ...parsed, billing })
-    await db
-      .prepare(
-        `INSERT INTO org_settings (org_id, settings, version, updated_at)
-         VALUES (?, ?, 1, now())
-         ON CONFLICT (org_id) DO UPDATE SET
-           settings = EXCLUDED.settings,
-           updated_at = now()`,
-      )
-      .bind(orgId, settings)
-      .run()
-  } catch (err) {
-    if (isMissingTableError(err)) return
-    console.error("[billing] writeOrgBillingOverrides error:", err)
-  }
+  return "conflict"
 }
 
 /**

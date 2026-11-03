@@ -27,6 +27,7 @@
 // Pure: nothing here touches the network, React or the DOM, so every rule is
 // pinned by match.test.ts.
 
+import { toWesternDigits } from "../../../../shared/decimal-digits"
 import { BOOK_CODES, BookNameIndex, englishBookName } from "./book-names"
 import { folderSegments, isRangeSep, naturalCompare, readName, type NameNumber, type NameReading } from "./read-name"
 import { LAST_VERSES } from "./verse-counts"
@@ -206,8 +207,7 @@ export function precheckFile(file: BulkInputFile, maxBytes: number): UnmatchedRe
 
 /** A project file name, compared the way a recording's name prefix is. */
 function fileNameKey(name: string): string {
-  return name
-    .normalize("NFKC")
+  return toWesternDigits(name.normalize("NFKC"))
     .toLowerCase()
     .replace(/\.[a-z0-9]{1,5}$/i, "")
     .replace(/[\s._\-'’]+/gu, " ")

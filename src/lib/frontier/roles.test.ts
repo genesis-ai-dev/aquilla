@@ -223,7 +223,7 @@ describe("AQU-832/WS-08: a role used for comparison keeps working when its label
     "common.role.commenter": "Commentateur",
     "common.role.reviewer": "Réviseur",
     "common.role.contributor": "Contributeur",
-    "common.role.projectLead": "Chef de projet",
+    "common.role.projectLead": "Chef de Projet",
     "common.role.maintainer": "Mainteneur",
     "common.role.owner": "Propriétaire",
   }

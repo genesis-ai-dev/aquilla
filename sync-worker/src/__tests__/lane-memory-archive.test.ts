@@ -45,8 +45,8 @@ beforeEach(async () => {
        VALUES ('5ce00000', $1, 'source', 'Greek', NULL, 0)`,
     [PROJECT],
   )
-  await insertTargetLane(t.db, PROJECT, { id: ES, language: "Spanish", legacyTag: "es" })
-  await insertTargetLane(t.db, PROJECT, { id: FR, language: "French", legacyTag: "fr" })
+  await insertTargetLane(t.db, PROJECT, { id: ES, language: "Spanish", name: null, langCode: null, legacyTag: "es" })
+  await insertTargetLane(t.db, PROJECT, { id: FR, language: "French", name: null, langCode: null, legacyTag: "fr" })
 })
 afterAll(async () => {
   await t?.close()

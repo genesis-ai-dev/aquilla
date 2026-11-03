@@ -235,7 +235,9 @@ export function briefWriteOp(
   if (laneId === undefined) return { key: BRIEF_SETTINGS_KEY, value: brief }
   return {
     key: BRIEF_BY_LANE_SETTINGS_KEY,
-    value: withLaneMemoryValue(readLaneBriefMap(settings), laneId, brief),
+    // `<unknown>` as readBriefForLane's resolveLaneOverride does: the stored
+    // map is raw (junk-tolerant), only the value being written is a parsed record.
+    value: withLaneMemoryValue<unknown>(readLaneBriefMap(settings), laneId, brief),
   }
 }
 

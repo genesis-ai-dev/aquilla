@@ -121,6 +121,7 @@ export function ExperimentalFlagsSection({
     <div id="section-experimental">
       <SettingsGroup label={t("autopilot.settings.experimentalTitle")}>
         <SettingsRow
+          saveId="autopilotEnabled"
           label={<label htmlFor="experimental-autopilot">{t("autopilot.settings.autopilotLabel")}</label>}
           description={t("autopilot.settings.autopilotDescription")}
           control={
@@ -139,6 +140,7 @@ export function ExperimentalFlagsSection({
           }
         />
         <SettingsRow
+          saveId="smartExtensionsEnabled"
           label={<label htmlFor="experimental-smart-extensions">{t("extensions.flag.label")}</label>}
           description={t("extensions.flag.description")}
           control={

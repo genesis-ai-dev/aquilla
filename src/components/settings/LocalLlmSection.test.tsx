@@ -46,11 +46,14 @@ describe("LocalLlmSection", () => {
     expect(screen.getByDisplayValue("phi3")).toBeInTheDocument()
   })
 
-  it("saves edited settings on submit", async () => {
+  // AQU-2262: settings save as you change them; there is no Save button.
+  it("saves the endpoint when you leave the field, with no Save button", async () => {
     render(<LocalLlmSection />)
+    expect(screen.queryByRole("button", { name: /^save$/i })).toBeNull()
     const endpointInput = screen.getByDisplayValue("http://localhost:11434")
     fireEvent.change(endpointInput, { target: { value: "http://localhost:8000" } })
-    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+    expect(setLocalLlmSettings).not.toHaveBeenCalled()
+    fireEvent.blur(endpointInput)
 
     await waitFor(() => expect(setLocalLlmSettings).toHaveBeenCalledWith({
       endpoint: "http://localhost:8000",
@@ -89,6 +92,11 @@ describe("LocalLlmSection", () => {
       )
       expect(listLocalLlmModels).toHaveBeenCalledWith("http://localhost:11434")
       expect(screen.getByText(/Detected and filled in/)).toBeInTheDocument()
+      // Filled in is saved (AQU-2262).
+      expect(setLocalLlmSettings).toHaveBeenCalledWith({
+        endpoint: "http://localhost:11434",
+        model: "qwen/qwen2.5-coder-14b",
+      })
     })
 
     it("offers a pick list when multiple models are found, and fills the field on click", async () => {
@@ -100,6 +108,7 @@ describe("LocalLlmSection", () => {
       fireEvent.click(screen.getByRole("button", { name: "mistral" }))
 
       expect(screen.getByDisplayValue("mistral")).toBeInTheDocument()
+      expect(setLocalLlmSettings).toHaveBeenCalledWith({ endpoint: "http://localhost:11434", model: "mistral" })
     })
 
     it("reports when no models are found", async () => {
@@ -124,7 +133,7 @@ describe("LocalLlmSection", () => {
       fireEvent.click(screen.getByRole("button", { name: /detect models/i }))
       await waitFor(() => expect(screen.getByText(/No models found/)).toBeInTheDocument())
 
-      fireEvent.change(screen.getByDisplayValue("llama3"), { target: { value: "custom-model" } })
+      fireEvent.input(screen.getByDisplayValue("llama3"), { target: { value: "custom-model" } })
       expect(screen.queryByText(/No models found/)).not.toBeInTheDocument()
     })
   })

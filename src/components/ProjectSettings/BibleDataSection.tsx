@@ -90,6 +90,7 @@ export function BibleDataSection({
     <>
       <SettingsGroup label={t("bibleData.card.title")} locked={canEdit ? null : lockedTooltip}>
         <SettingsRow
+          saveId="bibleResourcesEnabled"
           label={<label htmlFor="bible-resources-enabled">{t(enableLabelKey)}</label>}
           description={
             <>
@@ -135,6 +136,7 @@ export function BibleDataSection({
           return (
             <SettingsRow
               key={id}
+              saveId={`bibleEnrichments.${id}`}
               label={<label htmlFor={controlId}>{t(BIBLE_ENRICHMENT_LABEL_KEYS[id])}</label>}
               description={
                 <>

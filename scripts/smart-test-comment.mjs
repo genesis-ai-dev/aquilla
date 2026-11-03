@@ -196,7 +196,7 @@ async function publishRelease({ ref, sha, body, token, author, fetchImpl }) {
   if (existing?.body === body) return "unchanged"
   if (existing && !Number.isSafeInteger(existing.id)) throw new Error("Invalid comment ID")
   await api(
-    existing ? `/commits/comments/${existing.id}` : `/commits/${sha}/comments`,
+    existing ? `/comments/${existing.id}` : `/commits/${sha}/comments`,
     existing ? "PATCH" : "POST",
     { body },
   )

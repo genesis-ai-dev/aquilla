@@ -26,6 +26,15 @@ import {
   ADMIN_TABLE_SECTION_HEADER,
 } from "@/components/admin/shared"
 
+/** The stat tiles that can open the list behind their number. */
+export type OverviewTile =
+  | "orgs"
+  | "teams"
+  | "users"
+  | "activeProjects"
+  | "activeUsers"
+  | "needAttention"
+
 /**
  * The Overview tab, rebuilt as an operator home. Stat tiles carry context via
  * `hint`; below them, three Sections answer "what needs me": at-risk projects,
@@ -41,6 +50,7 @@ export function AdminOverviewHome({
   onOpenOrg,
   onViewProjects,
   onViewActivity,
+  onOpenTile,
 }: {
   overview: AdminOverview
   orgs: AdminOrg[]
@@ -50,8 +60,11 @@ export function AdminOverviewHome({
   onOpenOrg: (orgId: number) => void
   onViewProjects: () => void
   onViewActivity: () => void
+  /** Makes each stat tile a button that opens the list behind it. */
+  onOpenTile?: (tile: OverviewTile) => void
 }) {
   const navigate = useNavigate()
+  const tile = (name: OverviewTile) => (onOpenTile ? () => onOpenTile(name) : undefined)
   const [now] = useState(() => Date.now())
   const atRisk = useMemo(() => projectsNeedingAttention(projects, now, 6), [projects, now])
   const atRiskTotal = useMemo(() => projectsNeedingAttention(projects, now).length, [projects, now])
@@ -145,26 +158,30 @@ export function AdminOverviewHome({
   return (
     <div className="space-y-6">
       <div className={STAT_TILE_GRID}>
-        <StatTile label="Organizations" value={overview.orgs} />
-        <StatTile label="Teams" value={overview.teams} />
+        <StatTile label="Organizations" value={overview.orgs} onClick={tile("orgs")} />
+        <StatTile label="Teams" value={overview.teams} onClick={tile("teams")} />
         <StatTile
           label="Users"
           value={overview.users}
+          onClick={tile("users")}
           hint={newSignups > 0 ? `+${newSignups} in the last 7 days` : "No new signups this week"}
         />
         <StatTile
           label="Active projects"
           value={overview.activeProjects}
+          onClick={tile("activeProjects")}
           hint={`${overview.archivedProjects.toLocaleString()} archived`}
         />
         <StatTile
           label="Active users"
           value={overview.activeUsers7d}
+          onClick={tile("activeUsers")}
           hint={`of ${overview.users.toLocaleString()} · last 7 days`}
         />
         <StatTile
           label="Need attention"
           value={atRiskTotal}
+          onClick={tile("needAttention")}
           hint={overdueCount > 0 ? `${overdueCount} overdue` : "projects at risk"}
           className={atRiskTotal > 0 ? "border-amber-500/40" : undefined}
         />

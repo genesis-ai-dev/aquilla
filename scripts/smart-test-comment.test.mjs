@@ -293,4 +293,26 @@ describe("release HEAD publication", () => {
     }
     expect(await publishReport({ ref: releaseRef, sha, body, token: "fake", author: "qa", fetchImpl: moved })).toBe("superseded")
   })
+
+  it("updates the existing commit comment at GitHub's /comments/{id} route", async () => {
+    // The runner posts "Starting" first, then rewrites that same comment with
+    // the verdict. GitHub updates a commit comment at /repos/{o}/{r}/comments/{id};
+    // a /commits/comments/{id} path is read as a commit lookup and fails, so the
+    // verdict never lands and the deploy check waits forever.
+    const writes = []
+    const fetchImpl = async (url, options) => {
+      if (options.method !== "GET") {
+        writes.push({ url, method: options.method })
+        return { ok: true, json: async () => ({ id: 207830084 }) }
+      }
+      if (url.includes("/comments")) {
+        return { ok: true, json: async () => [{ id: 207830084, user: { login: "qa" }, body: `${renderReport({ sha, phase: "running", releaseRef })}` }] }
+      }
+      return { ok: true, json: async () => ({ sha }) }
+    }
+    const body = renderReport({ sha, phase: "finished", releaseRef })
+    expect(await publishReport({ ref: releaseRef, sha, body, token: "fake", author: "qa", fetchImpl })).toBe("updated")
+    expect(writes[0].method).toBe("PATCH")
+    expect(writes[0].url).toMatch(/\/repos\/genesis-ai-dev\/aquilla\/comments\/207830084$/)
+  })
 })

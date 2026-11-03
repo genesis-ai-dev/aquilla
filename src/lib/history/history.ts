@@ -47,9 +47,10 @@ import { tabConnId } from "@/lib/sync/ws-reconciler"
 /**
  * Why a step was left alone. `approved`: someone else approved what it made
  * since (`by` names them, gap 25). `notAllowed`: the person may no longer make
- * that change (gap 29).
+ * that change (gap 29). `otherDevice`: it changed a setting kept only on the
+ * device it was made on (AQU-2262), which this one does not share.
  */
-export type SkipReason = "changed" | "gone" | "unavailable" | "approved" | "notAllowed" | "linesChanged"
+export type SkipReason = "changed" | "gone" | "unavailable" | "approved" | "notAllowed" | "linesChanged" | "otherDevice"
 
 /** What an undo or redo did. `skipped` is not an error: it is the guard working. */
 export type StepOutcome =
@@ -113,6 +114,10 @@ export interface SkipLogEntry {
   by?: string
   /** When it was attempted. */
   at: number
+  /** The step's kind, so a History panel that shows one part of the app's
+   *  steps (Project settings, AQU-2262) shows only its skips. Absent on
+   *  entries logged before it was kept. */
+  kind?: string
 }
 
 interface Stacks extends HistoryDoc {
@@ -131,7 +136,8 @@ const GROUP_KIND = "group"
 const LIMITS = { steps: HISTORY_LIMIT, log: LOG_LIMIT }
 
 const stacks = new Map<string, Stacks>()
-const handlers = new Map<string, StepHandler<never>>()
+/** Each kind's registrations, newest last: the newest one runs. */
+const handlers = new Map<string, StepHandler<never>[]>()
 const listeners = new Set<() => void>()
 let activeScope: string | null = null
 let activeUser: string | null = null
@@ -606,6 +612,32 @@ export function setHistoryScope(projectId: string | null, username: string | nul
 }
 
 /**
+ * Host a project's history while nothing else does, and give it back after.
+ * (AQU-2262)
+ *
+ * The workspace hosts the history (`setHistoryScope`, `setHistoryRemote`)
+ * while a project is open. Project settings record steps too, and they can be
+ * open on their own page with no workspace behind them; then they host it, so
+ * Undo, the History panel and the copy on the server work there as well. Over
+ * the workspace (the settings dialog) the history is already hosted for the
+ * same project and person, and this changes nothing.
+ *
+ * Returns the release. It ends only what it started: the scope if it is still
+ * the active one, and the server copy if it set it.
+ */
+export function holdHistoryScope(projectId: string, username: string, makeRemote?: () => HistoryRemote): () => void {
+  const key = scopeKey(projectId, username)
+  if (activeScope === key) return () => {}
+  setHistoryScope(projectId, username, laneByProject.get(projectId) ?? "")
+  const ownRemote = !remote && makeRemote ? makeRemote() : null
+  if (ownRemote) setHistoryRemote(ownRemote)
+  return () => {
+    if (ownRemote && remote === ownRemote) setHistoryRemote(null)
+    if (activeScope === key) setHistoryScope(null, null)
+  }
+}
+
+/**
  * How opening a step's language went: open and loaded; `denied`, the person
  * may no longer work in it (the step is dropped, gap 29); `blocked`, it could
  * not be opened from here or not in time (the step waits, like one made in
@@ -626,12 +658,27 @@ export function setLaneSwitcher(fn: ((lane: string) => Promise<LaneSwitch>) | nu
  * Register what undo and redo mean for some step kinds. Returns the
  * unregister function; the newest registration of a kind wins, so a component
  * that re-registers with fresh closures replaces its earlier one.
+ *
+ * AQU-2262: registrations stack. Project settings open as a dialog over the
+ * workspace register the settings kinds the workspace registers too; when the
+ * dialog closes, the workspace's registration runs again rather than the kind
+ * being left with none (an undo would then drop the step as unavailable).
  */
 export function registerStepKinds(map: Record<string, StepHandler<never>>): () => void {
   const mine = Object.entries(map)
-  for (const [kind, handler] of mine) handlers.set(kind, handler)
+  for (const [kind, handler] of mine) {
+    const list = handlers.get(kind) ?? []
+    list.push(handler)
+    handlers.set(kind, list)
+  }
   return () => {
-    for (const [kind, handler] of mine) if (handlers.get(kind) === handler) handlers.delete(kind)
+    for (const [kind, handler] of mine) {
+      const list = handlers.get(kind)
+      if (!list) continue
+      const at = list.lastIndexOf(handler)
+      if (at >= 0) list.splice(at, 1)
+      if (list.length === 0) handlers.delete(kind)
+    }
   }
 }
 
@@ -845,7 +892,8 @@ async function runRecord(record: StepRecord, which: "undo" | "redo"): Promise<St
   const pending = pendingWrites.get(record.id)
   if (pending && !(await pending)) return { kind: "skipped", reason: "gone" }
   if (record.kind === GROUP_KIND) return runGroup(record as StepRecord<{ steps: StepRecord[] }>, which)
-  const handler = handlers.get(record.kind) as StepHandler<unknown> | undefined
+  const registered = handlers.get(record.kind)
+  const handler = registered?.[registered.length - 1] as StepHandler<unknown> | undefined
   if (!handler) return { kind: "skipped", reason: "unavailable" }
   try {
     return await (which === "undo" ? handler.undo(record.data) : handler.redo(record.data))
@@ -900,12 +948,12 @@ export async function redoLast(): Promise<HistoryResult | null> {
 // 2026-10-13, where one undo could take seconds and most presses vanished).
 let queue: Promise<unknown> = Promise.resolve()
 
-function run(which: "undo" | "redo"): Promise<HistoryResult | null> {
+function run(which: "undo" | "redo", pickId?: string): Promise<HistoryResult | null> {
   if (!activeScope) return Promise.resolve(null)
   // A press belongs to the project it was made in; if the user has moved on
   // by the time its turn comes, it does nothing.
   const scope = activeScope
-  const turn = queue.then(() => runNow(which, scope))
+  const turn = queue.then(() => runNow(which, scope, pickId))
   queue = turn.catch(() => {})
   return turn
 }
@@ -915,14 +963,18 @@ function takeOut(list: StepRecord[], id: string): StepRecord | null {
   return at >= 0 ? (list.splice(at, 1)[0] ?? null) : null
 }
 
-async function runNow(which: "undo" | "redo", scope: string): Promise<HistoryResult | null> {
+async function runNow(which: "undo" | "redo", scope: string, pickId?: string): Promise<HistoryResult | null> {
   if (activeScope !== scope) return null
   const s = stacksFor(scope)
   // Looked up afresh after every wait: a merge may have replaced the arrays' contents.
   const fromList = () => (which === "undo" ? s.undo : s.redo)
   const toList = () => (which === "undo" ? s.redo : s.undo)
-  const top = fromList()[fromList().length - 1]
+  // The newest step — or, for the Station's own Undo (AQU-2327, Q4), one
+  // older step by id: a newer step elsewhere doesn't block it, and each
+  // step's own "changed since?" guard still holds.
+  const top = pickId ? fromList().find((r) => r.id === pickId) : fromList()[fromList().length - 1]
   if (!top) return null
+  const startedAt = fromList().findIndex((r) => r.id === top.id)
   const label = { labelKey: top.labelKey, labelParams: top.labelParams, fileName: top.fileName ?? null, lane: top.lane }
   if (top.fileId && openFileProbe && !openFileProbe(top.fileId)) {
     return { step: label, outcome: { kind: "blocked", reason: "elsewhere" } }
@@ -974,7 +1026,9 @@ async function runNow(which: "undo" | "redo", scope: string): Promise<HistoryRes
     // Moving back is a move too, and the newest one: a copy that took the
     // in-flight one (on the other stack) must not win a later merge.
     record.movedAt = Math.max(stampFor(s), (record.movedAt ?? record.at) + 1)
-    fromList().push(record)
+    // An older step picked out of order goes back where it was.
+    if (pickId && startedAt >= 0) fromList().splice(Math.min(startedAt, fromList().length), 0, record)
+    else fromList().push(record)
   } else {
     bury(s, record.id)
     logSkip(s, record, which, outcome)
@@ -993,6 +1047,7 @@ function logSkip(s: Stacks, record: StepRecord, which: "undo" | "redo", outcome:
     reason: outcome.kind === "skipped" ? outcome.reason : "failed",
     ...(outcome.kind === "skipped" && outcome.by ? { by: outcome.by } : {}),
     at: Date.now(),
+    kind: record.kind,
   })
   if (s.log.length > LOG_LIMIT) s.log.splice(0, s.log.length - LOG_LIMIT)
 }
@@ -1023,6 +1078,31 @@ export async function undoTo(
     if (top.id === id) break
   }
   return results
+}
+
+/**
+ * Redo one step by id, out of order: the Redo of a part of the app that has
+ * its own Undo and Redo (Project settings, AQU-2262, Sam Oct 30), the
+ * counterpart of `undoStepById`. It then sits on top of Undo.
+ */
+export function redoStepById(id: string): Promise<HistoryResult | null> {
+  return run("redo", id)
+}
+
+/**
+ * Every step Undo and Redo can reach that touches something `match` names —
+ * for a group, any of its parts, as `newestMatchingStep` counts them — in the
+ * order `historyView` lists them (Undo's oldest first, Redo's next one LAST).
+ * What a part of the app with its own Undo, Redo and History panel acts on
+ * (Project settings, AQU-2262, Sam Oct 30).
+ */
+export function matchingSteps(match: (kind: string, data: unknown) => boolean): { undo: StepSummary[]; redo: StepSummary[] } {
+  const s = activeScope ? stacks.get(activeScope) : undefined
+  const touches = (r: StepRecord) =>
+    r.kind === GROUP_KIND
+      ? ((r.data as { steps?: ReadonlyArray<{ kind: string; data: unknown }> }).steps ?? []).some((p) => match(p.kind, p.data))
+      : match(r.kind, r.data)
+  return { undo: (s?.undo ?? []).filter(touches).map(summary), redo: (s?.redo ?? []).filter(touches).map(summary) }
 }
 
 // ── Reading ─────────────────────────────────────────────────────────────────
@@ -1089,6 +1169,33 @@ export function newestStepAt(): number | null {
   const s = activeScope ? stacks.get(activeScope) : undefined
   const top = s?.undo[s.undo.length - 1]
   return top ? (recordedHere.get(top.id) ?? top.at) : null
+}
+
+/**
+ * The newest step Undo can reach that touches something `match` names — for a
+ * group, any of its parts — or null. The Station's own Undo button (AQU-2327,
+ * Q4, Sam Oct 30) always takes back your last change to the recording it has
+ * open, even when you have changed other things since; ⌘Z stays the
+ * project's newest step.
+ */
+export function newestMatchingStep(match: (kind: string, data: unknown) => boolean): StepSummary | null {
+  const s = activeScope ? stacks.get(activeScope) : undefined
+  if (!s) return null
+  for (let i = s.undo.length - 1; i >= 0; i--) {
+    const r = s.undo[i]
+    const hit =
+      r.kind === GROUP_KIND
+        ? ((r.data as { steps?: ReadonlyArray<{ kind: string; data: unknown }> }).steps ?? []).some((p) => match(p.kind, p.data))
+        : match(r.kind, r.data)
+    if (hit) return summary(r)
+  }
+  return null
+}
+
+/** Undo one step by id, out of order (the Station's own Undo, Q4). It then
+ *  sits on top of Redo, so Redo brings it back as usual. */
+export function undoStepById(id: string): Promise<HistoryResult | null> {
+  return run("undo", id)
 }
 
 /** The signed-in person the active scope belongs to. */

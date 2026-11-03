@@ -94,6 +94,8 @@ export type EventKind =
   // timings, a duration heal) wiped them: "no opinion" and "cleared" were both
   // expressed as an absent field. See the payload doc below.
   | 'cell.audio.trim'
+  // AQU-2327: a take's volume and fades — data on the clip, like the trim.
+  | 'cell.audio.gain'
   | 'cell.audio.place'
   // AQU-1767: cut one dub piece in two at a point in its own audio. Both
   // pieces share the bytes, stay on the same row, and start unvalidated.
@@ -625,6 +627,14 @@ export interface EventPayloads {
      * value: the transcript is no longer the AI's.
      */
     transcriptAi?: { model: string; at: number; changes: number }
+    /**
+     * AQU-2327: a version saved from the Station (or made by its Remove noise):
+     * which kinds of change it holds, each once ('deleted', 'inserted',
+     * 'noise'), and the cells it went on. Read back from the event log by the
+     * Station's History ("Version 2 saved: a part deleted · used on line
+     * 331"); the projection ignores it — nothing about the row depends on it.
+     */
+    versionChanges?: { kinds: Array<'deleted' | 'inserted' | 'noise'>; usedOn: string[]; over?: boolean }
     /** AQU-1462: lane the member was working in. Omitted when the clip is shared. */
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
@@ -675,6 +685,22 @@ export interface EventPayloads {
     audioId: string
     trimStartMs: number | null
     trimEndMs: number | null
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
+    /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
+  }
+  /**
+   * AQU-2327: the clip's COMPLETE level settings — its volume in dB and its
+   * fades in ms — always all three stated, null meaning none (0 dB, no fade),
+   * for the reason `cell.audio.trim` states both ends. Like a trim they never
+   * change the recording, set nothing else, and keep the take's approvals.
+   */
+  'cell.audio.gain': {
+    audioId: string
+    gainDb: number | null
+    fadeInMs: number | null
+    fadeOutMs: number | null
     /** AQU-1462: see `cell.audio.attach`. */
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
@@ -1264,6 +1290,14 @@ export interface EventPayloads {
     /** Passed through to files.meta (JSON) — same shape as file.create's
      *  language/orderedBy fields, merged rather than replacing wholesale. */
     meta?: Record<string, unknown>
+    /** AQU-2345: the upstream file's type columns, so the copy reads as what
+     *  it was imported as (the read side derives `fileType` as
+     *  `kind ?? role ?? 'codex'`). Absent on events mirrored before this
+     *  slice; the projection fills a NULL column from these and never
+     *  overwrites one that is set. */
+    role?: string | null
+    kind?: string | null
+    bookCode?: string | null
     upstream: {
       projectId: string
       eventId: string

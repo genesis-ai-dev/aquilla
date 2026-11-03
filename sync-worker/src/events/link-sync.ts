@@ -82,7 +82,9 @@ import {
   type SourceLinkBackfill,
 } from '../../../db/shared/source-link-backfill'
 import { parseSourceLinkAdoption } from '../../../db/shared/source-link-adopt'
+import { planLinkedFileProvenanceFor, type LinkedFilePair } from '../../../db/shared/link-file-provenance'
 import { loadAdoptedCellIds, runAdoption } from './link-adopt'
+import { linkSourceBlobPointers } from '../../../db/shared/link-source-blob'
 import { selectByCellKeys, type CellKey } from '../lib/cell-key-lookup'
 
 const BATCH_LIMIT = 100
@@ -687,7 +689,7 @@ export function deterministicDownstreamFileId(downstreamProjectId: string, upstr
 /** `files.meta` as a plain object. TEXT column, so a malformed or non-object
  *  legacy blob degrades to `{}` rather than throwing mid-sync and failing the
  *  whole mirror batch over one bad row (AQU-1547). */
-function parseMetaObject(meta: string | null): Record<string, unknown> {
+export function parseMetaObject(meta: string | null): Record<string, unknown> {
   if (!meta) return {}
   try {
     const parsed = JSON.parse(meta) as unknown
@@ -1785,6 +1787,26 @@ export async function mirrorSync(
   // that consumes the upstream's SOURCE has any — see link-adopt.ts.
   let adoption = consumes === 'source' ? parseSourceLinkAdoption(link.source_link_adopt) : null
   const adoptionPending = adoption != null && adoption.pending.length > 0
+  // AQU-2345: point any linked file with no side-car row at its upstream
+  // file's original artifact, BEFORE the "nothing to mirror" return below —
+  // that is the path a project whose link already ran takes, so this is also
+  // what backfills one. See linkSourceBlobPointers: it writes nothing but
+  // missing `file_source_blobs` rows, so it is safe on every sync.
+  const sweepSourceBlobs = async (): Promise<void> => {
+    try {
+      await linkSourceBlobPointers(db, {
+        upstreamProjectId,
+        downstreamProjectId,
+        downstreamFileIdOf: (upstreamFileId) =>
+          deterministicDownstreamFileId(downstreamProjectId, upstreamFileId),
+      })
+    } catch (err) {
+      // Export provenance is not worth failing a sync over: the next sweep
+      // retries, and the mirror itself is unaffected either way.
+      console.warn(`[link-sync] ${downstreamProjectId}: source-blob sweep failed:`, err)
+    }
+  }
+  await sweepSourceBlobs()
   // AQU-1560: a pending backfill is work even when the link is not behind —
   // the files being added have their history BELOW the cursor. AQU-1679: so is
   // a file still waiting to be joined to its upstream.
@@ -1873,7 +1895,11 @@ export async function mirrorSync(
     followedFileIds = outcome.followedFileIds
     total.ranSync = true
   }
-  if (head <= cursor) return total
+  if (head <= cursor) {
+    // AQU-2345: a backfill-only run mirrored its files above and stops here.
+    if (total.filesMirrored > 0) await sweepSourceBlobs()
+    return total
+  }
 
   total.ranSync = true
   let sinceSeq = cursor
@@ -1900,6 +1926,10 @@ export async function mirrorSync(
     total.toSeq = untilSeq
     sinceSeq = untilSeq
   }
+  // AQU-2345: again now that this run's own files exist — a first sync's files
+  // are mirrored in above, after the sweep at the top of the run saw nothing,
+  // and a file linked today must export today without manual intervention.
+  if (total.filesMirrored > 0) await sweepSourceBlobs()
   return total
 }
 
@@ -2346,16 +2376,21 @@ async function mirrorWindow(db: AquillaDb, args: MirrorWindowArgs): Promise<Mirr
   // replay's last window adds every file being added to the list, including
   // one the upstream no longer has a row for, which gets no event.
   let fileMirrorsEmitted = 0
+  // AQU-2345: every file this window touched, with its copy — adopted files
+  // aside, since those are the project's own (see link-file-provenance.ts).
+  const provenancePairs: LinkedFilePair[] = []
   if (deltaFileIdList.length > 0) {
     const filePlaceholders = deltaFileIdList.map(() => '?').join(', ')
     const upstreamFiles = await db
-      .prepare(`SELECT id, name, meta FROM files WHERE project_id = ? AND id IN (${filePlaceholders})`)
+      .prepare(`SELECT id, name, role, kind, book_code, meta FROM files WHERE project_id = ? AND id IN (${filePlaceholders})`)
       .bind(upstreamProjectId, ...deltaFileIdList)
-      .all<{ id: string; name: string; meta: string | null }>()
+      .all<{ id: string; name: string; role: string | null; kind: string | null; book_code: string | null; meta: string | null }>()
     for (const f of upstreamFiles.results) {
       const downstreamFileId = downstreamFileOf(f.id)
       const isNew = !existingDownstreamFileIdSet.has(downstreamFileId)
       if (isNew && holdNewFiles) continue
+      const isAdopted = adopted?.has(f.id) === true
+      if (!isAdopted) provenancePairs.push({ upstreamFileId: f.id, downstreamFileId })
       const renamed = !isNew && downstreamNameOf.get(downstreamFileId) !== f.name
       // Already mirrored under the same name — nothing to say. Most delta
       // files land here (they were only dragged in by their cells' events),
@@ -2390,6 +2425,11 @@ async function mirrorWindow(db: AquillaDb, args: MirrorWindowArgs): Promise<Mirr
         fileId: downstreamFileId,
         name: f.name,
         meta: { ...upstreamMeta, upstreamFileId: f.id },
+        // AQU-2345: the copy is the upstream file's material, so it is the
+        // upstream's type too — without this every mirrored file projected
+        // with a NULL `kind` and read as `codex`. Not for an adopted file: a
+        // rename re-mirrors it, and its type is its own import's.
+        ...(isAdopted ? {} : { role: f.role, kind: f.kind, bookCode: f.book_code }),
         upstream: { projectId: upstreamProjectId, eventId: f.id, seq: untilSeq },
       }
       eventRows.push({
@@ -2422,6 +2462,19 @@ async function mirrorWindow(db: AquillaDb, args: MirrorWindowArgs): Promise<Mirr
       fileMirrorsEmitted++
     }
   }
+
+  // AQU-2345: the type and the original of every file this window touched —
+  // a new copy's pointer row at the upstream's original, a copy mirrored
+  // before this slice its missing type and pointer, and a copy whose upstream
+  // was re-imported the new object. Planned against the rows as they are and
+  // written with the window's batch below (or on their own when the fold has
+  // nothing else to say), so one sync of a file is enough to repair it.
+  const provenance = await planLinkedFileProvenanceFor(db, {
+    upstreamProjectId,
+    downstreamProjectId,
+    pairs: provenancePairs,
+    now,
+  })
 
   // 2. source.cell.mirror per folded cell — hash-equal skips entirely.
   // `fileId` on the emitted event is the DOWNSTREAM's deterministic file id
@@ -2570,6 +2623,11 @@ async function mirrorWindow(db: AquillaDb, args: MirrorWindowArgs): Promise<Mirr
     // advance the cursor directly, no link.cursor.advance event (§4: "no log
     // spam from unmirrored upstream noise"). AQU-1560: a backfill window is
     // below the cursor and never moves it; runBackfill saves its progress.
+    //
+    // AQU-2345: a window that mirrors nothing can still owe a file its type
+    // or its original — a copy mirrored before this slice whose upstream made
+    // a hash-equal edit. Its own batch: there is no event for it to ride.
+    if (provenance.stmts.length > 0) await runMirrorBatch(db, provenance.stmts)
     if (!backfill) await advanceCursor(db, downstreamProjectId, untilSeq)
     return { cellsMirrored: 0, filesMirrored: 0, skippedHashEqual }
   }
@@ -2593,6 +2651,9 @@ async function mirrorWindow(db: AquillaDb, args: MirrorWindowArgs): Promise<Mirr
   for (const event of persistedForProjection) {
     buildEventProjectionStmts(db, event, allStmts, { deferFileCounters: true })
   }
+  // AQU-2345: after the projection — a type fill addresses a row this batch
+  // may be creating — and the pointer rows beside it.
+  allStmts.push(...provenance.stmts)
 
   // link.cursor.advance — audit record, no cells projection, emitted only
   // because the fold was non-empty. It also closes the batch "Upstream

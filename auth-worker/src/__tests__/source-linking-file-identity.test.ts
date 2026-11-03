@@ -152,3 +152,66 @@ describe("withUpstreamFileId / readUpstreamFileId", () => {
     expect(readUpstreamFileId('{"upstreamFileId":7}')).toBeNull()
   })
 })
+
+// AQU-2345: a clone (or detach) copy is the upstream file's material, so its
+// original is the upstream's. `snapshotSourceFiles` copied `kind` with the row
+// but wrote no `file_source_blobs` row, so a copy's export answered "no source
+// blob recorded for this file". The copy now gets a pointer row at the
+// upstream's R2 object (db/shared/link-file-provenance.ts) — never an adopted
+// file, which is the project's own import with its own original.
+describe("snapshotSourceFiles — a copy points at the upstream's original (AQU-2345)", () => {
+  const UPSTREAM_BLOB = { format: "idml", r2_key: `artifacts/${UPSTREAM}/art-fg/original.idml`, size_bytes: 1234 }
+
+  async function seedBlob(fileId: string, projectId: string, blob: { format: string; r2_key: string; size_bytes: number }): Promise<void> {
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO file_source_blobs (file_id, project_id, format, raw_source, r2_key, size_bytes, created_at)
+       VALUES (?, ?, ?, NULL, ?, ?, 1000)`,
+    )
+      .bind(fileId, projectId, blob.format, blob.r2_key, blob.size_bytes)
+      .run()
+  }
+
+  async function blobOf(fileId: string): Promise<{ project_id: string; format: string; r2_key: string | null; size_bytes: string | number } | null> {
+    return env.AQUILLA_PG.prepare(`SELECT project_id, format, r2_key, size_bytes FROM file_source_blobs WHERE file_id = ?`)
+      .bind(fileId)
+      .first<{ project_id: string; format: string; r2_key: string | null; size_bytes: string | number }>()
+  }
+
+  it("writes a pointer row for each copy and leaves an adopted file's own original alone", async () => {
+    await seedProject(UPSTREAM, "Upstream")
+    await seedProject(TARGET, "Target")
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO files (id, project_id, name, kind, event_id, created_at, updated_at) VALUES (?, ?, ?, 'idml', ?, 1000, 1000)`,
+    )
+      .bind("up-fg", UPSTREAM, "Facilitator Guide.idml", "e-up-fg")
+      .run()
+    await seedBlob("up-fg", UPSTREAM, UPSTREAM_BLOB)
+    await seedUpstreamFile("up-mrk", "Mark")
+    await seedBlob("up-mrk", UPSTREAM, { format: "usfm", r2_key: `artifacts/${UPSTREAM}/art-mrk/original.usfm`, size_bytes: 2 })
+    // The target's own Mark, followed under the link, with its own original.
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO files (id, project_id, name, kind, event_id, created_at, updated_at) VALUES (?, ?, ?, 'usfm', ?, 1000, 1000)`,
+    )
+      .bind("own-mrk", TARGET, "Mark.usfm", "e-own-mrk")
+      .run()
+    const ownBlob = { format: "usfm", r2_key: `artifacts/${TARGET}/art-own/original.usfm`, size_bytes: 3 }
+    await seedBlob("own-mrk", TARGET, ownBlob)
+
+    const map = await snapshotSourceFiles(env, {
+      upstreamProjectId: UPSTREAM,
+      targetProjectId: TARGET,
+      authorUsername: "lead",
+      adoptedFileIdOf: { "up-mrk": "own-mrk" },
+    })
+
+    const copyId = map.get("up-fg")!
+    expect(copyId).toBeTruthy()
+    const copy = await env.AQUILLA_PG.prepare(`SELECT kind FROM files WHERE id = ?`).bind(copyId).first<{ kind: string }>()
+    expect(copy?.kind).toBe("idml")
+    expect(await blobOf(copyId)).toEqual({ project_id: TARGET, ...UPSTREAM_BLOB, size_bytes: expect.anything() })
+    expect(Number((await blobOf(copyId))?.size_bytes)).toBe(1234)
+    expect(map.get("up-mrk")).toBe("own-mrk")
+    const own = await blobOf("own-mrk")
+    expect(own).toMatchObject({ project_id: TARGET, format: "usfm", r2_key: ownBlob.r2_key })
+  })
+})

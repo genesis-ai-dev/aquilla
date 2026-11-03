@@ -7,23 +7,21 @@
 // three are pinned here together rather than only the new one.
 //
 // What matters about a settings checkbox is not that it renders — it is the
-// SEVEN-SITE wiring behind it. A box can look perfect and still be inert
-// because someone added it to the baseline type and the JSX but not to the
-// dirty check, or not to the save diff. Each of the tests below fails on a
-// different one of those omissions:
-//   · reads the project's value       → buildBaseline + applyBaseline
-//   · toggling offers to save         → the dirty check AND its dep array
-//   · saving sends the field          → the save diff
-//
-// The dep-array case is the sneaky one: without `allowTrackEditing` in it, the
-// dirty memo keeps a stale closure and the Save button never appears — the box
-// ticks and nothing else happens.
+// wiring behind it. A box can look perfect and still be inert. Each of the
+// tests below fails on a different omission:
+//   · reads the project's value       → readSavedSettings
+//   · toggling saves the field        → the box's own write (AQU-2262: every
+//                                       setting saves the moment it changes)
+//   · the write carries only that field, so it cannot disturb its neighbours
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { ProjectSettings } from "./ProjectSettings"
+import { historyReady, historyView, resetHistoryForTests } from "@/lib/history/history"
+import { clearHistoryStoreForTests } from "@/lib/history/history-store"
+import { registerSettingsAccessor } from "@/lib/history/settings-access"
 
 vi.mock("@/components/org/OrgSidebar", () => ({
   OrgSidebar: () => <div data-testid="org-sidebar">sidebar</div>,
@@ -51,29 +49,24 @@ function makeProject(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
 let currentProject: ProjectRecord = makeProject()
 /** AQU-1768: the org's media defaults the settings response carries. */
 let orgMedia: Record<string, unknown> = {}
+/** The shared settings as the hook reads them: the server's copy over this
+ *  browser's, so a project's own value is in here too. */
+let currentSettings: Record<string, unknown> = {}
 const patch = vi.fn().mockResolvedValue({ kind: "ok" })
 
 vi.mock("@/hooks/useProject", () => ({
   useProject: () => ({ project: currentProject, loading: false, refresh: vi.fn() }),
 }))
 
-vi.mock("@/hooks/useProjectSettings", () => ({
-  useProjectSettings: () => ({
-    canEdit: true,
-    reasonCannotEdit: null,
-    patch,
-    version: 1,
-    updatedAt: null,
-    updatedBy: null,
-    conflict: false,
-    dismissConflict: vi.fn(),
-    settings: {},
-    hasFetched: true,
-    isOnline: true,
-    refresh: vi.fn(),
-    orgMediaDefaults: orgMedia,
-  }),
-}))
+// AQU-2262: a write shows on the page, as the real hook's overlay does.
+vi.mock("@/hooks/useProjectSettings", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks/useProjectSettings")>()
+  const { useLiveProjectSettings } = await import("@/test-utils/live-project-settings")
+  return {
+    ...actual,
+    useProjectSettings: () => useLiveProjectSettings(() => ({ settings: currentSettings, patch, orgMediaDefaults: orgMedia })),
+  }
+})
 
 vi.mock("@/hooks/useOrg", () => ({ useOrg: () => ({ org: null }) }))
 
@@ -98,6 +91,7 @@ vi.mock("@/lib/completion/completion-service", async (importOriginal) => {
 vi.mock("@/lib/store/project-index", () => ({
   getProject: vi.fn().mockResolvedValue(null),
   updateProject: vi.fn().mockResolvedValue(undefined),
+  patchProject: vi.fn().mockResolvedValue(null),
 }))
 
 vi.mock("@/lib/progress/read-validation-count", () => ({
@@ -131,12 +125,14 @@ const box = (testid: string) => screen.getByTestId(testid) as HTMLElement
 const isChecked = (el: HTMLElement) =>
   el.getAttribute("aria-checked") === "true" || el.getAttribute("data-state") === "checked"
 
-const saveButton = () => screen.queryByRole("button", { name: /save changes/i })
+/** What each write sent, in order. */
+const sent = () => patch.mock.calls.map((c) => c[0] as Record<string, unknown>)
 
 beforeEach(() => {
   vi.clearAllMocks()
   currentProject = makeProject()
   orgMedia = {}
+  currentSettings = {}
 })
 
 /** AQU-1768: a box follows the organization until "Set for this project". */
@@ -167,47 +163,35 @@ describe("ProjectSettings — allowTrackEditing (AQU-646 stage 2)", () => {
     currentProject = makeProject({ allowTrackEditing: undefined })
     renderSettings()
     expect(isChecked(box("settings-allow-track-editing"))).toBe(true)
-    // Rendering a default must not look like an unsaved change.
-    expect(saveButton()).toBeNull()
+    // Rendering a default must not write anything.
+    expect(patch).not.toHaveBeenCalled()
   })
 
   it("reads OFF on a project that turned it off", () => {
     currentProject = makeProject({ allowTrackEditing: false })
     renderSettings()
     expect(isChecked(box("settings-allow-track-editing"))).toBe(false)
-    expect(saveButton()).toBeNull()
+    expect(patch).not.toHaveBeenCalled()
   })
 
   it("reads ON from a project that has opted in", () => {
     currentProject = makeProject({ allowTrackEditing: true })
     renderSettings()
     expect(isChecked(box("settings-allow-track-editing"))).toBe(true)
-    expect(saveButton()).toBeNull()
+    expect(patch).not.toHaveBeenCalled()
   })
 
-  // Fails if `allowTrackEditing` is missing from the dirty check OR from its
-  // dependency array — in the second case the memo holds a stale closure and
-  // the box ticks with no Save button, which is the exact shape of an inert
-  // setting. Post-AQU-2214 the box starts ON, so the toggle under test is the
-  // one that turns it OFF.
-  it("offers to save once it is toggled", async () => {
+  // Fails if the box's change never reaches the server — the box would tick
+  // and nothing would change, the exact shape of an inert setting. It saves
+  // the moment it is toggled; there is no Save bar (AQU-2262). Post-AQU-2214
+  // the box starts ON, so the toggle under test is the one that turns it OFF.
+  it("sends the field to the server the moment it is toggled", async () => {
     renderSettings()
     await setForThisProject("allow-track-editing-source")
     fireEvent.click(box("settings-allow-track-editing"))
+    await waitFor(() => expect(sent().at(-1)).toEqual({ allowTrackEditing: false }))
     expect(isChecked(box("settings-allow-track-editing"))).toBe(false)
-    expect(saveButton()).toBeTruthy()
-  })
-
-  // Fails if the field is missing from the save diff — the box would tick, the
-  // Save button would appear, the save would succeed, and nothing would change.
-  it("sends the field to the server when saved", async () => {
-    renderSettings()
-    await setForThisProject("allow-track-editing-source")
-    fireEvent.click(box("settings-allow-track-editing"))
-    fireEvent.click(saveButton() as HTMLElement)
-    await waitFor(() => expect(patch).toHaveBeenCalled())
-    const sent = patch.mock.calls[0]?.[0] as Record<string, unknown>
-    expect(sent.allowTrackEditing).toBe(false)
+    expect(screen.queryByRole("button", { name: /save changes/i })).toBeNull()
   })
 
   // AQU-2214: "Set for this project" on its own pins the default as the
@@ -217,9 +201,7 @@ describe("ProjectSettings — allowTrackEditing (AQU-646 stage 2)", () => {
     renderSettings()
     await setForThisProject("allow-track-editing-source")
     expect(isChecked(box("settings-allow-track-editing"))).toBe(true)
-    fireEvent.click(saveButton() as HTMLElement)
-    await waitFor(() => expect(patch).toHaveBeenCalled())
-    expect((patch.mock.calls[0]?.[0] as Record<string, unknown>).allowTrackEditing).toBe(true)
+    await waitFor(() => expect(sent()).toEqual([{ allowTrackEditing: true }]))
   })
 
   // The boxes are independent switches, not one policy. Changing track editing
@@ -231,12 +213,11 @@ describe("ProjectSettings — allowTrackEditing (AQU-646 stage 2)", () => {
     renderSettings()
     await setForThisProject("allow-track-editing-source")
     fireEvent.click(box("settings-allow-track-editing"))
-    fireEvent.click(saveButton() as HTMLElement)
-    await waitFor(() => expect(patch).toHaveBeenCalled())
-    const sent = patch.mock.calls[0]?.[0] as Record<string, unknown>
-    expect(sent.allowTrackEditing).toBe(false)
-    expect(sent).not.toHaveProperty("timingLocked")
-    expect(sent).not.toHaveProperty("cellEditingFloor")
+    await waitFor(() => expect(sent().at(-1)).toEqual({ allowTrackEditing: false }))
+    for (const write of sent()) {
+      expect(write).not.toHaveProperty("timingLocked")
+      expect(write).not.toHaveProperty("cellEditingFloor")
+    }
   })
 })
 
@@ -255,9 +236,7 @@ describe("ProjectSettings — the timing lock, which shipped uncovered", () => {
     renderSettings()
     await setForThisProject("timing-locked-source")
     fireEvent.click(box("settings-timing-locked"))
-    fireEvent.click(saveButton() as HTMLElement)
-    await waitFor(() => expect(patch).toHaveBeenCalled())
-    expect((patch.mock.calls[0]?.[0] as Record<string, unknown>).timingLocked).toBe(false)
+    await waitFor(() => expect(sent().at(-1)).toEqual({ timingLocked: false }))
   })
 })
 
@@ -270,21 +249,42 @@ describe("ProjectSettings — media settings follow the organization (AQU-1768)"
     expect(isChecked(box("settings-allow-track-editing"))).toBe(true)
     expect(box("timing-locked-source").textContent).toContain("Organization default (off)")
     expect(box("allow-track-editing-source").textContent).toContain("Organization default (on)")
-    expect(saveButton()).toBeNull()
+    expect(patch).not.toHaveBeenCalled()
   })
 
-  it("ticking a box that follows the organization sets it for this project in one step (Sam, Oct 28)", async () => {
-    orgMedia = { timingLocked: false }
-    currentProject = makeProject({ timingLocked: undefined })
-    renderSettings()
-    const lock = box("settings-timing-locked")
-    expect(lock.hasAttribute("disabled") || lock.getAttribute("aria-disabled") === "true" || lock.hasAttribute("data-disabled")).toBe(false)
-    fireEvent.click(lock)
-    expect(isChecked(box("settings-timing-locked"))).toBe(true)
-    expect(box("timing-locked-source").textContent).toContain("Set for this project")
-    fireEvent.click(saveButton() as HTMLElement)
-    await waitFor(() => expect(patch).toHaveBeenCalled())
-    expect((patch.mock.calls[0]?.[0] as Record<string, unknown>).timingLocked).toBe(true)
+  // Sam, Oct 28: ticking a box while it follows the organization sets the
+  // choice for this project, and the menu beside it follows. AQU-2262: the
+  // tick saves at once, says Saved beside the box, and is one Undo step.
+  it("ticking a box that follows the organization saves it for this project in one Undo step (Sam, Oct 28)", async () => {
+    resetHistoryForTests()
+    await clearHistoryStoreForTests()
+    // The server's copy, as the page's writes have left it.
+    const leave = registerSettingsAccessor(PROJECT_ID, {
+      read: () => Object.assign({}, currentSettings, ...sent()),
+      write: async (p) => { await patch(p) },
+    })
+    try {
+      orgMedia = { timingLocked: false }
+      currentProject = makeProject({ timingLocked: undefined })
+      renderSettings()
+      await historyReady()
+      const lock = box("settings-timing-locked")
+      expect(lock.hasAttribute("disabled") || lock.getAttribute("aria-disabled") === "true" || lock.hasAttribute("data-disabled")).toBe(false)
+      fireEvent.click(lock)
+      await waitFor(() => expect(sent()).toEqual([{ timingLocked: true }]))
+      expect(isChecked(box("settings-timing-locked"))).toBe(true)
+      expect(box("timing-locked-source").textContent).toContain("Set for this project")
+      expect(await screen.findByTestId("save-status-timingLocked")).toHaveTextContent("Saved")
+      expect(screen.queryByRole("button", { name: /save changes/i })).toBeNull()
+      await waitFor(() => expect(historyView().nextUndo?.labelKey).toBe("editor.history.stepChangeSetting"))
+      expect(historyView().nextUndo?.labelParams).toMatchObject({ settingKey: "projectSettings.timeline.lockLabel" })
+      // One step: a single Undo puts the project back to following the organization.
+      await userEvent.click(screen.getByTestId("settings-undo"))
+      await waitFor(() => expect(sent().at(-1)).toEqual({ timingLocked: null }))
+      expect(historyView().nextUndo).toBeFalsy()
+    } finally {
+      leave()
+    }
   })
 
   it("each (i) opens its explanation beneath the title on a click, and closes it on another", () => {
@@ -303,26 +303,27 @@ describe("ProjectSettings — media settings follow the organization (AQU-1768)"
     expect((document.getElementById("settings-allow-track-editing-explanation") as HTMLElement).dataset.open).toBe("false")
   })
 
-  it("'Set for this project' starts from the organization's value and saves only once edited", async () => {
+  // "Set for this project" saves the organization's value as the project's
+  // own (AQU-2214), then the box saves what it is changed to.
+  it("'Set for this project' starts from the organization's value", async () => {
     orgMedia = { allowTrackEditing: true }
     renderSettings()
     await setForThisProject("allow-track-editing-source")
     expect(isChecked(box("settings-allow-track-editing"))).toBe(true)
+    await waitFor(() => expect(sent()).toEqual([{ allowTrackEditing: true }]))
     fireEvent.click(box("settings-allow-track-editing"))
-    fireEvent.click(saveButton() as HTMLElement)
-    await waitFor(() => expect(patch).toHaveBeenCalled())
-    expect((patch.mock.calls[0]?.[0] as Record<string, unknown>).allowTrackEditing).toBe(false)
+    await waitFor(() => expect(sent()).toEqual([{ allowTrackEditing: true }, { allowTrackEditing: false }]))
   })
 
   it("going back to the organization's default clears the project's own value", async () => {
     currentProject = makeProject({ timingLocked: false })
+    currentSettings = { timingLocked: false }
     renderSettings()
     await userEvent.click(box("timing-locked-source"))
     await userEvent.click(await screen.findByRole("option", { name: "Organization default (on)" }))
-    fireEvent.click(saveButton() as HTMLElement)
-    await waitFor(() => expect(patch).toHaveBeenCalled())
-    const sent = patch.mock.calls[0]?.[0] as Record<string, unknown>
-    expect("timingLocked" in sent && sent.timingLocked === undefined).toBe(true)
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(1))
+    const write = sent()[0]
+    expect("timingLocked" in write && write.timingLocked === undefined).toBe(true)
   })
 })
 
@@ -338,7 +339,7 @@ describe("ProjectSettings — film and sources (AQU-1758)", () => {
     renderSettings()
     expect(isChecked(box("settings-film-and-sources"))).toBe(false)
     expect(box("settings-film-and-sources-info")).toHaveAttribute("aria-label", "About the film and sources tools")
-    expect(saveButton()).toBeNull()
+    expect(screen.queryByRole("button", { name: /save changes/i })).toBeNull()
   })
 
   it("reads ON on any other project that never chose", () => {
@@ -371,13 +372,42 @@ describe("ProjectSettings — film and sources (AQU-1758)", () => {
     expect(text.dataset.open).toBe("false")
   })
 
+  // AQU-2262: it saves the moment it is ticked; there is no Save bar.
   it("saves the choice a maintainer makes", async () => {
     currentProject = makeProject({ files: bookFiles as unknown as ProjectRecord["files"] })
     renderSettings()
     fireEvent.click(box("settings-film-and-sources"))
+    await waitFor(() => expect(sent()).toEqual([{ filmAndSources: true }]))
     expect(isChecked(box("settings-film-and-sources"))).toBe(true)
-    fireEvent.click(saveButton() as HTMLElement)
-    await waitFor(() => expect(patch).toHaveBeenCalled())
-    expect((patch.mock.calls[0]?.[0] as Record<string, unknown>).filmAndSources).toBe(true)
+  })
+
+  // AQU-2262: like every setting on the page, the change says Saved beside
+  // the box and is one Undo step named for the setting; Undo clears the
+  // project's own choice, so the project's kind decides again.
+  it("says Saved beside it, is one Undo step named for it, and Undo clears the choice", async () => {
+    resetHistoryForTests()
+    await clearHistoryStoreForTests()
+    // The server's copy, as the page's writes have left it.
+    const leave = registerSettingsAccessor(PROJECT_ID, {
+      read: () => Object.assign({}, currentSettings, ...sent()),
+      write: async (p) => { await patch(p) },
+    })
+    try {
+      currentProject = makeProject({ files: bookFiles as unknown as ProjectRecord["files"] })
+      renderSettings()
+      await historyReady()
+      fireEvent.click(box("settings-film-and-sources"))
+      await waitFor(() => expect(sent()).toEqual([{ filmAndSources: true }]))
+      expect(await screen.findByTestId("save-status-filmAndSources")).toHaveTextContent("Saved")
+      await waitFor(() => expect(historyView().nextUndo?.labelKey).toBe("editor.history.stepChangeSetting"))
+      expect(historyView().nextUndo?.labelParams).toMatchObject({
+        setting: "Show the film and sources tools in the media view",
+        settingKey: "projectSettings.timeline.filmAndSourcesLabel",
+      })
+      await userEvent.click(screen.getByTestId("settings-undo"))
+      await waitFor(() => expect(sent().at(-1)).toEqual({ filmAndSources: null }))
+    } finally {
+      leave()
+    }
   })
 })

@@ -13,7 +13,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
-import { AudioLines, Check, CheckCheck, ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, CopyPlus, Ellipsis, Mic, Pencil, Play, Scissors, Sparkles, Square, Trash2, VolumeX, X } from "lucide-react"
+import { AudioLines, AudioWaveform, Check, CheckCheck, ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, CopyPlus, Ellipsis, Mic, Pencil, Play, Scissors, Sparkles, Square, Trash2, VolumeX, X } from "lucide-react"
 import {
   ContextMenu,
   ContextMenuContent,
@@ -162,7 +162,8 @@ export interface TargetAudioLaneProps {
   onSelect(id: string): void
   /** AQU-1767 (Sam, 2026-10-14): a clean click on a take selects THAT take,
    *  after `onSelect` has selected its line. */
-  onSelectTake?(cellId: string): void
+  /** A plain click chose this take; `audioId` is the chip clicked (a piece for a split take). */
+  onSelectTake?(cellId: string, audioId?: string): void
   /** A double-click on a take jumps playback to its line (a single click
    *  selects it and leaves the playhead where it is — Sam, 2026-10-14). */
   onSeek?(id: string): void
@@ -281,6 +282,8 @@ interface ChipGeometry {
  * Each is optional; a missing one is simply not in the menu.
  */
 export interface TakeMenuActions {
+  /** AQU-2327: open this take in the Station (its first item, Q1). */
+  editInStation?(cellId: string, audioId: string): void
   /** Open the recorder on this line, on this take's track. */
   reRecord?(cellId: string): void
   /** Generate a new voice for this line straight away, on this take's track. */
@@ -427,7 +430,8 @@ function TargetAudioChip({
   editable: boolean
   snap: { enabled: boolean; candidates: number[] }
   onSelect(id: string): void
-  onSelectTake?(cellId: string): void
+  /** A plain click chose this take; `audioId` is the chip clicked (a piece for a split take). */
+  onSelectTake?(cellId: string, audioId?: string): void
   onSeek?(id: string): void
   /** AQU-646 stage 3: the TAKE being moved, not just its line. Placement is
    *  stored per take now — two tracks share a line, and a per-cell anchor
@@ -1253,7 +1257,7 @@ function TargetAudioChip({
         // playhead where it is, so S can split it there. Jumping to the line
         // is a double-click.
         onSelect(cell.id)
-        if (!movedRef.current) onSelectTake?.(cell.id)
+        if (!movedRef.current) onSelectTake?.(cell.id, chip.item.audioId)
         movedRef.current = false
       }}
       onDoubleClick={(e) => {
@@ -1830,6 +1834,16 @@ function TargetAudioChip({
       <ContextMenuContent className="w-56" data-testid={`tl-take-menu-${testKey}`}>
         {takeDetails}
         <ContextMenuSeparator />
+        {/* AQU-2327 (Q1): the Station, first — editing the take you are on. */}
+        {takeMenu?.editInStation && (
+          <>
+            <ContextMenuItem data-testid="tl-take-menu-station" onClick={() => takeMenu.editInStation?.(cell.id, audioId)}>
+              <AudioWaveform className="h-3.5 w-3.5" />
+              {t("editor.station.editIn")}
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+          </>
+        )}
         {/* AQU-2212: the line's voice and this take part ways — the one click
             that brings them back together, first (the Audio view's card put
             it beside the voice field). */}

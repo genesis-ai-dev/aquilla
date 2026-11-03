@@ -40,7 +40,12 @@ export interface ProjectOrgPolicy {
   importMinRole?: number
 }
 
-/** One visibility floor: the org's, the project's own (null = follows the org), and the one enforced. */
+/**
+ * One stricter-only floor: the org's, the project's own (null = follows the
+ * org), and the one enforced. Named for the visibility floors it was written
+ * for (AQU-1771); the import floor (AQU-2305) reports the same three values
+ * the same way, so it shares the shape rather than cloning it.
+ */
 export interface VisibilityFloorView {
   org: number
   project: number | null
@@ -85,12 +90,20 @@ export interface ResolvedProjectPolicy {
   /** Whether the caller's project role meets the export floor (see useOrgSettings.canExport). */
   canExport: boolean
   /**
-   * AQU-2304: the floor to import a NEW source file, defaults applied. Pair it
-   * with the caller's role through `canImportSourceFiles` (role-policy.ts),
-   * which also keeps the static `file.create` bar — this value alone is only
-   * half the gate.
+   * AQU-2304: the floor to import a NEW source file, defaults applied —
+   * AQU-2305: raised by this project's own stricter value, so this is the floor
+   * actually ENFORCED and the one every affordance gates on. Pair it with the
+   * caller's role through `canImportSourceFiles` (role-policy.ts), which also
+   * keeps the static `file.create` bar — this value alone is only half the gate.
    */
   importMinRole: number
+  /**
+   * AQU-2305: the same floor split three ways — the org's, this project's own
+   * where stricter (null = follows the organization), and the effective one.
+   * The Project Settings → Import row needs all three; a gate wants
+   * `importMinRole` above.
+   */
+  importFloor: VisibilityFloorView
 }
 
 const LADDER: readonly number[] = Object.values(ROLE)
@@ -109,7 +122,17 @@ export function resolveProjectPolicy(input: {
   orgPolicy: ProjectOrgPolicy | null | undefined
   visibilityFloors: ProjectVisibilityFloors | null | undefined
   /** The project's own settings (for the fallback's floors). */
-  projectSettings: { rosterViewMinRole?: unknown; memberProgressViewMinRole?: unknown } | null | undefined
+  projectSettings:
+    | { rosterViewMinRole?: unknown; memberProgressViewMinRole?: unknown; importMinRole?: unknown }
+    | null
+    | undefined
+  /**
+   * AQU-2305: the import floor as the server split it (`importFloor` on the
+   * project's settings response). Absent on a server that predates the field,
+   * which is then derived here from `orgPolicy.importMinRole` and the project's
+   * stored key — the same arithmetic, so the answer does not change.
+   */
+  importFloor?: VisibilityFloorView | null
   org: OrgSettingsFallback
   /** The caller's project-resolved role. */
   roleLevel: number | null | undefined
@@ -126,6 +149,8 @@ export function resolveProjectPolicy(input: {
   const projectSettingsFetched = input.projectSettingsFetched ?? true
   if (orgPolicy && visibilityFloors) {
     const exportMinRole = orgPolicy.exportMinRole
+    const importFloor = input.importFloor
+      ?? floorView(resolveImportFloor(orgPolicy.importMinRole), projectSettings?.importMinRole)
     return {
       ready: true,
       carried: true,
@@ -139,9 +164,21 @@ export function resolveProjectPolicy(input: {
       canExport: exportMinRole == null || roleLevel == null || roleLevel >= exportMinRole,
       // AQU-2304: a server that predates the field sends nothing, which
       // resolves to the PROJECT_LEAD default — the behaviour before the key.
-      importMinRole: resolveImportFloor(orgPolicy.importMinRole),
+      // AQU-2305: `importFloor` is the server's own three-way split; a server
+      // that predates IT is read the same way the fallback below reads it, off
+      // the org's value and the project's stored key.
+      importMinRole: importFloor.effective,
+      importFloor,
     }
   }
+  // AQU-2305: the import floor for a server that carries no `orgPolicy` — the
+  // org's value (see the note on the field below for why an unknown org floor
+  // reads as the permissive default), with the project's own stricter value on
+  // top, read off its stored settings exactly as the server reads it.
+  const fallbackImportFloor = floorView(
+    org.version != null ? org.importMinRole : DEFAULT_IMPORT_MIN_ROLE,
+    projectSettings?.importMinRole,
+  )
   return {
     ready: org.hasFetched && projectSettingsFetched,
     carried: false,
@@ -164,7 +201,8 @@ export function resolveProjectPolicy(input: {
     // every org that never set the key means. Closing it instead would hide
     // Import from the leads of every org on an older server, and the server
     // refuses the write regardless — this value only decides affordances.
-    importMinRole: org.version != null ? org.importMinRole : DEFAULT_IMPORT_MIN_ROLE,
+    importMinRole: fallbackImportFloor.effective,
+    importFloor: fallbackImportFloor,
   }
 }
 

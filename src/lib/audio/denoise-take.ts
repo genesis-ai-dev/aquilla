@@ -18,7 +18,8 @@ import {
 import { audioCachePutBlob } from "./bytes-cache"
 import { decodeToMono48k } from "./decode-mono"
 import { denoiseMono48k } from "./denoise"
-import { emitCellAudioAttach, emitCellAudioPlace } from "@/lib/sync/events-emit"
+import { emitCellAudioAttach, emitCellAudioGain, emitCellAudioPlace } from "@/lib/sync/events-emit"
+import type { VersionChanges } from "@/lib/sync/outbox-types"
 import { recordTakeAdded } from "@/lib/history/take-steps"
 import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
 import { newPieceAudioId } from "./cut-take"
@@ -52,6 +53,26 @@ export interface DenoiseTakeArgs {
   /** Decision 11: record an Undo step for the new take, naming the take that
    *  played in its slot before. Omitted by bulk runs, which record none. */
   history?: { selectedBefore: string | null }
+  /** AQU-2327: run from the Station — the cleaned take is a version, and its
+   *  History row says so ("noise removed · used on line 331"). */
+  versionChanges?: VersionChanges
+  /**
+   * AQU-2327: the take being cleaned, so the cleaned take keeps its track,
+   * name, kept part, places and level — cleaning a take on an added track used
+   * to land it on the main track with its margins back. Cleaning keeps the
+   * length, so every window carries over as it is.
+   */
+  source?: {
+    slot?: string | null
+    label?: string | null
+    trimStartMs?: number | null
+    trimEndMs?: number | null
+    targetOffsetMs?: number | null
+    recordingsOffsetMs?: number | null
+    gainDb?: number | null
+    fadeInMs?: number | null
+    fadeOutMs?: number | null
+  }
 }
 
 export interface DenoiseTakeResult {
@@ -116,6 +137,8 @@ export async function denoiseTake(args: DenoiseTakeArgs): Promise<DenoiseTakeRes
   //    take so the UI can revert. On emit failure, clean up the orphaned R2
   //    object and re-throw the original error.
   let attachEventId: string
+  const src = args.source
+  const slot = src?.slot ?? "recording"
   try {
     attachEventId = await emitCellAudioAttach({
       projectId,
@@ -123,13 +146,33 @@ export async function denoiseTake(args: DenoiseTakeArgs): Promise<DenoiseTakeRes
       cellId,
       audioId: fullAudioId,
       url: result.url,
-      slot: "recording",
+      slot,
       mimeType: blob.type || undefined,
       referenceAudioId: sourceAudioId,
       durationMs: Math.round(durationMs),
+      ...(src?.label ? { label: src.label } : {}),
+      ...(src?.trimStartMs != null ? { trimStartMs: src.trimStartMs } : {}),
+      ...(src?.trimEndMs != null ? { trimEndMs: src.trimEndMs } : {}),
+      ...(args.versionChanges ? { versionChanges: args.versionChanges } : {}),
       ...(args.targetLang ? { targetLang: args.targetLang } : {}),
       author,
     })
+    const lane = args.targetLang ? { targetLang: args.targetLang } : {}
+    if (src && (src.targetOffsetMs != null || src.recordingsOffsetMs != null)) {
+      attachEventId = await emitCellAudioPlace({
+        projectId, fileId, cellId, audioId: fullAudioId,
+        targetOffsetMs: src.targetOffsetMs ?? null,
+        recordingsOffsetMs: src.recordingsOffsetMs ?? null,
+        ...lane, author,
+      })
+    }
+    if (src && (src.gainDb != null || src.fadeInMs != null || src.fadeOutMs != null)) {
+      await emitCellAudioGain({
+        projectId, fileId, cellId, audioId: fullAudioId,
+        gainDb: src.gainDb ?? null, fadeInMs: src.fadeInMs ?? null, fadeOutMs: src.fadeOutMs ?? null,
+        ...lane, author,
+      })
+    }
   } catch (emitErr) {
     dropUpload()
     throw emitErr
@@ -140,17 +183,23 @@ export async function denoiseTake(args: DenoiseTakeArgs): Promise<DenoiseTakeRes
   injectOptimisticAudioAttachment(fileId, cellId, {
     audioId: fullAudioId,
     url: result.url,
-    slot: "recording",
+    slot,
     mimeType: blob.type || null,
     voiceId: null,
     referenceAudioId: sourceAudioId,
     durationMs: Math.round(durationMs),
-    trimStartMs: null,
-    trimEndMs: null,
+    trimStartMs: src?.trimStartMs ?? null,
+    trimEndMs: src?.trimEndMs ?? null,
+    ...(src?.label ? { label: src.label } : {}),
+    ...(src?.targetOffsetMs != null ? { targetOffsetMs: src.targetOffsetMs } : {}),
+    ...(src?.recordingsOffsetMs != null ? { recordingsOffsetMs: src.recordingsOffsetMs } : {}),
+    ...(src?.gainDb != null ? { gainDb: src.gainDb } : {}),
+    ...(src?.fadeInMs != null ? { fadeInMs: src.fadeInMs } : {}),
+    ...(src?.fadeOutMs != null ? { fadeOutMs: src.fadeOutMs } : {}),
   }, attachEventId)
   notifyAudioAttachmentsChanged(fileId)
   if (args.history) {
-    recordTakeAdded("denoise", { cellId, audioId: fullAudioId, slot: "recording", selectedBefore: args.history.selectedBefore }, { fileId })
+    recordTakeAdded("denoise", { cellId, audioId: fullAudioId, slot, selectedBefore: args.history.selectedBefore }, { fileId })
   }
 
   return { audioId: fullAudioId, url: result.url, durationMs }
@@ -169,6 +218,8 @@ export interface DenoiseSplitTakeArgs {
   /** Decision 11: record an Undo step for the new take, naming the take that
    *  played in its slot before. Omitted by bulk runs, which record none. */
   history?: { selectedBefore: string | null }
+  /** AQU-2327: run from the Station (see `DenoiseTakeArgs`). */
+  versionChanges?: VersionChanges
 }
 
 /**
@@ -208,6 +259,7 @@ export async function denoiseSplitTake(args: DenoiseSplitTakeArgs): Promise<Deno
         ...(piece.trimStartMs != null ? { trimStartMs: piece.trimStartMs } : {}),
         ...(piece.trimEndMs != null ? { trimEndMs: piece.trimEndMs } : {}),
         ...(audioId !== rootId ? { pieceOf: rootId } : {}),
+        ...(args.versionChanges ? { versionChanges: args.versionChanges } : {}),
         ...lane,
         author,
       })

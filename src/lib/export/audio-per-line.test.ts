@@ -802,12 +802,12 @@ describe("where a take is placed in the export", () => {
   })
 
   // AQU-1575: the timestamp is a count of the FILE'S samples. Inworld takes
-  // are stored at 24 kHz and Seed-VC takes at 22.05 kHz; stamped as if every
+  // are stored at 24 kHz and converted takes at 22.05 kHz; stamped as if every
   // WAV were 48 kHz, a DAW placed them at about twice their real time.
   it("stamps a 24 kHz and a 22.05 kHz take at their own sample rates", async () => {
-    const rates: Record<string, number> = { "a-inworld": 24_000, "a-seedvc": 22_050 }
+    const rates: Record<string, number> = { "a-inworld": 24_000, "a-converted": 22_050 }
     const result = await exportAudioPerLine({
-      cells: [withTake("inworld", 10), withTake("seedvc", 20)],
+      cells: [withTake("inworld", 10), withTake("converted", 20)],
       settings: SETTINGS, projectId: "p1", langCode: "es",
       fetchBytes: async ({ audioId }) => makeWav(8, rates[audioId]),
     })
@@ -854,7 +854,7 @@ describe("where a take is placed in the export", () => {
 // ── AQU-1575: every take as 16-bit / 48 kHz / mono WAV ─────────────────────
 //
 // LOTE's broadcast vendor needs exactly that file, and the stored takes are a
-// mix: 24 kHz Inworld WAVs, 22.05 kHz Seed-VC WAVs, compressed webm for Gemini
+// mix: 24 kHz Inworld WAVs, 22.05 kHz converted WAVs, compressed webm for Gemini
 // and MMS and for denoised takes. The WAV choice decodes each one and writes it
 // again on the chapter export's path.
 describe("the WAV format", () => {
@@ -974,6 +974,33 @@ describe("the WAV format", () => {
     expect(entry.dataBytes).toBe(72_000)
     expect(entry.timeReference).toBe(10.25 * 48_000)
     expect(result.untrimmed).toBe(0)
+  })
+
+  // AQU-2327, found in the browser walk: the dialog handed no decoder unless
+  // the WAV box was ticked, so a take at its own volume came out as stored.
+  it("writes a take at its own volume and fades as WAV even when the rest are copied as stored", async () => {
+    const take = (id: string, at: number, level: Record<string, number>) => cell({
+      id, startTime: at, endTime: at + 1,
+      selectedAudioId: `${id}.webm`,
+      attachments: { [`${id}.webm`]: { url: `frontier-audio://${id}.webm`, type: "audio", ...level } },
+    } as Partial<CellData>)
+    const result = await exportAudioPerLine({
+      cells: [take("quiet", 10, { gainDb: -6, fadeInMs: 100 }), take("plain", 20, {})],
+      settings: SETTINGS, projectId: "p1", langCode: "es",
+      format: "original",
+      decode: oneSecond,
+      fetchBytes: async () => new Uint8Array([0x1a, 0x45, 0xdf, 0xa3]),
+    })
+    const zip = await JSZip.loadAsync(result.blob)
+    const names = Object.keys(zip.files).filter((n) => n !== "manifest.csv").sort()
+    expect(names).toEqual(["es_L0001_NO_CHARACTER.wav", "es_L0002_NO_CHARACTER.webm"])
+    const wav = await zip.files["es_L0001_NO_CHARACTER.wav"].async("uint8array")
+    const view = new DataView(wav.buffer, wav.byteOffset, wav.byteLength)
+    let o = 12
+    while (String.fromCharCode(...wav.subarray(o, o + 4)) !== "data") o += 8 + view.getUint32(o + 4, true)
+    const at = (i: number) => view.getInt16(o + 8 + i * 2, true) / 32767
+    expect(at(0)).toBe(0) // the fade starts from silence
+    expect(at(24_000)).toBeCloseTo(0.25 * Math.pow(10, -6 / 20), 3) // −6 dB after it
   })
 
   it("decodes a clip shared by neighbouring lines once", async () => {

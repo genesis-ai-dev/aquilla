@@ -3083,3 +3083,127 @@ the proofs above, not the grep:
   above, now with a reproduction: **lint before a build and after a build disagree by two
   warnings**, which makes any run-order-sensitive warning count in this repo unreliable
   until the ignore pattern is fixed. Worth promoting from candidate to an issue.
+
+## 2026-11-02 — complexity run: `ImportDialog`'s 16-branch screen-title ladder
+
+**Done this run** (theme 2, complexity reduction inside one file; 1 file, 34 insertions /
+15 deletions, no test file touched): `src/components/ImportDialog.tsx`. This is the
+candidate the 2026-10-28 entry queued — the dialog header's final fallback branch tested
+`screen === "…"` sixteen times in a row to choose one `t()` key. It is now a module-level
+`SCREEN_TITLE_KEYS: Partial<Record<Screen, MessageKey>>` holding the 13 plain lookups, plus
+the two branches that are not lookups kept inline at the call site.
+
+- **Equivalence is per-screen, not per-order.** Every arm of the old ladder tested
+  `screen ===` against a distinct literal, so the branches are mutually exclusive and
+  reordering cannot change the result. The 13 table screens (`upload`, `youtube`, `gdrive`,
+  `helloao`, `obs`, `dcs`, `macula`, `tn`, `spreadsheet`, `jsonKeys`, `paired`, `sdbh`,
+  `linkProject`) map to the exact key they had; `partner` (reads
+  `activePartner?.importScreen?.titleKey ?? "importExport.landing.upload.title"`) and
+  `extension` (`extensionImporter?.importer.label ?? ""`, a tool-supplied label, not a key)
+  moved to the front as the only two non-lookups; `ebible` had no arm of its own and was the
+  ladder's trailing `else`, which is now the `?? "importExport.landing.ebible.title"`
+  fallback. Any screen that somehow reached this branch without an arm landed on that same
+  eBible title before and after.
+- **Deliberately NOT derived from `POPULAR_OPTIONS`/`SPECIALIZED_OPTIONS`**, which already
+  map tiles to `titleKey`s in this same file. Four screens title themselves differently from
+  the tile that opens them — `helloao`, `tn`, `spreadsheet` and `paired` use
+  `importExport.dialog.title*` in the header but `importExport.landing.*.title` on the tile —
+  and two tiles (`importExport.landing.upload.title`, `importExport.landing.tm.title`) share
+  the single `upload` screen, so screen → title is not a function of the option tables.
+  A dedicated table is the only shape that preserves the keys; the comment on it says so, to
+  stop the next reader "simplifying" it into a derivation.
+- **Module-level, mirroring the file's own convention** (the AQU-832 note above
+  `POPULAR_OPTIONS`): the table holds keys and the render resolves them, because a
+  module-level table is evaluated before any `I18nProvider` exists and cannot call `t()`
+  itself. Being module-level also keeps it out of every enclosing `useCallback`'s dependency
+  array — the 2026-10-09 entry is this ledger's record of how expensive a `react-hooks`
+  dependency change can be with the React Compiler on. No dependency array is in the diff.
+- **The i18n sweeps still see these keys.** All 13 stay literal strings inside `src`, which
+  is what the dead-key runs grep for; no key moved into a computed expression. The
+  `i18n/no-unkeyed-string` ESLint rule is scoped to JSXText/JSX attributes/allowlisted call
+  arguments, so a module-level key table is outside it by design (see `scripts/i18n-scan.ts`'s
+  header, class 2 `hoisted-const`), and `scripts/i18n-scan.test.ts` asserts on synthetic
+  sources only — no repo-wide snapshot to shift.
+
+### New evidence for the blocked `src/components/import/*` orphan cluster
+
+The cluster (logged as 15 files / ~3,900 lines in the 2026-08-17 and 2026-08-31 entries) is
+**still blocked** — [#410](https://github.com/genesis-ai-dev/aquilla/issues/410) is open,
+unassigned, no linked PR. An independent re-grep this run (over `src`, `e2e`, `scripts` and
+the four worker packages) **re-inventories it, because files moved**, which is exactly what
+the 2026-08-31 entry warned would happen:
+
+- **11 still have zero importers**: `ImportLanding`, `UploadPanel`, `EBiblePanel`,
+  `HelloaoPanel`, `ObsPanel`, `DcsPanel`, `MaculaPanel`, `TnPanel`, `DirectionPanel`,
+  `ImportResultPanel`, `CollisionPanel` — each shadowed by a same-named inline `function`
+  inside `ImportDialog.tsx`.
+- **2 more are reachable only from inside the dead set**, so they die with it:
+  `ParatextChoice.tsx` (imported only by the dead `UploadPanel.tsx`) and
+  `ImportDialogBackButton.tsx` (imported only by the dead `HelloaoPanel.tsx`) — and
+  `ImportDialog.tsx` has its own inline `ImportDialogBackButton` at `:5268`, which is what
+  the live header renders. **13 files delete as one set.**
+- **`SdbhPanel.tsx` has left the set and is now frozen for a different reason**: no product
+  code imports it, but `src/components/import/SdbhPanel.test.tsx:17` does, so deleting it
+  would mean deleting a test file. (`ImportDialog.tsx:4919` holds the live inline copy.) A
+  human, not this routine, has to decide whether that test should follow its subject.
+- **`BiblicaPanel.tsx` is no longer in that directory at all** — strike it from the list. It
+  lives at `src/partner-integrations/biblica/BiblicaPanel.tsx`, is imported by its own test,
+  and is partner-owned either way.
+
+Two things worth adding:
+
+- **The dead duplicates are being maintained.** `6889cf0d` (`feat(AQU-2125)`, Oct 23) carried
+  a real behavior change — speaker tags casting the character instead of every line — into
+  `src/components/import/UploadPanel.tsx`, which **nothing imports**, in the same commit that
+  changed the live inline copy in `ImportDialog.tsx`. (Its sibling in that commit,
+  `SpreadsheetImportPanel.tsx`, *is* live: `ImportDialog.tsx:132` imports it.) So the cost of
+  leaving the cluster in place is no longer just dead weight — a contributor spent real effort
+  on a file that never runs, and anyone reading it sees current-looking code that does not
+  execute. Worth promoting from candidate to an issue on that basis alone.
+- **The blocker may be weaker than it reads.** #410's stated mechanism is vitest's
+  *test*-file-to-worker sharding, and none of the 11 files is a test file, so deleting them
+  does not change the test-file count. The 2026-09-02 entry already recorded the same flake
+  family firing with a zero-test-file-count diff, which argues the 2026-08-17
+  3-of-3-vs-2-of-2 correlation was coincidence rather than causation. This run's own baseline
+  is a third data point: neither `TeamsList.test.tsx` nor `ArchivedProjects.test.tsx` failed
+  at all (the one failure was `scripts/release-cut.test.ts`, see below). Not enough to act on
+  unilaterally — a run that deletes the cluster should still alternate staged/unstaged
+  full-suite runs at least twice each way, as the 2026-08-17 entry asks — but a human could
+  reasonably unblock it.
+
+### Gates recorded 2026-11-02 (`origin/dev` `1385d515`)
+
+- **`pnpm lint`** — exit 0 both times, **0 errors / 992 warnings** both times, and the
+  output is *identical* once `line:col` is normalized (same files, same rules, same order).
+  The only raw-text delta is four pre-existing warnings in the touched file moving by exactly
+  the diff's arithmetic: `605→637`, `628→660`, `823→855` (+32, the inserted table) and
+  `2944→2963` (+19 = +32 − 13, the ladder shrinking 16 lines to 3).
+  The final run was made comparable by `rm -rf packages/*/dist` first: the baseline lint ran
+  before any build in a fresh container, so it never saw the git-ignored
+  `packages/idml-roundtrip/dist` output that the baseline `pnpm build` then generated. That is
+  the nested-`dist` `globalIgnores` candidate at the top of this file, reproduced for the
+  third run in a row — the ignore gap makes any lint-warning count in this repo
+  order-sensitive, and every code-health run now has to work around it by hand.
+- **`pnpm build`** — exit 0, baseline and final (`check-app-build` SPA-only output OK,
+  `check-brand-build aquilla` OK).
+- **`pnpm test`** — **baseline is red, pre-existing, and out of scope**: 1 failed / 2230
+  passed / 2 skipped (2233 files), 1 failed / 25394 passed / 2 expected-fail / 23 skipped
+  (25420 tests). The failure is
+  `scripts/release-cut.test.ts > buildReleaseBranch against a scratch repo > "fails loud when
+  the pick cannot commit, and leaves nothing in progress"` — it sets `commit.gpgsign true`
+  with a deliberately bogus `gpg.program` and expects `buildReleaseBranch` to throw; in this
+  container the commit does not fail, so nothing is thrown (`expected [Function] to throw an
+  error`). Environment-dependent (the container's git/gpg behavior), reproduced with a zero
+  diff, in a test file this routine may not touch. `scripts/release-cut.test.ts` is therefore
+  frozen for this run. **The final run reproduced the baseline exactly** — same single
+  failing test, same totals to the digit (1 failed / 2230 passed / 2 skipped files; 1 failed /
+  25394 passed / 2 expected-fail / 23 skipped tests) — so the green-to-green proof holds, with
+  the one pre-existing failure identically red on both sides. No worker suite was run: no
+  worker package is in the diff.
+- **`pnpm test:e2e:smoke`** — **not runnable in this container**, same hard no-result as the
+  2026-08-10/12/14, 2026-09-18 and 2026-10-30 runs: no Docker daemon, and the `psql` fallback
+  found no Postgres on 127.0.0.1:5432 (`connection refused`), so `e2e-up` refuses to run
+  against a stale schema. It fails before Playwright loads a spec, so it cannot be sensitive
+  to the diff; CI runs the gate.
+- **Targeted, as the proof the 2026-10-28 entry asked for**: all 15 `ImportDialog.*.test.tsx`
+  files, 128 tests, green (`npx vitest run` in two batches), plus `npx tsc -b` clean.

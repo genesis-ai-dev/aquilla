@@ -59,8 +59,8 @@ const FORMAT_CEILINGS = {
 } as const
 
 export interface RecordingLimitOptions {
-  /** Tighter byte budget than the upload cap — the voice-clone reference has
-   *  its own, and checking it after the take is over is a late failure. */
+  /** Tighter byte budget than the upload cap, for a caller with its own —
+   *  checking it after the take is over is a late failure. */
   maxBytes?: number
 }
 

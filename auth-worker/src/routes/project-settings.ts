@@ -82,6 +82,7 @@ import {
   VISIBILITY_FLOOR_LEVELS,
   type VisibilityFloorKey,
 } from "../../../db/shared/visibility-floors"
+import { IMPORT_MIN_ROLE_KEY, importFloorView, type ImportFloorView } from "../../../db/shared/import-floor"
 import { notifySyncWorkerOfProjectSettingsChange } from "../services/sync-worker-notify"
 import {
   loadProjectSettings,
@@ -225,6 +226,7 @@ async function withOrgDefaults(
   orgValidationCountAudio: number | null
   orgPolicy: ProjectOrgPolicy
   visibilityFloors: VisibilityFloorsView
+  importFloor: ImportFloorView
   orgMediaDefaults: MediaDefaults
 }> {
   const [orgCountStructuralCells, orgThresholds, policy, orgMediaDefaults] = await Promise.all([
@@ -259,6 +261,11 @@ async function withOrgDefaults(
         effective: visibility.memberProgressViewMinRole,
       },
     },
+    // AQU-2305: the import floor this project enforces — its org's, this
+    // project's own where stricter, and the higher of the two. Every
+    // source-import affordance gates on `effective`, and the Project Settings
+    // row needs all three to say what "Organization default" means today.
+    importFloor: importFloorView(policy.orgPolicy.importMinRole, response.settings[IMPORT_MIN_ROLE_KEY]),
     orgMediaDefaults,
   }
 }
@@ -349,6 +356,53 @@ async function visibilityFloorWriteRefusal(
           role,
         ),
       }
+    }
+  }
+  return null
+}
+
+/**
+ * AQU-2305: the rule for changing a project's own import floor. Judged on the
+ * CHANGE, so a stored value rides along unchanged on an unrelated save.
+ *
+ * A value set must be a role-ladder level at or above the org's floor: a
+ * project can make who imports a new source file stricter, never looser. A
+ * stored value the org has since overtaken is inert — the floor enforced is the
+ * higher of the two (db/shared/import-floor.ts).
+ *
+ * Unlike the visibility floors there is no extra gate on LOOSENING it. The org
+ * floor is owner-only, and everything above the org's floor is this project's
+ * own call, kept behind the ordinary maintainer gate on shared project settings
+ * — so a project lead can neither raise nor lower it, which is the whole
+ * protection the decision asked for.
+ */
+async function importFloorWriteRefusal(
+  env: AuthHonoEnv["Bindings"],
+  projectId: string,
+  stored: Record<string, unknown>,
+  next: Record<string, unknown>,
+): Promise<{ status: 400; body: { error: string } } | null> {
+  const key = IMPORT_MIN_ROLE_KEY
+  if (JSON.stringify(stored[key]) === JSON.stringify(next[key])) return null
+  if (next[key] == null) return null
+  const level = parseProjectVisibilityFloor(next[key])
+  if (level == null) {
+    return {
+      status: 400,
+      body: { error: `${key} must be a role level: one of ${VISIBILITY_FLOOR_LEVELS.join(", ")}` },
+    }
+  }
+  const { orgPolicy } = await getProjectOrgPolicy(env, projectId, next)
+  const orgFloor = orgPolicy.importMinRole
+  if (level < orgFloor) {
+    return {
+      status: 400,
+      body: {
+        error:
+          `${key} ${level} is below the organization's setting (${orgFloor}). A project can only make who `
+          + `imports a new source file stricter than its organization does: choose ${orgFloor} or higher, or `
+          + `remove ${key} to follow the organization.`,
+      },
     }
   }
   return null
@@ -665,6 +719,10 @@ projectSettings.on(
     // AQU-1771: a project's own visibility floors can only be stricter.
     const floorRefusal = await visibilityFloorWriteRefusal(c.env, projectId, stored.settings, settings, role)
     if (floorRefusal) return c.json(floorRefusal.body, floorRefusal.status)
+
+    // AQU-2305: and so can its own import floor.
+    const importRefusal = await importFloorWriteRefusal(c.env, projectId, stored.settings, settings)
+    if (importRefusal) return c.json(importRefusal.body, importRefusal.status)
 
     const queryVersion = parseIntOrNull(c.req.query("ifMatchVersion"))
     const headerVersion = parseIntOrNull(c.req.header("If-Match-Version"))

@@ -16,6 +16,7 @@ import { handleCellAttachmentRequest } from "./cell-attachments"
 import { handleVoiceConvertRequest, handleVoiceReferenceRequest } from "./voice-convert"
 import { handleCustomVoiceRequest } from "./custom-voice"
 import { handleTtsRequest } from "./tts"
+import { handleElevenLabsRequest } from "./elevenlabs"
 import { handleDiarizationRequest } from "./diarization"
 import { notifyProjectDo } from "./archive-broadcast"
 import { handleCorsPreflight, withCors } from "./cors"
@@ -189,11 +190,8 @@ declare global {
       ALLOW_UNAUTHENTICATED?: string
       /** Optional R2 key prefix for PR/staging isolation. */
       R2_KEY_PREFIX?: string
-      /** Seed-VC voice-clone Modal endpoint (infra/modal/seed_vc.py). */
-      SEED_VC_URL?: string
-      /** Shared secret for the Seed-VC endpoint (matches its SEED_VC_TOKEN). */
-      SEED_VC_TOKEN?: string
-      /** Voice-forge library-voice endpoint (infra/modal/voice_forge.py `web`). */
+      /** Voice-forge endpoint (infra/modal/voice_forge.py `web`): the only
+       *  speech-to-speech path — library and custom voices (AQU-2291). */
       VOICE_FORGE_URL?: string
       /** Shared secret for the voice-forge endpoint (matches its VOICE_FORGE_TOKEN). */
       VOICE_FORGE_TOKEN?: string
@@ -205,6 +203,10 @@ declare global {
       INWORLD_API_BASE?: string
       INWORLD_TTS_MODEL?: string
       INWORLD_DEFAULT_VOICE?: string
+      /** ElevenLabs upstream origin (AQU-2299). Unset → https://api.elevenlabs.io.
+       *  ElevenLabs is BYOK: there is no house key — each user's own key arrives
+       *  per request in X-ElevenLabs-Key. `pnpm dev` points this at the mock. */
+      ELEVENLABS_BASE_URL?: string
       /** Per-user daily TTS audio-seconds cap (default 36000 = 10 h while sizing). */
       TTS_USER_DAILY_SECONDS_LIMIT?: string
       /** "true" → enforce TTS cap with 429; anything else → log-only. */
@@ -469,6 +471,9 @@ const worker = {
     if (customVoiceResponse) return withCors(customVoiceResponse, request)
     const ttsResponse = await handleTtsRequest(request, env)
     if (ttsResponse) return withCors(ttsResponse, request)
+    // AQU-2299: ElevenLabs, bring-your-own-key (the key rides each request).
+    const elevenLabsResponse = await handleElevenLabsRequest(request, env)
+    if (elevenLabsResponse) return withCors(elevenLabsResponse, request)
     const diarizationResponse = await handleDiarizationRequest(request, env)
     if (diarizationResponse) return withCors(diarizationResponse, request)
     const eventsReadResponse = await handleEventsReadRequest(request, env)

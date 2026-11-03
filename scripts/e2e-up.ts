@@ -717,7 +717,17 @@ async function main(): Promise<void> {
   // The build cost (~15-30s) pays for itself after the second spec. The backend
   // URLs are passed via env so each shard bakes its own (VITE_* process env is
   // inlined by Vite at build time and takes priority over .env files).
-  if (VITE_MODE === "preview") {
+  //
+  // E2E_PREBUILT_DIST=1 means the caller already ran this exact build before
+  // starting the workers (the Hetzner QA bootstrap does, so the build never
+  // shares its memory cap with two wrangler dev servers). An absent dist is
+  // still a hard error, never a silent dev-mode fallback.
+  if (VITE_MODE === "preview" && process.env.E2E_PREBUILT_DIST === "1") {
+    if (!existsSync(path.join(REPO_ROOT, DIST_DIR, "index.html"))) {
+      throw new Error(`E2E_PREBUILT_DIST=1 but ${DIST_DIR}/index.html is missing`)
+    }
+    console.log(`${TAG}[boot 7/8] serving prebuilt ${DIST_DIR} (E2E_PREBUILT_DIST=1)`)
+  } else if (VITE_MODE === "preview") {
     console.log(`${TAG}[boot 7/8] building app for test mode (one-time, ~30s)…`)
     await runOnce("npx", ["vite", "build", "--mode", "test", "--outDir", DIST_DIR], REPO_ROOT, "build", browserEnv)
   } else {

@@ -8,7 +8,7 @@ function voice(over: Partial<Voice> = {}): Voice {
 
 describe("upsertVoice", () => {
   it("appends a new voice and pins it as default when none is set", () => {
-    const added = voice({ id: "v-clone", name: "Clone" })
+    const added = voice({ id: "v-anna", name: "Anna" })
     expect(upsertVoice([voice()], added, undefined)).toEqual({
       voices: [voice(), added],
       defaultVoiceId: "v-1",
@@ -30,11 +30,8 @@ describe("isRecordedCloneClip", () => {
     expect(isRecordedCloneClip(voice({ referenceAudioId: "ref.webm" }))).toBe(true)
   })
 
-  it("is false when the reference was lifted from a line take", () => {
-    expect(isRecordedCloneClip(voice({
-      referenceAudioId: "ref.webm",
-      referenceTakeKey: "cell-1:recorded",
-    }))).toBe(false)
+  it("is false when the reference was copied from a line take", () => {
+    expect(isRecordedCloneClip(voice({ referenceAudioId: "ref.webm", referenceTakeKey: "cell-1:take-1.webm" }))).toBe(false)
   })
 
   it("is false when there is no reference", () => {

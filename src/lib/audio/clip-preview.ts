@@ -33,6 +33,7 @@
 // the same structural-parameter trick `slotAudible` already uses for the same
 // reason.
 
+import { levelAt, mixerInput, type ClipLevel } from "./mixer"
 import { claimActiveAudio, clearActiveAudioIf, type ActiveAudioController } from "./audio-coordinator"
 import { audioCacheGet, audioCachePut } from "./bytes-cache"
 import {
@@ -60,6 +61,8 @@ export interface ClipPreviewSource {
   /** From the attachment, so the length gate can be applied BEFORE a byte
    *  moves. Null when nobody has measured this clip. */
   durationSec: number | null
+  /** AQU-2327: the take's volume and fades (cell.audio.gain); absent = as recorded. */
+  level?: ClipLevel | null
 }
 
 export interface ClipPreviewHandle {
@@ -235,13 +238,16 @@ function playWindow(
   buffer: AudioBuffer,
   offsetSec: number,
   durationSec: number | null,
-  opts: { fadeSec: number; volume?: number; onEnded?: () => void },
+  opts: { fadeSec: number; volume?: number; level?: ClipLevel | null; onEnded?: () => void },
 ): { stop(): void } {
   const source = ctx.createBufferSource()
   source.buffer = buffer
   const gain = ctx.createGain()
   source.connect(gain)
-  gain.connect(ctx.destination)
+  // AQU-2327: through the app's one mixer — the main volume and the peak
+  // guard — so a raised take is as loud here as on the timeline, never louder.
+  const mixed = mixerInput()
+  gain.connect(mixed ?? ctx.destination)
 
   const t0 = ctx.currentTime + SCHEDULE_AHEAD_SEC
   const length = durationSec ?? Math.max(0, buffer.duration - offsetSec)
@@ -253,10 +259,20 @@ function playWindow(
   // The transport's own level, so a preview is as loud as playing the timeline
   // would have been. Sam's standing rule for this surface is "no special rules —
   // go with how the timeline already works".
-  const peak = opts.volume == null ? 1 : Math.min(1, Math.max(0, opts.volume))
+  const peak = mixed || opts.volume == null ? 1 : Math.min(1, Math.max(0, opts.volume))
+  const lv = opts.level ?? null
+  // The take's own level at a moment of the window (its volume, its fades).
+  const at = (sec: number) => peak * (lv ? levelAt(offsetSec + (sec - t0), lv) : 1)
   gain.gain.setValueAtTime(0, t0)
-  gain.gain.linearRampToValueAtTime(peak, t0 + fade)
-  gain.gain.setValueAtTime(peak, Math.max(t0 + fade, t1 - fade))
+  gain.gain.linearRampToValueAtTime(at(t0 + fade), t0 + fade)
+  if (lv) {
+    const keys = [lv.startSec + lv.fadeInSec, ...(lv.endSec != null ? [lv.endSec - lv.fadeOutSec] : [])]
+      .map((k) => t0 + (k - offsetSec))
+      .filter((k) => k > t0 + fade && k < t1 - fade)
+      .sort((a, b) => a - b)
+    for (const k of keys) gain.gain.linearRampToValueAtTime(at(k), k)
+  }
+  gain.gain.linearRampToValueAtTime(at(Math.max(t0 + fade, t1 - fade)), Math.max(t0 + fade, t1 - fade))
   gain.gain.linearRampToValueAtTime(0, t1)
 
   let done = false
@@ -394,6 +410,7 @@ export function playClipWindow(
       // A clip-length fade is inaudible but still removes the edge click.
       fadeSec: CLIP_FADE_SEC,
       volume: opts?.volume,
+      level: src.level ?? null,
       onEnded: finish,
     })
   })

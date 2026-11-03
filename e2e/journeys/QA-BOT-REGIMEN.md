@@ -22,7 +22,7 @@ is not a stage on this line.
 
 | Stage | Who acts | Gate |
 | --- | --- | --- |
-| PR → `dev` | The agent who opened it | Walk **PASS** at the head sha, no proven unresolved finding, required checks green. |
+| PR → `dev` | The agent who opened it | Walk **PASS** at the head sha, no proven unresolved finding, required checks green. The one other walk that merges is a **BLOCKED** the PR's own pending migration explains; its proof comes after merge, on dev ([PR-BOT.md](PR-BOT.md), *Re-walk on dev after merge*). |
 | `dev` → release branch | **Release cut** workflow, after each deploy's tag push or a button press | `node scripts/release-plan.mjs` says `cut: true`. |
 | Release HEAD → deploy | A person, after smart Jev | A smart-Jev `FAIL` holds that HEAD. `PASS`, inconclusive, and harness unavailable do not. |
 | Release → prod | Kieran or Matthew | Always a person. The tag is `YYYY.MM.DD.NN`. See "Deployment ownership" in [DEPLOYMENT-ENVIRONMENTS.md](../../docs/DEPLOYMENT-ENVIRONMENTS.md). |
@@ -32,7 +32,10 @@ is not a stage on this line.
 An agent may merge its own pull request into `dev` when all of these hold at
 the pull request's **current head sha**:
 
-- The bot walk comment ([PR-BOT.md](PR-BOT.md)) is **PASS** for that sha.
+- The bot walk comment ([PR-BOT.md](PR-BOT.md)) is **PASS** for that sha, or
+  **BLOCKED** with a `Blocked by: pending migration <file>` line: the one
+  BLOCKED a preview cannot clear, because nobody applies a branch's migration
+  to the shared development database before the merge deploys it.
 - The review agent has no unresolved finding it could prove (a failing test, a
   reproduced bug). Unproven suspicions do not block.
 - Required checks are green. Those checks are the `ci.yml` jobs: lint
@@ -51,7 +54,13 @@ for the new run.
 **Inconclusive is a checker bug, not QA work.** A `FLAKY` or `BLOCKED` walk means
 the bot could not prove the effect. Fix the journey's outcome check (read the
 API or the DOM state directly) so the next walk is conclusive. Do not hand the
-item to a human to "just look at it", and do not merge it.
+item to a human to "just look at it", and do not merge it. The exception is
+the pending-migration `BLOCKED` above: no outcome check can fix a schema the
+preview does not have, so that PR merges on review and green checks, dev
+deploys it with its migration, and the bot re-walks it there
+([PR-BOT.md](PR-BOT.md), *Re-walk on dev after merge*). The planner still
+holds it: a migration is a holding area, and only `release:approved` clears
+that.
 
 `scripts/release-plan.mjs` reads the same walk comment later and holds a cut
 unless the walk is `PASS` or `none`.

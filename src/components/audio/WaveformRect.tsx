@@ -28,6 +28,14 @@
 //     it can be seen and cut. Overlays opt in with `data-wave-overlay` (WAVE_OVERLAY_CLASS
 //     does the fading); a nudge keeps them aside for a moment after the key.
 //
+// AQU-2235 (Sam, Oct 25, boards 51–52): THE LOOK CHANGED, THE RECTANGLE DID
+// NOT. A take is now a deeper shade of its track's hue (`--tl-track-wave`, at
+// 90%) on a 12% wash of it in a faint 26% frame; while it plays the heard part
+// keeps full strength on a 27% ground and the rest drops to 30%, split at a
+// 1.5px line in the darkened hue. A generated voice looks exactly like a
+// recorded take: the sparkle in its corner is the only mark, at every size.
+// Corners are 6px, and 4px on anything under 24px tall.
+//
 // SVG, not canvas, for the reasons TargetChipWaveform gives: the ink inherits
 // the body's colour, the path is rebuilt only when the peaks or the height
 // change, and a `d` string is something a happy-dom test can assert.
@@ -37,11 +45,17 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import type { CSSProperties, KeyboardEvent, PointerEvent, ReactNode } from "react"
-import { Play, Square } from "lucide-react"
+import { Play, Sparkles, Square } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { envelopePathD } from "@/lib/audio/waveform-shape"
-import { NEUTRAL_TRACK_VARS, trackChipClass, trackChipPlayingClass } from "@/lib/timeline/track-colors"
-import { CHIP_PLAYLINE_CLASS } from "./chip-classes"
+import {
+  NEUTRAL_TRACK_VARS,
+  TRACK_WAVE_FILL_CLASS,
+  WAVE_LOOK,
+  TRACK_CHIP_CLASS,
+  TRACK_CHIP_PLAYING_CLASS,
+} from "@/lib/timeline/track-colors"
+import { WAVE_OVERLAY_CLASS, chipPlaylineClass } from "./chip-classes"
 import { ChipCornerButton, TakeValidatedBadge } from "./chip-parts"
 
 /** One trim edge or split point. Positions are FRACTIONS of the whole clip. */
@@ -220,6 +234,12 @@ export function WaveformRect({
   }
 
   const showProgress = (playing || holdProgress) && progress != null && Number.isFinite(progress)
+  // AQU-2235: the sparkle sits beside the play button when there is one, and
+  // in the corner itself when there is not; smaller at list size.
+  const sparkleBig = height >= 30
+  const sparkleStyle: CSSProperties = onTogglePlay
+    ? { left: 28, top: sparkleBig ? 6.5 : 5, width: sparkleBig ? 11 : 9, height: sparkleBig ? 11 : 9 }
+    : { left: sparkleBig ? 5 : 3, top: sparkleBig ? 2 : 1, width: sparkleBig ? 11 : 9, height: sparkleBig ? 11 : 9 }
   const fracFromX = (clientX: number): number => {
     const el = boxRef.current
     if (!el) return 0
@@ -247,9 +267,10 @@ export function WaveformRect({
       data-testid={testId}
       className={cn(
         // The chip's own body, in its track's colour ladder.
-        "group/wave relative touch-none select-none overflow-hidden rounded-[6px] border",
-        trackChipClass(kind),
-        showProgress && trackChipPlayingClass(kind),
+        "group/wave relative touch-none select-none overflow-hidden border",
+        height < 24 ? "rounded-[4px]" : "rounded-[6px]",
+        TRACK_CHIP_CLASS,
+        showProgress && TRACK_CHIP_PLAYING_CLASS,
         className,
       )}
       style={{
@@ -260,15 +281,45 @@ export function WaveformRect({
       } as CSSProperties}
     >
       {d && (
+        // Played (or the whole take, at rest) at full strength…
         <svg
           aria-hidden
           data-testid={testId ? `${testId}-shape` : undefined}
-          className="pointer-events-none absolute inset-0 h-full w-full fill-current opacity-40"
+          className={cn("pointer-events-none absolute inset-0 h-full w-full", TRACK_WAVE_FILL_CLASS)}
           viewBox={`0 0 ${bins} ${innerH}`}
           preserveAspectRatio="none"
+          style={{
+            opacity: WAVE_LOOK.wave,
+            ...(showProgress ? { clipPath: `inset(0 calc(100% - ${pct(progress!)}) 0 0)` } : {}),
+          }}
         >
           <path d={d} />
         </svg>
+      )}
+      {d && showProgress && (
+        // …and, while it plays, the part not yet played at 30%.
+        <svg
+          aria-hidden
+          data-testid={testId ? `${testId}-shape-unplayed` : undefined}
+          className={cn("pointer-events-none absolute inset-0 h-full w-full", TRACK_WAVE_FILL_CLASS)}
+          viewBox={`0 0 ${bins} ${innerH}`}
+          preserveAspectRatio="none"
+          style={{ opacity: WAVE_LOOK.unplayed, clipPath: `inset(0 0 0 ${pct(progress!)})` }}
+        >
+          <path d={d} />
+        </svg>
+      )}
+      {kind === "generated" && (
+        // A generated voice's only mark (Sam, Oct 25).
+        <span
+          aria-hidden
+          data-testid={testId ? `${testId}-generated` : undefined}
+          data-wave-overlay=""
+          className={cn("pointer-events-none absolute z-10 flex text-foreground", WAVE_OVERLAY_CLASS)}
+          style={sparkleStyle}
+        >
+          <Sparkles className="h-full w-full" />
+        </span>
       )}
       {loading && !d && (
         <div
@@ -327,7 +378,7 @@ export function WaveformRect({
         <span
           aria-hidden
           data-testid={testId ? `${testId}-playline` : undefined}
-          className={CHIP_PLAYLINE_CLASS}
+          className={chipPlaylineClass(height)}
           style={{ left: pct(progress!), opacity: 1 }}
         />
       )}

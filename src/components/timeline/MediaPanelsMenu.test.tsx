@@ -41,7 +41,7 @@ describe("MediaPanelsMenu", () => {
     expect(screen.queryByText("Panels on this file")).toBeNull()
     expect(screen.queryByText(/Live|Synced|lines · 0 done/)).toBeNull()
     const rows = screen.getAllByRole("button").filter((b) => b.dataset.testid?.startsWith("panels-row-"))
-    expect(rows.map((b) => b.dataset.testid)).toEqual(["panels-row-timeline", "panels-row-film", "panels-row-text"])
+    expect(rows.map((b) => b.dataset.testid)).toEqual(["panels-row-timeline", "panels-row-film", "panels-row-text", "panels-row-station"])
     const timeline = screen.getByTestId("panels-row-timeline")
     expect(timeline).toHaveAttribute("aria-pressed", "true")
     expect(timeline).toHaveTextContent(/^Timeline(⌥1|Alt\+1)$/)
@@ -49,6 +49,9 @@ describe("MediaPanelsMenu", () => {
     expect(film).toHaveAttribute("aria-pressed", "true")
     expect(film).toHaveTextContent(/^Film(⌥2|Alt\+2)$/)
     expect(screen.getByTestId("panels-row-text")).toHaveTextContent(/^Text(⌥3|Alt\+3)$/)
+    // AQU-2327: the Station, a tab behind the text, with ⌥4.
+    expect(screen.getByTestId("panels-row-station")).toHaveTextContent(/^Station(⌥4|Alt\+4)$/)
+    expect(screen.getByTestId("panels-row-station")).toHaveAttribute("aria-pressed", "false")
     // Where a panel sits is in its tooltip; nothing says "showing".
     expect(screen.queryByText(/showing/)).toBeNull()
     expect(screen.queryByTestId("panels-where-film")).toBeNull()
@@ -80,7 +83,7 @@ describe("MediaPanelsMenu", () => {
   it("hides a showing panel, shows one out of sight, and names a tab behind another", async () => {
     const layout: DockLayout = {
       ...startDockLayout(),
-      areas: { ll: ["film", "text"], lr: [] },
+      areas: { ll: ["film", "text", "station"], lr: [] },
       active: { ll: "film", lr: null },
     }
     const dock = fakeDock(layout)

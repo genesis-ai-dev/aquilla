@@ -24,6 +24,7 @@ import {
   type OutboxEventKind,
   type OutboxPayloadFor,
   type OutboxRawEvent,
+  type VersionChanges,
   isGenesisKind,
 } from "./outbox-types"
 import posthog from "@/lib/posthog"
@@ -690,6 +691,8 @@ export interface CellAudioAttachInput {
   asr?: { text: string; model: string }
   /** Provenance of an AI cleanup. New timings without it clear the server's mark. */
   transcriptAi?: { model: string; at: number; changes: number }
+  /** AQU-2327: a Station version's changes and lines, for its History row. */
+  versionChanges?: VersionChanges
   /**
    * AQU-1572: which gesture produced this clip — telemetry only, never on the
    * wire. ONLY the originating gesture passes one (an upload or LinkMedia
@@ -762,6 +765,7 @@ export async function emitCellAudioAttach(input: CellAudioAttachInput): Promise<
       ...(input.pieceOf !== undefined ? { pieceOf: input.pieceOf } : {}),
       ...(input.asr !== undefined ? { asr: input.asr } : {}),
       ...(input.transcriptAi !== undefined ? { transcriptAi: input.transcriptAi } : {}),
+      ...(input.versionChanges !== undefined ? { versionChanges: input.versionChanges } : {}),
       ...targetLaneFields(input),
     },
     clientTs: input.clientTs,
@@ -856,6 +860,48 @@ export async function emitCellAudioTrim(input: CellAudioTrimInput): Promise<stri
       audioId: input.audioId,
       trimStartMs: input.trimStartMs,
       trimEndMs: input.trimEndMs,
+      ...targetLaneFields(input),
+    },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+export interface CellAudioGainInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  audioId: string
+  /** Volume in dB; null = as recorded. */
+  gainDb: number | null
+  /** Fade lengths in ms; null = none. */
+  fadeInMs: number | null
+  fadeOutMs: number | null
+  /** AQU-1462: lane the member was working in. */
+  targetLang?: string
+  /** AQU-1612: the lane row's id, when the caller has it. Must match `targetLang`. */
+  laneId?: string
+  author: string
+  clientTs?: number
+}
+
+/**
+ * Emit a `cell.audio.gain` (AQU-2327) — the clip's volume and fades ONLY,
+ * all three stated (null clears). Never selection, trims or the recording.
+ */
+export async function emitCellAudioGain(input: CellAudioGainInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.audio.gain",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: {
+      audioId: input.audioId,
+      gainDb: input.gainDb,
+      fadeInMs: input.fadeInMs,
+      fadeOutMs: input.fadeOutMs,
       ...targetLaneFields(input),
     },
     clientTs: input.clientTs,

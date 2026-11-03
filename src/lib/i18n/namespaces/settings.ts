@@ -24,6 +24,13 @@ import { defineNamespace, plural } from "./types"
  */
 export const settings = defineNamespace({
   keys: {
+    // ── AQU-2262: settings save as you change them ──
+    "settings.save.saved": "Saved",
+    "settings.save.saving": "Saving…",
+    "settings.save.theirsKept": "{name} changed this first, so their change is kept.",
+    "settings.save.theirsKeptNoName": "Someone else changed this first, so their change is kept.",
+    "settings.save.offline": "Not saved: you're offline.",
+    "settings.save.failed": "Couldn't save. Try again.",
     // ── AQU-2265: the temporary note left where a setting used to live ──
     "settings.moved.note": "This setting moved to {where}.",
     "settings.moved.goThere": "Go to it",
@@ -679,6 +686,31 @@ export const settings = defineNamespace({
         description:
           "Opens under 'Recording format' when its (i) is clicked. 'WAV / COMPRESSED' names the " +
           "button in the recorder that shows the same setting; keep it as it is shown there.",
+      },
+      "settings.save.saved": {
+        description:
+          "A quiet word shown for a moment beside a setting just after it saved by itself. " +
+          "Settings save the moment they are changed; there is no Save button. Past participle.",
+        maxLength: 16,
+      },
+      "settings.save.saving": {
+        description: "Shown beside a setting while a slow save is still going. Settings save the moment they are changed.",
+        maxLength: 16,
+      },
+      "settings.save.theirsKept": {
+        description:
+          "Shown beside a setting whose change was NOT saved because another person changed the same " +
+          "setting a moment earlier; the setting now shows that person's value. One plain sentence.",
+        placeholders: { name: "The other person's name or username." },
+      },
+      "settings.save.theirsKeptNoName": {
+        description: "Same as settings.save.theirsKept, when the other person's name is not known.",
+      },
+      "settings.save.offline": {
+        description: "Shown beside a setting that could not be saved for the team because there is no internet connection.",
+      },
+      "settings.save.failed": {
+        description: "Shown beside a setting whose save failed for a reason with no message of its own.",
       },
       "settings.moved.note": {
         description:

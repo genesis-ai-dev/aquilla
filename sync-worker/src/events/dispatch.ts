@@ -94,6 +94,7 @@ export function dispatchEvent(
     case 'cell.audio.remove':
     case 'cell.audio.rename':
     case 'cell.audio.trim':
+    case 'cell.audio.gain':
     case 'cell.audio.place':
     case 'cell.audio.cut':
     case 'cell.audio.measure':

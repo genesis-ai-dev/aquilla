@@ -133,7 +133,11 @@ production tip does not carry (by `(cherry picked from commit …)`
 provenance or PR number), classifies each by the files its merge touched,
 and reads its walk verdict and the `release:approved` label from GitHub.
 A PR is *held* when a holding area it touches has no green gate (below)
-or its walk is not `PASS`/`none`; the label clears both. Held PRs are
+or its walk is not `PASS`/`none`; the label clears both. A walk may be
+posted after the merge: the planner takes the newest walk that names the
+PR's head sha, which is how a dev re-walk (`e2e/journeys/PR-BOT.md`,
+*Re-walk on dev after merge*, for a PR whose preview walk a pending
+migration blocked) replaces the BLOCKED comment before it. Held PRs are
 skipped, not a wall: the plan is the ready PRs in dev order plus the held
 list with a reason each.
 

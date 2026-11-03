@@ -1,5 +1,5 @@
 import { LoadingTemplate } from "@/components/ui/loading-overlay"
-import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingLine } from "@/components/ui/loading-cursor"
 
 export { ValidatedBar } from "./ValidatedBar"
 
@@ -15,9 +15,12 @@ export function AdminSectionSkeleton({ label, blocks = 3 }: { label: string; blo
   return (
     <LoadingTemplate label={label} className="min-h-[18rem]" templateClassName="min-h-[18rem]">
       <div className="flex flex-col gap-4">
-        <Skeleton className="h-6 w-56 rounded-md" />
+        <LoadingLine className="text-lg font-semibold" />
         {Array.from({ length: blocks }).map((_, i) => (
-          <Skeleton key={i} className="h-24 rounded-lg border bg-card" />
+          <div key={i} className="flex h-24 flex-col gap-2 rounded-lg border bg-card p-4">
+            <LoadingLine className="font-medium" />
+            <LoadingLine className="text-xs" />
+          </div>
         ))}
       </div>
     </LoadingTemplate>

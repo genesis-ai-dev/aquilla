@@ -336,7 +336,7 @@ describe("OrgHome loading template", () => {
     expect(screen.getByTestId("org-home-loading-template")).toBeInTheDocument()
     const header = document.querySelector("[data-slot='app-shell-header']")
     expect(header).not.toBeNull()
-    expect(header!.querySelectorAll("[data-slot='skeleton']")).toHaveLength(1)
+    expect(header!.querySelectorAll("[data-slot='loading-cursor']")).toHaveLength(1)
   })
 })
 

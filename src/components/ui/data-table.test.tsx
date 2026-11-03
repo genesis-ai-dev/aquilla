@@ -326,7 +326,7 @@ describe("DataTable", () => {
     expect(screen.getByRole("status", { name: "Loading rows" })).toHaveAttribute("aria-busy", "true")
     expect(screen.getByRole("table")).toBeInTheDocument()
     expect(screen.queryByTestId("custom-empty")).not.toBeInTheDocument()
-    expect(screen.getByTestId("loading-table").querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThan(0)
+    expect(screen.getByTestId("loading-table").querySelectorAll('[data-slot="loading-cursor"]').length).toBeGreaterThan(0)
   })
 
   it("shows a spinner in the search field while searching without skeletonizing rows", () => {
@@ -346,7 +346,7 @@ describe("DataTable", () => {
     expect(search.closest("[data-slot='input-group']")).toHaveAttribute("aria-busy", "true")
     expect(screen.getByRole("status", { name: /searching/i })).toBeInTheDocument()
     expect(screen.getByText("Alpha")).toBeInTheDocument()
-    expect(screen.getByTestId("searching-table").querySelectorAll('[data-slot="skeleton"]')).toHaveLength(0)
+    expect(screen.getByTestId("searching-table").querySelectorAll('[data-slot="loading-cursor"]')).toHaveLength(0)
   })
 
   it("opens renderRowMenuItems from row right-click and from the ⋯ button", async () => {

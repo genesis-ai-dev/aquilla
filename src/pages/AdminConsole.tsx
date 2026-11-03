@@ -6,7 +6,7 @@ import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
 import { Page, PageHeader, Section, STAT_TILE_GRID } from "@/components/ui/page"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { LoadingTemplate } from "@/components/ui/loading-overlay"
-import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingCursor, LoadingLine, LoadingLines } from "@/components/ui/loading-cursor"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useAdminElevation } from "@/hooks/useAdminElevation"
@@ -377,16 +377,28 @@ function ConsoleSkeleton() {
       templateClassName="min-h-[34rem]"
     >
       <div className="flex flex-col gap-6">
-        <Skeleton className="h-8 w-72 rounded-md" />
+        <LoadingLine className="h-8 text-2xl font-semibold" />
         <div className={STAT_TILE_GRID}>
           {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} className="h-[88px] rounded-lg border bg-card" />
+            <div key={i} className="flex h-[88px] flex-col justify-center gap-2 rounded-lg border bg-card px-5">
+              <LoadingCursor className="text-xl" />
+              <LoadingLine className="text-xs" />
+            </div>
           ))}
         </div>
-        <Skeleton className="h-48 rounded-lg border bg-card" />
+        <div className="flex h-48 flex-col gap-3 rounded-lg border bg-card p-5">
+          <LoadingLine className="font-medium" />
+          <LoadingLines count={3} />
+        </div>
         <div className="grid gap-6 lg:grid-cols-2">
-          <Skeleton className="h-40 rounded-lg border bg-card" />
-          <Skeleton className="h-40 rounded-lg border bg-card" />
+          <div className="flex h-40 flex-col gap-3 rounded-lg border bg-card p-5">
+          <LoadingLine className="font-medium" />
+          <LoadingLines count={3} />
+        </div>
+          <div className="flex h-40 flex-col gap-3 rounded-lg border bg-card p-5">
+          <LoadingLine className="font-medium" />
+          <LoadingLines count={3} />
+        </div>
         </div>
       </div>
     </LoadingTemplate>

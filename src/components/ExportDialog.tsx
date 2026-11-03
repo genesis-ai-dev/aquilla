@@ -47,7 +47,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { SegmentTabs } from "@/components/ui/tabs"
-import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { Spinner } from "@/components/ui/spinner"
 import { Input } from "@/components/ui/input"
 import { downloadBlob } from "@/lib/export/export-service"
@@ -2777,9 +2777,8 @@ export function ExportDialog({
           {/* Project-scope notices */}
           {/* i18n-exempt "project" is an ExportScope tag, not copy */}
           {effectiveScope === "project" && format !== "usfm" && projectCellsLoading && (
-            <div className="flex items-center gap-1.5 mt-1">
-              <Skeleton className="h-2 w-2 rounded-full shrink-0" />
-              <Skeleton className="h-3 w-40" />
+            <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+              <LoadingCursor />
             </div>
           )}
         </fieldset>

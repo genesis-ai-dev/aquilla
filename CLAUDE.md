@@ -30,7 +30,7 @@ abandoned — if you find docs or memory describing `apps/workspace/`, `packages
 ├── db/                 # LIVE Postgres schema: postgres/schema.sql, postgres/migrations/,
 │                       #   rollout/, shim/ (D1-compatible executor over Hyperdrive)
 ├── worker/             # root SPA-serving Worker (index.ts + og/) for the production deploy
-├── infra/modal/        # Modal services: diarization.py, seed_vc.py
+├── infra/modal/        # Modal services: voice_forge.py, diarization.py, omni_asr.py
 ├── src-tauri/          # Tauri desktop shell
 ├── e2e/                # Playwright specs + page objects + JOURNEYS.md (see AGENTS.md)
 │                       #   specs/partner-integrations/<partner>/ is partner-owned
@@ -134,7 +134,12 @@ worker binds D1; workers fail fast if `HYPERDRIVE` is unbound and query through
   `repaired=N` log line is the alarm for a write-path regression — and files missing a
   row for one of their project's lanes (`laneRows=N`, not an alarm: "Add language" and
   unarchive write those rows themselves via `db/shared/lane-progress.ts`, but imports
-  and migrations that add a language leave them to the sweep) — and the external
+  and migrations that add a language leave them to the sweep) — plus the on-demand
+  `POST /admin/link-provenance?projectId=…&dryRun=1` (AQU-2345,
+  `src/events/link-provenance.ts`) that gives files a source link brought in their
+  upstream type and a `file_source_blobs` pointer at the upstream's original (the
+  rules: `db/shared/link-file-provenance.ts`; every mirror window applies them to
+  the files it touches, this is the backfill) — and the external
   **Agent API** under `/api/v1/external/*`
   (changeset engine + apply gate, artifacts, tools-only MCP server, self-describing
   discovery — see `docs/AGENT-API.md`). Every PR DOES get its own per-branch sync-worker and

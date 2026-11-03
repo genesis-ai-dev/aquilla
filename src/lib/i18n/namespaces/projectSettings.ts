@@ -331,31 +331,14 @@ export const projectSettings = defineNamespace({
     "projectSettings.backLinkLabel": "Settings",
     "projectSettings.breadcrumbEditor": "Editor",
     // "Save changes" → common.saveChanges (identical text)
-    "projectSettings.moreSaveOptionsAriaLabel": "More save options",
-    "projectSettings.saveAndClose": "Save and close",
-    "projectSettings.closeWithoutSaving": "Close without saving",
-    "projectSettings.unsavedChanges": "Unsaved changes",
-    "projectSettings.settingsChangedElsewhere": "Settings changed elsewhere — refresh to reapply.",
-    "projectSettings.dismissConflictAriaLabel": "Dismiss conflict notice",
     "projectSettings.noMatchingSettings": "No matching settings.",
-    "projectSettings.discardDialogTitle": "Discard changes?",
-    "projectSettings.discardDialogDescription":
-      "You have unsaved changes to project settings. They will be lost if you leave now.",
-    "projectSettings.keepEditing": "Keep editing",
 
-    "projectSettings.save.noChanges": "No changes to save.",
-    "projectSettings.save.savedShort": "Saved: {list}.",
-    "projectSettings.save.savedMany": plural({
-      other: "Saved {count} changes: {list}, +{more} more.",
-    }),
 
     // ── Changed-field nouns (AQU-408 "Saved: X, Y, Z." delta message) ──
     // AQU-832: several concepts here reuse an existing FieldLabel/section key
     // instead of a duplicate lowercase noun (no-duplicates.test.ts hard-fails
     // on an unexcused 2+-key collision, and a case-only difference is never a
     // valid exception reason) — see the reused key named in each comment.
-    "projectSettings.field.aiProvider": "AI provider",
-    "projectSettings.field.endpoint": "endpoint",
     "projectSettings.field.apiKey": "API key",
     // AQU-646, keyed 2026-08-20.
     "projectSettings.field.apiKeyRequired": "API key *",
@@ -395,63 +378,22 @@ export const projectSettings = defineNamespace({
     "projectSettings.cellEditing.optionCommenter": "Commenter",
     "projectSettings.cellEditing.optionReviewer": "Reviewer",
     "projectSettings.cellEditing.optionContributor": "Contributor",
-    "projectSettings.cellEditing.optionProjectLead": "Project lead",
+    "projectSettings.cellEditing.optionProjectLead": "Project Lead",
     "projectSettings.cellEditing.optionMaintainer": "Maintainer",
     // model → projectSettings.advancedLlm.modelLabel
-    "projectSettings.field.temperature": "temperature",
-    "projectSettings.field.examplesRetrieved": "examples retrieved",
     // context window → projectSettings.ai.contextWindowLabel
-    "projectSettings.field.validatedExamplesOnly": "validated examples only",
     // reference example format → projectSettings.ai.referenceExampleFormatLabel
-    "projectSettings.field.assistedLanguage": "assisted language",
     // AI completions batch size → projectSettings.ai.completionBatchSizeLabel
     // batch validation size → projectSettings.ai.validationBatchSizeLabel
     // project name → projectSettings.info.nameLabel
-    "projectSettings.field.decaySettings": "decay settings",
-    "projectSettings.field.audioMediaStrategy": "audio loading",
-    "projectSettings.field.autoSync": "auto-sync",
-    "projectSettings.field.voiceApiKey": "voice API key",
     // source language → projectSettings.info.sourceLanguageLabel
     // target language → projectSettings.info.targetLanguageLabel
-    "projectSettings.field.validationCount": "validation count",
-    "projectSettings.field.audioValidationCount": "audio validation count",
-    "projectSettings.field.validationRoleFloor": "validation role floor",
-    "projectSettings.field.namedValidators": "named validators",
-    "projectSettings.field.selfValidation": "self-validation",
-    "projectSettings.field.harmonizeMinRole": "harmonize min role",
-    "projectSettings.field.usfmFrontMatter": "USFM front matter",
     // draft context → projectSettings.section.draftContext
     // AQU-2261: the rest of the "Saved: …" nouns, so the whole message is translated.
-    "projectSettings.field.model": "model",
-    "projectSettings.field.maxTokens": "max tokens",
-    "projectSettings.field.contextWindow": "context window",
-    "projectSettings.field.referenceExampleFormat": "reference example format",
-    "projectSettings.field.completionBatchSize": "AI completions batch size",
-    "projectSettings.field.validationBatchSize": "batch validation size",
-    "projectSettings.field.projectName": "project name",
-    "projectSettings.field.audioValidationRoleFloor": "minimum role to validate recordings",
-    "projectSettings.field.namedAudioValidators": "named recording validators",
-    "projectSettings.field.selfValidationAudio": "validating your own recordings",
-    "projectSettings.field.cellEditingFloor": "who can add and remove cells",
-    "projectSettings.field.trackEditing": "timeline track editing",
-    "projectSettings.field.timingLock": "the timing lock",
-    "projectSettings.field.filmAndSources": "film and sources",
-    "projectSettings.field.bibleData": "Bible data",
-    "projectSettings.field.bibleEnrichments": "Bible data enrichments",
-    "projectSettings.field.importCellUnit": "import cell unit",
-    "projectSettings.field.smartQuotes": "smart quotes",
-    "projectSettings.field.draftContext": "draft context",
-    "projectSettings.field.termMatching": "term matching affixes",
 
     // ── Save-flow errors ──
-    "projectSettings.save.nameRequired": "Enter a project name.",
     "projectSettings.save.signedOutRenameError": "You're signed out. Sign in again to rename this project.",
     "projectSettings.save.renameFailedGeneric": "Renaming the project failed.",
-    "projectSettings.save.conflictToast": "Synced settings update from {username}.",
-    "projectSettings.save.conflictFallbackUsername": "another collaborator",
-    "projectSettings.save.conflictError": "Someone else updated shared settings. Refresh to reapply your edits.",
-    "projectSettings.save.offlineError": "You're offline. Reconnect to save shared fields.",
-    "projectSettings.save.sharedSettingsFailedGeneric": "Saving shared settings failed.",
     "projectSettings.save.projectNotFoundError": "Project not found",
 
     // ── Settings-group index (SETTINGS_GROUPS) ──
@@ -569,6 +511,7 @@ export const projectSettings = defineNamespace({
     // AQU-2263: the team's fallback for the assistant's answers (it was saved
     // but never read). Each person's own choice in Preferences wins over it.
     "projectSettings.ai.assistantLanguageLabel": "The assistant answers the team in",
+    "projectSettings.ai.assistantLanguageName": "Assistant language",
     "projectSettings.ai.assistantLanguagePlaceholder": "e.g. English, Français, Español…",
     "projectSettings.ai.assistantLanguageDescription":
       "For everyone on this project who hasn't chosen their own in Preferences. Left empty, the assistant answers in the language each person writes in.",
@@ -640,6 +583,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.advancedLlm.modelOverrideHelp": "Enter an OpenRouter model (optional), for example {example}.",
     "projectSettings.advancedLlm.maxTokensLabel": "Max tokens",
     "projectSettings.advancedLlm.temperatureLabel": "Temperature ({value})",
+    "projectSettings.advancedLlm.temperatureName": "Temperature",
 
     // ── Voice card ──
     // Oct 29 second pass: the voice card's provider row, hard-coded English before.
@@ -649,11 +593,13 @@ export const projectSettings = defineNamespace({
     "projectSettings.voice.geminiKeyHelp":
       "Used for Gemini-powered text-to-speech. Get a key at aistudio.google.com/apikey. " +
       "Sent directly to Google; never uploaded to Aquilla.",
+    "projectSettings.voice.elevenLabsHelp":
+      "Your own ElevenLabs key, for ElevenLabs voices. It stays on this device for you only and is never shared with the project.",
     // AQU-1758: the Voice Studio (the Audio view) is gone; the library and the
     // cast are in Media's Voices tab.
     "projectSettings.voice.voicesNote": "The voice library and cast assignments are in the Voices tab of the Media view.",
     "projectSettings.voice.openVoicesButton": "Open Voices",
-    "projectSettings.voice.leadsManageLabel": "Project leads can manage voices",
+    "projectSettings.voice.leadsManageLabel": "Project Leads can manage voices",
     "projectSettings.voice.leadsManageDescription":
       "When this is on, a project lead can create, edit, and assign voices on the language lanes " +
       "they can write. When it is off, only a maintainer can. Voices already created stay either way.",
@@ -673,7 +619,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.harmonization.defaultRoleSuffix": "{role} (default)",
     "projectSettings.harmonization.description":
       "Only users with at least this role can open a harmonization sweep on this project. The floor " +
-      "cannot be lowered below Project lead (hard floor per spec).",
+      "cannot be lowered below Project Lead (hard floor per spec).",
 
     // ── Git Sync card ──
     "projectSettings.gitSync.originLabel": "Origin: {url} (branch: {branch})",
@@ -729,6 +675,20 @@ export const projectSettings = defineNamespace({
       "Each member's progress on the project's dashboard. They also need to see the member list.",
     // {role} is a plural role name: "Owners".
     "projectSettings.visibility.onlyRoleLoosens": "Only {role} can make this less strict.",
+
+    // ── ProjectImportFloorSection ── AQU-2305: who may bring a NEW source file
+    // into THIS project. The organization's floor (AQU-2304), which a project
+    // may only make stricter.
+    "projectSettings.importFloor.label": "Who can import files",
+    "projectSettings.importFloor.description":
+      "Minimum role required to bring a new source file into this project, " +
+      "including re-importing one. Your organization sets this; a project can " +
+      "make it stricter, never looser. Importing a translation into a file " +
+      "that is already here is not affected.",
+    // Shown on a role the organization's own floor rules out, so the option
+    // says why it cannot be chosen.
+    "projectSettings.importFloor.stricterOnly":
+      "your organization requires more; a project can only be stricter",
 
     // AQU-1391 — repetition auto-propagation, same shape as above.
     "projectSettings.autoPropagateRepetitions.label": "Auto-propagate repetitions",
@@ -960,7 +920,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.sourceLink.irreversibleDescription":
       "Detaching snapshots the current upstream source cells into this project and " +
       "severs the live link. Stale-source markers will clear. This action cannot be undone.",
-    "projectSettings.sourceLink.roleGateNote": "Project lead or above required to detach from source.",
+    "projectSettings.sourceLink.roleGateNote": "Project Lead or above required to detach from source.",
     "projectSettings.sourceLink.detachButton": "Detach from source",
     "projectSettings.sourceLink.detachDialogTitle": "Detach from source project?",
     "projectSettings.sourceLink.detachDialogDescription":
@@ -998,7 +958,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.linkSource.linkButton": "Link source project",
     "projectSettings.linkSource.linkingButton": "Linking…",
     "projectSettings.linkSource.roleGateNote":
-      "Project lead or above required to link a source project.",
+      "Project Lead or above required to link a source project.",
     "projectSettings.linkSource.cycleError":
       "That project already reads its source from this one, so linking would " +
       "create a loop. This project is still unlinked — choose a different project.",
@@ -1969,38 +1929,6 @@ export const projectSettings = defineNamespace({
       "projectSettings.searchAriaLabel": {
         description: "Accessible name of the settings search input, which filters section cards by label/keyword as the user types.",
       },
-      "projectSettings.moreSaveOptionsAriaLabel": {
-        description: "Accessible name of the small chevron button beside 'Save changes' that opens the 'Save and close' / 'Close without saving' menu.",
-      },
-      "projectSettings.dismissConflictAriaLabel": {
-        description: "Accessible name of the small × button that dismisses the 'Settings changed elsewhere' banner.",
-      },
-      "projectSettings.save.savedShort": {
-        description:
-          "Success message shown briefly after Save when 3 or fewer fields changed — " +
-          "a plain list of the changed field names.",
-        placeholders: {
-          list: "The changed field names (projectSettings.field.*), already joined into a localized list via formatList() — insert exactly as given.",
-        },
-      },
-      "projectSettings.save.savedMany": {
-        description:
-          "Success message shown briefly after Save when more than 3 fields changed — " +
-          "names the first 3 and counts the rest. count is always > 3 in the English " +
-          "flow (the <=3 case uses savedShort instead), but other locales' plural " +
-          "rules may still select a category other than 'other' for the same number.",
-        placeholders: {
-          count: "Total number of changed fields (always > 3 in the English flow — governs plural selection).",
-          list: "The first 3 changed field names (projectSettings.field.*), already joined into a localized list via formatList() — insert exactly as given.",
-          more: "How many additional changed fields beyond the first 3, as a plain cardinal number. Not separately pluralized.",
-        },
-      },
-      "projectSettings.save.conflictToast": {
-        description: "Toast shown when a background shared-settings update from another collaborator lands while this page is open.",
-        placeholders: {
-          username: "The other collaborator's username (data), or the projectSettings.save.conflictFallbackUsername fallback text if unknown.",
-        },
-      },
       "projectSettings.info.lastEditedBy": {
         description: "Small note under the Project Name field showing who last saved shared settings and when.",
         placeholders: {
@@ -2087,6 +2015,14 @@ export const projectSettings = defineNamespace({
           example: "An example OpenRouter model id, e.g. 'anthropic/claude-3.5-sonnet', styled as inline code by the caller — data, not translated.",
         },
       },
+      "projectSettings.advancedLlm.temperatureName": {
+        description: "The name of the AI temperature setting, without its value: names the slider for screen readers and names an Undo step ('Change: Temperature').",
+        maxLength: 30,
+      },
+      "projectSettings.ai.assistantLanguageName": {
+        description: "Short name of the setting for the language the AI assistant answers the team in, as an Undo step names it ('Change: Assistant language').",
+        maxLength: 40,
+      },
       "projectSettings.advancedLlm.temperatureLabel": {
         description: "Field label for the temperature slider, showing its current value live.",
         placeholders: {
@@ -2139,7 +2075,7 @@ export const projectSettings = defineNamespace({
           "Marks a role option in the harmonization minimum-role select as the " +
           "current default.",
         placeholders: {
-          role: "The already-localized role display name (via resolveRoleName/common.role.*), e.g. 'Project lead'.",
+          role: "The already-localized role display name (via resolveRoleName/common.role.*), e.g. 'Project Lead'.",
         },
       },
       "projectSettings.gitSync.originLabel": {
@@ -2844,7 +2780,7 @@ export const projectSettings = defineNamespace({
           "as the project creator stays. This dialog does not revoke those paths.",
         placeholders: {
           username: "The member's username — not translated.",
-          role: "The direct membership's role name, already localized (for example 'Project lead').",
+          role: "The direct membership's role name, already localized (for example 'Project Lead').",
         },
       },
       "projectSettings.members.actionsForRow": {
@@ -2862,7 +2798,7 @@ export const projectSettings = defineNamespace({
           "'Change role', and as the tooltip on the disabled 'Add a member' button. " +
           "States the required role rather than leaving the control silently missing.",
         placeholders: {
-          role: "The localized name of the required role (today 'Project lead'), resolved from the role ladder — insert exactly as given.",
+          role: "The localized name of the required role (today 'Project Lead'), resolved from the role ladder — insert exactly as given.",
         },
       },
       "projectSettings.members.roleChangeOutranked": {
@@ -3368,8 +3304,23 @@ export const projectSettings = defineNamespace({
           "Same dropdown beside a role setting ('Who can add and remove cells', 'Minimum role to validate recordings'). " +
           "Choosing it means this project follows its organization's choice, shown in brackets.",
         placeholders: {
-          value: "The organization's current choice, e.g. 'Project lead' or 'No one', already translated.",
+          value: "The organization's current choice, e.g. 'Project Lead' or 'No one', already translated.",
         },
+      },
+      "projectSettings.importFloor.label": {
+        description:
+          "Row label in Project settings \u2192 Import: the minimum role needed to bring a NEW source file into this "
+          + "project. Same wording as the organization-wide row on Settings \u2192 Security.",
+      },
+      "projectSettings.importFloor.description": {
+        description:
+          "Help text under that row. Says the organization sets the floor and a project can only be stricter, and that "
+          + "importing a translation into a file already in the project is not affected.",
+      },
+      "projectSettings.importFloor.stricterOnly": {
+        description:
+          "Appended to a role option this project cannot choose because the organization already requires a higher "
+          + "role. Shown after the role name and a dash, on a disabled option, e.g. \"Project lead \u2014 \u2026\".",
       },
       "projectSettings.visibility.onlyRoleLoosens": {
         description:

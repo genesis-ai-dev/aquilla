@@ -8,7 +8,7 @@ import { Upload } from "lucide-react"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { ImportOptionCard } from "./ImportOptionCard"
 
-const REASON = "Project lead or above required to link a source project."
+const REASON = "Project Lead or above required to link a source project."
 
 describe("ImportOptionCard — a greyed-out card says why", () => {
   it("says why inside the card, with no hover, and a click chooses nothing", async () => {

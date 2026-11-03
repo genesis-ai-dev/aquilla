@@ -219,10 +219,17 @@ adminBilling.patch("/billing/org/:orgId", zValidator("json", orgPatchSchema), as
     addonPacks: patch.addonPacks,
   })
   if (patch.includedCredits !== undefined || patch.billedLanguageCount !== undefined) {
-    await writeOrgBillingOverrides(c.env.AQUILLA_PG, orgId, {
+    const overrides = await writeOrgBillingOverrides(c.env.AQUILLA_PG, orgId, {
       includedCredits: patch.includedCredits,
       billedLanguageCount: patch.billedLanguageCount,
     })
+    // AQU-2328: tell the operator instead of losing either save.
+    if (overrides === "conflict") {
+      return c.json({
+        error: "settings_changed",
+        message: "The organization's settings changed while saving the billing overrides. Save again.",
+      }, 409)
+    }
   }
   await audit(c.env.AQUILLA_PG, c.get("user").id, "billing.org.update", { orgId, patch })
   const rec = await loadPlatformSettings(c.env)

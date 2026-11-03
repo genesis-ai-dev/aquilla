@@ -67,7 +67,7 @@ vi.mock("@/lib/audio/upload", async (importOriginal) => ({
   })),
   deleteCellAudio: vi.fn(async () => {}),
 }))
-vi.mock("@/lib/audio/bytes-cache", () => ({ audioCachePutBlob: vi.fn(async () => {}) }))
+vi.mock("@/lib/audio/bytes-cache", () => ({ audioCacheGet: vi.fn(async () => null), audioCachePutBlob: vi.fn(async () => {}) }))
 vi.mock("@/lib/audio/project-audio-state", () => ({ markProjectHasAudioDataSoon: vi.fn() }))
 vi.mock("@/lib/audio/transcribe-status", () => ({ setTranscribeStatus: vi.fn() }))
 const transcribeCell = vi.hoisted(() => vi.fn(async (..._args: unknown[]) => {}))

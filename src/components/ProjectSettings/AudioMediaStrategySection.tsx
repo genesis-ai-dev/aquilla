@@ -9,6 +9,7 @@ import {
   AUDIO_MEDIA_STRATEGY_LABELS, type AudioMediaStrategy,
 } from "@/lib/parsers/types"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { SaveStatus } from "@/lib/settings/save-status"
 import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
 
 interface Props {
@@ -36,6 +37,7 @@ export function AudioMediaStrategySection({ value, onChange }: Props) {
             controls={["settings-audio-media-explanation", ...ORDER.map((id) => `settings-audio-media-${id}-explanation`)].join(" ")}
             testId="settings-audio-media-info"
           />
+          <SaveStatus id="audioMediaStrategy" className="ml-auto font-normal" />
         </CardTitle>
         <InfoReveal open={infoOpen} id="settings-audio-media-explanation">
           <span className="block text-sm text-muted-foreground">{t("projectSettings.audioMedia.info")}</span>

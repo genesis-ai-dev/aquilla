@@ -11,6 +11,9 @@
  * Decision 11: the history is the project's, not one language's, so each step
  * names the language it was made in; and opening the panel catches up with the
  * steps made on the person's other devices (gap 28).
+ *
+ * Given `match` (Project settings, AQU-2262), it lists, undoes and reports
+ * only the steps that names; steps made elsewhere stay where they are.
  */
 import { useState } from "react"
 import { History, Redo2, Undo2 } from "lucide-react"
@@ -19,7 +22,7 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useFormat } from "@/lib/i18n/format"
 import { redoLast, refreshHistory, undoLast, undoTo, type HistoryResult, type SkipLogEntry, type StepSummary } from "@/lib/history/history"
-import { useHistoryView } from "@/lib/history/useHistory"
+import { redoNewestMatching, undoMatchingTo, undoNewestMatching, useMatchingHistory, type StepMatch } from "@/lib/history/step-sphere"
 import { stepLabel } from "@/lib/history/step-label"
 import { cn } from "@/lib/utils"
 
@@ -28,14 +31,16 @@ export interface HistoryPanelProps {
   onResult: (which: "undo" | "redo", result: HistoryResult) => void
   /** A language tag's name, the way the language switcher shows it. */
   laneName?: (lane: string) => string
+  /** Act only on the steps this names (Project settings: isSettingsStep). */
+  match?: StepMatch
 }
 
 // Its button is a square like its neighbours in every view's bar, without
 // the count (canvas board 55, option E; in every view since Sam, Oct 28).
-export function HistoryPanel({ onResult, laneName }: HistoryPanelProps) {
+export function HistoryPanel({ onResult, laneName, match }: HistoryPanelProps) {
   const t = useT()
   const fmt = useFormat()
-  const view = useHistoryView()
+  const view = useMatchingHistory(match)
   const [open, setOpen] = useState(false)
   const name = (s: Pick<StepSummary, "labelKey" | "labelParams">) => stepLabel(t as never, s)
   // Where a step was made: its file and, when it belongs to one, its language.
@@ -50,14 +55,18 @@ export function HistoryPanel({ onResult, laneName }: HistoryPanelProps) {
   }
 
   const run = (which: "undo" | "redo") => {
-    void (which === "undo" ? undoLast() : redoLast()).then((r) => {
+    const pressed = match
+      ? which === "undo" ? undoNewestMatching(match) : redoNewestMatching(match)
+      : which === "undo" ? undoLast() : redoLast()
+    void pressed.then((r) => {
       if (r) onResult(which, r)
     })
   }
   const undoToHere = (id: string) => {
     // Each step reports as it finishes: walking back five slow steps took
     // twenty seconds with nothing said until the end.
-    void undoTo(id, (r) => onResult("undo", r))
+    const report = (r: HistoryResult) => onResult("undo", r)
+    void (match ? undoMatchingTo(id, match, report) : undoTo(id, report))
   }
 
   const undoSteps = [...view.undoSteps].reverse()
@@ -75,7 +84,9 @@ export function HistoryPanel({ onResult, laneName }: HistoryPanelProps) {
               ? t("editor.history.reasonNotAllowed")
               : entry.reason === "linesChanged"
                 ? t("editor.history.reasonLinesChanged")
-                : t("editor.history.reasonFailed")
+                : entry.reason === "otherDevice"
+                  ? t("editor.history.reasonOtherDevice")
+                  : t("editor.history.reasonFailed")
 
   return (
     <Popover open={open} onOpenChange={onOpenChange}>

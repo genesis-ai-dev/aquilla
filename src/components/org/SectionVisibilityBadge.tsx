@@ -53,7 +53,7 @@ const VISIBILITY_ROLE_OPTIONS = [
 export function visibilityFloorLabel(minRole: number): string {
   if (minRole <= ROLE.VIEWER) return "Everyone can see this"
   if (minRole <= ROLE.CONTRIBUTOR) return "Contributors & up can see this"
-  if (minRole <= ROLE.PROJECT_LEAD) return "Project leads & up can see this"
+  if (minRole <= ROLE.PROJECT_LEAD) return "Project Leads & up can see this"
   if (minRole <= ROLE.MAINTAINER) return "Only maintainers & owners can see this"
   return "Only owners can see this"
 }

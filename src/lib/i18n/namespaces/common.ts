@@ -124,7 +124,7 @@ export const common = defineNamespace({
     "common.role.commenter": plural({ one: "Commenter", other: "Commenters" }),
     "common.role.reviewer": plural({ one: "Reviewer", other: "Reviewers" }),
     "common.role.contributor": plural({ one: "Contributor", other: "Contributors" }),
-    "common.role.projectLead": plural({ one: "Project lead", other: "Project leads" }),
+    "common.role.projectLead": plural({ one: "Project Lead", other: "Project Leads" }),
     "common.role.maintainer": plural({ one: "Maintainer", other: "Maintainers" }),
     "common.role.owner": plural({ one: "Owner", other: "Owners" }),
 
@@ -359,8 +359,8 @@ export const common = defineNamespace({
       },
       "common.voices": {
         description:
-          "The set of speaking voices configured for a project — TTS configurations and " +
-          "cloned voices. Used both as the left-dock tab label that opens the voices panel " +
+          "The set of speaking voices configured for a project — TTS configurations, " +
+          "character voices and trained voices. Used both as the left-dock tab label that opens the voices panel " +
           "and as that panel's own heading. Plural noun; the tab is in a narrow rail.",
         screenshot: "audio-studio",
       },
@@ -742,9 +742,10 @@ export const common = defineNamespace({
       "common.role.projectLead": {
         description:
           "Operational-PM role: contributor privileges plus managing project members, " +
-          "but not managing roles. Two words in English ('Project lead'); keep the " +
-          "second word lowercase unless the target language's title-casing rules call " +
-          "for otherwise. Same singular/plural label usage as common.role.viewer.",
+          "but not managing roles. A role title, so English capitalizes both words " +
+          "('Project Lead'); capitalize the main words the same way, leaving small " +
+          "joining words such as 'de' lowercase (French: 'Chef de Projet'). Same " +
+          "singular/plural label usage as common.role.viewer.",
         screenshot: "project-settings",
       },
       "common.role.maintainer": {

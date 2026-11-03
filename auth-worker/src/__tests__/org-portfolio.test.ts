@@ -1491,7 +1491,7 @@ describe("AQU-1421 portfolio lane visibility", () => {
   // The wall asks one question per project: is this caller a maintainer on
   // it, by any grant path? That is resolveProjectRole's question, and the page
   // now gets it answered for every project at once, so each path is walked
-  // here through the dashboard itself. Project lead (500) still needs a grant.
+  // here through the dashboard itself. Project Lead (500) still needs a grant.
   it("lifts the wall for a project lead on the project whichever path grants it, and for nothing lower", async () => {
     await seedSplitProject()
     env.LANE_READ_WALL = "1"

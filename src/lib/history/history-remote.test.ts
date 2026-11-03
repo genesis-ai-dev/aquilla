@@ -3,6 +3,10 @@
 // megabytes with every step (review, Oct 29).
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { httpHistoryRemote } from "./history-remote"
+
+// test-setup answers the server copy as if offline for every other test
+// (AQU-2262); this one tests the real client.
+vi.unmock("@/lib/history/history-remote")
 import { emptyHistoryDoc } from "./history-merge"
 
 afterEach(() => {

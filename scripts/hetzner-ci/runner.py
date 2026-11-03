@@ -24,9 +24,27 @@ CONFIG = Path("/etc/aquilla-qa/runner.json")
 NETWORK = "aquilla-qa"
 SHA = re.compile(r"[a-f0-9]{40}")
 COMMON = ["--init", "--cgroup-parent=aquillaqa.slice", "--cpus=1.5",
-          "--memory=2200m", "--memory-swap=2600m", "--pids-limit=512",
+          "--pids-limit=512",
           "--cap-drop=ALL", "--security-opt=no-new-privileges",
           "--log-opt=max-size=5m", "--log-opt=max-file=1"]
+# Per-container memory. The aquillaqa.slice MemoryMax is the real ceiling for
+# every QA container together; raise both, never only this one.
+MEMORY_MB, SWAP_MB = 2200, 400
+# Browser-facing URLs baked into the test-mode build. The app container builds
+# before its workers start (app_bootstrap.prebuild); the test container must
+# see the same addresses.
+BROWSER_ENV = dict(VITE_AUTH_BASE="http://127.0.0.1:9787",
+                   VITE_FRONTIER_BASE="http://127.0.0.1:9787",
+                   VITE_CHAT_BASE="http://127.0.0.1:9787/chat",
+                   VITE_SYNC_WORKER_HOST="127.0.0.1:9788")
+
+
+def memory(config):
+    memory_mb = int(config.get("container_memory_mb", MEMORY_MB))
+    swap_mb = int(config.get("container_swap_mb", SWAP_MB))
+    if not 512 <= memory_mb <= 16384 or not 0 <= swap_mb <= memory_mb:
+        raise ValueError("Unreasonable container memory limits")
+    return [f"--memory={memory_mb}m", f"--memory-swap={memory_mb + swap_mb}m"]
 
 
 class ReportPending(Exception):
@@ -176,7 +194,8 @@ def execute(config, job):
         download(config, sha, source)
         if not current(config, ref, sha):
             return "superseded"
-        command(["docker", "run", "-d", "--name", prefix + "db", *COMMON,
+        limits = memory(config)
+        command(["docker", "run", "-d", "--name", prefix + "db", *COMMON, *limits,
                  "--network=" + NETWORK, "--user=postgres", "--read-only",
                  "--tmpfs=/var/lib/postgresql/data:rw,uid=999,gid=999,size=256m",
                  "--tmpfs=/var/run/postgresql:rw,uid=999,gid=999,size=16m",
@@ -191,10 +210,12 @@ def execute(config, job):
             raise RuntimeError("Database readiness timeout")
         # Reuse installed dependencies without building/copying a multi-GB image
         # for every commit. All PR extraction and install hooks stay sandboxed.
-        command(["docker", "create", "--name", prefix + "app", *COMMON,
+        app_env = dict(BROWSER_ENV, E2E_SERVE_ONLY="1", HUSKY="0",
+                       E2E_PG_ADMIN_URL="postgresql://aquilla:aquilla@localhost:5432/postgres",
+                       QA_BUILD_NODE_OPTIONS=str(config.get("build_node_options", "")))
+        command(["docker", "create", "--name", prefix + "app", *COMMON, *limits,
                  "--network=container:" + prefix + "db",
-                 "-e", "E2E_SERVE_ONLY=1", "-e", "HUSKY=0",
-                 "-e", "E2E_PG_ADMIN_URL=postgresql://aquilla:aquilla@localhost:5432/postgres",
+                 *(f"-e={key}={value}" for key, value in app_env.items()),
                  harness, "python3", "/tmp/app_bootstrap.py"], timeout=60)
         # The enclosing job directory is root-only; the archive must be readable
         # by the unprivileged container user after docker cp.
@@ -219,14 +240,10 @@ def execute(config, job):
         # Fixed trusted test image, separate mount/PID namespace, no host mounts.
         # Only the network namespace is shared to preserve localhost safeguards.
         test_env = dict(provider_env)
-        test_env.update(CI="1", SMART_TEST_APP_SHA=sha, SMART_TEST_HARNESS_SHA=harness_sha,
+        test_env.update(BROWSER_ENV, CI="1", SMART_TEST_APP_SHA=sha, SMART_TEST_HARNESS_SHA=harness_sha,
                         SMART_TEST_RUN_ID="server", E2E_BASE_URL="http://127.0.0.1:6173",
-                        E2E_DATABASE_URL="postgresql://aquilla:aquilla@localhost:5432/aquilla_e2e",
-                        VITE_AUTH_BASE="http://127.0.0.1:9787",
-                        VITE_FRONTIER_BASE="http://127.0.0.1:9787",
-                        VITE_CHAT_BASE="http://127.0.0.1:9787/chat",
-                        VITE_SYNC_WORKER_HOST="127.0.0.1:9788")
-        args = ["docker", "run", "--name", prefix + "tests", *COMMON,
+                        E2E_DATABASE_URL="postgresql://aquilla:aquilla@localhost:5432/aquilla_e2e")
+        args = ["docker", "run", "--name", prefix + "tests", *COMMON, *limits,
                 "--shm-size=256m", "--network=container:" + prefix + "db"]
         for key in test_env:
             args += ["-e", key]

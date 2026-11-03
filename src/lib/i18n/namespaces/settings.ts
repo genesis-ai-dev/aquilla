@@ -24,6 +24,13 @@ import { defineNamespace, plural } from "./types"
  */
 export const settings = defineNamespace({
   keys: {
+    // ── AQU-2262: settings save as you change them ──
+    "settings.save.saved": "Saved",
+    "settings.save.saving": "Saving…",
+    "settings.save.theirsKept": "{name} changed this first, so their change is kept.",
+    "settings.save.theirsKeptNoName": "Someone else changed this first, so their change is kept.",
+    "settings.save.offline": "Not saved: you're offline.",
+    "settings.save.failed": "Couldn't save. Try again.",
     // ── AQU-2265: the temporary note left where a setting used to live ──
     "settings.moved.note": "This setting moved to {where}.",
     "settings.moved.goThere": "Go to it",
@@ -251,7 +258,7 @@ export const settings = defineNamespace({
     "settings.assignmentAuthority.floorSummary": "The lowest project role that can assign work to other people.",
     "settings.assignmentAuthority.floorInfo":
       "That covers assigning, reassigning and unassigning files, chapters, language lanes and " +
-      "AI review. Project lead by default.",
+      "AI review. Project Lead by default.",
     "settings.assignmentAuthority.label": "Allow self-assignment",
     "settings.assignmentAuthority.summary": "Contributors can take work for themselves, but not give it to others.",
     "settings.assignmentAuthority.info":
@@ -357,7 +364,7 @@ export const settings = defineNamespace({
     // treatment as settings.termbase.option* below.
     "settings.rosterProgress.optionViewer": "Viewer — anyone with access",
     "settings.rosterProgress.optionContributor": "Contributor",
-    "settings.rosterProgress.optionProjectLead": "Project lead",
+    "settings.rosterProgress.optionProjectLead": "Project Lead",
     "settings.rosterProgress.optionMaintainer": "Maintainer — default",
     "settings.rosterProgress.optionOwner": "Owner — most restrictive",
 
@@ -370,7 +377,7 @@ export const settings = defineNamespace({
     // Open-dropdown option text for the termbase-edit floor select; see the
     // roster/progress options above for why the level number is baked in.
     "settings.termbase.optionContributor": "Contributor — translators manage terms",
-    "settings.termbase.optionProjectLead": "Project lead — default",
+    "settings.termbase.optionProjectLead": "Project Lead — default",
     "settings.termbase.optionMaintainer": "Maintainer — most restrictive",
 
     // ── LanguageEditSection (org settings → security) — AQU-1086 ──
@@ -382,7 +389,7 @@ export const settings = defineNamespace({
     // Open-dropdown option text for the language-edit floor select; see the
     // roster/progress options above for why the level number is baked in.
     "settings.languageEdit.optionProjectLead":
-      "Project lead — default. Project managers fix their own languages",
+      "Project Lead — default. Project managers fix their own languages",
     "settings.languageEdit.optionMaintainer": "Maintainer — only maintainers change languages",
     "settings.languageEdit.ownerOnlyError":
       "Only org owners can change the language permission policy.",
@@ -396,7 +403,7 @@ export const settings = defineNamespace({
     // Open-dropdown option text for the import floor select; see the
     // roster/progress options above for why the level number is baked in.
     "settings.importPermissions.optionProjectLead":
-      "Project lead — default. Project managers import their own files",
+      "Project Lead — default. Project managers import their own files",
     "settings.importPermissions.optionMaintainer": "Maintainer — only maintainers add or replace source files",
     "settings.importPermissions.ownerOnlyError":
       "Only org owners can change the import permission policy.",
@@ -420,12 +427,12 @@ export const settings = defineNamespace({
     "settings.commentPermissions.createOptionCommenter": "Commenter — default",
     "settings.commentPermissions.createOptionReviewer": "Reviewer — reviewers and above",
     "settings.commentPermissions.createOptionContributor": "Contributor — translators and above",
-    "settings.commentPermissions.createOptionProjectLead": "Project lead — leads and above",
+    "settings.commentPermissions.createOptionProjectLead": "Project Lead — leads and above",
     "settings.commentPermissions.createOptionMaintainer": "Maintainer — most restrictive",
     "settings.commentPermissions.resolveOptionCommenter": "Commenter — anyone who can comment",
     "settings.commentPermissions.resolveOptionReviewer": "Reviewer — reviewers and above",
     "settings.commentPermissions.resolveOptionContributor": "Contributor — default",
-    "settings.commentPermissions.resolveOptionProjectLead": "Project lead — leads and above",
+    "settings.commentPermissions.resolveOptionProjectLead": "Project Lead — leads and above",
     "settings.commentPermissions.resolveOptionMaintainer": "Maintainer — most restrictive",
 
     // ── UsageSection (Preferences → Usage) ──
@@ -612,7 +619,7 @@ export const settings = defineNamespace({
           "Shown once for the whole card, instead of a note on every greyed-out control in it. " +
           "A sentence, with its period.",
         placeholders: {
-          role: "Plural role name, already translated, e.g. 'Maintainers' or 'Project leads'.",
+          role: "Plural role name, already translated, e.g. 'Maintainers' or 'Project Leads'.",
         },
       },
       "settings.locked.control": {
@@ -620,7 +627,7 @@ export const settings = defineNamespace({
           "One short line beneath a single greyed-out setting the reader cannot change, saying " +
           "who can. 'this' is that one setting. A sentence, with its period.",
         placeholders: {
-          role: "Plural role name, already translated, e.g. 'Maintainers' or 'Project leads'.",
+          role: "Plural role name, already translated, e.g. 'Maintainers' or 'Project Leads'.",
         },
       },
       "settings.locked.page": {
@@ -679,6 +686,31 @@ export const settings = defineNamespace({
         description:
           "Opens under 'Recording format' when its (i) is clicked. 'WAV / COMPRESSED' names the " +
           "button in the recorder that shows the same setting; keep it as it is shown there.",
+      },
+      "settings.save.saved": {
+        description:
+          "A quiet word shown for a moment beside a setting just after it saved by itself. " +
+          "Settings save the moment they are changed; there is no Save button. Past participle.",
+        maxLength: 16,
+      },
+      "settings.save.saving": {
+        description: "Shown beside a setting while a slow save is still going. Settings save the moment they are changed.",
+        maxLength: 16,
+      },
+      "settings.save.theirsKept": {
+        description:
+          "Shown beside a setting whose change was NOT saved because another person changed the same " +
+          "setting a moment earlier; the setting now shows that person's value. One plain sentence.",
+        placeholders: { name: "The other person's name or username." },
+      },
+      "settings.save.theirsKeptNoName": {
+        description: "Same as settings.save.theirsKept, when the other person's name is not known.",
+      },
+      "settings.save.offline": {
+        description: "Shown beside a setting that could not be saved for the team because there is no internet connection.",
+      },
+      "settings.save.failed": {
+        description: "Shown beside a setting whose save failed for a reason with no message of its own.",
       },
       "settings.moved.note": {
         description:

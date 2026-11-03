@@ -6,18 +6,18 @@
 // effective value (explicit ?? isScriptureProject) and only persists what the
 // user explicitly toggles. These tests encode that:
 //   1. A scripture project with the setting UNSET shows the switch ON
-//      (derived default) WITHOUT that being a "saved" state — no dirty flag.
+//      (derived default) WITHOUT that being a "saved" state — nothing written.
 //   2. A scripture project with an EXPLICIT false shows the switch OFF — the
 //      trust invariant: derive-on-read must never override an explicit OFF.
 //   3. A non-scripture project with the setting UNSET shows the switch OFF.
-//   4. Toggling the switch marks the form dirty (about to persist an
-//      explicit value), proving persistence only happens on user action.
+//   4. Toggling the switch saves an explicit value, the moment it flips
+//      (AQU-2262), proving persistence only happens on user action.
 //
 // AQU-1686 renamed the card to "Bible data" and put one switch per Bible data
 // enrichment under it. The second describe block covers how those rows ride
-// the page: stored choices show on load without a dirty flag, a change joins
-// the deferred Save bar and saves only `bibleEnrichments`, and the rows follow
-// the master switch, including an unsaved change to it.
+// the page: stored choices show on load without writing anything, a change
+// saves at once and only `bibleEnrichments`, and the rows follow the master
+// switch.
 //
 // AQU-1685: all of that is an experiment, on only for a device that switched
 // on "Bible data enrichments" in Settings → Experimental. Without it the card
@@ -79,22 +79,16 @@ vi.mock("@/hooks/useProject", () => ({
   }),
 }))
 
-vi.mock("@/hooks/useProjectSettings", () => ({
-  useProjectSettings: () => ({
-    canEdit: true,
-    reasonCannotEdit: null,
-    patch,
-    version: 1,
-    updatedAt: null,
-    updatedBy: null,
-    conflict: false,
-    dismissConflict: vi.fn(),
-    settings: currentSettings,
-    hasFetched: currentHasFetched,
-    isOnline: true,
-    refresh: vi.fn(),
-  }),
-}))
+// AQU-2262: a write shows on the page, as the real hook's overlay does.
+vi.mock("@/hooks/useProjectSettings", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks/useProjectSettings")>()
+  const { useLiveProjectSettings } = await import("@/test-utils/live-project-settings")
+  return {
+    ...actual,
+    useProjectSettings: () =>
+      useLiveProjectSettings(() => ({ settings: currentSettings, patch, hasFetched: currentHasFetched })),
+  }
+})
 
 vi.mock("@/hooks/useOrg", () => ({
   useOrg: () => ({ org: null }),
@@ -129,6 +123,7 @@ vi.mock("@/lib/completion/completion-service", async (importOriginal) => {
 vi.mock("@/lib/store/project-index", () => ({
   getProject: vi.fn().mockResolvedValue(null),
   updateProject: vi.fn().mockResolvedValue(undefined),
+  patchProject: vi.fn().mockResolvedValue(null),
 }))
 
 vi.mock("@/lib/progress/read-validation-count", () => ({
@@ -181,9 +176,9 @@ describe("ProjectSettings — Bible resources (AQU-460 derive-on-read)", () => {
     renderSettings()
     const toggle = screen.getByRole("switch", { name: /enable bible data/i })
     expect(toggle).toHaveAttribute("aria-checked", "true")
-    // Nothing was toggled by the user — the page must not report unsaved changes
-    // just from rendering the derived state.
-    expect(screen.queryByRole("button", { name: /save changes/i })).toBeNull()
+    // Nothing was toggled by the user — the page must not write anything just
+    // from rendering the derived state.
+    expect(patch).not.toHaveBeenCalled()
   })
 
   it("scripture project, EXPLICIT false -> switch shows OFF (trust invariant respected)", () => {
@@ -206,7 +201,7 @@ describe("ProjectSettings — Bible resources (AQU-460 derive-on-read)", () => {
     expect(toggle).toHaveAttribute("aria-checked", "false")
   })
 
-  it("toggling the switch marks the form dirty (persists only on explicit user action)", () => {
+  it("toggling the switch saves an explicit value (persists only on explicit user action)", async () => {
     currentProject = makeProject({
       files: [{ id: "f1", name: "GEN.usfm", type: "usfm", createdAt: "", cellCount: 1 }],
       bibleResourcesEnabled: undefined,
@@ -214,7 +209,9 @@ describe("ProjectSettings — Bible resources (AQU-460 derive-on-read)", () => {
     renderSettings()
     const toggle = screen.getByRole("switch", { name: /enable bible data/i })
     fireEvent.click(toggle)
-    expect(screen.getByRole("button", { name: /save changes/i })).toBeTruthy()
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(1))
+    expect(patch.mock.calls[0]?.[0]).toEqual({ bibleResourcesEnabled: false })
+    expect(toggle).toHaveAttribute("aria-checked", "false")
   })
 
   // AQU-460 display-race (live-QA finding): `project.bibleResourcesEnabled`
@@ -262,7 +259,7 @@ describe("ProjectSettings — Bible resources (AQU-460 derive-on-read)", () => {
     const toggle = screen.getByRole("switch", { name: /enable bible data/i })
     expect(toggle).toHaveAttribute("aria-checked", "false")
     // Settling to the real value must not itself count as a user edit.
-    expect(screen.queryByRole("button", { name: /save changes/i })).toBeNull()
+    expect(patch).not.toHaveBeenCalled()
   })
 })
 
@@ -271,7 +268,6 @@ describe("ProjectSettings — Bible data enrichments (AQU-1686)", () => {
   /** The device-local experiment, switched on (useProject overlays it onto the record). */
   const EXPERIMENT_ON = { bibleData: true }
   const enrichmentSwitch = (name: string) => screen.getByRole("switch", { name })
-  const saveButton = () => screen.queryByRole("button", { name: /save changes/i })
 
   // A project's stored enrichment choices must not leak the experiment onto a
   // device that never opted in: the card stays the old one, with no rows and
@@ -297,7 +293,7 @@ describe("ProjectSettings — Bible data enrichments (AQU-1686)", () => {
 
   // A stored choice must read back as stored after a reload, and settling to
   // it must not count as an edit (the AQU-460 trust bug, one level down).
-  it("shows stored choices and defaults on load without a dirty flag", () => {
+  it("shows stored choices and defaults on load without writing anything", () => {
     currentProject = makeProject({ files: SCRIPTURE_FILES as ProjectRecord["files"], experimentalFlags: EXPERIMENT_ON })
     currentSettings = { bibleEnrichments: { voices: false, autopilot: true }, autopilotEnabled: true }
     renderSettings()
@@ -305,26 +301,27 @@ describe("ProjectSettings — Bible data enrichments (AQU-1686)", () => {
     expect(enrichmentSwitch("Autopilot uses Bible data")).toHaveAttribute("aria-checked", "true")
     // Not stored → its registry default.
     expect(enrichmentSwitch("Places and maps")).toHaveAttribute("aria-checked", "true")
-    expect(saveButton()).toBeNull()
+    expect(patch).not.toHaveBeenCalled()
   })
 
-  it("joins the Save bar and saves only the bibleEnrichments key", async () => {
+  it("saves at once, and only that enrichment of the bibleEnrichments key", async () => {
     currentProject = makeProject({ files: SCRIPTURE_FILES as ProjectRecord["files"], experimentalFlags: EXPERIMENT_ON })
     renderSettings()
     fireEvent.click(enrichmentSwitch("Places and maps"))
-    expect(enrichmentSwitch("Places and maps")).toHaveAttribute("aria-checked", "false")
-    fireEvent.click(saveButton() as HTMLElement)
     await waitFor(() => expect(patch).toHaveBeenCalledTimes(1))
+    // One field, merged into the stored choices rather than replacing them.
     expect(patch.mock.calls[0]?.[0]).toEqual({ bibleEnrichments: { places: false } })
+    expect(patch.mock.calls[0]?.[1]).toMatchObject({ mergeKeys: ["bibleEnrichments"] })
+    expect(enrichmentSwitch("Places and maps")).toHaveAttribute("aria-checked", "false")
   })
 
-  it("disables every enrichment, with the reason, while Bible data is off — even an unsaved off", () => {
+  it("disables every enrichment, with the reason, once Bible data is switched off", async () => {
     currentProject = makeProject({ files: SCRIPTURE_FILES as ProjectRecord["files"], experimentalFlags: EXPERIMENT_ON })
     renderSettings()
     expect(enrichmentSwitch("Voices")).not.toHaveAttribute("aria-disabled", "true")
 
     fireEvent.click(screen.getByRole("switch", { name: /enable bible data/i }))
-    expect(screen.getByText("Turn on Bible data to use these enrichments.")).toBeInTheDocument()
+    expect(await screen.findByText("Turn on Bible data to use these enrichments.")).toBeInTheDocument()
     expect(enrichmentSwitch("Voices")).toHaveAttribute("aria-disabled", "true")
     expect(enrichmentSwitch("Bible data checks")).toHaveAttribute("aria-disabled", "true")
   })

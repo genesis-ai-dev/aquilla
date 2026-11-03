@@ -290,7 +290,36 @@ export const AUDIO_MEDIA_STRATEGY_LABELS: Record<AudioMediaStrategy, { nameKey: 
  * rewrites them to `"inworld"` (language tags included); runtime still remaps
  * unread copies so generate uses hosted Inworld (AQU-1189, AQU-1051).
  */
-export type TtsProvider = "inworld" | "omnivoice" | "gemini" | "kokoro" | "mms"
+export type TtsProvider = "inworld" | "omnivoice" | "gemini" | "kokoro" | "mms" | "elevenlabs"
+
+/**
+ * ElevenLabs voice tuning (AQU-2299), camelCase mirror of the API's
+ * `voice_settings`. Defaults live in src/lib/audio/elevenlabs/settings.ts.
+ */
+export interface ElevenLabsVoiceSettings {
+  /** 0–1. Lower is more expressive, higher more consistent. */
+  stability: number
+  /** 0–1. How closely to stick to the original voice. */
+  similarityBoost: number
+  /** 0–1. Style exaggeration; 0 is the voice's own delivery. */
+  style: number
+  /** 0.7–1.2. Talking speed. */
+  speed: number
+  speakerBoost: boolean
+}
+
+/** The ElevenLabs side of a `provider: "elevenlabs"` voice (AQU-2299). */
+export interface ElevenLabsVoiceRef {
+  /** The account's ElevenLabs voice id. */
+  voiceId: string
+  /** Display copy of the ElevenLabs voice name (the cast name may differ). */
+  voiceName?: string
+  /** premade | cloned | generated | professional. */
+  category?: string
+  /** TTS model; absent → eleven_multilingual_v2. */
+  modelId?: string
+  settings?: ElevenLabsVoiceSettings
+}
 
 /**
  * A reusable voice in the project's voice library. Voice owns *all* the knobs
@@ -333,7 +362,7 @@ export interface Voice {
    * Narrator, so it cannot belong to one lane.
    *
    * Stamped once, at the write that first stores the voice (`useProjectTts`'s
-   * `saveTts`), so every mint site — New voice / Clone / voice design, an
+   * `saveTts`), so every mint site — New voice / voice design / training, an
    * import with speaker labels, diarization, "Adopt voices as cast" — lands in
    * the active lane without each one having to know about lanes. An edit never
    * re-stamps: a voice does not move lane because someone renamed it.
@@ -369,12 +398,22 @@ export interface Voice {
   /** Preset voices shipped with the app. Cannot be deleted, only forked. */
   builtIn?: boolean
   /**
-   * Voice-clone reference clip id (object name incl. ext) stored project-scoped
-   * in R2. When set, TTS output is re-voiced into this clip's timbre via Seed-VC
-   * (sync-worker POST /api/v1/voice/convert) before being attached. Absent means
-   * plain TTS, no conversion.
+   * Inworld instant ("quick") clone: the short reference clip (object name incl.
+   * ext) stored project-scoped in R2 (`projects/{p}/voices/{id}`). The
+   * sync-worker's /api/v1/voice/tts clones it once through Inworld's
+   * `voices:clone` (cached beside the clip as `{id}.inworld.json`) and reads the
+   * line with the cloned voice. Meaningful ONLY on a voice whose provider is
+   * "inworld" — read it through `inworldCloneReferenceId`. Voices from before
+   * AQU-2291 may carry one on Gemini/MMS (those clones needed Seed-VC, now
+   * removed); it is ignored there. An instant clone reads text; it cannot
+   * re-voice a take (Change voice).
    */
   referenceAudioId?: string
+  /**
+   * When the clone reference was copied from a line's take, `${cellId}:${audioId}`
+   * of that take. Absent for a clip recorded or uploaded in the Clone voice tab.
+   */
+  referenceTakeKey?: string
   /**
    * R2 object name (incl. ext) of the Voice Design sample the user picked.
    * The editor plays this clip so it matches the preview, instead of
@@ -383,16 +422,11 @@ export interface Voice {
    */
   designPreviewAudioId?: string
   /**
-   * When the clone reference was lifted from a line take, `${cellId}:${slot}`
-   * of that take. The Reference audio tab is filled only when `referenceAudioId`
-   * is set *without* this key (a recorded or uploaded clip).
-   */
-  referenceTakeKey?: string
-  /**
    * A pre-built character voice from the Voice library (src/lib/audio/character-voices.ts),
-   * i.e. an RVC model trained by infra/modal/voice_forge.py. Change voice re-voices a
-   * take into it through the voice forge instead of Seed-VC (sync-worker POST
-   * /api/v1/voice/convert with `libraryVoiceId`). Speech-to-speech only: the take's
+   * i.e. an RVC model trained by infra/modal/voice_forge.py — or a trained custom voice
+   * (`c-<hex>`). The only speech-to-speech path: Change voice re-voices a take into it
+   * through the voice forge (sync-worker POST /api/v1/voice/convert with
+   * `libraryVoiceId`), and Generate re-voices fresh TTS the same way. The take's
    * words, pronunciation, timing and intonation are kept; only the timbre changes.
    */
   libraryVoiceId?: string
@@ -402,6 +436,23 @@ export interface Voice {
    * the consent confirmation; the authoritative audit record lives server-side
    * (sync-worker custom-voice.ts). Consent is the organization's responsibility.
    */
+  /**
+   * ElevenLabs (AQU-2299, bring-your-own-key): the account voice this cast
+   * voice speaks with. Generate synthesizes through sync-worker
+   * /api/v1/elevenlabs/tts and Change voice re-voices takes through
+   * /api/v1/elevenlabs/sts, both with the user's own device-local key.
+   */
+  elevenLabs?: ElevenLabsVoiceRef
+  /**
+   * Set when `elevenLabs.voiceId` is an Instant Voice Clone of a real speaker
+   * made from this project. Same consent statement as `customVoice`; the audit
+   * record lives server-side (sync-worker elevenlabs.ts).
+   */
+  elevenLabsClone?: {
+    consentAttestedAt: string
+    consentAttestedBy: string
+    consentStatementVersion: string
+  }
   customVoice?: {
     speakerName: string
     /** ISO time the maintainer confirmed the consent statement. */
@@ -421,8 +472,8 @@ export interface ProjectTtsSettings {
   /**
    * Project's voice library. Empty/absent means: use the built-in presets.
    * In the Voice Studio these are presented as the project's *cast* — each
-   * voice is a character/speaker (a base TTS voice + an optional actor-clone
-   * reference) that lines get assigned to.
+   * voice is a character/speaker (a TTS voice, a ready-made character voice,
+   * or a voice trained from an actor's recordings) that lines get assigned to.
    */
   voices?: Voice[]
   /** Voice id used when a cell doesn't specify one (the narrator/default cast member). */

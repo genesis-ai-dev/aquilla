@@ -51,6 +51,10 @@ interface PreviewBody {
     }[]
     examples: { cellId?: string; source: string; target: string }[]
     precedingContext: { source: string; target: string }[]
+    /** Deprecated AQU-2342 aliases, kept for one release. */
+    brief: string
+    rules: string
+    styleRules: string
   }
   generation: {
     provider: string

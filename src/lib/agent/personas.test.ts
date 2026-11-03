@@ -192,7 +192,7 @@ describe("persona capabilities (agent cards)", () => {
         "/project/proj-1/memory/instructions",
         "/project/proj-1/terminology",
         "/project/proj-1/memory",
-        "/project/proj-1/memory/quality",
+        "/project/proj-1/memory/checks",
       ]),
     )
   })

@@ -5,8 +5,8 @@ import { type Page, type Locator, expect } from "@playwright/test"
  * ("/project/:id/memory[/:section]", AQU-932).
  *
  * Living Memory is a settings-style index → pane drill-down inside the
- * workspace shell (sections: instructions | quality | knowledge |
- * examples). Knowledge Base documents live on the `knowledge` pane; the page
+ * workspace shell (sections: instructions | terminology (a link) | examples | checks |
+ * knowledge). Knowledge Base documents live on the `knowledge` pane; the page
  * keeps its "Living Memory" h1 on every view.
  */
 export class LivingMemory {

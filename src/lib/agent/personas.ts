@@ -202,7 +202,7 @@ export const AGENT_READ_SOURCES = {
     descriptionKey: "agent.card.read.rules.description",
     icon: ShieldCheck,
     // `/project/:id/rules` redirects here; link the destination directly.
-    route: (projectId: string) => projectMemoryPath(projectId, "quality"),
+    route: (projectId: string) => projectMemoryPath(projectId, "checks"),
   },
 } as const satisfies Record<string, AgentReadCapability>
 

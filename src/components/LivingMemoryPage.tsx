@@ -2,12 +2,12 @@
  * LivingMemoryPage — settings-style index → detail surface for the project's
  * living memory, mounted by ProjectWorkspace as an overlay at
  * `/project/:id/memory` and `/project/:id/memory/:section` (the same
- * index → pane pattern as ProjectSettings/Preferences). Four sections —
- *   instructions | quality | knowledge | examples
- * (see LIVING_MEMORY_SECTIONS) — each an icon NavRow on the index that opens a
- * focused pane. An unknown `:section` falls back to the index; the retired
- * `brief` section redirects to `instructions` (AQU-2342: the brief interview
- * now writes INTO the instructions).
+ * index → pane pattern as ProjectSettings/Preferences). AQU-2342: the index is
+ * the four things the AI is given, plus the team's source documents —
+ *   instructions | terminology | examples | checks | knowledge
+ * (see LIVING_MEMORY_SECTIONS). Terminology's row opens the terminology page;
+ * the others open a focused pane. An unknown `:section` falls back to the
+ * index; retired ids redirect (`brief` → instructions, `quality` → checks).
  *
  * Edit access is gated at MAINTAINER (600) via useProjectSettings.canEdit;
  * below-floor users see read-only affordances with a tooltip naming the
@@ -50,6 +50,8 @@ import {
 } from "@/components/ProjectSettings/InheritedSettingsChoice"
 import { parseInheritedFromLink, type InheritFieldId } from "@/lib/sync/inherited-settings"
 import { RulesSettingsSection } from "@/components/ProjectSettings/RulesSection"
+import { LanguageProfileSection } from "@/components/ProjectSettings/LanguageProfileSection"
+import { isBibleDataExperimentOn } from "@/lib/bible-data/experiment"
 import { projectTranslationInstructions } from "@/lib/instructions/project-instructions"
 import {
   editorReturnFromLocation,
@@ -59,7 +61,7 @@ import {
 import { ROLE } from "@/lib/frontier/roles"
 import { RecentExamplesSection } from "@/components/living-memory/ExamplesSection"
 import { InstructionsPane } from "@/components/living-memory/InstructionsPane"
-import { QualityStyleRules } from "@/components/living-memory/QualityStyleRules"
+import { StyleChecks } from "@/components/living-memory/StyleChecks"
 import type { RefineSegment } from "@/components/living-memory/RefineApplicabilityDialog"
 import { cellCoordinates } from "@/lib/rules/applicability"
 import { resolveFileGenre } from "@/lib/rules/file-genre"
@@ -76,9 +78,10 @@ export { addEntry, updateEntry, deleteEntry } from "@/components/living-memory/e
 
 export type LivingMemorySectionId =
   | "instructions"
-  | "quality"
-  | "knowledge"
+  | "terminology"
   | "examples"
+  | "checks"
+  | "knowledge"
 
 export interface LivingMemorySectionDef {
   id: LivingMemorySectionId
@@ -96,16 +99,11 @@ export const LIVING_MEMORY_SECTIONS: readonly LivingMemorySectionDef[] = [
     descriptionKey: "terminology.livingMemory.section.instructions.description",
   },
   {
-    id: "quality",
-    icon: ShieldCheck,
-    titleKey: "terminology.livingMemory.section.quality.title",
-    descriptionKey: "terminology.livingMemory.section.quality.description",
-  },
-  {
-    id: "knowledge",
-    icon: LibraryBig,
-    titleKey: "knowledgeBase.title",
-    descriptionKey: "knowledgeBase.description",
+    // Not a pane: the row opens the terminology page (see TERMINOLOGY_SECTION).
+    id: "terminology",
+    icon: BookOpen,
+    titleKey: "nav.sidebarSection.terminology",
+    descriptionKey: "terminology.livingMemory.section.terminology.description",
   },
   {
     id: "examples",
@@ -113,17 +111,36 @@ export const LIVING_MEMORY_SECTIONS: readonly LivingMemorySectionDef[] = [
     titleKey: "terminology.livingMemory.section.examples.title",
     descriptionKey: "terminology.livingMemory.recentExamplesDescription",
   },
+  {
+    id: "checks",
+    icon: ShieldCheck,
+    titleKey: "terminology.livingMemory.section.checks.title",
+    descriptionKey: "terminology.livingMemory.section.checks.description",
+  },
+  {
+    // Source documents: the agent and style-rule extraction read them; no
+    // drafting prompt does (AQU-2342).
+    id: "knowledge",
+    icon: LibraryBig,
+    titleKey: "terminology.livingMemory.section.knowledge.title",
+    descriptionKey: "terminology.livingMemory.section.knowledge.description",
+  },
 ]
 
-/** Panes whose content brings its own visible heading/description render no
- *  extra chrome paragraph (instructions: InstructionsPane's heading;
- *  knowledge: KnowledgeBaseSurface's Section title; examples: the Recent
- *  Examples block) — a duplicate heading would break exact-text locators. */
-const PANES_WITH_CHROME_DESCRIPTION: readonly LivingMemorySectionId[] = ["quality"]
+/** The section whose row leaves this page for the terminology page. */
+const TERMINOLOGY_SECTION: LivingMemorySectionId = "terminology"
+
+/** Panes whose content brings no visible heading/description of its own get
+ *  the section's description as a chrome paragraph (instructions:
+ *  InstructionsPane's heading; checks: the list's own intro; knowledge:
+ *  KnowledgeBaseSurface's Section title; examples: the Recent Examples block)
+ *  — a duplicate heading would break exact-text locators. */
+const PANES_WITH_CHROME_DESCRIPTION: readonly LivingMemorySectionId[] = ["knowledge"]
 
 /** Retired section ids and the pane that replaced them (bookmarks, old links). */
 const RETIRED_SECTION_REDIRECTS: Readonly<Record<string, LivingMemorySectionId>> = {
   brief: "instructions",
+  quality: "checks",
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────
@@ -266,15 +283,10 @@ export function LivingMemoryPage({
         return resolvedInstructions
           ? undefined
           : t("terminology.livingMemory.instructions.notWritten")
-      case "quality":
-        // Reuses the rules check-drawer's "{count} rules" plural — same string.
-        return t("rules.checkDrawer.scopeRules", {
-          count: formatCount(settings.rules?.length ?? 0, locale),
-        })
+      case "terminology":
+      case "checks":
       case "knowledge":
-        return settings.knowledgeBaseEnabled
-          ? t("terminology.livingMemory.section.knowledge.hintOn")
-          : t("terminology.livingMemory.section.knowledge.hintOff")
+        return undefined
       case "examples":
         return !validatedExamplesEnabled || isLoading
           ? undefined
@@ -399,43 +411,54 @@ export function LivingMemoryPage({
             />
           </>
         )
-      case "quality":
-        return (
-          <>
-            {projectId ? (
-              <section aria-label={t("nav.sidebarSection.rules")}>
-                {/* "Rules" doesn't collide with RulesSurface's own card
-                    titles ("Project Rules (n)" / "Org Rules (n)"). */}
-                <h2 className="text-xs font-semibold text-muted-foreground mb-3">
-                  {t("nav.sidebarSection.rules")}
-                </h2>
-                <RulesSettingsSection
-                  projectId={projectId}
-                  project={projectWithDrafting}
-                  refreshProject={refreshProject}
-                  patchSettings={patchSettings}
-                  roleLevel={roleLevel}
-                  activeLane={activeLane}
-                  onActiveLaneChange={onActiveLaneChange}
-                />
-              </section>
-            ) : null}
-            {projectId ? (
-              <QualityStyleRules
+      case "terminology":
+        // The row links out; a direct visit to /memory/terminology lands on
+        // the index rather than an empty pane.
+        return null
+      case "checks":
+        return projectId ? (
+          <StyleChecks
+            projectId={projectId}
+            roleLevel={entriesReady ? roleLevel : null}
+            completionSettings={completionSettings}
+            session={session ?? null}
+            files={project?.files ?? []}
+            fileGenres={settings.fileGenres}
+            canEditSettings={entriesReady && canEdit}
+            reasonCannotEditSettings={entriesReady ? reasonCannotEdit : "role"}
+            patchFileGenres={patchSettings}
+            loadSegments={loadSegments}
+          >
+            {(style) => (
+              <RulesSettingsSection
                 projectId={projectId}
-                roleLevel={entriesReady ? roleLevel : null}
-                completionSettings={completionSettings}
-                session={session ?? null}
-                files={project?.files ?? []}
-                fileGenres={settings.fileGenres}
-                canEditSettings={entriesReady && canEdit}
-                reasonCannotEditSettings={entriesReady ? reasonCannotEdit : "role"}
-                patchFileGenres={patchSettings}
-                loadSegments={loadSegments}
+                project={projectWithDrafting}
+                refreshProject={refreshProject}
+                patchSettings={patchSettings}
+                roleLevel={roleLevel}
+                activeLane={activeLane}
+                onActiveLaneChange={onActiveLaneChange}
+                style={style}
+                checkData={
+                  <>
+                    {style.documentGenres}
+                    {/* AQU-1688: the language facts the Bible data checks
+                        read — structured data behind Checks, not guidance. */}
+                    {project && isBibleDataExperimentOn(project) ? (
+                      <LanguageProfileSection
+                        value={settings.languageProfile}
+                        targetLanguage={settings.targetLanguage ?? project.targetLanguage ?? ""}
+                        canEdit={entriesReady && canEdit}
+                        disabledTooltip={t("rules.builtinChecks.manageNeedsMaintainer")}
+                        patch={patchSettings}
+                      />
+                    ) : null}
+                  </>
+                }
               />
-            ) : null}
-          </>
-        )
+            )}
+          </StyleChecks>
+        ) : null
       case "knowledge":
         return projectId ? (
           <>
@@ -444,13 +467,6 @@ export function LivingMemoryPage({
             scope={{ kind: "project", id: projectId }}
             jwt={session?.jwt ?? null}
             canManage={entriesReady && roleLevel != null && roleLevel >= ROLE.PROJECT_LEAD}
-            drafting={{
-              checked: settings.knowledgeBaseEnabled ?? false,
-              disabled: !(entriesReady && canEdit),
-              onCheckedChange: async (checked) => {
-                await patchSettings({ knowledgeBaseEnabled: checked })
-              },
-            }}
           />
           </>
         ) : null
@@ -459,6 +475,16 @@ export function LivingMemoryPage({
           <RecentExamplesSection cells={cells} isLoading={isLoading} isEmpty={isEmpty} />
         )
     }
+  }
+
+  // The terminology page, with the same editor-return handoff as the header's
+  // Terminology button.
+  const terminologyPath = withEditorReturn(
+    `/project/${pid}/terminology`,
+    editorReturnFromLocation(location.pathname, location.search, pid),
+  )
+  if (section === TERMINOLOGY_SECTION && projectId) {
+    return <Navigate to={terminologyPath} replace />
   }
 
   const retiredTarget = section ? RETIRED_SECTION_REDIRECTS[section] : undefined
@@ -500,7 +526,7 @@ export function LivingMemoryPage({
                 {LIVING_MEMORY_SECTIONS.map((s) => (
                   <NavRow
                     key={s.id}
-                    to={projectMemoryPath(pid, s.id) + location.search}
+                    to={s.id === TERMINOLOGY_SECTION ? terminologyPath : projectMemoryPath(pid, s.id) + location.search}
                     icon={s.icon}
                     title={t(s.titleKey)}
                     description={t(s.descriptionKey)}

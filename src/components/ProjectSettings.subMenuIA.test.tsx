@@ -21,7 +21,7 @@
 //   6. Living Memory extraction: the `memory`, `rules`, and `system-prompt`
 //      sections are gone from settings, and their legacy URLs redirect
 //      (page AND route-modal) to the standalone /project/:id/memory surface —
-//      memory → /memory, rules → /memory/quality, system-prompt →
+//      memory → /memory, rules → /memory/checks, system-prompt →
 //      /memory/instructions — preserving the query string.
 //   7. The AI pane keeps one NavRow to the project instructions
 //      (memory/instructions) with a preview of the text (AQU-2342).
@@ -574,10 +574,10 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     )
   })
 
-  it("redirects the legacy settings/rules URL to memory/quality, preserving search", () => {
+  it("redirects the legacy settings/rules URL to memory/checks, preserving search", () => {
     renderAt(`/project/${PROJECT_ID}/settings/rules?q=x`)
     expect(screen.getByTestId("landing-path").textContent).toBe(
-      `/project/${PROJECT_ID}/memory/quality?q=x`,
+      `/project/${PROJECT_ID}/memory/checks?q=x`,
     )
   })
 

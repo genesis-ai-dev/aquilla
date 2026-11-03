@@ -217,6 +217,8 @@ export default function AgentMemoryTab({ projectId, roleLevel }: AgentMemoryTabP
           {error}
         </p>
       )}
+      {/* AQU-2342: what agent memory is, and where approved decisions go. */}
+      <p className="border-b px-3 py-1.5 text-[11px] text-muted-foreground">{t("agent.memory.scopeNote")}</p>
       <Tabs defaultValue="proposed" className="flex min-h-0 flex-1 flex-col px-3 py-2">
         <TabsList className="w-fit">
           <TabsTrigger value="proposed" className="gap-1.5">

@@ -91,20 +91,20 @@ vi.mock("@/lib/frontier/knowledge-base", () => ({
   reindexKnowledgeDocument: vi.fn(),
 }))
 
-// The Rules surface owns its own data wiring (org settings, project cells) —
-// stub it; the quality pane only needs to mount it.
+// The Checks list owns its own data wiring (org settings, project cells) —
+// stub it; the checks pane only needs to mount it with the style binding.
 vi.mock("@/components/ProjectSettings/RulesSection", () => ({
-  RulesSettingsSection: ({ projectId }: { projectId: string }) => (
-    <div data-testid="rules-settings-section" data-project-id={projectId} />
+  RulesSettingsSection: ({ projectId, style }: { projectId: string; style?: { canManage: boolean } }) => (
+    <div data-testid="rules-settings-section" data-project-id={projectId} data-has-style={style ? "yes" : "no"} />
   ),
 }))
 
-// Same for the style-rule library section — it owns its own useStyleRules
-// fetch; its behaviour is covered by living-memory/QualityStyleRules.test.tsx.
-vi.mock("@/components/living-memory/QualityStyleRules", () => ({
-  QualityStyleRules: ({ projectId }: { projectId: string }) => (
-    <div data-testid="quality-style-rules" data-project-id={projectId} />
-  ),
+// Same for the style-rule store — it owns its own useStyleRules fetch; its
+// behaviour is covered by living-memory/StyleChecks.test.tsx. The stub hands
+// the list a binding, as the real one does.
+vi.mock("@/components/living-memory/StyleChecks", () => ({
+  StyleChecks: ({ children }: { children: (binding: unknown) => import("react").ReactNode }) =>
+    children({ canManage: false, rules: [], applicability: [], reviewQueue: null, documentGenres: null, errorBanner: null }),
 }))
 
 import { useProject } from "@/hooks/useProject"
@@ -239,13 +239,19 @@ describe("LivingMemoryPage — index", () => {
     expect(screen.getByText(/Your team's encoded voice/i)).toBeInTheDocument()
   })
 
-  it("lists the four section rows by accessible name", () => {
+  it("lists Instructions, Terminology, Examples, Checks, then Source documents", () => {
     renderPage()
-    expect(screen.getByRole("link", { name: /Instructions/ })).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: /Translation quality/ })).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: /Knowledge base/i })).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: /Examples/ })).toBeInTheDocument()
-    expect(screen.getAllByRole("link").filter((l) => l.getAttribute("href")?.includes("/memory/"))).toHaveLength(4)
+    const rows = screen.getAllByRole("link").filter((l) => /\/(memory|terminology)/.test(l.getAttribute("href") ?? ""))
+    expect(rows).toHaveLength(5)
+    expect(rows[0]).toHaveAccessibleName(/^Instructions/)
+    expect(rows[1]).toHaveAccessibleName(/^Terminology/)
+    expect(rows[2]).toHaveAccessibleName(/^Examples/)
+    expect(rows[3]).toHaveAccessibleName(/^Checks/)
+    expect(rows[4]).toHaveAccessibleName(/^Source documents/)
+    // Terminology leaves for the terminology page, carrying the editor return.
+    expect(rows[1].getAttribute("href")).toMatch(/^\/project\/proj-1\/terminology/)
+    // Source documents never claim to reach drafting prompts.
+    expect(rows[4]).toHaveTextContent(/not added to drafting prompts/)
   })
 
   it("says the instructions are not written yet, until they are", () => {
@@ -266,7 +272,7 @@ describe("LivingMemoryPage — index", () => {
   it("falls back to the index for an unknown section", () => {
     renderPage("/project/proj-1/memory/nope")
     expect(screen.getByText(/Your team's encoded voice/i)).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: /Translation quality/ })).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: /^Checks/ })).toBeInTheDocument()
     // No pane content leaked through.
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument()
   })
@@ -301,7 +307,7 @@ describe("LivingMemoryPage — instructions pane", () => {
     const back = screen.getByRole("link", { name: /Living Memory/i })
     fireEvent.click(back)
     expect(screen.getByText(/Your team's encoded voice/i)).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: /Translation quality/ })).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: /^Checks/ })).toBeInTheDocument()
   })
 
   it("prefills the migrated text from the old sources when nothing is stored", () => {
@@ -388,13 +394,15 @@ describe("LivingMemoryPage — role-gated edit affordances", () => {
     expect(mockPatch).not.toHaveBeenCalled()
   })
 
-  it("mounts the Rules and style-rule surfaces on the quality pane, with no Standards block", () => {
-    renderPage("/project/proj-1/memory/quality")
+  it("mounts the one Checks list, fed the style rules, on the checks pane", () => {
+    renderPage("/project/proj-1/memory/checks")
     expect(screen.queryByRole("heading", { name: "Standards" })).not.toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: /Add standards entry/i })).not.toBeInTheDocument()
-    expect(screen.getByRole("heading", { name: "Rules" })).toBeInTheDocument()
+    expect(screen.getByTestId("rules-settings-section")).toHaveAttribute("data-has-style", "yes")
+  })
+
+  it("redirects the retired quality section to the checks pane", () => {
+    renderPage("/project/proj-1/memory/quality")
     expect(screen.getByTestId("rules-settings-section")).toBeInTheDocument()
-    expect(screen.getByTestId("quality-style-rules")).toBeInTheDocument()
   })
 })
 
@@ -502,9 +510,8 @@ describe("LivingMemoryPage — knowledge pane", () => {
     expect(
       screen.getByRole("button", { name: /Upload document/i }),
     ).toBeInTheDocument()
-    expect(
-      screen.getByRole("switch", { name: /Use knowledge base in drafting/i }),
-    ).toBeInTheDocument()
+    // AQU-2342: knowledge documents never reach a drafting prompt — no switch claims they do.
+    expect(screen.queryByRole("switch")).not.toBeInTheDocument()
   })
 
   it("shows a read-only surface below PROJECT_LEAD", async () => {

@@ -198,7 +198,7 @@ export function SetupChecklistDrawer({
                   title={t("onboarding.checklist.standards.title")}
                   description={t("onboarding.checklist.standards.description")}
                   actionLabel={t("onboarding.checklist.standards.actionLabel")}
-                  onOpen={() => onNavigate(projectMemoryPath(project.id, "quality"))}
+                  onOpen={() => onNavigate(projectMemoryPath(project.id, "checks"))}
                 />
                 <LinkStep
                   title={t("onboarding.checklist.glossary.title")}

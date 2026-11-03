@@ -44,10 +44,9 @@ import {
 import { EmptyState } from "@/components/ui/empty"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Section, SettingsGroup, SettingsRow } from "@/components/ui/page"
+import { Section } from "@/components/ui/page"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
-import { Switch } from "@/components/ui/switch"
 import { toast } from "@/components/ui/toast"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { formatNumber } from "@/lib/i18n/format"
@@ -71,11 +70,6 @@ interface KnowledgeBaseSurfaceProps {
   jwt: string | null
   canManage: boolean
   showTitle?: boolean
-  drafting?: {
-    checked: boolean
-    disabled: boolean
-    onCheckedChange: (checked: boolean) => Promise<void> | void
-  }
 }
 
 interface ViewerState {
@@ -122,7 +116,6 @@ export function KnowledgeBaseSurface({
   jwt,
   canManage,
   showTitle = true,
-  drafting,
 }: KnowledgeBaseSurfaceProps) {
   const t = useT()
   const { locale } = useI18n()
@@ -344,24 +337,6 @@ export function KnowledgeBaseSurface({
 
   return (
     <div className="flex flex-col gap-6">
-      {drafting ? (
-        <SettingsGroup>
-          <SettingsRow
-            label={<label htmlFor="knowledge-base-drafting">{t("knowledgeBase.useInDraftingLabel")}</label>}
-            description={t("knowledgeBase.useInDraftingDescription")}
-            control={
-              <Switch
-                id="knowledge-base-drafting"
-                checked={drafting.checked}
-                onCheckedChange={(checked) => void drafting.onCheckedChange(checked)}
-                disabled={drafting.disabled}
-                aria-label={t("knowledgeBase.useInDraftingLabel")}
-              />
-            }
-          />
-        </SettingsGroup>
-      ) : null}
-
       <Section
         title={showTitle ? t("knowledgeBase.title") : undefined}
         description={showTitle ? description : undefined}

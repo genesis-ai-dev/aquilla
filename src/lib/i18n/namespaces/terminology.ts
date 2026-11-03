@@ -170,11 +170,18 @@ export const terminology = defineNamespace({
     "terminology.livingMemory.instructions.notWritten": "Not written yet",
     "terminology.livingMemory.instructions.helpTitle": "Help writing the instructions",
     "terminology.livingMemory.instructions.helpFinish": "Add to instructions",
-    "terminology.livingMemory.section.quality.title": "Translation quality",
-    "terminology.livingMemory.section.quality.description":
-      "Rules, style rules, and checks that guard the translation",
-    "terminology.livingMemory.section.knowledge.hintOn": "On",
-    "terminology.livingMemory.section.knowledge.hintOff": "Off",
+    // AQU-2342: the index is the four things the AI is given, plus the
+    // team's source documents (which no drafting prompt reads).
+    "terminology.livingMemory.section.terminology.description":
+      "Key terms and their agreed renderings. Each AI draft is given the terms that appear in " +
+      "the line it translates.",
+    "terminology.livingMemory.section.checks.title": "Checks",
+    "terminology.livingMemory.section.checks.description":
+      "What every AI draft is checked against after it is written. The drafting prompt names them too.",
+    "terminology.livingMemory.section.knowledge.title": "Source documents",
+    "terminology.livingMemory.section.knowledge.description":
+      "Style guides, background and other reference documents. The agent can read them, and " +
+      "style rules can be drawn from them; they are not added to drafting prompts.",
     "terminology.livingMemory.section.examples.title": "Examples",
 
     // ── Style-rule library + applicability (quality pane, AQU-934) ───────────
@@ -184,11 +191,6 @@ export const terminology = defineNamespace({
     // common.close for generic actions, common.file for the `file` target type,
     // rules.editor.severityLabel + rules.severity.major/minor for severity, and
     // rules.surface.enabledLabel for the enabled toggle.
-    "terminology.livingMemory.styleRules.title": "Style rules",
-    "terminology.livingMemory.styleRules.description":
-      "Rules extracted from your knowledge base or written by hand. Approved rules steer " +
-      "every AI draft, and each one can be narrowed to the books, sections, or passages " +
-      "it governs.",
     "terminology.livingMemory.styleRules.loadError":
       "Couldn't load the style-rule library: {message}",
     "terminology.livingMemory.styleRules.candidates.heading": "Proposed rules",
@@ -229,10 +231,6 @@ export const terminology = defineNamespace({
     "terminology.livingMemory.styleRules.assignedBy.human": "Set by a person",
     "terminology.livingMemory.styleRules.assignedBy.model": "Suggested by AI",
     "terminology.livingMemory.styleRules.assignedBy.inherited": "Inherited",
-    "terminology.livingMemory.styleRules.library.heading": "Approved rules",
-    "terminology.livingMemory.styleRules.library.empty":
-      "No approved style rules yet. Extract them from a knowledge-base document, or " +
-      "approve one that is waiting for review.",
     "terminology.livingMemory.styleRules.library.applicability": "Where it applies",
     "terminology.livingMemory.styleRules.applicability.title": "Where this rule applies",
     "terminology.livingMemory.styleRules.applicability.empty":
@@ -253,7 +251,6 @@ export const terminology = defineNamespace({
       "A verse range inside one chapter, for example: LUK 1:1-4",
     "terminology.livingMemory.styleRules.applicability.hint.segment":
       "A single segment (cell) id",
-    "terminology.livingMemory.styleRules.extract.button": "Extract from knowledge base",
     "terminology.livingMemory.styleRules.extract.title": "Extract style rules",
     "terminology.livingMemory.styleRules.extract.description":
       "Read one knowledge-base document section by section and propose the rules it " +
@@ -745,17 +742,30 @@ export const terminology = defineNamespace({
           "and adds the summary to the project instructions text.",
         maxLength: 32,
       },
-      "terminology.livingMemory.section.knowledge.hintOn": {
+      "terminology.livingMemory.section.terminology.description": {
         description:
-          "Right-aligned hint on the Living Memory index's Knowledge base row when the " +
-          "knowledge base is used in drafting. Paired with the 'Off' hint.",
-        maxLength: 12,
+          "Living Memory index row for Terminology (opens the terminology page): what the termbase " +
+          "is and how drafts use it — only the terms found in the line being translated are given.",
       },
-      "terminology.livingMemory.section.knowledge.hintOff": {
+      "terminology.livingMemory.section.checks.title": {
         description:
-          "Right-aligned hint on the Living Memory index's Knowledge base row when the " +
-          "knowledge base is not used in drafting. Paired with the 'On' hint.",
-        maxLength: 12,
+          "Name of the Living Memory section listing every check (project, organization, style and " +
+          "built-in rules). Also its row in Project settings → AI.",
+        maxLength: 24,
+      },
+      "terminology.livingMemory.section.checks.description": {
+        description: "One sentence under that section's name: what a check is and that prompts mention it.",
+      },
+      "terminology.livingMemory.section.knowledge.title": {
+        description:
+          "Name of the Living Memory section holding the team's reference documents (style guides, " +
+          "background). Called source documents because they inform people and the agent, not drafts.",
+        maxLength: 24,
+      },
+      "terminology.livingMemory.section.knowledge.description": {
+        description:
+          "One sentence under that name. Must say truthfully that drafting prompts do not include " +
+          "these documents; the agent can read them and style rules can be drawn from them.",
       },
       "terminology.livingMemory.styleRules.loadError": {
         description:

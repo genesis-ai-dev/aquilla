@@ -274,7 +274,7 @@ describe("SetupChecklistDrawer — standards and terminology steps", () => {
     fireEvent.click(screen.getByRole("button", { name: /open terminology/i }))
 
     expect(onNavigate.mock.calls).toEqual([
-      ["/project/proj-1/memory/quality"],
+      ["/project/proj-1/memory/checks"],
       ["/project/proj-1/terminology"],
     ])
     expect(onOpenChange).not.toHaveBeenCalled()

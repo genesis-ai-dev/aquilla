@@ -12,9 +12,6 @@ export const knowledgeBase = defineNamespace({
       "Add style guides, cultural background, commentary, and other reference documents for this project.",
     "knowledgeBase.orgDescription":
       "Add reference documents that every project in this organization can use.",
-    "knowledgeBase.useInDraftingLabel": "Use knowledge base in drafting",
-    "knowledgeBase.useInDraftingDescription":
-      "Use relevant passages from these documents when generating translations and predictions.",
     "knowledgeBase.upload": "Upload document",
     "knowledgeBase.uploading": "Uploading document…",
     "knowledgeBase.uploadSuccess": "Uploaded {name}.",

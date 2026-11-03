@@ -480,6 +480,9 @@ export const agent = defineNamespace({
     "agent.memory.proposedNotice": "Proposed memory {path} — {preview}",
     "agent.memory.briefProposedNotice": "Proposed brief update — {preview}",
     "agent.memory.signInNotice": "Sign in to view agent memory.",
+    "agent.memory.scopeNote":
+      "The agent's working notes, read in agent chat only. Approving a decision (decisions/…) also " +
+      "adds it to the project instructions, which every AI draft reads.",
     "agent.memory.loading": "Loading agent memory…",
     "agent.memory.tabProposed": "Proposed",
     "agent.memory.tabApproved": "Approved",
@@ -986,6 +989,12 @@ export const agent = defineNamespace({
         description:
           "Accessible name for the spinner shown while a sandboxed code-execution step " +
           "is still running, before it has settled with a duration.",
+      },
+      "agent.memory.scopeNote": {
+        description:
+          "One line above the agent memory lists: memory entries are the agent's own notes and reach only " +
+          "the agent chat, except that an approved decision entry (its path starts with 'decisions/', not " +
+          "translated) is appended to the project instructions that every AI draft uses.",
       },
       "agent.memory.proposedNotice": {
         description:

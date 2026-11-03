@@ -105,8 +105,7 @@ import { isBibleDataExperimentOn } from "@/lib/bible-data/experiment"
 import type { BibleEnrichmentSettings } from "../../db/shared/bible-enrichments"
 import type { MediaDefaults } from "../../db/shared/media-setting-defaults"
 import { BibleDataSection } from "./ProjectSettings/BibleDataSection"
-import { LanguageProfileSection } from "./ProjectSettings/LanguageProfileSection"
-import { ProjectDecisionsSection } from "./ProjectSettings/ProjectDecisionsSection"
+import { ChecksRow, InstructionsRow } from "./ProjectSettings/AiGuidanceRows"
 import {
   resolveTimingLocked,
   createProjectLane,
@@ -138,7 +137,6 @@ import { ProjectVisibilitySection } from "./ProjectSettings/ProjectVisibilitySec
 import { KeyInUseLine } from "@/components/settings/KeyInUseLine"
 import { completionKeyInUse, geminiKeyInUse } from "@/lib/settings/key-in-use"
 import { useUserProviderOverride } from "@/lib/store/user-provider-override"
-import { BRIEF_ICON } from "./LivingMemoryButton"
 import { projectTranslationInstructions } from "@/lib/instructions/project-instructions"
 import { DcsUpstreamPanel } from "@/components/dcs/DcsUpstreamPanel"
 import { readCursor } from "@/lib/dcs/cursor"
@@ -1622,15 +1620,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     { id: "section-upstream-changes", label: t("projectSettings.section.upstreamChanges"), keywords: ["upstream", "changes", "repin", "review", "mirror", "stale"], visible: hasLiveSourceLink },
     { id: "section-dcs-upstream", label: t("projectSettings.section.dcsUpstream"), keywords: ["door43", "dcs", "unfoldingword", "upstream", "check for updates", "import changes", "release"], visible: hasDcsUpstream },
     { id: "section-project-info", label: t("projectSettings.section.projectInfo"), keywords: ["name", "source language", "target language", "smart quotes", "curly quotes", "quotation marks", "typography"] },
-    // AQU-1688: the Language profile for checks lives here too, while this
-    // device has the Bible data experiment on (AQU-1685).
     {
       id: "section-languages",
       label: t("projectSettings.section.languages"),
-      keywords: [
-        "languages", "language lanes", "language lane", "target lanes", "lane", "target language", "dialect",
-        ...(bibleDataExperiment ? ["language profile", "quotation marks", "quote marks", "bible data checks"] : []),
-      ],
+      keywords: ["languages", "language lanes", "language lane", "target lanes", "lane", "target language", "dialect"],
     },
     // AQU-1686: "translation notes" stays. It used to mislead (this card did
     // not control the Translation Notes sidebar, and still does not), but the
@@ -1662,6 +1655,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     // Its own section id gives it a row in the AI pane AND makes a search for
     // any of the old names land on it (AQU-1672).
     { id: "section-instructions", label: t("terminology.livingMemory.instructionsTitle"), keywords: ["instructions", "ai instructions", "brief", "translation brief", "system prompt", "prompt", "skopos", "purpose", "audience", "register", "literalness", "style guide", "living memory"] },
+    // AQU-2342: the ONE Checks list (project, lane, org and style rules, the
+    // built-in checks, and the Language profile they read). A row in the AI
+    // pane, findable by every old name.
+    { id: "section-checks", label: t("terminology.livingMemory.section.checks.title"), keywords: ["checks", "rules", "style rules", "quality", "translation quality", "built-in checks", "org rules", "decisions", "project decisions", "language profile", "quotation marks", "quote marks", "bible data checks"] },
     { id: "section-ai-instructions", label: t("projectSettings.section.aiInstructions"), keywords: ["ai", "llm", "batch size", "completions batch", "validation batch", "batch validate", "top_k", "examples", "context window", "assistant language", "few shot", "ai drafting", "drafting"] },
     { id: "section-draft-context", label: t("projectSettings.section.draftContext"), keywords: ["draft context", "preceding cells", "left context", "paragraph drafting", "context budget"] },
     { id: "section-advanced-llm", label: t("projectSettings.section.advancedLlm"), keywords: ["provider", "endpoint", "api key", "model", "ai model", "advanced", "llm", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom"] },
@@ -1780,7 +1777,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       // this pane keeps one NavRow to memory/instructions instead of a nested
       // settings page.
       sectionIds: [
-        "section-instructions",
+        "section-instructions", "section-checks",
         "section-ai-instructions", "section-draft-context", "section-advanced-llm",
         "section-voice", "section-local-models", "section-terminology", "section-termbase-sharing",
       ],
@@ -1871,7 +1868,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const movedSectionRedirects: Record<string, string> = id
     ? {
         memory: projectMemoryPath(id),
-        rules: projectMemoryPath(id, "quality"),
+        rules: projectMemoryPath(id, "checks"),
         "system-prompt": projectMemoryPath(id, "instructions"),
       }
     : {}
@@ -1914,6 +1911,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       "section-import",
       "section-user",
       "section-members",
+      "section-instructions",
+      "section-checks",
       "section-ai-instructions",
       "section-draft-context",
       "section-advanced-llm",
@@ -2328,33 +2327,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             startAdding={focusTarget === "add-lane"}
           />
         )}
-        {/* AQU-1688: facts about the target language that Bible data checks
-            need. Only with the Bible data experiment on (AQU-1685): without
-            it there are no Bible data checks to configure. */}
-        {bibleDataExperiment && sectionsToRender.some((s) => s.id === "section-languages") && (
-          <LanguageProfileSection
-            value={sharedSettingsBlob?.languageProfile}
-            targetLanguage={sharedSettingsBlob?.targetLanguage ?? project?.targetLanguage ?? ""}
-            canEdit={canEditShared}
-            disabledTooltip={sharedDisabledTooltip ?? null}
-            patch={patchShared}
-          />
-        )}
-        {/* AQU-1691: the decision log, the team's answers to Autopilot's
-            questions. Only with the Bible data experiment on (AQU-1685): the
-            questions that record a decision are Bible data questions
-            (AQU-1690), so without the experiment the card has nothing to
-            show. Autopilot follows the stored decisions either way. */}
-        {bibleDataExperiment && sectionsToRender.some((s) => s.id === "section-languages") && (
-          <ProjectDecisionsSection
-            value={sharedSettingsBlob?.projectFacts}
-            canEdit={canEditShared}
-            disabledTooltip={sharedDisabledTooltip ?? null}
-            username={session?.username ?? ""}
-            patch={patchShared}
-          />
-        )}
-
         {searchGroupLabel("section-cell-editing")}
         {sectionsToRender.some((s) => s.id === "section-cell-editing") && (
           <div id="section-cell-editing">
@@ -2434,7 +2406,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 experimentalFlags: project?.experimentalFlags,
               })}
               // Through requestNavigate, so unsaved edits get the discard prompt.
-              onOpenBuiltinChecks={id ? () => requestNavigate(projectMemoryPath(id, "quality")) : undefined}
+              onOpenBuiltinChecks={id ? () => requestNavigate(projectMemoryPath(id, "checks")) : undefined}
               experimentOn={bibleDataExperiment}
             />
           </div>
@@ -2536,21 +2508,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             this is a real navigation out of settings. */}
         {searchGroupLabel("section-instructions")}
         {id && sectionsToRender.some((s) => s.id === "section-instructions") && (
-          <div id="section-instructions" className="flex flex-col gap-12">
-            <NavList>
-              <NavRow
-                to={projectMemoryPath(id, "instructions")}
-                icon={BRIEF_ICON}
-                title={t("terminology.livingMemory.instructionsTitle")}
-                description={
-                  resolvedInstructions
-                    ? resolvedInstructions.slice(0, 240).replace(/\s+/g, " ")
-                    : t("terminology.livingMemory.instructions.notWritten")
-                }
-              />
-            </NavList>
-          </div>
+          <InstructionsRow projectId={id} resolvedInstructions={resolvedInstructions} />
         )}
+        {searchGroupLabel("section-checks")}
+        {id && sectionsToRender.some((s) => s.id === "section-checks") && <ChecksRow projectId={id} />}
 
         {searchGroupLabel("section-ai-instructions")}
         {sectionsToRender.some((s) => s.id === "section-ai-instructions") && (

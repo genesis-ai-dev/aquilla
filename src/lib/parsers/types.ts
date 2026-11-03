@@ -891,7 +891,7 @@ export interface ProjectRecord {
   /** AQU-1699: the decision log, synced via ProjectWideSettings. Bible data
    *  check pack B reads its `render.*` and `clusivity.*` decisions. Read it
    *  through `readProjectFacts` (db/shared/project-facts.ts); never write it
-   *  from here (ProjectDecisionsSection writes the stored list). */
+   *  from here (decision cards write it, server-side; AQU-2342). */
   projectFacts?: unknown[]
   /** AQU-1692: maintainers' voice corrections, synced via ProjectWideSettings.
    *  Read it through `readBibleVoiceOverrides` (db/shared/bible-voice-overrides.ts). */

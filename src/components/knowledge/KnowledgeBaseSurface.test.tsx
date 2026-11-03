@@ -88,14 +88,12 @@ describe("KnowledgeBaseSurface", () => {
       doc(),
       doc({ id: "org-doc", projectId: null, orgId: 7, scope: "org", name: "org-guide.pdf" }),
     ])
-    const onCheckedChange = vi.fn()
 
     render(
       <KnowledgeBaseSurface
         scope={{ kind: "project", id: "project-1" }}
         jwt="jwt"
         canManage
-        drafting={{ checked: false, disabled: false, onCheckedChange }}
       />,
     )
 
@@ -107,8 +105,9 @@ describe("KnowledgeBaseSurface", () => {
       .not.toBeInTheDocument()
     expect(screen.getAllByRole("button", { name: "Delete document" })).toHaveLength(1)
 
-    fireEvent.click(screen.getByRole("switch", { name: "Use knowledge base in drafting" }))
-    expect(onCheckedChange).toHaveBeenCalledWith(true)
+    // AQU-2342: knowledge documents never reach a drafting prompt, so the
+    // surface offers no "use in drafting" switch.
+    expect(screen.queryByRole("switch")).not.toBeInTheDocument()
   })
 
   it("uploads a supported original and renders the returned pending document", async () => {

@@ -175,3 +175,21 @@ describe("ProjectSettings — the Instructions entry (AQU-2342)", () => {
     expect(instructionsRow().textContent).toContain("Draft for new readers.")
   })
 })
+
+describe("ProjectSettings — the Checks entry (AQU-2342)", () => {
+  const checksHref = `/project/${PROJECT_ID}/memory/checks`
+
+  it("links the AI pane to the one Checks list", () => {
+    renderAt(`/project/${PROJECT_ID}/settings/ai`)
+
+    const row = screen.getByRole("link", { name: /^checks/i })
+    expect(row).toHaveAttribute("href", checksHref)
+    expect(row.textContent).toMatch(/checked against after it is written/i)
+  })
+
+  it.each(["rules", "language profile", "project decisions", "quality"])("a `?q=%s` search surfaces the Checks link", (q) => {
+    renderAt(`/project/${PROJECT_ID}/settings?q=${encodeURIComponent(q)}`)
+
+    expect(screen.getByRole("link", { name: /^checks/i })).toHaveAttribute("href", checksHref)
+  })
+})

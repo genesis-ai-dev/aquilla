@@ -60,6 +60,7 @@ import type { PaidCallAdmit } from "../billing/agent-usage"
 import { deriveSpanSeeds, seedsFromBoundaries } from "./segment"
 import { lintSpanDraft } from "./lint-node"
 import { runSpan, spanPairs, EXAMPLES_TARGET } from "./pipeline"
+import { styleInstructionsForCells } from "../../../../db/shared/style-instructions"
 import { examplesForSpan } from "./bible-examples"
 import type { NeighborBrief, LayerAboveBlock } from "./closure"
 import { reflectAtPark } from "./reflect"
@@ -1040,6 +1041,14 @@ async function processSpan(
     { laneId: run.laneId, tag: run.targetLang },
     shared.ctx.targetLanguage,
   )
+  // AQU-2342: the style rules in force for this span, resolved as the editor
+  // resolves them (db/shared/style-instructions.ts).
+  const styleInstructions = await styleInstructionsForCells(db, {
+    projectId: run.projectId,
+    fileId: run.fileId,
+    cells: spanPairs(seed, shared.pairs),
+    settings: { fileGenres: shared.ctx.fileGenres },
+  })
   // AQU-1690: the facts this span's prompts carry, and (below) its metrics.
   const factsRow = bibleFactsTraceRow(seed.id, spanPairs(seed, shared.pairs), shared.bible)
   if (factsRow) deps.bible?.trace?.(factsRow)
@@ -1064,9 +1073,10 @@ async function processSpan(
       // span's source text inside runSpan.
       ...(shared.ctx.translationInstructions ? { translationInstructions: shared.ctx.translationInstructions } : {}),
       ...(shared.ctx.concepts.length > 0 ? { concepts: shared.ctx.concepts } : {}),
-      // AQU-1691: durable decisions, re-read every wave (never consumed).
-      projectFacts: shared.ctx.projectFacts,
+      // AQU-2342: the Language profile rides in the checks hint; the decision
+      // log reaches the performer through the instructions.
       languageProfile: shared.ctx.languageProfile,
+      ...(styleInstructions.length > 0 ? { styleInstructions } : {}),
       ...(shared.ctx.termMatching ? { termMatching: shared.ctx.termMatching } : {}),
       ...(shared.bible.state === "ready"
         ? {
@@ -1471,7 +1481,8 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
     ? [{ ref: "project-instructions", text: ctx.translationInstructions }]
     : []
   // AQU-609: lane-scoped rules only constrain their own lane's drafts.
-  const rules: LintRule[] = rulesForLane(ctx.authoredRules, run.targetLang)
+  // AQU-2342: the org's rules are checked and hinted too, after the project's.
+  const rules: LintRule[] = rulesForLane([...ctx.authoredRules, ...(ctx.orgRules ?? [])], run.targetLang)
   // AQU-1690: Bible data for the wave, loaded once beside the project context.
   const bible = await prepareBibleWave(deps.bible, {
     pairs,

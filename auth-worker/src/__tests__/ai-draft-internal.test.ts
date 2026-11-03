@@ -164,7 +164,11 @@ describe("POST /api/v1/ai/agent/internal/draft-cells", () => {
       const messages = call.body.messages as { content: string }[]
       expect(messages[0].content.split(block)).toHaveLength(2)
       expect(messages[0].content).not.toContain("Project brief")
-      expect(messages[1].content).toContain("Directions for this run: Use vosotros.")
+      // AQU-2342: the run's directions close the system prompt's guidance
+      // (after instructions, checks, terms, examples, context).
+      expect(messages[0].content).toContain("This run's directions")
+      expect(messages[0].content).toContain("- Use vosotros.")
+      expect(messages[0].content.indexOf(block)).toBeLessThan(messages[0].content.indexOf("- Use vosotros."))
     }
   })
 

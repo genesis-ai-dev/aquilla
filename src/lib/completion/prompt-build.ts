@@ -31,6 +31,13 @@ import {
   DEFAULT_SYSTEM_PROMPT,
   instructionsPromptBlock,
 } from "../../../db/shared/translation-instructions"
+import {
+  assemblePromptSections,
+  checksHintBlock,
+  terminologyBlock,
+  type TermHint,
+} from "../../../db/shared/prompt-blocks"
+import type { LanguageProfile } from "../../../db/shared/language-profile"
 
 /** One OpenAI-style chat message. The copilot prompt is always exactly two:
  *  a system message then a user message. */
@@ -80,6 +87,8 @@ export interface PromptTermInfo {
   approved?: string[]
   /** The single forbidden rendering this rule names (a `:forbidden:…` rule). */
   forbidden?: string
+  /** The termbase entry's note (AQU-2342: shown, clipped, on every path). */
+  notes?: string
 }
 
 /**
@@ -91,6 +100,11 @@ export interface PromptTermInfo {
  * listed so the union stays exhaustive rather than falling through silently.
  */
 export interface PromptRule {
+  id?: string
+  name?: string
+  /** What the rule requires, as the team wrote it. The checks hint prefers it
+   *  over the pattern shape (db/shared/prompt-blocks.ts). */
+  description?: string
   enabled: boolean
   check:
     | { type: "source-requires-target"; sourcePattern: string; targetPattern: string }
@@ -208,6 +222,7 @@ export interface InjectedTerm {
   sourceTerm: string
   approvedRenderings: string[]
   forbiddenRenderings: string[]
+  notes?: string
 }
 
 export interface TermSelection {
@@ -278,6 +293,7 @@ export function selectInjectedTerms(
         sourceTerm: term.sourceTerm,
         approvedRenderings: [],
         forbiddenRenderings: [],
+        ...(term.notes ? { notes: term.notes } : {}),
       }
       byConcept.set(term.conceptId, entry)
     }
@@ -300,97 +316,68 @@ export function selectInjectedTerms(
   }
 }
 
-/**
- * One glossary line, regex-free. Returns "" for a concept with nothing to say
- * — the compiler emits no rule in that case (a lane where every rendering
- * belongs to another one, AQU-1508), so this is a guard, not a path — and the
- * caller drops empty lines rather than injecting a bare term.
- */
-function renderInjectedTerm(term: InjectedTerm): string {
-  const parts: string[] = []
-  const [preferred, ...alternates] = term.approvedRenderings
-  if (preferred) {
-    parts.push(
-      alternates.length
-        ? `"${term.sourceTerm}" → "${preferred}" (also acceptable: ${alternates.map((r) => `"${r}"`).join(", ")})`
-        : `"${term.sourceTerm}" → "${preferred}"`,
-    )
+/** An injected concept as the shared terminology block reads it. */
+export function injectedTermHint(term: InjectedTerm): TermHint {
+  return {
+    sourceTerm: term.sourceTerm,
+    approved: term.approvedRenderings,
+    forbidden: term.forbiddenRenderings,
+    ...(term.notes ? { notes: term.notes } : {}),
   }
-  if (term.forbiddenRenderings.length) {
-    const forbidden = term.forbiddenRenderings.map((r) => `"${r}"`).join(", ")
-    parts.push(preferred ? `Do NOT use ${forbidden}` : `"${term.sourceTerm}": Do NOT use ${forbidden}`)
-  }
-  return parts.length ? `- ${parts.join(". ")}.` : ""
 }
 
 /**
- * Render active project rules as a concise terminology/guidance block that
- * can be injected into a system prompt. Only `source-requires-target` rules
- * are rendered as explicit "if you see X → use Y" guidance; other check
- * types become a simple "avoid: X" instruction. Disabled rules are skipped.
- *
- * Terminology rules — the ones carrying `term`, compiled from the project's
- * termbase — are handled apart from those three regex shapes: they are
- * narrowed to the concepts that occur in `options.sourceText` and rendered as
- * plain `"Moses" → "Moisés"` lines (AQU-2209; see PromptTermInfo for why).
- * With no `sourceText` there is nothing to narrow against, so NO term is
- * injected: a caller assembling a prompt always has the source it is about to
- * translate, and injecting the whole table is the bug this replaced.
- *
- * Returns an empty string when there are no active, injectable rules.
+ * The Terminology block for the text about to be drafted (AQU-2209 narrowing,
+ * AQU-2342 shared rendering): the terminology rules — the ones carrying
+ * `term`, compiled from the project's termbase — narrowed to the concepts that
+ * occur in `sourceText`, rendered as plain `"Moses" → "Moisés"` lines with the
+ * entry's note. With no `sourceText` nothing is injected: injecting the whole
+ * table is the bug AQU-2209 replaced. "" when no term occurs.
  */
-export function buildRulesBlock(
-  rules: PromptRule[],
+export function buildTerminologyBlock(
+  rules: readonly PromptRule[] | undefined,
   options: { sourceText?: string; maxTerms?: number } = {},
 ): string {
-  const active = rules.filter((r) => r.enabled)
-  if (!active.length) return ""
-
-  const lines: string[] = []
-  for (const rule of active) {
-    if (rule.term) continue // narrowed and rendered below, not as regex prose
-    const { check } = rule
-    if (check.type === "source-requires-target") {
-      lines.push(`- When the source contains "${check.sourcePattern}", the translation must include "${check.targetPattern}".`)
-    } else if (check.type === "target-forbids") {
-      lines.push(`- Do NOT use "${check.targetPattern}" in the translation.`)
-    } else if (check.type === "source-target-match") {
-      lines.push(`- The pattern "${check.pattern}" must appear in the translation when present in the source.`)
-    }
-    // builtin checks are algorithmic; no useful prompt injection
-  }
-
-  // Glossary terms last: the rules above are the project's standing
-  // instructions, these are the handful specific to the cell in hand.
-  for (const term of selectInjectedTerms(active, options.sourceText ?? "", options.maxTerms).injected) {
-    const line = renderInjectedTerm(term)
-    if (line) lines.push(line)
-  }
-
-  if (!lines.length) return ""
-  return "Project terminology and style rules (MUST follow):\n" + lines.join("\n")
+  if (!rules?.length) return ""
+  const { injected } = selectInjectedTerms(rules, options.sourceText ?? "", options.maxTerms)
+  return terminologyBlock(injected.map(injectedTermHint))
 }
 
 /**
- * Render the style-rule instructions in force for the cell(s) being drafted
- * (AQU-934). Unlike `buildRulesBlock`, which can only speak the three regex
- * check shapes, these are natural-language rules resolved per passage from the
- * applicability graph — so the block carries exactly the guidance that applies
- * here, instead of every project rule on every call.
- *
- * Blank/duplicate instructions are dropped; empty input → "" (caller skips).
+ * The Checks hint (AQU-2342): the project/lane/org rules, the style rules in
+ * force for this passage (AQU-934, resolved per passage from the
+ * applicability graph) and the Language-profile slots the Bible data checks
+ * verify — rendered by the ONE shared builder every drafting path uses.
+ * Terminology rules are skipped (they are the Terminology block); built-in
+ * checks contribute nothing (algorithmic). "" when nothing can be hinted.
  */
-export function buildStyleRulesBlock(instructions: string[] | undefined | null): string {
-  const seen = new Set<string>()
-  const lines: string[] = []
-  for (const raw of instructions ?? []) {
-    const instruction = raw.trim()
-    if (!instruction || seen.has(instruction)) continue
-    seen.add(instruction)
-    lines.push(`- ${instruction}`)
-  }
-  if (!lines.length) return ""
-  return "Style rules that apply to this passage (MUST follow):\n" + lines.join("\n")
+export function buildChecksBlock(
+  rules: readonly PromptRule[] | undefined,
+  styleInstructions?: readonly string[] | null,
+  languageProfile?: LanguageProfile | null,
+): string {
+  return checksHintBlock({
+    rules: rules ?? [],
+    styleInstructions: styleInstructions ?? [],
+    languageProfile: languageProfile ?? null,
+  })
+}
+
+/** The copilot's standing guidance, in the one order (db/shared/prompt-blocks):
+ *  Instructions → Checks → Terminology. Shared by the single-cell, batch and
+ *  paragraph builders and therefore by the Agent API's prompt preview. */
+export function copilotGuidanceBlocks(options: {
+  instructions?: string
+  rules?: readonly PromptRule[]
+  styleInstructions?: readonly string[]
+  languageProfile?: LanguageProfile | null
+  sourceText: string
+}): string {
+  return assemblePromptSections({
+    instructions: instructionsPromptBlock(options.instructions),
+    checks: buildChecksBlock(options.rules, options.styleInstructions, options.languageProfile),
+    terminology: buildTerminologyBlock(options.rules, { sourceText: options.sourceText }),
+  })
 }
 
 // AQU-2342: the fixed role text and the one project-instructions block live in
@@ -406,11 +393,14 @@ export interface BuildPromptOptions {
   systemPrompt?: string
   sourceText: string
   examples: { source: string; target: string }[]
-  /** Active project rules — injected as a "must follow" block in the system prompt. */
+  /** Active project rules (org, project, lane, terminology) — the checks hint
+   *  and, narrowed to this source, the terminology block. */
   rules?: PromptRule[]
   /** Style-rule instructions resolved for this cell from the applicability
-   *  graph (AQU-934) — injected after the rules block. */
+   *  graph (AQU-934) — part of the checks hint. */
   styleInstructions?: string[]
+  /** The Language profile — its filled slots join the checks hint. */
+  languageProfile?: LanguageProfile | null
   /** Pre-filtered validated pairs from the project — prepended to examples. */
   validatedPairs?: ValidatedPair[]
   /** How to render few-shot examples. Default "source-and-target". */
@@ -437,22 +427,15 @@ export interface BuildPromptOptions {
 }
 
 export function buildPrompt(options: BuildPromptOptions): ChatMessage[] {
-  // Instructions ride with the role text through the placeholder pass: text
-  // migrated from a customized system prompt may still say "{targetLanguage}".
-  const instructionsBlock = instructionsPromptBlock(options.instructions)
-  let sys = ((options.systemPrompt ?? DEFAULT_SYSTEM_PROMPT) + (instructionsBlock ? "\n\n" + instructionsBlock : ""))
+  // One order for every drafting path (db/shared/prompt-blocks.ts): role →
+  // Instructions → Checks → Terminology here in the system message, then the
+  // examples and discourse context in the user message. Guidance rides with
+  // the role text through the placeholder pass: text migrated from a
+  // customized system prompt may still say "{targetLanguage}".
+  const guidance = copilotGuidanceBlocks({ ...options, sourceText: options.sourceText })
+  let sys = ((options.systemPrompt ?? DEFAULT_SYSTEM_PROMPT) + (guidance ? "\n\n" + guidance : ""))
     .replace(/\{sourceLanguage\}/g, options.sourceLanguage)
     .replace(/\{targetLanguage\}/g, options.targetLanguage)
-
-  // Inject rules block after the base system prompt so it is always visible.
-  // The source goes in so terminology narrows to this cell (AQU-2209).
-  if (options.rules?.length) {
-    const block = buildRulesBlock(options.rules, { sourceText: options.sourceText })
-    if (block) sys = sys + "\n\n" + block
-  }
-
-  const styleBlock = buildStyleRulesBlock(options.styleInstructions)
-  if (styleBlock) sys = sys + "\n\n" + styleBlock
 
   if (options.systemAddendum) sys = sys + "\n\n" + options.systemAddendum
 

@@ -45,8 +45,8 @@ interface PreviewBody {
   parts: {
     base: string
     instructions: string
-    rules: string
-    styleRules: string
+    checks: string
+    terminology: string
     injectedTerms: {
       conceptId: string
       sourceTerm: string
@@ -243,7 +243,8 @@ describe("external prompt preview", () => {
       // Parts are labeled and, with nothing configured, empty rather than absent.
       expect(body.parts.base).toContain("English")
       expect(body.parts.instructions).toBe("")
-      expect(body.parts.rules).toBe("")
+      expect(body.parts.checks).toBe("")
+      expect(body.parts.terminology).toBe("")
       expect(body.parts.injectedTerms).toEqual([])
       expect(body.retrieval.primitive).toBe("branching-search")
     })
@@ -391,8 +392,8 @@ describe("external prompt preview", () => {
       await styleRule("sr-4", "approved", "DISABLED wording.", false)
 
       const { body } = await preview(testDb, token)
-      expect(body.parts.styleRules).toBe(
-        "Style rules that apply to this passage (MUST follow):\n- Use short sentences.",
+      expect(body.parts.checks).toBe(
+        "Checks (verified automatically after drafting — the draft must pass each one):\n- Use short sentences.",
       )
       const system = body.messages[0].content
       expect(system).toContain("Use short sentences.")
@@ -403,7 +404,7 @@ describe("external prompt preview", () => {
 
     it("leaves the block empty when the project has no style rules", async () => {
       const { body } = await preview(testDb, token)
-      expect(body.parts.styleRules).toBe("")
+      expect(body.parts.checks).toBe("")
     })
   })
 
@@ -414,7 +415,7 @@ describe("external prompt preview", () => {
 
     it("a term added via the terminology path appears in the preview", async () => {
       const before = await preview(testDb, token)
-      expect(before.body.parts.rules).toBe("")
+      expect(before.body.parts.terminology).toBe("")
       expect(before.body.parts.injectedTerms).toEqual([])
 
       await testDb.pg.query(
@@ -424,8 +425,8 @@ describe("external prompt preview", () => {
       )
 
       const after = await preview(testDb, token)
-      expect(after.body.parts.rules).toContain("covenant")
-      expect(after.body.parts.rules).toContain("alliance")
+      expect(after.body.parts.terminology).toContain("covenant")
+      expect(after.body.parts.terminology).toContain("alliance")
       expect(after.body.messages[0].content).toContain("alliance")
       expect(after.body.parts.injectedTerms).toEqual([
         {
@@ -444,8 +445,8 @@ describe("external prompt preview", () => {
         [JSON.stringify([{ rendering: "contrat", status: "forbidden" }])],
       )
       const { body } = await preview(testDb, token)
-      expect(body.parts.rules).toContain("Do NOT use")
-      expect(body.parts.rules).toContain("contrat")
+      expect(body.parts.terminology).toContain("Do NOT use")
+      expect(body.parts.terminology).toContain("contrat")
     })
 
     it("a draft concept injects nothing (only active concepts compile)", async () => {
@@ -455,7 +456,7 @@ describe("external prompt preview", () => {
         [JSON.stringify([{ rendering: "alliance", status: "preferred" }])],
       )
       const { body } = await preview(testDb, token)
-      expect(body.parts.rules).toBe("")
+      expect(body.parts.terminology).toBe("")
       expect(body.parts.injectedTerms).toEqual([])
     })
 
@@ -466,7 +467,7 @@ describe("external prompt preview", () => {
         [JSON.stringify([{ rendering: "alliance", status: "preferred" }])],
       )
       const { body } = await preview(testDb, token)
-      expect(body.parts.rules).toBe("")
+      expect(body.parts.terminology).toBe("")
     })
 
     // AQU-1721: the editor compiles subscribed termbases ahead of the project's
@@ -498,9 +499,9 @@ describe("external prompt preview", () => {
       const { body } = await preview(testDb, token)
       // Subscribed first, each termbase oldest first; a draft compiles to nothing.
       expect(body.parts.injectedTerms.map((t) => t.conceptId)).toEqual(["up-first", "up-later", "own"])
-      expect(body.parts.rules).toContain("accord")
-      expect(body.parts.rules).toContain("alliance")
-      expect(body.parts.rules).not.toContain("contrat")
+      expect(body.parts.terminology).toContain("accord")
+      expect(body.parts.terminology).toContain("alliance")
+      expect(body.parts.terminology).not.toContain("contrat")
     })
 
     it("leaves out an unpublished, trashed, deleted or other-org termbase (AQU-1721)", async () => {
@@ -519,7 +520,7 @@ describe("external prompt preview", () => {
 
       const { body } = await preview(testDb, token)
       expect(body.parts.injectedTerms).toEqual([])
-      expect(body.parts.rules).toBe("")
+      expect(body.parts.terminology).toBe("")
     })
 
     // AQU-1777: a termbase's renderings carry ITS lane ids. The preview maps
@@ -562,9 +563,9 @@ describe("external prompt preview", () => {
         ["up-cov", ["alliance"]],
         ["own", ["testament"]],
       ])
-      expect(french.body.parts.rules).toContain("alliance")
-      expect(french.body.parts.rules).not.toContain("pacto")
-      expect(french.body.parts.rules).not.toContain("patto")
+      expect(french.body.parts.terminology).toContain("alliance")
+      expect(french.body.parts.terminology).not.toContain("pacto")
+      expect(french.body.parts.terminology).not.toContain("patto")
 
       const spanish = await preview(testDb, token, "cell-live", "?targetLang=c0ffee01")
       // The project's own unstamped rendering belongs to its `''` lane, so in
@@ -574,8 +575,8 @@ describe("external prompt preview", () => {
       expect(spanish.body.parts.injectedTerms.map((t) => [t.conceptId, t.approvedRenderings])).toEqual([
         ["up-cov", ["pacto"]],
       ])
-      expect(spanish.body.parts.rules).toContain("pacto")
-      expect(spanish.body.parts.rules).not.toContain("alliance")
+      expect(spanish.body.parts.terminology).toContain("pacto")
+      expect(spanish.body.parts.terminology).not.toContain("alliance")
     })
 
     // AQU-2209 — the termbase is scoped to the cell, not dumped wholesale.
@@ -587,7 +588,7 @@ describe("external prompt preview", () => {
       )
       const { body } = await preview(testDb, token)
       expect(body.sourceText).toBe("the covenant endures")
-      expect(body.parts.rules).toBe("")
+      expect(body.parts.terminology).toBe("")
       expect(body.parts.injectedTerms).toEqual([])
       expect(body.messages[0].content).not.toContain("Melchisédech")
     })
@@ -607,10 +608,10 @@ describe("external prompt preview", () => {
       )
       const { body } = await preview(testDb, token)
       expect(body.parts.injectedTerms.map((t) => t.conceptId)).toEqual(["c-cov"])
-      expect(body.parts.rules).toContain("alliance")
-      expect(body.parts.rules).not.toContain("relleno")
+      expect(body.parts.terminology).toContain("alliance")
+      expect(body.parts.terminology).not.toContain("relleno")
       // The rules block stays a couple of lines, not one per concept.
-      expect(body.parts.rules.split("\n").filter((l) => l.startsWith("- "))).toHaveLength(1)
+      expect(body.parts.terminology.split("\n").filter((l) => l.startsWith("- "))).toHaveLength(1)
     })
 
     it("renders the term as plain guidance, not as the match pattern", async () => {
@@ -620,10 +621,26 @@ describe("external prompt preview", () => {
         [JSON.stringify([{ rendering: "alliance", status: "preferred" }])],
       )
       const { body } = await preview(testDb, token)
-      expect(body.parts.rules).toContain('"covenant" → "alliance"')
+      expect(body.parts.terminology).toContain('"covenant" → "alliance"')
       // The matcher's boundary wrappers are internals, not project content.
       expect(body.messages[0].content).not.toContain("\\p{L}")
       expect(body.messages[0].content).not.toContain("(?<!")
+    })
+
+    // AQU-2342: the preview shows what every path now carries — the term's
+    // note, and the Language profile's filled slots in the checks hint.
+    it("carries the term note and the Language profile, in the shared blocks", async () => {
+      await testDb.pg.query(
+        `INSERT INTO concepts (concept_id, project_id, source_term, renderings, notes, status, case_sensitive, created_at, updated_at)
+         VALUES ('c-note', 'proj-a', 'covenant', $1, 'Treaty sense, not a contract.', 'active', 0, 1, 1)`,
+        [JSON.stringify([{ rendering: "alliance", status: "preferred" }])],
+      )
+      await putSettings(testDb, "proj-a", { sourceLanguage: "English", targetLanguage: "French", languageProfile: { measures: "convert" } })
+      const { body } = await preview(testDb, token)
+      expect(body.parts.terminology).toContain('"covenant" → "alliance". Note: Treaty sense, not a contract.')
+      expect(body.parts.checks).toContain('- Measures (convert, transliterate or mixed): "convert"')
+      const sys = body.messages[0].content
+      expect(sys.indexOf(body.parts.checks)).toBeLessThan(sys.indexOf(body.parts.terminology))
     })
 
     it("warns when a term-dense source exceeds the injection cap", async () => {
@@ -643,7 +660,7 @@ describe("external prompt preview", () => {
       expect(body.parts.injectedTerms).toHaveLength(40)
       expect(body.warnings.map((w) => w.code)).toContain("terms_capped")
       expect(body.warnings.find((w) => w.code === "terms_capped")!.message).toContain("45")
-      expect(body.parts.rules.split("\n").filter((l) => l.startsWith("- "))).toHaveLength(40)
+      expect(body.parts.terminology.split("\n").filter((l) => l.startsWith("- "))).toHaveLength(40)
     })
 
     it("injects project rules from settings", async () => {
@@ -660,7 +677,7 @@ describe("external prompt preview", () => {
         ],
       })
       const { body } = await preview(testDb, token)
-      expect(body.parts.rules).toContain("thingy")
+      expect(body.parts.checks).toContain("thingy")
     })
 
     it("drops a lane-scoped rule belonging to another lane", async () => {
@@ -685,8 +702,8 @@ describe("external prompt preview", () => {
         ],
       })
       const { body } = await preview(testDb, token)
-      expect(body.parts.rules).toContain("defaultlane")
-      expect(body.parts.rules).not.toContain("otherlane")
+      expect(body.parts.checks).toContain("defaultlane")
+      expect(body.parts.checks).not.toContain("otherlane")
     })
   })
 

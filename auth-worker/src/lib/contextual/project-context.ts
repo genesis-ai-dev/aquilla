@@ -26,10 +26,12 @@
 import { readLanguageProfile, type LanguageProfile } from "../../../../db/shared/language-profile"
 import { readProjectFacts, type ProjectFact } from "../../../../db/shared/project-facts"
 import { loadTranslationInstructions } from "../../../../db/shared/load-translation-instructions"
+import { checksHintBlock, type TermHint } from "../../../../db/shared/prompt-blocks"
 import {
   compileRulePattern,
   countMatches,
   ruleViolation,
+  rulesForLane,
   type LintHit,
   type LintRule,
   type RuleViolation,
@@ -99,13 +101,21 @@ export interface ProjectContext {
   termMatching?: TermMatchingSettings
   /** Hand-authored project rules. */
   authoredRules: LintRule[]
+  /** AQU-2342: the org's rules (`org_settings.rules`), which the editor lints
+   *  and the copilot hints too. Checked and hinted after the project's own. */
+  orgRules?: LintRule[]
+  /** `settings.fileGenres`, so style rules resolve per file as in the editor. */
+  fileGenres?: Record<string, unknown>
   /**
    * AQU-1691: the decision log — answers to one-off questions, each with the
-   * scope it applies to. Loaded every wave, never consumed: a fact decided in
-   * one run reaches every later run and file.
+   * scope it applies to. AQU-2342: NOT a prompt block any more — an answer is
+   * appended to the instructions (and the log folds into them on read until
+   * they are written). Kept for the Bible data checks' agreed names and so a
+   * question is never asked twice.
    */
   projectFacts: ProjectFact[]
-  /** AQU-1691: the Language profile, read slot by slot (a damaged slot is left out). */
+  /** AQU-1691: the Language profile, read slot by slot (a damaged slot is
+   *  left out). Data behind Checks: the checks hint carries its slots. */
   languageProfile: LanguageProfile
   /**
    * AQU-1699: more than one target lane is active. The termbase does not say
@@ -266,6 +276,17 @@ export function lintTerminology(
 
 // ── Span-scoped term guidance ───────────────────────────────────────────────
 
+/** A span's term guidance as the shared terminology block reads it
+ *  (db/shared/prompt-blocks.ts): preferred, then admitted renderings. */
+export function termHints(terms: readonly TermGuidance[]): TermHint[] {
+  return terms.map((t) => ({
+    sourceTerm: t.sourceTerm,
+    approved: [...t.preferred, ...t.admitted],
+    forbidden: t.forbidden,
+    ...(t.notes ? { notes: t.notes } : {}),
+  }))
+}
+
 /** Ceiling on terms carried into one prompt. Ordered by first appearance in
  *  the span, so the cut falls on the least locally-relevant entries. */
 export const MAX_TERMS_PER_SPAN = 24
@@ -362,6 +383,7 @@ export async function loadProjectContext(
     translationInstructions: "",
     concepts: [],
     authoredRules: [],
+    orgRules: [],
     projectFacts: [],
     languageProfile: {},
   }
@@ -376,8 +398,11 @@ export async function loadProjectContext(
   } catch {
     return empty
   }
+  const orgRules = await loadOrgRules(db, projectId)
   // No settings row still resolves: the legacy brief alone can carry them.
-  if (!row) return { ...empty, translationInstructions: (await loadTranslationInstructions(db, projectId, {})).text }
+  if (!row) {
+    return { ...empty, orgRules, translationInstructions: (await loadTranslationInstructions(db, projectId, {})).text }
+  }
 
   const settings = parseSettings(row.settings)
   const { text: translationInstructions } = await loadTranslationInstructions(db, projectId, settings)
@@ -401,10 +426,56 @@ export async function loadProjectContext(
     concepts,
     ...(termMatching ? { termMatching } : {}),
     authoredRules: parseAuthoredRules(settings.rules),
+    orgRules,
+    ...(isRecord(settings.fileGenres) ? { fileGenres: settings.fileGenres } : {}),
     projectFacts: readProjectFacts(settings.projectFacts),
     languageProfile: readLanguageProfile(settings.languageProfile),
     ...((await hasExtraTargetLane(db, projectId)) ? { multiLane: true } : {}),
   }
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === "object" && !Array.isArray(v)
+}
+
+/**
+ * The org's rules (`org_settings.rules`), enabled and well-formed only. The
+ * editor merges them into every project's rules (useRules); the copilot and
+ * the prompt preview hint them, so the worker paths do too (AQU-2342).
+ * Best-effort: no org row, or a failed read, is no org rules.
+ */
+export async function loadOrgRules(db: SettingsDb, projectId: string): Promise<LintRule[]> {
+  try {
+    const row = await db
+      .prepare(
+        `SELECT os.settings AS settings FROM org_settings os
+           JOIN projects p ON p.org_id = os.org_id WHERE p.id = ?`,
+      )
+      .bind(projectId)
+      .first<{ settings: unknown }>()
+    return parseAuthoredRules(parseSettings(row?.settings).rules)
+  } catch {
+    return []
+  }
+}
+
+/**
+ * The checks hint for a prompt with no single passage in hand (the agent
+ * chat): the project's rules then the org's, narrowed to `laneTag`, and the
+ * Language profile — the shared builder every drafting path uses. Style rules
+ * resolve per passage, so they ride on the draft tool's prompt, not here.
+ */
+export async function projectChecksHint(
+  db: SettingsDb,
+  projectId: string,
+  settings: Record<string, unknown>,
+  laneTag: string,
+): Promise<string> {
+  const rules = rulesForLane(
+    [...parseAuthoredRules(settings.rules), ...(await loadOrgRules(db, projectId))],
+    laneTag,
+  )
+  return checksHintBlock({ rules, languageProfile: readLanguageProfile(settings.languageProfile) })
 }
 
 /**

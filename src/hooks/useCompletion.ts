@@ -310,6 +310,9 @@ export function useCompletion(
   /** AQU-1656: audit trail for each model call that committed a draft.
    *  Fire-and-forget — never awaited, never fails a draft. */
   recordModelCall?: RecordModelCall,
+  /** AQU-2342: the Language profile — its filled slots join every prompt's
+   *  checks hint (db/shared/prompt-blocks.ts). */
+  languageProfile?: import("../../db/shared/language-profile").LanguageProfile,
 ) {
   const [completing, setCompleting] = useState<Map<string, string>>(new Map())
   const [examples, setExamples] = useState<Map<string, ScoredPair[]>>(new Map())
@@ -505,6 +508,7 @@ export function useCompletion(
         examples: [],
         rules,
         ...(styleInstructionsFor && { styleInstructions: styleInstructionsFor(cell) }),
+        ...(languageProfile && { languageProfile }),
         validatedPairs: approvedExamples,
         exampleFormat: effectiveSettings.fewShotExampleFormat,
         instructions,
@@ -668,7 +672,7 @@ export function useCompletion(
       putLaneEntry(setErrors, lk(cell.id), err instanceof Error ? err.message : "Failed")
       return false
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, instructions, draftProvenance, prepareSingleEvidence, lk, recordModelCall])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, instructions, draftProvenance, prepareSingleEvidence, lk, recordModelCall, languageProfile])
 
   // Move an existing translation into the source cell's style runs. The model
   // does not rewrite the words; a placement that would change them is refused.
@@ -1000,6 +1004,7 @@ export function useCompletion(
           })),
           examples: [],
           rules,
+          ...(languageProfile && { languageProfile }),
           ...(styleInstructionsFor && {
             styleInstructions: unionStyleInstructions(chunk, styleInstructionsFor),
           }),
@@ -1287,7 +1292,7 @@ export function useCompletion(
       clearBatchCompletionProgress(runId)
       memMark(`completeBatch.end(${cells.length}c)`)
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, completeSingle, commitCompletedCell, commitCompletedCells, rules, styleInstructionsFor, getAllCells, instructions, draftContext, draftProvenance, lk, recordModelCall])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, completeSingle, commitCompletedCell, commitCompletedCells, rules, styleInstructionsFor, getAllCells, instructions, draftContext, draftProvenance, lk, recordModelCall, languageProfile])
 
   // completeParagraph: draft a whole paragraph group as ONE model call, fan results
   // out to per-cell commits via the existing commitCompletedCell path (D3, D11).
@@ -1383,6 +1388,7 @@ export function useCompletion(
         examples: [],
         validatedPairs: approvedExamples,
         rules,
+        ...(languageProfile && { languageProfile }),
         ...(styleInstructionsFor && {
           styleInstructions: unionStyleInstructions(groupCells, styleInstructionsFor),
         }),
@@ -1559,7 +1565,7 @@ export function useCompletion(
         putLaneEntry(setErrors, lk(c.id), msg)
       }
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, getAllCells, instructions, draftContext, draftProvenance, lk, recordModelCall])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, getAllCells, instructions, draftContext, draftProvenance, lk, recordModelCall, languageProfile])
 
   /**
    * AQU-913: forget a cell's failure entirely — the visible message AND the

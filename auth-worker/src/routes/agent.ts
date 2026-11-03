@@ -50,7 +50,8 @@ import { resolveLaneIdOrTag } from "../../../db/shared/lane-ref"
 import { languageOfTargetLane } from "../../../db/shared/lane-language"
 import { readDraftingSettings } from "../../../db/shared/drafting-settings"
 import { settingsObject } from "../../../db/shared/load-translation-instructions"
-import { resolveTranslationInstructions } from "../../../db/shared/translation-instructions"
+import { loadTranslationInstructions } from "../../../db/shared/load-translation-instructions"
+import { projectChecksHint } from "../lib/contextual/project-context"
 import { resolveAnswerLanguage } from "../lib/agent/answer-language"
 import { enforceRateLimit, userRateLimitIdentifier } from "../../../db/shared/rate-limit"
 import { buildAugmentSystemPrompt } from "../lib/agent/prompt-augment"
@@ -394,7 +395,7 @@ function buildTools(bibleResourcesEnabled: boolean) {
       function: {
         name: "propose_memory",
         description:
-          "STAGE a durable project note for human review (never approved by you). Path must match ^[a-z0-9-/]+\\.md$, content ≤10KB. Disabled while parsing untrusted content.",
+          "STAGE a durable project note for human review (never approved by you). Path must match ^[a-z0-9-/]+\\.md$, content ≤10KB. Use decisions/<slug>.md for a standing translation decision (\"render X as Y, never Z\") — once a lead approves it, it is appended to the project instructions every draft follows. Use observations/ for working notes. Disabled while parsing untrusted content.",
         parameters: {
           type: "object",
           properties: {
@@ -403,22 +404,6 @@ function buildTools(bibleResourcesEnabled: boolean) {
             rationale: { type: "string" },
           },
           required: ["path", "content", "rationale"],
-        },
-      },
-    },
-    {
-      type: "function",
-      function: {
-        name: "propose_brief_update",
-        description:
-          "STAGE a proposed change to the project brief for human review. Disabled while parsing untrusted content.",
-        parameters: {
-          type: "object",
-          properties: {
-            content: { type: "string" },
-            rationale: { type: "string" },
-          },
-          required: ["content", "rationale"],
         },
       },
     },
@@ -886,9 +871,22 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
   // AQU-2342: THE project instructions — one block, carried by the schema card
   // and the draft tool alike. The legacy brief already loaded with the memory
   // context is only a migrate-on-read source here, never a second block.
-  const translationInstructions = resolveTranslationInstructions(settingsBlob, {
-    projectBriefText: memory.brief,
-  })
+  // Phase 2: the shared loader, so approved decisions/ memories and the
+  // decision log fold in exactly as on every other path.
+  const { text: translationInstructions } = await loadTranslationInstructions(
+    env.AQUILLA_PG,
+    body.projectId,
+    settingsBlob,
+  )
+  // AQU-2342: the Checks hint, built by the shared builder every drafting path
+  // uses. Best-effort, like all grounding.
+  let checksHint = ""
+  try {
+    const lane = await resolveLaneIdOrTag(env.AQUILLA_PG, body.projectId, body.context?.lane ?? "")
+    checksHint = await projectChecksHint(env.AQUILLA_PG, body.projectId, settingsBlob, lane.targetLang ?? "")
+  } catch {
+    /* grounding is best-effort */
+  }
 
   const convo: ConvoMessage[] = [
     {
@@ -911,6 +909,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
         // that can't be told) — never the project's translation target.
         responseLanguage: answerLanguage.reply,
         translationInstructions,
+        checksHint,
       }),
     },
     // AQU-AGENT §2 — second system message: approved-memory index + new-tool

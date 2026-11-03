@@ -9,6 +9,7 @@
 
 import { catalogIndexLines } from "../../../../db/shared/command-catalog"
 import { instructionsPromptBlock } from "../../../../db/shared/translation-instructions"
+import { assemblePromptSections } from "../../../../db/shared/prompt-blocks"
 
 // ── Role table ──────────────────────────────────────────────────────────────
 // Mirrored as data from sync-worker/src/events/role-policy.ts (REQUIRED_ROLE).
@@ -241,6 +242,8 @@ export interface AgentPromptContext {
   /** AQU-2342: the project's resolved translation instructions
    *  (db/shared/translation-instructions.ts) — the ONE instructions block. */
   translationInstructions?: string
+  /** AQU-2342: the shared checks hint (db/shared/prompt-blocks.ts), "" when none. */
+  checksHint?: string
 }
 
 // MIRROR of src/lib/translator-profile.ts translatorProfilePromptBlock — the
@@ -286,8 +289,14 @@ function translatorProfileBlock(ctx: AgentPromptContext): string {
 // AQU-2342: the same block every drafting path carries, right after the fixed
 // role text. It replaces the brief summary here AND the verbatim legacy brief
 // the augmentation message used to add, so the agent reads one text, once.
+// Phase 2: then the Checks hint, in the one section order. Terminology and
+// examples are per line, so the chat carries neither — its draft tool adds the
+// terms and examples matching the cells it drafts.
 function instructionsBlock(ctx: AgentPromptContext): string {
-  const block = instructionsPromptBlock(ctx.translationInstructions)
+  const block = assemblePromptSections({
+    instructions: instructionsPromptBlock(ctx.translationInstructions),
+    checks: ctx.checksHint ?? "",
+  })
   return block ? `\n\n${block}` : ""
 }
 

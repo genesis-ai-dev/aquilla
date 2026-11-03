@@ -72,7 +72,7 @@ import { useSeamClassification } from "@/hooks/useSeamClassification"
 import { useTranslateAsReadPreference } from "@/hooks/useTranslateAsReadPreference"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
 import { shouldPromptAiSetup } from "@/lib/completion/completion-service"
-import { resolveTranslationInstructions } from "@/lib/instructions/project-instructions"
+import { projectTranslationInstructions } from "@/lib/instructions/project-instructions"
 import {
   hasMateriallyBetterEvidence,
   translateAsReadAction,
@@ -7040,20 +7040,24 @@ export function ProjectWorkspace() {
     void recordModelCall(project.id, activeLane, call, aiTrailToken)
   }, [project?.id, activeLane, aiTrailToken])
   // AQU-2342: THE project instructions — the stored text, or (until a
-  // maintainer saves one) the legacy sources composed on read.
+  // maintainer saves one) the legacy sources composed on read. Each source is
+  // its own dependency so the React Compiler re-resolves when one moves.
   const instructionsSource = project?.translationInstructions
   const instructionsBrief = project?.translationBrief
   const instructionsEntries = project?.livingMemoryEntries
+  const instructionsFacts = project?.projectFacts
   const instructionsLegacyPrompt = project?.completionSettings?.systemPrompt
   const instructionsLegacyBrief = project?.legacyProjectBriefText
   const projectInstructions = useMemo(
-    () => resolveTranslationInstructions({
+    () => projectTranslationInstructions({
       translationInstructions: instructionsSource,
       translationBrief: instructionsBrief,
       livingMemoryEntries: instructionsEntries,
-      systemPrompt: instructionsLegacyPrompt,
-    }, { projectBriefText: instructionsLegacyBrief }),
-    [instructionsSource, instructionsBrief, instructionsEntries, instructionsLegacyPrompt, instructionsLegacyBrief],
+      projectFacts: instructionsFacts,
+      completionSettings: instructionsLegacyPrompt === undefined ? undefined : { systemPrompt: instructionsLegacyPrompt },
+      legacyProjectBriefText: instructionsLegacyBrief,
+    }),
+    [instructionsSource, instructionsBrief, instructionsEntries, instructionsFacts, instructionsLegacyPrompt, instructionsLegacyBrief],
   )
   const { completeSingle, alignCellStyles, askAlignStyles, alignStylesModel, prepareSingleEvidence, prefetchSingleEvidence, completeBatch, completeParagraph, clearCellError, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
     // AQU-538/AQU-602: when a non-default lane is active, its tag IS the target
@@ -7066,6 +7070,7 @@ export function ProjectWorkspace() {
     commitCompletedCells,
     styleInstructionsFor,
     recordAiModelCall,
+    project?.languageProfile,
   )
 
   // AQU-1386: classify the open file's cell seams in the background so

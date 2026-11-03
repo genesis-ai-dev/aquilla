@@ -96,10 +96,8 @@ export function resolveBibleResourcesEnabled(
   return explicit !== undefined ? explicit : hasScriptureFiles
 }
 
-/** Text checks (db/shared/builtin-checks.ts) plus the Bible data checks
- *  (AQU-1688, "bkp:V1" …), which run from pack facts and exist only while the
- *  project's Bible data checks enrichment is on. */
-export type BuiltinCheckId = import("../../../db/shared/builtin-checks").BuiltinCheckKey
+/** Text checks plus the Bible data checks — defined in ../rules/rule-check. */
+export type BuiltinCheckId = import("../rules/rule-check").BuiltinCheckId
 
 export interface AlgorithmicCheckOverride {
   enabled: boolean
@@ -131,20 +129,7 @@ export interface TranslationRule {
   term?: import("../completion/prompt-build").PromptTermInfo
 }
 
-export type RuleCheck =
-  | { type: "source-requires-target"; sourcePattern: string; targetPattern: string; caseSensitive?: boolean }
-  | { type: "target-forbids"; targetPattern: string; caseSensitive?: boolean }
-  | { type: "source-target-match"; pattern: string }
-  /**
-   * `punctuation` (AQU-1906) is resolved per LANE by `resolveBuiltinRules`
-   * and read by `rule-engine`'s builtin branch. It is never stored: built-in
-   * rules are synthesized on read, so nothing persists a `check` carrying it.
-   */
-  | {
-      type: "builtin"
-      checkId: BuiltinCheckId
-      punctuation?: import("../../../db/shared/punctuation-conventions").PunctuationConventions | null
-    }
+export type RuleCheck = import("../rules/rule-check").RuleCheck
 
 export type RuleAutofix =
   | { kind: "regex-replace"; pattern: string; replacement: string; flags: string }

@@ -8,7 +8,7 @@ vi.mock("@/lib/offline/local-llm-client", () => ({
   completeWithLocalLlm: (...args: unknown[]) => completeWithLocalLlm(...args),
 }))
 
-import { buildPrompt, buildBatchPrompt, complete, fetchModels, normalizeOpenAIBaseUrl, resolveProvider, resolveEffectiveCompletionSettings, isCompletionConfigured, resolveCompletionTarget, DEFAULT_COMPLETION_SETTINGS, shouldPromptAiSetup, DEFAULT_APPROVED_EXAMPLE_COUNT, DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL, OPENROUTER_BYOK_ENDPOINT, isHostedOpenRouterUnconfigured, collectValidatedPairs, retainTranslationPairs, selectApprovedExamples, buildRulesBlock, buildStyleRulesBlock, activeProjectIdFromPath, normalizeCompletionMaxTokens, DEFAULT_MAX_INJECTED_TERMS, selectInjectedTerms } from "./completion-service"
+import { buildPrompt, buildBatchPrompt, complete, fetchModels, normalizeOpenAIBaseUrl, resolveProvider, resolveEffectiveCompletionSettings, isCompletionConfigured, resolveCompletionTarget, DEFAULT_COMPLETION_SETTINGS, shouldPromptAiSetup, DEFAULT_APPROVED_EXAMPLE_COUNT, DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL, OPENROUTER_BYOK_ENDPOINT, isHostedOpenRouterUnconfigured, collectValidatedPairs, retainTranslationPairs, selectApprovedExamples, buildChecksBlock, buildTerminologyBlock, activeProjectIdFromPath, normalizeCompletionMaxTokens, DEFAULT_MAX_INJECTED_TERMS, selectInjectedTerms } from "./completion-service"
 import { compileConceptsToRules } from "@/lib/terminology/compile"
 import { setUserApiKey } from "@/lib/store/user-api-keys"
 import {
@@ -1176,24 +1176,24 @@ describe("retainTranslationPairs (AQU-153)", () => {
 // Living Memory: buildRulesBlock
 // ---------------------------------------------------------------------------
 
-describe("buildRulesBlock", () => {
+describe("buildChecksBlock (AQU-2342 checks hint)", () => {
   const makeRule = (id: string, check: TranslationRule["check"], enabled = true): TranslationRule => ({
     id, name: id, description: "", severity: "minor", source: "user", scope: "project",
     check, enabled, createdAt: new Date().toISOString(),
   })
 
   it("returns empty string when rules array is empty", () => {
-    expect(buildRulesBlock([])).toBe("")
+    expect(buildChecksBlock([])).toBe("")
   })
 
   it("returns empty string when all rules are disabled", () => {
     const rule = makeRule("r1", { type: "target-forbids", targetPattern: "bienes" }, false)
-    expect(buildRulesBlock([rule])).toBe("")
+    expect(buildChecksBlock([rule])).toBe("")
   })
 
   it("renders source-requires-target as 'if source contains X → target must include Y'", () => {
     const rule = makeRule("r1", { type: "source-requires-target", sourcePattern: "bienestar", targetPattern: "bienes" })
-    const block = buildRulesBlock([rule])
+    const block = buildChecksBlock([rule])
     expect(block).toContain("bienestar")
     expect(block).toContain("bienes")
     expect(block).toMatch(/must include/i)
@@ -1201,21 +1201,28 @@ describe("buildRulesBlock", () => {
 
   it("renders target-forbids rule", () => {
     const rule = makeRule("r1", { type: "target-forbids", targetPattern: "forbidden_word" })
-    const block = buildRulesBlock([rule])
+    const block = buildChecksBlock([rule])
     expect(block).toContain("forbidden_word")
     expect(block).toMatch(/do not use/i)
   })
 
   it("renders source-target-match rule", () => {
     const rule = makeRule("r1", { type: "source-target-match", pattern: "Yahweh" })
-    const block = buildRulesBlock([rule])
+    const block = buildChecksBlock([rule])
     expect(block).toContain("Yahweh")
+  })
+
+  it("prefers the rule's description over its pattern shape", () => {
+    const rule = { ...makeRule("r1", { type: "target-forbids", targetPattern: "x" }), description: "Never use the colloquial form." }
+    expect(buildChecksBlock([rule])).toBe(
+      "Checks (verified automatically after drafting — the draft must pass each one):\n- Never use the colloquial form.",
+    )
   })
 
   it("skips builtin check type (no useful injection)", () => {
     const rule = makeRule("builtin:r1", { type: "builtin", checkId: "no-repeated-word" as TranslationRule["check"] extends { type: "builtin"; checkId: infer C } ? C : never })
     // builtin produces no lines → returns ""
-    expect(buildRulesBlock([rule])).toBe("")
+    expect(buildChecksBlock([rule])).toBe("")
   })
 })
 
@@ -1229,7 +1236,7 @@ describe("buildRulesBlock", () => {
 // hand-built, so a change to either side has to keep them agreeing.
 // ---------------------------------------------------------------------------
 
-describe("buildRulesBlock terminology narrowing (AQU-2209)", () => {
+describe("buildTerminologyBlock narrowing (AQU-2209)", () => {
   const concept = (id: string, sourceTerm: string, renderings: { rendering: string; status: "preferred" | "admitted" | "forbidden" }[]) => ({
     id,
     sourceTerm,
@@ -1248,7 +1255,7 @@ describe("buildRulesBlock terminology narrowing (AQU-2209)", () => {
 
   it("injects only the concepts present in the source", () => {
     const rules = compileConceptsToRules([moses, jesus])
-    const block = buildRulesBlock(rules, { sourceText: "Moses went up the mountain." })
+    const block = buildTerminologyBlock(rules, { sourceText: "Moses went up the mountain." })
     expect(block).toContain("Moses")
     expect(block).toContain("Moisés")
     expect(block).not.toContain("Jesus")
@@ -1257,7 +1264,7 @@ describe("buildRulesBlock terminology narrowing (AQU-2209)", () => {
 
   it("renders a term as plain guidance, never as the match pattern", () => {
     const rules = compileConceptsToRules([moses])
-    const block = buildRulesBlock(rules, { sourceText: "Moses spoke." })
+    const block = buildTerminologyBlock(rules, { sourceText: "Moses spoke." })
     expect(block).toContain('"Moses" → "Moisés"')
     // The matcher's boundary wrappers are internals; they mean nothing to a model.
     expect(block).not.toContain("\\p{L}")
@@ -1272,7 +1279,7 @@ describe("buildRulesBlock terminology narrowing (AQU-2209)", () => {
         { rendering: "aliento", status: "admitted" as const },
       ]),
     ])
-    const block = buildRulesBlock(rules, { sourceText: "the spirit moved" })
+    const block = buildTerminologyBlock(rules, { sourceText: "the spirit moved" })
     expect(block).toContain('"spirit" → "espíritu"')
     expect(block).toContain('also acceptable: "aliento"')
   })
@@ -1284,7 +1291,7 @@ describe("buildRulesBlock terminology narrowing (AQU-2209)", () => {
         { rendering: "fantasma", status: "forbidden" as const },
       ]),
     ])
-    const block = buildRulesBlock(rules, { sourceText: "the spirit moved" })
+    const block = buildTerminologyBlock(rules, { sourceText: "the spirit moved" })
     // One concept → one line.
     expect(block.split("\n").filter((l) => l.startsWith("- "))).toHaveLength(1)
     expect(block).toContain('"spirit" → "espíritu"')
@@ -1293,20 +1300,26 @@ describe("buildRulesBlock terminology narrowing (AQU-2209)", () => {
 
   it("injects nothing when no concept occurs in the source", () => {
     const rules = compileConceptsToRules([moses, jesus])
-    expect(buildRulesBlock(rules, { sourceText: "In the beginning." })).toBe("")
+    expect(buildTerminologyBlock(rules, { sourceText: "In the beginning." })).toBe("")
   })
 
-  it("leaves a project's general rules alone while narrowing terminology", () => {
+  it("leaves a project's general rules to the checks hint while narrowing terminology", () => {
     const general = generalRule("r1", { type: "target-forbids", targetPattern: "bienes" })
-    const block = buildRulesBlock([general, ...compileConceptsToRules([jesus])], {
-      sourceText: "Moses spoke.",
-    })
-    expect(block).toContain("bienes")
-    expect(block).not.toContain("Jesús")
+    const rules = [general, ...compileConceptsToRules([jesus])]
+    expect(buildChecksBlock(rules)).toContain("bienes")
+    expect(buildChecksBlock(rules)).not.toContain("Jesús")
+    expect(buildTerminologyBlock(rules, { sourceText: "Moses spoke." })).toBe("")
+  })
+
+  it("carries the termbase note, clipped, after the renderings (AQU-2342)", () => {
+    const rules = compileConceptsToRules([{ ...moses, notes: "Lawgiver; keep the Spanish accent." }])
+    expect(buildTerminologyBlock(rules, { sourceText: "Moses spoke." })).toContain(
+      '- "Moses" → "Moisés". Note: Lawgiver; keep the Spanish accent.',
+    )
   })
 
   it("injects no term without a source to narrow against", () => {
-    expect(buildRulesBlock(compileConceptsToRules([moses]))).toBe("")
+    expect(buildTerminologyBlock(compileConceptsToRules([moses]))).toBe("")
   })
 
   it("keeps a 722-concept termbase down to the terms the cell actually bears", () => {
@@ -1319,7 +1332,7 @@ describe("buildRulesBlock terminology narrowing (AQU-2209)", () => {
     ]
     const rules = compileConceptsToRules(termbase)
     const source = "Moses wrote of the coming of Jesus to the people of Israel."
-    const block = buildRulesBlock(rules, { sourceText: source })
+    const block = buildTerminologyBlock(rules, { sourceText: source })
     const lines = block.split("\n").filter((l) => l.startsWith("- "))
     expect(lines).toHaveLength(2)
     // The old behavior put ~115 KB into the system prompt for a short source.
@@ -1340,7 +1353,7 @@ describe("buildRulesBlock terminology narrowing (AQU-2209)", () => {
     // Compile order is precedence order: the cap drops from the tail.
     expect(selection.injected[0].conceptId).toBe("c-0")
 
-    const lines = buildRulesBlock(rules, { sourceText }).split("\n").filter((l) => l.startsWith("- "))
+    const lines = buildTerminologyBlock(rules, { sourceText }).split("\n").filter((l) => l.startsWith("- "))
     expect(lines).toHaveLength(DEFAULT_MAX_INJECTED_TERMS)
   })
 
@@ -1650,25 +1663,25 @@ describe("buildBatchPrompt — target-only format", () => {
 // regex can express still reaches the model — and only where it applies.
 // ---------------------------------------------------------------------------
 
-describe("buildStyleRulesBlock", () => {
-  it("renders one bullet per instruction under a labeled header", () => {
-    const block = buildStyleRulesBlock(["Use formal register.", "Keep numerals as digits."])
+describe("style rules in the checks hint", () => {
+  it("renders one bullet per instruction under the checks heading", () => {
+    const block = buildChecksBlock(undefined, ["Use formal register.", "Keep numerals as digits."])
     expect(block).toBe(
-      "Style rules that apply to this passage (MUST follow):\n" +
+      "Checks (verified automatically after drafting — the draft must pass each one):\n" +
         "- Use formal register.\n" +
         "- Keep numerals as digits.",
     )
   })
 
   it("returns empty string for empty, blank, undefined, or null input", () => {
-    expect(buildStyleRulesBlock([])).toBe("")
-    expect(buildStyleRulesBlock(["   ", ""])).toBe("")
-    expect(buildStyleRulesBlock(undefined)).toBe("")
-    expect(buildStyleRulesBlock(null)).toBe("")
+    expect(buildChecksBlock(undefined, [])).toBe("")
+    expect(buildChecksBlock(undefined, ["   ", ""])).toBe("")
+    expect(buildChecksBlock(undefined, undefined)).toBe("")
+    expect(buildChecksBlock(undefined, null)).toBe("")
   })
 
   it("drops duplicates so a union across a batch cannot repeat a rule", () => {
-    const block = buildStyleRulesBlock(["Use formal register.", "Use formal register."])
+    const block = buildChecksBlock(undefined, ["Use formal register.", "Use formal register."])
     expect(block.match(/Use formal register\./g)).toHaveLength(1)
   })
 })
@@ -1682,7 +1695,7 @@ describe("style instructions in the prompt builders", () => {
       systemPrompt: DEFAULT_SYSTEM_PROMPT, sourceText: "hello",
       examples: [], styleInstructions,
     })
-    expect(sys.content).toContain("Style rules that apply to this passage")
+    expect(sys.content).toContain("Checks (verified automatically after drafting")
     expect(sys.content).toContain("Render divine names in small caps.")
   })
 
@@ -1715,7 +1728,7 @@ describe("style instructions in the prompt builders", () => {
     expect(buildPrompt(args)).toEqual(buildPrompt({ ...args, styleInstructions: undefined }))
   })
 
-  it("keeps the deterministic rules block and the style block as separate blocks", () => {
+  it("lists the deterministic rules and the style rules in ONE checks hint, rules first", () => {
     const rule: TranslationRule = {
       id: "r1", name: "no LORD", description: "", severity: "minor",
       source: "user", scope: "project", enabled: true, createdAt: new Date().toISOString(),
@@ -1726,16 +1739,15 @@ describe("style instructions in the prompt builders", () => {
       systemPrompt: DEFAULT_SYSTEM_PROMPT, sourceText: "hello",
       examples: [], rules: [rule], styleInstructions,
     })
-    expect(sys.content).toContain("Project terminology and style rules (MUST follow):")
-    expect(sys.content).toContain("Style rules that apply to this passage (MUST follow):")
+    expect(sys.content.split("Checks (verified automatically").length - 1).toBe(1)
     // Deterministic rules first, resolved guidance after.
-    expect(sys.content.indexOf("Project terminology and style rules"))
-      .toBeLessThan(sys.content.indexOf("Style rules that apply to this passage"))
+    expect(sys.content.indexOf('Do NOT use "LORD"'))
+      .toBeLessThan(sys.content.indexOf("Render divine names in small caps."))
   })
 })
 
 // AQU-2342: every copilot recipe carries the fixed role text, then the ONE
-// project-instructions block, then rules — and nothing else project-authored.
+// project-instructions block, then the checks hint — and nothing else project-authored.
 describe("project instructions in every copilot recipe", () => {
   const rule: TranslationRule = {
     id: "r1", name: "r1", description: "", severity: "minor", source: "user", scope: "project",
@@ -1756,7 +1768,7 @@ describe("project instructions in every copilot recipe", () => {
     const sys = build("Prefer natural phrasing for {targetLanguage}.")
     const role = sys.indexOf("You are a translation assistant completing a project that translates from Greek into Kala.")
     const block = sys.indexOf("Project instructions (follow these):\nPrefer natural phrasing for Kala.")
-    const rules = sys.indexOf("Project terminology and style rules (MUST follow):")
+    const rules = sys.indexOf("Checks (verified automatically after drafting")
     expect(role).toBeGreaterThanOrEqual(0)
     expect(block).toBeGreaterThan(role)
     expect(rules).toBeGreaterThan(block)

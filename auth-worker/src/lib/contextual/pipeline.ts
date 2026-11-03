@@ -16,11 +16,9 @@ import { construeScene, type ClosureContext, type ClosureResult } from "./closur
 import { performSpan, type ExamplePair, type PerformSpanResult } from "./draft"
 import { classifyRisk } from "./router"
 import { termGuidanceForSpan, type Concept } from "./project-context"
-import { projectDecisionLines } from "./project-decisions"
 import { checkSpanBible, newBibleMetrics, recordBible, type SpanBible } from "./bible-span"
 import { repairExpectations, type RepairCell } from "./bible-repair"
 import type { LanguageProfile } from "../../../../db/shared/language-profile"
-import type { ProjectFact } from "../../../../db/shared/project-facts"
 import { encodeBibleParams } from "../../../../db/shared/bible-checks/params"
 import type { TermMatchingSettings } from "../../../../src/lib/terminology/model"
 import { analyzeSupport, confirmSupport, toSupportSignal, type SupportCorpus, type SupportSignal } from "./support"
@@ -69,9 +67,12 @@ export interface RunSpanDeps {
   translationInstructions?: string
   /** Active key-term concepts for the project (scoped to the span in here). */
   concepts?: Concept[]
-  /** AQU-1691: the decision log (scoped to the span in here) and the Language profile. */
-  projectFacts?: ProjectFact[]
+  /** AQU-1691 Language profile — data behind Checks; its filled slots join the
+   *  checks hint (AQU-2342). The decision log reaches the performer through
+   *  the instructions, not here. */
   languageProfile?: LanguageProfile
+  /** AQU-2342: the style-rule instructions in force for this span. */
+  styleInstructions?: string[]
   /** The project's affix inventory, so terms are found as the editor finds them. */
   termMatching?: TermMatchingSettings
   /** AQU-1690: Bible data for this span, when autopilot uses it. */
@@ -290,13 +291,6 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
   const spanTerms = deps.concepts
     ? termGuidanceForSpan(deps.concepts, inSpan.map((p) => p.source), deps.termMatching)
     : []
-  // AQU-1691: same scoping for the project's decisions: a fact for ACT 16
-  // reaches a span in ACT 16 and no other.
-  const spanDecisions = projectDecisionLines(
-    deps.projectFacts ?? [],
-    deps.languageProfile ?? {},
-    inSpan.map((p) => p.canonicalRef),
-  )
 
   // The evidence the draft prompt carries, as the support check will see it.
   // Hoisted: it is the same on both attempts, and building it per attempt
@@ -317,7 +311,8 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
       ...(deps.steeringDirections ? { steeringDirections: deps.steeringDirections } : {}),
       ...(deps.translationInstructions ? { translationInstructions: deps.translationInstructions } : {}),
       ...(spanTerms.length > 0 ? { terms: spanTerms } : {}),
-      ...(spanDecisions.length > 0 ? { decisions: spanDecisions } : {}),
+      ...(deps.languageProfile ? { languageProfile: deps.languageProfile } : {}),
+      ...(deps.styleInstructions?.length ? { styleInstructions: deps.styleInstructions } : {}),
       ...(deps.rules ? { rules: deps.rules } : {}),
       ...(constraints.length > 0 ? { constraints } : {}),
       ...(deps.bible ? { facts: deps.bible.draftFacts } : {}),

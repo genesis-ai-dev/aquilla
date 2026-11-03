@@ -899,6 +899,71 @@ describe("executeDraft", () => {
     }
   }
 
+  // AQU-2342 phase 2: the draft tool (and so DraftCells) carries the same
+  // checks hint and per-segment matching terms as the copilot and Autopilot —
+  // it used to get neither and could only be told about them by the lint.
+  it("carries the checks hint and the terms matching THIS work list, in the one section order", async () => {
+    await seedWorld()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_settings (project_id, settings) VALUES (?, ?)
+       ON CONFLICT (project_id) DO UPDATE SET settings = EXCLUDED.settings`,
+    )
+      .bind(
+        PROJECT,
+        JSON.stringify({
+          rules: [{ id: "r1", name: "No slang", description: "Never use slang.", enabled: true, check: { type: "target-forbids", targetPattern: "tío" } }],
+          languageProfile: { measures: "convert" },
+        }),
+      )
+      .run()
+    for (const [id, term, rendering, notes] of [
+      ["c-sower", "sower", "sembrador", "The farmer, not a seed drill."],
+      ["c-absent", "Pharisee", "fariseo", null],
+    ] as const) {
+      await env.AQUILLA_PG.prepare(
+        `INSERT INTO concepts (concept_id, project_id, source_term, renderings, notes, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?::text::jsonb, ?, 'active', 1, 1)`,
+      )
+        .bind(id, PROJECT, term, JSON.stringify([{ rendering, status: "preferred" }]), notes)
+        .run()
+    }
+    const draftRequests: { messages: { role: string; content: string }[] }[] = []
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      draftRequests.push(JSON.parse(String(init?.body)))
+      const content = draftRequests.length === 1 ? "evidence [E1]" : '[{"i":1,"t":"uno"},{"i":2,"t":"dos"}]'
+      return new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    })
+
+    const { ctx } = draftCtx()
+    await executeDraft(env.AQUILLA_PG, { ref: "MRK 4", instructions: "Use vosotros." }, ctx, {
+      model: "test/drafter",
+      apiKey: "k",
+      url: "https://mock/chat/completions",
+    })
+    expect(draftRequests).toHaveLength(2)
+    for (const req of draftRequests) {
+      const system = req.messages[0].content
+      const at = (needle: string) => {
+        const i = system.indexOf(needle)
+        expect(i, needle).toBeGreaterThanOrEqual(0)
+        return i
+      }
+      const order = [
+        at("You draft for a scripture translation project."),
+        at("Project instructions (follow these):"),
+        at("Checks (verified automatically after drafting — the draft must pass each one):\n- Never use slang.\n- Measures"),
+        at('Terminology for this text (use an approved rendering for each term; never a forbidden one):\n- "sower" → "sembrador". Note: The farmer, not a seed drill.'),
+        at("Translation pairs from this project"),
+        at("This run's directions"),
+      ]
+      expect([...order].sort((a, b) => a - b)).toEqual(order)
+      expect(system).not.toContain("Pharisee")
+    }
+  })
+
   it("drafts untranslated cells via the model and stages them through emit-stage", async () => {
     await seedWorld()
     const draftRequests: { messages: { role: string; content: string }[] }[] = []
@@ -942,7 +1007,7 @@ describe("executeDraft", () => {
         ai_draft: {
           model: "test/drafter",
           provider: "platform",
-          promptVersion: "agent-draft-v4-instructions",
+          promptVersion: "agent-draft-v5-guidance",
           mode: "agent",
           projectState: {
             sourceLanguage: "English",
@@ -991,7 +1056,10 @@ describe("executeDraft", () => {
       expect(system.indexOf("You draft for a scripture translation project.")).toBeLessThan(system.indexOf(block))
       expect(system.indexOf(block)).toBeLessThan(system.indexOf("Translation pairs from this project"))
       expect(system).not.toContain("Project brief")
-      expect(req.messages[1].content).toContain("Directions for this run: Use vosotros.")
+      // AQU-2342: this run's directions close the guidance, after the examples.
+      expect(system).toContain("This run's directions")
+      expect(system.indexOf("Translation pairs from this project")).toBeLessThan(system.indexOf("- Use vosotros."))
+      expect(req.messages[1].content).not.toContain("Use vosotros.")
     }
   })
 

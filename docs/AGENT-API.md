@@ -1424,8 +1424,9 @@ can now do the whole pass.
   `version`. Approve and reject leave `version` unchanged (the in-app review does not bump
   it either); only `update` does. `reviewed_by` is the credential owner's username, as with
   the in-app route.
-- **Prompt preview.** `GET .../cells/:cellId/prompt-preview` now returns the style-rules
-  block as `parts.styleRules` and in the assembled system message. It carries what the
+- **Prompt preview.** `GET .../cells/:cellId/prompt-preview` returns the style rules as
+  lines of the Checks hint, `parts.checks` (AQU-2342: one checks block with the project, lane
+  and org rules and the Language-profile slots), and in the assembled system message. It carries what the
   editor's drafting call carries: approved, enabled rules (the project's and its org's) that
   apply to that cell through the applicability graph. Proposed, rejected, archived and
   disabled rules never appear.

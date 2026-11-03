@@ -48,22 +48,12 @@ import {
   DataTableColumnHeader,
   DataTableSortingContext,
 } from "@/components/ui/data-table-column-header"
-import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingCursor, LoadingLine } from "@/components/ui/loading-cursor"
 import { cn } from "@/lib/utils"
 import { MoreHorizontal, Search } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 const SKELETON_ROW_COUNT = 8
-const SKELETON_WIDTHS = [
-  "w-[72%]",
-  "w-[48%]",
-  "w-[60%]",
-  "w-[40%]",
-  "w-[55%]",
-  "w-[35%]",
-  "w-[64%]",
-  "w-[44%]",
-] as const
 
 /** Idle search chrome. Loading disables the field but must not swap in
  *  InputGroup's muted `has-disabled:bg-input/*` / opacity — that flash is
@@ -677,12 +667,7 @@ function DataTable<TData, TValue>({
                         key={col}
                         className={dense ? "py-1.5" : "py-2.5"}
                       >
-                        <Skeleton
-                          className={cn(
-                            "h-4 max-w-full",
-                            SKELETON_WIDTHS[(row + col) % SKELETON_WIDTHS.length],
-                          )}
-                        />
+                        <LoadingCursor />
                       </TableCell>
                     ))}
                   </TableRow>
@@ -939,10 +924,7 @@ function DataTablePanelSkeleton({
       >
         <div className="space-y-2 p-2">
           {Array.from({ length: SKELETON_ROW_COUNT }, (_, i) => (
-            <Skeleton
-              key={i}
-              className={cn("h-9 max-w-full", SKELETON_WIDTHS[i % SKELETON_WIDTHS.length])}
-            />
+            <LoadingLine key={i} className="h-9 px-2" />
           ))}
         </div>
       </div>

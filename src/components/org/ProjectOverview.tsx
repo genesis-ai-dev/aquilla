@@ -151,7 +151,7 @@ import {
 } from "@/lib/metrics/hidden-stats"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { SearchSelect } from "@/components/ui/search-select"
-import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingCursor, LoadingLine, LoadingLines } from "@/components/ui/loading-cursor"
 import { LoadingTemplate } from "@/components/ui/loading-overlay"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { bidiIsolate } from "@/lib/i18n/format"
@@ -171,52 +171,66 @@ import { PROGRESS_BG, type ProgressTone } from "@/lib/progress/progress-palette"
 
 
 function ProjectOverviewSkeleton() {
+  const t = useT()
+  // Mirrors the resolved cards' geometry (padding, line heights, tile and
+  // bar rows) so nothing moves when the data lands. Labels that are known
+  // before the data (section headings, tile and bar names) stay visible with
+  // a cursor where the value will go; the project's own words do not.
+  // The two text stats every project shows; the audio and AI-drafted rows
+  // only exist for projects that have them, so they are not guessed here.
+  const tileLabels = [
+    t("org.orgHome.table.translatedHeaderLabel"),
+    t("org.orgHome.table.validatedHeaderLabel"),
+  ]
   return (
     <div className="max-w-5xl space-y-4">
-      <div className="rounded-lg border bg-card shadow-sm p-6 space-y-2">
-        <div className="flex items-center gap-2">
-          <Skeleton className="h-6 w-48" />
-          <Skeleton className="h-5 w-16 rounded-md" />
+      {/* Header card: title, language pair, file count, then the meta row. */}
+      <div className="rounded-lg border bg-card p-6">
+        <div className="min-w-0">
+          <LoadingLine className="min-h-7 text-xl font-semibold leading-tight" />
+          <LoadingLine className="mt-0.5 min-h-5 text-sm" />
+          <LoadingLine className="mt-0.5 min-h-5 text-sm" />
         </div>
-        <Skeleton className="h-4 w-32" />
-        <Skeleton className="h-4 w-20" />
-        <div className="flex items-start gap-4 pt-2">
-          <div className="space-y-1.5">
-            <Skeleton className="h-3 w-24" />
-            <Skeleton className="h-8 w-48" />
+        <div className="mt-4 flex flex-wrap items-start gap-4">
+          <div className="flex min-w-48 flex-col gap-1.5">
+            <LoadingLine label={t("org.projectOverview.projectManagerHeading")} className="min-h-4 text-xs font-semibold" />
+            <LoadingLine className="min-h-7 text-sm" />
           </div>
-          <div className="space-y-1.5">
-            <Skeleton className="h-3 w-16" />
-            <Skeleton className="h-8 w-56" />
+          <div className="flex min-w-56 flex-col gap-1.5">
+            <LoadingLine label={t("org.projectOverview.deadlineHeading")} className="min-h-4 text-xs font-semibold" />
+            <LoadingLine className="min-h-7 text-sm" />
           </div>
         </div>
       </div>
-      <div className="rounded-lg border bg-card shadow-sm p-5 space-y-4">
-        <Skeleton className="h-3 w-20" />
-        <div className="flex flex-wrap gap-3">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <Skeleton key={i} className="h-14 w-24 rounded-lg" />
+      {/* Progress card: heading row, stat tiles, stat bars. */}
+      <div className="rounded-lg border bg-card p-5">
+        <div className="mb-3 flex min-h-6 items-center">
+          <LoadingLine label={t("fileDetails.progress")} className="min-h-4 text-xs font-semibold" />
+        </div>
+        <div className="mb-4 flex flex-wrap gap-3">
+          {tileLabels.map((label) => (
+            <div key={label} className="flex flex-col items-center rounded-lg bg-muted/40 px-5 py-3 text-center">
+              <div className="flex min-h-8 items-center text-2xl font-bold"><LoadingCursor /></div>
+              <p className="mt-0.5 min-h-4 text-[11px] text-muted-foreground">{label}</p>
+            </div>
           ))}
         </div>
         <div className="space-y-2.5">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <Skeleton key={i} className="h-2.5 w-full rounded-full" />
+          {tileLabels.map((label) => (
+            <div key={label} className="flex min-h-4 items-center gap-3">
+              <span className="w-28 shrink-0 text-xs font-medium text-muted-foreground">{label}</span>
+              <div className="flex flex-1 items-center gap-2">
+                <span className="h-2 flex-1 rounded-full bg-muted" />
+                <span className="flex w-20 shrink-0 justify-end text-xs"><LoadingCursor /></span>
+              </div>
+            </div>
           ))}
         </div>
       </div>
-      <div className="rounded-lg border bg-card shadow-sm p-5 space-y-3">
-        <Skeleton className="h-3 w-16" />
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="flex items-center gap-3">
-            <Skeleton className="h-4 w-36" />
-            <Skeleton className="h-1.5 flex-1 rounded-full" />
-            <Skeleton className="h-3 w-24" />
-          </div>
-        ))}
-      </div>
-      <div className="rounded-lg border bg-card shadow-sm p-5 space-y-2">
-        <Skeleton className="h-3 w-20" />
-        <Skeleton className="h-4 w-40" />
+      {/* Languages / lane table. */}
+      <div className="rounded-lg border bg-card p-5">
+        <LoadingLine className="mb-3 min-h-4 text-xs font-semibold" />
+        <LoadingLines count={3} />
       </div>
     </div>
   )

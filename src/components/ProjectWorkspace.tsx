@@ -30,7 +30,7 @@ import {
 } from "@/lib/editor/milestone-jump-targets"
 import { CellAreaPlaceholder, CellRowsLoadStatus } from "./CellAreaPlaceholder"
 import { WorkspaceMainSkeleton } from "./WorkspaceSkeleton"
-import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingLine } from "@/components/ui/loading-cursor"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { EmptyState, NotFoundIcon } from "@/components/ui/empty"
 import { TabStrip } from "./TabStrip"
@@ -16445,7 +16445,7 @@ export function ProjectWorkspace() {
             filesPanel={
               <div className="flex flex-col gap-2 p-3" aria-hidden="true">
                 {Array.from({ length: 6 }).map((_, index) => (
-                  <Skeleton key={index} className="h-8" style={{ width: `${72 + (index % 3) * 8}%` }} />
+                  <LoadingLine key={index} className="h-8 px-2" />
                 ))}
               </div>
             }

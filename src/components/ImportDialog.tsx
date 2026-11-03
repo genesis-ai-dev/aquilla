@@ -32,7 +32,7 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingLines } from "@/components/ui/loading-cursor"
 import { SegmentTabs, Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -1352,7 +1352,7 @@ export function ImportDialog({
                 {t("importExport.translation.opening", { fileName: translationDestination?.name ?? "" })}
               </p>
               <div className="space-y-2.5 rounded-md border p-3">
-                {[0, 1, 2, 3, 4].map((row) => <Skeleton key={row} className="h-4 w-full" />)}
+                <LoadingLines count={5} />
               </div>
               <div className="flex justify-end">
                 <Button variant="ghost" onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button>

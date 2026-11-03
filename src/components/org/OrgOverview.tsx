@@ -59,6 +59,7 @@ type OverviewProjectRow = {
 }
 
 function OverviewLoadingTemplate() {
+  const { t } = useI18n()
   return (
     <div data-testid="org-overview-loading-template" className="h-full">
       <AppShell
@@ -84,14 +85,16 @@ function OverviewLoadingTemplate() {
             {/* AQU-1071: seven tiles, matching the loaded strip (the Languages tile
               * was the seventh) so the layout does not jump on resolve. */}
             <div className={STAT_TILE_GRID}>
-              {Array.from({ length: 7 }).map((_, index) => (
-                <div
-                  key={index}
-                  className="flex h-[88px] items-center justify-between rounded-lg border bg-card px-5 py-4 min-[480px]:flex-col min-[480px]:items-start min-[480px]:justify-start min-[480px]:gap-2"
-                >
-                  <LoadingCursor className="order-last text-xl min-[480px]:order-none" />
-                  <LoadingLine className="text-xs" />
-                </div>
+              {[
+                t("nav.projects"),
+                t("org.orgHome.activeLanguages"),
+                t("org.orgHome.avgTranslated"),
+                t("org.orgHome.avgValidated"),
+                t("org.orgHome.avgAudio"),
+                t("org.orgHome.stalled"),
+                t("org.orgHome.overdue"),
+              ].map((label) => (
+                <StatTile key={label} label={label} value={<LoadingCursor />} />
               ))}
             </div>
           </Page>

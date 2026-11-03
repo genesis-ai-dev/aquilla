@@ -81,6 +81,7 @@ function DashboardPanelTemplate({ rows }: { rows: number }) {
  * visual transition: template → resolved dashboard.
  */
 function OrgHomeLoadingTemplate() {
+  const { t } = useI18n()
   return (
     <div data-testid="org-home-loading-template" className="h-full">
       <AppShell
@@ -109,14 +110,17 @@ function OrgHomeLoadingTemplate() {
             <LoadingLine className="mb-8 h-7 text-xl font-semibold" />
             <div className="flex flex-col gap-6">
               <div className={STAT_TILE_GRID}>
-                {Array.from({ length: 6 }).map((_, index) => (
-                  <div
-                    key={index}
-                    className="flex h-[88px] items-center justify-between rounded-lg border bg-card px-5 py-4 min-[480px]:flex-col min-[480px]:items-start min-[480px]:justify-start min-[480px]:gap-2"
-                  >
-                    <LoadingCursor className="order-last text-xl min-[480px]:order-none" />
-                    <LoadingLine className="text-xs" />
-                  </div>
+                {/* The labels are known before the numbers: show them, and a
+                  * cursor where each value will land. */}
+                {[
+                  t("org.orgHome.organizations"),
+                  t("nav.projects"),
+                  t("org.orgHome.avgTranslated"),
+                  t("org.orgHome.avgValidated"),
+                  t("org.orgHome.stalled"),
+                  t("org.orgHome.overdue"),
+                ].map((label) => (
+                  <StatTile key={label} label={label} value={<LoadingCursor />} />
                 ))}
               </div>
               <div className="flex flex-col gap-6">

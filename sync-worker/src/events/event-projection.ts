@@ -2763,7 +2763,8 @@ case 'cell.audio.attach': {
               anchor_file_id = excluded.anchor_file_id,
               event_id = excluded.event_id,
               meta = excluded.meta,
-              updated_at = (extract(epoch from now()) * 1000)::bigint`,
+              updated_at = (extract(epoch from now()) * 1000)::bigint
+            WHERE files.project_id = excluded.project_id`,
           )
           .bind(
             event.fileId,

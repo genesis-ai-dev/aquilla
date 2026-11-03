@@ -103,7 +103,7 @@ export interface UseAudioRecorderOptions {
    *  Undefined (the normal case) means "whatever the pref says at start()". */
   format?: RecordingFormat
   /** A tighter byte budget than the upload cap, turned into a shorter hard
-   *  stop. The voice-clone reference has one; checking it once the take is
+   *  stop, for a caller with its own budget; checking it once the take is
    *  already over is a late failure the operator pays for. */
   maxBytes?: number
   /**
@@ -114,7 +114,7 @@ export interface UseAudioRecorderOptions {
    * takes makes the OS reconfigure the input device, and the recovery ramp
    * lands inside the next take — measured at a fifteenth of the real level
    * through Sam's first words. The recording modal passes true and releases
-   * on close; the voice-clone recorder keeps the default, where the mic
+   * on close; any other caller keeps the default, where the mic
    * indicator turning off at stop is the expected behaviour.
    */
   holdMic?: boolean

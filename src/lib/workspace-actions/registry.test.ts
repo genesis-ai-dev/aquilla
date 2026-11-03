@@ -9,7 +9,6 @@ import { formatList } from "@/lib/i18n/format"
 import type { TFunction } from "@/lib/i18n/I18nProvider"
 import type { BatchValidateCandidate } from "@/lib/review/batch-validate-summary"
 import { summarizeBatchValidate } from "@/lib/review/batch-validate-summary"
-import { resetChangeVoiceQualityCacheForTests } from "@/lib/store/change-voice-quality"
 
 // English-only `t`, standing in for the real I18nProvider hook — description()
 // is resolved outside React (registry.ts has no component tree), so tests
@@ -481,7 +480,6 @@ describe("the audio actions are gated on their counts", () => {
 
   // AQU-1109: Change voice converts existing takes; it never generates from text.
   it("offers Change voice only when a take can be re-voiced, and says so", () => {
-    resetChangeVoiceQualityCacheForTests()
     const change = find("change-voice-all")
     const counts = (voiceChangeable: number) =>
       ctx({ activeFileId: "f1", audioCounts: { untranscribed: 0, unsynthesized: 9, voiceChangeable } })
@@ -491,7 +489,8 @@ describe("the audio actions are gated on their counts", () => {
     expect(change.isAvailable!(counts(3))).toBe(true)
     const body = change.requiresConfirmation!.description(counts(3), t, joinList)
     expect(body).toContain("3 cells")
-    expect(body).toContain("Standard quality")
+    // AQU-2291: no quality knob any more — one voice-forge pass.
+    expect(body).not.toMatch(/quality/i)
     expect(body).toContain("Nothing is generated from text.")
   })
 })

@@ -7,6 +7,7 @@ import {
   isInworldAudioQuality,
   isInworldDeliveryMode,
 } from "./inworld-voice-settings"
+import { DEFAULT_ELEVENLABS_MODEL } from "./elevenlabs/settings"
 
 export const DEFAULT_TTS_PROVIDER: TtsProvider = "inworld"
 
@@ -71,10 +72,8 @@ export const INWORLD_TTS_MODEL = "inworld-tts-2-flash"
 export interface TtsProviderInfo {
   id: TtsProvider
   // `title` stays plain, untranslated English by design — it's the engine's
-  // display name (e.g. "Inworld TTS", "Gemini TTS"), and its one consumer
-  // (NewVoiceModal's audio.newVoice.singleVoiceHint placeholder) is documented
-  // to keep it "already resolved in English by the app — a brand name, do not
-  // translate the substituted value." shortTitle is likewise a display name.
+  // display name (e.g. "Inworld TTS", "Gemini TTS"), a brand name that is not
+  // translated. shortTitle is likewise a display name.
   title: string
   shortTitle: string
   /** `hintKey` — see the GEMINI_TTS_VOICES comment above for why this table
@@ -82,8 +81,6 @@ export interface TtsProviderInfo {
   hintKey: MessageKey
   /** Where the engine runs. Drives the Cloud/On-device grouping in the picker. */
   tier: "cloud" | "device"
-  /** Whether a reference recording can clone a target timbre for this engine. */
-  supportsCloning: boolean
   /** Whether the engine exposes named base voices. */
   hasNamedVoices: boolean
   /** A few words of value-prop for the engine card. */
@@ -95,6 +92,8 @@ export interface TtsProviderInfo {
   badge?: string
   localModel?: "mms"
   requiresGeminiKey?: boolean
+  /** BYOK engine whose key is the user's own, kept on this device (AQU-2299). */
+  requiresElevenLabsKey?: boolean
 }
 
 export const TTS_PROVIDER_INFOS: readonly TtsProviderInfo[] = [
@@ -103,10 +102,9 @@ export const TTS_PROVIDER_INFOS: readonly TtsProviderInfo[] = [
     title: "Inworld TTS",
     shortTitle: "Inworld",
     tier: "cloud",
-    supportsCloning: true,
     hasNamedVoices: true,
     badge: "Recommended",
-    blurb: "Hosted Inworld TTS 2 and Flash — multilingual, clone from a reference clip.",
+    blurb: "Hosted Inworld TTS 2 and Flash — multilingual, with Voice Design.",
     hintKey: "audio.provider.inworldHint",
   },
   {
@@ -114,7 +112,6 @@ export const TTS_PROVIDER_INFOS: readonly TtsProviderInfo[] = [
     title: "Gemini TTS",
     shortTitle: "Gemini",
     tier: "cloud",
-    supportsCloning: true,
     hasNamedVoices: true,
     requiresGeminiKey: true,
     blurb: "Highest quality, promptable; many languages.",
@@ -122,11 +119,22 @@ export const TTS_PROVIDER_INFOS: readonly TtsProviderInfo[] = [
     hintKey: "audio.provider.geminiHint",
   },
   {
+    id: "elevenlabs",
+    title: "ElevenLabs",
+    shortTitle: "ElevenLabs",
+    tier: "cloud",
+    hasNamedVoices: true,
+    requiresElevenLabsKey: true,
+    badge: "Your key",
+    blurb: "Expressive multilingual voices, cloning and speech-to-speech.",
+    caveat: "Needs your own ElevenLabs API key.",
+    hintKey: "audio.provider.elevenLabsHint",
+  },
+  {
     id: "mms",
     title: "MMS (multilingual)",
     shortTitle: "MMS",
     tier: "device",
-    supportsCloning: false,
     hasNamedVoices: true,
     localModel: "mms",
     blurb: "Free, on-device; many languages.",
@@ -163,8 +171,26 @@ export function effectiveTtsProvider(provider: TtsProvider | undefined): TtsProv
   return provider
 }
 
+/**
+ * The reference clip an Inworld instant ("quick") clone reads from, or
+ * undefined when the voice is not one. Only a voice whose provider is Inworld
+ * can be an instant clone: a `referenceAudioId` on any other voice — a
+ * Gemini/MMS clone from before AQU-2291, which needed Seed-VC — is ignored, as
+ * it is on a character, trained or ElevenLabs voice.
+ */
+export function inworldCloneReferenceId(
+  voice: Pick<Voice, "provider" | "referenceAudioId" | "libraryVoiceId" | "customVoice" | "elevenLabs">,
+): string | undefined {
+  if (!voice.referenceAudioId || !voice.provider) return undefined
+  if (voice.libraryVoiceId || voice.customVoice || voice.elevenLabs) return undefined
+  return effectiveTtsProvider(voice.provider) === "inworld" ? voice.referenceAudioId : undefined
+}
+
+/** Engines that synthesize in the sync-worker (no client-side synth path):
+ *  hosted Inworld, and BYOK ElevenLabs (AQU-2299). */
 export function isServerTtsProvider(provider: TtsProvider | undefined): boolean {
-  return effectiveTtsProvider(provider) === "inworld"
+  const engine = effectiveTtsProvider(provider)
+  return engine === "inworld" || engine === "elevenlabs"
 }
 
 export function providerInfo(provider: TtsProvider | undefined): TtsProviderInfo {
@@ -228,6 +254,9 @@ export function defaultVoiceNameForProvider(
 ): string {
   const engine = effectiveTtsProvider(provider)
   if (engine === "inworld") return DEFAULT_INWORLD_VOICE
+  // An ElevenLabs voice is named by `voice.elevenLabs.voiceId`, picked in the
+  // voice browser — there is no default account voice to guess.
+  if (engine === "elevenlabs") return ""
   if (engine === "mms") return inferMmsLanguageCode(context.targetLanguage) ?? DEFAULT_MMS_LANGUAGE
   return DEFAULT_GEMINI_VOICE
 }
@@ -239,6 +268,16 @@ export function normalizeVoiceForProvider(
 ): Voice {
   const engine = effectiveTtsProvider(provider)
   const next: Voice = { ...voice, provider: engine }
+  if (engine !== "elevenlabs") {
+    delete next.elevenLabs
+    delete next.elevenLabsClone
+  }
+  if (engine !== "inworld") {
+    // Only Inworld can instant-clone a reference clip; on any other engine a
+    // leftover clip (a pre-AQU-2291 Gemini clone) means nothing.
+    delete next.referenceAudioId
+    delete next.referenceTakeKey
+  }
   if (engine === "inworld") {
     if (!isInworldVoiceName(next.voiceName)) next.voiceName = DEFAULT_INWORLD_VOICE
     if (!isInworldAudioQuality(next.audioQuality)) {
@@ -247,10 +286,17 @@ export function normalizeVoiceForProvider(
     }
     return next
   }
-  delete next.language
   delete next.speakingRate
   delete next.deliveryMode
   delete next.audioQuality
+  if (engine === "elevenlabs") {
+    // Keeps `language` (it feeds `language_code` on models that take one) and
+    // the ElevenLabs block; drops the Inworld/Gemini timbre id.
+    delete next.voiceName
+    if (next.elevenLabs) next.elevenLabs = { ...next.elevenLabs, modelId: next.elevenLabs.modelId ?? DEFAULT_ELEVENLABS_MODEL }
+    return next
+  }
+  delete next.language
   if (engine === "gemini") {
     if (!isGeminiVoiceName(next.voiceName)) next.voiceName = DEFAULT_GEMINI_VOICE
     return next

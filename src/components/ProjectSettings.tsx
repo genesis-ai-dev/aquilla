@@ -161,6 +161,7 @@ import { CELL_EDITING_FLOOR_OPTIONS, cellEditingTierLabel } from "@/components/P
 import { OrgDefaultSource, orgBooleanOptionLabel } from "@/components/ProjectSettings/OrgDefaultSource"
 import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { ElevenLabsConnectCard } from "@/components/voice/elevenlabs/ElevenLabsConnectCard"
 import { PERMISSION_DOCS_URL } from "@/components/PermissionDeniedAlert"
 import { resolveRoleName, ROLE } from "@/lib/frontier/roles"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
@@ -1018,7 +1019,7 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
     { id: "section-draft-context", label: t("projectSettings.section.draftContext"), keywords: ["draft context", "preceding cells", "left context", "paragraph drafting", "context budget"] },
     { id: "section-advanced-llm", label: t("projectSettings.section.advancedLlm"), keywords: ["provider", "endpoint", "api key", "model", "ai model", "advanced", "llm", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom"] },
     // AQU-1758: the Voice Studio is the Voices tab now; its old name still finds it.
-    { id: "section-voice", label: t("projectSettings.section.voice"), keywords: ["tts", "voices", "cast", "voice studio", "audio", "gemini", "api key", "tts key"] },
+    { id: "section-voice", label: t("projectSettings.section.voice"), keywords: ["tts", "voices", "cast", "voice studio", "audio", "gemini", "elevenlabs", "api key", "tts key"] },
     { id: "section-local-models", label: t("projectSettings.section.localModels"), keywords: ["whisper", "mms", "transcription", "model", "download", "offline", "local ai", "local models", "on-device"] },
     { id: "section-validation", label: t("projectSettings.section.validation"), keywords: ["validation count", "approvals", "audio validation"] },
     { id: "section-decay", label: t("projectSettings.decay.summary"), keywords: ["health", "decay", "decay threshold", "half life", "retrieval support", "max hops", "attention threshold"] },
@@ -2363,6 +2364,16 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
                   onUserKeyChange={(v) => setUserApiKey("gemini-tts", v)}
                   help={t("projectSettings.voice.geminiKeyHelp")}
                 />
+              </SettingsRow>
+              {/* AQU-2299: the user's own ElevenLabs key, per user + device
+                  (never project settings) — the same key row / connected line
+                  New voice shows. */}
+              <SettingsRow
+                label="ElevenLabs"
+                description={t("projectSettings.voice.elevenLabsHelp")}
+                block
+              >
+                <ElevenLabsConnectCard projectId={id} session={session} />
               </SettingsRow>
               <SettingsRow
                 label={t("common.voices")}

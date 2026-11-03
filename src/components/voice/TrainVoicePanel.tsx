@@ -4,21 +4,22 @@
 // start training (~45 min on the voice forge). The cast gets the voice at once,
 // marked "Training" until it is ready for Change voice.
 //
+// Opened from a line's take ("Train a voice from this recording", AQU-2291),
+// that take arrives as the first recording through `seedRecording`.
+//
 // Consent is the organization's responsibility and the panel says so plainly:
 // nothing starts until the maintainer ticks the statement, and the worker keeps
 // that confirmation as an audit record.
-import { useCallback, useState, type ReactNode } from "react"
-import { FileAudio, ShieldCheck, Upload, X } from "lucide-react"
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
+import { FileAudio, Upload, X } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { probeDurationMsSafe } from "@/lib/import"
 import {
-  CUSTOM_VOICE_CONSENT_STATEMENT,
   CUSTOM_VOICE_MAX_CLIP_BYTES,
   CUSTOM_VOICE_MAX_CLIPS,
   CUSTOM_VOICE_MAX_MINUTES,
@@ -28,6 +29,7 @@ import {
   voiceFromCustomTraining,
 } from "@/lib/audio/custom-voice"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
+import { VoiceConsentBox } from "@/components/voice/VoiceConsentBox"
 import type { Voice } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 
@@ -47,6 +49,8 @@ export interface TrainVoicePanelProps {
   fileId?: string | null
   session?: FrontierSession | null
   onStarted: (voice: Voice) => void
+  /** Loads a recording to start the list with (a line's take). Called once. */
+  seedRecording?: () => Promise<File>
 }
 
 const fmt = (seconds: number) => `${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, "0")}`
@@ -70,14 +74,16 @@ export function TrainVoicePanel(props: TrainVoicePanelProps) {
   return <TrainVoiceForm {...props} nameField={nameField} />
 }
 
-function TrainVoiceForm({ draft, projectId, fileId, session, onStarted, nameField }: TrainVoicePanelProps & { nameField: ReactNode }) {
+function TrainVoiceForm({
+  draft, projectId, fileId, session, onStarted, seedRecording, nameField,
+}: TrainVoicePanelProps & { nameField: ReactNode }) {
   const t = useT()
   const [recordings, setRecordings] = useState<Recording[]>([])
   const [consent, setConsent] = useState(false)
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const addFiles = useCallback((files: FileList | null) => {
+  const addFiles = useCallback((files: ArrayLike<File> | null) => {
     if (!files) return
     const added = Array.from(files).slice(0, CUSTOM_VOICE_MAX_CLIPS)
     setRecordings((cur) => [...cur, ...added.map((file) => ({ file, seconds: null }))].slice(0, CUSTOM_VOICE_MAX_CLIPS))
@@ -88,10 +94,24 @@ function TrainVoiceForm({ draft, projectId, fileId, session, onStarted, nameFiel
     }
   }, [])
 
+  // The seeded take loads once per mount (the modal remounts per seed). No
+  // cancel on cleanup: under StrictMode the ref keeps the re-run from loading
+  // again, so the first run is the only one that can deliver the file.
+  const [seeding, setSeeding] = useState(Boolean(seedRecording))
+  const seededRef = useRef(false)
+  useEffect(() => {
+    if (!seedRecording || seededRef.current) return
+    seededRef.current = true
+    seedRecording()
+      .then((file) => addFiles([file]))
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setSeeding(false))
+  }, [seedRecording, addFiles])
+
   const totalSeconds = recordings.reduce((sum, r) => sum + (r.seconds ?? 0), 0)
   const minutes = totalSeconds / 60
   const oversized = recordings.filter((r) => r.file.size > CUSTOM_VOICE_MAX_CLIP_BYTES)
-  const probing = recordings.some((r) => r.seconds == null)
+  const probing = seeding || recordings.some((r) => r.seconds == null)
   const enough = minutes >= CUSTOM_VOICE_MIN_MINUTES
   const tooMuch = minutes > CUSTOM_VOICE_MAX_MINUTES
   const name = draft.name.trim()
@@ -203,31 +223,7 @@ function TrainVoiceForm({ draft, projectId, fileId, session, onStarted, nameFiel
         )}
       </div>
 
-      <div className="space-y-2.5 rounded-xl border border-amber-500/30 bg-amber-500/[0.06] p-3">
-        <p className="flex items-center gap-1.5 text-[13px] font-medium">
-          <ShieldCheck className="size-4 text-amber-600 dark:text-amber-400" />
-          {t("audio.train.consentTitle")}
-        </p>
-        <p className="text-xs leading-relaxed text-muted-foreground">{t("audio.train.consentBody")}</p>
-        <details className="group text-[11px] text-muted-foreground">
-          <summary className="cursor-pointer select-none underline-offset-2 hover:underline">
-            {t("audio.train.fullStatement")}
-          </summary>
-          <p className="mt-1.5 rounded-md bg-background/60 p-2 leading-relaxed" lang="en">{CUSTOM_VOICE_CONSENT_STATEMENT}</p>
-        </details>
-        {/* Not a wrapping <label>: around the Checkbox's own button, one click
-            would toggle it twice. */}
-        <div className="flex items-start gap-2 text-xs">
-          <Checkbox
-            id="train-voice-consent"
-            checked={consent}
-            onCheckedChange={(v) => setConsent(v === true)}
-            aria-label={t("audio.train.consentCheckboxAriaLabel")}
-            className="mt-0.5"
-          />
-          <label htmlFor="train-voice-consent" className="leading-relaxed">{t("audio.train.consentCheckbox")}</label>
-        </div>
-      </div>
+      <VoiceConsentBox id="train-voice-consent" checked={consent} onCheckedChange={setConsent} />
 
       {error && <p className="select-text break-words text-xs text-destructive" role="alert">{error}</p>}
 

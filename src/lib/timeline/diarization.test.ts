@@ -60,8 +60,8 @@ describe("turnsToSegments", () => {
   })
 
   it("keeps each segment's TRIM window at the tight turn bounds (AQU-646)", () => {
-    // Trims feed voice-reference extraction + Whisper — tiling them would
-    // contaminate a speaker's clone reference with the neighbor's audio.
+    // Trims feed Whisper and each turn's playback — tiling them would bleed
+    // the neighbor's audio into a speaker's turn.
     const { segments } = turnsToSegments(turns)
     expect(segments.map((s) => [s.trimStartMs, s.trimEndMs])).toEqual([
       [0, 2000],

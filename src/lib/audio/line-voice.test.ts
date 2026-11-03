@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest"
 import {
-  cloneNameSuggestion,
   lineTake,
   lineTakeLabel,
   lineVoiceActionFor,
@@ -61,10 +60,6 @@ describe("picking a voice acts on the line", () => {
   it("does nothing when the take is already in that voice", () => {
     expect(lineVoiceActionFor(generated, mary, ready)).toBeNull()
   })
-
-  it("never re-voices a take some voice was cloned from (AQU-2037)", () => {
-    expect(lineVoiceActionFor(recorded, hearth, { ...ready, takeIsReference: true })).toBeNull()
-  })
 })
 
 describe("the one-click when the line's voice and its take disagree", () => {
@@ -110,11 +105,5 @@ describe("naming a person's recording", () => {
   it("names nothing for a generated voice or a line with no take", () => {
     expect(lineTakeLabel(generated, "dev")).toBeNull()
     expect(lineTakeLabel(empty, "dev")).toBeNull()
-  })
-
-  it("suggests who recorded the take as a clone's name", () => {
-    expect(cloneNameSuggestion(byAna, "dev")).toBe("ana")
-    expect(cloneNameSuggestion(recorded, "dev")).toBe("dev")
-    expect(cloneNameSuggestion(generated, "dev")).toBe("")
   })
 })

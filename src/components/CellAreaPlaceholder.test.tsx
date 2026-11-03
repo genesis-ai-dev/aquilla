@@ -27,7 +27,7 @@ describe("CellAreaPlaceholder", () => {
   // until the project's languages load.
   it("says it is loading the project's languages, with no row or editor in it", () => {
     render(<CellAreaPlaceholder state={{ kind: "lanes-loading" }} fileName="GEN" hasFiles filesLoaded />)
-    const status = screen.getByRole("status", { name: "Loading this project's languages" })
+    const status = screen.getByRole("status", { name: "Loading this project's language lanes" })
     expect(status).toHaveAttribute("aria-busy", "true")
     expect(status.querySelector("[inert]")).not.toBeNull()
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument()

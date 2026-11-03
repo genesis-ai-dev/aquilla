@@ -9,7 +9,6 @@ import {
   MEMBER_GRANT_MIN_ROLE,
   callerLevelFromRoster,
   canManageProjectMembers,
-  grantableProjectRoles,
   roleChangeBlock,
 } from "./member-grants"
 import { ROLE } from "./roles"
@@ -96,29 +95,6 @@ describe("roleChangeBlock", () => {
   })
 })
 
-describe("grantableProjectRoles", () => {
-  it("never offers a role above the caller's own level", () => {
-    const levels = grantableProjectRoles(ROLE.PROJECT_LEAD).map((r) => r.level)
-    expect(levels).toContain(ROLE.PROJECT_LEAD)
-    expect(levels).not.toContain(ROLE.MAINTAINER)
-  })
-
-  it("offers the whole project picker to a maintainer", () => {
-    const levels = grantableProjectRoles(ROLE.MAINTAINER).map((r) => r.level)
-    expect(levels).toEqual([
-      ROLE.VIEWER,
-      ROLE.COMMENTER,
-      ROLE.REVIEWER,
-      ROLE.CONTRIBUTOR,
-      ROLE.PROJECT_LEAD,
-      ROLE.MAINTAINER,
-    ])
-  })
-
-  it("keeps the full picker while the caller's level is unknown", () => {
-    expect(grantableProjectRoles(null)).toHaveLength(6)
-  })
-})
 
 describe("callerLevelFromRoster", () => {
   const roster = [

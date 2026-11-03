@@ -8,11 +8,26 @@ name: Notify help bot
 #
 # GitHub reads this file from the tagged commit, so it fires only for
 # releases cut from a dev that already carries it.
+#
+# release-deploy.yml pushes its tag with GITHUB_TOKEN, and GitHub never
+# chains runs from GITHUB_TOKEN events, so the tag trigger stays silent for
+# the hourly line. That workflow starts this one by hand instead, on dev,
+# naming the tag and sha it just released.
 
 on:
   push:
     # Calver only: YYYY.MM.DD.NN, as tag-release.sh writes it.
     tags: ['20[0-9][0-9].[0-9][0-9].[0-9][0-9].[0-9][0-9]']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Calver tag that went live (YYYY.MM.DD.NN)'
+        required: true
+        type: string
+      sha:
+        description: 'Commit the tag points at'
+        required: true
+        type: string
 
 # Sends one request to the bot; needs no access to the repo.
 permissions: {}
@@ -28,8 +43,8 @@ jobs:
           # the whole line, "Authorization: Bearer <key>".
           WEBHOOK_URL: ${{ secrets.GROK_HELP_WEBHOOK_URL }}
           WEBHOOK_AUTH_HEADER: ${{ secrets.GROK_HELP_WEBHOOK_AUTH_HEADER }}
-          TAG: ${{ github.ref_name }}
-          SHA: ${{ github.sha }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+          SHA: ${{ inputs.sha || github.sha }}
         run: |
           for name in WEBHOOK_URL WEBHOOK_AUTH_HEADER; do
             if [ -z "${!name}" ]; then
@@ -37,6 +52,15 @@ jobs:
               exit 1
             fi
           done
+          # A dispatch names its tag by hand; hold it to the push filter's shape.
+          if ! [[ "$TAG" =~ ^20[0-9]{2}\.[0-9]{2}\.[0-9]{2}\.[0-9]{2}$ ]]; then
+            echo "::error::'$TAG' is not a calver tag (YYYY.MM.DD.NN)."
+            exit 1
+          fi
+          if ! [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::'$SHA' is not a full commit sha."
+            exit 1
+          fi
           # A failed ping fails the run, so a missed docs update shows up red.
           curl -fsS --max-time 30 --retry 3 --retry-all-errors -X POST "$WEBHOOK_URL" \
             -H 'Content-Type: application/json' \

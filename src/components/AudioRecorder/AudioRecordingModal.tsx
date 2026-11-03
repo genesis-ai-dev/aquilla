@@ -36,6 +36,7 @@ import { groupSelection, groupTakesByTrack, listedTakeCount as countListedTakes,
 import type { FrontierSession } from "@/lib/frontier/types"
 import { composeTakeWindow, defaultTakeWindow } from "@/lib/audio/take-margins"
 import { keptLengthSec } from "@/lib/audio/trim-edit"
+import { isGeneratedTake } from "@/lib/audio/track-audio"
 import { usePreviewTake } from "./usePreviewTake"
 import { cameraLabel } from "@/lib/timeline/cue-character"
 import type { CameraState } from "@/lib/sync/cells-read-types"
@@ -2536,7 +2537,9 @@ export function AudioRecordingModal({
                       // keeps its place, and without it so a long line still
                       // leaves the takes drawer its room (Sam, 2026-09-28).
                       height={40}
-                      kind={readyTakeId === audioEntry?.selectedGeneratedVoiceAudioId ? "generated" : "take"}
+                      // AQU-2235: a generated voice carries its sparkle on any
+                      // track, by the one rule the takes list reads too.
+                      kind={isGeneratedTake({ selectedGeneratedVoiceAudioId: audioEntry?.selectedGeneratedVoiceAudioId }, readyTakeId, readyAtt) ? "generated" : "take"}
                       trackVars={readyTrackVars}
                       strategy="eager"
                       validation={readyBadge === "self" || readyBadge === "full" ? readyBadge : null}
@@ -2841,7 +2844,7 @@ export function AudioRecordingModal({
               </AppTooltip>
               {!takeInHand && (
                 <InfoNote
-                  label={t("common.aboutAria", { name: t("importExport.dialog.formatLegend") })}
+                  label={t("audio.recordingModal.formatInfoAria")}
                   testId="rec-format-info"
                   className="text-muted-foreground/70"
                   iconClassName="h-3 w-3"

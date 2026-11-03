@@ -28,6 +28,11 @@ describe("inherited settings vocabulary (AQU-1075)", () => {
     }
     expect(copied.has("systemPrompt")).toBe(true)
     expect(copied.has("translationBrief")).toBe(true)
+    // AQU-2305: and never the import floor. It is a permission resolved
+    // against the DOWNSTREAM project's own org (a link can cross orgs), so a
+    // copy would let an upstream maintainer lock another project's people out
+    // of their imports.
+    expect(INHERIT_NEVER_KEYS).toContain("importMinRole")
     expect(copied.has("validationNamedUsers")).toBe(false)
     expect(copied.has("rules")).toBe(false)
   })

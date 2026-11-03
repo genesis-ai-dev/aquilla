@@ -85,7 +85,7 @@ calibration record. `FINDINGS-*.md` hold the tables per pass.
 preview's URL is `https://<branch alias>-aquilla-web-preview.<account>.workers.dev`
 (the build log prints it as `app=`; the alias is the branch name lowered,
 non-alphanumerics to `-`, cut at 30). `AQUILLA_ORG_ID` is the org the
-stories work in (`9`, Dev Org, on the local seed).
+stories work in (`1`, Dev Org, the first organization a fresh local seed creates; `organizations.id` is a serial, so check it if the stack was seeded differently).
 
 On the local stack `login` opens `/__dev/login?as=<user>`. On a preview
 that route does not exist; set `AQUILLA_QA_USER` and `AQUILLA_QA_PASSWORD`
@@ -139,7 +139,7 @@ everyone. Name them in stories; never paste an id.
   timeline, either takes on Target audio or the source audio of a
   media-imported file. The timeline's Sources menu says which of the
   three a file has.
-- The seeded ids in the stories (`bestalu-bible`, org `9`) exist on the
+- The seeded ids in the stories (`bestalu-bible`, org `1`) exist on the
   local stack only.
 - Leave the workspace as you found it. Create throwaways under your own
   prefix and archive them when the walk ends. Never rename, archive, or

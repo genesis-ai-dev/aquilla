@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 
 describe("generateCombinedVoice routing", () => {
-  it("inworld voice uses server TTS path and attaches to all cells", async () => {
+  it("inworld voice (a quick clone) uses server TTS path with its clip and attaches to all cells", async () => {
     vi.resetModules()
     const synthCellTts = vi.fn(async () => ({
       audioId: "a", durationSeconds: 1,
@@ -16,7 +16,7 @@ describe("generateCombinedVoice routing", () => {
       ttsStatusKey: (s: string) => s,
     }))
     vi.doMock("./voices", () => ({
-      resolveCastVoice: () => ({ id: "v", name: "N", provider: "inworld", voiceName: "Dennis" }),
+      resolveCastVoice: () => ({ id: "v", name: "N", provider: "inworld", voiceName: "Dennis", referenceAudioId: "ref-n.webm" }),
     }))
     vi.doMock("./upload", () => ({
       buildAudioId: () => "id",
@@ -26,7 +26,7 @@ describe("generateCombinedVoice routing", () => {
     vi.doMock("./sync-token-fetcher", () => ({
       audioSyncTokenFetcherForSession: () => async () => "tok",
     }))
-    vi.doMock("./voice-clone", () => ({ convertToCloneVoice: vi.fn() }))
+    vi.doMock("./voice-clone", () => ({ convertToLibraryVoice: vi.fn() }))
     vi.doMock("@/lib/sync/events-emit", () => ({ emitCellAudioAttach: emitAttach }))
     vi.doMock("./audio-attachments-bus", () => ({ notifyAudioAttachmentsChanged: vi.fn() }))
 
@@ -62,6 +62,11 @@ describe("generateCombinedVoice routing", () => {
     })
 
     expect(synthCellTts).toHaveBeenCalledTimes(1)
+    // The Inworld instant clone's clip rides the one /tts call.
+    expect(synthCellTts).toHaveBeenCalledWith(
+      expect.objectContaining({ referenceAudioId: "ref-n.webm" }),
+      expect.any(Function),
+    )
     expect(synthForCell).not.toHaveBeenCalled()
     expect(emitAttach).toHaveBeenCalledTimes(2)
     // AQU-1572: one shared clip, one `audio generated` per line it landed on.
@@ -112,7 +117,7 @@ describe("generateCombinedVoice routing", () => {
     vi.doMock("./sync-token-fetcher", () => ({
       audioSyncTokenFetcherForSession: () => async () => "tok",
     }))
-    vi.doMock("./voice-clone", () => ({ convertToCloneVoice: vi.fn() }))
+    vi.doMock("./voice-clone", () => ({ convertToLibraryVoice: vi.fn() }))
     vi.doMock("@/lib/sync/events-emit", () => ({ emitCellAudioAttach: emitAttach }))
     vi.doMock("./audio-attachments-bus", () => ({ notifyAudioAttachmentsChanged: vi.fn() }))
 
@@ -176,7 +181,7 @@ describe("generateCombinedVoice routing", () => {
     vi.doMock("./sync-token-fetcher", () => ({
       audioSyncTokenFetcherForSession: () => async () => "tok",
     }))
-    vi.doMock("./voice-clone", () => ({ convertToCloneVoice: vi.fn() }))
+    vi.doMock("./voice-clone", () => ({ convertToLibraryVoice: vi.fn() }))
     vi.doMock("@/lib/sync/events-emit", () => ({ emitCellAudioAttach: emitAttach }))
     vi.doMock("./audio-attachments-bus", () => ({ notifyAudioAttachmentsChanged: vi.fn() }))
   }

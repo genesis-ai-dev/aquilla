@@ -75,7 +75,7 @@ describe("RulesSurface punctuation note (AQU-2000)", () => {
 
   it("still says the lane records no language when it really records none", () => {
     expect(noteFor(projectWith([lane("", "", 0)]))).toBe(
-      "Judged by the source's own marks — this lane records no language.",
+      "Judged by the source's own marks — this language lane records no language.",
     )
   })
 

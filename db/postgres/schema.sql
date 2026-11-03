@@ -358,6 +358,11 @@ CREATE TABLE project_settings (
     wp_validation_named_users_audio JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'validationNamedUsersAudio') STORED,
     wp_allow_self_validation_audio JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'allowSelfValidationAudio') STORED,
     wp_harmonize_min_role JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'harmonize_min_role') STORED,
+    -- AQU-2305 (0192): this project's own import floor, stricter-only over its
+    -- org's `importMinRole` (AQU-2304). Read by the `file.create` perimeter on
+    -- every source import, so it joins this projection rather than being the
+    -- one write-path read that reopens the blob (db/shared/import-floor.ts).
+    wp_import_min_role JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'importMinRole') STORED,
     -- AQU-1771 (0174): this project's own, stricter-only floors for who sees
     -- its member list and each member's progress — read on every roster and
     -- named-progress check (members, mentions, assignments, activity), so they
@@ -379,14 +384,7 @@ CREATE TABLE project_settings (
     -- 0190 (AQU-2263): and whether it sets its own "Auto-propagate
     -- repetitions" answer, for the same count and reset. One line (dev-stack
     -- reconciler).
-    auto_propagate_repetitions TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'autoPropagateRepetitions') STORED,
-    -- 0192 (AQU-2306): this project's own, stricter-only import floor
-    -- (AQU-2305), so the org's Security page can count and name the projects
-    -- that require more than the org does to import a file. Number-typed like
-    -- the visibility floors above, and for the same reason. One line
-    -- (dev-stack reconciler).
-    import_min_role TEXT
-      GENERATED ALWAYS AS (CASE WHEN jsonb_typeof((settings::jsonb) -> 'importMinRole') = 'number' THEN (settings::jsonb) ->> 'importMinRole' END) STORED
+    auto_propagate_repetitions TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'autoPropagateRepetitions') STORED
 );
 CREATE INDEX project_settings_agent_react ON project_settings(project_id) WHERE agent_react;
 
@@ -1106,6 +1104,12 @@ CREATE TABLE cell_audio (
     -- limits. NULL = no place of its own there: that timing reads
     -- target_offset_ms, as every take before 0189 does.
     recordings_offset_ms BIGINT,
+    -- AQU-2327 (0193): the clip's volume (dB) and fades (ms), written only by
+    -- cell.audio.gain. Like the trim they never change the recording; NULL =
+    -- as recorded, no fade.
+    gain_db            REAL,
+    fade_in_ms         BIGINT,
+    fade_out_ms        BIGINT,
     PRIMARY KEY (project_id, file_id, cell_id, audio_id)
 );
 

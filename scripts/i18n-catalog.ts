@@ -5,6 +5,9 @@
  *     Lint the context sidecar against the base catalog. Same check the
  *     `context.test.ts` suite runs, exposed as a standalone command so it can be
  *     wired into a pre-commit hook or a docs example without booting vitest.
+ *     It also fails an English message that uses a retired word from the
+ *     interface's word list (AQU-2261, src/lib/i18n/retired-terms.ts), naming
+ *     the word to write instead.
  *
  *   pnpm i18n:export [outDir]              (default: i18n-export/)
  *     Write the files a translator or the translation agent needs:
@@ -54,6 +57,7 @@ import {
 import { MESSAGE_KEYS, catalogContextIssues } from "../src/lib/i18n/context"
 import { DEFAULT_LOCALE, LOCALES, isSupportedLocale } from "../src/lib/i18n/locales"
 import { CATALOGS, unknownCatalogKeys } from "../src/lib/i18n/messages/all"
+import { retiredTermIssues } from "../src/lib/i18n/retired-terms"
 import type { MessageKey } from "../src/lib/i18n/messages/en"
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..")
@@ -68,16 +72,27 @@ function fail(message: string): never {
 
 function runCheck(): void {
   const issues = [...catalogContextIssues(), ...unknownCatalogKeys()]
+  // AQU-2261: the interface's word list. An English message may not use a
+  // retired word; each failure names the word to write instead.
+  const retired = retiredTermIssues()
   if (issues.length > 0) {
     console.error(
       `i18n-catalog: ${issues.length} context issue(s) — every message key needs a ` +
         `namespace \`_context\` or its own description (docs/I18N-CONTEXT-CATALOG.md):\n`,
     )
     for (const issue of issues) console.error(`  • ${issue}`)
-    process.exit(1)
   }
+  if (retired.length > 0) {
+    console.error(
+      `${issues.length > 0 ? "\n" : ""}i18n-catalog: ${retired.length} retired word(s) in English ` +
+        `messages — see src/lib/i18n/retired-terms.ts and docs/UI-GLOSSARY.md:\n`,
+    )
+    for (const issue of retired) console.error(`  • ${issue}`)
+  }
+  if (issues.length > 0 || retired.length > 0) process.exit(1)
   console.log(
-    `i18n-catalog: context complete — ${MESSAGE_KEYS.length} message key(s) covered.`,
+    `i18n-catalog: context complete — ${MESSAGE_KEYS.length} message key(s) covered, ` +
+      `no retired words.`,
   )
 }
 

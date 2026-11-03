@@ -6,7 +6,6 @@ vi.mock("@/lib/audio/transport-pause", () => ({ pauseAllTransports: vi.fn() }))
 
 import { TargetAudioLane, type ChangeVoiceMenuState, type TakeMenuActions } from "./TargetAudioLane"
 import type { CellData } from "@/hooks/useCells"
-import { CHANGE_VOICE_QUALITIES, type ChangeVoiceQuality } from "@/lib/audio/change-voice"
 import { renderWithTooltips } from "@/test-utils/tooltip"
 
 const SOURCE_ID = "audio-f1-1690000000-shared.mp3"
@@ -43,8 +42,7 @@ const base = {
 function changeVoiceState(over: Partial<ChangeVoiceMenuState> = {}): ChangeVoiceMenuState {
   return {
     voiceName: "Narrator",
-    quality: null,
-    blockers: { fast: null, standard: null, high: null },
+    blocker: null,
     ...over,
   }
 }
@@ -231,28 +229,14 @@ describe("TargetAudioLane — per-line Change voice (AQU-2026)", () => {
     />
   )
 
-  /** Right-click the take, then open the Change voice submenu. */
-  async function openChangeVoice() {
+  it("converts this line in one click — no quality submenu (AQU-2291)", async () => {
+    const actions = menuActions()
+    render(lane(actions))
     rightClick("tl-target-c1", 80)
-    fireEvent.click(await screen.findByTestId("tl-take-menu-change-voice"))
-    return await screen.findByTestId("tl-take-menu-change-voice-standard")
-  }
-
-  it("converts this line at the quality picked, and offers all three", async () => {
-    const actions = menuActions()
-    render(lane(actions))
-    await openChangeVoice()
-    for (const quality of CHANGE_VOICE_QUALITIES) {
-      expect(screen.getByTestId(`tl-take-menu-change-voice-${quality}`), quality).toBeInTheDocument()
-    }
-    fireEvent.click(screen.getByTestId("tl-take-menu-change-voice-high"))
-    expect(actions.changeVoice).toHaveBeenCalledWith("c1", "high")
-  })
-
-  it("asks the line, not the chip, what it may do", async () => {
-    const actions = menuActions()
-    render(lane(actions))
-    await openChangeVoice()
+    const item = await screen.findByTestId("tl-take-menu-change-voice")
+    expect(item.textContent).toContain("Change voice")
+    fireEvent.click(item)
+    expect(actions.changeVoice).toHaveBeenCalledWith("c1")
     expect(actions.changeVoiceState).toHaveBeenCalledWith("c1")
   })
 
@@ -265,12 +249,11 @@ describe("TargetAudioLane — per-line Change voice (AQU-2026)", () => {
   })
 
   it.each([
-    ["not-cloned" as const, "Narrator has no reference clip. Assign a cloned voice to change this take."],
-    ["voice-reference" as const, "A voice is cloned from this take"],
-  ])("greys the item and gives the reason when it cannot run at all (%s)", async (blocker, reason) => {
-    const actions = menuActions({
-      changeVoiceState: vi.fn(() => changeVoiceState({ blockers: { fast: blocker, standard: blocker, high: blocker } })),
-    })
+    ["not-trained" as const, "Narrator can read text but can't re-voice recordings — Change voice works with character, trained and ElevenLabs voices."],
+    ["up-to-date" as const, "This take is already in Narrator's voice"],
+    ["busy" as const, "Change voice"],
+  ])("greys the item and gives the reason when it cannot run (%s)", async (blocker, reason) => {
+    const actions = menuActions({ changeVoiceState: vi.fn(() => changeVoiceState({ blocker })) })
     render(lane(actions))
     rightClick("tl-target-c1", 80)
     const item = await screen.findByTestId("tl-take-menu-change-voice")
@@ -278,39 +261,6 @@ describe("TargetAudioLane — per-line Change voice (AQU-2026)", () => {
     expect(item.textContent).toContain(reason)
     fireEvent.click(item)
     expect(actions.changeVoice).not.toHaveBeenCalled()
-    // No submenu to open: the reason IS the item.
-    expect(screen.queryByTestId("tl-take-menu-change-voice-standard")).toBeNull()
-  })
-
-  it("says a take is already in that voice, and still offers the other qualities", async () => {
-    const actions = menuActions({
-      changeVoiceState: vi.fn(() => changeVoiceState({
-        quality: "standard",
-        blockers: { fast: null, standard: "up-to-date", high: null },
-      })),
-    })
-    render(lane(actions))
-    const standard = await openChangeVoice()
-    expect(screen.getByTestId("tl-take-menu-change-voice-note").textContent)
-      .toBe("This take is already in Narrator's voice")
-    expect(standard.getAttribute("aria-disabled") === "true" || standard.hasAttribute("data-disabled")).toBe(true)
-    expect(standard.getAttribute("aria-checked")).toBe("true")
-    fireEvent.click(standard)
-    expect(actions.changeVoice).not.toHaveBeenCalled()
-    // Raising the quality reconverts this take alone.
-    fireEvent.click(screen.getByTestId("tl-take-menu-change-voice-high"))
-    expect(actions.changeVoice).toHaveBeenCalledWith("c1", "high")
-  })
-
-  it("ticks nothing when the take is not a conversion, and names the quality choice", async () => {
-    render(lane(menuActions()))
-    const standard = await openChangeVoice()
-    expect(screen.getByTestId("tl-take-menu-change-voice-note").textContent).toBe("Quality")
-    for (const quality of CHANGE_VOICE_QUALITIES as readonly ChangeVoiceQuality[]) {
-      expect(screen.getByTestId(`tl-take-menu-change-voice-${quality}`).getAttribute("aria-checked"), quality)
-        .toBe("false")
-    }
-    expect(standard).toBeInTheDocument()
   })
 
   it("offers nothing on a timeline you cannot edit", () => {
@@ -350,24 +300,35 @@ const GEN = "audio-c1-1700000900-gen.wav"
 const generatedTake = () =>
   cell({ [GEN]: { type: "audio", url: "frontier-audio://gen", slot: "generatedVoice", durationMs: 4000, voiceId: "v-narrator" } })
 
-describe("TargetAudioLane — make a character from a take (AQU-1758)", () => {
-  it("offers it on a take's menu, and hands over the take's line", async () => {
-    const makeCharacter = vi.fn()
+describe("TargetAudioLane — train a voice from a take (AQU-1758, AQU-2291)", () => {
+  it("offers it on a person's take, and hands over the take's line and audio", async () => {
+    const trainFromTake = vi.fn()
     render(
       <TargetAudioLane
         {...base}
         items={[{ cell: oneTake(), kind: "take", audioId: TAKE }]}
-        takeMenu={menuActions({ makeCharacter })}
+        takeMenu={menuActions({ trainFromTake })}
       />,
     )
     rightClick("tl-target-c1", 80)
-    const item = await screen.findByTestId("tl-take-menu-make-character")
-    expect(item.textContent).toBe("Make a character from this voice")
+    const item = await screen.findByTestId("tl-take-menu-train-voice")
+    expect(item.textContent).toBe("Train a voice from this recording")
     fireEvent.click(item)
-    expect(makeCharacter).toHaveBeenCalledWith("c1")
+    expect(trainFromTake).toHaveBeenCalledWith("c1", TAKE)
   })
 
-  it("leaves it out for someone who may not make voices", async () => {
+  it("leaves it out on a generated take, and for someone who may not make voices", async () => {
+    const { unmount } = render(
+      <TargetAudioLane
+        {...base}
+        items={[{ cell: generatedTake(), kind: "generated", audioId: GEN }]}
+        takeMenu={menuActions({ trainFromTake: vi.fn() })}
+      />,
+    )
+    rightClick("tl-target-c1", 80)
+    await screen.findByTestId("tl-take-menu-regenerate")
+    expect(screen.queryByTestId("tl-take-menu-train-voice")).toBeNull()
+    unmount()
     render(
       <TargetAudioLane
         {...base}
@@ -377,7 +338,7 @@ describe("TargetAudioLane — make a character from a take (AQU-1758)", () => {
     )
     rightClick("tl-target-c1", 80)
     await screen.findByTestId("tl-take-menu-rerecord")
-    expect(screen.queryByTestId("tl-take-menu-make-character")).toBeNull()
+    expect(screen.queryByTestId("tl-take-menu-train-voice")).toBeNull()
   })
 })
 
@@ -427,26 +388,28 @@ describe("TargetAudioLane — a take's voice on its clip (AQU-1758)", () => {
 // opens the same menu as a right-click.
 describe("TargetAudioLane — a take's ⋯ (AQU-1758)", () => {
   it("opens the take's menu, the same items as a right-click", async () => {
-    const makeCharacter = vi.fn()
+    const trainFromTake = vi.fn()
     render(
       <TargetAudioLane
         {...base}
         items={[{ cell: oneTake(), kind: "take", audioId: TAKE }]}
         onCutTarget={vi.fn()}
         onOpenRecording={vi.fn()}
-        takeMenu={menuActions({ makeCharacter })}
+        takeMenu={menuActions({ trainFromTake })}
       />,
     )
     const more = screen.getByTestId("tl-target-c1-more")
     expect(more).toHaveAttribute("aria-label", "More actions")
-    // To the right of the record button: the mic makes room for it.
-    expect(screen.getByTestId("tl-target-c1-record").className).toContain("right-[1.625rem]")
+    // AQU-2235: both in the name bar's right end, the ⋯ to the right of the mic.
+    const hover = screen.getByTestId("tl-target-c1-bar-hover")
+    expect(hover.contains(more)).toBe(true)
+    expect(screen.getByTestId("tl-target-c1-record").nextElementSibling).toBe(more)
     fireEvent.click(more)
-    for (const id of ["split", "rerecord", "regenerate", "make-character", "vote", "rename", "delete"]) {
+    for (const id of ["split", "rerecord", "regenerate", "train-voice", "vote", "rename", "delete"]) {
       expect(await screen.findByTestId(`tl-take-menu-${id}`), id).toBeInTheDocument()
     }
-    fireEvent.click(screen.getByTestId("tl-take-menu-make-character"))
-    expect(makeCharacter).toHaveBeenCalledWith("c1")
+    fireEvent.click(screen.getByTestId("tl-take-menu-train-voice"))
+    expect(trainFromTake).toHaveBeenCalledWith("c1", TAKE)
   })
 
   it("splits at the playhead from there, when the playhead is on the take", async () => {
@@ -493,9 +456,10 @@ describe("TargetAudioLane — a take's ⋯ (AQU-1758)", () => {
         takeMenu={menuActions()}
       />,
     )
-    // 0.3 s at 40 px/s is 12 px: no room for the mic, the ⋯ is still there.
+    // 0.3 s at 40 px/s is 12 px: no room for the mic, the ⋯ is still there —
+    // in the name bar (AQU-2235), the same glyph as on a wide take.
     expect(screen.queryByTestId("tl-target-c1-record")).toBeNull()
-    expect(screen.getByTestId("tl-target-c1-more").className).toContain("h-4 w-4")
+    expect(screen.getByTestId("tl-target-c1-bar-hover").contains(screen.getByTestId("tl-target-c1-more"))).toBe(true)
   })
 
   it("is not there for someone who cannot change the take", () => {

@@ -30,7 +30,7 @@ export const nav = defineNamespace({
     // -- AccountSwitcher: account menu + auth dialogs --
     "nav.account.addTitle": "Add Aquilla account",
     "nav.account.loginTitle": "Log in to Aquilla",
-    "nav.account.signupTitle": "Create an Aquilla Account",
+    "nav.account.signupTitle": "Create an Aquilla account",
     "nav.account.newToFrontier": "New to Aquilla?",
     "nav.account.menuLabel": "Account menu: {username}",
     "nav.account.preferences": "Preferences",
@@ -199,13 +199,11 @@ export const nav = defineNamespace({
     "nav.workspaceActions.changeVoiceAll.description": plural(
       {
         one:
-          "Converts {n} cell to its assigned voice at {quality} quality. A changed " +
-          "reference clip is included. A take already at that quality from the current " +
-          "clip stays. Nothing is generated from text.",
+          "Converts {n} cell to its assigned character or trained voice. A take " +
+          "already in that voice stays. Nothing is generated from text.",
         other:
-          "Converts {n} cells to each assigned voice at {quality} quality. A changed " +
-          "reference clip is included. A take already at that quality from the current " +
-          "clip stays. Nothing is generated from text.",
+          "Converts {n} cells to each assigned character or trained voice. A take " +
+          "already in that voice stays. Nothing is generated from text.",
       },
       "n",
     ),
@@ -215,20 +213,22 @@ export const nav = defineNamespace({
     "nav.workspaceActions.splitQuotes.title": "Split lines at their quotation marks?",
     "nav.workspaceActions.splitQuotes.description": plural({
       one:
-        "{count} line in this file holds more than one speaker. Split at its quotation " +
-        "marks it becomes {lines} lines, so each speaker can have their own voice. Every " +
-        "language shares the new lines. Every existing translation is marked for review, " +
-        "so it has to be done again. A translation that splits the same way is divided " +
-        "between the new lines. Any other stays whole on the first line.",
+        "{count} line in this file holds more than one speaker. Split at its quotation marks it " +
+        "becomes {lines} lines, so each speaker can have their own voice. Every language lane shares " +
+        "the new lines. Every existing translation is marked for review, so it has to be done again. " +
+        "A translation that splits the same way is divided between the new lines. Any other stays " +
+        "whole on the first line.",
       other:
-        "{count} lines in this file hold more than one speaker. Split at their quotation " +
-        "marks they become {lines} lines, so each speaker can have their own voice. Every " +
-        "language shares the new lines. Every existing translation is marked for review, " +
-        "so it has to be done again. A translation that splits the same way is divided " +
-        "between the new lines. Any other stays whole on the first line.",
+        "{count} lines in this file hold more than one speaker. Split at their quotation marks they " +
+        "become {lines} lines, so each speaker can have their own voice. Every language lane shares " +
+        "the new lines. Every existing translation is marked for review, so it has to be done again. " +
+        "A translation that splits the same way is divided between the new lines. Any other stays " +
+        "whole on the first line.",
     }),
     "nav.workspaceActions.splitQuotes.multiLaneWarning":
-      "Splitting changes the source all lanes share. Each lane's translations of these lines are marked so they have to be done again, and each lane keeps the voice it already gave a line on that line's new narration.",
+      "Splitting changes the source all language lanes share. Each language lane's translations of " +
+      "these lines are marked so they have to be done again, and each language lane keeps the voice " +
+      "it already gave a line on that line's new narration.",
     "nav.workspaceActions.splitQuotes.none":
       "No line in this file holds more than one speaker at its quotation marks, so there is nothing to split.",
     "nav.workspaceActions.splitQuotes.confirmLabel": "Split lines",
@@ -368,7 +368,7 @@ export const nav = defineNamespace({
     "nav.fileList.collapseGroup": "Collapse {group}",
     "nav.fileList.renameGroup": "Rename {group}",
     "nav.fileList.ungroupedLabel": "Ungrouped",
-    "nav.fileList.jumpToTestament": "Jump to Testament",
+    "nav.fileList.jumpToTestament": "Jump to testament",
 
     // -- ExpandableFileList: hand-placed file order (AQU-1569) --
     "nav.fileList.reorderHandle": "Reorder {name}",
@@ -949,7 +949,7 @@ export const nav = defineNamespace({
       "nav.workspaceActions.changeVoiceAll.label": {
         description:
           "Secondary action-menu item (Media) that keeps every cell's existing " +
-          "recording and makes it sound like the cloned voice assigned to that cell. " +
+          "recording and makes it sound like the character or trained voice assigned to that cell. " +
           "Contrast with 'Generate AI voice for empty cells', which makes new audio " +
           "from text.",
         maxLength: 40,
@@ -961,12 +961,9 @@ export const nav = defineNamespace({
       "nav.workspaceActions.changeVoiceAll.description": {
         description:
           "Body of the confirmation dialog above. The point to keep: only the speaker's " +
-          "sound changes, and a new reference clip or a different quality is redone.",
+          "sound changes, and a take already in its voice is left as it is.",
         placeholders: {
-          n: "How many cells will be converted at the quality chosen in this dialog. Takes already made from the current reference clip at that quality are not included.",
-          quality:
-            "The quality chosen in this dialog — Fast, Standard, or High — already " +
-            "translated. Insert it as given.",
+          n: "How many cells will be converted. Takes already in their assigned voice are not included.",
         },
         maxLength: 200,
       },

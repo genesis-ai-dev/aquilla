@@ -16,7 +16,7 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { isDenoisedAudioId } from "@/lib/audio/upload"
 import { isDenoiseSupported } from "@/lib/audio/denoise"
-import { denoiseSplitTake, denoiseTake } from "@/lib/audio/denoise-take"
+import { denoiseSplitTake, denoiseTake, type DenoiseTakeArgs } from "@/lib/audio/denoise-take"
 import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
 import { emitCellAudioSelect } from "@/lib/sync/events-emit"
 import {
@@ -54,6 +54,8 @@ interface Props {
   /** For a split take's Revert: the original take's first piece as it reads,
    *  painted chosen at once (its whole group follows it). */
   originalTake?: AudioAttachmentOut | null
+  /** AQU-2327: the take being cleaned (its track, kept part, places, level). */
+  source?: DenoiseTakeArgs["source"]
 }
 
 export function DenoiseButton(props: Props) {
@@ -61,7 +63,7 @@ export function DenoiseButton(props: Props) {
   const {
     projectId, fileId, cellId, selectedAudioId, selectedUrl,
     referenceAudioId, originalUrl, originalDurationMs, author, session, editable,
-    targetLang, pieces, originalTake,
+    targetLang, pieces, originalTake, source,
   } = props
   const split = pieces && pieces.length > 1 ? pieces : null
 
@@ -92,6 +94,7 @@ export function DenoiseButton(props: Props) {
           author,
           session,
           ...(targetLang ? { targetLang } : {}),
+          ...(source ? { source } : {}),
           history: { selectedBefore: selectedAudioId },
         })
       }

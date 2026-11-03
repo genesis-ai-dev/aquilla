@@ -119,9 +119,10 @@ describe("AQU-2306: the projects stricter than the org's import floor", () => {
 
   it("ignores a stored value that is not a role-ladder number", async () => {
     await seedOrg()
-    // The generated column is number-typed (0192): `->>` cannot tell the number
-    // 600 from the string "600", and an import floor decided by a typo'd
-    // settings write would be a permission nobody chose.
+    // Only a JSON NUMBER in AQU-2305's `wp_import_min_role` projection (0192)
+    // counts: `->>` cannot tell the number 600 from the string "600", and an
+    // import floor decided by a typo'd settings write would be a permission
+    // nobody chose.
     await project("p-str", "String", { importMinRole: "600" })
     await project("p-bool", "Boolean", { importMinRole: true })
     await project("p-off", "Offladder", { importMinRole: 650 })
@@ -171,8 +172,8 @@ describe("AQU-2306: the projects stricter than the org's import floor", () => {
     // The project kept its own answer the whole time — the count is a
     // comparison, not a stored flag — so dropping the org back restores it.
     const stored = await env.AQUILLA_PG
-      .prepare("SELECT import_min_role AS floor FROM project_settings WHERE project_id = 'p-a'")
-      .first<{ floor: string | null }>()
+      .prepare("SELECT wp_import_min_role AS floor FROM project_settings WHERE project_id = 'p-a'")
+      .first<{ floor: number | string | null }>()
     expect(Number(stored?.floor)).toBe(MAINTAINER)
 
     const lowered = await patchOrg("olive", { importMinRole: PROJECT_LEAD }, 1)

@@ -52,11 +52,11 @@ export class Dashboard {
     // Anchored, case-insensitive labels: the AD-9 "Advanced: project shape"
     // radios carry long descriptions (e.g. the "Source-only" option mentions
     // "target language"), so we anchor with ^...$ to avoid matching those,
-    // while /i tolerates label casing ("Project title" vs "Project Title").
-    await dialog.getByLabel(/^Project title$/i).fill(name)
+    // while /i tolerates label casing ("Project name" vs "Project Name").
+    await dialog.getByLabel(/^Project name$/i).fill(name)
     await dialog.getByLabel(/^Source language$/i).fill(source)
-    // Create-dialog target field is always "Target Language(s)".
-    await dialog.getByLabel(/^Target Language\(s\)$/i).fill(target)
+    // Create-dialog target field is always "Language lanes".
+    await dialog.getByLabel(/^Language lanes$/i).fill(target)
     const createResponse = this.page.waitForResponse((response) => {
       const request = response.request()
       if (request.method() !== "POST" || !response.ok()) return false

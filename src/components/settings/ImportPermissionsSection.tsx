@@ -94,7 +94,7 @@ export function ImportPermissionsSection({ orgSettings, canEdit, orgId }: Import
       label={t("settings.importPermissions.label")}
       description={
         <>
-          {t("settings.importPermissions.description")}
+          {t("settings.importPermissions.summary")}
           {orgId != null && (
             <OverrideStatus
               count={stricter?.importMinRole ?? 0}
@@ -106,6 +106,11 @@ export function ImportPermissionsSection({ orgSettings, canEdit, orgId }: Import
           )}
         </>
       }
+      info={{
+        label: t("common.aboutAria", { name: t("settings.importPermissions.label") }),
+        content: t("settings.importPermissions.info"),
+        testId: "settings-info-import-min-role",
+      }}
       control={
         <div className="flex min-w-44 flex-col items-end gap-1">
           <Select

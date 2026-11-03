@@ -909,7 +909,7 @@ describe("TimelineEditor", () => {
       />,
     )
     const pill = screen.getByTestId("tl-sound-source-picker")
-    expect(pill).toHaveTextContent(/^Sound: Video$/)
+    expect(pill).toHaveTextContent(/^Sound: Film$/)
     // In the SOURCE row, with its speaker, not the target's...
     let row: HTMLElement | null = pill.parentElement
     while (row && !row.contains(screen.getByTestId("tl-speaker-source"))) row = row.parentElement
@@ -3335,14 +3335,19 @@ describe("TimelineEditor — rows come from the track model", () => {
     // become the row's firstElementChild, which the drop-indent test reads.
     const audio = named("Target audio") as HTMLElement
     expect(audio.className).toContain("border-l-4")
-    expect(audio.className).toContain("border-l-[color:var(--tl-track-hue)]")
-    expect(audio.style.getPropertyValue("--tl-track-hue")).toBe("#40c06e")
+    // AQU-2235: in the strip colour — the waveform's chroma at the track's own
+    // lightness — and the green is the new one (#23c179 since Oct 28; was #0cc187, and #40c06e before that).
+    expect(audio.className).toContain("border-l-[color:var(--tl-track-strip)]")
+    expect(audio.style.getPropertyValue("--tl-track-hue")).toBe("#23c179")
+    expect(audio.style.getPropertyValue("--tl-track-strip")).toBe("oklch(0.717 0.140 156.9)")
 
     // A source row is not PICKABLE, but it still has a colour of its own and
     // is now drawn the same way — that is the whole of this change.
     const source = named("Source text") as HTMLElement
     expect(source.className).toContain("border-l-4")
     expect(source.style.getPropertyValue("--tl-track-hue")).toBe("#8b93a3")
+    // …and keeps its own grey as its strip: a derived row's colour never moves.
+    expect(source.style.getPropertyValue("--tl-track-strip")).toBe("#8b93a3")
 
     // …and every row's hue is its own, not one shared default.
     const dubs = named("Dubs") as HTMLElement // the folder
@@ -3393,6 +3398,22 @@ describe("TimelineEditor — rows come from the track model", () => {
     fireEvent.contextMenu(named("Spanish"))
     expect(screen.queryByText(/^Delete/)).toBeNull()
     expect(screen.queryByText(/folder/i)).toBeNull()
+  })
+
+  // AQU-2235: a track shows its colour as the strip at its far left (and the
+  // dot, and the name bar): chroma 0.14 at the colour's own lightness. The
+  // swatch you pick must be that colour, not the raw palette hex beside it.
+  it("paints each swatch in the colour its track will then show", () => {
+    render(selectable({ onSetTrackColor: vi.fn(), tracks: foldedTracks() }))
+    const named = (name: string) => Array.from(rows()).find((r) => r.textContent?.includes(name))!
+    fireEvent.contextMenu(named("Target audio"))
+    fireEvent.click(screen.getByText("Color"))
+    for (const [name, strip] of [["Cyan", "oklch(0.744 0.140 201.3)"], ["Magenta", "oklch(0.596 0.140 350.5)"]] as const) {
+      const swatch = screen.getByRole("menuitemradio", { name }).querySelector("span")!
+      expect(swatch.style.getPropertyValue("--tl-track-strip"), name).toBe(strip)
+      expect(swatch.className, name).toContain("bg-[color:var(--tl-track-strip)]")
+      expect(swatch.style.backgroundColor, name).toBe("")
+    }
   })
 
   it("offers no colour without the clearance", () => {
@@ -5652,7 +5673,7 @@ describe("TimelineEditor — captions becoming a linked video's rows (AQU-1566)"
     // is behind the row's (i) — a click opens it in place (AQU-2260) — and is
     // its accessible description.
     expect(within(item).queryByText("track editing off")).toBeNull()
-    expect(item).toHaveAccessibleDescription("Track editing is off. Turn it on in Project Settings.")
+    expect(item).toHaveAccessibleDescription("Track editing is off. Turn it on in Project settings.")
     const info = within(item).getByRole("button", { name: "About Attach captions" })
     // The row is disabled, so its (i) has to take the pointer back itself.
     expect(info.parentElement!.className).toMatch(/pointer-events-auto/)
@@ -5660,7 +5681,7 @@ describe("TimelineEditor — captions becoming a linked video's rows (AQU-1566)"
     expect(reason).toHaveAttribute("data-open", "false")
     fireEvent.click(info)
     expect(reason).toHaveAttribute("data-open", "true")
-    expect(reason).toHaveTextContent("Track editing is off. Turn it on in Project Settings.")
+    expect(reason).toHaveTextContent("Track editing is off. Turn it on in Project settings.")
   })
 
   // The viewer decision: a Viewer keeps "Open Media view" and may watch. What
@@ -5834,14 +5855,14 @@ describe("TimelineEditor — an empty linked video (Sam's D3)", () => {
     expect(screen.queryByTestId("tl-linked-video-lane-prompt")).toBeNull()
   })
 
-  it("the dashed Source audio placeholder is the video's own sound, with no raw time range", () => {
+  it("the dashed Source audio placeholder is the film's own sound, with no raw time range", () => {
     setVideoDurationSec(LINKED, 635)
     render(
       <TimelineEditor fileId="lv" coreMediaUrl={LINKED} editable cells={[]} tracks={linkedTracks()} onRetimeSubtitle={() => {}}
         linkedVideoEmpty={{ captionTrackCount: 0 }} />,
     )
     const lane = screen.getByTestId("tl-source-regions")
-    expect(within(lane).getByTestId("tl-source-gap-label")).toHaveTextContent("The video's own sound")
+    expect(within(lane).getByTestId("tl-source-gap-label")).toHaveTextContent("The film's own sound")
     expect(lane.textContent).not.toContain("10:35.0")
   })
 
@@ -5852,19 +5873,19 @@ describe("TimelineEditor — an empty linked video (Sam's D3)", () => {
         timingMode="audioFirst" linkedVideoEmpty={{ captionTrackCount: 0 }} />,
     )
     expect(screen.queryByTestId("tl-source-gap")).toBeNull()
-    expect(screen.queryByText("The video's own sound")).toBeNull()
+    expect(screen.queryByText("The film's own sound")).toBeNull()
   })
 
   // Sam, Oct 5: once a linked video's captions are its rows, its Source audio
   // row stays (tracks.ts), and with no audio cues on it the band is still the
   // video's own sound. Only an empty linked video gets the lane prompt.
-  it("labels the band the video's own sound on any linked video with no audio cues", () => {
+  it("labels the band the film's own sound on any linked video with no audio cues", () => {
     setVideoDurationSec(LINKED, 635)
     render(
       <TimelineEditor fileId="lv" coreMediaUrl={LINKED} editable cells={[]} tracks={linkedTracks()} onRetimeSubtitle={() => {}} />,
     )
     expect(screen.queryByTestId("tl-linked-video-lane-prompt")).toBeNull()
-    expect(screen.getByTestId("tl-source-gap-label")).toHaveTextContent("The video's own sound")
+    expect(screen.getByTestId("tl-source-gap-label")).toHaveTextContent("The film's own sound")
     expect(screen.getByTestId("tl-source-regions").textContent).not.toContain("0:00.0–10:35.0")
   })
 

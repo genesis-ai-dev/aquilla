@@ -31,10 +31,11 @@
 // AQU-1575 adds the other choice: every take re-encoded as 16-bit / 48 kHz /
 // mono WAV, the file a broadcast studio asks for (LOTE's vendor named exactly
 // that). The stored takes are not one format — Inworld writes 24 kHz WAV,
-// Seed-VC 22.05 kHz WAV, Gemini and MMS a compressed webm — so "keep the
+// converted takes 22.05 kHz WAV, Gemini and MMS a compressed webm — so "keep the
 // originals" hands a studio a folder of mixed rates and codecs. The WAV choice
 // decodes through the same path the chapter export uses.
 
+import { applyClipLevelPcm, hasClipLevel } from "@/lib/export/clip-level"
 import JSZip from "jszip"
 
 import type { CellData } from "@/hooks/useCells"
@@ -434,10 +435,13 @@ export async function exportAudioPerLine(
   }
   const decoded = new Map<string, Promise<Float32Array>>()
   type Loaded = { pcm: Float32Array } | { bytes: Uint8Array; ext: string }
+  const leveled = (clip: PerLineClip) => hasClipLevel(cellById.get(clip.cellId)?.attachments?.[clip.audioId])
   const load = (clip: PerLineClip): Promise<Loaded> | null => {
     const key = keyOf(clip)
     if (!key) return null
-    if (!(toWav && decode)) return sourceOf(clip)
+    // AQU-2327: a take at its own volume or fades is decoded and written as
+    // WAV too — an export contains what you hear.
+    if (!((toWav || leveled(clip)) && decode)) return sourceOf(clip)
     let pcm = decoded.get(key)
     if (!pcm) {
       pcm = sourceOf(clip).then((src) => decode(src.bytes))
@@ -473,7 +477,7 @@ export async function exportAudioPerLine(
       const attachment = cell.attachments?.[clip.audioId]
       let bytes: Uint8Array
       let ext: string
-      if (toWav && decode) {
+      if ((toWav || hasClipLevel(attachment)) && decode) {
         // AQU-1575: decoded, cut to its trim and written as 16-bit / 48 kHz /
         // mono — the chapter export's path. The source is the one above, so a
         // generated take still starts from its lossless sibling where there is
@@ -484,7 +488,7 @@ export async function exportAudioPerLine(
           trimStartMs: attachment?.trimStartMs,
           trimEndMs: attachment?.trimEndMs,
         })
-        const kept = win.isFull ? pcm : pcm.subarray(win.start, win.end)
+        const kept = applyClipLevelPcm(win.isFull ? pcm : pcm.subarray(win.start, win.end), TARGET_RATE, attachment)
         bytes = new Uint8Array(await encodeWavPcm16(kept, TARGET_RATE).arrayBuffer())
         ext = "wav"
       } else {
@@ -535,7 +539,7 @@ export async function exportAudioPerLine(
         const placeSec = geom?.start ?? clip.startSec
         // AQU-1575: a BWF TimeReference is a count of THIS FILE'S samples, so
         // it is written at the file's own rate. Not every stored WAV is 48 kHz:
-        // Inworld takes are 24 kHz and Seed-VC takes 22.05 kHz, and stamping
+        // Inworld takes are 24 kHz and converted takes 22.05 kHz, and stamping
         // those at 48,000 a second put them into a DAW at about twice their
         // real time.
         const rate = readWavFormat(bytes)?.sampleRate ?? BWF_RATE

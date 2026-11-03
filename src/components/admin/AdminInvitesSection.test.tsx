@@ -257,7 +257,7 @@ describe("AdminInvitesSection", () => {
       await user.click(screen.getByRole("checkbox", { name: "Project 1" }))
       expect(submit).toBeDisabled()
       await user.click(screen.getByRole("checkbox", { name: "Project 2" }))
-      await user.click(screen.getByRole("checkbox", { name: /every current target lane/i }))
+      await user.click(screen.getByRole("checkbox", { name: /every current language lane/i }))
       expect(submit).toBeEnabled()
       await user.click(submit)
 
@@ -277,7 +277,7 @@ describe("AdminInvitesSection", () => {
       })
       const user = await openInviteDialog()
       await user.click(screen.getByRole("checkbox", { name: "Project 1" }))
-      await user.click(screen.getByRole("checkbox", { name: /every current target lane/i }))
+      await user.click(screen.getByRole("checkbox", { name: /every current language lane/i }))
       const toastSpy = vi.spyOn(toastModule.toast, "add")
       await user.click(screen.getByRole("button", { name: "Create invite" }))
       await waitFor(() => expect(isElevationRequired()).toBe(true))

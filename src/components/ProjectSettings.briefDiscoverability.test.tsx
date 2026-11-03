@@ -2,12 +2,12 @@
 //
 // Why this test exists: the brief gates Autopilot starts (AQU-827) but had no
 // row of its own anywhere in settings. The only path a partner user found
-// (Samuel, 2026-10-04) was Project settings → AI & completion → Living Memory →
+// (Samuel, 2026-10-04) was Project settings → AI → Living Memory →
 // *click the breadcrumb* → the Living Memory index → Brief. The fix gives the
-// brief its own `section-brief` NavRow in the AI & completion pane, carrying
+// brief its own `section-brief` NavRow in the AI pane, carrying
 // its derived status as the row hint, and searchable by the word "brief".
 //
-// Regression guard: the AI & completion pane must link straight to
+// Regression guard: the AI pane must link straight to
 // `/project/:id/memory/brief`, a `?q=brief` search must surface that same link
 // (the Living Memory cross-link next to it is hidden while searching, which is
 // what made a search for "brief" come back empty), and the row must report the
@@ -135,7 +135,7 @@ describe("ProjectSettings — translation-brief discoverability (AQU-1672)", () 
     return screen.getByRole("link", { name: /translation brief/i })
   }
 
-  it("links the AI & completion pane straight to the brief", () => {
+  it("links the AI pane straight to the brief", () => {
     renderAt(`/project/${PROJECT_ID}/settings/ai`)
 
     expect(briefRow()).toHaveAttribute("href", `/project/${PROJECT_ID}/memory/brief`)

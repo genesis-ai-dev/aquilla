@@ -122,13 +122,17 @@ function mockHook(overrides: { rules?: StyleRule[]; applicability?: RuleApplicab
   })
 }
 
-async function renderSection(roleLevel: number | null = ROLE.PROJECT_LEAD) {
+async function renderSection(
+  roleLevel: number | null = ROLE.PROJECT_LEAD,
+  extra: Partial<React.ComponentProps<typeof QualityStyleRules>> = {},
+) {
   const result = render(
     <QualityStyleRules
       projectId="proj-1"
       roleLevel={roleLevel}
       completionSettings={SETTINGS}
       session={{ jwt: "tok", username: "alice", createdAt: "2026-01-01T00:00:00.000Z" }}
+      {...extra}
     />,
   )
   // Settles the knowledge-document fetch the section fires on mount.
@@ -407,5 +411,91 @@ describe("QualityStyleRules — gates and empty states", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Couldn't load the style-rule library: network down",
     )
+  })
+})
+
+// ── Per-lane style rules (AQU-2348) ────────────────────────────────────────
+//
+// The library list is deliberately NOT filtered by lane — a maintainer has to
+// be able to see what the other lane is held to — so the row has to say whose
+// rule it is. A rule written for another audience that looks identical to one
+// governing the lane on screen is the whole hazard.
+
+const LANE_VIEW = "11112222"
+const LANE_OTHER = "33334444"
+const LANE_SCOPE = {
+  viewLaneId: LANE_VIEW,
+  laneLabel: (id: string) => (id === LANE_VIEW ? "French" : id === LANE_OTHER ? "Spanish" : id),
+}
+
+describe("QualityStyleRules — per-lane rules", () => {
+  it("marks a project rule as applying in every lane", async () => {
+    mockHook({ rules: [makeRule({ id: "r-p", status: "approved", laneId: null })] })
+    await renderSection(ROLE.PROJECT_LEAD, { laneScope: LANE_SCOPE })
+    expect(screen.getByText("All lanes")).toBeInTheDocument()
+  })
+
+  it("names the viewed lane on a rule that lane owns", async () => {
+    mockHook({ rules: [makeRule({ id: "r-v", status: "approved", laneId: LANE_VIEW })] })
+    await renderSection(ROLE.PROJECT_LEAD, { laneScope: LANE_SCOPE })
+    expect(screen.getByText("French only")).toBeInTheDocument()
+  })
+
+  it("marks another lane's rule as another lane's, not as one that applies here", async () => {
+    mockHook({ rules: [makeRule({ id: "r-o", status: "approved", laneId: LANE_OTHER })] })
+    await renderSection(ROLE.PROJECT_LEAD, { laneScope: LANE_SCOPE })
+    // Still LISTED — that is the management-list rule — but never as applying here.
+    expect(screen.getByText("Use formal register")).toBeInTheDocument()
+    expect(screen.getByText(/Spanish/)).toBeInTheDocument()
+    expect(screen.queryByText("All lanes")).not.toBeInTheDocument()
+    expect(screen.queryByText("French only")).not.toBeInTheDocument()
+  })
+
+  it("carries no lane badge at all without a lane scope", async () => {
+    // A single-lane project reads exactly as it did before a lane could own a rule.
+    mockHook({ rules: [makeRule({ id: "r-p", status: "approved", laneId: null })] })
+    await renderSection()
+    expect(screen.queryByText("All lanes")).not.toBeInTheDocument()
+  })
+
+})
+
+describe("QualityStyleRules — a rule created in a lane view is that lane's", () => {
+  // Criterion #6, driven through the real extraction flow rather than a mocked
+  // callback, so it proves what actually reaches the create request.
+  beforeEach(() => {
+    vi.mocked(listKnowledgeDocuments).mockResolvedValue([makeDoc()])
+    vi.mocked(getKnowledgeDocument).mockResolvedValue({
+      doc: makeDoc(),
+      tree: [{ id: "n1", title: "Intro", charStart: 0, charEnd: 10 }],
+    })
+    vi.mocked(extractStyleRulesFromDoc).mockResolvedValue([
+      {
+        candidate: { instruction: "Formal register", category: "register", scopeHint: "global" },
+        nodeId: "n1",
+        nodeTitle: "Intro",
+        quote: "Keep it formal.",
+      },
+    ])
+  })
+
+  it("stamps the viewed lane on the created rule", async () => {
+    await renderSection(ROLE.PROJECT_LEAD, { laneId: LANE_VIEW, laneScope: LANE_SCOPE })
+    fireEvent.click(screen.getByRole("button", { name: /Extract from knowledge base/ }))
+    fireEvent.click(await screen.findByRole("button", { name: "Start extraction" }))
+
+    await waitFor(() => expect(createRule).toHaveBeenCalledTimes(1))
+    expect(createRule).toHaveBeenCalledWith(
+      expect.objectContaining({ instruction: "Formal register", laneId: LANE_VIEW }),
+    )
+  })
+
+  it("stamps nothing in the project-wide view, so the request is unchanged", async () => {
+    await renderSection()
+    fireEvent.click(screen.getByRole("button", { name: /Extract from knowledge base/ }))
+    fireEvent.click(await screen.findByRole("button", { name: "Start extraction" }))
+
+    await waitFor(() => expect(createRule).toHaveBeenCalledTimes(1))
+    expect(createRule.mock.calls[0]![0]).not.toHaveProperty("laneId")
   })
 })

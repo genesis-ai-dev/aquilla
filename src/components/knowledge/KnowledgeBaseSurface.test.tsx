@@ -121,9 +121,38 @@ describe("KnowledgeBaseSurface", () => {
 
     fireEvent.change(input, { target: { files: [file] } })
 
-    await waitFor(() => expect(api.upload).toHaveBeenCalledWith({ kind: "org", id: 7 }, "jwt", file))
+    // AQU-2348: no `laneId` prop means a PROJECT-WIDE document, retrieved for
+    // every lane — what every upload did before per-lane memory existed.
+    await waitFor(() =>
+      expect(api.upload).toHaveBeenCalledWith({ kind: "org", id: 7 }, "jwt", file, undefined),
+    )
     expect(await screen.findByText("new.md")).toBeInTheDocument()
     expect(screen.getByText("Indexing…")).toBeInTheDocument()
+  })
+
+  // AQU-2348: the Living Memory page passes the lane it is viewing, so a
+  // document added in a lane view is retrieved only for that lane. The write is
+  // the only thing the lane steers — the management list below is deliberately
+  // NOT narrowed, so a maintainer can still see what the other lane is held to.
+  it("stamps the viewed lane on an upload when the page is scoped to one", async () => {
+    const { container } = render(
+      <KnowledgeBaseSurface
+        scope={{ kind: "project", id: "p1" }}
+        jwt="jwt"
+        canManage
+        showTitle={false}
+        laneId="a1b2c3d4"
+      />,
+    )
+    await screen.findByText("No knowledge documents yet")
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement
+    const file = new File(["Reference"], "lane.md", { type: "text/markdown" })
+
+    fireEvent.change(input, { target: { files: [file] } })
+
+    await waitFor(() =>
+      expect(api.upload).toHaveBeenCalledWith({ kind: "project", id: "p1" }, "jwt", file, "a1b2c3d4"),
+    )
   })
 
   // AQU-1499: a partner's .docx can be refused for a reason that names its own

@@ -15,7 +15,7 @@
  * optimistic-overlay note below).
  */
 
-import { useCallback, useMemo } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { overlaySettings } from "@/hooks/project-settings-overlay"
 import type { ComponentType } from "react"
 import { useParams, useNavigate, useLocation } from "react-router-dom"
@@ -49,6 +49,24 @@ import {
 } from "@/components/ProjectSettings/InheritedSettingsChoice"
 import { parseInheritedFromLink, type InheritFieldId } from "@/lib/sync/inherited-settings"
 import { RulesSettingsSection } from "@/components/ProjectSettings/RulesSection"
+import {
+  LaneListNote,
+  LaneOverrideControl,
+  LivingMemoryLanePicker,
+  type MemoryLaneOption,
+} from "@/components/living-memory/LaneMemorySection"
+import {
+  customizeSectionPatch,
+  laneOwnsSection,
+  laneSectionValue,
+  laneSectionWritePatch,
+  revertSectionPatch,
+} from "@/lib/living-memory/lane-sections"
+import { resolveLaneEntries, targetLaneIdForTag } from "../../db/shared/lane-memory"
+import { extraRegistryLanes } from "@/lib/lanes/registry-lanes"
+import { switcherLaneTags } from "@/lib/lanes/switcher-lanes"
+import { laneDisplayName } from "@/lib/lanes/lane-display"
+import type { TranslationBrief } from "@/lib/brief/types"
 import { briefStatus } from "@/lib/brief/brief"
 import { DEFAULT_SYSTEM_PROMPT } from "@/lib/completion/completion-service"
 import {
@@ -178,6 +196,71 @@ export function LivingMemoryPage({
   // The full validated-cell corpus is an expensive all-files query. Only the
   // Examples pane consumes it; every other pane renders from project/settings.
   const validatedExamplesEnabled = activeSection?.id === "examples"
+  // ── The lane this page is viewing (AQU-2348) ────────────────────────────
+  //
+  // The picker chooses a lane by its legacy TAG, because that is the key the
+  // editor and the Rules section already share through `activeLane` — one
+  // "current lane" across the workspace, not three. Lane MEMORY, though, is
+  // keyed by `lanes.id` (AQU-1240), so the tag is mapped through
+  // `targetLaneIdForTag` exactly once, here.
+  //
+  // `viewLaneId` is `undefined` for the project-wide view, and `undefined` is
+  // what every resolver already means by "no lane": a single-lane project, a
+  // project whose lane rows have not arrived, and a legacy project whose
+  // default lane carries only the `''` tag all read project-wide values, with
+  // no picker and no lane chrome. That is criterion #1's "the page is
+  // unchanged" and criterion #12's legacy project, and it is why this feature
+  // needs no migration to open an existing project.
+  const laneRows = (project?.lanes ?? []).filter((lane) => lane.role === "target")
+  const laneOptions: MemoryLaneOption[] = useMemo(() => {
+    if (!project) return []
+    const fallback = [...new Set(extraRegistryLanes(project.targetLanes, project.targetLanguage))]
+    if (!fallback.includes("")) fallback.unshift("")
+    const rows = (project.lanes ?? []).filter((lane) => lane.role === "target")
+    const archived = new Set(rows.filter((lane) => lane.archivedAt).map((lane) => lane.legacyTag ?? ""))
+    const defaultRow = rows.find((lane) => (lane.legacyTag ?? "") === "")
+    const labels = Object.fromEntries(rows.map((lane) => [lane.legacyTag ?? "", laneDisplayName(lane)]))
+    return switcherLaneTags(rows, fallback).map((tag) => ({
+      tag,
+      label:
+        labels[tag] ||
+        (tag === ""
+          ? (defaultRow ? laneDisplayName(defaultRow) : project.targetLanguage) ||
+            t("rules.editor.lane.defaultLane")
+          : tag),
+      archived: archived.has(tag),
+    }))
+  }, [project, t])
+
+  const [localLane, setLocalLane] = useState("")
+  const requestedLane = activeLane ?? localLane
+  const viewLane = laneOptions.some((o) => o.tag === requestedLane)
+    ? requestedLane
+    : (laneOptions[0]?.tag ?? "")
+  const setViewLane = onActiveLaneChange ?? setLocalLane
+  // One lane means no lane scope at all — not "lane 1 of 1". Keeping the
+  // picker hidden AND the id undefined is what makes a single-lane project
+  // byte-identical to before this feature.
+  const laneScoped = laneOptions.length > 1
+  const viewLaneId = laneScoped ? targetLaneIdForTag(viewLane, laneRows) : undefined
+  const viewLaneLabel = laneOptions.find((o) => o.tag === viewLane)?.label ?? viewLane
+  // A lane row the picker offers but `lanes` has no id for cannot carry lane
+  // memory, so its chrome would be a control that silently does nothing.
+  const laneChrome = laneScoped && viewLaneId !== undefined
+  // laneId → display name, for the rows that name their OWNING lane (style
+  // rules). Keyed by id rather than by tag because that is what a row stores.
+  const laneLabelById = useMemo(() => {
+    const rows = (project?.lanes ?? []).filter((lane) => lane.role === "target")
+    return Object.fromEntries(rows.map((lane) => [lane.id, laneDisplayName(lane)]))
+  }, [project?.lanes])
+  const laneScope = useMemo(
+    () =>
+      laneChrome && viewLaneId !== undefined
+        ? { viewLaneId, laneLabel: (id: string) => laneLabelById[id] ?? id }
+        : undefined,
+    [laneChrome, viewLaneId, laneLabelById],
+  )
+
   // AQU-2001: read the corpus in the lane this page is viewing. An omitted
   // lane selects the legacy default lane, which holds no target rows on a
   // project translated into a named lane — the Examples pane then showed its
@@ -186,7 +269,16 @@ export function LivingMemoryPage({
     projectId: projectId ?? "",
     project,
     enabled: validatedExamplesEnabled,
-    lane: activeLane ?? "",
+    // AQU-2348: a standalone visit has no `activeLane`, so the Examples pane
+    // used to read the default lane's corpus however the page's own picker was
+    // set. It now follows that local choice.
+    //
+    // The workspace's `activeLane` is still passed through VERBATIM when it
+    // has one, deliberately NOT narrowed to `viewLane`: `viewLane` validates
+    // against the project record's lane list, which is empty while the record
+    // hydrates, and falling back to the default lane there would re-introduce
+    // exactly the empty Examples pane AQU-2001 fixed.
+    lane: activeLane ?? viewLane,
   })
 
   const { state: livenessState, label: livenessLabel } = useLiveness(cells.length)
@@ -216,11 +308,37 @@ export function LivingMemoryPage({
   // refetch, so a just-saved entry wouldn't render (same class as the
   // file-rename overlay fix). Fall back to the project record before the
   // settings GET resolves.
-  const entries = settings.livingMemoryEntries ?? project?.livingMemoryEntries ?? []
+  // The project's WHOLE entry list — every lane's — is what the mutators work
+  // on, because an entry is addressed by id and a lane-owned one must still be
+  // editable and deletable from the lane that owns it.
+  // Memoized because `?? []` mints a fresh array on a project with no entries,
+  // which would re-run the lane resolution below on every render.
+  const allEntries = useMemo(
+    () => settings.livingMemoryEntries ?? project?.livingMemoryEntries ?? [],
+    [settings.livingMemoryEntries, project?.livingMemoryEntries],
+  )
+  // What the viewed lane actually sees: the project's entries PLUS this lane's
+  // own, never another lane's (the union rule — entries are a list, so a lane
+  // adds to the project's standards rather than replacing them).
+  const entries = useMemo(
+    () => resolveLaneEntries(allEntries, viewLaneId),
+    [allEntries, viewLaneId],
+  )
 
   const author = session?.username ?? "unknown"
 
-  const brief = settings.translationBrief ?? project?.translationBrief
+  // Override-with-fallback: this lane's brief when it owns one, else the
+  // project's.
+  const briefCustomized = laneOwnsSection(settings, viewLaneId, "brief")
+  // The project record is the pre-settings-GET fallback it always was — but
+  // ONLY while the lane is inheriting. A lane that deliberately owns "no
+  // brief" must not fall through to the project's: an empty lane value means
+  // "this lane has none", not "inherit", or the badge would read "Customized"
+  // over the project's own text.
+  const brief = briefCustomized
+    ? laneSectionValue(settings, viewLaneId, "brief")
+    : laneSectionValue(settings, viewLaneId, "brief") ?? project?.translationBrief
+  const promptCustomized = laneOwnsSection(settings, viewLaneId, "systemPrompt")
   const inheritedConfig = useMemo(
     () => parseInheritedFromLink(settings?.inheritedFromLink),
     [settings],
@@ -265,23 +383,67 @@ export function LivingMemoryPage({
     [project, completionSettings],
   )
 
+  // Every mutator writes the WHOLE list back (the key is replaced wholesale),
+  // so they must start from `allEntries` — starting from the lane-resolved
+  // view would drop every other lane's entries on the first edit.
   async function handleAdd(kind: LivingMemoryEntry["kind"], text: string) {
-    const next = addEntry(entries, kind, text, author)
+    const next = addEntry(allEntries, kind, text, author, viewLaneId)
     await patchSettings({ livingMemoryEntries: next })
   }
 
   async function handleUpdate(id: string, text: string) {
-    const next = updateEntry(entries, id, text)
+    const next = updateEntry(allEntries, id, text)
     await patchSettings({ livingMemoryEntries: next })
   }
 
   async function handleDelete(id: string) {
-    const next = deleteEntry(entries, id)
+    const next = deleteEntry(allEntries, id)
     await patchSettings({ livingMemoryEntries: next })
   }
 
+  // ── Lane-aware writes and the customize / revert actions ────────────────
+  //
+  // BriefPane and PredictionPromptSection are unchanged: they keep patching
+  // `translationBrief` / `systemPrompt` and the destination is rewritten here.
+  // An edit made in a lane that OWNS the section must never land on the
+  // project's value — that leak is exactly what criterion #3 forbids — and an
+  // edit in a lane that inherits is still a project-wide edit, because the
+  // lane is showing the project's value and the user is editing what they see.
+  const patchBrief = useCallback(
+    (partial: { translationBrief: TranslationBrief }) =>
+      patchSettings(laneSectionWritePatch(settings, viewLaneId, "brief", partial.translationBrief)),
+    [patchSettings, settings, viewLaneId],
+  )
+  const patchPrompt = useCallback(
+    (partial: Parameters<typeof patchSettings>[0]) => {
+      if (typeof partial.systemPrompt !== "string") return patchSettings(partial)
+      return patchSettings(
+        laneSectionWritePatch(settings, viewLaneId, "systemPrompt", partial.systemPrompt),
+      )
+    },
+    [patchSettings, settings, viewLaneId],
+  )
+  const laneOverrideNote = (section: "brief" | "systemPrompt") =>
+    laneChrome && viewLaneId !== undefined ? (
+      <LaneOverrideControl
+        laneLabel={viewLaneLabel}
+        customized={section === "brief" ? briefCustomized : promptCustomized}
+        canEdit={entriesReady && canEdit}
+        reasonCannotEdit={entriesReady ? reasonCannotEdit : "role"}
+        onCustomize={() => {
+          void patchSettings(customizeSectionPatch(settings, viewLaneId, section))
+        }}
+        onRevert={() => {
+          void patchSettings(revertSectionPatch(settings, viewLaneId, section))
+        }}
+      />
+    ) : null
+  const laneListNote = () => (laneChrome ? <LaneListNote laneLabel={viewLaneLabel} /> : null)
+
   // ── Index-row hints: short current-value summaries (settings pattern) ────
-  const storedPrompt = settings.systemPrompt ?? ""
+  // The index hint reflects the lane being viewed, so "Custom prompt" names
+  // the prompt that lane would actually send.
+  const storedPrompt = laneSectionValue(settings, viewLaneId, "systemPrompt") ?? ""
   const promptIsCustom =
     Boolean(storedPrompt.trim()) && storedPrompt !== DEFAULT_SYSTEM_PROMPT
 
@@ -426,13 +588,14 @@ export function LivingMemoryPage({
         return (
           <>
           {inheritedNote("translationBrief")}
+          {laneOverrideNote("brief")}
           <BriefPane
             brief={brief}
             canEdit={entriesReady && canEdit}
             author={author}
             completionSettings={completionSettings}
             session={session ?? null}
-            patch={patchSettings}
+            patch={patchBrief}
           />
           </>
         )
@@ -440,6 +603,7 @@ export function LivingMemoryPage({
         return (
           <>
             {inheritedNote("livingMemory")}
+            {laneListNote()}
             <AuthoredEntriesSection
               title={t("terminology.livingMemory.instructionsTitle")}
               description={t("terminology.livingMemory.instructionsDescription")}
@@ -454,17 +618,19 @@ export function LivingMemoryPage({
               onDelete={handleDelete}
             />
             {inheritedNote("systemPrompt")}
+            {laneOverrideNote("systemPrompt")}
             <PredictionPromptSection
-              stored={settings.systemPrompt}
+              stored={storedPrompt || undefined}
               canEdit={entriesReady && canEdit}
               reasonCannotEdit={entriesReady ? reasonCannotEdit : "role"}
-              patch={patchSettings}
+              patch={patchPrompt}
             />
           </>
         )
       case "quality":
         return (
           <>
+            {laneListNote()}
             <AuthoredEntriesSection
               title={t("terminology.livingMemory.standardsTitle")}
               description={t("terminology.livingMemory.standardsDescription")}
@@ -508,6 +674,8 @@ export function LivingMemoryPage({
                 reasonCannotEditSettings={entriesReady ? reasonCannotEdit : "role"}
                 patchFileGenres={patchSettings}
                 loadSegments={loadSegments}
+                {...(viewLaneId !== undefined ? { laneId: viewLaneId } : {})}
+                {...(laneScope ? { laneScope } : {})}
               />
             ) : null}
           </>
@@ -516,9 +684,11 @@ export function LivingMemoryPage({
         return projectId ? (
           <>
           {inheritedNote("knowledgeDocs")}
+          {laneListNote()}
           <KnowledgeBaseSurface
             scope={{ kind: "project", id: projectId }}
             jwt={session?.jwt ?? null}
+            {...(viewLaneId !== undefined ? { laneId: viewLaneId } : {})}
             canManage={entriesReady && roleLevel != null && roleLevel >= ROLE.PROJECT_LEAD}
             drafting={{
               checked: settings.knowledgeBaseEnabled ?? false,
@@ -559,6 +729,16 @@ export function LivingMemoryPage({
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 p-6">
+          {/* AQU-2348: the lane picker sits above BOTH the index and every
+              pane, so a maintainer can never edit one lane's memory while
+              believing they are looking at another's. Renders nothing on a
+              single-lane project. */}
+          <LivingMemoryLanePicker
+            options={laneOptions}
+            value={viewLane}
+            onValueChange={setViewLane}
+            sharedWithEditor={onActiveLaneChange != null}
+          />
           {activeSection === null ? (
             <>
               <p className="text-xs text-muted-foreground leading-relaxed">

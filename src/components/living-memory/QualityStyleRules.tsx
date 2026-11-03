@@ -17,11 +17,12 @@
  * carry is still readable.
  */
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { AlertTriangle, Sparkles } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { useStyleRules } from "@/hooks/useStyleRules"
+import { stampLaneOnNewRow } from "@/lib/living-memory/lane-sections"
 import { ROLE } from "@/lib/frontier/roles"
 import {
   listKnowledgeDocuments,
@@ -34,6 +35,7 @@ import { formatCount } from "@/lib/i18n/format"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { CompletionSettings } from "@/lib/parsers/types"
 import type {
+  CreateStyleRuleInput,
   StyleRule,
   StyleRuleCategory,
   StyleRuleScope,
@@ -106,6 +108,20 @@ interface QualityStyleRulesProps {
    * not this section's — without it the Refine action is not offered.
    */
   loadSegments?: (fileId: string | null, signal: AbortSignal) => Promise<readonly RefineSegment[]>
+  /**
+   * AQU-2348: the target lane the page is viewing (`lanes.id`). A rule created
+   * while viewing one lane belongs to THAT lane — it is compiled, linted and
+   * sent only there. Omitted (and on a single-lane project) a new rule is a
+   * project rule in force in every lane, which is what every rule was before
+   * a lane could own one.
+   *
+   * The library LIST is deliberately not narrowed by this: a maintainer has to
+   * be able to see what the other lane is held to.
+   */
+  laneId?: string
+  /** AQU-2348: how the library row labels the lane a rule belongs to. Passed
+   *  straight through — the list is not filtered by lane, only annotated. */
+  laneScope?: { viewLaneId: string; laneLabel: (laneId: string) => string }
 }
 
 export function QualityStyleRules({
@@ -119,6 +135,8 @@ export function QualityStyleRules({
   reasonCannotEditSettings = "role",
   patchFileGenres,
   loadSegments,
+  laneId,
+  laneScope,
 }: QualityStyleRulesProps) {
   const t = useT()
   const { locale } = useI18n()
@@ -133,6 +151,13 @@ export function QualityStyleRules({
     setApplicability,
     removeApplicability,
   } = useStyleRules(projectId)
+  // Stamp the viewed lane on creation. An input that already names a lane wins,
+  // so a future per-rule lane chooser needs no change here; `laneId` undefined
+  // leaves the request exactly as it was before per-lane memory.
+  const createRuleInLane = useCallback(
+    (input: CreateStyleRuleInput) => createRule(stampLaneOnNewRow(input, laneId)),
+    [createRule, laneId],
+  )
 
   const [docs, setDocs] = useState<KnowledgeDocument[]>([])
   const [extractOpen, setExtractOpen] = useState(false)
@@ -270,6 +295,7 @@ export function QualityStyleRules({
             rules={library}
             canManage={canReview}
             labels={labels}
+            {...(laneScope ? { laneScope } : {})}
             onToggleEnabled={(rule, enabled) => { void updateRule(rule.id, { enabled }) }}
             onOpenApplicability={setApplicabilityRule}
             onRefine={loadSegments && completionSettings ? setRefineRule : undefined}
@@ -329,7 +355,7 @@ export function QualityStyleRules({
         docs={docs}
         settings={completionSettings}
         session={session}
-        onCreate={createRule}
+        onCreate={createRuleInLane}
         onFinished={() => { void refresh() }}
       />
     </section>

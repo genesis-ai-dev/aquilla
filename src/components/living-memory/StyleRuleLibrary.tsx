@@ -36,6 +36,21 @@ interface StyleRuleLibraryProps {
   rules: StyleRule[]
   canManage: boolean
   labels: StyleRuleLabels
+  /**
+   * AQU-2348: how to label the lane a rule belongs to, and which lane the page
+   * is viewing. The list is deliberately NOT filtered by lane — a maintainer
+   * must be able to see what the other lane is held to — so every row says
+   * whether it applies in every lane, only in the lane being viewed, or only
+   * in another one. A rule that applied nowhere near the current lane looking
+   * identical to one that governs it is the whole hazard.
+   *
+   * Absent (and on a single-lane project) no row carries a lane badge, so the
+   * list reads exactly as it did before a lane could own a rule.
+   */
+  laneScope?: {
+    viewLaneId: string
+    laneLabel: (laneId: string) => string
+  }
   onToggleEnabled: (rule: StyleRule, enabled: boolean) => void
   onOpenApplicability: (rule: StyleRule) => void
   /** Opens AI refinement of the rule's targets. Absent = the run has no source
@@ -47,6 +62,7 @@ export function StyleRuleLibrary({
   rules,
   canManage,
   labels,
+  laneScope,
   onToggleEnabled,
   onOpenApplicability,
   onRefine,
@@ -85,6 +101,7 @@ export function StyleRuleLibrary({
                   <div className="flex flex-wrap items-center gap-1.5">
                     <Badge variant="outline">{labels.severity[rule.severity]}</Badge>
                     <Badge variant="secondary">{labels.scope[rule.scope]}</Badge>
+                    {laneScope ? <RuleLaneBadge rule={rule} laneScope={laneScope} /> : null}
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
@@ -120,5 +137,33 @@ export function StyleRuleLibrary({
         </div>
       ))}
     </div>
+  )
+}
+
+/**
+ * Whose lane this rule is. Mirrors the Rules surface's All lanes / This lane /
+ * Other lane vocabulary (AQU-1509) so the two lists read the same way, and
+ * marks an other-lane rule as not applied here — a rule that does not bite in
+ * the lane on screen must never look like one that does.
+ */
+function RuleLaneBadge({
+  rule,
+  laneScope,
+}: {
+  rule: StyleRule
+  laneScope: NonNullable<StyleRuleLibraryProps["laneScope"]>
+}) {
+  const t = useT()
+  if (!rule.laneId) {
+    return <Badge variant="secondary">{t("terminology.livingMemory.lane.ownedByProjectBadge")}</Badge>
+  }
+  const label = laneScope.laneLabel(rule.laneId)
+  if (rule.laneId === laneScope.viewLaneId) {
+    return <Badge>{t("terminology.livingMemory.lane.ownedByLaneBadge", { lane: label })}</Badge>
+  }
+  return (
+    <Badge variant="outline" className="border-dashed">
+      {t("rules.surface.laneScope.badgeOther", { lane: label })}
+    </Badge>
   )
 }

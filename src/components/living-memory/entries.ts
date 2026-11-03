@@ -11,6 +11,13 @@ export function addEntry(
   kind: LivingMemoryEntry["kind"],
   text: string,
   author: string,
+  /** AQU-2348: the lane (`lanes.id`) that owns this entry. Omitted = a
+   *  project-wide entry, in force in every lane, which is what every entry was
+   *  before per-lane memory. Set when the page is viewing ONE lane, so an
+   *  entry written in that lane's view reaches that lane's prompt and no
+   *  other's. Entries UNION, so this ADDS to the project's rather than
+   *  replacing them. */
+  laneId?: string,
 ): LivingMemoryEntry[] {
   const entry: LivingMemoryEntry = {
     id: crypto.randomUUID(),
@@ -18,6 +25,7 @@ export function addEntry(
     text: text.trim(),
     createdAt: new Date().toISOString(),
     author,
+    ...(laneId ? { laneId } : {}),
   }
   return [...entries, entry]
 }

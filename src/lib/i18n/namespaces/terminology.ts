@@ -115,6 +115,33 @@ export const terminology = defineNamespace({
 
     // ── LivingMemoryPage.tsx ─────────────────────────────────────────────────
     "terminology.livingMemory.title": "Living Memory",
+
+    // AQU-2348 — per-lane Living Memory. The page-level lane picker and the
+    // per-section inherited/customized state. Two vocabularies on purpose:
+    // an OVERRIDE section is "Inherited from project" until a lane owns a
+    // copy, while a LIST section is never replaced — a lane ADDS to the
+    // project's, so it gets an explanation and no Revert control.
+    "terminology.livingMemory.lane.ariaLabel": "Language lane",
+    "terminology.livingMemory.lane.viewingLabel": "Viewing language lane",
+    "terminology.livingMemory.lane.chooseLaneAriaLabel": "Change language lane, currently {lane}",
+    "terminology.livingMemory.lane.explainer":
+      "Showing the memory the AI uses for {lane}. The project's memory is the default for every lane.",
+    "terminology.livingMemory.lane.sharedWithEditor": "Switching here switches the editor too.",
+    "terminology.livingMemory.lane.inheritedBadge": "Inherited from project",
+    "terminology.livingMemory.lane.customizedBadge": "Customized for {lane}",
+    "terminology.livingMemory.lane.customizeAction": "Customize for this lane",
+    "terminology.livingMemory.lane.revertAction": "Revert to project",
+    "terminology.livingMemory.lane.inheritedExplainer":
+      "{lane} uses the project's value. Customizing copies it into a copy only {lane} uses.",
+    "terminology.livingMemory.lane.customizedExplainer":
+      "Only {lane} uses this. Editing it leaves the project and every other lane unchanged.",
+    "terminology.livingMemory.lane.revertConfirmTitle": "Revert to the project's value?",
+    "terminology.livingMemory.lane.revertConfirmBody":
+      "{lane} will use the project's value again and this lane's copy is discarded. The project and every other lane are unaffected.",
+    "terminology.livingMemory.lane.listNote":
+      "The project's items below apply in {lane} too. Anything you add while viewing {lane} belongs to {lane} alone.",
+    "terminology.livingMemory.lane.ownedByLaneBadge": "{lane} only",
+    "terminology.livingMemory.lane.ownedByProjectBadge": "All lanes",
     "terminology.livingMemory.introText":
       "Your team's encoded voice and standards — the project context the AI draws on " +
       "for every new draft. It grows with each validation, correction, and instruction " +

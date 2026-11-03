@@ -176,10 +176,11 @@ function ProjectOverviewSkeleton() {
   // bar rows) so nothing moves when the data lands. Labels that are known
   // before the data (section headings, tile and bar names) stay visible with
   // a cursor where the value will go; the project's own words do not.
+  // The two text stats every project shows; the audio and AI-drafted rows
+  // only exist for projects that have them, so they are not guessed here.
   const tileLabels = [
     t("org.orgHome.table.translatedHeaderLabel"),
     t("org.orgHome.table.validatedHeaderLabel"),
-    t("org.orgHome.table.audioHeaderLabel"),
   ]
   return (
     <div className="max-w-5xl space-y-4">
@@ -203,7 +204,7 @@ function ProjectOverviewSkeleton() {
       </div>
       {/* Progress card: heading row, stat tiles, stat bars. */}
       <div className="rounded-lg border bg-card p-5">
-        <div className="mb-3 flex min-h-7 items-center">
+        <div className="mb-3 flex min-h-6 items-center">
           <LoadingLine label={t("fileDetails.progress")} className="min-h-4 text-xs font-semibold" />
         </div>
         <div className="mb-4 flex flex-wrap gap-3">

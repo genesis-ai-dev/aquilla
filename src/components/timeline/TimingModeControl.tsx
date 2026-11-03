@@ -157,7 +157,7 @@ export function TimingModeControl({
               )}
             >
               <Timer className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-              <span className="font-medium text-sky-700 dark:text-sky-300">{name}</span>
+              <span className="font-medium">{name}</span>
               <ChevronDown className="h-3 w-3 text-muted-foreground" aria-hidden="true" />
             </DropdownMenuTrigger>
           </AppTooltip>

@@ -432,7 +432,7 @@ describe("QualityStyleRules — per-lane rules", () => {
   it("marks a project rule as applying in every lane", async () => {
     mockHook({ rules: [makeRule({ id: "r-p", status: "approved", laneId: null })] })
     await renderSection(ROLE.PROJECT_LEAD, { laneScope: LANE_SCOPE })
-    expect(screen.getByText("All lanes")).toBeInTheDocument()
+    expect(screen.getByText("All language lanes")).toBeInTheDocument()
   })
 
   it("names the viewed lane on a rule that lane owns", async () => {
@@ -447,7 +447,7 @@ describe("QualityStyleRules — per-lane rules", () => {
     // Still LISTED — that is the management-list rule — but never as applying here.
     expect(screen.getByText("Use formal register")).toBeInTheDocument()
     expect(screen.getByText(/Spanish/)).toBeInTheDocument()
-    expect(screen.queryByText("All lanes")).not.toBeInTheDocument()
+    expect(screen.queryByText("All language lanes")).not.toBeInTheDocument()
     expect(screen.queryByText("French only")).not.toBeInTheDocument()
   })
 
@@ -455,7 +455,7 @@ describe("QualityStyleRules — per-lane rules", () => {
     // A single-lane project reads exactly as it did before a lane could own a rule.
     mockHook({ rules: [makeRule({ id: "r-p", status: "approved", laneId: null })] })
     await renderSection()
-    expect(screen.queryByText("All lanes")).not.toBeInTheDocument()
+    expect(screen.queryByText("All language lanes")).not.toBeInTheDocument()
   })
 
 })
@@ -496,6 +496,10 @@ describe("QualityStyleRules — a rule created in a lane view is that lane's", (
     fireEvent.click(await screen.findByRole("button", { name: "Start extraction" }))
 
     await waitFor(() => expect(createRule).toHaveBeenCalledTimes(1))
-    expect(createRule.mock.calls[0]![0]).not.toHaveProperty("laneId")
+    // `createRule` is declared with no parameters, so index the call through a
+    // matcher rather than a tuple: asserting the ABSENCE of laneId is the point.
+    expect(createRule).toHaveBeenCalledWith(
+      expect.not.objectContaining({ laneId: expect.anything() }),
+    )
   })
 })

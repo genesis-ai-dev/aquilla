@@ -178,10 +178,14 @@ describe("laneSectionWritePatch", () => {
 })
 
 describe("stampLaneOnNewRow", () => {
+  /** A new row as a caller builds one: a payload plus the optional lane. */
+  type NewRow = { instruction: string; laneId?: string | null }
+
   it("stamps the viewed lane on a new row", () => {
     // Criterion #6: a style rule created in a lane view is compiled for that
     // lane only.
-    expect(stampLaneOnNewRow({ instruction: "Formal register" }, LANE_A)).toEqual({
+    const input: NewRow = { instruction: "Formal register" }
+    expect(stampLaneOnNewRow(input, LANE_A)).toEqual({
       instruction: "Formal register",
       laneId: LANE_A,
     })
@@ -190,14 +194,16 @@ describe("stampLaneOnNewRow", () => {
   it("leaves the input untouched in the project-wide view", () => {
     // Byte-identical to the request before a lane could own a row, so the row
     // lands project-wide and in force in every lane.
-    const input = { instruction: "Formal register" }
+    const input: NewRow = { instruction: "Formal register" }
     expect(stampLaneOnNewRow(input, undefined)).toBe(input)
   })
 
   it("lets an explicit lane on the input win", () => {
     // So a per-row lane chooser can be added later without revisiting the
     // call sites — including an explicit null, which means "project-wide".
-    expect(stampLaneOnNewRow({ instruction: "x", laneId: LANE_B }, LANE_A).laneId).toBe(LANE_B)
-    expect(stampLaneOnNewRow({ instruction: "x", laneId: null }, LANE_A).laneId).toBeNull()
+    const named: NewRow = { instruction: "x", laneId: LANE_B }
+    expect(stampLaneOnNewRow(named, LANE_A).laneId).toBe(LANE_B)
+    const projectWide: NewRow = { instruction: "x", laneId: null }
+    expect(stampLaneOnNewRow(projectWide, LANE_A).laneId).toBeNull()
   })
 })

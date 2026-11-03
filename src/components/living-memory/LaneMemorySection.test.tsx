@@ -73,7 +73,7 @@ describe("LaneOverrideControl", () => {
   it("reads as inherited, and offers only Customize, until the lane owns a copy", () => {
     render(<LaneOverrideControl {...base} customized={false} />)
     expect(screen.getByText("Inherited from project")).toBeTruthy()
-    expect(screen.getByRole("button", { name: "Customize for this lane" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Customize for this language lane" })).toBeTruthy()
     // Nothing to revert — offering it would promise to restore a value that
     // was never replaced.
     expect(screen.queryByRole("button", { name: "Revert to project" })).toBeNull()
@@ -84,7 +84,7 @@ describe("LaneOverrideControl", () => {
     render(<LaneOverrideControl {...base} customized />)
     expect(screen.getByText("Customized for Spanish")).toBeTruthy()
     expect(screen.getByRole("button", { name: "Revert to project" })).toBeTruthy()
-    expect(screen.queryByRole("button", { name: "Customize for this lane" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Customize for this language lane" })).toBeNull()
     expect(screen.getByTestId("lane-override-control").dataset.laneState).toBe("customized")
   })
 
@@ -92,13 +92,13 @@ describe("LaneOverrideControl", () => {
     // Criterion #3 is the reassurance the control has to carry: without it a
     // maintainer cannot tell whether they are about to edit two audiences at once.
     render(<LaneOverrideControl {...base} customized />)
-    expect(screen.getByText(/leaves the project and every other lane unchanged/i)).toBeTruthy()
+    expect(screen.getByText(/leaves the project and every other language lane unchanged/i)).toBeTruthy()
   })
 
   it("customizes on click", () => {
     const onCustomize = vi.fn()
     render(<LaneOverrideControl {...base} customized={false} onCustomize={onCustomize} />)
-    fireEvent.click(screen.getByRole("button", { name: "Customize for this lane" }))
+    fireEvent.click(screen.getByRole("button", { name: "Customize for this language lane" }))
     expect(onCustomize).toHaveBeenCalledTimes(1)
   })
 
@@ -130,7 +130,7 @@ describe("LaneOverrideControl", () => {
     // that is the point of the badge — but may not move it.
     render(<LaneOverrideControl {...base} canEdit={false} reasonCannotEdit="role" customized={false} />)
     expect(screen.getByText("Inherited from project")).toBeTruthy()
-    expect(screen.queryByRole("button", { name: "Customize for this lane" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Customize for this language lane" })).toBeNull()
     expect(screen.queryByRole("button", { name: "Revert to project" })).toBeNull()
   })
 

@@ -614,7 +614,7 @@ describe("LivingMemoryPage — per-section inherit / customize", () => {
 
     const control = screen.getByTestId("lane-override-control")
     expect(control.dataset.laneState).toBe("inherited")
-    expect(screen.getByRole("button", { name: "Customize for this lane" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Customize for this language lane" })).toBeInTheDocument()
   })
 
   it("reads as customized, naming the lane, once that lane owns a copy", () => {
@@ -638,7 +638,7 @@ describe("LivingMemoryPage — per-section inherit / customize", () => {
     mockSettings({ settings: { translationBrief: makeBrief("Formal") } as never })
     renderPage("/project/proj-1/memory/brief")
 
-    fireEvent.click(screen.getByRole("button", { name: "Customize for this lane" }))
+    fireEvent.click(screen.getByRole("button", { name: "Customize for this language lane" }))
 
     await waitFor(() =>
       expect(mockPatch).toHaveBeenCalledWith({
@@ -687,7 +687,7 @@ describe("LivingMemoryPage — per-section inherit / customize", () => {
     renderPage("/project/proj-1/memory/brief")
 
     expect(screen.getByTestId("lane-override-control")).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "Customize for this lane" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Customize for this language lane" })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Revert to project" })).not.toBeInTheDocument()
   })
 })

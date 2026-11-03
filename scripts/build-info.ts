@@ -28,11 +28,15 @@ function firstNonEmpty(values: (string | undefined)[]): string {
 /**
  * Branch name for the build, in CI-precedence order. A detached-HEAD git answer
  * is discarded rather than shown — "unknown" is honest, "HEAD" is misleading.
+ * DEPLOY_REF_NAME comes first: a workflow that chose its deploy ref at run time
+ * sets it (release-deploy.yml runs on a schedule, so GITHUB_REF_NAME is `dev`
+ * there while the checkout is the release branch being deployed).
  */
 export function resolveBuildBranch(env: BuildEnv, gitBranch = ""): string {
   const fromGit = gitBranch.trim() === DETACHED_HEAD ? "" : gitBranch
   return (
     firstNonEmpty([
+      env.DEPLOY_REF_NAME,
       env.WORKERS_CI_BRANCH,
       env.CF_PAGES_BRANCH,
       // GitHub Actions: HEAD_REF is set on pull_request runs (REF_NAME is the merge ref).

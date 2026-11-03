@@ -248,7 +248,7 @@ if (isEntrypoint) {
     surface: process.argv[2],
     environment: process.argv[3],
     sourceId: process.env.WORKERS_CI_COMMIT_SHA || process.env.GITHUB_SHA,
-    sourceLabel: process.env.GITHUB_REF_NAME || process.env.WORKERS_CI_BRANCH || "manual",
+    sourceLabel: process.env.DEPLOY_REF_NAME || process.env.GITHUB_REF_NAME || process.env.WORKERS_CI_BRANCH || "manual",
   }).catch((error) => {
     console.error(`[cloudflare-deploy] ${error instanceof Error ? error.message : String(error)}`)
     process.exitCode = 1

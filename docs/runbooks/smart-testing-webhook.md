@@ -62,6 +62,35 @@ Containers have process limits, bounded logs, no Linux capabilities, and no
 privilege escalation. The QA bridge cannot reach host or private-network
 addresses. Host Node and the existing application service remain unchanged.
 
+### Memory budget (measured 2026-11-02 on the 3.8 GB host)
+
+Everything below is anonymous memory inside the app container at 1.5 CPUs,
+sampled from the cgroup, dev at `1a5121ab5`:
+
+| Phase                                              | Peak      | Wall    |
+| -------------------------------------------------- | --------- | ------- |
+| `pnpm install` after a dependency-cache miss       | ~1.1 GB (+1.5 GB page cache) | 40–130 s |
+| Worker stack alone (2× wrangler, 2× esbuild, workerd, tsx, mocks) | ~1.5 GB | — |
+| `vite build --mode test` alone                     | ~1.75 GB  | 17–20 s |
+| Worker stack **plus** the build (old order)        | > 2.8 GB → exit 137 or a 10-minute swap thrash | — |
+
+`NODE_OPTIONS=--max-old-space-size` does not lower the build peak (1024, 1536
+and the default all peak within 50 MB): the memory is rolldown's, not V8 heap.
+So the controller builds **before** the workers start: `app_bootstrap.prebuild`
+runs the test-mode build with the baked browser URLs and sets
+`E2E_PREBUILT_DIST=1`, which the reviewed `scripts/e2e-up.ts` honours by
+serving `dist` instead of building again. Install, build and stack then
+happen one after another and each stays under the 2200 MB container cap.
+
+`runner.json` may override the per-container limits: `container_memory_mb`
+(default 2200), `container_swap_mb` (default 400) and `build_node_options`
+(default empty). The `aquillaqa.slice` `MemoryMax` is the ceiling for all QA
+containers together; raising only the container limits changes nothing.
+
+A dependency-cache miss (`QA dependencies: changed inputs` in `app.log`) means
+the harness image's lockfile no longer matches the branch under test. Every job
+then pays the install column above. Rebuild the harness at a current commit.
+
 The suite already supports four isolated stacks on a larger machine through
 `SMART_TEST_SHARDS=4`. This host deliberately runs one stack. Starting four
 stacks on 4 GB would compete for memory and CPU. Measure test time separately
@@ -120,6 +149,10 @@ must be rebuilt at a reviewed commit containing them. Until that happens, report
 from this host plan the smaller suite and those three checks are NOT VERIFIED, not
 passed. This requires no credential or infrastructure change: build the new tag,
 verify it, and replace `harness_sha`.
+
+The prebuild step above also needs a harness whose `scripts/e2e-up.ts` knows
+`E2E_PREBUILT_DIST`. With an older harness the bootstrap detects that and lets
+e2e-up build as before (the memory-heavy order), so nothing builds twice.
 
 ## Re-dispatching a run (AQU-1354)
 

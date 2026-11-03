@@ -12,6 +12,8 @@
 //   GET /overview              — top-line counts (orgs, users, projects, active-7d)
 //   GET /orgs                  — every org + owner + member/project counts
 //   GET /users                 — every user
+//   GET /users/:userId         — one user + org and direct project memberships
+//   GET /orgs/:orgId/members   — one org's members with role, joined, last active
 //   GET /projects              — every project + org/creator + cell/word rollup + shared flag
 //   GET /activity              — cross-tenant activity_logs feed (?limit, ?since)
 //   GET /retention             — DAU/WAU/MAU, Day-N + weekly cohort retention (?days, ?asOf)
@@ -410,6 +412,54 @@ admin.get("/orgs", async (c) => {
   })
 })
 
+/** A path id that must be a positive whole number, else null (the route 404s). */
+function parseNumericId(raw: string): number | null {
+  return /^\d+$/.test(raw) ? Number(raw) : null
+}
+
+/**
+ * GET /api/v2/admin/orgs/:orgId/members — everyone in one org with their org
+ * role (`roleLevel`; the client labels it), join date, and last activity.
+ * 404 when the org does not exist.
+ */
+admin.get("/orgs/:orgId/members", async (c) => {
+  const orgId = parseNumericId(c.req.param("orgId"))
+  if (orgId === null) return c.json({ error: "Org not found" }, 404)
+  const org = await c.env.AQUILLA_PG.prepare("SELECT id FROM organizations WHERE id = ?")
+    .bind(orgId)
+    .first<{ id: number }>()
+  if (!org) return c.json({ error: "Org not found" }, 404)
+  const { results } = await c.env.AQUILLA_PG.prepare(
+    `SELECT u.id AS user_id, u.username, u.display_name, u.email,
+            m.role_level, m.granted_at, m.last_active_at
+       FROM org_members m
+       JOIN users u ON u.id = m.user_id
+      WHERE m.org_id = ?
+      ORDER BY m.role_level DESC, LOWER(u.username)`,
+  )
+    .bind(orgId)
+    .all<{
+      user_id: number
+      username: string
+      display_name: string | null
+      email: string
+      role_level: number
+      granted_at: string | null
+      last_active_at: string | null
+    }>()
+  return c.json({
+    members: results.map((r) => ({
+      userId: r.user_id,
+      username: r.username,
+      displayName: r.display_name,
+      email: r.email,
+      roleLevel: r.role_level,
+      joinedAt: r.granted_at,
+      lastActiveAt: r.last_active_at,
+    })),
+  })
+})
+
 /** GET /api/v2/admin/teams — every group ("team") with org + member/grant counts. */
 admin.get("/teams", async (c) => {
   const { results } = await c.env.AQUILLA_PG.prepare(
@@ -481,6 +531,86 @@ admin.get("/users", async (c) => {
       createdAt: r.created_at,
       orgCount: r.org_count,
       lastActiveAt: r.last_active_at,
+    })),
+  })
+})
+
+/**
+ * GET /api/v2/admin/users/:userId — one user plus their org memberships and
+ * their direct project memberships (`project_members` rows). Access a person
+ * gets only through an org role or a team grant is not listed as a project
+ * here. 404 when the user does not exist.
+ */
+admin.get("/users/:userId", async (c) => {
+  const userId = parseNumericId(c.req.param("userId"))
+  if (userId === null) return c.json({ error: "User not found" }, 404)
+  const user = await c.env.AQUILLA_PG.prepare(
+    "SELECT id, username, email, display_name, created_at FROM users WHERE id = ?",
+  )
+    .bind(userId)
+    .first<{
+      id: number
+      username: string
+      email: string
+      display_name: string | null
+      created_at: string
+    }>()
+  if (!user) return c.json({ error: "User not found" }, 404)
+  const orgs = await c.env.AQUILLA_PG.prepare(
+    `SELECT o.id AS org_id, o.name, m.role_level, m.granted_at, m.last_active_at
+       FROM org_members m
+       JOIN organizations o ON o.id = m.org_id
+      WHERE m.user_id = ?
+      ORDER BY LOWER(COALESCE(o.name, ''))`,
+  )
+    .bind(userId)
+    .all<{
+      org_id: number
+      name: string | null
+      role_level: number
+      granted_at: string | null
+      last_active_at: string | null
+    }>()
+  const projects = await c.env.AQUILLA_PG.prepare(
+    `SELECT p.id AS project_id, p.name, p.org_id, o.name AS org_name,
+            p.archived_at, pm.role_level
+       FROM project_members pm
+       JOIN projects p ON p.id = pm.project_id
+       LEFT JOIN organizations o ON o.id = p.org_id
+      WHERE pm.user_id = ?
+      ORDER BY LOWER(p.name)`,
+  )
+    .bind(userId)
+    .all<{
+      project_id: string
+      name: string
+      org_id: number | null
+      org_name: string | null
+      archived_at: string | null
+      role_level: number
+    }>()
+  return c.json({
+    user: {
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      displayName: user.display_name,
+      createdAt: user.created_at,
+    },
+    orgs: orgs.results.map((r) => ({
+      orgId: r.org_id,
+      name: r.name,
+      roleLevel: r.role_level,
+      joinedAt: r.granted_at,
+      lastActiveAt: r.last_active_at,
+    })),
+    projects: projects.results.map((r) => ({
+      projectId: r.project_id,
+      name: r.name,
+      orgId: r.org_id,
+      orgName: r.org_name,
+      archived: r.archived_at != null,
+      roleLevel: r.role_level,
     })),
   })
 })

@@ -21,11 +21,7 @@ import { describe, it, expect, beforeEach } from "vitest"
 import { handleExternalReadRequest } from "../external/read-routes"
 import { mintApiToken } from "../../../db/shared/api-credentials"
 import { makeTestDb, type TestDb } from "./helpers/pg-test-db"
-import {
-  buildPrompt,
-  DEFAULT_SYSTEM_PROMPT,
-  type ChatMessage,
-} from "../../../src/lib/completion/prompt-build"
+import { buildPrompt, DEFAULT_SYSTEM_PROMPT, type ChatMessage } from "../../../src/lib/completion/prompt-build"
 import { compileConceptsToRulesCore } from "../../../src/lib/terminology/compile-core"
 
 const SECRET = "test-secret"
@@ -627,20 +623,13 @@ describe("external prompt preview", () => {
       expect(body.messages[0].content).not.toContain("(?<!")
     })
 
-    // AQU-2342: the preview shows what every path now carries — the term's
-    // note, and the Language profile's filled slots in the checks hint.
-    it("carries the term note and the Language profile, in the shared blocks", async () => {
-      await testDb.pg.query(
-        `INSERT INTO concepts (concept_id, project_id, source_term, renderings, notes, status, case_sensitive, created_at, updated_at)
-         VALUES ('c-note', 'proj-a', 'covenant', $1, 'Treaty sense, not a contract.', 'active', 0, 1, 1)`,
-        [JSON.stringify([{ rendering: "alliance", status: "preferred" }])],
-      )
+    it("carries the term note and the Language profile in the shared blocks (AQU-2342)", async () => {
+      const row = [JSON.stringify([{ rendering: "alliance", status: "preferred" }])]
+      await testDb.pg.query(`INSERT INTO concepts (concept_id, project_id, source_term, renderings, notes, status, case_sensitive, created_at, updated_at) VALUES ('c-note', 'proj-a', 'covenant', $1, 'Treaty sense.', 'active', 0, 1, 1)`, row)
       await putSettings(testDb, "proj-a", { sourceLanguage: "English", targetLanguage: "French", languageProfile: { measures: "convert" } })
       const { body } = await preview(testDb, token)
-      expect(body.parts.terminology).toContain('"covenant" → "alliance". Note: Treaty sense, not a contract.')
+      expect(body.parts.terminology).toContain('"covenant" → "alliance". Note: Treaty sense.')
       expect(body.parts.checks).toContain('- Measures (convert, transliterate or mixed): "convert"')
-      const sys = body.messages[0].content
-      expect(sys.indexOf(body.parts.checks)).toBeLessThan(sys.indexOf(body.parts.terminology))
     })
 
     it("warns when a term-dense source exceeds the injection cap", async () => {

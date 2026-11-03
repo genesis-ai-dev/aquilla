@@ -358,6 +358,11 @@ CREATE TABLE project_settings (
     wp_validation_named_users_audio JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'validationNamedUsersAudio') STORED,
     wp_allow_self_validation_audio JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'allowSelfValidationAudio') STORED,
     wp_harmonize_min_role JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'harmonize_min_role') STORED,
+    -- AQU-2305 (0192): this project's own import floor, stricter-only over its
+    -- org's `importMinRole` (AQU-2304). Read by the `file.create` perimeter on
+    -- every source import, so it joins this projection rather than being the
+    -- one write-path read that reopens the blob (db/shared/import-floor.ts).
+    wp_import_min_role JSONB GENERATED ALWAYS AS ((settings::jsonb) -> 'importMinRole') STORED,
     -- AQU-1771 (0174): this project's own, stricter-only floors for who sees
     -- its member list and each member's progress — read on every roster and
     -- named-progress check (members, mentions, assignments, activity), so they

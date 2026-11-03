@@ -159,6 +159,7 @@ import type { CellEditingTier } from "@/lib/sync/project-settings"
 import { FLOOR_LABEL } from "@/pages/settings/constants"
 import { CELL_EDITING_FLOOR_OPTIONS, cellEditingTierLabel } from "@/components/ProjectSettings/cell-editing-floor-options"
 import { OrgDefaultSource, orgBooleanOptionLabel } from "@/components/ProjectSettings/OrgDefaultSource"
+import { ProjectImportFloorSection } from "@/components/ProjectSettings/ProjectImportFloorSection"
 import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { ElevenLabsConnectCard } from "@/components/voice/elevenlabs/ElevenLabsConnectCard"
@@ -469,6 +470,8 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
     // AQU-1771: the rest of the org policy, carried for this project.
     orgPolicy: carriedOrgPolicy,
     visibilityFloors: carriedVisibilityFloors,
+    // AQU-2305: the import floor this project enforces, split three ways.
+    importFloor: carriedImportFloor,
     // AQU-1768: what "Organization default" means for the media settings.
     // Defaulted for callers (and test doubles) that predate the field.
     orgMediaDefaults = NO_ORG_MEDIA_DEFAULTS,
@@ -521,6 +524,7 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
   const projectPolicy = resolveProjectPolicy({
     orgPolicy: carriedOrgPolicy,
     visibilityFloors: carriedVisibilityFloors,
+    importFloor: carriedImportFloor,
     projectSettings: sharedSettingsBlob,
     org: orgSettingsForProject,
     roleLevel: project?.syncRole?.level ?? null,
@@ -1744,6 +1748,19 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
         {sectionsToRender.some((s) => s.id === "section-import") && (
           <div id="section-import">
             <SettingsGroup label={t("projectSettings.section.import")} locked={sharedDisabledTooltip}>
+              {/* AQU-2305: who may bring a new source file in — the
+                  organization's floor (AQU-2304), which this project may make
+                  stricter. First in the card: it decides whether the rest of
+                  the card's import behaviour is reachable at all. Cloud only;
+                  a local project has no org and no server floor. */}
+              {isCloudProject && projectPolicy.ready && (
+                <ProjectImportFloorSection
+                  floor={projectPolicy.importFloor}
+                  canEdit={canEditShared}
+                  disabledTooltip={sharedDisabledTooltip ?? undefined}
+                  onPatch={patchShared}
+                />
+              )}
               <SettingsRow
                 saveId="importExcludeFrontMatter"
                 label={<label htmlFor="import-exclude-front-matter">{t("projectSettings.import.excludeFrontMatterLabel")}</label>}

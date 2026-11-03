@@ -20,7 +20,7 @@ describe("TeamRoleSelect (AQU-1352 P2)", () => {
     render(<TeamRoleSelect username="carol" value={null} canEdit maxLevel={600} onChange={onChange} />)
     fireEvent.click(screen.getByRole("combobox", { name: "Team-wide role of carol" }))
     expect(await screen.findByRole("option", { name: "Maintainer" })).toBeTruthy()
-    await pick("Project lead")
+    await pick("Project Lead")
     await waitFor(() => expect(onChange).toHaveBeenCalledWith(500))
   })
 
@@ -35,13 +35,13 @@ describe("TeamRoleSelect (AQU-1352 P2)", () => {
   it("does not offer levels above the caller's own (no self-escalation)", async () => {
     render(<TeamRoleSelect username="carol" value={null} canEdit maxLevel={500} onChange={vi.fn()} />)
     fireEvent.click(screen.getByRole("combobox", { name: "Team-wide role of carol" }))
-    expect(await screen.findByRole("option", { name: "Project lead" })).toBeTruthy()
+    expect(await screen.findByRole("option", { name: "Project Lead" })).toBeTruthy()
     expect(screen.queryByRole("option", { name: "Maintainer" })).toBeNull()
   })
 
   it("read-only for callers who cannot edit: a label, no picker", () => {
     render(<TeamRoleSelect username="carol" value={500} canEdit={false} maxLevel={100} onChange={vi.fn()} />)
     expect(screen.queryByRole("combobox")).toBeNull()
-    expect(screen.getByText("Project lead")).toBeTruthy()
+    expect(screen.getByText("Project Lead")).toBeTruthy()
   })
 })

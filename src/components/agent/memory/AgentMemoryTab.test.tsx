@@ -377,7 +377,7 @@ describe("project brief", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Project brief" }))
     await waitFor(() => expect(screen.getByText(/this project translates Mark/)).toBeInTheDocument())
     expect(screen.queryByRole("button", { name: /Edit/ })).not.toBeInTheDocument()
-    expect(screen.getByText("Project lead only")).toBeInTheDocument()
+    expect(screen.getByText("Project Lead only")).toBeInTheDocument()
   })
 })
 

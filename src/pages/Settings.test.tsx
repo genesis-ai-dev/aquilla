@@ -79,12 +79,12 @@ vi.mock("@/hooks/useOrgSettings", () => ({
     memberProgressViewMinRole: 600,
     // AQU-496: self-assignment authority — default leads-only.
     allowSelfAssignment: false,
-    // AQU-1037: assigning work to others defaults to Project lead.
+    // AQU-1037: assigning work to others defaults to Project Lead.
     assignmentMinRole: 500,
-    // AQU-822: terminology floor — default Project lead.
+    // AQU-822: terminology floor — default Project Lead.
     termbaseEditMinRole: 500,
     languageEditMinRole: 600,
-    // AQU-2304: import floor — default Project lead, i.e. what every org does
+    // AQU-2304: import floor — default Project Lead, i.e. what every org does
     // today until an owner raises it.
     importMinRole: 500,
     // AQU-1002: comment floors — defaults reproduce post-AQU-999 behaviour.
@@ -282,12 +282,12 @@ describe("Security settings page", () => {
   })
 
   // ── AQU-2304: the org's import floor ──────────────────────────────────────
-  it("offers exactly Project lead and Maintainer for the import floor", async () => {
+  it("offers exactly Project Lead and Maintainer for the import floor", async () => {
     renderSettings("/orgs/1/settings/security")
     const trigger = await screen.findByRole("combobox", { name: /who can import files/i })
     fireEvent.click(trigger)
     const options = await screen.findAllByRole("option")
-    // Anything below Project lead would be a control that does nothing —
+    // Anything below Project Lead would be a control that does nothing —
     // `file.create`'s own static floor refuses a contributor regardless.
     expect(options.map((o) => o.textContent)).toEqual([
       expect.stringMatching(/^project lead — default/i),

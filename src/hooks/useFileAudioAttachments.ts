@@ -191,6 +191,14 @@ function shadowConfirmed(entry: CellAudioEntry | undefined, shadow: OptimisticSh
   // omit it and must not be held hostage to a position they never asserted.
   if (att.targetOffsetMs !== undefined && (server.targetOffsetMs ?? null) !== att.targetOffsetMs)
     return false
+  // AQU-2267: and its place following the recordings, by the same rule. A move
+  // the source's limits held still changes only this one.
+  if (att.recordingsOffsetMs !== undefined && (server.recordingsOffsetMs ?? null) !== att.recordingsOffsetMs)
+    return false
+  // AQU-2327: a volume or fade overlay, by the same rule.
+  if (att.gainDb !== undefined && (server.gainDb ?? null) !== att.gainDb) return false
+  if (att.fadeInMs !== undefined && (server.fadeInMs ?? null) !== att.fadeInMs) return false
+  if (att.fadeOutMs !== undefined && (server.fadeOutMs ?? null) !== att.fadeOutMs) return false
   return true
 }
 
@@ -589,6 +597,12 @@ export function mergeCellsWithAudio(
         // that starts exactly on its line sits, and it must stay
         // distinguishable from "never placed".
         ...(a.targetOffsetMs != null ? { targetOffsetMs: a.targetOffsetMs } : {}),
+        // AQU-2267: its place following the recordings, by the same rule.
+        ...(a.recordingsOffsetMs != null ? { recordingsOffsetMs: a.recordingsOffsetMs } : {}),
+        // AQU-2327: the clip's volume and fades.
+        ...(a.gainDb != null ? { gainDb: a.gainDb } : {}),
+        ...(a.fadeInMs != null ? { fadeInMs: a.fadeInMs } : {}),
+        ...(a.fadeOutMs != null ? { fadeOutMs: a.fadeOutMs } : {}),
         // SUB-48: "saved here, not yet at the server" — drives the saving hint.
         ...(a.pendingSync ? { pendingSync: true as const } : {}),
         // AQU-924: "saved here, and it will NOT reach the server on its own."
@@ -602,6 +616,8 @@ export function mergeCellsWithAudio(
         ...(a.label != null ? { label: a.label } : {}),
         ...(a.validatorCount != null ? { validatorCount: a.validatorCount } : {}),
         ...(a.validators ? { validators: a.validators } : {}),
+        // AQU-2296: WHEN each of them voted, for the date under each name.
+        ...(a.validatorDecidedTs ? { validatorDecidedTs: a.validatorDecidedTs } : {}),
         ...(a.role ? { role: a.role } : {}),
         ...(a.recordedBy != null ? { recordedBy: a.recordedBy } : {}),
         // AQU-1767: which take a piece was cut from — the chips, the playback

@@ -187,7 +187,7 @@ function AlignmentRow({
           {/* AQU-240: the aria-label explains that confirming teaches the
               glosser. AQU-2260: the hover only names it; the section's (i)
               says what ✓ and ✕ do. */}
-          <AppTooltip content={t("common.confirm")}>
+          <AppTooltip content={t("workspace.alignment.confirmTooltip")}>
             <Button
               type="button"
               variant="ghost"
@@ -201,7 +201,7 @@ function AlignmentRow({
           </AppTooltip>
           {/* AQU-240: the aria-label explains that invalidating penalizes
               incorrect suggestions; the hover only names it (AQU-2260). */}
-          <AppTooltip content={t("agent.reject")}>
+          <AppTooltip content={t("workspace.alignment.rejectTooltip")}>
             <Button
               type="button"
               variant="ghost"

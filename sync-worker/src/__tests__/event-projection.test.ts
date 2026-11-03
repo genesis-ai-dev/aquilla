@@ -1051,6 +1051,8 @@ describe('isChainMutatingKind', () => {
     'cell.retime': false,
     'cell.audio.rename': false,
     'cell.audio.trim': false,
+    // AQU-2327: a take's volume and fades; never the text chain.
+    'cell.audio.gain': false,
     'cell.audio.place': false,
     // AQU-1767: a cut makes a second take row; it never moves the text chain.
     'cell.audio.cut': false,

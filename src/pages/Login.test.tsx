@@ -1,17 +1,18 @@
+import { renderWithBrand as render } from "@/test-utils/render-with-brand"
 /**
  * AQU-282: Login page tests
  *
  * Covers:
- *  - Page renders username + password fields and a Sign in button
+ *  - Page renders username + password fields and a Log in button
  *  - Successful login navigates to /app
  *  - Already-signed-in visitors are redirected into the app
  *  - Auth error shown in the form
  *  - "Forgot password?" link switches to forgot-password mode
- *  - "Create an account" link points to /onboarding
+ *  - "Create an account" link points to /signup
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, waitFor, fireEvent, act } from "@testing-library/react"
+import { screen, waitFor, fireEvent, act } from "@testing-library/react"
 import { MemoryRouter, Routes, Route } from "react-router-dom"
 import { Login } from "./Login"
 
@@ -128,9 +129,9 @@ describe("Login page — rendering", () => {
     expect(screen.getByLabelText("Password")).toBeInTheDocument()
   })
 
-  it("renders a Sign in button that stays enabled and validates on submit", async () => {
+  it("renders a Log in button that stays enabled and validates on submit", async () => {
     renderLogin()
-    const btn = screen.getByRole("button", { name: /^sign in$/i })
+    const btn = screen.getByRole("button", { name: /^log in$/i })
     expect(btn).toBeEnabled()
     await submitLogin()
     await waitFor(() => {
@@ -138,10 +139,10 @@ describe("Login page — rendering", () => {
     })
   })
 
-  it("renders a 'Create an account' link pointing to /onboarding", () => {
+  it("renders a 'Create an account' link pointing to /signup", () => {
     renderLogin()
     const link = screen.getByRole("link", { name: /create an account/i })
-    expect(link).toHaveAttribute("href", "/onboarding")
+    expect(link).toHaveAttribute("href", "/signup")
   })
 })
 
@@ -195,7 +196,7 @@ describe("Login page — success path", () => {
     fillLogin("alice", "secret")
     await submitLogin()
 
-    expect(screen.getByRole("button", { name: "Signing in…" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Logging in…" })).toBeDisabled()
     expect(screen.queryByRole("status")).not.toBeInTheDocument()
 
     act(() => announceMigration())
@@ -347,5 +348,5 @@ describe("Login page — next param", () => {
 
 it("keeps a paid selection when switching from sign-in to account creation", () => {
   render(<MemoryRouter initialEntries={["/login?next=" + encodeURIComponent("/billing/select?offer=team&interval=year&quantity=1")]}><Login /></MemoryRouter>)
-  expect(screen.getByRole("link", { name: /create an account/i })).toHaveAttribute("href", "/onboarding?offer=team&interval=year&quantity=1")
+  expect(screen.getByRole("link", { name: /create an account/i })).toHaveAttribute("href", "/signup?offer=team&interval=year&quantity=1")
 })

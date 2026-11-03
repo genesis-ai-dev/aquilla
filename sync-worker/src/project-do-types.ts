@@ -26,6 +26,7 @@ export type OutboxEventKind =
   // gating anything, so nothing broke; caught while adding AQU-490's pair.
   | "cell.audio.rename"
   | "cell.audio.trim"
+  | "cell.audio.gain"
   | "cell.audio.place"
   | "cell.audio.cut"
   | "cell.audio.measure"

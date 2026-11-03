@@ -690,6 +690,19 @@ CREATE TABLE IF NOT EXISTS removed_cell_archive (
 CREATE INDEX IF NOT EXISTS idx_removed_cell_archive_cell
     ON removed_cell_archive (project_id, file_id, cell_id, deleted_ts DESC);
 
+-- Decision 11 (migration 0191): each person's undo history for a project, so
+-- it follows them between devices. One row per (project, person); `history`
+-- is the client's JSON document and `revision` the compare-and-swap counter a
+-- write must name (auth-worker routes/edit-history.ts).
+CREATE TABLE IF NOT EXISTS edit_histories (
+    project_id  TEXT    NOT NULL,
+    user_id     BIGINT  NOT NULL,
+    revision    INTEGER NOT NULL,
+    history     TEXT    NOT NULL,
+    updated_at  BIGINT  NOT NULL,
+    PRIMARY KEY (project_id, user_id)
+);
+
 CREATE TABLE files (
     id             TEXT PRIMARY KEY,
     project_id     TEXT NOT NULL,
@@ -1079,6 +1092,19 @@ CREATE TABLE cell_audio (
     -- live piece of a selected group is selected, so a row needs every piece
     -- validated (the progress MIN over selected dubs already says so).
     piece_of           TEXT,
+    -- AQU-2267 (0189): the take's place FOLLOWING THE RECORDINGS, measured the
+    -- same way from its line's start in that layout; target_offset_ms is
+    -- its place following the source. Both are written by cell.audio.place, so
+    -- a move adds the same distance to both, each held by its own timing's
+    -- limits. NULL = no place of its own there: that timing reads
+    -- target_offset_ms, as every take before 0189 does.
+    recordings_offset_ms BIGINT,
+    -- AQU-2327 (0193): the clip's volume (dB) and fades (ms), written only by
+    -- cell.audio.gain. Like the trim they never change the recording; NULL =
+    -- as recorded, no fade.
+    gain_db            REAL,
+    fade_in_ms         BIGINT,
+    fade_out_ms        BIGINT,
     PRIMARY KEY (project_id, file_id, cell_id, audio_id)
 );
 

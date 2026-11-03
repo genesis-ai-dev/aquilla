@@ -146,6 +146,9 @@ import {
   type FileTargetPanelBack,
 } from "@/components/import/FileTargetImportPanel"
 import { ImportIntentChoice, type ImportIntent } from "@/components/import/ImportIntentChoice"
+import { RecordingsPicker, RecordingsReview } from "@/components/import/RecordingsUpload"
+import type { ChosenFile } from "@/lib/audio/bulk-upload/collect-files"
+import type { ProjectFileLike } from "@/lib/audio/bulk-upload/load-targets"
 import { TranslationChooser, type TranslationOtherWay, type TranslationStartOptions } from "@/components/import/TranslationChooser"
 import type { LaneComboboxOption } from "@/components/LaneCombobox"
 import type { FileTargetCellRef } from "@/lib/import-file-target"
@@ -183,6 +186,56 @@ type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "obs" | 
   // AQU-1365: a source upload looks like a translation; asked before any cell
   // is created.
   | "translationCheck"
+  // AQU-981: recordings chosen for one file from its ⋯ menu, then the review of
+  // where every recording goes (both entry points).
+  | "recordingsPick" | "recordingsReview"
+
+/**
+ * AQU-832: the header title for each screen whose title is a plain catalog
+ * lookup. Module-level, like the option tables below, so it holds keys and the
+ * render resolves them — it cannot call t() itself.
+ *
+ * Deliberately NOT derived from POPULAR_OPTIONS/SPECIALIZED_OPTIONS: four
+ * screens title themselves differently from the tile that opens them
+ * (`helloao`, `tn`, `spreadsheet`, `paired` use `importExport.dialog.title*`,
+ * their tiles use `importExport.landing.*.title`), and two tiles share the
+ * `upload` screen.
+ *
+ * Absent on purpose: the screens titled by their own branch earlier in the
+ * header, `partner` (reads the partner's own `importScreen.titleKey`),
+ * `extension` (a tool-supplied label, not a key), and `ebible`, which is the
+ * fallback for anything missing.
+ */
+const SCREEN_TITLE_KEYS: Partial<Record<Screen, MessageKey>> = {
+  upload: "importExport.landing.upload.title",
+  youtube: "importExport.landing.youtube.title",
+  gdrive: "importExport.landing.gdrive.title",
+  helloao: "importExport.dialog.titleHelloao",
+  obs: "importExport.landing.obs.title",
+  dcs: "importExport.landing.dcs.title",
+  macula: "importExport.landing.macula.title",
+  tn: "importExport.dialog.titleTn",
+  spreadsheet: "importExport.dialog.titleSpreadsheet",
+  jsonKeys: "importExport.dialog.titleJsonKeys",
+  paired: "importExport.dialog.titlePaired",
+  sdbh: "importExport.landing.sdbh.title",
+  linkProject: "importExport.landing.linkProject.title",
+}
+
+/**
+ * AQU-981: what the host gives "Recordings" — uploading many recordings onto
+ * lines already here. Absent, the dialog offers no Recordings card.
+ */
+export interface RecordingsImportHost {
+  /** The project's files, as the sidebar lists them. */
+  files: readonly ProjectFileLike[]
+  /** Why this person can't upload recordings into the open lane, or null. */
+  disabledReason: string | null
+  /** The open lane's name, which the recordings go into. */
+  languageLabel: string | null
+  /** Set when opened from a file's ⋯ menu: recordings for that file only. */
+  file: { id: string; name: string } | null
+}
 
 /**
  * AQU-1365: what the host gives the "A translation" path. The cell store only
@@ -402,6 +455,8 @@ interface ImportDialogProps {
    *  Absent when AI completion is not configured; the re-import still updates
    *  the source and leaves every translation where it is. */
   alignReimportedIdml?: IdmlReimportAlignHost
+  /** AQU-981: "Recordings" — bulk audio upload onto lines already here. */
+  recordings?: RecordingsImportHost
 }
 
 /** localStorage key used to persist the per-project "skip direction prompt" choice. */
@@ -433,6 +488,7 @@ export function ImportDialog({
   sourceDisabledReason = null,
   translation,
   alignReimportedIdml,
+  recordings,
 }: ImportDialogProps) {
   const t = useT()
   const [screen, setScreen] = useState<Screen>("landing")
@@ -449,6 +505,9 @@ export function ImportDialog({
   // the approval gate. Chosen on the chooser, before the drop, so the review
   // opens already titled for it and its final button says "Propose".
   const [translationMode, setTranslationMode] = useState<FileTargetImportMode>("commit")
+  // AQU-981: the recordings chosen, held here so Back from the review finds them.
+  const [recordingsChosen, setRecordingsChosen] = useState<ChosenFile[] | null>(null)
+  const recordingsFile = recordings?.file ?? null
   const [opening, setOpening] = useState<{ gate: ImportFileGate; state: ImportFileGateState }>(
     { gate: CLOSED_IMPORT_FILE_GATE, state: "waiting" },
   )
@@ -487,6 +546,7 @@ export function ImportDialog({
     if (open) {
       const openFileId = translation?.activeFileId ?? null
       setIntent(sourceDisabledReason !== null && translation ? "translation" : "source")
+      setRecordingsChosen(null)
       setTranslationFileId(openFileId !== null && translationFiles.some((file) => file.id === openFileId) ? openFileId : null)
       setHeldTranslationFile(null)
       setTranslationRun(null)
@@ -575,7 +635,7 @@ export function ImportDialog({
         ? partnerIdForImportedFile(reimportTarget)
         : null
       setPartnerId(reimportPartner)
-      setScreen(reimportTarget ? (reimportPartner ? "partner" : "upload") : "landing")
+      setScreen(reimportTarget ? (reimportPartner ? "partner" : "upload") : recordingsFile ? "recordingsPick" : "landing")
       setPendingImport(null)
       setImportResult(null)
       setImportResultError(null)
@@ -592,7 +652,7 @@ export function ImportDialog({
       setConfirmError(null)
       flushingRef.current = false
     }
-  }, [open, reimportTarget])
+  }, [open, reimportTarget, recordingsFile])
 
   const reimportFileId = reimportTarget?.fileId ?? null
   useEffect(() => {
@@ -1111,7 +1171,7 @@ export function ImportDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="flex max-h-[90dvh] sm:max-w-2xl flex-col">
+      <DialogContent className={cn("flex max-h-[90dvh] flex-col", screen === "recordingsReview" ? "sm:max-w-4xl" : "sm:max-w-2xl")}>
         <DialogHeader>
           <DialogTitle>
             {reimportTarget && (screen === "upload" || screen === "preview" || screen === "partner") ? (
@@ -1122,6 +1182,21 @@ export function ImportDialog({
                 />
                 <span className="min-w-0 truncate">
                   {t("importExport.reimport.title", { name: reimportTarget.name })}
+                </span>
+              </div>
+            ) : screen === "recordingsPick" || screen === "recordingsReview" ? (
+              <div className="flex min-w-0 items-center gap-2">
+                <ImportDialogBackButton
+                  onClick={() => {
+                    if (screen === "recordingsReview") setScreen(recordingsFile ? "recordingsPick" : "landing")
+                    else onOpenChange(false)
+                  }}
+                  label={screen === "recordingsReview" ? t("importExport.dialog.backToFileSelection") : t("common.cancel")}
+                />
+                <span className="min-w-0 truncate">
+                  {recordingsFile
+                    ? t("recordingsUpload.titleInto", { fileName: recordingsFile.name })
+                    : t("recordingsUpload.title")}
                 </span>
               </div>
             ) : screen === "landing" ? (
@@ -1185,22 +1260,9 @@ export function ImportDialog({
                   onClick={() => setScreen("landing")}
                   label={t("importExport.dialog.backToImportTypes")}
                 />
-                {screen === "upload" ? t("importExport.landing.upload.title")
-                  : screen === "youtube" ? t("importExport.landing.youtube.title")
-                  : screen === "gdrive" ? t("importExport.landing.gdrive.title")
-                  : screen === "helloao" ? t("importExport.dialog.titleHelloao")
-                  : screen === "obs" ? t("importExport.landing.obs.title")
-                  : screen === "dcs" ? t("importExport.landing.dcs.title")
-                  : screen === "macula" ? t("importExport.landing.macula.title")
-                  : screen === "tn" ? t("importExport.dialog.titleTn")
-                  : screen === "partner" ? t(activePartner?.importScreen?.titleKey ?? "importExport.landing.upload.title")
-                  : screen === "spreadsheet" ? t("importExport.dialog.titleSpreadsheet")
-                  : screen === "jsonKeys" ? t("importExport.dialog.titleJsonKeys")
-                  : screen === "paired" ? t("importExport.dialog.titlePaired")
-                  : screen === "sdbh" ? t("importExport.landing.sdbh.title")
-                  : screen === "linkProject" ? t("importExport.landing.linkProject.title")
+                {screen === "partner" ? t(activePartner?.importScreen?.titleKey ?? "importExport.landing.upload.title")
                   : screen === "extension" ? (extensionImporter?.importer.label ?? "")
-                  : t("importExport.landing.ebible.title")}
+                  : t(SCREEN_TITLE_KEYS[screen] ?? "importExport.landing.ebible.title")}
               </div>
             )}
           </DialogTitle>
@@ -1208,7 +1270,7 @@ export function ImportDialog({
 
         {/* AQU-1365: the translation review owns its scroll and pins its footer,
             so it sits outside the scrolling body (below), not inside it. */}
-        {screen !== "translationReview" && (
+        {screen !== "translationReview" && screen !== "recordingsReview" && (
         <DialogBody>
 
         {screen === "landing" && translation && (
@@ -1221,8 +1283,32 @@ export function ImportDialog({
               }}
               sourceDisabledReason={sourceDisabledReason}
               translationDisabledReason={translationDisabledReason}
+              {...(recordings ? { recordingsDisabledReason: recordings.disabledReason } : {})}
             />
           </div>
+        )}
+
+        {/* AQU-981: Recordings — the drop zone right under the choice, as the
+            translation's file chooser sits under its card. */}
+        {screen === "landing" && intent === "recordings" && recordings && (
+          <RecordingsPicker
+            fileName={null}
+            languageLabel={recordings.languageLabel}
+            onFiles={(files) => {
+              setRecordingsChosen(files)
+              setScreen("recordingsReview")
+            }}
+          />
+        )}
+        {screen === "recordingsPick" && recordings && recordingsFile && (
+          <RecordingsPicker
+            fileName={recordingsFile.name}
+            languageLabel={recordings.languageLabel}
+            onFiles={(files) => {
+              setRecordingsChosen(files)
+              setScreen("recordingsReview")
+            }}
+          />
         )}
 
         {screen === "landing" && intent === "translation" && translation && (
@@ -1804,6 +1890,27 @@ export function ImportDialog({
           />
         )}
         </DialogBody>
+        )}
+
+        {/* AQU-981: where every recording goes; owns its scroll and footer. */}
+        {screen === "recordingsReview" && recordings && recordingsChosen && (
+          <div className="flex min-h-0 flex-1 flex-col">
+            <RecordingsReview
+              projectId={projectId}
+              file={recordingsFile}
+              projectFiles={recordings.files}
+              getToken={getToken}
+              lane={targetLang ?? ""}
+              languageLabel={recordings.languageLabel}
+              username={username}
+              chosen={recordingsChosen}
+              onStarted={() => {
+                posthog.capture(IMPORT_STARTED, { import_type: "recordings", project_id: projectId, file_count: recordingsChosen.length })
+                onOpenChange(false)
+              }}
+              onCancel={() => onOpenChange(false)}
+            />
+          </div>
         )}
 
         {/* AQU-1365: the existing target-import review, handed the dropped

@@ -608,7 +608,7 @@ export function LinkSourceFlow({
           )}
         </div>
         <InheritedSettingsChoice
-          title={t("projectSettings.inherit.linkTitle")}
+          title={t("projectSettings.inherit.title", { upstream: preview?.upstreamName || reviewingName })}
           description={t("projectSettings.inherit.linkDescription")}
           receive={inheritReceive}
           detached={inheritDetached}

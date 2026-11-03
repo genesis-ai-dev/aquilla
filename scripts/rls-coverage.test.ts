@@ -100,7 +100,7 @@ const UNCOVERED: Record<string, string> = {
   chain_claims: "never granted to app_runtime",
   concepts: "never granted to app_runtime",
   file_segmentation: "never granted to app_runtime",
-  // AQU-2308 (0191): hand-set navigator milestones — a name and two cell
+  // AQU-2308 (0194): hand-set navigator milestones — a name and two cell
   // anchors per file, written and read only through the sync-worker perimeter
   // (the two file.milestone.* events and the per-file read route). Listed here
   // rather than given a policy for the blanket reason above, and the same one
@@ -136,6 +136,9 @@ const UNCOVERED: Record<string, string> = {
   // undone. Written and read only by the sync-worker's projection of
   // source.cell.delete / source.cell.restore; no app read path touches it.
   removed_cell_archive: "never granted to app_runtime",
+  // Decision 11 (0191): each person's undo history for a project, read and
+  // written only by auth-worker's /edit-history route for the caller's own row.
+  edit_histories: "never granted to app_runtime",
   style_rules: "never granted to app_runtime",
   workspace_usage_requests: "never granted to app_runtime",
   project_tools: "never granted to app_runtime (tools prototype)",

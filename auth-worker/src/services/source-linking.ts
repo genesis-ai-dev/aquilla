@@ -22,8 +22,10 @@
 
 import { sign } from "hono/jwt"
 import { ensureProjectLanes } from "../../../db/shared/lanes"
+import { applyLinkedFileProvenance, type LinkedFilePair } from "../../../db/shared/link-file-provenance"
 import { visibleTagsForMember } from "../../../db/shared/lane-visibility"
 import type { Env } from "../types"
+import { linkSourceBlobPointers } from "../../../db/shared/link-source-blob"
 import {
   loadFileSourceLines,
   matchLinkedFileLines,
@@ -845,6 +847,9 @@ export async function snapshotSourceFiles(
     console.warn("snapshotSourceFiles: existing-file scan failed:", err)
   }
 
+  // AQU-2345: the copies this run wrote, for their originals below. Never an
+  // adopted file — that is the project's own import, with its own original.
+  const copiedPairs: LinkedFilePair[] = []
   for (const file of files) {
     // AQU-1679: the project's own file followed this upstream file. It is not a
     // copy to refresh — its name, kind and meta are the project's own (the
@@ -900,8 +905,29 @@ export async function snapshotSourceFiles(
       byUpstreamId.set(file.id, targetFileId)
       liveFileIds.add(targetFileId)
       fileIdMap.set(file.id, targetFileId)
+      copiedPairs.push({ upstreamFileId: file.id, downstreamFileId: targetFileId })
     } catch (err) {
       console.warn(`snapshotSourceFiles: insert failed for ${file.id}:`, err)
+    }
+  }
+
+  // AQU-2345: a copy's original is the upstream's — a `file_source_blobs` row
+  // under the copy's id that names the upstream's R2 object, so the copy's
+  // export can round-trip through it. The kind travelled with the row above;
+  // this is the other half, and the reason a clone (or a detached link) could
+  // never export the IDML it was made from. Best-effort, like the rest of this
+  // function: the copies are already there, and a missing pointer is what
+  // `POST /admin/link-provenance` repairs.
+  if (copiedPairs.length > 0) {
+    try {
+      await applyLinkedFileProvenance(env.AQUILLA_PG, {
+        upstreamProjectId: args.upstreamProjectId,
+        downstreamProjectId: args.targetProjectId,
+        pairs: copiedPairs,
+        now,
+      })
+    } catch (err) {
+      console.warn("snapshotSourceFiles: source blob pointers failed:", err)
     }
   }
 
@@ -1336,6 +1362,26 @@ export async function snapshotSourceCells(
         err,
       )
     }
+  }
+
+  // AQU-2345: the copies this snapshot just made carry the upstream's cells
+  // and `files` rows, and carried nothing about where their original upload
+  // lives — so an IDML file copied in through a link read
+  // `hasOriginalSource: false` and 404'd on export. Point each one at the
+  // upstream file's artifact (a pointer, no bytes copied) now that the rows
+  // exist. See db/shared/link-source-blob.ts.
+  try {
+    await linkSourceBlobPointers(env.AQUILLA_PG, {
+      upstreamProjectId: args.upstreamProjectId,
+      downstreamProjectId: args.targetProjectId,
+      downstreamFileIdOf: (upstreamFileId) =>
+        deterministicDownstreamFileId(args.targetProjectId, upstreamFileId),
+      now: () => now,
+    })
+  } catch (err) {
+    // Export provenance is not worth failing the snapshot over — the live
+    // mirror's own sweep retries it on the next sync.
+    console.warn("snapshotSourceCells: source-blob sweep failed:", err)
   }
 
   return emitted

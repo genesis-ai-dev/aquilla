@@ -14,12 +14,12 @@ abA wait --load networkidle >/dev/null
 
 # 1. Alice creates the project.
 abA open "$BASE/orgs/$ORG/projects" >/dev/null && abA wait --load networkidle >/dev/null
-abA find role button click --name "New Project" >/dev/null || fail "New Project button"
-abA wait --text "Create New Project" >/dev/null || fail "create dialog"
-abA find label "Project title" fill "$NAME" >/dev/null || fail "title field"
-abA find label "Source Language" fill "en" >/dev/null || fail "source field"
-abA find label "Target language(s)" fill "fr" >/dev/null || fail "target field"
-abA find role button click --name "Create Project" >/dev/null || fail "Create Project button"
+abA find role button click --name "New project" >/dev/null || fail "New project button"
+abA wait --text "Create new project" >/dev/null || fail "create dialog"
+abA find label "Project name" fill "$NAME" >/dev/null || fail "name field"
+abA find label "Source language" fill "en" >/dev/null || fail "source field"
+abA find label "Language lanes" fill "fr" >/dev/null || fail "lanes field"
+abA find role button click --name "Create project" >/dev/null || fail "Create project button"
 abA wait --text "Open project" >/dev/null || fail "overview did not load"
 projectUrl=$(abA get url)
 projectId=$(printf '%s' "$projectUrl" | sed -n 's#.*/projects/\([^/?#]*\).*#\1#p')

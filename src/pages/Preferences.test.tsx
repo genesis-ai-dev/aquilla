@@ -7,6 +7,7 @@ import { ThemeModeProvider } from "@/branding/ThemeMode"
 import { FontSizeProvider, FONT_SIZE_STORAGE_KEY } from "@/branding/FontSize"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import { Preferences, PreferencesDialog } from "./Preferences"
+import { getTranslatorProfile } from "@/lib/translator-profile"
 
 // AQU-1277: OrgProvider loads the project directory via
 // fetchAccessibleProjectsResult, which catches its own network errors. Unmocked
@@ -61,6 +62,9 @@ describe("Preferences", () => {
   it("index shows General controls inline, then nav rows for nested sections", () => {
     renderAt("/preferences")
     expect(screen.getByRole("heading", { name: "Preferences" })).toBeInTheDocument()
+    // AQU-2261: Recording and Notifications follow you across devices now, so
+    // the page no longer says its preferences stay on this device.
+    expect(screen.getByText("Personal preferences that apply to you across all projects.")).toBeInTheDocument()
     expect(screen.getByText("General")).toBeInTheDocument()
     expect(screen.getByRole("combobox", { name: "Theme" })).toBeInTheDocument()
     expect(screen.getByRole("combobox", { name: "App font size" })).toBeInTheDocument()
@@ -74,7 +78,7 @@ describe("Preferences", () => {
       [/Workspace/, "/preferences/workspace"],
       [/Translator profile/, "/preferences/profile"],
       [/AI provider keys/, "/preferences/provider-keys"],
-      [/Local models/, "/preferences/local-models"],
+      [/On-device AI models/, "/preferences/local-models"],
       [/Usage/, "/preferences/usage"],
     ]
     for (const [name, href] of rows) {
@@ -202,7 +206,7 @@ describe("Preferences", () => {
     expect(document.documentElement.style.fontSize).toBe("14px")
 
     await userEvent.click(screen.getByRole("combobox", { name: "App font size" }))
-    await userEvent.click(await screen.findByRole("option", { name: "Extra Large" }))
+    await userEvent.click(await screen.findByRole("option", { name: "Extra large" }))
     expect(window.localStorage.getItem(FONT_SIZE_STORAGE_KEY)).toBe("extra-large")
     expect(document.documentElement.style.fontSize).toBe("20px")
   })
@@ -264,7 +268,34 @@ describe("Preferences — name when signed out (AQU-2259)", () => {
     const input = await screen.findByLabelText("Name when signed out")
     expect(input.closest("#pref-author-name")).not.toBeNull()
     await userEvent.type(input, "Ana")
+    // AQU-2262: a typing field saves when you leave it, never half-typed.
+    expect(window.localStorage.getItem("aq.local-author-name.v1")).toBeNull()
+    await userEvent.tab()
     expect(window.localStorage.getItem("aq.local-author-name.v1")).toBe("Ana")
+    expect(await screen.findByTestId("save-status-authorName")).toHaveTextContent("Saved")
+  })
+})
+
+// AQU-2262: the translator profile saves as you change it, a field at a time,
+// when you leave the field or pause, and says "Saved" beside it.
+describe("Preferences — translator profile saves as you change it (AQU-2262)", () => {
+  it("saves a field when you leave it, not on every keystroke", async () => {
+    renderAt("/preferences/profile")
+    const age = screen.getByLabelText("Age")
+    await userEvent.type(age, "34")
+    expect(getTranslatorProfile().age ?? "").toBe("")
+    await userEvent.tab()
+    expect(getTranslatorProfile().age).toBe("34")
+    expect(await screen.findByTestId("save-status-profile-age")).toHaveTextContent("Saved")
+  })
+
+  it("saves the longer note when you leave it, keeping its new lines", async () => {
+    renderAt("/preferences/profile")
+    const other = screen.getByLabelText(/other relevant information/i)
+    await userEvent.type(other, "Line one{Enter}Line two")
+    expect(getTranslatorProfile().otherInfo ?? "").toBe("")
+    await userEvent.tab()
+    expect(getTranslatorProfile().otherInfo).toBe("Line one\nLine two")
   })
 })
 

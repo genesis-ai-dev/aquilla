@@ -4,13 +4,13 @@ Smoke twin: `e2e/specs/collab/file-propagation.smoke.spec.ts`
 
 ## Preconditions
 
-- `alice` is logged in and is a maintainer of Dev Org (org id 9).
+- `alice` is logged in and is a maintainer of Dev Org (org id 1).
 - `bob` is logged in in a separate session. Bob is not a member of the project yet.
 - The fixture `e2e/fixtures/sample.md` is on disk.
 
 ## Steps
 
-1. **Alice** creates a project from `/orgs/9/projects`: click **New Project**, fill **Project title**, **Source Language** (`en`), **Target language(s)** (`fr`), click **Create Project**.
+1. **Alice** creates a project from `/orgs/1/projects`: click **New project**, fill **Project name**, **Source language** (`en`), **Language lanes** (`fr`), click **Create project**.
 2. **Alice** clicks **Project settings**, then **Members**, then **Add a member**. She types `bob` into the **Aquilla username** field, clicks the **bob** suggestion checkbox that appears, then clicks **Add**. The Members table now shows a row for bob with role **Contributor**.
 3. **Alice** closes the Members dialog, clicks **Open project**, clicks **Import**, then the **Upload files** card, then uploads `sample.md`. The **Import preview** shows. She clicks **Confirm import**.
 4. `sample.md` appears in Alice's sidebar Files list.

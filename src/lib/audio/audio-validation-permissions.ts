@@ -39,6 +39,8 @@ export interface CellLikeAudio {
     role?: "dub" | "source"
     validatorCount?: number
     validators?: string[]
+    /** AQU-2296: username → when they validated this take (ms). */
+    validatorDecidedTs?: Record<string, number>
     recordedBy?: string | null
     /** AQU-1767: the take a piece was cut from, and where it starts in the clip. */
     pieceOf?: string | null
@@ -73,6 +75,9 @@ export function audioEntryFromCell(cell: CellLikeAudio | undefined): CellAudioEn
       ...(att.role ? { role: att.role } : {}),
       ...(att.validatorCount != null ? { validatorCount: att.validatorCount } : {}),
       ...(att.validators ? { validators: att.validators } : {}),
+      // AQU-2296: the stamps ride with the names, or the popover has names
+      // and no dates — which is how it shipped the first time.
+      ...(att.validatorDecidedTs ? { validatorDecidedTs: att.validatorDecidedTs } : {}),
       ...(att.recordedBy !== undefined ? { recordedBy: att.recordedBy } : {}),
     }
   }

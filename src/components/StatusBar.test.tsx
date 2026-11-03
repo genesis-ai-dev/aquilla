@@ -66,10 +66,12 @@ describe("StatusBar health breakdown", () => {
     fireEvent.mouseEnter(trigger(container))
     fireEvent.mouseMove(trigger(container))
     await new Promise((resolve) => setTimeout(resolve, 500))
-    expect(screen.queryByText("project health")).toBeNull()
+    expect(screen.queryByText("Project health")).toBeNull()
     expect(screen.getByRole("button", { name: "Project health: 100%" })).toBe(trigger(container))
     fireEvent.click(trigger(container))
-    expect(await screen.findByText("project health")).toBeTruthy()
+    // AQU-2261: the card's title comes from the catalog, in sentence case.
+    expect(await screen.findByText("Project health", { exact: true })).toBeTruthy()
+    expect(screen.queryByText("project health", { exact: true })).toBeNull()
     expect(screen.queryByRole("button", { name: /Genesis/ })).toBeNull()
   })
 
@@ -319,5 +321,87 @@ describe("StatusBar in a language that counts its recordings", () => {
     expect(screen.queryByTestId("status-bar-validated")).toBeNull()
     expect(screen.queryByTestId("status-bar-unvalidated-audio")).toBeNull()
     expect(screen.queryByTestId("status-bar-validated-audio")).toBeNull()
+  })
+})
+
+// AQU-2337: the media view's status ring opens this footer inside a fixed
+// 320 px popover, where the footer is allowed to wrap. The badges are
+// `shrink-0 whitespace-nowrap`, so while the summary shared one non-wrapping
+// group with them it was the only element that could give way: it collapsed
+// into a word-per-line column ("1,208" / "lines ·" / "1,207" / "recorded" /
+// "(99%)") and the health ring was pushed onto a line of its own above the
+// counts. happy-dom does no layout, so the guard is the structure that
+// decides it — the summary never wraps and rides in the same group as the
+// ring (a flex line breaks on a group's whole content), and the legend
+// badges sit in a separate wrapping row that can drop below them.
+describe("StatusBar layout in the status popover (AQU-2337)", () => {
+  const view = (progress: ComponentProps<typeof StatusBarView>["progress"]) =>
+    render(<StatusBarView progress={progress} getHealthByCell={() => []} projectHealth={60} />)
+
+  it("keeps the summary on one line beside the ring, with the two long badges in their own wrapping row", () => {
+    // The reported file: EXO — 1,208 lines, 1,207 recorded, 1 of them not yet
+    // validated, 1,206 audio validated. Both long badges at once.
+    const { container } = view({ total: 1208, translated: 0, validated: 0, recorded: 1207, audioValidated: 1206 })
+    const summary = screen.getByTestId("status-bar-summary")
+    expect(plain(summary.textContent)).toBe("1,208 lines · 1,207 recorded (99%)")
+    // The summary may never be the element that gives way.
+    expect(summary.className).toContain("whitespace-nowrap")
+
+    // The ring travels with the summary instead of being pushed above it.
+    const counts = screen.getByTestId("status-bar-counts")
+    expect(summary.parentElement).toBe(counts)
+    expect(counts.contains(screen.getByRole("button", { name: /Project health/ }))).toBe(true)
+
+    // ...and the badges are NOT in that group — sharing it is what squeezed it.
+    const legend = screen.getByTestId("status-bar-legend")
+    expect(counts.contains(legend)).toBe(false)
+    expect(legend.contains(summary)).toBe(false)
+    expect(legend.className).toContain("flex-wrap")
+    expect([...legend.children]).toEqual([
+      screen.getByTestId("status-bar-unvalidated-audio"),
+      screen.getByTestId("status-bar-validated-audio"),
+    ])
+    expect(plain(legend.textContent)).toContain("1 recorded, not validated")
+    expect(plain(legend.textContent)).toContain("1,206 audio validated")
+
+    // The editor footer's own row is unchanged: the counts, then the legend.
+    expect([...container.querySelector("footer")!.children]).toEqual([counts, legend])
+  })
+
+  it("lays the text lens's unvalidated/validated pair out the same way, since it shares this footer", () => {
+    view({ total: 1208, translated: 1207, validated: 1206 })
+    const legend = screen.getByTestId("status-bar-legend")
+    expect(legend.className).toContain("flex-wrap")
+    expect(legend.contains(screen.getByTestId("status-bar-summary"))).toBe(false)
+    expect(screen.getByTestId("status-bar-summary").className).toContain("whitespace-nowrap")
+    expect([...legend.children]).toEqual([
+      screen.getByTestId("status-bar-unvalidated"),
+      screen.getByTestId("status-bar-validated"),
+    ])
+  })
+
+  it("keeps the shape with one badge, and draws no legend row at all when there are none", () => {
+    const one = view({ total: 10, translated: 4, validated: 0 })
+    expect([...screen.getByTestId("status-bar-legend").children])
+      .toEqual([screen.getByTestId("status-bar-unvalidated")])
+    one.unmount()
+
+    // An empty group would still eat a gap, so it is left out entirely: the
+    // footer holds the counts and nothing else, with no stray empty row.
+    for (const progress of [
+      // Nothing translated yet.
+      { total: 10, translated: 0, validated: 0 },
+      // "Both done": every line done on both halves, nothing left of either.
+      {
+        total: 10, translated: 10, validated: 10, recorded: 10, audioValidated: 10,
+        delivers: "text_and_audio" as const, needsText: 0, needsAudio: 0,
+      },
+    ]) {
+      const { container, unmount } = view(progress)
+      expect(screen.getByTestId("status-bar-summary").className).toContain("whitespace-nowrap")
+      expect(screen.queryByTestId("status-bar-legend")).toBeNull()
+      expect(container.querySelector("footer")!.children).toHaveLength(1)
+      unmount()
+    }
   })
 })

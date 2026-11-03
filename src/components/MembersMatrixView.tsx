@@ -40,12 +40,12 @@ type MemberScopeMap = Map<string, MemberScopeView>
  * Members × projects scan view, with inline cell editing.
  *
  * Click any cell to open a popover:
- *   - Empty cell → role picker; selecting a role POSTs /members for that
- *     project. Adds the user as a project_external if they aren't an org
- *     member, or as an override on top of their org role if they are.
- *   - Override cell → role picker (changes the override) + Remove button.
- *   - Org-inherited cell → "Make exception" picker that creates an
- *     override that supersedes the org grant for this project only.
+ *   - Empty cell → the one RoleDialog (AQU-2289); saving POSTs /members for
+ *     that project. Adds the user as a project_external if they aren't an
+ *     org member, or as an override on top of their org role if they are.
+ *   - Override cell → Change role (the RoleDialog) + Remove button.
+ *   - Org-inherited cell → "Set a role for this project…" (the RoleDialog),
+ *     an override that supersedes the org grant for this project only.
  *   - Creator / GitLab cell → read-only with explanation of where to
  *     actually edit it (those grants live elsewhere).
  *
@@ -354,6 +354,9 @@ const MatrixRow = memo(function MatrixRow({
             username={member.username}
             projectId={p.id}
             projectName={p.name}
+            // AQU-2289: the caller's own role on this column's project caps
+            // what the role dialog offers.
+            callerLevel={p.role?.level ?? null}
             grantLanes={cell ? grantLanesForCell(scopesForCell) : "all"}
             onMutated={onMutated}
             cellClassName={palette}

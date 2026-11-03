@@ -30,7 +30,7 @@ export const nav = defineNamespace({
     // -- AccountSwitcher: account menu + auth dialogs --
     "nav.account.addTitle": "Add Aquilla account",
     "nav.account.loginTitle": "Log in to Aquilla",
-    "nav.account.signupTitle": "Create a Aquilla account",
+    "nav.account.signupTitle": "Create an Aquilla account",
     "nav.account.newToFrontier": "New to Aquilla?",
     "nav.account.menuLabel": "Account menu: {username}",
     "nav.account.preferences": "Preferences",
@@ -199,13 +199,11 @@ export const nav = defineNamespace({
     "nav.workspaceActions.changeVoiceAll.description": plural(
       {
         one:
-          "Converts {n} cell to its assigned voice at {quality} quality. A changed " +
-          "reference clip is included. A take already at that quality from the current " +
-          "clip stays. Nothing is generated from text.",
+          "Converts {n} cell to its assigned character or trained voice. A take " +
+          "already in that voice stays. Nothing is generated from text.",
         other:
-          "Converts {n} cells to each assigned voice at {quality} quality. A changed " +
-          "reference clip is included. A take already at that quality from the current " +
-          "clip stays. Nothing is generated from text.",
+          "Converts {n} cells to each assigned character or trained voice. A take " +
+          "already in that voice stays. Nothing is generated from text.",
       },
       "n",
     ),
@@ -215,20 +213,22 @@ export const nav = defineNamespace({
     "nav.workspaceActions.splitQuotes.title": "Split lines at their quotation marks?",
     "nav.workspaceActions.splitQuotes.description": plural({
       one:
-        "{count} line in this file holds more than one speaker. Split at its quotation " +
-        "marks it becomes {lines} lines, so each speaker can have their own voice. Every " +
-        "language shares the new lines. Every existing translation is marked for review, " +
-        "so it has to be done again. A translation that splits the same way is divided " +
-        "between the new lines. Any other stays whole on the first line.",
+        "{count} line in this file holds more than one speaker. Split at its quotation marks it " +
+        "becomes {lines} lines, so each speaker can have their own voice. Every language lane shares " +
+        "the new lines. Every existing translation is marked for review, so it has to be done again. " +
+        "A translation that splits the same way is divided between the new lines. Any other stays " +
+        "whole on the first line.",
       other:
-        "{count} lines in this file hold more than one speaker. Split at their quotation " +
-        "marks they become {lines} lines, so each speaker can have their own voice. Every " +
-        "language shares the new lines. Every existing translation is marked for review, " +
-        "so it has to be done again. A translation that splits the same way is divided " +
-        "between the new lines. Any other stays whole on the first line.",
+        "{count} lines in this file hold more than one speaker. Split at their quotation marks they " +
+        "become {lines} lines, so each speaker can have their own voice. Every language lane shares " +
+        "the new lines. Every existing translation is marked for review, so it has to be done again. " +
+        "A translation that splits the same way is divided between the new lines. Any other stays " +
+        "whole on the first line.",
     }),
     "nav.workspaceActions.splitQuotes.multiLaneWarning":
-      "Splitting changes the source all lanes share. Each lane's translations of these lines are marked so they have to be done again, and each lane keeps the voice it already gave a line on that line's new narration.",
+      "Splitting changes the source all language lanes share. Each language lane's translations of " +
+      "these lines are marked so they have to be done again, and each language lane keeps the voice " +
+      "it already gave a line on that line's new narration.",
     "nav.workspaceActions.splitQuotes.none":
       "No line in this file holds more than one speaker at its quotation marks, so there is nothing to split.",
     "nav.workspaceActions.splitQuotes.confirmLabel": "Split lines",
@@ -343,8 +343,6 @@ export const nav = defineNamespace({
     "nav.fileRow.expandSections": "Expand sections",
     "nav.fileRow.collapse": "Collapse",
     "nav.fileRow.expand": "Expand",
-    "nav.fileRow.timelineOrderedTooltip": "Timeline-ordered (timecodes are the spine)",
-    "nav.fileRow.timelineOrderedFile": "Timeline-ordered file",
     "nav.fileRow.importedAsTooltip": "{name} (imported as {originalName})",
     "nav.fileRow.progressAriaLabel": "{translated}% translated, {validated}% validated",
     "nav.fileRow.audioProgressAriaLabel": "{recorded}% recorded, {audioValidated}% audio validated",
@@ -370,7 +368,7 @@ export const nav = defineNamespace({
     "nav.fileList.collapseGroup": "Collapse {group}",
     "nav.fileList.renameGroup": "Rename {group}",
     "nav.fileList.ungroupedLabel": "Ungrouped",
-    "nav.fileList.jumpToTestament": "Jump to Testament",
+    "nav.fileList.jumpToTestament": "Jump to testament",
 
     // -- ExpandableFileList: hand-placed file order (AQU-1569) --
     "nav.fileList.reorderHandle": "Reorder {name}",
@@ -496,25 +494,26 @@ export const nav = defineNamespace({
           "long translation there only affects the tooltip/aria-label, not layout).",
       },
 
-      // -- EditorModeToggle / audio-lens-label.ts (AQU-353) --
+      // -- EditorModeToggle (AQU-353; AQU-1758: one Media lens on every file) --
       "nav.lens.audio": {
         description:
-          "Second tab of the header Text/Audio segmented lens switch, for a cell-" +
-          "ordered file: reveals the cast library, transport and per-line speaker " +
-          "chips over the same cells the Text tab edits. Short — sits beside a Pencil-" +
-          "icon 'Text' tab in a two-tab segmented control.",
+          "The bare word 'Audio' as a short heading: the Audio column of the " +
+          "organization's project table and the Audio side of the character " +
+          "check. (It named the editor's second view until that view became Media " +
+          "on every file.) Short — a column heading or a button label.",
       },
       "nav.lens.transcribe": {
         description:
           "Third tab of the header lens switch, offered when the file has audio: a view for " +
           "transcribing each line's audio and cleaning the transcript up with AI. Short — sits " +
-          "beside the Text and Audio tabs in a segmented control.",
+          "beside the Text and Media tabs in a segmented control.",
       },
       "nav.lens.media": {
         description:
-          "Same second lens tab as nav.lens.audio, relabelled for a time-ordered " +
-          "(timeline) file where the lens shows separate media segments rather than " +
-          "audio attached to text cells.",
+          "Second tab of the header Text/Media segmented lens switch, on every " +
+          "file: the timeline stacked over the same table the Text tab edits, with " +
+          "the cast library and the playback strip. Short — sits beside a Pencil-" +
+          "icon 'Text' tab in a segmented control.",
       },
 
       // -- NavHistoryControls --
@@ -907,7 +906,7 @@ export const nav = defineNamespace({
       },
       "nav.workspaceActions.transcribeAll.label": {
         description:
-          "Secondary action-menu item (Audio lens) that runs Whisper transcription " +
+          "Secondary action-menu item (Media) that runs Whisper transcription " +
           "on every recorded-but-untimed cell in the file.",
         maxLength: 32,
       },
@@ -928,7 +927,7 @@ export const nav = defineNamespace({
       },
       "nav.workspaceActions.synthAll.label": {
         description:
-          "Secondary action-menu item (Audio lens) that generates AI voice for " +
+          "Secondary action-menu item (Media) that generates AI voice for " +
           "every translated-but-unrecorded cell in the file.",
         maxLength: 40,
       },
@@ -949,8 +948,8 @@ export const nav = defineNamespace({
       },
       "nav.workspaceActions.changeVoiceAll.label": {
         description:
-          "Secondary action-menu item (Audio lens) that keeps every cell's existing " +
-          "recording and makes it sound like the cloned voice assigned to that cell. " +
+          "Secondary action-menu item (Media) that keeps every cell's existing " +
+          "recording and makes it sound like the character or trained voice assigned to that cell. " +
           "Contrast with 'Generate AI voice for empty cells', which makes new audio " +
           "from text.",
         maxLength: 40,
@@ -962,12 +961,9 @@ export const nav = defineNamespace({
       "nav.workspaceActions.changeVoiceAll.description": {
         description:
           "Body of the confirmation dialog above. The point to keep: only the speaker's " +
-          "sound changes, and a new reference clip or a different quality is redone.",
+          "sound changes, and a take already in its voice is left as it is.",
         placeholders: {
-          n: "How many cells will be converted at the quality chosen in this dialog. Takes already made from the current reference clip at that quality are not included.",
-          quality:
-            "The quality chosen in this dialog — Fast, Standard, or High — already " +
-            "translated. Insert it as given.",
+          n: "How many cells will be converted. Takes already in their assigned voice are not included.",
         },
         maxLength: 200,
       },
@@ -1093,7 +1089,7 @@ export const nav = defineNamespace({
       },
       "nav.fileMenu.diarize": {
         description:
-          "Action-menu item (Audio lens) that runs speaker diarization on the " +
+          "Action-menu item (Media) that runs speaker diarization on the " +
           "file's audio. Default/idle state of nav.fileMenu.diarizing.",
         maxLength: 24,
       },
@@ -1111,7 +1107,7 @@ export const nav = defineNamespace({
       },
       "nav.fileMenu.useFileSpeakerAsVoice": {
         description:
-          "Action-menu item (Audio lens, after diarization) that adopts the file's " +
+          "Action-menu item (Media, after diarization) that adopts the file's " +
           "detected speaker as a reusable cast voice.",
         maxLength: 40,
       },
@@ -1411,14 +1407,6 @@ export const nav = defineNamespace({
       },
       "nav.fileRow.expand": {
         description: "Accessible name for the chevron toggle in its collapsed state.",
-      },
-      "nav.fileRow.timelineOrderedTooltip": {
-        description:
-          "Tooltip on the small waveform icon shown next to files whose cells are " +
-          "ordered by timecode rather than sequence.",
-      },
-      "nav.fileRow.timelineOrderedFile": {
-        description: "Accessible label for the same timeline-ordered indicator icon.",
       },
       "nav.fileRow.importedAsTooltip": {
         description:

@@ -12,6 +12,8 @@ import {
   clampRowHeight,
   folderRowHPx,
   slotButtonPx,
+  fitNameBar,
+  type NameBarWants,
 } from "./row-metrics"
 
 describe("row-metrics", () => {
@@ -112,5 +114,46 @@ describe("folderRowHPx", () => {
     expect(folderRowHPx(Number.NaN)).toBe(FOLDER_ROW_H_PX)
     // A sub-floor dial value clamps up to 24 first, then wins against 28.
     expect(folderRowHPx(1)).toBe(ROW_H_MIN)
+  })
+})
+
+// AQU-2235: what the name bar shows is budgeted from what is in it.
+describe("fitNameBar", () => {
+  const wants = (over: Partial<NameBarWants> = {}): NameBarWants => ({
+    sparkle: false, unknownLength: false, lastingGlyph: false, passingGlyph: false,
+    check: false, more: true, record: true, play: true, voice: true, ...over,
+  })
+
+  // (A passing state glyph is the one exception: with no name it shows where
+  // it fits, and it gives way where the name first appears.)
+  it("never takes something away as the take gets wider", () => {
+    for (const w of [wants(), wants({ sparkle: true, check: true }), wants({ lastingGlyph: true }), wants({ passingGlyph: true, unknownLength: true })]) {
+      let prev = fitNameBar(0, w)
+      for (let px = 1; px <= 400; px++) {
+        const fit = fitNameBar(px, w)
+        for (const k of ["name", "voice", "play", "record"] as const) {
+          if (prev[k]) expect(fit[k], `${k} at ${px}px`).toBe(true)
+        }
+        prev = fit
+      }
+    }
+  })
+
+  it("keeps the ⋯ at any width, as AQU-1758 gave a narrow take", () => {
+    expect(fitNameBar(12, wants()).more).toBe(true)
+  })
+
+  it("gives the name room before the record button, the play button and a passing glyph", () => {
+    const fit = fitNameBar(64, wants({ passingGlyph: true }))
+    expect(fit).toMatchObject({ name: true, record: false, play: false, passingGlyph: false })
+  })
+
+  it("shows a passing glyph on a take too narrow for a name, before the record button", () => {
+    expect(fitNameBar(40, wants({ more: false, passingGlyph: true }))).toMatchObject({ name: false, passingGlyph: true, record: false })
+  })
+
+  it("adds the play button where the name keeps its room beside all three", () => {
+    expect(fitNameBar(82, wants()).play).toBe(false)
+    expect(fitNameBar(83, wants()).play).toBe(true)
   })
 })

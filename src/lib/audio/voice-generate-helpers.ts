@@ -30,7 +30,6 @@ export interface GenerateCellVoiceArgs {
   voiceId?: string
   /** Round 8c: the TTS take's permanent name (unset → backfilled later). */
   label?: string
-  diffusionSteps?: number
   /**
    * AQU-646 stage 3f: the words to speak, when they are not the cell's own.
    *
@@ -56,6 +55,8 @@ export interface GenerateCellVoiceArgs {
   targetLang?: string
   /** AQU-1572: see `GenerateAndAttachArgs.surface`. */
   surface?: TelemetrySurface
+  /** Decision 11: see `GenerateAndAttachArgs.history`. */
+  history?: { selectedBefore: string | null }
 }
 
 /**
@@ -64,7 +65,7 @@ export interface GenerateCellVoiceArgs {
  * (status is surfaced via the per-cell tts badge, not thrown).
  */
 export async function generateCellVoice(args: GenerateCellVoiceArgs): Promise<boolean> {
-  const { project, cell, session, username, voiceId, label, diffusionSteps, slot } = args
+  const { project, cell, session, username, voiceId, label, slot } = args
   const text = (args.text ?? cell.translated)?.trim()
   // Not a failure — there is simply nothing to say. Every caller already gates
   // its control on the same emptiness, so this returns quietly, as before.
@@ -129,11 +130,11 @@ export async function generateCellVoice(args: GenerateCellVoiceArgs): Promise<bo
       },
       session,
       username,
-      diffusionSteps,
       ...(label ? { label } : {}),
       ...(args.targetLang ? { targetLang: args.targetLang } : {}),
       onProgress,
       ...(args.surface ? { surface: args.surface } : {}),
+      ...(args.history ? { history: args.history } : {}),
     })
     setTtsStatus(statusKey, { kind: "idle" })
     return true

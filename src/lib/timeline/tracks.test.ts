@@ -174,6 +174,31 @@ describe("deriveDefaultTracks — the derivation context", () => {
     for (const track of before) expect(after.get(track.id)).toBe(track.order)
   })
 
+  // AQU-1758: books and documents open on the timeline since the Audio view
+  // went. Without source audio of their own they have no Source-audio row.
+  it("gives a book or document with no source audio no Source-audio row", () => {
+    const BOOK: TrackDerivationContext = {
+      isSubtitleImport: false, hasMediaCells: false, hasAudioCues: false, sequenceOrdered: true,
+    }
+    expect(shape(deriveDefaultTracks(BOOK))).toEqual([
+      ["source-subtitles", "source-subtitles", "Source text", 0, null],
+      ["target-audio", "target-audio", "Target audio", 3, null],
+    ])
+    // A timed file that is neither subtitles nor media keeps its three rows.
+    expect(shape(deriveDefaultTracks({ ...BOOK, sequenceOrdered: false }))).toEqual(DEFAULT_SHAPE)
+  })
+
+  it("keeps the Source-audio row on a book that has source audio to draw", () => {
+    const BOOK: TrackDerivationContext = {
+      isSubtitleImport: false, hasMediaCells: false, hasAudioCues: false, sequenceOrdered: true,
+    }
+    for (const extra of [{ hasSourceAudio: true }, { hasAudioCues: true }, { hasLinkedVideoSound: true }]) {
+      expect(deriveDefaultTracks({ ...BOOK, ...extra }).map((t) => t.id)).toEqual([
+        "source-subtitles", "source-audio", "target-audio",
+      ])
+    }
+  })
+
   it("lets media cells win over the subtitle-import flag", () => {
     // A file cannot honestly be both; if both arrive true the caller is mid-
     // transition or holding a stale memo, and the legacy shape hides no row.
@@ -366,6 +391,28 @@ describe("mergeTrackOverrides — the kinds a user makes (stage 2)", () => {
     // Absent, not null: a derived row never carried the field in the first
     // place, and the merge must not invent one to say "no".
     expect(tracks[2].sourceTrackId).toBeUndefined()
+  })
+
+  // AQU-2252 (Sam, Oct 29): every track sets its lines' lengths unless it was
+  // made a layer, which is the only thing stored.
+  it("carries an added audio track made a layer", () => {
+    const tracks = merge({ "trk-a": { kind: "audio", name: "Music", setsLineLengths: false } })
+    expect(tracks[3]).toMatchObject({ id: "trk-a", setsLineLengths: false })
+  })
+
+  it("leaves an added audio track setting lengths by default — absent, not invented", () => {
+    const tracks = merge({ "trk-a": { kind: "audio", name: "Boaz" } })
+    expect(tracks[3].setsLineLengths).toBeUndefined()
+  })
+
+  it("ignores the switch on the main track, which always sets its lines' lengths", () => {
+    const tracks = merge({ "target-audio": { setsLineLengths: false } as never })
+    expect(tracks[2].setsLineLengths).toBeUndefined()
+  })
+
+  it("ignores the switch on a folder, which holds no takes", () => {
+    const tracks = merge({ grp: { kind: "folder", name: "Dubs", setsLineLengths: false } })
+    expect(tracks.find((t) => t.id === "grp")!.setsLineLengths).toBeUndefined()
   })
 
   // The palette is this build's rendering, not the contract — see

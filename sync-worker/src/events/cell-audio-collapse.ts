@@ -26,6 +26,13 @@ interface AudioRowRaw {
   trim_start_ms: number | null
   trim_end_ms: number | null
   target_offset_ms: number | null
+  /** AQU-2267 (0189). Optional, like the AQU-490 fields below, so a row built
+   *  by hand need not know it; absent reads as NULL. */
+  recordings_offset_ms?: number | null
+  /** AQU-2327 (0193): the clip's volume and fades. Optional, absent = none. */
+  gain_db?: number | null
+  fade_in_ms?: number | null
+  fade_out_ms?: number | null
   timings_json: string | null
   selected: number
   created_ts: number
@@ -70,6 +77,17 @@ export interface AttachmentOut {
    * every take made before this column existed.
    */
   targetOffsetMs: number | null
+  /**
+   * AQU-2267: where this take sits FOLLOWING THE RECORDINGS, measured the same
+   * way as `targetOffsetMs` (its place following the source) from its line's
+   * start in that layout. NULL = no place of its own there: that timing reads
+   * `targetOffsetMs`, as every take placed before the column existed does.
+   */
+  recordingsOffsetMs: number | null
+  /** AQU-2327: present only when set — volume in dB, fades in ms. */
+  gainDb?: number
+  fadeInMs?: number
+  fadeOutMs?: number
   /**
    * AQU-490: how many people have validated this take, and who.
    *
@@ -234,6 +252,10 @@ export function collapseCellAudioRows(rows: readonly AudioRowRaw[]): Record<stri
       trimStartMs: r.trim_start_ms,
       trimEndMs: r.trim_end_ms,
       targetOffsetMs: r.target_offset_ms,
+      recordingsOffsetMs: r.recordings_offset_ms ?? null,
+      ...(r.gain_db != null ? { gainDb: Number(r.gain_db) } : {}),
+      ...(r.fade_in_ms != null ? { fadeInMs: Number(r.fade_in_ms) } : {}),
+      ...(r.fade_out_ms != null ? { fadeOutMs: Number(r.fade_out_ms) } : {}),
       // AQU-490. The defaults are the pre-0096 reading of a row: no votes, a
       // dub, no known recorder. `role` is narrowed rather than cast, so a
       // value the schema's CHECK could not produce still lands on 'dub' — the

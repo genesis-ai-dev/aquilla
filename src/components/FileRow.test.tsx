@@ -5,7 +5,7 @@
 
 import { describe, it, expect, vi } from "vitest"
 import { render, within, fireEvent, screen } from "@testing-library/react"
-import { expectClickNote, expectTooltip } from "@/test-utils/tooltip"
+import { expectTooltip } from "@/test-utils/tooltip"
 import { FileRow } from "./FileRow"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import type { FileReference } from "@/lib/parsers/types"
@@ -336,16 +336,19 @@ describe("FileRow progress in a language that counts its recordings", () => {
   })
 })
 
-// AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button.
-describe("FileRow — hover only names; marks explain on click", () => {
-  it("the timeline-ordered mark says what it means on a click, without opening the file", async () => {
-    const onSelect = vi.fn()
-    const { getByLabelText } = renderRow({ file: makeFile({ orderedBy: "time" }), onSelect })
-    const mark = getByLabelText("Timeline-ordered file")
-    await expectClickNote(mark, "timecodes are the spine")
-    expect(onSelect).not.toHaveBeenCalled()
+// AQU-1758 (Sam): a timed file carried a waveform "squiggle" in the file list.
+// Every file opens on the timeline in Media now — "they're all media files" —
+// so no row is marked.
+describe("FileRow — no marker for a timed file (AQU-1758)", () => {
+  it("draws a subtitle file's row like any other, with no waveform", () => {
+    const { container } = renderRow({ file: makeFile({ type: "vtt", orderedBy: "time", name: "Episode 1.vtt" }) })
+    expect(within(container).queryByLabelText("Timeline-ordered file")).toBeNull()
+    expect(container.querySelector("svg.lucide-audio-waveform")).toBeNull()
   })
+})
 
+// AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button.
+describe("FileRow — hover only names", () => {
   it("the rename suggestion's hover only names it", async () => {
     renderRow({ hasSuggestion: true, onApplySuggestion: vi.fn() })
     const sparkle = screen.getByRole("button", { name: "Apply rename suggestion" })

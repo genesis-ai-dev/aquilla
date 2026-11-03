@@ -1,8 +1,10 @@
 import * as React from "react"
 
 import { EmptyState, NotFoundIcon, TableEmptyState } from "@/components/ui/empty"
+import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
 import { LockedNote, LockedSection } from "@/components/ui/locked-note"
 import { cn } from "@/lib/utils"
+import { SaveStatus } from "@/lib/settings/save-status"
 
 /**
  * Shared page-composition primitives for the org and account surfaces
@@ -225,30 +227,65 @@ function StatTile({
   value,
   hint,
   className,
+  onClick,
 }: {
   label: React.ReactNode
   value: React.ReactNode
   hint?: React.ReactNode
   className?: string
+  /** When set, the tile is a real button that runs this on click or Enter. */
+  onClick?: () => void
 }) {
-  return (
-    <div
-      className={cn(
-        "flex min-h-[88px] flex-row-reverse items-center justify-between gap-4 rounded-lg border bg-card px-5 py-4",
-        "min-[480px]:flex-col min-[480px]:items-start min-[480px]:justify-start min-[480px]:gap-0",
-        className,
-      )}
-    >
-      <div className="text-2xl leading-none font-semibold tracking-normal tabular-nums text-foreground">
+  const id = React.useId()
+  const labelId = `${id}-label`
+  const valueId = `${id}-value`
+  const hintId = `${id}-hint`
+  const tileClass = cn(
+    "flex min-h-[88px] flex-row-reverse items-center justify-between gap-4 rounded-lg border bg-card px-5 py-4",
+    "min-[480px]:flex-col min-[480px]:items-start min-[480px]:justify-start min-[480px]:gap-0",
+    className,
+  )
+  const body = (
+    <>
+      <div
+        id={onClick ? valueId : undefined}
+        className="text-2xl leading-none font-semibold tracking-normal tabular-nums text-foreground"
+      >
         {value}
       </div>
       <div className="min-w-0">
-        <div className="text-sm text-muted-foreground min-[480px]:mt-1.5">{label}</div>
+        <div
+          id={onClick ? labelId : undefined}
+          className="text-sm text-muted-foreground min-[480px]:mt-1.5"
+        >
+          {label}
+        </div>
         {hint ? (
-          <div className="mt-0.5 text-xs text-muted-foreground min-[480px]:mt-1">{hint}</div>
+          <div
+            id={onClick ? hintId : undefined}
+            className="mt-0.5 text-xs text-muted-foreground min-[480px]:mt-1"
+          >
+            {hint}
+          </div>
         ) : null}
       </div>
-    </div>
+    </>
+  )
+  if (!onClick) return <div className={tileClass}>{body}</div>
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-labelledby={labelId}
+      aria-describedby={hint ? `${valueId} ${hintId}` : valueId}
+      className={cn(
+        tileClass,
+        "w-full cursor-pointer text-left transition-colors hover:bg-muted/50 hover:border-foreground/20",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+      )}
+    >
+      {body}
+    </button>
   )
 }
 
@@ -300,35 +337,85 @@ function SettingsGroup({
   )
 }
 
+/** The longer explanation a SettingsRow keeps behind an (i) beside its title. */
+interface SettingsRowInfo {
+  /** The (i)'s accessible name: a few words saying what the text is about. */
+  label: string
+  /** What opens under the row's one visible line. */
+  content: React.ReactNode
+  /** Names the (i) `testId` and its text `${testId}-text`. */
+  testId?: string
+}
+
 /**
  * One setting inside a SettingsGroup card. Default layout is label/description
  * on the left and a control on the right; pass `block` (or `children`) when the
  * control needs the full row width (a select, a form, etc.).
+ *
+ * Sam, Oct 29: a setting shows one short line saying what it does, or none
+ * when its title already says it. Anything longer goes in `info`: an (i)
+ * beside the title opens it in place beneath that line, and closes it again.
  */
 function SettingsRow({
   label,
   description,
+  info,
   control,
   children,
   block = false,
+  saveId,
   className,
 }: {
   label: React.ReactNode
   description?: React.ReactNode
+  info?: SettingsRowInfo
   control?: React.ReactNode
   children?: React.ReactNode
   block?: boolean
+  /** AQU-2262: the setting's id in the page's save status — its quiet
+   *  "Saved" (or why not) shows beside the control. */
+  saveId?: string
   className?: string
 }) {
+  const infoId = React.useId()
+  const [infoOpen, toggleInfo] = useInfoOpen()
   const body = children ?? control
+  const status = saveId ? <SaveStatus id={saveId} className="max-w-56 text-right" /> : null
+  const text = (
+    <>
+      <p className="flex items-center gap-1 text-sm font-medium text-foreground">
+        {label}
+        {info ? (
+          <InfoToggle
+            open={infoOpen}
+            onToggle={toggleInfo}
+            label={info.label}
+            controls={infoId}
+            testId={info.testId}
+          />
+        ) : null}
+      </p>
+      {description ? (
+        <p className="mt-1 text-xs text-muted-foreground">{description}</p>
+      ) : null}
+      {info ? (
+        <InfoReveal
+          open={infoOpen}
+          id={infoId}
+          testId={info.testId ? `${info.testId}-text` : undefined}
+          className="text-xs text-muted-foreground"
+        >
+          {info.content}
+        </InfoReveal>
+      ) : null}
+    </>
+  )
   if (block || children) {
     return (
       <div className={cn("space-y-3 px-4 py-3", className)}>
-        <div className="min-w-0 space-y-1">
-          <p className="text-sm font-medium text-foreground">{label}</p>
-          {description ? (
-            <p className="text-xs text-muted-foreground">{description}</p>
-          ) : null}
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0 flex-1">{text}</div>
+          {status}
         </div>
         {body}
       </div>
@@ -338,15 +425,20 @@ function SettingsRow({
   // A description can grow while the page is open (a "N projects set their
   // own setting" list opening under it), and a centred control slid down to
   // the new middle each time.
+  // Sam, Oct 29: the text takes the whole width up to the control.
   return (
     <div className={cn("flex items-start justify-between gap-4 px-4 py-3", className)}>
-      <div className="min-w-0 space-y-1">
-        <p className="text-sm font-medium text-foreground">{label}</p>
-        {description ? (
-          <p className="text-xs text-muted-foreground">{description}</p>
-        ) : null}
-      </div>
-      {body ? <div className="shrink-0">{body}</div> : null}
+      <div className="min-w-0 flex-1">{text}</div>
+      {body ? (
+        status ? (
+          <div className="flex shrink-0 items-center gap-2">
+            {status}
+            {body}
+          </div>
+        ) : (
+          <div className="shrink-0">{body}</div>
+        )
+      ) : null}
     </div>
   )
 }

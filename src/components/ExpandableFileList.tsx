@@ -158,6 +158,9 @@ interface Props {
   onSegmentation?: (fileId: string) => void
   /** Opens the single-file re-import dialog for the given file. */
   onReimport?: (fileId: string) => void
+  /** AQU-981: opens "Upload recordings" for the given file. Omitted when the
+   *  caller may not upload recordings into the open lane. */
+  onUploadRecordings?: (fileId: string) => void
   /** AQU-271: Optional — pass undefined to hide delete for roles below project_lead (500). */
   onDelete?: (fileId: string) => void
   onApplySuggestion?: (fileId: string) => void
@@ -226,7 +229,7 @@ interface Props {
 
 export function ExpandableFileList({
   projectId, files, activeFileId, fileProgress,
-  suggestionFileIds, validationCount, countStructural, delivers, getTokenForFile, onSelectFile, onShowDetails, onRename, onMove, onExport, onAssignWork, onSegmentation, onReimport, onDelete,
+  suggestionFileIds, validationCount, countStructural, delivers, getTokenForFile, onSelectFile, onShowDetails, onRename, onMove, onExport, onAssignWork, onSegmentation, onReimport, onUploadRecordings, onDelete,
   assignedFileIds,
   onApplySuggestion, onRenameCorpus, canExportByOrgPolicy = true,
   hasActiveChapters, getActiveChapterHealth,
@@ -654,6 +657,7 @@ export function ExpandableFileList({
                             onAssignWork={onAssignWork ? () => onAssignWork(file.id) : undefined}
                             onSegmentation={onSegmentation ? () => onSegmentation(file.id) : undefined}
                             onReimport={onReimport ? () => onReimport(file.id) : undefined}
+                            onUploadRecordings={onUploadRecordings ? () => onUploadRecordings(file.id) : undefined}
                             onDelete={onDelete ? () => onDelete(file.id) : undefined}
                             onDownloadOriginal={
                               canExportByOrgPolicy && originalSourceIds.has(file.id)

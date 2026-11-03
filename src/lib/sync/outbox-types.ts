@@ -50,6 +50,8 @@ export type OutboxEventKind =
   | "cell.audio.remove"
   | "cell.audio.rename"
   | "cell.audio.trim"
+  // AQU-2327: a take's volume and fades — data on the clip, like the trim.
+  | "cell.audio.gain"
   | "cell.audio.place"
   // AQU-1767: cut one dub piece in two (contributor, like trim).
   | "cell.audio.cut"
@@ -212,6 +214,9 @@ export interface OutboxEventPayloads {
   "source.cell.delete": {
     /** Smart Extensions apiRev 7: an extension's file write (verified server-side). */
     tool_origin?: { origin: "tool"; toolId: string; version: number; codeHash: string; session?: string }
+    /** Slice 13: the undo of "make rows from a recording" names the line's
+     *  creating event, so its author may take it back below Maintainer. */
+    undoOfEventId?: string
   }
   "source.cell.reorder": {
     anchorCellId: string | null
@@ -423,6 +428,11 @@ export interface OutboxEventPayloads {
     asr?: { text: string; model: string }
     /** Provenance of an AI cleanup; new timings without it clear the mark. */
     transcriptAi?: { model: string; at: number; changes: number }
+    /** AQU-2327: a version saved from the Station (or made by its Remove
+     *  noise) — what changed and the lines (cell ids) it went on, which the
+     *  Station's History reads back ("Version 2 saved: a part deleted, audio
+     *  inserted · used on line 331"). History only: nothing is projected. */
+    versionChanges?: VersionChanges
   }
   "cell.audio.select": {
     /** null: leave the slot with nothing selected (2026-09-28) — how a line
@@ -460,6 +470,21 @@ export interface OutboxEventPayloads {
    * indistinguishable, so a re-attach carrying word timings wiped the window a
    * take had just been given. Sets nothing else.
    */
+  /**
+   * AQU-2327: the clip's COMPLETE level settings — volume in dB, fades in ms —
+   * all three always stated, null meaning none, for the reason the trim states
+   * both ends. They never change the recording and keep the take's approvals.
+   */
+  "cell.audio.gain": {
+    audioId: string
+    gainDb: number | null
+    fadeInMs: number | null
+    fadeOutMs: number | null
+    /** AQU-1462: see `cell.audio.attach`. */
+    targetLang?: string
+    /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
+    laneId?: string
+  }
   "cell.audio.trim": {
     audioId: string
     trimStartMs: number | null
@@ -489,7 +514,15 @@ export interface OutboxEventPayloads {
    */
   "cell.audio.place": {
     audioId: string
+    /** Its place following the source. */
     targetOffsetMs: number | null
+    /**
+     * AQU-2267: its place following the recordings. Every move states both
+     * (`emitCellAudioPlace` requires it); optional here because an event queued
+     * before AQU-2267 has none, and the server reads that as null — one place
+     * for both timings, as when it was queued.
+     */
+    recordingsOffsetMs?: number | null
     /** AQU-1462: see `cell.audio.attach`. */
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */
@@ -838,6 +871,8 @@ export interface OutboxEventPayloads {
       groupId?: string | null
       color?: string | null
       sourceTrackId?: string | null
+      /** AQU-2252: false makes an added track a layer; null clears it. */
+      setsLineLengths?: boolean | null
     } | null
   }
   // Timeline editor: set/clear a file's core video URL (timeline preview).
@@ -938,4 +973,15 @@ export function isChainMutatingKind(kind: OutboxEventKind): boolean {
 /** True iff the event kind is a genesis event (parentId must be null). */
 export function isGenesisKind(kind: OutboxEventKind): boolean {
   return GENESIS_KINDS.has(kind)
+}
+
+/** AQU-2327: what a version saved from the Station changed, for its History row. */
+export interface VersionChanges {
+  /** Each kind once, in the order they happened. */
+  kinds: Array<"deleted" | "inserted" | "noise">
+  /** The lines (cell ids) the version went on. */
+  usedOn: string[]
+  /** Saved over the take (Station "Save"): the take it replaced was removed in
+   *  the same step, and keeps its name. Absent: saved as a new version. */
+  over?: boolean
 }

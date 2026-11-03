@@ -87,7 +87,9 @@ describe("attachMediaFileToTimeline with speech already found", () => {
       signal: ac.signal,
       onPhase: (phase) => phases.push(phase),
     })
-    expect(result).toEqual({ segments: 3 })
+    expect(result).toMatchObject({ segments: 3 })
+    // Decision 11: the lines it made, for the "Make lines from a recording" step.
+    expect(result.lines).toHaveLength(3)
     expect(phases).toEqual(["save", "rows"])
     expect(emitted.uploadSignals).toEqual([ac.signal])
     // Timing tiles the whole film; trims stay on the speech.

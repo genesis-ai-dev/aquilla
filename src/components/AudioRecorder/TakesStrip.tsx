@@ -5,9 +5,10 @@
 // cell.audio.rename). Self-contained: resolves frontier audio URLs to
 // playable blobs and emits cell.audio.select / .remove / .rename.
 
+import { STATION_PICKS } from "@/lib/station/picks"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { recordStep } from "@/lib/history/history"
-import { Bird, Check, CloudAlert, CloudUpload, FileClock, Pause, Pencil, Play, RotateCcw, Sparkles, Trash2 } from "lucide-react"
+import { Bird, Check, CloudAlert, CloudUpload, FileClock, Pause, Pencil, Play, RotateCcw, Trash2 } from "lucide-react"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { fmtShortCalendarDate } from "@/lib/format-date"
 import { DateTooltip } from "@/components/ui/date-tooltip"
@@ -22,6 +23,7 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import { fetchCellAudio, isDenoisedAudioId, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { audioMimeForExt } from "@/lib/audio/mime"
+import { isGeneratedTake } from "@/lib/audio/track-audio"
 import { claimActiveAudio, clearActiveAudioIf, type ActiveAudioController } from "@/lib/audio/audio-coordinator"
 import { emitCellAudioDeselect, emitCellAudioSelect, emitCellAudioRename } from "@/lib/sync/events-emit"
 import {
@@ -53,17 +55,48 @@ function parseTakeNumber(label: string | null | undefined): number | null {
   return m ? Number(m[1]) : null
 }
 
-/** The next fresh take name for a cell, given its current takes' labels. */
-export function nextTakeLabel(takes: Array<Pick<AudioAttachmentOut, "label">>): string {
+/** What numbering reads of a take: its name, and, for a piece, which take it is. */
+type NumberedTake = Pick<AudioAttachmentOut, "label"> & Partial<Pick<AudioAttachmentOut, "audioId" | "pieceOf" | "trimStartMs">>
+
+/**
+ * A line's takes as the take list counts them. AQU-981 (Sam, 2026-10-29): a
+ * take split into pieces is ONE take. It goes by the name of its first named
+ * piece in clip order, which is the name the list shows ("Take 2 · split in
+ * 2"), whatever its other pieces happen to be named. Returns the highest take
+ * number, and the takes with no name yet (each a list of its pieces, in clip
+ * order), which the backfill numbers after it. A cleaned copy is never named
+ * "Take N", so it is not counted.
+ */
+function takeNumbering<T extends NumberedTake>(takes: readonly T[]): { max: number; unnamed: Array<{ key: string; pieces: T[] }> } {
+  const groups = new Map<string, T[]>()
+  takes.forEach((t, i) => {
+    const key = t.pieceOf ?? t.audioId ?? `#${i}`
+    const list = groups.get(key)
+    if (list) list.push(t)
+    else groups.set(key, [t])
+  })
   let max = 0
-  for (const t of takes) {
-    const n = parseTakeNumber(t.label)
-    if (n != null && n > max) max = n
+  const unnamed: Array<{ key: string; pieces: T[] }> = []
+  for (const [key, list] of groups) {
+    const pieces = [...list].sort((a, b) => (a.trimStartMs ?? 0) - (b.trimStartMs ?? 0) || (a.audioId ?? "").localeCompare(b.audioId ?? ""))
+    const named = pieces.find((p) => p.label)
+    if (named) {
+      const n = parseTakeNumber(takeBaseLabel(named.label))
+      if (n != null && n > max) max = n
+    } else if (!pieces.every((p) => p.audioId && isDenoisedAudioId(p.audioId))) {
+      unnamed.push({ key, pieces })
+    }
   }
-  // Unlabeled legacy takes still occupy numbers once backfilled; count them
-  // in so a fresh recording never collides with a pending backfill.
-  const unlabeled = takes.filter((t) => !t.label).length
-  return `Take ${Math.max(max, unlabeled) + 1}`
+  unnamed.sort((a, b) => a.key.localeCompare(b.key))
+  return { max, unnamed }
+}
+
+/** The next fresh take name for a cell, given its current takes. */
+export function nextTakeLabel(takes: readonly NumberedTake[]): string {
+  // A take with no name yet takes a number once the list names it (after the
+  // highest), so a fresh recording counts it in and never collides with it.
+  const { max, unnamed } = takeNumbering(takes)
+  return `Take ${max + unnamed.length + 1}`
 }
 
 interface Props {
@@ -458,9 +491,16 @@ export function TakesStrip({
     setDenoisingId(att.audioId)
     try {
       const { denoiseSplitTake, denoiseTake } = await import("@/lib/audio/denoise-take")
+      // Decision 11: an Undo step, naming the take that played in the slot the
+      // cleaned one lands in (none when another slot's take was playing).
+      const playing = takes.find((t) => t.audioId === (optimisticSelectedId ?? activeTakeId))
+      const playingIn = (slot: string) => (playing && playing.slot === slot ? (playing.pieceOf ?? playing.audioId) : null)
       // AQU-1767: a split take is cleaned whole and keeps its cuts.
       if (pieces && pieces.length > 1) {
-        await denoiseSplitTake({ projectId, fileId, cellId, pieces, author, session, ...(targetLang ? { targetLang } : {}) })
+        await denoiseSplitTake({
+          projectId, fileId, cellId, pieces, author, session, ...(targetLang ? { targetLang } : {}),
+          history: { selectedBefore: playingIn(pieces[0].slot) },
+        })
         return
       }
       await denoiseTake({
@@ -470,6 +510,9 @@ export function TakesStrip({
         author,
         session,
         ...(targetLang ? { targetLang } : {}),
+        // AQU-2327: the cleaned take keeps this one's track, kept part and places.
+        source: att,
+        history: { selectedBefore: playingIn(att.slot ?? RECORDING_SLOT) },
       })
     } catch {
       // Failure leaves the original untouched; the strip simply doesn't gain a
@@ -477,7 +520,7 @@ export function TakesStrip({
     } finally {
       setDenoisingId((cur) => (cur === att.audioId ? null : cur))
     }
-  }, [session, denoisingId, projectId, fileId, cellId, author, targetLang])
+  }, [session, denoisingId, projectId, fileId, cellId, author, targetLang, takes, optimisticSelectedId, activeTakeId])
 
   // Round 8: names are PERSISTED (att.label) — never derived from position.
   // Strip-local overrides show a rename/backfill instantly (a bus inject
@@ -499,16 +542,43 @@ export function TakesStrip({
       return changed ? next : prev
     })
   }, [takes])
+  // AQU-2327 (Q2): a version saved from the Station keeps its take's name;
+  // the list tells them apart by "· version N", counted up the chain of takes
+  // each was made from (`referenceAudioId`).
+  const versionOf = useCallback(
+    (att: AudioAttachmentOut): number => {
+      if (STATION_PICKS.versions !== "under") return 1
+      const byId = new Map(takes.map((x) => [x.audioId, x]))
+      let n = 1
+      let ref = att.referenceAudioId
+      const seen = new Set<string>()
+      // Only a NAMED take can be a version: two unnamed takes (an old
+      // "Cleaned" take and its original) are different takes.
+      if (!att.label) return 1
+      while (ref && !seen.has(ref) && byId.has(ref)) {
+        seen.add(ref)
+        if (byId.get(ref)!.label !== att.label) break
+        n += 1
+        ref = byId.get(ref)!.referenceAudioId
+      }
+      return n
+    },
+    [takes],
+  )
   const displayLabel = useCallback(
-    (att: AudioAttachmentOut): string =>
-      labelOverrides.get(att.audioId) ??
-      // A stored name is user data — never translated. Only the placeholder
-      // shown until a name exists (or is backfilled) is a UI string.
-      att.label ??
-      (isDenoisedAudioId(att.audioId)
-        ? t("audio.takesStrip.cleanedLabel")
-        : t("audio.takesStrip.takeFallback")),
-    [labelOverrides, t],
+    (att: AudioAttachmentOut): string => {
+      const base =
+        labelOverrides.get(att.audioId) ??
+        // A stored name is user data — never translated. Only the placeholder
+        // shown until a name exists (or is backfilled) is a UI string.
+        att.label ??
+        (isDenoisedAudioId(att.audioId)
+          ? t("audio.takesStrip.cleanedLabel")
+          : t("audio.takesStrip.takeFallback"))
+      const v = versionOf(att)
+      return v > 1 ? t("editor.station.takeVersion", { take: base, n: v }) : base
+    },
+    [labelOverrides, t, versionOf],
   )
 
   // Inline rename (pencil → input; Enter/blur commits, Esc cancels).
@@ -543,33 +613,40 @@ export function TakesStrip({
   useEffect(() => {
     // Not for someone who may not rename: every backfilled name would be
     // refused by the server.
-    if (backfilledRef.current || !session?.jwt || readOnly) return
-    const unlabeled = takes.filter((t) => !t.label && !isDenoisedAudioId(t.audioId) && !labelOverrides.has(t.audioId))
-    if (unlabeled.length === 0) return
+    // The pieces list sees one take's pieces and none of the line's other
+    // takes, so it can't number anything: the line's own list does.
+    if (backfilledRef.current || !session?.jwt || readOnly || piecesList) return
+    // AQU-981 (Sam, 2026-10-29): one number per TAKE. A take in pieces gets one
+    // number, and its pieces are named as a cut names them: "Take 2 · 1",
+    // "Take 2 · 2". Naming each piece as its own take made the line read
+    // "Take 1", "Take 2 · split in 2", then "Take 4".
+    const { max, unnamed } = takeNumbering(takes.map((t) => ({ ...t, label: labelOverrides.get(t.audioId) ?? t.label })))
+    if (unnamed.length === 0) return
     backfilledRef.current = true
-    let n = 0
-    for (const t of takes) {
-      const parsed = parseTakeNumber(t.label)
-      if (parsed != null && parsed > n) n = parsed
-    }
-    const sorted = [...unlabeled].sort((a, b) => a.audioId.localeCompare(b.audioId))
     void (async () => {
-      for (const t of sorted) {
+      let n = max
+      for (const take of unnamed) {
         n += 1
-        const label = `Take ${n}`
-        setLabelOverrides((prev) => new Map(prev).set(t.audioId, label))
-        try {
-          await emitCellAudioRename({
-            projectId, fileId, cellId, audioId: t.audioId, label, author,
-            ...(targetLang ? { targetLang } : {}),
-          })
-        } catch {
-          /* backfill is best-effort; next mount retries */
+        const names = take.pieces.map((p, i) => [p.audioId, take.pieces.length > 1 ? `Take ${n} · ${i + 1}` : `Take ${n}`] as const)
+        setLabelOverrides((prev) => {
+          const next = new Map(prev)
+          for (const [audioId, label] of names) next.set(audioId, label)
+          return next
+        })
+        for (const [audioId, label] of names) {
+          try {
+            await emitCellAudioRename({
+              projectId, fileId, cellId, audioId, label, author,
+              ...(targetLang ? { targetLang } : {}),
+            })
+          } catch {
+            /* backfill is best-effort; next mount retries */
+          }
         }
       }
       notifyAudioAttachmentsChanged(fileId)
     })()
-  }, [takes, session?.jwt, labelOverrides, projectId, fileId, cellId, author, targetLang, readOnly])
+  }, [takes, session?.jwt, labelOverrides, projectId, fileId, cellId, author, targetLang, readOnly, piecesList])
 
   // Cleaned (dn-) takes pinned above originals; stable id order within groups.
   // AQU-1767: a split take is one row (its first piece stands for it), named
@@ -633,9 +710,9 @@ export function TakesStrip({
             ? pieces.map((p) => ({ startSec: (p.trimStartMs ?? 0) / 1000, endSec: p.trimEndMs == null ? null : p.trimEndMs / 1000 }))
             : undefined
             // AQU-646 stage 3: synthetic-ness comes off the TAKE, not off its slot —
-    // an added track's single slot holds both kinds. `voiceId` is set by all
-    // three paths that mint a generated voice.
-    const isGenerated = Boolean(att.voiceId) || att.slot === GENERATED_VOICE_SLOT
+    // an added track's single slot holds both kinds. AQU-2235: the one rule
+    // every surface that draws the sparkle asks.
+    const isGenerated = isGeneratedTake({ selectedGeneratedVoiceAudioId: selectedGeneratedAudioId }, att.audioId, att)
           // AQU-1372: when this take was made and who made it. Absent — never
           // guessed — while the history read is still in flight, or when the
           // 200-event window does not reach back to this take's attach.
@@ -696,23 +773,25 @@ export function TakesStrip({
                     : <Play className="h-3.5 w-3.5" />}
                 </Button>
               </AppTooltip>
-              {(tab || piecesList) && (
-                <TakeRowWave
-                  projectId={projectId}
-                  fileId={fileId}
-                  // A split take's shape runs from its first piece to its last.
-                  att={isSplit
-                    ? { ...att, trimStartMs: Math.min(...pieces.map((p) => p.trimStartMs ?? 0)), trimEndMs: pieces[pieces.length - 1].trimEndMs }
-                    : att}
-                  session={session}
-                  strategy={project.audioMediaStrategy}
-                  generated={isGenerated}
-                  trackVars={takeTrackVars({ files: project.files, fileId: trackFileId ?? fileId, slot: att.slot })}
-                />
-              )}
+              {/* AQU-2235 (Sam's board 52): every takes list carries the take's
+                  56 × 20 shape — the recording window's too, not only the
+                  Recording tab's. */}
+              <TakeRowWave
+                projectId={projectId}
+                fileId={fileId}
+                // A split take's shape runs from its first piece to its last.
+                att={isSplit
+                  ? { ...att, trimStartMs: Math.min(...pieces.map((p) => p.trimStartMs ?? 0)), trimEndMs: pieces[pieces.length - 1].trimEndMs }
+                  : att}
+                session={session}
+                strategy={project.audioMediaStrategy}
+                generated={isGenerated}
+                trackVars={takeTrackVars({ files: project.files, fileId: trackFileId ?? fileId, slot: att.slot })}
+              />
               <span className="flex min-w-0 flex-1 items-center gap-1 tabular-nums">
                 {isCleaned && <Bird className="h-3 w-3 shrink-0 text-emerald-600 dark:text-emerald-400" />}
-                {isGenerated && <Sparkles className="h-3 w-3 shrink-0 text-violet-600 dark:text-violet-400" />}
+                {/* AQU-2235: no second star beside the name — the one in the
+                    take's shape is the only mark (Sam, Oct 25). */}
                 {renamingId === att.audioId ? (
                   <input
                     autoFocus

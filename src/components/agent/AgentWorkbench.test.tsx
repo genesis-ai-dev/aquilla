@@ -630,23 +630,27 @@ describe("AgentWorkbench unified view navigation", () => {
 })
 
 describe("AgentWorkbench editor chrome (AQU-980)", () => {
-  it("keeps Text / Audio / Agent on the workbench row so you can switch back", async () => {
+  it("keeps Text / Media / Agent on the workbench row so you can switch back", async () => {
     const onLensChange = vi.fn()
     render(<AgentWorkbench {...workbenchProps()} editorMode={{ lens: "text", onLensChange }} />)
 
     const row = screen.getByTestId("agent-toolbar-row")
-    expect(row.className).toContain("py-2")
+    // The media view's 40 px top bar's height (Sam, Oct 28).
+    expect(row.className).toContain("min-h-10")
+    expect(row.className).toContain("py-[3px]")
     expect(row.className).toContain("ps-4")
     expect(row.className).toContain("pe-2")
     const agentMode = await within(row).findByRole("tab", { name: "Agent" })
     expect(agentMode).toHaveAttribute("aria-selected", "true")
     const textTab = within(row).getByRole("tab", { name: "Text" })
-    const audioTab = within(row).getByRole("tab", { name: "Audio" })
+    const audioTab = within(row).getByRole("tab", { name: "Media" })
     expect(textTab).toBeVisible()
     expect(audioTab).toBeVisible()
+    // Only the open view keeps its label (board 55, in every view).
     expect(agentMode).toHaveClass("px-2", "py-1")
-    expect(textTab).toHaveClass("px-2", "py-1")
-    expect(audioTab).toHaveClass("px-2", "py-1")
+    expect(agentMode).toHaveTextContent("Agent")
+    expect(textTab.textContent).toBe("")
+    expect(audioTab.textContent).toBe("")
     // The view switch and the mode switch share one row; the session actions
     // (New chat, Previous chats, Back to editor) follow the mode switch.
     expect(within(row).getByRole("tab", { name: "Conversation" })).toHaveAttribute("aria-selected", "true")

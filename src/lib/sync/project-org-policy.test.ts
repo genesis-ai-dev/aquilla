@@ -11,6 +11,7 @@ import {
   type ProjectOrgPolicy,
   type ProjectVisibilityFloors,
 } from "./project-org-policy"
+import { canImportSourceFiles, importDenialFloor } from "./role-policy"
 
 /** What useOrgSettings hands back when the org read was refused: fetched, no server row, defaults. */
 const refusedOrgRead: OrgSettingsFallback = {
@@ -24,6 +25,7 @@ const refusedOrgRead: OrgSettingsFallback = {
   autoPropagateRepetitions: true,
   exportMinRole: null,
   canExport: true,
+  importMinRole: 500,
 }
 
 const carriedPolicy: ProjectOrgPolicy = {
@@ -34,6 +36,7 @@ const carriedPolicy: ProjectOrgPolicy = {
   assignmentMinRole: 400,
   autoPropagateRepetitions: false,
   exportMinRole: 500,
+  importMinRole: 600,
 }
 
 const carriedFloors: ProjectVisibilityFloors = {
@@ -140,5 +143,56 @@ describe("resolveProjectPolicy — fallback to the org read (older server)", () 
     })
     expect(policy.ready).toBe(false)
     expect(policy.autoPropagateRepetitions).toBe(false)
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────
+// AQU-2304: the import floor's trip from the settings response to the gate.
+//
+// The contract crosses a boundary (auth-worker resolves the floor onto
+// `orgPolicy`; the workspace gates on it through `canImportSourceFiles`), so
+// these pass the real producer's shape through the immediate consumer rather
+// than asserting each half against a hand-built number.
+// ──────────────────────────────────────────────────────────────────────────
+describe("the import floor through resolveProjectPolicy (AQU-2304)", () => {
+  const carried = (orgPolicy: ProjectOrgPolicy | null, org = refusedOrgRead) =>
+    resolveProjectPolicy({
+      orgPolicy,
+      visibilityFloors: orgPolicy ? carriedFloors : null,
+      projectSettings: null,
+      org,
+      roleLevel: 500,
+    })
+
+  it("carries the org's Maintainer floor, and withdraws a project lead's import", () => {
+    const policy = carried(carriedPolicy)
+    expect(policy.importMinRole).toBe(600)
+    // The composition that matters: a lead in this project loses the import.
+    expect(canImportSourceFiles(500, policy.importMinRole)).toBe(false)
+    expect(canImportSourceFiles(600, policy.importMinRole)).toBe(true)
+    expect(importDenialFloor(policy.importMinRole)).toBe(600)
+  })
+
+  it("falls back to Project lead when a server predating the field sends none", () => {
+    // An older server omits `importMinRole` from the bundle. Reading that as
+    // the default is the behaviour before the key existed — closing the gate
+    // instead would hide Import from every lead on an older deploy.
+    const { importMinRole: _omitted, ...withoutField } = carriedPolicy
+    const policy = carried(withoutField as ProjectOrgPolicy)
+    expect(policy.importMinRole).toBe(500)
+    expect(canImportSourceFiles(500, policy.importMinRole)).toBe(true)
+  })
+
+  it("falls back to Project lead when the org read was refused and nothing is carried", () => {
+    const policy = carried(null)
+    expect(policy.importMinRole).toBe(500)
+    expect(canImportSourceFiles(500, policy.importMinRole)).toBe(true)
+  })
+
+  it("uses the org read's own value when the server carries no bundle at all", () => {
+    // The pre-AQU-1771 fallback path: an org the caller CAN read.
+    const policy = carried(null, { ...refusedOrgRead, version: 3, importMinRole: 600 })
+    expect(policy.importMinRole).toBe(600)
+    expect(canImportSourceFiles(500, policy.importMinRole)).toBe(false)
   })
 })

@@ -84,6 +84,9 @@ vi.mock("@/hooks/useOrgSettings", () => ({
     // AQU-822: terminology floor — default Project lead.
     termbaseEditMinRole: 500,
     languageEditMinRole: 600,
+    // AQU-2304: import floor — default Project lead, i.e. what every org does
+    // today until an owner raises it.
+    importMinRole: 500,
     // AQU-1002: comment floors — defaults reproduce post-AQU-999 behaviour.
     commentCreateMinRole: 200,
     commentResolveMinRole: 400,
@@ -95,6 +98,7 @@ vi.mock("@/hooks/useOrgSettings", () => ({
   canEditTermbaseFloor: (level: number | null | undefined) => (level ?? 0) >= 700,
   canEditEgressFloor: (level: number | null | undefined) => (level ?? 0) >= 700,
   canEditCommentFloors: (level: number | null | undefined) => (level ?? 0) >= 700,
+  canEditImportFloor: (level: number | null | undefined) => (level ?? 0) >= 700,
 }))
 
 beforeEach(() => {
@@ -143,9 +147,9 @@ function renderSettings(path = "/orgs/1/settings") {
 }
 
 describe("Org Settings", () => {
-  it("lists Billing & usage on the settings index", async () => {
+  it("lists Billing on the settings index", async () => {
     renderSettings("/orgs/1/settings")
-    expect(await screen.findByRole("link", { name: /Billing & usage/i })).toBeDefined()
+    expect(await screen.findByRole("link", { name: /^Billing/i })).toBeDefined()
   })
 
   it("links to and renders the organization knowledge base", async () => {
@@ -238,20 +242,91 @@ describe("Security settings page", () => {
     await waitFor(() => expect(screen.getByRole("heading", { name: "Security" })).toBeInTheDocument())
     expect(screen.getByText("Visibility")).toBeInTheDocument()
     expect(screen.getByText("Permissions")).toBeInTheDocument()
-    expect(screen.getByLabelText(/who can view the roster/i)).toBeDefined()
-    expect(screen.getByLabelText(/who can view member progress/i)).toBeDefined()
-    expect(screen.getByLabelText(/who can export/i)).toBeDefined()
-    expect(screen.getByLabelText(/who can assign work/i)).toBeDefined()
-    expect(screen.getByLabelText(/allow self-assignment/i)).toBeDefined()
-    expect(screen.getByLabelText(/who can manage terminology/i)).toBeDefined()
+    expect(screen.getByLabelText(/who can see the member list/i)).toBeDefined()
+    expect(screen.getByLabelText(/who can see member progress/i)).toBeDefined()
+    // Each permission's control, by role: its (i) is named "About …" too.
+    expect(screen.getByRole("combobox", { name: /who can export/i })).toBeDefined()
+    expect(screen.getByRole("combobox", { name: /who can assign work/i })).toBeDefined()
+    expect(screen.getByRole("switch", { name: /allow self-assignment/i })).toBeDefined()
+    expect(screen.getByRole("combobox", { name: /who can manage terminology/i })).toBeDefined()
+    // AQU-2304: import sits with the other "Who can…" rows, beside languages.
+    expect(screen.getByRole("combobox", { name: /who can import files/i })).toBeDefined()
+  })
+
+  it("shows one short line per permission and keeps the rest behind a click (i) (Sam, Oct 29)", async () => {
+    renderSettings("/orgs/1/settings/security")
+    await waitFor(() => expect(screen.getByRole("combobox", { name: /who can export/i })).toBeDefined())
+    expect(screen.getByText("The lowest role that can export a project's deliverables.")).toBeVisible()
+    const info = screen.getByRole("button", { name: "About Who can export" })
+    const text = screen.getByTestId("settings-info-export-min-role-text")
+    expect(info).toHaveAttribute("aria-expanded", "false")
+    expect(text).toHaveAttribute("aria-hidden", "true")
+    expect(text).toHaveTextContent(/CSV and TSV files are made in the browser/)
+    fireEvent.click(info)
+    expect(info).toHaveAttribute("aria-expanded", "true")
+    expect(text).toHaveAttribute("data-open", "true")
+    expect(text).toHaveAttribute("aria-hidden", "false")
+    fireEvent.click(info)
+    expect(text).toHaveAttribute("data-open", "false")
+    for (const name of [
+      "About Who can use Data egress",
+      "About Who can assign work",
+      "About Allow self-assignment",
+      "About Allow language lane coordinators to assign work",
+      "About Who can manage terminology",
+      "About Who can change project languages",
+      "About Who can import files",
+    ]) {
+      expect(screen.getByRole("button", { name })).toHaveAttribute("aria-expanded", "false")
+    }
+  })
+
+  // ── AQU-2304: the org's import floor ──────────────────────────────────────
+  it("offers exactly Project lead and Maintainer for the import floor", async () => {
+    renderSettings("/orgs/1/settings/security")
+    const trigger = await screen.findByRole("combobox", { name: /who can import files/i })
+    fireEvent.click(trigger)
+    const options = await screen.findAllByRole("option")
+    // Anything below Project lead would be a control that does nothing —
+    // `file.create`'s own static floor refuses a contributor regardless.
+    expect(options.map((o) => o.textContent)).toEqual([
+      expect.stringMatching(/^project lead — default/i),
+      expect.stringMatching(/^maintainer — only maintainers/i),
+    ])
+  })
+
+  it("patches the import floor on change — an owner reserves imports for maintainers (AQU-2304)", async () => {
+    renderSettings("/orgs/1/settings/security")
+    await waitFor(() => expect(screen.getByRole("combobox", { name: /who can import files/i })).toBeDefined())
+
+    await pickSelectOption(/who can import files/i, /^maintainer/i)
+
+    await waitFor(() => expect(mockPatch).toHaveBeenCalledWith({ importMinRole: 600 }))
+    expect(screen.queryByText(/^Saved$/i)).toBeNull()
+  })
+
+  it("surfaces the owner-only refusal when a non-owner's import save is blocked", async () => {
+    mockPatch.mockResolvedValueOnce({ kind: "blocked" as const })
+    renderSettings("/orgs/1/settings/security")
+    await waitFor(() => expect(screen.getByRole("combobox", { name: /who can import files/i })).toBeDefined())
+
+    await pickSelectOption(/who can import files/i, /^maintainer/i)
+
+    expect(await screen.findByText(/only org owners can change the import permission policy/i)).toBeDefined()
+  })
+
+  it("says importing files in the page's own intro sentence (AQU-2304)", async () => {
+    renderSettings("/orgs/1/settings/security")
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Security" })).toBeInTheDocument())
+    expect(screen.getByText(/who can export, assign, manage terms, import files/i)).toBeDefined()
   })
 
   it("patches export on change without a Saved acknowledgment", async () => {
     mockPatch.mockResolvedValueOnce({ kind: "ok", value: { orgId: 1, settings: {}, version: 2, updatedAt: null, updatedBy: null } })
     renderSettings("/orgs/1/settings/security")
-    await waitFor(() => expect(screen.getByLabelText(/who can export/i)).toBeDefined())
+    await waitFor(() => expect(screen.getByRole("combobox", { name: /who can export/i })).toBeDefined())
 
-    await pickSelectOption(/who can export/i, /contributor \(400\)/i)
+    await pickSelectOption(/who can export/i, /^contributor$/i)
 
     await waitFor(() => expect(mockPatch).toHaveBeenCalledWith({ exportMinRole: 400 }))
     expect(screen.queryByText(/^Saved$/i)).toBeNull()
@@ -260,9 +335,9 @@ describe("Security settings page", () => {
 
   it("patches the egress floor on change — an owner opens Data egress to maintainers (AQU-907)", async () => {
     renderSettings("/orgs/1/settings/security")
-    await waitFor(() => expect(screen.getByLabelText(/who can use data egress/i)).toBeDefined())
+    await waitFor(() => expect(screen.getByRole("combobox", { name: /who can use data egress/i })).toBeDefined())
 
-    await pickSelectOption(/who can use data egress/i, /maintainer \(600\)/i)
+    await pickSelectOption(/who can use data egress/i, /^maintainer$/i)
 
     await waitFor(() => expect(mockPatch).toHaveBeenCalledWith({ egressMinRole: 600 }))
   })
@@ -270,9 +345,9 @@ describe("Security settings page", () => {
   it("surfaces a server error when the export save fails", async () => {
     mockPatch.mockResolvedValueOnce({ kind: "error" as const, status: 500, message: "Server error" })
     renderSettings("/orgs/1/settings/security")
-    await waitFor(() => expect(screen.getByLabelText(/who can export/i)).toBeDefined())
+    await waitFor(() => expect(screen.getByRole("combobox", { name: /who can export/i })).toBeDefined())
 
-    await pickSelectOption(/who can export/i, /contributor \(400\)/i)
+    await pickSelectOption(/who can export/i, /^contributor$/i)
 
     expect(await screen.findByText(/server error/i)).toBeDefined()
     expect(screen.queryByText(/^Saved$/i)).toBeNull()
@@ -281,9 +356,9 @@ describe("Security settings page", () => {
   it("silently patches the roster floor without a Saved acknowledgment", async () => {
     mockPatch.mockResolvedValueOnce({ kind: "ok", value: { orgId: 1, settings: { rosterViewMinRole: 400 }, version: 2, updatedAt: null, updatedBy: null } })
     renderSettings("/orgs/1/settings/security")
-    await waitFor(() => expect(screen.getByLabelText(/who can view the roster/i)).toBeDefined())
+    await waitFor(() => expect(screen.getByLabelText(/who can see the member list/i)).toBeDefined())
 
-    await pickSelectOption(/who can view the roster/i, /contributor \(400\)/i)
+    await pickSelectOption(/who can see the member list/i, /^contributor$/i)
 
     await waitFor(() => expect(mockPatch).toHaveBeenCalledWith({ rosterViewMinRole: 400 }))
     expect(screen.queryByText(/^Saved$/i)).toBeNull()
@@ -293,9 +368,9 @@ describe("Security settings page", () => {
   it("surfaces a server error for the member-progress floor without a false Saved", async () => {
     mockPatch.mockResolvedValueOnce({ kind: "error" as const, status: 500, message: "Server error" })
     renderSettings("/orgs/1/settings/security")
-    await waitFor(() => expect(screen.getByLabelText(/who can view member progress/i)).toBeDefined())
+    await waitFor(() => expect(screen.getByLabelText(/who can see member progress/i)).toBeDefined())
 
-    await pickSelectOption(/who can view member progress/i, /owner \(700\)/i)
+    await pickSelectOption(/who can see member progress/i, /^owner/i)
 
     expect(await screen.findByText(/server error/i)).toBeDefined()
     expect(screen.queryByText(/^Saved$/i)).toBeNull()
@@ -304,7 +379,7 @@ describe("Security settings page", () => {
   it("redirects retired floor URLs onto /settings/security", async () => {
     renderSettings("/orgs/1/settings/roster")
     await waitFor(() => expect(screen.getByRole("heading", { name: "Security" })).toBeInTheDocument())
-    expect(screen.getByLabelText(/who can view the roster/i)).toBeDefined()
+    expect(screen.getByLabelText(/who can see the member list/i)).toBeDefined()
   })
 })
 
@@ -312,14 +387,14 @@ describe("Settings index", () => {
   it("omits the Members settings row when the caller is below the roster floor", async () => {
     rosterSettings.canViewRoster = false
     renderSettings("/orgs/1/settings")
-    await waitFor(() => expect(screen.getByText("Organization settings")).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Organization settings" })).toBeInTheDocument())
     expect(screen.queryByRole("link", { name: "Members" })).not.toBeInTheDocument()
     expect(screen.getByRole("link", { name: /^security/i })).toBeInTheDocument()
   })
 
   it("links Security as a single row, not per-floor pages", async () => {
     renderSettings("/orgs/1/settings")
-    await waitFor(() => expect(screen.getByText("Organization settings")).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Organization settings" })).toBeInTheDocument())
     expect(screen.getByRole("link", { name: /^security/i })).toHaveAttribute("href", "/orgs/1/settings/security")
     expect(screen.queryByRole("link", { name: /roster & progress visibility/i })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: /export permissions/i })).not.toBeInTheDocument()
@@ -339,7 +414,9 @@ describe("Org settings you can open but not change (AQU-2260)", () => {
     expect(await screen.findByTestId("org-settings-locked")).toHaveTextContent("Only Owners can change Security.")
     expect(screen.getAllByTestId("org-settings-locked")).toHaveLength(1)
     // Read-only, not hidden: the controls are still there to read.
-    expect(screen.getByLabelText(/who can view the roster/i)).toBeDefined()
+    expect(screen.getByLabelText(/who can see the member list/i)).toBeDefined()
+    // AQU-2304: and the import floor is one of them — readable, not writable.
+    expect(screen.getByRole("combobox", { name: /who can import files/i })).toBeDisabled()
   })
 
   it("a Contributor reads Identity and Knowledge with the Maintainer line at the top", async () => {

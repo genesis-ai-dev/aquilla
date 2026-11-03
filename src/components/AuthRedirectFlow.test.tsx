@@ -1,5 +1,6 @@
+import { renderWithBrand as render } from "@/test-utils/render-with-brand"
 import { describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom"
 import { ExpiredSessionGate } from "./ExpiredSessionGate"
 import { Login } from "@/pages/Login"

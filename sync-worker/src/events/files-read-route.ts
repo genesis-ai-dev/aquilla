@@ -115,7 +115,7 @@ interface FileSummary {
    *  the route's job is to forward it intact, not to judge it. */
   trackOverrides: Record<
     string,
-    { kind?: string; name?: string; order?: number; groupId?: string; color?: string; sourceTrackId?: string }
+    { kind?: string; name?: string; order?: number; groupId?: string; color?: string; sourceTrackId?: string; setsLineLengths?: boolean }
   > | null
   /** Sidebar folder. Null when the file is ungrouped. */
   corpusMarker: string | null

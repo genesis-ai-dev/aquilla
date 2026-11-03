@@ -2950,3 +2950,260 @@ identity-preserving guarded delete (`if (!p.has(k)) return p`).
   here the helper must close over `getTokenForProjectFile`, so it cannot. Worth doing only
   alongside a real seam in that file. *Proof it would need*: the full gate plus a reading of
   every enclosing `useCallback`'s deps.
+
+## 2026-10-30 — dead-code run: the AQU-2259/AQU-1793 orphans and two test seams no test calls
+
+**Done this run** (theme 1, dead-code deletion; 5 source files, 1 whole module, 6 exports,
+no test file touched):
+
+| deleted | where | lines |
+| --- | --- | --- |
+| `ProjectMetricHeader` (whole module) | `src/components/org/ProjectMetricHeader.tsx` | 47 |
+| `useScopeSentence` + its now-unused `useScopeLabel` import | `src/components/tools/ExtensionDialogs.tsx` | 6 |
+| `putEntryMeta`, `deleteEntryMeta` | `src/lib/sync/cells-cache-budget.ts` | 9 |
+| `resetPericopeIndexForTests` | `src/lib/pericope/dataset.ts` | 4 |
+| `resetShowHiddenCellsCacheForTests` | `src/lib/store/show-hidden-cells-pref.ts` | 4 |
+
+Three different proofs, one per group — a repo-wide grep is the same for all of them
+(each name occurred exactly once, at its own definition, across `src`, `e2e`, `scripts`,
+`parity`, `shared`, `smart-tests`, `tools`, `db` and all four worker packages; `src` has
+**no** `export *` barrel, which is what makes the grep conclusive), but deadness is not
+supersession:
+
+- **`ProjectMetricHeader.tsx` — in-clone history proof, one day old.** `40c20429`
+  ("Delete the dead screens … the old org-home table (AQU-2259)", Oct 29) removed its only
+  caller: `OrgHome.tsx` imported it at `:26` of the pre-commit tree and rendered it three
+  times (`:344,350,356`) as the translated/validated/audio column headers of the old
+  `@md/project-table` grid. The commit deleted that markup and left the helper file.
+  **The replacement carries the same three testids**: `OrgProjectsDataTable.tsx:407,443,468`
+  render `project-table-translated-header`, `-validated-header` and `-audio-header` from its
+  own inline markup, so nothing under `e2e/` loses a selector. The component took `label`
+  and `description` as props, so it owned no i18n key of its own.
+- **`useScopeSentence` — in-clone history proof, and the key it stranded.** `55de397a`
+  ("Smart Extensions builder: prompt-first visual redesign (AQU-1793)", Oct 13) dropped
+  `const sentence = useScopeSentence()` from `PermissionsList` in the same file and replaced
+  the `extensions.can` sentence with the `PERM[scope]` facts table
+  (`./builder/ExtensionFacts`). The hook survived the redesign with no caller.
+  `useScopeLabel` (`./scope-label`) stays **live** — `PermissionPrompt.tsx:18` and
+  `ExtensionEditor.tsx:194` both use it — only this file's import of it went.
+  **Orphans one i18n key**: `extensions.can` is now referenced by nothing but the catalogs
+  (`namespaces/extensions.ts:35,395` plus ~20 locale files). Per the 2026-09-18 convention
+  the key was left in place rather than deleted on its own — see the candidate below.
+- **`putEntryMeta`/`deleteEntryMeta` — structural proof; the seam was never adopted.**
+  AQU-1865 added them as the intended way to keep the `cells-meta` row in the snapshot's own
+  transaction, and the module docstring still describes exactly that invariant. Every real
+  site writes the object store directly instead: `cells-cache-writer.ts:49`
+  (`tx.objectStore(CELLS_CACHE_META_STORE).put({…})`) and `cells-cache.ts:272` for the put,
+  `cells-cache.ts:433` and `:690` for the delete, and `cells-cache-budget.ts`'s own
+  `deleteEntries` at `:99`. The invariant the docstring promises is therefore held by those
+  five sites, not by the two wrappers, and deleting them changes no transaction. The
+  `CellsCacheEntryMeta` interface stays — `readAllMeta` and `touchEntryAccess` use it.
+- **The two `*ForTests` resets — dead by their own contract.** Both say so in their doc
+  comment ("Drop the memo so a test can load the dataset under fresh conditions"; "Test
+  helper: forget the cached snapshot so a fresh localStorage is read") and no test calls
+  either. This is the ledger's **fourth shape** (2026-10-02 entry): a test-only seam cannot
+  be forward-compat for production, so unlike a zero-caller *product* export there is no
+  shape-(c) reading to rule out — and because no test calls it, deleting it needs no test
+  file touched. Their siblings stay load-bearing and untouched (`loadPericopeIndex`'s
+  `indexPromise` memo; `peek()`'s `cached` snapshot behind the live `useShowHiddenCells`).
+
+**Deliberately NOT taken, with the reason** — these came out of the same fresh scan (69
+zero-caller `export function|const|class` names over all of `src`) and each failed one of
+the proofs above, not the grep:
+
+- `fetchCellInterventions`, `isCurrentIntervention` (`src/lib/ai-interventions/client.ts`) —
+  **shape (c), forward-compat.** `git log -S fetchCellInterventions -- src/components src/hooks`
+  is **empty**: it never had a caller to lose. It sits beside `fetchInterventionTrace`, which
+  *is* live (`AiTracePanel.tsx:11`), so the module is half-wired scaffolding, not debris.
+- `deleteCellsCache` (`src/lib/sync/cells-cache.ts:680`) — grep-dead, history inconclusive
+  (the shallow clone's grafted trees make `git log -S` return the same boundary commits for
+  it). The structural story is plausible — per-file invalidation is unnecessary because
+  `writeCellsCache` overwrites the same key, `readCellsCache` rejects on a `grantsVersion`
+  mismatch, and space comes back via `enforceCellsCacheBudget` (LRU) or
+  `purgeCellsCacheForQuota` — but "plausible" is not this routine's bar.
+- `copiedSettingsKeys`, `isInheritFieldId` (`src/lib/sync/inherited-settings.ts:184,98`) —
+  grep-dead, no supersession found. `isInheritFieldId` is a validator for a *persisted*
+  field id, which is the shape most likely to be wanted by a future server-side parse.
+- `getShowHiddenCells` and the prefs-getter family (`getQueueTargetSlots`,
+  `getQueueTimingMode`, `getRecordingAutoAdvance`, `isSectionCollapsed`) — **a pattern, not
+  debris.** Every prefs module in `src/lib/store` exports an imperative getter beside its
+  reactive hook; deleting one member of a five-module convention is a convention change.
+  Worth one run as its own cluster, with a human ruling on the convention first.
+- `src/components/import/*` (15 files, ~3,900 lines, still blocked on issue #410),
+  `src/components/ui/{attachment,item,bar-spinner}.tsx` (vendored primitives), everything
+  under `src/partner-integrations/` (partner-owned), `ThemeToggle` (branding, frozen),
+  `emitSourceCellReorder` (event contract, frozen), `useCellStoreViews` (the
+  `readAtVersion()` trap zone) — all unchanged and still out of scope.
+
+### New candidates spotted this run
+
+- **`extensions.can` joins the orphan-key queue.** Stranded by this run's `useScopeSentence`
+  deletion. Lives in `namespaces/extensions.ts:35` (string) and `:395` (context +
+  `placeholders: { scope }`), plus a line in each of ~20 `messages/*.ts` catalogs and an
+  entry in `source-hashes.json`. *Why deferred*: the key sweep is its own theme and ~22 files
+  — over this routine's ≤8-file budget on its own, which is why the queue is already split by
+  prefix. *Proof it would need*: the standard gate plus `src/lib/i18n/context.test.ts` and the
+  duplicate-exceptions simulation; `extensions.can` carries no duplicate exception, so no
+  collision pair can be stranded.
+- **`ExtensionDialogs.tsx`'s module docstring is one redesign stale.** It still opens "An
+  extension's secondary surfaces: permissions (**plain sentences with switches**) …" — the
+  plain sentences are what AQU-1793 replaced with the `PERM` facts table, and this run
+  deleted their last trace. *Why deferred*: comment drift is theme 6, and mixing it into a
+  deletion run muddies the one-theme rule. One-line fix for whoever takes the next doc-drift
+  run.
+- **`src/components/project-members/` is now an empty directory.** `40c20429` deleted its
+  only file (`roster-origin.tsx`). Git does not track directories so there is nothing to
+  commit, but a fresh clone will not have it and a working copy that predates the commit
+  still will — worth a `rmdir` in passing, not a PR.
+
+### Gates recorded 2026-10-30 (`origin/dev` `0bf700ab`) — the first all-green baseline in months
+
+- **`pnpm lint`** — exit 0, **0 errors**, 1080 warnings at baseline. The 125-error
+  `i18n/no-unkeyed-string` billing-surface block that the 2026-10-02 entry recorded is
+  **gone**; strike "dev's gates are red" from the 2026-09-21 and 2026-09-23 entries.
+- **`pnpm build`** — exit 0, baseline and final.
+- **`pnpm test`** — exit 0 both times, byte-identical totals: 2184 files passed / 2 skipped
+  (2186), 24721 tests passed / 23 skipped (24744). No worker suite was run because no worker
+  package is in the diff.
+- **`pnpm test:e2e:smoke`** — **not runnable in this container.** Its guard prerequisite
+  passed (7 files / 69 tests), then all three shards aborted at `[boot 2/8]`: no Docker
+  daemon, and the `psql` fallback found no local Postgres on 127.0.0.1:5432, so `e2e-up`
+  correctly refused to run against a stale schema. This is an environment limit, unaffected
+  by the diff; CI runs the gate.
+- **Lint-warning delta needs reading, and it strengthens the candidate at the top of this
+  file.** Final lint reports **1081** warnings, one more than baseline, but the source delta
+  is **−1**: deleting `useScopeSentence` removed a real
+  `react-refresh/only-export-components` warning at `ExtensionDialogs.tsx:24` (a hook
+  exported from a component module). The **+2** are
+  `Unused eslint-disable directive … 'no-control-regex'` in
+  `packages/idml-roundtrip/dist/engine.js:1739` and `dist/legacy.js:83` — git-ignored build
+  output (`.gitignore:11`) that the baseline `pnpm build` generated *after* the baseline
+  lint had already run, so the first lint never saw those files. That is exactly the
+  "ESLint `globalIgnores(['dist'])` doesn't reach nested `packages/*/dist`" candidate logged
+  above, now with a reproduction: **lint before a build and after a build disagree by two
+  warnings**, which makes any run-order-sensitive warning count in this repo unreliable
+  until the ignore pattern is fixed. Worth promoting from candidate to an issue.
+
+## 2026-11-02 — complexity run: `ImportDialog`'s 16-branch screen-title ladder
+
+**Done this run** (theme 2, complexity reduction inside one file; 1 file, 34 insertions /
+15 deletions, no test file touched): `src/components/ImportDialog.tsx`. This is the
+candidate the 2026-10-28 entry queued — the dialog header's final fallback branch tested
+`screen === "…"` sixteen times in a row to choose one `t()` key. It is now a module-level
+`SCREEN_TITLE_KEYS: Partial<Record<Screen, MessageKey>>` holding the 13 plain lookups, plus
+the two branches that are not lookups kept inline at the call site.
+
+- **Equivalence is per-screen, not per-order.** Every arm of the old ladder tested
+  `screen ===` against a distinct literal, so the branches are mutually exclusive and
+  reordering cannot change the result. The 13 table screens (`upload`, `youtube`, `gdrive`,
+  `helloao`, `obs`, `dcs`, `macula`, `tn`, `spreadsheet`, `jsonKeys`, `paired`, `sdbh`,
+  `linkProject`) map to the exact key they had; `partner` (reads
+  `activePartner?.importScreen?.titleKey ?? "importExport.landing.upload.title"`) and
+  `extension` (`extensionImporter?.importer.label ?? ""`, a tool-supplied label, not a key)
+  moved to the front as the only two non-lookups; `ebible` had no arm of its own and was the
+  ladder's trailing `else`, which is now the `?? "importExport.landing.ebible.title"`
+  fallback. Any screen that somehow reached this branch without an arm landed on that same
+  eBible title before and after.
+- **Deliberately NOT derived from `POPULAR_OPTIONS`/`SPECIALIZED_OPTIONS`**, which already
+  map tiles to `titleKey`s in this same file. Four screens title themselves differently from
+  the tile that opens them — `helloao`, `tn`, `spreadsheet` and `paired` use
+  `importExport.dialog.title*` in the header but `importExport.landing.*.title` on the tile —
+  and two tiles (`importExport.landing.upload.title`, `importExport.landing.tm.title`) share
+  the single `upload` screen, so screen → title is not a function of the option tables.
+  A dedicated table is the only shape that preserves the keys; the comment on it says so, to
+  stop the next reader "simplifying" it into a derivation.
+- **Module-level, mirroring the file's own convention** (the AQU-832 note above
+  `POPULAR_OPTIONS`): the table holds keys and the render resolves them, because a
+  module-level table is evaluated before any `I18nProvider` exists and cannot call `t()`
+  itself. Being module-level also keeps it out of every enclosing `useCallback`'s dependency
+  array — the 2026-10-09 entry is this ledger's record of how expensive a `react-hooks`
+  dependency change can be with the React Compiler on. No dependency array is in the diff.
+- **The i18n sweeps still see these keys.** All 13 stay literal strings inside `src`, which
+  is what the dead-key runs grep for; no key moved into a computed expression. The
+  `i18n/no-unkeyed-string` ESLint rule is scoped to JSXText/JSX attributes/allowlisted call
+  arguments, so a module-level key table is outside it by design (see `scripts/i18n-scan.ts`'s
+  header, class 2 `hoisted-const`), and `scripts/i18n-scan.test.ts` asserts on synthetic
+  sources only — no repo-wide snapshot to shift.
+
+### New evidence for the blocked `src/components/import/*` orphan cluster
+
+The cluster (logged as 15 files / ~3,900 lines in the 2026-08-17 and 2026-08-31 entries) is
+**still blocked** — [#410](https://github.com/genesis-ai-dev/aquilla/issues/410) is open,
+unassigned, no linked PR. An independent re-grep this run (over `src`, `e2e`, `scripts` and
+the four worker packages) **re-inventories it, because files moved**, which is exactly what
+the 2026-08-31 entry warned would happen:
+
+- **11 still have zero importers**: `ImportLanding`, `UploadPanel`, `EBiblePanel`,
+  `HelloaoPanel`, `ObsPanel`, `DcsPanel`, `MaculaPanel`, `TnPanel`, `DirectionPanel`,
+  `ImportResultPanel`, `CollisionPanel` — each shadowed by a same-named inline `function`
+  inside `ImportDialog.tsx`.
+- **2 more are reachable only from inside the dead set**, so they die with it:
+  `ParatextChoice.tsx` (imported only by the dead `UploadPanel.tsx`) and
+  `ImportDialogBackButton.tsx` (imported only by the dead `HelloaoPanel.tsx`) — and
+  `ImportDialog.tsx` has its own inline `ImportDialogBackButton` at `:5268`, which is what
+  the live header renders. **13 files delete as one set.**
+- **`SdbhPanel.tsx` has left the set and is now frozen for a different reason**: no product
+  code imports it, but `src/components/import/SdbhPanel.test.tsx:17` does, so deleting it
+  would mean deleting a test file. (`ImportDialog.tsx:4919` holds the live inline copy.) A
+  human, not this routine, has to decide whether that test should follow its subject.
+- **`BiblicaPanel.tsx` is no longer in that directory at all** — strike it from the list. It
+  lives at `src/partner-integrations/biblica/BiblicaPanel.tsx`, is imported by its own test,
+  and is partner-owned either way.
+
+Two things worth adding:
+
+- **The dead duplicates are being maintained.** `6889cf0d` (`feat(AQU-2125)`, Oct 23) carried
+  a real behavior change — speaker tags casting the character instead of every line — into
+  `src/components/import/UploadPanel.tsx`, which **nothing imports**, in the same commit that
+  changed the live inline copy in `ImportDialog.tsx`. (Its sibling in that commit,
+  `SpreadsheetImportPanel.tsx`, *is* live: `ImportDialog.tsx:132` imports it.) So the cost of
+  leaving the cluster in place is no longer just dead weight — a contributor spent real effort
+  on a file that never runs, and anyone reading it sees current-looking code that does not
+  execute. Worth promoting from candidate to an issue on that basis alone.
+- **The blocker may be weaker than it reads.** #410's stated mechanism is vitest's
+  *test*-file-to-worker sharding, and none of the 11 files is a test file, so deleting them
+  does not change the test-file count. The 2026-09-02 entry already recorded the same flake
+  family firing with a zero-test-file-count diff, which argues the 2026-08-17
+  3-of-3-vs-2-of-2 correlation was coincidence rather than causation. This run's own baseline
+  is a third data point: neither `TeamsList.test.tsx` nor `ArchivedProjects.test.tsx` failed
+  at all (the one failure was `scripts/release-cut.test.ts`, see below). Not enough to act on
+  unilaterally — a run that deletes the cluster should still alternate staged/unstaged
+  full-suite runs at least twice each way, as the 2026-08-17 entry asks — but a human could
+  reasonably unblock it.
+
+### Gates recorded 2026-11-02 (`origin/dev` `1385d515`)
+
+- **`pnpm lint`** — exit 0 both times, **0 errors / 992 warnings** both times, and the
+  output is *identical* once `line:col` is normalized (same files, same rules, same order).
+  The only raw-text delta is four pre-existing warnings in the touched file moving by exactly
+  the diff's arithmetic: `605→637`, `628→660`, `823→855` (+32, the inserted table) and
+  `2944→2963` (+19 = +32 − 13, the ladder shrinking 16 lines to 3).
+  The final run was made comparable by `rm -rf packages/*/dist` first: the baseline lint ran
+  before any build in a fresh container, so it never saw the git-ignored
+  `packages/idml-roundtrip/dist` output that the baseline `pnpm build` then generated. That is
+  the nested-`dist` `globalIgnores` candidate at the top of this file, reproduced for the
+  third run in a row — the ignore gap makes any lint-warning count in this repo
+  order-sensitive, and every code-health run now has to work around it by hand.
+- **`pnpm build`** — exit 0, baseline and final (`check-app-build` SPA-only output OK,
+  `check-brand-build aquilla` OK).
+- **`pnpm test`** — **baseline is red, pre-existing, and out of scope**: 1 failed / 2230
+  passed / 2 skipped (2233 files), 1 failed / 25394 passed / 2 expected-fail / 23 skipped
+  (25420 tests). The failure is
+  `scripts/release-cut.test.ts > buildReleaseBranch against a scratch repo > "fails loud when
+  the pick cannot commit, and leaves nothing in progress"` — it sets `commit.gpgsign true`
+  with a deliberately bogus `gpg.program` and expects `buildReleaseBranch` to throw; in this
+  container the commit does not fail, so nothing is thrown (`expected [Function] to throw an
+  error`). Environment-dependent (the container's git/gpg behavior), reproduced with a zero
+  diff, in a test file this routine may not touch. `scripts/release-cut.test.ts` is therefore
+  frozen for this run. **The final run reproduced the baseline exactly** — same single
+  failing test, same totals to the digit (1 failed / 2230 passed / 2 skipped files; 1 failed /
+  25394 passed / 2 expected-fail / 23 skipped tests) — so the green-to-green proof holds, with
+  the one pre-existing failure identically red on both sides. No worker suite was run: no
+  worker package is in the diff.
+- **`pnpm test:e2e:smoke`** — **not runnable in this container**, same hard no-result as the
+  2026-08-10/12/14, 2026-09-18 and 2026-10-30 runs: no Docker daemon, and the `psql` fallback
+  found no Postgres on 127.0.0.1:5432 (`connection refused`), so `e2e-up` refuses to run
+  against a stale schema. It fails before Playwright loads a spec, so it cannot be sensitive
+  to the diff; CI runs the gate.
+- **Targeted, as the proof the 2026-10-28 entry asked for**: all 15 `ImportDialog.*.test.tsx`
+  files, 128 tests, green (`npx vitest run` in two batches), plus `npx tsc -b` clean.

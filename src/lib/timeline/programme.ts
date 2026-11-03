@@ -27,6 +27,9 @@ import { resolveTargetPieces, sourceClipAudioForCell } from "@/lib/audio/track-a
 import { hasTiming, sortByLens } from "./derive"
 import { effectiveAttachmentDurationMs, MIN_TARGET_LEN_SEC, targetChipGeom } from "./lane-timing"
 import type { CellData } from "@/hooks/useCells"
+import { isHiddenCell } from "@/lib/cells/hidden"
+import { standInEstimator } from "./stand-in"
+import { isDefaultTrackSlot } from "./track-slots"
 
 /** A window on some clock, in seconds. */
 export interface Window {
@@ -74,7 +77,7 @@ export interface ProgrammeSlot {
    * skip between them — and lays them out end to end. Absent for a take
    * never split.
    */
-  targetPieces?: { audioId: string; start: number; end: number }[]
+  targetPieces?: ProgrammePiece[]
   /**
    * AQU-2204: the line has no times of its own and no recording, so its
    * length is a STAND-IN from its text (lib/timeline/stand-in). It is drawn
@@ -90,10 +93,137 @@ export interface ProgrammeSlot {
    * lightly. Absent when the take starts on its line (or before it).
    */
   targetLeadSec?: number
+  /**
+   * AQU-2252: the line's takes on every track but the Language lane's main
+   * one, piece by piece. Absent when it has none. See `ProgrammeLayer`.
+   */
+  layers?: ProgrammeLayer[]
+}
+
+/**
+ * AQU-2252: a take (or a piece of one) on an added track, following the
+ * recordings. It keeps its own length and its own trim, moves with its line,
+ * and plays on its own from its own start. What its track is decides the rest
+ * (Sam, Oct 29):
+ *
+ *   - A track that SETS LINE LENGTHS — every track, by default: a new track is
+ *     most often another voice. Its take sits in its line exactly as the main
+ *     take does — after the pause someone left before it (where its clip's
+ *     start was placed), never before the line's start — and its line grows
+ *     to hold it: a line lasts as long as its longest take on any such track.
+ *     So it never runs past its line.
+ *
+ *   - A track made a LAYER — music, sound effects, ambience. It sets nothing.
+ *     It sits against its line the way a take does following the source: its
+ *     clip's sample zero at its own stored offset from the line's start, so its
+ *     sound starts a head trim later (a head trim moves only its left edge, like
+ *     a region in a DAW); it may start a little before its line (a lead-in) and
+ *     run on past it, over the lines after it, and the timeline warns about
+ *     that as it does following the source. It never sounds before the start
+ *     of the file: a place that would is drawn and played from there instead.
+ */
+export interface ProgrammeLayer {
+  /** The track it is on — that track's storage slot. */
+  slot: string
+  audioId: string
+  /** Where it starts SOUNDING, in seconds from its line's start. Never < 0 on
+   *  a track that sets line lengths; a layer's may be (its lead-in). */
+  atSec: number
+  /** Where its clip's sample zero sits, from its line's start: `atSec` less
+   *  its head trim. */
+  anchorSec: number
+  /** Its window on its own clip's clock (head trim → tail trim); null when its
+   *  length isn't known, which leaves it nothing honest to play. */
+  window: Window | null
+  /** Its track sets its lines' lengths (the default), so it sits inside its
+   *  line like the main take; false on a track made a layer. */
+  setsLength: boolean
+}
+
+/**
+ * AQU-1767 / AQU-1758: one piece of a split take — its window on the
+ * recording's clock, where it sits in the line's slot (`atSec`, from the
+ * slot's start), and the silence left before it after the piece in front
+ * (`gapBeforeSec`, absent when they touch). The silence is someone's: a piece
+ * dragged away from the one before it (Sam: deliberate silence, which belongs
+ * to the line and plays as silence).
+ *
+ * A piece's place means one thing, the thing following the source reads:
+ * where its clip's start sits from its line's start (AQU-2267: each timing
+ * keeps its own such place — see `pauseAskedSec`). A cut leaves every piece
+ * the take's place, so following the recordings each piece is read from where
+ * it would sit if the take played straight through, its pieces end to end —
+ * `pieceAtSec`. A piece moved some distance in either timing is that distance
+ * along in both.
+ */
+export interface ProgrammePiece {
+  audioId: string
+  start: number
+  end: number
+  atSec: number
+  gapBeforeSec?: number
 }
 
 /** A pause shorter than this is a placement wobble, not a pause. */
 export const MIN_TARGET_LEAD_SEC = 0.05
+
+/**
+ * AQU-2204 / AQU-1758: the pause a take (or a piece of one) asks for before
+ * it, measured from its line's start — the stored placement (`targetOffsetMs`,
+ * through the anchor rungs on a timed line). On a line with NO times there is
+ * no line start to measure from, so the take's own offset is read as the
+ * pause from the start of its slot (Sam's decision 3). Zero when nobody
+ * placed it.
+ *
+ * AQU-2267 (Sam, Oct 29): A TAKE HAS A PLACE IN EACH TIMING. Its place here,
+ * following the recordings, is `recordingsOffsetMs` — the same measure, where
+ * its clip's start was put from its line's start — and a move adds the same
+ * distance to both places, each held by its own timing's limits
+ * (lib/timeline/take-place). A take with no place of its own here (every take
+ * before AQU-2267, and any nobody has moved since) reads its place following
+ * the source, exactly as it always did.
+ *
+ * WHAT A HEAD TRIM DOES (settled by AQU-2252, kept here on purpose). The place
+ * is where the CLIP'S START sits, never where its sound starts:
+ *   - On the main track and a track that sets line lengths (a voice), following
+ *     the recordings, the take sounds from its place: the trimmed-off head is
+ *     simply not there. So a head trim TIGHTENS the line — the sound comes
+ *     earlier and the pause before it is unchanged. People trim leading
+ *     silence to tighten a read.
+ *   - On a track made a layer, and everywhere following the source
+ *     (`targetChipGeom`), the clip's start stays at its place and the sound
+ *     starts a head trim later: a head trim moves only the take's left edge,
+ *     and the sound stays where it was, like a region in a DAW.
+ * A piece of a split take on the main track or a voice track (AQU-1758): its
+ * place is its clip's start too, and following the recordings it sounds that
+ * far along from where the take, played straight through, would put it —
+ * after the pieces in front of it (`pieceAtSec`).
+ */
+function pauseAskedSec(cell: CellData, att: NonNullable<CellData["attachments"]>[string] | undefined, untimed: boolean): number {
+  // `!= null`-style: 0 is a real place (the line's own start), never "none".
+  const placedHere = att?.recordingsOffsetMs
+  if (typeof placedHere === "number" && Number.isFinite(placedHere)) return placedHere / 1000
+  if (untimed) {
+    const ms = att?.targetOffsetMs
+    return typeof ms === "number" && Number.isFinite(ms) ? ms / 1000 : 0
+  }
+  const geom = targetChipGeom(cell, att)
+  return geom && typeof cell.startTime === "number" ? geom.anchor - cell.startTime : 0
+}
+
+/**
+ * AQU-1758: where a piece of a split take sits in its line's slot following
+ * the recordings, from its place (`pauseAskedSec`) and how long the pieces
+ * before it sound (`heardBeforeSec`): never over the piece in front, which
+ * ends at `floorSec` (0 for the first piece). Following the source the same
+ * place puts the piece where its sound is in the take; here the parts of the
+ * take nobody hears are left out — its head trim and anything cut away between
+ * the pieces — so its untouched pieces sit end to end.
+ */
+function pieceAtSec(askedSec: number, heardBeforeSec: number, floorSec: number): number {
+  const at = askedSec + heardBeforeSec
+  return at - floorSec >= MIN_TARGET_LEAD_SEC ? at : floorSec
+}
 
 export interface BuildProgrammeOptions {
   /**
@@ -102,11 +232,153 @@ export interface BuildProgrammeOptions {
    * one, else this) instead of being left out.
    */
   standInLenSec?(cell: CellData): number
+  /**
+   * AQU-2252: which added tracks' takes are laid in — their slots. The
+   * transport passes the file's tracks, the ones it plays, and so does the
+   * timeline, so the two agree about every line's length. Absent, every added
+   * track a line has a take on.
+   */
+  layerSlots?: readonly string[]
+  /**
+   * AQU-2252 (Sam, Oct 29): the added tracks made LAYERS — music, sound
+   * effects, ambience: their takes set no line's length (see
+   * `ProgrammeLayer`). Every other track's takes set their lines' lengths,
+   * which is the default; absent, none is a layer.
+   */
+  layerTrackSlots?: readonly string[]
+}
+
+function trimStartSecOf(att: { trimStartMs?: number } | undefined): number {
+  return att?.trimStartMs != null && Number.isFinite(att.trimStartMs) && att.trimStartMs > 0 ? att.trimStartMs / 1000 : 0
+}
+
+/**
+ * A line's take on one track, placed the way FOLLOWING THE RECORDINGS places
+ * the main take: its pause before it (where its clip's start was put, never a
+ * head trim), its length, and for a split take each piece where it was put,
+ * never over the piece in front. `slot` absent is the main track.
+ */
+interface PlacedTake {
+  /** The take's first piece; null when the line has no take on this track. */
+  target: { audioId: string } | null
+  /** Each piece of a split take, placed; null for a take never split. */
+  pieces: ProgrammePiece[] | null
+  /** How long it sounds (every piece, and the silence between them); null
+   *  when its length isn't known. */
+  lenSec: number | null
+  /** Its window on its own clip's clock (a split take's: on its joined copy's,
+   *  0 → every piece); null when its length isn't known. */
+  window: Window | null
+  /** The pause before it, inside its line (0 when none worth keeping). */
+  leadSec: number
+}
+
+function placeTake(cell: CellData, untimed: boolean, slot?: string): PlacedTake {
+  const refs = resolveTargetPieces(cell, slot)
+  const target = refs[0] ?? null
+  const att = target ? cell.attachments?.[target.audioId] : undefined
+  // AQU-1767: a split take sounds as all its pieces, back to back — but only
+  // when every piece's length is known; otherwise its first piece, as before.
+  // AQU-1758 (Sam's decision 3): each piece sits where it was placed, never
+  // over the one before it; a gap someone dragged open between two pieces is
+  // deliberate silence inside the line, joined into the copy as silence.
+  const split = refs.length > 1 ? splitWindows(cell, refs) : null
+  let pieces: ProgrammePiece[] | null = null
+  let splitLeadSec = 0
+  let splitSpanMs = 0
+  if (split) {
+    let prevEnd = 0
+    let heard = 0
+    pieces = split.pieces.map((p, i) => {
+      const floor = i === 0 ? 0 : prevEnd
+      const atSec = pieceAtSec(pauseAskedSec(cell, cell.attachments?.[p.audioId], untimed), heard, floor)
+      const gap = atSec - floor
+      prevEnd = atSec + (p.end - p.start)
+      heard += p.end - p.start
+      return { ...p, atSec, ...(i > 0 && gap > 0 ? { gapBeforeSec: gap } : {}) }
+    })
+    splitLeadSec = pieces[0].atSec
+    splitSpanMs = (prevEnd - splitLeadSec) * 1000
+  }
+  const effMs = split ? splitSpanMs : effectiveAttachmentDurationMs(att)
+  const trimStartSec = split ? 0 : trimStartSecOf(att)
+  const window: Window | null = target && effMs != null ? { start: trimStartSec, end: trimStartSec + effMs / 1000 } : null
+  // AQU-2204: a pause someone left before the take stays inside its line.
+  // It is where the take was PLACED (its clip's start against the line's),
+  // never a head trim, which only removes the start of the recording. Only a
+  // take with a known length can carry one. AQU-1758: on a line with no
+  // times too (measured from the slot's start), and a split take's first
+  // piece carries the take's.
+  const rawLeadSec = !window ? 0 : split ? splitLeadSec : pauseAskedSec(cell, att, untimed)
+  return {
+    target,
+    pieces,
+    lenSec: target && effMs != null ? effMs / 1000 : null,
+    window,
+    leadSec: rawLeadSec >= MIN_TARGET_LEAD_SEC ? rawLeadSec : 0,
+  }
+}
+
+/** AQU-2252: a take on an added track that sets its line's length, piece by
+ *  piece, placed as `placeTake` placed it (see `ProgrammeLayer`). */
+function lengthSettingLayers(slot: string, cell: CellData, placed: PlacedTake): ProgrammeLayer[] {
+  if (!placed.target) return []
+  if (placed.pieces) {
+    return placed.pieces.map((p) => ({
+      slot, audioId: p.audioId, atSec: p.atSec, anchorSec: p.atSec - p.start,
+      window: { start: p.start, end: p.end }, setsLength: true,
+    }))
+  }
+  const trimStartSec = trimStartSecOf(cell.attachments?.[placed.target.audioId])
+  return [{
+    slot,
+    audioId: placed.target.audioId,
+    atSec: placed.leadSec,
+    anchorSec: placed.leadSec - trimStartSec,
+    window: placed.window,
+    setsLength: true,
+  }]
+}
+
+/** AQU-2252: a take on a track made a LAYER — every piece of it, each placed on
+ *  its own the way a take is placed following the source (see `ProgrammeLayer`).
+ *  `lineStartSec` is where its line starts on the programme clock: nothing
+ *  sounds before the file's start. */
+function layerTrackLayers(slot: string, cell: CellData, untimed: boolean, lineStartSec: number): ProgrammeLayer[] {
+  const out: ProgrammeLayer[] = []
+  for (const piece of resolveTargetPieces(cell, slot)) {
+    const att = cell.attachments?.[piece.audioId]
+    const trimStartSec = trimStartSecOf(att)
+    // The stored place is the clip's sample zero, from the line's start.
+    const atSec = Math.max(-lineStartSec, pauseAskedSec(cell, att, untimed) + trimStartSec)
+    const effMs = effectiveAttachmentDurationMs(att)
+    out.push({
+      slot,
+      audioId: piece.audioId,
+      atSec,
+      anchorSec: atSec - trimStartSec,
+      window: effMs != null ? { start: trimStartSec, end: trimStartSec + effMs / 1000 } : null,
+      setsLength: false,
+    })
+  }
+  return out
+}
+
+/**
+ * AQU-2252: whether anything of the line's own sounds in it — its original,
+ * its take on the main track, or a take on any other track. A line with none
+ * of these has nothing to play of its own (a layer running on over it from the
+ * line before is not its own).
+ */
+export function slotHasOwnSound(slot: ProgrammeSlot): boolean {
+  return Boolean(slot.sourceWindow || slot.targetWindow || slot.layers?.some((l) => l.window))
 }
 
 export interface Programme {
   slots: ProgrammeSlot[]
-  /** Total assembled length — what the ruler and the transport show. */
+  /** Total assembled length — what the ruler and the transport show. AQU-2252:
+   *  it reaches the end of a layer that runs on past the last line, which
+   *  plays out to its end. */
   totalSec: number
   /** cellId → slot, for card clicks and chip geometry. */
   byCellId: Map<string, ProgrammeSlot>
@@ -147,11 +419,24 @@ function splitWindows(
  * `cells` must already be the dialogue lane, time-sorted (deriveLanes does
  * both) — the programme's order IS the cells' order.
  */
+/** AQU-2252: where a line's last take on another track stops sounding, on the
+ *  programme clock (0 with none) — what the file's length reaches to. */
+function layersReachSec(lineStartSec: number, layers: readonly ProgrammeLayer[] | undefined): number {
+  let reach = 0
+  for (const l of layers ?? []) {
+    if (l.window) reach = Math.max(reach, lineStartSec + l.atSec + (l.window.end - l.window.start))
+  }
+  return reach
+}
+
 export function buildProgramme(cells: readonly CellData[], opts?: BuildProgrammeOptions): Programme {
   if (cells.length === 0) return EMPTY
   const slots: ProgrammeSlot[] = []
   const byCellId = new Map<string, ProgrammeSlot>()
   let cursor = 0
+  // AQU-2252: how far the furthest take on another track reaches — a layer
+  // may run on past the last line, and the file plays it out to its end.
+  let reachSec = 0
 
   for (const cell of cells) {
     let nominalLenSec = sectionLenSec(cell)
@@ -171,32 +456,30 @@ export function buildProgramme(cells: readonly CellData[], opts?: BuildProgramme
       ? cell.startTime
       : null
 
-    const pieces = resolveTargetPieces(cell)
-    const target = pieces[0] ?? null
-    const att = target ? cell.attachments?.[target.audioId] : undefined
-    // AQU-1767: a split take sounds as all its pieces, back to back — but only
-    // when every piece's length is known; otherwise its first piece, as before.
-    const split = pieces.length > 1 ? splitWindows(cell, pieces) : null
-    const effMs = split ? split.totalMs : effectiveAttachmentDurationMs(att)
+    // The main track's take, and AQU-2252 the line's takes on its other
+    // tracks: each on a track that sets line lengths placed as the main take
+    // is, each on a track made a layer placed against the line.
+    const main = placeTake(cell, untimed)
+    const target = main.target
+    const placedPieces = main.pieces
     // A dub whose length genuinely isn't known borrows the section's, which is
     // what its chip already draws at (targetChipGeom's `usingFallback`). It
     // gets no playback window — there's no honest trim to play.
-    const targetLenSec = target ? (effMs != null ? effMs / 1000 : nominalLenSec) : 0
-    const trimStartSec =
-      !split && att?.trimStartMs != null && Number.isFinite(att.trimStartMs) && att.trimStartMs > 0
-        ? att.trimStartMs / 1000
-        : 0
-    const targetWindow: Window | null =
-      target && effMs != null ? { start: trimStartSec, end: trimStartSec + effMs / 1000 } : null
-
-    // AQU-2204: a pause someone left before the take stays inside its line.
-    // It is where the take was PLACED (its clip's start against the line's),
-    // never a head trim, which only removes the start of the recording. Only a
-    // whole take with a known length on a line with times can carry one — a
-    // split take's pieces sit end to end from the slot's start.
-    const leadGeom = !untimed && targetWindow && !split ? targetChipGeom(cell, att) : null
-    const rawLeadSec = leadGeom && typeof cell.startTime === "number" ? leadGeom.anchor - cell.startTime : 0
-    const targetLeadSec = rawLeadSec >= MIN_TARGET_LEAD_SEC ? rawLeadSec : 0
+    const targetLenSec = target ? (main.lenSec ?? nominalLenSec) : 0
+    const targetWindow = main.window
+    const targetLeadSec = main.leadSec
+    const layerTracks = new Set(opts?.layerTrackSlots ?? [])
+    const extraSlots = [...new Set(opts?.layerSlots ?? Object.keys(cell.selectedBySlot ?? {}))]
+      .filter((slot) => !isDefaultTrackSlot(slot))
+    const lengthTakes: PlacedTake[] = target ? [main] : []
+    const layers: ProgrammeLayer[] = []
+    for (const slot of extraSlots) {
+      if (layerTracks.has(slot)) continue
+      const placed = placeTake(cell, untimed, slot)
+      if (!placed.target) continue
+      lengthTakes.push(placed)
+      layers.push(...lengthSettingLayers(slot, cell, placed))
+    }
     // AQU-2204 (Sam, Oct 27): FOLLOWING THE RECORDINGS, ONLY THE RECORDINGS
     // SET A LINE'S LENGTH. Today's Free timing followed both (each line the
     // longer of its source and its take); the source no longer has a say:
@@ -206,8 +489,16 @@ export function buildProgramme(cells: readonly CellData[], opts?: BuildProgramme
     //   - a line with no take lasts its stand-in length, from its words (the
     //     caller's estimator), else its own span;
     // and the source sounds only as long as the line lasts: cut where it ends.
-    const recordedLenSec = targetWindow ? targetLeadSec + targetLenSec : 0
-    const usesStandIn = !target && (untimed || Boolean(opts?.standInLenSec))
+    // AQU-2252 (Sam, Oct 29): …a take on ANY track that sets line lengths,
+    // each at its own place and length: the line lasts as long as the longest
+    // of them, so two voices speaking over each other on two tracks both fit.
+    // A take on a track made a layer sets nothing.
+    let recordedLenSec = 0
+    for (const take of lengthTakes) {
+      if (take.window && take.lenSec != null) recordedLenSec = Math.max(recordedLenSec, take.leadSec + take.lenSec)
+    }
+    const recorded = lengthTakes.length > 0
+    const usesStandIn = !recorded && (untimed || Boolean(opts?.standInLenSec))
     const unrecordedLenSec = untimed
       ? nominalLenSec
       : opts?.standInLenSec
@@ -215,7 +506,7 @@ export function buildProgramme(cells: readonly CellData[], opts?: BuildProgramme
         : Math.max(nominalLenSec, MIN_TARGET_LEN_SEC)
     const slotLenSec = recordedLenSec > 0
       ? recordedLenSec
-      : target
+      : recorded
         ? Math.max(nominalLenSec, MIN_TARGET_LEN_SEC)
         : unrecordedLenSec
     // A verse whose source clip is gone (generated-voice-only, or a lone take)
@@ -225,8 +516,14 @@ export function buildProgramme(cells: readonly CellData[], opts?: BuildProgramme
       fullSourceStart != null ? { start: fullSourceStart, end: fullSourceStart + sourceLenSec } : null
     // The take clocks its line (the source never outlasts it now); a line with
     // no take is clocked by its source, else nothing plays and playback steps
-    // over it.
+    // over it. AQU-2252: a take on another track never clocks its line — the
+    // transport holds the line around it.
     const clock: ProgrammeSlot["clock"] = targetWindow ? "target" : sourceWindow ? "source" : null
+    // AQU-2252: the takes on the tracks made layers, placed against the line.
+    for (const slot of extraSlots) {
+      if (layerTracks.has(slot)) layers.push(...layerTrackLayers(slot, cell, untimed, cursor))
+    }
+    reachSec = Math.max(reachSec, layersReachSec(cursor, layers))
 
     const slot: ProgrammeSlot = {
       cellId: cell.id,
@@ -239,16 +536,17 @@ export function buildProgramme(cells: readonly CellData[], opts?: BuildProgramme
       clock,
       sourceWindow,
       targetWindow,
-      ...(split ? { targetPieces: split.pieces } : {}),
+      ...(placedPieces ? { targetPieces: placedPieces } : {}),
       ...(usesStandIn ? { standIn: true as const } : {}),
       ...(targetLeadSec > 0 ? { targetLeadSec } : {}),
+      ...(layers.length > 0 ? { layers } : {}),
     }
     slots.push(slot)
     byCellId.set(cell.id, slot)
     cursor += slotLenSec
   }
 
-  return { slots, totalSec: cursor, byCellId }
+  return { slots, totalSec: Math.max(cursor, reachSec), byCellId }
 }
 
 /**
@@ -271,23 +569,119 @@ export function programmeLines(cells: readonly CellData[]): { lines: CellData[];
 }
 
 /**
+ * AQU-1758: a file's lines laid out end to end — `programmeLines`, then
+ * `buildProgramme` with the stand-in estimator (AQU-2204: following the
+ * recordings, every unrecorded line takes its stand-in, timed file or not).
+ * The ONE composition the timeline draws, the transport plays, the Timing
+ * control measures and the bottom strip shows before anything plays, so none
+ * of them can count a different length.
+ */
+export function layOutProgramme(
+  cells: readonly CellData[],
+  /** AQU-2252: which added tracks are laid in, and which of them are layers
+   *  (see BuildProgrammeOptions). */
+  opts?: Pick<BuildProgrammeOptions, "layerSlots" | "layerTrackSlots">,
+): { programme: Programme; lines: CellData[]; untimed: boolean } {
+  const { lines, untimed } = programmeLines(cells)
+  return { programme: buildProgramme(lines, { standInLenSec: standInEstimator(lines), ...opts }), lines, untimed }
+}
+
+/**
  * Sam's decision (hidden lines on the timeline): the programme as it PLAYS
  * when some lines are hidden. Every verse keeps its place and length — the
  * timeline draws a hidden one where it always sat, faded — but a hidden
  * verse's take is taken out: it sounds only its original, clocked by it, and
  * one with no original has nothing left to play, so playback steps over it.
+ * AQU-2252: its takes on the other tracks (its layers) go with it.
  */
 export function withoutHiddenTakes(prog: Programme, hiddenCellIds: ReadonlySet<string>): Programme {
   if (hiddenCellIds.size === 0) return prog
   const byCellId = new Map<string, ProgrammeSlot>()
   const slots = prog.slots.map((slot) => {
     const out: ProgrammeSlot = hiddenCellIds.has(slot.cellId)
-      ? { ...slot, targetWindow: null, targetPieces: undefined, clock: slot.sourceWindow ? "source" : null }
+      ? { ...slot, targetWindow: null, targetPieces: undefined, layers: undefined, clock: slot.sourceWindow ? "source" : null }
       : slot
     byCellId.set(out.cellId, out)
     return out
   })
-  return { ...prog, slots, byCellId }
+  // …and so does how far past the last line they reached: a hidden last
+  // line's layer that ran on would leave seconds on the play strip that can
+  // never play.
+  const totalSec = slots.reduce((t, s) => Math.max(t, s.startSec + s.slotLenSec, layersReachSec(s.startSec, s.layers)), 0)
+  return { ...prog, slots, byCellId, totalSec }
+}
+
+/**
+ * The programme as the queue PLAYS it (play-queue's `progRebuild`): the
+ * layout, with the hidden lines' takes taken out. Null where a file with no
+ * times has a take whose length was never measured (a generated voice nobody
+ * has played yet): such a file only reaches the programme through AQU-2204's
+ * stand-ins, so it keeps the plain line-by-line path rather than going quiet.
+ *
+ * AQU-2252: laid out with the file's added tracks, as the queue is handed
+ * them, and saying which lines a take on another track sounds in.
+ */
+export function playedProgramme(
+  cells: readonly CellData[],
+  tracks?: Pick<BuildProgrammeOptions, "layerSlots" | "layerTrackSlots">,
+): { programme: Programme; hiddenCellIds: ReadonlySet<string>; underLayers: ReadonlySet<string> } | null {
+  const { programme: built, lines, untimed } = layOutProgramme(cells, tracks)
+  if (untimed && built.slots.some((slot) => slot.targetLenSec > 0 && slot.targetWindow == null)) return null
+  const hiddenCellIds = new Set(lines.filter(isHiddenCell).map((c) => c.id))
+  const programme = withoutHiddenTakes(built, hiddenCellIds)
+  return { programme, hiddenCellIds, underLayers: linesUnderLayers(programme) }
+}
+
+/**
+ * AQU-2252: the lines a take on another track sounds in — its own line's, or
+ * one running on over the lines after it. Following the recordings such a
+ * line is held under it (the queue's `progSlotHolds`), so it has something
+ * to hear even with nothing of its own.
+ */
+export function linesUnderLayers(prog: Programme): ReadonlySet<string> {
+  const spans: { start: number; end: number }[] = []
+  for (const slot of prog.slots) {
+    for (const l of slot.layers ?? []) {
+      if (!l.window) continue
+      const start = slot.startSec + l.atSec
+      spans.push({ start, end: start + (l.window.end - l.window.start) })
+    }
+  }
+  const out = new Set<string>()
+  if (spans.length === 0) return out
+  // Joined into the stretches where any sounds, by start; the lines are in
+  // order too, so one walk of each answers every line.
+  spans.sort((a, b) => a.start - b.start)
+  const sounding: { start: number; end: number }[] = []
+  for (const sp of spans) {
+    const last = sounding[sounding.length - 1]
+    if (last && sp.start <= last.end) last.end = Math.max(last.end, sp.end)
+    else sounding.push({ ...sp })
+  }
+  let j = 0
+  for (const slot of prog.slots) {
+    while (j < sounding.length && sounding[j].end <= slot.startSec) j++
+    if (j < sounding.length && sounding[j].start < slot.startSec + slot.slotLenSec) out.add(slot.cellId)
+  }
+  return out
+}
+
+/**
+ * AQU-2251: a verse "Skip lines with nothing to play" decides about — nothing
+ * to hear (no original, no take the programme can play) and not hidden. A
+ * hidden line is skipped whichever way the setting is: following the
+ * recordings the playhead jumps it (Sam, Oct 29). (Following the source under
+ * a film or a recording it is passed through instead — not this layout.)
+ *
+ * AQU-2252: a take on another track is the line's to play too, and a line a
+ * take from another line runs on over (`underLayers`) is held under it.
+ */
+export function slotHasNothingToPlay(
+  slot: ProgrammeSlot,
+  hiddenCellIds: ReadonlySet<string>,
+  underLayers: ReadonlySet<string> = new Set(),
+): boolean {
+  return !slotHasOwnSound(slot) && !underLayers.has(slot.cellId) && !hiddenCellIds.has(slot.cellId)
 }
 
 /** The slot a programme second falls in. Times past the end return null. */
@@ -415,13 +809,14 @@ export function targetRatio(slot: ProgrammeSlot): number | null {
  * AQU-2215 (Sam, Oct 27): whether a take on this line can carry a PAUSE
  * before it — exactly the conditions `buildProgramme` keeps one under, so a
  * take the timeline lets you drag is always a take whose new pause the
- * programme reads back. A line with no times of its own has nothing to
- * measure a pause from; a split take's pieces sit end to end from the slot's
- * start; a take of unknown length has no window. None of the three can hold
- * one, and letting a chip be dragged anyway would spring it back.
+ * programme reads back. A take of unknown length has no window, so it cannot
+ * hold one, and letting its chip be dragged would spring it back.
  */
-export function canCarryTargetLead(cell: CellData, slot: ProgrammeSlot): boolean {
-  return sectionLenSec(cell) > 0 && slot.targetWindow != null && slot.targetPieces == null
+export function canCarryTargetLead(_cell: CellData, slot: ProgrammeSlot): boolean {
+  // AQU-1758 (Sam's decision 3): a line with no times of its own measures
+  // the pause from its slot's start, and a split take's pieces each carry
+  // one. Only a take of unknown length stays where it is.
+  return slot.targetWindow != null
 }
 
 /**
@@ -439,4 +834,31 @@ export function canCarryTargetLead(cell: CellData, slot: ProgrammeSlot): boolean
 export function leadSecForMove(slot: ProgrammeSlot, audibleStartSec: number): number {
   const lead = audibleStartSec - slot.startSec
   return lead >= MIN_TARGET_LEAD_SEC ? lead : 0
+}
+
+/**
+ * AQU-1758: `leadSecForMove` for piece `at` of the line's split take — the
+ * place to store (from its line's start, as `pauseAskedSec` reads it) for a
+ * piece whose sound was dragged to `audibleStartSec`. The inverse of
+ * `pieceAtSec`: held against the piece in front, as the programme holds it,
+ * then measured back without the pieces before it, so following the source
+ * the piece moves by exactly the distance it was dragged here.
+ *
+ * AQU-2252: `pieces` are the take's pieces as the programme placed them —
+ * the main take's (`targetPieces`) unless given, or those of a take on an
+ * added track that sets line lengths (its layers, in order), whose pieces
+ * have the same one place.
+ */
+export function pieceLeadSecForMove(
+  slot: ProgrammeSlot,
+  at: number,
+  audibleStartSec: number,
+  pieces: readonly Pick<ProgrammePiece, "start" | "end" | "atSec">[] = slot.targetPieces ?? [],
+): number {
+  let heard = 0
+  for (let i = 0; i < at; i++) heard += pieces[i].end - pieces[i].start
+  const prev = at > 0 ? pieces[at - 1] : null
+  const floor = prev ? prev.atSec + (prev.end - prev.start) : 0
+  const lead = audibleStartSec - slot.startSec
+  return (lead - floor >= MIN_TARGET_LEAD_SEC ? lead : floor) - heard
 }

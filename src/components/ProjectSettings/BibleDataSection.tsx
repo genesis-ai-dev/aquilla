@@ -76,7 +76,7 @@ export function BibleDataSection({
   const switchOffReasonId = useId()
   const autopilotReasonId = useId()
   const switchOn = resolveBibleResourcesEnabled(switchValue, hasScriptureFiles)
-  const enableLabelKey = experimentOn ? "bibleData.card.enableLabel" : "projectSettings.bible.enableLabel"
+  const enableLabelKey = "bibleData.card.enableLabel"
 
   const sourceChip = (id: BibleEnrichmentId) => {
     const { sources, license } = BIBLE_ENRICHMENTS[id]
@@ -88,8 +88,9 @@ export function BibleDataSection({
 
   return (
     <>
-      <SettingsGroup label={t(experimentOn ? "bibleData.card.title" : "projectSettings.section.bibleResources")} locked={canEdit ? null : lockedTooltip}>
+      <SettingsGroup label={t("bibleData.card.title")} locked={canEdit ? null : lockedTooltip}>
         <SettingsRow
+          saveId="bibleResourcesEnabled"
           label={<label htmlFor="bible-resources-enabled">{t(enableLabelKey)}</label>}
           description={
             <>
@@ -135,6 +136,7 @@ export function BibleDataSection({
           return (
             <SettingsRow
               key={id}
+              saveId={`bibleEnrichments.${id}`}
               label={<label htmlFor={controlId}>{t(BIBLE_ENRICHMENT_LABEL_KEYS[id])}</label>}
               description={
                 <>

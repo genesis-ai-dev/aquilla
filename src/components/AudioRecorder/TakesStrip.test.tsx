@@ -4,7 +4,7 @@
 // in a booth session — a wrong audioId or slot here silently corrupts the mix.
 
 import { describe, it, expect, beforeEach, vi } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { fmtLabeledDateTime, fmtShortCalendarDate } from "@/lib/format-date"
 import { expectClickNote, expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
@@ -41,6 +41,13 @@ import type { RecordingTextDrift } from "@/lib/audio/text-drift"
 let driftResult = new Map<string, RecordingTextDrift>()
 vi.mock("@/hooks/useRecordingTextDrift", () => ({
   useRecordingTextDrift: () => driftResult,
+}))
+
+// AQU-2235: every list now draws each take's shape, which reads its peaks.
+const loadPeaks = vi.fn(async () => null)
+vi.mock("@/lib/audio/peaks-loader", async (orig) => ({
+  ...(await orig<typeof import("@/lib/audio/peaks-loader")>()),
+  loadPeaksFor: (...args: unknown[]) => loadPeaks(...(args as [])),
 }))
 
 import { TakesStrip, nextTakeLabel } from "./TakesStrip"
@@ -83,6 +90,26 @@ describe("TakesStrip", () => {
   it("renders nothing when there are no takes", () => {
     const { container } = render(<TakesStrip {...common} takes={[]} selectedAudioId={null} />)
     expect(container.firstChild).toBeNull()
+  })
+
+  // AQU-2235 (Sam's board 52): the recording window's list carries each
+  // take's shape at 56 × 20, as the Recording tab's always has.
+  it("draws each take's 56 × 20 shape in the recording window's list too", () => {
+    render(<TakesStrip {...common} chromeless takes={[take("a", 1500), take("b", 2300)]} selectedAudioId="b" />)
+    for (const id of ["a", "b"]) {
+      const shape = screen.getByTestId(`take-row-wave-${id}`)
+      expect(shape.style.height).toBe("20px")
+      expect(shape.className).toContain("w-14")
+    }
+  })
+
+  // Sam, Oct 25: "make the only distinction between AI and non-AI the little
+  // star in the corner" — ONE star, the one in the take's shape.
+  it("marks a generated take with one star, in its shape's corner", () => {
+    const voiced = { ...take("g", 1500), voiceId: "v-ana" }
+    render(<TakesStrip {...common} chromeless takes={[voiced, take("a", 1500)]} selectedAudioId="a" />)
+    expect(screen.getByTestId("take-row-g").querySelectorAll(".lucide-sparkles")).toHaveLength(1)
+    expect(screen.getByTestId("take-row-wave-g-generated")).toBeInTheDocument()
   })
 
   it("lists every take with its (backfilled) name and duration", async () => {
@@ -246,6 +273,25 @@ describe("TakesStrip", () => {
     // Originals offer denoise; cleaned takes do not.
     expect(screen.getAllByRole("button", { name: /Remove noise/ }).length).toBe(1)
     expect(container).toBeTruthy()
+  })
+
+  // AQU-2327 (Q2): a version saved from the Station keeps its take's name,
+  // and the list tells them apart by "· version N".
+  it("names a saved version after its take, with its version number", () => {
+    render(
+      <TakesStrip
+        {...common}
+        takes={[
+          { ...take("audio-a", 1000), label: "Take 2" },
+          { ...take("st-audio-b", 1000), label: "Take 2", referenceAudioId: "audio-a" },
+          { ...take("st-audio-c", 1000), label: "Take 2", referenceAudioId: "st-audio-b" },
+        ]}
+        selectedAudioId="st-audio-c"
+      />,
+    )
+    expect(screen.getByText("Take 2 · version 3")).toBeTruthy()
+    expect(screen.getByText("Take 2 · version 2")).toBeTruthy()
+    expect(screen.getByText("Take 2")).toBeTruthy()
   })
 
   it("a cleaned take offers revert that selects the original take", async () => {
@@ -701,6 +747,56 @@ describe("nextTakeLabel", () => {
   it("counts a split take's pieces as their take's number", () => {
     expect(nextTakeLabel([{ label: "Take 1 · 1" }, { label: "Take 1 · 2" }])).toBe("Take 2")
     expect(nextTakeLabel([{ label: "Take 1" }, { label: "Take 3 · 2" }])).toBe("Take 4")
+  })
+})
+
+// AQU-981 (Sam, Oct 29): a take split into pieces is still ONE take. After a
+// join the line read "Take 1", "Take 2 · split in 2", "Take 4" — no Take 3 —
+// because every unnamed piece was counted, and named, as a take of its own.
+describe("one number per take, however many pieces it has", () => {
+  const att = (audioId: string, label: string | null, pieceOf?: string, trimStartMs: number | null = null) =>
+    ({ audioId, label, trimStartMs, ...(pieceOf ? { pieceOf } : {}) })
+
+  it("an unnamed take in two pieces beside Take 1: it will be Take 2, so the next is Take 3", () => {
+    expect(nextTakeLabel([att("a", "Take 1"), att("b", null), att("c", null, "b", 400)])).toBe("Take 3")
+  })
+
+  it("a split take reads by its first piece's name, as the list shows it, whatever its other pieces were named", () => {
+    // Named one piece at a time by the old backfill: the list shows "Take 2 · split in 2".
+    expect(nextTakeLabel([att("a", "Take 1"), att("b", "Take 2"), att("c", "Take 3", "b", 400)])).toBe("Take 3")
+    // Named by a cut.
+    expect(nextTakeLabel([att("a", "Take 1"), att("b", "Take 2 · 1"), att("c", "Take 2 · 2", "b", 400)])).toBe("Take 3")
+  })
+
+  it("a named take and an unnamed whole take: the unnamed one is numbered after the named, so the next is Take 3", () => {
+    expect(nextTakeLabel([att("a", "Take 1"), att("b", null)])).toBe("Take 3")
+  })
+
+  it("named takes alone: one past the highest, a deleted number never reused", () => {
+    expect(nextTakeLabel([att("a", "Take 1"), att("c", "Take 3")])).toBe("Take 4")
+    expect(nextTakeLabel([att("a", "My best one")])).toBe("Take 1")
+  })
+
+  it("names an unnamed split take once, its pieces as the cut names them", async () => {
+    emitRename.mockClear()
+    const piece = { ...take("c", 1000), pieceOf: "b", trimStartMs: 400 } as AudioAttachmentOut
+    render(<TakesStrip {...common} takes={[namedTake("a", "Take 1"), take("b", 1000), piece]} selectedAudioId="a" />)
+    await waitFor(() => expect(emitRename).toHaveBeenCalledTimes(2))
+    expect(emitRename).toHaveBeenCalledWith(expect.objectContaining({ audioId: "b", label: "Take 2 · 1" }))
+    expect(emitRename).toHaveBeenCalledWith(expect.objectContaining({ audioId: "c", label: "Take 2 · 2" }))
+  })
+
+  it("the list of one take's pieces names nothing: it can't see the line's other takes", async () => {
+    emitRename.mockClear()
+    // The pieces' waveforms load their audio; nothing here is about that.
+    const offline = vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("Failed to fetch"))
+    const piece = { ...take("c", 1000), pieceOf: "b", trimStartMs: 400 } as AudioAttachmentOut
+    render(<TakesStrip {...common} variant="pieces" takes={[take("b", 1000), piece]} selectedAudioId="b" />)
+    // The naming effect calls the rename before its first await, so once the
+    // effects and their microtasks have run, a rename would already be here.
+    await act(async () => {})
+    expect(emitRename).not.toHaveBeenCalled()
+    offline.mockRestore()
   })
 })
 

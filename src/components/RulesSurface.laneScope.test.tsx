@@ -80,10 +80,10 @@ describe("RulesSurface lane scope (AQU-1509)", () => {
     renderSurface({ activeLane: "fr", onActiveLaneChange: vi.fn() })
     const panel = screen.getByTestId("rules-lane-scope")
     expect(within(panel).getByRole("combobox")).toHaveTextContent("French")
-    expect(panel).toHaveTextContent("Switching lanes here also switches the editor.")
+    expect(panel).toHaveTextContent("Switching language lanes here also switches the editor.")
 
-    expect(within(card("Everywhere rule")).getByText("All lanes")).toBeInTheDocument()
-    expect(within(card("French rule")).getByText("This lane: French")).toBeInTheDocument()
+    expect(within(card("Everywhere rule")).getByText("All language lanes")).toBeInTheDocument()
+    expect(within(card("French rule")).getByText("This language lane: French")).toBeInTheDocument()
     // The Spanish lane's rule is not enforced in French, so it is not listed.
     expect(screen.queryByText("Spanish rule")).not.toBeInTheDocument()
   })
@@ -91,9 +91,9 @@ describe("RulesSurface lane scope (AQU-1509)", () => {
   it("reveals other lanes' rules marked as not applied here", async () => {
     const user = userEvent.setup()
     renderSurface({ activeLane: "fr", onActiveLaneChange: vi.fn() })
-    await user.click(screen.getByRole("button", { name: "Show 1 rule from other lanes" }))
+    await user.click(screen.getByRole("button", { name: "Show 1 rule from other language lanes" }))
     const spanish = card("Spanish rule")
-    expect(within(spanish).getByText("Other lane: Spanish")).toBeInTheDocument()
+    expect(within(spanish).getByText("Other language lane: Spanish")).toBeInTheDocument()
     expect(spanish).toHaveTextContent("Not applied in French.")
   })
 
@@ -109,6 +109,6 @@ describe("RulesSurface lane scope (AQU-1509)", () => {
   it("falls back to the default lane when the active lane no longer exists", () => {
     renderSurface({ activeLane: "gone", onActiveLaneChange: vi.fn() })
     expect(within(screen.getByTestId("rules-lane-scope")).getByRole("combobox")).toHaveTextContent("Spanish")
-    expect(within(card("Spanish rule")).getByText("This lane: Spanish")).toBeInTheDocument()
+    expect(within(card("Spanish rule")).getByText("This language lane: Spanish")).toBeInTheDocument()
   })
 })

@@ -341,7 +341,12 @@ describe("LivingMemoryPage — instructions pane", () => {
         vi.advanceTimersByTime(INSTRUCTIONS_SAVE_DEBOUNCE_MS)
       })
       expect(mockPatch).toHaveBeenCalledTimes(1)
-      expect(mockPatch).toHaveBeenCalledWith({ translationInstructions: "Short sentences." })
+      // The page hands the pane the STORED text, which the save expects to
+      // still be there (nothing stored here), so it cannot erase a newer one.
+      expect(mockPatch).toHaveBeenCalledWith(
+        { translationInstructions: "Short sentences." },
+        { expect: [{ key: "translationInstructions", value: undefined }] },
+      )
     } finally {
       vi.useRealTimers()
     }
@@ -353,7 +358,7 @@ describe("LivingMemoryPage — instructions pane", () => {
     fireEvent.change(field, { target: { value: "Use informal you." } })
     fireEvent.blur(field)
     await waitFor(() =>
-      expect(mockPatch).toHaveBeenCalledWith({ translationInstructions: "Use informal you." }),
+      expect(mockPatch).toHaveBeenCalledWith({ translationInstructions: "Use informal you." }, expect.anything()),
     )
     expect(await screen.findByText("Saved")).toBeInTheDocument()
   })

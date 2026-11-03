@@ -401,6 +401,7 @@ export function LivingMemoryPage({
               // Remount once the record lands so the field seeds from it.
               key={entriesReady ? "ready" : "loading"}
               resolved={resolvedInstructions}
+              stored={settings.translationInstructions}
               canEdit={entriesReady && canEdit}
               reasonCannotEdit={entriesReady ? reasonCannotEdit : "role"}
               patch={patchSettings}

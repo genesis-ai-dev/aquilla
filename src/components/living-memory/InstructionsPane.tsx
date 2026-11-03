@@ -12,6 +12,13 @@
  *
  * The pane writes through the PAGE's useProjectSettings `patch` (the optimistic
  * overlay lives there) and must not fetch its own settings.
+ *
+ * Every save names the stored value the edit started from (`expect`). The
+ * server appends to this same text on its own — answering an Autopilot
+ * decision card, approving an agent decision — so a save over a newer stored
+ * text is refused instead of erasing that line. The box keeps the person's
+ * text and offers "Load latest" or "Save mine anyway"; nothing auto-saves
+ * until they choose.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react"
@@ -33,7 +40,7 @@ import { resolveCompletionTarget } from "@/lib/completion/completion-service"
 import { useUserProviderOverride } from "@/lib/store/user-provider-override"
 import { TRANSLATION_INSTRUCTIONS_MAX_CHARS } from "@/lib/instructions/project-instructions"
 import { INSTRUCTIONS_SAVE_DEBOUNCE_MS, mergeIntoInstructions } from "./instructions-merge"
-import type { CannotEditReason, PatchOutcome } from "@/hooks/useProjectSettings"
+import type { CannotEditReason, PatchOptions, PatchOutcome } from "@/hooks/useProjectSettings"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
 import type { TranslationBrief } from "@/lib/brief/types"
 import type { CompletionSettings } from "@/lib/parsers/types"
@@ -65,11 +72,14 @@ type SaveStatus = "idle" | "saving" | "saved" | "error"
 interface InstructionsPaneProps {
   /** The resolved instructions (stored, else migrated from the old sources). */
   resolved: string
+  /** The STORED `translationInstructions` (undefined = never written): what a
+   *  save expects to still be there. */
+  stored: string | undefined
   /** Page-level edit gate (MAINTAINER), already combined with readiness. */
   canEdit: boolean
   reasonCannotEdit: CannotEditReason
   /** The PAGE's useProjectSettings patch (optimistic overlay lives there). */
-  patch: (partial: ProjectWideSettings) => Promise<PatchOutcome>
+  patch: (partial: ProjectWideSettings, opts?: PatchOptions) => Promise<PatchOutcome>
   /** The brief interview's stored answers (interview data only). */
   brief: TranslationBrief | undefined
   author: string
@@ -80,6 +90,7 @@ interface InstructionsPaneProps {
 
 export function InstructionsPane({
   resolved,
+  stored,
   canEdit,
   reasonCannotEdit,
   patch,
@@ -97,44 +108,107 @@ export function InstructionsPane({
   const value = draft ?? resolved
   const [status, setStatus] = useState<SaveStatus>("idle")
   const [helpOpen, setHelpOpen] = useState(false)
+  // A save was refused because the stored text changed under the edit.
+  const [conflict, setConflict] = useState(false)
 
   const patchRef = useRef(patch)
+  const tRef = useRef(t)
   const draftRef = useRef<string | null>(null)
   const lastSavedRef = useRef<string | null>(null)
+  const storedRef = useRef(stored)
+  const conflictRef = useRef(false)
+  // The stored text this edit started from (set when the draft is pinned,
+  // moved on by each save that lands). `null` = no edit in progress.
+  const baseRef = useRef<{ value: string | undefined } | null>(null)
+  // What the server held when a save was refused: "Save mine anyway" expects it.
+  const latestRef = useRef<string | undefined>(undefined)
   useEffect(() => {
     patchRef.current = patch
+    tRef.current = t
     draftRef.current = draft
+    storedRef.current = stored
   })
 
+  /** Pin the draft; the first pin remembers the stored text it started from. */
+  const edit = (text: string) => {
+    if (draft === null) baseRef.current = { value: stored }
+    setDraft(text)
+  }
+
+  const write = (text: string) =>
+    patchRef.current(
+      { translationInstructions: text },
+      { expect: [{ key: "translationInstructions", value: (baseRef.current ?? { value: storedRef.current }).value }] },
+    )
+
   const save = useCallback(async (text: string) => {
-    if (text === lastSavedRef.current) return
+    if (conflictRef.current || text === lastSavedRef.current) return
     lastSavedRef.current = text
     setStatus("saving")
-    const outcome = await patchRef.current({ translationInstructions: text })
+    const outcome = await write(text)
     if (outcome.kind === "ok") {
+      baseRef.current = { value: text }
       setStatus("saved")
+    } else if (outcome.kind === "conflict") {
+      // Someone else's text is stored now. Keep ours in the box, write nothing
+      // more until the person picks one.
+      lastSavedRef.current = null
+      latestRef.current = outcome.latest.settings.translationInstructions
+      conflictRef.current = true
+      setConflict(true)
+      setStatus("idle")
     } else {
       // Keep the draft so the edit survives; a later keystroke retries.
       lastSavedRef.current = null
       setStatus("error")
     }
+    // write reads everything through refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  /** Drop the unsaved text and show what is stored now. */
+  const loadLatest = () => {
+    conflictRef.current = false
+    baseRef.current = null
+    lastSavedRef.current = null
+    setConflict(false)
+    setStatus("idle")
+    setDraft(null)
+  }
+
+  /** Save the person's text over the newer stored one, knowingly. */
+  const overwrite = () => {
+    if (draft === null) return
+    conflictRef.current = false
+    baseRef.current = { value: latestRef.current }
+    setConflict(false)
+    void save(draft)
+  }
 
   // Debounced auto-save of the pinned draft.
   useEffect(() => {
-    if (draft === null || !canEdit) return
+    if (draft === null || !canEdit || conflict) return
     const timer = setTimeout(() => void save(draft), INSTRUCTIONS_SAVE_DEBOUNCE_MS)
     return () => clearTimeout(timer)
-  }, [draft, canEdit, save])
+  }, [draft, canEdit, conflict, save])
 
-  // Leaving the pane mid-debounce must not drop the last keystrokes.
+  // Leaving the pane mid-debounce must not drop the last keystrokes — unless
+  // the stored text moved on, which this write must not erase either.
   useEffect(
     () => () => {
       const pending = draftRef.current
-      if (pending !== null && pending !== lastSavedRef.current) {
-        void patchRef.current({ translationInstructions: pending })
+      if (pending === null || pending === lastSavedRef.current) return
+      if (conflictRef.current) {
+        toast.add({ type: "warning", title: tRef.current("terminology.livingMemory.instructions.notSavedOnLeave") })
+        return
       }
+      void write(pending).then((outcome) => {
+        if (outcome.kind === "conflict") {
+          toast.add({ type: "warning", title: tRef.current("terminology.livingMemory.instructions.notSavedOnLeave") })
+        }
+      })
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   )
 
@@ -162,7 +236,7 @@ export function InstructionsPane({
       await attachL1(saved, summary, aiSettings.model)
       const merged = mergeIntoInstructions(value, summary)
       if (merged !== value) {
-        setDraft(merged)
+        edit(merged)
         await save(merged)
       }
       return true
@@ -198,9 +272,9 @@ export function InstructionsPane({
 
       <Textarea
         value={value}
-        onChange={(e) => setDraft(e.target.value)}
+        onChange={(e) => edit(e.target.value)}
         onBlur={() => {
-          if (draft !== null && canEdit) void save(draft)
+          if (draft !== null && canEdit && !conflict) void save(draft)
         }}
         readOnly={!canEdit}
         maxLength={TRANSLATION_INSTRUCTIONS_MAX_CHARS}
@@ -208,6 +282,23 @@ export function InstructionsPane({
         placeholder={t("terminology.livingMemory.instructions.placeholder")}
         className="min-h-[320px] resize-y leading-relaxed"
       />
+
+      {conflict && (
+        <div
+          role="alert"
+          className="flex flex-col gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-xs"
+        >
+          <p>{t("terminology.livingMemory.instructions.conflict")}</p>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={loadLatest}>
+              {t("terminology.livingMemory.instructions.loadLatest")}
+            </Button>
+            <Button variant="ghost" size="sm" onClick={overwrite}>
+              {t("terminology.livingMemory.instructions.overwrite")}
+            </Button>
+          </div>
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
         {canEdit ? (

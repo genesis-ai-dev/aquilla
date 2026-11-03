@@ -8,8 +8,8 @@
 // "does a provider resolve", not on the project having customized AI — a
 // project on the Aquilla default must generate.
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest"
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { InstructionsPane } from "./InstructionsPane"
 import { mergeIntoInstructions } from "./instructions-merge"
 import type { CompletionSettings } from "@/lib/parsers/types"
@@ -29,12 +29,14 @@ vi.mock("@/components/ui/toast", () => ({
 
 function renderPane({
   resolved = "",
+  stored,
   completionSettings,
-}: { resolved?: string; completionSettings?: CompletionSettings } = {}) {
-  const patch = vi.fn().mockResolvedValue({ kind: "ok" })
-  render(
+  patch = vi.fn().mockResolvedValue({ kind: "ok" }),
+}: { resolved?: string; stored?: string; completionSettings?: CompletionSettings; patch?: Mock } = {}) {
+  const view = render(
     <InstructionsPane
       resolved={resolved}
+      stored={stored}
       canEdit
       reasonCannotEdit={null}
       patch={patch}
@@ -44,7 +46,7 @@ function renderPane({
       session={{ username: "tester", jwt: "jwt-token" } as never}
     />,
   )
-  return { patch }
+  return { patch, unmount: view.unmount }
 }
 
 /** Open the interview, answer the first question, and finish it. */
@@ -96,9 +98,10 @@ describe("InstructionsPane — interview writes into the instructions (AQU-2342)
     await runInterview()
 
     await waitFor(() =>
-      expect(patch).toHaveBeenCalledWith({
-        translationInstructions: "Keep names as in the 1999 Bible.\n\nDraft for young readers.",
-      }),
+      expect(patch).toHaveBeenCalledWith(
+        { translationInstructions: "Keep names as in the 1999 Bible.\n\nDraft for young readers." },
+        expect.anything(),
+      ),
     )
     // The interview answers are still kept as brief data.
     expect(patch).toHaveBeenCalledWith(
@@ -166,5 +169,98 @@ describe("InstructionsPane — AI provider gate (AQU-1671)", () => {
     await waitFor(() => expect(toastAdd).toHaveBeenCalledTimes(1))
     expect(generateL1Summary).not.toHaveBeenCalled()
     expect(toastAdd.mock.calls[0][0].description).toMatch(/Personal AI provider/i)
+  })
+})
+
+describe("InstructionsPane — a save never erases a newer stored text (AQU-2342)", () => {
+  beforeEach(() => toastAdd.mockReset())
+
+  it("expects the text it started from; on a conflict it keeps the edit, stops saving, and offers both ways out", async () => {
+    vi.useFakeTimers()
+    try {
+      const appended = "Plain register.\n- names.peter: Simon Peter (whole project)"
+      const patch = vi.fn()
+        .mockResolvedValueOnce({
+          kind: "conflict",
+          latest: { version: 4, updatedAt: "now", updatedBy: null, settings: { translationInstructions: appended } },
+        })
+        .mockResolvedValue({ kind: "ok" })
+      renderPane({ resolved: "Plain register.", stored: "Plain register.", patch })
+      const box = screen.getByRole("textbox", { name: "Instructions" })
+
+      fireEvent.change(box, { target: { value: "Plain register. Short sentences." } })
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+      expect(patch).toHaveBeenCalledTimes(1)
+      expect(patch).toHaveBeenLastCalledWith(
+        { translationInstructions: "Plain register. Short sentences." },
+        { expect: [{ key: "translationInstructions", value: "Plain register." }] },
+      )
+
+      // Refused: the box keeps the person's text, says why, and writes nothing more.
+      expect(screen.getByRole("alert")).toHaveTextContent(/Someone else changed the instructions/)
+      expect(box).toHaveValue("Plain register. Short sentences.")
+      fireEvent.change(box, { target: { value: "Plain register. Short sentences!" } })
+      fireEvent.blur(box)
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
+      expect(patch).toHaveBeenCalledTimes(1)
+
+      // "Save mine anyway" writes over the text the server reported, knowingly.
+      fireEvent.click(screen.getByRole("button", { name: "Save mine anyway" }))
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      expect(patch).toHaveBeenCalledTimes(2)
+      expect(patch).toHaveBeenLastCalledWith(
+        { translationInstructions: "Plain register. Short sentences!" },
+        { expect: [{ key: "translationInstructions", value: appended }] },
+      )
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // FRO-234's empty-wipe, for the instructions: a box typed into before the
+  // stored text loaded says it saw nothing stored, so the server refuses it
+  // over real instructions instead of replacing them.
+  it("a save from a box that had not loaded the stored text expects nothing stored", async () => {
+    vi.useFakeTimers()
+    try {
+      const { patch } = renderPane({ resolved: "", stored: undefined })
+      fireEvent.change(screen.getByRole("textbox", { name: "Instructions" }), { target: { value: "New." } })
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+      expect(patch).toHaveBeenCalledWith(
+        { translationInstructions: "New." },
+        { expect: [{ key: "translationInstructions", value: undefined }] },
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("Load latest drops the unsaved text and shows the stored one", async () => {
+    vi.useFakeTimers()
+    try {
+      const patch = vi.fn().mockResolvedValue({
+        kind: "conflict",
+        latest: { version: 2, updatedAt: "now", updatedBy: null, settings: { translationInstructions: "Theirs." } },
+      })
+      const { rerender } = render(
+        <InstructionsPane resolved="Mine was." stored="Mine was." canEdit reasonCannotEdit={null} patch={patch}
+          brief={undefined} author="tester" completionSettings={undefined} session={null} />,
+      )
+      fireEvent.change(screen.getByRole("textbox", { name: "Instructions" }), { target: { value: "Mine now." } })
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+      // The page's settings hook snaps to the winner on a conflict.
+      rerender(
+        <InstructionsPane resolved="Theirs." stored="Theirs." canEdit reasonCannotEdit={null} patch={patch}
+          brief={undefined} author="tester" completionSettings={undefined} session={null} />,
+      )
+      fireEvent.click(screen.getByRole("button", { name: "Load latest" }))
+      expect(screen.getByRole("textbox", { name: "Instructions" })).toHaveValue("Theirs.")
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+      await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
+      expect(patch).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

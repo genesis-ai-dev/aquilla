@@ -168,6 +168,13 @@ export const terminology = defineNamespace({
     "terminology.livingMemory.instructions.saveFailed":
       "Couldn't save. Your text is kept here — keep typing to try again.",
     "terminology.livingMemory.instructions.notWritten": "Not written yet",
+    "terminology.livingMemory.instructions.conflict":
+      "Someone else changed the instructions while you were editing — for example, an answer to an " +
+      "Autopilot question was added. Your text is still here and has not been saved.",
+    "terminology.livingMemory.instructions.loadLatest": "Load latest",
+    "terminology.livingMemory.instructions.overwrite": "Save mine anyway",
+    "terminology.livingMemory.instructions.notSavedOnLeave":
+      "Your last change to the instructions was not saved: someone else changed them first.",
     "terminology.livingMemory.instructions.helpTitle": "Help writing the instructions",
     "terminology.livingMemory.instructions.helpFinish": "Add to instructions",
     // AQU-2342: the index is the four things the AI is given, plus the
@@ -730,6 +737,29 @@ export const terminology = defineNamespace({
           "(the Living Memory index row, the Instructions row in Project settings → " +
           "AI) when the team has not written any instructions yet.",
         maxLength: 32,
+      },
+      "terminology.livingMemory.instructions.conflict": {
+        description:
+          "Notice above the Instructions buttons when a save was refused because the stored " +
+          "instructions changed meanwhile (a teammate, or an answer added by Autopilot). The person's " +
+          "unsaved text stays in the box until they choose 'Load latest' or 'Save mine anyway'.",
+      },
+      "terminology.livingMemory.instructions.loadLatest": {
+        description:
+          "Button in that notice: replace the unsaved text in the box with the instructions as now " +
+          "stored (the unsaved text is dropped).",
+        maxLength: 24,
+      },
+      "terminology.livingMemory.instructions.overwrite": {
+        description:
+          "Button in that notice: save the person's text anyway, replacing the newer stored " +
+          "instructions (the other change is lost).",
+        maxLength: 24,
+      },
+      "terminology.livingMemory.instructions.notSavedOnLeave": {
+        description:
+          "Warning toast after leaving the Instructions page: the last edit was not saved because " +
+          "someone else changed the instructions first.",
       },
       "terminology.livingMemory.instructions.helpTitle": {
         description:

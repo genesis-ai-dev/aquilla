@@ -291,6 +291,10 @@ export interface TimelineEditorProps {
   onRenameTake?(cellId: string, audioId: string, label: string): void
   onRemoveTake?(cellId: string, audioId: string): void
   onVoteTake?(cellId: string, audioId: string, validated: boolean): void
+  /** AQU-2327: open a take in the Station (its ⋯ menu's first item). */
+  onEditInStation?(cellId: string, audioId: string): void
+  /** AQU-2327: a plain click chose a take (the Station follows it while it shows). */
+  onTakeChosen?(cellId: string, audioId: string): void
   voteStateFor?(cellId: string, audioId: string): { canVote: boolean; voted: boolean }
   /** AQU-1767: what Undo/Redo from the toolbar did, so the workspace can say
    *  so (the same report the keyboard shortcut gives). Absent = no buttons. */
@@ -1278,6 +1282,8 @@ export function TimelineEditor({
   onRenameTake,
   onRemoveTake,
   onVoteTake,
+  onEditInStation,
+  onTakeChosen,
   voteStateFor,
   onHistoryResult,
   onTogglePlay,
@@ -2831,6 +2837,7 @@ export function TimelineEditor({
             ? { rename: (cellId: string, audioId: string, current: string | null) => setRenamingTake({ cellId, audioId, label: current ?? "" }) }
             : {}),
           ...(onRemoveTake ? { remove: onRemoveTake } : {}),
+          ...(onEditInStation ? { editInStation: onEditInStation } : {}),
           ...(onVoteTake && voteStateFor ? { vote: onVoteTake, voteState: voteStateFor } : {}),
         }
       : undefined
@@ -4292,7 +4299,10 @@ export function TimelineEditor({
             masterHonorsTrims={masterHonorsTrims}
             snapEnabled={snapOn && !audioFirst}
             onSelect={selectFromChip}
-            onSelectTake={(cellId) => setSelectedTake({ cellId, slot: RECORDING_SLOT })}
+            onSelectTake={(cellId, audioId) => {
+              setSelectedTake({ cellId, slot: RECORDING_SLOT })
+              if (audioId) onTakeChosen?.(cellId, audioId)
+            }}
             onSeek={laneProps.onSeek}
             // AQU-2215 (Sam, Oct 27): dragging a take is NOT withheld when the
             // file follows its recordings any more. A chip's position is still
@@ -4329,6 +4339,8 @@ export function TimelineEditor({
             // single vote, on a project asking for two.
             validationRequirementAudio={project ? readValidationCountAudio(project) : 1}
             color={track.color}
+            // AQU-2235: a muted dub row's takes at half strength.
+            muted={!trackAudible(audibility, "target")}
           />
         )
       // ── The two kinds a USER makes (stage 2) ────────────────────────────
@@ -4376,7 +4388,10 @@ export function TimelineEditor({
             // AQU-2252: a layer's takes snap as they do following the source.
             snapEnabled={snapOn && (!audioFirst || track.setsLineLengths === false)}
             onSelect={selectFromChip}
-            onSelectTake={(cellId) => setSelectedTake({ cellId, slot: slotForTrack(track.id) })}
+            onSelectTake={(cellId, audioId) => {
+              setSelectedTake({ cellId, slot: slotForTrack(track.id) })
+              if (audioId) onTakeChosen?.(cellId, audioId)
+            }}
             onSeek={laneProps.onSeek}
             onRetimeTarget={onRetimeTarget}
             onTrimTarget={onTrimTarget}
@@ -4397,6 +4412,8 @@ export function TimelineEditor({
             validationRequirementAudio={project ? readValidationCountAudio(project) : 1}
             color={track.color}
             laneTestId={`tl-target-lane-${track.id}`}
+            // AQU-2235: …and an added track's, by its own slot's flag.
+            muted={!trackAudible(audibility, slotForTrack(track.id))}
           />
         )
       }

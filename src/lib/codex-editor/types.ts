@@ -111,6 +111,10 @@ export interface CodexCellAttachment {
    * timing reads `targetOffsetMs` as it always has (every take before AQU-2267).
    */
   recordingsOffsetMs?: number | null;
+  /** AQU-2327: the clip's volume (dB) and fades (ms) — how it plays, never the recording. */
+  gainDb?: number | null;
+  fadeInMs?: number | null;
+  fadeOutMs?: number | null;
   /** SUB-48: this clip's event is still queued locally (saved on this device,
    *  not yet at the server). Drives the "saving…" hint on chips/rows. */
   pendingSync?: true;

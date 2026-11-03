@@ -13,6 +13,7 @@
 // rendered without a project or a session hands out nothing, which is exactly
 // what this lane's own test suite does today and why it needs no new setup.
 
+import { clipLevelOf } from "@/lib/audio/mixer"
 import { useCallback } from "react"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import {
@@ -51,7 +52,8 @@ export type ChipPreviewFactory = (
 export function useChipPreview({ projectId, session }: UseChipPreviewArgs): ChipPreviewFactory {
   return useCallback(
     (cell, audioId, durationSec) => {
-      const url = cell.attachments?.[audioId]?.url
+      const att = cell.attachments?.[audioId]
+      const url = att?.url
       if (!projectId || !session || !url) return undefined
       const src: ClipPreviewSource = {
         url,
@@ -60,6 +62,8 @@ export function useChipPreview({ projectId, session }: UseChipPreviewArgs): Chip
         fileId: cell.fileId,
         getSyncToken: audioSyncTokenFetcherForSession(session),
         durationSec,
+        // AQU-2327: the take's volume and fades, as the timeline plays them.
+        level: clipLevelOf(att),
       }
       return {
         prime: () => primeClipPreview(src),

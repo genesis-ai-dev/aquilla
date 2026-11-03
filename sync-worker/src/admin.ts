@@ -16,8 +16,14 @@ import {
   runProgressSelfHealSweep,
   type ProgressSelfHealCronEnv,
 } from "./progress-selfheal-cron"
+import {
+  formatLinkProvenanceSweep,
+  runLinkProvenanceRepair,
+  type LinkProvenanceEnv,
+} from "./events/link-provenance"
 
-export interface AdminEnv extends R2GcCronEnv, ProjectionSnapshotCronEnv, ProgressSelfHealCronEnv {
+export interface AdminEnv
+  extends R2GcCronEnv, ProjectionSnapshotCronEnv, ProgressSelfHealCronEnv, LinkProvenanceEnv {
   SNAPSHOTS: R2Bucket
   /**
    * Dedicated admin bearer. Preferred over SYNC_SECRET_KEY — see the auth note
@@ -66,7 +72,8 @@ export async function handleAdminRequest(
   const gcMatch = url.pathname === "/admin/r2-gc"
   const snapshotMatch = url.pathname === "/admin/projection-snapshot"
   const selfHealMatch = url.pathname === "/admin/progress-selfheal"
-  if (!inspectMatch && !fileMatch && !gcMatch && !snapshotMatch && !selfHealMatch) {
+  const provenanceMatch = url.pathname === "/admin/link-provenance"
+  if (!inspectMatch && !fileMatch && !gcMatch && !snapshotMatch && !selfHealMatch && !provenanceMatch) {
     return new Response("not found", { status: 404 })
   }
 
@@ -172,6 +179,35 @@ export async function handleAdminRequest(
       report,
       summary: formatProgressSelfHealReport(report),
     })
+  }
+
+  // POST /admin/link-provenance — give the files a source link brought into a
+  // project the type they were imported as and a `file_source_blobs` pointer at
+  // the upstream's original (AQU-2345). Every mirror window does this for the
+  // files it touches; this is the backfill for files linked before it did, and
+  // the repair for a project whose export still says "no source blob recorded".
+  // `?projectId=` repairs one project; without it every linked project is
+  // walked. `?dryRun=1` reports what would be written and writes nothing. POST,
+  // not GET, because it writes `files` type columns and pointer rows — never a
+  // cell, a translation or a validation.
+  if (provenanceMatch) {
+    if (request.method !== "POST") return new Response("method not allowed", { status: 405 })
+    const projectId = url.searchParams.get("projectId")
+    const dryRun = url.searchParams.get("dryRun") === "1"
+    const report = await runLinkProvenanceRepair(env, {
+      dryRun,
+      ...(projectId ? { onlyProjectId: projectId } : {}),
+    })
+    if (!report) {
+      return Response.json(
+        { ok: false, error: "link provenance repair skipped — see worker logs (no HYPERDRIVE, or refused)" },
+        { status: 503 },
+      )
+    }
+    if (projectId && report.projects.length === 0) {
+      return Response.json({ ok: false, error: "project has no source link" }, { status: 404 })
+    }
+    return Response.json({ ok: true, report, summary: formatLinkProvenanceSweep(report) })
   }
 
   // GET /admin/files/:projectId/:fileId/inspect — returns counts and sizes

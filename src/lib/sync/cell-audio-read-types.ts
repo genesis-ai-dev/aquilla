@@ -38,6 +38,10 @@ export interface AudioAttachmentOut {
    * that timing reads `targetOffsetMs`, as every take before AQU-2267 does.
    */
   recordingsOffsetMs?: number | null
+  /** AQU-2327 (0193): the clip's volume (dB) and fades (ms); absent = none. */
+  gainDb?: number | null
+  fadeInMs?: number | null
+  fadeOutMs?: number | null
   /** SUB-48: set by the optimistic overlay while this clip's event is still
    *  sitting in the outbox — i.e. saved on this device but not yet at the
    *  server. Never sent by the server; UI renders a "saving…" hint from it so

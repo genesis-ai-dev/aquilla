@@ -134,7 +134,12 @@ worker binds D1; workers fail fast if `HYPERDRIVE` is unbound and query through
   `repaired=N` log line is the alarm for a write-path regression — and files missing a
   row for one of their project's lanes (`laneRows=N`, not an alarm: "Add language" and
   unarchive write those rows themselves via `db/shared/lane-progress.ts`, but imports
-  and migrations that add a language leave them to the sweep) — and the external
+  and migrations that add a language leave them to the sweep) — plus the on-demand
+  `POST /admin/link-provenance?projectId=…&dryRun=1` (AQU-2345,
+  `src/events/link-provenance.ts`) that gives files a source link brought in their
+  upstream type and a `file_source_blobs` pointer at the upstream's original (the
+  rules: `db/shared/link-file-provenance.ts`; every mirror window applies them to
+  the files it touches, this is the backfill) — and the external
   **Agent API** under `/api/v1/external/*`
   (changeset engine + apply gate, artifacts, tools-only MCP server, self-describing
   discovery — see `docs/AGENT-API.md`). Every PR DOES get its own per-branch sync-worker and

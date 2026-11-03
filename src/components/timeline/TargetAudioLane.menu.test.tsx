@@ -400,8 +400,10 @@ describe("TargetAudioLane — a take's ⋯ (AQU-1758)", () => {
     )
     const more = screen.getByTestId("tl-target-c1-more")
     expect(more).toHaveAttribute("aria-label", "More actions")
-    // To the right of the record button: the mic makes room for it.
-    expect(screen.getByTestId("tl-target-c1-record").className).toContain("right-[1.625rem]")
+    // AQU-2235: both in the name bar's right end, the ⋯ to the right of the mic.
+    const hover = screen.getByTestId("tl-target-c1-bar-hover")
+    expect(hover.contains(more)).toBe(true)
+    expect(screen.getByTestId("tl-target-c1-record").nextElementSibling).toBe(more)
     fireEvent.click(more)
     for (const id of ["split", "rerecord", "regenerate", "train-voice", "vote", "rename", "delete"]) {
       expect(await screen.findByTestId(`tl-take-menu-${id}`), id).toBeInTheDocument()
@@ -454,9 +456,10 @@ describe("TargetAudioLane — a take's ⋯ (AQU-1758)", () => {
         takeMenu={menuActions()}
       />,
     )
-    // 0.3 s at 40 px/s is 12 px: no room for the mic, the ⋯ is still there.
+    // 0.3 s at 40 px/s is 12 px: no room for the mic, the ⋯ is still there —
+    // in the name bar (AQU-2235), the same glyph as on a wide take.
     expect(screen.queryByTestId("tl-target-c1-record")).toBeNull()
-    expect(screen.getByTestId("tl-target-c1-more").className).toContain("h-4 w-4")
+    expect(screen.getByTestId("tl-target-c1-bar-hover").contains(screen.getByTestId("tl-target-c1-more"))).toBe(true)
   })
 
   it("is not there for someone who cannot change the take", () => {

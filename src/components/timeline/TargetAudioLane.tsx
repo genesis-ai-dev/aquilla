@@ -13,7 +13,7 @@
 
 import { useEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
-import { AudioLines, Check, CheckCheck, ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, Ellipsis, GraduationCap, Mic, Pencil, Play, Scissors, Sparkles, Square, Trash2, VolumeX, X } from "lucide-react"
+import { AudioLines, AudioWaveform, Check, CheckCheck, ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, Ellipsis, GraduationCap, Mic, Pencil, Play, Scissors, Sparkles, Square, Trash2, VolumeX, X } from "lucide-react"
 import {
   ContextMenu,
   ContextMenuContent,
@@ -33,6 +33,8 @@ import { isVisible, secToPx, pxToSec, chipRadiusPx } from "@/lib/timeline/scale"
 import {
   MIN_CHIP_GRIP_H_PX,
   MIN_CHIP_META_H_PX,
+  fitNameBar,
+  nameBarPx,
   slotButtonPx,
   slotIconPx,
   TL_CHIP_BOX_CLASS,
@@ -56,7 +58,8 @@ import { canCutAt } from "@/lib/audio/cut-take"
 import { pieceTrimLimitsMs } from "@/lib/sync/cell-audio-read-types"
 import { takeBaseLabel } from "@/lib/audio/take-groups"
 import { snapSpan, SNAP_THRESHOLD_PX } from "@/lib/timeline/snap"
-import { trackChipClass, trackChipPlayingClass, trackHueVars } from "@/lib/timeline/track-colors"
+import { TRACK_BAR_CLASS, TRACK_CHIP_CLASS, TRACK_CHIP_PLAYING_CLASS, WAVE_LOOK, trackHueVars } from "@/lib/timeline/track-colors"
+import { isDenoisedAudioId } from "@/lib/audio/upload"
 import { DragTimeChip } from "./DragTimeChip"
 import { TargetChipWaveform } from "./TargetChipWaveform"
 import { useChipPreview, type ChipPreview, type ChipPreviewFactory } from "./useChipPreview"
@@ -74,13 +77,13 @@ import type { CellData } from "@/hooks/useCells"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { takeBadgeState } from "@/components/cell/audio-validation-state"
 import { isHiddenCell } from "@/lib/cells/hidden"
-import { CHIP_PLAYLINE_CLASS, CHIP_VALIDATED_BADGE_CLASS, chipCornerButtonClass } from "@/components/audio/chip-classes"
+import { CHIP_VALIDATED_BADGE_CLASS, chipPlaylineClass } from "@/components/audio/chip-classes"
 import type { TakeVoiceNote } from "@/lib/audio/take-voice"
 
-/** AQU-1758: the take's-voice label needs a full-height chip (46 px by
- *  default) to sit under the sparkle, and room for a short name. */
-const TAKE_VOICE_LABEL_MIN_H_PX = 44
-const TAKE_VOICE_LABEL_MIN_W_PX = 56
+/** AQU-2235: a glyph in the name bar's right end — record, ⋯, play. No
+ *  button is drawn around it (board 54); the bar's height is its target. */
+const BAR_GLYPH_CLASS =
+  "inline-flex h-full w-3.5 items-center justify-center rounded-[3px] text-current opacity-80 outline-none hover:opacity-100 focus-visible:ring-1 focus-visible:ring-ring"
 
 export interface TargetAudioItem {
   cell: CellData
@@ -147,7 +150,8 @@ export interface TargetAudioLaneProps {
   onSelect(id: string): void
   /** AQU-1767 (Sam, 2026-10-14): a clean click on a take selects THAT take,
    *  after `onSelect` has selected its line. */
-  onSelectTake?(cellId: string): void
+  /** A plain click chose this take; `audioId` is the chip clicked (a piece for a split take). */
+  onSelectTake?(cellId: string, audioId?: string): void
   /** A double-click on a take jumps playback to its line (a single click
    *  selects it and leaves the playhead where it is — Sam, 2026-10-14). */
   onSeek?(id: string): void
@@ -228,6 +232,11 @@ export interface TargetAudioLaneProps {
    * those need namespacing the same way.
    */
   laneTestId?: string
+  /**
+   * AQU-2235 (Sam's board 51 suggestion): this track is muted, so every take
+   * on it is drawn at half strength, name bar and all.
+   */
+  muted?: boolean
 }
 
 type ChipDragMode = "move" | "resize-l" | "resize-r"
@@ -261,6 +270,8 @@ interface ChipGeometry {
  * Each is optional; a missing one is simply not in the menu.
  */
 export interface TakeMenuActions {
+  /** AQU-2327: open this take in the Station (its first item, Q1). */
+  editInStation?(cellId: string, audioId: string): void
   /** Open the recorder on this line, on this take's track. */
   reRecord?(cellId: string): void
   /** Generate a new voice for this line straight away, on this take's track. */
@@ -344,10 +355,13 @@ function TargetAudioChip({
   peaks,
   preview,
   layout,
+  muted = false,
   getOtherLayout,
   track,
 }: {
   chip: ChipGeometry
+  /** AQU-2235: the take's track is muted — drawn at half strength. */
+  muted?: boolean
   /** AQU-2215: the lane's layout, for the one question only it can answer —
    *  what a MOVE on this chip means, and what to store for it. Absent outside
    *  a timeline (this lane's own tests), which is dubbing's own behaviour. */
@@ -395,7 +409,8 @@ function TargetAudioChip({
   editable: boolean
   snap: { enabled: boolean; candidates: number[] }
   onSelect(id: string): void
-  onSelectTake?(cellId: string): void
+  /** A plain click chose this take; `audioId` is the chip clicked (a piece for a split take). */
+  onSelectTake?(cellId: string, audioId?: string): void
   onSeek?(id: string): void
   /** AQU-646 stage 3: the TAKE being moved, not just its line. Placement is
    *  stored per take now — two tracks share a line, and a per-cell anchor
@@ -875,7 +890,6 @@ function TargetAudioChip({
   // (an action, not a label) and stays.
   const overflowSec = span.end - section.end
   const paintedPx = Math.max(10, secToPx(paintedEnd - paintedStart, pxPerSec))
-  const fullPx = secToPx(geom.end - geom.start, pxPerSec)
   // AQU-646: the waveform's window into this clip. Computed from the PAINTED
   // edges, so a chip cut short by the at-fault rule shows exactly the audio it
   // is drawn over — and hovering, which restores the true edges, widens the
@@ -922,25 +936,104 @@ function TargetAudioChip({
   // overlap body and the truncation chevrons. A row squeezed down to colour
   // bands must still be able to say "these two dubs collide".
   const fitsBadges = chipH >= MIN_CHIP_META_H_PX
-  const showLeftGlyph = leftGlyph != null && fitsBadges && paintedPx >= 20
   // AQU-646 stage 5. Withheld while a state glyph holds the corner — see the
   // button's own comment — and needing the same room the record mic does.
   // Sam's decision: a hidden line's takes are drawn faded, and neither play
   // nor take a new recording from here.
   const hiddenLine = isHiddenCell(cell)
-  const showPlayButton = !hiddenLine && Boolean(preview) && leftGlyph == null && fitsBadges && fullPx >= 28
+  const canPlayHere = !hiddenLine && Boolean(preview) && leftGlyph == null && fitsBadges
   // AQU-1758 (Sam, decision 4): the take's menu from a ⋯ in its top-right
   // corner, on hover — the same menu a right-click opens. Like the other
   // corner buttons it is one fixed size whatever the take's width, so a
   // narrow take gets the same button; only a row too short for badges hides it.
   const showMoreButton = hasMenu && fitsBadges
-  const showRecordButton =
-    !hiddenLine &&
-    editable &&
-    Boolean(onOpenRecording) &&
-    fitsBadges &&
-    // Two corners want the width now, not one — and the ⋯ beside the mic.
-    fullPx >= (leftGlyph != null || showPlayButton ? 46 : 28) + (showMoreButton ? 18 : 0)
+  // AQU-2235: where it fits is the name bar's call now (`barRecord` below).
+  const canRecordHere = !hiddenLine && editable && Boolean(onOpenRecording) && fitsBadges
+
+  // ── AQU-2235 (Sam, Oct 28, board 54): THE NAME BAR ─────────────────────────
+  // "We go with medium. We go with the bar name from the take. Double clicking
+  // to rename should work. Dragging to move should work." Like a Logic Pro
+  // region header: a bar along the top in the track hue at 34%, holding — left
+  // to right — the sparkle of an AI voice, the TAKE's name (a piece's, "Take 2
+  // · 1 of 2"), and the voice when it is not the line's; at the right end the
+  // approval check, and on hover the take's buttons in its place. Everything
+  // that used to sit ON the waveform lives here now, so the waveform fills the
+  // height under the bar and nothing covers it.
+  //
+  // The bar is part of the chip, so pressing it starts the chip's own move —
+  // the same drag and retime the body has always had, in both timings — and
+  // a double-click on the name opens the take menu's own Rename dialog.
+  //
+  // Under 30px of clip there is no room for one: the clip keeps today's
+  // corner marks (the sparkle, the check), as Logic hides region names on
+  // short tracks. Every corner control already needed 30px (`fitsBadges`), so
+  // the bar takes over exactly where they stopped fitting.
+  const barH = nameBarPx(chipH)
+  const hasBar = barH > 0
+  const isPiece = (chip.item.pieceCount ?? 1) > 1
+  // A stored name is user data, never translated; the placeholder is.
+  const takeName =
+    (isPiece ? takeBaseLabel(chipTake?.label) : chipTake?.label) ??
+    (isDenoisedAudioId(chip.item.audioId) ? t("audio.takesStrip.cleanedLabel") : t("audio.takesStrip.takeFallback"))
+  const barName = isPiece
+    ? t("editor.timeline.takePieceName", {
+        name: takeName,
+        n: (chip.item.pieceIndex ?? 0) + 1,
+        total: chip.item.pieceCount ?? 1,
+      })
+    : takeName
+  const voiceName = takeVoice ? (takeVoice.takeVoiceName ?? t("editor.voice.removedVoice")) : null
+  const validatedState = chipValidationState === "self" || chipValidationState === "full" ? chipValidationState : null
+  // The check shows at any width, as the corner tick before the bar did: a
+  // narrow take, or one drawn short where it collides, still says it is
+  // validated. The name gives way to it.
+  const barCheck = validatedState != null
+  // What the bar holds gives way from the right as the clip narrows (board
+  // 54): the voice, then the name. On hover the record button and the ⋯ take
+  // the check's place, and the play button joins them, each only where the
+  // name keeps room to be double-clicked beside them — budgeted from what is
+  // actually in the bar (`fitNameBar`), not from widths tuned by eye. The ⋯
+  // stays at ANY width — AQU-1758 (Sam, decision 4) gave a narrow take the
+  // same ⋯ — so the menu is never only a right-click away. A passing state
+  // glyph (loading, saving) gives way before any of them: the transport's
+  // "loading" appears on the very click that starts a double-click.
+  const lastingGlyph = leftGlyph === "missing" || leftGlyph === "syncFailed"
+  const glyphFits = leftGlyph != null && fitsBadges && paintedPx >= 20
+  const barFit = fitNameBar(paintedPx, {
+    sparkle: chip.item.kind === "generated" && paintedPx >= 18,
+    unknownLength: geom.usingFallback,
+    lastingGlyph: glyphFits && lastingGlyph,
+    passingGlyph: glyphFits && !lastingGlyph,
+    check: barCheck,
+    more: showMoreButton,
+    record: canRecordHere,
+    play: canPlayHere,
+    voice: voiceName != null,
+  })
+  const showLeftGlyph = glyphFits && (lastingGlyph || barFit.passingGlyph)
+  const barShowsName = barFit.name
+  const barShowsVoice = barFit.voice
+  const barPlay = barFit.play
+  const barRecord = barFit.record
+  const barMore = barFit.more
+  const barHasHover = barPlay || barRecord || barMore
+  const renameFromBar =
+    editable && !blade && takeMenu?.rename
+      ? (e: React.MouseEvent) => {
+          e.stopPropagation()
+          // A piece renames its whole take, by the take's own name — the menu's call.
+          takeMenu.rename?.(cell.id, chip.item.audioId, (isPiece ? takeBaseLabel(chipTake?.label) : chipTake?.label) ?? null)
+        }
+      : undefined
+  // The name's node, because a real double-click on it does NOT arrive there:
+  // the press starts the chip's move drag, which captures the pointer on the
+  // chip, so the browser delivers the click and the double-click to the chip
+  // itself. The chip's own double-click asks whether it landed on the name.
+  const nameRef = useRef<HTMLSpanElement | null>(null)
+  const onName = (e: React.MouseEvent) => {
+    const r = nameRef.current?.getBoundingClientRect()
+    return r != null && r.width > 0 && e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom
+  }
 
   async function togglePreview() {
     if (previewRef.current) {
@@ -1141,17 +1234,24 @@ function TargetAudioChip({
         // playhead where it is, so S can split it there. Jumping to the line
         // is a double-click.
         onSelect(cell.id)
-        if (!movedRef.current) onSelectTake?.(cell.id)
+        if (!movedRef.current) onSelectTake?.(cell.id, chip.item.audioId)
         movedRef.current = false
       }}
       onDoubleClick={(e) => {
         // Not from the play or record button in a corner, and not a blade cut.
         if (blade || (e.target as Element).closest?.('[role="button"]')) return
+        // AQU-2235: on the take's name, it renames (see `nameRef`).
+        if (renameFromBar && onName(e)) {
+          renameFromBar(e)
+          return
+        }
         onSeek?.(cell.id)
       }}
       onPointerEnter={() => setHovered(true)}
-      onPointerLeave={() => {
-        setHovered(false)
+      onPointerLeave={(e) => {
+        // AQU-2235: a bar glyph with keyboard focus stays showing — hiding it
+        // under the focus would drop the focus with it.
+        if (!e.currentTarget.contains(document.activeElement)) setHovered(false)
         setBladeX(null)
       }}
       onPointerMove={(e) => {
@@ -1202,8 +1302,12 @@ function TargetAudioChip({
         left: `${secToPx(paintedStart, pxPerSec)}px`,
         width: `${paintedPx}px`,
         // Same rule as every other chip, its own smaller cap (was rounded-md).
-        borderRadius: `${chipRadiusPx(paintedPx, 6)}px`,
+        // AQU-2235: 4px on a clip under 24px tall (board 51).
+        borderRadius: `${chipRadiusPx(paintedPx, chipH < 24 ? 4 : 6)}px`,
         zIndex: (drag ? 2000 : selected || hovered ? 1000 : 0) + paintOrder,
+        // AQU-2235: a muted track's takes, whole, bar and all, at the look's
+        // own strength (WAVE_LOOK.muted, 50%).
+        ...(muted ? { opacity: WAVE_LOOK.muted } : {}),
       }}
       className={cn(
         "group/chip absolute flex touch-none select-none items-center justify-center border",
@@ -1220,15 +1324,14 @@ function TargetAudioChip({
         // colour by sitting after it. Injecting the palette anywhere else, or
         // letting a palette entry introduce a group the warnings do not also
         // set, would let a colour quietly win over an alarm.
-        trackChipClass(chip.item.kind),
+        TRACK_CHIP_CLASS,
         // 2026-08-27 (Sam): the preview PROGRESS FILL rides the identity slot
         // — played side at the chip's own rung, unplayed side at the hover
         // rung, split at `--tl-play-x`. Gated off the red at-fault body (a
         // warning still beats playback paint; amber needs no gate, it is
         // border-only) and off fallback chips (a guessed width has no honest
         // progress to draw).
-        previewing && !geom.usingFallback && overflow !== "overlap" &&
-          trackChipPlayingClass(chip.item.kind),
+        previewing && !geom.usingFallback && overflow !== "overlap" && TRACK_CHIP_PLAYING_CLASS,
         // An unmeasurable clip spans its section, so say so rather than
         // letting a placeholder width pass for the real thing.
         geom.usingFallback && "border-dashed",
@@ -1279,6 +1382,10 @@ function TargetAudioChip({
           x0={waveform.x0}
           x1={waveform.x1}
           chipH={chipH}
+          // AQU-2235: under the name bar, never behind it.
+          {...(hasBar ? { topPx: barH, drawH: chipH - 2 - barH } : {})}
+          playing={previewing && !geom.usingFallback && overflow !== "overlap"}
+          fault={overflow === "overlap"}
         />
       )}
       {canResize && (
@@ -1286,6 +1393,8 @@ function TargetAudioChip({
           aria-hidden
           data-testid={`tl-target-${testKey}-handle-l`}
           onPointerDown={(e) => beginDrag("resize-l", e)}
+          // AQU-2235: below the name bar, which is the move handle.
+          style={hasBar ? { top: barH } : undefined}
           className="absolute inset-y-0 left-0 flex w-[7px] cursor-col-resize items-center justify-center opacity-0 transition-opacity group-hover/chip:opacity-100 bg-background/70"
         >
           <span className="h-4 w-0.5 rounded bg-current" />
@@ -1308,26 +1417,20 @@ function TargetAudioChip({
           both themes and turns red with the body when this chip is the one at
           fault.
 
-          WITHHELD WHEN THE CORNER GLYPH IS SHOWING, because they occupy the
-          same pixels: the badge sits at left-1.5/top-1 and is 14px tall, so at
-          any height where it renders at all it covers the vertical centre. A
-          missing take or a parked transport is a state; "this one is
-          synthetic" is an identity the chip's colour still carries. State wins.
+          It used to give way to the corner state glyph, which sat on the same
+          pixels. AQU-2235 moved that glyph into the name bar, so on a clip too
+          short for a bar there is nothing left for it to give way to.
           No recorded-take glyph either way: recorded is the default, generated
           is the exception worth marking. */}
       {/* i18n-exempt "generated" is a TargetAudioItem kind, not copy */}
-      {chip.item.kind === "generated" && !showLeftGlyph && chipH >= MIN_CHIP_GRIP_H_PX && paintedPx >= 24 && (
+      {/* AQU-2235: with a name bar the sparkle leads the bar instead. */}
+      {chip.item.kind === "generated" && !hasBar && chipH >= MIN_CHIP_GRIP_H_PX && paintedPx >= 24 && (
         <span
           aria-hidden
           data-testid={`tl-target-${testKey}-generated`}
-                  // AQU-646 stage 5: the play button wants this side too. The sparkle
-            // is decorative and the button is an action, so on hover the
-            // action wins — the same reason the sparkle already gives way to a
-            // corner state badge.
-            className={cn(
-              "pointer-events-none absolute left-2 top-1/2 z-10 -translate-y-1/2",
-              showPlayButton && "transition-opacity group-hover/chip:opacity-0",
-            )}
+          // AQU-2235: only a clip too short for the bar lands here, and none of
+          // the corner buttons or state glyphs fit one, so nothing contests it.
+          className="pointer-events-none absolute left-2 top-1/2 z-10 -translate-y-1/2"
         >
           {/* THE SAME GLYPH THAT USED TO SIT DEAD CENTRE, byte for byte
               (Sam, 2026-08-24) — same lucide icon, same 3.5 size, same outline
@@ -1337,16 +1440,10 @@ function TargetAudioChip({
           <Sparkles className="h-3.5 w-3.5 shrink-0" />
         </span>
       )}
-      {/* AQU-1758: the clip names the take's voice when it is not the line's
-          (a voice picked for the line only assigns it). The same small
-          readout a take's running time uses over a waveform; the sentence is
-          in the tooltip. Bottom left, past the sparkle (only a generated take
-          carries a voice), and only where the chip is tall and wide enough
-          to read it. */}
-      {/* AQU-2212: while the line is being generated or re-voiced, the clip
-          says so in the take-voice label's place ("Voicing as …", the Audio
-          view card's status line). */}
-      {voicingAs && (
+      {/* AQU-2212: while the line is being generated or re-voiced, a clip too
+          short for the name bar (which says it there) still says so, as every
+          clip did before the bar (AQU-2235): bottom left, past the sparkle. */}
+      {!hasBar && voicingAs && (
         <span
           role="status"
           data-testid={`tl-target-${testKey}-working`}
@@ -1356,155 +1453,239 @@ function TargetAudioChip({
           <span className="truncate">{t("editor.voice.workingAs", { voice: voicingAs })}</span>
         </span>
       )}
-      {!voicingAs && takeVoice && chipH >= TAKE_VOICE_LABEL_MIN_H_PX && paintedPx >= TAKE_VOICE_LABEL_MIN_W_PX && (
+      {/* AQU-2235: THE NAME BAR (see `barH` above). Everything that used to
+          sit on the waveform at this height is in here now: the corner state
+          glyph, the sparkle, the take's name, the "?" of an unmeasured take,
+          the take's voice (AQU-1758's label) — or, while the line is being
+          generated or re-voiced, "Voicing as …" in its place (AQU-2212) — the
+          check, and on hover the
+          play and record buttons and the ⋯ (AQU-1758), as bare glyphs with no
+          button drawn around them.
+
+          The corner state glyph keeps its priority order — missing >
+          sync-failed > loading > saving — at the bar's RIGHT end, before the
+          check: never on the left, where it would push the name along the
+          moment it appeared (the transport's "loading" appears on the very
+          click that selects a take, and moved the name out from under the
+          second click of a double-click — found in the browser).
+
+          The hover glyphs keep BOTH their `stopPropagation` calls (see the
+          note these buttons have always carried): without the pointerdown one
+          a press would start the bar's move, without the click one the chip
+          would also select. */}
+      {hasBar && (
         <span
-          data-testid={`tl-target-${testKey}-take-voice`}
-          className="pointer-events-none absolute bottom-1 left-6 z-10 max-w-[calc(100%-2rem)] truncate rounded bg-background/70 px-1 text-[10px] leading-4 text-muted-foreground"
+          data-testid={`tl-target-${testKey}-bar`}
+          data-bar-h={barH}
+          className={cn(
+            "absolute inset-x-0 top-0 z-10 flex items-center gap-[5px] overflow-hidden px-[5px]",
+            // A warning still beats the track's colour: the red body's bar is red.
+            overflow === "overlap" ? "bg-red-500/20" : TRACK_BAR_CLASS,
+          )}
+          style={{ height: barH, fontSize: barH >= 14 ? 10 : 9, lineHeight: `${barH}px` }}
         >
-          {takeVoice.takeVoiceName ?? t("editor.voice.removedVoice")}
-        </span>
-      )}
-      {/* SUB-48: an unmeasurable clip says so instead of quietly borrowing
-          the section's width and passing for a measured take. */}
-      {geom.usingFallback && fitsBadges && (
-        <span
-          aria-hidden
-          data-testid={`tl-target-${testKey}-unknown-length`}
-          className="ml-0.5 shrink-0 text-[10px] font-semibold leading-none opacity-70"
-        >
-          ?
-        </span>
-      )}
-      {/* The corner priority slot: missing badge (decision 2026-08-05) >
-          AQU-924 sync-failed badge (never reached the server; needs a retry) >
-          loading spinner (the readiness gate is parked on this verse) >
-          SUB-48 saving glyph (still in the outbox — "safe, on its way"). */}
-      {/* AQU-2260: no hover; the glyph is named for a screen reader, and
-          what it means is in the take's right-click menu. */}
-      {showLeftGlyph && (
-        <span
-          role="img"
-          aria-label={
-            leftGlyph === "missing"
-              ? MISSING_AUDIO_MESSAGE
-              : leftGlyph === "syncFailed"
-                ? t("audio.takesStrip.syncFailedTooltip")
-                : leftGlyph === "loading"
-                  ? t("editor.timeline.takeLoading")
-                  : t("editor.timeline.takeSaving")
-          }
-          data-testid={`tl-target-${testKey}-${leftGlyph}`}
-          className="absolute left-1.5 top-1 z-10 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-background/85 shadow-sm ring-1 ring-border"
-        >
-          {leftGlyph === "missing" ? (
-            <VolumeX className="h-2.5 w-2.5 text-red-600 dark:text-red-400" />
-          ) : leftGlyph === "syncFailed" ? (
-            <CloudAlert className="h-2.5 w-2.5 text-red-600 dark:text-red-400" />
-          ) : leftGlyph === "loading" ? (
-            <Spinner className="h-2.5 w-2.5" />
-          ) : (
-            <CloudUpload className="h-2.5 w-2.5 animate-pulse" />
+          <span className="flex min-w-0 flex-1 items-center gap-[5px]">
+            {/* i18n-exempt "generated" is a TargetAudioItem kind, not copy */}
+            {barFit.sparkle && (
+              // Still the only mark of an AI voice; it leads the bar.
+              <span aria-hidden data-testid={`tl-target-${testKey}-generated`} className="flex flex-none">
+                <Sparkles className={barH >= 14 ? "h-2.5 w-2.5" : "h-[9px] w-[9px]"} />
+              </span>
+            )}
+            {barShowsName && (
+              <span
+                ref={nameRef}
+                data-testid={`tl-target-${testKey}-name`}
+                className="min-w-0 truncate font-semibold"
+                onDoubleClick={renameFromBar}
+              >
+                {barName}
+              </span>
+            )}
+            {/* SUB-48: an unmeasurable clip says so instead of quietly
+                borrowing the section's width and passing for a measured take. */}
+            {geom.usingFallback && (
+              <span
+                aria-hidden
+                data-testid={`tl-target-${testKey}-unknown-length`}
+                className="flex-none font-semibold opacity-70"
+              >
+                ?
+              </span>
+            )}
+            {/* AQU-2212: while the line is being generated or re-voiced, the
+                bar says so where the take's voice goes ("Voicing as …", the
+                Audio view card's status line), at any width the bar has. */}
+            {voicingAs ? (
+              <span
+                role="status"
+                data-testid={`tl-target-${testKey}-working`}
+                className="flex min-w-0 items-center gap-1 font-medium opacity-[0.72]"
+              >
+                <Spinner className={barH >= 14 ? "h-2.5 w-2.5 shrink-0" : "h-[9px] w-[9px] shrink-0"} />
+                <span className="truncate">{t("editor.voice.workingAs", { voice: voicingAs })}</span>
+              </span>
+            ) : null}
+            {/* AQU-1758: the take's voice when it is not the line's, lighter;
+                the sentence is in the take's right-click details (AQU-2260). */}
+            {!voicingAs && barShowsVoice && (
+              <span
+                data-testid={`tl-target-${testKey}-take-voice`}
+                className="min-w-0 truncate font-medium opacity-[0.72]"
+              >
+                {voiceName}
+              </span>
+            )}
+          </span>
+          {/* AQU-2260: no hover; the glyph is named for a screen reader, and
+              what it means is in the take's right-click menu. */}
+          {showLeftGlyph && (
+            <span
+              role="img"
+              aria-label={
+                leftGlyph === "missing"
+                  ? MISSING_AUDIO_MESSAGE
+                  : leftGlyph === "syncFailed"
+                    ? t("audio.takesStrip.syncFailedTooltip")
+                    : leftGlyph === "loading"
+                      ? t("editor.timeline.takeLoading")
+                      : t("editor.timeline.takeSaving")
+              }
+              data-testid={`tl-target-${testKey}-${leftGlyph}`}
+              className="flex flex-none"
+            >
+              {leftGlyph === "missing" ? (
+                <VolumeX className="h-2.5 w-2.5 text-red-600 dark:text-red-400" />
+              ) : leftGlyph === "syncFailed" ? (
+                <CloudAlert className="h-2.5 w-2.5 text-red-600 dark:text-red-400" />
+              ) : leftGlyph === "loading" ? (
+                <Spinner className="h-2.5 w-2.5" />
+              ) : (
+                <CloudUpload className="h-2.5 w-2.5 animate-pulse" />
+              )}
+            </span>
+          )}
+          {barHasHover && (
+            <span
+              data-testid={`tl-target-${testKey}-bar-hover`}
+              // Out of sight at rest, never display:none: the glyphs sit after
+              // the chip in the tab order, so Shift+Tab from the next take
+              // must still reach them. Focus inside the chip counts as hover.
+              className={cn(
+                "flex h-full flex-none items-center gap-0.5",
+                hovered
+                  ? null
+                  : "pointer-events-none absolute right-[5px] top-0 opacity-0 group-hover/chip:pointer-events-auto group-hover/chip:static group-hover/chip:opacity-100",
+              )}
+            >
+              {barPlay && preview && (
+                <span
+                  role="button"
+                  tabIndex={0}
+                  title={priming ? t("common.loading") : previewing ? t("common.stop") : t("workspace.targetAudioLane.playClip")}
+                  aria-label={priming ? t("common.loading") : previewing ? t("common.stop") : t("workspace.targetAudioLane.playClip")}
+                  aria-busy={priming || undefined}
+                  data-testid={`tl-target-${testKey}-play`}
+                  onPointerDown={(e) => { e.stopPropagation(); preview.prime() }}
+                  onClick={(e) => { e.stopPropagation(); togglePreview() }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      togglePreview()
+                    }
+                  }}
+                  className={BAR_GLYPH_CLASS}
+                >
+                  {priming
+                    ? <Spinner className="h-2.5 w-2.5" />
+                    : previewing ? <Square className="h-2 w-2 fill-current" /> : <Play className="h-2.5 w-2.5 fill-current" />}
+                </span>
+              )}
+              {barRecord && onOpenRecording && (
+                <span
+                  role="button"
+                  tabIndex={0}
+                  title={t("workspace.targetAudioLane.recordAudio")}
+                  data-testid={`tl-target-${testKey}-record`}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onSelect(cell.id)
+                    onOpenRecording(cell.id)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      onSelect(cell.id)
+                      onOpenRecording(cell.id)
+                    }
+                  }}
+                  className={BAR_GLYPH_CLASS}
+                >
+                  <Mic className="h-2.5 w-2.5" />
+                </span>
+              )}
+              {barMore && (
+                <span
+                  role="button"
+                  tabIndex={0}
+                  title={t("editor.rail.moreActions")}
+                  aria-label={t("editor.rail.moreActions")}
+                  aria-haspopup="menu"
+                  data-testid={`tl-target-${testKey}-more`}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={openMenuFromMore}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") openMenuFromMore(e)
+                  }}
+                  className={BAR_GLYPH_CLASS}
+                >
+                  <Ellipsis className="h-[11px] w-[11px]" />
+                </span>
+              )}
+            </span>
+          )}
+          {barCheck && validatedState && (
+            <span
+              data-testid={`tl-target-${testKey}-validated`}
+              title={validatedState === "full"
+                ? t("workspace.targetAudioLane.takeValidated")
+                : t("workspace.targetAudioLane.takeValidatedByYou")}
+              aria-label={validatedState === "full"
+                ? t("workspace.targetAudioLane.takeValidated")
+                : t("workspace.targetAudioLane.takeValidatedByYou")}
+              className={cn(
+                // In the bar's own ink, as board 54 draws it: a green check
+                // on the green track's bar read faintly. The colour comes
+                // from the bar (TRACK_BAR_CLASS), so it is dark on every
+                // palette colour and light on a dark custom one.
+                "flex-none items-center",
+                // The hover glyphs take its place.
+                !barHasHover ? "inline-flex" : hovered ? "hidden" : "inline-flex group-hover/chip:hidden",
+              )}
+            >
+              {validatedState === "full"
+                ? <CheckCheck className="h-2.5 w-2.5" strokeWidth={3} />
+                : <Check className="h-2.5 w-2.5" strokeWidth={3} />}
+            </span>
           )}
         </span>
       )}
-      {/* Round 8b (Sam): record right from the chip — opens this cell's
-          recording modal (takes and all) without a trip to the detail pane.
-          Inset from the right edge so it never fights the trim handle. */}
-      {/* AQU-646 stage 5: hear THIS clip, as the timeline draws it (Sam,
-          2026-08-26). Mirrors the record mic at the other corner — an action,
-          hover-revealed, not a state.
-
-          IT YIELDS THE CORNER TO A STATE GLYPH. `left-1.5 top-1` is a single
-          priority slot (missing > syncFailed > loading > saving), and three of
-          those four mean the clip cannot play anyway. The sparkle beside it
-          fades on hover instead, since both want the left side and only one of
-          them is an action.
-
-          BOTH `stopPropagation` CALLS ARE LOAD-BEARING. Without the pointerdown
-          one, pressing play begins a chip MOVE drag; without the click one, the
-          chip's own onClick selects the take as well. (The chip's double-click
-          jump skips its corner buttons itself, so a quick second press on play
-          does not move the playhead — the thing this button was ruled not to
-          do.) */}
-      {showPlayButton && preview && (
-        <span
-          role="button"
-          tabIndex={0}
-          title={priming ? t("common.loading") : previewing ? t("common.stop") : t("workspace.targetAudioLane.playClip")}
-          aria-label={priming ? t("common.loading") : previewing ? t("common.stop") : t("workspace.targetAudioLane.playClip")}
-          aria-busy={priming || undefined}
-          data-testid={`tl-target-${testKey}-play`}
-          onPointerDown={(e) => { e.stopPropagation(); preview.prime() }}
-          onClick={(e) => { e.stopPropagation(); togglePreview() }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault()
-              e.stopPropagation()
-              togglePreview()
-            }
-          }}
-          className={chipCornerButtonClass("left")}
-        >
-          {priming
-            ? <Spinner className="h-2.5 w-2.5" />
-            : previewing ? <Square className="h-2 w-2 fill-current" /> : <Play className="h-2.5 w-2.5 fill-current" />}
-        </span>
-      )}
-      {showRecordButton && onOpenRecording && (
-        <span
-          role="button"
-          tabIndex={0}
-          title={t("workspace.targetAudioLane.recordAudio")}
-          data-testid={`tl-target-${testKey}-record`}
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => {
-            e.stopPropagation()
-            onSelect(cell.id)
-            onOpenRecording(cell.id)
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault()
-              e.stopPropagation()
-              onSelect(cell.id)
-              onOpenRecording(cell.id)
-            }
-          }}
-          className={cn(chipCornerButtonClass("right"), showMoreButton && "right-[1.625rem]")}
-        >
-          <Mic className="h-2.5 w-2.5" />
-        </span>
-      )}
-      {showMoreButton && (
-        <span
-          role="button"
-          tabIndex={0}
-          title={t("editor.rail.moreActions")}
-          aria-label={t("editor.rail.moreActions")}
-          aria-haspopup="menu"
-          data-testid={`tl-target-${testKey}-more`}
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={openMenuFromMore}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") openMenuFromMore(e)
-          }}
-          className={chipCornerButtonClass("right")}
-        >
-          <Ellipsis className="h-2.5 w-2.5" />
-        </span>
-      )}
-      {(chipValidationState === "self" || chipValidationState === "full") && (
+      {/* No bar (a clip under 30px): today's corner tick, as it always was. */}
+      {!hasBar && validatedState && (
         <span
           data-testid={`tl-target-${testKey}-validated`}
-          title={chipValidationState === "full"
+          title={validatedState === "full"
             ? t("workspace.targetAudioLane.takeValidated")
             : t("workspace.targetAudioLane.takeValidatedByYou")}
-          aria-label={chipValidationState === "full"
+          aria-label={validatedState === "full"
             ? t("workspace.targetAudioLane.takeValidated")
             : t("workspace.targetAudioLane.takeValidatedByYou")}
           className={CHIP_VALIDATED_BADGE_CLASS}
         >
-          {chipValidationState === "full"
+          {validatedState === "full"
             ? <CheckCheck className="h-2.5 w-2.5" strokeWidth={3} />
             : <Check className="h-2.5 w-2.5" strokeWidth={3} />}
         </span>
@@ -1519,7 +1700,9 @@ function TargetAudioChip({
           aria-hidden
           ref={playlineRef}
           data-testid={`tl-target-${testKey}-playline`}
-          className={CHIP_PLAYLINE_CLASS}
+          // AQU-2235: in the track's darkened hue, over the waveform only.
+          className={chipPlaylineClass(chipH)}
+          style={hasBar ? { top: barH } : undefined}
         />
       )}
       {/* SUB-48: the cut edge of a chip drawn short — the audio really does
@@ -1529,6 +1712,7 @@ function TargetAudioChip({
         <span
           aria-hidden
           data-testid={`tl-target-${testKey}-overflow-head`}
+          style={hasBar ? { top: barH } : undefined}
           className={cn(
             "absolute inset-y-0 left-0 flex w-[6px] items-center justify-center",
             overflow === "overlap"
@@ -1543,6 +1727,7 @@ function TargetAudioChip({
         <span
           aria-hidden
           data-testid={`tl-target-${testKey}-overflow`}
+          style={hasBar ? { top: barH } : undefined}
           className={cn(
             "absolute inset-y-0 right-0 flex w-[6px] items-center justify-center",
             overflow === "overlap"
@@ -1558,6 +1743,7 @@ function TargetAudioChip({
           aria-hidden
           data-testid={`tl-target-${testKey}-handle-r`}
           onPointerDown={(e) => beginDrag("resize-r", e)}
+          style={hasBar ? { top: barH } : undefined}
           className="absolute inset-y-0 right-0 flex w-[7px] cursor-col-resize items-center justify-center opacity-0 transition-opacity group-hover/chip:opacity-100 bg-background/70"
         >
           <span className="h-4 w-0.5 rounded bg-current" />
@@ -1598,7 +1784,6 @@ function TargetAudioChip({
     : changeVoiceBlocked === "up-to-date"
       ? t("editor.voice.changeVoiceUpToDate", { name: changeVoice?.voiceName ?? "" })
       : null
-  const isPiece = (chip.item.pieceCount ?? 1) > 1
   const canSplit = Boolean(onCutTarget) && editable
   return (
     <>
@@ -1624,6 +1809,16 @@ function TargetAudioChip({
       <ContextMenuContent className="w-56" data-testid={`tl-take-menu-${testKey}`}>
         {takeDetails}
         <ContextMenuSeparator />
+        {/* AQU-2327 (Q1): the Station, first — editing the take you are on. */}
+        {takeMenu?.editInStation && (
+          <>
+            <ContextMenuItem data-testid="tl-take-menu-station" onClick={() => takeMenu.editInStation?.(cell.id, audioId)}>
+              <AudioWaveform className="h-3.5 w-3.5" />
+              {t("editor.station.editIn")}
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+          </>
+        )}
         {/* AQU-2212: the line's voice and this take part ways — the one click
             that brings them back together, first (the Audio view's card put
             it beside the voice field). */}
@@ -1771,6 +1966,7 @@ export function TargetAudioLane({
   previewFactory,
   color,
   laneTestId = "tl-target-lane",
+  muted = false,
 }: TargetAudioLaneProps) {
   const t = useT()
   const audioFirst = layout?.mode === "audioFirst"
@@ -2091,6 +2287,7 @@ export function TargetAudioLane({
             currentUsername={session?.username ?? ""}
             peaks={peaksFor.get(chip.item.audioId)}
             preview={makePreview(chip.item.cell, chip.item.audioId, chip.geom.durationSec)}
+            muted={muted}
           />
         ) : null,
       )}

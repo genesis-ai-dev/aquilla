@@ -7188,6 +7188,44 @@ function EditorRow({
   // would otherwise leave its listeners and `contenteditable` behind.
   useEffect(() => closeActivationCapture, [closeActivationCapture])
 
+  // AQU-1534: the same window, for activations that did NOT start on this row.
+  //
+  // Tab / Shift+Tab / ArrowUp / ArrowDown from a neighbouring cell (and every
+  // programmatic jump) activate this row through `onActivateEditor` in the
+  // table, never through `requestTargetEdit` — so the AQU-746 / AQU-1333
+  // window was never opened on the destination. The previous row's editor
+  // unmounts during the same commit, focus falls to `<body>`, and for the
+  // frames until this row's TipTap mounts and takes the caret there is no
+  // editing host at all: keystrokes, `Input.insertText`, IME commits and
+  // pastes in that gap are dropped with nothing to catch them.
+  //
+  // That is silent data damage for a translator working by keyboard: the row
+  // they tabbed into stays empty while they keep typing, so their text ends up
+  // beside the wrong source — and a wrong pairing can then be validated. Open
+  // the window here so every activation path is covered, and park focus on the
+  // row wrapper so `handleGridRowKeyDown` buffers keydowns as it does after a
+  // click. The editor's own `onFocus` drains the buffer and closes the window.
+  useEffect(() => {
+    if (!isEditorActive) return
+    if (!editable || isLoading || lockHolderLabel) return
+    // The pointer path already opened it, or the editor already owns the caret.
+    if (activationCaptureRef.current || editorFocusedRef.current) return
+    // Only when the caret is genuinely nowhere. An activation driven from a
+    // side panel while the translator types somewhere else must not steal
+    // focus, and grid-row focus (Escape-to-grid) is navigation, not editing.
+    const active = document.activeElement
+    if (active && active !== document.body) return
+    awaitingEditorFocusRef.current = true
+    rowRef.current?.focus({ preventScroll: true })
+    activationCaptureRef.current = rowRef.current && activationCaretHostRef.current
+      ? openActivationInputCapture({
+        host: rowRef.current,
+        caretHost: activationCaretHostRef.current,
+        onText: (text) => { pendingActivationInputRef.current += text },
+      })
+      : null
+  }, [isEditorActive, editable, isLoading, lockHolderLabel])
+
   /**
    * AQU-1393: put an exact match's existing translation into this cell's target.
    *

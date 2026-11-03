@@ -212,17 +212,22 @@ Example: \`{ "kind": "PatchSettings", "projectId": "p1", "ops": [{ "key": "syste
     tier: 'structural',
     agentReachable: true,
     paramsDoc: `### SetBrief
-Params: \`{ projectId, parameters?, freeformNotes?, ifMatchVersion }\` — sole command; at least one of \`parameters\`/\`freeformNotes\`.
+Params: \`{ projectId, parameters?, freeformNotes?, ifMatchVersion, laneId? }\` — sole command; at least one of \`parameters\`/\`freeformNotes\`.
 \`parameters\` is a PARTIAL map of brief section id → answer text: named sections are replaced, every unnamed section keeps its live value. Section ids (interview order):
 - Purpose & audience: \`purpose\`, \`audience\`, \`useAndMedium\`, \`motiveSponsor\`
 - Standards: \`sourceTexts\`, \`targetVariety\`, \`registerNaturalness\`, \`literalness\`, \`keyTerms\`, \`constraints\`, \`qualityBar\`
 Writes the \`translationBrief\` key of the project settings blob — the same record the in-app brief builder reads, so an API-set brief satisfies the autopilot brief gate exactly like a hand-typed one.
+\`laneId\` (AQU-2348) writes ONE TARGET LANE's brief instead, under \`translationBriefByLane[laneId]\`: the project's brief and every other lane's are untouched, and that lane's copy replaces the project's for its own prompts. Omit it for the project's brief, which stays the default for every lane that has none — so omitting it behaves exactly as before.
 Gotchas:
 - An unknown section id is \`validation_failed\` (nothing is staged) — it is never silently dropped.
+- \`laneId\` is the lane's opaque 8-hex id, as \`GET /api/v1/external/projects/:projectId\` returns it — never a language or a legacy tag. A source lane, an archived lane, or an id no lane carries is \`validation_failed\`.
+- The FIRST lane-scoped write merges its sections onto the brief that lane currently resolves to (the project's, when the lane owns none), so customizing a lane copies the project's answers rather than publishing a brief with every unnamed section blank.
+- \`ifMatchVersion\` is still the SETTINGS version — one blob holds the project brief and every lane's, so a lane write conflicts with a concurrent project write, by design.
 - Section text caps at 4000 chars; \`freeformNotes\` at 8000.
 - \`ifMatchVersion\` is the SETTINGS version (not the brief's own \`version\`) and must match at prepare AND commit (plan_stale on drift) — read it first.
 - The copilot reads only the brief's rendered L1 summary (\`translationBrief.l1Summary\`), so on commit the summary is regenerated automatically when the drafting backend is reachable — the receipt's \`briefSummary\` says whether it rendered (and bumps the settings version once more). If it did not, the sections are still committed; run \`RegenerateBriefSummary\` to re-render.
-Example: \`{ "kind": "SetBrief", "projectId": "p1", "parameters": { "audience": "Rural youth, 15–25" }, "ifMatchVersion": 7 }\``,
+Example: \`{ "kind": "SetBrief", "projectId": "p1", "parameters": { "audience": "Rural youth, 15–25" }, "ifMatchVersion": 7 }\`
+Per-lane example: \`{ "kind": "SetBrief", "projectId": "p1", "laneId": "0f0f0f0f", "parameters": { "registerNaturalness": "Formal liturgical register" }, "ifMatchVersion": 7 }\``,
   },
   {
     kind: 'RegenerateBriefSummary',
@@ -232,14 +237,16 @@ Example: \`{ "kind": "SetBrief", "projectId": "p1", "parameters": { "audience": 
     tier: 'structural',
     agentReachable: true,
     paramsDoc: `### RegenerateBriefSummary
-Params: \`{ projectId, ifMatchVersion }\` — sole command; REST changesets only (like SetBrief, not offered through the MCP prepare tools).
+Params: \`{ projectId, ifMatchVersion, laneId? }\` — sole command; REST changesets only (like SetBrief, not offered through the MCP prepare tools).
 Renders \`translationBrief.l1Summary\` from the brief's CURRENT sections + notes with the same prompt and 1600-char cap the in-app "Regenerate summary" button uses, and writes \`l1Summary\` / \`l1GeneratedAt\` / \`l1ModelId\` back through the version-guarded settings write. The L1 is the ONLY part of the brief the copilot's prompt injects (see \`parts.brief\` in the prompt-preview read), so this is how a brief written by SetBrief — or edited in-app without regenerating — reaches the AI.
 Gotchas:
-- Needs at least one filled section or \`freeformNotes\`; otherwise \`validation_failed\` "nothing to summarize" (nothing staged).
+- \`laneId\` (AQU-2348) summarizes and rewrites ONE TARGET LANE's brief, under \`translationBriefByLane[laneId].l1Summary\`; the project's L1 and every other lane's are untouched. Same lane-id rules as SetBrief. A lane that owns no brief summarizes the project's sections and stores the result as that lane's own copy, so regenerate in a lane is itself a customization.
+- Needs at least one filled section or \`freeformNotes\` in the brief that lane resolves to; otherwise \`validation_failed\` "nothing to summarize" (nothing staged).
 - \`ifMatchVersion\` is the SETTINGS version and must match at prepare AND commit (plan_stale on drift). A successful commit bumps it by one.
 - The render runs BEFORE the approval is consumed: a failed model call answers \`job_failed\` / \`rate_limited\` (credit cap) and leaves the approved changeset committable for a retry.
 - Receipt carries \`briefSummaryChars\` and \`l1ModelId\`.
-Example: \`{ "kind": "RegenerateBriefSummary", "projectId": "p1", "ifMatchVersion": 8 }\``,
+Example: \`{ "kind": "RegenerateBriefSummary", "projectId": "p1", "ifMatchVersion": 8 }\`
+Per-lane example: \`{ "kind": "RegenerateBriefSummary", "projectId": "p1", "laneId": "0f0f0f0f", "ifMatchVersion": 8 }\``,
   },
   {
     kind: 'ProjectSetup',

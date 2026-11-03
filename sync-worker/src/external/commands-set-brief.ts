@@ -40,15 +40,21 @@ import { loadProjectSettings, patchProjectSettingsShared } from '../../../db/sha
 import {
   applyBriefL1Summary,
   applyBriefPatch,
+  BRIEF_BY_LANE_SETTINGS_KEY,
   BRIEF_FIELD_IDS,
   BRIEF_SETTINGS_KEY,
   emptyBriefRecord,
   isBriefFieldId,
   isBriefPatchSatisfied,
-  readBriefFromSettings,
+  readBriefForLane,
+  readLaneBriefMap,
+  readOwnedBriefForLane,
   type BriefPatch,
   type TranslationBriefRecord,
 } from '../../../db/shared/brief'
+import { withLaneMemoryValue } from '../../../db/shared/lane-memory'
+import type { ProjectLaneRecord } from '../../../db/shared/lanes'
+import { laneContextFrom, resolveTargetLaneId } from './external-lane'
 import { ROLE } from '../events/role-policy'
 
 export interface SetBriefCommand {
@@ -62,6 +68,18 @@ export interface SetBriefCommand {
   /** Settings-blob version pin — the brief lives in the settings blob, so the
    *  same optimistic-concurrency guard as PatchSettings applies. */
   ifMatchVersion: number
+  /**
+   * AQU-2348: the TARGET LANE this brief belongs to (`lanes.id`). Omit to
+   * write the project's brief, which stays the default for every lane that
+   * has none — so omitting it is exactly the pre-AQU-2348 behaviour.
+   *
+   * A lane-scoped write touches ONLY `translationBriefByLane[laneId]`: the
+   * project's brief and every other lane's are left alone. The first such
+   * write merges its patch onto the brief the lane currently RESOLVES to
+   * (the project's, when the lane owns none), so customizing a lane copies
+   * the project's answers rather than starting from a blank brief.
+   */
+  laneId?: string
 }
 
 /** Same floor PatchSettings applies to the `translationBrief` key. Kept
@@ -109,6 +127,10 @@ export function validateSetBriefCommand(
     c.ifMatchVersion < 0
   ) {
     issues.push({ index, message: 'SetBrief.ifMatchVersion must be an integer >= 0' })
+    return null
+  }
+  if (c.laneId !== undefined && !isNonEmptyString(c.laneId)) {
+    issues.push({ index, message: 'SetBrief.laneId must be a non-empty lane id when present' })
     return null
   }
   if (c.parameters === undefined && c.freeformNotes === undefined) {
@@ -174,7 +196,17 @@ export function validateSetBriefCommand(
     ...(parameters !== undefined ? { parameters } : {}),
     ...(c.freeformNotes !== undefined ? { freeformNotes: c.freeformNotes as string } : {}),
     ifMatchVersion: c.ifMatchVersion,
+    ...(c.laneId !== undefined ? { laneId: c.laneId as string } : {}),
   }
+}
+
+/** The `settingsChanges` / plan prefix naming what a brief write touches. A
+ *  lane-scoped write names the lane, so the human on /approve/:id can see it
+ *  is one lane's brief and not the project's. */
+function briefChangePrefix(cmd: SetBriefCommand): string {
+  return cmd.laneId === undefined
+    ? BRIEF_SETTINGS_KEY
+    : `${BRIEF_BY_LANE_SETTINGS_KEY}.${cmd.laneId}`
 }
 
 /** The content half of the command, as the shared merge/compare helpers take it. */
@@ -182,6 +214,28 @@ export function briefPatchOf(cmd: SetBriefCommand): BriefPatch {
   return {
     ...(cmd.parameters !== undefined ? { parameters: cmd.parameters } : {}),
     ...(cmd.freeformNotes !== undefined ? { freeformNotes: cmd.freeformNotes } : {}),
+  }
+}
+
+/**
+ * The settings write op for a brief record: the project's key, or the lane's
+ * slot inside the per-lane map.
+ *
+ * `patchProjectSettingsShared` replaces a key WHOLESALE, so a lane-scoped
+ * write has to resend the whole map with this lane's slot replaced — hence
+ * `withLaneMemoryValue` over the map read from the blob this write is pinned
+ * to. Every OTHER lane's brief is carried across untouched, which is the
+ * difference between customizing one lane and clearing the rest.
+ */
+export function briefWriteOp(
+  settings: Record<string, unknown>,
+  laneId: string | undefined,
+  brief: TranslationBriefRecord,
+): { key: string; value: unknown } {
+  if (laneId === undefined) return { key: BRIEF_SETTINGS_KEY, value: brief }
+  return {
+    key: BRIEF_BY_LANE_SETTINGS_KEY,
+    value: withLaneMemoryValue(readLaneBriefMap(settings), laneId, brief),
   }
 }
 
@@ -195,11 +249,12 @@ function previewSection(value: string): string {
 
 function briefChangesPreview(cmd: SetBriefCommand): Record<string, string> {
   const changes: Record<string, string> = {}
+  const prefix = briefChangePrefix(cmd)
   for (const [id, value] of Object.entries(cmd.parameters ?? {})) {
-    changes[`${BRIEF_SETTINGS_KEY}.${id}`] = previewSection(value)
+    changes[`${prefix}.${id}`] = previewSection(value)
   }
   if (cmd.freeformNotes !== undefined) {
-    changes[`${BRIEF_SETTINGS_KEY}.freeformNotes`] = previewSection(cmd.freeformNotes)
+    changes[`${prefix}.freeformNotes`] = previewSection(cmd.freeformNotes)
   }
   return changes
 }
@@ -242,13 +297,25 @@ export async function prepareSetBrief(
     })
   }
 
+  // AQU-2348: a lane-scoped write must name a real, unarchived TARGET lane of
+  // this project. Resolved HERE (not at validate) because it needs the lane
+  // rows, and the resolved `lanes.id` is what gets staged — so an approval a
+  // human reads names the same lane the commit writes.
+  //
+  // Visibility is passed as "sees everything" deliberately: the lane read wall
+  // never hides a lane from a caller at MAINTAINER or above, and this command's
+  // floor already is MAINTAINER, so there is no hidden lane left to conceal.
+  const staged = resolveStagedLane(cmd, current.lanes ?? [])
+  if (!staged.ok) return errorResponse('validation_failed', staged.message)
+
   const plannedIds: PlannedEventIds = { setBrief: { version: cmd.ifMatchVersion } }
 
   const summary: ChangesetSummary = {
     command: 'SetBrief',
     projectId: urlProjectId,
     ifMatchVersion: cmd.ifMatchVersion,
-    settingsChanges: briefChangesPreview(cmd),
+    settingsChanges: briefChangesPreview(staged.cmd),
+    ...(staged.cmd.laneId !== undefined ? { laneId: staged.cmd.laneId } : {}),
     warnings: [],
   }
 
@@ -258,11 +325,31 @@ export async function prepareSetBrief(
     createdByUserId: String(cred.userId),
     credentialId: cred.credentialId,
     autonomyMode,
-    commands: [cmd],
+    commands: [staged.cmd],
     preconditions: [],
     summary,
     plannedIds,
   })
+}
+
+/**
+ * Resolve a brief command's `laneId` against the project's lane rows, giving
+ * back the command to stage with the canonical `lanes.id`.
+ *
+ * Shared by SetBrief and RegenerateBriefSummary so both answer a bad lane the
+ * same way `resolveTargetLaneId` answers everywhere else on this API: a
+ * language, a legacy tag, or an archived or absent lane is `validation_failed`
+ * with the message that names the discovery endpoint.
+ */
+export function resolveStagedLane<T extends { laneId?: string }>(
+  cmd: T,
+  lanes: readonly ProjectLaneRecord[],
+  where = 'SetBrief.laneId',
+): { ok: true; cmd: T } | { ok: false; message: string } {
+  if (cmd.laneId === undefined) return { ok: true, cmd }
+  const resolved = resolveTargetLaneId(cmd.laneId, where, laneContextFrom(lanes, null))
+  if (!resolved.ok) return { ok: false, message: resolved.message }
+  return { ok: true, cmd: { ...cmd, laneId: resolved.lane.id } }
 }
 
 /**
@@ -311,12 +398,16 @@ export async function commitSetBrief(
   // time. Costs one extra read of the settings row (patchProjectSettingsShared
   // re-reads it under the version guard, which stays the authoritative check).
   const current = await loadProjectSettings(db, projectId)
-  const live = readBriefFromSettings(current.settings)
+  // AQU-2348: for a lane-scoped write this reads the brief the lane RESOLVES
+  // to — its own copy, or the project's when it has none — so the first
+  // customization of a lane carries the project's answers across instead of
+  // publishing a brief with every unnamed section blank.
+  const live = readBriefForLane(current.settings, cmd.laneId).brief
   const nextBrief = applyBriefPatch(live ?? emptyBriefRecord(author, now), briefPatchOf(cmd), author, now)
 
   const result = await patchProjectSettingsShared(db, {
     projectId,
-    ops: [{ key: BRIEF_SETTINGS_KEY, value: nextBrief }],
+    ops: [briefWriteOp(current.settings, cmd.laneId, nextBrief)],
     ifMatchVersion: expectedVersion,
     updatedBy: cred.userId,
   })
@@ -330,15 +421,29 @@ export async function commitSetBrief(
       result.current.updatedBy != null &&
       String(result.current.updatedBy) === String(cred.userId)
     if (!wasStaged && bumpedByThisUser) {
-      return finishSetBriefReceipt(db, cred, cs, projectId, result.current.version, confirmationId, channel, {
-        rendered: false,
-        reason: 'crash-retry — the sections were already committed; use RegenerateBriefSummary',
-      })
+      return finishSetBriefReceipt(
+        db,
+        cred,
+        cs,
+        projectId,
+        result.current.version,
+        confirmationId,
+        channel,
+        {
+          rendered: false,
+          reason: 'crash-retry — the sections were already committed; use RegenerateBriefSummary',
+        },
+        cmd.laneId,
+      )
     }
     // A bump by someone else is only stale if the patch still has work to do.
     // When every named section already holds the proposed text, the human beat
     // the agent to it — that is `superseded`, a healthy outcome.
-    const liveNow = readBriefFromSettings(result.current.settings)
+    // Lane-aware: a lane-scoped patch is "already satisfied" only once THAT
+    // lane OWNS the proposed text. Resolving it through the project fallback
+    // would let a project-wide write retire a pending lane customization —
+    // and the lane would then still be inheriting, which is not what was asked.
+    const liveNow = readOwnedBriefForLane(result.current.settings, cmd.laneId)
     const superseded = isBriefPatchSatisfied(liveNow, briefPatchOf(cmd))
     if (superseded) await markChangesetSuperseded(db, cs.id)
     else await markChangesetStale(db, cs.id)
@@ -361,8 +466,27 @@ export async function commitSetBrief(
   // AQU-1282: the sections are committed; now try to make them reach the
   // copilot. Best-effort — a failed render is reported in the receipt, never
   // a failed commit, and RegenerateBriefSummary re-runs it on demand.
-  const { version, briefSummary } = await autoRenderL1(db, env, cred, projectId, nextBrief, result.settings.version)
-  return finishSetBriefReceipt(db, cred, cs, projectId, version, confirmationId, channel, briefSummary)
+  const { version, briefSummary } = await autoRenderL1(
+    db,
+    env,
+    cred,
+    projectId,
+    nextBrief,
+    result.settings.version,
+    result.settings.settings,
+    cmd.laneId,
+  )
+  return finishSetBriefReceipt(
+    db,
+    cred,
+    cs,
+    projectId,
+    version,
+    confirmationId,
+    channel,
+    briefSummary,
+    cmd.laneId,
+  )
 }
 
 /**
@@ -377,6 +501,8 @@ async function autoRenderL1(
   projectId: string,
   brief: TranslationBriefRecord,
   version: number,
+  settings: Record<string, unknown>,
+  laneId: string | undefined,
 ): Promise<{ version: number; briefSummary: NonNullable<ReceiptOnlyReceipt['briefSummary']> }> {
   const rendered = await renderBriefSummary(env, {
     projectId,
@@ -389,7 +515,9 @@ async function autoRenderL1(
   const withL1 = applyBriefL1Summary(brief, rendered.summary, rendered.model, new Date().toISOString())
   const write = await patchProjectSettingsShared(db, {
     projectId,
-    ops: [{ key: BRIEF_SETTINGS_KEY, value: withL1 }],
+    // The L1 belongs to the brief that was just written, so it lands in the
+    // same key — a lane's summary must not overwrite the project's.
+    ops: [briefWriteOp(settings, laneId, withL1)],
     ifMatchVersion: version,
     updatedBy: cred.userId,
   })
@@ -412,6 +540,7 @@ async function finishSetBriefReceipt(
   confirmationId: string | null,
   channel: ProvenanceChannel,
   briefSummary: NonNullable<ReceiptOnlyReceipt['briefSummary']>,
+  laneId?: string,
 ): Promise<Response> {
   const receipt: ReceiptOnlyReceipt = {
     credentialId: cred.credentialId,
@@ -421,6 +550,7 @@ async function finishSetBriefReceipt(
     appliedAt: new Date().toISOString(),
     projectId,
     version,
+    ...(laneId !== undefined ? { laneId } : {}),
     briefSummary,
   }
   await writeCommittedReceipt(db, cs.id, receipt, confirmationId)

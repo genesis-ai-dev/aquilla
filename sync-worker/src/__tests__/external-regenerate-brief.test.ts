@@ -19,7 +19,11 @@ vi.mock('partyserver', () => ({
 
 import { handleExternalChangesetsRequest } from '../external/changesets-route'
 import { buildPromptPreview } from '../external/prompt-preview'
-import { BRIEF_SETTINGS_KEY, type TranslationBriefRecord } from '../../../db/shared/brief'
+import {
+  BRIEF_BY_LANE_SETTINGS_KEY,
+  BRIEF_SETTINGS_KEY,
+  type TranslationBriefRecord,
+} from '../../../db/shared/brief'
 import { mintApiToken } from '../../../db/shared/api-credentials'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
 
@@ -105,6 +109,15 @@ function renderOk(summary: string, model = 'test/brief-model') {
 async function storedBrief(tdb: TestDb): Promise<TranslationBriefRecord | undefined> {
   const rows = await tdb.rows<{ settings: string }>('project_settings')
   return JSON.parse(rows[0].settings)[BRIEF_SETTINGS_KEY]
+}
+
+/** Read ONE LANE's stored brief out of the settings row (AQU-2348). */
+async function storedLaneBrief(
+  tdb: TestDb,
+  laneId: string,
+): Promise<TranslationBriefRecord | undefined> {
+  const rows = await tdb.rows<{ settings: string }>('project_settings')
+  return (JSON.parse(rows[0].settings)[BRIEF_BY_LANE_SETTINGS_KEY] ?? {})[laneId]
 }
 
 async function settingsVersion(tdb: TestDb): Promise<number> {
@@ -396,5 +409,132 @@ describe('RegenerateBriefSummary — guards', () => {
     ])
     expect(badRes.status).toBe(400)
     expect(await tdb.rows('changesets')).toHaveLength(0)
+  })
+})
+
+// AQU-2348: regenerating inside a lane rewrites THAT lane's L1 only. The
+// acceptance criterion is the timestamps: only the named lane's summary moves.
+describe('RegenerateBriefSummary — per lane (AQU-2348)', () => {
+  const ES_LANE = '0f0f0f0f'
+  const FR_LANE = 'a1a1a1a1'
+
+  /** Two target lanes; the source lane is the one the harness already minted. */
+  async function seedLanes() {
+    await tdb.pg.query(
+      `INSERT INTO lanes (id, project_id, role, language, legacy_tag, position) VALUES
+         ($1, $3, 'target', 'Spanish', 'es', 1),
+         ($2, $3, 'target', 'French',  'fr', 2)`,
+      [ES_LANE, FR_LANE, PROJECT],
+    )
+  }
+
+  function regenLane(laneId: string, ifMatchVersion = 1) {
+    return [{ kind: 'RegenerateBriefSummary', projectId: PROJECT, laneId, ifMatchVersion }]
+  }
+
+  it("rewrites only that lane's summary, leaving the project's untouched", async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    await seedLanes()
+    const laneBrief = { ...staleBrief(), parameters: { purpose: 'Spanish liturgical reading' } }
+    await seedSettings(tdb, {
+      targetLanguage: 'fr',
+      [BRIEF_SETTINGS_KEY]: staleBrief(),
+      [BRIEF_BY_LANE_SETTINGS_KEY]: { [ES_LANE]: laneBrief, [FR_LANE]: staleBrief() },
+    })
+    const calls = renderOk('Spanish summary')
+
+    const { body } = await prepare(env, maintainer.token, regenLane(ES_LANE))
+    // The approval page names the lane's path, not the project's key.
+    expect(body.summary.laneId).toBe(ES_LANE)
+    expect(
+      body.summary.settingsChanges[`${BRIEF_BY_LANE_SETTINGS_KEY}.${ES_LANE}.l1Summary`],
+    ).toContain('regenerated')
+
+    const { res } = await commit(env, maintainer.token, body.changeset.id)
+    expect(res.status).toBe(200)
+
+    // The model summarized the LANE's sections, not the project's.
+    expect(String(calls[0].body.l2Markdown ?? '')).toContain('Spanish liturgical reading')
+
+    expect((await storedLaneBrief(tdb, ES_LANE))!.l1Summary).toBe('Spanish summary')
+    expect((await storedBrief(tdb))!.l1Summary).toBe('old summary')
+    expect((await storedLaneBrief(tdb, FR_LANE))!.l1Summary).toBe('old summary')
+  })
+
+  it("a lane that owns no brief summarizes the project's sections into its own copy", async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    await seedLanes()
+    await seedSettings(tdb, { targetLanguage: 'fr', [BRIEF_SETTINGS_KEY]: staleBrief() })
+    renderOk('Lane summary of the project brief')
+
+    const { body } = await prepare(env, maintainer.token, regenLane(ES_LANE))
+    const { res } = await commit(env, maintainer.token, body.changeset.id)
+    expect(res.status).toBe(200)
+
+    // Regenerating inside a lane IS a customization: the lane now owns a brief
+    // whose sections came from the project's, and the project's L1 is untouched.
+    const lane = (await storedLaneBrief(tdb, ES_LANE))!
+    expect(lane.l1Summary).toBe('Lane summary of the project brief')
+    expect(lane.parameters).toEqual(staleBrief().parameters)
+    expect((await storedBrief(tdb))!.l1Summary).toBe('old summary')
+  })
+
+  it('without laneId it still rewrites the project summary', async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    await seedLanes()
+    await seedSettings(tdb, {
+      targetLanguage: 'fr',
+      [BRIEF_SETTINGS_KEY]: staleBrief(),
+      [BRIEF_BY_LANE_SETTINGS_KEY]: { [ES_LANE]: staleBrief() },
+    })
+    renderOk('Project summary')
+
+    const { body } = await prepare(env, maintainer.token, regen())
+    expect(body.summary.laneId).toBeUndefined()
+    await commit(env, maintainer.token, body.changeset.id)
+
+    expect((await storedBrief(tdb))!.l1Summary).toBe('Project summary')
+    expect((await storedLaneBrief(tdb, ES_LANE))!.l1Summary).toBe('old summary')
+  })
+
+  it('refuses a legacy tag or an unknown lane, and stages nothing', async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    await seedLanes()
+    await seedSettings(tdb, { targetLanguage: 'fr', [BRIEF_SETTINGS_KEY]: staleBrief() })
+    const calls = renderOk('never')
+
+    for (const laneId of ['es', 'c3c3c3c3']) {
+      const { res, body } = await prepare(env, maintainer.token, regenLane(laneId))
+      expect(res.status, `laneId ${laneId}`).toBe(400)
+      expect(body.error.code).toBe('validation_failed')
+    }
+
+    expect(await tdb.rows('changesets')).toHaveLength(0)
+    expect(calls).toHaveLength(0)
+  })
+
+  it('"nothing to summarize" is judged on what the lane resolves to', async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    await seedLanes()
+    // The lane owns a brief with no sections at all; the project's has two.
+    // The lane's own emptiness is what counts — it is what would be summarized.
+    await seedSettings(tdb, {
+      targetLanguage: 'fr',
+      [BRIEF_SETTINGS_KEY]: staleBrief(),
+      [BRIEF_BY_LANE_SETTINGS_KEY]: {
+        [ES_LANE]: { ...staleBrief(), parameters: {}, freeformNotes: '' },
+      },
+    })
+    const calls = renderOk('never')
+
+    const { res, body } = await prepare(env, maintainer.token, regenLane(ES_LANE))
+    expect(res.status).toBe(400)
+    expect(body.error.message).toContain('nothing to summarize')
+    expect(calls).toHaveLength(0)
   })
 })

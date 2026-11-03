@@ -1406,6 +1406,23 @@ own copy of the two prose sections and that copy replaces the project's for that
 - Lane overrides are **never copied across a source link** (`INHERIT_NEVER_KEYS`): lane ids
   are project-local, so a copied override would key the downstream project's memory by lanes
   it does not have. The project-wide `systemPrompt` / `translationBrief` still inherit.
+- **`SetBrief` and `RegenerateBriefSummary` take an optional `laneId`.** With it, the write
+  lands in `translationBriefByLane[laneId]` and the project's brief — and every other lane's —
+  is untouched; without it, behaviour is exactly as before. Three things worth knowing:
+  - The **first** lane-scoped write merges its sections onto the brief that lane currently
+    *resolves* to, which is the project's when the lane owns none. So "customize this lane"
+    copies the project's answers across rather than publishing a brief whose unnamed sections
+    are suddenly blank. The same holds for a lane-scoped `RegenerateBriefSummary`: it
+    summarizes what the lane resolves to and stores the result as that lane's own copy, so
+    regenerating inside a lane is itself a customization.
+  - `laneId` must be the **id of an unarchived target lane** of the project. A language, a
+    legacy tag, a source lane or an unknown id is `validation_failed` with the message that
+    names the discovery endpoint — the same answer `laneId` gets everywhere else on this API.
+  - `ifMatchVersion` is still the **settings** version. One blob holds the project brief and
+    every lane's, so a lane write and a concurrent project write conflict with each other by
+    design; `plan_stale` means re-read and retry, as it always did. The approval page names
+    the lane (`translationBriefByLane.<laneId>.<section>`), so a human approving a lane write
+    can see it is not the project's brief.
 
 ## Status addendum (2026-10-27, AQU-2195 — style rules: list and review)
 

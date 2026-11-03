@@ -40,10 +40,12 @@ import {
   assembleBriefL2Markdown,
   briefFilledSectionCount,
   briefHasContent,
+  BRIEF_BY_LANE_SETTINGS_KEY,
   BRIEF_SETTINGS_KEY,
-  readBriefFromSettings,
+  readBriefForLane,
   type TranslationBriefRecord,
 } from '../../../db/shared/brief'
+import { briefWriteOp, resolveStagedLane } from './commands-set-brief'
 import { ROLE } from '../events/role-policy'
 
 export interface RegenerateBriefSummaryCommand {
@@ -51,6 +53,15 @@ export interface RegenerateBriefSummaryCommand {
   projectId: string
   /** Settings-blob version pin — same optimistic-concurrency guard as SetBrief. */
   ifMatchVersion: number
+  /**
+   * AQU-2348: the TARGET LANE whose summary to re-render (`lanes.id`). Omit
+   * for the project's brief, which is the pre-AQU-2348 behaviour.
+   *
+   * A lane-scoped render summarizes the sections the LANE resolves to and
+   * writes the L1 back into that lane's own brief only — so regenerating in
+   * one lane cannot move another lane's summary, or the project's.
+   */
+  laneId?: string
 }
 
 /** Same floor as SetBrief: the L1 is part of the same MAINTAINER-only key. */
@@ -78,7 +89,19 @@ export function validateRegenerateBriefSummaryCommand(
     issues.push({ index, message: 'RegenerateBriefSummary.ifMatchVersion must be an integer >= 0' })
     return null
   }
-  return { kind: 'RegenerateBriefSummary', projectId: c.projectId, ifMatchVersion: c.ifMatchVersion }
+  if (c.laneId !== undefined && (typeof c.laneId !== 'string' || c.laneId.length === 0)) {
+    issues.push({
+      index,
+      message: 'RegenerateBriefSummary.laneId must be a non-empty lane id when present',
+    })
+    return null
+  }
+  return {
+    kind: 'RegenerateBriefSummary',
+    projectId: c.projectId,
+    ifMatchVersion: c.ifMatchVersion,
+    ...(c.laneId !== undefined ? { laneId: c.laneId as string } : {}),
+  }
 }
 
 function roleDenied(): Response {
@@ -128,7 +151,12 @@ export async function prepareRegenerateBriefSummary(
     })
   }
 
-  const brief = readBriefFromSettings(current.settings)
+  // AQU-2348: same lane resolution as SetBrief, and the resolved `lanes.id` is
+  // what gets staged.
+  const staged = resolveStagedLane(cmd, current.lanes ?? [], 'RegenerateBriefSummary.laneId')
+  if (!staged.ok) return errorResponse('validation_failed', staged.message)
+
+  const brief = readBriefForLane(current.settings, staged.cmd.laneId).brief
   if (!briefHasContent(brief)) return nothingToSummarize()
 
   const plannedIds: PlannedEventIds = { regenerateBriefSummary: { version: cmd.ifMatchVersion } }
@@ -137,8 +165,9 @@ export async function prepareRegenerateBriefSummary(
     projectId: urlProjectId,
     ifMatchVersion: cmd.ifMatchVersion,
     settingsChanges: {
-      [`${BRIEF_SETTINGS_KEY}.l1Summary`]: `(regenerated from ${briefFilledSectionCount(brief)} sections)`,
+      [`${l1ChangeKey(staged.cmd.laneId)}`]: `(regenerated from ${briefFilledSectionCount(brief)} sections)`,
     },
+    ...(staged.cmd.laneId !== undefined ? { laneId: staged.cmd.laneId } : {}),
     warnings: [],
   }
 
@@ -148,11 +177,19 @@ export async function prepareRegenerateBriefSummary(
     createdByUserId: String(cred.userId),
     credentialId: cred.credentialId,
     autonomyMode,
-    commands: [cmd],
+    commands: [staged.cmd],
     preconditions: [],
     summary,
     plannedIds,
   })
+}
+
+/** The settings path the L1 write touches, named for the approval page so a
+ *  lane-scoped regenerate does not read as a project-wide one. */
+function l1ChangeKey(laneId: string | undefined): string {
+  return laneId === undefined
+    ? `${BRIEF_SETTINGS_KEY}.l1Summary`
+    : `${BRIEF_BY_LANE_SETTINGS_KEY}.${laneId}.l1Summary`
 }
 
 /**
@@ -182,7 +219,10 @@ export async function commitRegenerateBriefSummary(
 
   const expectedVersion = cs.plannedIds?.regenerateBriefSummary?.version ?? cmd.ifMatchVersion
   const current = await loadProjectSettings(db, projectId)
-  const live = readBriefFromSettings(current.settings)
+  // The lane's own brief when it has one, the project's otherwise — the same
+  // record the copilot resolves for that lane, which is what the summary has
+  // to describe.
+  const live = readBriefForLane(current.settings, cmd.laneId).brief
 
   // Drift check BEFORE the paid render: patchProjectSettingsShared would
   // refuse the write anyway, but only after a model call was spent.
@@ -194,7 +234,17 @@ export async function commitRegenerateBriefSummary(
       current.updatedBy != null &&
       String(current.updatedBy) === String(cred.userId)
     if (!wasStaged && bumpedByThisUser && live?.l1Summary) {
-      return finishReceipt(db, cred, cs, projectId, current.version, cs.confirmationId ?? null, channel, live)
+      return finishReceipt(
+        db,
+        cred,
+        cs,
+        projectId,
+        current.version,
+        cs.confirmationId ?? null,
+        channel,
+        live,
+        cmd.laneId,
+      )
     }
     await markChangesetStale(db, cs.id)
     return errorResponse('plan_stale', 'settings version changed since prepare', {
@@ -221,7 +271,7 @@ export async function commitRegenerateBriefSummary(
   const nextBrief = applyBriefL1Summary(live, rendered.summary, rendered.model, now)
   const result = await patchProjectSettingsShared(db, {
     projectId,
-    ops: [{ key: BRIEF_SETTINGS_KEY, value: nextBrief }],
+    ops: [briefWriteOp(current.settings, cmd.laneId, nextBrief)],
     ifMatchVersion: expectedVersion,
     updatedBy: cred.userId,
   })
@@ -236,7 +286,17 @@ export async function commitRegenerateBriefSummary(
   }
   if (result.status === 'error') return errorResponse('job_failed', result.message)
 
-  return finishReceipt(db, cred, cs, projectId, result.settings.version, confirmationId, channel, nextBrief)
+  return finishReceipt(
+    db,
+    cred,
+    cs,
+    projectId,
+    result.settings.version,
+    confirmationId,
+    channel,
+    nextBrief,
+    cmd.laneId,
+  )
 }
 
 async function finishReceipt(
@@ -248,6 +308,7 @@ async function finishReceipt(
   confirmationId: string | null,
   channel: ProvenanceChannel,
   brief: TranslationBriefRecord,
+  laneId?: string,
 ): Promise<Response> {
   const receipt: ReceiptOnlyReceipt = {
     credentialId: cred.credentialId,
@@ -257,6 +318,7 @@ async function finishReceipt(
     appliedAt: new Date().toISOString(),
     projectId,
     version,
+    ...(laneId !== undefined ? { laneId } : {}),
     briefSummaryChars: (brief.l1Summary ?? '').length,
     l1ModelId: brief.l1ModelId ?? 'unknown',
   }

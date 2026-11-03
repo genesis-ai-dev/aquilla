@@ -17,6 +17,8 @@
 // `env.AQUILLA_PG`.
 
 import type { AquillaDb } from "../shim/postgres"
+import { appendTranslationInstructionsLine } from "./project-facts-write"
+import { decisionMemoryText } from "./translation-instructions"
 
 // ──────────────────────────────────────────────────────────────────────────
 // Types
@@ -384,10 +386,15 @@ export interface ReviewMemoryInput {
    * — adversarial-panel B1/B2.
    */
   supersedeHumanEdited?: boolean
+  /** User id stamped as `project_settings.updated_by` when approving a
+   *  `decisions/` memory appends it to the project instructions. */
+  settingsUpdatedBy?: number | null
 }
 
 export type ReviewMemoryResult =
-  | { status: "ok"; memory: AgentMemory }
+  /** `instructionsVersion`: set when approving a `decisions/` memory appended
+   *  it to the project instructions — the caller tells the realtime room. */
+  | { status: "ok"; memory: AgentMemory; instructionsVersion?: number }
   | { status: "not_found" }
   | { status: "invalid_state"; message: string }
   // Approving would archive a currently-approved, human-edited row and the
@@ -449,6 +456,30 @@ export async function reviewMemory(
     return { status: "ok", memory: rowToMemory(row) }
   }
 
+  // AQU-2342 phase 2: an approved decision is standing guidance, so it lands
+  // in THE project instructions every drafting prompt reads — appended before
+  // the row flips, so a full Instructions box refuses the approval instead of
+  // approving a decision no prompt will see. (Its own transaction: db.batch
+  // below opens another, and the two cannot nest.)
+  let instructionsVersion: number | undefined
+  if (memoryKindForPath(current.path) === "decision") {
+    const line = decisionMemoryText(current.content)
+    const append = (tx: AquillaDb) =>
+      appendTranslationInstructionsLine(tx, {
+        projectId: current.projectId,
+        line,
+        updatedBy: input.settingsUpdatedBy ?? null,
+      })
+    const appended = db.transaction ? await db.transaction(append) : await append(db)
+    if (appended.status === "rejected") {
+      return {
+        status: "invalid_state",
+        message: "the project instructions are full — shorten them, then approve this decision",
+      }
+    }
+    if (appended.changed && appended.version !== null) instructionsVersion = appended.version
+  }
+
   // approve: archive the current holder of this path (if any), then approve.
   await db.batch([
     db
@@ -468,7 +499,7 @@ export async function reviewMemory(
   ])
   const approved = await getMemory(db, input.id)
   if (!approved) return { status: "not_found" }
-  return { status: "ok", memory: approved }
+  return { status: "ok", memory: approved, ...(instructionsVersion !== undefined ? { instructionsVersion } : {}) }
 }
 
 export interface HumanEditInput {

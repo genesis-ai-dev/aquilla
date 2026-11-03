@@ -1,5 +1,5 @@
 // AQU-AGENT §2 — new harness tool handlers (run_code, load_artifact,
-// read_sandbox_file, propose_memory, propose_brief_update,
+// read_sandbox_file, propose_memory, propose_brief_update (retired → propose_memory),
 // read_memory). Each returns the tool-result TEXT the model sees and emits the
 // relevant §4 SSE frame(s) via `ctx.send`. Registration + dispatch live in a
 // minimal diff in agent.ts; the logic lives here to keep that file small.
@@ -15,7 +15,7 @@ import {
 import type { AiEntitlementEnv } from "../../../../db/shared/ai-entitlement"
 import { projectOrgId } from "../billing/paid-llm"
 import { admitSandboxTime, secondsSince } from "../billing/sandbox-meter"
-import { proposeMemory, proposeBriefUpdate, type MemoryProvenance } from "./memory-writes"
+import { proposeMemory, type MemoryProvenance } from "./memory-writes"
 import type { HarnessFrame } from "./frames"
 import type { MemoryContext } from "../../../../db/shared/agent-memory"
 
@@ -269,37 +269,38 @@ export async function proposeMemoryTool(
   return `proposed memory ${path} (id ${res.memoryId}, status proposed) — a human must approve it before it is used`
 }
 
-// ── propose_brief_update ───────────────────────────────────────────────────────
+// ── propose_brief_update (retired, AQU-2342) ─────────────────────────────────
+//
+// The brief review screen is gone: the project's standing guidance is ONE
+// text, the instructions. The tool is no longer offered; a call from an older
+// conversation is retargeted to propose_memory under decisions/, whose
+// approval appends the text to the instructions (db/shared/agent-memory.ts
+// reviewMemory). Same human gate, one store.
 
 export interface ProposeBriefArgs {
   content?: unknown
   rationale?: unknown
 }
 
+/** A stable decisions/ path for a retargeted brief update: same text → same
+ *  path, so a repeated call supersedes rather than piles up. */
+async function briefDecisionPath(content: string): Promise<string> {
+  const bytes = new TextEncoder().encode(content.trim())
+  const hash = await crypto.subtle.digest("SHA-256", bytes)
+  const hex = [...new Uint8Array(hash).slice(0, 6)].map((b) => b.toString(16).padStart(2, "0")).join("")
+  return `decisions/instructions-${hex}.md`
+}
+
 export async function proposeBriefUpdateTool(
   args: ProposeBriefArgs,
   ctx: HarnessToolCtx,
 ): Promise<string> {
-  if (ctx.isUntrustedActive()) return UNTRUSTED_BLOCK_MSG
   const content = typeof args.content === "string" ? args.content : null
-  const rationale = typeof args.rationale === "string" ? args.rationale : ""
-  if (!content) return "error: propose_brief_update needs {content: string, rationale: string}"
-
-  const res = await proposeBriefUpdate(ctx.env.AQUILLA_PG, {
-    projectId: ctx.projectId,
-    content,
-    rationale,
-    createdBy: ctx.username,
-  })
-  if (!res.ok) return `${res.code}: ${res.message}`
-
-  ctx.send({
-    type: "brief.proposed",
-    runId: ctx.runId,
-    proposalId: res.proposalId,
-    preview: content.slice(0, 200),
-  })
-  return `proposed brief update (id ${res.proposalId}, status proposed) — a human must approve it`
+  if (!content?.trim()) return "error: propose_brief_update is retired — call propose_memory with a decisions/<slug>.md path"
+  return proposeMemoryTool(
+    { path: await briefDecisionPath(content), content, rationale: args.rationale },
+    ctx,
+  )
 }
 
 // ── read_memory ────────────────────────────────────────────────────────────────

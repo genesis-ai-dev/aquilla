@@ -16,6 +16,7 @@
 // `{ error: { code, message, details? } }`.
 
 import { Hono, type Context } from "hono"
+import { notifySyncWorkerOfProjectSettingsChange } from "../services/sync-worker-notify"
 import type { ContentfulStatusCode } from "hono/utils/http-status"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
@@ -233,6 +234,7 @@ agentMemory.post(
       action,
       reviewedBy: user.username,
       supersedeHumanEdited: isAgent ? false : supersedeHumanEdited,
+      settingsUpdatedBy: user.id,
     })
     if (result.status === "not_found") {
       const { body, status } = errorJson("not_found", `memory ${id} not found`, 404)
@@ -255,6 +257,16 @@ agentMemory.post(
         { path: result.existing.path, existingId: result.existing.id },
       )
       return c.json(body, status)
+    }
+    if (result.instructionsVersion !== undefined) {
+      // AQU-2342: an approved decision was appended to the project
+      // instructions — tell open editors the settings moved.
+      const notify = notifySyncWorkerOfProjectSettingsChange(c.env, projectId, result.instructionsVersion)
+      try {
+        c.executionCtx.waitUntil(notify)
+      } catch {
+        void notify
+      }
     }
     return c.json({ memory: result.memory })
   },

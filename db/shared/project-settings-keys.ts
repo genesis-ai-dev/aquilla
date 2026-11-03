@@ -182,14 +182,20 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
   // RETIRED_TERMINOLOGY_KEY below.
   // AQU-1688: facts about the target language that Bible data checks need
   // (db/shared/language-profile.ts). A check whose slot is empty is dormant.
+  // AQU-2342: data behind Checks — every drafting prompt's checks hint
+  // carries the filled slots (db/shared/prompt-blocks.ts).
   languageProfile: {
     kind: 'object',
     problem: (value) => languageProfileProblem(value),
     typeName: LANGUAGE_PROFILE_TYPE_NAME,
   },
-  // AQU-1691: the decision log — answers to one-off questions that later
-  // drafts must honour (db/shared/project-facts.ts). One entry per key; a key
-  // that names a Language-profile slot belongs in languageProfile instead.
+  // AQU-1691: the decision log — answers to one-off questions
+  // (db/shared/project-facts.ts). One entry per key; a key that names a
+  // Language-profile slot belongs in languageProfile instead. AQU-2342: no
+  // prompt reads this key directly any more — answering a decision appends
+  // the answer to translationInstructions, and the log only feeds the
+  // instructions on read until they are written. It stays as the record of
+  // which questions are already answered.
   projectFacts: {
     kind: 'object[]',
     problem: (value) => projectFactsProblem(value),

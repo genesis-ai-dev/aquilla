@@ -124,7 +124,7 @@ import { loadOrgValidationDefaults } from "../../../db/shared/validation-thresho
 import { ttsSettingsCapProblem } from "../../../db/shared/tts-settings-caps"
 import { castNameFromCellMetadata, copyCastsOntoSplitPieces, splitPieceBelongsTo, type SplitCastSource } from "../../../src/lib/audio/split-cast"
 import { mediaDefaultsFromOrgSettings, type MediaDefaults } from "../../../db/shared/media-setting-defaults"
-import { readProjectBriefText } from "../../../db/shared/load-translation-instructions"
+import { readLegacyServerInstructions } from "../../../db/shared/load-translation-instructions"
 import { storedTranslationInstructions } from "../../../db/shared/translation-instructions"
 
 const projectSettings = new Hono<AuthHonoEnv>()
@@ -246,7 +246,7 @@ async function withOrgDefaults(
     // the project instructions the browser cannot read itself. Only while the
     // project has stored no instructions — after that no reader uses it.
     storedTranslationInstructions(response.settings) === null
-      ? readProjectBriefText(env.AQUILLA_PG, projectId)
+      ? readLegacyServerInstructions(env.AQUILLA_PG, projectId)
       : Promise.resolve(""),
   ])
   const { visibility } = policy

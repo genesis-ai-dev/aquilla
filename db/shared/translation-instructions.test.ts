@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest"
 import {
+  appendInstructionLine,
   composeDeduplicated,
   customSystemPromptText,
+  decisionMemoryText,
   DEFAULT_SYSTEM_PROMPT,
   instructionsPromptBlock,
   resolveTranslationInstructions,
@@ -68,19 +70,57 @@ describe("resolveTranslationInstructions", () => {
     )).toBe("")
   })
 
-  it("migrates on read: brief summary, custom prompt text, instruction entries, legacy brief — de-duplicated", () => {
+  it("migrates on read: brief summary, custom prompt text, instruction + standard entries, legacy brief — de-duplicated", () => {
     const settings = {
       translationBrief: brief({ l1Summary: "Translate for teenagers. Prefer everyday words." }),
       systemPrompt: DEFAULT_SYSTEM_PROMPT + "\nNever transliterate divine names.",
       livingMemoryEntries: [
         { id: "1", kind: "instruction", text: "Prefer everyday words.", createdAt: "", author: "" },
-        { id: "2", kind: "standard", text: "Ignored standard.", createdAt: "", author: "" },
+        { id: "2", kind: "standard", text: "Quote marks are guillemets.", createdAt: "", author: "" },
         { id: "3", kind: "instruction", text: "Keep verse numbers.", createdAt: "", author: "" },
       ],
     }
     expect(resolveTranslationInstructions(settings, { projectBriefText: "Keep verse numbers." })).toBe(
-      "Translate for teenagers. Prefer everyday words.\n\nNever transliterate divine names.\n\nKeep verse numbers.",
+      "Translate for teenagers. Prefer everyday words.\n\nNever transliterate divine names.\n\nQuote marks are guillemets.\n\nKeep verse numbers.",
     )
+  })
+
+  it("folds the decision log in, oldest decision first, after the Living Memory entries (phase 2)", () => {
+    const fact = (key: string, value: string, at: string, scope: Record<string, unknown> = {}, note?: string) => ({
+      id: key, key, value, scope, author: "ana", at, ...(note ? { note } : {}),
+    })
+    const settings = {
+      livingMemoryEntries: [{ id: "1", kind: "standard", text: "Use guillemets.", createdAt: "", author: "" }],
+      projectFacts: [
+        fact("we.inclusive", "false", "2026-02-02", { passage: { from: "ACT 16:10", to: "ACT 16:17" } }, "Luke's party only"),
+        fact("the-twelve", "the Twelve apostles", "2026-01-01", { book: "MRK", entity: "the Twelve" }),
+        { broken: true },
+      ],
+    }
+    expect(resolveTranslationInstructions(settings, { projectBriefText: "Agent brief." })).toBe(
+      "Use guillemets.\n\nProject decisions:\n" +
+        "- the-twelve: the Twelve apostles (MRK; about the Twelve)\n" +
+        "- we.inclusive: false (ACT 16:10–ACT 16:17) — Luke's party only\n\nAgent brief.",
+    )
+  })
+})
+
+describe("decisionMemoryText", () => {
+  it("drops AddDecision's summary line when the body repeats it", () => {
+    expect(decisionMemoryText("Decision — Render Lord as Господь.\n\nRender Lord as Господь.")).toBe("Render Lord as Господь.")
+  })
+  it("keeps a summary-only decision and any other markdown as written", () => {
+    expect(decisionMemoryText("Decision — Keep verse numbers.")).toBe("Keep verse numbers.")
+    expect(decisionMemoryText("# Names\nUse Moisés.")).toBe("# Names\nUse Moisés.")
+  })
+})
+
+describe("appendInstructionLine", () => {
+  it("appends on its own line, skips a line already present, and refuses past the cap", () => {
+    expect(appendInstructionLine("Be brief.", "- x: y")).toEqual({ ok: true, text: "Be brief.\n- x: y", changed: true })
+    expect(appendInstructionLine("", "Use Moisés.")).toEqual({ ok: true, text: "Use Moisés.", changed: true })
+    expect(appendInstructionLine("Use  moisés. Be brief.", "use Moisés.")).toEqual({ ok: true, text: "Use  moisés. Be brief.", changed: false })
+    expect(appendInstructionLine("x".repeat(TRANSLATION_INSTRUCTIONS_MAX_CHARS - 2), "abc")).toEqual({ ok: false, reason: "instructions-full" })
   })
 
   it("renders brief sections as prose when no summary was generated", () => {

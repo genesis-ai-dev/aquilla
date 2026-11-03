@@ -12,8 +12,12 @@
 // at the same position: right after the path's fixed role text, before rules,
 // terms and examples.
 //
-// A project that never wrote the new key is migrated ON READ: the four old
-// sources are composed into one de-duplicated text. Nothing is written back
+// A project that never wrote the new key is migrated ON READ: the old sources
+// are composed into one de-duplicated text. Phase 2 folded in the rest of the
+// standing guidance: Living Memory "standard" entries, the Autopilot decision
+// log (`settings.projectFacts`, all but Language-profile keys — those are data
+// the Bible data checks read, see docs/AI-GUIDANCE.md) and the agent's
+// approved `decisions/` memories. Nothing is written back
 // until a maintainer saves the Instructions editor, which stores the (possibly
 // edited) migrated text under the new key — from then on the old sources are
 // ignored by every prompt.
@@ -22,6 +26,7 @@
 // src/lib/completion/prompt-build.ts) can use it.
 
 import { BRIEF_FIELD_SPECS, readBriefFromSettings, type TranslationBriefRecord } from './brief'
+import { readProjectFacts, type FactScope, type ProjectFact } from './project-facts'
 
 /** The settings key the instructions live under. */
 export const TRANSLATION_INSTRUCTIONS_KEY = 'translationInstructions'
@@ -120,16 +125,63 @@ export function briefInstructionsText(brief: TranslationBriefRecord | null): str
   return lines.join('\n')
 }
 
-/** Text of each Living Memory "instruction" entry, in stored order. */
+/** Text of each Living Memory "instruction" and "standard" entry, in stored
+ *  order. Both kinds were standing guidance; neither reached a prompt before
+ *  AQU-2342. */
 function livingMemoryInstructionTexts(raw: unknown): string[] {
   if (!Array.isArray(raw)) return []
   const out: string[] = []
   for (const entry of raw) {
     if (typeof entry !== 'object' || entry === null) continue
     const { kind, text } = entry as { kind?: unknown; text?: unknown }
-    if (kind === 'instruction' && typeof text === 'string' && text.trim()) out.push(text.trim())
+    if ((kind === 'instruction' || kind === 'standard') && typeof text === 'string' && text.trim()) {
+      out.push(text.trim())
+    }
   }
   return out
+}
+
+function factScopeLabel(scope: FactScope): string {
+  const parts: string[] = []
+  if (scope.passage) parts.push(`${scope.passage.from}–${scope.passage.to}`)
+  else if (scope.book) parts.push(scope.book)
+  if (scope.entity) parts.push(`about ${scope.entity}`)
+  return parts.length > 0 ? ` (${parts.join('; ')})` : ''
+}
+
+/**
+ * One decision-log fact as an instructions line: "- key: value (scope) — note".
+ * Autopilot's "Project decisions" block used the same parts; the line is now
+ * prose the team can read and edit in the Instructions box.
+ */
+export function projectFactInstructionLine(
+  fact: Pick<ProjectFact, 'key' | 'value' | 'scope'> & { note?: string },
+): string {
+  const note = fact.note?.trim() ? ` — ${fact.note.trim()}` : ''
+  return `- ${fact.key}: ${fact.value.trim()}${factScopeLabel(fact.scope ?? {})}${note}`
+}
+
+/** The decision log as one instructions paragraph, oldest decision first (the
+ *  order the team made them), or "" when there are none. Language-profile
+ *  answers are never stored as facts, so none appear here. */
+export function projectFactsInstructionsText(raw: unknown): string {
+  const facts = readProjectFacts(raw).sort((a, b) => a.at.localeCompare(b.at))
+  if (facts.length === 0) return ''
+  return ['Project decisions:', ...facts.map(projectFactInstructionLine)].join('\n')
+}
+
+/**
+ * The guidance in an agent `decisions/` memory. AddDecision renders
+ * "Decision — X" + blank line + X; that summary line is dropped when the body
+ * repeats it. Anything else (a propose_memory decision) is used as written.
+ */
+export function decisionMemoryText(content: string): string {
+  const text = content.replace(/\r\n?/g, '\n').trim()
+  const [first = '', ...rest] = text.split('\n')
+  const summary = /^Decision\s+[—-]\s*(.*)$/.exec(first.trim())
+  if (!summary) return text
+  const body = rest.join('\n').trim()
+  return body || summary[1].trim()
 }
 
 /** Comparison form for de-duplication: whitespace collapsed, case folded. */
@@ -165,7 +217,9 @@ export function composeDeduplicated(parts: readonly string[]): string {
 
 /** Old sources a caller can supply that are not in the settings blob. */
 export interface LegacyInstructionSources {
-  /** The agent's legacy free-text brief (`project_briefs.text`). */
+  /** Server-held sources the browser cannot read itself, already composed:
+   *  the agent's legacy free-text brief (`project_briefs.content`) and its
+   *  approved `decisions/` memories (see readLegacyServerInstructions). */
   projectBriefText?: string | null
 }
 
@@ -188,7 +242,9 @@ export function storedTranslationInstructions(
  * that is an explicit "none"). Otherwise (migrate-on-read) the old
  * sources composed and de-duplicated, in this order: the brief (summary, or its
  * sections as prose), the hand-written part of a customized system prompt,
- * Living Memory instruction entries, the agent's legacy project brief. Capped
+ * Living Memory instruction and standard entries, the decision log
+ * (`projectFacts`), then the server-held sources (the agent's legacy project
+ * brief and approved `decisions/` memories). Capped
  * at TRANSLATION_INSTRUCTIONS_MAX_CHARS. "" when the project has none.
  */
 export function resolveTranslationInstructions(
@@ -203,6 +259,7 @@ export function resolveTranslationInstructions(
     briefInstructionsText(readBriefFromSettings(s)),
     customSystemPromptText(systemPrompt),
     ...livingMemoryInstructionTexts(s.livingMemoryEntries),
+    projectFactsInstructionsText(s.projectFacts),
     legacy?.projectBriefText ?? '',
   ])
   return composed.slice(0, TRANSLATION_INSTRUCTIONS_MAX_CHARS).trim()
@@ -222,4 +279,27 @@ export function translationInstructionsProblem(value: unknown): string | null {
     return `longer than ${TRANSLATION_INSTRUCTIONS_MAX_CHARS} characters`
   }
   return null
+}
+
+/** Why a line could not be appended. */
+export type AppendInstructionRejection = 'instructions-full'
+
+export type AppendInstructionResult =
+  | { ok: true; text: string; changed: boolean }
+  | { ok: false; reason: AppendInstructionRejection }
+
+/**
+ * `current` with `line` appended as its own paragraph line. A line the text
+ * already holds (whitespace/case folded) is not added twice (`changed: false`).
+ * Refused when the result would pass TRANSLATION_INSTRUCTIONS_MAX_CHARS: the
+ * block rides in every prompt, so a full box is the team's to edit, never
+ * silently truncated.
+ */
+export function appendInstructionLine(current: string, line: string): AppendInstructionResult {
+  const base = current.trim()
+  const add = line.trim()
+  if (!add || dedupeKey(base).includes(dedupeKey(add))) return { ok: true, text: base, changed: false }
+  const text = base ? `${base}\n${add}` : add
+  if (text.length > TRANSLATION_INSTRUCTIONS_MAX_CHARS) return { ok: false, reason: 'instructions-full' }
+  return { ok: true, text, changed: true }
 }

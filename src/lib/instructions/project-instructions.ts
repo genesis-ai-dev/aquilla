@@ -2,7 +2,9 @@
 //
 // The workspace holds the project as a ProjectRecord (the settings blob
 // overlaid onto the IDB record), where the legacy `systemPrompt` rides inside
-// `completionSettings`. This maps the record back to the blob shape the shared
+// `completionSettings`. `legacyProjectBriefText` (settings GET) carries the
+// server-held sources — the agent's legacy brief and approved `decisions/`
+// memories — already composed. This maps the record back to the blob shape the shared
 // resolver reads, so the editor, the copilot and the Instructions editor all
 // resolve the same text the workers do.
 
@@ -23,9 +25,12 @@ type InstructionSourceFields = Pick<
   | "translationInstructions"
   | "translationBrief"
   | "livingMemoryEntries"
-  | "completionSettings"
+  | "projectFacts"
   | "legacyProjectBriefText"
->
+> & {
+  /** Only the legacy `systemPrompt` is read (a migrate-on-read source). */
+  completionSettings?: { systemPrompt?: string } | null
+}
 
 /** The resolved instructions for a project record ("" when it has none). The
  *  record's `legacyProjectBriefText` (from the settings GET) is the legacy
@@ -40,6 +45,7 @@ export function projectTranslationInstructions(
       translationInstructions: project.translationInstructions,
       translationBrief: project.translationBrief,
       livingMemoryEntries: project.livingMemoryEntries,
+      projectFacts: project.projectFacts,
       systemPrompt: project.completionSettings?.systemPrompt,
     },
     legacy ?? { projectBriefText: project.legacyProjectBriefText },

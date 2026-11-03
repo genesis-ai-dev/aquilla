@@ -10,6 +10,8 @@
 // read degrades to "no instructions" rather than throwing.
 
 import {
+  composeDeduplicated,
+  decisionMemoryText,
   resolveTranslationInstructions,
   storedTranslationInstructions,
 } from './translation-instructions'
@@ -19,6 +21,7 @@ export interface InstructionsDb {
   prepare(query: string): {
     bind(...params: unknown[]): {
       first<T>(): Promise<T | null>
+      all<T>(): Promise<{ results: T[] }>
     }
   }
 }
@@ -60,6 +63,42 @@ export async function readProjectBriefText(db: InstructionsDb, projectId: string
 }
 
 /**
+ * The approved agent `decisions/` memories (oldest first, the order they were
+ * decided), as instruction texts. AQU-2342 phase 2: approving a decision now
+ * appends it to `translationInstructions`; decisions approved before that are
+ * a migrate-on-read source. "" entries are dropped; a failed read is [].
+ */
+export async function readApprovedDecisionTexts(db: InstructionsDb, projectId: string): Promise<string[]> {
+  try {
+    const { results } = await db
+      .prepare(
+        `SELECT content FROM agent_memories
+          WHERE project_id = ? AND status = 'approved' AND path LIKE 'decisions/%'
+          ORDER BY created_at ASC`,
+      )
+      .bind(projectId)
+      .all<{ content: string | null }>()
+    return results.map((r) => decisionMemoryText(r.content ?? '')).filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Every server-held migrate-on-read source composed into one text: the legacy
+ * project brief, then the approved `decisions/` memories. The settings GET
+ * hands this to the browser as `legacyProjectBriefText`, so the editor
+ * resolves the same text the workers do.
+ */
+export async function readLegacyServerInstructions(db: InstructionsDb, projectId: string): Promise<string> {
+  const [brief, decisions] = await Promise.all([
+    readProjectBriefText(db, projectId),
+    readApprovedDecisionTexts(db, projectId),
+  ])
+  return composeDeduplicated([brief, ...decisions])
+}
+
+/**
  * Resolve a project's instructions. Pass `settings` when the caller already
  * read the blob, so the row is not fetched twice.
  */
@@ -83,6 +122,6 @@ export async function loadTranslationInstructions(
   if (storedTranslationInstructions(blob) !== null) {
     return { text: resolveTranslationInstructions(blob), stored: true }
   }
-  const projectBriefText = await readProjectBriefText(db, projectId)
+  const projectBriefText = await readLegacyServerInstructions(db, projectId)
   return { text: resolveTranslationInstructions(blob, { projectBriefText }), stored: false }
 }

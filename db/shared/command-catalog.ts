@@ -202,7 +202,7 @@ Gotchas:
 - Checks and rules: \`rules\`, \`rulePenalties\`, \`algorithmicChecks\` and \`algorithmicChecksByLane\` are checked field by field; a wrong shape or an unknown field is \`validation_failed\` naming it. Read \`builtinChecks\` from GET .../settings to see what is on; \`settings\` alone shows only overrides.
 - Prefer this over UpdateProjectSettings (deprecated whole-blob replace).
 - RTL projects: set \`targetTextDirection: "rtl"\` ONCE here rather than per file (AQU-1471). It is the project's DEFAULT — resolution is per-file-row → this setting → the language — so it covers every file, present and future, and a file that really runs the other way keeps its own override. \`"auto"\`, and an absent key, mean "take it from the language", which already answers Arabic/Hebrew/Persian/Urdu/… by name or ISO code; set it explicitly when the language name is one Aquilla cannot read.
-- \`translationInstructions\` (string, ≤ 8000 chars) is THE text every drafting prompt reads — copilot, prompt-preview, the in-app agent and its draft tool, DraftCells, Autopilot — injected once, right after the fixed role text. Until it is written, prompts compose it on read from the brief, a customized \`systemPrompt\`, Living Memory instruction entries and the legacy agent brief; once written, those are ignored by every prompt. GET .../settings returns the resolved text as \`translationInstructions\`.
+- \`translationInstructions\` (string, ≤ 8000 chars) is THE text every drafting prompt reads — copilot, prompt-preview, the in-app agent and its draft tool, DraftCells, Autopilot — injected once, right after the fixed role text. Until it is written, prompts compose it on read from the brief, a customized \`systemPrompt\`, Living Memory instruction/standard entries, the decision log (\`projectFacts\`), the legacy agent brief and approved \`decisions/\` memories; once written, those are ignored by every prompt. Answering an Autopilot decision card and approving an AddDecision append a line to it. GET .../settings returns the resolved text as \`translationInstructions\`.
 Example: \`{ "kind": "PatchSettings", "projectId": "p1", "ops": [{ "key": "translationInstructions", "value": "Plain register for rural youth; keep divine names as in the 1999 Bible." }], "ifMatchVersion": 7 }\``,
   },
   {
@@ -478,15 +478,16 @@ Gotchas:
   {
     kind: 'AddExample',
     title: 'Add example',
-    oneLiner: 'Record a source-to-target example pair the copilot reuses on similar lines.',
+    oneLiner: 'Record a source-to-target example pair in the in-app agent\'s working memory.',
     minRoleLevel: CONTRIBUTOR,
     tier: 'structural',
     agentReachable: true,
     paramsDoc: `### AddExample
 Params: \`{ slug, source, target, note?, rationale? }\` — sole command. Writes the Living Memory entry \`examples/<slug>.md\`.
 \`slug\` is a lowercase dash-separated slug (max 64 chars); re-using a slug SUPERSEDES that entry (the previous version is archived, never erased).
+It is agent working memory: once approved, the in-app agent's chat sees it in its memory index. It does NOT reach the drafting prompts — their examples are the project's VALIDATED cells, picked per line automatically. To teach every draft a pair, validate a cell that uses it (or add the term to the termbase).
 Gotchas:
-- Landing state depends on who approved the changeset: an ask-mode approval by a PROJECT_LEAD(500)+ lands it \`approved\` (live in the copilot's next prompt); anything else lands it \`proposed\` and a lead must approve it in the in-app Memory surface first. The receipt's \`memoryStatus\` says which — don't assume.
+- Landing state depends on who approved the changeset: an ask-mode approval by a PROJECT_LEAD(500)+ lands it \`approved\`; anything else lands it \`proposed\` and a lead must approve it in the in-app Memory surface first. The receipt's \`memoryStatus\` says which — don't assume.
 - A path already held by a HUMAN-EDITED memory is refused (permission_denied) — a human owns that entry; edit it in-app.
 - source/target/note/rationale cap at 2000 chars; content matching a secret pattern is rejected.
 Example: \`{ "kind": "AddExample", "slug": "lord-as-hospod", "source": "the LORD", "target": "Господь" }\``,
@@ -494,16 +495,17 @@ Example: \`{ "kind": "AddExample", "slug": "lord-as-hospod", "source": "the LORD
   {
     kind: 'AddDecision',
     title: 'Add decision',
-    oneLiner: 'Record a standing rendering decision in Living Memory for the agent to consult.',
+    oneLiner: 'Record a standing translation decision; once approved it is appended to the project instructions.',
     minRoleLevel: CONTRIBUTOR,
     tier: 'structural',
     agentReachable: true,
     paramsDoc: `### AddDecision
 Params: \`{ slug, decision, rationale? }\` — sole command. Writes the Living Memory entry \`decisions/<slug>.md\`.
-State a decision as a standing instruction ("render X as Y, never Z"), not as a report of one edit. Once approved, the in-app agent's chat sees it in its memory index (path + first line, read in full on demand). It does NOT reach the drafting prompts (copilot, draft tool, DraftCells, Autopilot): for a rule every draft must follow, put it in the project instructions with PatchSettings \`translationInstructions\`.
+State a decision as a standing instruction ("render X as Y, never Z"), not as a report of one edit. When it is APPROVED its text is appended to the project instructions (settings.translationInstructions) — the one text every drafting prompt reads (copilot, prompt preview, agent chat, draft tool, DraftCells, Autopilot). The \`decisions/<slug>.md\` entry stays as the record.
 Gotchas:
 - Same approval rule as AddExample: \`approved\` only on an ask-mode approval by PROJECT_LEAD(500)+, else \`proposed\`. Read \`memoryStatus\` on the receipt.
-- Re-using a slug supersedes the prior decision (archived, not erased). A human-edited holder is refused.
+- Re-using a slug supersedes the prior decision (archived, not erased) and appends the new text; the old line stays in the instructions until a maintainer edits them. A human-edited holder is refused.
+- Refused (\`conflict\`) when the instructions are full (8000 characters) — shorten them first.
 Example: \`{ "kind": "AddDecision", "slug": "divine-name", "decision": "Render Lord as Господь, never Пан." }\``,
   },
   {
@@ -525,15 +527,15 @@ Example: \`{ "kind": "AddNote", "fileId": "f1", "cellId": "GEN 1:1", "note": "Ke
   {
     kind: 'RetireExample',
     title: 'Retire example',
-    oneLiner: 'Drop an example from copilot retrieval without erasing its history.',
+    oneLiner: 'Archive an agent example memory without erasing its history.',
     minRoleLevel: PROJECT_LEAD,
     tier: 'structural',
     agentReachable: true,
     paramsDoc: `### RetireExample
 Params: \`{ slug, rationale? }\` — sole command. Archives the APPROVED memory at \`examples/<slug>.md\`.
-Retirement is a retrieval change, not a delete: the row keeps its content and history, and the copilot simply stops receiving it. The in-app Memory surface shows it as archived.
+Retirement is an archive, not a delete: the row keeps its content and history, and the in-app agent's memory index stops listing it. The in-app Memory surface shows it as archived.
 Gotchas:
-- PROJECT_LEAD(500)+ — un-publishing memory the whole project's copilot reads is a review-tier act, unlike adding.
+- PROJECT_LEAD(500)+ — un-publishing approved memory is a review-tier act, unlike adding.
 - Rejected with \`not_found\` when nothing is currently APPROVED at that slug (a \`proposed\` entry is rejected in-app instead, not retired here).
 - A human-edited entry is refused (permission_denied) — retire it from the in-app Memory surface.
 Example: \`{ "kind": "RetireExample", "slug": "lord-as-hospod", "rationale": "Superseded by the divine-name decision." }\``,

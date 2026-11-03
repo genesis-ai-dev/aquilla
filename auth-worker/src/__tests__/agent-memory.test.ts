@@ -10,6 +10,7 @@ import { describe, it, expect } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 import { buildMemoryContext } from "../../../db/shared/agent-memory"
+import { loadTranslationInstructions } from "../../../db/shared/load-translation-instructions"
 
 const PROJECT = "proj-mem"
 
@@ -136,6 +137,75 @@ describe("memory propose → review lifecycle", () => {
     expect(r.status).toBe(200)
     const { memory } = (await r.json()) as { memory: { status: string } }
     expect(memory.status).toBe("rejected")
+  })
+})
+
+// AQU-2342 phase 2: an approved decisions/ memory is standing guidance, so it
+// lands in THE project instructions every drafting prompt reads.
+describe("approving a decisions/ memory appends it to the project instructions", () => {
+  const instructionsOf = async () => {
+    const row = await env.AQUILLA_PG.prepare("SELECT settings FROM project_settings WHERE project_id = ?")
+      .bind(PROJECT)
+      .first<{ settings: string }>()
+    return (JSON.parse(row?.settings ?? "{}") as { translationInstructions?: string }).translationInstructions
+  }
+  const proposeAndApprove = async (path: string, content: string) => {
+    const leadJwt = await jwtFor("lead")
+    const p = await req("POST", `${PROJECT}/agent-memory`, leadJwt, { path, content })
+    const { memoryId } = (await p.json()) as { memoryId: string }
+    return req("POST", `${PROJECT}/agent-memory/${memoryId}/review`, leadJwt, { action: "approve" })
+  }
+
+  it("materializes the migrate-on-read text, then appends the decision once", async () => {
+    await seedUser(1, "lead")
+    await seedProject(PROJECT, 1)
+    await grant(PROJECT, 1, 500)
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_settings (project_id, settings) VALUES (?, ?)
+       ON CONFLICT (project_id) DO UPDATE SET settings = EXCLUDED.settings`,
+    )
+      .bind(PROJECT, JSON.stringify({ livingMemoryEntries: [{ id: "1", kind: "standard", text: "Use guillemets.", createdAt: "", author: "" }] }))
+      .run()
+
+    const res = await proposeAndApprove("decisions/divine-name.md", "Decision — Render Lord as Señor.\n\nRender Lord as Señor.")
+    expect(res.status).toBe(200)
+    expect(await instructionsOf()).toBe("Use guillemets.\nRender Lord as Señor.")
+
+    // The same decision again (another path) is not appended twice.
+    expect((await proposeAndApprove("decisions/divine-name-2.md", "Render Lord as Señor.")).status).toBe(200)
+    expect(await instructionsOf()).toBe("Use guillemets.\nRender Lord as Señor.")
+  })
+
+  it("folds decisions approved BEFORE phase 2 in on read while nothing is stored", async () => {
+    await seedUser(1, "lead")
+    await seedProject(PROJECT, 1)
+    await grant(PROJECT, 1, 500)
+    // An approval made by an older build: the row is approved, the
+    // instructions were never written.
+    const leadJwt = await jwtFor("lead")
+    const p = await req("POST", `${PROJECT}/agent-memory`, leadJwt, { path: "decisions/old.md", content: "Decision — Keep verse numbers." })
+    const { memoryId } = (await p.json()) as { memoryId: string }
+    await env.AQUILLA_PG.prepare("UPDATE agent_memories SET status = 'approved' WHERE id = ?").bind(memoryId).run()
+    const loaded = await loadTranslationInstructions(env.AQUILLA_PG, PROJECT)
+    expect(loaded).toEqual({ text: "Keep verse numbers.", stored: false })
+  })
+
+  it("leaves other paths alone, and refuses the approval when the instructions are full", async () => {
+    await seedUser(1, "lead")
+    await seedProject(PROJECT, 1)
+    await grant(PROJECT, 1, 500)
+    expect((await proposeAndApprove("observations/x.md", "Seen twice.")).status).toBe(200)
+    expect(await instructionsOf()).toBeUndefined()
+
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_settings (project_id, settings) VALUES (?, ?)
+       ON CONFLICT (project_id) DO UPDATE SET settings = EXCLUDED.settings`,
+    )
+      .bind(PROJECT, JSON.stringify({ translationInstructions: "x".repeat(7999) }))
+      .run()
+    const refused = await proposeAndApprove("decisions/long.md", "A decision that does not fit.")
+    expect(refused.status).toBe(409)
+    expect(await instructionsOf()).toBe("x".repeat(7999))
   })
 })
 

@@ -976,6 +976,33 @@ describe("the WAV format", () => {
     expect(result.untrimmed).toBe(0)
   })
 
+  // AQU-2327, found in the browser walk: the dialog handed no decoder unless
+  // the WAV box was ticked, so a take at its own volume came out as stored.
+  it("writes a take at its own volume and fades as WAV even when the rest are copied as stored", async () => {
+    const take = (id: string, at: number, level: Record<string, number>) => cell({
+      id, startTime: at, endTime: at + 1,
+      selectedAudioId: `${id}.webm`,
+      attachments: { [`${id}.webm`]: { url: `frontier-audio://${id}.webm`, type: "audio", ...level } },
+    } as Partial<CellData>)
+    const result = await exportAudioPerLine({
+      cells: [take("quiet", 10, { gainDb: -6, fadeInMs: 100 }), take("plain", 20, {})],
+      settings: SETTINGS, projectId: "p1", langCode: "es",
+      format: "original",
+      decode: oneSecond,
+      fetchBytes: async () => new Uint8Array([0x1a, 0x45, 0xdf, 0xa3]),
+    })
+    const zip = await JSZip.loadAsync(result.blob)
+    const names = Object.keys(zip.files).filter((n) => n !== "manifest.csv").sort()
+    expect(names).toEqual(["es_L0001_NO_CHARACTER.wav", "es_L0002_NO_CHARACTER.webm"])
+    const wav = await zip.files["es_L0001_NO_CHARACTER.wav"].async("uint8array")
+    const view = new DataView(wav.buffer, wav.byteOffset, wav.byteLength)
+    let o = 12
+    while (String.fromCharCode(...wav.subarray(o, o + 4)) !== "data") o += 8 + view.getUint32(o + 4, true)
+    const at = (i: number) => view.getInt16(o + 8 + i * 2, true) / 32767
+    expect(at(0)).toBe(0) // the fade starts from silence
+    expect(at(24_000)).toBeCloseTo(0.25 * Math.pow(10, -6 / 20), 3) // −6 dB after it
+  })
+
   it("decodes a clip shared by neighbouring lines once", async () => {
     // A combined generation is attached to every line it covers under one id.
     const shared = (id: string, at: number) => cell({

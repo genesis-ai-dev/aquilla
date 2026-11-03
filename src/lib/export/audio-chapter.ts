@@ -17,6 +17,7 @@
 // of a cut take, plays as silence in the app, so it goes in as silence here,
 // and every piece of a cut take is stitched in (book-line-parts.ts).
 
+import { applyClipLevelPcm, levelFields } from "@/lib/export/clip-level"
 import JSZip from "jszip"
 
 import { resolvePcmWindow } from "@/lib/audio/pcm-window"
@@ -45,6 +46,10 @@ export interface ChapterClip {
   heading: boolean
   trimStartMs?: number | null
   trimEndMs?: number | null
+  /** AQU-2327: the take's volume and fades, applied as the timeline plays them. */
+  gainDb?: number | null
+  fadeInMs?: number | null
+  fadeOutMs?: number | null
   /**
    * AQU-965: validated-only withdrew this take, so the stitch writes a GAP of
    * its length here instead of its audio.
@@ -72,7 +77,7 @@ export interface ChapterClip {
  *  own trims and its own validation. */
 export type ChapterClipPart =
   | { kind: "silence"; ms: number }
-  | ({ kind: "take" } & Pick<ChapterClip, "audioId" | "url" | "trimStartMs" | "trimEndMs" | "silenced" | "durationMs">)
+  | ({ kind: "take" } & Pick<ChapterClip, "audioId" | "url" | "trimStartMs" | "trimEndMs" | "silenced" | "durationMs" | "gainDb" | "fadeInMs" | "fadeOutMs">)
 
 export interface GroupAudioByChapterOptions {
   /**
@@ -296,6 +301,7 @@ export function groupAudioByChapter(
       heading,
       trimStartMs: attachment.trimStartMs ?? null,
       trimEndMs: attachment.trimEndMs ?? null,
+      ...levelFields(attachment),
       ...(isSilencedForExport(attachment)
         ? { silenced: true, durationMs: attachment.durationMs ?? null }
         : {}),
@@ -335,6 +341,7 @@ function bookPartsFor(cell: CellData, audioId: string): { parts: ChapterClipPart
       url: att.url,
       trimStartMs: att.trimStartMs ?? null,
       trimEndMs: att.trimEndMs ?? null,
+      ...levelFields(att),
       ...(isSilencedForExport(att) ? { silenced: true, durationMs: att.durationMs ?? null } : {}),
     })
   }
@@ -433,7 +440,7 @@ export async function exportAudioByChapter(args: ExportChapterArgs): Promise<Exp
    */
   const takeSamples = async (
     cell: CellData,
-    take: Pick<ChapterClip, "cellId" | "audioId" | "url" | "trimStartMs" | "trimEndMs" | "silenced" | "durationMs">,
+    take: Pick<ChapterClip, "cellId" | "audioId" | "url" | "trimStartMs" | "trimEndMs" | "silenced" | "durationMs" | "gainDb" | "fadeInMs" | "fadeOutMs">,
   ): Promise<{ samples: Float32Array; silenced: boolean } | null> => {
     // AQU-965: a withdrawn take is a GAP OF ITS OWN LENGTH, so the verses
     // around it stay where the reader heard them. Written straight from the
@@ -475,7 +482,8 @@ export async function exportAudioByChapter(args: ExportChapterArgs): Promise<Exp
         trimStartMs: take.trimStartMs,
         trimEndMs: take.trimEndMs,
       })
-      const slice = win.isFull ? pcm : pcm.subarray(win.start, win.end)
+      // AQU-2327: its volume and fades, as the timeline plays them.
+      const slice = applyClipLevelPcm(win.isFull ? pcm : pcm.subarray(win.start, win.end), TARGET_RATE, take)
       // Withdrawn, and its length was not known up front — so it was decoded
       // only to measure. The samples are discarded; the gap they sized ships.
       return take.silenced

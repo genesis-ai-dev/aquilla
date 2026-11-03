@@ -43,6 +43,13 @@ vi.mock("@/hooks/useRecordingTextDrift", () => ({
   useRecordingTextDrift: () => driftResult,
 }))
 
+// AQU-2235: every list now draws each take's shape, which reads its peaks.
+const loadPeaks = vi.fn(async () => null)
+vi.mock("@/lib/audio/peaks-loader", async (orig) => ({
+  ...(await orig<typeof import("@/lib/audio/peaks-loader")>()),
+  loadPeaksFor: (...args: unknown[]) => loadPeaks(...(args as [])),
+}))
+
 import { TakesStrip, nextTakeLabel } from "./TakesStrip"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
@@ -83,6 +90,26 @@ describe("TakesStrip", () => {
   it("renders nothing when there are no takes", () => {
     const { container } = render(<TakesStrip {...common} takes={[]} selectedAudioId={null} />)
     expect(container.firstChild).toBeNull()
+  })
+
+  // AQU-2235 (Sam's board 52): the recording window's list carries each
+  // take's shape at 56 × 20, as the Recording tab's always has.
+  it("draws each take's 56 × 20 shape in the recording window's list too", () => {
+    render(<TakesStrip {...common} chromeless takes={[take("a", 1500), take("b", 2300)]} selectedAudioId="b" />)
+    for (const id of ["a", "b"]) {
+      const shape = screen.getByTestId(`take-row-wave-${id}`)
+      expect(shape.style.height).toBe("20px")
+      expect(shape.className).toContain("w-14")
+    }
+  })
+
+  // Sam, Oct 25: "make the only distinction between AI and non-AI the little
+  // star in the corner" — ONE star, the one in the take's shape.
+  it("marks a generated take with one star, in its shape's corner", () => {
+    const voiced = { ...take("g", 1500), voiceId: "v-ana" }
+    render(<TakesStrip {...common} chromeless takes={[voiced, take("a", 1500)]} selectedAudioId="a" />)
+    expect(screen.getByTestId("take-row-g").querySelectorAll(".lucide-sparkles")).toHaveLength(1)
+    expect(screen.getByTestId("take-row-wave-g-generated")).toBeInTheDocument()
   })
 
   it("lists every take with its (backfilled) name and duration", async () => {
@@ -246,6 +273,25 @@ describe("TakesStrip", () => {
     // Originals offer denoise; cleaned takes do not.
     expect(screen.getAllByRole("button", { name: /Remove noise/ }).length).toBe(1)
     expect(container).toBeTruthy()
+  })
+
+  // AQU-2327 (Q2): a version saved from the Station keeps its take's name,
+  // and the list tells them apart by "· version N".
+  it("names a saved version after its take, with its version number", () => {
+    render(
+      <TakesStrip
+        {...common}
+        takes={[
+          { ...take("audio-a", 1000), label: "Take 2" },
+          { ...take("st-audio-b", 1000), label: "Take 2", referenceAudioId: "audio-a" },
+          { ...take("st-audio-c", 1000), label: "Take 2", referenceAudioId: "st-audio-b" },
+        ]}
+        selectedAudioId="st-audio-c"
+      />,
+    )
+    expect(screen.getByText("Take 2 · version 3")).toBeTruthy()
+    expect(screen.getByText("Take 2 · version 2")).toBeTruthy()
+    expect(screen.getByText("Take 2")).toBeTruthy()
   })
 
   it("a cleaned take offers revert that selects the original take", async () => {

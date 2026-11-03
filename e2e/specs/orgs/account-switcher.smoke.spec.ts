@@ -290,11 +290,17 @@ test("offline account switch recovers the project on reconnect without Retry", a
   // Alice is the seeded platform admin; both accounts can read Bob's project.
   await openSeededProject(alice, seeded)
   await alice.context().setOffline(true)
+  // Firefox's emulated offline mode can leave existing connections usable.
+  // Explicitly fail project reads as native Work Offline does, so the test
+  // actually exercises the unreachable state on every supported browser.
+  const projectReads = "**/api/v2/projects/**"
+  await alice.route(projectReads, route => route.abort("internetdisconnected"))
   try {
     await new AccountSwitcherPage(alice).openMenu("alice")
     await alice.getByRole("menuitem", { name: /bob/i }).click()
     await expect(alice.getByText("Can't reach the server — your project may still be available.")).toBeVisible()
   } finally {
+    await alice.unroute(projectReads)
     await alice.context().setOffline(false)
   }
   // Deliberately no Retry or navigation: the online event must recover it.

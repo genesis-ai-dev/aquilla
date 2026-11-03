@@ -131,6 +131,8 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
   const [offlineCopyPending, setOfflineCopyPending] = useState(false)
   const hasLoaded = useRef(Boolean(initialProject))
   const { session, loading: sessionLoading } = useFrontierSession()
+  const statusRef = useRef(status)
+  useEffect(() => { statusRef.current = status }, [status])
 
   const refresh = useCallback(() => {
     if (!enabled) return () => {}
@@ -202,6 +204,9 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
     // has not settled yet. Cancel the older read so it cannot overwrite the
     // recovered result. One read per online event; no error-driven retry loop.
     const reconnect = () => {
+      // Healthy editors keep their mounted state; definitive permission or
+      // missing-project responses still require an explicit action.
+      if (statusRef.current !== "loading" && statusRef.current !== "unreachable") return
       cancelInFlight()
       cancelInFlight = refresh()
     }

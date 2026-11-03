@@ -132,6 +132,8 @@ describe("useProject status distinction", () => {
     expect(result.current.isUnreachable).toBe(false)
     expect(result.current.project).not.toBeNull()
     expect(result.current.project?.id).toBe("p-3")
+    act(() => window.dispatchEvent(new Event("online")))
+    expect(mockResolve).toHaveBeenCalledTimes(1)
   })
 
   it("starts in loading state before the resolve resolves", () => {

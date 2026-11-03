@@ -38,8 +38,7 @@ export const SHARED_SETTING_LABELS: Record<string, MessageKey> = {
   autopilotEnabled: "autopilot.settings.autopilotLabel",
   smartExtensionsEnabled: "extensions.flag.label",
   languageProfile: "bibleData.profile.title",
-  // AQU-2342: the decision log folded into Instructions.
-  projectFacts: "terminology.livingMemory.instructionsTitle",
+  projectFacts: "projectDecisions.title",
   translationInstructions: "terminology.livingMemory.instructionsTitle",
   inheritedFromLink: "projectSettings.section.sourceLink",
 }

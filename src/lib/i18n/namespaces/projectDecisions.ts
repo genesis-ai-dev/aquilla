@@ -3,13 +3,46 @@ import { defineNamespace } from "./types"
 /**
  * `projectDecisions` namespace (AQU-1691): the decision log.
  *
- * AQU-2342: there is no separate "Project decisions" card any more. An answer
- * to an Autopilot question card is added to the project instructions (or, for
- * a language fact, to the Language profile the checks read).
- * `projectDecisions.card.*` is what the question card says about that.
+ * `projectDecisions.*` is the "Project decisions" card in Living Memory →
+ * Checks, which lists the answers a team gave to Autopilot's questions.
+ * AQU-2342: an answer is also added to the project instructions (or, for a
+ * language fact, to the Language profile the checks read); the card is the
+ * record. `projectDecisions.card.*` is what the question card says about that.
  */
 export const projectDecisions = defineNamespace({
   keys: {
+    // ── Settings card ──
+    "projectDecisions.title": "Project decisions",
+    "projectDecisions.description":
+      "Answers your team gave to Autopilot's questions. Each answer was also added to the project " +
+      "instructions; this list is the record, so Autopilot never asks the same question twice.",
+    "projectDecisions.empty": "No decisions yet. When someone answers a question from Autopilot, it appears here.",
+    "projectDecisions.scope.project": "Whole project",
+    "projectDecisions.scope.passage": "{from} to {to}",
+    "projectDecisions.scope.about": "About {entity}",
+    "projectDecisions.byline": "{author} · {date}",
+    "projectDecisions.editAriaLabel": "Edit {key}",
+    "projectDecisions.remove": "Remove",
+    "projectDecisions.removeAriaLabel": "Remove {key}",
+    "projectDecisions.removeConfirm":
+      "Remove this decision? Autopilot may ask the question again. To change what drafts follow, edit the " +
+      "project instructions.",
+    "projectDecisions.field.value": "Decision",
+    "projectDecisions.field.book": "Book",
+    "projectDecisions.field.from": "From verse",
+    "projectDecisions.field.to": "To verse",
+    "projectDecisions.field.entity": "About",
+    "projectDecisions.field.note": "Note",
+    "projectDecisions.field.scopeHint":
+      "Leave the book and verses empty for the whole project. Write a book as a code such as ACT, and a verse as ACT 16:10.",
+    "projectDecisions.invalid": "This decision can't be saved. Check the book code and the verses.",
+    "projectDecisions.saved": "Decision saved.",
+    "projectDecisions.removed": "Decision removed.",
+    "projectDecisions.error.conflict": "Someone else changed the project settings. Try again.",
+    "projectDecisions.error.offline": "You're offline. Reconnect to change project decisions.",
+    "projectDecisions.error.permission": "Only a maintainer can change project decisions.",
+    "projectDecisions.error.failed": "The project decisions could not be saved.",
+
     // ── Autopilot question card ──
     "projectDecisions.card.durable":
       "Your answer is added to the project instructions (or to the language data the checks use), so " +
@@ -32,11 +65,63 @@ export const projectDecisions = defineNamespace({
         "question it cannot answer alone, such as 'Is Andrew older or younger than Peter?'. " +
         "The answer is added to the project instructions (the one text every AI draft reads), " +
         "or, for a fact about the language, to the 'Language profile' the checks read. The " +
-        "projectDecisions.card.* strings appear on " +
+        "'Project decisions' card in Living Memory → Checks lists the recorded answers; maintainers " +
+        "can edit or remove them. The projectDecisions.card.* strings appear on " +
         "the question card itself, in Autopilot's activity panel. Decision keys such as " +
         "'kin.andrew-peter.relative-age' and book codes such as ACT are data: never translate them.",
     },
     keys: {
+      "projectDecisions.title": { description: "Title of the settings card that lists the project's decisions." },
+      "projectDecisions.description": { description: "One sentence under the card's title." },
+      "projectDecisions.empty": { description: "Shown in the card while the project has no decisions." },
+      "projectDecisions.scope.project": {
+        description: "Where a decision applies: everywhere in the project. Short phrase in a list row.",
+        maxLength: 30,
+      },
+      "projectDecisions.scope.passage": {
+        description: "Where a decision applies: a range of Bible verses.",
+        placeholders: { from: "First verse, e.g. 'ACT 16:10'. Never translated.", to: "Last verse, e.g. 'ACT 16:17'." },
+      },
+      "projectDecisions.scope.about": {
+        description: "Who or what a decision is about.",
+        placeholders: { entity: "A person or thing, as the team typed it, e.g. 'Andrew'." },
+      },
+      "projectDecisions.byline": {
+        description: "Who made a decision and when, under each decision in the list.",
+        placeholders: { author: "A username.", date: "A date, already formatted for the reader's language." },
+      },
+      "projectDecisions.editAriaLabel": {
+        description: "Accessible name of the Edit button on one decision.",
+        placeholders: { key: "The decision's key, e.g. 'render.the-twelve'. Never translated." },
+      },
+      "projectDecisions.remove": { description: "Button that removes one decision.", maxLength: 16 },
+      "projectDecisions.removeAriaLabel": {
+        description: "Accessible name of the Remove button on one decision.",
+        placeholders: { key: "The decision's key, e.g. 'render.the-twelve'. Never translated." },
+      },
+      "projectDecisions.removeConfirm": {
+        description: "Question shown before a decision is removed, above Remove and Cancel buttons.",
+      },
+      "projectDecisions.field.value": { description: "Label of the field holding the decision itself, e.g. 'younger'." },
+      "projectDecisions.field.book": { description: "Label of the field for a Bible book code, e.g. ACT." },
+      "projectDecisions.field.from": { description: "Label of the field for the first verse the decision applies to." },
+      "projectDecisions.field.to": { description: "Label of the field for the last verse the decision applies to." },
+      "projectDecisions.field.entity": {
+        description: "Label of the field for who or what the decision is about, e.g. 'Andrew'.",
+      },
+      "projectDecisions.field.note": { description: "Label of a free-text note on the decision." },
+      "projectDecisions.field.scopeHint": {
+        description: "Hint under the book and verse fields. Keep 'ACT' and 'ACT 16:10' exactly.",
+      },
+      "projectDecisions.invalid": { description: "Error when an edited decision cannot be saved." },
+      "projectDecisions.saved": { description: "Confirmation after an edited decision is saved." },
+      "projectDecisions.removed": { description: "Confirmation after a decision is removed." },
+      "projectDecisions.error.conflict": { description: "Error: another person saved project settings first." },
+      "projectDecisions.error.offline": { description: "Error: the device is offline, so the card cannot save." },
+      "projectDecisions.error.permission": {
+        description: "Error: the person's project role is too low to change decisions.",
+      },
+      "projectDecisions.error.failed": { description: "Error: saving failed for another reason." },
       "projectDecisions.card.durable": {
         description:
           "Line on an Autopilot question card: the answer is added to the project instructions (or the " +

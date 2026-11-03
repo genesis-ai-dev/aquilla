@@ -50,7 +50,7 @@ import {
 } from "@/components/ProjectSettings/InheritedSettingsChoice"
 import { parseInheritedFromLink, type InheritFieldId } from "@/lib/sync/inherited-settings"
 import { RulesSettingsSection } from "@/components/ProjectSettings/RulesSection"
-import { LanguageProfileSection } from "@/components/ProjectSettings/LanguageProfileSection"
+import { CheckDataCards } from "@/components/living-memory/CheckDataCards"
 import { isBibleDataExperimentOn } from "@/lib/bible-data/experiment"
 import { projectTranslationInstructions } from "@/lib/instructions/project-instructions"
 import {
@@ -442,14 +442,16 @@ export function LivingMemoryPage({
                 checkData={
                   <>
                     {style.documentGenres}
-                    {/* AQU-1688: the language facts the Bible data checks
-                        read — structured data behind Checks, not guidance. */}
+                    {/* AQU-1688 / AQU-1691: the language facts and the
+                        decision log the Bible data checks read — structured
+                        data behind Checks, not guidance. */}
                     {project && isBibleDataExperimentOn(project) ? (
-                      <LanguageProfileSection
-                        value={settings.languageProfile}
-                        targetLanguage={settings.targetLanguage ?? project.targetLanguage ?? ""}
+                      <CheckDataCards
+                        project={project}
+                        settings={settings}
                         canEdit={entriesReady && canEdit}
-                        disabledTooltip={t("rules.builtinChecks.manageNeedsMaintainer")}
+                        sessionUsername={session?.username}
+                        sessionJwt={session?.jwt}
                         patch={patchSettings}
                       />
                     ) : null}

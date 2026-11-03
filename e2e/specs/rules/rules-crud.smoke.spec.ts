@@ -133,7 +133,9 @@ test("rules page create, edit, delete, and dialogs surface session", async ({ al
   await test.step("Import from a style guide opens; rule suggestions live in the list", async () => {
     await startAddCheck(alice, "Import from a style guide")
 
-    const importDialog = alice.getByRole("dialog")
+    // Scoped by name: the "Add check" chooser is a dialog too, and can still be
+    // finishing its close animation when this one closes.
+    const importDialog = alice.getByRole("dialog", { name: /Import rules from/i })
     await expect(importDialog).toBeVisible({ timeout: 5_000 })
     await expect(
       importDialog.getByRole("heading", { name: /Import rules from/i }),

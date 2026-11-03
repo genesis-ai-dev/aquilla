@@ -29,7 +29,7 @@ export async function checkingRequest<T>(path: string, token?: string, body?: un
 }
 export async function loadCheckingFiles(jwt: string, projectId: string): Promise<CheckingFile[]> {
   const projectToken = await fetchSyncToken(jwt, projectId, "any")
-  if (projectToken.role.level < 500) throw new Error("Project lead access is required to share checking links.")
+  if (projectToken.role.level < 500) throw new Error("Project Lead access is required to share checking links.")
   const files = await fetchProjectFiles(projectId, projectToken.token)
   const result: CheckingFile[] = []
   // Serial file reads bound load on large projects; no N-file Promise.all.

@@ -4,6 +4,7 @@
 // verse in a Bible file, a line number in a document) needs the whole folder
 // and the destination, which is match.ts's job.
 
+import { toWesternDigits } from "../../../../shared/decimal-digits"
 import { BookNameIndex } from "./book-names"
 
 export type NumberMarker = "chapter" | "verse" | "line" | "part" | "take"
@@ -113,7 +114,8 @@ export function nameStem(fileName: string): string {
 }
 
 function tokenize(stem: string): Tok[] {
-  const text = splitChineseMarkers(stem.normalize("NFKC"))
+  // AQU-2329: a script's own digits (٥, ۵, ५, ৫, ၅, ๕…) read as 0–9; NFKC leaves them alone.
+  const text = splitChineseMarkers(toWesternDigits(stem.normalize("NFKC")))
   const out: Tok[] = []
   const re = /(\d+)|(\p{L}+)|([^\p{L}\d]+)/gu
   let m: RegExpExecArray | null

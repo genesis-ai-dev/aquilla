@@ -5,7 +5,7 @@
  * **Project Lead (500)** on Biblica ETT and reaches the Pattani Malay Bible
  * project through the team `biblica/pattani-malay`, which is attached at the
  * **Contributor (400)** default. She resolved to Contributor, so the Team /
- * Assignments panel ("Project leads & up can see this") was hidden from her.
+ * Assignments panel ("Project Leads & up can see this") was hidden from her.
  *
  * The cause was not "most specific wins" — this resolver has always been
  * AD-12 max-wins. It was AQU-435's `ORG_WIDE_ACCESS_FLOOR`, which silenced the

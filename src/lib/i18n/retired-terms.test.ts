@@ -60,8 +60,8 @@ describe("retired words in English messages (AQU-2261)", () => {
   })
 
   it("fails a role's level number", () => {
-    expect(check({ a: "Project lead (500) — default" })).toEqual([
-      `a: "a role's level number, e.g. (500)" → write "the role's name alone, e.g. Project lead"`,
+    expect(check({ a: "Project Lead (500) — default" })).toEqual([
+      `a: "a role's level number, e.g. (500)" → write "the role's name alone, e.g. Project Lead"`,
     ])
     expect(check({ a: "Saved (5000 cells)", b: "Take (2)" })).toEqual([])
   })
@@ -79,7 +79,7 @@ describe("retired words in English messages (AQU-2261)", () => {
   it("lists every retired term with a word to use instead", () => {
     for (const entry of RETIRED_TERMS) {
       expect(entry.use.trim()).not.toBe("")
-      const sample = entry.term.startsWith("a role's") ? "Project lead (500)" : entry.term
+      const sample = entry.term.startsWith("a role's") ? "Project Lead (500)" : entry.term
       expect(retiredTermsIn(sample, [entry])).toHaveLength(1)
     }
   })

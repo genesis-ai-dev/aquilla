@@ -1,7 +1,7 @@
 // AQU-1758 / AQU-2212: what the Audio view's voice card did for a line's take,
 // in the line's Recording tab.
 import { afterEach, describe, it, expect, vi } from "vitest"
-import { act, fireEvent, render, screen, within } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 
 vi.mock("@/hooks/useCellAudio", () => ({
   useCellAudio: () => ({
@@ -71,19 +71,6 @@ describe("RecordingTakes — the line's voice and its take (AQU-2212)", () => {
     expect(screen.queryByTestId("voice-card-apply")).toBeNull()
   })
 
-  // AQU-2037: which voice a line speaks with is the LANE's, but a take some
-  // voice was cloned from is left alone whichever lane that voice is on — the
-  // rule the workspace runs the click by. A voice another lane cloned from
-  // this take is not in this lane's library.
-  it("never offers to re-voice a take another lane's voice was cloned from", () => {
-    const echo: Voice = { id: "v-echo", name: "Echo", color: "#444", provider: "inworld", voiceName: "echo", referenceAudioId: T1 } as Voice
-    const lane = cast("v-hearth")
-    const whole = { ...lane, voices: [...(lane.voices ?? []), echo] } as ProjectTtsSettings
-    draw(lane, { onApplyLineVoice: vi.fn(), allTtsSettings: whole })
-    // Not "Change to Hearth": what the click would do is read the text.
-    expect(screen.getByTestId("voice-card-apply")).toHaveTextContent("Generate · Hearth")
-  })
-
   it("says Voicing as … while the line is voiced, in the button's place", async () => {
     draw(cast("v-hearth"), { onApplyLineVoice: vi.fn() })
     let done!: () => void
@@ -97,28 +84,11 @@ describe("RecordingTakes — the line's voice and its take (AQU-2212)", () => {
   })
 })
 
-describe("RecordingTakes — make a character from this voice, in one step (AQU-1758, AQU-2212)", () => {
-  it("clones the take that plays: name it, Add to cast", async () => {
-    const onCloneTake = vi.fn(async () => {})
-    const onMakeCharacter = vi.fn()
-    draw(cast(), { onCloneTake, onMakeCharacter })
-    fireEvent.click(screen.getByTestId("voice-card-clone"))
-    const popover = await screen.findByTestId("voice-card-clone-popover")
-    const name = within(popover).getByTestId("voice-card-clone-name") as HTMLInputElement
-    // Your own recording: you are the suggestion.
-    expect(name.value).toBe("dir")
-    fireEvent.change(name, { target: { value: "Dir" } })
-    await act(async () => { fireEvent.click(within(popover).getByTestId("voice-card-clone-submit")) })
-    expect(onCloneTake).toHaveBeenCalledWith("c1", T1, "Dir")
-    expect(onMakeCharacter).not.toHaveBeenCalled()
-  })
-
-  it("keeps the full dialog under More options", async () => {
-    const onMakeCharacter = vi.fn()
-    draw(cast(), { onCloneTake: vi.fn(async () => {}), onMakeCharacter })
-    fireEvent.click(screen.getByTestId("voice-card-clone"))
-    const popover = await screen.findByTestId("voice-card-clone-popover")
-    fireEvent.click(within(popover).getByRole("button", { name: "More options" }))
-    expect(onMakeCharacter).toHaveBeenCalledWith("c1")
+describe("RecordingTakes — train a voice from this recording (AQU-1758, AQU-2291)", () => {
+  it("hands over the line and the take that plays, in one click", () => {
+    const onTrainFromTake = vi.fn()
+    draw(cast(), { onTrainFromTake })
+    fireEvent.click(screen.getByTestId("cell-take-train-voice"))
+    expect(onTrainFromTake).toHaveBeenCalledWith("c1", T1)
   })
 })

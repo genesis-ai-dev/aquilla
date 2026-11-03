@@ -388,4 +388,68 @@ describe("/api/v2/admin/* platform-admin gate", () => {
     expect(body.activity[0]).toMatchObject({ id: 3, username: "wendi", type: "edit" })
     expect(body.activity[1].id).toBe(2)
   })
+
+  it("GET /orgs/:orgId/members lists members with role, joined and last active; 404s an unknown org", async () => {
+    await seedUser(7, "root")
+    await seedUser(1, "wendi")
+    await seedUser(2, "amos")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by, last_active_at) VALUES (1, 1, 700, 1, '2026-05-01'), (1, 2, 200, 1, NULL)",
+    ).run()
+    const headers = authHeader(await jwtFor("root"))
+
+    const res = await app.request("/api/v2/admin/orgs/1/members", { headers }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      members: Array<{ userId: number; username: string; roleLevel: number; joinedAt: string | null; lastActiveAt: string | null }>
+    }
+    // Highest role first.
+    expect(body.members.map((m) => [m.username, m.roleLevel])).toEqual([
+      ["wendi", 700],
+      ["amos", 200],
+    ])
+    expect(body.members[0].lastActiveAt).not.toBeNull()
+    expect(body.members[1].lastActiveAt).toBeNull()
+    expect(body.members[0].joinedAt).not.toBeNull()
+
+    expect((await app.request("/api/v2/admin/orgs/999/members", { headers }, env)).status).toBe(404)
+    expect((await app.request("/api/v2/admin/orgs/nope/members", { headers }, env)).status).toBe(404)
+    const wendi = authHeader(await jwtFor("wendi"))
+    expect((await app.request("/api/v2/admin/orgs/1/members", { headers: wendi }, env)).status).toBe(403)
+  })
+
+  it("GET /users/:userId returns the user with org and direct project memberships; 404s an unknown user", async () => {
+    await seedUser(7, "root")
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 500, 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by, archived_at) VALUES ('pa', 'John', 1, 1, NULL), ('pz', 'Old', 1, 1, '2026-01-01')",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('pa', 1, 300, 1), ('pz', 1, 200, 1)",
+    ).run()
+    const headers = authHeader(await jwtFor("root"))
+
+    const res = await app.request("/api/v2/admin/users/1", { headers }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      user: { id: number; username: string }
+      orgs: Array<{ orgId: number; name: string; roleLevel: number }>
+      projects: Array<{ projectId: string; orgName: string; archived: boolean; roleLevel: number }>
+    }
+    expect(body.user).toMatchObject({ id: 1, username: "wendi" })
+    expect(body.orgs).toEqual([expect.objectContaining({ orgId: 1, name: "CAS", roleLevel: 500 })])
+    // Ordered by project name: John, then Old.
+    expect(body.projects).toEqual([
+      expect.objectContaining({ projectId: "pa", orgName: "CAS", archived: false, roleLevel: 300 }),
+      expect.objectContaining({ projectId: "pz", orgName: "CAS", archived: true, roleLevel: 200 }),
+    ])
+
+    expect((await app.request("/api/v2/admin/users/999", { headers }, env)).status).toBe(404)
+    expect((await app.request("/api/v2/admin/users/abc", { headers }, env)).status).toBe(404)
+  })
 })

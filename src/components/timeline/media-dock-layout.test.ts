@@ -17,12 +17,15 @@ import {
 
 const FILM = { film: true }
 const NO_FILM = { film: false }
+/** The film and the text alone, as before the Station (AQU-2327) joined them. */
+const FILM_TEXT = { film: true, station: false }
 
 describe("the docking model", () => {
   it("starts with the film bottom left and the text bottom right, nothing folded", () => {
     const v = dockView(startDockLayout(), FILM)
     expect(v.list("ll")).toEqual(["film"])
-    expect(v.list("lr")).toEqual(["text"])
+    // AQU-2327: the Station is a tab behind the text.
+    expect(v.list("lr")).toEqual(["text", "station"])
     expect(v.openRegions).toEqual(["tl", "ll", "lr"])
   })
 
@@ -41,7 +44,7 @@ describe("the docking model", () => {
 
   it("moving a panel to an area that has one makes tabs; the emptied area goes", () => {
     const l = movePanel(startDockLayout(), "text", "ll")
-    const v = dockView(l, FILM)
+    const v = dockView(l, FILM_TEXT)
     expect(v.list("ll")).toEqual(["film", "text"])
     expect(v.activeOf("ll")).toBe("text")
     expect(v.exists("lr")).toBe(false)
@@ -89,7 +92,7 @@ describe("the docking model", () => {
 
     it("switching tabs inside the full-screen area keeps it", () => {
       const tabs = movePanel(startDockLayout(), "text", "ll")
-      const { layout } = enterFullScreen(tabs, FILM, "ll", null)
+      const { layout } = enterFullScreen(tabs, FILM_TEXT, "ll", null)
       expect(showPanel(layout, "film").fullUndo).toEqual(["tl"])
     })
   })
@@ -113,7 +116,7 @@ describe("the docking model", () => {
         JSON.stringify({ areas: { ll: ["film", "nope"], lr: ["film"] }, folded: { tl: "yes" }, fullUndo: ["ll", 3, "left:files"] }),
       )
       const l = readStoredDock("f1")!
-      expect(l.areas).toEqual({ ll: ["film"], lr: ["text"] })
+      expect(l.areas).toEqual({ ll: ["film"], lr: ["text", "station"] })
       expect(l.folded.tl).toBe(false)
       expect(l.fullUndo).toEqual(["ll", "left:files"])
       localStorage.setItem("aquilla:mediaDock:f1", "{not json")

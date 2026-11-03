@@ -191,6 +191,38 @@ type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "obs" | 
   | "recordingsPick" | "recordingsReview"
 
 /**
+ * AQU-832: the header title for each screen whose title is a plain catalog
+ * lookup. Module-level, like the option tables below, so it holds keys and the
+ * render resolves them — it cannot call t() itself.
+ *
+ * Deliberately NOT derived from POPULAR_OPTIONS/SPECIALIZED_OPTIONS: four
+ * screens title themselves differently from the tile that opens them
+ * (`helloao`, `tn`, `spreadsheet`, `paired` use `importExport.dialog.title*`,
+ * their tiles use `importExport.landing.*.title`), and two tiles share the
+ * `upload` screen.
+ *
+ * Absent on purpose: the screens titled by their own branch earlier in the
+ * header, `partner` (reads the partner's own `importScreen.titleKey`),
+ * `extension` (a tool-supplied label, not a key), and `ebible`, which is the
+ * fallback for anything missing.
+ */
+const SCREEN_TITLE_KEYS: Partial<Record<Screen, MessageKey>> = {
+  upload: "importExport.landing.upload.title",
+  youtube: "importExport.landing.youtube.title",
+  gdrive: "importExport.landing.gdrive.title",
+  helloao: "importExport.dialog.titleHelloao",
+  obs: "importExport.landing.obs.title",
+  dcs: "importExport.landing.dcs.title",
+  macula: "importExport.landing.macula.title",
+  tn: "importExport.dialog.titleTn",
+  spreadsheet: "importExport.dialog.titleSpreadsheet",
+  jsonKeys: "importExport.dialog.titleJsonKeys",
+  paired: "importExport.dialog.titlePaired",
+  sdbh: "importExport.landing.sdbh.title",
+  linkProject: "importExport.landing.linkProject.title",
+}
+
+/**
  * AQU-981: what the host gives "Recordings" — uploading many recordings onto
  * lines already here. Absent, the dialog offers no Recordings card.
  */
@@ -1231,22 +1263,9 @@ export function ImportDialog({
                   onClick={() => setScreen("landing")}
                   label={t("importExport.dialog.backToImportTypes")}
                 />
-                {screen === "upload" ? t("importExport.landing.upload.title")
-                  : screen === "youtube" ? t("importExport.landing.youtube.title")
-                  : screen === "gdrive" ? t("importExport.landing.gdrive.title")
-                  : screen === "helloao" ? t("importExport.dialog.titleHelloao")
-                  : screen === "obs" ? t("importExport.landing.obs.title")
-                  : screen === "dcs" ? t("importExport.landing.dcs.title")
-                  : screen === "macula" ? t("importExport.landing.macula.title")
-                  : screen === "tn" ? t("importExport.dialog.titleTn")
-                  : screen === "partner" ? t(activePartner?.importScreen?.titleKey ?? "importExport.landing.upload.title")
-                  : screen === "spreadsheet" ? t("importExport.dialog.titleSpreadsheet")
-                  : screen === "jsonKeys" ? t("importExport.dialog.titleJsonKeys")
-                  : screen === "paired" ? t("importExport.dialog.titlePaired")
-                  : screen === "sdbh" ? t("importExport.landing.sdbh.title")
-                  : screen === "linkProject" ? t("importExport.landing.linkProject.title")
+                {screen === "partner" ? t(activePartner?.importScreen?.titleKey ?? "importExport.landing.upload.title")
                   : screen === "extension" ? (extensionImporter?.importer.label ?? "")
-                  : t("importExport.landing.ebible.title")}
+                  : t(SCREEN_TITLE_KEYS[screen] ?? "importExport.landing.ebible.title")}
               </div>
             )}
           </DialogTitle>

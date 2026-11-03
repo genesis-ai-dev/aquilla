@@ -59,6 +59,25 @@ describe("placing takes on the timeline", () => {
     expect(floor[0]).toBe(-32768)
   })
 
+  // AQU-2327: the peak guard (the playback mixer's) only where it is needed.
+  it("leaves a take on its own at its recorded level exactly as recorded, even near full scale", () => {
+    const track = placeClips([clip(0, 0.95, -0.97)], 2, RATE)
+    expect(Array.from(track)).toEqual([quantised(0.95), quantised(-0.97)])
+  })
+
+  it("guards a loud sum below full scale instead of clipping it", () => {
+    const track = placeClips([clip(0, 0.5), clip(0, 0.45)], 1, RATE)
+    // 0.95 summed lands softly under it, never past full scale.
+    expect(track[0]).toBeLessThan(quantised(0.95))
+    expect(track[0]).toBeGreaterThan(quantised(0.891))
+  })
+
+  it("guards a raised take's own peaks, where nothing overlaps it", () => {
+    const track = placeClips([{ pcm: new Float32Array([0.95, 0.4]), startSec: 0, raised: true }], 2, RATE)
+    expect(track[0]).toBeLessThan(quantised(0.95))
+    expect(track[1]).toBe(quantised(0.4))
+  })
+
   it("quantises exactly as a live take does", () => {
     // `quantisePcm16` is shared with the capture worklet, so an exported clip
     // and a recorded one of the same audio land on identical samples.

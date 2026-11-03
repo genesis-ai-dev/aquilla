@@ -1,12 +1,10 @@
 // "Change voice of existing audio" — the project-wide Change voice (AQU-1109).
 //
 // Converts every cell's selected take into that cell's assigned cast voice with
-// Seed-VC. Nothing is synthesized from text. Cells that can't or needn't change
-// are skipped and counted so the caller can say why: no take to convert, an
-// assigned voice with no reference clip (stock voices are out of scope for v1),
-// or a take already converted from that voice's CURRENT reference clip at the
-// chosen quality. A new reference clip, or a different quality, is redone.
-// A selected take that a voice is using as its reference clip is left alone.
+// the voice forge (RVC). Nothing is synthesized from text. Cells that can't or
+// needn't change are skipped and counted so the caller can say why: no take to
+// convert, an assigned voice with no trained model (only character voices and
+// trained voices convert), or a take already converted into that voice.
 //
 // Runs through the shared batch runner, so the AudioBulkProgressBanner shows
 // progress and can cancel it like the other bulk audio actions.
@@ -15,40 +13,16 @@ import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { ProjectTtsSettings, Voice } from "@/lib/parsers/types"
 import { runBatchJobs } from "./batch-audio"
-import { changeCellVoice, changeVoiceBlocker, changeVoiceSourceTake, type ChangeVoiceBlocker } from "./change-voice"
+import { changeCellVoice, changeVoiceBlocker, type ChangeVoiceBlocker } from "./change-voice"
 import { getTtsStatus, ttsStatusKey } from "./tts"
-import { getVoiceLibrary, resolveCastVoice } from "./voices"
-import { changeVoiceDiffusionSteps } from "@/lib/store/change-voice-quality"
+import { resolveCastVoice } from "./voices"
 
 export interface ChangeVoiceTarget {
   cell: CellData
   voice: Voice
 }
 
-export type ChangeVoiceSkipCounts = Record<ChangeVoiceBlocker | "busy" | "voice-reference", number>
-
-/**
- * The key the voice library stores when a clone was lifted from a line take:
- * `${cellId}:recorded` or `${cellId}:generated`.
- */
-function cloneTakeKey(cell: CellData, audioId: string): string {
-  const slot = audioId === cell.selectedGeneratedVoiceAudioId && audioId !== cell.selectedAudioId
-    ? "generated"
-    : "recorded"
-  return `${cell.id}:${slot}`
-}
-
-/** Some voice in the library is using this cell's selected take as its reference clip.
- *  AQU-2026: exported so the per-line Change voice on the Media timeline leaves
- *  the same takes alone as the whole-file run — one rule, not two. */
-export function takeUsedByVoice(cell: CellData, settings: ProjectTtsSettings | undefined): boolean {
-  const take = changeVoiceSourceTake(cell)
-  if (!take) return false
-  const key = cloneTakeKey(cell, take.audioId)
-  return getVoiceLibrary(settings).some((voice) =>
-    voice.referenceTakeKey === key || voice.referenceAudioId === take.audioId,
-  )
-}
+export type ChangeVoiceSkipCounts = Record<ChangeVoiceBlocker | "busy", number>
 
 export interface ChangeVoicePlan {
   targets: ChangeVoiceTarget[]
@@ -59,27 +33,12 @@ export function planChangeVoiceAll(
   cells: CellData[],
   /** The OPEN LANE's voices (AQU-2037) — which voice each line speaks with. */
   settings: ProjectTtsSettings | undefined,
-  /** When set, a take already in this voice is redone if its reference clip or
-   *  its quality differs. Omitted, any quality of the current clip counts as done. */
-  diffusionSteps?: number,
-  /**
-   * The WHOLE project's voices, for the clone-reference guard only (AQU-2037).
-   * A take that another LANE's voice is cloned from must still be left alone —
-   * converting it would change what that voice sounds like, and the lane the
-   * batch happens to run on has no bearing on that. Defaults to `settings`,
-   * which is the pre-lane behaviour.
-   */
-  allSettings: ProjectTtsSettings | undefined = settings,
 ): ChangeVoicePlan {
-  const skipped: ChangeVoiceSkipCounts = { "no-take": 0, "not-cloned": 0, "up-to-date": 0, busy: 0, "voice-reference": 0 }
+  const skipped: ChangeVoiceSkipCounts = { "no-take": 0, "not-trained": 0, "up-to-date": 0, busy: 0 }
   const targets: ChangeVoiceTarget[] = []
   for (const cell of cells) {
-    if (takeUsedByVoice(cell, allSettings)) {
-      skipped["voice-reference"]++
-      continue
-    }
     const voice = resolveCastVoice(settings, cell)
-    const blocker = changeVoiceBlocker(cell, voice, diffusionSteps)
+    const blocker = changeVoiceBlocker(cell, voice)
     if (blocker) {
       skipped[blocker]++
       continue
@@ -105,13 +64,8 @@ export interface ChangeVoiceAllArgs {
   cells: CellData[]
   /** The OPEN LANE's voices (AQU-2037). */
   settings: ProjectTtsSettings | undefined
-  /** The whole project's voices, for the clone-reference guard — see
-   *  `planChangeVoiceAll`'s `allSettings`. Defaults to `settings`. */
-  allSettings?: ProjectTtsSettings
   session: FrontierSession | null
   author: string
-  /** Seed-VC diffusion steps. Defaults to the device's Change voice quality. */
-  diffusionSteps?: number
 }
 
 export interface ChangeVoiceAllResult {
@@ -121,10 +75,7 @@ export interface ChangeVoiceAllResult {
 }
 
 export async function runChangeVoiceAll(args: ChangeVoiceAllArgs): Promise<ChangeVoiceAllResult> {
-  const diffusionSteps = args.diffusionSteps ?? changeVoiceDiffusionSteps()
-  const { targets, skipped } = planChangeVoiceAll(
-    args.cells, args.settings, diffusionSteps, args.allSettings ?? args.settings,
-  )
+  const { targets, skipped } = planChangeVoiceAll(args.cells, args.settings)
   const result: ChangeVoiceAllResult = { converted: 0, failed: 0, skipped }
   if (targets.length === 0) return result
 
@@ -138,7 +89,6 @@ export async function runChangeVoiceAll(args: ChangeVoiceAllArgs): Promise<Chang
         voice,
         session: args.session,
         author: args.author,
-        diffusionSteps,
       })
       if (ok) result.converted++
       else result.failed++

@@ -40,6 +40,20 @@ Do not walk the app. Leave one comment with status **BLOCKED** and stop.
   failed SPA preview.
 - Sign-in on the preview fails.
 
+**A server fault the PR's own migration explains is BLOCKED, not FAIL.**
+Every branch preview runs the branch's auth and sync workers against the
+one development database, and nobody applies a branch's migration there,
+so a PR that adds a file under `db/postgres/migrations/` (or sits on a
+branch that does) answers 500 on every route that reads the new table or
+column until the migration reaches dev, which happens when the merge
+deploys. When the diff adds a migration and the items that failed died on a
+server fault on a route the diff touches, post **BLOCKED** with the line
+`Blocked by: pending migration <file>` and stop; the PR gets a dev
+re-walk after merge (see **Re-walk on dev after merge**). Observation and
+hypothesis stay in separate sentences: the 500 is measured, the cause is
+read off the diff. A 500 on a PR with no migration in its diff or its base
+is still FAIL (PR 628).
+
 **Not a hard stop:** the branch is behind `dev` but mergeable, with a
 preview of *this* HEAD. Walk it. Note how far behind in the comment.
 Skipping every stale PR means the bot walks almost nothing in a large
@@ -53,12 +67,14 @@ queue, and the preview is still that branch's code.
 
 **One comment per HEAD.** If you already commented on this SHA, stop.
 If HEAD moved, one new comment for the new SHA. Do not stack BLOCKED
-notes on the same docs PR.
+notes on the same docs PR. The one second comment on a HEAD is the dev
+re-walk below, and its heading says so.
 
 **Re-read the PR right before posting.** A walk takes long enough for
 the PR to merge or move. If it is merged or closed, or HEAD is no
 longer the sha you walked, do not post; PR 513 got its walk 34 minutes
-after Matthew merged it.
+after Matthew merged it. The one comment written after a merge on purpose
+is the dev re-walk below.
 
 ## Status
 
@@ -88,7 +104,9 @@ in two narrower places: a miss, and the replays.
   2/3), or a replay passed on some runs and not others. That is a
   harness suspect first and an app bug second. Say which item and
   which run missed; do not call it a bug until a cold walk misses too.
-- **BLOCKED** only for a hard stop above.
+- **BLOCKED** only for a hard stop above, the pending-migration case
+  included. That one BLOCKED is not a checker bug: the preview has no way
+  to prove the claim, and the dev re-walk is where it gets proved.
 - **NOT CHECKED** as the whole-comment status when the diff has no UI claim
   at all — a scripts/CLI-only PR, or a backend-only change with no named
   screen effect (PR 797 is the real example: `scripts/release-plan*` and
@@ -145,6 +163,75 @@ in two narrower places: a miss, and the replays.
 
 5. **Comment on the PR.** One issue comment, never a GitHub review
    approval. Use the template below. Do not fix the app. Do not push.
+
+## Re-walk on dev after merge
+
+Previews cannot prove a migration. The schema a branch adds reaches the
+development database only when the merge deploys dev (`dev-deploy.yml`:
+`pnpm neon:apply:dev`, then `deploy:aquilla:dev`; by hand until the
+repository variable `AUTO_DEV_DEPLOY` is `on`). So a PR whose preview
+walk was **BLOCKED** by its own pending migration gets one more walk, on
+`dev.aquilla.app`, after it merges. Nothing else is walked twice: a FAIL
+whose effect did not show, a FLAKY, and a BLOCKED for a missing preview or
+a failed sign-in are handled as before. This is not a second chance for a
+FAIL.
+
+**Who qualifies.** All of these at once:
+
+- The PR is merged to `dev` and not in the latest calver tag. The
+  **Release cut** run summary lists it under *Held* as `walk fail`.
+- Its newest walk at the head sha is **BLOCKED** with a `Blocked by:
+  pending migration <file>` line (**Hard stops**). No marker line, no
+  re-walk: that line is the queue, not a judgement made later.
+- `dev.aquilla.app` carries the merge. Read
+  `https://dev.aquilla.app/version.json` and check that the PR's merge
+  commit is an ancestor of its `sha`
+  (`GET /repos/genesis-ai-dev/aquilla/compare/<merge sha>...<dev sha>`
+  answers `ahead` or `identical`). The deploy script refuses to run while
+  a migration is pending, so a dev at or after the merge has the schema.
+  While `AUTO_DEV_DEPLOY` is off, dev moves only when a person deploys:
+  wait, and say in the comment how long the PR waited. Never walk a dev
+  that is older than the merge.
+
+**What to walk.** The same checklist items and the same stories the
+preview walk would have had (Steps 1 to 4), as `qa-bot` in QA Bot
+Workspace, with `AQUILLA_BASE=https://dev.aquilla.app` for the replays.
+Dev is the merged state of the branch, not the branch: note dev's `sha`
+and the compare's `ahead_by`. An **Outside this PR** finding on dev is
+more likely to belong to a later merge; when the compare shows one that
+touches the screen, name it.
+
+**When not to start.** The development database is restored from
+production at 4:07 a.m. Eastern (`dev-neon-refresh.yml`) and the dev
+migrations are re-applied after it. Do not start a re-walk in the hour
+before; if the restore lands during one, start over on fresh fixtures and
+say so.
+
+**Comment.** Same PR, same head sha, one parenthetical, posted after the
+merge on purpose (the one exception to **Re-read the PR right before
+posting**):
+
+```
+## Bot walk — PR <n> @ <sha> (dev re-walk)
+
+**PASS** · dev re-walk after merge · walk 4/4 · replays 9/9 · https://dev.aquilla.app @ <dev sha>, <ahead_by> merges after the PR · as <role>
+
+Earlier walk: BLOCKED at <preview url> by pending migration <file>; dev carried the merge from <UTC time>.
+Walked: <checklist items, one line, in the PR's words>.
+Not walked: <items and why, one line; or "none">.
+```
+
+The planner reads the newest walk that names the head sha, so this comment
+replaces the BLOCKED one. A FAIL here is a FAIL: the migration is applied
+and the effect did not show; use the FAIL template with `dev re-walk after
+merge` on its status line.
+
+**What it changes for the release.** A migration is a holding area with no
+gate, so the migration PR itself waits for `release:approved` whatever the
+re-walk says; the comment is the evidence the person labels on. A PR
+stacked on that migration PR, with no migration of its own, becomes ready
+on a PASS and picks once the migration PR is in the same slice (the
+planner reports `pick conflict` until then).
 
 ## Effect, not control
 
@@ -250,7 +337,10 @@ The release planner reads the heading by machine
 sha, no backticks, nothing before or after. A re-walk uses the same heading;
 say why on the status line (`**PASS** · re-walk, Manager fixture · …`). A
 heading the planner cannot read counts as no walk, and that PR holds the
-release.
+release. A dev re-walk writes `## Bot walk — PR <n> @ <sha> (dev re-walk)`:
+the same PR head sha, and that parenthetical is the only thing allowed
+after it; the planner takes the newest walk naming the head sha, so it
+replaces the BLOCKED comment before it.
 
 Short. A reviewer reads the first line and knows whether to look. Status
 is exactly one of **PASS**, **FAIL**, **FLAKY**, **BLOCKED**,

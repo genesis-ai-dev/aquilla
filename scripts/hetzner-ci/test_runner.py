@@ -12,6 +12,23 @@ import webhook
 
 
 class RunnerTests(unittest.TestCase):
+    def test_container_memory_comes_from_the_host_config_within_sane_bounds(self):
+        # The default is the 3.8 GB host's budget; a resized host raises it in
+        # runner.json without a controller change. Swap stays a fraction of RAM.
+        self.assertEqual(runner.memory({}), ["--memory=2200m", "--memory-swap=2600m"])
+        self.assertEqual(runner.memory({"container_memory_mb": 4000, "container_swap_mb": 500}),
+                         ["--memory=4000m", "--memory-swap=4500m"])
+        for bad in ({"container_memory_mb": 100}, {"container_memory_mb": 2200, "container_swap_mb": 3000},
+                    {"container_memory_mb": "lots"}):
+            with self.assertRaises(ValueError):
+                runner.memory(bad)
+
+    def test_app_and_test_containers_bake_the_same_browser_urls(self):
+        # The app builds against these before its workers start; a test image
+        # pointed elsewhere would drive a different stack than the one built.
+        self.assertEqual(runner.BROWSER_ENV["VITE_AUTH_BASE"], "http://127.0.0.1:9787")
+        self.assertEqual(runner.BROWSER_ENV["VITE_SYNC_WORKER_HOST"], "127.0.0.1:9788")
+
     def test_untrusted_logs_have_a_hard_cap(self):
         log = io.BytesIO()
         result = runner.command([sys.executable, "-c",

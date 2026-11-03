@@ -6,6 +6,9 @@
 #
 # Usage: verify-deploy-branch.sh <expected-branch | release>
 # "release" accepts any release/YYYY/MM/DD or release/YYYY/MM/DD-NN branch (production).
+# In GitHub Actions the checkout must also match the ref GitHub reports
+# (GITHUB_REF_NAME) — or DEPLOY_REF_NAME, set by a workflow that chose its
+# deploy ref at run time instead of being dispatched on it.
 set -euo pipefail
 
 expected="$1"
@@ -13,7 +16,12 @@ git_branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
 ci_branch=""
 
 if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
-  ci_branch="${GITHUB_REF_NAME:-}"
+  # GITHUB_REF_NAME is the ref the workflow ran on. A workflow that picks its
+  # deploy ref at run time (release-deploy.yml runs on a schedule, so GitHub
+  # reports the default branch while the job checks out the release branch
+  # it chose) names that ref in DEPLOY_REF_NAME. It is checked against the
+  # checkout below exactly as GITHUB_REF_NAME is.
+  ci_branch="${DEPLOY_REF_NAME:-${GITHUB_REF_NAME:-}}"
 fi
 
 if [ -n "$git_branch" ]; then

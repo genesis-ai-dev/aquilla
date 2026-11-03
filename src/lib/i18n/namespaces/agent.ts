@@ -587,6 +587,8 @@ export const agent = defineNamespace({
     //    BriefSection) ───────────────────────────────────────────────────
     "agent.brief.helpMeWrite": "Help me write this",
     "agent.brief.notesPrompt": "Anything else the AI should know?",
+    "agent.brief.notesStepLabel": "Other notes",
+    "agent.brief.sectionsNavAriaLabel": "Brief sections",
     "agent.brief.saveDraft": "Save draft",
     "agent.brief.saveAndGenerate": "Save & generate summary",
     "agent.brief.pasteToPrefill": "Optional: paste an existing brief to pre-fill",
@@ -1109,6 +1111,13 @@ export const agent = defineNamespace({
           "Live counter badge on a proposal receipt: how many rule-lint findings exist " +
           "across its still-undecided drafts.",
         placeholders: { count: "Number of rule-lint findings on undecided drafts." },
+      },
+      "agent.brief.sectionsNavAriaLabel": {
+        description:
+          "Accessible landmark name (aria-label) for the list of the translation " +
+          "brief's sections down the left of the brief dialog. Each item jumps to " +
+          "one section of the brief; the list itself has no visible heading, so a " +
+          "screen-reader user only hears this string.",
       },
       "agent.workingSet.title": {
         description:

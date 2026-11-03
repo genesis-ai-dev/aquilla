@@ -17,7 +17,7 @@ import {
   settingsEditorName,
 } from "@/lib/sync/project-settings"
 import { readOfflineProjectSettings, rememberProjectSettingsOffline, whenOfflineStoreOpen } from "@/lib/sync/project-resolve"
-import type { ProjectOrgPolicy, ProjectVisibilityFloors } from "@/lib/sync/project-org-policy"
+import type { ProjectOrgPolicy, ProjectVisibilityFloors, VisibilityFloorView } from "@/lib/sync/project-org-policy"
 import posthog from "@/lib/posthog"
 import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
 import { claimHydrationReport, retainProjectOpen } from "./project-settings-open"
@@ -25,6 +25,7 @@ import { useDraftingSettingsUpload } from "./useDraftingSettingsUpload"
 import { registerSettingsAccessor } from "@/lib/history/settings-access"
 import type { CompletionSettings, ProjectRecord } from "@/lib/parsers/types"
 import type { MediaDefaults } from "../../db/shared/media-setting-defaults"
+import { readSettingAt } from "@/lib/settings/setting-at"
 
 /** AQU-1768: one stable empty value, so an org with no media defaults never re-renders. */
 const EMPTY_MEDIA_DEFAULTS: MediaDefaults = Object.freeze({})
@@ -330,6 +331,10 @@ export interface UseProjectSettings {
    */
   orgPolicy: ProjectOrgPolicy | null
   visibilityFloors: ProjectVisibilityFloors | null
+  /** AQU-2305: the import floor this project enforces, split org / own /
+   *  effective. Null until a response carries it (and on a server that
+   *  predates it), where `resolveProjectPolicy` derives the same split. */
+  importFloor: VisibilityFloorView | null
   /** AQU-1418: the project's lane rows from the last settings response.
    *  Null before the first response that carries them, and on a server
    *  that predates lane rows. */
@@ -380,7 +385,64 @@ export interface UseProjectSettings {
    *  patch, gated by PROJECT_LEAD (AQU-1246). Server-forbidden writes are
    *  surfaced as blocked and the optimistic overlay is rolled back — no silent
    *  local divergence. */
-  patch: (partial: ProjectWideSettings) => Promise<PatchOutcome>
+  patch: (partial: ProjectWideSettings, opts?: PatchOptions) => Promise<PatchOutcome>
+}
+
+/**
+ * AQU-2262: what a one-setting write (Project settings save as you change
+ * them) tells the patch besides the new values.
+ */
+export interface PatchOptions {
+  /**
+   * The value of each setting (or one field of an object setting) as the
+   * person saw it when they changed it. The write is refused — a conflict,
+   * with the server's row — when the server holds something else there by
+   * the time it goes: someone else changed that same setting first, and
+   * their change is kept. Settings not named here are never compared, so a
+   * change to one setting goes ahead over someone's change to another.
+   */
+  expect?: SettingExpectation[]
+  /** Keys whose object value is merged into the server's object (one field
+   *  of the drafting settings) rather than replacing it. */
+  mergeKeys?: string[]
+}
+
+export interface SettingExpectation {
+  key: string
+  field?: string
+  value: unknown
+}
+
+const sameSettingValue = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null)
+
+/** The first expectation the settings no longer meet, if any. */
+export function unmetExpectation(
+  settings: ProjectWideSettings | undefined,
+  expect: readonly SettingExpectation[] | undefined,
+): SettingExpectation | null {
+  for (const e of expect ?? []) {
+    if (!sameSettingValue(readSettingAt(settings, e.key, e.field), e.value)) return e
+  }
+  return null
+}
+
+/** `partial` laid over `base`, merging the objects under `mergeKeys`. */
+export function applySettingsPatch(
+  base: ProjectWideSettings | undefined,
+  partial: ProjectWideSettings,
+  mergeKeys: readonly string[] | undefined,
+): ProjectWideSettings {
+  const next: Record<string, unknown> = { ...(base ?? {}), ...partial }
+  for (const key of mergeKeys ?? []) {
+    const add = (partial as Record<string, unknown>)[key]
+    if (!add || typeof add !== "object") continue
+    const had = (base as Record<string, unknown> | undefined)?.[key]
+    const merged: Record<string, unknown> = { ...(had && typeof had === "object" ? (had as Record<string, unknown>) : {}), ...(add as Record<string, unknown>) }
+    // An undefined field means "unset": leave it out rather than send it.
+    for (const [field, value] of Object.entries(merged)) if (value === undefined) delete merged[field]
+    next[key] = merged
+  }
+  return next as ProjectWideSettings
 }
 
 export interface UseProjectSettingsOptions {
@@ -561,6 +623,7 @@ export function useProjectSettings(
   const [orgValidationCountAudio, setOrgValidationCountAudio] = useState<number | null>(null)
   const [orgPolicy, setOrgPolicy] = useState<ProjectOrgPolicy | null>(null)
   const [visibilityFloors, setVisibilityFloors] = useState<ProjectVisibilityFloors | null>(null)
+  const [importFloor, setImportFloor] = useState<VisibilityFloorView | null>(null)
   const [orgMediaDefaults, setOrgMediaDefaults] = useState<MediaDefaults>(EMPTY_MEDIA_DEFAULTS)
   const [lanes, setLanes] = useState<ProjectLaneView[] | null>(null)
   const writeServer = useCallback((next: ProjectSettingsResponse | null) => {
@@ -573,6 +636,7 @@ export function useProjectSettings(
     if (next?.orgValidationCountAudio !== undefined) setOrgValidationCountAudio(next.orgValidationCountAudio)
     if (next?.orgPolicy !== undefined) setOrgPolicy(next.orgPolicy)
     if (next?.visibilityFloors !== undefined) setVisibilityFloors(next.visibilityFloors)
+    if (next?.importFloor !== undefined) setImportFloor(next.importFloor)
     if (next?.orgMediaDefaults !== undefined) setOrgMediaDefaults(next.orgMediaDefaults)
     if (next?.lanes !== undefined) setLanes(next.lanes)
   }, [])
@@ -924,7 +988,9 @@ export function useProjectSettings(
     onServerResponse: onDraftingUploadResponse,
   })
 
-  const patch = useCallback(async (partial: ProjectWideSettings): Promise<PatchOutcome> => {
+  const patch = useCallback(async (partial: ProjectWideSettings, opts?: PatchOptions): Promise<PatchOutcome> => {
+    const mergeKeys = opts?.mergeKeys
+    const over = (base: ProjectWideSettings | undefined) => applySettingsPatch(base, partial, mergeKeys)
     // Gate logic for local apply vs. server write:
     //
     // 1. No jwt or no projectId → error immediately (no session/project).
@@ -951,8 +1017,8 @@ export function useProjectSettings(
 
     if (!isOnlineRef.current) {
       // Offline — apply locally so work isn't lost; server will reconcile on reconnect.
-      setLocal((prev) => ({ ...prev, ...partial }))
-      void patchProject(projectId, (existing) => ({ ...existing, ...partial })).catch((err) => {
+      setLocal((prev) => over(prev))
+      void patchProject(projectId, (existing) => ({ ...existing, ...over(existing as ProjectWideSettings) })).catch((err) => {
         console.warn("[useProjectSettings] local IDB patch failed (offline)", err)
       })
       return { kind: "blocked", reason: "offline" }
@@ -960,8 +1026,8 @@ export function useProjectSettings(
 
     if (roleLevel == null) {
       // Unsynced project — only local storage exists; no server to write to.
-      setLocal((prev) => ({ ...prev, ...partial }))
-      void patchProject(projectId, (existing) => ({ ...existing, ...partial })).catch((err) => {
+      setLocal((prev) => over(prev))
+      void patchProject(projectId, (existing) => ({ ...existing, ...over(existing as ProjectWideSettings) })).catch((err) => {
         console.warn("[useProjectSettings] local IDB patch failed (unsynced)", err)
       })
       return { kind: "blocked", reason: "role" }
@@ -985,8 +1051,8 @@ export function useProjectSettings(
     // Optimistic local apply for synced+online+authorized path. We apply here
     // (after the role guard) rather than before it so a below-floor user never
     // writes stale data to IDB on a synced project.
-    setLocal((prev) => ({ ...prev, ...partial }))
-    void patchProject(projectId, (existing) => ({ ...existing, ...partial })).catch((err) => {
+    setLocal((prev) => over(prev))
+    void patchProject(projectId, (existing) => ({ ...existing, ...over(existing as ProjectWideSettings) })).catch((err) => {
       console.warn("[useProjectSettings] local IDB patch failed", err)
     })
 
@@ -1003,24 +1069,31 @@ export function useProjectSettings(
       // etc.). One extra GET per save eliminates the whole class of bug.
       const probe = await fetchProjectSettingsResult(jwt, projectId)
       const fresh = (probe.ok ? probe.value : null) ?? serverRef.current
+      // AQU-2262: someone else changed this same setting since the person
+      // saw it. Their change stands; nothing is written.
+      if (fresh && unmetExpectation(fresh.settings, opts?.expect)) {
+        writeServerConfirmed(fresh)
+        return { kind: "conflict", latest: fresh } satisfies PatchResult
+      }
       const baseVersion = fresh?.version ?? 0
       const optimistic: ProjectSettingsResponse = {
         version: baseVersion,
         updatedAt: fresh?.updatedAt ?? new Date().toISOString(),
         updatedBy: fresh?.updatedBy ?? null,
-        settings: { ...(fresh?.settings ?? {}), ...partial },
+        settings: over(fresh?.settings),
       }
       writeServer(optimistic)
 
       // Retry once for the (now rare) case that a concurrent writer slipped
-      // in between the GET above and our PATCH.
+      // in between the GET above and our PATCH — unless that writer changed
+      // the setting this write was about (AQU-2262).
       const first = await patchProjectSettings(jwt, projectId, optimistic.settings, baseVersion)
       const outcome =
-        first.kind === "conflict"
+        first.kind === "conflict" && !unmetExpectation(first.latest.settings, opts?.expect)
           ? await patchProjectSettings(
               jwt,
               projectId,
-              { ...first.latest.settings, ...partial },
+              over(first.latest.settings),
               first.latest.version,
             )
           : first
@@ -1122,8 +1195,8 @@ export function useProjectSettings(
     if (!projectId) return
     return registerSettingsAccessor(projectId, {
       read: () => settingsForHistoryRef.current as Record<string, unknown>,
-      write: async (next) => {
-        const out = await patchForHistoryRef.current(next as ProjectWideSettings)
+      write: async (next, opts) => {
+        const out = await patchForHistoryRef.current(next as ProjectWideSettings, opts)
         if (out.kind !== "ok") throw new Error(`settings write ${out.kind}`)
       },
     })
@@ -1140,6 +1213,7 @@ export function useProjectSettings(
     orgValidationCountAudio,
     orgPolicy,
     visibilityFloors,
+    importFloor,
     orgMediaDefaults,
     lanes,
     isOnline,

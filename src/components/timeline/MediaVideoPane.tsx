@@ -1287,7 +1287,7 @@ export function MediaVideoPane({
           <div
             aria-hidden
             data-testid="video-pane-youtube-click-layer"
-            className="absolute inset-0 z-[5] cursor-pointer"
+            className="absolute inset-0 z-[5]"
             onClick={onPictureClick}
           />
         )}

@@ -93,7 +93,7 @@ export function CueLinkOverlay({
               onPick(item.id)
             }}
             className={cn(
-              "absolute z-20 cursor-pointer ring-inset transition-colors",
+              "absolute z-20 ring-inset transition-colors",
               TL_CHIP_BOX_CLASS,
               picked && "bg-violet-500/25 ring-2 ring-violet-500",
               !picked && linked && "bg-emerald-500/20 ring-2 ring-emerald-500",

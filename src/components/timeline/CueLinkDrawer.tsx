@@ -99,7 +99,7 @@ function CandidateRow({
         e.preventDefault()
         onNavigate(row.cueCellId, [row.textCellId])
       }}
-      className="cursor-pointer rounded-md border border-border p-2 text-xs transition-colors hover:bg-muted/40"
+      className="rounded-md border border-border p-2 text-xs transition-colors hover:bg-muted/40"
     >
       <div className="flex w-full flex-col gap-1 text-left">
         <div className="flex items-baseline gap-2">
@@ -160,7 +160,7 @@ function PairRow({
         e.preventDefault()
         onNavigate(pair.cueCellId, [pair.textCellId])
       }}
-      className="cursor-pointer rounded-md border border-border p-2 text-xs transition-colors hover:bg-muted/40"
+      className="rounded-md border border-border p-2 text-xs transition-colors hover:bg-muted/40"
     >
       <div className="flex w-full flex-col gap-1 text-left">
         <div className="truncate">{clip(cue?.original)}</div>

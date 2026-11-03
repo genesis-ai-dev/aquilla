@@ -200,7 +200,7 @@ function RowShell({
       }}
       className={cn(
         "rounded-md border border-border p-2 text-xs transition-colors",
-        inert ? "cursor-default" : "cursor-pointer hover:bg-muted/40",
+        !inert && "hover:bg-muted/40",
         muted && "border-border/60 bg-muted/20",
       )}
     >

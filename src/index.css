@@ -478,6 +478,14 @@ textarea,
   text-decoration-color: color-mix(in oklch, var(--color-violet-500, oklch(0.606 0.25 292.717)) 70%, transparent);
   cursor: pointer;
 }
+/* Media tab: the arrow stays. Clickable marks (health, notes, chips) used
+   the hand; hover already shows they respond. Unlayered so it wins over the
+   `cursor-pointer` utility. Resize, grab, text, and not-allowed are their
+   own classes and stay. */
+[data-media-editor] .cursor-pointer,
+[data-media-editor] .smart-edit-blot {
+  cursor: default;
+}
 .smart-edit-blot-jev { text-decoration-style: dotted; }
 .smart-edit-blot-llm {
   text-decoration-style: dashed;

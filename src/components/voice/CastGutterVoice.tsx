@@ -210,7 +210,7 @@ export function CastGutterVoice({ voice, explicit, castName, editable, voices, o
                     ["everywhere", t("workspace.castGutterVoice.scopeEverywhere", { name: castName })],
                   ] as const
                 ).map(([value, label]) => (
-                  <label key={value} className="flex cursor-pointer items-start gap-2">
+                  <label key={value} className="flex items-start gap-2">
                     <input
                       type="radio"
                       name="cast-gutter-voice-scope"

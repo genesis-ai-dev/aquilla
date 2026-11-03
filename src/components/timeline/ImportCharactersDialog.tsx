@@ -100,7 +100,7 @@ interface Picked {
 export function ImportCharactersDialog(props: Props) {
   return (
     <Dialog open={props.open} onOpenChange={(next) => { if (!next) props.onCancel() }}>
-      <DialogContent data-testid="import-characters-dialog">
+      <DialogContent data-testid="import-characters-dialog" data-media-editor="">
         <ImportCharactersContent {...props} />
       </DialogContent>
     </Dialog>
@@ -413,7 +413,7 @@ function ImportCharactersContent({
                 too — and a person always knows which they downloaded. */}
             <div className="flex flex-wrap items-center justify-center gap-2">
               <label>
-                <span className="inline-flex cursor-pointer items-center rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium transition-colors hover:bg-accent">
+                <span className="inline-flex items-center rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium transition-colors hover:bg-accent">
                   {t("editor.timeline.charactersPickSubtitle")}
                 </span>
                 <input
@@ -432,7 +432,7 @@ function ImportCharactersContent({
               </label>
               {audioCues && audioCues.length > 0 && (
                 <label>
-                  <span className="inline-flex cursor-pointer items-center rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium transition-colors hover:bg-accent">
+                  <span className="inline-flex items-center rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium transition-colors hover:bg-accent">
                     {t("editor.timeline.charactersPickAudio")}
                   </span>
                   <input

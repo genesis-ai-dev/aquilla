@@ -17546,7 +17546,10 @@ export function ProjectWorkspace() {
           </div>
         ) : cellAreaState.kind === "ready" ? (
           // FRO-309: relative wrapper so the search-expanded overlay can cover the editor
-          <div className="relative flex h-full w-full flex-col">
+          <div
+            className="relative flex h-full w-full flex-col"
+            {...(timelineStacked ? { "data-media-editor": "" } : {})}
+          >
             <ExtensionsBar choice={extensionEditorChoice} />
             {/* FRO-309: Expanded search results overlay */}
             {searchExpandedQuery !== null && (

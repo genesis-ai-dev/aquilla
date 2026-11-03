@@ -485,10 +485,13 @@ const TOOL_SPECS: McpToolSpec[] = [
     name: 'get_prompt_preview',
     description:
       'See the prompt the project copilot would ACTUALLY send when drafting one cell — base ' +
-      'role text after language substitution, the project instructions, the compiled rules ' +
-      'block (project/org rules plus terminology), the retrieved few-shot examples, and the ' +
+      'role text after language substitution, the project instructions, the Checks hint ' +
+      '(project/lane/org rules, style rules, Language-profile slots), the terminology block, ' +
+      'the retrieved few-shot examples, and the ' +
       'preceding approved-target discourse window — as both the assembled system+user ' +
-      'messages and the same content labeled by origin. Args: projectId, cellId, optional ' +
+      'messages and the same content labeled by origin (parts.brief / parts.rules / ' +
+      'parts.styleRules are deprecated aliases kept for one release — read parts.instructions, ' +
+      'parts.checks and parts.terminology). Args: projectId, cellId, optional ' +
       'targetLang (required lane id from get_project, not a language tag) and fileId (only needed when ' +
       'the same cellId exists in more than one file). This is the verification half of prompt ' +
       'tuning: after PatchSettings changes translationInstructions / draftingSettings / ' +

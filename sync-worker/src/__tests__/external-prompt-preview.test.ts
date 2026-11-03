@@ -398,6 +398,23 @@ describe("external prompt preview", () => {
       expect(system).not.toContain("DISABLED wording")
     })
 
+    it("keeps the pre-AQU-2342 part names as deprecated aliases for one release", async () => {
+      await putSettings(testDb, "proj-a", {
+        sourceLanguage: "English",
+        targetLanguage: "French",
+        translationInstructions: "Plain register.",
+        rules: [{ id: "r1", enabled: true, scope: "project", check: { type: "target-forbids", targetPattern: "thingy" } }],
+      })
+      await styleRule("sr-1", "approved", "Use short sentences.")
+      const { body } = await preview(testDb, token)
+      expect(body.parts.brief).toBe(body.parts.instructions)
+      expect(body.parts.styleRules).toContain("- Use short sentences.")
+      expect(body.parts.styleRules).not.toContain("thingy")
+      expect(body.parts.rules).toContain("thingy")
+      expect(body.parts.rules).not.toContain("Use short sentences.")
+      expect(body.parts.checks).toContain("- Use short sentences.")
+    })
+
     it("leaves the block empty when the project has no style rules", async () => {
       const { body } = await preview(testDb, token)
       expect(body.parts.checks).toBe("")

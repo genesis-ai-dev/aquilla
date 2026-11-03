@@ -232,6 +232,16 @@ export interface PromptPreviewBody {
     injectedTerms: InjectedTerm[]
     examples: ValidatedPair[]
     precedingContext: { source: string; target: string }[]
+    /** @deprecated AQU-2342 compat alias, kept for one release: the same text
+     *  as `instructions`. Read `instructions`. */
+    brief: string
+    /** @deprecated AQU-2342 compat alias, kept for one release: the rule hints
+     *  of `checks` without the style rules, then `terminology` — what the old
+     *  rules block covered. Read `checks` and `terminology`. */
+    rules: string
+    /** @deprecated AQU-2342 compat alias, kept for one release: the style-rule
+     *  lines of `checks` on their own. Read `checks`. */
+    styleRules: string
   }
   /** What the draft call would be made WITH (project configuration; a
    *  per-device provider override in user Settings is invisible here). */
@@ -541,6 +551,11 @@ export async function buildPromptPreview(
     precedingContext,
   })
 
+  const instructionsBlock = instructionsPromptBlock(instructions)
+    .replace(/\{sourceLanguage\}/g, sourceLanguage)
+    .replace(/\{targetLanguage\}/g, targetLanguage)
+  const terminologyBlock = buildTerminologyBlock(rules, { sourceText })
+
   const warnings: { code: string; message: string }[] = []
   if (!sourceText.trim()) {
     warnings.push({
@@ -584,14 +599,16 @@ export async function buildPromptPreview(
         base: systemPrompt
           .replace(/\{sourceLanguage\}/g, sourceLanguage)
           .replace(/\{targetLanguage\}/g, targetLanguage),
-        instructions: instructionsPromptBlock(instructions)
-          .replace(/\{sourceLanguage\}/g, sourceLanguage)
-          .replace(/\{targetLanguage\}/g, targetLanguage),
+        instructions: instructionsBlock,
         checks: buildChecksBlock(rules, styleInstructions, languageProfile),
-        terminology: buildTerminologyBlock(rules, { sourceText }),
+        terminology: terminologyBlock,
         injectedTerms,
         examples,
         precedingContext,
+        // AQU-2342: the pre-2342 part names, for one release (see the type).
+        brief: instructionsBlock,
+        rules: [buildChecksBlock(rules, [], languageProfile), terminologyBlock].filter(Boolean).join("\n\n"),
+        styleRules: buildChecksBlock([], styleInstructions, null),
       },
       generation: {
         provider:

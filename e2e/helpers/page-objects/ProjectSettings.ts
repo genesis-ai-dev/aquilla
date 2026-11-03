@@ -56,14 +56,30 @@ export class ProjectSettings {
     // an org that turns the default off must not silently disarm them.
     // AQU-1768: a project follows the organization's default until it sets its
     // own, and the box stays locked to the organization's value until then.
-    await this.page.getByTestId("allow-track-editing-source").click()
-    await this.page.getByRole("option", { name: "Set for this project" }).click()
+    // AQU-2262: there is no Save bar; each pick saves as it is made.
+    const source = this.page.getByTestId("allow-track-editing-source")
+    if (!/Set for this project/.test((await source.textContent()) ?? "")) {
+      const pinned = this.settingsSave()
+      await source.click()
+      await this.page.getByRole("option", { name: "Set for this project" }).click()
+      expect((await pinned).ok(), "pinning track editing to this project should save").toBe(true)
+    }
     await expect(setting).toBeEnabled()
-    if (!(await setting.isChecked())) await setting.click()
-    await this.page.getByRole("button", { name: /Save changes/i }).click()
-    await expect(this.page.getByText("Saved: timeline track editing.", { exact: true }))
-      .toBeVisible({ timeout: 10_000 })
+    if (!(await setting.isChecked())) {
+      const ticked = this.settingsSave()
+      await setting.click()
+      expect((await ticked).ok(), "ticking track editing should save").toBe(true)
+    }
     await expect(setting).toBeChecked()
+  }
+
+  /** The next write of the project's settings (AQU-2262: settings save as they change). */
+  private settingsSave() {
+    return this.page.waitForResponse(
+      (r) => /\/api\/v2\/projects\/[^/]+\/settings/.test(r.url())
+        && (r.request().method() === "PATCH" || r.request().method() === "PUT"),
+      { timeout: 15_000 },
+    )
   }
 
   /** Add a target lane via the Languages section's "Add language lane" form. */

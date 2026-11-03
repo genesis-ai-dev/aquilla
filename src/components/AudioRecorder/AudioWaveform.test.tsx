@@ -113,6 +113,16 @@ describe("AudioWaveform — the take, growing", () => {
     expect(screen.getByTestId("rec-live-waveform").style.getPropertyValue("--tl-track-hue")).toBe("#eba720")
   })
 
+  // AQU-2235: the take look — the frame and ground of a saved take, and its
+  // ink read off the track's waveform colour, so Stop hands over seamlessly.
+  it("is drawn in the take look: the faint frame, the 12% ground and the track's waveform ink", () => {
+    render(<AudioWaveform stream={null} tone="armed" />)
+    const box = screen.getByTestId("rec-live-waveform")
+    expect(box.className).toContain("border-[color:var(--tl-track-frame)]")
+    expect(box.className).toContain("var(--tl-track-played)_var(--tl-play-x")
+    expect(box.querySelector("canvas")?.getAttribute("class")).toContain("text-[color:var(--tl-track-wave)]")
+  })
+
   it("with no microphone stream it draws nothing", () => {
     render(<AudioWaveform stream={null} tone="live" />)
     expect(grown()).toBe("0%")

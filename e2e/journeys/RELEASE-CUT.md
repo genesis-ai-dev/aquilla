@@ -54,9 +54,14 @@ The workflow pushes no branch and posts no comment, and the run says why:
 **Not a hard stop:** a held PR. Held PRs are skipped by the cut, listed in
 the notes with why, and wait for a person's `release:approved` label (or,
 for an area with a gate such as `events` → `replay-gate`, for that check to
-go green on the PR head; see `docs/RELEASE-RISK-GATES.md`). A
-pick that conflicts is aborted and joins the held list as `pick conflict`;
-the cut goes on with the rest.
+go green on the PR head; see `docs/RELEASE-RISK-GATES.md`). A pick that
+does not land joins the held list with its own reason and the cut goes on
+with the rest: a conflict is aborted and listed as `pick conflict in
+<paths>; needs #N` (the held PR it was built on, when the plan's files
+show one); a pick with nothing to commit is skipped, never committed
+empty, and listed as `empty pick: already in base, or needs #N`. Neither
+is a failed run and neither is dropped: when nothing could be picked, the
+run summary lists each PR with its reason.
 
 ## Steps
 
@@ -113,7 +118,7 @@ and files Linear tickets. It does not affect the cut or the deploy.
 | #772 | Comment thread polish | PASS | sync |
 | #774 | Retention tab copy | none (docs only) | — |
 
-**Held, not in this release:** #773 (walk fail), #775 (touches migration), #776 (pick conflict).
+**Held, not in this release:** #773 (walk fail), #775 (touches migration), #776 (pick conflict in src/lib/sync/outbox.ts; needs #775).
 A held PR joins the next cut once it carries the `release:approved` label.
 ```
 
@@ -130,10 +135,12 @@ A held PR joins the next cut once it carries the `release:approved` label.
   return prints as `(title unavailable)` rather than failing the cut.
   "Areas" is `pr.areas.join(", ")` or `—`.
 - The **Held** line lists every PR in `plan.held` plus every pick that
-  conflicted, as `#<number> (<why>)` separated by commas, followed by the
-  fixed sentence about `release:approved`. Omit both lines when nothing
-  is held. `why` is `touches <areas>`, `walk <verdict>`, or `pick
-  conflict`; copy it verbatim.
+  did not land, as `#<number> (<why>)` separated by commas, followed by
+  the fixed sentence about `release:approved`. Omit both lines when
+  nothing is held. `why` is `touches <areas>`, `walk <verdict>`, `pick
+  conflict in <paths>` (with `; needs #N` when the plan's files name the
+  held PR it was built on), or `empty pick: already in base, or needs
+  #N` (`a held PR` when none is named); copy it verbatim.
 
 ## Say only what the plan measured
 

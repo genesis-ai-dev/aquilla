@@ -92,7 +92,8 @@ beforeEach(() => {
 describe("TakesStrip — the recorder lists each piece of a cut take on its own row", () => {
   it("lists the take, then each piece under it by its own name", () => {
     draw(cutTake({ [P3]: { label: "Chorus" } }), P1)
-    const rows = screen.getAllByTestId(/^take-row-/)
+    // The rows, not the waveform each row carries since AQU-2235.
+    const rows = screen.getAllByTestId(/^take-row-(?!wave-)/)
     expect(rows.map((r) => r.dataset.testid)).toEqual([
       `take-row-${P1}`, `take-row-piece-${P1}`, `take-row-piece-${P2}`, `take-row-piece-${P3}`,
     ])
@@ -296,7 +297,7 @@ describe("TakesStrip — the recorder lists each piece of a cut take on its own 
 
   it("lists a take never cut as one row, voted on as before", async () => {
     draw([take({ audioId: B, label: "Take 3" })], B)
-    expect(screen.getAllByTestId(/^take-row-/)).toHaveLength(1)
+    expect(screen.getAllByTestId(/^take-row-(?!wave-)/)).toHaveLength(1)
     expect(screen.queryByTestId(`take-pieces-approved-${B}`)).toBeNull()
     await userEvent.click(voteOn(screen.getByTestId(`take-row-${B}`)))
     expect(emitValidate.mock.calls.map(([i]) => (i as { audioId: string }).audioId)).toEqual([B])

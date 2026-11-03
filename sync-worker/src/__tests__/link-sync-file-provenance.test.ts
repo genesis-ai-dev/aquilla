@@ -168,3 +168,136 @@ describe("mirrorSync — a mirrored file records its upstream file id (AQU-1547)
     }
   })
 })
+
+// AQU-2345: a mirrored file is the upstream file's material, so it is the
+// upstream's TYPE — `file.mirror` projected `role`/`kind`/`book_code` as NULL,
+// which read every copy as `codex` and hid the IDML round-trip for it — and
+// its ORIGINAL is the upstream's: a `file_source_blobs` row under the copy's id
+// that names the upstream's R2 object, without which `GET /files/:id/source`
+// answered "no source blob recorded for this file". Both ride every mirror
+// window (db/shared/link-file-provenance.ts), so one sync of a file repairs a
+// copy mirrored before this slice and follows an upstream re-import.
+
+const UPSTREAM_BLOB = { format: "idml", r2_key: `artifacts/${UPSTREAM}/art-1/original.idml`, size_bytes: 1234 }
+
+async function seedUpstreamBlob(
+  t: TestDb,
+  blob: { format: string; r2_key: string | null; size_bytes: number } = UPSTREAM_BLOB,
+): Promise<void> {
+  await t.pg.query(
+    `INSERT INTO file_source_blobs (file_id, project_id, format, raw_source, r2_key, size_bytes, created_at)
+     VALUES ($1, $2, $3, NULL, $4, $5, 1000)
+     ON CONFLICT (file_id) DO UPDATE SET format = EXCLUDED.format, r2_key = EXCLUDED.r2_key, size_bytes = EXCLUDED.size_bytes`,
+    [FILE, UPSTREAM, blob.format, blob.r2_key, blob.size_bytes],
+  )
+}
+
+async function downstreamFileRow(t: TestDb): Promise<{ kind: string | null; role: string | null; book_code: string | null } | null> {
+  const r = await t.pg.query<{ kind: string | null; role: string | null; book_code: string | null }>(
+    `SELECT kind, role, book_code FROM files WHERE id = $1 AND project_id = $2`,
+    [DOWNSTREAM_FILE, DOWNSTREAM],
+  )
+  return r.rows[0] ?? null
+}
+
+async function downstreamBlob(
+  t: TestDb,
+): Promise<{ project_id: string; format: string; r2_key: string | null; size_bytes: number | null } | null> {
+  const r = await t.pg.query<{ project_id: string; format: string; r2_key: string | null; size_bytes: string | number | null }>(
+    `SELECT project_id, format, r2_key, size_bytes FROM file_source_blobs WHERE file_id = $1`,
+    [DOWNSTREAM_FILE],
+  )
+  const row = r.rows[0]
+  // BIGINT reaches the test as a string or a number depending on the driver path.
+  return row ? { ...row, size_bytes: row.size_bytes == null ? null : Number(row.size_bytes) } : null
+}
+
+/** What the rows looked like for every file mirrored before this slice. */
+async function stripProvenance(t: TestDb): Promise<void> {
+  await t.pg.query(`UPDATE files SET kind = NULL, role = NULL, book_code = NULL WHERE id = $1`, [DOWNSTREAM_FILE])
+  await t.pg.query(`DELETE FROM file_source_blobs WHERE file_id = $1`, [DOWNSTREAM_FILE])
+}
+
+describe("mirrorSync — a mirrored file keeps the upstream's type and original (AQU-2345)", () => {
+  it("projects the upstream's kind and book code and points at its original", async () => {
+    const t = await makeTestDb()
+    try {
+      await seedProjects(t)
+      await seedUpstreamFile(t, { fileType: "idml", bookCode: "GEN" })
+      await seedUpstreamBlob(t)
+
+      expect((await mirrorSync(t.db, DOWNSTREAM)).ranSync).toBe(true)
+
+      expect(await downstreamFileRow(t)).toEqual({ kind: "idml", role: null, book_code: "GEN" })
+      expect(await downstreamBlob(t)).toEqual({ project_id: DOWNSTREAM, ...UPSTREAM_BLOB })
+      // The pointer is a row, not a copy: the upstream's row is untouched.
+      const upstream = await t.pg.query<{ n: string | number }>(`SELECT COUNT(*) AS n FROM file_source_blobs WHERE r2_key = $1`, [UPSTREAM_BLOB.r2_key])
+      expect(Number(upstream.rows[0]?.n)).toBe(2)
+    } finally {
+      await t.close()
+    }
+  })
+
+  it("repairs a copy mirrored before this slice on the next window that touches it, even one with nothing to mirror", async () => {
+    const t = await makeTestDb()
+    try {
+      await seedProjects(t)
+      await seedUpstreamFile(t, { fileType: "idml", bookCode: "GEN" })
+      await seedUpstreamBlob(t)
+      expect((await mirrorSync(t.db, DOWNSTREAM)).ranSync).toBe(true)
+      await stripProvenance(t)
+      expect(await downstreamFileRow(t)).toEqual({ kind: null, role: null, book_code: null })
+      expect(await downstreamBlob(t)).toBeNull()
+
+      // A re-import upstream: another file.create, no cell change, same name —
+      // the window folds no cell and re-mirrors no file.
+      await emitUpstream(t, "file.create", { fileId: FILE, payload: { name: "ACT-REV", fileType: "idml", bookCode: "GEN" } })
+      const result = await mirrorSync(t.db, DOWNSTREAM)
+      expect(result.ranSync).toBe(true)
+      expect(result.cellsMirrored).toBe(0)
+
+      expect(await downstreamFileRow(t)).toEqual({ kind: "idml", role: null, book_code: "GEN" })
+      expect(await downstreamBlob(t)).toEqual({ project_id: DOWNSTREAM, ...UPSTREAM_BLOB })
+    } finally {
+      await t.close()
+    }
+  })
+
+  it("follows the upstream's original when the upstream file is re-imported", async () => {
+    const t = await makeTestDb()
+    try {
+      await seedProjects(t)
+      await seedUpstreamFile(t, { fileType: "idml" })
+      await seedUpstreamBlob(t)
+      expect((await mirrorSync(t.db, DOWNSTREAM)).ranSync).toBe(true)
+
+      const replaced = { format: "idml", r2_key: `artifacts/${UPSTREAM}/art-2/original.idml`, size_bytes: 5678 }
+      await seedUpstreamBlob(t, replaced)
+      await emitUpstream(t, "file.create", { fileId: FILE, payload: { name: "ACT-REV", fileType: "idml" } })
+      expect((await mirrorSync(t.db, DOWNSTREAM)).ranSync).toBe(true)
+
+      expect(await downstreamBlob(t)).toEqual({ project_id: DOWNSTREAM, ...replaced })
+    } finally {
+      await t.close()
+    }
+  })
+
+  it("never overwrites a type the copy already has", async () => {
+    const t = await makeTestDb()
+    try {
+      await seedProjects(t)
+      await seedUpstreamFile(t, { fileType: "idml" })
+      expect((await mirrorSync(t.db, DOWNSTREAM)).ranSync).toBe(true)
+      await t.pg.query(`UPDATE files SET kind = 'usfm' WHERE id = $1`, [DOWNSTREAM_FILE])
+
+      // A rename re-mirrors the file (file.mirror's upsert path) with the
+      // upstream's type on the event.
+      await emitUpstream(t, "file.create", { fileId: FILE, payload: { name: "Acts", fileType: "idml" } })
+      expect((await mirrorSync(t.db, DOWNSTREAM)).ranSync).toBe(true)
+
+      expect((await downstreamFileRow(t))?.kind).toBe("usfm")
+    } finally {
+      await t.close()
+    }
+  })
+})

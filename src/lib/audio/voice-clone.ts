@@ -1,10 +1,11 @@
-// Voice-clone client: talks to sync-worker's /api/v1/voice/* routes.
+// Voice client: talks to sync-worker's /api/v1/voice/* routes.
 //
-//   - reference clips (the timbre a clone Voice points at) are project-scoped
-//     blobs in R2, uploaded/fetched via /api/v1/voice/reference/:projectId/:id
+//   - reference clips (custom-voice training recordings, Inworld design
+//     previews) are project-scoped blobs in R2, uploaded/fetched via
+//     /api/v1/voice/reference/:projectId/:id
 //   - conversion re-voices a source clip (fresh TTS output, or an existing cell
-//     recording by id) into a reference clip's timbre via Seed-VC, returning a
-//     new cell-audio object id the caller attaches like any other audio.
+//     recording by id) into a library voice (voice forge RVC), returning a new
+//     cell-audio object id the caller attaches like any other audio.
 //
 // All three reuse the file-scoped sync token (SyncTokenForFile): the reference
 // routes accept any of the project's file tokens (project-scoped auth) and the
@@ -80,28 +81,24 @@ export async function fetchVoiceReference(args: FetchVoiceReferenceArgs): Promis
   return new Uint8Array(await res.arrayBuffer())
 }
 
-export interface ConvertToCloneVoiceArgs {
+export interface ConvertToLibraryVoiceArgs {
   projectId: string
   /** File the converted audio is attached to (scopes the sync token). */
   fileId: string
-  /** Reference clip id whose timbre to convert into (Seed-VC). */
-  referenceAudioId?: string
-  /** Or a Voice library voice to convert into (voice forge RVC). Exactly one of
-   *  `referenceAudioId` / `libraryVoiceId`. */
-  libraryVoiceId?: string
+  /** The Voice library voice to convert into (voice forge RVC): a character
+   *  voice id, or a trained custom voice `c-<hex>`. */
+  libraryVoiceId: string
   /** Fresh source audio (e.g. TTS output) to re-voice. */
   source?: Blob
   /** Or an existing cell-audio object id under this file to re-voice. */
   sourceAudioId?: string
   /** The cell the result attaches to. When sent, the worker names the clip
-   *  `vc-<reference fingerprint>-audio-<cellId>-…` (see change-voice.ts). */
+   *  `vc-<voice fingerprint>-audio-<cellId>-…` (see change-voice.ts). */
   cellId?: string
-  /** Seed-VC diffusion steps (4-10 fast, 25 default, 30-50 best). */
-  diffusionSteps?: number
   getSyncToken: SyncTokenForFile
 }
 
-export interface ConvertToCloneVoiceResult {
+export interface ConvertToLibraryVoiceResult {
   audioId: string
   ext: string
   /** frontier-audio://<id>.<ext> — store on the cell attachment. */
@@ -110,32 +107,29 @@ export interface ConvertToCloneVoiceResult {
 }
 
 /**
- * Re-voice `source` (or the recording at `sourceAudioId`) into the reference
- * clip's timbre. The worker calls Seed-VC, writes the result to R2, and returns
- * the new audio id — caller attaches it like a normal generated-voice clip.
+ * Re-voice `source` (or the recording at `sourceAudioId`) into a library
+ * voice's timbre. The worker runs the voice forge, writes the result to R2,
+ * and returns the new audio id — caller attaches it like a normal
+ * generated-voice clip.
  */
-export async function convertToCloneVoice(
-  args: ConvertToCloneVoiceArgs,
-): Promise<ConvertToCloneVoiceResult> {
-  const { projectId, fileId, referenceAudioId, libraryVoiceId, source, sourceAudioId, cellId, diffusionSteps, getSyncToken } = args
+export async function convertToLibraryVoice(
+  args: ConvertToLibraryVoiceArgs,
+): Promise<ConvertToLibraryVoiceResult> {
+  const { projectId, fileId, libraryVoiceId, source, sourceAudioId, cellId, getSyncToken } = args
   if (!source && !sourceAudioId) {
-    throw new Error("convertToCloneVoice: provide a source blob or sourceAudioId")
+    throw new Error("convertToLibraryVoice: provide a source blob or sourceAudioId")
   }
-  if (!referenceAudioId === !libraryVoiceId) {
-    throw new Error("convertToCloneVoice: provide exactly one of referenceAudioId or libraryVoiceId")
-  }
+  if (!libraryVoiceId) throw new Error("convertToLibraryVoice: provide a libraryVoiceId")
   const token = await getSyncToken(projectId, fileId)
   if (!token) throw new Error("voice convert: no sync token")
 
   const form = new FormData()
   form.append("projectId", projectId)
   form.append("fileId", fileId)
-  if (referenceAudioId) form.append("referenceAudioId", referenceAudioId)
-  if (libraryVoiceId) form.append("libraryVoiceId", libraryVoiceId)
+  form.append("libraryVoiceId", libraryVoiceId)
   if (source) form.append("source", source, "source")
   if (sourceAudioId) form.append("sourceAudioId", sourceAudioId)
   if (cellId) form.append("cellId", cellId)
-  if (referenceAudioId && typeof diffusionSteps === "number") form.append("diffusionSteps", String(diffusionSteps))
 
   const res = await fetch(`${syncWorkerHttpOrigin()}/api/v1/voice/convert`, {
     method: "POST",
@@ -146,5 +140,5 @@ export async function convertToCloneVoice(
     const text = await res.text().catch(() => "")
     throw errorFromVoiceConvert(res.status, text || res.statusText)
   }
-  return (await res.json()) as ConvertToCloneVoiceResult
+  return (await res.json()) as ConvertToLibraryVoiceResult
 }

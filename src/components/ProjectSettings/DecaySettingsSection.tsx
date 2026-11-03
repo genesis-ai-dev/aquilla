@@ -1,6 +1,8 @@
 import type { ReactNode } from "react"
 import { ChevronRight } from "lucide-react"
-import { Input } from "@/components/ui/input"
+import { CommitNumberInput } from "@/components/settings/CommitInput"
+import { SaveStatus } from "@/lib/settings/save-status"
+import type { CommitInfo } from "@/lib/settings/useCommitOnPause"
 import { LockedNote } from "@/components/ui/locked-note"
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import type { DecaySettings } from "@/lib/parsers/types"
@@ -12,7 +14,8 @@ const DEFAULT_MAX_HOPS = 4
 
 interface DecaySettingsSectionProps {
   settings?: DecaySettings
-  onChange: (next: DecaySettings) => void
+  /** AQU-2262: saves on a pause or when you leave a box (`typed`). */
+  onChange: (next: DecaySettings, typed?: CommitInfo<unknown>) => void
   disabled?: boolean
   disabledTooltip?: ReactNode
 }
@@ -48,6 +51,7 @@ export function DecaySettingsSection({
           aria-hidden
         />
         {t("projectSettings.decay.summary")}
+        <SaveStatus id="decaySettings" className="ml-auto font-normal" />
       </summary>
       <div data-slot="settings-disclosure-body" className="space-y-4 bg-muted/30 px-4 py-4">
         <p className="text-xs text-muted-foreground">
@@ -61,18 +65,14 @@ export function DecaySettingsSection({
         <FieldGroup>
           <Field>
             <FieldLabel htmlFor="decay-max-hops">{t("projectSettings.decay.maxHopsLabel")}</FieldLabel>
-            <Input
+            <CommitNumberInput
               id="decay-max-hops"
-              type="number"
               min={1}
               max={20}
               step={1}
               value={maxHops}
               disabled={disabled}
-              onChange={(e) => {
-                const v = Math.min(20, Math.max(1, Math.round(Number(e.target.value) || 0)))
-                onChange({ ...settings, maxHops: v })
-              }}
+              onCommit={(v, info) => onChange({ ...settings, maxHops: v }, info)}
             />
             <FieldDescription>
               {t("projectSettings.decay.maxHopsDescription", { defaultValue: DEFAULT_MAX_HOPS })}
@@ -81,18 +81,15 @@ export function DecaySettingsSection({
 
           <Field>
             <FieldLabel htmlFor="decay-warn">{t("projectSettings.decay.attentionThresholdLabel")}</FieldLabel>
-            <Input
+            <CommitNumberInput
               id="decay-warn"
-              type="number"
               min={0}
               max={1}
+              integer={false}
               step={0.01}
               value={decayWarnThreshold}
               disabled={disabled}
-              onChange={(e) => {
-                const v = Math.min(1, Math.max(0, Number(e.target.value) || 0))
-                onChange({ ...settings, decayWarnThreshold: v })
-              }}
+              onCommit={(v, info) => onChange({ ...settings, decayWarnThreshold: v }, info)}
             />
             <FieldDescription>
               {t("projectSettings.decay.attentionThresholdDescription", { defaultValue: DECAY_DEFAULTS.decayWarnThreshold })}

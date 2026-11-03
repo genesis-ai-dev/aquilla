@@ -9,8 +9,8 @@
 // No chevrons and no rails: a folded panel leaves nothing behind, and the
 // Panels button above the view is the way back.
 
-import { useEffect, useRef, useState, type ReactNode } from "react"
-import { Expand, FileText, Film, Minus, MoreHorizontal, Shrink } from "lucide-react"
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react"
+import { AudioWaveform, Expand, FileText, Film, Minus, MoreHorizontal, Shrink } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -42,14 +42,30 @@ export function dockKeys() {
   }
 }
 
-export const PANEL_ICON: Record<DockPanel, typeof Film> = { film: Film, text: FileText }
+export const PANEL_ICON: Record<DockPanel, typeof Film> = { film: Film, text: FileText, station: AudioWaveform }
+
+/** ⌥n for each panel (⌥1 is the timeline). */
+export const PANEL_KEY: Record<DockPanel, number> = { film: 2, text: 3, station: 4 }
+
+/**
+ * A panel's own items for its area's ⋯ menu, under the heading and Move to
+ * (AQU-2327: the Station's Remove noise, Change the voice, History). Provided
+ * by whoever renders the panel; read only while that panel is the area's tab.
+ */
+export const PanelMenuItemsContext = createContext<Partial<Record<DockPanel, ReactNode>>>({})
 
 /** "Film" / "Text", and the areas' names. */
 export function usePanelNames() {
   const t = useT()
   return {
     panel: (p: DockPanel | "timeline") =>
-      p === "timeline" ? t("editor.timeline.title") : p === "film" ? t("editor.dock.film") : t("editor.timeline.textPaneTitle"),
+      p === "timeline"
+        ? t("editor.timeline.title")
+        : p === "film"
+          ? t("editor.dock.film")
+          : p === "station"
+            ? t("editor.station.title")
+            : t("editor.timeline.textPaneTitle"),
     area: (a: DockArea) => (a === "ll" ? t("editor.dock.bottomLeft") : t("editor.dock.bottomRight")),
   }
 }
@@ -234,11 +250,14 @@ export function AreaMenu({ dock, area }: { dock: MediaDock; area: DockArea }) {
   const t = useT()
   const names = usePanelNames()
   const panel = dock.view.activeOf(area)
+  const own = useContext(PanelMenuItemsContext)
   if (!panel) return null
   const other: DockArea = area === "ll" ? "lr" : "ll"
+  const items = own[panel]
   return (
     <DropdownMenu>
-      <MoreTrigger tip={t("editor.dock.moreTip")} testId={`dock-more-${area}`} />
+      {/* AQU-2327, spec item 2: the Station's ⋯ names its own items. */}
+      <MoreTrigger tip={panel === "station" ? t("editor.station.moreTip") : t("editor.dock.moreTip")} testId={`dock-more-${area}`} />
       <DropdownMenuContent align="end" className="w-[270px]">
         <DropdownMenuGroup>
           <DropdownMenuLabel className="text-[11px] uppercase tracking-wide">
@@ -249,6 +268,12 @@ export function AreaMenu({ dock, area }: { dock: MediaDock; area: DockArea }) {
             {t(other === "ll" ? "editor.dock.moveToBottomLeft" : "editor.dock.moveToBottomRight")}
           </DropdownMenuItem>
         </DropdownMenuGroup>
+        {items ? (
+          <>
+            <DropdownMenuSeparator />
+            {items}
+          </>
+        ) : null}
         <DropdownMenuSeparator />
         <p className="px-1.5 py-1 text-xs leading-snug text-muted-foreground">{t("editor.dock.dragNote")}</p>
       </DropdownMenuContent>
@@ -317,7 +342,7 @@ export function MediaAreaStrip({ dock, area }: { dock: MediaDock; area: DockArea
         <TabsList className="h-5 gap-0.5 bg-transparent p-0">
           {tabs.map((panel) => {
             const Icon = PANEL_ICON[panel]
-            const n = panel === "film" ? 2 : 3
+            const n = PANEL_KEY[panel]
             return (
               <AppTooltip key={panel} content={t("editor.dock.tabTip", { panel: names.panel(panel), keys: keys.show(n) })}>
                 <TabsTrigger
@@ -378,7 +403,7 @@ export function useAreaDrop(dock: MediaDock, area: DockArea) {
     const onDrop = (e: DragEvent) => {
       setOver(false)
       const panel = e.dataTransfer?.getData(DRAG_TYPE)
-      if (panel !== "film" && panel !== "text") return
+      if (panel !== "film" && panel !== "text" && panel !== "station") return
       e.preventDefault()
       move.current(panel, area)
     }

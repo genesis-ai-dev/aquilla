@@ -194,7 +194,7 @@ export function formatVoiceLanguageName(code: string, locale: string): string {
 
 /**
  * Language shown under a voice name: the voice's own tag. A project lane is
- * not a voice language — a Gemini or clone voice with none of its own stays
+ * not a voice language — a Gemini or character voice with none of its own stays
  * unlabeled rather than borrowing whichever lane is open.
  */
 export function languageForVoiceDescription(

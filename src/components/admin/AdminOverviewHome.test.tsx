@@ -126,4 +126,27 @@ describe("AdminOverviewHome", () => {
     renderHome({ projects: [] })
     expect(screen.getByText(/all clear/i)).toBeInTheDocument()
   })
+
+  it("opens the list behind a stat tile", () => {
+    const onOpenTile = vi.fn()
+    render(
+      <MemoryRouter>
+        <AdminOverviewHome
+          overview={overview}
+          orgs={orgs}
+          users={users}
+          projects={projects}
+          activity={activity}
+          onOpenOrg={vi.fn()}
+          onViewProjects={vi.fn()}
+          onViewActivity={vi.fn()}
+          onOpenTile={onOpenTile}
+        />
+      </MemoryRouter>,
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Active users" }))
+    expect(onOpenTile).toHaveBeenLastCalledWith("activeUsers")
+    fireEvent.click(screen.getByRole("button", { name: "Need attention" }))
+    expect(onOpenTile).toHaveBeenLastCalledWith("needAttention")
+  })
 })

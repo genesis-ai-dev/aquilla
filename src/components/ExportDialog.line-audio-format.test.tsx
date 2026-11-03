@@ -105,7 +105,9 @@ describe("the WAV choice on Audio by line (AQU-1575)", () => {
     expect(screen.getByTestId("export-line-audio-wav")).toHaveAttribute("aria-checked", "false")
     fireEvent.click(screen.getByRole("button", { name: /^Export$/i }))
     await waitFor(() => expect(mockByLine).toHaveBeenCalledTimes(1))
-    expect(mockByLine).toHaveBeenCalledWith(expect.objectContaining({ format: "original", decode: undefined }))
+    // AQU-2327: the decoder goes along regardless; with "original" the
+    // exporter only uses it for a take at its own volume or fades.
+    expect(mockByLine).toHaveBeenCalledWith(expect.objectContaining({ format: "original", decode: vi.mocked(decodeToMono48k) }))
   })
 
   it("sends a ticked WAV box to the exporter with the decoder, and remembers it", async () => {

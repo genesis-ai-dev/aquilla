@@ -5,7 +5,7 @@ Smoke twin: `e2e/specs/orgs/members.smoke.spec.ts`
 ## Preconditions
 
 - Logged in as `alice` in one session and `bob` in a second session.
-- `alice` is on an org-level page (for example `/orgs/9/overview`), where the top bar shows the **Organization switcher** combobox. The editor page that dev-login lands on has no switcher.
+- `alice` is on an org-level page (for example `/orgs/1/overview`), where the top bar shows the **Organization switcher** combobox. The editor page that dev-login lands on has no switcher.
 - `bob` has his own session open at `/` before `alice` adds him, so the switcher check can be tried live first.
 
 ## Steps
@@ -30,7 +30,7 @@ Smoke twin: `e2e/specs/orgs/members.smoke.spec.ts`
 
 ## Notes for the agent
 
-Dev Org (org id 9) does not work for this story. **Add a member** renders only for org Owners (`src/components/org/OrgMembersTable.tsx`: `isOwner = (callerOrgRoleLevel ?? 0) >= ROLE.OWNER`; a test in `src/pages/MembersPage.test.tsx` pins this), and `alice` is a Maintainer there, so she only sees **Add to projects**, whose dialog says "org-wide membership is unchanged." Also, bob's switcher already lists **DO Dev Org Guest** from his project-level grants, so "Dev Org appears for bob" is true before anything happens. A fresh org that `alice` creates makes her Owner and gives bob nothing to start with, which is what the story needs.
+Dev Org (org id 1) does not work for this story. **Add a member** renders only for org Owners (`src/components/org/OrgMembersTable.tsx`: `isOwner = (callerOrgRoleLevel ?? 0) >= ROLE.OWNER`; a test in `src/pages/MembersPage.test.tsx` pins this), and `alice` is a Maintainer there, so she only sees **Add to projects**, whose dialog says "org-wide membership is unchanged." Also, bob's switcher already lists **DO Dev Org Guest** from his project-level grants, so "Dev Org appears for bob" is true before anything happens. A fresh org that `alice` creates makes her Owner and gives bob nothing to start with, which is what the story needs.
 
 The org switcher is a `combobox`. `find role combobox click --name "Organization switcher"` works; the accessible name is `Organization switcher: <current org>`, and adding the trailing colon to `--name` made it miss.
 

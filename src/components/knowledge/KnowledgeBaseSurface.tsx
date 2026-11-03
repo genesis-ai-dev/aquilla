@@ -45,7 +45,7 @@ import { EmptyState } from "@/components/ui/empty"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Section } from "@/components/ui/page"
-import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingLine, LoadingLines } from "@/components/ui/loading-cursor"
 import { Spinner } from "@/components/ui/spinner"
 import { toast } from "@/components/ui/toast"
 import { DateTooltip } from "@/components/ui/date-tooltip"
@@ -379,7 +379,10 @@ export function KnowledgeBaseSurface({
         {loading ? (
           <div className="flex flex-col gap-3" aria-label={t("common.loading")}>
             {Array.from({ length: 3 }).map((_, index) => (
-              <Skeleton key={index} className="h-28 w-full" />
+              <div key={index} className="flex h-28 w-full flex-col gap-2 rounded-lg border p-4">
+                <LoadingLine className="font-medium" />
+                <LoadingLines count={2} className="text-xs" />
+              </div>
             ))}
           </div>
         ) : loadFailed ? (
@@ -484,8 +487,8 @@ export function KnowledgeBaseSurface({
           <DialogBody className="flex flex-col gap-5">
             {viewer?.loading ? (
               <div className="flex flex-col gap-3" aria-label={t("common.loading")}>
-                <Skeleton className="h-4 w-1/3" />
-                <Skeleton className="h-56 w-full" />
+                <LoadingLine className="font-medium" />
+                <LoadingLines count={6} className="min-h-56" />
               </div>
             ) : viewer?.failed ? (
               <EmptyState variant="inline" icon={TriangleAlert} title={t("knowledgeBase.loadError")} />

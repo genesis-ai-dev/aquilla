@@ -80,6 +80,14 @@
 
     /* OTP fake-caret blink (shadcn input-otp). */
     --animate-caret-blink: caret-blink 1.2s ease-out infinite;
+    /* Loading cursor (ui/loading-cursor.tsx): a hard terminal-style blink. */
+    --animate-cursor-blink: cursor-blink 1s steps(1, end) infinite;
+}
+
+@keyframes cursor-blink {
+  50% {
+    opacity: 0;
+  }
 }
 
 @keyframes caret-blink {

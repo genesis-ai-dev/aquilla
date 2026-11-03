@@ -4,6 +4,7 @@ import { EmptyState, NotFoundIcon, TableEmptyState } from "@/components/ui/empty
 import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
 import { LockedNote, LockedSection } from "@/components/ui/locked-note"
 import { cn } from "@/lib/utils"
+import { SaveStatus } from "@/lib/settings/save-status"
 
 /**
  * Shared page-composition primitives for the org and account surfaces
@@ -226,30 +227,65 @@ function StatTile({
   value,
   hint,
   className,
+  onClick,
 }: {
   label: React.ReactNode
   value: React.ReactNode
   hint?: React.ReactNode
   className?: string
+  /** When set, the tile is a real button that runs this on click or Enter. */
+  onClick?: () => void
 }) {
-  return (
-    <div
-      className={cn(
-        "flex min-h-[88px] flex-row-reverse items-center justify-between gap-4 rounded-lg border bg-card px-5 py-4",
-        "min-[480px]:flex-col min-[480px]:items-start min-[480px]:justify-start min-[480px]:gap-0",
-        className,
-      )}
-    >
-      <div className="text-2xl leading-none font-semibold tracking-normal tabular-nums text-foreground">
+  const id = React.useId()
+  const labelId = `${id}-label`
+  const valueId = `${id}-value`
+  const hintId = `${id}-hint`
+  const tileClass = cn(
+    "flex min-h-[88px] flex-row-reverse items-center justify-between gap-4 rounded-lg border bg-card px-5 py-4",
+    "min-[480px]:flex-col min-[480px]:items-start min-[480px]:justify-start min-[480px]:gap-0",
+    className,
+  )
+  const body = (
+    <>
+      <div
+        id={onClick ? valueId : undefined}
+        className="text-2xl leading-none font-semibold tracking-normal tabular-nums text-foreground"
+      >
         {value}
       </div>
       <div className="min-w-0">
-        <div className="text-sm text-muted-foreground min-[480px]:mt-1.5">{label}</div>
+        <div
+          id={onClick ? labelId : undefined}
+          className="text-sm text-muted-foreground min-[480px]:mt-1.5"
+        >
+          {label}
+        </div>
         {hint ? (
-          <div className="mt-0.5 text-xs text-muted-foreground min-[480px]:mt-1">{hint}</div>
+          <div
+            id={onClick ? hintId : undefined}
+            className="mt-0.5 text-xs text-muted-foreground min-[480px]:mt-1"
+          >
+            {hint}
+          </div>
         ) : null}
       </div>
-    </div>
+    </>
+  )
+  if (!onClick) return <div className={tileClass}>{body}</div>
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-labelledby={labelId}
+      aria-describedby={hint ? `${valueId} ${hintId}` : valueId}
+      className={cn(
+        tileClass,
+        "w-full cursor-pointer text-left transition-colors hover:bg-muted/50 hover:border-foreground/20",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+      )}
+    >
+      {body}
+    </button>
   )
 }
 
@@ -327,6 +363,7 @@ function SettingsRow({
   control,
   children,
   block = false,
+  saveId,
   className,
 }: {
   label: React.ReactNode
@@ -335,11 +372,15 @@ function SettingsRow({
   control?: React.ReactNode
   children?: React.ReactNode
   block?: boolean
+  /** AQU-2262: the setting's id in the page's save status — its quiet
+   *  "Saved" (or why not) shows beside the control. */
+  saveId?: string
   className?: string
 }) {
   const infoId = React.useId()
   const [infoOpen, toggleInfo] = useInfoOpen()
   const body = children ?? control
+  const status = saveId ? <SaveStatus id={saveId} className="max-w-56 text-right" /> : null
   const text = (
     <>
       <p className="flex items-center gap-1 text-sm font-medium text-foreground">
@@ -372,7 +413,10 @@ function SettingsRow({
   if (block || children) {
     return (
       <div className={cn("space-y-3 px-4 py-3", className)}>
-        <div className="min-w-0">{text}</div>
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0 flex-1">{text}</div>
+          {status}
+        </div>
         {body}
       </div>
     )
@@ -385,7 +429,16 @@ function SettingsRow({
   return (
     <div className={cn("flex items-start justify-between gap-4 px-4 py-3", className)}>
       <div className="min-w-0 flex-1">{text}</div>
-      {body ? <div className="shrink-0">{body}</div> : null}
+      {body ? (
+        status ? (
+          <div className="flex shrink-0 items-center gap-2">
+            {status}
+            {body}
+          </div>
+        ) : (
+          <div className="shrink-0">{body}</div>
+        )
+      ) : null}
     </div>
   )
 }

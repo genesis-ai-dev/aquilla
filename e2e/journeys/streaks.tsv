@@ -280,3 +280,21 @@ date	story	run	result	seconds	note
 2026-09-09T20:22:01Z	collab-cross-user-validate	5	PASS	56	PASS: bob validated cell 0 on project 4533bff2-ae1c-4cef-ba80-656559511d59, file 01a087d5-41d3-728d-b35c-0ce3d5754ead — control reads 'Validated — row 1. Cl
 2026-09-09T20:22:27Z	collab-bt-edit-locked-for-reviewer	1	FAIL	26	FAIL: type translation
 2026-09-09T21:24:03Z	projects-create	1	PASS	18	PASS: row 'Journey create 142345' in Projects table; overview url http://127.0.0.1:5173/projects/5b294b14-af6a-4530-b5b4-7cf9ccb7b1c2
+2026-11-02T14:49:39Z	orgs-billing-cta	1	FAIL	54	FAIL: no Organization settings heading
+2026-11-02T14:50:31Z	projects-create	1	FAIL	52	FAIL: New project button
+2026-11-02T14:51:23Z	projects-settings-rename	1	FAIL	52	FAIL: New project button
+2026-11-02T14:55:17Z	orgs-billing-cta	1	PASS	77	PASS: Billing shows the Free badge, the usage panel, Compare new plans (prices-unavailable notice) and the Discuss your rollout link
+2026-11-02T14:56:35Z	projects-create	1	FAIL	78	FAIL: no table row named Journey create 095517
+2026-11-02T14:57:56Z	projects-settings-rename	1	FAIL	81	FAIL: Change (source language) button
+2026-11-02T15:03:46Z	projects-settings-rename	1	FAIL	80	FAIL: source language line not present
+2026-11-02T15:05:51Z	projects-settings-rename	1	PASS	82	PASS: renamed to 'Journey settings 100429 renamed' and it survives reload; source lane language 'English (US)' saved and survives reload
+2026-11-02T15:07:58Z	orgs-billing-cta	1	PASS	76	PASS: Billing shows the Free badge, the usage panel, Compare new plans (prices-unavailable notice) and the Discuss your rollout link
+2026-11-02T15:09:15Z	orgs-billing-cta	2	PASS	77	PASS: Billing shows the Free badge, the usage panel, Compare new plans (prices-unavailable notice) and the Discuss your rollout link
+2026-11-02T15:10:32Z	orgs-billing-cta	3	PASS	77	PASS: Billing shows the Free badge, the usage panel, Compare new plans (prices-unavailable notice) and the Discuss your rollout link
+2026-11-02T15:11:54Z	projects-settings-rename	1	PASS	82	PASS: renamed to 'Journey settings 101032 renamed' and it survives reload; source lane language 'English (US)' saved and survives reload
+2026-11-02T15:13:15Z	projects-settings-rename	2	PASS	81	PASS: renamed to 'Journey settings 101154 renamed' and it survives reload; source lane language 'English (US)' saved and survives reload
+2026-11-02T15:14:37Z	projects-settings-rename	3	PASS	82	PASS: renamed to 'Journey settings 101315 renamed' and it survives reload; source lane language 'English (US)' saved and survives reload
+2026-11-02T15:17:59Z	projects-create	1	FAIL	102	FAIL: Search projects box
+2026-11-02T15:21:24Z	projects-create	1	PASS	103	PASS: row 'Journey create 101941' in Projects table; overview url http://127.0.0.1:5173/projects/aa35b15c-e287-4d53-9f7e-5f51b3fb6d8c
+2026-11-02T15:23:07Z	projects-create	2	PASS	103	PASS: row 'Journey create 102124' in Projects table; overview url http://127.0.0.1:5173/projects/b9d42717-1f61-49e9-b1f4-254caa4ed407
+2026-11-02T15:24:50Z	projects-create	3	PASS	103	PASS: row 'Journey create 102307' in Projects table; overview url http://127.0.0.1:5173/projects/91642b1c-70b1-4978-9e36-9d1582c76c0b

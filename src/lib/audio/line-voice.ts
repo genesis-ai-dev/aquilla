@@ -6,8 +6,8 @@
 // clip on the timeline. They all read the line through this one module, so
 // a pick, the one-click button and the menu item can never disagree.
 //
-//   - A pick ACTS on the line. A voice that can re-voice the take (a clone or
-//     a character) converts it at once; with no take, the voice reads the
+//   - A pick ACTS on the line. A voice that can re-voice the take (a
+//     character, a trained voice or an ElevenLabs voice) converts it at once; with no take, the voice reads the
 //     text; a stock voice regenerates a generated take, but never reads over a
 //     person's recording on its own.
 //   - When the line's cast voice and its take part ways (a pick for the whole
@@ -18,15 +18,7 @@
 //
 // Pure: no React, no I/O.
 
-import {
-  CHANGE_VOICE_QUALITY_STEPS,
-  changeVoiceBlocker,
-  changeVoiceQualityForSteps,
-  changeVoiceSourceTake,
-  isVoiceChangedAudioId,
-  voiceChangedSteps,
-  type ChangeVoiceQuality,
-} from "./change-voice"
+import { changeVoiceBlocker, isVoiceChangedAudioId } from "./change-voice"
 import { keptWindowSec } from "./kept-window"
 import { assignedCastVoiceId, findVoice, resolveCastVoice } from "./voices"
 import type { CellData } from "@/hooks/useCells"
@@ -73,22 +65,10 @@ export function lineTake(cell: CellData): LineTake {
   }
 }
 
-/**
- * The quality a re-voice runs at: the one stamped into the take's id when it
- * is itself a conversion, else standard — the card's default.
- */
-export function lineChangeQuality(cell: CellData): ChangeVoiceQuality {
-  const takeId = changeVoiceSourceTake(cell)?.audioId
-  return changeVoiceQualityForSteps(takeId ? voiceChangedSteps(takeId) : null) ?? "standard"
-}
-
 export interface LineVoiceOptions {
   /** The line has words to read and the engine is reachable (the card's
    *  `canGenerate && offline gate ok`). */
   generateReady: boolean
-  /** The take is the reference some voice was cloned from (AQU-2037):
-   *  converting it would change that voice, so it is never re-voiced. */
-  takeIsReference?: boolean
 }
 
 /**
@@ -99,8 +79,7 @@ export function lineVoiceActionFor(cell: CellData, voice: Voice, opts: LineVoice
   const take = lineTake(cell)
   if (!take.audioId) return opts.generateReady ? "generate" : null
   if (take.att?.voiceId === voice.id) return null
-  const steps = CHANGE_VOICE_QUALITY_STEPS[lineChangeQuality(cell)]
-  if (!opts.takeIsReference && changeVoiceBlocker(cell, voice, steps) == null) return "change"
+  if (changeVoiceBlocker(cell, voice) == null) return "change"
   return opts.generateReady && !take.human ? "generate" : null
 }
 
@@ -146,11 +125,4 @@ export function lineTakeLabel(
   if (take.isSourceClip) return { key: "editor.voice.originalAudio" }
   if (take.recordedBy && take.recordedBy !== username) return { key: "editor.voice.recordedBy", name: take.recordedBy }
   return { key: "editor.voice.yourRecording" }
-}
-
-/** The suggested name for a voice cloned from the line's take: who recorded
- *  it, or you for your own recording (the card's `suggestedName`). */
-export function cloneNameSuggestion(cell: CellData, username: string): string {
-  const take = lineTake(cell)
-  return take.recordedBy ?? (take.human && !take.isSourceClip ? username : "")
 }

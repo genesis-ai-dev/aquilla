@@ -195,6 +195,10 @@ function shadowConfirmed(entry: CellAudioEntry | undefined, shadow: OptimisticSh
   // the source's limits held still changes only this one.
   if (att.recordingsOffsetMs !== undefined && (server.recordingsOffsetMs ?? null) !== att.recordingsOffsetMs)
     return false
+  // AQU-2327: a volume or fade overlay, by the same rule.
+  if (att.gainDb !== undefined && (server.gainDb ?? null) !== att.gainDb) return false
+  if (att.fadeInMs !== undefined && (server.fadeInMs ?? null) !== att.fadeInMs) return false
+  if (att.fadeOutMs !== undefined && (server.fadeOutMs ?? null) !== att.fadeOutMs) return false
   return true
 }
 
@@ -595,6 +599,10 @@ export function mergeCellsWithAudio(
         ...(a.targetOffsetMs != null ? { targetOffsetMs: a.targetOffsetMs } : {}),
         // AQU-2267: its place following the recordings, by the same rule.
         ...(a.recordingsOffsetMs != null ? { recordingsOffsetMs: a.recordingsOffsetMs } : {}),
+        // AQU-2327: the clip's volume and fades.
+        ...(a.gainDb != null ? { gainDb: a.gainDb } : {}),
+        ...(a.fadeInMs != null ? { fadeInMs: a.fadeInMs } : {}),
+        ...(a.fadeOutMs != null ? { fadeOutMs: a.fadeOutMs } : {}),
         // SUB-48: "saved here, not yet at the server" — drives the saving hint.
         ...(a.pendingSync ? { pendingSync: true as const } : {}),
         // AQU-924: "saved here, and it will NOT reach the server on its own."

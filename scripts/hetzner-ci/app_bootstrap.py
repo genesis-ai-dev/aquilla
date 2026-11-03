@@ -60,6 +60,27 @@ def drop_node_modules(root):
             children.remove("node_modules")
 
 
+BROWSER_ENV = ("VITE_AUTH_BASE", "VITE_FRONTIER_BASE", "VITE_CHAT_BASE", "VITE_SYNC_WORKER_HOST")
+
+
+def prebuild(root, bootstrap, env):
+    """Build the app before the workers start, so the build never shares the
+    container's memory cap with two wrangler dev servers (measured on the QA
+    host: stack ~1.6 GB anon + build on top kills the container at 2.2 GB).
+    Only when the reviewed e2e-up honours E2E_PREBUILT_DIST, else it would
+    build twice. Returns True when e2e-up must skip its own build step."""
+    if b"E2E_PREBUILT_DIST" not in bootstrap or not all(env.get(key) for key in BROWSER_ENV):
+        return False
+    build_env = {**env, "VITE_GOOGLE_CLIENT_ID": "", "VITE_GOOGLE_API_KEY": "",
+                 "NODE_OPTIONS": env.get("QA_BUILD_NODE_OPTIONS", "")}
+    shutil.rmtree(root / "dist", ignore_errors=True)
+    started = time.monotonic()
+    subprocess.run(["pnpm", "exec", "vite", "build", "--mode", "test", "--outDir", "dist"],
+                   cwd=root, env=build_env, check=True)
+    print(f"QA prebuild: test-mode dist ready in {time.monotonic() - started:.1f}s", flush=True)
+    return True
+
+
 def main():
     root = Path("/work")
     started = time.monotonic()
@@ -87,6 +108,8 @@ def main():
     # docker cp owns this archive as root in sticky /tmp. Container removal
     # deletes it; the unprivileged app does not need permission to unlink it.
     print(f"QA source/dependencies ready in {time.monotonic() - started:.1f}s; cached={cached}", flush=True)
+    if prebuild(root, bootstrap, os.environ):
+        os.environ["E2E_PREBUILT_DIST"] = "1"
     os.chdir(root)
     os.execvp("pnpm", ["pnpm", "exec", "tsx", "scripts/e2e-up.ts"])
 

@@ -203,7 +203,7 @@ export interface CharacterCastWrite {
  * Voices are matched by name and reused, exactly as `buildCastAdditions` does,
  * so clearing a sheet and importing it again gives every character back the
  * same voice and colour. A character that already has a working entry keeps it:
- * re-importing a sheet must not undo someone recasting Jesus with a cloned
+ * re-importing a sheet must not undo someone recasting Jesus with a trained
  * voice. The imported lines' own entries are dropped, because the sheet has
  * just told them who they are; before this change the import overwrote them
  * with the named voice, which is what they now resolve to through the

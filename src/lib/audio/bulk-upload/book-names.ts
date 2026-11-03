@@ -21,6 +21,8 @@
 // only trusted right before the chapter number — see `isWeakAlias` — because
 // on their own they are ordinary words.
 
+import { toWesternDigits } from "../../../../shared/decimal-digits"
+
 /** [USFM code, English name, …other spellings]. Canonical (Protestant) order. */
 const BOOKS: ReadonlyArray<readonly [string, string, ...string[]]> = [
   ["GEN", "Genesis", "Gen", "Ge", "Gn"],
@@ -179,13 +181,13 @@ const ORDINAL_WORDS: ReadonlyArray<readonly [RegExp, string]> = [
 
 /**
  * How a book name is compared. NFKC (full-width letters and digits become
- * ordinary ones), lower case, and no spaces, dots, hyphens or underscores —
+ * ordinary ones), any script's digits as 0–9 (AQU-2329), lower case, and no spaces, dots, hyphens or underscores —
  * then a leading ordinal word or Roman numeral becomes its digit, so "I
  * Samuel", "First Samuel" and "1 Samuel" are one key. Only before a word: a
  * bare "I" is not a book.
  */
 export function bookKey(value: string): string {
-  const flat = value.normalize("NFKC").toLowerCase().replace(/[\s._\-'’]+/gu, "")
+  const flat = toWesternDigits(value.normalize("NFKC")).toLowerCase().replace(/[\s._\-'’]+/gu, "")
   for (const [re, digit] of ORDINAL_WORDS) {
     const match = re.exec(flat)
     if (!match) continue

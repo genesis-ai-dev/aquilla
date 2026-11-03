@@ -19,7 +19,7 @@ describe("AssignmentAuthoritySection", () => {
   it("names each role in the minimum-role list without its level number", async () => {
     render(<AssignmentAuthoritySection orgSettings={orgSettings()} canEdit />)
     const picker = screen.getAllByRole("combobox")[0]
-    expect(picker.textContent).toContain("Project lead")
+    expect(picker.textContent).toContain("Project Lead")
     expect(picker.textContent).not.toMatch(/\(\d00\)/)
     await userEvent.click(picker)
     expect(await screen.findByRole("option", { name: "Maintainer" })).toBeInTheDocument()

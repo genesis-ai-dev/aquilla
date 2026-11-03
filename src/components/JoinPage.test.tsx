@@ -388,7 +388,7 @@ describe("InviteSummary (AQU-337 singular/plural copy)", () => {
         roleName="project_lead"
       />,
     )
-    expect(screen.getByText("Project lead")).toBeInTheDocument()
+    expect(screen.getByText("Project Lead")).toBeInTheDocument()
   })
 
   it("renders the bound email suffix when present", () => {

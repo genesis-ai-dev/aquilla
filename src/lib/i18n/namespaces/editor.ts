@@ -6806,7 +6806,7 @@ export const editor = defineNamespace({
       "editor.selection.harmonizeNeedLead": {
         description:
           "Tooltip when the harmonize button is disabled because the user's project " +
-          "role is below lead. 'Project lead' is a role name in this app.",
+          "role is below lead. 'Project Lead' is a role name in this app.",
       },
       "editor.selection.clearTooltip": {
         description:
@@ -8741,7 +8741,7 @@ export const editor = defineNamespace({
         description:
           "Body under editor.empty.noMediaSegments for someone who cannot add the " +
           "file's recording themselves (below Project Lead, or a viewer): nothing " +
-          "is here until a project lead uploads the audio or video. 'Project lead' " +
+          "is here until a project lead uploads the audio or video. 'Project Lead' " +
           "is the project role name; match the members screen.",
       },
       "editor.note.footnote": {

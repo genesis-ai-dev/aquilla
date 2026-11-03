@@ -4,7 +4,7 @@
 // and a body that omits them keeps the stored copies (history is not
 // rewritten). The AQU-1086 language-only carve-out therefore never fires: a
 // lead's language edit goes through the lane routes, which carry the org's
-// `languageEditMinRole` floor. Absence of that key is Project lead (AQU-984);
+// `languageEditMinRole` floor. Absence of that key is Project Lead (AQU-984);
 // a stored floor, including an explicit Maintainer (600), is kept.
 //
 // Guards, in order of severity:

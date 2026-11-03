@@ -547,6 +547,10 @@ const POLICY_DIRECTION_CASES: {
   // its floor is Maintainer; clearing a stricter value goes back to it.
   { key: 'rosterViewMinRole', tighten: { from: undefined, to: 700 }, loosen: { from: 700, to: null } },
   { key: 'memberProgressViewMinRole', tighten: { from: 600, to: 700 }, loosen: { from: 700, to: 600 } },
+  // AQU-2305: the project's own import floor. The org sets none here, so its
+  // floor is the Project lead default; clearing a stricter value goes back to
+  // it, which is a loosening an agent may not write.
+  { key: 'importMinRole', tighten: { from: undefined, to: 600 }, loosen: { from: 600, to: null } },
 ]
 
 describe('PatchSettings — policy keys, restrictive direction only (AQU-1282 §1)', () => {

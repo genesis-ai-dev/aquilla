@@ -5,12 +5,12 @@ Smoke twin: `e2e/specs/collab/cross-user-validate.smoke.spec.ts`
 ## Preconditions
 
 - Two sessions: `alice` and `bob`, each logged in separately.
-- `alice` is a maintainer of Dev Org (org id 9), reachable at `/orgs/9/projects`.
+- `alice` is a maintainer of Dev Org (org id 1), reachable at `/orgs/1/projects`.
 - The fixture `e2e/fixtures/sample.md` is on disk.
 
 ## Steps
 
-1. **Alice**: from the org **Projects** page click **New Project**. Fill **Project title**, **Source Language** (`en`), **Target language(s)** (`fr`). Click **Create Project**.
+1. **Alice**: from the org **Projects** page click **New project**. Fill **Project name**, **Source language** (`en`), **Language lanes** (`fr`). Click **Create project**.
 2. **Alice**: click **Project settings**, then **Members Roles & invites**. Click **Add a member**. Type `bob` into the **Aquilla username** field. A checkbox labelled `bob` appears below it. Click it; bob turns into a chip labelled **Remove bob**. Open the **Role** combobox (it starts on **Contributor**) and read its option labels from the snapshot. They are **Viewer**, **Commenter**, **Reviewer**, **Contributor**, **Project Lead**, **Maintainer**, each with a one-line description. Click the option whose visible text starts with **Reviewer**. Click **Add**. The Members table now lists a row for bob with role **Reviewer**.
 3. **Alice**: close the Members dialog, click **Open project**. Click **Import**, then the **Upload files** card, then choose `sample.md`. The **Import preview** shows. Click **Confirm import**.
 4. **Alice**: click the first cell's target (the textbox named **row 1 — empty**). Wait for an editable field to mount inside that cell, then type a unique sentence. Click **aside** to leave the cell; leaving commits the edit.

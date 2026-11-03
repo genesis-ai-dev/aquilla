@@ -1,5 +1,6 @@
 import type { ReactNode } from "react"
-import { Input } from "@/components/ui/input"
+import { CommitNumberInput } from "@/components/settings/CommitInput"
+import type { CommitInfo } from "@/lib/settings/useCommitOnPause"
 import { OptionalMark } from "@/components/ui/field"
 import { Switch } from "@/components/ui/switch"
 import {
@@ -113,7 +114,9 @@ interface Props {
         | "allowSelfValidation"
         | "validationNamedUsersAudio"
       >
-    >
+    >,
+    /** AQU-2262: a typed count's change (it saves on a pause or on leaving). */
+    typed?: CommitInfo<unknown>,
   ) => void
 }
 
@@ -167,14 +170,6 @@ export function ValidationSettingsSection({
     ]),
   ).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
 
-  function clamp(raw: string): number {
-    const n = Math.floor(Number(raw))
-    if (!Number.isFinite(n)) return 1
-    if (n < 1) return 1
-    if (n > 15) return 15
-    return n
-  }
-
   // AQU-1771: "Organization default (N)" or this project's own number, then
   // the number in force. Picking the default clears the project's value;
   // picking "Set for this project" starts from the number in force, so nothing
@@ -186,7 +181,7 @@ export function ValidationSettingsSection({
     sourceAria: string
     value: number | null
     orgValue: number | null
-    emit: (next: number | null) => void
+    emit: (next: number | null, typed?: CommitInfo<unknown>) => void
   }) {
     const sourceItems = [
       { value: "inherit", label: t("projectSettings.validation.orgDefaultOption", { number: opts.orgValue ?? 1 }) },
@@ -225,14 +220,14 @@ export function ValidationSettingsSection({
           {/* AQU-2263: the box is always there. While the project follows the
               organization it shows the organization's number, and typing in
               it sets this project's own number in one step. */}
-          <Input
+          {/* AQU-2262: saves when you leave it or pause, never mid-number. */}
+          <CommitNumberInput
             id={opts.id}
-            type="number"
             min={1}
             max={15}
             disabled={disabled}
             value={opts.value ?? opts.orgValue ?? 1}
-            onChange={(e) => opts.emit(clamp(e.target.value))}
+            onCommit={(next, info) => opts.emit(next, info)}
             className="w-20 bg-background"
             aria-label={opts.label}
           />
@@ -246,6 +241,7 @@ export function ValidationSettingsSection({
       {notice}
       <SettingsGroup label={t("projectSettings.validation.textGroup")} locked={disabled ? disabledTooltip : null}>
         <SettingsRow
+          saveId="validationCount"
           label={<label htmlFor="validation-count">{t("projectSettings.validation.requiredTextLabel")}</label>}
           description={t("projectSettings.validation.requiredTextDescription")}
           control={countControl({
@@ -254,10 +250,11 @@ export function ValidationSettingsSection({
             sourceAria: t("projectSettings.validation.requiredTextSourceAria"),
             value: validationCount,
             orgValue: orgValidationCount,
-            emit: (next) => onChange({ validationCount: next }),
+            emit: (next, typed) => onChange({ validationCount: next }, typed),
           })}
         />
         <SettingsRow
+          saveId="validationRoleFloor"
           label={<label htmlFor="validation-role-floor">{t("projectSettings.validation.minRoleLabel")}</label>}
           description={t("projectSettings.validation.minRoleDescription")}
           control={
@@ -293,6 +290,7 @@ export function ValidationSettingsSection({
           }
         />
         <SettingsRow
+          saveId="allowSelfValidation"
           label={<label htmlFor="allow-self-validation">{t("projectSettings.validation.allowSelfLabel")}</label>}
           description={t("projectSettings.validation.allowSelfDescription")}
           control={
@@ -315,6 +313,7 @@ export function ValidationSettingsSection({
           }
           description={t("projectSettings.validation.namedValidatorsDescription")}
           block
+          saveId="validationNamedUsers"
         >
           <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
             <MemberMultiSelect
@@ -341,6 +340,7 @@ export function ValidationSettingsSection({
           (Sam, PR 1 test pass). */}
       <SettingsGroup label={t("projectSettings.validation.audioGroup")} locked={disabled ? disabledTooltip : null}>
         <SettingsRow
+          saveId="validationCountAudio"
           label={<label htmlFor="validation-count-audio">{t("projectSettings.validation.requiredAudioLabel")}</label>}
           description={t("projectSettings.validation.requiredAudioAppliesNote")}
           // AQU-490: never gated on "audio exists". That gate read a
@@ -354,10 +354,11 @@ export function ValidationSettingsSection({
             sourceAria: t("projectSettings.validation.requiredAudioSourceAria"),
             value: validationCountAudio,
             orgValue: orgValidationCountAudio,
-            emit: (next) => onChange({ validationCountAudio: next }),
+            emit: (next, typed) => onChange({ validationCountAudio: next }, typed),
           })}
         />
         <SettingsRow
+          saveId="validationRoleFloorAudio"
           label={<label htmlFor="validation-role-floor-audio">{t("projectSettings.validation.minRoleAudioLabel")}</label>}
           description={t("projectSettings.validation.minRoleAudioDescription")}
           control={
@@ -405,6 +406,7 @@ export function ValidationSettingsSection({
           }
         />
         <SettingsRow
+          saveId="allowSelfValidationAudio"
           label={<label htmlFor="allow-self-validation-audio">{t("projectSettings.validation.allowSelfAudioLabel")}</label>}
           description={t("projectSettings.validation.allowSelfAudioDescription")}
           control={
@@ -437,6 +439,7 @@ export function ValidationSettingsSection({
           }
           description={t("projectSettings.validation.namedValidatorsAudioDescription")}
           block
+          saveId="validationNamedUsersAudio"
         >
           <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
             <MemberMultiSelect

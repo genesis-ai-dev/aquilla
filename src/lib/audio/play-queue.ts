@@ -25,6 +25,7 @@ import { audioMimeForExt } from "./mime"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { claimActiveAudio, clearActiveAudioIf, getActiveAudio, type ActiveAudioController } from "./audio-coordinator"
 import { t } from "@/lib/i18n/standalone"
+import { clipLevelOf, isMixed, mixElement, setMixerVolume } from "./mixer"
 import { selectQueueForFile, type QueueForFile } from "./queue-scope"
 import { isHiddenCell } from "@/lib/cells/hidden"
 
@@ -690,12 +691,27 @@ export function setQueueRate(rate: number): void {
   aimTakeEdge()
 }
 
-/** Set queue volume 0..1 (applies live + to subsequent tracks). */
+/** Set queue volume 0..1 (applies live + to subsequent tracks). An element
+ *  going through the mixer (AQU-2327) stays at 1: the mixer's main volume is
+ *  its volume, which also reaches iPhone and iPad. */
 export function setQueueVolume(vol: number): void {
   const v = Math.max(0, Math.min(1, vol))
-  if (currentAudio) currentAudio.volume = v
-  for (const e of overlayPool) if (e.element) e.element.volume = v
+  setMixerVolume(v)
+  if (currentAudio) currentAudio.volume = isMixed(currentAudio) ? 1 : v
+  for (const e of overlayPool) if (e.element) e.element.volume = isMixed(e.element) ? 1 : v
   setProgress({ volume: v })
+}
+
+/**
+ * AQU-2327: send a line's player through the app's one mixer, with its take's
+ * volume and fades (cell.audio.gain). The source clip is mixed as recorded.
+ * Unroutable elements (a cross-origin stream, no AudioContext) keep `volume`.
+ */
+function mixLineElement(audio: HTMLAudioElement, cell: CellData | undefined, url: string | null, slot?: string): void {
+  const att = cell && url
+    ? Object.values(cell.attachments ?? {}).find((a) => a.url === url && !a.isDeleted && a.role !== "source")
+    : undefined
+  if (mixElement(audio, slot ?? att?.slot ?? (att ? RECORDING_SLOT : "source"), clipLevelOf(att))) audio.volume = 1
 }
 
 // ── Per-cell audio resolution ───────────────────────────────────────────────
@@ -1975,6 +1991,7 @@ async function progOpenSource(cell: CellData, atClipSec: number): Promise<"open"
   audio.playbackRate = progress.rate
   audio.volume = progress.volume
   audio.muted = sourceElementMuted(audio)
+  mixLineElement(audio, cell, currentAttachmentUrl)
   pendingStartSeconds = atClipSec
 
   audio.onloadedmetadata = () => {
@@ -3359,6 +3376,11 @@ function wireOverlayElement(
   audio.playbackRate = progress.rate
   audio.volume = progress.volume
   audio.muted = !slotAudible(audibility, entry.slot)
+  // AQU-2327: the take's volume and fades, through the app's one mixer.
+  {
+    const att = activeContext?.cells.find((c) => c.id === entry.cellId)?.attachments?.[entry.audioId]
+    if (mixElement(audio, entry.slot, clipLevelOf(att))) audio.volume = 1
+  }
   const applySeek = () => {
     const d = audio.duration
     // A RECORDED take is a MediaRecorder webm, and that container carries no
@@ -3908,6 +3930,7 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
   audio.playbackRate = progress.rate
   audio.volume = progress.volume
   audio.muted = !audibility.source
+  mixLineElement(audio, cell, currentAttachmentUrl)
   setProgress({ currentTime: pendingStartSeconds ?? currentTrim?.start ?? 0, duration: 0 })
 
   // Handlers read the MUTABLE module state (currentIndex/currentTrim) — with

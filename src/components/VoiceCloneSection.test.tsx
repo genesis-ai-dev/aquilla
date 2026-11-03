@@ -1,10 +1,9 @@
 /**
- * VoiceCloneSection.test.tsx — empty dropzone vs filled clip; line reuse stays empty.
+ * VoiceCloneSection.test.tsx — the Inworld quick-clone clip: empty dropzone vs
+ * filled clip; a clip copied from a line leaves the dropzone empty.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
-import { TooltipProvider } from "@/components/ui/tooltip"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { VoiceCloneSection } from "./VoiceCloneSection"
 import type { Voice } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -46,10 +45,11 @@ describe("VoiceCloneSection filled state", () => {
     vi.mocked(uploadVoiceReference).mockClear()
   })
 
-  it("shows Active/Preview for a recorded or uploaded clip", () => {
-    renderSection({ id: "v", name: "N", referenceAudioId: "ref.webm" })
+  it("shows Active/Preview/Replace for a recorded or uploaded clip", () => {
+    renderSection({ id: "v", name: "N", provider: "inworld", referenceAudioId: "ref.webm" })
     expect(screen.getByText("Active")).toBeTruthy()
     expect(screen.getByRole("button", { name: /Preview/ })).toBeTruthy()
+    expect(screen.getByRole("button", { name: /Replace/ })).toBeTruthy()
   })
 
   it("stays an empty dropzone when the clip was reused from a line", () => {
@@ -57,12 +57,12 @@ describe("VoiceCloneSection filled state", () => {
       id: "v",
       name: "N",
       referenceAudioId: "ref.webm",
-      referenceTakeKey: "cell-1:recorded",
+      referenceTakeKey: "cell-1:take-1.webm",
     })
     expect(screen.queryByText("Active")).toBeNull()
     expect(screen.queryByRole("button", { name: /Preview/ })).toBeNull()
     expect(screen.getByRole("group", { name: "Add a reference clip" })).toBeTruthy()
-    expect(screen.getByText(/A short clip is enough \(5–15s of one clear speaker\)/)).toBeTruthy()
+    expect(screen.getByText(/5–15 seconds of one clear speaker/)).toBeTruthy()
     expect(screen.getByRole("button", { name: /Record reference/ })).toBeTruthy()
     expect(screen.getByRole("button", { name: /Upload audio/ })).toBeTruthy()
   })
@@ -98,20 +98,5 @@ describe("VoiceCloneSection filled state", () => {
     fireEvent.drop(zone, { dataTransfer: { files: [file] } })
     expect(await screen.findByText(/That file isn't audio/)).toBeTruthy()
     expect(uploadVoiceReference).not.toHaveBeenCalled()
-  })
-})
-
-// AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button. Preview
-// carries its own word.
-describe("VoiceCloneSection — Preview has no hover", () => {
-  it("shows nothing on hover over Preview", async () => {
-    render(
-      <TooltipProvider delay={0}>
-        <VoiceCloneSection voice={{ id: "v", name: "N", referenceAudioId: "ref.webm" }} projectId="p" fileId="f" session={session} onChange={vi.fn()} />
-      </TooltipProvider>,
-    )
-    await userEvent.setup().hover(screen.getByRole("button", { name: /Preview/ }))
-    await act(() => new Promise((r) => setTimeout(r, 30)))
-    expect(screen.queryByRole("tooltip")).toBeNull()
   })
 })

@@ -6,6 +6,8 @@
 import { describe, it, expect } from "vitest"
 import { render, screen } from "@testing-library/react"
 import { DurationBar } from "./DurationBar"
+import { TRACK_HUES } from "@/lib/timeline/track-colors"
+import { hexToOklch } from "@/lib/timeline/track-oklch"
 
 const overrun = () => screen.queryByTestId("rec-overrun-by")
 
@@ -63,5 +65,17 @@ describe("DurationBar — the overrun difference", () => {
     expect(row.children[0].textContent).toBe("0:03.4")
     expect(row.children[1]).toContainElement(overrun())
     expect(row.children[1].textContent).toMatch(/0:02\.8/)
+  })
+
+  // Sam, Oct 28: the "ok" green backed off blue a hair, with the timeline's
+  // green track. It is derived from that track's hue, so the next change to
+  // the palette's green moves the timing bar with it.
+  it("fills in the timeline's green track's hue while the take is inside its window", () => {
+    render(<DurationBar elapsedMs={1200} targetSec={2.8} />)
+    const green = TRACK_HUES.find((h) => h.id === "green")!
+    const ok = screen.getByTestId("rec-duration").style.getPropertyValue("--rec-ok")
+    expect(ok).toBe(`oklch(0.696 0.149 ${hexToOklch(green.hex).h.toFixed(1)})`)
+    expect(screen.getByTestId("rec-duration-fill").className).toContain("var(--rec-ok)")
+    expect(screen.getByTestId("rec-duration-window").className).toContain("var(--rec-ok)")
   })
 })

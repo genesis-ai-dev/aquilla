@@ -111,6 +111,9 @@ export function attachmentOutFrom(audioId: string, att: CodexCellAttachment, slo
     targetOffsetMs: att.targetOffsetMs ?? null,
     // AQU-2267: the place following the recordings travels with it.
     recordingsOffsetMs: att.recordingsOffsetMs ?? null,
+    ...(att.gainDb != null ? { gainDb: att.gainDb } : {}),
+    ...(att.fadeInMs != null ? { fadeInMs: att.fadeInMs } : {}),
+    ...(att.fadeOutMs != null ? { fadeOutMs: att.fadeOutMs } : {}),
     ...(att.validatorCount != null ? { validatorCount: att.validatorCount } : {}),
     ...(att.validators ? { validators: att.validators } : {}),
     ...(att.validatorDecidedTs ? { validatorDecidedTs: att.validatorDecidedTs } : {}),

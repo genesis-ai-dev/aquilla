@@ -72,6 +72,9 @@ const CORS_HEADERS: Record<string, string> = {
     "X-Update-Source-Sidecar",
     // Sent by MCP streamable-HTTP clients on every request after initialize.
     "Mcp-Protocol-Version",
+    // AQU-2299: the user's own ElevenLabs key on /api/v1/elevenlabs/* (BYOK).
+    // Missing here, every ElevenLabs call would die in the preflight.
+    "X-ElevenLabs-Key",
   ].join(", "),
   // AQU-276: expose custom response headers so the browser-side fetch() can
   // read them via res.headers.get(). Without Expose-Headers, only the CORS

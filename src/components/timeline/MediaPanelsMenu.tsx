@@ -145,6 +145,7 @@ export function MediaPanelsMenu({ dock, fileName, kind }: MediaPanelsMenuProps) 
           {row("timeline", 1)}
           {v.present.includes("film") && row("film", 2)}
           {row("text", 3)}
+          {v.present.includes("station") && row("station", 4)}
         </div>
         <ResetRow
           onReset={dock.resetLayout}

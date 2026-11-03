@@ -496,3 +496,53 @@ describe("mirrorSync — replacing the source of a file the project already has 
     }
   })
 })
+
+// AQU-2345: a mirrored copy takes the upstream file's type and points at its
+// original (link-sync-file-provenance.test.ts). An ADOPTED file is not a copy —
+// it is the project's own import, with its own type and its own original — and
+// the mirror must leave both alone even as it writes the upstream's source onto
+// its lines.
+describe("mirrorSync — an adopted file keeps its own type and original (AQU-2345)", () => {
+  async function seedOriginal(t: TestDb, projectId: string, fileId: string, key: string): Promise<void> {
+    await t.pg.query(
+      `INSERT INTO file_source_blobs (file_id, project_id, format, raw_source, r2_key, size_bytes, created_at)
+       VALUES ($1, $2, 'usfm', NULL, $3, 10, 1)`,
+      [fileId, projectId, key],
+    )
+  }
+
+  async function typeAndOriginal(t: TestDb, fileId: string): Promise<{ kind: string | null; r2_key: string | null }> {
+    const r = await t.pg.query<{ kind: string | null; r2_key: string | null }>(
+      `SELECT f.kind, b.r2_key FROM files f LEFT JOIN file_source_blobs b ON b.file_id = f.id WHERE f.id = $1`,
+      [fileId],
+    )
+    return r.rows[0]!
+  }
+
+  it("leaves the adopted file's type and original alone while the plain copy beside it takes the upstream's", async () => {
+    const t = await makeTestDb()
+    try {
+      seq = 0
+      await seedProjects(t)
+      await seedEstablished(t)
+      await seedUpstream(t)
+      // The upstream imported both files as USFM, each with an original…
+      await t.pg.query(`UPDATE files SET kind = 'usfm' WHERE project_id = $1`, [UPSTREAM])
+      await seedOriginal(t, UPSTREAM, UP_MRK, `artifacts/${UPSTREAM}/mrk/original.usfm`)
+      await seedOriginal(t, UPSTREAM, UP_GEN, `artifacts/${UPSTREAM}/gen/original.usfm`)
+      // …and the project's own Mark has an original of its own.
+      await seedOriginal(t, ESTABLISHED, OWN_MRK, `artifacts/${ESTABLISHED}/own/original.usfm`)
+
+      await linkReplacingMark(t)
+      expect((await mirrorSync(t.db, ESTABLISHED)).ranSync).toBe(true)
+
+      expect(await typeAndOriginal(t, OWN_MRK)).toEqual({ kind: "codex", r2_key: `artifacts/${ESTABLISHED}/own/original.usfm` })
+      expect(await typeAndOriginal(t, deterministicDownstreamFileId(ESTABLISHED, UP_GEN))).toEqual({
+        kind: "usfm",
+        r2_key: `artifacts/${UPSTREAM}/gen/original.usfm`,
+      })
+    } finally {
+      await t.close()
+    }
+  })
+})

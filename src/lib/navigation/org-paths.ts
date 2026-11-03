@@ -118,6 +118,16 @@ export function projectLanguageSettingsPath(
   return `${projectSettingsPath(projectId, "general")}?focus=${focus}`
 }
 
+/**
+ * AQU-2306: where a project's own import floor is set — the Import card, which
+ * lives in the General pane. Deep-linked with `?focus=` rather than `?q=` for
+ * the reason projectLanguageSettingsPath gives: a search the person never ran
+ * is a confusing place to land.
+ */
+export function projectImportSettingsPath(projectId: string): string {
+  return `${projectSettingsPath(projectId, "general")}?focus=import`
+}
+
 /** Living Memory surface — the section index, or one of its detail panes. */
 export function projectMemoryPath(projectId: string, section?: string): string {
   return section

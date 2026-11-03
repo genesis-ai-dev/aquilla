@@ -38,6 +38,7 @@ import {
   DOCK_AREAS,
   DOCK_HOST_MOVING,
   DOCK_PANELS,
+  STATION_MIN_WIDTH,
   dockView,
   enterFullScreen,
   foldRegion,
@@ -126,6 +127,13 @@ function isTyping(target: EventTarget | null): boolean {
 /** A dialog or a menu is open: Esc is theirs. */
 function somethingModalOpen(): boolean {
   return Boolean(document.querySelector('[role="dialog"], [role="alertdialog"], [role="menu"], [data-slot="popover-content"]'))
+}
+
+/** Inside a panel that has something of its own for Esc to dismiss right now
+ *  (the Station's selection or its Insert menu, AQU-2327): that Esc is the
+ *  panel's, not full screen's way back. */
+function panelOwnsEscape(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest('[data-owns-escape="true"]') != null
 }
 
 /** Keep every scroll position under `root` across a DOM move, which resets them. */
@@ -222,7 +230,14 @@ export function useMediaDock(input: UseMediaDockInput) {
     [safeResize, fileId, start.timelineHeight, start.videoWidth],
   )
 
-  const minWidthOf = (area: DockArea) => (view.list(area).includes("text") ? VIDEO_PANE_TABLE_MIN_WIDTH : VIDEO_PANE_MIN_WIDTH)
+  // The Station needs room for its action bar and its Start/End fields
+  // (AQU-2327: 480 px, spec item 42).
+  const minWidthOf = (area: DockArea) =>
+    view.list(area).includes("text")
+      ? VIDEO_PANE_TABLE_MIN_WIDTH
+      : view.list(area).includes("station")
+        ? Math.max(VIDEO_PANE_MIN_WIDTH, STATION_MIN_WIDTH)
+        : VIDEO_PANE_MIN_WIDTH
 
   const constraints: Record<DockRegion | "body", PanelConstraints> = (() => {
     if (!timelineStacked) return { tl: {}, body: {}, ll: {}, lr: {} }
@@ -262,7 +277,7 @@ export function useMediaDock(input: UseMediaDockInput) {
       el.dataset.mediaPanel = panel
       return el
     }
-    return { film: make("film"), text: make("text") } as Record<DockPanel, HTMLDivElement | null>
+    return { film: make("film"), text: make("text"), station: make("station") } as Record<DockPanel, HTMLDivElement | null>
   })
   // Moving a host and showing or hiding it changes the node itself, which a
   // value from state may not have done to it; the DOM work reaches the same
@@ -667,13 +682,13 @@ export function useMediaDock(input: UseMediaDockInput) {
         else k.fold(region)
         return
       }
-      if (e.key === "Escape" && !mod && !e.altKey && k.canRestore && !isTyping(e.target) && !somethingModalOpen()) {
+      if (e.key === "Escape" && !mod && !e.altKey && k.canRestore && !isTyping(e.target) && !somethingModalOpen() && !panelOwnsEscape(e.target)) {
         e.preventDefault()
         k.restore()
         return
       }
       if (e.altKey && !mod && !e.shiftKey && !isTyping(e.target)) {
-        const target = ({ Digit1: "timeline", Digit2: "film", Digit3: "text" } as const)[e.code as "Digit1"]
+        const target = ({ Digit1: "timeline", Digit2: "film", Digit3: "text", Digit4: "station" } as const)[e.code as "Digit1"]
         if (target) {
           e.preventDefault()
           k.show(target)

@@ -73,11 +73,16 @@ describe("the waveform reaches the chip", () => {
     expect(svg!.querySelector("path")?.getAttribute("d")).toBeTruthy()
   })
 
+  // AQU-2235 (board 54): the 46px clip carries a 14px name bar, so the
+  // waveform is drawn in the 30px under it (46 less the 2px frame and the
+  // bar), starting below the bar — never behind it.
   it("shows the whole clip when nothing is trimmed", () => {
     render(
       <TargetAudioLane {...base} items={[item(10_000)]} peaksByAudioId={peaks(keyOf())} />,
     )
-    expect(viewBox()).toBe(`0 0 ${BINS} 46`)
+    expect(viewBox()).toBe(`0 0 ${BINS} 30`)
+    expect(wave()!.style.top).toBe("14px")
+    expect(wave()!.style.height).toBe("30px")
   })
 
   it("skips the head margin a take is born with", () => {
@@ -89,7 +94,7 @@ describe("the waveform reaches the chip", () => {
         peaksByAudioId={peaks(keyOf())}
       />,
     )
-    expect(viewBox()).toBe(`32 0 288 46`)
+    expect(viewBox()).toBe(`32 0 288 30`)
   })
 
   it("windows both ends when the take is trimmed at both", () => {
@@ -100,7 +105,7 @@ describe("the waveform reaches the chip", () => {
         peaksByAudioId={peaks(keyOf())}
       />,
     )
-    expect(viewBox()).toBe(`64 0 192 46`)
+    expect(viewBox()).toBe(`64 0 192 30`)
   })
 })
 

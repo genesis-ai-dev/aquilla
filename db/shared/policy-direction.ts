@@ -58,6 +58,7 @@ export const POLICY_DIRECTION_TABLE: readonly { key: string; restrictiveDirectio
   // AQU-1771: who may see the project's member list / each member's progress.
   { key: 'rosterViewMinRole', restrictiveDirection: "a higher role level, 100 viewer … 700 owner (unset reads as the org's floor, Maintainer 600 by default; a project is never looser than its org)" },
   { key: 'memberProgressViewMinRole', restrictiveDirection: "a higher role level, 100 viewer … 700 owner (unset reads as the org's floor, Maintainer 600 by default; a project is never looser than its org)" },
+  { key: 'importMinRole', restrictiveDirection: "a higher role level, 100 viewer … 700 owner (unset reads as the org's floor, Project lead 500 by default; a project is never looser than its org)" },
 ]
 
 // ── Per-key rules ────────────────────────────────────────────────────────────
@@ -113,15 +114,24 @@ const countRule: PolicyRule = {
   describe: String,
 }
 
-/** A project's visibility floor (db/shared/visibility-floors.ts): a role
- *  level, Maintainer when neither the project nor its org set one, and never
- *  below the org's. Raising it hides more. */
-const visibilityFloorRule: PolicyRule = {
-  defaultValue: 600,
+/** A stricter-only role floor a project may raise above its org's: a role
+ *  level, `unset` when neither the project nor its org set one, and never below
+ *  the org's. Raising it admits fewer people. */
+const roleFloorRule = (unset: number): PolicyRule => ({
+  defaultValue: unset,
   rank: (v) => (typeof v === 'number' && [100, 200, 300, 400, 500, 600, 700].includes(v) ? v : null),
   describe: String,
   inheritedIsFloor: true,
-}
+})
+
+/** The two visibility floors (db/shared/visibility-floors.ts), Maintainer when
+ *  unset. Raising one hides more. */
+const visibilityFloorRule: PolicyRule = roleFloorRule(600)
+
+/** AQU-2305: the import floor (db/shared/import-floor.ts), Project lead when
+ *  unset — the bar `file.create` has always had. Raising it admits fewer
+ *  importers. */
+const importFloorRule: PolicyRule = roleFloorRule(500)
 
 const RULES: Readonly<Record<string, PolicyRule>> = {
   contributeToGlobalTm: falseIsTighter,
@@ -148,6 +158,7 @@ const RULES: Readonly<Record<string, PolicyRule>> = {
   ),
   rosterViewMinRole: visibilityFloorRule,
   memberProgressViewMinRole: visibilityFloorRule,
+  importMinRole: importFloorRule,
 }
 
 /** `agentAuthorship` is a one-value enum: "none" hides translator identity

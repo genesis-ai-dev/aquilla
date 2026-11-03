@@ -15,15 +15,46 @@ describe("WaveformRect", () => {
     const svg = screen.getByTestId("w-shape")
     expect(svg.getAttribute("viewBox")).toBe("0 0 4 54")
     expect(svg.querySelector("path")?.getAttribute("d")).toBe(envelopePathD(peaks, 54))
-    expect(svg.getAttribute("class")).toContain("opacity-40")
+    // AQU-2235 (Sam, Oct 25): the track's deep shade at 90%, not 40% ink.
+    expect(svg.getAttribute("class")).toContain("fill-[color:var(--tl-track-wave)]")
+    expect(svg.style.opacity).toBe("0.9")
   })
 
   it("wears the chip's body on a neutral ladder", () => {
     render(<WaveformRect peaks={peaks} height={56} testId="w" />)
     const root = screen.getByTestId("w")
-    expect(root.className).toContain("bg-[color:var(--tl-track-take)]")
+    // AQU-2235: the 12% ground in a 26% frame, here in the grey fallback.
+    expect(root.className).toContain("bg-[color:var(--tl-track-ground)]")
+    expect(root.className).toContain("border-[color:var(--tl-track-frame)]")
     expect(root.className).toContain("rounded-[6px]")
-    expect(root.style.getPropertyValue("--tl-track-take")).toContain("color-mix")
+    expect(root.style.getPropertyValue("--tl-track-ground")).toContain("color-mix")
+    expect(root.style.getPropertyValue("--tl-track-wave")).toContain("color-mix")
+  })
+
+  // AQU-2235 (board 51): 6px corners, and 4px under 24px tall.
+  it("rounds 4px under 24px tall, 6px from there", () => {
+    const { rerender } = render(<WaveformRect peaks={peaks} height={20} testId="w" />)
+    expect(screen.getByTestId("w").className).toContain("rounded-[4px]")
+    rerender(<WaveformRect peaks={peaks} height={24} testId="w" />)
+    expect(screen.getByTestId("w").className).toContain("rounded-[6px]")
+  })
+
+  // AQU-2235 (Sam, Oct 25): "make the only distinction between AI and non-AI
+  // the little star in the corner" — the same body, plus the sparkle.
+  it("marks a generated voice with its sparkle alone, at every size", () => {
+    const { rerender } = render(<WaveformRect peaks={peaks} height={56} kind="generated" testId="w" />)
+    const sparkle = screen.getByTestId("w-generated")
+    expect(sparkle.style.width).toBe("11px")
+    expect(screen.getByTestId("w").className).toContain("bg-[color:var(--tl-track-ground)]")
+    rerender(<WaveformRect peaks={peaks} height={20} kind="generated" testId="w" />)
+    expect(screen.getByTestId("w-generated").style.width).toBe("9px")
+    rerender(<WaveformRect peaks={peaks} height={56} kind="take" testId="w" />)
+    expect(screen.queryByTestId("w-generated")).toBeNull()
+  })
+
+  it("puts the sparkle beside the play button rather than under it", () => {
+    render(<WaveformRect peaks={peaks} height={40} kind="generated" onTogglePlay={() => {}} playLabel="Play" testId="w" />)
+    expect(screen.getByTestId("w-generated").style.left).toBe("28px")
   })
 
   it("wears the track colour it is given instead of grey", () => {
@@ -71,11 +102,33 @@ describe("WaveformRect", () => {
   it("shows progress the chip's way while playing: split body and a hairline", () => {
     const { rerender } = render(<WaveformRect peaks={peaks} height={56} progress={0.25} testId="w" />)
     expect(screen.queryByTestId("w-playline")).toBeNull()
+    expect(screen.queryByTestId("w-shape-unplayed")).toBeNull()
     rerender(<WaveformRect peaks={peaks} height={56} progress={0.25} playing testId="w" />)
     const root = screen.getByTestId("w")
     expect(root.className).toContain("var(--tl-play-x")
     expect(root.style.getPropertyValue("--tl-play-x")).toBe("25%")
     expect(screen.getByTestId("w-playline").style.left).toBe("25%")
+  })
+
+  // AQU-2235 (Sam, Oct 25, board 51): played at full strength on a 27% ground,
+  // the rest at 30%, split at a 1.5px line in the darkened hue (1px under 30px).
+  it("plays full strength behind the line and 30% ahead of it", () => {
+    render(<WaveformRect peaks={peaks} height={56} progress={0.25} playing testId="w" />)
+    expect(screen.getByTestId("w").className).toContain("var(--tl-track-played)_var(--tl-play-x")
+    const played = screen.getByTestId("w-shape")
+    const ahead = screen.getByTestId("w-shape-unplayed")
+    expect(played.style.opacity).toBe("0.9")
+    expect(played.style.clipPath).toBe("inset(0 calc(100% - 25%) 0 0)")
+    expect(ahead.style.opacity).toBe("0.3")
+    expect(ahead.style.clipPath).toBe("inset(0 0 0 25%)")
+    const line = screen.getByTestId("w-playline")
+    expect(line.className).toContain("w-[1.5px]")
+    expect(line.className).toContain("bg-[color:var(--tl-track-line)]")
+  })
+
+  it("draws a 1px play line under 30px tall", () => {
+    render(<WaveformRect peaks={peaks} height={20} progress={0.5} playing testId="w" />)
+    expect(screen.getByTestId("w-playline").className).toContain("w-px")
   })
 
   it("plays and records from its corners without triggering a seek", () => {

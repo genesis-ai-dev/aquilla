@@ -129,12 +129,6 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "audio.recordingModal.recordingStatus is the present participle shown beside a " +
     "pulsing dot while the microphone is live. Noun vs progressive verb: English " +
     "spells both 'Recording', almost nothing else does.",
-  "projectSettings.gitSync.autoSyncSwitch":
-    "The label of the Git sync card's on/off switch, a standalone noun phrase at the " +
-    "start of a row ('Auto-sync'). projectSettings.field.autoSync is the lower-case " +
-    "name of the same setting read inside the 'Saved …' sentence that lists what " +
-    "changed. A capitalized label and a mid-sentence list item differ in case and, " +
-    "in many languages, in grammatical form.",
   "auth.login.submitDefault":
     "The submit button of the sign-in form. auth.login.title is the heading naming " +
     "the whole form. Languages that nominalize headings ('Anmeldung') while keeping " +
@@ -142,7 +136,7 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
   "search.mode.replace":
     "Names the find-and-replace mode, a term of art paired with 'Find' and usually " +
     "fixed by local software convention. audio.clone.replaceButton is an everyday " +
-    "imperative that swaps an attached reference clip for another file.",
+    "imperative that swaps something already set (existing audio, a saved key) for a new one.",
   "editor.milestone.vocab.startLabel":
     "Names the synthetic first division in the milestone navigator — a noun for " +
     "'the beginning of the file'. audio.recordingModal.startButton is the " +
@@ -368,9 +362,14 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
   "projectSettings.sourceLink.modeClone":
     "Badge naming the AD-9 link-mode ('Clone' vs 'Live') on a linked project's " +
     "Source Link card, and reused for the same radio option in the create-project " +
-    "dialog. audio.library.cloneEngineLabel names a voice-cloning TTS engine in " +
-    "the voice library's engine picker. A project-linking term of art and an " +
-    "audio-engine brand-ish label that happen to share the English word 'Clone'.",
+    "dialog. audio.library.cloneEngineLabel labels a quick-cloned voice (a copy of " +
+    "a real person's voice) in the Voices panel. A project-linking term of art and " +
+    "a kind-of-voice label that happen to share the English word 'Clone'.",
+  "audio.newVoice.tabClone":
+    "Tab label naming a kind of voice in the New voice dialog (a quick clone, " +
+    "next to TTS voice / Characters / Train voice) — a noun phrase in most " +
+    "languages. audio.elevenLabs.cloneButton is the imperative action button that " +
+    "starts an ElevenLabs clone. A tab name and a command.",
   "projectSettings.section.experimental":
     "Section/nav-group heading for this project's device-local experimental " +
     "feature flags. autopilot.settings.experimentalTitle is the same heading for " +
@@ -786,6 +785,53 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "same operation-name-vs-imperative-button split already documented for " +
     "nav.outbox.eventEdit above — a different feature (the outbox diagnostics feed) " +
     "with the identical register distinction.",
+  "editor.station.helpEditTerm":
+    "Term heading (a <dt>) in the Station's (i) explanation, naming the group of " +
+    "cut-and-insert controls (Keep this, Delete this, Insert audio here) beside its " +
+    "sibling headings 'Select', 'Trim', 'Volume', 'Fades', 'Saving' and 'Keys' — a " +
+    "nominalized glossary label, not an action. common.edit is the imperative " +
+    "button that opens editing. The same heading-against-imperative split " +
+    "documented for nav.outbox.eventEdit and agent.proposal.kind.edit above: a " +
+    "language that nominalizes the heading writes it differently from the button.",
+  "editor.station.start":
+    "Noun label in the Station's transport, before the kept part's start time and " +
+    "paired with 'End' — 'the start' of the kept part, clicked to type a time. " +
+    "audio.recordingModal.startButton is the imperative button that begins " +
+    "recording. The same noun-against-verb split documented for " +
+    "editor.milestone.vocab.startLabel above; languages that spell the noun and " +
+    "the imperative differently need the two apart.",
+  "editor.station.approved":
+    "State adjective in the Station's heading after a check mark ('✓ Approved', " +
+    "beside 'Waiting' and 'Waiting · 1 of 2'): the open recording has the approvals " +
+    "the project asks for, a term of the audio-validation vote. " +
+    "autopilot.evidence.status.approved is one member of an AI agent's evidence-" +
+    "review enum — the unrelated review pipeline documented at " +
+    "org.projectOverview.columnApproved above; a recording's validation state and " +
+    "an evidence item's review state are different referents.",
+  "editor.station.hApproved":
+    "History row in the Station naming an EVENT — someone approved the recording — " +
+    "read with who and when ('Approved · Ana · Oct 30'), a past-tense act beside " +
+    "sibling rows 'Recorded', 'Trimmed', 'Deleted'. editor.station.approved " +
+    "is the current STATE in the heading; autopilot.evidence.status.approved is an " +
+    "AI evidence-review status. Languages that inflect an act done by someone " +
+    "differently from a state label (and from a review-pipeline enum) write the " +
+    "three apart, so none can borrow another's translation.",
+  "editor.station.approve":
+    "Imperative button in the Station's heading that casts this person's approval " +
+    "vote on the open recording — the audio-validation act the project counts " +
+    "('Waiting · 1 of 2' → '✓ Approved'), the same act as the take's vote on the " +
+    "timeline. rules.surface.approveButton promotes a project-level translation " +
+    "rule up to org scope and agent.approve accepts an agent's staged proposal: " +
+    "the three independent human-gate actions already split at agent.approve " +
+    "above, sharing only the English verb.",
+  "editor.station.hDeleted":
+    "Title-case History row in the Station naming what happened to the recording " +
+    "— it was deleted — read with who and when beside 'Trimmed'/'Approved' rows. " +
+    "comments.file.deletedBadge is lower-case 'deleted', a small inline status " +
+    "badge on a file reference inside a comment thread. A past-tense event line " +
+    "and a lower-case inline badge take different forms in languages that case- " +
+    "or register-mark that distinction, the split already documented for " +
+    "org.archivedProjects.deletedColumnLabel above.",
   "agent.proposal.kind.validate":
     "Badge naming the KIND of a staged agent-authored proposal row ('cell.validate') " +
     "in ProposalCard, the same noun-phrase operation-name register as its sibling " +

@@ -21,6 +21,9 @@ export interface AgentMemoryProvenance {
   runId?: string
   sessionId?: string
   credentialId?: string
+  /** AQU-2342: an agent brief proposal made before the brief screen was
+   *  retired, moved into the memory queue as a decisions/ entry. */
+  briefProposalId?: string
 }
 
 export interface AgentMemory {

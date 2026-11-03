@@ -30,6 +30,8 @@ export interface MemoryProvenance {
   runId?: string
   sessionId?: string
   credentialId?: string
+  /** AQU-2342: moved from this pending brief proposal (brief-proposals-to-decisions.ts). */
+  briefProposalId?: string
 }
 
 export interface AgentMemory {

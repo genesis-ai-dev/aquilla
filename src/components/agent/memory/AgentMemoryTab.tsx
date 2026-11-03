@@ -156,6 +156,10 @@ export default function AgentMemoryTab({ projectId, roleLevel }: AgentMemoryTabP
           setMemories((cur) => cur.map((m) => (m.id === updated.id ? updated : m)))
           // mem-M5: flip the matching memory.proposed chat notice, if any.
           agentSessionStore(projectId, username).markMemoryReviewed(updated.id)
+          // AQU-2342: a brief proposal moved into this queue — its old
+          // brief.proposed notice settles too.
+          const briefProposalId = updated.provenance?.briefProposalId
+          if (briefProposalId) agentSessionStore(projectId, username).markBriefReviewed(briefProposalId)
         } catch (err) {
           setMemories((cur) => cur.map((m) => (m.id === original.id ? original : m)))
           if (err instanceof SupersedesHumanEditedError) {

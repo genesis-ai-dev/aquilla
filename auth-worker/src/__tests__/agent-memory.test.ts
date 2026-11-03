@@ -689,6 +689,47 @@ describe("project brief", () => {
   })
 })
 
+describe("pending brief proposals join the memory queue (AQU-2342)", () => {
+  it("listing memories moves each pending proposal to one decisions/ memory, whose approval appends to the instructions", async () => {
+    await seedUser(1, "lead")
+    await seedProject(PROJECT, 1)
+    await grant(PROJECT, 1, 500)
+    const leadJwt = await jwtFor("lead")
+    const propose = async (content: string) => {
+      const r = await req("POST", `${PROJECT}/brief/proposals`, leadJwt, { content, rationale: "gap" }, agentHeader(leadJwt))
+      return ((await r.json()) as { proposalId: string }).proposalId
+    }
+    const pending = await propose("Keep verse numbers in the margin.")
+    const reviewed = await propose("Already handled.")
+    await req("POST", `${PROJECT}/brief/proposals/${reviewed}/review`, leadJwt, { action: "reject" })
+
+    type Listed = { id: string; path: string; status: string; content: string; provenance: { briefProposalId?: string } | null }
+    const list = async () =>
+      ((await (await req("GET", `${PROJECT}/agent-memory`, leadJwt)).json()) as { memories: Listed[] }).memories
+    const first = await list()
+    expect(first).toHaveLength(1)
+    expect(first[0]).toMatchObject({
+      status: "proposed",
+      content: "Keep verse numbers in the margin.",
+      provenance: { briefProposalId: pending },
+    })
+    expect(first[0].path).toMatch(/^decisions\/instructions-[0-9a-f]{12}\.md$/)
+    // Moved once: listing again does not add a second copy, and the proposal is closed as moved.
+    expect(await list()).toHaveLength(1)
+    const row = await env.AQUILLA_PG.prepare("SELECT status, reviewed_by FROM project_brief_proposals WHERE id = ?")
+      .bind(pending)
+      .first<{ status: string; reviewed_by: string }>()
+    expect(row).toEqual({ status: "rejected", reviewed_by: "aqu-2342:moved-to-decisions" })
+
+    const approved = await req("POST", `${PROJECT}/agent-memory/${first[0].id}/review`, leadJwt, { action: "approve" })
+    expect(approved.status).toBe(200)
+    expect(await loadTranslationInstructions(env.AQUILLA_PG, PROJECT)).toEqual({
+      text: "Keep verse numbers in the margin.",
+      stored: true,
+    })
+  })
+})
+
 // ──────────────────────────────────────────────────────────────────────────
 // Brief base_version + history (adversarial-panel mem-M2/M3): a proposal
 // drafted against version N must not silently clobber a human edit that lands

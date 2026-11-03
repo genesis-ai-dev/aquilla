@@ -26,6 +26,7 @@ import { resolveProjectRole } from "../services/project-permissions"
 import { loadProjectSettings } from "../../../db/shared/projects"
 import { resolveTranslationInstructions } from "../../../db/shared/translation-instructions"
 import type { AquillaDb } from "../../../db/shim/postgres"
+import { moveBriefProposalsToDecisions } from "../../../db/shared/brief-proposals-to-decisions"
 import {
   createProposal,
   listMemories,
@@ -124,6 +125,11 @@ agentMemory.get("/:projectId/agent-memory", authMiddleware, async (c) => {
     const { body, status } = errorJson("validation_failed", `unknown status "${statusParam}"`, 400)
     return c.json(body, status)
   }
+  // AQU-2342: brief proposals made before the brief screen was retired join
+  // this queue as decisions/ entries (approval appends them to the project
+  // instructions), so the Memory tab — and the chat's old "Review" links —
+  // show them.
+  await moveBriefProposalsToDecisions(c.env.AQUILLA_PG, projectId)
   const memories = await listMemories(
     c.env.AQUILLA_PG,
     projectId,

@@ -18,6 +18,8 @@ import { admitSandboxTime, secondsSince } from "../billing/sandbox-meter"
 import { proposeMemory, type MemoryProvenance } from "./memory-writes"
 import type { HarnessFrame } from "./frames"
 import type { MemoryContext } from "../../../../db/shared/agent-memory"
+// Same path the pending brief proposals move to, so the two never diverge.
+import { briefDecisionPath } from "../../../../db/shared/brief-proposals-to-decisions"
 
 /** read_sandbox_file default/utf-8 cap (contracts §2: 48KB). */
 const READ_SANDBOX_MAX_BYTES = 48 * 1024
@@ -280,15 +282,6 @@ export async function proposeMemoryTool(
 export interface ProposeBriefArgs {
   content?: unknown
   rationale?: unknown
-}
-
-/** A stable decisions/ path for a retargeted brief update: same text → same
- *  path, so a repeated call supersedes rather than piles up. */
-async function briefDecisionPath(content: string): Promise<string> {
-  const bytes = new TextEncoder().encode(content.trim())
-  const hash = await crypto.subtle.digest("SHA-256", bytes)
-  const hex = [...new Uint8Array(hash).slice(0, 6)].map((b) => b.toString(16).padStart(2, "0")).join("")
-  return `decisions/instructions-${hex}.md`
 }
 
 export async function proposeBriefUpdateTool(

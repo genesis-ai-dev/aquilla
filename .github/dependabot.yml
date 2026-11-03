@@ -53,6 +53,17 @@ updates:
       - dependency-name: "@tanstack/react-table"
         update-types:
           - "version-update:semver-major"
+      # LiveStore is pre-1.0 and ships breaking changes in MINOR versions (its
+      # changelog says so), so a minor bump does not belong in this group.
+      # 0.4 -> 0.5 is the Effect 3 -> Effect 4 migration: Schema.Literal became
+      # single-valued (13 call sites in src/lib/offline/schema.ts), the pnpm
+      # patch on @livestore/common@0.4.0 is silently dropped, the offline data
+      # generation and its eventlog fixture must be bumped, and every existing
+      # client store rebuilds once. PR #1759 went red on all four checks from
+      # that one bump. Remove once a deliberate migration lands.
+      - dependency-name: "@livestore/*"
+        update-types:
+          - "version-update:semver-minor"
 
   - package-ecosystem: npm
     directory: "/auth-worker"

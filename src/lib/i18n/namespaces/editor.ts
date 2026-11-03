@@ -687,10 +687,6 @@ export const editor = defineNamespace({
       "These lines use Inworld TTS, not Gemini. Inworld TTS isn't set up on this server, so a Gemini API key will not fix it.",
     "editor.selection.voiceTogetherInworldFailed":
       "Inworld TTS couldn't voice these lines. This is not a Gemini key problem.",
-    "editor.selection.voiceTogetherSeedVcNotConfigured":
-      "This clone voice needs Seed-VC, which isn't set up on this server. An Inworld clone wouldn't need this step.",
-    "editor.selection.voiceTogetherSeedVcFailed":
-      "Voice conversion couldn't re-voice these lines. This is not a Gemini key problem.",
     "editor.selection.translate": "Translate",
     "editor.selection.translateNotConfigured":
       "Translation isn't configured for this project",
@@ -958,6 +954,8 @@ export const editor = defineNamespace({
     "editor.timeline.timingLengthSeconds": "{seconds} s",
     "editor.timeline.timingLengthMinutes": "{minutes} min {seconds} s",
     "editor.timeline.timingLengthHours": "{hours} h {minutes} min",
+    // AQU-2235: a piece's name in its name bar on the timeline.
+    "editor.timeline.takePieceName": "{name} · {n} of {total}",
     "editor.timeline.qualityToggleAria": "Play generated voices at original quality",
     // AQU-646: "Recordings are always compressed" stopped being true when
     // capture began following the device's WAV preference — a take now plays
@@ -976,12 +974,9 @@ export const editor = defineNamespace({
     "editor.timeline.takeMenuReRecord": "Re-record this line",
     "editor.timeline.takeMenuRegenerate": "Regenerate voice",
     // AQU-2026: Change voice per line, from the Media timeline's take menu.
-    // The action and its quality names are the Audio tab's own
+    // The action and its reasons are the Audio tab's own
     // (`editor.voice.changeVoice*`) — the two surfaces must not name the same
-    // thing differently. Only the reason the Audio tab has no equivalent of
-    // is keyed here.
-    "editor.timeline.takeMenuChangeVoiceIsReference": "A voice is cloned from this take",
-    "editor.timeline.takeMenuMakeCharacter": "Make a character from this voice",
+    // thing differently.
     "editor.timeline.takeMenuSplitAtPlayhead": "Split at the playhead",
     "editor.timeline.takeMenuApprove": "Approve this take",
     "editor.timeline.takeMenuApprovePiece": "Approve this piece",
@@ -1107,18 +1102,22 @@ export const editor = defineNamespace({
     "editor.history.reasonApproved": "{name} approved it afterwards, so it was left as it is.",
     "editor.history.reasonNotAllowed": "You can no longer make this change, so it was left as it is.",
     "editor.history.reasonLinesChanged": "These lines have changed since you made them, so Undo left them as they are.",
+    "editor.history.reasonOtherDevice": "It changed a setting kept only on the device it was made on, so it can only be undone there.",
     "editor.history.blockedLanguage": "Open {language} to undo “{step}”",
     "editor.history.movedUndo": "“{step}” was already undone on another of your devices, so nothing changed here",
     "editor.history.movedRedo": "“{step}” was already redone on another of your devices, so nothing changed here",
     "editor.history.skippedApproved": "Skipped “{step}”: {name} approved it since",
     "editor.history.skippedNotAllowed": "Skipped “{step}”: you can no longer make that change",
     "editor.history.skippedLinesChanged": "Skipped “{step}”: these lines have changed since you made them, so Undo left them as they are",
+    "editor.history.skippedOtherDevice": "“{step}” was made on another device and can only be undone there",
     "editor.history.stepPlace": "{file} · {language}",
     "editor.history.stepRecordTake": "Record take",
     "editor.history.stepUploadTake": "Upload recording",
     "editor.history.stepGenerateVoice": "Generate a voice",
     "editor.history.stepChangeVoice": "Change the voice",
     "editor.history.stepRemoveNoise": "Remove noise",
+    "editor.history.stepStationVersion": "Save a new version",
+    "editor.history.stepTakeLevel": "Change volume or fades",
     "editor.history.stepLinesFromRecording": "Make lines from a recording",
     "editor.history.stepImportRecording": "Import recording",
     "editor.history.stepLinkFilm": "Link film",
@@ -1131,6 +1130,7 @@ export const editor = defineNamespace({
       other: "Change {count} characters",
     }),
     "editor.history.stepEditSource": "Edit the source text",
+    "editor.history.stepChangeSetting": "Change: {setting}",
     "editor.history.stepUnknown": "A change made in a newer version of Aquilla",
     "editor.timeline.videoHiddenNote":
       "The linked film is hidden here. It plays to the source's times, and this file now follows its " +
@@ -1285,6 +1285,180 @@ export const editor = defineNamespace({
     // media view's panels — the timeline, the Film and the Text — their 24 px
     // strips with Full screen, Fold and ⋯, the one 40 px top bar, its status
     // ring, and the Panels menu that brings back whatever is folded.
+    // AQU-2327: the Station, the media view's audio editing panel.
+    "editor.station.title": "Station",
+    "editor.station.editIn": "Edit in the Station",
+    "editor.station.empty": "Pick a recording on the timeline, or choose Edit in the Station from a take’s ⋯ menu.",
+    "editor.station.loading": "Loading the recording…",
+    "editor.station.loadFailed": "This recording couldn’t be loaded.",
+    "editor.station.gone": "This recording is no longer here.",
+    "editor.station.nameOnLine": "{take} · {line}",
+    "editor.station.lineNumber": "line {n}",
+    "editor.station.placedOn": "Placed on {line}",
+    "editor.station.placedOnTwo": "Placed on {a} and {b} · open on {open}",
+    "editor.station.waiting": "Waiting",
+    "editor.station.waitingCount": "Waiting · {done} of {need}",
+    "editor.station.approved": "Approved",
+    "editor.station.version": "Version {n}",
+    "editor.station.approve": "Approve",
+    "editor.station.approveTip": "Approve the clip on {line} (A)",
+    "editor.station.approveTakeTip": "Approve the take (A)",
+    "editor.station.undoTip": "Undo your last change to this recording",
+    "editor.station.nothingToUndo": "Nothing to undo",
+    "editor.station.laneTip": "Drag across the recording to select a part; click to place the cursor",
+    "editor.station.controlsInfo": "How the Station's controls work",
+    "editor.station.helpSelectTerm": "Select",
+    "editor.station.helpSelect": "Drag across the waveform to select a part. Click to place the cursor.",
+    "editor.station.helpTrimTerm": "Trim",
+    "editor.station.helpTrim": "Drag Start or End, or the waveform's edge. To type a time, click Start or End under the waveform.",
+    "editor.station.helpEditTerm": "Edit",
+    "editor.station.helpEdit": "With a part selected, Keep this trims to it and Delete this cuts it out. Insert audio here adds another recording, a file or a new recording at the cursor.",
+    "editor.station.helpVolumeTerm": "Volume",
+    "editor.station.helpVolume": "Point at the waveform to see the volume line. Drag it up or down, or use − and +.",
+    "editor.station.helpFadesTerm": "Fades",
+    "editor.station.helpFades": "Drag the round knob at a top corner inward to fade in or out. Click it to turn the fade on or off.",
+    "editor.station.helpSaveTerm": "Saving",
+    "editor.station.helpSave": "Cuts and inserts wait until you choose Save as new version. The original recording is always kept.",
+    "editor.station.helpKeysTerm": "Keys",
+    "editor.station.helpKeys": "Space plays, K keeps, ⌫ deletes, I inserts, A approves, L loops, + and − zoom, {mod}Z undoes, {mod}S saves. After Record now, Enter keeps the new recording.",
+    "editor.station.startFlag": "Start {time}",
+    "editor.station.endFlag": "End {time}",
+    "editor.station.dragStart": "Drag to trim the start",
+    "editor.station.dragEnd": "Drag to trim the end",
+    "editor.station.insertFlag": "Insert {time}",
+    "editor.station.keepThis": "Keep this",
+    "editor.station.keepTip": "Keep only this part (K)",
+    "editor.station.deleteThis": "Delete this",
+    "editor.station.deleteTip": "Delete this part (⌫)",
+    "editor.station.insertHere": "Insert audio here",
+    "editor.station.insertTip": "Insert audio here (I)",
+    "editor.station.selRange": "{a}–{b} · {len}",
+    "editor.station.selAt": "at {time}",
+    "editor.station.play": "Play (Space)",
+    "editor.station.playSelection": "Play the selection (Space)",
+    "editor.station.pause": "Pause (Space)",
+    "editor.station.speedTip": "Playback speed",
+    "editor.station.timeOf": "{at} / {len}",
+    "editor.station.start": "Start",
+    "editor.station.end": "End",
+    "editor.station.typeStartTip": "Click to type the start time, to 0.01 s",
+    "editor.station.typeEndTip": "Click to type the end time, to 0.01 s",
+    "editor.station.typeHelp": "Type a time to 0.01 s · Return sets it · Esc cancels",
+    "editor.station.set": "Set",
+    "editor.station.badTime": "Type a time like 0:01.25 or 1.25.",
+    "editor.station.zoomIn": "Zoom in (=)",
+    "editor.station.zoomOut": "Zoom out (−)",
+    "editor.station.scroll": "Scroll the waveform",
+    "editor.station.hintCalm": "Drag across the waveform to select a part. Drag its edges to trim. Space plays.",
+    "editor.station.history": "History",
+    "editor.station.hideHistory": "Hide the history",
+    "editor.station.historyNothing": "Nothing yet",
+    "editor.station.historyTitle": "History",
+    "editor.station.historyFootnote": "Trims, fades and volume are kept on the clip and never change the recording.",
+    "editor.station.historyFailed": "The history couldn’t be loaded.",
+    "editor.station.historyWho": "{row} · {who}, {when}",
+    "editor.station.hRecorded": "Recorded",
+    "editor.station.hVersionSaved": "Version {n} saved",
+    "editor.station.hVersionSavedWith": "Version {n} saved: {what} · used on {lines}",
+    "editor.station.hSavedOver": "Saved over",
+    "editor.station.hSavedOverWith": "Saved over: {what} · used on {lines}",
+    "editor.station.hTrimmed": "Trimmed: Start {a}, End {b}",
+    "editor.station.hApproved": "Approved",
+    "editor.station.hUnapproved": "Approval withdrawn",
+    "editor.station.hRenamed": "Renamed to “{name}”",
+    "editor.station.hMoved": "Moved on the timeline",
+    "editor.station.hSplit": "Split at {time}",
+    "editor.station.hChosen": "Chosen to play",
+    "editor.station.hDeleted": "Deleted",
+    "editor.station.placedOnMany": plural(
+      {
+        one: "Placed on {count} line · open on {open}",
+        other: "Placed on {count} lines · open on {open}",
+      },
+      "count",
+    ),
+    "editor.station.historyEntries": plural(
+      {
+        one: "{count} entry",
+        other: "{count} entries",
+      },
+      "count",
+    ),
+    "editor.station.insertedMark": "Inserted: {label}",
+    "editor.station.joinMark": "A part was deleted here",
+    "editor.station.loop": "Loop",
+    "editor.station.loopTip": "Play the selection over and over (L)",
+    "editor.station.removeNoise": "Remove noise…",
+    "editor.station.changeVoice": "Change the voice…",
+    "editor.station.makesVersion": "Makes a new version",
+    "editor.station.hDraftDeleted": "{n}. Deleted {len} at {time} · not saved yet",
+    "editor.station.hDraftInserted": "{n}. Inserted {label} ({len}) at {time} · not saved yet",
+    "editor.station.hint": "Drag across the waveform to select a part; click to place the cursor. Drag Start or End to trim. Space plays; K keeps, ⌫ deletes, I inserts, {mod}Z undoes.",
+    "editor.station.fromLibrary": "From the library",
+    "editor.station.libraryEmpty": "No other recordings in this file yet.",
+    "editor.station.fromFile": "From a file…",
+    "editor.station.recordNow": "Record now",
+    "editor.station.recordLater": "Recording straight into an insert comes next.",
+    "editor.station.recordFlagIn": "Recording in {n}",
+    "editor.station.recordFlagReady": "Get ready",
+    "editor.station.recordFlag": "Recording at {time}",
+    "editor.station.recordingFor": "Recording · {len}",
+    "editor.station.recordStop": "Stop",
+    "editor.station.newRecording": "New recording",
+    "editor.station.keepRecording": "Keep",
+    "editor.station.recordAgain": "Record again",
+    "editor.station.micDenied": "The microphone is blocked for this site. Allow it in the browser's site settings, then choose Record now again.",
+    "editor.station.recordFailed": "The recording couldn't be made: {message}",
+    "editor.station.kindDeleted": "a part deleted",
+    "editor.station.kindInserted": "audio inserted",
+    "editor.station.kindNoise": "noise removed",
+    "editor.station.notSaved": "Not saved: {what}",
+    "editor.station.applyTo": "Where to use the new version",
+    "editor.station.clipOnly": "For this clip only",
+    "editor.station.everywhere": "Everywhere",
+    "editor.station.placesCount": plural(
+      {
+        one: "{count} place",
+        other: "{count} places",
+      },
+      "count",
+    ),
+    "editor.station.save": "Save",
+    "editor.station.saveTip": "Save over this take. Undo brings the old sound back ({keys})",
+    "editor.station.saveMenu": "More ways to save",
+    "editor.station.saveOver": "Save over this take",
+    "editor.station.saveNew": "Save as new version",
+    "editor.station.savedOver": "Saved over {take} on {lines}. Its history is kept, and Undo brings the old sound back.",
+    "editor.station.saving": "Saving…",
+    "editor.station.saved": "Saved as version {n}, used on {line}. The original recording is kept.",
+    "editor.station.savedEverywhere": "Saved as version {n}, used everywhere ({lines}). The original recording is kept.",
+    "editor.station.saveFailed": "The new version couldn’t be saved: {message}",
+    "editor.station.notAudio": "“{name}” isn’t an audio file the browser can read.",
+    "editor.station.keptForLater": "Your changes to {name} are kept until you save or undo them.",
+    "editor.station.undoUnsaved": "Undo the last unsaved change",
+    "editor.station.fileLabel": "the file “{name}”",
+    "editor.station.fadeIn": "Fade in",
+    "editor.station.fadeOut": "Fade out",
+    "editor.station.fadeInLen": "Fade in {len} s",
+    "editor.station.fadeOutLen": "Fade out {len} s",
+    "editor.station.fadeTip": "{fade}: drag the corner inward, or click",
+    "editor.station.volumeDragTip": "Drag the line up or down to change the volume",
+    "editor.station.quieter": "Quieter",
+    "editor.station.quieterTip": "Drag the line down, or click: 3 dB quieter",
+    "editor.station.louder": "Louder",
+    "editor.station.louderTip": "Drag the line up, or click: 3 dB louder",
+    "editor.station.hLevel": "Volume {db} · fades {fin} in, {fout} out",
+    "editor.station.noiseRunning": "Removing noise… it takes about as long as the recording plays.",
+    "editor.station.noiseDone": "Noise removed: saved as version {n}, used on {line}. The original recording is kept.",
+    "editor.station.voiceStarted": "Changing the voice. The new version appears on the line when it’s ready.",
+    "editor.station.voiceUnavailable": "This line’s voice can’t be changed here.",
+    "editor.station.recordedInsert": "a recording made here",
+    "editor.station.tooLong": "Too long to cut or insert here yet; trims, volume and fades work.",
+    "editor.station.takeVersion": "{take} · version {n}",
+    "editor.station.sourceReadOnly": "This is the source recording, so it can’t be edited here.",
+    "editor.station.sourceName": "Source recording",
+    "editor.station.moreTip": "More: remove noise, change the voice, history",
+    "editor.station.hintListen": "Drag across the waveform to select a part. Space plays.",
     "editor.dock.film": "Film",
     "editor.dock.bottomLeft": "Bottom left",
     "editor.dock.bottomRight": "Bottom right",
@@ -1888,15 +2062,7 @@ export const editor = defineNamespace({
 
     // — A line's voice (the timeline's take menu, the Voices tab) ——————————
     "editor.voice.play": "Play this line",
-    // AQU-2212's one-step clone (components/cell/CloneFromTakeButton). Its
-    // card left with the Audio view (AQU-1758); kept for the take's new homes.
-    "editor.voice.clone": "Clone voice from take",
-    "editor.voice.cloneTitle": "Make a voice from this take",
-    "editor.voice.cloneNamePlaceholder": "Voice name",
-    "editor.voice.cloneNameAriaLabel": "Name for the new voice",
-    "editor.voice.cloneSubmit": "Add to cast",
-    "editor.voice.cloneMoreOptions": "More options",
-    "editor.voice.clonedToast": "{name} is in the cast",
+    "editor.voice.trainFromTake": "Train a voice from this recording",
     // AQU-2212's voice card, its jobs moved (AQU-1758): the one-click when a
     // line's voice and its take disagree, the work in progress, and what a
     // line nobody cast names a person's take.
@@ -1907,12 +2073,9 @@ export const editor = defineNamespace({
     "editor.voice.recordedBy": "Recorded by {name}",
     "editor.voice.originalAudio": "Original audio",
     "editor.voice.changeVoice": "Change voice",
-    "editor.voice.changeVoiceNeedsClone": "{name} has no reference clip. Assign a cloned voice to change this take.",
+    "editor.voice.changeVoiceCantRevoice":
+      "{name} can read text but can't re-voice recordings — Change voice works with character, trained and ElevenLabs voices.",
     "editor.voice.changeVoiceUpToDate": "This take is already in {name}'s voice",
-    "editor.voice.changeVoiceQuality": "Quality",
-    "editor.voice.changeVoiceQuality.fast": "Fast",
-    "editor.voice.changeVoiceQuality.standard": "Standard",
-    "editor.voice.changeVoiceQuality.high": "High",
     "editor.voice.voicing": "Voicing…",
     "editor.voice.choose": "Choose a voice",
     "editor.voice.activeVoice": "Voice: {name}. Choose a voice",
@@ -2802,6 +2965,600 @@ export const editor = defineNamespace({
           "timeline's track-name column shows every track's full name; " +
           "unticked, it narrows to a strip of icons and gives the space to the " +
           "tracks. Affects every row at once.",
+      },
+      "editor.station.title": {
+        description: "Name of the media view's audio editing panel, where one recording is trimmed, cut, approved and saved as a new version. On its tab, in the Panels menu and in menus.",
+      },
+      "editor.station.editIn": {
+        description: "Menu item and button on a recording (a take) that opens it in the Station, the media view's audio editing panel.",
+      },
+      "editor.station.empty": {
+        description: "One quiet line in the empty Station panel, saying how to open a recording in it.",
+      },
+      "editor.station.loading": {
+        description: "Shown in the Station while a recording's audio is fetched and decoded.",
+      },
+      "editor.station.loadFailed": {
+        description: "Shown in the Station when a recording's audio cannot be fetched or decoded.",
+      },
+      "editor.station.gone": {
+        description: "Shown in the Station when the recording it had open was deleted or moved.",
+      },
+      "editor.station.nameOnLine": {
+        description: "The Station's heading: the recording's name, then the line it was opened on.",
+        placeholders: {
+          take: "The take's name, e.g. 'Take 2'.",
+          line: "The line, e.g. 'line 331' or a verse reference.",
+        },
+      },
+      "editor.station.lineNumber": {
+        description: "How a numbered line is named in the Station's heading, e.g. 'line 331'. Lowercase, as it follows a middle dot.",
+        placeholders: {
+          n: "The line's number.",
+        },
+      },
+      "editor.station.placedOn": {
+        description: "Under the Station's heading: the line this recording is used on.",
+        placeholders: {
+          line: "The line, e.g. 'line 331'.",
+        },
+      },
+      "editor.station.placedOnTwo": {
+        description: "Under the Station's heading: the recording is used on two lines; which one the Station opened it on.",
+        placeholders: {
+          a: "The first line.",
+          b: "The second line.",
+          open: "The line the Station opened it on.",
+        },
+      },
+      "editor.station.waiting": {
+        description: "A recording's approval state in the Station's heading: not approved yet. Follows a clock symbol.",
+      },
+      "editor.station.waitingCount": {
+        description: "A recording's approval state when a project needs more than one approval: how many it has of how many.",
+        placeholders: {
+          done: "Approvals so far.",
+          need: "Approvals the project needs.",
+        },
+      },
+      "editor.station.approved": {
+        description: "A recording's approval state in the Station's heading: approved. Follows a check mark.",
+      },
+      "editor.station.version": {
+        description: "In the Station's heading, which saved version of the recording this is (the first edit saved is version 2).",
+        placeholders: {
+          n: "The version number.",
+        },
+      },
+      "editor.station.approve": {
+        description: "Button in the Station's heading that approves the open recording.",
+      },
+      "editor.station.approveTip": {
+        description: "Tooltip of the Station's Approve button; A is its keyboard shortcut.",
+        placeholders: {
+          line: "The line the recording is open on.",
+        },
+      },
+      "editor.station.approveTakeTip": {
+        description: "Tooltip of the Station's Approve button on one piece of a split take, which approves the whole take.",
+      },
+      "editor.station.undoTip": {
+        description: "Tooltip of the Station's Undo button: it takes back your last change to the open recording, even if you changed other things since (Cmd/Ctrl+Z is the project-wide Undo).",
+      },
+      "editor.station.nothingToUndo": {
+        description: "Tooltip of the Station's Undo button when there is nothing to undo.",
+      },
+      "editor.station.controlsInfo": {
+        description: "Screen-reader name of the (i) beside the recording's name in the Station, which opens a short explanation of its controls.",
+      },
+      "editor.station.helpSelectTerm": { description: "Term in the Station's (i) explanation: selecting part of the recording." },
+      "editor.station.helpSelect": { description: "The Station's (i) explanation: how to select and place the cursor." },
+      "editor.station.helpTrimTerm": { description: "Term in the Station's (i) explanation: trimming." },
+      "editor.station.helpTrim": { description: "The Station's (i) explanation: how to trim with Start and End." },
+      "editor.station.helpEditTerm": { description: "Term in the Station's (i) explanation: cutting and inserting." },
+      "editor.station.helpEdit": { description: "The Station's (i) explanation: Keep this, Delete this and Insert audio here." },
+      "editor.station.helpVolumeTerm": { description: "Term in the Station's (i) explanation: the clip's volume." },
+      "editor.station.helpVolume": { description: "The Station's (i) explanation: the volume line and its − and + buttons." },
+      "editor.station.helpFadesTerm": { description: "Term in the Station's (i) explanation: fades." },
+      "editor.station.helpFades": { description: "The Station's (i) explanation: the round fade knobs at the waveform's top corners." },
+      "editor.station.helpSaveTerm": { description: "Term in the Station's (i) explanation: saving a new version." },
+      "editor.station.helpSave": { description: "The Station's (i) explanation: unsaved edits and Save as new version." },
+      "editor.station.helpKeysTerm": { description: "Term in the Station's (i) explanation: keyboard shortcuts." },
+      "editor.station.helpKeys": {
+        description: "The Station's (i) explanation: its keyboard shortcuts. Keep the key symbols as they are.",
+        placeholders: { mod: "⌘ on a Mac, 'Ctrl+' elsewhere." },
+      },
+      "editor.station.laneTip": {
+        description: "Tooltip and screen-reader name of the Station's waveform.",
+      },
+      "editor.station.startFlag": {
+        description: "Label on the flag marking where the kept part of a recording starts; dragged to trim.",
+        placeholders: {
+          time: "A time like 0:00.00.",
+        },
+      },
+      "editor.station.endFlag": {
+        description: "Label on the flag marking where the kept part of a recording ends; dragged to trim.",
+        placeholders: {
+          time: "A time like 0:04.20.",
+        },
+      },
+      "editor.station.dragStart": {
+        description: "Screen-reader name and tooltip of the Start flag.",
+      },
+      "editor.station.dragEnd": {
+        description: "Screen-reader name and tooltip of the End flag.",
+      },
+      "editor.station.insertFlag": {
+        description: "Label on the flag marking the cursor, where inserted audio goes.",
+        placeholders: {
+          time: "A time like 0:02.05.",
+        },
+      },
+      "editor.station.keepThis": {
+        description: "Button over a selected part of a recording: keep only that part (a trim).",
+      },
+      "editor.station.keepTip": {
+        description: "Tooltip of Keep this; K is its shortcut.",
+      },
+      "editor.station.deleteThis": {
+        description: "Button over a selected part of a recording: delete it, closing the gap.",
+      },
+      "editor.station.deleteTip": {
+        description: "Tooltip of Delete this; ⌫ is its shortcut.",
+      },
+      "editor.station.insertHere": {
+        description: "Button at the cursor or selection: opens the choice of audio to insert there.",
+      },
+      "editor.station.insertTip": {
+        description: "Tooltip of Insert audio here; I is its shortcut.",
+      },
+      "editor.station.selRange": {
+        description: "Readout beside the selection's buttons: where it starts and ends, and its length.",
+        placeholders: {
+          a: "Start time.",
+          b: "End time.",
+          len: "Length, e.g. '0.90 s'.",
+        },
+      },
+      "editor.station.selAt": {
+        description: "Readout beside the cursor's Insert button: where the cursor is.",
+        placeholders: {
+          time: "A time like 0:02.05.",
+        },
+      },
+      "editor.station.play": {
+        description: "Tooltip of the Station's Play button.",
+      },
+      "editor.station.playSelection": {
+        description: "Tooltip of the Station's Play button while a part is selected.",
+      },
+      "editor.station.pause": {
+        description: "Tooltip of the Station's Pause button.",
+      },
+      "editor.station.speedTip": {
+        description: "Tooltip of the Station's speed menu (0.5× to 2×).",
+      },
+      "editor.station.timeOf": {
+        description: "The Station's running time: where playback is inside the kept part, and the kept part's length.",
+        placeholders: {
+          at: "Current time.",
+          len: "Length of the kept part.",
+        },
+      },
+      "editor.station.start": {
+        description: "Label before the kept part's start time in the Station; click to type it.",
+      },
+      "editor.station.end": {
+        description: "Label before the kept part's end time in the Station; click to type it.",
+      },
+      "editor.station.typeStartTip": {
+        description: "Tooltip of the Start time field.",
+      },
+      "editor.station.typeEndTip": {
+        description: "Tooltip of the End time field.",
+      },
+      "editor.station.typeHelp": {
+        description: "Help line shown while a start or end time is being typed.",
+      },
+      "editor.station.set": {
+        description: "Button that applies a typed start or end time.",
+      },
+      "editor.station.badTime": {
+        description: "Message when what was typed is not a time.",
+      },
+      "editor.station.zoomIn": {
+        description: "Screen-reader name and tooltip of the Station's zoom-in button.",
+      },
+      "editor.station.zoomOut": {
+        description: "Screen-reader name and tooltip of the Station's zoom-out button.",
+      },
+      "editor.station.scroll": {
+        description: "Screen-reader name of the slider that scrolls the zoomed waveform.",
+      },
+      "editor.station.hintCalm": {
+        description: "One quiet line under the Station's controls, shown when nothing is selected.",
+      },
+      "editor.station.history": {
+        description: "Item in the Station's ⋯ menu that shows the open recording's history.",
+      },
+      "editor.station.hideHistory": {
+        description: "The same item while the history is showing.",
+      },
+      "editor.station.historyNothing": {
+        description: "Grey line under the History item when the recording has no history yet.",
+      },
+      "editor.station.historyTitle": {
+        description: "Small uppercase heading of the history box in the Station.",
+      },
+      "editor.station.historyFootnote": {
+        description: "Footnote of the Station's history box.",
+      },
+      "editor.station.historyFailed": {
+        description: "Shown in the history box when the server's history cannot be read.",
+      },
+      "editor.station.historyWho": {
+        description: "One history row with who made the change and when.",
+        placeholders: {
+          row: "What happened.",
+          who: "The person's name.",
+          when: "When, e.g. '2:14 pm' or 'Oct 28, 2:14 pm'.",
+        },
+      },
+      "editor.station.hRecorded": {
+        description: "History row: the recording was made or added.",
+      },
+      "editor.station.hVersionSavedWith": {
+        description: "A row in the Station's History: a new version of the recording was saved, what was changed in it, and the lines it is used on, e.g. 'Version 2 saved: a part deleted, audio inserted · used on line 331'.",
+        placeholders: {
+          n: "The version's number.",
+          what: "What changed, already worded and joined, e.g. 'a part deleted, audio inserted'.",
+          lines: "The lines it is used on, e.g. 'line 331' or 'line 4, line 9'.",
+        },
+      },
+      "editor.station.hSavedOver": {
+        description: "History row: the edited recording was saved over the take, which kept its name.",
+      },
+      "editor.station.hSavedOverWith": {
+        description: "History row: the edited recording was saved over the take, with what changed and where it is used.",
+        placeholders: {
+          what: "What changed, already worded and joined, e.g. 'a part deleted, audio inserted'.",
+          lines: "The lines it is used on, e.g. 'line 331' or 'line 4, line 9'.",
+        },
+      },
+      "editor.station.hVersionSaved": {
+        description: "History row: an edited version of the recording was saved.",
+        placeholders: {
+          n: "The version number.",
+        },
+      },
+      "editor.station.hTrimmed": {
+        description: "History row: the kept part was changed.",
+        placeholders: {
+          a: "Start time.",
+          b: "End time.",
+        },
+      },
+      "editor.station.hApproved": {
+        description: "History row: someone approved the recording.",
+      },
+      "editor.station.hUnapproved": {
+        description: "History row: someone withdrew their approval.",
+      },
+      "editor.station.hRenamed": {
+        description: "History row: the recording was renamed.",
+        placeholders: {
+          name: "The new name.",
+        },
+      },
+      "editor.station.hMoved": {
+        description: "History row: the recording was moved along the timeline.",
+      },
+      "editor.station.hSplit": {
+        description: "History row: the recording was split in two.",
+        placeholders: {
+          time: "Where it was split.",
+        },
+      },
+      "editor.station.hChosen": {
+        description: "History row: this recording was chosen as the one that plays on its line.",
+      },
+      "editor.station.hDeleted": {
+        description: "History row: the recording was deleted.",
+      },
+      "editor.station.placedOnMany": {
+        description: "Under the Station's heading: the recording is used on several lines; which one the Station opened it on.",
+        placeholders: {
+          count: "How many lines.",
+          open: "The line the Station opened it on.",
+        },
+      },
+      "editor.station.historyEntries": {
+        description: "Grey line under the History item: how many rows the history has.",
+        placeholders: {
+          count: "Number of rows.",
+        },
+      },
+      "editor.station.insertedMark": {
+        description: "Tooltip on a stretch of inserted audio not yet saved.",
+        placeholders: {
+          label: "What was inserted.",
+        },
+      },
+      "editor.station.joinMark": {
+        description: "Tooltip on the dashed line where a deleted part was.",
+      },
+      "editor.station.loop": {
+        description: "Button after the speed menu: while on, playback repeats the selected part (or the kept part).",
+      },
+      "editor.station.loopTip": {
+        description: "Tooltip of the Loop button; L is its shortcut.",
+      },
+      "editor.station.removeNoise": {
+        description: "Item in the Station's ⋯ menu: clean the recording's background noise.",
+      },
+      "editor.station.changeVoice": {
+        description: "Item in the Station's ⋯ menu: re-voice the recording into another voice.",
+      },
+      "editor.station.makesVersion": {
+        description: "Grey line under Remove noise and Change the voice: the original is kept.",
+      },
+      "editor.station.hDraftDeleted": {
+        description: "History row for an unsaved delete.",
+        placeholders: {
+          n: "Its number.",
+          len: "Length deleted, e.g. '0.50 s'.",
+          time: "Where.",
+        },
+      },
+      "editor.station.hDraftInserted": {
+        description: "History row for an unsaved insert.",
+        placeholders: {
+          n: "Its number.",
+          label: "What was inserted.",
+          len: "Its length.",
+          time: "Where.",
+        },
+      },
+      "editor.station.hint": {
+        description: "One quiet line under the Station's controls when nothing is selected, naming the shortcuts.",
+        placeholders: { mod: "⌘ on a Mac, 'Ctrl+' elsewhere." },
+      },
+      "editor.station.fromLibrary": {
+        description: "First choice in the Insert menu: insert another recording. Until the project has a recordings library it lists this file's other recordings.",
+      },
+      "editor.station.libraryEmpty": {
+        description: "Shown under 'From the library' when there is nothing to insert.",
+      },
+      "editor.station.fromFile": {
+        description: "Choice in the Insert menu: pick an audio file from the computer.",
+      },
+      "editor.station.recordNow": {
+        description: "Choice in the Insert menu: record something and insert it at the cursor.",
+      },
+      "editor.station.recordLater": {
+        description: "Grey line under the greyed 'Record now' while it is not available yet.",
+      },
+      "editor.station.recordFlagIn": {
+        description: "Red flag on the waveform at the cursor, and the line under it, during the count-in before Record now records. Counts down.",
+        placeholders: { n: "Seconds left, 3, 2, 1." },
+      },
+      "editor.station.recordFlagReady": {
+        description: "The same red flag in the instant before the count-in starts.",
+      },
+      "editor.station.recordFlag": {
+        description: "Red flag on the waveform where Record now is recording.",
+        placeholders: { time: "Where in the recording, e.g. 0:05.48." },
+      },
+      "editor.station.recordingFor": {
+        description: "Red text under the waveform while Record now records.",
+        placeholders: { len: "How long so far, e.g. 3.10 s." },
+      },
+      "editor.station.recordStop": {
+        description: "Button under the waveform that stops Record now.",
+      },
+      "editor.station.newRecording": {
+        description: "After Record now stops: the red flag on the new recording, and the start of the line under the waveform that asks to keep it.",
+      },
+      "editor.station.keepRecording": {
+        description: "Button after Record now stops: keep the new recording where it was put in.",
+      },
+      "editor.station.recordAgain": {
+        description: "Text button after Record now stops: throw the new recording away and record again at the same place.",
+      },
+      "editor.station.micDenied": {
+        description: "Message when Record now can't use the microphone because the browser blocks it.",
+      },
+      "editor.station.recordFailed": {
+        description: "Message when Record now fails.",
+        placeholders: { message: "The error, as the browser gives it." },
+      },
+      "editor.station.kindDeleted": {
+        description: "What changed, in 'Not saved: …' under the recording's name. Lowercase; joined by commas with the others.",
+      },
+      "editor.station.kindInserted": {
+        description: "What changed, in 'Not saved: …' under the recording's name. Lowercase.",
+      },
+      "editor.station.kindNoise": {
+        description: "What changed, in 'Not saved: …' under the recording's name. Lowercase.",
+      },
+      "editor.station.notSaved": {
+        description: "Amber text at the end of the line under the recording's name, after a change to its sound that is not saved yet.",
+        placeholders: {
+          what: "What changed, e.g. 'a part deleted, audio inserted'.",
+        },
+      },
+      "editor.station.applyTo": {
+        description: "Screen-reader name of Save's menu, shown when the recording is used on more than one line.",
+      },
+      "editor.station.clipOnly": {
+        description: "Item in Save's menu, under 'Save as new version': use the new version only where the Station opened the recording.",
+      },
+      "editor.station.everywhere": {
+        description: "Item in Save's menu, under 'Save as new version': use the new version on every line the recording is placed on.",
+      },
+      "editor.station.placesCount": {
+        description: "After 'Save everywhere': how many lines use the recording.",
+        placeholders: {
+          count: "Number of lines.",
+        },
+      },
+      "editor.station.save": {
+        description: "Button beside Undo and Approve while a change isn't saved: save the edited recording over the take.",
+      },
+      "editor.station.saveMenu": {
+        description: "Tooltip and screen-reader name of the small ▾ beside Save, which opens the other ways to save.",
+      },
+      "editor.station.saveOver": {
+        description: "Item in Save's menu: save the edited recording over the take, on every line it is used on. It keeps its name and its history.",
+      },
+      "editor.station.saveNew": {
+        description: "Item in Save's menu (or its heading, when the recording is used on more than one line): save the edited recording as a new take; the original is kept.",
+      },
+      "editor.station.savedOver": {
+        description: "Message after saving over a take.",
+        placeholders: {
+          take: "The take's name, e.g. 'Take 2'.",
+          lines: "The lines it is used on, e.g. 'line 4' or 'line 4, line 9'.",
+        },
+      },
+      "editor.station.saveTip": {
+        description: "Tooltip of Save.",
+        placeholders: {
+          keys: "The shortcut, e.g. ⌘S.",
+        },
+      },
+      "editor.station.saving": {
+        description: "The Save button while the new version uploads.",
+      },
+      "editor.station.saved": {
+        description: "Message after saving a new version used on one line.",
+        placeholders: {
+          n: "The version number.",
+          line: "The line it is used on.",
+        },
+      },
+      "editor.station.savedEverywhere": {
+        description: "Message after saving a new version used on every line it was placed on.",
+        placeholders: {
+          n: "The version number.",
+          lines: "The lines, e.g. 'line 316 and line 329'.",
+        },
+      },
+      "editor.station.saveFailed": {
+        description: "Message when saving a new version fails; nothing was changed.",
+        placeholders: {
+          message: "The reason.",
+        },
+      },
+      "editor.station.notAudio": {
+        description: "Message when a file picked for inserting cannot be read as audio.",
+        placeholders: {
+          name: "The file's name.",
+        },
+      },
+      "editor.station.keptForLater": {
+        description: "Message when switching away from a recording with unsaved changes.",
+        placeholders: {
+          name: "The recording, e.g. 'Take 2 · line 331'.",
+        },
+      },
+      "editor.station.undoUnsaved": {
+        description: "Tooltip of the Station's Undo button while there are unsaved changes to the sound.",
+      },
+      "editor.station.fileLabel": {
+        description: "How an inserted file is named in the History row and the inserted mark's tooltip.",
+        placeholders: {
+          name: "The file's name without its extension.",
+        },
+      },
+      "editor.station.fadeIn": {
+        description: "Label beside the fade-in corner, and its screen-reader name, when there is no fade yet.",
+      },
+      "editor.station.fadeOut": {
+        description: "Screen-reader name of the fade-out corner when there is no fade yet.",
+      },
+      "editor.station.fadeInLen": {
+        description: "The fade-in corner's label and name: how long the fade is.",
+        placeholders: {
+          len: "Seconds, e.g. 0.30.",
+        },
+      },
+      "editor.station.fadeOutLen": {
+        description: "The fade-out corner's name: how long the fade is.",
+        placeholders: {
+          len: "Seconds, e.g. 0.30.",
+        },
+      },
+      "editor.station.fadeTip": {
+        description: "Tooltip of a fade corner.",
+        placeholders: {
+          fade: "The corner's label, e.g. 'Fade in 0.30 s'.",
+        },
+      },
+      "editor.station.volumeDragTip": {
+        description: "Tooltip of the clip's volume line.",
+      },
+      "editor.station.quieter": {
+        description: "Screen-reader name of the volume's minus button.",
+      },
+      "editor.station.quieterTip": {
+        description: "Tooltip of the volume's minus button.",
+      },
+      "editor.station.louder": {
+        description: "Screen-reader name of the volume's plus button.",
+      },
+      "editor.station.louderTip": {
+        description: "Tooltip of the volume's plus button.",
+      },
+      "editor.station.hLevel": {
+        description: "History row: the clip's volume or fades changed.",
+        placeholders: {
+          db: "The volume, e.g. '−3 dB'.",
+          fin: "Fade-in length.",
+          fout: "Fade-out length.",
+        },
+      },
+      "editor.station.noiseRunning": {
+        description: "Message while noise removal runs on the open recording.",
+      },
+      "editor.station.noiseDone": {
+        description: "Message after noise removal made a new version.",
+        placeholders: {
+          n: "The version number.",
+          line: "The line it is used on.",
+        },
+      },
+      "editor.station.voiceStarted": {
+        description: "Message after starting a voice change from the Station.",
+      },
+      "editor.station.voiceUnavailable": {
+        description: "Message when the voice change is not possible for this line.",
+      },
+      "editor.station.recordedInsert": {
+        description: "How audio recorded with 'Record now' is named in the History row and its mark's tooltip.",
+      },
+      "editor.station.tooLong": {
+        description: "Note in the selection's bar on a recording longer than ten minutes, where Delete and Insert are not offered yet.",
+      },
+      "editor.station.takeVersion": {
+        description: "A take's name in the lists of takes when it is a version saved from the Station (it keeps its take's name).",
+        placeholders: {
+          take: "The take's name, e.g. 'Take 2'.",
+          n: "The version number (2 or more).",
+        },
+      },
+      "editor.station.sourceReadOnly": {
+        description: "Plain line under the Station's heading when the open recording is the imported source (the original everyone's timing follows): it can be played and looped, not edited.",
+      },
+      "editor.station.moreTip": {
+        description: "Tooltip and accessible name of the ⋯ button on the Station's tab strip: what its menu holds (Remove noise, Change the voice, History).",
+      },
+      "editor.station.sourceName": {
+        description: "The Station's heading names the imported source recording this way (it has no take name), followed by ' · ' and the line, e.g. 'Source recording · line 2'.",
+      },
+      "editor.station.hintListen": {
+        description: "One quiet line under the Station's controls when the recording can only be listened to.",
       },
       "editor.dock.film": {
         description:
@@ -5854,19 +6611,6 @@ export const editor = defineNamespace({
           "voice engine failed on the selected lines. Says plainly that this is " +
           "not about the Gemini key. Keep 'Inworld TTS' and 'Gemini'.",
       },
-      "editor.selection.voiceTogetherSeedVcNotConfigured": {
-        description:
-          "Body of the 'Voice together' error notice when the chosen clone voice " +
-          "needs the Seed-VC voice-conversion step and this server has none. Keep " +
-          "'Seed-VC' and 'Inworld'; a clone voice is a voice copied from a " +
-          "recording.",
-      },
-      "editor.selection.voiceTogetherSeedVcFailed": {
-        description:
-          "Body of the 'Voice together' error notice when the Seed-VC " +
-          "voice-conversion step failed on the selected lines. Says plainly that " +
-          "this is not about the Gemini key. Keep 'Seed-VC' and 'Gemini'.",
-      },
       "editor.selection.translate": {
         description:
           "Button in the selection toolbar that asks the AI to draft the untranslated " +
@@ -6635,6 +7379,18 @@ export const editor = defineNamespace({
         description: "A file's length of an hour or more, e.g. '1 h 3 min'.",
         placeholders: { hours: "Whole hours.", minutes: "Whole minutes left over, 0 to 59." },
       },
+      "editor.timeline.takePieceName": {
+        description:
+          "The name shown in the thin bar along the top of one piece of a recording on the " +
+          "timeline, after the recording was cut into pieces. For example 'Take 2 · 1 of 2' " +
+          "for the first of two pieces of Take 2.",
+        placeholders: {
+          name: "The recording's own name, e.g. 'Take 2'. User data, never translated.",
+          n: "Which piece this is, counting from 1.",
+          total: "How many pieces the recording was cut into.",
+        },
+        maxLength: 40,
+      },
       "editor.timeline.qualityToggleAria": {
         description:
           "Accessible name of the toolbar toggle that chooses how synthesized voices " +
@@ -6704,19 +7460,12 @@ export const editor = defineNamespace({
       "editor.timeline.changeVoiceStarted": {
         description:
           "Toast shown when the per-line 'Change voice' starts: the line's existing recording " +
-          "is being converted into the named cloned voice. Nothing is spoken afresh from text.",
+          "is being converted into the named character or trained voice. Nothing is spoken afresh from text.",
         placeholders: { name: "The voice's name, e.g. 'Narrator'." },
       },
       "editor.timeline.changeVoiceDone": {
         description: "Toast shown when the per-line 'Change voice' has finished.",
         placeholders: { name: "The voice's name, e.g. 'Narrator'." },
-      },
-      "editor.timeline.takeMenuChangeVoiceIsReference": {
-        description:
-          "Shown in place of the 'Change voice' item in a take's right-click menu, greyed out: " +
-          "this take is the reference clip some cloned voice was made from, so converting it " +
-          "would change what that voice sounds like. It is left as it is.",
-        maxLength: 40,
       },
       "editor.timeline.takeMenuSplitAtPlayhead": {
         description:
@@ -6724,15 +7473,6 @@ export const editor = defineNamespace({
           "right-clicking: cuts the take in two where the playhead (the timeline's position " +
           "line) crosses it. Greyed out when the playhead is not on this take.",
         maxLength: 32,
-      },
-      "editor.timeline.takeMenuMakeCharacter": {
-        description:
-          "Item in a take's right-click menu on the timeline, and the tooltip of a button " +
-          "on the take in a line's Recording tab: opens the New voice dialog, cloning, " +
-          "seeded with this take, to make a new character (a reusable voice for the " +
-          "project's cast) that sounds like it. 'Character' is a cast member, as in the " +
-          "Voices tab.",
-        maxLength: 40,
       },
       "editor.timeline.takeMenuDeletePiece": {
         description:
@@ -6867,17 +7607,21 @@ export const editor = defineNamespace({
       "editor.history.reasonApproved": { description: "Why an undo did not happen: someone else approved the recording (or text) this step made, after it was made. Undoing would throw their approval away.", placeholders: { name: "The username of the person who approved it." } },
       "editor.history.reasonNotAllowed": { description: "Why an undo did not happen: the user may no longer make this change (for example, they lost access to that language)." },
       "editor.history.reasonLinesChanged": { description: "Why undoing 'make lines from a recording' did not happen: someone recorded, translated or edited one of those lines after they were made, so all of them were kept." },
+      "editor.history.reasonOtherDevice": { description: "Why an undo in the History panel did not happen: the step changed a project setting that is kept only on one device (such as Audio loading), and this is a different device." },
       "editor.history.blockedLanguage": { description: "Toast when Undo is waiting because the step was made in another language that could not be opened from here. The step is kept; it can be undone after opening that language.", placeholders: { language: "The language's name as the language switcher shows it.", step: "The step's name." } },
       "editor.history.movedUndo": { description: "Toast when Undo found that the same person had already undone this step on another computer or browser. Nothing was changed.", placeholders: { step: "The step's name." } },
       "editor.history.movedRedo": { description: "Toast when Redo found that the same person had already redone this step on another computer or browser. Nothing was changed.", placeholders: { step: "The step's name." } },
       "editor.history.skippedApproved": { description: "Toast when Undo was not applied because someone else approved what the step made (e.g. a new recording) since. Nothing was changed.", placeholders: { step: "The step's name.", name: "The username of the person who approved it." } },
       "editor.history.skippedNotAllowed": { description: "Toast when Undo was not applied because the user may no longer make that change. Nothing was changed.", placeholders: { step: "The step's name." } },
       "editor.history.skippedLinesChanged": { description: "Toast when undoing 'make lines from a recording' was not applied: someone recorded, translated or edited one of those lines after they were made, so every line was kept.", placeholders: { step: "The step's name." } },
+      "editor.history.skippedOtherDevice": { description: "Toast when Undo or Redo was not applied because the step changed a project setting kept only on another device (such as Audio loading).", placeholders: { step: "The step's name." } },
       "editor.history.stepPlace": { description: "Second line of a step in the History panel: the file and the language the step was made in.", placeholders: { file: "The file's name.", language: "The language's name as the language switcher shows it." } },
       "editor.history.stepRecordTake": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a new take was recorded on a line. A short verb phrase.", maxLength: 40 },
       "editor.history.stepUploadTake": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): an audio file was uploaded as a line's take. A short verb phrase.", maxLength: 40 },
       "editor.history.stepGenerateVoice": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a voice (text-to-speech take) was generated for a line. A short verb phrase.", maxLength: 40 },
       "editor.history.stepChangeVoice": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a take was converted to another (cloned) voice, which adds the converted take. A short verb phrase.", maxLength: 40 },
+      "editor.history.stepTakeLevel": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a take's volume or its fade in/out was changed in the Station. A short verb phrase.", maxLength: 40 },
+      "editor.history.stepStationVersion": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): an edited recording was saved from the Station as a new version, which adds a take that plays instead of the old one. A short verb phrase.", maxLength: 40 },
       "editor.history.stepRemoveNoise": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): background noise was removed from a take, which adds a cleaned take. A short verb phrase.", maxLength: 40 },
       "editor.history.stepLinesFromRecording": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): an audio or video file was split into new lines (rows) of the open file, with their transcripts. A short verb phrase.", maxLength: 40 },
       "editor.history.stepImportRecording": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): an audio or video file was imported as a new file of lines. Undo moves the new file to Recently deleted. A short verb phrase.", maxLength: 40 },
@@ -6889,6 +7633,7 @@ export const editor = defineNamespace({
       "editor.history.stepCharacters": { description: "Name of one history step: the character (speaker) of one or more lines was set, changed or cleared. {count} is how many lines.", placeholders: { count: "A number." } },
       "editor.history.stepEditSource": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): the source text of a line was edited (one editing session). A short verb phrase.", maxLength: 40 },
       "editor.history.stepUnknown": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel) when the step was made on another of the person's devices running a newer version of the app, so this version has no name for it.", maxLength: 60 },
+      "editor.history.stepChangeSetting": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): one project setting was changed. {setting} is the setting's own name as Project settings shows it, for example 'Who can export'.", placeholders: { setting: "The name of the setting that was changed." }, maxLength: 60 },
       "editor.timeline.videoHiddenNote": {
         description:
           "Note replacing the linked video player when the file is in free-timing " +
@@ -7043,22 +7788,14 @@ export const editor = defineNamespace({
           "the whole file. Swaps with common.pause.",
         maxLength: 22,
       },
-      "editor.voice.cloneTitle": { description: "Heading of the small popover that turns a line's audio take into a reusable voice." },
-      "editor.voice.cloneNamePlaceholder": { description: "Placeholder of the name field in that popover." },
-      "editor.voice.cloneNameAriaLabel": { description: "Accessible label of the name field in that popover." },
-      "editor.voice.cloneSubmit": { description: "Button in that popover: creates the voice from the take and adds it to the project's cast. Short." },
-      "editor.voice.cloneMoreOptions": { description: "Link in that popover: opens the full New voice dialog instead." },
-      "editor.voice.clonedToast": {
-        description: "Toast after a voice was cloned from a take and added to the project's cast of voices.",
-        placeholders: { name: "The new voice's name, e.g. 'Ana'." },
-      },
-      "editor.voice.clone": {
+      "editor.voice.trainFromTake": {
         description:
-          "Tooltip of the clone (copy-plus) button on a take, which turns this " +
-          "recording into a reusable synthetic voice for the project's cast. " +
-          "'Clone' is the voice-synthesis term for copying a speaker's sound. " +
-          "Keep it a short label, like the English.",
-        maxLength: 24,
+          "Tooltip and accessible name of the graduation-cap button on the take in a " +
+          "line's Recording tab, and an item of that take's right-click menu on the " +
+          "timeline. It opens the New voice dialog on its Train voice tab with this " +
+          "recording already added, to train a custom voice of the person speaking. " +
+          "'Train' as in training a voice model.",
+        maxLength: 48,
       },
       "editor.voice.changeTo": {
         description:
@@ -7085,15 +7822,20 @@ export const editor = defineNamespace({
       "editor.voice.originalAudio": { description: "What a line's voice circle names its take when the audio is the imported original programme audio." },
       "editor.voice.changeVoice": {
         description:
-          "Name of the icon on a line that already has a take, and of the button " +
-          "inside the popover it opens. It keeps the recording and makes it sound " +
-          "like the assigned cloned voice. No new speech is generated from text.",
+          "Accessible name of the icon button on a line that already has a take (and of " +
+          "the timeline take-menu item). It keeps the recording and makes it sound " +
+          "like the assigned character or trained voice. No new speech is generated from text.",
         maxLength: 18,
       },
-      "editor.voice.changeVoiceNeedsClone": {
+      "editor.voice.changeVoiceCantRevoice": {
         description:
-          "Tooltip on the disabled 'Change voice' button when the assigned voice is a " +
-          "stock voice with no reference recording to copy the sound from.",
+          "Tooltip on the disabled 'Change voice' button (and the disabled timeline " +
+          "menu item) when the line's voice is a text-to-speech voice or a quick " +
+          "(Inworld) clone: it can speak typed text, but it cannot turn an existing " +
+          "recording into its voice. Change voice keeps a take's words and timing and " +
+          "only changes who it sounds like; only ready-made character voices, voices " +
+          "trained from a real person's recordings, and ElevenLabs voices can do that. " +
+          "'Change voice' is the name of the button.",
         placeholders: {
           name: "The assigned voice's name from the project's cast — user data, never translate it.",
         },
@@ -7105,27 +7847,6 @@ export const editor = defineNamespace({
         placeholders: {
           name: "The assigned voice's name from the project's cast — user data, never translate it.",
         },
-      },
-      "editor.voice.changeVoiceQuality": {
-        description:
-          "Accessible name of the quality menu beside Change voice. The options are " +
-          "Fast, Standard and High.",
-        maxLength: 12,
-      },
-      "editor.voice.changeVoiceQuality.fast": {
-        description:
-          "Change voice quality option. The quickest conversion and the roughest match.",
-        maxLength: 10,
-      },
-      "editor.voice.changeVoiceQuality.standard": {
-        description:
-          "Change voice quality option, and the default. Seed-VC's normal setting.",
-        maxLength: 12,
-      },
-      "editor.voice.changeVoiceQuality.high": {
-        description:
-          "Change voice quality option. The closest match, and the slowest.",
-        maxLength: 10,
       },
       "editor.voice.voicing": {
         description:

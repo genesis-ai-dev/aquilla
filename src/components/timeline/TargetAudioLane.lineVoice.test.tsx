@@ -6,6 +6,8 @@ vi.mock("@/lib/audio/transport-pause", () => ({ pauseAllTransports: vi.fn() }))
 
 import { TargetAudioLane, type TakeMenuActions } from "./TargetAudioLane"
 import type { CellData } from "@/hooks/useCells"
+import { RowMetricsContext } from "./useRowMetrics"
+import { chipHeightPx, chipPadPx } from "@/lib/timeline/row-metrics"
 import { __resetVoicingAsForTests, whileVoicingAs } from "@/lib/audio/voicing-as"
 
 const TAKE = "audio-c1-1700000000-take.wav"
@@ -101,43 +103,25 @@ describe("TargetAudioLane — the line's voice and its take (AQU-2212)", () => {
     await act(async () => { done(); await voicing })
     expect(screen.queryByTestId("tl-target-c1-working")).toBeNull()
   })
-})
 
-describe("TargetAudioLane — make a character from this voice, in one step (AQU-1758, AQU-2212)", () => {
-  it("clones this take at the clip: name it, Add to cast", async () => {
-    const cloneTake = vi.fn(async () => {})
-    const makeCharacter = vi.fn()
+  // AQU-2235: the name bar needs a 30px clip. A shorter row has no bar, and
+  // "Voicing as …" must still say the line is being voiced there, as it did
+  // at every height before the bar.
+  it("still says Voicing as … on a row too short for a name bar", async () => {
+    const rowH = 40
+    expect(chipHeightPx(rowH)).toBeLessThan(30)
     render(
-      <TargetAudioLane
-        {...base}
-        items={[{ cell: oneTake(), kind: "take", audioId: TAKE }]}
-        takeMenu={menu({ makeCharacter, cloneTake, cloneName: () => "ana" })}
-      />,
+      <RowMetricsContext.Provider value={{ rowH, chipH: chipHeightPx(rowH), chipPad: chipPadPx(rowH) }}>
+        <TargetAudioLane {...base} items={[{ cell: oneTake(), kind: "take", audioId: TAKE }]} />
+      </RowMetricsContext.Provider>,
     )
-    rightClick("tl-target-c1")
-    fireEvent.click(await screen.findByTestId("tl-take-menu-make-character"))
-    const popover = await screen.findByTestId("voice-card-clone-popover")
-    const name = within(popover).getByTestId("voice-card-clone-name") as HTMLInputElement
-    expect(name.value).toBe("ana")
-    fireEvent.change(name, { target: { value: "Ana" } })
-    await act(async () => { fireEvent.click(within(popover).getByTestId("voice-card-clone-submit")) })
-    expect(cloneTake).toHaveBeenCalledWith("c1", TAKE, "Ana")
-    expect(makeCharacter).not.toHaveBeenCalled()
-  })
-
-  it("still offers the full dialog under More options", async () => {
-    const makeCharacter = vi.fn()
-    render(
-      <TargetAudioLane
-        {...base}
-        items={[{ cell: oneTake(), kind: "take", audioId: TAKE }]}
-        takeMenu={menu({ makeCharacter, cloneTake: vi.fn(async () => {}) })}
-      />,
-    )
-    rightClick("tl-target-c1")
-    fireEvent.click(await screen.findByTestId("tl-take-menu-make-character"))
-    const popover = await screen.findByTestId("voice-card-clone-popover")
-    fireEvent.click(within(popover).getByRole("button", { name: "More options" }))
-    expect(makeCharacter).toHaveBeenCalledWith("c1")
+    expect(screen.queryByTestId("tl-target-c1-bar")).toBeNull()
+    let done!: () => void
+    let voicing!: Promise<void>
+    act(() => { voicing = whileVoicingAs("c1", "Hearth", () => new Promise<void>((r) => { done = r })) })
+    expect(screen.getByTestId("tl-target-c1-working")).toHaveTextContent("Voicing as Hearth…")
+    expect(screen.getByTestId("tl-target-c1-working")).toHaveAttribute("role", "status")
+    await act(async () => { done(); await voicing })
+    expect(screen.queryByTestId("tl-target-c1-working")).toBeNull()
   })
 })

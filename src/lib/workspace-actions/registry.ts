@@ -1,5 +1,4 @@
 import { Plus, Sparkles, Download, CheckSquare, Mic, Wand2, AudioLines, Quote } from "lucide-react"
-import { CHANGE_VOICE_QUALITY_LABEL, getChangeVoiceQuality } from "@/lib/store/change-voice-quality"
 import type {
   WorkspaceAction, WorkspaceActionContext,
 } from "./types"
@@ -239,8 +238,7 @@ export const workspaceActions: WorkspaceAction[] = [
       titleKey: "nav.workspaceActions.changeVoiceAll.title",
       description: (c, t) => {
         const n = c.audioCounts?.voiceChangeable ?? 0
-        const quality = t(CHANGE_VOICE_QUALITY_LABEL[getChangeVoiceQuality()])
-        return t("nav.workspaceActions.changeVoiceAll.description", { n, quality })
+        return t("nav.workspaceActions.changeVoiceAll.description", { n })
       },
       confirmLabelKey: "nav.workspaceActions.changeVoiceAll.confirmLabel",
     },

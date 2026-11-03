@@ -20,6 +20,18 @@ describe("resolveBuildBranch", () => {
     ).toBe("main")
   })
 
+  it("prefers the deploy ref a scheduled workflow chose over GitHub's ref", () => {
+    // release-deploy.yml runs on a schedule: GITHUB_REF_NAME is `dev`, the
+    // checkout is the release branch, and the job names it in DEPLOY_REF_NAME.
+    expect(
+      resolveBuildBranch(
+        { DEPLOY_REF_NAME: "release/2026/11/02-02", GITHUB_REF_NAME: "dev" },
+        "release/2026/11/02-02",
+      ),
+    ).toBe("release/2026/11/02-02")
+    expect(resolveBuildBranch({ DEPLOY_REF_NAME: "  ", GITHUB_REF_NAME: "dev" }, "HEAD")).toBe("dev")
+  })
+
   it("uses the local branch when no CI env is present", () => {
     expect(resolveBuildBranch({}, "agent/AQU-1023-version-build-date")).toBe(
       "agent/AQU-1023-version-build-date",

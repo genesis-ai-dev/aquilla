@@ -193,5 +193,126 @@ export function folderRowHPx(rowH: number): number {
 // would resolve `var(--tl-chip-h)` to nothing. With the fallbacks it resolves to
 // today's 46px, so the whole swap needs no setup change in any existing test.
 
+// ── The name bar on a take (AQU-2235; Sam, Oct 28, board 54) ───────────────
+//
+// Like Logic Pro's region header: a thin bar along a take's top edge carrying
+// its name, the voice when it is not the line's, the sparkle for an AI voice
+// and the approval mark — so nothing sits on the waveform any more, which
+// fills the height under it. Its own height gates, on the same axis as the
+// ones above.
+
+/** The bar on the timeline's 46px clips, and anything 40px or taller. */
+export const NAME_BAR_H_PX = 14
+/** …on a 30–39px clip. */
+export const NAME_BAR_SMALL_H_PX = 12
+/** From this clip height the bar is the full 14px. */
+export const NAME_BAR_FULL_FROM_H_PX = 40
+/** Under this there is no room for a bar: the clip keeps today's corner marks,
+ *  as Logic hides region names on short tracks. The same 30px the corner
+ *  furniture has always needed (`MIN_CHIP_META_H_PX`). */
+export const NAME_BAR_MIN_CLIP_H_PX = MIN_CHIP_META_H_PX
+
+/** The bar's height on a clip this tall; 0 means no bar. */
+export function nameBarPx(chipH: number): number {
+  if (!Number.isFinite(chipH) || chipH < NAME_BAR_MIN_CLIP_H_PX) return 0
+  return chipH >= NAME_BAR_FULL_FROM_H_PX ? NAME_BAR_H_PX : NAME_BAR_SMALL_H_PX
+}
+
+/** What the bar holds gives way from the right as the clip narrows (board
+ *  54): the voice first, then the name, leaving the sparkle and the colour. */
+export const NAME_BAR_VOICE_MIN_W_PX = 150
+export const NAME_BAR_NAME_MIN_W_PX = 44
+
+// ── What fits in the bar, by what is actually in it ────────────────────────
+//
+// A double-click on the name renames the take, and a double-click happens
+// under the pointer — when the hover glyphs (play, record, ⋯) have taken the
+// check's place, and often just after the first click put the transport's
+// "loading" glyph up. Width gates tuned by eye left the name ~0px in exactly
+// that moment on a narrow take, so the double-click seeked instead. So the bar
+// is budgeted from the widths its own classes draw (TargetAudioLane: the
+// chip's 1px border, `px-[5px]`, `gap-[5px]`, 10px icons, `w-3.5` glyphs
+// `gap-0.5` apart): the name shows only where it keeps NAME_BAR_NAME_ROOM_PX in
+// its tighter state, and the extras that would take that from it give way.
+
+/** The least of a name worth drawing: about two letters and the ellipsis at
+ *  10px — something to read and to land a double-click on. */
+export const NAME_BAR_NAME_ROOM_PX = 20
+/** …and of the voice beside it. */
+export const NAME_BAR_VOICE_ROOM_PX = 24
+const BAR_EDGES_PX = 2 + 2 * 5
+const BAR_GAP_PX = 5
+const BAR_ICON_PX = 10
+const BAR_UNKNOWN_PX = 6
+const BAR_GLYPH_PX = 14
+const BAR_GLYPH_GAP_PX = 2
+
+export interface NameBarWants {
+  /** An AI voice's sparkle, leading the bar. */
+  sparkle: boolean
+  /** The "?" of a take whose length was never measured. */
+  unknownLength: boolean
+  /** A state that stays until someone acts (missing audio, a failed sync). */
+  lastingGlyph: boolean
+  /** A state that passes in seconds (loading, saving): it gives way first. */
+  passingGlyph: boolean
+  check: boolean
+  /** The hover glyphs this take may offer. The ⋯ is offered at any width
+   *  (AQU-1758, decision 4), so the menu is never only a right-click away. */
+  more: boolean
+  record: boolean
+  play: boolean
+  voice: boolean
+}
+
+export interface NameBarFit {
+  /** An AI voice's sparkle gives way to the check where both can't fit: the
+   *  check is a state, the sparkle an identity — state wins, as it always has
+   *  on these clips. */
+  sparkle: boolean
+  name: boolean
+  voice: boolean
+  play: boolean
+  record: boolean
+  more: boolean
+  passingGlyph: boolean
+}
+
+/** What a bar this wide shows of what its take wants (see above). */
+export function fitNameBar(paintedPx: number, want: NameBarWants): NameBarFit {
+  const inner = paintedPx - BAR_EDGES_PX
+  const icon = BAR_GAP_PX + BAR_ICON_PX
+  const sparkle = want.sparkle && (!want.check || inner >= BAR_ICON_PX + icon)
+  const left =
+    (sparkle ? BAR_ICON_PX + BAR_GAP_PX : 0) + (want.unknownLength ? BAR_GAP_PX + BAR_UNKNOWN_PX : 0)
+  const glyphs = (n: number) => (n > 0 ? BAR_GAP_PX + n * BAR_GLYPH_PX + (n - 1) * BAR_GLYPH_GAP_PX : 0)
+  // The name's room in its tighter state: at rest beside the check, on hover
+  // beside the glyphs that take the check's place.
+  const room = (hover: number, extra: number) =>
+    inner - left - (want.lastingGlyph ? icon : 0) - extra - Math.max(want.check ? icon : 0, glyphs(hover))
+
+  const more = want.more
+  const base = more ? 1 : 0
+  const name = paintedPx >= NAME_BAR_NAME_MIN_W_PX && room(base, 0) >= NAME_BAR_NAME_ROOM_PX
+  // A passing state glyph never takes the name's room (it is up on the very
+  // click that starts a double-click), but where there is no name it shows
+  // wherever it fits — and then before the record button, which gives way to it.
+  const passingGlyph = want.passingGlyph && room(base, icon) >= (name ? NAME_BAR_NAME_ROOM_PX : 0)
+  const glyph = passingGlyph ? icon : 0
+  // The hover glyphs show only where a name would keep its room beside them —
+  // with or without one there — so none appears and then vanishes as a take
+  // widens.
+  const fits = (hover: number) => room(hover, glyph) >= NAME_BAR_NAME_ROOM_PX
+  const record = want.record && fits(base + 1)
+  const play = want.play && fits(base + (record ? 1 : 0) + 1)
+  const hover = base + (record ? 1 : 0) + (play ? 1 : 0)
+  const voice =
+    want.voice &&
+    name &&
+    paintedPx >= NAME_BAR_VOICE_MIN_W_PX &&
+    room(hover, glyph) >= NAME_BAR_NAME_ROOM_PX + BAR_GAP_PX + NAME_BAR_VOICE_ROOM_PX
+  return { sparkle, name, voice, play, record, more, passingGlyph }
+}
+
 export const TL_ROW_H_CLASS = "h-[var(--tl-row-h,66px)]"
 export const TL_CHIP_BOX_CLASS = "top-[var(--tl-chip-top,10px)] h-[var(--tl-chip-h,46px)]"

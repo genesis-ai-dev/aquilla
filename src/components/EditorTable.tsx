@@ -8718,7 +8718,7 @@ function EditorRow({
         <EditorTargetCellColumn
           data-showcase="editor.target"
           className={cn(
-            "relative col-start-2 flex flex-col border-t border-border/60 bg-muted/25 pt-1 transition-opacity md:col-auto md:border-t-0 md:bg-transparent md:pt-0",
+            "relative col-start-2 flex flex-col border-t border-border/60 bg-muted/25 pt-1 md:col-auto md:border-t-0 md:bg-transparent md:pt-0",
             isSynthBusy && "opacity-70",
           )}
           fontSize={targetFontSize}

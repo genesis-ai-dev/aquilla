@@ -28,46 +28,30 @@ import type { ExternalEnv } from './types'
 import {
   parseTextFormat,
   TEXT_PARSE_FILE_TYPES,
-  type TextParseFileType,
 } from '../../../src/lib/parsers/parse-text-formats'
+// The format tables live in their own module so they can be read without this
+// module's Worker-only graph (AQU-2384). Re-exported below for every existing
+// importer.
+import {
+  BINARY_PARSE_FILE_TYPES,
+  CLIENT_ONLY_FORMATS,
+  CLIENT_ONLY_HINT,
+  SERVER_PARSEABLE_FILE_TYPES,
+  type ServerParseFileType,
+} from './import-parse-formats'
 import { extractDocxStrings } from '../../../src/lib/parsers/docx'
 import { usfmContentOnly } from '../../../src/lib/parsers/usfm-content-only'
 import type { ParsedTextFileResult, TranslatableString } from '../../../src/lib/parsers/core-types'
 import { loadProjectSettings } from '../../../db/shared/projects'
 import type { UsfmNoteRecord } from '../lib/usfm-notes'
 
-/** Formats parsed from BYTES rather than decoded text — zip containers whose
- *  parser reads members itself. Routed around the text-parse core below. */
-export const BINARY_PARSE_FILE_TYPES: ReadonlySet<string> = new Set<string>(['docx'])
-
-/** The union the parse route accepts. */
-export type ServerParseFileType = TextParseFileType | 'docx'
-
-/** Formats the server can parse (published by discovery + get_capabilities). */
-export const SERVER_PARSEABLE_FILE_TYPES: readonly string[] = [
-  ...TEXT_PARSE_FILE_TYPES,
-  ...BINARY_PARSE_FILE_TYPES,
-].sort()
-
-/** Detected formats we recognize but cannot parse in the worker (DOM-bound
- *  parsers, binary containers, or multi-member packages). Kept as data so the
- *  error and the capability docs can never drift. */
-export const CLIENT_ONLY_FORMATS: readonly string[] = [
-  'pptx',
-  'doc',
-  'html',
-  'xliff',
-  'tmx',
-  'usx',
-  'idml',
-  'paratext-project',
-  'zip',
-]
-
-const CLIENT_ONLY_HINT =
-  'this format is not yet server-parseable — import it through the in-app Import dialog ' +
-  '(which runs the full parser set in the browser), or parse it yourself and stage raw ' +
-  'PlanImport cells via POST .../changesets'
+export {
+  BINARY_PARSE_FILE_TYPES,
+  CLIENT_ONLY_FORMATS,
+  CLIENT_ONLY_HINT,
+  SERVER_PARSEABLE_FILE_TYPES,
+  type ServerParseFileType,
+}
 
 /** Caller-supplied fileType spellings → canonical parse types. */
 const FILE_TYPE_ALIASES: Record<string, ServerParseFileType> = {

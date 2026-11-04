@@ -131,6 +131,8 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
   const [offlineCopyPending, setOfflineCopyPending] = useState(false)
   const hasLoaded = useRef(Boolean(initialProject))
   const { session, loading: sessionLoading } = useFrontierSession()
+  const statusRef = useRef(status)
+  useEffect(() => { statusRef.current = status }, [status])
 
   const refresh = useCallback(() => {
     if (!enabled) return () => {}
@@ -196,8 +198,23 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
   }, [enabled, projectId, session?.jwt, sessionLoading])
 
   useEffect(() => {
-    const cleanup = refresh()
-    return cleanup
+    let cancelInFlight = refresh()
+    // Account switching can mount this hook while offline. Revalidate using
+    // the current session on reconnect, including when the offline request
+    // has not settled yet. Cancel the older read so it cannot overwrite the
+    // recovered result. One read per online event; no error-driven retry loop.
+    const reconnect = () => {
+      // Healthy editors keep their mounted state; definitive permission or
+      // missing-project responses still require an explicit action.
+      if (statusRef.current !== "loading" && statusRef.current !== "unreachable") return
+      cancelInFlight()
+      cancelInFlight = refresh()
+    }
+    window.addEventListener("online", reconnect)
+    return () => {
+      window.removeEventListener("online", reconnect)
+      cancelInFlight()
+    }
   }, [refresh])
 
   // Desktop, offline: a cold open can outrun the offline store (a rebuild after

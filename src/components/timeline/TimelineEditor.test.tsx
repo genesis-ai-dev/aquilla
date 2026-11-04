@@ -2982,6 +2982,19 @@ describe("TimelineEditor — rows come from the track model", () => {
     expect(screen.getByTestId("tl-add-track")).toBeTruthy()
   })
 
+  it("opens the add-track choices below the +, aligned to its leading edge", () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells} onRetimeSubtitle={() => {}}
+        onReorderTrack={vi.fn()} onRenameTrack={vi.fn()} trackEditing={editingActions()}
+      />,
+    )
+    fireEvent.click(screen.getByTestId("tl-add-track"))
+    const positioner = screen.getByRole("menu").parentElement
+    expect(positioner).toHaveAttribute("data-side", "bottom")
+    expect(positioner).toHaveAttribute("data-align", "start")
+  })
+
   it("offers rename only with the setting off, and the full menu with it on", () => {
     const { unmount } = render(
       <TimelineEditor

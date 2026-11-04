@@ -4479,6 +4479,11 @@ export function TimelineEditor({
       triggerIcon={Plus}
       testId="tl-add-track"
       ariaLabel={t("editor.timeline.trackAdd")}
+      // Still drops below the +. align start keeps the panel's leading edge
+      // on the button, so the list grows across the lanes instead of back
+      // over the track names. "start" follows the page direction.
+      side="bottom"
+      align="start"
     />
   ) : null
   const addTrackMenuItems = addTrackItems.length > 0 ? (

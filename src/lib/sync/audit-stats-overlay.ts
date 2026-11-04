@@ -173,4 +173,92 @@ export function applyOutboxOverlay(
   return out
 }
 
+
+// ── Post-flush shadow ──
+//
+// The overlay above lives exactly as long as the outbox record does. The
+// flusher deletes the record the instant `POST /events` succeeds, but the
+// server stats map only learns about the event from a LATER targeted refetch
+// (`revalidateCellStats`) — validate/unvalidate cannot be derived from the
+// POST response the way commits are (see `flush-applied.ts`). Between the
+// delete and that refetch landing, the pill drew the pre-click server state:
+// validated → unvalidated → validated, a flash as wide as one GET round trip.
+//
+// A shadow bridges that window the way `optimisticEditsRef` does for cell
+// text: when a cell's last pending record leaves the outbox, its overlaid
+// stats entry is pinned until the base map's entry for that cell is replaced
+// (any refetch, targeted or full, swaps in a fresh object). A record that left
+// because it was QUARANTINED (status `failed`) is never shadowed — the server
+// refused it, and the base state is the truth (AQU-274).
+
+export interface FlushShadow {
+  /** The overlaid entry as it read the moment before the record was deleted. */
+  stats: CellAuditStats
+  /** `base.get(cellId)` at that moment; the shadow clears when this changes. */
+  baseAtFlush: CellAuditStats | undefined
+}
+
+export type FlushShadowState = ReadonlyMap<string, FlushShadow>
+
+export interface ReconcileFlushShadowsInput {
+  base: ReadonlyMap<string, CellAuditStats>
+  /** Pending (non-quarantined) records, as passed to `applyOutboxOverlay`. */
+  pending: ReadonlyArray<OutboxRecord>
+  /** Cells with a `failed` record right now: their disappearance from
+   *  `pending` was a refusal, not a flush. */
+  failedCellIds: ReadonlySet<string>
+  /** `applyOutboxOverlay` result for this `base` + `pending`. */
+  overlaid: ReadonlyMap<string, CellAuditStats>
+  /** Cells that had a pending record on the previous call. */
+  prevPendingCellIds: ReadonlySet<string>
+  /** The previous call's `overlaid` map — the values a flushed cell showed. */
+  prevOverlaid: ReadonlyMap<string, CellAuditStats> | null
+  prev: FlushShadowState
+}
+
+export interface ReconcileFlushShadowsResult {
+  shadows: FlushShadowState
+  /** `overlaid` with live shadows applied. Same reference as `overlaid` when
+   *  no shadow is live. */
+  out: ReadonlyMap<string, CellAuditStats>
+}
+
+export function pendingCellIds(pending: ReadonlyArray<OutboxRecord>): Set<string> {
+  const ids = new Set<string>()
+  for (const rec of pending) if (rec.event.cellId) ids.add(rec.event.cellId)
+  return ids
+}
+
+export function reconcileFlushShadows(input: ReconcileFlushShadowsInput): ReconcileFlushShadowsResult {
+  const next = new Map<string, FlushShadow>()
+  const nowPending = pendingCellIds(input.pending)
+  // Keep shadows the server has not yet caught up on. A cell with a NEW pending
+  // record is drawn by the overlay instead, and re-shadowed when that flushes.
+  for (const [cellId, shadow] of input.prev) {
+    if (input.base.get(cellId) !== shadow.baseAtFlush) continue
+    if (input.failedCellIds.has(cellId)) continue
+    next.set(cellId, shadow)
+  }
+  // Pin cells whose last pending record just left the outbox.
+  if (input.prevOverlaid) {
+    for (const cellId of input.prevPendingCellIds) {
+      if (nowPending.has(cellId)) continue
+      if (input.failedCellIds.has(cellId)) continue
+      const shown = input.prevOverlaid.get(cellId)
+      if (!shown) continue
+      // The refetch may already have landed (fast server, slow IDB delete):
+      // then the base agrees and there is nothing to bridge.
+      if (input.base.get(cellId) === shown) continue
+      next.set(cellId, { stats: shown, baseAtFlush: input.base.get(cellId) })
+    }
+  }
+  if (next.size === 0) return { shadows: next, out: input.overlaid }
+  const out = new Map(input.overlaid)
+  for (const [cellId, shadow] of next) {
+    if (nowPending.has(cellId)) continue
+    out.set(cellId, shadow.stats)
+  }
+  return { shadows: next, out }
+}
+
 export type { CqrsEventKind }

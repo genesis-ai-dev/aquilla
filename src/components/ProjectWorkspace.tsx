@@ -72,6 +72,7 @@ import { useSeamClassification } from "@/hooks/useSeamClassification"
 import { useTranslateAsReadPreference } from "@/hooks/useTranslateAsReadPreference"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
 import { shouldPromptAiSetup } from "@/lib/completion/completion-service"
+import { projectTranslationInstructions } from "@/lib/instructions/project-instructions"
 import {
   hasMateriallyBetterEvidence,
   translateAsReadAction,
@@ -166,7 +167,6 @@ import {
 import type { TimebaseCorrection } from "@/lib/import/timebase"
 import { resolveActiveSourceLanguage } from "./project-workspace-source-language"
 import {
-  shouldPatchSystemPrompt,
   trackDeleteGate,
   shouldSelfHealZeroFileLink,
   selfHealZeroFileLink,
@@ -7084,17 +7084,38 @@ export function ProjectWorkspace() {
     if (!project?.id || !aiTrailToken) return
     void recordModelCall(project.id, activeLane, call, aiTrailToken)
   }, [project?.id, activeLane, aiTrailToken])
+  // AQU-2342: THE project instructions — the stored text, or (until a
+  // maintainer saves one) the legacy sources composed on read. Each source is
+  // its own dependency so the React Compiler re-resolves when one moves.
+  const instructionsSource = project?.translationInstructions
+  const instructionsBrief = project?.translationBrief
+  const instructionsEntries = project?.livingMemoryEntries
+  const instructionsFacts = project?.projectFacts
+  const instructionsLegacyPrompt = project?.completionSettings?.systemPrompt
+  const instructionsLegacyBrief = project?.legacyProjectBriefText
+  const projectInstructions = useMemo(
+    () => projectTranslationInstructions({
+      translationInstructions: instructionsSource,
+      translationBrief: instructionsBrief,
+      livingMemoryEntries: instructionsEntries,
+      projectFacts: instructionsFacts,
+      completionSettings: instructionsLegacyPrompt === undefined ? undefined : { systemPrompt: instructionsLegacyPrompt },
+      legacyProjectBriefText: instructionsLegacyBrief,
+    }),
+    [instructionsSource, instructionsBrief, instructionsEntries, instructionsFacts, instructionsLegacyPrompt, instructionsLegacyBrief],
+  )
   const { completeSingle, alignCellStyles, askAlignStyles, alignStylesModel, prepareSingleEvidence, prefetchSingleEvidence, completeBatch, completeParagraph, clearCellError, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
     // AQU-538/AQU-602: when a non-default lane is active, its tag IS the target
     // language for few-shot/completion; default lane falls back to the file's
     // (then project's) targetLanguage exactly as before. Shares the same
     // lane-aware derivation as the editor project + file metadata.
-    project?.completionSettings, activeSourceLanguage || "", activeLaneTargetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell, rules, getActiveCells, project?.translationBrief?.l1Summary ?? undefined,
+    project?.completionSettings, activeSourceLanguage || "", activeLaneTargetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell, rules, getActiveCells, projectInstructions || undefined,
     project?.draftContext ?? DEFAULT_DRAFT_CONTEXT,
     activeLane,
     commitCompletedCells,
     styleInstructionsFor,
     recordAiModelCall,
+    project?.languageProfile,
   )
 
   // AQU-1386: classify the open file's cell seams in the background so
@@ -10678,38 +10699,14 @@ export function ProjectWorkspace() {
     }
   }, [checklistDismissed, dismissChecklist])
 
-  const handleProjectUpdated = useCallback(async (updated: ProjectRecord | undefined) => {
-    // FRO-234: When a step component saves (e.g. AiInstructionsStep via
-    // useSaveCompletionSettings), it writes to IDB and hands us the updated
-    // record. We must also push the change through patchSettings so that
-    // useProjectSettings.local reflects it — that overlay is what
-    // deriveChecklistState reads to compute aiInstructions. Without this call,
-    // the checklist step never flips to complete because useProject.refresh()
-    // fetches from the server (not IDB) and the server-overlay wins.
-    //
-    // WARN: only patch when the updated record carries a NON-EMPTY systemPrompt.
-    // buildCompletionSettings() materialises systemPrompt as "" by default, so a
-    // provider-only save (Device B changing the AI provider with no local prompt)
-    // would otherwise WIPE the server-side prompt project-wide.
-    //
-    // Also gate on MAINTAINER (600) — same floor as handleImported — so viewers
-    // and editors can't inadvertently overwrite project-wide settings they have
-    // no server authority to change.
-    const systemPrompt = updated?.completionSettings?.systemPrompt
-    const roleLevel = project?.syncRole?.level ?? 0
-    if (shouldPatchSystemPrompt(systemPrompt, roleLevel)) {
-      void patchSettings({ systemPrompt: systemPrompt! })
-    } else if (systemPrompt !== undefined && systemPrompt !== null && systemPrompt.trim().length === 0) {
-      // Empty prompt from a provider-only save — silently skip to avoid clobbering the server.
-    } else if (systemPrompt && roleLevel < ROLE.MAINTAINER) {
-      console.warn(
-        `[FRO-234] skipping systemPrompt patch — role ${roleLevel} is below server floor ${ROLE.MAINTAINER}. ` +
-        "A sub-MAINTAINER device cannot write project-wide AI instructions.",
-      )
-    }
-    // Also refresh the server-fetched base record so other fields stay in sync.
+  const handleProjectUpdated = useCallback(async (_updated: ProjectRecord | undefined) => {
+    // AQU-2342: step components save the project instructions through
+    // patchSettings themselves; the copilot's role text is no longer
+    // user-editable, so nothing here mirrors `completionSettings.systemPrompt`
+    // back to the server any more (that was FRO-234's job). Just refresh the
+    // server-fetched base record so other fields stay in sync.
     refresh()
-  }, [refresh, patchSettings, project?.syncRole?.level])
+  }, [refresh])
 
   // All hooks below must live above the early return so hook count is stable
   // across renders (React throws "Rendered more hooks" otherwise).

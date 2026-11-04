@@ -56,6 +56,7 @@ import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { loadProjectSettings, patchProjectSettingsShared } from '../../../db/shared/projects'
 import { loosensPolicy } from '../../../db/shared/policy-direction'
 import { loadInheritedPolicyDefaults } from '../../../db/shared/validation-threshold'
+import { loadTranslationInstructions } from '../../../db/shared/load-translation-instructions'
 import {
   applyBriefL1Summary,
   applyBriefPatch,
@@ -608,6 +609,11 @@ async function verifyBriefReachesCopilot(
     details: { ...caveat, reason },
   })
 
+  // AQU-2342: written instructions replace the brief in every prompt.
+  if (l1 !== '' && (await loadTranslationInstructions(step.db, step.cs.projectId)).stored) {
+    return notInjected('the project has written translationInstructions, which replace the brief in every prompt')
+  }
+
   const first = files[0]
   if (!first || l1 === '') {
     return l1 !== ''
@@ -632,7 +638,11 @@ async function verifyBriefReachesCopilot(
     fileId: first.fileId,
   })
   if (!preview.ok) return { reaches: true, details: caveat }
-  return preview.body.parts.brief.trim() !== ''
+  // AQU-2342: the brief reaches a prompt only as part of the ONE instructions
+  // block (composed on read until `translationInstructions` is written), so
+  // the claim is that the block carries the summary — not merely that a block
+  // exists, which stored instructions alone would satisfy.
+  return preview.body.parts.instructions.includes(l1)
     ? { reaches: true, details: caveat }
-    : notInjected('prompt-preview renders no brief block on the first imported cell')
+    : notInjected('prompt-preview renders no instructions block carrying the brief on the first imported cell')
 }

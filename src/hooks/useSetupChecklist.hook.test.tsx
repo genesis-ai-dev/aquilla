@@ -142,3 +142,26 @@ describe("useSetupChecklist — AQU-694 mid-setup persistence", () => {
     expect(isSetupInProgress("p1")).toBe(false)
   })
 })
+
+// AQU-2342: the "AI instructions" step reads the RESOLVED project instructions
+// — the one text every AI draft reads — not the retired system prompt.
+describe("useSetupChecklist — AI instructions step", () => {
+  it("is complete when the project stored instructions", () => {
+    const project = mkProject("p1", { translationInstructions: "Plain register for youth." })
+    const { result } = renderHook(() => useSetupChecklist(project), { wrapper })
+    expect(result.current.state.aiInstructions).toBe(true)
+  })
+
+  it("is complete when only an old custom system prompt migrates into instructions", () => {
+    const project = mkProject("p1", {
+      completionSettings: { systemPrompt: "Keep divine names as in the 1999 Bible." },
+    } as Partial<ProjectRecord>)
+    const { result } = renderHook(() => useSetupChecklist(project), { wrapper })
+    expect(result.current.state.aiInstructions).toBe(true)
+  })
+
+  it("is not complete when the project has no instructions", () => {
+    const { result } = renderHook(() => useSetupChecklist(mkProject("p1")), { wrapper })
+    expect(result.current.state.aiInstructions).toBe(false)
+  })
+})

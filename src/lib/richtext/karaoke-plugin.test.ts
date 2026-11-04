@@ -71,6 +71,22 @@ describe("buildKaraokeDecorationSet", () => {
     expect(out.find().length).toBe(0)
   })
 
+  // AQU-2254: an AI transcript cleanup rewrites the cell's text while the
+  // stored timings keep the pre-cleanup layout. The band must go dark on the
+  // words that moved instead of painting letters the audio is not saying.
+  it("paints nothing when the active word's offsets no longer address it", () => {
+    const cleanedUp = paragraph("hello whirled")
+    expect(buildKaraokeDecorationSet(cleanedUp, timings, 1).find().length).toBe(0)
+  })
+
+  it("still paints the words a cleanup left in place", () => {
+    // "hello world" → "hello whirled": word 0 did not move.
+    const cleanedUp = paragraph("hello whirled")
+    const first = buildKaraokeDecorationSet(cleanedUp, timings, 0).find()
+    expect(first.length).toBe(1)
+    expect(first[0]).toMatchObject({ from: 1, to: 6 })
+  })
+
   it("decorates words across paragraph boundaries (\\n separator counted)", () => {
     // Plain text: "hello\nworld" — 5 + 1 (\n) + 5 = 11 chars
     const doc = multiParagraph("hello", "world")

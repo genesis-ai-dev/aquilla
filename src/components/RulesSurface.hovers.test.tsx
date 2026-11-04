@@ -9,8 +9,6 @@ import { renderWithTooltips, expectClickNote } from "@/test-utils/tooltip"
 import { RulesSurface } from "./RulesSurface"
 import type { ProjectRecord, TranslationRule } from "@/lib/parsers/types"
 
-vi.mock("@/components/rules/OrgRulesPanel", () => ({ OrgRulesPanel: () => null }))
-vi.mock("./BuiltinChecksList", () => ({ BuiltinChecksList: () => null }))
 vi.mock("@/lib/completion/frontier-health", () => ({ useFrontierHealth: () => ({ available: true }) }))
 
 const project = {

@@ -144,6 +144,7 @@ export function SetMilestoneDialog({
               <SearchSelect
                 id="set-milestone-start"
                 data-testid="set-milestone-start"
+                className="w-full!"
                 options={startOptions}
                 value={startCellId}
                 searchPlaceholder={t("editor.setMilestone.searchPlaceholder")}
@@ -170,6 +171,7 @@ export function SetMilestoneDialog({
               <SearchSelect
                 id="set-milestone-end"
                 data-testid="set-milestone-end"
+                className="w-full!"
                 options={endOptions}
                 value={endCellId}
                 placeholder={t("editor.setMilestone.endPlaceholder")}

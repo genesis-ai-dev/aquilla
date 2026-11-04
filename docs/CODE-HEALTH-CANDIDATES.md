@@ -3286,3 +3286,43 @@ output *is* the proof of deadness, per directive, with the rule named.
   `RecordingsUpload.tsx`, the dead `UploadPanel.tsx` and `ImportDialog.tsx`), and the ~100
   `as unknown as` casts in non-test `src/` are overwhelmingly legitimate browser-global and
   `Worker`-`self` narrowings. Not a productive theme until something changes.
+
+### Gates recorded 2026-11-04 (`origin/dev` `5cdb8e5c`)
+
+- **`pnpm lint`** — exit 0 both times, **0 errors** both times, **967 warnings at baseline →
+  948 after**: exactly **−19**, one per deleted directive. That arithmetic is the run's
+  sharpest proof. Had any of the 8 `react-hooks/exhaustive-deps` directives been masking a
+  real violation, deleting it would have *replaced* its unused-directive warning with an
+  exhaustive-deps warning and the total would have fallen by fewer than 19. A normalized
+  diff of the two outputs (`line:col` collapsed) confirms it per line: every removed line is
+  either an "Unused eslint-disable directive" warning or a file-path header, and **every
+  added line is an `EditorTable.tsx` path header whose line number moved by exactly −1** —
+  the single deleted line above it. No new rule fired anywhere.
+  As on 2026-11-02, the final lint was made comparable by `rm -rf packages/*/dist` first:
+  the baseline lint ran before any build in a fresh container, so it never saw the
+  git-ignored `packages/idml-roundtrip/dist` output the baseline build then generated. That
+  is the nested-`dist` `globalIgnores` candidate at the top of this file, now worked around
+  by hand for the fourth run running.
+- **`pnpm build`** — exit 0, baseline and final (`check-app-build` SPA-only output OK, asset
+  sizes OK, `check-brand-build aquilla` OK).
+- **`pnpm test`** — **baseline red, pre-existing, out of scope, and reproduced to the digit**:
+  1 failed / 2264 passed / 2 skipped (2267 files) and 1 failed / 25892 passed / 2
+  expected-fail / 23 skipped (25918 tests), *identical* before and after. Same single
+  failure both runs — `scripts/release-cut.test.ts > buildReleaseBranch against a scratch
+  repo > "fails loud when the pick cannot commit, and leaves nothing in progress"`
+  (`:321`), which sets `commit.gpgsign true` with a deliberately bogus `gpg.program` and
+  expects a throw that this container's git does not produce. Identical to the failure the
+  2026-11-02 run recorded; environment-dependent, in a test file this routine may not touch,
+  so `scripts/release-cut.test.ts` stays frozen. No worker suite was run: no worker package
+  is in the diff. (`shared/` was surveyed but deliberately left untouched — see the
+  generated door43 bundle above.)
+- **`pnpm test:e2e:smoke`** — **not runnable in this container, and for a new reason worth
+  recording**: it is no longer the missing-Docker/Postgres wall of the 2026-08/09/10 runs but
+  a **Playwright browser-path mismatch**. All three shards die before loading a spec with
+  `Playwright browser executable is missing: /opt/pw-browsers/chromium-1248/chrome-linux64/chrome`
+  and `/opt/pw-browsers/chromium_headless_shell-1248` (`[e2e-shard] 0/3 shard(s) passed`).
+  The container ships a pre-installed Chromium at `/opt/pw-browsers/chromium`, but the
+  repo's pinned Playwright wants the versioned `-1248` directory, which is absent; the
+  environment's own guidance is not to run `playwright install` (a second download will not
+  be found by this Playwright). Fails before any spec loads, so it cannot be sensitive to a
+  comment-only diff. CI runs the gate.

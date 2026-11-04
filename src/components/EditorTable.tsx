@@ -8289,6 +8289,10 @@ function EditorRow({
                     voice={gutterVoice}
                     explicit={gutterExplicit}
                     castName={gutterCastName}
+                    // AQU-1279: the circle's hover is the editor source side's
+                    // only word on who speaks a line, so it is where an
+                    // imported camera angle has to appear.
+                    cameraState={cell.cameraState ?? null}
                     editable={editable && Boolean(onAssignCastVoice)}
                     voices={gutterVoices}
                     showLanguageBadge={gutterLanguageBadge}

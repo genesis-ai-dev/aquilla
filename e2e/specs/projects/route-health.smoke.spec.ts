@@ -77,6 +77,8 @@ test("first offline editor visit explains the missing screen and recovers on rec
     await alice.context().setOffline(false)
   }
   await expect(alice.getByRole("button", { name: "Reload", exact: true })).toBeEnabled()
+  // Reconnect alone must leave recovery under the user's control.
+  await expect(alice.getByText("Your browser is back online. Reload to try loading this screen again.", { exact: true })).toBeVisible()
   await alice.getByRole("button", { name: "Reload", exact: true }).click()
   await expect(alice.locator('[data-slot="error-boundary-fallback"]')).not.toBeVisible()
   await expect(alice.getByRole("button", { name: /Account menu: alice/ })).toBeVisible()

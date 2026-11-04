@@ -73,6 +73,8 @@ for (const failure of ["browser-offline", "unreachable-host"] as const) {
     } else {
       // Native Safari can keep navigator.onLine=true while requests fail.
       await alice.route("**/assets/**", route => route.abort("internetdisconnected"))
+      // The affected pre-push gate also runs the unbundled Vite dev server.
+      await alice.route("**/src/components/ProjectWorkspace.tsx*", route => route.abort("internetdisconnected"))
       await alice.route("**/version.json", route => route.abort("internetdisconnected"))
     }
     try {
@@ -84,6 +86,7 @@ for (const failure of ["browser-offline", "unreachable-host"] as const) {
       await alice.context().setOffline(false)
       if (failure === "unreachable-host") {
         await alice.unroute("**/assets/**")
+        await alice.unroute("**/src/components/ProjectWorkspace.tsx*")
         await alice.unroute("**/version.json")
       }
     }

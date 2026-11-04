@@ -108,7 +108,7 @@ function CrumbSeparator() {
 function renderCrumbItem(crumb: Crumb, key: string) {
   return (
     <BreadcrumbItem key={key} className="shrink-0">
-      {crumb.pending ? <LoadingCursor data-testid="org-breadcrumb-pending" /> : <CrumbLink crumb={crumb} />}
+      {crumb.pending ? <LoadingCursor plain data-testid="org-breadcrumb-pending" /> : <CrumbLink crumb={crumb} />}
     </BreadcrumbItem>
   )
 }

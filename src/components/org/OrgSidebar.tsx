@@ -206,7 +206,7 @@ export function OrgSidebar() {
         </>}
         {navPending && (
           <div className="flex h-8 items-center px-2" data-testid="org-sidebar-pending" aria-hidden="true">
-            <LoadingCursor />
+            <LoadingCursor plain />
           </div>
         )}
       </nav>

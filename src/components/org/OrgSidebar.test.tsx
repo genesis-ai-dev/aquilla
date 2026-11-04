@@ -148,6 +148,8 @@ describe("OrgSidebar pending cursor", () => {
       await screen.findByRole("link", { name: "Overview" })
       expect(screen.getByTestId("org-sidebar-pending")).toBeInTheDocument()
       expect(document.querySelectorAll("[data-slot='loading-cursor']")).toHaveLength(1)
+      // A secondary cursor: it never prints a surrounding loading label.
+      expect(screen.getByTestId("org-sidebar-pending").textContent).toBe("")
     } finally {
       platformAdmin.loading = false
     }

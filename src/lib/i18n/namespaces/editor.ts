@@ -537,6 +537,19 @@ export const editor = defineNamespace({
     "editor.bibles.closePicker": "Close picker",
     "editor.bibles.addVersion": "Add version",
     "editor.bibles.attribution": "Text from the",
+    "editor.bibles.showPassages": "Side by side",
+    "editor.bibles.showVerse": "One verse",
+    "editor.bibles.creditLicense": "License",
+    "editor.bibles.creditWebsite": "Website",
+    "editor.bibles.versShifted": "Numbered {here} in this version ({ref} in English).",
+    "editor.bibles.versPsalmTitle": "This version counts the psalm title as a verse, so its numbers run {offset} ahead.",
+    "editor.bibles.versPsalmUnsure": "This version may count the psalm title as verse 1. Check the verse numbers.",
+    "editor.bibles.versCountDiffers": "Verses here: {verses}. In {version}: {refVerses}. The numbering differs in this chapter.",
+    "editor.bibles.makeProjectDefaults": "Make these the project defaults",
+    "editor.bibles.useProjectDefaults": "Use the project defaults",
+    "editor.bibles.usingProjectDefaults": "Showing this project's default versions.",
+    "editor.bibles.projectDefaultsSaved": "Saved as the project defaults.",
+    "editor.bibles.projectDefaultsFailed": "The project defaults were not saved. Try again.",
 
     // — Verse-resources reference sidebar (AQU-461) ————————————————————
     "editor.resources.show": "Show verse resources",
@@ -5994,6 +6007,74 @@ export const editor = defineNamespace({
           "It is followed immediately by a link whose text is the data source's " +
           "proper name, which is not translated — so this string ends mid-phrase on " +
           "purpose and the name cannot be moved in front of it.",
+      },
+      "editor.bibles.showPassages": {
+        description:
+          "Header button of the Parallel Bibles panel that switches to whole chapters shown side by side in columns, one per Bible version. Swaps with editor.bibles.showVerse. Very short.",
+        maxLength: 16,
+      },
+      "editor.bibles.showVerse": {
+        description:
+          "Header button of the Parallel Bibles panel, shown while whole chapters are side by side; it switches back to showing only the current verse of each version. Swaps with editor.bibles.showPassages. Very short.",
+        maxLength: 16,
+      },
+      "editor.bibles.creditLicense": {
+        description:
+          "Link text in the small credit line under each Bible version; it opens the version's license page. One word.",
+        maxLength: 14,
+      },
+      "editor.bibles.creditWebsite": {
+        description:
+          "Link text in the same credit line; it opens the Bible version publisher's website. One word.",
+        maxLength: 14,
+      },
+      "editor.bibles.versShifted": {
+        description:
+          "Note above a Bible version whose verse numbers differ from the editor's (Hebrew Bibles number some chapters differently). Says where the same verse is in this version.",
+        placeholders: {
+          here: "The reference in this version's numbering, e.g. 'MAL 3:19'. Book codes and numbers come from the data — do not translate.",
+          ref: "The same verse in English numbering, e.g. 'MAL 4:1'. Do not translate.",
+        },
+      },
+      "editor.bibles.versPsalmTitle": {
+        description:
+          "Note above a Hebrew Bible version in Psalms: it numbers the psalm's title line as verse 1, so every verse number is higher by the given amount.",
+        placeholders: {
+          offset: "How many numbers ahead: 1 or 2, as digits.",
+        },
+      },
+      "editor.bibles.versPsalmUnsure": {
+        description:
+          "Note above a Hebrew Bible version in Psalms when the panel cannot tell whether the title line is numbered. Asks the reader to check the numbers.",
+      },
+      "editor.bibles.versCountDiffers": {
+        description:
+          "Note above a Bible version whose chapter has a different number of verses from the first version in the panel, so verses with the same number may not match.",
+        placeholders: {
+          verses: "Verse count in this version, as digits.",
+          version: "The other version's short name, e.g. 'BSB'. A code — do not translate.",
+          refVerses: "Verse count in that other version, as digits.",
+        },
+      },
+      "editor.bibles.makeProjectDefaults": {
+        description:
+          "Footer button in the Parallel Bibles panel, shown only to project leads: saves the versions now shown as the ones every team member sees until they choose their own.",
+      },
+      "editor.bibles.useProjectDefaults": {
+        description:
+          "Footer button in the Parallel Bibles panel: drops the user's own choice of versions and shows the ones the project lead chose instead.",
+      },
+      "editor.bibles.usingProjectDefaults": {
+        description:
+          "Status line in the Parallel Bibles footer when the versions shown are the ones the project lead chose, not the user's own.",
+      },
+      "editor.bibles.projectDefaultsSaved": {
+        description:
+          "Status line after a project lead saved the shown versions as the project defaults.",
+      },
+      "editor.bibles.projectDefaultsFailed": {
+        description:
+          "Status line when saving the project default versions failed.",
       },
       "editor.resources.show": {
         description:

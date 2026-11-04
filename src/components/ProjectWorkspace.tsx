@@ -19,6 +19,7 @@ import { useProjectLaneStaffing } from "@/hooks/useProjectLaneStaffing"
 import {
   broadcastProjectSettingsUpdated,
   describePatchFailure,
+  PARALLEL_BIBLES_EDIT_ROLE_FLOOR,
 } from "@/hooks/useProjectSettings"
 import { useNavHistoryTitle } from "@/context/NavHistoryContext"
 import { deriveNavTitleKey } from "@/lib/navigation/deriveTitle"
@@ -18339,6 +18340,12 @@ export function ProjectWorkspace() {
                 <ParallelBiblesSidebar
                   key={`${activeFile!.id}-bibles`}
                   trackedRef={trackedCellRef}
+                  projectId={projectId}
+                  projectDefaults={projectSettings?.settings?.parallelBibleVersions}
+                  canSetProjectDefaults={(serverRoleLevel ?? 0) >= PARALLEL_BIBLES_EDIT_ROLE_FLOOR}
+                  onSetProjectDefaults={async (ids) =>
+                    (await patchSettings({ parallelBibleVersions: ids })).kind === "ok"
+                  }
                   open
                   onToggle={() => {
                     const next = !parallelBiblesOpen

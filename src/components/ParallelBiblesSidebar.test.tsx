@@ -191,3 +191,100 @@ describe("ParallelBiblesSidebar — the closed edge tab", () => {
     await expectNoHoverTip(screen.getByRole("button", { name: "Show parallel bibles" }))
   })
 })
+
+function translation(id: string, over: Partial<Awaited<ReturnType<typeof fetchHelloaoTranslations>>[number]>) {
+  return {
+    id, name: id, englishName: id, shortName: id, language: "eng", languageName: "English",
+    languageEnglishName: "English", textDirection: "ltr", licenseUrl: "", website: "",
+    numberOfBooks: 66, totalNumberOfChapters: 1189, totalNumberOfVerses: 31102, ...over,
+  }
+}
+
+const CATALOGUE = [
+  translation("BSB", { shortName: "BSB", englishName: "Berean Standard Bible", licenseUrl: "https://berean.bible/", website: "https://berean.bible/" }),
+  translation("hbo_wlc", {
+    shortName: "WLC", englishName: "Westminster Leningrad Codex Hebrew OT", language: "hbo", textDirection: "rtl",
+    licenseUrl: "https://ebible.org/Scriptures/details.php?id=hboWLC", website: "https://ebible.org/Scriptures/details.php?id=hboWLC",
+  }),
+]
+
+function verses(from: number, to: number, label: string) {
+  return Array.from({ length: to - from + 1 }, (_, i) => ({
+    type: "verse" as const, number: from + i, content: [`${label} ${from + i}`],
+  }))
+}
+
+describe("ParallelBiblesSidebar — whole chapters side by side", () => {
+  it("searches a catalogue whose entries leave out the language name", async () => {
+    const { languageName: _a, languageEnglishName: _b, ...bare } = translation("XYZ", { englishName: "Bare entry" })
+    fetchTranslations.mockReset().mockResolvedValue([bare, ...CATALOGUE])
+    render(<ParallelBiblesSidebar trackedRef="GEN 1:1" open onToggle={() => {}} />)
+    fireEvent.click(screen.getByRole("button", { name: "Add version" }))
+    fireEvent.change(await screen.findByRole("textbox", { name: "Search Bible versions" }), { target: { value: "hbo" } })
+    expect(await screen.findByText("Westminster Leningrad Codex Hebrew OT")).toBeInTheDocument()
+  })
+
+
+  beforeEach(async () => {
+    localStorage.clear()
+    const { flattenHelloaoContent } = await import("@/lib/parsers/helloao")
+    vi.mocked(flattenHelloaoContent).mockImplementation((content) => content.filter((c) => typeof c === "string").join(" "))
+    fetchTranslations.mockReset().mockResolvedValue(CATALOGUE)
+    fetchChapter.mockReset().mockImplementation(async (id, _book, chapter) =>
+      id === "BSB" ? chapterResponse(...verses(1, 6, `BSB ${chapter}`)) : chapterResponse(...verses(1, 24, `WLC ${chapter}`)),
+    )
+  })
+
+  it("lines English MAL 4:1 up with Hebrew MAL 3:19, right to left, with a credit under each column", async () => {
+    localStorage.setItem("aquilla:parallel-bibles:view", "passage")
+    render(<ParallelBiblesSidebar projectId="p1" projectDefaults={["BSB", "hbo_wlc"]} trackedRef="MAL 4:1" open onToggle={() => {}} />)
+
+    const hebrew = await screen.findByTestId("passage-column-hbo_wlc")
+    await waitFor(() => expect(hebrew.querySelector('[aria-current="true"]')?.textContent).toContain("WLC 3 19"))
+    expect(fetchChapter).toHaveBeenCalledWith("hbo_wlc", "MAL", 3)
+    expect(hebrew.querySelector('[dir="rtl"][lang="hbo"]')).not.toBeNull()
+    expect(hebrew.textContent).toContain("Numbered MAL 3:19 in this version (MAL 4:1 in English).")
+    const credit = hebrew.querySelector('[data-testid="version-credit"]')
+    expect(credit?.textContent).toBe("Westminster Leningrad Codex Hebrew OT · License")
+    expect(credit?.querySelector("a")?.getAttribute("rel")).toBe("noopener noreferrer")
+
+    const english = screen.getByTestId("passage-column-BSB")
+    expect(english.querySelector('[aria-current="true"]')?.textContent).toContain("BSB 4 1")
+    expect(english.querySelector('[data-testid="versification-mark"]')).toBeNull()
+    expect(screen.getByText("Showing this project's default versions.")).toBeInTheDocument()
+  })
+
+  it("offsets a Hebrew psalm by its numbered title, read against the first version that has the psalm", async () => {
+    localStorage.setItem("aquilla:parallel-bibles:view", "passage")
+    fetchTranslations.mockReset().mockResolvedValue([translation("grc_sbl", { language: "grc" }), ...CATALOGUE])
+    fetchChapter.mockReset().mockImplementation(async (id) => {
+      if (id === "grc_sbl") throw new HelloaoChapterNotFoundError("grc_sbl/PSA/3")
+      return id === "BSB"
+        ? chapterResponse({ type: "hebrew_subtitle", content: ["A Psalm of David"] }, ...verses(1, 8, "BSB"))
+        : chapterResponse(...verses(1, 9, "WLC"))
+    })
+    render(<ParallelBiblesSidebar projectDefaults={["grc_sbl", "BSB", "hbo_wlc"]} trackedRef="PSA 3:4" open onToggle={() => {}} />)
+
+    const hebrew = await screen.findByTestId("passage-column-hbo_wlc")
+    await waitFor(() => expect(hebrew.querySelector('[aria-current="true"]')?.textContent).toContain("WLC 5"))
+    expect(hebrew.textContent).toContain("This version counts the psalm title as a verse, so its numbers run 1 ahead.")
+  })
+
+  it("lets a lead save their own pins as the project defaults, and hides that from everyone else", async () => {
+    localStorage.setItem("aquilla:parallel-bibles:p1:versions", JSON.stringify(["hbo_wlc", "BSB"]))
+    const onSet = vi.fn().mockResolvedValue(true)
+    const { rerender } = render(
+      <ParallelBiblesSidebar projectId="p1" projectDefaults={["BSB"]} trackedRef="GEN 1:1" open onToggle={() => {}} onSetProjectDefaults={onSet} />,
+    )
+    expect(screen.queryByRole("button", { name: "Make these the project defaults" })).toBeNull()
+    expect(screen.getByRole("button", { name: "Use the project defaults" })).toBeInTheDocument()
+
+    rerender(
+      <ParallelBiblesSidebar projectId="p1" projectDefaults={["BSB"]} trackedRef="GEN 1:1" open onToggle={() => {}} onSetProjectDefaults={onSet} canSetProjectDefaults />,
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Make these the project defaults" }))
+    await waitFor(() => expect(onSet).toHaveBeenCalledWith(["hbo_wlc", "BSB"]))
+    // Saved: the lead now follows the defaults like everyone else.
+    await waitFor(() => expect(localStorage.getItem("aquilla:parallel-bibles:p1:versions")).toBeNull())
+  })
+})

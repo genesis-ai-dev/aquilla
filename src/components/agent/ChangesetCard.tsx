@@ -36,6 +36,7 @@ import {
   changesetStatusBadgeClass,
   changesetStatusLabel,
   changesetStatusVariant,
+  isDecidedChangesetStatus,
   isTerminalChangesetStatus,
 } from "@/lib/agent/changeset-review"
 import { ChangeList, ImportPreviewView } from "@/components/changesets/ChangeList"
@@ -131,12 +132,20 @@ function LegacyChangesetCard({ item }: { item: ChangesetItem }) {
   const actionable = staged && !approvedLocally && jwt !== null && approval !== null
   // "Approved" awaiting the agent's commit — shown while the server still says staged.
   const approvedAwaitingCommit = approvedLocally && staged
+  // AQU-1639: once the reviewer has decided, the sample diff has nothing left
+  // to review — the card collapses to its header, status chip and notice so an
+  // answered suggestion stops competing with the ones still waiting.
+  const decided = approvedLocally || isDecidedChangesetStatus(status)
 
   return (
     <div
       data-frame-type="changeset.staged"
       data-changeset-status={approvedAwaitingCommit ? "approved" : status}
-      className="space-y-1.5 rounded-lg border border-sky-900/60 bg-sky-950/30 px-3 py-2"
+      data-changeset-collapsed={decided ? "true" : undefined}
+      // AQU-1639: sky-950 alone painted a near-black panel in LIGHT mode, so
+      // its muted text was dark-on-dark. Light values first, dark behind the
+      // `dark:` prefix — the pairing ProposalReceipt already uses.
+      className="space-y-1.5 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 dark:border-sky-900/60 dark:bg-sky-950/30"
     >
       <div className="flex flex-wrap items-center gap-1.5 text-xs">
         <FileDiff className="h-3.5 w-3.5 shrink-0 text-sky-500" />
@@ -152,10 +161,10 @@ function LegacyChangesetCard({ item }: { item: ChangesetItem }) {
         </Badge>
       </div>
 
-      {approval?.changes && approval.changes.items.length > 0 && (
+      {!decided && approval?.changes && approval.changes.items.length > 0 && (
         <ChangeList changes={approval.changes} maxItems={SAMPLE_CHANGES} />
       )}
-      {approval?.importPreview && (
+      {!decided && approval?.importPreview && (
         <ImportPreviewView
           preview={{
             ...approval.importPreview,

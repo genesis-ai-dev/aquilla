@@ -58,7 +58,12 @@ export interface DraftGenerationContext {
   targetLanguage?: string
   briefSummary?: string
   signal: AbortSignal
-  sendProgress: (label: string, done: number, total: number) => void
+  /**
+   * AQU-1536: the counter is optional. Drafting runs two batched model
+   * calls, so no cell finishes before the whole pass returns — a
+   * per-cell `done/total` here could only sit at 0 and then jump to N.
+   */
+  sendProgress: (label: string, done?: number, total?: number) => void
   addUsage: (usage: { prompt_tokens?: number; completion_tokens?: number; cost?: number }) => void
   /** Re-check the enclosing agent run's cost/token cap between the two paid
    *  phases. Direct unit callers may omit it (no enclosing run budget). */
@@ -342,7 +347,12 @@ export async function generateDrafts(
   // Preserve the benchmarked causal structure: research finishes before the
   // model sees the request to translate. This is deliberately two calls, not
   // one prompt asking the model to "think first" and draft in the same pass.
-  ctx.sendProgress(`Researching ${work.length} cells`, 0, work.length)
+  // AQU-1536: a stage label, not a cell counter. Research is ONE call covering
+  // every cell, so there is no per-cell completion to count; the dock showed
+  // `Researching 7 cells — 0/7` frozen for the whole pass, which a translator
+  // cannot tell from a stalled run. The label names the pass instead, and it
+  // changes when generation starts — visible movement before the proposals land.
+  ctx.sendProgress(`Researching ${work.length} cells (pass 1 of 2)`)
   const researched = await callPaidPass(
     ctx,
     modelCfg,
@@ -363,9 +373,7 @@ export async function generateDrafts(
   if (!evidenceRecord) {
     return { ok: false, error: "drafting research returned no evidence record — retry or draft fewer cells" }
   }
-  ctx.sendProgress(`Researching ${work.length} cells`, work.length, work.length)
-
-  ctx.sendProgress(`Drafting ${work.length} cells`, 0, work.length)
+  ctx.sendProgress(`Drafting ${work.length} cells (pass 2 of 2)`)
   const generated = await callPaidPass(
     ctx,
     modelCfg,
@@ -426,7 +434,6 @@ export async function generateDrafts(
       missed.push(p.canonicalRef ?? ctx.aliases.alias(p.cellId, "c"))
     }
   })
-  ctx.sendProgress(`Drafting ${work.length} cells`, work.length, work.length)
 
   return {
     ok: true,

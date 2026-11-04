@@ -13,30 +13,18 @@
 
 import { useEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
-import { AudioLines, AudioWaveform, Check, CheckCheck, ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, CopyPlus, Ellipsis, Mic, Pencil, Play, Scissors, Sparkles, Square, Trash2, VolumeX, X } from "lucide-react"
+import { AudioLines, AudioWaveform, Check, CheckCheck, ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, Ellipsis, GraduationCap, Mic, Pencil, Play, Scissors, Sparkles, Square, Trash2, VolumeX, X } from "lucide-react"
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
-  ContextMenuLabel,
-  ContextMenuRadioGroup,
-  ContextMenuRadioItem,
   ContextMenuSeparator,
-  ContextMenuSub,
-  ContextMenuSubContent,
-  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu"
-import {
-  CHANGE_VOICE_QUALITIES,
-  type ChangeVoiceBlocker,
-  type ChangeVoiceQuality,
-} from "@/lib/audio/change-voice"
-import { CHANGE_VOICE_QUALITY_LABEL } from "@/lib/store/change-voice-quality"
+import { isVoiceChangedAudioId, type ChangeVoiceBlocker } from "@/lib/audio/change-voice"
 import { cn } from "@/lib/utils"
 import { toast } from "@/components/ui/toast"
 import { Spinner } from "@/components/ui/spinner"
-import { CloneFromTakeButton } from "@/components/cell/CloneFromTakeButton"
 import { useVoicingAs } from "@/lib/audio/voicing-as"
 import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
 import { TimelineSlotButton } from "./TimelineSlotButton"
@@ -289,10 +277,10 @@ export interface TakeMenuActions {
   /** Generate a new voice for this line straight away, on this take's track. */
   regenerate?(cellId: string): void
   /**
-   * AQU-2026: re-voice this line's own take into its cast voice at `quality`.
-   * Nothing is synthesized from text — the words and timing are kept.
+   * AQU-2026: re-voice this line's own take into its cast voice. Nothing is
+   * synthesized from text — the words and timing are kept.
    */
-  changeVoice?(cellId: string, quality: ChangeVoiceQuality): void
+  changeVoice?(cellId: string): void
   /**
    * AQU-2026: what Change voice can do on this line, or `null` to leave the
    * item out of the menu entirely (a line whose only sound is the film's own
@@ -300,18 +288,12 @@ export interface TakeMenuActions {
    */
   changeVoiceState?(cellId: string): ChangeVoiceMenuState | null
   /**
-   * AQU-1758: turn this line's take into a character — the New voice dialog,
-   * cloning, seeded with it. (The Audio view's voice card had this.) With
-   * `cloneTake`, it is the one-step clone's More options.
+   * AQU-1758 / AQU-2291: "Train a voice from this recording" — New voice on
+   * the Train voice tab, THIS take already added as its first recording.
+   * Offered on a person's take only (a generated or re-voiced take is not a
+   * recording of anyone).
    */
-  makeCharacter?(cellId: string): void
-  /**
-   * AQU-1758 / AQU-2212: "Make a character from this voice" clones THIS take
-   * in one step — name it, Add to cast — in a popover at the clip.
-   */
-  cloneTake?(cellId: string, audioId: string, name: string): Promise<void>
-  /** The name that popover suggests (who recorded the take). */
-  cloneName?(cellId: string): string
+  trainFromTake?(cellId: string, audioId: string): void
   /**
    * AQU-2212: the one-click when the line's voice and its take disagree —
    * "Change to …" / "Generate · …", first in the menu. Read when the menu
@@ -333,17 +315,14 @@ export interface TakeMenuActions {
  * AQU-2026: why the per-line Change voice can't run. `no-take` never reaches
  * the menu — the item is left out instead.
  */
-export type ChangeVoiceMenuBlocker = ChangeVoiceBlocker | "voice-reference" | "busy"
+export type ChangeVoiceMenuBlocker = ChangeVoiceBlocker | "busy"
 
-/** AQU-2026: what a take's Change voice submenu offers for one line. */
+/** AQU-2026: what a take's Change voice item offers for one line. */
 export interface ChangeVoiceMenuState {
   /** The voice the line is cast to — named in the reason the menu gives. */
   voiceName: string
-  /** The quality this take was converted at, ticked in the submenu. Null when
-   *  the take is not a conversion, so nothing shows as current. */
-  quality: ChangeVoiceQuality | null
-  /** Why Change voice can't run at each quality; null where it can. */
-  blockers: Record<ChangeVoiceQuality, ChangeVoiceMenuBlocker | null>
+  /** Why Change voice can't run; null when it can. */
+  blocker: ChangeVoiceMenuBlocker | null
 }
 
 function TargetAudioChip({
@@ -781,8 +760,6 @@ function TargetAudioChip({
   // AQU-2212: the line's one-click, read as the menu opens (it resolves the
   // line's takes, which is too much to do for every clip on every render).
   const [menuLineVoice, setMenuLineVoice] = useState<{ action: "change" | "generate"; voiceName: string } | null>(null)
-  // AQU-1758 / AQU-2212: the one-step clone, open at this clip.
-  const [cloneOpen, setCloneOpen] = useState(false)
   function openMenuFromMore(e: React.MouseEvent<HTMLElement> | React.KeyboardEvent<HTMLElement>) {
     e.preventDefault()
     e.stopPropagation()
@@ -1796,18 +1773,16 @@ function TargetAudioChip({
   const changeVoice = takeMenu?.changeVoice && takeMenu.changeVoiceState
     ? takeMenu.changeVoiceState(cell.id)
     : null
-  // A reason that holds at EVERY quality is the item's own reason — a stock
-  // voice, a take a voice is cloned from, or a conversion already running on
-  // this line. `up-to-date` is never one of those: it can only match the one
-  // quality the take already carries, which leaves the others to pick.
-  const changeVoiceBlocked = changeVoice != null
-    && CHANGE_VOICE_QUALITIES.every((q) => changeVoice.blockers[q] != null)
-    ? changeVoice.blockers.standard
-    : null
-  const changeVoiceReason = changeVoiceBlocked === "not-cloned"
-    ? t("editor.voice.changeVoiceNeedsClone", { name: changeVoice?.voiceName ?? "" })
-    : changeVoiceBlocked === "voice-reference"
-      ? t("editor.timeline.takeMenuChangeVoiceIsReference")
+  // The item's reason: a voice with no trained model, a take already in this
+  // voice, or a conversion already running on this line (no extra words).
+  const changeVoiceBlocked = changeVoice?.blocker ?? null
+  // A person's take — a recording, not a generated voice or a re-voiced one —
+  // is the only take a voice can be trained from.
+  const isHumanTake = chipAtt != null && !chipAtt.voiceId && !isVoiceChangedAudioId(chip.item.audioId)
+  const changeVoiceReason = changeVoiceBlocked === "not-trained"
+    ? t("editor.voice.changeVoiceCantRevoice", { name: changeVoice?.voiceName ?? "" })
+    : changeVoiceBlocked === "up-to-date"
+      ? t("editor.voice.changeVoiceUpToDate", { name: changeVoice?.voiceName ?? "" })
       : null
   const canSplit = Boolean(onCutTarget) && editable
   return (
@@ -1893,62 +1868,26 @@ function TargetAudioChip({
             tooltip: a disabled menu item fires no pointer events, so a tooltip
             on it would never open — the same trap `ChangeVoiceButton` works
             around with a stand-in trigger, which a menu item cannot have. */}
-        {changeVoice && takeMenu?.changeVoice && (changeVoiceBlocked != null ? (
-          <ContextMenuItem data-testid="tl-take-menu-change-voice" disabled>
+        {changeVoice && takeMenu?.changeVoice && (
+          <ContextMenuItem
+            data-testid="tl-take-menu-change-voice"
+            disabled={changeVoiceBlocked != null}
+            onClick={() => { if (changeVoiceBlocked == null) takeMenu.changeVoice?.(cell.id) }}
+          >
             <AudioLines className="h-3.5 w-3.5" />
             {changeVoiceReason ?? t("editor.voice.changeVoice")}
           </ContextMenuItem>
-        ) : (
-          <ContextMenuSub>
-            <ContextMenuSubTrigger data-testid="tl-take-menu-change-voice">
-              <AudioLines className="h-3.5 w-3.5" />
-              {t("editor.voice.changeVoice")}
-            </ContextMenuSubTrigger>
-            {/* The quality the Audio tab's popover offers, as the pick-one
-                shape a menu has: radio items, so the quality this take already
-                carries announces as checked (the same reason TrackMenuItems'
-                colour submenu uses them). Picking one converts at it; the one
-                it already is, is spent, and the header says so. */}
-            <ContextMenuSubContent className="w-52">
-              <ContextMenuRadioGroup value={changeVoice.quality ?? ""}>
-                {/* Inside the group, not above it: a menu label names the group
-                    it belongs to, and Base UI throws without one. */}
-                <ContextMenuLabel data-testid="tl-take-menu-change-voice-note">
-                  {CHANGE_VOICE_QUALITIES.some((q) => changeVoice.blockers[q] === "up-to-date")
-                    ? t("editor.voice.changeVoiceUpToDate", { name: changeVoice.voiceName })
-                    : t("editor.voice.changeVoiceQuality")}
-                </ContextMenuLabel>
-                {CHANGE_VOICE_QUALITIES.map((q) => (
-                  <ContextMenuRadioItem
-                    key={q}
-                    value={q}
-                    data-testid={`tl-take-menu-change-voice-${q}`}
-                    disabled={changeVoice.blockers[q] != null}
-                    onClick={() => {
-                      if (changeVoice.blockers[q] == null) takeMenu.changeVoice?.(cell.id, q)
-                    }}
-                  >
-                    {t(CHANGE_VOICE_QUALITY_LABEL[q])}
-                  </ContextMenuRadioItem>
-                ))}
-              </ContextMenuRadioGroup>
-            </ContextMenuSubContent>
-          </ContextMenuSub>
-        ))}
-        {/* AQU-1758: make a character from this take's voice — the Audio
-            view's voice card had this; the take's menu is its home now. */}
-        {takeMenu?.makeCharacter && !hiddenLine && (
+        )}
+        {/* AQU-1758 put "Make a character from this voice" here; AQU-2291
+            made cloning mean training: a person's take opens New voice on the
+            Train voice tab with this take as the first recording. */}
+        {takeMenu?.trainFromTake && !hiddenLine && isHumanTake && (
           <ContextMenuItem
-            data-testid="tl-take-menu-make-character"
-            onClick={() => {
-              // AQU-2212: in one step, at the clip — once the menu has let go
-              // of focus, or it would close the popover as it opens.
-              if (takeMenu.cloneTake) setTimeout(() => setCloneOpen(true), 0)
-              else takeMenu.makeCharacter?.(cell.id)
-            }}
+            data-testid="tl-take-menu-train-voice"
+            onClick={() => takeMenu.trainFromTake?.(cell.id, audioId)}
           >
-            <CopyPlus className="h-3.5 w-3.5" />
-            {t("editor.timeline.takeMenuMakeCharacter")}
+            <GraduationCap className="h-3.5 w-3.5" />
+            {t("editor.voice.trainFromTake")}
           </ContextMenuItem>
         )}
         {vote?.canVote && (
@@ -1987,15 +1926,6 @@ function TargetAudioChip({
         )}
       </ContextMenuContent>
     </ContextMenu>
-    {cloneOpen && takeMenu?.cloneTake && (
-      <CloneFromTakeButton
-        anchor={chipRef.current}
-        onClose={() => setCloneOpen(false)}
-        suggestedName={takeMenu.cloneName?.(cell.id) ?? ""}
-        onClone={(name) => takeMenu.cloneTake!(cell.id, audioId, name)}
-        onMoreOptions={() => takeMenu.makeCharacter?.(cell.id)}
-      />
-    )}
     </>
   )
 }

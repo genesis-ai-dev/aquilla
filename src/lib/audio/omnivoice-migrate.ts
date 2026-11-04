@@ -99,7 +99,6 @@ export function migrateOmnivoiceTtsSettings(
 export interface OmnivoiceMigrationProperties {
   project_provider_migrated: boolean
   voice_count: number
-  cloned_voice_count: number
   from_languages: string[]
   to_languages: string[]
 }
@@ -128,7 +127,6 @@ export function omnivoiceMigrationProperties(
   return {
     project_provider_migrated: isLegacyHostedProvider(projectProvider),
     voice_count: migrated.length,
-    cloned_voice_count: migrated.filter((voice) => Boolean(voice.referenceAudioId)).length,
     from_languages: uniqueLanguages(migrated),
     to_languages: uniqueLanguages(after),
   }

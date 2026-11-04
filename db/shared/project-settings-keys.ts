@@ -232,6 +232,15 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
     problem: (value) => visibilityFloorProblem(value),
     typeName: VISIBILITY_FLOOR_TYPE_NAME,
   },
+  // AQU-2305: this project's own floor for importing a NEW source file, the
+  // same key the org uses (AQU-2304). Stricter-only: the project enforces the
+  // higher of its own value and its org's (db/shared/import-floor.ts), and an
+  // agent may only raise it (policy-direction.ts).
+  importMinRole: {
+    kind: 'number',
+    problem: (value) => visibilityFloorProblem(value),
+    typeName: VISIBILITY_FLOOR_TYPE_NAME,
+  },
 
   // Capability switches
   allowLineCreation: { kind: 'boolean' },

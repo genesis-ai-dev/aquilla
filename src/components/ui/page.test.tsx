@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 
 import { Page, PageHeader, SettingsRow, StatTile, STAT_TILE_GRID } from "./page"
 
@@ -17,6 +17,22 @@ describe("StatTile", () => {
     const tile = container.firstElementChild
     expect(tile).toHaveClass("flex", "flex-row-reverse", "items-center", "justify-between", "min-h-[88px]")
     expect(tile).toHaveClass("min-[480px]:flex-col", "min-[480px]:items-start")
+  })
+})
+
+describe("StatTile with onClick", () => {
+  it("renders a button named by its label that fires onClick", () => {
+    const onClick = vi.fn()
+    render(<StatTile label="Organizations" value={4} hint="all tenants" onClick={onClick} />)
+    const tile = screen.getByRole("button", { name: "Organizations" })
+    expect(tile).toHaveAccessibleDescription("4 all tenants")
+    fireEvent.click(tile)
+    expect(onClick).toHaveBeenCalledTimes(1)
+  })
+
+  it("stays a plain, non-interactive tile without onClick", () => {
+    render(<StatTile label="Organizations" value={4} />)
+    expect(screen.queryByRole("button")).not.toBeInTheDocument()
   })
 })
 

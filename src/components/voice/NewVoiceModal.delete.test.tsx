@@ -13,9 +13,6 @@ import type { Voice } from "@/lib/parsers/types"
 
 // ── Stub heavy audio / network dependencies ──────────────────────────────
 
-vi.mock("@/components/VoiceCloneSection", () => ({
-  VoiceCloneSection: () => null,
-}))
 vi.mock("@/lib/audio/sync-token-fetcher", () => ({
   audioSyncTokenFetcherForSession: vi.fn(),
 }))
@@ -26,6 +23,8 @@ vi.mock("@/lib/audio/voice-clone", () => ({
 vi.mock("@/lib/audio/upload", () => ({
   parseFrontierAudioUrl: vi.fn(),
   fetchCellAudio: vi.fn(),
+  // The Clone voice tab's recorder reads the upload ceiling at import.
+  MAX_AUDIO_UPLOAD_BYTES: 95 * 1024 * 1024,
 }))
 
 // ── Helpers ───────────────────────────────────────────────────────────────

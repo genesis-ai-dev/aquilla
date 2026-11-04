@@ -66,7 +66,7 @@ export const RETIRED_TERMS: readonly RetiredTerm[] = [
   },
   {
     term: "a role's level number, e.g. (500)",
-    use: "the role's name alone, e.g. Project lead",
+    use: "the role's name alone, e.g. Project Lead",
     pattern: /\((?:100|200|300|400|500|600|700)\)/g,
   },
   { term: "Link a video", use: "Link a film" },

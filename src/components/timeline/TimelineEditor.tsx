@@ -166,7 +166,6 @@ import { useBatchProgress, canTranscribeCell } from "@/lib/audio/batch-audio"
 import { useOnline } from "@/hooks/useOnline"
 import { TimelineRuler } from "./TimelineRuler"
 import { TimelineLane } from "./TimelineLane"
-import type { ChangeVoiceQuality } from "@/lib/audio/change-voice"
 import { TargetAudioLane, type ChangeVoiceMenuState, type TakeMenuActions, type TargetAudioItem } from "./TargetAudioLane"
 import type { TakeVoiceNote } from "@/lib/audio/take-voice"
 import { TimelinePlayhead } from "./TimelinePlayhead"
@@ -278,16 +277,11 @@ export interface TimelineEditorProps {
   /** AQU-2026: re-voice one line's existing take into its cast voice. Both
    *  halves are needed for the item to appear — the run and the state that
    *  says what it may do (see `TakeMenuActions`). */
-  onChangeVoice?(cellId: string, quality: ChangeVoiceQuality): void
+  onChangeVoice?(cellId: string): void
   changeVoiceStateFor?(cellId: string): ChangeVoiceMenuState | null
-  /** AQU-1758: "Make a character from this voice" on a take's menu. Absent
-   *  leaves it out (someone who may not make voices). */
-  onMakeCharacter?(cellId: string): void
-  /** AQU-1758 / AQU-2212: …in one step (name it, Add to cast) at the clip;
-   *  `onMakeCharacter` is its More options. */
-  onCloneTake?(cellId: string, audioId: string, name: string): Promise<void>
-  /** The name that clone suggests (who recorded the take). */
-  cloneNameFor?(cellId: string): string
+  /** AQU-1758 / AQU-2291: "Train a voice from this recording" on a take's
+   *  menu. Absent leaves it out (someone who may not make voices). */
+  onTrainFromTake?(cellId: string, audioId: string): void
   /** AQU-2212: "Change to …" / "Generate · …" when a line's voice and its
    *  take disagree, first in its take's menu (lib/audio/line-voice). */
   lineVoiceFor?(cellId: string): { action: "change" | "generate"; voiceName: string } | null
@@ -1281,9 +1275,7 @@ export function TimelineEditor({
   onRegenerateVoice,
   onChangeVoice,
   changeVoiceStateFor,
-  onMakeCharacter,
-  onCloneTake,
-  cloneNameFor,
+  onTrainFromTake,
   lineVoiceFor,
   onApplyLineVoice,
   takeVoiceFor,
@@ -2836,10 +2828,7 @@ export function TimelineEditor({
           ...(onChangeVoice && changeVoiceStateFor
             ? { changeVoice: onChangeVoice, changeVoiceState: changeVoiceStateFor }
             : {}),
-          ...(onMakeCharacter ? { makeCharacter: onMakeCharacter } : {}),
-          ...(onMakeCharacter && onCloneTake
-            ? { cloneTake: onCloneTake, ...(cloneNameFor ? { cloneName: cloneNameFor } : {}) }
-            : {}),
+          ...(onTrainFromTake ? { trainFromTake: onTrainFromTake } : {}),
           // The line's own voice and its take: the line's own track only.
           ...(slot === RECORDING_SLOT && lineVoiceFor && onApplyLineVoice
             ? { lineVoice: lineVoiceFor, applyLineVoice: onApplyLineVoice }

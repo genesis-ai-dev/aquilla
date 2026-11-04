@@ -227,30 +227,65 @@ function StatTile({
   value,
   hint,
   className,
+  onClick,
 }: {
   label: React.ReactNode
   value: React.ReactNode
   hint?: React.ReactNode
   className?: string
+  /** When set, the tile is a real button that runs this on click or Enter. */
+  onClick?: () => void
 }) {
-  return (
-    <div
-      className={cn(
-        "flex min-h-[88px] flex-row-reverse items-center justify-between gap-4 rounded-lg border bg-card px-5 py-4",
-        "min-[480px]:flex-col min-[480px]:items-start min-[480px]:justify-start min-[480px]:gap-0",
-        className,
-      )}
-    >
-      <div className="text-2xl leading-none font-semibold tracking-normal tabular-nums text-foreground">
+  const id = React.useId()
+  const labelId = `${id}-label`
+  const valueId = `${id}-value`
+  const hintId = `${id}-hint`
+  const tileClass = cn(
+    "flex min-h-[88px] flex-row-reverse items-center justify-between gap-4 rounded-lg border bg-card px-5 py-4",
+    "min-[480px]:flex-col min-[480px]:items-start min-[480px]:justify-start min-[480px]:gap-0",
+    className,
+  )
+  const body = (
+    <>
+      <div
+        id={onClick ? valueId : undefined}
+        className="text-2xl leading-none font-semibold tracking-normal tabular-nums text-foreground"
+      >
         {value}
       </div>
       <div className="min-w-0">
-        <div className="text-sm text-muted-foreground min-[480px]:mt-1.5">{label}</div>
+        <div
+          id={onClick ? labelId : undefined}
+          className="text-sm text-muted-foreground min-[480px]:mt-1.5"
+        >
+          {label}
+        </div>
         {hint ? (
-          <div className="mt-0.5 text-xs text-muted-foreground min-[480px]:mt-1">{hint}</div>
+          <div
+            id={onClick ? hintId : undefined}
+            className="mt-0.5 text-xs text-muted-foreground min-[480px]:mt-1"
+          >
+            {hint}
+          </div>
         ) : null}
       </div>
-    </div>
+    </>
+  )
+  if (!onClick) return <div className={tileClass}>{body}</div>
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-labelledby={labelId}
+      aria-describedby={hint ? `${valueId} ${hintId}` : valueId}
+      className={cn(
+        tileClass,
+        "w-full cursor-pointer text-left transition-colors hover:bg-muted/50 hover:border-foreground/20",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+      )}
+    >
+      {body}
+    </button>
   )
 }
 

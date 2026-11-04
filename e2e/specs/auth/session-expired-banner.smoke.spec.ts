@@ -123,8 +123,8 @@ test("dead credential raises the banner; it persists, dismisses, and re-login cl
   await expect(banner(page)).toBeVisible({ timeout: 10_000 })
 
   // AQU-884: client-side navigation must not wipe it — the banner's own
-  // "Sign in again" link routes to /login without a reload.
-  await banner(page).getByRole("link", { name: /sign in again/i }).click()
+  // "Log in again" link routes to /login without a reload.
+  await banner(page).getByRole("link", { name: /log in again/i }).click()
   await expect(page.getByRole("button", { name: "Log in" })).toBeVisible({ timeout: 10_000 })
   // Login is itself the recovery action, so the global banner is suppressed
   // there rather than linking recursively back to another /login URL.

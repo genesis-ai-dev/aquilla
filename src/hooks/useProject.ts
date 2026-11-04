@@ -131,8 +131,14 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
   const [offlineCopyPending, setOfflineCopyPending] = useState(false)
   const hasLoaded = useRef(Boolean(initialProject))
   const { session, loading: sessionLoading } = useFrontierSession()
+  const cancelActiveResolve = useRef<(() => void) | null>(null)
+  const resolvePending = useRef(false)
+  const statusRef = useRef(status)
+  useEffect(() => { statusRef.current = status }, [status])
 
   const refresh = useCallback(() => {
+    // Every trigger shares one current read; an older result must never win.
+    cancelActiveResolve.current?.()
     if (!enabled) return () => {}
     if (!hasLoaded.current) setStatus("loading")
 
@@ -147,6 +153,13 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
     }
 
     let cancelled = false
+    resolvePending.current = true
+    const cancel = () => {
+      if (cancelled) return
+      cancelled = true
+      resolvePending.current = false
+    }
+    cancelActiveResolve.current = cancel
     ;(async () => {
       if (!session?.jwt) {
         if (cancelled) return
@@ -190,14 +203,31 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
       setPm(result.project.pm ?? null)
       setStatus("ready")
       hasLoaded.current = true
-    })()
+    })().finally(() => {
+      if (!cancelled) resolvePending.current = false
+    })
 
-    return () => { cancelled = true }
+    return cancel
   }, [enabled, projectId, session?.jwt, sessionLoading])
 
   useEffect(() => {
-    const cleanup = refresh()
-    return cleanup
+    refresh()
+    // Account switching can mount this hook while offline. Revalidate using
+    // the current session on reconnect, including when the offline request
+    // has not settled yet. Cancel the older read so it cannot overwrite the
+    // recovered result. One read per online event; no error-driven retry loop.
+    const reconnect = () => {
+      // Healthy editors keep their mounted state; definitive permission or
+      // missing-project responses still require an explicit action.
+      if (!resolvePending.current && statusRef.current !== "loading" && statusRef.current !== "unreachable") return
+      refresh()
+    }
+    window.addEventListener("online", reconnect)
+    return () => {
+      window.removeEventListener("online", reconnect)
+      // Also cancel manual/event-triggered reads on session change or unmount.
+      cancelActiveResolve.current?.()
+    }
   }, [refresh])
 
   // Desktop, offline: a cold open can outrun the offline store (a rebuild after

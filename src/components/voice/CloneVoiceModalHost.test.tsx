@@ -1,10 +1,10 @@
 /**
- * CloneVoiceModalHost.test.tsx — AQU-1001 in-cell Clone voice entry point.
+ * CloneVoiceModalHost.test.tsx — AQU-1001 in-cell New voice entry point.
  *
- * The New voice modal used to live only inside the Voices dock tab, so
- * clicking Clone on a source cell did nothing until that tab mounted. The
- * host must open the modal in place (clone tab, seeded to the cell) and
- * persist a created voice onto the project library.
+ * The New voice modal used to live only inside the Voices dock tab, so the
+ * in-cell entry point did nothing until that tab mounted. The host must open
+ * the modal in place (AQU-2291: on the Train voice tab, seeded with the line's
+ * take) and persist a created voice onto the project library.
  */
 
 import { describe, it, expect, vi } from "vitest"
@@ -29,6 +29,7 @@ vi.mock("./NewVoiceModal", () => ({
         data-testid="new-voice-modal"
         data-mode={props.initialMode}
         data-seed={props.seedCellId ?? ""}
+        data-seed-audio={props.seedAudioId ?? ""}
       />
     ) : null
   },
@@ -56,11 +57,12 @@ function makeTts(over: Partial<ProjectTtsApi> = {}): ProjectTtsApi {
   }
 }
 
+// A person's recording: the take a voice can be trained from.
 const cell = {
   id: "cell-1", fileId: "file-1", type: "text",
   translated: "hola",
-  selectedGeneratedVoiceAudioId: "a1",
-  attachments: { a1: { url: "blob:x", type: "audio/wav" } },
+  selectedAudioId: "audio-cell-1-1-abcd.webm",
+  attachments: { "audio-cell-1-1-abcd.webm": { url: "blob:x", type: "audio/webm", slot: "recording" } },
 } as unknown as CellData
 
 
@@ -81,13 +83,14 @@ describe("CloneVoiceModalHost", () => {
     expect(screen.queryByTestId("new-voice-modal")).toBeNull()
   })
 
-  it("opens on the clone tab, seeded to the source cell", () => {
+  it("opens on the Train voice tab, seeded to the source cell's take", () => {
     modalProps.last = null
     renderWithTooltips(
       <CloneVoiceModalHost
         open
         onClose={() => {}}
         seedCellId="cell-1"
+        seedAudioId="audio-cell-1-1-abcd.webm"
         tts={makeTts()}
         projectId="proj-1"
         session={null}
@@ -95,8 +98,9 @@ describe("CloneVoiceModalHost", () => {
       />,
     )
     const modal = screen.getByTestId("new-voice-modal")
-    expect(modal.getAttribute("data-mode")).toBe("clone")
+    expect(modal.getAttribute("data-mode")).toBe("train")
     expect(modal.getAttribute("data-seed")).toBe("cell-1")
+    expect(modal.getAttribute("data-seed-audio")).toBe("audio-cell-1-1-abcd.webm")
     expect(lastModalProps()?.voice).toBeNull()
     expect(lastModalProps()?.provider).toBe("gemini")
   })
@@ -116,10 +120,10 @@ describe("CloneVoiceModalHost", () => {
       />,
     )
     const created: Voice = {
-      id: "v-clone",
-      name: "Keean",
+      id: "v-anna",
+      name: "Anna",
       color: "#0d9488",
-      referenceAudioId: "ref.webm",
+      libraryVoiceId: "c-0a1b2c3d",
     }
     modalProps.last!.onSave(created)
     expect(saveTts).toHaveBeenCalledTimes(1)
@@ -130,7 +134,7 @@ describe("CloneVoiceModalHost", () => {
 
   it("carries the LANE's default along, not the project-wide one (AQU-2038)", () => {
     // `saveTts` routes a `defaultVoiceId` patch to the active lane's star, so a
-    // clone made while lane B is open must not hand it the project's stored
+    // voice made while lane B is open must not hand it the project's stored
     // default — that would move lane B's star back onto it.
     const laneVoice: Voice = { id: "v-lane", name: "Lane B reader", color: "#0e7490", laneId: "lane-b" }
     const settings: ProjectTtsSettings = { provider: "gemini", voices: [narrator, laneVoice], defaultVoiceId: narrator.id }
@@ -154,7 +158,7 @@ describe("CloneVoiceModalHost", () => {
         cells={[]}
       />,
     )
-    modalProps.last!.onSave({ id: "v-clone", name: "Keean", color: "#0d9488", referenceAudioId: "ref.webm" })
+    modalProps.last!.onSave({ id: "v-clone", name: "Keean", color: "#0d9488", libraryVoiceId: "c-0a1b2c3d" })
     expect(saveTts).toHaveBeenCalledTimes(1)
     const patch = saveTts.mock.calls[0]?.[0]
     expect(patch?.voices?.map((v) => v.id)).toEqual([narrator.id, laneVoice.id, "v-clone"])
@@ -181,28 +185,31 @@ describe("CloneVoiceModalHost", () => {
   })
 })
 
-describe("Make a character from this voice → New voice modal (AQU-1001, AQU-1758)", () => {
+describe("Train a voice from this recording → New voice modal (AQU-1001, AQU-1758, AQU-2291)", () => {
   // The entry points (the timeline take menu, the Recording tab's take) hand
-  // the workspace a cell id; the host must open in place, cloning, seeded to it.
-  it("opens the clone modal in place, seeded to the line that asked", async () => {
+  // the workspace a cell and take; the host must open in place, on the Train
+  // voice tab, seeded with that take.
+  it("opens New voice in place on the Train voice tab, seeded with the take", async () => {
     function Harness() {
       const [open, setOpen] = useState(false)
-      const [seed, setSeed] = useState<string | null>(null)
+      const [seed, setSeed] = useState<{ cellId: string; audioId: string } | null>(null)
       return (
         <>
           <button
             type="button"
             onClick={() => {
-              setSeed(cell.id)
+              setSeed({ cellId: cell.id, audioId: "audio-cell-1-1-abcd.webm" })
               setOpen(true)
             }}
           >
-            Make a character from this voice
+            Train a voice from this recording
           </button>
           <CloneVoiceModalHost
             open={open}
             onClose={() => setOpen(false)}
-            seedCellId={seed}
+            seedCellId={seed?.cellId ?? null}
+            seedAudioId={seed?.audioId ?? null}
+            initialMode="train"
             tts={makeTts()}
             projectId="proj-1"
             session={null}
@@ -216,10 +223,11 @@ describe("Make a character from this voice → New voice modal (AQU-1001, AQU-17
     renderWithTooltips(<Harness />)
     expect(screen.queryByTestId("new-voice-modal")).toBeNull()
 
-    await user.click(screen.getByRole("button", { name: /make a character/i }))
+    await user.click(screen.getByRole("button", { name: "Train a voice from this recording" }))
 
     const modal = screen.getByTestId("new-voice-modal")
-    expect(modal.getAttribute("data-mode")).toBe("clone")
+    expect(modal.getAttribute("data-mode")).toBe("train")
     expect(modal.getAttribute("data-seed")).toBe("cell-1")
+    expect(modal.getAttribute("data-seed-audio")).toBe("audio-cell-1-1-abcd.webm")
   })
 })

@@ -14,7 +14,7 @@ export const FLOOR_LABEL: Record<number, string> = {
   [ROLE.COMMENTER]: "Commenter",
   [ROLE.REVIEWER]: "Reviewer",
   [ROLE.CONTRIBUTOR]: "Contributor",
-  [ROLE.PROJECT_LEAD]: "Project lead",
+  [ROLE.PROJECT_LEAD]: "Project Lead",
   [ROLE.MAINTAINER]: "Maintainer",
   [ROLE.OWNER]: "Owner",
 }

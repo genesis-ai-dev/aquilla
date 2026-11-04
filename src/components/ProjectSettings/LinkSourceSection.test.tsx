@@ -271,7 +271,7 @@ describe("LinkSourceSection", () => {
     renderSection(300)
 
     expect(
-      screen.getByText("Project lead or above required to link a source project."),
+      screen.getByText("Project Lead or above required to link a source project."),
     ).toBeTruthy()
     expect(screen.queryByRole("button", { name: "Review what will be added" })).toBeNull()
     expect(screen.queryByRole("button", { name: "Link source project" })).toBeNull()

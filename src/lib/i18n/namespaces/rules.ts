@@ -198,7 +198,7 @@ export const rules = defineNamespace({
     "rules.orgSettings.title": "Rules",
     "rules.orgSettings.navHint": "Org-wide translation rules",
     "rules.orgSettings.description":
-      "Rules every project in this organization is checked against. Project leads can promote a project rule up to here.",
+      "Rules every project in this organization is checked against. Project Leads can promote a project rule up to here.",
 
     // ── RulesSurface (the /project/:id/rules view) ──────────────────────────
     "rules.usageSummary": "{fixes} fixes applied · {calls} LLM calls this project",

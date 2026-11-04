@@ -496,7 +496,7 @@ export const agent = defineNamespace({
     "agent.memory.humanEditedBadge": "Human-edited",
     "agent.memory.contentAriaLabel": "Memory content",
     "agent.memory.loadingBrief": "Loading project brief…",
-    "agent.memory.leadOnly": "Project lead only",
+    "agent.memory.leadOnly": "Project Lead only",
     "agent.memory.noBriefYet": "No brief written yet.",
     "agent.memory.proposalsHeading": "Brief proposals — high-oversight: human approval only.",
     "agent.memory.noPendingProposals": "No pending brief proposals.",

@@ -1,13 +1,15 @@
-// Voice-clone reference editor: record from the mic or upload a clip whose
-// timbre generated audio is re-voiced into. The clip is stored project-scoped
-// in R2 (uploadVoiceReference); the voice keeps a pointer to it in
-// `referenceAudioId`. Removing the reference reverts the voice to plain TTS.
-// Lives on the Clone tab's "Reference audio" panel (NewVoiceModal).
+// Inworld quick-clone reference editor: record from the mic or upload a short
+// clip of the speaker. The clip is stored project-scoped in R2
+// (uploadVoiceReference); the voice keeps a pointer to it in
+// `referenceAudioId`, and the sync-worker's /tts clones it through Inworld's
+// instant cloning the first time the voice reads a line. Lives on the Clone
+// voice tab (CloneVoicePanel, inside NewVoiceModal).
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { FileAudio, Mic, Pause, Play, Square, Trash2, Upload } from "lucide-react"
+import { FileAudio, Mic, Pause, Play, Square, Upload } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { Badge } from "@/components/ui/badge"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
@@ -46,8 +48,8 @@ interface Props {
   fileId?: string | null
   session?: FrontierSession | null
   onChange: (patch: Partial<Voice>) => void
-  /** Bumped by the library when a clone profile is created — scrolls this
-   *  section into view and pulses it so the recorder is the obvious next step. */
+  /** Bumped to scroll this section into view and pulse it, so the recorder is
+   *  the obvious next step. */
   focusSignal?: number
 }
 
@@ -56,16 +58,14 @@ type Status =
   | { kind: "uploading" }
   | { kind: "error"; message: string }
 
-const MAX_REFERENCE_BYTES = 8 * 1024 * 1024 // 8 MB — Seed-VC only needs a few seconds.
+const MAX_REFERENCE_BYTES = 8 * 1024 * 1024 // 8 MB — an instant clone only needs a few seconds.
 
 export function VoiceCloneSection({ voice, projectId, fileId, session, onChange, focusSignal }: Props) {
   const t = useT()
   // Hand the 8 MB budget to the recorder so it becomes an early hard stop
   // (~78s of WAV, ~4min of webm/opus) instead of a rejection delivered after
   // the person has finished speaking. The reference follows the device's WAV
-  // preference like any other take: reference-extract.ts already uploads WAV
-  // through uploadVoiceReference, so that server path is proven, and Seed-VC
-  // reads only the first few seconds either way.
+  // preference like any other take; Inworld needs only a few seconds of it.
   const recorder = useAudioRecorder({ maxBytes: MAX_REFERENCE_BYTES })
   const [status, setStatus] = useState<Status>({ kind: "idle" })
   const consumedBlobRef = useRef<Blob | null>(null)
@@ -76,8 +76,8 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange,
 
   const hasContext = Boolean(projectId && fileId && session?.jwt)
 
-  // When the library asks us to (a clone profile was just created), bring the
-  // recorder into view and pulse so the next step is unmistakable.
+  // When asked to, bring the recorder into view and pulse so the next step is
+  // unmistakable.
   useEffect(() => {
     if (!focusSignal) return
     sectionRef.current?.scrollIntoView({ block: "center", behavior: "smooth" })
@@ -159,11 +159,6 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange,
 
   const dropEnabled = hasContext && !isRecording && status.kind !== "uploading"
 
-  const removeReference = useCallback(() => {
-    onChange({ referenceAudioId: undefined, referenceTakeKey: undefined })
-    setStatus({ kind: "idle" })
-  }, [onChange])
-
   const clipFilled = isRecordedCloneClip(voice)
 
   return (
@@ -190,14 +185,6 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange,
               referenceAudioId={voice.referenceAudioId}
               session={session ?? null}
             />
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={removeReference}
-              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-            >
-              <Trash2 className="me-1 h-3.5 w-3.5" /> {t("audio.clone.removeButton")}
-            </Button>
             <Button
               type="button"
               variant="outline"
@@ -347,8 +334,8 @@ export function ReferencePreview({ projectId, fileId, referenceAudioId, session 
     }
   }, [state, projectId, fileId, referenceAudioId, session, cleanup])
 
-  // Its word names it: no hover (AQU-2260).
   return (
+    <AppTooltip content={t("audio.clone.previewTooltip")}>
       <Button
         type="button"
         variant="outline"
@@ -364,5 +351,6 @@ export function ReferencePreview({ projectId, fileId, referenceAudioId, session 
       )}
       {state === "error" ? t("audio.clone.previewFailed") : t("common.preview")}
     </Button>
+    </AppTooltip>
   )
 }

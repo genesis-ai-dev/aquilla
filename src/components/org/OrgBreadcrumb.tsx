@@ -231,6 +231,7 @@ export function OrgBreadcrumb({
   return (
     <Breadcrumb className="min-w-0 px-3">
       <BreadcrumbList
+        data-reveal=""
         ref={scrollRef}
         className="min-w-0 scroll-fade-x scroll-fade-8 flex-nowrap overflow-x-auto overscroll-x-contain whitespace-nowrap scrollbar-none"
       >

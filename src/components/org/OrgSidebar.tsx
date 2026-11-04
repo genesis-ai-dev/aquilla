@@ -85,7 +85,7 @@ export function OrgSidebar() {
       <div data-tour="org-switcher">
         <OrgSwitcher />
       </div>
-      <nav className="mt-2 flex flex-1 flex-col gap-0.5">
+      <nav className="mt-2 flex flex-1 flex-col gap-0.5" data-reveal="">
         {/* Guest org: Projects table only. Member: Overview + Projects. */}
         {isGuestOrg && activeOrgId != null ? (
           <OrgNavLink

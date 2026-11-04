@@ -658,7 +658,7 @@ function DataTable<TData, TValue>({
                 </TableRow>
               ))}
             </TableHeader>
-            <TableBody>
+            <TableBody data-reveal="">
               {loading ? (
                 // One cursor where the first row will start; the rows below
                 // keep the table's height so the page does not jump.

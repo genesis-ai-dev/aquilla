@@ -161,3 +161,12 @@ describe("SettingsRow", () => {
     expect(screen.getAllByRole("button")).toHaveLength(1)
   })
 })
+
+describe("Page", () => {
+  it("marks its well as a reveal region so content types in on mount, unless opted out", () => {
+    const { container, rerender } = render(<Page>body</Page>)
+    expect(container.querySelector("[data-reveal]")).not.toBeNull()
+    rerender(<Page reveal={false}>body</Page>)
+    expect(container.querySelector("[data-reveal]")).toBeNull()
+  })
+})

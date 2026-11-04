@@ -19,7 +19,7 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller"
-import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingLines } from "@/components/ui/loading-cursor"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
@@ -349,8 +349,7 @@ export function TeamThreadDetail({
             {feed.length === 0 ? (
           feedLoading ? (
             <div className="flex flex-col gap-2">
-              <Skeleton className="h-4 w-56" />
-              <Skeleton className="h-4 w-40" />
+              <LoadingLines count={2} />
             </div>
           ) : (
             <p className="text-xs text-muted-foreground">{t("agent.team.threadEmpty")}</p>

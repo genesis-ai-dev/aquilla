@@ -378,7 +378,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.cellEditing.optionCommenter": "Commenter",
     "projectSettings.cellEditing.optionReviewer": "Reviewer",
     "projectSettings.cellEditing.optionContributor": "Contributor",
-    "projectSettings.cellEditing.optionProjectLead": "Project lead",
+    "projectSettings.cellEditing.optionProjectLead": "Project Lead",
     "projectSettings.cellEditing.optionMaintainer": "Maintainer",
     // model → projectSettings.advancedLlm.modelLabel
     // context window → projectSettings.ai.contextWindowLabel
@@ -593,11 +593,13 @@ export const projectSettings = defineNamespace({
     "projectSettings.voice.geminiKeyHelp":
       "Used for Gemini-powered text-to-speech. Get a key at aistudio.google.com/apikey. " +
       "Sent directly to Google; never uploaded to Aquilla.",
+    "projectSettings.voice.elevenLabsHelp":
+      "Your own ElevenLabs key, for ElevenLabs voices. It stays on this device for you only and is never shared with the project.",
     // AQU-1758: the Voice Studio (the Audio view) is gone; the library and the
     // cast are in Media's Voices tab.
     "projectSettings.voice.voicesNote": "The voice library and cast assignments are in the Voices tab of the Media view.",
     "projectSettings.voice.openVoicesButton": "Open Voices",
-    "projectSettings.voice.leadsManageLabel": "Project leads can manage voices",
+    "projectSettings.voice.leadsManageLabel": "Project Leads can manage voices",
     "projectSettings.voice.leadsManageDescription":
       "When this is on, a project lead can create, edit, and assign voices on the language lanes " +
       "they can write. When it is off, only a maintainer can. Voices already created stay either way.",
@@ -617,7 +619,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.harmonization.defaultRoleSuffix": "{role} (default)",
     "projectSettings.harmonization.description":
       "Only users with at least this role can open a harmonization sweep on this project. The floor " +
-      "cannot be lowered below Project lead (hard floor per spec).",
+      "cannot be lowered below Project Lead (hard floor per spec).",
 
     // ── Git Sync card ──
     "projectSettings.gitSync.originLabel": "Origin: {url} (branch: {branch})",
@@ -673,6 +675,20 @@ export const projectSettings = defineNamespace({
       "Each member's progress on the project's dashboard. They also need to see the member list.",
     // {role} is a plural role name: "Owners".
     "projectSettings.visibility.onlyRoleLoosens": "Only {role} can make this less strict.",
+
+    // ── ProjectImportFloorSection ── AQU-2305: who may bring a NEW source file
+    // into THIS project. The organization's floor (AQU-2304), which a project
+    // may only make stricter.
+    "projectSettings.importFloor.label": "Who can import files",
+    "projectSettings.importFloor.description":
+      "Minimum role required to bring a new source file into this project, " +
+      "including re-importing one. Your organization sets this; a project can " +
+      "make it stricter, never looser. Importing a translation into a file " +
+      "that is already here is not affected.",
+    // Shown on a role the organization's own floor rules out, so the option
+    // says why it cannot be chosen.
+    "projectSettings.importFloor.stricterOnly":
+      "your organization requires more; a project can only be stricter",
 
     // AQU-1391 — repetition auto-propagation, same shape as above.
     "projectSettings.autoPropagateRepetitions.label": "Auto-propagate repetitions",
@@ -904,7 +920,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.sourceLink.irreversibleDescription":
       "Detaching snapshots the current upstream source cells into this project and " +
       "severs the live link. Stale-source markers will clear. This action cannot be undone.",
-    "projectSettings.sourceLink.roleGateNote": "Project lead or above required to detach from source.",
+    "projectSettings.sourceLink.roleGateNote": "Project Lead or above required to detach from source.",
     "projectSettings.sourceLink.detachButton": "Detach from source",
     "projectSettings.sourceLink.detachDialogTitle": "Detach from source project?",
     "projectSettings.sourceLink.detachDialogDescription":
@@ -942,7 +958,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.linkSource.linkButton": "Link source project",
     "projectSettings.linkSource.linkingButton": "Linking…",
     "projectSettings.linkSource.roleGateNote":
-      "Project lead or above required to link a source project.",
+      "Project Lead or above required to link a source project.",
     "projectSettings.linkSource.cycleError":
       "That project already reads its source from this one, so linking would " +
       "create a loop. This project is still unlinked — choose a different project.",
@@ -2063,7 +2079,7 @@ export const projectSettings = defineNamespace({
           "Marks a role option in the harmonization minimum-role select as the " +
           "current default.",
         placeholders: {
-          role: "The already-localized role display name (via resolveRoleName/common.role.*), e.g. 'Project lead'.",
+          role: "The already-localized role display name (via resolveRoleName/common.role.*), e.g. 'Project Lead'.",
         },
       },
       "projectSettings.gitSync.originLabel": {
@@ -2768,7 +2784,7 @@ export const projectSettings = defineNamespace({
           "as the project creator stays. This dialog does not revoke those paths.",
         placeholders: {
           username: "The member's username — not translated.",
-          role: "The direct membership's role name, already localized (for example 'Project lead').",
+          role: "The direct membership's role name, already localized (for example 'Project Lead').",
         },
       },
       "projectSettings.members.actionsForRow": {
@@ -2786,7 +2802,7 @@ export const projectSettings = defineNamespace({
           "'Change role', and as the tooltip on the disabled 'Add a member' button. " +
           "States the required role rather than leaving the control silently missing.",
         placeholders: {
-          role: "The localized name of the required role (today 'Project lead'), resolved from the role ladder — insert exactly as given.",
+          role: "The localized name of the required role (today 'Project Lead'), resolved from the role ladder — insert exactly as given.",
         },
       },
       "projectSettings.members.roleChangeOutranked": {
@@ -3292,8 +3308,23 @@ export const projectSettings = defineNamespace({
           "Same dropdown beside a role setting ('Who can add and remove cells', 'Minimum role to validate recordings'). " +
           "Choosing it means this project follows its organization's choice, shown in brackets.",
         placeholders: {
-          value: "The organization's current choice, e.g. 'Project lead' or 'No one', already translated.",
+          value: "The organization's current choice, e.g. 'Project Lead' or 'No one', already translated.",
         },
+      },
+      "projectSettings.importFloor.label": {
+        description:
+          "Row label in Project settings \u2192 Import: the minimum role needed to bring a NEW source file into this "
+          + "project. Same wording as the organization-wide row on Settings \u2192 Security.",
+      },
+      "projectSettings.importFloor.description": {
+        description:
+          "Help text under that row. Says the organization sets the floor and a project can only be stricter, and that "
+          + "importing a translation into a file already in the project is not affected.",
+      },
+      "projectSettings.importFloor.stricterOnly": {
+        description:
+          "Appended to a role option this project cannot choose because the organization already requires a higher "
+          + "role. Shown after the role name and a dash, on a disabled option, e.g. \"Project lead \u2014 \u2026\".",
       },
       "projectSettings.visibility.onlyRoleLoosens": {
         description:

@@ -25,6 +25,7 @@ import { ensureProjectLanes } from "../../../db/shared/lanes"
 import { applyLinkedFileProvenance, type LinkedFilePair } from "../../../db/shared/link-file-provenance"
 import { visibleTagsForMember } from "../../../db/shared/lane-visibility"
 import type { Env } from "../types"
+import { linkSourceBlobPointers } from "../../../db/shared/link-source-blob"
 import {
   loadFileSourceLines,
   matchLinkedFileLines,
@@ -1361,6 +1362,26 @@ export async function snapshotSourceCells(
         err,
       )
     }
+  }
+
+  // AQU-2345: the copies this snapshot just made carry the upstream's cells
+  // and `files` rows, and carried nothing about where their original upload
+  // lives — so an IDML file copied in through a link read
+  // `hasOriginalSource: false` and 404'd on export. Point each one at the
+  // upstream file's artifact (a pointer, no bytes copied) now that the rows
+  // exist. See db/shared/link-source-blob.ts.
+  try {
+    await linkSourceBlobPointers(env.AQUILLA_PG, {
+      upstreamProjectId: args.upstreamProjectId,
+      downstreamProjectId: args.targetProjectId,
+      downstreamFileIdOf: (upstreamFileId) =>
+        deterministicDownstreamFileId(args.targetProjectId, upstreamFileId),
+      now: () => now,
+    })
+  } catch (err) {
+    // Export provenance is not worth failing the snapshot over — the live
+    // mirror's own sweep retries it on the next sync.
+    console.warn("snapshotSourceCells: source-blob sweep failed:", err)
   }
 
   return emitted

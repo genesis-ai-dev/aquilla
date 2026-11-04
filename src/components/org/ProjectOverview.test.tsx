@@ -641,10 +641,10 @@ describe("ProjectOverview load states", () => {
 
     renderOverview()
 
-    expect(await screen.findByText(/sign in to see your workspace/i)).toBeInTheDocument()
+    expect(await screen.findByText(/log in to see your workspace/i)).toBeInTheDocument()
     expect(screen.queryByText("Loading…")).not.toBeInTheDocument()
 
-    const signIn = screen.getByRole("link", { name: /^sign in$/i })
+    const signIn = screen.getByRole("link", { name: /^log in$/i })
     expect(signIn).toHaveAttribute("href", "/login?next=%2Fprojects%2Fp1")
   })
 })
@@ -1330,7 +1330,7 @@ describe("ProjectOverview PM assignment", () => {
     expect(pmInfo).toHaveAttribute("aria-expanded", "true")
     expect(screen.getByTestId("overview-pm-lead-note")).toHaveAttribute("data-state", "open")
     expect(screen.getByTestId("overview-pm-lead-note")).toHaveTextContent(
-      /adds them as a Project lead/,
+      /adds them as a Project Lead/,
     )
     expect(screen.getByTestId("overview-pm-lead-note")).toHaveTextContent(
       /does not remove that membership/,
@@ -1338,7 +1338,7 @@ describe("ProjectOverview PM assignment", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Change project manager" }))
     expect(screen.getByRole("heading", { name: "Change project manager" })).toBeInTheDocument()
-    expect(screen.getByRole("dialog")).toHaveTextContent(/adds them as a Project lead/)
+    expect(screen.getByRole("dialog")).toHaveTextContent(/adds them as a Project Lead/)
     fireEvent.click(screen.getByRole("button", { name: "Clear" }))
 
     await waitFor(() => expect(setProjectPm).toHaveBeenCalledWith("jwt", "p1", null))
@@ -3255,7 +3255,7 @@ describe("plan board on the overview", () => {
 
   // AQU-1914: Assign follows "who can assign work", not "who can see team
   // progress" — the default org hides per-member progress below Maintainer
-  // but lets a Project lead assign.
+  // but lets a Project Lead assign.
   it("offers Assign to a project lead though the org hides the assignee list from them", async () => {
     useProject.mockReturnValue({
       project: projectRecord({ level: ROLE.PROJECT_LEAD }), status: "ready", refresh, roleLevel: ROLE.PROJECT_LEAD,

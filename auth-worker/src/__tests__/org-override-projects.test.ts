@@ -32,7 +32,9 @@ interface SettingsBody {
 interface VisibilityBody {
   rosterViewMinRole: number
   memberProgressViewMinRole: number
-  overrideProjects: Record<"rosterViewMinRole" | "memberProgressViewMinRole", ProjectList>
+  /** AQU-2306: the import floor shares this route; its own suite is org-stricter-import-projects.test.ts. */
+  importMinRole: number
+  overrideProjects: Record<"rosterViewMinRole" | "memberProgressViewMinRole" | "importMinRole", ProjectList>
 }
 
 async function project(
@@ -174,10 +176,13 @@ describe("AQU-1938: the projects behind the Security page's stricter counts", ()
     expect(await res.json()).toEqual({
       rosterViewMinRole: 2,
       memberProgressViewMinRole: 1,
+      // AQU-2306 put the import floor on this route; no project here sets one.
+      importMinRole: 0,
       overrideProjects: {
         // Not Echo (at the org's floor), not the archived one, not the other org's.
         rosterViewMinRole: { total: 2, projects: [bravo, charlie] },
         memberProgressViewMinRole: { total: 1, projects: [alpha] },
+        importMinRole: { total: 0, projects: [] },
       },
     })
   })
@@ -189,9 +194,11 @@ describe("AQU-1938: the projects behind the Security page's stricter counts", ()
     expect(await res.json()).toEqual({
       rosterViewMinRole: 2,
       memberProgressViewMinRole: 1,
+      importMinRole: 0,
       overrideProjects: {
         rosterViewMinRole: { total: 2, projects: [charlie] },
         memberProgressViewMinRole: { total: 1, projects: [] },
+        importMinRole: { total: 0, projects: [] },
       },
     })
   })

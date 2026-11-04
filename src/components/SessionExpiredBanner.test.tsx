@@ -65,7 +65,7 @@ describe("SessionExpiredBanner", () => {
     renderApp("/orgs/all")
     act(() => notifySessionExpired("jwt-active"))
     expect(banner()).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: /sign in again/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /log in again/i })).toHaveAttribute(
       "href",
       "/login?next=%2Forgs%2Fall&reauth=1",
     )

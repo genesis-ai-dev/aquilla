@@ -133,8 +133,6 @@
             "DIARIZATION_PUBLIC_BASE",
             "DIARIZATION_SHARED_SECRET",
             "INWORLD_API_KEY",
-            "SEED_VC_TOKEN",
-            "SEED_VC_URL",
             "VOICE_FORGE_TOKEN",
             "VOICE_FORGE_URL"
           ],

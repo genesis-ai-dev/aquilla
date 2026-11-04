@@ -249,7 +249,11 @@ the `release-verify` check conclusion and the newest Jev marker comment's
 decision line. Deploy iff verify succeeded and Jev reported anything but
 FAIL. No Jev comment yet means wait for the next hour. The deploy is the
 unchanged `pnpm run deploy:aquilla` chain (schema guard, SPA, sync, auth,
-live checks, calver tag).
+live checks, calver tag). The deploy job runs on GitHub's schedule, so
+`GITHUB_REF_NAME` is `dev` there while the checkout is the release branch;
+the job names that branch in `DEPLOY_REF_NAME`, which the deploy guard
+(`scripts/verify-deploy-branch.sh`), the build stamp (`scripts/build-info.ts`)
+and the Cloudflare version label read ahead of GitHub's ref.
 
 **Tag → next cut.** The tag closes the release; the deploy workflow
 dispatches the cut so the next slice starts at once; the :05 schedule is

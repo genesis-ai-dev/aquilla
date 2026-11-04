@@ -21,7 +21,7 @@ import { useMemo, useState } from "react"
 import { AlertTriangle, Cloud, Sparkles } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { EmptyState } from "@/components/ui/empty"
-import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingLines } from "@/components/ui/loading-cursor"
 import { Badge } from "@/components/ui/badge"
 import {
   Table,
@@ -330,9 +330,7 @@ export function PostEditMetricsSection({
         <CardContent>
           {isLoading && (
             <div className="space-y-2 pt-1">
-              <Skeleton className="h-4 w-3/4" />
-              <Skeleton className="h-4 w-1/2" />
-              <Skeleton className="h-4 w-2/3" />
+              <LoadingLines count={3} />
             </div>
           )}
 

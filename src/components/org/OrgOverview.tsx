@@ -4,7 +4,7 @@ import { type ColumnDef } from "@tanstack/react-table"
 import { FolderKanban } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { LoadingOverlay } from "@/components/ui/loading-overlay"
-import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingCursor, LoadingLine } from "@/components/ui/loading-cursor"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
@@ -59,39 +59,42 @@ type OverviewProjectRow = {
 }
 
 function OverviewLoadingTemplate() {
+  const { t } = useI18n()
   return (
     <div data-testid="org-overview-loading-template" className="h-full">
       <AppShell
         sidebar={
           <div className="flex h-full flex-col gap-4 p-2">
-            <Skeleton className="h-9 w-full" />
+            <LoadingLine className="h-9 px-2" />
             <div className="flex flex-col gap-2">
-              <Skeleton className="h-8 w-full" />
-              <Skeleton className="h-8 w-3/4" />
-              <Skeleton className="h-8 w-2/3" />
+              <LoadingLine className="h-8 px-2" />
+              <LoadingLine className="h-8 px-2" />
+              <LoadingLine className="h-8 px-2" />
             </div>
           </div>
         }
         header={
           <div className="flex items-center gap-4 px-4">
-            <Skeleton className="h-5 w-40" />
+            <LoadingCursor />
           </div>
         }
         statusBar={null}
         main={
           <Page size="wide">
-            <Skeleton className="mb-8 h-7 w-48" />
+            <LoadingLine className="mb-8 h-7 text-xl font-semibold" />
             {/* AQU-1071: seven tiles, matching the loaded strip (the Languages tile
               * was the seventh) so the layout does not jump on resolve. */}
             <div className={STAT_TILE_GRID}>
-              {Array.from({ length: 7 }).map((_, index) => (
-                <div
-                  key={index}
-                  className="flex h-[88px] items-center justify-between rounded-lg border bg-card px-5 py-4 min-[480px]:flex-col min-[480px]:items-start min-[480px]:justify-start min-[480px]:gap-2"
-                >
-                  <Skeleton className="order-last h-6 w-12 min-[480px]:order-none" />
-                  <Skeleton className="h-3 w-20" />
-                </div>
+              {[
+                t("nav.projects"),
+                t("org.orgHome.activeLanguages"),
+                t("org.orgHome.avgTranslated"),
+                t("org.orgHome.avgValidated"),
+                t("org.orgHome.avgAudio"),
+                t("org.orgHome.stalled"),
+                t("org.orgHome.overdue"),
+              ].map((label) => (
+                <StatTile key={label} label={label} value={<LoadingCursor />} />
               ))}
             </div>
           </Page>

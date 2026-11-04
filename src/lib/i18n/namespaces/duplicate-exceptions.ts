@@ -129,6 +129,10 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "audio.recordingModal.recordingStatus is the present participle shown beside a " +
     "pulsing dot while the microphone is live. Noun vs progressive verb: English " +
     "spells both 'Recording', almost nothing else does.",
+  "auth.login.title":
+    "Names the authentication form as a heading, while common.logIn is an " +
+    "imperative action. Locales may nominalize this heading (for example " +
+    "German Anmeldung) while retaining a verb on the action (Anmelden).",
   "auth.login.submitDefault":
     "The submit button of the sign-in form. auth.login.title is the heading naming " +
     "the whole form. Languages that nominalize headings ('Anmeldung') while keeping " +
@@ -136,7 +140,7 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
   "search.mode.replace":
     "Names the find-and-replace mode, a term of art paired with 'Find' and usually " +
     "fixed by local software convention. audio.clone.replaceButton is an everyday " +
-    "imperative that swaps an attached reference clip for another file.",
+    "imperative that swaps something already set (existing audio, a saved key) for a new one.",
   "editor.milestone.vocab.startLabel":
     "Names the synthetic first division in the milestone navigator — a noun for " +
     "'the beginning of the file'. audio.recordingModal.startButton is the " +
@@ -362,9 +366,14 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
   "projectSettings.sourceLink.modeClone":
     "Badge naming the AD-9 link-mode ('Clone' vs 'Live') on a linked project's " +
     "Source Link card, and reused for the same radio option in the create-project " +
-    "dialog. audio.library.cloneEngineLabel names a voice-cloning TTS engine in " +
-    "the voice library's engine picker. A project-linking term of art and an " +
-    "audio-engine brand-ish label that happen to share the English word 'Clone'.",
+    "dialog. audio.library.cloneEngineLabel labels a quick-cloned voice (a copy of " +
+    "a real person's voice) in the Voices panel. A project-linking term of art and " +
+    "a kind-of-voice label that happen to share the English word 'Clone'.",
+  "audio.newVoice.tabClone":
+    "Tab label naming a kind of voice in the New voice dialog (a quick clone, " +
+    "next to TTS voice / Characters / Train voice) — a noun phrase in most " +
+    "languages. audio.elevenLabs.cloneButton is the imperative action button that " +
+    "starts an ElevenLabs clone. A tab name and a command.",
   "projectSettings.section.experimental":
     "Section/nav-group heading for this project's device-local experimental " +
     "feature flags. autopilot.settings.experimentalTitle is the same heading for " +

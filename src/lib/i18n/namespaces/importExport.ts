@@ -449,7 +449,7 @@ export const importExport = defineNamespace({
       "This project already reads its source from another project, and it can only follow one. " +
       "Manage or detach that link in Project settings → Source & sync.",
     "importExport.landing.linkProject.roleTooltip":
-      "Project lead or above required to link a source project.",
+      "Project Lead or above required to link a source project.",
 
     // — Re-import collision panel —
     "importExport.collision.intro": plural({

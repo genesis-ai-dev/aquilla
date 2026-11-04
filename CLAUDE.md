@@ -30,7 +30,7 @@ abandoned — if you find docs or memory describing `apps/workspace/`, `packages
 ├── db/                 # LIVE Postgres schema: postgres/schema.sql, postgres/migrations/,
 │                       #   rollout/, shim/ (D1-compatible executor over Hyperdrive)
 ├── worker/             # root SPA-serving Worker (index.ts + og/) for the production deploy
-├── infra/modal/        # Modal services: diarization.py, seed_vc.py
+├── infra/modal/        # Modal services: voice_forge.py, diarization.py, omni_asr.py
 ├── src-tauri/          # Tauri desktop shell
 ├── e2e/                # Playwright specs + page objects + JOURNEYS.md (see AGENTS.md)
 │                       #   specs/partner-integrations/<partner>/ is partner-owned

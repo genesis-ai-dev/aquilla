@@ -7,6 +7,10 @@
  * the events — but each act of validation must be the human's own click.
  * Deliberately: one Confirm per row, no "validate all", and this tier is
  * exempt from any future auto-apply toggle.
+ *
+ * AQU-1639: the panel's emerald values are paired light/dark. The dark-only
+ * emerald-900/950 it shipped with painted a near-black card in LIGHT mode, so
+ * the muted counter and the testimony notice read dark-on-dark.
  */
 
 import { useState } from "react"
@@ -61,8 +65,8 @@ export function ValidationQueueCard({ proposal, applyContext, onApplied, canVali
   }
 
   return (
-    <div className="my-1.5 flex flex-col rounded-lg border border-emerald-900/50 bg-emerald-950/20">
-      <div className="flex items-center gap-1.5 border-b border-emerald-900/40 px-3 py-1.5 text-xs">
+    <div className="my-1.5 flex flex-col rounded-lg border border-emerald-200 bg-emerald-50 dark:border-emerald-900/50 dark:bg-emerald-950/20">
+      <div className="flex items-center gap-1.5 border-b border-emerald-200 px-3 py-1.5 text-xs dark:border-emerald-900/40">
         <BadgeCheck className="h-3.5 w-3.5 text-emerald-500" />
         <span className="font-medium">
           {t("agent.validation.preparedCount", { count: validations.length })}
@@ -73,11 +77,11 @@ export function ValidationQueueCard({ proposal, applyContext, onApplied, canVali
       </div>
 
       {/* The tier-2 contract, stated where the decision happens. */}
-      <p className="border-b border-emerald-900/30 px-3 py-1 text-[10px] text-muted-foreground">
+      <p className="border-b border-emerald-200/80 px-3 py-1 text-[10px] text-muted-foreground dark:border-emerald-900/30">
         {t("agent.validation.testimonyNotice")}
       </p>
 
-      <div className="divide-y divide-emerald-900/20">
+      <div className="divide-y divide-emerald-200/80 dark:divide-emerald-900/20">
         {validations.map((ev, idx) => {
           const state = rowState.get(idx) ?? "idle"
           // Resolved per row, not per card: self-validation turns on the
@@ -93,7 +97,7 @@ export function ValidationQueueCard({ proposal, applyContext, onApplied, canVali
                 {ev.display.before || "∅"}
               </span>
               {state === "done" ? (
-                <span className="flex shrink-0 items-center gap-1 pt-0.5 text-[10px] text-emerald-600 dark:text-emerald-500">
+                <span className="flex shrink-0 items-center gap-1 pt-0.5 text-[10px] text-emerald-700 dark:text-emerald-500">
                   <Check className="h-3 w-3" /> {t("editor.state.validated")}
                 </span>
               ) : blockedReason ? (

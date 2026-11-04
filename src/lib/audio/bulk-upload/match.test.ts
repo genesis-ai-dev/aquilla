@@ -828,3 +828,103 @@ describe("the review's cases (Oct 29)", () => {
     expect(run(phone, [ruth], fileScope("ruth")).assignments.map(lineOf)).toEqual(["ruth:1:1", "ruth:1:2"])
   })
 })
+
+// AQU-2329: a team may name its files in its own script's digits. Every
+// Unicode decimal digit is read as its value, so a name written in Arabic-Indic,
+// Persian, Devanagari, Bengali, Burmese, Thai or any other script's digits
+// lands exactly where the same name written with 0–9 does.
+describe("names written in another script's digits", () => {
+  const MAT = [25, 23, 17, 25, 48, 34, 29, 34, 38, 42, 30, 50]
+  const mat = book("mat", "MAT", "Matthew", MAT)
+  const inMatthew: MatchScope = { kind: "file", fileId: "mat" }
+  const arabicNames = () => {
+    const index = new BookNameIndex()
+    index.addProjectName("متى", "MAT")
+    return index
+  }
+  /** Where one file lands: its line(s), or why it didn't. */
+  const landing = (path: string, scope: MatchScope = inMatthew, targets: TargetFile[] = [mat]) => {
+    const a = run([audio(path)], targets, scope, arabicNames()).assignments[0]
+    return { cellIds: a.cellIds ?? null, reason: a.reason ?? null }
+  }
+
+  it("the ticket's names, متى ٥_١, ۵_۱ and ५_१, land exactly where 5_1 does", () => {
+    const ascii = landing("5_1.mp3")
+    expect(ascii).toEqual({ cellIds: ["mat:5:1"], reason: null })
+    expect(landing("متى ٥_١.mp3")).toEqual(ascii)
+    expect(landing("۵_۱.mp3")).toEqual(ascii)
+    expect(landing("५_१.mp3")).toEqual(ascii)
+  })
+
+  /** `n` written with the ten digits that start at `zero`. */
+  const inScript = (zero: number, n: number) =>
+    String(n).replace(/[0-9]/g, (d) => String.fromCodePoint(zero + Number(d)))
+
+  const SCRIPTS: [script: string, zero: number][] = [
+    ["Arabic-Indic", 0x0660],
+    ["Extended Arabic-Indic (Persian, Urdu)", 0x06f0],
+    ["Devanagari", 0x0966],
+    ["Bengali", 0x09e6],
+    ["Burmese", 0x1040],
+    ["Thai", 0x0e50],
+    ["Gurmukhi", 0x0a66],
+    ["Gujarati", 0x0ae6],
+    ["Odia", 0x0b66],
+    ["Tamil", 0x0be6],
+    ["Telugu", 0x0c66],
+    ["Kannada", 0x0ce6],
+    ["Malayalam", 0x0d66],
+    ["Lao", 0x0ed0],
+    ["Tibetan", 0x0f20],
+    ["Khmer", 0x17e0],
+    ["Mongolian", 0x1810],
+    ["N'Ko", 0x07c0],
+    ["Adlam (outside the first 65,536 code points)", 0x1e950],
+  ]
+
+  // Each shape of name, built once with 0–9 and once with the script's digits.
+  const SHAPES: [shape: string, build: (w: (n: number) => string) => string, scope?: MatchScope][] = [
+    ["chapter and verse", (w) => `${w(5)}_${w(1)}.mp3`],
+    ["book, chapter and verse", (w) => `Matthew ${w(12)}-${w(34)}.mp3`],
+    ["the project's own book name", (w) => `متى ${w(10)}:${w(42)}.wav`],
+    ["a range of verses", (w) => `${w(3)}_${w(1)}-${w(4)}.mp3`],
+    ["a range across chapters", (w) => `Matthew ${w(3)}:${w(17)}-${w(4)}:${w(2)}.mp3`],
+    ["a whole chapter", (w) => `Matthew ${w(2)}.mp3`],
+    ["a chapter folder", (w) => `Chapter ${w(7)}/${w(9)}.mp3`],
+    ["padded numbers", (w) => `MAT_${w(0)}${w(11)}_${w(0)}${w(30)}.wav`],
+    ["a book across the whole project", (w) => `متى ${w(6)}_${w(9)}.mp3`, { kind: "project" }],
+  ]
+
+  describe.each(SCRIPTS)("%s digits", (_script, zero) => {
+    it.each(SHAPES)("%s", (_shape, build, scope) => {
+      const ascii = landing(build(String), scope)
+      expect(ascii.reason).toBeNull()
+      expect(ascii.cellIds?.length).toBeGreaterThan(0)
+      expect(landing(build((n) => inScript(zero, n)), scope)).toEqual(ascii)
+    })
+  })
+
+  it("every script's digits the JavaScript engine knows read as their values", () => {
+    const index = new BookNameIndex()
+    let scripts = 0
+    for (const system of Intl.supportedValuesOf("numberingSystem")) {
+      if (system === "latn") continue
+      const format = new Intl.NumberFormat(`en-u-nu-${system}`, { useGrouping: false })
+      const digits = [...format.format(1234567890)]
+      // Only scripts with ten decimal digits of their own (not 〇一二, not Roman).
+      if (digits.length !== 10 || !digits.every((d) => /^\p{Nd}$/u.test(d)) || format.format(1) === "1") continue
+      scripts++
+      const r = readName(`Matthew ${format.format(12)}_${format.format(34)} take ${format.format(2)}.mp3`, index)
+      expect(r.book?.code, system).toBe("MAT")
+      expect(r.numbers.map((n) => [n.value, n.marker ?? null]), system).toEqual([[12, null], [34, null], [2, "take"]])
+    }
+    expect(scripts).toBeGreaterThan(60)
+  })
+
+  it("a document named in its own digits is found by a folder written in 0–9", () => {
+    const lesson = doc("lesson3", "درس ٣", 5)
+    const other = doc("lesson4", "درس ٤", 5)
+    const a = run([audio("درس 3/2.mp3")], [lesson, other], { kind: "project" }).assignments[0]
+    expect(a.cellIds).toEqual(["lesson3#2"])
+  })
+})

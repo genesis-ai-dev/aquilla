@@ -31,7 +31,7 @@ import {
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { NoteOnClick } from "@/components/ui/info-note"
 import { BackLink, NavList, NavRow } from "@/components/ui/nav-list"
 import { BRIEF_ICON, LIVING_MEMORY_ICON } from "@/components/LivingMemoryButton"
@@ -343,10 +343,13 @@ export function LivingMemoryPage({
       </NoteOnClick>
       {validatedExamplesEnabled ? (
         isLoading ? (
-          <Skeleton
-            className="h-4 w-20 rounded-md"
+          <span
+            role="status"
+            className="inline-flex h-4 items-center px-1"
             aria-label={t("terminology.livingMemory.loadingCountAria")}
-          />
+          >
+            <LoadingCursor className="text-[10px]" />
+          </span>
         ) : (
           <Badge variant="secondary" className="text-[10px] tabular-nums">
             {t("terminology.livingMemory.validatedCount", {

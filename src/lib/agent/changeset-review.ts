@@ -29,6 +29,22 @@ export function isTerminalChangesetStatus(status: string): boolean {
   return TERMINAL_STATUSES.has(status)
 }
 
+/**
+ * Terminal statuses in which the reviewer's decision has been made, so the
+ * staged diff has nothing left to review (AQU-1639).
+ *
+ * `stale` and `expired` are terminal too but are NOT decided: the card still
+ * offers a Refresh, and the reviewer needs to see what was staged to judge
+ * what went stale. A decided card collapses to its header plus its receipt /
+ * outcome notice — the same "steps out of the way but leaves a trace" shape
+ * ProposalReceipt uses once every row is settled.
+ */
+const DECIDED_STATUSES = new Set(["committed", "discarded", "superseded"])
+
+export function isDecidedChangesetStatus(status: string): boolean {
+  return DECIDED_STATUSES.has(status)
+}
+
 /** Terminal statuses that are a good outcome rather than a failure — the plan
  *  landed (`committed`) or was already true (`superseded`). Never merge these
  *  into the `stale`/`expired` accounting: those two exist to warn, and a

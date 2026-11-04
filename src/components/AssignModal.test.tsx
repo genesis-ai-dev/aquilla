@@ -96,7 +96,7 @@ describe("self-assign carve-out (AQU-496)", () => {
     expect(screen.getByText("Assign work")).toBeTruthy()
   })
 
-  it("renders a full assignee picker below Project lead when the org lowers the floor", () => {
+  it("renders a full assignee picker below Project Lead when the org lowers the floor", () => {
     render(
       <AssignModal
         {...BASE_PROPS}
@@ -218,10 +218,10 @@ describe("nobody else on the project yet (AQU-2194)", () => {
 
   it("still says it when the only others are the project's maintainers or owners", () => {
     // The real shape: the project's creator (an org owner) is listed, the PM
-    // is a Project lead, and the linguist isn't on the project.
+    // is a Project Lead, and the linguist isn't on the project.
     const PM = { userId: 2, username: "lee", role: { level: 500, name: "project_lead", source: "override" as const }, secondarySources: [] }
     render(<AssignModal {...BASE_PROPS} author="lee" members={[CREATOR, PM, LINGUIST_IN_ORG_ONLY]} />)
-    // A Project lead can't open the Members settings, so no link: who to ask.
+    // A Project Lead can't open the Members settings, so no link: who to ask.
     const hint = screen.getByTestId("assign-modal-staff-hint")
     expect(hint.textContent).toMatch(/ask a project maintainer/i)
     expect(screen.queryByRole("link", { name: /add someone to this project/i })).toBeNull()

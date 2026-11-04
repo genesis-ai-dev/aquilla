@@ -721,7 +721,7 @@ export function useCellAudio(
       creatingRef.current = null
       created()
     }
-  }, [attachmentUrl, project.id, fileId, getSyncToken, ensureBytes, startTicking, stopTicking, t, publishTime, setCurrentTime]) // eslint-disable-line react-hooks/exhaustive-deps -- elTime/setElTime read refs only
+  }, [attachmentUrl, project.id, fileId, getSyncToken, ensureBytes, startTicking, stopTicking, t, publishTime, setCurrentTime]) // elTime reads refs only
 
   const pause = useCallback(() => {
     const own = audioRef.current
@@ -765,7 +765,7 @@ export function useCellAudio(
         setCurrentTime(start)
       }
     }
-  }, [setCurrentTime, stopTicking]) // eslint-disable-line react-hooks/exhaustive-deps -- elTime/setElTime read refs only
+  }, [setCurrentTime, stopTicking]) // elTime/setElTime read refs only
 
   // A seek lands a hair INSIDE the window's end. Landing exactly on it is
   // "reached the end" to the tick, which pauses and rewinds — so a drag into
@@ -826,7 +826,7 @@ export function useCellAudio(
     pendingStartRef.current = at
     setCurrentTime(at)
     void play()
-  }, [play, setCurrentTime]) // eslint-disable-line react-hooks/exhaustive-deps -- setElTime reads refs only
+  }, [play, setCurrentTime]) // setElTime reads refs only
 
   const requestPeaks = useCallback(async (bins: number, opts?: { force?: boolean }) => {
     if (!attachmentUrl || !selectedAudioId) return

@@ -52,7 +52,8 @@ interface SetupChecklistDrawerProps {
    *  power the "Import files" first step. */
   onOpenImport?: () => void
   /** Hides the drawer (without dismissing setup) and navigates to `path`.
-   *  Powers the optional standards / terminology link steps. */
+   *  Powers the instructions step and the optional quality / terminology
+   *  link steps. */
   onNavigate?: (path: string) => void
 }
 
@@ -148,7 +149,14 @@ export function SetupChecklistDrawer({
                 requiredRole={ROLE.MAINTAINER}
                 actionLabel={t("onboarding.checklist.aiInstructions.actionLabel")}
               >
-                <AiInstructionsStep project={project} onUpdated={onProjectUpdated} />
+                <AiInstructionsStep
+                  project={project}
+                  onOpen={
+                    onNavigate
+                      ? () => onNavigate(projectMemoryPath(project.id, "instructions"))
+                      : undefined
+                  }
+                />
               </RoleGatedStep>
             </ChecklistItem>
 
@@ -190,7 +198,7 @@ export function SetupChecklistDrawer({
                   title={t("onboarding.checklist.standards.title")}
                   description={t("onboarding.checklist.standards.description")}
                   actionLabel={t("onboarding.checklist.standards.actionLabel")}
-                  onOpen={() => onNavigate(projectMemoryPath(project.id, "quality"))}
+                  onOpen={() => onNavigate(projectMemoryPath(project.id, "checks"))}
                 />
                 <LinkStep
                   title={t("onboarding.checklist.glossary.title")}

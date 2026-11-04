@@ -70,6 +70,12 @@ export interface ProjectWideSettings {
    */
   sourceTextDirection?: DirectionMode
   targetTextDirection?: DirectionMode
+  /** AQU-2342: THE project instructions every AI draft reads (copilot,
+   *  Autopilot, the agent). Absent → composed on read from the legacy sources
+   *  (db/shared/translation-instructions.ts resolveTranslationInstructions). */
+  translationInstructions?: string
+  /** Legacy (AQU-2342): no prompt reads it except as a migrate-on-read source
+   *  for `translationInstructions`. */
   systemPrompt?: string
   /**
    * AQU-2259: the team's AI drafting settings — the "AI Instructions" card
@@ -538,6 +544,13 @@ export function settingsEditorName(editor: ProjectSettingsEditor | undefined): s
 }
 
 export interface ProjectSettingsResponse {
+  /**
+   * AQU-2342: the agent's legacy free-text brief (`project_briefs`), sent while
+   * the project has stored no `translationInstructions`, so the copilot
+   * migrates on read from exactly the sources the server paths do. "" or
+   * absent otherwise (and on a server that predates it).
+   */
+  legacyProjectBriefText?: string
   version: number
   updatedAt: string
   updatedBy: ProjectSettingsEditor

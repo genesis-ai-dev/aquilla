@@ -50,6 +50,9 @@ export interface CompiledConcept {
   status: string
   caseSensitive?: boolean
   match?: TermMatchOptions
+  /** The termbase entry's note. Carried into prompts (clipped) with the
+   *  renderings — AQU-2342: every drafting path shows term notes. */
+  notes?: string
 }
 
 /** Structural echo of `TranslationRule` (../parsers/types) for the two check
@@ -139,6 +142,7 @@ export function compileConceptsToRulesCore(
       sourceTerm: concept.sourceTerm,
       sourcePattern,
       ...(concept.caseSensitive ? { caseSensitive: true } : {}),
+      ...(concept.notes?.trim() ? { notes: concept.notes.trim() } : {}),
     }
 
     // source-requires-target: each source instance needs a counterpart rendering.

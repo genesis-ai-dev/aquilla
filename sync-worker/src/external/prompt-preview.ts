@@ -7,7 +7,7 @@
 //                             one file; otherwise the lowest-ordered match wins
 //
 // Why this exists: an agent can already PATCH the prompt-shaping settings
-// (systemPrompt, completionSettings, translationBrief, rules — see
+// (translationInstructions, draftingSettings, rules — see
 // commands-patch-settings.ts) but had no way to see what the copilot actually
 // receives after injection. Tuning was change-a-setting-then-guess. This route
 // closes the loop: it returns the assembled messages plus the labeled parts
@@ -34,9 +34,10 @@
 // Per-device provider overrides (user Settings, localStorage) are likewise
 // invisible to the server; `generation` reports the PROJECT's configuration.
 //
-// The system prompt resolves top-level `settings.systemPrompt` first (the key
-// PatchSettings writes), then `completionSettings.systemPrompt` (the copy the
-// SPA keeps in sync), then DEFAULT_SYSTEM_PROMPT (AQU-1283).
+// AQU-2342: the role text is always DEFAULT_SYSTEM_PROMPT (no longer
+// project-editable); the project's own guidance is the ONE instructions block
+// (`settings.translationInstructions`, or the legacy sources composed on read
+// by resolveTranslationInstructions — the same call the editor makes).
 //
 // Role floor: VIEWER, same as every other external read — this is a read of
 // configuration the caller can already read piecemeal (/projects, settings),
@@ -55,27 +56,19 @@ import {
 } from "../lib/branching-search/settings"
 import { resolveLane } from "../../../db/shared/lane-ref"
 import { loadProjectSettings } from "../../../db/shared/projects"
+import { loadTranslationInstructions } from "../../../db/shared/load-translation-instructions"
 import { listProjectLanes } from "../../../db/shared/lanes"
-import { listRulesForProject } from "../../../db/shared/style-rules"
-import {
-  buildApplicabilityIndex,
-  cellCoordinates,
-  resolveEffectiveRules,
-} from "../../../src/lib/rules/applicability"
-import type {
-  RuleApplicability as ClientRuleApplicability,
-  StyleRule as ClientStyleRule,
-} from "../../../src/lib/rules/style-rule-types"
-import { bookGenre } from "../../../src/lib/scripture/book-genres"
+import { styleInstructionsForCells } from "../../../db/shared/style-instructions"
+import { readLanguageProfile } from "../../../db/shared/language-profile"
 import { conceptsForLane, mapSubscribedConceptLanes } from "../../../src/lib/terminology/rendering-lane"
 import {
-  buildBriefBlock,
+  buildChecksBlock,
   buildPrompt,
-  buildRulesBlock,
-  buildStyleRulesBlock,
+  buildTerminologyBlock,
   DEFAULT_APPROVED_EXAMPLE_COUNT,
   DEFAULT_MAX_INJECTED_TERMS,
   DEFAULT_SYSTEM_PROMPT,
+  instructionsPromptBlock,
   selectApprovedExamples,
   selectInjectedTerms,
   type ChatMessage,
@@ -225,16 +218,30 @@ export interface PromptPreviewBody {
     /** Base instructions after {sourceLanguage}/{targetLanguage} substitution,
      *  before any injection. */
     base: string
-    /** The brief block, or "" when the project has no L1 summary. */
-    brief: string
-    /** The rules block (terminology and your own regex rules), or "" when nothing injects. */
-    rules: string
-    /** The style-rules block (approved, enabled style rules in force for this
-     *  cell), or "" when none applies. Proposed and rejected rules never appear. */
-    styleRules: string
+    /** The project-instructions block (AQU-2342), or "" when the project has
+     *  none. Sits right after `base`. */
+    instructions: string
+    /** AQU-2342: the Checks hint — org, project and lane rules, the style
+     *  rules in force for this cell (approved + enabled only) and the filled
+     *  Language-profile slots — or "" when nothing can be hinted. Sits after
+     *  `instructions`. The same builder every drafting path uses. */
+    checks: string
+    /** AQU-2342: the Terminology block — only the glossary concepts that occur
+     *  in this cell's source (`injectedTerms`), with their notes — or "". */
+    terminology: string
     injectedTerms: InjectedTerm[]
     examples: ValidatedPair[]
     precedingContext: { source: string; target: string }[]
+    /** @deprecated AQU-2342 compat alias, kept for one release: the same text
+     *  as `instructions`. Read `instructions`. */
+    brief: string
+    /** @deprecated AQU-2342 compat alias, kept for one release: the rule hints
+     *  of `checks` without the style rules, then `terminology` — what the old
+     *  rules block covered. Read `checks` and `terminology`. */
+    rules: string
+    /** @deprecated AQU-2342 compat alias, kept for one release: the style-rule
+     *  lines of `checks` on their own. Read `checks`. */
+    styleRules: string
   }
   /** What the draft call would be made WITH (project configuration; a
    *  per-device provider override in user Settings is invisible here). */
@@ -257,51 +264,6 @@ export interface PromptPreviewBody {
   }
   /** Non-fatal notes: things the real draft call adds that a read cannot. */
   warnings: { code: string; message: string }[]
-}
-
-/**
- * Style-rule instructions in force for one cell: the library resolved through
- * the applicability graph exactly as the editor does. Only `approved` and
- * `enabled` rules participate (resolveEffectiveRules), so proposed, rejected
- * and archived rules never reach the prompt.
- */
-async function styleInstructionsFor(
-  db: AquillaDb,
-  args: {
-    projectId: string
-    fileId: string
-    cellId: string
-    canonicalRef: string | null
-    settings: Record<string, unknown>
-  },
-): Promise<string[]> {
-  const { rules, applicability } = await listRulesForProject(db, args.projectId)
-  if (rules.length === 0) return []
-
-  const file = await db
-    .prepare("SELECT book_code FROM files WHERE id = ? AND project_id = ?")
-    .bind(args.fileId, args.projectId)
-    .first<{ book_code: string | null }>()
-  // An explicit file genre wins over the one derived from the book code
-  // (resolveFileGenre). The id is only matched against applicability rows, so
-  // an unknown one simply matches nothing.
-  const assigned = objectSetting(args.settings, "fileGenres")[args.fileId]
-  const genre = typeof assigned === "string" && assigned.trim() ? assigned.trim().toLowerCase() : undefined
-  const coords = cellCoordinates(
-    { id: args.cellId, ...(args.canonicalRef ? { globalReferences: [args.canonicalRef] } : {}) },
-    {
-      fileId: args.fileId,
-      ...(file?.book_code ? { bookCode: file.book_code } : {}),
-      ...(genre ? { genre } : {}),
-    },
-    bookGenre,
-  )
-  // The worker's rows carry a looser checkSpec type than the client's; the
-  // resolver never reads it.
-  const index = buildApplicabilityIndex(applicability as unknown as ClientRuleApplicability[])
-  return resolveEffectiveRules(rules as unknown as ClientStyleRule[], index, coords).map(
-    (effective) => effective.rule.instruction,
-  )
 }
 
 /**
@@ -338,12 +300,11 @@ export async function buildPromptPreview(
   // AQU-2259: the team's drafting settings (`draftingSettings`: retrieval,
   // example format, provider, model, sampling). Each of its fields wins over
   // the older nested `completionSettings` copy, which the SPA no longer
-  // writes; that copy still supplies `systemPrompt` below.
+  // writes.
   const completion = {
     ...objectSetting(settings, "completionSettings"),
     ...objectSetting(settings, "draftingSettings"),
   }
-  const brief = objectSetting(settings, "translationBrief")
   const draftContext = objectSetting(settings, "draftContext")
 
   // AQU-1593 / AQU-1595: both languages come from the lane row. `targetLang`
@@ -356,17 +317,19 @@ export async function buildPromptPreview(
   })
   const targetLanguage = laneLanguageForTag(targetLang, lanes) ?? ""
 
-  // Top-level `systemPrompt` is what PatchSettings writes and what the SPA
-  // syncs into completionSettings.systemPrompt (useProject.ts) — so it wins;
-  // the nested copy is the fallback for projects that only ever set it there.
-  const systemPrompt =
-    stringSetting(settings, "systemPrompt") ||
-    stringSetting(completion, "systemPrompt") ||
-    DEFAULT_SYSTEM_PROMPT
+  // AQU-2342: fixed role text + the one instructions text. A legacy prompt
+  // that only ever lived in the nested completionSettings copy still feeds
+  // migrate-on-read, exactly as the SPA's record overlay does.
+  const systemPrompt = DEFAULT_SYSTEM_PROMPT
+  // The legacy agent brief is read too, exactly as the editor gets it from the
+  // settings GET, so the preview and every server path resolve the same text.
+  const { text: instructions } = await loadTranslationInstructions(db, projectId, {
+    ...settings,
+    systemPrompt: stringSetting(settings, "systemPrompt") || stringSetting(completion, "systemPrompt"),
+  })
   const topK = clampInt(completion.top_k, DEFAULT_APPROVED_EXAMPLE_COUNT, 1, MAX_TOP_K)
   const exampleFormat =
     completion.fewShotExampleFormat === "target-only" ? "target-only" : "source-and-target"
-  const briefSummary = stringSetting(brief, "l1Summary")
   const precedingCount = clampInt(
     draftContext.precedingTargetCells,
     DEFAULT_PRECEDING_TARGET_CELLS,
@@ -419,10 +382,11 @@ export async function buildPromptPreview(
     renderings: unknown
     status: string
     case_sensitive: number
+    notes: string | null
   }
   const subscribedRows = await db
     .prepare(
-      "SELECT s.termbase_project_id, c.concept_id, c.source_term, c.renderings, c.status, c.case_sensitive " +
+      "SELECT s.termbase_project_id, c.concept_id, c.source_term, c.renderings, c.status, c.case_sensitive, c.notes " +
         "FROM project_termbase_subscriptions s " +
         "JOIN projects sub ON sub.id = s.project_id " +
         "JOIN projects tb ON tb.id = s.termbase_project_id " +
@@ -436,7 +400,7 @@ export async function buildPromptPreview(
     .all<ConceptRow & { termbase_project_id: string }>()
   const conceptRows = await db
     .prepare(
-      "SELECT concept_id, source_term, renderings, status, case_sensitive " +
+      "SELECT concept_id, source_term, renderings, status, case_sensitive, notes " +
         "FROM concepts WHERE project_id = ? AND deleted_at IS NULL ORDER BY concept_id",
     )
     .bind(projectId)
@@ -460,6 +424,7 @@ export async function buildPromptPreview(
       renderings,
       status: row.status,
       ...(row.case_sensitive ? { caseSensitive: true } : {}),
+      ...(row.notes?.trim() ? { notes: row.notes.trim() } : {}),
     }
   }
   // Rows arrive grouped by termbase in subscription order (the ORDER BY), and
@@ -561,13 +526,15 @@ export async function buildPromptPreview(
   // The same selection the editor makes (ProjectWorkspace styleInstructionsFor):
   // approved, enabled rules resolved against this cell's place in the
   // applicability graph, with the org's shared rules included.
-  const styleInstructions = await styleInstructionsFor(db, {
+  const styleInstructions = await styleInstructionsForCells(db, {
     projectId,
     fileId,
-    cellId,
-    canonicalRef: cell.canonical_ref,
+    cells: [{ cellId, canonicalRef: cell.canonical_ref }],
     settings,
   })
+
+  // AQU-2342: the Language profile's filled slots join the checks hint.
+  const languageProfile = readLanguageProfile(settings.languageProfile)
 
   const messages = buildPrompt({
     sourceLanguage,
@@ -577,11 +544,17 @@ export async function buildPromptPreview(
     examples: [],
     rules,
     styleInstructions,
+    languageProfile,
     validatedPairs: examples,
     exampleFormat,
-    briefSummary,
+    instructions,
     precedingContext,
   })
+
+  const instructionsBlock = instructionsPromptBlock(instructions)
+    .replace(/\{sourceLanguage\}/g, sourceLanguage)
+    .replace(/\{targetLanguage\}/g, targetLanguage)
+  const terminologyBlock = buildTerminologyBlock(rules, { sourceText })
 
   const warnings: { code: string; message: string }[] = []
   if (!sourceText.trim()) {
@@ -626,12 +599,16 @@ export async function buildPromptPreview(
         base: systemPrompt
           .replace(/\{sourceLanguage\}/g, sourceLanguage)
           .replace(/\{targetLanguage\}/g, targetLanguage),
-        brief: buildBriefBlock(briefSummary),
-        rules: buildRulesBlock(rules, { sourceText }),
-        styleRules: buildStyleRulesBlock(styleInstructions),
+        instructions: instructionsBlock,
+        checks: buildChecksBlock(rules, styleInstructions, languageProfile),
+        terminology: terminologyBlock,
         injectedTerms,
         examples,
         precedingContext,
+        // AQU-2342: the pre-2342 part names, for one release (see the type).
+        brief: instructionsBlock,
+        rules: [buildChecksBlock(rules, [], languageProfile), terminologyBlock].filter(Boolean).join("\n\n"),
+        styleRules: buildChecksBlock([], styleInstructions, null),
       },
       generation: {
         provider:

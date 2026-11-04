@@ -1,10 +1,12 @@
 /**
  * AgentMemoryTab.tsx — the "memory" tab in AgentWorkbench (AQU-AGENT
- * contracts §5, owner W1E). Three sections: Proposed queue, Approved list,
- * and the Project brief panel (view/edit + its own proposals sub-list).
+ * contracts §5, owner W1E). Two sections: Proposed queue and Approved list.
+ * AQU-2342 retired the third, the agent's own "Project brief": how the AI
+ * should translate the project now lives in ONE place, Living Memory →
+ * Instructions, which the agent reads like every other drafting path.
  *
- * Data flow: fetches memories (all statuses) + brief + brief proposals once
- * per `projectId`, then applies optimistic status flips locally (revert on a
+ * Data flow: fetches memories (all statuses) once per `projectId`, then
+ * applies optimistic status flips locally (revert on a
  * failed request) so approve/reject/edit feel instant without a full refetch
  * round-trip. `jwt`/`username` come from useFrontierSession, matching
  * ApiTokensSection's pattern; `roleLevel` is passed in the same shape
@@ -18,7 +20,7 @@
  *
  * mem-M5 (memory-notice liveness): this tab and AgentRunView's chat timeline
  * both key off `projectId`, so a review here calls straight into
- * `agentSessionStore(projectId, username).markMemoryReviewed/markBriefReviewed` — the
+ * `agentSessionStore(projectId, username).markMemoryReviewed` — the
  * store already exists as the single source of truth for run state (see
  * session-store.ts), so that's the "clean channel" rather than a window
  * event: any mounted AgentRunView subscribed to the same store re-renders
@@ -49,20 +51,12 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { agentSessionStore, useAgentSession } from "@/lib/agent/session-store"
 import {
   editAgentMemory,
-  getProjectBrief,
   listAgentMemories,
-  listBriefProposals,
-  putProjectBrief,
   reviewAgentMemory,
-  reviewBriefProposal,
   SupersedesHumanEditedError,
-  VersionConflictError,
   type AgentMemory,
-  type ProjectBrief,
-  type ProjectBriefProposal,
 } from "@/lib/agent/memory-api"
 import { ApprovedMemoryList } from "./ApprovedMemoryList"
-import { BriefPanel, type StaleProposalInfo } from "./BriefPanel"
 import { ProposedMemoryList } from "./ProposedMemoryList"
 
 interface SupersedePrompt {
@@ -87,31 +81,17 @@ export default function AgentMemoryTab({ projectId, roleLevel }: AgentMemoryTabP
   const { state: agentSessionState } = useAgentSession(projectId, username)
 
   const [memories, setMemories] = useState<AgentMemory[]>([])
-  const [brief, setBrief] = useState<ProjectBrief | null>(null)
-  const [briefProposals, setBriefProposals] = useState<ProjectBriefProposal[]>([])
   const [state, setState] = useState<LoadState>("idle")
   const [error, setError] = useState<string | null>(null)
   const [busyMemoryIds, setBusyMemoryIds] = useState<Set<string>>(new Set())
-  const [busyProposalIds, setBusyProposalIds] = useState<Set<string>>(new Set())
   const [supersedePrompt, setSupersedePrompt] = useState<SupersedePrompt | null>(null)
-  const [staleProposals, setStaleProposals] = useState<Map<string, StaleProposalInfo>>(new Map())
 
   const load = useCallback(async () => {
     if (!jwt) return
     setState("loading")
     setError(null)
     try {
-      const [memoriesResult, briefResult, proposalsResult] = await Promise.all([
-        listAgentMemories(jwt, projectId),
-        getProjectBrief(jwt, projectId),
-        // Best-effort: §3 doesn't explicitly list a GET for proposals — an
-        // empty list on a 404 keeps the panel usable rather than failing the
-        // whole tab load. See memory-api.ts's SWARM-TODO on this route.
-        listBriefProposals(jwt, projectId).catch(() => []),
-      ])
-      setMemories(memoriesResult)
-      setBrief(briefResult)
-      setBriefProposals(proposalsResult)
+      setMemories(await listAgentMemories(jwt, projectId))
       setState("loaded")
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load agent memory.")
@@ -141,13 +121,6 @@ export default function AgentMemoryTab({ projectId, roleLevel }: AgentMemoryTabP
     }
     prevMemoryProposedCount.current = memoryProposedCount
   }, [memoryProposedCount, jwt, projectId])
-
-  const reloadBrief = useCallback(() => {
-    if (!jwt) return
-    getProjectBrief(jwt, projectId)
-      .then(setBrief)
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to reload brief."))
-  }, [jwt, projectId])
 
   const proposed = useMemo(() => memories.filter((m) => m.status === "proposed"), [memories])
   const approved = useMemo(() => memories.filter((m) => m.status === "approved"), [memories])
@@ -183,6 +156,10 @@ export default function AgentMemoryTab({ projectId, roleLevel }: AgentMemoryTabP
           setMemories((cur) => cur.map((m) => (m.id === updated.id ? updated : m)))
           // mem-M5: flip the matching memory.proposed chat notice, if any.
           agentSessionStore(projectId, username).markMemoryReviewed(updated.id)
+          // AQU-2342: a brief proposal moved into this queue — its old
+          // brief.proposed notice settles too.
+          const briefProposalId = updated.provenance?.briefProposalId
+          if (briefProposalId) agentSessionStore(projectId, username).markBriefReviewed(briefProposalId)
         } catch (err) {
           setMemories((cur) => cur.map((m) => (m.id === original.id ? original : m)))
           if (err instanceof SupersedesHumanEditedError) {
@@ -212,76 +189,11 @@ export default function AgentMemoryTab({ projectId, roleLevel }: AgentMemoryTabP
     [jwt, projectId],
   )
 
-  const saveBrief = useCallback(
-    async (content: string, ifMatchVersion: number) => {
-      if (!jwt) throw new Error("Not signed in.")
-      const updated = await putProjectBrief(jwt, projectId, content, ifMatchVersion)
-      setBrief(updated)
-    },
-    [jwt, projectId],
-  )
-
-  const withBusyProposal = useCallback(async (id: string, fn: () => Promise<void>) => {
-    setBusyProposalIds((prev) => new Set(prev).add(id))
-    try {
-      await fn()
-    } finally {
-      setBusyProposalIds((prev) => {
-        const next = new Set(prev)
-        next.delete(id)
-        return next
-      })
-    }
-  }, [])
-
-  const reviewProposal = useCallback(
-    (proposal: ProjectBriefProposal, action: "approve" | "reject") => {
-      if (!jwt) return
-      const original = proposal
-      // A retried approve on a proposal already marked stale clears the mark
-      // optimistically — either the retry succeeds, or the catch re-marks it.
-      setStaleProposals((cur) => {
-        if (!cur.has(proposal.id)) return cur
-        const next = new Map(cur)
-        next.delete(proposal.id)
-        return next
-      })
-      // Functional single-id revert (races-F5) — see reviewMemory above.
-      setBriefProposals((cur) =>
-        cur.map((p) => (p.id === proposal.id ? { ...p, status: action === "approve" ? "approved" : "rejected" } : p)),
-      )
-      void withBusyProposal(proposal.id, async () => {
-        try {
-          const updated = await reviewBriefProposal(jwt, projectId, proposal.id, action)
-          setBriefProposals((cur) => cur.map((p) => (p.id === updated.id ? updated : p)))
-          // mem-M5: flip the matching brief.proposed chat notice, if any.
-          agentSessionStore(projectId, username).markBriefReviewed(updated.id)
-          if (action === "approve") reloadBrief()
-        } catch (err) {
-          setBriefProposals((cur) => cur.map((p) => (p.id === original.id ? original : p)))
-          // mem-M3: a stale approve (the brief moved since this was proposed)
-          // marks the card in place instead of a generic error banner —
-          // Approve stays disabled until the proposal is dropped/re-proposed.
-          if (err instanceof VersionConflictError && action === "approve") {
-            setStaleProposals((cur) => {
-              const next = new Map(cur)
-              next.set(proposal.id, { baseVersion: err.baseVersion, currentVersion: err.currentVersion })
-              return next
-            })
-            return
-          }
-          setError(err instanceof Error ? err.message : "Failed to review brief proposal.")
-        }
-      })
-    },
-    [jwt, projectId, withBusyProposal, reloadBrief],
-  )
-
   if (!jwt) {
     return <p className="p-3 text-xs text-muted-foreground">{t("agent.memory.signInNotice")}</p>
   }
 
-  if (state === "loading" && memories.length === 0 && !brief) {
+  if (state === "loading" && memories.length === 0) {
     return <p className="p-3 text-xs text-muted-foreground">{t("agent.memory.loading")}</p>
   }
 
@@ -309,6 +221,8 @@ export default function AgentMemoryTab({ projectId, roleLevel }: AgentMemoryTabP
           {error}
         </p>
       )}
+      {/* AQU-2342: what agent memory is, and where approved decisions go. */}
+      <p className="border-b px-3 py-1.5 text-[11px] text-muted-foreground">{t("agent.memory.scopeNote")}</p>
       <Tabs defaultValue="proposed" className="flex min-h-0 flex-1 flex-col px-3 py-2">
         <TabsList className="w-fit">
           <TabsTrigger value="proposed" className="gap-1.5">
@@ -320,7 +234,6 @@ export default function AgentMemoryTab({ projectId, roleLevel }: AgentMemoryTabP
             )}
           </TabsTrigger>
           <TabsTrigger value="approved">{t("agent.memory.tabApproved")}</TabsTrigger>
-          <TabsTrigger value="brief">{t("agent.memory.projectBriefTitle")}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="proposed" className="min-h-0 flex-1 overflow-y-auto pt-2">
@@ -342,19 +255,6 @@ export default function AgentMemoryTab({ projectId, roleLevel }: AgentMemoryTabP
           />
         </TabsContent>
 
-        <TabsContent value="brief" className="min-h-0 flex-1 overflow-y-auto pt-2">
-          <BriefPanel
-            brief={brief}
-            proposals={briefProposals}
-            roleLevel={roleLevel}
-            busyProposalIds={busyProposalIds}
-            staleProposals={staleProposals}
-            onSaveBrief={saveBrief}
-            onReloadBrief={reloadBrief}
-            onApproveProposal={(p) => reviewProposal(p, "approve")}
-            onRejectProposal={(p) => reviewProposal(p, "reject")}
-          />
-        </TabsContent>
       </Tabs>
 
       {supersedePrompt && (

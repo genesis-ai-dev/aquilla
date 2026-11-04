@@ -68,8 +68,9 @@ export interface SetBriefCommand {
  *  identical on purpose — see the header note on not being a cheaper door. */
 export const SET_BRIEF_REQUIRED_ROLE = ROLE.MAINTAINER
 
-/** Per-field answer cap. The brief is injected into every copilot prompt via
- *  its L1/L2, so an unbounded field is a token-budget hazard, not just a big
+/** Per-field answer cap. Until the project writes `translationInstructions`,
+ *  the brief is composed into them on read (AQU-2342) and so rides in every
+ *  drafting prompt; an unbounded field is a token-budget hazard, not just a big
  *  string. Generous enough for a real answer paragraph. */
 export const BRIEF_FIELD_MAX_CHARS = 4000
 /** Freeform notes hold the leftovers that don't fit a field — a little roomier. */

@@ -188,6 +188,8 @@ if (typeof window !== "undefined") {
   // decisions periodically; an offline or hidden tab never collects.
   let lastCheck = Date.now()
   window.setInterval(() => {
+    // A queued callback may outlive its browser environment during teardown.
+    if (typeof document === "undefined" || typeof navigator === "undefined") return
     if (analyticsAccount.getSnapshot().ready && analyticsAccount.getSnapshot().decision?.allowed && !analyticsAccount.eligible()) analyticsAccount.suspend()
     if (!document.hidden && navigator.onLine && Date.now() - lastCheck >= 60_000) {
       lastCheck = Date.now()

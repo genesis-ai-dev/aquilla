@@ -24,7 +24,7 @@ afterEach(() => {
 it("cannot finish initializing a previous account after a switch", async () => {
   vi.stubEnv("VITE_POSTHOG_KEY", "phc_test")
   const { PostHog } = await import("posthog-js/full/no-external")
-  const init = vi.spyOn(PostHog.prototype, "init").mockImplementation(function () { return this })
+  const init = vi.spyOn(PostHog.prototype, "init").mockImplementation(function (this: InstanceType<typeof PostHog>) { return this })
   let finish!: (value: ArrayBuffer) => void
   const digest = vi.spyOn(crypto.subtle, "digest").mockImplementationOnce(() => new Promise<ArrayBuffer>(resolve => { finish = resolve }))
   try {

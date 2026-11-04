@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test"
 import { AccountSwitcherPage } from "../helpers/page-objects/AccountSwitcher"
 import { resetBackend } from "../helpers/seed"
-import { ensureAuthState, injectSession, injectSessions } from "../helpers/auth"
+import { ensureAuthState, injectSessions } from "../helpers/auth"
 
 // Run against the hermetic dev stack with VITE_POSTHOG_KEY=phc_local_privacy_test
 // and a local collector. Never send these synthetic events to production.
@@ -100,7 +100,12 @@ test("withdrawal propagates to another tab and offline activity never queues", a
   await resetBackend()
   await request.get(`${collector}/_reset`)
   await page.goto("/login")
-  await injectSession(page, await ensureAuthState("alice"))
+  // Use the real login flow here: a Firefox document navigation interrupted
+  // the direct IDB insertion used by the earlier test setup.
+  await page.getByLabel("Aquilla username or email", { exact: true }).fill("alice")
+  await page.getByLabel("Password", { exact: true }).fill("alice-test-pw")
+  await page.getByRole("button", { name: "Log in", exact: true }).click()
+  await expect(page.getByRole("button", { name: "Account menu: alice", exact: true })).toBeVisible()
   await page.goto("/preferences")
   const sharing = page.getByRole("switch", { name: /share usage data/i })
   await expect(sharing).toBeEnabled()

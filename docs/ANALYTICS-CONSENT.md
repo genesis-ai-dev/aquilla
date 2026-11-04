@@ -91,3 +91,46 @@ compliance, provider retention/deletion, contracts, lawful bases or disclosures.
 
 Test setup and collector are under `e2e/privacy`; no real user project or existing
 content was edited. Preserve the combined-preview release gate described above.
+
+### Follow-up native-browser verification
+
+Native Safari Private was driven through the actual UI against the same local
+synthetic stack. The collector received zero requests on the initially checked
+privacy screen, after toggling the draft, after “Agree and continue” without
+registration, and after logging into existing Alice. Alice's Preferences remained
+OFF, proving the provisional signup choice did not grant that existing account
+permission. Turning sharing ON in Preferences produced a real `$pageview` and
+replay requests. The captured payloads contained neither the synthetic email nor
+the synthetic password.
+
+Adding Bob through the account dialog left Bob OFF. Navigation and reload with Bob
+selected produced zero collector requests. Clicking Alice in the account menu
+resumed approved page views. Turning Alice OFF then navigating and reloading again
+produced zero collector requests. No projects or content were created or changed.
+This also exercised pointer account switching, previously unverified in the final
+automated run. Native Safari's WebDriver could not create a session; the visible
+Private-window test used native UI control instead.
+
+Native Firefox UI control timed out on three attempts, so no native Firefox
+Private result is claimed. Automated Firefox engine coverage remains separate.
+
+The automated privacy matrix was repeated twice per engine: 11 passed and one
+Firefox run failed during direct session insertion because a document navigation
+destroyed that helper's execution context, before any consent assertions. The
+withdrawal case now uses the real login form. Both repetitions of that case then
+passed in all three engines (six passes); all six repeated account-isolation
+cases had already passed.
+
+The full root regression rerun passed 25,896 tests, with three audio-export
+assertion failures and one unhandled timer error during test-environment teardown.
+The export assertions now check the exact returned blob, filename and operation
+analytics argument. The consent timer now returns safely when browser globals
+have been removed, with a regression test covering that teardown.
+
+After those corrections, the combined export/analytics regression run passed all
+876 tests in 70 files (two skipped), with no unhandled errors. Type checking and
+changed-file lint passed. The entire root suite was not repeated after these
+small corrections; its earlier failures and their targeted rerun are reported
+separately rather than describing the full run as green.
+The final complete privacy matrix then passed all six cases on the corrected
+code, across Chromium, Firefox and WebKit.

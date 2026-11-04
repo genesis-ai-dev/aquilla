@@ -68,23 +68,15 @@ function DevCrashTrigger() {
 // Window-level error handlers — registered once when the module first loads.
 // They exist for chunk-reload recovery, which must run on every uncaught error.
 //
-// AQU-1572: on the web they no longer report to PostHog. posthog.ts inits with
-// `capture_exceptions: true`, which wraps window.onerror and
-// window.onunhandledrejection itself, so a capture here sent every uncaught
-// error twice.
-//
-// The desktop shell is the exception. posthog-js lazy-loads that autocapture
-// from its CDN as a <script>, and the shell's CSP (`script-src 'self'` in
-// src-tauri/tauri.conf.json) blocks it, so autocapture never starts there and
-// these handlers are the only capture. Consent-gating is baked into posthog.ts
-// either way (opt_out_capturing_by_default + onAnalyticsConsentChange).
+// Unowned global errors may originate in an inactive account’s background work.
+// Keep recovery here; optional reporting belongs to account-scoped producers.
 // ---------------------------------------------------------------------------
 if (typeof window !== "undefined") {
   window.addEventListener("error", (event: ErrorEvent) => {
     const err = event.error instanceof Error
       ? event.error
       : new Error(event.message || "Unknown window.onerror")
-    if (isTauriRuntime()) posthog.captureException(err, { source: "window.onerror" })
+    // Global errors have no reliable account owner; only scoped errors are sent.
     recoverChunk(err)
   })
 
@@ -92,7 +84,7 @@ if (typeof window !== "undefined") {
     const err = event.reason instanceof Error
       ? event.reason
       : new Error(String(event.reason ?? "Unhandled promise rejection"))
-    if (isTauriRuntime()) posthog.captureException(err, { source: "unhandledrejection" })
+    // A rejected background task may belong to an inactive account.
     recoverChunk(err)
   })
 

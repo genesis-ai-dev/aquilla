@@ -1,65 +1,69 @@
-// AQU-2093 — posthog-js loads after the page, not with it.
-//
-// WHY: the library is ~280 KB of the first load, which on a slow connection
-// is seconds before anyone can work. Deferring it must not lose anything: calls
-// made before it arrives are delivered once it does, in order, and an error
-// thrown in those first seconds is still reported.
-
-import { afterEach, describe, expect, it, vi } from "vitest"
-
-const calls: string[] = []
-const fake = {
-  init: vi.fn((key: string) => { calls.push(`init:${key}`) }),
-  register: vi.fn(() => { calls.push("register") }),
-  capture: vi.fn((event: string) => { calls.push(`capture:${event}`) }),
-  identify: vi.fn((id: string) => { calls.push(`identify:${id}`) }),
-  captureException: vi.fn((error: unknown) => { calls.push(`exception:${(error as Error).message}`) }),
-  get_session_replay_url: vi.fn(() => "https://replay"),
-}
-vi.mock("posthog-js", () => ({ default: fake }))
-// test-setup.ts stubs this module for every other test; this one is about it.
+import { afterEach, expect, it, vi } from "vitest"
+const harness = vi.hoisted(() => ({
+  state: { generation: 0, accountId: null as string | null, username: null as string | null }, approved: false,
+  listeners: new Set<() => void>(), instances: [] as Array<{ capture: ReturnType<typeof vi.fn>; identify: ReturnType<typeof vi.fn>; shutdown: ReturnType<typeof vi.fn> }>,
+}))
+vi.mock("./analytics-account", () => ({ analyticsAccount: {
+  getSnapshot: () => harness.state,
+  eligible: () => harness.approved,
+  subscribe: (fn: () => void) => { harness.listeners.add(fn) },
+  suspend: () => { harness.approved = false; harness.state.generation++; for (const fn of harness.listeners) fn() },
+} }))
+vi.mock("posthog-js/full/no-external", () => ({ PostHog: class {
+  __loaded = true
+  rateLimiter = { isServerRateLimited: vi.fn(() => false) }
+  init = vi.fn()
+  register = vi.fn()
+  identify = vi.fn()
+  capture = vi.fn()
+  captureException = vi.fn()
+  startSessionRecording = vi.fn()
+  stopSessionRecording = vi.fn()
+  shutdown = vi.fn(() => { expect(this.rateLimiter.isServerRateLimited()).toBe(true) })
+  get_session_replay_url = () => "replay"
+  constructor() { harness.instances.push(this) }
+} }))
 vi.unmock("@/lib/posthog")
-
+function change(accountId: string | null, approved: boolean) {
+  harness.state = { generation: harness.state.generation + 1, accountId, username: accountId }
+  harness.approved = approved
+  for (const listener of harness.listeners) listener()
+}
 afterEach(() => {
-  vi.unstubAllEnvs()
-  vi.resetModules()
-  calls.length = 0
+  change(null, false)
+  vi.unstubAllEnvs(); vi.resetModules()
+  harness.listeners.clear(); harness.instances.length = 0
 })
-
-describe("deferred posthog (AQU-2093)", () => {
-  it("queues calls until the library has loaded, then delivers them in order", async () => {
-    vi.stubEnv("VITE_POSTHOG_KEY", "phc_test")
-    const { default: posthog } = await import("./posthog")
-
-    posthog.capture("early_event")
-    posthog.identify("user-1")
-    expect(posthog.get_session_replay_url()).toBeUndefined()
-    expect(calls).toEqual([])
-
-    await vi.waitFor(() => expect(calls).toContain("identify:user-1"))
-    expect(calls).toEqual(["init:phc_test", "register", "capture:early_event", "identify:user-1"])
-
-    posthog.capture("late_event")
-    expect(calls.at(-1)).toBe("capture:late_event")
-    expect(posthog.get_session_replay_url()).toBe("https://replay")
-  })
-
-  it("reports an error thrown before the library arrived", async () => {
-    vi.stubEnv("VITE_POSTHOG_KEY", "phc_test")
-    await import("./posthog")
-
-    window.dispatchEvent(new ErrorEvent("error", { error: new Error("boot failure") }))
-    expect(calls).toEqual([])
-
-    await vi.waitFor(() => expect(calls).toContain("exception:boot failure"))
-  })
-
-  it("never loads the library without a key", async () => {
-    vi.stubEnv("VITE_POSTHOG_KEY", "")
-    const { default: posthog } = await import("./posthog")
-    posthog.capture("ignored")
-    await new Promise((resolve) => setTimeout(resolve, 20))
-    expect(fake.init).not.toHaveBeenCalled()
-    expect(calls).toEqual([])
-  })
+it("drops preapproval events, isolates old callbacks and prevents teardown flushing across accounts", async () => {
+  vi.stubEnv("VITE_POSTHOG_KEY", "phc_test")
+  const { default: analytics } = await import("./posthog")
+  analytics.capture("unapproved"); analytics.captureException(new Error("unapproved"))
+  expect(harness.instances).toHaveLength(0)
+  change("a", true)
+  await vi.waitFor(() => expect(harness.instances).toHaveLength(1))
+  const a = harness.instances[0]
+  const oldOperation = analytics.scope()
+  analytics.scope(undefined, "inactive").capture("inactive upload")
+  expect(a.capture).toHaveBeenCalledTimes(1)
+  analytics.capture("approved")
+  expect(a.capture.mock.calls.map((args: unknown[]) => args[0])).toEqual(["$pageview", "approved"])
+  change("b", false)
+  analytics.capture("declined"); oldOperation.capture("late A")
+  expect(a.shutdown).toHaveBeenCalledOnce()
+  expect(a.capture).toHaveBeenCalledTimes(2)
+  expect(analytics.get_session_replay_url()).toBeUndefined()
+  change("b", true)
+  await vi.waitFor(() => expect(harness.instances).toHaveLength(2))
+  const b = harness.instances[1]
+  oldOperation.capture("late A after B approves")
+  expect(b.capture).toHaveBeenCalledTimes(1)
+  expect(a.identify.mock.calls[0][0]).not.toBe(b.identify.mock.calls[0][0])
+  change(null, false)
+  expect(b.shutdown).toHaveBeenCalledOnce()
+})
+it("does not initialize without a configured project key", async () => {
+  vi.stubEnv("VITE_POSTHOG_KEY", "")
+  const { default: analytics } = await import("./posthog")
+  change("a", true); analytics.capture("ignored")
+  expect(harness.instances).toHaveLength(0)
 })

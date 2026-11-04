@@ -1,3 +1,4 @@
+import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 import { useValidatedEvidenceVersion } from "@/hooks/useValidatedEvidenceVersion"
 import { authorNameFor, useLocalAuthorName } from "@/lib/store/local-author-name"
 import { fileDisplayName } from "@/lib/file-display-name"
@@ -636,7 +637,6 @@ import {
 } from "@/lib/review/batch-file-options"
 import { BatchFileModal, type BatchFileModalRequest } from "@/components/batch/BatchFileModal"
 import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
-import posthog from "@/lib/posthog"
 import { visibleFootnoteEntriesFor } from "@/lib/footnotes/visible-entries"
 import { useExtensionEditorRev4 } from "./tools/useExtensionEditorRev4"
 import { audioEntryFromCell, audioValidationScope, audioValidationTakes } from "@/lib/audio/audio-validation-permissions"
@@ -767,6 +767,7 @@ function writeAgentTabOpen(projectId: string | undefined, open: boolean): void {
 }
 
 export function ProjectWorkspace() {
+  const analytics = useAccountAnalytics()
   const t = useT()
   // AQU-1503: the batch-validate skip clauses are joined the way a list is
   // written in the reader's language, not with a hardcoded "; ".
@@ -12001,12 +12002,12 @@ export function ProjectWorkspace() {
       source: "selection" | "workspace-action",
       repetitions: BulkRepetitionOutcome | null = null,
     ) => {
-      posthog.capture(BATCH_VALIDATE_ATTEMPTED, batchValidateTelemetry(summary, source))
+      analytics.capture(BATCH_VALIDATE_ATTEMPTED, batchValidateTelemetry(summary, source))
       const message = batchValidateToast(summary, t, formatLocaleList)
       // AQU-1486: still ONE message — the repetitions' note and Undo ride on it.
       showBulkValidateToast(message, prepareBulkRepetitionsRef.current?.toastExtras(repetitions) ?? { note: null })
     },
-    [t, formatLocaleList],
+    [t, formatLocaleList, analytics],
   )
 
   // AQU-983: the file modal writes these, then the menu action runs. Defaults

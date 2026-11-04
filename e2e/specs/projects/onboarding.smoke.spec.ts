@@ -7,13 +7,14 @@ test("welcome and privacy choice lead to signup and the app without workspace se
   test.setTimeout(120_000)
   await resetBackend()
   await page.goto("/onboarding")
+  await page.evaluate(() => localStorage.setItem("aquilla:analyticsEnabled", "false"))
   await page.getByRole("button", { name: /get started/i }).click()
   await expect(page.getByRole("switch", { name: /share usage data/i })).toBeChecked()
   // Leaving before Continue must return to the unanswered sharing screen.
   await page.goto("/login")
   await page.getByRole("link", { name: /create an account/i }).click()
   await expect(page.getByRole("switch", { name: /share usage data/i })).toBeChecked()
-  await page.getByRole("button", { name: /^continue$/i }).click()
+  await page.getByRole("button", { name: /agree and continue/i }).click()
   await page.getByRole("link", { name: /^log in$/i }).click()
   await page.getByRole("link", { name: /create an account/i }).click()
   await expect(page.getByRole("heading", { name: "Create an Aquilla Account" })).toBeVisible()
@@ -29,6 +30,8 @@ test("welcome and privacy choice lead to signup and the app without workspace se
   await page.reload()
   await expect(page.getByRole("button", { name: /account menu/i })).toBeVisible({ timeout: 30_000 })
   expect(new URL(page.url()).pathname).toMatch(/^\/orgs\//)
+  await page.goto("/preferences")
+  await expect(page.getByRole("switch", { name: /share usage data/i })).toBeChecked()
 })
 
 // Deny progress and consent storage without changing the analytics-choice
@@ -39,11 +42,11 @@ test("signup survives denied progress and consent storage across login navigatio
     const get = Storage.prototype.getItem
     const set = Storage.prototype.setItem
     Storage.prototype.getItem = function (key) {
-      if (key === "aquilla:signupStarted" || key === "aquilla:analyticsEnabled") throw new DOMException("Storage blocked", "SecurityError")
+      if (key === "aquilla:signupStarted" || key.startsWith("aquilla:signup-analytics:")) throw new DOMException("Storage blocked", "SecurityError")
       return get.call(this, key)
     }
     Storage.prototype.setItem = function (key, value) {
-      if (key === "aquilla:signupStarted" || key === "aquilla:analyticsEnabled") throw new DOMException("Storage blocked", "SecurityError")
+      if (key === "aquilla:signupStarted" || key.startsWith("aquilla:signup-analytics:")) throw new DOMException("Storage blocked", "SecurityError")
       return set.call(this, key, value)
     }
   })
@@ -52,13 +55,13 @@ test("signup survives denied progress and consent storage across login navigatio
   const sharing = page.getByRole("switch", { name: /share usage data/i })
   await expect(sharing).toBeChecked()
   await sharing.click()
-  await page.getByRole("button", { name: /^continue$/i }).click()
+  await page.getByRole("button", { name: /continue without sharing/i }).click()
   await page.getByRole("link", { name: /^log in$/i }).click()
   await page.getByRole("link", { name: /create an account/i }).click()
   await expect(page.getByRole("heading", { name: "Create an Aquilla Account" })).toBeVisible()
   await page.getByRole("button", { name: /back/i }).click()
   await expect(sharing).not.toBeChecked()
-  await page.getByRole("button", { name: /^continue$/i }).click()
+  await page.getByRole("button", { name: /continue without sharing/i }).click()
   const username = `storage${Date.now()}`
   await page.getByLabel("Username", { exact: true }).fill(username)
   await page.getByLabel("Email", { exact: true }).fill(`${username}@example.test`)

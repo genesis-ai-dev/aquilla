@@ -84,6 +84,10 @@ export const onboarding = defineNamespace({
     // "Creating…" reuses `common.creating` (identical text)
 
     // — Shared privacy/analytics vocabulary (PrivacyStep + Preferences' Privacy row) —
+    "onboarding.privacy.agreeContinue": "Agree and continue",
+    "onboarding.privacy.continueWithoutSharing": "Continue without sharing",
+    "onboarding.privacy.collectionStarts": "Sharing starts only after you agree and create your account. Your choice applies only to that account.",
+    "onboarding.privacy.saveFailed": "Sharing is off because your preference could not be loaded or saved. Check your connection and try again in Preferences.",
     "onboarding.privacy.shareUsageData": "Share usage data",
     "onboarding.privacy.disabledWarning":
       "With analytics disabled, we may not be able to help diagnose problems you encounter.",

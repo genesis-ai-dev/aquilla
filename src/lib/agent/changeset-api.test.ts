@@ -1,3 +1,4 @@
+import { analyticsAccount } from "@/lib/analytics-account"
 /**
  * changeset-api.test.ts — fetch-client contract tests for the staged-changeset
  * review flow (AQU-926). Verifies request shape (URL, method, headers, body),
@@ -223,9 +224,9 @@ describe("commitChangeset", () => {
   // AQU-1572: the worker reports what the plan applies to PostHog only when
   // this browser's analytics switch is on, and it can only know by being told.
   it.each([
-    ["true", "on"],
+    ["true", "off"],
     ["false", "off"],
-  ])("states the analytics switch on the commit (stored %s → %s)", async (stored, sent) => {
+  ])("does not inherit legacy browser consent on agent commits (stored %s → %s)", async (stored, sent) => {
     window.localStorage.setItem("aquilla:analyticsEnabled", stored)
     try {
       fetchMock
@@ -237,6 +238,17 @@ describe("commitChangeset", () => {
     } finally {
       window.localStorage.removeItem("aquilla:analyticsEnabled")
     }
+  })
+
+  it.each([false, true])("forwards only the initiating account's still-current approval (switch during mint: %s)", async switched => {
+    vi.mocked(analyticsAccount.eligibleForSession).mockReturnValue(true)
+    fetchMock.mockImplementationOnce(async () => {
+      if (switched) vi.mocked(analyticsAccount.eligibleForSession).mockReturnValue(false)
+      return jsonResponse(SYNC_TOKEN)
+    }).mockResolvedValueOnce(jsonResponse(COMMITTED))
+    await commitChangeset(JWT, PROJECT_ID, CHANGESET_ID)
+    expect(new URL(fetchMock.mock.calls[1][0] as string).searchParams.get("analytics")).toBe(switched ? "off" : "on")
+    vi.mocked(analyticsAccount.eligibleForSession).mockReturnValue(false)
   })
 
   it("mints a __project__-scoped sync token, then POSTs commit with it", async () => {

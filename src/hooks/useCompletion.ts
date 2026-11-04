@@ -1,3 +1,4 @@
+import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 // Phase 2c-gamma → AQU-174 → AQU-211: useCompletion drives the LLM stream and
 // reports per-cell completion status. Both single-cell and batch completions
 // auto-commit the generated text as an *unvalidated* cell; review happens
@@ -94,7 +95,6 @@ import {
 import type { TranslationRule } from "@/lib/parsers/types"
 import type { PassageHit } from "./useSearchIndex"
 import { useFrontierHealth, checkFrontierHealth } from "@/lib/completion/frontier-health"
-import posthog from "@/lib/posthog"
 import { memMark } from "@/lib/perf-log"
 import { effectiveSourceText } from "@/lib/cell-text"
 import { noteAbAssignment } from "@/lib/ab/feedback"
@@ -265,12 +265,13 @@ function unionStyleInstructions(
  * along here.
  */
 function captureIdmlDraftRejection(
+  analytics: ReturnType<typeof useAccountAnalytics>,
   cells: readonly { metadata?: Record<string, unknown> | null }[],
   error: unknown,
   mode: string,
 ): void {
   if (!(error instanceof IdmlCompletionError)) return
-  posthog.capture(
+  analytics.capture(
     "idml draft rejected for protected anchor",
     idmlDraftRejectionProperties({
       cells,
@@ -310,6 +311,7 @@ export function useCompletion(
    *  Fire-and-forget — never awaited, never fails a draft. */
   recordModelCall?: RecordModelCall,
 ) {
+  const analytics = useAccountAnalytics()
   const [completing, setCompleting] = useState<Map<string, string>>(new Map())
   const [examples, setExamples] = useState<Map<string, ScoredPair[]>>(new Map())
   const [errors, setErrors] = useState<Map<string, string>>(new Map())
@@ -527,7 +529,7 @@ export function useCompletion(
         signal,
         // Model A/B: remember which experiment request drafted this cell so the
         // user's validate/edit gesture can be attributed to the served model.
-        onAbAssignment: (ab) => noteAbAssignment(cell.fileId, cell.id, ab),
+        onAbAssignment: (ab) => noteAbAssignment(cell.fileId, cell.id, ab, analytics),
       })
       // AQU-685: a successful HTTP call can still yield an empty completion —
       // the model produced no content, or a streamed 200 carried only an
@@ -548,7 +550,7 @@ export function useCompletion(
       // target is untouched, and the cell shows the error badge instead.
       if (isRefusalReply(result)) {
         console.warn(`[completeSingle] model refused (not committed): ${cell.id}`)
-        posthog.capture("ai translation refused", {
+        analytics.capture("ai translation refused", {
           provider,
           model: modelName,
           mode: opts?.mode ?? "single",
@@ -561,7 +563,7 @@ export function useCompletion(
         putLaneEntry(setErrors, lk(cell.id), REFUSAL_ERROR_MESSAGE)
         return false
       }
-      posthog.capture("ai translation completed", {
+      analytics.capture("ai translation completed", {
         provider,
         model: modelName,
         source_language: sourceLanguage,
@@ -660,14 +662,14 @@ export function useCompletion(
       // AQU-670: a commit/enqueue failure lands here (commitCompletedCell
       // rethrows after reverting its optimistic patch). Record the error and
       // report failure so the caller does not show a "Saved" confirmation.
-      posthog.captureException(err instanceof Error ? err : new Error(String(err)))
-      captureIdmlDraftRejection([cell], err, opts?.mode ?? "single")
+      analytics.captureException(err instanceof Error ? err : new Error(String(err)))
+      captureIdmlDraftRejection(analytics, [cell], err, opts?.mode ?? "single")
       dropLaneEntry(setPreviews, lk(cell.id))
       putLaneEntry(setCompleting, lk(cell.id), "error")
       putLaneEntry(setErrors, lk(cell.id), err instanceof Error ? err.message : "Failed")
       return false
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, briefSummary, draftProvenance, prepareSingleEvidence, lk, recordModelCall])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, briefSummary, draftProvenance, prepareSingleEvidence, lk, recordModelCall, analytics])
 
   // Move an existing translation into the source cell's style runs. The model
   // does not rewrite the words; a placement that would change them is refused.
@@ -734,7 +736,7 @@ export function useCompletion(
         putLaneEntry(setErrors, lk(cell.id), t("editor.idml.alignStylesUnchanged"))
         return false
       }
-      posthog.capture("ai styles aligned", {
+      analytics.capture("ai styles aligned", {
         provider,
         model: modelName,
         source_language: sourceLanguage,
@@ -787,12 +789,12 @@ export function useCompletion(
         dropLaneEntry(setCompleting, lk(cell.id))
         return false
       }
-      posthog.captureException(err instanceof Error ? err : new Error(String(err)))
+      analytics.captureException(err instanceof Error ? err : new Error(String(err)))
       putLaneEntry(setCompleting, lk(cell.id), "error")
       putLaneEntry(setErrors, lk(cell.id), err instanceof Error ? err.message : "Failed")
       return false
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, lk, recordModelCall])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, lk, recordModelCall, analytics])
 
   const askAlignStyles = useCallback(async (
     messages: readonly IdmlRepairMessage[],
@@ -863,7 +865,7 @@ export function useCompletion(
         .filter((chunk) => chunk.length > 0)
       : fixedSlices(cells, MAX_CELLS_PER_CALL)
 
-    posthog.capture("ai batch translation started", {
+    analytics.capture("ai batch translation started", {
       provider,
       model: modelName,
       source_language: sourceLanguage,
@@ -1028,7 +1030,7 @@ export function useCompletion(
               // Model A/B: one batch request drafts every cell in the chunk; the
               // first gesture on any of them reports (server keeps one outcome).
               onAbAssignment: (ab) => {
-                for (const c of chunk) noteAbAssignment(c.fileId, c.id, ab)
+                for (const c of chunk) noteAbAssignment(c.fileId, c.id, ab, analytics)
               },
             })
             lastErr = undefined
@@ -1071,7 +1073,7 @@ export function useCompletion(
             skippedCount += 1
           }
           if (skippedCount > 0) incrementBatchCompletionFailed(runId, skippedCount)
-          posthog.captureException(lastErr instanceof Error ? lastErr : new Error(String(lastErr)))
+          analytics.captureException(lastErr instanceof Error ? lastErr : new Error(String(lastErr)))
           chunkFailed = true
         }
 
@@ -1124,8 +1126,8 @@ export function useCompletion(
               })
             } catch (err) {
               if (err instanceof DOMException && err.name === "AbortError") throw err
-              posthog.captureException(err instanceof Error ? err : new Error(String(err)))
-              captureIdmlDraftRejection([cell], err, "batch")
+              analytics.captureException(err instanceof Error ? err : new Error(String(err)))
+              captureIdmlDraftRejection(analytics, [cell], err, "batch")
               dropLaneEntry(setPreviews, lk(cell.id))
               putLaneEntry(setCompleting, lk(cell.id), "error")
               putLaneEntry(setErrors, lk(cell.id), err instanceof Error ? err.message : "Failed")
@@ -1212,8 +1214,8 @@ export function useCompletion(
             continue
           }
           const err = outcome.reason
-          posthog.captureException(err instanceof Error ? err : new Error(String(err)))
-          captureIdmlDraftRejection([cell], err, "batch")
+          analytics.captureException(err instanceof Error ? err : new Error(String(err)))
+          captureIdmlDraftRejection(analytics, [cell], err, "batch")
           putLaneEntry(setCompleting, lk(cell.id), "error")
           putLaneEntry(setErrors, lk(cell.id), err instanceof Error ? err.message : "Failed")
           incrementBatchCompletionFailed(runId, 1)
@@ -1245,7 +1247,7 @@ export function useCompletion(
         // If we broke out of the inner loop due to supersession, stop chunks.
         if (isBatchCompletionCancelled(runId)) break
 
-        posthog.capture("ai batch translation chunk completed", {
+        analytics.capture("ai batch translation chunk completed", {
           provider,
           model: modelName,
           cell_count: chunk.length,
@@ -1286,7 +1288,7 @@ export function useCompletion(
       clearBatchCompletionProgress(runId)
       memMark(`completeBatch.end(${cells.length}c)`)
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, completeSingle, commitCompletedCell, commitCompletedCells, rules, styleInstructionsFor, getAllCells, briefSummary, draftContext, draftProvenance, lk, recordModelCall])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, completeSingle, commitCompletedCell, commitCompletedCells, rules, styleInstructionsFor, getAllCells, briefSummary, draftContext, draftProvenance, lk, recordModelCall, analytics])
 
   // completeParagraph: draft a whole paragraph group as ONE model call, fan results
   // out to per-cell commits via the existing commitCompletedCell path (D3, D11).
@@ -1411,7 +1413,7 @@ export function useCompletion(
         signal,
         // Model A/B: the paragraph request drafts the whole group.
         onAbAssignment: (ab) => {
-          for (const c of draftCells) noteAbAssignment(c.fileId, c.id, ab)
+          for (const c of draftCells) noteAbAssignment(c.fileId, c.id, ab, analytics)
         },
       })
 
@@ -1463,7 +1465,7 @@ export function useCompletion(
         // like an empty one — flag it and NEVER commit the boilerplate.
         if (isRefusalReply(text)) {
           console.warn(`[completeParagraph] model refused for cell (not committed): ${cellId}`)
-          posthog.capture("ai translation refused", {
+          analytics.capture("ai translation refused", {
             provider,
             model: modelName,
             mode: "paragraph",
@@ -1523,7 +1525,7 @@ export function useCompletion(
         })
       }
 
-      posthog.capture("ai paragraph translation completed", {
+      analytics.capture("ai paragraph translation completed", {
         provider,
         model: modelName,
         source_language: sourceLanguage,
@@ -1544,8 +1546,8 @@ export function useCompletion(
         }
         return
       }
-      posthog.captureException(err instanceof Error ? err : new Error(String(err)))
-      captureIdmlDraftRejection(draftCells, err, "paragraph")
+      analytics.captureException(err instanceof Error ? err : new Error(String(err)))
+      captureIdmlDraftRejection(analytics, draftCells, err, "paragraph")
       const msg = err instanceof Error ? err.message : "Failed"
       for (const c of draftCells) {
         // Don't relabel a cell that was already committed before the failure —
@@ -1558,7 +1560,7 @@ export function useCompletion(
         putLaneEntry(setErrors, lk(c.id), msg)
       }
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, getAllCells, briefSummary, draftContext, draftProvenance, lk, recordModelCall])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, getAllCells, briefSummary, draftContext, draftProvenance, lk, recordModelCall, analytics])
 
   /**
    * AQU-913: forget a cell's failure entirely — the visible message AND the

@@ -1,4 +1,5 @@
 import { test, expect, orgRoute } from "../../helpers/multi-user"
+import { Workspace } from "../../helpers/page-objects/Workspace"
 
 /**
  * Route-health sweep: every named route renders without a crash boundary
@@ -80,5 +81,5 @@ test("first offline editor visit explains the missing screen and recovers on rec
   await expect(alice.locator('[data-slot="error-boundary-fallback"]')).not.toBeVisible()
   await expect(alice.getByRole("button", { name: /Account menu: alice/ })).toBeVisible()
   await expect(alice.getByText("Connect to load this screen", { exact: true })).not.toBeVisible()
-  await expect(alice.locator("[data-cell-id]").first()).toBeVisible()
+  await new Workspace(alice).waitForEditor(seeded.cellIds[0])
 })

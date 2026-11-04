@@ -660,16 +660,13 @@ function DataTable<TData, TValue>({
             </TableHeader>
             <TableBody>
               {loading ? (
+                // One cursor where the first row will start; the rows below
+                // keep the table's height so the page does not jump.
                 Array.from({ length: SKELETON_ROW_COUNT }, (_, row) => (
                   <TableRow key={`skeleton-${row}`} className="hover:bg-transparent">
-                    {Array.from({ length: visibleColumnCount }, (_, col) => (
-                      <TableCell
-                        key={col}
-                        className={dense ? "py-1.5" : "py-2.5"}
-                      >
-                        <LoadingCursor />
-                      </TableCell>
-                    ))}
+                    <TableCell colSpan={visibleColumnCount} className={dense ? "py-1.5" : "py-2.5"}>
+                      {row === 0 ? <LoadingCursor /> : <span className="inline-block h-[1em]" />}
+                    </TableCell>
                   </TableRow>
                 ))
               ) : hasRows ? (

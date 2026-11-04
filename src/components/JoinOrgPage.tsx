@@ -147,7 +147,7 @@ function OrgInvitation({ token }: { token?: string }) {
     } catch (err) {
       const status = err instanceof UserError ? err.status : undefined
       if (status === 403) {
-        setError("This invite was sent to a different email address. Sign in with the invited account.")
+        setError("This invite was sent to a different email address. Log in with the invited account.")
       } else if (status === 410) {
         setError("This invite link has expired or was already used. Ask the org owner for a fresh one.")
       } else if (status === 404) {
@@ -288,7 +288,7 @@ function OrgInvitation({ token }: { token?: string }) {
         {authMode !== "forgot" && (
           <p className="text-sm text-muted-foreground">
             {authMode === "login"
-              ? "Sign in to accept your invitation."
+              ? "Log in to accept your invitation."
               : "Create an account to accept your invitation."}
           </p>
         )}
@@ -320,7 +320,7 @@ function OrgInvitation({ token }: { token?: string }) {
           >
             {authMode === "login"
               ? "Need an account? Sign up"
-              : "Already have an account? Sign in"}
+              : "Already have an account? Log in"}
           </button>
         )}
       </CardContent>

@@ -924,7 +924,7 @@ describe("OrgOverview signed-out state", () => {
     renderMemberOverview()
 
     await waitFor(() => {
-      expect(screen.getByRole("link", { name: /sign in/i })).toBeInTheDocument()
+      expect(screen.getByRole("link", { name: /log in/i })).toBeInTheDocument()
     })
 
     // The stat rollup cards must not be present — they'd show meaningless zeros.
@@ -938,7 +938,7 @@ describe("OrgOverview signed-out state", () => {
 
     renderMemberOverview()
 
-    const link = await screen.findByRole("link", { name: /sign in/i })
+    const link = await screen.findByRole("link", { name: /log in/i })
     expect(link.getAttribute("href")).toMatch(/\/login\?next=/)
   })
 })

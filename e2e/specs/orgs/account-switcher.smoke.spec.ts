@@ -212,8 +212,8 @@ test("logout and second-user sign-in survive unavailable private storage", async
     "/project/private-storage-project/editor",
   ]) {
     await alice.goto(path)
-    await expect(alice.getByText("Sign in to see your workspace")).toBeVisible({ timeout: 30_000 })
-    await expect(alice.getByRole("link", { name: "Sign in", exact: true })).toHaveAttribute(
+    await expect(alice.getByText("Log in to see your workspace")).toBeVisible({ timeout: 30_000 })
+    await expect(alice.getByRole("link", { name: "Log in", exact: true })).toHaveAttribute(
       "href",
       `/login?next=${encodeURIComponent(path)}`,
     )
@@ -222,7 +222,7 @@ test("logout and second-user sign-in survive unavailable private storage", async
   }
 
   await alice.goto("/orgs/all")
-  await alice.getByRole("link", { name: "Sign in" }).click()
+  await alice.getByRole("link", { name: "Log in" }).click()
 
   await alice.getByLabel("Username or email").fill(bob.username)
   await alice.getByRole("textbox", { name: "Password" }).fill(bob.password)
@@ -274,7 +274,7 @@ test("logout clears local access when revocation never responds", async ({ alice
     await new AccountSwitcherPage(alice).logOutCurrentAccount("alice")
     await expect(alice.getByRole("button", { name: "Log in", exact: true })).toBeVisible({ timeout: 30_000 })
     await alice.reload()
-    await expect(alice.getByText("Sign in to see your workspace")).toBeVisible()
+    await expect(alice.getByText("Log in to see your workspace")).toBeVisible()
   } finally {
     release()
     await alice.unrouteAll({ behavior: "wait" })

@@ -33,7 +33,6 @@ import {
   Film,
   FolderInput,
   FolderPlus,
-  GripVertical,
   Link2,
   LocateFixed,
   Magnet,
@@ -611,7 +610,7 @@ export interface TimelineEditorProps {
    * and negative values are normal, and only the named track changes.
    *
    * ABSENT IS THE PERMISSION GATE, and it withholds the whole affordance: no
-   * pointerdown handler, no grip, no grab cursor, no tab stop. Rendering a
+   * pointerdown handler and no tab stop. Rendering a
    * draggable-looking row that mints a 403 on release is the same lie
    * `hideTimingMode` was added to stop telling — a control you cannot use is
    * worse than no control, because you have to try it to find out.
@@ -974,8 +973,7 @@ function LaneLabel({
     // print across the label below it rather than being cut off by it.
     //
     // Stage 3: THE WHOLE LABEL IS THE DRAG HANDLE (Sam: "dragging on the
-    // name"). The grip beside the dot is an affordance and nothing more — it
-    // has no handler of its own, so there is no thin target to hunt for.
+    // name"). There is no separate grip — the row itself is the target.
     // `role="listitem"` and deliberately NOT `role="button"`: the app's
     // keyboard layer treats buttons as controls that refuse Space
     // (`spacebarShouldToggle`), so a focused label would silently kill the
@@ -1034,7 +1032,7 @@ function LaneLabel({
         // row that shipped. `touch-none` for the same reason TimelineCard has
         // it: without it the browser claims a vertical drag as a scroll gesture
         // and the pointer stream stops mid-drag.
-        reorder && "group relative cursor-grab touch-none select-none outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-500",
+        reorder && "group relative touch-none select-none outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-500",
         // 2026-08-27 (Sam): THE FOLDER ROW IS A GREY BAND, continuous across
         // both columns — TimelineFolderLane paints the same token on its half.
         // Opaque and lifted above the gutter's edge rule (z-30 over the
@@ -1048,7 +1046,7 @@ function LaneLabel({
         // is still drawn where it always was — the other rows deliberately do
         // NOT part (see the gutter's comment), so the only thing separating the
         // travelling row from the stationary one underneath is this.
-        lifted && "z-10 cursor-grabbing bg-background opacity-90 shadow-lg",
+        lifted && "z-10 bg-background opacity-90 shadow-lg",
         // The selection tint. AFTER the lift, so a row being dragged keeps its
         // opaque background and does not read as translucent over the rows it
         // passes; before `className`, so a caller can still override.
@@ -1090,18 +1088,6 @@ function LaneLabel({
           lifted-row background still span the full gutter. */}
       <div className={cn("flex min-w-0 flex-col gap-0.5", indented && !collapsed && "pl-3.5")}>
         <span className="flex min-w-0 items-center gap-1.5 text-xs font-semibold text-foreground">
-          {/* An <svg> inside the existing name span, and it MUST NOT grow a
-              `span.font-semibold` of its own: the gutter parity test reads the
-              track names by selecting exactly that class and mapping
-              textContent, so a wrapper here would read back as a nameless
-              extra row. An icon contributes no text, so the names are
-              untouched. */}
-          {reorder && !collapsed && (
-            <GripVertical
-              data-testid={`tl-track-grip-${reorder.trackId}`}
-              className="-ml-1.5 h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-30 transition-opacity group-hover:opacity-100"
-            />
-          )}
           {/* AQU-646 stage 2: a folder's disclosure control stands where every
               other row's colour dot stands, so the column of glyphs stays a
               column. A real <button>, which also means `beginTrackDrag`'s

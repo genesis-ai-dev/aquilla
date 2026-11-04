@@ -4268,8 +4268,8 @@ describe("TimelineEditor — the track gutter collapses and expands", () => {
   it("keeps the rows countable, so dragging still works collapsed", () => {
     // `beginTrackDrag` bails outright when the `[data-tl-track-row]` count
     // disagrees with the rendered tracks — no error, no partial behaviour, just
-    // a dead drag. Collapsing takes the GRIP away (there is no room for it) but
-    // the whole row is the handle, so the count must not move with it.
+    // a dead drag. Collapsing hides the name, but the whole row is the handle,
+    // so the count must not move with it.
     render(editor())
     const before = gutter().querySelectorAll("[data-tl-track-row]").length
     expect(before).toBe(3)
@@ -5591,7 +5591,7 @@ describe("TimelineEditor — captions becoming a linked video's rows (AQU-1566)"
     fileId: "f1", coreMediaUrl: null, editable: true, cells: [] as CellData[],
     onRetimeSubtitle: () => {}, tracks, textTrackCells: {},
   }
-  // A maintainer always has the reorder grip, which is what marks the rows.
+  // A maintainer can reorder, which is what marks the rows.
   const menuBase = { ...base, onReorderTrack: vi.fn() }
   const gutterRow = (name: string) => [...screen.getByTestId("tl-scroll").previousElementSibling!
     .querySelectorAll<HTMLElement>("[data-tl-track-row]")]

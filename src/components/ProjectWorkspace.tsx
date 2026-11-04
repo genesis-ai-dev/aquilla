@@ -13616,7 +13616,7 @@ export function ProjectWorkspace() {
   // Stage 3: track order is PROJECT-WIDE (Sam's call) and rides `file.track.set`,
   // which the server floors at maintainer — the same clearance, read the same
   // way, as the timing mode beside it. The gate is "don't pass the callback":
-  // below the floor the gutter has no grip, no grab cursor and no tab stop.
+  // below the floor the gutter has no tab stop.
   const trackRoleLevel = serverRoleLevel ?? project?.syncRole?.level ?? 0
   const canReorderTracks = trackRoleLevel >= ROLE.MAINTAINER
   // AQU-646 stage 2 / AQU-2214: RESTRUCTURING is doubly gated — the same

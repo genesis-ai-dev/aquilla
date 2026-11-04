@@ -11,7 +11,7 @@
 // wide enough to spend real timeline on, and too narrow to show a name — a
 // two-word track truncated, which is what prompted the request. Splitting it
 // gives each state one job. Expanded is sized to show the longest name the app
-// generates plus a grip, a dot, a speaker and the `⋯` with room to spare;
+// generates plus a dot, a speaker and the `⋯` with room to spare;
 // collapsed keeps only the glyphs that stay meaningful without words.
 //
 // DEFAULT EXPANDED. The names are the reason the gutter exists, and a file that
@@ -35,7 +35,7 @@ export const GUTTER_COLLAPSED_PX = 56
 
 /** "Fully expanded" — Sam's words. Sized off the longest label this build
  *  produces ("Source text" / "takes · generated", plus a user's own track names,
- *  which run longer) with the grip, dot, speaker and `⋯` all present. */
+ *  which run longer) with the dot, speaker and `⋯` all present. */
 export const GUTTER_EXPANDED_PX = 240
 
 /** The width of the gutter column in px, for the grid template. */

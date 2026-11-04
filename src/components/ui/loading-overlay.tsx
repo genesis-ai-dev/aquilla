@@ -3,14 +3,14 @@ import { createPortal } from "react-dom"
 
 import { cn } from "@/lib/utils"
 import { LoadingCursor } from "@/components/ui/loading-cursor"
-import { Spinner } from "@/components/ui/spinner"
 
-/** The shared spinner pill shown centered on every loading overlay. */
+/** The shared status pill shown centered on every loading overlay: the
+ *  label is "typed" with the cursor blinking after it, like a prompt. */
 function LoadingStatusPill({ label, detail }: { label: string; detail?: ReactNode }) {
   return (
-    <div className="flex items-center gap-3 rounded-lg border bg-background/90 px-4 py-2 text-sm text-muted-foreground shadow-sm backdrop-blur-sm">
-      <Spinner aria-hidden="true" className="size-5" />
+    <div className="flex items-center gap-1.5 rounded-lg border bg-background/90 px-4 py-2 text-sm text-muted-foreground shadow-sm backdrop-blur-sm">
       <span>{label}…{detail}</span>
+      <LoadingCursor />
     </div>
   )
 }

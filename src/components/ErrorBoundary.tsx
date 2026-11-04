@@ -122,11 +122,15 @@ if (typeof window !== "undefined") {
 function ErrorFallback({
   onReload,
   isChunkError,
+  offlineChunk,
+  online,
   compact,
   boundary,
 }: {
   onReload: () => void
   isChunkError?: boolean
+  offlineChunk?: boolean
+  online?: boolean
   compact?: boolean
   /** Which boundary is showing, mirrored into `data-boundary` — see the
    * data-slot note below. */
@@ -151,15 +155,17 @@ function ErrorFallback({
           <AlertTriangle className="h-10 w-10" aria-hidden />
         </div>
         <h3 className="text-base font-medium">
-          {isChunkError ? "App updated — reload needed" : "Something went wrong"}
+          {offlineChunk ? t("workspace.errorBoundary.offlineTitle") : isChunkError ? "App updated — reload needed" : "Something went wrong"}
         </h3>
         <p className="text-sm text-muted-foreground">
-          {isChunkError
+          {offlineChunk
+            ? t(online ? "workspace.errorBoundary.reconnectedDescription" : "workspace.errorBoundary.offlineDescription")
+            : isChunkError
             ? "A new version of the app was deployed. Your work is saved locally — reload to pick it up."
             : "An unexpected error occurred. Your work is saved locally — reload to continue."}
         </p>
         <div className="mt-2">
-          <Button type="button" variant="outline" onClick={onReload}>
+          <Button type="button" variant="outline" disabled={offlineChunk && !online} onClick={onReload}>
             {t("workspace.errorBoundary.reload")}
           </Button>
         </div>
@@ -192,16 +198,33 @@ interface Props {
 interface State {
   hasError: boolean
   isChunkError: boolean
+  offlineChunk: boolean
+  online: boolean
 }
 
 export class ErrorBoundary extends Component<Props, State> {
   constructor(props: Props) {
     super(props)
-    this.state = { hasError: false, isChunkError: false }
+    this.state = { hasError: false, isChunkError: false, offlineChunk: false, online: navigator.onLine }
   }
 
   static getDerivedStateFromError(error: Error): State {
-    return { hasError: true, isChunkError: isChunkLoadError(error) }
+    const chunk = isChunkLoadError(error)
+    return { hasError: true, isChunkError: chunk, offlineChunk: chunk && !navigator.onLine, online: navigator.onLine }
+  }
+
+  // Keep the offline explanation after reconnect; a rejected React.lazy import
+  // is cached, so resetting this boundary alone cannot retry the screen.
+  private updateConnection = () => this.setState({ online: navigator.onLine })
+
+  componentDidMount() {
+    window.addEventListener("online", this.updateConnection)
+    window.addEventListener("offline", this.updateConnection)
+  }
+
+  componentWillUnmount() {
+    window.removeEventListener("online", this.updateConnection)
+    window.removeEventListener("offline", this.updateConnection)
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
@@ -228,7 +251,7 @@ export class ErrorBoundary extends Component<Props, State> {
   /** Clears the boundary so the subtree remounts — the in-place recovery a
    * panel-level fallback offers instead of a page reload. */
   private handleReset = () => {
-    this.setState({ hasError: false, isChunkError: false })
+    this.setState({ hasError: false, isChunkError: false, offlineChunk: false })
   }
 
   render() {
@@ -242,6 +265,8 @@ export class ErrorBoundary extends Component<Props, State> {
         <ErrorFallback
           onReload={this.handleReload}
           isChunkError={this.state.isChunkError}
+          offlineChunk={this.state.offlineChunk}
+          online={this.state.online}
           compact={this.props.compact}
           boundary={this.props.label ?? "root"}
         />

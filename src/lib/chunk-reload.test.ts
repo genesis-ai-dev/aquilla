@@ -61,6 +61,7 @@ describe("isChunkLoadError", () => {
     expect(isChunkLoadError(new Error(FIREFOX))).toBe(true)
     expect(isChunkLoadError(new Error(SAFARI))).toBe(true)
     expect(isChunkLoadError("Loading chunk 42 failed")).toBe(true)
+    expect(isChunkLoadError(new Error("Unable to preload CSS for /assets/editor.css"))).toBe(true)
   })
 
   it("leaves ordinary application errors alone", () => {

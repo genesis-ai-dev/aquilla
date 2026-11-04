@@ -41,6 +41,7 @@ const CHUNK_LOAD_PATTERNS = [
   "Importing a module script failed",
   "Loading chunk",
   "ChunkLoadError",
+  "Unable to preload CSS for",
 ]
 
 export function isChunkLoadError(err: unknown): boolean {

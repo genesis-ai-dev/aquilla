@@ -59,3 +59,26 @@ test("all project-level routes render without errors", async ({ alice }) => {
     await expect(alice.locator("vite-error-overlay")).not.toBeAttached()
   }
 })
+
+// AQU-2377: a fresh document has never downloaded the editor's lazy assets.
+test("first offline editor visit explains the missing screen and recovers on reconnect", async ({ alice }) => {
+  const { jwtFor, seedProjectWithFile } = await import("../../helpers/seed-project")
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: "Cold offline editor" })
+  await alice.goto(`/projects/${seeded.projectId}`)
+  await expect(alice.getByRole("button", { name: "Open project", exact: true })).toBeVisible()
+  await alice.context().setOffline(true)
+  try {
+    await alice.getByRole("button", { name: "Open project", exact: true }).click()
+    await expect(alice.getByText("Connect to load this screen", { exact: true })).toBeVisible()
+    await expect(alice.getByText("Something went wrong", { exact: true })).not.toBeVisible()
+    await expect(alice.getByRole("button", { name: "Reload", exact: true })).toBeDisabled()
+  } finally {
+    await alice.context().setOffline(false)
+  }
+  await expect(alice.getByRole("button", { name: "Reload", exact: true })).toBeEnabled()
+  await alice.getByRole("button", { name: "Reload", exact: true }).click()
+  await expect(alice.locator('[data-slot="error-boundary-fallback"]')).not.toBeVisible()
+  await expect(alice.getByRole("button", { name: /Account menu: alice/ })).toBeVisible()
+  await expect(alice.getByText("Connect to load this screen", { exact: true })).not.toBeVisible()
+  await expect(alice.locator("[data-cell-id]").first()).toBeVisible()
+})

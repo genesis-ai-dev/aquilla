@@ -320,3 +320,44 @@ describe("vite:preloadError", () => {
     expect(reloadSpy).not.toHaveBeenCalled()
   })
 })
+
+// AQU-2377: do not mistake first-use asset downloads for app crashes or deploys.
+describe("offline screen assets", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it.each([
+    "Unable to preload CSS for https://app.test/assets/editor.css",
+    "Failed to fetch dynamically imported module: https://app.test/assets/editor.js",
+  ])("waits for connectivity and explicit reload: %s", message => {
+    const online = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false)
+    const reload = vi.fn()
+    Object.defineProperty(window, "location", { value: { ...window.location, reload }, writable: true })
+    function MissingAsset(): never { throw new Error(message) }
+    render(<ErrorBoundary><MissingAsset /></ErrorBoundary>)
+    expect(screen.getByText("Connect to load this screen")).toBeInTheDocument()
+    const button = screen.getByRole("button", { name: "Reload" })
+    expect(button).toBeDisabled()
+    expect(reload).not.toHaveBeenCalled()
+    online.mockReturnValue(true)
+    fireEvent(window, new Event("online"))
+    expect(button).toBeEnabled()
+    expect(screen.getByText(/Your browser is back online/)).toBeInTheDocument()
+    expect(reload).not.toHaveBeenCalled()
+    online.mockReturnValue(false)
+    fireEvent(window, new Event("offline"))
+    expect(button).toBeDisabled()
+    online.mockReturnValue(true)
+    fireEvent(window, new Event("online"))
+    fireEvent.click(button)
+    expect(reload).toHaveBeenCalledOnce()
+  })
+
+  it("keeps ordinary offline render exceptions on the crash path", () => {
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(false)
+    render(<ErrorBoundary><AlwaysThrows /></ErrorBoundary>)
+    expect(screen.getByText("Something went wrong")).toBeInTheDocument()
+    expect(screen.queryByText("Connect to load this screen")).not.toBeInTheDocument()
+  })
+})

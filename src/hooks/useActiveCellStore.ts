@@ -3208,6 +3208,13 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     inFlightRef.current = true
     // A full fetch supersedes any queued soft one.
     if (!soft) pendingSoftRefetchRef.current = false
+    // A full fetch is loading from the moment it is asked for, not from the
+    // moment the sync token and the cache read (two async hops) resolve. The
+    // project socket can open inside that window, and with zero rows and no
+    // loading flag the editor then read "<file> is empty" for a frame — a
+    // flash for people, and a gap with no busy region that let the Jev
+    // readiness gate through onto a file still loading (QA job 1853).
+    if (!soft) setIsLoading(true)
 
     // Tauri offline branch: an offline-ready project's cells live in the
     // local LiveStore `cells` table (kept live-synced by the Phase 3 sync

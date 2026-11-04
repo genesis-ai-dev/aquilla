@@ -27,7 +27,7 @@ import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import { DiscoveredFormsChips } from "@/components/terminology/DiscoveredFormsChips"
 import { MatchOptionsFields } from "@/components/terminology/MatchOptionsFields"
 import { previewConceptMatches } from "@/lib/terminology/discover-forms"
-import { hasCombiningMarks, pruneMatch, resolveMatchOptions } from "@/lib/terminology/match-options"
+import { hasFoldableDiacritics, pruneMatch, resolveMatchOptions } from "@/lib/terminology/match-options"
 import type { ConceptDraft, TermMatchingSettings, TermMatchOptions } from "@/lib/terminology/types"
 
 /**
@@ -165,10 +165,13 @@ export function AddConceptPopover({
   )
   const forms = preview?.forms ?? []
   const count = preview?.cellCount ?? 0
-  // Offer the fold-marks toggle only where marks actually exist — on plain
-  // Latin text it is a checkbox that can never change an answer.
+  // Offer the fold-marks toggle only where foldable diacritics actually exist
+  // — on plain Latin text it is a checkbox that can never change an answer.
+  // Greek counts (AQU-1936): its accents are precomposed, so the term is
+  // folded by default and the user needs the toggle to turn that off.
   const showFoldMarks = useMemo(
-    () => hasCombiningMarks(term) || (cells?.some((c) => hasCombiningMarks(c.original)) ?? false),
+    () =>
+      hasFoldableDiacritics(term) || (cells?.some((c) => hasFoldableDiacritics(c.original)) ?? false),
     [term, cells],
   )
   const hasAffixInventory = resolved.prefixes.length > 0 || resolved.suffixes.length > 0

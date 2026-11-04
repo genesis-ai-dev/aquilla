@@ -21,6 +21,14 @@
 // names that recording ("Your recording"), with a microphone for its mark,
 // not the default voice — the Audio view's field did; the circle does now
 // (AQU-1758).
+//
+// AQU-1279: the hover also names the CAMERA ANGLE when the line carries one.
+// The circle is the only place the editor's source side says who speaks a
+// line, so it was also the only place that could say whether the camera is on
+// them — and it did not, which is why an imported angle appeared nowhere in
+// the editor even though the importer had stored it and both exports wrote it
+// back out. The wording comes from `cameraLabel`, the one place camera states
+// are put into words, so the editor cannot drift from the timeline lens.
 
 import { useState } from "react"
 import { Mic, Plus } from "lucide-react"
@@ -30,6 +38,8 @@ import { NoCharacterAvatar, VoiceAvatar } from "./VoiceAvatar"
 import { VoicePickerContent } from "./VoiceCombobox"
 import type { Voice } from "@/lib/parsers/types"
 import type { CastScope } from "@/lib/audio/character-cast"
+import type { CameraState } from "@/lib/sync/cells-read-types"
+import { cameraLabel } from "@/lib/timeline/cue-character"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 export interface CastGutterVoiceProps {
@@ -40,6 +50,8 @@ export interface CastGutterVoiceProps {
   explicit: boolean
   /** The diarized/VTT speaker name, when the cell carries one. */
   castName: string | null
+  /** This line's camera angle, when the cell carries one (AQU-1279). */
+  cameraState?: CameraState | null
   /** False (read-only surfaces): the circle is informational, no picker. */
   editable: boolean
   voices: Voice[]
@@ -61,7 +73,7 @@ export interface CastGutterVoiceProps {
   takeLabel?: string
 }
 
-export function CastGutterVoice({ voice, explicit, castName, editable, voices, onPick, onClear, countSpeakerLines, showLanguageBadge = false, onAddVoice, takeLabel }: CastGutterVoiceProps) {
+export function CastGutterVoice({ voice, explicit, castName, cameraState, editable, voices, onPick, onClear, countSpeakerLines, showLanguageBadge = false, onAddVoice, takeLabel }: CastGutterVoiceProps) {
   const t = useT()
   const [open, setOpenState] = useState(false)
   const [speakerLines, setSpeakerLines] = useState<number | null>(null)
@@ -78,13 +90,20 @@ export function CastGutterVoice({ voice, explicit, castName, editable, voices, o
   const pickScope: CastScope = castName ? scope : "line"
   // Hover text leads with the CHARACTER (Sam 2026-08-07) — the voice is the
   // detail, the name is the answer to "who is this circle?".
-  const tooltip = explicit
+  const castText = explicit
     ? castName && castName !== voice.name
       ? t("audio.castGutter.namedTooltip", { castName, voiceName: voice.name })
       : voice.name
     : takeLabel
       ? t("audio.castGutter.recordingTooltip", { label: takeLabel })
       : t("audio.castGutter.defaultTooltip", { voiceName: voice.name })
+  // AQU-1279: appended rather than folded into each of the three messages
+  // above — the angle is a fact about the LINE, not about which of the cast
+  // states it is in, so it reads the same whoever is (or is not) cast.
+  const camera = cameraLabel(cameraState ?? undefined)
+  const tooltip = camera
+    ? t("audio.castGutter.cameraTooltip", { label: castText, camera })
+    : castText
   const recording = !explicit && Boolean(takeLabel)
   const avatarPx = 32
   const trigger = (

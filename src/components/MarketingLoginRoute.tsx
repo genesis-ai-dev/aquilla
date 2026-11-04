@@ -48,7 +48,6 @@ export function MarketingLoginRoute() {
     return () => {
       cancelled = true
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adopt, loading, navigate, t])
 
   return (

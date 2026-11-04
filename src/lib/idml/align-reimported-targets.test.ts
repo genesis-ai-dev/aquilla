@@ -14,6 +14,7 @@ import {
   pairedCellsForIdmlAlignment,
   type IdmlReimportAlignCell,
 } from "./align-reimported-targets"
+import { emptyIdmlEditableHtml } from "./preview-segment"
 
 const IDML_MIME = "application/vnd.adobe.indesign-idml-package"
 const IDPKG = 'xmlns:idPkg="http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging"'
@@ -99,6 +100,55 @@ describe("IDML re-import style alignment", () => {
     expect(ask).not.toHaveBeenCalled()
     expect(outcome.aligned).toHaveLength(0)
     expect(outcome.unchanged).toBe(1)
+  })
+
+  it("passes an unstyled preview into its style run without a model call", async () => {
+    const unit = await parsedUnit(["Hello WORLD"])
+    const cell: IdmlReimportAlignCell = {
+      ...legacyCell(unit, "preview", "Bonjour MONDE"),
+      translatedHtml: emptyIdmlEditableHtml(unit.sourceHtml, unit.metadata),
+    }
+    const ask = vi.fn()
+
+    const outcome = await alignReimportedIdmlTargets([cell], ask)
+
+    expect(idmlReimportPlacement(cell)).toBe("single")
+    expect(ask).not.toHaveBeenCalled()
+    expect(outcome.aligned).toHaveLength(1)
+    const checked = validateIdmlTranslation(
+      unit.sourceHtml,
+      outcome.aligned[0]!.completion.valueHtml!,
+      unit.metadata,
+    )
+    expect(checked.valid).toBe(true)
+    expect(checked.slots.join("")).toBe("Bonjour MONDE")
+  })
+
+  it("aligns an unstyled preview whose runs are not bold", async () => {
+    const unit = await parsedStyled([
+      ["CharacterStyle/Plain", "Hello "],
+      ["CharacterStyle/Plain", "WORLD"],
+    ])
+    const cell: IdmlReimportAlignCell = {
+      ...legacyCell(unit, "plain-preview", "Bonjour MONDE"),
+      translatedHtml: emptyIdmlEditableHtml(unit.sourceHtml, unit.metadata),
+    }
+    const ask = vi.fn().mockResolvedValue(JSON.stringify({
+      slots: [{ i: 0, t: "Bonjour " }, { i: 1, t: "MONDE" }],
+    }))
+
+    const outcome = await alignReimportedIdmlTargets([cell], ask)
+
+    expect(idmlReimportPlacement(cell)).toBe("align")
+    expect(outcome.aligned).toHaveLength(1)
+    const checked = validateIdmlTranslation(
+      unit.sourceHtml,
+      outcome.aligned[0]!.completion.valueHtml!,
+      unit.metadata,
+    )
+    expect(checked.valid).toBe(true)
+    expect(checked.slots[0]).toBe("Bonjour ")
+    expect(checked.slots[1]).toBe("MONDE")
   })
 
   it("stitches a one-run translation without a model call", async () => {

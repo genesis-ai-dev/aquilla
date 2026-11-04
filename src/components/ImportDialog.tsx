@@ -32,7 +32,7 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingLines } from "@/components/ui/loading-cursor"
 import { SegmentTabs, Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -451,9 +451,10 @@ interface ImportDialogProps {
   /** AQU-1365: the "A translation" path. Absent, the dialog offers source
    *  import only, as before. */
   translation?: TranslationImportHost
-  /** IDML Update Existing places kept translations into the new style runs.
-   *  Absent when AI completion is not configured; the re-import still updates
-   *  the source and leaves every translation where it is. */
+  /** IDML re-import that keeps translations (update, or an updated copy)
+   *  places them into the new style runs. Absent when AI completion is not
+   *  configured; the re-import still updates the source and leaves every
+   *  translation where it is. */
   alignReimportedIdml?: IdmlReimportAlignHost
   /** AQU-981: "Recordings" — bulk audio upload onto lines already here. */
   recordings?: RecordingsImportHost
@@ -1352,7 +1353,7 @@ export function ImportDialog({
                 {t("importExport.translation.opening", { fileName: translationDestination?.name ?? "" })}
               </p>
               <div className="space-y-2.5 rounded-md border p-3">
-                {[0, 1, 2, 3, 4].map((row) => <Skeleton key={row} className="h-4 w-full" />)}
+                <LoadingLines count={5} />
               </div>
               <div className="flex justify-end">
                 <Button variant="ghost" onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button>
@@ -1633,6 +1634,8 @@ export function ImportDialog({
           ...(sourceLanguage ? { sourceLanguage } : {}),
           ...(targetLanguage ? { targetLanguage } : {}),
           getToken,
+          ...(targetLang !== undefined ? { targetLang } : {}),
+          ...(alignReimportedIdml ? { alignReimportedIdml } : {}),
           onImported: async (ref) => {
             await handleChildImported([ref])
           },
@@ -2366,7 +2369,7 @@ interface UploadPanelProps {
     /** Every file in the batch, flagged or not, media included. */
     fileCount: number,
   ) => Promise<boolean>
-  /** IDML Update Existing places kept translations into the new style runs. */
+  /** IDML re-import that keeps translations places them into the new style runs. */
   alignReimportedIdml?: IdmlReimportAlignHost
 }
 

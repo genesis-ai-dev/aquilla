@@ -42,6 +42,13 @@ export const knowledgeBase = defineNamespace({
     // claimed otherwise, and sent the uploader to a retry button that could
     // only fail again. The row carries the reason, shown verbatim beneath it.
     "knowledgeBase.status.partial": "Indexed without summaries",
+    // AQU-1766: the four status words said nothing about WHEN the run that
+    // produced them happened, or HOW MUCH it indexed. A failure the uploader
+    // cannot date cannot be correlated with anything they changed, and
+    // "Indexed" over an empty index is indistinguishable from a good one.
+    "knowledgeBase.indexRunAt": "Last indexing run {when}",
+    "knowledgeBase.indexLastHeard": "Last heard from {when}",
+    "knowledgeBase.indexSections": "Sections indexed: {count}",
     "knowledgeBase.open": "View document",
     "knowledgeBase.openOriginal": "Open original",
     "knowledgeBase.reindex": "Try indexing again",
@@ -80,6 +87,28 @@ export const knowledgeBase = defineNamespace({
           + "knowledgeBase.status.pending (\"Indexing…\", still running) and from "
           + "knowledgeBase.status.failed (the job reported an error). Shown with a "
           + "retry action.",
+      },
+      "knowledgeBase.indexRunAt": {
+        description:
+          "Timestamp line under a knowledge document's index state, saying when "
+          + "the last indexing run reported back. Shown on a document whose "
+          + "indexing failed or finished without summaries, beneath the reason.",
+        placeholders: { when: "Formatted date and time of the last indexing run." },
+      },
+      "knowledgeBase.indexLastHeard": {
+        description:
+          "Timestamp line on a document whose indexing job never reported back "
+          + "at all (knowledgeBase.status.stalled). It says when the document was "
+          + "last heard from, not when a run finished — nothing finished.",
+        placeholders: { when: "Formatted date and time the document was last heard from." },
+      },
+      "knowledgeBase.indexSections": {
+        description:
+          "How much of an indexed document the index covers, shown on its card. "
+          + "A section is one node of the document's index — a heading or a block "
+          + "of paragraphs. Written as a label and a number so it reads the same "
+          + "for one section as for many; 0 is shown, and means the index is empty.",
+        placeholders: { count: "Number of indexed sections; may be 0." },
       },
       "knowledgeBase.uploadSuccess": {
         description: "Toast shown after a knowledge document upload succeeds.",

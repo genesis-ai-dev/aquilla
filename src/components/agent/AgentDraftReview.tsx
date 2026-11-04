@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { EmptyState } from "@/components/ui/empty"
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
-import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingLines } from "@/components/ui/loading-cursor"
 import { Textarea } from "@/components/ui/textarea"
 import {
   attachContextualDrafts,
@@ -338,7 +338,7 @@ function DraftReviewSession({ projectId, run, fileName, onBack, onReviewed, init
         {!loading && !loadError && <p role="status">{t("agentDraftReview.pending", { count: pending.length })}</p>}
       </header>
       {loadError ? <p role="alert">{t("agentDraftReview.loadFailed", { message: errorText(loadError) })}</p> : null}
-      {loading && !snapshot ? <div role="status" aria-label={t("common.loading")}><Skeleton className="h-40 w-full" /></div> : null}
+      {loading && !snapshot ? <div role="status" aria-label={t("common.loading")}><LoadingLines count={5} className="min-h-40" /></div> : null}
       {snapshot && !loading && !loadError && pending.length === 0 ? (
         <EmptyState title={t("agentDraftReview.empty")} description={t("agentDraftReview.emptyHelp")} />
       ) : null}

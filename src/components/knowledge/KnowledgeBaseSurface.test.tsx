@@ -54,6 +54,7 @@ function doc(overrides: Partial<KnowledgeDocument> = {}): KnowledgeDocument {
     docSummary: "A concise style guide.",
     indexStatus: "ready",
     indexError: null,
+    nodeCount: 12,
     createdBy: "alice",
     createdAt: "2026-08-16T00:00:00.000Z",
     updatedAt: "2026-08-16T00:00:00.000Z",
@@ -208,6 +209,11 @@ describe("KnowledgeBaseSurface", () => {
     // Distinct from "Indexing…" — the state is readable without backend access.
     expect(within(card).getByText("Indexing stalled")).toBeInTheDocument()
     expect(within(card).queryByText("Indexing…")).not.toBeInTheDocument()
+    // AQU-1766: a stall is dated by when the doc was last heard from, which is
+    // the only thing a stalled row knows — no run ever reported back, so it
+    // must not claim one did.
+    expect(within(card).getByText(/^Last heard from /)).toBeInTheDocument()
+    expect(within(card).queryByText(/Last indexing run/)).not.toBeInTheDocument()
 
     fireEvent.click(within(card).getByRole("button", { name: "Try indexing again" }))
     await waitFor(() => expect(api.reindex).toHaveBeenCalledWith(
@@ -273,6 +279,63 @@ describe("KnowledgeBaseSurface", () => {
     const card = (await screen.findByText("scan.pdf")).closest('[data-slot="card"]') as HTMLElement
     expect(within(card).getByText("Indexing failed")).toBeInTheDocument()
     expect(within(card).getByText(/no extractable text/)).toBeInTheDocument()
+    // AQU-1766: the reason is dated, so the uploader can line the failure up
+    // with whatever they changed. A failed doc indexed nothing, so no count.
+    expect(within(card).getByText(/^Last indexing run /)).toBeInTheDocument()
+    expect(within(card).queryByText(/Sections indexed/)).not.toBeInTheDocument()
+  })
+
+  // AQU-1766: "Indexed" over an empty index read exactly like "Indexed" over a
+  // whole book, so nobody could tell a real index from one that covered
+  // nothing — the question that sent LOTE to worker logs in AQU-1763.
+  it("states how much an indexed doc covers, and says so even when it covers nothing", async () => {
+    api.list.mockResolvedValue([
+      doc({ id: "rich-doc", name: "handbook.md", nodeCount: 1234 }),
+      doc({ id: "empty-doc", name: "blank.md", docSummary: null, nodeCount: 0 }),
+    ])
+
+    render(<KnowledgeBaseSurface scope={{ kind: "project", id: "project-1" }} jwt="jwt" canManage />)
+
+    const rich = (await screen.findByText("handbook.md")).closest('[data-slot="card"]') as HTMLElement
+    expect(within(rich).getByText("Sections indexed: 1,234")).toBeInTheDocument()
+    // A clean run has nothing to say beyond the count — no reason, no date.
+    expect(within(rich).queryByText(/Last indexing run/)).not.toBeInTheDocument()
+
+    const empty = (await screen.findByText("blank.md")).closest('[data-slot="card"]') as HTMLElement
+    expect(within(empty).getByText("Sections indexed: 0")).toBeInTheDocument()
+  })
+
+  // AQU-1766 / AQU-2002: a doc indexed without summaries carries both halves —
+  // what it does have, and why the rest is missing, dated.
+  it("dates the run on a doc indexed without summaries, alongside its count", async () => {
+    api.list.mockResolvedValue([
+      doc({
+        id: "degraded-doc",
+        name: "commentary.pdf",
+        docSummary: null,
+        nodeCount: 8,
+        indexError: "The summarizing model is rate-limiting us. Try again shortly.",
+      }),
+    ])
+
+    render(<KnowledgeBaseSurface scope={{ kind: "project", id: "project-1" }} jwt="jwt" canManage />)
+
+    const card = (await screen.findByText("commentary.pdf")).closest('[data-slot="card"]') as HTMLElement
+    expect(within(card).getByText(/Sections indexed: 8 · Last indexing run /)).toBeInTheDocument()
+  })
+
+  // AQU-1766: a row whose timestamp the server could not express is a contract
+  // break, not a date — rendering it would put "Invalid Date" on the card.
+  it("renders no run line when the document's timestamp is unreadable", async () => {
+    api.list.mockResolvedValue([
+      doc({ id: "odd-doc", name: "odd.md", docSummary: null, updatedAt: "not-a-date" }),
+    ])
+
+    render(<KnowledgeBaseSurface scope={{ kind: "project", id: "project-1" }} jwt="jwt" canManage />)
+
+    const card = (await screen.findByText("odd.md")).closest('[data-slot="card"]') as HTMLElement
+    expect(within(card).queryByText(/Sections indexed/)).not.toBeInTheDocument()
+    expect(within(card).queryByText(/Last indexing run|Last heard from/)).not.toBeInTheDocument()
   })
 
   it("leaves a doc that is still genuinely indexing as pending, with no retry", async () => {

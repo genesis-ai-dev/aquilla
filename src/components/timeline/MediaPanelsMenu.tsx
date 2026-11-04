@@ -16,13 +16,23 @@
 // it to nothing too, and this is the way back ("Why does the timeline not
 // show up in panels?").
 
-import { Check, LayoutGrid, RotateCcw, Shrink } from "lucide-react"
+import { LayoutGrid, RotateCcw, Shrink } from "lucide-react"
+import { EDITOR_SURFACE_OVERFLOW_TRIGGER_CLASS } from "@/components/editor-surface-toolbar"
 import { Button } from "@/components/ui/button"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuShortcut,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
 import { useT } from "@/lib/i18n/I18nProvider"
-import { cn } from "@/lib/utils"
 import { undoTargets, type DockPanel } from "./media-dock-layout"
 import type { MediaFileKind } from "./media-layout-start"
 import { dockKeys, usePanelNames } from "./MediaPanelChrome"
@@ -85,20 +95,18 @@ export function MediaPanelsMenu({ dock, fileName, kind, filmHiddenByTiming }: Me
       toggle = showing ? () => dock.hide(id) : () => dock.show(id)
     }
     return (
-      <AppTooltip key={id} content={where} side="left">
-        <button
-          type="button"
+      <AppTooltip key={id} content={where} side="left" disabledTriggerClassName="flex w-full">
+        <DropdownMenuCheckboxItem
           data-testid={`panels-row-${id}`}
-          aria-pressed={showing}
+          checked={showing}
           aria-description={where}
           disabled={!toggle}
-          onClick={() => toggle?.()}
-          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-[13px] font-medium transition-colors hover:bg-accent/50 disabled:cursor-default disabled:text-muted-foreground disabled:hover:bg-transparent"
+          closeOnClick={false}
+          onCheckedChange={() => toggle?.()}
         >
-          <Check className={cn("size-3.5 shrink-0", !showing && "invisible")} aria-hidden />
           <span className="min-w-0 flex-1 truncate">{names.panel(id)}</span>
-          <span className="shrink-0 text-xs font-normal text-muted-foreground">{keys.show(n)}</span>
-        </button>
+          <DropdownMenuShortcut className="tracking-normal">{keys.show(n)}</DropdownMenuShortcut>
+        </DropdownMenuCheckboxItem>
       </AppTooltip>
     )
   }
@@ -114,26 +122,29 @@ export function MediaPanelsMenu({ dock, fileName, kind, filmHiddenByTiming }: Me
   )
 
   return (
-    <Popover open={dock.panelsOpen} onOpenChange={dock.setPanelsOpen}>
+    <DropdownMenu open={dock.panelsOpen} onOpenChange={dock.setPanelsOpen}>
       <AppTooltip content={t("editor.dock.panelsTip", { keys: keys.panels })} disabled={dock.panelsOpen}>
-        <PopoverTrigger
+        <DropdownMenuTrigger
           render={
-            // Board 55, option E: its icon only, on the grey of the view
-            // switch; "Panels ⌘\\" is its hover text.
+            // Same square as the ⋯ beside it. "Panels ⌘\" is its hover text.
             <Button
               type="button"
               variant="outline"
-              size="icon-sm"
-              className="bg-muted"
+              size="icon"
+              className={EDITOR_SURFACE_OVERFLOW_TRIGGER_CLASS}
               aria-label={t("editor.dock.panels")}
               data-testid="panels-button"
             >
-              <LayoutGrid />
+              <LayoutGrid className="size-4" />
             </Button>
           }
         />
       </AppTooltip>
-      <PopoverContent align="end" className="w-64 gap-1.5 p-2" data-testid="panels-menu">
+      <DropdownMenuContent
+        align="end"
+        className="w-64"
+        data-testid="panels-menu"
+      >
         {full && dock.canRestore && (
           <FullScreenNote
             folded={t("editor.dock.fullNote", { folded: foldedNames.join(", ") })}
@@ -144,21 +155,20 @@ export function MediaPanelsMenu({ dock, fileName, kind, filmHiddenByTiming }: Me
             }}
           />
         )}
-        <div className="px-2 pt-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground" data-testid="panels-heading">
-          {t("editor.dock.panels")}
-        </div>
-        <div className="flex flex-col">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel data-testid="panels-heading">{t("editor.dock.panels")}</DropdownMenuLabel>
           {row("timeline", 1)}
           {(v.present.includes("film") || filmHiddenByTiming) && row("film", 2)}
           {row("text", 3)}
-        </div>
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
         <ResetRow
           onReset={dock.resetLayout}
           note={`${t("editor.dock.rememberedNote", { file: fileName })} ${t(START_KEY[kind])}`}
           keysLine={t("editor.dock.keysHint", { panels: keys.panels, full: keys.full, fold: keys.fold, restore: keys.restore })}
         />
-      </PopoverContent>
-    </Popover>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
@@ -207,33 +217,28 @@ function ResetRow({ onReset, note, keysLine }: { onReset: () => void; note: stri
   const t = useT()
   const [infoOpen, toggleInfo] = useInfoOpen()
   return (
-    <div className="flex flex-col border-t border-border pt-1.5">
-      <div className="flex items-center gap-1">
-        <button
-          type="button"
-          data-testid="panels-reset"
-          onClick={onReset}
-          className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-start text-[13px] font-medium transition-colors hover:bg-accent/50"
-        >
-          <RotateCcw className="size-3.5 shrink-0" aria-hidden />
-          {t("editor.dock.resetLayout")}
-        </button>
-        <span className="flex size-6 shrink-0 items-center justify-center">
-          <InfoToggle
-            open={infoOpen}
-            onToggle={toggleInfo}
-            label={t("editor.dock.resetInfoAria")}
-            controls="panels-reset-info"
-            testId="panels-reset-info-toggle"
-          />
+    <DropdownMenuItem closeOnClick={false} data-testid="panels-reset" onClick={onReset}>
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="flex items-center gap-1.5">
+          <RotateCcw aria-hidden />
+          <span className="flex-1">{t("editor.dock.resetLayout")}</span>
+          <span className="pointer-events-auto">
+            <InfoToggle
+              open={infoOpen}
+              onToggle={toggleInfo}
+              label={t("editor.dock.resetInfoAria")}
+              controls="panels-reset-info"
+              testId="panels-reset-info-toggle"
+            />
+          </span>
         </span>
-      </div>
-      <InfoReveal open={infoOpen} id="panels-reset-info" testId="panels-reset-info" className="px-2 text-xs text-muted-foreground">
-        <span className="flex flex-col gap-1.5 pb-1">
-          <span>{note}</span>
-          <span data-testid="panels-keys">{keysLine}</span>
-        </span>
-      </InfoReveal>
-    </div>
+        <InfoReveal open={infoOpen} id="panels-reset-info" testId="panels-reset-info" className="text-xs font-normal text-muted-foreground">
+          <span className="flex flex-col gap-1.5 pb-0.5">
+            <span>{note}</span>
+            <span data-testid="panels-keys">{keysLine}</span>
+          </span>
+        </InfoReveal>
+      </span>
+    </DropdownMenuItem>
   )
 }

@@ -15,12 +15,88 @@ import { ZOOM_DEFAULT, ZOOM_MAX } from "@/lib/timeline/scale"
 import { getSkipSilentLinesPref, resetSkipSilentLinesPrefCacheForTests } from "@/lib/store/skip-silent-lines-pref"
 import { resetPersonPrefCachesForTests } from "@/lib/prefs/person-prefs"
 import { timelineFollowPlayheadPref, timelineSnapPref } from "@/lib/prefs/person-pref-list"
+import { TRACK_DRAG_ACTIVATION_DISTANCE } from "@/components/timeline/track-gutter-dnd"
 
 /**
  * Media redesign, layout: the timeline's settings (snap, follow, original
  * quality, track names, zoom, row height) live in its corner ⋯, directly
  * (Sam, Oct 27: no submenu). Finds the control, opening the menu if need be.
  */
+function trackBox(top: number, height: number, left = 0, width = 240): DOMRect {
+  return {
+    x: left, y: top, top, left, width, height,
+    right: left + width, bottom: top + height,
+    toJSON() { return {} },
+  } as DOMRect
+}
+
+/** happy-dom reports every rect as empty, and the sidebar's collision decides the drop from those rects. */
+function layoutTrackSlots() {
+  const slots = [...document.querySelectorAll<HTMLElement>("[data-reorderable]")]
+  const topLevel = slots.filter((slot) => !slot.parentElement?.closest("[data-reorderable]"))
+  let top = 0
+  for (const slot of topLevel) {
+    const nested = [...slot.querySelectorAll<HTMLElement>("[data-reorderable]")]
+    let inner = top + 40
+    for (const child of nested) {
+      const childTop = inner
+      child.getBoundingClientRect = () => trackBox(childTop, 40)
+      inner += 40
+    }
+    const slotTop = top
+    const height = inner - top
+    slot.getBoundingClientRect = () => trackBox(slotTop, height)
+    top = inner
+  }
+  for (const frame of document.querySelectorAll<HTMLElement>("[data-reorder-group]")) {
+    const nested = [...frame.querySelectorAll<HTMLElement>("[data-reorderable]")]
+    if (nested.length === 0) continue
+    const first = nested[0].getBoundingClientRect()
+    const last = nested[nested.length - 1].getBoundingClientRect()
+    frame.getBoundingClientRect = () => trackBox(first.top, last.bottom - first.top, first.left, first.width)
+  }
+}
+
+function trackPointer(x: number, y: number, buttons = 1) {
+  return {
+    clientX: x,
+    clientY: y,
+    button: 0,
+    buttons,
+    isPrimary: true,
+    pointerId: 1,
+    pointerType: "mouse" as const,
+  }
+}
+
+function trackRowNamed(name: string): HTMLElement {
+  const row = [...document.querySelectorAll<HTMLElement>("[data-tl-track-row]")].find((el) => el.textContent?.includes(name))
+  if (!row) throw new Error(`no track row named ${name}`)
+  return row
+}
+
+function trackSlot(name: string): HTMLElement {
+  const slot = trackRowNamed(name).closest("[data-reorderable]")
+  if (!(slot instanceof HTMLElement)) throw new Error(`no reorder slot for ${name}`)
+  return slot
+}
+
+/** Drag `from` onto `to` from the row itself, the way a pointer does. */
+function dragTrackOnto(from: string, to: string) {
+  layoutTrackSlots()
+  const row = trackRowNamed(from)
+  const host = trackSlot(from).getBoundingClientRect()
+  const start = { x: host.left + host.width / 2, y: host.top + 12 }
+  fireEvent.pointerDown(row, trackPointer(start.x, start.y))
+  const nudged = trackPointer(start.x, start.y + TRACK_DRAG_ACTIVATION_DISTANCE + 8)
+  fireEvent.pointerMove(document, nudged)
+  fireEvent.pointerMove(document, nudged)
+  const dest = trackSlot(to).getBoundingClientRect()
+  const point = trackPointer(dest.left + dest.width / 2, dest.top + 8)
+  fireEvent.pointerMove(document, point)
+  fireEvent.pointerUp(document, trackPointer(point.clientX, point.clientY, 0))
+}
+
 function inTimelineSettings<T>(find: () => T): T {
   try {
     return find()
@@ -3312,10 +3388,14 @@ describe("TimelineEditor — rows come from the track model", () => {
 
   it("does not select on a click that was really a drag", () => {
     render(selectable())
+    layoutTrackSlots()
     const row = rows()[0]
-    fireEvent.pointerDown(row, { clientY: 100, pointerId: 1, button: 0 })
-    fireEvent.pointerMove(window, { clientY: 160 })
-    fireEvent.pointerUp(window, { clientY: 160 })
+    const start = trackPointer(40, 12)
+    fireEvent.pointerDown(row, start)
+    const moved = trackPointer(40, 12 + TRACK_DRAG_ACTIVATION_DISTANCE + 20)
+    fireEvent.pointerMove(document, moved)
+    fireEvent.pointerMove(document, moved)
+    fireEvent.pointerUp(document, trackPointer(moved.clientX, moved.clientY, 0))
     fireEvent.click(row)
     expect(selectedRows()).toEqual([])
   })
@@ -4332,79 +4412,93 @@ describe("TimelineEditor — the track gutter collapses and expands", () => {
   })
 })
 
-// ── AQU-646 stage 3c: the drop line has to move WHILE you drag ───────────────
-//
-// Sam, 2026-08-24: "technically based on mouse positioning it works correctly
-// but it doesn't actually visually adapt while I'm dragging — it lines itself up
-// correctly once I let go and then I find out if I dragged far enough."
-//
-// That defeats the whole point of the indent, which exists so the two possible
-// outcomes of one gesture are distinguishable BEFORE release. The drop resolves
-// on `pointermove` and the indicator is pure state, so this is testable without
-// a browser — the only thing happy-dom cannot supply is geometry, and geometry
-// is exactly what `vi.spyOn(el, "getBoundingClientRect")` can hand it.
-describe("TimelineEditor — the drop indicator during a track drag", () => {
+// Track reorder is a dnd-kit drag of the whole row. A press that has not
+// moved far enough is still a click. The row keeps its height, and no drop
+// line is drawn.
+describe("TimelineEditor — dragging a track row reorders it", () => {
   beforeEach(() => { topOwner.value = 1 })
 
   const rowCells = [cell({ id: "m1", original: "One", medium: "media", startTime: 0, endTime: 10 })]
 
-  /** Three 40px rows stacked from the origin. The gutter's own rect stays
-   *  happy-dom's 0-origin default, and scrollTop is 0, so `gutterContentY` is
-   *  the identity and a clientY IS a content-y — which keeps the arithmetic in
-   *  this test readable. */
-  const stubRows = (rows: Element[]) => {
-    rows.forEach((row, i) => {
-      vi.spyOn(row, "getBoundingClientRect").mockReturnValue({
-        top: i * 40, bottom: i * 40 + 40, left: 0, right: 128, width: 128, height: 40, x: 0, y: i * 40,
-        toJSON: () => ({}),
-      } as DOMRect)
-    })
-  }
+  it("reorders when the row is dropped on another track, and a short press does not", () => {
+    const onReorderTrack = vi.fn()
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+        onRetimeSubtitle={() => {}} onReorderTrack={onReorderTrack}
+      />,
+    )
+    layoutTrackSlots()
+    const row = trackRowNamed("Source text")
+    const host = trackSlot("Source text").getBoundingClientRect()
+    const start = { x: host.left + host.width / 2, y: host.top + 12 }
+    fireEvent.pointerDown(row, trackPointer(start.x, start.y))
+    fireEvent.pointerMove(document, trackPointer(start.x, start.y + 2))
+    fireEvent.pointerUp(document, trackPointer(start.x, start.y + 2, 0))
+    expect(onReorderTrack).not.toHaveBeenCalled()
 
-  /** Where the line is, as "<row index>:<edge>" — the EDGE matters as much as
-   *  the row, because sliding from below row 1 to below row 2 keeps the same
-   *  row element and moves the line from its top to its bottom. */
-  const dropLineAt = () =>
-    Array.from(document.querySelectorAll('[data-testid="tl-track-drop-line"]')).map((el) => {
-      const row = el.closest("[data-tl-track-row]")!
-      const index = Array.from(document.querySelectorAll("[data-tl-track-row]")).indexOf(row)
-      return `${index}:${el.className.includes("top-0") ? "top" : "bottom"}`
-    })
+    dragTrackOnto("Source text", "Source audio")
+    expect(onReorderTrack).toHaveBeenCalledTimes(1)
+    expect(onReorderTrack).toHaveBeenCalledWith("source-subtitles", 2.5)
+  })
 
-  it("draws the line as the pointer moves, and moves it — not only on release", () => {
+  it("keeps the dragged row at its own height and draws no drop line", () => {
     render(
       <TimelineEditor
         fileId="f1" coreMediaUrl={null} editable cells={rowCells}
         onRetimeSubtitle={() => {}} onReorderTrack={() => {}}
       />,
     )
-    const gutter = screen.getByTestId("tl-scroll").previousElementSibling as HTMLElement
-    const rows = Array.from(gutter.querySelectorAll("[data-tl-track-row]"))
-    expect(rows).toHaveLength(3)
-    stubRows(rows)
+    layoutTrackSlots()
+    const row = trackRowNamed("Source audio")
+    const slot = trackSlot("Source audio")
+    const host = slot.getBoundingClientRect()
+    const start = { x: host.left + host.width / 2, y: host.top + 12 }
+    fireEvent.pointerDown(row, trackPointer(start.x, start.y))
+    const nudged = trackPointer(start.x, start.y + TRACK_DRAG_ACTIVATION_DISTANCE + 8)
+    fireEvent.pointerMove(document, nudged)
+    fireEvent.pointerMove(document, nudged)
+    expect(slot.className).not.toContain("opacity-0")
+    expect(slot.style.height).toBe("")
+    expect(row).toBeInTheDocument()
+    expect(screen.queryByTestId("tl-track-drop-line")).toBeNull()
+    expect(screen.queryByTestId("tl-track-drag-preview")).toBeNull()
+    fireEvent.pointerUp(document, trackPointer(start.x, start.y, 0))
+  })
 
-    // Grab the top row and drag it down past the second.
-    fireEvent.pointerDown(rows[0], { button: 0, pointerId: 1, clientX: 8, clientY: 10 })
-    // Nothing yet — under the 3px threshold a drag has not been intended.
-    fireEvent.pointerMove(window, { pointerId: 1, clientX: 8, clientY: 12 })
-    expect(dropLineAt()).toEqual([])
+  it("eases a row back into place with the same slide it used on the way out", () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+        onRetimeSubtitle={() => {}} onReorderTrack={() => {}} onRenameTrack={() => {}}
+      />,
+    )
+    layoutTrackSlots()
+    const from = trackRowNamed("Source text")
+    const host = trackSlot("Source text").getBoundingClientRect()
+    const start = { x: host.left + host.width / 2, y: host.top + 12 }
+    fireEvent.pointerDown(from, trackPointer(start.x, start.y))
+    const nudged = trackPointer(start.x, start.y + TRACK_DRAG_ACTIVATION_DISTANCE + 8)
+    fireEvent.pointerMove(document, nudged)
+    fireEvent.pointerMove(document, nudged)
+    const audio = trackSlot("Source audio")
+    const dest = audio.getBoundingClientRect()
+    fireEvent.pointerMove(document, trackPointer(dest.left + dest.width / 2, dest.top + 8))
+    expect(audio.style.transition).toContain("180ms")
+    expect(audio.style.transform).toContain("translate3d")
+    expect(audio.style.transform).not.toContain("0px, 0px, 0")
+    const lane = document.querySelector<HTMLElement>('[data-tl-track-lane="source-audio"]')
+    expect(lane).not.toBeNull()
+    expect(lane?.style.transition).toContain("180ms")
+    expect(lane?.style.transform).toMatch(/translateY\(-?\d/)
+    expect(lane?.style.transform).not.toBe("translateY(0px)")
 
-    // Into the second row's lower half.
-    fireEvent.pointerMove(window, { pointerId: 1, clientX: 8, clientY: 70 })
-    const first = dropLineAt()
-    expect(first).not.toEqual([])
-
-    // …and on down into the third. THE LINE MUST FOLLOW. This is the assertion
-    // Sam's report is about: a line that only appears once is a line that told
-    // you nothing while you were deciding.
-    fireEvent.pointerMove(window, { pointerId: 1, clientX: 8, clientY: 110 })
-    const second = dropLineAt()
-    expect(second).not.toEqual([])
-    expect(second).not.toEqual(first)
-
-    fireEvent.pointerUp(window, { pointerId: 1, clientX: 8, clientY: 110 })
-    // The gesture is over, so the line goes with it.
-    expect(dropLineAt()).toEqual([])
+    fireEvent.pointerMove(document, trackPointer(start.x, start.y))
+    expect(audio.style.transition).toContain("180ms")
+    expect(audio.style.transform).toContain("translate3d(0px, 0px, 0)")
+    expect(lane?.style.transition).toContain("180ms")
+    expect(lane?.style.transform).toBe("translateY(0px)")
+    fireEvent.pointerUp(document, trackPointer(start.x, start.y, 0))
   })
 })
 
@@ -4727,15 +4821,9 @@ describe("TimelineEditor — the gutter's trailing controls sit in one column", 
   })
 })
 
-// AQU-646 stage 3c — the row you are dragging re-indents as you aim.
-//
-// Sam, 2026-08-25: "the blue line is either all the way at the edge or indented
-// but the contents of the track that is being dragged are indented in both
-// cases… it should be realigning dynamically as well." The line already told
-// you which outcome a release would pick; the row under the pointer did not,
-// so for the whole gesture the thing being moved and the promise about where it
-// lands disagreed.
-describe("TimelineEditor — the lifted row follows the drop it is aiming at", () => {
+// Dropping a track on a folder's member is the file list's cross-group drop:
+// it joins that folder. With track editing off, the same gesture writes nothing.
+describe("TimelineEditor — dropping a track on a folder member moves it into the folder", () => {
   beforeEach(() => { topOwner.value = 1 })
 
   const rowCells = [cell({ id: "m1", original: "One", medium: "media", startTime: 0, endTime: 10 })]
@@ -4747,57 +4835,34 @@ describe("TimelineEditor — the lifted row follows the drop it is aiming at", (
       },
     })
 
-  /** 40px rows from the origin; the gutter keeps happy-dom's 0-origin rect, so
-   *  a clientY is a content-y and a clientX is an indent-x. */
-  const stubRows = (rows: Element[]) =>
-    rows.forEach((row, i) => {
-      vi.spyOn(row, "getBoundingClientRect").mockReturnValue({
-        top: i * 40, bottom: i * 40 + 40, left: 0, right: 240, width: 240, height: 40, x: 0, y: i * 40,
-        toJSON: () => ({}),
-      } as DOMRect)
-    })
-
-  /** Is the dragged row's CONTENT drawn indented? The indent is on the content
-   *  block, not the row, so the drop line and the lift still span the gutter. */
-  const contentIndented = (row: Element) =>
-    (row.firstElementChild as HTMLElement).className.includes("pl-3.5")
-
-  it("indents while aiming inside the folder and flattens while aiming outside", () => {
-    render(
+  it("moves into the folder when track editing is on, and only reorders when it is off", () => {
+    const onReorderTrack = vi.fn()
+    const onMoveToScope = vi.fn()
+    const { rerender } = render(
       <TimelineEditor
         fileId="f1" coreMediaUrl={null} editable cells={rowCells}
         tracks={folded()}
-        onRetimeSubtitle={() => {}} onReorderTrack={() => {}} onRenameTrack={() => {}}
+        onRetimeSubtitle={() => {}} onReorderTrack={onReorderTrack}
         trackEditing={{
           onAdd: () => "x", onLeaveFolder: () => {},
-          onMoveToScope: () => {}, onCreateFolderFrom: () => "y", onDelete: () => {},
+          onMoveToScope, onCreateFolderFrom: () => "y", onDelete: () => {},
         }}
       />,
     )
-    const gutter = screen.getByTestId("tl-scroll").previousElementSibling as HTMLElement
-    const rows = Array.from(gutter.querySelectorAll("[data-tl-track-row]"))
-    stubRows(rows)
+    dragTrackOnto("Source text", "Target audio")
+    expect(onMoveToScope).toHaveBeenCalledWith("source-subtitles", "grp", -1)
+    expect(onReorderTrack).not.toHaveBeenCalled()
 
-    // Grab a loose row and drag it down over the folder's block.
-    const dragged = rows[0]
-    expect(contentIndented(dragged)).toBe(false)
-    fireEvent.pointerDown(dragged, { button: 0, pointerId: 1, clientX: 8, clientY: 10 })
-
-    // Well to the RIGHT — past half the 240px gutter — means "drop inside".
-    fireEvent.pointerMove(window, { pointerId: 1, clientX: 200, clientY: 150 })
-    const indentedWhileReachingIn = contentIndented(rows[0])
-
-    // …and back to the LEFT means "just reorder", at the same height.
-    fireEvent.pointerMove(window, { pointerId: 1, clientX: 4, clientY: 150 })
-    const indentedWhileOutside = contentIndented(rows[0])
-
-    fireEvent.pointerUp(window, { pointerId: 1, clientX: 4, clientY: 150 })
-
-    // THE ASSERTION IS THE DIFFERENCE, not either value on its own: the same Y
-    // with a different X has to change how the travelling row is drawn, which
-    // is exactly what was missing.
-    expect(indentedWhileReachingIn).toBe(true)
-    expect(indentedWhileOutside).toBe(false)
+    rerender(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+        tracks={folded()}
+        onRetimeSubtitle={() => {}} onReorderTrack={onReorderTrack}
+      />,
+    )
+    dragTrackOnto("Source text", "Target audio")
+    expect(onMoveToScope).toHaveBeenCalledTimes(1)
+    expect(onReorderTrack).not.toHaveBeenCalled()
   })
 })
 
@@ -5378,86 +5443,31 @@ describe("TimelineEditor — the track names pass under the Tracks header (AQU-2
     expect(rule.classList).not.toContain("right-0")
   })
 
-  // The lane half of the drop line already crosses the ruler (z-30 over its
-  // z-20). Mid-drag the names must cross the header too, the way a dragged
-  // chip's lane crosses the ruler, or near the top the gutter half of the line
-  // and the row in the air vanish under the header while the lane half shows.
-  it("lifts the names over the header while a row is dragged, and only then", () => {
+  // The dragged row stays in the gutter at its own height. A press that has
+  // not moved far enough is not a drag, and nothing draws a drop line.
+  it("moves the row itself once the drag has started, and draws no drop line", () => {
     render(<TimelineEditor {...props} onReorderTrack={() => {}} />)
-    const raised = () => inner().classList.contains("z-50")
-    fireEvent.pointerDown(rows()[1], { button: 0, pointerId: 1, clientX: 8, clientY: 50 })
-    // A press is not a drag: under the 3px threshold nothing should pop.
-    fireEvent.pointerMove(window, { pointerId: 1, clientX: 8, clientY: 52 })
-    expect(raised()).toBe(false)
-    fireEvent.pointerMove(window, { pointerId: 1, clientX: 8, clientY: 10 })
-    expect(raised()).toBe(true)
-    // Back over its own slot it is still a drag, and must not flicker.
-    fireEvent.pointerMove(window, { pointerId: 1, clientX: 8, clientY: 50 })
-    expect(raised()).toBe(true)
-    fireEvent.pointerUp(window, { pointerId: 1, clientX: 8, clientY: 50 })
-    expect(raised()).toBe(false)
     expect(inner().classList).toContain("z-30")
+    expect(inner().classList).not.toContain("z-50")
+    layoutTrackSlots()
+    const row = trackRowNamed("Source audio")
+    const slot = trackSlot("Source audio")
+    const host = slot.getBoundingClientRect()
+    const start = { x: host.left + host.width / 2, y: host.top + 12 }
+    fireEvent.pointerDown(row, trackPointer(start.x, start.y))
+    fireEvent.pointerMove(document, trackPointer(start.x, start.y + 2))
+    expect(screen.queryByTestId("tl-track-drop-line")).toBeNull()
+    const nudged = trackPointer(start.x, start.y + TRACK_DRAG_ACTIVATION_DISTANCE + 8)
+    fireEvent.pointerMove(document, nudged)
+    fireEvent.pointerMove(document, nudged)
+    expect(slot.className).not.toContain("opacity-0")
+    expect(slot.style.height).toBe("")
+    expect(gutter().contains(row)).toBe(true)
+    expect(screen.queryByTestId("tl-track-drop-line")).toBeNull()
+    expect(screen.queryByTestId("tl-track-drag-preview")).toBeNull()
+    fireEvent.pointerUp(document, trackPointer(start.x, start.y, 0))
   })
 
-  // The browser pass on the demo: dragging a track to the top of a scrolled
-  // list drew the line on the top row's upper edge, which was scrolled up out
-  // of the column, so the drop that matters most up there showed no line at
-  // all. The line is the whole readout of a drag, so it stays where it can be
-  // seen: just under the header, or just above the column's foot.
-  describe("the drop line stays in sight", () => {
-    /** Three 40px rows under the 28px header, the column scrolled up 30px:
-     *  the top row's upper edge is 2px above the column. */
-    const setUp = (gutterHeight: number) => {
-      render(<TimelineEditor {...props} onReorderTrack={() => {}} />)
-      const scroll = screen.getByTestId("tl-scroll")
-      scroll.scrollTop = 30
-      fireEvent.scroll(scroll)
-      stubRect(gutter(), 0, gutterHeight)
-      stubRect(header(), 0, 28)
-      rows().forEach((row, i) => stubRect(row, 28 + i * 40 - 30, 40))
-    }
-    /** Where the gutter half is drawn, in px from the column's top. */
-    const gutterLineTop = () => {
-      const line = screen.getByTestId("tl-track-drop-line")
-      const rowTop = line.closest("[data-tl-track-row]")!.getBoundingClientRect().top
-      const own = line.style.top ? parseFloat(line.style.top) : line.classList.contains("bottom-0") ? 38 : 0
-      return rowTop + own
-    }
-    const laneLineTop = () => screen.getByTestId("tl-track-drop-line-lane").style.top
-
-    it("at the top of the list, just under the header, in both columns", () => {
-      setUp(200)
-      fireEvent.pointerDown(rows()[2], { button: 0, pointerId: 1, clientX: 8, clientY: 98 })
-      // Up into the header band, over the top row's upper half.
-      fireEvent.pointerMove(window, { pointerId: 1, clientX: 8, clientY: 5 })
-      expect(gutterLineTop()).toBe(28)
-      // Content pixels: the header's 28 plus the 30 scrolled.
-      expect(laneLineTop()).toBe("58px")
-      fireEvent.pointerUp(window, { pointerId: 1, clientX: 8, clientY: 5 })
-    })
-
-    it("past the last row below the column's foot, just above the foot", () => {
-      // A 100px column shows rows 0 and 1 and the top of row 2; row 2's lower
-      // edge, 118px down, is below the foot.
-      setUp(100)
-      fireEvent.pointerDown(rows()[0], { button: 0, pointerId: 1, clientX: 8, clientY: 10 })
-      fireEvent.pointerMove(window, { pointerId: 1, clientX: 8, clientY: 130 })
-      expect(gutterLineTop()).toBe(98)
-      expect(laneLineTop()).toBe("128px")
-      fireEvent.pointerUp(window, { pointerId: 1, clientX: 8, clientY: 130 })
-    })
-
-    it("leaves a line that is already in sight where it is", () => {
-      setUp(200)
-      fireEvent.pointerDown(rows()[0], { button: 0, pointerId: 1, clientX: 8, clientY: 10 })
-      // Into row 1's lower half: the line goes on the boundary between rows 1
-      // and 2, 78px down — in sight, so drawn on the row's own edge as before.
-      fireEvent.pointerMove(window, { pointerId: 1, clientX: 8, clientY: 70 })
-      expect(screen.getByTestId("tl-track-drop-line").style.top).toBe("")
-      expect(laneLineTop()).toBe("108px")
-      fireEvent.pointerUp(window, { pointerId: 1, clientX: 8, clientY: 70 })
-    })
-  })
 
   // The browser counts the strip under the header as on screen, so focusing a
   // row there scrolls nothing — and it could not scroll the gutter up anyway,

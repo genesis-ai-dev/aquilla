@@ -684,6 +684,20 @@ describe("guardSql — pen-test 2026-09-30 literal-desync and xml-function bypas
     }
   })
 
+  it.each([
+    "pg_stat_get_activity(NULL::int)",
+    "pg_stat_get_backend_activity(1)",
+    "dblink_exec('a','b')",
+    "pg_catalog.pg_read_file('/etc/passwd')",
+    "lo_get(1234)",
+    "pg_ls_dir('/')",
+    "pg_advisory_lock_shared(1)",
+  ])("rejects introspection/file/large-object function family: %s", (call) => {
+    const r = guard(`SELECT ${call} FROM cells WHERE project_id = :project`)
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.error).toMatch(/not allowed/)
+  })
+
   it("rejects query_to_xml (runs an unscoped query from a string)", () => {
     const r = guard("SELECT query_to_xml('select * from users', true, false, '') FROM cells WHERE project_id = :project")
     expect(r.ok).toBe(false)

@@ -21,7 +21,7 @@ import { useMemo, useState } from "react"
 import { AlertTriangle, Cloud, Sparkles } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { EmptyState } from "@/components/ui/empty"
-import { LoadingLines } from "@/components/ui/loading-cursor"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { Badge } from "@/components/ui/badge"
 import {
   Table,
@@ -330,7 +330,7 @@ export function PostEditMetricsSection({
         <CardContent>
           {isLoading && (
             <div className="space-y-2 pt-1">
-              <LoadingLines count={3} />
+              <LoadingCursor />
             </div>
           )}
 

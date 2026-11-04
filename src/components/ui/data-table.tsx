@@ -48,7 +48,7 @@ import {
   DataTableColumnHeader,
   DataTableSortingContext,
 } from "@/components/ui/data-table-column-header"
-import { LoadingCursor, LoadingLine } from "@/components/ui/loading-cursor"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { cn } from "@/lib/utils"
 import { MoreHorizontal, Search } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -924,7 +924,7 @@ function DataTablePanelSkeleton({
       >
         <div className="space-y-2 p-2">
           {Array.from({ length: SKELETON_ROW_COUNT }, (_, i) => (
-            <LoadingLine key={i} className="h-9 px-2" />
+            <div key={i} className="flex h-9 items-center px-2">{i === 0 ? <LoadingCursor /> : null}</div>
           ))}
         </div>
       </div>

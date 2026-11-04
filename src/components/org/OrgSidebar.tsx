@@ -15,6 +15,7 @@ import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
 import { OrgSwitcher } from "./OrgSwitcher"
 import { AccountSwitcher } from "@/components/AccountSwitcher"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 
 const link = ({ isActive }: { isActive: boolean }) =>
   `flex items-center gap-2 rounded-md px-2 py-1.5 text-sm font-normal ${isActive ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`
@@ -46,7 +47,7 @@ function OrgNavLink(props: ComponentProps<typeof NavLink>) {
 
 export function OrgSidebar() {
   const t = useT()
-  const { activeOrg, activeOrgId, activeGuestOrg, isAllOrgs } = useActiveOrg()
+  const { activeOrg, activeOrgId, activeGuestOrg, isAllOrgs, isLoading: orgsLoading } = useActiveOrg()
   // AQU-790: in a guest org the caller has project-level access only — no org
   // membership. Member-scoped nav (Teams, Assigned, Members, Archived,
   // Settings) is hidden so nothing links into an org they can't operate on
@@ -58,7 +59,7 @@ export function OrgSidebar() {
   // AQU-485: Members is a roster-visibility surface, not a generic admin
   // tool. Follow rosterViewMinRole so a below-floor maintainer does not see
   // the nav item, and a lowered floor can surface it for contributors.
-  const { canViewRoster, canEgress } = useOrgSettings(
+  const { canViewRoster, canEgress, hasFetched: settingsFetched } = useOrgSettings(
     isMemberOrg ? activeOrgId : null,
     activeOrg?.role?.level,
   )
@@ -68,7 +69,10 @@ export function OrgSidebar() {
   // a below-admin role the org opened the surface to still gets the entry.
   const showEgressNav = isMemberOrg && canEgress
   // Platform-operator (site-wide admin) — separate axis from the org role.
-  const { isAdmin: isPlatformAdmin } = usePlatformAdmin()
+  const { isAdmin: isPlatformAdmin, loading: platformAdminLoading } = usePlatformAdmin()
+  // The entries above appear as each permission check lands. While any is
+  // still pending, one cursor at the end of the list says more may follow.
+  const navPending = orgsLoading || platformAdminLoading || (isMemberOrg && !settingsFetched)
 
   const portfolioHomeTo = isAllOrgs
     ? orgHomePath(ALL_ORGS_PARAM)
@@ -200,6 +204,11 @@ export function OrgSidebar() {
             {t("org.orgSidebar.admin")}
           </OrgNavLink>
         </>}
+        {navPending && (
+          <div className="flex h-8 items-center px-2" data-testid="org-sidebar-pending" aria-hidden="true">
+            <LoadingCursor />
+          </div>
+        )}
       </nav>
       <div className="mt-auto pt-2" data-tour="account-switcher">
         <div className="min-w-0">

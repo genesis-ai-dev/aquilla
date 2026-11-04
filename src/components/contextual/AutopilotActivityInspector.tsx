@@ -32,7 +32,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
-import { LoadingLines } from "@/components/ui/loading-cursor"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { cn } from "@/lib/utils"
 import { BibleFactsEvidence } from "./BibleFactsEvidence"
 import { useBibleDataExperiment } from "@/hooks/useBibleDataExperiment"
@@ -1358,7 +1358,7 @@ export function AutopilotActivityInspector({
                 </p>
               )}
               {loadingRuns && scopedRuns.length === 0 ? (
-                <div className="flex flex-col gap-2"><LoadingLines count={2} className="min-h-14" /><LoadingLines count={2} className="min-h-14" /></div>
+                <LoadingCursor />
               ) : scopedRuns.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
                   {t("autopilot.inspector.noRuns")}

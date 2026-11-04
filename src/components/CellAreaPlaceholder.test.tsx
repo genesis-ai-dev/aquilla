@@ -40,7 +40,7 @@ describe("CellAreaPlaceholder", () => {
     const status = screen.getByRole("status", { name: "Loading file from the cloud" })
     expect(status).toHaveAttribute("aria-busy", "true")
     expect(status.querySelector("[inert]")).not.toBeNull()
-    expect(status.querySelectorAll("[data-slot='loading-cursor']")).toHaveLength(3)
+    expect(status.querySelectorAll("[data-slot='loading-cursor']")).toHaveLength(1)
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument()
     rerender(<CellRowsLoadStatus loading={false} error onRetryClick={retry} />)
     fireEvent.click(screen.getByRole("button", { name: "Retry loading file" }))
@@ -65,7 +65,7 @@ describe("CellAreaPlaceholder", () => {
     expect(status).toHaveAttribute("aria-busy", "true")
     expect(within(status).getByText("Loading file from the cloud…")).toBeInTheDocument()
     expect(status.querySelector("[data-slot='spinner']")).not.toBeNull()
-    expect(status.querySelectorAll("[data-slot='loading-cursor']")).toHaveLength(40)
+    expect(status.querySelectorAll("[data-slot='loading-cursor']")).toHaveLength(1)
     expect(screen.queryByText(/0 cells/i)).not.toBeInTheDocument()
   })
 

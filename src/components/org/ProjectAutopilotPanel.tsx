@@ -32,7 +32,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { LoadingLine, LoadingLines } from "@/components/ui/loading-cursor"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 import {
   ContextualApiError,
   fetchContextualOverview,
@@ -548,8 +548,7 @@ export function ProjectAutopilotPanel({
   if (loading && !overview) {
     return (
       <Card size="sm" className="mt-6" data-testid="project-autopilot-loading">
-        <CardHeader><LoadingLine className="text-base font-medium" /><LoadingLine /></CardHeader>
-        <CardContent><LoadingLines count={2} className="min-h-14" /></CardContent>
+        <CardHeader><LoadingCursor /></CardHeader>
       </Card>
     )
   }

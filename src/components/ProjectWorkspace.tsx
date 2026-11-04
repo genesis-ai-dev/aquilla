@@ -30,7 +30,7 @@ import {
 } from "@/lib/editor/milestone-jump-targets"
 import { CellAreaPlaceholder, CellRowsLoadStatus } from "./CellAreaPlaceholder"
 import { WorkspaceMainSkeleton } from "./WorkspaceSkeleton"
-import { LoadingLine } from "@/components/ui/loading-cursor"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { EmptyState, NotFoundIcon } from "@/components/ui/empty"
 import { TabStrip } from "./TabStrip"
@@ -16492,9 +16492,7 @@ export function ProjectWorkspace() {
             onActiveTabChange={setDockTab}
             filesPanel={
               <div className="flex flex-col gap-2 p-3" aria-hidden="true">
-                {Array.from({ length: 6 }).map((_, index) => (
-                  <LoadingLine key={index} className="h-8 px-2" />
-                ))}
+                <div className="flex h-8 items-center px-2"><LoadingCursor /></div>
               </div>
             }
             agentPanel={null}

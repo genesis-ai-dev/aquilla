@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/breadcrumb"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 
 interface OrgBreadcrumbParent {
   label: string
@@ -51,6 +52,8 @@ interface Crumb {
   to?: string
   isCurrent?: boolean
   isRoot?: boolean
+  /** The crumb's name is not known yet: render a cursor in its place. */
+  pending?: boolean
 }
 
 function CrumbLink({ crumb }: { crumb: Crumb }) {
@@ -105,7 +108,7 @@ function CrumbSeparator() {
 function renderCrumbItem(crumb: Crumb, key: string) {
   return (
     <BreadcrumbItem key={key} className="shrink-0">
-      <CrumbLink crumb={crumb} />
+      {crumb.pending ? <LoadingCursor data-testid="org-breadcrumb-pending" /> : <CrumbLink crumb={crumb} />}
     </BreadcrumbItem>
   )
 }
@@ -118,7 +121,7 @@ export function OrgBreadcrumb({
   trail = [],
   isProjectsLanding = false,
 }: OrgBreadcrumbProps) {
-  const { activeOrgId, isAllOrgs, orgs, guestOrgs, setActiveOrg, setAllOrgs } = useActiveOrg()
+  const { activeOrgId, isAllOrgs, orgs, guestOrgs, setActiveOrg, setAllOrgs, isLoading: orgsLoading } = useActiveOrg()
   const location = useLocation()
   const t = useT()
   const scrollRef = useRef<HTMLOListElement | null>(null)
@@ -173,6 +176,10 @@ export function OrgBreadcrumb({
       onClick: isOrgLanding ? undefined : () => setActiveOrg(resolvedOrg.id),
       isCurrent: isOrgLanding,
     })
+  } else if (resolvedOrgId != null && orgsLoading) {
+    // The org is addressed but its record has not arrived: hold its place
+    // with a cursor rather than skipping the level or guessing a name.
+    crumbs.push({ label: "", pending: true })
   } else if (resolvedGuestOrg) {
     // AQU-790: link only (no setActiveOrg onClick) — the path drives the guest
     // scope; navigation keeps it a sibling of "All organizations".

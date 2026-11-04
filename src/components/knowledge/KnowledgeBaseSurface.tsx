@@ -50,8 +50,8 @@ import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import { toast } from "@/components/ui/toast"
 import { DateTooltip } from "@/components/ui/date-tooltip"
-import { formatNumber } from "@/lib/i18n/format"
-import { useI18n, useT } from "@/lib/i18n/I18nProvider"
+import { formatDateTime, formatNumber } from "@/lib/i18n/format"
+import { useI18n, useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import {
   deleteKnowledgeDocument,
   getKnowledgeDocument,
@@ -108,6 +108,40 @@ function statusKey(doc: KnowledgeDocument, stalled: boolean) {
   if (stalled) return "knowledgeBase.status.stalled" as const
   if (doc.indexStatus === "ready" && doc.indexError) return "knowledgeBase.status.partial" as const
   return `knowledgeBase.status.${doc.indexStatus}` as const
+}
+
+/** What the last indexing run has to say about itself beyond its badge and its
+ *  reason: when it was heard from, and — once something is indexed — how much
+ *  (AQU-1766).
+ *
+ *  `updatedAt` is the row's own clock: the moment the run wrote its outcome, or
+ *  for a `pending` row the moment it was queued. A date the uploader can read
+ *  is what makes a failure correlatable with whatever they changed, and a
+ *  section count is what tells "Indexed" over 40 sections apart from "Indexed"
+ *  over nothing.
+ *
+ *  Returns null while a doc is genuinely mid-run (nothing to date yet, nothing
+ *  indexed yet) and when the timestamp is unreadable — a server contract break
+ *  must not render "Invalid Date" at someone. */
+function indexRunLine(
+  doc: KnowledgeDocument,
+  stalled: boolean,
+  t: TFunction,
+  locale: string,
+): string | null {
+  const at = Date.parse(doc.updatedAt)
+  if (Number.isNaN(at)) return null
+  if (stalled) return t("knowledgeBase.indexLastHeard", { when: formatDateTime(at, locale) })
+  if (doc.indexStatus === "pending") return null
+  if (doc.indexStatus === "failed") {
+    return t("knowledgeBase.indexRunAt", { when: formatDateTime(at, locale) })
+  }
+  // Indexed, with or without summaries: the count is the useful half, and the
+  // reason line above already carries the "what" when there is one.
+  const sections = t("knowledgeBase.indexSections", { count: formatNumber(doc.nodeCount, locale) })
+  return doc.indexError
+    ? `${sections} · ${t("knowledgeBase.indexRunAt", { when: formatDateTime(at, locale) })}`
+    : sections
 }
 
 /** How often the open list re-reads itself while a doc is pending (AQU-2028).
@@ -434,6 +468,7 @@ export function KnowledgeBaseSurface({
               const inherited = scopeKind === "project" && doc.scope === "org"
               const manageable = canManage && !inherited
               const stalled = isKnowledgeIndexStalled(doc, now)
+              const runLine = indexRunLine(doc, stalled, t, locale)
               return (
                 <Card key={doc.id} size="sm">
                   <CardHeader>
@@ -453,7 +488,7 @@ export function KnowledgeBaseSurface({
                       </div>
                     </CardAction>
                   </CardHeader>
-                  {doc.docSummary || doc.indexError || inherited ? (
+                  {doc.docSummary || doc.indexError || runLine || inherited ? (
                     <CardContent className="flex flex-col gap-2">
                       {doc.docSummary ? <p className="text-sm text-muted-foreground">{doc.docSummary}</p> : null}
                       {/* AQU-2002: the server's own sentence, shown as sent. A
@@ -469,6 +504,11 @@ export function KnowledgeBaseSurface({
                           {doc.indexError}
                         </p>
                       ) : null}
+                      {/* AQU-1766: when the run was heard from, and how much it
+                          indexed. A reason with no date cannot be lined up with
+                          anything the uploader did, and "Indexed" says nothing
+                          about whether the index has any sections in it. */}
+                      {runLine ? <p className="text-xs text-muted-foreground">{runLine}</p> : null}
                       {inherited ? <p className="text-xs text-muted-foreground">{t("knowledgeBase.readOnlyHelp")}</p> : null}
                     </CardContent>
                   ) : null}

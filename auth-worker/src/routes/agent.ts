@@ -135,6 +135,10 @@ function resolveDraftModel(env: Env, settings: PlatformSettings, agentModel: str
 // backstops a model looping on free tools.
 const MAX_TOOL_ITERATIONS = 12
 const MAX_TOTAL_ROUNDS = 30
+// Bounds the CONVERSATION SIZE — the latest orchestrator turn's prompt +
+// completion — not tokens summed across turns. Every turn re-sends the whole
+// context, so a running sum tripped a whole-book task after a few turns with
+// almost nothing spent. Spend is the cost cap's job.
 const TOKEN_CEILING = 200_000
 const TURN_LIMIT_MESSAGE =
   "Turn length limit reached (200,000 tokens). Send a new message to continue or redirect the agent."
@@ -937,6 +941,8 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
 
   let promptTokens = 0
   let completionTokens = 0
+  /** Latest orchestrator turn's prompt + completion — what TOKEN_CEILING bounds. */
+  let contextTokens = 0
   let costCents = 0
   let steps = 0
   let stagedCount = 0
@@ -1018,7 +1024,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
         send({ type: "error", message: `Tool-iteration cap reached — run stopped.` })
         break
       }
-      if (promptTokens + completionTokens > TOKEN_CEILING) {
+      if (contextTokens > TOKEN_CEILING) {
         status = "capped"
         send({ type: "error", message: TURN_LIMIT_MESSAGE })
         break
@@ -1125,6 +1131,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
         message = turn.message
         promptTokens += turn.usage?.prompt_tokens ?? 0
         completionTokens += turn.usage?.completion_tokens ?? 0
+        contextTokens = (turn.usage?.prompt_tokens ?? 0) + (turn.usage?.completion_tokens ?? 0)
         costCents += (turn.usage?.cost ?? 0) * 100
         meter.add({
           surface: "agent",
@@ -1192,15 +1199,16 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
       for (let ci = 0; ci < toolCalls.length; ci++) {
         const call = toolCalls[ci]
         // races-F3: re-check the caps mid-turn before each BUDGETED call. A prior
-        // tool in this same turn can push cost/tokens past the cap (e.g. a draft's
-        // internal model call folds cost via addUsage). Halt rather than run more
-        // paid work — the top-of-loop check only fires between turns.
+        // tool in this same turn can push cost past the cap (e.g. a draft's
+        // internal model call folds cost via addUsage); a turn whose own context
+        // is already over TOKEN_CEILING runs no more budgeted work. Halt rather
+        // than run more paid work — the top-of-loop check only fires between turns.
         if (
           budgetedCall(call) &&
-          (costCents >= costCapCents || promptTokens + completionTokens > TOKEN_CEILING)
+          (costCents >= costCapCents || contextTokens > TOKEN_CEILING)
         ) {
           status = "capped"
-          if (promptTokens + completionTokens > TOKEN_CEILING) {
+          if (contextTokens > TOKEN_CEILING) {
             send({ type: "error", message: TURN_LIMIT_MESSAGE })
           } else {
             send({ type: "budget.exhausted", runId, spentCredits: toCredits(costCents), capCredits: toCredits(costCapCents) })
@@ -1277,7 +1285,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
             })
           },
           canContinuePaidWork: () =>
-            costCents < costCapCents && promptTokens + completionTokens <= TOKEN_CEILING,
+            costCents < costCapCents && contextTokens <= TOKEN_CEILING,
           admitPaidCall: usage
             ? async (input) => {
                 const admission = await usage.admitStep(input)

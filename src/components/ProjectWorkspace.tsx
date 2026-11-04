@@ -186,6 +186,7 @@ import {
   canRestructureTracks,
   resolveTakeLine,
   historyFileName,
+  buildRouteScopedTokenFetcher,
 } from "./project-workspace-helpers"
 import type { PaintGate } from "./project-workspace-helpers"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
@@ -494,6 +495,7 @@ import type { InsertChoice } from "@/components/station/StationEdits"
 import { onStationShowRequest, openInStation, setStationAvailable } from "@/lib/station/target"
 import { STATION_PICKS } from "@/lib/station/picks"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
+import type { SyncTokenResponse } from "@/lib/sync/sync-token"
 import { takeTrackVars } from "@/lib/timeline/take-colors"
 import { filmLabelFor, MediaTopBar } from "@/components/timeline/MediaTopBar"
 import { MediaStatusRing } from "@/components/timeline/MediaStatusRing"
@@ -1664,6 +1666,40 @@ export function ProjectWorkspace() {
   // FRO-214 (orchestrator glue): frozen-project state for the workspace banner.
   const { isFrozen, toggle: toggleLifecycle, busy: lifecycleBusy } = useProjectLifecycle(projectId ?? "", project, () => refresh())
 
+  // FRO-159: the session JWT was rejected (401) — surface it instead of
+  // silently failing on every file open. AQU-994: raise the dismissible
+  // session-expired banner rather than force-logging the user out; a lone 401
+  // can be a transient server fault misreported as an auth failure (the
+  // 2026-08-25 incident), and the old doLogout() here also revoked the
+  // still-valid token server-side and wiped local data.
+  //
+  // Stable, and shared by every sync-token fetcher this component builds.
+  const onSyncTokenUnauthorized = useCallback((failedJwt: string) => {
+    console.warn("[ProjectWorkspace] session JWT rejected (401) on sync-token mint — raising session-expired banner")
+    void notifySessionExpiredIfCurrent(failedJwt)
+  }, [])
+
+  // Persist the role a mint resolved, so Dashboard rendering can decide
+  // owner-only actions without a round-trip. Keyed on the ROUTE's project id
+  // (identical to `project.id`, but known before the details response), and
+  // shared by both fetchers below so the route-scoped mint records the role
+  // too — `patchProject` is a no-op until the record exists locally.
+  const onSyncTokenRole = useCallback(
+    (role: SyncTokenResponse["role"]) => {
+      if (!projectId) return
+      void patchProject(projectId, (p) => ({
+        ...p,
+        syncRole: {
+          level: role.level,
+          name: role.name,
+          source: role.source,
+          fetchedAt: new Date().toISOString(),
+        },
+      }))
+    },
+    [projectId],
+  )
+
   const getTokenForFile = useMemo(() => {
     if (!project?.id) {
       return async (_fileId: string) => null as string | null
@@ -1680,27 +1716,8 @@ export function ProjectWorkspace() {
       bootstrap,
       undefined,
       {
-        onRole: (role) => {
-          void patchProject(pid, (p) => ({
-            ...p,
-            syncRole: {
-              level: role.level,
-              name: role.name,
-              source: role.source,
-              fetchedAt: new Date().toISOString(),
-            },
-          }))
-        },
-        onUnauthorized: (failedJwt) => {
-          // FRO-159: the session JWT was rejected (401) — surface it instead of
-          // silently failing on every file open. AQU-994: raise the dismissible
-          // session-expired banner rather than force-logging the user out; a
-          // lone 401 can be a transient server fault misreported as an auth
-          // failure (the 2026-08-25 incident), and the old doLogout() here also
-          // revoked the still-valid token server-side and wiped local data.
-          console.warn("[ProjectWorkspace] session JWT rejected (401) on sync-token mint — raising session-expired banner")
-          void notifySessionExpiredIfCurrent(failedJwt)
-        },
+        onRole: onSyncTokenRole,
+        onUnauthorized: onSyncTokenUnauthorized,
       },
     )
   }, [
@@ -1708,7 +1725,22 @@ export function ProjectWorkspace() {
     project?.name,
     project?.origin?.kind,
     project?.origin?.kind === "git" ? project?.origin.gitlabProjectId : undefined,
+    onSyncTokenRole,
+    onSyncTokenUnauthorized,
   ])
+
+  // AQU-2079: a fetcher scoped to the ROUTE's project id, so a read that needs
+  // nothing but the id does not queue behind the project-details response.
+  // Used by the terminology read below; see buildRouteScopedTokenFetcher for
+  // why a mint never needs the loaded record.
+  const getTokenForRouteProject = useMemo(
+    () => buildRouteScopedTokenFetcher({
+      routeProjectId: projectId,
+      getJwt: () => jwtRef.current,
+      callbacks: { onRole: onSyncTokenRole, onUnauthorized: onSyncTokenUnauthorized },
+    }),
+    [projectId, onSyncTokenRole, onSyncTokenUnauthorized],
+  )
 
   const originalSourceIds = useOriginalSourceFlags(project?.id, project?.files ?? [], getTokenForFile)
 
@@ -1726,14 +1758,21 @@ export function ProjectWorkspace() {
   // the concepts themselves, so a failed read would otherwise reach the editor
   // and the in-workspace glossary as `terminology: []` — indistinguishable from
   // a project that has no terminology, with every term check silently off.
+  //
+  // AQU-2079: scoped to the ROUTE's project id, through the route-scoped token
+  // fetcher. Keyed on `project?.id` this read could not start until the
+  // details response had landed, so details, token mint and terms ran end to
+  // end — the first term row took ~3.9 s on prod for a 2-term project, ~200 ms
+  // of which was the terms request. It now runs in parallel with the details
+  // request.
   const {
     concepts: localConcepts,
     isLoading: conceptsLoading,
     error: conceptsError,
     refresh: refreshConcepts,
   } = useConcepts({
-    projectId: project?.id ?? null,
-    getToken: getTokenForFile,
+    projectId: projectId ?? null,
+    getToken: getTokenForRouteProject,
     tokenReady: !!frontierSession?.jwt,
   })
 
@@ -11352,8 +11391,15 @@ export function ProjectWorkspace() {
 
   // Project Settings is a large route chunk. Warm it after the editor mounts
   // so opening the modal never suspends behind the first module download.
+  //
+  // AQU-2079: the glossary too. The Terminology item below is pinned — it is
+  // always on screen in this workspace — and opening it used to replace the
+  // whole surface with "Loading terminology…" while the chunk downloaded (~8 s
+  // on dev before an empty termbase could say "No terms yet"). Warming it here
+  // means the surface paints as soon as the terms read returns.
   useEffect(() => {
     void import("./ProjectSettings")
+    void import("./GlossaryEditor")
   }, [])
 
   const projectNavItems = useMemo(() => {

@@ -6,11 +6,15 @@ import { afterEach, describe, expect, it } from "vitest"
 import { BiaEngine } from "./bia-engine"
 import { BiaIndex, type ForecastCell } from "./bia-index"
 import { suggestAtCaret } from "./forecast-protocol"
-import { fold, graphemes, isSingleWord, joiner, segmentWords, setSegmenterForTests, wordKeys } from "./forecast-tokenize"
+import { fold, graphemes, isSingleWord, joiner, segmentWords, setSegmenterForTests, stripZeroWidth, wordKeys } from "./forecast-tokenize"
 
 afterEach(() => setSegmenterForTests(undefined))
 
 const surfaces = (text: string) => segmentWords(text).map((w) => w.surface)
+
+/** eBible-style text: a ZERO WIDTH SPACE between the syllables of every word. */
+const withSyllableZwsp = (text: string) =>
+  text.split(" ").map((word) => graphemes(word).join("\u200B")).join(" ")
 
 function engineOf(texts: string[], sources: string[] = []): BiaEngine {
   const index = new BiaIndex()
@@ -62,6 +66,35 @@ describe("segmentWords", () => {
 
   it("keeps the zero-width non-joiner inside Persian words", () => {
     expect(surfaces("می‌خواهم بروم")).toEqual(["می‌خواهم", "بروم"])
+  })
+
+  it("segments Burmese the same whether or not its syllables carry a ZERO WIDTH SPACE", () => {
+    // eBible's Burmese puts U+200B between every syllable and ICU breaks there,
+    // so every method used to see syllables instead of dictionary words.
+    const plain = "ဘုရားသခင်သည် မိုးကောင်းကင်ကို ဖန်ဆင်းတော်မူ၏"
+    const zwsp = withSyllableZwsp(plain)
+    expect(zwsp).not.toBe(plain)
+    expect(stripZeroWidth(zwsp)).toBe(plain)
+    expect(surfaces(plain)).toContain("ဘုရားသခင်")
+    expect(surfaces(zwsp)).toEqual(surfaces(plain))
+    expect(wordKeys(zwsp)).toEqual(wordKeys(plain))
+  })
+
+  it("keeps offsets pointing into the original text when zero-width spaces are dropped", () => {
+    const text = withSyllableZwsp("ဘုရားသခင်သည် မိုးကောင်းကင်ကို")
+    for (const word of segmentWords(text)) {
+      expect(stripZeroWidth(text.slice(word.start, word.end))).toBe(word.surface)
+    }
+    // A caret after a trailing zero-width space is still inside the last word.
+    const trailing = "ကောင်း\u200B"
+    expect(segmentWords(trailing).at(-1)?.end).toBe(trailing.length)
+  })
+
+  it("drops the word joiner and the BOM from word keys, and joins across them", () => {
+    expect(wordKeys("ab\uFEFFc")).toEqual(["abc"])
+    expect(wordKeys("ab\u2060c")).toEqual(["abc"])
+    expect(surfaces("one\u200Btwo three")).toEqual(["onetwo", "three"])
+    expect(isSingleWord("one\u200Btwo")).toBe(true)
   })
 
   it("treats a straight apostrophe as a letter (glottal stop), a typographic quote as punctuation", () => {
@@ -126,6 +159,16 @@ describe("the engine in other scripts", () => {
     expect(engine.index.lexicon.dice("light", "אוֹר")).toBeGreaterThan(0.9)
     const [first] = engine.suggestNext("בָּרָא אֱלֹהִים ", { extend: false, source: "God created water" })
     expect(first.word).toBe("מַיִם")
+  })
+
+  it("suggests a whole Burmese word from a corpus whose syllables carry U+200B", () => {
+    // eBible-style Burmese: every syllable separated by a ZERO WIDTH SPACE.
+    const verse = "ဘုရားသခင်သည် မိုးကောင်းကင်ကို ဖန်ဆင်းတော်မူ၏"
+    const engine = engineOf([verse, verse, "ဘုရားသခင်သည် ကောင်း၏"].map(withSyllableZwsp))
+    const [first] = suggestAtCaret(engine, "ဘုရားသခင်သည် ")
+    // The dictionary word, not its first syllable (မိုး), and no U+200B in it.
+    expect(first.word).toBe("မိုးကောင်းကင်")
+    expect(first.word).not.toContain("\u200B")
   })
 
   it("completes a K'iche' word ending in a glottal-stop apostrophe", () => {

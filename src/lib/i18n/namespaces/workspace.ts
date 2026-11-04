@@ -295,6 +295,9 @@ export const workspace = defineNamespace({
 
     // -- ErrorBoundary --
     "workspace.errorBoundary.reload": "Reload",
+    "workspace.errorBoundary.offlineTitle": "Connect to load this screen",
+    "workspace.errorBoundary.offlineDescription": "This screen needs files that are not available offline yet. Reconnect, then reload to try again.",
+    "workspace.errorBoundary.reconnectedDescription": "Your browser is back online. Reload to try loading this screen again.",
     // AQU-1405. Painted over the page for the moment between a stale-chunk
     // failure and the automatic reload that recovers from it.
     "workspace.updateNotice.reloading": "Updating {app}…",

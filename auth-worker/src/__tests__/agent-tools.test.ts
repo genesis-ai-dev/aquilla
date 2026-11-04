@@ -878,7 +878,7 @@ describe("executeDraft", () => {
       lane,
       aliases,
     }
-    const progress: { label: string; done: number; total: number }[] = []
+    const progress: { label: string; done?: number; total?: number }[] = []
     const usage: unknown[] = []
     return {
       ctx: {
@@ -891,7 +891,7 @@ describe("executeDraft", () => {
         targetLanguage: "Spanish",
         translationInstructions: "A clear, natural Spanish translation.",
         signal: new AbortController().signal,
-        sendProgress: (label: string, done: number, total: number) => progress.push({ label, done, total }),
+        sendProgress: (label: string, done?: number, total?: number) => progress.push({ label, done, total }),
         addUsage: (u: unknown) => usage.push(u),
       },
       progress,
@@ -1021,11 +1021,12 @@ describe("executeDraft", () => {
     // in the working set (crossed-out new value above the identical proposal).
     expect(out.data?.cells?.map((c) => c.status)).toEqual(["untranslated", "untranslated"])
     expect(out.data?.cells?.every((c) => c.target === "")).toBe(true)
+    // AQU-1536: each pass is one batched model call, so no cell finishes
+    // before the pass returns. The frames are stage labels with NO counter —
+    // a `0/N` that can only jump to `N/N` reads as a stalled run in the dock.
     expect(progress).toEqual([
-      { label: "Researching 2 cells", done: 0, total: 2 },
-      { label: "Researching 2 cells", done: 2, total: 2 },
-      { label: "Drafting 2 cells", done: 0, total: 2 },
-      { label: "Drafting 2 cells", done: 2, total: 2 },
+      { label: "Researching 2 cells (pass 1 of 2)", done: undefined, total: undefined },
+      { label: "Drafting 2 cells (pass 2 of 2)", done: undefined, total: undefined },
     ])
     expect(usage).toHaveLength(2)
 

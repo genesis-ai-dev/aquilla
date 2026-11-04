@@ -129,6 +129,10 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "audio.recordingModal.recordingStatus is the present participle shown beside a " +
     "pulsing dot while the microphone is live. Noun vs progressive verb: English " +
     "spells both 'Recording', almost nothing else does.",
+  "auth.login.title":
+    "Names the authentication form as a heading, while common.logIn is an " +
+    "imperative action. Locales may nominalize this heading (for example " +
+    "German Anmeldung) while retaining a verb on the action (Anmelden).",
   "auth.login.submitDefault":
     "The submit button of the sign-in form. auth.login.title is the heading naming " +
     "the whole form. Languages that nominalize headings ('Anmeldung') while keeping " +

@@ -526,6 +526,10 @@ export const autopilot = defineNamespace({
     "autopilot.inspector.context.setupNamed": "Set up {label}",
     "autopilot.inspector.context.noEvidence":
       "No context evidence was recorded for this run.",
+    // AQU-1678: the Context section renders with no run selected, so the
+    // run-scoped sentence above cannot carry the empty state on its own.
+    "autopilot.inspector.context.noProjectContext":
+      "No context has been recorded for this project yet.",
     "autopilot.inspector.context.recentBriefsOnly":
       "Only the most recent scene briefs are shown for this run.",
     // AQU-1690: the Bible facts each span of a run used.

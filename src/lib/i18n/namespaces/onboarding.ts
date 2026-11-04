@@ -143,8 +143,8 @@ export const onboarding = defineNamespace({
       "AI translations, sync, and cloud import are available.",
     "onboarding.step.signIn.orgCheckFailed":
       "You're signed in, but we couldn't check whether this account has finished setup. Check your connection and try again.",
-    "onboarding.step.signIn.headingSignup": "Create your Aquilla account",
-    "onboarding.step.signIn.headingLogin": "Sign in to Aquilla",
+    "onboarding.step.signIn.headingSignup": "Create an Aquilla Account",
+    "onboarding.step.signIn.headingLogin": "Log in to Aquilla",
     // "Reset your password" reuses `auth.resetPassword.title`
     "onboarding.step.signIn.unlockBlurb":
       "Unlock AI-powered translations, sync across devices, and import projects from the cloud.",

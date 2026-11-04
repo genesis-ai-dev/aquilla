@@ -889,6 +889,52 @@ describe("AutopilotActivityInspector", () => {
     )
   })
 
+  // AQU-1678: the Context disclosure used to be nested inside the
+  // `selectedRun` branch, so a project with no Autopilot runs opened a sheet
+  // with no Context section at all — while the card's "N context suggestions"
+  // widget opened that very sheet with `initialSection: "context"`. Readiness is
+  // project state, so the list has to render with zero runs.
+  it("shows project context readiness on a project with no Autopilot runs", async () => {
+    runsMock.mockResolvedValue(runPage([]))
+
+    renderInspector({
+      initialSection: "context",
+      readiness: {
+        ready: false,
+        blockingGaps: 1,
+        items: [
+          { id: "brief", label: "Translation brief", level: "missing", detail: "Missing", href: "memory/brief" },
+          { id: "terminology", label: "Key terms", level: "ready", detail: "Answered", href: "terminology" },
+        ],
+      },
+    })
+
+    expect(await screen.findByText("No Autopilot runs have been recorded yet.")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Context/ })).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Set up Translation brief" })).toHaveAttribute(
+      "href",
+      "/project/p1/memory/brief",
+    )
+    expect(screen.getByRole("link", { name: "Key terms" })).toHaveAttribute(
+      "href",
+      "/project/p1/terminology",
+    )
+    // Run-specific cards stay gated on a selected run.
+    expect(screen.queryByRole("img", { name: "Autopilot process graph" })).not.toBeInTheDocument()
+    expect(activityMock).not.toHaveBeenCalled()
+  })
+
+  // AQU-1678: the empty state used to say "for this run" unconditionally, which
+  // cannot be true in the no-run, no-readiness case this section now renders in.
+  it("names the project, not a run, when no context exists and no run is selected", async () => {
+    runsMock.mockResolvedValue(runPage([]))
+
+    renderInspector({ initialSection: "context" })
+
+    expect(await screen.findByText("No context has been recorded for this project yet.")).toBeInTheDocument()
+    expect(screen.queryByText(/recorded for this run/)).not.toBeInTheDocument()
+  })
+
   it("retries a named-language lane and reviews its drafts in that lane", async () => {
     const frenchLane = {
       ...run,

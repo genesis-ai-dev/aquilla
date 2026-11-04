@@ -1467,6 +1467,100 @@ export function AutopilotActivityInspector({
               )}
             </section>
 
+            {/* AQU-1678: context readiness scores PROJECT state (terminology,
+                brief, examples, rules, languages) and is the dashboard's route
+                into each of those surfaces — including the project instructions,
+                whose only path this is once the start gate clears. It used to
+                live inside the `selectedRun` branch below, so a project with no
+                Autopilot runs yet opened a sheet with no Context section, while
+                the card's "N context suggestions" widget pointed straight at
+                it. Run-specific cards stay gated on `selectedRun`. */}
+            <Disclosure title={t("autopilot.inspector.context.title")} open={contextOpen} onOpenChange={setContextOpen} badge={<Badge variant="secondary">{suggestedContext.length}</Badge>}>
+              {readiness && (
+                <div className="flex flex-col gap-2">
+                  {readiness.blockingGaps > 0 && (
+                    <p className="text-sm font-medium">
+                      {t("autopilot.inspector.context.missingEssentials", {
+                        count: readiness.blockingGaps,
+                      })}
+                    </p>
+                  )}
+                  {readiness.items.map((item) => {
+                    const itemLabel = readinessItemLabel(item, t)
+                    return (
+                      <div key={item.id} className="flex items-start justify-between gap-3 text-sm">
+                        <div>
+                          {/* AQU-1672: the "Set up" link below appears only
+                              while an item is unfinished, so a project past
+                              first setup lost every path to the surface
+                              behind it — including the project instructions,
+                              whose only route from the dashboard this is. A
+                              finished item links from its own title instead,
+                              so every row with a surface has exactly one
+                              link to it at every level. */}
+                          {item.href && item.level === "ready" ? (
+                            <Link
+                              to={`/project/${projectId}/${item.href}`}
+                              className="block font-medium text-primary underline-offset-2 hover:underline"
+                              // Same reason as the action link below: SPA
+                              // navigation leaves this sheet mounted over
+                              // the destination unless it is closed.
+                              onClick={() => onOpenChange(false)}
+                            >
+                              {itemLabel}
+                            </Link>
+                          ) : (
+                            <p className="font-medium">{itemLabel}</p>
+                          )}
+                          <p className="text-muted-foreground">
+                            {readinessItemDetail(item, t)}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <Badge variant="outline">{readinessLevelLabel(item, t)}</Badge>
+                          {item.href && item.level !== "ready" && (
+                            <Link
+                              aria-label={t("autopilot.inspector.context.setupNamed", {
+                                label: itemLabel,
+                              })}
+                              to={`/project/${projectId}/${item.href}`}
+                              className="text-xs text-primary underline-offset-2 hover:underline"
+                              // SPA navigation keeps this sheet mounted (the old
+                              // raw <a> reloaded the page) — close it so the
+                              // destination isn't hidden behind the overlay.
+                              onClick={() => onOpenChange(false)}
+                            >
+                              {t("autopilot.inspector.context.setup")}
+                            </Link>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+              {sceneBriefs.map((brief, index) => <SceneBriefEvidence key={brief.id ?? index} brief={brief} />)}
+              {/* AQU-1678: run evidence stays run-scoped now that the
+                  disclosure itself is project-level. */}
+              {bibleData && selectedRun && (
+                <BibleFactsEvidence key={selectedRun.runId} projectId={projectId} runId={selectedRun.runId} />
+              )}
+              {!readiness && sceneBriefs.length === 0 && (
+                <p className="text-sm text-muted-foreground">
+                  {/* AQU-1678: the old copy named "this run", which no longer
+                      holds — this section renders with no run selected. */}
+                  {t(selectedRun
+                    ? "autopilot.inspector.context.noEvidence"
+                    : "autopilot.inspector.context.noProjectContext")}
+                </p>
+              )}
+              {sceneBriefsTruncated && (
+                <p className="text-xs text-muted-foreground">
+                  {t("autopilot.inspector.context.recentBriefsOnly")}
+                </p>
+              )}
+            </Disclosure>
+
             {selectedRun && (
               <>
                 <Separator />
@@ -1721,86 +1815,6 @@ export function AutopilotActivityInspector({
                     })}
                   </p>
                 )}
-
-                <Disclosure title={t("autopilot.inspector.context.title")} open={contextOpen} onOpenChange={setContextOpen} badge={<Badge variant="secondary">{suggestedContext.length}</Badge>}>
-                  {readiness && (
-                    <div className="flex flex-col gap-2">
-                      {readiness.blockingGaps > 0 && (
-                        <p className="text-sm font-medium">
-                          {t("autopilot.inspector.context.missingEssentials", {
-                            count: readiness.blockingGaps,
-                          })}
-                        </p>
-                      )}
-                      {readiness.items.map((item) => {
-                        const itemLabel = readinessItemLabel(item, t)
-                        return (
-                          <div key={item.id} className="flex items-start justify-between gap-3 text-sm">
-                            <div>
-                              {/* AQU-1672: the "Set up" link below appears only
-                                  while an item is unfinished, so a project past
-                                  first setup lost every path to the surface
-                                  behind it — including the project instructions,
-                                  whose only route from the dashboard this is. A
-                                  finished item links from its own title instead,
-                                  so every row with a surface has exactly one
-                                  link to it at every level. */}
-                              {item.href && item.level === "ready" ? (
-                                <Link
-                                  to={`/project/${projectId}/${item.href}`}
-                                  className="block font-medium text-primary underline-offset-2 hover:underline"
-                                  // Same reason as the action link below: SPA
-                                  // navigation leaves this sheet mounted over
-                                  // the destination unless it is closed.
-                                  onClick={() => onOpenChange(false)}
-                                >
-                                  {itemLabel}
-                                </Link>
-                              ) : (
-                                <p className="font-medium">{itemLabel}</p>
-                              )}
-                              <p className="text-muted-foreground">
-                                {readinessItemDetail(item, t)}
-                              </p>
-                            </div>
-                            <div className="flex shrink-0 items-center gap-2">
-                              <Badge variant="outline">{readinessLevelLabel(item, t)}</Badge>
-                              {item.href && item.level !== "ready" && (
-                                <Link
-                                  aria-label={t("autopilot.inspector.context.setupNamed", {
-                                    label: itemLabel,
-                                  })}
-                                  to={`/project/${projectId}/${item.href}`}
-                                  className="text-xs text-primary underline-offset-2 hover:underline"
-                                  // SPA navigation keeps this sheet mounted (the old
-                                  // raw <a> reloaded the page) — close it so the
-                                  // destination isn't hidden behind the overlay.
-                                  onClick={() => onOpenChange(false)}
-                                >
-                                  {t("autopilot.inspector.context.setup")}
-                                </Link>
-                              )}
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
-                  {sceneBriefs.map((brief, index) => <SceneBriefEvidence key={brief.id ?? index} brief={brief} />)}
-                  {bibleData && (
-                    <BibleFactsEvidence key={selectedRun.runId} projectId={projectId} runId={selectedRun.runId} />
-                  )}
-                  {!readiness && sceneBriefs.length === 0 && (
-                    <p className="text-sm text-muted-foreground">
-                      {t("autopilot.inspector.context.noEvidence")}
-                    </p>
-                  )}
-                  {sceneBriefsTruncated && (
-                    <p className="text-xs text-muted-foreground">
-                      {t("autopilot.inspector.context.recentBriefsOnly")}
-                    </p>
-                  )}
-                </Disclosure>
 
                 <Disclosure title={t("autopilot.inspector.technical.title")} open={technicalOpen} onOpenChange={setTechnicalOpen} badge={<Badge variant="secondary">{eventsTruncated ? `${events.length}+` : events.length}</Badge>}>
                   <Button type="button" size="sm" variant="outline" className="self-start" onClick={() => void copyText(activityLog(selectedRun, activity)).then(() => setActionMessage({ key: "autopilot.inspector.technical.activityLogCopied" }))}>

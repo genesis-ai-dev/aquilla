@@ -39,8 +39,8 @@ describe("draft prompt — Bible facts", () => {
     expect(user).toContain("Facts: speech Samaritan woman [local:JHN:n43004007002] → Jesus [person:Jesus.2], quote level 1 opens and closes here")
     expect(user).toContain("quote level 2 opens and closes here")
     expect(calls[0].system).toContain("Bible data — given facts")
-    expect(CONTEXTUAL_PROMPT_VERSION).toBe("contextual-draft-v4")
-    expect(result.ok && result.draft.promptVersion.startsWith("contextual-draft-v4:")).toBe(true)
+    expect(CONTEXTUAL_PROMPT_VERSION).toBe("contextual-draft-v5")
+    expect(result.ok && result.draft.promptVersion.startsWith("contextual-draft-v5:")).toBe(true)
   })
 
   it("keeps the old prompt when there are no facts", async () => {

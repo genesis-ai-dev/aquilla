@@ -1,6 +1,7 @@
 /**
- * QualityStyleRules — style-rule library section on the Translation quality
- * pane (AQU-934 phase 2).
+ * StyleChecks — the style-rule store behind the unified Checks list
+ * (AQU-934 phase 2; AQU-2342). Approved rules are rendered here through the
+ * same StyleCheckRow the Checks list uses, so the wiring is tested end to end.
  *
  * The hook, the knowledge client and the extractor are all mocked: this suite
  * is about the section's wiring (which mutation each affordance calls, with
@@ -13,7 +14,8 @@ import { ROLE } from "@/lib/frontier/roles"
 import type { KnowledgeDocument } from "@/lib/frontier/knowledge-base"
 import type { RuleApplicability, StyleRule } from "@/lib/rules/style-rule-types"
 import type { CompletionSettings } from "@/lib/parsers/types"
-import { QualityStyleRules } from "./QualityStyleRules"
+import { StyleChecks, type StyleChecksBinding } from "./StyleChecks"
+import { StyleCheckRow } from "@/components/checks/OtherCheckRows"
 
 // ── Mocks ──────────────────────────────────────────────────────────────────
 
@@ -123,14 +125,45 @@ function mockHook(overrides: { rules?: StyleRule[]; applicability?: RuleApplicab
   })
 }
 
+/** The parts of the Checks list a style binding feeds: its rows, the review
+ *  queue, the error banner, and the Add-check "extract" choice. */
+function Harness({ binding }: { binding: StyleChecksBinding }) {
+  return (
+    <>
+      {binding.errorBanner}
+      {binding.extract ? (
+        <button type="button" onClick={binding.extract}>Extract from knowledge base</button>
+      ) : null}
+      <ul>
+        {binding.rules
+          .filter((rule) => rule.status === "approved")
+          .map((rule) => (
+            <StyleCheckRow
+              key={rule.id}
+              rule={rule}
+              chips={null}
+              categoryLabel={binding.labels.category[rule.category]}
+              canManage={binding.canManage}
+              onToggle={(enabled) => binding.toggle(rule, enabled)}
+              onOpenApplicability={() => binding.openApplicability(rule)}
+            />
+          ))}
+      </ul>
+      {binding.reviewQueue}
+    </>
+  )
+}
+
 async function renderSection(roleLevel: number | null = ROLE.PROJECT_LEAD) {
   const result = render(
-    <QualityStyleRules
+    <StyleChecks
       projectId="proj-1"
       roleLevel={roleLevel}
       completionSettings={SETTINGS}
       session={{ jwt: "tok", username: "alice", createdAt: "2026-01-01T00:00:00.000Z" }}
-    />,
+    >
+      {(binding) => <Harness binding={binding} />}
+    </StyleChecks>,
   )
   // Settles the knowledge-document fetch the section fires on mount.
   await waitFor(() => expect(vi.mocked(listKnowledgeDocuments)).toHaveBeenCalled())
@@ -148,7 +181,7 @@ beforeEach(() => {
 
 // ── Candidates queue ───────────────────────────────────────────────────────
 
-describe("QualityStyleRules — candidates queue", () => {
+describe("StyleChecks — candidates queue", () => {
   beforeEach(() => {
     vi.mocked(listKnowledgeDocuments).mockResolvedValue([makeDoc()])
     mockHook({
@@ -203,20 +236,18 @@ describe("QualityStyleRules — candidates queue", () => {
 
 // ── Library ────────────────────────────────────────────────────────────────
 
-describe("QualityStyleRules — approved library", () => {
+describe("StyleChecks — approved library", () => {
   const approved = [
     makeRule({ id: "r-term", status: "approved", category: "terminology", instruction: "Render 'covenant' consistently" }),
     makeRule({ id: "r-style", status: "approved", category: "style", instruction: "Keep sentences short", scope: "genre" }),
   ]
 
-  it("groups rules by category and skips empty groups", async () => {
+  it("labels each approved rule with its category", async () => {
     mockHook({ rules: approved })
     await renderSection()
 
     expect(screen.getByText("Terminology rules")).toBeInTheDocument()
     expect(screen.getByText("General style rules")).toBeInTheDocument()
-    expect(screen.queryByText("Grammar rules")).not.toBeInTheDocument()
-    expect(screen.queryByText("Formatting rules")).not.toBeInTheDocument()
     expect(screen.getByText("Render 'covenant' consistently")).toBeInTheDocument()
     expect(screen.getByText("Keep sentences short")).toBeInTheDocument()
   })
@@ -225,7 +256,7 @@ describe("QualityStyleRules — approved library", () => {
     mockHook({ rules: [approved[0]] })
     await renderSection()
 
-    fireEvent.click(screen.getByRole("switch", { name: "Enabled" }))
+    fireEvent.click(screen.getByRole("switch", { name: /Disable/ }))
     await waitFor(() => expect(updateRule).toHaveBeenCalledWith("r-term", { enabled: false }))
   })
 
@@ -235,7 +266,7 @@ describe("QualityStyleRules — approved library", () => {
 
     // Base UI's Switch renders a span with role=switch, so the disabled state
     // lands on aria-disabled rather than the `disabled` attribute.
-    expect(screen.getByRole("switch", { name: "Enabled" })).toHaveAttribute(
+    expect(screen.getByRole("switch", { name: /Disable/ })).toHaveAttribute(
       "aria-disabled",
       "true",
     )
@@ -245,7 +276,7 @@ describe("QualityStyleRules — approved library", () => {
 
 // ── Applicability dialog ───────────────────────────────────────────────────
 
-describe("QualityStyleRules — applicability dialog", () => {
+describe("StyleChecks — applicability dialog", () => {
   beforeEach(() => {
     mockHook({
       rules: [makeRule({ status: "approved", category: "terminology" })],
@@ -290,7 +321,7 @@ describe("QualityStyleRules — applicability dialog", () => {
 
 // ── Extraction ─────────────────────────────────────────────────────────────
 
-describe("QualityStyleRules — extraction", () => {
+describe("StyleChecks — extraction", () => {
   beforeEach(() => {
     vi.mocked(listKnowledgeDocuments).mockResolvedValue([makeDoc()])
     vi.mocked(getKnowledgeDocument).mockResolvedValue({
@@ -375,22 +406,17 @@ describe("QualityStyleRules — extraction", () => {
 
 // ── Gates and empty states ─────────────────────────────────────────────────
 
-describe("QualityStyleRules — gates and empty states", () => {
-  it("shows both empty states with no rules at all", async () => {
+describe("StyleChecks — gates and empty states", () => {
+  it("renders no review queue while nothing is proposed", async () => {
     await renderSection()
-    expect(screen.getByText("Nothing is waiting for review.")).toBeInTheDocument()
-    expect(screen.getByText(/No approved style rules yet/)).toBeInTheDocument()
+    expect(screen.queryByText("Proposed rules")).not.toBeInTheDocument()
   })
 
-  it("hides the extract action below CONTRIBUTOR and shows the role lock", async () => {
+  it("offers no extract choice below CONTRIBUTOR", async () => {
     await renderSection(ROLE.REVIEWER)
     expect(
       screen.queryByRole("button", { name: /Extract from knowledge base/ }),
     ).not.toBeInTheDocument()
-    // The lock must name the floor it actually gates on (Contributor for
-    // extraction), not the maintainer floor the entry sections use.
-    expect(screen.getAllByLabelText(/requires the Contributor role/i).length).toBeGreaterThan(0)
-    expect(screen.queryByLabelText(/requires the Maintainer role/i)).not.toBeInTheDocument()
   })
 
   it("keeps the review actions disabled below PROJECT_LEAD", async () => {

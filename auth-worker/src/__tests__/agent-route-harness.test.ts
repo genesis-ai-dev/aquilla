@@ -110,12 +110,13 @@ describe("agent route — harness tool registration & dispatch", () => {
       "load_artifact",
       "read_sandbox_file",
       "propose_memory",
-      "propose_brief_update",
       "read_memory",
     ]) {
       expect(toolNames).toContain(name)
     }
     expect(toolNames).not.toContain("plan_import")
+    // AQU-2342: retired — a legacy call is retargeted to propose_memory decisions/.
+    expect(toolNames).not.toContain("propose_brief_update")
 
     // read_memory dispatched → its result reached the model on the next turn.
     const toolMsg = upstreamBodies[1].messages.find((m) => m.role === "tool")!

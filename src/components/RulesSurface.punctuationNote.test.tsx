@@ -4,6 +4,8 @@
  * just has nothing special for it, so "this lane records no language" was
  * wrong there and sent leads looking for a language that was already set.
  */
+import { PUNCTUATION_CHECK_IDS } from "@/lib/lqa/builtin-resolver"
+import type { TranslationRule } from "@/lib/parsers/types"
 import { beforeEach, describe, it, expect, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
@@ -11,14 +13,28 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { RulesSurface } from "./RulesSurface"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
-vi.mock("@/components/rules/OrgRulesPanel", () => ({ OrgRulesPanel: () => null }))
-vi.mock("./BuiltinChecksList", () => ({
-  BuiltinChecksList: ({ punctuationNote }: { punctuationNote?: string }) => (
-    <p data-testid="punctuation-note">{punctuationNote}</p>
+// AQU-2342: built-in checks are rows of the one Checks list; the row is
+// stubbed to expose the punctuation note the surface hands it.
+vi.mock("./BuiltinChecksList", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./BuiltinChecksList")>()),
+  BuiltinCheckRow: ({ punctuationNote }: { punctuationNote?: string }) => (
+    <li data-testid="punctuation-note">{punctuationNote}</li>
   ),
 }))
 
 type Lane = NonNullable<ProjectRecord["lanes"]>[number]
+
+const PUNCTUATION_RULE = {
+  id: "builtin:terminal-punctuation",
+  name: "Terminal punctuation",
+  description: "",
+  severity: "minor",
+  source: "algorithmic",
+  scope: "project",
+  check: { type: "builtin", checkId: PUNCTUATION_CHECK_IDS[0] },
+  enabled: true,
+  createdAt: "2026-01-01T00:00:00Z",
+} as TranslationRule
 
 const lane = (legacyTag: string, name: string, position: number, extra: Partial<Lane> = {}): Lane => ({
   id: `lane-${position}`, role: "target", name, langCode: null, legacyTag, position, archivedAt: null, ...extra,
@@ -44,7 +60,7 @@ function noteFor(project: ProjectRecord, activeLane = "") {
           project={project}
           projectId="p1"
           userRules={[]}
-          builtinRules={[]}
+          builtinRules={[PUNCTUATION_RULE]}
           addRule={vi.fn()}
           updateRule={vi.fn()}
           deleteRule={vi.fn()}

@@ -791,7 +791,7 @@ type ReadinessItem = ContextReadiness["items"][number]
 function readinessItemLabel(item: ReadinessItem, t: TFunction): string {
   const keyById: Partial<Record<string, MessageKey>> = {
     terminology: "autopilot.readiness.terminology.label",
-    brief: "autopilot.readiness.brief.label",
+    instructions: "autopilot.readiness.instructions.label",
     examples: "autopilot.readiness.examples.label",
     rules: "autopilot.readiness.rules.label",
     languages: "autopilot.readiness.languages.label",
@@ -815,8 +815,8 @@ function readinessItemDetail(item: ReadinessItem, t: TFunction): string {
   if (item.id === "terminology" && item.level === "missing") {
     return t("autopilot.readiness.terminology.none")
   }
-  if (item.id === "brief" && item.level === "missing") {
-    return t("autopilot.readiness.brief.none")
+  if (item.id === "instructions" && item.level === "missing") {
+    return t("autopilot.readiness.instructions.none")
   }
   if (item.id === "examples" && item.level === "missing") {
     return t("autopilot.readiness.examples.none")
@@ -1469,7 +1469,7 @@ export function AutopilotActivityInspector({
 
             {/* AQU-1678: context readiness scores PROJECT state (terminology,
                 brief, examples, rules, languages) and is the dashboard's route
-                into each of those surfaces — including the translation brief,
+                into each of those surfaces — including the project instructions,
                 whose only path this is once the start gate clears. It used to
                 live inside the `selectedRun` branch below, so a project with no
                 Autopilot runs yet opened a sheet with no Context section, while
@@ -1493,7 +1493,7 @@ export function AutopilotActivityInspector({
                           {/* AQU-1672: the "Set up" link below appears only
                               while an item is unfinished, so a project past
                               first setup lost every path to the surface
-                              behind it — including the translation brief,
+                              behind it — including the project instructions,
                               whose only route from the dashboard this is. A
                               finished item links from its own title instead,
                               so every row with a surface has exactly one

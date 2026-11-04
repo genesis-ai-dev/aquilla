@@ -3,17 +3,19 @@ import { defineNamespace } from "./types"
 /**
  * `projectDecisions` namespace (AQU-1691): the decision log.
  *
- * `projectDecisions.*` is the "Project decisions" card in Settings → General
- * → Languages, which lists the answers a team gave to Autopilot's questions.
- * `projectDecisions.card.*` is what an Autopilot question card adds when its
- * answer becomes one of these decisions.
+ * `projectDecisions.*` is the "Project decisions" card in Living Memory →
+ * Checks, which lists the answers a team gave to Autopilot's questions.
+ * AQU-2342: an answer is also added to the project instructions (or, for a
+ * language fact, to the Language profile the checks read); the card is the
+ * record. `projectDecisions.card.*` is what the question card says about that.
  */
 export const projectDecisions = defineNamespace({
   keys: {
     // ── Settings card ──
     "projectDecisions.title": "Project decisions",
     "projectDecisions.description":
-      "Answers your team gave to Autopilot's questions. Autopilot follows each one in every later draft.",
+      "Answers your team gave to Autopilot's questions. Each answer was also added to the project " +
+      "instructions; this list is the record, so Autopilot never asks the same question twice.",
     "projectDecisions.empty": "No decisions yet. When someone answers a question from Autopilot, it appears here.",
     "projectDecisions.scope.project": "Whole project",
     "projectDecisions.scope.passage": "{from} to {to}",
@@ -22,7 +24,9 @@ export const projectDecisions = defineNamespace({
     "projectDecisions.editAriaLabel": "Edit {key}",
     "projectDecisions.remove": "Remove",
     "projectDecisions.removeAriaLabel": "Remove {key}",
-    "projectDecisions.removeConfirm": "Remove this decision? Autopilot stops following it.",
+    "projectDecisions.removeConfirm":
+      "Remove this decision? Autopilot may ask the question again. To change what drafts follow, edit the " +
+      "project instructions.",
     "projectDecisions.field.value": "Decision",
     "projectDecisions.field.book": "Book",
     "projectDecisions.field.from": "From verse",
@@ -40,26 +44,29 @@ export const projectDecisions = defineNamespace({
     "projectDecisions.error.failed": "The project decisions could not be saved.",
 
     // ── Autopilot question card ──
-    "projectDecisions.card.durable": "Your answer becomes a project decision. Autopilot follows it in every later draft.",
+    "projectDecisions.card.durable":
+      "Your answer is added to the project instructions (or to the language data the checks use), so " +
+      "every later AI draft follows it.",
     "projectDecisions.card.otherAnswer": "Or write your own answer",
     "projectDecisions.card.needsMaintainer":
       "Only a maintainer can answer this question, because the answer changes the Language profile.",
     "projectDecisions.card.reason.notStorable":
       "This answer doesn't fit the Language profile. Choose one of the answers above, or change the " +
-      "profile in Project settings.",
+      "profile in Living Memory → Checks.",
     "projectDecisions.card.reason.tooLong": "This answer is too long to keep as a project decision.",
     "projectDecisions.card.reason.full":
-      "The project already keeps as many decisions as it can. Remove one in Project settings, then " +
-      "answer again.",
+      "The project can't keep any more answers. Shorten the project instructions in Living Memory, " +
+      "then answer again.",
   },
   context: {
     _context: {
       description:
         "The decision log. Autopilot (an AI drafting assistant) sometimes asks the team a " +
         "question it cannot answer alone, such as 'Is Andrew older or younger than Peter?'. " +
-        "The answer is kept as a 'project decision', and Autopilot follows it in every draft " +
-        "after that. The 'Project decisions' card in Settings lists these decisions; " +
-        "maintainers can edit or remove them. The projectDecisions.card.* strings appear on " +
+        "The answer is added to the project instructions (the one text every AI draft reads), " +
+        "or, for a fact about the language, to the 'Language profile' the checks read. The " +
+        "'Project decisions' card in Living Memory → Checks lists the recorded answers; maintainers " +
+        "can edit or remove them. The projectDecisions.card.* strings appear on " +
         "the question card itself, in Autopilot's activity panel. Decision keys such as " +
         "'kin.andrew-peter.relative-age' and book codes such as ACT are data: never translate them.",
     },
@@ -116,7 +123,9 @@ export const projectDecisions = defineNamespace({
       },
       "projectDecisions.error.failed": { description: "Error: saving failed for another reason." },
       "projectDecisions.card.durable": {
-        description: "Line on an Autopilot question card: the answer will be kept and followed from now on.",
+        description:
+          "Line on an Autopilot question card: the answer is added to the project instructions (or the " +
+          "Language profile) and followed from now on.",
       },
       "projectDecisions.card.otherAnswer": {
         description: "Placeholder of a text box under the suggested answers, for an answer of the person's own.",
@@ -133,7 +142,9 @@ export const projectDecisions = defineNamespace({
       },
       "projectDecisions.card.reason.tooLong": { description: "Error on a question card: the answer is too long to keep." },
       "projectDecisions.card.reason.full": {
-        description: "Error on a question card: the project has reached the most decisions it can keep.",
+        description:
+          "Error on a question card: the project cannot keep this answer — its instructions or its decision " +
+          "record is full. 'Living Memory' is the name of the page that holds the instructions.",
       },
     },
   },

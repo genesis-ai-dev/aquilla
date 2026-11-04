@@ -11,6 +11,11 @@ import {
   AGENT_REQUIRED_ROLE,
   AGENT_ROLE,
 } from "../lib/agent/schema-card"
+import { buildAugmentSystemPrompt } from "../lib/agent/prompt-augment"
+import {
+  instructionsPromptBlock,
+  resolveTranslationInstructions,
+} from "../../../db/shared/translation-instructions"
 
 const baseCtx = { projectId: "p1", username: "tester" }
 
@@ -62,13 +67,13 @@ describe("buildSystemPrompt — role filtering", () => {
     expect(prompt.split("\n").length).toBeLessThanOrEqual(250)
   })
 
-  it("stays within the L1 budget even with a worst-case multi-line brief summary", () => {
-    // The injected brief block can carry up to L1_MAX_CHARS; a multi-paragraph
-    // summary adds the most newlines. Pin that the card still fits the budget.
+  it("stays within the L1 budget even with worst-case multi-line instructions", () => {
+    // The injected instructions block is multi-paragraph prose; pin that the
+    // card still fits the budget with a many-line one.
     const prompt = buildSystemPrompt({
       ...baseCtx,
       roleLevel: AGENT_ROLE.OWNER,
-      briefSummary: "Line of brief guidance.\n".repeat(30),
+      translationInstructions: "Line of guidance.\n".repeat(30),
     })
     expect(prompt.split("\n").length).toBeLessThanOrEqual(250)
   })
@@ -220,16 +225,36 @@ describe("buildSystemPrompt — role filtering", () => {
   })
 })
 
-describe("buildSystemPrompt brief block", () => {
+// AQU-2342: the agent chat carries the ONE project instructions block, once,
+// right after the fixed role text — and the legacy sources it was composed from
+// (brief summary, project_briefs text) no longer ride as blocks of their own.
+describe("buildSystemPrompt instructions block", () => {
   const base = { projectId: "p", username: "u", roleLevel: 600 }
-  it("includes the brief summary when provided", () => {
-    const out = buildSystemPrompt({ ...base, briefSummary: "Translate for unchurched youth." })
-    expect(out).toContain("Translate for unchurched youth.")
-    expect(out).toContain("docs('brief')") // points the agent at the full L2
+  it("carries the resolved instructions once after the role text, and the augment no longer repeats the legacy brief", () => {
+    const legacyBrief = "Keep the divine name as in the 1999 Bible."
+    const translationInstructions = resolveTranslationInstructions(
+      { translationBrief: { l1Summary: "Translate for unchurched youth." } },
+      { projectBriefText: legacyBrief },
+    )
+    const card = buildSystemPrompt({
+      ...base,
+      translationInstructions,
+      translatorProfile: { age: "30" },
+    })
+    const block = instructionsPromptBlock(translationInstructions)
+    expect(card.split(block)).toHaveLength(2)
+    expect(card.indexOf("staged for the user's approval.")).toBeLessThan(card.indexOf(block))
+    expect(card.indexOf(block)).toBeLessThan(card.indexOf("## Translator profile"))
+    expect(card).not.toContain("Project translation brief")
+
+    const augment = buildAugmentSystemPrompt({
+      memory: { brief: legacyBrief, memoryIndex: [], readMemory: async () => null },
+    })
+    expect(augment).not.toContain(legacyBrief)
+    expect(augment).not.toContain("Project brief")
   })
-  it("omits the brief section when no summary is set", () => {
-    const out = buildSystemPrompt(base)
-    expect(out).not.toContain("Project translation brief")
+  it("omits the block when the project has no instructions", () => {
+    expect(buildSystemPrompt(base)).not.toContain("Project instructions")
   })
 })
 

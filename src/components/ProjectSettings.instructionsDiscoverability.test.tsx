@@ -1,17 +1,10 @@
-// AQU-1672 — the translation brief must have a direct entry in Project Settings.
+// AQU-2342 — Project settings → AI has ONE entry to the project instructions.
 //
-// Why this test exists: the brief gates Autopilot starts (AQU-827) but had no
-// row of its own anywhere in settings. The only path a partner user found
-// (Samuel, 2026-10-04) was Project settings → AI → Living Memory →
-// *click the breadcrumb* → the Living Memory index → Brief. The fix gives the
-// brief its own `section-brief` NavRow in the AI pane, carrying
-// its derived status as the row hint, and searchable by the word "brief".
-//
-// Regression guard: the AI pane must link straight to
-// `/project/:id/memory/brief`, a `?q=brief` search must surface that same link
-// (the Living Memory cross-link next to it is hidden while searching, which is
-// what made a search for "brief" come back empty), and the row must report the
-// brief's real status rather than a fixed string.
+// The instructions replaced the translation brief, the system prompt and
+// Living Memory's instruction entries. The AI pane links straight to
+// `/project/:id/memory/instructions` with a one-line preview of the resolved
+// text, and a search for any of the old names still lands on that link
+// (AQU-1672: a search for "brief" once came back empty).
 
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
@@ -33,12 +26,12 @@ vi.mock("@/components/org/OrgBreadcrumb", () => ({
 
 import type { ProjectRecord } from "@/lib/parsers/types"
 
-const PROJECT_ID = "proj-brief-discoverability"
+const PROJECT_ID = "proj-instructions-discoverability"
 
 function makeProject(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
   return {
     id: PROJECT_ID,
-    name: "Brief Discoverability Test Project",
+    name: "Instructions Discoverability Test Project",
     files: [{ id: "f1", name: "GEN.usfm", type: "usfm", createdAt: "", cellCount: 1 }],
     sourceLanguage: "English",
     targetLanguage: "French",
@@ -130,30 +123,40 @@ beforeEach(() => {
   settingsBlob.current = {}
 })
 
-describe("ProjectSettings — translation-brief discoverability (AQU-1672)", () => {
-  function briefRow() {
-    return screen.getByRole("link", { name: /translation brief/i })
+describe("ProjectSettings — the Instructions entry (AQU-2342)", () => {
+  const instructionsHref = `/project/${PROJECT_ID}/memory/instructions`
+  function instructionsRow() {
+    return screen.getByRole("link", { name: /^instructions/i })
   }
 
-  it("links the AI pane straight to the brief", () => {
+  it("links the AI pane straight to the instructions, as its only Living Memory link", () => {
     renderAt(`/project/${PROJECT_ID}/settings/ai`)
 
-    expect(briefRow()).toHaveAttribute("href", `/project/${PROJECT_ID}/memory/brief`)
+    expect(instructionsRow()).toHaveAttribute("href", instructionsHref)
+    expect(screen.queryByRole("link", { name: /translation brief/i })).toBeNull()
+    expect(screen.queryByRole("link", { name: /living memory/i })).toBeNull()
   })
 
-  it("a `?q=brief` search surfaces the brief link", () => {
-    renderAt(`/project/${PROJECT_ID}/settings?q=brief`)
+  it.each(["brief", "system prompt", "instructions"])("a `?q=%s` search surfaces the instructions link", (q) => {
+    renderAt(`/project/${PROJECT_ID}/settings?q=${encodeURIComponent(q)}`)
 
-    expect(briefRow()).toHaveAttribute("href", `/project/${PROJECT_ID}/memory/brief`)
+    expect(instructionsRow()).toHaveAttribute("href", instructionsHref)
   })
 
-  it("reports 'Not started' when the project has no brief", () => {
+  it("says 'Not written yet' when the project has no instructions", () => {
     renderAt(`/project/${PROJECT_ID}/settings/ai`)
 
-    expect(briefRow().textContent).toMatch(/not started/i)
+    expect(instructionsRow().textContent).toMatch(/not written yet/i)
   })
 
-  it("reports the brief's derived status — a partially answered brief reads Draft", () => {
+  it("previews the stored instructions on one line", () => {
+    settingsBlob.current = { translationInstructions: "Plain register\nfor rural youth." }
+    renderAt(`/project/${PROJECT_ID}/settings/ai`)
+
+    expect(instructionsRow().textContent).toContain("Plain register for rural youth.")
+  })
+
+  it("previews the migrated text when only an old brief exists", () => {
     settingsBlob.current = {
       translationBrief: {
         version: 1,
@@ -162,13 +165,31 @@ describe("ProjectSettings — translation-brief discoverability (AQU-1672)", () 
         parameters: { purpose: "Evangelistic" },
         freeformNotes: "",
         l2Markdown: "",
-        l1Summary: null,
+        l1Summary: "Draft for new readers.",
         l1GeneratedAt: null,
         l1ModelId: null,
       },
     }
     renderAt(`/project/${PROJECT_ID}/settings/ai`)
 
-    expect(briefRow().textContent).toMatch(/draft/i)
+    expect(instructionsRow().textContent).toContain("Draft for new readers.")
+  })
+})
+
+describe("ProjectSettings — the Checks entry (AQU-2342)", () => {
+  const checksHref = `/project/${PROJECT_ID}/memory/checks`
+
+  it("links the AI pane to the one Checks list", () => {
+    renderAt(`/project/${PROJECT_ID}/settings/ai`)
+
+    const row = screen.getByRole("link", { name: /^checks/i })
+    expect(row).toHaveAttribute("href", checksHref)
+    expect(row.textContent).toMatch(/checked against after it is written/i)
+  })
+
+  it.each(["rules", "language profile", "project decisions", "quality"])("a `?q=%s` search surfaces the Checks link", (q) => {
+    renderAt(`/project/${PROJECT_ID}/settings?q=${encodeURIComponent(q)}`)
+
+    expect(screen.getByRole("link", { name: /^checks/i })).toHaveAttribute("href", checksHref)
   })
 })

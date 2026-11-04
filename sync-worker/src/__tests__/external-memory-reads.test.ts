@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeEach } from "vitest"
 import { handleExternalMemoryReadRequest } from "../external/memory-read-routes"
 import { buildPromptPreview } from "../external/prompt-preview"
-import { buildBriefBlock } from "../../../src/lib/completion/prompt-build"
+import { instructionsPromptBlock } from "../../../db/shared/translation-instructions"
 import { mintApiToken } from "../../../db/shared/api-credentials"
 import {
   buildMemoryContext,
@@ -178,7 +178,13 @@ interface BriefBody {
   l1Stale: boolean
 }
 
+interface InstructionsBody {
+  content: string
+  stored: boolean
+}
+
 interface MemoryListBody {
+  instructions: InstructionsBody
   brief: BriefBody
   legacyBrief?: { content: string; version: number }
   data: MemoryEntryBody[]
@@ -188,6 +194,7 @@ interface MemoryListBody {
 
 interface CellMemoryBody {
   cell: { fileId: string; cellId: string }
+  instructions: InstructionsBody
   brief: BriefBody
   legacyBrief?: { content: string; version: number }
   entries: Array<{ path: string; kind: string; firstLine: string; humanEdited: boolean }>
@@ -388,7 +395,8 @@ describe("external Living Memory reads", () => {
       expect(second.data[0].path).not.toBe(first.data[0].path)
     })
 
-    it("reports the brief the copilot prompt injects — the rendered L1 of settings.translationBrief (AQU-1282)", async () => {
+    // AQU-2342: prompts read ONE instructions text; the brief feeds it on read.
+    it("reports the instructions every prompt carries — composed on read from the brief's L1 — and agrees with prompt-preview", async () => {
       await seedTranslationBrief(testDb, { l1Summary: "Translate for rural youth in a liturgical register." })
       const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
       const body = (await (
@@ -397,42 +405,56 @@ describe("external Living Memory reads", () => {
           env(testDb),
         )
       )!.json()) as MemoryListBody
+      expect(body.instructions).toEqual({
+        content: "Translate for rural youth in a liturgical register.",
+        stored: false,
+      })
       expect(body.brief.content).toBe("Translate for rural youth in a liturgical register.")
       expect(body.brief.source).toBe("translationBrief")
       expect(body.brief.version).toBe(2)
       expect(body.brief.reachesCopilot).toBe(true)
       expect(body.brief.sections).toBe(2)
       expect(body.brief.l1Stale).toBe(false)
-      expect(body.legacyBrief).toBeUndefined()
+      // legacyBrief keeps its shape for older callers and carries the resolved text.
+      expect(body.legacyBrief).toEqual({ content: body.instructions.content, version: 0 })
 
-      // Agreement with prompt-preview: the brief block the copilot gets is
-      // built from exactly this text.
       const preview = await buildPromptPreview(testDb.db, { projectId: "proj-a", cellId: "cell-1", targetLang: "" })
       expect(preview.ok).toBe(true)
       if (preview.ok) {
-        expect(preview.body.parts.brief).not.toBe("")
-        expect(preview.body.parts.brief).toBe(buildBriefBlock(body.brief.content))
+        expect(preview.body.parts.instructions).toBe(instructionsPromptBlock(body.instructions.content))
       }
     })
 
-    it("a brief with sections but no L1 does NOT reach the copilot, and says so", async () => {
+    it("a brief with sections but no L1 still feeds the instructions, until instructions are written", async () => {
       await seedTranslationBrief(testDb, { l1Summary: null, l1GeneratedAt: null })
       const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
-      const body = (await (
-        await handleExternalMemoryReadRequest(
-          req("/api/v1/external/projects/proj-a/memory", token),
-          env(testDb),
-        )
-      )!.json()) as MemoryListBody
-      expect(body.brief.content).toBe("")
-      expect(body.brief.sections).toBe(2)
-      expect(body.brief.reachesCopilot).toBe(false)
-      expect(body.brief.l1Stale).toBe(true)
+      const read = async () =>
+        (await (
+          await handleExternalMemoryReadRequest(
+            req("/api/v1/external/projects/proj-a/memory", token),
+            env(testDb),
+          )
+        )!.json()) as MemoryListBody
+      const composed = await read()
+      expect(composed.brief.content).toBe("")
+      expect(composed.brief.l1Stale).toBe(true)
+      expect(composed.brief.reachesCopilot).toBe(true)
+      expect(composed.instructions.stored).toBe(false)
+      expect(composed.instructions.content).toContain("Rural youth")
+
+      await testDb.pg.query(
+        `UPDATE project_settings
+            SET settings = settings::jsonb || '{"translationInstructions": "Plain register."}'::jsonb
+          WHERE project_id = 'proj-a'`,
+      )
+      const stored = await read()
+      expect(stored.instructions).toEqual({ content: "Plain register.", stored: true })
+      expect(stored.brief.reachesCopilot).toBe(false)
       const preview = await buildPromptPreview(testDb.db, { projectId: "proj-a", cellId: "cell-1", targetLang: "" })
-      expect(preview.ok && preview.body.parts.brief).toBe("")
+      expect(preview.ok && preview.body.parts.instructions).toBe(instructionsPromptBlock("Plain register."))
     })
 
-    it("surfaces the older free-text project brief as legacyBrief only when it has content", async () => {
+    it("composes the older free-text project brief into the instructions, reported as legacyBrief", async () => {
       await testDb.pg.query(
         `INSERT INTO project_briefs (project_id, content, updated_by, version)
          VALUES ('proj-a', 'Formal register throughout.', 'owner', 3)`,
@@ -445,7 +467,8 @@ describe("external Living Memory reads", () => {
         )
       )!.json()) as MemoryListBody
       expect(body.legacyBrief).toEqual({ content: "Formal register throughout.", version: 3 })
-      // …and it is NOT reported as the copilot's brief: no settings brief exists.
+      expect(body.instructions).toEqual({ content: "Formal register throughout.", stored: false })
+      // …and it is NOT reported as the settings brief: no settings brief exists.
       expect(body.brief.content).toBe("")
       expect(body.brief.reachesCopilot).toBe(false)
     })
@@ -599,7 +622,7 @@ describe("external Living Memory reads", () => {
   })
 
   describe("GET .../files/:fileId/cells/:cellId/memory", () => {
-    it("returns exactly what the copilot's retrieval would inject", async () => {
+    it("returns exactly what the in-app agent's retrieval would inject", async () => {
       await seedTranslationBrief(testDb, { l1Summary: "Formal register throughout." })
       await testDb.pg.query(
         `INSERT INTO project_briefs (project_id, content, updated_by, version)
@@ -628,14 +651,12 @@ describe("external Living Memory reads", () => {
 
       const ctx = await buildMemoryContext(testDb.db, "proj-a")
       expect(body.cell).toEqual({ fileId: "file-x", cellId: "cell-1" })
-      // The brief block is the drafting prompt's brief (settings L1); the
-      // free-text row the in-app agent's memory context still carries is the
-      // legacy one — reported separately, never conflated.
+      // AQU-2342: the settings brief and the legacy free-text row both feed
+      // the ONE instructions text the agent's prompt carries.
       expect(body.brief.content).toBe("Formal register throughout.")
       expect(body.brief.reachesCopilot).toBe(true)
-      const preview = await buildPromptPreview(testDb.db, { projectId: "proj-a", cellId: "cell-1", targetLang: "" })
-      expect(preview.ok && preview.body.parts.brief).toBe(buildBriefBlock(body.brief.content))
-      expect(body.legacyBrief).toEqual({ content: ctx.brief, version: 2 })
+      expect(body.instructions.content).toBe(`Formal register throughout.\n\n${ctx.brief}`)
+      expect(body.legacyBrief).toEqual({ content: body.instructions.content, version: 2 })
       expect(body.entries.map((e) => e.path)).toEqual(ctx.memoryIndex.map((m) => m.path))
       expect(body.entries.map((e) => e.firstLine)).toEqual(ctx.memoryIndex.map((m) => m.firstLine))
       expect(body.entries[0].humanEdited).toBe(true)

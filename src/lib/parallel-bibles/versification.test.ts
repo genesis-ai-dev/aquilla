@@ -39,12 +39,18 @@ describe("versification", () => {
       .toEqual({ chapter: 3, verse: 2, note: { kind: "psalmUnsure" } })
     expect(alignVersion({ scheme: "hebrew", book: "MAL", chapter: 4, verse: 1 }))
       .toEqual({ chapter: 3, verse: 19, note: { kind: "shifted", here: "MAL 3:19", english: "MAL 4:1" } })
-    // JOL 2 before the shifted run: Hebrew 27 verses vs English 32.
+    // A chapter the table does not cover, with a different count, is marked…
     expect(alignVersion({
-      scheme: "hebrew", book: "JOL", chapter: 2, verse: 1,
-      loaded: { verseCount: 27, hasPsalmTitle: false },
-      reference: { verseCount: 32, hasPsalmTitle: false, versionLabel: "BSB", isSelf: false },
-    }).note).toEqual({ kind: "countDiffers", count: 27, refCount: 32, refVersion: "BSB" })
+      scheme: "hebrew", book: "NEH", chapter: 4, verse: 1,
+      loaded: { verseCount: 17, hasPsalmTitle: false },
+      reference: { verseCount: 23, hasPsalmTitle: false, versionLabel: "BSB", isSelf: false },
+    }).note).toEqual({ kind: "countDiffers", count: 17, refCount: 23, refVersion: "BSB" })
+    // …but one the table re-numbers is not: Hebrew MAL 3 has 24 verses by design.
+    expect(alignVersion({
+      scheme: "hebrew", book: "MAL", chapter: 3, verse: 18,
+      loaded: { verseCount: 24, hasPsalmTitle: false },
+      reference: { verseCount: 18, hasPsalmTitle: false, versionLabel: "BSB", isSelf: false },
+    })).toEqual({ chapter: 3, verse: 18, note: null })
     // The yardstick never flags itself, and matching counts say nothing.
     expect(alignVersion({
       scheme: "english", book: "JHN", chapter: 3, verse: 16,

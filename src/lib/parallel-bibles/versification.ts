@@ -160,7 +160,12 @@ export function alignVersion(args: {
       return { chapter, verse: verse === null ? null : verse + offset, note: { kind: "psalmTitle", offset } }
     }
   }
-  if (loaded && reference && !reference.isSelf && loaded.verseCount !== reference.verseCount) {
+  // A chapter the table already re-numbers (Hebrew Malachi 3 holds English
+  // 4:1-6) differs in count by design, and its verses are lined up above.
+  const tableExplains = scheme === "hebrew" && ENGLISH_TO_HEBREW_SHIFTS.some(
+    (r) => r.book === book && (r.chapter === chapter || r.hebrewChapter === chapter),
+  )
+  if (!tableExplains && loaded && reference && !reference.isSelf && loaded.verseCount !== reference.verseCount) {
     return {
       chapter,
       verse,

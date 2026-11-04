@@ -9,7 +9,7 @@
 // The chapter is per version: a Hebrew-numbered version may need a different
 // one (English Malachi 4 is Hebrew Malachi 3), see versification.ts.
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   adjacentChapters,
   fetchHelloaoChapter,
@@ -29,46 +29,57 @@ export interface TrackedRef {
 
 interface PlanEntry {
   versionId: string
+  book: string
   chapter: number
 }
 
-function encodePlan(book: string, entries: PlanEntry[]): string {
-  return `${book}|${entries.map((e) => `${e.versionId}:${e.chapter}`).join(",")}`
+function encodePlan(entries: PlanEntry[]): string {
+  return entries.map((e) => `${e.versionId}|${e.book}|${e.chapter}`).join(",")
 }
 
-function decodePlan(plan: string): { book: string; entries: PlanEntry[] } {
-  const [book, rest] = plan.split("|")
-  const entries = (rest ? rest.split(",") : []).map((part) => {
-    const at = part.lastIndexOf(":")
-    return { versionId: part.slice(0, at), chapter: Number(part.slice(at + 1)) }
+function decodePlan(plan: string): PlanEntry[] {
+  return (plan ? plan.split(",") : []).map((part) => {
+    const [versionId, book, chapter] = part.split("|")
+    return { versionId, book, chapter: Number(chapter) }
   })
-  return { book, entries }
 }
 
+/**
+ * The chapters to load: for every pinned version, the chapter each of `refs`
+ * falls in under that version's numbering. The panel passes the one tracked
+ * verse; the editor passes the first and last verse of every row in view.
+ */
 export function useParallelChapters(args: {
   open: boolean
   pinned: readonly string[]
-  tracked: TrackedRef | null
+  refs: readonly TrackedRef[]
   translationById: ReadonlyMap<string, HelloaoTranslation>
   retryNonce: number
 }): {
   chapterData: ReadonlyMap<string, ChapterData>
   forget: (key: string) => void
 } {
-  const { open, pinned, tracked, translationById, retryNonce } = args
+  const { open, pinned, refs, translationById, retryNonce } = args
   const [chapterData, setChapterData] = useState<Map<string, ChapterData>>(new Map())
 
-  // One "BOOK|version:chapter,…" string, so the debounce and the fetch effect
+  // One "version|BOOK|chapter,…" string, so the debounce and the fetch effect
   // re-run only when some version needs a different chapter.
   const plan = useMemo(() => {
-    if (!tracked || pinned.length === 0) return null
-    const entries = pinned.map((versionId) => {
+    if (refs.length === 0 || pinned.length === 0) return null
+    const seen = new Set<string>()
+    const entries: PlanEntry[] = []
+    for (const versionId of pinned) {
       const scheme = versificationScheme(translationById.get(versionId)?.language)
-      const mapped = mapEnglishRef(scheme, tracked.book, tracked.chapter, tracked.verse)
-      return { versionId, chapter: mapped.chapter }
-    })
-    return encodePlan(tracked.book, entries)
-  }, [tracked, pinned, translationById])
+      for (const ref of refs) {
+        const { chapter } = mapEnglishRef(scheme, ref.book, ref.chapter, ref.verse)
+        const key = `${versionId}|${ref.book}|${chapter}`
+        if (seen.has(key)) continue
+        seen.add(key)
+        entries.push({ versionId, book: ref.book, chapter })
+      }
+    }
+    return encodePlan(entries)
+  }, [refs, pinned, translationById])
 
   const [debouncedPlan, setDebouncedPlan] = useState(plan)
   useEffect(() => {
@@ -79,21 +90,25 @@ export function useParallelChapters(args: {
 
   useEffect(() => {
     if (!open || !debouncedPlan) return
-    const { book, entries } = decodePlan(debouncedPlan)
+    const entries = decodePlan(debouncedPlan)
     let cancelled = false
     const store = (key: string, data: ChapterData) =>
       setChapterData((prev) => {
+        // A chapter already loaded stays the same object, so scrolling within
+        // loaded chapters re-renders nothing.
+        const had = prev.get(key)
+        if (had && !had.error && !data.error) return prev
         const next = new Map(prev)
         next.set(key, data)
         return next
       })
 
-    const loads = entries.map(({ versionId, chapter }) =>
+    const loads = entries.map(({ versionId, book, chapter }) =>
       fetchHelloaoChapter(versionId, book, chapter)
         .then((res) => {
           if (cancelled) return null
           store(chapterKey(versionId, book, chapter), chapterDataFromResponse(res))
-          return { versionId, chapter, numberOfChapters: res.book?.numberOfChapters }
+          return { versionId, book, chapter, numberOfChapters: res.book?.numberOfChapters }
         })
         .catch((err) => {
           if (cancelled) return null
@@ -116,7 +131,7 @@ export function useParallelChapters(args: {
       for (const res of results) {
         if (!res?.numberOfChapters) continue
         for (const target of adjacentChapters(res.chapter, res.numberOfChapters)) {
-          prefetchHelloaoChapter(res.versionId, book, target)
+          prefetchHelloaoChapter(res.versionId, res.book, target)
         }
       }
     })
@@ -126,12 +141,12 @@ export function useParallelChapters(args: {
     }
   }, [open, debouncedPlan, retryNonce])
 
-  const forget = (key: string) =>
+  const forget = useCallback((key: string) =>
     setChapterData((prev) => {
       const next = new Map(prev)
       next.delete(key)
       return next
-    })
+    }), [])
 
   return { chapterData, forget }
 }

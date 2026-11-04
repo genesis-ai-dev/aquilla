@@ -537,8 +537,9 @@ export const editor = defineNamespace({
     "editor.bibles.closePicker": "Close picker",
     "editor.bibles.addVersion": "Add version",
     "editor.bibles.attribution": "Text from the",
-    "editor.bibles.showPassages": "Side by side",
-    "editor.bibles.showVerse": "One verse",
+    "editor.bibles.addBible": "Add Bible",
+    "editor.bibles.continued": "cont.",
+    "editor.bibles.versNumberingDiffers": "This version numbers the verse differently",
     "editor.bibles.creditLicense": "License",
     "editor.bibles.creditWebsite": "Website",
     "editor.bibles.versShifted": "Numbered {here} in this version ({ref} in English).",
@@ -6008,16 +6009,6 @@ export const editor = defineNamespace({
           "proper name, which is not translated — so this string ends mid-phrase on " +
           "purpose and the name cannot be moved in front of it.",
       },
-      "editor.bibles.showPassages": {
-        description:
-          "Header button of the Parallel Bibles panel that switches to whole chapters shown side by side in columns, one per Bible version. Swaps with editor.bibles.showVerse. Very short.",
-        maxLength: 16,
-      },
-      "editor.bibles.showVerse": {
-        description:
-          "Header button of the Parallel Bibles panel, shown while whole chapters are side by side; it switches back to showing only the current verse of each version. Swaps with editor.bibles.showPassages. Very short.",
-        maxLength: 16,
-      },
       "editor.bibles.creditLicense": {
         description:
           "Link text in the small credit line under each Bible version; it opens the version's license page. One word.",
@@ -6075,6 +6066,20 @@ export const editor = defineNamespace({
       "editor.bibles.projectDefaultsFailed": {
         description:
           "Status line when saving the project default versions failed.",
+      },
+      "editor.bibles.addBible": {
+        description:
+          "Button on the Source column heading of the editor. Opens a menu to choose a published Bible translation shown as an extra read-only column beside the source. Short.",
+        maxLength: 16,
+      },
+      "editor.bibles.continued": {
+        description:
+          "Shown in an extra Bible column on the second and later parts of a verse that the editor split into several rows: the verse's text is on its first part, and this says the row continues it. Abbreviation of 'continued'.",
+        maxLength: 8,
+      },
+      "editor.bibles.versNumberingDiffers": {
+        description:
+          "Screen-reader name of a small icon beside a Bible verse shown under the source text, marking that this Bible numbers the verse differently from the editor (for example Hebrew Malachi 3:19 is English 4:1).",
       },
       "editor.resources.show": {
         description:

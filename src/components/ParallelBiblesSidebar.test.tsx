@@ -214,7 +214,7 @@ function verses(from: number, to: number, label: string) {
   }))
 }
 
-describe("ParallelBiblesSidebar — whole chapters side by side", () => {
+describe("ParallelBiblesSidebar — credits, right to left, numbering, defaults", () => {
   it("searches a catalogue whose entries leave out the language name", async () => {
     const { languageName: _a, languageEnglishName: _b, ...bare } = translation("XYZ", { englishName: "Bare entry" })
     fetchTranslations.mockReset().mockResolvedValue([bare, ...CATALOGUE])
@@ -235,27 +235,22 @@ describe("ParallelBiblesSidebar — whole chapters side by side", () => {
     )
   })
 
-  it("lines English MAL 4:1 up with Hebrew MAL 3:19, right to left, with a credit under each column", async () => {
-    localStorage.setItem("aquilla:parallel-bibles:view", "passage")
+  it("lines English MAL 4:1 up with Hebrew MAL 3:19, right to left, with a credit under each version", async () => {
     render(<ParallelBiblesSidebar projectId="p1" projectDefaults={["BSB", "hbo_wlc"]} trackedRef="MAL 4:1" open onToggle={() => {}} />)
 
-    const hebrew = await screen.findByTestId("passage-column-hbo_wlc")
-    await waitFor(() => expect(hebrew.querySelector('[aria-current="true"]')?.textContent).toContain("WLC 3 19"))
+    const hebrew = await screen.findByText("WLC 3 19")
     expect(fetchChapter).toHaveBeenCalledWith("hbo_wlc", "MAL", 3)
-    expect(hebrew.querySelector('[dir="rtl"][lang="hbo"]')).not.toBeNull()
-    expect(hebrew.textContent).toContain("Numbered MAL 3:19 in this version (MAL 4:1 in English).")
-    const credit = hebrew.querySelector('[data-testid="version-credit"]')
-    expect(credit?.textContent).toBe("Westminster Leningrad Codex Hebrew OT · License")
-    expect(credit?.querySelector("a")?.getAttribute("rel")).toBe("noopener noreferrer")
-
-    const english = screen.getByTestId("passage-column-BSB")
-    expect(english.querySelector('[aria-current="true"]')?.textContent).toContain("BSB 4 1")
-    expect(english.querySelector('[data-testid="versification-mark"]')).toBeNull()
+    expect(hebrew.getAttribute("dir")).toBe("rtl")
+    expect(hebrew.getAttribute("lang")).toBe("hbo")
+    expect(screen.getByText("Numbered MAL 3:19 in this version (MAL 4:1 in English).")).toBeInTheDocument()
+    expect(await screen.findByText("BSB 4 1")).toBeInTheDocument()
+    const credits = screen.getAllByTestId("version-credit").map((el) => el.textContent)
+    expect(credits).toEqual(["Berean Standard Bible · License", "Westminster Leningrad Codex Hebrew OT · License"])
+    expect(screen.getAllByTestId("version-credit")[1].querySelector("a")?.getAttribute("rel")).toBe("noopener noreferrer")
     expect(screen.getByText("Showing this project's default versions.")).toBeInTheDocument()
   })
 
   it("offsets a Hebrew psalm by its numbered title, read against the first version that has the psalm", async () => {
-    localStorage.setItem("aquilla:parallel-bibles:view", "passage")
     fetchTranslations.mockReset().mockResolvedValue([translation("grc_sbl", { language: "grc" }), ...CATALOGUE])
     fetchChapter.mockReset().mockImplementation(async (id) => {
       if (id === "grc_sbl") throw new HelloaoChapterNotFoundError("grc_sbl/PSA/3")
@@ -265,9 +260,8 @@ describe("ParallelBiblesSidebar — whole chapters side by side", () => {
     })
     render(<ParallelBiblesSidebar projectDefaults={["grc_sbl", "BSB", "hbo_wlc"]} trackedRef="PSA 3:4" open onToggle={() => {}} />)
 
-    const hebrew = await screen.findByTestId("passage-column-hbo_wlc")
-    await waitFor(() => expect(hebrew.querySelector('[aria-current="true"]')?.textContent).toContain("WLC 5"))
-    expect(hebrew.textContent).toContain("This version counts the psalm title as a verse, so its numbers run 1 ahead.")
+    expect(await screen.findByText("WLC 5")).toBeInTheDocument()
+    expect(screen.getByText("This version counts the psalm title as a verse, so its numbers run 1 ahead.")).toBeInTheDocument()
   })
 
   it("lets a lead save their own pins as the project defaults, and hides that from everyone else", async () => {

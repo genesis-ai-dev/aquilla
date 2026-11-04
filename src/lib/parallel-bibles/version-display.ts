@@ -75,23 +75,32 @@ export function verseTextPresentation(
 }
 
 /** Type size per view and script: Greek and Hebrew read larger than the panel's sans. */
-export const VERSE_TEXT_CLASS: Record<"verse" | "passage", Record<"greek" | "hebrew" | "plain", string>> = {
+export type TextView = "verse" | "column" | "stacked"
+
+export const VERSE_TEXT_CLASS: Record<TextView, Record<"greek" | "hebrew" | "plain", string>> = {
   verse: {
     greek: "text-sm leading-relaxed",
     hebrew: "text-base leading-relaxed",
     plain: "text-xs leading-relaxed",
   },
-  passage: {
+  /** An editor Bible column, beside the 14px source text. */
+  column: {
     greek: "text-[15px] leading-relaxed",
-    hebrew: "text-lg leading-loose",
+    hebrew: "text-lg leading-relaxed",
     plain: "text-sm leading-relaxed",
+  },
+  /** Stacked under the source text when the columns don't fit. */
+  stacked: {
+    greek: "text-[13px] leading-snug",
+    hebrew: "text-[15px] leading-snug",
+    plain: "text-xs leading-snug",
   },
 }
 
 /** Class and inline font for one version's text. */
 export function verseTextStyle(
   presentation: VerseTextPresentation,
-  view: "verse" | "passage",
+  view: TextView,
 ): { className: string; style: { fontFamily: string } | undefined } {
   return {
     className: VERSE_TEXT_CLASS[view][presentation.script ?? "plain"],

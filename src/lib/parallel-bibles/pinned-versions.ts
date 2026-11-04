@@ -61,8 +61,21 @@ export function readPersonalPins(projectId?: string | null): string[] | null {
   return null
 }
 
+/** Same-tab change signal: the editor's Bible columns and the Parallel Bibles
+ *  panel read the same pins and must not drift apart. */
+export const PINS_CHANGED_EVENT = "aquilla:parallel-bibles-pins"
+
+function announce(projectId: string | null | undefined): void {
+  try {
+    window.dispatchEvent(new CustomEvent(PINS_CHANGED_EVENT, { detail: { projectId: projectId ?? null } }))
+  } catch {
+    // no window (tests without a DOM) — nothing to tell
+  }
+}
+
 export function writePersonalPins(projectId: string | null | undefined, ids: readonly string[]): void {
   setItem(projectId ? projectVersionsStorageKey(projectId) : LEGACY_VERSIONS_STORAGE_KEY, JSON.stringify(ids))
+  announce(projectId)
 }
 
 /** Drop this project's own pins, so the panel follows the project defaults. */
@@ -72,6 +85,7 @@ export function clearPersonalPins(projectId: string): void {
   } catch {
     // ignore
   }
+  announce(projectId)
 }
 
 export type PinSource = "personal" | "project" | "none"

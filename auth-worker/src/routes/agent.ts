@@ -162,7 +162,7 @@ type AgentFrame =
   | { type: "code_result"; step: number; ok: boolean; summary: string; data?: ToolResultData }
   | { type: "proposal"; proposal: AgentProposal }
   | { type: "aquifer_proposal"; proposal: AquiferPublishProposal }
-  | { type: "progress"; label: string; done: number; total: number }
+  | { type: "progress"; label: string; done?: number; total?: number }
   | { type: "usage"; promptTokens: number; completionTokens: number; costCredits: number }
   | { type: "done"; runId: string; status: "ok" | "capped" | "error" }
   | { type: "error"; message: string }
@@ -1569,7 +1569,8 @@ async function runDraftTool(args: DraftArgs, t: ToolCallEnv): Promise<string> {
       targetLanguage: t.draft.targetLanguage,
       briefSummary: t.draft.briefSummary,
       signal: t.signal,
-      sendProgress: (label, done, total) => t.send({ type: "progress", label, done, total }),
+      sendProgress: (label, done, total) =>
+        t.send({ type: "progress", label, ...(done === undefined ? {} : { done }), ...(total === undefined ? {} : { total }) }),
       addUsage: t.addUsage,
       canContinuePaidWork: t.canContinuePaidWork,
       admitPaidCall: t.admitPaidCall,

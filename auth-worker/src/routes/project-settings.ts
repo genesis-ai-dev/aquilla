@@ -49,6 +49,10 @@
 //            and per-lane defaults on lanes they can write. The flag itself
 //            stays maintainer-only and defaults off. A save that rewrites a
 //            hidden lane's voices is refused.
+//   `parallelBibleVersions` (the team's default Parallel Bibles versions).
+//            A write whose only changed key is this one is admitted at
+//            project_lead 500 — which comparison Bibles the team reads is a
+//            lead's call. Validated by db/shared/parallel-bible-versions.ts.
 //
 // Everything else keeps the maintainer gate, unchanged. Each carve-out is
 // scoped to a write that changes NOTHING ELSE, so none widens access to any
@@ -116,6 +120,7 @@ import type { AquillaDb } from "../../../db/shim/postgres"
 import { laneLanguage } from "../../../src/lib/lanes/lane-display"
 import { validateSettingsKeyValue } from "../../../db/shared/project-settings-keys"
 import { DRAFTING_SETTINGS_KEY } from "../../../db/shared/drafting-settings"
+import { PARALLEL_BIBLE_VERSIONS_KEY } from "../../../db/shared/parallel-bible-versions"
 import {
   includesRetiredLaneSettings,
   preserveRetiredLaneSettings,
@@ -181,6 +186,14 @@ const AUTOPILOT_WRITE_MIN_ROLE = ROLE.PROJECT_LEAD
  */
 const ALIGNMENT_SEEDS_KEY = "alignmentSeeds"
 const ALIGNMENT_SEEDS_WRITE_MIN_ROLE = ROLE.CONTRIBUTOR
+
+/**
+ * The team's default Parallel Bibles versions — what a translator sees in the
+ * panel until they pin their own. A write whose only *changed* key is this one
+ * is admitted at project_lead(500)+, from the panel's "Make these the project
+ * defaults". It decides nothing about access and hands a lead no other key.
+ */
+const PARALLEL_BIBLES_WRITE_MIN_ROLE = ROLE.PROJECT_LEAD
 
 /**
  * Top-level settings keys whose value differs between the stored blob and an
@@ -569,6 +582,8 @@ projectSettings.on(
         && changed.every((key) => key === COUNT_STRUCTURAL_KEY)
       const alignmentSeedsOnly = changed.length > 0
         && changed.every((key) => key === ALIGNMENT_SEEDS_KEY)
+      const parallelBiblesOnly = changed.length > 0
+        && changed.every((key) => key === PARALLEL_BIBLE_VERSIONS_KEY)
       const storedTts = plainRecord(stored.settings.ttsSettings) ?? {}
       const nextTts = plainRecord(settings.ttsSettings) ?? {}
       const voiceLeadWrite = changed.length > 0
@@ -578,7 +593,7 @@ projectSettings.on(
         && leadMaySaveTtsSettings(storedTts, nextTts, visible, lanes)
       if (
         !noop && !autopilotOnly
-        && !countStructuralOnly && !alignmentSeedsOnly && !voiceLeadWrite
+        && !countStructuralOnly && !alignmentSeedsOnly && !parallelBiblesOnly && !voiceLeadWrite
       ) {
         return c.json(
           { error: `role >= maintainer (${SETTINGS_WRITE_MIN_ROLE}) required` },
@@ -631,6 +646,15 @@ projectSettings.on(
           return c.json(
             {
               error: `role >= contributor (${ALIGNMENT_SEEDS_WRITE_MIN_ROLE}) required to confirm or reject word alignments`,
+            },
+            403,
+          )
+        }
+      } else if (parallelBiblesOnly) {
+        if (role.level < PARALLEL_BIBLES_WRITE_MIN_ROLE) {
+          return c.json(
+            {
+              error: `role >= project lead (${PARALLEL_BIBLES_WRITE_MIN_ROLE}) required to set the project's default Bible versions`,
             },
             403,
           )
@@ -689,6 +713,16 @@ projectSettings.on(
     if (rawDrafting !== undefined) {
       const problem = validateSettingsKeyValue(DRAFTING_SETTINGS_KEY, rawDrafting)
       if (problem && JSON.stringify(stored.settings[DRAFTING_SETTINGS_KEY]) !== JSON.stringify(rawDrafting)) {
+        return c.json({ error: problem }, 400)
+      }
+    }
+
+    // The default Parallel Bibles versions: a short list of distinct ids. Same
+    // rule as the validators above — an unchanged stored value rides along.
+    const rawParallelBibles = (body.settings as Record<string, unknown>)[PARALLEL_BIBLE_VERSIONS_KEY]
+    if (rawParallelBibles !== undefined) {
+      const problem = validateSettingsKeyValue(PARALLEL_BIBLE_VERSIONS_KEY, rawParallelBibles)
+      if (problem && JSON.stringify(stored.settings[PARALLEL_BIBLE_VERSIONS_KEY]) !== JSON.stringify(rawParallelBibles)) {
         return c.json({ error: problem }, 400)
       }
     }

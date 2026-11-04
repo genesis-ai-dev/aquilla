@@ -18,6 +18,7 @@ import type { ComponentType } from "react"
 import type { LucideIcon } from "lucide-react"
 import type { IdmlFormatMetadataV2, IdmlProgress } from "@aquilla/idml-roundtrip"
 import type { MessageKey } from "@/lib/i18n/messages/en"
+import type { IdmlReimportAlignHost } from "@/lib/idml/align-reimported-targets"
 import type { ReimportCountedCell } from "@/lib/import/reimport-diff"
 import type { FileReference, TranslatableString } from "@/lib/parsers/types"
 
@@ -87,6 +88,13 @@ export interface PartnerImportPanelProps {
   sourceLanguage?: string
   targetLanguage?: string
   getToken: (fileId: string) => Promise<string | null>
+  /** Lane whose copied translations should be placed into style runs. */
+  targetLang?: string
+  /**
+   * After a re-import that keeps translations, place each one into the new
+   * style runs. Absent when AI completion is not configured.
+   */
+  alignReimportedIdml?: IdmlReimportAlignHost
   onImported: (ref: FileReference) => void | Promise<void>
   /**
    * Sidebar re-import of a file this partner already imported. The panel keeps

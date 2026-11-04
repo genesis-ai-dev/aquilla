@@ -10,24 +10,39 @@
 // a backfill script untouched. The migration commands keep their fixed shape:
 // `neon-migrate` takes the command word and nothing else.
 
-export type NeonTargetCommand =
-  | "status"
-  | "apply"
-  | "baseline"
-  | "prepare-comments-key"
-  | "backfill-progress"
-  | "backfill-activity"
-  | "backfill-book-codes"
-  | "backfill-lanes"
-  | "backfill-lane-batch"
-  | "repair-lane-grants"
-  | "prune-phantom-voices"
-  | "fold-cast-by-character"
-  | "verify-lanes"
-  | "seed-extract"
-  | "scrub-integrations"
-  | "copy-dev-audio"
-  | "copy-dev-audio-all"
+// AQU-1946: THE ONE LIST. `neon-target.ts` used to repeat the accepted
+// commands as a hand-written `parseCommand` chain, so `repair-lane-grants`
+// could sit in the union, in `scriptFor` and in the flag-passthrough list and
+// still be rejected before any database work — both
+// `pnpm neon:repair-lane-grants:dev|:prod` printed the usage and exited 1. The
+// union is now derived from this array and `parseCommand` / `usage()` read it,
+// so adding a command here wires all four places at once.
+export const NEON_TARGET_COMMANDS = [
+  "status",
+  "apply",
+  "baseline",
+  "prepare-comments-key",
+  "backfill-progress",
+  "backfill-activity",
+  "backfill-book-codes",
+  "backfill-lanes",
+  "backfill-lane-batch",
+  "repair-lane-grants",
+  "prune-phantom-voices",
+  "fold-cast-by-character",
+  "verify-lanes",
+  "seed-extract",
+  "scrub-integrations",
+  "copy-dev-audio",
+  "copy-dev-audio-all",
+] as const
+
+export type NeonTargetCommand = (typeof NEON_TARGET_COMMANDS)[number]
+
+/** The command word `neon-target.ts` was invoked with, or not one at all. */
+export function isNeonTargetCommand(value: string | undefined): value is NeonTargetCommand {
+  return value !== undefined && (NEON_TARGET_COMMANDS as readonly string[]).includes(value)
+}
 
 export function scriptFor(command: NeonTargetCommand): string {
   if (command === "backfill-progress") return "scripts/neon-backfill-progress.ts"

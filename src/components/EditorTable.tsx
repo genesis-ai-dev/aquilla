@@ -556,7 +556,6 @@ if (typeof window !== "undefined") {
   perfHandles.__perfDumpRowRenders = () => {
     const obj: Record<string, number> = {}
     for (const [k, v] of rowRenders) obj[k] = v
-    // eslint-disable-next-line no-console
     console.table(obj)
   }
   perfHandles.__perfResetRowRenders = () => rowRenders.clear()

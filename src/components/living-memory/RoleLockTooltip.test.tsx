@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest"
 import { render, screen } from "@testing-library/react"
 import { renderWithTooltips, expectClickNote } from "@/test-utils/tooltip"
-import { RoleLockTooltip } from "./AuthoredEntriesSection"
+import { RoleLockTooltip } from "./RoleLockTooltip"
 
 describe("RoleLockTooltip", () => {
   it("says which role may edit, on click", async () => {

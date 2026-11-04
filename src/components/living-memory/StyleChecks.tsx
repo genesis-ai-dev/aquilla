@@ -1,26 +1,24 @@
 /**
- * Style-rule library section on the Living Memory → Translation quality pane
- * (AQU-934 phase 2).
+ * Style rules as checks (AQU-934; AQU-2342: one Checks list).
  *
- * Composes the review queue, the approved-rule library, the per-rule
- * applicability editor and the knowledge-base extraction dialog over a single
- * `useStyleRules` instance, so one refetch after a mutation refreshes all of
- * them, plus the document-genre block (phase 3b) — genre assignment is what
- * makes a genre-scoped rule reach a document, so it belongs beside the library.
+ * Owns the style-rule data — one `useStyleRules` instance, so one refetch after
+ * a mutation refreshes everything — and the dialogs that edit it: where a rule
+ * applies, the AI refine of that, and extraction from knowledge documents.
+ * It does NOT render a list of its own: approved style rules are rows of the
+ * unified Checks list, so this hands the list a `StyleChecksBinding` through
+ * its render prop. The review queue (proposed rules) and the document-genre
+ * block (genre assignment is what makes a genre-scoped rule reach a document)
+ * come back as nodes the list places.
  *
  * Role floors (live-resolved from the project's syncRole, like the rest of the
  * page): proposing/extracting needs CONTRIBUTOR (400); reviewing, editing,
  * enabling and applicability writes need PROJECT_LEAD (500) — the same floors
- * the server enforces. The extract action is hidden below its floor with a
- * `RoleLockTooltip` beside the heading (matching the sibling Standards
- * section); row-level controls stay visible but disabled so the state they
- * carry is still readable.
+ * the server enforces.
  */
 
-import { useEffect, useMemo, useState } from "react"
-import { AlertTriangle, Sparkles } from "lucide-react"
+import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { AlertTriangle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import { useStyleRules } from "@/hooks/useStyleRules"
 import { ROLE } from "@/lib/frontier/roles"
 import {
@@ -34,20 +32,20 @@ import { formatCount } from "@/lib/i18n/format"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { CompletionSettings } from "@/lib/parsers/types"
 import type {
+  RuleApplicability,
   StyleRule,
   StyleRuleCategory,
   StyleRuleScope,
 } from "@/lib/rules/style-rule-types"
 import { suggestFileGenres } from "@/lib/rules/file-genre"
-import { RoleLockTooltip } from "./AuthoredEntriesSection"
+import { RoleLockTooltip } from "./RoleLockTooltip"
 import { DocumentGenres, type GenreFile } from "./DocumentGenres"
 import { ExtractRulesDialog } from "./ExtractRulesDialog"
 import { RefineApplicabilityDialog, type RefineSegment } from "./RefineApplicabilityDialog"
 import { RuleApplicabilityDialog } from "./RuleApplicabilityDialog"
 import { StyleRuleCandidates } from "./StyleRuleCandidates"
-import { StyleRuleLibrary, type StyleRuleLabels } from "./StyleRuleLibrary"
+import type { StyleRuleLabels } from "./style-rule-labels"
 
-/** Library grouping order — broad vocabulary first, catch-all last. */
 const CATEGORY_ORDER: readonly StyleRuleCategory[] = [
   "terminology",
   "register",
@@ -77,38 +75,44 @@ const SCOPE_LABEL_KEY: Record<StyleRuleScope, MessageKey> = {
   segment: "terminology.livingMemory.styleRules.scope.segment",
 }
 
-const SEVERITY_LABEL_KEY: Record<StyleRule["severity"], MessageKey> = {
-  major: "rules.severity.major",
-  minor: "rules.severity.minor",
+/** What the unified Checks list needs from the style-rule store. */
+export interface StyleChecksBinding {
+  rules: StyleRule[]
+  applicability: RuleApplicability[]
+  /** PROJECT_LEAD+: toggle, edit where a rule applies, refine, review. */
+  canManage: boolean
+  labels: StyleRuleLabels
+  toggle: (rule: StyleRule, enabled: boolean) => void
+  openApplicability: (rule: StyleRule) => void
+  /** Absent without a model or a segment source. */
+  refine?: (rule: StyleRule) => void
+  /** Open extraction from knowledge documents; absent below CONTRIBUTOR. */
+  extract?: () => void
+  /** Proposed rules awaiting review, or null when there are none. */
+  reviewQueue: ReactNode
+  /** Genre assignment for documents, or null when not wired. */
+  documentGenres: ReactNode
+  /** Load failure banner, or null. */
+  errorBanner: ReactNode
 }
 
-interface QualityStyleRulesProps {
+interface StyleChecksProps {
   projectId: string
   roleLevel: number | null
   completionSettings?: CompletionSettings
   session: FrontierSession | null
-  /**
-   * Document-genre block (phase 3b). Its inputs come from the page-level
-   * `useProjectSettings` instance — this section must not open a second one
-   * (see LivingMemoryPage's header) — so the block renders only once `files`
-   * is wired through. Genre assignment is what makes a genre-scoped rule
-   * reach a document, hence its home beside the library.
-   */
+  /** Document-genre block inputs, from the page's own settings instance. */
   files?: readonly GenreFile[]
   fileGenres?: Record<string, string>
   canEditSettings?: boolean
   reasonCannotEditSettings?: "offline" | "role" | null
-  /** The PAGE's useProjectSettings patch (optimistic overlay lives there). */
   patchFileGenres?: (partial: { fileGenres: Record<string, string> }) => Promise<unknown>
-  /**
-   * Segment source for AI applicability refinement (phase 3c): one file, or
-   * the whole project when `fileId` is null. Reading cells is the page's job,
-   * not this section's — without it the Refine action is not offered.
-   */
+  /** Segment source for AI applicability refinement (phase 3c). */
   loadSegments?: (fileId: string | null, signal: AbortSignal) => Promise<readonly RefineSegment[]>
+  children: (binding: StyleChecksBinding) => ReactNode
 }
 
-export function QualityStyleRules({
+export function StyleChecks({
   projectId,
   roleLevel,
   completionSettings,
@@ -119,7 +123,8 @@ export function QualityStyleRules({
   reasonCannotEditSettings = "role",
   patchFileGenres,
   loadSegments,
-}: QualityStyleRulesProps) {
+  children,
+}: StyleChecksProps) {
   const t = useT()
   const { locale } = useI18n()
   const {
@@ -140,10 +145,7 @@ export function QualityStyleRules({
   const [refineRule, setRefineRule] = useState<StyleRule | null>(null)
 
   const jwt = session?.jwt ?? null
-  const scope: KnowledgeScope = useMemo(
-    () => ({ kind: "project", id: projectId }),
-    [projectId],
-  )
+  const scope: KnowledgeScope = useMemo(() => ({ kind: "project", id: projectId }), [projectId])
 
   // Knowledge docs feed BOTH the extraction picker and the source citations on
   // proposed rules, so they are fetched once here rather than per dialog.
@@ -156,13 +158,8 @@ export function QualityStyleRules({
     return () => { live = false }
   }, [jwt, scope])
 
-  const docNames = useMemo(
-    () => Object.fromEntries(docs.map((doc) => [doc.id, doc.name])),
-    [docs],
-  )
+  const docNames = useMemo(() => Object.fromEntries(docs.map((doc) => [doc.id, doc.name])), [docs])
 
-  // One resolved vocabulary for both lists — the queue's chips and the
-  // library's group headings can't drift apart.
   const labels = useMemo<StyleRuleLabels>(
     () => ({
       categoryOrder: CATEGORY_ORDER,
@@ -172,7 +169,7 @@ export function QualityStyleRules({
       scope: Object.fromEntries(
         (Object.keys(SCOPE_LABEL_KEY) as StyleRuleScope[]).map((s) => [s, t(SCOPE_LABEL_KEY[s])]),
       ) as Record<StyleRuleScope, string>,
-      severity: { major: t(SEVERITY_LABEL_KEY.major), minor: t(SEVERITY_LABEL_KEY.minor) },
+      severity: { major: t("rules.severity.major"), minor: t("rules.severity.minor") },
     }),
     [t],
   )
@@ -180,113 +177,82 @@ export function QualityStyleRules({
   const canPropose = roleLevel != null && roleLevel >= ROLE.CONTRIBUTOR
   const canReview = roleLevel != null && roleLevel >= ROLE.PROJECT_LEAD
 
-  // One completion call over the batch the genre block hands us; undefined
-  // (no model configured) hides the suggest action rather than failing on click.
   const suggestGenres = useMemo(() => {
     if (!completionSettings) return undefined
     return (batch: readonly GenreFile[]) =>
       suggestFileGenres({
-        files: batch.map((file) => ({
-          fileId: file.id,
-          name: file.name,
-          sample: file.sample ?? "",
-        })),
+        files: batch.map((file) => ({ fileId: file.id, name: file.name, sample: file.sample ?? "" })),
         settings: completionSettings,
         session,
       })
   }, [completionSettings, session])
 
   const candidates = rules.filter((rule) => rule.status === "proposed")
-  const library = rules.filter((rule) => rule.status === "approved")
-  const openRows = applicabilityRule
-    ? applicability.filter((row) => row.ruleId === applicabilityRule.id)
-    : []
+  const openRows = applicabilityRule ? applicability.filter((row) => row.ruleId === applicabilityRule.id) : []
+
+  const reviewQueue = candidates.length === 0 ? null : (
+    <section aria-label={t("terminology.livingMemory.styleRules.candidates.heading")} className="flex flex-col gap-2">
+      <div className="flex items-center gap-2">
+        <h3 className="text-xs font-semibold text-muted-foreground">
+          {t("terminology.livingMemory.styleRules.candidates.heading")}
+        </h3>
+        <Badge variant="secondary" className="tabular-nums">
+          {t("terminology.livingMemory.styleRules.candidates.pendingCount", {
+            count: formatCount(candidates.length, locale),
+          })}
+        </Badge>
+        <div className="flex-1" />
+        {canReview ? null : <RoleLockTooltip reason="role" requiredRole="projectLead" />}
+      </div>
+      <StyleRuleCandidates
+        rules={candidates}
+        canReview={canReview}
+        labels={labels}
+        docNames={docNames}
+        onReview={(id, action) => { void review(id, action) }}
+        onSave={(id, patch) => { void updateRule(id, patch) }}
+      />
+    </section>
+  )
+
+  const documentGenres = files && patchFileGenres ? (
+    <DocumentGenres
+      files={files}
+      assignments={fileGenres}
+      canEdit={canEditSettings}
+      reasonCannotEdit={reasonCannotEditSettings}
+      onSave={(next) => patchFileGenres({ fileGenres: next })}
+      onSuggest={suggestGenres}
+    />
+  ) : null
+
+  const errorBanner = error ? (
+    <div
+      className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive"
+      role="alert"
+    >
+      <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
+      <span>{t("terminology.livingMemory.styleRules.loadError", { message: error })}</span>
+    </div>
+  ) : null
+
+  const binding: StyleChecksBinding = {
+    rules,
+    applicability,
+    canManage: canReview,
+    labels,
+    toggle: (rule, enabled) => { void updateRule(rule.id, { enabled }) },
+    openApplicability: setApplicabilityRule,
+    ...(loadSegments && completionSettings ? { refine: setRefineRule } : {}),
+    ...(canPropose ? { extract: () => setExtractOpen(true) } : {}),
+    reviewQueue,
+    documentGenres,
+    errorBanner,
+  }
 
   return (
-    <section aria-label={t("terminology.livingMemory.styleRules.title")}>
-      <div className="mb-1 flex items-center gap-2">
-        <h2 className="flex-1 text-xs font-semibold text-muted-foreground">
-          {t("terminology.livingMemory.styleRules.title")}
-        </h2>
-        {canPropose ? (
-          <Button
-            variant="ghost"
-            className="h-6 gap-1 px-2 text-xs"
-            onClick={() => setExtractOpen(true)}
-          >
-            <Sparkles className="h-3 w-3" aria-hidden="true" />
-            {t("terminology.livingMemory.styleRules.extract.button")}
-          </Button>
-        ) : (
-          <RoleLockTooltip reason="role" requiredRole="contributor" />
-        )}
-      </div>
-
-      <p className="mb-3 text-xs leading-relaxed text-muted-foreground">
-        {t("terminology.livingMemory.styleRules.description")}
-      </p>
-
-      {error ? (
-        <div
-          className="mb-3 flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive"
-          role="alert"
-        >
-          <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
-          <span>{t("terminology.livingMemory.styleRules.loadError", { message: error })}</span>
-        </div>
-      ) : null}
-
-      <div className="flex flex-col gap-4">
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center gap-2">
-            <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/70">
-              {t("terminology.livingMemory.styleRules.candidates.heading")}
-            </h3>
-            {candidates.length > 0 ? (
-              <Badge variant="secondary" className="tabular-nums">
-                {t("terminology.livingMemory.styleRules.candidates.pendingCount", {
-                  count: formatCount(candidates.length, locale),
-                })}
-              </Badge>
-            ) : null}
-            <div className="flex-1" />
-            {canReview ? null : <RoleLockTooltip reason="role" requiredRole="projectLead" />}
-          </div>
-          <StyleRuleCandidates
-            rules={candidates}
-            canReview={canReview}
-            labels={labels}
-            docNames={docNames}
-            onReview={(id, action) => { void review(id, action) }}
-            onSave={(id, patch) => { void updateRule(id, patch) }}
-          />
-        </div>
-
-        <div className="flex flex-col gap-2">
-          <h3 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground/70">
-            {t("terminology.livingMemory.styleRules.library.heading")}
-          </h3>
-          <StyleRuleLibrary
-            rules={library}
-            canManage={canReview}
-            labels={labels}
-            onToggleEnabled={(rule, enabled) => { void updateRule(rule.id, { enabled }) }}
-            onOpenApplicability={setApplicabilityRule}
-            onRefine={loadSegments && completionSettings ? setRefineRule : undefined}
-          />
-        </div>
-
-        {files && patchFileGenres ? (
-          <DocumentGenres
-            files={files}
-            assignments={fileGenres}
-            canEdit={canEditSettings}
-            reasonCannotEdit={reasonCannotEditSettings}
-            onSave={(next) => patchFileGenres({ fileGenres: next })}
-            onSuggest={suggestGenres}
-          />
-        ) : null}
-      </div>
+    <>
+      {children(binding)}
 
       <RuleApplicabilityDialog
         rule={applicabilityRule}
@@ -332,6 +298,6 @@ export function QualityStyleRules({
         onCreate={createRule}
         onFinished={() => { void refresh() }}
       />
-    </section>
+    </>
   )
 }

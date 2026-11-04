@@ -241,18 +241,9 @@ export const onboarding = defineNamespace({
     // — AiInstructionsStep —
     "onboarding.checklist.aiInstructions.title": "Set translation instructions",
     "onboarding.checklist.aiInstructions.stepDescription":
-      "A short system prompt that shapes tone, formality, and style. Shared with everyone in this project.",
+      "Tell the AI how to translate this project — audience, tone, names, style. Every AI draft follows them.",
+    "onboarding.checklist.aiInstructions.openButton": "Open instructions",
     "onboarding.checklist.aiInstructions.actionLabel": "Editing translation instructions",
-    "onboarding.checklist.aiInstructions.introPrefix":
-      "Tell the AI how to translate. The starter prompt works for most projects; edit it to match your tone, formality, or domain (legal, scripture, marketing, etc.). Use",
-    "onboarding.checklist.aiInstructions.introAnd": "and",
-    "onboarding.checklist.aiInstructions.introSuffix": "as placeholders.",
-    "onboarding.checklist.aiInstructions.resetToDefault": "Reset to default",
-    "onboarding.checklist.aiInstructions.charCount": plural({
-      one: "{count} character",
-      other: "{count} characters",
-    }),
-    "onboarding.checklist.aiInstructions.saveButton": "Save instructions",
 
     // — AiProviderStep —
     "onboarding.checklist.aiProvider.description":
@@ -366,9 +357,9 @@ export const onboarding = defineNamespace({
     // System prompt nudge (editor banner)
     // ═══════════════════════════════════════════════════════════════════════
     "onboarding.systemPromptNudge.message":
-      "Your AI is still using the default translation instructions.",
+      "This project has no translation instructions yet.",
     "onboarding.systemPromptNudge.detail":
-      "Customize them to match your project's tone and domain — shared with everyone on the project.",
+      "Tell the AI your audience, tone and style — every AI draft on the project follows them.",
     // "Customize" button reuses `common.customize` (identical text)
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -660,11 +651,6 @@ export const onboarding = defineNamespace({
         description:
           "Confirmation line under the Import files checklist step, once at least one file has been imported.",
         placeholders: { count: "Number of files imported into the project so far." },
-      },
-      "onboarding.checklist.aiInstructions.charCount": {
-        description:
-          "Small counter under the system-prompt textarea in the AI instructions checklist step, showing its current length.",
-        placeholders: { count: "Number of characters currently typed in the prompt textarea." },
       },
       "onboarding.checklist.aiProvider.frontierSignedIn": {
         description:

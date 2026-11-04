@@ -1,8 +1,11 @@
 // "Project decisions" card (AQU-1691), under the Language profile card in
-// Settings → General → Languages.
+// Living Memory → Checks (AQU-2342; mounted by living-memory/CheckDataCards).
 //
-// The decision log: the answers a team gave to Autopilot's questions, which
-// every later draft follows (db/shared/project-facts.ts). Each row shows the
+// The decision log: the answers a team gave to Autopilot's questions
+// (db/shared/project-facts.ts). Since AQU-2342 an answer is also appended to
+// the project instructions, which is what drafts read once they are written;
+// the log stays the record Autopilot checks so it never asks twice, and the
+// Bible data checks read their agreed names from it. Each row shows the
 // key, the value, where it applies, who decided it and when. Maintainers can
 // edit a decision's value, scope and note, or remove it; an edit is a new
 // decision, so it takes the editor's name and today's date.

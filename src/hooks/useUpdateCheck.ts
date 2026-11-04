@@ -57,3 +57,29 @@ export function __setUpdateAvailableForTests(value: boolean) {
 export function isEditorPath(pathname: string): boolean {
   return /^\/project\/[^/]+\/editor(\/|$)/.test(pathname)
 }
+
+/** Focusable things you cannot type prose into. */
+const NON_TEXT_INPUT_TYPES = new Set([
+  "button", "checkbox", "color", "file", "hidden", "image", "radio", "range", "reset", "submit",
+])
+
+/**
+ * AQU-2335 — the other half of "a new build never interrupts input".
+ * `isEditorPath` guards the editor *route*; this guards the *keystroke*,
+ * wherever it is being typed: a cell editor, the agent composer, a comment
+ * box, any form field. The update flag is sticky, so a reload skipped here
+ * is only deferred — the next navigation with the caret out of a field
+ * takes the new build. A click on the indicator still reloads at once:
+ * that is the user asking for it.
+ */
+export function isTypingSomewhere(doc: Document | undefined = globalThis.document): boolean {
+  const el = doc?.activeElement
+  if (!el) return false
+  if (el.tagName === "TEXTAREA") return true
+  if (el.tagName === "INPUT") {
+    return !NON_TEXT_INPUT_TYPES.has((el.getAttribute("type") ?? "text").toLowerCase())
+  }
+  // TipTap (cell editor, agent composer) and any other rich-text surface.
+  if ("isContentEditable" in el && (el as HTMLElement).isContentEditable) return true
+  return el.getAttribute("role") === "textbox"
+}

@@ -13,10 +13,10 @@ import { stripTrailingBareMarkers } from "./strip-trailing-usfm-markers"
 // needs the browser (Vite env, storage-backed keys, i18n, fetch) and re-exports
 // the core so existing importers are unaffected.
 import {
-  buildBriefBlock,
+  buildChecksBlock,
   buildPrompt,
-  buildRulesBlock,
-  buildStyleRulesBlock,
+  buildTerminologyBlock,
+  copilotGuidanceBlocks,
   DEFAULT_APPROVED_EXAMPLE_COUNT,
   DEFAULT_MAX_INJECTED_TERMS,
   DEFAULT_SYSTEM_PROMPT,
@@ -26,17 +26,19 @@ import {
   selectInjectedTerms,
   type ChatMessage,
   type PrecedingContextEntry,
+  instructionsPromptBlock,
   type ValidatedPair,
 } from "./prompt-build"
 
 export {
-  buildBriefBlock,
+  buildChecksBlock,
   buildPrompt,
-  buildRulesBlock,
-  buildStyleRulesBlock,
+  buildTerminologyBlock,
+  copilotGuidanceBlocks,
   DEFAULT_APPROVED_EXAMPLE_COUNT,
   DEFAULT_MAX_INJECTED_TERMS,
   DEFAULT_SYSTEM_PROMPT,
+  instructionsPromptBlock,
   precedingContextLabel,
   retainTranslationPairs,
   selectApprovedExamples,
@@ -376,7 +378,9 @@ function joinedSource(cells: { source: string }[]): string {
 }
 
 export function buildBatchPrompt(options: {
-  sourceLanguage: string; targetLanguage: string; systemPrompt: string
+  sourceLanguage: string; targetLanguage: string
+  /** Fixed role text; defaults to DEFAULT_SYSTEM_PROMPT (AQU-2342). */
+  systemPrompt?: string
   cells: { source: string }[]
   examples: PassageExample[]
   /** Active project rules — injected as a "must follow" block in the system prompt. */
@@ -384,12 +388,14 @@ export function buildBatchPrompt(options: {
   /** Style-rule instructions in force across the batch (AQU-934) — the union
    *  of what applies to its cells, since the batch shares one system prompt. */
   styleInstructions?: string[]
+  /** The Language profile — its filled slots join the checks hint. */
+  languageProfile?: import("../../../db/shared/language-profile").LanguageProfile | null
   /** Pre-filtered validated pairs from the project — prepended as a passage example. */
   validatedPairs?: ValidatedPair[]
   /** How to render few-shot examples. Default "source-and-target". */
   exampleFormat?: "source-and-target" | "target-only"
-  /** The project brief's L1 summary — injected before the rules block. */
-  briefSummary?: string
+  /** The project instructions — injected right after the role text. */
+  instructions?: string
   /** Format-specific output contract appended after project rules. */
   systemAddendum?: string
   /** Bilingual pairs immediately preceding the first live cell. Approved
@@ -398,18 +404,13 @@ export function buildBatchPrompt(options: {
 }): ChatMessage[] {
   const targetOnly = options.exampleFormat === "target-only"
 
-  let baseSys = BATCH_FRAMING_INSTRUCTIONS + "\n\n" + options.systemPrompt
-  const batchBriefBlock = buildBriefBlock(options.briefSummary)
-  if (batchBriefBlock) baseSys = baseSys + "\n\n" + batchBriefBlock
-  // Inject rules block after the base system prompt. The batch's own source
-  // cells narrow terminology to the terms it actually contains (AQU-2209) —
-  // one system prompt serves the whole batch, so the union is the right scope.
-  if (options.rules?.length) {
-    const block = buildRulesBlock(options.rules, { sourceText: joinedSource(options.cells) })
-    if (block) baseSys = baseSys + "\n\n" + block
-  }
-  const batchStyleBlock = buildStyleRulesBlock(options.styleInstructions)
-  if (batchStyleBlock) baseSys = baseSys + "\n\n" + batchStyleBlock
+  let baseSys = BATCH_FRAMING_INSTRUCTIONS + "\n\n" + (options.systemPrompt ?? DEFAULT_SYSTEM_PROMPT)
+  // One order (db/shared/prompt-blocks.ts): Instructions → Checks →
+  // Terminology. The batch's own source cells narrow terminology to the terms
+  // it contains (AQU-2209) — one system prompt serves the whole batch, so the
+  // union is the right scope.
+  const batchGuidance = copilotGuidanceBlocks({ ...options, sourceText: joinedSource(options.cells) })
+  if (batchGuidance) baseSys = baseSys + "\n\n" + batchGuidance
   if (options.systemAddendum) baseSys = baseSys + "\n\n" + options.systemAddendum
   if (targetOnly) {
     baseSys = baseSys + "\n\nThe examples provided are reference translations in the target language. Use them to imitate the style, terminology, and patterns of this project."
@@ -494,7 +495,8 @@ export interface ParagraphPromptCell {
 export function buildParagraphPrompt(options: {
   sourceLanguage: string
   targetLanguage: string
-  systemPrompt: string
+  /** Fixed role text; defaults to DEFAULT_SYSTEM_PROMPT (AQU-2342). */
+  systemPrompt?: string
   /** The paragraph's source cells, in document order. */
   cells: ParagraphPromptCell[]
   /** Few-shot examples (whole passages). Same format as buildBatchPrompt. */
@@ -505,8 +507,10 @@ export function buildParagraphPrompt(options: {
   rules?: TranslationRule[]
   /** Style-rule instructions in force across the paragraph group (AQU-934). */
   styleInstructions?: string[]
-  /** Project brief L1 summary. */
-  briefSummary?: string
+  /** The Language profile — its filled slots join the checks hint. */
+  languageProfile?: import("../../../db/shared/language-profile").LanguageProfile | null
+  /** The project instructions — injected right after the role text. */
+  instructions?: string
   /** Format-specific output contract appended after project rules. */
   systemAddendum?: string
   /** How to render few-shot examples. */
@@ -521,24 +525,17 @@ export function buildParagraphPrompt(options: {
 }): ChatMessage[] {
   const targetOnly = options.exampleFormat === "target-only"
 
-  // Build system prompt: base + framing + brief + rules
+  // Build system prompt: base + framing + instructions + rules
   const framingSuffix = PARAGRAPH_SYSTEM_SUFFIX
     .replace(/\{targetLanguage\}/g, options.targetLanguage)
 
-  let sys = (options.systemPrompt + framingSuffix)
+  // One order (db/shared/prompt-blocks.ts): Instructions → Checks →
+  // Terminology, the paragraph's source cells narrowing terminology to it.
+  const paragraphGuidance = copilotGuidanceBlocks({ ...options, sourceText: joinedSource(options.cells) })
+  let sys = ((options.systemPrompt ?? DEFAULT_SYSTEM_PROMPT) + framingSuffix + (paragraphGuidance ? "\n\n" + paragraphGuidance : ""))
     .replace(/\{sourceLanguage\}/g, options.sourceLanguage)
     .replace(/\{targetLanguage\}/g, options.targetLanguage)
 
-  const briefBlock = buildBriefBlock(options.briefSummary)
-  if (briefBlock) sys = sys + "\n\n" + briefBlock
-
-  // The paragraph's source cells narrow terminology to it (AQU-2209).
-  if (options.rules?.length) {
-    const block = buildRulesBlock(options.rules, { sourceText: joinedSource(options.cells) })
-    if (block) sys = sys + "\n\n" + block
-  }
-  const paragraphStyleBlock = buildStyleRulesBlock(options.styleInstructions)
-  if (paragraphStyleBlock) sys = sys + "\n\n" + paragraphStyleBlock
   if (options.systemAddendum) sys = sys + "\n\n" + options.systemAddendum
 
   if (targetOnly) {

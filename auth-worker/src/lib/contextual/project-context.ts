@@ -7,12 +7,15 @@
 // read. Nothing on the server ever saw it. So autopilot drafted every passage
 // blind to the single most consequential professional constraint in the
 // project, and its lint could not catch a violation it had never been told
-// about. Same for the translation brief: only the compressed L1 summary
-// reached the model, and only if somebody had generated one — the structured
-// skopos parameters (register, literalness, key-term strategy, constraints,
-// quality bar) sat unused in the same settings blob.
+// about.
 //
-// The brief and the rules are read from ONE `project_settings` row. The
+// AQU-2342: the project's guidance reaches the performer as ONE text, the
+// resolved translation instructions (db/shared/translation-instructions.ts) —
+// the same block the copilot, the agent and its draft tool carry. The brief's
+// summary and answered sections only feed it on read, until a maintainer
+// writes the instructions themselves.
+//
+// The instructions and the rules are read from ONE `project_settings` row. The
 // project's own key terms, and those of the termbases it subscribes to, come
 // from the `concepts` table, where the editor reads them (AQU-1710, AQU-1715;
 // lib/concepts-read.ts). Terminology hits reuse the client's compiled rule ids
@@ -22,10 +25,13 @@
 
 import { readLanguageProfile, type LanguageProfile } from "../../../../db/shared/language-profile"
 import { readProjectFacts, type ProjectFact } from "../../../../db/shared/project-facts"
+import { loadTranslationInstructions } from "../../../../db/shared/load-translation-instructions"
+import { checksHintBlock, type TermHint } from "../../../../db/shared/prompt-blocks"
 import {
   compileRulePattern,
   countMatches,
   ruleViolation,
+  rulesForLane,
   type LintHit,
   type LintRule,
   type RuleViolation,
@@ -43,7 +49,7 @@ import { readProjectConcepts } from "../concepts-read"
 import type { LaneLanguageRow } from "../../../../src/lib/lanes/lane-language"
 import { languagesForLanes, loadLaneRows } from "../read-lane-language"
 
-// ── Shapes (mirrors of src/lib/terminology/types.ts + src/lib/brief/types.ts) ─
+// ── Shapes (mirrors of src/lib/terminology/types.ts) ─
 
 export type RenderingStatus = "preferred" | "admitted" | "forbidden"
 
@@ -66,38 +72,6 @@ export interface Concept {
   match?: TermMatchOptions
 }
 
-export interface TranslationBriefParameters {
-  purpose?: string
-  audience?: string
-  useAndMedium?: string
-  motiveSponsor?: string
-  sourceTexts?: string
-  targetVariety?: string
-  registerNaturalness?: string
-  literalness?: string
-  keyTerms?: string
-  constraints?: string
-  qualityBar?: string
-  [k: string]: string | undefined
-}
-
-/** Brief fields that change how a line is WORDED, in prompt order. The purpose
- *  group (motive, sponsor) matters to humans planning the work but does not
- *  alter a rendering, so it stays out of the performer's context budget. */
-export const PERFORMER_BRIEF_FIELDS: { id: string; label: string }[] = [
-  { id: "audience", label: "Audience" },
-  { id: "useAndMedium", label: "Use & medium" },
-  { id: "targetVariety", label: "Variety & orthography" },
-  { id: "registerNaturalness", label: "Register & naturalness" },
-  { id: "literalness", label: "Literalness" },
-  { id: "keyTerms", label: "Key-term strategy" },
-  { id: "constraints", label: "Constraints & sensitivities" },
-  { id: "qualityBar", label: "Quality bar" },
-]
-
-/** Per-field clip so a rambling brief cannot crowd out the scene itself. */
-const BRIEF_FIELD_MAX_CHARS = 400
-
 export interface TermGuidance {
   conceptId: string
   sourceTerm: string
@@ -116,10 +90,10 @@ export interface ProjectContext {
    * the former default lane.
    */
   lanes?: LaneLanguageRow[]
-  /** Model-generated compression of the whole brief, when one exists. */
-  projectBriefL1?: string
-  /** The brief's structured answers — used verbatim when there is no L1. */
-  briefParameters: TranslationBriefParameters
+  /** AQU-2342: the project's resolved translation instructions ("" when it
+   *  has none) — what every drafting prompt carries and what the start gate
+   *  asks for. */
+  translationInstructions: string
   /** Active concepts, the project's own plus any it subscribes to. */
   concepts: Concept[]
   /** The project's affix inventory for source-term matching
@@ -127,13 +101,21 @@ export interface ProjectContext {
   termMatching?: TermMatchingSettings
   /** Hand-authored project rules. */
   authoredRules: LintRule[]
+  /** AQU-2342: the org's rules (`org_settings.rules`), which the editor lints
+   *  and the copilot hints too. Checked and hinted after the project's own. */
+  orgRules?: LintRule[]
+  /** `settings.fileGenres`, so style rules resolve per file as in the editor. */
+  fileGenres?: Record<string, unknown>
   /**
    * AQU-1691: the decision log — answers to one-off questions, each with the
-   * scope it applies to. Loaded every wave, never consumed: a fact decided in
-   * one run reaches every later run and file.
+   * scope it applies to. AQU-2342: NOT a prompt block any more — an answer is
+   * appended to the instructions (and the log folds into them on read until
+   * they are written). Kept for the Bible data checks' agreed names and so a
+   * question is never asked twice.
    */
   projectFacts: ProjectFact[]
-  /** AQU-1691: the Language profile, read slot by slot (a damaged slot is left out). */
+  /** AQU-1691: the Language profile, read slot by slot (a damaged slot is
+   *  left out). Data behind Checks: the checks hint carries its slots. */
   languageProfile: LanguageProfile
   /**
    * AQU-1699: more than one target lane is active. The termbase does not say
@@ -193,16 +175,6 @@ function parseAuthoredRules(raw: unknown): LintRule[] {
       !!r && typeof r === "object" && typeof (r as LintRule).id === "string" &&
       (r as LintRule).enabled === true && !!(r as LintRule).check,
   )
-}
-
-function parseBriefParameters(raw: unknown): TranslationBriefParameters {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {}
-  const out: TranslationBriefParameters = {}
-  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
-    const s = asString(v)
-    if (s) out[k] = s.slice(0, BRIEF_FIELD_MAX_CHARS)
-  }
-  return out
 }
 
 /** `ProjectWideSettings.termMatching`, which the editor passes to the matcher
@@ -304,6 +276,17 @@ export function lintTerminology(
 
 // ── Span-scoped term guidance ───────────────────────────────────────────────
 
+/** A span's term guidance as the shared terminology block reads it
+ *  (db/shared/prompt-blocks.ts): preferred, then admitted renderings. */
+export function termHints(terms: readonly TermGuidance[]): TermHint[] {
+  return terms.map((t) => ({
+    sourceTerm: t.sourceTerm,
+    approved: [...t.preferred, ...t.admitted],
+    forbidden: t.forbidden,
+    ...(t.notes ? { notes: t.notes } : {}),
+  }))
+}
+
 /** Ceiling on terms carried into one prompt. Ordered by first appearance in
  *  the span, so the cut falls on the least locally-relevant entries. */
 export const MAX_TERMS_PER_SPAN = 24
@@ -397,9 +380,10 @@ export async function loadProjectContext(
   lane?: { laneId?: string | null; targetLang?: string | null },
 ): Promise<ProjectContext> {
   const empty: ProjectContext = {
-    briefParameters: {},
+    translationInstructions: "",
     concepts: [],
     authoredRules: [],
+    orgRules: [],
     projectFacts: [],
     languageProfile: {},
   }
@@ -414,14 +398,14 @@ export async function loadProjectContext(
   } catch {
     return empty
   }
-  if (!row) return empty
+  const orgRules = await loadOrgRules(db, projectId)
+  // No settings row still resolves: the legacy brief alone can carry them.
+  if (!row) {
+    return { ...empty, orgRules, translationInstructions: (await loadTranslationInstructions(db, projectId, {})).text }
+  }
 
   const settings = parseSettings(row.settings)
-  const brief = settings.translationBrief
-  const briefObj =
-    brief && typeof brief === "object" && !Array.isArray(brief)
-      ? (brief as Record<string, unknown>)
-      : {}
+  const { text: translationInstructions } = await loadTranslationInstructions(db, projectId, settings)
 
   const lanes: LaneLanguageRow[] = await loadLaneRows(db, projectId).catch(() => [])
   const loaded = [
@@ -438,15 +422,60 @@ export async function loadProjectContext(
     ...(sourceLanguage ? { sourceLanguage } : {}),
     ...(targetLanguage ? { targetLanguage } : {}),
     lanes,
-    ...(asString(briefObj.l1Summary) ? { projectBriefL1: asString(briefObj.l1Summary) } : {}),
-    briefParameters: parseBriefParameters(briefObj.parameters),
+    translationInstructions,
     concepts,
     ...(termMatching ? { termMatching } : {}),
     authoredRules: parseAuthoredRules(settings.rules),
+    orgRules,
+    ...(isRecord(settings.fileGenres) ? { fileGenres: settings.fileGenres } : {}),
     projectFacts: readProjectFacts(settings.projectFacts),
     languageProfile: readLanguageProfile(settings.languageProfile),
     ...((await hasExtraTargetLane(db, projectId)) ? { multiLane: true } : {}),
   }
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === "object" && !Array.isArray(v)
+}
+
+/**
+ * The org's rules (`org_settings.rules`), enabled and well-formed only. The
+ * editor merges them into every project's rules (useRules); the copilot and
+ * the prompt preview hint them, so the worker paths do too (AQU-2342).
+ * Best-effort: no org row, or a failed read, is no org rules.
+ */
+export async function loadOrgRules(db: SettingsDb, projectId: string): Promise<LintRule[]> {
+  try {
+    const row = await db
+      .prepare(
+        `SELECT os.settings AS settings FROM org_settings os
+           JOIN projects p ON p.org_id = os.org_id WHERE p.id = ?`,
+      )
+      .bind(projectId)
+      .first<{ settings: unknown }>()
+    return parseAuthoredRules(parseSettings(row?.settings).rules)
+  } catch {
+    return []
+  }
+}
+
+/**
+ * The checks hint for a prompt with no single passage in hand (the agent
+ * chat): the project's rules then the org's, narrowed to `laneTag`, and the
+ * Language profile — the shared builder every drafting path uses. Style rules
+ * resolve per passage, so they ride on the draft tool's prompt, not here.
+ */
+export async function projectChecksHint(
+  db: SettingsDb,
+  projectId: string,
+  settings: Record<string, unknown>,
+  laneTag: string,
+): Promise<string> {
+  const rules = rulesForLane(
+    [...parseAuthoredRules(settings.rules), ...(await loadOrgRules(db, projectId))],
+    laneTag,
+  )
+  return checksHintBlock({ rules, languageProfile: readLanguageProfile(settings.languageProfile) })
 }
 
 /**

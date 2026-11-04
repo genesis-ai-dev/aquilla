@@ -323,6 +323,9 @@ export interface UseProjectSettings {
    * first response that carries them.
    */
   orgMediaDefaults: MediaDefaults
+  /** AQU-2342: the legacy agent brief text from the same response ("" when
+   *  none, or once the project stored its own instructions). */
+  legacyProjectBriefText: string
   /**
    * AQU-1771: the org policy this project's surfaces apply, and the
    * visibility floors it enforces, from the same response. Null before the
@@ -544,6 +547,8 @@ function localSettingsFrom(
     out.ttsSettings = ttsRest
   }
   if (record.terminology != null) out.terminology = record.terminology
+  if (record.translationInstructions != null)
+    out.translationInstructions = record.translationInstructions
   if (record.livingMemoryEntries != null) out.livingMemoryEntries = record.livingMemoryEntries
   if (record.translationBrief != null) out.translationBrief = record.translationBrief
   if (record.draftContext != null) out.draftContext = record.draftContext
@@ -626,6 +631,7 @@ export function useProjectSettings(
   const [visibilityFloors, setVisibilityFloors] = useState<ProjectVisibilityFloors | null>(null)
   const [importFloor, setImportFloor] = useState<VisibilityFloorView | null>(null)
   const [orgMediaDefaults, setOrgMediaDefaults] = useState<MediaDefaults>(EMPTY_MEDIA_DEFAULTS)
+  const [legacyProjectBriefText, setLegacyProjectBriefText] = useState("")
   const [lanes, setLanes] = useState<ProjectLaneView[] | null>(null)
   const writeServer = useCallback((next: ProjectSettingsResponse | null) => {
     serverRef.current = next
@@ -639,6 +645,7 @@ export function useProjectSettings(
     if (next?.visibilityFloors !== undefined) setVisibilityFloors(next.visibilityFloors)
     if (next?.importFloor !== undefined) setImportFloor(next.importFloor)
     if (next?.orgMediaDefaults !== undefined) setOrgMediaDefaults(next.orgMediaDefaults)
+    if (next?.legacyProjectBriefText !== undefined) setLegacyProjectBriefText(next.legacyProjectBriefText)
     if (next?.lanes !== undefined) setLanes(next.lanes)
   }, [])
   // A response the server actually returned (never an optimistic guess): also
@@ -769,6 +776,9 @@ export function useProjectSettings(
               : {}),
             ...(got.settings.terminology != null
               ? { terminology: got.settings.terminology }
+              : {}),
+            ...(got.settings.translationInstructions != null
+              ? { translationInstructions: got.settings.translationInstructions }
               : {}),
             ...(got.settings.livingMemoryEntries != null
               ? { livingMemoryEntries: got.settings.livingMemoryEntries }
@@ -1216,6 +1226,7 @@ export function useProjectSettings(
     visibilityFloors,
     importFloor,
     orgMediaDefaults,
+    legacyProjectBriefText,
     lanes,
     isOnline,
     canEdit,

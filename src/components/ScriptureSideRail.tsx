@@ -50,7 +50,9 @@ export function ScriptureSideRail({ tabs, openPanel, onSelect }: ScriptureSideRa
             aria-pressed={active}
             data-testid={testId}
             className={cn(
-              "flex w-8 flex-col items-center gap-1.5 rounded-md py-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+              // The rail is wider than the button. The pseudo fills that gutter
+              // so the accent stays while the pointer is in the side padding.
+              "relative flex w-8 flex-col items-center gap-1.5 rounded-md py-1 text-muted-foreground hover:bg-accent hover:text-foreground before:absolute before:inset-y-0 before:-inset-x-0.5 before:content-['']",
               active && "bg-accent text-foreground",
             )}
           >

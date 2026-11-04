@@ -3553,6 +3553,8 @@ export function ProjectWorkspace() {
         await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
         revalidateCells()
         // Only if something was actually reported — see the lazy toast above.
+        // AQU-1917: a run the ASR backend rejected no longer lands here (it
+        // goes to onFailed), so this success line can be trusted again.
         if (toastId !== null) {
           toast.update(toastId, { type: "success", title: `Transcribed ${lastTotal} section${plural(lastTotal)} of "${fileName}".`, description: undefined })
         }

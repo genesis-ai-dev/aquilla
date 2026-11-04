@@ -98,6 +98,7 @@ function makeDoc(overrides: Partial<KnowledgeDocument> = {}): KnowledgeDocument 
     docSummary: null,
     indexStatus: "ready",
     indexError: null,
+    nodeCount: 3,
     createdBy: "alice",
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",

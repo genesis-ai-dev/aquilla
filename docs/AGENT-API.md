@@ -1379,6 +1379,77 @@ and PatchSettings accepted any object for `rules`, `rulePenalties`,
 - **Source of truth.** Check ids, English names and defaults live in
   `db/shared/builtin-checks.ts`; the Rules page and this read both resolve from it.
 
+## Status addendum (2026-11-02, AQU-2348 — Living Memory resolves per lane)
+
+A project's Living Memory is the **default** for every target lane; a lane may now own its
+own copy of the two prose sections and that copy replaces the project's for that lane only.
+
+- **Two new `PatchSettings` keys**, both keyed by the lane's opaque 8-hex **`lanes.id`** —
+  never a language and never a legacy tag, because a rename must not strand a lane's own
+  instructions. `describe_command("PatchSettings")` lists them with that rule, and a
+  non-id key is refused by name rather than silently stored:
+  - `systemPromptByLane: { [laneId]: string }` — replaces `systemPrompt` for that lane.
+  - `translationBriefByLane: { [laneId]: object } ` — replaces `translationBrief` for that lane.
+  Authored entries are a **list**, so they do not get a second key: a `livingMemoryEntries`
+  entry carries an optional `laneId`, and a lane sees the project's entries **plus** its own
+  and never another lane's.
+- **Absent means inherit.** A lane with no entry, a single-lane project, and a legacy project
+  whose default lane carries only the `''` tag all resolve exactly as they did before these
+  keys existed. Nothing migrates.
+- **Prompt preview reports the level.** `parts.sources` is `{ base, brief }`, each `"lane"`
+  or `"project"`. A caller comparing two lanes cannot otherwise tell a shared value from a
+  customized one that happens to read the same. The source names the project whenever the
+  project's text is what actually reached the prompt — a lane whose own prompt is empty falls
+  through the same chain a blank project prompt always did.
+- **One resolver** (`db/shared/lane-memory.ts`) serves the editor's drafting call and this
+  preview, so the preview cannot drift from what the copilot sends — the AQU-1230 contract.
+- Lane overrides are **never copied across a source link** (`INHERIT_NEVER_KEYS`): lane ids
+  are project-local, so a copied override would key the downstream project's memory by lanes
+  it does not have. The project-wide `systemPrompt` / `translationBrief` still inherit.
+- **`SetBrief` and `RegenerateBriefSummary` take an optional `laneId`.** With it, the write
+  lands in `translationBriefByLane[laneId]` and the project's brief — and every other lane's —
+  is untouched; without it, behaviour is exactly as before. Three things worth knowing:
+  - The **first** lane-scoped write merges its sections onto the brief that lane currently
+    *resolves* to, which is the project's when the lane owns none. So "customize this lane"
+    copies the project's answers across rather than publishing a brief whose unnamed sections
+    are suddenly blank. The same holds for a lane-scoped `RegenerateBriefSummary`: it
+    summarizes what the lane resolves to and stores the result as that lane's own copy, so
+    regenerating inside a lane is itself a customization.
+  - `laneId` must be the **id of an unarchived target lane** of the project. A language, a
+    legacy tag, a source lane or an unknown id is `validation_failed` with the message that
+    names the discovery endpoint — the same answer `laneId` gets everywhere else on this API.
+  - `ifMatchVersion` is still the **settings** version. One blob holds the project brief and
+    every lane's, so a lane write and a concurrent project write conflict with each other by
+    design; `plan_stale` means re-read and retry, as it always did. The approval page names
+    the lane (`translationBriefByLane.<laneId>.<section>`), so a human approving a lane write
+    can see it is not the project's brief.
+- **Rows a lane owns: knowledge documents and style rules.** The prose sections above are
+  values a lane *overrides*; a document and a rule are ROWS, so a lane does not override them
+  — it ADDS one. `knowledge_docs.lane_id` and `style_rules.lane_id` (migration 0196, nullable,
+  nothing to backfill) carry the owning lane's `lanes.id`; `NULL` is the project's own row,
+  in force in every lane, which is what every row written before the column was.
+  - **Retrieval is the project's rows plus this lane's, never another lane's.** One rule,
+    stated once in `db/shared/lane-memory.ts` as both the SQL filter (`laneRowFilterSql`) and
+    the in-memory predicate (`laneScopedRows`), so what the database hands the health checks
+    is what the prompt builder compiles.
+  - `GET .../style-rules` rows now carry `laneId` (`null` = a project rule). The list itself
+    is unnarrowed on purpose — it is a management view, and a maintainer must be able to see
+    what the other lane is held to. `prompt-preview` IS narrowed: a rule written for another
+    lane never appears in this lane's preview or in the prompt the copilot sends.
+  - An **org-shared** row can never carry a lane: lane ids are project-local, so a shared row
+    keyed by one project's lane would name a lane the next project does not have.
+  - Writing one: `POST /api/v2/projects/:projectId/style-rules` and the knowledge upload
+    `POST /api/v2/projects/:projectId/knowledge?laneId=<lanes.id>` take the lane and refuse a
+    language, a legacy tag, a source lane and an archived lane with `validation_failed`,
+    exactly as `SetBrief` does. Nothing is written when they refuse.
+  - **Archiving a lane keeps its memory.** `archived_at` moves and nothing else: the lane's
+    settings keys and its rows stay exactly as they were, so restoring the lane brings its
+    brief, instructions, documents and rules back. A closed lane simply accepts no new ones.
+- **Autopilot and the server-side draft resolve the brief per lane too** — the contextual run
+  (`loadProjectContext`), `/api/v1/ai/agent/run` and the internal `DraftCells` endpoint all
+  read through the same `readBriefForLane`, so a run cannot be grounded in a brief the prompt
+  preview says it would not use.
+
 ## Status addendum (2026-10-27, AQU-2195 — style rules: list and review)
 
 "Extract from knowledge base" can propose hundreds of style rules, and until now only a

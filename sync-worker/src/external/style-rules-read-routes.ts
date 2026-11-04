@@ -50,6 +50,11 @@ interface ExternalStyleRule {
   /** True for a rule the project's org shares. It is shown and applied here,
    *  but cannot be reviewed or edited through the project. */
   inherited: boolean
+  /** AQU-2348: the one target lane this rule was written for (its opaque
+   *  `lanes.id`), or null for a rule the whole project is held to. A
+   *  lane-owned rule is compiled only for that lane's cells — it will not
+   *  appear in another lane's prompt preview. */
+  laneId: string | null
 }
 
 async function docTitles(
@@ -120,6 +125,7 @@ async function handleList(
       source: r.source,
       ...(title !== undefined ? { sourceDocTitle: title } : {}),
       inherited: r.projectId !== projectId,
+      laneId: r.laneId ?? null,
     }
   })
 
@@ -130,6 +136,8 @@ async function handleList(
     hints: {
       review:
         'Approve, reject or edit rules with a ReviewStyleRules changeset (describe_command ReviewStyleRules). Send each rule\'s version back as ifMatchVersion. Only approved, enabled rules reach the copilot; rows with inherited: true belong to the org and are refused.',
+      lanes:
+        'A row with a laneId was written for that one target lane and is compiled only for its cells; laneId: null is a project rule, in force in every lane. GET /api/v1/external/projects/:projectId lists the lane ids.',
     },
   })
 }

@@ -1877,10 +1877,19 @@ CREATE TABLE IF NOT EXISTS knowledge_docs (
     created_by TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CHECK ((org_id IS NULL) <> (project_id IS NULL))
+    -- The one target lane this document belongs to, or NULL for a document the
+    -- whole project reads (0196; AQU-2348). The lane's opaque `lanes.id`, never
+    -- a language or a legacy tag. NULL = in force in every lane, which is what
+    -- every row written before this column was.
+    lane_id TEXT,
+    CHECK ((org_id IS NULL) <> (project_id IS NULL)),
+    -- Lane ids are project-local, so an org-shared document can never name one.
+    CONSTRAINT knowledge_docs_lane_is_project_scoped
+      CHECK (lane_id IS NULL OR project_id IS NOT NULL)
 );
 CREATE INDEX IF NOT EXISTS knowledge_docs_project ON knowledge_docs (project_id) WHERE project_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS knowledge_docs_org ON knowledge_docs (org_id) WHERE org_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS knowledge_docs_project_lane ON knowledge_docs (project_id, lane_id) WHERE lane_id IS NOT NULL;
 
 -- Agent memory + project brief (0066_agent_memory.sql; AQU-AGENT contracts §3).
 -- Long-term, human-reviewed agent memory. `agent_memories` rows move
@@ -2464,10 +2473,18 @@ CREATE TABLE IF NOT EXISTS style_rules (
   version integer NOT NULL DEFAULT 1,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
-  CHECK ((org_id IS NULL) <> (project_id IS NULL))
+  -- The one target lane this rule was written for, or NULL for a rule the whole
+  -- project is held to (0196; AQU-2348). The lane's opaque `lanes.id`. A lane
+  -- answers *for whom* the rule was written; `rule_applicability` below answers
+  -- *where in the text* it bites — deliberately separate axes.
+  lane_id TEXT,
+  CHECK ((org_id IS NULL) <> (project_id IS NULL)),
+  CONSTRAINT style_rules_lane_is_project_scoped
+    CHECK (lane_id IS NULL OR project_id IS NOT NULL)
 );
 CREATE INDEX IF NOT EXISTS style_rules_project ON style_rules (project_id, status) WHERE project_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS style_rules_org ON style_rules (org_id, status) WHERE org_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS style_rules_project_lane ON style_rules (project_id, lane_id, status) WHERE lane_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS rule_applicability (
   id text PRIMARY KEY,                    -- uuidv7

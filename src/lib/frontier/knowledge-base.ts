@@ -170,8 +170,13 @@ export async function uploadKnowledgeDocument(
   scope: KnowledgeScope,
   jwt: string,
   file: File,
+  /** AQU-2348: the target lane that will OWN this document (`lanes.id`). Omitted
+   *  = a project-wide document, retrieved for every lane — which is what every
+   *  upload was before per-lane memory, so the default is unchanged. A raw-body
+   *  POST has nowhere to put it but the query string. */
+  laneId?: string,
 ): Promise<KnowledgeDocument> {
-  const response = await request(scope, jwt, "", {
+  const response = await request(scope, jwt, laneId ? `?laneId=${encodeURIComponent(laneId)}` : "", {
     method: "POST",
     headers: { "x-doc-name": encodeURIComponent(file.name) },
     body: file,

@@ -88,6 +88,12 @@ export function overlaySettings(
   assign("alignmentSeeds", settings.alignmentSeeds)
   assign("livingMemoryEntries", settings.livingMemoryEntries)
   assign("translationBrief", settings.translationBrief)
+  // AQU-2348: the per-lane Living Memory overrides. They must reach the
+  // workspace record or every lane reads the project's prompt and brief —
+  // `resolveLaneMemory` would see an absent map and answer "inherit", which
+  // looks exactly like a lane that was never customized.
+  assign("systemPromptByLane", settings.systemPromptByLane)
+  assign("translationBriefByLane", settings.translationBriefByLane)
   assign("validationCount", settings.validationCount ?? orgDefaults?.validationCount)
   assign("validationCountAudio", settings.validationCountAudio ?? orgDefaults?.validationCountAudio)
   assign("validationRoleFloor", settings.validationRoleFloor)

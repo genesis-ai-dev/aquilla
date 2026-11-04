@@ -71,6 +71,13 @@ interface KnowledgeBaseSurfaceProps {
   jwt: string | null
   canManage: boolean
   showTitle?: boolean
+  /** AQU-2348: when the Living Memory page is viewing ONE target lane, the
+   *  lane (`lanes.id`) that will own documents uploaded here. Omitted = a
+   *  project-wide document retrieved for every lane, which is what every
+   *  upload did before per-lane memory. The management list is deliberately
+   *  NOT narrowed by lane — a maintainer must be able to see what the other
+   *  lane is held to — so this only steers the write. */
+  laneId?: string
   drafting?: {
     checked: boolean
     disabled: boolean
@@ -122,6 +129,7 @@ export function KnowledgeBaseSurface({
   jwt,
   canManage,
   showTitle = true,
+  laneId,
   drafting,
 }: KnowledgeBaseSurfaceProps) {
   const t = useT()
@@ -223,7 +231,7 @@ export function KnowledgeBaseSurface({
     if (!jwt || !canManage) return
     setUploading(true)
     try {
-      const doc = await uploadKnowledgeDocument(stableScope, jwt, file)
+      const doc = await uploadKnowledgeDocument(stableScope, jwt, file, laneId)
       listGenRef.current++
       setDocs((current) => [doc, ...current.filter((item) => item.id !== doc.id)])
       toast.add({ type: "success", title: t("knowledgeBase.uploadSuccess", { name: file.name }) })

@@ -907,6 +907,17 @@ export interface ProjectRecord {
   /** The project's skopos/Paratext translation brief. Persisted and synced via
    *  ProjectWideSettings the same way as `livingMemoryEntries`. */
   translationBrief?: import("@/lib/brief/types").TranslationBrief
+  /** AQU-2348: the default prediction prompt customized for ONE target lane,
+   *  keyed by the lane's opaque 8-hex id. Overlaid from
+   *  ProjectWideSettings.systemPromptByLane. Read it through
+   *  `resolveLaneMemory` (db/shared/lane-memory.ts), never directly: a lane
+   *  entry REPLACES the project prompt for that lane, and an absent entry
+   *  means the lane inherits it. */
+  systemPromptByLane?: Record<string, string>
+  /** AQU-2348: the brief customized for ONE target lane, keyed by the lane's
+   *  opaque 8-hex id. Same override-with-fallback rule as
+   *  `systemPromptByLane`; resolve through `resolveLaneMemory`. */
+  translationBriefByLane?: Record<string, import("@/lib/brief/types").TranslationBrief>
   /**
    * Persisted interlinear alignment seeds (AQU-207). Synced via
    * ProjectWideSettings the same way as `terminology`. Positive weight =
@@ -967,6 +978,17 @@ export interface LivingMemoryEntry {
   text: string
   createdAt: string
   author: string
+  /**
+   * AQU-2348: the target lane that owns this entry — the lane's opaque 8-hex
+   * id (`lanes.id`), never a legacy tag.
+   *
+   * ABSENT means a project-wide entry, which is what every entry was before
+   * this field existed, so nothing migrates. Entries UNION rather than
+   * override (they are a list, not prose): a lane sees the project's entries
+   * plus its own, and never another lane's. Resolve with `resolveLaneEntries`
+   * (db/shared/lane-memory.ts).
+   */
+  laneId?: string
 }
 
 export interface ProjectSyncSettings {

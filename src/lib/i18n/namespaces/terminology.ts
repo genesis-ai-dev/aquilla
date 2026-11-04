@@ -115,6 +115,33 @@ export const terminology = defineNamespace({
 
     // ── LivingMemoryPage.tsx ─────────────────────────────────────────────────
     "terminology.livingMemory.title": "Living Memory",
+
+    // AQU-2348 — per-lane Living Memory. The page-level lane picker and the
+    // per-section inherited/customized state. Two vocabularies on purpose:
+    // an OVERRIDE section is "Inherited from project" until a lane owns a
+    // copy, while a LIST section is never replaced — a lane ADDS to the
+    // project's, so it gets an explanation and no Revert control.
+    "terminology.livingMemory.lane.ariaLabel": "Language lane",
+    "terminology.livingMemory.lane.viewingLabel": "Viewing language lane",
+    "terminology.livingMemory.lane.chooseLaneAriaLabel": "Change language lane, currently {lane}",
+    "terminology.livingMemory.lane.explainer":
+      "Showing the memory the AI uses for {lane}. The project's memory is the default for every language lane.",
+    "terminology.livingMemory.lane.sharedWithEditor": "Switching here switches the editor too.",
+    "terminology.livingMemory.lane.inheritedBadge": "Inherited from project",
+    "terminology.livingMemory.lane.customizedBadge": "Customized for {lane}",
+    "terminology.livingMemory.lane.customizeAction": "Customize for this language lane",
+    "terminology.livingMemory.lane.revertAction": "Revert to project",
+    "terminology.livingMemory.lane.inheritedExplainer":
+      "{lane} uses the project's value. Customizing copies it into a copy only {lane} uses.",
+    "terminology.livingMemory.lane.customizedExplainer":
+      "Only {lane} uses this. Editing it leaves the project and every other language lane unchanged.",
+    "terminology.livingMemory.lane.revertConfirmTitle": "Revert to the project's value?",
+    "terminology.livingMemory.lane.revertConfirmBody":
+      "{lane} will use the project's value again and this language lane's copy is discarded. The project and every other language lane are unaffected.",
+    "terminology.livingMemory.lane.listNote":
+      "The project's items below apply in {lane} too. Anything you add while viewing {lane} belongs to {lane} alone.",
+    "terminology.livingMemory.lane.ownedByLaneBadge": "{lane} only",
+    "terminology.livingMemory.lane.ownedByProjectBadge": "All language lanes",
     "terminology.livingMemory.introText":
       "Your team's encoded voice and standards — the project context the AI draws on " +
       "for every new draft. It grows with each validation, correction, and instruction " +
@@ -639,6 +666,66 @@ export const terminology = defineNamespace({
         "sentence, which IS translated.",
     },
     keys: {
+      // AQU-2348 — the Living Memory page's language-lane chrome. {lane} is
+      // ALWAYS a lane's own display name (the name a maintainer gave it, else
+      // the language it carries) and is never translated.
+      "terminology.livingMemory.lane.ariaLabel": {
+        description:
+          "Accessible name for the page-level language-lane picker, and for each section's " +
+          "inherited/customized state block, on the Living Memory page.",
+      },
+      "terminology.livingMemory.lane.chooseLaneAriaLabel": {
+        description:
+          "Accessible name for the button that opens the language-lane picker; {lane} is " +
+          "the lane currently being viewed.",
+        placeholders: { lane: "The lane's display name, verbatim (not translated)." },
+      },
+      "terminology.livingMemory.lane.explainer": {
+        description:
+          "Help text under the language-lane picker, stating that the page is showing one " +
+          "lane's memory and that the project's is every lane's default; {lane} is the lane " +
+          "being viewed.",
+        placeholders: { lane: "The lane's display name, verbatim (not translated)." },
+      },
+      "terminology.livingMemory.lane.customizedBadge": {
+        description:
+          "Badge on a section this lane owns its own copy of, rather than inheriting from " +
+          "the project; {lane} is the lane being viewed.",
+        placeholders: { lane: "The lane's display name, verbatim (not translated)." },
+      },
+      "terminology.livingMemory.lane.inheritedExplainer": {
+        description:
+          "Help text on a section this lane INHERITS: it uses the project's value, and " +
+          "customizing would copy that value into one only this lane uses. {lane} is the " +
+          "lane being viewed, repeated.",
+        placeholders: { lane: "The lane's display name, verbatim (not translated)." },
+      },
+      "terminology.livingMemory.lane.customizedExplainer": {
+        description:
+          "Help text on a section this lane OWNS: only this lane uses it, and editing it " +
+          "leaves the project and every other lane alone. {lane} is the lane being viewed.",
+        placeholders: { lane: "The lane's display name, verbatim (not translated)." },
+      },
+      "terminology.livingMemory.lane.revertConfirmBody": {
+        description:
+          "Confirmation body for 'Revert to project': this lane's own copy is discarded and " +
+          "it reads the project's value again. {lane} is the lane being reverted.",
+        placeholders: { lane: "The lane's display name, verbatim (not translated)." },
+      },
+      "terminology.livingMemory.lane.listNote": {
+        description:
+          "Note on a section whose items ADD to the project's rather than replacing them " +
+          "(authored entries, knowledge documents, style rules): the project's items apply " +
+          "here too, and anything added while viewing this lane is this lane's alone. " +
+          "{lane} is the lane being viewed, repeated three times.",
+        placeholders: { lane: "The lane's display name, verbatim (not translated)." },
+      },
+      "terminology.livingMemory.lane.ownedByLaneBadge": {
+        description:
+          "Badge on a style rule owned by the lane currently being viewed, so it is in " +
+          "force here and nowhere else; {lane} is that lane.",
+        placeholders: { lane: "The lane's display name, verbatim (not translated)." },
+      },
       "terminology.termDetail.closeAria": {
         description: "Accessible name for the back/close button on the term detail header.",
       },

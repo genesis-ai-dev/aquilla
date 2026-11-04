@@ -16,7 +16,11 @@ vi.mock('partyserver', () => ({
 import { handleExternalChangesetsRequest } from '../external/changesets-route'
 import { buildPromptPreview } from '../external/prompt-preview'
 import { BRIEF_FIELD_MAX_CHARS, BRIEF_NOTES_MAX_CHARS } from '../external/commands-set-brief'
-import { BRIEF_SETTINGS_KEY, type TranslationBriefRecord } from '../../../db/shared/brief'
+import {
+  BRIEF_BY_LANE_SETTINGS_KEY,
+  BRIEF_SETTINGS_KEY,
+  type TranslationBriefRecord,
+} from '../../../db/shared/brief'
 import { mintApiToken } from '../../../db/shared/api-credentials'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
 
@@ -104,6 +108,15 @@ function setBrief(patch: Record<string, unknown>, ifMatchVersion = 1) {
 async function storedBrief(tdb: TestDb): Promise<TranslationBriefRecord | undefined> {
   const rows = await tdb.rows<{ settings: string }>('project_settings')
   return JSON.parse(rows[0].settings)[BRIEF_SETTINGS_KEY]
+}
+
+/** Read ONE LANE's stored brief out of the settings row (AQU-2348). */
+async function storedLaneBrief(
+  tdb: TestDb,
+  laneId: string,
+): Promise<TranslationBriefRecord | undefined> {
+  const rows = await tdb.rows<{ settings: string }>('project_settings')
+  return (JSON.parse(rows[0].settings)[BRIEF_BY_LANE_SETTINGS_KEY] ?? {})[laneId]
 }
 
 /** A brief already holding two sections plus a generated L1, as if a human had
@@ -448,5 +461,199 @@ describe('SetBrief — settings version guard', () => {
     expect(body.error.details.status).toBe('superseded')
     const cs = await tdb.rows<{ status: string }>('changesets')
     expect(cs[0].status).toBe('superseded')
+  })
+})
+
+// AQU-2348: SetBrief writes ONE TARGET LANE's brief when it names one. The
+// project's brief stays the default for every lane that has none, so a project
+// nobody customized — and every single-lane project — behaves exactly as it
+// did before `laneId` existed.
+describe('SetBrief — per-lane briefs (AQU-2348)', () => {
+  const ES_LANE = '0f0f0f0f'
+  const FR_LANE = 'a1a1a1a1'
+
+  /**
+   * Two target lanes, as a two-audience project has. The source lane is the
+   * one the harness's lane-fill trigger already minted for the seeded source
+   * cell — inserting another would break `uq_lanes_project_source`.
+   */
+  async function seedLanes(): Promise<{ sourceLaneId: string }> {
+    await tdb.pg.query(
+      `INSERT INTO lanes (id, project_id, role, language, legacy_tag, position) VALUES
+         ($1, $3, 'target', 'Spanish', 'es', 1),
+         ($2, $3, 'target', 'French',  'fr', 2)`,
+      [ES_LANE, FR_LANE, PROJECT],
+    )
+    const existing = await tdb.pg.query<{ id: string }>(
+      `SELECT id FROM lanes WHERE project_id = $1 AND role = 'source'`,
+      [PROJECT],
+    )
+    if (existing.rows.length > 0) return { sourceLaneId: existing.rows[0].id }
+    await tdb.pg.query(
+      `INSERT INTO lanes (id, project_id, role, language, legacy_tag, position)
+       VALUES ('b2b2b2b2', $1, 'source', 'English', '', 0)`,
+      [PROJECT],
+    )
+    return { sourceLaneId: 'b2b2b2b2' }
+  }
+
+  it('writes the lane brief and leaves the project brief alone', async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    await seedLanes()
+    await seedSettings(tdb, { targetLanguage: 'fr', [BRIEF_SETTINGS_KEY]: seededBrief() })
+
+    const { res, body } = await prepare(env, maintainer.token, setBrief({
+      laneId: ES_LANE,
+      parameters: { registerNaturalness: 'Formal liturgical register' },
+    }))
+    expect(res.status).toBe(200)
+    // The approval page must name the LANE, or a human cannot tell a one-lane
+    // write from a project-wide one.
+    expect(body.summary.laneId).toBe(ES_LANE)
+    expect(
+      body.summary.settingsChanges[`${BRIEF_BY_LANE_SETTINGS_KEY}.${ES_LANE}.registerNaturalness`],
+    ).toContain('Formal liturgical')
+    expect(body.summary.settingsChanges['translationBrief.registerNaturalness']).toBeUndefined()
+
+    const { res: commitRes } = await commit(env, maintainer.token, body.changeset.id)
+    expect(commitRes.status).toBe(200)
+
+    // The project's brief is byte-for-byte what the human left.
+    expect(await storedBrief(tdb)).toEqual(seededBrief())
+
+    // The lane's own copy carries the project's answers PLUS the new section:
+    // customizing a lane copies, it does not blank the unnamed sections.
+    const lane = (await storedLaneBrief(tdb, ES_LANE))!
+    expect(lane.parameters).toEqual({
+      purpose: 'Liturgical reading',
+      literalness: 'Meaning-based',
+      registerNaturalness: 'Formal liturgical register',
+    })
+    expect(lane.freeformNotes).toBe('Keep verse numbers.')
+    expect(lane.updatedBy).toBe(maintainer.username)
+  })
+
+  it('leaves every other lane inheriting the project brief', async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    await seedLanes()
+    await seedSettings(tdb, { targetLanguage: 'fr', [BRIEF_SETTINGS_KEY]: seededBrief() })
+
+    const { body } = await prepare(env, maintainer.token, setBrief({
+      laneId: ES_LANE,
+      parameters: { purpose: 'Spanish-only purpose' },
+    }))
+    await commit(env, maintainer.token, body.changeset.id)
+
+    expect(await storedLaneBrief(tdb, FR_LANE)).toBeUndefined()
+    expect((await storedBrief(tdb))!.parameters.purpose).toBe('Liturgical reading')
+  })
+
+  it('a second lane write keeps the first lane’s brief', async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    await seedLanes()
+
+    const { body: first } = await prepare(env, maintainer.token, setBrief({
+      laneId: ES_LANE,
+      parameters: { purpose: 'Spanish purpose' },
+    }))
+    const { body: firstReceipt } = await commit(env, maintainer.token, first.changeset.id)
+
+    // The per-lane map is ONE settings key, so a second lane's write resends
+    // the whole map — this is the regression guard that it carries the first
+    // lane across instead of replacing it.
+    const { body: second } = await prepare(env, maintainer.token, setBrief({
+      laneId: FR_LANE,
+      parameters: { purpose: 'French purpose' },
+    }, firstReceipt.receipt.version))
+    const { res } = await commit(env, maintainer.token, second.changeset.id)
+    expect(res.status).toBe(200)
+
+    expect((await storedLaneBrief(tdb, ES_LANE))!.parameters.purpose).toBe('Spanish purpose')
+    expect((await storedLaneBrief(tdb, FR_LANE))!.parameters.purpose).toBe('French purpose')
+  })
+
+  it('without laneId the write still lands on the project brief', async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    await seedLanes()
+
+    const { body } = await prepare(env, maintainer.token, setBrief({
+      parameters: { purpose: 'Project purpose' },
+    }))
+    expect(body.summary.laneId).toBeUndefined()
+    expect(body.summary.settingsChanges['translationBrief.purpose']).toBe('Project purpose')
+    await commit(env, maintainer.token, body.changeset.id)
+
+    expect((await storedBrief(tdb))!.parameters.purpose).toBe('Project purpose')
+    expect(await storedLaneBrief(tdb, ES_LANE)).toBeUndefined()
+  })
+
+  it('refuses a language, a legacy tag, a source lane and an unknown id', async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    const { sourceLaneId } = await seedLanes()
+
+    for (const laneId of ['es', 'Spanish', 'c3c3c3c3']) {
+      const { res, body } = await prepare(env, maintainer.token, setBrief({
+        laneId,
+        parameters: { purpose: 'x' },
+      }))
+      expect(res.status, `laneId ${laneId}`).toBe(400)
+      expect(body.error.code).toBe('validation_failed')
+    }
+
+    // A source lane is visible but is not a target — say so rather than
+    // claiming it does not exist.
+    const { res, body } = await prepare(env, maintainer.token, setBrief({
+      laneId: sourceLaneId,
+      parameters: { purpose: 'x' },
+    }))
+    expect(res.status).toBe(400)
+    expect(body.error.message).toContain('must name a target lane')
+
+    // Nothing was staged by any of them.
+    expect(await tdb.rows('changesets')).toHaveLength(0)
+  })
+
+  it('refuses an archived lane', async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    await seedLanes()
+    await tdb.pg.query(`UPDATE lanes SET archived_at = now() WHERE id = $1`, [ES_LANE])
+
+    const { res, body } = await prepare(env, maintainer.token, setBrief({
+      laneId: ES_LANE,
+      parameters: { purpose: 'x' },
+    }))
+    expect(res.status).toBe(400)
+    expect(body.error.message).toContain('archived')
+  })
+
+  it('a project write does NOT supersede a pending lane write for the same text', async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    await seedLanes()
+
+    const { body: prep } = await prepare(env, maintainer.token, setBrief({
+      laneId: ES_LANE,
+      parameters: { purpose: 'agent text' },
+    }))
+
+    // A human lands the identical text on the PROJECT brief. The lane still
+    // has no copy, so the plan's work is not done — reading the project's
+    // brief here would wrongly report it satisfied and drop the write.
+    const human = seededBrief()
+    human.parameters = { ...human.parameters, purpose: 'agent text' }
+    await tdb.db
+      .prepare(`UPDATE project_settings SET version = 2, updated_by = 99, settings = ? WHERE project_id = ?`)
+      .bind(JSON.stringify({ targetLanguage: 'fr', [BRIEF_SETTINGS_KEY]: human }), PROJECT)
+      .run()
+
+    const { res, body } = await commit(env, maintainer.token, prep.changeset.id)
+    expect(res.status).toBe(409)
+    expect(body.error.details.status).toBe('stale')
   })
 })

@@ -20,6 +20,7 @@
 // violations inbox point at the same concept rather than at two definitions
 // that drift.
 
+import { readBriefForLane } from "../../../../db/shared/brief"
 import { readLanguageProfile, type LanguageProfile } from "../../../../db/shared/language-profile"
 import { readProjectFacts, type ProjectFact } from "../../../../db/shared/project-facts"
 import {
@@ -417,11 +418,17 @@ export async function loadProjectContext(
   if (!row) return empty
 
   const settings = parseSettings(row.settings)
-  const brief = settings.translationBrief
+  // AQU-2348: the brief a run is grounded in is the one in force for the lane
+  // it is drafting — the lane's own copy when a maintainer customized it, the
+  // project's otherwise. `readBriefForLane` is the same reader the copilot, the
+  // Agent API's prompt preview and the brief writers use, so autopilot cannot
+  // ground a run in a brief the preview says it would not use. A run with no
+  // lane, and every lane of an uncustomized project, reads the project's brief
+  // exactly as before.
+  const laneIdForBrief = lane ? ((await targetLaneId(db, projectId, lane)) ?? undefined) : undefined
   const briefObj =
-    brief && typeof brief === "object" && !Array.isArray(brief)
-      ? (brief as Record<string, unknown>)
-      : {}
+    (readBriefForLane(settings as Record<string, unknown>, laneIdForBrief)
+      .brief as unknown as Record<string, unknown> | null) ?? {}
 
   const lanes: LaneLanguageRow[] = await loadLaneRows(db, projectId).catch(() => [])
   const loaded = [

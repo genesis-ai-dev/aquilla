@@ -526,6 +526,11 @@ export interface ReceiptOnlyReceipt {
   previousRole?: number
   /** AQU-1235: the org role written (absent for a removal). */
   role?: number
+  /** AQU-2348: SetBrief / RegenerateBriefSummary, when the write was scoped to
+   *  one target lane — the `lanes.id` whose own brief was written. Absent means
+   *  the project's brief, which is every lane's default. An agent reading the
+   *  receipt must be able to tell the two apart without re-reading settings. */
+  laneId?: string
   /** RegenerateBriefSummary (AQU-1282): length of the rendered L1 summary. */
   briefSummaryChars?: number
   /** RegenerateBriefSummary (AQU-1282): the model that rendered it. */

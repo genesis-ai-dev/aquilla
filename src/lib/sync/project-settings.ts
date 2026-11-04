@@ -72,6 +72,17 @@ export interface ProjectWideSettings {
   targetTextDirection?: DirectionMode
   systemPrompt?: string
   /**
+   * AQU-2348: the default prediction prompt customized for ONE target lane,
+   * keyed by the lane's opaque 8-hex id (`lanes.id`, never a legacy tag).
+   * A lane entry REPLACES `systemPrompt` for that lane; an absent entry means
+   * the lane inherits it, which is what every project had before this key
+   * existed — so no migration, and a single-lane project is untouched.
+   * Replaces wholesale like `algorithmicChecksByLane`, so a writer sends the
+   * full merged map. Resolve it through `resolveLaneMemory`
+   * (db/shared/lane-memory.ts), never by reading this key directly.
+   */
+  systemPromptByLane?: Record<string, string>
+  /**
    * AQU-2259: the team's AI drafting settings — the "AI Instructions" card
    * (examples retrieved, context window, batch sizes, example format,
    * assistant language), the model choice (provider, endpoint, model, max
@@ -286,6 +297,12 @@ export interface ProjectWideSettings {
    *  Absent → no brief authored yet. See
    *  docs/superpowers/specs/2026-06-17-translation-brief-design.md. */
   translationBrief?: TranslationBrief
+  /** AQU-2348: the brief customized for ONE target lane, keyed by `lanes.id`.
+   *  Same override-with-fallback rule as `systemPromptByLane` — a lane brief
+   *  replaces the project brief for that lane and nothing is merged, because
+   *  half of each is prose no reviewer can read. Resolve through
+   *  `resolveLaneMemory` (db/shared/lane-memory.ts). */
+  translationBriefByLane?: Record<string, TranslationBrief>
   /**
    * AI-draft context budget (Phase 0). Currently just how many preceding
    * committed-target cells to feed the draft as discourse left-context. Synced

@@ -10,6 +10,16 @@
 // match; `src/lib/brief/schema.shared-parity.test.ts` fails the root suite if
 // they ever drift. The headings below are the English fallback used when the
 // brief is assembled server-side, where there is no viewer locale.
+//
+// AQU-2348: a TARGET LANE may own its own brief, stored under
+// `translationBriefByLane[laneId]`. Lane resolution itself lives in
+// `./lane-memory` — the one rule every per-lane reader shares — which this
+// module composes with its own parser so a writer can never resolve a lane
+// differently from the prompt readers. That import keeps this module
+// dependency-free in the sense that matters: both are pure, with no DB, no
+// React and no network, so both workers can still import them.
+
+import { resolveLaneOverride, type LaneMemorySource } from './lane-memory'
 
 export type BriefFieldGroup = 'purpose' | 'standards'
 
@@ -47,6 +57,12 @@ export function isBriefFieldId(id: string): boolean {
 
 /** The settings key the brief lives under. */
 export const BRIEF_SETTINGS_KEY = 'translationBrief'
+
+/** AQU-2348: the settings key holding each TARGET LANE's own brief, keyed by
+ *  `lanes.id`. An absent entry means that lane inherits `translationBrief` —
+ *  which is every lane of a project nobody has customized, so no migration is
+ *  needed to read a project written before this key existed. */
+export const BRIEF_BY_LANE_SETTINGS_KEY = 'translationBriefByLane'
 
 /** L1 summary cap — mirrors `L1_MAX_CHARS` in src/lib/brief/schema.ts. The L1
  *  is injected into every copilot prompt, so the cap is a token budget, not a
@@ -126,13 +142,10 @@ export function assembleBriefL2Markdown(brief: TranslationBriefRecord): string {
   return parts.join('\n\n')
 }
 
-/** Read the stored brief out of a settings blob. Anything that isn't a plain
- *  object (absent key, a legacy string, a hand-edited array) reads as "no
- *  brief yet" rather than throwing — the caller then starts from empty. */
-export function readBriefFromSettings(
-  settings: Record<string, unknown>,
-): TranslationBriefRecord | null {
-  const raw = settings[BRIEF_SETTINGS_KEY]
+/** Parse one stored brief value. Anything that isn't a plain object (an
+ *  absent key, a legacy string, a hand-edited array) reads as "no brief yet"
+ *  rather than throwing — the caller then starts from empty. */
+export function parseBriefRecord(raw: unknown): TranslationBriefRecord | null {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null
   const r = raw as Record<string, unknown>
   const parameters: Record<string, string> = {}
@@ -152,6 +165,83 @@ export function readBriefFromSettings(
     l1GeneratedAt: typeof r.l1GeneratedAt === 'string' ? r.l1GeneratedAt : null,
     l1ModelId: typeof r.l1ModelId === 'string' ? r.l1ModelId : null,
   }
+}
+
+/** Read the PROJECT's brief out of a settings blob. This is the default for
+ *  every lane; `readBriefForLane` is how a reader that knows its lane asks. */
+export function readBriefFromSettings(
+  settings: Record<string, unknown>,
+): TranslationBriefRecord | null {
+  return parseBriefRecord(settings[BRIEF_SETTINGS_KEY])
+}
+
+/**
+ * AQU-2348: the stored lane id -> brief map, as a plain object.
+ *
+ * Junk (a string, an array, an absent key) reads as an empty map rather than
+ * throwing: a brief write must still work on a project whose settings blob an
+ * older writer bent, and the map is rewritten wholesale on the way out.
+ */
+export function readLaneBriefMap(
+  settings: Record<string, unknown>,
+): Record<string, unknown> {
+  const raw = settings[BRIEF_BY_LANE_SETTINGS_KEY]
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return {}
+  return { ...(raw as Record<string, unknown>) }
+}
+
+/** A brief read for one lane, and which level it came from. */
+export interface LaneBriefRead {
+  brief: TranslationBriefRecord | null
+  source: LaneMemorySource
+}
+
+/**
+ * The brief in force for `laneId`: that lane's own copy when it owns one, the
+ * project's otherwise. `undefined` asks for the project's own brief.
+ *
+ * Resolution goes through `resolveLaneOverride`, the one rule every per-lane
+ * reader shares (db/shared/lane-memory.ts), so a writer cannot disagree with
+ * what the prompt readers resolve. The fallback is also what makes "Customize
+ * for this lane" a copy rather than a blank page: the first lane-scoped write
+ * merges its patch onto the project's brief, so a lane starts life saying
+ * exactly what the project said and then diverges.
+ */
+/**
+ * The brief `laneId` OWNS, with no fallback: null when that lane has no copy
+ * of its own. `undefined` asks for the project's brief.
+ *
+ * This is the reader for "is this plan already satisfied?", where
+ * `readBriefForLane`'s fallback would be wrong. A lane-scoped SetBrief asks
+ * for the lane to OWN the text, which is not the same as the lane currently
+ * READING it: the two come apart the moment the project's brief moves, and
+ * that divergence is the entire point of a lane override. So a project-wide
+ * write that happens to match must not retire a pending lane customization.
+ */
+export function readOwnedBriefForLane(
+  settings: Record<string, unknown>,
+  laneId: string | undefined,
+): TranslationBriefRecord | null {
+  if (laneId === undefined) return readBriefFromSettings(settings)
+  return parseBriefRecord(readLaneBriefMap(settings)[laneId])
+}
+
+export function readBriefForLane(
+  settings: Record<string, unknown>,
+  laneId: string | undefined,
+): LaneBriefRead {
+  const resolved = resolveLaneOverride<unknown>(
+    settings[BRIEF_SETTINGS_KEY],
+    readLaneBriefMap(settings),
+    laneId,
+  )
+  const brief = parseBriefRecord(resolved.value)
+  // A lane entry that parses to nothing (never written, or junk) is not a
+  // customization — fall back to the project so the lane still gets a brief.
+  if (resolved.source === 'lane' && brief === null) {
+    return { brief: readBriefFromSettings(settings), source: 'project' }
+  }
+  return { brief, source: resolved.source }
 }
 
 /** The content half of a brief write — what a caller may set. */

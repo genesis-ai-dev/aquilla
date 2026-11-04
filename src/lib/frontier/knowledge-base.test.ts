@@ -46,6 +46,28 @@ describe("Knowledge Base API client", () => {
     expect(init.method).toBe("POST")
     expect(init.body).toBe(file)
     expect(new Headers(init.headers).get("x-doc-name")).toBe("style%20guide.md")
+    // AQU-2348: no lane named = no query param at all, so the request is
+    // byte-identical to what it was before per-lane memory and the row lands
+    // project-wide, retrieved for every lane.
+    expect(url).not.toMatch(/laneId/)
+  })
+
+  // AQU-2348: the upload is a RAW-BODY post, so the owning lane has nowhere to
+  // ride but the query string — which is the contract `auth-worker`'s knowledge
+  // route reads it from. A lane that never reached the wire would file the
+  // document project-wide and the team would believe one lane's reference was
+  // scoped when it was grounding every lane's drafts.
+  it("carries the owning lane in the query string when one is given", async () => {
+    const doc = { id: "doc-3", name: "lane.md", scope: "project" }
+    const fetchSpy = vi.fn().mockResolvedValue(response({ doc }, 201))
+    vi.stubGlobal("fetch", fetchSpy)
+    const file = new File(["Formal register."], "lane.md", { type: "text/markdown" })
+
+    await expect(uploadKnowledgeDocument({ kind: "project", id: "p-7" }, "jwt", file, "a1b2c3d4"))
+      .resolves.toEqual(doc)
+
+    const [url] = fetchSpy.mock.calls[0] as [string, RequestInit]
+    expect(url).toMatch(/\/api\/v2\/projects\/p-7\/knowledge\?laneId=a1b2c3d4$/)
   })
 
   // AQU-1499: the boundary used to keep only the status, so a rejection the

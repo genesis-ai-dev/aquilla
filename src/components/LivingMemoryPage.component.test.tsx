@@ -521,3 +521,226 @@ describe("LivingMemoryPage — liveness dot", () => {
     await expectClickNote(screen.getByRole("button", { name: "Live" }), "Live")
   })
 })
+
+// ── Per-lane Living Memory (AQU-2348) ──────────────────────────────────────
+//
+// The page's half of the feature: criteria #1 (picker only on a multi-lane
+// project), #2 (each section inherited until customized), #3 (a lane's edit
+// does not reach the project or another lane) and #11 (role gating).
+//
+// The chrome's own states are covered in living-memory/LaneMemorySection.test.tsx
+// and the patch rules in lib/living-memory/lane-sections.test.ts. What is only
+// provable HERE is the wiring between them: that the page resolves the lane the
+// picker is showing, and that a write made in a lane view is addressed to that
+// lane's copy rather than to the project's value.
+
+const LANE_FR = "11112222"
+const LANE_ES = "33334444"
+
+/** A real `TranslationBrief` — `BriefSection` reads `parameters`, so a loose
+ *  stand-in would fail on the render rather than on the behaviour under test. */
+function makeBrief(variety: string): import("@/lib/brief/types").TranslationBrief {
+  return {
+    version: 1,
+    updatedAt: "2026-11-03T00:00:00.000Z",
+    updatedBy: "alice",
+    parameters: { purpose: variety },
+    freeformNotes: "",
+    l2Markdown: "",
+    l1Summary: null,
+    l1GeneratedAt: null,
+    l1ModelId: null,
+  }
+}
+
+/** A project with two target lanes, each with an id and a legacy tag. */
+function twoLaneProject(): Partial<ProjectRecord> {
+  return {
+    targetLanguage: "French",
+    targetLanes: ["", "es"],
+    lanes: [
+      { id: LANE_FR, role: "target", legacyTag: "", name: "French" },
+      { id: LANE_ES, role: "target", legacyTag: "es", name: "Spanish" },
+      { id: "source01", role: "source", legacyTag: "", name: "Greek" },
+    ],
+  } as unknown as Partial<ProjectRecord>
+}
+
+describe("LivingMemoryPage — lane picker", () => {
+  it("shows no lane picker on a single-lane project", () => {
+    // Criterion #1: the page is unchanged. A single-lane project never had a
+    // lane to choose and must not grow a control that cannot do anything.
+    renderPage()
+    expect(screen.queryByTestId("living-memory-lane-scope")).not.toBeInTheDocument()
+  })
+
+  it("shows the picker once the project has two target lanes", () => {
+    mockProject(twoLaneProject())
+    renderPage()
+    expect(screen.getByTestId("living-memory-lane-scope")).toBeInTheDocument()
+  })
+
+  it("does not count the SOURCE lane towards needing a picker", () => {
+    // Every project has a source lane. Counting it would put a picker on every
+    // single-lane project in the product.
+    mockProject({
+      targetLanguage: "French",
+      targetLanes: [""],
+      lanes: [
+        { id: LANE_FR, role: "target", legacyTag: "", name: "French" },
+        { id: "source01", role: "source", legacyTag: "", name: "Greek" },
+      ],
+    } as unknown as Partial<ProjectRecord>)
+    renderPage()
+    expect(screen.queryByTestId("living-memory-lane-scope")).not.toBeInTheDocument()
+  })
+
+  it("shows the picker on every pane, not only the index", () => {
+    // Editing one lane's brief while believing you are in another is the one
+    // mistake this feature makes possible, so the lane in force is never off-screen.
+    mockProject(twoLaneProject())
+    renderPage("/project/proj-1/memory/brief")
+    expect(screen.getByTestId("living-memory-lane-scope")).toBeInTheDocument()
+  })
+})
+
+describe("LivingMemoryPage — per-section inherit / customize", () => {
+  it("reads as inherited on a lane that owns nothing", () => {
+    // Criterion #2. The lane resolves the project's brief, which is NOT the
+    // same as owning it.
+    mockProject(twoLaneProject())
+    mockSettings({ settings: { translationBrief: makeBrief("Formal") } as never })
+    renderPage("/project/proj-1/memory/brief")
+
+    const control = screen.getByTestId("lane-override-control")
+    expect(control.dataset.laneState).toBe("inherited")
+    expect(screen.getByRole("button", { name: "Customize for this language lane" })).toBeInTheDocument()
+  })
+
+  it("reads as customized, naming the lane, once that lane owns a copy", () => {
+    mockProject(twoLaneProject())
+    mockSettings({
+      settings: {
+        translationBrief: makeBrief("Formal"),
+        translationBriefByLane: { [LANE_FR]: makeBrief("Colloquial") },
+      } as never,
+    })
+    renderPage("/project/proj-1/memory/brief")
+
+    expect(screen.getByTestId("lane-override-control").dataset.laneState).toBe("customized")
+    expect(screen.getByText("Customized for French")).toBeInTheDocument()
+  })
+
+  it("customizing writes a COPY of the project's value into the lane's key", async () => {
+    // Criterion #2's "copies the project value": a lane that starts owning the
+    // brief starts from the project's answers, not from a blank form.
+    mockProject(twoLaneProject())
+    mockSettings({ settings: { translationBrief: makeBrief("Formal") } as never })
+    renderPage("/project/proj-1/memory/brief")
+
+    fireEvent.click(screen.getByRole("button", { name: "Customize for this language lane" }))
+
+    await waitFor(() =>
+      expect(mockPatch).toHaveBeenCalledWith({
+        translationBriefByLane: { [LANE_FR]: makeBrief("Formal") },
+      }),
+    )
+    // The project's own brief is not in the patch at all.
+    expect(mockPatch.mock.calls[0]![0]).not.toHaveProperty("translationBrief")
+  })
+
+  it("reverting removes only this lane's copy and keeps the other lane's", async () => {
+    // Criterion #3's second half.
+    mockProject(twoLaneProject())
+    mockSettings({
+      settings: {
+        translationBrief: makeBrief("Formal"),
+        translationBriefByLane: {
+          [LANE_FR]: makeBrief("Colloquial"),
+          [LANE_ES]: makeBrief("Liturgical"),
+        },
+      } as never,
+    })
+    renderPage("/project/proj-1/memory/brief")
+
+    fireEvent.click(screen.getByRole("button", { name: "Revert to project" }))
+    const confirms = screen.getAllByRole("button", { name: "Revert to project" })
+    fireEvent.click(confirms[confirms.length - 1]!)
+
+    await waitFor(() =>
+      expect(mockPatch).toHaveBeenCalledWith({
+        translationBriefByLane: { [LANE_ES]: makeBrief("Liturgical") },
+      }),
+    )
+  })
+
+  it("offers no customize/revert control at all on a single-lane project", () => {
+    mockSettings({ settings: { translationBrief: makeBrief("Formal") } as never })
+    renderPage("/project/proj-1/memory/brief")
+    expect(screen.queryByTestId("lane-override-control")).not.toBeInTheDocument()
+  })
+
+  it("locks the controls below MAINTAINER", () => {
+    // Criterion #11: the state stays readable, the actions do not.
+    mockProject({ ...twoLaneProject(), syncRole: { level: ROLE.CONTRIBUTOR, source: "override" } } as never)
+    mockSettings({ canEdit: false, reasonCannotEdit: "role" })
+    renderPage("/project/proj-1/memory/brief")
+
+    expect(screen.getByTestId("lane-override-control")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Customize for this language lane" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Revert to project" })).not.toBeInTheDocument()
+  })
+})
+
+describe("LivingMemoryPage — lane-owned entries", () => {
+  it("shows the project's entries plus this lane's, and never another lane's", () => {
+    // The UNION rule. A lane adds to the project's standards; it does not
+    // replace them, and it must not see the neighbouring audience's.
+    mockProject(twoLaneProject())
+    mockSettings({
+      settings: {
+        livingMemoryEntries: [
+          makeEntry({ id: "p1", text: "Project instruction" }),
+          makeEntry({ id: "fr1", text: "French instruction", laneId: LANE_FR }),
+          makeEntry({ id: "es1", text: "Spanish instruction", laneId: LANE_ES }),
+        ],
+      } as never,
+    })
+    renderPage("/project/proj-1/memory/instructions")
+
+    expect(screen.getByText("Project instruction")).toBeInTheDocument()
+    expect(screen.getByText("French instruction")).toBeInTheDocument()
+    expect(screen.queryByText("Spanish instruction")).not.toBeInTheDocument()
+  })
+
+  it("explains the union rather than borrowing the inherit/revert vocabulary", () => {
+    // There is no lane COPY of a list, so there is nothing to revert — the
+    // override control must not appear over the entries.
+    mockProject(twoLaneProject())
+    renderPage("/project/proj-1/memory/instructions")
+    expect(screen.getByTestId("lane-list-note")).toBeInTheDocument()
+  })
+
+  it("stamps the viewed lane on an entry added in a lane view, keeping every other entry", async () => {
+    // The mutator writes the WHOLE list back, so starting from the lane-resolved
+    // view instead of the stored list would delete the other lane's entries on
+    // the first edit a maintainer made.
+    mockProject(twoLaneProject())
+    mockSettings({
+      settings: {
+        livingMemoryEntries: [makeEntry({ id: "es1", text: "Spanish instruction", laneId: LANE_ES })],
+      } as never,
+    })
+    renderPage("/project/proj-1/memory/instructions")
+
+    fireEvent.click(screen.getByRole("button", { name: /add instructions/i }))
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "French only note" } })
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+
+    await waitFor(() => expect(mockPatch).toHaveBeenCalled())
+    const written = mockPatch.mock.calls.at(-1)![0].livingMemoryEntries as LivingMemoryEntry[]
+    expect(written.find((e) => e.text === "French only note")?.laneId).toBe(LANE_FR)
+    // The other lane's entry survived.
+    expect(written.find((e) => e.id === "es1")?.laneId).toBe(LANE_ES)
+  })
+})

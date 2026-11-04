@@ -220,3 +220,72 @@ describe("POST /api/v1/ai/agent/internal/draft-cells", () => {
     expect(Number(ledger?.raw_cost_cents)).toBeCloseTo(0.02, 4)
   })
 })
+
+// AQU-2348: a lane that owns its own translation brief drafts against ITS
+// brief. This endpoint is where an agent's DraftCells actually spends money,
+// so grounding it in the project's brief while the Agent API's prompt preview
+// reports the lane's would make the preview a lie about the call it describes.
+describe("draft-cells grounds the prompt in the lane's brief (AQU-2348)", () => {
+  const ES = "0f0f0f0f"
+  const FR = "a1b2c3d4"
+
+  const BRIEF_SETTINGS = {
+    translationBrief: {
+      version: 1,
+      updatedAt: "2026-11-01T00:00:00.000Z",
+      updatedBy: "pm",
+      l1Summary: "PROJECT BRIEF: natural register for young readers.",
+    },
+    translationBriefByLane: {
+      [ES]: {
+        version: 1,
+        updatedAt: "2026-11-02T00:00:00.000Z",
+        updatedBy: "pm",
+        l1Summary: "SPANISH LANE BRIEF: formal liturgical register.",
+      },
+    },
+  }
+
+  async function seedLanes(): Promise<void> {
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO lanes (id, project_id, role, language, legacy_tag, position) VALUES
+         (?, ?, 'target', 'Spanish', 'es', 1),
+         (?, ?, 'target', 'French', 'fr', 2)`,
+    )
+      .bind(ES, PROJECT, FR, PROJECT)
+      .run()
+  }
+
+  /** Every string the two paid calls sent, so an assertion cannot miss the
+   *  brief by looking in the wrong message. */
+  function sentText(calls: { body: Record<string, unknown> }[]): string {
+    return JSON.stringify(calls.map((c) => c.body))
+  }
+
+  it("sends the lane's brief for that lane and never the project's", async () => {
+    await seedProject({ roleLevel: 400, settings: BRIEF_SETTINGS })
+    await seedLanes()
+    const calls = mockDraftModel(["uno", "dos"])
+
+    const res = await draftReq(`Bearer ${env.SYNC_SECRET_KEY}`, { ...baseBody, laneId: ES })
+    expect(res.status).toBe(200)
+    expect(sentText(calls)).toContain("SPANISH LANE BRIEF")
+    expect(sentText(calls)).not.toContain("PROJECT BRIEF")
+  })
+
+  it("sends the project's brief for a lane that owns none, and when no lane is named", async () => {
+    await seedProject({ roleLevel: 400, settings: BRIEF_SETTINGS })
+    await seedLanes()
+
+    const frCalls = mockDraftModel(["un", "deux"])
+    expect((await draftReq(`Bearer ${env.SYNC_SECRET_KEY}`, { ...baseBody, laneId: FR })).status).toBe(200)
+    expect(sentText(frCalls)).toContain("PROJECT BRIEF")
+    expect(sentText(frCalls)).not.toContain("SPANISH LANE BRIEF")
+
+    vi.unstubAllGlobals()
+    const noLaneCalls = mockDraftModel(["one", "two"])
+    expect((await draftReq(`Bearer ${env.SYNC_SECRET_KEY}`, baseBody)).status).toBe(200)
+    expect(sentText(noLaneCalls)).toContain("PROJECT BRIEF")
+    expect(sentText(noLaneCalls)).not.toContain("SPANISH LANE BRIEF")
+  })
+})

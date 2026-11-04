@@ -17,6 +17,7 @@ import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE } from "../types"
 import { resolveProjectRole } from "../services/project-permissions"
+import { projectLaneOwnerProblem } from "../lib/lane-owned-row"
 import {
   APPLICABILITY_ASSIGNED_BY,
   APPLICABILITY_RELATIONSHIPS,
@@ -172,6 +173,11 @@ const applicabilityRowSchema = z.object({
 })
 
 const createSchema = z.object({
+  // AQU-2348: write the rule for ONE target lane (its opaque `lanes.id`).
+  // Omitted/null = a project rule, compiled in every lane. Validated against
+  // the project's live lane rows below — a language or a legacy tag here would
+  // key the rule to a lane nothing can resolve.
+  laneId: z.string().min(1).nullable().optional(),
   instruction: z.string().min(1),
   category: z.enum(STYLE_RULE_CATEGORIES),
   scope: z.enum(STYLE_RULE_SCOPES),
@@ -240,8 +246,18 @@ styleRules.post(
 
     const user = c.get("user")
     const input = c.req.valid("json")
+    const laneProblem = await projectLaneOwnerProblem(
+      c.env.AQUILLA_PG,
+      projectId,
+      input.laneId ?? null,
+    )
+    if (laneProblem) {
+      const { body, status } = errorJson("validation_failed", laneProblem, 400)
+      return c.json(body, status)
+    }
     const { rule, applicability } = await createRule(c.env.AQUILLA_PG, {
       owner: { projectId },
+      ...(input.laneId ? { laneId: input.laneId } : {}),
       instruction: input.instruction,
       category: input.category,
       scope: input.scope,

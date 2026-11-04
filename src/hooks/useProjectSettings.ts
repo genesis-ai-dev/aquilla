@@ -546,6 +546,10 @@ function localSettingsFrom(
   if (record.terminology != null) out.terminology = record.terminology
   if (record.livingMemoryEntries != null) out.livingMemoryEntries = record.livingMemoryEntries
   if (record.translationBrief != null) out.translationBrief = record.translationBrief
+  // AQU-2348
+  if (record.systemPromptByLane != null) out.systemPromptByLane = record.systemPromptByLane
+  if (record.translationBriefByLane != null)
+    out.translationBriefByLane = record.translationBriefByLane
   if (record.draftContext != null) out.draftContext = record.draftContext
   return out
 }
@@ -774,6 +778,14 @@ export function useProjectSettings(
               : {}),
             ...(got.settings.translationBrief != null
               ? { translationBrief: got.settings.translationBrief }
+              : {}),
+            // AQU-2348: mirror the per-lane overrides too, or an offline
+            // reload shows every lane the project's prompt and brief.
+            ...(got.settings.systemPromptByLane != null
+              ? { systemPromptByLane: got.settings.systemPromptByLane }
+              : {}),
+            ...(got.settings.translationBriefByLane != null
+              ? { translationBriefByLane: got.settings.translationBriefByLane }
               : {}),
           }))
         } catch (err) {

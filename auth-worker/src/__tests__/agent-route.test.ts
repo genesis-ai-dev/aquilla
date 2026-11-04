@@ -740,3 +740,85 @@ describe("POST /api/v1/ai/agent/run — PostHog telemetry", () => {
     expect(frames.at(-1)).toMatchObject({ type: "done", status: "ok" })
   })
 })
+
+// AQU-2348: a run working in a lane is grounded in THAT lane's translation
+// brief. The brief is most of the project's steer, so a run in a lane whose
+// register was deliberately customized must not be prompted with the
+// project-wide one — and a lane that owns no copy must keep reading exactly
+// the brief it read before per-lane memory existed.
+describe("POST /api/v1/ai/agent/run — the brief is resolved per lane (AQU-2348)", () => {
+  const ES = "0f0f0f0f"
+  const FR = "a1b2c3d4"
+
+  async function seedLaneBriefs() {
+    await seedProjectWorld()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO lanes (id, project_id, role, language, legacy_tag, position) VALUES
+         (?, ?, 'target', 'Spanish', 'es', 1),
+         (?, ?, 'target', 'French', 'fr', 2)`,
+    )
+      .bind(ES, PROJECT, FR, PROJECT)
+      .run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_settings (project_id, settings, version, updated_by, updated_at)
+       VALUES (?, ?::text::jsonb, 1, 1, now())`,
+    )
+      .bind(
+        PROJECT,
+        JSON.stringify({
+          translationBrief: {
+            version: 1,
+            updatedAt: "2026-11-01T00:00:00.000Z",
+            updatedBy: "boss",
+            l1Summary: "PROJECT BRIEF: natural register for young readers.",
+          },
+          translationBriefByLane: {
+            [ES]: {
+              version: 1,
+              updatedAt: "2026-11-02T00:00:00.000Z",
+              updatedBy: "boss",
+              l1Summary: "SPANISH LANE BRIEF: formal liturgical register.",
+            },
+          },
+        }),
+      )
+      .run()
+    return jwtFor("alice")
+  }
+
+  /** Run one turn and return everything that was sent upstream. */
+  async function runInLane(jwt: string, lane?: string): Promise<string> {
+    const upstream: unknown[] = []
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      upstream.push(JSON.parse(String(init?.body)))
+      return modelTurn({ role: "assistant", content: "Nothing to change." })
+    })
+    const res = await postRun(jwt, {
+      projectId: PROJECT,
+      messages: [{ role: "user", content: "What register should I use?" }],
+      context: { fileId: FILE, ...(lane ? { lane } : {}) },
+    })
+    expect(res.status).toBe(200)
+    await res.text()
+    vi.restoreAllMocks()
+    return JSON.stringify(upstream)
+  }
+
+  it("prompts with the lane's own brief inside that lane", async () => {
+    const jwt = await seedLaneBriefs()
+    const sent = await runInLane(jwt, ES)
+    expect(sent).toContain("SPANISH LANE BRIEF")
+    expect(sent).not.toContain("PROJECT BRIEF")
+  })
+
+  it("prompts with the project's brief in a lane that owns none, and with no lane named", async () => {
+    const jwt = await seedLaneBriefs()
+    const inFrench = await runInLane(jwt, FR)
+    expect(inFrench).toContain("PROJECT BRIEF")
+    expect(inFrench).not.toContain("SPANISH LANE BRIEF")
+
+    const noLane = await runInLane(jwt)
+    expect(noLane).toContain("PROJECT BRIEF")
+    expect(noLane).not.toContain("SPANISH LANE BRIEF")
+  })
+})

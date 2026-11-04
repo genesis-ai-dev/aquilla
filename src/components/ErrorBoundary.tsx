@@ -23,8 +23,21 @@ import { Button } from "@/components/ui/button"
 import posthog from "@/lib/posthog"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
-import { isChunkLoadError, recoverFromChunkError } from "@/lib/chunk-reload"
+import {
+  CHUNK_HOST_UNREACHABLE_EVENT,
+  chunkLoadKey,
+  isChunkLoadError,
+  probeChunkHost,
+  recoverFromChunkError,
+  recoverFromChunkErrorWhenReachable,
+} from "@/lib/chunk-reload"
 import { isTauriRuntime } from "@/lib/offline/is-tauri"
+
+function recoverChunk(error: unknown) {
+  // Desktop assets are local; probing the web version endpoint is not useful.
+  if (isTauriRuntime()) recoverFromChunkError(error)
+  else void recoverFromChunkErrorWhenReachable(error)
+}
 
 // ---------------------------------------------------------------------------
 // Dev-only crash trigger: appending ?__crash=1 to any URL while
@@ -72,7 +85,7 @@ if (typeof window !== "undefined") {
       ? event.error
       : new Error(event.message || "Unknown window.onerror")
     if (isTauriRuntime()) posthog.captureException(err, { source: "window.onerror" })
-    recoverFromChunkError(err)
+    recoverChunk(err)
   })
 
   window.addEventListener("unhandledrejection", (event: PromiseRejectionEvent) => {
@@ -80,7 +93,7 @@ if (typeof window !== "undefined") {
       ? event.reason
       : new Error(String(event.reason ?? "Unhandled promise rejection"))
     if (isTauriRuntime()) posthog.captureException(err, { source: "unhandledrejection" })
-    recoverFromChunkError(err)
+    recoverChunk(err)
   })
 
   // AQU-1966: the two handlers above only ever see a chunk failure that nobody
@@ -106,7 +119,7 @@ if (typeof window !== "undefined") {
   // deploy. Nothing here disables `build.modulePreload`; if anything ever does,
   // this handler stops firing and the swallowed-rejection hole reopens.
   window.addEventListener("vite:preloadError", (event: Event) => {
-    recoverFromChunkError((event as Event & { payload?: unknown }).payload)
+    recoverChunk((event as Event & { payload?: unknown }).payload)
   })
 }
 
@@ -215,19 +228,59 @@ export class ErrorBoundary extends Component<Props, State> {
 
   // Keep the offline explanation after reconnect; a rejected React.lazy import
   // is cached, so resetting this boundary alone cannot retry the screen.
-  private updateConnection = () => this.setState({ online: navigator.onLine })
+  private chunkErrorKey?: string
+  private hostUnreachable = false
+  private mounted = false
+  private checkingHost = false
+  private retryTimer?: ReturnType<typeof setTimeout>
+
+  private checkHost = async () => {
+    if (this.checkingHost || !this.mounted) return
+    this.checkingHost = true
+    clearTimeout(this.retryTimer)
+    const online = await probeChunkHost()
+    this.checkingHost = false
+    if (!this.mounted || !this.hostUnreachable) return
+    this.setState({ online })
+    // Safari may never emit an online event after an outage. Poll only while
+    // this failed screen is mounted; recovery remains an explicit user action.
+    if (!online) this.retryTimer = setTimeout(() => { void this.checkHost() }, 5_000)
+  }
+
+  private onHostUnreachable = (event: Event) => {
+    if ((event as CustomEvent<string>).detail !== this.chunkErrorKey) return
+    this.hostUnreachable = true
+    this.setState({ offlineChunk: true, online: false })
+    clearTimeout(this.retryTimer)
+    this.retryTimer = setTimeout(() => { void this.checkHost() }, 5_000)
+  }
+
+  private updateConnection = () => {
+    if (this.hostUnreachable) void this.checkHost()
+    else this.setState({ online: navigator.onLine })
+  }
+
+  private onFocus = () => { if (this.hostUnreachable) void this.checkHost() }
 
   componentDidMount() {
+    this.mounted = true
     window.addEventListener("online", this.updateConnection)
     window.addEventListener("offline", this.updateConnection)
+    window.addEventListener("focus", this.onFocus)
+    window.addEventListener(CHUNK_HOST_UNREACHABLE_EVENT, this.onHostUnreachable)
   }
 
   componentWillUnmount() {
+    this.mounted = false
+    clearTimeout(this.retryTimer)
     window.removeEventListener("online", this.updateConnection)
     window.removeEventListener("offline", this.updateConnection)
+    window.removeEventListener("focus", this.onFocus)
+    window.removeEventListener(CHUNK_HOST_UNREACHABLE_EVENT, this.onHostUnreachable)
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
+    this.chunkErrorKey = isChunkLoadError(error) ? chunkLoadKey(error) : undefined
     // Not a duplicate of PostHog's autocapture (AQU-1572): React 19 reports an
     // error a boundary caught to console.error, never to window.onerror, and
     // `capture_exceptions: true` leaves console errors alone — so this is the
@@ -241,7 +294,7 @@ export class ErrorBoundary extends Component<Props, State> {
     })
     // Stale-chunk render throws get one automatic reload before showing the
     // "App updated" fallback (see @/lib/chunk-reload).
-    recoverFromChunkError(error)
+    recoverChunk(error)
   }
 
   private handleReload = () => {

@@ -24,6 +24,7 @@ import {
   markChunkAttempted,
   readAttemptedChunks,
   recoverFromChunkError,
+  probeChunkHost,
   showUpdatingNotice,
 } from "./chunk-reload"
 
@@ -235,4 +236,28 @@ describe("showUpdatingNotice", () => {
     showUpdatingNotice(document, "Updating Aquilla…")
     expect(document.querySelectorAll(`#${CHUNK_NOTICE_ID}`)).toHaveLength(1)
   })
+})
+
+it("bounds and shares a stalled reachability probe, then permits a fresh check", async () => {
+  vi.useFakeTimers()
+  let signal: AbortSignal | undefined
+  const request = vi.fn((_url, options) => {
+    signal = options.signal
+    return new Promise<Response>(() => {})
+  })
+  vi.stubGlobal("fetch", request)
+  try {
+    const first = probeChunkHost()
+    expect(probeChunkHost()).toBe(first)
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(await first).toBe(false)
+    expect(signal?.aborted).toBe(true)
+    expect(request).toHaveBeenCalledOnce()
+    request.mockResolvedValue({ ok: true } as Response)
+    expect(await probeChunkHost()).toBe(true)
+    expect(request).toHaveBeenCalledTimes(2)
+  } finally {
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  }
 })

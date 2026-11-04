@@ -228,3 +228,39 @@ export function recoverFromChunkError(err: unknown, overrides: Partial<ChunkReco
   reload()
   return true
 }
+
+export const CHUNK_HOST_UNREACHABLE_EVENT = "aquilla:chunk-host-unreachable"
+let hostProbe: Promise<boolean> | undefined
+
+/** navigator.onLine=true is not proof that a reload can reach the app host. */
+export function probeChunkHost(): Promise<boolean> {
+  if (isKnownOffline()) return Promise.resolve(false)
+  if (hostProbe) return hostProbe
+  hostProbe = (async () => {
+    const controller = new AbortController()
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    try {
+      return await Promise.race([
+        Promise.resolve().then(() => fetch("/version.json", { method: "HEAD", cache: "no-store", signal: controller.signal }))
+          .then(response => response.ok, () => false),
+        new Promise<boolean>(resolve => {
+          timeout = setTimeout(() => { controller.abort(); resolve(false) }, 5_000)
+        }),
+      ])
+    } finally {
+      clearTimeout(timeout)
+      hostProbe = undefined
+    }
+  })()
+  return hostProbe
+}
+
+/** Keep a false-positive online signal from reloading into an offline blank page. */
+export async function recoverFromChunkErrorWhenReachable(err: unknown): Promise<boolean> {
+  if (!isChunkLoadError(err) || typeof window === "undefined" || isKnownOffline()) return false
+  if (!await probeChunkHost()) {
+    window.dispatchEvent(new CustomEvent(CHUNK_HOST_UNREACHABLE_EVENT, { detail: chunkLoadKey(err) }))
+    return false
+  }
+  return recoverFromChunkError(err)
+}

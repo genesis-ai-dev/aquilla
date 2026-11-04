@@ -194,3 +194,50 @@ it.each(["unreachable", "forbidden", "not-found"] as const)(
     expect(mockResolve).toHaveBeenCalledTimes(2)
   },
 )
+
+// All refresh entry points must share ordering, even when cached chrome is ready.
+it.each(["seeded", "manual", "record-change", "session-change"] as const)(
+  "keeps the latest project resolve for %s refreshes",
+  async (trigger) => {
+    const { rememberResolvedProject } = await import("@/lib/sync/project-record-seed")
+    const { announceProjectRecordChanged } = await import("@/lib/sync/project-record-changed")
+    const { useFrontierSession } = await import("@/hooks/useFrontierSession")
+    const id = `ordering-${trigger}`
+    const good: ResolveProjectResult = { ok: true, project: {
+      id, name: "Recovered", gitlabProjectId: null, archivedAt: null, archivedBy: null,
+      role: { level: 400, name: "contributor", source: "member" }, files: [],
+    } }
+    if (trigger === "seeded") {
+      const { minimalProjectRecord } = await import("@/lib/sync/cloud-projects")
+      rememberResolvedProject(minimalProjectRecord(good.project))
+    }
+    let settleOld!: (value: ResolveProjectResult) => void
+    mockResolve.mockImplementationOnce(() => new Promise(resolve => { settleOld = resolve }))
+    const { result, rerender, unmount } = renderHook(() => useProject(id))
+    expect(mockResolve).toHaveBeenCalledTimes(1)
+    if (trigger === "seeded") expect(result.current.status).toBe("ready")
+    if (trigger === "manual" || trigger === "record-change" || trigger === "session-change") {
+      mockResolve.mockImplementationOnce(() => new Promise(resolve => { settleOld = resolve }))
+      act(() => {
+        if (trigger === "record-change") announceProjectRecordChanged(id)
+        else result.current.refresh()
+      })
+    }
+    setResolveMock(good)
+    if (trigger === "session-change") {
+      const oldSession = vi.mocked(useFrontierSession).getMockImplementation()!
+      vi.mocked(useFrontierSession).mockImplementation(() => ({ ...oldSession(), session: { ...oldSession().session!, jwt: "bob-jwt" } }))
+      rerender()
+      await waitFor(() => expect(result.current.status).toBe("ready"))
+      vi.mocked(useFrontierSession).mockImplementation(oldSession)
+    } else {
+      act(() => window.dispatchEvent(new Event("online")))
+      await waitFor(() => expect(result.current.status).toBe("ready"))
+      expect(mockResolve).toHaveBeenCalledTimes(trigger === "seeded" ? 2 : 3)
+    }
+    await act(async () => settleOld({ ok: false, reason: "unreachable" }))
+    expect(result.current.status).toBe("ready")
+    expect(result.current.project?.name).toBe("Recovered")
+    unmount()
+  },
+)

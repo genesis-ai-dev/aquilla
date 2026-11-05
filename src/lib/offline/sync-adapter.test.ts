@@ -705,6 +705,55 @@ describe("catch-up", () => {
     adapter.close()
   })
 
+  it("catches up when a live frame's rows were left out of a >200-cell write", async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      frameCoalesceMs: 0,
+    })
+    await drainMicrotasks()
+    const ws = FakeWebSocket.instances[0]
+    // Not opened: onOpen runs its own catch-up, and only the frame's should count here.
+
+    // A frame of a kind that never carries rows, and one with rows: no catch-up.
+    ws.receive({ t: "event.applied", id: "e0", kind: "file.create", project: "proj1", file: "file1" })
+    ws.receive({
+      t: "event.applied",
+      id: "e1",
+      kind: "target.cell.commit",
+      project: "proj1",
+      file: "file1",
+      cell: "GEN 1:1",
+      serverSeq: 7,
+      rows: [],
+    })
+    await landFrames()
+    expect(catchUpProject).not.toHaveBeenCalled()
+
+    // A peer's bulk edit: serverSeq, but rows omitted. A burst asks once.
+    for (let i = 0; i < 3; i++) {
+      ws.receive({
+        t: "event.applied",
+        id: `bulk-${i}`,
+        kind: "target.cell.commit",
+        project: "proj1",
+        file: "file1",
+        cell: `GEN 1:${i + 2}`,
+        serverSeq: 8 + i,
+      })
+    }
+    await landFrames()
+    await waitFor(() => vi.mocked(catchUpProject).mock.calls.length > 0)
+    expect(catchUpProject).toHaveBeenCalledTimes(1)
+    expect(catchUpProject).toHaveBeenCalledWith(store, "proj1", "tok-1", undefined)
+
+    adapter.close()
+  })
+
   it("stores every target lane's rows from a live frame, keyed per lane (AQU-1614)", async () => {
     store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
     const adapter = createOfflineSyncAdapter({

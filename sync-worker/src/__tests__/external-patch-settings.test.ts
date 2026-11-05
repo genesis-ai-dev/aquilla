@@ -291,6 +291,49 @@ describe('PatchSettings — settings-key validation (AQU-1224)', () => {
     expect(await tdb.rows('changesets')).toHaveLength(0)
   })
 
+  // AQU-2402: the refusal has to be actionable on the surface where keys get
+  // guessed. The OAuth connector drops describe_command from its tool list, so
+  // "call describe_command" was a dead end; and returning only ops[0] made an
+  // agent pay one round trip per wrong key.
+  it('names the write key when the caller used the READ name — builtinChecks → algorithmicChecks', async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    const { res, body } = await prepare(
+      env,
+      maintainer.token,
+      patchCmd([{ key: 'builtinChecks', value: { 'usfm-structure': { enabled: false } } }]),
+    )
+    expect(res.status).toBe(400)
+    expect(body.error.code).toBe('validation_failed')
+    const details = JSON.stringify(body.error.details)
+    expect(details).toContain('the key for that is \\"algorithmicChecks\\"')
+    // And the whole writable set, so no further tool call is needed.
+    expect(details).toContain('validationCount')
+    expect(await tdb.rows('changesets')).toHaveLength(0)
+  })
+
+  it('reports EVERY bad op, not only ops[0]', async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    const { res, body } = await prepare(
+      env,
+      maintainer.token,
+      patchCmd([
+        { key: 'builtinChecks', value: {} },
+        { key: 'validationCount', value: 2 },
+        { key: 'alsoNotAKey', value: 1 },
+      ]),
+    )
+    expect(res.status).toBe(400)
+    expect(body.error.code).toBe('validation_failed')
+    const messages = (body.error.details as { index: number; message: string }[]).map((i) => i.message)
+    expect(messages.some((m) => m.startsWith('PatchSettings.ops[0]'))).toBe(true)
+    expect(messages.some((m) => m.startsWith('PatchSettings.ops[2]'))).toBe(true)
+    // The one good op is not reported, and nothing is staged.
+    expect(messages.some((m) => m.includes('validationCount\\" expects'))).toBe(false)
+    expect(await tdb.rows('changesets')).toHaveLength(0)
+  })
+
   it('a near-miss typo of a real key is rejected too (no silent write of the typo)', async () => {
     const env = makeEnv(tdb.db)
     const maintainer = await memberToken(tdb, 600)

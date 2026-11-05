@@ -66,7 +66,7 @@
         "https://github.com/genesis-ai-dev/aquilla/releases/latest/download/latest.json"
       ],
       "dialog": true,
-      "pubkey": "REPLACE_WITH_OUTPUT_OF_npx_tauri_signer_generate"
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEM0RTdEOENGMTlGREVGRkQKUldUOTcvMFp6OWpueE1TYlBwZmNJMEpLN0VFSEI0UmxQWEx4NDBpNjRkdGlBaGIyWUc0dFFRQWIK"
     }
   }
 }

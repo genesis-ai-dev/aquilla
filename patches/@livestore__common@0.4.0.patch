@@ -49,10 +49,10 @@ index ef367175e1eef1cce225c307cf811744c8b3dd1c..78e4fcdff5ebb6176241b75b8b9a57fb
      for (const item of a) {
          if (b.has(item) === false) {
 diff --git a/dist/leader-thread/recreate-db.js b/dist/leader-thread/recreate-db.js
-index 3e592fc5d2a35a4f0c8f230aa4206c894ee54f7a..a6101b839c4c13b258b900ae7dbe1e5b5c88cb3f 100644
+index 3e592fc5d2a35a4f0c8f230aa4206c894ee54f7a..340dd6d3c601d578a3d0a6faa17d4df821819029 100644
 --- a/dist/leader-thread/recreate-db.js
 +++ b/dist/leader-thread/recreate-db.js
-@@ -30,13 +30,18 @@ export const recreateDb = ({ dbState, dbEventlog, schema, bootStatusQueue, mater
+@@ -30,13 +30,29 @@ export const recreateDb = ({ dbState, dbEventlog, schema, bootStatusQueue, mater
              const hooks = migrationOptions.hooks;
              const initResult = yield* initDb(hooks);
              migrationsReport = initResult.migrationsReport;
@@ -69,12 +69,23 @@ index 3e592fc5d2a35a4f0c8f230aa4206c894ee54f7a..a6101b839c4c13b258b900ae7dbe1e5b
                  materializeEvent,
                  onProgress: ({ done, total }) => Queue.offer(bootStatusQueue, { stage: 'rehydrating', progress: { done, total } }),
 -            });
-+            }), (_, exit) => Effect.sync(() => dbState.execute(exit._tag === 'Success' ? 'COMMIT' : 'ROLLBACK', undefined)));
++            }), (_, exit) => Effect.sync(() => {
++                if (exit._tag === 'Success') {
++                    dbState.execute('COMMIT', undefined);
++                    return;
++                }
++                // SQLite rolls the transaction back itself on some errors (IOERR, FULL, NOMEM); a
++                // second ROLLBACK would then throw and bury the error that failed the replay.
++                try {
++                    dbState.execute('ROLLBACK', undefined);
++                }
++                catch { }
++            }));
              yield* Effect.tryAll(() => hooks?.post?.(initResult.tmpDb)).pipe(UnknownError.mapToUnknownError);
              break;
          }
 diff --git a/dist/rematerialize-from-eventlog.js b/dist/rematerialize-from-eventlog.js
-index 797a369cb08763226831cb6b1cb021080508ebd3..0c74dca4e7373a0b1ad30809abd656ac787bb74b 100644
+index 797a369cb08763226831cb6b1cb021080508ebd3..9db29c03a4ec349deb36945ca6a983c1f2810e9f 100644
 --- a/dist/rematerialize-from-eventlog.js
 +++ b/dist/rematerialize-from-eventlog.js
 @@ -10,6 +10,22 @@ export const rematerializeFromEventlog = Effect.fn('@livestore/common:rematerial
@@ -86,7 +97,7 @@ index 797a369cb08763226831cb6b1cb021080508ebd3..0c74dca4e7373a0b1ad30809abd656ac
 +    // the batches and races through the edits. The session only reads boot statuses once the
 +    // leader has booted (after this replay), so the app's leader worker installs this hook.
 +    const progressHook = globalThis.__livestoreRehydrateProgress;
-+    const bytesTotal = progressHook === undefined
++    let bytesTotal = progressHook === undefined
 +        ? 0
 +        : dbEventlog.select(`SELECT COALESCE(SUM(LENGTH(argsJson)), 0) AS bytes FROM ${SystemTables.EVENTLOG_META_TABLE}`)[0].bytes;
 +    let bytesDone = 0;
@@ -100,17 +111,24 @@ index 797a369cb08763226831cb6b1cb021080508ebd3..0c74dca4e7373a0b1ad30809abd656ac
      const hashEventDef = memoizeByRef((event) => Schema.hash(event.schema));
      const processEvent = Effect.fn(`@livestore/common:rematerializeFromEventlog:processEvent`)(function* (row) {
          const args = jsonParse(row.argsJson);
-@@ -75,9 +91,17 @@ LIMIT ${CHUNK_SIZE}
+@@ -75,9 +91,24 @@ LIMIT ${CHUNK_SIZE}
          const prevItem = Chunk.isChunk(item) === true ? item : Chunk.empty();
          return Option.some([prevItem, nextItem]);
      }).pipe(Stream.bufferChunks({ capacity: 2 }), Stream.tap((row) => Effect.gen(function* () {
 -        yield* processEvent(row);
-+        if (shouldSkip?.(row) !== true)
++        const skipped = shouldSkip?.(row) === true;
++        if (skipped !== true)
 +            yield* processEvent(row);
          processedEvents++;
          yield* onProgress({ done: processedEvents, total: eventsCount });
 +        if (progressHook !== undefined) {
-+            bytesDone += row.argsJson.length;
++            // A skipped event costs next to nothing, so it comes off the total rather than counting
++            // as done: otherwise the bar races through the skipped early downloads and then sits at
++            // ~99% while the events that matter replay.
++            if (skipped === true)
++                bytesTotal -= row.argsJson.length;
++            else
++                bytesDone += row.argsJson.length;
 +            // LENGTH() counts code points and .length UTF-16 units, so hold short of the total
 +            // until the replay has really finished.
 +            progressHook({ done: Math.min(bytesDone, bytesTotal - 1), total: bytesTotal });

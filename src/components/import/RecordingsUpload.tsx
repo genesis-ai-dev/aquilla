@@ -49,6 +49,7 @@ import {
   type UnmatchedReason,
   type UploadJob,
 } from "@/lib/audio/bulk-upload/match"
+import { AUDIO_FILE_ACCEPT } from "@/lib/audio/mime"
 import { chosenFromDrop, chosenFromInput, type ChosenFile } from "@/lib/audio/bulk-upload/collect-files"
 import { learnHeaderNames, loadTargetFile, projectFileInfos, type ProjectFileLike } from "@/lib/audio/bulk-upload/load-targets"
 import { BULK_MAX_FILE_BYTES, isBulkUploadRunning, startBulkUpload } from "@/lib/audio/bulk-upload/engine"
@@ -133,7 +134,7 @@ export function RecordingsPicker({ fileName, languageLabel, onFiles }: Recording
             <input
               type="file"
               multiple
-              accept="audio/*,.wav,.mp3,.m4a,.ogg,.oga,.opus,.flac,.aac,.webm"
+              accept={AUDIO_FILE_ACCEPT}
               className="hidden"
               data-testid="recordings-input-files"
               onChange={(e) => { const list = e.target.files ? chosenFromInput(e.target.files) : []; e.target.value = ""; take(list) }}

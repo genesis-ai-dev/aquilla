@@ -24,9 +24,11 @@ export async function exportFile(_fileId: string): Promise<ExportResult> {
   )
 }
 
-export function downloadBlob(blob: Blob, filename: string): void {
+export function downloadBlob(blob: Blob, filename: string, analytics?: ReturnType<typeof posthog.scope>): void {
   const extension = filename.split(".").pop() ?? "unknown"
-  posthog.capture("file exported", { filename, file_type: extension })
+  // An async caller must supply the lease captured when its export began.
+  // Unowned downloads still work, but cannot borrow the current identity.
+  analytics?.capture("file exported", { filename, file_type: extension })
   const url = URL.createObjectURL(blob)
   const a = document.createElement("a")
   a.href = url

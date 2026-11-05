@@ -6,7 +6,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const { capture } = vi.hoisted(() => ({ capture: vi.fn() }))
-vi.mock("@/lib/posthog", () => ({ default: { capture } }))
+vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, capture } }))
 
 import { captureAudioAction, captureCellValidation } from "./cell-telemetry"
 

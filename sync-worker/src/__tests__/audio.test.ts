@@ -309,6 +309,11 @@ describe("audio R2 endpoints", () => {
     expect(safeAudioContentType(null)).toBe("application/octet-stream")
     expect(safeAudioContentType("image/svg+xml")).toBe("application/octet-stream")
     expect(safeAudioContentType("APPLICATION/JAVASCRIPT")).toBe("application/octet-stream")
+    for (const t of ["text/xsl", "application/xslt+xml", "application/rdf+xml", "application/mathml+xml", "multipart/x-mixed-replace", "application/pdf", "audio/x svg", "text/plain"]) {
+      expect(safeAudioContentType(t)).toBe("application/octet-stream")
+    }
+    expect(safeAudioContentType("video/mp4")).toBe("video/mp4")
+    expect(safeAudioContentType("application/ogg")).toBe("application/ogg")
   })
 
   it("records imported media as an immutable audio artifact and binding", async () => {

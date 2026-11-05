@@ -202,12 +202,23 @@ describe("AgentRunView", () => {
     expect(screen.getByText("Agent working…")).toBeInTheDocument()
     third.unmount()
 
-    render(
+    const fourth = render(
       <AgentRunView
         run={makeRun({ status: "running", progress: { label: "Drafting MRK 4", done: 3, total: 12 } })}
       />,
     )
     expect(screen.getByText("Drafting MRK 4 — 3/12")).toBeInTheDocument()
+    fourth.unmount()
+
+    // AQU-1536: drafting reports the pass it is on and sends no counter —
+    // the label is shown verbatim, never padded out to a fake "— 0/7".
+    render(
+      <AgentRunView
+        run={makeRun({ status: "running", progress: { label: "Researching 7 cells (pass 1 of 2)" } })}
+      />,
+    )
+    expect(screen.getByText("Researching 7 cells (pass 1 of 2)")).toBeInTheDocument()
+    expect(screen.queryByText(/0\/7/)).not.toBeInTheDocument()
   })
 
   // The model closes with "NEXT:" lines in the user's voice. They are an

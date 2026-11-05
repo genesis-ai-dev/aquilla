@@ -1,3 +1,4 @@
+import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 import { useEffect, useState, type ReactNode } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import { AlertCircle, Users, CheckCircle2 } from "lucide-react"
@@ -17,7 +18,6 @@ import { FrontierLoginForm } from "@/components/git-import/FrontierLoginForm"
 import { FrontierSignupForm } from "@/components/git-import/FrontierSignupForm"
 import { FrontierForgotPasswordForm } from "@/components/git-import/FrontierForgotPasswordForm"
 import { UserError } from "@/lib/errors/user-error"
-import posthog from "@/lib/posthog"
 import { INVITE_REDEEMED } from "@/lib/event-names"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
@@ -66,6 +66,7 @@ export function JoinOrgPage() {
 }
 
 function OrgInvitation({ token }: { token?: string }) {
+  const analytics = useAccountAnalytics()
   const { t } = useI18n()
   const navigate = useNavigate()
   const { session, loading: sessionLoading } = useFrontierSession()
@@ -140,14 +141,14 @@ function OrgInvitation({ token }: { token?: string }) {
     setError(null)
     try {
       const result = await acceptOrgInvite(jwt, token)
-      posthog.capture(INVITE_REDEEMED, { invite_kind: "org", org_id: result.orgId })
+      analytics.capture(INVITE_REDEEMED, { invite_kind: "org", org_id: result.orgId })
       setOrgName(result.orgName)
       setPhase("done")
       setTimeout(() => navigate(orgHomePath(result.orgId)), 1200)
     } catch (err) {
       const status = err instanceof UserError ? err.status : undefined
       if (status === 403) {
-        setError("This invite was sent to a different email address. Sign in with the invited account.")
+        setError("This invite was sent to a different email address. Log in with the invited account.")
       } else if (status === 410) {
         setError("This invite link has expired or was already used. Ask the org owner for a fresh one.")
       } else if (status === 404) {
@@ -288,7 +289,7 @@ function OrgInvitation({ token }: { token?: string }) {
         {authMode !== "forgot" && (
           <p className="text-sm text-muted-foreground">
             {authMode === "login"
-              ? "Sign in to accept your invitation."
+              ? "Log in to accept your invitation."
               : "Create an account to accept your invitation."}
           </p>
         )}
@@ -320,7 +321,7 @@ function OrgInvitation({ token }: { token?: string }) {
           >
             {authMode === "login"
               ? "Need an account? Sign up"
-              : "Already have an account? Sign in"}
+              : "Already have an account? Log in"}
           </button>
         )}
       </CardContent>

@@ -99,7 +99,7 @@ vi.mock("@/lib/sync/archive", async (importOriginal) => {
 vi.mock("@/lib/store/project-index", () => ({
   createProject: vi.fn().mockResolvedValue(undefined),
 }))
-vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn() } }))
+vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn() } }))
 // AQU-1352: the destination picker fetches create-targets on open; submit waits
 // for it, so resolve to Personal (the server always lists it).
 vi.mock("@/lib/sync/create-targets", () => ({

@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 
 const transcribeCell = vi.fn()
 vi.mock("@/lib/audio/transcribe", () => ({ transcribeCell: (...args: unknown[]) => transcribeCell(...args) }))
-vi.mock("@/lib/posthog", () => ({ default: { captureException: vi.fn() } }))
+vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, captureException: vi.fn() } }))
 
 import { setTranscribeStatus } from "@/lib/audio/transcribe-status"
 import { transcribeAndCleanUp, transcribeRow } from "./run"

@@ -13,7 +13,7 @@ import {
 import * as restClient from "@/lib/sync/project-settings"
 import posthog from "@/lib/posthog"
 
-vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn(), captureException: vi.fn() } }))
+vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn(), captureException: vi.fn() } }))
 
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "test-jwt", username: "ryder" } }),

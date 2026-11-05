@@ -99,7 +99,7 @@ vi.mock("@/lib/store/project-index", () => ({
   createProject: vi.fn().mockResolvedValue(undefined),
 }))
 
-vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn() } }))
+vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn() } }))
 
 // AQU-1519: the partial-success warning now rides a toast (the dialog closes),
 // so the assertion is on what was handed to the toast manager.

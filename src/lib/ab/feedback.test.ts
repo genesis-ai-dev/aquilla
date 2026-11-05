@@ -13,6 +13,11 @@ import {
   clearPendingAb,
 } from "./feedback"
 
+const consent = vi.hoisted(() => ({ allowed: true }))
+vi.mock("@/lib/posthog", () => ({ default: {
+  scope: () => ({ owner: "wendi", enabled: () => consent.allowed }),
+} }))
+
 vi.mock("@/lib/frontier/session-store", () => ({
   loadSession: vi.fn(async () => ({ jwt: "test-jwt", username: "wendi" })),
 }))
@@ -24,6 +29,7 @@ let fetchSpy: ReturnType<typeof vi.spyOn>
 
 beforeEach(() => {
   clearPendingAb()
+  consent.allowed = true
   fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }))
 })
 
@@ -94,4 +100,23 @@ describe("reportAbOutcome", () => {
     await flush()
     expect(fetchSpy).not.toHaveBeenCalled()
   })
+})
+
+it("does not retain unapproved assignments or send feedback after withdrawal/account change", async () => {
+  consent.allowed = false
+  noteAbAssignment("f", "c", AB)
+  expect(hasPendingAb("f", "c")).toBe(false)
+  consent.allowed = true
+  noteAbAssignment("f", "c", AB)
+  reportAbOutcome("f", "c", "edited", "text")
+  consent.allowed = false
+  await flush()
+  expect(fetchSpy).not.toHaveBeenCalled()
+  consent.allowed = true
+  clearPendingAb()
+  noteAbAssignment("f", "c", AB)
+  vi.mocked(loadSession).mockResolvedValueOnce({ jwt: "other", username: "other", createdAt: "now" })
+  reportAbOutcome("f", "c", "accepted")
+  await flush()
+  expect(fetchSpy).not.toHaveBeenCalled()
 })

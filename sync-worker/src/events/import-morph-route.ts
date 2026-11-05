@@ -5,14 +5,18 @@
 // seeded the cells, so cell_ids are already known.
 //
 // Auth mirrors /import: a valid `aud=sync` token scoped to (projectId, fileId),
-// role >= PROJECT_LEAD (source-side importer authority).
+// role >= PROJECT_LEAD (source-side importer authority). As on /import, the
+// body-independent half of that check and the request-body ceiling are applied
+// before the body is read (AQU-1858, AQU-1882).
 //
 // Idempotent: INSERT ... ON CONFLICT DO UPDATE upserts each row so re-running the
 // same import safely overwrites rather than duplicating.
 
-import { verifyTokenForDoc } from '../auth'
+import { verifyDocScope, verifySyncToken } from '../auth'
 import { ROLE } from './role-policy'
 import { withCors } from '../cors'
+import { MAX_IMPORT_REQUEST_BODY_BYTES } from '../../../shared/import-contract'
+import { readTextBodyWithLimit } from '../../../shared/http-body-limit'
 
 const BATCH_LIMIT = 100
 
@@ -77,9 +81,34 @@ export async function handleBulkMorphImportRequest(
   }
   const db = env.AQUILLA_PG
 
+  // AQU-1882 (following AQU-1858 on POST /import): authenticate and size-gate
+  // BEFORE the body is materialized. Parsing first let an unauthenticated
+  // caller spend the isolate's shared ~128 MB on a body this route was always
+  // going to refuse, taking every other request on that isolate down with it.
+  // Signature, audience and the PROJECT_LEAD+ floor need nothing from the
+  // body; only the (project, file) scope comparison does, and it runs below on
+  // these same claims.
+  const authHeader = request.headers.get('Authorization') ?? ''
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
+  const auth = await verifySyncToken(token, env.SYNC_SECRET_KEY)
+  if (!auth.ok) {
+    return withCors(new Response(auth.reason, { status: auth.status }), request)
+  }
+  if (auth.claims.role < ROLE.PROJECT_LEAD) {
+    return withCors(new Response('role too low for morph import', { status: 403 }), request)
+  }
+
+  const read = await readTextBodyWithLimit(request.headers, request.body, MAX_IMPORT_REQUEST_BODY_BYTES)
+  if (!read.ok) {
+    return withCors(
+      Response.json({ error: read.error, maxBytes: read.maxBytes }, { status: read.status }),
+      request,
+    )
+  }
+
   let body: unknown
   try {
-    body = await request.json()
+    body = JSON.parse(read.text)
   } catch {
     return withCors(new Response('invalid JSON body', { status: 400 }), request)
   }
@@ -90,19 +119,11 @@ export async function handleBulkMorphImportRequest(
     )
   }
 
-  // Auth: token must be scoped to (project, file) with PROJECT_LEAD+ role.
-  const authHeader = request.headers.get('Authorization') ?? ''
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null
-  const auth = await verifyTokenForDoc(
-    token,
-    { projectId: body.projectId, fileId: body.fileId },
-    env.SYNC_SECRET_KEY,
-  )
-  if (!auth.ok) {
-    return withCors(new Response(auth.reason, { status: auth.status }), request)
-  }
-  if (auth.claims.role < ROLE.PROJECT_LEAD) {
-    return withCors(new Response('role too low for morph import', { status: 403 }), request)
+  // Auth, second half: the token must be scoped to the (project, file) the
+  // body names.
+  const scope = verifyDocScope(auth.claims, { projectId: body.projectId, fileId: body.fileId })
+  if (!scope.ok) {
+    return withCors(new Response(scope.reason, { status: scope.status }), request)
   }
 
   // Validate and build upsert statements.

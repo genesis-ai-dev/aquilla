@@ -6,7 +6,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { act, renderHook } from "@testing-library/react"
 import type { ProjectTtsSettings, Voice } from "@/lib/parsers/types"
 
-vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn() } }))
+vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn() } }))
 vi.mock("@/lib/store/project-index", () => ({ patchProject: vi.fn(async () => {}) }))
 
 import { useProjectTts } from "./useProjectTts"

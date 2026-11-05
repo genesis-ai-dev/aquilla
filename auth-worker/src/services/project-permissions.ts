@@ -244,10 +244,24 @@ export async function resolveGenuineProjectRole(
   env: Env,
   user: AuthUser,
   projectId: string,
+  /**
+   * OPS-51: resolve even when `archived_at` is set, the way
+   * {@link resolveProjectRoleIncludingArchived} does. Needed by the
+   * de-escalation path for routes whose whole job is an archived project
+   * (deleting one out of Trash, detaching its link): without it, stripping
+   * admin power from an operator who ALSO genuinely owns the project answers
+   * null, and the fix would lock them out of their own trash rather than out
+   * of another tenant's. The archive rule itself is the handler's to enforce,
+   * not this narrowing check's.
+   */
+  opts: { includeArchived?: boolean } = {},
 ): Promise<ResolvedRole | null> {
   const project = await loadProjectRow(env, projectId)
   if (!project) return null
-  if (project.archived_at) return null
+  if (!opts.includeArchived && project.archived_at) return null
+  // As in resolveProjectRoleInternal: the grant paths do not depend on
+  // archived-ness, so both entry points share one memo slot per (project,
+  // user). The archive check above has already run.
   return memoize(env.requestMemo, `role-genuine:${projectId}:${user.id}`, () =>
     resolveGrantPaths(env, user, projectId, project, false),
   )

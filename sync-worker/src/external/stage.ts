@@ -113,6 +113,11 @@ export async function stageAndRespond(
   // Re-load to return the canonical persisted row (existing one on id-replay).
   const stored = await loadChangeset(db, args.projectId, args.id)
   if (!stored) return errorResponse('job_failed', 'changeset insert did not persist')
+  // An id replay may only return the caller's own changeset: another credential
+  // in the same project must not read this plan back by supplying its id.
+  if (stored.credentialId !== args.credentialId) {
+    return errorResponse('conflict', 'changeset id is already in use', { code: 'id_in_use' })
+  }
 
   return Response.json({
     changeset: changesetToResponse(stored),

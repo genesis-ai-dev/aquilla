@@ -42,6 +42,12 @@ export interface Observed {
   mutatorApplied: boolean
   serverErrors: number
   pageErrors: number
+  /**
+   * The driver's own reason for never entering the input it was driving at
+   * (see `agentNeverActed`), or null/absent when every agent acted. Set means
+   * the product was never exercised, whatever the contract signals say.
+   */
+  harnessFault?: string | null
 }
 
 export type AdversarialOutcome = Outcome & { diffs: string[]; unmet: string[] }
@@ -157,8 +163,16 @@ export function requirementMet(requirement: Requirement, after: Snapshot): boole
 
 /**
  * The adversarial oracle. An agent's DONE is absent by design. A broken
- * check is a product failure only when the UI showed the attempted input
- * and, for condition attacks, the hostile condition really happened.
+ * check is a product failure only when the product was actually exercised:
+ * the UI showed the attempted input, the driver did enter it, and, for
+ * condition attacks, the hostile condition really happened.
+ *
+ * Attributability keys on whether the product ran, never on which contract
+ * signals happen to be unmet — one cause must reach one verdict. A driver
+ * that typed nothing leaves a `target-value` requirement unmet by its own
+ * doing; whether `inputObserved` also trips is incidental, and reading the
+ * difference as a product failure put false findings on PRs whose diff could
+ * not reach the attacked surface (AQU-1513).
  */
 export function verifyInvariants(
   before: Snapshot, after: Snapshot, contract: Contract, observed: Observed,
@@ -174,7 +188,8 @@ export function verifyInvariants(
     mutatorApplied: observed.mutatorApplied,
   }
   const passed = Object.values(checks).every(Boolean)
-  const attributable = observed.inputObserved && observed.mutatorApplied
+  const harnessFault = observed.harnessFault ?? null
+  const attributable = observed.inputObserved && observed.mutatorApplied && !harnessFault
   const failed = Object.entries(checks).filter(([, ok]) => !ok).map(([name]) => name)
   return {
     verdict: passed ? "passed" : attributable ? "product_failure" : "inconclusive",
@@ -183,6 +198,8 @@ export function verifyInvariants(
     unmet,
     reason: passed ? "Every invariant and requirement held."
       : attributable ? `Failed: ${failed.join(", ")}.`
-        : `Not attributable to the product: ${failed.join(", ")}.`,
+        : harnessFault
+          ? `Not attributable to the product: the harness never exercised it (${harnessFault}). Unmet: ${failed.join(", ")}.`
+          : `Not attributable to the product: ${failed.join(", ")}.`,
   }
 }

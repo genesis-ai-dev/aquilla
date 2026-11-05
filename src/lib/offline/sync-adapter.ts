@@ -13,7 +13,9 @@
  * Two directions:
  *  - Downstream: `event.applied` frames carrying projected `rows` (the
  *    server's per-cell content snapshot, same shape ProjectWorkspace lands
- *    via live-apply.ts) are written straight into the `cells` table.
+ *    via live-apply.ts) are written straight into the `cells` table. A
+ *    cell-content frame whose rows the server left out (one request touched
+ *    more than EVENT_APPLIED_ROWS_MAX_CELLS cells) triggers a catch-up instead.
  *  - Upstream: rows queued locally in `event_queue` (Phase 4 will populate
  *    this from offline writes) are POSTed to `/events` whenever the queue
  *    gains pending rows, and again on every reconnect.
@@ -238,6 +240,22 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
     return existing?.laneKey ?? localLaneKey(null, targetLang)
   }
 
+  /**
+   * Whether any frame reports a change its rows don't carry, which a catch-up
+   * then fetches (dropped, it left the local copy stale until the next
+   * reconnect):
+   *  - a cell-content write whose `rows` the server left out — it does that
+   *    when one request touches more than 200 cells (a peer's bulk edit or
+   *    import), keeping `serverSeq`; frames of other kinds never carry it;
+   *  - a deleted file, which catch-up drops from the local copy, or a restored
+   *    one, which it streams back in.
+   */
+  function needsCatchUp(frames: readonly AppliedFrame[]): boolean {
+    return frames.some(
+      (f) => (f.serverSeq !== undefined && f.file && !f.rows) || f.kind === "file.delete" || f.kind === "file.restore",
+    )
+  }
+
   // Live frames are buffered for a beat and landed together: the server
   // broadcasts one event.applied per event it applies, so a flush (or a peer's
   // bulk edit) arrives as hundreds of frames in a row — one commit each left
@@ -271,6 +289,8 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
     if (toCommit.length > 0) store.commit(...toCommit)
     // Resolved writes count as uploads, as they do from the flush response.
     if (dequeued.length > 0) recordOfflineUpload(projectId)
+    // After the dequeue commit, so the catch-up no longer protects those cells.
+    if (needsCatchUp(frames)) void catchUpNow()
   }
 
   function handleMessage(msg: ProjectWsServerMessage): void {
@@ -480,6 +500,7 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
     ]
     if (toCommit.length > 0) store.commit(...toCommit)
     if (accepted > 0) recordOfflineUpload(projectId)
+    if (needsCatchUp([...buffered.frames, ...frames])) void catchUpNow()
     return "ok"
   }
 

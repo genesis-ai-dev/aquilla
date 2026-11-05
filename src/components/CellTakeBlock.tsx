@@ -393,9 +393,10 @@ function CellTakeBlockView({
     if (!removed) return
     const gone = new Set(removing?.map((r) => r.audioId) ?? [selectedAudioId])
     const takes = Object.entries(owner.attachments ?? {}).map(([audioId, a]) => ({
-      audioId, voiceId: a.voiceId ?? null, isDeleted: a.isDeleted || (gone.has(audioId) && audioId !== selectedAudioId),
+      audioId, voiceId: a.voiceId ?? null, role: a.role ?? null,
+      isDeleted: a.isDeleted || (gone.has(audioId) && audioId !== selectedAudioId),
     }))
-    if (!hasOwnRecordingLeft(takes, selectedAudioId, owner.id)) onLastTakeRemoved?.(owner.id)
+    if (!hasOwnRecordingLeft(takes, selectedAudioId, owner)) onLastTakeRemoved?.(owner.id)
   }, [selectedAudioId, attachment, takePlaying, pauseTake, project.id, owner, username, onLastTakeRemoved, targetLang, split])
 
   // Renameable in place, as every take in the lists is (Sam, 2026-09-29).

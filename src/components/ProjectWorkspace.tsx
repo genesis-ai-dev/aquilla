@@ -339,7 +339,7 @@ import {
 } from "@/lib/cell-editing-gate"
 import { useDcsUpstreamCursor } from "@/hooks/useDcsUpstreamCursor"
 import { MIN_ADDABLE_SPAN_SEC } from "@/lib/timeline/lane-timing"
-import { audioIdSeededWith } from "@/lib/audio/upload"
+import { isOwnSelection, sharedSelections } from "@/lib/audio/own-take"
 import {
   buildLinkedTakes,
   divergentVoiceTargets,
@@ -8173,6 +8173,7 @@ export function ProjectWorkspace() {
         audioValidationLoaded ? audioValidationByCellId : null,
         audioValidationRequirement,
         countStructuralCells,
+        activeFileId,
       )
     : null,
   [activeFileId, audioValidationByCellId, audioValidationLoaded, audioValidationRequirement, cellSummaries, countStructuralCells])
@@ -11665,12 +11666,14 @@ export function ProjectWorkspace() {
   // a dub with no text counts as translated work in the status bar, file
   // progress, validation status and the rule engine.
   //
-  // `audioIdSeededWith` is what keeps this honest: the imported source clip is
-  // seeded with the FILE's id and shared across every cell, so only a
-  // cell-seeded take can put a cell in this set. Without that check a subtitle
-  // file with one attached video would report itself fully translated.
+  // The own-take rule (own-take.ts) is what keeps this honest: the imported
+  // source clip is seeded with the FILE's id and shared across every cell, so
+  // it can never put a cell in this set. Without that check a subtitle file
+  // with one attached video would report itself fully translated. AQU-2411: a
+  // take migrated from Codex, whose id carries no line id, does count.
   const ownTakeCellIds = useMemo(() => {
     const ids = new Set<string>()
+    const shared = sharedSelections(workspaceAudioByCellId.values())
     for (const [cellId, entry] of workspaceAudioByCellId) {
       // AQU-490: EVERY slot, not just `recording`.
       //
@@ -11684,11 +11687,14 @@ export function ProjectWorkspace() {
       // holding a chosen take must be validated, which cannot mean anything
       // while the text view cannot see the tracks.
       for (const selected of Object.values(slotSelections(entry))) {
-        if (selected && audioIdSeededWith(selected, cellId)) { ids.add(cellId); break }
+        if (isOwnSelection({ id: cellId, fileId: activeFileId }, selected, entry.attachments[selected], shared)) {
+          ids.add(cellId)
+          break
+        }
       }
     }
     return ids
-  }, [workspaceAudioByCellId])
+  }, [workspaceAudioByCellId, activeFileId])
   /**
    * Media redesign slice 2: which lines are recorded and approved in the open
    * language, from the lane-scoped read (the one bulk validation uses, loaded
@@ -11700,13 +11706,15 @@ export function ProjectWorkspace() {
       ? editorLaneTakes({
           delivers: activeLaneDelivers,
           ownAudio: audioValidationByCellId,
+          fileId: activeFileId,
           cueIds: audioCueSibling && audioCues ? audioCues.map((cue) => cue.id) : null,
           cueAudio: audioCueSibling ? cueAudioByCellId : null,
+          cueFileId: audioCueSibling?.id ?? null,
           cuesForText: cueLinks.cuesForText,
           audioThreshold: project ? readValidationCountAudio(project) : 1,
         })
       : NO_LANE_TAKES,
-    [laneCountsRecordings, activeLaneDelivers, audioValidationByCellId, audioCueSibling, audioCues,
+    [laneCountsRecordings, activeLaneDelivers, audioValidationByCellId, activeFileId, audioCueSibling, audioCues,
       cueAudioByCellId, cueLinks.cuesForText, project],
   )
   useEffect(() => {
@@ -11833,8 +11841,8 @@ export function ProjectWorkspace() {
       ? laneTakes.recorded.size === 0
         ? EMPTY_AUDIO_PROGRESS_CELL_IDS
         : { recorded: laneTakes.recorded, audioValidated: laneTakes.approved }
-      : audioProgressCellIds(audioValidationByCellId, audioValidationRequirement),
-    [laneCountsRecordings, laneTakes, audioValidationByCellId, audioValidationRequirement],
+      : audioProgressCellIds(audioValidationByCellId, audioValidationRequirement, activeFileId),
+    [laneCountsRecordings, laneTakes, audioValidationByCellId, audioValidationRequirement, activeFileId],
   )
   useEffect(() => {
     cellStore.setAudioProgressCellIds(audioProgressIds)
@@ -12899,9 +12907,9 @@ export function ProjectWorkspace() {
       }
       if (!removed) return
       const takes = Object.entries(cur.owner.cell.attachments ?? {}).map(([id, a]) => ({
-        audioId: id, voiceId: a.voiceId ?? null, isDeleted: a.isDeleted,
+        audioId: id, voiceId: a.voiceId ?? null, role: a.role ?? null, isDeleted: a.isDeleted,
       }))
-      if (!hasOwnRecordingLeft(takes, audioId, cellId)) handleLastTakeRemoved(cellId)
+      if (!hasOwnRecordingLeft(takes, audioId, cur.owner.cell)) handleLastTakeRemoved(cellId)
     },
     [project?.id, readTake, activeLane, currentUsername, t, handleLastTakeRemoved],
   )
@@ -15457,8 +15465,8 @@ export function ProjectWorkspace() {
           const owner = resolveTakeCellRef.current(cellId)
           const takes = Object.entries(owner?.cell.attachments ?? {})
             .filter(([id]) => !removedIds.includes(id))
-            .map(([id, a]) => ({ audioId: id, voiceId: a.voiceId ?? null, isDeleted: a.isDeleted }))
-          if (!hasOwnRecordingLeft(takes, "", cellId)) handleLastTakeRemoved(cellId)
+            .map(([id, a]) => ({ audioId: id, voiceId: a.voiceId ?? null, role: a.role ?? null, isDeleted: a.isDeleted }))
+          if (!hasOwnRecordingLeft(takes, "", owner?.cell ?? cellId)) handleLastTakeRemoved(cellId)
         },
         takeRestored: (cellId) => handleTakeSaved(cellId),
       }),

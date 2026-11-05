@@ -235,9 +235,10 @@ export async function handleExportSourceRequest(
     const stored = await readOriginalSourceBytes(blob, env.SNAPSHOTS)
     // `ignoreBOM: true` KEEPS the mark in the decoded string (the flag name
     // reads backwards): the default strips it, which would hide the very thing
-    // the envelope detection is looking for.
+    // the envelope detection is looking for. `fatal: false` is the default,
+    // spelled out because workers-types declares both fields required.
     const storedText = stored.ok
-      ? new TextDecoder("utf-8", { ignoreBOM: true }).decode(stored.bytes)
+      ? new TextDecoder("utf-8", { ignoreBOM: true, fatal: false }).decode(stored.bytes)
       : null
     const { body, untouched } = await buildPlainTextExport(db, projectId, fileId, lane, {
       validatedOnly,

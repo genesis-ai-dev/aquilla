@@ -61,7 +61,7 @@ describe("exportFileCells", () => {
   // exportFileCells("md") now uses the structure-preserving markdown exporter,
   // which emits NO anchor comments — they re-imported as paragraph text and
   // broke the round trip. Assertion updated accordingly (logged in
-  // ITERATION_LOG.md cycle 11); the legacy anchor exporter (exportMarkdown)
+  // docs/archive/ITERATION_LOG.md cycle 11); the legacy anchor exporter (exportMarkdown)
   // still exists with its own untouched tests.
   it("md: returns round-trip markdown blob without anchor comments", async () => {
     const blob = exportFileCells(CELLS, "md", "en", "fr")

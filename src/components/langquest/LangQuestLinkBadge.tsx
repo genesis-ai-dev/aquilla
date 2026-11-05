@@ -1,3 +1,4 @@
+import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 // The workspace-header badge on a project linked to LangQuest (AQU-2105), and
 // the panel it opens: sync state and "Sync now", a new token when LangQuest
 // stops accepting the old one, publishing approved versions to a channel
@@ -22,7 +23,6 @@ import { useI18n } from "@/lib/i18n/I18nProvider"
 import { formatDate } from "@/lib/i18n/format"
 import { ROLE } from "@/lib/sync/role-policy"
 import { LangQuestLinkError, linkLangQuest, publishLangQuestReleases, unlinkLangQuest } from "@/lib/langquest/api"
-import posthog from "@/lib/posthog"
 
 export function LangQuestLinkBadge({
   projectId,
@@ -34,6 +34,7 @@ export function LangQuestLinkBadge({
   /** After a sync that changed the project, so the host can re-read its files. */
   onSynced?: () => void
 }) {
+  const analytics = useAccountAnalytics()
   const { t, locale } = useI18n()
   const { link, sync, canSync, runSync, reload, jwt } = useLangQuestLink(projectId, roleLevel, onSynced)
   const canManage = (roleLevel ?? 0) >= ROLE.MAINTAINER
@@ -75,7 +76,7 @@ export function LangQuestLinkBadge({
         ...(channelUrl.trim() ? { url: channelUrl.trim() } : {}),
       })
       setMessage(t("langquest.panel.published", { released: r.released, unchanged: r.unchanged, failed: r.failed.length }))
-      posthog.capture("langquest releases published", { project_id: projectId, live, released: r.released, failed: r.failed.length })
+      analytics.capture("langquest releases published", { project_id: projectId, live, released: r.released, failed: r.failed.length })
     } catch (err) {
       setMessage(t("langquest.panel.syncFailed", { reason: err instanceof Error ? err.message : String(err) }))
     } finally {
@@ -88,7 +89,7 @@ export function LangQuestLinkBadge({
     setAction("unlink")
     try {
       await unlinkLangQuest(jwt, projectId, { revoke: true })
-      posthog.capture("langquest unlinked", { project_id: projectId })
+      analytics.capture("langquest unlinked", { project_id: projectId })
       await reload()
     } finally {
       setAction(null)

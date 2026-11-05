@@ -70,7 +70,7 @@ vi.mock("@/lib/sync/archive", async (importOriginal) => {
   }
 })
 vi.mock("@/lib/store/project-index", () => ({ createProject: vi.fn().mockResolvedValue(undefined) }))
-vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn() } }))
+vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn() } }))
 
 // The one seam this slice adds to the dialog: the chosen upstream's file list.
 vi.mock("@/lib/sync/link-source-preview", async (importOriginal) => {

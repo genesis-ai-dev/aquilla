@@ -20,7 +20,7 @@ const { mockCapture, mockImportFile } = vi.hoisted(() => ({
   mockImportFile: vi.fn(),
 }))
 vi.mock("@/lib/posthog", () => ({
-  default: {
+  default: { scope() { return { ...this, enabled: () => true } },
     capture: mockCapture,
     captureException: vi.fn(),
     opt_in_capturing: vi.fn(),

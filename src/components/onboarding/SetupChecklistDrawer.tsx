@@ -1,9 +1,9 @@
+import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 import { useEffect, useRef, useState } from "react"
 import { Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { SettingsGroup } from "@/components/ui/page"
-import posthog from "@/lib/posthog"
 import { SETUP_CHECKLIST_COMPLETED } from "@/lib/event-names"
 import {
   Sheet,
@@ -69,6 +69,7 @@ export function SetupChecklistDrawer({
   onOpenImport,
   onNavigate,
 }: SetupChecklistDrawerProps) {
+  const analytics = useAccountAnalytics()
   const t = useT()
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false)
   const allDone = state.completedCount === state.totalCount && state.totalCount > 0
@@ -84,9 +85,9 @@ export function SetupChecklistDrawer({
   useEffect(() => {
     if (allDone && !completionFired.current) {
       completionFired.current = true
-      posthog.capture(SETUP_CHECKLIST_COMPLETED, { project_id: project.id })
+      analytics.capture(SETUP_CHECKLIST_COMPLETED, { project_id: project.id })
     }
-  }, [allDone, project.id])
+  }, [allDone, project.id, analytics])
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange} disablePointerDismissal={inviteDialogOpen}>

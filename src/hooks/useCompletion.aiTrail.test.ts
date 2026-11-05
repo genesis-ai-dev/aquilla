@@ -9,7 +9,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 
-vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn(), captureException: vi.fn() } }))
+vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn(), captureException: vi.fn() } }))
 vi.mock("@/lib/completion/frontier-health", () => ({
   useFrontierHealth: () => ({ available: true }),
 }))

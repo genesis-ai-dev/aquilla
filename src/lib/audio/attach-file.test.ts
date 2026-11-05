@@ -33,7 +33,7 @@ vi.mock("@/lib/audio/sync-token-fetcher", () => ({ audioSyncTokenFetcherForSessi
 vi.mock("@/lib/audio/project-audio-state", () => ({ markProjectHasAudioDataSoon: vi.fn() }))
 vi.mock("@/lib/import", () => ({ probeDurationMsSafe: vi.fn(async () => 1234.5) }))
 
-import { attachAudioFileToCell } from "./attach-file"
+import { ACCEPT, attachAudioFileToCell, validateAudioFile } from "./attach-file"
 
 const session = { jwt: "jwt", username: "dev", createdAt: "" } as never
 
@@ -84,5 +84,42 @@ describe("attachAudioFileToCell (the one-file upload)", () => {
     const file = new File([new Uint8Array(10)], "verse.wav", { type: "audio/wav" })
     await expect(attachAudioFileToCell({ session, projectId: "p1", fileId: "f1", cellId: "c1", file, username: "dev", surface: "cell" })).rejects.toThrow("outbox full")
     expect(calls).toEqual(["cache", "upload", "emit", "delete"])
+  })
+})
+
+// AQU-1922 — "confirm the import dialog's accepted list against what actually
+// decodes". It did not match in either direction: the picker refused to LIST
+// six of the ten formats the validator accepts, and it ACCEPTED formats no
+// browser can decode (they declare a real audio/* type, so the declared-type
+// check waved them straight through and the take never played).
+describe("validateAudioFile — the accepted list matches what decodes (AQU-1922)", () => {
+  const file = (name: string, type: string) =>
+    new File([new Uint8Array(10)], name, { type })
+
+  it("offers every format it accepts, including the six it used to hide", () => {
+    // The old literal was "audio/*,.wav,.mp3,.m4a,.ogg": a FLAC or Opus pick
+    // off a phone's Files app (empty MIME) was unselectable in the dialog.
+    for (const ext of ["wav", "mp3", "m4a", "mp4", "aac", "ogg", "oga", "opus", "webm", "flac"]) {
+      expect(ACCEPT).toContain(`.${ext}`)
+    }
+  })
+
+  it("accepts a supported format whose MIME type the OS does not report", () => {
+    for (const name of ["verse.flac", "verse.opus", "verse.aac", "verse.webm", "verse.oga", "verse.mp4"]) {
+      expect(validateAudioFile(file(name, ""))).toBeNull()
+    }
+  })
+
+  it("refuses a format a browser cannot decode, even though it declares audio/*", () => {
+    // Without the up-front extension check these passed on `audio/x-ms-wma`
+    // alone, uploaded, and sat on the line as a take that never played — while
+    // bulk upload refused the very same file as `unplayableFormat`.
+    expect(validateAudioFile(file("verse.wma", "audio/x-ms-wma"))).toMatch(/can't be played in a browser/)
+    expect(validateAudioFile(file("verse.aiff", "audio/aiff"))).toMatch(/\.aiff file/)
+    expect(validateAudioFile(file("verse.amr", "audio/amr"))).toMatch(/can't be played in a browser/)
+  })
+
+  it("still refuses something that is not audio at all", () => {
+    expect(validateAudioFile(file("notes.txt", "text/plain"))).toMatch(/doesn't look like an audio file/)
   })
 })

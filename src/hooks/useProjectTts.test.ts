@@ -4,7 +4,7 @@ import type { ProjectTtsSettings } from "@/lib/parsers/types"
 
 const mockCapture = vi.hoisted(() => vi.fn())
 vi.mock("@/lib/posthog", () => ({
-  default: { capture: mockCapture },
+  default: { scope() { return { ...this, enabled: () => true } }, capture: mockCapture },
 }))
 
 vi.mock("@/lib/store/project-index", () => ({

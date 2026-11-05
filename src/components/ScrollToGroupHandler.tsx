@@ -35,25 +35,41 @@ export function ScrollToGroupHandler({ cellStore, storeVersion, editorRef }: Scr
     if (!pending) return
     const { group: groupId, section: sectionLabel, fileId: targetFileId } = pending
 
-    // FRO-250/254: only consume() when the active store belongs to the requested
-    // file. During a file-switch the pending request may already carry the NEW
-    // file's id while the store is still clearing/loading; consuming early would
-    // jump nowhere and burn the request.
-    const currentFileId = cellStore.getFileId()
-    if (targetFileId !== null && currentFileId !== targetFileId) {
-      // Leave the request pending until the store has been replaced.
+    // FRO-250/254 → AQU-1244 → AQU-1442: only consume() once the store holds
+    // THE REQUESTED FILE'S OWN ROWS. Three distinct states have to be waited
+    // out on a cross-file click, and the first two rounds of this guard each
+    // covered only one of them:
+    //
+    //   1. the runtime file id is still the outgoing file (the request arrived
+    //      before the switch reached the store) — `getFileId()` catches it;
+    //   2. the runtime file id is the incoming file and the store is empty
+    //      (reset done, fetch in flight) — the cell count caught it;
+    //   3. the runtime file id is the incoming file while `order` STILL HOLDS
+    //      the outgoing file's rows. `setRuntime` flips `ctx.fileId` and only
+    //      re-partitions the loaded rows against the lane; nothing is cleared
+    //      until `reset()`. Both ids match and the count is non-zero, so the
+    //      first two checks pass and the handler consumes — resolving the
+    //      section against the OUTGOING file's navigation index.
+    //
+    // State 3 is the one that keeps burning requests, because a canonical
+    // section key is file-independent: "Genesis 2" is `scripture:GEN:2` in both
+    // files, so the lookup does not fail loudly — it returns a real, wrong cell
+    // id belonging to the file being navigated away from. `scrollToCellId`
+    // cannot find that id among the incoming file's rows, nothing moves, and the
+    // request is gone, leaving the new file on its first milestone.
+    //
+    // `getLoadedRowsFileId()` is the rows' own provenance rather than the file
+    // the store is pointed at, so one check now rules out all three states; it
+    // is null while no rows are loaded, which subsumes the count check for a
+    // file-stamped request. This effect re-runs as the store version advances,
+    // so the parked request is picked up as soon as the rows land.
+    if (targetFileId !== null && cellStore.getLoadedRowsFileId() !== targetFileId) {
+      // Leave the request pending until the requested file's rows are in.
       return
     }
 
-    // AQU-1244 round 2: matching file ids is NOT enough to consume. On a
-    // cross-file click the runtime file id flips first (useActiveCellStore's
-    // setRuntime effect) and `doFetch` then resets the store, so there is a
-    // window where getFileId() already reports the requested file while the
-    // store holds no rows at all. The Files panel submits its request ~100ms
-    // after selecting the file — squarely inside that window — and consuming
-    // there resolves the section against an empty navigation index, burning
-    // the request and leaving the file on its first milestone. Wait for the
-    // rows instead; this effect re-runs as the store version advances.
+    // A request with no file stamp (an older caller) can still only be resolved
+    // against rows that exist.
     if (cellStore.getCellCount() === 0) return
 
     editorScroll.consume()

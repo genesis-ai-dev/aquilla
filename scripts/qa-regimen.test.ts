@@ -7,6 +7,9 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const regimen = readFileSync(path.join(root, "e2e/journeys/QA-BOT-REGIMEN.md"), "utf8")
 const deploy = readFileSync(path.join(root, "e2e/journeys/RELEASE-CUT.md"), "utf8")
 const agents = readFileSync(path.join(root, "AGENTS.md"), "utf8")
+const prBot = readFileSync(path.join(root, "e2e/journeys/PR-BOT.md"), "utf8")
+const fixtures = readFileSync(path.join(root, "e2e/journeys/README.md"), "utf8")
+const previewStack = readFileSync(path.join(root, "scripts/cloudflare-stack-preview.mjs"), "utf8")
 
 describe("the merge rule the bots follow", () => {
   it("lets the agent merge its own pull request once the walk is PASS", () => {
@@ -36,5 +39,33 @@ describe("the merge rule the bots follow", () => {
     }
     expect(deploy).toContain("The workflow does not start Jev and does not read its result")
     expect(deploy).toContain("refs/heads/release/YYYY/MM/DD-NN")
+  })
+})
+
+// AQU-1436: an AI-control claim used to come back FAIL on every preview for
+// two reasons that were never the diff, so the walk said nothing. Both halves
+// of the answer live in prose the bots read, and the recipe is the only place
+// the device-local half can live at all — a trim of either silently brings the
+// uninformative FAIL back.
+describe("the AI fixture the bots walk (AQU-1436)", () => {
+  it("tells the bot where hosted drafting comes from, that Set up AI is per browser, and to report the gap as NOT CHECKED", () => {
+    // The key half: every preview has one, enforced at deploy time.
+    expect(previewStack).toContain("OPENROUTER_API_KEY")
+    expect(fixtures).toContain("platform `OPENROUTER_API_KEY` (AQU-1500)")
+    // The device-local half: not a project column, so no seed can pre-answer it.
+    expect(fixtures).toContain("`aiProviderChosen` is device-local")
+    expect(fixtures).toContain("no such column in Postgres")
+    expect(fixtures).toContain("Set up AI is not on this list, and cannot be.")
+    // The one-off click, and what the tooltip says before and after it.
+    expect(fixtures).toContain("Set up AI to enable")
+    expect(fixtures).toContain("Translate with AI")
+    // A name long enough to truncate (absorbed AQU-1437), in both the fixture
+    // list and the rebuild recipe.
+    const longName = "QA Long Project Name For Truncation And Ellipsis Acceptance Criteria"
+    expect(longName.length).toBeGreaterThan(60)
+    expect(fixtures.split(longName).length - 1).toBeGreaterThanOrEqual(2)
+    // The verdict rule: a missing fixture is never a finding against the app.
+    expect(prBot).toContain("An AI control is walkable on a preview too (AQU-1436)")
+    expect(prBot).toContain("**NOT CHECKED**, naming which of the two was missing — never **FAIL**")
   })
 })

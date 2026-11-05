@@ -92,6 +92,17 @@ updates:
       - "*"
     cooldown:
       default-days: 7
+    ignore:
+      # @cloudflare/sandbox 1.0 is a ground-up rewrite ("a migration, not a
+      # version bump", per its release notes): the `Sandbox` base class and
+      # `getSandbox` that src/index.ts, resolve-sandbox.ts and types.ts build
+      # on are gone, and the 1.x container image ships no `-python` tag, so the
+      # docker entry below cannot follow the SDK anyway. PR #1758 paired SDK
+      # 1.0.3 with image 0.12.14-python and failed type-check. Remove once a
+      # deliberate migration lands.
+      - dependency-name: "@cloudflare/sandbox"
+        update-types:
+          - "version-update:semver-major"
 
   # The Dockerfile's FROM tag. Dependabot keeps the `-python` suffix when it
   # picks a newer tag.
@@ -102,6 +113,11 @@ updates:
       - "*"
     cooldown:
       default-days: 7
+    ignore:
+      # Held to the 0.x line with the SDK pin above; the two must match.
+      - dependency-name: "cloudflare/sandbox"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: cargo
     directory: "/src-tauri"

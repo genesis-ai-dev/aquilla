@@ -64,6 +64,35 @@ provider recipients and retention in the privacy policy. This implementation
 makes no claim of overall GDPR compliance. Existing operational logs/RUM are not
 changed by this feature. No production configuration or deployment is implied.
 
+Development uses the dedicated `aquilla-login-development` Google Cloud project.
+The public development client configuration is in `auth-worker/wrangler.toml`;
+the secret is stored on `aquilla-dev-identity`, not in the repository. These
+settings take effect on the normal development deployment, not merely on push.
+PR #1838 has independently configured preview bindings and an exact registered
+preview callback. No Google configuration is added to production.
+
+## Live-provider verification (2026-11-05)
+
+The configured PR preview was exercised in native Safari Private with a real
+Google test account: account creation, session persistence after reload, logout,
+and a second Google login all succeeded. The new account chose not to share
+analytics; Preferences showed sharing off. Returning login went directly to the
+requested organizations page without repeating signup.
+
+Chromium network captures recorded zero Google requests on login (including
+hover/focus), on signup after declining sharing, and after approving sharing
+before authentication. Google traffic began only after the explicit Google
+button action. The logo and font were served from the preview origin; the login
+document had no preconnect, DNS-prefetch, or iframe elements.
+
+The first real callback exposed a runtime compatibility bug: Workers rejects
+`redirect: "error"` before sending the token request. A local workerd probe
+confirmed it. Token exchange now uses `manual` and rejects non-2xx responses,
+including redirects, so credentials are never forwarded to a redirect target.
+Worker tests cover redirect rejection and credential-free diagnostics. The
+temporary development diagnostic response used to isolate this failure was
+removed before the successful live test.
+
 ## Verification recorded during implementation
 
 - Worker integration tests use real signed OIDC tokens and Postgres semantics,

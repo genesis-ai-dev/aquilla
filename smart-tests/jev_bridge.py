@@ -68,7 +68,16 @@ def main():
         if url == "https://api.typesafe.ai/v1/systemone":
             url = os.environ.get("TYPESAFE_URL", url)
         started = time.monotonic()
-        result = original_post(url, key, body)
+        try:
+            result = original_post(url, key, body)
+        except RuntimeError as error:
+            # Upstream already retries 429/503 three times within ~1.5 s. A
+            # provider that is still rate-limiting after that usually clears
+            # within a few seconds; one longer wait beats losing the journey.
+            if not re.fullmatch(r"Model provider returned HTTP (429|503|529); no action executed\.", str(error)):
+                raise
+            time.sleep(3)
+            result = original_post(url, key, body)
         usage = result.get("usage", {})
         print(json.dumps({"type": "model_call", "call": {
             "kind": kind, "model": result.get("model", body.get("model")),

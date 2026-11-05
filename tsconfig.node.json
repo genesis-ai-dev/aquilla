@@ -27,7 +27,10 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["vite.config.ts", "scripts/**/*.ts"],
+  /* agents/**: the QA-runner's Vitest bridge and its config (AQU-2365). They
+   * are .mts, which no other include matches, so without this line they are
+   * typechecked by nothing. */
+  "include": ["vite.config.ts", "scripts/**/*.ts", "agents/**/*.mts"],
   /* Worker-package imports need auth-worker/sync-worker installs. Cloudflare
    * SPA builds only `pnpm install` at the repo root, so typechecking these
    * one-off tools here fails with TS2307 (e.g. bcryptjs / @noble/hashes).

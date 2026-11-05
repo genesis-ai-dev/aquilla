@@ -55,6 +55,7 @@
     "test:worker": "vitest run --config worker/vitest.config.ts --dir worker",
     "test:daemon": "NODE_OPTIONS=--expose-gc vitest run scripts/migrate-daemon",
     "scan:secrets": "tsx scripts/secret-scan.ts",
+    "check:doc-pins": "tsx scripts/check-doc-pins.ts",
     "admin:request": "tsx scripts/admin-request.ts",
     "test:idml": "pnpm --filter @aquilla/idml-roundtrip test",
     "build:idml": "pnpm --filter @aquilla/idml-roundtrip build",

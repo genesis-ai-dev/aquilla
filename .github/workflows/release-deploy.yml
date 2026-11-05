@@ -135,7 +135,12 @@ jobs:
       # saw production serving a dev sha and refused to tag the release HEAD.
       # The tag is annotated, so git needs a committer; the runner has none
       # ("fatal: empty ident name"). Same identity release-cut.yml commits with.
+      # Pushing the tag runs the repo's husky pre-push hook (the smoke e2e
+      # suite), which the runner cannot run: no Playwright browser. The hook
+      # is a developer gate; the release branch was verified by release-verify.
       - name: Deploy production and tag
+        env:
+          HUSKY: "0"
         run: |
           git config user.name "aquilla-release-bot"
           git config user.email "release-bot@aquilla.app"

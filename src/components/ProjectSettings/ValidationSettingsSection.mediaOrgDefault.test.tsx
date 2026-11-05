@@ -45,7 +45,7 @@ describe("ValidationSettingsSection — audio settings follow the organization",
     expect(selfSource().textContent).toContain("Organization default (off)")
     expect(selfSwitch().getAttribute("aria-checked") === "true" || selfSwitch().hasAttribute("data-checked")).toBe(false)
     expect(isDisabled(selfSwitch())).toBe(false)
-    expect(floorSource().textContent).toContain("Organization default (Project lead)")
+    expect(floorSource().textContent).toContain("Organization default (Project Lead)")
     expect(isDisabled(screen.getByRole("combobox", { name: "Minimum role to validate recordings" }))).toBe(false)
   })
 
@@ -65,7 +65,7 @@ describe("ValidationSettingsSection — audio settings follow the organization",
   it("choosing the organization's default clears the project's own value", async () => {
     const { onChange } = draw({ validationRoleFloorAudio: "maintainer" })
     await userEvent.click(floorSource())
-    await userEvent.click(await screen.findByRole("option", { name: "Organization default (Project lead)" }))
+    await userEvent.click(await screen.findByRole("option", { name: "Organization default (Project Lead)" }))
     expect(onChange).toHaveBeenCalledExactlyOnceWith({ validationRoleFloorAudio: null })
   })
 

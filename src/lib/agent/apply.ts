@@ -1,3 +1,4 @@
+import posthog from "@/lib/posthog"
 /**
  * apply.ts — turn server-staged agent events into REAL events on the
  * existing client write path.
@@ -63,6 +64,7 @@ export async function applyStagedEvent(
   ev: StagedEvent,
   ctx: ApplyContext,
 ): Promise<string> {
+  const analytics = posthog.scope(undefined, ctx.author)
   if (!isSupportedApplyKind(ev.kind)) throw new UnsupportedAgentEventError(ev.kind)
 
   switch (ev.kind) {
@@ -188,7 +190,7 @@ export async function applyStagedEvent(
         lane: typeof ev.payload.targetLang === "string" ? ev.payload.targetLang : "",
         source: "agent",
         surface: "proposal",
-      })
+      }, analytics)
       return eventId
     }
   }

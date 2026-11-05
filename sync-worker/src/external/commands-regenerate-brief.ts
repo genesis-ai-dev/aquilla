@@ -3,8 +3,10 @@
 // `l1Summary` / `l1GeneratedAt` / `l1ModelId` fields of the `translationBrief`
 // settings key through the same version-guarded write.
 //
-// Why it exists: the copilot injects only the rendered L1
-// (prompt-preview's `parts.brief`), and until now only the in-app builder's
+// Why it exists: until a project writes `translationInstructions` (AQU-2342),
+// the brief reaches prompts through the instructions composed on read, and the
+// rendered L1 is what it contributes there (prompt-preview's
+// `parts.instructions`). Until now only the in-app builder's
 // "Regenerate summary" button produced it. SetBrief now auto-renders on
 // commit (best-effort), but a render can fail (backend down, credit cap) or a
 // human may edit sections in-app without regenerating — this command is the

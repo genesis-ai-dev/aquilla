@@ -19,15 +19,16 @@ describe("LoadingOverlay", () => {
     expect(status).toHaveAttribute("aria-busy", "true")
   })
 
-  it("renders the shared animated spinner (visible motion)", () => {
+  it("types its label with the shared blinking cursor after it (visible motion)", () => {
     const { container } = render(<LoadingOverlay />)
 
-    // Reuses the shared <Spinner> primitive (SVG ring + animate-spin) rather
-    // than reinventing spinner styling.
-    const spinner = container.querySelector("[data-slot='spinner']")
-    expect(spinner).not.toBeNull()
-    expect(spinner).toHaveClass("animate-spin")
-    expect(spinner).toHaveClass("motion-reduce:animate-none")
+    // No pill and no spinner: the body's own cursor prints the label.
+    expect(container.querySelector("[data-slot='spinner']")).toBeNull()
+    const labelled = screen.getByText("Loading…").parentElement!
+    const cursor = labelled.querySelector("[data-slot='loading-cursor']")
+    expect(cursor).not.toBeNull()
+    expect(cursor).toHaveClass("animate-cursor-blink")
+    expect(cursor).toHaveClass("motion-reduce:animate-none")
     expect(screen.getByTestId("loading-neutral-template")).toBeInTheDocument()
   })
 
@@ -95,19 +96,18 @@ describe("BlockingLoadingOverlay (AQU-737)", () => {
     expect(status.parentElement).toBe(document.body)
     // Fixed full-viewport layer with NO pointer-events-none: the layer itself
     // must swallow clicks aimed at controls beneath it. Loading is shown by
-    // the spinner pill, not a wait cursor.
+    // the labelled cursor, not a wait cursor.
     expect(status).toHaveClass("fixed", "inset-0")
     expect(status.className).not.toContain("pointer-events-none")
     expect(status.className).not.toContain("cursor-wait")
   })
 
-  it("shows the shared spinner pill with the label", () => {
+  it("prints the label with the cursor after it, no pill", () => {
     render(<BlockingLoadingOverlay label="Opening project" />)
 
     const status = screen.getByRole("status", { name: "Opening project" })
-    const spinner = status.querySelector("[data-slot='spinner']")
-    expect(spinner).not.toBeNull()
-    expect(spinner).toHaveClass("animate-spin")
+    expect(status.querySelector("[data-slot='spinner']")).toBeNull()
+    expect(status.querySelector("[data-slot='loading-cursor']")).not.toBeNull()
     expect(screen.getByText("Opening project…")).toBeInTheDocument()
   })
 

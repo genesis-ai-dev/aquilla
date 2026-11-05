@@ -1,4 +1,4 @@
-// AQU-2041: "Project leads can manage voices" is off until a maintainer turns
+// AQU-2041: "Project Leads can manage voices" is off until a maintainer turns
 // it on. While it is on, a project lead may change voices on lanes they can
 // write. A crafted change to a hidden lane is refused. Contributors and
 // viewers never may, and a lead cannot flip the switch.

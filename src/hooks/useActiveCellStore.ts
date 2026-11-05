@@ -477,6 +477,14 @@ export class CellStore {
   }
 
   private order: string[] = []
+  // AQU-1442: the file the loaded rows were installed under, which is NOT the
+  // same thing as `ctx.fileId`. On a file switch `setRuntime` flips `ctx.fileId`
+  // to the incoming file while `order` still holds the outgoing file's rows
+  // (`setRuntime` only re-partitions them against the lane), so `getFileId()`
+  // alone cannot tell a reader whose rows it is about to resolve against.
+  // Stamped wherever rows land, cleared by `reset()`. Read via
+  // `getLoadedRowsFileId()`.
+  private rowsFileId: string | null = null
   private sourceOrder: string[] = []
   private targetOrder: string[] = []
   private indexById = new Map<string, number>()
@@ -816,6 +824,9 @@ export class CellStore {
     // content until something else touches its cell.
     const clearedIds = this.order
     this.order = []
+    // AQU-1442: the rows these belonged to are gone, so no file owns the
+    // (now empty) row set until the next load stamps it.
+    this.rowsFileId = null
     this.sourceOrder = []
     this.targetOrder = []
     this.indexById = new Map()
@@ -876,6 +887,14 @@ export class CellStore {
   getAllVersion = (): number => this.fileVersion
   getCellVersion = (cellId: string): number => this.cellVersionById.get(cellId) ?? 0
   getFileId = (): string | null => this.ctx.fileId
+  /** AQU-1442: the file the loaded rows actually came from, for readers that
+   *  must not resolve a lookup against the outgoing file's rows mid-switch.
+   *  `getFileId()` is the file the store is *pointed at*; this is the file the
+   *  rows *are*. They differ for the whole window between `setRuntime` flipping
+   *  the runtime file and the incoming file's rows landing. Null whenever no
+   *  rows are loaded, so a caller never has to pair it with a count check to
+   *  know the answer is "none yet". */
+  getLoadedRowsFileId = (): string | null => this.order.length === 0 ? null : this.rowsFileId
   getProjectId = (): string | null => this.ctx.projectId
   getCellCount = (): number => this.order.length
   getMaxServerSeq = (): number | null => this.maxServerSeq
@@ -1516,6 +1535,10 @@ export class CellStore {
     // re-reads it on listVersion; a fresh array here made every
     // getNavigationIndex(displayCellIds) call miss the store's own index.
     this.order = orderChanged ? order : this.order
+    // AQU-1442: every row install goes through here (full load, cached load and
+    // delta merge alike), and `doFetch` has already pointed `ctx` at the file it
+    // fetched, so this is the provenance of the rows now in `order`.
+    this.rowsFileId = this.ctx.fileId
     this.sourceOrder = sourceOrder
     this.targetOrder = targetOrder
     this.sourceById = sourceById
@@ -3275,6 +3298,13 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     inFlightRef.current = true
     // A full fetch supersedes any queued soft one.
     if (!soft) pendingSoftRefetchRef.current = false
+    // A full fetch is loading from the moment it is asked for, not from the
+    // moment the sync token and the cache read (two async hops) resolve. The
+    // project socket can open inside that window, and with zero rows and no
+    // loading flag the editor then read "<file> is empty" for a frame — a
+    // flash for people, and a gap with no busy region that let the Jev
+    // readiness gate through onto a file still loading (QA job 1853).
+    if (!soft) setIsLoading(true)
 
     // Tauri offline branch: an offline-ready project's cells live in the
     // local LiveStore `cells` table (kept live-synced by the Phase 3 sync

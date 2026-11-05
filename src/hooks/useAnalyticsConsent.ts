@@ -1,20 +1,14 @@
-import { useEffect, useState } from "react"
-import {
-  isAnalyticsEnabled,
-  setAnalyticsEnabled,
-  onAnalyticsConsentChange,
-} from "@/lib/analytics-consent"
+import { useSyncExternalStore } from "react"
+import { analyticsAccount } from "@/lib/analytics-account"
 
-export function useAnalyticsConsent(): {
-  enabled: boolean
-  setEnabled: (next: boolean) => void
-} {
-  const [enabled, setEnabled] = useState<boolean>(() => isAnalyticsEnabled())
-
-  useEffect(() => onAnalyticsConsentChange(setEnabled), [])
-
+export function useAnalyticsConsent() {
+  const state = useSyncExternalStore(analyticsAccount.subscribe, analyticsAccount.getSnapshot, analyticsAccount.getSnapshot)
   return {
-    enabled,
-    setEnabled: (next) => setAnalyticsEnabled(next),
+    enabled: state.decision?.allowed === true && !state.blocked,
+    disabled: !state.accountId || state.saving,
+    saving: state.saving,
+    retry: analyticsAccount.refresh,
+    error: state.error,
+    setEnabled: (next: boolean) => { void analyticsAccount.choose(next).catch(() => { /* rendered from state.error */ }) },
   }
 }

@@ -16,6 +16,7 @@
 // `{ error: { code, message, details? } }`.
 
 import { Hono, type Context } from "hono"
+import { notifySyncWorkerOfProjectSettingsChange } from "../services/sync-worker-notify"
 import type { ContentfulStatusCode } from "hono/utils/http-status"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
@@ -23,7 +24,9 @@ import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE } from "../types"
 import { resolveProjectRole } from "../services/project-permissions"
 import { loadProjectSettings } from "../../../db/shared/projects"
+import { resolveTranslationInstructions } from "../../../db/shared/translation-instructions"
 import type { AquillaDb } from "../../../db/shim/postgres"
+import { moveBriefProposalsToDecisions } from "../../../db/shared/brief-proposals-to-decisions"
 import {
   createProposal,
   listMemories,
@@ -122,6 +125,11 @@ agentMemory.get("/:projectId/agent-memory", authMiddleware, async (c) => {
     const { body, status } = errorJson("validation_failed", `unknown status "${statusParam}"`, 400)
     return c.json(body, status)
   }
+  // AQU-2342: brief proposals made before the brief screen was retired join
+  // this queue as decisions/ entries (approval appends them to the project
+  // instructions), so the Memory tab — and the chat's old "Review" links —
+  // show them.
+  await moveBriefProposalsToDecisions(c.env.AQUILLA_PG, projectId)
   const memories = await listMemories(
     c.env.AQUILLA_PG,
     projectId,
@@ -232,6 +240,7 @@ agentMemory.post(
       action,
       reviewedBy: user.username,
       supersedeHumanEdited: isAgent ? false : supersedeHumanEdited,
+      settingsUpdatedBy: user.id,
     })
     if (result.status === "not_found") {
       const { body, status } = errorJson("not_found", `memory ${id} not found`, 404)
@@ -254,6 +263,16 @@ agentMemory.post(
         { path: result.existing.path, existingId: result.existing.id },
       )
       return c.json(body, status)
+    }
+    if (result.instructionsVersion !== undefined) {
+      // AQU-2342: an approved decision was appended to the project
+      // instructions — tell open editors the settings moved.
+      const notify = notifySyncWorkerOfProjectSettingsChange(c.env, projectId, result.instructionsVersion)
+      try {
+        c.executionCtx.waitUntil(notify)
+      } catch {
+        void notify
+      }
     }
     return c.json({ memory: result.memory })
   },
@@ -329,12 +348,19 @@ agentMemory.patch(
 // ──────────────────────────────────────────────────────────────────────────
 
 // GET /:projectId/brief — read the brief (VIEWER+).
+// AQU-2342: `content` is the project's RESOLVED translation instructions — the
+// one text every drafting prompt carries — so an old reader of "the brief the
+// agent sees" keeps reading the truth. The shape is unchanged, and `version` is
+// still the `project_briefs` row's, so PUT's ifMatchVersion keeps working.
 agentMemory.get("/:projectId/brief", authMiddleware, async (c) => {
   const projectId = c.req.param("projectId") ?? ""
   const gate = await requireRole(c, projectId, ROLE.VIEWER)
   if (!gate.ok) return gate.res
-  const brief = await getBrief(c.env.AQUILLA_PG, projectId)
-  return c.json({ brief })
+  const db = c.env.AQUILLA_PG
+  const brief = await getBrief(db, projectId)
+  const { settings } = await loadProjectSettings(db, projectId)
+  const content = resolveTranslationInstructions(settings, { projectBriefText: brief.content })
+  return c.json({ brief: { ...brief, content } })
 })
 
 const putBriefSchema = z.object({

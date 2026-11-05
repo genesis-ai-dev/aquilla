@@ -24,6 +24,7 @@ const YT = "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
 const FILM = "https://cdn.thechosen.media/ep1/master.m3u8"
 
 afterEach(() => {
+  vi.unstubAllGlobals()
   localStorage.clear()
   __resetPlaybackSourceForTests()
   vi.restoreAllMocks()
@@ -60,15 +61,23 @@ describe("the stored choice", () => {
     expect(readPlaybackSource("f1", YT)).toBe("video")
   })
 
+  // AQU-2334: blocked storage is a stand-in for localStorage itself, not spies
+  // on Storage.prototype. The first time anything reads localStorage.getItem,
+  // happy-dom pins a bound copy of the method onto that one localStorage, so
+  // after an earlier test had read storage a prototype spy was never called
+  // and this passed without reaching the fallback. The calls are checked, so
+  // the blocked read and write provably happen.
   it("falls back to the default when storage cannot be read, and a pick still holds", () => {
-    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
-      throw new Error("blocked")
-    })
-    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
-      throw new Error("blocked")
-    })
+    const blocked = () => {
+      throw new DOMException("The operation is insecure.", "SecurityError")
+    }
+    const storage = { getItem: vi.fn(blocked), setItem: vi.fn(blocked), removeItem: vi.fn(), clear: vi.fn(), key: vi.fn(), length: 0 }
+    vi.stubGlobal("localStorage", storage)
+
     expect(readPlaybackSource("f1", YT)).toBe("video")
+    expect(storage.getItem).toHaveBeenCalledWith(playbackSourceKey("f1"))
     setPlaybackSource("f1", "recording")
+    expect(storage.setItem).toHaveBeenCalledWith(playbackSourceKey("f1"), "recording")
     expect(readPlaybackSource("f1", YT)).toBe("recording")
   })
 })

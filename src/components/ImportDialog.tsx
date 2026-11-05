@@ -1,3 +1,4 @@
+import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { ExtensionMarker, ExtensionStripe } from "@/components/tools/ExtensionMarker"
 import { ExtensionImportPanel } from "@/components/tools/ExtensionImportPanel"
@@ -32,7 +33,7 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { SegmentTabs, Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -117,7 +118,6 @@ interface CollisionResolution {
   /** normalized incoming book-code/name → existing file id */
   reimportFileIds: ReadonlyMap<string, string>
 }
-import posthog from "@/lib/posthog"
 import {
   IMPORT_STARTED,
   IMPORT_SUCCEEDED,
@@ -451,9 +451,10 @@ interface ImportDialogProps {
   /** AQU-1365: the "A translation" path. Absent, the dialog offers source
    *  import only, as before. */
   translation?: TranslationImportHost
-  /** IDML Update Existing places kept translations into the new style runs.
-   *  Absent when AI completion is not configured; the re-import still updates
-   *  the source and leaves every translation where it is. */
+  /** IDML re-import that keeps translations (update, or an updated copy)
+   *  places them into the new style runs. Absent when AI completion is not
+   *  configured; the re-import still updates the source and leaves every
+   *  translation where it is. */
   alignReimportedIdml?: IdmlReimportAlignHost
   /** AQU-981: "Recordings" — bulk audio upload onto lines already here. */
   recordings?: RecordingsImportHost
@@ -490,6 +491,7 @@ export function ImportDialog({
   alignReimportedIdml,
   recordings,
 }: ImportDialogProps) {
+  const analytics = useAccountAnalytics()
   const t = useT()
   const [screen, setScreen] = useState<Screen>("landing")
   const [extensionImporter, setExtensionImporter] = useState<{ toolId: string; importer: ToolImporter; toolName: string } | null>(null)
@@ -756,7 +758,7 @@ export function ImportDialog({
     ) => {
       // AQU-277: partial import — show result screen first, hold the close.
       if (skippedBooks && skippedBooks.length > 0) {
-        posthog.capture(IMPORT_PARTIAL, {
+        analytics.capture(IMPORT_PARTIAL, {
           imported_count: refs.length,
           skipped_count: skippedBooks.length,
           project_id: projectId,
@@ -818,14 +820,14 @@ export function ImportDialog({
         return
       }
 
-      posthog.capture(IMPORT_SUCCEEDED, {
+      analytics.capture(IMPORT_SUCCEEDED, {
         file_count: refs.length,
         project_id: projectId,
       })
       await onImported(refs, inferredLanguages)
       onOpenChange(false)
     },
-    [lanes, targetLang, sourceLanguage, targetLanguage, projectId, onImported, onOpenChange],
+    [lanes, targetLang, sourceLanguage, targetLanguage, projectId, onImported, onOpenChange, analytics],
   )
 
   // Lane rows can arrive after the import callback already opened an empty
@@ -961,7 +963,7 @@ export function ImportDialog({
     setTranslationNotice(null)
     setTranslationBack(null)
     setTranslationRun({ ...run, key: `${fileId}:${translationRunCount.current}` })
-    posthog.capture(IMPORT_STARTED, {
+    analytics.capture(IMPORT_STARTED, {
       import_type: TRANSLATION_IMPORT_TYPE[run.way],
       entry: run.entry,
       suggested: run.suggested,
@@ -1031,7 +1033,7 @@ export function ImportDialog({
   function answerTranslationCheck(choice: TranslationCheckChoice) {
     const check = translationCheck
     if (!check) return
-    posthog.capture(IMPORT_TRANSLATION_CHECK, {
+    analytics.capture(IMPORT_TRANSLATION_CHECK, {
       signal: translationCheckSignal(check.signals),
       file_count: check.fileCount,
       flagged_count: check.signals.length,
@@ -1352,7 +1354,7 @@ export function ImportDialog({
                 {t("importExport.translation.opening", { fileName: translationDestination?.name ?? "" })}
               </p>
               <div className="space-y-2.5 rounded-md border p-3">
-                {[0, 1, 2, 3, 4].map((row) => <Skeleton key={row} className="h-4 w-full" />)}
+                <LoadingCursor />
               </div>
               <div className="flex justify-end">
                 <Button variant="ghost" onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button>
@@ -1378,7 +1380,7 @@ export function ImportDialog({
               setScreen("extension")
             }}
             onSelect={(s, selectedPartnerId) => {
-              posthog.capture(IMPORT_STARTED, {
+              analytics.capture(IMPORT_STARTED, {
                 import_type: selectedPartnerId ?? s,
                 project_id: projectId,
               })
@@ -1443,7 +1445,7 @@ export function ImportDialog({
             onCastUpdated={onCastUpdated}
             existingFiles={existingFiles}
             onCollision={(collisions, proceed) => {
-              posthog.capture(IMPORT_COLLISION_DETECTED, {
+              analytics.capture(IMPORT_COLLISION_DETECTED, {
                 collision_count: collisions.length,
                 project_id: projectId,
               })
@@ -1495,7 +1497,7 @@ export function ImportDialog({
             onCastUpdated={onCastUpdated}
             existingFiles={existingFiles}
             onCollision={(collisions, proceed) => {
-              posthog.capture(IMPORT_COLLISION_DETECTED, {
+              analytics.capture(IMPORT_COLLISION_DETECTED, {
                 collision_count: collisions.length,
                 project_id: projectId,
               })
@@ -1633,6 +1635,8 @@ export function ImportDialog({
           ...(sourceLanguage ? { sourceLanguage } : {}),
           ...(targetLanguage ? { targetLanguage } : {}),
           getToken,
+          ...(targetLang !== undefined ? { targetLang } : {}),
+          ...(alignReimportedIdml ? { alignReimportedIdml } : {}),
           onImported: async (ref) => {
             await handleChildImported([ref])
           },
@@ -1729,7 +1733,7 @@ export function ImportDialog({
             sourceCells={sourceCells}
             getToken={getToken}
             onImported={(committedCount) => {
-              posthog.capture(IMPORT_SUCCEEDED, { file_count: committedCount, project_id: projectId })
+              analytics.capture(IMPORT_SUCCEEDED, { file_count: committedCount, project_id: projectId })
               onOpenChange(false)
             }}
             onCancel={() => setScreen("landing")}
@@ -1769,7 +1773,7 @@ export function ImportDialog({
             sourceCells={translation.activeFileCells}
             onImported={handleChildImported}
             onTargetImported={() => {
-              posthog.capture(IMPORT_SUCCEEDED, {
+              analytics.capture(IMPORT_SUCCEEDED, {
                 import_type: TRANSLATION_IMPORT_TYPE.ebible,
                 entry: translationRun.entry,
                 project_id: projectId,
@@ -1787,7 +1791,7 @@ export function ImportDialog({
             sourceCells={translation.activeFileCells}
             getToken={getToken}
             onImported={(committedCount) => {
-              posthog.capture(IMPORT_SUCCEEDED, {
+              analytics.capture(IMPORT_SUCCEEDED, {
                 import_type: TRANSLATION_IMPORT_TYPE.paired,
                 entry: translationRun.entry,
                 file_count: committedCount,
@@ -1866,14 +1870,14 @@ export function ImportDialog({
               const updatedCount = resolution.reimportFileIds.size
               const duplicatedCount = totalCount - skippedCount - updatedCount
               if (skippedCount > 0) {
-                posthog.capture(IMPORT_COLLISION_SKIPPED, {
+                analytics.capture(IMPORT_COLLISION_SKIPPED, {
                   skipped_count: skippedCount,
                   duplicated_count: duplicatedCount,
                   updated_count: updatedCount,
                   project_id: projectId,
                 })
               } else {
-                posthog.capture(IMPORT_COLLISION_DUPLICATED, {
+                analytics.capture(IMPORT_COLLISION_DUPLICATED, {
                   duplicated_count: duplicatedCount,
                   updated_count: updatedCount,
                   project_id: projectId,
@@ -1905,7 +1909,7 @@ export function ImportDialog({
               username={username}
               chosen={recordingsChosen}
               onStarted={() => {
-                posthog.capture(IMPORT_STARTED, { import_type: "recordings", project_id: projectId, file_count: recordingsChosen.length })
+                analytics.capture(IMPORT_STARTED, { import_type: "recordings", project_id: projectId, file_count: recordingsChosen.length })
                 onOpenChange(false)
               }}
               onCancel={() => onOpenChange(false)}
@@ -1940,7 +1944,7 @@ export function ImportDialog({
               mode={translationMode}
               jwt={identityToken ?? null}
               onProposalsStaged={(result) => {
-                posthog.capture(IMPORT_SUCCEEDED, {
+                analytics.capture(IMPORT_SUCCEEDED, {
                   import_type: "file-target-proposals",
                   entry: translationRun.entry,
                   suggested: translationRun.suggested,
@@ -1956,7 +1960,7 @@ export function ImportDialog({
                 onOpenChange(false)
               }}
               onImported={(committedCount) => {
-                posthog.capture(IMPORT_SUCCEEDED, {
+                analytics.capture(IMPORT_SUCCEEDED, {
                   import_type: "file-target",
                   entry: translationRun.entry,
                   suggested: translationRun.suggested,
@@ -1971,7 +1975,7 @@ export function ImportDialog({
                 onOpenChange(false)
               }}
               onError={(message, phase) => {
-                posthog.capture(IMPORT_FAILED, {
+                analytics.capture(IMPORT_FAILED, {
                   import_type: translationMode === "proposal" ? "file-target-proposals" : "file-target",
                   entry: translationRun.entry,
                   phase,
@@ -2366,7 +2370,7 @@ interface UploadPanelProps {
     /** Every file in the batch, flagged or not, media included. */
     fileCount: number,
   ) => Promise<boolean>
-  /** IDML Update Existing places kept translations into the new style runs. */
+  /** IDML re-import that keeps translations places them into the new style runs. */
   alignReimportedIdml?: IdmlReimportAlignHost
 }
 
@@ -2479,6 +2483,7 @@ function idmlParsePhase(
 }
 
 function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError, onSpreadsheetFile, onJsonFile, excludeFrontMatter, cellUnit, variant = "upload", onTranslationCheck, alignReimportedIdml, reimportTarget = null }: UploadPanelProps) {
+  const analytics = useAccountAnalytics()
   const t = useT()
   const [importing, setImporting] = useState(false)
   const [dragOver, setDragOver] = useState(false)
@@ -2658,8 +2663,8 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
           }
         } catch (err) {
           if (parseController.signal.aborted) return
-          posthog.captureException(err, { import_stage: "parse", project_id: projectId, file_exts: fileExts(list) })
-          posthog.capture(IMPORT_FAILED, {
+          analytics.captureException(err, { import_stage: "parse", project_id: projectId, file_exts: fileExts(list) })
+          analytics.capture(IMPORT_FAILED, {
             import_stage: "parse",
             project_id: projectId,
             file_exts: fileExts(list),
@@ -2794,7 +2799,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       await doCommit(list, undefined, reimportFileIds)
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [projectId, username, sourceLanguage, targetLanguage, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onPreview, onSpreadsheetFile, onJsonFile, onTranslationCheck, t, reimportTarget]
+    [projectId, username, sourceLanguage, targetLanguage, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onPreview, onSpreadsheetFile, onJsonFile, onTranslationCheck, t, reimportTarget, analytics]
   )
 
   /** Upload all files (called after preview confirmation, or directly for media). */
@@ -2929,8 +2934,8 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
         finalizationCheckpointRef.current = null
       } catch (err) {
         const message = err instanceof Error ? err.message : t("importExport.errors.importFailed")
-        posthog.captureException(err, { import_stage: "upload", project_id: projectId, file_exts: fileExts(list) })
-        posthog.capture(IMPORT_FAILED, {
+        analytics.captureException(err, { import_stage: "upload", project_id: projectId, file_exts: fileExts(list) })
+        analytics.capture(IMPORT_FAILED, {
           import_stage: "upload",
           project_id: projectId,
           file_exts: fileExts(list),
@@ -2991,7 +2996,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
         onCommitPhase?.("")
       }
     },
-    [projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, onCommitPhase, onCommitProgress, onCommitError, alignReimportedIdml, t, reimportTarget, existingFiles]
+    [projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, onCommitPhase, onCommitProgress, onCommitError, alignReimportedIdml, t, reimportTarget, existingFiles, analytics]
   )
 
   function handleDrop(e: React.DragEvent) {
@@ -3178,6 +3183,7 @@ function ParatextChoice({
   entries, bookCount, projectId, username, sourceLanguage, targetLanguage, targetLang, getToken, onImported, onCancel,
   existingFiles, onCollision, excludeFrontMatter,
 }: ParatextChoiceProps) {
+  const analytics = useAccountAnalytics()
   const t = useT()
   const [mode, setMode] = useState<"choose" | "pickSource" | "importing">("choose")
   const [plan, setPlan] = useState<ParatextPlan | null>(null)
@@ -3205,8 +3211,8 @@ function ParatextChoice({
       })
       .catch((err) => {
         if (cancelled) return
-        posthog.captureException(err, { import_stage: "paratext-parse", project_id: projectId })
-        posthog.capture(IMPORT_FAILED, {
+        analytics.captureException(err, { import_stage: "paratext-parse", project_id: projectId })
+        analytics.capture(IMPORT_FAILED, {
           import_stage: "paratext-parse",
           project_id: projectId,
           error_message: err instanceof Error ? err.message : String(err),
@@ -3214,7 +3220,7 @@ function ParatextChoice({
         setError(err instanceof Error ? err.message : t("importExport.paratext.couldNotReadProject"))
       })
     return () => { cancelled = true }
-  }, [entries, projectId, excludeFrontMatter, t])
+  }, [entries, projectId, excludeFrontMatter, t, analytics])
 
   function onProgress(p: ParatextImportProgress) {
     const bookLabel = p.book
@@ -3259,8 +3265,8 @@ function ParatextChoice({
       const inferredLang = settings.languageIsoCode || settings.language
       await onImported(refs, inferredLang ? { sourceLanguage: inferredLang } : undefined, skipped.length ? skipped : undefined)
     } catch (err) {
-      posthog.captureException(err, { import_stage: "paratext-upload", project_id: projectId })
-      posthog.capture(IMPORT_FAILED, {
+      analytics.captureException(err, { import_stage: "paratext-upload", project_id: projectId })
+      analytics.capture(IMPORT_FAILED, {
         import_stage: "paratext-upload",
         project_id: projectId,
         error_message: err instanceof Error ? err.message : String(err),

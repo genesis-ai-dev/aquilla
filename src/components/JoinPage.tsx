@@ -1,3 +1,4 @@
+import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 import { useEffect, useState, type ReactNode } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import { AlertCircle, Users } from "lucide-react"
@@ -19,7 +20,6 @@ import { isJwtExpired } from "@/lib/frontier/auth"
 import { FrontierLoginForm } from "@/components/git-import/FrontierLoginForm"
 import { FrontierSignupForm } from "@/components/git-import/FrontierSignupForm"
 import { FrontierForgotPasswordForm } from "@/components/git-import/FrontierForgotPasswordForm"
-import posthog from "@/lib/posthog"
 import { INVITE_REDEEMED } from "@/lib/event-names"
 import { RoleLabel } from "@/components/RoleLabel"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -46,6 +46,7 @@ type PreviewLoadState = null | InvitePreviewFailReason
  * must be signed in.
  */
 export function JoinPage() {
+  const analytics = useAccountAnalytics()
   const t = useT()
   const { token } = useParams<{ token: string }>()
   const navigate = useNavigate()
@@ -128,7 +129,7 @@ export function JoinPage() {
     // (one row) — then fall back to the legacy single-project accept.
     const multi = await acceptMultiInvite(jwt, token)
     if (multi.ok && multi.data.accepted.length > 0) {
-      posthog.capture(INVITE_REDEEMED, {
+      analytics.capture(INVITE_REDEEMED, {
         invite_kind: "multi",
         project_count: multi.data.accepted.length,
         project_id: multi.data.accepted[0].projectId,
@@ -138,7 +139,7 @@ export function JoinPage() {
     }
     const single = await acceptServerInvite(jwt, token)
     if (single.ok) {
-      posthog.capture(INVITE_REDEEMED, {
+      analytics.capture(INVITE_REDEEMED, {
         invite_kind: "single",
         project_count: 1,
         project_id: single.data.projectId,

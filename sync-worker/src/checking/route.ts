@@ -86,7 +86,7 @@ export async function handleCheckingRequest(request: Request, env: CheckingEnv,
       const pid = parsed?.success ? parsed.data.projectId : projectId
       const auth = await verifyTokenForProject(bearer(request), pid, env.SYNC_SECRET_KEY)
       if (!auth.ok) return dead()
-      if (auth.claims.role < 500 || !await canShare(db, pid, auth.claims.userId)) return jsonError("Project lead access required.", 403)
+      if (auth.claims.role < 500 || !await canShare(db, pid, auth.claims.userId)) return jsonError("Project Lead access required.", 403)
       if (request.method === "GET") {
         const rows = await db.prepare(`SELECT token, title, role, expires_at AS "expiresAt", revoked_at AS "revokedAt"
           FROM checking_links WHERE project_id = ? ORDER BY created_at DESC LIMIT 100`).bind(pid).all()

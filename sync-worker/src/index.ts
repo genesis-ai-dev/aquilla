@@ -494,7 +494,9 @@ const worker = {
     // AQU-1092…1098: the project's plan board (units + target dates + Done).
     const planResponse = await handlePlanRequest(request, env)
     if (planResponse) return withCors(planResponse, request)
-    const cellsReadResponse = await handleCellsReadRequest(request, env)
+    // AQU-1885: `ctx` lets the colo-shared ordering-cache write run off the
+    // response's critical path.
+    const cellsReadResponse = await handleCellsReadRequest(request, env, ctx)
     if (cellsReadResponse) return withCors(cellsReadResponse, request)
     const cellConfidenceResponse = await handleCellConfidenceRequest(request, env)
     if (cellConfidenceResponse) return withCors(cellConfidenceResponse, request)

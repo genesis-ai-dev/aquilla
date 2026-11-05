@@ -1,3 +1,4 @@
+import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 // A project's LangQuest link (AQU-2105): its state, and the sync that keeps
 // the project following the linked language.
 //
@@ -25,7 +26,6 @@ import {
 } from "@/lib/langquest/api"
 import { syncLangQuest, type LangQuestSyncProgress, type LangQuestSyncResult } from "@/lib/langquest/sync"
 import type { LangQuestLink } from "@/lib/langquest/types"
-import posthog from "@/lib/posthog"
 
 const AUTO_SYNC_EVERY_MS = 2 * 60 * 1000
 
@@ -36,6 +36,7 @@ export type LangQuestSyncState =
   | { kind: "failed"; message: string }
 
 export function useLangQuestLink(projectId: string, roleLevel: number | null, onSynced?: () => void) {
+  const analytics = useAccountAnalytics()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const author = session?.username ?? "local"
@@ -93,7 +94,7 @@ export function useLangQuestLink(projectId: string, roleLevel: number | null, on
         })
         setSync({ kind: "done", result })
         if (result.cellsCreated + result.takesAttached + result.cellsRemoved > 0) onSyncedRef.current?.()
-        posthog.capture("langquest synced", {
+        analytics.capture("langquest synced", {
           project_id: projectId,
           trigger,
           mode: result.mode,
@@ -106,13 +107,13 @@ export function useLangQuestLink(projectId: string, roleLevel: number | null, on
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         setSync({ kind: "failed", message })
-        posthog.capture("langquest sync failed", { project_id: projectId, trigger, error: message.slice(0, 200) })
+        analytics.capture("langquest sync failed", { project_id: projectId, trigger, error: message.slice(0, 200) })
       } finally {
         running.current = false
         await reload()
       }
     },
-    [jwt, canSync, projectId, author, reload],
+    [jwt, canSync, projectId, author, reload, analytics],
   )
 
   const runSync = useCallback((trigger: "focus" | "manual") => syncLink(link, trigger), [syncLink, link])

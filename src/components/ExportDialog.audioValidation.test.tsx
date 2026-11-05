@@ -24,7 +24,7 @@ vi.mock("@/lib/audio/upload", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/audio/upload")>()
   return { ...actual, fetchCellAudio: vi.fn() }
 })
-vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn() } }))
+vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn() } }))
 
 import { useProjectCells } from "@/hooks/useProjectCells"
 import { exportAudioPerLine } from "@/lib/export/audio-per-line"

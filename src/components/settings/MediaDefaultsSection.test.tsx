@@ -48,7 +48,7 @@ describe("MediaDefaultsSection", () => {
       />,
     )
     expect(isOn(lockSwitch())).toBe(false)
-    expect(tierPicker().textContent).toContain("Project lead")
+    expect(tierPicker().textContent).toContain("Project Lead")
     expect(floorPicker().textContent).toContain("Maintainer")
   })
 

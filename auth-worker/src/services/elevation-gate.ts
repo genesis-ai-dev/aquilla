@@ -2,6 +2,9 @@
 // writes. OPS-44 extends the same rule to the sync-token mint and the
 // merge-sibling fold.
 //
+// OPS-51 extends it to the source-linking surface, including the hard project
+// delete.
+//
 // resolveProjectRole adds a { source: "platform", level: 700 } contribution for
 // every platform admin, and platform has the lowest tie PRIORITY — but priority
 // only breaks ties. 700 outranks every genuine grant below owner, so
@@ -65,10 +68,20 @@ export async function roleWithoutUnelevatedAdmin(
   user: AuthUser,
   projectId: string,
   callerRole: RoleResolution,
+  /**
+   * OPS-51: pass `{ includeArchived: true }` when `callerRole` itself came
+   * from {@link resolveProjectRoleIncludingArchived}. The genuine lookup
+   * otherwise answers null for an archived project, which would de-escalate an
+   * operator who genuinely owns a TRASHED project down to no access — locking
+   * them out of their own trash instead of out of another tenant's. Callers
+   * that resolved with the archive rule applied leave it off, so their
+   * behaviour is unchanged.
+   */
+  opts: { includeArchived?: boolean } = {},
 ): Promise<RoleResolution | null> {
   if (callerRole.source !== "platform") return callerRole
   if (await hasActiveElevation(c)) return callerRole
-  return resolveGenuineProjectRole(c.env, user, projectId)
+  return resolveGenuineProjectRole(c.env, user, projectId, opts)
 }
 
 /**

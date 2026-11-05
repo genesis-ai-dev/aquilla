@@ -1,7 +1,16 @@
 import { Events, Schema, State, makeSchema } from "@livestore/livestore"
 
 /** Bump on any offline event change, then run `pnpm offline:fixture` (enforced by eventlog-compat.test.ts). */
-export const OFFLINE_DATA_GENERATION = 5
+export const OFFLINE_DATA_GENERATION = 6
+
+/**
+ * Which server row fields a local cell row carries. A sync cursor records the
+ * version its file was last fully streamed under; catch-up trusts only a
+ * cursor at the current version, so a field added later reaches every row
+ * already stored (one full stream per file) instead of only rows that change.
+ * 1 — AQU-1422 `hidden`.
+ */
+export const CELL_FIELDS_VERSION = 1
 
 /**
  * AQU-1614: prefix for a lane key derived from a lane's legacy tag rather than
@@ -98,6 +107,9 @@ const cells = State.SQLite.table({
     aiDrafted: State.SQLite.boolean({ default: false }),
     sequenceIndex: State.SQLite.integer(),
     canonicalRef: State.SQLite.text({ nullable: true }),
+    // AQU-1422: the cell is parked ("Hide cell"). Only a source row carries it,
+    // as on the server (CellRow.hidden).
+    hidden: State.SQLite.boolean({ default: false }),
   },
   indexes: [
     { name: "idx_cells_project_file", columns: ["projectId", "fileId"] },
@@ -160,6 +172,9 @@ const syncCursors = State.SQLite.table({
     fileId: State.SQLite.text(),
     serverSeq: State.SQLite.integer({ nullable: true }),
     projectEpoch: State.SQLite.integer({ nullable: true }),
+    // CELL_FIELDS_VERSION the file was streamed under; null on cursors from
+    // before it was recorded.
+    fieldsVersion: State.SQLite.integer({ nullable: true }),
   },
   indexes: [{ name: "idx_sync_cursors_project", columns: ["projectId"] }],
 })
@@ -236,6 +251,8 @@ const events = {
       aiDrafted: Schema.Boolean,
       sequenceIndex: Schema.Number,
       canonicalRef: Schema.NullOr(Schema.String),
+      // AQU-1422. Optional: events from before generation 6 lack it.
+      hidden: Schema.optional(Schema.Boolean),
     }),
   }),
   cellRemoved: Events.clientOnly({
@@ -273,6 +290,7 @@ const events = {
           aiDrafted: Schema.Boolean,
           sequenceIndex: Schema.Number,
           canonicalRef: Schema.NullOr(Schema.String),
+          hidden: Schema.optional(Schema.Boolean),
         }),
       ),
     }),
@@ -411,6 +429,8 @@ const events = {
       fileId: Schema.String,
       serverSeq: Schema.NullOr(Schema.Number),
       projectEpoch: Schema.NullOr(Schema.Number),
+      // Optional: events from before generation 6 lack it.
+      fieldsVersion: Schema.optional(Schema.NullOr(Schema.Number)),
     }),
   }),
   syncCursorsRemoved: Events.clientOnly({
@@ -516,10 +536,10 @@ const materializers = State.SQLite.materializers(events, {
     }),
   "v1.OfflineProjectRemoved": ({ projectId }) => tables.offlineProjects.delete().where({ projectId }),
 
-  "v1.SyncCursorSet": ({ projectId, fileId, serverSeq, projectEpoch }) =>
+  "v1.SyncCursorSet": ({ projectId, fileId, serverSeq, projectEpoch, fieldsVersion = null }) =>
     tables.syncCursors
-      .insert({ id: syncCursorId(projectId, fileId), projectId, fileId, serverSeq, projectEpoch })
-      .onConflict("id", "update", { serverSeq, projectEpoch }),
+      .insert({ id: syncCursorId(projectId, fileId), projectId, fileId, serverSeq, projectEpoch, fieldsVersion })
+      .onConflict("id", "update", { serverSeq, projectEpoch, fieldsVersion }),
   "v1.SyncCursorsRemoved": ({ projectId }) => tables.syncCursors.delete().where({ projectId }),
   // Queued writes stay: removal refuses a project with any, and a stranded
   // row is still the user's unsent work.

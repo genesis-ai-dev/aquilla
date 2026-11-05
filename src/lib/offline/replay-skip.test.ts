@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { planReplaySkip, type ReplayRow } from "./replay-skip"
 
 const P = "proj-a"
@@ -18,6 +18,10 @@ function eventlog(rows: ReplayRow[], head: number | undefined) {
     syncStatusTable: "__livestore_sync_status",
     select: (query: string): Record<string, unknown>[] => {
       if (query.includes("__livestore_sync_status")) return head === undefined ? [] : [{ head }]
+      if (query.includes("ORDER BY")) {
+        const last = [...rows].sort((a, b) => b.seqNumGlobal - a.seqNumGlobal || b.seqNumClient - a.seqNumClient)[0]
+        return last === undefined ? [] : [{ ...last }]
+      }
       const names = /name (?:= '([^']+)'|IN \(([^)]+)\))/.exec(query)
       const wanted = names?.[1] !== undefined ? [names[1]] : (names?.[2] ?? "").split(",").map((n) => n.trim().replaceAll("'", ""))
       return rows.filter((r) => wanted.includes(r.name)).map((r) => ({ ...r }))
@@ -111,10 +115,35 @@ describe("planReplaySkip", () => {
     })
   })
 
+  it("never skips the eventlog's last event, so the rebuilt state db ends on the eventlog's head", () => {
+    // A single dequeue of a confirmed row would otherwise be skipped; as the last
+    // event it would leave the state head behind and force a rebuild every boot.
+    const rows = [row(1, 1, "v1.EventQueued", { id: "a" }), row(1, 2, "v1.EventDequeued", { id: "a" })]
+    const skip = planReplaySkip(eventlog(rows, 2))
+    expect(skip?.(rows[0])).toBe(true)
+    expect(skip?.(rows[1])).toBe(false)
+  })
+
+  it("handles clientOnly sequence numbers: confirmed only once a later synced event moves the head", () => {
+    // Every skippable event is clientOnly (client > 0); v1.LocalCheckpoint is synced.
+    const rows = [
+      row(3, 1, "v2.CellsSynced", { projectId: P, fileId: "f", rows: [] }),
+      row(3, 2, "v1.OfflineCopyRemoved", { projectId: P }),
+      row(4, 0, "v1.LocalCheckpoint", {}),
+      row(4, 1, "v1.OfflineProjectStatusSet", { projectId: P, status: "downloading" }),
+    ]
+    // e3.2 is above a head of 3 (e3.0): not yet confirmed.
+    expect(planReplaySkip(eventlog(rows, 3))).toBeUndefined()
+    const skip = planReplaySkip(eventlog(rows, 4))
+    expect(rows.map((r) => skip?.(r))).toEqual([true, false, false, false])
+  })
+
   it("never throws: a broken eventlog read replays everything, a broken row is kept", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const broken = { ...eventlog(history, 5), select: () => { throw new Error("boom") } }
     expect(planReplaySkip(broken)).toBeUndefined()
     const skip = planReplaySkip(eventlog(history, 5))
     expect(skip?.({ name: "v2.CellsSynced", argsJson: "{not json", seqNumGlobal: 1, seqNumClient: 9 })).toBe(false)
+    warn.mockRestore()
   })
 })

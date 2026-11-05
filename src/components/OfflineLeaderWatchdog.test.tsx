@@ -83,11 +83,17 @@ describe("OfflineLeaderWatchdog", () => {
     const booting = () => {
       offlineStore = { store: null, loading: true, error: null }
     }
-    const renderBooting = (restart = vi.fn(), slowRebuildMs = 120) =>
+    const renderBooting = (restart = vi.fn(), slowRebuildMs = 120, hungRebuildMs = 60_000) =>
       render(
         <>
           <Toaster />
-          <OfflineLeaderWatchdog bootStallMs={40} slowRebuildMs={slowRebuildMs} bootCheckEveryMs={10} restart={restart} />
+          <OfflineLeaderWatchdog
+            bootStallMs={40}
+            slowRebuildMs={slowRebuildMs}
+            hungRebuildMs={hungRebuildMs}
+            bootCheckEveryMs={10}
+            restart={restart}
+          />
         </>,
       )
 
@@ -138,7 +144,7 @@ describe("OfflineLeaderWatchdog", () => {
       expect(screen.queryByRole("button", { name: /restart app/i })).toBeNull()
     })
 
-    it("never prompts a restart mid-rebuild, and says it's still working once progress stalls", async () => {
+    it("doesn't prompt a restart mid-rebuild, and says it's still working once progress stalls", async () => {
       vi.spyOn(console, "warn").mockImplementation(() => {})
       booting()
       renderBooting()
@@ -156,6 +162,26 @@ describe("OfflineLeaderWatchdog", () => {
       reportOfflineRebuildProgress({ done: 20, total: 200 })
       expect(await screen.findByText(/once after an update/)).toBeInTheDocument()
       expect(screen.getByText(/Preparing your offline projects… 10%/)).toBeInTheDocument()
+    })
+
+    it("offers a restart once a rebuild has made no progress for a long time", async () => {
+      vi.spyOn(console, "warn").mockImplementation(() => {})
+      vi.spyOn(console, "error").mockImplementation(() => {})
+      const restart = vi.fn()
+      booting()
+      renderBooting(restart, 60, 120)
+      reportOfflineRebuildProgress({ done: 10, total: 200 })
+      expect(await screen.findByText(/once after an update/)).toBeInTheDocument()
+
+      expect(await screen.findByText(/may be stuck/)).toBeInTheDocument()
+      expect(screen.getByText(/Preparing your offline projects… 5%/)).toBeInTheDocument()
+      await userEvent.setup().click(screen.getByRole("button", { name: /restart app/i }))
+      expect(restart).toHaveBeenCalledOnce()
+
+      // Moving again takes the restart away.
+      reportOfflineRebuildProgress({ done: 20, total: 200 })
+      expect(await screen.findByText(/once after an update/)).toBeInTheDocument()
+      await waitFor(() => expect(screen.queryByRole("button", { name: /restart app/i })).toBeNull())
     })
 
     it("swaps a restart prompt for progress once a rebuild starts reporting", async () => {

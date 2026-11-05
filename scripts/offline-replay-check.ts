@@ -6,7 +6,9 @@
  *
  * Runs the rebuild twice — replaying every event, then with the replay-skip
  * rules (src/lib/offline/replay-skip.ts) — and fails unless both produce the
- * same rows in every app table. Uses LiveStore's own recreateDb with our
+ * same rows in every app table and the rebuilt state db's head matches the
+ * eventlog's (the leader rebuilds again on every boot when they differ).
+ * Uses LiveStore's own recreateDb with our
  * patches applied, on in-memory SQLite. `--cuts N` also checks the eventlog
  * as it stood at N points in its history (truncated there, with the
  * confirmed head moved back to match), which covers outbox rows still
@@ -86,9 +88,16 @@ async function rebuild(withSkip: boolean, cutAtGlobal?: number) {
     dump[table] = dbState.select(`SELECT * FROM ${table}`).map((row: Record<string, unknown>) => JSON.stringify(row)).sort()
   }
   const total = Number(dbEventlog.select("SELECT COUNT(*) AS n FROM eventlog")[0].n)
+  // The leader's own head check (make-leader-thread-layer.js, our patch): newest changeset row vs newest event.
+  const headOf = (db: ReturnType<typeof makeDb>, table: string): string => {
+    const row = db.select(`SELECT seqNumGlobal AS g, seqNumClient AS c FROM ${table} ORDER BY seqNumGlobal DESC, seqNumClient DESC LIMIT 1`)[0]
+    return row === undefined ? "none" : `e${row.g}.${row.c}`
+  }
+  const stateHead = headOf(dbState, "__livestore_session_changeset")
+  const eventlogHead = headOf(dbEventlog, "eventlog")
   dbState.close()
   dbEventlog.close()
-  return { ms, dump, replayed: total - skippedCount, total }
+  return { ms, dump, replayed: total - skippedCount, total, stateHead, eventlogHead }
 }
 
 async function check(label: string, cutAtGlobal?: number): Promise<boolean> {
@@ -102,6 +111,12 @@ async function check(label: string, cutAtGlobal?: number): Promise<boolean> {
     if (!equal) same = false
     if (!equal || cutAtGlobal === undefined) {
       console.log(`${equal ? "same" : "DIFFERENT"}  ${table}: ${a.length} rows (full) / ${b.length} rows (with skip)`)
+    }
+  }
+  for (const [name, run] of [["full", full], ["with skip", skipped]] as const) {
+    if (run.stateHead !== run.eventlogHead) {
+      same = false
+      console.log(`DIFFERENT  state head (${name}): ${run.stateHead}, eventlog head ${run.eventlogHead}`)
     }
   }
   const counts = APP_TABLES.map((t) => `${t} ${full.dump[t].length}`).join(", ")

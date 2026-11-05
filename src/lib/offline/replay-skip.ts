@@ -4,7 +4,7 @@
 // schema change, or when the state db and eventlog disagree) replays every
 // event ever committed — including every earlier download of a project the
 // user has since removed and downloaded again. On a real 34k-cell project
-// that was 60,956 events, of which 105 came after the last removal.
+// that was 60,958 events, of which 338 still need replaying.
 //
 // v1.OfflineCopyRemoved deletes every row of its project from cells, files,
 // projects, sync_cursors and offline_projects, so an earlier event whose only
@@ -25,6 +25,13 @@
 // Only removals and dequeues at or below the confirmed sync head count.
 // LiveStore only rolls back events above it, so a skipped event never needs
 // its changeset.
+//
+// The eventlog's last event is never skipped. The leader takes the state db's
+// head from its newest changeset row, and our @livestore/common patch rebuilds
+// whenever that differs from the eventlog's head, so a skipped last event
+// would mean a rebuild on every boot. (Every skippable event is clientOnly, so
+// today a later synced checkpoint always follows a confirmed one — this keeps
+// it safe if that changes.)
 
 /** The field holding the project id, for every event a later removal makes irrelevant. */
 const PROJECT_FIELD: Record<string, "id" | "projectId"> = {
@@ -92,8 +99,17 @@ const keepLatest = (map: Map<string, Seq>, key: string | undefined, seq: Seq, co
 export function planReplaySkip(eventlog: ReplayEventlog): ((row: ReplayRow) => boolean) | undefined {
   try {
     const head = eventlog.select(`SELECT head FROM ${eventlog.syncStatusTable}`)[0]?.head
-    if (typeof head !== "number") return undefined
+    if (typeof head !== "number") {
+      // Replaying everything is always correct, just slow; say so in case it's a type surprise.
+      if (head !== undefined) console.warn("[offline] Replaying the whole eventlog: unexpected sync head", { head })
+      return undefined
+    }
     const confirmed: Seq = { global: head, client: 0 }
+    const lastRow = eventlog.select(
+      `SELECT seqNumGlobal, seqNumClient FROM ${eventlog.eventlogTable} ORDER BY seqNumGlobal DESC, seqNumClient DESC LIMIT 1`,
+    )[0]
+    if (lastRow === undefined) return undefined
+    const last = seqOf(lastRow)
 
     const lastWipe = new Map<string, Seq>()
     const wipes = eventlog.select(
@@ -125,7 +141,7 @@ export function planReplaySkip(eventlog: ReplayEventlog): ((row: ReplayRow) => b
         if (field === undefined && !queueRow) return false
         const seq = { global: row.seqNumGlobal, client: row.seqNumClient }
         // Most of a log after the last removal: no need to parse anything.
-        if (compare(seq, latest) > 0) return false
+        if (compare(seq, latest) > 0 || compare(seq, last) === 0) return false
         const args = argsOf(row)
         if (queueRow) {
           const id = stringField(args, "id")
@@ -139,7 +155,8 @@ export function planReplaySkip(eventlog: ReplayEventlog): ((row: ReplayRow) => b
         return false
       }
     }
-  } catch {
+  } catch (error) {
+    console.warn("[offline] Replaying the whole eventlog: couldn't plan which events to skip", error)
     return undefined
   }
 }

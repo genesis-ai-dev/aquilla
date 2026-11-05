@@ -16,6 +16,21 @@
 //     is not validated, both as `scopeCellsForExport` does in the app;
 //   - the paragraph rules themselves come from the shared
 //     `plainTextStructuredBody`, so there is no second copy to drift.
+//
+// AQU-2383: the rebuilt body is LF-terminated and BOM-less, because that is
+// what the plain-text parser normalized the upload to. A Windows upload must
+// not come back as a Unix file, so the caller passes the source's envelope
+// (`detectTextFidelity`) and it is restored here.
+//
+// The caller also needs to know whether this rebuild says anything the upload
+// does not. Two things can make it differ, and BOTH have to be absent before
+// the route may serve the stored bytes instead:
+//
+//   - a translation went in (`translatedCells`), or
+//   - a cell was left out (`droppedCells`) — hidden in the editor, or filtered
+//     by `validatedOnly`. A hidden cell means a paragraph of the upload is
+//     deliberately missing from the export, which is a real edit even though
+//     no words were translated.
 
 import { walkAnchorChain } from "./cells-read-route"
 import { targetLaneDualReadBinds, targetLaneDualReadSql } from "./lane-id-sql"
@@ -25,6 +40,11 @@ import {
   plainTextStructuredBody,
   type PlainTextStructuredCell,
 } from "../../../src/lib/export/plaintext-structured"
+import {
+  applyTextFidelity,
+  NORMALIZED_TEXT_FIDELITY,
+  type TextFidelity,
+} from "../../../src/lib/export/text-fidelity"
 
 interface CellRow {
   cell_id: string
@@ -41,13 +61,34 @@ interface CellRow {
 const COLUMNS =
   "cell_id, anchor_cell_id, event_id, value, canonical_ref, medium, transcription, validated, hidden_at"
 
+export interface PlainTextExportOptions {
+  validatedOnly?: boolean
+  /** The source upload's envelope, from `detectTextFidelity` on its decoded
+   *  text. Omitted when the file has no stored blob to read it from, in which
+   *  case the body keeps the parser's normalized form. */
+  fidelity?: TextFidelity
+}
+
+export interface PlainTextExportResult {
+  /** The rebuilt body, in the source's line terminator and byte-order mark. */
+  body: string
+  /** Exported cells carrying a committed translation for this lane. */
+  translatedCells: number
+  /** Cells the export left out: hidden, or filtered by `validatedOnly`. */
+  droppedCells: number
+  /** AQU-2383: this rebuild says nothing the upload does not, so the upload
+   *  itself is the faithful export. True only when no translation went in AND
+   *  no cell was left out. */
+  untouched: boolean
+}
+
 export async function buildPlainTextExport(
   db: AquillaDb,
   projectId: string,
   fileId: string,
   lane: string,
-  options: { validatedOnly?: boolean } = {},
-): Promise<string> {
+  options: PlainTextExportOptions = {},
+): Promise<PlainTextExportResult> {
   const sources = await db
     .prepare(
       `SELECT ${COLUMNS} FROM cells
@@ -79,13 +120,22 @@ export async function buildPlainTextExport(
   }
 
   const cells: PlainTextStructuredCell[] = []
+  let translatedCells = 0
+  let droppedCells = 0
   for (const cellId of order) {
     const source = sourceById.get(cellId)
     const target = targetById.get(cellId)
     // Hiding is per cell and read off the SOURCE row only (AQU-1422).
-    if (source?.hidden_at != null) continue
+    if (source?.hidden_at != null) {
+      droppedCells++
+      continue
+    }
     const translated = decodeHtmlEntities(target?.value ?? "")
-    if (options.validatedOnly && !(translated.trim() && Number(target?.validated ?? 0) !== 0)) continue
+    if (options.validatedOnly && !(translated.trim() && Number(target?.validated ?? 0) !== 0)) {
+      droppedCells++
+      continue
+    }
+    if (translated.trim() !== "") translatedCells++
     cells.push({
       translated,
       source: semanticSourceText({
@@ -96,5 +146,11 @@ export async function buildPlainTextExport(
       group: target?.canonical_ref ?? source?.canonical_ref ?? "",
     })
   }
-  return plainTextStructuredBody(cells)
+  const body = plainTextStructuredBody(cells)
+  return {
+    body: applyTextFidelity(body, options.fidelity ?? NORMALIZED_TEXT_FIDELITY),
+    translatedCells,
+    droppedCells,
+    untouched: translatedCells === 0 && droppedCells === 0,
+  }
 }

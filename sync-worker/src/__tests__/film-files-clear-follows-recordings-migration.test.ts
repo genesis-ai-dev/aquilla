@@ -16,7 +16,7 @@ import { makeTestDb, type TestDb } from "./helpers/pg-test-db"
 const MIGRATION = readFileSync(
   path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
-    "../../../db/postgres/migrations/0194_film_files_clear_follows_recordings.sql",
+    "../../../db/postgres/migrations/0196_film_files_clear_follows_recordings.sql",
   ),
   "utf8",
 )

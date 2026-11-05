@@ -258,7 +258,11 @@ describe("admin authority is de-escalated on the paths that escape the session",
     // Both helpers must return the de-escalated answer on the un-elevated
     // branch; an early `return callerRole` after the elevation check would
     // silently restore admin power.
-    expect(gate).toContain("resolveGenuineProjectRole(c.env, user, projectId)")
+    // OPS-51 threads `opts` through so a caller that resolved with the archive
+    // rule off (source-linking's router) does not de-escalate an operator who
+    // genuinely owns a TRASHED project down to no access. Still the genuine
+    // lookup on the un-elevated branch, which is what this pins.
+    expect(gate).toContain("resolveGenuineProjectRole(c.env, user, projectId, opts)")
     expect(gate).toContain("getOrgMemberRole(c.env, orgId, user.id)")
   })
 })
@@ -280,5 +284,221 @@ describe("the reach of a platform-source token stays measured", () => {
       if (hits) counts[rel(f)] = hits.length
     }
     expect(counts).toEqual(EXEMPTIONS)
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────
+// OPS-52 (closes OPS-50 §1): the elevation census, as an assertion.
+//
+// OPS-45 measured how many auth-worker route modules make an elevation
+// decision and how many make none; OPS-48 separated their writes from their
+// reads and ranked what to decide next; OPS-50 found that the census method
+// could not see a decision once AQU-804 moved it into a shared guard, and
+// named the fix — "the census belongs in the drift guard, not in a document …
+// making it an assertion that fails when a new undecided module appears is
+// the follow-up, and it is the only thing that stops this ledger decaying
+// between passes."
+//
+// This is that assertion. Every route module that reaches a role a platform
+// operator can win must appear in LEDGER with one of three states:
+//
+//   "decides"    — makes the elevation decision itself. The assertion checks a
+//                  decision symbol is still present, so a refactor that drops
+//                  it fails here rather than in the next hand-run pass.
+//   "delegates"  — its authorization is a helper that decides (OPS-49's guard
+//                  pair). The assertion checks it resolves NO role of its own,
+//                  so a new route in it cannot sidestep the guard.
+//   "undecided"  — reaches platform-winnable power and makes no elevation
+//                  decision. NOT a clean bill: it is the open queue, carried
+//                  here so it is counted rather than re-derived. OPS-48's
+//                  ranked writes are annotated.
+//
+// A module that is in none of the three fails the first assertion. That is the
+// whole point: the next route to reach a platform-winnable role cannot default
+// into the undecided set silently.
+//
+// What this does NOT claim: that an "undecided" module is safe, or that a
+// "decides" module decided correctly. It is a coverage ledger over source
+// text. The behavioural tests are the per-finding suites
+// (admin-membership-elevation, merge-sibling, changeset-approval-elevation,
+// integration-guard-elevation, source-linking-elevation).
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Resolvers that can hand back a role a platform operator wins (level 700). */
+const PLATFORM_WINNABLE_RESOLVERS = [
+  "resolveProjectRole",
+  "resolveProjectRoleIncludingArchived",
+  "resolveProjectRoles",
+  "resolveOrgWriteRole",
+  "getEffectiveOrgRole",
+  "isPlatformAdmin",
+] as const
+
+/** Symbols that constitute making an elevation decision. */
+const DECISION_SYMBOLS = [
+  "roleWithoutUnelevatedAdmin",
+  "orgLevelWithoutUnelevatedAdmin",
+  "projectElevationDenial",
+  "hasActiveElevation",
+  "requireAdminElevation",
+] as const
+
+type LedgerState = "decides" | "delegates" | "undecided"
+
+/**
+ * One recorded state per route module. Paths are relative to
+ * auth-worker/src/routes. Keep the comments: they are the decision, and the
+ * next pass reads them before re-deciding anything.
+ */
+const LEDGER: Record<string, LedgerState> = {
+  // ── decides (13) ───────────────────────────────────────────────────────
+  "_integration-helpers.ts": "decides", // OPS-49, for all three routers below
+  "access-links.ts": "decides",
+  "agent-connect.ts": "decides",
+  "changeset-approvals.ts": "decides", // OPS-47
+  "credentials.ts": "decides", // OPS-44 (a PAT outlives the session)
+  "invites.ts": "decides",
+  "merge-sibling.ts": "decides", // OPS-44 (irreversible fold)
+  "org-settings.ts": "decides", // D7 (the org's live vendor keys)
+  "orgs.ts": "decides",
+  "project-members.ts": "decides", // AQU-1322's original eleven
+  "projects.ts": "decides", // AQU-1322
+  "source-linking.ts": "decides", // OPS-51 (the hard delete, and the link)
+  "sync-token.ts": "decides", // OPS-44 (the mint)
+
+  // ── delegates to _integration-helpers' guard pair (3) ──────────────────
+  "airtable.ts": "delegates",
+  "langquest.ts": "delegates",
+  "monday.ts": "delegates",
+
+  // ── undecided (33) — the open queue, not a clean bill ──────────────────
+  // OPS-48's ranked remainder, with its write counts. source-linking.ts was
+  // the head of this list and is now decided (OPS-51); these eight are what
+  // OPS-48 left, in its order.
+  "termbase-subscriptions.ts": "undecided", // OPS-48: 7 writes
+  "member-scopes.ts": "undecided", // OPS-48: 2 writes
+  "knowledge.ts": "undecided", // OPS-48: 2 writes
+  "team-handoffs.ts": "undecided", // OPS-48: 1 write
+  "project-settings.ts": "undecided", // OPS-48: 1 write
+  "ai-smart-edits.ts": "undecided", // OPS-48: 1 write
+  "ai-interventions.ts": "undecided", // OPS-48: 1 write
+  "agent-artifacts.ts": "undecided", // OPS-48: 1 write
+  // The rest: reads, AI proxies and helpers OPS-48 did not rank as writes.
+  // Unread by this series as elevation surfaces — which is the state this
+  // ledger exists to keep visible, not a judgment that they are fine.
+  "_contextual-helpers.ts": "undecided",
+  "access-audit.ts": "undecided",
+  "agent-memory.ts": "undecided",
+  "agent-sessions.ts": "undecided",
+  "agent.ts": "undecided",
+  "ai-harmonize.ts": "undecided",
+  "ai-passage-tags.ts": "undecided",
+  "ai-seams.ts": "undecided",
+  "ai-transcript-cleanup.ts": "undecided",
+  "aquifer.ts": "undecided",
+  "billing-workspace.ts": "undecided",
+  "billing.ts": "undecided",
+  "chat.ts": "undecided",
+  "edit-history.ts": "undecided",
+  "feedback.ts": "undecided",
+  "import-classify.ts": "undecided",
+  "import-sandbox.ts": "undecided",
+  "scene-briefs.ts": "undecided",
+  "style-rules.ts": "undecided",
+  "tools-build.ts": "undecided",
+  "tools-web.ts": "undecided",
+  "tools.ts": "undecided",
+  "transcription.ts": "undecided",
+  "usage.ts": "undecided",
+  "users.ts": "undecided",
+}
+
+describe("the platform-elevation census is an assertion, not a document (OPS-52)", () => {
+  const ROUTES = path.join(REPO, "auth-worker/src/routes")
+  const routeRel = (p: string) => path.relative(ROUTES, p).replace(/\\/g, "/")
+  const sources = new Map(
+    walk(ROUTES).map((f) => [routeRel(f), stripComments(readFileSync(f, "utf8"))]),
+  )
+
+  /**
+   * Reaches platform-winnable power: resolves such a role, delegates to a
+   * shared guard that does, or makes an elevation decision about one.
+   *
+   * The third arm matters — routes/sync-token.ts resolves nothing itself (the
+   * mint core does) and would otherwise fall out of the ledger entirely while
+   * being the very path OPS-44 closed.
+   */
+  const reaches = (src: string): boolean =>
+    PLATFORM_WINNABLE_RESOLVERS.some((r) => new RegExp(`\\b${r}\\s*\\(`).test(src)) ||
+    /\b(orgGuard|projectGuard)\s*\(/.test(src) ||
+    DECISION_SYMBOLS.some((d) => new RegExp(`\\b${d}\\s*\\(`).test(src))
+
+  it("every route module that reaches platform-winnable power has a recorded state", () => {
+    const found = [...sources]
+      .filter(([, src]) => reaches(src))
+      .map(([name]) => name)
+      .sort()
+    // Fails in BOTH directions on purpose: a new module that reaches a
+    // platform-winnable role must be added with a state, and a module that
+    // stops reaching one must be removed rather than left as a stale row.
+    expect(found).toEqual(Object.keys(LEDGER).sort())
+  })
+
+  it("every module recorded as deciding still makes a decision", () => {
+    for (const [name, state] of Object.entries(LEDGER)) {
+      if (state !== "decides") continue
+      const src = sources.get(name)
+      expect(src, `${name} is in the ledger but not on disk`).toBeDefined()
+      const decisions = DECISION_SYMBOLS.filter((d) =>
+        new RegExp(`\\b${d}\\s*\\(`).test(src as string),
+      )
+      expect(`${name}: ${decisions.join(",") || "NO DECISION"}`).toBe(
+        `${name}: ${decisions.join(",")}`,
+      )
+      expect(decisions.length, `${name} records "decides" but makes no decision`).toBeGreaterThan(0)
+    }
+  })
+
+  it("every module recorded as delegating resolves no role of its own", () => {
+    // Same rule as the OPS-49 pin above, applied from the ledger so a fourth
+    // delegating router inherits it without a new test.
+    for (const [name, state] of Object.entries(LEDGER)) {
+      if (state !== "delegates") continue
+      const src = sources.get(name) as string
+      const own = PLATFORM_WINNABLE_RESOLVERS.filter((r) =>
+        new RegExp(`\\b${r}\\s*\\(`).test(src),
+      )
+      expect(`${name}: ${own.length ? `UNGATED ${own.join(",")}` : "delegates"}`).toBe(
+        `${name}: delegates`,
+      )
+    }
+  })
+
+  it("every module recorded as undecided still makes no decision", () => {
+    // The other direction: a module that quietly STARTS deciding should be
+    // promoted in the ledger, so the count below stays true and the next pass
+    // does not spend its budget re-deciding something already closed.
+    for (const [name, state] of Object.entries(LEDGER)) {
+      if (state !== "undecided") continue
+      const src = sources.get(name) as string
+      const decisions = DECISION_SYMBOLS.filter((d) =>
+        new RegExp(`\\b${d}\\s*\\(`).test(src),
+      )
+      expect(`${name}: ${decisions.length ? `NOW DECIDES (${decisions.join(",")})` : "undecided"}`).toBe(
+        `${name}: undecided`,
+      )
+    }
+  })
+
+  it("the count is what the review series last reported", () => {
+    const tally = (s: LedgerState) => Object.values(LEDGER).filter((v) => v === s).length
+    // 10-26 re-measured 13 of 48 covered (deciding, or delegating to a guard
+    // that decides) by exactly this method. OPS-51 adds source-linking.ts and
+    // the denominator is 49: 16 of 49.
+    expect({ decides: tally("decides"), delegates: tally("delegates"), undecided: tally("undecided") })
+      .toEqual({ decides: 13, delegates: 3, undecided: 33 })
+    expect(tally("decides") + tally("delegates") + tally("undecided")).toBe(
+      Object.keys(LEDGER).length,
+    )
   })
 })

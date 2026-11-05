@@ -13,6 +13,8 @@ it("isolates accounts, rejects legacy yes and invalidates a late account respons
   localStorage.setItem("aquilla:analyticsEnabled", "true")
   await state.activate(session("unknown")); expect(state.eligible()).toBe(false)
   await state.activate(session("a")); expect(state.eligible()).toBe(true)
+  expect(state.eligibleForSession("a")).toBe(true)
+  expect(state.eligibleForSession("b")).toBe(false)
   const pending = state.activate(session("slow")); expect(state.eligible()).toBe(false)
   await state.activate(session("b")); release({ accountId: "slow", decision: decision(true) }); await pending
   expect(state.getSnapshot().accountId).toBe("b"); expect(state.eligible()).toBe(false)

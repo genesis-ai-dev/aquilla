@@ -1,3 +1,4 @@
+import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useOnline } from "@/hooks/useOnline"
@@ -17,8 +18,7 @@ import {
   settingsEditorName,
 } from "@/lib/sync/project-settings"
 import { readOfflineProjectSettings, rememberProjectSettingsOffline, whenOfflineStoreOpen } from "@/lib/sync/project-resolve"
-import type { ProjectOrgPolicy, ProjectVisibilityFloors } from "@/lib/sync/project-org-policy"
-import posthog from "@/lib/posthog"
+import type { ProjectOrgPolicy, ProjectVisibilityFloors, VisibilityFloorView } from "@/lib/sync/project-org-policy"
 import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
 import { claimHydrationReport, retainProjectOpen } from "./project-settings-open"
 import { useDraftingSettingsUpload } from "./useDraftingSettingsUpload"
@@ -323,6 +323,9 @@ export interface UseProjectSettings {
    * first response that carries them.
    */
   orgMediaDefaults: MediaDefaults
+  /** AQU-2342: the legacy agent brief text from the same response ("" when
+   *  none, or once the project stored its own instructions). */
+  legacyProjectBriefText: string
   /**
    * AQU-1771: the org policy this project's surfaces apply, and the
    * visibility floors it enforces, from the same response. Null before the
@@ -331,6 +334,10 @@ export interface UseProjectSettings {
    */
   orgPolicy: ProjectOrgPolicy | null
   visibilityFloors: ProjectVisibilityFloors | null
+  /** AQU-2305: the import floor this project enforces, split org / own /
+   *  effective. Null until a response carries it (and on a server that
+   *  predates it), where `resolveProjectPolicy` derives the same split. */
+  importFloor: VisibilityFloorView | null
   /** AQU-1418: the project's lane rows from the last settings response.
    *  Null before the first response that carries them, and on a server
    *  that predates lane rows. */
@@ -540,6 +547,8 @@ function localSettingsFrom(
     out.ttsSettings = ttsRest
   }
   if (record.terminology != null) out.terminology = record.terminology
+  if (record.translationInstructions != null)
+    out.translationInstructions = record.translationInstructions
   if (record.livingMemoryEntries != null) out.livingMemoryEntries = record.livingMemoryEntries
   if (record.translationBrief != null) out.translationBrief = record.translationBrief
   if (record.draftContext != null) out.draftContext = record.draftContext
@@ -551,6 +560,7 @@ export function useProjectSettings(
   roleLevel: number | null,
   options?: UseProjectSettingsOptions,
 ): UseProjectSettings {
+  const analytics = useAccountAnalytics()
   const termbaseEditMinRole = options?.termbaseEditMinRole
   const languageEditMinRole = options?.languageEditMinRole
   const { session } = useFrontierSession()
@@ -619,7 +629,9 @@ export function useProjectSettings(
   const [orgValidationCountAudio, setOrgValidationCountAudio] = useState<number | null>(null)
   const [orgPolicy, setOrgPolicy] = useState<ProjectOrgPolicy | null>(null)
   const [visibilityFloors, setVisibilityFloors] = useState<ProjectVisibilityFloors | null>(null)
+  const [importFloor, setImportFloor] = useState<VisibilityFloorView | null>(null)
   const [orgMediaDefaults, setOrgMediaDefaults] = useState<MediaDefaults>(EMPTY_MEDIA_DEFAULTS)
+  const [legacyProjectBriefText, setLegacyProjectBriefText] = useState("")
   const [lanes, setLanes] = useState<ProjectLaneView[] | null>(null)
   const writeServer = useCallback((next: ProjectSettingsResponse | null) => {
     serverRef.current = next
@@ -631,7 +643,9 @@ export function useProjectSettings(
     if (next?.orgValidationCountAudio !== undefined) setOrgValidationCountAudio(next.orgValidationCountAudio)
     if (next?.orgPolicy !== undefined) setOrgPolicy(next.orgPolicy)
     if (next?.visibilityFloors !== undefined) setVisibilityFloors(next.visibilityFloors)
+    if (next?.importFloor !== undefined) setImportFloor(next.importFloor)
     if (next?.orgMediaDefaults !== undefined) setOrgMediaDefaults(next.orgMediaDefaults)
+    if (next?.legacyProjectBriefText !== undefined) setLegacyProjectBriefText(next.legacyProjectBriefText)
     if (next?.lanes !== undefined) setLanes(next.lanes)
   }, [])
   // A response the server actually returned (never an optimistic guess): also
@@ -704,7 +718,7 @@ export function useProjectSettings(
       setHasFetched(true)
       const withinMs = got ? claimHydrationReport(projectId) : null
       if (got && withinMs !== null) {
-        posthog.capture("project settings hydrated", {
+        analytics.capture("project settings hydrated", {
           project_id: projectId,
           within_ms: withinMs,
           has_server_row: got.version > 0,
@@ -763,6 +777,9 @@ export function useProjectSettings(
             ...(got.settings.terminology != null
               ? { terminology: got.settings.terminology }
               : {}),
+            ...(got.settings.translationInstructions != null
+              ? { translationInstructions: got.settings.translationInstructions }
+              : {}),
             ...(got.settings.livingMemoryEntries != null
               ? { livingMemoryEntries: got.settings.livingMemoryEntries }
               : {}),
@@ -782,7 +799,7 @@ export function useProjectSettings(
     } finally {
       if (refreshInFlightRef.current === request) refreshInFlightRef.current = null
     }
-  }, [projectId, jwt, hydrateFromOfflineCopy, writeServerConfirmed])
+  }, [projectId, jwt, hydrateFromOfflineCopy, writeServerConfirmed, analytics])
 
   // AQU-1816: what a writer that bypasses `patch` calls instead of a bare
   // `refresh()`. The broadcast reaches the sibling instances (and the overview's
@@ -944,13 +961,13 @@ export function useProjectSettings(
       const nonEmptyCount = Object.values(local).filter((v) => v !== "" && v != null).length
       if (out.kind === "ok") {
         writeServerConfirmed(out.value)
-        posthog.capture("project settings migrated", {
+        analytics.capture("project settings migrated", {
           project_id: projectId,
           fields_count: nonEmptyCount,
         })
       } else if (out.kind === "conflict") {
         writeServerConfirmed(out.latest)
-        posthog.capture("project settings migration conflict", {
+        analytics.capture("project settings migration conflict", {
           project_id: projectId,
           fields_count: nonEmptyCount,
         })
@@ -958,7 +975,7 @@ export function useProjectSettings(
       // forbidden / error: leave server at version 0; display is still backed
       // by local cache. A fresh hook instance will retry on next mount.
     })()
-  }, [hasFetched, server, canEdit, local, jwt, projectId, writeServerConfirmed])
+  }, [hasFetched, server, canEdit, local, jwt, projectId, writeServerConfirmed, analytics])
 
   // AQU-2259: upload this browser's old drafting settings once, when the team
   // has none yet (src/hooks/useDraftingSettingsUpload.ts).
@@ -970,8 +987,8 @@ export function useProjectSettings(
       version: response.version,
       origin: instanceIdRef.current,
     })
-    if (wrote) posthog.capture("project drafting settings uploaded", { project_id: projectId })
-  }, [projectId, writeServerConfirmed])
+    if (wrote) analytics.capture("project drafting settings uploaded", { project_id: projectId })
+  }, [projectId, writeServerConfirmed, analytics])
   useDraftingSettingsUpload({
     projectId,
     jwt,
@@ -1131,7 +1148,7 @@ export function useProjectSettings(
         console.warn("[useProjectSettings] local IDB conflict-snap failed", err)
       })
       setConflict(true)
-      posthog.capture("project settings sync conflict", {
+      analytics.capture("project settings sync conflict", {
         project_id: projectId,
         conflicting_user: settingsEditorName(result.latest.updatedBy),
       })
@@ -1158,7 +1175,7 @@ export function useProjectSettings(
       }).catch((err) => {
         console.warn("[useProjectSettings] local IDB forbidden-rollback failed", err)
       })
-      posthog.capture("project settings write forbidden", {
+      analytics.capture("project settings write forbidden", {
         project_id: projectId,
         role_level: roleLevel,
       })
@@ -1175,7 +1192,7 @@ export function useProjectSettings(
       return rollbackRejectedKeys(prev, partial, snapTarget)
     })
     return { kind: "error", message: result.message, status: result.status }
-  }, [projectId, jwt, roleLevel, termbaseEditMinRole, languageEditFloor, refresh, runSerialized, t, writeServerConfirmed])
+  }, [projectId, jwt, roleLevel, termbaseEditMinRole, languageEditFloor, refresh, runSerialized, t, writeServerConfirmed, analytics])
 
   // AQU-1767 phase 2: let a history step read and write this project's
   // settings through this hook, wherever the person presses Undo.
@@ -1207,7 +1224,9 @@ export function useProjectSettings(
     orgValidationCountAudio,
     orgPolicy,
     visibilityFloors,
+    importFloor,
     orgMediaDefaults,
+    legacyProjectBriefText,
     lanes,
     isOnline,
     canEdit,

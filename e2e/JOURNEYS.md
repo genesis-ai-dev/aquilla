@@ -32,6 +32,7 @@ not a micro-spec farm.
 | Auth | First-login / account-setup status (sentinel) | `e2e/specs/auth/login-account-setup-status.smoke.spec.ts` |
 | Editor | Import markdown, edit cell, persists across reload and immediate hard navigation; cold opens reveal complete source/target rows while the remaining rows load; imported video automatically links its picture and preserves signed range playback and seeking after reload; YouTube imports support a picture only whose first captions, attached from the Text view without the track-editing switch, become its own rows (subtitle file type, original caption download) while a later caption file stays a timeline-only track (AQU-1566), original media with configured ASR or embedded-caption review, and user caption exports with unchanged original download | `e2e/specs/editor/import-and-edit.smoke.spec.ts` |
 | Importing | Media with companion or embedded MP4/M4A captions preserves reviewed wording, cue boundaries, playable source clips, and byte-exact original media across publication and reload. Attaching captions creates an independent track; counted overwrite preserves other wording and source audio. Pasted and uploaded scripts reuse persisted word timings, preserve paragraph boundaries, save reviewed independent tracks, and retain byte-exact original script downloads (SPA → sync-worker → Postgres + R2). Preview, confidence, boundary correction, and consent changes also have RTL coverage | `e2e/specs/editor/import-media-captions.smoke.spec.ts` |
+| Audio & Voice | Transcription is a background job, never a gate on the document (AQU-1917): with the hosted ASR endpoint hung or returning 500, automatic transcription after a media import still leaves the contributor able to edit a cell, save it, switch files and reload with the edit intact (SPA → sync-worker → Postgres), reports in a toast rather than a modal, and writes nothing into the document on a failed run. The per-cell badge's own error/retry rendering is covered in RTL (`src/components/CellTranscribeBadge.test.tsx`) | `e2e/specs/editor/transcription-never-blocks.smoke.spec.ts` |
 | Editor | BIA ghost-text next words learned from validated target cells (projection → SPA read → forecast worker); the suggestion is a decoration only until Tab/→ accepts it; "words that fit here" replaces a selected word; both commit like typing (full suite, not smoke — an aid that never writes on its own; off by default since AQU-2117, so the spec and the showcases turn the "Suggest next words" switch on through View settings first; never-mutates-the-document, Esc, setting toggle and Tab-over-cell-navigation covered in RTL: `TranslatedEditor.ghostText.test.tsx`, `ghost-text-plugin.test.ts`) | `e2e/specs/editor/ghost-text.spec.ts` |
 | Editor | Adaptive cell pages preserve ordering and show download progress | Covered in worker integration (`cells-read.test.ts`) and RTL (`CellLoadingProgress.test.tsx`, `useActiveCellStore.stale-rejection.test.tsx`) |
 | Editor | Hidden cells are not work — excluded from progress (numerator and denominator, live in both directions), health, automatic drafting and search (AQU-1424) | Covered in worker integration (`sync-worker/src/__tests__/hidden-cells-progress.test.ts` — progress projection, `files` counters, FTS; `auth-worker/src/__tests__/hidden-cells-agent.test.ts` — the shared cell selector behind autopilot and the agent's read/draft, plus agent search) and RTL/unit (`useActiveCellStore.hiddenProgress.test.ts`, `src/lib/completion/draft-targets.test.ts`, `src/lib/health/excluded-cell.test.ts`). No new smoke: the hide/show journey itself is AQU-1422's row, and nothing here can lose data, access or a committed artifact — a regression misreports a number or wastes a credit. |
@@ -440,6 +441,37 @@ UI chrome that used to be one smoke file per click is covered under
   had no Docker, hence no local Postgres and no runnable stack. It is on the ticket's QA checklist
   rather than written blind — same call as the AQU-1187 row below. There is no existing org-floor
   smoke to extend (no spec drives `/settings/security` today), so this would be a new journey file.
+  AQU-2306 adds the row's disclosure of which projects require MORE than the org: the count, the
+  zero state, the loading state that says nothing, the capped and visibility-filtered list with its
+  "and N more" remainder, the absence of a reset, and the re-read when the org's floor moves are in
+  `ImportPermissionsSection.test.tsx`; the server side of the count — name-visibility filtering, the
+  50 cap beside the exact total, the number-only read of AQU-2305's `wp_import_min_role` column, and the count falling to zero when the ORG
+  rises past a project with nothing written to that project — in auth-worker
+  `org-stricter-import-projects.test.ts`. It shares the walk above's gap for the same reason, and
+  the cross-project version of it (project A goes stricter → the org's Security row names A → the
+  link lands on A's Import card) is on AQU-2306's QA checklist.
+- Project import floor (AQU-2305): a project may make that same floor **stricter and never looser**.
+  A maintainer sets **Project settings → Import → "Who can import files"** from "Organization default
+  (Project lead)" to "Set for this project" → Maintainer, and in that project alone a project lead
+  loses Import "New source text", the sidebar re-import and the IDML repair, while the same lead still
+  imports in a sibling project of the same org. With the org itself at Maintainer the project's role
+  select offers nothing lower — the lower rung is disabled with the stricter-only reason on the option
+  — and a value below the org's floor written through the settings API is refused with a 400 naming
+  that floor, so the picker's restraint is a convenience and not the protection. A stored value the
+  org has since overtaken is inert: it displays as following the organization and enforces the org's
+  floor. The floor the perimeter applies is the HIGHER of the two
+  (`sync-worker/src/__tests__/authorize-project-import-floor.test.ts` — stricter enforced, looser and
+  off-ladder inert, no project row / a throwing read → Project lead, an owner reads neither settings
+  row, each row read once per batch); the write refusal, the three-way `importFloor` on the settings
+  response, the clear-on-omit and the project lead's 403 in
+  `auth-worker/src/__tests__/project-import-floor.test.ts`; the row itself — the source selector, the
+  disabled lower option with its hint, the cleared key on "Organization default", an inert stored
+  value reading as the org's, and the whole row disabled for a lead — in
+  `ProjectSettings.importFloor.test.tsx`. The key is never copied down a source link
+  (`inherited-settings.test.ts`). **No smoke, for AQU-2304's reason and inheriting its gap:** the walk
+  that matters spans two projects, two roles and a direct sync-API post, which needs a running stack
+  this box has no Docker for. It is on the ticket's QA checklist rather than written blind, and it
+  would extend the AQU-2304 journey file that does not exist yet rather than adding a second one.
 - Mobile sidebar sheet chrome (org + editor dock): header PanelLeft opens a left sheet — RTL in `AppShell.test.tsx`. Org navigate-and-close also has `e2e/specs/orgs/mobile-sidebar-sheet.smoke.spec.ts`
 - Mobile editor rows stack source and target beside a compact line gutter, share a row-level health indicator, and keep Source/Target language controls side by side. Desktop keeps equal side-by-side columns — covered in RTL (`EditorTable.cellWidth.test.tsx`, `EditorTable.validationGutter.test.tsx`).
 - Agent works on compact viewports (2026-09-30, restored after #802 hid it): the single-column Team workspace keeps its entry points below `lg`, and picking a conversation from the mobile sidebar sheet closes the sheet even when only `?conversation=` changes — covered in RTL (`AppShell.test.tsx` sheet close; `FileChapterToolbar.test.tsx` / `LeftDock.test.tsx` for entry-point wiring; `ProjectWorkspaceRoute.test.tsx` for a direct Agent URL staying on Agent). Verified at 375px on the dev stack. AQU-1496: every `/project/:id/...` surface shares one route wrapper — `ProjectWorkspaceRoute.test.tsx` pins it, so a surface hop keeps the workspace (and its open file) mounted; a guard on one surface alone is what broke that.
@@ -551,3 +583,13 @@ Parallel Bibles missing-reference empty state is covered in RTL:
 `src/components/ParallelBiblesSidebar.test.tsx` (absent/book-only references,
 version picker access, and recovery when a valid reference appears).
 AQU-1249: `e2e/specs/collab/cross-user-comment.smoke.spec.ts` also covers a named anonymous guest joining a PIN checking link and saving feedback visible to the project owner. Default-off experimental discovery and hierarchical selection are covered in RTL (`ExperimentalFlagsSection.test.tsx`, `CheckingScopePicker.test.tsx`).
+
+### Optional analytics consent (AQU-2242 / AQU-2381)
+
+`e2e/privacy/analytics-consent.spec.ts` runs separately with
+`e2e/config/playwright.config.privacy.ts` and an analytics-enabled hermetic stack
+(see `e2e/privacy/README.md`). It verifies zero pre-approval contact, approved
+positive controls, account-specific identities and recordings, masking, stale
+callbacks, withdrawal, offline recovery and cross-tab refusal in Chromium,
+Firefox and WebKit. `projects/onboarding.smoke.spec.ts` checks the initially
+checked draft, explicit confirmation, Back/login navigation and denied storage.

@@ -254,6 +254,7 @@ export async function alignReimportedIdmlFile(args: {
   signal?: AbortSignal
   onProgress?: (done: number, total: number) => void
 }): Promise<IdmlReimportAlignOutcome> {
+  const analytics = posthog.scope()
   const empty: IdmlReimportAlignOutcome = { aligned: [], unchanged: 0, failed: 0, skipped: 0, manual: [] }
   if (args.signal?.aborted) return empty
   const jwt = await args.getToken(args.fileId)
@@ -288,7 +289,7 @@ export async function alignReimportedIdmlFile(args: {
   }
   for (const cell of outcome.manual) markManualStyleAlign(cell.id)
   if (outcome.aligned.length > 0) {
-    posthog.capture("ai styles aligned", {
+    analytics.capture("ai styles aligned", {
       provider: args.host.provider,
       model: args.host.model,
       source_language: args.sourceLanguage,

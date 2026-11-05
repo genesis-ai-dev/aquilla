@@ -10,6 +10,7 @@ import { describe, it, expect } from "vitest"
 import {
   assistantTextOf,
   createRun,
+  formatProgress,
   proposalsOf,
   reduceRunFrame,
   failRun,
@@ -113,6 +114,59 @@ describe("reduceRunFrame", () => {
     expect(mid.progress).toEqual({ label: "Drafting MRK 4", done: 3, total: 12 })
     const done = reduceRunFrame(mid, { type: "done", runId: "r1", status: "ok" })
     expect(done.progress).toBeUndefined()
+  })
+
+  // AQU-1536: the draft tool runs two batched model calls, so it reports the
+  // pass it is on and no counter. The dock must show that label as-is, and the
+  // line must not outlive the tool that owned it — a stage line left standing
+  // after the tool gave up is the frozen `Researching N cells — 0/N` the
+  // translator could not tell from a stalled run.
+  describe("counter-less stage progress (AQU-1536)", () => {
+    const stage: AgentFrame = { type: "progress", label: "Researching 7 cells (pass 1 of 2)" }
+
+    it("keeps a progress frame that carries no counter", () => {
+      const run = fold([stage])
+      expect(run.progress).toEqual({ label: "Researching 7 cells (pass 1 of 2)" })
+      expect(run.progress).not.toHaveProperty("done")
+      expect(run.progress).not.toHaveProperty("total")
+    })
+
+    it("formatProgress shows the label alone without a counter, and done/total with one", () => {
+      expect(formatProgress({ label: "Researching 7 cells (pass 1 of 2)" })).toBe(
+        "Researching 7 cells (pass 1 of 2)",
+      )
+      expect(formatProgress({ label: "Drafting MRK 4", done: 3, total: 12 })).toBe("Drafting MRK 4 — 3/12")
+      // A half-specified counter is not a counter.
+      expect(formatProgress({ label: "Researching", done: 0 })).toBe("Researching")
+    })
+
+    it("clears the stage line when the owning tool reports a result, success or failure", () => {
+      const failed = fold([
+        { type: "code_start", step: 1, kind: "draft", summary: "7 cells" },
+        stage,
+        { type: "code_result", step: 1, ok: false, summary: "drafting research provider 503" },
+      ])
+      expect(failed.progress).toBeUndefined()
+      expect(failed.items[0]).toMatchObject({ kind: "tool", step: 1, ok: false })
+
+      const succeeded = fold([
+        { type: "code_start", step: 1, kind: "draft", summary: "7 cells" },
+        stage,
+        { type: "code_result", step: 1, ok: true, summary: "7 drafted" },
+      ])
+      expect(succeeded.progress).toBeUndefined()
+    })
+
+    it("clears the stage line even when no tool item matches the result's step", () => {
+      const run = fold([stage, { type: "code_result", step: 9, ok: false, summary: "orphan" }])
+      expect(run.progress).toBeUndefined()
+    })
+
+    it("clears the stage line when the run errors", () => {
+      const run = fold([stage, { type: "error", message: "stream closed" }])
+      expect(run.status).toBe("error")
+      expect(run.progress).toBeUndefined()
+    })
   })
 
   it("an error frame is sticky across a later done frame", () => {

@@ -2,7 +2,8 @@
 // synthesis, and the single up-front consent gate.
 
 import { setTranscriptionProvider } from "./transcription-preference"
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import { setTranscribeStatus, clearTranscribeStatus } from "./transcribe-status"
 
 const requestAiModelConsent = vi.fn(async (_model: unknown) => true)
 vi.mock("./ai-consent", async (importOriginal) => {
@@ -189,5 +190,44 @@ describe("reporting progress to whoever is showing it", () => {
     // Still never throws — a failed transcribe leaves the file exactly as a
     // manual-transcribe user would find it.
     expect(onDone).not.toHaveBeenCalled()
+  })
+})
+
+// ── AQU-1917: a run the ASR backend rejected must not report success ──────
+//
+// `transcribeCell` catches a failed ASR call, records the error on the clip's
+// status and RESOLVES, so `runTranscribeAll` never throws for it. The
+// post-import report used to treat that as a completed run and say
+// "Transcribed N sections of …" over a file that had gained no text at all.
+
+describe("a run the backend rejected is reported as a failure, not a success", () => {
+  const seed = { fileId: "f3", cells: buildMediaSeedCells({
+    fileId: "f3", fileName: "c.mp3",
+    specs: [{ cellId: "c1", startMs: 0, endMs: 1_000 }],
+    audioId: "c.mp3", url: "frontier-audio://c.mp3",
+  }) }
+
+  afterEach(() => clearTranscribeStatus("c.mp3"))
+
+  it("routes a batch that left an error to onFailed, and never to onDone", async () => {
+    runTranscribeAll.mockImplementation(async () => {
+      setTranscribeStatus("c.mp3", { kind: "error", message: "HTTP 500" })
+    })
+    const onDone = vi.fn()
+    const onFailed = vi.fn()
+    await autoTranscribeImportedMedia({ seed, projectId: "p1", session: null, onDone, onFailed })
+    expect(onFailed).toHaveBeenCalledWith("HTTP 500")
+    expect(onDone).not.toHaveBeenCalled()
+  })
+
+  it("still reports a real run through onDone", async () => {
+    runTranscribeAll.mockImplementation(async () => {
+      setTranscribeStatus("c.mp3", { kind: "done", wordCount: 3, durationMs: 10 })
+    })
+    const onDone = vi.fn()
+    const onFailed = vi.fn()
+    await autoTranscribeImportedMedia({ seed, projectId: "p1", session: null, onDone, onFailed })
+    expect(onDone).toHaveBeenCalledTimes(1)
+    expect(onFailed).not.toHaveBeenCalled()
   })
 })

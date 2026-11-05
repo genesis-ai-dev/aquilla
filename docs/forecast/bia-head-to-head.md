@@ -167,10 +167,12 @@ edges ahead: 2.91 vs 2.80.
 - **Agglutinative / polysynthetic:** every method is weak (Quechua 3–14 % next word, Inupiatun 5–18 %). Whole-word
   matching is the shared limit.
 
-**Burmese (corrected).** The eBible Burmese text puts a ZERO WIDTH SPACE (U+200B) between every syllable. ICU's word
-segmenter (78.2) treats ZWSP as a break, so every method sees syllables there. Without ZWSP, `Intl.Segmenter` gives
-dictionary words (ဘုရားသခင်|သည်|…). The earlier note in this doc blamed ICU, which was wrong. Stripping ZWSP before
-segmenting is a follow-up: it changes the caret offsets.
+**Burmese (corrected).** The eBible Burmese text puts a ZERO WIDTH SPACE (U+200B) between every syllable, and ICU's
+word segmenter (78.2) treats ZWSP as a break — so every method saw syllables there. Without ZWSP, `Intl.Segmenter`
+gives dictionary words (ဘုရားသခင်|သည်|…); the earlier note in this doc blamed ICU, which was wrong. The tokenizer now
+drops ZWSP (and U+2060 / U+FEFF) before segmenting and maps the offsets back onto the original text, so Burmese
+segments into dictionary words either way (AQU-1895). The Burmese rows below were measured before that change and
+still reflect syllable-level tokens.
 
 ## The measurement is the one users get
 

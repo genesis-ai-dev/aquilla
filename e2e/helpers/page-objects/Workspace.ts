@@ -134,6 +134,21 @@ export class Workspace {
     await this.waitForImportSettled()
   }
 
+  /**
+   * Import media and wait only for the authoritative sidebar row.
+   *
+   * `importMediaFile` additionally waits for the import dialog's overlay to
+   * go, which AQU-1917's specs cannot use: they hold a transcription request
+   * open on purpose, and the resulting long-lived progress toast keeps that
+   * overlay check busy. Those specs assert the "no modal over the workspace"
+   * rule themselves, against `modalDialogs()`, so the settle heuristic here
+   * would only add a second, flakier copy of it.
+   */
+  async startMediaImport(filePath: string, fileName: string): Promise<void> {
+    await this.chooseImportFiles(filePath)
+    await this.waitForFileInSidebar(fileName)
+  }
+
   /** Review companion captions before publishing the media file. */
   async previewMediaWithCaptions(
     media: FilePayload,

@@ -611,7 +611,7 @@ describe("ProjectOverview load states", () => {
       name: "Loading project details",
     })
     expect(status).toHaveAttribute("aria-busy", "true")
-    expect(status.querySelector("[data-slot='spinner']")).not.toBeNull()
+    expect(status.querySelector("[data-slot='loading-cursor']")).not.toBeNull()
     expect(screen.getByText("Loading project details…")).toBeInTheDocument()
     expect(screen.queryByRole("heading", { level: 1, name: "John" })).not.toBeInTheDocument()
   })

@@ -21,6 +21,15 @@
 //   POST   /:projectId/detach-source      clear upstream    (project_lead+)
 //   DELETE /:projectId                    blocked-if-downstreams owner-only
 //
+// OPS-51: every floor on this router is satisfied by platform-admin power
+// alone (resolveProjectRole contributes { source: "platform", level: 700 } on
+// every project on the platform, which clears both LINK_MIN_ROLE and the
+// OWNER floor on DELETE). The six WRITES below therefore strip that power
+// unless the session is elevated, then re-apply their own floor to what
+// remains, per AQU-1322 / OPS-44. The reads are left open on purpose —
+// AQU-2003 settled that an un-elevated operator may open another tenant's
+// project read-only — and each one says so at its own guard.
+//
 // The archive / unarchive flow already exists in routes/projects.ts. This
 // file adds the source-linking surface only — it does NOT redefine archive
 // (avoiding the conflict 1A might also touch). It does add the
@@ -38,6 +47,7 @@ import {
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE } from "../types"
 import { resolveProjectRoleIncludingArchived } from "../services/project-permissions"
+import { roleWithoutUnelevatedAdmin } from "../services/elevation-gate"
 import {
   chainContains,
   clearLinkAdoption,
@@ -218,6 +228,21 @@ sourceLinking.post(
         403,
       )
     }
+    // OPS-51: a link is a STANDING cross-tenant data flow, not one write — the
+    // mirror keeps copying the upstream's cells into this project long after
+    // any elevation would have lapsed, so an elevation check at use time can
+    // never reach it. Admin power is stripped unless elevated and the same
+    // floor re-applied, so an operator who genuinely leads the project is
+    // unaffected. The upstream side is narrowed below, at its own check.
+    const effective = await roleWithoutUnelevatedAdmin(c, user, projectId, role, {
+      includeArchived: true,
+    })
+    if (!effective || effective.level < LINK_MIN_ROLE) {
+      return c.json(
+        { error: "elevation required to link a project's source with platform-admin access" },
+        403,
+      )
+    }
 
     const project = await loadProjectWithSource(c.env, projectId)
     if (!project) return c.json({ error: "project not found" }, 404)
@@ -239,6 +264,25 @@ sourceLinking.post(
     if (!sourceRole) {
       return c.json({ error: "not found or no access to source project" }, 403)
     }
+    // OPS-51: and the upstream side. The pen-test check above was added
+    // precisely to stop "link my own project to ANY project id on the platform
+    // and mirror its source cells" — but platform power satisfies it for free
+    // on every project, which is that finding restored for one principal, and
+    // persistently. Narrowed to the caller's genuine access to the upstream;
+    // the lane check below keys off this level, so it narrows with it.
+    const sourceEffective = await roleWithoutUnelevatedAdmin(
+      c,
+      user,
+      sourceProjectId,
+      sourceRole,
+      { includeArchived: true },
+    )
+    if (!sourceEffective) {
+      return c.json(
+        { error: "elevation required to link a project's source with platform-admin access" },
+        403,
+      )
+    }
 
     // AQU-1605: the chosen upstream lane, checked against this caller's access
     // to the upstream — see resolveUpstreamLinkLane. Done after the source-role
@@ -248,7 +292,7 @@ sourceLinking.post(
       consumes,
       laneId,
       userId: user.id,
-      upstreamRole: sourceRole.level,
+      upstreamRole: sourceEffective.level,
     })
     if (!lane.ok) return c.json({ error: lane.error }, lane.status)
 
@@ -517,6 +561,11 @@ sourceLinking.post(
     if (!sourceRole) {
       return c.json({ error: "not found or no access to source project" }, 403)
     }
+    // OPS-51, decided and left open: this route writes nothing. It is the
+    // preview of a link, and its answer is line counts over content an
+    // un-elevated operator may already read directly under AQU-2003. Narrowing
+    // it would cost an operator the ability to diagnose a tenant's link
+    // without taking a power they do not need. The link itself IS narrowed.
 
     try {
       const matches = await matchFilesForReplace(c.env, { projectId, sourceProjectId, pairs: files })
@@ -587,6 +636,17 @@ sourceLinking.post(
     if (role.level < LINK_MIN_ROLE) {
       return c.json({ error: `role >= project_lead (${LINK_MIN_ROLE}) required` }, 403)
     }
+    // OPS-51: widening a live link copies more of the upstream across the
+    // tenant boundary, and keeps doing it. Same rule as the link itself.
+    const effective = await roleWithoutUnelevatedAdmin(c, user, projectId, role, {
+      includeArchived: true,
+    })
+    if (!effective || effective.level < LINK_MIN_ROLE) {
+      return c.json(
+        { error: "elevation required to change a link's files with platform-admin access" },
+        403,
+      )
+    }
 
     const project = await loadProjectWithSource(c.env, projectId)
     if (!project) return c.json({ error: "project not found" }, 404)
@@ -612,6 +672,18 @@ sourceLinking.post(
     const sourceRole = await resolveProjectRoleIncludingArchived(c.env, user, upstreamId)
     if (!sourceRole) {
       return c.json({ error: "not found or no access to source project" }, 403)
+    }
+    // OPS-51: and the upstream side, for the reason the comment above gives —
+    // "must still be able to see the upstream now" is not satisfied by a
+    // standing cross-tenant power the caller has not asserted.
+    const sourceEffective = await roleWithoutUnelevatedAdmin(c, user, upstreamId, sourceRole, {
+      includeArchived: true,
+    })
+    if (!sourceEffective) {
+      return c.json(
+        { error: "elevation required to change a link's files with platform-admin access" },
+        403,
+      )
     }
 
     // A whole-project link already follows every upstream file, and files the
@@ -764,6 +836,8 @@ sourceLinking.get("/:projectId/link-source/files", authMiddleware, async (c) => 
   if (role.level < LINK_MIN_ROLE) {
     return c.json({ error: `role >= project_lead (${LINK_MIN_ROLE}) required` }, 403)
   }
+  // OPS-51, decided and left open: a read of what the link follows, per
+  // AQU-2003's cross-tenant read-only posture.
 
   const project = await loadProjectWithSource(c.env, projectId)
   if (!project) return c.json({ error: "project not found" }, 404)
@@ -836,6 +910,18 @@ sourceLinking.post(
     if (!role) return c.json({ error: "not found or no access" }, 403)
     if (role.level < LINK_MIN_ROLE) {
       return c.json({ error: `role >= project_lead (${LINK_MIN_ROLE}) required` }, 403)
+    }
+    // OPS-51: stopping a file severs the tenant's own mirror and freezes the
+    // current text as their copy. Only this project's side is involved, so
+    // only this side narrows.
+    const effective = await roleWithoutUnelevatedAdmin(c, user, projectId, role, {
+      includeArchived: true,
+    })
+    if (!effective || effective.level < LINK_MIN_ROLE) {
+      return c.json(
+        { error: "elevation required to change a link's files with platform-admin access" },
+        403,
+      )
     }
 
     const project = await loadProjectWithSource(c.env, projectId)
@@ -925,6 +1011,18 @@ sourceLinking.post("/:projectId/detach-source", authMiddleware, async (c) => {
   if (role.level < LINK_MIN_ROLE) {
     return c.json(
       { error: `role >= project_lead (${LINK_MIN_ROLE}) required` },
+      403,
+    )
+  }
+  // OPS-51: detaching bursts source.cell.commit events across the project's
+  // whole source side (see the note above) and cannot be undone by re-linking
+  // — the snapshot has already landed as the project's own text.
+  const effective = await roleWithoutUnelevatedAdmin(c, user, projectId, role, {
+    includeArchived: true,
+  })
+  if (!effective || effective.level < LINK_MIN_ROLE) {
+    return c.json(
+      { error: "elevation required to detach a project's source with platform-admin access" },
       403,
     )
   }
@@ -1049,6 +1147,10 @@ sourceLinking.get("/:projectId/downstreams", authMiddleware, async (c) => {
 
   const role = await resolveProjectRoleIncludingArchived(c.env, user, projectId)
   if (!role) return c.json({ error: "not found or no access" }, 403)
+  // OPS-51, decided and left open: a read with no floor of its own, and the
+  // warning surface the delete below depends on. Narrowing it would tell an
+  // operator "this project has downstreams" only after they elevated, which
+  // inverts the confirm-then-act order the dialog exists for.
 
   const downstreams = await listDownstreamProjects(c.env, projectId)
   return c.json({ projectId, downstreams })
@@ -1071,6 +1173,28 @@ sourceLinking.delete("/:projectId", authMiddleware, async (c) => {
   if (!role) return c.json({ error: "not found or no access" }, 403)
   if (role.level < ROLE.OWNER) {
     return c.json({ error: "only owners can delete a project" }, 403)
+  }
+  // OPS-51: the OWNER floor above is not the fence it reads as. The platform
+  // contribution IS level 700, so `role.level < ROLE.OWNER` is false for every
+  // platform operator on every project on the platform — an owner-only gate
+  // that an un-elevated admin passes by definition, in front of an
+  // unrecoverable `DELETE FROM projects` with every cell, event and comment
+  // cascading after it.
+  //
+  // routes/projects.ts — the SIBLING router on this same /api/v2/projects
+  // mount — calls projectElevationDenial to remove ONE member or revoke ONE
+  // invite (AQU-1322). routes/merge-sibling.ts narrows for the fold, and says
+  // why in terms that decide this route too: "folding is irreversible and
+  // cross-tenant … destroying a donor project outranks [adding one member]".
+  // This route destroys the project outright and asked for nothing.
+  const effective = await roleWithoutUnelevatedAdmin(c, user, projectId, role, {
+    includeArchived: true,
+  })
+  if (!effective || effective.level < ROLE.OWNER) {
+    return c.json(
+      { error: "elevation required to delete a project with platform-admin access" },
+      403,
+    )
   }
 
   const downstreams = await listDownstreamProjects(c.env, projectId)

@@ -10,6 +10,10 @@
  * Evaluation is gated by the caller behind the active "Violations" tab (lazy),
  * mirroring the candidate-tab pattern, so the (super-linear-ish, regex-per-cell)
  * scan only runs when the user is looking at this surface.
+ *
+ * AQU-1888: and when it does run, it runs through the shared *incremental*
+ * scan (`useProjectInfractions`), never in a render-time memo. See the comment
+ * on that call below.
  */
 import { useMemo, useState } from "react"
 import { ChevronDown, ChevronRight, FileText, ShieldAlert } from "lucide-react"
@@ -20,15 +24,22 @@ import type { TerminologyViolationRow } from "@/lib/terminology/project-scan"
 import type { Concept, TermMatchingSettings } from "@/lib/terminology/types"
 import { renderingStatusLabelKey } from "@/lib/terminology/types"
 import { compileConceptsToRules } from "@/lib/terminology/compile"
-import { checkRules } from "@/lib/rules/rule-engine"
+import { useProjectInfractions } from "@/hooks/useProjectInfractions"
 import {
   groupTerminologyInfractions,
   violationCellRef,
   type ConceptViolationGroup,
 } from "@/lib/terminology/violations-inbox"
-import type { RuleInfraction } from "@/lib/parsers/types"
+import type { RuleInfraction, TranslationRule } from "@/lib/parsers/types"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
+
+/**
+ * Stable empties. The incremental scan re-plans on every new array identity,
+ * so the no-op (server `rows`) path must hand it the same arrays every render.
+ */
+const NO_CELLS: CellData[] = []
+const NO_RULES: TranslationRule[] = []
 
 interface Props {
   concepts: Concept[]
@@ -53,7 +64,7 @@ interface Props {
 
 export function TerminologyViolationsInbox({
   concepts,
-  cells = [],
+  cells = NO_CELLS,
   rows,
   truncated = false,
   onJumpToCell,
@@ -61,24 +72,41 @@ export function TerminologyViolationsInbox({
   files,
 }: Props) {
   const t = useT()
-  // Compile active concepts → rules and evaluate over the loaded cells. This is
-  // the same derive-on-read path the editor uses; it only runs while mounted
-  // (the caller mounts this only on the active Violations tab). A `rows` list
-  // is already the result of that scan on the server.
+  // AQU-1888: this scan used to run right here, in a render-time memo —
+  // `compileConceptsToRules` and then `checkRules` over every loaded cell,
+  // synchronously during render, and again on every republish of `cells` (the
+  // outbox moves, `useProjectCells` hands down a new array, the memo is
+  // invalidated even though at most one cell changed). On a full Bible with an
+  // active termbase that is the same freeze AQU-1864 fixed on the rules page,
+  // on a corpus of the same size.
+  //
+  // The work now goes through the shared incremental scan: sliced across
+  // frames under a time budget, cached per cell, so concept groups fill in
+  // progressively and a single cell edit re-evaluates a single cell. Grouping
+  // by concept is this surface's own job (the rules pane counts per rule), so
+  // only the scan is shared — `groupTerminologyInfractions` still runs here.
+  //
+  // A `rows` list is already the result of this scan on the server, so that
+  // path compiles nothing and scans nothing.
+  const fromServer = rows !== undefined
+  const termRules = useMemo<TranslationRule[]>(
+    () =>
+      fromServer
+        ? NO_RULES
+        : // `checkRules` dropped disabled rules for us; `checkRulesForCell`,
+          // which the scan calls, does not.
+          compileConceptsToRules(concepts, termMatching).filter((rule) => rule.enabled),
+    [fromServer, concepts, termMatching],
+  )
+  const { infractions, scanning } = useProjectInfractions(
+    fromServer ? NO_CELLS : cells,
+    termRules,
+  )
+
   const groups = useMemo<ConceptViolationGroup[]>(() => {
     if (rows) return groupsFromRows(rows)
-    const termRules = compileConceptsToRules(concepts, termMatching)
-    if (termRules.length === 0) return []
-    const byFile = new Map<string, CellData[]>()
-    for (const c of cells) {
-      const arr = byFile.get(c.fileId)
-      if (arr) arr.push(c)
-      else byFile.set(c.fileId, [c])
-    }
-    const infractionMap = checkRules(byFile, termRules)
-    const flat = [...infractionMap.values()].flat()
-    return groupTerminologyInfractions(flat, concepts)
-  }, [concepts, cells, rows, termMatching])
+    return groupTerminologyInfractions([...infractions.values()].flat(), concepts)
+  }, [rows, infractions, concepts])
 
   const cellById = useMemo(() => {
     const m = new Map<string, CellData>()
@@ -131,17 +159,34 @@ export function TerminologyViolationsInbox({
         {truncated && (
           <p className="text-xs text-muted-foreground">{t("terminology.violations.truncated")}</p>
         )}
+        {/* AQU-1888: the sliced scan publishes a subset of the final groups, so
+            say so rather than letting a partial list read as the whole answer.
+            The string is the one the server-`rows` caller already shows while
+            its scan loads, so both halves of this surface say the same thing. */}
+        {scanning && (
+          <p
+            role="status"
+            data-testid="terminology-violations-scanning"
+            className="text-xs text-muted-foreground"
+          >
+            {t("terminology.editor.checkingTerminology")}
+          </p>
+        )}
 
         {groups.length === 0 ? (
-          <div className="flex flex-col items-center gap-2 py-12 text-center text-muted-foreground">
-            <ShieldAlert className="h-8 w-8 opacity-40" />
-            <p className="text-sm">{t("terminology.violations.emptyTitle")}</p>
-            <p className="text-xs">
-              {t("terminology.violations.emptyDescriptionPre")}{" "}
-              <span className="font-medium">{t("terminology.common.statusApproved")}</span>{" "}
-              {t("terminology.violations.emptyDescriptionPost")}
-            </p>
-          </div>
+          // A still-running scan has found nothing *yet*; claiming the project
+          // is clean would be a lie until it settles.
+          scanning ? null : (
+            <div className="flex flex-col items-center gap-2 py-12 text-center text-muted-foreground">
+              <ShieldAlert className="h-8 w-8 opacity-40" />
+              <p className="text-sm">{t("terminology.violations.emptyTitle")}</p>
+              <p className="text-xs">
+                {t("terminology.violations.emptyDescriptionPre")}{" "}
+                <span className="font-medium">{t("terminology.common.statusApproved")}</span>{" "}
+                {t("terminology.violations.emptyDescriptionPost")}
+              </p>
+            </div>
+          )
         ) : (
           <ul className="divide-y">
             {groups.map((g) => (

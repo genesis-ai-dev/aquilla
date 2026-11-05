@@ -46,6 +46,8 @@ export class AnalyticsAccount {
     this.state.decision?.allowed === true && !!this.session && !isJwtExpired(this.session.jwt) &&
     navigator.onLine && !document.hidden && Date.now() - this.verifiedAt < 75_000
 
+  eligibleForSession = (jwt: string) => this.session?.jwt === jwt && this.eligible()
+
   async activate(session: FrontierSession | null): Promise<void> {
     this.suspend()
     this.session = session

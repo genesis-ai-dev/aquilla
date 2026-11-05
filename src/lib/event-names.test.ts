@@ -18,7 +18,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 const mockCapture = vi.fn()
 
 vi.mock("@/lib/posthog", () => ({
-  default: {
+  default: { scope() { return { ...this, enabled: () => true } },
     capture: mockCapture,
     opt_in_capturing: vi.fn(),
     opt_out_capturing: vi.fn(),

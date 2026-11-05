@@ -89,7 +89,7 @@ vi.mock("@/lib/sync/archive", async (importOriginal) => {
   }
 })
 vi.mock("@/lib/store/project-index", () => ({ createProject: vi.fn().mockResolvedValue(undefined) }))
-vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn() } }))
+vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn() } }))
 
 import { loadUpstreamLaneChoices } from "@/lib/sync/link-source-preview"
 import { linkProjectSource } from "@/lib/sync/archive"

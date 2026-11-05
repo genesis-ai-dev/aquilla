@@ -1,5 +1,5 @@
 import { FRONTIER_API_URL } from "./sync-token"
-import type { ProjectOrgPolicy, ProjectVisibilityFloors } from "./project-org-policy"
+import type { ProjectOrgPolicy, ProjectVisibilityFloors, VisibilityFloorView } from "./project-org-policy"
 import { RETIRED_LANE_SETTINGS_KEYS } from "../../../db/shared/retired-lane-settings"
 import { t } from "@/lib/i18n/standalone"
 import { ROLE, type RoleLevel } from "@/lib/frontier/roles"
@@ -70,6 +70,12 @@ export interface ProjectWideSettings {
    */
   sourceTextDirection?: DirectionMode
   targetTextDirection?: DirectionMode
+  /** AQU-2342: THE project instructions every AI draft reads (copilot,
+   *  Autopilot, the agent). Absent → composed on read from the legacy sources
+   *  (db/shared/translation-instructions.ts resolveTranslationInstructions). */
+  translationInstructions?: string
+  /** Legacy (AQU-2342): no prompt reads it except as a migrate-on-read source
+   *  for `translationInstructions`. */
   systemPrompt?: string
   /**
    * AQU-2259: the team's AI drafting settings — the "AI Instructions" card
@@ -130,6 +136,14 @@ export interface ProjectWideSettings {
    */
   rosterViewMinRole?: number
   memberProgressViewMinRole?: number
+  /**
+   * AQU-2305: this project's own floor for importing a NEW source file — a
+   * role level, stricter-only over its org's `importMinRole` (AQU-2304). The
+   * project enforces the higher of the two, so a value at or below the org's
+   * means nothing. ABSENT means "follow the organization"; choosing the org's
+   * floor deletes the key.
+   */
+  importMinRole?: number
   validationRoleFloor?: "reviewer" | "project_lead" | "maintainer"
   validationNamedUsers?: string[]
   allowSelfValidation?: boolean
@@ -522,6 +536,13 @@ export function settingsEditorName(editor: ProjectSettingsEditor | undefined): s
 }
 
 export interface ProjectSettingsResponse {
+  /**
+   * AQU-2342: the agent's legacy free-text brief (`project_briefs`), sent while
+   * the project has stored no `translationInstructions`, so the copilot
+   * migrates on read from exactly the sources the server paths do. "" or
+   * absent otherwise (and on a server that predates it).
+   */
+  legacyProjectBriefText?: string
   version: number
   updatedAt: string
   updatedBy: ProjectSettingsEditor
@@ -560,6 +581,8 @@ export interface ProjectSettingsResponse {
   orgPolicy?: ProjectOrgPolicy
   /** AQU-1771: each visibility floor as the org sets it, as this project sets it, and as enforced. */
   visibilityFloors?: ProjectVisibilityFloors
+  /** AQU-2305: the import floor as the org sets it, as this project sets it, and as enforced. */
+  importFloor?: VisibilityFloorView
   /** Lane rows. Optional: a server that predates AQU-1418 omits them. */
   lanes?: ProjectLaneView[]
 }

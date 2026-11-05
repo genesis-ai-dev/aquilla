@@ -1276,7 +1276,8 @@ export async function handleImportReconcileRequest(
        SELECT ?, ?, ?, NULL, ?, ?, ? WHERE ${fileClaimGate()}
        ON CONFLICT (file_id) DO UPDATE SET
          project_id = EXCLUDED.project_id, format = EXCLUDED.format, raw_source = NULL,
-         r2_key = EXCLUDED.r2_key, size_bytes = EXCLUDED.size_bytes, created_at = EXCLUDED.created_at`,
+         r2_key = EXCLUDED.r2_key, size_bytes = EXCLUDED.size_bytes, created_at = EXCLUDED.created_at
+       WHERE file_source_blobs.project_id = EXCLUDED.project_id`,
     ).bind(
       body.fileId, body.projectId, body.rawSourceFormat, artifact.r2_key,
       Number(artifact.size_bytes), serverTs,

@@ -42,6 +42,7 @@ import {
   changesetStatusBadgeClass,
   changesetStatusLabel,
   changesetStatusVariant,
+  isDecidedChangesetStatus,
   isTerminalChangesetStatus,
   testimonyEntriesFor,
 } from "@/lib/agent/changeset-review"
@@ -198,13 +199,21 @@ export function LiveChangesetCard({
   // Superseded is a GOOD terminal outcome (P1 §1) — the work already exists —
   // so it earns an explanation rather than the error treatment `stale` gets.
   const showSupersededNotice = status === "superseded"
+  // AQU-1639: an answered card keeps its header, status chip and receipt (the
+  // trace of what happened) but drops the staged diff — an applied suggestion
+  // that still shows its whole proposal reads as though nothing happened.
+  const decided = isDecidedChangesetStatus(status)
 
   return (
     <div
       data-frame-type="changeset.staged"
       data-changeset-status={displayStatus}
       aria-busy={committing || undefined}
-      className="space-y-1.5 rounded-lg border border-sky-900/60 bg-sky-950/30 px-3 py-2"
+      data-changeset-collapsed={decided ? "true" : undefined}
+      // AQU-1639: sky-950 alone painted a near-black panel in LIGHT mode, so
+      // its muted text was dark-on-dark. Light values first, dark behind the
+      // `dark:` prefix — the pairing ProposalReceipt already uses.
+      className="space-y-1.5 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 dark:border-sky-900/60 dark:bg-sky-950/30"
     >
       <div className="flex flex-wrap items-center gap-1.5 text-xs">
         <FileDiff className="h-3.5 w-3.5 shrink-0 text-sky-500" />
@@ -273,10 +282,10 @@ export function LiveChangesetCard({
         </div>
       )}
 
-      {approval?.changes && approval.changes.items.length > 0 && (
+      {!decided && approval?.changes && approval.changes.items.length > 0 && (
         <ChangeList changes={approval.changes} maxItems={MAX_DIFF_ROWS} />
       )}
-      {approval?.importPreview && <ImportPreviewView preview={approval.importPreview} />}
+      {!decided && approval?.importPreview && <ImportPreviewView preview={approval.importPreview} />}
 
       {reviewable && testimony.length > 0 && (
         <div className="space-y-1 rounded-md border border-amber-300/50 bg-amber-50/50 p-2 dark:bg-amber-950/20">
@@ -306,7 +315,7 @@ export function LiveChangesetCard({
       )}
 
       {showReceipt && (
-        <p className="flex items-center gap-1 text-[11px] font-medium text-emerald-600">
+        <p className="flex items-center gap-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-500">
           <Check className="h-3 w-3 shrink-0" />
           {t("agent.changeset.receiptApplied", { count: appliedCount ?? 0 })}
           {staleCount > 0 && (

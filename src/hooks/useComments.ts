@@ -1,3 +1,4 @@
+import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 /**
  * useComments — live threaded comments on the v3 event log.
  *
@@ -26,7 +27,6 @@ import type { CommentScope } from "@/lib/sync/outbox-types"
 import { useRefusedComments } from "@/hooks/useRefusedComments"
 import type { CommentRefusal } from "@/lib/sync/comment-refusals"
 import { COMMENT_SUBMIT_REFUSED } from "@/lib/event-names"
-import posthog from "@/lib/posthog"
 
 export type { CommentRecord, CommentScope }
 export type { CommentRefusal }
@@ -121,6 +121,7 @@ export interface UseCommentsApi {
 }
 
 export function useComments(opts: UseCommentsOptions): UseCommentsApi {
+  const analytics = useAccountAnalytics()
   const { projectId, getToken, author, scope, tokenReady, priorityFileId } = opts
 
   const [comments, setComments] = useState<CommentRecord[]>([])
@@ -466,7 +467,7 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
       // Never the comment body — a refused comment is still the user's text.
       if (reportedRefusals.has(refusal.id)) continue
       reportedRefusals.add(refusal.id)
-      posthog.capture(COMMENT_SUBMIT_REFUSED, {
+      analytics.capture(COMMENT_SUBMIT_REFUSED, {
         kind: refusal.kind,
         status: refusal.status,
         reason: refusal.reason,
@@ -477,7 +478,7 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
     const dropped = new Set(rolledBack)
     mutationSeqRef.current++
     setComments((prev) => prev.filter((c) => !dropped.has(c.commentId)))
-  }, [refusals])
+  }, [refusals, analytics])
 
   return {
     comments, isLoading, isLoadingRest, isError, counts,

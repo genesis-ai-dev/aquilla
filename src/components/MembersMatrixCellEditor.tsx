@@ -87,8 +87,9 @@ interface CellEditorProps {
  * entry reuses an identical-text badge already minted elsewhere
  * (org.accessModelLegend.direct.label / .orgWide.label /
  * org.membersPanel.sourceViaGroup / org.memberAccessPanel.creatorGrantLabel
- * — the surrounding `capitalize` CSS class means the reused keys' Title
- * Case renders identically to the lowercase this list otherwise uses)
+ * — the `capitalize` CSS class on the label means the reused keys' Title
+ * Case renders identically to the lowercase this list otherwise uses; the
+ * role chip beside it stays as the catalog writes it, AQU-2332)
  * rather than minting duplicate keys for the same words.
  */
 const SOURCE_LABEL: Record<string, MessageKey> = {
@@ -322,8 +323,8 @@ export function MembersMatrixCellEditor({
               <p className="mb-1 font-medium">{t("org.membersMatrixCellEditor.alsoHasAccessVia")}</p>
               <ul className="space-y-0.5">
                 {secondarySources.map((s) => (
-                  <li key={s.source} className="capitalize text-muted-foreground">
-                    {t(SOURCE_LABEL[s.source])} · <RoleLabel name={s.name} />
+                  <li key={s.source} className="text-muted-foreground">
+                    <span className="capitalize">{t(SOURCE_LABEL[s.source])}</span> · <RoleLabel name={s.name} />
                   </li>
                 ))}
               </ul>

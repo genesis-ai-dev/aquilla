@@ -7,14 +7,15 @@
 // would happily bill for fluent, generic output on a project nobody has told it
 // anything about, which is precisely the failure the gate exists to prevent.
 // So the floor is pinned from both sides: what must block, and what must NOT
-// (one answered brief field is enough — this is a floor, not the `ready` bar).
+// (any non-blank resolved instructions are enough — a floor, not the `ready` bar).
 
 import { describe, it, expect } from "vitest"
 import { computeContextReadiness, computeStartBlockers } from "./readiness"
 import type { ProjectContext } from "./project-context"
+import { resolveTranslationInstructions } from "../../../../db/shared/translation-instructions"
 
 const bare: ProjectContext = {
-  briefParameters: {},
+  translationInstructions: "",
   concepts: [],
   authoredRules: [],
   projectFacts: [],
@@ -25,15 +26,15 @@ const ready: ProjectContext = {
   ...bare,
   sourceLanguage: "en",
   targetLanguage: "sw",
-  briefParameters: { purpose: "Community reading" },
+  translationInstructions: "Purpose: Community reading",
 }
 
 describe("computeStartBlockers", () => {
-  it("blocks a project with no languages and no brief on both counts", () => {
-    expect(computeStartBlockers(bare)).toEqual(["languages", "brief"])
+  it("blocks a project with no languages and no instructions on both counts", () => {
+    expect(computeStartBlockers(bare)).toEqual(["languages", "instructions"])
   })
 
-  it("clears a project that has both languages and one answered brief field", () => {
+  it("clears a project that has both languages and instructions", () => {
     expect(computeStartBlockers(ready)).toEqual([])
   })
 
@@ -42,14 +43,26 @@ describe("computeStartBlockers", () => {
     expect(computeStartBlockers({ ...ready, sourceLanguage: undefined })).toEqual(["languages"])
   })
 
-  it("treats whitespace-only languages and brief answers as unset", () => {
+  it("treats whitespace-only languages and instructions as unset", () => {
     expect(computeStartBlockers({ ...ready, sourceLanguage: "   " })).toContain("languages")
-    expect(computeStartBlockers({ ...ready, briefParameters: { purpose: "  " } })).toContain("brief")
+    expect(computeStartBlockers({ ...ready, translationInstructions: "  " })).toContain("instructions")
   })
 
-  it("accepts a generated L1 summary in place of answered fields", () => {
-    const summarised = { ...ready, briefParameters: {}, projectBriefL1: "Clear-language NT" }
-    expect(computeStartBlockers(summarised)).toEqual([])
+  // AQU-2342: the gate reads the RESOLVED instructions, so every legacy source
+  // still clears it on read — one answered brief field, a brief summary, a
+  // customized copilot prompt, the legacy agent brief — and so does the key.
+  it("clears on instructions from any source, stored or composed on read", () => {
+    const sources = [
+      resolveTranslationInstructions({ translationBrief: { parameters: { purpose: "Community reading" } } }),
+      resolveTranslationInstructions({ translationBrief: { l1Summary: "Clear-language NT" } }),
+      resolveTranslationInstructions({ systemPrompt: "Always use the formal you." }),
+      resolveTranslationInstructions({}, { projectBriefText: "For radio broadcast." }),
+      resolveTranslationInstructions({ translationInstructions: "Plain register." }),
+    ]
+    for (const translationInstructions of sources) {
+      expect(computeStartBlockers({ ...ready, translationInstructions })).toEqual([])
+    }
+    expect(computeStartBlockers({ ...ready, translationInstructions: resolveTranslationInstructions({}) })).toEqual(["instructions"])
   })
 
   it("is a floor, not the readiness bar — one field clears the gate while the checklist still asks for more", () => {
@@ -59,9 +72,9 @@ describe("computeStartBlockers", () => {
       untranslatedCells: 40,
     })
     expect(readiness.startBlockers).toEqual([])
-    // The brief item is still only "partial" and examples are still missing:
-    // the gate opening is not a claim that the project is well set up.
-    expect(readiness.items.find((i) => i.id === "brief")?.level).toBe("partial")
+    // Examples are still missing: the gate opening is not a claim that the
+    // project is well set up.
+    expect(readiness.items.find((i) => i.id === "examples")?.level).toBe("missing")
     expect(readiness.ready).toBe(false)
   })
 
@@ -71,6 +84,6 @@ describe("computeStartBlockers", () => {
       validatedExamples: 0,
       untranslatedCells: 40,
     })
-    expect(readiness.startBlockers).toEqual(["languages", "brief"])
+    expect(readiness.startBlockers).toEqual(["languages", "instructions"])
   })
 })

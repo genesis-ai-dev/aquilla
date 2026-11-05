@@ -39,7 +39,8 @@ const FILE_A = "file-mrk"
 const FILE_B = "file-luk"
 const MOCK_URL = "http://mock.local/api/v1/chat/completions"
 const KIN_KEY = "kin.andrew-peter.relative-age"
-const KIN_LINE = `${KIN_KEY} = "younger"`
+// AQU-2342: an answer is appended to the project instructions as one line.
+const KIN_LINE = `- ${KIN_KEY}: younger`
 
 let draftPrompts: string[] = []
 const realFetch = globalThis.fetch
@@ -136,8 +137,14 @@ describe("durability: an answer outlives the wave that asked", () => {
     // Wave 1 of run A: the fact, and (unchanged) the one-wave steering copy.
     await runOneTick({ db, runId: runA.id, llm: llm(), concurrency: 1 })
     expect(draftPrompts).toHaveLength(1)
-    expect(draftPrompts[0]).toContain("Project decisions — HARD constraints")
+    expect(draftPrompts[0]).toContain("Project instructions (follow these):")
     expect(draftPrompts[0]).toContain(KIN_LINE)
+    // Stored in the instructions themselves, not only in the decision log.
+    const stored = await db
+      .prepare("SELECT settings FROM project_settings WHERE project_id = ?")
+      .bind(PROJECT)
+      .first<{ settings: string }>()
+    expect(String(JSON.parse(stored?.settings ?? "{}").translationInstructions)).toContain(KIN_LINE)
     expect(draftPrompts[0]).toContain("Human answer: younger")
 
     // Wave 2 of run A: the steering is consumed; the fact is still there.
@@ -312,5 +319,43 @@ describe("a key that names a Language-profile slot", () => {
     expect(resolved).toEqual({ status: "invalid_answer", reason: "profile-value-invalid" })
     expect((await getDecision(db, decision.id))?.status).toBe("open")
     expect((await readSettingsBlob(db, PROJECT)).languageProfile).toEqual({ headings: "none" })
+  })
+})
+
+// AQU-2342: the answer joins the project instructions; a profile answer is
+// data behind Checks and does not; a full Instructions box refuses the answer.
+describe("answers and the project instructions", () => {
+  const seedSettings = async (settings: Record<string, unknown>) => {
+    await db
+      .prepare(`INSERT INTO project_settings (project_id, settings, version) VALUES (?, ?, 3)`)
+      .bind(PROJECT, JSON.stringify(settings))
+      .run()
+  }
+  it("appends a fact answer after the migrated text, and never a profile answer", async () => {
+    await seedFiles()
+    await seedSettings({ livingMemoryEntries: [{ id: "1", kind: "instruction", text: "Plain register.", createdAt: "", author: "" }] })
+    const run = await startRun(FILE_A)
+    const decision = await blockOnKinQuestion(run.id)
+    expect((await answerKin(decision.id)).status).toBe("ok")
+    expect((await readSettingsBlob(db, PROJECT)).translationInstructions).toBe(`Plain register.\n${KIN_LINE}`)
+
+    const profile = await raiseDecision(db, {
+      projectId: PROJECT, runId: null, fileId: null,
+      reason: "How should measures be rendered?", readinessItem: "bible-fact", factKey: "measures",
+    })
+    await resolveBlockingDecision(db, { decisionId: profile.id, action: "answer", answer: "convert", byUserId: 9, byUsername: "m" })
+    const after = await readSettingsBlob(db, PROJECT)
+    expect(after.translationInstructions).toBe(`Plain register.\n${KIN_LINE}`)
+    expect(after.languageProfile).toEqual({ measures: "convert" })
+  })
+
+  it("rolls back with too-many-facts when the instructions are full", async () => {
+    await seedFiles()
+    await seedSettings({ translationInstructions: "x".repeat(7995) })
+    const run = await startRun(FILE_A)
+    const decision = await blockOnKinQuestion(run.id)
+    expect(await answerKin(decision.id)).toEqual({ status: "invalid_answer", reason: "too-many-facts" })
+    expect((await getDecision(db, decision.id))?.status).toBe("open")
+    expect((await readSettingsBlob(db, PROJECT)).translationInstructions).toBe("x".repeat(7995))
   })
 })

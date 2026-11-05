@@ -297,11 +297,11 @@ describe("LanguagesSection", () => {
         defaultTargetLanguage="French"
         targetLanes={[]}
         canEdit={false}
-        disabledTooltip="You need Project lead to change languages."
+        disabledTooltip="You need Project Lead to change languages."
         patch={vi.fn(async (): Promise<PatchOutcome> => ({ kind: "ok" }))}
       />,
     )
-    expect(screen.getByTestId("languages-view-only")).toHaveTextContent("You need Project lead to change languages.")
+    expect(screen.getByTestId("languages-view-only")).toHaveTextContent("You need Project Lead to change languages.")
     expect(screen.queryByRole("button", { name: "Why you can't change languages" })).toBeNull()
     await userEvent.setup().hover(screen.getByTestId("add-lane-open"))
     expect(screen.queryByRole("tooltip")).toBeNull()

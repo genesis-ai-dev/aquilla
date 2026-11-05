@@ -33,7 +33,7 @@ vi.mock("@/lib/store/project-index", () => ({
   createProject: vi.fn().mockResolvedValue(undefined),
 }))
 
-vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn() } }))
+vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn() } }))
 
 vi.mock("@/lib/langquest/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/langquest/api")>()

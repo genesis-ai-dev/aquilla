@@ -1,17 +1,22 @@
+import { confirmSignupAnalyticsChoice } from "@/lib/signup-analytics-choice"
+import { confirmNewAccountAnalytics } from "@/lib/analytics-account"
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { renderHook, act } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import React, { type ReactNode } from "react"
 
+vi.mock("@/lib/analytics-account", async (load) => ({ ...await load<typeof import("@/lib/analytics-account")>(), confirmNewAccountAnalytics: vi.fn(async () => {}) }))
 // --- mocks (must be before importing the module under test) ---
 
 vi.mock("@/lib/frontier/auth", () => ({
+  AUTH_BASE: "http://localhost/auth",
   login: vi.fn(),
   register: vi.fn(),
 }))
 
 vi.mock("@/lib/posthog", () => ({
   default: {
+    scope: vi.fn(() => ({ capture: vi.fn() })),
     identify: vi.fn(),
     capture: vi.fn(),
     reset: vi.fn(),
@@ -46,9 +51,7 @@ vi.mock("@/lib/audio/cache-cleanup", () => ({
 import { useFrontierSession } from "./useFrontierSession"
 import posthog from "@/lib/posthog"
 import { login as mockLogin, register as mockRegister } from "@/lib/frontier/auth"
-import { resolveAppEnv } from "@/lib/analytics-env"
 
-const HEX_RE = /^[0-9a-f]{64}$/
 
 function makeWrapper() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -59,101 +62,38 @@ function makeWrapper() {
 beforeEach(() => {
   vi.clearAllMocks()
   localStorage.clear()
+  sessionStorage.clear()
 })
 
-describe("useFrontierSession — distinct id hashing", () => {
-  it("login: distinct id is a 64-char hex string, not the raw username", async () => {
-    const username = "wendi"
-    vi.mocked(mockLogin).mockResolvedValue({ username, jwt: "tok", createdAt: "x" } as never)
-
+describe("account-scoped login analytics", () => {
+  it("keeps login and registration callbacks scoped to their returning account without sending email", async () => {
+    const session = { username: "alice", jwt: "tok", createdAt: "x" }
+    vi.mocked(mockLogin).mockResolvedValue(session)
+    vi.mocked(mockRegister).mockResolvedValue(session)
     const { result } = renderHook(() => useFrontierSession(), { wrapper: makeWrapper() })
-    await act(async () => {
-      await result.current.login(username, "pw")
-    })
-
-    const identifyMock = posthog.identify as ReturnType<typeof vi.fn>
-    const [distinctId] = identifyMock.mock.calls[0]
-    expect(distinctId).toMatch(HEX_RE)
-    expect(distinctId).not.toBe(username)
-    expect(distinctId).not.toContain(username)
+    await act(async () => { await result.current.login("alice", "pw") })
+    await act(async () => { await result.current.register("alice", "alice@example.com", "pw") })
+    expect(posthog.scope).toHaveBeenNthCalledWith(1, undefined, "alice")
+    expect(posthog.scope).toHaveBeenNthCalledWith(2, undefined, "alice")
+    expect(posthog.identify).not.toHaveBeenCalled()
   })
-
-  it("login: distinct id is deterministic for the same username", async () => {
-    const username = "anna"
-    vi.mocked(mockLogin).mockResolvedValue({ username, jwt: "tok", createdAt: "x" } as never)
-
+  it("invalidates analytics on logout without re-registering an anonymous identity", async () => {
     const { result } = renderHook(() => useFrontierSession(), { wrapper: makeWrapper() })
-    await act(async () => { await result.current.login(username, "pw") })
-    await act(async () => { await result.current.login(username, "pw") })
-
-    const identifyMock = posthog.identify as ReturnType<typeof vi.fn>
-    const calls = identifyMock.mock.calls
-    expect(calls[0][0]).toBe(calls[1][0])
-  })
-
-  it("register: distinct id is not the raw username or email", async () => {
-    const username = "randall"
-    const email = "randall@example.com"
-    vi.mocked(mockRegister).mockResolvedValue({ username, jwt: "tok", createdAt: "x" } as never)
-
-    const { result } = renderHook(() => useFrontierSession(), { wrapper: makeWrapper() })
-    await act(async () => {
-      await result.current.register(username, email, "pw")
-    })
-
-    const identifyMock = posthog.identify as ReturnType<typeof vi.fn>
-    const [distinctId] = identifyMock.mock.calls[0]
-    expect(distinctId).toMatch(HEX_RE)
-    expect(distinctId).not.toBe(username)
-    expect(distinctId).not.toBe(email)
-    expect(distinctId).not.toContain(username)
-    expect(distinctId).not.toContain(email)
-  })
-
-  it("register with analytics opted out: email not passed as person property", async () => {
-    // Analytics defaults to ON, so withholding email requires an explicit opt-out
-    localStorage.setItem("aquilla:analyticsEnabled", "false")
-    const username = "bob"
-    const email = "bob@example.com"
-    vi.mocked(mockRegister).mockResolvedValue({ username, jwt: "tok", createdAt: "x" } as never)
-
-    const { result } = renderHook(() => useFrontierSession(), { wrapper: makeWrapper() })
-    await act(async () => {
-      await result.current.register(username, email, "pw")
-    })
-
-    const identifyMock = posthog.identify as ReturnType<typeof vi.fn>
-    // Second arg (personProps) should be empty object (no email)
-    expect(identifyMock.mock.calls[0][1]).toEqual({})
-  })
-
-  it("register with consent: email passed as person property", async () => {
-    localStorage.setItem("aquilla:analyticsEnabled", "true")
-    const username = "alice"
-    const email = "alice@example.com"
-    vi.mocked(mockRegister).mockResolvedValue({ username, jwt: "tok", createdAt: "x" } as never)
-
-    const { result } = renderHook(() => useFrontierSession(), { wrapper: makeWrapper() })
-    await act(async () => {
-      await result.current.register(username, email, "pw")
-    })
-
-    const identifyMock = posthog.identify as ReturnType<typeof vi.fn>
-    expect(identifyMock.mock.calls[0][1]).toEqual({ email })
+    await act(async () => { await result.current.logout() })
+    expect(posthog.reset).toHaveBeenCalledOnce()
+    expect(posthog.register).not.toHaveBeenCalled()
   })
 })
 
-describe("useFrontierSession — logout keeps the app_env super-property (AQU-1572)", () => {
-  it("registers app_env again after posthog.reset() clears it", async () => {
-    const { result } = renderHook(() => useFrontierSession(), { wrapper: makeWrapper() })
-    await act(async () => {
-      await result.current.logout()
-    })
-
-    const reset = posthog.reset as ReturnType<typeof vi.fn>
-    const register = posthog.register as ReturnType<typeof vi.fn>
-    expect(register).toHaveBeenCalledWith({ app_env: resolveAppEnv(window.location) })
-    // Order matters: registered before the reset, it would be wiped again.
-    expect(register.mock.invocationCallOrder[0]).toBeGreaterThan(reset.mock.invocationCallOrder[0]!)
-  })
+it.each([true, false])("binds confirmed signup choice %s only to the registered account, never a login", async (allowed) => {
+  const session = { username: "new", jwt: "new-account-token", createdAt: "now" }
+  vi.mocked(mockRegister).mockResolvedValue(session)
+  vi.mocked(mockLogin).mockResolvedValue(session)
+  const { result } = renderHook(() => useFrontierSession(), { wrapper: makeWrapper() })
+  confirmSignupAnalyticsChoice(allowed)
+  await act(async () => { await result.current.login("new", "pw") })
+  expect(confirmNewAccountAnalytics).not.toHaveBeenCalled()
+  confirmSignupAnalyticsChoice(allowed)
+  await act(async () => { await result.current.register("new", "new@example.test", "pw") })
+  expect(confirmNewAccountAnalytics).toHaveBeenCalledExactlyOnceWith("new-account-token", allowed)
 })

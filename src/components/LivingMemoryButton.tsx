@@ -24,7 +24,7 @@ export const BRIEF_ICON = Target
 
 interface LivingMemoryButtonProps {
   projectId: string
-  /** Target section pane (e.g. "instructions", "quality"); omit for the index. */
+  /** Target section pane (e.g. "instructions", "checks"); omit for the index. */
   section?: string
   /** Minimal variant — the label moves into a tooltip + aria-label. */
   iconOnly?: boolean

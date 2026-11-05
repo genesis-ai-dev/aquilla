@@ -57,7 +57,7 @@ describe("ValidationSettingsSection — validator-role taxonomy (AQU-352)", () =
   it("shows the capitalized canonical role name for project_lead", () => {
     const { container } = renderFloor("project_lead")
     const text = floorValueText(container)
-    expect(text).toContain(resolveRoleName(t, 500)) // "Project lead"
+    expect(text).toContain(resolveRoleName(t, 500)) // "Project Lead"
   })
 
   it("shows 'Reviewer' without a '(default)' suffix baked into the label", () => {

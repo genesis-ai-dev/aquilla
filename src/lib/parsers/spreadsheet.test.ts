@@ -49,6 +49,27 @@ describe("splitCastName", () => {
     expect(splitCastName("Narrator")).toEqual({ voice: "Narrator", cameraState: undefined })
   })
 
+  // AQU-1279: a partner's cast sheet wrote the angle in SQUARE brackets. Only
+  // round ones matched, so the angle stayed glued to the name, no cameraState
+  // was stored, and the angle reached neither the editor nor the exports.
+  it("reads a square-bracketed angle, which a partner's sheet writes", () => {
+    expect(splitCastName("Anna   [on]")).toEqual({ voice: "Anna", cameraState: "on" })
+    expect(splitCastName("Crowd [Group]")).toEqual({ voice: "Crowd", cameraState: "group" })
+    expect(splitCastName("  John  [off]  ")).toEqual({ voice: "John", cameraState: "off" })
+  })
+
+  it("still falls back to mixed for an unrecognised square-bracketed angle", () => {
+    expect(splitCastName("Anna [wide shot]")).toEqual({ voice: "Anna", cameraState: "mixed" })
+  })
+
+  // A group has to open and close with the same bracket; a mismatched pair is
+  // not an angle anybody wrote on purpose, so the label stays a name rather
+  // than being silently halved.
+  it("leaves a mismatched bracket pair alone", () => {
+    expect(splitCastName("Anna (on]")).toEqual({ voice: "Anna (on]", cameraState: undefined })
+    expect(splitCastName("Anna [on)")).toEqual({ voice: "Anna [on)", cameraState: undefined })
+  })
+
   it("returns undefined cameraState for an empty string", () => {
     expect(splitCastName("")).toEqual({ voice: "", cameraState: undefined })
   })

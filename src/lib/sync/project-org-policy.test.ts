@@ -173,7 +173,7 @@ describe("the import floor through resolveProjectPolicy (AQU-2304)", () => {
     expect(importDenialFloor(policy.importMinRole)).toBe(600)
   })
 
-  it("falls back to Project lead when a server predating the field sends none", () => {
+  it("falls back to Project Lead when a server predating the field sends none", () => {
     // An older server omits `importMinRole` from the bundle. Reading that as
     // the default is the behaviour before the key existed — closing the gate
     // instead would hide Import from every lead on an older deploy.
@@ -183,7 +183,7 @@ describe("the import floor through resolveProjectPolicy (AQU-2304)", () => {
     expect(canImportSourceFiles(500, policy.importMinRole)).toBe(true)
   })
 
-  it("falls back to Project lead when the org read was refused and nothing is carried", () => {
+  it("falls back to Project Lead when the org read was refused and nothing is carried", () => {
     const policy = carried(null)
     expect(policy.importMinRole).toBe(500)
     expect(canImportSourceFiles(500, policy.importMinRole)).toBe(true)

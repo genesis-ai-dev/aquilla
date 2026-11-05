@@ -12,7 +12,7 @@
  * shares for the Agent API's events, so both senders agree on every name.
  *
  * Every call goes through `@/lib/posthog`, which is consent-gated
- * (`opt_out_capturing_by_default`) — there is no capture path here that
+ * (active-account approval) — there is no capture path here that
  * bypasses that.
  */
 
@@ -58,11 +58,12 @@ function recordForDevtools(event: TelemetryEvent): void {
  * error for a validation that happened. Telemetry never gets to break the
  * action it describes.
  */
-function send(build: () => TelemetryEvent): void {
+function send(build: () => TelemetryEvent, analytics: ReturnType<typeof posthog.scope>): void {
   try {
+    if (!analytics.enabled()) return
     const event = build()
     recordForDevtools(event)
-    posthog.capture(event.event, event.properties)
+    analytics.capture(event.event, event.properties)
   } catch {
     /* dropped: a missing chart point, never a failed gesture */
   }
@@ -72,11 +73,12 @@ function send(build: () => TelemetryEvent): void {
 export function captureCellValidation(
   validated: boolean,
   t: CellValidationTelemetry,
+  analytics = posthog.scope(),
 ): void {
-  send(() => cellValidationEvent(validated, t))
+  send(() => cellValidationEvent(validated, t), analytics)
 }
 
 /** Emit the `audio attached` / `audio generated` / `audio recorded` event. */
-export function captureAudioAction(t: AudioActionTelemetry): void {
-  send(() => audioActionEvent(t))
+export function captureAudioAction(t: AudioActionTelemetry, analytics = posthog.scope()): void {
+  send(() => audioActionEvent(t), analytics)
 }

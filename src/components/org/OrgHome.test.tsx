@@ -336,7 +336,11 @@ describe("OrgHome loading template", () => {
     expect(screen.getByTestId("org-home-loading-template")).toBeInTheDocument()
     const header = document.querySelector("[data-slot='app-shell-header']")
     expect(header).not.toBeNull()
-    expect(header!.querySelectorAll("[data-slot='skeleton']")).toHaveLength(1)
+    // The real breadcrumb, nothing else: no profile chip, no loading chrome.
+    expect(header!.textContent).toContain("All organizations")
+    expect(header!.querySelectorAll("nav")).toHaveLength(1)
+    expect(header!.children).toHaveLength(1)
+    expect(document.querySelectorAll("[data-slot='loading-cursor']").length).toBeGreaterThan(0)
   })
 })
 
@@ -480,7 +484,13 @@ describe("OrgOverview / OrgProjects", () => {
 
   it("renders the org name, nav, and admin links for an owner", async () => {
     renderMemberOverview()
-    await waitFor(() => expect(screen.getAllByText("Come and See").length).toBeGreaterThan(0))
+    // The loading template shows the real breadcrumb (so the org name is
+    // visible early): wait for the template itself to leave.
+    await waitFor(() => {
+      expect(screen.queryByTestId("org-home-loading-template")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("org-overview-loading-template")).not.toBeInTheDocument()
+    })
+    expect(screen.getAllByText("Come and See").length).toBeGreaterThan(0)
     expect(screen.getByRole("link", { name: "Overview" })).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "Projects" })).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "Teams" })).toBeInTheDocument()
@@ -544,7 +554,9 @@ describe("OrgOverview / OrgProjects", () => {
 
   it("shows the project count in the rollup strip", async () => {
     renderMemberOverview()
-    await waitFor(() => expect(screen.getByText("Avg translated")).toBeInTheDocument())
+    // The loading template already shows the tile labels, so wait for the
+    // template itself to leave rather than for a label to appear.
+    await waitFor(() => expect(screen.queryByTestId("org-overview-loading-template")).not.toBeInTheDocument())
     const projectsStat = projectsRollupStat()
     expect(within(projectsStat).getByText("2")).toBeInTheDocument()
     expect(projectsStat).toHaveClass("flex-row-reverse")
@@ -555,7 +567,7 @@ describe("OrgOverview / OrgProjects", () => {
   // org has. The tile shows the server-side count.
   it("shows the org's active-lane count in the rollup strip", async () => {
     renderMemberOverview()
-    await waitFor(() => expect(screen.getByText("Avg translated")).toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByTestId("org-overview-loading-template")).not.toBeInTheDocument())
     const label = screen.getAllByText("Active language lanes").find((el) => !el.closest("nav"))!
     const tile = label.parentElement?.parentElement
     if (!tile) throw new Error("lanes tile root not found")
@@ -776,7 +788,7 @@ describe("OrgOverview per-section visibility (AQU-486)", () => {
     vi.mocked(listMyOrgs).mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 400, name: "contributor" } }])
 
     renderMemberOverview()
-    await waitFor(() => expect(screen.getByText("Avg translated")).toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByTestId("org-overview-loading-template")).not.toBeInTheDocument())
 
     expect(screen.queryByTestId("section-team-workload")).not.toBeInTheDocument()
     expect(screen.queryByTestId("section-team-usage")).not.toBeInTheDocument()
@@ -793,7 +805,7 @@ describe("OrgOverview per-section visibility (AQU-486)", () => {
     ])
     // Default org role in this suite is 700 (owner) — meets the floor.
     renderMemberOverview()
-    await waitFor(() => expect(screen.getByText("Avg translated")).toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByTestId("org-overview-loading-template")).not.toBeInTheDocument())
 
     const section = await screen.findByTestId("section-team-workload")
     // The card renders nothing until its workload rows land, so the badge
@@ -818,7 +830,7 @@ describe("OrgOverview per-section visibility (AQU-486)", () => {
     ])
 
     renderMemberOverview()
-    await waitFor(() => expect(screen.getByText("Avg translated")).toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByTestId("org-overview-loading-template")).not.toBeInTheDocument())
 
     const section = await screen.findByTestId("section-team-workload")
     const visibilityButton = await within(section).findByRole("button", {
@@ -858,7 +870,7 @@ describe("OrgOverview Team cards follow both visibility settings (AQU-1771)", ()
     vi.mocked(getWorkload).mockResolvedValue([workloadRow])
 
     renderMemberOverview()
-    await waitFor(() => expect(screen.getByText("Avg translated")).toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByTestId("org-overview-loading-template")).not.toBeInTheDocument())
 
     expect(screen.queryByTestId("section-team-workload")).not.toBeInTheDocument()
     expect(screen.queryByTestId("section-team-usage")).not.toBeInTheDocument()
@@ -922,7 +934,7 @@ describe("OrgOverview signed-out state", () => {
     renderMemberOverview()
 
     await waitFor(() => {
-      expect(screen.getByRole("link", { name: /sign in/i })).toBeInTheDocument()
+      expect(screen.getByRole("link", { name: /log in/i })).toBeInTheDocument()
     })
 
     // The stat rollup cards must not be present — they'd show meaningless zeros.
@@ -936,7 +948,7 @@ describe("OrgOverview signed-out state", () => {
 
     renderMemberOverview()
 
-    const link = await screen.findByRole("link", { name: /sign in/i })
+    const link = await screen.findByRole("link", { name: /log in/i })
     expect(link.getAttribute("href")).toMatch(/\/login\?next=/)
   })
 })

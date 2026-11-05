@@ -218,7 +218,7 @@ describe("useOrgSettings — write floor matches server (AQU-255 follow-up)", ()
     const lead = renderHook(() => useOrgSettings(1, 500))
     await waitFor(() => expect(lead.result.current.hasFetched).toBe(true))
     expect(lead.result.current.canEdit).toBe(false)
-    // Project leads can still *request* promotion (server floor is 500 there).
+    // Project Leads can still *request* promotion (server floor is 500 there).
     expect(lead.result.current.canRequestPromotion).toBe(true)
 
     const maintainer = renderHook(() => useOrgSettings(1, 600))

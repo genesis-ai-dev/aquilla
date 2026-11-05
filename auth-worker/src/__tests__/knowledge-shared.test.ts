@@ -85,6 +85,71 @@ describe("knowledge shared primitives", () => {
     expect(await searchKnowledge(env.AQUILLA_PG, "proj-kb", "quick brown")).toHaveLength(1)
   })
 
+  // AQU-1766: the card has to say how much was indexed, so every meta read
+  // carries the node count — derived in SQL from index_tree, which the list
+  // never ships. Nested nodes count once each; `strict` in the jsonpath is
+  // what stops lax auto-unwrapping counting the top level twice.
+  it("reports a node count on every meta read, counting nested nodes once", async () => {
+    await seedScope()
+    const id = "88888888-8888-8888-8888-888888888888"
+    await seedDoc(id, { projectId: "proj-kb" })
+
+    // Before any run: nothing indexed, and that reads as 0, not as missing.
+    expect((await getDocMeta(env.AQUILLA_PG, id))?.nodeCount).toBe(0)
+    expect((await listProjectDocs(env.AQUILLA_PG, "proj-kb"))[0].nodeCount).toBe(0)
+
+    const nested: KnowledgeNode[] = [
+      { id: "n1", title: "Alpha", charStart: 0, charEnd: 29, children: [
+        { id: "n1.1", title: "Alpha a", charStart: 0, charEnd: 10 },
+        { id: "n1.2", title: "Alpha b", charStart: 10, charEnd: 29, children: [
+          { id: "n1.2.1", title: "Alpha b i", charStart: 10, charEnd: 20 },
+        ] },
+      ] },
+      { id: "n2", title: "Beta", charStart: 30, charEnd: TEXT.length },
+    ]
+    await setIndexResult(env.AQUILLA_PG, id, "ready", nested, "sum")
+
+    expect((await getDocMeta(env.AQUILLA_PG, id))?.nodeCount).toBe(5)
+    expect((await listProjectDocs(env.AQUILLA_PG, "proj-kb"))[0].nodeCount).toBe(5)
+    expect((await getDocTree(env.AQUILLA_PG, id))?.meta.nodeCount).toBe(5)
+    expect((await getDocText(env.AQUILLA_PG, id))?.meta.nodeCount).toBe(5)
+
+    // An org doc reads the same way through the org list.
+    const orgId = "99999999-9999-9999-9999-999999999999"
+    await seedDoc(orgId, { orgId: 77 }, "org.md")
+    await setIndexResult(env.AQUILLA_PG, orgId, "ready", nodeFixture(), "sum")
+    expect((await listOrgDocs(env.AQUILLA_PG, 77))[0].nodeCount).toBe(2)
+  })
+
+  // AQU-1766: the reason has to survive the round trip on both terminal
+  // statuses — the card renders it verbatim, and a retry that clears it must
+  // leave nothing stale behind.
+  it("round-trips the index reason, and a clean run clears it", async () => {
+    await seedScope()
+    const id = "aaaaaaaa-1111-1111-1111-aaaaaaaaaaaa"
+    await seedDoc(id, { projectId: "proj-kb" })
+
+    await setIndexResult(env.AQUILLA_PG, id, "failed", null, null,
+      "This document has no extractable text, so there is nothing to index.")
+    let meta = await getDocMeta(env.AQUILLA_PG, id)
+    expect(meta?.indexStatus).toBe("failed")
+    expect(meta?.indexError).toContain("no extractable text")
+    expect(meta?.nodeCount).toBe(0)
+
+    // Structure landed, summaries did not: indexed, with something to say.
+    await setIndexResult(env.AQUILLA_PG, id, "ready", nodeFixture(), null,
+      "The summarizing model is rate-limiting us. Try again shortly.")
+    meta = await getDocMeta(env.AQUILLA_PG, id)
+    expect(meta?.indexStatus).toBe("ready")
+    expect(meta?.indexError).toContain("rate-limiting")
+    expect(meta?.nodeCount).toBe(2)
+
+    // A clean run drops the reason rather than leaving the old one on the card.
+    await setIndexResult(env.AQUILLA_PG, id, "ready", nodeFixture(), "sum")
+    meta = await getDocMeta(env.AQUILLA_PG, id)
+    expect(meta?.indexError).toBeNull()
+  })
+
   it("kbExtension + kbR2Key helpers", () => {
     expect(kbExtension("Style Guide.DOCX")).toBe(".docx")
     expect(kbExtension("noext")).toBeNull()

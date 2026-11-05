@@ -156,18 +156,18 @@ describe("ROLE_OPTIONS shapes", () => {
 
 describe("role display helpers (resolveRoleName / resolveRoleDescription)", () => {
   it("resolves singular labels", () => {
-    expect(resolveRoleName(t, ROLE.PROJECT_LEAD)).toBe("Project lead")
+    expect(resolveRoleName(t, ROLE.PROJECT_LEAD)).toBe("Project Lead")
     expect(resolveRoleName(t, ROLE.CONTRIBUTOR)).toBe("Contributor")
     expect(resolveRoleName(t, ROLE.VIEWER)).toBe("Viewer")
   })
 
   it("resolves plural labels via the catalog's plural() form, not string concatenation", () => {
     expect(resolveRoleName(t, ROLE.VIEWER, { plural: true })).toBe("Viewers")
-    expect(resolveRoleName(t, ROLE.PROJECT_LEAD, { plural: true })).toBe("Project leads")
+    expect(resolveRoleName(t, ROLE.PROJECT_LEAD, { plural: true })).toBe("Project Leads")
   })
 
   it("accepts the canonical name string as well as the numeric level", () => {
-    expect(resolveRoleName(t, "project_lead")).toBe("Project lead")
+    expect(resolveRoleName(t, "project_lead")).toBe("Project Lead")
     expect(resolveRoleName(t, "owner", { plural: true })).toBe("Owners")
   })
 
@@ -223,7 +223,7 @@ describe("AQU-832/WS-08: a role used for comparison keeps working when its label
     "common.role.commenter": "Commentateur",
     "common.role.reviewer": "Réviseur",
     "common.role.contributor": "Contributeur",
-    "common.role.projectLead": "Chef de projet",
+    "common.role.projectLead": "Chef de Projet",
     "common.role.maintainer": "Mainteneur",
     "common.role.owner": "Propriétaire",
   }

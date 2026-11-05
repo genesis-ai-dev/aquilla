@@ -1,3 +1,4 @@
+import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 // src/hooks/useCellAudio.ts
 // React hook that loads per-cell audio on demand from sync-worker R2.
 // Owns the HTMLAudioElement lifecycle and revokes the object URL on unmount /
@@ -6,7 +7,6 @@
 
 import { isOnline } from "@/lib/offline/connectivity"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import posthog from "@/lib/posthog"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { fetchCellAudio, getCellAudioStreamUrl, parseFrontierAudioUrl } from "@/lib/audio/upload"
@@ -189,6 +189,7 @@ export function useCellAudio(
   fileId: string,
   opts: UseCellAudioOptions = {},
 ): UseCellAudioResult {
+  const analytics = useAccountAnalytics()
   const { session } = useFrontierSession()
   const t = useT()
   const [state, setState] = useState<UseCellAudioResult["state"]>("idle")
@@ -570,7 +571,7 @@ export function useCellAudio(
               const err = (e && typeof e === "object" && "kind" in e)
                 ? (e as AudioError)
                 : { kind: "download-failed" as const, message: String(e) }
-              posthog.captureException(e instanceof Error ? e : new Error(err.message), {
+              analytics.captureException(e instanceof Error ? e : new Error(err.message), {
                 audio_error_kind: err.kind,
               })
               setError(err)
@@ -579,7 +580,7 @@ export function useCellAudio(
           })()
           return
         }
-        posthog.captureException(new Error("audio element failed to stream media source"), {
+        analytics.captureException(new Error("audio element failed to stream media source"), {
           audio_error_kind: "download-failed",
         })
         setError({ kind: "download-failed", message: t("audio.error.streamingFailed") })
@@ -712,7 +713,7 @@ export function useCellAudio(
         ? (e as AudioError)
         : { kind: "download-failed" as const, message: String(e) }
       console.error("[useCellAudio]", err)
-      posthog.captureException(e instanceof Error ? e : new Error(err.message), {
+      analytics.captureException(e instanceof Error ? e : new Error(err.message), {
         audio_error_kind: err.kind,
       })
       setError(err)
@@ -721,7 +722,7 @@ export function useCellAudio(
       creatingRef.current = null
       created()
     }
-  }, [attachmentUrl, project.id, fileId, getSyncToken, ensureBytes, startTicking, stopTicking, t, publishTime, setCurrentTime]) // eslint-disable-line react-hooks/exhaustive-deps -- elTime/setElTime read refs only
+  }, [attachmentUrl, project.id, fileId, getSyncToken, ensureBytes, startTicking, stopTicking, t, publishTime, setCurrentTime, analytics]) // elTime reads refs only
 
   const pause = useCallback(() => {
     const own = audioRef.current
@@ -765,7 +766,7 @@ export function useCellAudio(
         setCurrentTime(start)
       }
     }
-  }, [setCurrentTime, stopTicking]) // eslint-disable-line react-hooks/exhaustive-deps -- elTime/setElTime read refs only
+  }, [setCurrentTime, stopTicking]) // elTime/setElTime read refs only
 
   // A seek lands a hair INSIDE the window's end. Landing exactly on it is
   // "reached the end" to the tick, which pauses and rewinds — so a drag into
@@ -826,7 +827,7 @@ export function useCellAudio(
     pendingStartRef.current = at
     setCurrentTime(at)
     void play()
-  }, [play, setCurrentTime]) // eslint-disable-line react-hooks/exhaustive-deps -- setElTime reads refs only
+  }, [play, setCurrentTime]) // setElTime reads refs only
 
   const requestPeaks = useCallback(async (bins: number, opts?: { force?: boolean }) => {
     if (!attachmentUrl || !selectedAudioId) return

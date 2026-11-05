@@ -327,14 +327,29 @@ export async function resolveScope(
   } else if (range) {
     // A known file whose cells never carry this book (a made-up "MRK" on an
     // XXB file): the ref cannot select anything, so the scope is the file.
+    //
+    // AQU-1492: what counts as "carries this book" depends on the range. A
+    // whole-book scope is satisfied by either ref shape, scripture
+    // ("MRK 4:1") or the marker form a non-scripture USFM book carries
+    // ("XXB:h:1") — `inRange` accepts both. A CHAPTER/VERSE scope is
+    // satisfied only by the scripture shape, because `parseCanonical` needs
+    // "<BOOK> <chapter>[:<verse>]" to compare numbers at all. So a marker-ref
+    // file used to pass this probe, keep the chaptered range, and then have
+    // every one of its cells filtered out — the agent reported "no
+    // untranslated cells" for a file full of them. Only the scripture shape
+    // keeps a chaptered range alive; otherwise the scope widens to the file.
+    const refPatterns =
+      range.chapter === undefined
+        ? [`${range.book} %`, `${range.book}:%`]
+        : [`${range.book} %`]
     const carries = await db
       .prepare(
         `SELECT 1 AS hit FROM cells
          WHERE project_id = ? AND file_id = ? AND side = 'source'
-           AND (upper(canonical_ref) LIKE ? OR upper(canonical_ref) LIKE ?)
+           AND (${refPatterns.map(() => "upper(canonical_ref) LIKE ?").join(" OR ")})
          LIMIT 1`,
       )
-      .bind(ctx.projectId, fileId, `${range.book} %`, `${range.book}:%`)
+      .bind(ctx.projectId, fileId, ...refPatterns)
       .first<{ hit: number }>()
     if (!carries) {
       range = undefined

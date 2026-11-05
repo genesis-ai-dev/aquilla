@@ -133,8 +133,12 @@ jobs:
       # GITHUB_SHA has the same problem: it names dev's commit, and the SPA's
       # version.json prefers it over git (scripts/build-info.ts), so the tag step
       # saw production serving a dev sha and refused to tag the release HEAD.
+      # The tag is annotated, so git needs a committer; the runner has none
+      # ("fatal: empty ident name"). Same identity release-cut.yml commits with.
       - name: Deploy production and tag
         run: |
+          git config user.name "aquilla-release-bot"
+          git config user.email "release-bot@aquilla.app"
           export GITHUB_REF_NAME="$DEPLOY_REF_NAME"
           export GITHUB_SHA="$(git rev-parse HEAD)"
           pnpm run deploy:aquilla

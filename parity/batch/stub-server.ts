@@ -1,4 +1,4 @@
-// Reference stub implementing BATCH_ENDPOINT_CONTRACT.md over BatchService.
+// Reference stub implementing docs/BATCH_ENDPOINT_CONTRACT.md over BatchService.
 // Transport-agnostic (no sockets): contract tests drive handle() directly;
 // the real endpoint later swaps this for an HTTP transport adapter and MUST
 // pass the same contract suite.

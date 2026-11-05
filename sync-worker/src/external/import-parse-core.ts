@@ -28,6 +28,7 @@ import type { ExternalEnv } from './types'
 import {
   parseTextFormat,
   TEXT_PARSE_FILE_TYPES,
+  type TextParseFileType,
 } from '../../../src/lib/parsers/parse-text-formats'
 // The format tables live in their own module so they can be read without this
 // module's Worker-only graph (AQU-2384). Re-exported below for every existing

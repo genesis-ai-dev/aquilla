@@ -51,6 +51,25 @@ describe("adversarial invariant oracle", () => {
     expect(verifyInvariants(before, before, editC1, { ...seen, inputObserved: false }).verdict).toBe("inconclusive")
   })
 
+  it("stays inconclusive when the driver typed nothing, whichever contract signals that left unmet", () => {
+    // AQU-1513: "nothing typed" leaves `target-value` unmet by the harness's own
+    // doing. Whether `inputObserved` also trips is incidental, so both shapes must
+    // reach one verdict — reading the difference as a product failure put false
+    // findings on PRs whose diff could not reach the attacked surface.
+    const nothingTyped = "Text helper returned no valid field value; nothing typed."
+    const requirementsOnly = verifyInvariants(before, before, editC1, { ...seen, harnessFault: nothingTyped })
+    const alsoUnobserved = verifyInvariants(before, before, editC1,
+      { ...seen, inputObserved: false, harnessFault: nothingTyped })
+    expect(requirementsOnly.verdict).toBe("inconclusive")
+    expect(alsoUnobserved.verdict).toBe(requirementsOnly.verdict)
+    expect(requirementsOnly.checks.requirementsMet).toBe(false)
+    expect(requirementsOnly.reason).toContain(nothingTyped)
+  })
+
+  it("still blames the product when the driver acted, so the harness escape hatch stays narrow", () => {
+    expect(verifyInvariants(before, before, editC1, { ...seen, harnessFault: null }).verdict).toBe("product_failure")
+  })
+
   it("stays inconclusive when the hostile condition never fired, so a calm run is not a condition pass", () => {
     const outcome = verifyInvariants(before, edited("fixed"), editC1, { ...seen, mutatorApplied: false })
     expect(outcome.verdict).toBe("inconclusive")

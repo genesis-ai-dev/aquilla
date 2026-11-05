@@ -1,0 +1,33 @@
+diff --git a/dist/make-sqlite-db.js b/dist/make-sqlite-db.js
+index 6367ada0a598063f9385e34cf6bceec62d3561b8..828728e0c975e7c9d32cad137c834e3e485304cf 100644
+--- a/dist/make-sqlite-db.js
++++ b/dist/make-sqlite-db.js
+@@ -3,7 +3,11 @@ import { EventSequenceNumber } from '@livestore/common/schema';
+ import * as SqliteConstants from '@livestore/wa-sqlite/src/sqlite-constants.js';
+ import { makeInMemoryDb } from "./in-memory-vfs.js";
+ export const makeSqliteDb = ({ sqlite3, metadata, }) => {
+-    const preparedStmts = [];
++    // [aquilla patch] A Set, and finalize() removes its statement. As an array that only close()
++    // read, every statement ever run stayed reachable for the life of the connection - and
++    // execute()/select() prepare a fresh one per call, so a leader that replays 600k statements
++    // after a schema change (or just runs all day) held them all.
++    const preparedStmts = new Set();
+     const { dbPointer } = metadata;
+     let isClosed = false;
+     const sqliteDb = {
+@@ -83,13 +87,14 @@ export const makeSqliteDb = ({ sqlite3, metadata, }) => {
+                             return;
+                         }
+                         isFinalized = true;
++                        preparedStmts.delete(preparedStmt);
+                         for (const stmt of stmts) {
+                             sqlite3.finalize(stmt);
+                         }
+                     },
+                     sql: queryStr,
+                 };
+-                preparedStmts.push(preparedStmt);
++                preparedStmts.add(preparedStmt);
+                 return preparedStmt;
+             }
+             catch (e) {

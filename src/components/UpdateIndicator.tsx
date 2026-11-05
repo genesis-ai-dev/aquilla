@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react"
 import { useLocation } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { isEditorPath, useUpdateCheck } from "@/hooks/useUpdateCheck"
+import { isEditorPath, isTypingSomewhere, useUpdateCheck } from "@/hooks/useUpdateCheck"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { cn } from "@/lib/utils"
 
@@ -46,8 +46,11 @@ export function UpdateIndicator({ className }: { className?: string }) {
 /**
  * Picks a newer build up on the next page change that is not into the
  * editor. Mounted once in App; renders nothing. The reload never fires on
- * its own while the pathname is an editor route, and never on the first
- * render (a page the user just opened is not a page they just left).
+ * its own while the pathname is an editor route, while the caret sits in
+ * something the user can type into (AQU-2335 — the agent composer and the
+ * left dock outlive a change of the routed pane, so a navigation can land
+ * mid-sentence), and never on the first render (a page the user just
+ * opened is not a page they just left).
  */
 export function UpdateOnNavigate() {
   const available = useUpdateCheck()
@@ -57,7 +60,7 @@ export function UpdateOnNavigate() {
   useEffect(() => {
     const moved = previous.current !== pathname
     previous.current = pathname
-    if (moved && available && !isEditorPath(pathname)) window.location.reload()
+    if (moved && available && !isEditorPath(pathname) && !isTypingSomewhere()) window.location.reload()
   }, [pathname, available])
 
   return null

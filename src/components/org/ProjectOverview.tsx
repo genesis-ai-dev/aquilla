@@ -151,7 +151,7 @@ import {
 } from "@/lib/metrics/hidden-stats"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { SearchSelect } from "@/components/ui/search-select"
-import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { LoadingTemplate } from "@/components/ui/loading-overlay"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { bidiIsolate } from "@/lib/i18n/format"
@@ -172,52 +172,8 @@ import { PROGRESS_BG, type ProgressTone } from "@/lib/progress/progress-palette"
 
 function ProjectOverviewSkeleton() {
   return (
-    <div className="max-w-5xl space-y-4">
-      <div className="rounded-lg border bg-card shadow-sm p-6 space-y-2">
-        <div className="flex items-center gap-2">
-          <Skeleton className="h-6 w-48" />
-          <Skeleton className="h-5 w-16 rounded-md" />
-        </div>
-        <Skeleton className="h-4 w-32" />
-        <Skeleton className="h-4 w-20" />
-        <div className="flex items-start gap-4 pt-2">
-          <div className="space-y-1.5">
-            <Skeleton className="h-3 w-24" />
-            <Skeleton className="h-8 w-48" />
-          </div>
-          <div className="space-y-1.5">
-            <Skeleton className="h-3 w-16" />
-            <Skeleton className="h-8 w-56" />
-          </div>
-        </div>
-      </div>
-      <div className="rounded-lg border bg-card shadow-sm p-5 space-y-4">
-        <Skeleton className="h-3 w-20" />
-        <div className="flex flex-wrap gap-3">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <Skeleton key={i} className="h-14 w-24 rounded-lg" />
-          ))}
-        </div>
-        <div className="space-y-2.5">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <Skeleton key={i} className="h-2.5 w-full rounded-full" />
-          ))}
-        </div>
-      </div>
-      <div className="rounded-lg border bg-card shadow-sm p-5 space-y-3">
-        <Skeleton className="h-3 w-16" />
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="flex items-center gap-3">
-            <Skeleton className="h-4 w-36" />
-            <Skeleton className="h-1.5 flex-1 rounded-full" />
-            <Skeleton className="h-3 w-24" />
-          </div>
-        ))}
-      </div>
-      <div className="rounded-lg border bg-card shadow-sm p-5 space-y-2">
-        <Skeleton className="h-3 w-20" />
-        <Skeleton className="h-4 w-40" />
-      </div>
+    <div className="max-w-5xl">
+      <LoadingCursor className="text-xl" />
     </div>
   )
 }

@@ -1,15 +1,15 @@
 /**
- * AgentMemoryTab.test.tsx — the memory tab must load all three sections,
+ * AgentMemoryTab.test.tsx — the memory tab must load its two sections,
  * flip a proposed memory's status optimistically on approve/reject (and
- * revert on a failed request), set the human-edited badge after an edit, and
- * surface the brief's 409 version-conflict path with a reload affordance
- * instead of silently discarding the edit.
+ * revert on a failed request), and set the human-edited badge after an edit.
+ * AQU-2342: the agent's own "Project brief" tab is gone — the project
+ * instructions live in Living Memory, the one place every AI draft reads.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import AgentMemoryTab from "./AgentMemoryTab"
-import type { AgentMemory, ProjectBrief, ProjectBriefProposal } from "@/lib/agent/memory-api"
+import type { AgentMemory } from "@/lib/agent/memory-api"
 import { ROLE } from "@/lib/agent/role-floors"
 import type { AgentRunUi } from "@/lib/agent/run-state"
 
@@ -25,29 +25,22 @@ vi.mock("@/lib/agent/memory-api", async () => {
   return {
     ...actual,
     listAgentMemories: vi.fn(),
-    getProjectBrief: vi.fn(),
-    listBriefProposals: vi.fn(),
     reviewAgentMemory: vi.fn(),
     editAgentMemory: vi.fn(),
-    putProjectBrief: vi.fn(),
-    proposeBriefUpdate: vi.fn(),
-    reviewBriefProposal: vi.fn(),
   }
 })
 
 // mem-M5/mem-m2: a controllable fake of the shared agent-session store, so
-// tests can assert AgentMemoryTab calls markMemoryReviewed/markBriefReviewed
+// tests can assert AgentMemoryTab calls markMemoryReviewed
 // on review, and can push in a `runs` array with more memory-proposed items
 // to prove the badge-refetch effect (real useSyncExternalStore wiring is
 // session-store.test.ts's job — this fakes just the read/write surface
 // AgentMemoryTab uses).
 let fakeRuns: AgentRunUi[] = []
 const mockMarkMemoryReviewed = vi.fn()
-const mockMarkBriefReviewed = vi.fn()
 vi.mock("@/lib/agent/session-store", () => ({
   agentSessionStore: vi.fn(() => ({
     markMemoryReviewed: mockMarkMemoryReviewed,
-    markBriefReviewed: mockMarkBriefReviewed,
   })),
   useAgentSession: vi.fn(() => ({
     state: { runs: fakeRuns, isStreaming: false, queued: [], decided: new Map(), activity: [], sessionId: "s" },
@@ -61,23 +54,14 @@ vi.mock("@/lib/agent/session-store", () => ({
 
 import {
   listAgentMemories,
-  getProjectBrief,
-  listBriefProposals,
   reviewAgentMemory,
   editAgentMemory,
-  putProjectBrief,
-  reviewBriefProposal,
-  VersionConflictError,
   SupersedesHumanEditedError,
 } from "@/lib/agent/memory-api"
 
 const mockListAgentMemories = vi.mocked(listAgentMemories)
-const mockGetProjectBrief = vi.mocked(getProjectBrief)
-const mockListBriefProposals = vi.mocked(listBriefProposals)
 const mockReviewAgentMemory = vi.mocked(reviewAgentMemory)
 const mockEditAgentMemory = vi.mocked(editAgentMemory)
-const mockPutProjectBrief = vi.mocked(putProjectBrief)
-const mockReviewBriefProposal = vi.mocked(reviewBriefProposal)
 
 const PROPOSED_MEMORY: AgentMemory = {
   id: "mem-1",
@@ -104,30 +88,29 @@ const APPROVED_MEMORY: AgentMemory = {
   version: 1,
 }
 
-const BRIEF: ProjectBrief = {
-  projectId: "proj-1",
-  content: "this project translates Mark",
-  updatedBy: "alice",
-  version: 1,
-  updatedAt: "2026-01-01T00:00:00Z",
-}
-
 beforeEach(() => {
   vi.clearAllMocks()
   fakeRuns = []
   mockListAgentMemories.mockResolvedValue([PROPOSED_MEMORY, APPROVED_MEMORY])
-  mockGetProjectBrief.mockResolvedValue(BRIEF)
-  mockListBriefProposals.mockResolvedValue([])
 })
 
 describe("loading and layout", () => {
-  it("loads memories + brief and renders the proposed count badge", async () => {
+  it("loads memories and renders the proposed count badge", async () => {
     render(<AgentMemoryTab projectId="proj-1" roleLevel={ROLE.PROJECT_LEAD} />)
     await waitFor(() => expect(screen.getByText("observations/foo.md")).toBeInTheDocument())
     expect(mockListAgentMemories).toHaveBeenCalledWith("test-jwt", "proj-1")
-    expect(mockGetProjectBrief).toHaveBeenCalledWith("test-jwt", "proj-1")
     // Proposed tab trigger shows the pending count.
     expect(screen.getByRole("tab", { name: /Proposed/ })).toHaveTextContent("1")
+  })
+
+  it("has no Project brief tab — the instructions live in Living Memory (AQU-2342)", async () => {
+    render(<AgentMemoryTab projectId="proj-1" roleLevel={ROLE.PROJECT_LEAD} />)
+    await waitFor(() => expect(screen.getByText("observations/foo.md")).toBeInTheDocument())
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent?.replace(/\d+$/, ""))).toEqual([
+      "Proposed",
+      "Approved",
+    ])
+    expect(screen.queryByRole("tab", { name: "Project brief" })).toBeNull()
   })
 
   it("tags proposed and approved rows with data-memory-path for e2e selectors", async () => {
@@ -329,96 +312,5 @@ describe("approved list edit", () => {
 
     await waitFor(() => expect(mockEditAgentMemory).toHaveBeenCalledWith("test-jwt", "proj-1", "mem-2", "revised"))
     await waitFor(() => expect(screen.getByText("Human-edited")).toBeInTheDocument())
-  })
-})
-
-describe("project brief", () => {
-  it("renders the brief and saves an edit with ifMatchVersion after overwrite confirmation", async () => {
-    mockPutProjectBrief.mockResolvedValueOnce({ ...BRIEF, content: "updated brief", version: 2 })
-    render(<AgentMemoryTab projectId="proj-1" roleLevel={ROLE.PROJECT_LEAD} />)
-    await waitFor(() => expect(screen.getByText("observations/foo.md")).toBeInTheDocument())
-
-    fireEvent.click(screen.getByRole("tab", { name: "Project brief" }))
-    await waitFor(() => expect(screen.getByText(/this project translates Mark/)).toBeInTheDocument())
-
-    fireEvent.click(screen.getByRole("button", { name: /Edit/ }))
-    const textarea = screen.getByLabelText("Brief content")
-    fireEvent.change(textarea, { target: { value: "updated brief" } })
-    fireEvent.click(screen.getByRole("button", { name: "Save" }))
-
-    // Overwrite confirm dialog gates the actual PUT.
-    expect(mockPutProjectBrief).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole("button", { name: "Overwrite" }))
-
-    await waitFor(() => expect(mockPutProjectBrief).toHaveBeenCalledWith("test-jwt", "proj-1", "updated brief", 1))
-  })
-
-  it("shows a reload prompt on a 409 version conflict instead of overwriting", async () => {
-    mockPutProjectBrief.mockRejectedValueOnce(new VersionConflictError("stale", 5))
-    render(<AgentMemoryTab projectId="proj-1" roleLevel={ROLE.PROJECT_LEAD} />)
-    await waitFor(() => expect(screen.getByText("observations/foo.md")).toBeInTheDocument())
-
-    fireEvent.click(screen.getByRole("tab", { name: "Project brief" }))
-    await waitFor(() => expect(screen.getByText(/this project translates Mark/)).toBeInTheDocument())
-    fireEvent.click(screen.getByRole("button", { name: /Edit/ }))
-    fireEvent.change(screen.getByLabelText("Brief content"), { target: { value: "conflicting edit" } })
-    fireEvent.click(screen.getByRole("button", { name: "Save" }))
-    fireEvent.click(screen.getByRole("button", { name: "Overwrite" }))
-
-    await waitFor(() => expect(screen.getByText("stale")).toBeInTheDocument())
-    expect(screen.getByRole("button", { name: "Reload latest brief" })).toBeInTheDocument()
-    // The failed edit must not have replaced the brief shown behind the dialog.
-    expect(mockGetProjectBrief).toHaveBeenCalledTimes(1)
-  })
-
-  it("hides Edit and shows a role notice for a non-lead role", async () => {
-    render(<AgentMemoryTab projectId="proj-1" roleLevel={ROLE.CONTRIBUTOR} />)
-    await waitFor(() => expect(screen.getByText("observations/foo.md")).toBeInTheDocument())
-    fireEvent.click(screen.getByRole("tab", { name: "Project brief" }))
-    await waitFor(() => expect(screen.getByText(/this project translates Mark/)).toBeInTheDocument())
-    expect(screen.queryByRole("button", { name: /Edit/ })).not.toBeInTheDocument()
-    expect(screen.getByText("Project lead only")).toBeInTheDocument()
-  })
-})
-
-const BRIEF_PROPOSAL: ProjectBriefProposal = {
-  id: "prop-1",
-  projectId: "proj-1",
-  content: "this project translates Mark and Luke",
-  rationale: "Luke was added to scope",
-  status: "proposed",
-  createdBy: "agent",
-  reviewedBy: null,
-  createdAt: "2026-01-01T00:00:00Z",
-  reviewedAt: null,
-}
-
-describe("brief proposal diff + stale state (mem-M2/M3)", () => {
-  it("renders a line-level diff of the current brief vs the proposed content", async () => {
-    mockListBriefProposals.mockResolvedValue([BRIEF_PROPOSAL])
-    render(<AgentMemoryTab projectId="proj-1" roleLevel={ROLE.PROJECT_LEAD} />)
-    await waitFor(() => expect(screen.getByText("observations/foo.md")).toBeInTheDocument())
-    fireEvent.click(screen.getByRole("tab", { name: "Project brief" }))
-
-    // The unchanged prefix stays a context line; the changed line shows both
-    // the removed original and the added replacement.
-    await waitFor(() => expect(screen.getByText(/- this project translates Mark$/)).toBeInTheDocument())
-    expect(screen.getByText(/\+ this project translates Mark and Luke/)).toBeInTheDocument()
-  })
-
-  it("marks a proposal stale on a 409 conflict, disabling Approve and leaving only Reject", async () => {
-    mockListBriefProposals.mockResolvedValue([BRIEF_PROPOSAL])
-    mockReviewBriefProposal.mockRejectedValueOnce(new VersionConflictError("stale", 5, 3))
-    render(<AgentMemoryTab projectId="proj-1" roleLevel={ROLE.PROJECT_LEAD} />)
-    await waitFor(() => expect(screen.getByText("observations/foo.md")).toBeInTheDocument())
-    fireEvent.click(screen.getByRole("tab", { name: "Project brief" }))
-    await waitFor(() => expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument())
-
-    fireEvent.click(screen.getByRole("button", { name: "Approve" }))
-
-    await waitFor(() => expect(screen.getByText(/Stale — brief changed since this was proposed/)).toBeInTheDocument())
-    expect(screen.getByText(/v3 → v5/)).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled()
-    expect(screen.getByRole("button", { name: "Reject" })).not.toBeDisabled()
   })
 })

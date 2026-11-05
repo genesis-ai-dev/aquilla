@@ -28,7 +28,7 @@ describe("PATCH /api/v2/projects/:projectId/pm", () => {
     expect((await set.json())).toMatchObject({ ok: true, pm: { id: 2, username: "anna" } })
     let row = await env.AQUILLA_PG.prepare("SELECT pm_user_id FROM projects WHERE id='pa'").first<{ pm_user_id: number | null }>()
     expect(Number(row?.pm_user_id)).toBe(2)
-    // AQU-984: a contributor named PM is raised to a visible Project lead.
+    // AQU-984: a contributor named PM is raised to a visible Project Lead.
     const raised = await env.AQUILLA_PG.prepare(
       "SELECT role_level FROM project_members WHERE project_id='pa' AND user_id=2",
     ).first<{ role_level: number }>()
@@ -43,7 +43,7 @@ describe("PATCH /api/v2/projects/:projectId/pm", () => {
     expect((await clear.json())).toMatchObject({ ok: true, pm: null })
     row = await env.AQUILLA_PG.prepare("SELECT pm_user_id FROM projects WHERE id='pa'").first<{ pm_user_id: number | null }>()
     expect(row?.pm_user_id).toBeNull()
-    // Clearing the PM does not remove the Project lead membership.
+    // Clearing the PM does not remove the Project Lead membership.
     const kept = await env.AQUILLA_PG.prepare(
       "SELECT role_level FROM project_members WHERE project_id='pa' AND user_id=2",
     ).first<{ role_level: number }>()

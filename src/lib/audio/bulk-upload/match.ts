@@ -27,6 +27,8 @@
 // Pure: nothing here touches the network, React or the DOM, so every rule is
 // pinned by match.test.ts.
 
+import { toWesternDigits } from "../../../../shared/decimal-digits"
+import { AUDIO_FILE_EXT_SET, UNPLAYABLE_AUDIO_EXTS } from "../mime"
 import { BOOK_CODES, BookNameIndex, englishBookName } from "./book-names"
 import { folderSegments, isRangeSep, naturalCompare, readName, type NameNumber, type NameReading } from "./read-name"
 import { LAST_VERSES } from "./verse-counts"
@@ -175,11 +177,14 @@ export interface ReadRecording {
   folderKey: string
 }
 
-const AUDIO_EXTS = new Set(["wav", "mp3", "m4a", "mp4", "aac", "ogg", "oga", "opus", "webm", "flac"])
-/** Audio the one-file upload refuses (attach-file.ts KNOWN_AUDIO_EXTS) and
- *  most browsers can't play: uploaded, each would sit on its line as a take
- *  that never plays. Refused here too, whatever type the file declares. */
-const UNPLAYABLE_EXTS = new Set(["wma", "aif", "aiff", "amr", "3gp", "caf"])
+// AQU-1922: both lists are the shared ones in ../mime.ts. They used to be
+// re-typed here, which is how the pickers' `accept` strings drifted out of
+// step with what the validators actually allow.
+const AUDIO_EXTS = AUDIO_FILE_EXT_SET
+/** Audio the one-file upload refuses too (attach-file.ts `validateAudioFile`)
+ *  and most browsers can't play: uploaded, each would sit on its line as a
+ *  take that never plays. Refused here whatever type the file declares. */
+const UNPLAYABLE_EXTS = UNPLAYABLE_AUDIO_EXTS
 const SYSTEM_NAMES = new Set([".ds_store", "thumbs.db", "desktop.ini", "icon\r"])
 
 function extOf(name: string): string {
@@ -206,8 +211,7 @@ export function precheckFile(file: BulkInputFile, maxBytes: number): UnmatchedRe
 
 /** A project file name, compared the way a recording's name prefix is. */
 function fileNameKey(name: string): string {
-  return name
-    .normalize("NFKC")
+  return toWesternDigits(name.normalize("NFKC"))
     .toLowerCase()
     .replace(/\.[a-z0-9]{1,5}$/i, "")
     .replace(/[\s._\-'’]+/gu, " ")

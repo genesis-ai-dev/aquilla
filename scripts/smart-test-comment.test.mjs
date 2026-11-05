@@ -32,6 +32,31 @@ describe("truthful outcome report", () => {
     expect(report).toContain("No outcome has passed yet")
     expect(report).not.toContain("VERIFIED PASS")
   })
+  it("shows live progress per finished step and journey without claiming an outcome", () => {
+    const progress = { stage: "tests", elapsedS: 212.4,
+      steps: [{ name: "dependencies", seconds: 2.1, detail: "reused" }, { name: "build", seconds: 20.7, detail: "test-mode dist" },
+        { name: "stack", seconds: 31, detail: "workers and preview up" }],
+      total: 12,
+      journeys: [{ title: "DOM audit: surfaces", state: "finished" }, { title: "Jev edit | durability", state: "failed" },
+        { title: "Jev project outcome: rename", state: "running" }] }
+    const report = renderReport({ sha, phase: "running", progress })
+    expect(report).toContain("**Running.** No outcome has passed yet. 212 s elapsed.")
+    expect(report).toContain("- Dependencies: 2.1 s (reused)")
+    expect(report).toContain("- App build: 20.7 s (test-mode dist)")
+    expect(report).toContain("- Journeys: 2 of 12 finished, 1 failed so far")
+    expect(report).toContain("| Jev edit &#124; durability | FAILED |")
+    expect(report).toContain("| Jev project outcome: rename | running… |")
+    expect(report).toContain("| DOM audit: surfaces | finished — outcome pending |")
+    expect(report).not.toContain("VERIFIED PASS")
+    expect(report).not.toContain("PASS —")
+  })
+  it("falls back to the starting line when progress is missing or malformed", () => {
+    for (const progress of [undefined, null, "x", { steps: "no", journeys: 3 }]) {
+      const report = renderReport({ sha, phase: "running", progress })
+      expect(report).toContain("No outcome has passed yet")
+      expect(report).not.toContain("| Journey | Progress |")
+    }
+  })
   it("reports elapsed parallel time rather than adding overlapping test durations", () => {
     const value = { ...suite(), parallel: { shards: 4, wallMs: 51000, longestShardTestMs: 30000 } }
     expect(render(value)).toContain("4 isolated stacks; 51.0 s including setup; 30.0 s for the slowest test shard")

@@ -41,7 +41,7 @@ describe("WorkspaceHeaderActions", () => {
         <WorkspaceHeaderActions
           onImport={onImport}
           menuItems={[]}
-          importDisabledReason="Viewers cannot perform this action — you need at least Project lead access."
+          importDisabledReason="Viewers cannot perform this action — you need at least Project Lead access."
         />,
       )
 
@@ -58,10 +58,10 @@ describe("WorkspaceHeaderActions", () => {
         <WorkspaceHeaderActions
           onImport={vi.fn()}
           menuItems={[]}
-          importDisabledReason="Viewers cannot perform this action — you need at least Project lead access."
+          importDisabledReason="Viewers cannot perform this action — you need at least Project Lead access."
         />,
       )
-      await expectDisabledNote(screen.getByRole("button", { name: /^Import$/i }), /you need at least Project lead access/)
+      await expectDisabledNote(screen.getByRole("button", { name: /^Import$/i }), /you need at least Project Lead access/)
     })
 
     it("leaves Import enabled when no denial reason is given", () => {

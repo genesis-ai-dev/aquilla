@@ -63,15 +63,25 @@ interface Props {
   completionSettings: CompletionSettings | undefined
   onAdd: (rule: Omit<TranslationRule, "id" | "createdAt">) => void | Promise<void>
   projectId?: string
+  /** AQU-2342: controlled from the Checks list's one "Add check" flow — no
+   *  trigger button of its own is rendered then. */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }
 
 type Stage = "idle" | "extracting" | "review"
 
-export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props) {
+export function RuleImportDialog({ completionSettings, onAdd, projectId, open: controlledOpen, onOpenChange }: Props) {
   const t = useT()
   const { session } = useFrontierSession()
   const { available: frontierAvailable } = useFrontierHealth()
-  const [open, setOpen] = useState(false)
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false)
+  const controlled = controlledOpen !== undefined
+  const open = controlled ? controlledOpen : uncontrolledOpen
+  const setOpen = (next: boolean) => {
+    if (!controlled) setUncontrolledOpen(next)
+    onOpenChange?.(next)
+  }
   const [stage, setStage] = useState<Stage>("idle")
   const [error, setError] = useState<string | null>(null)
   const [progress, setProgress] = useState<ExtractionProgress | null>(null)
@@ -271,7 +281,7 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
           Greyed out, it says why on click: AppTooltip wraps the disabled
           button itself (a hand-made span between them would bring the hover
           back), and with nothing to open it is not a dialog trigger. */}
-      {isConfigured ? (
+      {controlled ? null : isConfigured ? (
         <DialogTrigger render={<Button variant="outline" />}>
           <Upload className="me-1 h-3.5 w-3.5" />
           {t("rules.importDialog.triggerButton")}

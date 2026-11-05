@@ -49,6 +49,7 @@ type PageSize = "default" | "wide" | "full"
 function Page({
   size = "default",
   fill = false,
+  reveal = true,
   className,
   children,
   ...props
@@ -59,6 +60,9 @@ function Page({
    * (or other flex-1 child) own remaining height — used by directory lists.
    */
   fill?: boolean
+  /** "Type in" the page's content top to bottom when it mounts (index.css
+   *  `data-reveal`). Off for pages whose children animate themselves. */
+  reveal?: boolean
   className?: string
   children: React.ReactNode
 } & Omit<React.ComponentProps<"div">, "children" | "className">) {
@@ -71,6 +75,7 @@ function Page({
       {...props}
     >
       <div
+        data-reveal={reveal ? "" : undefined}
         className={cn(
           "mx-auto w-full",
           fill ? "flex min-h-0 flex-1 flex-col py-18" : "py-18",

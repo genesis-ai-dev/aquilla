@@ -23,6 +23,13 @@ export interface EmailService {
      *  to a routed inbox (support@…) or a reply lands nowhere. Workers-binding
      *  field is camelCase `replyTo` (REST is `reply_to`). */
     replyTo?: string
+    /** Files sent with the message. The whole message may not pass 5 MiB. */
+    attachments?: {
+      content: string | ArrayBuffer | ArrayBufferView
+      filename: string
+      type: string
+      disposition: "attachment" | "inline"
+    }[]
   }): Promise<{ messageId: string }>
 }
 

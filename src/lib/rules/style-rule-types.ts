@@ -12,7 +12,7 @@
  * coverage is COMPUTED at read time, never materialized (assigned_by
  * 'inherited' exists only for deliberate audit/perf materialization).
  */
-import type { RuleCheck } from "@/lib/parsers/types"
+import type { RuleCheck } from "./rule-check"
 
 export type StyleRuleScope =
   | "global"

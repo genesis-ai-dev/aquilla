@@ -22,7 +22,7 @@ interface MinimalCell {
   status: string
 }
 
-vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn(), captureException: vi.fn() } }))
+vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn(), captureException: vi.fn() } }))
 vi.mock("@/lib/completion/frontier-health", () => ({
   useFrontierHealth: () => ({ available: true }),
 }))
@@ -180,5 +180,39 @@ describe("example evidence requires a real source→target pair (AQU-153)", () =
     })
 
     expect((result.current.examples.get("cell-1") ?? []).map((e) => e.cellId)).toEqual(["p-paired"])
+  })
+})
+
+// AQU-2342: the copilot sends the fixed role text plus the ONE project
+// instructions text. A device's stored `completionSettings.systemPrompt` is a
+// legacy migrate-on-read source only — it must never reach the request itself.
+describe("project instructions reach every copilot request (AQU-2342)", () => {
+  const sentSystemMessages = (): string[] =>
+    (vi.mocked(fetch).mock.calls as [string, RequestInit][]).map(([, init]) => {
+      const body = JSON.parse(String(init.body)) as { messages: { role: string; content: string }[] }
+      return body.messages.find((m) => m.role === "system")?.content ?? ""
+    })
+
+  it.each(["single", "batch"] as const)("%s: instructions after the default role text; the legacy prompt is not sent", async (path) => {
+    mockFetchReturning(path === "batch" ? "<v1>Au commencement</v1>" : "Au commencement")
+    searchMock.mockResolvedValue([])
+    searchPassagesMock.mockResolvedValue([])
+    const commitMock = vi.fn().mockResolvedValue(undefined)
+    const { result } = renderHook(() =>
+      useCompletion(
+        { ...SETTINGS, systemPrompt: "LEGACY DEVICE PROMPT" }, "English", "French",
+        searchMock, searchPassagesMock,
+        SESSION, commitMock as never, [],
+        [CELL] as never, "Use the formal register.", DEFAULT_DRAFT_CONTEXT,
+      ),
+    )
+    await act(async () => {
+      if (path === "batch") await result.current.completeBatch([CELL] as never)
+      else await result.current.completeSingle(CELL as never)
+    })
+    const [sys] = sentSystemMessages()
+    expect(sys).toContain("Project instructions (follow these):\nUse the formal register.")
+    expect(sys.indexOf("Project instructions")).toBeGreaterThan(sys.indexOf("You are a translation assistant"))
+    expect(sys).not.toContain("LEGACY DEVICE PROMPT")
   })
 })

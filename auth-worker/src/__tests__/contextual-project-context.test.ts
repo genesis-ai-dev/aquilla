@@ -206,7 +206,7 @@ describe("termGuidanceForSpan", () => {
 // ── Loading ─────────────────────────────────────────────────────────────────
 
 describe("loadProjectContext", () => {
-  it("reads brief, terminology and rules out of the one settings blob", async () => {
+  it("reads instructions, terminology and rules out of the one settings blob", async () => {
     await seedSettings(
       "proj-ctx-load",
       {
@@ -238,8 +238,9 @@ describe("loadProjectContext", () => {
     // or settings.targetLanguage. These keys are still in the blob.
     expect(ctx.sourceLanguage).toBeUndefined()
     expect(ctx.targetLanguage).toBeUndefined()
-    expect(ctx.projectBriefL1).toContain("young readers")
-    expect(ctx.briefParameters.audience).toBe("Youth")
+    // AQU-2342: the brief reaches Autopilot only through the resolved
+    // instructions (its summary wins over its sections on read).
+    expect(ctx.translationInstructions).toBe("A natural-register translation for young readers.")
     expect(ctx.concepts.map((c) => c.id)).toEqual(["c1"])
     expect(ctx.authoredRules.map((r) => r.id)).toEqual(["r1"])
   })
@@ -248,7 +249,27 @@ describe("loadProjectContext", () => {
     const ctx = await loadProjectContext(db, "proj-that-does-not-exist")
     expect(ctx.concepts).toEqual([])
     expect(ctx.authoredRules).toEqual([])
-    expect(ctx.briefParameters).toEqual({})
+    expect(ctx.translationInstructions).toBe("")
+  })
+
+  // AQU-2342: Autopilot reads the same resolved text as every other prompt —
+  // the legacy agent brief composes in on read, and a stored key replaces all.
+  it("resolves the one instructions text, legacy brief on read and stored key over all", async () => {
+    await seedSettings("proj-ctx-instr", { translationBrief: { l1Summary: "For young readers." } })
+    await db
+      .prepare(
+        `INSERT INTO project_briefs (project_id, content, updated_by, version, updated_at)
+         VALUES ('proj-ctx-instr', 'Keep divine names.', NULL, 1, now())`,
+      )
+      .run()
+    expect((await loadProjectContext(db, "proj-ctx-instr")).translationInstructions).toBe(
+      "For young readers.\n\nKeep divine names.",
+    )
+    await seedSettings("proj-ctx-instr", {
+      translationBrief: { l1Summary: "For young readers." },
+      translationInstructions: "Plain register.",
+    })
+    expect((await loadProjectContext(db, "proj-ctx-instr")).translationInstructions).toBe("Plain register.")
   })
 
   it("survives a corrupt settings blob without failing the run", async () => {
@@ -256,7 +277,7 @@ describe("loadProjectContext", () => {
     const ctx = await loadProjectContext(db, "proj-ctx-corrupt")
     expect(ctx.concepts).toEqual([])
     expect(ctx.authoredRules).toEqual([])
-    expect(ctx.briefParameters).toEqual({})
+    expect(ctx.translationInstructions).toBe("")
   })
 
   it("picks up concepts from a subscribed org termbase", async () => {
@@ -407,7 +428,7 @@ describe("loadProjectContext", () => {
 // ── Readiness ───────────────────────────────────────────────────────────────
 
 const bareContext = {
-  briefParameters: {},
+  translationInstructions: "",
   concepts: [],
   authoredRules: [],
   projectFacts: [],
@@ -422,13 +443,13 @@ describe("computeContextReadiness", () => {
       untranslatedCells: 500,
     })
     expect(r.ready).toBe(false)
-    // Terminology, brief and examples are the three that change the WORDING.
+    // Terminology, instructions and examples are the three that change the WORDING.
     expect(r.blockingGaps).toBe(3)
     const byId = new Map(r.items.map((i) => [i.id, i]))
     expect(byId.get("terminology")?.level).toBe("missing")
     expect(byId.get("terminology")?.href).toBe("terminology")
-    expect(byId.get("brief")?.level).toBe("missing")
-    expect(byId.get("brief")?.href).toBe("memory/brief")
+    expect(byId.get("instructions")?.level).toBe("missing")
+    expect(byId.get("instructions")?.href).toBe("memory/instructions")
     expect(byId.get("examples")?.level).toBe("missing")
   })
 
@@ -438,8 +459,7 @@ describe("computeContextReadiness", () => {
         ...bareContext,
         sourceLanguage: "English",
         targetLanguage: "Spanish",
-        projectBriefL1: "A natural-register translation.",
-        briefParameters: { audience: "a", literalness: "b", registerNaturalness: "c", keyTerms: "d" },
+        translationInstructions: "A natural-register translation.",
         concepts: Array.from({ length: 12 }, (_, i) =>
           concept({
             id: `c${i}`,
@@ -473,7 +493,7 @@ describe("computeContextReadiness", () => {
     const r = computeContextReadiness({
       context: {
         ...bareContext,
-        briefParameters: { audience: "Youth" },
+        translationInstructions: "Audience: Youth",
         concepts: [concept({
           id: "c1",
           sourceTerm: "grace",
@@ -485,7 +505,6 @@ describe("computeContextReadiness", () => {
     })
     const byId = new Map(r.items.map((i) => [i.id, i]))
     expect(byId.get("terminology")?.level).toBe("partial")
-    expect(byId.get("brief")?.level).toBe("partial")
     expect(byId.get("examples")?.level).toBe("partial")
     // Partial is not a blocker — nobody is stopped from pressing play.
     expect(r.blockingGaps).toBe(0)

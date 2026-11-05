@@ -1,3 +1,5 @@
+import posthog from "@/lib/posthog"
+import { analyticsAccount } from "@/lib/analytics-account"
 // Model A/B outcome reporting — the client half of the platform experiment
 // (auth-worker lib/model-ab.ts). When a completion response carries an X-AB-*
 // assignment, useCompletion notes it here against the cell it drafted; the AI
@@ -29,6 +31,7 @@ export type AbOutcome = "accepted" | "edited" | "rejected"
 const AB_FEEDBACK_URL = FRONTIER_CHAT_URL.replace(/\/completions$/, "/ab-feedback")
 
 interface PendingAb {
+  analytics: ReturnType<typeof posthog.scope>
   ab: AbAssignment
   /** The AI draft's text for THIS cell, captured at the AI auto-commit. */
   draftText?: string
@@ -38,18 +41,22 @@ interface PendingAb {
 
 /** `${fileId}:${cellId}` → the assignment that drafted that cell's content. */
 const pending = new Map<string, PendingAb>()
+analyticsAccount.subscribe(() => {
+  for (const [key, entry] of pending) if (!entry.analytics.enabled()) pending.delete(key)
+})
 
 const cellKey = (fileId: string, cellId: string): string => `${fileId}:${cellId}`
 
 /** Note that `cellId`'s next AI draft comes from an A/B-assigned request. */
-export function noteAbAssignment(fileId: string, cellId: string, ab: AbAssignment): void {
-  pending.set(cellKey(fileId, cellId), { ab })
+export function noteAbAssignment(fileId: string, cellId: string, ab: AbAssignment, analytics = posthog.scope()): void {
+  if (!analytics.enabled()) return
+  pending.set(cellKey(fileId, cellId), { ab, analytics })
 }
 
 /** Attach the draft text the AI actually committed for this cell. */
 export function noteAbDraftText(fileId: string, cellId: string, text: string): void {
   const entry = pending.get(cellKey(fileId, cellId))
-  if (entry) entry.draftText = text
+  if (entry?.analytics.enabled()) entry.draftText = text
 }
 
 /** True when the cell has an unreported A/B draft (exposed for tests). */
@@ -81,7 +88,7 @@ export function reportAbOutcome(
 ): void {
   const key = cellKey(fileId, cellId)
   const entry = pending.get(key)
-  if (!entry) return
+  if (!entry || !entry.analytics.enabled()) return
 
   let editDistance: number | undefined
   if (outcome === "edited" && entry.draftText !== undefined && currentText !== undefined) {
@@ -98,7 +105,7 @@ export function reportAbOutcome(
 
   void (async () => {
     const session = await loadSession()
-    if (!session?.jwt) return
+    if (!session?.jwt || session.username !== entry.analytics.owner || !entry.analytics.enabled()) return
     await fetch(AB_FEEDBACK_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.jwt}` },

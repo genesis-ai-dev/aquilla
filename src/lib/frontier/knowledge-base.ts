@@ -26,6 +26,12 @@ export interface KnowledgeDocument {
    * "the error" but "what this run has to say".
    */
   indexError: string | null
+  /**
+   * AQU-1766: how many sections the last indexing run left in the document's
+   * index — the card's "how much was indexed", so a real index is tellable
+   * from an empty one. Always a number; 0 means nothing was indexed.
+   */
+  nodeCount: number
   createdBy: string
   createdAt: string
   updatedAt: string

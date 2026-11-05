@@ -10,9 +10,9 @@ vi.mock("@/hooks/useFrontierSession", () => ({
 vi.mock("./OrgSwitcher", () => ({ OrgSwitcher: () => null }))
 vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
 vi.mock("@/components/HelpMenu", () => ({ HelpMenu: () => null }))
-const platformAdmin = vi.hoisted(() => ({ isAdmin: false }))
+const platformAdmin = vi.hoisted(() => ({ isAdmin: false, loading: false }))
 vi.mock("@/hooks/usePlatformAdmin", () => ({
-  usePlatformAdmin: () => ({ isAdmin: platformAdmin.isAdmin, loading: false }),
+  usePlatformAdmin: () => ({ isAdmin: platformAdmin.isAdmin, loading: platformAdmin.loading }),
 }))
 
 const rosterSettings = vi.hoisted(() => ({ canViewRoster: true, canEgress: true }))
@@ -135,6 +135,32 @@ describe("OrgSidebar in a guest org (AQU-790)", () => {
     expect(screen.queryByRole("link", { name: "Teams" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Assigned to me" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Access audit" })).not.toBeInTheDocument()
+  })
+})
+
+describe("OrgSidebar pending cursor", () => {
+  it("prints one cursor at the end of the nav until every permission check has landed", async () => {
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }])
+    fetchAccessibleProjects.mockResolvedValue([])
+    platformAdmin.loading = true
+    try {
+      renderSidebar("/orgs/1")
+      await screen.findByRole("link", { name: "Overview" })
+      expect(screen.getByTestId("org-sidebar-pending")).toBeInTheDocument()
+      expect(document.querySelectorAll("[data-slot='loading-cursor']")).toHaveLength(1)
+      // A secondary cursor: it never prints a surrounding loading label.
+      expect(screen.getByTestId("org-sidebar-pending").textContent).toBe("")
+    } finally {
+      platformAdmin.loading = false
+    }
+  })
+
+  it("drops the cursor once the checks are done", async () => {
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }])
+    fetchAccessibleProjects.mockResolvedValue([])
+    renderSidebar("/orgs/1")
+    await screen.findByRole("link", { name: "Overview" })
+    await waitFor(() => expect(screen.queryByTestId("org-sidebar-pending")).not.toBeInTheDocument())
   })
 })
 

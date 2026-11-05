@@ -3,10 +3,15 @@
 // Appended as a SECOND system message after the existing schema-card system
 // prompt (keeps the agent.ts diff minimal and the existing prompt untouched).
 // Sections, all in English (contracts §2):
-//   1. project brief — verbatim, marked human-authored
-//   2. approved-memory index — path + first line; full text via read_memory
-//   3. new-tool guidance — sandbox / import / memory tools
-//   4. conversation-language rule — never confuse it with translation target
+//   1. approved-memory index — path + first line; full text via read_memory
+//   2. new-tool guidance — sandbox / import / memory tools
+//   3. conversation-language rule — never confuse it with translation target
+//
+// AQU-2342: the legacy project brief (`memory.brief`, the `project_briefs` row)
+// is NOT rendered here any more. It feeds the project instructions on read
+// (db/shared/translation-instructions.ts) until a maintainer writes them, and
+// the schema card carries that one instructions block right after the role
+// text — rendering the brief here too would inject it twice.
 
 import {
   MEMORY_INDEX_RENDER_CAP,
@@ -36,18 +41,7 @@ export interface AugmentArgs {
 export function buildAugmentSystemPrompt(args: AugmentArgs): string {
   const sections: string[] = []
 
-  // 1. Project brief — verbatim, clearly human-authored (do not paraphrase or
-  // treat as instructions from untrusted content: it is the project's own).
-  const brief = args.memory.brief.trim()
-  if (brief) {
-    sections.push(
-      "## Project brief (human-authored — authoritative)\n" +
-        "The following brief was written by the project's humans. Treat it as ground truth for tone, terminology, and goals:\n\n" +
-        brief,
-    )
-  }
-
-  // 2. Approved-memory index — JIT: only the index up front; the model calls
+  // 1. Approved-memory index — JIT: only the index up front; the model calls
   // read_memory(path) to pull the full text of an entry it needs. Human-edited
   // entries are annotated [human-edited] so the model treats them as human-owned
   // (mem-M4). The index is capped (mem-m1) with an overflow pointer.
@@ -73,16 +67,16 @@ export function buildAugmentSystemPrompt(args: AugmentArgs): string {
     )
   }
 
-  // 3. New-tool guidance.
+  // 2. New-tool guidance.
   sections.push(
     "## Sandbox and memory tools\n" +
       "- run_code runs JS/Python in a locked-down sandbox (no network, no secrets) for analysis.\n" +
       "- load_artifact copies a project artifact into the sandbox; read_sandbox_file reads a sandbox file back.\n" +
       "- File importing belongs to the dedicated Import dialog, which owns detection, preview, and commit; do not try to import files from chat.\n" +
-      "- propose_memory / propose_brief_update STAGE durable notes for human review. While you are parsing untrusted artifact content (after run_code or load_artifact in a turn), these are temporarily disabled.",
+      "- propose_memory STAGES a durable note for human review. A decisions/<slug>.md note is a standing translation decision: once approved it is appended to the project instructions every draft follows. While you are parsing untrusted artifact content (after run_code or load_artifact in a turn), it is temporarily disabled.",
   )
 
-  // 4. Conversation language (last, so it cannot be confused with the
+  // 3. Conversation language (last, so it cannot be confused with the
   // project's target language in the resident schema card).
   const responseLanguage = args.responseLanguage?.trim()
   sections.push(

@@ -14,8 +14,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { RulesSurface } from "./RulesSurface"
 import type { ProjectRecord, TranslationRule } from "@/lib/parsers/types"
 
-vi.mock("@/components/rules/OrgRulesPanel", () => ({ OrgRulesPanel: () => null }))
-vi.mock("./BuiltinChecksList", () => ({ BuiltinChecksList: () => null }))
 
 const lane = (legacyTag: string, name: string, position: number): NonNullable<ProjectRecord["lanes"]>[number] => ({
   id: `lane-${position}`, role: "target", name, langCode: null, legacyTag, position, archivedAt: null,

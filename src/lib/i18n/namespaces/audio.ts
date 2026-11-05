@@ -690,6 +690,7 @@ export const audio = defineNamespace({
     "audio.castGutter.noCharacter": "No character",
     "audio.castGutter.addVoice": "Add a voice…",
     "audio.castGutter.recordingTooltip": "{label} · pick a voice to re-voice it",
+    "audio.castGutter.cameraTooltip": "{label} · {camera}",
 
     // useCellAudio — errors surfaced while loading/streaming a cell's audio.
     "audio.error.noAttachment": "No audio attachment on this cell",
@@ -3150,6 +3151,23 @@ export const audio = defineNamespace({
           "e.g. 'Kore — default (no one cast yet)'.",
         placeholders: {
           voiceName: "The fallback voice's own name (e.g. 'Kore'). Proper name — do not translate.",
+        },
+      },
+      "audio.castGutter.cameraTooltip": {
+        description:
+          "Hover/accessible text on the cast-gutter avatar for a line that carries a " +
+          "camera angle (AQU-1279). Appends the angle to whichever cast text already " +
+          "describes the line — e.g. 'Peter — voiced by Kore · on camera'. The angle " +
+          "matters to the subtitle workflow even when the dubbing side ignores it, so " +
+          "it must be readable in the editor and not only in the timeline lens.",
+        placeholders: {
+          label:
+            "The already-resolved cast text for this avatar (see " +
+            "audio.castGutter.namedTooltip / .defaultTooltip / .recordingTooltip), " +
+            "inserted verbatim.",
+          camera:
+            "The camera angle in words ('on camera', 'off camera', 'group shot', " +
+            "'mixed'), from cameraLabel() in lib/timeline/cue-character.",
         },
       },
       "audio.castGutter.chooseCharacterAriaLabel": {

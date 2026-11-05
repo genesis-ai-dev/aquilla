@@ -166,7 +166,7 @@ describe("the import floor at the perimeter (AQU-2304)", () => {
     if (!result.ok) {
       expect(result.status).toBe(403)
       // The reason names the role the ORG asked for, so the client can say why
-      // rather than repeating the static "Project lead" bar.
+      // rather than repeating the static "Project Lead" bar.
       expect(result.reason).toMatch(/maintainer/)
       expect(result.reason).toMatch(/600/)
     }

@@ -49,6 +49,12 @@ export interface KnowledgeDocMeta {
    *  too: a doc whose structure landed without summaries is indexed *and* has
    *  something to say about it. */
   indexError: string | null
+  /** How many nodes the last successful indexing run left in the doc's tree —
+   *  the "sections indexed" count (AQU-1766, AQU-1762). 0 means nothing was
+   *  indexed, which is what distinguishes a real index from an empty one, so
+   *  it is always a number and never null. Derived in SQL from `index_tree`
+   *  (see META_COLS) rather than shipped as the tree itself. */
+  nodeCount: number
   createdBy: string
   createdAt: string
   updatedAt: string
@@ -71,8 +77,19 @@ export type KnowledgeScopeRef = { projectId: string } | { orgId: number }
 // Row mapping
 // ──────────────────────────────────────────────────────────────────────────
 
+// `index_node_count` is DERIVED, not stored: the flattened node count of
+// `index_tree`, computed in SQL so every meta read carries "how much was
+// indexed" without shipping the tree to the caller (AQU-1766). `strict` is
+// load-bearing — in lax mode `$.**` auto-unwraps the root array and counts the
+// top-level nodes twice. `silent => true` keeps an unexpected tree shape from
+// turning a list read into a 500; it reports 0, which reads as "not indexed".
+const NODE_COUNT_COL = `jsonb_array_length(
+    jsonb_path_query_array(COALESCE(index_tree, '[]'::jsonb), 'strict $.**.id', '{}', true)
+  ) AS index_node_count`
+
 const META_COLS = `id, org_id, project_id, name, content_type, size_bytes, sha256,
-  r2_key, doc_summary, index_status, index_error, created_by, created_at, updated_at`
+  r2_key, doc_summary, index_status, index_error, ${NODE_COUNT_COL},
+  created_by, created_at, updated_at`
 
 interface Row {
   id: string
@@ -86,6 +103,7 @@ interface Row {
   doc_summary: string | null
   index_status: string
   index_error: string | null
+  index_node_count: number | null
   created_by: string
   created_at: string
   updated_at: string
@@ -105,6 +123,9 @@ function rowToMeta(r: Row): KnowledgeDocMeta {
     docSummary: r.doc_summary,
     indexStatus: r.index_status as KnowledgeIndexStatus,
     indexError: r.index_error ?? null,
+    // jsonb_array_length comes back as a number from postgres.js and PGlite
+    // alike; Number() guards a driver that hands integers back as strings.
+    nodeCount: Number(r.index_node_count ?? 0),
     createdBy: r.created_by,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -211,29 +232,19 @@ export async function listProjectDocs(db: AquillaDb, projectId: string): Promise
   return results.map(rowToMeta)
 }
 
-/** Project + org-inherited docs with each doc's flattened index-node count —
- *  the "chunk count" the Agent API publishes so a caller can tell an indexed
- *  doc from one that merely uploaded (AQU-1762). Separate from
- *  `listProjectDocs` because it reads `index_tree`, which the in-app list does
- *  not need; trees are node metadata only (title/summary/char-range) and
- *  capped at MAX_NODES per doc, so the extra column stays small. */
+/** Project + org-inherited docs with each doc's index-node count — the "chunk
+ *  count" the Agent API publishes so a caller can tell an indexed doc from one
+ *  that merely uploaded (AQU-1762).
+ *
+ *  Kept as its own export because the Agent API's documented response shape
+ *  names it, but it no longer selects anything extra: the in-app card needs the
+ *  same count (AQU-1766), so `nodeCount` is part of every doc's meta and this
+ *  is `listProjectDocs`. */
 export async function listProjectDocsWithNodeCounts(
   db: AquillaDb,
   projectId: string,
 ): Promise<(KnowledgeDocMeta & { nodeCount: number })[]> {
-  const { results } = await db
-    .prepare(
-      `SELECT ${META_COLS}, index_tree FROM knowledge_docs
-       WHERE project_id = ?
-          OR org_id = (SELECT org_id FROM projects WHERE id = ?)
-       ORDER BY created_at DESC`,
-    )
-    .bind(projectId, projectId)
-    .all<Row & { index_tree: unknown }>()
-  return results.map((r) => ({
-    ...rowToMeta(r),
-    nodeCount: flattenNodes(parseTree(r.index_tree)).length,
-  }))
+  return listProjectDocs(db, projectId)
 }
 
 export async function listOrgDocs(db: AquillaDb, orgId: number): Promise<KnowledgeDocMeta[]> {

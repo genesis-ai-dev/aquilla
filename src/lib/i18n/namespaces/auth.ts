@@ -34,12 +34,12 @@ const INVITE_COUNT_PLACEHOLDER =
 export const auth = defineNamespace({
   keys: {
     // --- Login (/login) ---------------------------------------------------
-    "auth.login.title": "Sign in",
+    "auth.login.title": "Log in",
     "auth.login.usernameLabel": "Username or email",
     "auth.login.passwordLabel": "Password",
     "auth.login.forgotPasswordLink": "Forgot password?",
-    "auth.login.submitDefault": "Sign in",
-    "auth.login.submitSigningIn": "Signing in…",
+    "auth.login.submitDefault": "Log in",
+    "auth.login.submitSigningIn": "Logging in…",
     "auth.login.submitMigrating": "Setting up your account and permissions…",
     "auth.login.migratingNote":
       "First-time sign-in may take a moment while we securely migrate your account.",
@@ -52,7 +52,7 @@ export const auth = defineNamespace({
     "auth.login.onboardingMigrationFailed":
       "We couldn't check this browser's existing local workspace. Retry to continue without risking your local projects.",
     "auth.login.aquillaUsernameLabel": "Aquilla username or email",
-    "auth.login.offlineNotice": "You're offline — connect to sign in",
+    "auth.login.offlineNotice": "You're offline — connect to log in",
     "auth.login.submitLoggingIn": "Logging in…",
     "auth.login.sessionLoadFailed":
       "We couldn't read this browser's saved session. Your accounts are still stored; try loading them again.",
@@ -192,7 +192,7 @@ export const auth = defineNamespace({
 
     // --- Session-expired banner (global) ------------------------------------
     "auth.sessionExpired.message": "Your session expired.",
-    "auth.sessionExpired.signInAgain": "Sign in again",
+    "auth.sessionExpired.signInAgain": "Log in again",
     "auth.sessionExpired.continueSuffix": "to continue.",
   },
   context: {
@@ -487,10 +487,7 @@ export const auth = defineNamespace({
         description:
           "Submit button label on the import flow's sign-in form while the " +
           "credentials are being checked. Present continuous, ends with an ellipsis " +
-          "glyph (…). This form says 'Log in' where the main sign-in page says " +
-          "'Sign in' (common.logIn vs auth.login.submitDefault), and this label is " +
-          "the progress form of the former — keep it consistent with whichever word " +
-          "you chose for common.logIn.",
+          "glyph (…). Keep it consistent with common.logIn and auth.login.submitDefault.",
       },
       "auth.login.sessionLoadFailed": {
         description:
@@ -883,7 +880,7 @@ export const auth = defineNamespace({
   surfaces: [
     {
       id: "auth",
-      title: "Sign in",
+      title: "Log in",
       route: "/login",
       notes:
         "Pre-authentication sign-in screen — the first screen a new translator sees, " +

@@ -125,13 +125,13 @@ describe("AssignedToMe", () => {
     // search box instead and then probing the skeleton synchronously made
     // this order-dependent — the table mounts one commit before the
     // skeleton did, so a full-suite run could observe the gap.
-    // AQU-1257: the search box and the pulse markup are part of that same
+    // AQU-1257: the search box and the cursor markup are part of that same
     // asserted state, so they are awaited with it instead of trailing it as
     // bare synchronous probes that only the awaited node was holding up.
     await waitFor(() => {
       expect(screen.getByRole("status", { name: "Loading assignments" })).toHaveAttribute("aria-busy", "true")
       expect(screen.getByPlaceholderText("Search assignments…")).toBeInTheDocument()
-      expect(document.querySelector(".animate-pulse")).toBeTruthy()
+      expect(document.querySelector("[data-slot=\"loading-cursor\"]")).toBeTruthy()
     })
   })
 

@@ -49,7 +49,7 @@ export interface ClosureContext {
   orderedPairs: CellPair[]
   /** Adjacent APPROVED scene briefs — compressed, memoized context. */
   neighborBriefs: NeighborBrief[]
-  /** One layer up: file intro / project brief. */
+  /** One layer up: file intro / project instructions. */
   layerAbove: LayerAboveBlock[]
   /** AQU-1690: per cell id, who speaks to whom and who is named, from Bible
    *  data. Given as known facts, so the analysis need not ask about them. */

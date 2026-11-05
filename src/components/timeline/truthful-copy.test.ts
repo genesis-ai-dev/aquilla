@@ -14,7 +14,7 @@ describe("sentences that match the app (AQU-2259)", () => {
     expect(notice).not.toMatch(/tick|checkbox|re-import/i)
   })
 
-  it("the film-link refusal names the floor the policy enforces: Project lead (AQU-2230)", () => {
+  it("the film-link refusal names the floor the policy enforces: Project Lead (AQU-2230)", () => {
     const refusal = denialMessageForEvent(t, "file.video.set", ROLE.CONTRIBUTOR, ROLE.CONTRIBUTOR)
     expect(refusal).toContain(resolveRoleName(t, ROLE.PROJECT_LEAD))
     expect(refusal).not.toMatch(/at least Contributor/)

@@ -442,10 +442,17 @@ export function mappedRowsToStrings(rows: MappedRow[]): TranslatableString[] {
  * Come and See encodes camera angle inside the character-label string:
  *   "Mary Magdalene   (on)"   →  voice = "Mary Magdalene", angle = "on"
  *   "Peter  (mixed)"          →  voice = "Peter",          angle = "mixed"
+ *   "Anna   [on]"             →  voice = "Anna",           angle = "on"
  *   "Narrator"                →  voice = "Narrator",       angle = undefined
  *
- * The trailing `(…)` group is always separated from the name by one or more
- * spaces.
+ * The trailing bracket group is always separated from the name by one or more
+ * spaces, and is either `(…)` or `[…]`. AQU-1279: a partner's cast sheet wrote
+ * the angle in SQUARE brackets, which this only matched in round ones — so the
+ * angle stayed glued to the name (`"Anna [on]"`), no `cameraState` was stored,
+ * and the angle reached neither the editor nor the subtitle export. Both forms
+ * are the same claim about the same line; the brackets a sheet happens to use
+ * are not a reason to lose it. A group must open and close with the same kind,
+ * so `"Anna (on]"` is still a name and not an angle.
  *
  * Synonym mapping (normalises common variants to CameraState literals):
  *   on    → "on"
@@ -485,14 +492,15 @@ const CAMERA_STATE_SYNONYM_MAP: Record<string, CameraState> = {
  */
 export function splitCastName(raw: string): SplitCastName {
   const trimmed = raw.trim()
-  // Match trailing "(…)" optionally preceded by whitespace.
-  // The regex requires at least one non-paren character inside the parens.
-  const match = /^(.*?)\s+\(([^)]+)\)\s*$/.exec(trimmed)
+  // Match a trailing "(…)" or "[…]" preceded by whitespace. Each alternative
+  // requires at least one character inside that is not a bracket of either
+  // kind, so a group has to open and close with the same one.
+  const match = /^(.*?)\s+(?:\(([^()[\]]+)\)|\[([^()[\]]+)\])\s*$/.exec(trimmed)
   if (!match) {
     return { voice: trimmed, cameraState: undefined }
   }
   const voice = match[1].trim()
-  const angleRaw = match[2].trim().toLowerCase()
+  const angleRaw = (match[2] ?? match[3]).trim().toLowerCase()
   const cameraState = CAMERA_STATE_SYNONYM_MAP[angleRaw] ?? "mixed"
   return { voice, cameraState }
 }

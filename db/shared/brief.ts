@@ -1,6 +1,8 @@
 // Translation-brief contract (AQU-1227) — dependency-free, importable by BOTH
-// workers. The brief is stored as the `translationBrief` key of the project
-// settings blob (project_settings.settings), i.e. exactly where the in-app
+// workers. AQU-2342: the brief is interview DATA — prompts read the project
+// instructions (./translation-instructions.ts), which the brief feeds only on
+// read until they are written. The brief is stored as the `translationBrief`
+// key of the project settings blob (project_settings.settings), i.e. exactly where the in-app
 // brief builder writes it: an API-set brief and a hand-typed one are the same
 // row, so every reader (the brief builder, the autopilot brief gate, the
 // agent's prompt augmentation) sees them identically with no extra wiring.
@@ -48,9 +50,10 @@ export function isBriefFieldId(id: string): boolean {
 /** The settings key the brief lives under. */
 export const BRIEF_SETTINGS_KEY = 'translationBrief'
 
-/** L1 summary cap — mirrors `L1_MAX_CHARS` in src/lib/brief/schema.ts. The L1
- *  is injected into every copilot prompt, so the cap is a token budget, not a
- *  display nicety (AQU-1282). */
+/** L1 summary cap — mirrors `L1_MAX_CHARS` in src/lib/brief/schema.ts. Until a
+ *  project writes `translationInstructions`, the L1 is composed into them on
+ *  read and so rides in every drafting prompt: the cap is a token budget, not a
+ *  display nicety (AQU-1282, AQU-2342). */
 export const BRIEF_L1_MAX_CHARS = 1600
 
 /** The prompt the in-app builder uses to render the L1 (mirrors

@@ -146,6 +146,15 @@ export function blobRangeReader(blob: Blob): ByteRangeReader {
 }
 
 /**
+ * Read a slice of bytes already in memory — the {@link ByteRangeReader} for a
+ * clip that was fetched or read from the cache rather than picked from disk
+ * (AQU-1886). A view, not a copy: the walk only reads frame headers.
+ */
+export function bytesRangeReader(bytes: Uint8Array): ByteRangeReader {
+  return async (start, end) => bytes.subarray(start, end)
+}
+
+/**
  * Walk `size` bytes of an MPEG audio stream and cut it into decodable ranges
  * of at most `chunkMs` each.
  *

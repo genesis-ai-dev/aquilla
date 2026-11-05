@@ -826,7 +826,8 @@ export async function handleBulkImportRequest(
                project_id = excluded.project_id,
                format     = excluded.format,
                raw_source = excluded.raw_source,
-               created_at = excluded.created_at`,
+               created_at = excluded.created_at
+             WHERE file_source_blobs.project_id = excluded.project_id`,
           )
           .bind(body.fileId, body.projectId, body.rawSourceFormat, body.rawSource, Date.now()),
       )

@@ -98,6 +98,42 @@ describe("useRuleSuggestions", () => {
     expect(result.current.adoptedDraftId(savedRule)).toBeUndefined()
   })
 
+  // AQU-1754 AC5, guarding AQU-455: the modal's "Add" loop once saved only the
+  // last accepted rule. Approving several drafts in one pass must still add
+  // every one of them, and clear every one of their rows.
+  it("adds every rule when several drafts are approved in one pass", async () => {
+    vi.mocked(suggestRulesFromCandidates).mockResolvedValueOnce({
+      suggestions: [suggestion("A"), suggestion("B"), suggestion("C")],
+      evidence: ["", "", ""],
+    })
+    const { result, addRule } = setup()
+    await act(() => result.current.suggest(""))
+    const ids = result.current.drafts.map((d) => d.id)
+    expect(ids).toHaveLength(3)
+
+    await act(async () => {
+      await Promise.all(ids.map((id) => result.current.approve(id)))
+    })
+
+    expect(addRule.mock.calls.map(([rule]) => rule.name)).toEqual(["A", "B", "C"])
+    expect(result.current.drafts).toHaveLength(0)
+  })
+
+  // AQU-1674's false negative must stay visible in the inline flow, and a
+  // failed save has to give the draft back rather than swallow it.
+  it("returns the draft to the list when its save fails", async () => {
+    vi.mocked(suggestRulesFromCandidates).mockResolvedValueOnce({ suggestions: [suggestion("A")], evidence: [""] })
+    const { result, addRule } = setup()
+    addRule.mockRejectedValue(new Error("nope"))
+    await act(() => result.current.suggest(""))
+
+    await act(() => result.current.approve(result.current.drafts[0].id))
+
+    expect(result.current.drafts.map((d) => d.suggestion.name)).toEqual(["A"])
+    expect(result.current.drafts[0].status).toBe("draft")
+    expect(result.current.message?.kind).toBe("error")
+  })
+
   it("keeps drafts when the page is left and reopened", async () => {
     vi.mocked(suggestRulesFromCandidates).mockResolvedValueOnce({ suggestions: [suggestion("A")], evidence: ["why"] })
     const first = setup()

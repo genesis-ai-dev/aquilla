@@ -74,6 +74,7 @@ import { ROLE } from "../types"
 import {
   getEffectiveOrgRole,
   getOrgMemberRole,
+  listStricterImportProjects,
   listStricterVisibilityProjects,
   OVERRIDE_PROJECT_LIST_CAP,
   projectNameVisibleSql,
@@ -400,6 +401,14 @@ orgSettings.get("/:orgId/settings", authMiddleware, async (c) => {
  * (projectNameVisibleSql), so a member below Maintainer learns no project
  * name the org dashboard would not show them. The counts are unchanged and
  * stay at the top level for older clients.
+ *
+ * AQU-2306: and the same pair for the import floor, so the "Who can import
+ * files" row carries the disclosure the roster rows already do. It rides this
+ * route rather than a sibling one because it is the same read for the same
+ * page under the same rules, off the same kind of generated column (0192).
+ * Each row still asks for itself when ITS floor moves, so the Security page
+ * makes two of these requests — see src/hooks/useStricterProjectCounts.ts for
+ * why that is the trade we took.
  */
 orgSettings.get("/:orgId/settings/visibility-overrides", authMiddleware, async (c) => {
   const user = c.get("user")
@@ -407,11 +416,16 @@ orgSettings.get("/:orgId/settings/visibility-overrides", authMiddleware, async (
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
   const role = await getEffectiveOrgRole(c.env, orgId, user)
   if (role == null) return c.json({ error: "no access to org" }, 403)
-  const lists = await listStricterVisibilityProjects(c.env, orgId, await nameViewer(c.env, user))
+  const viewer = await nameViewer(c.env, user)
+  const [lists, importList] = await Promise.all([
+    listStricterVisibilityProjects(c.env, orgId, viewer),
+    listStricterImportProjects(c.env, orgId, viewer),
+  ])
   return c.json({
     rosterViewMinRole: lists.rosterViewMinRole.total,
     memberProgressViewMinRole: lists.memberProgressViewMinRole.total,
-    overrideProjects: lists,
+    importMinRole: importList.total,
+    overrideProjects: { ...lists, importMinRole: importList },
   })
 })
 

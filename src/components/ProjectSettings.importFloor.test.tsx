@@ -168,8 +168,8 @@ describe("Project settings → Import: who can import files (AQU-2305)", () => {
   it("shows the row following the organization, with the role select disabled at the org's value", () => {
     renderGeneral()
     expect(screen.getByText("Who can import files")).toBeInTheDocument()
-    expect(source()).toHaveTextContent("Organization default (Project lead)")
-    expect(roleSelect()).toHaveTextContent("Project lead")
+    expect(source()).toHaveTextContent("Organization default (Project Lead)")
+    expect(roleSelect()).toHaveTextContent("Project Lead")
     expect(roleSelect()).toBeDisabled()
   })
 
@@ -206,7 +206,7 @@ describe("Project settings → Import: who can import files (AQU-2305)", () => {
     await userEvent.click(source())
     await userEvent.click(await screen.findByRole("option", { name: "Set for this project" }))
     await userEvent.click(roleSelect())
-    const lower = await screen.findByRole("option", { name: /^Project lead —/ })
+    const lower = await screen.findByRole("option", { name: /^Project Lead —/ })
     expect(lower).toHaveTextContent("a project can only be stricter")
     expect(lower).toHaveAttribute("aria-disabled", "true")
     expect(await screen.findByRole("option", { name: "Maintainer" })).not.toHaveAttribute("aria-disabled", "true")
@@ -219,7 +219,7 @@ describe("Project settings → Import: who can import files (AQU-2305)", () => {
     expect(source()).toHaveTextContent("Set for this project")
     expect(roleSelect()).toHaveTextContent("Maintainer")
     await userEvent.click(source())
-    await userEvent.click(await screen.findByRole("option", { name: "Organization default (Project lead)" }))
+    await userEvent.click(await screen.findByRole("option", { name: "Organization default (Project Lead)" }))
     expect(patchSpy).toHaveBeenCalledExactlyOnceWith({ importMinRole: undefined })
   })
 

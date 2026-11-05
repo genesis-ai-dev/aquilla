@@ -210,7 +210,7 @@ describe("MembersSection", () => {
     ).toBeTruthy()
     expect(
       within(dialog).getByText(
-        "This removes carol's direct Project lead membership on this project. Access through the organization, a team, or as the project creator stays.",
+        "This removes carol's direct Project Lead membership on this project. Access through the organization, a team, or as the project creator stays.",
       ),
     ).toBeTruthy()
     expect(within(dialog).queryByRole("heading", { name: "Remove member" })).toBeNull()

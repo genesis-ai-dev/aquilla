@@ -235,6 +235,9 @@ export interface RecordingsImportHost {
   languageLabel: string | null
   /** Set when opened from a file's ⋯ menu: recordings for that file only. */
   file: { id: string; name: string } | null
+  /** AQU-2302: a project lead may ask the assistant to work out a folder's
+   *  naming; anyone else who uploads gets the team's saved namings only. */
+  canAskAssistant?: boolean
 }
 
 /**
@@ -1908,6 +1911,7 @@ export function ImportDialog({
               languageLabel={recordings.languageLabel}
               username={username}
               chosen={recordingsChosen}
+              canAskAssistant={recordings.canAskAssistant ?? false}
               onStarted={() => {
                 analytics.capture(IMPORT_STARTED, { import_type: "recordings", project_id: projectId, file_count: recordingsChosen.length })
                 onOpenChange(false)
@@ -3617,7 +3621,7 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, targ
           tr.id.toLowerCase().includes(q) ||
           tr.title.toLowerCase().includes(q) ||
           tr.languageNameInEnglish.toLowerCase().includes(q) ||
-          tr.languageName.toLowerCase().includes(q)
+          (tr.languageName ?? "").toLowerCase().includes(q)
       )
       .slice(0, 200)
   }, [translations, query])
@@ -3984,8 +3988,8 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
           tr.id.toLowerCase().includes(q) ||
           tr.name.toLowerCase().includes(q) ||
           tr.englishName.toLowerCase().includes(q) ||
-          tr.languageEnglishName.toLowerCase().includes(q) ||
-          tr.languageName.toLowerCase().includes(q)
+          (tr.languageEnglishName ?? "").toLowerCase().includes(q) ||
+          (tr.languageName ?? "").toLowerCase().includes(q)
       )
       .slice(0, 200)
   }, [translations, query])
@@ -4236,7 +4240,7 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
                   </div>
                   <span className="text-xs text-muted-foreground">
                     {t("importExport.helloao.languageAndBookCount", {
-                      language: tr.languageEnglishName || tr.languageName,
+                      language: tr.languageEnglishName || tr.languageName || tr.language,
                       count: tr.numberOfBooks,
                     })}
                   </span>

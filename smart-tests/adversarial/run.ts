@@ -7,11 +7,16 @@ import { runJev, JEV_REVISION, type AgentAction, type AgentRun } from "../driver
 import type { Attack, GoalContext, Ids } from "./attacks"
 import { fingerprint } from "./fingerprint"
 import { seedFor } from "./fuzz"
+import { agentNeverActed } from "./health"
 import { verifyInvariants, withoutLockedOut, type AdversarialOutcome, type Contract, type Snapshot } from "./invariants"
 import { createMutator } from "./mutators"
 import { readRunContext, readSnapshot, seedFixture } from "./state"
 
 const settle = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+/** One agent's driver-error steps — what the evidence records and the oracle reads. */
+const errorSteps = (agent: AgentRun | null) =>
+  agent?.steps.filter((step) => step.operation === "ERROR") ?? []
 
 /**
  * The inputs the agent must visibly attempt, one group per requirement.
@@ -55,8 +60,10 @@ async function newlySeen(page: Page, attack: Attack, contract: Contract, action:
   // input-value: read the DOM, never the policy's own report of what it typed.
   const wanted = contract.required.flatMap((req) => req.kind === "project-name" || req.kind === "file-name"
     ? [req.value] : req.kind === "comment-once" ? [req.body] : [])
-  if (await page.locator("input, textarea").evaluateAll((elements, values) => elements.some((element) =>
-    values.includes((element as HTMLInputElement).value)), wanted)) seen.add(0)
+  // The comment composer is a contenteditable (MentionTextarea), so a value-only
+  // read would never observe a comment-once body.
+  if (await page.locator("input, textarea, [contenteditable]").evaluateAll((elements, values) => elements.some((element) =>
+    values.includes(((element as HTMLInputElement).value ?? (element as HTMLElement).innerText ?? "").trim())), wanted)) seen.add(0)
 }
 
 /**
@@ -173,7 +180,8 @@ export async function runAttack(browser: Browser, attack: Attack, repeat: number
     // Poll authoritative state briefly; expiry records the failed contract.
     const deadline = Date.now() + 15_000
     const observedNow = () => ({ inputObserved: observed.every(Boolean), mutatorApplied: mutator.applied,
-      serverErrors: counters.server, pageErrors: counters.page })
+      serverErrors: counters.server, pageErrors: counters.page,
+      harnessFault: agentNeverActed(agents.map((agent) => ({ errors: errorSteps(agent) }))) })
     do {
       after = await readSnapshot(readers)
       outcome = verifyInvariants(before, after, withoutLockedOut(contract, lockedOut), observedNow())
@@ -201,8 +209,7 @@ export async function runAttack(browser: Browser, attack: Attack, repeat: number
     projects: readers.map(({ projectId, reader }) => ({ projectId, owner: reader.username })),
     jevRevision: JEV_REVISION,
     agents: agents.map((agent) => agent && { status: agent.status, elapsedMs: agent.elapsedMs,
-      actions: agent.actions, modelCalls: agent.modelCalls,
-      errors: agent.steps.filter((step) => step.operation === "ERROR") }),
+      actions: agent.actions, modelCalls: agent.modelCalls, errors: errorSteps(agent) }),
   }
   await testInfo.attach("smart-testing-evidence", { body: JSON.stringify(evidence), contentType: "application/json" })
   return outcome

@@ -87,6 +87,74 @@ class RunnerTests(unittest.TestCase):
             self.assertEqual(json.loads(kwargs["input"])["token"], token)
 
 
+class ProgressTests(unittest.TestCase):
+    """The release comment is updated as each setup step and journey finishes."""
+
+    def progress(self):
+        config = {"github_token": "t", "author": "qa"}
+        return runner.Progress(config, "release/2026/11/03-01", "a" * 40, time.monotonic())
+
+    def published(self, report):
+        return [json.loads(call.kwargs["input"]) for call in report.call_args_list]
+
+    def test_journeys_are_reported_as_they_start_finish_and_fail(self):
+        progress = self.progress()
+        with patch.object(runner, "command") as command:
+            progress.feed(b"Running 12 tests using 1 worker\n\n"
+                          b"[1/12] smart-tests/journeys/dom-audit.spec.ts:7:1 \xe2\x80\xba DOM audit: surfaces\n")
+            progress.feed(b"[2/12] smart-tests/journeys/edit.spec.ts:12:3 \xe2\x80\xba Jev edit durability: normal\n"
+                          b"    Error: {\"verdict\":\"inconclusive\"}\n")
+            progress.feed(b"    at file (x.ts:1:1)\n[3/12] smart-tests/x.spec.ts:1:1 \xe2\x80\xba third\n")
+        payloads = [p["progress"] for p in self.published(command)]
+        self.assertEqual([p["stage"] for p in payloads], ["tests"] * 4)
+        self.assertEqual(payloads[0]["journeys"], [{"title": "DOM audit: surfaces", "state": "running"}])
+        self.assertEqual([j["state"] for j in payloads[1]["journeys"]], ["finished", "running"])
+        self.assertEqual([j["state"] for j in payloads[2]["journeys"]], ["finished", "failed"])
+        self.assertEqual([j["state"] for j in payloads[3]["journeys"]], ["finished", "failed", "running"])
+        self.assertEqual(payloads[3]["total"], 12)
+
+    def test_partial_lines_and_unrelated_output_publish_nothing(self):
+        progress = self.progress()
+        with patch.object(runner, "command") as command:
+            progress.feed(b"[Jev] 1 actions \xc2\xb7 CLICK \xc2\xb7 681 ms\n[1/12] smart-tests/a.spec.ts:1:1 \xe2\x80\xba ti")
+            self.assertEqual(command.call_count, 0)
+            progress.feed(b"tle\n")
+            self.assertEqual(command.call_count, 1)
+            self.assertEqual(self.published(command)[0]["progress"]["journeys"][0]["title"], "title")
+
+    def test_container_steps_are_validated_and_published_once_per_change(self):
+        progress = self.progress()
+        self.assertFalse(progress.steps_from(b"not json"))
+        self.assertFalse(progress.steps_from(b'[{"name": 7, "seconds": 1}]'))
+        self.assertTrue(progress.steps_from(b'[{"name": "dependencies", "seconds": 169.64, "detail": "installed"}]'))
+        self.assertFalse(progress.steps_from(b'[{"name": "dependencies", "seconds": 169.64, "detail": "installed"}]'))
+        with patch.object(runner, "command") as command:
+            progress.publish()
+            progress.publish()
+            progress.stack_ready()
+        payloads = self.published(command)
+        self.assertEqual(len(payloads), 2)
+        self.assertEqual(payloads[0]["progress"]["stage"], "setup")
+        self.assertEqual(payloads[0]["progress"]["steps"][0]["detail"], "installed")
+        self.assertEqual(payloads[1]["progress"]["steps"][1]["name"], "stack")
+
+    def test_a_failed_progress_update_never_fails_the_job(self):
+        progress = self.progress()
+        progress.steps_from(b'[{"name": "build", "seconds": 20.7, "detail": ""}]')
+        with patch.object(runner, "command", side_effect=subprocess.TimeoutExpired("node", 150)):
+            progress.publish()
+        self.assertIsNone(progress.sent)
+
+    def test_command_streams_output_to_the_progress_parser_while_logging(self):
+        seen = []
+        with tempfile.TemporaryFile() as log:
+            runner.command([sys.executable, "-c", "print('[1/2] a.spec.ts:1:1 › one')"], log,
+                           timeout=30, on_output=seen.append)
+            log.seek(0)
+            self.assertIn(b"[1/2]", log.read())
+        self.assertIn(b"[1/2]", b"".join(seen))
+
+
 if __name__ == "__main__":
     unittest.main()
 

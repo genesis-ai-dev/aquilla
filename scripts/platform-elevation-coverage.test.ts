@@ -371,7 +371,7 @@ const LEDGER: Record<string, LedgerState> = {
   "langquest.ts": "delegates",
   "monday.ts": "delegates",
 
-  // ── undecided (33) — the open queue, not a clean bill ──────────────────
+  // ── undecided (34) — the open queue, not a clean bill ──────────────────
   // OPS-48's ranked remainder, with its write counts. source-linking.ts was
   // the head of this list and is now decided (OPS-51); these eight are what
   // OPS-48 left, in its order.
@@ -402,6 +402,7 @@ const LEDGER: Record<string, LedgerState> = {
   "edit-history.ts": "undecided",
   "feedback.ts": "undecided",
   "import-classify.ts": "undecided",
+  "import-recording-names.ts": "undecided", // #1763 (AQU-2302): resolves project + org roles, decides nothing
   "import-sandbox.ts": "undecided",
   "scene-briefs.ts": "undecided",
   "style-rules.ts": "undecided",
@@ -495,8 +496,9 @@ describe("the platform-elevation census is an assertion, not a document (OPS-52)
     // 10-26 re-measured 13 of 48 covered (deciding, or delegating to a guard
     // that decides) by exactly this method. OPS-51 adds source-linking.ts and
     // the denominator is 49: 16 of 49.
+    // 11-05: #1763 adds import-recording-names.ts (undecided); 16 of 50.
     expect({ decides: tally("decides"), delegates: tally("delegates"), undecided: tally("undecided") })
-      .toEqual({ decides: 13, delegates: 3, undecided: 33 })
+      .toEqual({ decides: 13, delegates: 3, undecided: 34 })
     expect(tally("decides") + tally("delegates") + tally("undecided")).toBe(
       Object.keys(LEDGER).length,
     )

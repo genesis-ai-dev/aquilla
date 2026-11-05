@@ -35,3 +35,28 @@ export function harnessHealth(recorded: Recorded[], attacksPlanned: number): { a
   }
   return { available: true, reason: "" }
 }
+
+/**
+ * Driver reports that state, in so many words, that no input reached the page.
+ * `jev_bridge.py` only ever emits its own vetted `safe_messages`, so matching
+ * their wording is matching a closed set, not parsing free-form text.
+ */
+const NO_INPUT_REPORTED = /nothing typed|no action executed|without executing an unverified action/i
+
+/**
+ * The harness's own admission that it never exercised the product: an agent
+ * whose driver stopped before entering the input it was driving at. The
+ * product's behaviour was not observed, so nothing about it has been
+ * established and no verdict may blame it (AQU-1513). Returns the driver's
+ * reason, for the verdict to quote, or null when every agent did act.
+ */
+export function agentNeverActed(
+  agents: readonly ({ errors?: readonly { reason?: unknown }[] } | null)[] | undefined,
+): string | null {
+  for (const agent of agents ?? []) {
+    for (const error of agent?.errors ?? []) {
+      if (typeof error.reason === "string" && NO_INPUT_REPORTED.test(error.reason)) return error.reason
+    }
+  }
+  return null
+}

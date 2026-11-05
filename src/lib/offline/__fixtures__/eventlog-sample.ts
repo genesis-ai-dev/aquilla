@@ -55,15 +55,16 @@ export function buildSampleSession() {
       fileId: "file1",
       rows: [
         { ...sourceRow("GEN 1:1", 0), targetLang: "", laneId: null },
-        { ...sourceRow("GEN 1:2", 1), targetLang: "", laneId: null },
+        // AQU-1422: a parked cell.
+        { ...sourceRow("GEN 1:2", 1), targetLang: "", laneId: null, hidden: true },
         { ...sourceRow("GEN 1:1", 0), side: "target", value: "En el principio", targetLang: "es", laneId: "lane-es" },
       ],
     }),
-    events.cellSynced({ ...sourceRow("EXO 1:1", 0), projectId: "proj1", fileId: "file2", targetLang: "", laneId: null }),
+    events.cellSynced({ ...sourceRow("EXO 1:1", 0), projectId: "proj1", fileId: "file2", targetLang: "", laneId: null, hidden: false }),
     events.cellSynced({ ...sourceRow("EXO 1:2", 1), projectId: "proj1", fileId: "file2", targetLang: "", laneId: null }),
     events.cellRemoved({ projectId: "proj1", fileId: "file2", cellId: "EXO 1:2", side: "source", laneKey: "tag:" }),
     events.cellsRemoved({ projectId: "proj1", fileId: "file1", cells: [{ cellId: "GEN 1:2", side: "source", laneKey: "tag:" }] }),
-    events.syncCursorSet({ projectId: "proj1", fileId: "file1", serverSeq: 42, projectEpoch: 1 }),
+    events.syncCursorSet({ projectId: "proj1", fileId: "file1", serverSeq: 42, projectEpoch: 1, fieldsVersion: 1 }),
     events.syncCursorSet({ projectId: "proj1", fileId: "file2", serverSeq: 17, projectEpoch: 1 }),
     events.offlineProjectStatusSet({ projectId: "proj1", status: "ready", syncedAt: at, queueDepth: 0 }),
 

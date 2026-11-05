@@ -13,10 +13,15 @@ import { seedUser } from "./helpers/db"
 const origin = "https://app.example.com", verifier = "a".repeat(64)
 const testEnv = Object.assign(Object.create(env), { GOOGLE_LOGIN_CLIENT_ID: "test-client", GOOGLE_LOGIN_CLIENT_SECRET: "test-secret", GOOGLE_LOGIN_REDIRECT_URI: "https://identity.example.com/api/v2/auth/oauth/google/callback", GOOGLE_LOGIN_APP_ORIGINS: origin })
 let keys: Awaited<ReturnType<typeof generateKeyPair>>, jwk: object, token: string
-const network = vi.fn(async (input: RequestInfo | URL) => {
-  const url = String(input)
+const network = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+  // These tests run in Node; assert the Workers-compatible no-follow contract.
+  const request = new Request(input, init)
+  const url = request.url
   if (url === "https://www.googleapis.com/oauth2/v3/certs") return Response.json({ keys: [jwk] })
-  if (url === "https://oauth2.googleapis.com/token") return Response.json({ id_token: token, access_token: "never-store-this" })
+  if (url === "https://oauth2.googleapis.com/token") {
+    expect(request.redirect).toBe("manual")
+    return Response.json({ id_token: token, access_token: "never-store-this" })
+  }
   throw new Error("Unexpected network destination")
 })
 beforeAll(async () => { keys = await generateKeyPair("RS256"); jwk = { ...await exportJWK(keys.publicKey), kid: "test", alg: "RS256", use: "sig" } })
@@ -45,16 +50,18 @@ async function handoff() {
 describe("Google login boundary", () => {
   it("diagnoses provider failures without logging credentials or provider response bodies", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
-    for (const failure of ["rejected", "network"] as const) {
+    for (const failure of ["rejected", "redirected", "network"] as const) {
       const url = await start()
       network.mockImplementationOnce(async () => {
         if (failure === "network") throw new Error("private-token-and-client-secret")
+        if (failure === "redirected") return new Response(null, { status: 302, headers: { Location: "https://attacker.example" } })
         return Response.json({ error: "invalid_client", error_description: "private-token-and-client-secret" }, { status: 401 })
       })
       expect((await callback(url)).headers.get("location")).toContain("error=provider_failed")
     }
     expect(warn.mock.calls).toEqual([
       ["[social-login] token exchange rejected", 401],
+      ["[social-login] token exchange rejected", 302],
       ["[social-login] callback failed", "token_exchange"],
     ])
   })

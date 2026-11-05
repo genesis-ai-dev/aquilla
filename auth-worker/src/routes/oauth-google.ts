@@ -70,7 +70,9 @@ routes.get("/callback", async c => {
   let stage = "token_exchange"
   try {
     const response = await fetch("https://oauth2.googleapis.com/token", {
-      method: "POST", redirect: "error", signal: AbortSignal.timeout(15_000),
+      // Workers does not support redirect: "error". Return redirects untouched
+      // and reject their non-2xx status below so credentials never follow them.
+      method: "POST", redirect: "manual", signal: AbortSignal.timeout(15_000),
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ client_id: c.env.GOOGLE_LOGIN_CLIENT_ID!, client_secret: c.env.GOOGLE_LOGIN_CLIENT_SECRET!, code, code_verifier: flow.google_verifier, redirect_uri: c.env.GOOGLE_LOGIN_REDIRECT_URI!, grant_type: "authorization_code" }),
     })

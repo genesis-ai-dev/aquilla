@@ -67,8 +67,8 @@ importers:
         specifier: 0.4.0
         version: 0.4.0(97d1d22feab14e72a1f6ba21852ae4a7)
       '@livestore/wa-sqlite':
-        specifier: ^0.4.0
-        version: 0.4.0
+        specifier: ^1.0.5
+        version: 1.0.5
       '@sapphi-red/web-noise-suppressor':
         specifier: ^0.4.1
         version: 0.4.1
@@ -1664,6 +1664,9 @@ packages:
 
   '@livestore/wa-sqlite@0.4.0':
     resolution: {integrity: sha512-ds2hA8C4tcXki+ANK9A8x6BH3/rutC7yMtyaei5cm3fRtuQw8fpGQ9Tlts9qEJ1al88qQoNlraOgrpgl3/ZqRA==}
+
+  '@livestore/wa-sqlite@1.0.5':
+    resolution: {integrity: sha512-OIxBEtl027kSl/z3772YgYf7ZlkE8aDWvLmm+O/hbPJO/lubv9+2EaDpXeoxsyg2xIIpkpXXSreEzFckkT1/QQ==}
 
   '@livestore/webmesh@0.4.0':
     resolution: {integrity: sha512-HrDCNLPWG/aupdXt7Y2HcseR9FIUU54/GvDniyndXMAq6xhehiSgwKvxbDhjWpl0I2UoOakfxyndT7a6JPtU8w==}
@@ -8212,6 +8215,8 @@ snapshots:
       qrcode-generator: 2.0.4
 
   '@livestore/wa-sqlite@0.4.0': {}
+
+  '@livestore/wa-sqlite@1.0.5': {}
 
   '@livestore/webmesh@0.4.0(97d1d22feab14e72a1f6ba21852ae4a7)':
     dependencies:

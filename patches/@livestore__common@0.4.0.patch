@@ -85,7 +85,7 @@ index 3e592fc5d2a35a4f0c8f230aa4206c894ee54f7a..340dd6d3c601d578a3d0a6faa17d4df8
              break;
          }
 diff --git a/dist/rematerialize-from-eventlog.js b/dist/rematerialize-from-eventlog.js
-index 797a369cb08763226831cb6b1cb021080508ebd3..9db29c03a4ec349deb36945ca6a983c1f2810e9f 100644
+index 797a369cb08763226831cb6b1cb021080508ebd3..fcca28358a66d527123d4f6263265c7e9ae32691 100644
 --- a/dist/rematerialize-from-eventlog.js
 +++ b/dist/rematerialize-from-eventlog.js
 @@ -10,6 +10,22 @@ export const rematerializeFromEventlog = Effect.fn('@livestore/common:rematerial
@@ -111,7 +111,16 @@ index 797a369cb08763226831cb6b1cb021080508ebd3..9db29c03a4ec349deb36945ca6a983c1
      const hashEventDef = memoizeByRef((event) => Schema.hash(event.schema));
      const processEvent = Effect.fn(`@livestore/common:rematerializeFromEventlog:processEvent`)(function* (row) {
          const args = jsonParse(row.argsJson);
-@@ -75,9 +91,24 @@ LIMIT ${CHUNK_SIZE}
+@@ -55,7 +71,7 @@ This likely means the schema has changed in an incompatible way.
+     });
+     const CHUNK_SIZE = 100;
+     const stmt = dbEventlog.prepare(sql `\
+-SELECT * FROM ${SystemTables.EVENTLOG_META_TABLE} 
++SELECT *, LENGTH(argsJson) AS argsLength FROM ${SystemTables.EVENTLOG_META_TABLE} 
+ WHERE seqNumGlobal > $seqNumGlobal OR (seqNumGlobal = $seqNumGlobal AND seqNumClient > $seqNumClient)
+ ORDER BY seqNumGlobal ASC, seqNumClient ASC
+ LIMIT ${CHUNK_SIZE}
+@@ -75,9 +91,25 @@ LIMIT ${CHUNK_SIZE}
          const prevItem = Chunk.isChunk(item) === true ? item : Chunk.empty();
          return Option.some([prevItem, nextItem]);
      }).pipe(Stream.bufferChunks({ capacity: 2 }), Stream.tap((row) => Effect.gen(function* () {
@@ -125,12 +134,13 @@ index 797a369cb08763226831cb6b1cb021080508ebd3..9db29c03a4ec349deb36945ca6a983c1
 +            // A skipped event costs next to nothing, so it comes off the total rather than counting
 +            // as done: otherwise the bar races through the skipped early downloads and then sits at
 +            // ~99% while the events that matter replay.
++            // argsLength is SQLite's LENGTH(), the same measure as bytesTotal: JS .length counts
++            // UTF-16 units, so astral-plane scripts would drive the total negative on skips.
 +            if (skipped === true)
-+                bytesTotal -= row.argsJson.length;
++                bytesTotal -= row.argsLength;
 +            else
-+                bytesDone += row.argsJson.length;
-+            // LENGTH() counts code points and .length UTF-16 units, so hold short of the total
-+            // until the replay has really finished.
++                bytesDone += row.argsLength;
++            // Hold short of the total until the replay has really finished.
 +            progressHook({ done: Math.min(bytesDone, bytesTotal - 1), total: bytesTotal });
 +        }
      })), Stream.runDrain);

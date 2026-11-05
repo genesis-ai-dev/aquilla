@@ -317,6 +317,49 @@ describe("catchUpProject — project level", () => {
     const project = store.query(tables.offlineProjects.select().where({ projectId: P }).first())
     expect(project?.syncedAt?.getTime()).toBeGreaterThan(0)
   })
+
+  it("removes a file the server no longer lists: its cells, its row, and its cursor", async () => {
+    seedLocal(row("v1", "source", "a"))
+    seedLocal(row("v1", "target", "b"))
+    store.commit(events.syncCursorSet({ projectId: P, fileId: F, serverSeq: 50, projectEpoch: 2 }))
+    const kept = { ...file, fileId: "file2", name: "Mark" }
+    const deps = makeDeps({ files: [kept], pages: [{ rows: [], maxServerSeq: 1, projectEpoch: 1 }] })
+
+    const result = await catchUpProject(store, P, "tok", deps)
+
+    expect(store.query(tables.files.select().where({ projectId: P })).map((f) => f.id)).toEqual(["file2"])
+    expect(store.query(tables.cells.select().where({ projectId: P, fileId: F }))).toHaveLength(0)
+    // Back to no trusted cursor, so a restored file streams in whole.
+    expect(cursor()).toMatchObject({ serverSeq: null, projectEpoch: null })
+    expect(result.rowsChanged).toBe(2)
+    // Only the listed file is read.
+    expect(deps.streamFileCells).toHaveBeenCalledTimes(1)
+    expect(deps.streamFileCells.mock.calls[0][1]).toBe("file2")
+  })
+
+  it("keeps a server-deleted file while it still has queued writes", async () => {
+    seedLocal(row("v1", "target", "my unsent edit"))
+    store.commit(
+      events.eventQueued({
+        id: "q1",
+        projectId: P,
+        fileId: F,
+        cellId: "v1",
+        kind: "target.cell.commit",
+        payload: { value: "my unsent edit" },
+        parentId: null,
+        author: "me",
+        schemaVersion: 1,
+        clientTs: new Date(),
+        createdAt: new Date(),
+      }),
+    )
+
+    await catchUpProject(store, P, "tok", makeDeps({ files: [] }))
+
+    expect(store.query(tables.files.select().where({ id: F }).first())).toBeDefined()
+    expect(cell("v1", "target")?.value).toBe("my unsent edit")
+  })
 })
 
 describe("catchUpProject — batching", () => {

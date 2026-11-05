@@ -295,10 +295,30 @@ async function catchUpFile(
 }
 
 /**
+ * Drops a file the server no longer lists (deleted, or out of this user's
+ * reach) from the local copy, returning how many cell rows went. Uses the
+ * existing row events rather than a new file-level one: deletes are rare, and
+ * a new event would mean a new offline data generation. A file with queued
+ * writes stays until they resolve — they are the user's unsent work, and the
+ * server's verdict on them (refused, most likely) is what the user should see.
+ * Its cursor goes back to null, so a file restored later streams in whole.
+ */
+function removeFile(store: OfflineStore, projectId: string, fileId: string): number {
+  if (store.query(tables.eventQueue.select("id").where({ projectId, fileId }).first()) !== undefined) return 0
+  const removals = store
+    .query(tables.cells.select().where({ projectId, fileId }))
+    .map(({ cellId, side, laneKey }) => ({ cellId, side, laneKey }))
+  commitBatched(store, projectId, fileId, [], removals)
+  if (readCursor(store, projectId, fileId)) setCursor(store, projectId, fileId, null, null)
+  store.commit(events.fileRemoved({ id: fileId }))
+  return removals.length
+}
+
+/**
  * Brings every file of `projectId` level with the server. `token` is a
  * sync-worker token for the project (a file-scoped token authorizes every
- * file's read). Adds files created since download; files deleted on the
- * server are left in place for now.
+ * file's read). Adds files created since download and removes files deleted
+ * on the server.
  */
 export async function catchUpProject(
   store: OfflineStore,
@@ -315,7 +335,11 @@ export async function catchUpProject(
     )
   }
 
+  const serverFiles = new Set(files.map((f) => f.fileId))
   let rowsChanged = 0
+  for (const fileId of localFiles) {
+    if (!serverFiles.has(fileId)) rowsChanged += removeFile(store, projectId, fileId)
+  }
   for (const file of files) {
     rowsChanged += await catchUpFile(store, projectId, file.fileId, token, deps)
   }

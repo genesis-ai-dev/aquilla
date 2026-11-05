@@ -271,6 +271,8 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
     if (toCommit.length > 0) store.commit(...toCommit)
     // Resolved writes count as uploads, as they do from the flush response.
     if (dequeued.length > 0) recordOfflineUpload(projectId)
+    // A deleted file carries no rows; catch-up drops it from the local copy.
+    if (frames.some((f) => f.kind === "file.delete")) void catchUpNow()
   }
 
   function handleMessage(msg: ProjectWsServerMessage): void {

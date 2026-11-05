@@ -92,7 +92,10 @@ export type AgentFrame =
   | { type: 'memory.proposed'; runId: string; memoryId: string; path: string; preview: string }
   | { type: 'brief.proposed'; runId: string; proposalId: string; preview: string }
   | { type: 'budget'; runId: string; spentCredits: number; capCredits: number }
-  | { type: 'budget.exhausted'; runId: string; spentCredits: number; capCredits: number; reason?: 'weekly_allowance' }
+  // AQU-2313: `reason` names the limit that applied — this run's own cost cap
+  // or the workspace's weekly allowance. Absent on a pre-AQU-2313 server,
+  // which sent the frame only for the per-run cap.
+  | { type: 'budget.exhausted'; runId: string; spentCredits: number; capCredits: number; reason?: 'weekly_allowance' | 'run_cost_cap' }
 
 // ── Staged proposal shape ──────────────────────────────────────────────────
 

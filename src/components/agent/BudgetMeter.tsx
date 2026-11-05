@@ -3,6 +3,13 @@
  * AGENT_RUN_COST_CAP_CENTS, §4 budget / budget.exhausted). Renders like
  * AgentRunView's usage line while the run is under cap, and switches to a
  * distinct alert once `budget.exhausted` lands explaining the run stopped.
+ *
+ * AQU-2313: the alert NAMES the limit that applied, and only that one. The
+ * frame carries a `reason`; each branch below says what stopped the run and
+ * shows figures that belong to that limit. The per-run branch must not call
+ * its ceiling a credit cap — it applies on every plan, including an Enterprise
+ * workspace whose credits are unlimited, and a customer told they hit a
+ * "2,500 cr credit cap" after spending 4 cr reads it as a billing fault.
  */
 
 import { AlertTriangle, Gauge } from "lucide-react"
@@ -30,10 +37,13 @@ export function BudgetMeter({ budget }: { budget: AgentBudget }) {
     )
   }
   if (budget.exhausted) {
+    // An absent reason is a pre-AQU-2313 server, which sent this frame only
+    // for the per-run cost cap.
     return (
       <div
         role="alert"
         data-frame-type="budget.exhausted"
+        data-reason="run_cost_cap"
         className="flex items-center gap-1.5 rounded-md border border-destructive/50 bg-destructive/10 px-2.5 py-1.5 text-[11px] text-destructive"
       >
         <AlertTriangle className="h-3.5 w-3.5 shrink-0" />

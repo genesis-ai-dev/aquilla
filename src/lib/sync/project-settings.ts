@@ -316,6 +316,14 @@ export interface ProjectWideSettings {
    */
   bibleResourcesEnabled?: boolean
   /**
+   * The team's default Parallel Bibles versions (helloao translation ids, in
+   * panel order). A translator with no pins of their own for this project sees
+   * these. Project lead (500)+ may set them — a patch that changes only this
+   * key is a carve-out below the maintainer floor, validated and re-checked by
+   * the server (db/shared/parallel-bible-versions.ts).
+   */
+  parallelBibleVersions?: string[]
+  /**
    * AQU-1686: one explicit switch per Bible data enrichment
    * (db/shared/bible-enrichments.ts). A missing id means that enrichment's
    * default, and `bibleResourcesEnabled` off turns every one of them off.

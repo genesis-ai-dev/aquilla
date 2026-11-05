@@ -73,8 +73,8 @@ export function HelloaoPanel({ projectId, username, sourceLanguage, targetLangua
           tr.id.toLowerCase().includes(q) ||
           tr.name.toLowerCase().includes(q) ||
           tr.englishName.toLowerCase().includes(q) ||
-          tr.languageEnglishName.toLowerCase().includes(q) ||
-          tr.languageName.toLowerCase().includes(q)
+          (tr.languageEnglishName ?? "").toLowerCase().includes(q) ||
+          (tr.languageName ?? "").toLowerCase().includes(q)
       )
       .slice(0, 200)
   }, [translations, query])
@@ -317,7 +317,7 @@ export function HelloaoPanel({ projectId, username, sourceLanguage, targetLangua
                   </div>
                   <span className="text-xs text-muted-foreground">
                     {t("importExport.helloao.languageAndBookCount", {
-                      language: tr.languageEnglishName || tr.languageName,
+                      language: tr.languageEnglishName || tr.languageName || tr.language,
                       count: tr.numberOfBooks,
                     })}
                   </span>

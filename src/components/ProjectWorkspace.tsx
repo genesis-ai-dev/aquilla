@@ -20,6 +20,7 @@ import { useProjectLaneStaffing } from "@/hooks/useProjectLaneStaffing"
 import {
   broadcastProjectSettingsUpdated,
   describePatchFailure,
+  PARALLEL_BIBLES_EDIT_ROLE_FLOOR,
 } from "@/hooks/useProjectSettings"
 import { useNavHistoryTitle } from "@/context/NavHistoryContext"
 import { deriveNavTitleKey } from "@/lib/navigation/deriveTitle"
@@ -430,6 +431,7 @@ import {
 } from "@/lib/editor/right-rail-panels"
 import { ScriptureSideRail } from "./ScriptureSideRail"
 import { ParallelBiblesSidebar, readParallelBiblesOpen, writeParallelBiblesOpen } from "./ParallelBiblesSidebar"
+import type { EditorParallelBiblesConfig } from "./parallel-bibles/EditorBibleColumns"
 import { VerseResourcesSidebar, readVerseResourcesOpen, writeVerseResourcesOpen } from "./VerseResourcesSidebar"
 import { WhosWhoSidebar } from "./bible-data/WhosWhoSidebar"
 import { readWhosWhoOpen, writeWhosWhoOpen } from "./bible-data/whos-who-open-state"
@@ -8953,6 +8955,23 @@ export function ProjectWorkspace() {
   // The AQU-461 verse-resources panel renders under a subset of that gate,
   // so the same subscription serves both.
   const parallelBiblesPanelActive = isBibleOpen(centerSurface, activeFile)
+  // The editor's Bible columns and the Parallel Bibles panel share one set of
+  // versions: the translator's own for this project, else the defaults a
+  // project lead saved (`parallelBibleVersions`).
+  const parallelBibleDefaults = projectSettings?.settings?.parallelBibleVersions
+  const canSetParallelBibleDefaults = (serverRoleLevel ?? 0) >= PARALLEL_BIBLES_EDIT_ROLE_FLOOR
+  const editorParallelBibles = useMemo<EditorParallelBiblesConfig | undefined>(
+    () => projectId
+      ? {
+          projectId,
+          projectDefaults: parallelBibleDefaults,
+          canSetProjectDefaults: canSetParallelBibleDefaults,
+          onSetProjectDefaults: async (ids) =>
+            (await patchSettings({ parallelBibleVersions: ids })).kind === "ok",
+        }
+      : undefined,
+    [projectId, parallelBibleDefaults, canSetParallelBibleDefaults, patchSettings],
+  )
   // AQU-1692: a maintainer's voice corrections, saved against the latest map
   // (see use-voice-override-writer.ts). EditorTable gets the writer only while
   // Bible data shows (AQU-1685), and offers "Correct…" only to a maintainer.
@@ -18276,6 +18295,7 @@ export function ProjectWorkspace() {
             ref={editorRef} project={editorProject ?? project} cellStore={cellStore}
             fileType={activeFile?.type}
             bibleOpen={parallelBiblesPanelActive}
+            parallelBibles={editorParallelBibles}
             onSaveVoiceOverride={bibleDataShown ? saveVoiceOverride : undefined}
             onAdoptVoicesAsCast={bibleDataShown ? adoptVoicesAsCast : undefined}
             showFootnotesInline={footnoteViewMode === "inline"}
@@ -18509,6 +18529,10 @@ export function ProjectWorkspace() {
                 <ParallelBiblesSidebar
                   key={`${activeFile!.id}-bibles`}
                   trackedRef={trackedCellRef}
+                  projectId={projectId}
+                  projectDefaults={parallelBibleDefaults}
+                  canSetProjectDefaults={canSetParallelBibleDefaults}
+                  onSetProjectDefaults={editorParallelBibles?.onSetProjectDefaults}
                   open
                   onToggle={() => {
                     const next = !parallelBiblesOpen

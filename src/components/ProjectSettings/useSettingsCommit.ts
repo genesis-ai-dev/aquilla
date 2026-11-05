@@ -250,7 +250,6 @@ export function useSettingsCommit(options: SettingsCommitOptions) {
         step(pending)
         return (await pending) ? { kind: "saved" } : { kind: "failed", message: ref.current.t("settings.save.failed") }
       }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [track],
   )
 
@@ -263,7 +262,6 @@ export function useSettingsCommit(options: SettingsCommitOptions) {
         const next = await patchLocal(projectId, update)
         return next ? { kind: "saved" } : { kind: "failed", message: ref.current.t("settings.save.failed") }
       }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [track],
   )
 
@@ -305,7 +303,6 @@ export function useSettingsCommit(options: SettingsCommitOptions) {
         step(write.then((r) => r.kind === "saved", () => false))
         return write
       }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [track],
   )
 

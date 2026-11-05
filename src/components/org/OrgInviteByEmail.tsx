@@ -1,3 +1,4 @@
+import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 import { useState } from "react"
 import { Copy } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -17,7 +18,6 @@ import { roleChoices } from "@/lib/frontier/role-choices"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { describeGrant, grantButtonLabel } from "@/lib/access/grant-scope-sentence"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import posthog from "@/lib/posthog"
 import { INVITE_SENT } from "@/lib/event-names"
 
 /**
@@ -27,6 +27,7 @@ import { INVITE_SENT } from "@/lib/event-names"
  * Server enforces owner-only — this UI is gated by the caller as a courtesy.
  */
 export function OrgInviteByEmail({ orgId }: { orgId: number }) {
+  const analytics = useAccountAnalytics()
   const { t, locale } = useI18n()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
@@ -57,7 +58,7 @@ export function OrgInviteByEmail({ orgId }: { orgId: number }) {
         email: trimmed || undefined,
         role,
       })
-      posthog.capture(INVITE_SENT, {
+      analytics.capture(INVITE_SENT, {
         scope: "org",
         org_id: orgId,
         role,

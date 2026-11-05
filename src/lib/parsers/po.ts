@@ -21,6 +21,7 @@
 import { v4 as uuid } from "uuid"
 import type { TranslatableString } from "./core-types"
 import type { ExportCellFields } from "./core-types"
+import { placeholderMetadata } from "./placeholders"
 
 // ─── PO string escaping ──────────────────────────────────────────────────────
 
@@ -213,9 +214,13 @@ export function extractPoStrings(content: string): TranslatableString[] {
       const indices = slots.length > 0 ? slots.map((s) => s.index as number) : [0, 1]
       for (let k = 0; k < indices.length; k++) {
         const n = indices[k]
+        const original = n === 0 ? msgid : e.msgidPlural
+        // AQU-2386: the plural forms carry their own placeholders (`%d` rides
+        // the plural msgid, not the singular), so classify each form's own text.
+        const placeholders = placeholderMetadata(original)
         results.push({
           id: uuid(),
-          original: n === 0 ? msgid : e.msgidPlural,
+          original,
           translated: slots[k]?.value ?? "",
           context,
           group: `${msgid}#${n}`,
@@ -225,10 +230,12 @@ export function extractPoStrings(content: string): TranslatableString[] {
               ...(e.msgctxt !== undefined ? { msgctxt: e.msgctxt } : {}),
               ...(e.references[0] ? { sourceReference: e.references[0] } : {}),
             },
+            ...(placeholders ? { placeholders } : {}),
           },
         })
       }
     } else {
+      const placeholders = placeholderMetadata(msgid)
       results.push({
         id: uuid(),
         original: msgid,
@@ -241,6 +248,7 @@ export function extractPoStrings(content: string): TranslatableString[] {
             ...(e.msgctxt !== undefined ? { msgctxt: e.msgctxt } : {}),
             ...(e.references[0] ? { sourceReference: e.references[0] } : {}),
           },
+          ...(placeholders ? { placeholders } : {}),
         },
       })
     }

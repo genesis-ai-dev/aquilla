@@ -30,7 +30,7 @@ vi.mock("@/lib/sync/project-settings", () => ({
   patchProjectSettings: vi.fn().mockResolvedValue({ kind: "ok" }),
 }))
 vi.mock("@/lib/store/project-index", () => ({ createProject: vi.fn().mockResolvedValue(undefined) }))
-vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn() } }))
+vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn() } }))
 vi.mock("@/lib/sync/create-targets", () => ({ fetchCreateTargets: vi.fn() }))
 vi.mock("@/context/OrgContext", () => ({
   useActiveOrgOptional: () => ({ orgs: [{ id: 10, name: "Kalam", role: { level: 600, name: "maintainer" } }], guestOrgs: [] }),

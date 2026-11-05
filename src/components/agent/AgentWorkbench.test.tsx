@@ -63,8 +63,8 @@ vi.mock("@/lib/agent/agent-client", () => ({
 }))
 
 // The Memory tab lazy-loads W1E's real AgentMemoryTab, which reads the session
-// and fetches memory/brief on mount. Mock both so the tab renders its real
-// shell (Proposed/Approved/Project brief) instead of erroring on a live fetch.
+// and fetches memories on mount. Mock both so the tab renders its real shell
+// (Proposed/Approved) instead of erroring on a live fetch.
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "test-jwt", username: "alice" }, loading: false }),
 }))
@@ -90,14 +90,6 @@ vi.mock("@/lib/agent/memory-api", async () => {
   return {
     ...actual,
     listAgentMemories: vi.fn().mockResolvedValue([]),
-    getProjectBrief: vi.fn().mockResolvedValue({
-      projectId: "wb",
-      content: "",
-      updatedBy: null,
-      version: 1,
-      updatedAt: "2026-01-01T00:00:00Z",
-    }),
-    listBriefProposals: vi.fn().mockResolvedValue([]),
   }
 })
 
@@ -622,7 +614,7 @@ describe("AgentWorkbench unified view navigation", () => {
     await waitFor(() => expect(memoryTab).toHaveAttribute("aria-selected", "true"))
     expect(screen.getByTestId("workbench-location")).toHaveTextContent("view=knowledge")
     // The Memory tab lazy-loads W1E's real AgentMemoryTab (Wave-2 seam): once
-    // resolved it renders its own Proposed/Approved/Project-brief sub-tabs.
+    // resolved it renders its own Proposed/Approved sub-tabs.
     await waitFor(() =>
       expect(screen.getByRole("tab", { name: /Proposed/ })).toBeInTheDocument(),
     )

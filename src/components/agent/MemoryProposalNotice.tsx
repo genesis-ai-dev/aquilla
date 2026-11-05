@@ -4,6 +4,11 @@
  * §4 frames). Review/approve lives in the Memory tab (W1E's
  * src/components/agent/memory/AgentMemoryTab.tsx) — these notices are
  * read-only in chat, with an optional jump-to-tab affordance.
+ *
+ * AQU-2342: brief proposals are no longer reviewed on their own. A pending one
+ * is moved into the Memory tab's queue as a `decisions/instructions-<hash>.md`
+ * entry when the tab lists memories (db/shared/brief-proposals-to-decisions.ts),
+ * so an old `brief.proposed` notice's link still lands on the item.
  */
 
 import { ArrowRight, BookMarked, Check, FileText } from "lucide-react"

@@ -49,7 +49,7 @@ vi.mock("@/lib/sync/project-settings", () => ({
 vi.mock("@/lib/store/project-index", () => ({
   createProject: vi.fn().mockResolvedValue(undefined),
 }))
-vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn() } }))
+vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn() } }))
 
 
 describe("New Project's submit button goes through translation (AQU-2259)", () => {

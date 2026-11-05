@@ -50,7 +50,7 @@ describe("denialMessage", () => {
     // English role name, which is precisely why it's a silent trap — this
     // asserts the message goes through the catalog's `other` form instead.
     const msg = denialMessage(t, ROLE.CONTRIBUTOR, ROLE.PROJECT_LEAD)
-    expect(msg).toContain("Project leads cannot perform this action")
+    expect(msg).toContain("Project Leads cannot perform this action")
     // The naive concatenation would have produced "Project_leads", which
     // this also rules out.
     expect(msg).not.toContain("Project_lead")

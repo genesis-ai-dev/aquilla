@@ -258,7 +258,7 @@ describe("ProjectSettings — per-control permission hint (AQU-623)", () => {
 })
 
 // AQU-1086 / AQU-984 / AQU-1594: the lane language fields sit behind
-// languageEditMinRole. The unset default is Project lead, so a lead edits them.
+// languageEditMinRole. The unset default is Project Lead, so a lead edits them.
 // An org that stored Maintainer still locks them, and the hint names that role.
 describe("ProjectSettings — org-configurable language floor (AQU-1086 / AQU-984)", () => {
   it("project lead sees the lane language fields locked when the org stored Maintainer, naming Maintainers", async () => {
@@ -272,7 +272,7 @@ describe("ProjectSettings — org-configurable language floor (AQU-1086 / AQU-98
     expect(screen.getByTestId("languages-view-only")).toHaveTextContent("Only Maintainers can change these settings.")
   })
 
-  it("a contributor below the unset default sees the language fields locked, naming Project leads", async () => {
+  it("a contributor below the unset default sees the language fields locked, naming Project Leads", async () => {
     currentProject = makeProject({ syncRole: { level: 400, source: "member" } } as Partial<ProjectRecord>)
     currentCanEditLanguages = false
     currentReasonCannotEditLanguages = "role"
@@ -280,7 +280,7 @@ describe("ProjectSettings — org-configurable language floor (AQU-1086 / AQU-98
     renderSettings(`/project/${PROJECT_ID}/settings/general`)
     const source = screen.getByLabelText(/source language/i)
     expect(source).toBeDisabled()
-    expect(screen.getByTestId("languages-view-only")).toHaveTextContent("Only Project leads can change these settings.")
+    expect(screen.getByTestId("languages-view-only")).toHaveTextContent("Only Project Leads can change these settings.")
   })
 
   it("project lead with the floor at 500 can edit the lane language fields", () => {
@@ -330,7 +330,7 @@ describe("ProjectSettings — Count headings follows its own project-lead floor 
     expect(screen.getByRole("switch", { name: /auto-propagate repetitions/i })).toHaveAttribute("aria-disabled", "true")
   })
 
-  it("a contributor sees it locked, and the hint names Project leads", async () => {
+  it("a contributor sees it locked, and the hint names Project Leads", async () => {
     currentProject = makeProject({ syncRole: { level: 400, source: "member" } } as Partial<ProjectRecord>)
     renderSettings(`/project/${PROJECT_ID}/settings/validation`)
     expect(headingsControl()).toHaveAttribute("aria-disabled", "true")
@@ -338,7 +338,7 @@ describe("ProjectSettings — Count headings follows its own project-lead floor 
     // reason, says its own line beneath it (AQU-2260). What the organization
     // does is on the menu beside it (AQU-2263).
     expect(screen.getAllByTestId("settings-group-locked")[0]).toHaveTextContent("Only Maintainers can change these settings.")
-    expect(screen.getByText("Only Project leads can change this.")).toBeVisible()
+    expect(screen.getByText("Only Project Leads can change this.")).toBeVisible()
     expect(screen.getByTestId("count-structural-cells-source")).toHaveTextContent(/Organization default/)
   })
 })

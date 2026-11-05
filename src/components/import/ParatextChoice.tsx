@@ -1,3 +1,4 @@
+import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 import { useEffect, useMemo, useState } from "react"
 import { Search } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -13,7 +14,6 @@ import { usfmDisplayText } from "@/lib/parsers/usfm-display"
 import type { SourceVerse } from "@/lib/parsers/paratext-pairing"
 import { fetchTranslationsList, fetchTranslationText, parseEBibleCorpus, type EBibleTranslation } from "@/lib/parsers/ebible"
 import { detectCollisions, type CollisionResult } from "@/lib/import-collision"
-import posthog from "@/lib/posthog"
 import { IMPORT_FAILED } from "@/lib/event-names"
 import { UsfmStructureFindings } from "./UsfmStructureFindings"
 import type { CollisionResolution } from "./import-dialog-types"
@@ -49,6 +49,7 @@ export function ParatextChoice({
   entries, bookCount, projectId, username, sourceLanguage, targetLanguage, targetLang, getToken, onImported, onCancel,
   existingFiles, onCollision, excludeFrontMatter,
 }: ParatextChoiceProps) {
+  const analytics = useAccountAnalytics()
   const { locale } = useI18n()
   const t = useT()
   const [mode, setMode] = useState<"choose" | "pickSource" | "importing">("choose")
@@ -72,8 +73,8 @@ export function ParatextChoice({
       .then((p) => { if (!cancelled) setPlan(p) })
       .catch((err) => {
         if (cancelled) return
-        posthog.captureException(err, { import_stage: "paratext-parse", project_id: projectId })
-        posthog.capture(IMPORT_FAILED, {
+        analytics.captureException(err, { import_stage: "paratext-parse", project_id: projectId })
+        analytics.capture(IMPORT_FAILED, {
           import_stage: "paratext-parse",
           project_id: projectId,
           error_message: err instanceof Error ? err.message : String(err),
@@ -81,7 +82,7 @@ export function ParatextChoice({
         setError(err instanceof Error ? err.message : t("importExport.paratext.couldNotReadProject"))
       })
     return () => { cancelled = true }
-  }, [entries, projectId, excludeFrontMatter, t])
+  }, [entries, projectId, excludeFrontMatter, t, analytics])
 
   function onProgress(p: ParatextImportProgress) {
     const bookLabel = p.book
@@ -126,8 +127,8 @@ export function ParatextChoice({
       const inferredLang = settings.languageIsoCode || settings.language
       await onImported(refs, inferredLang ? { sourceLanguage: inferredLang } : undefined, skipped.length ? skipped : undefined)
     } catch (err) {
-      posthog.captureException(err, { import_stage: "paratext-upload", project_id: projectId })
-      posthog.capture(IMPORT_FAILED, {
+      analytics.captureException(err, { import_stage: "paratext-upload", project_id: projectId })
+      analytics.capture(IMPORT_FAILED, {
         import_stage: "paratext-upload",
         project_id: projectId,
         error_message: err instanceof Error ? err.message : String(err),

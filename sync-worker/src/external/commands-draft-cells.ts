@@ -4,7 +4,8 @@ import { fetchIdentity, type IdentityTransport } from './identity-bridge'
 //
 // Why it exists: until now an agent could only write text it wrote itself.
 // DraftCells lets it ask the app to draft, so the output carries the project's
-// terminology, few-shot pairs and brief — and lands as `ai_drafted`, exactly
+// few-shot pairs, preceding validated context and project instructions
+// (AQU-2342) — and lands as `ai_drafted`, exactly
 // like an in-app draft, so a human reviews it as AI work rather than as a
 // human edit.
 //

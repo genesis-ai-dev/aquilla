@@ -48,17 +48,17 @@ describe("RoleSelect", () => {
     expect(onValueChange).toHaveBeenCalledWith(100)
   })
 
-  // AQU-2289: the closed picker showed "Project Lead", title-cased from the
-  // role's machine name and English in every language. It now shows the
-  // catalog's name, in sentence case and in the reader's language.
+  // AQU-2289: the closed picker showed the role's machine name, title-cased and
+  // English in every language. It now shows the catalog's name, as written and
+  // in the reader's language.
   describe("the chosen role's name", () => {
     afterEach(() => window.localStorage.clear())
 
-    it("is the catalog's sentence-case name", () => {
+    it("is the catalog's name as written", () => {
       render(
         <RoleSelect options={PROJECT_ROLE_OPTIONS} value={500} onValueChange={() => {}} aria-label="Role" />,
       )
-      expect(screen.getByRole("combobox", { name: "Role" })).toHaveTextContent(/^Project lead/)
+      expect(screen.getByRole("combobox", { name: "Role" })).toHaveTextContent(/^Project Lead/)
     })
 
     it("is in the reader's language", () => {
@@ -68,7 +68,7 @@ describe("RoleSelect", () => {
           <RoleSelect options={PROJECT_ROLE_OPTIONS} value={500} onValueChange={() => {}} aria-label="Role" />
         </I18nProvider>,
       )
-      expect(screen.getByRole("combobox", { name: "Role" })).toHaveTextContent(/^Chef de projet/)
+      expect(screen.getByRole("combobox", { name: "Role" })).toHaveTextContent(/^Chef de Projet/)
     })
   })
 })

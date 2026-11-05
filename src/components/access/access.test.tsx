@@ -112,7 +112,7 @@ describe("EffectiveRoleCell (§3.7 rule 3)", () => {
       />,
     )
     expect(container.textContent).toBe(
-      "Contributor (direct) → Project lead (via Biblica ETT › biblica/pattani-malay)",
+      "Contributor (direct) → Project Lead (via Biblica ETT › biblica/pattani-malay)",
     )
   })
 
@@ -184,7 +184,7 @@ describe("MemberInspector (§3.8)", () => {
     expect([...sections].map((s) => s.getAttribute("data-section"))).toEqual(["effective-here", "everything-else"])
     const here = within(sections[0] as HTMLElement)
     expect(here.getByText(`Effective here (${formatScopePath(projectPath)})`)).toBeInTheDocument()
-    expect(here.getAllByText("Project lead").length).toBeGreaterThan(0)
+    expect(here.getAllByText("Project Lead").length).toBeGreaterThan(0)
   })
 
   it("groups everything else under one heading per scope type, outermost first (rule 1)", () => {

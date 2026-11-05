@@ -19,7 +19,7 @@ function completeBrief(): TranslationBrief {
   }
 }
 
-/** Advance the wizard to the notes step where "Save & generate summary" lives. */
+/** Advance the wizard to the notes step where the finish button lives. */
 async function gotoGenerateStep() {
   let next = screen.queryByRole("button", { name: /next/i })
   while (next) {
@@ -27,7 +27,7 @@ async function gotoGenerateStep() {
     next = screen.queryByRole("button", { name: /next/i })
   }
   await waitFor(() =>
-    expect(screen.getByRole("button", { name: /save & generate summary/i })).toBeTruthy(),
+    expect(screen.getByRole("button", { name: /add to instructions/i })).toBeTruthy(),
   )
 }
 
@@ -36,7 +36,7 @@ describe("BriefBuilder", () => {
     const onSave = vi.fn().mockResolvedValue(emptyBrief("a"))
     render(
       <BriefBuilder
-        open
+        open title="Help me write instructions" finishLabel="Add to instructions"
         brief={emptyBrief("a")}
         canEdit
         onSaveDraft={onSave}
@@ -56,7 +56,7 @@ describe("BriefBuilder", () => {
 
   it("disables editing affordances when canEdit is false", () => {
     render(
-      <BriefBuilder open brief={emptyBrief("a")} canEdit={false}
+      <BriefBuilder open title="Help me write instructions" finishLabel="Add to instructions" brief={emptyBrief("a")} canEdit={false}
         onSaveDraft={noopAsync} onGenerateL1={noGenerate} onClose={() => {}} />,
     )
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).readOnly).toBe(true)
@@ -64,15 +64,15 @@ describe("BriefBuilder", () => {
 
   // AQU-968: the wizard must close on a successful generation and stay open
   // otherwise (e.g. no AI provider configured, so nothing was generated).
-  it("closes after Save & generate summary succeeds", async () => {
+  it("closes after the finish step succeeds", async () => {
     const onClose = vi.fn()
     const onGenerateL1 = vi.fn().mockResolvedValue(true)
     render(
-      <BriefBuilder open brief={emptyBrief("a")} canEdit
+      <BriefBuilder open title="Help me write instructions" finishLabel="Add to instructions" brief={emptyBrief("a")} canEdit
         onSaveDraft={noopAsync} onGenerateL1={onGenerateL1} onClose={onClose} />,
     )
     await gotoGenerateStep()
-    fireEvent.click(screen.getByRole("button", { name: /save & generate summary/i }))
+    fireEvent.click(screen.getByRole("button", { name: /add to instructions/i }))
     await waitFor(() => expect(onGenerateL1).toHaveBeenCalled())
     await waitFor(() => expect(onClose).toHaveBeenCalled())
   })
@@ -81,11 +81,11 @@ describe("BriefBuilder", () => {
     const onClose = vi.fn()
     const onGenerateL1 = vi.fn().mockResolvedValue(false)
     render(
-      <BriefBuilder open brief={emptyBrief("a")} canEdit
+      <BriefBuilder open title="Help me write instructions" finishLabel="Add to instructions" brief={emptyBrief("a")} canEdit
         onSaveDraft={noopAsync} onGenerateL1={onGenerateL1} onClose={onClose} />,
     )
     await gotoGenerateStep()
-    fireEvent.click(screen.getByRole("button", { name: /save & generate summary/i }))
+    fireEvent.click(screen.getByRole("button", { name: /add to instructions/i }))
     await waitFor(() => expect(onGenerateL1).toHaveBeenCalled())
     expect(onClose).not.toHaveBeenCalled()
   })
@@ -95,21 +95,21 @@ describe("BriefBuilder", () => {
   describe("section navigation (AQU-2347)", () => {
     it("opens a complete brief at its first section, not its last", () => {
       render(
-        <BriefBuilder open brief={completeBrief()} canEdit
+        <BriefBuilder open title="Help me write instructions" finishLabel="Add to instructions" brief={completeBrief()} canEdit
           onSaveDraft={noopAsync} onGenerateL1={noGenerate} onClose={() => {}} />,
       )
       const nav = screen.getByRole("navigation", { name: /brief sections/i })
       const current = nav.querySelector('[aria-current="step"]')
       expect(current?.textContent).toMatch(/Purpose \/ skopos/i)
       // The last step's primary action is absent: we are not at the end.
-      expect(screen.queryByRole("button", { name: /save & generate summary/i })).toBeNull()
+      expect(screen.queryByRole("button", { name: /add to instructions/i })).toBeNull()
       expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("answer for purpose")
     })
 
     it("still resumes an unfinished brief at its first unanswered field", () => {
       const brief = completeBrief()
       render(
-        <BriefBuilder open canEdit
+        <BriefBuilder open title="Help me write instructions" finishLabel="Add to instructions" canEdit
           brief={{ ...brief, parameters: { ...brief.parameters, useAndMedium: "  " } }}
           onSaveDraft={noopAsync} onGenerateL1={noGenerate} onClose={() => {}} />,
       )
@@ -120,7 +120,7 @@ describe("BriefBuilder", () => {
 
     it("lists every section and jumps to one in a single click", () => {
       render(
-        <BriefBuilder open brief={completeBrief()} canEdit
+        <BriefBuilder open title="Help me write instructions" finishLabel="Add to instructions" brief={completeBrief()} canEdit
           onSaveDraft={noopAsync} onGenerateL1={noGenerate} onClose={() => {}} />,
       )
       const nav = screen.getByRole("navigation", { name: /brief sections/i })
@@ -134,13 +134,13 @@ describe("BriefBuilder", () => {
 
       // The notes step is reachable the same way — no Next-clicking required.
       fireEvent.click(screen.getByRole("button", { name: /^Other notes$/i }))
-      expect(screen.getByRole("button", { name: /save & generate summary/i })).toBeTruthy()
+      expect(screen.getByRole("button", { name: /add to instructions/i })).toBeTruthy()
     })
 
     it("keeps the user in the section they saved", async () => {
       const onSave = vi.fn().mockResolvedValue(completeBrief())
       render(
-        <BriefBuilder open brief={completeBrief()} canEdit
+        <BriefBuilder open title="Help me write instructions" finishLabel="Add to instructions" brief={completeBrief()} canEdit
           onSaveDraft={onSave} onGenerateL1={noGenerate} onClose={() => {}} />,
       )
       fireEvent.click(screen.getByRole("button", { name: /^Key terms & theological tradition$/i }))

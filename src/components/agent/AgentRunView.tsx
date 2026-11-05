@@ -25,6 +25,7 @@ import { Message, MessageContent } from "@/components/ui/message"
 import { Spinner } from "@/components/ui/spinner"
 import type { AgentProposal, AquiferPublishProposal, FileCandidate } from "@/lib/agent/protocol"
 import { latestFileCandidates } from "@/lib/agent/file-candidates"
+import { formatProgress } from "@/lib/agent/run-state"
 import type { AgentRunUi, ToolItem, ToolKind } from "@/lib/agent/run-state"
 import { splitNextSteps } from "@/lib/agent/suggestions"
 import { AGENT_PERSONAS, personaForToolKind } from "@/lib/agent/personas"
@@ -281,9 +282,7 @@ export function AgentRunView({
             <Spinner />
           </MarkerIcon>
           <MarkerContent>
-            {run.progress
-              ? `${run.progress.label} — ${run.progress.done}/${run.progress.total}`
-              : "Agent working…"}
+            {run.progress ? formatProgress(run.progress) : "Agent working…"}
           </MarkerContent>
         </Marker>
       )}

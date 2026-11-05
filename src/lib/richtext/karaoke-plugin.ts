@@ -10,7 +10,7 @@ import { Extension } from "@tiptap/core"
 import type { WordTiming } from "@/lib/codex-editor/types"
 import { FOOTNOTE_NODE_NAME } from "@/lib/richtext/usfm-plain-text"
 import { isWordSeekClick } from "@/lib/audio/seek-word-click"
-import { findTimingAtPlainOffset } from "@/lib/audio/timings"
+import { findTimingAtPlainOffset, timingAddressesText } from "@/lib/audio/timings"
 
 // Leaf-text serialiser for textBetween: footnote nodes expand to their raw
 // `\f...\f*` (so timing offsets computed against the plain `value` line up),
@@ -36,6 +36,13 @@ export function buildKaraokeDecorationSet(
     return DecorationSet.empty
   }
   const w = timings[activeIdx]
+  // AQU-2254: the offsets must still address the word they name. A transcript
+  // cleanup rewrites the text under timings that keep pointing at the old
+  // layout, and painting them anyway highlights letters the audio is not
+  // saying. Nothing is a truer signal than no highlight at all.
+  if (!timingAddressesText(w, doc.textBetween(0, doc.content.size, "\n", leafText))) {
+    return DecorationSet.empty
+  }
   const { fromMap, toMap } = buildPlainMaps(doc)
   const from = fromMap[w.start]
   const to = toMap[w.end]

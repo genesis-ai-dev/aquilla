@@ -9,6 +9,11 @@
  *     so Thai, Lao, Khmer, Burmese, Chinese and Japanese — written without
  *     spaces — split into words instead of one sentence-long token. Where the
  *     runtime has no Segmenter, a Unicode-category regex is the fallback.
+ *   - Zero-width spaces (U+200B, U+2060, U+FEFF) are dropped before segmenting:
+ *     ICU breaks a word at U+200B, and eBible-style Burmese text puts one
+ *     between every syllable, so every syllable would become its own word.
+ *     Offsets still point into the original text. The zero-width
+ *     (non-)joiners U+200C/U+200D are kept — see the next bullet.
  *   - Letters, marks and digits by Unicode category (\p{L}\p{M}\p{N}), plus the
  *     zero-width (non-)joiners Persian and Indic spelling put inside words.
  *   - Apostrophes: between letters they are part of the word (UAX #29 already
@@ -25,11 +30,14 @@
  */
 
 export interface WordToken {
-  /** The word as written (NFC). */
+  /** The word as written (NFC), minus any zero-width spaces it was typed with. */
   surface: string
   /** Case-folded comparison key. */
   key: string
-  /** Offsets into the NFC-normalised input. */
+  /**
+   * Offsets into the NFC-normalised input — the text as given, so a zero-width
+   * space inside the word, or directly after it, falls inside `start`..`end`.
+   */
   start: number
   end: number
 }
@@ -41,6 +49,21 @@ const FALLBACK_RE = new RegExp(
   `'?[${WORD_CLASS}]+(?:['’ʼ][${WORD_CLASS}]+)*'?`,
   "gu",
 )
+
+/**
+ * Zero-width characters with no part in any spelling: ZERO WIDTH SPACE, WORD
+ * JOINER, and ZERO WIDTH NO-BREAK SPACE (the BOM). ICU treats U+200B as a word
+ * break, and eBible-style Burmese text puts one between every syllable, so they
+ * are removed before segmenting. The zero-width (NON-)JOINERS U+200C/U+200D are
+ * NOT removed: Indic and Persian spelling needs them inside words.
+ */
+const ZERO_WIDTH = /[\u200B\u2060\uFEFF]/
+const ZERO_WIDTH_ALL = /[\u200B\u2060\uFEFF]/g
+
+/** `text` without the zero-width characters the segmenter ignores. */
+export function stripZeroWidth(text: string): string {
+  return ZERO_WIDTH.test(text) ? text.replace(ZERO_WIDTH_ALL, "") : text
+}
 
 /**
  * Scripts written without spaces between words. A word from one of these is
@@ -84,13 +107,37 @@ export function joiner(before: string, after: string): string {
 /** Words of `text` with their spelling, key and offsets (in NFC text). */
 export function segmentWords(input: string): WordToken[] {
   const text = input.normalize("NFC")
+  if (!ZERO_WIDTH.test(text)) return segmentOn(text, null)
+  // Segment a zero-width-free copy, keeping where each character came from so
+  // the offsets handed back still address `text`.
+  const kept: number[] = []
+  let stripped = ""
+  for (let i = 0; i < text.length; i++) {
+    if (ZERO_WIDTH.test(text[i])) continue
+    stripped += text[i]
+    kept.push(i)
+  }
+  // One past the last character, so a word's `end` can reach the text's end.
+  kept.push(text.length)
+  return segmentOn(stripped, kept)
+}
+
+/**
+ * The segmentation pass over `text`. `kept[i]` is where character `i` sits in
+ * the caller's text when `text` is a zero-width-stripped copy of it; `null`
+ * when `text` is the caller's text itself.
+ */
+function segmentOn(text: string, kept: readonly number[] | null): WordToken[] {
   if (wordSegmenter === undefined) wordSegmenter = makeSegmenter("word")
   const out: WordToken[] = []
+  const origin = (offset: number) => (kept ? kept[offset] : offset)
+  let pushedEnd = -1
   const push = (start: number, end: number) => {
     const surface = text.slice(start, end)
     // A stray joiner or mark with no letter or digit is not a word.
     if (!HAS_LETTER.test(surface)) return
-    out.push({ surface, key: fold(surface), start, end })
+    pushedEnd = end
+    out.push({ surface, key: fold(surface), start: origin(start), end: origin(end) })
   }
   if (!wordSegmenter) {
     for (const m of text.matchAll(FALLBACK_RE)) push(m.index ?? 0, (m.index ?? 0) + m[0].length)
@@ -103,8 +150,7 @@ export function segmentWords(input: string): WordToken[] {
     // A straight apostrophe glued to the word's edge is part of it.
     if (text[start - 1] === "'" && !isWordChar(text[start - 2])) start--
     if (text[end] === "'" && !isWordChar(text[end + 1])) end++
-    const last = out.at(-1)
-    if (last && last.end > start) start = last.end
+    if (pushedEnd > start) start = pushedEnd
     if (end > start) push(start, end)
   }
   return out
@@ -118,7 +164,7 @@ export function wordKeys(text: string): string[] {
 /** True when `word` is exactly one word with nothing else around it. */
 export function isSingleWord(word: string): boolean {
   const words = segmentWords(word)
-  return words.length === 1 && words[0].surface === word.normalize("NFC")
+  return words.length === 1 && words[0].surface === stripZeroWidth(word.normalize("NFC"))
 }
 
 const graphemeCache = new Map<string, string[]>()

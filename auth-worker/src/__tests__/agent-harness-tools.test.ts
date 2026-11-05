@@ -15,6 +15,7 @@ import {
   loadArtifact,
   readSandboxFile,
   proposeMemoryTool,
+  proposeBriefUpdateTool,
   readMemoryTool,
   type HarnessToolCtx,
 } from "../lib/agent/harness-tools"
@@ -172,6 +173,19 @@ describe("untrusted-content guard", () => {
     expect(text).toContain("proposed memory")
     const frame = h.frames.find((f) => f.type === "memory.proposed")
     expect(frame).toMatchObject({ type: "memory.proposed", path: "observations/terms.md" })
+  })
+
+  // AQU-2342: propose_brief_update is retired; a legacy call becomes a
+  // decisions/ proposal, whose approval appends to the project instructions.
+  it("retargets a legacy propose_brief_update to a decisions/ memory proposal", async () => {
+    await seedUser(1, "alice")
+    const h = makeHarness()
+    const text = await proposeBriefUpdateTool({ content: "Prefer everyday words.", rationale: "seen" }, h.ctx)
+    expect(text).toContain("proposed memory decisions/instructions-")
+    expect(h.frames.some((f) => f.type === "brief.proposed")).toBe(false)
+    const frame = h.frames.find((f) => f.type === "memory.proposed")
+    expect(frame).toMatchObject({ type: "memory.proposed" })
+    expect((frame as { path: string }).path).toMatch(/^decisions\/instructions-[0-9a-f]{12}\.md$/)
   })
 })
 

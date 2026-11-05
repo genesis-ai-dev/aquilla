@@ -1,3 +1,4 @@
+import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useForm, useStore } from "@tanstack/react-form"
 import { z } from "zod"
@@ -58,7 +59,6 @@ import { useSubmitError } from "@/lib/forms/submit-error"
 import { ROLE } from "@/lib/frontier/roles"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
-import posthog from "@/lib/posthog"
 import { LangQuestCreatePanel } from "@/components/langquest/LangQuestCreatePanel"
 import { LangQuestLogo } from "@/components/langquest/LangQuestLogo"
 
@@ -250,6 +250,7 @@ const projectSchema = z
   })
 
 export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppliedProjects }: ProjectCreateDialogProps) {
+  const analytics = useAccountAnalytics()
   const t = useT()
   const { session } = useFrontierSession()
   const {
@@ -474,7 +475,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
         }
 
         await createProject(project)
-        posthog.capture("project created", {
+        analytics.capture("project created", {
           project_id: project.id,
           project_shape: value.shape,
           source_language: project.sourceLanguage,
@@ -1299,6 +1300,7 @@ function AddAsLaneRecommendation({
    *  flight, or this panel's own lane add. */
   disabled?: boolean
 }) {
+  const analytics = useAccountAnalytics()
   const t = useT()
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle")
   const [message, setMessage] = useState<string | null>(null)
@@ -1387,7 +1389,7 @@ function AddAsLaneRecommendation({
       if (result.kind === "ok") {
         setStatus("success")
         setMessage(t("projectSettings.create.laneRecommendationSuccess", { lane: trimmed, projectName: project.name }))
-        posthog.capture("sibling lane added from create dialog", {
+        analytics.capture("sibling lane added from create dialog", {
           upstream_project_id: project.id,
           lane: trimmed,
         })

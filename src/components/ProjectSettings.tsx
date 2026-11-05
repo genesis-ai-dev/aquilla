@@ -88,7 +88,7 @@ import {
   presetIdForEndpoint,
   presetLabel,
 } from "@/lib/completion/provider-presets"
-import { buildCompletionSettings, DEFAULT_SYSTEM_PROMPT } from "@/hooks/useCompletionSettings"
+import { buildCompletionSettings } from "@/hooks/useCompletionSettings"
 import { MAX_BATCH_COMPLETIONS } from "@/lib/workspace-actions/registry"
 import type {
   AudioMediaStrategy,
@@ -107,8 +107,7 @@ import { isBibleDataExperimentOn } from "@/lib/bible-data/experiment"
 import type { BibleEnrichmentSettings } from "../../db/shared/bible-enrichments"
 import type { MediaDefaults } from "../../db/shared/media-setting-defaults"
 import { BibleDataSection } from "./ProjectSettings/BibleDataSection"
-import { LanguageProfileSection } from "./ProjectSettings/LanguageProfileSection"
-import { ProjectDecisionsSection } from "./ProjectSettings/ProjectDecisionsSection"
+import { ChecksRow, InstructionsRow } from "./ProjectSettings/AiGuidanceRows"
 import {
   resolveTimingLocked,
   createProjectLane,
@@ -140,8 +139,7 @@ import { ProjectVisibilitySection } from "./ProjectSettings/ProjectVisibilitySec
 import { KeyInUseLine } from "@/components/settings/KeyInUseLine"
 import { completionKeyInUse, geminiKeyInUse } from "@/lib/settings/key-in-use"
 import { useUserProviderOverride } from "@/lib/store/user-provider-override"
-import { BRIEF_ICON, LIVING_MEMORY_ICON } from "./LivingMemoryButton"
-import { briefStatus } from "@/lib/brief/brief"
+import { projectTranslationInstructions } from "@/lib/instructions/project-instructions"
 import { DcsUpstreamPanel } from "@/components/dcs/DcsUpstreamPanel"
 import { readCursor } from "@/lib/dcs/cursor"
 import { UpstreamChangesPanel } from "./linked/UpstreamChangesPanel"
@@ -382,6 +380,9 @@ type SettingsHub = (typeof HUB_ORDER)[number]
 const SETTINGS_FOCUS_TARGETS: Record<string, { elementId: string; block: ScrollLogicalPosition }> = {
   languages: { elementId: "section-languages", block: "start" },
   "add-lane": { elementId: "add-lane-field", block: "nearest" },
+  // AQU-2306: the org Security page's "N projects are stricter than this" list
+  // links each project here, to the card that holds its own import floor.
+  import: { elementId: "section-import", block: "start" },
 }
 
 /**
@@ -982,15 +983,10 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
     { id: "section-upstream-changes", label: t("projectSettings.section.upstreamChanges"), keywords: ["upstream", "changes", "repin", "review", "mirror", "stale"], visible: hasLiveSourceLink },
     { id: "section-dcs-upstream", label: t("projectSettings.section.dcsUpstream"), keywords: ["door43", "dcs", "unfoldingword", "upstream", "check for updates", "import changes", "release"], visible: hasDcsUpstream },
     { id: "section-project-info", label: t("projectSettings.section.projectInfo"), keywords: ["name", "source language", "target language", "smart quotes", "curly quotes", "quotation marks", "typography"] },
-    // AQU-1688: the Language profile for checks lives here too, while this
-    // device has the Bible data experiment on (AQU-1685).
     {
       id: "section-languages",
       label: t("projectSettings.section.languages"),
-      keywords: [
-        "languages", "language lanes", "language lane", "target lanes", "lane", "target language", "dialect",
-        ...(bibleDataExperiment ? ["language profile", "quotation marks", "quote marks", "bible data checks"] : []),
-      ],
+      keywords: ["languages", "language lanes", "language lane", "target lanes", "lane", "target language", "dialect"],
     },
     // AQU-1686: "translation notes" stays. It used to mislead (this card did
     // not control the Translation Notes sidebar, and still does not), but the
@@ -1017,13 +1013,16 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
     // Timeline card it grew out of — it governs ordinary text files now, not
     // just the timeline's silences.
     { id: "section-cell-editing", label: t("projectSettings.cellEditing.sectionTitle"), keywords: ["add cell", "remove cell", "insert", "delete", "structure", "verse", "line", "row", "restructure", "permission", "role"] },
-    // AQU-1672: the brief gates Autopilot starts (AQU-827) but had no entry of
-    // its own anywhere in settings — it was reachable only by opening Living
-    // Memory's Instructions pane and clicking the breadcrumb back up to the
-    // index. Its own section id gives it a row in the AI & completion pane AND
-    // makes a search for "brief" land on it.
-    { id: "section-brief", label: t("autopilot.readiness.brief.label"), keywords: ["brief", "translation brief", "skopos", "purpose", "audience", "register", "literalness", "style guide", "living memory"] },
-    { id: "section-ai-instructions", label: t("projectSettings.section.aiInstructions"), keywords: ["ai", "llm", "instructions", "batch size", "completions batch", "validation batch", "batch validate", "top_k", "examples", "context window", "assistant language", "few shot", "ai drafting", "drafting", "ai instructions"] },
+    // AQU-2342: the ONE instructions text every AI draft reads (it replaced
+    // the brief, the system prompt and Living Memory's instruction entries).
+    // Its own section id gives it a row in the AI pane AND makes a search for
+    // any of the old names land on it (AQU-1672).
+    { id: "section-instructions", label: t("terminology.livingMemory.instructionsTitle"), keywords: ["instructions", "ai instructions", "brief", "translation brief", "system prompt", "prompt", "skopos", "purpose", "audience", "register", "literalness", "style guide", "living memory"] },
+    // AQU-2342: the ONE Checks list (project, lane, org and style rules, the
+    // built-in checks, and the Language profile they read). A row in the AI
+    // pane, findable by every old name.
+    { id: "section-checks", label: t("terminology.livingMemory.section.checks.title"), keywords: ["checks", "rules", "style rules", "quality", "translation quality", "built-in checks", "org rules", "decisions", "project decisions", "language profile", "quotation marks", "quote marks", "bible data checks"] },
+    { id: "section-ai-instructions", label: t("projectSettings.section.aiInstructions"), keywords: ["ai", "llm", "batch size", "completions batch", "validation batch", "batch validate", "top_k", "examples", "context window", "assistant language", "few shot", "ai drafting", "drafting"] },
     { id: "section-draft-context", label: t("projectSettings.section.draftContext"), keywords: ["draft context", "preceding cells", "left context", "paragraph drafting", "context budget"] },
     { id: "section-advanced-llm", label: t("projectSettings.section.advancedLlm"), keywords: ["provider", "endpoint", "api key", "model", "ai model", "advanced", "llm", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom"] },
     // AQU-1758: the Voice Studio is the Voices tab now; its old name still finds it.
@@ -1137,11 +1136,11 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
       description: t("projectSettings.group.aiDescription"),
       icon: Sparkles,
       hub: "aiMedia",
-      // The system prompt (and the rest of Living Memory) lives on the
-      // standalone /project/:id/memory surface; this pane keeps a cross-link
-      // NavRow to memory/instructions instead of a nested settings page.
+      // The instructions live on the standalone /project/:id/memory surface;
+      // this pane keeps one NavRow to memory/instructions instead of a nested
+      // settings page.
       sectionIds: [
-        "section-brief",
+        "section-instructions", "section-checks",
         "section-ai-instructions", "section-draft-context", "section-advanced-llm",
         "section-voice", "section-local-models", "section-terminology", "section-termbase-sharing",
       ],
@@ -1232,7 +1231,7 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
   const movedSectionRedirects: Record<string, string> = id
     ? {
         memory: projectMemoryPath(id),
-        rules: projectMemoryPath(id, "quality"),
+        rules: projectMemoryPath(id, "checks"),
         "system-prompt": projectMemoryPath(id, "instructions"),
       }
     : {}
@@ -1275,6 +1274,8 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
       "section-import",
       "section-user",
       "section-members",
+      "section-instructions",
+      "section-checks",
       "section-ai-instructions",
       "section-draft-context",
       "section-advanced-llm",
@@ -1410,27 +1411,13 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
     )
   }
 
-  // Living Memory cross-link hint (Custom vs Default): the prompt itself is
-  // edited on memory/instructions now, so read the saved value straight off
-  // the project record — the same source the removed form baseline used.
-  const savedSystemPrompt = project?.completionSettings?.systemPrompt || DEFAULT_SYSTEM_PROMPT
-
-  // AQU-1672: the brief's derived status, as the row's right-aligned hint —
-  // same three strings the Living Memory index shows, so the two surfaces can
-  // never disagree about whether a brief exists. Read from the editable
-  // settings hook first (it carries this page's optimistic overlay) and fall
-  // back to the project record before that GET resolves, like the panes above.
-  const briefHint = (() => {
-    const brief = sharedSettingsBlob?.translationBrief ?? project?.translationBrief
-    switch (briefStatus(brief)) {
-      case "none":
-        return t("terminology.livingMemory.section.brief.statusNone")
-      case "draft":
-        return t("terminology.livingMemory.section.brief.statusDraft")
-      case "complete":
-        return t("terminology.livingMemory.section.brief.statusComplete")
-    }
-  })()
+  // AQU-2342: a one-line preview of the resolved instructions (stored, else
+  // migrated from the old sources) on the Instructions row. Read through the
+  // editable settings hook first (it carries this page's optimistic overlay),
+  // falling back to the bare record before that GET resolves.
+  const resolvedInstructions = project
+    ? projectTranslationInstructions(overlaySettings(project, sharedSettingsBlob ?? {}))
+    : ""
 
   const settingsContent = (
     <Page
@@ -1636,33 +1623,6 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
             startAdding={focusTarget === "add-lane"}
           />
         )}
-        {/* AQU-1688: facts about the target language that Bible data checks
-            need. Only with the Bible data experiment on (AQU-1685): without
-            it there are no Bible data checks to configure. */}
-        {bibleDataExperiment && sectionsToRender.some((s) => s.id === "section-languages") && (
-          <LanguageProfileSection
-            value={sharedSettingsBlob?.languageProfile}
-            targetLanguage={sharedSettingsBlob?.targetLanguage ?? project?.targetLanguage ?? ""}
-            canEdit={canChangeShared}
-            disabledTooltip={sharedDisabledTooltip ?? null}
-            patch={commit.recordedPatch()}
-          />
-        )}
-        {/* AQU-1691: the decision log, the team's answers to Autopilot's
-            questions. Only with the Bible data experiment on (AQU-1685): the
-            questions that record a decision are Bible data questions
-            (AQU-1690), so without the experiment the card has nothing to
-            show. Autopilot follows the stored decisions either way. */}
-        {bibleDataExperiment && sectionsToRender.some((s) => s.id === "section-languages") && (
-          <ProjectDecisionsSection
-            value={sharedSettingsBlob?.projectFacts}
-            canEdit={canChangeShared}
-            disabledTooltip={sharedDisabledTooltip ?? null}
-            username={session?.username ?? ""}
-            patch={commit.recordedPatch({ ownErrors: "all" })}
-          />
-        )}
-
         {searchGroupLabel("section-cell-editing")}
         {sectionsToRender.some((s) => s.id === "section-cell-editing") && (
           <div id="section-cell-editing">
@@ -1744,7 +1704,8 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
                 autopilotEnabled: sharedSettingsBlob.autopilotEnabled,
                 experimentalFlags: project?.experimentalFlags,
               })}
-              onOpenBuiltinChecks={id ? () => requestNavigate(projectMemoryPath(id, "quality")) : undefined}
+              // Through requestNavigate, so unsaved edits get the discard prompt.
+              onOpenBuiltinChecks={id ? () => requestNavigate(projectMemoryPath(id, "checks")) : undefined}
               experimentOn={bibleDataExperiment}
             />
           </div>
@@ -1857,48 +1818,20 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
           </div>
         )}
 
-        {/* AQU-1672: a direct, first-class entry to the translation brief.
-            Unlike the Living Memory cross-link below it, this row renders while
-            searching too — a search for "brief" has to produce the path to the
-            brief, not an empty result. Same deliberate omission of a modal
-            `state`: this is a real navigation out of settings. */}
-        {searchGroupLabel("section-brief")}
-        {id && sectionsToRender.some((s) => s.id === "section-brief") && (
-          <div id="section-brief" className="flex flex-col gap-12">
-            <NavList>
-              <NavRow
-                to={projectMemoryPath(id, "brief")}
-                icon={BRIEF_ICON}
-                title={t("autopilot.readiness.brief.label")}
-                description={t("terminology.livingMemory.section.brief.description")}
-                hint={briefHint}
-              />
-            </NavList>
-          </div>
+        {/* AQU-2342: the one entry to the project instructions. It renders
+            while searching too — a search for "brief" or "prompt" has to
+            produce the path to them (AQU-1672). Deliberately no modal `state`:
+            this is a real navigation out of settings. */}
+        {searchGroupLabel("section-instructions")}
+        {id && sectionsToRender.some((s) => s.id === "section-instructions") && (
+          <InstructionsRow projectId={id} resolvedInstructions={resolvedInstructions} />
         )}
+        {searchGroupLabel("section-checks")}
+        {id && sectionsToRender.some((s) => s.id === "section-checks") && <ChecksRow projectId={id} />}
 
         {searchGroupLabel("section-ai-instructions")}
         {sectionsToRender.some((s) => s.id === "section-ai-instructions") && (
           <div id="section-ai-instructions" className="flex flex-col gap-12">
-            {/* Cross-link: the system prompt is edited on the Living Memory
-                surface (memory/instructions). A real navigation out of
-                settings — deliberately no modal `state` (unlike sibling
-                NavRows), so the route-modal doesn't try to stack it. */}
-            {!lowerQuery && id ? (
-              <NavList>
-                <NavRow
-                  to={projectMemoryPath(id, "instructions")}
-                  icon={LIVING_MEMORY_ICON}
-                  title={t("terminology.livingMemory.title")}
-                  description={t("projectSettings.systemPrompt.navDescription")}
-                  hint={
-                    savedSystemPrompt.trim() && savedSystemPrompt !== DEFAULT_SYSTEM_PROMPT
-                      ? t("terminology.livingMemory.prompt.customBadge")
-                      : t("terminology.livingMemory.prompt.defaultBadge")
-                  }
-                />
-              </NavList>
-            ) : null}
             <SettingsGroup label={t("projectSettings.section.aiInstructions")} description={sharedLockedLine}>
               <SettingsRow
                 saveId="draftingSettings.top_k"

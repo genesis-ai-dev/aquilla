@@ -4949,7 +4949,11 @@
     "editor.selection.validatePartialRows": "ce82f38632ed19e0",
     "audio.clone.dropzoneTitle": "55f96d1ad2036a38",
     "audio.clone.dropzoneDrop": "202483f0fb0c2e81",
-    "audio.clone.errorNotAudio": "de5e2c7f102a9d1b"
+    "audio.clone.errorNotAudio": "de5e2c7f102a9d1b",
+    "workspace.offline.preparingToast": "71326387327f24d9",
+    "workspace.offline.preparingToastDescription": "7f87f5162c012108",
+    "workspace.offline.preparingToastSlowDescription": "d70c90e58c3d72cd",
+    "workspace.offline.preparingToastStuckDescription": "73d5edaadc3a9586"
   },
   "my": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -9883,7 +9887,11 @@
     "editor.selection.validatePartialRows": "ce82f38632ed19e0",
     "audio.clone.dropzoneTitle": "55f96d1ad2036a38",
     "audio.clone.dropzoneDrop": "202483f0fb0c2e81",
-    "audio.clone.errorNotAudio": "de5e2c7f102a9d1b"
+    "audio.clone.errorNotAudio": "de5e2c7f102a9d1b",
+    "workspace.offline.preparingToast": "71326387327f24d9",
+    "workspace.offline.preparingToastDescription": "7f87f5162c012108",
+    "workspace.offline.preparingToastSlowDescription": "d70c90e58c3d72cd",
+    "workspace.offline.preparingToastStuckDescription": "73d5edaadc3a9586"
   },
   "ms": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -14804,7 +14812,11 @@
     "editor.selection.validatePartialRows": "ce82f38632ed19e0",
     "audio.clone.dropzoneTitle": "55f96d1ad2036a38",
     "audio.clone.dropzoneDrop": "202483f0fb0c2e81",
-    "audio.clone.errorNotAudio": "de5e2c7f102a9d1b"
+    "audio.clone.errorNotAudio": "de5e2c7f102a9d1b",
+    "workspace.offline.preparingToast": "71326387327f24d9",
+    "workspace.offline.preparingToastDescription": "7f87f5162c012108",
+    "workspace.offline.preparingToastSlowDescription": "d70c90e58c3d72cd",
+    "workspace.offline.preparingToastStuckDescription": "73d5edaadc3a9586"
   },
   "ar": {
     "knowledgeBase.title": "f56819a30de2c139",
@@ -19751,7 +19763,11 @@
     "editor.selection.validatePartialRows": "ce82f38632ed19e0",
     "audio.clone.dropzoneTitle": "55f96d1ad2036a38",
     "audio.clone.dropzoneDrop": "202483f0fb0c2e81",
-    "audio.clone.errorNotAudio": "de5e2c7f102a9d1b"
+    "audio.clone.errorNotAudio": "de5e2c7f102a9d1b",
+    "workspace.offline.preparingToast": "71326387327f24d9",
+    "workspace.offline.preparingToastDescription": "7f87f5162c012108",
+    "workspace.offline.preparingToastSlowDescription": "d70c90e58c3d72cd",
+    "workspace.offline.preparingToastStuckDescription": "73d5edaadc3a9586"
   },
   "zh-Hans": {
     "common.save": "1509f561f2416598",
@@ -25974,7 +25990,11 @@
     "audio.clone.errorNoContext": "e9cff1e07c54d6dd",
     "audio.clone.errorTooLarge": "d4090535e2b61377",
     "audio.clone.previewTooltip": "71c4c759591b47c5",
-    "audio.clone.previewFailed": "97ce5234adcb4967"
+    "audio.clone.previewFailed": "97ce5234adcb4967",
+    "workspace.offline.preparingToast": "71326387327f24d9",
+    "workspace.offline.preparingToastDescription": "7f87f5162c012108",
+    "workspace.offline.preparingToastSlowDescription": "d70c90e58c3d72cd",
+    "workspace.offline.preparingToastStuckDescription": "73d5edaadc3a9586"
   },
   "zh-Hant": {
     "common.save": "1509f561f2416598",
@@ -32199,7 +32219,11 @@
     "audio.clone.errorNoContext": "e9cff1e07c54d6dd",
     "audio.clone.errorTooLarge": "d4090535e2b61377",
     "audio.clone.previewTooltip": "71c4c759591b47c5",
-    "audio.clone.previewFailed": "97ce5234adcb4967"
+    "audio.clone.previewFailed": "97ce5234adcb4967",
+    "workspace.offline.preparingToast": "71326387327f24d9",
+    "workspace.offline.preparingToastDescription": "7f87f5162c012108",
+    "workspace.offline.preparingToastSlowDescription": "d70c90e58c3d72cd",
+    "workspace.offline.preparingToastStuckDescription": "73d5edaadc3a9586"
   },
   "id": {
     "common.save": "1509f561f2416598",
@@ -38496,7 +38520,11 @@
     "audio.clone.errorNoContext": "e9cff1e07c54d6dd",
     "audio.clone.errorTooLarge": "d4090535e2b61377",
     "audio.clone.previewTooltip": "71c4c759591b47c5",
-    "audio.clone.previewFailed": "97ce5234adcb4967"
+    "audio.clone.previewFailed": "97ce5234adcb4967",
+    "workspace.offline.preparingToast": "71326387327f24d9",
+    "workspace.offline.preparingToastDescription": "7f87f5162c012108",
+    "workspace.offline.preparingToastSlowDescription": "d70c90e58c3d72cd",
+    "workspace.offline.preparingToastStuckDescription": "73d5edaadc3a9586"
   },
   "ru": {
     "common.save": "1509f561f2416598",
@@ -44840,7 +44868,11 @@
     "audio.clone.errorNoContext": "e9cff1e07c54d6dd",
     "audio.clone.errorTooLarge": "d4090535e2b61377",
     "audio.clone.previewTooltip": "71c4c759591b47c5",
-    "audio.clone.previewFailed": "97ce5234adcb4967"
+    "audio.clone.previewFailed": "97ce5234adcb4967",
+    "workspace.offline.preparingToast": "71326387327f24d9",
+    "workspace.offline.preparingToastDescription": "7f87f5162c012108",
+    "workspace.offline.preparingToastSlowDescription": "d70c90e58c3d72cd",
+    "workspace.offline.preparingToastStuckDescription": "73d5edaadc3a9586"
   },
   "fr": {
     "common.save": "1509f561f2416598",
@@ -51099,7 +51131,11 @@
     "audio.clone.errorNoContext": "e9cff1e07c54d6dd",
     "audio.clone.errorTooLarge": "d4090535e2b61377",
     "audio.clone.previewTooltip": "71c4c759591b47c5",
-    "audio.clone.previewFailed": "97ce5234adcb4967"
+    "audio.clone.previewFailed": "97ce5234adcb4967",
+    "workspace.offline.preparingToast": "71326387327f24d9",
+    "workspace.offline.preparingToastDescription": "7f87f5162c012108",
+    "workspace.offline.preparingToastSlowDescription": "d70c90e58c3d72cd",
+    "workspace.offline.preparingToastStuckDescription": "73d5edaadc3a9586"
   },
   "es": {
     "common.save": "1509f561f2416598",
@@ -59307,7 +59343,11 @@
     "audio.clone.errorNoContext": "e9cff1e07c54d6dd",
     "audio.clone.errorTooLarge": "d4090535e2b61377",
     "audio.clone.previewTooltip": "71c4c759591b47c5",
-    "audio.clone.previewFailed": "97ce5234adcb4967"
+    "audio.clone.previewFailed": "97ce5234adcb4967",
+    "workspace.offline.preparingToast": "71326387327f24d9",
+    "workspace.offline.preparingToastDescription": "7f87f5162c012108",
+    "workspace.offline.preparingToastSlowDescription": "d70c90e58c3d72cd",
+    "workspace.offline.preparingToastStuckDescription": "73d5edaadc3a9586"
   },
   "pt": {
     "common.save": "1509f561f2416598",
@@ -67520,7 +67560,11 @@
     "audio.clone.errorNoContext": "e9cff1e07c54d6dd",
     "audio.clone.errorTooLarge": "d4090535e2b61377",
     "audio.clone.previewTooltip": "71c4c759591b47c5",
-    "audio.clone.previewFailed": "97ce5234adcb4967"
+    "audio.clone.previewFailed": "97ce5234adcb4967",
+    "workspace.offline.preparingToast": "71326387327f24d9",
+    "workspace.offline.preparingToastDescription": "7f87f5162c012108",
+    "workspace.offline.preparingToastSlowDescription": "d70c90e58c3d72cd",
+    "workspace.offline.preparingToastStuckDescription": "73d5edaadc3a9586"
   },
   "sw": {
     "common.save": "1509f561f2416598",
@@ -76146,7 +76190,11 @@
     "audio.clone.errorNoContext": "e9cff1e07c54d6dd",
     "audio.clone.errorTooLarge": "d4090535e2b61377",
     "audio.clone.previewTooltip": "71c4c759591b47c5",
-    "audio.clone.previewFailed": "97ce5234adcb4967"
+    "audio.clone.previewFailed": "97ce5234adcb4967",
+    "workspace.offline.preparingToast": "71326387327f24d9",
+    "workspace.offline.preparingToastDescription": "7f87f5162c012108",
+    "workspace.offline.preparingToastSlowDescription": "d70c90e58c3d72cd",
+    "workspace.offline.preparingToastStuckDescription": "73d5edaadc3a9586"
   },
   "hi": {
     "common.save": "1509f561f2416598",
@@ -84413,7 +84461,11 @@
     "audio.clone.errorNoContext": "e9cff1e07c54d6dd",
     "audio.clone.errorTooLarge": "d4090535e2b61377",
     "audio.clone.previewTooltip": "71c4c759591b47c5",
-    "audio.clone.previewFailed": "97ce5234adcb4967"
+    "audio.clone.previewFailed": "97ce5234adcb4967",
+    "workspace.offline.preparingToast": "71326387327f24d9",
+    "workspace.offline.preparingToastDescription": "7f87f5162c012108",
+    "workspace.offline.preparingToastSlowDescription": "d70c90e58c3d72cd",
+    "workspace.offline.preparingToastStuckDescription": "73d5edaadc3a9586"
   },
   "ha": {
     "common.save": "1509f561f2416598",
@@ -93059,7 +93111,11 @@
     "audio.clone.errorNoContext": "e9cff1e07c54d6dd",
     "audio.clone.errorTooLarge": "d4090535e2b61377",
     "audio.clone.previewTooltip": "71c4c759591b47c5",
-    "audio.clone.previewFailed": "97ce5234adcb4967"
+    "audio.clone.previewFailed": "97ce5234adcb4967",
+    "workspace.offline.preparingToast": "71326387327f24d9",
+    "workspace.offline.preparingToastDescription": "7f87f5162c012108",
+    "workspace.offline.preparingToastSlowDescription": "d70c90e58c3d72cd",
+    "workspace.offline.preparingToastStuckDescription": "73d5edaadc3a9586"
   },
   "ur": {
     "common.save": "1509f561f2416598",
@@ -101698,7 +101754,11 @@
     "audio.clone.errorNoContext": "e9cff1e07c54d6dd",
     "audio.clone.errorTooLarge": "d4090535e2b61377",
     "audio.clone.previewTooltip": "71c4c759591b47c5",
-    "audio.clone.previewFailed": "97ce5234adcb4967"
+    "audio.clone.previewFailed": "97ce5234adcb4967",
+    "workspace.offline.preparingToast": "71326387327f24d9",
+    "workspace.offline.preparingToastDescription": "7f87f5162c012108",
+    "workspace.offline.preparingToastSlowDescription": "d70c90e58c3d72cd",
+    "workspace.offline.preparingToastStuckDescription": "73d5edaadc3a9586"
   },
   "bn": {
     "common.save": "1509f561f2416598",
@@ -110373,7 +110433,11 @@
     "audio.clone.errorNoContext": "e9cff1e07c54d6dd",
     "audio.clone.errorTooLarge": "d4090535e2b61377",
     "audio.clone.previewTooltip": "71c4c759591b47c5",
-    "audio.clone.previewFailed": "97ce5234adcb4967"
+    "audio.clone.previewFailed": "97ce5234adcb4967",
+    "workspace.offline.preparingToast": "71326387327f24d9",
+    "workspace.offline.preparingToastDescription": "7f87f5162c012108",
+    "workspace.offline.preparingToastSlowDescription": "d70c90e58c3d72cd",
+    "workspace.offline.preparingToastStuckDescription": "73d5edaadc3a9586"
   },
   "am": {
     "common.save": "1509f561f2416598",
@@ -119034,7 +119098,11 @@
     "audio.clone.errorNoContext": "e9cff1e07c54d6dd",
     "audio.clone.errorTooLarge": "d4090535e2b61377",
     "audio.clone.previewTooltip": "71c4c759591b47c5",
-    "audio.clone.previewFailed": "97ce5234adcb4967"
+    "audio.clone.previewFailed": "97ce5234adcb4967",
+    "workspace.offline.preparingToast": "71326387327f24d9",
+    "workspace.offline.preparingToastDescription": "7f87f5162c012108",
+    "workspace.offline.preparingToastSlowDescription": "d70c90e58c3d72cd",
+    "workspace.offline.preparingToastStuckDescription": "73d5edaadc3a9586"
   },
   "pa": {
     "common.save": "1509f561f2416598",
@@ -127687,6 +127755,10 @@
     "audio.clone.errorNoContext": "e9cff1e07c54d6dd",
     "audio.clone.errorTooLarge": "d4090535e2b61377",
     "audio.clone.previewTooltip": "71c4c759591b47c5",
-    "audio.clone.previewFailed": "97ce5234adcb4967"
+    "audio.clone.previewFailed": "97ce5234adcb4967",
+    "workspace.offline.preparingToast": "71326387327f24d9",
+    "workspace.offline.preparingToastDescription": "7f87f5162c012108",
+    "workspace.offline.preparingToastSlowDescription": "d70c90e58c3d72cd",
+    "workspace.offline.preparingToastStuckDescription": "73d5edaadc3a9586"
   }
 }

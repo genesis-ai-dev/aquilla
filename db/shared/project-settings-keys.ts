@@ -328,6 +328,80 @@ export function isKnownSettingsKey(key: string): boolean {
 }
 
 /**
+ * AQU-2402: names a caller reaches for that are NOT the key, mapped to the one
+ * that is. Two kinds live here:
+ *
+ *  - a READ name that differs from the write key — `get_project_settings`
+ *    returns the built-in checks as `builtinChecks` (each with `overridden`),
+ *    but the writable key is `algorithmicChecks`, so a read-modify-write that
+ *    echoes the shape it just read names a key that does not exist;
+ *  - the obvious guess for a key whose real name is not guessable
+ *    (`checks`, `brief`, `instructions`, `tts`).
+ *
+ * Only aliases that are UNAMBIGUOUS belong here: the suggestion is quoted as
+ * "the key for that is …", so a wrong entry sends a caller somewhere worse
+ * than the key list would.
+ */
+export const SETTINGS_KEY_ALIASES: Readonly<Record<string, string>> = {
+  builtinChecks: 'algorithmicChecks',
+  builtinChecksByLane: 'algorithmicChecksByLane',
+  checks: 'algorithmicChecks',
+  checksByLane: 'algorithmicChecksByLane',
+  qualityChecks: 'algorithmicChecks',
+  brief: 'translationBrief',
+  instructions: 'translationInstructions',
+  projectInstructions: 'translationInstructions',
+  tts: 'ttsSettings',
+  voiceSettings: 'ttsSettings',
+}
+
+/** Lowercase, letters and digits only — so `builtin_checks`, `BuiltinChecks`
+ *  and `builtin-checks` all fold onto the same probe. */
+function foldKey(key: string): string {
+  return key.toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
+const FOLDED_KEYS = new Map<string, string>(PROJECT_SETTINGS_KEYS.map((key) => [foldKey(key), key]))
+const FOLDED_ALIASES = new Map<string, string>(
+  Object.entries(SETTINGS_KEY_ALIASES).map(([wrong, right]) => [foldKey(wrong), right]),
+)
+
+/**
+ * AQU-2402: the writable key a caller probably meant, or null. An alias wins
+ * over a spelling fold (`builtinChecks` is spelled correctly — it is simply
+ * the read name), and a fold only answers when exactly one key matches.
+ */
+export function suggestSettingsKey(key: string): string | null {
+  const folded = foldKey(key)
+  const alias = FOLDED_ALIASES.get(folded)
+  if (alias) return alias
+  const spelling = FOLDED_KEYS.get(folded)
+  if (spelling && spelling !== key) return spelling
+  const contained = PROJECT_SETTINGS_KEYS.filter(
+    (candidate) => folded.length >= 4 &&
+      (foldKey(candidate).includes(folded) || folded.includes(foldKey(candidate))),
+  )
+  return contained.length === 1 ? contained[0] : null
+}
+
+/**
+ * AQU-2402: the unknown-key refusal, SELF-CONTAINED. It used to say only
+ * "call describe_command('PatchSettings') for the valid keys" — but that tool
+ * is filtered out of the OAuth connector's tool list (external/mcp-chatgpt-tools.ts),
+ * so on the surface where an agent is most likely to guess a key, the one hint
+ * it was given could not be followed and each guess cost a round trip. The
+ * valid keys are named here instead, in the error itself, on every surface.
+ */
+export function unknownSettingsKeyMessage(key: string): string {
+  const suggestion = suggestSettingsKey(key)
+  const hint = suggestion ? ` — the key for that is "${suggestion}"` : ''
+  return (
+    `unknown settings key "${key}"${hint}. The writable keys are: ${PROJECT_SETTINGS_KEYS.join(', ')}. ` +
+    'Where describe_command is available, describe_command("PatchSettings") adds each key\'s type.'
+  )
+}
+
+/**
  * Validate one `{key, value}` settings op against the registry.
  *
  * Returns null when it is fine, else a message naming what is wrong — the
@@ -340,9 +414,7 @@ export function validateSettingsKeyValue(key: string, value: unknown): string | 
   // too, and on a project not yet migrated it would delete its only termbase.
   if (key === RETIRED_TERMINOLOGY_KEY) return RETIRED_TERMINOLOGY_MESSAGE
   const spec = PROJECT_SETTINGS_KEY_SPECS[key]
-  if (!spec) {
-    return `unknown settings key "${key}" — call describe_command("PatchSettings") for the valid keys`
-  }
+  if (!spec) return unknownSettingsKeyMessage(key)
   if (value === null) return null
   if (!matchesSpec(spec, value)) {
     // A structural problem names the field at fault, not only the expected type.

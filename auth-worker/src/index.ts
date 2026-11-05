@@ -104,6 +104,7 @@ import { mcpOAuthPublicRoutes, mcpOAuthConsentRoutes } from "./routes/mcp-oauth"
 import changesetApprovalsRoutes from "./routes/changeset-approvals"
 import importClassifyRoutes from "./routes/import-classify"
 import importSandboxRoutes from "./routes/import-sandbox"
+import importRecordingNamesRoutes from "./routes/import-recording-names"
 import agentMemoryRoutes from "./routes/agent-memory"
 import aiInterventionRoutes from "./routes/ai-interventions"
 import sceneBriefRoutes from "./routes/scene-briefs"
@@ -440,6 +441,9 @@ app.route("/api/v1/audio", transcriptionRoutes)
 // server owns the prompt and accepts only bounded file metadata + a sample.
 app.route("/api/v1/import", importClassifyRoutes)
 app.route("/api/v1/import", importSandboxRoutes)
+// AQU-2302: a recordings folder's naming, worked out once by the assistant from
+// a sample of file names, applied and checked in the browser, kept per org.
+app.route("/api/v1/import", importRecordingNamesRoutes)
 // Translation agent (SSE) — one-tool SQL agent, staged-write proposals.
 // Same auth + AI-guard path as chat; see routes/agent.ts and the 2026-06-12
 // translation-agent design/implementation-plan specs.

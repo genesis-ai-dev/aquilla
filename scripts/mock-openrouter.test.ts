@@ -153,3 +153,52 @@ describe("scripted local agent", () => {
     expect(new Set(ids).size).toBe(ids.length)
   })
 })
+
+// AQU-2302: the scripted answers a local walk of the naming assistant needs.
+describe("scripted recordings naming", () => {
+  const ask = (names: string[], retry = false) => message(scriptMockResponse([
+    { role: "system", content: "You work out how a folder of audio recordings is named, so an app can put each recording on its line." },
+    // As the server sends them: each name a JSON string.
+    { role: "user", content: ["<file-names>", ...names.map((n) => JSON.stringify(n)), "</file-names>", ...(retry ? ["<failed-names>", `${JSON.stringify(names[0])} → no template fitted ("noTemplate")`, "</failed-names>"] : [])].join("\n") },
+  ])).content as string
+
+  it("reads Mt-ch19_v01 as the book, the chapter and the verse", () => {
+    expect(JSON.parse(ask(["Mt-ch19_v01.ogg"]))).toMatchObject({ templates: [{ pattern: "{book}-ch{chapter}_v{verse}" }], books: { Mt: "MAT" } })
+  })
+
+  it("reads sermon_01 with a constant book and chapter", () => {
+    expect(JSON.parse(ask(["sermon_01.ogg"]))).toMatchObject({ templates: [{ pattern: "sermon_{verse}" }], book: "MAT", chapter: 20 })
+  })
+
+  it("adds a template for the pieces of a verse when a name has a letter after its verse", () => {
+    expect(JSON.parse(ask(["Mt-ch19_v01.ogg", "Mt-ch19_v03a.wav", "Mt-ch19_v03b.wav"]))).toMatchObject({
+      templates: [{ pattern: "{book}-ch{chapter}_v{verse}{part}" }, { pattern: "{book}-ch{chapter}_v{verse}" }],
+      books: { Mt: "MAT" },
+    })
+  })
+
+  it("answers a worse- folder's retry with the chapter and the verse swapped", () => {
+    expect(JSON.parse(ask(["worse-Mt-ch19_v01.ogg"]))).toMatchObject({ templates: [{ pattern: "worse-{book}-ch{chapter}_v{verse}" }] })
+    expect(JSON.parse(ask(["worse-Mt-ch19_v99.ogg"], true))).toMatchObject({ templates: [{ pattern: "worse-{book}-ch{verse}_v{chapter}" }] })
+  })
+
+  it("adds a template for a range of verses when a name has a range after its verse", () => {
+    expect(JSON.parse(ask(["Mt-ch19_v01-03.ogg", "Mt-ch19_v04-06.ogg"]))).toMatchObject({
+      templates: [{ pattern: "{book}-ch{chapter}_v{verse}-{toVerse}" }, { pattern: "{book}-ch{chapter}_v{verse}" }],
+      books: { Mt: "MAT" },
+    })
+  })
+
+  it("maps Sermon, a word that names no book, to Matthew", () => {
+    expect(JSON.parse(ask(["Sermon-ch20_v01.ogg"]))).toMatchObject({ templates: [{ pattern: "{book}-ch{chapter}_v{verse}" }], books: { Sermon: "MAT" } })
+  })
+
+  it("answers a swap- folder with the chapter and the verse swapped on the first answer", () => {
+    expect(JSON.parse(ask(["swap-Mt-ch05_v01.ogg"]))).toMatchObject({ templates: [{ pattern: "swap-{book}-ch{verse}_v{chapter}" }], books: { Mt: "MAT" } })
+  })
+
+  it("answers a fail- folder's retry with no rule at all", () => {
+    expect(JSON.parse(ask(["fail-a.ogg"]))).toMatchObject({ templates: [{ pattern: "rec-{verse}" }] })
+    expect(() => JSON.parse(ask(["fail-a.ogg"], true))).toThrow()
+  })
+})

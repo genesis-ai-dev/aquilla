@@ -53,7 +53,7 @@ export const langquest = defineNamespace({
     "langquest.panel.syncing": "Syncing: {passages} passages read, {takes} recordings added",
     "langquest.panel.synced": "Up to date: {cells} new passages, {takes} new recordings",
     "langquest.panel.syncFailed": "Sync failed: {reason}",
-    "langquest.panel.leadOnly": "Project leads can sync this project.",
+    "langquest.panel.leadOnly": "Project Leads can sync this project.",
     "langquest.panel.needsToken": "LangQuest no longer accepts this link's token. Paste a new one.",
     "langquest.panel.saveToken": "Save token",
     "langquest.panel.publishTitle": "Publish approved versions",

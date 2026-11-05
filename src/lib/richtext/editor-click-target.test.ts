@@ -71,6 +71,43 @@ describe("resolveEditorClickTarget", () => {
     expect(resolveEditorClickTarget(target, BOTH)).toBeNull()
   })
 
+  // AQU-1778 — a smart-edit underline has to be clickable where it overlaps the
+  // other decorations, and the precedence it sits at must stay pinned: a broken
+  // rule outranks a stylistic suggestion, a suggestion outranks the read-only
+  // term lookup.
+  it("opens the suggestion for a smart-edit marker over a managed term", () => {
+    const target = clickTargetFrom(`
+      <span class="term-chip-host terminology-highlight" data-source-term="grace">
+        <span class="smart-edit-blot smart-edit-blot-memory"
+              data-smart-edit-id="JHN 6:27:0:4:mark" data-hit>gracia</span>
+      </span>`)
+
+    const hit = resolveEditorClickTarget(target, { rule: true, term: true, smartEdit: true })
+
+    expect(hit?.kind).toBe("smartEdit")
+    expect(hit).toMatchObject({ id: "JHN 6:27:0:4:mark" })
+  })
+
+  it("still gives a violation blot precedence over an overlapping smart-edit marker", () => {
+    const target = clickTargetFrom(`
+      <span class="violation-blot violation-blot-major" data-rule-id="rule-7">
+        <span class="smart-edit-blot" data-smart-edit-id="JHN 6:27:0:4:mark" data-hit>gracia</span>
+      </span>`)
+
+    expect(resolveEditorClickTarget(target, { rule: true, term: true, smartEdit: true }))
+      .toMatchObject({ kind: "rule", ruleId: "rule-7" })
+  })
+
+  it("treats a smart-edit marker as transparent when the editor holds no suggestions", () => {
+    const target = clickTargetFrom(`
+      <span class="term-chip-host terminology-highlight" data-source-term="grace">
+        <span class="smart-edit-blot" data-smart-edit-id="JHN 6:27:0:4:mark" data-hit>gracia</span>
+      </span>`)
+
+    expect(resolveEditorClickTarget(target, { rule: true, term: true, smartEdit: false }))
+      .toMatchObject({ kind: "term", term: "grace" })
+  })
+
   it("returns null for plain text and for a missing target", () => {
     expect(resolveEditorClickTarget(clickTargetFrom(`<span data-hit>plain</span>`), BOTH)).toBeNull()
     expect(resolveEditorClickTarget(null, BOTH)).toBeNull()

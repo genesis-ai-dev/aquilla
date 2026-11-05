@@ -560,8 +560,9 @@ export interface ImportContext {
   /** Existing files selected for safe unit-identity reconciliation. Keys use
    * the same normalized book-code/name vocabulary as skipKeys. */
   reimportFileIds?: ReadonlyMap<string, string>
-  /** IDML Update Existing: after reconcile, place each kept translation into
-   *  the new style runs. Absent when AI completion is not configured. */
+  /** IDML re-import that keeps translations (update, or an updated copy):
+   *  after reconcile, place each kept translation into the new style runs.
+   *  Absent when AI completion is not configured. */
   alignReimportedIdml?: IdmlReimportAlignHost
   /** Replaces the upload phase label, for example while styles are aligning. */
   onPhase?: (label: string) => void
@@ -1911,6 +1912,8 @@ export async function emitParsedFile(
     })
   }
 
+  // Update and "Make updated copy" both keep the translations. A blank copy
+  // has no existing file here, so it does not try to place styles.
   if (existingFileId && fileType === "idml" && ctx.alignReimportedIdml) {
     try {
       await alignReimportedIdmlFile({

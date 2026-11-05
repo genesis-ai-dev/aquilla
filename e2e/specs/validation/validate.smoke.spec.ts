@@ -93,6 +93,9 @@ test("an edit made as soon as the project opens lands on its lane, with its vali
   // The window: languages not loaded. It says so, and shows no row at all —
   // so none can read "empty", and there is nothing to type into.
   await expect(alice.getByTestId("lanes-loading-banner")).toBeVisible({ timeout: 30_000 })
+  // Jev's readiness gate waits on visible aria-busy regions; a loading banner
+  // without it reads as "ready" and the agent gives up on an editor still loading.
+  await expect(alice.getByTestId("lanes-loading-banner")).toHaveAttribute("aria-busy", "true")
   await expect(alice.getByTestId("cell-area-lanes-loading")).toBeVisible()
   await expect(ws.cellRows()).toHaveCount(0)
 

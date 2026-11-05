@@ -160,7 +160,7 @@ describe("GlossaryEditor — failed concepts read (AQU-1340)", () => {
 
     const importBtn = screen.getByRole("button", { name: /Import/ })
     expect(importBtn).toBeDisabled()
-    expect(screen.getByTestId("terminology-locked")).toHaveTextContent(/Project lead/i)
+    expect(screen.getByTestId("terminology-locked")).toHaveTextContent(/Project Lead/i)
     expect(screen.getByTestId("terminology-locked").textContent).not.toMatch(/until the termbase loads/)
   })
 

@@ -1424,8 +1424,45 @@ can now do the whole pass.
   `version`. Approve and reject leave `version` unchanged (the in-app review does not bump
   it either); only `update` does. `reviewed_by` is the credential owner's username, as with
   the in-app route.
-- **Prompt preview.** `GET .../cells/:cellId/prompt-preview` now returns the style-rules
-  block as `parts.styleRules` and in the assembled system message. It carries what the
+- **Prompt preview.** `GET .../cells/:cellId/prompt-preview` returns the style rules as
+  lines of the Checks hint, `parts.checks` (AQU-2342: one checks block with the project, lane
+  and org rules and the Language-profile slots), and in the assembled system message. It carries what the
   editor's drafting call carries: approved, enabled rules (the project's and its org's) that
   apply to that cell through the applicability graph. Proposed, rejected, archived and
   disabled rules never appear.
+
+## Status addendum (2026-11-03, AQU-2342 — one place for AI instructions: changes for callers)
+
+Every drafting prompt now reads ONE project text, `settings.translationInstructions`
+(see `docs/AI-GUIDANCE.md`). Until a project writes it, it is composed on read from the old
+sources (brief, a customized `systemPrompt`, Living Memory instruction/standard entries, the
+decision log, the legacy agent brief, approved `decisions/` memories). What an external caller
+sees differently:
+
+- **Prompt preview — part names changed.** `GET .../cells/:cellId/prompt-preview` returns
+  `parts.instructions` (the instructions block), `parts.checks` (one Checks hint: project, lane
+  and org rules, the style rules in force for the cell, the filled Language-profile slots) and
+  `parts.terminology` (only the concepts that occur in the cell's source, with their notes).
+  The old `parts.brief`, `parts.rules` and `parts.styleRules` are **deprecated aliases kept for
+  one release**, then removed: `brief` equals `instructions`; `rules` is the rule hints of
+  `checks` (no style rules) followed by `terminology`, roughly what the old rules block
+  covered; `styleRules` is the style-rule lines of `checks` on their own. Their text follows
+  the new block format, not the old one. Read the new names.
+- **The legacy brief reads return the instructions.** `GET .../memory`'s `legacyBrief.content`
+  (external) and the in-app `GET /api/v2/projects/:id/brief` now carry the RESOLVED
+  instructions text, the one prompts actually use, in the same shape. The brief row's
+  `version` is unchanged, so `PUT .../brief` with `ifMatchVersion` still works — but once a
+  project has written instructions, the brief row no longer reaches any prompt. Write
+  `translationInstructions` with PatchSettings instead.
+- **Settings read.** `GET .../settings` adds `translationInstructions` (resolved) and
+  `translationInstructionsStored` beside the raw `settings` blob.
+- **Decisions append.** Approving an AddDecision (or a `decisions/` memory in the app) appends
+  its text to the instructions; a full instructions box refuses the approval with `conflict`.
+- **Brief proposals.** `propose_brief_update` is retired from the agent's tools; a legacy call
+  becomes a `decisions/instructions-<hash>.md` memory proposal. Brief proposals that were still
+  pending are moved into the memory queue the same way the first time the project's memory
+  list is read (`GET /api/v2/projects/:id/agent-memory`): the memory carries
+  `provenance.briefProposalId`, and the proposal is closed as `rejected` with
+  `reviewed_by = "aqu-2342:moved-to-decisions"`. A proposal whose text breaks the memory
+  rules (over 10 KB, a secret-looking string) is left pending. The `/brief/proposals` routes
+  still answer, unchanged; approving one there writes the legacy brief row only.

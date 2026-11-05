@@ -125,6 +125,8 @@ import { loadOrgValidationDefaults } from "../../../db/shared/validation-thresho
 import { ttsSettingsCapProblem } from "../../../db/shared/tts-settings-caps"
 import { castNameFromCellMetadata, copyCastsOntoSplitPieces, splitPieceBelongsTo, type SplitCastSource } from "../../../src/lib/audio/split-cast"
 import { mediaDefaultsFromOrgSettings, type MediaDefaults } from "../../../db/shared/media-setting-defaults"
+import { readLegacyServerInstructions } from "../../../db/shared/load-translation-instructions"
+import { storedTranslationInstructions } from "../../../db/shared/translation-instructions"
 
 const projectSettings = new Hono<AuthHonoEnv>()
 
@@ -228,8 +230,9 @@ async function withOrgDefaults(
   visibilityFloors: VisibilityFloorsView
   importFloor: ImportFloorView
   orgMediaDefaults: MediaDefaults
+  legacyProjectBriefText: string
 }> {
-  const [orgCountStructuralCells, orgThresholds, policy, orgMediaDefaults] = await Promise.all([
+  const [orgCountStructuralCells, orgThresholds, policy, orgMediaDefaults, legacyProjectBriefText] = await Promise.all([
     getOrgCountStructuralCellsForProject(env, projectId),
     // AQU-1771: the org's validation defaults, null when it set none. Read
     // here for the same reason as countStructuralCells: a project member who
@@ -241,6 +244,12 @@ async function withOrgDefaults(
     getProjectOrgPolicy(env, projectId, response.settings),
     // AQU-1768: and its media defaults, for the same reason.
     loadOrgMediaDefaults(env, projectId),
+    // AQU-2342: the agent's legacy free-text brief, a migrate-on-read source of
+    // the project instructions the browser cannot read itself. Only while the
+    // project has stored no instructions — after that no reader uses it.
+    storedTranslationInstructions(response.settings) === null
+      ? readLegacyServerInstructions(env.AQUILLA_PG, projectId)
+      : Promise.resolve(""),
   ])
   const { visibility } = policy
   return {
@@ -267,6 +276,7 @@ async function withOrgDefaults(
     // row needs all three to say what "Organization default" means today.
     importFloor: importFloorView(policy.orgPolicy.importMinRole, response.settings[IMPORT_MIN_ROLE_KEY]),
     orgMediaDefaults,
+    legacyProjectBriefText,
   }
 }
 
@@ -679,6 +689,16 @@ projectSettings.on(
         if (JSON.stringify(before) !== JSON.stringify(rawVoiceOverrides)) {
           return c.json({ error: problem }, 400)
         }
+      }
+    }
+
+    // AQU-2342: the project instructions ride in every drafting prompt, so the
+    // in-app door caps them exactly as the Agent API does (same registry rule).
+    const rawInstructions = (body.settings as Record<string, unknown>).translationInstructions
+    if (rawInstructions !== undefined) {
+      const problem = validateSettingsKeyValue("translationInstructions", rawInstructions)
+      if (problem && stored.settings.translationInstructions !== rawInstructions) {
+        return c.json({ error: problem }, 400)
       }
     }
 

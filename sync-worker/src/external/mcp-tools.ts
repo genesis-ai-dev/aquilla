@@ -140,7 +140,13 @@ const TOOL_SPECS: McpToolSpec[] = [
     name: 'get_project_settings',
     description:
       'Read a project\'s settings blob and its LIVE settings version (AQU-1176). Returns ' +
-      '{ projectId, settings, version, updatedAt }. Call this BEFORE patch_settings: ' +
+      '{ projectId, settings, version, updatedAt, translationInstructions, ' +
+      'translationInstructionsStored }. `translationInstructions` is the RESOLVED project ' +
+      'instructions — the exact text every drafting prompt carries (copilot, in-app agent ' +
+      'and its draft tool, DraftCells, Autopilot); `translationInstructionsStored: false` ' +
+      'means it is composed on read from the brief, a customized systemPrompt, Living Memory ' +
+      'instruction entries and the legacy agent brief until someone writes the key. ' +
+      'Call this BEFORE patch_settings: ' +
       '`version` is the value you pass as that tool\'s ifMatchVersion, and `settings` shows ' +
       'you the keys that already exist so you replace the right one. A project with no ' +
       'settings row yet reads as {} at version 0 (patch against 0 to create it). Needs ' +
@@ -190,7 +196,7 @@ const TOOL_SPECS: McpToolSpec[] = [
           items: {
             type: 'object',
             properties: {
-              key: { type: 'string', description: 'Top-level settings key, e.g. "systemPrompt". sourceLanguage, targetLanguage, targetLanes, and archivedLanes are not settings.' },
+              key: { type: 'string', description: 'Top-level settings key, e.g. "translationInstructions" (the one text every drafting prompt reads). sourceLanguage, targetLanguage, targetLanes, and archivedLanes are not settings.' },
               value: { description: 'Any JSON value; replaces that key wholesale.' },
             },
             required: ['key', 'value'],
@@ -479,14 +485,17 @@ const TOOL_SPECS: McpToolSpec[] = [
     name: 'get_prompt_preview',
     description:
       'See the prompt the project copilot would ACTUALLY send when drafting one cell — base ' +
-      'instructions after language substitution, the translation brief, the compiled rules ' +
-      'block (project/org rules plus terminology), the retrieved few-shot examples, and the ' +
+      'role text after language substitution, the project instructions, the Checks hint ' +
+      '(project/lane/org rules, style rules, Language-profile slots), the terminology block, ' +
+      'the retrieved few-shot examples, and the ' +
       'preceding approved-target discourse window — as both the assembled system+user ' +
-      'messages and the same content labeled by origin. Args: projectId, cellId, optional ' +
+      'messages and the same content labeled by origin (parts.brief / parts.rules / ' +
+      'parts.styleRules are deprecated aliases kept for one release — read parts.instructions, ' +
+      'parts.checks and parts.terminology). Args: projectId, cellId, optional ' +
       'targetLang (required lane id from get_project, not a language tag) and fileId (only needed when ' +
       'the same cellId exists in more than one file). This is the verification half of prompt ' +
-      'tuning: after PatchSettings changes systemPrompt / draftingSettings / ' +
-      'translationBrief / rules, or after a terminology entry lands, call this on a ' +
+      'tuning: after PatchSettings changes translationInstructions / draftingSettings / ' +
+      'rules, or after a terminology entry lands, call this on a ' +
       'representative cell to confirm the change actually reached the model instead of ' +
       'inferring it from a draft. Read-only — it drafts nothing and spends no credits. ' +
       'Returns not_found if the cell has no source row in this project, and ' +
@@ -514,12 +523,13 @@ const TOOL_SPECS: McpToolSpec[] = [
   {
     name: 'list_memory',
     description:
-      'Read a project’s Living Memory: the human-authored project brief plus every memory ' +
-      'entry the copilot learns from — examples (source→target pairs), decisions (standing ' +
+      'Read a project’s Living Memory: the resolved project instructions (`instructions`, ' +
+      'what every drafting prompt carries), the brief interview record, plus every memory ' +
+      'entry the in-app agent learns from — examples (source→target pairs), decisions (standing ' +
       'rendering rules), notes (per-cell rationale), and observations. Same rows a human ' +
       'sees on the project’s Memory page, newest first. Each entry carries its path, kind, ' +
       'status (proposed|approved|rejected|archived), full content, humanEdited, and ' +
-      '`inRetrieval` — whether the copilot is ACTUALLY being given it (only approved entries ' +
+      '`inRetrieval` — whether the in-app agent is ACTUALLY being given it (only approved entries ' +
       'within the index render cap are). Call this BEFORE proposing a memory entry: it shows ' +
       'whether one already exists at that path, whether a human approved it, and whether a ' +
       'human has edited it (human-edited entries are human-owned — raise a question instead ' +
@@ -578,12 +588,13 @@ const TOOL_SPECS: McpToolSpec[] = [
   {
     name: 'read_cell_memory',
     description:
-      'Show what the copilot’s memory retrieval would inject for ONE cell’s draft: the ' +
-      'project brief plus the approved-memory index it is given (path + first line per ' +
-      'entry, which is all the prompt carries — full text is fetched just-in-time). Use it ' +
-      'to predict what the copilot is working from before asking it to draft, or to explain ' +
+      'Show what the in-app agent’s memory retrieval would inject for ONE cell: the ' +
+      'project instructions plus the approved-memory index it is given (path + first line per ' +
+      'entry, which is all the prompt carries — full text is fetched just-in-time). The ' +
+      'drafting prompts carry the instructions but not this index. Use it ' +
+      'to predict what the agent is working from, or to explain ' +
       'a draft after the fact. NOTE the `retrieval.scope` field: retrieval is currently ' +
-      'PROJECT-scoped, i.e. the same brief and index for every cell in the project, with no ' +
+      'PROJECT-scoped, i.e. the same instructions and index for every cell in the project, with no ' +
       'per-cell ranking or filtering — do not assume this returned set was narrowed to your ' +
       'cell. `retrieval.truncated` tells you approved entries exist that are NOT being ' +
       'injected. Args: projectId, fileId, cellId. Errors: not_found (no such cell), ' +
@@ -767,7 +778,9 @@ const TOOL_SPECS: McpToolSpec[] = [
       'Requires CONTRIBUTOR.\n' +
       '  { kind: "DraftCells", fileId, cellIds, laneId?, instructions? } — ask the PROJECT\'S ' +
       'OWN copilot to draft those cells instead of writing the text yourself, so the result ' +
-      'carries this project\'s terminology, example pairs and brief. Must be the SOLE command ' +
+      'carries this project\'s example pairs, preceding validated context and project ' +
+      'instructions (key terms are not in the drafting prompt — name term choices in ' +
+      '`instructions`, which reach it as "Directions for this run"). Must be the SOLE command ' +
       'in the changeset. `cellIds` is explicit and non-empty — wildcards are rejected; the ' +
       'per-changeset cap is the project\'s configured completion batch size (default 10, max ' +
       '50) and an over-cap request names the cap so you can split the work. Drafting spends ' +

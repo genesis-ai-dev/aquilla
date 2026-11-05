@@ -231,7 +231,8 @@ export function FileRow(props: FileRowProps) {
                 onClick={(e) => e.stopPropagation()}
               />
             ) : (
-              <AppTooltip content={fileNameTooltip} side="right">
+              // Keep the name tooltip clear of the adjacent file-actions button.
+              <AppTooltip content={fileNameTooltip} side="bottom" align="start">
                 <button
                   type="button"
                   className="block w-full truncate text-left"

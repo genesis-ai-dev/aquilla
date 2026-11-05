@@ -1,5 +1,23 @@
+import fs from "node:fs"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
-import { childArgs } from "./neon-target-args"
+import { childArgs, isNeonTargetCommand, NEON_TARGET_COMMANDS, scriptFor } from "./neon-target-args"
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
+
+/** Every `neon:*` package script's command word, as neon-target.ts would see it. */
+function packageScriptCommands(): { script: string; command: string }[] {
+  const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "package.json"), "utf8")) as {
+    scripts: Record<string, string>
+  }
+  const found: { script: string; command: string }[] = []
+  for (const [script, body] of Object.entries(pkg.scripts)) {
+    const m = body.match(/scripts\/neon-target\.ts\s+(\S+)\s+(\S+)/)
+    if (m) found.push({ script, command: m[2] })
+  }
+  return found
+}
 
 describe("neon-target hands the backfill its flags", () => {
   it("passes everything after the command through to a backfill script", () => {
@@ -55,5 +73,47 @@ describe("neon-target hands the backfill its flags", () => {
     expect(childArgs("status", [])).toEqual(["scripts/neon-migrate.ts", "status"])
     expect(childArgs("baseline", [])).toEqual(["scripts/neon-migrate.ts", "baseline"])
     expect(childArgs("prepare-comments-key", ["--dry-run"])).toEqual(["scripts/neon-migrate.ts", "prepare-comments-key"])
+  })
+})
+
+// AQU-1946: `repair-lane-grants` sat in the command union, in `scriptFor` and
+// in the flag-passthrough list, and was still rejected by the hand-written
+// `parseCommand` chain in neon-target.ts — so both
+// `pnpm neon:repair-lane-grants:dev` and `:prod` printed the usage and exited 1
+// without ever reaching the repair. These pin the wiring, not one command word.
+describe("every neon-target command is actually reachable", () => {
+  it("accepts every command in the one list", () => {
+    for (const command of NEON_TARGET_COMMANDS) {
+      expect(isNeonTargetCommand(command), `${command} must be accepted`).toBe(true)
+    }
+    expect(isNeonTargetCommand("repair-lane-grants")).toBe(true)
+  })
+
+  it("rejects a typo, an empty word, and a missing command", () => {
+    expect(isNeonTargetCommand("repair-lane-grant")).toBe(false)
+    expect(isNeonTargetCommand("")).toBe(false)
+    expect(isNeonTargetCommand(undefined)).toBe(false)
+  })
+
+  it("accepts the command word of every neon:* package script", () => {
+    const commands = packageScriptCommands()
+    // Guard the guard: if the regex stops matching, this test must not pass empty.
+    expect(commands.length).toBeGreaterThan(20)
+    expect(commands.map((c) => c.command)).toContain("repair-lane-grants")
+    for (const { script, command } of commands) {
+      expect(isNeonTargetCommand(command), `pnpm ${script} passes '${command}'`).toBe(true)
+    }
+  })
+
+  it("routes every non-migration command to its own script, never the migrate fallthrough", () => {
+    for (const command of NEON_TARGET_COMMANDS) {
+      const script = scriptFor(command)
+      if (script === "scripts/neon-migrate.ts") {
+        // Only the fixed-shape migration commands may land on neon-migrate.
+        expect(["status", "apply", "baseline", "prepare-comments-key"]).toContain(command)
+        continue
+      }
+      expect(fs.existsSync(path.join(REPO_ROOT, script)), `${script} for '${command}'`).toBe(true)
+    }
   })
 })

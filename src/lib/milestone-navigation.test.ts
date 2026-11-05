@@ -5,6 +5,7 @@ import {
   readImportMilestone,
   type MilestoneNavigationCell,
 } from "./milestone-navigation"
+import { FALLBACK_MILESTONE_SIZE } from "@/lib/import/milestones"
 import type { ImportMilestone } from "../../shared/import-contract"
 
 function persisted(
@@ -125,6 +126,45 @@ describe("deriveMilestoneNavigation", () => {
     ])
 
     expect([...result.milestoneByCellId.values()]).toEqual([story, story])
+  })
+
+  it("keeps an arbitrarily long section as one page, however many chunks it spans (AQU-1444)", () => {
+    // The cheap half of the EditorTable split-milestones guard: a section read
+    // out of the file is one navigation entry no matter how far past the
+    // fallback chunker's `FALLBACK_MILESTONE_SIZE` cut it runs. Four chunks'
+    // worth here, which the render-level test in
+    // `src/components/EditorTable.splitMilestones.test.tsx` cannot afford —
+    // it pays ~55 ms per cell, so it covers only the first boundary crossing.
+    const section = {
+      key: "ebl:boxes:1",
+      kind: "section",
+      label: "Boxes and tables",
+      shortLabel: "B",
+    } as const
+    const length = FALLBACK_MILESTONE_SIZE * 4
+    const cellIds = Array.from({ length }, (_, index) => `cell-box-${index + 1}`)
+    const result = deriveMilestoneNavigation([
+      ...cellIds.map((id) => persisted(id, section)),
+      persisted("cell-intro-1", {
+        key: "ebl:section:1:intro",
+        kind: "section",
+        label: "INTRODUCTION",
+        shortLabel: "1",
+      }),
+    ])
+
+    expect(result.orderedMilestones.map(({ milestone }) => milestone.key)).toEqual([
+      "ebl:boxes:1",
+      "ebl:section:1:intro",
+    ])
+    expect(result.orderedMilestones[0]?.cellIds).toEqual(cellIds)
+    expect(cellIdsForMilestonePage(
+      result.orderedMilestones.map(({ milestone, cellIds: ids }) => ({
+        key: milestone.key,
+        cellIds: ids,
+      })),
+      "ebl:boxes:1",
+    )).toEqual(cellIds)
   })
 
   it("keeps Part N for a file that is generic all the way through (AQU-1164)", () => {

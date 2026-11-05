@@ -146,7 +146,7 @@ export function RuleDrawer({
 
   function onAmendRule() {
     navigate(withEditorReturn(
-      `/project/${project!.id}/memory/quality?ruleId=${rule!.id}&focus=autofix`,
+      `/project/${project!.id}/memory/checks?ruleId=${rule!.id}&focus=autofix`,
       editorReturnFromLocation(location.pathname, location.search, project!.id),
     ))
   }

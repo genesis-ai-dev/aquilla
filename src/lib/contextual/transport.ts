@@ -349,7 +349,7 @@ export interface ReadinessItem {
 /** What autopilot knows about this project — the context an expert translator
  *  would have on the desk before drafting a line. */
 /** Prerequisites the server actually enforces before a run may start. */
-export type StartBlockerId = "languages" | "brief"
+export type StartBlockerId = "languages" | "instructions"
 
 export interface ContextReadiness {
   items: ReadinessItem[]

@@ -39,6 +39,7 @@ export const SHARED_SETTING_LABELS: Record<string, MessageKey> = {
   smartExtensionsEnabled: "extensions.flag.label",
   languageProfile: "bibleData.profile.title",
   projectFacts: "projectDecisions.title",
+  translationInstructions: "terminology.livingMemory.instructionsTitle",
   inheritedFromLink: "projectSettings.section.sourceLink",
 }
 

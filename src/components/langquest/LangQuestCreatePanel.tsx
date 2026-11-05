@@ -1,3 +1,4 @@
+import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 // The "Import from LangQuest" path of the New project dialog (AQU-2105).
 //
 // Paste a token from LangQuest's /connect page → Aquilla asks LangQuest what
@@ -30,7 +31,6 @@ import { inspectLangQuestToken, LangQuestLinkError, linkLangQuest } from "@/lib/
 import { accessLevel, canLinkLanguage, capabilityRows } from "@/lib/langquest/permissions"
 import type { LangQuestInspection } from "@/lib/langquest/types"
 import type { ProjectRecord } from "@/lib/parsers/types"
-import posthog from "@/lib/posthog"
 
 /** Where tokens are made. The preview API base points at the preview app. */
 function connectUrl(apiBase: string | undefined): string {
@@ -58,6 +58,7 @@ export interface LangQuestCreatePanelProps {
 }
 
 export function LangQuestCreatePanel({ jwt, username, getProjectId, pageOrgId, onBack, onCreated }: LangQuestCreatePanelProps) {
+  const analytics = useAccountAnalytics()
   const { t, locale } = useI18n()
   const [token, setToken] = useState("")
   const [inspection, setInspection] = useState<LangQuestInspection | null>(null)
@@ -101,7 +102,7 @@ export function LangQuestCreatePanel({ jwt, username, getProjectId, pageOrgId, o
       // After a failed link, a new token must link the language already created.
       setLanguageId(prepared?.languageId ?? first?.languageId ?? "")
       if (first && !name.trim()) setName(first.name)
-      posthog.capture("langquest token checked", {
+      analytics.capture("langquest token checked", {
         scopes: result.token.scopes,
         language_count: result.languages.length,
         all_languages: result.token.allLanguages,
@@ -159,7 +160,7 @@ export function LangQuestCreatePanel({ jwt, username, getProjectId, pageOrgId, o
       // The project exists but nothing else in the app can link it (the
       // badge only shows on linked projects), so keep the dialog open here.
       console.error("[langquest-create] link failed:", err)
-      posthog.capture("langquest link failed", {
+      analytics.capture("langquest link failed", {
         project_id: project.id,
         status: err instanceof LangQuestLinkError ? err.status : null,
       })
@@ -168,7 +169,7 @@ export function LangQuestCreatePanel({ jwt, username, getProjectId, pageOrgId, o
       return
     }
     await createProject(project)
-    posthog.capture("project created", {
+    analytics.capture("project created", {
       project_id: project.id,
       project_shape: "langquest",
       source_language: project.sourceLanguage,

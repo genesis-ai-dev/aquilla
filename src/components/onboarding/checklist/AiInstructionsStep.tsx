@@ -1,76 +1,36 @@
-import { useState } from "react"
 import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
-import {
-  DEFAULT_SYSTEM_PROMPT,
-  useSaveCompletionSettings,
-} from "@/hooks/useCompletionSettings"
+import { projectTranslationInstructions } from "@/lib/instructions/project-instructions"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 interface AiInstructionsStepProps {
   project: ProjectRecord
-  onUpdated: (p: ProjectRecord) => void
+  /** Opens Living Memory → Instructions, the one place the instructions are
+   *  edited (AQU-2342). Absent → the step only previews them. */
+  onOpen?: () => void
 }
 
-export function AiInstructionsStep({ project, onUpdated }: AiInstructionsStepProps) {
+/**
+ * Setup step for the project instructions. It edits nothing itself: the
+ * instructions have one editor (Living Memory → Instructions), so the step
+ * previews the resolved text and opens that editor.
+ */
+export function AiInstructionsStep({ project, onOpen }: AiInstructionsStepProps) {
   const t = useT()
-  const saved = project.completionSettings?.systemPrompt ?? ""
-  const [prompt, setPrompt] = useState(saved || DEFAULT_SYSTEM_PROMPT)
-  const [busy, setBusy] = useState(false)
-
-  const saveSettings = useSaveCompletionSettings(project, onUpdated)
-
-  async function handleSave() {
-    setBusy(true)
-    try {
-      await saveSettings({ systemPrompt: prompt.trim() })
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const isDefault = prompt.trim() === DEFAULT_SYSTEM_PROMPT.trim()
+  const instructions = projectTranslationInstructions(project)
 
   return (
     <div className="space-y-3">
-      <p className="text-xs text-muted-foreground">
-        {t("onboarding.checklist.aiInstructions.introPrefix")}{" "}
-        <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
-          {"{sourceLanguage}"}
-        </code>{" "}
-        {t("onboarding.checklist.aiInstructions.introAnd")}{" "}
-        <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
-          {"{targetLanguage}"}
-        </code>{" "}
-        {t("onboarding.checklist.aiInstructions.introSuffix")}
-      </p>
-
-      <Textarea
-        value={prompt}
-        onChange={(e) => setPrompt(e.target.value)}
-        rows={6}
-        className="resize-none font-mono leading-relaxed"
-        spellCheck={false}
-      />
-      <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-        <button
-          type="button"
-          onClick={() => setPrompt(DEFAULT_SYSTEM_PROMPT)}
-          disabled={isDefault}
-          className="underline-offset-2 hover:underline disabled:opacity-50"
-        >
-          {t("onboarding.checklist.aiInstructions.resetToDefault")}
-        </button>
-        <span>{t("onboarding.checklist.aiInstructions.charCount", { count: prompt.length })}</span>
-      </div>
-      <Button
-        onClick={handleSave}
-        disabled={busy || prompt.trim().length === 0}
-        className="w-full"
-      >
-        {busy ? t("common.saving") : t("onboarding.checklist.aiInstructions.saveButton")}
-      </Button>
+      {instructions && (
+        <p className="line-clamp-3 whitespace-pre-line text-xs text-muted-foreground">
+          {instructions}
+        </p>
+      )}
+      {onOpen && (
+        <Button variant="outline" onClick={onOpen} className="w-full">
+          {t("onboarding.checklist.aiInstructions.openButton")}
+        </Button>
+      )}
     </div>
   )
 }

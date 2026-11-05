@@ -75,6 +75,16 @@ const BANNED_FUNCTIONS = [
   "pg_stat_file", "pg_ls_logdir", "pg_ls_waldir", "pg_ls_tmpdir", "pg_ls_archive_statusdir",
 ] as const
 
+// Whole FAMILIES of server-introspection / file / large-object / cross-session
+// functions, matched by prefix. The exact-name list above is a denylist, and a
+// denylist of names misses siblings (`dblink_exec` ≠ `\bdblink\b`;
+// `pg_stat_get_activity()` / `pg_stat_get_backend_activity()` expose the text
+// of other sessions' in-flight queries, and every worker shares one DB role via
+// Hyperdrive, so "own role only" does not narrow it). None has a use in
+// project Q&A. (AQU pen-test finding, 2026-11-04.)
+const BANNED_FUNCTION_PREFIXES_RE =
+  /\b(?:pg_stat_\w*|pg_ls_\w*|pg_read_\w*|pg_logical_\w*|pg_replication_\w*|pg_advisory_\w*|pg_try_advisory_\w*|pg_backend_pid|pg_export_snapshot|pg_current_logfile|pg_file_\w*|lo_\w+|dblink\w*|txid_\w+|pg_xact_\w+)\b/i
+
 // Columns with no legitimate read use through this tool, banned outright
 // regardless of project scoping (AQU pen-test finding, 2026-07-29): `users`
 // has no RLS backstop (db/postgres/migrations/0034 doesn't cover it), so a
@@ -476,6 +486,10 @@ export function guardSql(
     if (re.test(masked)) {
       return { ok: false, error: `function "${fn}" is not allowed` }
     }
+  }
+  const family = BANNED_FUNCTION_PREFIXES_RE.exec(masked)
+  if (family) {
+    return { ok: false, error: `function "${family[0].toLowerCase()}" is not allowed` }
   }
   for (const [fn, alternative] of Object.entries(FROM_OPERAND_FUNCTIONS)) {
     const re = new RegExp(`\\b${fn}\\s*\\(`, "i")

@@ -7,7 +7,7 @@ import userEvent from "@testing-library/user-event"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { ImportIntentChoice } from "./ImportIntentChoice"
 
-const REASON = "You're a Contributor; you need at least Project lead access."
+const REASON = "You're a Contributor; you need at least Project Lead access."
 
 function draw(sourceDisabledReason: string | null) {
   return render(

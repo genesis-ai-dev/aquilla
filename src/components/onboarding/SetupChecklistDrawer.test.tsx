@@ -274,9 +274,50 @@ describe("SetupChecklistDrawer — standards and terminology steps", () => {
     fireEvent.click(screen.getByRole("button", { name: /open terminology/i }))
 
     expect(onNavigate.mock.calls).toEqual([
-      ["/project/proj-1/memory/quality"],
+      ["/project/proj-1/memory/checks"],
       ["/project/proj-1/terminology"],
     ])
     expect(onOpenChange).not.toHaveBeenCalled()
+  })
+})
+
+// AQU-2342: the instructions have ONE editor (Living Memory → Instructions);
+// the setup step previews them and opens that editor rather than editing the
+// retired system prompt.
+describe("SetupChecklistDrawer — instructions step", () => {
+  function renderWithNavigate(project: ProjectRecord) {
+    const onNavigate = vi.fn()
+    const onOpenChange = vi.fn()
+    render(
+      <SetupChecklistDrawer
+        open
+        onOpenChange={onOpenChange}
+        project={project}
+        roleLevel={ROLE.OWNER}
+        state={EMPTY_STATE}
+        onProjectUpdated={() => {}}
+        onSharesChanged={() => {}}
+        onDismiss={() => {}}
+        onNavigate={onNavigate}
+      />,
+      { wrapper },
+    )
+    expandStep("Set translation instructions")
+    return { onNavigate, onOpenChange }
+  }
+
+  it("opens Living Memory → Instructions without dismissing setup", () => {
+    const { onNavigate, onOpenChange } = renderWithNavigate(makeProject())
+
+    expect(screen.queryByRole("textbox")).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Open instructions" }))
+    expect(onNavigate).toHaveBeenCalledWith("/project/proj-1/memory/instructions")
+    expect(onOpenChange).not.toHaveBeenCalled()
+  })
+
+  it("previews the project's resolved instructions", () => {
+    renderWithNavigate({ ...makeProject(), translationInstructions: "Plain register for youth." })
+
+    expect(screen.getByText("Plain register for youth.")).toBeInTheDocument()
   })
 })

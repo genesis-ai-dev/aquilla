@@ -567,9 +567,11 @@ export interface ProjectSetupVerification {
    *  carried a `brief` block it is true only if the L1 summary was re-rendered
    *  inside this commit — a plan that wrote sections but left yesterday's L1
    *  standing reports `false`, because the copilot is still reading the old
-   *  brief. prompt-preview's `parts.brief` is then run for real on the first
-   *  source cell of the first created file (no files: the L1 must be non-empty)
-   *  to confirm the fresh summary is actually injected. */
+   *  brief. prompt-preview's `parts.instructions` is then run for real on the
+   *  first source cell of the first created file (no files: the L1 must be
+   *  non-empty) to confirm the fresh summary is actually injected. AQU-2342:
+   *  the brief reaches prompts only through the instructions composed on read,
+   *  so a project with written `translationInstructions` reports `false`. */
   briefReachesCopilot: boolean
   /** The evidence behind `briefReachesCopilot` (AQU-1323) — always present on a
    *  fully applied plan, and always carrying a `reason` when the answer is false. */

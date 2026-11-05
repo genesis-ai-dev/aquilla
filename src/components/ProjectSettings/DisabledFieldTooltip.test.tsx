@@ -61,7 +61,7 @@ describe("DisabledFieldTooltip", () => {
 
   it("inside a locked card, a control locked for another reason still says its own", () => {
     const shared = <PermissionLockHint role="Maintainers" linkLabel="View Maintainers" onView={() => {}} />
-    const lead = <PermissionLockHint role="Project leads" linkLabel="View Project leads" onView={() => {}} />
+    const lead = <PermissionLockHint role="Project Leads" linkLabel="View Project Leads" onView={() => {}} />
     render(
       <SettingsGroup label="Text" locked={shared}>
         <SettingsRow label="Minimum role" control={<DisabledFieldTooltip disabled tooltip={shared}><Button disabled>Reviewer</Button></DisabledFieldTooltip>} />
@@ -69,6 +69,6 @@ describe("DisabledFieldTooltip", () => {
       </SettingsGroup>,
     )
     expect(screen.getByText("Only Maintainers can change these settings.")).toBeVisible()
-    expect(screen.getByText("Only Project leads can change this.")).toBeVisible()
+    expect(screen.getByText("Only Project Leads can change this.")).toBeVisible()
   })
 })

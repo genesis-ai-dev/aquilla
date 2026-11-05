@@ -33,7 +33,7 @@ vi.mock("@/lib/sync/project-settings", () => ({
   PROJECT_SETTINGS_VERSION_INITIAL: 0,
 }))
 vi.mock("@/lib/store/project-index", () => ({ createProject: vi.fn().mockResolvedValue(undefined) }))
-vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn() } }))
+vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn() } }))
 vi.mock("@/lib/sync/create-targets", () => ({ fetchCreateTargets: vi.fn() }))
 vi.mock("@/context/OrgContext", () => ({
   useActiveOrgOptional: () => ({

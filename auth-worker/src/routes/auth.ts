@@ -1,3 +1,4 @@
+import { ANALYTICS_CONSENT_KEY, ANALYTICS_DISCLOSURE_VERSION, parseAnalyticsDecision } from "../../../shared/analytics-consent"
 // Auth routes ported from frontier-server/cloudflare/src/routes/auth.ts.
 //
 // All routes are mounted under `/api/v2/auth/*` by src/index.ts so the
@@ -805,6 +806,7 @@ auth.patch("/me", authMiddleware, zValidator("json", patchMeSchema), async (c) =
     evictUserSessions(user.id)
   }
   if (body.preferences !== undefined) {
+    if (Object.hasOwn(body.preferences, ANALYTICS_CONSENT_KEY)) return c.json({ error: "use the analytics-consent endpoint" }, 400)
     const preferencesJson = JSON.stringify(body.preferences)
     // [Pen test] Auth & session mgmt (2026-11-02): this replace-style write had
     // no size bound, unlike PATCH /auth/me/preferences. The blob is read back
@@ -815,7 +817,11 @@ auth.patch("/me", authMiddleware, zValidator("json", patchMeSchema), async (c) =
       return c.json({ error: "preferences too large" }, 413)
     }
     await c.env.AQUILLA_PG.prepare(
-      "UPDATE users SET preferences = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+      `UPDATE users SET preferences = (?::text::jsonb || CASE
+        WHEN NOT pg_input_is_valid(preferences, 'jsonb') THEN '{}'::jsonb
+        WHEN jsonb_typeof(preferences::jsonb) <> 'object' THEN '{}'::jsonb
+        WHEN jsonb_exists(preferences::jsonb, 'privacy.analytics.v1') THEN jsonb_build_object('privacy.analytics.v1', preferences::jsonb -> 'privacy.analytics.v1')
+        ELSE '{}'::jsonb END)::text, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
     )
       .bind(preferencesJson, user.id)
       .run()
@@ -911,6 +917,7 @@ auth.patch(
   zValidator("json", patchPreferencesSchema),
   async (c) => {
     const { set = {}, setIfAbsent = {} } = c.req.valid("json")
+    if (Object.hasOwn(set, ANALYTICS_CONSENT_KEY) || Object.hasOwn(setIfAbsent, ANALYTICS_CONSENT_KEY)) return c.json({ error: "use the analytics-consent endpoint" }, 400)
     const keyCount = Object.keys(set).length + Object.keys(setIfAbsent).length
     if (keyCount === 0) return c.json({ error: "nothing to save" }, 400)
     if (keyCount > PREFERENCES_PATCH_MAX_KEYS) {
@@ -951,6 +958,50 @@ auth.patch(
     return c.json({ preferences: parseStoredPreferences(row.preferences) })
   },
 )
+
+// AQU-2381: only the authenticated user owns this preference. Never accept an
+// account id from the client. Server timestamps and revisions record confirmation.
+const analyticsChoiceSchema = z.object({
+  allowed: z.boolean(),
+  disclosureVersion: z.literal(ANALYTICS_DISCLOSURE_VERSION),
+  source: z.enum(["signup", "settings"]),
+  expectedRevision: z.string().nullable(),
+}).strict()
+
+auth.get("/me/analytics-consent", authMiddleware, async (c) => {
+  const user = c.get("user")
+  const row = await c.env.AQUILLA_PG.prepare("SELECT preferences FROM users WHERE id = ?")
+    .bind(user.id).first<{ preferences: string }>()
+  if (!row) return c.json({ error: "user not found" }, 404)
+  c.header("Cache-Control", "no-store")
+  return c.json({ accountId: String(user.id), decision: parseAnalyticsDecision(parseStoredPreferences(row.preferences)[ANALYTICS_CONSENT_KEY]) })
+})
+
+auth.put("/me/analytics-consent", authMiddleware, zValidator("json", analyticsChoiceSchema), async (c) => {
+  const user = c.get("user")
+  const choice = c.req.valid("json")
+  const row = await c.env.AQUILLA_PG.prepare("SELECT preferences FROM users WHERE id = ?")
+    .bind(user.id).first<{ preferences: string }>()
+  if (!row) return c.json({ error: "user not found" }, 404)
+  const stored = parseStoredPreferences(row.preferences)
+  const current = parseAnalyticsDecision(stored[ANALYTICS_CONSENT_KEY])
+  if ((current?.revision ?? null) !== choice.expectedRevision) return c.json({ error: "choice changed; reload before confirming" }, 409)
+  const decision = {
+    allowed: choice.allowed, disclosureVersion: ANALYTICS_DISCLOSURE_VERSION,
+    source: choice.source, decidedAt: new Date().toISOString(), revision: crypto.randomUUID(),
+  }
+  // Compare the whole previously-read blob atomically. A concurrent preference
+  // write causes a conflict rather than silently overwriting any newer choice.
+  const nextPreferences = JSON.stringify({ ...stored, [ANALYTICS_CONSENT_KEY]: decision })
+  if (new TextEncoder().encode(nextPreferences).length > PREFERENCES_STORED_MAX_BYTES) return c.json({ error: "preferences are full" }, 413)
+  const updated = await c.env.AQUILLA_PG.prepare(
+    "UPDATE users SET preferences = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND preferences = ? RETURNING id",
+  ).bind(nextPreferences, user.id, row.preferences).first<{ id: number }>()
+  if (!updated) return c.json({ error: "preferences changed; reload before confirming" }, 409)
+  evictUserSessions(user.id)
+  c.header("Cache-Control", "no-store")
+  return c.json({ accountId: String(user.id), decision })
+})
 
 const verifyEmailSchema = z.object({ token: z.string().min(8) })
 

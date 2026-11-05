@@ -66,7 +66,7 @@ describe("session replay masking", () => {
   })
 
   it("keeps recording opt-out by default, so masking is the second line and not the first", () => {
-    expect(posthogSource).toMatch(/opt_out_capturing_by_default/)
+    expect(posthogSource).toMatch(/analyticsAccount\.eligible\(\)/)
     expect(posthogSource).toMatch(/maskAllInputs:\s*true/)
   })
 })

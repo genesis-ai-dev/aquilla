@@ -55,8 +55,10 @@ async function newlySeen(page: Page, attack: Attack, contract: Contract, action:
   // input-value: read the DOM, never the policy's own report of what it typed.
   const wanted = contract.required.flatMap((req) => req.kind === "project-name" || req.kind === "file-name"
     ? [req.value] : req.kind === "comment-once" ? [req.body] : [])
-  if (await page.locator("input, textarea").evaluateAll((elements, values) => elements.some((element) =>
-    values.includes((element as HTMLInputElement).value)), wanted)) seen.add(0)
+  // The comment composer is a contenteditable (MentionTextarea), so a value-only
+  // read would never observe a comment-once body.
+  if (await page.locator("input, textarea, [contenteditable]").evaluateAll((elements, values) => elements.some((element) =>
+    values.includes(((element as HTMLInputElement).value ?? (element as HTMLElement).innerText ?? "").trim())), wanted)) seen.add(0)
 }
 
 /**

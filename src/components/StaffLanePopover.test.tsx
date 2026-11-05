@@ -15,7 +15,7 @@
 //     refused for that reason (the route's real LANE_SCOPE_ABOVE_CEILING_ERROR),
 //     the popover shows the same note, not the raw server error. Someone
 //     already on the project at or above the picked role keeps their role,
-//     and the sentence says so ("stays a Project lead").
+//     and the sentence says so ("stays a Project Lead").
 //   - AQU-1998 Remove: the popover lists who is already scoped to the lane and
 //     takes one of them off it — their other lanes and file limits written
 //     through untouched, a lane-limited project lead listed like anyone else

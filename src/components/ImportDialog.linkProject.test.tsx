@@ -371,7 +371,7 @@ describe("ImportDialog — From another project (AQU-1527)", () => {
     const card = tile()
     expect(card.getAttribute("aria-disabled")).toBe("true")
     expect(card.getAttribute("data-tooltip")).toBe(
-      "Project lead or above required to link a source project.",
+      "Project Lead or above required to link a source project.",
     )
 
     await act(async () => {

@@ -241,6 +241,87 @@ export function scriptMockResponse(messages: ChatMessage[]) {
     }))
   }
 
+  // AQU-2302: a recordings folder's naming. Route on the server-owned system
+  // contract, like the importer above. The names come one per line, each a
+  // JSON string. The "brain" reads the first sampled name:
+  //   - "Mt-ch19_v01": the chapter-and-verse rule, which the team may keep;
+  //     with a letter after a verse ("Mt-ch19_v03a"), a second template for
+  //     the pieces of a verse, kept too;
+  //   - "sermon_01": the verse, with Matthew 20 as constants; it places the
+  //     folder but is never kept (a constant book and chapter);
+  //   - "worse-Mt-ch19_v01": the right rule, then on the retry the chapter and
+  //     the verse swapped, which places fewer, so the first is kept in use;
+  //   - "Mt-ch19_v01-03": with a range after a verse, a template that reads
+  //     the first and last verse ({toVerse}), kept too;
+  //   - "Sermon-ch20_v01": "Sermon" as Matthew, a book word that names no
+  //     book; it places the folder but is never kept;
+  //   - "swap-Mt-ch05_v01": the chapter and the verse swapped on the first
+  //     answer; it places every file, far apart, and is never kept;
+  //   - "fail-…": a rule that fits nothing, then a retry that fails outright;
+  //   - anything else: a rule that fits nothing, twice ("didn't fit").
+  const namesSystemPrompt = messages.some((message) =>
+    message.role === "system"
+      && typeof message.content === "string"
+      && message.content.includes("You work out how a folder of audio recordings is named"),
+  )
+  if (namesSystemPrompt && userText.includes("<file-names>")) {
+    const names = (userText.split("<file-names>\n")[1]?.split("\n</file-names>")[0] ?? "").split("\n").map((line) => {
+      try {
+        return String(JSON.parse(line))
+      } catch {
+        return line
+      }
+    })
+    const first = names[0] ?? ""
+    const retry = userText.includes("<failed-names>")
+    console.log(`[mock] recording-names rule${retry ? " (retry)" : ""} for ${first}`)
+    if (/^fail-/i.test(first) && retry) return respond("Sorry, I can't tell.")
+    if (/^sermon_\d+/i.test(first)) {
+      return respond(JSON.stringify({
+        templates: [{ pattern: "sermon_{verse}" }],
+        book: "MAT",
+        chapter: 20,
+        explanation: "The number is the verse; every recording is Matthew 20.",
+      }))
+    }
+    if (/^worse-/i.test(first)) {
+      return respond(JSON.stringify(retry
+        ? { templates: [{ pattern: "worse-{book}-ch{verse}_v{chapter}" }], books: { Mt: "MAT" }, explanation: "Mt is Matthew, then the verse and the chapter." }
+        : { templates: [{ pattern: "worse-{book}-ch{chapter}_v{verse}" }], books: { Mt: "MAT" }, explanation: "Mt is Matthew, then the chapter and the verse." }))
+    }
+    if (/^sermon-ch\d+_v\d+/i.test(first)) {
+      return respond(JSON.stringify({
+        templates: [{ pattern: "{book}-ch{chapter}_v{verse}" }],
+        books: { Sermon: "MAT" },
+        explanation: "Sermon is Matthew, then the chapter and the verse.",
+      }))
+    }
+    if (/^swap-/i.test(first)) {
+      return respond(JSON.stringify({
+        templates: [{ pattern: "swap-{book}-ch{verse}_v{chapter}" }],
+        books: { Mt: "MAT" },
+        explanation: "Mt is Matthew, then the verse and the chapter.",
+      }))
+    }
+    const pieces = names.some((name) => /_v\d+[a-h]\.[A-Za-z0-9]+$/.test(name))
+    const ranges = names.some((name) => /_v\d+-\d+\.[A-Za-z0-9]+$/.test(name))
+    return respond(JSON.stringify(/^[A-Za-z]{2}-ch\d+_v\d+/.test(first)
+      ? {
+          templates: pieces
+            ? [{ pattern: "{book}-ch{chapter}_v{verse}{part}" }, { pattern: "{book}-ch{chapter}_v{verse}" }]
+            : ranges
+              ? [{ pattern: "{book}-ch{chapter}_v{verse}-{toVerse}" }, { pattern: "{book}-ch{chapter}_v{verse}" }]
+              : [{ pattern: "{book}-ch{chapter}_v{verse}" }],
+          books: { Mt: "MAT", Mk: "MRK" },
+          explanation: pieces
+            ? "Mt is Matthew, then the chapter, the verse, and a letter for each piece of a verse."
+            : ranges
+              ? "Mt is Matthew, then the chapter, and the first and last verse of each recording."
+              : "Mt is Matthew, then the chapter and the verse.",
+        }
+      : { templates: [{ pattern: "rec-{verse}" }], explanation: "rec- then the verse." }))
+  }
+
   // Monday.com board SELECTION (auth-worker lib/monday/selectBoardForProject):
   // runs before the mapping call when the wizard omits a boardId. Echo back a
   // real id from the prompt — a bogus one would exercise the fallback instead

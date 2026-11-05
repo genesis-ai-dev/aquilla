@@ -27,6 +27,8 @@
 // Pure: nothing here touches the network, React or the DOM, so every rule is
 // pinned by match.test.ts.
 
+import { toWesternDigits } from "../../../../shared/decimal-digits"
+import { AUDIO_FILE_EXT_SET, UNPLAYABLE_AUDIO_EXTS } from "../mime"
 import { BOOK_CODES, BookNameIndex, englishBookName } from "./book-names"
 import { folderSegments, isRangeSep, naturalCompare, readName, type NameNumber, type NameReading } from "./read-name"
 import { LAST_VERSES } from "./verse-counts"
@@ -175,11 +177,14 @@ export interface ReadRecording {
   folderKey: string
 }
 
-const AUDIO_EXTS = new Set(["wav", "mp3", "m4a", "mp4", "aac", "ogg", "oga", "opus", "webm", "flac"])
-/** Audio the one-file upload refuses (attach-file.ts KNOWN_AUDIO_EXTS) and
- *  most browsers can't play: uploaded, each would sit on its line as a take
- *  that never plays. Refused here too, whatever type the file declares. */
-const UNPLAYABLE_EXTS = new Set(["wma", "aif", "aiff", "amr", "3gp", "caf"])
+// AQU-1922: both lists are the shared ones in ../mime.ts. They used to be
+// re-typed here, which is how the pickers' `accept` strings drifted out of
+// step with what the validators actually allow.
+const AUDIO_EXTS = AUDIO_FILE_EXT_SET
+/** Audio the one-file upload refuses too (attach-file.ts `validateAudioFile`)
+ *  and most browsers can't play: uploaded, each would sit on its line as a
+ *  take that never plays. Refused here whatever type the file declares. */
+const UNPLAYABLE_EXTS = UNPLAYABLE_AUDIO_EXTS
 const SYSTEM_NAMES = new Set([".ds_store", "thumbs.db", "desktop.ini", "icon\r"])
 
 function extOf(name: string): string {
@@ -206,8 +211,7 @@ export function precheckFile(file: BulkInputFile, maxBytes: number): UnmatchedRe
 
 /** A project file name, compared the way a recording's name prefix is. */
 function fileNameKey(name: string): string {
-  return name
-    .normalize("NFKC")
+  return toWesternDigits(name.normalize("NFKC"))
     .toLowerCase()
     .replace(/\.[a-z0-9]{1,5}$/i, "")
     .replace(/[\s._\-'’]+/gu, " ")
@@ -1044,6 +1048,15 @@ function lineReadLabel(fi: FileIndex, line: TargetLine, position: number): strin
 }
 
 /**
+ * Two files on one line that are its pieces: each names a part of that one
+ * line, and not the same part ("4a" and "4b", or verses 4 and 5 of a joined
+ * line 4-5). They upload joined, in order, as one recording (rule 4).
+ */
+export function piecesOfOneLine(a: Assignment, b: Assignment): boolean {
+  return a.cellIds?.length === 1 && b.cellIds?.length === 1 && a.part != null && b.part != null && a.part.rank !== b.part.rank
+}
+
+/**
  * Two files on one line. Pieces of one verse share it. So do any files that
  * are not parts (Sam, Oct 29): each uploads as a take of the line, whether the
  * names say "take 2", say the same verse twice ("Genesis 1-1", "Genesis 1-1
@@ -1067,9 +1080,8 @@ function settleConflicts(read: readonly ReadRecording[], assignments: Assignment
       const held = claims.get(`${a.fileId}\u0000${cellId}`) ?? []
       for (const h of held) {
         const sameLine = h.cellIds!.length === 1 && a.cellIds!.length === 1
-        const pieces = sameLine && h.part != null && a.part != null && h.part.rank !== a.part.rank
         const takes = sameLine && !h.part && !a.part
-        if (!pieces && !takes) { clash = h; break }
+        if (!piecesOfOneLine(h, a) && !takes) { clash = h; break }
       }
       if (clash) break
     }

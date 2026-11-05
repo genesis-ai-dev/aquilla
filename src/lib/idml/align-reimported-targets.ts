@@ -29,6 +29,7 @@ import {
   idmlPlacementOmitsStyledRuns,
   requiredStyledRunCount,
 } from "./force-align"
+import { idmlTargetIsPreview } from "./preview-segment"
 
 const ALIGN_CONCURRENCY = 4
 const COMMIT_CHUNK = 100
@@ -39,7 +40,7 @@ export interface IdmlReimportAlignCell extends AlignStylesCell {
   readonly laneId?: string | null
 }
 
-/** What Update Existing should do with one re-imported IDML cell's target. */
+/** What a re-import that keeps translations should do with one IDML target. */
 export type IdmlReimportPlacement = "align" | "single" | "current" | "skip"
 
 export interface IdmlReimportAlignAsk {
@@ -106,15 +107,19 @@ export function pairedCellsForIdmlAlignment(
 }
 
 /**
- * Multi-run cells whose target is not yet protected HTML go through Align
- * styles. A single editable run has only one place for the existing words, so
- * those are stitched without a model call. A target that already validates
- * against the new source is left alone.
+ * Multi-run cells whose words are not yet inside the source style runs go
+ * through Align styles. That includes a translation still sitting as one
+ * unstyled preview: the shell can validate while every editable run is empty.
+ * A single editable run has only one place for the existing words, so those
+ * are stitched without a model call (Pass to style segments). A target that
+ * already validates against the new source, with the words in the runs, is
+ * left alone.
  */
 export function idmlReimportPlacement(cell: IdmlReimportAlignCell): IdmlReimportPlacement {
   const metadata = idmlMetadata(cell)
   if (!metadata || !cell.originalHtml || !hasTranslation(cell)) return "skip"
-  if (targetMatchesSource(cell, metadata)) return "current"
+  const preview = idmlTargetIsPreview(cell.translatedHtml, cell.metadata ?? null)
+  if (targetMatchesSource(cell, metadata) && !preview) return "current"
   if (metadata.editableSlotIndexes.length >= 2) return "align"
   if (metadata.editableSlotIndexes.length === 1) return "single"
   return "skip"
@@ -249,6 +254,7 @@ export async function alignReimportedIdmlFile(args: {
   signal?: AbortSignal
   onProgress?: (done: number, total: number) => void
 }): Promise<IdmlReimportAlignOutcome> {
+  const analytics = posthog.scope()
   const empty: IdmlReimportAlignOutcome = { aligned: [], unchanged: 0, failed: 0, skipped: 0, manual: [] }
   if (args.signal?.aborted) return empty
   const jwt = await args.getToken(args.fileId)
@@ -283,7 +289,7 @@ export async function alignReimportedIdmlFile(args: {
   }
   for (const cell of outcome.manual) markManualStyleAlign(cell.id)
   if (outcome.aligned.length > 0) {
-    posthog.capture("ai styles aligned", {
+    analytics.capture("ai styles aligned", {
       provider: args.host.provider,
       model: args.host.model,
       source_language: args.sourceLanguage,

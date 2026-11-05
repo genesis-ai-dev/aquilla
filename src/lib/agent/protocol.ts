@@ -72,7 +72,11 @@ export type AgentFrame =
   | { type: 'code_result'; step: number; ok: boolean; summary: string; data?: ToolResultData } // summary: compressed result block (what the model saw), ≤2000 chars for UI
   | { type: 'proposal'; proposal: AgentProposal }
   | { type: 'aquifer_proposal'; proposal: AquiferPublishProposal }
-  | { type: 'progress'; label: string; done: number; total: number } // bulk-job heartbeat
+  // bulk-job heartbeat. AQU-1536: `done`/`total` are optional — a producer
+  // that runs one batched call and cannot count finished work items omits
+  // them and lets the label carry the stage, rather than reporting a `0/N`
+  // that can only jump straight to `N/N` and reads as a stalled run.
+  | { type: 'progress'; label: string; done?: number; total?: number }
   | { type: 'usage'; promptTokens: number; completionTokens: number; costCredits: number }
   | { type: 'done'; runId: string; status: 'ok' | 'capped' | 'error' }
   | { type: 'error'; message: string }

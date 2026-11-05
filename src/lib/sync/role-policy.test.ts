@@ -448,7 +448,7 @@ describe("resolveImportFloor", () => {
     expect(resolveImportFloor(ROLE.PROJECT_LEAD)).toBe(500)
   })
 
-  it("falls back to Project lead when the org set nothing or set nonsense", () => {
+  it("falls back to Project Lead when the org set nothing or set nonsense", () => {
     // Mirrors the server's resolveImportMinRole: a misconfigured floor is a
     // no-op, never a lockout.
     expect(resolveImportFloor(undefined)).toBe(DEFAULT_IMPORT_MIN_ROLE)
@@ -460,7 +460,7 @@ describe("resolveImportFloor", () => {
 })
 
 describe("canImportSourceFiles", () => {
-  it("is Project lead and up when the org set nothing — today's behaviour", () => {
+  it("is Project Lead and up when the org set nothing — today's behaviour", () => {
     expect(canImportSourceFiles(ROLE.CONTRIBUTOR)).toBe(false)
     expect(canImportSourceFiles(ROLE.PROJECT_LEAD)).toBe(true)
     expect(canImportSourceFiles(ROLE.MAINTAINER)).toBe(true)

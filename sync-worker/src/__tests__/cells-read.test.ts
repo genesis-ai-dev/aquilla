@@ -1,5 +1,12 @@
-import { describe, it, expect, vi } from "vitest"
+import { describe, it, expect, vi, afterEach } from "vitest"
 import { handleCellsReadRequest, resetChainCacheForTests, type CellsReadEnv } from "../events/cells-read-route"
+import {
+  decodeOrder,
+  encodeOrder,
+  setColoOrderCacheForTests,
+  type OrderCacheItem,
+  type OrderCacheStore,
+} from "../events/cells-order-cache"
 import { handleRebuildProjectionRequest } from "../events/rebuild"
 import { buildEventProjectionStmts, type PersistedEvent } from "../events/event-projection"
 import { type CellRow } from "./helpers/in-memory-db"
@@ -1907,5 +1914,305 @@ describe("AQU-2094 streamFileCells fetches the next page ahead", () => {
       if (url.searchParams.has("pageSize")) url.searchParams.set("pageSize", "3")
     })
     expect(pages.flat()).toEqual(["a/source", "b/source", "b/target", "c/source", "d/source", "e/source"])
+  })
+})
+
+// ── AQU-1885: the pinned ordering survives an isolate boundary ──────────────
+//
+// AQU-1160's ordering cache and AQU-1841's cursor pin both lived in ONE
+// isolate-local Map. A later page of the same stream served by a different
+// Worker isolate therefore found nothing: it re-walked the whole file and
+// re-advertised the live watermark, which is the client's signal that the
+// snapshot may be torn. Opening a 30k-cell file spreads its ~60 pages over
+// however many isolates the colo hands out, so most of them paid that.
+//
+// These tests pin the fix's obligations:
+//   AC1 — a stream whose pages land on fresh isolates costs ONE full-file
+//         ordering pass in total, with a peer committing between every page.
+//   AC2 — the cells still arrive exactly once in anchor-chain order, under one
+//         watermark for the whole stream (the AQU-1841 snapshot contract).
+//   plus: a cache that is missing, unreadable or refusing writes degrades to
+//         the full walk and never to a wrong or short answer.
+//
+// `resetChainCacheForTests({ keepColo: true })` is how a test says "the next
+// request is served by a different isolate of the same colo": this isolate's
+// Map is empty, the colo-shared copy is not. Clearing BOTH (the default) is
+// still "the ordering is gone", which is what the AQU-1841 fallback tests mean.
+
+/** The colo-shared store, in process. Goes through the real wire codec, so
+ *  these tests exercise `encodeOrder`/`decodeOrder` rather than a stand-in. */
+function fakeColoCache(): OrderCacheStore & { store: Map<string, string>; gets: string[]; puts: string[] } {
+  const store = new Map<string, string>()
+  const gets: string[] = []
+  const puts: string[] = []
+  return {
+    store,
+    gets,
+    puts,
+    async get(key: string) {
+      gets.push(key)
+      const raw = store.get(key)
+      return raw === undefined ? null : decodeOrder(raw)
+    },
+    async put(key: string, items: readonly OrderCacheItem[]) {
+      puts.push(key)
+      store.set(key, encodeOrder(items))
+    },
+  }
+}
+
+describe("AQU-1885: colo-shared ordering cache", () => {
+  afterEach(() => {
+    // Clears both tiers AND uninstalls the fake, so no later test in this file
+    // inherits a colo store.
+    resetChainCacheForTests()
+  })
+
+  it("AC1/AC2: a later page on a different isolate is a colo hit that keeps the pin and reads only its own rows", async () => {
+    const N = 400
+    const limit = 25
+    const { db } = await makeTestDb({
+      cells: makeLinearChain(N),
+      events: [makeEvent({ id: "seed", server_seq: 10, cell_id: "lc00000" })],
+    })
+    const colo = fakeColoCache()
+    setColoOrderCacheForTests(colo)
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const request = (query: string) =>
+      new Request(`https://w/api/v1/projects/proj-a/files/file-x/cells?${query}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+
+    // Page 1 pays the one unavoidable walk — and publishes its ordering.
+    const firstRes = (await handleCellsReadRequest(request(`side=target&limit=${limit}`), envWith(db)))!
+    const first = (await firstRes.json()) as { cells: Array<{ cellId: string }>; nextCursor: string; maxServerSeq: number }
+    expect(first.maxServerSeq).toBe(10)
+    expect(colo.puts).toHaveLength(1)
+
+    // A peer commits, so the LIVE ETag no longer matches the pinned one...
+    await commitPeerEvent(db, "peer", 11, "lc00000")
+    // ...and the next page lands on an isolate that never walked this file.
+    resetChainCacheForTests({ keepColo: true })
+
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {})
+    const { env: countedEnv, counts } = countingEnv(db)
+    const res = (await handleCellsReadRequest(
+      request(`side=target&limit=${limit}&cursor=${encodeURIComponent(first.nextCursor)}`),
+      countedEnv,
+    ))!
+    const body = (await res.json()) as { cells: Array<{ cellId: string }>; maxServerSeq: number }
+    const lines = logSpy.mock.calls.map(([line]) => String(line))
+    logSpy.mockRestore()
+
+    const hits = lines.filter((l) => l.includes("[cells-read] chain-cache hit"))
+    expect(hits).toHaveLength(1)
+    // Served from the colo tier, under the PINNED key.
+    expect(hits[0]).toContain("tier=colo")
+    expect(hits[0]).toContain("pinned=1")
+    expect(lines.filter((l) => l.includes("[cells-read] chain-cache miss"))).toHaveLength(0)
+    // Nothing on this request read anything approaching the whole file.
+    expect(Math.max(...counts)).toBeLessThanOrEqual(limit)
+    // The page continues the chain where page 1 stopped...
+    expect(body.cells.map((c) => c.cellId)).toEqual(
+      Array.from({ length: limit }, (_, i) => `lc${(limit + i).toString().padStart(5, "0")}`),
+    )
+    // ...and re-advertises the PINNED watermark, not the peer's 11, so the
+    // client keeps one consistent snapshot to resume its delta from.
+    expect(body.maxServerSeq).toBe(10)
+    await db.close()
+  })
+
+  it("AC1: a stream whose every page lands on a new isolate costs exactly one full-file ordering pass", async () => {
+    const N = 300
+    const limit = 20
+    const { db } = await makeTestDb({
+      cells: makeLinearChain(N),
+      events: [makeEvent({ id: "seed", server_seq: 10, cell_id: "lc00000" })],
+    })
+    const colo = fakeColoCache()
+    setColoOrderCacheForTests(colo)
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const request = (query: string) =>
+      new Request(`https://w/api/v1/projects/proj-a/files/file-x/cells?${query}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {})
+    const { env: countedEnv, counts } = countingEnv(db)
+    const seen: string[] = []
+    const advertised = new Set<number>()
+    const fullFilePasses: number[] = []
+    let cursor: string | null = null
+    let pages = 0
+    let peerSeq = 10
+
+    do {
+      // Every page is a cold isolate, and a peer commits between every page —
+      // the "another client commits every 200 ms" case from the ticket.
+      resetChainCacheForTests({ keepColo: true })
+      const query = cursor === null
+        ? `side=target&limit=${limit}`
+        : `side=target&limit=${limit}&cursor=${encodeURIComponent(cursor)}`
+      counts.length = 0
+      const res = (await handleCellsReadRequest(request(query), countedEnv))!
+      const body = (await res.json()) as {
+        cells: Array<{ cellId: string }>
+        nextCursor: string | null
+        maxServerSeq: number
+      }
+      // A query that came back with (close to) every row in the file is a
+      // full-file ordering pass — the cost this ticket is about.
+      fullFilePasses.push(counts.filter((c) => c >= N).length)
+      seen.push(...body.cells.map((c) => c.cellId))
+      advertised.add(body.maxServerSeq)
+      cursor = body.nextCursor
+      pages++
+      peerSeq++
+      await commitPeerEvent(db, `peer-${peerSeq}`, peerSeq, "lc00000")
+    } while (cursor)
+
+    const lines = logSpy.mock.calls.map(([line]) => String(line))
+    logSpy.mockRestore()
+
+    expect(pages).toBe(N / limit)
+    // AC1: one full-file pass for the whole stream, on page 1 only.
+    expect(fullFilePasses.reduce((a, b) => a + b, 0)).toBe(1)
+    expect(fullFilePasses[0]).toBe(1)
+    expect(lines.filter((l) => l.includes("[cells-read] chain-cache miss"))).toHaveLength(1)
+    expect(lines.filter((l) => l.includes("tier=colo"))).toHaveLength(pages - 1)
+    // AC2: the chain, in order, exactly once — no duplicates, no gaps.
+    expect(seen).toEqual(makeLinearChain(N).map((c) => c.cell_id))
+    // AC2: one watermark for the whole stream despite 15 peer commits.
+    expect([...advertised]).toEqual([10])
+    console.log(
+      `[AQU-1885 test evidence] file size=${N}; a fresh isolate and a peer commit per page; ${pages} pages cost ${fullFilePasses.reduce((a, b) => a + b, 0)} full-file ordering pass`,
+    )
+    await db.close()
+  })
+
+  it("treats an unreadable colo entry as a miss, never as a shorter file", async () => {
+    const N = 80
+    const limit = 20
+    const { db } = await makeTestDb({ cells: makeLinearChain(N) })
+    const colo = fakeColoCache()
+    setColoOrderCacheForTests(colo)
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const request = (query: string) =>
+      new Request(`https://w/api/v1/projects/proj-a/files/file-x/cells?${query}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+
+    const first = (await (await handleCellsReadRequest(request(`side=target&limit=${limit}`), envWith(db)))!.json()) as {
+      nextCursor: string
+    }
+    // Something else's bytes under our key: a future wire version, a truncated
+    // write, anything. It must not be read as an ordering.
+    for (const key of [...colo.store.keys()]) colo.store.set(key, '{"v":99,"slots":[],"ids":[],"slotOf":[]}')
+    resetChainCacheForTests({ keepColo: true })
+
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {})
+    const res = (await handleCellsReadRequest(
+      request(`side=target&limit=${limit}&cursor=${encodeURIComponent(first.nextCursor)}`),
+      envWith(db),
+    ))!
+    const body = (await res.json()) as { cells: Array<{ cellId: string }>; total: number }
+    const lines = logSpy.mock.calls.map(([line]) => String(line))
+    logSpy.mockRestore()
+
+    // Fell back to the walk, and served the right rows from it.
+    expect(lines.filter((l) => l.includes("[cells-read] chain-cache miss"))).toHaveLength(1)
+    expect(body.total).toBe(N)
+    expect(body.cells.map((c) => c.cellId)).toEqual(
+      Array.from({ length: limit }, (_, i) => `lc${(limit + i).toString().padStart(5, "0")}`),
+    )
+    await db.close()
+  })
+
+  it("serves the read when the colo cache refuses both reads and writes", async () => {
+    const { db } = await makeTestDb({ cells: makeLinearChain(40) })
+    setColoOrderCacheForTests({
+      get: async () => {
+        throw new Error("cache read refused")
+      },
+      put: async () => {
+        throw new Error("cache write refused")
+      },
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const request = (query: string) =>
+      new Request(`https://w/api/v1/projects/proj-a/files/file-x/cells?${query}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+    const first = (await (await handleCellsReadRequest(request("side=target&limit=10"), envWith(db)))!.json()) as {
+      cells: Array<{ cellId: string }>
+      nextCursor: string
+    }
+    expect(first.cells[0].cellId).toBe("lc00000")
+    resetChainCacheForTests({ keepColo: true })
+    const second = (await (await handleCellsReadRequest(
+      request(`side=target&limit=10&cursor=${encodeURIComponent(first.nextCursor)}`),
+      envWith(db),
+    ))!.json()) as { cells: Array<{ cellId: string }>; total: number }
+
+    // Both pages answered correctly off the walk; the failures were logged,
+    // not raised.
+    expect(second.cells[0].cellId).toBe("lc00010")
+    expect(second.total).toBe(40)
+    expect(errSpy.mock.calls.length).toBeGreaterThan(0)
+    errSpy.mockRestore()
+    await db.close()
+  })
+
+  it("never serves one caller's ordering to a request keyed differently", async () => {
+    // Every dimension that can change the ordering is in the key: project,
+    // the response ETag (file + epoch + rebuiltSeq + maxSeq + the CALLER's
+    // lane-visibility token), side, lane and `paired`. Changing one must miss.
+    const N = 60
+    const { db } = await makeTestDb({ cells: makeLinearChain(N) })
+    const colo = fakeColoCache()
+    setColoOrderCacheForTests(colo)
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const request = (query: string) =>
+      new Request(`https://w/api/v1/projects/proj-a/files/file-x/cells?${query}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+
+    await handleCellsReadRequest(request("side=target&limit=10"), envWith(db))
+    expect(colo.puts).toHaveLength(1)
+    resetChainCacheForTests({ keepColo: true })
+
+    // Same file, same watermark, no side filter: a DIFFERENT ordering, so a
+    // different key — it must walk rather than adopt the target-only one.
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {})
+    await handleCellsReadRequest(request("limit=10"), envWith(db))
+    const lines = logSpy.mock.calls.map(([line]) => String(line))
+    logSpy.mockRestore()
+    expect(lines.filter((l) => l.includes("[cells-read] chain-cache miss"))).toHaveLength(1)
+    expect(new Set(colo.puts).size).toBe(2)
+    await db.close()
+  })
+
+  it("round-trips an ordering across both sides and several lanes, and rejects a corrupt one", async () => {
+    const items: OrderCacheItem[] = [
+      { cellId: "c1", side: "source", laneId: "" },
+      { cellId: "c1", side: "target", laneId: "" },
+      { cellId: "c1", side: "target", laneId: "lane-es" },
+      { cellId: "c2", side: "source", laneId: "" },
+      { cellId: "c2", side: "target", laneId: "lane-es" },
+    ]
+    expect(decodeOrder(encodeOrder(items))).toEqual(items)
+    expect(decodeOrder(encodeOrder([]))).toEqual([])
+    // The dictionary collapses the repeated side/lane strings.
+    expect(JSON.parse(encodeOrder(items)).slots).toHaveLength(3)
+
+    expect(decodeOrder("not json")).toBeNull()
+    expect(decodeOrder('{"v":2,"slots":[],"ids":[],"slotOf":[]}')).toBeNull()
+    // An id with no slot, a slot index out of range, a bad side: all a miss.
+    expect(decodeOrder('{"v":1,"slots":["source\u0000"],"ids":["a"],"slotOf":[]}')).toBeNull()
+    expect(decodeOrder('{"v":1,"slots":["source\u0000"],"ids":["a"],"slotOf":[7]}')).toBeNull()
+    expect(decodeOrder('{"v":1,"slots":["sideways\u0000"],"ids":["a"],"slotOf":[0]}')).toBeNull()
+    expect(decodeOrder('{"v":1,"slots":["nosep"],"ids":["a"],"slotOf":[0]}')).toBeNull()
   })
 })

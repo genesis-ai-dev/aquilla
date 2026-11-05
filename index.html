@@ -34,7 +34,10 @@
     <script>
       (function () {
         try {
-          var stored = localStorage.getItem("aquilla-theme");
+          // AQU-1555: this runs before the bundle renames the pre-rebrand
+          // "codex" keys, so read the old theme key too — otherwise a
+          // migrating browser flashes the wrong theme on its last old load.
+          var stored = localStorage.getItem("aquilla-theme") || localStorage.getItem("codex-theme");
           var prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
           var dark = stored === "dark" || ((stored === "system" || !stored) && prefersDark);
           if (dark) document.documentElement.classList.add("dark");

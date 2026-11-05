@@ -45,6 +45,8 @@ export const OUTPUT_TABLES = [
   "cell_links",
   "cell_word_morph",
   "concepts",
+  // AQU-2308: hand-set navigator milestones (file.milestone.set / .remove).
+  "file_milestones",
 ] as const
 
 /** Columns whose value is the wall clock or a derived index, not the log. */

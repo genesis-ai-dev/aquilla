@@ -2,7 +2,13 @@
 #
 # Status: FROZEN 2026-07-04T15:27Z. Rows are APPEND-ONLY from this point.
 # No edits, removals, reweights, or reprioritizations of existing rows.
-# Every append must be logged in ITERATION_LOG.md with justification.
+# Every append must be logged in docs/archive/ITERATION_LOG.md with justification.
+#
+# Location: this file must stay at the REPOSITORY ROOT.
+# parity/instruments/parity-score.ts reads it from the repo root, and the
+# suites under parity/acceptance/ are written against its rows. The run's
+# reports were archived to docs/archive/ (AQU-1583); this scorecard was not,
+# because it is a runtime input, not a report.
 #
 # Provenance (C1 clean-room): every `evidence` URL is a PUBLIC Matecat doc,
 # guide, or marketing page. No Matecat source code was read by this run.

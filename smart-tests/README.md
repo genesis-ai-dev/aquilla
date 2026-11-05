@@ -164,6 +164,12 @@ daemon is involved. Only synthetic local fixture content reaches the model.
 The bridge waits for visible `aria-busy` regions to finish, with a bounded
 timeout. It supplies no route-specific next action. User goals remain free
 of test selectors. Selectors appear only in setup and independent checks.
+Every loading state the app shows must therefore carry `aria-busy="true"` on a
+visible element (the `LoadingTemplate` primitives do; a bare `role="status"`
+banner does not): without it the agent sees a "ready" page with nothing to act
+on and reports BLOCKED, which the suite records as inconclusive, not as a
+failure. Input observation covers `input`, `textarea` and `contenteditable`
+surfaces, since the comment composer is a contenteditable.
 
 Jev currently supports its observed click, fill, select, scroll, and wait
 actions. This suite does not establish coverage for drag gestures, keyboard

@@ -1,0 +1,31 @@
+# Canonical author identities (AQU-1583).
+#
+# `git` applies this file to `log`, `blame`, `shortlog` and friends, so history
+# attributes correctly WITHOUT rewriting it. Each line is
+#   <Canonical Name> <canonical@email> <Commit Name> <commit@email>
+# and maps the trailing (as-committed) identity onto the leading one.
+#
+# Only identities with direct evidence are merged here. If you appear twice,
+# add yourself — and fix the `user.name` / `user.email` on the machine that
+# produced the wrong one, because this file corrects the record, not the cause.
+
+# `t <t@t>` is a machine with an unconfigured git identity, not a person: every
+# commit authored that way reaches `dev` through a `ryder/*` branch (PRs #1835,
+# #1841, #1844, #1693, #1694, #1712, #1682, #1738, and the
+# `ryder/release-deploy-*` merges). Nothing in this repository sets that
+# identity — the CI workflows commit as `aquilla-release-bot`, and the only
+# in-tree `user.name=t` is inside throwaway temp repos in
+# `scripts/release-cut.test.ts`, `scripts/tag-release.test.ts` and
+# `scripts/migrate-daemon/__tests__/fetch.test.ts` — so the fix belongs in that
+# machine's local/global git config.
+Ryder Wishart <ryderwishart@gmail.com> t <t@t>
+Ryder Wishart <ryderwishart@gmail.com> ryderwishart <ryderwishart@gmail.com>
+
+# Same address, two display names.
+Matthew <matthewthomasx13@gmail.com> LeviXIII <matthewthomasx13@gmail.com>
+Keean <38674879+keeandev@users.noreply.github.com> keeandev <38674879+keeandev@users.noreply.github.com>
+
+# NOT merged, deliberately: `Samuel van Vuuren <matthewthomasx13@gmail.com>`
+# carries Sam's name on Matthew's address, so it is either Sam committing from
+# Matthew's checkout or Matthew's `user.name` being wrong. Only those two can
+# say which; whoever knows should add the right line here.

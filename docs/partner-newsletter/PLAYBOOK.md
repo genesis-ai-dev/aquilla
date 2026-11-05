@@ -89,7 +89,7 @@ Google Drive folder **"Partner Letter — Archive"**
 
 | Product | Linear team | Repo | Notes |
 |---|---|---|---|
-| Aquilla | Aquilla | github.com/genesis-ai-dev/aquilla (private; local folder when connected) | CHANGES.md, docs/ |
+| Aquilla | Aquilla | github.com/genesis-ai-dev/aquilla (private; local folder when connected) | docs/archive/CHANGES.md, docs/ |
 | Codex | Codex | github.com/genesis-ai-dev/codex-editor (public) | releases/commits fetchable even in scheduled runs |
 | LangQuest | LangQuest | github.com/genesis-ai-dev/langquest (public) | releases/commits fetchable even in scheduled runs |
 

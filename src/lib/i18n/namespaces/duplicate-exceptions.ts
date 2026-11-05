@@ -129,6 +129,10 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "audio.recordingModal.recordingStatus is the present participle shown beside a " +
     "pulsing dot while the microphone is live. Noun vs progressive verb: English " +
     "spells both 'Recording', almost nothing else does.",
+  "auth.login.title":
+    "Names the authentication form as a heading, while common.logIn is an " +
+    "imperative action. Locales may nominalize this heading (for example " +
+    "German Anmeldung) while retaining a verb on the action (Anmelden).",
   "auth.login.submitDefault":
     "The submit button of the sign-in form. auth.login.title is the heading naming " +
     "the whole form. Languages that nominalize headings ('Anmeldung') while keeping " +
@@ -136,7 +140,7 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
   "search.mode.replace":
     "Names the find-and-replace mode, a term of art paired with 'Find' and usually " +
     "fixed by local software convention. audio.clone.replaceButton is an everyday " +
-    "imperative that swaps an attached reference clip for another file.",
+    "imperative that swaps something already set (existing audio, a saved key) for a new one.",
   "editor.milestone.vocab.startLabel":
     "Names the synthetic first division in the milestone navigator — a noun for " +
     "'the beginning of the file'. audio.recordingModal.startButton is the " +
@@ -362,9 +366,14 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
   "projectSettings.sourceLink.modeClone":
     "Badge naming the AD-9 link-mode ('Clone' vs 'Live') on a linked project's " +
     "Source Link card, and reused for the same radio option in the create-project " +
-    "dialog. audio.library.cloneEngineLabel names a voice-cloning TTS engine in " +
-    "the voice library's engine picker. A project-linking term of art and an " +
-    "audio-engine brand-ish label that happen to share the English word 'Clone'.",
+    "dialog. audio.library.cloneEngineLabel labels a quick-cloned voice (a copy of " +
+    "a real person's voice) in the Voices panel. A project-linking term of art and " +
+    "a kind-of-voice label that happen to share the English word 'Clone'.",
+  "audio.newVoice.tabClone":
+    "Tab label naming a kind of voice in the New voice dialog (a quick clone, " +
+    "next to TTS voice / Characters / Train voice) — a noun phrase in most " +
+    "languages. audio.elevenLabs.cloneButton is the imperative action button that " +
+    "starts an ElevenLabs clone. A tab name and a command.",
   "projectSettings.section.experimental":
     "Section/nav-group heading for this project's device-local experimental " +
     "feature flags. autopilot.settings.experimentalTitle is the same heading for " +
@@ -586,14 +595,14 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "'Approve'.",
   "agent.memory.tabApproved":
     "Tab-trigger heading over the list of already-approved agent-authored " +
-    "memories, in the translation-agent's Memory tab (paired with sibling tabs " +
-    "'Proposed' / 'Project brief') — the counterpart split to agent.memory." +
+    "memories, in the translation-agent's Memory tab (paired with the sibling " +
+    "tab 'Proposed') — the counterpart split to agent.memory." +
     "tabProposed just below, against the same unrelated autopilot evidence-" +
     "status enum documented at org.projectOverview.columnApproved above.",
   "agent.memory.tabProposed":
     "Tab-trigger heading over the queue of agent-authored memories awaiting human " +
-    "review, in the translation-agent's Memory tab (paired with sibling tabs " +
-    "'Approved' / 'Project brief'). autopilot.evidence.status.proposed is one " +
+    "review, in the translation-agent's Memory tab (paired with the sibling " +
+    "tab 'Approved'). autopilot.evidence.status.proposed is one " +
     "value of the fixed, unrelated evidence-review lifecycle enum (Proposed/" +
     "Applied/Rejected/Superseded/Approved/Archived/Unknown) in the autopilot " +
     "readiness inspector, the same kind of split already documented for " +
@@ -843,51 +852,19 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "has already arrived at. Same English words, different grammatical role — " +
     "the same navigate-vs-heading split already documented for the language " +
     "switcher in namespaces/language.ts.",
-  "terminology.livingMemory.section.brief.title":
-    "Index-row title naming the translation brief — the skopos document, a " +
-    "translation-studies term of art that several languages render with a " +
-    "loanword or fixed phrase. autopilot.graph.node.summarize shows 'Brief' as " +
-    "the caption of the summarize STAGE in the autopilot pipeline graph — a " +
-    "process-step label, not the document, and free to translate as 'summary'.",
   "org.projectOverview.plan.statusNotStarted":
     "Status of a PLANNING UNIT on the project dashboard's plan board \u2014 a " +
     "book, episode or document nobody has put any content into yet. " +
     "autopilot.status.notStarted is a value of the run-status enum for a " +
-    "background PROCESS that has not run; terminology.livingMemory.section." +
-    "brief.statusNone is the authoring state of one document. All three are " +
-    "'not started' in English and routinely take different verbs, participles " +
-    "or genders elsewhere \u2014 a unit of planned work, a job that has not " +
-    "fired, and an unwritten document are three different subjects.",
-  "terminology.livingMemory.section.brief.statusNone":
-    "Hint on the Living Memory index saying the brief document has not been " +
-    "begun — an authoring state of a document. autopilot.status.notStarted is a " +
-    "value of the run-status enum for a background PROCESS that has not run " +
-    "yet; document-authoring and process-lifecycle states often take different " +
-    "verbs or participles.",
-  "terminology.livingMemory.section.brief.statusDraft":
-    "Hint on the Living Memory index saying the brief document is partially " +
-    "filled in — a document maturity state ('a draft'). " +
-    "autopilot.graph.node.draft labels the autopilot DRAFTING step and its " +
-    "produced draft translations (the pipeline-graph caption and the review " +
-    "inspector's card title) — the activity of machine-drafting text, a " +
-    "different sense languages split from 'unfinished document'.",
-  "terminology.livingMemory.section.brief.statusComplete":
-    "Hint on the Living Memory index saying every brief field is filled in — " +
-    "'complete' as document completeness. autopilot.status.complete is the " +
-    "terminal value of the run-status enum — a PROCESS that finished; " +
-    "'filled-in' vs 'finished' are commonly different words outside English.",
-  "terminology.livingMemory.prompt.defaultBadge":
-    "Badge on the prediction-prompt block stating the prompt is the unmodified " +
-    "built-in one — 'default' as a setting state, paired with the sibling " +
-    "Custom badge. org.projectOverview.laneDefaultFallback names the unnamed " +
-    "target LANE shown when a project has no named lanes — a placeholder noun " +
-    "('the default one'), a different grammatical role.",
+    "background PROCESS that has not run. Both are 'not started' in English " +
+    "and routinely take different verbs, participles or genders elsewhere " +
+    "\u2014 a unit of planned work and a job that has not fired are different " +
+    "subjects.",
   "onboarding.preferences.fontSize.default":
     "Option in the app-wide font-size select for the baseline UI scale (root " +
-    "unset, today's sizes). Distinct from terminology.livingMemory.prompt.defaultBadge " +
-    "(a status badge on a built-in prompt) and org.projectOverview.laneDefaultFallback " +
-    "(placeholder name of an unnamed workflow lane). A scale choice, a badge, and a " +
-    "lane noun take different words outside English.",
+    "unset, today's sizes). Distinct from org.projectOverview.laneDefaultFallback " +
+    "(placeholder name of an unnamed workflow lane). A scale choice and a lane noun " +
+    "take different words outside English.",
   "terminology.livingMemory.section.examples.title":
     "Index-row title for the validated-example-pairs section of Living Memory " +
     "— a plain plural noun heading. agent.run.tool.examples is the display " +

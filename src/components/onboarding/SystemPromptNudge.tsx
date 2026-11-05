@@ -1,6 +1,6 @@
 import { Sparkles, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { DEFAULT_SYSTEM_PROMPT } from "@/lib/completion/completion-service"
+import { projectTranslationInstructions } from "@/lib/instructions/project-instructions"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { patchProject } from "@/lib/store/project-index"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -17,18 +17,18 @@ const NUDGE_DELAY_MS = 24 * 60 * 60 * 1000
  * Soft, one-time banner that appears in the editor when:
  *  - the project is older than ~24h
  *  - the project actually has content (any file with cells)
- *  - the system prompt is still the default (or empty)
+ *  - the project has no translation instructions (AQU-2342: the one text
+ *    every AI draft reads, resolved — so a project whose old brief or custom
+ *    prompt migrates into instructions is not nagged)
  *  - the user hasn't dismissed it before
  *
- * The "eventually" nudge for founders who skipped customizing AI instructions.
- * Customizing the prompt OR clicking the X both stop future nags via
- * `defaultPromptNudgeDismissedAt`.
+ * The "eventually" nudge for founders who skipped writing AI instructions.
+ * "Customize" (opens the setup checklist) OR clicking the X both stop future
+ * nags via `defaultPromptNudgeDismissedAt`.
  */
 export function shouldShowSystemPromptNudge(project: ProjectRecord): boolean {
   if (project.defaultPromptNudgeDismissedAt) return false
-  const prompt = project.completionSettings?.systemPrompt?.trim() ?? ""
-  const isCustomized = prompt.length > 0 && prompt !== DEFAULT_SYSTEM_PROMPT.trim()
-  if (isCustomized) return false
+  if (projectTranslationInstructions(project)) return false
   const created = Date.parse(project.createdAt)
   if (!Number.isFinite(created)) return false
   if (Date.now() - created < NUDGE_DELAY_MS) return false
@@ -62,7 +62,7 @@ export function SystemPromptNudge({ project, onProjectUpdated, onCustomize }: Sy
         variant="default"
         onClick={() => {
           // Customizing fires the same dismiss path so we don't re-nag if the
-          // user later resets to default.
+          // user later clears the instructions.
           void dismiss()
           onCustomize()
         }}

@@ -6,7 +6,7 @@ import * as analyticsConsent from "@/lib/analytics-consent"
 
 // Mock posthog before importing the module under test
 vi.mock("@/lib/posthog", () => ({
-  default: {
+  default: { scope() { return { ...this, enabled: () => true } },
     capture: vi.fn(),
     get_session_replay_url: vi.fn(() => "https://app.posthog.com/replay/session-abc"),
   },

@@ -5,6 +5,13 @@ shared by all AI assistants) and `docs/` (SYNC, AGENT-API, AGENT-SANDBOX, SEO, O
 FEATURE-STORIES, PARTNER-INTEGRATIONS, ZAPIER;
 SPEC.md covers the separate VS Code Codex extension that uses Aquilla as a backend).
 
+**Why a rule is the rule: `docs/decisions/INDEX.md`.** One page per decision that shapes
+behaviour you cannot read off a single file — parser version stamps, byte-identical
+exports, the inline-tag ladder, the partner seam, the event log's head compare-and-swap.
+Claims there are *pinned* to a file (and an exported symbol), never a line number, and
+`pnpm run check:doc-pins` fails when a pin stops resolving. New architecture decisions go
+there rather than into a Linear issue quoted in a code comment.
+
 ## Layout — flat single-SPA trunk
 
 This repo is a **single browser SPA at the repo root** plus a small set of Cloudflare Workers.
@@ -30,7 +37,7 @@ abandoned — if you find docs or memory describing `apps/workspace/`, `packages
 ├── db/                 # LIVE Postgres schema: postgres/schema.sql, postgres/migrations/,
 │                       #   rollout/, shim/ (D1-compatible executor over Hyperdrive)
 ├── worker/             # root SPA-serving Worker (index.ts + og/) for the production deploy
-├── infra/modal/        # Modal services: diarization.py, seed_vc.py
+├── infra/modal/        # Modal services: voice_forge.py, diarization.py, omni_asr.py
 ├── src-tauri/          # Tauri desktop shell
 ├── e2e/                # Playwright specs + page objects + JOURNEYS.md (see AGENTS.md)
 │                       #   specs/partner-integrations/<partner>/ is partner-owned

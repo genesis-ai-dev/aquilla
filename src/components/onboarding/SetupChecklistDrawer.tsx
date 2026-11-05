@@ -1,9 +1,9 @@
+import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 import { useEffect, useRef, useState } from "react"
 import { Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { SettingsGroup } from "@/components/ui/page"
-import posthog from "@/lib/posthog"
 import { SETUP_CHECKLIST_COMPLETED } from "@/lib/event-names"
 import {
   Sheet,
@@ -52,7 +52,8 @@ interface SetupChecklistDrawerProps {
    *  power the "Import files" first step. */
   onOpenImport?: () => void
   /** Hides the drawer (without dismissing setup) and navigates to `path`.
-   *  Powers the optional standards / terminology link steps. */
+   *  Powers the instructions step and the optional quality / terminology
+   *  link steps. */
   onNavigate?: (path: string) => void
 }
 
@@ -68,6 +69,7 @@ export function SetupChecklistDrawer({
   onOpenImport,
   onNavigate,
 }: SetupChecklistDrawerProps) {
+  const analytics = useAccountAnalytics()
   const t = useT()
   const [inviteDialogOpen, setInviteDialogOpen] = useState(false)
   const allDone = state.completedCount === state.totalCount && state.totalCount > 0
@@ -83,9 +85,9 @@ export function SetupChecklistDrawer({
   useEffect(() => {
     if (allDone && !completionFired.current) {
       completionFired.current = true
-      posthog.capture(SETUP_CHECKLIST_COMPLETED, { project_id: project.id })
+      analytics.capture(SETUP_CHECKLIST_COMPLETED, { project_id: project.id })
     }
-  }, [allDone, project.id])
+  }, [allDone, project.id, analytics])
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange} disablePointerDismissal={inviteDialogOpen}>
@@ -148,7 +150,14 @@ export function SetupChecklistDrawer({
                 requiredRole={ROLE.MAINTAINER}
                 actionLabel={t("onboarding.checklist.aiInstructions.actionLabel")}
               >
-                <AiInstructionsStep project={project} onUpdated={onProjectUpdated} />
+                <AiInstructionsStep
+                  project={project}
+                  onOpen={
+                    onNavigate
+                      ? () => onNavigate(projectMemoryPath(project.id, "instructions"))
+                      : undefined
+                  }
+                />
               </RoleGatedStep>
             </ChecklistItem>
 
@@ -190,7 +199,7 @@ export function SetupChecklistDrawer({
                   title={t("onboarding.checklist.standards.title")}
                   description={t("onboarding.checklist.standards.description")}
                   actionLabel={t("onboarding.checklist.standards.actionLabel")}
-                  onOpen={() => onNavigate(projectMemoryPath(project.id, "quality"))}
+                  onOpen={() => onNavigate(projectMemoryPath(project.id, "checks"))}
                 />
                 <LinkStep
                   title={t("onboarding.checklist.glossary.title")}

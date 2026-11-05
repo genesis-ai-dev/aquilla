@@ -44,7 +44,21 @@ export function SmartEditPopover({
   const count = suggestion.support.strong + suggestion.support.weak
   return (
     <Popover open onOpenChange={(open) => { if (!open) onClose() }}>
-      <PopoverContent className="w-80 p-3 text-sm" sideOffset={6} anchor={anchor}>
+      {/* AQU-1778: this card is rendered INSIDE TranslatedEditor, and EditorTable
+          mounts that editor only while the cell is active — the editor's blur
+          deactivates the cell. base-ui moves focus to the popup's first tabbable
+          element by default, which blurred ProseMirror and tore the card (and the
+          underlines) down in the same frame: the translator saw the caret land and
+          nothing open. `initialFocus={false}` leaves the caret where it was, and
+          swallowing mousedown keeps Accept/Dismiss from blurring the editor before
+          their click handler runs — the same guard the "Ask AI for edits" button uses. */}
+      <PopoverContent
+        className="w-80 p-3 text-sm"
+        sideOffset={6}
+        anchor={anchor}
+        initialFocus={false}
+        onMouseDown={(e) => e.preventDefault()}
+      >
         <div className="space-y-3" data-testid="smart-edit-popover">
           <div className="text-xs font-medium text-muted-foreground">{t("smartEdits.popoverTitle")}</div>
           {suggestion.flagOnly ? (

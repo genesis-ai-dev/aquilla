@@ -214,3 +214,62 @@ describe("CastGutterVoice — the gutter avatar keeps its name on hover (AQU-226
     await expectTooltip(screen.getByTestId("gutter-voice"), "Mary")
   })
 })
+
+/**
+ * AQU-1279: an imported camera angle appeared NOWHERE in the editor. The
+ * importer stored it (`readCharacterRows` → `cell.cameraState`) and both
+ * character-sheet exports wrote it back, but the editor's source side had only
+ * this circle, and the circle never said it — so a partner whose subtitle work
+ * depends on the angle could not see it without leaving for the timeline lens.
+ */
+describe("CastGutterVoice — the camera angle (AQU-1279)", () => {
+  it("names the camera angle alongside the character on hover", async () => {
+    ui(
+      <CastGutterVoice voice={mary} explicit castName="Mary Magdalene" cameraState="on" editable voices={VOICES} onPick={() => {}} />,
+    )
+    await expectTooltip(screen.getByTestId("gutter-voice"), "Mary Magdalene — voiced by Mary · on camera")
+  })
+
+  it("carries the angle into the accessible name, so it is not hover-only", () => {
+    ui(
+      <CastGutterVoice voice={mary} explicit castName="Mary Magdalene" cameraState="off" editable voices={VOICES} onPick={() => {}} />,
+    )
+    expect(screen.getByTestId("gutter-voice")).toHaveAttribute(
+      "aria-label",
+      "Mary Magdalene — voiced by Mary · off camera. Choose a character",
+    )
+  })
+
+  // The angle is a fact about the LINE, so it reads the same on a line nobody
+  // has cast — which is exactly the state a freshly imported cast sheet leaves
+  // rows in when its names do not match the project's voices.
+  it("names the angle on a line nobody has cast yet", async () => {
+    ui(
+      <CastGutterVoice voice={narrator} explicit={false} castName={null} cameraState="group" editable voices={VOICES} onPick={() => {}} />,
+    )
+    await expectTooltip(
+      screen.getByTestId("gutter-voice"),
+      "Narrator — default (no one cast yet) · group shot",
+    )
+  })
+
+  it("says nothing extra when the line carries no angle", async () => {
+    ui(
+      <CastGutterVoice voice={mary} explicit castName="Mary Magdalene" editable voices={VOICES} onPick={() => {}} />,
+    )
+    const trigger = screen.getByTestId("gutter-voice")
+    expect(trigger).toHaveAttribute("aria-label", "Mary Magdalene — voiced by Mary. Choose a character")
+    await expectTooltip(trigger, "Mary Magdalene — voiced by Mary")
+    expect(screen.getByRole("tooltip").textContent).not.toContain("·")
+  })
+
+  it("a read-only surface names the angle too", () => {
+    ui(
+      <CastGutterVoice voice={mary} explicit castName="Mary Magdalene" cameraState="mixed" editable={false} voices={VOICES} onPick={() => {}} />,
+    )
+    expect(screen.getByTestId("gutter-voice")).toHaveAttribute(
+      "aria-label",
+      "Mary Magdalene — voiced by Mary · mixed",
+    )
+  })
+})

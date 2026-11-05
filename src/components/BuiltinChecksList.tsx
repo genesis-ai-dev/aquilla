@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { useMemo, type ReactNode } from "react"
 import { Wand2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -110,117 +110,25 @@ export function BuiltinChecksList({
   punctuationNote,
 }: Props) {
   const t = useT()
-  const SEVERITY_OPTIONS: { value: "major" | "minor"; label: string }[] = [
-    { value: "major", label: t("rules.severity.major") },
-    { value: "minor", label: t("rules.severity.minor") },
-  ]
-  const counts = useMemo(() => {
-    const c = new Map<string, number>()
-    for (const cellInfractions of infractions.values()) {
-      for (const inf of cellInfractions) {
-        c.set(inf.ruleId, (c.get(inf.ruleId) ?? 0) + 1)
-      }
-    }
-    return c
-  }, [infractions])
+  const counts = useBuiltinCounts(infractions)
   const profile = readLanguageProfile(languageProfile)
   const textRules = builtinRules.filter((rule) => !isBibleRule(rule))
   const bibleRules = builtinRules.filter(isBibleRule)
 
-  const renderRow = (rule: TranslationRule) => {
-    if (rule.check.type !== "builtin") return null
-    const checkId = rule.check.checkId
-    const name = translateRuleName(rule, t)
-    const description = translateRuleDescription(rule, t)
-    const count = counts.get(rule.id) ?? 0
-    const showHarmonize = onHarmonize != null && count > 0
-    const needs: MessageKey[] = isBibleCheckId(checkId)
-      ? bibleCheckDormancy(checkId, profile, bibleReadiness).map((d) => ("slot" in d ? NEEDS_KEY[d.slot] : NEED_KEY[d.need]))
-      : []
-    return (
-      <li
-        key={rule.id}
-        data-testid="builtin-row"
-        className="flex items-center gap-3 px-4 py-3 text-sm"
-      >
-        <div className="min-w-0 flex-1">
-          <div className="font-medium">{name}</div>
-          <div className="text-xs text-muted-foreground truncate">{description}</div>
-          {needs.map((key) => (
-            <div key={key} data-testid="builtin-row-needs" className="text-xs text-amber-700 dark:text-amber-400">
-              {t(key)}
-            </div>
-          ))}
-          {punctuationNote && PUNCTUATION_CHECK_IDS.includes(checkId) && (
-            <div data-testid="builtin-row-conventions" className="text-xs text-muted-foreground">
-              {punctuationNote}
-            </div>
-          )}
-        </div>
-        {count > 0 && (
-          <Badge variant="secondary" className="tabular-nums">
-            {t("rules.builtinChecks.violationCount", { count })}
-          </Badge>
-        )}
-        {showHarmonize && (
-          // Its words name it; why it is greyed out opens on a click (AQU-2260).
-          <AppTooltip content={!canHarmonize ? t("editor.selection.harmonizeNeedLead") : null}>
-            <Button
-              variant="outline"
-              disabled={!canHarmonize}
-              onClick={() => onHarmonize(rule, count)}
-              data-testid="harmonize-all-btn"
-            >
-              <Wand2 data-icon="inline-start" />
-              {t("rules.builtinChecks.harmonizeAllButton", { count })}
-            </Button>
-          </AppTooltip>
-        )}
-        <Select
-          items={SEVERITY_OPTIONS}
-          value={rule.severity}
-          disabled={!canManage}
-          onValueChange={(v) => onSetOverride(checkId, {
-            enabled: rule.enabled,
-            severity: (v ?? rule.severity) as "major" | "minor",
-          })}
-        >
-          {/* Greyed out, so the stand-in AppTooltip draws takes the click and
-              says why (AQU-2260 — never a hover). */}
-          <AppTooltip content={!canManage ? t("rules.builtinChecks.manageNeedsMaintainer") : undefined}>
-            <SelectTrigger
-              size="sm"
-              disabled={!canManage}
-              className="text-xs"
-              aria-label={t("rules.builtinChecks.severitySelectAriaLabel", { name })}
-            >
-              <SelectValue />
-            </SelectTrigger>
-          </AppTooltip>
-          <SelectContent>
-            <SelectGroup>
-              {SEVERITY_OPTIONS.map((o) => (
-                <SelectItem key={o.value} value={o.value}>
-                  {o.label}
-                </SelectItem>
-              ))}
-            </SelectGroup>
-          </SelectContent>
-        </Select>
-        <Switch
-          size="sm"
-          checked={rule.enabled}
-          disabled={!canManage}
-          aria-label={t("rules.builtinChecks.enabledSwitchAriaLabel", { name })}
-          onCheckedChange={(checked) => onSetOverride(checkId, {
-            enabled: checked,
-            severity: rule.severity,
-          })}
-        />
-      </li>
-    )
-  }
-
+  const renderRow = (rule: TranslationRule) => (
+    <BuiltinCheckRow
+      key={rule.id}
+      rule={rule}
+      count={counts.get(rule.id) ?? 0}
+      onSetOverride={onSetOverride}
+      onHarmonize={onHarmonize}
+      canHarmonize={canHarmonize}
+      canManage={canManage}
+      profile={profile}
+      bibleReadiness={bibleReadiness}
+      punctuationNote={punctuationNote}
+    />
+  )
   return (
     <>
       <div className="rounded-md border">
@@ -244,5 +152,148 @@ export function BuiltinChecksList({
         </div>
       )}
     </>
+  )
+}
+
+/** Violations per rule id across the corpus being viewed. */
+export function useBuiltinCounts(infractions: Map<string, RuleInfraction[]>): Map<string, number> {
+  return useMemo(() => {
+    const c = new Map<string, number>()
+    for (const cellInfractions of infractions.values()) {
+      for (const inf of cellInfractions) {
+        c.set(inf.ruleId, (c.get(inf.ruleId) ?? 0) + 1)
+      }
+    }
+    return c
+  }, [infractions])
+}
+
+export interface BuiltinCheckRowProps {
+  rule: TranslationRule
+  /** Open violations of this check in the corpus being viewed. */
+  count: number
+  onSetOverride: Props["onSetOverride"]
+  onHarmonize?: Props["onHarmonize"]
+  canHarmonize?: boolean
+  canManage?: boolean
+  profile: LanguageProfile
+  bibleReadiness?: BibleCheckReadiness
+  punctuationNote?: string
+  /** AQU-2342: the scope chip the unified Checks list puts before the name. */
+  leading?: ReactNode
+  className?: string
+}
+
+/** One built-in check's row: name, what it still needs, its count, severity
+ *  and switch. Shared by this list and the unified Checks list (AQU-2342). */
+export function BuiltinCheckRow({
+  rule,
+  count,
+  onSetOverride,
+  onHarmonize,
+  canHarmonize = true,
+  canManage = true,
+  profile,
+  bibleReadiness,
+  punctuationNote,
+  leading,
+  className = "flex items-center gap-3 px-4 py-3 text-sm",
+}: BuiltinCheckRowProps) {
+  const t = useT()
+  if (rule.check.type !== "builtin") return null
+  const SEVERITY_OPTIONS: { value: "major" | "minor"; label: string }[] = [
+    { value: "major", label: t("rules.severity.major") },
+    { value: "minor", label: t("rules.severity.minor") },
+  ]
+  const checkId = rule.check.checkId
+  const name = translateRuleName(rule, t)
+  const description = translateRuleDescription(rule, t)
+  const showHarmonize = onHarmonize != null && count > 0
+  const needs: MessageKey[] = isBibleCheckId(checkId)
+    ? bibleCheckDormancy(checkId, profile, bibleReadiness).map((d) => ("slot" in d ? NEEDS_KEY[d.slot] : NEED_KEY[d.need]))
+    : []
+  return (
+    <li
+      data-testid="builtin-row"
+      className={className}
+    >
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {leading}
+          <span className="font-medium">{name}</span>
+        </div>
+        <div className="text-xs text-muted-foreground truncate">{description}</div>
+        {needs.map((key) => (
+          <div key={key} data-testid="builtin-row-needs" className="text-xs text-amber-700 dark:text-amber-400">
+            {t(key)}
+          </div>
+        ))}
+        {punctuationNote && PUNCTUATION_CHECK_IDS.includes(checkId) && (
+          <div data-testid="builtin-row-conventions" className="text-xs text-muted-foreground">
+            {punctuationNote}
+          </div>
+        )}
+      </div>
+      {count > 0 && (
+        <Badge variant="secondary" className="tabular-nums">
+          {t("rules.builtinChecks.violationCount", { count })}
+        </Badge>
+      )}
+      {showHarmonize && (
+        // Its words name it; why it is greyed out opens on a click (AQU-2260).
+        <AppTooltip content={!canHarmonize ? t("editor.selection.harmonizeNeedLead") : null}>
+          <Button
+            variant="outline"
+            disabled={!canHarmonize}
+            onClick={() => onHarmonize(rule, count)}
+            data-testid="harmonize-all-btn"
+          >
+            <Wand2 data-icon="inline-start" />
+            {t("rules.builtinChecks.harmonizeAllButton", { count })}
+          </Button>
+        </AppTooltip>
+      )}
+      <Select
+        items={SEVERITY_OPTIONS}
+        value={rule.severity}
+        disabled={!canManage}
+        onValueChange={(v) => onSetOverride(checkId, {
+          enabled: rule.enabled,
+          severity: (v ?? rule.severity) as "major" | "minor",
+        })}
+      >
+        {/* Greyed out, so the stand-in AppTooltip draws takes the click and
+            says why (AQU-2260 — never a hover). */}
+        <AppTooltip content={!canManage ? t("rules.builtinChecks.manageNeedsMaintainer") : undefined}>
+          <SelectTrigger
+            size="sm"
+            disabled={!canManage}
+            className="text-xs"
+            aria-label={t("rules.builtinChecks.severitySelectAriaLabel", { name })}
+          >
+            <SelectValue />
+          </SelectTrigger>
+        </AppTooltip>
+        <SelectContent>
+          <SelectGroup>
+            {SEVERITY_OPTIONS.map((o) => (
+              <SelectItem key={o.value} value={o.value}>
+                {o.label}
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        </SelectContent>
+      </Select>
+      <Switch
+        size="sm"
+        checked={rule.enabled}
+        disabled={!canManage}
+        aria-label={t("rules.builtinChecks.enabledSwitchAriaLabel", { name })}
+        onCheckedChange={(checked) => onSetOverride(checkId, {
+          enabled: checked,
+          severity: rule.severity,
+        })}
+      />
+    </li>
   )
 }

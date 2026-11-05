@@ -1,3 +1,4 @@
+import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 // Floating action bar that appears whenever the user has multi-selected
 // cells. Surfaces bulk Translate / Validate / Generate Audio / Both.
 //
@@ -52,7 +53,6 @@ import { namedCellRef } from "@/lib/cell-named-ref"
 import { createEditorStructureCache } from "@/lib/editor-structure-cache"
 import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
 import { showBulkValidateToast, type BulkRepetitionOutcome, type UseRepetitionValidation } from "@/hooks/useRepetitionValidation"
-import posthog from "@/lib/posthog"
 
 /** "Voice together" failures whose usual body speaks of ONE line, in the
  *  words that fit the several lines this action voices. */
@@ -62,8 +62,6 @@ const PARTIAL_REFS_SHOWN = 8
 const VOICE_TOGETHER_ENGINE_BODY: Partial<Record<ErrorCategory, MessageKey>> = {
   "hosted-tts-not-configured": "editor.selection.voiceTogetherInworldNotConfigured",
   "hosted-tts-failed": "editor.selection.voiceTogetherInworldFailed",
-  "seed-vc-not-configured": "editor.selection.voiceTogetherSeedVcNotConfigured",
-  "seed-vc-failed": "editor.selection.voiceTogetherSeedVcFailed",
 }
 
 interface Props {
@@ -156,6 +154,7 @@ type Running =
   | { kind: "validate-audio" }
 
 export function SelectionBar({ project, cellStore, session, username, activeLane, myScopes, audioByCellId, linkedTakesByCell, completeBatch, audioMode, audioOnlyLane = false, orderedBy, mediaLayer = false, onVoiceTogether, onHarmonize, canHarmonize = true, onValidationCommitted, prepareBulkRepetitions, bulkRepetitionToastExtras }: Props) {
+  const analytics = useAccountAnalytics()
   const t = useT()
   // AQU-1503: skip clauses join the way a list is written in the reader's
   // language rather than with a hardcoded separator.
@@ -580,14 +579,14 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
       })
       // Catching it removes the automatic `$exception` that was the only
       // trace of this failure, so report it by hand.
-      posthog.captureException(err instanceof Error ? err : new Error(String(err)), {
+      analytics.captureException(err instanceof Error ? err : new Error(String(err)), {
         surface: "voice-together",
         project_id: project.id,
       })
     } finally {
       setRunning({ kind: "idle" })
     }
-  }, [selectedCells, onVoiceTogether, isBusy, t, project.id])
+  }, [selectedCells, onVoiceTogether, isBusy, t, project.id, analytics])
 
   const onValidate = useCallback(async () => {
     if (isBusy) return
@@ -647,7 +646,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
           fileId: cell.fileId,
         })),
       )
-      posthog.capture(BATCH_VALIDATE_ATTEMPTED, batchValidateTelemetry(summary, "selection"))
+      analytics.capture(BATCH_VALIDATE_ATTEMPTED, batchValidateTelemetry(summary, "selection"))
       const message = batchValidateToast(summary, t, formatLocaleList)
       // One message for the whole gesture: the repetitions' note and Undo ride on it.
       showBulkValidateToast(message, bulkRepetitionToastExtras?.(repetitions) ?? { note: null })
@@ -657,7 +656,7 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     } finally {
       setRunning({ kind: "idle" })
     }
-  }, [selectedCells, username, activeLane, myScopes, isBusy, project.id, onValidationCommitted, t, formatLocaleList, allowSelfValidation, textScopeCanValidate, noPermissionReason, prepareBulkRepetitions, bulkRepetitionToastExtras])
+  }, [selectedCells, username, activeLane, myScopes, isBusy, project.id, onValidationCommitted, t, formatLocaleList, allowSelfValidation, textScopeCanValidate, noPermissionReason, prepareBulkRepetitions, bulkRepetitionToastExtras, analytics])
 
   const onUnvalidate = useCallback(() => {
     if (isBusy) return

@@ -13,6 +13,7 @@ import { EditorActionsProvider } from "@/context/EditorActionsContext"
 import { CellStore } from "@/hooks/useActiveCellStore"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { CellRow } from "@/lib/sync/cells-read-types"
+import { FALLBACK_MILESTONE_SIZE } from "@/lib/import/milestones"
 import {
   resetMilestoneSplitCacheForTests,
   setMilestoneSplit,
@@ -190,8 +191,41 @@ describe("EditorTable — split into milestones", () => {
     expect(cellRow("cell-ch2-b")).toBeTruthy()
   })
 
+  /**
+   * AQU-1444 — why this test is sized and timed the way it is; please read
+   * before "tidying" either.
+   *
+   * What it guards: a section that came out of the imported file is one page,
+   * however long it is. The thing that could break that is the fallback
+   * chunker, which cuts the app's own "Part N" divisions every
+   * `FALLBACK_MILESTONE_SIZE` cells (`src/lib/import/milestones.ts`), so the
+   * section only has to be one cell longer than a chunk to cross a boundary
+   * that must not become a page break. The length is therefore derived from
+   * that constant and follows it if it ever changes — the literal 74 it
+   * replaces was arbitrary, and 23 cells of it were render cost buying no
+   * extra coverage.
+   *
+   * Cost: every cell here is a source/target pair rendered through the real
+   * `EditorTable`, ~55 ms each in happy-dom, so this test is linear in the
+   * length and is by far the most expensive one in this file (~3.4 s). That is
+   * budgeted. Its watchdog is the suite-wide 60 s `testTimeout` in
+   * `vite.config.ts` (AGENTS.md rule 15, AQU-1749), which leaves an order of
+   * magnitude of headroom on a loaded machine. Do NOT give it a local
+   * `{ timeout: … }`: a ceiling a few hundred ms above the measured runtime is
+   * what made this test fail on busy builders, as a timeout that read like a
+   * hang. The cheap half of the same invariant — an arbitrarily long section
+   * staying one navigation entry, at 4x the chunk size and no render cost — is
+   * covered in `src/lib/milestone-navigation.test.ts`.
+   *
+   * Siblings checked while sizing this: the other three cases in this file run
+   * 0.3-0.6 s, and across all 65 `EditorTable.*` test files the next slowest
+   * tests sit at 1.6-2.6 s (`bibleHelps`, `bibleVoices`, `whosWho*`,
+   * `bibleOt`, `sourceStepUnmount`). Nothing in that band is near the
+   * watchdog, so no per-test change is needed elsewhere.
+   */
   it("keeps every cell of a long IDML section on one page", () => {
-    const boxes = Array.from({ length: 74 }, (_, index) => ({
+    const sectionLength = FALLBACK_MILESTONE_SIZE + 1
+    const boxes = Array.from({ length: sectionLength }, (_, index) => ({
       id: `cell-box-${index + 1}`,
       milestone: {
         key: "ebl:boxes:1",
@@ -288,16 +322,19 @@ describe("EditorTable — split into milestones", () => {
       setMilestoneSplit(true)
     })
 
+    // First cell, the last cell of the chunk the fallback chunker would have
+    // cut at, the first cell after it, and the section's last cell — all on
+    // this one page.
     expect(cellRow("cell-box-1")).toBeTruthy()
-    expect(cellRow("cell-box-50")).toBeTruthy()
-    expect(cellRow("cell-box-51")).toBeTruthy()
-    expect(cellRow("cell-box-74")).toBeTruthy()
+    expect(cellRow(`cell-box-${FALLBACK_MILESTONE_SIZE}`)).toBeTruthy()
+    expect(cellRow(`cell-box-${FALLBACK_MILESTONE_SIZE + 1}`)).toBeTruthy()
+    expect(cellRow(`cell-box-${sectionLength}`)).toBeTruthy()
     expect(cellRow("cell-intro-1")).toBeNull()
 
     fireEvent.click(screen.getByRole("button", { name: "Next section" }))
 
     expect(cellRow("cell-box-1")).toBeNull()
-    expect(cellRow("cell-box-74")).toBeNull()
+    expect(cellRow(`cell-box-${sectionLength}`)).toBeNull()
     expect(cellRow("cell-intro-1")).toBeTruthy()
     expect(screen.getByRole("button", { name: "Next section" })).toBeDisabled()
   })

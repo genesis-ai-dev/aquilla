@@ -1,3 +1,4 @@
+import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 import { useValidatedEvidenceVersion } from "@/hooks/useValidatedEvidenceVersion"
 import { authorNameFor, useLocalAuthorName } from "@/lib/store/local-author-name"
 import { fileDisplayName } from "@/lib/file-display-name"
@@ -30,7 +31,7 @@ import {
 } from "@/lib/editor/milestone-jump-targets"
 import { CellAreaPlaceholder, CellRowsLoadStatus } from "./CellAreaPlaceholder"
 import { WorkspaceMainSkeleton } from "./WorkspaceSkeleton"
-import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { EmptyState, NotFoundIcon } from "@/components/ui/empty"
 import { TabStrip } from "./TabStrip"
@@ -72,6 +73,7 @@ import { useSeamClassification } from "@/hooks/useSeamClassification"
 import { useTranslateAsReadPreference } from "@/hooks/useTranslateAsReadPreference"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
 import { shouldPromptAiSetup } from "@/lib/completion/completion-service"
+import { projectTranslationInstructions } from "@/lib/instructions/project-instructions"
 import {
   hasMateriallyBetterEvidence,
   translateAsReadAction,
@@ -100,6 +102,7 @@ import { bookGenre } from "@/lib/scripture/book-genres"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { effectiveRepetitionPropagation, resolveProjectPolicy } from "@/lib/sync/project-org-policy"
 import { useActiveOrg } from "@/context/OrgContext"
+import { resolveEditorFileId } from "@/lib/navigation/editor-file-restore"
 import { resolveOverlayFileId } from "@/lib/navigation/overlay-file-restore"
 import {
   ALL_ORGS_PARAM,
@@ -166,7 +169,6 @@ import {
 import type { TimebaseCorrection } from "@/lib/import/timebase"
 import { resolveActiveSourceLanguage } from "./project-workspace-source-language"
 import {
-  shouldPatchSystemPrompt,
   trackDeleteGate,
   shouldSelfHealZeroFileLink,
   selfHealZeroFileLink,
@@ -186,6 +188,7 @@ import {
   canRestructureTracks,
   resolveTakeLine,
   historyFileName,
+  buildRouteScopedTokenFetcher,
 } from "./project-workspace-helpers"
 import type { PaintGate } from "./project-workspace-helpers"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
@@ -254,7 +257,7 @@ import { NotificationsInbox } from "./NotificationsInbox"
 import { AttachmentsDrawer } from "./AttachmentsDrawer"
 import { HistoryDrawer } from "./HistoryDrawer"
 import { VideoPlayer, type VideoPlayerHandle } from "./VideoPlayer"
-import { extractCuesFromCells } from "@/lib/video/vtt-generator"
+import { extractCuesFromCells, parseTimestampRange } from "@/lib/video/vtt-generator"
 import { useFileSync } from "@/hooks/useFileSync"
 import { useFileMeta } from "@/hooks/useFileMeta"
 import { useCellLabelsPreference } from "@/hooks/useCellLabelsPreference"
@@ -264,19 +267,9 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
 import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll, needsTranscription, takesNeedingMeasure, runMeasureAll, type SynthTarget } from "@/lib/audio/batch-audio"
-import {
-  CHANGE_VOICE_QUALITIES,
-  CHANGE_VOICE_QUALITY_STEPS,
-  changeCellVoice,
-  changeVoiceBlocker,
-  changeVoiceQualityForSteps,
-  changeVoiceSourceTake,
-  voiceChangedSteps,
-  type ChangeVoiceQuality,
-} from "@/lib/audio/change-voice"
-import { planChangeVoiceAll, runChangeVoiceAll, takeUsedByVoice } from "@/lib/audio/change-voice-batch"
+import { changeCellVoice, changeVoiceBlocker, changeVoiceSourceTake } from "@/lib/audio/change-voice"
+import { planChangeVoiceAll, runChangeVoiceAll } from "@/lib/audio/change-voice-batch"
 import { getTtsStatus, ttsStatusKey } from "@/lib/audio/tts"
-import { CHANGE_VOICE_QUALITY_LABEL, getChangeVoiceQuality, setChangeVoiceQuality } from "@/lib/store/change-voice-quality"
 import { injectOptimisticAudioTrim,
   injectOptimisticAudioPlace, injectOptimisticAudioAttachment, injectOptimisticAudioRemove, injectOptimisticAudioDeselect,
   notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
@@ -307,7 +300,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { canHarmonize, emitCastAssign, emitSourceCellCommit, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitCellGlossSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellAudioUnvalidate, emitCellAudioSelect, emitCellAudioDeselect, emitSourceCellRestore, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioGain, emitCellAudioPlace, emitCellAudioCut, emitCellAudioUncut, emitCellAudioRemove, emitCellAudioRename, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, emitTermUpdate, enqueueEvents } from "@/lib/sync/events-emit"
+import { canHarmonize, emitCastAssign, emitSourceCellCommit, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitCellGlossSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellAudioUnvalidate, emitCellAudioSelect, emitCellAudioDeselect, emitSourceCellRestore, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioGain, emitCellAudioPlace, emitCellAudioCut, emitCellAudioUncut, emitCellAudioRemove, emitCellAudioRename, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitFileMilestoneSet, emitTermCreate, emitTermUpdate, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
 import { postSplitCastCopies, resolveCellEditingFloor, resolveTimingLocked } from "@/lib/sync/project-settings"
@@ -363,7 +356,7 @@ import { folderIdsOf, folderMembers, orderForScopeAppend, trackScope } from "@/l
 import { GENERATED_VOICE_SLOT, programmeTrackSlots, RECORDING_SLOT, slotForTrack } from "@/lib/timeline/track-slots"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { TimelineEditor } from "@/components/timeline/TimelineEditor"
-import type { ChangeVoiceMenuBlocker, ChangeVoiceMenuState } from "@/components/timeline/TargetAudioLane"
+import type { ChangeVoiceMenuState } from "@/components/timeline/TargetAudioLane"
 import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/sync/cell-lock-state"
 import { canPerform, canImportSourceFiles, importDenialFloor, canOpenAssignUi, canSwitchLanes, laneDelegateLanes, scopedLanesFor } from "@/lib/sync/role-policy"
 import { laneComboboxOptions } from "@/components/lane-options"
@@ -391,11 +384,8 @@ import { useForbiddenOutboxRecords } from "@/hooks/useForbiddenOutboxRecords"
 import { useRefusedFileEvents } from "@/hooks/useRefusedFileEvents"
 import { invalidateCellHistory } from "@/lib/sync/history-invalidation"
 import { runDiarization, findFileClip, type DiarizationPhase } from "@/lib/diarization/run-diarization"
-import { extractVoiceReference } from "@/lib/audio/reference-extract"
-import { assignedCastVoiceId, castNameOf, findVoice, getVoiceLibrary, newVoiceId, resolveCastVoice, upsertVoice, VOICE_PALETTE } from "@/lib/audio/voices"
-import { resolveTtsProvider } from "@/lib/audio/tts-providers"
-import { cloneVoiceFromTake } from "@/lib/audio/clone-from-take"
-import { cloneNameSuggestion, lineChangeQuality, lineVoiceActionFor, lineVoicePending, type LineVoiceAction } from "@/lib/audio/line-voice"
+import { assignedCastVoiceId, castNameOf, findVoice, getVoiceLibrary, newVoiceId, resolveCastVoice, VOICE_PALETTE } from "@/lib/audio/voices"
+import { lineVoiceActionFor, lineVoicePending, type LineVoiceAction } from "@/lib/audio/line-voice"
 import { whileVoicingAs } from "@/lib/audio/voicing-as"
 import { useOnline } from "@/hooks/useOnline"
 import { useConnectivity } from "@/lib/offline/connectivity"
@@ -507,6 +497,7 @@ import type { InsertChoice } from "@/components/station/StationEdits"
 import { onStationShowRequest, openInStation, setStationAvailable } from "@/lib/station/target"
 import { STATION_PICKS } from "@/lib/station/picks"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
+import type { SyncTokenResponse } from "@/lib/sync/sync-token"
 import { takeTrackVars } from "@/lib/timeline/take-colors"
 import { filmLabelFor, MediaTopBar } from "@/components/timeline/MediaTopBar"
 import { MediaStatusRing } from "@/components/timeline/MediaStatusRing"
@@ -647,11 +638,21 @@ import {
 } from "@/lib/review/batch-file-options"
 import { BatchFileModal, type BatchFileModalRequest } from "@/components/batch/BatchFileModal"
 import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
-import posthog from "@/lib/posthog"
 import { visibleFootnoteEntriesFor } from "@/lib/footnotes/visible-entries"
 import { useExtensionEditorRev4 } from "./tools/useExtensionEditorRev4"
 import { audioEntryFromCell, audioValidationScope, audioValidationTakes } from "@/lib/audio/audio-validation-permissions"
 import { clearSelection, getSelectedIds, setSelection } from "@/lib/audio/selection"
+import { useFileMilestones } from "@/hooks/useFileMilestones"
+import {
+  divisionsForOrder,
+  milestoneDraftCells,
+  milestoneDraftPrefill,
+} from "@/lib/editor/milestone-draft"
+import {
+  SetMilestoneDialog,
+  type MilestoneDraftSubmission,
+} from "@/components/editor/SetMilestoneDialog"
+import { normalizeMilestoneName } from "../../db/shared/file-milestones"
 import {
   setVisibleCellIds as setEditorViewportVisibleCellIds,
   setTrackedCellRef as setEditorViewportTrackedCellRef,
@@ -778,6 +779,7 @@ function writeAgentTabOpen(projectId: string | undefined, open: boolean): void {
 }
 
 export function ProjectWorkspace() {
+  const analytics = useAccountAnalytics()
   const t = useT()
   // AQU-1503: the batch-validate skip clauses are joined the way a list is
   // written in the reader's language, not with a hardcoded "; ".
@@ -847,7 +849,13 @@ export function ProjectWorkspace() {
   // permissive, never wrongly closed, and the server refuses the write either
   // way. The user-visible affordances below gate on `projectPolicy`, which
   // also falls back to the org read for a server predating the carried field.
-  const carriedImportMinRole = projectSettings?.orgPolicy?.importMinRole ?? null
+  // AQU-2305: the EFFECTIVE floor — the org's raised by this project's own —
+  // so a project that reserved its own imports for maintainers stops a lead's
+  // `file.create` at the same place the server does. `importFloor.effective` is
+  // the server's own arithmetic; the org's value alone is the fallback for a
+  // server that predates that field.
+  const carriedImportMinRole =
+    projectSettings?.importFloor?.effective ?? projectSettings?.orgPolicy?.importMinRole ?? null
   // Client-local overlays (corpusMarker, originalName, suggestionsDismissedAt,
   // aiSetupSkipped) live in IDB; merge them onto the server-fetched record on
   // load and after each local patch so rename suggestions don't loop on every
@@ -1281,16 +1289,16 @@ export function ProjectWorkspace() {
     // because this effect is declared before currentUsername is computed.
     const uid = currentUsernameRef.current
     const savedLoc = readLastLocation(uid, projectId)
-    const last = (savedLoc?.fileId && fileIds.includes(savedLoc.fileId) ? savedLoc.fileId : null)
-      ?? readLastActiveFileId(projectId)
-    const firstOpenTab = workspaceTabs.tabs[0]?.fileId ?? null
-    const onlyFile = projectFiles.length === 1 ? projectFiles[0]?.id : null
-    const nextFileId =
-      last && fileIds.includes(last)
-        ? last
-        : firstOpenTab && fileIds.includes(firstOpenTab)
-          ? firstOpenTab
-          : onlyFile
+    // AQU-1537: the ordering rule lives in `resolveEditorFileId` so it can be
+    // unit-tested — this effect is unmountable in a test, and the rule
+    // (remembered file → legacy record → first open tab → the project's one
+    // file → keep the empty state) is the ticket's acceptance criteria.
+    const nextFileId = resolveEditorFileId({
+      savedFileId: savedLoc?.fileId,
+      legacyFileId: readLastActiveFileId(projectId),
+      firstOpenTabFileId: workspaceTabs.tabs[0]?.fileId ?? null,
+      knownFileIds: fileIds,
+    })
     if (!nextFileId) return
     // If there is a remembered cell, park it in the ref so the scroll-restore
     // effect can consume it once cells are loaded.
@@ -1325,8 +1333,9 @@ export function ProjectWorkspace() {
     project,
     projectId,
     routeFileId,
+    // `fileIds` is derived from `projectFiles`, so it already tracks the file
+    // list settling; the effect body no longer reads `projectFiles` itself.
     fileIds,
-    projectFiles,
     workspaceTabs.tabs,
     redirectTo,
     // AQU-1496: the overlay re-seed reads the `?return=` file off the URL.
@@ -1584,12 +1593,14 @@ export function ProjectWorkspace() {
   /** A line that has just been created and is waiting for its row to exist so
    *  the timeline and the table can both land on it. */
   const [pendingNewCell, setPendingNewCell] = useState<{ cellId: string; thenRecord: boolean } | null>(null)
-  // "Clone voice from this take" dialog. Owned here (not inside the Voices
+  // The in-cell New voice dialog ("Train a voice from this recording", "Add a
+  // voice…"). Owned here (not inside the Voices
   // dock tab) so the per-cell control can open NewVoiceModal in place even
   // when the left dock is on Files or collapsed.
   const [makeCharacterOpen, setMakeCharacterOpen] = useState(false)
   const [makeCharacterSeedCellId, setMakeCharacterSeedCellId] = useState<string | null>(null)
-  const [makeCharacterMode, setMakeCharacterMode] = useState<"clone" | "character">("clone")
+  const [makeCharacterSeedAudioId, setMakeCharacterSeedAudioId] = useState<string | null>(null)
+  const [makeCharacterMode, setMakeCharacterMode] = useState<"train" | "character">("train")
   // FRO-192: Assign… modal
   const [assignModalOpen, setAssignModalOpen] = useState(false)
   // File the sidebar context menu asked to assign; null means "use the
@@ -1669,6 +1680,40 @@ export function ProjectWorkspace() {
   // FRO-214 (orchestrator glue): frozen-project state for the workspace banner.
   const { isFrozen, toggle: toggleLifecycle, busy: lifecycleBusy } = useProjectLifecycle(projectId ?? "", project, () => refresh())
 
+  // FRO-159: the session JWT was rejected (401) — surface it instead of
+  // silently failing on every file open. AQU-994: raise the dismissible
+  // session-expired banner rather than force-logging the user out; a lone 401
+  // can be a transient server fault misreported as an auth failure (the
+  // 2026-08-25 incident), and the old doLogout() here also revoked the
+  // still-valid token server-side and wiped local data.
+  //
+  // Stable, and shared by every sync-token fetcher this component builds.
+  const onSyncTokenUnauthorized = useCallback((failedJwt: string) => {
+    console.warn("[ProjectWorkspace] session JWT rejected (401) on sync-token mint — raising session-expired banner")
+    void notifySessionExpiredIfCurrent(failedJwt)
+  }, [])
+
+  // Persist the role a mint resolved, so Dashboard rendering can decide
+  // owner-only actions without a round-trip. Keyed on the ROUTE's project id
+  // (identical to `project.id`, but known before the details response), and
+  // shared by both fetchers below so the route-scoped mint records the role
+  // too — `patchProject` is a no-op until the record exists locally.
+  const onSyncTokenRole = useCallback(
+    (role: SyncTokenResponse["role"]) => {
+      if (!projectId) return
+      void patchProject(projectId, (p) => ({
+        ...p,
+        syncRole: {
+          level: role.level,
+          name: role.name,
+          source: role.source,
+          fetchedAt: new Date().toISOString(),
+        },
+      }))
+    },
+    [projectId],
+  )
+
   const getTokenForFile = useMemo(() => {
     if (!project?.id) {
       return async (_fileId: string) => null as string | null
@@ -1685,27 +1730,8 @@ export function ProjectWorkspace() {
       bootstrap,
       undefined,
       {
-        onRole: (role) => {
-          void patchProject(pid, (p) => ({
-            ...p,
-            syncRole: {
-              level: role.level,
-              name: role.name,
-              source: role.source,
-              fetchedAt: new Date().toISOString(),
-            },
-          }))
-        },
-        onUnauthorized: (failedJwt) => {
-          // FRO-159: the session JWT was rejected (401) — surface it instead of
-          // silently failing on every file open. AQU-994: raise the dismissible
-          // session-expired banner rather than force-logging the user out; a
-          // lone 401 can be a transient server fault misreported as an auth
-          // failure (the 2026-08-25 incident), and the old doLogout() here also
-          // revoked the still-valid token server-side and wiped local data.
-          console.warn("[ProjectWorkspace] session JWT rejected (401) on sync-token mint — raising session-expired banner")
-          void notifySessionExpiredIfCurrent(failedJwt)
-        },
+        onRole: onSyncTokenRole,
+        onUnauthorized: onSyncTokenUnauthorized,
       },
     )
   }, [
@@ -1713,7 +1739,22 @@ export function ProjectWorkspace() {
     project?.name,
     project?.origin?.kind,
     project?.origin?.kind === "git" ? project?.origin.gitlabProjectId : undefined,
+    onSyncTokenRole,
+    onSyncTokenUnauthorized,
   ])
+
+  // AQU-2079: a fetcher scoped to the ROUTE's project id, so a read that needs
+  // nothing but the id does not queue behind the project-details response.
+  // Used by the terminology read below; see buildRouteScopedTokenFetcher for
+  // why a mint never needs the loaded record.
+  const getTokenForRouteProject = useMemo(
+    () => buildRouteScopedTokenFetcher({
+      routeProjectId: projectId,
+      getJwt: () => jwtRef.current,
+      callbacks: { onRole: onSyncTokenRole, onUnauthorized: onSyncTokenUnauthorized },
+    }),
+    [projectId, onSyncTokenRole, onSyncTokenUnauthorized],
+  )
 
   const originalSourceIds = useOriginalSourceFlags(project?.id, project?.files ?? [], getTokenForFile)
 
@@ -1731,14 +1772,21 @@ export function ProjectWorkspace() {
   // the concepts themselves, so a failed read would otherwise reach the editor
   // and the in-workspace glossary as `terminology: []` — indistinguishable from
   // a project that has no terminology, with every term check silently off.
+  //
+  // AQU-2079: scoped to the ROUTE's project id, through the route-scoped token
+  // fetcher. Keyed on `project?.id` this read could not start until the
+  // details response had landed, so details, token mint and terms ran end to
+  // end — the first term row took ~3.9 s on prod for a 2-term project, ~200 ms
+  // of which was the terms request. It now runs in parallel with the details
+  // request.
   const {
     concepts: localConcepts,
     isLoading: conceptsLoading,
     error: conceptsError,
     refresh: refreshConcepts,
   } = useConcepts({
-    projectId: project?.id ?? null,
-    getToken: getTokenForFile,
+    projectId: projectId ?? null,
+    getToken: getTokenForRouteProject,
     tokenReady: !!frontierSession?.jwt,
   })
 
@@ -1964,6 +2012,27 @@ export function ProjectWorkspace() {
     project?.syncRole?.level ?? null,
   )
   const showHiddenCellsPref = useShowHiddenCells()
+  /**
+   * AQU-2308: this file's hand-set milestones.
+   *
+   * A navigation INPUT rather than cell data, so it is read by its own hook and
+   * handed to the store, which is the one place that decides which division
+   * each cell belongs to. Read for every role — a contributor navigates by the
+   * same divisions a maintainer named — and the Maintainer floor sits on
+   * SETTING one, where the menu entry and the server check are.
+   */
+  const fileMilestones = useFileMilestones({
+    projectId: project?.id ?? null,
+    fileId: activeFileId,
+  })
+  // All three are `useCallback`-stable for the hook's life, so pulling them out
+  // keeps them out of the dep arrays that would otherwise churn on the whole
+  // result object — including the WS effect's, which must not resubscribe.
+  const {
+    setMilestoneLocally: paintMilestone,
+    removeMilestoneLocally: unpaintMilestone,
+    refresh: refreshFileMilestones,
+  } = fileMilestones
   // AQU-538: useActiveCellStore serves the ACTUAL workspace cell list; it now
   // filters target rows to `activeLane` (same `(r.targetLang ?? '') === lane`
   // rule as useCells) before the one-target-per-cell pairing. N=1 is
@@ -1996,6 +2065,9 @@ export function ProjectWorkspace() {
     // is device-scoped and survives a role downgrade, so on its own a demoted
     // lead would keep seeing hidden rows in a file they may no longer park.
     showHidden: showHiddenCellsPref && mayParkCellsInProject,
+    // AQU-2308: the hook's `milestones` is already a stable `useMemo`d array,
+    // which the store's navigation cache compares by reference.
+    userMilestones: fileMilestones.milestones,
   })
   const cellStoreVersion = useCellStoreVersion(cellStore)
   /**
@@ -3558,6 +3630,8 @@ export function ProjectWorkspace() {
         await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
         revalidateCells()
         // Only if something was actually reported — see the lazy toast above.
+        // AQU-1917: a run the ASR backend rejected no longer lands here (it
+        // goes to onFailed), so this success line can be trusted again.
         if (toastId !== null) {
           toast.update(toastId, { type: "success", title: `Transcribed ${lastTotal} section${plural(lastTotal)} of "${fileName}".`, description: undefined })
         }
@@ -3837,6 +3911,124 @@ export function ProjectWorkspace() {
       await applying
     },
     [applyCellHidden, activeFileId],
+  )
+
+  /**
+   * AQU-2308: the range "Set a new milestone…" is open on, or null when it is
+   * shut. Held here rather than in the row because the prefill, the pickers and
+   * the refusals all need the file's cell ORDER, which only the store has.
+   */
+  const [milestoneDraft, setMilestoneDraft] = useState<
+    { startCellId: string; endCellId: string } | null
+  >(null)
+
+  const handleSetMilestoneFromCell = useCallback((cellId: string) => {
+    // The DISPLAY order, which is what the navigator derives its divisions from
+    // and therefore what the stored anchors are resolved against.
+    setMilestoneDraft(
+      milestoneDraftPrefill(cellStore.getCellIdsForLens(), cellId, getSelectedIds()),
+    )
+  }, [cellStore])
+
+  /**
+   * Write one hand-set milestone.
+   *
+   * Optimistic, like every other write here: the row has to appear in the
+   * navigator the moment the dialog shuts, and the event behind it can sit in
+   * the outbox for a while. The overlay retires when the server AGREES — see
+   * `useFileMilestones` — so a refusal has to retract it explicitly rather than
+   * wait for a clock to run out.
+   */
+  const handleSubmitMilestone = useCallback(async (draft: MilestoneDraftSubmission) => {
+    const projectId = project?.id
+    const fileId = activeFileId
+    if (!projectId || !fileId) return
+    // The dialog's own save gate uses the same shared rule, so this is the
+    // belt-and-braces one: it is what stops a blank name reaching the emitter,
+    // which throws on one.
+    const name = normalizeMilestoneName(draft.name)
+    if (name === null) return
+    const milestoneId = uuidv7()
+    const record = {
+      id: milestoneId,
+      name,
+      startCellId: draft.startCellId,
+      endCellId: draft.endCellId,
+    }
+    setMilestoneDraft(null)
+    paintMilestone(record)
+    const retract = () => {
+      unpaintMilestone(milestoneId)
+      refreshFileMilestones()
+    }
+    try {
+      await emitFileMilestoneSet({
+        projectId,
+        fileId,
+        milestoneId,
+        name,
+        startCellId: record.startCellId,
+        endCellId: record.endCellId,
+        author: currentUsername,
+      })
+      await flushOutboxBatch({
+        getTokenForFile: getTokenForProjectFile,
+        // A per-event 4xx arrives inside a 200 and the flusher drops it, so
+        // without this the row would simply vanish from the navigator with no
+        // explanation — which reads as the app undoing the user's work.
+        onRejected: (entries) => {
+          const mine = entries.filter((r) => (
+            r.kind === "file.milestone.set" && r.fileId === fileId
+          ))
+          if (mine.length === 0) return
+          retract()
+          toast.add({
+            type: "error",
+            title: t("editor.setMilestone.saveFailed"),
+            description: mine[0].reason,
+          })
+        },
+      })
+      refreshFileMilestones()
+    } catch {
+      retract()
+      toast.add({ type: "error", title: t("editor.setMilestone.saveFailed") })
+    }
+  }, [
+    project?.id, activeFileId, currentUsername, paintMilestone, unpaintMilestone,
+    refreshFileMilestones, getTokenForProjectFile, toast, t,
+  ])
+
+  /**
+   * The pickers' rows and the divisions a refusal names, or null while the
+   * dialog is shut.
+   *
+   * `readAtVersion` because the React Compiler memoises a version-only
+   * dependency away — see the note in `useActiveCellStore`. `getNavigationIndex`
+   * is asked for the divisions rather than re-deriving them, so the dialog
+   * refuses exactly what the navigator would have refused.
+   */
+  const milestoneDialogData = useMemo(
+    () => readAtVersion(cellStoreVersion, () => {
+      if (milestoneDraft === null) return null
+      const order = cellStore.getCellIdsForLens()
+      return {
+        cells: milestoneDraftCells(order, (cellId) => {
+          const summary = cellStore.getCellSummary(cellId)
+          if (!summary) return null
+          const context = summary.context.trim()
+          // A timecode is not a reference. Same parser the source row uses to
+          // decide which corner its context belongs in, rather than a second
+          // rule for telling "MRK 4:35" from "00:01:02 → 00:01:05".
+          return {
+            reference: context && !parseTimestampRange(context) ? context : null,
+            text: summary.original,
+          }
+        }),
+        divisions: divisionsForOrder(order, cellStore.getNavigationIndex(order)),
+      }
+    }),
+    [cellStore, cellStoreVersion, milestoneDraft],
   )
 
   // Round 7: trim a dub chip (edge drag) — re-attach the take with the new
@@ -6124,6 +6316,9 @@ export function ProjectWorkspace() {
   const projectPolicy = resolveProjectPolicy({
     orgPolicy: projectSettings?.orgPolicy,
     visibilityFloors: projectSettings?.visibilityFloors,
+    // AQU-2305: the org's floor raised by this project's own, as the server
+    // resolved it for this project.
+    importFloor: projectSettings?.importFloor,
     projectSettings: projectSettings?.settings,
     org: orgSettingsForProject,
     roleLevel: project?.syncRole?.level ?? null,
@@ -7045,17 +7240,38 @@ export function ProjectWorkspace() {
     if (!project?.id || !aiTrailToken) return
     void recordModelCall(project.id, activeLane, call, aiTrailToken)
   }, [project?.id, activeLane, aiTrailToken])
+  // AQU-2342: THE project instructions — the stored text, or (until a
+  // maintainer saves one) the legacy sources composed on read. Each source is
+  // its own dependency so the React Compiler re-resolves when one moves.
+  const instructionsSource = project?.translationInstructions
+  const instructionsBrief = project?.translationBrief
+  const instructionsEntries = project?.livingMemoryEntries
+  const instructionsFacts = project?.projectFacts
+  const instructionsLegacyPrompt = project?.completionSettings?.systemPrompt
+  const instructionsLegacyBrief = project?.legacyProjectBriefText
+  const projectInstructions = useMemo(
+    () => projectTranslationInstructions({
+      translationInstructions: instructionsSource,
+      translationBrief: instructionsBrief,
+      livingMemoryEntries: instructionsEntries,
+      projectFacts: instructionsFacts,
+      completionSettings: instructionsLegacyPrompt === undefined ? undefined : { systemPrompt: instructionsLegacyPrompt },
+      legacyProjectBriefText: instructionsLegacyBrief,
+    }),
+    [instructionsSource, instructionsBrief, instructionsEntries, instructionsFacts, instructionsLegacyPrompt, instructionsLegacyBrief],
+  )
   const { completeSingle, alignCellStyles, askAlignStyles, alignStylesModel, prepareSingleEvidence, prefetchSingleEvidence, completeBatch, completeParagraph, clearCellError, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
     // AQU-538/AQU-602: when a non-default lane is active, its tag IS the target
     // language for few-shot/completion; default lane falls back to the file's
     // (then project's) targetLanguage exactly as before. Shares the same
     // lane-aware derivation as the editor project + file metadata.
-    project?.completionSettings, activeSourceLanguage || "", activeLaneTargetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell, rules, getActiveCells, project?.translationBrief?.l1Summary ?? undefined,
+    project?.completionSettings, activeSourceLanguage || "", activeLaneTargetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell, rules, getActiveCells, projectInstructions || undefined,
     project?.draftContext ?? DEFAULT_DRAFT_CONTEXT,
     activeLane,
     commitCompletedCells,
     styleInstructionsFor,
     recordAiModelCall,
+    project?.languageProfile,
   )
 
   // AQU-1386: classify the open file's cell seams in the background so
@@ -9000,6 +9216,20 @@ export function ProjectWorkspace() {
                 },
                 refreshDrafts: refreshContextualDrafts,
               })
+              // AQU-2308: AHEAD of the generic `file.` branch below, which
+              // would otherwise swallow a milestone into a whole-project
+              // `refresh()` — the wrong answer twice over: it re-pulls the file
+              // inventory, which a milestone does not touch, and it never
+              // re-reads the milestones, which is the only thing that moved.
+              // The read is per-file, so a frame for another file is ignored.
+              if (
+                !msg.cell
+                && (msg.kind === "file.milestone.set" || msg.kind === "file.milestone.remove")
+                && msg.project === pid
+              ) {
+                if (msg.file === activeFileIdRef.current) refreshFileMilestones()
+                return
+              }
               // File-scoped events (file.create / file.rename) carry no cell;
               // they change the project's file inventory or labels. Re-pull the
               // project so renames + new files surface live and the local
@@ -9330,6 +9560,7 @@ export function ProjectWorkspace() {
     sendPresenceUpdate,
     refreshContextualDrafts,
     revalidateAuditStats,
+    refreshFileMilestones,
   ])
 
   // FRO-288: workspace-level focus-lock with renewal.
@@ -10071,30 +10302,31 @@ export function ProjectWorkspace() {
       `/project/${projectId}/terminology?concept=${encodeURIComponent(conceptId)}`,
     )
   }, [navigate, projectId])
-  // AQU-1758: "Make a character from this voice" — the Audio view's voice
-  // card had it; a take's menu on the timeline and its Recording tab do now.
-  // Offered to someone who may make voices: the dialog would refuse the rest.
+  // AQU-1758: the Audio view's voice card turned a take into a voice; a
+  // take's menu on the timeline and its Recording tab do now. AQU-2291:
+  // "Train a voice from this recording" — New voice on the Train voice tab,
+  // the take already added as its first recording. Offered to someone who
+  // may make voices: the host would drop the trained voice otherwise.
   const mayMakeCharacter = canManageVoices(
     project?.syncRole?.level ?? null, project?.projectLeadsManageVoices === true, activeLaneId != null,
   )
-  const handleMakeCharacter = useCallback((cellId: string) => {
+  const handleTrainFromTake = useCallback((cellId: string, audioId: string) => {
     setMakeCharacterSeedCellId(cellId)
-    setMakeCharacterMode("clone")
+    setMakeCharacterSeedAudioId(audioId)
+    setMakeCharacterMode("train")
     setMakeCharacterOpen(true)
   }, [])
-  const makeCharacter = mayMakeCharacter ? handleMakeCharacter : undefined
+  const trainFromTake = mayMakeCharacter ? handleTrainFromTake : undefined
   // AQU-1758 / AQU-2212: what the Audio view's voice card did to a line, now
   // done from where its jobs went — a pick in Media's table acts on the line,
   // the line's Recording tab and its take's menu offer "Change to …" /
-  // "Generate · …", and the take clones in one step. The work is defined far
+  // "Generate · …", and a person's take trains a voice. The work is defined far
   // below, beside the timeline's Regenerate and Change voice it runs through;
   // these stay identity-stable for the editor's context.
   const lineVoiceRef = useRef<{
     picked: (cell: CellData, voiceId: string) => void
     pending: (cellId: string) => { action: LineVoiceAction; voiceName: string } | null
     apply: (cellId: string) => void
-    clone: (cellId: string, audioId: string, name: string) => Promise<void>
-    cloneName: (cellId: string) => string
   } | null>(null)
   // Whether a pick can read the text: the engine has to be reachable.
   const browserOnline = useOnline()
@@ -10105,12 +10337,6 @@ export function ProjectWorkspace() {
   )
   const handleApplyLineVoice = useCallback((cellId: string) => lineVoiceRef.current?.apply(cellId), [])
   const handleLineVoicePending = useCallback((cellId: string) => lineVoiceRef.current?.pending(cellId) ?? null, [])
-  const handleCloneTake = useCallback(
-    (cellId: string, audioId: string, name: string) => lineVoiceRef.current?.clone(cellId, audioId, name) ?? Promise.resolve(),
-    [],
-  )
-  const cloneTake = mayMakeCharacter ? handleCloneTake : undefined
-  const handleCloneNameFor = useCallback((cellId: string) => lineVoiceRef.current?.cloneName(cellId) ?? "", [])
   // AQU-2212: "Add a voice…" at the end of a line's voice dropdown opens New
   // voice on the ready-made characters; the voice it adds is cast on that line.
   const handleAddVoiceForLine = useCallback((cellId: string) => {
@@ -10136,11 +10362,9 @@ export function ProjectWorkspace() {
     onOpenTerminologyConcept: handleOpenTerminologyConcept,
     onAiSetupNeeded: handleAiSetupNeeded,
     onOpenRecording: handleOpenRecording,
-    onMakeCharacter: makeCharacter, // AQU-1758: the Recording tab's take
-    onCloneTake: cloneTake, // AQU-1758 / AQU-2212: …in one step
+    onTrainFromTake: trainFromTake, // AQU-1758 / AQU-2291: the Recording tab's take
     onLineVoicePicked: handleLineVoicePicked, // AQU-2212: a pick acts on the line
     onApplyLineVoice: handleApplyLineVoice, // AQU-2212: "Change to …" / "Generate · …"
-    allTtsSettings: tts.settings, // AQU-2037: …never over a take a voice was cloned from
     onAddVoiceForLine: addVoiceForLine, // AQU-2212: "Add a voice…"
     onMediaRowActivate: handleMediaRowActivate, // 2026-08-07: row click → timeline (stacked lens only)
     onAssignCastVoice: handleAssignCastVoice, // 2026-08-07: gutter picker (pure assignment)
@@ -10162,6 +10386,9 @@ export function ProjectWorkspace() {
     // with `canPerform` against the same table the emitter enforces, because
     // that is where the DCS/live-linked reasons already live.
     onSetCellHidden: handleSetCellHiddenStable,
+    // AQU-2308: also passed unconditionally — the Maintainer gate and the
+    // live-link test are applied in the row, beside the other role gates.
+    onSetMilestone: handleSetMilestoneFromCell,
     onRetimeCell: handleRetimeSubtitle,
     timingLocked,
     canUnlockTiming,
@@ -10169,7 +10396,7 @@ export function ProjectWorkspace() {
     // AQU-2204: following its recordings, a file shows no source times — so
     // a line's "Edit timestamps" is unavailable, with the reason.
     followsRecordings: timingMode === "audioFirst",
-  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenAttachment, attachmentsByCell, handleAttachmentAdded, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, makeCharacter, cloneTake, handleLineVoicePicked, handleApplyLineVoice, tts.settings, addVoiceForLine, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleCountCastLines, handleTakeSaved, handleLastTakeRemoved, audioHomeFor, myScopes, cellStore, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleRequestSplitAtQuotes, handleSetCellHiddenStable, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings, timingMode])
+  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenAttachment, attachmentsByCell, handleAttachmentAdded, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, trainFromTake, handleLineVoicePicked, handleApplyLineVoice, addVoiceForLine, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleCountCastLines, handleTakeSaved, handleLastTakeRemoved, audioHomeFor, myScopes, cellStore, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleRequestSplitAtQuotes, handleSetCellHiddenStable, handleSetMilestoneFromCell, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings, timingMode])
 
 
   // Drives the editor-area rendering: loading skeleton vs. empty state vs.
@@ -10646,38 +10873,14 @@ export function ProjectWorkspace() {
     }
   }, [checklistDismissed, dismissChecklist])
 
-  const handleProjectUpdated = useCallback(async (updated: ProjectRecord | undefined) => {
-    // FRO-234: When a step component saves (e.g. AiInstructionsStep via
-    // useSaveCompletionSettings), it writes to IDB and hands us the updated
-    // record. We must also push the change through patchSettings so that
-    // useProjectSettings.local reflects it — that overlay is what
-    // deriveChecklistState reads to compute aiInstructions. Without this call,
-    // the checklist step never flips to complete because useProject.refresh()
-    // fetches from the server (not IDB) and the server-overlay wins.
-    //
-    // WARN: only patch when the updated record carries a NON-EMPTY systemPrompt.
-    // buildCompletionSettings() materialises systemPrompt as "" by default, so a
-    // provider-only save (Device B changing the AI provider with no local prompt)
-    // would otherwise WIPE the server-side prompt project-wide.
-    //
-    // Also gate on MAINTAINER (600) — same floor as handleImported — so viewers
-    // and editors can't inadvertently overwrite project-wide settings they have
-    // no server authority to change.
-    const systemPrompt = updated?.completionSettings?.systemPrompt
-    const roleLevel = project?.syncRole?.level ?? 0
-    if (shouldPatchSystemPrompt(systemPrompt, roleLevel)) {
-      void patchSettings({ systemPrompt: systemPrompt! })
-    } else if (systemPrompt !== undefined && systemPrompt !== null && systemPrompt.trim().length === 0) {
-      // Empty prompt from a provider-only save — silently skip to avoid clobbering the server.
-    } else if (systemPrompt && roleLevel < ROLE.MAINTAINER) {
-      console.warn(
-        `[FRO-234] skipping systemPrompt patch — role ${roleLevel} is below server floor ${ROLE.MAINTAINER}. ` +
-        "A sub-MAINTAINER device cannot write project-wide AI instructions.",
-      )
-    }
-    // Also refresh the server-fetched base record so other fields stay in sync.
+  const handleProjectUpdated = useCallback(async (_updated: ProjectRecord | undefined) => {
+    // AQU-2342: step components save the project instructions through
+    // patchSettings themselves; the copilot's role text is no longer
+    // user-editable, so nothing here mirrors `completionSettings.systemPrompt`
+    // back to the server any more (that was FRO-234's job). Just refresh the
+    // server-fetched base record so other fields stay in sync.
     refresh()
-  }, [refresh, patchSettings, project?.syncRole?.level])
+  }, [refresh])
 
   // All hooks below must live above the early return so hook count is stable
   // across renders (React throws "Rendered more hooks" otherwise).
@@ -11359,8 +11562,15 @@ export function ProjectWorkspace() {
 
   // Project Settings is a large route chunk. Warm it after the editor mounts
   // so opening the modal never suspends behind the first module download.
+  //
+  // AQU-2079: the glossary too. The Terminology item below is pinned — it is
+  // always on screen in this workspace — and opening it used to replace the
+  // whole surface with "Loading terminology…" while the chunk downloaded (~8 s
+  // on dev before an empty termbase could say "No terms yet"). Warming it here
+  // means the surface paints as soon as the terms read returns.
   useEffect(() => {
     void import("./ProjectSettings")
+    void import("./GlossaryEditor")
   }, [])
 
   const projectNavItems = useMemo(() => {
@@ -11734,15 +11944,12 @@ export function ProjectWorkspace() {
     const holders = audioCueCells ?? batchAudioCells
     let untranscribed = 0
     for (const c of holders) if (needsTranscription(c)) untranscribed++
-    // Includes takes already in the current voice. The menu stays so a quality
-    // change or a new reference clip can overwrite them. The dialog counts only
-    // the cells the chosen quality will actually convert.
-    const plan = planChangeVoiceAll(holders, tts.laneSettings, undefined, tts.settings)
-    // Takes a voice is using as its reference clip are not converted, but the
-    // menu stays so the confirmation can say how many were left out.
-    const voiceChangeable = plan.targets.length + plan.skipped["up-to-date"] + plan.skipped["voice-reference"]
+    // Includes takes already in the current voice, so the menu stays and the
+    // confirmation can say there is nothing left to convert.
+    const plan = planChangeVoiceAll(holders, tts.laneSettings)
+    const voiceChangeable = plan.targets.length + plan.skipped["up-to-date"]
     return { untranscribed, unsynthesized: synthTargets.length, voiceChangeable }
-  }, [activeFileId, batchAudioCells, audioCueCells, synthTargets, tts.settings, tts.laneSettings])
+  }, [activeFileId, batchAudioCells, audioCueCells, synthTargets, tts.laneSettings])
 
   /**
    * AQU-490: takes this viewer could still validate — the number the bulk
@@ -11965,17 +12172,13 @@ export function ProjectWorkspace() {
       source: "selection" | "workspace-action",
       repetitions: BulkRepetitionOutcome | null = null,
     ) => {
-      posthog.capture(BATCH_VALIDATE_ATTEMPTED, batchValidateTelemetry(summary, source))
+      analytics.capture(BATCH_VALIDATE_ATTEMPTED, batchValidateTelemetry(summary, source))
       const message = batchValidateToast(summary, t, formatLocaleList)
       // AQU-1486: still ONE message — the repetitions' note and Undo ride on it.
       showBulkValidateToast(message, prepareBulkRepetitionsRef.current?.toastExtras(repetitions) ?? { note: null })
     },
-    [t, formatLocaleList],
+    [t, formatLocaleList, analytics],
   )
-
-  // Read at confirm time. The batch dialog owns the quality; this stays out of
-  // the actionArgs dependency list so picking a quality does not rebuild it.
-  const batchVoiceQualityRef = useRef<ChangeVoiceQuality>(getChangeVoiceQuality())
 
   // AQU-983: the file modal writes these, then the menu action runs. Defaults
   // match the old one-shot actions: next package of empty cells, and no
@@ -12310,20 +12513,16 @@ export function ProjectWorkspace() {
         projectId: project.id,
         cells: audioCueCells ?? fileCells,
         settings: tts.laneSettings,
-        allSettings: tts.settings,
         session: frontierSession ?? null,
         author: currentUsername,
-        diffusionSteps: CHANGE_VOICE_QUALITY_STEPS[batchVoiceQualityRef.current],
       }).then(({ converted, failed, skipped }) => {
-        const notCloned = skipped["not-cloned"]
-        const voiceReference = skipped["voice-reference"]
+        const notTrained = skipped["not-trained"]
         toast.add({
           type: failed > 0 ? "warning" : "success",
           title: t("audio.changeVoice.batchDone", { count: converted }),
           description: [
             failed > 0 ? t("audio.changeVoice.batchFailed", { count: failed }) : null,
-            notCloned > 0 ? t("audio.changeVoice.batchSkippedNotCloned", { count: notCloned }) : null,
-            voiceReference > 0 ? t("audio.changeVoice.batchSkippedVoiceReference", { count: voiceReference }) : null,
+            notTrained > 0 ? t("audio.changeVoice.batchSkippedNotTrained", { count: notTrained }) : null,
           ].filter(Boolean).join(" ") || undefined,
         })
         revalidateCells?.()
@@ -12340,16 +12539,10 @@ export function ProjectWorkspace() {
   // actions with `requiresConfirmation` route through the ConfirmActionDialog
   // (rendered below) instead of running immediately.
   const [pendingActionConfirm, setPendingActionConfirm] = useState<WorkspaceAction | null>(null)
-  const [batchVoiceQuality, setBatchVoiceQuality] = useState<ChangeVoiceQuality>(() => getChangeVoiceQuality())
   const changeVoicePlan = useMemo(() => {
     if (pendingActionConfirm?.id !== "change-voice-all") return null
-    return planChangeVoiceAll(
-      audioCueCells ?? batchAudioCells,
-      tts.laneSettings,
-      CHANGE_VOICE_QUALITY_STEPS[batchVoiceQuality],
-      tts.settings,
-    )
-  }, [pendingActionConfirm, audioCueCells, batchAudioCells, tts.settings, tts.laneSettings, batchVoiceQuality])
+    return planChangeVoiceAll(audioCueCells ?? batchAudioCells, tts.laneSettings)
+  }, [pendingActionConfirm, audioCueCells, batchAudioCells, tts.laneSettings])
   const [batchFileModal, setBatchFileModal] = useState<BatchFileModalRequest | null>(null)
   const handleWorkspaceAction = useCallback((action: WorkspaceAction) => {
     if (action.comingSoon) return
@@ -12367,11 +12560,6 @@ export function ProjectWorkspace() {
       return
     }
     if (action.requiresConfirmation) {
-      if (action.id === "change-voice-all") {
-        const quality = getChangeVoiceQuality()
-        batchVoiceQualityRef.current = quality
-        setBatchVoiceQuality(quality)
-      }
       setPendingActionConfirm(action)
     } else {
       action.run(actionCtx, actionArgs)
@@ -12863,8 +13051,9 @@ export function ProjectWorkspace() {
    * The per-line control shipped on the Audio view's voice card, and a
    * time-ordered file had no voice cards — the lens drew the timeline instead
    * — so on video and subtitle files the only Change voice was the whole-file
-   * one. (AQU-1758: no file has voice cards now; this menu is the one.) Dubbing is where cloned voices are
-   * used most, so that is exactly backwards.
+   * one. (AQU-1758: no file has voice cards now; this menu is the one.)
+   * Dubbing is where character and trained voices are used most, so that is
+   * exactly backwards.
    *
    * Both halves read the line the same way the Audio tab does: its cast voice
    * (`resolveCastVoice`, the picker's own three-part rule) and the take
@@ -12881,32 +13070,15 @@ export function ProjectWorkspace() {
       const take = changeVoiceSourceTake(cell)
       if (!take) return null
       const voice = resolveCastVoice(tts.laneSettings, cell, cell.ttsSettings?.voiceId)
-      // A take some voice is cloned FROM is left alone: converting it would
-      // change what that voice sounds like. Same rule as the whole-file run.
-      // Checked against the WHOLE library on purpose (AQU-2037): a voice on
-      // another lane cloned from this take would be changed just the same.
-      const isReference = takeUsedByVoice(cell, tts.settings)
       const status = getTtsStatus(ttsStatusKey(cell.id))
       const busy = status.kind === "loading" || status.kind === "synthesizing"
-      const blockers = {} as Record<ChangeVoiceQuality, ChangeVoiceMenuBlocker | null>
-      for (const quality of CHANGE_VOICE_QUALITIES) {
-        blockers[quality] = isReference
-          ? "voice-reference"
-          : busy
-            ? "busy"
-            : changeVoiceBlocker(cell, voice, CHANGE_VOICE_QUALITY_STEPS[quality])
-      }
-      return {
-        voiceName: voice.name,
-        quality: changeVoiceQualityForSteps(voiceChangedSteps(take.audioId)),
-        blockers,
-      }
+      return { voiceName: voice.name, blocker: busy ? "busy" : changeVoiceBlocker(cell, voice) }
     },
-    [tts.settings, tts.laneSettings],
+    [tts.laneSettings],
   )
 
   const handleChangeTimelineVoice = useCallback(
-    async (cellId: string, quality: ChangeVoiceQuality, opts?: { voice?: Voice }) => {
+    async (cellId: string, opts?: { voice?: Voice }) => {
       if (!project || !frontierSession) return
       const owner = resolveTakeCellRef.current(cellId)
       if (!owner) return
@@ -12914,10 +13086,9 @@ export function ProjectWorkspace() {
       // AQU-2212: a pick re-voices into the voice picked, before the cast
       // settings catch up; otherwise into the line's own cast voice.
       const voice = opts?.voice ?? resolveCastVoice(tts.laneSettings, cell, cell.ttsSettings?.voiceId)
-      const diffusionSteps = CHANGE_VOICE_QUALITY_STEPS[quality]
       // The menu disables what cannot run, but it was drawn from an earlier
       // render: re-check before spending a conversion.
-      if (takeUsedByVoice(cell, tts.settings) || changeVoiceBlocker(cell, voice, diffusionSteps) != null) return
+      if (changeVoiceBlocker(cell, voice) != null) return
       toast.add({ type: "info", title: t("editor.timeline.changeVoiceStarted", { name: voice.name }) })
       const ok = await whileVoicingAs(cellId, voice.name, () => changeCellVoice({
         projectId: project.id,
@@ -12925,7 +13096,6 @@ export function ProjectWorkspace() {
         voice,
         session: frontierSession,
         author: currentUsername,
-        diffusionSteps,
         ...(activeLane ? { targetLang: activeLane } : {}),
         recordStep: true, // decision 11: an Undo step
       }))
@@ -12944,7 +13114,7 @@ export function ProjectWorkspace() {
         ...(failure.kind === "error" && failure.message ? { description: failure.message } : {}),
       })
     },
-    [project, frontierSession, tts.settings, tts.laneSettings, currentUsername, activeLane, revalidateCells, t],
+    [project, frontierSession, tts.laneSettings, currentUsername, activeLane, revalidateCells, t],
   )
   // AQU-1758 / AQU-2212: the Audio view card's rules (lib/audio/line-voice),
   // run through the timeline's own Regenerate and Change voice so every way of
@@ -12959,8 +13129,8 @@ export function ProjectWorkspace() {
     const status = getTtsStatus(ttsStatusKey(cellId))
     return status.kind === "loading" || status.kind === "synthesizing"
   }
-  const runLineVoice = (cellId: string, action: LineVoiceAction, voice: Voice, cell: CellData): void => {
-    if (action === "change") void handleChangeTimelineVoice(cellId, lineChangeQuality(cell), { voice })
+  const runLineVoice = (cellId: string, action: LineVoiceAction, voice: Voice): void => {
+    if (action === "change") void handleChangeTimelineVoice(cellId, { voice })
     else void handleRegenerateTimelineVoice(cellId, RECORDING_SLOT, { voiceId: voice.id })
   }
   lineVoiceRef.current = {
@@ -12972,16 +13142,14 @@ export function ProjectWorkspace() {
       if (!voice || laneWriteFrozen || lineVoiceBusy(cell.id)) return
       const action = lineVoiceActionFor(cell, voice, {
         generateReady: lineVoiceGenerateReady(cell),
-        takeIsReference: takeUsedByVoice(cell, tts.settings),
       })
-      if (action) runLineVoice(cell.id, action, voice, cell)
+      if (action) runLineVoice(cell.id, action, voice)
     },
     pending: (cellId) => {
       const cell = resolveTakeCellRef.current(cellId)?.cell
       if (!cell) return null
       const found = lineVoicePending(tts.laneSettings, cell, {
         generateReady: lineVoiceGenerateReady(cell),
-        takeIsReference: takeUsedByVoice(cell, tts.settings),
         canEdit: !laneWriteFrozen,
         busy: lineVoiceBusy(cellId),
       })
@@ -12992,34 +13160,10 @@ export function ProjectWorkspace() {
       if (!cell) return
       const found = lineVoicePending(tts.laneSettings, cell, {
         generateReady: lineVoiceGenerateReady(cell),
-        takeIsReference: takeUsedByVoice(cell, tts.settings),
         canEdit: !laneWriteFrozen,
         busy: lineVoiceBusy(cellId),
       })
-      if (found) runLineVoice(cellId, found.action, found.voice, cell)
-    },
-    cloneName: (cellId) => {
-      const cell = resolveTakeCellRef.current(cellId)?.cell
-      return cell ? cloneNameSuggestion(cell, currentUsername) : ""
-    },
-    // AQU-2212: Clone voice from take, without the dialog.
-    clone: async (cellId, audioId, name) => {
-      const level = project?.syncRole?.level ?? null
-      if (!project || !canManageVoices(level, project.projectLeadsManageVoices === true, activeLaneId != null)) {
-        throw new Error(denialMessage(t, ROLE.MAINTAINER, level))
-      }
-      const cell = resolveTakeCellRef.current(cellId)?.cell
-      if (!cell) return
-      const voice = await cloneVoiceFromTake({
-        projectId: project.id, cell, audioId, name,
-        provider: resolveTtsProvider(tts.settings),
-        // A clone rides Inworld or Gemini, which take no target language.
-        paletteIndex: tts.allVoices.length,
-        session: frontierSession ?? null,
-      })
-      const next = upsertVoice(tts.allVoices, voice, tts.laneSettings?.defaultVoiceId)
-      await tts.saveTts({ voices: next.voices, defaultVoiceId: next.defaultVoiceId })
-      toast.add({ type: "success", title: t("editor.voice.clonedToast", { name: voice.name }) })
+      if (found) runLineVoice(cellId, found.action, found.voice)
     },
   }
   // Publish the resolver declared near the top of the component. Assigned on
@@ -13155,10 +13299,10 @@ export function ProjectWorkspace() {
       },
       changeVoice: (cellId) => {
         const state = timelineChangeVoiceState(cellId)
-        if (!state) return t("editor.station.voiceUnavailable")
-        const quality = CHANGE_VOICE_QUALITIES.find((q) => state.blockers[q] == null)
-        if (!quality) return t("editor.station.voiceUnavailable")
-        handleChangeTimelineVoice(cellId, quality)
+        // AQU-2291: one conversion, no quality to pick — it runs when nothing
+        // blocks it, else the Station says why not.
+        if (!state || state.blocker != null) return t("editor.station.voiceUnavailable")
+        handleChangeTimelineVoice(cellId)
         return null
       },
       approvalsNeeded: Math.max(1, project.validationCountAudio ?? 1),
@@ -16162,11 +16306,6 @@ export function ProjectWorkspace() {
     ttsSettings: tts.laneSettings,
     onAssignCastVoice: handleAssignCastVoice,
     onClearCastVoice: handleClearCastVoice,
-    onCloneVoice: (cellId) => {
-      setMakeCharacterSeedCellId(cellId)
-      setMakeCharacterMode("clone")
-      setMakeCharacterOpen(true)
-    },
   })
   const extensionEditorPipeline = useExtensionEditorServices({
     enabled: extensionEditorActive,
@@ -16251,9 +16390,9 @@ export function ProjectWorkspace() {
   }, [getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCells])
 
   // AQU-646: single-speaker path — adopt the imported file's speaker as a cast
-  // voice without diarizing. Extracts a reference from the file's (longest)
-  // media sections, creates a voice carrying it, and assigns the file's media
-  // cells to it so per-cell generate speaks in the imported voice.
+  // voice without diarizing: a plain voice named for the file, assigned to the
+  // file's media cells. AQU-2291: no clone clip is lifted from the sections any
+  // more — to sound like the speaker, train a voice from their recordings.
   const [adoptingSpeaker, setAdoptingSpeaker] = useState(false)
   const handleAdoptSpeakerVoice = useCallback(async () => {
     if (!project?.id || !activeFileId || adoptingSpeaker) return
@@ -16263,40 +16402,17 @@ export function ProjectWorkspace() {
       const clip = findFileClip(cells)
       if (!clip) return
       const media = cells.filter((c) => c.medium === "media")
-      // Sections' trim windows (in-clip coordinates); fall back to the cell's
-      // timeline placement, which equals the trim for imported files.
-      const ranges = media.map((c) => {
-        const att = c.selectedAudioId ? c.attachments?.[c.selectedAudioId] : undefined
-        return {
-          startMs: att?.trimStartMs ?? Math.round((c.startTime ?? 0) * 1000),
-          endMs: att?.trimEndMs ?? Math.round((c.endTime ?? 0) * 1000),
-        }
-      })
 
       const name = activeFile?.name ? `Speaker — ${activeFile.name}` : "Imported speaker"
       const voices = [...getVoiceLibrary(tts.settings)]
       let voiceId = voices.find((v) => v.name === name)?.id
-      if (!voiceId || !voices.find((v) => v.id === voiceId)?.referenceAudioId) {
-        const referenceAudioId = await extractVoiceReference({
-          projectId: project.id,
-          fileId: activeFileId,
-          clipUrl: clip.url,
-          ranges,
-          getSyncToken: (_pid, fid) => getTokenForFile(fid),
+      if (!voiceId) {
+        voiceId = newVoiceId()
+        voices.push({
+          id: voiceId,
+          name,
+          color: VOICE_PALETTE[voices.length % VOICE_PALETTE.length],
         })
-        if (!referenceAudioId) return
-        if (voiceId) {
-          const idx = voices.findIndex((v) => v.id === voiceId)
-          voices[idx] = { ...voices[idx], referenceAudioId }
-        } else {
-          voiceId = newVoiceId()
-          voices.push({
-            id: voiceId,
-            name,
-            color: VOICE_PALETTE[voices.length % VOICE_PALETTE.length],
-            referenceAudioId,
-          })
-        }
       }
 
       // AQU-2038: casting those lines is this lane's call, like every other
@@ -16312,7 +16428,7 @@ export function ProjectWorkspace() {
     } finally {
       setAdoptingSpeaker(false)
     }
-  }, [project?.id, activeFileId, activeFile?.name, adoptingSpeaker, cellStore, getTokenForFile, tts.settings, tts.saveTts, activeLane])
+  }, [project?.id, activeFileId, activeFile?.name, adoptingSpeaker, cellStore, tts.settings, tts.saveTts, activeLane])
 
   const fileMenuItems = useMemo((): OverflowMenuItem[] => {
     if (!activeFileId) return []
@@ -16547,9 +16663,7 @@ export function ProjectWorkspace() {
             onActiveTabChange={setDockTab}
             filesPanel={
               <div className="flex flex-col gap-2 p-3" aria-hidden="true">
-                {Array.from({ length: 6 }).map((_, index) => (
-                  <Skeleton key={index} className="h-8" style={{ width: `${72 + (index % 3) * 8}%` }} />
-                ))}
+                <div className="flex h-8 items-center px-2"><LoadingCursor /></div>
               </div>
             }
             agentPanel={null}
@@ -17864,9 +17978,7 @@ export function ProjectWorkspace() {
                     onChangeVoice={handleChangeTimelineVoice}
                     changeVoiceStateFor={timelineChangeVoiceState}
                     // AQU-1758: what the Audio view's voice card did for a take.
-                    onMakeCharacter={makeCharacter}
-                    onCloneTake={cloneTake}
-                    cloneNameFor={handleCloneNameFor}
+                    onTrainFromTake={trainFromTake}
                     lineVoiceFor={handleLineVoicePending}
                     onApplyLineVoice={handleApplyLineVoice}
                     takeVoiceFor={timelineTakeVoice}
@@ -18858,7 +18970,6 @@ export function ProjectWorkspace() {
           audioId={combinedEditor.audioId}
           url={combinedEditor.url}
           voiceId={combinedEditor.voiceId}
-          referenceAudioId={combinedEditor.referenceAudioId}
           cells={combinedEditor.cells}
           session={frontierSession}
           username={currentUsername}
@@ -18953,6 +19064,9 @@ export function ProjectWorkspace() {
             disabledReason: recordingsDisabledReason,
             languageLabel: laneLabels[activeLane] || activeLaneTargetLanguage || null,
             file: recordingsTarget,
+            // AQU-2302: asking the assistant is a project lead's, like the
+            // route's own floor (500); contributors get the saved namings.
+            canAskAssistant: (project?.syncRole?.level ?? 0) >= ROLE.PROJECT_LEAD,
           }}
           linkSource={{
             // AQU-1527: the Import dialog's "From another project" tile runs
@@ -19121,8 +19235,10 @@ export function ProjectWorkspace() {
           onClose={() => {
             setMakeCharacterOpen(false)
             setMakeCharacterSeedCellId(null)
+            setMakeCharacterSeedAudioId(null)
           }}
           seedCellId={makeCharacterSeedCellId}
+          seedAudioId={makeCharacterSeedAudioId}
           initialMode={makeCharacterMode}
           // Added from a line's dropdown: cast it on that line too.
           onAdded={makeCharacterMode === "character" && makeCharacterSeedCellId
@@ -19188,47 +19304,17 @@ export function ProjectWorkspace() {
           onOpenChange={(v) => { if (!v) setPendingActionConfirm(null) }}
           title={t(pendingActionConfirm.requiresConfirmation.titleKey)}
           description={pendingActionConfirm.id === "change-voice-all"
-            ? t("nav.workspaceActions.changeVoiceAll.description", {
-                n: changeVoicePlan?.targets.length ?? 0,
-                quality: t(CHANGE_VOICE_QUALITY_LABEL[batchVoiceQuality]),
-              })
+            ? t("nav.workspaceActions.changeVoiceAll.description", { n: changeVoicePlan?.targets.length ?? 0 })
             : pendingActionConfirm.requiresConfirmation.description(actionCtx, t, formatLocaleList)}
           notice={pendingActionConfirm.id === "split-quotes" && project && openTargetLaneCount(project) >= 2
             ? t("nav.workspaceActions.splitQuotes.multiLaneWarning")
-            : pendingActionConfirm.id === "change-voice-all" && (changeVoicePlan?.skipped["voice-reference"] ?? 0) > 0
-              ? t("audio.changeVoice.batchSkippedVoiceReference", { count: changeVoicePlan?.skipped["voice-reference"] ?? 0 })
+            : pendingActionConfirm.id === "change-voice-all" && (changeVoicePlan?.skipped["not-trained"] ?? 0) > 0
+              ? t("audio.changeVoice.batchSkippedNotTrained", { count: changeVoicePlan?.skipped["not-trained"] ?? 0 })
               : undefined}
           confirmLabel={t(pendingActionConfirm.requiresConfirmation.confirmLabelKey)}
           canConfirm={pendingActionConfirm.requiresConfirmation.canConfirm?.(actionCtx) ?? true}
           checkboxLabel={t("nav.workspaceActions.confirmAttribution")}
           confirmDisabled={pendingActionConfirm.id === "change-voice-all" && (changeVoicePlan?.targets.length ?? 0) === 0}
-          extra={pendingActionConfirm.id === "change-voice-all" ? (
-            <div className="flex flex-col gap-1.5">
-              <span className="text-sm font-medium">{t("editor.voice.changeVoiceQuality")}</span>
-              <Select
-                value={batchVoiceQuality}
-                onValueChange={(value) => {
-                  if (value != null && (CHANGE_VOICE_QUALITIES as readonly string[]).includes(value)) {
-                    const quality = value as ChangeVoiceQuality
-                    batchVoiceQualityRef.current = quality
-                    setBatchVoiceQuality(quality)
-                    setChangeVoiceQuality(quality)
-                  }
-                }}
-              >
-                <SelectTrigger size="sm" className="w-full!" aria-label={t("editor.voice.changeVoiceQuality")}>
-                  {t(CHANGE_VOICE_QUALITY_LABEL[batchVoiceQuality])}
-                </SelectTrigger>
-                <SelectContent align="start">
-                  <SelectGroup>
-                    {CHANGE_VOICE_QUALITIES.map((q) => (
-                      <SelectItem key={q} value={q}>{t(CHANGE_VOICE_QUALITY_LABEL[q])}</SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </div>
-          ) : undefined}
           onConfirm={() => { pendingActionConfirm.run(actionCtx, actionArgs); setPendingActionConfirm(null) }}
         />
       )}
@@ -19323,6 +19409,20 @@ export function ProjectWorkspace() {
           setPendingCellRemoval(null)
         }}
       />
+      {/* AQU-2308: name a start→end range of this file's lines. Rendered only
+          while a range is being named — the pickers hold one row per cell, and
+          building that for every file nobody is dividing is pure waste. */}
+      {milestoneDraft && milestoneDialogData && (
+        <SetMilestoneDialog
+          onDismiss={() => setMilestoneDraft(null)}
+          cells={milestoneDialogData.cells}
+          divisions={milestoneDialogData.divisions}
+          existing={fileMilestones.milestones}
+          initialStartCellId={milestoneDraft.startCellId}
+          initialEndCellId={milestoneDraft.endCellId}
+          onSubmit={(draft) => { void handleSubmitMilestone(draft) }}
+        />
+      )}
       {/* AQU-1759: what a split will make, before it makes it. */}
       <SplitAtQuotesDialog
         pieces={pendingQuoteSplit?.pieces ?? null}

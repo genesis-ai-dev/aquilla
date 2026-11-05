@@ -180,6 +180,16 @@ export default defineConfig(({ mode }) => ({
     ],
   },
   build: {
+    // AQU-2377: WebKit can retain failed modulepreload responses across a
+    // document reload after an offline navigation. Let dynamic imports load
+    // their JS graph normally; retain initial HTML preloads and Vite's CSS
+    // loading/error helper (including vite:preloadError).
+    // https://bugs.webkit.org/show_bug.cgi?id=270357
+    // Tradeoff: cold lazy routes discover JS dependencies through imports,
+    // rather than fetching the whole dependency graph in parallel up front.
+    modulePreload: {
+      resolveDependencies: (_filename, deps, { hostType }) => hostType === "html" ? deps : [],
+    },
     // hls.js (~508kB), dash.js (~961kB), and web-worker AI bundles (whisper,
     // mms) are intentionally large and non-initial (lazy route or
     // worker). Raise the threshold so vite doesn't warn about things we

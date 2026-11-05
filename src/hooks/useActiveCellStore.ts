@@ -27,6 +27,7 @@ import {
 } from "@/lib/progress/audio-progress-cells"
 import { deriveMilestoneNavigation, type MilestoneNavigationCell } from "@/lib/milestone-navigation"
 import type { ImportMilestoneKind } from "../../shared/import-contract"
+import type { FileMilestone } from "../../db/shared/file-milestones"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
 import { useOfflineStore } from "@/context/OfflineStoreContext"
@@ -52,6 +53,9 @@ const NO_AUDIT: CellAuditStats = Object.freeze({
   waivers: Object.freeze([]) as unknown as CellAuditStats["waivers"],
 })
 const EMPTY_TAKES: ReadonlySet<string> = new Set()
+/** AQU-2308: stable identity, so the navigation cache holds for a file with
+ *  no hand-set milestones (the overwhelmingly common case). */
+const EMPTY_USER_MILESTONES: readonly FileMilestone[] = []
 /**
  * The per-cell bits the navigation rollup counts, and the progress cache
  * compares: a cell's entry in the mask changes exactly when one of its five
@@ -320,6 +324,19 @@ interface RuntimeContext {
    */
   countStructural?: boolean
   /**
+   * AQU-2308: the file's hand-set milestones (`useFileMilestones`).
+   *
+   * They are a navigation INPUT, not cell data, so they arrive here rather
+   * than on any row: the store owns which division each cell belongs to, and
+   * that is the one place the navigator, the split-into-milestones pages and
+   * the per-division figures can agree about it.
+   *
+   * `getNavigationStructure`'s cache compares this by reference, so the hook
+   * must hand over a stable array (its `useMemo`d result) or the navigator
+   * rebuilds on every render.
+   */
+  userMilestones?: readonly FileMilestone[]
+  /**
    * AQU-1422: reveal cells parked with "Hide cell" instead of dropping them
    * from the display list. Absent ⇒ false, which is what every reader sees.
    *
@@ -450,6 +467,7 @@ export class CellStore {
     ownTakeCellIds: EMPTY_TAKES,
     lane: "",
     countStructural: true,
+    userMilestones: EMPTY_USER_MILESTONES,
   }
 
   /** The language the rows are sorted for now. It follows the hook's `lane`
@@ -459,6 +477,14 @@ export class CellStore {
   }
 
   private order: string[] = []
+  // AQU-1442: the file the loaded rows were installed under, which is NOT the
+  // same thing as `ctx.fileId`. On a file switch `setRuntime` flips `ctx.fileId`
+  // to the incoming file while `order` still holds the outgoing file's rows
+  // (`setRuntime` only re-partitions them against the lane), so `getFileId()`
+  // alone cannot tell a reader whose rows it is about to resolve against.
+  // Stamped wherever rows land, cleared by `reset()`. Read via
+  // `getLoadedRowsFileId()`.
+  private rowsFileId: string | null = null
   private sourceOrder: string[] = []
   private targetOrder: string[] = []
   private indexById = new Map<string, number>()
@@ -528,6 +554,10 @@ export class CellStore {
   private navIndex: CellNavigationEntry[] = []
   private navigationStructureCache = new WeakMap<readonly string[], {
     cells: MilestoneNavigationCell[]
+    /** AQU-2308: the hand-set milestones this structure was derived from. The
+     *  cache compares the CELLS it was built from, so without this a
+     *  newly-saved milestone would be invisible until a cell changed. */
+    userMilestones: readonly FileMilestone[]
     derived: ReturnType<typeof deriveMilestoneNavigation>
   }>()
   private navigationProgressCache = new WeakMap<readonly string[], {
@@ -689,9 +719,14 @@ export class CellStore {
     // progress number counts, so it invalidates exactly what a threshold
     // change does — hence it rides the same branch below.
     const nextCountStructural = next.countStructural ?? true
+    const nextUserMilestones = next.userMilestones ?? this.ctx.userMilestones ?? EMPTY_USER_MILESTONES
+    // AQU-2308: a hand-set milestone changes which division every covered cell
+    // belongs to, and therefore every per-division figure — the same blast
+    // radius a structural-policy flip has, so it rides the same branch.
     const userChanged = this.ctx.username !== next.username
       || this.ctx.requiredValidations !== next.requiredValidations
       || (this.ctx.countStructural ?? true) !== nextCountStructural
+      || (this.ctx.userMilestones ?? EMPTY_USER_MILESTONES) !== nextUserMilestones
     const laneChanged = (this.ctx.lane ?? "") !== nextLane
     // AQU-1422: revealing or re-hiding parked cells changes the DISPLAY LIST,
     // not any cell's data — so it bumps `listVersion` (what useCellIds watches)
@@ -705,6 +740,9 @@ export class CellStore {
       ...next,
       lane: nextLane,
       countStructural: nextCountStructural,
+      // AQU-2308: same hand-off as the take set — the milestones arrive from
+      // their own hook, so a runtime update that omits them must not blank them.
+      userMilestones: nextUserMilestones,
       ownTakeCellIds: next.ownTakeCellIds ?? this.ctx.ownTakeCellIds,
       // AQU-2110: same hand-off, same rule.
       audioProgressCellIds: next.audioProgressCellIds ?? this.ctx.audioProgressCellIds,
@@ -786,6 +824,9 @@ export class CellStore {
     // content until something else touches its cell.
     const clearedIds = this.order
     this.order = []
+    // AQU-1442: the rows these belonged to are gone, so no file owns the
+    // (now empty) row set until the next load stamps it.
+    this.rowsFileId = null
     this.sourceOrder = []
     this.targetOrder = []
     this.indexById = new Map()
@@ -846,6 +887,14 @@ export class CellStore {
   getAllVersion = (): number => this.fileVersion
   getCellVersion = (cellId: string): number => this.cellVersionById.get(cellId) ?? 0
   getFileId = (): string | null => this.ctx.fileId
+  /** AQU-1442: the file the loaded rows actually came from, for readers that
+   *  must not resolve a lookup against the outgoing file's rows mid-switch.
+   *  `getFileId()` is the file the store is *pointed at*; this is the file the
+   *  rows *are*. They differ for the whole window between `setRuntime` flipping
+   *  the runtime file and the incoming file's rows landing. Null whenever no
+   *  rows are loaded, so a caller never has to pair it with a count check to
+   *  know the answer is "none yet". */
+  getLoadedRowsFileId = (): string | null => this.order.length === 0 ? null : this.rowsFileId
   getProjectId = (): string | null => this.ctx.projectId
   getCellCount = (): number => this.order.length
   getMaxServerSeq = (): number | null => this.maxServerSeq
@@ -1486,6 +1535,10 @@ export class CellStore {
     // re-reads it on listVersion; a fresh array here made every
     // getNavigationIndex(displayCellIds) call miss the store's own index.
     this.order = orderChanged ? order : this.order
+    // AQU-1442: every row install goes through here (full load, cached load and
+    // delta merge alike), and `doFetch` has already pointed `ctx` at the file it
+    // fetched, so this is the provenance of the rows now in `order`.
+    this.rowsFileId = this.ctx.fileId
     this.sourceOrder = sourceOrder
     this.targetOrder = targetOrder
     this.sourceById = sourceById
@@ -2863,8 +2916,12 @@ export class CellStore {
    * Arrays can be mutated by structural edits, so identity alone is not enough.
    */
   private getNavigationStructure(ids: readonly string[]): ReturnType<typeof deriveMilestoneNavigation> {
+    const userMilestones = this.ctx.userMilestones ?? EMPTY_USER_MILESTONES
     const cached = this.navigationStructureCache.get(ids)
-    if (cached && cached.cells.length === ids.length && ids.every((id, index) => {
+    if (cached
+      && cached.cells.length === ids.length
+      && cached.userMilestones === userMilestones
+      && ids.every((id, index) => {
       const previous = cached.cells[index]
       const source = this.sourceById.get(id)
       const target = this.targetById.get(id)
@@ -2875,7 +2932,7 @@ export class CellStore {
         && previous.canonicalRef === (target?.canonicalRef ?? source?.canonicalRef ?? null)
         && previous.startMs === startMs
         && previous.metadata === (source?.metadata ?? target?.metadata ?? null)
-    })) return cached.derived
+      })) return cached.derived
     this.work.navigationStructureRebuilds++
     this.work.cellsWalked += ids.length
     const cells = ids.map((id): MilestoneNavigationCell => {
@@ -2890,8 +2947,8 @@ export class CellStore {
         metadata: source?.metadata ?? target?.metadata ?? null,
       }
     })
-    const derived = deriveMilestoneNavigation(cells)
-    this.navigationStructureCache.set(ids, { cells, derived })
+    const derived = deriveMilestoneNavigation(cells, { userMilestones })
+    this.navigationStructureCache.set(ids, { cells, userMilestones, derived })
     return derived
   }
 
@@ -2981,24 +3038,53 @@ export class CellStore {
         translated: 0, validated: 0, textTranslated: 0, audioRecorded: 0, audioValidated: 0, total: 0,
       }
       const subsections: CellNavigationSubsection[] = []
-      for (let offset = 0; offset < group.cellIds.length; offset += MILESTONE_SUBSECTION_SIZE) {
-        const cellIds = group.cellIds.slice(offset, offset + MILESTONE_SUBSECTION_SIZE)
-        const firstCellId = cellIds[0]
-        const counts = progressFor(cellIds)
+      // AQU-2308: a division the file supplied that has hand-set milestones
+      // inside it lists THOSE as its sub-entries, by name, instead of the
+      // anonymous 50-cell ranges. The division's own `cellIds` — and so its
+      // own figures, summed below — are untouched either way: nesting adds a
+      // way in, it does not re-partition the parent.
+      if (group.named?.length) {
+        for (const named of group.named) {
+          const cellIds = [...named.cellIds]
+          subsections.push({
+            key: named.key,
+            label: named.label,
+            firstCellId: named.firstCellId,
+            firstIndex: displayIndexByCellId.get(named.firstCellId) ?? group.firstIndex,
+            cellIds,
+            ...progressFor(cellIds),
+          })
+        }
+        // The parent's figures still cover the WHOLE division, including any
+        // cells no hand-set milestone reaches, so they are summed from the
+        // division rather than from these sub-entries.
+        const counts = progressFor(group.cellIds)
         progress.translated += counts.translated
         progress.validated += counts.validated
         progress.textTranslated += counts.textTranslated
         progress.audioRecorded += counts.audioRecorded
         progress.audioValidated += counts.audioValidated
         progress.total += counts.total
-        subsections.push({
-          key: `${group.milestone.key}:range:${firstCellId}`,
-          label: `${offset + 1}–${offset + cellIds.length}`,
-          firstCellId,
-          firstIndex: displayIndexByCellId.get(firstCellId) ?? group.firstIndex,
-          cellIds,
-          ...counts,
-        })
+      } else {
+        for (let offset = 0; offset < group.cellIds.length; offset += MILESTONE_SUBSECTION_SIZE) {
+          const cellIds = group.cellIds.slice(offset, offset + MILESTONE_SUBSECTION_SIZE)
+          const firstCellId = cellIds[0]
+          const counts = progressFor(cellIds)
+          progress.translated += counts.translated
+          progress.validated += counts.validated
+          progress.textTranslated += counts.textTranslated
+          progress.audioRecorded += counts.audioRecorded
+          progress.audioValidated += counts.audioValidated
+          progress.total += counts.total
+          subsections.push({
+            key: `${group.milestone.key}:range:${firstCellId}`,
+            label: `${offset + 1}–${offset + cellIds.length}`,
+            firstCellId,
+            firstIndex: displayIndexByCellId.get(firstCellId) ?? group.firstIndex,
+            cellIds,
+            ...counts,
+          })
+        }
       }
       return {
         key: group.milestone.key,
@@ -3069,6 +3155,9 @@ export interface UseActiveCellStoreOptions {
    *  from the display list. Default false. Only ever passed true for someone who
    *  may edit source text — see RuntimeContext.showHidden. */
   showHidden?: boolean
+  /** AQU-2308: the file's hand-set milestones (`useFileMilestones`). Must be a
+   *  stable array — see RuntimeContext.userMilestones. */
+  userMilestones?: readonly FileMilestone[]
 }
 
 export interface UseActiveCellStoreResult {
@@ -3107,6 +3196,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     lane = "",
     countStructural = true,
     showHidden = false,
+    userMilestones = EMPTY_USER_MILESTONES,
   } = opts
   const store = useMemo(() => new CellStore(), [])
   // Debug handle for the console and e2e probes. Published from an effect
@@ -3159,8 +3249,8 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     // rows against it on change (instant lane switch, no refetch). This effect
     // is defined before the (projectId, fileId, enabled) reload effect, so on a
     // lane change the store's active lane is updated before any fetch runs.
-    store.setRuntime({ projectId, fileId, username, requiredValidations, auditStats, auditStatsComplete, lane, countStructural, showHidden })
-  }, [auditStats, auditStatsComplete, countStructural, fileId, lane, projectId, requiredValidations, showHidden, store, username])
+    store.setRuntime({ projectId, fileId, username, requiredValidations, auditStats, auditStatsComplete, lane, countStructural, showHidden, userMilestones })
+  }, [auditStats, auditStatsComplete, countStructural, fileId, lane, projectId, requiredValidations, showHidden, userMilestones, store, username])
 
   // I4 cache hygiene: never persist optimistic values as server rows.
   // `applyOptimisticTargetEdit` mutates the target row in place (value under
@@ -3208,6 +3298,13 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     inFlightRef.current = true
     // A full fetch supersedes any queued soft one.
     if (!soft) pendingSoftRefetchRef.current = false
+    // A full fetch is loading from the moment it is asked for, not from the
+    // moment the sync token and the cache read (two async hops) resolve. The
+    // project socket can open inside that window, and with zero rows and no
+    // loading flag the editor then read "<file> is empty" for a frame — a
+    // flash for people, and a gap with no busy region that let the Jev
+    // readiness gate through onto a file still loading (QA job 1853).
+    if (!soft) setIsLoading(true)
 
     // Tauri offline branch: an offline-ready project's cells live in the
     // local LiveStore `cells` table (kept live-synced by the Phase 3 sync

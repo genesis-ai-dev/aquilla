@@ -11,7 +11,7 @@ import * as restClient from "@/lib/sync/project-settings"
 import { getProject } from "@/lib/store/project-index"
 import type { CompletionSettings, ProjectRecord } from "@/lib/parsers/types"
 
-vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn(), captureException: vi.fn() } }))
+vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn(), captureException: vi.fn() } }))
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "test-jwt", username: "ryder" } }),
 }))

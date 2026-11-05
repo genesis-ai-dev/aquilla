@@ -1,3 +1,4 @@
+import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 import { useEffect } from "react"
 import { useForm } from "@tanstack/react-form"
 import { z } from "zod"
@@ -17,7 +18,6 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { createOrg } from "@/lib/frontier/orgs"
 import { isFieldInvalid } from "@/lib/forms/field-state"
 import { useSubmitError } from "@/lib/forms/submit-error"
-import posthog from "@/lib/posthog"
 import { ORG_CREATED } from "@/lib/event-names"
 import { useT } from "@/lib/i18n/I18nProvider"
 
@@ -28,6 +28,7 @@ interface OrgCreateDialogProps {
 }
 
 export function OrgCreateDialog({ open, onOpenChange, onCreated }: OrgCreateDialogProps) {
+  const analytics = useAccountAnalytics()
   const t = useT()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
@@ -47,7 +48,7 @@ export function OrgCreateDialog({ open, onOpenChange, onCreated }: OrgCreateDial
       clearSubmitError()
       try {
         const org = await createOrg(jwt, value.name.trim())
-        posthog.capture(ORG_CREATED, { org_id: org.id })
+        analytics.capture(ORG_CREATED, { org_id: org.id })
         onCreated(org.id)
         onOpenChange(false)
       } catch (err) {

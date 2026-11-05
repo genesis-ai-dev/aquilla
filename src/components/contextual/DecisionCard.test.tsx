@@ -136,7 +136,7 @@ describe("DecisionCard — fact questions", () => {
     vi.mocked(actOnContextualDecision).mockClear()
     const onResolved = vi.fn()
     render(<DecisionCard decision={kin} projectId="p1" onResolved={onResolved} />)
-    expect(screen.getByText(/becomes a project decision/)).toBeInTheDocument()
+    expect(screen.getByText(/is added to the project instructions/)).toBeInTheDocument()
     expect(screen.queryByTestId("decision-context")).toBeNull()
     await userEvent.click(screen.getByRole("button", { name: "Andrew is younger" }))
     expect(actOnContextualDecision).toHaveBeenCalledWith("p1", "d2", "answer", { answer: "younger" })

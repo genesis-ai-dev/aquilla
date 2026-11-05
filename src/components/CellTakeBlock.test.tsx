@@ -388,24 +388,31 @@ describe("whose recording it acts on", () => {
   })
 })
 
-// AQU-1758: the Audio view's voice card turned a take into a character; the
-// take in the Recording tab does now.
-describe("make a character from this voice", () => {
-  it("offers it on the take and asks for it once", () => {
-    const onMakeCharacter = vi.fn()
-    draw({ onMakeCharacter })
-    fireEvent.click(screen.getByRole("button", { name: "Make a character from this voice" }))
-    expect(onMakeCharacter).toHaveBeenCalledTimes(1)
+// AQU-1758: the Audio view's voice card turned a take into a voice; the take
+// in the Recording tab does now. AQU-2291: by training, not cloning.
+describe("train a voice from this recording", () => {
+  it("offers it on a person's take and asks for it once", () => {
+    const onTrainFromTake = vi.fn()
+    draw({ onTrainFromTake })
+    fireEvent.click(screen.getByRole("button", { name: "Train a voice from this recording" }))
+    expect(onTrainFromTake).toHaveBeenCalledTimes(1)
   })
 
-  it("is not offered when nobody handed it in", () => {
+  it("is not offered when nobody handed it in, or on a generated take", () => {
     draw()
-    expect(screen.queryByTestId("cell-take-make-character")).toBeNull()
+    expect(screen.queryByTestId("cell-take-train-voice")).toBeNull()
+    const owner = cueOwner()
+    const audioId = owner.selectedAudioId!
+    draw({
+      onTrainFromTake: vi.fn(),
+      owner: { ...owner, attachments: { [audioId]: { ...owner.attachments![audioId]!, voiceId: "v-1" } } } as CellData,
+    })
+    expect(screen.queryByTestId("cell-take-train-voice")).toBeNull()
   })
 
   it("cannot be pressed by someone who cannot edit", () => {
-    draw({ onMakeCharacter: vi.fn(), editable: false })
-    expect(screen.getByTestId("cell-take-make-character")).toBeDisabled()
+    draw({ onTrainFromTake: vi.fn(), editable: false })
+    expect(screen.getByTestId("cell-take-train-voice")).toBeDisabled()
   })
 })
 

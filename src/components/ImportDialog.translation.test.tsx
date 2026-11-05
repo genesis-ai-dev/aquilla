@@ -39,7 +39,7 @@ vi.mock("@/lib/import", () => ({
   applyEBibleTargetImport: vi.fn(),
   prepareImportFile: vi.fn(),
 }))
-vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn() } }))
+vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn() } }))
 vi.mock("@/lib/import-file-target-proposals", () => ({
   stageTargetImportAsProposals: vi.fn(),
 }))
@@ -185,10 +185,10 @@ describe("AQU-1365: the Import dialog's first screen", () => {
   })
 
   it("greys out New source text for a Contributor and opens on A translation", () => {
-    renderDialog({ sourceDisabledReason: "You're a Contributor; you need at least Project lead access." })
+    renderDialog({ sourceDisabledReason: "You're a Contributor; you need at least Project Lead access." })
     expect(screen.getByRole("radio", { name: /^New source text/ })).toHaveAttribute("aria-disabled", "true")
     expect(screen.getByTestId("import-intent-source")).toHaveAttribute(
-      "data-tooltip", "You're a Contributor; you need at least Project lead access.",
+      "data-tooltip", "You're a Contributor; you need at least Project Lead access.",
     )
     expect(screen.getByRole("radio", { name: /^A translation/ })).toHaveAttribute("aria-checked", "true")
     expect(screen.getByTestId("translation-chooser")).toBeInTheDocument()
@@ -196,7 +196,7 @@ describe("AQU-1365: the Import dialog's first screen", () => {
 
   it("tells a Contributor in a project with no files that a project lead adds the source first", () => {
     renderDialog({
-      sourceDisabledReason: "You're a Contributor; you need at least Project lead access.",
+      sourceDisabledReason: "You're a Contributor; you need at least Project Lead access.",
       translation: host({ files: [], activeFileId: null, activeFileCells: [] }),
     })
     expect(screen.getByTestId("import-intent-translation")).toHaveAttribute(

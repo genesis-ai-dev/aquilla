@@ -30,6 +30,7 @@ const PLACEHOLDERS: Record<string, string> = {
   recordings: "A phrase with a count, such as '12 recordings'.",
   lines: "A phrase with a count, such as '12 lines'.",
   list: "A list of lines and how many takes each gets, such as '2 takes on Genesis 1:1 and 3 takes on Genesis 1:4'.",
+  explanation: "One sentence the AI assistant wrote about what each part of the file names means, in English, such as 'Mt is Matthew, then the chapter and the verse.'",
 }
 
 /** Where a key sits, by its prefix, for keys without a hand-written note. */
@@ -45,6 +46,7 @@ const SURFACE_NOTES: ReadonlyArray<readonly [string, string]> = [
   ["recordingsUpload.failures.", "The list of recordings that couldn't upload: its title, or why one failed. A full sentence."],
   ["recordingsUpload.join.", "The 'Join into one recording' action on a recording made of pieces."],
   ["recordingsUpload.takes.", "Names the lines that get more than one take from this upload, in the preview and in the summary after it."],
+  ["recordingsUpload.assistant.", "In the preview, when none of the namings the app knows fits some recordings: the offer to let the AI assistant work out the folder's naming from the file names, and what it found."],
 ]
 
 /** Placeholders a message uses, across its plural forms. */
@@ -228,11 +230,72 @@ const KEYS = {
     "recordingsUpload.join.tooltip": "Make one recording of these pieces, in order. The pieces stay in the take list.",
     "recordingsUpload.join.joining": "Joining…",
     "recordingsUpload.join.failed": "Couldn't join these pieces: {message}",
+    // AQU-2302: the assistant works out a folder's naming
+    "recordingsUpload.assistant.offer": plural({
+      one: "None of the namings the app knows fits {count} of these recordings.",
+      other: "None of the namings the app knows fits {count} of these recordings.",
+    }),
+    "recordingsUpload.assistant.ask": "Work out the naming with the assistant",
+    "recordingsUpload.assistant.infoLabel": "About working out the naming",
+    "recordingsUpload.assistant.info": "The assistant sees up to 30 of the file names and the project's book and file names, never the recordings. It answers with a naming rule, which is checked here before any recording is placed. Your team keeps the rule only when the names say the book and the chapter and it placed every file; then a folder named the same way is read next time without asking.",
+    "recordingsUpload.assistant.asking": "Asking the assistant…",
+    "recordingsUpload.assistant.read": "The assistant read the names like this: {explanation}",
+    "recordingsUpload.assistant.readSaved": "Read with your team's saved naming: {explanation}",
+    "recordingsUpload.assistant.placed": plural({
+      one: "{count} recording is placed by this naming.",
+      other: "{count} recordings are placed by this naming.",
+    }),
+    "recordingsUpload.assistant.undo": "Don't use this naming",
+    "recordingsUpload.assistant.forget": "Forget this naming for the team",
+    "recordingsUpload.assistant.byRule": "by the assistant's rule",
+    "recordingsUpload.assistant.bySavedRule": "by your team's saved rule",
+    "recordingsUpload.assistant.noFit": "The assistant's naming didn't fit these recordings, so they won't be uploaded.",
+    "recordingsUpload.assistant.noFitChoose": "The assistant's naming didn't fit these recordings. Choose their lines by hand.",
+    "recordingsUpload.assistant.failed": "The assistant couldn't work out the naming just now. Try again in a moment.",
+    "recordingsUpload.assistant.limit": "Your team has used its AI allowance for now, so the assistant can't read this folder.",
+    "recordingsUpload.assistant.failedFinal": "The assistant couldn't work out the naming, so these recordings won't be uploaded.",
+    "recordingsUpload.assistant.failedFinalChoose": "The assistant couldn't work out the naming. Choose their lines by hand.",
+    "recordingsUpload.assistant.leadOnly": "A project lead can ask the assistant to work out this naming.",
+    "recordingsUpload.assistant.keeps": "Your team will keep this naming for next time.",
+    "recordingsUpload.assistant.thisUploadOnly": "This naming is used for this upload only.",
+    "recordingsUpload.assistant.whyNotKeptLabel": "Why this naming isn't kept",
+    "recordingsUpload.assistant.notKept.fixed": "The names don't say the book and the chapter themselves.",
+    "recordingsUpload.assistant.notKept.bookWord": "A word in the names stands for a book here, but it isn't a name of that book.",
+    "recordingsUpload.assistant.notKept.notAllPlaced": "Not every recording was placed by reading its name.",
+    "recordingsUpload.assistant.notKept.sharedLine": "Two recordings landed on the same line.",
+    "recordingsUpload.assistant.notKept.scattered": "The recordings didn't land in order on lines close together, so the names may have been misread.",
+    "recordingsUpload.assistant.notKept.notInOrg": "Only a project lead who is also in the project's organization can keep a naming for the team.",
+    "recordingsUpload.assistant.forgetFailed": "The naming wasn't forgotten, so your team still has it.",
 } satisfies Record<string, MessageValue>
 
 type Key = keyof typeof KEYS
 
 const OWN_NOTES: Partial<Record<Key, ContextEntry>> = {
+  "recordingsUpload.assistant.ask": { description: "Button in the preview: let the AI assistant work out how this folder's recordings are named, so they can be placed on their lines.", maxLength: 48 },
+  "recordingsUpload.assistant.infoLabel": { description: "Accessible name of the (i) beside the offer to let the assistant work out the naming." },
+  "recordingsUpload.assistant.info": { description: "Text that opens under the (i): what the assistant sees (only file names and the project's book and file names), that its rule is checked before anything is placed, and that the team keeps it only when the file names themselves say the book and chapter and the rule placed every file. Full sentences." },
+  "recordingsUpload.assistant.asking": { description: "Shown while the assistant works out the naming." },
+  "recordingsUpload.assistant.undo": { description: "Button: stop using the naming the assistant (or the team) worked out, for this upload only; those recordings go back to being chosen by hand.", maxLength: 32 },
+  "recordingsUpload.assistant.forget": { description: "Button for a project lead, beside a naming the team saved from an earlier upload: delete that saved naming for the whole team, so later uploads don't use it either.", maxLength: 40 },
+  "recordingsUpload.assistant.byRule": { description: "Small grey text in a preview row: this recording's line came from the naming rule the AI assistant worked out.", maxLength: 32 },
+  "recordingsUpload.assistant.bySavedRule": { description: "Small grey text in a preview row: this recording's line came from a naming rule the team saved from an earlier upload.", maxLength: 32 },
+  "recordingsUpload.assistant.noFit": { description: "Shown when the assistant's naming rule didn't place the recordings, even after a second try, and no file's lines are loaded to choose from, so those recordings won't upload. Full sentences." },
+  "recordingsUpload.assistant.noFitChoose": { description: "Shown when the assistant's naming rule didn't place the recordings, even after a second try, and the person can still choose each one's line by hand with the 'Choose a line' button beside it. Full sentences." },
+  "recordingsUpload.assistant.failed": { description: "Shown when the assistant couldn't be reached or answered with something unusable. Full sentences." },
+  "recordingsUpload.assistant.limit": { description: "Shown when the team's AI allowance is used up, so the assistant can't help. Full sentences." },
+  "recordingsUpload.assistant.failedFinal": { description: "Shown after the assistant has been asked twice for this folder and still couldn't be reached or answered with something unusable; it isn't offered again, and no file's lines are loaded to choose from, so those recordings won't upload. Full sentences." },
+  "recordingsUpload.assistant.failedFinalChoose": { description: "Shown after the assistant has been asked twice for this folder and still couldn't be reached or answered with something unusable; it isn't offered again, and the person can choose each recording's line by hand with the 'Choose a line' button beside it. Full sentences." },
+  "recordingsUpload.assistant.leadOnly": { description: "Shown to a contributor, in place of the offer to ask the AI assistant: only a project lead can ask it to work out how this folder's recordings are named. Full sentence." },
+  "recordingsUpload.assistant.keeps": { description: "Quiet line under the assistant's note in the preview: when the person uploads, the team will keep this naming, so the next folder named the same way is read without asking. Full sentence." },
+  "recordingsUpload.assistant.thisUploadOnly": { description: "Quiet line under the assistant's note in the preview: this naming places these recordings, but the team won't keep it for later uploads. An (i) beside it opens the reason. Full sentence." },
+  "recordingsUpload.assistant.whyNotKeptLabel": { description: "Accessible name of the (i) beside 'This naming is used for this upload only.', which opens why the naming isn't kept." },
+  "recordingsUpload.assistant.notKept.fixed": { description: "Why a naming isn't kept for the team, opened by an (i): the file names don't say which book and chapter they are, so the assistant had to supply them, and they would be wrong for another folder. Full sentence." },
+  "recordingsUpload.assistant.notKept.bookWord": { description: "Why a naming isn't kept for the team, opened by an (i): a word in the file names (such as 'Sermon') was taken to mean a Bible book, but it isn't a name of that book. Full sentence." },
+  "recordingsUpload.assistant.notKept.notAllPlaced": { description: "Why a naming isn't kept for the team, opened by an (i): some recordings weren't placed by reading their names (they were left out, or their lines were chosen by hand). Full sentence." },
+  "recordingsUpload.assistant.notKept.sharedLine": { description: "Why a naming isn't kept for the team, opened by an (i): two recordings landed on the same line as takes of each other, a sign the naming was misread. Full sentence." },
+  "recordingsUpload.assistant.notKept.scattered": { description: "Why a naming isn't kept for the team, opened by an (i): in folder order the recordings landed out of order or on lines far apart, a sign the naming was misread. Full sentence." },
+  "recordingsUpload.assistant.notKept.notInOrg": { description: "Why a naming isn't kept for the team, opened by an (i): the person is a project lead, but not a member of the project's organization, and only members can keep namings for the team. Full sentence." },
+  "recordingsUpload.assistant.forgetFailed": { description: "Shown after 'Forget this naming for the team' when the team's saved naming couldn't be deleted (refused or no connection): it is still saved and still in use. Full sentence." },
   "recordingsUpload.intent.title": { description: "Title of the third card in the Import dialog's 'What are you importing?' choice: audio recordings for lines already in the project. Short noun.", maxLength: 24 },
   "recordingsUpload.menuItem": { description: "Item in a file's ⋯ menu in the sidebar that opens the upload of many recordings into that file.", maxLength: 32 },
   "recordingsUpload.preview.byName": { description: "Small grey text in a preview row: this recording's line was found from the book and verse in its name.", maxLength: 20 },

@@ -34,6 +34,11 @@ export interface WritePathSettings {
   validationNamedUsersAudio?: unknown
   allowSelfValidationAudio?: unknown
   harmonize_min_role?: unknown
+  /**
+   * AQU-2305: this project's own import floor, honoured only when it is a
+   * role level STRICTER than its org's (db/shared/import-floor.ts).
+   */
+  importMinRole?: unknown
 }
 
 /**
@@ -51,6 +56,7 @@ export const WRITE_PATH_COLUMNS: Readonly<Record<string, keyof WritePathSettings
   wp_validation_named_users_audio: 'validationNamedUsersAudio',
   wp_allow_self_validation_audio: 'allowSelfValidationAudio',
   wp_harmonize_min_role: 'harmonize_min_role',
+  wp_import_min_role: 'importMinRole',
 }
 
 /** The projected columns, in SELECT order. */

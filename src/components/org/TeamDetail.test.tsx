@@ -640,7 +640,7 @@ describe("TeamDetail member role editing (AQU-139)", () => {
 // AQU-2289 (Sam, Oct 29, settings cleanup 4c option A): every Change role and
 // Add member opens the same dialog, with the same roles for the same level.
 describe("TeamDetail one role dialog (AQU-2289)", () => {
-  const ALL = ["Viewer", "Commenter", "Reviewer", "Contributor", "Project lead", "Maintainer", "Owner"]
+  const ALL = ["Viewer", "Commenter", "Reviewer", "Contributor", "Project Lead", "Maintainer", "Owner"]
 
   async function offered(comboName: RegExp): Promise<string[]> {
     fireEvent.click(screen.getByRole("combobox", { name: comboName }))
@@ -663,7 +663,7 @@ describe("TeamDetail one role dialog (AQU-2289)", () => {
     await openMemberMenu("anna")
     await act(async () => { (await screen.findByRole("menuitem", { name: /change role/i })).click() })
     expect(screen.getByTestId("role-dialog")).toHaveAttribute("data-role-level", "org")
-    expect(await offered(/role for anna/i)).toEqual(["Viewer", "Contributor", "Project lead", "Maintainer", "Owner"])
+    expect(await offered(/role for anna/i)).toEqual(["Viewer", "Contributor", "Project Lead", "Maintainer", "Owner"])
   })
 
   it("offers no organization Change role for someone outside the org: saving it would add them to the org", async () => {
@@ -693,7 +693,7 @@ describe("TeamDetail one role dialog (AQU-2289)", () => {
     await act(async () => { screen.getByRole("menuitem", { name: /^change role$/i }).click() })
     expect(screen.getByTestId("role-dialog")).toHaveAttribute("data-role-level", "project")
     expect(await offered(/role for bambara/i)).toEqual([
-      "Viewer", "Commenter", "Reviewer", "Contributor", "Project lead", "Maintainer",
+      "Viewer", "Commenter", "Reviewer", "Contributor", "Project Lead", "Maintainer",
     ])
   })
 

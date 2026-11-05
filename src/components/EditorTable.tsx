@@ -30,6 +30,7 @@ import {
   CloudOff,
   Quote,
   Flag,
+  CaptionsOff,
 } from "lucide-react"
 import { InlineToolsTab, useHasInlineTools } from "@/components/tools/ToolMounts"
 import { FillsTwiceIndicator } from "@/components/ui/fills-twice-indicator"
@@ -189,7 +190,11 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { InfoNote, NOTE_CONTENT_CLASS, NoteOnClick } from "@/components/ui/info-note"
 import { CellPresenceBadges } from "./CellPresenceBadges"
 import { categorizeAiError } from "@/lib/audio/ai-error"
-import { CellAiStatusPopover } from "./CellAiStatusPopover"
+// AQU-1619: the row shows a failed transcription itself, instead of leaving it
+// to the Recording tab inside cell details.
+import { clearTranscribeStatus, useTranscribeStatus, type TranscribeStatus } from "@/lib/audio/transcribe-status"
+import { transcribeTake } from "@/lib/audio/transcribe-take"
+import { CellAiStatusPopover, type AiStatusAction } from "./CellAiStatusPopover"
 import { InlineAiError } from "./InlineAiError"
 import { CellNumberPill } from "./cell/CellNumberPill"
 import {
@@ -736,6 +741,63 @@ function SynthStatusBadge({
     )
   }
   return null
+}
+
+/**
+ * AQU-1619: the gutter's view of a FAILED transcription, beside the synth badge
+ * and drawn the same way — icon trigger, full heading/explanation/actions in the
+ * popover.
+ *
+ * The failure was always recorded (`transcribe-status.ts`, keyed by the clip),
+ * but the only thing reading it was the Recording tab's badge inside cell
+ * details. So a hosted run that hit the per-user rate limit left the row looking
+ * exactly like a line nobody had tried yet: "Too many requests right now", and
+ * the Retry that goes with it, were a panel-open away on every one of the rows
+ * that got refused.
+ *
+ * Only the error state. The progress states (model download, "transcribing",
+ * the "✓ N words" flash) stay the Recording tab's — a w-5 gutter cannot say
+ * them, and a run in flight is already visible on the timeline.
+ */
+function TranscribeStatusBadge({
+  status, audioId, onRetry,
+}: {
+  status: TranscribeStatus
+  /** The clip the status is filed under — dismissing clears that key. */
+  audioId: string
+  /** Re-runs ASR on this line. Absent (no session / no clip) offers only Dismiss. */
+  onRetry?: () => void
+}) {
+  const t = useT()
+  if (status.kind !== "error") return null
+  const error = categorizeAiError(status.message)
+  const dismiss = () => clearTranscribeStatus(audioId)
+  const actions: AiStatusAction[] = []
+  if (onRetry) {
+    // Same label and same dismiss-then-run order as the Recording tab's badge,
+    // so the two surfaces offer one action, not two that differ.
+    actions.push({ label: "Retry", primary: true, onClick: () => { dismiss(); onRetry() } })
+  }
+  return (
+    <CellAiStatusPopover
+      error={error}
+      actions={actions}
+      onDismiss={dismiss}
+      trigger={
+        <button
+          type="button"
+          aria-label={t("workspace.transcribeBadge.failed")}
+          data-testid="transcribe-status-error"
+          className={cn(
+            gutterIconShell,
+            "bg-destructive/15 text-destructive hover:bg-destructive/25",
+          )}
+        >
+          <CaptionsOff className="h-3 w-3" />
+        </button>
+      }
+    />
+  )
 }
 
 // Stable empty sentinels so per-cell "map.get(id) ?? []" derivations keep a
@@ -8070,6 +8132,28 @@ function EditorRow({
   const isSynthBusy = synthStatus.kind === "loading" || synthStatus.kind === "synthesizing"
   const isSynthError = synthStatus.kind === "error"
 
+  // AQU-1619: this line's ASR outcome, on the clip the batch runner and the
+  // Recording tab both file it under (`cell.selectedAudioId`) — so the row reads
+  // exactly the status those runs write, with no second store to keep in step.
+  const rowAudioId = cell.selectedAudioId
+  const transcribeStatus = useTranscribeStatus(rowAudioId)
+  const isTranscribeError = transcribeStatus.kind === "error"
+  // Retry runs the same sequence the Recording tab's Transcribe button runs
+  // (`transcribe-take.ts`): ASR language by provenance, then the flush that
+  // lands the timings. Without a clip there is nothing to re-run.
+  const handleRetryTranscribe = useCallback(() => {
+    if (!rowAudioId) return
+    void transcribeTake({
+      project,
+      owner: cell,
+      selectedAudioId: rowAudioId,
+      slot: cell.attachments?.[rowAudioId]?.slot,
+      session: rowSession,
+      ...(activeLane ? { targetLang: activeLane } : {}),
+      ...(onCellCommitted ? { onCommitted: onCellCommitted } : {}),
+    })
+  }, [rowAudioId, project, cell, rowSession, activeLane, onCellCommitted])
+
   // Human references help people and DOM agents identify a cell.
   const namedRef = namedCellRef(cell)
   const cellRef = namedRef || t("editor.row.rowFallbackRef", { index: rowIndex + 1 })
@@ -8518,6 +8602,15 @@ function EditorRow({
                 )}
                 {(isSynthBusy || isSynthError) && (
                   <SynthStatusBadge status={synthStatus} cellId={cell.id} projectId={project.id} onOpenAudioSetup={onOpenAudioSetup} />
+                )}
+                {/* AQU-1619: a refused transcription, on the row that was
+                    refused — not only inside cell details. */}
+                {isTranscribeError && rowAudioId && (
+                  <TranscribeStatusBadge
+                    status={transcribeStatus}
+                    audioId={rowAudioId}
+                    {...(rowSession ? { onRetry: handleRetryTranscribe } : {})}
+                  />
                 )}
                 {/* AQU-599: persistent "has comment" indicator. Unlike the
                     action-rail comment button (which only appears on

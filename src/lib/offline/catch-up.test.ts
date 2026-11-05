@@ -4,7 +4,7 @@ import { createStorePromise, type Store } from "@livestore/livestore"
 import type { CellRow, FileSummary } from "@/lib/sync/cells-read-types"
 import type { CellsDeltaResult } from "@/lib/sync/cells-read"
 import { catchUpProject, type CatchUpDeps } from "./catch-up"
-import { cellRowId, DEFAULT_LANE_KEY, events, localLaneKey, schema, syncCursorId, tables } from "./schema"
+import { CELL_FIELDS_VERSION, cellRowId, DEFAULT_LANE_KEY, events, localLaneKey, schema, syncCursorId, tables } from "./schema"
 
 const P = "proj1"
 const F = "file1"
@@ -150,7 +150,9 @@ describe("catchUpProject — full sync (no cursor)", () => {
 
 describe("catchUpProject — delta (trusted cursor)", () => {
   beforeEach(() => {
-    store.commit(events.syncCursorSet({ projectId: P, fileId: F, serverSeq: 50, projectEpoch: 2 }))
+    store.commit(
+      events.syncCursorSet({ projectId: P, fileId: F, serverSeq: 50, projectEpoch: 2, fieldsVersion: CELL_FIELDS_VERSION }),
+    )
   })
 
   it("applies changed cells, removes deleted ones, and advances the cursor", async () => {
@@ -173,8 +175,30 @@ describe("catchUpProject — delta (trusted cursor)", () => {
     expect(cell("v1", "target")?.value).toBe("web edit")
     expect(cell("v9", "target")).toBeUndefined()
     expect(cell("untouched", "target")?.value).toBe("keep")
-    expect(cursor()).toMatchObject({ serverSeq: 60, projectEpoch: 2 })
+    expect(cursor()).toMatchObject({ serverSeq: 60, projectEpoch: 2, fieldsVersion: CELL_FIELDS_VERSION })
     expect(deps.streamFileCells).not.toHaveBeenCalled()
+  })
+
+  it("lands a cell being hidden, and shown again (AQU-1422)", async () => {
+    seedLocal(row("v1", "source", "a"))
+    const hidden = { ...row("v1", "source", "a"), hidden: true }
+    await catchUpProject(
+      store,
+      P,
+      "tok",
+      makeDeps({ delta: { kind: "delta", changedCellIds: ["v1"], cells: [hidden], maxServerSeq: 60, projectEpoch: 2 } }),
+    )
+    expect(cell("v1", "source")?.hidden).toBe(true)
+
+    await catchUpProject(
+      store,
+      P,
+      "tok",
+      makeDeps({
+        delta: { kind: "delta", changedCellIds: ["v1"], cells: [row("v1", "source", "a")], maxServerSeq: 61, projectEpoch: 2 },
+      }),
+    )
+    expect(cell("v1", "source")?.hidden).toBe(false)
   })
 
   it("skips a cell with a queued local edit and holds the cursor", async () => {
@@ -292,6 +316,33 @@ describe("catchUpProject — delta (trusted cursor)", () => {
     await catchUpProject(store, P, "tok", deps)
     expect(cell("v1", "target", "lane-es")).toMatchObject({ value: "es text", laneId: "lane-es" })
     expect(cell("v1", "target", localLaneKey(null, "es"))).toBeUndefined()
+  })
+
+  it("full-streams once a cursor from before CELL_FIELDS_VERSION, so rows that never changed pick up `hidden` (AQU-1422)", async () => {
+    // A cursor an earlier build minted: no fieldsVersion.
+    store.commit(events.syncCursorSet({ projectId: P, fileId: F, serverSeq: 50, projectEpoch: 2 }))
+    seedLocal(row("v1", "source", "a"))
+    seedLocal(row("v2", "source", "b"))
+    const deps = makeDeps({
+      pages: [
+        { rows: [{ ...row("v1", "source", "a"), hidden: true }, row("v2", "source", "b")], maxServerSeq: 70, projectEpoch: 2 },
+      ],
+    })
+
+    const result = await catchUpProject(store, P, "tok", deps)
+
+    expect(deps.fetchCellsDelta).not.toHaveBeenCalled()
+    expect(cell("v1", "source")?.hidden).toBe(true)
+    expect(cell("v2", "source")?.hidden).toBe(false)
+    // Only the row that differed was written.
+    expect(result.rowsChanged).toBe(1)
+    expect(cursor()).toMatchObject({ serverSeq: 70, projectEpoch: 2, fieldsVersion: CELL_FIELDS_VERSION })
+
+    // From then on, deltas.
+    const next = makeDeps({ delta: { kind: "delta", changedCellIds: [], cells: [], maxServerSeq: 70, projectEpoch: 2 } })
+    await catchUpProject(store, P, "tok", next)
+    expect(next.fetchCellsDelta).toHaveBeenCalled()
+    expect(next.streamFileCells).not.toHaveBeenCalled()
   })
 
   it("falls back to a full stream when the server asks for a resync", async () => {

@@ -64,6 +64,7 @@ interface OfflineCellsRow {
   aiDrafted: boolean
   sequenceIndex: number
   canonicalRef: string | null
+  hidden: boolean
 }
 
 function toCellRow(row: OfflineCellsRow): CellRow {
@@ -87,6 +88,8 @@ function toCellRow(row: OfflineCellsRow): CellRow {
     aiDrafted: row.aiDrafted,
     sequenceIndex: row.sequenceIndex,
     canonicalRef: row.canonicalRef,
+    // AQU-1422: absent on a visible row, as the server sends it.
+    ...(row.hidden ? { hidden: true } : {}),
     // Not tracked by the offline schema — buildCellData() in useCells.ts
     // already tolerates these being absent/default the same way it handles
     // legacy pre-migration server rows. `type`/`anchorCellId`/`lastEditor`

@@ -9,7 +9,9 @@
  *
  * Per file: a `?since=` delta when a trusted cursor exists (sync_cursors),
  * else a full stream. The cursor rules mirror useCells.ts (M2-1 / AQU-943):
- *  - a cursor is trusted only with BOTH a watermark and a project epoch;
+ *  - a cursor is trusted only with BOTH a watermark and a project epoch, and
+ *    only at the current CELL_FIELDS_VERSION (so a newly tracked row field
+ *    reaches rows that haven't changed since);
  *  - a torn full stream (watermark moved between pages) mints no cursor;
  *  - if any server row was skipped to protect a queued local edit, the
  *    cursor holds instead of advancing past it.
@@ -26,7 +28,7 @@ import {
   fetchProjectFiles as fetchProjectFilesDefault,
   streamFileCells as streamFileCellsDefault,
 } from "@/lib/sync/cells-read"
-import { events, localLaneKey, syncCursorId, tables, type schema } from "./schema"
+import { CELL_FIELDS_VERSION, events, localLaneKey, syncCursorId, tables, type schema } from "./schema"
 
 type OfflineStore = Store<typeof schema>
 type CellSyncedArgs = Parameters<typeof events.cellSynced>[0]
@@ -76,6 +78,8 @@ export function toCellSyncedArgs(projectId: string, fileId: string, row: CellRow
     aiDrafted: row.aiDrafted ?? false,
     sequenceIndex: row.sequenceIndex ?? 0,
     canonicalRef: row.canonicalRef,
+    // AQU-1422: the server sends the key only on a hidden (source) row.
+    hidden: row.hidden === true,
   }
 }
 
@@ -90,7 +94,8 @@ export function sameAsLocal(local: LocalCell, args: CellSyncedArgs): boolean {
     local.validated === args.validated &&
     local.aiDrafted === args.aiDrafted &&
     local.sequenceIndex === args.sequenceIndex &&
-    local.canonicalRef === args.canonicalRef
+    local.canonicalRef === args.canonicalRef &&
+    local.hidden === (args.hidden ?? false)
   )
 }
 
@@ -214,8 +219,16 @@ function setCursor(
   projectEpoch: number | null,
 ): void {
   const current = readCursor(store, projectId, fileId)
-  if (current && current.serverSeq === serverSeq && current.projectEpoch === projectEpoch) return
-  store.commit(events.syncCursorSet({ projectId, fileId, serverSeq, projectEpoch }))
+  const fieldsVersion = serverSeq === null ? null : CELL_FIELDS_VERSION
+  if (
+    current &&
+    current.serverSeq === serverSeq &&
+    current.projectEpoch === projectEpoch &&
+    current.fieldsVersion === fieldsVersion
+  ) {
+    return
+  }
+  store.commit(events.syncCursorSet({ projectId, fileId, serverSeq, projectEpoch, fieldsVersion }))
 }
 
 /**
@@ -281,7 +294,9 @@ async function catchUpFile(
   const cursor = readCursor(store, projectId, fileId)
   const since = cursor?.serverSeq ?? null
   const epoch = cursor?.projectEpoch ?? null
-  if (since === null || epoch === null) return fullSyncFile(store, projectId, fileId, token, deps)
+  if (since === null || epoch === null || cursor?.fieldsVersion !== CELL_FIELDS_VERSION) {
+    return fullSyncFile(store, projectId, fileId, token, deps)
+  }
 
   const result = await deps.fetchCellsDelta(projectId, fileId, since, token, undefined, epoch)
   if (result.kind === "resync") return fullSyncFile(store, projectId, fileId, token, deps)

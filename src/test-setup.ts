@@ -53,8 +53,24 @@ Object.assign(globalThis, { BASE_UI_ANIMATIONS_DISABLED: true })
 // this with their own vi.mock. The Proxy returns a fresh no-op for every method
 // so we never have to enumerate PostHog's API surface here.
 vi.mock("@/lib/posthog", () => ({
-  default: new Proxy({}, { get: () => vi.fn() }),
+  default: new Proxy({}, { get: (_target, key) => key === "scope" ? () => new Proxy({}, { get: (_target, prop) => prop === "enabled" ? () => true : vi.fn() }) : vi.fn() }),
 }))
+
+// Optional analytics is isolated in ordinary product tests, just like the SDK
+// above. Consent/network integration tests explicitly unmock this controller.
+vi.mock("@/lib/analytics-account", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/analytics-account")>()
+  const state = { generation: 0, accountId: null, username: null, decision: null, ready: false, saving: false, error: false }
+  return { ...actual, analyticsAccount: {
+    getSnapshot: () => state, subscribe: () => () => {}, eligible: () => false, eligibleForSession: vi.fn(() => false),
+    activate: vi.fn(async () => {}), refresh: vi.fn(async () => {}),
+    invalidate: vi.fn(), suspend: vi.fn(), choose: vi.fn(async () => {}),
+  } }
+})
+vi.mock("@/hooks/useAccountAnalytics", async () => {
+  const { default: posthog } = await import("@/lib/posthog")
+  return { useAccountAnalytics: () => posthog }
+})
 
 // AQU-2262: Project settings host the undo history when no workspace does, and
 // the history reads and writes its copy on the server as it opens. Every

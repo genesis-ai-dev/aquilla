@@ -611,7 +611,7 @@ describe("ProjectOverview load states", () => {
       name: "Loading project details",
     })
     expect(status).toHaveAttribute("aria-busy", "true")
-    expect(status.querySelector("[data-slot='spinner']")).not.toBeNull()
+    expect(status.querySelector("[data-slot='loading-cursor']")).not.toBeNull()
     expect(screen.getByText("Loading project details…")).toBeInTheDocument()
     expect(screen.queryByRole("heading", { level: 1, name: "John" })).not.toBeInTheDocument()
   })
@@ -641,10 +641,10 @@ describe("ProjectOverview load states", () => {
 
     renderOverview()
 
-    expect(await screen.findByText(/sign in to see your workspace/i)).toBeInTheDocument()
+    expect(await screen.findByText(/log in to see your workspace/i)).toBeInTheDocument()
     expect(screen.queryByText("Loading…")).not.toBeInTheDocument()
 
-    const signIn = screen.getByRole("link", { name: /^sign in$/i })
+    const signIn = screen.getByRole("link", { name: /^log in$/i })
     expect(signIn).toHaveAttribute("href", "/login?next=%2Fprojects%2Fp1")
   })
 })

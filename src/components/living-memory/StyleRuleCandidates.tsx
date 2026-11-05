@@ -36,7 +36,7 @@ import type {
   StyleRuleCategory,
   UpdateStyleRuleInput,
 } from "@/lib/rules/style-rule-types"
-import type { StyleRuleLabels } from "./StyleRuleLibrary"
+import type { StyleRuleLabels } from "./style-rule-labels"
 
 const SEVERITIES: readonly StyleRule["severity"][] = ["minor", "major"]
 

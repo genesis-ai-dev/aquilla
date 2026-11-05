@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react"
-import type { ProjectRecord, CompletionSettings, ProjectTtsSettings } from "@/lib/parsers/types"
+import type { ProjectRecord, ProjectTtsSettings } from "@/lib/parsers/types"
+import { projectTranslationInstructions } from "@/lib/instructions/project-instructions"
 import { patchProject } from "@/lib/store/project-index"
 import { listProjectMembers } from "@/lib/frontier/members"
 import { useModelStatus, type ModelPrefetchStatus } from "@/lib/audio/prefetch"
@@ -63,7 +64,9 @@ export interface ChecklistState {
  * in user Settings, not project setup.
  */
 export function deriveChecklistState(
-  settings: Partial<CompletionSettings> | undefined,
+  // AQU-2342: the RESOLVED project instructions — the one text every AI draft
+  // reads (stored, else migrated from the old brief / system prompt).
+  instructions: string,
   collaboratorReach: number,
   aiModelsReady: boolean,
   fileCount: number = 0,
@@ -72,7 +75,7 @@ export function deriveChecklistState(
   aiSetupSkipped: boolean = false
 ): ChecklistState {
   const importFiles = fileCount > 0
-  const aiInstructions = Boolean(settings?.systemPrompt?.trim())
+  const aiInstructions = Boolean(instructions.trim())
   const collaborators = collaboratorReach > 0
   const aiModels = aiModelsReady || aiSetupSkipped
   const items = [importFiles, aiInstructions, collaborators, aiModels]
@@ -156,7 +159,7 @@ export function useSetupChecklist(project: ProjectRecord | null) {
   const aiModelsReady = deriveAiModelsReady(project?.ttsSettings, { mms })
 
   const state = deriveChecklistState(
-    project?.completionSettings,
+    projectTranslationInstructions(project),
     memberCount,
     aiModelsReady,
     project?.files?.length ?? 0,

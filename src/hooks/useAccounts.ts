@@ -1,9 +1,11 @@
+import { analyticsAccount } from "@/lib/analytics-account"
 import {
   createContext,
   createElement,
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -52,6 +54,7 @@ function useAccountsState(enabled = true) {
   const [sessions, setSessions] = useState<SessionSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [hydrated, setHydrated] = useState(false)
+  const [analyticsRevision, setAnalyticsRevision] = useState(0)
   const [loadError, setLoadError] = useState<Error | null>(null)
   const [transitionError, setTransitionError] = useState<Error | null>(null)
   const refreshRequestRef = useRef(0)
@@ -105,10 +108,19 @@ function useAccountsState(enabled = true) {
     setActive(nextActive)
     setSessions(nextSessions)
     setHydrated(true)
+    setAnalyticsRevision(value => value + 1)
     setLoadError(null)
     setTransitionError(null)
     setLoading(false)
   }, [qc])
+
+  // Collection may start only after React commits the matching identity/DOM.
+  // Storage transitions invalidate synchronously before any async work.
+  useLayoutEffect(() => {
+    if (!enabled || !hydrated || loading || loadError || transitionError) return
+    void analyticsAccount.activate(active)
+    return analyticsAccount.invalidate
+  }, [active, enabled, hydrated, loading, loadError, transitionError, analyticsRevision])
 
   // `loading` means "the first read hasn't landed yet", NOT "a refresh is in
   // flight". Re-entering it on every notification blanked whole pages behind
@@ -118,6 +130,7 @@ function useAccountsState(enabled = true) {
   // swaps atomically when the read resolves.
   const refresh = useCallback(async () => {
     if (!enabled) return
+    analyticsAccount.invalidate()
     const requestId = ++refreshRequestRef.current
     setTransitionError(null)
     try {
@@ -144,12 +157,14 @@ function useAccountsState(enabled = true) {
       cancelled = true
       // Invalidate an in-flight IDB read so it cannot publish into an
       // unmounted provider after its timeout or storage request resolves.
+      analyticsAccount.invalidate()
       refreshRequestRef.current += 1
       un()
     }
   }, [enabled, refresh])
 
   const adopt = useCallback(async (session: FrontierSession) => {
+    analyticsAccount.invalidate()
     const requestId = ++refreshRequestRef.current
     const key = sessionKey(session)
     const previousKey = prevKeyRef.current
@@ -171,6 +186,7 @@ function useAccountsState(enabled = true) {
       prevKeyRef.current = key
       setActive(session)
       setHydrated(true)
+      setAnalyticsRevision(value => value + 1)
       setSessions((current) => {
         const next: SessionSummary = {
           key,

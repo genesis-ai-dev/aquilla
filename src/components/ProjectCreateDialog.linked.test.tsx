@@ -90,7 +90,7 @@ vi.mock("@/lib/sync/archive", async (importOriginal) => {
 vi.mock("@/lib/store/project-index", () => ({
   createProject: vi.fn().mockResolvedValue(undefined),
 }))
-vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn() } }))
+vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn() } }))
 
 import { createCloudProject } from "@/lib/sync/cloud-projects"
 import { linkProjectSource, triggerLinkSync } from "@/lib/sync/archive"

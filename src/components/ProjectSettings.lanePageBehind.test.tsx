@@ -108,7 +108,7 @@ vi.mock("@/lib/store/user-api-keys", () => ({
 vi.mock("@/lib/metrics/use-post-edit-metrics", () => ({
   usePostEditMetrics: () => ({ metrics: null, isLoading: false, isError: false, revalidate: vi.fn() }),
 }))
-vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn(), captureException: vi.fn() } }))
+vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn(), captureException: vi.fn() } }))
 
 /** Stands in for the overview / workspace behind the dialog: its own settings
  *  instance, listing the target lanes that instance currently holds. */

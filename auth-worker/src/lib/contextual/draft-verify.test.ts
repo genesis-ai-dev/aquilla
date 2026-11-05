@@ -41,11 +41,38 @@ describe("performSpan", () => {
     expect(result.draft.promptVersion).toBe(
       `${CONTEXTUAL_PROMPT_VERSION}:${promptFingerprint(calls[0].system)}`,
     )
-    // Register rides the system prompt as a hard constraint; discourse context in user msg.
+    // Register rides the system prompt as a hard constraint; AQU-2342: so do
+    // the examples and the discourse context (one section order), and the
+    // user message is only the segments to translate.
     expect(calls[0].system).toContain("span1:amb:1")
     expect(calls[0].maxTokens).toBe(6144)
-    expect(calls[0].user).toContain("Immediately preceding")
-    expect(calls[0].user).toContain("imitate them")
+    expect(calls[0].system).toContain("Immediately preceding")
+    expect(calls[0].system).toContain("imitate them")
+    expect(calls[0].user).toMatch(/^Translate these 2 segments:/)
+  })
+
+  // AQU-2342: the performer carries the ONE instructions block right after its
+  // fixed role text — before the scene brief, terms, decisions and rules — and
+  // no longer a "Project brief" line of its own.
+  it("injects the project instructions once, after the role text and before rules", async () => {
+    const { llm, calls } = scriptedLlm([draftJson([{ i: 1, t: "one" }])])
+    await performSpan({
+      sceneBrief,
+      pairs: [pair("c1")],
+      examples: [],
+      precedingValidated: [],
+      translationInstructions: "Plain register for rural youth.",
+      rules: [{ id: "r1", name: "No quotes", enabled: true, check: { type: "target-forbids", targetPattern: '"' } }],
+      llm,
+      budget: createRunBudget(),
+    })
+    const system = calls[0].system
+    const block = "Project instructions (follow these):\nPlain register for rural youth."
+    expect(system.split(block)).toHaveLength(2)
+    expect(system.indexOf("You are the PERFORMER")).toBeLessThan(system.indexOf(block))
+    expect(system.indexOf(block)).toBeLessThan(system.indexOf("Checks (verified automatically"))
+    expect(system.indexOf("Checks (verified automatically")).toBeLessThan(system.indexOf("Scene brief:"))
+    expect(system).not.toContain("Project brief")
   })
 
   it("names cells the model skipped (missedCellIds) instead of inventing them", async () => {
@@ -77,9 +104,9 @@ describe("performSpan", () => {
       budget: createRunBudget(),
     })
 
-    expect(calls[0].user).toContain(JSON.stringify(longSource))
-    expect(calls[0].user).toContain(JSON.stringify(longTarget))
-    expect(calls[0].user).toContain("end")
+    expect(calls[0].system).toContain(JSON.stringify(longSource))
+    expect(calls[0].system).toContain(JSON.stringify(longTarget))
+    expect(calls[0].system).toContain("end")
   })
 
   it("refuses to call the model past the budget", async () => {

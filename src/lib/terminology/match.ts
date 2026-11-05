@@ -27,14 +27,23 @@ import { resolveMatchOptions } from "./match-options"
  *
  * Mark folding
  * ------------
- * `foldMarks: true` makes matching tolerant of combining marks (Hebrew vowel
- * points/accents, Latin diacritics, …) so a term selected under one pointing
- * matches the same consonants under different or no pointing. Folding is done
- * INSIDE the regex, not by stripping the haystack first: `literalSegment`
+ * `foldMarks: true` makes matching tolerant of diacritics (Hebrew vowel
+ * points/accents, Greek accents, Latin diacritics, …) so a term selected under
+ * one pointing matches the same letters under different or no pointing. Folding
+ * is done INSIDE the regex, not by stripping the haystack first: `literalSegment`
  * strips marks from the term's literal segments, then re-inserts `\p{M}*`
  * after every remaining character, so the compiled pattern still walks the
  * original (pointed) haystack and reported match offsets/spans stay correct
  * for consumers like editor decorations.
+ *
+ * Unicode stores the same diacritic two ways, and folding has to cover both
+ * (AQU-1936). Hebrew/Arabic/Syriac points stay separate combining marks under
+ * NFC, so `\p{M}*` finds them. Greek accents and Latin diacritics COMPOSE under
+ * NFC into one precomposed code point — καὶ is κ, α, U+1F76, with no mark in
+ * sight — so `\p{M}*` can never see them, and a folded term matched neither the
+ * other accent nor its own spelling. `foldedChar` therefore emits, for each
+ * stripped base letter, a class of that letter plus every precomposed form of
+ * it, so one folded pattern spans both encodings at the original offsets.
  *
  * Word boundaries
  * ---------------
@@ -93,14 +102,78 @@ function letterLength(s: string): number {
 }
 
 /**
+ * Code-point ranges scanned to build the precomposed-form index. Every block
+ * that holds canonically precomposed LETTERS and nothing we would have to
+ * reason about reordering for: Latin-1 Supplement + Latin Extended-A/B, Greek
+ * with tonos/dialytika, Cyrillic, then Latin Extended Additional and Greek
+ * Extended (the polytonic block, where καὶ's U+1F76 lives). Indic blocks are
+ * deliberately out: their canonical compositions are not a letter-plus-accent
+ * story and folding them is a separate decision.
+ */
+const PRECOMPOSED_SCAN_RANGES: ReadonlyArray<readonly [number, number]> = [
+  [0x00c0, 0x024f],
+  [0x0386, 0x03ce],
+  [0x0400, 0x04ff],
+  [0x1e00, 0x1fff],
+]
+
+/** base letter → every precomposed code point that folds down to it. */
+let precomposedByBase: Map<string, string[]> | null = null
+
+/**
+ * AQU-1936: the precomposed forms of one base letter — ι → ί ὶ ῖ ΐ ῒ …
+ *
+ * Built by inverting NFD over the ranges above rather than from a hand-written
+ * table, so it cannot drift from what `stripMarks` actually produces. Built
+ * once, lazily, and only when something folds: a term with no folding compiles
+ * exactly as it did before and pays nothing.
+ */
+function precomposedVariants(base: string): readonly string[] {
+  if (precomposedByBase === null) {
+    const map = new Map<string, string[]>()
+    for (const [from, to] of PRECOMPOSED_SCAN_RANGES) {
+      for (let cp = from; cp <= to; cp += 1) {
+        const ch = String.fromCodePoint(cp)
+        // Only forms real NFC text can contain: a code point NFC would itself
+        // rewrite can never appear in a normalized haystack.
+        if (ch.normalize("NFC") !== ch) continue
+        const stripped = stripMarks(ch)
+        // One base letter, and actually accented — skips unaccented letters
+        // and the ligatures/singletons that strip to several characters.
+        if (stripped.length !== 1 || stripped === ch) continue
+        const list = map.get(stripped)
+        if (list) list.push(ch)
+        else map.set(stripped, [ch])
+      }
+    }
+    precomposedByBase = map
+  }
+  return precomposedByBase.get(base) ?? []
+}
+
+/**
+ * One folded base letter: a class of the letter plus every precomposed form of
+ * it, so the pattern matches whether the haystack spells the accent as a
+ * combining mark (covered by the following `\p{M}*`) or composed into the
+ * letter. Falls back to the bare escaped character when the letter has no
+ * precomposed forms, so punctuation and unaccentable scripts compile byte-for-
+ * byte as before.
+ */
+function foldedChar(ch: string): string {
+  const variants = precomposedVariants(ch)
+  if (variants.length === 0) return escapeRegex(ch)
+  return `[${escapeRegex(ch)}${variants.map((v) => escapeRegex(v)).join("")}]`
+}
+
+/**
  * Escape a literal segment for the regex. When folding, marks are removed from
- * the segment and `\p{M}*` is emitted after every remaining character, so the
- * pattern matches the pointed original at its true offsets.
+ * the segment and each remaining character becomes `foldedChar` + `\p{M}*`, so
+ * the pattern matches the pointed or accented original at its true offsets.
  */
 function literalSegment(seg: string, foldMarks: boolean): string {
   if (!foldMarks) return escapeRegex(seg)
   return Array.from(stripMarks(seg))
-    .map((ch) => escapeRegex(ch) + MARKS)
+    .map((ch) => foldedChar(ch) + MARKS)
     .join("")
 }
 

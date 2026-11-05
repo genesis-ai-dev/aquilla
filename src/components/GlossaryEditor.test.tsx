@@ -180,7 +180,7 @@ describe("GlossaryEditor", () => {
 
     const status = screen.getByRole("status", { name: "Loading terminology" })
     expect(status).toHaveAttribute("aria-busy", "true")
-    expect(status.querySelector("[data-slot='spinner']")).not.toBeNull()
+    expect(status.querySelector("[data-slot='loading-cursor']")).not.toBeNull()
     expect(screen.getByTestId("loading-panel-template")).toBeInTheDocument()
     expect(screen.queryByText("grace")).not.toBeInTheDocument()
   })

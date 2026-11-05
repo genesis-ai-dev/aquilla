@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest"
-import { hasCombiningMarks, pruneMatch, resolveMatchOptions, coerceMatchOptions } from "./match-options"
+import {
+  hasCombiningMarks,
+  hasFoldableDiacritics,
+  hasPrecomposedGreekAccent,
+  pruneMatch,
+  resolveMatchOptions,
+  coerceMatchOptions,
+} from "./match-options"
 
 describe("resolveMatchOptions", () => {
   // WHY: the whole point of script-derived defaults is that a user who selects
@@ -16,6 +23,34 @@ describe("resolveMatchOptions", () => {
     expect(hasCombiningMarks("café")).toBe(false)
     expect(hasCombiningMarks("Español")).toBe(false)
     expect(hasCombiningMarks("בְּרֵאשִׁית")).toBe(true)
+  })
+
+  // WHY: AQU-1936. Greek composes its accent into the vowel, so the
+  // combining-mark test said "no marks here" and a hand-added Greek term got
+  // exact-accent matching — καί never saw the grave καὶ the text uses.
+  it("folds marks by default for a Greek term whose accent is precomposed", () => {
+    expect(hasCombiningMarks("καί")).toBe(false)
+    expect(hasPrecomposedGreekAccent("καί")).toBe(true)
+    expect(hasPrecomposedGreekAccent("καὶ")).toBe(true)
+    expect(resolveMatchOptions({ sourceTerm: "καί" }).foldMarks).toBe(true)
+    expect(resolveMatchOptions({ sourceTerm: "ἐκκλησία" }).foldMarks).toBe(true)
+  })
+
+  // WHY: unaccented Greek has nothing to fold, so the default must stay off —
+  // folding it would only widen matching with no accent to reconcile.
+  it("leaves unaccented Greek unfolded", () => {
+    expect(hasPrecomposedGreekAccent("λογος")).toBe(false)
+    expect(resolveMatchOptions({ sourceTerm: "λογος" }).foldMarks).toBe(false)
+  })
+
+  // WHY: Latin diacritics are lexical — año is not ano, où is not ou — so the
+  // broadened default must NOT reach them. Folding stays opt-in for Latin.
+  it("still does not fold precomposed Latin diacritics by default", () => {
+    expect(hasFoldableDiacritics("café")).toBe(false)
+    expect(hasFoldableDiacritics("Español")).toBe(false)
+    expect(resolveMatchOptions({ sourceTerm: "café" }).foldMarks).toBe(false)
+    // and the combining-mark scripts the default already covered keep it
+    expect(hasFoldableDiacritics("בְּרֵאשִׁית")).toBe(true)
   })
 
   // WHY: an explicit per-concept choice must beat every default.

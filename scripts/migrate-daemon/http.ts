@@ -3,6 +3,7 @@
 // the daemon's push loop (Task 6); this module is pure transport.
 import type { IngestEvent } from "../../src/lib/migrate/types"
 import type { ProjectionCell } from "../../src/lib/migrate/orphans"
+import { projectIdFor } from "../../src/lib/migrate/ids"
 import { MIGRATE_RUNNER_HEADER } from "../lib/migrate-runner-header"
 
 export class HttpError extends Error {
@@ -38,6 +39,7 @@ export async function retryingFetch(url: string, init: RequestInit, opts: RetryO
       const ra = Number(res.headers.get("Retry-After"))
       if (res.status === 429 && Number.isFinite(ra) && ra > 0) delay = ra * 1000
     } catch (e) {
+      if (init.signal?.aborted) throw e
       if (e instanceof HttpError && !e.retryable) throw e
       if (!(e instanceof HttpError)) lastErr = e
     }
@@ -53,16 +55,31 @@ export interface InboxItem { key: string; gitlabId: number; sha: string; ts: num
 export const INBOX_PAGE = 200
 export interface OrgTeamMaps { orgMap: Map<string, { id: number; ownerUserId: number }>; teamMap: Map<string, number> }
 
+export interface DirectIngestOptions {
+  base: string
+  secret: string
+  destination: string
+  identity(projectId: string): { gitlabId: number; orgId: number; teamId: number | null } | undefined
+}
+
 export class SyncClient {
   private readonly base: string
   private readonly secret: string
   private readonly runner: string
   private readonly retry: RetryOpts
-  constructor(base: string, secret: string, runner: string, retry: RetryOpts = {}) {
+  private readonly direct?: DirectIngestOptions
+  private directReady?: Promise<void>
+  constructor(base: string, secret: string, runner: string, retry: RetryOpts = {}, direct?: DirectIngestOptions) {
     this.base = base
     this.secret = secret
     this.runner = runner
     this.retry = retry
+    if (direct) {
+      const url = new URL(direct.base)
+      if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash
+        || !direct.secret || !direct.destination) throw new Error("Invalid direct migration transport configuration")
+      this.direct = { ...direct, base: direct.base.replace(/\/$/, "") }
+    }
   }
   private headers(): Record<string, string> {
     return { "Content-Type": "application/json", Authorization: `Bearer ${this.secret}`, [MIGRATE_RUNNER_HEADER]: this.runner }
@@ -71,11 +88,59 @@ export class SyncClient {
     const res = await retryingFetch(`${this.base}${path}`, { ...init, headers: this.headers() }, this.retry)
     return (await res.json()) as T
   }
+  /** Read-only admission check; never fall back to a different destination. */
+  async checkDirectReadiness(): Promise<void> {
+    if (!this.direct) return
+    if (!this.directReady) {
+      this.directReady = (async () => {
+        const res = await retryingFetch(`${this.direct!.base}/migrate/readiness`, {
+          headers: { ...this.headers(), Authorization: `Bearer ${this.direct!.secret}` },
+          signal: AbortSignal.timeout(60_000),
+        }, this.retry)
+        const body = await res.json() as { contractVersion?: number; destination?: string; writesEnabled?: boolean; maxEvents?: number }
+        if (body.contractVersion !== 1 || body.destination !== this.direct!.destination
+          || body.writesEnabled !== true || body.maxEvents !== 250) throw new Error("Direct migration readiness contract mismatch")
+      })().catch(error => { this.directReady = undefined; throw error })
+    }
+    return this.directReady
+  }
+  private async directJson(projectId: string, path: string, body: unknown): Promise<unknown> {
+    const direct = this.direct!
+    const identity = direct.identity(projectId)
+    if (!identity || !Number.isSafeInteger(identity.gitlabId) || identity.gitlabId < 1
+      || projectIdFor(String(identity.gitlabId), "gitlab") !== projectId
+      || !Number.isSafeInteger(identity.orgId) || identity.orgId < 1
+      || (identity.teamId !== null && (!Number.isSafeInteger(identity.teamId) || identity.teamId < 1))) {
+      throw new Error("Missing stable source identity for direct migration")
+    }
+    await this.checkDirectReadiness()
+    const headers = { ...this.headers(), Authorization: `Bearer ${direct.secret}`,
+      "x-migrate-gitlab-id": String(identity.gitlabId), "x-migrate-org-id": String(identity.orgId),
+      "x-migrate-destination": direct.destination,
+      ...(identity.teamId === null ? {} : { "x-migrate-team-id": String(identity.teamId) }) }
+    const res = await retryingFetch(`${direct.base}${path}`, {
+      method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(path === "/migrate/finalize" ? 360_000 : 120_000),
+    }, this.retry)
+    if (res.headers.get("x-migrate-destination") !== direct.destination) throw new Error("Direct migration acknowledgement destination mismatch")
+    return res.json()
+  }
   upsertProject(b: { projectId: string; name: string; orgId: number; ownerUserId: number; teamId: number | null }): Promise<void> {
     return this.json<unknown>("/migrate/project", { method: "POST", body: JSON.stringify(b) }).then(() => undefined)
   }
   async ingest(projectId: string, events: IngestEvent[], eventsOnly = false): Promise<{ status: number; ms: number; accepted: number }> {
     const t0 = Date.now()
+    if (this.direct) {
+      if (eventsOnly) throw new Error("Direct migration requires projections")
+      let accepted = 0
+      for (let i = 0; i < events.length; i += 250) {
+        const chunk = events.slice(i, i + 250)
+        const result = await this.directJson(projectId, "/migrate/ingest", { projectId, events: chunk, deferFileCounters: true }) as { accepted?: number; replayed?: number }
+        const replayed = result.replayed ?? 0
+        if (!Number.isInteger(result.accepted) || result.accepted! < 0 || !Number.isInteger(replayed) || replayed < 0 || result.accepted! + replayed !== chunk.length) throw new Error("Invalid direct migration acknowledgement")
+        accepted += result.accepted!
+      }
+      return { status: 200, ms: Date.now() - t0, accepted }
+    }
     const res = await retryingFetch(`${this.base}/migrate/ingest`, {
       method: "POST", headers: this.headers(),
       body: JSON.stringify({ projectId, events, eventsOnly, deferFileCounters: true }),
@@ -88,6 +153,7 @@ export class SyncClient {
    *  is a superset — never a skip. */
   finalize(projectId: string, fileIds: string[] = []): Promise<void> {
     const body = fileIds.length > 0 ? { projectId, fileIds } : { projectId }
+    if (this.direct) return this.directJson(projectId, "/migrate/finalize", body).then(() => undefined)
     return this.json<unknown>("/migrate/finalize", { method: "POST", body: JSON.stringify(body) }).then(() => undefined)
   }
   async getSettings(projectId: string): Promise<Record<string, unknown>> {

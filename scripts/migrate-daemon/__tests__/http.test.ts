@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, vi, afterEach } from "vitest"
+import { projectIdFor } from "../../../src/lib/migrate/ids"
 import { retryingFetch, HttpError, SyncClient, GitLabClient, INBOX_PAGE } from "../http"
 
 const noSleep = { sleep: async () => {}, random: () => 0.5 }
@@ -57,6 +58,59 @@ describe("SyncClient", () => {
     const r = await c.ingest("p", [{ id: "a", kind: "k", author: "x", clientTs: 1, payload: {} }, { id: "b", kind: "k", author: "x", clientTs: 1, payload: {} }])
     expect(r.accepted).toBe(2)
     expect(JSON.parse(String((f.mock.calls[0][1] as RequestInit).body))).toMatchObject({ projectId: "p", deferFileCounters: true, eventsOnly: false })
+  })
+  it("routes only ingest/finalize to the pinned transport and refuses unsafe readiness or acknowledgements", async () => {
+    const projectId = projectIdFor("41", "gitlab")
+    const destination = "ep-test-pooler.c-3.us-east-2.aws.neon.tech/testdb/testrole"
+    const calls: string[] = []
+    const f = vi.fn(async (url: string, init: RequestInit) => {
+      calls.push(url)
+      if (url === "https://direct/migrate/readiness") return Response.json({ contractVersion: 1, destination, writesEnabled: true, maxEvents: 250 })
+      if (url.startsWith("https://normal/")) {
+        expect(new Headers(init.headers).get("authorization")).toBe("Bearer normal-secret")
+        return Response.json({ settings: {} })
+      }
+      const headers = new Headers(init.headers)
+      expect(headers.get("authorization")).toBe("Bearer direct-secret")
+      expect(headers.get("x-migrate-gitlab-id")).toBe("41")
+      expect(headers.get("x-migrate-org-id")).toBe("1")
+      expect(headers.has("x-migrate-team-id")).toBe(false)
+      expect(headers.get("x-migrate-destination")).toBe(destination)
+      const body = JSON.parse(String(init.body))
+      return Response.json({ accepted: body.events?.length ?? 0 }, { headers: { "x-migrate-destination": destination } })
+    })
+    vi.stubGlobal("fetch", f)
+    const options = { base: "https://direct", secret: "direct-secret", destination, identity: () => ({ gitlabId: 41, orgId: 1, teamId: null }) }
+    const client = new SyncClient("https://normal", "normal-secret", "test", noSleep, options)
+    const event = { id: "e", kind: "source.cell.create", author: "legacy", clientTs: 1, payload: {} }
+    expect((await client.ingest(projectId, Array(501).fill(event))).accepted).toBe(501)
+    await client.finalize(projectId, ["f"])
+    await client.getSettings(projectId)
+    expect(calls.filter(url => url.endsWith("/migrate/readiness"))).toHaveLength(1)
+    expect(calls.filter(url => url === "https://direct/migrate/ingest")).toHaveLength(3)
+    expect(calls.at(-1)).toContain("https://normal/migrate/settings")
+    await expect(client.ingest("renamed-title", [event])).rejects.toThrow(/stable source identity/)
+    expect(f).toHaveBeenCalledTimes(6)
+    for (const bad of [
+      { contractVersion: 1, destination: "wrong", writesEnabled: true, maxEvents: 250 },
+      { contractVersion: 1, destination, writesEnabled: false, maxEvents: 250 },
+      { contractVersion: 2, destination, writesEnabled: true, maxEvents: 250 },
+    ]) {
+      const spy = vi.fn(async () => Response.json(bad))
+      vi.stubGlobal("fetch", spy)
+      await expect(new SyncClient("https://normal", "s", "r", noSleep, options).ingest(projectId, [event])).rejects.toThrow(/readiness/)
+      expect(spy).toHaveBeenCalledTimes(1)
+    }
+    for (const accepted of [undefined, -1, 2, "1"]) {
+      vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("readiness")
+        ? Response.json({ contractVersion: 1, destination, writesEnabled: true, maxEvents: 250 })
+        : Response.json({ accepted }, { headers: { "x-migrate-destination": destination } })))
+      await expect(new SyncClient("https://normal", "s", "r", noSleep, options).ingest(projectId, [event])).rejects.toThrow(/acknowledgement/)
+    }
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url.endsWith("readiness")
+      ? Response.json({ contractVersion: 1, destination, writesEnabled: true, maxEvents: 250 })
+      : Response.json({ accepted: 1 }, { headers: { "x-migrate-destination": "wrong" } })))
+    await expect(new SyncClient("https://normal", "s", "r", noSleep, options).ingest(projectId, [event])).rejects.toThrow(/destination mismatch/)
   })
   it("eventIds pages until more=false", async () => {
     let n = 0

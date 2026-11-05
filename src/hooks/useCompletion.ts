@@ -1,4 +1,5 @@
 import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
+import posthog from "@/lib/posthog"
 // Phase 2c-gamma → AQU-174 → AQU-211: useCompletion drives the LLM stream and
 // reports per-cell completion status. Both single-cell and batch completions
 // auto-commit the generated text as an *unvalidated* cell; review happens

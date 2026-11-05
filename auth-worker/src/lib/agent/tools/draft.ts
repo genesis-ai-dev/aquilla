@@ -12,6 +12,14 @@
 import { stripTrailingBareMarkers } from "../../../../../src/lib/completion/strip-trailing-usfm-markers"
 import { isRefusalReply } from "../../../../../src/lib/completion/refusal"
 import { resolveLaneIdOrTag } from "../../../../../db/shared/lane-ref"
+import {
+  createTagMask,
+  describeTagFailure,
+  isTagsOnlyText,
+  maskInlineTags,
+  settleTagLadder,
+  type TagMask,
+} from "../../../../../db/shared/inline-tags"
 import { instructionsPromptBlock } from "../../../../../db/shared/translation-instructions"
 import {
   assemblePromptSections,
@@ -84,6 +92,13 @@ export interface DraftGenerationContext {
    *  the call; the returned settle records the provider body afterwards. */
   admitPaidCall?: (input: { model: string; promptChars: number }) => Promise<
     { ok: true; settle: (body: unknown) => Promise<unknown>; hold: (body: unknown) => Promise<unknown> } | { ok: false; message: string }>
+  /**
+   * AQU-2385: mask inline tags to opaque sentinels before each model pass.
+   * On unless explicitly false — the escape hatch for a model that handles
+   * the sentinel grammar badly. Detection, repair and the quarantine never
+   * switch off, so a tag the model mangles is caught either way.
+   */
+  maskInlineTags?: boolean
   /** Ceiling on cells drafted in one call. Defaults to the in-agent review
    *  package size (MAX_LIMIT); the external DraftCells command passes the
    *  project's configured completion batch size instead. */
@@ -377,7 +392,47 @@ export async function generateDrafts(
   const remaining = Math.max(work.length - limit, 0)
   work = work.slice(0, limit)
 
+  // AQU-2385, rung 0 of the inline-tag ladder: a cell that is nothing but
+  // inline markup (plus at most one placeholder) has no words to translate.
+  // Copy it across and keep it out of both model passes — no model call means
+  // no reply that could drop, duplicate or reorder its tags.
+  const copiedPairs = work.filter((p) => isTagsOnlyText(p.source))
+  if (copiedPairs.length > 0) work = work.filter((p) => !isTagsOnlyText(p.source))
+  const copyEmit = (p: CellPair): DraftEmit => ({
+    kind: "target.cell.commit",
+    fileId: scope.fileId,
+    cellId: p.cellId,
+    payload: {
+      value: p.source,
+      ai_draft: {
+        model: modelCfg.model,
+        provider: "platform",
+        promptVersion: PROMPT_VERSION,
+        exampleIds: [],
+        generatedAt: Date.now(),
+        mode: "agent",
+        projectState: {
+          sourceLanguage: ctx.sourceLanguage ?? "",
+          targetLanguage: ctx.targetLanguage ?? "",
+          approvedExampleCount: 0,
+        },
+      },
+    },
+  })
+
   if (work.length === 0) {
+    if (copiedPairs.length > 0) {
+      return {
+        ok: true,
+        fileId: scope.fileId,
+        emits: copiedPairs.map(copyEmit),
+        missed: [],
+        remaining,
+        drafted: copiedPairs,
+        empty: false,
+        notice: scope.notice,
+      }
+    }
     return { ok: true, fileId: scope.fileId, emits: [], missed: [], remaining, drafted: [], empty: true, notice: scope.notice }
   }
 
@@ -418,8 +473,19 @@ export async function generateDrafts(
     // The caller's per-run steering: last, after the standing guidance.
     directions: runDirectionsBlock(typeof args.instructions === "string" ? args.instructions : ""),
   }
+  // AQU-2385, rung 1: inline tags reach the model as opaque sentinels, so it
+  // has nothing to "translate", reflow or helpfully reformat. ONE mask per
+  // call (one nonce, one ordinal sequence) covers every cell, and the same
+  // masked list is carried by the research pass and the drafting pass. The
+  // guidance, terminology and example blocks above keep the REAL source —
+  // term lookup needs the actual words.
+  const tagMask: TagMask | undefined = ctx.maskInlineTags === false ? undefined : createTagMask()
+  const maskedSources = work.map((p) => {
+    const text = stripTrailingBareMarkers(p.source)
+    return tagMask ? maskInlineTags(text, tagMask).masked : text
+  })
   const numbered = work
-    .map((p, i) => `${i + 1}. ${p.canonicalRef ? `[${p.canonicalRef}] ` : ""}${stripTrailingBareMarkers(p.source)}`)
+    .map((p, i) => `${i + 1}. ${p.canonicalRef ? `[${p.canonicalRef}] ` : ""}${maskedSources[i]}`)
     .join("\n")
 
   // Preserve the benchmarked causal structure: research finishes before the
@@ -479,7 +545,19 @@ export async function generateDrafts(
   const missed: string[] = []
   const draftedIdx = new Set<number>()
   work.forEach((p, i) => {
-    const t = stripTrailingBareMarkers((drafts.get(i + 1) ?? "").trim())
+    const reply = stripTrailingBareMarkers((drafts.get(i + 1) ?? "").trim())
+    // AQU-2385, rungs 2-4: put the real tags back, then detect -> repair ->
+    // quarantine. A quarantined draft is NOT dropped: it is staged like any
+    // other AI draft and a human approves or rejects it, which is exactly the
+    // review this changeset gate exists for.
+    const ladder = reply ? settleTagLadder(stripTrailingBareMarkers(p.source), reply, tagMask) : null
+    if (ladder && ladder.status !== "clean" && ladder.reason) {
+      console.warn(
+        `[draft] inline tags ${ladder.status} for cell ${p.cellId}: ` +
+        describeTagFailure(ladder.reason, ladder.detail),
+      )
+    }
+    const t = ladder ? ladder.value : reply
     // AQU-2217: the drafting model can fill a well-formed {"i","t"} entry with
     // a refusal ("I'm sorry, but I cannot assist with that request."). That is
     // not a translation, so it must never reach stageEvents and become a
@@ -516,10 +594,10 @@ export async function generateDrafts(
   return {
     ok: true,
     fileId: scope.fileId,
-    emits,
+    emits: [...copiedPairs.map(copyEmit), ...emits],
     missed,
     remaining,
-    drafted: work.filter((_, i) => draftedIdx.has(i)),
+    drafted: [...copiedPairs, ...work.filter((_, i) => draftedIdx.has(i))],
     empty: false,
     notice: scope.notice,
   }

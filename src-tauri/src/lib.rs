@@ -4,6 +4,7 @@ mod connectivity;
 mod fs_bridge;
 mod keychain;
 mod llm_proxy;
+mod paratext;
 mod repo_root;
 mod shutdown_guard;
 
@@ -61,6 +62,7 @@ pub fn run() {
             app.manage(llm_config);
             app.manage(shutdown_guard::ShutdownGuardState::new());
             app.manage(app_update::AppUpdateState::default());
+            app.manage(paratext::ParatextWatchers::default());
 
             Ok(())
         })
@@ -90,6 +92,15 @@ pub fn run() {
                     shutdown_guard::restart_app,
                     app_update::download_app_update,
                     app_update::install_app_update,
+                    paratext::paratext_discover,
+                    paratext::paratext_add_root,
+                    paratext::paratext_remove_root,
+                    paratext::paratext_read_file,
+                    paratext::paratext_hash_file,
+                    paratext::paratext_write_book,
+                    paratext::paratext_watch,
+                    paratext::paratext_unwatch,
+                    paratext::paratext_is_running,
                 ]
             }
             #[cfg(not(feature = "e2e-webdriver"))]
@@ -116,6 +127,15 @@ pub fn run() {
                     shutdown_guard::restart_app,
                     app_update::download_app_update,
                     app_update::install_app_update,
+                    paratext::paratext_discover,
+                    paratext::paratext_add_root,
+                    paratext::paratext_remove_root,
+                    paratext::paratext_read_file,
+                    paratext::paratext_hash_file,
+                    paratext::paratext_write_book,
+                    paratext::paratext_watch,
+                    paratext::paratext_unwatch,
+                    paratext::paratext_is_running,
                 ]
             }
         })

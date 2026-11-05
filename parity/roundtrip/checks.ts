@@ -1,6 +1,6 @@
 /**
  * FROZEN (F7) — round-trip fidelity checks. Do not modify after Phase 0.
- * If a genuine bug is found, log it in ITERATION_LOG.md, mark affected rows
+ * If a genuine bug is found, log it in docs/archive/ITERATION_LOG.md, mark affected rows
  * disputed, and leave the code alone — a human resolves it.
  *
  * External validators outrank self-report (F4):

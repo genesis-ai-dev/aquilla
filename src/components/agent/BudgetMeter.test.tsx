@@ -35,6 +35,29 @@ describe("BudgetMeter", () => {
     expect(screen.queryByRole("status")).toBeNull()
   })
 
+  it("names the per-run limit as a per-run limit, never the workspace's credit cap (AQU-2313)", () => {
+    // The ETT report: an Enterprise workspace (credits unlimited) was told a
+    // run "stopped at its 2,500 cr credit cap" after spending 4 cr. The cap in
+    // question is the ceiling on ONE run, which every plan has — so the
+    // sentence must name that, and must not describe it as a credit cap.
+    render(<BudgetMeter budget={{ spentCredits: 4, capCredits: 2500, exhausted: true, reason: "run_cost_cap" }} />)
+    const alert = screen.getByRole("alert")
+    expect(alert).toHaveTextContent("this run's own spending limit")
+    expect(alert.textContent).not.toMatch(/credit cap/i)
+    expect(alert).toHaveTextContent("2,500 cr")
+    expect(alert).toHaveTextContent("4 cr")
+    // The run is not a dead end — a follow-up question still works.
+    expect(alert).toHaveTextContent("send a new message to continue")
+    expect(alert.getAttribute("data-reason")).toBe("run_cost_cap")
+  })
+
+  it("reads an untagged exhausted frame as the per-run cap (pre-AQU-2313 server)", () => {
+    render(<BudgetMeter budget={{ spentCredits: 500, capCredits: 500, exhausted: true }} />)
+    const alert = screen.getByRole("alert")
+    expect(alert.getAttribute("data-reason")).toBe("run_cost_cap")
+    expect(alert.textContent).not.toMatch(/credit cap/i)
+  })
+
   it("explains a weekly-allowance stop without credit figures and keeps the alert selector", () => {
     render(<BudgetMeter budget={{ spentCredits: 12, capCredits: 500, exhausted: true, reason: "weekly_allowance" }} />)
     const alert = screen.getByRole("alert")

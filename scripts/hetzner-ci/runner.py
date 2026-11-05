@@ -51,7 +51,7 @@ class ReportPending(Exception):
     pass
 
 
-def command(args, log=None, timeout=900, env=None, check=True, input=None):
+def command(args, log=None, timeout=900, env=None, check=True, input=None, on_output=None):
     if log is None:
         return subprocess.run(args, input=input, stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE, timeout=timeout,
@@ -74,6 +74,8 @@ def command(args, log=None, timeout=900, env=None, check=True, input=None):
                 log.write(chunk[:remaining])
                 log.flush()
                 remaining = max(0, remaining - len(chunk))
+                if on_output:
+                    on_output(chunk)
         code = process.wait(timeout=max(1, deadline - time.monotonic()))
         if check and code:
             raise subprocess.CalledProcessError(code, args)
@@ -110,12 +112,92 @@ def current(config, ref, sha):
     return commit.get("sha") == sha
 
 
-def report(config, ref, sha, phase, suite=None, url=None, status=None):
+def report(config, ref, sha, phase, suite=None, url=None, status=None, progress=None):
     # Credentials travel over stdin, never command arguments or job logs.
-    payload = dict(ref=ref, sha=sha, phase=phase, suite=suite, runUrl=url,
+    payload = dict(ref=ref, sha=sha, phase=phase, suite=suite, runUrl=url, progress=progress,
                    jobStatus=status, token=config["github_token"], author=config["author"])
     command(["node", str(CODE / "report.mjs")], timeout=150,
             input=json.dumps(payload).encode())
+
+
+JOURNEY_HEADER = re.compile(rb"^\[(\d+)/(\d+)\] \S+ \xe2\x80\xba (.+?)\s*$")
+JOURNEY_ERROR = re.compile(rb"^ {4}Error\b")
+
+
+class Progress:
+    """Keeps the release commit comment current while a job runs.
+
+    Steps come from the app container's progress file (reviewed bootstrap
+    code), journeys from Playwright's line reporter in the test log. Both are
+    untrusted bytes and are validated and bounded before they reach the
+    reporter. Publishing is best effort: a failed PATCH never fails the job,
+    and the final "finished" report is still delivered the strict way.
+    """
+
+    def __init__(self, config, ref, sha, started):
+        self.config, self.ref, self.sha, self.started = config, ref, sha, started
+        self.steps, self.journeys, self.total = [], [], None
+        self.buffer, self.sent = b"", None
+
+    def steps_from(self, raw):
+        try:
+            entries = json.loads(raw[:4096].decode("utf-8", "replace"))
+        except ValueError:
+            return False
+        if not isinstance(entries, list):
+            return False
+        steps = []
+        for entry in entries[:8]:
+            if not isinstance(entry, dict):
+                return False
+            name, seconds, detail = entry.get("name"), entry.get("seconds"), entry.get("detail", "")
+            if not isinstance(name, str) or not isinstance(seconds, (int, float)) or not isinstance(detail, str):
+                return False
+            steps.append({"name": name[:40], "seconds": round(float(seconds), 1), "detail": detail[:80]})
+        if steps == self.steps:
+            return False
+        self.steps = steps
+        return True
+
+    def stack_ready(self):
+        elapsed = time.monotonic() - self.started
+        self.steps.append({"name": "stack", "seconds": round(elapsed - sum(s["seconds"] for s in self.steps), 1),
+                           "detail": "workers and preview up"})
+        self.publish()
+
+    def feed(self, chunk):
+        self.buffer += chunk
+        *lines, self.buffer = self.buffer.split(b"\n")
+        for line in lines:
+            header = JOURNEY_HEADER.match(line)
+            if header:
+                self.total = int(header.group(2))
+                for journey in self.journeys:
+                    if journey["state"] == "running":
+                        journey["state"] = "finished"
+                if len(self.journeys) < 64:
+                    self.journeys.append({"title": header.group(3).decode("utf-8", "replace")[:120],
+                                          "state": "running"})
+                self.publish()
+            elif JOURNEY_ERROR.match(line) and self.journeys and self.journeys[-1]["state"] == "running":
+                self.journeys[-1]["state"] = "failed"
+                self.publish()
+
+    def payload(self):
+        return dict(stage="tests" if self.journeys else "setup",
+                    elapsedS=round(time.monotonic() - self.started),
+                    steps=self.steps, journeys=self.journeys, total=self.total)
+
+    def publish(self):
+        # Snapshot: steps/journeys are mutated in place after this is sent.
+        payload = json.loads(json.dumps(self.payload()))
+        if payload == self.sent:
+            return
+        try:
+            report(self.config, self.ref, self.sha, "running", progress=payload)
+            self.sent = payload
+        except Exception as error:  # noqa: BLE001 - progress is advisory
+            print("Progress report:", type(error).__name__, flush=True)
 
 
 def download(config, sha, destination):
@@ -225,10 +307,16 @@ def execute(config, job):
                  prefix + "app:/tmp/app_bootstrap.py"])
         source.unlink()
         command(["docker", "start", prefix + "app"], timeout=60)
+        progress = Progress(config, ref, sha, started)
         for _ in range(480):
             if command(["docker", "exec", prefix + "app", "test", "-f",
                         "/tmp/aquilla-stack-ready.json"], check=False).returncode == 0:
+                progress.stack_ready()
                 break
+            steps = command(["docker", "exec", prefix + "app", "cat",
+                             "/tmp/aquilla-qa-progress.json"], check=False)
+            if steps.returncode == 0 and progress.steps_from(steps.stdout):
+                progress.publish()
             running = command(["docker", "inspect", "-f", "{{.State.Running}}", prefix + "app"])
             if running.stdout.strip() != b"true":
                 raise RuntimeError("Application setup exited")
@@ -249,7 +337,8 @@ def execute(config, job):
             args += ["-e", key]
         args += [harness, "pnpm", "exec", "playwright", "test", "--config", "smart-tests/config.ts"]
         with (directory / "tests.log").open("wb") as log:
-            result = command(args, log, timeout=960, check=False, env={**os.environ, **test_env})
+            result = command(args, log, timeout=960, check=False, env={**os.environ, **test_env},
+                             on_output=progress.feed)
         suite = read_suite(prefix + "tests")
         if suite.get("build") != sha or suite.get("harnessBuild") != harness_sha:
             raise RuntimeError("Evidence identity mismatch")

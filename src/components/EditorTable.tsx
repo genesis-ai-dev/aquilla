@@ -243,6 +243,23 @@ import { assignedCastVoiceId, findVoice, getVoiceLibrary, resolveCastVoice } fro
 import { lineTakeLabel } from "@/lib/audio/line-voice"
 import { useLocation, useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
+import {
+  editorGridCols,
+  editorGridStyle,
+  editorGutterPx,
+  editorHeaderGridCols,
+  type EditorGridCols,
+} from "@/lib/editor/editor-grid"
+import { rowScripture, type RowScripture } from "@/lib/parallel-bibles/row-verses"
+import {
+  AddBibleMenu,
+  BibleColumnHeaders,
+  BibleColumnsProvider,
+  BibleRowCells,
+  BibleRowStack,
+  useEditorBibleColumns,
+  type EditorParallelBiblesConfig,
+} from "./parallel-bibles/EditorBibleColumns"
 import { namedCellRef } from "@/lib/cell-named-ref"
 import { isStructuralCell } from "@/lib/cells/structural"
 import { quoteSplitForRow } from "@/lib/cells/quote-split-plan"
@@ -355,20 +372,8 @@ const ESTIMATED_ROW_HEIGHT_PX = 140
 /** How long focus must rest on an empty cell before its draft retrieval starts (AQU-617). */
 const COMPLETION_PREFETCH_DWELL_MS = 300
 
-/** The gutter track widens by the character circle's w-6 when the cast
- *  gutter is on (stacked media lens). One shared type keeps the header row,
- *  paragraph bar, and rows in the same template.
- *
- *  AQU-1101: the text tracks are `minmax(0,1fr)`, never a bare `1fr`. A bare
- *  `1fr` carries an implicit `min-width: auto`, so a single unbreakable token
- *  (a URL, a long identifier) widens ITS track to min-content and steals the
- *  width from the sibling — source and target stop lining up with each other
- *  and with the header row. Flooring the minimum at 0 makes the two tracks
- *  equal fractions of the row whatever the content is; the cell surfaces then
- *  break the token with `break-words` (see EditorCellSurface). */
-type EditorGridCols =
-  | "grid-cols-[48px_minmax(0,1fr)] md:grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]"
-  | "grid-cols-[48px_minmax(0,1fr)] md:grid-cols-[132px_minmax(0,1fr)_minmax(0,1fr)]"
+// The grid template (gutter, source, Bible columns, target) is one helper
+// shared by the headers, the paragraph bar and the rows: lib/editor/editor-grid.ts.
 const LEGEND_LIST_DRAW_DISTANCE_PX = 240
 /** AQU-1191: low-memory mode renders the viewport and nothing beyond it, so a
  *  constrained device holds one screen of rows instead of one screen plus two
@@ -1178,6 +1183,11 @@ interface EditorTableProps {
    */
   bibleOpen?: boolean
   /**
+   * Read-only Bible columns beside Source on a scripture file (the
+   * translator's chosen versions, else the project defaults). Absent: none.
+   */
+  parallelBibles?: EditorParallelBiblesConfig
+  /**
    * AQU-1692: saves a maintainer's voice correction. Without it (or below
    * maintainer) the voice details offer no "Correct…".
    */
@@ -1241,6 +1251,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onActiveChapterChange,
   onChapterPicked,
   bibleOpen = false,
+  parallelBibles,
   onSaveVoiceOverride,
   onAdoptVoicesAsCast,
 }, ref) {
@@ -2400,15 +2411,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   useEffect(() => stopSelectionDrag, [stopSelectionDrag])
 
-  // Grid layout: [gutter] [source] [target]. The gutter is one fixed track
-  // holding select + status-badges (flex-col) + verse number in a tight
-  // flex row (gap-0.5) — tighter than three gap-2 grid tracks, while the
-  // fixed width keeps Source header-aligned. No right gutter; the floating
-  // action rail is absolutely positioned. Target reserves pe-9 for the
-  // expand chevron.
-  const gridCols: EditorGridCols = castGutter
-    ? "grid-cols-[48px_minmax(0,1fr)] md:grid-cols-[132px_minmax(0,1fr)_minmax(0,1fr)]"
-    : "grid-cols-[48px_minmax(0,1fr)] md:grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]"
 
   const handleMouseUp = useCallback(() => {
     if (isDragging.current && dragCells.current.size > 1) {
@@ -2502,6 +2504,44 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const { sequentialNumberByCellId, paragraphGroupInfoByCellId, versePartByCellId } = useMemo(() =>
     readAtVersion(cellStoreVersion, () => structureCache.read(fileCellIds, cellStore)),
   [cellStore, cellStoreVersion, fileCellIds, structureCache])
+
+  // Grid layout: [gutter] [source] [target]. The gutter is one fixed track
+  // holding select + status-badges (flex-col) + verse number in a tight
+  // flex row (gap-0.5) — tighter than three gap-2 grid tracks, while the
+  // fixed width keeps Source header-aligned. No right gutter; the floating
+  // action rail is absolutely positioned. Target reserves pe-9 for the
+  // expand chevron.
+  //
+  // Bible columns sit between source and target, one track each, when they
+  // fit (EditorBibleColumns: at most three, and every text track keeps a
+  // usable width); otherwise they stack under the source text and the grid
+  // stays three tracks.
+  const tableRootRef = useRef<HTMLDivElement | null>(null)
+  // The rows in view, and a margin either side so the next rows' chapters are
+  // already loading — their chapters are what the Bible columns fetch.
+  const visibleBibleRows = useMemo(() => {
+    if (!parallelBibles) return []
+    const lo = Math.max(0, (viewableIndexes.length > 0 ? Math.min(...viewableIndexes) : firstVisibleIndex) - 10)
+    const hi = Math.min(displayCellIds.length - 1, (viewableIndexes.length > 0 ? Math.max(...viewableIndexes) : firstVisibleIndex) + 20)
+    const indexes = Array.from({ length: Math.max(0, hi - lo + 1) }, (_, i) => lo + i)
+    return readAtVersion(cellStoreVersion, () => indexes.flatMap((index) => {
+      const id = displayCellIds[index]
+      const view = id ? cellStore.getCellView(id) : undefined
+      const row = view ? rowScripture(view, versePartByCellId.get(id)) : null
+      return row ? [row] : []
+    }))
+  }, [parallelBibles, viewableIndexes, firstVisibleIndex, cellStoreVersion, displayCellIds, cellStore, versePartByCellId])
+  const bibleColumns = useEditorBibleColumns({
+    config: parallelBibles,
+    // A scripture file: chapters, and nothing but chapters. (scriptureNumbering
+    // alone is also true for a file with no milestones at all.)
+    enabled: scriptureNumbering && milestoneNavigationItems.length > 0 && !isTimeOrdered,
+    visibleRows: visibleBibleRows,
+    widthRef: tableRootRef,
+    gutterPx: editorGutterPx(castGutter),
+  })
+  const bibleTrackCount = bibleColumns?.layout === "columns" ? bibleColumns.columns.length : 0
+  const gridCols: EditorGridCols = editorGridCols(castGutter, bibleTrackCount)
 
   const viewportCellId = displayCellIds[chapterVisibleIndex ?? firstVisibleIndex]
   const currentSubsectionKey = subsectionKeyByCellId.get(viewportCellId ?? "")
@@ -3325,7 +3365,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   return (
     <SmartEditsProvider value={smartEditsContext}>
-    <div className="flex h-full min-h-0 flex-col" onMouseUp={handleMouseUp}>
+    <BibleColumnsProvider value={bibleColumns}>
+    <div
+      ref={tableRootRef}
+      className="flex h-full min-h-0 flex-col"
+      style={editorGridStyle(castGutter, bibleTrackCount)}
+      onMouseUp={handleMouseUp}
+    >
       {showStripNav && stripNavSlot
         ? createPortal(
             <div className="flex min-w-0 items-center gap-2">
@@ -3385,8 +3431,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         <div data-testid="table-column-headers" className={cn(
             "grid grid-cols-2 gap-2 overflow-hidden border-b border-border ps-2.5 pe-4 py-2 text-xs font-medium text-muted-foreground [scrollbar-gutter:stable]",
             castGutter
-              ? "md:grid-cols-[132px_minmax(0,1fr)_minmax(0,1fr)]"
-              : "md:grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]",
+              ? editorHeaderGridCols(true, bibleTrackCount)
+              : editorHeaderGridCols(false, bibleTrackCount),
           )}>
           {/* With the character gutter on, the Source label sits over the
               gutter at the LEFT EDGE (Sam 2026-08-07) instead of floating a
@@ -3413,7 +3459,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 {project.sourceLanguage}
               </Badge>
             )}
+            <AddBibleMenu />
           </div>
+          <BibleColumnHeaders />
           {/* AQU-2288: ltr like the rows' target column (EditorTargetCellColumn),
               so in an rtl UI the marks stay on the side the checks are on. */}
           <div data-testid="table-target-header" dir="ltr" className="relative col-start-2 flex min-w-0 flex-wrap items-center gap-1 ps-1 pe-1 md:col-auto md:gap-2 md:ps-6 md:pe-2">
@@ -3618,6 +3666,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         <div className="flex-1" />
       )}
     </div>
+    </BibleColumnsProvider>
     </SmartEditsProvider>
   )
 })
@@ -7230,6 +7279,44 @@ function EditorRow({
   // would otherwise leave its listeners and `contenteditable` behind.
   useEffect(() => closeActivationCapture, [closeActivationCapture])
 
+  // AQU-1534: the same window, for activations that did NOT start on this row.
+  //
+  // Tab / Shift+Tab / ArrowUp / ArrowDown from a neighbouring cell (and every
+  // programmatic jump) activate this row through `onActivateEditor` in the
+  // table, never through `requestTargetEdit` — so the AQU-746 / AQU-1333
+  // window was never opened on the destination. The previous row's editor
+  // unmounts during the same commit, focus falls to `<body>`, and for the
+  // frames until this row's TipTap mounts and takes the caret there is no
+  // editing host at all: keystrokes, `Input.insertText`, IME commits and
+  // pastes in that gap are dropped with nothing to catch them.
+  //
+  // That is silent data damage for a translator working by keyboard: the row
+  // they tabbed into stays empty while they keep typing, so their text ends up
+  // beside the wrong source — and a wrong pairing can then be validated. Open
+  // the window here so every activation path is covered, and park focus on the
+  // row wrapper so `handleGridRowKeyDown` buffers keydowns as it does after a
+  // click. The editor's own `onFocus` drains the buffer and closes the window.
+  useEffect(() => {
+    if (!isEditorActive) return
+    if (!editable || isLoading || lockHolderLabel) return
+    // The pointer path already opened it, or the editor already owns the caret.
+    if (activationCaptureRef.current || editorFocusedRef.current) return
+    // Only when the caret is genuinely nowhere. An activation driven from a
+    // side panel while the translator types somewhere else must not steal
+    // focus, and grid-row focus (Escape-to-grid) is navigation, not editing.
+    const active = document.activeElement
+    if (active && active !== document.body) return
+    awaitingEditorFocusRef.current = true
+    rowRef.current?.focus({ preventScroll: true })
+    activationCaptureRef.current = rowRef.current && activationCaretHostRef.current
+      ? openActivationInputCapture({
+        host: rowRef.current,
+        caretHost: activationCaretHostRef.current,
+        onText: (text) => { pendingActivationInputRef.current += text },
+      })
+      : null
+  }, [isEditorActive, editable, isLoading, lockHolderLabel])
+
   /**
    * AQU-1393: put an exact match's existing translation into this cell's target.
    *
@@ -7986,6 +8073,8 @@ function EditorRow({
   // Human references help people and DOM agents identify a cell.
   const namedRef = namedCellRef(cell)
   const cellRef = namedRef || t("editor.row.rowFallbackRef", { index: rowIndex + 1 })
+  // The verses this row stands for, for the Bible columns (none on headings).
+  const bibleRow: RowScripture | null = rowScripture(cell, versePart)
   // Media redesign slice 2 (P2.3): an Audio language has no text to validate.
   const validationControl = audioOnlyLane ? null : (
     <TargetValidationControl
@@ -8731,6 +8820,8 @@ function EditorRow({
               footnoteNumberOffset={sourceFootnoteNumberOffset}
             />
           )}
+          {/* Bible verses under the source when the columns don't fit (and on phones). */}
+          <BibleRowStack row={bibleRow} />
           {cellExamples.length > 0 && (
             <ExamplePanel
               examples={cellExamples}
@@ -8768,6 +8859,9 @@ function EditorRow({
             </div>
           )}
         </div>
+
+        {/* Bible columns: read-only, one track each between source and target. */}
+        <BibleRowCells row={bibleRow} />
 
         {/* Target column — TipTap is inline so typing is unchanged. Everything
             else (waveform, transcript preview, backtranslation, infractions

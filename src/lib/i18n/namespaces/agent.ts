@@ -360,7 +360,9 @@ export const agent = defineNamespace({
     "agent.aquifer.publishing": "Publishing…",
 
     // ── Run cost-cap meter (BudgetMeter) ────────────────────────────────
-    "agent.budget.exhausted": "Run stopped at its {capCredits} credit cap ({spentCredits} spent).",
+    "agent.budget.exhausted":
+      "Run stopped at this run's own spending limit of {capCredits} ({spentCredits} spent). " +
+      "It limits one run, not your workspace's credit allowance — send a new message to continue.",
     "agent.budget.weeklyExhausted":
       "Run stopped: this workspace has used its weekly AI allowance. Work already staged is kept. " +
       "Usage resets weekly; see Billing.",
@@ -844,11 +846,14 @@ export const agent = defineNamespace({
       },
       "agent.budget.exhausted": {
         description:
-          "Alert shown once an agent run is stopped because it hit its org credit cap. " +
+          "Alert shown once an agent run is stopped because it reached the spending " +
+          "limit on ONE run (AQU-2313 — never the workspace's credit allowance, which " +
+          "has its own message; an Enterprise workspace has no allowance at all yet " +
+          "still has this per-run limit, so the sentence must not call it a credit cap). " +
           "Both values are already-formatted credit amounts including their unit " +
           "('500 cr') — do not add a second currency/unit word around them.",
         placeholders: {
-          capCredits: "The run's credit cap, already formatted with its unit (e.g. '500 cr').",
+          capCredits: "The spending limit for one run, already formatted with its unit (e.g. '500 cr').",
           spentCredits: "Credits spent when the run stopped, already formatted with its unit.",
         },
       },

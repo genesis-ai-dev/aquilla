@@ -74,10 +74,10 @@ index 3e592fc5d2a35a4f0c8f230aa4206c894ee54f7a..a6101b839c4c13b258b900ae7dbe1e5b
              break;
          }
 diff --git a/dist/rematerialize-from-eventlog.js b/dist/rematerialize-from-eventlog.js
-index 797a369cb08763226831cb6b1cb021080508ebd3..36b40005cbc104214255fc8d0766424fc6cf77d1 100644
+index 797a369cb08763226831cb6b1cb021080508ebd3..0c74dca4e7373a0b1ad30809abd656ac787bb74b 100644
 --- a/dist/rematerialize-from-eventlog.js
 +++ b/dist/rematerialize-from-eventlog.js
-@@ -10,6 +10,15 @@ export const rematerializeFromEventlog = Effect.fn('@livestore/common:rematerial
+@@ -10,6 +10,22 @@ export const rematerializeFromEventlog = Effect.fn('@livestore/common:rematerial
  // db,
  schema, onProgress, materializeEvent, }) {
      const eventsCount = dbEventlog.select(`SELECT COUNT(*) AS count FROM ${SystemTables.EVENTLOG_META_TABLE}`)[0].count;
@@ -90,11 +90,23 @@ index 797a369cb08763226831cb6b1cb021080508ebd3..36b40005cbc104214255fc8d0766424f
 +        ? 0
 +        : dbEventlog.select(`SELECT COALESCE(SUM(LENGTH(argsJson)), 0) AS bytes FROM ${SystemTables.EVENTLOG_META_TABLE}`)[0].bytes;
 +    let bytesDone = 0;
++    // [aquilla patch] Lets the app skip events whose effects a later, confirmed event wipes out
++    // anyway (e.g. a whole earlier download of a project that was since removed). The app's leader
++    // worker installs the hook; it gets read access to the eventlog and returns a row predicate.
++    const skipHook = globalThis.__livestoreRehydrateSkip;
++    const shouldSkip = skipHook === undefined
++        ? undefined
++        : skipHook({ select: (query) => dbEventlog.select(query), eventlogTable: SystemTables.EVENTLOG_META_TABLE, syncStatusTable: SystemTables.SYNC_STATUS_TABLE });
      const hashEventDef = memoizeByRef((event) => Schema.hash(event.schema));
      const processEvent = Effect.fn(`@livestore/common:rematerializeFromEventlog:processEvent`)(function* (row) {
          const args = jsonParse(row.argsJson);
-@@ -78,6 +87,13 @@ LIMIT ${CHUNK_SIZE}
-         yield* processEvent(row);
+@@ -75,9 +91,17 @@ LIMIT ${CHUNK_SIZE}
+         const prevItem = Chunk.isChunk(item) === true ? item : Chunk.empty();
+         return Option.some([prevItem, nextItem]);
+     }).pipe(Stream.bufferChunks({ capacity: 2 }), Stream.tap((row) => Effect.gen(function* () {
+-        yield* processEvent(row);
++        if (shouldSkip?.(row) !== true)
++            yield* processEvent(row);
          processedEvents++;
          yield* onProgress({ done: processedEvents, total: eventsCount });
 +        if (progressHook !== undefined) {

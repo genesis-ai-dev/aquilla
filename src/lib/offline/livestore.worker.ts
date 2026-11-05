@@ -5,10 +5,12 @@
 import { makeWorker } from "@livestore/adapter-web/worker"
 import { installLeaderLogForwarder } from "./leader-log-bridge"
 import { installRebuildProgressForwarder } from "./boot-progress"
+import { installReplaySkip } from "./replay-skip"
 import { makeLocalSyncBackend } from "./local-sync-backend"
 import { schema } from "./schema"
 
 if (import.meta.env.DEV) installLeaderLogForwarder()
 installRebuildProgressForwarder()
+installReplaySkip()
 
 makeWorker({ schema, sync: { backend: makeLocalSyncBackend } })

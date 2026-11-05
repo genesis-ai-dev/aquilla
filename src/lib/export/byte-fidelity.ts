@@ -72,7 +72,7 @@ export const UNTOUCHED_EXPORT_FIDELITY: readonly ByteFidelityEntry[] = [
   {
     format: "idml",
     level: "rebuilt",
-    note: "the round-trip engine re-serializes the package on every export, and the no-break repair pass rewrites it again — no untouched short-circuit yet",
+    note: "the engine returns the upload for an empty translation list, but the NoBreak repair pass runs on every export and rewrites a member holding an over-long NoBreak run whether or not anything was translated — no soak case covers the untouched export yet",
   },
   {
     format: "srt",

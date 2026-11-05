@@ -235,9 +235,12 @@ describe("the byte-fidelity registry", () => {
 
   it("still names the work that is left, and leaves generated reports out of it", () => {
     const remaining = formatsWithoutByteIdenticalExport().map((e) => e.format)
-    // IDML re-serializes the package on every export — the open half of this
-    // rule. If it ever drops off this list it is because someone taught it the
-    // short-circuit, and this soak should have gained a case for it.
+    // IDML is the open half of this rule: the engine returns the upload for an
+    // empty translation list, but the NoBreak repair pass still rewrites a
+    // member holding an over-long NoBreak run, translated or not, and no case
+    // here proves the untouched export. If it ever drops off this list it is
+    // because someone closed that gap, and this soak should have gained a case
+    // for it.
     expect(remaining).toContain("idml")
     expect(remaining).not.toContain("xlsx")
     expect(remaining.every((f) => !exportsUntouchedByteIdentical(f))).toBe(true)

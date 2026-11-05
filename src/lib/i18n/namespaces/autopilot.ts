@@ -675,13 +675,9 @@ export const autopilot = defineNamespace({
       one: "{count} key term has an approved rendering. Autopilot is told the ones that appear in each passage and must use them.",
       other: "{count} key terms have an approved rendering. Autopilot is told the ones that appear in each passage and must use them.",
     }),
-    "autopilot.readiness.brief.label": "Translation brief",
-    "autopilot.readiness.brief.none":
-      "No brief. Autopilot has to guess your audience, register, and how literal to be — the decisions that shape every sentence.",
-    "autopilot.readiness.brief.some":
-      "{count} of the brief’s questions answered. Audience, register, and literalness ride in each draft prompt.",
-    "autopilot.readiness.brief.someWithSummary":
-      "{count} of the brief’s questions answered, summarised for every passage. Audience, register, and literalness ride in each draft prompt.",
+    "autopilot.readiness.instructions.label": "Translation instructions",
+    "autopilot.readiness.instructions.none":
+      "No instructions. Autopilot has to guess your audience, register, and how literal to be — the decisions that shape every sentence.",
     "autopilot.readiness.examples.label": "Approved examples",
     "autopilot.readiness.examples.none":
       "No validated translations yet. Autopilot has no sample of your team’s voice to imitate — validate a few translations first and the drafts will sound far more like you.",
@@ -703,10 +699,10 @@ export const autopilot = defineNamespace({
     "autopilot.startGate.title": "Autopilot needs a little more to go on",
     "autopilot.startGate.languages":
       "Set the project’s source and target languages in project settings.",
-    "autopilot.startGate.brief":
-      "Answer at least one translation-brief question so Autopilot knows what this translation is for.",
+    "autopilot.startGate.instructions":
+      "Write the project instructions so Autopilot knows who this translation is for and how to translate it.",
     "autopilot.startGate.settingsLink": "Open project settings",
-    "autopilot.startGate.briefLink": "Open the translation brief",
+    "autopilot.startGate.instructionsLink": "Open the instructions",
   },
   context: {
     _context: {
@@ -1039,17 +1035,27 @@ export const autopilot = defineNamespace({
         "Accessible name of a link that opens setup for one context-readiness item.",
         { label: "Localized name of the readiness item being configured." },
       ),
+      "autopilot.readiness.instructions.label": {
+        description:
+          "Name of one readiness row in the Autopilot activity inspector: the project's written instructions for how the AI should translate (audience, register, literalness). Every AI draft reads them.",
+        maxLength: 40,
+      },
+      "autopilot.readiness.instructions.none": {
+        description:
+          "Readiness row detail shown when the project has no written instructions. Explains what Autopilot loses without them.",
+      },
+      "autopilot.startGate.instructions": {
+        description:
+          "Reason Autopilot cannot start yet, in a list of setup gaps: the project has no written instructions for the AI. A link to the instructions editor follows.",
+      },
+      "autopilot.startGate.instructionsLink": {
+        description:
+          "Link text that opens the project's Instructions editor (Living Memory → Instructions), shown under the start-gate reason.",
+        maxLength: 40,
+      },
       "autopilot.readiness.terminology.some": withPlaceholders(
         "Readiness detail counting approved key-term renderings available to Autopilot.",
         { count: "Number of key terms with an approved rendering." },
-      ),
-      "autopilot.readiness.brief.some": withPlaceholders(
-        "Readiness detail counting answered translation-brief questions.",
-        { count: "Number of answered brief questions." },
-      ),
-      "autopilot.readiness.brief.someWithSummary": withPlaceholders(
-        "Readiness detail counting brief answers and noting a per-passage summary.",
-        { count: "Number of answered brief questions." },
       ),
       "autopilot.readiness.examples.some": withPlaceholders(
         "Readiness detail counting validated translations available as voice examples.",

@@ -55,6 +55,7 @@
     "test:worker": "vitest run --config worker/vitest.config.ts --dir worker",
     "test:daemon": "NODE_OPTIONS=--expose-gc vitest run scripts/migrate-daemon",
     "scan:secrets": "tsx scripts/secret-scan.ts",
+    "check:doc-pins": "tsx scripts/check-doc-pins.ts",
     "admin:request": "tsx scripts/admin-request.ts",
     "test:idml": "pnpm --filter @aquilla/idml-roundtrip test",
     "build:idml": "pnpm --filter @aquilla/idml-roundtrip build",
@@ -62,6 +63,7 @@
     "idml:adobe": "tsx scripts/idml-adobe-validation.ts",
     "test:watch": "vitest",
     "i18n:check": "tsx scripts/i18n-catalog.ts check",
+    "offline:replay-check": "tsx scripts/offline-replay-check.ts",
     "i18n:export": "tsx scripts/i18n-catalog.ts export",
     "i18n:import": "tsx scripts/i18n-catalog.ts import",
     "i18n:shots": "tsx scripts/i18n-shots.ts",
@@ -201,7 +203,7 @@
     "@livestore/react": "^0.4.0",
     "@livestore/sync-cf": "^0.4.0",
     "@livestore/utils": "0.4.0",
-    "@livestore/wa-sqlite": "^0.4.0",
+    "@livestore/wa-sqlite": "^1.0.5",
     "@sapphi-red/web-noise-suppressor": "^0.4.1",
     "@shadcn/react": "^0.3.1",
     "@tanstack/react-form": "^1.33.5",
@@ -299,7 +301,8 @@
       "sharp": ">=0.35.0"
     },
     "patchedDependencies": {
-      "@livestore/common@0.4.0": "patches/@livestore__common@0.4.0.patch"
+      "@livestore/common@0.4.0": "patches/@livestore__common@0.4.0.patch",
+      "@livestore/sqlite-wasm@0.4.0": "patches/@livestore__sqlite-wasm@0.4.0.patch"
     }
   }
 }

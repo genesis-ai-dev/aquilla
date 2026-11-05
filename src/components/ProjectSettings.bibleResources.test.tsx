@@ -341,26 +341,17 @@ describe("ProjectSettings — Bible data enrichments (AQU-1686)", () => {
   })
 })
 
-describe("ProjectSettings — Language profile for checks (AQU-1688) and Project decisions (AQU-1691)", () => {
+describe("ProjectSettings — Language profile and Project decisions moved out (AQU-2342)", () => {
   const SCRIPTURE_FILES = [{ id: "f1", name: "GEN.usfm", type: "usfm", createdAt: "", cellCount: 1 }]
 
-  // The cards configure Bible data checks and keep the answers to Bible data
-  // questions. A device that never opted in to the Bible data experiment has
-  // neither, so it must not see the cards, even for a scripture project with
-  // a stored profile.
-  it("are absent while this device has the Bible data experiment off", () => {
-    currentProject = makeProject({ files: SCRIPTURE_FILES as ProjectRecord["files"] })
-    currentSettings = { languageProfile: { quoteMarks: { levels: [{ open: "“", close: "”" }], continuation: "none" } } }
+  // The Language profile is data the checks read, so it lives with the Checks
+  // list in Living Memory; answers to Autopilot's questions are added to the
+  // project instructions. Settings shows neither card, experiment on or off.
+  it("are not settings cards, even with the Bible data experiment on", () => {
+    currentProject = makeProject({ files: SCRIPTURE_FILES as ProjectRecord["files"], experimentalFlags: { bibleData: true } })
     renderSettings()
     expect(screen.getByText("Languages")).toBeInTheDocument()
     expect(screen.queryByText("Language profile for checks")).toBeNull()
     expect(screen.queryByText("Project decisions")).toBeNull()
-  })
-
-  it("are shown with the experiment on", () => {
-    currentProject = makeProject({ files: SCRIPTURE_FILES as ProjectRecord["files"], experimentalFlags: { bibleData: true } })
-    renderSettings()
-    expect(screen.getByText("Language profile for checks")).toBeInTheDocument()
-    expect(screen.getByText("Project decisions")).toBeInTheDocument()
   })
 })

@@ -23,22 +23,6 @@ import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import type { SyncTokenCallbacks } from "@/lib/sync/sync-token"
 
 /**
- * Returns true iff the completion-settings save should actually patch
- * systemPrompt on the server. Guards against two failure modes:
- *   1. Empty-prompt clobber: buildCompletionSettings() materialises "" by
- *      default, so provider-only saves would erase the server prompt.
- *   2. Under-MAINTAINER write: sub-600 callers 403 server-side; skipping
- *      avoids IDB/server divergence (same floor as handleImported).
- */
-export function shouldPatchSystemPrompt(
-  systemPrompt: string | null | undefined,
-  roleLevel: number,
-): boolean {
-  if (!systemPrompt || systemPrompt.trim().length === 0) return false
-  return roleLevel >= ROLE.MAINTAINER
-}
-
-/**
  * Returns true iff the zero-file self-heal should fire a `/link/sync`
  * trigger for the current project. Only live-linked projects can be
  * self-healed this way (clone links never sync again after creation — the

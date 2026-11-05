@@ -49,6 +49,9 @@ import { callerMayReadLane } from "../../../db/shared/lane-visibility"
 import { resolveLaneIdOrTag } from "../../../db/shared/lane-ref"
 import { languageOfTargetLane } from "../../../db/shared/lane-language"
 import { readDraftingSettings } from "../../../db/shared/drafting-settings"
+import { settingsObject } from "../../../db/shared/load-translation-instructions"
+import { loadTranslationInstructions } from "../../../db/shared/load-translation-instructions"
+import { projectChecksHint } from "../lib/contextual/project-context"
 import { resolveAnswerLanguage } from "../lib/agent/answer-language"
 import { enforceRateLimit, userRateLimitIdentifier } from "../../../db/shared/rate-limit"
 import { buildAugmentSystemPrompt } from "../lib/agent/prompt-augment"
@@ -132,6 +135,10 @@ function resolveDraftModel(env: Env, settings: PlatformSettings, agentModel: str
 // backstops a model looping on free tools.
 const MAX_TOOL_ITERATIONS = 12
 const MAX_TOTAL_ROUNDS = 30
+// Bounds the CONVERSATION SIZE — the latest orchestrator turn's prompt +
+// completion — not tokens summed across turns. Every turn re-sends the whole
+// context, so a running sum tripped a whole-book task after a few turns with
+// almost nothing spent. Spend is the cost cap's job.
 const TOKEN_CEILING = 200_000
 const TURN_LIMIT_MESSAGE =
   "Turn length limit reached (200,000 tokens). Send a new message to continue or redirect the agent."
@@ -251,14 +258,14 @@ function buildTools(bibleResourcesEnabled: boolean) {
       function: {
         name: "draft",
         description:
-          "Draft untranslated cells with a separate evidence-research pass followed by generation from validated exemplars, discourse context, the project brief, and rules; then STAGE the results for user approval. Preferred over writing translations yourself. One call handles up to 10 cells; the result says how many remain.",
+          "Draft untranslated cells with a separate evidence-research pass followed by generation from validated exemplars, preceding validated context, and the project instructions; then STAGE the results for user approval, where the project's rules lint them (violations come back in the verdict). Key terms are not in the drafting prompt: name term choices in instructions. Preferred over writing translations yourself. One call handles up to 10 cells; the result says how many remain.",
         parameters: {
           type: "object",
           properties: {
             ...SCOPE_PROPS,
             cellIds: { type: "array", items: { type: "string" }, description: "Draft exactly these cells (ids or #c-aliases) instead of every untranslated cell in scope." },
             limit: { type: "number", description: "Max cells this call (default 10, cap 10)." },
-            instructions: { type: "string", description: "Extra guidance for this batch (tone, term choices, fixes from lint)." },
+            instructions: { type: "string", description: "Directions for this run only (tone, term choices, fixes from lint) — on top of the project instructions, which every draft already carries." },
           },
         },
       },
@@ -392,7 +399,7 @@ function buildTools(bibleResourcesEnabled: boolean) {
       function: {
         name: "propose_memory",
         description:
-          "STAGE a durable project note for human review (never approved by you). Path must match ^[a-z0-9-/]+\\.md$, content ≤10KB. Disabled while parsing untrusted content.",
+          "STAGE a durable project note for human review (never approved by you). Path must match ^[a-z0-9-/]+\\.md$, content ≤10KB. Use decisions/<slug>.md for a standing translation decision (\"render X as Y, never Z\") — once a lead approves it, it is appended to the project instructions every draft follows. Use observations/ for working notes. Disabled while parsing untrusted content.",
         parameters: {
           type: "object",
           properties: {
@@ -401,22 +408,6 @@ function buildTools(bibleResourcesEnabled: boolean) {
             rationale: { type: "string" },
           },
           required: ["path", "content", "rationale"],
-        },
-      },
-    },
-    {
-      type: "function",
-      function: {
-        name: "propose_brief_update",
-        description:
-          "STAGE a proposed change to the project brief for human review. Disabled while parsing untrusted content.",
-        parameters: {
-          type: "object",
-          properties: {
-            content: { type: "string" },
-            rationale: { type: "string" },
-          },
-          required: ["content", "rationale"],
         },
       },
     },
@@ -826,7 +817,9 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
   // run to ask "what language?". Best-effort, cheap lookups.
   let focusedFile: { name?: string; kind?: string } = {}
   let languages: { sourceLanguage?: string; targetLanguage?: string } = {}
-  let briefSummary: string | undefined
+  // AQU-2342: the settings blob, read once — the project instructions resolve
+  // from it (plus the legacy brief) after the memory context loads below.
+  let settingsBlob: Record<string, unknown> = {}
   // AQU-2263: the project's "The assistant answers the team in …".
   let teamLanguage: string | undefined
   try {
@@ -839,23 +832,19 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
       if (row) focusedFile = { name: row.name, kind: row.kind ?? undefined }
     }
     const settings = await env.AQUILLA_PG.prepare(
-      `SELECT settings::jsonb -> 'translationBrief' ->> 'l1Summary' AS brief_summary,
-              settings::jsonb -> 'draftingSettings' AS drafting_settings
-       FROM project_settings WHERE project_id = ?`,
+      `SELECT settings FROM project_settings WHERE project_id = ?`,
     )
       .bind(body.projectId)
-      .first<{ brief_summary: string | null; drafting_settings: unknown }>()
+      .first<{ settings: unknown }>()
     if (settings) {
+      settingsBlob = settingsObject(settings.settings)
+      teamLanguage = readDraftingSettings(settingsBlob.draftingSettings)?.main_chat_language
       const lanes = await loadLaneRows(env.AQUILLA_PG, body.projectId)
       languages = languagesForLanes(lanes, body.context?.lane ?? "")
       const fromLane = resolvedLaneId
         ? await languageOfTargetLane(env.AQUILLA_PG, body.projectId, resolvedLaneId)
         : null
       if (fromLane) languages = { ...languages, targetLanguage: fromLane }
-      briefSummary = settings.brief_summary ?? undefined
-      const rawDrafting = settings.drafting_settings
-      const drafting = typeof rawDrafting === "string" ? (() => { try { return JSON.parse(rawDrafting) as unknown } catch { return null } })() : rawDrafting
-      teamLanguage = readDraftingSettings(drafting)?.main_chat_language
     }
   } catch {
     /* prompt grounding is best-effort — the run proceeds without it */
@@ -883,6 +872,25 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
   } catch {
     /* memory grounding is best-effort */
   }
+  // AQU-2342: THE project instructions — one block, carried by the schema card
+  // and the draft tool alike. The legacy brief already loaded with the memory
+  // context is only a migrate-on-read source here, never a second block.
+  // Phase 2: the shared loader, so approved decisions/ memories and the
+  // decision log fold in exactly as on every other path.
+  const { text: translationInstructions } = await loadTranslationInstructions(
+    env.AQUILLA_PG,
+    body.projectId,
+    settingsBlob,
+  )
+  // AQU-2342: the Checks hint, built by the shared builder every drafting path
+  // uses. Best-effort, like all grounding.
+  let checksHint = ""
+  try {
+    const lane = await resolveLaneIdOrTag(env.AQUILLA_PG, body.projectId, body.context?.lane ?? "")
+    checksHint = await projectChecksHint(env.AQUILLA_PG, body.projectId, settingsBlob, lane.targetLang ?? "")
+  } catch {
+    /* grounding is best-effort */
+  }
 
   const convo: ConvoMessage[] = [
     {
@@ -904,11 +912,13 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
         // to follow the user's latest message (the app's language only when
         // that can't be told) — never the project's translation target.
         responseLanguage: answerLanguage.reply,
-        briefSummary,
+        translationInstructions,
+        checksHint,
       }),
     },
-    // AQU-AGENT §2 — second system message: verbatim brief + approved-memory
-    // index + new-tool guidance + conversation-language rule. Kept separate so the
+    // AQU-AGENT §2 — second system message: approved-memory index + new-tool
+    // guidance + conversation-language rule (the legacy brief now reaches the
+    // model only through the instructions block above — AQU-2342). Kept separate so the
     // existing schema-card prompt stays byte-identical.
     {
       role: "system" as const,
@@ -931,6 +941,8 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
 
   let promptTokens = 0
   let completionTokens = 0
+  /** Latest orchestrator turn's prompt + completion — what TOKEN_CEILING bounds. */
+  let contextTokens = 0
   let costCents = 0
   let steps = 0
   let stagedCount = 0
@@ -1012,7 +1024,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
         send({ type: "error", message: `Tool-iteration cap reached — run stopped.` })
         break
       }
-      if (promptTokens + completionTokens > TOKEN_CEILING) {
+      if (contextTokens > TOKEN_CEILING) {
         status = "capped"
         send({ type: "error", message: TURN_LIMIT_MESSAGE })
         break
@@ -1021,7 +1033,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
       // once the accumulated OpenRouter cost reaches the ceiling.
       if (costCents >= costCapCents) {
         status = "capped"
-        send({ type: "budget.exhausted", runId, spentCredits: toCredits(costCents), capCredits: toCredits(costCapCents) })
+        send({ type: "budget.exhausted", runId, spentCredits: toCredits(costCents), capCredits: toCredits(costCapCents), reason: "run_cost_cap" })
         break
       }
 
@@ -1119,6 +1131,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
         message = turn.message
         promptTokens += turn.usage?.prompt_tokens ?? 0
         completionTokens += turn.usage?.completion_tokens ?? 0
+        contextTokens = (turn.usage?.prompt_tokens ?? 0) + (turn.usage?.completion_tokens ?? 0)
         costCents += (turn.usage?.cost ?? 0) * 100
         meter.add({
           surface: "agent",
@@ -1186,18 +1199,19 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
       for (let ci = 0; ci < toolCalls.length; ci++) {
         const call = toolCalls[ci]
         // races-F3: re-check the caps mid-turn before each BUDGETED call. A prior
-        // tool in this same turn can push cost/tokens past the cap (e.g. a draft's
-        // internal model call folds cost via addUsage). Halt rather than run more
-        // paid work — the top-of-loop check only fires between turns.
+        // tool in this same turn can push cost past the cap (e.g. a draft's
+        // internal model call folds cost via addUsage); a turn whose own context
+        // is already over TOKEN_CEILING runs no more budgeted work. Halt rather
+        // than run more paid work — the top-of-loop check only fires between turns.
         if (
           budgetedCall(call) &&
-          (costCents >= costCapCents || promptTokens + completionTokens > TOKEN_CEILING)
+          (costCents >= costCapCents || contextTokens > TOKEN_CEILING)
         ) {
           status = "capped"
-          if (promptTokens + completionTokens > TOKEN_CEILING) {
+          if (contextTokens > TOKEN_CEILING) {
             send({ type: "error", message: TURN_LIMIT_MESSAGE })
           } else {
-            send({ type: "budget.exhausted", runId, spentCredits: toCredits(costCents), capCredits: toCredits(costCapCents) })
+            send({ type: "budget.exhausted", runId, spentCredits: toCredits(costCents), capCredits: toCredits(costCapCents), reason: "run_cost_cap" })
           }
           // Answer every not-yet-run tool_call so the stored transcript stays
           // valid for a follow-up run (each tool_call needs a tool message).
@@ -1239,7 +1253,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
             ...(usage ? { maxTokens: usage.maxOutputTokens } : {}),
             sourceLanguage: languages.sourceLanguage,
             targetLanguage: languages.targetLanguage,
-            briefSummary,
+            translationInstructions,
           },
           addUsage: (u) => {
             promptTokens += u.prompt_tokens ?? 0
@@ -1271,7 +1285,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
             })
           },
           canContinuePaidWork: () =>
-            costCents < costCapCents && promptTokens + completionTokens <= TOKEN_CEILING,
+            costCents < costCapCents && contextTokens <= TOKEN_CEILING,
           admitPaidCall: usage
             ? async (input) => {
                 const admission = await usage.admitStep(input)
@@ -1407,7 +1421,7 @@ interface ToolCallEnv {
     maxTokens?: number
     sourceLanguage?: string
     targetLanguage?: string
-    briefSummary?: string
+    translationInstructions?: string
   }
   /** Folds a tool-internal model call's usage into the run totals. */
   addUsage: (usage: { prompt_tokens?: number; completion_tokens?: number; cost?: number }) => void
@@ -1567,7 +1581,7 @@ async function runDraftTool(args: DraftArgs, t: ToolCallEnv): Promise<string> {
       stageCtx: t.stageCtx,
       sourceLanguage: t.draft.sourceLanguage,
       targetLanguage: t.draft.targetLanguage,
-      briefSummary: t.draft.briefSummary,
+      translationInstructions: t.draft.translationInstructions,
       signal: t.signal,
       sendProgress: (label, done, total) =>
         t.send({ type: "progress", label, ...(done === undefined ? {} : { done }), ...(total === undefined ? {} : { total }) }),

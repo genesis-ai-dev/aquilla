@@ -404,7 +404,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.group.sourceSyncLabel": "Source & sync",
     "projectSettings.group.sourceSyncDescription": "Source link, upstream changes, git sync",
     "projectSettings.group.aiLabel": "AI",
-    "projectSettings.group.aiDescription": "Brief, instructions, drafting, model, voice, terminology",
+    "projectSettings.group.aiDescription": "Instructions, drafting, model, voice, terminology",
     "projectSettings.group.validationLabel": "Validation & health",
     "projectSettings.group.validationDescription": "Approvals, harmonization, staleness decay",
     "projectSettings.group.audioMediaLabel": "Media",
@@ -1174,10 +1174,6 @@ export const projectSettings = defineNamespace({
 
     // ── ProjectSettings.tsx — misc call sites without a pre-existing key ──
     "projectSettings.info.titleLabel": "Project name",
-    "projectSettings.systemPrompt.label": "System prompt",
-    "projectSettings.systemPrompt.navDescription":
-      "The standing instructions behind every AI draft — how the AI should write, " +
-      "not what the project is for.",
     "projectSettings.advancedLlm.modelOverrideName": "Model override",
     "projectSettings.localModels.onDeviceLabel": "Transcription and voices",
     "projectSettings.gitSync.autoSyncIntervalAriaLabel": "Auto-sync interval minutes",

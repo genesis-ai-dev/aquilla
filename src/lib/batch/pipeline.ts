@@ -1,5 +1,5 @@
 // Batch translation pipeline — the engine behind the frozen Batch API v1
-// contract (BATCH_ENDPOINT_CONTRACT.md). Transport-agnostic: the stub server
+// contract (docs/BATCH_ENDPOINT_CONTRACT.md). Transport-agnostic: the stub server
 // (parity/batch/stub-server.ts) and the future Worker route both wrap this
 // service. All new surface: nothing existing changes (C7); the Worker mount
 // will sit behind the `batchApi` feature flag, default off.

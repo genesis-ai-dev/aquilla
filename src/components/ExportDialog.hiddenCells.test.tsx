@@ -39,7 +39,7 @@ vi.mock("@/lib/export/exporters/idml", () => ({
     diagnostics: {},
   })),
 }))
-vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn() } }))
+vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn() } }))
 
 import { useProjectCells } from "@/hooks/useProjectCells"
 import { fetchRemovedCells } from "@/lib/sync/source-export"

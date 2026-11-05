@@ -123,8 +123,8 @@ export const languageProfile = defineNamespace({
   context: {
     _context: {
       description:
-        "Rows in the 'Language profile for checks' settings card (Settings → General → " +
-        "Languages), read by a project maintainer. Each row records one fact about the " +
+        "Rows in the 'Language profile for checks' card (Living Memory → Checks, under the " +
+        "list of checks), read by a project maintainer. Each row records one fact about the " +
         "language the project translates INTO: how it marks questions, its pronouns, " +
         "its negative words, how it writes numbers, how it renders the names of God, and " +
         "the project's policy for measures, manuscript variants and headings. Automatic " +

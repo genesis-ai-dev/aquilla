@@ -9,14 +9,9 @@ import { CloudOff, FileText, FolderOpen, RefreshCw, Sparkles, Upload } from "luc
 import { Button } from "@/components/ui/button"
 import { LoadingTemplate } from "@/components/ui/loading-overlay"
 import { EmptyState } from "@/components/ui/page"
-import { LoadingCursor, LoadingLine, LoadingLines } from "@/components/ui/loading-cursor"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 import type { CellAreaState } from "@/lib/editor/cell-area-state"
 import { useT } from "@/lib/i18n/I18nProvider"
-
-/** Matches EditorTable's default gridCols (the Text lens shape — the stacked
- *  media lens widens the gutter, but this skeleton always precedes text
- *  mode). Keep in sync if the table's columns change. */
-const GRID_COLS = "grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]"
 
 interface CellAreaPlaceholderProps {
   state: CellAreaState
@@ -79,10 +74,8 @@ export function CellRowsLoadStatus({
     <div className="shrink-0 border-t" data-testid="cell-rows-load-status">
       {loading ? (
         <LoadingTemplate label={t("editor.file.loadingFromCloud")} statusDetail={<CellLoadingProgress progress={progress ?? null} />}>
-          <div className={`grid ${GRID_COLS} items-center gap-3 px-4 py-3`}>
-            <LoadingCursor className="text-xs" />
-            <LoadingLine />
-            <LoadingLine />
+          <div className="px-4 py-3">
+            <LoadingCursor />
           </div>
         </LoadingTemplate>
       ) : <LoadError onRetryClick={onRetryClick} compact />}
@@ -145,13 +138,9 @@ function SkeletonGrid() {
   return (
     <div className="flex h-full min-h-64 flex-col">
       <div className="flex flex-1 flex-col gap-2 overflow-hidden p-4">
-        {Array.from({ length: 8 }).map((_, i) => (
-          <div key={i} className={`bg-card grid ${GRID_COLS} items-start gap-3 rounded-lg px-4 py-3`}>
-            <LoadingCursor className="text-xs" />
-            <LoadingLines count={2} className="min-h-16" />
-            <LoadingLines count={2} className="min-h-16" />
-          </div>
-        ))}
+        <div className="px-4 py-3">
+          <LoadingCursor className="text-xl" />
+        </div>
       </div>
     </div>
   )

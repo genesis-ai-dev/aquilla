@@ -326,7 +326,8 @@ describe("DataTable", () => {
     expect(screen.getByRole("status", { name: "Loading rows" })).toHaveAttribute("aria-busy", "true")
     expect(screen.getByRole("table")).toBeInTheDocument()
     expect(screen.queryByTestId("custom-empty")).not.toBeInTheDocument()
-    expect(screen.getByTestId("loading-table").querySelectorAll('[data-slot="loading-cursor"]').length).toBeGreaterThan(0)
+    // One cursor for the whole table, not one per cell.
+    expect(screen.getByTestId("loading-table").querySelectorAll('[data-slot="loading-cursor"]')).toHaveLength(1)
   })
 
   it("shows a spinner in the search field while searching without skeletonizing rows", () => {

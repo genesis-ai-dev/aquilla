@@ -10,6 +10,8 @@ import { ExportDialog } from "./ExportDialog"
 import type { CellData } from "@/hooks/useCells"
 import type { TimelineTrack } from "@/lib/timeline/tracks"
 
+const analytics = vi.hoisted(() => ({ capture: vi.fn(), captureException: vi.fn(), enabled: () => false }))
+vi.mock("@/hooks/useAccountAnalytics", () => ({ useAccountAnalytics: () => analytics }))
 vi.mock("@/lib/export/export-service", () => ({ downloadBlob: vi.fn() }))
 vi.mock("@/hooks/useProjectCells", () => ({ useProjectCells: vi.fn() }))
 vi.mock("@/lib/export/audio-chapter", async (importOriginal) => {
@@ -128,7 +130,7 @@ describe("chapter audio export (AQU-1201)", () => {
     await waitFor(() => expect(mockChapter).toHaveBeenCalledTimes(1))
     expect(mockByCharacter).not.toHaveBeenCalled()
     expect(mockByLine).not.toHaveBeenCalled()
-    expect(mockDownload).toHaveBeenCalledWith(expect.any(Blob), expect.stringMatching(/_MAT_1\.wav$/))
+    expect(mockDownload).toHaveBeenCalledWith((await mockChapter.mock.results[0].value).blob, expect.stringMatching(/_MAT_1\.wav$/), analytics)
     expect(mockChapter).toHaveBeenCalledWith(expect.objectContaining({ includeChapterHeadings: false }))
   })
 
@@ -161,7 +163,7 @@ describe("chapter audio export (AQU-1201)", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Export$/i }))
     await waitFor(() => expect(mockByCharacter).toHaveBeenCalledTimes(1))
     expect(mockChapter).not.toHaveBeenCalled()
-    expect(mockDownload).toHaveBeenCalledWith(expect.any(Blob), expect.stringMatching(/audio-by-character\.zip$/))
+    expect(mockDownload).toHaveBeenCalledWith((await mockByCharacter.mock.results[0].value).blob, expect.stringMatching(/audio-by-character\.zip$/), analytics)
   })
 
   it("still exports by-line without going through the stitcher", async () => {
@@ -171,7 +173,7 @@ describe("chapter audio export (AQU-1201)", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Export$/i }))
     await waitFor(() => expect(mockByLine).toHaveBeenCalledTimes(1))
     expect(mockChapter).not.toHaveBeenCalled()
-    expect(mockDownload).toHaveBeenCalledWith(expect.any(Blob), expect.stringMatching(/audio-by-line\.zip$/))
+    expect(mockDownload).toHaveBeenCalledWith((await mockByLine.mock.results[0].value).blob, expect.stringMatching(/audio-by-line\.zip$/), analytics)
   })
 })
 

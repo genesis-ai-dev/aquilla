@@ -40,7 +40,7 @@ import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
 // tests care that the batch-validate event FIRES, which is precisely what the
 // surface could not previously prove.
 vi.mock("@/lib/posthog", () => ({
-  default: { capture: vi.fn(), captureException: vi.fn(), opt_in_capturing: vi.fn(), opt_out_capturing: vi.fn() },
+  default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn(), captureException: vi.fn(), opt_in_capturing: vi.fn(), opt_out_capturing: vi.fn() },
 }))
 import { MAX_SELECTED } from "@/lib/audio/selection"
 import type { AudioAttachmentOut, CellAudioEntry } from "@/lib/sync/cell-audio-read-types"

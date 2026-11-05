@@ -11,6 +11,7 @@ describe("WorkspaceMainSkeleton", () => {
     expect(status).toHaveAttribute("aria-busy", "true")
     expect(screen.getByTestId("workspace-loading-template").parentElement).toHaveAttribute("inert")
     expect(screen.getByText("Loading project…")).toBeInTheDocument()
-    expect(status.querySelector("[data-slot='spinner']")).not.toBeNull()
+    // One cursor, which prints the label: no separate pill.
+    expect(status.querySelectorAll("[data-slot='loading-cursor']")).toHaveLength(1)
   })
 })

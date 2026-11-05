@@ -11,8 +11,11 @@ overrides:
 
 patchedDependencies:
   '@livestore/common@0.4.0':
-    hash: 1bfa14648170e1d85757a19adf7a5457facbe74067da37c3094403843142f103
+    hash: b59b9101581ef40d63cf14efccd4ce7cf7ea644f339297badf7addfe4bc8ce25
     path: patches/@livestore__common@0.4.0.patch
+  '@livestore/sqlite-wasm@0.4.0':
+    hash: e1755846ba99f04ab30678b11181b3d41f478ef14d7162229a264a58e9e1e208
+    path: patches/@livestore__sqlite-wasm@0.4.0.patch
 
 importers:
 
@@ -47,7 +50,7 @@ importers:
         version: 0.4.0(3b79ce90d8e0e5337a9b451a318ee921)
       '@livestore/common':
         specifier: 0.4.0
-        version: 0.4.0(patch_hash=1bfa14648170e1d85757a19adf7a5457facbe74067da37c3094403843142f103)(3b79ce90d8e0e5337a9b451a318ee921)
+        version: 0.4.0(patch_hash=b59b9101581ef40d63cf14efccd4ce7cf7ea644f339297badf7addfe4bc8ce25)(3b79ce90d8e0e5337a9b451a318ee921)
       '@livestore/livestore':
         specifier: ^0.4.0
         version: 0.4.0(3b79ce90d8e0e5337a9b451a318ee921)
@@ -64,8 +67,8 @@ importers:
         specifier: 0.4.0
         version: 0.4.0(3b79ce90d8e0e5337a9b451a318ee921)
       '@livestore/wa-sqlite':
-        specifier: ^0.4.0
-        version: 0.4.0
+        specifier: ^1.0.5
+        version: 1.0.5
       '@sapphi-red/web-noise-suppressor':
         specifier: ^0.4.1
         version: 0.4.1
@@ -1667,6 +1670,9 @@ packages:
 
   '@livestore/wa-sqlite@0.4.0':
     resolution: {integrity: sha512-ds2hA8C4tcXki+ANK9A8x6BH3/rutC7yMtyaei5cm3fRtuQw8fpGQ9Tlts9qEJ1al88qQoNlraOgrpgl3/ZqRA==}
+
+  '@livestore/wa-sqlite@1.0.5':
+    resolution: {integrity: sha512-OIxBEtl027kSl/z3772YgYf7ZlkE8aDWvLmm+O/hbPJO/lubv9+2EaDpXeoxsyg2xIIpkpXXSreEzFckkT1/QQ==}
 
   '@livestore/webmesh@0.4.0':
     resolution: {integrity: sha512-HrDCNLPWG/aupdXt7Y2HcseR9FIUU54/GvDniyndXMAq6xhehiSgwKvxbDhjWpl0I2UoOakfxyndT7a6JPtU8w==}
@@ -6553,8 +6559,8 @@ packages:
     resolution: {integrity: sha512-LgO3D9yZJjApUiuUfl9iFAwrtaX4+lok3wJIqttGoKCHlWUqHqbQpnxCf82L8FjgKsh4iGo78hqJwgL8F6To2A==}
     engines: {node: '>=14.0.0'}
 
-  tldts-core@7.4.19:
-    resolution: {integrity: sha512-goNXV6Ho9TIOfpJZanTd6CKG5DyYgYAL+k+22T0SLh8l6+KHIfBUPFuePuSZv05UttIaaLmI9tb7TmGIdK5AkQ==}
+  tldts-core@7.4.20:
+    resolution: {integrity: sha512-C630TWXZCZmLq0F2bW4QqwnaaxCQ/svpAqvJwnC4JvgEM5ohhBnGsEzTLSOXcN+xjz+kEaHS5uoWIw2klnqd0A==}
 
   tldts@7.4.19:
     resolution: {integrity: sha512-48dH6aSpQnpbzDUc4vIQZ1VjB8tkK+e8c1yx05/SZK+rkssgjEOlxDd/yU8/a4vGYQ9vRgJr9dwMq9TJ0b3X2Q==}
@@ -8110,9 +8116,9 @@ snapshots:
       '@effect/sql': 0.51.1(@effect/experimental@0.60.0(@effect/platform@0.96.1(effect@3.21.2))(effect@3.21.2))(@effect/platform@0.96.1(effect@3.21.2))(effect@3.21.2)
       '@effect/typeclass': 0.40.0(effect@3.21.2)
       '@effect/vitest': 0.29.0(effect@3.21.2)(vitest@5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(happy-dom@21.0.4)(msw@2.13.3(@types/node@26.6.5)(typescript@6.0.3))(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)))
-      '@livestore/common': 0.4.0(patch_hash=1bfa14648170e1d85757a19adf7a5457facbe74067da37c3094403843142f103)(3b79ce90d8e0e5337a9b451a318ee921)
+      '@livestore/common': 0.4.0(patch_hash=b59b9101581ef40d63cf14efccd4ce7cf7ea644f339297badf7addfe4bc8ce25)(3b79ce90d8e0e5337a9b451a318ee921)
       '@livestore/devtools-web-common': 0.4.0(3b79ce90d8e0e5337a9b451a318ee921)
-      '@livestore/sqlite-wasm': 0.4.0(3b79ce90d8e0e5337a9b451a318ee921)
+      '@livestore/sqlite-wasm': 0.4.0(patch_hash=e1755846ba99f04ab30678b11181b3d41f478ef14d7162229a264a58e9e1e208)(3b79ce90d8e0e5337a9b451a318ee921)
       '@livestore/utils': 0.4.0(3b79ce90d8e0e5337a9b451a318ee921)
       '@livestore/webmesh': 0.4.0(3b79ce90d8e0e5337a9b451a318ee921)
       '@opentelemetry/api': 1.9.1
@@ -8144,7 +8150,7 @@ snapshots:
       '@standard-schema/spec': 1.1.0
       effect: 3.21.2
 
-  '@livestore/common@0.4.0(patch_hash=1bfa14648170e1d85757a19adf7a5457facbe74067da37c3094403843142f103)(3b79ce90d8e0e5337a9b451a318ee921)':
+  '@livestore/common@0.4.0(patch_hash=b59b9101581ef40d63cf14efccd4ce7cf7ea644f339297badf7addfe4bc8ce25)(3b79ce90d8e0e5337a9b451a318ee921)':
     dependencies:
       '@effect/ai': 0.35.0(@effect/experimental@0.60.0(@effect/platform@0.96.1(effect@3.21.2))(effect@3.21.2))(@effect/platform@0.96.1(effect@3.21.2))(@effect/rpc@0.75.1(@effect/platform@0.96.1(effect@3.21.2))(effect@3.21.2))(effect@3.21.2)
       '@effect/cli': 0.75.1(@effect/platform@0.96.1(effect@3.21.2))(@effect/printer-ansi@0.49.0(@effect/typeclass@0.40.0(effect@3.21.2))(effect@3.21.2))(@effect/printer@0.49.0(@effect/typeclass@0.40.0(effect@3.21.2))(effect@3.21.2))(effect@3.21.2)
@@ -8211,7 +8217,7 @@ snapshots:
       '@effect/sql': 0.51.1(@effect/experimental@0.60.0(@effect/platform@0.96.1(effect@3.21.2))(effect@3.21.2))(@effect/platform@0.96.1(effect@3.21.2))(effect@3.21.2)
       '@effect/typeclass': 0.40.0(effect@3.21.2)
       '@effect/vitest': 0.29.0(effect@3.21.2)(vitest@5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(happy-dom@21.0.4)(msw@2.13.3(@types/node@26.6.5)(typescript@6.0.3))(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)))
-      '@livestore/common': 0.4.0(patch_hash=1bfa14648170e1d85757a19adf7a5457facbe74067da37c3094403843142f103)(3b79ce90d8e0e5337a9b451a318ee921)
+      '@livestore/common': 0.4.0(patch_hash=b59b9101581ef40d63cf14efccd4ce7cf7ea644f339297badf7addfe4bc8ce25)(3b79ce90d8e0e5337a9b451a318ee921)
       '@livestore/utils': 0.4.0(3b79ce90d8e0e5337a9b451a318ee921)
       '@livestore/webmesh': 0.4.0(3b79ce90d8e0e5337a9b451a318ee921)
       '@opentelemetry/api': 1.9.1
@@ -8237,7 +8243,7 @@ snapshots:
       '@effect/typeclass': 0.40.0(effect@3.21.2)
       '@effect/vitest': 0.29.0(effect@3.21.2)(vitest@5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(happy-dom@21.0.4)(msw@2.13.3(@types/node@26.6.5)(typescript@6.0.3))(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)))
       '@livestore/adapter-web': 0.4.0(3b79ce90d8e0e5337a9b451a318ee921)
-      '@livestore/common': 0.4.0(patch_hash=1bfa14648170e1d85757a19adf7a5457facbe74067da37c3094403843142f103)(3b79ce90d8e0e5337a9b451a318ee921)
+      '@livestore/common': 0.4.0(patch_hash=b59b9101581ef40d63cf14efccd4ce7cf7ea644f339297badf7addfe4bc8ce25)(3b79ce90d8e0e5337a9b451a318ee921)
       '@livestore/livestore': 0.4.0(3b79ce90d8e0e5337a9b451a318ee921)
       '@livestore/utils': 0.4.0(3b79ce90d8e0e5337a9b451a318ee921)
       '@opentelemetry/api': 1.9.1
@@ -8262,7 +8268,7 @@ snapshots:
       '@effect/sql': 0.51.1(@effect/experimental@0.60.0(@effect/platform@0.96.1(effect@3.21.2))(effect@3.21.2))(@effect/platform@0.96.1(effect@3.21.2))(effect@3.21.2)
       '@effect/typeclass': 0.40.0(effect@3.21.2)
       '@effect/vitest': 0.29.0(effect@3.21.2)(vitest@5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(happy-dom@21.0.4)(msw@2.13.3(@types/node@26.6.5)(typescript@6.0.3))(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)))
-      '@livestore/common': 0.4.0(patch_hash=1bfa14648170e1d85757a19adf7a5457facbe74067da37c3094403843142f103)(3b79ce90d8e0e5337a9b451a318ee921)
+      '@livestore/common': 0.4.0(patch_hash=b59b9101581ef40d63cf14efccd4ce7cf7ea644f339297badf7addfe4bc8ce25)(3b79ce90d8e0e5337a9b451a318ee921)
       '@livestore/utils': 0.4.0(3b79ce90d8e0e5337a9b451a318ee921)
       '@opentelemetry/api': 1.9.1
       '@opentelemetry/resources': 2.11.0(@opentelemetry/api@1.9.1)
@@ -8321,7 +8327,7 @@ snapshots:
       '@effect/sql': 0.51.1(@effect/experimental@0.60.0(@effect/platform@0.96.1(effect@3.21.2))(effect@3.21.2))(@effect/platform@0.96.1(effect@3.21.2))(effect@3.21.2)
       '@effect/typeclass': 0.40.0(effect@3.21.2)
       '@effect/vitest': 0.29.0(effect@3.21.2)(vitest@5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(happy-dom@21.0.4)(msw@2.13.3(@types/node@26.6.5)(typescript@6.0.3))(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)))
-      '@livestore/common': 0.4.0(patch_hash=1bfa14648170e1d85757a19adf7a5457facbe74067da37c3094403843142f103)(3b79ce90d8e0e5337a9b451a318ee921)
+      '@livestore/common': 0.4.0(patch_hash=b59b9101581ef40d63cf14efccd4ce7cf7ea644f339297badf7addfe4bc8ce25)(3b79ce90d8e0e5337a9b451a318ee921)
       '@livestore/framework-toolkit': 0.4.0(3b79ce90d8e0e5337a9b451a318ee921)
       '@livestore/livestore': 0.4.0(3b79ce90d8e0e5337a9b451a318ee921)
       '@livestore/utils': 0.4.0(3b79ce90d8e0e5337a9b451a318ee921)
@@ -8331,7 +8337,7 @@ snapshots:
       effect: 3.21.2
       react: 19.3.1
 
-  '@livestore/sqlite-wasm@0.4.0(3b79ce90d8e0e5337a9b451a318ee921)':
+  '@livestore/sqlite-wasm@0.4.0(patch_hash=e1755846ba99f04ab30678b11181b3d41f478ef14d7162229a264a58e9e1e208)(3b79ce90d8e0e5337a9b451a318ee921)':
     dependencies:
       '@cloudflare/workers-types': 4.20251118.0
       '@effect/ai': 0.35.0(@effect/experimental@0.60.0(@effect/platform@0.96.1(effect@3.21.2))(effect@3.21.2))(@effect/platform@0.96.1(effect@3.21.2))(@effect/rpc@0.75.1(@effect/platform@0.96.1(effect@3.21.2))(effect@3.21.2))(effect@3.21.2)
@@ -8349,7 +8355,7 @@ snapshots:
       '@effect/sql': 0.51.1(@effect/experimental@0.60.0(@effect/platform@0.96.1(effect@3.21.2))(effect@3.21.2))(@effect/platform@0.96.1(effect@3.21.2))(effect@3.21.2)
       '@effect/typeclass': 0.40.0(effect@3.21.2)
       '@effect/vitest': 0.29.0(effect@3.21.2)(vitest@5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(happy-dom@21.0.4)(msw@2.13.3(@types/node@26.6.5)(typescript@6.0.3))(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)))
-      '@livestore/common': 0.4.0(patch_hash=1bfa14648170e1d85757a19adf7a5457facbe74067da37c3094403843142f103)(3b79ce90d8e0e5337a9b451a318ee921)
+      '@livestore/common': 0.4.0(patch_hash=b59b9101581ef40d63cf14efccd4ce7cf7ea644f339297badf7addfe4bc8ce25)(3b79ce90d8e0e5337a9b451a318ee921)
       '@livestore/common-cf': 0.4.0(3b79ce90d8e0e5337a9b451a318ee921)
       '@livestore/utils': 0.4.0(3b79ce90d8e0e5337a9b451a318ee921)
       '@livestore/wa-sqlite': 0.4.0
@@ -8376,7 +8382,7 @@ snapshots:
       '@effect/sql': 0.51.1(@effect/experimental@0.60.0(@effect/platform@0.96.1(effect@3.21.2))(effect@3.21.2))(@effect/platform@0.96.1(effect@3.21.2))(effect@3.21.2)
       '@effect/typeclass': 0.40.0(effect@3.21.2)
       '@effect/vitest': 0.29.0(effect@3.21.2)(vitest@5.0.5(@opentelemetry/api@1.9.1)(@types/node@26.6.5)(happy-dom@21.0.4)(msw@2.13.3(@types/node@26.6.5)(typescript@6.0.3))(vite@8.3.5(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)))
-      '@livestore/common': 0.4.0(patch_hash=1bfa14648170e1d85757a19adf7a5457facbe74067da37c3094403843142f103)(3b79ce90d8e0e5337a9b451a318ee921)
+      '@livestore/common': 0.4.0(patch_hash=b59b9101581ef40d63cf14efccd4ce7cf7ea644f339297badf7addfe4bc8ce25)(3b79ce90d8e0e5337a9b451a318ee921)
       '@livestore/common-cf': 0.4.0(3b79ce90d8e0e5337a9b451a318ee921)
       '@livestore/utils': 0.4.0(3b79ce90d8e0e5337a9b451a318ee921)
       '@opentelemetry/api': 1.9.1
@@ -8410,6 +8416,8 @@ snapshots:
       qrcode-generator: 2.0.4
 
   '@livestore/wa-sqlite@0.4.0': {}
+
+  '@livestore/wa-sqlite@1.0.5': {}
 
   '@livestore/webmesh@0.4.0(3b79ce90d8e0e5337a9b451a318ee921)':
     dependencies:
@@ -13841,12 +13849,12 @@ snapshots:
 
   tinyrainbow@3.2.0: {}
 
-  tldts-core@7.4.19:
+  tldts-core@7.4.20:
     optional: true
 
   tldts@7.4.19:
     dependencies:
-      tldts-core: 7.4.19
+      tldts-core: 7.4.20
     optional: true
 
   to-buffer@1.2.2:

@@ -138,9 +138,11 @@ export interface AgentBudget {
   capCredits: number
   /** Set once a `budget.exhausted` frame lands — the run halted at its cap. */
   exhausted: boolean
-  /** Why it stopped: the workspace's weekly AI allowance (AQU-837) rather
-   *  than this run's own cost cap. Absent for the per-run cap. */
-  reason?: 'weekly_allowance'
+  /** Which limit stopped the run (AQU-2313): the workspace's weekly AI
+   *  allowance (AQU-837) or this run's own cost cap. Absent from a
+   *  pre-AQU-2313 server, which tagged only the weekly stop — read as
+   *  `run_cost_cap`, the only stop those servers sent untagged. */
+  reason?: 'weekly_allowance' | 'run_cost_cap'
 }
 
 export interface AgentProgress {

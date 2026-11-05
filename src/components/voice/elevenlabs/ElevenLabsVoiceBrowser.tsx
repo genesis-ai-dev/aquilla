@@ -9,7 +9,7 @@ import { Check, Pause, Play, Plus, Search } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
-import { LoadingLine } from "@/components/ui/loading-cursor"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import { VOICE_PALETTE } from "@/lib/audio/voices"
@@ -174,8 +174,7 @@ export function ElevenLabsVoiceBrowser({
             <li key={i} className="flex items-center gap-2.5 rounded-xl border p-2.5">
               <Skeleton className="size-9 rounded-full" />
               <div className="flex-1 space-y-1.5">
-                <LoadingLine className="text-xs" />
-                <LoadingLine className="text-[10px]" />
+                {i === 0 ? <LoadingCursor className="text-xs" /> : null}
               </div>
             </li>
           ))}

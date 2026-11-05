@@ -34,7 +34,9 @@ export const INHERIT_DEFAULTS: Record<InheritFieldId, boolean> = {
 
 /** Top-level settings keys each field copies. Knowledge documents are rows, not a key. */
 export const INHERIT_FIELD_KEYS: Record<InheritFieldId, readonly string[]> = {
-  translationBrief: ["translationBrief"],
+  // AQU-2342: the instructions travel with the brief — they are what the
+  // brief now feeds, and every drafting prompt reads them.
+  translationBrief: ["translationBrief", "translationInstructions"],
   knowledgeDocs: [],
   // How progress is COUNTED (approvals needed, headings counted) is never
   // copied (AQU-1771): it follows the project's own value, then its org's

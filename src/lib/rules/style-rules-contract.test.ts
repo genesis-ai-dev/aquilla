@@ -10,7 +10,9 @@
  */
 import { describe, expect, it } from "vitest"
 
-import { buildStyleRulesBlock } from "@/lib/completion/completion-service"
+import { buildChecksBlock } from "@/lib/completion/completion-service"
+
+const buildStyleRulesBlock = (instructions: string[]) => buildChecksBlock(undefined, instructions)
 import { bookGenre } from "@/lib/scripture/book-genres"
 
 import { buildApplicabilityIndex, cellCoordinates, resolveEffectiveRules } from "./applicability"
@@ -121,7 +123,7 @@ describe("extraction → applicability → prompt", () => {
     )
 
     expect(block).toBe(
-      "Style rules that apply to this passage (MUST follow):\n- Use the covenant name in small caps.",
+      "Checks (verified automatically after drafting — the draft must pass each one):\n- Use the covenant name in small caps.",
     )
   })
 

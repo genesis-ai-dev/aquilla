@@ -146,11 +146,9 @@ export const agent = defineNamespace({
     "agent.card.tool.lintRules.description":
       "Runs this project's own rules over every draft before it is staged.",
 
-    "agent.card.read.brief.label": "Translation brief",
-    "agent.card.read.brief.description": "The project's purpose, audience, and standards.",
-    "agent.card.read.styleGuide.label": "Style guide",
-    "agent.card.read.styleGuide.description":
-      "The standing instructions for how this project should read.",
+    "agent.card.read.instructions.label": "Project instructions",
+    "agent.card.read.instructions.description":
+      "How the team wants this project translated — the text every AI draft follows.",
     "agent.card.read.termbase.label": "Terminology",
     "agent.card.read.termbase.description": "The agreed renderings for this project's key terms.",
     "agent.card.read.livingMemory.label": "Living memory",
@@ -362,7 +360,9 @@ export const agent = defineNamespace({
     "agent.aquifer.publishing": "Publishing…",
 
     // ── Run cost-cap meter (BudgetMeter) ────────────────────────────────
-    "agent.budget.exhausted": "Run stopped at its {capCredits} credit cap ({spentCredits} spent).",
+    "agent.budget.exhausted":
+      "Run stopped at this run's own spending limit of {capCredits} ({spentCredits} spent). " +
+      "It limits one run, not your workspace's credit allowance — send a new message to continue.",
     "agent.budget.weeklyExhausted":
       "Run stopped: this workspace has used its weekly AI allowance. Work already staged is kept. " +
       "Usage resets weekly; see Billing.",
@@ -474,19 +474,20 @@ export const agent = defineNamespace({
     "agent.code.outputTruncated": "Output truncated — the sandbox caps stdout/stderr at 64KB each.",
     "agent.code.runningEllipsis": "Running…",
 
-    // ── Memory + brief: chat notices (MemoryProposalNotice), the Memory
-    //    tab shell (AgentMemoryTab), the approved list (ApprovedMemoryList),
-    //    the project brief panel (BriefPanel), and the proposed queue
-    //    (ProposedMemoryList). ──────────────────────────────────────────
+    // ── Memory: chat notices (MemoryProposalNotice), the Memory tab shell
+    //    (AgentMemoryTab), the approved list (ApprovedMemoryList), and the
+    //    proposed queue (ProposedMemoryList). ────────────────────────────
     "agent.memory.reviewInMemoryTab": "Review in Memory tab",
     "agent.memory.reviewed": "Reviewed",
     "agent.memory.proposedNotice": "Proposed memory {path} — {preview}",
     "agent.memory.briefProposedNotice": "Proposed brief update — {preview}",
     "agent.memory.signInNotice": "Sign in to view agent memory.",
+    "agent.memory.scopeNote":
+      "The agent's working notes, read in agent chat only. Approving a decision (decisions/…) also " +
+      "adds it to the project instructions, which every AI draft reads.",
     "agent.memory.loading": "Loading agent memory…",
     "agent.memory.tabProposed": "Proposed",
     "agent.memory.tabApproved": "Approved",
-    "agent.memory.projectBriefTitle": "Project brief",
     "agent.memory.supersedeTitle": "Replace the human-edited memory?",
     "agent.memory.supersedeBody":
       "Approving will replace the human-edited memory at {path}. The existing human-authored content will be archived.",
@@ -495,22 +496,9 @@ export const agent = defineNamespace({
     "agent.memory.protectedTooltip": "Protected: the agent cannot modify this; it can only ask.",
     "agent.memory.humanEditedBadge": "Human-edited",
     "agent.memory.contentAriaLabel": "Memory content",
-    "agent.memory.loadingBrief": "Loading project brief…",
-    "agent.memory.leadOnly": "Project Lead only",
-    "agent.memory.noBriefYet": "No brief written yet.",
-    "agent.memory.proposalsHeading": "Brief proposals — high-oversight: human approval only.",
-    "agent.memory.noPendingProposals": "No pending brief proposals.",
     "agent.memory.rationaleLabel": "Rationale:",
-    "agent.memory.staleNotice": "Stale — brief changed since this was proposed",
     "agent.memory.requiresLeadNotice": "Requires project lead or higher to review",
-    "agent.memory.editBriefTitle": "Edit project brief",
     "agent.memory.editMemoryTitle": "Edit {path}",
-    "agent.memory.briefContentAriaLabel": "Brief content",
-    "agent.memory.reloadLatestBrief": "Reload latest brief",
-    "agent.memory.overwriteTitle": "Overwrite the project brief?",
-    "agent.memory.overwriteBody":
-      "This replaces the brief every agent run reads as ground truth. Continue?",
-    "agent.memory.overwriteConfirm": "Overwrite",
     "agent.memory.noneProposed": "No proposed memories awaiting review.",
     "agent.memory.provenanceRun": "run {runId}",
     "agent.memory.provenanceSession": "session {sessionId}",
@@ -583,24 +571,16 @@ export const agent = defineNamespace({
     "agent.slashCommands.findDescription": "Search the project and summarize usage",
     "agent.slashCommands.statusDescription": "Progress summary for the open file",
 
-    // ── Translation-brief interview + summary card (BriefBuilder,
-    //    BriefSection) ───────────────────────────────────────────────────
+    // ── Translation-brief interview (BriefBuilder, opened by "Help me write
+    //    this" on Living Memory → Instructions) ──────────────────────────
     "agent.brief.helpMeWrite": "Help me write this",
     "agent.brief.notesPrompt": "Anything else the AI should know?",
     "agent.brief.notesStepLabel": "Other notes",
     "agent.brief.sectionsNavAriaLabel": "Brief sections",
     "agent.brief.saveDraft": "Save draft",
-    "agent.brief.saveAndGenerate": "Save & generate summary",
     "agent.brief.pasteToPrefill": "Optional: paste an existing brief to pre-fill",
     "agent.brief.pastePlaceholder": "Paste notes or an existing brief…",
     "agent.brief.prefillFromText": "Pre-fill from text",
-    "agent.brief.summaryOutOfDate": "Summary out of date",
-    "agent.brief.capturePurpose":
-      "Capture this project's purpose, audience, and standards so the AI drafts to " +
-      "your brief — or skip it and start translating without one.",
-    "agent.brief.createBrief": "Create brief",
-    "agent.brief.noSummaryYet": "No summary generated yet.",
-    "agent.brief.editBrief": "Edit brief",
 
     // ── Interview field schema (src/lib/brief/schema.ts's BRIEF_FIELDS) —
     //    field labels + helper text rendered by BriefBuilder, one interview
@@ -866,11 +846,14 @@ export const agent = defineNamespace({
       },
       "agent.budget.exhausted": {
         description:
-          "Alert shown once an agent run is stopped because it hit its org credit cap. " +
+          "Alert shown once an agent run is stopped because it reached the spending " +
+          "limit on ONE run (AQU-2313 — never the workspace's credit allowance, which " +
+          "has its own message; an Enterprise workspace has no allowance at all yet " +
+          "still has this per-run limit, so the sentence must not call it a credit cap). " +
           "Both values are already-formatted credit amounts including their unit " +
           "('500 cr') — do not add a second currency/unit word around them.",
         placeholders: {
-          capCredits: "The run's credit cap, already formatted with its unit (e.g. '500 cr').",
+          capCredits: "The spending limit for one run, already formatted with its unit (e.g. '500 cr').",
           spentCredits: "Credits spent when the run stopped, already formatted with its unit.",
         },
       },
@@ -1014,6 +997,12 @@ export const agent = defineNamespace({
           "Accessible name for the spinner shown while a sandboxed code-execution step " +
           "is still running, before it has settled with a duration.",
       },
+      "agent.memory.scopeNote": {
+        description:
+          "One line above the agent memory lists: memory entries are the agent's own notes and reach only " +
+          "the agent chat, except that an approved decision entry (its path starts with 'decisions/', not " +
+          "translated) is appended to the project instructions that every AI draft uses.",
+      },
       "agent.memory.proposedNotice": {
         description:
           "Inline read-only chat notice for an agent-proposed memory entry, naming the " +
@@ -1049,9 +1038,6 @@ export const agent = defineNamespace({
         placeholders: {
           path: "File path of the memory being edited, e.g. 'glossary/terms.md'. A literal path — never translate the substituted value.",
         },
-      },
-      "agent.memory.briefContentAriaLabel": {
-        description: "Accessible name for the textarea editing the project brief's raw content.",
       },
       "agent.memory.provenanceRun": {
         description:

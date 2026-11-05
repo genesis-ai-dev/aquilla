@@ -45,6 +45,7 @@ import { languageOfTargetLane } from "../../../db/shared/lane-language"
 import type { PaidCallRefusal } from "../lib/billing/paid-call"
 import { admitLlmCall, legacyLedgers, projectOrgId } from "../lib/billing/paid-llm"
 import { METERED_MAX_OUTPUT_TOKENS } from "../lib/billing/chat-usage"
+import { loadTranslationInstructions, settingsObject } from "../../../db/shared/load-translation-instructions"
 
 const aiDraftInternal = new Hono<{ Bindings: Env; Variables: Variables }>()
 
@@ -131,25 +132,18 @@ aiDraftInternal.post("/internal/draft-cells", zValidator("json", bodySchema), as
   // Prompt grounding — best-effort, identical to the agent run's.
   let sourceLanguage: string | undefined
   let targetLanguage: string | undefined
-  let briefSummary: string | undefined
+  // AQU-2342: THE project instructions, exactly as the agent's draft tool gets them.
+  let translationInstructions: string | undefined
   let batchCap = completionBatchSizeFromSettings(null)
   try {
     const settings = await db
-      .prepare(
-        `SELECT settings::jsonb -> 'translationBrief' ->> 'l1Summary' AS brief_summary,
-                settings AS raw
-           FROM project_settings WHERE project_id = ?`,
-      )
+      .prepare(`SELECT settings AS raw FROM project_settings WHERE project_id = ?`)
       .bind(body.projectId)
-      .first<{
-        brief_summary: string | null
-        raw: unknown
-      }>()
+      .first<{ raw: unknown }>()
+    const parsed = settingsObject(settings?.raw)
+    // No settings row still resolves: the legacy brief alone can carry them.
+    translationInstructions = (await loadTranslationInstructions(db, body.projectId, parsed)).text
     if (settings) {
-      briefSummary = settings.brief_summary ?? undefined
-      const raw = typeof settings.raw === "string" ? JSON.parse(settings.raw) : settings.raw
-      const parsed =
-        raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : null
       batchCap = completionBatchSizeFromSettings(parsed)
       const lanes = await loadLaneRows(db, body.projectId)
       const languages = languagesForLanes(lanes, body.laneId ?? "")
@@ -221,7 +215,7 @@ aiDraftInternal.post("/internal/draft-cells", zValidator("json", bodySchema), as
       aliases: new AliasMap(),
       sourceLanguage,
       targetLanguage,
-      briefSummary,
+      translationInstructions,
       signal: c.req.raw.signal,
       sendProgress: () => {},
       addUsage: (u) => {

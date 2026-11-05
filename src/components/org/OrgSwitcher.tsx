@@ -11,6 +11,8 @@ import { isOrgScopedRoute } from "./org-route-scope"
 import { OrgCreateDialog } from "./OrgCreateDialog"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { RoleLabel } from "@/components/RoleLabel"
+import { Badge } from "@/components/ui/badge"
+import { isProjectNew, readProjectOpenedAt } from "@/lib/frontier/opened-shared-store"
 import type { OrgSummary } from "@/lib/frontier/orgs"
 import {
   ALL_ORGS_PARAM,
@@ -64,6 +66,8 @@ type OrgSwitcherItem =
       key: `guest:${number}`
       id: number
       label: string
+      /** AQU-1489: holds a grant the caller has never opened since it landed. */
+      isNew?: boolean
     }
 
 function orgMatchesSearch(name: string, query: string): boolean {
@@ -99,12 +103,13 @@ function memberItem(org: OrgSummary, fallbackName: string): OrgSwitcherItem {
   }
 }
 
-function guestItem(org: GuestOrg): OrgSwitcherItem {
+function guestItem(org: GuestOrg, isNew = false): OrgSwitcherItem {
   return {
     kind: "guest",
     key: `guest:${org.id}`,
     id: org.id,
     label: org.name ?? `Org #${org.id}`,
+    isNew,
   }
 }
 
@@ -347,6 +352,14 @@ function OrgSwitcherOption({
       />
       <span className="truncate">{item.label}</span>
       <span className="flex shrink-0 items-center gap-1.5">
+        {/* AQU-1489: a grant that landed since the caller last opened it. The
+            row itself still lives on `/orgs/all` (AQU-417); this is the signal
+            that sends them there without having to sign out first. */}
+        {item.kind === "guest" && item.isNew && (
+          <Badge className="shrink-0" data-testid="new-shared-org-badge">
+            {t("org.guestOrgHome.newBadge")}
+          </Badge>
+        )}
         {item.kind === "all" ? (
           <span className={ORG_META_CLASS}>{t("org.switcher.allProjects")}</span>
         ) : item.kind === "member" && item.personal ? (
@@ -380,11 +393,13 @@ export function OrgSwitcher() {
     refresh,
     error,
     retryOrgLoad,
+    accessibleProjects,
     accessibleProjectsError,
     refreshAccessibleProjects,
   } = useActiveOrg()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
+  const username = session?.username ?? null
   const { isAdmin: isPlatformAdmin, loading: platformAdminLoading } = usePlatformAdmin()
   const location = useLocation()
   const navigate = useNavigate()
@@ -430,6 +445,26 @@ export function OrgSwitcher() {
       ? t("org.breadcrumb.allOrganizations")
       : activeOrg?.name ?? t("org.breadcrumb.organizationFallback")
 
+  // AQU-1489: which guest orgs hold a project granted to the caller since they
+  // last opened it. A direct grant in an org the caller does not belong to is
+  // listed on `/orgs/all` and nowhere else (AQU-417), so someone scoped to a
+  // concrete org saw nothing change when they were added to one — signing out
+  // and back in was the only thing that surfaced it, because that resets the
+  // resume org to `all`. The switcher is on every org surface, so this is where
+  // the grant announces itself after a single refresh.
+  const newSharedOrgIds = useMemo(() => {
+    const ids = new Set<number>()
+    if (!username) return ids
+    const memberOrgIds = new Set(orgs.map((org) => org.id))
+    for (const project of accessibleProjects) {
+      if (project.orgId == null || memberOrgIds.has(project.orgId)) continue
+      if (isProjectNew(project.grantedAt, readProjectOpenedAt(username, project.id))) {
+        ids.add(project.orgId)
+      }
+    }
+    return ids
+  }, [accessibleProjects, orgs, username])
+
   const items = useMemo<OrgSwitcherItem[]>(() => {
     const next: OrgSwitcherItem[] = []
     if (showAllOrgs) next.push({ kind: "all", key: "all", label: t("org.breadcrumb.allOrganizations") })
@@ -445,9 +480,9 @@ export function OrgSwitcher() {
     if (activeOrg && !seen.has(activeOrg.id) && !guestSelected) {
       next.push(memberItem(activeOrg, t("org.breadcrumb.organizationFallback")))
     }
-    for (const org of sortedGuestOrgs) next.push(guestItem(org))
+    for (const org of sortedGuestOrgs) next.push(guestItem(org, newSharedOrgIds.has(org.id)))
     return next
-  }, [showAllOrgs, sortedOrgs, sortedGuestOrgs, t, activeOrg, guestSelected])
+  }, [showAllOrgs, sortedOrgs, sortedGuestOrgs, t, activeOrg, guestSelected, newSharedOrgIds])
 
   const visibleItems = useMemo<OrgSwitcherItem[]>(() => {
     if (!catalogEnabled) return items
@@ -612,6 +647,18 @@ export function OrgSwitcher() {
         >
           <OrgMark name={title} allOrgs={viewingAllOrgs} />
           <span className="truncate">{title}</span>
+          {/* AQU-1489: the closed trigger carries the signal too — otherwise the
+              badge inside the menu only reaches someone who already suspected
+              there was something to find. */}
+          {newSharedOrgIds.size > 0 && !guestSelected && !viewingAllOrgs && (
+            <span
+              data-testid="new-shared-org-dot"
+              title={t("org.guestOrgHome.newBadge")}
+              className="size-2 shrink-0 rounded-full bg-primary"
+            >
+              <span className="sr-only">{t("org.guestOrgHome.newBadge")}</span>
+            </span>
+          )}
         </ComboboxTrigger>
         <ComboboxContent
           className="w-72 min-w-72 flex flex-col p-0 *:data-[slot=input-group]:mx-0! *:data-[slot=input-group]:my-0! *:data-[slot=input-group]:h-10 *:data-[slot=input-group]:rounded-none *:data-[slot=input-group]:border-0! *:data-[slot=input-group]:bg-transparent! *:data-[slot=input-group]:shadow-none!"

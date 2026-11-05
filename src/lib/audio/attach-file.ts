@@ -21,13 +21,16 @@ import { injectOptimisticAudioAttachment, notifyAudioAttachmentsChanged } from "
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { markProjectHasAudioDataSoon } from "@/lib/audio/project-audio-state"
 import { probeDurationMsSafe } from "@/lib/import"
+import { AUDIO_FILE_ACCEPT, AUDIO_FILE_EXT_SET, AUDIO_FORMATS_LABEL, UNPLAYABLE_AUDIO_EXTS } from "@/lib/audio/mime"
 import type { TelemetrySurface } from "@/lib/cell-telemetry"
 import { recordTakeAdded } from "@/lib/history/take-steps"
 
-/** `accept` for the hidden `<input type="file">`. `audio/*` alone is not
- *  enough: some mobile browsers report an empty or wrong MIME type for files
- *  off the camera roll / Files app, so the extensions are listed too. */
-export const ACCEPT = "audio/*,.wav,.mp3,.m4a,.ogg"
+/** `accept` for the hidden `<input type="file">` — the shared list, not a
+ *  hand-written copy of it. AQU-1922: this named 4 of the 10 supported
+ *  extensions, so a FLAC/Opus/AAC/WebM file off a phone's Files app (empty or
+ *  wrong MIME, the case the extension list exists for) could not be picked at
+ *  all, though `validateAudioFile` and playback both handle it. */
+export const ACCEPT = AUDIO_FILE_ACCEPT
 
 /** Decision 2026-08-05: audio work is blocked UP FRONT while offline instead
  *  of failing mid-flow with a raw fetch error. One copy of the message, used
@@ -35,14 +38,6 @@ export const ACCEPT = "audio/*,.wav,.mp3,.m4a,.ogg"
  *  local duplicate it used to have. */
 export const OFFLINE_MESSAGE =
   "You're offline — recordings can't be saved without a connection. Reconnect and try again."
-
-// Extensions `audioMimeForExt` (./mime.ts) can map to a real audio MIME type.
-// Kept as an explicit list rather than probing that function, because its
-// default arm returns "audio/mpeg" for anything unknown — asking it "do you
-// know this?" is not a question it can answer. Keep the two in sync.
-const KNOWN_AUDIO_EXTS = new Set([
-  "wav", "mp3", "m4a", "mp4", "aac", "ogg", "oga", "opus", "webm", "flac",
-])
 
 // 100 MB. Nothing in this path has a progress UI — no bar, no byte counter —
 // so an oversized pick is an unexplained multi-minute freeze covering both the
@@ -86,9 +81,19 @@ export function extFromFile(file: File): string {
  * MediaRecorder webm).
  */
 export function validateAudioFile(file: File): string | null {
+  const ext = extFromFile(file)
+  // BEFORE the declared-type check, not after: a .wma/.aiff/.amr declares a
+  // real `audio/*` type, so trusting the type alone waves through exactly the
+  // files no browser can decode — they upload fine and then sit on the line as
+  // a take that never plays. Bulk upload has always refused them
+  // (bulk-upload/match.ts `UNPLAYABLE_AUDIO_EXTS`, reason `unplayableFormat`),
+  // and its comment claimed this path did too; AQU-1922 makes that true.
+  if (UNPLAYABLE_AUDIO_EXTS.has(ext)) {
+    return `A .${ext} file can't be played in a browser — convert it to ${AUDIO_FORMATS_LABEL} first.`
+  }
   const declaredAudio = file.type.toLowerCase().startsWith("audio/")
-  if (!declaredAudio && !KNOWN_AUDIO_EXTS.has(extFromFile(file))) {
-    return "That doesn't look like an audio file — pick a .wav, .mp3, .m4a or .ogg."
+  if (!declaredAudio && !AUDIO_FILE_EXT_SET.has(ext)) {
+    return `That doesn't look like an audio file — pick a ${AUDIO_FORMATS_LABEL}.`
   }
   if (file.size > MAX_ATTACH_BYTES) {
     return `That file is ${mb(file.size)} MB — the limit is ${mb(MAX_ATTACH_BYTES)} MB. ` +

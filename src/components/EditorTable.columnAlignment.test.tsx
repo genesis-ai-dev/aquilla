@@ -535,6 +535,20 @@ describe("EditorTable — Bible columns", () => {
     expect(screen.getByTestId("table-column-headers").className).toContain("md:grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]")
   })
 
+  it.each([
+    [1400, "columns"],
+    [700, "stacked"],
+  ])("keeps the drafted target beside the Bible text at %spx (%s)", async (width) => {
+    tableWidth(width)
+    renderTable({ bibles: ["BSB"] })
+    // In columns the stacked copy is also in the DOM, hidden from md up (phones read it).
+    const [bible] = await screen.findAllByText("In the beginning God created")
+    const row = bible.closest("[data-grid-row]") as HTMLElement
+    const target = row.querySelector<HTMLElement>("[data-showcase='editor.target']")
+    expect(target).not.toBeNull()
+    expect(within(target!).getByText("bonjour")).toBeInTheDocument()
+  })
+
   it("shows no Bible columns and no Add Bible on a file with no chapter and verse", async () => {
     tableWidth(1400)
     renderTable({ bibles: ["BSB"], ref: null })

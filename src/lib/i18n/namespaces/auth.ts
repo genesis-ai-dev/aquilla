@@ -33,6 +33,21 @@ const INVITE_COUNT_PLACEHOLDER =
 
 export const auth = defineNamespace({
   keys: {
+    "auth.google.continue": "Continue with Google",
+    "auth.google.redirecting": "Opening Google…",
+    "auth.google.privacy": "Google is contacted only when you continue. Analytics sharing is a separate choice.",
+    "auth.google.startFailed": "Google login could not start. Check your connection and browser storage, or use your password.",
+    "auth.google.chooseUsername": "Create an Aquilla Account",
+    "auth.google.linkTitle": "Connect Google to your account",
+    "auth.google.usernameNote": "Choose your permanent Aquilla username. Your Google account will be used to log in.",
+    "auth.google.linkNote": "An Aquilla account already uses this email. Enter its password once to connect Google.",
+    "auth.google.linkSubmit": "Connect Google and log in",
+    "auth.google.cancelled": "Google login was cancelled. You can try again or use your password.",
+    "auth.google.invalidPassword": "That password did not match. Nothing has been linked.",
+    "auth.google.identityTaken": "That username or email is already reserved. Use your existing account or choose another username.",
+    "auth.google.failed": "Google login could not finish. Try again from the login screen.",
+    "auth.google.back": "Back to login",
+
     // --- Login (/login) ---------------------------------------------------
     "auth.login.title": "Log in",
     "auth.login.usernameLabel": "Username or email",
@@ -206,6 +221,20 @@ export const auth = defineNamespace({
       screenshot: "auth",
     },
     keys: {
+      "auth.google.continue": { description: "Google OAuth continue text. First-party login UI; no automatic provider contact." },
+      "auth.google.redirecting": { description: "Google OAuth redirecting text. First-party login UI; no automatic provider contact." },
+      "auth.google.privacy": { description: "Google OAuth privacy text. First-party login UI; no automatic provider contact." },
+      "auth.google.startFailed": { description: "Google OAuth startFailed text. First-party login UI; no automatic provider contact." },
+      "auth.google.chooseUsername": { description: "Google OAuth chooseUsername text. First-party login UI; no automatic provider contact." },
+      "auth.google.linkTitle": { description: "Google OAuth linkTitle text. First-party login UI; no automatic provider contact." },
+      "auth.google.usernameNote": { description: "Google OAuth usernameNote text. First-party login UI; no automatic provider contact." },
+      "auth.google.linkNote": { description: "Google OAuth linkNote text. First-party login UI; no automatic provider contact." },
+      "auth.google.linkSubmit": { description: "Google OAuth linkSubmit text. First-party login UI; no automatic provider contact." },
+      "auth.google.cancelled": { description: "Google OAuth cancelled text. First-party login UI; no automatic provider contact." },
+      "auth.google.invalidPassword": { description: "Google OAuth invalidPassword text. First-party login UI; no automatic provider contact." },
+      "auth.google.identityTaken": { description: "Google OAuth identityTaken text. First-party login UI; no automatic provider contact." },
+      "auth.google.failed": { description: "Google OAuth failed text. First-party login UI; no automatic provider contact." },
+      "auth.google.back": { description: "Google OAuth back text. First-party login UI; no automatic provider contact." },
       "auth.login.title": {
         description:
           "Heading of the sign-in form. Short imperative/label phrase naming the " +

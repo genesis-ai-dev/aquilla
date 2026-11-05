@@ -593,3 +593,16 @@ positive controls, account-specific identities and recordings, masking, stale
 callbacks, withdrawal, offline recovery and cross-tab refusal in Chromium,
 Firefox and WebKit. `projects/onboarding.smoke.spec.ts` checks the initially
 checked draft, explicit confirmation, Back/login navigation and denied storage.
+
+### Google login (AQU-1057)
+
+`auth/google-login.spec.ts` covers click-only provider contact, cancellation,
+return destination and normal session adoption in Chromium/Firefox/WebKit using
+a simulated provider boundary and a real Aquilla JWT. It does not claim live
+Google Cloud verification. `auth-worker/src/__tests__/oauth-google.test.ts`
+verifies signed provider claims through real Postgres creation/linking and the
+normal JWT consumer, plus state/nonce/PKCE, replay and account-proof rejection.
+`src/pages/GoogleLoginReturn.test.tsx` covers separate account-bound analytics
+approval. The existing onboarding/account-switch smoke remains the session
+regression gate. Run the browser matrix with
+`E2E_CONFIG=e2e/config/playwright.config.google-login.ts pnpm exec tsx scripts/e2e-up.ts -- e2e/specs/auth/google-login.spec.ts`.

@@ -32,6 +32,7 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import { audioIdSeededWith, parseFrontierAudioUrl } from "./upload"
 import { setTranscribeStatus } from "./transcribe-status"
 import { sharedClipWindow } from "./shared-clip-pcm"
+import { decodeSharedClipPcm } from "./shared-clip-decode"
 import { AsrWarmingError, transcribeHosted } from "./transcribe-hosted"
 import { WARMUP_CAP_MS } from "./omni-warmup"
 import { audioBytesToWhisperPcm, readClipBytes, type TranscriptionResult } from "./transcribe"
@@ -294,7 +295,8 @@ async function recogniseChunk(chunk: TranscriptionChunk, ctx: ChunkRunContext): 
     () => readClipBytes({
       projectId: ctx.projectId, fileId: first.fileId, audioId: frontier.audioId, ext: frontier.ext, session: ctx.session,
     }),
-    (bytes) => audioBytesToWhisperPcm(bytes),
+    // AQU-1886: bounded, a minute at a time, for a long recording.
+    (bytes) => decodeSharedClipPcm(bytes, (clip) => audioBytesToWhisperPcm(clip)),
   ))
   // The account's model choice applies as for a row of the source clip
   // transcribed alone: never zero-shot (no lane's speech to learn from), and

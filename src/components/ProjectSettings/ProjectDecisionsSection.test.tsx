@@ -102,7 +102,7 @@ describe("ProjectDecisionsSection", () => {
   it("removes a decision after a confirmation, keeping the rest", async () => {
     const props = renderCard()
     fireEvent.click(screen.getByRole("button", { name: "Remove clusivity.ACT.16.10-17" }))
-    expect(screen.getByText(/Autopilot stops following it/)).toBeInTheDocument()
+    expect(screen.getByText(/Autopilot may ask the question again/)).toBeInTheDocument()
     fireEvent.click(within(rows()[0]).getByRole("button", { name: "Remove" }))
     await waitFor(() => expect(props.patch).toHaveBeenCalledWith({ projectFacts: [kin, unreadable] }))
   })

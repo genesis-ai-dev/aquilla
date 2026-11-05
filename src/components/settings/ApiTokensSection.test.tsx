@@ -383,6 +383,43 @@ describe("ApiTokensSection", () => {
       expect(prompt).toContain("Maintainer Project")
     })
 
+    it("post-mint: closing the dialog mid-countdown leaves no timer behind", async () => {
+      mockMintCredential.mockResolvedValue({
+        token: "aqk_freshplaintext",
+        credential: {
+          id: "cred-3", name: "Deploy bot", mode: "act", orgId: null,
+          projectId: "proj-maint", tokenPrefix: "aqk_fresh",
+          createdAt: "2026-07-17T00:00:00.000Z", expiresAt: null,
+          lastUsedAt: null, revokedAt: null, pii: false, access: "write",
+        },
+      })
+      const { unmount } = render(<ApiTokensSection />)
+      await waitFor(() => expect(mockListCredentials).toHaveBeenCalled())
+      fireEvent.click(screen.getByRole("button", { name: "New token" }))
+      await screen.findByText("New API token")
+      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Deploy bot" } })
+      fireEvent.click(screen.getByRole("button", { name: "Mint token" }))
+      await screen.findByText("aqk_freshplaintext")
+
+      // Real timers: fake ones would also catch waitFor's own scheduling and
+      // leave the later tests in this file stalled.
+      const setSpy = vi.spyOn(globalThis, "setTimeout")
+      const clearSpy = vi.spyOn(globalThis, "clearTimeout")
+      try {
+        fireEvent.click(screen.getByRole("button", { name: /Copy agent instructions/i }))
+        expect(screen.getByRole("button", { name: /Copied/i })).toBeInTheDocument()
+        // The 1.5 s "Copied" reset is pending; tearing the tree down must
+        // cancel it rather than let it fire into an unmounted component.
+        const reset = setSpy.mock.results.find((_, i) => setSpy.mock.calls[i][1] === 1500)
+        expect(reset).toBeDefined()
+        unmount()
+        expect(clearSpy).toHaveBeenCalledWith(reset!.value)
+      } finally {
+        setSpy.mockRestore()
+        clearSpy.mockRestore()
+      }
+    })
+
     it("per-token: shows a placeholder prompt matching that credential's mode and scope", async () => {
       render(<ApiTokensSection />)
       await waitFor(() => expect(mockListCredentials).toHaveBeenCalled())

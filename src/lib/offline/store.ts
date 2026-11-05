@@ -10,6 +10,7 @@ import { installBfcacheGuard, trackLeaderWorker } from "./bfcache-guard"
 import { checkClientSessionHead } from "./head-check"
 import { startLocalCheckpoints } from "./local-checkpoint"
 import { claimOfflineGeneration, opfsGenerationMarker, type GenerationMarker } from "./generation-guard"
+import { listenForOfflineRebuildProgress } from "./boot-progress"
 
 // Names the OPFS dir; changing it strands every device's data (pinned by eventlog-compat.test.ts).
 export const STORE_ID = "aquilla-offline"
@@ -36,6 +37,8 @@ const defaultCreateAdapter: CreateOfflineAdapter = async () => {
   const devBridge = import.meta.env.DEV ? await import("./leader-log-bridge") : null
   devBridge?.installLeaderLogCollector()
   installBfcacheGuard()
+  // Before the leader boots, so a rebuild's progress is caught from the start (see boot-progress.ts).
+  listenForOfflineRebuildProgress()
   return makePersistedAdapter({
     worker: (options: WorkerOptions) => {
       const worker = new LiveStoreWorker(options)

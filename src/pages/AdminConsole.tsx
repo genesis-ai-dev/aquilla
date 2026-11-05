@@ -3,10 +3,10 @@ import { Navigate, useNavigate, useSearchParams } from "react-router-dom"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
-import { Page, PageHeader, Section, STAT_TILE_GRID } from "@/components/ui/page"
+import { Page, PageHeader, Section } from "@/components/ui/page"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { LoadingTemplate } from "@/components/ui/loading-overlay"
-import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useAdminElevation } from "@/hooks/useAdminElevation"
@@ -376,19 +376,7 @@ function ConsoleSkeleton() {
       className="min-h-[34rem]"
       templateClassName="min-h-[34rem]"
     >
-      <div className="flex flex-col gap-6">
-        <Skeleton className="h-8 w-72 rounded-md" />
-        <div className={STAT_TILE_GRID}>
-          {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} className="h-[88px] rounded-lg border bg-card" />
-          ))}
-        </div>
-        <Skeleton className="h-48 rounded-lg border bg-card" />
-        <div className="grid gap-6 lg:grid-cols-2">
-          <Skeleton className="h-40 rounded-lg border bg-card" />
-          <Skeleton className="h-40 rounded-lg border bg-card" />
-        </div>
-      </div>
+      <LoadingCursor className="text-xl" />
     </LoadingTemplate>
   )
 }

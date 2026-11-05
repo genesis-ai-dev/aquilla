@@ -487,7 +487,31 @@ describe('ProjectSetup — the brief reaches the copilot (AQU-1323)', () => {
       fileId,
     })
     expect(preview.ok).toBe(true)
-    if (preview.ok) expect(preview.body.parts.brief).toContain('Алла')
+    if (preview.ok) expect(preview.body.parts.instructions).toContain('Алла')
+  })
+
+  // AQU-2342: written instructions replace the brief in every prompt, so a
+  // fresh render alone is no longer proof the brief reaches the AI.
+  it('reports briefReachesCopilot=false when the plan also writes translationInstructions', async () => {
+    const env = makeEnv(tdb.db, bucket, { briefBackend: true })
+    stubBriefBackend('Render "Алла" for God.')
+    await seedStaleBrief()
+    const caller = await memberToken(700)
+
+    const { body } = await prepare(
+      env,
+      caller.token,
+      setupCommand({
+        settings: { translationInstructions: 'Plain register.' },
+        brief: { parameters: { keyTerms: 'God → Алла' } },
+      }),
+    )
+    await approve(body.changeset.id, body.digest, caller.userId, caller.credentialId)
+    const { res, body: committed } = await commit(env, caller.token, body.changeset.id)
+    expect(res.status).toBe(200)
+    const receipt = committed.receipt as { verification: SetupVerification }
+    expect(receipt.verification.briefReachesCopilot).toBe(false)
+    expect(receipt.verification.briefDetails?.reason).toContain('translationInstructions')
   })
 
   it('reports briefReachesCopilot=false with a reason when the render fails and the L1 stays stale', async () => {

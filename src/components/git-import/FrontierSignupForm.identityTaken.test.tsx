@@ -72,7 +72,7 @@ describe("FrontierSignupForm identity-taken redirection (AQU-1345)", () => {
     render(<FrontierSignupForm onSuccess={() => {}} onSwitchToLogin={onSwitchToLogin} />)
     await submitValidSignup("randall")
 
-    fireEvent.click(await screen.findByRole("button", { name: "Sign in" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Log in" }))
     expect(onSwitchToLogin).toHaveBeenCalledWith("randall")
   })
 
@@ -82,7 +82,7 @@ describe("FrontierSignupForm identity-taken redirection (AQU-1345)", () => {
 
     await submitValidSignup()
     expect(await screen.findByTestId("signup-identity-taken")).toHaveTextContent(TAKEN_COPY)
-    expect(screen.queryByRole("button", { name: "Sign in" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Log in" })).toBeNull()
   })
 
   it("leaves non-409 failures on the ordinary error path", async () => {

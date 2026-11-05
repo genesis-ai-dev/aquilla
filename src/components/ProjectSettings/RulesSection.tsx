@@ -1,11 +1,11 @@
 /**
- * Self-contained Rules pane for Project Settings.
+ * Self-contained data owner for the Living Memory → Checks pane (AQU-2342).
  *
  * Rules used to render inside the workspace overlay (`/project/:id/rules`).
  * The settings pane owns its own data (project, rules, org rules, cells) so
  * it does not depend on the editor shell staying mounted.
  */
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useMemo, useState, type ReactNode } from "react"
 import { useActiveOrgOptional } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useConcepts } from "@/hooks/useConcepts"
@@ -23,6 +23,7 @@ import { RulesSurface } from "@/components/RulesSurface"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { UseProjectSettings } from "@/hooks/useProjectSettings"
+import type { StyleChecksBinding } from "@/components/living-memory/StyleChecks"
 import { readinessFromDecisions } from "../../../db/shared/bible-checks/agreed-names"
 import { readProjectFacts } from "../../../db/shared/project-facts"
 
@@ -34,6 +35,10 @@ interface RulesSettingsSectionProps {
   roleLevel?: number | null
   activeLane?: string
   onActiveLaneChange?: (lane: string) => void
+  /** AQU-2342: style rules as rows of the one Checks list. */
+  style?: StyleChecksBinding
+  /** Data the checks read, shown under the list. */
+  checkData?: ReactNode
 }
 
 export function RulesSettingsSection({
@@ -44,6 +49,8 @@ export function RulesSettingsSection({
   roleLevel: parentRoleLevel,
   activeLane,
   onActiveLaneChange,
+  style,
+  checkData,
 }: RulesSettingsSectionProps) {
   const t = useT()
   const [editingRuleId, setEditingRuleId] = useState<string | "new" | null>(null)
@@ -180,7 +187,6 @@ export function RulesSettingsSection({
         </div>
       )}
       <RulesSurface
-        embedded
         project={project}
         projectId={projectId}
         userRules={userRules}
@@ -207,6 +213,8 @@ export function RulesSettingsSection({
         activeLane={activeLane}
         onActiveLaneChange={onActiveLaneChange}
         bibleReadiness={bibleReadiness}
+        style={style}
+        checkData={checkData}
       />
     </>
   )

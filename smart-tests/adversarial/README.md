@@ -104,11 +104,19 @@ validation flags, comments, and per-cell event history.
 | Verdict | Meaning |
 | --- | --- |
 | `passed` | Every requirement met, nothing outside the allowed changes moved, no 5xx, no page error |
-| `product_failure` | Something broke **after** the UI showed the agent's attempt and the condition fired |
-| `inconclusive` | The agent never showed the attempt, the condition never fired, or the run did not complete |
+| `product_failure` | Something broke **after** the product was exercised: the UI showed the agent's attempt, the driver did enter it, and the condition fired |
+| `inconclusive` | The agent never showed the attempt, the driver never entered it, the condition never fired, or the run did not complete |
 
 Inconclusive is never a pass and never a ticket. Inconclusive fuzz attacks
 are listed as navigability misses in the rollup.
+
+Attributability keys on whether the product ran, never on which contract
+signals happen to be unmet. When the driver reports that it entered nothing
+— `Text helper returned no valid field value; nothing typed.` and the rest of
+`jev_bridge.py`'s closed message set — the attack is `inconclusive` whatever
+else is unmet, because a `target-value` requirement it never typed cannot
+hold. Reading the difference as a product failure put "1 FAILURE FOUND" on
+PRs whose diff could not reach the attacked surface (AQU-1513).
 
 A product failure can still be an agent mistake that left the same state as
 a product fault, for example an edit on the wrong row. Tickets land in

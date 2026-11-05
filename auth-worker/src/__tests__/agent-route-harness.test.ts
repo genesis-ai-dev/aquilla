@@ -212,6 +212,10 @@ describe("agent route — harness tool registration & dispatch", () => {
     // Frames carry CREDITS: cap 5¢ × agentMarkup 5 = 25 cr; spend ≥ cap.
     expect(exhausted).toMatchObject({ capCredits: 25 })
     expect((exhausted!.spentCredits as number)).toBeGreaterThanOrEqual(25)
+    // AQU-2313: the frame names WHICH limit stopped the run. Untagged, the
+    // client cannot tell this from a weekly-allowance stop and falls back to
+    // calling the per-run ceiling the workspace's credit cap.
+    expect(exhausted).toMatchObject({ reason: "run_cost_cap" })
     expect(frames.find((f) => f.type === "done")).toMatchObject({ status: "capped" })
   })
 

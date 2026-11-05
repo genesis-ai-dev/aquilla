@@ -419,6 +419,20 @@ describe("MembersPage — Teams-style roster table", () => {
     expect(screen.getByRole("button", { name: /add a member/i })).toBeInTheDocument()
   })
 
+  // AQU-2256 item 1: the add-to-projects picker must be scoped to the org
+  // whose roster is open (42 here). Called without an org it listed every
+  // project the caller maintains in ANY org, so an org-A admin could grant an
+  // org-A member access to an org-C project from this page — and org-C's
+  // project names showed up on org-A's roster.
+  it("scopes the add-to-projects picker to the org whose roster is open", async () => {
+    const { useAccessibleProjects } = await import("@/hooks/useAccessibleProjects")
+    renderMembers()
+    await waitFor(() => expect(vi.mocked(useAccessibleProjects)).toHaveBeenCalled())
+    for (const call of vi.mocked(useAccessibleProjects).mock.calls) {
+      expect(call[0]).toBe(42)
+    }
+  })
+
   it("hides Add a member but keeps Add to projects for a non-owner with project grants", async () => {
     vi.mocked(listMyOrgs).mockResolvedValue([
       { id: 42, name: "Come and See", role: { level: 400, name: "contributor" } },

@@ -1033,7 +1033,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
       // once the accumulated OpenRouter cost reaches the ceiling.
       if (costCents >= costCapCents) {
         status = "capped"
-        send({ type: "budget.exhausted", runId, spentCredits: toCredits(costCents), capCredits: toCredits(costCapCents) })
+        send({ type: "budget.exhausted", runId, spentCredits: toCredits(costCents), capCredits: toCredits(costCapCents), reason: "run_cost_cap" })
         break
       }
 
@@ -1211,7 +1211,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
           if (contextTokens > TOKEN_CEILING) {
             send({ type: "error", message: TURN_LIMIT_MESSAGE })
           } else {
-            send({ type: "budget.exhausted", runId, spentCredits: toCredits(costCents), capCredits: toCredits(costCapCents) })
+            send({ type: "budget.exhausted", runId, spentCredits: toCredits(costCents), capCredits: toCredits(costCapCents), reason: "run_cost_cap" })
           }
           // Answer every not-yet-run tool_call so the stored transcript stays
           // valid for a follow-up run (each tool_call needs a tool message).

@@ -39,6 +39,13 @@
 // (`settings.translationInstructions`, or the legacy sources composed on read
 // by resolveTranslationInstructions — the same call the editor makes).
 //
+// AQU-2404: because that role text is fixed, a project that still stores a
+// customized `systemPrompt` gets a `warnings` entry saying where its text
+// actually went (into `parts.instructions` by migrate-on-read, or nowhere at
+// all once `translationInstructions` is stored) rather than a silently default
+// `parts.base`. The preview is the tool that proves a setting landed, so a
+// setting that lands nowhere has to be said out loud.
+//
 // Role floor: VIEWER, same as every other external read — this is a read of
 // configuration the caller can already read piecemeal (/projects, settings),
 // assembled. It performs no writes and mints no drafts.
@@ -57,6 +64,7 @@ import {
 import { resolveLane } from "../../../db/shared/lane-ref"
 import { loadProjectSettings } from "../../../db/shared/projects"
 import { loadTranslationInstructions } from "../../../db/shared/load-translation-instructions"
+import { customSystemPromptText } from "../../../db/shared/translation-instructions"
 import { listProjectLanes } from "../../../db/shared/lanes"
 import { styleInstructionsForCells } from "../../../db/shared/style-instructions"
 import { readLanguageProfile } from "../../../db/shared/language-profile"
@@ -215,8 +223,10 @@ export interface PromptPreviewBody {
   messages: ChatMessage[]
   /** The same content, labeled by where it came from. */
   parts: {
-    /** Base instructions after {sourceLanguage}/{targetLanguage} substitution,
-     *  before any injection. */
+    /** The FIXED role text after {sourceLanguage}/{targetLanguage}
+     *  substitution, before any injection. Not project-editable since
+     *  AQU-2342: a stored `systemPrompt` does not replace this, and a project
+     *  that still holds one gets a `warnings` entry saying so (AQU-2404). */
     base: string
     /** The project-instructions block (AQU-2342), or "" when the project has
      *  none. Sits right after `base`. */
@@ -321,12 +331,15 @@ export async function buildPromptPreview(
   // that only ever lived in the nested completionSettings copy still feeds
   // migrate-on-read, exactly as the SPA's record overlay does.
   const systemPrompt = DEFAULT_SYSTEM_PROMPT
+  const legacySystemPrompt =
+    stringSetting(settings, "systemPrompt") || stringSetting(completion, "systemPrompt")
   // The legacy agent brief is read too, exactly as the editor gets it from the
   // settings GET, so the preview and every server path resolve the same text.
-  const { text: instructions } = await loadTranslationInstructions(db, projectId, {
-    ...settings,
-    systemPrompt: stringSetting(settings, "systemPrompt") || stringSetting(completion, "systemPrompt"),
-  })
+  const { text: instructions, stored: instructionsStored } = await loadTranslationInstructions(
+    db,
+    projectId,
+    { ...settings, systemPrompt: legacySystemPrompt },
+  )
   const topK = clampInt(completion.top_k, DEFAULT_APPROVED_EXAMPLE_COUNT, 1, MAX_TOP_K)
   const exampleFormat =
     completion.fewShotExampleFormat === "target-only" ? "target-only" : "source-and-target"
@@ -574,6 +587,36 @@ export async function buildPromptPreview(
         "lowest-precedence matches (the project's own concepts before any subscribed " +
         "termbase's) were left out of the prompt",
     })
+  }
+  // AQU-2404: a stored `systemPrompt` never replaces `parts.base` — since
+  // AQU-2342 the role text is fixed, and the live draft path (auth-worker
+  // ai-draft-internal / the agent's draft tool) passes no systemPrompt either,
+  // so previewing the default IS the faithful answer. Silence was the bug: the
+  // key is still writable and still readable, so a caller who set it had no way
+  // to learn it changed nothing. Say where it went instead.
+  const customSystemPrompt = customSystemPromptText(legacySystemPrompt)
+  if (customSystemPrompt) {
+    warnings.push(
+      instructionsStored
+        ? {
+            code: "system_prompt_ignored",
+            message:
+              "this project stores a customized `systemPrompt`, but no drafting path reads it: since " +
+              "AQU-2342 the role text in `parts.base` is fixed and not project-editable, and the " +
+              "project's own guidance comes from the stored `translationInstructions` shown in " +
+              "`parts.instructions`. Put the custom wording in `translationInstructions` " +
+              "(PatchSettings) — editing `systemPrompt` changes no prompt.",
+          }
+        : {
+            code: "system_prompt_in_instructions",
+            message:
+              "this project stores a customized `systemPrompt` and has not written " +
+              "`translationInstructions` yet, so the hand-written part of that prompt is migrated ON " +
+              "READ into `parts.instructions` — it is deliberately NOT in `parts.base`, which is the " +
+              "fixed role text since AQU-2342. Writing `translationInstructions` makes the text " +
+              "explicit and stops `systemPrompt` feeding any prompt.",
+          },
+    )
   }
   if (/\\f\s/.test(sourceText) || sourceText.includes("\\f*")) {
     warnings.push({

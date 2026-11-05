@@ -129,7 +129,7 @@ imports.post(
     const user = c.get("user")
     const role = await resolveProjectRole(c.env, user, input.projectId)
     if (!role || role.level < MIN_IMPORT_ROLE) {
-      return c.json({ error: "project_lead_required", message: "Project lead access is required to import files." }, 403)
+      return c.json({ error: "project_lead_required", message: "Project Lead access is required to import files." }, 403)
     }
     if (!c.env.OPENROUTER_API_KEY) {
       return c.json({ error: "import_classifier_unavailable", message: "AI import classification is not configured" }, 503)

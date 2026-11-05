@@ -1,3 +1,7 @@
+import { readSignupAnalyticsChoice, clearSignupAnalyticsChoice } from "@/lib/signup-analytics-choice"
+import { confirmNewAccountAnalytics } from "@/lib/analytics-account"
+import { toast } from "@/components/ui/toast"
+import { t } from "@/lib/i18n/standalone"
 import { useCallback, useEffect } from "react"
 import {
   login as doLogin,
@@ -8,17 +12,6 @@ import {
 import { clearAuthHint } from "@/lib/frontier/session-store"
 import { useAccounts } from "@/hooks/useAccounts"
 import posthog from "@/lib/posthog"
-import { isAnalyticsEnabled } from "@/lib/analytics-consent"
-import { resolveAppEnv } from "@/lib/analytics-env"
-
-/** Returns the hex SHA-256 of a string using Web Crypto (available in all modern browsers). */
-async function sha256Hex(input: string): Promise<string> {
-  const encoded = new TextEncoder().encode(input)
-  const hashBuffer = await crypto.subtle.digest("SHA-256", encoded)
-  return Array.from(new Uint8Array(hashBuffer))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("")
-}
 
 export function useFrontierSession() {
   const { active, loading, loadError, retryLoad, adopt, removeAll } = useAccounts()
@@ -30,30 +23,28 @@ export function useFrontierSession() {
   ) => {
     const session = await doLogin({ username, password }, options)
     await adopt(session)
-    const distinctId = await sha256Hex(session.username)
-    posthog.identify(distinctId)
-    posthog.capture("user logged in")
+    clearSignupAnalyticsChoice()
+    posthog.scope(undefined, session.username).capture("user logged in")
     return session
   }, [adopt])
 
   const register = useCallback(async (username: string, email: string, password: string) => {
+    const choice = readSignupAnalyticsChoice()
     const session = await doRegister({ username, email, password })
     await adopt(session)
-    const distinctId = await sha256Hex(session.username)
-    const personProps = isAnalyticsEnabled() ? { email } : {}
-    posthog.identify(distinctId, personProps)
-    posthog.capture("user signed up")
+    if (choice && readSignupAnalyticsChoice()?.revision === choice.revision) {
+      clearSignupAnalyticsChoice()
+      try { await confirmNewAccountAnalytics(session.jwt, choice.allowed) }
+      catch { toast.add({ type: "error", title: t("onboarding.privacy.saveFailed") }) }
+    }
+    posthog.scope(undefined, session.username).capture("user signed up")
     return session
   }, [adopt])
 
   const logout = useCallback(async () => {
+    clearSignupAnalyticsChoice()
     posthog.capture("user logged out")
     posthog.reset()
-    // AQU-1572: reset() clears every super-property along with the identity.
-    // The deployment marker describes the page, not the user, so it goes back
-    // on — otherwise everything after a logout lands with no app_env until the
-    // next full page load.
-    posthog.register({ app_env: resolveAppEnv(window.location) })
     // Denylist the token server-side before dropping it locally, so a
     // leaked copy elsewhere doesn't stay valid until its natural expiry.
     // Best-effort — doServerLogout never throws.

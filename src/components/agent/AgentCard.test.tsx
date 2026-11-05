@@ -7,7 +7,7 @@
  *   - the card names the teammate's actual tools and the standing project
  *     state it reads;
  *   - the reads link INTO those surfaces under the current project, which is
- *     what makes "it reads your brief" checkable instead of merely claimed —
+ *     what makes "it reads your instructions" checkable instead of merely claimed —
  *     and degrade to plain text when there is no project to link to, since a
  *     dead link would be a worse answer than none;
  *   - the writes line keeps the approval gate legible: staged, awaiting a
@@ -73,7 +73,7 @@ describe("AgentCard", () => {
       expect(screen.getByText(tool)).toBeInTheDocument()
     }
 
-    for (const read of ["Translation brief", "Style guide", "Terminology", "Living memory"]) {
+    for (const read of ["Project instructions", "Terminology", "Living memory"]) {
       expect(screen.getByText(read)).toBeInTheDocument()
     }
   })
@@ -96,8 +96,7 @@ describe("AgentCard", () => {
   it("links each read to its real surface under the current project", () => {
     renderCard("drafter", PROJECT_ID)
     const expected: Record<string, string> = {
-      "Translation brief": `/project/${PROJECT_ID}/memory/brief`,
-      "Style guide": `/project/${PROJECT_ID}/memory/instructions`,
+      "Project instructions": `/project/${PROJECT_ID}/memory/instructions`,
       Terminology: `/project/${PROJECT_ID}/terminology`,
       "Living memory": `/project/${PROJECT_ID}/memory`,
     }
@@ -110,8 +109,8 @@ describe("AgentCard", () => {
     // The first-run guide can render before a project is in scope; the card
     // still discloses what is read, it just cannot offer a route to it.
     renderCard("drafter", undefined)
-    expect(screen.getByText("Translation brief")).toBeInTheDocument()
-    expect(screen.queryByRole("link", { name: "Translation brief" })).toBeNull()
+    expect(screen.getByText("Project instructions")).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Project instructions" })).toBeNull()
   })
 
   it("states that writes are staged and wait for a human decision", () => {

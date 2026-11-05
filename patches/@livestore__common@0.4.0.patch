@@ -48,3 +48,102 @@ index ef367175e1eef1cce225c307cf811744c8b3dd1c..78e4fcdff5ebb6176241b75b8b9a57fb
  const isSubsetOf = (a, b) => {
      for (const item of a) {
          if (b.has(item) === false) {
+diff --git a/dist/leader-thread/recreate-db.js b/dist/leader-thread/recreate-db.js
+index 3e592fc5d2a35a4f0c8f230aa4206c894ee54f7a..340dd6d3c601d578a3d0a6faa17d4df821819029 100644
+--- a/dist/leader-thread/recreate-db.js
++++ b/dist/leader-thread/recreate-db.js
+@@ -30,13 +30,29 @@ export const recreateDb = ({ dbState, dbEventlog, schema, bootStatusQueue, mater
+             const hooks = migrationOptions.hooks;
+             const initResult = yield* initDb(hooks);
+             migrationsReport = initResult.migrationsReport;
+-            yield* rematerializeFromEventlog({
++            // [aquilla patch] Replay in one transaction. Without it every statement autocommits, and on
++            // OPFS with a rollback journal each commit writes, syncs and deletes a journal file: ~7 ms
++            // per cell upsert, 20+ minutes for a 34k-cell store. Nothing else writes to the state db
++            // during boot, and a replay that fails or is killed starts over either way (the db is
++            // destroyed on failure; a half-built file fails the head check on the next boot).
++            yield* Effect.acquireUseRelease(Effect.sync(() => dbState.execute('BEGIN TRANSACTION', undefined)), () => rematerializeFromEventlog({
+                 // db: initResult.tmpDb,
+                 dbEventlog,
+                 schema,
+                 materializeEvent,
+                 onProgress: ({ done, total }) => Queue.offer(bootStatusQueue, { stage: 'rehydrating', progress: { done, total } }),
+-            });
++            }), (_, exit) => Effect.sync(() => {
++                if (exit._tag === 'Success') {
++                    dbState.execute('COMMIT', undefined);
++                    return;
++                }
++                // SQLite rolls the transaction back itself on some errors (IOERR, FULL, NOMEM); a
++                // second ROLLBACK would then throw and bury the error that failed the replay.
++                try {
++                    dbState.execute('ROLLBACK', undefined);
++                }
++                catch { }
++            }));
+             yield* Effect.tryAll(() => hooks?.post?.(initResult.tmpDb)).pipe(UnknownError.mapToUnknownError);
+             break;
+         }
+diff --git a/dist/rematerialize-from-eventlog.js b/dist/rematerialize-from-eventlog.js
+index 797a369cb08763226831cb6b1cb021080508ebd3..fcca28358a66d527123d4f6263265c7e9ae32691 100644
+--- a/dist/rematerialize-from-eventlog.js
++++ b/dist/rematerialize-from-eventlog.js
+@@ -10,6 +10,22 @@ export const rematerializeFromEventlog = Effect.fn('@livestore/common:rematerial
+ // db,
+ schema, onProgress, materializeEvent, }) {
+     const eventsCount = dbEventlog.select(`SELECT COUNT(*) AS count FROM ${SystemTables.EVENTLOG_META_TABLE}`)[0].count;
++    // [aquilla patch] Live replay progress for the app, weighted by payload size: one batched
++    // download event can carry 500 cells and take seconds, so a count of events crawls through
++    // the batches and races through the edits. The session only reads boot statuses once the
++    // leader has booted (after this replay), so the app's leader worker installs this hook.
++    const progressHook = globalThis.__livestoreRehydrateProgress;
++    let bytesTotal = progressHook === undefined
++        ? 0
++        : dbEventlog.select(`SELECT COALESCE(SUM(LENGTH(argsJson)), 0) AS bytes FROM ${SystemTables.EVENTLOG_META_TABLE}`)[0].bytes;
++    let bytesDone = 0;
++    // [aquilla patch] Lets the app skip events whose effects a later, confirmed event wipes out
++    // anyway (e.g. a whole earlier download of a project that was since removed). The app's leader
++    // worker installs the hook; it gets read access to the eventlog and returns a row predicate.
++    const skipHook = globalThis.__livestoreRehydrateSkip;
++    const shouldSkip = skipHook === undefined
++        ? undefined
++        : skipHook({ select: (query) => dbEventlog.select(query), eventlogTable: SystemTables.EVENTLOG_META_TABLE, syncStatusTable: SystemTables.SYNC_STATUS_TABLE });
+     const hashEventDef = memoizeByRef((event) => Schema.hash(event.schema));
+     const processEvent = Effect.fn(`@livestore/common:rematerializeFromEventlog:processEvent`)(function* (row) {
+         const args = jsonParse(row.argsJson);
+@@ -55,7 +71,7 @@ This likely means the schema has changed in an incompatible way.
+     });
+     const CHUNK_SIZE = 100;
+     const stmt = dbEventlog.prepare(sql `\
+-SELECT * FROM ${SystemTables.EVENTLOG_META_TABLE} 
++SELECT *, LENGTH(argsJson) AS argsLength FROM ${SystemTables.EVENTLOG_META_TABLE} 
+ WHERE seqNumGlobal > $seqNumGlobal OR (seqNumGlobal = $seqNumGlobal AND seqNumClient > $seqNumClient)
+ ORDER BY seqNumGlobal ASC, seqNumClient ASC
+ LIMIT ${CHUNK_SIZE}
+@@ -75,9 +91,25 @@ LIMIT ${CHUNK_SIZE}
+         const prevItem = Chunk.isChunk(item) === true ? item : Chunk.empty();
+         return Option.some([prevItem, nextItem]);
+     }).pipe(Stream.bufferChunks({ capacity: 2 }), Stream.tap((row) => Effect.gen(function* () {
+-        yield* processEvent(row);
++        const skipped = shouldSkip?.(row) === true;
++        if (skipped !== true)
++            yield* processEvent(row);
+         processedEvents++;
+         yield* onProgress({ done: processedEvents, total: eventsCount });
++        if (progressHook !== undefined) {
++            // A skipped event costs next to nothing, so it comes off the total rather than counting
++            // as done: otherwise the bar races through the skipped early downloads and then sits at
++            // ~99% while the events that matter replay.
++            // argsLength is SQLite's LENGTH(), the same measure as bytesTotal: JS .length counts
++            // UTF-16 units, so astral-plane scripts would drive the total negative on skips.
++            if (skipped === true)
++                bytesTotal -= row.argsLength;
++            else
++                bytesDone += row.argsLength;
++            // Hold short of the total until the replay has really finished.
++            progressHook({ done: Math.min(bytesDone, bytesTotal - 1), total: bytesTotal });
++        }
+     })), Stream.runDrain);
++    progressHook?.({ done: bytesTotal, total: bytesTotal });
+ }, Effect.withPerformanceMeasure('@livestore/common:rematerializeFromEventlog'));
+ //# sourceMappingURL=rematerialize-from-eventlog.js.map

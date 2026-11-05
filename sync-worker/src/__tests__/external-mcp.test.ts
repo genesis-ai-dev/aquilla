@@ -551,8 +551,11 @@ describe('MCP tools/call — settings + command discovery', () => {
     )
   }
 
-  it('get_project_settings returns the blob and its live version', async () => {
-    await seedSettings({ targetLanguage: 'fr', brief: 'Keep it plain.' }, 4)
+  it('get_project_settings returns the blob, its live version, and the resolved instructions', async () => {
+    await seedSettings(
+      { targetLanguage: 'fr', brief: 'Keep it plain.', translationBrief: { l1Summary: 'For rural youth.' } },
+      4,
+    )
     const env = makeEnv(tdb.db)
     const token = await credToken(tdb)
     const res = await rpc(env, token, {
@@ -563,6 +566,11 @@ describe('MCP tools/call — settings + command discovery', () => {
     expect(isError).toBe(false)
     expect((payload as any).version).toBe(4)
     expect((payload as any).settings.targetLanguage).toBe('fr')
+    // AQU-2342: the text every drafting prompt carries, composed on read here.
+    expect(payload).toMatchObject({
+      translationInstructions: 'For rural youth.',
+      translationInstructionsStored: false,
+    })
   })
 
   it('get_project_settings on a project outside the credential scope is denied', async () => {

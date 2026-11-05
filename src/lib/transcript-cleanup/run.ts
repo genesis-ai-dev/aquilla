@@ -37,8 +37,8 @@ export type SparkleOutcome =
   | { kind: "allowance" }
   | { kind: "failed"; step: FailedStep; detail?: string }
 
-function failed(step: FailedStep, projectId: string, detail?: string): SparkleOutcome {
-  posthog.captureException(new Error(`Transcribe lens ${step} failed${detail ? `: ${detail}` : ""}`), {
+function failed(analytics: ReturnType<typeof posthog.scope>, step: FailedStep, projectId: string, detail?: string): SparkleOutcome {
+  analytics.captureException(new Error(`Transcribe lens ${step} failed${detail ? `: ${detail}` : ""}`), {
     transcribe_step: step,
     project_id: projectId,
   })
@@ -95,9 +95,10 @@ type Heard = { kind: "heard"; heard: string; transcript: string; timings: WordTi
 
 /** Run ASR on the row's clip and save what it heard. */
 async function runAsr(args: RowArgs): Promise<Heard | SparkleOutcome> {
+  const analytics = posthog.scope(undefined, args.session.username)
   const { row, project, session, targetLang, onRateLimited } = args
   const attachment = row.cell.attachments?.[row.audioId]
-  if (!attachment) return failed("asr", project.id, "no clip")
+  if (!attachment) return failed(analytics, "asr", project.id, "no clip")
   let got: { heard: string; transcript: string; timings: WordTiming[] } | null = null
   try {
     await transcribeCell({
@@ -112,13 +113,13 @@ async function runAsr(args: RowArgs): Promise<Heard | SparkleOutcome> {
       onTranscribed: (r) => { got = r },
     })
   } catch (err) {
-    return failed("asr", project.id, err instanceof Error ? err.message : String(err))
+    return failed(analytics, "asr", project.id, err instanceof Error ? err.message : String(err))
   }
   const result = got as { heard: string; transcript: string; timings: WordTiming[] } | null
   if (!result) {
     // transcribeCell never throws: it keeps the error in the status store.
     const status = getTranscribeStatus(row.audioId)
-    return status.kind === "error" ? failed("asr", project.id, status.message) : { kind: "no-speech" }
+    return status.kind === "error" ? failed(analytics, "asr", project.id, status.message) : { kind: "no-speech" }
   }
   if (!result.transcript || result.timings.length === 0) return { kind: "no-speech" }
   return { kind: "heard", ...result }
@@ -142,10 +143,11 @@ export async function transcribeAndCleanUp(args: {
   /** Re-run ASR even when the clip already has saved ASR text. */
   forceAsr?: boolean
 }): Promise<SparkleOutcome> {
+  const analytics = posthog.scope(undefined, args.session.username)
   const { row, project, session, targetLang } = args
   if (row.validated) return { kind: "validated" }
   const attachment = row.cell.attachments?.[row.audioId]
-  if (!attachment) return failed("asr", project.id, "no clip")
+  if (!attachment) return failed(analytics, "asr", project.id, "no clip")
   const language = rowLanguage(project, row, targetLang)
 
   // Step 1: ASR, unless what it heard is already saved and still transcribed.
@@ -172,10 +174,10 @@ export async function transcribeAndCleanUp(args: {
     terms: cleanupTerms(args.concepts, row.isSourceSegment),
     context: neighbourTranscripts(args.rows, row),
   }, session.jwt)
-  if (!cleaned.ok) return cleaned.reason === "allowance" ? { kind: "allowance" } : failed("cleanup", project.id, cleaned.detail)
+  if (!cleaned.ok) return cleaned.reason === "allowance" ? { kind: "allowance" } : failed(analytics, "cleanup", project.id, cleaned.detail)
   const result = cleaned.result
   if (result.kind === "unchanged" || result.kind === "too-different") return { kind: result.kind }
-  if (result.kind !== "ok") return failed("cleanup", project.id, `result ${result.kind}`)
+  if (result.kind !== "ok") return failed(analytics, "cleanup", project.id, `result ${result.kind}`)
 
   // Step 3: land it as an AI cleanup — timings remapped, the mark set.
   try {
@@ -190,8 +192,8 @@ export async function transcribeAndCleanUp(args: {
       author: session.username,
       ai: { model: cleaned.model, at: Date.now(), changes: result.changes },
     })
-    return saved ? { kind: "cleaned", changes: result.changes } : failed("save", project.id, "no timings to save onto")
+    return saved ? { kind: "cleaned", changes: result.changes } : failed(analytics, "save", project.id, "no timings to save onto")
   } catch (err) {
-    return failed("save", project.id, err instanceof Error ? err.message : String(err))
+    return failed(analytics, "save", project.id, err instanceof Error ? err.message : String(err))
   }
 }

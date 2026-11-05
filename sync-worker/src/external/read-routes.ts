@@ -69,6 +69,7 @@ import { handleExternalCrossProjectSearch, handleExternalSearch } from "./search
 import { handleFilesReadRequest } from "../events/files-read-route"
 import { handleCellsReadRequest } from "../events/cells-read-route"
 import { loadProjectSettings } from "../../../db/shared/projects"
+import { loadTranslationInstructions } from "../../../db/shared/load-translation-instructions"
 import { filterSettingsBlobForMember } from "../../../db/shared/lane-visibility"
 import { paginate, parsePageParams } from "./pagination"
 import { recordAgentRead, resolveAuthorshipPolicy, scrubAuthorField } from "./pii"
@@ -549,6 +550,14 @@ async function handleExternalProjectSettings(
     authed.ctx.role,
     current.settings,
   )
+  // AQU-2342: the RESOLVED project instructions — what every drafting prompt
+  // actually carries — beside the raw blob, which holds the stored key only
+  // once someone wrote it. PatchSettings still patches `settings`.
+  const instructions = await loadTranslationInstructions(
+    env.AQUILLA_PG as AquillaDb,
+    projectId,
+    current.settings,
+  )
   return Response.json({
     projectId: current.projectId,
     settings,
@@ -556,6 +565,8 @@ async function handleExternalProjectSettings(
     builtinChecksByLane: checks.builtinChecksByLane,
     version: current.version,
     updatedAt: current.updatedAt,
+    translationInstructions: instructions.text,
+    translationInstructionsStored: instructions.stored,
   })
 }
 

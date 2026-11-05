@@ -11,6 +11,7 @@ import {
 import { decideReviewCell } from '../events/import-reconcile-review'
 import { makeTestToken } from './helpers/auth'
 import { makeTestDb } from './helpers/pg-test-db'
+import { MAX_IMPORT_REQUEST_BODY_BYTES } from '../../../shared/import-contract'
 
 const SECRET = 'reimport-secret'
 const PROJECT_ID = 'project-reimport'
@@ -748,4 +749,130 @@ describe('POST /import/reconcile', () => {
     ).bind(PROJECT_ID, copyId).first<{ value: string }>()
     expect(copyTarget).toMatchObject({ value: 'Traduction existante' })
   }, 120_000)
+})
+
+// AQU-1882 — the sibling of AQU-1858's gate on POST /import. The route used to
+// `await request.json()` before it looked at the token, so an unauthenticated
+// caller could spend the isolate's shared ~128 MB on a body that was always
+// going to be refused. These tests assert the refusal happens without the body
+// stream ever being pulled.
+describe('POST /import/reconcile — gated before the body is read (AQU-1882)', () => {
+  /** A body stream that records whether anything was ever pulled from it. */
+  function unreadableBody(): { body: ReadableStream<Uint8Array>; pulled: () => boolean } {
+    let pulled = false
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled = true
+        controller.enqueue(new TextEncoder().encode('{}'))
+        controller.close()
+      },
+    }, new CountQueuingStrategy({ highWaterMark: 0 }))
+    return { body, pulled: () => pulled }
+  }
+
+  function streamingRequest(
+    body: ReadableStream<Uint8Array>,
+    headers: Record<string, string>,
+  ): Request {
+    return new Request('https://worker/import/reconcile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body,
+      // Node/workerd both require this for a streamed request body.
+      duplex: 'half',
+    } as RequestInit)
+  }
+
+  it('rejects a missing token with 401 without touching the body', async () => {
+    const { db } = await makeTestDb()
+    const { body, pulled } = unreadableBody()
+
+    const res = await handleImportReconcileRequest(streamingRequest(body, {}), env(db))
+
+    expect(res?.status).toBe(401)
+    expect(pulled()).toBe(false)
+  })
+
+  it('rejects a too-low role with 403 without touching the body', async () => {
+    const { db } = await makeTestDb()
+    const contributor = await makeTestToken(SECRET, {
+      projectId: PROJECT_ID,
+      fileId: FILE_ID,
+      role: 400, // contributor — below PROJECT_LEAD
+    })
+    const { body, pulled } = unreadableBody()
+
+    const res = await handleImportReconcileRequest(
+      streamingRequest(body, { Authorization: `Bearer ${contributor}` }),
+      env(db),
+    )
+
+    expect(res?.status).toBe(403)
+    expect(pulled()).toBe(false)
+  })
+
+  it('rejects an oversize Content-Length with 413 without touching the body', async () => {
+    const { db } = await makeTestDb()
+    const auth = await token()
+    const { body, pulled } = unreadableBody()
+
+    const res = await handleImportReconcileRequest(
+      streamingRequest(body, {
+        Authorization: `Bearer ${auth}`,
+        'content-length': String(MAX_IMPORT_REQUEST_BODY_BYTES + 1),
+      }),
+      env(db),
+    )
+
+    expect(res?.status).toBe(413)
+    expect(await res?.json()).toMatchObject({ maxBytes: MAX_IMPORT_REQUEST_BODY_BYTES })
+    expect(pulled()).toBe(false)
+  })
+
+  it('reads a chunked body with no Content-Length under the same byte cap', async () => {
+    const { db } = await makeTestDb()
+    const auth = await token()
+    // One chunk over the ceiling, streamed with no declared length: the header
+    // check cannot catch it, so the streaming counter has to.
+    const oversize = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new Uint8Array(MAX_IMPORT_REQUEST_BODY_BYTES + 1))
+        controller.close()
+      },
+    })
+
+    const res = await handleImportReconcileRequest(
+      streamingRequest(oversize, { Authorization: `Bearer ${auth}` }),
+      env(db),
+    )
+
+    expect(res?.status).toBe(413)
+    expect(await res?.json()).toMatchObject({ maxBytes: MAX_IMPORT_REQUEST_BODY_BYTES })
+  })
+
+  it('still rejects a token scoped to another file with 403, once the body names it', async () => {
+    const { db } = await makeTestDb()
+    const otherFile = await makeTestToken(SECRET, {
+      projectId: PROJECT_ID,
+      fileId: 'some-other-file',
+      role: 500,
+    })
+
+    const res = await handleImportReconcileRequest(
+      new Request('https://worker/import/reconcile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${otherFile}` },
+        body: JSON.stringify({
+          projectId: PROJECT_ID,
+          fileId: FILE_ID,
+          file: { id: 'scoped-file-event', name: 'Genesis', fileType: 'usfm', role: 'source', kind: 'usfm' },
+          cells: [],
+        }),
+      }),
+      env(db),
+    )
+
+    expect(res?.status).toBe(403)
+    expect(await res?.text()).toBe('token scoped to different file')
+  })
 })

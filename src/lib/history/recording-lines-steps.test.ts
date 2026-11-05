@@ -64,7 +64,7 @@ describe("lines.fromRecording", () => {
     expect([...lines.keys()].sort()).toEqual(["l1", "l2", "l3"])
   })
 
-  // Slice 13 evidence (Oct 27): Lena, a Project lead, made the lines and
+  // Slice 13 evidence (Oct 27): Lena, a Project Lead, made the lines and
   // pressed Undo; the five removals were queued and the server refused each
   // ("removing an imported cell requires maintainer"), leaving "5 failed" and
   // every line in place. Someone who may not remove them is told instead.
@@ -80,7 +80,7 @@ describe("lines.fromRecording", () => {
     expect(lines.size).toBe(0)
   })
 
-  // Sam, Oct 28: a Project lead may undo making lines from a recording — her
+  // Sam, Oct 28: a Project Lead may undo making lines from a recording — her
   // own, still untouched. The guard is asked with each line's creating event.
   it("asks whether each line may go with its creating event, and a lead's own lines go", async () => {
     const lines = fresh()

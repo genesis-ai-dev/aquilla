@@ -19,22 +19,8 @@ import { isLinkSeedFailed, markLinkSeedFailed } from "@/lib/sync/link-seed-statu
 import type { CellData } from "@/hooks/useCells"
 import { mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
-
-/**
- * Returns true iff the completion-settings save should actually patch
- * systemPrompt on the server. Guards against two failure modes:
- *   1. Empty-prompt clobber: buildCompletionSettings() materialises "" by
- *      default, so provider-only saves would erase the server prompt.
- *   2. Under-MAINTAINER write: sub-600 callers 403 server-side; skipping
- *      avoids IDB/server divergence (same floor as handleImported).
- */
-export function shouldPatchSystemPrompt(
-  systemPrompt: string | null | undefined,
-  roleLevel: number,
-): boolean {
-  if (!systemPrompt || systemPrompt.trim().length === 0) return false
-  return roleLevel >= ROLE.MAINTAINER
-}
+import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
+import type { SyncTokenCallbacks } from "@/lib/sync/sync-token"
 
 /**
  * Returns true iff the zero-file self-heal should fire a `/link/sync`
@@ -636,6 +622,41 @@ export function resolveTakeLine(args: {
   // every timeline trim a silent no-op before the fortify pass.
   const cell = mergeCellsWithAudio([own], audio)[0] ?? own
   return { fileId, cell }
+}
+
+/**
+ * AQU-2079: the sync-token fetcher a project-scoped read mints through when it
+ * must not wait for the project-details response.
+ *
+ * The terminology page took ~3.9 s to show its first term row on prod though
+ * the `/concepts` request itself takes ~200 ms, because the read was wired to
+ * the LOADED project (`project?.id`) and so could not even start minting until
+ * `useProject` had answered — details, then token, then terms, three requests
+ * end to end.
+ *
+ * Nothing in a mint needs the loaded record. `POST /api/v2/sync-token` takes a
+ * `projectId` and a `fileId`; the `ProjectBootstrap` payload the workspace
+ * fetcher also carries (`projectName`, `gitlabProjectId`) is the only part that
+ * comes off the project record, and it has been accepted-and-ignored
+ * server-side since AQU-299 / SEC-9 — minting a token is an authorization step,
+ * never a project-creation step. So a read can mint against the id the ROUTE
+ * already carries and run in parallel with the details request.
+ *
+ * `build` is injectable so the rule can be tested without a network.
+ */
+export function buildRouteScopedTokenFetcher(args: {
+  /** `/project/:id` — available on the first render, unlike `project?.id`. */
+  routeProjectId: string | null | undefined
+  getJwt: () => string | null
+  callbacks?: SyncTokenCallbacks
+  build?: typeof buildFileScopedTokenFetcher
+}): (fileId: string) => Promise<string | null> {
+  const { routeProjectId, getJwt, callbacks, build = buildFileScopedTokenFetcher } = args
+  // No route id yet: no scope to mint for. Returning a null fetcher (rather
+  // than minting against a guessed id) keeps the read's fail-closed branch —
+  // AQU-1340: an unmintable token is an error, never an empty termbase.
+  if (!routeProjectId) return async (_fileId: string) => null
+  return build(getJwt, routeProjectId, {}, undefined, callbacks ?? {})
 }
 
 /**

@@ -28,9 +28,9 @@ import {
   ALL_ROLE_LEVELS,
   humanRoleName,
   ROLE,
-  roleDisplayText,
+  resolveRoleName,
   roleHelpText,
-  roleName,
+  type RoleT,
 } from "@/lib/frontier/roles"
 import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -46,10 +46,11 @@ const REMOVE_REQUIRES_OWNER_TOOLTIP =
 // table cannot undo it: the row menu hides Change role and Remove for members
 // who are already owners. RoleDialog warns before saving it (AQU-2289).
 
-function roleLabel(roleLevel: number | null | undefined): string {
+/** The role as its chip shows it (AQU-2332): the catalog's name, for the chip's note label. */
+function roleLabel(t: RoleT, roleLevel: number | null | undefined): string {
   if (roleLevel == null) return "Unknown"
   return ALL_ROLE_LEVELS.includes(roleLevel as (typeof ALL_ROLE_LEVELS)[number])
-    ? roleDisplayText(roleName(roleLevel))
+    ? resolveRoleName(t, roleLevel)
     : humanRoleName(roleLevel)
 }
 
@@ -194,7 +195,7 @@ export function OrgMembersTable({
               {/* AQU-2260: why it is read-only opens on click, never on hover. */}
               <NoteOnClick
                 note={lockedOrgRoleTooltip(m.role.level)}
-                label={t("org.teamDetail.orgLevelRoleAriaLabel", { role: roleLabel(m.role.level) })}
+                label={t("org.teamDetail.orgLevelRoleAriaLabel", { role: roleLabel(t, m.role.level) })}
               >
                 {label}
               </NoteOnClick>

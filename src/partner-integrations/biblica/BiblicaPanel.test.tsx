@@ -86,6 +86,50 @@ describe("BiblicaPanel re-import", () => {
     })
   })
 
+  it("places kept translations into style runs when making an updated copy", async () => {
+    const align = {
+      ask: vi.fn(async () => ""),
+      author: "dev",
+      model: "frontier-default",
+      provider: "frontier",
+      flush: vi.fn(async () => {}),
+    }
+    render(
+      <I18nProvider>
+        <BiblicaPanel
+          projectId="p1"
+          username="dev"
+          targetLang="fr"
+          alignReimportedIdml={align}
+          getToken={async () => "tok"}
+          onImported={vi.fn()}
+          reimport={{
+            fileId: "file-notes",
+            profileId: "builtin:biblica-study-notes",
+            existingNames: ["Genesis"],
+          }}
+        />
+      </I18nProvider>,
+    )
+    chooseFile()
+    fireEvent.click(screen.getByRole("button", { name: "Make updated copy" }))
+    await vi.waitFor(() => {
+      expect(importBiblicaStudyNotes).toHaveBeenCalledWith(
+        expect.any(File),
+        expect.objectContaining({
+          targetLang: "fr",
+          alignReimportedIdml: align,
+          sidebarReimport: expect.objectContaining({
+            mode: "updated-copy",
+            targetFileId: "file-notes",
+          }),
+        }),
+        expect.any(Function),
+        expect.objectContaining({ edition: "study-notes" }),
+      )
+    })
+  })
+
   it("shows how many cells the chosen package would add and update", async () => {
     renderPanel({
       fileId: "file-notes",

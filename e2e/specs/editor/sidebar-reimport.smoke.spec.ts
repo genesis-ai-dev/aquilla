@@ -24,6 +24,10 @@ test("sidebar re-import updates this file and flags the changed source", async (
   const translated = `Traduction conservée ${Date.now()}`
   await workspace.editCell(index, translated)
   await workspace.validateCell(index)
+  // AQU-2379: exercise the real obstruction, not only the menu with no tooltip.
+  const fileRow = alice.locator('[data-showcase="sidebar.file"]').filter({ hasText: /genesis\.usfm/i }).first()
+  await fileRow.getByRole("button", { name: "genesis.usfm", exact: true }).hover()
+  await expect(alice.getByRole("tooltip").filter({ hasText: /genesis\.usfm/i })).toBeVisible()
   await workspace.sidebarReimportUpdate(UPDATED)
 
   await alice.reload()

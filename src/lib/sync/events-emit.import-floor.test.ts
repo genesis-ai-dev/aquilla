@@ -10,7 +10,7 @@
 // The floor is NOT a row in that static table (it is per-org, and the table is
 // static): it rides the workspace bridge, resolved by the server onto the
 // project's own settings response. An absent floor therefore means "unknown",
-// not "Project lead", and the gate must stay fail-open on it — a bridge that
+// not "Project Lead", and the gate must stay fail-open on it — a bridge that
 // has not loaded the floor yet may only be more permissive, never wrongly
 // closed, because the server remains the security boundary.
 

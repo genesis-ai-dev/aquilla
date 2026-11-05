@@ -33,7 +33,7 @@ vi.mock("@/lib/import", () => ({
 vi.mock("@/lib/import/cast-from-speakers", () => ({ buildCastAdditions: vi.fn(() => ({})) }))
 vi.mock("@/lib/import/file-entries", () => ({ filesToProjectEntries: vi.fn(async () => []) }))
 vi.mock("@/lib/parsers/paratext-project", () => ({ detectParatextProject: vi.fn(() => null) }))
-vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn(), captureException: vi.fn() } }))
+vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn(), captureException: vi.fn() } }))
 vi.mock("@/components/ui/scroll-area", () => ({
   ScrollArea: ({ children, className }: { children: React.ReactNode; className?: string }) => (
     <div className={className}>{children}</div>

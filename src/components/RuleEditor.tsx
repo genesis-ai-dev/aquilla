@@ -1,3 +1,4 @@
+import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 /**
  * RuleEditor — plain-language rule editor (AQU-195).
  *
@@ -22,7 +23,6 @@ import { ChevronDown, X } from "lucide-react"
 import type { TranslationRule, RuleCheck, RuleAutofix } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { checkRulesForCell } from "@/lib/rules/rule-engine"
-import posthog from "@/lib/posthog"
 import { cn } from "@/lib/utils"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { t as standaloneT } from "@/lib/i18n/standalone"
@@ -165,6 +165,7 @@ interface RuleEditorProps {
 }
 
 export function RuleEditor({ initialRule, cells, onSave, onCancel, className, lanes, defaultLaneLabel, laneLabels }: RuleEditorProps) {
+  const analytics = useAccountAnalytics()
   const t = useT()
   // ── Field state ──
   const [name, setName] = useState(initialRule?.name ?? "")
@@ -279,7 +280,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className, la
       ? { kind: "regex-replace", pattern: afPattern, replacement: afReplacement, flags: afFlags }
       : undefined
 
-    posthog.capture(initialRule ? "translation rule updated" : "translation rule created", {
+    analytics.capture(initialRule ? "translation rule updated" : "translation rule created", {
       rule_name: name.trim(),
       severity,
       check_type: currentCheck!.type,

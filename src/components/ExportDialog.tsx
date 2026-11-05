@@ -1,3 +1,4 @@
+import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 // ExportDialog: the headline action is "download your file back" — the active
 // file's ORIGINAL format with current translations injected (USFM/DOCX/PPTX
 // via the server side-car, structured re-serialization for md/txt/subtitles/
@@ -50,7 +51,7 @@ import { SegmentTabs } from "@/components/ui/tabs"
 import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { Spinner } from "@/components/ui/spinner"
 import { Input } from "@/components/ui/input"
-import { downloadBlob } from "@/lib/export/export-service"
+import { downloadBlob as downloadExportBlob } from "@/lib/export/export-service"
 import { collectInlineStyleWarnings, type ExportFidelityWarning } from "@/lib/export/fidelity"
 import { chapterFilenameSuffix, filterCellsByChapter, listChapterLabels } from "@/lib/export/chapter-scope"
 import {
@@ -108,7 +109,6 @@ import { isDefaultTrackSlot } from "@/lib/timeline/track-slots"
 import type { TimelineTrack } from "@/lib/timeline/tracks"
 import { isSubtitleImportFile } from "@/lib/parsers/types"
 import type { CharacterResolution, ProjectTtsSettings } from "@/lib/parsers/types"
-import posthog from "@/lib/posthog"
 import {
   CURRENT_IDML_FORMAT_COPY,
   idmlFormatCopy,
@@ -518,6 +518,8 @@ export function ExportDialog({
   audioValidationRequirement = 1,
   onJumpToAudioLine,
 }: ExportDialogProps) {
+  const analytics = useAccountAnalytics()
+  const downloadBlob = useCallback((blob: Blob, filename: string) => downloadExportBlob(blob, filename, analytics), [analytics])
   const { locale } = useI18n()
   const t = useT()
   // The file's own format is the default export — "give me my file back".
@@ -1470,7 +1472,7 @@ export function ExportDialog({
         const { exportIdml } = await import("@/lib/export/exporters/idml")
         // AQU-1148: see the docx branch above.
         const result = await exportIdml(rawBytes, scopeRoundTripCells(cells, contentMode))
-        posthog.capture("idml export completed", idmlTelemetryProperties({
+        analytics.capture("idml export completed", idmlTelemetryProperties({
           cells,
           report: result.report,
           diagnostics: result.diagnostics,
@@ -2019,7 +2021,7 @@ export function ExportDialog({
     } catch (e) {
       if (recoverableIdmlOriginal) setIdmlRecovery(recoverableIdmlOriginal)
       if (idmlTelemetryStartedAt !== null) {
-        posthog.capture("idml export blocked", idmlTelemetryProperties({
+        analytics.capture("idml export blocked", idmlTelemetryProperties({
           cells,
           diagnostics: (
             e && typeof e === "object" && Array.isArray((e as { diagnostics?: unknown }).diagnostics)

@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui/button"
 import { useState } from "react"
 import { Navigate, useLocation, useNavigate, useParams, type Location } from "react-router-dom"
 import { Bell, Cpu, Gauge, KeyRound, Mic, PanelLeft, ServerCog, UserRound } from "lucide-react"
@@ -189,7 +190,7 @@ function GeneralSection({
   const { mode, setMode } = useThemeMode()
   const { scale: fontSizeScale, setScale: setFontSizeScale } = useFontSizeScale()
   const { locale, locales, setLocale, t } = useI18n()
-  const { enabled, setEnabled } = useAnalyticsConsent()
+  const { enabled, setEnabled, disabled: sharingDisabled, error: sharingError, retry: retrySharing } = useAnalyticsConsent()
   const localAuthorName = useLocalAuthorName()
   const track = useSaveTracker()
   const languageItems = locales.map((l) => ({
@@ -306,7 +307,8 @@ function GeneralSection({
         />
       </div>
       {/* AQU-2263: the one Share usage data setting, as onboarding shows it. */}
-      <ShareUsageDataSetting enabled={enabled} onEnabledChange={setEnabled} />
+      <ShareUsageDataSetting enabled={enabled} onEnabledChange={setEnabled} disabled={sharingDisabled} />
+      {sharingError && <div role="alert"><p className="text-sm text-destructive">{t("onboarding.privacy.saveFailed")}</p><Button variant="outline" size="sm" onClick={() => void retrySharing()}>{t("common.retry")}</Button></div>}
       <NavRow
         to="/preferences/workspace"
         state={backgroundLocation ? { backgroundLocation, preferencesModalDepth: 2 } : undefined}

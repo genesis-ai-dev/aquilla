@@ -46,7 +46,7 @@ describe("OPS-3 session-replay masking", () => {
 
   it("keeps replay opt-in, so masking is defence in depth rather than the only control", () => {
     const config = read("src/lib/posthog.ts")
-    expect(config).toContain("opt_out_capturing_by_default")
+    expect(config).toContain("analyticsAccount.eligible()")
     expect(config).toContain("disable_session_recording")
   })
 

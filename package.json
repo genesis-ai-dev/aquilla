@@ -203,7 +203,7 @@
     "@livestore/react": "^0.4.0",
     "@livestore/sync-cf": "^0.4.0",
     "@livestore/utils": "0.4.0",
-    "@livestore/wa-sqlite": "^0.4.0",
+    "@livestore/wa-sqlite": "^1.0.5",
     "@sapphi-red/web-noise-suppressor": "^0.4.1",
     "@shadcn/react": "^0.3.1",
     "@tanstack/react-form": "^1.33.5",

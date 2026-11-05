@@ -17,6 +17,14 @@ export const paratextBridge = defineNamespace({
     "paratextBridge.noProjectsHint":
       "Paratext usually keeps them in “My Paratext 9 Projects”. If yours live somewhere else, add that folder.",
     "paratextBridge.notDesktop": "The Paratext bridge needs the desktop app, which can read the project folder on this computer.",
+    "paratextBridge.browser.title": "Work on your Paratext projects in Aquilla",
+    "paratextBridge.browser.body":
+      "In the Aquilla desktop app, the Paratext projects on your computer appear here. Open a book, edit it, and Aquilla writes only the words you changed back into the Paratext project. Paratext's Send/Receive carries them to your team as usual.",
+    "paratextBridge.browser.howItWorks": "How it works",
+    "paratextBridge.browser.point1": "Paratext stays in charge of the text, history and permissions. Aquilla never touches Mercurial.",
+    "paratextBridge.browser.point2": "Every write keeps a copy of the previous file outside the project folder.",
+    "paratextBridge.browser.point3": "If Paratext overwrites one of your edits, Aquilla notices and asks which version to keep.",
+    "paratextBridge.browser.docs": "Read the guide",
     "paratextBridge.registeredAs": "Registered in Paratext as {name}",
     "paratextBridge.notRegistered": "No Paratext registration found on this computer",
     "paratextBridge.paratextRunning": "Paratext is running",
@@ -75,6 +83,7 @@ export const paratextBridge = defineNamespace({
         "Desktop-only screen. 'Paratext' is a product name (SIL/UBS Bible translation software) and stays untranslated. 'Send/Receive' is Paratext's own menu command name; use the translation Paratext's UI uses for it, else leave it in English. A 'unit' is one editable segment: a verse, a heading or an intro paragraph. 'Write' here means saving the edits into the Paratext project file on disk.",
     },
     keys: {
+      "paratextBridge.browser.docs": { description: "Link to the help page about Paratext projects.", maxLength: 24 },
       "paratextBridge.registeredAs": { description: "Who Paratext says is registered on this computer.", placeholders: { name: "Person's name from Paratext's registration." } },
       "paratextBridge.booksCount": { description: "Book count under a project card.", placeholders: { count: "Number of books." } },
       "paratextBridge.book.loading": { description: "Shown while a book file is read.", placeholders: { file: "File name like 41MATTPP1.SFM." } },

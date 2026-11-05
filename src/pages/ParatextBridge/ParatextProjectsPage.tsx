@@ -13,6 +13,9 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { useParatextDiscovery, type BridgeProject } from "@/lib/paratext-bridge/use-paratext-discovery"
 import { getBookName } from "@/lib/file-labeling/bible-book-names"
 
+const PARATEXT_DOCS_URL =
+  `${(import.meta.env.VITE_DOCS_URL as string | undefined)?.trim() || "https://help.aquilla.app"}/projects/paratext-projects/`
+
 function paratextBookPath(project: BridgeProject, fileName: string): string {
   const q = new URLSearchParams({ project: project.path, file: fileName })
   return `/paratext/book?${q.toString()}`
@@ -50,7 +53,20 @@ export function ParatextProjectsPage() {
             }
           />
           {!d.supported ? (
-            <EmptyState title={t("paratextBridge.title")} description={t("paratextBridge.notDesktop")} />
+            <section className="max-w-prose space-y-4" data-testid="paratext-browser-explainer">
+              <h2 className="text-base font-semibold">{t("paratextBridge.browser.title")}</h2>
+              <p className="text-sm text-muted-foreground">{t("paratextBridge.browser.body")}</p>
+              <h3 className="text-sm font-medium">{t("paratextBridge.browser.howItWorks")}</h3>
+              <ul className="list-disc space-y-1 ps-5 text-sm text-muted-foreground">
+                <li>{t("paratextBridge.browser.point1")}</li>
+                <li>{t("paratextBridge.browser.point2")}</li>
+                <li>{t("paratextBridge.browser.point3")}</li>
+              </ul>
+              <p className="text-sm text-muted-foreground">{t("paratextBridge.notDesktop")}</p>
+              <Button variant="outline" size="sm" nativeButton={false} render={<a href={PARATEXT_DOCS_URL} target="_blank" rel="noreferrer" />}>
+                <BookOpen />{t("paratextBridge.browser.docs")}
+              </Button>
+            </section>
           ) : d.loading && !d.discovery ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground"><Spinner />{t("paratextBridge.scanning")}</div>
           ) : (

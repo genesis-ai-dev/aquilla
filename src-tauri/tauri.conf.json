@@ -41,8 +41,8 @@
       "icons/icon.ico"
     ],
     "macOS": {
-      "signingIdentity": null,
-      "providerShortName": null,
+      "signingIdentity": "Developer ID Application: Ryder Wishart (GW63HDZ4G9)",
+      "providerShortName": "GW63HDZ4G9",
       "minimumSystemVersion": "11.0",
       "entitlements": "./Entitlements.plist",
       "infoPlist": "./Info.plist"

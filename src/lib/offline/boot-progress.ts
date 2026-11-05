@@ -31,28 +31,45 @@ export interface OfflineBootProgress {
   rebuilding: boolean
   done: number
   total: number
+  /** Date.now() when the current rebuild's first progress arrived; 0 when not rebuilding. */
+  startedAt: number
   /** Date.now() when the last progress arrived; 0 before any. */
   lastProgressAt: number
 }
 
-const idle: OfflineBootProgress = { rebuilding: false, done: 0, total: 0, lastProgressAt: 0 }
+const idle: OfflineBootProgress = { rebuilding: false, done: 0, total: 0, startedAt: 0, lastProgressAt: 0 }
 
 let progress: OfflineBootProgress = idle
+let channel: BroadcastChannel | null = null
 
 export function reportOfflineRebuildProgress({ done, total }: RebuildProgressMessage, now: () => number = Date.now): void {
-  progress = { rebuilding: total > 0 && done < total, done, total, lastProgressAt: now() }
+  const at = now()
+  const rebuilding = total > 0 && done < total
+  const startedAt = !rebuilding ? 0 : progress.rebuilding ? progress.startedAt : at
+  progress = { rebuilding, done, total, startedAt, lastProgressAt: at }
 }
 
 export function getOfflineBootProgress(): OfflineBootProgress {
   return progress
 }
 
-/** Page side: start taking progress from the leader worker. Returns a stop function. */
+const stopListening = (): void => {
+  channel?.close()
+  channel = null
+}
+
+/**
+ * Page side: start taking progress from the leader worker. Idempotent — the
+ * adapter is created again on a retry, and one channel per page is enough.
+ * Returns a stop function.
+ */
 export function listenForOfflineRebuildProgress(): () => void {
   if (typeof BroadcastChannel === "undefined") return () => {}
-  const channel = new BroadcastChannel(CHANNEL_NAME)
-  channel.onmessage = (event: MessageEvent<RebuildProgressMessage>) => reportOfflineRebuildProgress(event.data)
-  return () => channel.close()
+  if (channel === null) {
+    channel = new BroadcastChannel(CHANNEL_NAME)
+    channel.onmessage = (event: MessageEvent<RebuildProgressMessage>) => reportOfflineRebuildProgress(event.data)
+  }
+  return stopListening
 }
 
 type RehydrateHook = (progress: RebuildProgressMessage) => void
@@ -75,4 +92,5 @@ export function installRebuildProgressForwarder(now: () => number = Date.now): v
 /** Test-only reset. */
 export function __resetOfflineBootProgressForTests(): void {
   progress = idle
+  stopListening()
 }

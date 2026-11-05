@@ -83,12 +83,13 @@ describe("OfflineLeaderWatchdog", () => {
     const booting = () => {
       offlineStore = { store: null, loading: true, error: null }
     }
-    const renderBooting = (restart = vi.fn(), slowRebuildMs = 120, hungRebuildMs = 60_000) =>
+    const renderBooting = (restart = vi.fn(), slowRebuildMs = 120, hungRebuildMs = 60_000, showRebuildAfterMs = 0) =>
       render(
         <>
           <Toaster />
           <OfflineLeaderWatchdog
             bootStallMs={40}
+            showRebuildAfterMs={showRebuildAfterMs}
             slowRebuildMs={slowRebuildMs}
             hungRebuildMs={hungRebuildMs}
             bootCheckEveryMs={10}
@@ -149,7 +150,7 @@ describe("OfflineLeaderWatchdog", () => {
       booting()
       renderBooting()
       reportOfflineRebuildProgress({ done: 10, total: 200 })
-      expect(await screen.findByText(/once after an update/)).toBeInTheDocument()
+      expect(await screen.findByText(/only takes a moment/)).toBeInTheDocument()
 
       // Quiet well past both bootStallMs (40 ms) and slowRebuildMs (120 ms).
       expect(await screen.findByText(/taking longer than usual, but it's still working/)).toBeInTheDocument()
@@ -160,7 +161,7 @@ describe("OfflineLeaderWatchdog", () => {
 
       // Moving again restores the normal description.
       reportOfflineRebuildProgress({ done: 20, total: 200 })
-      expect(await screen.findByText(/once after an update/)).toBeInTheDocument()
+      expect(await screen.findByText(/only takes a moment/)).toBeInTheDocument()
       expect(screen.getByText(/Preparing your offline projects… 10%/)).toBeInTheDocument()
     })
 
@@ -171,7 +172,7 @@ describe("OfflineLeaderWatchdog", () => {
       booting()
       renderBooting(restart, 60, 120)
       reportOfflineRebuildProgress({ done: 10, total: 200 })
-      expect(await screen.findByText(/once after an update/)).toBeInTheDocument()
+      expect(await screen.findByText(/only takes a moment/)).toBeInTheDocument()
 
       expect(await screen.findByText(/may be stuck/)).toBeInTheDocument()
       expect(screen.getByText(/Preparing your offline projects… 5%/)).toBeInTheDocument()
@@ -180,7 +181,7 @@ describe("OfflineLeaderWatchdog", () => {
 
       // Moving again takes the restart away.
       reportOfflineRebuildProgress({ done: 20, total: 200 })
-      expect(await screen.findByText(/once after an update/)).toBeInTheDocument()
+      expect(await screen.findByText(/only takes a moment/)).toBeInTheDocument()
       await waitFor(() => expect(screen.queryByRole("button", { name: /restart app/i })).toBeNull())
     })
 
@@ -192,7 +193,7 @@ describe("OfflineLeaderWatchdog", () => {
       renderBooting(restart, 60, 120)
       reportOfflineRebuildProgress({ done: 10, total: 200 })
       const user = userEvent.setup()
-      await screen.findByText(/once after an update/)
+      await screen.findByText(/only takes a moment/)
       await user.click(document.querySelector<HTMLElement>(`[data-slot="toast-close"]`)!)
       await waitFor(() => expect(screen.queryByText(/Preparing your offline projects/)).toBeNull())
 
@@ -210,6 +211,26 @@ describe("OfflineLeaderWatchdog", () => {
       reportOfflineRebuildProgress({ done: 20, total: 200 })
       expect(await screen.findByText(/Preparing your offline projects… 10%/)).toBeInTheDocument()
       await waitFor(() => expect(screen.queryByText(/taking a while to open/)).toBeNull())
+    })
+
+    it("doesn't flash a progress toast for a rebuild that finishes quickly", async () => {
+      booting()
+      renderBooting(vi.fn(), 120, 60_000, 80)
+      reportOfflineRebuildProgress({ done: 50, total: 200 })
+      await act(() => new Promise((r) => setTimeout(r, 30)))
+      expect(screen.queryByText(/Preparing your offline projects/)).toBeNull()
+
+      reportOfflineRebuildProgress({ done: 200, total: 200 })
+      await act(() => new Promise((r) => setTimeout(r, 100)))
+      expect(screen.queryByText(/Preparing your offline projects/)).toBeNull()
+    })
+
+    it("shows the progress toast once a rebuild has run for a while", async () => {
+      booting()
+      renderBooting(vi.fn(), 120, 60_000, 50)
+      reportOfflineRebuildProgress({ done: 50, total: 200 })
+      expect(screen.queryByText(/Preparing your offline projects/)).toBeNull()
+      expect(await screen.findByText(/Preparing your offline projects… 25%/)).toBeInTheDocument()
     })
 
     it("closes the progress toast when the rebuild finishes", async () => {

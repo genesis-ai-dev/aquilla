@@ -47,7 +47,7 @@ export const workspace = defineNamespace({
     "workspace.offline.slowBootToast": "Your offline projects are taking a while to open. This can take a few minutes after an update. If it doesn't finish, restart the app.",
     // Tauri: the offline store is rebuilding after an update (src/lib/offline/boot-progress.ts).
     "workspace.offline.preparingToast": "Preparing your offline projects… {percent}%",
-    "workspace.offline.preparingToastDescription": "This happens once after an update and can take a few minutes. Your offline projects will open when it's done.",
+    "workspace.offline.preparingToastDescription": "This usually happens after an update and only takes a moment. Your offline projects will open when it's done.",
     "workspace.offline.preparingToastSlowDescription": "This is taking longer than usual, but it's still working. Restarting the app would start it over.",
     "workspace.offline.preparingToastStuckDescription": "This hasn't moved for several minutes and may be stuck. Restart the app to try again — it will start over from the beginning.",
     // Tauri: a newer build owns the offline data (src/lib/offline/generation-guard.ts).
@@ -614,8 +614,8 @@ export const workspace = defineNamespace({
       "workspace.offline.preparingToast": {
         description:
           "Title of a progress toast in the Tauri desktop app while the on-device " +
-          "copy of the user's offline projects is being rebuilt after an app " +
-          "update (takes minutes on a large project). {percent} is a whole " +
+          "copy of the user's offline projects is being rebuilt, usually after " +
+          "an app update (seconds, longer on a very large project). {percent} is a whole " +
           "number 0–100 that ticks up; keep the % sign after it. Plain language " +
           "— no 'worker', 'store', 'database' or 'sync' jargon.",
         placeholders: {
@@ -626,8 +626,8 @@ export const workspace = defineNamespace({
         description:
           "Body of the 'Preparing your offline projects… N%' toast " +
           "(workspace.offline.preparingToast). Reassures the user it's a " +
-          "one-time step after an update and that their downloaded projects " +
-          "open once it finishes. Two short sentences with periods.",
+          "short step that usually follows an update and that their downloaded " +
+          "projects open once it finishes. Two short sentences with periods.",
       },
       "workspace.offline.preparingToastSlowDescription": {
         description:

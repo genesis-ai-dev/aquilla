@@ -22,6 +22,9 @@ const DEFAULT_BOOT_STALL_MS = 30_000
 // the whole rebuild now takes ~13 s there. After this long the toast says it's
 // still working; a restart would only start the replay over.
 const DEFAULT_SLOW_REBUILD_MS = 60_000
+// Most rebuilds now finish in seconds; one shorter than this would only flash
+// a toast, so the progress toast waits until the rebuild has run this long.
+const DEFAULT_SHOW_REBUILD_AFTER_MS = 2_000
 // After this long with no progress at all the leader is almost certainly hung
 // (or killed without failing the boot), so the toast offers a restart after all.
 const DEFAULT_HUNG_REBUILD_MS = 5 * 60_000
@@ -48,6 +51,7 @@ const restartApp = (): void => {
 
 type Props = {
   bootStallMs?: number
+  showRebuildAfterMs?: number
   slowRebuildMs?: number
   hungRebuildMs?: number
   bootCheckEveryMs?: number
@@ -71,6 +75,7 @@ type Props = {
  */
 export function OfflineLeaderWatchdog({
   bootStallMs = DEFAULT_BOOT_STALL_MS,
+  showRebuildAfterMs = DEFAULT_SHOW_REBUILD_AFTER_MS,
   slowRebuildMs = DEFAULT_SLOW_REBUILD_MS,
   hungRebuildMs = DEFAULT_HUNG_REBUILD_MS,
   bootCheckEveryMs = DEFAULT_BOOT_CHECK_EVERY_MS,
@@ -98,7 +103,11 @@ export function OfflineLeaderWatchdog({
         // A rebuild gets progress, not a restart prompt: a restart only
         // starts the replay over. Only a rebuild that has stopped moving for
         // minutes (a hung or silently killed leader) offers one.
-        if (shown === "slow") toast.close(SLOW_BOOT_TOAST_ID)
+        if (shown === "slow") {
+          toast.close(SLOW_BOOT_TOAST_ID)
+          shown = null
+        }
+        if (shown === null && Date.now() - progress.startedAt < showRebuildAfterMs) return
         const hung = quietForMs >= hungRebuildMs
         const slow = quietForMs >= slowRebuildMs
         if (slow && !loggedSlowRebuild) {
@@ -165,7 +174,7 @@ export function OfflineLeaderWatchdog({
       toast.close(SLOW_BOOT_TOAST_ID)
       toast.close(PREPARING_TOAST_ID)
     }
-  }, [loading, bootStallMs, slowRebuildMs, hungRebuildMs, bootCheckEveryMs, restart, t])
+  }, [loading, bootStallMs, showRebuildAfterMs, slowRebuildMs, hungRebuildMs, bootCheckEveryMs, restart, t])
 
   useEffect(() => {
     if (!store) return

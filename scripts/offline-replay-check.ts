@@ -3,6 +3,7 @@
  * app's leader does after a schema change, and reports how long it took.
  *
  *   pnpm offline:replay-check <eventlog.db> [--cuts N]
+ *   pnpm offline:replay-check <eventlog.db> --cut-at <seqNumGlobal>
  *
  * Runs the rebuild twice — replaying every event, then with the replay-skip
  * rules (src/lib/offline/replay-skip.ts) — and fails unless both produce the
@@ -12,7 +13,8 @@
  * patches applied, on in-memory SQLite. `--cuts N` also checks the eventlog
  * as it stood at N points in its history (truncated there, with the
  * confirmed head moved back to match), which covers outbox rows still
- * pending, projects mid-download, and so on.
+ * pending, projects mid-download, and so on. Each cut runs in its own
+ * process via `--cut-at`, which also works by hand to re-check one cut.
  *
  * To get an eventlog from the desktop app: quit it, then find the file in
  * ~/Library/WebKit/<app>/WebsiteData/Default/<hash>/<hash>/FileSystem/
@@ -36,7 +38,7 @@ const flag = (name: string): number | undefined => {
 const cuts = flag("--cuts") ?? 0
 const cutAt = flag("--cut-at")
 if (!file || !Number.isInteger(cuts) || cuts < 0) {
-  console.error("usage: pnpm offline:replay-check <eventlog.db> [--cuts N]")
+  console.error("usage: pnpm offline:replay-check <eventlog.db> [--cuts N | --cut-at <seqNumGlobal>]")
   process.exit(2)
 }
 

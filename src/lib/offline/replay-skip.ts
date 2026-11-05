@@ -32,6 +32,12 @@
 // would mean a rebuild on every boot. (Every skippable event is clientOnly, so
 // today a later synced checkpoint always follows a confirmed one — this keeps
 // it safe if that changes.)
+//
+// A skipped event is never decoded, so it also skips LiveStore's check that
+// every eventlog entry still matches the current schema ("the schema has
+// changed in an incompatible way"). That's what lets an old, superseded event
+// stop mattering — but it means `pnpm offline:replay-check` can't catch an
+// incompatible schema change for events like it, only for ones still replayed.
 
 /** The field holding the project id, for every event a later removal makes irrelevant. */
 const PROJECT_FIELD: Record<string, "id" | "projectId"> = {

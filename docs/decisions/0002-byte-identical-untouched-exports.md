@@ -48,9 +48,21 @@ equivalent package — the same bytes.
 
 ## Not covered yet
 
-- The guarantee is stated for the IDML package path only. The other exporters
-  render from cells (`src/lib/export/export-service.ts`) and make no byte-level
-  promise; a USFM or DOCX export of an untouched project is *equivalent*, not
-  identical.
+- *Amended 2026-11-05 (AQU-2383).* Written for the IDML package path alone;
+  the other exporters rendered from cells (`src/lib/export/export-service.ts`)
+  and made no byte-level promise. The rule now also holds for an untouched
+  plain-text, DOCX and PPTX export, and USFM already held it: the per-file
+  route returns the stored upload when the lane has no translation and no cell
+  was left out (`sync-worker/src/events/export-route.ts::handleExportSourceRequest`),
+  and `src/lib/export/exporters/docx.ts::exportDocx` and
+  `src/lib/export/exporters/pptx.ts::exportPptx` return the uploaded package
+  when they spliced nothing. Which formats hold the rule, and why the rest
+  (SRT, VTT, XLIFF, TMX, CSV, TSV, Markdown, HTML) still rebuild, is recorded
+  in `src/lib/export/byte-fidelity.ts::UNTOUCHED_EXPORT_FIDELITY` and locked
+  to its proof by `src/lib/export/untouched-export.soak.test.ts`. That
+  registry does not claim IDML yet: the engine returns the upload for an empty
+  translation list, but the `NoBreak` repair pass above runs on every export
+  and rewrites a member holding an over-long `NoBreak` run whether or not
+  anything was translated, and no soak case covers the untouched IDML export.
 - Nothing in the app surfaces the distinction to a user: there is no "this
   export is byte-identical to your upload" signal in the export dialog.

@@ -8,7 +8,9 @@
 //       fileId           (optional)
 //       sessionReplayUrl (optional) — posthog replay link, when analytics are on
 //       screenshot       (optional) — image/png|jpeg|webp, ≤ MAX_FEEDBACK_SCREENSHOT_BYTES
-//     → { ok, feedbackId, delivered, screenshotKey }
+//     → { ok, feedbackId, delivered, screenshotKey, emailedRoutes }
+//       (`delivered` is Discord only; `emailedRoutes` counts addresses mailed by
+//       the admin-defined feedback routes, services/feedback-routes.ts)
 //
 // WHY the server and not just PostHog: AQU-307 shipped "Report a problem" as a
 // PostHog capture, which means feedback only reaches the team when the user has
@@ -37,6 +39,7 @@
 import { Hono } from "hono"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { sendFeedbackToDiscord, type FeedbackAttachment } from "../services/discord-feedback"
+import { emailFeedbackRoutes } from "../services/feedback-routes"
 import { getOrgMemberRole } from "../services/org-permissions"
 import { resolveProjectRole } from "../services/project-permissions"
 import type { AuthUser, Env } from "../types"
@@ -219,6 +222,31 @@ feedback.post("/", authMiddleware, async (c) => {
         }
       : null
 
+  const fileId = field(body, "fileId")
+  const sessionReplayUrl = field(body, "sessionReplayUrl")
+  const screenshotDropped = screenshotBytes !== null && screenshotKey === null
+
+  // Discord and the admin-defined email routes go out together. The email
+  // helper never throws, so a mail failure cannot fail the report.
+  const emailed = emailFeedbackRoutes(
+    c.env,
+    { orgId: context.orgId, projectId: context.orgId !== null ? projectId : null, userId: user.id },
+    {
+      description,
+      username: user.username,
+      userEmail: user.email,
+      orgName: context.orgName,
+      projectName: context.projectName,
+      route,
+      fileId,
+      sessionReplayUrl,
+      screenshotKey,
+      screenshotDropped,
+      sentAt: new Date().toISOString(),
+    },
+    attachment,
+  )
+
   let delivered: boolean
   try {
     const result = await sendFeedbackToDiscord(
@@ -231,10 +259,10 @@ feedback.post("/", authMiddleware, async (c) => {
         route,
         ...context,
         projectId,
-        fileId: field(body, "fileId"),
-        sessionReplayUrl: field(body, "sessionReplayUrl"),
+        fileId,
+        sessionReplayUrl,
         screenshotKey,
-        screenshotDropped: screenshotBytes !== null && screenshotKey === null,
+        screenshotDropped,
       },
       attachment,
     )
@@ -243,10 +271,12 @@ feedback.post("/", authMiddleware, async (c) => {
     // A configured-but-failing post is a real delivery failure: tell the SPA so
     // it can offer the copy-to-clipboard fallback instead of claiming success.
     console.error("[feedback] discord post failed:", err)
+    await emailed
     return c.json({ error: "Feedback could not be delivered — please try again." }, 502)
   }
+  const emailedRoutes = await emailed
 
-  return c.json({ ok: true, feedbackId, delivered, screenshotKey }, 201)
+  return c.json({ ok: true, feedbackId, delivered, screenshotKey, emailedRoutes }, 201)
 })
 
 export default feedback

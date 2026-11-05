@@ -1261,7 +1261,7 @@ function TargetAudioChip({
         // for the informational src/tgt end difference.
         overflow === "overlap" &&
           "border-red-500 ring-1 ring-red-500/70 bg-red-100/80 text-red-800 dark:bg-red-950/70 dark:text-red-300",
-        blade ? "cursor-crosshair" : canMove && "cursor-grab active:cursor-grabbing",
+        blade ? "cursor-crosshair" : canMove && "cursor-default",
         "hover:brightness-105",
         selected === "take" && "ring-2 ring-sky-500",
         selected === "line" && "ring-1 ring-sky-500/50",

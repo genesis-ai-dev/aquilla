@@ -5,8 +5,17 @@
  * English ships with the app: it is the source of every key and the per-key
  * fallback, so the UI is complete before anything else arrives. Every other
  * locale is its own chunk, fetched the first time something asks for it: the
- * app downloads the visitor's language, not all of them (the nine catalogs were
- * 4.5 MB of every first load).
+ * app downloads the visitor's language, not all of them.
+ *
+ * Measured on a production `vite build` of this tree (AQU-1583, 18 non-English
+ * locales): the entry chunk holds no catalog at all, and of the 19 catalog
+ * chunks exactly one — English, 779 kB raw / 195 kB gzip — is in the initial
+ * load. The other 18 are 14.3 MB raw / 3.0 MB gzip of deferred chunks, against
+ * a 4.39 MB raw / 1.32 MB gzip first-load JS total. Statically importing them
+ * all again, as `./all.ts` does for the tooling, would therefore roughly
+ * quadruple the first load (1.32 MB → 4.34 MB gzip) for every visitor,
+ * whatever language they read. If you add a locale, add a loader below — never
+ * a static import.
  *
  * Non-English catalogs fall back to English key-by-key until a translator fills
  * them in, so a partial catalog is safe to ship. Each locale lives in its own

@@ -35,6 +35,7 @@ import {
   rulesProblem,
 } from './rules-settings'
 import { parseProjectVisibilityFloor, VISIBILITY_FLOOR_LEVELS } from './visibility-floors'
+import { PARALLEL_BIBLE_VERSIONS_TYPE_NAME, parallelBibleVersionsProblem } from './parallel-bible-versions'
 import { TRANSLATION_INSTRUCTIONS_MAX_CHARS, translationInstructionsProblem } from './translation-instructions'
 
 const VISIBILITY_FLOOR_TYPE_NAME = `${VISIBILITY_FLOOR_LEVELS.join(' | ')} (a role level: 100 viewer … 700 owner)`
@@ -64,7 +65,7 @@ export interface SettingsKeySpec {
   booleanFlags?: readonly string[]
   /**
    * AQU-1688: when `kind` is 'object' (or, since AQU-1691, 'object[]'; since
-   * AQU-1771, 'number'), a check the value must also pass. Returns null when
+   * AQU-1771, 'number'; and 'string[]'), a check the value must also pass. Returns null when
    * it is fine, else what is wrong.
    */
   problem?: (value: unknown) => string | null
@@ -96,6 +97,7 @@ function matchesSpec(spec: SettingsKeySpec, value: unknown): boolean {
       return typeof value === 'boolean'
     case 'string[]':
       return Array.isArray(value) && value.every((v) => typeof v === 'string')
+        && (!spec.problem || spec.problem(value) === null)
     case 'object': {
       if (!isPlainObject(value)) return false
       if (spec.problem && spec.problem(value) !== null) return false
@@ -282,6 +284,13 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
     kind: 'object',
     problem: (value) => bibleVoiceOverridesProblem(value),
     typeName: BIBLE_VOICE_OVERRIDES_TYPE_NAME,
+  },
+  // The team's default Parallel Bibles versions (db/shared/parallel-bible-versions.ts).
+  // A project lead may set them from the panel; agents keep the maintainer floor.
+  parallelBibleVersions: {
+    kind: 'string[]',
+    problem: (value) => parallelBibleVersionsProblem(value),
+    typeName: PARALLEL_BIBLE_VERSIONS_TYPE_NAME,
   },
   knowledgeBaseEnabled: { kind: 'boolean' },
   importExcludeFrontMatter: { kind: 'boolean' },

@@ -67,27 +67,39 @@ routes.get("/callback", async c => {
   if (c.req.query("error")) return fail("cancelled")
   const code = c.req.query("code")
   if (!code || code.length > 4096) return fail("invalid_request")
+  let stage = "token_exchange"
   try {
     const response = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST", redirect: "error", signal: AbortSignal.timeout(15_000),
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ client_id: c.env.GOOGLE_LOGIN_CLIENT_ID!, client_secret: c.env.GOOGLE_LOGIN_CLIENT_SECRET!, code, code_verifier: flow.google_verifier, redirect_uri: c.env.GOOGLE_LOGIN_REDIRECT_URI!, grant_type: "authorization_code" }),
     })
-    if (!response.ok) return fail("provider_failed")
+    if (!response.ok) {
+      // Only a fixed category and HTTP status: never log provider bodies,
+      // authorization codes, tokens, email addresses or the client secret.
+      console.warn("[social-login] token exchange rejected", response.status)
+      return fail("provider_failed")
+    }
+    stage = "token_body"
     const data = await response.json() as { id_token?: unknown }
     if (typeof data.id_token !== "string") return fail("provider_failed")
+    stage = "token_verification"
     const { payload } = await jwtVerify(data.id_token, googleKeys, {
       issuer: ["https://accounts.google.com", "accounts.google.com"], audience: c.env.GOOGLE_LOGIN_CLIENT_ID!, algorithms: ["RS256"], requiredClaims: ["exp", "iat", "sub", "nonce", "email", "email_verified"], maxTokenAge: "10m",
     })
     if (payload.nonce !== flow.nonce || payload.email_verified !== true || typeof payload.sub !== "string" || !payload.sub || payload.sub.length > 255 || typeof payload.email !== "string" || !z.string().email().max(320).safeParse(payload.email).success || (payload.azp !== undefined && payload.azp !== c.env.GOOGLE_LOGIN_CLIENT_ID)) return fail("provider_failed")
     const handoff = random()
+    stage = "handoff_storage"
     await c.env.AQUILLA_PG.prepare(`UPDATE social_login_flows SET status='ready', code_hash=?, google_verifier=NULL, subject=?, email=?, authoritative_email=?, expires_at=now()+interval '5 minutes' WHERE state_hash=? AND status='callback'`)
       .bind(await sha256Hex(handoff), payload.sub, payload.email, payload.email.toLowerCase().endsWith("@gmail.com") || (typeof payload.hd === "string" && payload.hd.length > 0), flow.state_hash).run()
     // Fragment isn't sent in HTTP requests/referrers. The SPA removes it before
     // rendering and requires its tab-local verifier to redeem it.
     back.hash = new URLSearchParams({ code: handoff }).toString()
     return c.redirect(back.href, 303)
-  } catch { return fail("provider_failed") }
+  } catch {
+    console.warn("[social-login] callback failed", stage)
+    return fail("provider_failed")
+  }
 })
 async function accountFor(db: AquillaDb, flow: Flow): Promise<{ account: Account | null; linked: boolean }> {
   const linked = await db.prepare("SELECT u.id, u.username, u.password_hash FROM provider_identities p JOIN users u ON u.id=p.user_id WHERE p.provider='google' AND p.subject=?").bind(flow.subject).first<Account>()

@@ -43,6 +43,21 @@ async function handoff() {
   return code
 }
 describe("Google login boundary", () => {
+  it("diagnoses provider failures without logging credentials or provider response bodies", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    for (const failure of ["rejected", "network"] as const) {
+      const url = await start()
+      network.mockImplementationOnce(async () => {
+        if (failure === "network") throw new Error("private-token-and-client-secret")
+        return Response.json({ error: "invalid_client", error_description: "private-token-and-client-secret" }, { status: 401 })
+      })
+      expect((await callback(url)).headers.get("location")).toContain("error=provider_failed")
+    }
+    expect(warn.mock.calls).toEqual([
+      ["[social-login] token exchange rejected", 401],
+      ["[social-login] callback failed", "token_exchange"],
+    ])
+  })
   it("is first-party only before redirect, uses minimal scopes and refuses untrusted return origins", async () => {
     const disabled = await app.request("/api/v2/auth/oauth/google/config", {}, env)
     expect(await disabled.json()).toEqual({ enabled: false })

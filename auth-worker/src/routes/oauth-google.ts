@@ -95,10 +95,10 @@ async function accountFor(db: AquillaDb, flow: Flow): Promise<{ account: Account
   const account = await db.prepare("SELECT id, username, password_hash FROM users WHERE LOWER(email)=LOWER(?)").bind(flow.email).first<Account>()
   return { account, linked: false }
 }
-async function session(env: AuthHonoEnv["Bindings"], username: string, created: boolean) {
+async function session(env: AuthHonoEnv["Bindings"], username: string, created: boolean, linked = false) {
   const { token } = await new JWTService(env).createAccessTokenWithPayload(username)
   try { await env.AQUILLA_PG.prepare("INSERT INTO activity_logs (user_id, activity_type, description) SELECT id, ?, ? FROM users WHERE username=?")
-    .bind(created ? "register" : "login", created ? "Account created with Google" : "Signed in with Google", username).run()
+    .bind(created ? "register" : "login", created ? "Account created with Google" : linked ? "Google linked and signed in" : "Signed in with Google", username).run()
   } catch { console.warn("[social-login] activity log insert failed (non-fatal)") }
   return { access_token: token, token_type: "bearer", username, created }
 }
@@ -152,7 +152,7 @@ routes.post("/finish", zValidator("json", proof.extend({ username: z.string().tr
       .bind(hash, challenge, account.id, account.password_hash, flow.email, account.id).first<{ username: string }>()
     } catch { return c.json({ error: "restart" }, 409) }
     if (!result) return c.json({ error: "restart" }, 409)
-    return c.json(await session(c.env, result.username, false))
+    return c.json(await session(c.env, result.username, false, true))
   }
   if (!username) return c.json({ error: "username_required" }, 400)
   if (c.env.ENVIRONMENT !== "production") {

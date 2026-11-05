@@ -87,6 +87,10 @@ export function OfflineLeaderWatchdog({
     let shown: "preparing" | "slow" | null = null
     let loggedSlowRebuild = false
     let loggedHungRebuild = false
+    // Whether the preparing toast on screen carries the restart prompt. The
+    // user can close that toast, and an update to a closed toast is a no-op,
+    // so a rebuild that goes on to hang re-adds it rather than updating.
+    let shownHung = false
     const check = () => {
       const progress = getOfflineBootProgress()
       const quietForMs = Date.now() - Math.max(startedAt, progress.lastProgressAt)
@@ -121,7 +125,9 @@ export function OfflineLeaderWatchdog({
               : "workspace.offline.preparingToastDescription",
         )
         const actionProps = hung ? { children: t("workspace.offline.leaderStalledRestart"), onClick: restart } : undefined
-        if (shown === "preparing") {
+        const becameHung = hung && !shownHung
+        shownHung = hung
+        if (shown === "preparing" && !becameHung) {
           toast.update(PREPARING_TOAST_ID, { title, description, actionProps })
           return
         }

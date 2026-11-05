@@ -184,6 +184,23 @@ describe("OfflineLeaderWatchdog", () => {
       await waitFor(() => expect(screen.queryByRole("button", { name: /restart app/i })).toBeNull())
     })
 
+    it("brings the progress toast back with a restart if it was closed before the rebuild hung", async () => {
+      vi.spyOn(console, "warn").mockImplementation(() => {})
+      vi.spyOn(console, "error").mockImplementation(() => {})
+      const restart = vi.fn()
+      booting()
+      renderBooting(restart, 60, 120)
+      reportOfflineRebuildProgress({ done: 10, total: 200 })
+      const user = userEvent.setup()
+      await screen.findByText(/once after an update/)
+      await user.click(document.querySelector<HTMLElement>(`[data-slot="toast-close"]`)!)
+      await waitFor(() => expect(screen.queryByText(/Preparing your offline projects/)).toBeNull())
+
+      expect(await screen.findByText(/may be stuck/)).toBeInTheDocument()
+      await user.click(screen.getByRole("button", { name: /restart app/i }))
+      expect(restart).toHaveBeenCalledOnce()
+    })
+
     it("swaps a restart prompt for progress once a rebuild starts reporting", async () => {
       vi.spyOn(console, "error").mockImplementation(() => {})
       booting()

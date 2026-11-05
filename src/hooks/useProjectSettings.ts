@@ -1,3 +1,4 @@
+import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useOnline } from "@/hooks/useOnline"
@@ -18,7 +19,6 @@ import {
 } from "@/lib/sync/project-settings"
 import { readOfflineProjectSettings, rememberProjectSettingsOffline, whenOfflineStoreOpen } from "@/lib/sync/project-resolve"
 import type { ProjectOrgPolicy, ProjectVisibilityFloors, VisibilityFloorView } from "@/lib/sync/project-org-policy"
-import posthog from "@/lib/posthog"
 import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
 import { claimHydrationReport, retainProjectOpen } from "./project-settings-open"
 import { useDraftingSettingsUpload } from "./useDraftingSettingsUpload"
@@ -560,6 +560,7 @@ export function useProjectSettings(
   roleLevel: number | null,
   options?: UseProjectSettingsOptions,
 ): UseProjectSettings {
+  const analytics = useAccountAnalytics()
   const termbaseEditMinRole = options?.termbaseEditMinRole
   const languageEditMinRole = options?.languageEditMinRole
   const { session } = useFrontierSession()
@@ -717,7 +718,7 @@ export function useProjectSettings(
       setHasFetched(true)
       const withinMs = got ? claimHydrationReport(projectId) : null
       if (got && withinMs !== null) {
-        posthog.capture("project settings hydrated", {
+        analytics.capture("project settings hydrated", {
           project_id: projectId,
           within_ms: withinMs,
           has_server_row: got.version > 0,
@@ -798,7 +799,7 @@ export function useProjectSettings(
     } finally {
       if (refreshInFlightRef.current === request) refreshInFlightRef.current = null
     }
-  }, [projectId, jwt, hydrateFromOfflineCopy, writeServerConfirmed])
+  }, [projectId, jwt, hydrateFromOfflineCopy, writeServerConfirmed, analytics])
 
   // AQU-1816: what a writer that bypasses `patch` calls instead of a bare
   // `refresh()`. The broadcast reaches the sibling instances (and the overview's
@@ -960,13 +961,13 @@ export function useProjectSettings(
       const nonEmptyCount = Object.values(local).filter((v) => v !== "" && v != null).length
       if (out.kind === "ok") {
         writeServerConfirmed(out.value)
-        posthog.capture("project settings migrated", {
+        analytics.capture("project settings migrated", {
           project_id: projectId,
           fields_count: nonEmptyCount,
         })
       } else if (out.kind === "conflict") {
         writeServerConfirmed(out.latest)
-        posthog.capture("project settings migration conflict", {
+        analytics.capture("project settings migration conflict", {
           project_id: projectId,
           fields_count: nonEmptyCount,
         })
@@ -974,7 +975,7 @@ export function useProjectSettings(
       // forbidden / error: leave server at version 0; display is still backed
       // by local cache. A fresh hook instance will retry on next mount.
     })()
-  }, [hasFetched, server, canEdit, local, jwt, projectId, writeServerConfirmed])
+  }, [hasFetched, server, canEdit, local, jwt, projectId, writeServerConfirmed, analytics])
 
   // AQU-2259: upload this browser's old drafting settings once, when the team
   // has none yet (src/hooks/useDraftingSettingsUpload.ts).
@@ -986,8 +987,8 @@ export function useProjectSettings(
       version: response.version,
       origin: instanceIdRef.current,
     })
-    if (wrote) posthog.capture("project drafting settings uploaded", { project_id: projectId })
-  }, [projectId, writeServerConfirmed])
+    if (wrote) analytics.capture("project drafting settings uploaded", { project_id: projectId })
+  }, [projectId, writeServerConfirmed, analytics])
   useDraftingSettingsUpload({
     projectId,
     jwt,
@@ -1147,7 +1148,7 @@ export function useProjectSettings(
         console.warn("[useProjectSettings] local IDB conflict-snap failed", err)
       })
       setConflict(true)
-      posthog.capture("project settings sync conflict", {
+      analytics.capture("project settings sync conflict", {
         project_id: projectId,
         conflicting_user: settingsEditorName(result.latest.updatedBy),
       })
@@ -1174,7 +1175,7 @@ export function useProjectSettings(
       }).catch((err) => {
         console.warn("[useProjectSettings] local IDB forbidden-rollback failed", err)
       })
-      posthog.capture("project settings write forbidden", {
+      analytics.capture("project settings write forbidden", {
         project_id: projectId,
         role_level: roleLevel,
       })
@@ -1191,7 +1192,7 @@ export function useProjectSettings(
       return rollbackRejectedKeys(prev, partial, snapTarget)
     })
     return { kind: "error", message: result.message, status: result.status }
-  }, [projectId, jwt, roleLevel, termbaseEditMinRole, languageEditFloor, refresh, runSerialized, t, writeServerConfirmed])
+  }, [projectId, jwt, roleLevel, termbaseEditMinRole, languageEditFloor, refresh, runSerialized, t, writeServerConfirmed, analytics])
 
   // AQU-1767 phase 2: let a history step read and write this project's
   // settings through this hook, wherever the person presses Undo.

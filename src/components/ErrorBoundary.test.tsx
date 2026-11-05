@@ -17,7 +17,7 @@ import {
 // PostHog key / network connection.
 // ---------------------------------------------------------------------------
 vi.mock("@/lib/posthog", () => ({
-  default: {
+  default: { scope() { return { ...this, enabled: () => true } },
     captureException: vi.fn(),
     capture: vi.fn(),
   },
@@ -169,15 +169,13 @@ describe("window error handlers", () => {
     expect(posthog.captureException).not.toHaveBeenCalled()
   })
 
-  it("captures each once in the desktop shell, where autocapture cannot load", () => {
+  it("does not attribute unowned desktop background errors to the active account", () => {
     ;(window as unknown as Record<string, unknown>).__TAURI__ = {}
     const err = new Error("global error")
     const rejection = new Error("rejection error")
     dispatchError(err)
     dispatchRejection(rejection)
-    expect(posthog.captureException).toHaveBeenCalledTimes(2)
-    expect(posthog.captureException).toHaveBeenCalledWith(err, { source: "window.onerror" })
-    expect(posthog.captureException).toHaveBeenCalledWith(rejection, { source: "unhandledrejection" })
+    expect(posthog.captureException).not.toHaveBeenCalled()
   })
 
   it("still reloads once for a stale chunk reported as an uncaught error or rejection", async () => {

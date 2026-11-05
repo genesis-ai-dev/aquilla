@@ -25,7 +25,7 @@ vi.mock("@/lib/export/exporters/idml", () => ({
   })),
 }))
 vi.mock("@/lib/posthog", () => ({
-  default: { capture: vi.fn() },
+  default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn() },
 }))
 
 import { downloadBlob } from "@/lib/export/export-service"

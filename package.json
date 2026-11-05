@@ -62,6 +62,7 @@
     "idml:adobe": "tsx scripts/idml-adobe-validation.ts",
     "test:watch": "vitest",
     "i18n:check": "tsx scripts/i18n-catalog.ts check",
+    "offline:replay-check": "tsx scripts/offline-replay-check.ts",
     "i18n:export": "tsx scripts/i18n-catalog.ts export",
     "i18n:import": "tsx scripts/i18n-catalog.ts import",
     "i18n:shots": "tsx scripts/i18n-shots.ts",
@@ -299,7 +300,8 @@
       "sharp": ">=0.35.0"
     },
     "patchedDependencies": {
-      "@livestore/common@0.4.0": "patches/@livestore__common@0.4.0.patch"
+      "@livestore/common@0.4.0": "patches/@livestore__common@0.4.0.patch",
+      "@livestore/sqlite-wasm@0.4.0": "patches/@livestore__sqlite-wasm@0.4.0.patch"
     }
   }
 }

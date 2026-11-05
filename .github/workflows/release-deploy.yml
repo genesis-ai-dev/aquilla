@@ -130,9 +130,13 @@ jobs:
       # scripts come from there. Naming the chosen branch under both variables
       # satisfies every slice; GitHub's own value here is `dev` (the schedule).
       # (GitHub does not let `env:` overwrite GITHUB_*, so the shell exports it.)
+      # GITHUB_SHA has the same problem: it names dev's commit, and the SPA's
+      # version.json prefers it over git (scripts/build-info.ts), so the tag step
+      # saw production serving a dev sha and refused to tag the release HEAD.
       - name: Deploy production and tag
         run: |
           export GITHUB_REF_NAME="$DEPLOY_REF_NAME"
+          export GITHUB_SHA="$(git rev-parse HEAD)"
           pnpm run deploy:aquilla
       # A tag pushed with a token from this workflow does not start the
       # tag-push trigger of release-cut.yml (GitHub never chains runs from

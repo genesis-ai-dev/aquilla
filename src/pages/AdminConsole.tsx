@@ -3,10 +3,10 @@ import { Navigate, useNavigate, useSearchParams } from "react-router-dom"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
-import { Page, PageHeader, Section, StatTile, STAT_TILE_GRID } from "@/components/ui/page"
+import { Page, PageHeader, Section } from "@/components/ui/page"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { LoadingTemplate } from "@/components/ui/loading-overlay"
-import { LoadingCursor, LoadingLine, LoadingLines } from "@/components/ui/loading-cursor"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useAdminElevation } from "@/hooks/useAdminElevation"
@@ -376,29 +376,7 @@ function ConsoleSkeleton() {
       className="min-h-[34rem]"
       templateClassName="min-h-[34rem]"
     >
-      <div className="flex flex-col gap-6">
-        <LoadingLine className="h-8 text-2xl font-semibold" />
-        <div className={STAT_TILE_GRID}>
-          {/* Same labels as AdminOverviewHome's strip: known before the counts. */}
-          {["Organizations", "Teams", "Users", "Active projects", "Active users", "Need attention"].map((label) => (
-            <StatTile key={label} label={label} value={<LoadingCursor />} />
-          ))}
-        </div>
-        <div className="flex h-48 flex-col gap-3 rounded-lg border bg-card p-5">
-          <LoadingLine className="font-medium" />
-          <LoadingLines count={3} />
-        </div>
-        <div className="grid gap-6 lg:grid-cols-2">
-          <div className="flex h-40 flex-col gap-3 rounded-lg border bg-card p-5">
-          <LoadingLine className="font-medium" />
-          <LoadingLines count={3} />
-        </div>
-          <div className="flex h-40 flex-col gap-3 rounded-lg border bg-card p-5">
-          <LoadingLine className="font-medium" />
-          <LoadingLines count={3} />
-        </div>
-        </div>
-      </div>
+      <LoadingCursor className="text-xl" />
     </LoadingTemplate>
   )
 }

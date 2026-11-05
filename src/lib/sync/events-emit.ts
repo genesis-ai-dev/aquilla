@@ -369,7 +369,7 @@ function noteTargetCellCommit(input: CellCommitInput): void {
   // AQU-267: once-per-session first-commit funnel event.
   if (!_firstCommitFired) {
     _firstCommitFired = true
-    posthog.capture(FIRST_CELL_COMMIT, {
+    posthog.scope(undefined, input.author).capture(FIRST_CELL_COMMIT, {
       project_id: input.projectId,
       file_id: input.fileId,
       ai_suggestion: input.aiSuggestion ?? false,
@@ -493,10 +493,11 @@ export interface CellValidateInput {
  * `cell_validators`), so parentId is omitted.
  */
 export async function emitCellValidate(input: CellValidateInput): Promise<string> {
+  const analytics = posthog.scope(undefined, input.author)
   // AQU-267: once-per-session first-validate funnel event.
   if (!_firstValidateFired) {
     _firstValidateFired = true
-    posthog.capture(FIRST_CELL_VALIDATE, {
+    analytics.capture(FIRST_CELL_VALIDATE, {
       project_id: input.projectId,
       file_id: input.fileId,
     })
@@ -532,12 +533,13 @@ export async function emitCellValidate(input: CellValidateInput): Promise<string
     source: input.source,
     auto: input.auto,
     surface: input.surface,
-  })
+  }, analytics)
   return eventId
 }
 
 /** Mirror of `emitCellValidate` for the un-validate gesture. */
 export async function emitCellUnvalidate(input: CellValidateInput): Promise<string> {
+  const analytics = posthog.scope(undefined, input.author)
   const { eventId } = await enqueueEvent({
     kind: "cell.unvalidate",
     projectId: input.projectId,
@@ -562,7 +564,7 @@ export async function emitCellUnvalidate(input: CellValidateInput): Promise<stri
     source: input.source,
     auto: input.auto,
     surface: input.surface,
-  })
+  }, analytics)
   return eventId
 }
 
@@ -734,6 +736,7 @@ function playedDuration(input: CellAudioAttachInput): { durationMs?: number } {
 }
 
 export async function emitCellAudioAttach(input: CellAudioAttachInput): Promise<string> {
+  const analytics = posthog.scope(undefined, input.author)
   // AQU-1565 follow-up: the server refuses `role: "source"` below Project Lead
   // (authorize.ts). Refuse it here too, before the outbox, so a certain 403
   // never sits in the durable queue.
@@ -786,7 +789,7 @@ export async function emitCellAudioAttach(input: CellAudioAttachInput): Promise<
       ...(input.voiceId !== undefined ? { voiceId: input.voiceId } : {}),
       ...(input.ttsProvider !== undefined ? { provider: input.ttsProvider } : {}),
       ...playedDuration(input),
-    })
+    }, analytics)
   }
   return eventId
 }
@@ -1444,6 +1447,7 @@ export interface CellAudioValidateInput {
 
 /** Emit a `cell.audio.validate` — one person's vote on one take. */
 export async function emitCellAudioValidate(input: CellAudioValidateInput): Promise<string> {
+  const analytics = posthog.scope(undefined, input.author)
   const { eventId } = await enqueueEvent({
     kind: "cell.audio.validate",
     projectId: input.projectId,
@@ -1463,7 +1467,7 @@ export async function emitCellAudioValidate(input: CellAudioValidateInput): Prom
     source: input.source,
     auto: input.auto,
     surface: input.surface,
-  })
+  }, analytics)
   return eventId
 }
 
@@ -1479,6 +1483,7 @@ export interface CellAudioUnvalidateInput extends CellAudioValidateInput {
 
 /** Mirror of `emitCellAudioValidate` for withdrawing a vote. */
 export async function emitCellAudioUnvalidate(input: CellAudioUnvalidateInput): Promise<string> {
+  const analytics = posthog.scope(undefined, input.author)
   const { eventId } = await enqueueEvent({
     kind: "cell.audio.unvalidate",
     projectId: input.projectId,
@@ -1502,7 +1507,7 @@ export async function emitCellAudioUnvalidate(input: CellAudioUnvalidateInput): 
     source: input.source,
     auto: input.auto,
     surface: input.surface,
-  })
+  }, analytics)
   return eventId
 }
 

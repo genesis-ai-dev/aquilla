@@ -1,3 +1,4 @@
+import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 import { useValidatedEvidenceVersion } from "@/hooks/useValidatedEvidenceVersion"
 import { authorNameFor, useLocalAuthorName } from "@/lib/store/local-author-name"
 import { fileDisplayName } from "@/lib/file-display-name"
@@ -30,7 +31,7 @@ import {
 } from "@/lib/editor/milestone-jump-targets"
 import { CellAreaPlaceholder, CellRowsLoadStatus } from "./CellAreaPlaceholder"
 import { WorkspaceMainSkeleton } from "./WorkspaceSkeleton"
-import { LoadingLine } from "@/components/ui/loading-cursor"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { EmptyState, NotFoundIcon } from "@/components/ui/empty"
 import { TabStrip } from "./TabStrip"
@@ -101,6 +102,7 @@ import { bookGenre } from "@/lib/scripture/book-genres"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { effectiveRepetitionPropagation, resolveProjectPolicy } from "@/lib/sync/project-org-policy"
 import { useActiveOrg } from "@/context/OrgContext"
+import { resolveEditorFileId } from "@/lib/navigation/editor-file-restore"
 import { resolveOverlayFileId } from "@/lib/navigation/overlay-file-restore"
 import {
   ALL_ORGS_PARAM,
@@ -636,7 +638,6 @@ import {
 } from "@/lib/review/batch-file-options"
 import { BatchFileModal, type BatchFileModalRequest } from "@/components/batch/BatchFileModal"
 import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
-import posthog from "@/lib/posthog"
 import { visibleFootnoteEntriesFor } from "@/lib/footnotes/visible-entries"
 import { useExtensionEditorRev4 } from "./tools/useExtensionEditorRev4"
 import { audioEntryFromCell, audioValidationScope, audioValidationTakes } from "@/lib/audio/audio-validation-permissions"
@@ -767,6 +768,7 @@ function writeAgentTabOpen(projectId: string | undefined, open: boolean): void {
 }
 
 export function ProjectWorkspace() {
+  const analytics = useAccountAnalytics()
   const t = useT()
   // AQU-1503: the batch-validate skip clauses are joined the way a list is
   // written in the reader's language, not with a hardcoded "; ".
@@ -1276,16 +1278,16 @@ export function ProjectWorkspace() {
     // because this effect is declared before currentUsername is computed.
     const uid = currentUsernameRef.current
     const savedLoc = readLastLocation(uid, projectId)
-    const last = (savedLoc?.fileId && fileIds.includes(savedLoc.fileId) ? savedLoc.fileId : null)
-      ?? readLastActiveFileId(projectId)
-    const firstOpenTab = workspaceTabs.tabs[0]?.fileId ?? null
-    const onlyFile = projectFiles.length === 1 ? projectFiles[0]?.id : null
-    const nextFileId =
-      last && fileIds.includes(last)
-        ? last
-        : firstOpenTab && fileIds.includes(firstOpenTab)
-          ? firstOpenTab
-          : onlyFile
+    // AQU-1537: the ordering rule lives in `resolveEditorFileId` so it can be
+    // unit-tested — this effect is unmountable in a test, and the rule
+    // (remembered file → legacy record → first open tab → the project's one
+    // file → keep the empty state) is the ticket's acceptance criteria.
+    const nextFileId = resolveEditorFileId({
+      savedFileId: savedLoc?.fileId,
+      legacyFileId: readLastActiveFileId(projectId),
+      firstOpenTabFileId: workspaceTabs.tabs[0]?.fileId ?? null,
+      knownFileIds: fileIds,
+    })
     if (!nextFileId) return
     // If there is a remembered cell, park it in the ref so the scroll-restore
     // effect can consume it once cells are loaded.
@@ -1320,8 +1322,9 @@ export function ProjectWorkspace() {
     project,
     projectId,
     routeFileId,
+    // `fileIds` is derived from `projectFiles`, so it already tracks the file
+    // list settling; the effect body no longer reads `projectFiles` itself.
     fileIds,
-    projectFiles,
     workspaceTabs.tabs,
     redirectTo,
     // AQU-1496: the overlay re-seed reads the `?return=` file off the URL.
@@ -11998,12 +12001,12 @@ export function ProjectWorkspace() {
       source: "selection" | "workspace-action",
       repetitions: BulkRepetitionOutcome | null = null,
     ) => {
-      posthog.capture(BATCH_VALIDATE_ATTEMPTED, batchValidateTelemetry(summary, source))
+      analytics.capture(BATCH_VALIDATE_ATTEMPTED, batchValidateTelemetry(summary, source))
       const message = batchValidateToast(summary, t, formatLocaleList)
       // AQU-1486: still ONE message — the repetitions' note and Undo ride on it.
       showBulkValidateToast(message, prepareBulkRepetitionsRef.current?.toastExtras(repetitions) ?? { note: null })
     },
-    [t, formatLocaleList],
+    [t, formatLocaleList, analytics],
   )
 
   // AQU-983: the file modal writes these, then the menu action runs. Defaults
@@ -16489,9 +16492,7 @@ export function ProjectWorkspace() {
             onActiveTabChange={setDockTab}
             filesPanel={
               <div className="flex flex-col gap-2 p-3" aria-hidden="true">
-                {Array.from({ length: 6 }).map((_, index) => (
-                  <LoadingLine key={index} className="h-8 px-2" />
-                ))}
+                <div className="flex h-8 items-center px-2"><LoadingCursor /></div>
               </div>
             }
             agentPanel={null}

@@ -1,5 +1,5 @@
 import { LoadingTemplate } from "@/components/ui/loading-overlay"
-import { LoadingLine } from "@/components/ui/loading-cursor"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 
 export { ValidatedBar } from "./ValidatedBar"
 
@@ -11,17 +11,11 @@ export { ValidatedBar } from "./ValidatedBar"
  * here re-fetches, and swapping back to a placeholder takes the table, its
  * filters and the admin's scroll position with it.
  */
-export function AdminSectionSkeleton({ label, blocks = 3 }: { label: string; blocks?: number }) {
+export function AdminSectionSkeleton({ label }: { label: string; blocks?: number }) {
   return (
     <LoadingTemplate label={label} className="min-h-[18rem]" templateClassName="min-h-[18rem]">
       <div className="flex flex-col gap-4">
-        <LoadingLine className="text-lg font-semibold" />
-        {Array.from({ length: blocks }).map((_, i) => (
-          <div key={i} className="flex h-24 flex-col gap-2 rounded-lg border bg-card p-4">
-            <LoadingLine className="font-medium" />
-            <LoadingLine className="text-xs" />
-          </div>
-        ))}
+        <LoadingCursor className="text-xl" />
       </div>
     </LoadingTemplate>
   )

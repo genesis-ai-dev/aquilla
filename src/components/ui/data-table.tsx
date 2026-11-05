@@ -48,7 +48,7 @@ import {
   DataTableColumnHeader,
   DataTableSortingContext,
 } from "@/components/ui/data-table-column-header"
-import { LoadingCursor, LoadingLine } from "@/components/ui/loading-cursor"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { cn } from "@/lib/utils"
 import { MoreHorizontal, Search } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -658,18 +658,15 @@ function DataTable<TData, TValue>({
                 </TableRow>
               ))}
             </TableHeader>
-            <TableBody>
+            <TableBody data-reveal="">
               {loading ? (
+                // One cursor where the first row will start; the rows below
+                // keep the table's height so the page does not jump.
                 Array.from({ length: SKELETON_ROW_COUNT }, (_, row) => (
                   <TableRow key={`skeleton-${row}`} className="hover:bg-transparent">
-                    {Array.from({ length: visibleColumnCount }, (_, col) => (
-                      <TableCell
-                        key={col}
-                        className={dense ? "py-1.5" : "py-2.5"}
-                      >
-                        <LoadingCursor />
-                      </TableCell>
-                    ))}
+                    <TableCell colSpan={visibleColumnCount} className={dense ? "py-1.5" : "py-2.5"}>
+                      {row === 0 ? <LoadingCursor /> : <span className="inline-block h-[1em]" />}
+                    </TableCell>
                   </TableRow>
                 ))
               ) : hasRows ? (
@@ -924,7 +921,7 @@ function DataTablePanelSkeleton({
       >
         <div className="space-y-2 p-2">
           {Array.from({ length: SKELETON_ROW_COUNT }, (_, i) => (
-            <LoadingLine key={i} className="h-9 px-2" />
+            <div key={i} className="flex h-9 items-center px-2">{i === 0 ? <LoadingCursor /> : null}</div>
           ))}
         </div>
       </div>

@@ -19,7 +19,7 @@ import {
 } from "@/lib/store/style-align-dirty"
 
 vi.mock("@/lib/posthog", () => ({
-  default: { capture: vi.fn(), captureException: vi.fn() },
+  default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn(), captureException: vi.fn() },
 }))
 vi.mock("@/lib/completion/frontier-health", () => ({
   useFrontierHealth: () => ({ available: true }),

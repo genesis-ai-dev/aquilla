@@ -10,8 +10,10 @@ import { useT } from "@/lib/i18n/I18nProvider"
 export function ShareUsageDataSetting({
   enabled,
   onEnabledChange,
+  disabled = false,
 }: {
   enabled: boolean
+  disabled?: boolean
   onEnabledChange: (next: boolean) => void
 }) {
   const t = useT()
@@ -33,6 +35,7 @@ export function ShareUsageDataSetting({
           <Switch
             id="analytics-consent"
             checked={enabled}
+            disabled={disabled}
             onCheckedChange={(checked) => onEnabledChange(checked)}
             aria-label={t("onboarding.privacy.shareUsageData")}
           />

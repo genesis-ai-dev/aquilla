@@ -21,6 +21,7 @@ import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { IdmlReimportAlignHost } from "@/lib/idml/align-reimported-targets"
 import type { ReimportCountedCell } from "@/lib/import/reimport-diff"
 import type { FileReference, TranslatableString } from "@/lib/parsers/types"
+import type { PartnerFormatFilterRegistration } from "@/lib/formats/partner-contract"
 
 /** Progress phases reported while a partner package is read and saved. */
 export type PartnerImportPhase = "parse" | "save"
@@ -214,4 +215,16 @@ export interface PartnerIntegration {
    * file's profile id has not been loaded yet. A renamed folder does not match.
    */
   importCorpusMarkers?: readonly string[]
+  /**
+   * Formats this partner puts on the shared format contract (AQU-2384). This
+   * is the ONLY route a partner filter reaches the format registry by: the
+   * registry derives its partner entries from `partnerIntegrations()`, so
+   * nothing outside `partner-integrations/` ever names a partner module, and
+   * deleting the folders empties the list instead of breaking the build.
+   *
+   * The filter itself hangs off a thunk, like `importScreen.panel`, so a
+   * partner's parser stays code-split and out of the bundle that merely asks
+   * which extensions are importable.
+   */
+  formatFilters?: readonly PartnerFormatFilterRegistration[]
 }

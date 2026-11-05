@@ -388,6 +388,53 @@
 > fortnight while the numerator grew by three. Reported, not fixed: the census
 > should become an assertion that fails on a new undecided module, and eight of
 > OPS-48's ten remain, led now by `source-linking.ts` (14 writes).
+>
+> `docs/OPSEC-REVIEW-2026-11-02.md` holds the **auth & session** Monday slot and
+> takes up both of the things 10-26 handed forward. It avoids `routes/auth.ts`
+> and the `/me` surface, which a parallel pen-test pass (`cf042e21`, no review
+> document, so no OPS-n) rewrote at 09:12 the same morning — the **eighth**
+> concurrent-pass collision, and the fifth in twenty-eight days. **OPS-51**:
+> OPS-48 was right to rank `source-linking.ts` first and wrong about where the
+> finding was. It is not in any of the fourteen writes OPS-48 counted but in the
+> one route whose floor is **OWNER** — `DELETE /:projectId`, a hard
+> `DELETE FROM projects` with every cell, event, file and comment cascading
+> after it, and no Trash step. The platform contribution *is* level 700, so
+> `role.level < ROLE.OWNER` is false for every operator on every project on the
+> platform: the strictest gate on the router was the one that could not hold,
+> and an un-elevated admin JWT passed it by definition. Three things in the repo
+> had already decided it — `routes/projects.ts`, the **sibling router on the
+> same `/api/v2/projects` mount**, requires elevation to remove one member or
+> revoke one invite (AQU-1322); `routes/merge-sibling.ts` says in its own OPS-44
+> comment that *"destroying a donor project outranks [adding one member]"*; and
+> AQU-2003 priced un-elevated platform access as read-only. The same pass found
+> the second half: `POST /:projectId/link-source` carries an explicit
+> cross-tenant check whose comment spells out the IDOR it closed — *"link it to
+> ANY other project id on the platform and clone/mirror its source cells"* —
+> and platform power satisfies that check for free on **both** sides, which is
+> that exploit restored for one principal and made **permanent**, because a live
+> link is a standing data flow the mirror keeps replaying long after any
+> elevation lapses (OPS-44's "escapes the session" category a fourth time). With
+> `replaceFiles` it overwrites a tenant's existing files in place, so every
+> translation, validation and comment stays attached to text swapped underneath
+> it; and the upstream lane wall came with it, since `resolveUpstreamLinkLane`
+> keyed on the un-narrowed 700. Fixed with OPS-44's idiom at seven call sites
+> across the six writes, both sides where two tenancies are involved; the three
+> reads are left open and say so at their own guards. The one edge it had to
+> avoid: `resolveGenuineProjectRole` answers null for an archived project, so
+> the naive narrowing would have locked an operator out of deleting their **own
+> project from their own Trash** — both helpers now take `{ includeArchived }`,
+> threaded only from the call sites that resolved that way. **OPS-52** closes
+> OPS-50 §1: the elevation census is now an assertion in
+> `scripts/platform-elevation-coverage.test.ts`, not a number re-derived by
+> hand. Every route module reaching a platform-winnable role must carry one of
+> three recorded states — `decides` (13), `delegates` (3, asserted to resolve no
+> role of their own), `undecided` (33, the open queue with OPS-48's write counts
+> annotated) — and the set assertion fails in both directions, so the next route
+> to reach that power cannot default into the undecided set silently. **16 of
+> 49** now decide, and the suite computes that, not the document. Still open:
+> `termbase-subscriptions.ts` (7 writes) is the head of OPS-48's remainder, and
+> a project delete writes **no audit row anywhere** — the gate is closed, but
+> nothing can say what went through it before today.
 
 _Standing OPSEC review of Aquilla's handling of sensitive data. Complements
 `docs/SECURITY-NOTES-2026-06-10.md` (application-security findings, June audit)
@@ -415,7 +462,7 @@ Ranked by what it would cost us if it leaked, not by volume.
 | # | Asset | Where it lives | Why it matters |
 |---|---|---|---|
 | D1 | **Signing keys** — `SECRET_KEY` (access tokens), `SYNC_SECRET_KEY` (sync tokens, and a plaintext admin bearer) | Worker secrets; `.dev.vars` locally | Holding either mints credentials for *any* user or project. Root of the whole trust tree. |
-| D2 | **Unpublished translation drafts** — per-cell target text, comments, backtranslations | Postgres `cells`/`events`, R2 source blobs | Pre-publication scripture text for named languages. In restricted-access regions, *which* language is being worked on and *by whom* is the sensitive part, not the prose. |
+| D2 | **Unpublished translation drafts** — per-cell target text, comments, backtranslations | Postgres `cells`/`events`, R2 source blobs | Pre-publication scripture text for named languages. In restricted-access regions, *which* language is being worked on and *by whom* is the sensitive part, not the prose. Since OPS-51 (`docs/OPSEC-REVIEW-2026-11-02.md`) an un-elevated platform admin can no longer **destroy** D2 or open a standing cross-tenant pipe into it: `DELETE /api/v2/projects/:id` had an OWNER floor that the platform contribution's own level 700 satisfied by definition, and `link-source` had a cross-tenant check that the same 700 satisfied on both sides — a live link then kept mirroring one tenant's source cells into another's project, with `replaceFiles` overwriting existing files in place. Both now de-escalate to the operator's genuine grant unless the step-up code has been redeemed. **A project delete still writes no audit row**, so what passed that gate before 2026-11-02 is unrecoverable and unknowable. |
 | D3 | **Translator identity + activity** — emails, usernames, org/project membership, presence, focus locks, `last_used_at` | Postgres; the `ProjectSync` DO in memory | Presence and focus-lock data is a working-hours and collaboration graph. Combined with D2 this answers "who is translating what, and when" — the question that makes this product a target rather than a curiosity. **Not agent-readable by default since AQU-1180**: the Agent API returns per-project pseudonyms rather than names, real identity needs an owner-minted `pii` credential, and a project can set `agentAuthorship: none` to drop author fields entirely — see `docs/AGENT-API.md` § Collaborator identity. Comment `@mention` emails (D2 excerpt, routed by D3 username/email) are now scoped to actual project grants — OPS-39, `docs/OPSEC-REVIEW-2026-09-24.md`. Since OPS-44 (`docs/OPSEC-REVIEW-2026-10-12.md`) a platform admin's cross-tenant reach over D2/D3 is no longer available to an *un-elevated* session: the sync-token mint, PAT minting and the sibling fold de-escalate to the operator's genuine role unless the step-up code has been redeemed. Cross-tenant *metadata* reads (the org/project directories) remain open un-elevated by design — OPS-45. Since OPS-49 (`docs/OPSEC-REVIEW-2026-10-26.md`) D3 no longer leaves the platform on an un-elevated operator's say-so either: the progress-sync integrations push the `translators` username list, each language and the activity date into a tenant's Monday board or Airtable base, and the three routers' shared role guard now requires elevation before admin power can set that destination or the credential it rides on. |
 | D4 | **Third-party credentials** — `OPENROUTER_API_KEY`, Monday client/signing secrets, GitLab admin token, Neon/Hyperdrive connection strings, R2 keys, `CLOUDFLARE_API_TOKEN`, Apple/Windows/Tauri signing keys | Worker secrets + GitHub Actions secrets | Direct financial loss (LLM spend), or — for the code-signing keys — the ability to ship a signed malicious desktop build. `tauri-release.yml` now enters a `desktop-release-signing` GitHub Environment before touching these (OPS-40, `docs/OPSEC-REVIEW-2026-09-25.md`); the Environment still needs required reviewers configured in repo settings to actually hold the job. |
 | D5 | **Bearer tokens in circulation** — 30-day access JWTs, 15-minute sync tokens, `aqk_` Agent-API PATs, password-reset and email-verification tokens, admin step-up elevation codes, invite tokens | Client IndexedDB / localStorage; `api_credentials`, `password_reset_tokens`, `email_verification_tokens` (hashed — the latter two since migration 0080, OPS-20, with the plaintext columns themselves dropped by 0087, OPS-31); `admin_elevation_codes` (scrypt-hashed since 0094, OPS-36 — plaintext column retired nullable, drop pending); `project_invites`, `org_invites` (**plaintext** — OPS-26) | Each is a live credential. A password-reset token is account takeover on its own for 24 hours. For the two auth-token tables the guarantee is now structural rather than behavioural: since migration 0087 there is no plaintext column to write to, so restoring a pre-0080 backup into the live schema can no longer re-introduce readable reset links. Invite tokens ride in a URL path, which is the least protected place a bearer token can be — **and they remain the exception to this row's "hashed" claim**: both invite tables store the raw token, so a DB read hands over working invite links (OPS-26, `docs/OPSEC-REVIEW-2026-08-31.md`). Since OPS-42 (`docs/OPSEC-REVIEW-2026-10-05.md`) the workers no longer copy those URL paths into PostHog Logs or Cloudflare Workers Logs on the ordinary 4xx (mistyped PIN, lapsed session) or on a slow success; Cloudflare's own edge request logs still record full URLs, as they do for any HTTP service, which is the standing reason this placement is poor. |

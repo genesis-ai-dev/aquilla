@@ -513,7 +513,19 @@ export async function commitMemoryCommand(
 
   // The approver is the reviewer of record — the audit trail must name the
   // human whose authority published this, not the credential's owner.
-  const reviewed = await reviewMemory(db, { id: memoryId, action: 'approve', reviewedBy: approver })
+  const approverUserId = Number(approver)
+  const reviewed = await reviewMemory(db, {
+    id: memoryId,
+    action: 'approve',
+    reviewedBy: approver,
+    settingsUpdatedBy: Number.isSafeInteger(approverUserId) ? approverUserId : null,
+  })
+  // AQU-2342: approving an AddDecision appends it to the project instructions
+  // (reviewMemory). No realtime broadcast from here — open editors pick the
+  // new settings version up on their next settings read.
+  if (reviewed.status === 'invalid_state' && /instructions are full/.test(reviewed.message)) {
+    return errorResponse('conflict', reviewed.message, { path })
+  }
   if (reviewed.status === 'supersedes_human_edited') {
     return errorResponse(
       'permission_denied',

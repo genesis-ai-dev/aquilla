@@ -39,7 +39,7 @@ vi.mock("@/lib/import", () => ({
   applyEBibleTargetImport: vi.fn(),
   prepareImportFile: vi.fn(),
 }))
-vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn() } }))
+vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn() } }))
 vi.mock("@/lib/import-file-target-proposals", () => ({
   stageTargetImportAsProposals: vi.fn(),
 }))

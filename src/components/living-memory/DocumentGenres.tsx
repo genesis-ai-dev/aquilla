@@ -38,7 +38,7 @@ import {
   setFileGenre,
   type FileGenre,
 } from "@/lib/rules/file-genre"
-import { RoleLockTooltip } from "./AuthoredEntriesSection"
+import { RoleLockTooltip } from "./RoleLockTooltip"
 
 const GENRE_LABEL_KEY: Record<FileGenre, MessageKey> = {
   law: "terminology.livingMemory.genres.name.law",

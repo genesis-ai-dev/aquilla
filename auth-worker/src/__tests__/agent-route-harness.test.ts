@@ -110,12 +110,13 @@ describe("agent route — harness tool registration & dispatch", () => {
       "load_artifact",
       "read_sandbox_file",
       "propose_memory",
-      "propose_brief_update",
       "read_memory",
     ]) {
       expect(toolNames).toContain(name)
     }
     expect(toolNames).not.toContain("plan_import")
+    // AQU-2342: retired — a legacy call is retargeted to propose_memory decisions/.
+    expect(toolNames).not.toContain("propose_brief_update")
 
     // read_memory dispatched → its result reached the model on the next turn.
     const toolMsg = upstreamBodies[1].messages.find((m) => m.role === "tool")!
@@ -125,16 +126,41 @@ describe("agent route — harness tool registration & dispatch", () => {
     expect(frames.find((f) => f.type === "done")).toMatchObject({ status: "ok" })
   })
 
+  // WHY: every turn re-sends the whole conversation, so summing prompt tokens
+  // across turns tripped whole-book tasks after a few rounds with ~4 cr spent.
+  // The ceiling bounds one turn's context; a long run of small turns is spend,
+  // which the cost cap governs.
+  it("does not stop a run whose turns only add up past 200k", async () => {
+    await seedWorld()
+    const jwt = await jwtFor("alice")
+    let calls = 0
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      calls++
+      const message = calls <= 3 ? toolCall(`t${calls}`, "read_memory", {}) : { role: "assistant", content: "done" }
+      return new Response(JSON.stringify({
+        choices: [{ message }],
+        usage: { prompt_tokens: 90_000, completion_tokens: 0, cost: 0.001 },
+      }), { headers: { "Content-Type": "application/json" } })
+    })
+
+    const res = await postRun(jwt, { projectId: PROJECT, messages: [{ role: "user", content: "Draft Exodus" }] })
+    const frames = parseFrames(await res.text())
+
+    expect(calls).toBe(4) // 360k summed, never more than 90k in one turn
+    expect(frames.find((f) => f.type === "error")).toBeUndefined()
+    expect(frames.find((f) => f.type === "done")).toMatchObject({ status: "ok" })
+  })
+
   it.each(["read_memory", "propose_memory"])(
-    "allows 200k tokens, then explains continuation before more %s work",
+    "allows a 200k-token turn, then explains continuation before more %s work",
     async (nextTool) => {
       await seedWorld()
       const jwt = await jwtFor("alice")
       let calls = 0
       const upstream = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
         calls++
-        // Two rounds total exactly 200k. The third crosses the ceiling.
-        const tokens = calls <= 2 ? 100_000 : 1
+        // Turns at exactly 200k pass. The third turn's context crosses the ceiling.
+        const tokens = calls <= 2 ? 200_000 : 200_001
         const name = calls <= 2 ? "read_memory" : nextTool
         return new Response(JSON.stringify({
           choices: [{ message: toolCall(`t${calls}`, name, {}) }],

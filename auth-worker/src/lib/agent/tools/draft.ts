@@ -12,6 +12,24 @@
 import { stripTrailingBareMarkers } from "../../../../../src/lib/completion/strip-trailing-usfm-markers"
 import { isRefusalReply } from "../../../../../src/lib/completion/refusal"
 import { resolveLaneIdOrTag } from "../../../../../db/shared/lane-ref"
+import {
+  createTagMask,
+  describeTagFailure,
+  isTagsOnlyText,
+  maskInlineTags,
+  settleTagLadder,
+  type TagMask,
+} from "../../../../../db/shared/inline-tags"
+import { instructionsPromptBlock } from "../../../../../db/shared/translation-instructions"
+import {
+  assemblePromptSections,
+  checksHintBlock,
+  runDirectionsBlock,
+  terminologyBlock,
+} from "../../../../../db/shared/prompt-blocks"
+import { styleInstructionsForCells } from "../../../../../db/shared/style-instructions"
+import { loadProjectContext, termGuidanceForSpan, termHints } from "../../contextual/project-context"
+import { rulesForLane } from "../lint"
 import { AliasMap } from "../compress"
 import { stageEvents, type AgentProposal, type EmitStageContext } from "../emit-stage"
 import { executeExamples } from "./examples"
@@ -56,9 +74,16 @@ export interface DraftGenerationContext {
   aliases: AliasMap
   sourceLanguage?: string
   targetLanguage?: string
-  briefSummary?: string
+  /** AQU-2342: the project's resolved translation instructions — the ONE
+   *  instructions block, right after the fixed role text. */
+  translationInstructions?: string
   signal: AbortSignal
-  sendProgress: (label: string, done: number, total: number) => void
+  /**
+   * AQU-1536: the counter is optional. Drafting runs two batched model
+   * calls, so no cell finishes before the whole pass returns — a
+   * per-cell `done/total` here could only sit at 0 and then jump to N.
+   */
+  sendProgress: (label: string, done?: number, total?: number) => void
   addUsage: (usage: { prompt_tokens?: number; completion_tokens?: number; cost?: number }) => void
   /** Re-check the enclosing agent run's cost/token cap between the two paid
    *  phases. Direct unit callers may omit it (no enclosing run budget). */
@@ -67,6 +92,13 @@ export interface DraftGenerationContext {
    *  the call; the returned settle records the provider body afterwards. */
   admitPaidCall?: (input: { model: string; promptChars: number }) => Promise<
     { ok: true; settle: (body: unknown) => Promise<unknown>; hold: (body: unknown) => Promise<unknown> } | { ok: false; message: string }>
+  /**
+   * AQU-2385: mask inline tags to opaque sentinels before each model pass.
+   * On unless explicitly false — the escape hatch for a model that handles
+   * the sentinel grammar badly. Detection, repair and the quarantine never
+   * switch off, so a tag the model mangles is caught either way.
+   */
+  maskInlineTags?: boolean
   /** Ceiling on cells drafted in one call. Defaults to the in-agent review
    *  package size (MAX_LIMIT); the external DraftCells command passes the
    *  project's configured completion batch size instead. */
@@ -114,44 +146,103 @@ const MAX_LIMIT = 10
 const PRECEDING_CONTEXT = 5
 const EXAMPLES_N = 10
 const RESEARCH_RECORD_MAX_CHARS = 12_000
-const PROMPT_VERSION = "agent-draft-v3-staged-research"
+// v5 (AQU-2342 phase 2): checks hint + matching terms, one shared section order.
+const PROMPT_VERSION = "agent-draft-v5-guidance"
 
-function groundingPrompt(ctx: DraftGenerationContext, examplesBlock: string, precedingBlock: string): string {
+/** The standing guidance and evidence one draft call carries, built once and
+ *  shared by the research and generation passes. */
+export interface DraftGuidance {
+  /** db/shared/prompt-blocks checks hint ("" when none). */
+  checks: string
+  /** db/shared/prompt-blocks terminology block for the work list ("" when none). */
+  terminology: string
+  /** [E#]-labelled validated pairs ("" when none). */
+  examples: string
+  /** [C#]-labelled preceding validated context ("" when none). */
+  context: string
+  /** This run's directions (the `instructions` arg), "" when none. */
+  directions: string
+}
+
+/** One section order for every drafting path (db/shared/prompt-blocks.ts):
+ *  role → instructions → checks → terminology → examples → context → this
+ *  run's directions → the pass's own task. */
+function passSystemPrompt(ctx: DraftGenerationContext, guidance: DraftGuidance, task: string): string {
   const pair = ctx.targetLanguage
     ? `You translate${ctx.sourceLanguage ? ` from ${ctx.sourceLanguage}` : ""} into ${ctx.targetLanguage}.`
     : "You translate into the project's target language — infer it from the example pairs."
-  return `${pair} You draft for a scripture translation project.
-
-The translation pairs below are your PRIMARY source of truth: they carry this team's exact terminology, tone, register, punctuation, and stylistic conventions. This may be an ultra-low-resource language — imitate the project's own patterns above general knowledge of the language.
-${ctx.briefSummary ? `\nProject brief (honour it): ${ctx.briefSummary}\n` : ""}${examplesBlock}${precedingBlock}`
+  return assemblePromptSections({
+    role: `${pair} You draft for a scripture translation project. The translation pairs below are your PRIMARY source of truth: they carry this team's exact terminology, tone, register, punctuation, and stylistic conventions. This may be an ultra-low-resource language — imitate the project's own patterns above general knowledge of the language.`,
+    instructions: instructionsPromptBlock(ctx.translationInstructions),
+    checks: guidance.checks,
+    terminology: guidance.terminology,
+    examples: guidance.examples,
+    context: guidance.context,
+    directions: guidance.directions,
+    output: task,
+  })
 }
 
-function researchSystemPrompt(ctx: DraftGenerationContext, examplesBlock: string, precedingBlock: string): string {
-  return `${groundingPrompt(ctx, examplesBlock, precedingBlock)}
-
-You are the RESEARCH pass, separate from final generation. Produce a compact evidence record, not a translation and not hidden chain-of-thought.
+export function researchSystemPrompt(ctx: DraftGenerationContext, guidance: DraftGuidance): string {
+  return passSystemPrompt(ctx, guidance, `You are the RESEARCH pass, separate from final generation. Produce a compact evidence record, not a translation and not hidden chain-of-thought.
 
 For each numbered source segment:
 1. Inventory every proposition, participant and semantic role, relation, polarity, quantity, and name that the translation must preserve.
 2. Record directly attested target wording or constructions from [E#] and [C#] evidence separately from inference. Cite those short evidence labels.
 3. Note material conflicts or uncertain choices. Prefer exact and repeated attestation over inference; never construct an answer by splicing unrelated target fragments.
-4. End with concise constraints for the drafting pass.
+4. Note every listed term and check the segment triggers.
+5. End with concise constraints for the drafting pass.
 
-Do not produce final translated segments in this pass.`
+Do not produce final translated segments in this pass.`)
 }
 
-function draftSystemPrompt(ctx: DraftGenerationContext, examplesBlock: string, precedingBlock: string): string {
-  return `${groundingPrompt(ctx, examplesBlock, precedingBlock)}
-
-You are the GENERATION pass. Use the separate evidence record supplied by the user as a decision aid, while treating the project evidence above as authoritative.
+export function draftSystemPrompt(ctx: DraftGenerationContext, guidance: DraftGuidance): string {
+  return passSystemPrompt(ctx, guidance, `You are the GENERATION pass. Use the separate evidence record supplied by the user as a decision aid, while treating the project evidence above as authoritative.
 
 Rules:
 1. Translate segment by segment; do not merge, split, or reorder segments.
 2. Keep names, numbers, and punctuation conventions consistent with the pairs.
-3. Prefer directly attested, repeated constructions over inference. Resolve conflicts coherently; never concatenate incompatible fragments.
-4. Before answering, check that no proposition, participant, semantic role, relation, polarity, quantity, or name was omitted or added. Make at most one evidence-supported repair.
-5. When uncertainty remains, preserve the strongest coherent attested construction rather than inventing a distinction.
-6. Output STRICT JSON only: an array like [{"i":1,"t":"<translation>"}] with one object per input segment, i matching the input number. No prose, no code fences.`
+3. Render every listed term with an approved rendering, and satisfy every listed check.
+4. Prefer directly attested, repeated constructions over inference. Resolve conflicts coherently; never concatenate incompatible fragments.
+5. Before answering, check that no proposition, participant, semantic role, relation, polarity, quantity, or name was omitted or added. Make at most one evidence-supported repair.
+6. When uncertainty remains, preserve the strongest coherent attested construction rather than inventing a distinction.
+7. Output STRICT JSON only: an array like [{"i":1,"t":"<translation>"}] with one object per input segment, i matching the input number. No prose, no code fences.`)
+}
+
+/**
+ * The checks hint and the matching terms for this work list, read the way
+ * Autopilot reads them (loadProjectContext: the editor's concepts, affix
+ * inventory, project + org rules, Language profile) and rendered by the shared
+ * builders. Best-effort: grounding never fails a draft.
+ */
+async function loadDraftGuidance(
+  db: AquillaDb,
+  ctx: DraftGenerationContext,
+  work: readonly CellPair[],
+  fileId: string,
+  lane: { laneId: string | null; tag: string },
+): Promise<Pick<DraftGuidance, "checks" | "terminology">> {
+  try {
+    const project = await loadProjectContext(db, ctx.projectId, { laneId: lane.laneId, targetLang: lane.tag })
+    const terms = termGuidanceForSpan(project.concepts, work.map((p) => p.source), project.termMatching)
+    const styleInstructions = await styleInstructionsForCells(db, {
+      projectId: ctx.projectId,
+      fileId,
+      cells: work,
+      settings: { fileGenres: project.fileGenres },
+    })
+    return {
+      checks: checksHintBlock({
+        rules: rulesForLane([...project.authoredRules, ...(project.orgRules ?? [])], lane.tag),
+        styleInstructions,
+        languageProfile: project.languageProfile,
+      }),
+      terminology: terminologyBlock(termHints(terms)),
+    }
+  } catch (err) {
+    console.warn("[draft] guidance read failed; drafting without checks/terms:", err instanceof Error ? err.message : err)
+    return { checks: "", terminology: "" }
+  }
 }
 
 interface UpstreamJson {
@@ -283,7 +374,8 @@ export async function generateDrafts(
   const maxCells = Math.max(1, Math.floor(ctx.maxCells ?? MAX_LIMIT))
   const limit = Math.min(Math.max(Number(args.limit) || DEFAULT_LIMIT, 1), maxCells)
 
-  const all = await selectCellPairs(db, ctx.projectId, { fileId: scope.fileId, range: scope.range, laneId: (await resolveLaneIdOrTag(db, ctx.projectId, ctx.lane)).laneId })
+  const resolvedLane = await resolveLaneIdOrTag(db, ctx.projectId, ctx.lane)
+  const all = await selectCellPairs(db, ctx.projectId, { fileId: scope.fileId, range: scope.range, laneId: resolvedLane.laneId })
 
   // Work list: explicit cellIds (aliases ok), else every untranslated cell in scope.
   let work: CellPair[]
@@ -300,7 +392,47 @@ export async function generateDrafts(
   const remaining = Math.max(work.length - limit, 0)
   work = work.slice(0, limit)
 
+  // AQU-2385, rung 0 of the inline-tag ladder: a cell that is nothing but
+  // inline markup (plus at most one placeholder) has no words to translate.
+  // Copy it across and keep it out of both model passes — no model call means
+  // no reply that could drop, duplicate or reorder its tags.
+  const copiedPairs = work.filter((p) => isTagsOnlyText(p.source))
+  if (copiedPairs.length > 0) work = work.filter((p) => !isTagsOnlyText(p.source))
+  const copyEmit = (p: CellPair): DraftEmit => ({
+    kind: "target.cell.commit",
+    fileId: scope.fileId,
+    cellId: p.cellId,
+    payload: {
+      value: p.source,
+      ai_draft: {
+        model: modelCfg.model,
+        provider: "platform",
+        promptVersion: PROMPT_VERSION,
+        exampleIds: [],
+        generatedAt: Date.now(),
+        mode: "agent",
+        projectState: {
+          sourceLanguage: ctx.sourceLanguage ?? "",
+          targetLanguage: ctx.targetLanguage ?? "",
+          approvedExampleCount: 0,
+        },
+      },
+    },
+  })
+
   if (work.length === 0) {
+    if (copiedPairs.length > 0) {
+      return {
+        ok: true,
+        fileId: scope.fileId,
+        emits: copiedPairs.map(copyEmit),
+        missed: [],
+        remaining,
+        drafted: copiedPairs,
+        empty: false,
+        notice: scope.notice,
+      }
+    }
     return { ok: true, fileId: scope.fileId, emits: [], missed: [], remaining, drafted: [], empty: true, notice: scope.notice }
   }
 
@@ -312,9 +444,9 @@ export async function generateDrafts(
   }
   const precedingBlock =
     preceding.length > 0
-      ? `\nImmediately preceding, validated context (continue its discourse flow):\n${preceding
+      ? `Immediately preceding, validated context (continue its discourse flow):\n${preceding
           .map((p, i) => `[C${i + 1}; ${p.canonicalRef ?? "no ref"}] ${JSON.stringify(stripTrailingBareMarkers(p.source))} → ${JSON.stringify(stripTrailingBareMarkers(p.target))}`)
-          .join("\n")}\n`
+          .join("\n")}`
       : ""
 
   // Few-shot pairs — validated first (the team's terminology decisions).
@@ -326,29 +458,51 @@ export async function generateDrafts(
   const examplePairs = examplesOutcome.data?.examples ?? []
   const examplesBlock =
     examplePairs.length > 0
-      ? `\nTranslation pairs from this project (imitate them):\n${examplePairs
+      ? `Translation pairs from this project (imitate them):\n${examplePairs
           .map((e, i) => `[E${i + 1}; ${e.ref ?? "no ref"}] ${JSON.stringify(stripTrailingBareMarkers(e.source))} → ${JSON.stringify(stripTrailingBareMarkers(e.target))}`)
-          .join("\n")}\n`
+          .join("\n")}`
       : ""
 
-  const instructions =
-    typeof args.instructions === "string" && args.instructions.trim()
-      ? `\nExtra instructions for this batch: ${args.instructions.trim()}`
-      : ""
+  // AQU-2342: checks hint + the terms that occur in THIS work list — the
+  // blocks every drafting path carries (this tool used to get neither, and
+  // could only be told about a violation after the lint).
+  const guidance: DraftGuidance = {
+    ...(await loadDraftGuidance(db, ctx, work, scope.fileId, { laneId: resolvedLane.laneId, tag: resolvedLane.targetLang ?? "" })),
+    examples: examplesBlock,
+    context: precedingBlock,
+    // The caller's per-run steering: last, after the standing guidance.
+    directions: runDirectionsBlock(typeof args.instructions === "string" ? args.instructions : ""),
+  }
+  // AQU-2385, rung 1: inline tags reach the model as opaque sentinels, so it
+  // has nothing to "translate", reflow or helpfully reformat. ONE mask per
+  // call (one nonce, one ordinal sequence) covers every cell, and the same
+  // masked list is carried by the research pass and the drafting pass. The
+  // guidance, terminology and example blocks above keep the REAL source —
+  // term lookup needs the actual words.
+  const tagMask: TagMask | undefined = ctx.maskInlineTags === false ? undefined : createTagMask()
+  const maskedSources = work.map((p) => {
+    const text = stripTrailingBareMarkers(p.source)
+    return tagMask ? maskInlineTags(text, tagMask).masked : text
+  })
   const numbered = work
-    .map((p, i) => `${i + 1}. ${p.canonicalRef ? `[${p.canonicalRef}] ` : ""}${stripTrailingBareMarkers(p.source)}`)
+    .map((p, i) => `${i + 1}. ${p.canonicalRef ? `[${p.canonicalRef}] ` : ""}${maskedSources[i]}`)
     .join("\n")
 
   // Preserve the benchmarked causal structure: research finishes before the
   // model sees the request to translate. This is deliberately two calls, not
   // one prompt asking the model to "think first" and draft in the same pass.
-  ctx.sendProgress(`Researching ${work.length} cells`, 0, work.length)
+  // AQU-1536: a stage label, not a cell counter. Research is ONE call covering
+  // every cell, so there is no per-cell completion to count; the dock showed
+  // `Researching 7 cells — 0/7` frozen for the whole pass, which a translator
+  // cannot tell from a stalled run. The label names the pass instead, and it
+  // changes when generation starts — visible movement before the proposals land.
+  ctx.sendProgress(`Researching ${work.length} cells (pass 1 of 2)`)
   const researched = await callPaidPass(
     ctx,
     modelCfg,
     [
-      { role: "system", content: researchSystemPrompt(ctx, examplesBlock, precedingBlock) },
-      { role: "user", content: `Research these ${work.length} source segments:${instructions}\n${numbered}` },
+      { role: "system", content: researchSystemPrompt(ctx, guidance) },
+      { role: "user", content: `Research these ${work.length} source segments:\n${numbered}` },
     ],
   )
   if (!researched.ok) return { ok: false, error: `drafting research ${researched.error}` }
@@ -363,19 +517,17 @@ export async function generateDrafts(
   if (!evidenceRecord) {
     return { ok: false, error: "drafting research returned no evidence record — retry or draft fewer cells" }
   }
-  ctx.sendProgress(`Researching ${work.length} cells`, work.length, work.length)
-
-  ctx.sendProgress(`Drafting ${work.length} cells`, 0, work.length)
+  ctx.sendProgress(`Drafting ${work.length} cells (pass 2 of 2)`)
   const generated = await callPaidPass(
     ctx,
     modelCfg,
     [
-      { role: "system", content: draftSystemPrompt(ctx, examplesBlock, precedingBlock) },
+      { role: "system", content: draftSystemPrompt(ctx, guidance) },
       {
         role: "user",
         content:
           `Evidence record from the completed research pass:\n<evidence>\n${evidenceRecord}\n</evidence>\n\n` +
-          `Translate these ${work.length} segments:${instructions}\n${numbered}`,
+          `Translate these ${work.length} segments:\n${numbered}`,
       },
     ],
   )
@@ -393,7 +545,19 @@ export async function generateDrafts(
   const missed: string[] = []
   const draftedIdx = new Set<number>()
   work.forEach((p, i) => {
-    const t = stripTrailingBareMarkers((drafts.get(i + 1) ?? "").trim())
+    const reply = stripTrailingBareMarkers((drafts.get(i + 1) ?? "").trim())
+    // AQU-2385, rungs 2-4: put the real tags back, then detect -> repair ->
+    // quarantine. A quarantined draft is NOT dropped: it is staged like any
+    // other AI draft and a human approves or rejects it, which is exactly the
+    // review this changeset gate exists for.
+    const ladder = reply ? settleTagLadder(stripTrailingBareMarkers(p.source), reply, tagMask) : null
+    if (ladder && ladder.status !== "clean" && ladder.reason) {
+      console.warn(
+        `[draft] inline tags ${ladder.status} for cell ${p.cellId}: ` +
+        describeTagFailure(ladder.reason, ladder.detail),
+      )
+    }
+    const t = ladder ? ladder.value : reply
     // AQU-2217: the drafting model can fill a well-formed {"i","t"} entry with
     // a refusal ("I'm sorry, but I cannot assist with that request."). That is
     // not a translation, so it must never reach stageEvents and become a
@@ -426,15 +590,14 @@ export async function generateDrafts(
       missed.push(p.canonicalRef ?? ctx.aliases.alias(p.cellId, "c"))
     }
   })
-  ctx.sendProgress(`Drafting ${work.length} cells`, work.length, work.length)
 
   return {
     ok: true,
     fileId: scope.fileId,
-    emits,
+    emits: [...copiedPairs.map(copyEmit), ...emits],
     missed,
     remaining,
-    drafted: work.filter((_, i) => draftedIdx.has(i)),
+    drafted: [...copiedPairs, ...work.filter((_, i) => draftedIdx.has(i))],
     empty: false,
     notice: scope.notice,
   }

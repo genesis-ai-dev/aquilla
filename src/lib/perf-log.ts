@@ -26,7 +26,6 @@ export function setPerfLog(on: boolean): void {
     if (on) window.localStorage.setItem("PERF_LOG", "1")
     else window.localStorage.removeItem("PERF_LOG")
   }
-  // eslint-disable-next-line no-console
   console.log(`[perf] logging ${on ? "ON" : "OFF"}`)
 }
 
@@ -43,7 +42,6 @@ export function perfMark(label: string): () => number {
   const t = performance.now()
   return () => {
     const dt = performance.now() - t
-    // eslint-disable-next-line no-console
     console.log(`[perf] ${label} ${dt.toFixed(2)}ms`)
     return dt
   }
@@ -120,7 +118,6 @@ export function memMark(label: string): void {
   memSamples.push(sample)
   if (memSamples.length > MEM_SAMPLE_CAP) memSamples.shift()
   // Crash-survivable: log + persist on every sample.
-  // eslint-disable-next-line no-console
   console.log(
     `[mem] ${(sample.t / 1000).toFixed(1)}s ${sample.usedMB.toFixed(0)}MB ` +
       `(Δ${sample.deltaMB >= 0 ? "+" : ""}${sample.deltaMB.toFixed(0)}) ${label}`,
@@ -130,7 +127,6 @@ export function memMark(label: string): void {
 
 function startMemSampler(intervalMs = 250): void {
   if (heapUsedBytes() === null) {
-    // eslint-disable-next-line no-console
     console.warn(
       "[mem] performance.memory unavailable on this engine (WebKit/Safari/Tauri). " +
         "Use DevTools → Memory → Heap snapshot instead, or run Chrome with --enable-precise-memory-info.",
@@ -146,7 +142,6 @@ function startMemSampler(intervalMs = 250): void {
   }
   memTimer = setInterval(() => memMark("·tick"), intervalMs)
   memMark("·start")
-  // eslint-disable-next-line no-console
   console.log(
     `[mem] sampler started (every ${intervalMs}ms). Turn on DevTools "Preserve log" so the ` +
       `trail survives an OOM crash. After a crash, reload and run window.memReport().`,
@@ -157,7 +152,6 @@ function stopMemSampler(): void {
   if (memTimer !== null) clearInterval(memTimer)
   memTimer = null
   memMark("·stop")
-  // eslint-disable-next-line no-console
   console.log("[mem] sampler stopped")
 }
 
@@ -169,7 +163,6 @@ function memReport(): MemSample[] {
       const raw = window.localStorage.getItem(MEM_LS_KEY)
       if (raw) {
         samples = JSON.parse(raw) as MemSample[]
-        // eslint-disable-next-line no-console
         console.log(`[mem] replaying ${samples.length} persisted samples from last run (pre-crash trail)`)
       }
     } catch {
@@ -177,14 +170,12 @@ function memReport(): MemSample[] {
     }
   }
   if (samples.length === 0) {
-    // eslint-disable-next-line no-console
     console.log("[mem] no samples. Run window.startMemSampler() first.")
     return []
   }
   const peak = Math.max(...samples.map((s) => s.usedMB))
   const first = samples[0].usedMB
   const last = samples[samples.length - 1].usedMB
-  // eslint-disable-next-line no-console
   console.table(
     samples.map((s) => ({
       "t(s)": (s.t / 1000).toFixed(1),
@@ -193,7 +184,6 @@ function memReport(): MemSample[] {
       "Δ(MB)": s.deltaMB.toFixed(1),
     })),
   )
-  // eslint-disable-next-line no-console
   console.log(
     `[mem] first=${first.toFixed(0)}MB last=${last.toFixed(0)}MB peak=${peak.toFixed(0)}MB ` +
       `net=${(last - first).toFixed(0)}MB over ${(samples[samples.length - 1].t / 1000).toFixed(0)}s`,

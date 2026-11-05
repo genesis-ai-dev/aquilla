@@ -19,6 +19,7 @@ import {
 import { OverflowMenu, type OverflowMenuItem } from "@/components/OverflowMenu"
 import { applyStagedEvents, type ApplyContext } from "@/lib/agent/apply"
 import type { AgentProposal } from "@/lib/agent/protocol"
+import { formatProgress } from "@/lib/agent/run-state"
 import { useAgentSession } from "@/lib/agent/session-store"
 import { fetchAgentSession, runsFromTurns } from "@/lib/agent/session-history"
 import { useAgentSessionHistory } from "@/hooks/useAgentSessionHistory"
@@ -382,7 +383,7 @@ export function AgentWorkbench({ agent, credits, fileNames, editorHref, onCollap
           <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground" role="status">
             <Spinner className="h-3 w-3 shrink-0" />
             <span className="truncate">
-              {progress ? `${progress.label} — ${progress.done}/${progress.total}` : t("agentWorkspace.working")}
+              {progress ? formatProgress(progress) : t("agentWorkspace.working")}
             </span>
           </span>
         )}

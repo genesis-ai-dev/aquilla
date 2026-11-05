@@ -84,21 +84,61 @@ export function alignChunks(
 }
 
 /**
+ * Comparable core of a token: letters and digits only, lower-cased. ASR
+ * punctuation and capitalization are the model's own guess and a person
+ * retypes both freely, so neither decides whether a timing still points at
+ * its word.
+ */
+function wordCore(value: string): string {
+  return value.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "")
+}
+
+/**
+ * AQU-2254 — does this timing's character span still address the word it
+ * names in `text`?
+ *
+ * A WordTiming carries BOTH an audio span (`t0`/`t1`) and a character span
+ * (`start`/`end`) into the text it was aligned against. Rewriting that text —
+ * an AI transcript cleanup, a global wording change — moves every word after
+ * the edit without touching the stored offsets, so the character span starts
+ * addressing the wrong letters while the audio span stays right. Painting it
+ * anyway highlights a word the audio is not saying, which reads as a broken
+ * karaoke band rather than as stale data.
+ *
+ * So the offsets have to prove themselves against the text being painted:
+ * the slice they select must still be the word the timing names. Checked per
+ * word, not per cell, so the words BEFORE a cleanup's edit keep their
+ * highlight and only the shifted ones go dark.
+ */
+export function timingAddressesText(
+  timing: Pick<WordTiming, "word" | "start" | "end">,
+  text: string,
+): boolean {
+  if (timing.start < 0 || timing.end > text.length || timing.end <= timing.start) return false
+  return wordCore(text.slice(timing.start, timing.end)) === wordCore(timing.word)
+}
+
+/**
  * Plain-text offset span [start, end) of the word active at time `t`, or null
  * if no word is active (or the span is empty). Used by the read-only "karaoke
  * while listening" renderer (KaraokeReadText) so the highlight follows playback
  * even when the cell is not being actively edited. The editor path uses
  * findActiveTimingIndex directly and paints via the ProseMirror plugin.
+ *
+ * `word` rides along so whoever paints the span can check it still belongs to
+ * the text under it (`timingAddressesText`) — AQU-2254. A span is only ever as
+ * good as the wording it was measured against, and the renderer is the one
+ * holding that wording.
  */
 export function activeWordRange(
   timings: WordTiming[] | undefined,
   t: number,
-): { start: number; end: number } | null {
+): { start: number; end: number; word: string } | null {
   const idx = findActiveTimingIndex(timings, t)
   if (idx < 0 || !timings) return null
   const w = timings[idx]
   if (w.end <= w.start) return null
-  return { start: w.start, end: w.end }
+  return { start: w.start, end: w.end, word: w.word }
 }
 
 /**

@@ -336,7 +336,11 @@ describe("OrgHome loading template", () => {
     expect(screen.getByTestId("org-home-loading-template")).toBeInTheDocument()
     const header = document.querySelector("[data-slot='app-shell-header']")
     expect(header).not.toBeNull()
-    expect(header!.querySelectorAll("[data-slot='loading-cursor']")).toHaveLength(1)
+    // The real breadcrumb, nothing else: no profile chip, no loading chrome.
+    expect(header!.textContent).toContain("All organizations")
+    expect(header!.querySelectorAll("nav")).toHaveLength(1)
+    expect(header!.children).toHaveLength(1)
+    expect(document.querySelectorAll("[data-slot='loading-cursor']").length).toBeGreaterThan(0)
   })
 })
 
@@ -480,7 +484,13 @@ describe("OrgOverview / OrgProjects", () => {
 
   it("renders the org name, nav, and admin links for an owner", async () => {
     renderMemberOverview()
-    await waitFor(() => expect(screen.getAllByText("Come and See").length).toBeGreaterThan(0))
+    // The loading template shows the real breadcrumb (so the org name is
+    // visible early): wait for the template itself to leave.
+    await waitFor(() => {
+      expect(screen.queryByTestId("org-home-loading-template")).not.toBeInTheDocument()
+      expect(screen.queryByTestId("org-overview-loading-template")).not.toBeInTheDocument()
+    })
+    expect(screen.getAllByText("Come and See").length).toBeGreaterThan(0)
     expect(screen.getByRole("link", { name: "Overview" })).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "Projects" })).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "Teams" })).toBeInTheDocument()
@@ -924,7 +934,7 @@ describe("OrgOverview signed-out state", () => {
     renderMemberOverview()
 
     await waitFor(() => {
-      expect(screen.getByRole("link", { name: /sign in/i })).toBeInTheDocument()
+      expect(screen.getByRole("link", { name: /log in/i })).toBeInTheDocument()
     })
 
     // The stat rollup cards must not be present — they'd show meaningless zeros.
@@ -938,7 +948,7 @@ describe("OrgOverview signed-out state", () => {
 
     renderMemberOverview()
 
-    const link = await screen.findByRole("link", { name: /sign in/i })
+    const link = await screen.findByRole("link", { name: /log in/i })
     expect(link.getAttribute("href")).toMatch(/\/login\?next=/)
   })
 })

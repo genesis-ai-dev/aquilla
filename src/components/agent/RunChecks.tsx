@@ -6,7 +6,7 @@
 
 import { Link } from "react-router-dom"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { LoadingLines } from "@/components/ui/loading-cursor"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { agentConversationHref } from "@/lib/agent/workspace-location"
 import { runThreadId } from "@/lib/agent/team-channel"
@@ -67,8 +67,7 @@ export function RunChecks({ projectId, run, review }: { projectId: string; run: 
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-5 p-4">
         {review.loading && review.drafts.length === 0 ? (
           <div role="status" aria-label={t("agent.pr.checks.loading")} className="flex flex-col gap-2">
-            <LoadingLines count={2} className="min-h-14" />
-            <LoadingLines count={2} className="min-h-14" />
+            <LoadingCursor />
           </div>
         ) : flagged.length === 0 ? (
           <p className="text-sm text-muted-foreground">{t("agent.pr.checks.empty")}</p>

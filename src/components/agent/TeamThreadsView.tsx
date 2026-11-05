@@ -24,7 +24,7 @@ import { useSearchParams } from "react-router-dom"
 import { AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { LoadingLines } from "@/components/ui/loading-cursor"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { useI18n, type TFunction } from "@/lib/i18n/I18nProvider"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { ROLE } from "@/lib/frontier/roles"
@@ -420,7 +420,7 @@ export function TeamThreadsView({
   if (loading) {
     return (
       <div className="flex min-h-0 flex-1 flex-col gap-2 p-4" aria-label={t("agent.team.loading")}>
-        <LoadingLines count={3} />
+        <LoadingCursor />
       </div>
     )
   }

@@ -196,9 +196,9 @@ export const org = defineNamespace({
     "org.laneChips.recordedAriaLabel": "{label}: {pct} recorded",
 
     // -- OrgHome: org dashboard (org list, project portfolio, signed-out/empty states) --
-    "org.orgHome.signedOut.heading": "Sign in to see your workspace",
+    "org.orgHome.signedOut.heading": "Log in to see your workspace",
     "org.orgHome.signedOut.description":
-      "Your session has ended or you are not signed in. Sign in to access your projects and translation data.",
+      "Your session has ended or you are not logged in. Log in to access your projects and translation data.",
     "org.orgHome.loadingDashboard": "Loading dashboard",
 
     "org.orgHome.pendingInvitations.heading": "Pending invitations",

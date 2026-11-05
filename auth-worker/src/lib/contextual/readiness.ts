@@ -2,7 +2,7 @@
 // here?", answered BEFORE someone spends a run finding out.
 //
 // The failure this prevents is specific and expensive. Autopilot always
-// produces output. With no brief, no terminology and no validated examples it
+// produces output. With no instructions, no terminology and no validated examples it
 // produces *fluent, confident, generic* output — the most costly kind, because
 // nothing about it looks wrong until a consultant reads it. The run reports
 // spans staged either way, so the product's own progress numbers actively hide
@@ -40,7 +40,7 @@ export interface ContextReadiness {
 }
 
 /** The two prerequisites autopilot cannot substitute a guess for. */
-export type StartBlockerId = "languages" | "brief"
+export type StartBlockerId = "languages" | "instructions"
 
 /**
  * The one part of readiness that IS a gate (AQU-827).
@@ -49,20 +49,21 @@ export type StartBlockerId = "languages" | "brief"
  * examples still produces something a reviewer can judge. These two are
  * different in kind. Without both languages the run has no direction to
  * translate in and infers one from whatever text already exists; without any
- * brief at all it has no statement of audience, register, or literalness, so
- * every sentence is steered by nothing. Output in that state is not a weak
- * draft, it is an unsteerable one — so the start is blocked and the missing
- * pieces are named, rather than spending a run to discover it.
+ * project instructions it has no statement of audience, register, or
+ * literalness, so every sentence is steered by nothing. Output in that state
+ * is not a weak draft, it is an unsteerable one — so the start is blocked and
+ * the missing pieces are named, rather than spending a run to discover it.
  *
- * Deliberately a floor, not the `ready` bar: ONE answered brief field (or a
- * generated L1 summary) clears it. This gate says "someone has told autopilot
- * what this is for", and the readiness checklist keeps asking for the rest.
+ * AQU-2342: "has instructions" means the RESOLVED instructions text is not
+ * blank — the same text every drafting prompt carries. A project that never
+ * wrote instructions still clears it through migrate-on-read: one answered
+ * brief field, a brief summary, a customized copilot prompt, a Living Memory
+ * instruction or the legacy agent brief all compose into it.
  */
 export function computeStartBlockers(context: ProjectContext): StartBlockerId[] {
   const blockers: StartBlockerId[] = []
   if (!context.sourceLanguage?.trim() || !context.targetLanguage?.trim()) blockers.push("languages")
-  const answered = Object.values(context.briefParameters).filter((v) => v && v.trim()).length
-  if (answered === 0 && !context.projectBriefL1?.trim()) blockers.push("brief")
+  if (!context.translationInstructions.trim()) blockers.push("instructions")
   return blockers
 }
 
@@ -104,20 +105,17 @@ export function computeContextReadiness(input: ReadinessInput): ContextReadiness
     href: "terminology",
   })
 
-  // ── Translation brief ──
-  const answered = Object.values(context.briefParameters).filter((v) => v && v.trim()).length
-  const hasL1 = Boolean(context.projectBriefL1)
+  // ── Project instructions (AQU-2342) ──
+  const instructionsChars = context.translationInstructions.trim().length
   items.push({
-    id: "brief",
-    label: "Translation brief",
-    level: answered === 0 && !hasL1 ? "missing" : answered < MIN_BRIEF_FIELDS ? "partial" : "ready",
+    id: "instructions",
+    label: "Translation instructions",
+    level: instructionsChars === 0 ? "missing" : "ready",
     detail:
-      answered === 0 && !hasL1
-        ? "No brief. Autopilot has to guess your audience, register, and how literal to be — the decisions that shape every sentence."
-        : `${answered} of the brief's questions answered${hasL1 ? ", summarised for every passage" : ""}. Audience, register, and literalness ride in each draft prompt.`,
-        // The brief builder is Living Memory's "brief" pane
-        // (/project/:id/memory/brief) — deep-link straight to it.
-        href: "memory/brief",
+      instructionsChars === 0
+        ? "No instructions. Autopilot has to guess your audience, register, and how literal to be — the decisions that shape every sentence."
+        : "Your project instructions ride in every draft prompt — audience, register, literalness, and anything else you told the AI.",
+    href: "memory/instructions",
   })
 
   // ── Examples of your team's own work ──
@@ -157,10 +155,10 @@ export function computeContextReadiness(input: ReadinessInput): ContextReadiness
     href: "settings",
   })
 
-  // Only terminology, the brief, and examples change the WORDING enough that a
+  // Only terminology, the instructions, and examples change the WORDING enough that a
   // translator would call a run premature without them.
   const blockingGaps = items.filter(
-    (i) => i.level === "missing" && ["terminology", "brief", "examples"].includes(i.id),
+    (i) => i.level === "missing" && ["terminology", "instructions", "examples"].includes(i.id),
   ).length
 
   return {

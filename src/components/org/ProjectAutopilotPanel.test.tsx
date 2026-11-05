@@ -438,7 +438,7 @@ describe("ProjectAutopilotPanel", () => {
   // before the click, and to point at the two surfaces that supply the context.
   it("disables the start button and names the missing context when the server reports start blockers", async () => {
     fetchMock.mockResolvedValue(overview({
-      readiness: { items: [], blockingGaps: 0, ready: false, startBlockers: ["languages", "brief"] },
+      readiness: { items: [], blockingGaps: 0, ready: false, startBlockers: ["languages", "instructions"] },
     }))
     renderPanel()
     const panel = await screen.findByTestId("project-autopilot-panel")
@@ -446,25 +446,25 @@ describe("ProjectAutopilotPanel", () => {
     expect(within(panel).getByRole("button", { name: "Run Autopilot" })).toBeDisabled()
     const gate = within(panel).getByTestId("autopilot-start-gate")
     expect(within(gate).getByText(/source and target languages/i)).toBeInTheDocument()
-    expect(within(gate).getByText(/at least one translation-brief question/i)).toBeInTheDocument()
+    expect(within(gate).getByText(/Write the project instructions/i)).toBeInTheDocument()
     expect(within(gate).getByRole("link", { name: "Open project settings" }))
       .toHaveAttribute("href", "/project/p1/settings")
-    expect(within(gate).getByRole("link", { name: "Open the translation brief" }))
-      .toHaveAttribute("href", "/project/p1/memory/brief")
+    expect(within(gate).getByRole("link", { name: "Open the instructions" }))
+      .toHaveAttribute("href", "/project/p1/memory/instructions")
 
     fireEvent.click(within(panel).getByRole("button", { name: "Run Autopilot" }))
     expect(startMock).not.toHaveBeenCalled()
   })
 
-  it("leaves the start button live when only the brief is missing, and clears the notice when nothing is", async () => {
+  it("leaves the start button live when only the instructions are missing, and clears the notice when nothing is", async () => {
     fetchMock.mockResolvedValue(overview({
-      readiness: { items: [], blockingGaps: 0, ready: false, startBlockers: ["brief"] },
+      readiness: { items: [], blockingGaps: 0, ready: false, startBlockers: ["instructions"] },
     }))
     renderPanel()
     let panel = await screen.findByTestId("project-autopilot-panel")
     const gate = within(panel).getByTestId("autopilot-start-gate")
     expect(within(gate).queryByText(/source and target languages/i)).not.toBeInTheDocument()
-    expect(within(gate).getByRole("link", { name: "Open the translation brief" })).toBeInTheDocument()
+    expect(within(gate).getByRole("link", { name: "Open the instructions" })).toBeInTheDocument()
 
     cleanup()
     fetchMock.mockResolvedValue(overview({

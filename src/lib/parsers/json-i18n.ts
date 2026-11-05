@@ -1,5 +1,6 @@
 import { v4 as uuid } from "uuid"
 import { sanitizeThrownDetail } from "./parse-error-detail"
+import { placeholderMetadata } from "./placeholders"
 import type { TranslatableString } from "./core-types"
 import type { ExportCellFields } from "./core-types"
 
@@ -141,6 +142,9 @@ export function extractJsonStrings(
   const results: TranslatableString[] = []
   walkStringLeaves(parsed, "", (path, value) => {
     if (include && !matchesJsonSelection(path, include)) return undefined
+    // AQU-2386: software strings carry placeholders the runtime substitutes.
+    // Record them so QA and the drafting prompt treat them as protected.
+    const placeholders = placeholderMetadata(value)
     results.push({
       id: uuid(),
       original: value,
@@ -148,6 +152,7 @@ export function extractJsonStrings(
       context: path,
       group: path,
       type: "text",
+      ...(placeholders ? { metadata: { placeholders } } : {}),
     })
     return undefined
   })

@@ -44,14 +44,13 @@ import {
 import { EmptyState } from "@/components/ui/empty"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Section, SettingsGroup, SettingsRow } from "@/components/ui/page"
-import { LoadingLine, LoadingLines } from "@/components/ui/loading-cursor"
+import { Section } from "@/components/ui/page"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { Spinner } from "@/components/ui/spinner"
-import { Switch } from "@/components/ui/switch"
 import { toast } from "@/components/ui/toast"
 import { DateTooltip } from "@/components/ui/date-tooltip"
-import { formatNumber } from "@/lib/i18n/format"
-import { useI18n, useT } from "@/lib/i18n/I18nProvider"
+import { formatDateTime, formatNumber } from "@/lib/i18n/format"
+import { useI18n, useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import {
   deleteKnowledgeDocument,
   getKnowledgeDocument,
@@ -71,11 +70,6 @@ interface KnowledgeBaseSurfaceProps {
   jwt: string | null
   canManage: boolean
   showTitle?: boolean
-  drafting?: {
-    checked: boolean
-    disabled: boolean
-    onCheckedChange: (checked: boolean) => Promise<void> | void
-  }
 }
 
 interface ViewerState {
@@ -110,6 +104,40 @@ function statusKey(doc: KnowledgeDocument, stalled: boolean) {
   return `knowledgeBase.status.${doc.indexStatus}` as const
 }
 
+/** What the last indexing run has to say about itself beyond its badge and its
+ *  reason: when it was heard from, and — once something is indexed — how much
+ *  (AQU-1766).
+ *
+ *  `updatedAt` is the row's own clock: the moment the run wrote its outcome, or
+ *  for a `pending` row the moment it was queued. A date the uploader can read
+ *  is what makes a failure correlatable with whatever they changed, and a
+ *  section count is what tells "Indexed" over 40 sections apart from "Indexed"
+ *  over nothing.
+ *
+ *  Returns null while a doc is genuinely mid-run (nothing to date yet, nothing
+ *  indexed yet) and when the timestamp is unreadable — a server contract break
+ *  must not render "Invalid Date" at someone. */
+function indexRunLine(
+  doc: KnowledgeDocument,
+  stalled: boolean,
+  t: TFunction,
+  locale: string,
+): string | null {
+  const at = Date.parse(doc.updatedAt)
+  if (Number.isNaN(at)) return null
+  if (stalled) return t("knowledgeBase.indexLastHeard", { when: formatDateTime(at, locale) })
+  if (doc.indexStatus === "pending") return null
+  if (doc.indexStatus === "failed") {
+    return t("knowledgeBase.indexRunAt", { when: formatDateTime(at, locale) })
+  }
+  // Indexed, with or without summaries: the count is the useful half, and the
+  // reason line above already carries the "what" when there is one.
+  const sections = t("knowledgeBase.indexSections", { count: formatNumber(doc.nodeCount, locale) })
+  return doc.indexError
+    ? `${sections} · ${t("knowledgeBase.indexRunAt", { when: formatDateTime(at, locale) })}`
+    : sections
+}
+
 /** How often the open list re-reads itself while a doc is pending (AQU-2028).
  *  Indexing runs server-side and sends no event when it settles, so without
  *  this a row stayed on "Indexing…" until a reload — and then flipped to a
@@ -122,7 +150,6 @@ export function KnowledgeBaseSurface({
   jwt,
   canManage,
   showTitle = true,
-  drafting,
 }: KnowledgeBaseSurfaceProps) {
   const t = useT()
   const { locale } = useI18n()
@@ -344,24 +371,6 @@ export function KnowledgeBaseSurface({
 
   return (
     <div className="flex flex-col gap-6">
-      {drafting ? (
-        <SettingsGroup>
-          <SettingsRow
-            label={<label htmlFor="knowledge-base-drafting">{t("knowledgeBase.useInDraftingLabel")}</label>}
-            description={t("knowledgeBase.useInDraftingDescription")}
-            control={
-              <Switch
-                id="knowledge-base-drafting"
-                checked={drafting.checked}
-                onCheckedChange={(checked) => void drafting.onCheckedChange(checked)}
-                disabled={drafting.disabled}
-                aria-label={t("knowledgeBase.useInDraftingLabel")}
-              />
-            }
-          />
-        </SettingsGroup>
-      ) : null}
-
       <Section
         title={showTitle ? t("knowledgeBase.title") : undefined}
         description={showTitle ? description : undefined}
@@ -405,8 +414,7 @@ export function KnowledgeBaseSurface({
           <div className="flex flex-col gap-3" aria-label={t("common.loading")}>
             {Array.from({ length: 3 }).map((_, index) => (
               <div key={index} className="flex h-28 w-full flex-col gap-2 rounded-lg border p-4">
-                <LoadingLine className="font-medium" />
-                <LoadingLines count={2} className="text-xs" />
+                {index === 0 ? <LoadingCursor /> : null}
               </div>
             ))}
           </div>
@@ -434,6 +442,7 @@ export function KnowledgeBaseSurface({
               const inherited = scopeKind === "project" && doc.scope === "org"
               const manageable = canManage && !inherited
               const stalled = isKnowledgeIndexStalled(doc, now)
+              const runLine = indexRunLine(doc, stalled, t, locale)
               return (
                 <Card key={doc.id} size="sm">
                   <CardHeader>
@@ -453,7 +462,7 @@ export function KnowledgeBaseSurface({
                       </div>
                     </CardAction>
                   </CardHeader>
-                  {doc.docSummary || doc.indexError || inherited ? (
+                  {doc.docSummary || doc.indexError || runLine || inherited ? (
                     <CardContent className="flex flex-col gap-2">
                       {doc.docSummary ? <p className="text-sm text-muted-foreground">{doc.docSummary}</p> : null}
                       {/* AQU-2002: the server's own sentence, shown as sent. A
@@ -469,6 +478,11 @@ export function KnowledgeBaseSurface({
                           {doc.indexError}
                         </p>
                       ) : null}
+                      {/* AQU-1766: when the run was heard from, and how much it
+                          indexed. A reason with no date cannot be lined up with
+                          anything the uploader did, and "Indexed" says nothing
+                          about whether the index has any sections in it. */}
+                      {runLine ? <p className="text-xs text-muted-foreground">{runLine}</p> : null}
                       {inherited ? <p className="text-xs text-muted-foreground">{t("knowledgeBase.readOnlyHelp")}</p> : null}
                     </CardContent>
                   ) : null}
@@ -512,8 +526,7 @@ export function KnowledgeBaseSurface({
           <DialogBody className="flex flex-col gap-5">
             {viewer?.loading ? (
               <div className="flex flex-col gap-3" aria-label={t("common.loading")}>
-                <LoadingLine className="font-medium" />
-                <LoadingLines count={6} className="min-h-56" />
+                <LoadingCursor />
               </div>
             ) : viewer?.failed ? (
               <EmptyState variant="inline" icon={TriangleAlert} title={t("knowledgeBase.loadError")} />

@@ -74,6 +74,8 @@ function BiblicaPanel({
   username,
   sourceLanguage,
   targetLanguage,
+  targetLang,
+  alignReimportedIdml,
   getToken,
   onImported,
   reimport,
@@ -81,6 +83,7 @@ function BiblicaPanel({
   const t = useT()
   const [importing, setImporting] = useState(false)
   const [progress, setProgress] = useState<BiblicaProgress | null>(null)
+  const [phaseLabel, setPhaseLabel] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [file, setFile] = useState<File | null>(null)
   // Off by default: each InDesign line stays one cell unless the translator opts in.
@@ -145,6 +148,9 @@ function BiblicaPanel({
           author: username,
           ...(sourceLanguage ? { sourceLanguage } : {}),
           ...(targetLanguage ? { targetLanguage } : {}),
+          ...(targetLang !== undefined ? { targetLang } : {}),
+          ...(alignReimportedIdml ? { alignReimportedIdml } : {}),
+          onPhase: setPhaseLabel,
           getToken,
           ...(reimport && mode ? {
             sidebarReimport: {
@@ -166,6 +172,7 @@ function BiblicaPanel({
     } finally {
       setImporting(false)
       setProgress(null)
+      setPhaseLabel(null)
     }
   }
 
@@ -293,6 +300,9 @@ function BiblicaPanel({
             </>
           )}
         </div>
+      )}
+      {phaseLabel && (
+        <p className="text-xs text-muted-foreground">{phaseLabel}</p>
       )}
       {error && <p className="text-sm text-destructive">{error}</p>}
       {recounting && reading && !importing && (

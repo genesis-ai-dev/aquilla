@@ -32,7 +32,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { LoadingLine, LoadingLines } from "@/components/ui/loading-cursor"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 import {
   ContextualApiError,
   fetchContextualOverview,
@@ -349,10 +349,11 @@ function StartGateNotice({
       label: t("autopilot.startGate.settingsLink"),
       detail: t("autopilot.startGate.languages"),
     },
-    brief: {
-      to: `/project/${projectId}/memory/brief`,
-      label: t("autopilot.startGate.briefLink"),
-      detail: t("autopilot.startGate.brief"),
+    // AQU-2342: the gate asks for project instructions.
+    instructions: {
+      to: `/project/${projectId}/memory/instructions`,
+      label: t("autopilot.startGate.instructionsLink"),
+      detail: t("autopilot.startGate.instructions"),
     },
   }
   return (
@@ -548,8 +549,7 @@ export function ProjectAutopilotPanel({
   if (loading && !overview) {
     return (
       <Card size="sm" className="mt-6" data-testid="project-autopilot-loading">
-        <CardHeader><LoadingLine className="text-base font-medium" /><LoadingLine /></CardHeader>
-        <CardContent><LoadingLines count={2} className="min-h-14" /></CardContent>
+        <CardHeader><LoadingCursor /></CardHeader>
       </Card>
     )
   }

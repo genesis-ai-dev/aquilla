@@ -2,19 +2,7 @@ import { useEffect, useRef, type ReactNode } from "react"
 import { createPortal } from "react-dom"
 
 import { cn } from "@/lib/utils"
-import { LoadingCursor, LoadingLine, LoadingLines } from "@/components/ui/loading-cursor"
-import { Spinner } from "@/components/ui/spinner"
-import { STAT_TILE_GRID } from "@/components/ui/page"
-
-/** The shared spinner pill shown centered on every loading overlay. */
-function LoadingStatusPill({ label, detail }: { label: string; detail?: ReactNode }) {
-  return (
-    <div className="flex items-center gap-3 rounded-lg border bg-background/90 px-4 py-2 text-sm text-muted-foreground shadow-sm backdrop-blur-sm">
-      <Spinner aria-hidden="true" className="size-5" />
-      <span>{label}…{detail}</span>
-    </div>
-  )
-}
+import { LoadingCursor, LoadingCursorLabel } from "@/components/ui/loading-cursor"
 
 type LoadingTemplateProps = Omit<React.ComponentProps<"div">, "children"> & {
   label?: string
@@ -26,9 +14,10 @@ type LoadingTemplateProps = Omit<React.ComponentProps<"div">, "children"> & {
 /**
  * Container-safe loading boundary for first-data transitions.
  *
- * The child is a non-interactive template of the destination. It remains
- * visible to preserve geometry, while assistive technology receives one
- * concise live status instead of every decorative skeleton block.
+ * The child is a non-interactive template of the destination: one cursor
+ * where its content will start, which prints this boundary's label
+ * ("Loading project… ▌"). No pill, no scrim. Assistive technology receives
+ * one concise live status instead of every decorative element.
  */
 function LoadingTemplate({
   label = "Loading",
@@ -55,10 +44,9 @@ function LoadingTemplate({
           templateClassName,
         )}
       >
-        {children}
-      </div>
-      <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background/20">
-        <LoadingStatusPill label={label} detail={statusDetail} />
+        <LoadingCursorLabel label={label} detail={statusDetail} fallbackClassName="absolute left-6 top-5">
+          {children}
+        </LoadingCursorLabel>
       </div>
     </div>
   )
@@ -112,7 +100,11 @@ function BlockingLoadingOverlay({
       )}
       {...props}
     >
-      <LoadingStatusPill label={label} />
+      <div className="absolute left-6 top-5 text-sm">
+        <LoadingCursorLabel label={label}>
+          <LoadingCursor />
+        </LoadingCursorLabel>
+      </div>
     </div>,
     document.body,
   )
@@ -167,20 +159,7 @@ function LoadingPanel({
         data-testid="loading-panel-template"
         className="flex min-h-64 flex-col gap-5 p-6"
       >
-        <LoadingLine className="text-lg font-semibold" />
-        <div className="grid gap-4 sm:grid-cols-3">
-          {Array.from({ length: 3 }).map((_, index) => (
-            <div key={index} className="flex h-20 flex-col justify-center gap-1.5 rounded-xl border px-4">
-              <LoadingCursor className="text-xl" />
-              <LoadingLine className="text-xs" />
-            </div>
-          ))}
-        </div>
-        <div className="flex flex-col gap-3">
-          {Array.from({ length: 4 }).map((_, index) => (
-            <LoadingLine key={index} className="h-12 rounded-xl border px-4" />
-          ))}
-        </div>
+        <LoadingCursor className="text-xl" />
       </div>
     </LoadingTemplate>
   )
@@ -194,46 +173,18 @@ function LoadingPanel({
 function NeutralLoadingTemplate() {
   return (
     <div data-testid="loading-neutral-template" className="flex min-h-screen bg-sidebar">
-      <aside className="hidden w-56 shrink-0 flex-col gap-5 p-3 sm:flex">
-        <div className="flex items-center justify-between">
-          <div className="size-8 rounded-lg border" />
-          <LoadingCursor className="text-xs" />
-        </div>
-        <div className="flex flex-col gap-2">
-          <LoadingLine className="h-9 px-2" />
-          <LoadingLine className="h-8 px-2" />
-          <LoadingLine className="h-8 px-2" />
-        </div>
-        <div className="mt-auto flex flex-col gap-2">
-          <LoadingLine className="h-8 px-2" />
-          <LoadingLine className="h-10 px-2" />
+      <aside className="hidden w-56 shrink-0 flex-col p-3 sm:flex">
+        <div className="flex h-8 items-center px-2">
+          <LoadingCursor plain />
         </div>
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex h-[52px] shrink-0 items-center px-4">
-          <LoadingCursor />
+          <LoadingCursor plain />
         </div>
         <div className="m-2 flex min-h-0 flex-1 flex-col rounded-xl border bg-background">
-          <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-6 sm:px-6 sm:py-8">
-            <LoadingLine className="h-7 text-xl font-semibold" />
-            <div className={STAT_TILE_GRID}>
-              {Array.from({ length: 6 }).map((_, index) => (
-                <div key={index} className="flex h-[88px] flex-col justify-center gap-2 rounded-lg border px-5">
-                  <LoadingCursor className="text-xl" />
-                  <LoadingLine className="text-xs" />
-                </div>
-              ))}
-            </div>
-            <div className="grid gap-6 lg:grid-cols-[minmax(14rem,1fr)_minmax(30rem,2fr)]">
-              <div className="flex h-72 flex-col gap-3 rounded-lg border p-5">
-                <LoadingLine className="font-medium" />
-                <LoadingLines count={4} />
-              </div>
-              <div className="flex h-72 flex-col gap-3 rounded-lg border p-5">
-                <LoadingLine className="font-medium" />
-                <LoadingLines count={6} />
-              </div>
-            </div>
+          <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
+            <LoadingCursor className="text-xl" />
           </div>
         </div>
       </div>

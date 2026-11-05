@@ -22,7 +22,7 @@ interface MinimalCell {
   status: string
 }
 
-vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn(), captureException: vi.fn() } }))
+vi.mock("@/lib/posthog", () => ({ default: { scope() { return { ...this, enabled: () => true } }, capture: vi.fn(), captureException: vi.fn() } }))
 
 // The hook reports "unavailable" — the stale-negative state the bug left behind.
 // `checkFrontierHealth` is the on-demand re-probe the fix adds; each test decides

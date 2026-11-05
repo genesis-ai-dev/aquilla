@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { harnessHealth, type Recorded } from "./health"
+import { agentNeverActed, harnessHealth, type Recorded } from "./health"
 
 const verdict = (value: string): Recorded["evidence"] =>
   ({ outcome: { verdict: value, reason: "", checks: {} }, projects: [] })
@@ -28,5 +28,30 @@ describe("harness health", () => {
 
   it("is available for a canary-only run", () => {
     expect(harnessHealth(canaryOk, 0).available).toBe(true)
+  })
+})
+
+describe("agentNeverActed", () => {
+  const agent = (reason: string) => ({ errors: [{ reason }] })
+
+  it("reports the driver's own words when the text helper typed nothing, the AQU-1513 shape", () => {
+    const reason = "Text helper returned no valid field value; nothing typed."
+    expect(agentNeverActed([agent(reason), null])).toBe(reason)
+  })
+
+  it("reports every closed-set driver message that says no input reached the page", () => {
+    for (const reason of [
+      "Invalid TypeSafe response; no action executed.",
+      "Model connection failed; no action executed.",
+      "Model provider returned HTTP 503; no action executed.",
+      "Driver stopped without executing an unverified action",
+    ]) expect(agentNeverActed([agent(reason)])).toBe(reason)
+  })
+
+  it("is silent when the agents acted, so a real finding still reaches the product", () => {
+    expect(agentNeverActed([{ errors: [{ reason: "Loading state did not settle" }] }, null])).toBe(null)
+    expect(agentNeverActed([{ errors: [] }, null])).toBe(null)
+    expect(agentNeverActed([null, null])).toBe(null)
+    expect(agentNeverActed(undefined)).toBe(null)
   })
 })

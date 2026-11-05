@@ -705,6 +705,28 @@ describe("catch-up", () => {
     adapter.close()
   })
 
+  it("catches up when a live frame reports a restored file", async () => {
+    store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
+    const adapter = createOfflineSyncAdapter({
+      projectId: "proj1",
+      store,
+      mintToken: okMint,
+      baseUrl: "https://sync.example.com",
+      webSocketCtor: FakeWsCtor,
+      frameCoalesceMs: 0,
+    })
+    await drainMicrotasks()
+    const ws = FakeWebSocket.instances[0]
+    // Not opened: onOpen runs its own catch-up, and only the frame's should count here.
+
+    ws.receive({ t: "event.applied", id: "e1", kind: "file.restore", project: "proj1", file: "file1" })
+    await landFrames()
+    await waitFor(() => vi.mocked(catchUpProject).mock.calls.length > 0)
+    expect(catchUpProject).toHaveBeenCalledWith(store, "proj1", "tok-1", undefined)
+
+    adapter.close()
+  })
+
   it("catches up when a live frame's rows were left out of a >200-cell write", async () => {
     store.commit(events.fileSynced({ id: "file1", projectId: "proj1", name: "Genesis", type: "usfm", sequenceIndex: 0 }))
     const adapter = createOfflineSyncAdapter({

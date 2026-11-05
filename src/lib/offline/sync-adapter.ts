@@ -247,10 +247,13 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
    *  - a cell-content write whose `rows` the server left out — it does that
    *    when one request touches more than 200 cells (a peer's bulk edit or
    *    import), keeping `serverSeq`; frames of other kinds never carry it;
-   *  - a deleted file, which catch-up drops from the local copy.
+   *  - a deleted file, which catch-up drops from the local copy, or a restored
+   *    one, which it streams back in.
    */
   function needsCatchUp(frames: readonly AppliedFrame[]): boolean {
-    return frames.some((f) => (f.serverSeq !== undefined && f.file && !f.rows) || f.kind === "file.delete")
+    return frames.some(
+      (f) => (f.serverSeq !== undefined && f.file && !f.rows) || f.kind === "file.delete" || f.kind === "file.restore",
+    )
   }
 
   // Live frames are buffered for a beat and landed together: the server

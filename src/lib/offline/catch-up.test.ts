@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { makeInMemoryAdapter } from "@livestore/adapter-web"
 import { createStorePromise, type Store } from "@livestore/livestore"
 import type { CellRow, FileSummary } from "@/lib/sync/cells-read-types"
-import type { CellsDeltaResult } from "@/lib/sync/cells-read"
+import { CellsReadError, type CellsDeltaResult } from "@/lib/sync/cells-read"
 import { catchUpProject, type CatchUpDeps } from "./catch-up"
 import { CELL_FIELDS_VERSION, cellRowId, DEFAULT_LANE_KEY, events, localLaneKey, schema, syncCursorId, tables } from "./schema"
 
@@ -78,7 +78,9 @@ const file: FileSummary = { fileId: F, projectId: P, name: "Matthew", fileType: 
 
 type Page = { rows: CellRow[]; maxServerSeq?: number; projectEpoch?: number }
 
-function makeDeps(opts: { files?: FileSummary[]; pages?: Page[]; delta?: CellsDeltaResult } = {}) {
+function makeDeps(
+  opts: { files?: FileSummary[]; pages?: Page[]; delta?: CellsDeltaResult; fetchFile?: CatchUpDeps["fetchFile"] } = {},
+) {
   const streamFileCells = vi.fn<CatchUpDeps["streamFileCells"]>(async (_p, _f, _t, onPage, _side, onMeta) => {
     const pages = opts.pages ?? []
     for (const [i, page] of pages.entries()) {
@@ -88,7 +90,14 @@ function makeDeps(opts: { files?: FileSummary[]; pages?: Page[]; delta?: CellsDe
   })
   const fetchCellsDelta = vi.fn<CatchUpDeps["fetchCellsDelta"]>(async () => opts.delta ?? { kind: "resync" })
   const fetchProjectFiles = vi.fn<CatchUpDeps["fetchProjectFiles"]>(async () => opts.files ?? [file])
-  return { streamFileCells, fetchCellsDelta, fetchProjectFiles }
+  // Unlisted files are gone unless a test says otherwise.
+  const fetchFile = vi.fn<CatchUpDeps["fetchFile"]>(
+    opts.fetchFile ??
+      (async () => {
+        throw new CellsReadError(404, "file not found")
+      }),
+  )
+  return { streamFileCells, fetchCellsDelta, fetchProjectFiles, fetchFile }
 }
 
 const cell = (cellId: string, side: "source" | "target", laneKey = DEFAULT_LANE_KEY) =>
@@ -386,6 +395,49 @@ describe("catchUpProject — project level", () => {
     // Only the listed file is read.
     expect(deps.streamFileCells).toHaveBeenCalledTimes(1)
     expect(deps.streamFileCells.mock.calls[0][1]).toBe("file2")
+  })
+
+  it("removes an unlisted file the single-file read reports soft-deleted", async () => {
+    seedLocal(row("v1", "target", "b"))
+    const deps = makeDeps({ files: [], fetchFile: async () => ({ ...file, deletedAt: 1 }) })
+
+    await catchUpProject(store, P, "tok", deps)
+
+    expect(deps.fetchFile).toHaveBeenCalledWith(P, F, "tok")
+    expect(store.query(tables.files.select().where({ id: F }).first())).toBeUndefined()
+    expect(cell("v1", "target")).toBeUndefined()
+  })
+
+  it("keeps and catches up a file the listing skipped but the server still has", async () => {
+    // A file edited mid-listing moves ahead of the keyset cursor and is left off every page.
+    seedLocal(row("v1", "target", "old"))
+    const deps = makeDeps({
+      files: [],
+      fetchFile: async () => ({ ...file, deletedAt: null }),
+      pages: [{ rows: [row("v1", "target", "new")], maxServerSeq: 9, projectEpoch: 1 }],
+    })
+
+    const result = await catchUpProject(store, P, "tok", deps)
+
+    expect(store.query(tables.files.select().where({ id: F }).first())).toBeDefined()
+    expect(cell("v1", "target")?.value).toBe("new")
+    expect(result.filesChecked).toBe(1)
+  })
+
+  it("keeps an unlisted file when the single-file read fails for another reason", async () => {
+    seedLocal(row("v1", "target", "b"))
+    const deps = makeDeps({
+      files: [],
+      fetchFile: async () => {
+        throw new TypeError("Failed to fetch")
+      },
+    })
+
+    await catchUpProject(store, P, "tok", deps)
+
+    expect(store.query(tables.files.select().where({ id: F }).first())).toBeDefined()
+    // Still caught up like any listed file, rather than dropped.
+    expect(deps.streamFileCells.mock.calls[0][1]).toBe(F)
   })
 
   it("keeps a server-deleted file while it still has queued writes", async () => {

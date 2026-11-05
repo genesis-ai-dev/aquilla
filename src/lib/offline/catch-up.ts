@@ -24,7 +24,9 @@
 import type { Store } from "@livestore/livestore"
 import type { CellRow } from "@/lib/sync/cells-read-types"
 import {
+  CellsReadError,
   fetchCellsDelta as fetchCellsDeltaDefault,
+  fetchFile as fetchFileDefault,
   fetchProjectFiles as fetchProjectFilesDefault,
   streamFileCells as streamFileCellsDefault,
 } from "@/lib/sync/cells-read"
@@ -101,12 +103,14 @@ export function sameAsLocal(local: LocalCell, args: CellSyncedArgs): boolean {
 
 export interface CatchUpDeps {
   fetchProjectFiles: typeof fetchProjectFilesDefault
+  fetchFile: typeof fetchFileDefault
   fetchCellsDelta: typeof fetchCellsDeltaDefault
   streamFileCells: typeof streamFileCellsDefault
 }
 
 const defaultDeps: CatchUpDeps = {
   fetchProjectFiles: fetchProjectFilesDefault,
+  fetchFile: fetchFileDefault,
   fetchCellsDelta: fetchCellsDeltaDefault,
   streamFileCells: streamFileCellsDefault,
 }
@@ -310,6 +314,22 @@ async function catchUpFile(
 }
 
 /**
+ * Whether a file missing from the listing is really gone. The listing is paged
+ * by last edit, so a file edited mid-listing can jump ahead of the cursor and
+ * be left off every page; the single-file read is the authority. It returns a
+ * soft-deleted file with `deletedAt` set, and 404 for one with no row left.
+ * Any other failure keeps the file — the next catch-up asks again.
+ */
+async function isGoneOnServer(projectId: string, fileId: string, token: string, deps: CatchUpDeps): Promise<boolean> {
+  try {
+    const file = await deps.fetchFile(projectId, fileId, token)
+    return file.deletedAt != null
+  } catch (err) {
+    return err instanceof CellsReadError && err.status === 404
+  }
+}
+
+/**
  * Drops a file the server no longer lists (deleted, or out of this user's
  * reach) from the local copy, returning how many cell rows went. Uses the
  * existing row events rather than a new file-level one: deletes are rare, and
@@ -350,13 +370,16 @@ export async function catchUpProject(
     )
   }
 
-  const serverFiles = new Set(files.map((f) => f.fileId))
+  const fileIds = files.map((f) => f.fileId)
+  const serverFiles = new Set(fileIds)
   let rowsChanged = 0
   for (const fileId of localFiles) {
-    if (!serverFiles.has(fileId)) rowsChanged += removeFile(store, projectId, fileId)
+    if (serverFiles.has(fileId)) continue
+    if (await isGoneOnServer(projectId, fileId, token, deps)) rowsChanged += removeFile(store, projectId, fileId)
+    else fileIds.push(fileId)
   }
-  for (const file of files) {
-    rowsChanged += await catchUpFile(store, projectId, file.fileId, token, deps)
+  for (const fileId of fileIds) {
+    rowsChanged += await catchUpFile(store, projectId, fileId, token, deps)
   }
 
   const row = store.query(tables.offlineProjects.select().where({ projectId }).first())
@@ -365,5 +388,5 @@ export async function catchUpProject(
       events.offlineProjectStatusSet({ projectId, status: "ready", syncedAt: new Date(), queueDepth: row.queueDepth }),
     )
   }
-  return { filesChecked: files.length, rowsChanged }
+  return { filesChecked: fileIds.length, rowsChanged }
 }

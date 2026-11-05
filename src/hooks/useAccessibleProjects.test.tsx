@@ -26,7 +26,9 @@ function deferred<T>() {
 }
 
 describe.each([
-  ["maintainer directory", () => useAccessibleProjects()],
+  // AQU-2256: the maintainer directory is org-scoped — it needs an org id to
+  // fetch at all, so the fencing case passes the org whose roster is open.
+  ["maintainer directory", () => useAccessibleProjects(42)],
   ["navigation directory", () => useProjectsForNavigation()],
 ])("%s request fencing", (_label, useHook) => {
   beforeEach(() => {
@@ -68,5 +70,79 @@ describe.each([
       })
     })
     expect(hook.result.current.projects[0]?.id).toBe("new-project")
+  })
+})
+
+
+// AQU-2256 item 1: the add-to-projects picker hangs off one org's Members
+// page. Offering every project the caller maintains anywhere let an org-A
+// admin grant an org-A member access to an org-C project, and leaked org-C
+// project names onto org-A's page. The org id has to reach the server, and a
+// page that does not know its org yet must not fall back to the cross-org list.
+describe("useAccessibleProjects org scoping", () => {
+  beforeEach(() => {
+    authState.session = { jwt: "jwt-1", username: "alice", createdAt: "now" }
+    fetchProjects.mockReset()
+    fetchProjects.mockResolvedValue({ ok: true, projects: [] })
+  })
+
+  it("asks the server for only the given org, at the invite threshold", async () => {
+    renderHook(() => useAccessibleProjects(42))
+    await waitFor(() => expect(fetchProjects).toHaveBeenCalledTimes(1))
+    expect(fetchProjects).toHaveBeenCalledWith("jwt-1", 42, undefined, 600)
+  })
+
+  it("fetches nothing and stays empty when the org is not known yet", async () => {
+    const hook = renderHook(() => useAccessibleProjects(null))
+    await waitFor(() => expect(hook.result.current.isLoading).toBe(false))
+    expect(fetchProjects).not.toHaveBeenCalled()
+    expect(hook.result.current.projects).toEqual([])
+    expect(hook.result.current.error).toBeNull()
+  })
+
+  it("re-fetches for the new org when the roster switches org", async () => {
+    const hook = renderHook(({ orgId }) => useAccessibleProjects(orgId), {
+      initialProps: { orgId: 42 as number | null },
+    })
+    await waitFor(() => expect(fetchProjects).toHaveBeenCalledTimes(1))
+    hook.rerender({ orgId: 43 })
+    await waitFor(() => expect(fetchProjects).toHaveBeenCalledTimes(2))
+    expect(fetchProjects).toHaveBeenLastCalledWith("jwt-1", 43, undefined, 600)
+  })
+
+  it("drops a previous org's response that lands after the switch", async () => {
+    const orgA = deferred<ProjectsResult>()
+    const orgB = deferred<ProjectsResult>()
+    fetchProjects.mockImplementation((_jwt: string, orgId?: number) =>
+      orgId === 42 ? orgA.promise : orgB.promise,
+    )
+    const hook = renderHook(({ orgId }) => useAccessibleProjects(orgId), {
+      initialProps: { orgId: 42 as number | null },
+    })
+    await waitFor(() => expect(fetchProjects).toHaveBeenCalledTimes(1))
+    hook.rerender({ orgId: 43 })
+    await waitFor(() => expect(fetchProjects).toHaveBeenCalledTimes(2))
+
+    await act(async () => {
+      orgB.resolve({
+        ok: true,
+        projects: [{
+          id: "org-b-project", name: "B", gitlabProjectId: null,
+          role: { level: 600, name: "maintainer", source: "direct" },
+        }],
+      })
+    })
+    await waitFor(() => expect(hook.result.current.projects[0]?.id).toBe("org-b-project"))
+
+    await act(async () => {
+      orgA.resolve({
+        ok: true,
+        projects: [{
+          id: "org-a-project", name: "A", gitlabProjectId: null,
+          role: { level: 600, name: "maintainer", source: "direct" },
+        }],
+      })
+    })
+    expect(hook.result.current.projects.map((p) => p.id)).toEqual(["org-b-project"])
   })
 })

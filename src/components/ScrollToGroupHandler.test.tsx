@@ -97,6 +97,22 @@ const OTHER_CELLS = [
   { id: "cell-1pe-ch3-b", ref: "1PE 3:2" },
 ] as const
 
+// AQU-1442: a third file whose chapters carry the SAME canonical refs as
+// FILE_ID's. Section keys are canonical (`scripture:GEN:2`), so a label from
+// this file is byte-identical to FILE_ID's label for the same chapter — which is
+// why resolving a cross-file request against the outgoing file returns a real,
+// wrong cell id instead of failing. This is the shape of the reported fixture
+// (Berean Standard Bible and sample.usfm both contain Genesis 2).
+const SHARED_REF_FILE_ID = "file-3"
+const SHARED_REF_CELLS = [
+  { id: "cell-other-ch1-a", ref: "GEN 1:1" },
+  { id: "cell-other-ch1-b", ref: "GEN 1:2" },
+  { id: "cell-other-ch2-a", ref: "GEN 2:1" },
+  { id: "cell-other-ch2-b", ref: "GEN 2:2" },
+  { id: "cell-other-ch3-a", ref: "GEN 3:1" },
+  { id: "cell-other-ch3-b", ref: "GEN 3:2" },
+] as const
+
 function makeRows(cells: readonly { id: string; ref: string }[]): CellRow[] {
   return cells.flatMap(({ id, ref }, i) => [
     {
@@ -112,11 +128,12 @@ function makeRows(cells: readonly { id: string; ref: string }[]): CellRow[] {
   ] satisfies CellRow[])
 }
 
-/** Phase 1 of a file switch, as the app performs it: useActiveCellStore's
- *  setRuntime effect flips the runtime file id, then `doFetch` resets the store.
- *  Between this and the rows landing, getFileId() already reports the NEW file
- *  while the store is empty — the window AQU-1244 round 2 was burning requests in. */
-function beginFileSwitch(store: CellStore, fileId: string) {
+/** Phase 1 of a file switch, in isolation: useActiveCellStore's setRuntime
+ *  effect flips the runtime file id. It only re-partitions the loaded rows
+ *  against the lane, so the OUTGOING file's rows are still in the store —
+ *  getFileId() reports the new file and getCellCount() is non-zero. This is the
+ *  state AQU-1442 was burning requests in. */
+function flipRuntimeFile(store: CellStore, fileId: string) {
   store.setRuntime({
     projectId: project.id,
     fileId,
@@ -124,6 +141,14 @@ function beginFileSwitch(store: CellStore, fileId: string) {
     requiredValidations: 1,
     auditStats: new Map(),
   })
+}
+
+/** Phases 1+2, as the app performs them: the runtime file id flips, then
+ *  `doFetch` resets the store. Between this and the rows landing, getFileId()
+ *  already reports the NEW file while the store is empty — the window
+ *  AQU-1244 round 2 was burning requests in. */
+function beginFileSwitch(store: CellStore, fileId: string) {
+  flipRuntimeFile(store, fileId)
   store.reset(project.id, fileId)
 }
 
@@ -302,6 +327,62 @@ describe("ScrollToGroupHandler — section requests (AQU-1244)", () => {
     expect(cellRow("cell-1pe-ch3-b")).toBeTruthy()
     // Chapter 1 is the file's FIRST milestone — the page it wrongly landed on.
     expect(cellRow("cell-1pe-ch1-a")).toBeNull()
+  })
+
+  // AQU-1442: the same cross-file click, driven through ALL THREE phases of the
+  // switch in the order the app performs them. The two earlier rounds of this
+  // coverage each modelled one phase and skipped the decisive one: round 1
+  // flipped the file id and installed the new rows atomically (a sequence the
+  // app never performs), round 2's beginFileSwitch flips the id and empties the
+  // store. Neither modelled the id-flipped-but-old-rows-still-present state the
+  // app actually passes through, which is why the bug survived both.
+  //
+  // The requested section exists in BOTH files under the same canonical key, so
+  // resolving it against the outgoing file yields a valid-looking cell id that
+  // belongs to the wrong file — silent, not an error.
+  it("parks a cross-file request through the stale-rows phase, so a section both files share never resolves against the outgoing file", async () => {
+    setMilestoneSplit(true)
+    const store = makeStore()
+    const { requestSection } = renderWorkspace(store)
+    expect(cellRow("cell-ch1-a")).toBeTruthy()
+
+    // Chapter 3's key, read off the OPEN file — identical to the incoming
+    // file's key for the same chapter, which is the whole trap.
+    const targetSection = sectionKey(store, 2)
+    const otherStore = new CellStore()
+    loadFile(otherStore, SHARED_REF_FILE_ID, SHARED_REF_CELLS)
+    expect(sectionKey(otherStore, 2)).toBe(targetSection)
+
+    // Phase 1: runtime file id flipped, the OUTGOING file's rows still loaded.
+    await act(async () => {
+      flipRuntimeFile(store, SHARED_REF_FILE_ID)
+    })
+    expect(store.getFileId()).toBe(SHARED_REF_FILE_ID)
+    expect(store.getCellCount()).toBeGreaterThan(0)
+
+    // The request lands here — the Files panel submits it ~100ms after
+    // selecting the file. It must be parked, not resolved against file-1.
+    await requestSectionScroll(requestSection.current, targetSection, SHARED_REF_FILE_ID)
+    // Nothing was consumed, so the editor did not jump inside the outgoing file.
+    expect(cellRow("cell-ch3-a")).toBeNull()
+    expect(cellRow("cell-ch1-a")).toBeTruthy()
+
+    // Phase 2: `doFetch` empties the store.
+    await act(async () => {
+      store.reset(project.id, SHARED_REF_FILE_ID)
+    })
+
+    // Phase 3: the incoming file's rows land.
+    await act(async () => {
+      completeFileSwitch(store, SHARED_REF_CELLS)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+
+    // The request survived all three phases and landed on the REQUESTED
+    // milestone of the new file, not on its first.
+    expect(cellRow("cell-other-ch3-a")).toBeTruthy()
+    expect(cellRow("cell-other-ch3-b")).toBeTruthy()
+    expect(cellRow("cell-other-ch1-a")).toBeNull()
   })
 
   it("still scrolls the continuous file to the section's first cell when the split is off", async () => {

@@ -61,9 +61,12 @@ for (const journey of ["project-rename", "file-rename", "cell-comment"] as const
         onAction: async (action) => {
           if (action.kind === "fill") {
             // Observe actual DOM values; the policy's reported text is no oracle.
-            inputObserved ||= await page.locator("input, textarea").evaluateAll(
+            // The comment composer is a contenteditable (MentionTextarea, AQU-761),
+            // so a value-only check could never observe the cell-comment input.
+            inputObserved ||= await page.locator("input, textarea, [contenteditable]").evaluateAll(
               (elements, value) => elements.some((element) =>
-                (element as HTMLInputElement).value === value), expected)
+                ((element as HTMLInputElement).value ?? (element as HTMLElement).innerText ?? "").trim() === value),
+              expected)
           }
           return false
         },

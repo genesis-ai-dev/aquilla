@@ -27,6 +27,7 @@
 // site and test keeps importing from where it always did.
 
 import { stripTrailingBareMarkers } from "./strip-trailing-usfm-markers"
+import { placeholderPromptInstruction } from "../parsers/placeholders"
 import {
   DEFAULT_SYSTEM_PROMPT,
   instructionsPromptBlock,
@@ -436,6 +437,13 @@ export function buildPrompt(options: BuildPromptOptions): ChatMessage[] {
   let sys = ((options.systemPrompt ?? DEFAULT_SYSTEM_PROMPT) + (guidance ? "\n\n" + guidance : ""))
     .replace(/\{sourceLanguage\}/g, options.sourceLanguage)
     .replace(/\{targetLanguage\}/g, options.targetLanguage)
+
+  // AQU-2386: software-string placeholders are protected tokens. Appended
+  // AFTER the {sourceLanguage}/{targetLanguage} pass, like systemAddendum,
+  // because the rule quotes placeholder syntax ({name}, {0}) verbatim. Empty
+  // for a source that carries none, so prose projects pay nothing for it.
+  const placeholderRule = placeholderPromptInstruction(options.sourceText)
+  if (placeholderRule) sys = sys + "\n\n" + placeholderRule
 
   if (options.systemAddendum) sys = sys + "\n\n" + options.systemAddendum
 

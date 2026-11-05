@@ -9,13 +9,30 @@
 // plain-text offsets, matching how WordTiming.start/end are computed. USFM /
 // rich-HTML read views fall back to the normal renderer (see EditorTable).
 
+import { timingAddressesText } from "@/lib/audio/timings"
+
 interface KaraokeReadTextProps {
   text: string
-  /** Plain-text offset span [start, end) of the word to highlight. */
-  range: { start: number; end: number }
+  /**
+   * Plain-text offset span [start, end) of the word to highlight, and — when
+   * the caller knows it — the word that span is supposed to be.
+   */
+  range: { start: number; end: number; word?: string }
 }
 
 export function KaraokeReadText({ text, range }: KaraokeReadTextProps) {
+  // AQU-2254: the offsets were measured against some wording, and `text` is
+  // the wording now. An AI transcript cleanup rewrites a cell's text under
+  // timings that keep the old layout, which slides every span after the edit
+  // onto the wrong letters while the audio clock stays right. The component
+  // that paints is the one holding the text, so it is the one that checks:
+  // a span that no longer selects its own word paints nothing at all, because
+  // highlighting the wrong word claims the audio is saying something it is not.
+  const { word } = range
+  if (word !== undefined && !timingAddressesText({ start: range.start, end: range.end, word }, text)) {
+    return <span>{text}</span>
+  }
+
   const start = Math.max(0, Math.min(text.length, range.start))
   const end = Math.max(start, Math.min(text.length, range.end))
 

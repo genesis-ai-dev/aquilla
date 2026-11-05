@@ -125,8 +125,28 @@ jobs:
         working-directory: auth-worker
       # SPA, sync, auth, then the tag: the same chain a person runs. Each
       # step re-runs the Neon schema guard and refuses a non-release branch.
+      # Release branches cut before #1791 carry a deploy guard that reads only
+      # GITHUB_REF_NAME, and the job checks out the release branch, so the
+      # scripts come from there. Naming the chosen branch under both variables
+      # satisfies every slice; GitHub's own value here is `dev` (the schedule).
+      # (GitHub does not let `env:` overwrite GITHUB_*, so the shell exports it.)
+      # GITHUB_SHA has the same problem: it names dev's commit, and the SPA's
+      # version.json prefers it over git (scripts/build-info.ts), so the tag step
+      # saw production serving a dev sha and refused to tag the release HEAD.
+      # The tag is annotated, so git needs a committer; the runner has none
+      # ("fatal: empty ident name"). Same identity release-cut.yml commits with.
+      # Pushing the tag runs the repo's husky pre-push hook (the smoke e2e
+      # suite), which the runner cannot run: no Playwright browser. The hook
+      # is a developer gate; the release branch was verified by release-verify.
       - name: Deploy production and tag
-        run: pnpm run deploy:aquilla
+        env:
+          HUSKY: "0"
+        run: |
+          git config user.name "aquilla-release-bot"
+          git config user.email "release-bot@aquilla.app"
+          export GITHUB_REF_NAME="$DEPLOY_REF_NAME"
+          export GITHUB_SHA="$(git rev-parse HEAD)"
+          pnpm run deploy:aquilla
       # A tag pushed with a token from this workflow does not start the
       # tag-push trigger of release-cut.yml (GitHub never chains runs from
       # GITHUB_TOKEN events), so the next slice is asked for by hand here.

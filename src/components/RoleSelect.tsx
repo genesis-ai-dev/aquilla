@@ -73,7 +73,7 @@ export function RoleSelect({
       : null
 
   // The closed trigger shows these labels: the catalog's name, so it reads
-  // in sentence case and in the reader's language, like the open list.
+  // as written and in the reader's language, like the open list.
   const items = [
     ...(extra
       ? [{ value: String(extra.level), label: resolveRoleName(t, extra.name) }]
@@ -110,7 +110,7 @@ export function RoleSelect({
           {resolved.map((o) => (
             <SelectItem key={o.level} value={String(o.level)} multiline>
               <span className="flex min-w-0 flex-col gap-0.5">
-                <RoleLabel name={o.name} plain className="font-medium normal-case" />
+                <RoleLabel name={o.name} plain className="font-medium" />
                 {o.description ? (
                   <span className="text-xs font-normal whitespace-normal text-muted-foreground normal-case">
                     {o.description}

@@ -248,7 +248,6 @@ export function RecordingVideoSurface({
     // The NONCE is the command. Re-running on `startSec` would re-seek the
     // picture out from under a take whenever the caller happened to recompute
     // it; not re-running on an unchanged nonce is what makes a retake re-arm.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [armNonce])
 
   // ── The transport, such as it is.

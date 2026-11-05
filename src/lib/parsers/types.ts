@@ -96,10 +96,8 @@ export function resolveBibleResourcesEnabled(
   return explicit !== undefined ? explicit : hasScriptureFiles
 }
 
-/** Text checks (db/shared/builtin-checks.ts) plus the Bible data checks
- *  (AQU-1688, "bkp:V1" …), which run from pack facts and exist only while the
- *  project's Bible data checks enrichment is on. */
-export type BuiltinCheckId = import("../../../db/shared/builtin-checks").BuiltinCheckKey
+/** Text checks plus the Bible data checks — defined in ../rules/rule-check. */
+export type BuiltinCheckId = import("../rules/rule-check").BuiltinCheckId
 
 export interface AlgorithmicCheckOverride {
   enabled: boolean
@@ -131,20 +129,7 @@ export interface TranslationRule {
   term?: import("../completion/prompt-build").PromptTermInfo
 }
 
-export type RuleCheck =
-  | { type: "source-requires-target"; sourcePattern: string; targetPattern: string; caseSensitive?: boolean }
-  | { type: "target-forbids"; targetPattern: string; caseSensitive?: boolean }
-  | { type: "source-target-match"; pattern: string }
-  /**
-   * `punctuation` (AQU-1906) is resolved per LANE by `resolveBuiltinRules`
-   * and read by `rule-engine`'s builtin branch. It is never stored: built-in
-   * rules are synthesized on read, so nothing persists a `check` carrying it.
-   */
-  | {
-      type: "builtin"
-      checkId: BuiltinCheckId
-      punctuation?: import("../../../db/shared/punctuation-conventions").PunctuationConventions | null
-    }
+export type RuleCheck = import("../rules/rule-check").RuleCheck
 
 export type RuleAutofix =
   | { kind: "regex-replace"; pattern: string; replacement: string; flags: string }
@@ -899,8 +884,15 @@ export interface ProjectRecord {
    *  compiled to TranslationRule instances at rule-evaluation time — violations
    *  are DERIVED on read, no materialized verdicts. */
   terminology?: import("@/lib/terminology/types").Concept[]
-  /** Authored living-memory entries (instructions + standards). Persisted and
-   *  synced via ProjectWideSettings the same way as `rules` / `terminology`. */
+  /** AQU-2342: THE project instructions every AI draft reads. Synced via
+   *  ProjectWideSettings. Absent → resolved on read from the legacy sources
+   *  (see `projectTranslationInstructions` in src/lib/instructions). */
+  translationInstructions?: string
+  /** AQU-2342: the agent's legacy free-text brief, from the settings GET
+   *  (never persisted). Only a migrate-on-read source for the instructions. */
+  legacyProjectBriefText?: string
+  /** Authored living-memory entries. Legacy (AQU-2342): "instruction" entries
+   *  only feed `translationInstructions` on read until it is written. */
   livingMemoryEntries?: LivingMemoryEntry[]
   /** AQU-934: per-file genre assignment (fileId → genre id). Synced settings. */
   fileGenres?: Record<string, string>
@@ -935,7 +927,7 @@ export interface ProjectRecord {
   /** AQU-1699: the decision log, synced via ProjectWideSettings. Bible data
    *  check pack B reads its `render.*` and `clusivity.*` decisions. Read it
    *  through `readProjectFacts` (db/shared/project-facts.ts); never write it
-   *  from here (ProjectDecisionsSection writes the stored list). */
+   *  from here (decision cards write it, server-side; AQU-2342). */
   projectFacts?: unknown[]
   /** AQU-1692: maintainers' voice corrections, synced via ProjectWideSettings.
    *  Read it through `readBibleVoiceOverrides` (db/shared/bible-voice-overrides.ts). */

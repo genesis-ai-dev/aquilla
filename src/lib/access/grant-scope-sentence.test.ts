@@ -24,7 +24,7 @@ describe("describeGrant", () => {
       stays: true,
       scope: { kind: "project", projectName: "Mark", lanes: ["French"] },
     })
-    expect(copy.sentence).toBe("Maria stays a Project lead on Mark, French language lane only")
+    expect(copy.sentence).toBe("Maria stays a Project Lead on Mark, French language lane only")
     expect(copy.scopeEcho).toBe("French language lane only")
   })
 

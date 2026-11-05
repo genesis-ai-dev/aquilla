@@ -4,7 +4,7 @@
 //   GET /api/v1/external/projects/:projectId/files/:fileId/cells/:cellId/memory
 //
 // Why these exist: Living Memory is the product story — the brief, the
-// approved examples/decisions/notes the copilot learns from — and an agent
+// approved examples/decisions/notes the in-app agent learns from — and an agent
 // holding a PAT could read none of it. The write commands (AQU-1228) can stage
 // entries; nothing could read them back, so an agent could not tell whether an
 // entry already existed, had been approved, or was reaching the prompt at all.
@@ -15,9 +15,9 @@
 // author identities pseudonymized per the agent-facing PII default (AQU-1180).
 //
 // Both routes delegate to `db/shared/agent-memory.ts`, the same module the
-// in-app surface and the copilot's own prompt assembly use. No query or
+// in-app surface and the in-app agent's own prompt assembly use. No query or
 // retrieval logic is reimplemented here: the per-cell route calls
-// `buildMemoryContext`, i.e. the copilot's actual retrieval path, so what it
+// `buildMemoryContext`, i.e. the agent's actual retrieval path, so what it
 // reports is what the next draft would be given rather than a second
 // description of it.
 //
@@ -44,6 +44,11 @@ import {
   readBriefFromSettings,
 } from "../../../db/shared/brief"
 import { loadProjectSettings } from "../../../db/shared/projects"
+import {
+  briefInstructionsText,
+  resolveTranslationInstructions,
+  storedTranslationInstructions,
+} from "../../../db/shared/translation-instructions"
 import { externalError } from "./errors"
 import { authenticateAndScope, checkReadRateLimit, type ExternalReadsEnv } from "./read-auth"
 import { paginate, parsePageParams } from "./pagination"
@@ -128,24 +133,27 @@ interface ExternalMemoryEntry {
   inRetrieval: boolean
 }
 
-/** The brief block reports what the copilot's prompt actually injects: the
- *  rendered L1 summary of `settings.translationBrief` — the same value
- *  prompt-preview's `parts.brief` is built from (AQU-1282). The older
- *  free-text `project_briefs` row is surfaced separately as `legacyBrief`
- *  when it has content, so a caller is never told "no brief" while one of the
- *  two stores still holds text. */
+/** The brief block reports the interview record (`settings.translationBrief`)
+ *  and its rendered L1 summary. AQU-2342: no prompt reads the brief directly —
+ *  every drafting prompt reads the ONE project instructions text, which is
+ *  composed on read from the brief (and the other legacy sources) until a
+ *  maintainer writes `translationInstructions`. `instructions` reports that
+ *  resolved text; `legacyBrief` keeps its old shape and now carries it too, so
+ *  a caller reading "the brief the AI sees" keeps reading the truth. */
 interface ExternalBrief {
   /** `translationBrief.l1Summary`, or "" when the brief has no rendered
-   *  summary yet — in which case the copilot prompt carries no brief block. */
+   *  summary yet. */
   content: string
   /** The brief record's own version (not the settings version). */
   version: number
   updatedAt: string | null
   updatedBy: string | null | undefined
   source: "translationBrief"
-  /** content !== "" — whether the next draft's prompt will carry the brief. */
+  /** Whether the brief currently feeds the prompts: the project has NOT written
+   *  `translationInstructions` and the brief has a summary or answered
+   *  sections, so the instructions composed on read carry it. */
   reachesCopilot: boolean
-  /** Filled interview sections. Sections without an L1 do NOT reach the copilot. */
+  /** Filled interview sections. */
   sections: number
   /** The sections moved after the L1 was rendered (or no L1 exists) —
    *  RegenerateBriefSummary fixes it. */
@@ -153,18 +161,30 @@ interface ExternalBrief {
 }
 
 interface LegacyBrief {
+  /** AQU-2342: the RESOLVED project instructions (what prompts carry). */
   content: string
+  /** The `project_briefs` row version (0 when no row). */
   version: number
+}
+
+/** The ONE text every drafting prompt carries (AQU-2342). */
+interface ExternalInstructions {
+  content: string
+  /** True when `translationInstructions` is written; false when `content` is
+   *  composed on read from the brief and the other legacy sources. */
+  stored: boolean
 }
 
 async function loadExternalBrief(
   db: AquillaDb,
   projectId: string,
   pseudonymize: (name: string | null) => Promise<string | null | undefined>,
-): Promise<{ brief: ExternalBrief; legacyBrief: LegacyBrief | null }> {
+): Promise<{ brief: ExternalBrief; legacyBrief: LegacyBrief | null; instructions: ExternalInstructions }> {
   const { settings } = await loadProjectSettings(db, projectId)
   const record = readBriefFromSettings(settings)
   const legacy = await getBrief(db, projectId)
+  const stored = storedTranslationInstructions(settings) !== null
+  const content = resolveTranslationInstructions(settings, { projectBriefText: legacy.content })
   const brief: ExternalBrief = record
     ? {
         content: record.l1Summary ?? "",
@@ -172,7 +192,7 @@ async function loadExternalBrief(
         updatedAt: record.updatedAt || null,
         updatedBy: await pseudonymize(record.updatedBy || null),
         source: "translationBrief",
-        reachesCopilot: (record.l1Summary ?? "") !== "",
+        reachesCopilot: !stored && briefInstructionsText(record) !== "",
         sections: briefFilledSectionCount(record),
         l1Stale: isBriefL1Stale(record),
       }
@@ -187,8 +207,8 @@ async function loadExternalBrief(
         l1Stale: true,
       }
   const legacyBrief: LegacyBrief | null =
-    legacy.content !== "" ? { content: legacy.content, version: legacy.version } : null
-  return { brief, legacyBrief }
+    content !== "" ? { content, version: legacy.version } : null
+  return { brief, legacyBrief, instructions: { content, stored } }
 }
 
 /** Keep the run/session ids (they identify an agent run, which is what a
@@ -297,7 +317,7 @@ async function handleMemoryList(
 
   const policy = await resolveAuthorshipPolicy(db, authed.ctx.credential, projectId)
   const pseudonymize = createIdentityMapper(policy, env.SYNC_SECRET_KEY, projectId)
-  const { brief, legacyBrief } = await loadExternalBrief(db, projectId, pseudonymize)
+  const { brief, legacyBrief, instructions } = await loadExternalBrief(db, projectId, pseudonymize)
   const data: ExternalMemoryEntry[] = await Promise.all(
     page.data.map(async (m) =>
       toExternalEntry(
@@ -310,6 +330,7 @@ async function handleMemoryList(
   )
 
   return Response.json({
+    instructions,
     brief,
     ...(legacyBrief ? { legacyBrief } : {}),
     data,
@@ -326,7 +347,7 @@ async function handleMemoryList(
       identities:
         "createdBy/reviewedBy/brief.updatedBy are per-project pseudonyms by default, not usernames — stable within this project, uncorrelatable across projects. Real usernames only on a credential minted `pii: true`; absent entirely when the project has set agentAuthorship: 'none'.",
       brief:
-        "brief.content is the rendered L1 summary of settings.translationBrief — the exact text the copilot prompt injects (prompt-preview parts.brief). Empty content means the brief does not reach the AI yet: write sections with SetBrief (which auto-renders) or run RegenerateBriefSummary. legacyBrief (when present) is the older free-text project brief, still injected by the in-app agent's memory context but not by the drafting prompt.",
+        "instructions.content is THE text every drafting prompt carries (copilot, prompt-preview parts.instructions, the in-app agent and its draft tool, DraftCells, Autopilot). instructions.stored false means it is composed on read from the brief, a customized systemPrompt, Living Memory instruction entries and the legacy agent brief; write it with PatchSettings translationInstructions and those stop reaching any prompt. brief is the interview record (brief.content = its rendered L1 summary); brief.reachesCopilot says whether it currently feeds the instructions. legacyBrief keeps its old shape for older callers and carries the same resolved instructions text.",
       perCell:
         "GET /api/v1/external/projects/:projectId/files/:fileId/cells/:cellId/memory returns what retrieval would inject for one cell's draft.",
     },
@@ -338,11 +359,11 @@ async function handleMemoryList(
 // ---------------------------------------------------------------------------
 
 // Honesty note, and the reason this route reports its own scope: retrieval is
-// **project-scoped today**. `buildMemoryContext` injects the brief plus the
-// capped approved-memory index for the project, identically for every cell —
+// **project-scoped today**. The agent's prompt carries the project instructions
+// plus the capped approved-memory index (`buildMemoryContext`), identically for every cell —
 // there is no per-cell narrowing (no embedding search, no anchor filter). So
 // this route returns that set for the named cell rather than inventing a
-// per-cell ranking the copilot does not actually perform, and says so in
+// per-cell ranking the agent does not actually perform, and says so in
 // `retrieval.scope`/`retrieval.note`. An agent that assumed otherwise would
 // mis-predict its own drafts. If per-cell retrieval later lands (AQU-1232's
 // similarity search is the likely vehicle), this route narrows with it and the
@@ -375,22 +396,23 @@ async function handleCellMemory(
     return externalError("not_found", `no cell ${cellId} in file ${fileId}`, 404)
   }
 
-  // The copilot's own retrieval path — not a reimplementation of it.
+  // The in-app agent's own retrieval path — not a reimplementation of it.
   const memory = await buildMemoryContext(db, projectId)
   const shown = memory.memoryIndex.slice(0, MEMORY_INDEX_RENDER_CAP)
   const overflow = memory.memoryIndex.length - shown.length
 
   const policy = await resolveAuthorshipPolicy(db, authed.ctx.credential, projectId)
   const pseudonymize = createIdentityMapper(policy, env.SYNC_SECRET_KEY, projectId)
-  const { brief, legacyBrief } = await loadExternalBrief(db, projectId, pseudonymize)
+  const { brief, legacyBrief, instructions } = await loadExternalBrief(db, projectId, pseudonymize)
 
   return Response.json({
     cell: { fileId, cellId },
+    instructions,
     brief,
     ...(legacyBrief ? { legacyBrief } : {}),
     // Index entries only — path + first line + human-edited marker — because
     // that is literally what the prompt carries. Full text is fetched
-    // just-in-time by the copilot's read_memory tool, and by an agent from the
+    // just-in-time by the agent's read_memory tool, and by an agent from the
     // list route above.
     entries: shown.map((e) => ({
       path: e.path,
@@ -405,7 +427,7 @@ async function handleCellMemory(
       injectedCount: shown.length,
       truncated: overflow > 0,
       note:
-        "Retrieval is project-scoped: the copilot injects the project brief plus the most-recently-updated approved memory index, capped at indexRenderCap, identically for every cell in this project. No per-cell narrowing happens yet — entries are not ranked or filtered against this cell. Only paths and first lines are injected; the copilot pulls full text just-in-time, and so can you via GET /api/v1/external/projects/:projectId/memory." +
+        "Retrieval is project-scoped: the in-app agent's chat carries the project instructions plus the most-recently-updated approved memory index, capped at indexRenderCap, identically for every cell in this project. The drafting prompts (copilot, draft tool, DraftCells, Autopilot) carry the instructions but not this index. No per-cell narrowing happens yet — entries are not ranked or filtered against this cell. Only paths and first lines are injected; the agent pulls full text just-in-time, and so can you via GET /api/v1/external/projects/:projectId/memory." +
         (overflow > 0
           ? ` ${overflow} further approved ${overflow === 1 ? "entry is" : "entries are"} NOT injected (past the cap).`
           : ""),

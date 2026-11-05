@@ -45,6 +45,11 @@ export const workspace = defineNamespace({
     "workspace.offline.leaderStalledToast": "Your recent changes aren't being saved on this device. Restart the app to fix this — changes made since it started may be lost.",
     "workspace.offline.leaderStalledRestart": "Restart app",
     "workspace.offline.slowBootToast": "Your offline projects are taking a while to open. This can take a few minutes after an update. If it doesn't finish, restart the app.",
+    // Tauri: the offline store is rebuilding after an update (src/lib/offline/boot-progress.ts).
+    "workspace.offline.preparingToast": "Preparing your offline projects… {percent}%",
+    "workspace.offline.preparingToastDescription": "This usually happens after an update and only takes a moment. Your offline projects will open when it's done.",
+    "workspace.offline.preparingToastSlowDescription": "This is taking longer than usual, but it's still working. Restarting the app would start it over.",
+    "workspace.offline.preparingToastStuckDescription": "This hasn't moved for several minutes and may be stuck. Restart the app to try again — it will start over from the beginning.",
     // Tauri: a newer build owns the offline data (src/lib/offline/generation-guard.ts).
     "workspace.offline.newerDataToast": "Your offline projects were saved by a newer version of Aquilla. Update the app to use them — until then, changes save only while you're online.",
     // Desktop update prompt (DesktopUpdatePrompt.tsx).
@@ -295,6 +300,9 @@ export const workspace = defineNamespace({
 
     // -- ErrorBoundary --
     "workspace.errorBoundary.reload": "Reload",
+    "workspace.errorBoundary.offlineTitle": "Connect to load this screen",
+    "workspace.errorBoundary.offlineDescription": "This screen needs files that are not available offline yet. Reconnect, then reload to try again.",
+    "workspace.errorBoundary.reconnectedDescription": "Your browser is back online. Reload to try loading this screen again.",
     // AQU-1405. Painted over the page for the moment between a stale-chunk
     // failure and the automatic reload that recovers from it.
     "workspace.updateNotice.reloading": "Updating {app}…",
@@ -594,6 +602,40 @@ export const workspace = defineNamespace({
           "stuck. Paired with a 'Restart app' action " +
           "(workspace.offline.leaderStalledRestart). Three short sentences with " +
           "periods. Plain language — no 'worker', 'store' or 'sync' jargon.",
+      },
+      "workspace.offline.preparingToast": {
+        description:
+          "Title of a progress toast in the Tauri desktop app while the on-device " +
+          "copy of the user's offline projects is being rebuilt, usually after " +
+          "an app update (seconds, longer on a very large project). {percent} is a whole " +
+          "number 0–100 that ticks up; keep the % sign after it. Plain language " +
+          "— no 'worker', 'store', 'database' or 'sync' jargon.",
+        placeholders: {
+          percent: "How far along the rebuild is, a whole number from 0 to 100.",
+        },
+      },
+      "workspace.offline.preparingToastDescription": {
+        description:
+          "Body of the 'Preparing your offline projects… N%' toast " +
+          "(workspace.offline.preparingToast). Reassures the user it's a " +
+          "short step that usually follows an update and that their downloaded " +
+          "projects open once it finishes. Two short sentences with periods.",
+      },
+      "workspace.offline.preparingToastSlowDescription": {
+        description:
+          "Replaces the body of the 'Preparing your offline projects… N%' toast " +
+          "(workspace.offline.preparingToast) when the percentage hasn't moved " +
+          "for a minute. Reassures the user it isn't stuck and warns that " +
+          "restarting would only make it start again from the beginning. Two " +
+          "short sentences with periods.",
+      },
+      "workspace.offline.preparingToastStuckDescription": {
+        description:
+          "Replaces the body of the 'Preparing your offline projects… N%' toast " +
+          "(workspace.offline.preparingToast) when the percentage hasn't moved " +
+          "for five minutes. Says it may be stuck and pairs with a 'Restart app' " +
+          "button (workspace.offline.leaderStalledRestart); warns the restart " +
+          "begins again from the start. Two short sentences with periods.",
       },
       "workspace.offline.newerDataToast": {
         description:

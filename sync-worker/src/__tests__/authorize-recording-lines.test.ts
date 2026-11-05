@@ -1,4 +1,4 @@
-// Slice 13 (Sam, Oct 28): "Should a Project lead be able to undo 'make rows
+// Slice 13 (Sam, Oct 28): "Should a Project Lead be able to undo 'make rows
 // from an audio or video file'?" — yes, narrowly. Below Maintainer a person
 // may remove an IMPORTED line only by naming its creating event, when that
 // event is their own `source.cell.create` of a line made from a recording
@@ -72,7 +72,7 @@ const lead = (username = "alice") =>
   makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x", role: ROLE.PROJECT_LEAD, username })
 
 describe("undoing lines made from a recording, below Maintainer", () => {
-  it("lets a Project lead take back a line she just made from a recording, untouched by anyone else", async () => {
+  it("lets a Project Lead take back a line she just made from a recording, untouched by anyone else", async () => {
     const result = await authorize(await lead(), del(), SECRET, makeDb({}))
     expect(result.ok).toBe(true)
   })

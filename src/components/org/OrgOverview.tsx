@@ -4,7 +4,7 @@ import { type ColumnDef } from "@tanstack/react-table"
 import { FolderKanban } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { LoadingOverlay } from "@/components/ui/loading-overlay"
-import { Skeleton } from "@/components/ui/skeleton"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
@@ -62,38 +62,12 @@ function OverviewLoadingTemplate() {
   return (
     <div data-testid="org-overview-loading-template" className="h-full">
       <AppShell
-        sidebar={
-          <div className="flex h-full flex-col gap-4 p-2">
-            <Skeleton className="h-9 w-full" />
-            <div className="flex flex-col gap-2">
-              <Skeleton className="h-8 w-full" />
-              <Skeleton className="h-8 w-3/4" />
-              <Skeleton className="h-8 w-2/3" />
-            </div>
-          </div>
-        }
-        header={
-          <div className="flex items-center gap-4 px-4">
-            <Skeleton className="h-5 w-40" />
-          </div>
-        }
+        sidebar={<OrgSidebar />}
+        header={<OrgBreadcrumb section="Overview" isProjectsLanding />}
         statusBar={null}
         main={
           <Page size="wide">
-            <Skeleton className="mb-8 h-7 w-48" />
-            {/* AQU-1071: seven tiles, matching the loaded strip (the Languages tile
-              * was the seventh) so the layout does not jump on resolve. */}
-            <div className={STAT_TILE_GRID}>
-              {Array.from({ length: 7 }).map((_, index) => (
-                <div
-                  key={index}
-                  className="flex h-[88px] items-center justify-between rounded-lg border bg-card px-5 py-4 min-[480px]:flex-col min-[480px]:items-start min-[480px]:justify-start min-[480px]:gap-2"
-                >
-                  <Skeleton className="order-last h-6 w-12 min-[480px]:order-none" />
-                  <Skeleton className="h-3 w-20" />
-                </div>
-              ))}
-            </div>
+            <LoadingCursor className="text-xl" />
           </Page>
         }
       />

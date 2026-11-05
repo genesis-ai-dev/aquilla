@@ -4,7 +4,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import type { ReactNode } from "react"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { ErrorBoundary } from "./ErrorBoundary"
 import {
   CHUNK_FAILURE_EVENT,
@@ -17,7 +17,7 @@ import {
 // PostHog key / network connection.
 // ---------------------------------------------------------------------------
 vi.mock("@/lib/posthog", () => ({
-  default: {
+  default: { scope() { return { ...this, enabled: () => true } },
     captureException: vi.fn(),
     capture: vi.fn(),
   },
@@ -36,10 +36,12 @@ function AlwaysThrows(): never {
 let consoleErrorSpy: ReturnType<typeof vi.spyOn>
 beforeEach(() => {
   consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }))
 })
 afterEach(() => {
   consoleErrorSpy.mockRestore()
   vi.clearAllMocks()
+  vi.unstubAllGlobals()
 })
 
 // ---------------------------------------------------------------------------
@@ -167,18 +169,16 @@ describe("window error handlers", () => {
     expect(posthog.captureException).not.toHaveBeenCalled()
   })
 
-  it("captures each once in the desktop shell, where autocapture cannot load", () => {
+  it("does not attribute unowned desktop background errors to the active account", () => {
     ;(window as unknown as Record<string, unknown>).__TAURI__ = {}
     const err = new Error("global error")
     const rejection = new Error("rejection error")
     dispatchError(err)
     dispatchRejection(rejection)
-    expect(posthog.captureException).toHaveBeenCalledTimes(2)
-    expect(posthog.captureException).toHaveBeenCalledWith(err, { source: "window.onerror" })
-    expect(posthog.captureException).toHaveBeenCalledWith(rejection, { source: "unhandledrejection" })
+    expect(posthog.captureException).not.toHaveBeenCalled()
   })
 
-  it("still reloads once for a stale chunk reported as an uncaught error or rejection", () => {
+  it("still reloads once for a stale chunk reported as an uncaught error or rejection", async () => {
     sessionStorage.clear()
     const reloadSpy = vi.fn()
     Object.defineProperty(window, "location", {
@@ -187,7 +187,7 @@ describe("window error handlers", () => {
     })
     dispatchError(new Error("Failed to fetch dynamically imported module: /assets/a-1.js"))
     dispatchRejection(new Error("Failed to fetch dynamically imported module: /assets/b-2.js"))
-    expect(reloadSpy).toHaveBeenCalledTimes(2)
+    await waitFor(() => expect(reloadSpy).toHaveBeenCalledTimes(2))
     expect(posthog.captureException).not.toHaveBeenCalled()
     document.getElementById(CHUNK_NOTICE_ID)?.remove()
   })
@@ -210,7 +210,7 @@ describe("chunk-load recovery", () => {
     sessionStorage.clear()
   })
 
-  it("reloads once on the first failure of a chunk", () => {
+  it("reloads once on the first failure of a chunk", async () => {
     const reloadSpy = vi.fn()
     Object.defineProperty(window, "location", {
       value: { ...window.location, reload: reloadSpy },
@@ -221,7 +221,7 @@ describe("chunk-load recovery", () => {
         <ThrowsChunkError />
       </ErrorBoundary>,
     )
-    expect(reloadSpy).toHaveBeenCalledOnce()
+    await waitFor(() => expect(reloadSpy).toHaveBeenCalledOnce())
     expect(sessionStorage.getItem("aq:chunk-reload-attempted")).toBe(JSON.stringify([CHUNK_URL]))
   })
 
@@ -290,21 +290,21 @@ describe("vite:preloadError", () => {
     document.getElementById(CHUNK_NOTICE_ID)?.remove()
   })
 
-  it("recovers a stale chunk even though the caller swallowed the rejection", () => {
+  it("recovers a stale chunk even though the caller swallowed the rejection", async () => {
     const reloadSpy = stubReload()
     dispatchPreloadError(new Error(`Failed to fetch dynamically imported module: ${CHUNK}`))
-    expect(reloadSpy).toHaveBeenCalledOnce()
+    await waitFor(() => expect(reloadSpy).toHaveBeenCalledOnce())
     expect(document.getElementById(CHUNK_NOTICE_ID)).not.toBeNull()
   })
 
-  it("counts the failure under the tagged event, beacon-sent to survive the reload", () => {
+  it("counts the failure under the tagged event, beacon-sent to survive the reload", async () => {
     stubReload()
     dispatchPreloadError(new Error(`Failed to fetch dynamically imported module: ${CHUNK}`))
-    expect(posthog.capture).toHaveBeenCalledWith(
+    await waitFor(() => expect(posthog.capture).toHaveBeenCalledWith(
       CHUNK_FAILURE_EVENT,
       { chunk: CHUNK, recovered: true },
       { transport: "sendBeacon" },
-    )
+    ))
   })
 
   it("leaves a preload failure that is not a chunk error alone", () => {
@@ -318,5 +318,67 @@ describe("vite:preloadError", () => {
     const reloadSpy = stubReload()
     expect(() => dispatchPreloadError(undefined)).not.toThrow()
     expect(reloadSpy).not.toHaveBeenCalled()
+  })
+})
+
+// AQU-2377: do not mistake first-use asset downloads for app crashes or deploys.
+describe("offline screen assets", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("does not trust online=true when the app host is unreachable, then recovers without an online event", async () => {
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(true)
+    const request = vi.mocked(fetch).mockRejectedValue(new TypeError("Network unavailable"))
+    const reload = vi.fn()
+    Object.defineProperty(window, "location", { value: { ...window.location, reload }, writable: true })
+    sessionStorage.clear()
+    function MissingAsset(): never { throw new Error("Unable to preload CSS for /assets/safari.css") }
+    render(<ErrorBoundary><MissingAsset /></ErrorBoundary>)
+    await screen.findByText("Connect to load this screen")
+    const button = screen.getByRole("button", { name: "Reload" })
+    expect(button).toBeDisabled()
+    expect(reload).not.toHaveBeenCalled()
+    expect(sessionStorage.getItem("aq:chunk-reload-attempted")).toBeNull()
+    request.mockResolvedValue({ ok: true } as Response)
+    fireEvent(window, new Event("focus"))
+    await waitFor(() => expect(button).toBeEnabled())
+    expect(reload).not.toHaveBeenCalled()
+    fireEvent.click(button)
+    expect(reload).toHaveBeenCalledOnce()
+  })
+
+  it.each([
+    "Unable to preload CSS for https://app.test/assets/editor.css",
+    "Failed to fetch dynamically imported module: https://app.test/assets/editor.js",
+  ])("waits for connectivity and explicit reload: %s", message => {
+    const online = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false)
+    const reload = vi.fn()
+    Object.defineProperty(window, "location", { value: { ...window.location, reload }, writable: true })
+    function MissingAsset(): never { throw new Error(message) }
+    render(<ErrorBoundary><MissingAsset /></ErrorBoundary>)
+    expect(screen.getByText("Connect to load this screen")).toBeInTheDocument()
+    const button = screen.getByRole("button", { name: "Reload" })
+    expect(button).toBeDisabled()
+    expect(reload).not.toHaveBeenCalled()
+    online.mockReturnValue(true)
+    fireEvent(window, new Event("online"))
+    expect(button).toBeEnabled()
+    expect(screen.getByText(/Your browser is back online/)).toBeInTheDocument()
+    expect(reload).not.toHaveBeenCalled()
+    online.mockReturnValue(false)
+    fireEvent(window, new Event("offline"))
+    expect(button).toBeDisabled()
+    online.mockReturnValue(true)
+    fireEvent(window, new Event("online"))
+    fireEvent.click(button)
+    expect(reload).toHaveBeenCalledOnce()
+  })
+
+  it("keeps ordinary offline render exceptions on the crash path", () => {
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(false)
+    render(<ErrorBoundary><AlwaysThrows /></ErrorBoundary>)
+    expect(screen.getByText("Something went wrong")).toBeInTheDocument()
+    expect(screen.queryByText("Connect to load this screen")).not.toBeInTheDocument()
   })
 })

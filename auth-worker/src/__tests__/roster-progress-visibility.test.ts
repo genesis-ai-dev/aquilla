@@ -527,7 +527,7 @@ describe("saving a project's own visibility floors (AQU-1771)", () => {
 
   it("lets a maintainer raise it, and loosen a value at their own level", async () => {
     await seedSettings({ rosterViewMinRole: 600 }, { rosterViewMinRole: 400 })
-    // Lower their own Maintainers value to Project leads: allowed (600 ≥ 600).
+    // Lower their own Maintainers value to Project Leads: allowed (600 ≥ 600).
     const lowered = await patchProject("anna", { rosterViewMinRole: 500 })
     expect(lowered.status).toBe(200)
     const raised = await app.request(
@@ -613,12 +613,15 @@ describe("counting the org's stricter projects (AQU-1771)", () => {
     expect(res.status).toBe(200)
     // AQU-1938: the projects behind each count ride along, named only where
     // the caller may see them — tom is a contributor on none of these.
+    // AQU-2306: the import floor shares this route; no project here sets one.
     expect(await res.json()).toEqual({
       rosterViewMinRole: 1,
       memberProgressViewMinRole: 1,
+      importMinRole: 0,
       overrideProjects: {
         rosterViewMinRole: { total: 1, projects: [] },
         memberProgressViewMinRole: { total: 1, projects: [] },
+        importMinRole: { total: 0, projects: [] },
       },
     })
   })

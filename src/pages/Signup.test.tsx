@@ -1,3 +1,4 @@
+import { confirmSignupAnalyticsChoice, readSignupAnalyticsChoice } from "@/lib/signup-analytics-choice"
 import { renderWithBrand as render } from "@/test-utils/render-with-brand"
 import { screen, fireEvent, waitFor } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
@@ -38,8 +39,9 @@ it.each([
   show(path)
   fireEvent.click(screen.getByRole("button", { name: /get started/i }))
   expect(screen.getByRole("switch", { name: /share usage data/i })).toBeChecked()
-  fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
-  expect(localStorage.getItem("aquilla:analyticsEnabled")).toBe("true")
+  fireEvent.click(screen.getByRole("button", { name: /agree and continue/i }))
+  expect(localStorage.getItem("aquilla:analyticsEnabled")).toBeNull()
+  expect(readSignupAnalyticsChoice()?.allowed).toBe(true)
   expect(screen.queryByRole("progressbar")).toBeNull()
   expect(screen.queryByRole("button", { name: /skip for now/i })).toBeNull()
   fireEvent.change(screen.getByLabelText("Username"), { target: { value: "new-person" } })
@@ -67,39 +69,40 @@ it("uses a valid existing account without replaying setup", async () => {
 })
 
 it("offers returning users a direct login and respects an existing consent choice", () => {
-  localStorage.setItem("aquilla:analyticsEnabled", "true")
+  confirmSignupAnalyticsChoice(true)
   show("/signup?next=%2Fjoin-org%2Finvite")
   expect(screen.getByRole("link", { name: /already have an account/i })).toHaveAttribute("href", "/login?next=%2Fjoin-org%2Finvite")
   fireEvent.click(screen.getByRole("button", { name: /get started/i }))
   expect(screen.getByLabelText("Username")).toBeVisible()
   expect(screen.queryByRole("switch")).toBeNull()
   expect(screen.getByRole("link", { name: "Log in" })).toHaveAttribute("href", "/login?next=%2Fjoin-org%2Finvite")
-  expect(localStorage.getItem("aquilla:analyticsEnabled")).toBe("true")
+  expect(localStorage.getItem("aquilla:analyticsEnabled")).toBeNull()
+  expect(readSignupAnalyticsChoice()?.allowed).toBe(true)
 })
 
 it("preserves a saved opt-out and skips the privacy screen", () => {
-  localStorage.setItem("aquilla:analyticsEnabled", "false")
+  confirmSignupAnalyticsChoice(false)
   show()
   fireEvent.click(screen.getByRole("button", { name: /get started/i }))
   expect(screen.getByLabelText("Username")).toBeVisible()
   expect(screen.queryByRole("switch")).toBeNull()
-  expect(localStorage.getItem("aquilla:analyticsEnabled")).toBe("false")
+  expect(localStorage.getItem("aquilla:analyticsEnabled")).toBeNull()
 })
 
 it("returns to privacy without losing signup fields", () => {
   show()
   fireEvent.click(screen.getByRole("button", { name: /get started/i }))
-  fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
+  fireEvent.click(screen.getByRole("button", { name: /agree and continue/i }))
   fireEvent.change(screen.getByLabelText("Username"), { target: { value: "kept-name" } })
   fireEvent.click(screen.getByRole("button", { name: /back/i }))
   expect(screen.getByRole("switch", { name: /share usage data/i })).toBeChecked()
-  fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
+  fireEvent.click(screen.getByRole("button", { name: /agree and continue/i }))
   expect(screen.getByLabelText("Username")).toHaveValue("kept-name")
 })
 it("shows only required errors for empty signup email and password", async () => {
   show()
   fireEvent.click(screen.getByRole("button", { name: /get started/i }))
-  fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
+  fireEvent.click(screen.getByRole("button", { name: /agree and continue/i }))
   fireEvent.click(screen.getByRole("button", { name: /create account/i }))
   await screen.findByText("Email is required")
   expect(screen.queryByText("Enter a valid email address")).toBeNull()
@@ -109,7 +112,7 @@ it("shows only required errors for empty signup email and password", async () =>
 
 it.each(["true", "false"])("resumes account creation after login with saved sharing choice %s", choice => {
   sessionStorage.setItem("aquilla:signupStarted", "true")
-  localStorage.setItem("aquilla:analyticsEnabled", choice)
+  confirmSignupAnalyticsChoice(choice === "true")
   show()
   expect(screen.getByLabelText("Username")).toBeVisible()
   expect(screen.queryByRole("button", { name: /get started/i })).toBeNull()
@@ -146,8 +149,8 @@ it.each(["read", "write", "both"])("continues signup and preserves the privacy c
     fireEvent.click(screen.getByRole("button", { name: /get started/i }))
     expect(screen.getByRole("switch", { name: /share usage data/i })).toBeChecked()
     fireEvent.click(screen.getByRole("switch", { name: /share usage data/i }))
-    fireEvent.click(screen.getByRole("button", { name: /^continue$/i }))
-    expect(localStorage.getItem("aquilla:analyticsEnabled")).toBe("false")
+    fireEvent.click(screen.getByRole("button", { name: /continue without sharing/i }))
+    expect(localStorage.getItem("aquilla:analyticsEnabled")).toBeNull()
     fireEvent.change(screen.getByLabelText("Username"), { target: { value: "new-person" } })
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "new@example.test" } })
     fireEvent.change(document.getElementById("s-pass")!, { target: { value: "safe-password-123" } })
@@ -158,4 +161,12 @@ it.each(["read", "write", "both"])("continues signup and preserves the privacy c
     view.unmount()
     vi.unstubAllGlobals()
   }
+})
+
+it("ignores legacy browser-wide yes for a new signup and keeps the checked draft from collecting", () => {
+  localStorage.setItem("aquilla:analyticsEnabled", "true")
+  show()
+  fireEvent.click(screen.getByRole("button", { name: /get started/i }))
+  expect(screen.getByRole("switch", { name: /share usage data/i })).toBeChecked()
+  expect(readSignupAnalyticsChoice()).toBeNull()
 })

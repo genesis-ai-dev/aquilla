@@ -73,11 +73,18 @@ export interface BudgetFrame {
   capCredits: number
 }
 
-/** The run hit its cost cap and halted gracefully. Credits, same as BudgetFrame. */
+/** The run halted gracefully on a spend limit. Credits, same as BudgetFrame.
+ *
+ *  AQU-2313: `reason` NAMES the limit that actually applied, because the two
+ *  stops read very differently to a customer — `run_cost_cap` is this one
+ *  run's own ceiling (it applies on every plan, including an Enterprise
+ *  workspace with no credit allowance at all), while `weekly_allowance` is the
+ *  workspace running out of allowance. Absent on a pre-AQU-2313 server, which
+ *  only ever sent the frame for the per-run cap, so the client reads an absent
+ *  reason as `run_cost_cap`. */
 export interface BudgetExhaustedFrame {
   type: "budget.exhausted"
-  /** Set when the weekly workspace allowance, not the per-run cap, stopped the run. */
-  reason?: "weekly_allowance"
+  reason?: "weekly_allowance" | "run_cost_cap"
   runId: string
   spentCredits: number
   capCredits: number

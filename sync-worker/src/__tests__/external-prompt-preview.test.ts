@@ -331,6 +331,49 @@ describe("external prompt preview", () => {
       expect(body.messages[0].content.split("Translate tersely.").length - 1).toBe(1)
     })
 
+    // AQU-2404: the role text is fixed, so a stored `systemPrompt` changes no
+    // prompt. Showing the default `parts.base` is correct; showing it SILENTLY
+    // is the bug — the preview is what proves a setting landed.
+    it("warns that a stored systemPrompt reaches no prompt once instructions are stored", async () => {
+      await putSettings(testDb, "proj-a", {
+        sourceLanguage: "English",
+        targetLanguage: "French",
+        translationInstructions: "Aimed at oral communities.",
+        systemPrompt: `${DEFAULT_SYSTEM_PROMPT}\nNever transliterate divine names.`,
+      })
+      const { body } = await preview(testDb, token)
+      expect(body.parts.base).not.toContain("transliterate")
+      expect(body.messages[0].content).not.toContain("transliterate")
+      const warning = body.warnings.find((w) => w.code === "system_prompt_ignored")
+      expect(warning).toBeDefined()
+      expect(warning?.message).toContain("translationInstructions")
+    })
+
+    it("warns that a legacy systemPrompt was migrated into the instructions block", async () => {
+      await putSettings(testDb, "proj-a", {
+        sourceLanguage: "English",
+        targetLanguage: "French",
+        systemPrompt: `${DEFAULT_SYSTEM_PROMPT}\nNever transliterate divine names.`,
+      })
+      const { body } = await preview(testDb, token)
+      expect(body.parts.base).not.toContain("transliterate")
+      expect(body.parts.instructions).toContain("Never transliterate divine names.")
+      expect(body.warnings.map((w) => w.code)).toContain("system_prompt_in_instructions")
+      expect(body.warnings.map((w) => w.code)).not.toContain("system_prompt_ignored")
+    })
+
+    it("stays quiet when the stored prompt is only the default template", async () => {
+      await putSettings(testDb, "proj-a", {
+        sourceLanguage: "English",
+        targetLanguage: "French",
+        translationInstructions: "Aimed at oral communities.",
+        systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      })
+      const { body } = await preview(testDb, token)
+      expect(body.warnings.map((w) => w.code)).not.toContain("system_prompt_ignored")
+      expect(body.warnings.map((w) => w.code)).not.toContain("system_prompt_in_instructions")
+    })
+
     it("migrates the agent's legacy project brief exactly as the server paths do", async () => {
       await putSettings(testDb, "proj-a", { sourceLanguage: "English", targetLanguage: "French" })
       await testDb.pg.query(

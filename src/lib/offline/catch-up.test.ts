@@ -2,9 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { makeInMemoryAdapter } from "@livestore/adapter-web"
 import { createStorePromise, type Store } from "@livestore/livestore"
 import type { CellRow, FileSummary } from "@/lib/sync/cells-read-types"
-import type { CellsDeltaResult } from "@/lib/sync/cells-read"
+import { CellsReadError, type CellsDeltaResult } from "@/lib/sync/cells-read"
 import { catchUpProject, type CatchUpDeps } from "./catch-up"
-import { cellRowId, DEFAULT_LANE_KEY, events, localLaneKey, schema, syncCursorId, tables } from "./schema"
+import { CELL_FIELDS_VERSION, cellRowId, DEFAULT_LANE_KEY, events, localLaneKey, schema, syncCursorId, tables } from "./schema"
 
 const P = "proj1"
 const F = "file1"
@@ -78,7 +78,9 @@ const file: FileSummary = { fileId: F, projectId: P, name: "Matthew", fileType: 
 
 type Page = { rows: CellRow[]; maxServerSeq?: number; projectEpoch?: number }
 
-function makeDeps(opts: { files?: FileSummary[]; pages?: Page[]; delta?: CellsDeltaResult } = {}) {
+function makeDeps(
+  opts: { files?: FileSummary[]; pages?: Page[]; delta?: CellsDeltaResult; fetchFile?: CatchUpDeps["fetchFile"] } = {},
+) {
   const streamFileCells = vi.fn<CatchUpDeps["streamFileCells"]>(async (_p, _f, _t, onPage, _side, onMeta) => {
     const pages = opts.pages ?? []
     for (const [i, page] of pages.entries()) {
@@ -88,7 +90,14 @@ function makeDeps(opts: { files?: FileSummary[]; pages?: Page[]; delta?: CellsDe
   })
   const fetchCellsDelta = vi.fn<CatchUpDeps["fetchCellsDelta"]>(async () => opts.delta ?? { kind: "resync" })
   const fetchProjectFiles = vi.fn<CatchUpDeps["fetchProjectFiles"]>(async () => opts.files ?? [file])
-  return { streamFileCells, fetchCellsDelta, fetchProjectFiles }
+  // Unlisted files are gone unless a test says otherwise.
+  const fetchFile = vi.fn<CatchUpDeps["fetchFile"]>(
+    opts.fetchFile ??
+      (async () => {
+        throw new CellsReadError(404, "file not found")
+      }),
+  )
+  return { streamFileCells, fetchCellsDelta, fetchProjectFiles, fetchFile }
 }
 
 const cell = (cellId: string, side: "source" | "target", laneKey = DEFAULT_LANE_KEY) =>
@@ -150,7 +159,9 @@ describe("catchUpProject — full sync (no cursor)", () => {
 
 describe("catchUpProject — delta (trusted cursor)", () => {
   beforeEach(() => {
-    store.commit(events.syncCursorSet({ projectId: P, fileId: F, serverSeq: 50, projectEpoch: 2 }))
+    store.commit(
+      events.syncCursorSet({ projectId: P, fileId: F, serverSeq: 50, projectEpoch: 2, fieldsVersion: CELL_FIELDS_VERSION }),
+    )
   })
 
   it("applies changed cells, removes deleted ones, and advances the cursor", async () => {
@@ -173,8 +184,30 @@ describe("catchUpProject — delta (trusted cursor)", () => {
     expect(cell("v1", "target")?.value).toBe("web edit")
     expect(cell("v9", "target")).toBeUndefined()
     expect(cell("untouched", "target")?.value).toBe("keep")
-    expect(cursor()).toMatchObject({ serverSeq: 60, projectEpoch: 2 })
+    expect(cursor()).toMatchObject({ serverSeq: 60, projectEpoch: 2, fieldsVersion: CELL_FIELDS_VERSION })
     expect(deps.streamFileCells).not.toHaveBeenCalled()
+  })
+
+  it("lands a cell being hidden, and shown again (AQU-1422)", async () => {
+    seedLocal(row("v1", "source", "a"))
+    const hidden = { ...row("v1", "source", "a"), hidden: true }
+    await catchUpProject(
+      store,
+      P,
+      "tok",
+      makeDeps({ delta: { kind: "delta", changedCellIds: ["v1"], cells: [hidden], maxServerSeq: 60, projectEpoch: 2 } }),
+    )
+    expect(cell("v1", "source")?.hidden).toBe(true)
+
+    await catchUpProject(
+      store,
+      P,
+      "tok",
+      makeDeps({
+        delta: { kind: "delta", changedCellIds: ["v1"], cells: [row("v1", "source", "a")], maxServerSeq: 61, projectEpoch: 2 },
+      }),
+    )
+    expect(cell("v1", "source")?.hidden).toBe(false)
   })
 
   it("skips a cell with a queued local edit and holds the cursor", async () => {
@@ -294,6 +327,33 @@ describe("catchUpProject — delta (trusted cursor)", () => {
     expect(cell("v1", "target", localLaneKey(null, "es"))).toBeUndefined()
   })
 
+  it("full-streams once a cursor from before CELL_FIELDS_VERSION, so rows that never changed pick up `hidden` (AQU-1422)", async () => {
+    // A cursor an earlier build minted: no fieldsVersion.
+    store.commit(events.syncCursorSet({ projectId: P, fileId: F, serverSeq: 50, projectEpoch: 2 }))
+    seedLocal(row("v1", "source", "a"))
+    seedLocal(row("v2", "source", "b"))
+    const deps = makeDeps({
+      pages: [
+        { rows: [{ ...row("v1", "source", "a"), hidden: true }, row("v2", "source", "b")], maxServerSeq: 70, projectEpoch: 2 },
+      ],
+    })
+
+    const result = await catchUpProject(store, P, "tok", deps)
+
+    expect(deps.fetchCellsDelta).not.toHaveBeenCalled()
+    expect(cell("v1", "source")?.hidden).toBe(true)
+    expect(cell("v2", "source")?.hidden).toBe(false)
+    // Only the row that differed was written.
+    expect(result.rowsChanged).toBe(1)
+    expect(cursor()).toMatchObject({ serverSeq: 70, projectEpoch: 2, fieldsVersion: CELL_FIELDS_VERSION })
+
+    // From then on, deltas.
+    const next = makeDeps({ delta: { kind: "delta", changedCellIds: [], cells: [], maxServerSeq: 70, projectEpoch: 2 } })
+    await catchUpProject(store, P, "tok", next)
+    expect(next.fetchCellsDelta).toHaveBeenCalled()
+    expect(next.streamFileCells).not.toHaveBeenCalled()
+  })
+
   it("falls back to a full stream when the server asks for a resync", async () => {
     const deps = makeDeps({
       delta: { kind: "resync" },
@@ -316,6 +376,92 @@ describe("catchUpProject — project level", () => {
     expect(deps.streamFileCells).toHaveBeenCalledTimes(2)
     const project = store.query(tables.offlineProjects.select().where({ projectId: P }).first())
     expect(project?.syncedAt?.getTime()).toBeGreaterThan(0)
+  })
+
+  it("removes a file the server no longer lists: its cells, its row, and its cursor", async () => {
+    seedLocal(row("v1", "source", "a"))
+    seedLocal(row("v1", "target", "b"))
+    store.commit(events.syncCursorSet({ projectId: P, fileId: F, serverSeq: 50, projectEpoch: 2 }))
+    const kept = { ...file, fileId: "file2", name: "Mark" }
+    const deps = makeDeps({ files: [kept], pages: [{ rows: [], maxServerSeq: 1, projectEpoch: 1 }] })
+
+    const result = await catchUpProject(store, P, "tok", deps)
+
+    expect(store.query(tables.files.select().where({ projectId: P })).map((f) => f.id)).toEqual(["file2"])
+    expect(store.query(tables.cells.select().where({ projectId: P, fileId: F }))).toHaveLength(0)
+    // Back to no trusted cursor, so a restored file streams in whole.
+    expect(cursor()).toMatchObject({ serverSeq: null, projectEpoch: null })
+    expect(result.rowsChanged).toBe(2)
+    // Only the listed file is read.
+    expect(deps.streamFileCells).toHaveBeenCalledTimes(1)
+    expect(deps.streamFileCells.mock.calls[0][1]).toBe("file2")
+  })
+
+  it("removes an unlisted file the single-file read reports soft-deleted", async () => {
+    seedLocal(row("v1", "target", "b"))
+    const deps = makeDeps({ files: [], fetchFile: async () => ({ ...file, deletedAt: 1 }) })
+
+    await catchUpProject(store, P, "tok", deps)
+
+    expect(deps.fetchFile).toHaveBeenCalledWith(P, F, "tok")
+    expect(store.query(tables.files.select().where({ id: F }).first())).toBeUndefined()
+    expect(cell("v1", "target")).toBeUndefined()
+  })
+
+  it("keeps and catches up a file the listing skipped but the server still has", async () => {
+    // A file edited mid-listing moves ahead of the keyset cursor and is left off every page.
+    seedLocal(row("v1", "target", "old"))
+    const deps = makeDeps({
+      files: [],
+      fetchFile: async () => ({ ...file, deletedAt: null }),
+      pages: [{ rows: [row("v1", "target", "new")], maxServerSeq: 9, projectEpoch: 1 }],
+    })
+
+    const result = await catchUpProject(store, P, "tok", deps)
+
+    expect(store.query(tables.files.select().where({ id: F }).first())).toBeDefined()
+    expect(cell("v1", "target")?.value).toBe("new")
+    expect(result.filesChecked).toBe(1)
+  })
+
+  it("keeps an unlisted file when the single-file read fails for another reason", async () => {
+    seedLocal(row("v1", "target", "b"))
+    const deps = makeDeps({
+      files: [],
+      fetchFile: async () => {
+        throw new TypeError("Failed to fetch")
+      },
+    })
+
+    await catchUpProject(store, P, "tok", deps)
+
+    expect(store.query(tables.files.select().where({ id: F }).first())).toBeDefined()
+    // Still caught up like any listed file, rather than dropped.
+    expect(deps.streamFileCells.mock.calls[0][1]).toBe(F)
+  })
+
+  it("keeps a server-deleted file while it still has queued writes", async () => {
+    seedLocal(row("v1", "target", "my unsent edit"))
+    store.commit(
+      events.eventQueued({
+        id: "q1",
+        projectId: P,
+        fileId: F,
+        cellId: "v1",
+        kind: "target.cell.commit",
+        payload: { value: "my unsent edit" },
+        parentId: null,
+        author: "me",
+        schemaVersion: 1,
+        clientTs: new Date(),
+        createdAt: new Date(),
+      }),
+    )
+
+    await catchUpProject(store, P, "tok", makeDeps({ files: [] }))
+
+    expect(store.query(tables.files.select().where({ id: F }).first())).toBeDefined()
+    expect(cell("v1", "target")?.value).toBe("my unsent edit")
   })
 })
 

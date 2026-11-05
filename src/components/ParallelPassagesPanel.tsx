@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/command"
 import { Checkbox } from "@/components/ui/checkbox"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
-import { LoadingLine } from "@/components/ui/loading-cursor"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
 import { TableEmptyState } from "@/components/ui/empty"
@@ -332,9 +332,7 @@ function ResultsLoadingSkeleton({ t }: { t: TFunction }) {
     <div role="status" aria-label={t("common.searching")}>
       {Array.from({ length: 4 }).map((_, i) => (
         <div key={i} className="space-y-1.5 px-2 py-1.5">
-          <LoadingLine className="text-xs" />
-          <LoadingLine className="text-xs" />
-          <LoadingLine className="text-[10px]" />
+          {i === 0 ? <LoadingCursor className="text-xs" /> : null}
         </div>
       ))}
       <span className="sr-only">{t("common.searching")}</span>

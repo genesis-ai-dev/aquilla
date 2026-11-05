@@ -4,7 +4,7 @@ import { type ColumnDef } from "@tanstack/react-table"
 import { FolderKanban } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { LoadingOverlay } from "@/components/ui/loading-overlay"
-import { LoadingCursor, LoadingLine } from "@/components/ui/loading-cursor"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
@@ -59,44 +59,15 @@ type OverviewProjectRow = {
 }
 
 function OverviewLoadingTemplate() {
-  const { t } = useI18n()
   return (
     <div data-testid="org-overview-loading-template" className="h-full">
       <AppShell
-        sidebar={
-          <div className="flex h-full flex-col gap-4 p-2">
-            <LoadingLine className="h-9 px-2" />
-            <div className="flex flex-col gap-2">
-              <LoadingLine className="h-8 px-2" />
-              <LoadingLine className="h-8 px-2" />
-              <LoadingLine className="h-8 px-2" />
-            </div>
-          </div>
-        }
-        header={
-          <div className="flex items-center gap-4 px-4">
-            <LoadingCursor />
-          </div>
-        }
+        sidebar={<OrgSidebar />}
+        header={<OrgBreadcrumb section="Overview" isProjectsLanding />}
         statusBar={null}
         main={
           <Page size="wide">
-            <LoadingLine className="mb-8 h-7 text-xl font-semibold" />
-            {/* AQU-1071: seven tiles, matching the loaded strip (the Languages tile
-              * was the seventh) so the layout does not jump on resolve. */}
-            <div className={STAT_TILE_GRID}>
-              {[
-                t("nav.projects"),
-                t("org.orgHome.activeLanguages"),
-                t("org.orgHome.avgTranslated"),
-                t("org.orgHome.avgValidated"),
-                t("org.orgHome.avgAudio"),
-                t("org.orgHome.stalled"),
-                t("org.orgHome.overdue"),
-              ].map((label) => (
-                <StatTile key={label} label={label} value={<LoadingCursor />} />
-              ))}
-            </div>
+            <LoadingCursor className="text-xl" />
           </Page>
         }
       />

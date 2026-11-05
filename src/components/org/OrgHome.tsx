@@ -4,7 +4,7 @@ import { Link, Navigate, useLocation, useNavigate } from "react-router-dom"
 import { type ColumnDef } from "@tanstack/react-table"
 import { AppShell } from "@/components/AppShell"
 import { LoadingOverlay } from "@/components/ui/loading-overlay"
-import { LoadingCursor, LoadingLine } from "@/components/ui/loading-cursor"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
@@ -44,90 +44,21 @@ import { progressPercentOfFraction } from "@/lib/progress/progress-percent"
 const PANEL_MAX_H =
   "h-[clamp(14rem,calc(100dvh-22rem),28rem)]"
 
-function DashboardRowTemplate() {
-  return (
-    <div className="flex items-center gap-4 px-2 py-2">
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <LoadingLine />
-        <LoadingLine className="text-xs" />
-      </div>
-      <LoadingCursor className="shrink-0" />
-    </div>
-  )
-}
-
-function DashboardPanelTemplate({ rows }: { rows: number }) {
-  return (
-    <section className="overflow-hidden rounded-lg border bg-card">
-      <div className="flex items-start justify-between gap-4 px-5 pt-5 pb-0">
-        <div className="flex flex-col gap-1">
-          <LoadingLine className="text-base font-medium" />
-          <LoadingLine className="text-xs" />
-        </div>
-        <div className="h-8 w-40 rounded-md border" />
-      </div>
-      <div className="space-y-1 px-5 pt-2 pb-3">
-        {Array.from({ length: rows }).map((_, index) => (
-          <DashboardRowTemplate key={index} />
-        ))}
-      </div>
-    </section>
-  )
-}
-
 /**
- * A stable, value-free preview of the dashboard's eventual geometry. This
- * never reads partially hydrated org/project state, so startup has exactly one
- * visual transition: template → resolved dashboard.
+ * The real chrome with one cursor per region: the sidebar prints its entries
+ * as each permission lands, the breadcrumb holds the org's place, and the
+ * body shows one cursor where the dashboard will start.
  */
 function OrgHomeLoadingTemplate() {
-  const { t } = useI18n()
   return (
     <div data-testid="org-home-loading-template" className="h-full">
       <AppShell
-        sidebar={
-          <div className="flex h-full flex-col gap-4 p-2">
-            <LoadingLine className="h-9 px-2" />
-            <div className="flex flex-col gap-2">
-              <LoadingLine className="h-8 px-2" />
-              <LoadingLine className="h-8 px-2" />
-              <LoadingLine className="h-8 px-2" />
-            </div>
-            <div className="mt-auto flex flex-col gap-2">
-              <LoadingLine className="h-8 px-2" />
-              <LoadingLine className="h-10 px-2" />
-            </div>
-          </div>
-        }
-        header={
-          <div className="flex items-center gap-4 px-4">
-            <LoadingCursor />
-          </div>
-        }
+        sidebar={<OrgSidebar />}
+        header={<OrgBreadcrumb section="Overview" isProjectsLanding />}
         statusBar={null}
         main={
           <Page size="wide">
-            <LoadingLine className="mb-8 h-7 text-xl font-semibold" />
-            <div className="flex flex-col gap-6">
-              <div className={STAT_TILE_GRID}>
-                {/* The labels are known before the numbers: show them, and a
-                  * cursor where each value will land. */}
-                {[
-                  t("org.orgHome.organizations"),
-                  t("nav.projects"),
-                  t("org.orgHome.avgTranslated"),
-                  t("org.orgHome.avgValidated"),
-                  t("org.orgHome.stalled"),
-                  t("org.orgHome.overdue"),
-                ].map((label) => (
-                  <StatTile key={label} label={label} value={<LoadingCursor />} />
-                ))}
-              </div>
-              <div className="flex flex-col gap-6">
-                <DashboardPanelTemplate rows={4} />
-                <DashboardPanelTemplate rows={3} />
-              </div>
-            </div>
+            <LoadingCursor className="text-xl" />
           </Page>
         }
       />

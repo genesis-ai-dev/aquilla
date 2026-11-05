@@ -14,7 +14,7 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { EmptyState } from "@/components/ui/empty"
-import { LoadingLine } from "@/components/ui/loading-cursor"
+import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { LoadingTemplate } from "@/components/ui/loading-overlay"
 import type { LivingMemoryCell } from "@/hooks/useLivingMemory"
 
@@ -32,9 +32,7 @@ function LivingMemorySkeleton() {
         {Array.from({ length: 6 }).map((_, i) => (
           <Card key={i} className="overflow-hidden">
             <CardContent className="flex flex-col gap-2 p-3">
-              <LoadingLine className="text-[10px]" />
-              <LoadingLine className="text-xs" />
-              <LoadingLine />
+              {i === 0 ? <LoadingCursor /> : null}
             </CardContent>
           </Card>
         ))}

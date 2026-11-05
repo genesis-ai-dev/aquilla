@@ -117,12 +117,14 @@ export function useParatextBook(project: BridgeProject | null, fileName: string 
   const setEditText = useCallback(async (unit: Unit, text: string) => {
     if (!guid || !bookRef.current) return
     const next = new Map(editsRef.current)
+    // Keep the text exactly as typed: trimming here would eat a trailing space
+    // on every keystroke. planWriteBack trims trailing whitespace at write time.
     const trimmed = text.replace(/[ \t\r\n]+$/, "")
-    if (trimmed === unit.text) {
+    if (trimmed === unit.text.replace(/[ \t\r\n]+$/, "")) {
       next.delete(unit.id)
       await bridgeStore.deletePendingEdits(guid, [unit.id])
     } else {
-      const edit = { unitId: unit.id, text: trimmed, baseRawHash: unit.rawHash }
+      const edit = { unitId: unit.id, text, baseRawHash: unit.rawHash }
       next.set(unit.id, edit)
       await bridgeStore.putPendingEdit(guid, bookRef.current, edit)
     }

@@ -1,4 +1,4 @@
-// Throughput bar test — BATCH_ENDPOINT_CONTRACT.md §4 (frozen):
+// Throughput bar test — docs/BATCH_ENDPOINT_CONTRACT.md §4 (frozen):
 // 10,000 segments through create→process→results with a no-op translator in
 // ≤5 minutes of pipeline time (≥2,000 segments/minute sustained).
 import { describe, it, expect } from "vitest"

@@ -153,9 +153,9 @@ import { SettingsNav, type SettingsSection } from "./ProjectSettings/SettingsNav
 import { BackLink, NavList, NavRow } from "@/components/ui/nav-list"
 import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
-import type { CellEditingTier } from "@/lib/sync/project-settings"
+import type { CellEditingTier, CellLabelTier } from "@/lib/sync/project-settings"
 import { FLOOR_LABEL } from "@/pages/settings/constants"
-import { CELL_EDITING_FLOOR_OPTIONS, cellEditingTierLabel } from "@/components/ProjectSettings/cell-editing-floor-options"
+import { CELL_EDITING_FLOOR_OPTIONS, CELL_LABEL_FLOOR_OPTIONS, cellEditingTierLabel } from "@/components/ProjectSettings/cell-editing-floor-options"
 import { OrgDefaultSource, orgBooleanOptionLabel } from "@/components/ProjectSettings/OrgDefaultSource"
 import { ProjectImportFloorSection } from "@/components/ProjectSettings/ProjectImportFloorSection"
 import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
@@ -270,6 +270,8 @@ interface SavedSettings {
   allowSelfValidationAudio: boolean | null
   /** AQU-646: may people add lines into the timeline's silences? */
   cellEditingFloor: CellEditingTier | null
+  /** AQU-2408: who may type a label on a cell; null = maintainer (the default). */
+  cellLabelFloor: CellLabelTier | null
   /** AQU-646 stage 2: may this project's timelines be restructured? */
   allowTrackEditing: boolean | null
   /** AQU-1758: Film and Sources in the media view; null = the project's kind decides. */
@@ -333,6 +335,7 @@ function readSavedSettings(project: ProjectRecord): SavedSettings {
     validationNamedUsersAudio: project.validationNamedUsersAudio ?? [],
     allowSelfValidationAudio: typeof project.allowSelfValidationAudio === "boolean" ? project.allowSelfValidationAudio : null,
     cellEditingFloor: project.cellEditingFloor ?? null,
+    cellLabelFloor: project.cellLabelFloor ?? null,
     allowTrackEditing: typeof project.allowTrackEditing === "boolean" ? project.allowTrackEditing : null,
     filmAndSources: typeof project.filmAndSources === "boolean" ? project.filmAndSources : null,
     timingLocked: typeof project.timingLocked === "boolean" ? project.timingLocked : null,
@@ -757,7 +760,7 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
     validationRoleFloor, validationNamedUsers, allowSelfValidation,
     validationRoleFloorAudio, validationNamedUsersAudio, allowSelfValidationAudio,
-    cellEditingFloor, allowTrackEditing, filmAndSources, timingLocked, harmonize_min_role: harmonizeMinRole,
+    cellEditingFloor, cellLabelFloor, allowTrackEditing, filmAndSources, timingLocked, harmonize_min_role: harmonizeMinRole,
     bibleResourcesEnabled, bibleEnrichments, decaySettings, audioMediaStrategy, geminiApiKey,
     precedingTargetCells, importExcludeFrontMatter, importCellUnit, smartQuotes, termMatching,
   } = live
@@ -774,6 +777,8 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
   // the organization's, then on.
   const effectiveAllowTrackEditing = allowTrackEditing ?? orgMediaDefaults.allowTrackEditing ?? true
   const effectiveCellEditingFloor: CellEditingTier = cellEditingFloor ?? orgMediaDefaults.cellEditingFloor ?? "none"
+  // AQU-2408: no organization default — the built-in one is maintainer.
+  const effectiveCellLabelFloor: CellLabelTier = cellLabelFloor ?? "maintainer"
   // Pre-merge round: the Media timeline's timing mode moved OUT of Project
   // Settings — it is FILE-level now (file.timing.set), controlled from the
   // timeline toolbar with the same maintainer floor.
@@ -1008,7 +1013,7 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
     // AQU-1068: a permission, so it lives with the roles rather than in the
     // Timeline card it grew out of — it governs ordinary text files now, not
     // just the timeline's silences.
-    { id: "section-cell-editing", label: t("projectSettings.cellEditing.sectionTitle"), keywords: ["add cell", "remove cell", "insert", "delete", "structure", "verse", "line", "row", "restructure", "permission", "role"] },
+    { id: "section-cell-editing", label: t("projectSettings.cellEditing.sectionTitle"), keywords: ["add cell", "remove cell", "insert", "delete", "structure", "verse", "line", "row", "restructure", "permission", "role", "label", "cell label", "who can label"] },
     // AQU-2342: the ONE instructions text every AI draft reads (it replaced
     // the brief, the system prompt and Living Memory's instruction entries).
     // Its own section id gives it a row in the AI pane AND makes a search for
@@ -1670,6 +1675,46 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
                       </SelectContent>
                     </Select>
                     </div>
+                  </DisabledFieldTooltip>
+                }
+              />
+              {/* AQU-2408: who may type a label on a cell. Two rungs, maintainer
+                  unless opened to project leads; no organization default. The
+                  tier is enforced where the Label field is drawn, like the one
+                  above — docs/decisions/0007-cell-labels-are-metadata-never-cast.md. */}
+              <SettingsRow
+                saveId="cellLabelFloor"
+                label={<label htmlFor="cell-label-floor">{t("projectSettings.cellLabel.label")}</label>}
+                description={t("projectSettings.cellLabel.description")}
+                control={
+                  <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
+                    <Select
+                      items={CELL_LABEL_FLOOR_OPTIONS.map((o) => ({
+                        value: o.value,
+                        label: FLOOR_LABEL[o.level] ?? t(o.labelKey),
+                      }))}
+                      disabled={!canChangeShared}
+                      value={effectiveCellLabelFloor}
+                      onValueChange={(value) => {
+                        if (value && value !== effectiveCellLabelFloor) setShared("cellLabelFloor", value as CellLabelTier)
+                      }}
+                    >
+                      <SelectTrigger
+                        id="cell-label-floor"
+                        data-testid="settings-cell-label-floor"
+                        aria-label={t("projectSettings.cellLabel.label")}
+                        className="w-64 bg-background"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {CELL_LABEL_FLOOR_OPTIONS.map((o) => (
+                            <SelectItem key={o.value} value={o.value}>{t(o.labelKey)}</SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
                   </DisabledFieldTooltip>
                 }
               />

@@ -279,6 +279,7 @@ import { recordGroup, recordStep, registerStepKinds, setHistoryRemote, setHistor
 import { httpHistoryRemote } from "@/lib/history/history-remote"
 import { laneAccessFor, laneShownReady, waitUntilReady, type LaneAccess } from "@/lib/history/lane-switch"
 import { CastStepBuilder, castValueOf, filmNow, mediaStepHandlers, type CastValue, type CueLinksData, type CueLinkWrite, type PendingFilm } from "@/lib/history/media-steps"
+import { cellLabelStepHandlers, recordCellLabelStep } from "@/lib/history/label-steps"
 import { sourceStepHandlers } from "@/lib/history/source-steps"
 import { recordingLinesStepHandlers } from "@/lib/history/recording-lines-steps"
 import { rowStepHandlers } from "@/lib/history/row-steps"
@@ -301,7 +302,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { canHarmonize, emitCastAssign, emitSourceCellCommit, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitCellGlossSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellAudioUnvalidate, emitCellAudioSelect, emitCellAudioDeselect, emitSourceCellRestore, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioGain, emitCellAudioPlace, emitCellAudioCut, emitCellAudioUncut, emitCellAudioRemove, emitCellAudioRename, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitFileMilestoneSet, emitTermCreate, emitTermUpdate, enqueueEvents } from "@/lib/sync/events-emit"
+import { canHarmonize, emitCastAssign, emitCellLabelSet, emitSourceCellCommit, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitCellGlossSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellAudioUnvalidate, emitCellAudioSelect, emitCellAudioDeselect, emitSourceCellRestore, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioGain, emitCellAudioPlace, emitCellAudioCut, emitCellAudioUncut, emitCellAudioRemove, emitCellAudioRename, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitFileMilestoneSet, emitTermCreate, emitTermUpdate, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
 import { postSplitCastCopies, resolveCellEditingFloor, resolveTimingLocked } from "@/lib/sync/project-settings"
@@ -7944,6 +7945,34 @@ export function ProjectWorkspace() {
     persistGloss(cell, glossText)
   }, [persistGloss])
 
+  // AQU-2408: the cell's own label, typed in the expansion panel's Label row.
+  // One non-chain event (`cell.label.set`, metadata on the source row — never
+  // cast_name, never a voice) and one undo step. The row shows the saved value
+  // once the projection comes back: metadata rides the cell row, so there is
+  // no local cache to keep in step. The tier that decides who sees the field
+  // is enforced in the row (src/lib/cell-label-gate.ts); this handler trusts it.
+  const saveCellLabel = useCallback((cell: CellData, label: string | null) => {
+    if (!project?.id || !cell.fileId) return
+    const before = cell.cellLabel ?? null
+    const trimmed = label?.trim() ?? ""
+    const after = trimmed === "" ? null : trimmed
+    if (before === after) return
+    const pending = emitCellLabelSet({
+      projectId: project.id,
+      fileId: cell.fileId,
+      cellId: cell.id,
+      label: after,
+      author: currentUsername,
+    }).then(
+      () => true,
+      (err: unknown) => {
+        console.warn("[cell-label] outbox emit failed:", err)
+        return false
+      },
+    )
+    recordCellLabelStep({ fileId: cell.fileId, cellId: cell.id, before, after }, activeFileNameRef.current, pending)
+  }, [project?.id, currentUsername])
+
   // ── FRO-192: assignment data ──────────────────────────────────────────────
   // Members list: used by AssignModal for the assignee picker and for building
   // the username→userId reverse map.
@@ -15341,6 +15370,31 @@ export function ProjectWorkspace() {
       }),
     )
   }, [readFilmLink, writeFilmLink, writeCueLinks, getTokenForProjectFile, readCastValue, writeCastValues])
+  // AQU-2408: a cell's label, undone by writing the previous one back. Only the
+  // open file's rows can be read, so a step held for another file is blocked
+  // as "elsewhere" rather than guessed at.
+  useEffect(() => {
+    if (!project?.id) return
+    const projectId = project.id
+    return registerStepKinds(
+      cellLabelStepHandlers({
+        readLabel: (fileId, cellId) => {
+          if (fileId !== activeFileId) return { missing: "elsewhere" }
+          const view = cellStore.getCellView(cellId)
+          return view ? { label: view.cellLabel ?? null } : { missing: "gone" }
+        },
+        writeLabel: async (fileId, cellId, label) => {
+          try {
+            await emitCellLabelSet({ projectId, fileId, cellId, label, author: currentUsername })
+            return true
+          } catch (err) {
+            console.warn("[cell-label] undo write failed:", err)
+            return false
+          }
+        },
+      }),
+    )
+  }, [project?.id, activeFileId, cellStore, currentUsername])
   // …and source text, chained on the line's source head like any source edit.
   useEffect(() => {
     return registerStepKinds(
@@ -18362,6 +18416,7 @@ export function ProjectWorkspace() {
             onBacktranslate={runBacktranslation}
             onSaveBacktranslation={saveBacktranslation}
             onSaveGloss={saveGloss}
+            onSaveCellLabel={saveCellLabel}
             backtranslating={backtranslating}
             backtranslationErrors={backtranslationErrors}
             backtranslationByCellId={backtranslationCache}

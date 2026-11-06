@@ -358,7 +358,8 @@ import { deriveSourceRegions, insertSlotsByCell, EMPTY_INSERT_SLOTS } from "@/li
 import { deriveTracksForFile } from "@/lib/timeline/tracks"
 import { nextFolderName } from "@/lib/timeline/track-names"
 import { applyPendingOrders, renormaliseOrders, settledPendingOrders } from "@/lib/timeline/track-reorder"
-import { folderIdsOf, folderMembers, orderForScopeAppend, trackScope } from "@/lib/timeline/track-groups"
+import { contentFileIdsOfShownTracks, folderIdsOf, folderMembers, orderForScopeAppend, trackScope } from "@/lib/timeline/track-groups"
+import { loadHiddenTracks } from "@/lib/timeline/track-collapse"
 import { GENERATED_VOICE_SLOT, programmeTrackSlots, RECORDING_SLOT, slotForTrack } from "@/lib/timeline/track-slots"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { TimelineEditor } from "@/components/timeline/TimelineEditor"
@@ -2583,7 +2584,7 @@ export function ProjectWorkspace() {
   // the plain text table. AQU-1758 (Oct 27): so does every other file — the
   // Audio view, which replaced a book's source column with per-line voice
   // cards, is gone. A book or document lays its lines out from its recordings,
-  // one chapter at a time, with dashed stand-ins for lines not yet recorded.
+  // the whole file, every chapter, with dashed stand-ins for lines not yet recorded.
   const activeFileForLens = activeFileId ? project?.files.find((f) => f.id === activeFileId) : null
   const activeFileTimeOrdered = Boolean(activeFileForLens && fileOrderedBy(activeFileForLens) === "time")
   // Smart Extensions (apiRev 2 + 3): an `editor` extension mounted for the
@@ -13520,9 +13521,19 @@ export function ProjectWorkspace() {
   // Media view" would be a button to where you already are.
   const handleOpenMediaView = useCallback(() => switchLens("audio"), [switchLens])
 
+  const [hiddenTimelineTrackIds, setHiddenTimelineTrackIds] = useState<ReadonlySet<string>>(() => loadHiddenTracks(activeFileId))
+  useEffect(() => {
+    setHiddenTimelineTrackIds(loadHiddenTracks(activeFileId))
+  }, [activeFileId])
+  const onHiddenTimelineTracks = useCallback((ids: ReadonlySet<string>) => {
+    setHiddenTimelineTrackIds((prev) => {
+      if (prev.size === ids.size && [...ids].every((id) => prev.has(id))) return prev
+      return ids
+    })
+  }, [])
   const timelineText = useTimelineTextCells({
     projectId: project?.id ?? null,
-    fileIds: serverTimelineTracks.flatMap(track => track.contentFileId ? [track.contentFileId] : []),
+    fileIds: contentFileIdsOfShownTracks(serverTimelineTracks, hiddenTimelineTrackIds),
     getToken: getTokenForFile,
     enabled: editorFirstPaint && lens === "audio",
   })
@@ -13987,17 +13998,18 @@ export function ProjectWorkspace() {
     ? (fileTransport.cellId ?? heldCellIdAtSec(audioMergedCells, fileTransport.progress.currentTime))
     : null
 
-  // ── AQU-1758: a book or document on the timeline, one chapter at a time ──
+  // ── A book or document on the timeline, the whole file ──
   //
-  // A book's timeline shows ONE CHAPTER at a time: the one the table and its
-  // chapter picker are on, or, while playback is on a line of this file, that
-  // line's chapter. A file with no chapters shows WHOLE, however long (Sam,
-  // Oct 28: the long-file parts are dropped — the timeline draws only the
-  // clips in view, so length costs nothing). The timeline, the bottom strip's
-  // Play all and every timeline seek share ONE list of lines
-  // (`timelineCells`), so the programme they each lay out is the same one. On
-  // a book, headings follow "Count headings as translatable content" and
-  // hidden lines stay off unless recorded (lib/timeline/sequence-timeline.ts).
+  // A book's timeline lays out EVERY chapter, end to end, on one clock. The
+  // chapter the table is on (`chosenScopeKey`) only names where the reader
+  // is; scrolling the table does not swap the timeline for that chapter. A
+  // file with no chapters is the same list (Sam, Oct 28: the long-file parts
+  // are dropped — the timeline draws the clips in view, so length costs
+  // nothing). The timeline, the bottom strip's Play all and every timeline
+  // seek share ONE list of lines (`timelineCells`), so the programme they
+  // each lay out is the same one. On a book, headings follow "Count headings
+  // as translatable content" and hidden lines stay off unless recorded
+  // (lib/timeline/sequence-timeline.ts).
   const sequenceTimeline = timelineEditorVisible && !activeFileTimeOrdered
   const [chosenScopeKey, setChosenScopeKey] = useState<string | null>(null)
   // The lines a book's timeline may draw at all, before any chapter.
@@ -14011,16 +14023,15 @@ export function ProjectWorkspace() {
     return chapters.length > 0 ? chapters : EMPTY_TIMELINE_CHAPTERS
   }, [sequenceTimeline, cellStore, cellStoreVersion])
   const queueCellOnFile = fileTransport.source === "queue" && fileTransport.active ? fileTransport.cellId : null
+  // Remembered so a scroll of the table still has a chapter to name. The
+  // timeline itself is `timelineLines`: every chapter, in the file's order.
   const timelineChapter = useMemo(
     () => timelineScopes.length > 0
       ? resolveTimelineChapter({ chapters: timelineScopes, chosenKey: chosenScopeKey, queueCellId: queueCellOnFile })
       : null,
     [timelineScopes, chosenScopeKey, queueCellOnFile],
   )
-  const timelineCells = useMemo(
-    () => scopeCells(timelineLines, timelineChapter),
-    [timelineLines, timelineChapter],
-  )
+  const timelineCells = timelineLines
   // The bottom strip reads its own audio and merges it in; it gets the same
   // lines by id.
   const timelineBarCells = useMemo(() => {
@@ -14028,19 +14039,19 @@ export function ProjectWorkspace() {
     const ids = new Set(timelineCells.map((c) => c.id))
     return legacyCells.filter((c) => ids.has(c.id))
   }, [audioMergedCells, legacyCells, timelineCells])
-  // A book's chapter comes from the table: the chapter on screen, as it
-  // scrolls. Scrolling is reading, never a pick, so it leaves playback alone —
-  // a paused Play all resumes where it was, and the timeline stays on its
-  // chapter until it ends (lib/timeline/chapter-pick). A pick in the chapter
-  // picker and a row of another chapter clicked are what end a paused one.
+  // The table reports the chapter on screen as it scrolls. Scrolling is
+  // reading, never a pick, so it leaves playback alone — a paused Play all
+  // resumes where it was. The timeline keeps every chapter either way
+  // (lib/timeline/chapter-pick). A pick in the chapter picker and a row of
+  // another chapter clicked are what end a paused one.
   const handleTableChapterChange = useCallback((key: string | null) => {
     setChosenScopeKey(key)
   }, [])
   const queueChapterKey = chapterOfCell(timelineScopes, queueCellOnFile)?.key ?? null
   // AQU-1758 (Sam, Oct 29): picking a chapter while Play all plays jumps to
-  // it and keeps playing, from its first line, in either timing. Picking one
-  // while playback is paused ends that playback, as before. Either way the
-  // timeline shows the chapter picked (lib/timeline/chapter-pick).
+  // it and keeps playing, from its first line, on the whole book's clock.
+  // Picking one while playback is paused ends that playback, as before
+  // (lib/timeline/chapter-pick).
   const queueChapterKeyRef = useRef(queueChapterKey)
   queueChapterKeyRef.current = queueChapterKey
   const chapterPickRunRef = useRef({ projectId: project?.id, session: frontierSession })
@@ -14048,7 +14059,11 @@ export function ProjectWorkspace() {
   // The file's chapters and lines, for the chapter pick below and for Play
   // all's run into the next chapter. Declared before both read it: the React
   // Compiler only treats it as a ref when it sees the useRef first.
-  const chapterRunRef = useRef<{ chapters: readonly TimelineChapter[]; cells: readonly CellData[] } | null>(null)
+  const chapterRunRef = useRef<{
+    chapters: readonly TimelineChapter[]
+    cells: readonly CellData[]
+    onScreen: TimelineChapter | null
+  } | null>(null)
   const handleChapterPicked = useCallback((key: string): boolean => {
     setChosenScopeKey(key)
     const run = chapterRunRef.current
@@ -14064,12 +14079,14 @@ export function ProjectWorkspace() {
   // Play all carries on into the next chapter: when a run of this file's
   // chapter plays out, the next chapter with anything to play starts.
   useLayoutEffect(() => {
-    chapterRunRef.current = timelineScopes.length > 0 ? { chapters: timelineScopes, cells: timelineLines } : null
+    chapterRunRef.current = timelineScopes.length > 0
+      ? { chapters: timelineScopes, cells: timelineLines, onScreen: timelineChapter }
+      : null
     showChapterOfCellRef.current = (cellId) => {
       const chapter = chapterOfCell(timelineScopes, cellId)
       if (!chapter) return
       setChosenScopeKey(chapter.key)
-      // Paused on another chapter: end it, so the timeline shows this row's.
+      // Paused on another chapter: end it. The row's chapter is already on the timeline.
       if (rowEndsPlayback({ rowKey: chapter.key, playingKey: queueChapterKeyRef.current, queueKind: getQueueState().kind })) stopQueue()
     }
   })
@@ -14078,6 +14095,10 @@ export function ProjectWorkspace() {
     if (!run || ctx.snapshot) return
     const played = chapterOfCell(run.chapters, ctx.cells[0]?.id)
     if (!played) return
+    // A run that already holds the later chapters plays them itself. Starting
+    // the next chapter here would begin it again after the book had finished.
+    const last = chapterOfCell(run.chapters, ctx.cells[ctx.cells.length - 1]?.id)
+    if (last && last.key !== played.key) return
     const linesOf = (chapter: TimelineChapter) => scopeCells(run.cells, chapter)
     const next = nextPlayableChapter(run.chapters, played.key, (chapter) => hasAnyPlayableAudio(linesOf(chapter)))
     if (!next) return
@@ -17585,7 +17606,7 @@ export function ProjectWorkspace() {
               // then History. Right: the status ring, the views, Panels, ⋯.
               // The transport is the thin strip along the bottom of the view.
               <MediaTopBar
-                afterTools={<HistoryPanel onResult={reportHistory} laneName={historyLaneName} />}
+                afterTools={<HistoryPanel onResult={reportHistory} laneName={historyLaneName} align="start" />}
                 trailing={
                   <>
                     <MediaStatusRing
@@ -17819,6 +17840,7 @@ export function ProjectWorkspace() {
                     onScrubEnd={handleTimelineScrubEnd}
                     tracks={timelineTracks}
                     textTrackCells={timelineText.cellsByFile}
+                    onHiddenTracksChange={onHiddenTimelineTracks}
                     textTrackErrors={timelineText.errors}
                     onRetryTextTrack={timelineText.refresh}
                     onRetimeTextTrack={handleRetimeTextTrack}

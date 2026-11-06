@@ -103,6 +103,7 @@ export function MediaPanelsMenu({ dock, fileName, kind, filmHiddenByTiming }: Me
           disabled={!toggle}
           closeOnClick={false}
           onCheckedChange={() => toggle?.()}
+          className="hover:bg-accent/40"
         >
           <span className="min-w-0 flex-1 truncate">{names.panel(id)}</span>
           <DropdownMenuShortcut className="tracking-normal">{keys.show(n)}</DropdownMenuShortcut>
@@ -122,7 +123,13 @@ export function MediaPanelsMenu({ dock, fileName, kind, filmHiddenByTiming }: Me
   )
 
   return (
-    <DropdownMenu open={dock.panelsOpen} onOpenChange={dock.setPanelsOpen}>
+    <DropdownMenu
+      open={dock.panelsOpen}
+      onOpenChange={dock.setPanelsOpen}
+      // A row lights up from the keyboard, not from opening or from the pointer,
+      // the same way the notification inbox does.
+      highlightItemOnHover={false}
+    >
       <AppTooltip content={t("editor.dock.panelsTip", { keys: keys.panels })} disabled={dock.panelsOpen}>
         <DropdownMenuTrigger
           render={
@@ -217,7 +224,7 @@ function ResetRow({ onReset, note, keysLine }: { onReset: () => void; note: stri
   const t = useT()
   const [infoOpen, toggleInfo] = useInfoOpen()
   return (
-    <DropdownMenuItem closeOnClick={false} data-testid="panels-reset" onClick={onReset}>
+    <DropdownMenuItem closeOnClick={false} data-testid="panels-reset" onClick={onReset} className="hover:bg-accent/40">
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="flex items-center gap-1.5">
           <RotateCcw aria-hidden />
@@ -229,6 +236,9 @@ function ResetRow({ onReset, note, keysLine }: { onReset: () => void; note: stri
               label={t("editor.dock.resetInfoAria")}
               controls="panels-reset-info"
               testId="panels-reset-info-toggle"
+              // A tab stop here is the first thing the menu can focus, so Reset
+              // layout would open already highlighted.
+              tabIndex={-1}
             />
           </span>
         </span>

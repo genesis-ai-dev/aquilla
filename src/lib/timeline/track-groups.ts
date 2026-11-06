@@ -154,6 +154,20 @@ export function hiddenTracksOf(
   return tracks.filter((track) => track.kind !== "folder" && hidden.has(track.id))
 }
 
+/** Content files of tracks this person has not hidden. A hidden track is not
+ *  drawn, so nothing should fetch or lay out the file it points at. */
+export function contentFileIdsOfShownTracks(
+  tracks: readonly { id: string; contentFileId?: string | null }[],
+  hidden: ReadonlySet<string> | null | undefined,
+): string[] {
+  const out: string[] = []
+  for (const track of tracks) {
+    if (!track.contentFileId || hidden?.has(track.id)) continue
+    out.push(track.contentFileId)
+  }
+  return out
+}
+
 /**
  * What a drag is actually reordering: the dragged track's SIBLINGS, and the
  * screen extent of each.

@@ -20,7 +20,12 @@
 // stretch of source audio"; this row should look exactly like an mp3 import's,
 // not invent its own.
 
-import { memo } from "react"
+import { memo, useContext, useSyncExternalStore } from "react"
+import {
+  TimelineScrollBusContext,
+  emptyScrollLeft,
+  subscribeNoScroll,
+} from "./timeline-scroll-bus"
 import { TRACK_DASH_CLASS, trackHueVarsFor } from "@/lib/timeline/track-colors"
 import { secToPx, isVisible, chipRadiusPx } from "@/lib/timeline/scale"
 import { MIN_ADDABLE_SPAN_SEC } from "@/lib/timeline/lane-timing"
@@ -35,6 +40,7 @@ import { CueLinkOverlay, type LaneLinkOverlay } from "./CueLinkOverlay"
 import { MIN_CARD_TEXT_PX, TimelineCard } from "./TimelineCard"
 import type { CellData } from "@/hooks/useCells"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { useTimelineOriginPx } from "./timeline-origin"
 import type { SourceRegionMap } from "@/lib/timeline/source-regions"
 
 // Silences shorter than MIN_ADDABLE_SPAN_SEC draw no chip. A real VTT carries
@@ -120,6 +126,16 @@ function SourceRegionLaneImpl({
   hideGaps = false,
 }: SourceRegionLaneProps) {
   const t = useT()
+  const originPx = useTimelineOriginPx()
+  // The editor publishes scroll on a bus so a wheel tick does not re-render
+  // every lane. Outside the editor (the lane's own tests) the prop stands.
+  const scrollBus = useContext(TimelineScrollBusContext)
+  const liveScrollLeft = useSyncExternalStore(
+    scrollBus ? scrollBus.subscribe : subscribeNoScroll,
+    scrollBus ? scrollBus.getLeft : emptyScrollLeft,
+    scrollBus ? scrollBus.getLeft : emptyScrollLeft,
+  )
+  const scrollLeft = scrollBus ? liveScrollLeft : scrollLeftPx
   const spanOf = (c: CellData): { start: number; end: number } => {
     const start = c.startTime ?? 0
     return { start, end: c.endTime ?? start }
@@ -201,7 +217,7 @@ function SourceRegionLaneImpl({
           // solid-walled cue is exactly where the two used to read as one
           // interlocked shape.
           style={{
-            left: `${secToPx(g.startSec, pxPerSec)}px`,
+            left: `${secToPx(g.startSec, pxPerSec) - originPx}px`,
             width: `${widthPx}px`,
             borderRadius: `${chipRadiusPx(widthPx)}px`,
           }}
@@ -225,7 +241,7 @@ function SourceRegionLaneImpl({
               // chip's overflow-hidden makes the chip its scroll container.)
               <span data-testid="tl-source-gap-label"
                 className="absolute inset-y-0 flex items-center whitespace-nowrap text-xs text-muted-foreground"
-                style={{ left: `${10 + Math.max(0, Math.min(scrollLeftPx - secToPx(g.startSec, pxPerSec), widthPx - 160))}px` }}>
+                style={{ left: `${10 + Math.max(0, Math.min(scrollLeft - secToPx(g.startSec, pxPerSec), widthPx - 160))}px` }}>
                 {gapLabel}
               </span>
             ) : (

@@ -80,20 +80,36 @@ export function useTargetChipPeaks({
       })
     }
 
-    void loadPeaksBatch({
-      targets: missing,
-      projectId,
-      bins,
-      getSyncToken: audioSyncTokenFetcherForSession(session),
-      isCancelled: () => cancelled,
-      onLoaded: (attachmentKey, peaks) => {
-        byKey.current.set(attachmentKey, peaks)
-        flush()
-      },
-    })
+    // Not in this commit. A column is wider than the screen, and each one
+    // decodes every take it holds. Starting that during the open — or back to
+    // back — is the hitch that lasts until the first screenful of clips has
+    // been decoded. Wait until the browser is idle, then one clip at a time
+    // with a gap so a scroll frame can land between decodes.
+    const start = () => {
+      if (cancelled) return
+      void loadPeaksBatch({
+        targets: missing,
+        projectId,
+        bins,
+        concurrency: 1,
+        pauseMs: 32,
+        getSyncToken: audioSyncTokenFetcherForSession(session),
+        isCancelled: () => cancelled,
+        onLoaded: (attachmentKey, peaks) => {
+          byKey.current.set(attachmentKey, peaks)
+          flush()
+        },
+      })
+    }
+    const idleId = typeof requestIdleCallback === "function"
+      ? requestIdleCallback(start, { timeout: 500 })
+      : 0
+    const timerId = idleId === 0 ? window.setTimeout(start, 200) : 0
 
     return () => {
       cancelled = true
+      if (idleId !== 0 && typeof cancelIdleCallback === "function") cancelIdleCallback(idleId)
+      if (timerId !== 0) window.clearTimeout(timerId)
     }
     // `targets` is excluded on purpose: it is a fresh array every render, and
     // `wanted` is the string that actually says whether anything new is needed.

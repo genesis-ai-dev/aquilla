@@ -3,7 +3,7 @@
 // swapped for a preview, and no drop line is drawn. A drop still writes one
 // sort key through `orderForDrop` / `orderForInsert`.
 
-import { useEffect, useLayoutEffect, useMemo, useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
+import { useLayoutEffect, useMemo, useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
 import {
   closestCenter,
   DndContext,
@@ -301,7 +301,7 @@ function ActiveTrackSlot({
         transition: isDragging || !sorting ? undefined : slide,
         touchAction: draggable ? "none" : undefined,
       }}
-      className={cn("relative", draggable && "cursor-grab", isDragging && "z-20 cursor-grabbing")}
+      className={cn("relative", isDragging && "z-20")}
       {...listeners}
       onPointerDown={(event: ReactPointerEvent<HTMLDivElement>) => {
         if (!draggable || !dragStartsHere(event.target)) return
@@ -374,30 +374,16 @@ function ActiveTrackReorder({
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: TRACK_DRAG_ACTIVATION_DISTANCE } }),
   )
-  useEffect(() => {
-    return () => {
-      document.body.style.cursor = ""
-    }
-  }, [])
   return (
     <DndContext
       sensors={sensors}
       collisionDetection={trackCollision}
       modifiers={[lockVertical]}
       accessibility={accessibility}
-      onDragStart={(event) => {
-        document.body.style.cursor = "grabbing"
-        onDragStart(event)
-      }}
+      onDragStart={onDragStart}
       onDragOver={onDragOver}
-      onDragEnd={(event) => {
-        document.body.style.cursor = ""
-        onDragEnd(event)
-      }}
-      onDragCancel={() => {
-        document.body.style.cursor = ""
-        onDragCancel()
-      }}
+      onDragEnd={onDragEnd}
+      onDragCancel={onDragCancel}
     >
       {children}
     </DndContext>

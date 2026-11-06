@@ -33,7 +33,6 @@ import {
   ContextMenuCheckboxItem,
   ContextMenuItem,
   ContextMenuRadioGroup,
-  ContextMenuSeparator,
   ContextMenuSub,
   ContextMenuSubContent,
   ContextMenuSubTrigger,
@@ -225,8 +224,8 @@ export function trackMenuItems({
   onRename?: (trackId: string) => void
   /** Maintainer clearance too, and not gated on the setting either. */
   onSetColor?: SetTrackColor
-  /** Maintainer clearance AND the setting. Absent withholds every item below
-   *  the separator — which is the whole affordance, not a disabled one. */
+  /** Maintainer clearance AND the setting. Absent withholds the folder, length,
+   *  and delete items — which is the whole affordance, not a disabled one. */
   editing?: TrackEditingActions
   /** AQU-1566: "Use as this file's rows". Maintainer clearance on a linked
    *  video with no rows; NOT gated on the track-editing setting (Sam). The
@@ -248,8 +247,6 @@ export function trackMenuItems({
     canSetLengths: Boolean(editing?.onSetLineLengths),
     busyIds: busyTrackIds,
   })
-  const anythingBelowPromote = rename != null || colourable.length > 0 || lengths != null || foldable.length > 0
-    || inAFolder.length > 0 || deletable.length > 0
 
   const ids = (list: readonly TimelineTrack[]) => list.map((tr) => tr.id)
 
@@ -263,7 +260,6 @@ export function trackMenuItems({
           {t("editor.timeline.trackUseAsRows")}
         </ContextMenuItem>
       )}
-      {onPromote && promotable && (hideable.length > 0 || anythingBelowPromote) && <ContextMenuSeparator />}
 
       {/* AQU-1684: everyone's, and about this screen alone, so it sits above
           the maintainers' items that change the file for everybody. */}
@@ -280,7 +276,6 @@ export function trackMenuItems({
             : t("editor.timeline.trackHide")}
         </ContextMenuItem>
       )}
-      {onHide && hideable.length > 0 && anythingBelowPromote && <ContextMenuSeparator />}
 
       {/* Renaming is a single-track verb: there is one field and one name.
           With several selected it is simply absent rather than renaming an
@@ -291,10 +286,6 @@ export function trackMenuItems({
           {t("editor.timeline.trackRename")}
         </ContextMenuItem>
       )}
-      {/* Only when something actually follows it — a separator under the last
-          item is a line with nothing beneath it. */}
-      {onRename && rename && (colourable.length > 0 || lengths != null || foldable.length > 0
-        || inAFolder.length > 0 || deletable.length > 0) && <ContextMenuSeparator />}
 
       {/* AQU-646 stage 7: SIX SWATCHES, AND NOTHING ELSE (Sam, 2026-08-27:
           "all the user needs to see is the six colors to pick from. no previews

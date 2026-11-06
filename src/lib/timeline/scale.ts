@@ -51,7 +51,7 @@ export const CHIP_RADIUS_SQUARE_PX = 6
  * WHY THIS EXISTS. Zoomed out, the source band read as a cue chip OVERLAPPING a
  * silence chip — one wall solid, one wall dashed. Nothing overlapped: the data
  * tiles exactly and so do the drawn boxes. The illusion is built entirely at
- * the shared walls. A 26px chip carrying an 8px corner spends a third of its
+ * the shared walls. A 26px chip carrying a full corner spends a third of its
  * width on curves, so where a solid border meets a dashed one the two rounded
  * shapes read as interlocking rather than abutting — and because the corners
  * curve away from each other, the neighbour's dash peeks out past the solid
@@ -66,13 +66,16 @@ export const CHIP_RADIUS_SQUARE_PX = 6
  * radius-over-width fall as the chip narrows, which is the thing that actually
  * stops small chips reading as lozenges.
  *
- * Normal zoom is untouched: at the default 38px/s anything from about a second
- * upward is past 40px and keeps exactly the corner it has today.
+ * Normal zoom keeps the app corner: at the default 38px/s anything from about
+ * a second upward is past 40px and uses the full `rounded-lg` radius.
  *
  * CONTINUOUS, not stepped, on purpose: zoom is animated (TimelineEditor glides
  * pxPerSec), and a threshold would make every chip's corners pop mid-glide.
  */
-export function chipRadiusPx(widthPx: number, maxPx = 8): number {
+/** Full corner, matching the app's `rounded-lg` (`--radius`, 0.375rem). */
+const CHIP_RADIUS_MAX_PX = 6
+
+export function chipRadiusPx(widthPx: number, maxPx = CHIP_RADIUS_MAX_PX): number {
   if (!Number.isFinite(widthPx) || widthPx <= CHIP_RADIUS_SQUARE_PX) return 0
   if (widthPx >= CHIP_RADIUS_FULL_PX) return maxPx
   const t = (widthPx - CHIP_RADIUS_SQUARE_PX) / (CHIP_RADIUS_FULL_PX - CHIP_RADIUS_SQUARE_PX)

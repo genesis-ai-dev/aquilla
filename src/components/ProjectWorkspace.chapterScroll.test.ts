@@ -36,6 +36,14 @@ describe("scrolling a book's table into another chapter (AQU-1758)", () => {
     expect(offenders.map((e) => e.deps)).toEqual([])
   })
 
+  it("lays every chapter on the timeline", () => {
+    const start = source.indexOf("const timelineCells = ")
+    expect(start).toBeGreaterThan(-1)
+    const line = source.slice(start, source.indexOf("\n", start))
+    expect(line).toContain("timelineLines")
+    expect(line).not.toContain("scopeCells")
+  })
+
   it("a row of another chapter clicked still ends a paused playback", () => {
     const start = source.indexOf("showChapterOfCellRef.current = (cellId) => {")
     expect(start).toBeGreaterThan(-1)

@@ -2,13 +2,12 @@
 // puts on the timeline, now that the Audio view is gone and every file opens on
 // the timeline in Media.
 //
-// Two rules, decided with the removal:
+// Two rules, decided with the removal, and the later one for the drawing:
 //
-//   - ONE CHAPTER AT A TIME. Genesis has about 1,500 verses; one timeline for
-//     the whole book is unreadable and slow. The timeline shows the chapter the
-//     chapter picker (and the table under it) is on. While playback runs, it
-//     shows the chapter being played instead, so a run that crosses into the
-//     next chapter carries the timeline with it.
+//   - THE WHOLE FILE, EVERY CHAPTER. The timeline lays the book out end to
+//     end, so scrolling carries you into the next chapter. The chapter picker
+//     still names a chapter: a pick while playback is running jumps the
+//     playhead to that chapter's first line on this same clock.
 //   - HEADINGS FOLLOW THE PROJECT'S "Count headings as translatable content"
 //     (`countStructuralCells`; Sam's decision 2): counted, a heading or
 //     section break sits on the timeline like any line — its take, or a dashed
@@ -74,10 +73,11 @@ export function chapterOfCell(
 }
 
 /**
- * The chapter the timeline shows: the one playback is on (`queueCellId`, the
+ * The chapter the reader is on: the one playback is on (`queueCellId`, the
  * line playing or paused on this file), else the one the person is on
- * (`chosenKey`), else the first. Null for a file with no chapters, which the
- * caller reads as "the whole file".
+ * (`chosenKey`), else the first. Null for a file with no chapters. The
+ * timeline draws the whole file either way; this names the chapter, it does
+ * not choose which lines are drawn.
  */
 export function resolveTimelineChapter({
   chapters,

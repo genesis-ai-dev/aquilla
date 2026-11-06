@@ -453,13 +453,14 @@ export function CharacterCheckDrawer({
           </span>
         )}
         <Button
-          size="sm"
+          type="button"
           variant="ghost"
-          className="ml-auto"
+          size="icon-sm"
+          className="ml-auto text-muted-foreground"
           aria-label={t("common.close")}
           onClick={onClose}
         >
-          <X className="h-4 w-4" />
+          <X />
         </Button>
       </header>
 

@@ -49,6 +49,9 @@ describe("MediaPanelsMenu", () => {
     expect(film).toHaveAttribute("aria-checked", "true")
     expect(film).toHaveTextContent(/^Film\s*(⌥2|Alt\+2)$/)
     expect(screen.getByTestId("panels-row-text")).toHaveTextContent(/^Text\s*(⌥3|Alt\+3)$/)
+    // Opening leaves every row plain. A tab stop on the (i) would focus Reset layout.
+    expect(document.querySelector("[data-highlighted]")).toBeNull()
+    expect(screen.getByTestId("panels-reset-info-toggle")).toHaveAttribute("tabindex", "-1")
     // Where a panel sits is in its tooltip; nothing says "showing".
     expect(screen.queryByText(/showing/)).toBeNull()
     expect(screen.queryByTestId("panels-where-film")).toBeNull()

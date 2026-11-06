@@ -22,6 +22,7 @@
 
 import type { ReactNode } from "react"
 
+import { AppTooltip } from "@/components/ui/tooltip"
 import { SLOT_BUTTON_MAX_PX } from "@/lib/timeline/row-metrics"
 
 export function TimelineSlotButton({
@@ -38,7 +39,7 @@ export function TimelineSlotButton({
   /** The lane says the pointer is on this slot. See the header for why the
    *  browser is not asked. */
   hot: boolean
-  /** The circle's diameter, from `slotButtonPx` — the lane knows how tall its
+  /** The button's side, from `slotButtonPx` — the lane knows how tall its
    *  rows are and how wide this slot is, and this button does not. Defaults to
    *  the size it was hard-coded to before the vertical zoom existed. */
   sizePx?: number
@@ -46,27 +47,29 @@ export function TimelineSlotButton({
   children: ReactNode
 }) {
   return (
-    <button
-      type="button"
-      title={label}
-      aria-label={label}
-      data-testid={testId}
-      data-hot={hot ? "true" : undefined}
-      onPointerDown={(e) => e.stopPropagation()}
-      onClick={(e) => {
-        e.stopPropagation()
-        onClick()
-      }}
-      style={{ width: `${sizePx}px`, height: `${sizePx}px` }}
-      className={[
-        "flex shrink-0 items-center justify-center rounded-full text-muted-foreground opacity-0 transition-all",
-        // The circle arrives with the pointer, not before.
-        hot ? "bg-background opacity-100 shadow-sm ring-1 ring-border" : "",
-        "hover:text-foreground",
-        "focus-visible:bg-background focus-visible:opacity-100 focus-visible:shadow-sm focus-visible:ring-1 focus-visible:ring-border",
-      ].join(" ")}
-    >
-      {children}
-    </button>
+    <AppTooltip content={label}>
+      <button
+        type="button"
+        aria-label={label}
+        data-testid={testId}
+        data-hot={hot ? "true" : undefined}
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation()
+          onClick()
+        }}
+        style={{ width: `${sizePx}px`, height: `${sizePx}px` }}
+        className={[
+          "flex shrink-0 items-center justify-center rounded-lg text-muted-foreground opacity-0",
+          // The button arrives with the pointer, not before. No fade: the
+          // slot is already under the pointer, so a transition only lags it.
+          hot ? "bg-background opacity-100 shadow-sm ring-1 ring-border" : "",
+          "hover:text-foreground",
+          "focus-visible:bg-background focus-visible:opacity-100 focus-visible:shadow-sm focus-visible:ring-1 focus-visible:ring-border",
+        ].join(" ")}
+      >
+        {children}
+      </button>
+    </AppTooltip>
   )
 }

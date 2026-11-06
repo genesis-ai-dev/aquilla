@@ -15,6 +15,7 @@
 
 import { folderRowHPx } from "@/lib/timeline/row-metrics"
 import { secToPx } from "@/lib/timeline/scale"
+import { useTimelineOriginPx } from "./timeline-origin"
 import { summaryBlocks, type SummarySpan } from "@/lib/timeline/summary-band"
 import { useRowMetrics } from "./useRowMetrics"
 
@@ -42,6 +43,7 @@ export function TimelineFolderLane({
   // are matched row for row (see the header comment), so LaneLabel computes
   // the same `folderRowHPx` on its side.
   const { rowH } = useRowMetrics()
+  const originPx = useTimelineOriginPx()
   return (
     <div
       data-testid={`tl-folder-lane-${trackId}`}
@@ -69,7 +71,7 @@ export function TimelineFolderLane({
           // one enormous take.
           className="pointer-events-none absolute top-1/2 h-1.5 -translate-y-1/2 rounded-sm bg-muted-foreground/40"
           style={{
-            left: `${secToPx(block.startSec, pxPerSec)}px`,
+            left: `${secToPx(block.startSec, pxPerSec) - originPx}px`,
             // A block narrower than a pixel still has to be visible — at a zoom
             // where the whole file fits, a single short take is the only thing
             // on the row and rounding it to nothing would say the folder is

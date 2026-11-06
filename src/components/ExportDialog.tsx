@@ -454,6 +454,8 @@ interface ExportDialogProps {
 /** AQU-2073: how many line pills the unvalidated-audio note shows before "+N more". */
 const UNVALIDATED_LINE_PILLS_SHOWN = 8
 
+const EMPTY_EXPORT_CELLS: CellData[] = []
+
 function profileIdFromCells(cells: readonly CellData[]): string | null {
   for (const cell of cells) {
     const metadata = cell.metadata
@@ -555,7 +557,7 @@ export function ExportDialog({
    * the format re-renders and simply carries everything.
    */
   const structuralNote = useMemo(() => {
-    if (!nativeFormatId) return null
+    if (!open || !nativeFormatId) return null
     // Word and PowerPoint place content by a per-paragraph locator recorded at
     // import. A file imported before that existed is matched BY POSITION, where
     // an inserted or dropped paragraph shifts every later one onto the wrong
@@ -572,7 +574,7 @@ export function ExportDialog({
       return "importExport.dialog.structuralNoteUnplaceable" as const
     }
     return null
-  }, [nativeFormatId, cells])
+  }, [open, nativeFormatId, cells])
 
   /**
    * AQU-1423: what this native export does with cells PARKED here ("Hide cell",
@@ -591,7 +593,7 @@ export function ExportDialog({
    * nothing surprising to explain.
    */
   const hiddenNote = useMemo(() => {
-    if (!nativeFormatId) return null
+    if (!open || !nativeFormatId) return null
     if (!hasHiddenCells(cells)) return null
     // No locators means no paragraph can be placed OR dropped, so a hidden cell
     // keeps the client's words here as well — the same answer IDML gives, for a
@@ -607,7 +609,7 @@ export function ExportDialog({
       return "importExport.dialog.hiddenNoteKeepsOriginal" as const
     }
     return null
-  }, [nativeFormatId, cells])
+  }, [open, nativeFormatId, cells])
 
   const [format, setFormat] = useState<ExportFormat>(nativeFormatId ?? "tsv")
   const [scope, setScope] = useState<ExportScope>("file")
@@ -736,7 +738,7 @@ export function ExportDialog({
     setFormat(nativeFormatId ?? "tsv")
   }, [activeFileId, nativeFormatId])
 
-  const activeProfileId = useMemo(() => profileIdFromCells(cells), [cells])
+  const activeProfileId = useMemo(() => (open ? profileIdFromCells(cells) : null), [open, cells])
   const idmlExportOptions = useMemo(
     () => partnerIdmlExportOptionsFor(activeProfileId),
     [activeProfileId],
@@ -765,6 +767,7 @@ export function ExportDialog({
    * back when neither does.
    */
   const audioSourceCells = useMemo(() => {
+    if (!open) return EMPTY_EXPORT_CELLS
     const hasTake = (list: CellData[] | undefined) =>
       list?.some((c) => {
         const id = c.selectedAudioId ?? c.selectedGeneratedVoiceAudioId
@@ -788,7 +791,7 @@ export function ExportDialog({
     if (hasTake(audioCells)) return dropHiddenCells(audioCells!)
     if (hasTake(cells)) return dropHiddenCells(cells)
     return dropHiddenCells(audioCells ?? cells)
-  }, [audioCells, cells])
+  }, [open, audioCells, cells])
 
   /**
    * Is this a DUBBING file?
@@ -1149,13 +1152,14 @@ export function ExportDialog({
   }
 
   const distinctVoices = useMemo(() => {
+    if (!open) return []
     const names = new Set<string>()
     for (const c of cells) {
       const v = getCellVoice(c)
       if (v) names.add(v)
     }
     return Array.from(names).sort()
-  }, [cells])
+  }, [open, cells])
 
   // Same Base UI label rule as `chapterItems` below: without `items` the
   // "All voices" option ("") renders an empty trigger.
@@ -1205,8 +1209,8 @@ export function ExportDialog({
   const isRoundTripFormat = format === "usfm" || format === "docx" || format === "pptx" || format === "idml"
 
   const validatedCellCount = useMemo(
-    () => cells.filter((c) => c.status === "validated").length,
-    [cells],
+    () => (open ? cells.filter((c) => c.status === "validated").length : 0),
+    [open, cells],
   )
 
   /**
@@ -1218,8 +1222,8 @@ export function ExportDialog({
    * under "validated only" it is how many lines are about to fall silent.
    */
   const unvalidatedAudioLines = useMemo(
-    () => unvalidatedAudioLineIds(audioSourceCells, audioValidationRequirement),
-    [audioSourceCells, audioValidationRequirement],
+    () => (open ? unvalidatedAudioLineIds(audioSourceCells, audioValidationRequirement) : []),
+    [open, audioSourceCells, audioValidationRequirement],
   )
   /** AQU-2073: those lines named for the note's pills — a line's reference
    *  ("JHN 6:5"), or "L3" the way the by-line export numbers its files. */
@@ -1243,7 +1247,7 @@ export function ExportDialog({
     [audioSourceCells, contentMode, audioValidationRequirement],
   )
 
-  const chapterLabels = useMemo(() => listChapterLabels(cells), [cells])
+  const chapterLabels = useMemo(() => (open ? listChapterLabels(cells) : []), [open, cells])
 
   // Base UI resolves the trigger's label from the root's `items`, not from
   // the mounted <SelectItem>s, and falls back to the raw value string when
@@ -2324,6 +2328,8 @@ export function ExportDialog({
       </div>
     )
   }
+
+  if (!open) return <Dialog open={false} onOpenChange={handleOpenChange} />
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>

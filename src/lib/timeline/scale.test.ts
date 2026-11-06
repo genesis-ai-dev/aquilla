@@ -51,11 +51,12 @@ describe("scale", () => {
 describe("chipRadiusPx", () => {
   const ratio = (w: number) => chipRadiusPx(w) / w
 
-  it("leaves normal-zoom chips exactly as they were", () => {
+  it("gives a normal-zoom chip the app's rounded-lg corner", () => {
     // At the default 38px/s anything from about a second upward clears 40px.
-    expect(chipRadiusPx(40)).toBe(8)
-    expect(chipRadiusPx(120)).toBe(8)
-    expect(chipRadiusPx(1000)).toBe(8)
+    // 6px is `--radius` (rounded-lg), not the old Tailwind 8px rounded-lg.
+    expect(chipRadiusPx(40)).toBe(6)
+    expect(chipRadiusPx(120)).toBe(6)
+    expect(chipRadiusPx(1000)).toBe(6)
   })
 
   it("ramps down to square, rather than clipping to a fixed proportion", () => {
@@ -71,7 +72,7 @@ describe("chipRadiusPx", () => {
   it("nearly halves the corner on the chip from Sam's screenshot", () => {
     // 26px, wedged between two dashed silences — the exact shape that read as
     // one interlocked box with a solid wall and a dashed wall.
-    expect(chipRadiusPx(26)).toBeCloseTo(4.71, 2)
+    expect(chipRadiusPx(26)).toBeCloseTo(3.53, 2)
   })
 
   it("a sliver is square, not a lozenge", () => {
@@ -89,7 +90,7 @@ describe("chipRadiusPx", () => {
     }
     // Slope is maxPx / (40 - 6) below the cap and 0 above it, so half a pixel of
     // width can never move the radius by more than ~0.118px.
-    expect(worst).toBeLessThanOrEqual(8 / 34 / 2 + 1e-9)
+    expect(worst).toBeLessThanOrEqual(6 / 34 / 2 + 1e-9)
   })
 
   it("never exceeds a quarter of the chip, at any width", () => {

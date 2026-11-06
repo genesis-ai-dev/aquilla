@@ -32,6 +32,7 @@ import { DragTimeChip } from "./DragTimeChip"
 import type { CellData } from "@/hooks/useCells"
 import { isHiddenCell } from "@/lib/cells/hidden"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { useTimelineOriginPx } from "./timeline-origin"
 import { AppTooltip } from "@/components/ui/tooltip"
 
 const MIN_DUR_SEC = 0.2
@@ -232,21 +233,22 @@ export function TimelineCard({
   // the number under the cursor disagreed with the box being drawn.
   const dragged = drag ? proposeSpan(drag.mode, pxToSec(drag.dx, pxPerSec)) : null
 
-  const left = secToPx((dragged?.startSec ?? startSec) - laneStartSec, pxPerSec)
+  const originPx = useTimelineOriginPx()
+  const left = secToPx((dragged?.startSec ?? startSec) - laneStartSec, pxPerSec) - originPx
   const width = Math.max(
     secToPx((dragged?.endSec ?? endSec) - (dragged?.startSec ?? startSec), pxPerSec),
     secToPx(MIN_DUR_SEC, pxPerSec),
   )
 
-  // Round 9b: the corner shrinks with the chip. A constant 8px radius on a 26px
+  // Round 9b: the corner shrinks with the chip. A full corner on a 26px
   // chip is a third of its width, and against a dashed neighbour that reads as
   // two shapes interlocking. See chipRadiusPx.
   //
   // Stage 3 caps it by HEIGHT as well, through the existing `maxPx` parameter:
-  // 8px of corner on an 18px band leaves almost no straight edge and the chip
+  // a full corner on an 18px band leaves almost no straight edge and the chip
   // reads as a lozenge rather than as a stripe of the track. A third of the
-  // height is the cap — unchanged at 46px (min(8, 15) is still 8), 6px at 18.
-  const radiusPx = chipRadiusPx(width, Math.min(8, Math.round(chipH / 3)))
+  // height is the cap — at 46px that is still the app's rounded-lg (6px).
+  const radiusPx = chipRadiusPx(width, Math.min(6, Math.round(chipH / 3)))
 
   // Round 9: what there is room to SAY at this width. Stage 3 asks the same
   // question on the other axis, one gate per piece of furniture, because they
@@ -359,6 +361,7 @@ export function TimelineCard({
       data-multi-selected={multiSelected ? "" : undefined}
       data-hidden-line={hiddenLine ? "" : undefined}
       data-stand-in={standIn ? "" : undefined}
+      data-tl-drag={drag ? "" : undefined}
       onClick={(e) => {
         // AQU-928: a modified click BUILDS a selection — it must not also yank
         // playback to this clip, which is what makes multi-select usable.

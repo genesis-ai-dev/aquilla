@@ -12,6 +12,7 @@
 // don't) — with an outward chevron on the cut; hover restores the true length.
 
 import { useEffect, useRef, useState } from "react"
+import { useTimelineOriginPx } from "./timeline-origin"
 import type { ReactNode } from "react"
 import { AudioLines, Check, CheckCheck, ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, CopyPlus, Ellipsis, Mic, Pencil, Play, Scissors, Sparkles, Square, Trash2, VolumeX, X } from "lucide-react"
 import {
@@ -35,6 +36,7 @@ import {
 import { CHANGE_VOICE_QUALITY_LABEL } from "@/lib/store/change-voice-quality"
 import { cn } from "@/lib/utils"
 import { toast } from "@/components/ui/toast"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { CloneFromTakeButton } from "@/components/cell/CloneFromTakeButton"
 import { useVoicingAs } from "@/lib/audio/voicing-as"
@@ -440,6 +442,7 @@ function TargetAudioChip({
   currentUsername?: string
 }) {
   const t = useT()
+  const originPx = useTimelineOriginPx()
   const { cell } = chip.item
   const { geom, section } = chip
   // AQU-2252: the rules FOLLOWING THE RECORDINGS gives a take — its line grows
@@ -1222,7 +1225,7 @@ function TargetAudioChip({
         // exactly as they always did. Rev 2 had to put the fill in this style
         // object and gate it on `overflow === "none"`, because an inline style
         // beats every class; that gate is gone with the style.
-        left: `${secToPx(paintedStart, pxPerSec)}px`,
+        left: `${secToPx(paintedStart, pxPerSec) - originPx}px`,
         width: `${paintedPx}px`,
         // Same rule as every other chip, its own smaller cap (was rounded-md).
         borderRadius: `${chipRadiusPx(paintedPx, 6)}px`,
@@ -1450,10 +1453,10 @@ function TargetAudioChip({
           does not move the playhead — the thing this button was ruled not to
           do.) */}
       {showPlayButton && preview && (
+        <AppTooltip content={priming ? t("common.loading") : previewing ? t("common.stop") : t("workspace.targetAudioLane.playClip")}>
         <span
           role="button"
           tabIndex={0}
-          title={priming ? t("common.loading") : previewing ? t("common.stop") : t("workspace.targetAudioLane.playClip")}
           aria-label={priming ? t("common.loading") : previewing ? t("common.stop") : t("workspace.targetAudioLane.playClip")}
           aria-busy={priming || undefined}
           data-testid={`tl-target-${testKey}-play`}
@@ -1472,12 +1475,14 @@ function TargetAudioChip({
             ? <Spinner className="h-2.5 w-2.5" />
             : previewing ? <Square className="h-2 w-2 fill-current" /> : <Play className="h-2.5 w-2.5 fill-current" />}
         </span>
+        </AppTooltip>
       )}
       {showRecordButton && onOpenRecording && (
+        <AppTooltip content={t("workspace.targetAudioLane.recordAudio")}>
         <span
           role="button"
           tabIndex={0}
-          title={t("workspace.targetAudioLane.recordAudio")}
+          aria-label={t("workspace.targetAudioLane.recordAudio")}
           data-testid={`tl-target-${testKey}-record`}
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {
@@ -1497,12 +1502,13 @@ function TargetAudioChip({
         >
           <Mic className="h-2.5 w-2.5" />
         </span>
+        </AppTooltip>
       )}
       {showMoreButton && (
+        <AppTooltip content={t("editor.rail.moreActions")}>
         <span
           role="button"
           tabIndex={0}
-          title={t("editor.rail.moreActions")}
           aria-label={t("editor.rail.moreActions")}
           aria-haspopup="menu"
           data-testid={`tl-target-${testKey}-more`}
@@ -1515,13 +1521,16 @@ function TargetAudioChip({
         >
           <Ellipsis className="h-2.5 w-2.5" />
         </span>
+        </AppTooltip>
       )}
       {(chipValidationState === "self" || chipValidationState === "full") && (
-        <span
-          data-testid={`tl-target-${testKey}-validated`}
-          title={chipValidationState === "full"
+        <AppTooltip
+          content={chipValidationState === "full"
             ? t("workspace.targetAudioLane.takeValidated")
             : t("workspace.targetAudioLane.takeValidatedByYou")}
+        >
+        <span
+          data-testid={`tl-target-${testKey}-validated`}
           aria-label={chipValidationState === "full"
             ? t("workspace.targetAudioLane.takeValidated")
             : t("workspace.targetAudioLane.takeValidatedByYou")}
@@ -1531,6 +1540,7 @@ function TargetAudioChip({
             ? <CheckCheck className="h-2.5 w-2.5" strokeWidth={3} />
             : <Check className="h-2.5 w-2.5" strokeWidth={3} />}
         </span>
+        </AppTooltip>
       )}
       {/* The preview's mini-playhead (2026-08-27, Sam): white, non-interactive,
           exists only while this chip's own preview sounds. Left/opacity are
@@ -1843,6 +1853,7 @@ export function TargetAudioLane({
   laneTestId = "tl-target-lane",
 }: TargetAudioLaneProps) {
   const t = useT()
+  const originPx = useTimelineOriginPx()
   const audioFirst = layout?.mode === "audioFirst"
   // Resolve every chip first — overflow needs the NEXT chip's start, and
   // snapping needs neighbors' effective edges.
@@ -2060,7 +2071,7 @@ export function TargetAudioLane({
           <div
             key={`addrec-${span.startSec}`}
             data-testid={`tl-target-add-${span.startSec}`}
-            style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
+            style={{ left: `${leftPx - originPx}px`, width: `${widthPx}px` }}
             className={`absolute ${TL_CHIP_BOX_CLASS} flex items-center justify-center`}
             {...slotHoverProps(`add-${span.startSec}`)}
           >
@@ -2091,7 +2102,7 @@ export function TargetAudioLane({
         <div
           key={`empty-${cell.id}`}
           data-testid={`tl-target-empty-${cell.id}`}
-          style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
+          style={{ left: `${leftPx - originPx}px`, width: `${widthPx}px` }}
           className={`absolute ${TL_CHIP_BOX_CLASS} flex items-center justify-center`}
           {...slotHoverProps(`empty-${cell.id}`)}
         >

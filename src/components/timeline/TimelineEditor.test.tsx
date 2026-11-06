@@ -97,6 +97,21 @@ function dragTrackOnto(from: string, to: string) {
   fireEvent.pointerUp(document, trackPointer(point.clientX, point.clientY, 0))
 }
 
+// dnd-kit swallows the click that follows a drag by stopping it on `document`
+// for 50ms (a setTimeout cleared on pointerup). The listener outlives the
+// component, and the next test's clicks run before that timer. Only wait when
+// a probe click is actually swallowed.
+afterEach(async () => {
+  const probe = document.createElement("button")
+  document.body.appendChild(probe)
+  let reached = false
+  probe.addEventListener("click", () => { reached = true })
+  probe.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }))
+  probe.remove()
+  if (reached) return
+  await act(async () => { await new Promise((r) => setTimeout(r, 60)) })
+})
+
 function inTimelineSettings<T>(find: () => T): T {
   try {
     return find()
@@ -3941,6 +3956,7 @@ describe("who may use the Check tools", () => {
     fireEvent.click(screen.getByTestId("tl-check-menu"))
     expect(screen.getByText("Check links")).toBeInTheDocument()
     expect(screen.getByText("Check characters")).toBeInTheDocument()
+    expect(screen.getByText("Check characters").closest("[data-align]")).toHaveAttribute("data-align", "start")
   })
 
   it("hides the whole menu below it", () => {
@@ -4323,9 +4339,9 @@ describe("TimelineEditor — the track gutter collapses and expands", () => {
   it("narrows the column itself, not just its contents", () => {
     render(editor())
     const grid = gutter().parentElement as HTMLElement
-    expect(grid.style.gridTemplateColumns).toBe("240px 1fr")
+    expect(grid.style.gridTemplateColumns).toBe("240px minmax(0, 1fr)")
     fireEvent.click(toggle())
-    expect(grid.style.gridTemplateColumns).toBe("56px 1fr")
+    expect(grid.style.gridTemplateColumns).toBe("56px minmax(0, 1fr)")
   })
 
   it("leaves every collapsed row still able to say which track it is", () => {

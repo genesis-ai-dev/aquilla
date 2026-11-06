@@ -1,8 +1,11 @@
 // The timeline editor: composes the lanes, ruler, playhead and chip strip into
 // the top of the Media-lens surface. Owns zoom (persisted per file), horizontal
-// scroll/windowing, and selection. Hand-rolled, with no media dependency of its
-// own — the play queue is the master clock, and the linked video lives beside
-// the text table as MediaVideoPane (AQU-646).
+// scroll, and selection. The rows scroll in one horizontal LegendList of
+// fixed-width time columns that share the track column's scrollbar, so a
+// wheel tick moves columns without re-rendering the editor. The ruler stays
+// on that same pixel axis. No media dependency of its own — the play queue
+// is the master clock, and the linked video lives beside the text table as
+// MediaVideoPane (AQU-646).
 
 import {
   Fragment,
@@ -105,6 +108,7 @@ import {
 } from "@/lib/timeline/tracks"
 import { computeFollowScroll } from "@/lib/timeline/follow"
 import { secToPx, pxToSec, clampScrollLeft, ZOOM_MIN, ZOOM_MAX, ZOOM_DEFAULT } from "@/lib/timeline/scale"
+import { timeSlices } from "@/lib/timeline/horizontal-slices"
 import {
   chipHeightPx,
   chipPadPx,
@@ -121,6 +125,7 @@ import { orderForDrop } from "@/lib/timeline/track-reorder"
 import { SCRUB_SEEK_THROTTLE_MS } from "@/lib/timeline/scrub"
 import {
   buildTrackRows,
+  contentFileIdsOfShownTracks,
   hiddenTracksOf,
   folderMembers,
   scopeSiblings,
@@ -170,7 +175,9 @@ import { setAudioQualityPref, useAudioQualityPref } from "@/lib/store/audio-qual
 import { setSkipSilentLinesPref, useSkipSilentLinesPref } from "@/lib/store/skip-silent-lines-pref"
 import { useBatchProgress, canTranscribeCell } from "@/lib/audio/batch-audio"
 import { useOnline } from "@/hooks/useOnline"
-import { TimelineRuler } from "./TimelineRuler"
+import { TimelineHorizontalList, TimelineScrollingRuler } from "./TimelineHorizontalList"
+import { TimelineOrigin } from "./timeline-origin"
+import { createTimelineScrollBus, TimelineScrollBusContext, type TimelineScrollBus } from "./timeline-scroll-bus"
 import { TimelineLane } from "./TimelineLane"
 import type { ChangeVoiceQuality } from "@/lib/audio/change-voice"
 import { TargetAudioLane, type ChangeVoiceMenuState, type TakeMenuActions, type TargetAudioItem } from "./TargetAudioLane"
@@ -606,6 +613,9 @@ export interface TimelineEditorProps {
   tracks?: TimelineTrack[]
   /** Independently imported text belongs to its referenced hidden cue file. */
   textTrackCells?: Readonly<Record<string, CellData[]>>
+  /** Fired when this person hides or shows a track, so a hidden track's
+   *  content file is not fetched. */
+  onHiddenTracksChange?(ids: ReadonlySet<string>): void
   textTrackErrors?: Readonly<Record<string, Error>>
   onRetryTextTrack?(fileId: string): void
   onRetimeTextTrack?(fileId: string, cellId: string, startSec: number, endSec: number): void
@@ -1283,6 +1293,7 @@ export function TimelineEditor({
   legacyMeasure,
   tracks = DEFAULT_TRACKS,
   textTrackCells,
+  onHiddenTracksChange,
   textTrackErrors,
   onRetryTextTrack,
   onRetimeTextTrack,
@@ -1352,13 +1363,17 @@ export function TimelineEditor({
   }, [fileId])
   // AQU-1684: which tracks this person has hidden on THIS file — the same
   // personal, per-file, on-this-device state as folder collapse (Sam's
-  // decision), re-read on a file switch for the same reason. Hiding changes
-  // only what is drawn: the queue sounds every track from `tracks`, hidden or
-  // not, and mute stays the speaker's.
+  // decision), re-read on a file switch for the same reason. A hidden track
+  // is not drawn and nothing is built for it: no lane, no chips, no
+  // waveforms, no content-file fetch. The queue still sounds every track
+  // from `tracks`, hidden or not, and mute stays the speaker's.
   const [hiddenTrackIds, setHiddenTrackIds] = useState<ReadonlySet<string>>(() => loadHiddenTracks(fileId))
   useEffect(() => {
     setHiddenTrackIds(loadHiddenTracks(fileId))
   }, [fileId])
+  useEffect(() => {
+    onHiddenTracksChange?.(hiddenTrackIds)
+  }, [hiddenTrackIds, onHiddenTracksChange])
 
   /**
    * The rows to draw: the tracks, with folder members lifted under their
@@ -1690,7 +1705,6 @@ export function TimelineEditor({
   // scope for the transcribe row. Every rule about how a click changes this
   // lives in `applySelect`; this component only stores the two halves.
   const [extraIds, setExtraIds] = useState<readonly string[]>([])
-  const [scrollLeft, setScrollLeft] = useState(0)
   const [viewportPx, setViewportPx] = useState(0)
   // Follow playhead (AQU-2264): the button is a preference that follows the
   // person, remembered and shared with Preferences → Recording. A manual scroll
@@ -1702,6 +1716,16 @@ export function TimelineEditor({
   const [followReleased, setFollowReleased] = useState(false)
   const follow = followPref && !followReleased
   const scrollRef = useRef<HTMLDivElement>(null)
+  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null)
+  const bindScroll = useCallback((node: HTMLDivElement | null) => {
+    scrollRef.current = node
+    setScrollEl(node)
+  }, [])
+  /** Horizontal offset for the ruler and the gap label. Not React state: a
+   *  wheel tick must not re-render the lanes. */
+  const scrollBusRef = useRef<TimelineScrollBus | null>(null)
+  if (!scrollBusRef.current) scrollBusRef.current = createTimelineScrollBus()
+  const scrollBus = scrollBusRef.current
   /** The clipped label column, and the div inside it that carries the vertical
    *  offset. The gutter is not scrolled by us — see `handleTrackScroll` — and
    *  when the browser scrolls it anyway `handleGutterScroll` hands the offset
@@ -1937,8 +1961,12 @@ export function TimelineEditor({
     const el = scrollRef.current
     if (!el) return
     setViewportPx(el.clientWidth)
+    scrollBus.set(el.scrollLeft, el.clientWidth)
     if (typeof ResizeObserver === "undefined") return // happy-dom
-    const ro = new ResizeObserver(() => setViewportPx(el.clientWidth))
+    const ro = new ResizeObserver(() => {
+      setViewportPx(el.clientWidth)
+      scrollBus.set(el.scrollLeft, el.clientWidth)
+    })
     ro.observe(el)
     return () => ro.disconnect()
   }, [])
@@ -2014,7 +2042,7 @@ export function TimelineEditor({
         if (el) {
           lastProgrammaticScrollAt.current = performance.now()
           el.scrollLeft = 0
-          setScrollLeft(0)
+          scrollBus.set(0, el.clientWidth)
         }
         setFollowReleased(false)
       }
@@ -2080,9 +2108,22 @@ export function TimelineEditor({
   // AQU-2204: following its recordings, a book with no times lays its lines
   // out in order (see `timelineLanes`).
   const { subtitle, dialogue, untimed } = useMemo(() => timelineLanes(cells, timingMode), [cells, timingMode])
+  // A hidden track's captions are not laid out. The parent stops fetching
+  // them; this also drops a file that was already in hand when it was hidden.
+  const shownTextTrackCells = useMemo(() => {
+    if (!textTrackCells || hiddenTrackIds.size === 0) return textTrackCells
+    const shown = new Set(contentFileIdsOfShownTracks(tracks, hiddenTrackIds))
+    const hiddenFile = tracks.some((track) => track.contentFileId && !shown.has(track.contentFileId))
+    if (!hiddenFile) return textTrackCells
+    const out: Record<string, CellData[]> = {}
+    for (const [id, cells] of Object.entries(textTrackCells)) {
+      if (shown.has(id)) out[id] = cells
+    }
+    return out
+  }, [textTrackCells, tracks, hiddenTrackIds])
   const independentTextCells = useMemo(
-    () => Object.values(textTrackCells ?? {}).flat(),
-    [textTrackCells],
+    () => Object.values(shownTextTrackCells ?? {}).flat(),
+    [shownTextTrackCells],
   )
   const independentTextLayout = useMemo(
     () => buildTimelineLayout("dubbing", independentTextCells, [], null),
@@ -2589,15 +2630,16 @@ export function TimelineEditor({
   const resolveTarget = resolveTargetAudio
   // AQU-1767: ONE CHIP PER PIECE. A take cut in two is two selected pieces of
   // one group; each is drawn, moved, trimmed and approved on its own.
+  const targetAudioHidden = hiddenTrackIds.has("target-audio")
   const targetItems = useMemo<TargetAudioItem[]>(
-    () => targetSource.flatMap((c) => piecesAsItems(c, resolveTargetPieces(c))),
-    [targetSource],
+    () => targetAudioHidden ? [] : targetSource.flatMap((c) => piecesAsItems(c, resolveTargetPieces(c))),
+    [targetAudioHidden, targetSource],
   )
   // SUB-51: the complement — sections still waiting for a dub. Their empty
   // space in the Target row offers a record button on hover.
   const emptyTargets = useMemo(
-    () => targetSource.filter((c) => !resolveTarget(c)),
-    [targetSource, resolveTarget],
+    () => targetAudioHidden ? [] : targetSource.filter((c) => !resolveTarget(c)),
+    [targetAudioHidden, targetSource, resolveTarget],
   )
   /**
    * The cells an ADDED track's chips line up against. (AQU-646 stage 3)
@@ -2698,7 +2740,7 @@ export function TimelineEditor({
       takeSel.slot === RECORDING_SLOT
         ? targetItems
         : tracks
-            .filter((tr) => tr.kind === "audio" && slotForTrack(tr.id) === takeSel.slot)
+            .filter((tr) => tr.kind === "audio" && slotForTrack(tr.id) === takeSel.slot && !hiddenTrackIds.has(tr.id))
             .flatMap((tr) => targetItemsForTrack(tr).items)
     // A cut take is several chips on its line; the one the playhead is over.
     for (const item of items) {
@@ -2860,10 +2902,26 @@ export function TimelineEditor({
   // edges don't pop in/out during zoom glides and fast scrolls (windowing was
   // exact-to-the-pixel, so any transient scroll/zoom mismatch blinked cards).
   const overscanSec = pxToSec(240, pxPerSec)
-  const viewStartSec = pxToSec(scrollLeft, pxPerSec) - overscanSec
-  // Before the scroll container is measured (viewportPx 0), fall back to the
-  // full track so every card renders — correct, and keeps tests deterministic.
-  const viewEndSec = pxToSec(scrollLeft + (viewportPx || trackWidthPx), pxPerSec) + overscanSec
+  // Unmeasured (tests, the commit before layout): a short prefix of the
+  // track. Once the column has a width, the horizontal list owns the window
+  // and this range is only the fallback.
+  const viewStartSec = -overscanSec
+  // Before the column is measured, draw a short prefix. A book is hours long;
+  // drawing every card on that first commit is what keeps the page from
+  // loading. Tests use short files, so they still see the whole track. The
+  // measured column hands the window to the horizontal list.
+  const UNMEASURED_WINDOW_SEC = 600
+  const viewEndSec = (viewportPx > 0
+    ? pxToSec(viewportPx, pxPerSec)
+    : Math.min(pxToSec(trackWidthPx, pxPerSec), UNMEASURED_WINDOW_SEC)) + overscanSec
+  const horizontalSlices = useMemo(
+    () => (viewportPx > 0 ? timeSlices(canvasWidthPx, pxPerSec) : []),
+    [viewportPx, canvasWidthPx, pxPerSec],
+  )
+  // Bumps on every render of this editor, and on none of the scroll ticks.
+  // Mounted columns redraw when the lanes' data changes.
+  const laneEpoch = useRef(0)
+  laneEpoch.current += 1
   // 2026-08-07: the chip strip describes the CURRENT chip — an explicit
   // selection wins; with nothing selected it follows the cell the queue is
   // sounding (or holds while paused); after the queue goes idle it keeps the
@@ -3025,7 +3083,7 @@ export function TimelineEditor({
     // to a different offset the values differ, the handler runs in full, and the
     // real number wins — which is exactly what should happen.)
     lastScrollLeft.current = left
-    setScrollLeft(left)
+    scrollBus.set(left, el.clientWidth)
   }
 
   /**
@@ -3051,8 +3109,7 @@ export function TimelineEditor({
     if (inner) inner.style.transform = `translateY(${-el.scrollTop}px)`
     if (el.scrollLeft === lastScrollLeft.current) return
     lastScrollLeft.current = el.scrollLeft
-    setScrollLeft(el.scrollLeft)
-    setViewportPx(el.clientWidth)
+    scrollBus.set(el.scrollLeft, el.clientWidth)
     // A MANUAL scroll while playback runs means "stop following me". Our own
     // programmatic scrolls fire this handler too — the 150ms stamp window
     // filters them out.
@@ -3148,7 +3205,7 @@ export function TimelineEditor({
       // Round 5: a video-driven follow keeps its anchor too — zooming used to
       // recentre on the viewport middle instead of the playhead.
       const followAnchor = follow && (queueActive || videoPlaying)
-      const anchorSec = followAnchor ? displayCurrentSec : pxToSec(scrollLeft + viewportPx / 2, pxPerSec)
+      const anchorSec = followAnchor ? displayCurrentSec : pxToSec(el.scrollLeft + el.clientWidth / 2, pxPerSec)
       const target = Math.max(0, secToPx(anchorSec, z) - (followAnchor ? viewportPx * 0.1 : viewportPx / 2))
       setPxPerSec(z)
       // Apply after React paints the new track width, or the browser clamps
@@ -3346,14 +3403,9 @@ export function TimelineEditor({
       const anchor = zoomGestureAnchorRef.current
       zoomAnchorRef.current = anchor
       setPxPerSec(next)
-      // SUB-18 (flicker): update the scroll STATE in the same batch as the
-      // zoom. Otherwise each glide frame renders with new zoom + stale
-      // scrollLeft (state only catches up via the DOM scroll event a beat
-      // later), the visibility window miscomputes for that frame, and edge
-      // cards blink out. The layout effect still writes the DOM scrollLeft.
-      if (anchor) {
-        setScrollLeft(Math.max(0, secToPx(anchor.timeSec, next) - anchor.offsetX))
-      }
+      // The columns are fixed pixel ranges, so a new zoom does not need a
+      // scroll offset in state to keep the right chips mounted. The layout
+      // effect below writes the DOM offset that holds the anchor still.
       if (next !== target) {
         zoomAnimRef.current = requestAnimationFrame(step)
       } else {
@@ -3471,9 +3523,10 @@ export function TimelineEditor({
     const wanted = Math.max(0, secToPx(anchor.timeSec, pxPerSec) - anchor.offsetX)
     const left = clampScrollLeft(wanted, el.scrollWidth, el.clientWidth)
     el.scrollLeft = left
-    // The glide step already put `wanted` in state. Past what the column can
-    // scroll, the DOM may not move at all, so no scroll event would correct it.
-    if (left !== wanted) setScrollLeft(left)
+    lastScrollLeft.current = left
+    // Past what the column can scroll, the DOM may not move at all, so no
+    // scroll event would tell the ruler. Publish the offset either way.
+    scrollBus.set(left, el.clientWidth)
   }, [pxPerSec])
 
   // ── AQU-646 stage 5: dragging the playhead ────────────────────────────────
@@ -3796,7 +3849,7 @@ export function TimelineEditor({
    */
   function summarySpansForTrack(track: TimelineTrack): SummarySpan[] {
     if (track.contentFileId) {
-      return (textTrackCells?.[track.contentFileId] ?? []).flatMap(cell => {
+      return (shownTextTrackCells?.[track.contentFileId] ?? []).flatMap(cell => {
         const span = independentTextLayout.spanFor(cell, "subtitle")
         return span ? [{ startSec: span.start, endSec: span.end }] : []
       })
@@ -3853,11 +3906,17 @@ export function TimelineEditor({
   // handler above — hoisting it to module scope would mean threading twenty
   // reactive values through a parameter object, and the first one anybody
   // forgot to pass would be a lane that quietly stopped updating.
-  function laneForTrack(row: TrackRow): ReactNode {
+  function laneForTrack(row: TrackRow, win?: { startSec: number; endSec: number }): ReactNode {
+    const rowProps = {
+      ...laneProps,
+      viewStartSec: win?.startSec ?? viewStartSec,
+      viewEndSec: win?.endSec ?? viewEndSec,
+    }
     const track = row.track
+    if (hiddenTrackIds.has(track.id)) return null
     if (track.contentFileId && ["source-subtitles", "target-subtitles"].includes(track.kind)) {
       const contentFileId = track.contentFileId
-      const contentCells = textTrackCells?.[contentFileId] ?? []
+      const contentCells = shownTextTrackCells?.[contentFileId] ?? []
       const error = textTrackErrors?.[contentFileId]
       if (error) return <div role="alert" className="flex h-[var(--tl-row-h)] items-center gap-3 px-3 text-sm">
         <span>{error.message}</span>
@@ -3866,7 +3925,7 @@ export function TimelineEditor({
       </div>
       return <TimelineLane
         key={track.id} cells={contentCells} variant="subtitle"
-        {...laneProps} layout={independentTextLayout}
+        {...rowProps} layout={independentTextLayout}
         retimable={!timingLocked && Boolean(onRetimeTextTrack)}
         onRetime={(cellId, start, end) => onRetimeTextTrack?.(contentFileId, cellId, start, end)}
         onSeek={cellId => {
@@ -3919,7 +3978,7 @@ export function TimelineEditor({
             // sit wherever it likes, so this must never be on by default.
             boundNeighbours={subtitleFileWithFootage}
             snapEnabled={snapOn}
-            {...laneProps}
+            {...rowProps}
             // AQU-646: the stretches of film with no line of their own. Only
             // this arrangement offers them — everywhere else the lane is
             // exactly as it was.
@@ -3955,15 +4014,15 @@ export function TimelineEditor({
         // transcript chips over the film's own speech, with a dashed empty chip
         // across each stretch where nobody talks.
         return dialogue.length > 0 ? (
-          <TimelineLane key={track.id} cells={dialogue} variant="dialogue" retimable={false} {...laneProps} />
+          <TimelineLane key={track.id} cells={dialogue} variant="dialogue" retimable={false} {...rowProps} />
         ) : (
           <SourceRegionLane
             key={track.id}
             map={audioRegions}
             cells={audioCues ?? []}
             pxPerSec={pxPerSec}
-            viewStartSec={viewStartSec}
-            viewEndSec={viewEndSec}
+            viewStartSec={rowProps.viewStartSec}
+            viewEndSec={rowProps.viewEndSec}
             selectedId={selectedId}
             editable={editable}
             // AUDIO CHIPS SELECT, AND ALWAYS SHOULD HAVE. Stage 2 refused it
@@ -3996,7 +4055,6 @@ export function TimelineEditor({
                 : undefined
             }
             hideGaps={Boolean(linkedVideoEmpty) && audioFirst}
-            scrollLeftPx={scrollLeft}
           />
         )
       case "target-subtitles":
@@ -4010,7 +4068,7 @@ export function TimelineEditor({
             cells={subtitle}
             variant="target-subtitle"
             retimable={false}
-            {...laneProps}
+            {...rowProps}
             // The same pencil, in the same silences, doing the same thing —
             // and that is the point (Sam, 2026-08-13). It creates the SAME cell
             // the source row's pencil creates, because these two rows are two
@@ -4029,8 +4087,8 @@ export function TimelineEditor({
             layout={layout}
             getOtherLayout={getOtherLayout}
             pxPerSec={pxPerSec}
-            viewStartSec={viewStartSec}
-            viewEndSec={viewEndSec}
+            viewStartSec={rowProps.viewStartSec}
+            viewEndSec={rowProps.viewEndSec}
             selectedId={selectedId}
             selectedTakeCellId={takeSelCellFor(RECORDING_SLOT)}
             loadingCellId={loadingCellId}
@@ -4087,8 +4145,8 @@ export function TimelineEditor({
             collapsed={row.collapsed}
             spans={row.collapsed ? row.members.flatMap(summarySpansForTrack) : NO_SUMMARY_SPANS}
             pxPerSec={pxPerSec}
-            viewStartSec={viewStartSec}
-            viewEndSec={viewEndSec}
+            viewStartSec={rowProps.viewStartSec}
+            viewEndSec={rowProps.viewEndSec}
           />
         )
       case "audio": {
@@ -4112,8 +4170,8 @@ export function TimelineEditor({
             layout={layout}
             getOtherLayout={getOtherLayout}
             pxPerSec={pxPerSec}
-            viewStartSec={viewStartSec}
-            viewEndSec={viewEndSec}
+            viewStartSec={rowProps.viewStartSec}
+            viewEndSec={rowProps.viewEndSec}
             selectedId={selectedId}
             selectedTakeCellId={takeSelCellFor(slotForTrack(track.id))}
             loadingCellId={loadingCellId}
@@ -4329,7 +4387,7 @@ export function TimelineEditor({
             const el = scrollRef.current
             if (el) {
               const target = computeFollowScroll(
-                secToPx(displayCurrentSec, pxPerSec), el.scrollLeft, viewportPx, trackWidthPx,
+                secToPx(displayCurrentSec, pxPerSec), el.scrollLeft, el.clientWidth, trackWidthPx,
               )
               if (target != null) scrollTrackTo(target)
             }
@@ -4429,6 +4487,9 @@ export function TimelineEditor({
           items={checkMenuItems}
           triggerVariant="outline"
           triggerSize="icon-sm"
+          // The square sits in the bar, not on the window's edge. The panel
+          // opens from the button's left edge, the same way Timing does.
+          align="start"
           triggerTooltip={t(linkingMode ? "editor.timeline.checkMenuLinking" : "editor.timeline.checkMenu")}
           triggerIcon={cueLinksPending ? Spinner : ClipboardCheck}
           // Armed linking is a MODE, so the control has to look different
@@ -4692,7 +4753,80 @@ export function TimelineEditor({
     }
   }
 
-  return (
+  function renderTrackRows(startSec: number, endSec: number) {
+    return trackRows.map((row) => {
+      const lane = laneForTrack(row, { startSec, endSec })
+                // A row with NO MENU CAPABILITY at all — a viewer — is the row
+                // that shipped, byte for byte. That flag is role-derived and
+                // never flips mid-session, so this early return costs nothing.
+                //
+                // AN EMPTY MENU IS NOT THAT CASE, and used to share this line
+                // (2026-08-28). `trackMenuEmpty` flips DURING INTERACTION: with
+                // rename-only clearance, selecting a second track empties the
+                // menu for every selected row at once. That swapped this
+                // element between `lane` and `ContextMenu` at the same key —
+                // different type, so React unmounted and remounted every one of
+                // them. The tint vanishing was the visible half; the rest was
+                // worse. A remount runs `TargetAudioChip`'s cleanup, which
+                // STOPS A PLAYING PREVIEW; it empties `useTargetChipPeaks`'
+                // session cache, so every visible waveform refetches and
+                // redecodes; and it drops any in-flight drag. Ctrl-clicking a
+                // second track silenced audio you were listening to.
+                //
+                // So the menu stays MOUNTED and only its content is withheld.
+                // Consequence to know: a right-click on an empty-menu row now
+                // does nothing at all, where before it showed the browser's own
+                // menu (no trigger was mounted to swallow it). That is the same
+                // answer a chip already gives, and it is the price of not
+                // remounting the lane under a playing take.
+                if (!hasTrackMenu) return lane
+                const menuEmpty = trackMenuEmpty(row.track.id)
+                return (
+                  // Sam's ruling: right-click ANYWHERE in a track that is not a
+                  // chip. So the lane gets the same menu the label does.
+                  //
+                  // THE WRAPPER MUST CREATE NO STACKING CONTEXT — no `relative`,
+                  // no `isolate`, no `z-*`, no `transform`, no `filter`.
+                  // TargetAudioLane's own root carries `isolate` specifically so
+                  // chip z-indexes stack WITHIN the lane and never over the
+                  // playhead, and a stacking context one level up would undo
+                  // exactly that. A bare block element is the whole wrapper, and
+                  // the lane inside it is a fixed row height, so it adds no
+                  // geometry either.
+                  <ContextMenu
+                    key={row.track.id}
+                    onOpenChange={(open) => { if (open) onTrackContextMenu(row.track.id) }}
+                  >
+                    {/* AQU-646 stage 2b: the selection reaches ACROSS the whole
+                        track, not just its name — otherwise selecting a track
+                        highlights a 128px label and says nothing about the
+                        thing you actually selected. Fainter than the gutter's
+                        tint because it sits under the chips rather than behind
+                        text, and `bg-*` creates no stacking context, so the
+                        rule above still holds. */}
+                    <ContextMenuTrigger
+                      render={
+                        <div
+                          data-tl-track-lane={row.track.id}
+                          className={cn(selectedTrackIdSet.has(row.track.id) && "bg-accent/40")}
+                          style={laneShiftStyle(row.track.id, row.depth === 1 ? row.track.groupId : null)}
+                          // AQU-1684: a drag under way in this lane keeps it
+                          // from being hidden. Capture, because the chips own
+                          // their pointerdown.
+                          onPointerDownCapture={(e) => pressLane(row.track.id, e)}
+                        />
+                      }
+                    >
+                      {lane}
+                    </ContextMenuTrigger>
+                    {!menuEmpty && (
+                      <ContextMenuContent className="w-48">{trackMenu(row.track)}</ContextMenuContent>
+                    )}
+                  </ContextMenu>
+                )
+    })
+  }
+
     // Stage 3: the editor FILLS the height it is given, and gives it all to the
     // tracks. It sits in a resizable panel now, so it no longer sizes itself to
     // its content (which is what the 2026-08-07 note here used to say) — every
@@ -4707,6 +4841,7 @@ export function TimelineEditor({
     // exists in exactly one place. The context beside them carries the same
     // numbers to the components that need to make DECISIONS about the height
     // (which pieces of a chip still fit) rather than merely be that tall.
+    return (
     <div
       data-testid="tl-editor"
       className="flex h-full min-h-0 flex-col overflow-hidden"
@@ -4814,7 +4949,10 @@ export function TimelineEditor({
           `grid-rows-[minmax(0,1fr)]` is load-bearing, not tidiness: with an
           implicit `auto` row the row sizes to its content, the columns overflow
           the panel, and there is NO SCROLLBAR AT ALL — a failure that looks
-          exactly like the resizable panel not having taken. */}
+          exactly like the resizable panel not having taken. The track column
+          is `minmax(0, 1fr)` for the same reason on the other axis: a bare
+          `1fr` will not shrink below the canvas, and a long book is millions
+          of pixels wide. */}
       <RowMetricsContext.Provider value={rowMetrics}>
         {/* AN INLINE STYLE, NOT A CLASS, and that is forced rather than
             chosen: Tailwind generates only the classes it can literally see in
@@ -4825,7 +4963,7 @@ export function TimelineEditor({
             places and the module that names them is no longer the authority. */}
         <div
           className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)]"
-          style={{ gridTemplateColumns: `${gutterWidthPx(gutterCollapsed)}px 1fr` }}
+          style={{ gridTemplateColumns: `${gutterWidthPx(gutterCollapsed)}px minmax(0, 1fr)` }}
         >
           {/* NOTHING MAY BE INSERTED BETWEEN THESE TWO COLUMNS, and the gutter
               must not grow a testid: TimelineEditor.test.tsx reads the labels
@@ -5084,7 +5222,7 @@ export function TimelineEditor({
                             handle={menuHandleFor(track.id)}
                             data-testid={`tl-track-menu-${track.id}`}
                             aria-label={t("editor.timeline.trackMenuAria", { name: track.name })}
-                            className="rounded-md p-1 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground focus-visible:opacity-100 aria-expanded:opacity-100"
+                            className="rounded-md p-1 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground focus-visible:opacity-100 aria-expanded:opacity-100"
                           >
                             <MoreHorizontal className="h-3.5 w-3.5" />
                           </DropdownMenuTrigger>
@@ -5202,94 +5340,41 @@ export function TimelineEditor({
               would otherwise chain the gesture into the page behind it and
               scroll the whole workspace away. */}
           <div
-            ref={scrollRef}
+            ref={bindScroll}
             data-testid="tl-scroll"
             className="overflow-auto overscroll-contain"
             onScroll={handleTrackScroll}
           >
+            <TimelineScrollBusContext.Provider value={scrollBus}>
             <div className="relative" data-testid="tl-canvas" data-file-px={trackWidthPx} style={{ width: `${canvasWidthPx}px` }}>
-              <TimelineRuler
+              <TimelineScrollingRuler
                 durationSec={durationSec}
                 pxPerSec={pxPerSec}
                 fillPx={canvasWidthPx}
-                viewStartSec={viewStartSec}
-                viewEndSec={viewEndSec}
                 onScrub={seekTo}
                 onScrubStart={beginScrub}
                 onScrubMove={moveScrub}
                 onScrubEnd={endScrub}
               />
-              {trackRows.map((row) => {
-                const lane = laneForTrack(row)
-                // A row with NO MENU CAPABILITY at all — a viewer — is the row
-                // that shipped, byte for byte. That flag is role-derived and
-                // never flips mid-session, so this early return costs nothing.
-                //
-                // AN EMPTY MENU IS NOT THAT CASE, and used to share this line
-                // (2026-08-28). `trackMenuEmpty` flips DURING INTERACTION: with
-                // rename-only clearance, selecting a second track empties the
-                // menu for every selected row at once. That swapped this
-                // element between `lane` and `ContextMenu` at the same key —
-                // different type, so React unmounted and remounted every one of
-                // them. The tint vanishing was the visible half; the rest was
-                // worse. A remount runs `TargetAudioChip`'s cleanup, which
-                // STOPS A PLAYING PREVIEW; it empties `useTargetChipPeaks`'
-                // session cache, so every visible waveform refetches and
-                // redecodes; and it drops any in-flight drag. Ctrl-clicking a
-                // second track silenced audio you were listening to.
-                //
-                // So the menu stays MOUNTED and only its content is withheld.
-                // Consequence to know: a right-click on an empty-menu row now
-                // does nothing at all, where before it showed the browser's own
-                // menu (no trigger was mounted to swallow it). That is the same
-                // answer a chip already gives, and it is the price of not
-                // remounting the lane under a playing take.
-                if (!hasTrackMenu) return lane
-                const menuEmpty = trackMenuEmpty(row.track.id)
-                return (
-                  // Sam's ruling: right-click ANYWHERE in a track that is not a
-                  // chip. So the lane gets the same menu the label does.
-                  //
-                  // THE WRAPPER MUST CREATE NO STACKING CONTEXT — no `relative`,
-                  // no `isolate`, no `z-*`, no `transform`, no `filter`.
-                  // TargetAudioLane's own root carries `isolate` specifically so
-                  // chip z-indexes stack WITHIN the lane and never over the
-                  // playhead, and a stacking context one level up would undo
-                  // exactly that. A bare block element is the whole wrapper, and
-                  // the lane inside it is a fixed row height, so it adds no
-                  // geometry either.
-                  <ContextMenu
-                    key={row.track.id}
-                    onOpenChange={(open) => { if (open) onTrackContextMenu(row.track.id) }}
-                  >
-                    {/* AQU-646 stage 2b: the selection reaches ACROSS the whole
-                        track, not just its name — otherwise selecting a track
-                        highlights a 128px label and says nothing about the
-                        thing you actually selected. Fainter than the gutter's
-                        tint because it sits under the chips rather than behind
-                        text, and `bg-*` creates no stacking context, so the
-                        rule above still holds. */}
-                    <ContextMenuTrigger
-                      render={
-                        <div
-                          data-tl-track-lane={row.track.id}
-                          className={cn(selectedTrackIdSet.has(row.track.id) && "bg-accent/40")}
-                          style={laneShiftStyle(row.track.id, row.depth === 1 ? row.track.groupId : null)}
-                          // AQU-1684: a drag under way in this lane keeps it
-                          // from being hidden. Capture, because the chips own
-                          // their pointerdown.
-                          onPointerDownCapture={(e) => pressLane(row.track.id, e)}
-                        />
-                      }
-                    >
-                      {lane}
-                    </ContextMenuTrigger>
-                    {!menuEmpty && (
-                      <ContextMenuContent className="w-48">{trackMenu(row.track)}</ContextMenuContent>
-                    )}
-                  </ContextMenu>
-                )
-              })}
+              {viewportPx > 0 && scrollEl ? (
+                <TimelineHorizontalList
+                  scrollElement={scrollEl}
+                  slices={horizontalSlices}
+                  extraData={laneEpoch.current}
+                  renderSlice={(slice) => (
+                    <TimelineOrigin px={slice.startPx}>
+                      <div
+                        data-tl-slice={slice.key}
+                        style={{ width: slice.widthPx, overflowX: "clip", overflowY: "visible" }}
+                      >
+                        {renderTrackRows(slice.startSec, slice.endSec)}
+                      </div>
+                    </TimelineOrigin>
+                  )}
+                />
+              ) : (
+                renderTrackRows(viewStartSec, viewEndSec)
+              )}
               {untimed.length > 0 && (
                 <div className="flex h-12 items-center gap-2 overflow-x-auto border-b border-border px-3">
                   {untimed.map((c) => (
@@ -5320,6 +5405,7 @@ export function TimelineEditor({
                 rate={transportRate}
               />
             </div>
+            </TimelineScrollBusContext.Provider>
           </div>
         </div>
       </RowMetricsContext.Provider>

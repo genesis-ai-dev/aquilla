@@ -55,6 +55,9 @@ describe("HistoryPanel", () => {
       expect.stringContaining("Edit translation"),
       expect.stringContaining("Add row"),
     ])
+    // The newest step undoes itself; an older one undoes back to that row.
+    expect(within(steps[0]).getByRole("button", { name: "Undo" })).toBeInTheDocument()
+    expect(within(steps[1]).getByRole("button", { name: "Undo to here" })).toBeInTheDocument()
     // "Undo to here" on the second: the newest two go, newest first.
     await userEvent.click(within(steps[1]).getByTestId("history-undo-to-here"))
     await waitFor(() => expect(log).toEqual(["undo editor.history.stepHideRow", "undo editor.history.stepEditText"]))
@@ -82,11 +85,12 @@ describe("HistoryPanel", () => {
     render(<HistoryPanel onResult={vi.fn()} laneName={(tag) => names[tag] ?? tag} />)
     await userEvent.click(screen.getByTestId("history-panel-trigger"))
     const steps = within(await screen.findByTestId("history-panel-steps")).getAllByTestId("history-step")
-    expect(steps.map((li) => li.textContent)).toEqual([
-      expect.stringMatching(/Add row.*Ep 1(?!.*·)/),
-      expect.stringContaining("Edit translationEp 1 · French"),
-      expect.stringContaining("Ep 1 · Swahili"),
-    ])
+    expect(steps[0].textContent).toContain("Add row")
+    expect(steps[0].textContent).toContain("Ep 1")
+    expect(steps[0].textContent).not.toMatch(/·/)
+    expect(steps[1].textContent).toContain("Edit translation")
+    expect(steps[1].textContent).toContain("Ep 1 · French")
+    expect(steps[2].textContent).toContain("Ep 1 · Swahili")
   })
 
   it("shows someone else's approval as the reason a step was left alone", async () => {

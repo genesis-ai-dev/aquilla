@@ -182,7 +182,12 @@ Output ONLY JSON. No markdown, no code fences, no explanation.`
 
 function describeCheck(rule: TranslationRule): string {
   const c = rule.check
-  if (c.type === "target-forbids") return `Target must not contain /${c.targetPattern}/i`
+  if (c.type === "target-forbids") {
+    // AQU-1712: a `target-forbids` check may carry a source condition.
+    return c.sourcePattern
+      ? `When source matches /${c.sourcePattern}/i, target must not contain /${c.targetPattern}/i`
+      : `Target must not contain /${c.targetPattern}/i`
+  }
   if (c.type === "source-target-match") return `Pattern /${c.pattern}/gi must appear in both source and target when present in source`
   if (c.type === "source-requires-target") return `When source matches /${c.sourcePattern}/i, target must match /${c.targetPattern}/i`
   // builtin: code-defined check, identified only by id from the caller's perspective.

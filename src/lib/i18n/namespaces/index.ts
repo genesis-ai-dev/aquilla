@@ -56,6 +56,7 @@ import { bibleParticipants } from "./bibleParticipants"
 import { bibleVoices } from "./bibleVoices"
 import { transcribe } from "./transcribe"
 import { recordingsUpload } from "./recordingsUpload"
+import { paratextBridge } from "./paratextBridge"
 
 export const NAMESPACES = [
   common,
@@ -98,4 +99,5 @@ export const NAMESPACES = [
   bibleVoices,
   transcribe,
   recordingsUpload,
+  paratextBridge,
 ] as const

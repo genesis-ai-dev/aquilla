@@ -240,6 +240,92 @@ const TOOL_SPECS: McpToolSpec[] = [
     },
   },
   {
+    name: 'prepare_set_brief',
+    description:
+      'Stage a SECTION-SCOPED write of the project translation brief as a changeset ' +
+      '(AQU-2407 — the MCP door onto the SetBrief command). Use this instead of ' +
+      'patch_settings { key: "translationBrief" }: that replaces the whole brief record ' +
+      'wholesale, so you must hand-write l2Markdown, l1Summary, version and updatedBy and ' +
+      'nothing checks they agree with the answers. Here you send ANSWERS ONLY — the server ' +
+      'merges them into the live brief (unnamed sections keep their value), reassembles ' +
+      'l2Markdown from the code-owned section order, stamps version / updatedAt / updatedBy ' +
+      'from this credential, and re-renders the L1 summary on commit so the brief reaches ' +
+      'the copilot. Args: projectId (required), parameters (partial map of section id → ' +
+      'answer text; call describe_command({ kind: "SetBrief" }) for the section ids — an ' +
+      'unknown id is validation_failed and stages nothing), freeformNotes (replaces the ' +
+      'notes block), ifMatchVersion (optional settings version from get_project_settings; ' +
+      'omitted, the live version is read and pinned for you), changesetId (optional ' +
+      'UUIDv7 for idempotency). At least one of parameters / freeformNotes is required. ' +
+      'Floor MAINTAINER; SetBrief must be the SOLE command in its changeset. Returns ' +
+      '{ changesetId, summary, digest, mode, approvalUrl? } exactly like prepare_translations ' +
+      '— nothing is applied until confirm_changeset (ask mode: a human approves first). The ' +
+      "commit receipt's briefSummary says whether the L1 summary rendered; if it did not, " +
+      'the sections are still committed — call regenerate_brief_summary.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        parameters: {
+          type: 'object',
+          description:
+            'Brief section id → answer text. Partial: only the named sections are written. ' +
+            'Section ids come from describe_command({ kind: "SetBrief" }); each answer caps ' +
+            'at 4000 characters.',
+          additionalProperties: { type: 'string' },
+        },
+        freeformNotes: {
+          type: 'string',
+          description: 'Replaces the brief\'s freeform notes block (≤ 8000 characters).',
+        },
+        ifMatchVersion: {
+          type: 'number',
+          description:
+            'Optional live SETTINGS version from get_project_settings (not the brief\'s own ' +
+            'version). Omit it and the server reads and pins the live version; pass it to ' +
+            'assert nothing changed since you read the brief (plan_stale on drift).',
+        },
+        changesetId: { type: 'string', description: 'Optional client-supplied UUIDv7 for idempotency.' },
+      },
+      required: ['projectId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'regenerate_brief_summary',
+    description:
+      "Stage a re-render of the translation brief's L1 summary from its CURRENT sections " +
+      '(AQU-2407 — the MCP door onto the RegenerateBriefSummary command). This is the ' +
+      'in-app "Regenerate summary" button: the server renders the summary with its own ' +
+      'prompt and 1600-char cap and writes l1Summary / l1GeneratedAt / l1ModelId back. Call ' +
+      'it when a brief was edited without a render, or when a prepare_set_brief receipt ' +
+      'reported briefSummary.rendered: false. While a project has not written ' +
+      'translationInstructions, this summary is what the brief contributes to every drafting ' +
+      'prompt (see parts.instructions in get_prompt_preview); once instructions are written ' +
+      'the summary reaches no prompt and this is a no-op for the AI. Args: projectId ' +
+      '(required), ifMatchVersion (optional settings version from get_project_settings; ' +
+      'omitted, the live version is read and pinned for you), changesetId (optional UUIDv7). ' +
+      'Floor MAINTAINER; sole command in its changeset. A brief with no filled section and no ' +
+      'notes is validation_failed ("nothing to summarize") — write it with prepare_set_brief ' +
+      'first. The model call runs at commit BEFORE the approval is consumed, so a failed ' +
+      'render answers job_failed / rate_limited and leaves the changeset committable for a ' +
+      'retry.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        ifMatchVersion: {
+          type: 'number',
+          description:
+            'Optional live SETTINGS version from get_project_settings. Omit it and the ' +
+            'server reads and pins the live version.',
+        },
+        changesetId: { type: 'string', description: 'Optional client-supplied UUIDv7 for idempotency.' },
+      },
+      required: ['projectId'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'describe_command',
     description:
       'Look up the full parameter documentation for one changeset command kind — its params, ' +
@@ -1413,6 +1499,10 @@ export const TOOL_KINDS: Record<string, ToolKind> = {
   get_project: 'read',
   get_project_settings: 'read',
   patch_settings: 'stage',
+  // AQU-2407: both stage a changeset only; the brief write (and the L1
+  // render it pays for) happens at confirm_changeset.
+  prepare_set_brief: 'stage',
+  regenerate_brief_summary: 'stage',
   describe_command: 'read',
   get_skill: 'read',
   search_project: 'read',

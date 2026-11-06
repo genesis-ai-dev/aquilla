@@ -54,7 +54,6 @@ interface Props {
   text: string
   original?: string
   context?: string
-  cellLabel?: string
   sourceLanguage?: string
   targetLanguage?: string
   projectTtsSettings?: ProjectTtsSettings
@@ -144,7 +143,6 @@ export function CellTtsButton({
   text,
   original,
   context,
-  cellLabel,
   sourceLanguage,
   targetLanguage,
   projectTtsSettings,
@@ -248,7 +246,9 @@ export function CellTtsButton({
           // and for library voices re-voice the TTS through the voice forge); otherwise we
           // fall back to a transient preview synth.
           setTtsStatus(statusKey, { kind: "loading", loaded: 0, total: 0, file: "" })
-          const geminiContext = { sourceLanguage, targetLanguage, original, context, cellLabel }
+          // AQU-2408: no cellLabel — a typed label is a note on the line, not
+          // voice direction (docs/decisions/0007). The placeholder renders empty.
+          const geminiContext = { sourceLanguage, targetLanguage, original, context }
           const onProgress: Parameters<typeof synthesizeForCell>[1]["onProgress"] = (p) => {
             setTtsStatus(statusKey, { kind: "loading", loaded: p.loaded, total: p.total, file: p.file })
             if (p.status === "ready" || (p.total > 0 && p.loaded >= p.total)) {
@@ -417,7 +417,6 @@ export function CellTtsButton({
     targetLanguage,
     original,
     context,
-    cellLabel,
     previewOnly,
     alsoAttachTo,
     t,

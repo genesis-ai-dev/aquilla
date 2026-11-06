@@ -139,6 +139,8 @@ import { useManualStyleAlign, useStyleAlignDirtyMatch } from "@/lib/store/style-
 import { useIsMediaCursorCell, useMediaSyncActive } from "@/lib/timeline/media-cursor"
 import { useUiSlot } from "@/lib/ui-slots"
 import { CastGutterVoice } from "@/components/voice/CastGutterVoice"
+import { CellLabelRow } from "@/components/CellLabelRow"
+import { canEditCellLabel } from "@/lib/cell-label-gate"
 import { projectTargetLaneLanguages, showVoiceLanguageBadge } from "@/lib/audio/inworld-voices"
 import { queueClockIsFileTime, useIsQueueCurrentCell, useQueueCellPlayhead, useQueueCurrentCellId } from "@/lib/audio/play-queue"
 import { useVideoClockPlaying, useVideoSoundingCellId } from "@/lib/timeline/video-clock"
@@ -1102,6 +1104,10 @@ interface EditorTableProps {
   /** AQU-1408 §1: called when the user saves a correction to the statistical
    *  gloss. Parent emits `cell.gloss.set`. Empty text withdraws the correction. */
   onSaveGloss?: (cell: CellData, glossText: string) => void
+  /** AQU-2408: called when the person saves the cell's own label from the
+   *  expansion panel's Label row. Parent emits `cell.label.set`; null clears.
+   *  Metadata, never a voice (docs/decisions/0007). */
+  onSaveCellLabel?: (cell: CellData, label: string | null) => void
   /** The statistical gloss to show for a cell: the contributor's saved
    *  correction when one still describes this text, else the corpus-derived
    *  gloss computed on demand (AQU-1408 §1). */
@@ -1274,7 +1280,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   backtranslationByCellId,
   linkedTakesByCell,
   heardLinesLoading = false,
-  onSaveBacktranslation, onSaveGloss, getStatisticalBt,
+  onSaveBacktranslation, onSaveGloss, onSaveCellLabel, getStatisticalBt,
   cellOpenCommentCount,
   onSeekToCue,
   playingCueCellId = null,
@@ -3188,6 +3194,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onBacktranslate={onBacktranslate}
           onSaveBacktranslation={onSaveBacktranslation}
           onSaveGloss={onSaveGloss}
+          onSaveCellLabel={onSaveCellLabel}
           getStatisticalBt={getStatisticalBt}
           getFootnoteDetails={getFootnoteDetails}
           cellOpenCommentCount={cellOpenCommentCount}
@@ -3350,6 +3357,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     onReleaseCell,
     onSaveBacktranslation,
     onSaveGloss,
+    onSaveCellLabel,
     onSeekToCue,
     playingCueCellId,
     onPauseCue,
@@ -4447,6 +4455,7 @@ interface MemoizedRowProps {
   onBacktranslate?: (cell: CellData, source: BacktranslationActionSource) => void
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
   onSaveGloss?: (cell: CellData, glossText: string) => void
+  onSaveCellLabel?: (cell: CellData, label: string | null) => void
   getStatisticalBt?: (translatedText: string, cellId: string) => GlossReading
   getFootnoteDetails: (cellId: string) => CellFootnoteDetails
   cellOpenCommentCount?: Map<string, number>
@@ -4556,7 +4565,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     structuralEditing, untimedInserts,
     insertAboveStartSec, insertAboveEndSec, insertBelowStartSec, insertBelowEndSec,
     prevStartSec, nextStartSec, timedFile,
-    isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation, onSaveGloss, getStatisticalBt,
+    isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation, onSaveGloss, onSaveCellLabel, getStatisticalBt,
     getFootnoteDetails,
     onSeekToCue, cuePlaying, onPauseCue, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled,
     sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, isAnonymous,
@@ -4706,6 +4715,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onBacktranslate={onBacktranslate}
         onSaveBacktranslation={onSaveBacktranslation}
         onSaveGloss={onSaveGloss}
+        onSaveCellLabel={onSaveCellLabel}
         getStatisticalBt={getStatisticalBt}
         getFootnoteDetails={getFootnoteDetails}
         openCommentCount={openCommentCount}
@@ -4891,6 +4901,7 @@ interface EditorRowProps {
   onBacktranslate?: (cell: CellData, source: BacktranslationActionSource) => void
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
   onSaveGloss?: (cell: CellData, glossText: string) => void
+  onSaveCellLabel?: (cell: CellData, label: string | null) => void
   getStatisticalBt?: (translatedText: string, cellId: string) => GlossReading
   getFootnoteDetails: (cellId: string) => CellFootnoteDetails
   /** FRO-207: Lazily returns the interlinear alignment model. */
@@ -5837,6 +5848,7 @@ function EditorRow({
   prevStartSec = null, nextStartSec = null, timedFile,
   isBacktranslationConfigured, isBacktranslating, backtranslationError, onBacktranslate, onSaveBacktranslation,
   onSaveGloss,
+  onSaveCellLabel,
   getStatisticalBt,
   getFootnoteDetails,
   openCommentCount,
@@ -7835,6 +7847,13 @@ function EditorRow({
   // it is always a string and never nullish, and cell.transcription was never
   // consulted.) The 40px gutter column is reserved unconditionally, so a
   // missing circle read as a missing CONTROL rather than a missing column.
+  // AQU-2408: who may type the cell's label. The project's tier (maintainer
+  // unless opened to project leads) is enforced here, where the field is drawn,
+  // exactly as the cell-editing tier is; the server's static floor (project
+  // lead) sits underneath. docs/decisions/0007-cell-labels-are-metadata-never-cast.md.
+  const mayEditCellLabel =
+    Boolean(onSaveCellLabel) &&
+    canEditCellLabel({ roleLevel: project.syncRole?.level ?? null, settings: project })
   const speaksInGutter = castGutter && !isStructuralCell(cell.type)
   const gutterVoice = speaksInGutter
     ? resolveCastVoice(ttsSettings, cell, cell.ttsSettings?.voiceId)
@@ -9740,7 +9759,6 @@ function EditorRow({
                 text={visibleTranslated}
                 original={effectiveSourceText(cell)}
                 context={cell.context}
-                cellLabel={cell.cellLabel}
                 sourceLanguage={project.sourceLanguage}
                 targetLanguage={project.targetLanguage}
                 projectTtsSettings={project.ttsSettings}
@@ -9849,6 +9867,15 @@ function EditorRow({
           row's child, and only mounted while open so collapsed rows stay flush. */}
       {expanded && (
       <div className="ps-[3.75rem] pe-4 pb-2">
+        {/* AQU-2408: the cell's own label — a note on the line, metadata, never
+            a voice. Read by everyone it is shown to; typed at or above the
+            project's label tier. Sits above the tabs because it is about the
+            whole line, not one lens on it. */}
+        <CellLabelRow
+          label={cell.cellLabel ?? null}
+          editable={mayEditCellLabel}
+          onSave={onSaveCellLabel ? (label) => onSaveCellLabel(cell, label) : undefined}
+        />
         <CellExpansion
           open={expanded}
           tab={expansionTab}

@@ -167,6 +167,11 @@ export type EventKind =
   // cells.event_id). Writes cast_name into cells.metadata JSONB without touching
   // target text. Contributor-level — a PM/project-lead labels cells for voice actors.
   | 'cast.assign'
+  // AQU-2408: a hand-typed label on a cell. Non-chain-mutating (does NOT move
+  // cells.event_id). Writes `cellLabel` into the SOURCE row's metadata JSONB
+  // without touching text. Metadata, never a speaker or a voice — see
+  // docs/decisions/0007-cell-labels-are-metadata-never-cast.md.
+  | 'cell.label.set'
   // Timeline editor: retime a cell (move/stretch). Non-chain-mutating — updates
   // start_ms/end_ms on both the source and target rows without moving cells.event_id.
   | 'cell.retime'
@@ -1167,6 +1172,15 @@ export interface EventPayloads {
      * Omitted when her sheet had no such column. Null clears it.
      */
     lineNumber?: string | null
+  }
+
+  // AQU-2408: a hand-typed label on a cell (docs/decisions/0007). Stored as
+  // cells.metadata.cellLabel on the SOURCE row — the key legacy Codex notebooks
+  // already carry — so scoped search and the editor's corner label read both
+  // the same way. Null removes the key. Never cast_name, never a voice.
+  'cell.label.set': {
+    /** The label to show on the cell. Null (or blank) removes it. */
+    label: string | null
   }
 
   // ── Timeline editor (non-chain-mutating) ────────────────────────────────

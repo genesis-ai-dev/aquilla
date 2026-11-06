@@ -380,6 +380,11 @@ export const projectSettings = defineNamespace({
     "projectSettings.cellEditing.optionContributor": "Contributor",
     "projectSettings.cellEditing.optionProjectLead": "Project Lead",
     "projectSettings.cellEditing.optionMaintainer": "Maintainer",
+    // AQU-2408: who may type a label on a cell. Sits under the same "Content
+    // structure" heading as the cell-editing tier, and reuses its role options.
+    "projectSettings.cellLabel.label": "Who can label cells",
+    "projectSettings.cellLabel.description":
+      "A label is a short note typed on a line — a section name, a reviewer's mark. It is never a voice or a character. Maintainers can label cells unless you open this to project leads.",
     // model → projectSettings.advancedLlm.modelLabel
     // context window → projectSettings.ai.contextWindowLabel
     // reference example format → projectSettings.ai.referenceExampleFormatLabel
@@ -2057,6 +2062,19 @@ export const projectSettings = defineNamespace({
         placeholders: {
           value: "The current temperature value, e.g. '0.3'.",
         },
+      },
+      "projectSettings.cellLabel.label": {
+        description:
+          "Row label for the dropdown in Project settings → Content structure that " +
+          "says which role may type a label on a cell (Maintainer or Project Lead). " +
+          "A question-like noun phrase, matching 'Who can add and remove cells'.",
+      },
+      "projectSettings.cellLabel.description": {
+        description:
+          "Help text under the 'Who can label cells' row. Explains what a cell label " +
+          "is (a short note typed on a line), that it is never a voice or a character, " +
+          "and that maintainers may label cells unless the setting opens it to project " +
+          "leads. Role names as in common.role.*.",
       },
       "projectSettings.cellEditing.optionNone": {
         description:

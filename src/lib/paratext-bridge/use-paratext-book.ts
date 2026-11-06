@@ -116,20 +116,22 @@ export function useParatextBook(project: BridgeProject | null, fileName: string 
 
   const setEditText = useCallback(async (unit: Unit, text: string) => {
     if (!guid || !bookRef.current) return
+    const book = bookRef.current
     const next = new Map(editsRef.current)
     // Keep the text exactly as typed: trimming here would eat a trailing space
     // on every keystroke. planWriteBack trims trailing whitespace at write time.
     const trimmed = text.replace(/[ \t\r\n]+$/, "")
-    if (trimmed === unit.text.replace(/[ \t\r\n]+$/, "")) {
-      next.delete(unit.id)
-      await bridgeStore.deletePendingEdits(guid, [unit.id])
-    } else {
-      const edit = { unitId: unit.id, text, baseRawHash: unit.rawHash }
-      next.set(unit.id, edit)
-      await bridgeStore.putPendingEdit(guid, bookRef.current, edit)
-    }
+    const reverted = trimmed === unit.text.replace(/[ \t\r\n]+$/, "")
+    const edit = { unitId: unit.id, text, baseRawHash: unit.rawHash }
+    if (reverted) next.delete(unit.id)
+    else next.set(unit.id, edit)
+    // Update React state before touching IndexedDB: the textarea is controlled,
+    // and a render with the old value between the keystroke and the awaited
+    // write resets the caret to the end of the field.
     editsRef.current = next
     setState((s) => ({ ...s, edits: next }))
+    if (reverted) await bridgeStore.deletePendingEdits(guid, [unit.id])
+    else await bridgeStore.putPendingEdit(guid, book, edit)
   }, [guid])
 
   const discardEdits = useCallback(async () => {

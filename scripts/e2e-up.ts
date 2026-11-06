@@ -464,8 +464,9 @@ function resetE2ePostgres(): string {
   if (!hasLocalPsql()) {
     console.error(
       `${TAG}[e2e-up] no Docker container 'aquilla-dev-pg' and no local 'psql' on PATH.\n` +
-        "  Start Docker (with the aquilla-dev-pg container) or install a local\n" +
-        "  Postgres reachable at 127.0.0.1:5432 with role 'aquilla'. See e2e/README.md.",
+        "  Start Docker (with the aquilla-dev-pg container), or bring up a native\n" +
+        "  Postgres with:  eval \"$(bash scripts/e2e-pg-native.sh)\"\n" +
+        "  (AQU-1820: Docker is not required — see e2e/README.md → Prerequisites).",
     )
     process.exit(1)
   }

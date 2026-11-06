@@ -279,6 +279,7 @@ export default defineConfig(({ mode }) => ({
             "scripts/lib/spawn-command.test.ts",
             "scripts/lib/playwright-loader-env.test.ts",
             "scripts/lib/listening-pids.test.ts",
+            "scripts/lib/desktop-bundle.test.ts",
             // Owned by the "qa-biblica-python" project below: a Node-env test
             // that shells out to the QA runner's Python suite (AQU-2365).
             "agents/**",

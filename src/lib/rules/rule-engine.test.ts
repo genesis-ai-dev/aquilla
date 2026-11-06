@@ -56,6 +56,31 @@ describe("checkRules", () => {
     expect(result.has("c1")).toBe(false)
   })
 
+  // AQU-1712: a forbidden rendering is wrong only as a rendering of its
+  // concept, so the compiled `term:` rule carries a source condition.
+  it.each([
+    { name: "flags when the source bears the term", original: "to baptize them", flagged: true },
+    { name: "does not flag when the source lacks the term", original: "to lower the net", flagged: false },
+  ])("target-forbids with a sourcePattern: $name", ({ original, flagged }) => {
+    const cells = new Map([["f1", [
+      makeCell({ id: "c1", original, translated: "para sumergir", status: "validated" }),
+    ]]])
+    const rules = [makeRule({
+      id: "term:baptize:forbidden:sumergir",
+      check: { type: "target-forbids", targetPattern: "sumergir", sourcePattern: "baptiz" },
+    })]
+    const result = checkRules(cells, rules)
+    expect(result.has("c1")).toBe(flagged)
+  })
+
+  it("target-forbids without a sourcePattern stays unconditional", () => {
+    const cells = new Map([["f1", [
+      makeCell({ id: "c1", original: "to lower the net", translated: "para sumergir", status: "validated" }),
+    ]]])
+    const rules = [makeRule({ id: "r1", check: { type: "target-forbids", targetPattern: "sumergir" } })]
+    expect(checkRules(cells, rules).has("c1")).toBe(true)
+  })
+
   it("detects source-requires-target infraction", () => {
     const cells = new Map([["f1", [
       makeCell({ id: "c1", original: "Chapter 5 is here", translated: "Chapitre est ici", status: "validated" }),

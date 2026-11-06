@@ -71,7 +71,7 @@ Keep test coverage synchronized with behavior without running the entire suite a
 6. **Do not leave smoke specs testing removed UI.** If the old journey no longer exists, rewrite the remaining smoke around the replacement cross-layer contract, move UI-only coverage to RTL, or remove the smoke only when `e2e/JOURNEYS.md` records that the journey was intentionally retired or moved to RTL.
 7. **Investigate before changing a failing test.** Check the implementation, relevant commits/issues/specs, and the intended user journey before classifying a failure. Fix the product when behavior regressed; update the test only when the intended behavior genuinely changed. Never delete, skip, broaden, or weaken an assertion merely to make CI pass.
 8. **Reuse helpers** in `e2e/helpers/page-objects/`. Do not duplicate selectors. If no page object fits, add one or update the existing one as part of the feature.
-9. Tests run against **local `wrangler dev` instances** of `auth-worker` and `sync-worker`, backed by a Docker-managed local Postgres (container `aquilla-dev-pg`). See `e2e/README.md` for setup.
+9. Tests run against **local `wrangler dev` instances** of `auth-worker` and `sync-worker`, backed by a local Postgres on `127.0.0.1:5432`. Docker (container `aquilla-dev-pg`) is the convenient way to get one, **not a prerequisite** — with no Docker daemon, `eval "$(bash scripts/e2e-pg-native.sh)"` provisions a native cluster and `scripts/e2e-up.ts` resets through `psql` instead (AQU-1820). "No Docker, cannot run the suite" is not a valid blocker. See `e2e/README.md` → Prerequisites.
 10. **Wait for state, never elapsed time.** Smoke specs and shared page objects must not use `page.waitForTimeout()` or `networkidle` as application-readiness signals. Wait for the responsible response, URL, accessible UI state, or poll an authoritative API. Required assertions must not be hidden behind `.catch(() => false)` or optional early returns. `scripts/e2e-determinism.test.ts` enforces these rules and is an automatic prerequisite of every standard E2E command.
 11. **A retry is diagnostic, not a pass.** The gating config runs with zero retries. Long tests emit heartbeats, have a 60-second default test ceiling, and the suite has a 30-minute ceiling. Required asynchronous state uses the shared 10-second assertion timeout. Cold application/editor hydration and multi-service workflows use a justified 30-second readiness watchdog while still waiting on observable state; do not force those through the shorter interaction budget. Do not add a shorter local timeout that makes success depend on machine speed. Immediate synchronous probes are allowed only for genuine UI branches, must not make required behavior optional, and should carry a brief reason when the distinction is not obvious. Never use `test.skip`, `test.fixme`, or an early return because a state was slow to appear; skips/fixmes are only for a documented product gap and must cite its issue.
 12. **Test contracts across boundaries, not only each layer in isolation.** When changing a shared type, payload, validation rule, parser result, API contract, persistence shape, or other producer/consumer invariant, trace every producer and consumer. Add at least one test that passes a real producer's output through the immediate consumer. A parser test plus a synthetic validator test does not cover their composition.
@@ -96,8 +96,9 @@ Smoke tests are production guardrails for the ~25 cross-layer journeys in `e2e/J
 - Cross-browser. Chromium only for v1.
 - Tauri shell — native-surface smoke suite at `e2e/tauri/smoke.spec.ts` (WebdriverIO +
   `@wdio/tauri-service` embedded provider, not Playwright/tauri-driver — see
-  `docs/superpowers/plans/2026-04-30-e2e-framework-and-smoke.md` "Plan 3" for why). Release-gate
-  only (`tauri-release.yml`), not a push gate.
+  `docs/superpowers/plans/2026-04-30-e2e-framework-and-smoke.md` "Plan 3" for why). Runs in
+  `tauri-release.yml` (release gate) and `tauri-build.yml` (PRs touching `src-tauri/**`), not a
+  push gate.
 
 ## Project-level conventions
 

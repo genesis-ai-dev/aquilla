@@ -27,9 +27,12 @@ test("Archive removes project from active projects list", async ({ alice }) => {
   await dash.goto()
   await dash.createProject({ name: archiveName })
 
-  // Project creation lands on the project Overview (/projects/:id).
+  // Project creation lands on the project Overview (/projects/:id). The exact
+  // h1 selector lives on the page object (AQU-1664): a plain name lookup here
+  // also matched the "Created <name> in <destination>" toast's <h2>, and
+  // Playwright's strict mode failed on the two headings before archiving.
   await alice.waitForURL(/\/projects\/[^/]+$/, { timeout: 5_000 })
-  await expect(alice.getByRole("heading", { name: archiveName, exact: true })).toBeVisible({ timeout: 10_000 })
+  await expect(dash.projectOverviewHeading(archiveName)).toBeVisible({ timeout: 10_000 })
 
   // Open the header overflow menu and click "Archive", then confirm.
   await alice.getByRole("button", { name: /More actions/i }).click()
@@ -45,6 +48,11 @@ test("Archive removes project from active projects list", async ({ alice }) => {
   await alice.waitForURL(new RegExp(`/orgs/${alice.orgId}/projects/?$`), { timeout: 10_000 })
 
   // The archived project is gone from the active list; the other remains.
-  await expect(alice.getByText(keepName)).toBeVisible({ timeout: 10_000 })
-  await expect(alice.getByText(archiveName)).not.toBeVisible({ timeout: 8_000 })
+  // Asserted on the table's own name cell, not on page text (AQU-1664): the
+  // create toast carries the project name and outlives the navigation, so a
+  // bare getByText check was really racing the toast's auto-dismiss. The
+  // kept row lands first, so the table has rendered before the absence of the
+  // archived row is read as an empty count rather than an unrendered one.
+  await expect(dash.projectRow(keepName)).toBeVisible({ timeout: 10_000 })
+  await expect(dash.projectRow(archiveName)).toHaveCount(0, { timeout: 8_000 })
 })

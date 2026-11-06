@@ -3330,8 +3330,6 @@ export const ur: Catalog = {
   "org.egressSettings.roleOptionViewer": "{role} — منصوبے کی رسائی والا کوئی بھی",
   "org.egressSettings.roleOptionOwner": "{role} — طے شدہ",
   "org.egressSettings.saveFailedFallback": "اخراج کی اجازت محفوظ نہیں ہو سکی۔",
-  "org.addLanguagePopover.triggerLabel": "زبان",
-  "org.addLanguagePopover.conflictError": "زبانیں کہیں اور بدل گئیں۔ دوبارہ لوڈ ہو گیا — شامل کرنے کی دوبارہ کوشش کریں۔",
   "org.setupChecklist.heading": "اپنی تنظیم شروع کریں",
   "org.setupChecklist.dismissAriaLabel": "فہرست ہٹائیں",
   "org.setupChecklist.progress": "{total} میں سے {done} مکمل",

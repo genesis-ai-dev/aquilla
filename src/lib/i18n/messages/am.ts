@@ -3331,8 +3331,6 @@ export const am: Catalog = {
   "org.egressSettings.roleOptionViewer": "{role} — የፕሮጀክት መዳረሻ ያለው ማንኛውም ሰው",
   "org.egressSettings.roleOptionOwner": "{role} — ነባሪ",
   "org.egressSettings.saveFailedFallback": "የወጪ ፈቃዱን ማስቀመጥ አልተቻለም።",
-  "org.addLanguagePopover.triggerLabel": "ቋንቋ",
-  "org.addLanguagePopover.conflictError": "ቋንቋዎች ሌላ ቦታ ተቀይረዋል። እንደገና ተጭኗል — እንደገና ለመጨመር ይሞክሩ።",
   "org.setupChecklist.heading": "ድርጅትዎን ያስጀምሩ",
   "org.setupChecklist.dismissAriaLabel": "የማረጋገጫ ዝርዝር አስወግዱ",
   "org.setupChecklist.progress": "ከ{total} {done} ተጠናቋል",

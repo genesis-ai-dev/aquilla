@@ -3336,8 +3336,6 @@ export const bn: Catalog = {
   "org.egressSettings.roleOptionViewer": "{role} — প্রকল্প অ্যাক্সেস যাদের আছে",
   "org.egressSettings.roleOptionOwner": "{role} — ডিফল্ট",
   "org.egressSettings.saveFailedFallback": "এগ্রেস অনুমতি সংরক্ষণ হয়নি।",
-  "org.addLanguagePopover.triggerLabel": "ভাষা",
-  "org.addLanguagePopover.conflictError": "ভাষা অন্য জায়গায় বদলেছে। আবার লোড হয়েছে — আবার যোগ করে দেখুন।",
   "org.setupChecklist.heading": "আপনার প্রতিষ্ঠান শুরু করুন",
   "org.setupChecklist.dismissAriaLabel": "চেকলিস্ট বাতিল করুন",
   "org.setupChecklist.progress": "{total}-এর {done} সম্পূর্ণ",

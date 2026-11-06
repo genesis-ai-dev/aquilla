@@ -3329,8 +3329,6 @@ export const pa: Catalog = {
   "org.egressSettings.roleOptionViewer": "{role} — ਪ੍ਰੋਜੈਕਟ ਪਹੁੰਚ ਵਾਲਾ ਕੋਈ ਵੀ",
   "org.egressSettings.roleOptionOwner": "{role} — ਮੂਲ",
   "org.egressSettings.saveFailedFallback": "ਨਿਕਾਸ ਇਜਾਜ਼ਤ ਸੰਭਾਲੀ ਨਹੀਂ ਜਾ ਸਕੀ.",
-  "org.addLanguagePopover.triggerLabel": "ਭਾਸ਼ਾ",
-  "org.addLanguagePopover.conflictError": "ਭਾਸ਼ਾਵਾਂ ਕਿਤੇ ਹੋਰ ਬਦਲੀਆਂ. ਮੁੜ ਲੋਡ ਹੋਈਆਂ — ਜੋੜਨ ਦੀ ਦੁਬਾਰਾ ਕੋਸ਼ਿਸ਼ ਕਰੋ.",
   "org.setupChecklist.heading": "ਆਪਣੀ ਸੰਸਥਾ ਸ਼ੁਰੂ ਕਰੋ",
   "org.setupChecklist.dismissAriaLabel": "ਚੈੱਕਲਿਸਟ ਖਾਰਜ ਕਰੋ",
   "org.setupChecklist.progress": "{total} ਵਿੱਚੋਂ {done} ਪੂਰੇ",

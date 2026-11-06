@@ -233,13 +233,6 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "translator render this column with interface-language wording, which is " +
     "wrong for a content column, and several languages distinguish the two " +
     "senses lexically rather than by context.",
-  "org.addLanguagePopover.triggerLabel":
-    "Visible text of a small chip BUTTON beside a project row that opens the " +
-    "add-a-language-lane popover; it names an action's object, not a heading. " +
-    "org.orgHome.table.languageHeader is the noun heading of a table column, and " +
-    "language.label names the interface-language switcher. Button object, column " +
-    "heading, and interface-chrome name take different forms in languages that " +
-    "inflect for grammatical role, so one shared string cannot serve all three.",
 
   // -- AQU-511/AQU-832 org-namespace dedupe (WS-11) --------------------------
   // The org.ts sweep left 41+ keys re-minting English another namespace (or

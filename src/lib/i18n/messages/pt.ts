@@ -3229,8 +3229,6 @@ export const pt: Catalog = {
   "org.egressSettings.roleOptionViewer": "{role} — qualquer pessoa com acesso ao projeto",
   "org.egressSettings.roleOptionOwner": "{role} — padrão",
   "org.egressSettings.saveFailedFallback": "Não foi possível salvar a permissão de saída de dados.",
-  "org.addLanguagePopover.triggerLabel": "Idioma",
-  "org.addLanguagePopover.conflictError": "Os idiomas mudaram em outro lugar. Recarregados — tente adicionar de novo.",
   "org.setupChecklist.heading": "Comece com sua organização",
   "org.setupChecklist.dismissAriaLabel": "Dispensar a lista de verificação",
   "org.setupChecklist.progress": "{done} de {total} concluídos",

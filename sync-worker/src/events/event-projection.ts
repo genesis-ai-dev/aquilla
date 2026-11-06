@@ -3402,6 +3402,46 @@ case 'cell.audio.attach': {
       return ['cells']
     }
 
+    case 'cell.label.set': {
+      // AQU-2408: a hand-typed label on a cell — docs/decisions/0007. The same
+      // per-key JSONB merge discipline as cast.assign: writes ONE key
+      // (`cellLabel`) on the SOURCE row, touches neither value nor event_id nor
+      // validated, and commutes with every other metadata write. Null or a
+      // blank string removes the key. The key is the one legacy Codex
+      // notebooks already carry, so the editor's corner label and scoped
+      // search read a typed label and a migrated one the same way.
+      const p = event.payload as EventPayloads['cell.label.set']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`cell.label.set event ${event.id} is missing fileId or cellId`)
+      }
+      const label = typeof p.label === 'string' ? p.label.trim() : ''
+      if (label !== '') {
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cells
+               SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('cellLabel', ?::text)
+               WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
+            )
+            .bind(label, event.projectId, event.fileId, event.cellId),
+        )
+      } else {
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cells
+               SET metadata = CASE
+                 WHEN metadata IS NULL THEN NULL
+                 ELSE metadata - 'cellLabel'
+               END
+               WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
+            )
+            .bind(event.projectId, event.fileId, event.cellId),
+        )
+      }
+      return ['cells']
+    }
+
     case 'cell.lane.retime': {
       // AQU-646 round 6: per-LANE presentation timing, stored as metadata keys
       // on the source-side row (same JSONB merge discipline as cast.assign —

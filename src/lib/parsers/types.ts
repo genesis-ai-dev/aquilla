@@ -714,6 +714,10 @@ export interface ProjectRecord {
    *  value straight into this field, so a rung missing here is a compile
    *  error, which is what keeps the two honest. */
   cellEditingFloor?: "none" | "commenter" | "reviewer" | "contributor" | "project_lead" | "maintainer"
+  /** AQU-2408: who may type a label on a cell. Absent = maintainer. Spelled
+   *  out for the same reason as `cellEditingFloor` above (`CellLabelTier` in
+   *  `@/lib/sync/project-settings`); `resolveCellLabelFloor` maps it. */
+  cellLabelFloor?: "maintainer" | "project_lead"
   /** AQU-646 stage 2: may this project's timelines be restructured — tracks
    *  added, deleted, foldered, recoloured? ON unless turned off (AQU-2214); a
    *  SECOND gate on top of the maintainer floor, so with it off the write is

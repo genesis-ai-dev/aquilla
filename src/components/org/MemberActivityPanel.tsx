@@ -37,6 +37,7 @@ const KIND_LABEL_KEYS: Record<string, MessageKey> = {
   "comment.resolve": "org.memberActivityPanel.kindCommentResolve",
   "cell.backtranslation.set": "org.memberActivityPanel.kindCellBacktranslationSet",
   "cell.gloss.set": "org.memberActivityPanel.kindCellGlossSet",
+  "cell.label.set": "org.memberActivityPanel.kindCellLabelSet",
   "cell.audio.attach": "org.memberActivityPanel.kindCellAudioAttach",
   "cell.audio.select": "org.memberActivityPanel.kindCellAudioSelect",
   "cell.retime": "org.memberActivityPanel.kindCellRetime",

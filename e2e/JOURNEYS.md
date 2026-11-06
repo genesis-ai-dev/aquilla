@@ -234,6 +234,17 @@ UI chrome that used to be one smoke file per click is covered under
   `EditorTable.editorActions.test.tsx`). Pending-edit page-hide flush is covered
   in `TranslatedEditor.commit.test.tsx` and import-and-edit smoke.
 
+- A cell's own label (AQU-2408): typed in the expansion panel's Label row at or
+  above the project's `cellLabelFloor` tier (maintainer unless opened to project
+  leads), stored as `metadata.cellLabel` on the source row by the non-chain
+  `cell.label.set` event, shown in the corner label slot beneath an assigned
+  voice or cast name, and never a voice itself. Covered in RTL
+  (`CellLabelRow.test.tsx`, `EditorTable.cellLabelRow.test.tsx`,
+  `ProjectSettings.cellLabel.test.tsx`), with the projection, floors, read model
+  and undo step pinned in `sync-worker/src/__tests__/cell-label-set.test.ts`,
+  `cell-label-gate.test.ts`, `cell-label-floor.test.ts`, `label-steps.test.ts`
+  and `useCells.cellLabel.test.ts`. UI-only, no new smoke: the write rides the
+  same outbox → sync-worker → Postgres path every metadata event already uses.
 - View settings, tab strip, selection bar, outbox inspector, term-lookup popover,
   video attachment dialog, cell-expansion Escape close, setup-checklist expand/skip
   (except survives-refresh, which stays smoke)

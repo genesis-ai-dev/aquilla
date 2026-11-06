@@ -172,14 +172,12 @@ describe("syncLangQuest", () => {
 
 // AQU-981 check 8 (Oct 29): a version LangQuest recorded as several cards is
 // written as one take — the first card the take, the rest its pieces, each
-// card its own recording (url). The players read pieces as windows of ONE
-// recording, found through an id seeded with the line's cell id; a LangQuest
-// id ("lq-<first 8 of the cell id>-<hash>") is not, so the timeline, the
-// chapter queue's dub overlay and Free timing find no take on the line at all.
-// Known failure, not fixed here: when it is, vitest reports this test as
-// failing — drop `.fails`.
+// card its own recording (url). A LangQuest id ("lq-<first 8 of the cell
+// id>-<hash>") isn't seeded with the line's cell id; since AQU-2411 the
+// players take it as the line's own take anyway (own-take.ts), so the
+// timeline, the chapter queue's dub overlay and Free timing find every card.
 describe("a multi-card LangQuest version, as the players read it", () => {
-  it.fails("every card is a piece of the take the line plays, in card order, each with its own recording", async () => {
+  it("every card is a piece of the take the line plays, in card order, each with its own recording", async () => {
     const h = harness({ passages: [passage("01", 3)] })
     await syncLangQuest(h.deps)
     const attaches = h.events.filter((e) => e.kind === "cell.audio.attach")

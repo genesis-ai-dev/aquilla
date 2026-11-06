@@ -1,7 +1,7 @@
 # Virtual source cells: a file is a blob, a filter stamp, and a revision chain
 
-*Draft 2026-11-06. Status: increment 1 (shared pure core) implemented on
-`ryder/virtual-source-cells`; increments 2–5 are planned below.*
+*Draft 2026-11-06. Ticket AQU-2459. Status: increments 1, 2 and the fresh-import half of 3
+implemented on `aqu-2459-virtual-source-cells`; the rest is planned below.*
 
 ## Problem
 
@@ -103,11 +103,15 @@ Properties that the tests pin:
 ## Staleness and the AD-9 pin
 
 A target commit is pinned today to the source head `event_id`
-(`cells.source_event_id`), and `stale-source-route.ts` already compares pinned
-*content* when ids differ. Under revisions the source row's `event_id` is the
-revision event id, so the existing rule holds without change: a target is stale
-when its pinned revision is older than the file head **and** the unit's content
-hash differs. `db/shared/file-revision.ts::classifyTargetStaleness` is the
+(`cells.source_event_id`), and `stale-source-route.ts` compares the pinned
+event's payload text with the current source when the ids differ. A bulk
+revision event carries no per-cell text, so it cannot be the pin for every
+cell. The rule that keeps AD-9 intact (`file-revision-apply.ts`): **`equal` and
+`moved` units keep their source row's `event_id`; only `changed` and `inserted`
+units take the revision event id.** Targets pinned to unchanged cells stay
+fresh with no query change; a changed cell's pin now points at an older event
+whose text differs, so it reads stale exactly as a `source.cell.commit` does
+today. Increment 4 moves the stale check onto content hashes directly. `db/shared/file-revision.ts::classifyTargetStaleness` is the
 pure form of that rule, with Weblate's revert case: if the hash comes back to
 what the target was pinned against, the target is `fresh` again.
 
@@ -132,10 +136,18 @@ file_revisions
 files.head_revision_n            NULL ⇒ materialized (legacy) file
 ```
 
-**Phase A (compat):** applying a revision still writes `cells` source rows,
-set-based in one statement per chunk from the manifest
-(`event-projection.ts::buildBulkSourceCellCreateStmt` is already that shape),
-with `event_id = <revision event id>`, and deletes become `tombstoned_at`.
+**Phase A (compat, increment 2):** applying a revision still writes `cells`
+source rows, set-based in one statement per 1000 rows from the manifest
+(`event-projection.ts::buildBulkSourceCellCreateStmt`, reused so the column
+list cannot drift), anchors rewritten in document order, deletes as
+`tombstoned_at`. The manifest is JSON in R2 at
+`revisions/<project>/<file>/<n>.json` (`file-revision-sql.ts::revisionManifestKey`)
+and remembers each unit's `eventId`. Route: `POST
+/api/v1/projects/:p/files/:f/revisions` (`sync-worker/src/events/revisions-route.ts`),
+lead role, body `{artifactSha256, stamp, optionsHash?, origin?, units[]}`;
+same artifact + stamp + options as the head is a no-op. The revision event id
+is `uuidV5("revision:<n>:<sha>:<stamp>", fileId)`, so a replayed request is
+idempotent through the events PK.
 There are no per-cell event rows and no chain claims. Every reader that joins
 `cells` (FTS, by-ref, milestones, progress, Agent API, comments) keeps working.
 This alone removes the N event inserts and the claim writes from import.
@@ -193,13 +205,21 @@ asks.
 | # | Scope | Done when |
 | --- | --- | --- |
 | 1 | `db/shared/file-revision.ts`: stamps, ids, content hash, `alignRevision`, `classifyTargetStaleness`, manifest types; tests. Decision record 0007. | `pnpm test db/shared/file-revision.test.ts` green; pins resolve. **This PR.** |
-| 2 | Postgres migration `file_revisions` + `files.head_revision_n`; `POST /api/v1/projects/:p/files/:f/revisions` (artifact + units → revision; Phase A projection); `file.revision` event kind; adopt. | Import a DOCX twice: second call is one event, cells keep ids, inserted paragraph gets a new id, edited one is `changed`. |
-| 3 | Client import goes through revisions when the format has a `FormatFilter` (docx, pptx, idml, html, xliff, srt, vtt), falling back to the legacy bulk route otherwise. Stale badge reads `classifyTargetStaleness`. | Import timing before/after on the 10k-cell fixture; e2e `reimport` journeys green. |
+| 2 | Migration `0196_file_revisions` + `files.head_revision_n`; `POST …/files/:f/revisions` (units → revision; Phase A projection); `file.revision` event kind; adopt. | **Done.** `sync-worker/src/__tests__/revisions-route.test.ts`: second call is one event, cells keep ids, inserted paragraph gets a new id, edited one is `changed`, a pre-revision target reads stale only on the edited cell, a legacy file adopts with every id intact. |
+| 3 | Client import goes through revisions when the format has a `FormatFilter` (docx, pptx, idml, html, xliff, srt, vtt), falling back to the legacy bulk route otherwise. | **Fresh imports done** (`src/lib/sync/revision-import.ts`, gate `canImportAsRevision`; kill switch `VITE_IMPORT_VIA_REVISIONS=0`): one `/import` call with zero cells creates the file, the bytes go to R2, one revisions POST carries the units. Rebuild replays revisioned files from their manifests (`rebuild.ts`). **Left:** re-import through the route instead of `/import/reconcile`; import timing on the 10k-cell fixture; e2e import/export journeys on a preview. |
 | 4 | Phase B read path behind a per-file flag; manifest cache; `sequenceIndex` ordering. | Cells route serves a revisioned file with no `cells` source rows; smoke suite green. |
 | 5 | Connectors: Drive and git fetchers + cron; DCS delta and LangQuest planner rewritten as unit providers. | A Drive doc edited upstream shows `changed` cells in Aquilla within one cron tick with no re-import. |
 
 ## Not covered yet
 
+- **Rebuild without R2.** Rebuild reads every `file.revision` manifest from
+  R2 before its transaction and replays cells from them
+  (`file-revision-apply.ts::buildCellStmtsFromManifest`); a manifest that
+  cannot be read fails the rebuild loudly rather than leaving a file empty.
+  The projection-snapshot path (AQU-1833) seeds from `cells` rows and is
+  unaffected.
+- Server-side parsing. The route takes parsed units; connectors and the
+  worker-safe filters feed it in increment 5.
 - Export through `build(skeleton, translations)` with the stamp selecting the
   walk is AQU-2382's work and stays there; this design only guarantees the
   stamp is always present and the units are reproducible.

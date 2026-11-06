@@ -1,6 +1,6 @@
 # 0007 — File revisions and derived source cells
 
-*Decided 2026-11-06. Increment 1 of the spec
+*Decided 2026-11-06 (AQU-2459). Increments 1 and 2 of the spec
 `docs/superpowers/specs/2026-11-06-virtual-source-cells-file-revisions.md`.*
 
 ## Context
@@ -38,6 +38,26 @@ path that updates a source: `db/shared/file-revision.ts`.
 - **Stamps keep their 0001 shape.** `db/shared/file-revision.ts::parseFilterStamp`
   reads `<filterId>@<walk>` and treats a bare id as walk 1; parse options hash
   through `db/shared/file-revision.ts::optionsHash`.
+- **A revision is one event.** `sync-worker/src/events/revisions-route.ts`
+  writes a `file.revision` event, an index row (`file_revisions`,
+  `sync-worker/src/events/file-revision-sql.ts::buildFileRevisionIndexStmts`)
+  and the manifest in R2, then projects `cells` set-based
+  (`sync-worker/src/events/file-revision-apply.ts::buildRevisionCellStmts`).
+  No per-cell events, no chain claims. A file with `files.head_revision_n`
+  NULL is materialized and untouched until adopted
+  (`sync-worker/src/events/file-revision-apply.ts::loadAdoptableUnits`), which
+  keeps every existing cell id and event id.
+- **Unchanged units keep their event id.**
+  `sync-worker/src/events/file-revision-apply.ts::unitEventId`: `equal` and
+  `moved` rows keep `cells.event_id`; `changed` and `inserted` rows take the
+  revision event. That is what keeps the AD-9 pin and the stale route correct
+  without a query change, because the route compares the pinned event's text
+  and a bulk event carries none.
+- **Rebuild replays revisions from their manifests.**
+  `sync-worker/src/events/rebuild.ts` reads every `file.revision` manifest
+  before its transaction and projects cells with
+  `sync-worker/src/events/file-revision-apply.ts::buildCellStmtsFromManifest`;
+  an unreadable manifest fails the rebuild rather than emptying the file.
 - **No dependencies.** The module ships its own SHA-1/UUIDv5
   (`db/shared/file-revision.ts::uuidV5`), pinned against the `uuid` package in
   its test, because the sync-worker has no `uuid` dependency and every runtime
@@ -55,7 +75,9 @@ path that updates a source: `db/shared/file-revision.ts`.
 
 ## Not covered yet
 
-- The `file_revisions` table, the revisions route, the `file.revision` event
-  kind and adoption are increment 2 and are not in this record.
+- Re-import of a revisioned file still travels through `/import/reconcile`
+  (unit-key matching on `cells`); moving it onto the revisions route is the
+  remaining half of increment 3.
+- Server-side parsing and connectors; the route takes parsed units.
 - Export selecting a walk by stamp remains AQU-2382's work.
 - Cross-file moves are delete + insert.

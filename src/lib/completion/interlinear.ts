@@ -57,7 +57,7 @@ import {
   forwardProbabilities,
   trainWordAlignModel,
   type WordAlignModel,
-} from "@/lib/bible-data/word-align"
+} from "../bible-data/word-align"
 import { tokenize } from "./tokenize"
 
 // ── Constants ─────────────────────────────────────────────────────────────────

@@ -328,7 +328,7 @@ export function VoicePlaybackBar({
               data-testid="transport-play"
               className="bg-foreground text-background hover:bg-foreground/90"
             >
-              {isLoading ? <Spinner /> : isPlaying ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5 translate-x-px" />}
+              {isLoading ? <Spinner /> : isPlaying ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
             </Button>
           </AppTooltip>
           <IconButton small title={t("audio.playbackBar.nextLine")} disabled={!canPlay} onClick={() => stepLine(1)}>
@@ -432,7 +432,7 @@ export function VoicePlaybackBar({
               aria-label={isPlaying ? t("common.pause") : t("audio.playbackBar.playAll")}
               className="bg-foreground text-background hover:bg-foreground/90"
             >
-              {isLoading ? <Spinner /> : isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 translate-x-px" />}
+              {isLoading ? <Spinner /> : isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
             </Button>
           </AppTooltip>
           <IconButton title={t("audio.playbackBar.nextLine")} disabled={!canPlay} onClick={() => stepLine(1)}>

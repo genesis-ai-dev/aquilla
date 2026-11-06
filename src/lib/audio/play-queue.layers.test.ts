@@ -197,7 +197,14 @@ describe("following the recordings, a take on an added track plays (AQU-2252)", 
     expect(layer.paused).toBe(false)
     expect(layerEntries()).toHaveLength(1)
 
-    layer.tick(3) // its trim end
+    layer.tick(3) // its trim end: stopped now, not on a later beat
+    expect(layerEntries()).toHaveLength(0)
+    // The programme is at 5.0 s then, so b3's take, which clocks it, is a
+    // second in. Say so: a layer stopped at its tail while the programme
+    // still reads it as due (one clock ticked, the other not) is fired again
+    // by the next 60 ms boundary beat, with a second of it left — which a
+    // loaded CI runner saw whenever that beat landed inside settle().
+    el("b3")!.tick(1)
     await settle()
     expect(layerEntries()).toHaveLength(0)
     expect(el("b3")!.paused).toBe(false)

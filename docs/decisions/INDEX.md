@@ -60,6 +60,7 @@ pinned symbol gets renamed and the check goes red.
 | 0004 | [Named versus ordered placeholders](0004-named-versus-ordered-placeholders.md) | which tokens a translation may move, and which it may not |
 | 0005 | [The partner-integrations seam](0005-partner-integrations-seam.md) | publisher code in a folder you can delete |
 | 0006 | [The event log's head compare-and-swap](0006-event-log-head-compare-and-swap.md) | how two offline edits to one cell resolve |
+| 0007 | [File revisions and derived source cells](0007-file-revisions-and-derived-source-cells.md) | a file is an artifact + a filter stamp + a revision chain; alignment assigns cell ids |
 
 ## Adding a record
 

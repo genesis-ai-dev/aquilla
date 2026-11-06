@@ -2067,6 +2067,31 @@ CREATE TABLE IF NOT EXISTS integration_item_links (
   PRIMARY KEY (link_id, entity_kind, entity_id)
 );
 
+-- LangQuest account-level connections (0196_langquest_connections.sql): one
+-- per (Aquilla user, LangQuest organization), the encrypted lqp_ token, and
+-- its health (needs_reauth / last_checked_at / last_error). Links made from a
+-- connection point at it and carry their own token_enc copy.
+CREATE TABLE IF NOT EXISTS langquest_connections (
+  id               TEXT PRIMARY KEY,
+  user_id          BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  api_base         TEXT NOT NULL,
+  lq_org_id        TEXT NOT NULL,
+  lq_org_name      TEXT,
+  token_enc        TEXT NOT NULL,            -- AES-GCM, base64(iv||ciphertext)
+  environment      TEXT,                     -- deployment that stored the token (AQU-1775)
+  token_id         TEXT,
+  token_name       TEXT,
+  scopes           JSONB NOT NULL DEFAULT '[]'::jsonb,
+  all_languages    BOOLEAN NOT NULL DEFAULT TRUE,
+  token_expires_at TIMESTAMPTZ,
+  needs_reauth     BOOLEAN NOT NULL DEFAULT FALSE,
+  last_checked_at  TIMESTAMPTZ,
+  last_error       TEXT,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (user_id, lq_org_id)
+);
+
 -- LangQuest live links (0185_langquest_links.sql): one per project, the
 -- encrypted lqp_ token, the change-feed cursor, and the passage→cell map.
 CREATE TABLE IF NOT EXISTS langquest_links (
@@ -2089,8 +2114,11 @@ CREATE TABLE IF NOT EXISTS langquest_links (
   last_sync_error   TEXT,
   created_by        TEXT NOT NULL,
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  connection_id     TEXT REFERENCES langquest_connections(id) ON DELETE SET NULL  -- 0196: the account-level connection the link was made from
 );
+
+CREATE INDEX IF NOT EXISTS idx_langquest_links_connection ON langquest_links(connection_id);
 
 CREATE TABLE IF NOT EXISTS langquest_passages (
   project_id  TEXT NOT NULL REFERENCES langquest_links(project_id) ON DELETE CASCADE,

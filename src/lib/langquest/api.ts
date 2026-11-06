@@ -9,7 +9,9 @@ import { AUTH_BASE } from "../frontier/auth"
 import type {
   KnownPassage,
   LangQuestChange,
+  LangQuestConnection,
   LangQuestInspection,
+  LangQuestLanguage,
   LangQuestLink,
   LangQuestPassage,
 } from "./types"
@@ -69,6 +71,46 @@ export const linkLangQuest = async (jwt: string, projectId: string, token: strin
       body: JSON.stringify({ token, languageId }),
     })
   ).link
+
+/** Link from one of the caller's saved connections: no token leaves the browser. */
+export const linkLangQuestFromConnection = async (jwt: string, projectId: string, connectionId: string, languageId: string) =>
+  (
+    await call<{ link: LangQuestLink }>(jwt, `${project(projectId)}/link`, {
+      method: "PUT",
+      body: JSON.stringify({ connectionId, languageId }),
+    })
+  ).link
+
+// ── Account-level connections (routes/langquest-connections.ts) ──
+
+export const fetchLangQuestConnections = async (jwt: string) =>
+  (await call<{ connections: LangQuestConnection[] }>(jwt, "/connections")).connections
+
+/** Paste a token once: it becomes (or refreshes) the caller's connection to that token's org. */
+export const connectLangQuest = (jwt: string, token: string) =>
+  call<{ connection: LangQuestConnection; languages: LangQuestLanguage[] }>(jwt, "/connections", {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  })
+
+/** What the connection's token reaches now; also a health probe (a 401 marks it needs_reauth). */
+export const fetchLangQuestConnectionLanguages = (jwt: string, connectionId: string) =>
+  call<{ connection: LangQuestConnection; languages: LangQuestLanguage[] }>(
+    jwt,
+    `/connections/${encodeURIComponent(connectionId)}/languages`,
+  )
+
+export const checkLangQuestConnection = (jwt: string, connectionId: string) =>
+  call<{ connection: LangQuestConnection }>(jwt, `/connections/${encodeURIComponent(connectionId)}/check`, {
+    method: "POST",
+  })
+
+export const disconnectLangQuest = (jwt: string, connectionId: string, opts: { revoke: boolean }) =>
+  call<{ ok: true; revoked: boolean }>(
+    jwt,
+    `/connections/${encodeURIComponent(connectionId)}${opts.revoke ? "?revoke=1" : ""}`,
+    { method: "DELETE" },
+  )
 
 export const unlinkLangQuest = (jwt: string, projectId: string, opts: { revoke: boolean }) =>
   call<{ ok: true; revoked: boolean }>(jwt, `${project(projectId)}/link${opts.revoke ? "?revoke=1" : ""}`, {

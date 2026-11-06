@@ -800,19 +800,49 @@ describe("flushOutboxBatch", () => {
     await enqueueOutboxEvent(makeEvent("e2", "f1"))
     let release!: () => void
     const gate = new Promise<void>((r) => { release = r })
+    let announceFetchEntered!: () => void
+    const fetchEntered = new Promise<void>((r) => { announceFetchEntered = r })
     const fetchMock = vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
+      announceFetchEntered()
       await gate
       const ids = (JSON.parse(init.body as string).events as Array<{ id: string }>).map((e) => e.id)
       return jsonResponse({ accepted: ids.map((id) => ({ id })), rejected: [] })
     })
-    const deps = { getTokenForFile: TOKEN_FN, fetchImpl: fetchMock as unknown as typeof fetch }
+    // Counting the mint is what tells us the second caller did NO work: the
+    // per-tab chain is taken before the first IDB peek, so a queued caller
+    // cannot reach the mint until the running flush settles.
+    const tokenFn = vi.fn(TOKEN_FN)
+    const deps = { getTokenForFile: tokenFn, fetchImpl: fetchMock as unknown as typeof fetch }
     // Two callers race (the useOutboxFlusher loop and an inline "flush now").
     const a = flushOutboxBatch(deps)
     const b = flushOutboxBatch(deps)
-    await new Promise((r) => setTimeout(r, 10))
-    // The second caller waited: only one POST is in flight.
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    release()
+    let watchdog: ReturnType<typeof setTimeout> | undefined
+    try {
+      // Wait for the state — the first POST is in flight — not for a 10 ms
+      // window. Under CPU starvation that window expired before the first
+      // caller had even reached fetch, so the count below read 0 (AQU-1916).
+      // The watchdog only keeps a genuine stall from sitting here silently;
+      // it is generous, so it never decides a correct build (rule 15).
+      await Promise.race([
+        fetchEntered,
+        new Promise<never>((_resolve, reject) => {
+          watchdog = setTimeout(
+            () => reject(new Error("the first flush never reached its POST")),
+            STALL_WATCHDOG_MS,
+          )
+        }),
+      ])
+      // The second caller waited: while the first sits inside its POST, the
+      // second has minted nothing, peeked nothing and POSTed nothing.
+      expect(tokenFn).toHaveBeenCalledTimes(1)
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    } finally {
+      clearTimeout(watchdog)
+      // Release in a finally: a failed assertion above must not leave the
+      // per-tab chain wedged, hanging every later test in this file to the
+      // 60 s ceiling (AQU-1916).
+      release()
+    }
     const [ra, rb] = await Promise.all([a, b])
     expect(ra.accepted).toBe(2)
     // The queued caller ran AFTER the first drained the queue and found nothing.

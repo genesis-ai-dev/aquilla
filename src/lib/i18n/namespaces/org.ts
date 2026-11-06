@@ -746,16 +746,6 @@ export const org = defineNamespace({
     "org.egressSettings.roleOptionOwner": "{role} — default",
     "org.egressSettings.saveFailedFallback": "Couldn't save the egress permission.",
 
-    // -- AddLanguagePopover: "+ Language" quick action on an OrgHome project row --
-    "org.addLanguagePopover.triggerLabel": "Language",
-    // "e.g. Traditional Han" placeholder → projectSettings.create.extraLanguagesPlaceholder (identical text)
-    // "Enter a language name." → projectSettings.create.extraLanguagesEmptyError (identical text)
-    // too-long error → projectSettings.create.extraLanguagesTooLongError (identical text)
-    // already-default error → projectSettings.languages.alreadyDefaultError (identical text)
-    // lane-already-exists error → projectSettings.languages.alreadyExistsError (identical text)
-    "org.addLanguagePopover.conflictError": "Languages changed elsewhere. Reloaded — try adding again.",
-    // generic save-failed error → projectSettings.languages.savingFailedGeneric (identical text)
-
     // -- CreditsPanel: org credits/usage panel --
 
     // -- OrgSetupChecklist: org onboarding checklist --

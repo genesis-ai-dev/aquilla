@@ -24,10 +24,10 @@ cat > /etc/systemd/system/aquillaqa.slice <<'EOF'
 Description=Bounded Aquilla QA containers
 [Slice]
 CPUAccounting=true
-CPUQuota=150%
+CPUQuota=250%
 MemoryAccounting=true
-MemoryHigh=2300M
-MemoryMax=2500M
+MemoryHigh=2700M
+MemoryMax=2900M
 MemorySwapMax=512M
 TasksMax=1536
 EOF

@@ -43,7 +43,44 @@ export function evidenceDefect(suite, sha) {
   return null
 }
 
-export function renderReport({ sha, phase, suite, runUrl, jobStatus, releaseRef }) {
+const STEP_LABELS = { dependencies: "Dependencies", build: "App build", stack: "Local stack" }
+const JOURNEY_STATES = { running: "running…", finished: "finished — outcome pending", failed: "FAILED" }
+
+/**
+ * Live progress while a job runs. Every field is untrusted runner input:
+ * bounded, typed and escaped. Nothing here is an outcome; the finished report
+ * replaces it.
+ */
+export function renderProgress(progress) {
+  if (!progress || typeof progress !== "object") return null
+  const steps = Array.isArray(progress.steps) ? progress.steps.slice(0, 8) : []
+  const journeys = Array.isArray(progress.journeys) ? progress.journeys.slice(0, 64) : []
+  const total = Number.isInteger(progress.total) && progress.total > 0 ? progress.total : null
+  const elapsed = Number.isFinite(progress.elapsedS) ? `${Math.max(0, Math.round(progress.elapsedS))} s elapsed.` : ""
+  const lines = [`**Running.** No outcome has passed yet. ${elapsed}`.trimEnd(), ""]
+  for (const step of steps) {
+    if (!step || typeof step.name !== "string" || !Number.isFinite(step.seconds)) continue
+    const label = STEP_LABELS[step.name] ?? escape(step.name.slice(0, 40))
+    const detail = typeof step.detail === "string" && step.detail ? ` (${escape(step.detail.slice(0, 80))})` : ""
+    lines.push(`- ${label}: ${step.seconds.toFixed(1)} s${detail}`)
+  }
+  if (journeys.length) {
+    const finished = journeys.filter((j) => j?.state !== "running").length
+    const failed = journeys.filter((j) => j?.state === "failed").length
+    const of = total ? ` of ${total}` : ""
+    lines.push(`- Journeys: ${finished}${of} finished${failed ? `, ${failed} failed so far` : ""}`, "",
+      "| Journey | Progress |", "| --- | --- |")
+    for (const journey of journeys) {
+      if (!journey || typeof journey.title !== "string") continue
+      lines.push(`| ${escape(journey.title.slice(0, 120))} | ${JOURNEY_STATES[journey.state] ?? "running…"} |`)
+    }
+  } else if (steps.length) {
+    lines.push("- Journeys: not started")
+  }
+  return lines
+}
+
+export function renderReport({ sha, phase, suite, runUrl, jobStatus, releaseRef, progress }) {
   if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error("Expected an exact commit SHA")
   if (!["running", "finished"].includes(phase)) throw new Error("Invalid report phase")
   if (releaseRef !== undefined && !/^release\/\d{4}\/\d{2}\/\d{2}-\d{2}$/.test(releaseRef)) {
@@ -60,7 +97,7 @@ export function renderReport({ sha, phase, suite, runUrl, jobStatus, releaseRef 
   /** @type {null | "pass" | "fail" | "inconclusive" | "unavailable"} */
   let deployDecision = null
   if (phase === "running") {
-    lines.push("**Starting.** The runner has started setup. No outcome has passed yet.")
+    lines.push(...(renderProgress(progress) ?? ["**Starting.** The runner has started setup. No outcome has passed yet."]))
   } else {
     const defect = evidenceDefect(suite, sha)
     if (defect) {

@@ -68,6 +68,8 @@ export interface PptxExportOptions {
   removedCells?: readonly RemovedCellLocatorSource[]
 }
 
+const PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+
 export async function exportPptx(
   rawPptxBytes: ArrayBuffer,
   cells: CellData[],
@@ -152,6 +154,10 @@ export async function exportPptx(
     return true
   }
 
+  // AQU-2383: set by any slide that actually changed. Nothing changed means
+  // the deck the client uploaded is already the export.
+  let packageMutated = false
+
   for (const slideFile of slideFiles) {
     const xmlStr = await zip.file(slideFile)!.async("string")
     const doc = parser.parseFromString(xmlStr, "application/xml")
@@ -222,10 +228,25 @@ export async function exportPptx(
     }
 
     if (slideMutated) {
+      packageMutated = true
       // ECMA-376 producers (PowerPoint included) write empty text runs as
       // paired <a:t></a:t>, not self-closing — normalize so downstream
       // structural tooling sees the same element count as the original.
       zip.file(slideFile, serializer.serializeToString(doc).replace(/<a:t\s*\/>/g, "<a:t></a:t>"))
+    }
+  }
+
+  // AQU-2383: no slide was rewritten, so re-zipping would change the deck's
+  // bytes (member order, compression, local headers) without changing a word
+  // of its content. Return the upload itself — see the same guard in docx.ts.
+  if (!packageMutated) {
+    return {
+      blob: new Blob([rawPptxBytes], { type: PPTX_MIME }),
+      injected,
+      untouched,
+      removed,
+      inserted,
+      warnings,
     }
   }
 
@@ -234,7 +255,7 @@ export async function exportPptx(
   // deck even more expensive than a document's.
   const blob = await zip.generateAsync({
     type: "blob",
-    mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    mimeType: PPTX_MIME,
     compression: "DEFLATE",
     compressionOptions: { level: 6 },
   })

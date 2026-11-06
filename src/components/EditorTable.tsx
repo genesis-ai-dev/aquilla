@@ -30,6 +30,7 @@ import {
   CloudOff,
   Quote,
   Flag,
+  CaptionsOff,
 } from "lucide-react"
 import { InlineToolsTab, useHasInlineTools } from "@/components/tools/ToolMounts"
 import { FillsTwiceIndicator } from "@/components/ui/fills-twice-indicator"
@@ -158,6 +159,7 @@ import { isWordSeekClick, timingFromClick } from "@/lib/audio/seek-word-click"
 import { KaraokeReadText } from "./KaraokeReadText"
 import { resolveCurrentCellIndex } from "@/lib/editor/current-index"
 import { startRowFlash } from "@/lib/editor/row-flash"
+import { isPlaybackStart, rowNeedsReveal, type SeenPlaying } from "@/lib/editor/playing-row-reveal"
 import { useCellAudio } from "@/hooks/useCellAudio"
 import { isSourceSegmentSelected } from "@/lib/audio/batch-audio"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -189,7 +191,11 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { InfoNote, NOTE_CONTENT_CLASS, NoteOnClick } from "@/components/ui/info-note"
 import { CellPresenceBadges } from "./CellPresenceBadges"
 import { categorizeAiError } from "@/lib/audio/ai-error"
-import { CellAiStatusPopover } from "./CellAiStatusPopover"
+// AQU-1619: the row shows a failed transcription itself, instead of leaving it
+// to the Recording tab inside cell details.
+import { clearTranscribeStatus, useTranscribeStatus, type TranscribeStatus } from "@/lib/audio/transcribe-status"
+import { transcribeTake } from "@/lib/audio/transcribe-take"
+import { CellAiStatusPopover, type AiStatusAction } from "./CellAiStatusPopover"
 import { InlineAiError } from "./InlineAiError"
 import { CellNumberPill } from "./cell/CellNumberPill"
 import {
@@ -243,6 +249,23 @@ import { assignedCastVoiceId, findVoice, getVoiceLibrary, resolveCastVoice } fro
 import { lineTakeLabel } from "@/lib/audio/line-voice"
 import { useLocation, useNavigate } from "react-router-dom"
 import { cn } from "@/lib/utils"
+import {
+  editorGridCols,
+  editorGridStyle,
+  editorGutterPx,
+  editorHeaderGridCols,
+  type EditorGridCols,
+} from "@/lib/editor/editor-grid"
+import { rowScripture, type RowScripture } from "@/lib/parallel-bibles/row-verses"
+import {
+  AddBibleMenu,
+  BibleColumnHeaders,
+  BibleColumnsProvider,
+  BibleRowCells,
+  BibleRowStack,
+  useEditorBibleColumns,
+  type EditorParallelBiblesConfig,
+} from "./parallel-bibles/EditorBibleColumns"
 import { namedCellRef } from "@/lib/cell-named-ref"
 import { isStructuralCell } from "@/lib/cells/structural"
 import { quoteSplitForRow } from "@/lib/cells/quote-split-plan"
@@ -355,20 +378,8 @@ const ESTIMATED_ROW_HEIGHT_PX = 140
 /** How long focus must rest on an empty cell before its draft retrieval starts (AQU-617). */
 const COMPLETION_PREFETCH_DWELL_MS = 300
 
-/** The gutter track widens by the character circle's w-6 when the cast
- *  gutter is on (stacked media lens). One shared type keeps the header row,
- *  paragraph bar, and rows in the same template.
- *
- *  AQU-1101: the text tracks are `minmax(0,1fr)`, never a bare `1fr`. A bare
- *  `1fr` carries an implicit `min-width: auto`, so a single unbreakable token
- *  (a URL, a long identifier) widens ITS track to min-content and steals the
- *  width from the sibling — source and target stop lining up with each other
- *  and with the header row. Flooring the minimum at 0 makes the two tracks
- *  equal fractions of the row whatever the content is; the cell surfaces then
- *  break the token with `break-words` (see EditorCellSurface). */
-type EditorGridCols =
-  | "grid-cols-[48px_minmax(0,1fr)] md:grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]"
-  | "grid-cols-[48px_minmax(0,1fr)] md:grid-cols-[132px_minmax(0,1fr)_minmax(0,1fr)]"
+// The grid template (gutter, source, Bible columns, target) is one helper
+// shared by the headers, the paragraph bar and the rows: lib/editor/editor-grid.ts.
 const LEGEND_LIST_DRAW_DISTANCE_PX = 240
 /** AQU-1191: low-memory mode renders the viewport and nothing beyond it, so a
  *  constrained device holds one screen of rows instead of one screen plus two
@@ -731,6 +742,63 @@ function SynthStatusBadge({
     )
   }
   return null
+}
+
+/**
+ * AQU-1619: the gutter's view of a FAILED transcription, beside the synth badge
+ * and drawn the same way — icon trigger, full heading/explanation/actions in the
+ * popover.
+ *
+ * The failure was always recorded (`transcribe-status.ts`, keyed by the clip),
+ * but the only thing reading it was the Recording tab's badge inside cell
+ * details. So a hosted run that hit the per-user rate limit left the row looking
+ * exactly like a line nobody had tried yet: "Too many requests right now", and
+ * the Retry that goes with it, were a panel-open away on every one of the rows
+ * that got refused.
+ *
+ * Only the error state. The progress states (model download, "transcribing",
+ * the "✓ N words" flash) stay the Recording tab's — a w-5 gutter cannot say
+ * them, and a run in flight is already visible on the timeline.
+ */
+function TranscribeStatusBadge({
+  status, audioId, onRetry,
+}: {
+  status: TranscribeStatus
+  /** The clip the status is filed under — dismissing clears that key. */
+  audioId: string
+  /** Re-runs ASR on this line. Absent (no session / no clip) offers only Dismiss. */
+  onRetry?: () => void
+}) {
+  const t = useT()
+  if (status.kind !== "error") return null
+  const error = categorizeAiError(status.message)
+  const dismiss = () => clearTranscribeStatus(audioId)
+  const actions: AiStatusAction[] = []
+  if (onRetry) {
+    // Same label and same dismiss-then-run order as the Recording tab's badge,
+    // so the two surfaces offer one action, not two that differ.
+    actions.push({ label: "Retry", primary: true, onClick: () => { dismiss(); onRetry() } })
+  }
+  return (
+    <CellAiStatusPopover
+      error={error}
+      actions={actions}
+      onDismiss={dismiss}
+      trigger={
+        <button
+          type="button"
+          aria-label={t("workspace.transcribeBadge.failed")}
+          data-testid="transcribe-status-error"
+          className={cn(
+            gutterIconShell,
+            "bg-destructive/15 text-destructive hover:bg-destructive/25",
+          )}
+        >
+          <CaptionsOff className="h-3 w-3" />
+        </button>
+      }
+    />
+  )
 }
 
 // Stable empty sentinels so per-cell "map.get(id) ?? []" derivations keep a
@@ -1178,6 +1246,11 @@ interface EditorTableProps {
    */
   bibleOpen?: boolean
   /**
+   * Read-only Bible columns beside Source on a scripture file (the
+   * translator's chosen versions, else the project defaults). Absent: none.
+   */
+  parallelBibles?: EditorParallelBiblesConfig
+  /**
    * AQU-1692: saves a maintainer's voice correction. Without it (or below
    * maintainer) the voice details offer no "Correct…".
    */
@@ -1241,6 +1314,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onActiveChapterChange,
   onChapterPicked,
   bibleOpen = false,
+  parallelBibles,
   onSaveVoiceOverride,
   onAdoptVoicesAsCast,
 }, ref) {
@@ -2049,6 +2123,38 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     return true
   }, [clearChapterNavigationSelection, flashCellDom, programmaticListScroll, revealCellPage])
 
+  /**
+   * AQU-1636: a row whose audio has just started asks to be brought into
+   * view. The row cannot do this itself: the list is virtualized with
+   * recycled, estimated-height rows, so a DOM `scrollIntoView` on the row
+   * walks every scrollable ancestor into a coordinate space the list is
+   * still correcting, and — not being stamped — reads back as a user scroll,
+   * which silently releases playback-follow. It goes through
+   * `programmaticListScroll` like every other code-driven list scroll.
+   *
+   * No follow intent is issued either way: starting a clip is neither the
+   * user asking to watch the queue nor navigating away from it, so whatever
+   * follow state they were in survives.
+   */
+  const revealRowForPlayback = useCallback((cellId: string) => {
+    const index = displayCellIdsRef.current.indexOf(cellId)
+    if (index < 0) return
+    const viewport = listRootRef.current
+    const root = getListQueryRoot()
+    // Measured against the LIST's viewport, not the window: a row can sit
+    // under the sticky header while the window still "shows" it, and an
+    // expanded row can be taller than the viewport it already fills.
+    if (viewport && root) {
+      const row = root.querySelector<HTMLElement>(
+        `[data-cell-id="${CSS.escape(cellId)}"][data-index]`,
+      )
+      if (row && !rowNeedsReveal(row.getBoundingClientRect(), viewport.getBoundingClientRect())) {
+        return
+      }
+    }
+    programmaticListScroll(index, { viewPosition: 0.5, animated: true })
+  }, [getListQueryRoot, programmaticListScroll])
+
   // AQU-1689: a Who's Who mention jump (previous/next mention, the panel's
   // first mention) scrolls and flashes like a search hit.
   useEffect(() => {
@@ -2400,15 +2506,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   useEffect(() => stopSelectionDrag, [stopSelectionDrag])
 
-  // Grid layout: [gutter] [source] [target]. The gutter is one fixed track
-  // holding select + status-badges (flex-col) + verse number in a tight
-  // flex row (gap-0.5) — tighter than three gap-2 grid tracks, while the
-  // fixed width keeps Source header-aligned. No right gutter; the floating
-  // action rail is absolutely positioned. Target reserves pe-9 for the
-  // expand chevron.
-  const gridCols: EditorGridCols = castGutter
-    ? "grid-cols-[48px_minmax(0,1fr)] md:grid-cols-[132px_minmax(0,1fr)_minmax(0,1fr)]"
-    : "grid-cols-[48px_minmax(0,1fr)] md:grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]"
 
   const handleMouseUp = useCallback(() => {
     if (isDragging.current && dragCells.current.size > 1) {
@@ -2502,6 +2599,44 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const { sequentialNumberByCellId, paragraphGroupInfoByCellId, versePartByCellId } = useMemo(() =>
     readAtVersion(cellStoreVersion, () => structureCache.read(fileCellIds, cellStore)),
   [cellStore, cellStoreVersion, fileCellIds, structureCache])
+
+  // Grid layout: [gutter] [source] [target]. The gutter is one fixed track
+  // holding select + status-badges (flex-col) + verse number in a tight
+  // flex row (gap-0.5) — tighter than three gap-2 grid tracks, while the
+  // fixed width keeps Source header-aligned. No right gutter; the floating
+  // action rail is absolutely positioned. Target reserves pe-9 for the
+  // expand chevron.
+  //
+  // Bible columns sit between source and target, one track each, when they
+  // fit (EditorBibleColumns: at most three, and every text track keeps a
+  // usable width); otherwise they stack under the source text and the grid
+  // stays three tracks.
+  const tableRootRef = useRef<HTMLDivElement | null>(null)
+  // The rows in view, and a margin either side so the next rows' chapters are
+  // already loading — their chapters are what the Bible columns fetch.
+  const visibleBibleRows = useMemo(() => {
+    if (!parallelBibles) return []
+    const lo = Math.max(0, (viewableIndexes.length > 0 ? Math.min(...viewableIndexes) : firstVisibleIndex) - 10)
+    const hi = Math.min(displayCellIds.length - 1, (viewableIndexes.length > 0 ? Math.max(...viewableIndexes) : firstVisibleIndex) + 20)
+    const indexes = Array.from({ length: Math.max(0, hi - lo + 1) }, (_, i) => lo + i)
+    return readAtVersion(cellStoreVersion, () => indexes.flatMap((index) => {
+      const id = displayCellIds[index]
+      const view = id ? cellStore.getCellView(id) : undefined
+      const row = view ? rowScripture(view, versePartByCellId.get(id)) : null
+      return row ? [row] : []
+    }))
+  }, [parallelBibles, viewableIndexes, firstVisibleIndex, cellStoreVersion, displayCellIds, cellStore, versePartByCellId])
+  const bibleColumns = useEditorBibleColumns({
+    config: parallelBibles,
+    // A scripture file: chapters, and nothing but chapters. (scriptureNumbering
+    // alone is also true for a file with no milestones at all.)
+    enabled: scriptureNumbering && milestoneNavigationItems.length > 0 && !isTimeOrdered,
+    visibleRows: visibleBibleRows,
+    widthRef: tableRootRef,
+    gutterPx: editorGutterPx(castGutter),
+  })
+  const bibleTrackCount = bibleColumns?.layout === "columns" ? bibleColumns.columns.length : 0
+  const gridCols: EditorGridCols = editorGridCols(castGutter, bibleTrackCount)
 
   const viewportCellId = displayCellIds[chapterVisibleIndex ?? firstVisibleIndex]
   const currentSubsectionKey = subsectionKeyByCellId.get(viewportCellId ?? "")
@@ -3074,6 +3209,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           ttsSettings={ttsSettings}
           isAnonymous={isAnonymous}
           onJumpToCell={onJumpToCell}
+          onRevealForPlayback={revealRowForPlayback}
           micDenied={micDenied}
           onOpenAudioSetup={onOpenAudioSetup}
           onProjectChanged={onProjectChanged}
@@ -3325,7 +3461,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   return (
     <SmartEditsProvider value={smartEditsContext}>
-    <div className="flex h-full min-h-0 flex-col" onMouseUp={handleMouseUp}>
+    <BibleColumnsProvider value={bibleColumns}>
+    <div
+      ref={tableRootRef}
+      className="flex h-full min-h-0 flex-col"
+      style={editorGridStyle(castGutter, bibleTrackCount)}
+      onMouseUp={handleMouseUp}
+    >
       {showStripNav && stripNavSlot
         ? createPortal(
             <div className="flex min-w-0 items-center gap-2">
@@ -3385,8 +3527,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         <div data-testid="table-column-headers" className={cn(
             "grid grid-cols-2 gap-2 overflow-hidden border-b border-border ps-2.5 pe-4 py-2 text-xs font-medium text-muted-foreground [scrollbar-gutter:stable]",
             castGutter
-              ? "md:grid-cols-[132px_minmax(0,1fr)_minmax(0,1fr)]"
-              : "md:grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]",
+              ? editorHeaderGridCols(true, bibleTrackCount)
+              : editorHeaderGridCols(false, bibleTrackCount),
           )}>
           {/* With the character gutter on, the Source label sits over the
               gutter at the LEFT EDGE (Sam 2026-08-07) instead of floating a
@@ -3413,7 +3555,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 {project.sourceLanguage}
               </Badge>
             )}
+            <AddBibleMenu />
           </div>
+          <BibleColumnHeaders />
           {/* AQU-2288: ltr like the rows' target column (EditorTargetCellColumn),
               so in an rtl UI the marks stay on the side the checks are on. */}
           <div data-testid="table-target-header" dir="ltr" className="relative col-start-2 flex min-w-0 flex-wrap items-center gap-1 ps-1 pe-1 md:col-auto md:gap-2 md:ps-6 md:pe-2">
@@ -3618,6 +3762,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         <div className="flex-1" />
       )}
     </div>
+    </BibleColumnsProvider>
     </SmartEditsProvider>
   )
 })
@@ -4325,6 +4470,9 @@ interface MemoizedRowProps {
   ttsSettings?: ProjectTtsSettings
   isAnonymous?: boolean
   onJumpToCell?: (cellId: string) => void
+  /** AQU-1636: this row's audio just started — ask the LIST to bring the row
+   *  into view (never a DOM scroll; see `revealRowForPlayback` on the table). */
+  onRevealForPlayback?: (cellId: string) => void
   micDenied?: boolean
   onOpenAudioSetup?: () => void
   onProjectChanged?: () => void
@@ -4412,7 +4560,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     getFootnoteDetails,
     onSeekToCue, cuePlaying, onPauseCue, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled,
     sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, isAnonymous,
-    onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
+    onJumpToCell, onRevealForPlayback, micDenied, onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
     onOpenAudioSetup,
     onCellCommitted, onValidated, repetitionCounts, getPendingTargetEventId, reservePendingTargetCommit, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
     onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
@@ -4579,6 +4727,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         ttsSettings={ttsSettings}
         isAnonymous={isAnonymous}
         onJumpToCell={onJumpToCell}
+        onRevealForPlayback={onRevealForPlayback}
         micDenied={micDenied}
         onOpenAudioSetup={onOpenAudioSetup}
         onProjectChanged={onProjectChanged}
@@ -4781,6 +4930,9 @@ interface EditorRowProps {
   ttsSettings?: ProjectTtsSettings
   isAnonymous?: boolean
   onJumpToCell?: (cellId: string) => void
+  /** AQU-1636: this row's audio just started — ask the LIST to bring the row
+   *  into view (never a DOM scroll; see `revealRowForPlayback` on the table). */
+  onRevealForPlayback?: (cellId: string) => void
   micDenied?: boolean
   onOpenAudioSetup?: () => void
   onProjectChanged?: () => void
@@ -5694,7 +5846,7 @@ function EditorRow({
   onDragStart, onDragEnter, onSelectionPointerDown, onNavigateCell,
   onEscapeToGrid, onGridRowKeyNav,
   rowIndex, contentNumber, versePart, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols, castGutter, ttsSettings,
-  isAnonymous, micDenied,
+  isAnonymous, onRevealForPlayback, micDenied,
   onOpenAudioSetup, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
   onCellCommitted, onValidated, repetitionCount, getPendingTargetEventId, reservePendingTargetCommit, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
   onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
@@ -7230,6 +7382,44 @@ function EditorRow({
   // would otherwise leave its listeners and `contenteditable` behind.
   useEffect(() => closeActivationCapture, [closeActivationCapture])
 
+  // AQU-1534: the same window, for activations that did NOT start on this row.
+  //
+  // Tab / Shift+Tab / ArrowUp / ArrowDown from a neighbouring cell (and every
+  // programmatic jump) activate this row through `onActivateEditor` in the
+  // table, never through `requestTargetEdit` — so the AQU-746 / AQU-1333
+  // window was never opened on the destination. The previous row's editor
+  // unmounts during the same commit, focus falls to `<body>`, and for the
+  // frames until this row's TipTap mounts and takes the caret there is no
+  // editing host at all: keystrokes, `Input.insertText`, IME commits and
+  // pastes in that gap are dropped with nothing to catch them.
+  //
+  // That is silent data damage for a translator working by keyboard: the row
+  // they tabbed into stays empty while they keep typing, so their text ends up
+  // beside the wrong source — and a wrong pairing can then be validated. Open
+  // the window here so every activation path is covered, and park focus on the
+  // row wrapper so `handleGridRowKeyDown` buffers keydowns as it does after a
+  // click. The editor's own `onFocus` drains the buffer and closes the window.
+  useEffect(() => {
+    if (!isEditorActive) return
+    if (!editable || isLoading || lockHolderLabel) return
+    // The pointer path already opened it, or the editor already owns the caret.
+    if (activationCaptureRef.current || editorFocusedRef.current) return
+    // Only when the caret is genuinely nowhere. An activation driven from a
+    // side panel while the translator types somewhere else must not steal
+    // focus, and grid-row focus (Escape-to-grid) is navigation, not editing.
+    const active = document.activeElement
+    if (active && active !== document.body) return
+    awaitingEditorFocusRef.current = true
+    rowRef.current?.focus({ preventScroll: true })
+    activationCaptureRef.current = rowRef.current && activationCaretHostRef.current
+      ? openActivationInputCapture({
+        host: rowRef.current,
+        caretHost: activationCaretHostRef.current,
+        onText: (text) => { pendingActivationInputRef.current += text },
+      })
+      : null
+  }, [isEditorActive, editable, isLoading, lockHolderLabel])
+
   /**
    * AQU-1393: put an exact match's existing translation into this cell's target.
    *
@@ -7495,23 +7685,36 @@ function EditorRow({
   // When this cell starts playing, gently bring it into view if it's
   // off-screen. Skips when the user is actively interacting with another cell
   // (focus inside an editable element).
-  const wasPlayingRef = useRef(false)
+  //
+  // AQU-1636: this used to scroll the row's own DOM node
+  // (`scrollIntoView({ block: "center" })`) off a per-mount `wasPlaying`
+  // flag, and both halves misbehaved on a transcribed media file — where one
+  // mp3 is split into many short rows, so playing a line from the rail scrolls
+  // through plenty of them:
+  //   * a raw DOM scroll walks every scrollable ANCESTOR and lands in a
+  //     coordinate space the virtualized list is still correcting (recycled
+  //     rows, estimated heights), and being unstamped it reads as a USER
+  //     scroll, which silently kills playback-follow. Every code-driven list
+  //     scroll goes through `programmaticListScroll` for exactly that reason,
+  //     so this one asks the TABLE to reveal the row by id instead.
+  //   * the flag starts `false` on each mount, so a row remounting while its
+  //     clip was already sounding counted as a fresh start and yanked the list
+  //     back onto itself — the user could not scroll away during playback.
+  //     `isPlaybackStart` only fires on a false → true transition this row
+  //     observed itself.
+  const seenPlayingRef = useRef<SeenPlaying>(null)
   useEffect(() => {
-    const wasPlaying = wasPlayingRef.current
+    const previous = seenPlayingRef.current
     const anyPlaying = audioController.isPlaying || generatedVoiceController.isPlaying
-    wasPlayingRef.current = anyPlaying
-    if (!wasPlaying && anyPlaying && rowRef.current) {
-      const rect = rowRef.current.getBoundingClientRect()
-      const fullyVisible = rect.top >= 0 && rect.bottom <= window.innerHeight
-      const ae = document.activeElement
-      const userIsTyping = ae instanceof HTMLElement && (
-        ae.isContentEditable || ae.tagName === "INPUT" || ae.tagName === "TEXTAREA"
-      )
-      if (!fullyVisible && !userIsTyping) {
-        rowRef.current.scrollIntoView({ behavior: "smooth", block: "center" })
-      }
-    }
-  }, [audioController.isPlaying, generatedVoiceController.isPlaying])
+    seenPlayingRef.current = anyPlaying
+    if (!isPlaybackStart(previous, anyPlaying)) return
+    const ae = document.activeElement
+    const userIsTyping = ae instanceof HTMLElement && (
+      ae.isContentEditable || ae.tagName === "INPUT" || ae.tagName === "TEXTAREA"
+    )
+    if (userIsTyping) return
+    onRevealForPlayback?.(cell.id)
+  }, [audioController.isPlaying, generatedVoiceController.isPlaying, cell.id, onRevealForPlayback])
   // The transcribe / correct-transcript handlers moved into CellTakeBlock
   // (2026-08-22) so they can be scoped to whichever cell OWNS the recording —
   // a linked heard line's take must write to the cue sibling, not to this row.
@@ -7983,9 +8186,33 @@ function EditorRow({
   const isSynthBusy = synthStatus.kind === "loading" || synthStatus.kind === "synthesizing"
   const isSynthError = synthStatus.kind === "error"
 
+  // AQU-1619: this line's ASR outcome, on the clip the batch runner and the
+  // Recording tab both file it under (`cell.selectedAudioId`) — so the row reads
+  // exactly the status those runs write, with no second store to keep in step.
+  const rowAudioId = cell.selectedAudioId
+  const transcribeStatus = useTranscribeStatus(rowAudioId)
+  const isTranscribeError = transcribeStatus.kind === "error"
+  // Retry runs the same sequence the Recording tab's Transcribe button runs
+  // (`transcribe-take.ts`): ASR language by provenance, then the flush that
+  // lands the timings. Without a clip there is nothing to re-run.
+  const handleRetryTranscribe = useCallback(() => {
+    if (!rowAudioId) return
+    void transcribeTake({
+      project,
+      owner: cell,
+      selectedAudioId: rowAudioId,
+      slot: cell.attachments?.[rowAudioId]?.slot,
+      session: rowSession,
+      ...(activeLane ? { targetLang: activeLane } : {}),
+      ...(onCellCommitted ? { onCommitted: onCellCommitted } : {}),
+    })
+  }, [rowAudioId, project, cell, rowSession, activeLane, onCellCommitted])
+
   // Human references help people and DOM agents identify a cell.
   const namedRef = namedCellRef(cell)
   const cellRef = namedRef || t("editor.row.rowFallbackRef", { index: rowIndex + 1 })
+  // The verses this row stands for, for the Bible columns (none on headings).
+  const bibleRow: RowScripture | null = rowScripture(cell, versePart)
   // Media redesign slice 2 (P2.3): an Audio language has no text to validate.
   const validationControl = audioOnlyLane ? null : (
     <TargetValidationControl
@@ -8430,6 +8657,15 @@ function EditorRow({
                 {(isSynthBusy || isSynthError) && (
                   <SynthStatusBadge status={synthStatus} cellId={cell.id} projectId={project.id} onOpenAudioSetup={onOpenAudioSetup} />
                 )}
+                {/* AQU-1619: a refused transcription, on the row that was
+                    refused — not only inside cell details. */}
+                {isTranscribeError && rowAudioId && (
+                  <TranscribeStatusBadge
+                    status={transcribeStatus}
+                    audioId={rowAudioId}
+                    {...(rowSession ? { onRetry: handleRetryTranscribe } : {})}
+                  />
+                )}
                 {/* AQU-599: persistent "has comment" indicator. Unlike the
                     action-rail comment button (which only appears on
                     hover/focus), this icon stays visible whenever the cell
@@ -8731,6 +8967,8 @@ function EditorRow({
               footnoteNumberOffset={sourceFootnoteNumberOffset}
             />
           )}
+          {/* Bible verses under the source when the columns don't fit (and on phones). */}
+          <BibleRowStack row={bibleRow} />
           {cellExamples.length > 0 && (
             <ExamplePanel
               examples={cellExamples}
@@ -8768,6 +9006,9 @@ function EditorRow({
             </div>
           )}
         </div>
+
+        {/* Bible columns: read-only, one track each between source and target. */}
+        <BibleRowCells row={bibleRow} />
 
         {/* Target column — TipTap is inline so typing is unchanged. Everything
             else (waveform, transcript preview, backtranslation, infractions

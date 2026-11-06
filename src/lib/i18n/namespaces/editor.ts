@@ -537,6 +537,20 @@ export const editor = defineNamespace({
     "editor.bibles.closePicker": "Close picker",
     "editor.bibles.addVersion": "Add version",
     "editor.bibles.attribution": "Text from the",
+    "editor.bibles.addBible": "Add Bible",
+    "editor.bibles.continued": "cont.",
+    "editor.bibles.versNumberingDiffers": "This version numbers the verse differently",
+    "editor.bibles.creditLicense": "License",
+    "editor.bibles.creditWebsite": "Website",
+    "editor.bibles.versShifted": "Numbered {here} in this version ({ref} in English).",
+    "editor.bibles.versPsalmTitle": "This version counts the psalm title as a verse, so its numbers run {offset} ahead.",
+    "editor.bibles.versPsalmUnsure": "This version may count the psalm title as verse 1. Check the verse numbers.",
+    "editor.bibles.versCountDiffers": "Verses here: {verses}. In {version}: {refVerses}. The numbering differs in this chapter.",
+    "editor.bibles.makeProjectDefaults": "Make these the project defaults",
+    "editor.bibles.useProjectDefaults": "Use the project defaults",
+    "editor.bibles.usingProjectDefaults": "Showing this project's default versions.",
+    "editor.bibles.projectDefaultsSaved": "Saved as the project defaults.",
+    "editor.bibles.projectDefaultsFailed": "The project defaults were not saved. Try again.",
 
     // — Verse-resources reference sidebar (AQU-461) ————————————————————
     "editor.resources.show": "Show verse resources",
@@ -1117,6 +1131,7 @@ export const editor = defineNamespace({
     "editor.history.stepChangeVoice": "Change the voice",
     "editor.history.stepRemoveNoise": "Remove noise",
     "editor.history.stepStationVersion": "Save a new version",
+    "editor.history.stepStationSaveOver": "Save over a take",
     "editor.history.stepTakeLevel": "Change volume or fades",
     "editor.history.stepLinesFromRecording": "Make lines from a recording",
     "editor.history.stepImportRecording": "Import recording",
@@ -1318,7 +1333,7 @@ export const editor = defineNamespace({
     "editor.station.helpFadesTerm": "Fades",
     "editor.station.helpFades": "Drag the round knob at a top corner inward to fade in or out. Click it to turn the fade on or off.",
     "editor.station.helpSaveTerm": "Saving",
-    "editor.station.helpSave": "Cuts and inserts wait until you choose Save as new version. The original recording is always kept.",
+    "editor.station.helpSave": "Cuts and inserts wait until you save. Save saves over the take, and Undo brings the old sound back. Save's ▾ saves a new version instead and keeps the original.",
     "editor.station.helpKeysTerm": "Keys",
     "editor.station.helpKeys": "Space plays, K keeps, ⌫ deletes, I inserts, A approves, L loops, + and − zoom, {mod}Z undoes, {mod}S saves. After Record now, Enter keeps the new recording.",
     "editor.station.startFlag": "Start {time}",
@@ -1393,7 +1408,7 @@ export const editor = defineNamespace({
     "editor.station.makesVersion": "Makes a new version",
     "editor.station.hDraftDeleted": "{n}. Deleted {len} at {time} · not saved yet",
     "editor.station.hDraftInserted": "{n}. Inserted {label} ({len}) at {time} · not saved yet",
-    "editor.station.hint": "Drag across the waveform to select a part; click to place the cursor. Drag Start or End to trim. Space plays; K keeps, ⌫ deletes, I inserts, {mod}Z undoes.",
+    "editor.station.hint": "Drag across the waveform to select a part; click to place the cursor. Drag Start or End to trim. Space plays; K keeps, ⌫ deletes, I inserts, A approves, {mod}Z undoes.",
     "editor.station.fromLibrary": "From the library",
     "editor.station.libraryEmpty": "No other recordings in this file yet.",
     "editor.station.fromFile": "From a file…",
@@ -1500,9 +1515,9 @@ export const editor = defineNamespace({
     "editor.dock.resetInfoAria": "About your layout",
     "editor.dock.rememberedNote": "Remembered for you, for this file. Your teammates keep their own arrangement of {file}.",
     "editor.dock.startDub":
-      "Reset layout returns to the starting layout for a dubbing episode: the film large beside the text, the timeline at its usual height.",
+      "Reset layout returns to the starting layout for a file with a film: the timeline a little under half the height, and the film about a third of the width beside the text.",
     "editor.dock.startSubtitles":
-      "Reset layout returns to the starting layout for a subtitles file: the text large beside a smaller film, the timeline shorter.",
+      "Reset layout returns to the starting layout for a file with a film: the timeline a little under half the height, and the film about a third of the width beside the text.",
     "editor.dock.startScripture":
       "Reset layout returns to the starting layout for a scripture book: the timeline tall above the text.",
     "editor.dock.startPlain":
@@ -3085,7 +3100,7 @@ export const editor = defineNamespace({
       "editor.station.helpFadesTerm": { description: "Term in the Station's (i) explanation: fades." },
       "editor.station.helpFades": { description: "The Station's (i) explanation: the round fade knobs at the waveform's top corners." },
       "editor.station.helpSaveTerm": { description: "Term in the Station's (i) explanation: saving a new version." },
-      "editor.station.helpSave": { description: "The Station's (i) explanation: unsaved edits and Save as new version." },
+      "editor.station.helpSave": { description: "The Station's (i) explanation: unsaved edits; Save, which saves over the take; and Save's ▾ menu, which saves a new version instead. Keep the ▾ symbol as it is." },
       "editor.station.helpKeysTerm": { description: "Term in the Station's (i) explanation: keyboard shortcuts." },
       "editor.station.helpKeys": {
         description: "The Station's (i) explanation: its keyboard shortcuts. Keep the key symbols as they are.",
@@ -6018,6 +6033,78 @@ export const editor = defineNamespace({
           "proper name, which is not translated — so this string ends mid-phrase on " +
           "purpose and the name cannot be moved in front of it.",
       },
+      "editor.bibles.creditLicense": {
+        description:
+          "Link text in the small credit line under each Bible version; it opens the version's license page. One word.",
+        maxLength: 14,
+      },
+      "editor.bibles.creditWebsite": {
+        description:
+          "Link text in the same credit line; it opens the Bible version publisher's website. One word.",
+        maxLength: 14,
+      },
+      "editor.bibles.versShifted": {
+        description:
+          "Note above a Bible version whose verse numbers differ from the editor's (Hebrew Bibles number some chapters differently). Says where the same verse is in this version.",
+        placeholders: {
+          here: "The reference in this version's numbering, e.g. 'MAL 3:19'. Book codes and numbers come from the data — do not translate.",
+          ref: "The same verse in English numbering, e.g. 'MAL 4:1'. Do not translate.",
+        },
+      },
+      "editor.bibles.versPsalmTitle": {
+        description:
+          "Note above a Hebrew Bible version in Psalms: it numbers the psalm's title line as verse 1, so every verse number is higher by the given amount.",
+        placeholders: {
+          offset: "How many numbers ahead: 1 or 2, as digits.",
+        },
+      },
+      "editor.bibles.versPsalmUnsure": {
+        description:
+          "Note above a Hebrew Bible version in Psalms when the panel cannot tell whether the title line is numbered. Asks the reader to check the numbers.",
+      },
+      "editor.bibles.versCountDiffers": {
+        description:
+          "Note above a Bible version whose chapter has a different number of verses from the first version in the panel, so verses with the same number may not match.",
+        placeholders: {
+          verses: "Verse count in this version, as digits.",
+          version: "The other version's short name, e.g. 'BSB'. A code — do not translate.",
+          refVerses: "Verse count in that other version, as digits.",
+        },
+      },
+      "editor.bibles.makeProjectDefaults": {
+        description:
+          "Footer button in the Parallel Bibles panel, shown only to project leads: saves the versions now shown as the ones every team member sees until they choose their own.",
+      },
+      "editor.bibles.useProjectDefaults": {
+        description:
+          "Footer button in the Parallel Bibles panel: drops the user's own choice of versions and shows the ones the project lead chose instead.",
+      },
+      "editor.bibles.usingProjectDefaults": {
+        description:
+          "Status line in the Parallel Bibles footer when the versions shown are the ones the project lead chose, not the user's own.",
+      },
+      "editor.bibles.projectDefaultsSaved": {
+        description:
+          "Status line after a project lead saved the shown versions as the project defaults.",
+      },
+      "editor.bibles.projectDefaultsFailed": {
+        description:
+          "Status line when saving the project default versions failed.",
+      },
+      "editor.bibles.addBible": {
+        description:
+          "Button on the Source column heading of the editor. Opens a menu to choose a published Bible translation shown as an extra read-only column beside the source. Short.",
+        maxLength: 16,
+      },
+      "editor.bibles.continued": {
+        description:
+          "Shown in an extra Bible column on the second and later parts of a verse that the editor split into several rows: the verse's text is on its first part, and this says the row continues it. Abbreviation of 'continued'.",
+        maxLength: 8,
+      },
+      "editor.bibles.versNumberingDiffers": {
+        description:
+          "Screen-reader name of a small icon beside a Bible verse shown under the source text, marking that this Bible numbers the verse differently from the editor (for example Hebrew Malachi 3:19 is English 4:1).",
+      },
       "editor.resources.show": {
         description:
           "Screen-reader name of that same collapsed edge tab. Imperative.",
@@ -7645,6 +7732,7 @@ export const editor = defineNamespace({
       "editor.history.stepChangeVoice": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a take was converted to another (cloned) voice, which adds the converted take. A short verb phrase.", maxLength: 40 },
       "editor.history.stepTakeLevel": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a take's volume or its fade in/out was changed in the Station. A short verb phrase.", maxLength: 40 },
       "editor.history.stepStationVersion": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): an edited recording was saved from the Station as a new version, which adds a take that plays instead of the old one. A short verb phrase.", maxLength: 40 },
+      "editor.history.stepStationSaveOver": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): an edited recording was saved from the Station over the take it was made from, which replaces that take. A short verb phrase.", maxLength: 40 },
       "editor.history.stepRemoveNoise": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): background noise was removed from a take, which adds a cleaned take. A short verb phrase.", maxLength: 40 },
       "editor.history.stepLinesFromRecording": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): an audio or video file was split into new lines (rows) of the open file, with their transcripts. A short verb phrase.", maxLength: 40 },
       "editor.history.stepImportRecording": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): an audio or video file was imported as a new file of lines. Undo moves the new file to Recently deleted. A short verb phrase.", maxLength: 40 },

@@ -20,6 +20,7 @@ import { useProjectLaneStaffing } from "@/hooks/useProjectLaneStaffing"
 import {
   broadcastProjectSettingsUpdated,
   describePatchFailure,
+  PARALLEL_BIBLES_EDIT_ROLE_FLOOR,
 } from "@/hooks/useProjectSettings"
 import { useNavHistoryTitle } from "@/context/NavHistoryContext"
 import { deriveNavTitleKey } from "@/lib/navigation/deriveTitle"
@@ -430,6 +431,7 @@ import {
 } from "@/lib/editor/right-rail-panels"
 import { ScriptureSideRail } from "./ScriptureSideRail"
 import { ParallelBiblesSidebar, readParallelBiblesOpen, writeParallelBiblesOpen } from "./ParallelBiblesSidebar"
+import type { EditorParallelBiblesConfig } from "./parallel-bibles/EditorBibleColumns"
 import { VerseResourcesSidebar, readVerseResourcesOpen, writeVerseResourcesOpen } from "./VerseResourcesSidebar"
 import { WhosWhoSidebar } from "./bible-data/WhosWhoSidebar"
 import { readWhosWhoOpen, writeWhosWhoOpen } from "./bible-data/whos-who-open-state"
@@ -8953,6 +8955,23 @@ export function ProjectWorkspace() {
   // The AQU-461 verse-resources panel renders under a subset of that gate,
   // so the same subscription serves both.
   const parallelBiblesPanelActive = isBibleOpen(centerSurface, activeFile)
+  // The editor's Bible columns and the Parallel Bibles panel share one set of
+  // versions: the translator's own for this project, else the defaults a
+  // project lead saved (`parallelBibleVersions`).
+  const parallelBibleDefaults = projectSettings?.settings?.parallelBibleVersions
+  const canSetParallelBibleDefaults = (serverRoleLevel ?? 0) >= PARALLEL_BIBLES_EDIT_ROLE_FLOOR
+  const editorParallelBibles = useMemo<EditorParallelBiblesConfig | undefined>(
+    () => projectId
+      ? {
+          projectId,
+          projectDefaults: parallelBibleDefaults,
+          canSetProjectDefaults: canSetParallelBibleDefaults,
+          onSetProjectDefaults: async (ids) =>
+            (await patchSettings({ parallelBibleVersions: ids })).kind === "ok",
+        }
+      : undefined,
+    [projectId, parallelBibleDefaults, canSetParallelBibleDefaults, patchSettings],
+  )
   // AQU-1692: a maintainer's voice corrections, saved against the latest map
   // (see use-voice-override-writer.ts). EditorTable gets the writer only while
   // Bible data shows (AQU-1685), and offers "Correct…" only to a maintainer.
@@ -14058,7 +14077,9 @@ export function ProjectWorkspace() {
       }),
     [activeFile?.coreMediaUrl, activeFile?.type, activeFile?.corpusMarker, isSubtitleFile, audioCueSibling],
   )
-  const mediaStart = useMemo(() => startingLayout(mediaKind), [mediaKind])
+  // AQU-2343: any file whose film panel shows starts from the film shares.
+  const filmShown = showVideoPane && Boolean(activeFile?.coreMediaUrl)
+  const mediaStart = useMemo(() => startingLayout(mediaKind, filmShown), [mediaKind, filmShown])
   // Media redesign, layout (canvas board 23): the timeline across the top, the
   // film and the text in the two areas below it, each foldable to nothing,
   // movable, and able to take the whole view — per person, per file.
@@ -14069,7 +14090,7 @@ export function ProjectWorkspace() {
   const dock = useMediaDock({
     fileId: activeFileId,
     timelineStacked,
-    filmPresent: showVideoPane && Boolean(activeFile?.coreMediaUrl),
+    filmPresent: filmShown,
     start: mediaStart,
     left: dockLeft,
     // A hidden text panel stays mounted (frozen, or a tab behind the film), so
@@ -17497,6 +17518,7 @@ export function ProjectWorkspace() {
             {!isReadOnly && lanesPending && (
               <div
                 role="status"
+                aria-busy="true"
                 data-testid="lanes-loading-banner"
                 className="flex items-center gap-2 border-b bg-muted px-4 py-2 text-xs text-muted-foreground"
               >
@@ -18275,6 +18297,7 @@ export function ProjectWorkspace() {
             ref={editorRef} project={editorProject ?? project} cellStore={cellStore}
             fileType={activeFile?.type}
             bibleOpen={parallelBiblesPanelActive}
+            parallelBibles={editorParallelBibles}
             onSaveVoiceOverride={bibleDataShown ? saveVoiceOverride : undefined}
             onAdoptVoicesAsCast={bibleDataShown ? adoptVoicesAsCast : undefined}
             showFootnotesInline={footnoteViewMode === "inline"}
@@ -18508,6 +18531,10 @@ export function ProjectWorkspace() {
                 <ParallelBiblesSidebar
                   key={`${activeFile!.id}-bibles`}
                   trackedRef={trackedCellRef}
+                  projectId={projectId}
+                  projectDefaults={parallelBibleDefaults}
+                  canSetProjectDefaults={canSetParallelBibleDefaults}
+                  onSetProjectDefaults={editorParallelBibles?.onSetProjectDefaults}
                   open
                   onToggle={() => {
                     const next = !parallelBiblesOpen

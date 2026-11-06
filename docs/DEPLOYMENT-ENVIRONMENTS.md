@@ -367,6 +367,42 @@ release (add first, remove in a later release). Apply the release's migrations
 to the target Neon branch *before* step 3 — every surface's deploy guard fails
 closed on a pending migration, and nothing publishes until it passes.
 
+## Desktop
+
+The Tauri shell (`src-tauri/`) updates on two channels
+(`docs/superpowers/specs/2026-11-05-desktop-hot-bundle.md`):
+
+- **Web bundle — hourly, automatic.** `deploy:aquilla` ends with
+  `tsx scripts/desktop-bundle-publish.ts production`, after `tag-release.sh`, so
+  the calver tag is the bundle version. It tars `dist/`, signs a manifest
+  (ed25519 over the spec's canonical string) and uploads
+  `production/<calver>/bundle.tar.gz` and `production/latest.json` to the R2
+  bucket `aquilla-desktop-bundles`, public at `https://desktop-bundles.aquilla.app`
+  (custom domain attached in the Cloudflare dashboard, not in this repo). The
+  shell fetches `latest.json` on launch and when it comes online, verifies the
+  signature, stages the bundle and applies it on the next launch. `pnpm
+  desktop:bundle:publish development --dry-run` builds and prints the manifest
+  without uploading.
+- **Native shell — rare, signed.** `tauri-release.yml` on a `v*` tag, gated by the
+  `desktop-release-signing` environment; its `pnpm run build:hosted` step embeds a
+  production-host fallback bundle. The existing Tauri updater (GitHub Releases
+  `latest.json`) ships it.
+
+Secrets:
+
+| Secret | Used by |
+| --- | --- |
+| `DESKTOP_BUNDLE_SIGNING_KEY` | `release-deploy.yml` → `desktop-bundle-publish.ts`. PKCS#8 PEM ed25519 private key from `pnpm desktop:bundle:keygen`. Unset: the publish prints a `::warning::` and the web release still succeeds. |
+| `AQUILLA_BUNDLE_PUBKEY` | `tauri-release.yml`; the matching raw 32-byte public key (hex), compiled into the shell via `option_env!`. The workflow fails if it is empty. |
+| `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Tauri updater signature for the shell (`npx tauri signer generate`; public half in `tauri.conf.json` `plugins.updater.pubkey`). |
+| `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`, `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY` | macOS code signing + notarization. |
+| `WINDOWS_CERTIFICATE`, `WINDOWS_CERTIFICATE_PASSWORD` | Windows code signing (optional). |
+
+**Version-bump rule.** A change to any `#[tauri::command]`, IPC event name or
+capability bumps `version` in `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml`.
+That version is published as `minShellVersion` in every bundle from that commit on;
+an older shell does not download such a bundle and instead prompts for a shell update.
+
 ## Deployment ownership
 
 Live Aquilla deployments require an explicit human/operator action or one of

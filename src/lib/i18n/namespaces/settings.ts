@@ -230,8 +230,21 @@ export const settings = defineNamespace({
       "Whether imported timings are locked against dragging. Projects use this unless they set their own.",
     "settings.mediaDefaults.allowTrackEditingDescription":
       "Whether maintainers may add, group and recolour timeline tracks. On unless you turn it off. Projects use this unless they set their own.",
+    // AQU-1967: this row names CELLS — its label always did, and so does the
+    // project page's copy of it — and it carries the one rule that decides
+    // whether the rung picked here means what an org admin reads into it:
+    // removing an IMPORTED cell needs a maintainer whatever this says
+    // (cell-editing-gate.ts `canRemoveImportedCells`, mirrored at the
+    // perimeter in sync-worker authorize.ts). Biblica ETT set the tier to
+    // Project Lead expecting their leads to be able to delete cells; every
+    // cell in a project imported from USFM is an imported cell, so each lead's
+    // Remove entry stayed disabled and the setting read as broken. The project
+    // page said so already (projectSettings.cellEditing.description) and this
+    // one did not, which is the whole of that surprise.
     "settings.mediaDefaults.cellEditingFloorDescription":
-      "Who may add and remove lines. Projects use this unless they set their own.",
+      "Who may add and remove cells. Removing a cell also removes its translations, recordings and "
+      + "comments; removing an imported cell always needs a maintainer, whatever this is set to. "
+      + "Projects use this unless they set their own.",
     "settings.mediaDefaults.allowSelfValidationAudioDescription":
       "Whether people may validate their own recordings. Projects use this unless they set their own.",
     "settings.mediaDefaults.validationRoleFloorAudioDescription":
@@ -870,7 +883,7 @@ export const settings = defineNamespace({
       "settings.mediaDefaults.groupLabel": {
         description:
           "Heading of a group on the organization's Project defaults page holding the timeline and recording defaults " +
-          "(timing lock, track editing, who may add and remove lines, recording validation).",
+          "(timing lock, track editing, who may add and remove cells, recording validation).",
       },
       "settings.mediaDefaults.timingLockedDescription": {
         description: "Help text under the timing-lock row in that group. An on/off switch sits beside it.",

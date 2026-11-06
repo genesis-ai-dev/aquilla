@@ -17,6 +17,7 @@ import { COUNTDOWN_FROM, useCountdown } from "@/components/AudioRecorder/useCoun
 import { probeMicPermission } from "@/components/AudioRecorder/probeMicPermission"
 import { Button } from "@/components/ui/button"
 import { useAudioRecorder } from "@/hooks/useAudioRecorder"
+import { isInEditableContext, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { audioCachePutBlob } from "@/lib/audio/bytes-cache"
 import { decodeToMono48k } from "@/lib/audio/decode-mono"
 import { setMicHeld } from "@/lib/audio/mic-hold"
@@ -119,6 +120,29 @@ export function useStationRecorder(ed: StationEditor, onMessage: (text: string) 
       recRef.current.stop()
     }
   }, [letGo, setPhase])
+
+  // While it counts in and records, the Station holds Space wherever the
+  // focus is, as the recording window does: the timeline's Space stands down
+  // (it played the timeline over the recording, Nov 2 shortcut review), and
+  // Space or Esc stops the recording. With the focus in the Station, its own
+  // keys get there first.
+  const capturing = phase.kind === "counting" || phase.kind === "recording" || phase.kind === "finishing"
+  useEffect(() => {
+    if (!capturing) return
+    const release = pushAudioShortcutOverride()
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || isInEditableContext(e.target)) return
+      if (e.key !== " " && e.key !== "Escape") return
+      e.preventDefault()
+      e.stopPropagation()
+      stop()
+    }
+    window.addEventListener("keydown", onKey)
+    return () => {
+      window.removeEventListener("keydown", onKey)
+      release()
+    }
+  }, [capturing, stop])
 
   // The recorder's own state moves the phase on.
   const state = recorder.state

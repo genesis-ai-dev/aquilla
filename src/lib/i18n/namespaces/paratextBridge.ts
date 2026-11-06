@@ -76,6 +76,22 @@ export const paratextBridge = defineNamespace({
     "paratextBridge.book.conflict.allowMarkers": "Write it anyway",
     "paratextBridge.book.conflict.missing": "This unit no longer exists in the file.",
     "paratextBridge.book.backup": "A copy of the previous file is kept outside the project folder.",
+
+    "paratextBridge.openInAquilla": "Open in Aquilla",
+    "paratextBridge.open.title": "Open in Aquilla",
+    "paratextBridge.open.description":
+      "Aquilla keeps a copy of this project's books with the full editor. Writing sends your changes back into the Paratext project folder.",
+    "paratextBridge.open.needLogin": "Sign in to Aquilla first; the mirrored project is created in your organization.",
+    "paratextBridge.open.reading": "Reading the project folder",
+    "paratextBridge.open.creating": "Creating the Aquilla project",
+    "paratextBridge.mirror.badge": "Paratext · {book}",
+    "paratextBridge.mirror.badgeAria": "Paratext bridge",
+    "paratextBridge.mirror.title": "Paratext bridge",
+    "paratextBridge.mirror.description": "This file mirrors {file}. Paratext's own changes arrive here as you work.",
+    "paratextBridge.mirror.unmapped": plural({
+      one: "{count} cell has no matching line in the Paratext file and was left out.",
+      other: "{count} cells have no matching line in the Paratext file and were left out.",
+    }),
   },
   context: {
     _context: {
@@ -95,6 +111,10 @@ export const paratextBridge = defineNamespace({
       "paratextBridge.book.refused": { description: "Write refused; nothing changed on disk.", placeholders: { reason: "One of the refused.* strings." } },
       "paratextBridge.book.refused.proof": { description: "Write refused because the byte-level check failed.", placeholders: { details: "Technical list, often English." } },
       "paratextBridge.book.conflict.stale": { description: "Explains a clobber: Paratext overwrote Aquilla's edits from a stale copy.", placeholders: { count: "Number of reverted edits." } },
+      "paratextBridge.mirror.badgeAria": { description: "Accessible name of the header badge button that opens the Paratext bridge panel." },
+      "paratextBridge.mirror.badge": { description: "Editor header badge on a project mirroring a Paratext project.", placeholders: { book: "Three-letter book code like MAT." } },
+      "paratextBridge.mirror.description": { description: "Which Paratext file the open Aquilla file mirrors.", placeholders: { file: "File name like 41MATTPP1.SFM." } },
+      "paratextBridge.mirror.unmapped": { description: "Cells skipped on write because the file has no line for their reference.", placeholders: { count: "Number of cells." } },
     },
   },
   surfaces: [],

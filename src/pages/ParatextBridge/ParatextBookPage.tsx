@@ -10,9 +10,7 @@ import { Badge } from "@/components/ui/badge"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { toast } from "@/components/ui/toast"
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
+import { ParatextConflictDialog } from "@/components/paratext/ParatextConflictDialog"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import { useParatextDiscovery } from "@/lib/paratext-bridge/use-paratext-discovery"
@@ -153,40 +151,11 @@ export function ParatextBookPage() {
             </div>
           )}
 
-          <AlertDialog open={book.conflicts.length > 0}>
-            <AlertDialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
-              <AlertDialogHeader>
-                <AlertDialogTitle>{t("paratextBridge.book.conflict.title")}</AlertDialogTitle>
-                <AlertDialogDescription>
-                  {book.conflicts.some((c) => c.case === "stale-revert")
-                    ? t("paratextBridge.book.conflict.stale", { count: book.conflicts.filter((c) => c.case === "stale-revert").length })
-                    : t("paratextBridge.book.conflict.description")}
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <div className="space-y-4 text-sm">
-                {book.conflicts.map((c) => (
-                  <div key={c.unitId} className="space-y-2 rounded-md border border-border p-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <code className="text-xs">{c.unitId}</code>
-                      <div className="flex gap-2">
-                        <Button size="sm" variant={c.case === "stale-revert" ? "default" : "outline"} onClick={() => void act.resolve(c.unitId, "mine")}>{t("paratextBridge.book.conflict.keepMine")}</Button>
-                        <Button size="sm" variant="outline" onClick={() => void act.resolve(c.unitId, "theirs")}>{t("paratextBridge.book.conflict.takeTheirs")}</Button>
-                      </div>
-                    </div>
-                    <dl className="grid gap-1 text-xs">
-                      <dt className="text-muted-foreground">{t("paratextBridge.book.conflict.base")}</dt><dd className="whitespace-pre-wrap">{c.base?.text ?? ""}</dd>
-                      <dt className="text-muted-foreground">{t("paratextBridge.book.conflict.theirs")}</dt><dd className="whitespace-pre-wrap">{c.theirs?.text ?? t("paratextBridge.book.conflict.missing")}</dd>
-                      <dt className="text-muted-foreground">{t("paratextBridge.book.conflict.mine")}</dt><dd className="whitespace-pre-wrap font-medium">{c.mine ?? ""}</dd>
-                    </dl>
-                  </div>
-                ))}
-              </div>
-              <AlertDialogFooter>
-                <AlertDialogCancel onClick={() => void act.resolveAll("theirs")}>{t("paratextBridge.book.conflict.takeAllTheirs")}</AlertDialogCancel>
-                <AlertDialogAction onClick={() => void act.resolveAll("mine")}>{t("paratextBridge.book.conflict.keepAllMine")}</AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+          <ParatextConflictDialog
+            conflicts={book.conflicts}
+            onResolve={(id, choice) => void act.resolve(id, choice)}
+            onResolveAll={(choice) => void act.resolveAll(choice)}
+          />
         </Page>
       }
     />

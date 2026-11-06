@@ -3325,8 +3325,6 @@ export const sw: Catalog = {
   "org.egressSettings.roleOptionViewer": "{role} — yeyote mwenye ufikiaji wa mradi",
   "org.egressSettings.roleOptionOwner": "{role} — chaguo-msingi",
   "org.egressSettings.saveFailedFallback": "Imeshindwa kuhifadhi ruhusa ya Utoaji wa data.",
-  "org.addLanguagePopover.triggerLabel": "Lugha",
-  "org.addLanguagePopover.conflictError": "Lugha zimebadilishwa kwingineko. Imepakiwa upya — jaribu kuongeza tena.",
   "org.setupChecklist.heading": "Anzisha shirika lako",
   "org.setupChecklist.dismissAriaLabel": "Ondoa orodha hakiki",
   "org.setupChecklist.progress": "{done} kati ya {total} zimekamilika",

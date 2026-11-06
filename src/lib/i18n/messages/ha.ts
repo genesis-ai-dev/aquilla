@@ -3329,8 +3329,6 @@ export const ha: Catalog = {
   "org.egressSettings.roleOptionViewer": "{role} — duk wanda ke da shigar aiki",
   "org.egressSettings.roleOptionOwner": "{role} — na al'ada",
   "org.egressSettings.saveFailedFallback": "An kasa ajiye izinin fitar da bayanai.",
-  "org.addLanguagePopover.triggerLabel": "Harshe",
-  "org.addLanguagePopover.conflictError": "An canza harsuna a wani wuri. An sake loda — ku sake ƙoƙarin ƙarawa.",
   "org.setupChecklist.heading": "Ku fara ƙungiyarku",
   "org.setupChecklist.dismissAriaLabel": "Ku watsar da jerin dubawa",
   "org.setupChecklist.progress": "{done} cikin {total} an gama",

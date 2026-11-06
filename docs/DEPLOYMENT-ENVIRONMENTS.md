@@ -45,11 +45,37 @@ the target's `NEON_*` credentials, not just the Cloudflare pair: without them th
 guard fails closed on a missing credential instead of reporting the schema state,
 which published the SPA while neither Worker could go out (AQU-1539).
 
-**Migrate first, then deploy.** `npm run neon:apply:dev` / `neon:apply:prod`
+**Migrate first, then deploy.** `pnpm neon:apply:dev` / `neon:apply:prod`
 applies pending `db/postgres/migrations/` files to the target Neon branch; only
-then does any deploy command get past its guard. Migrations are never applied
-automatically by a deploy path or by an agent — that is a deliberate human step
-(`npm run neon:status:dev` / `:prod` is the read-only check the guard runs).
+then does any deploy command get past its guard. Who applies differs by target:
+
+- **Production: a person.** `neon:apply:prod` (with the `--snapshot` decision
+  below) is a deliberate human step; no deploy path or agent applies production
+  migrations, and `deploy:aquilla` and the hourly release line fail closed on a
+  pending one.
+- **Development: the merge.** While the repository variable `AUTO_DEV_DEPLOY` is
+  `on` (it has been since 2026-11-02), `dev-deploy.yml` runs `neon:apply:dev` on
+  every push to `dev` and then `deploy:aquilla:dev` — see "Deployment
+  ownership". Running `deploy:aquilla:dev` by hand still means applying first.
+
+`neon:status:dev` / `:prod` is the read-only check the guard runs, and `apply`
+ends with the same check: every migration file must have its `schema_migrations`
+row, and the tables, columns, named constraints, indexes and RLS policies in
+`db/postgres/schema.sql` must match the live database. A ledger row whose file
+is not in the tree is only a warning (`⚠ ledger row has no matching file:`); a
+live schema that differs from `schema.sql` is drift and fails (`✗ schema
+drift:` … `FAIL — do not deploy workers against this DB`), so the dev deploy
+stops before its "Deploy dev" step and dev.aquilla.app stays on the previous
+build. **Never apply an unmerged branch's migration to the shared dev Neon
+branch.** Previews run on development storage and do not apply migrations, so
+`neon:apply:dev` from a PR branch looks like the way to exercise one — but dev's
+`schema.sql` lacks that change, so every dev deploy fails on drift from then
+until the nightly refresh (`dev-neon-refresh.yml`, 04:07 Eastern) restores dev
+from production; the warning line names the file, and so the PR. (2026-11-05,
+PR #1838 `0194_google_login.sql`: twenty-odd red dev deploys and dev.aquilla.app
+a day behind `dev`.) Exercise a branch migration on the local stack
+(`pnpm neon:apply:local`) instead; if dev Neon must carry it for a live walk,
+say so in the PR and expect dev deploys to stay red until the next refresh.
 
 Each file commits together with its `schema_migrations` row, so a migration is
 either applied and recorded or neither; a file needing `CREATE INDEX
@@ -406,7 +432,12 @@ dedicated `aquilla-web-preview` Worker. All six production/development Workers
 remain disconnected from Git. The preview Worker has no custom domain or live
 route. Its build deploys matching auth/sync previews and never promotes a live version or changes
 production/development traffic. `versification-tool` remains disconnected
-because it has no deployable Wrangler application.
+because it has no deployable Wrangler application. A preview never applies
+migrations either: it runs the branch's Workers against the shared dev Neon
+branch as it stands, so a branch that adds a migration cannot exercise the new
+table or column on its preview until the migration is on `dev` and the dev
+deploy has applied it. "Migrate first, then deploy" above says why the answer
+is not `neon:apply:dev` from the branch.
 
 The consolidated `.github/workflows/ci.yml` runs on pull requests into `dev`
 (lint, `i18n:check`, the secret scan, unit tests, worker tests, and

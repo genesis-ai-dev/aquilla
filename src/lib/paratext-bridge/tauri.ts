@@ -39,6 +39,8 @@ async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T
 
 export const paratextTauri = {
   discover: () => invoke<Discovery>("paratext_discover"),
+  /** Linked folders only; reads nothing inside them. */
+  userRoots: () => invoke<string[]>("paratext_user_roots"),
   addRoot: (path: string) => invoke<Discovery>("paratext_add_root", { path }),
   removeRoot: (path: string) => invoke<Discovery>("paratext_remove_root", { path }),
   readFile: async (projectPath: string, fileName: string) =>

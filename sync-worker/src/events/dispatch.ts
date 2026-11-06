@@ -277,6 +277,7 @@ export function dispatchEvent(
     case 'cell.backtranslation.set':
     case 'cell.gloss.set':
     case 'cast.assign':
+    case 'cell.label.set':
     case 'cell.retime':
     case 'cell.lane.retime':
     case 'source.cell.mirror':

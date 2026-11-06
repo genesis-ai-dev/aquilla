@@ -2124,6 +2124,41 @@ export async function emitCastAssign(input: CastAssignInput): Promise<string> {
   return eventId
 }
 
+// ── Cell label (AQU-2408) ────────────────────────────────────────────────
+// Non-chain-mutating (parentId omitted), exactly like cast.assign: writes one
+// metadata key on the source-side row and never touches text or cells.event_id.
+// A label is a note on a line — metadata, never a character and never a voice
+// (docs/decisions/0007-cell-labels-are-metadata-never-cast.md).
+
+export interface CellLabelSetInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  /** The label to show on the cell. Null clears it. Trimmed before it leaves. */
+  label: string | null
+  author: string
+  clientTs?: number
+}
+
+/**
+ * Emit a `cell.label.set` event — sets or clears the cell's own label in
+ * `metadata.cellLabel` WITHOUT writing to text. A blank label clears.
+ */
+export async function emitCellLabelSet(input: CellLabelSetInput): Promise<string> {
+  const trimmed = input.label?.trim() ?? ""
+  const { eventId } = await enqueueEvent({
+    kind: "cell.label.set",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: { label: trimmed === "" ? null : trimmed },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 export interface FileRenameInput {
   projectId: string
   fileId: string

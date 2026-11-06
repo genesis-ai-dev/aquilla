@@ -11,6 +11,7 @@ import type { DeviceSettingKey } from "./useSettingsStepKinds"
 export const SHARED_SETTING_LABELS: Record<string, MessageKey> = {
   smartQuotes: "projectSettings.info.smartQuotesLabel",
   cellEditingFloor: "projectSettings.cellEditing.label",
+  cellLabelFloor: "projectSettings.cellLabel.label",
   bibleResourcesEnabled: "bibleData.card.title",
   bibleEnrichments: "bibleData.card.title",
   importExcludeFrontMatter: "projectSettings.import.excludeFrontMatterLabel",

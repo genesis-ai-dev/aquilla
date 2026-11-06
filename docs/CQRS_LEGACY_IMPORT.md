@@ -137,7 +137,8 @@ POST /events {
   author: "<frontier username>",
   payload: {
     name: "Genesis",
-    fileType: "codex",
+    fileType: "usfm",   // the type the notebook had in Codex (its importerType);
+                        // "codex" only when it records none — AQU-2211
     sourceLanguage: "eng",
     targetLanguage: "spa"
   },

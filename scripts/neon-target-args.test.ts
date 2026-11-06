@@ -31,6 +31,8 @@ describe("neon-target hands the backfill its flags", () => {
     // would turn the production write into a silent dry run.
     expect(childArgs("backfill-book-codes", ["--apply", "--verbose"]))
       .toEqual(["scripts/neon-backfill-book-codes.ts", "--apply", "--verbose"])
+    expect(childArgs("backfill-file-kinds", ["--only", "47", "--apply"]))
+      .toEqual(["scripts/neon-backfill-file-kinds.ts", "--only", "47", "--apply"])
     // AQU-1240: the lane backfill takes --apply / --project / --limit the same way.
     expect(childArgs("backfill-lanes", ["--apply", "--project", "p1", "--limit", "5"]))
       .toEqual(["scripts/neon-backfill-lanes.ts", "--apply", "--project", "p1", "--limit", "5"])

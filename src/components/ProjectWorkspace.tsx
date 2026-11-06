@@ -19165,6 +19165,9 @@ export function ProjectWorkspace() {
           activeFileId={activeFileId ?? null}
           activeFileName={activeFile?.name ?? null}
           activeFileType={activeFile?.type ?? null}
+          // AQU-2211: the round-trip exports write into the original upload; a
+          // file migrated from Codex has none, so the dialog hides them for it.
+          activeFileHasOriginalSource={activeFile ? originalSourceIds.has(activeFile.id) : undefined}
           projectFiles={project.files.map((f) => ({ id: f.id, name: f.name, type: f.type }))}
           sourceLanguage={activeSourceLanguage}
           targetLanguage={activeLaneTargetLanguage}

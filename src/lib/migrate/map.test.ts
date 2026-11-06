@@ -694,3 +694,137 @@ describe("mapFilePairToEvents", () => {
     expect(collectSpeakers(pair)).toEqual([{ cellId: "c1", speaker: "MARY MAGDALENE" }])
   })
 })
+
+// AQU-2211: a migrated file lands with the type it had in Codex. The notebook
+// names its importer (`importerType`); older notebooks only have the uploaded
+// file's name, and some have neither — those stay `codex`, as every migrated
+// file did before.
+describe("fileType from the Codex notebook (AQU-2211)", () => {
+  type Metadata = CodexNotebookFile["metadata"]
+  const pairWith = (
+    metadata: Partial<Metadata>,
+    opts: { name?: string; sourceMetadata?: Partial<Metadata> } = {},
+  ): FilePairInput => {
+    const name = opts.name ?? "TheChosen_101"
+    const cells: CodexNotebookFile["cells"] = [
+      { kind: 2, languageId: "html", value: "<p>x</p>", metadata: { id: "c1", type: "text" } },
+    ]
+    return {
+      relPath: name,
+      name,
+      source: { metadata: { id: "f", originalName: name, ...opts.sourceMetadata }, cells },
+      target: { metadata: { id: "f", originalName: name, ...metadata }, cells },
+    }
+  }
+  const fileCreate = (pair: FilePairInput) =>
+    mapFilePairToEvents(pair, OPTS).find((e) => e.kind === "file.create")!.payload
+
+  it.each([
+    ["usfm", "usfm"],
+    ["usfm-experimental", "usfm"],
+    ["paratext", "usfm"],
+    ["ebible", "ebible"],
+    ["ebibleCorpus", "ebible"],
+    ["obs", "obs"],
+    ["audio", "audio"],
+    ["markdown", "md"],
+    ["plaintext", "txt"],
+    ["spreadsheet", "xlsx"],
+    ["spreadsheet-csv", "csv"],
+    ["spreadsheet-tsv", "tsv"],
+    ["tms", "tmx"],
+    ["docx", "docx"],
+  ])("importerType %s lands as %s", (importerType, fileType) => {
+    expect(fileCreate(pairWith({ importerType }))).toMatchObject({ fileType })
+  })
+
+  it("subtitles: VTT, SRT or SBV by the uploaded file's name, VTT when the name does not say", () => {
+    expect(fileCreate(pairWith({ importerType: "subtitles", originalName: "TheChosen_101_en_5&2.vtt" })))
+      .toMatchObject({ fileType: "vtt" })
+    expect(fileCreate(pairWith({ importerType: "subtitles", originalName: "episode.srt" })))
+      .toMatchObject({ fileType: "srt" })
+    expect(fileCreate(pairWith({ importerType: "subtitles", originalFileName: "episode.sbv", originalName: "episode" })))
+      .toMatchObject({ fileType: "sbv" })
+    expect(fileCreate(pairWith({ importerType: "subtitles" }))).toMatchObject({ fileType: "vtt" })
+  })
+
+  it("the importer wins over the file name — an OBS story is named 01.md in Codex", () => {
+    expect(fileCreate(pairWith({ importerType: "obs", originalName: "01.md" }))).toMatchObject({ fileType: "obs" })
+  })
+
+  it("no importerType: the extension of originalFileName, then of originalName", () => {
+    expect(fileCreate(pairWith({ originalFileName: "mydoc.docx", originalName: "mydoc" })))
+      .toMatchObject({ fileType: "docx" })
+    expect(fileCreate(pairWith({ originalName: "41MATBENA18.SFM" }))).toMatchObject({ fileType: "usfm" })
+    expect(fileCreate(pairWith({ originalName: "README.md" }))).toMatchObject({ fileType: "md" })
+    expect(fileCreate(pairWith({ originalName: "104 - Rick Line 1 _12345.wav" }))).toMatchObject({ fileType: "audio" })
+    expect(fileCreate(pairWith({ originalName: "test-example.tmx" }))).toMatchObject({ fileType: "tmx" })
+  })
+
+  it("neither importerType nor a usable name: stays codex", () => {
+    expect(fileCreate(pairWith({ originalName: "1CH" }, { name: "1CH" }))).toMatchObject({ fileType: "codex" })
+    expect(fileCreate(pairWith({ originalName: "   " }))).toMatchObject({ fileType: "codex" })
+    expect(fileCreate(pairWith({ originalName: "notes.pdf" }))).toMatchObject({ fileType: "codex" })
+  })
+
+  it("an importer Aquilla has no type for stays codex, whatever the name says", () => {
+    // macula / biblica / pdf / smart-segmenter have no Aquilla counterpart yet,
+    // and a newer importer this build has never heard of is in the same
+    // position. The importer is the stronger signal, so the name is not read.
+    expect(fileCreate(pairWith({ importerType: "macula", originalName: "1CH.macula" }, { name: "1CH" })))
+      .toMatchObject({ fileType: "codex" })
+    expect(fileCreate(pairWith({ importerType: "pdf", originalName: "paper.pdf" }))).toMatchObject({ fileType: "codex" })
+    expect(fileCreate(pairWith({ importerType: "smart-segmenter", originalName: "notes.docx" })))
+      .toMatchObject({ fileType: "codex" })
+    expect(fileCreate(pairWith({ importerType: "something-newer", originalName: "notes.docx" })))
+      .toMatchObject({ fileType: "codex" })
+  })
+
+  it("IDML is still detected structurally and stays idml — Biblica's importer included", () => {
+    expect(fileCreate(pairWith({ importerType: "biblica", originalName: "JOS-EST.idml" }, { name: "JOS-EST" })))
+      .toMatchObject({ fileType: "idml", kind: "idml" })
+    expect(fileCreate(pairWith({ importerType: "indesign", originalName: "GEN-DEU.idml" }, { name: "GEN-DEU" })))
+      .toMatchObject({ fileType: "idml" })
+  })
+
+  it("a Scripture book keeps its book_code whatever type it resolves to (AQU-1196)", () => {
+    expect(fileCreate(pairWith({ importerType: "usfm" }, { name: "1CH" })))
+      .toMatchObject({ fileType: "usfm", bookCode: "1CH" })
+    expect(fileCreate(pairWith({ importerType: "ebibleCorpus" }, { name: "MAT" })))
+      .toMatchObject({ fileType: "ebible", bookCode: "MAT" })
+    expect(fileCreate(pairWith({ importerType: "macula" }, { name: "GEN" })))
+      .toMatchObject({ fileType: "codex", bookCode: "GEN" })
+  })
+
+  it("records the raw Codex origin facts as meta.legacyCodex, mapped or not", () => {
+    const mapped = fileCreate(pairWith({ importerType: "subtitles", originalName: "ep.vtt", videoUrl: "https://v/1.mp4" }))
+    expect(mapped.projectionMeta).toEqual({
+      legacyCodex: { importerType: "subtitles", originalName: "ep.vtt", videoUrl: "https://v/1.mp4" },
+    })
+    const unmapped = fileCreate(pairWith({ importerType: "macula", originalName: "1CH.macula", audioOnly: false }, { name: "1CH" }))
+    expect(unmapped.projectionMeta).toEqual({ legacyCodex: { importerType: "macula", originalName: "1CH.macula" } })
+    const audio = fileCreate(pairWith({ importerType: "audio", originalName: "take.wav", audioOnly: true }))
+    expect(audio.projectionMeta).toEqual({ legacyCodex: { importerType: "audio", originalName: "take.wav", audioOnly: true } })
+    // An IDML pair carries them beside its import manifest.
+    const idml = fileCreate(pairWith({ importerType: "indesign", originalName: "GEN-DEU.idml" }, { name: "GEN-DEU" }))
+    expect(idml.projectionMeta).toEqual({ legacyCodex: { importerType: "indesign", originalName: "GEN-DEU.idml" } })
+  })
+
+  it("reads the source notebook for what the target does not say", () => {
+    // Codex stamps the importer on the .source first; a bare target name must
+    // not shadow the telling one on the source.
+    const pair = pairWith(
+      { originalName: "episode" },
+      { sourceMetadata: { importerType: "subtitles", originalName: "episode.srt" } },
+    )
+    expect(fileCreate(pair)).toMatchObject({ fileType: "srt" })
+    expect(fileCreate(pair).projectionMeta).toEqual({
+      legacyCodex: { importerType: "subtitles", originalName: "episode.srt" },
+    })
+  })
+
+  it("the fixture pair is unchanged: no importer, bare names, codex", () => {
+    const payload = fileCreate(fixture())
+    expect(payload).toMatchObject({ fileType: "codex", projectionMeta: { legacyCodex: { originalName: "f" } } })
+  })
+})

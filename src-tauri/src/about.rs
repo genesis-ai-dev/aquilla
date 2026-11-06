@@ -7,7 +7,9 @@
 
 use std::borrow::Cow;
 
-use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::menu::{Menu, MenuEvent, MenuItem, Submenu};
+#[cfg(target_os = "macos")]
+use tauri::menu::PredefinedMenuItem;
 #[cfg(not(target_os = "macos"))]
 use tauri::menu::HELP_SUBMENU_ID;
 use tauri::Wry;

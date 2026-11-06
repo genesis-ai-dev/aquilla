@@ -33,12 +33,12 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "publisher": "Frontier R&D Ltd.",
-    "copyright": "© 2026 Frontier R&D Ltd.",
+    "publisher": "Frontier RnD Ltd.",
+    "copyright": "© 2026 Frontier RnD Ltd.",
     "homepage": "https://aquilla.app",
     "category": "Productivity",
     "shortDescription": "Translators, lifted.",
-    "longDescription": "Aquilla is a collaborative workspace for translation teams, built by Frontier R&D Ltd. Open source under the MIT license.",
+    "longDescription": "Aquilla is a collaborative workspace for translation teams, built by Frontier RnD Ltd. Open source under the MIT license.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

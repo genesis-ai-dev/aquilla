@@ -583,11 +583,11 @@ export function programmeLines(cells: readonly CellData[]): { lines: CellData[];
  * one answer the timeline and the transport both ask, so the dubs drawn are
  * the dubs played.
  */
-export function recordingsLines(
-  own: readonly CellData[],
-  heardLines: readonly CellData[] | null | undefined,
+export function recordingsLines<L extends readonly CellData[]>(
+  own: L,
+  heardLines: L | null | undefined,
   followsRecordings: boolean,
-): readonly CellData[] {
+): L {
   if (!followsRecordings || !heardLines || heardLines.length === 0) return own
   // An imported recording's own sections stay its lines, as `programmeLines` has them.
   return own.some((c) => (c.medium ?? "text") === "media") ? own : heardLines

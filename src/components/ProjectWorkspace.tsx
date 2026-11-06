@@ -14303,7 +14303,7 @@ export function ProjectWorkspace() {
   // Group D: following the recordings, a file with an audio cue file plays its
   // heard lines (`playbackCells` below), so the queue on them is this file's.
   const fileCellIds = useMemo(
-    () => new Set([...audioMergedCells, ...recordingsLines([], audioCueCells, timingMode === "audioFirst")].map((c) => c.id)),
+    () => new Set([...audioMergedCells, ...recordingsLines<CellData[]>([], audioCueCells, timingMode === "audioFirst")].map((c) => c.id)),
     [audioMergedCells, audioCueCells, timingMode],
   )
   const anyFileCellClockIsFileTime = useMemo(

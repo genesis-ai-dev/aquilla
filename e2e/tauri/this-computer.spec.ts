@@ -29,6 +29,8 @@ async function goTo(pathname: string) {
   }, pathname)
 }
 
+const exists = (selector: string) => browser.execute((s) => document.querySelector(s) !== null, selector)
+
 describe("This computer workspace", () => {
   it("persists a linked folder in the app-data roots file, without scanning it", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aq-this-computer-"))
@@ -52,18 +54,19 @@ describe("This computer workspace", () => {
     await browser.execute(() => localStorage.removeItem("aq.paratext-scan.v1"))
     await goTo("/this-computer")
 
-    const prep = await $('[data-testid="paratext-scan-prep"]')
-    await prep.waitForExist({ timeout: 15_000 })
-    await expect($('[data-testid="paratext-scan-results"]')).not.toBeExisting()
+    await browser.waitUntil(() => exists('[data-testid="paratext-scan-prep"]'), { timeout: 15_000 })
+    expect(await exists('[data-testid="paratext-scan-results"]')).toBe(false)
 
-    await $('[data-testid="paratext-scan-prep"] button').click()
-    const results = await $('[data-testid="paratext-scan-results"]')
-    await results.waitForExist({ timeout: 30_000 })
+    await browser.execute(() => {
+      document.querySelector<HTMLButtonElement>('[data-testid="paratext-scan-prep"] button')?.click()
+    })
+    await browser.waitUntil(() => exists('[data-testid="paratext-scan-results"]'), { timeout: 30_000 })
 
-    const found = await $$('[data-testid="paratext-found-project"]')
-    const names = await Promise.all(found.map((el) => el.getText()))
+    const names = await browser.execute(() =>
+      Array.from(document.querySelectorAll('[data-testid="paratext-found-project"]')).map((el) => el.textContent ?? ""),
+    )
     // Evidence for the run log: which projects this machine's scan found.
-    console.log(`[this-computer] paratext projects found: ${found.length}`, names)
+    console.log(`[this-computer] paratext projects found: ${names.length}`, names)
 
     expect(await browser.execute(() => localStorage.getItem("aq.paratext-scan.v1"))).toBe("ok")
   })

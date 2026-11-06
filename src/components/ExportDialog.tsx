@@ -464,6 +464,19 @@ function profileIdFromCells(cells: readonly CellData[]): string | null {
   return null
 }
 
+/**
+ * AQU-2437: the primary "Download <name>.<ext>" button carries the file name,
+ * which can run to sixty characters. The shared button style forbids wrapping
+ * (`whitespace-nowrap`), so a long name made the button wider than its card
+ * and handed the dialog body a horizontal scrollbar. The label wraps on its
+ * own and the button grows taller instead: `py-1.75` keeps a one-line label at
+ * the same 36px as `size="lg"`, and `items-start` + `mt-0.5` on the icon keep
+ * it on the first line rather than floating between two.
+ */
+const WRAPPING_DOWNLOAD_BUTTON = "h-auto w-full items-start justify-center py-1.75"
+/** `wrap-anywhere`, so a name with no spaces still breaks instead of overflowing. */
+const WRAPPING_DOWNLOAD_LABEL = "min-w-0 whitespace-normal wrap-anywhere"
+
 function idmlBlob(bytes: Uint8Array, type: string): Blob {
   return new Blob(
     [bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer],
@@ -2587,7 +2600,7 @@ export function ExportDialog({
                     renderVttOptions({ showSource: effectiveSubtitleTarget === "subtitle" })}
                   <Button
                     size="lg"
-                    className="w-full justify-center"
+                    className={WRAPPING_DOWNLOAD_BUTTON}
                     onClick={() =>
                       handleExport(nativeOption.id, {
                         audioCues: effectiveSubtitleTarget === "audio",
@@ -2596,10 +2609,16 @@ export function ExportDialog({
                     disabled={!activeFileId || isBusy}
                     aria-busy={isBusy}
                   >
-                    {isBusy ? <Spinner aria-hidden="true" /> : <Download className="h-4 w-4" aria-hidden="true" />}
-                    {t("importExport.dialog.downloadFile", {
-                      fileName: `${buildExportStem(false)}${effectiveSubtitleTarget === "audio" ? "_audio" : ""}${nativeOption.ext}`,
-                    })}
+                    {isBusy ? (
+                      <Spinner className="mt-0.5" aria-hidden="true" />
+                    ) : (
+                      <Download className="mt-0.5 h-4 w-4" aria-hidden="true" />
+                    )}
+                    <span className={WRAPPING_DOWNLOAD_LABEL}>
+                      {t("importExport.dialog.downloadFile", {
+                        fileName: `${buildExportStem(false)}${effectiveSubtitleTarget === "audio" ? "_audio" : ""}${nativeOption.ext}`,
+                      })}
+                    </span>
                   </Button>
                 </div>
               </details>
@@ -2612,17 +2631,19 @@ export function ExportDialog({
           <div className="flex flex-col gap-2 rounded-xl border border-border/60 bg-accent/30 px-3 py-3">
             <Button
               size="lg"
-              className="w-full justify-center"
+              className={WRAPPING_DOWNLOAD_BUTTON}
               onClick={() => handleExport(nativeOption.id)}
               disabled={!activeFileId || isBusy}
               aria-busy={isBusy}
             >
               {isBusy ? (
-                <Spinner aria-hidden="true" />
+                <Spinner className="mt-0.5" aria-hidden="true" />
               ) : (
-                <Download className="h-4 w-4" aria-hidden="true" />
+                <Download className="mt-0.5 h-4 w-4" aria-hidden="true" />
               )}
-              {t("importExport.dialog.downloadFile", { fileName: `${buildExportStem(false)}${nativeOption.ext}` })}
+              <span className={WRAPPING_DOWNLOAD_LABEL}>
+                {t("importExport.dialog.downloadFile", { fileName: `${buildExportStem(false)}${nativeOption.ext}` })}
+              </span>
             </Button>
             <p className="text-xs text-muted-foreground text-center leading-relaxed">
               {t("importExport.dialog.nativeFormatHint", { label: t(nativeOption.labelKey) })}

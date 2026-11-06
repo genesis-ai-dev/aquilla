@@ -34,6 +34,8 @@ import {
 } from "../lib/usfm-lossless"
 import { buildUsfmExportPlan } from "./usfm-export-plan"
 import { buildPlainTextExport } from "./plaintext-export"
+import { readOriginalSourceBytes } from "./original-source"
+import { detectTextFidelity } from "../../../src/lib/export/text-fidelity"
 
 export interface ExportRouteEnv {
   AQUILLA_PG?: AquillaDb
@@ -212,8 +214,49 @@ export async function handleExportSourceRequest(
   // the in-app export, built from the projection. `?mode=raw` skips it and
   // falls through to the stored upload below, which is what the project
   // export's "source documents" folder asks for.
+  //
+  // AQU-2383: the serializer rebuilds the file from cells, so it returns the
+  // parser's normalized form — segments rejoined by the paragraph rules, LF
+  // terminators, no byte-order mark. That is the right answer for a target
+  // somebody has translated and the WRONG answer for one nobody has touched,
+  // where the only honest export is the upload itself. So resolve the stored
+  // blob first and let it decide:
+  //
+  //   - the rebuild says nothing the upload does not (no translation went in
+  //     and no cell was hidden or filtered out) → return the stored bytes
+  //     verbatim (`raw-original`), which is byte-identical by construction;
+  //   - otherwise → rebuild, but put the source's mark and line terminator
+  //     back around the new text.
+  //
+  // A file with no stored blob (imported before blobs were kept, or swept)
+  // keeps the old behavior rather than failing: a normalized export beats no
+  // export at all.
   if (blob.format === "txt" && !rawMode) {
-    const body = await buildPlainTextExport(db, projectId, fileId, lane, { validatedOnly })
+    const stored = await readOriginalSourceBytes(blob, env.SNAPSHOTS)
+    // `ignoreBOM: true` KEEPS the mark in the decoded string (the flag name
+    // reads backwards): the default strips it, which would hide the very thing
+    // the envelope detection is looking for. `fatal: false` is the default,
+    // spelled out because workers-types declares both fields required.
+    const storedText = stored.ok
+      ? new TextDecoder("utf-8", { ignoreBOM: true, fatal: false }).decode(stored.bytes)
+      : null
+    const { body, untouched } = await buildPlainTextExport(db, projectId, fileId, lane, {
+      validatedOnly,
+      ...(storedText != null ? { fidelity: detectTextFidelity(storedText) } : {}),
+    })
+    if (untouched && stored.ok) {
+      return withCors(
+        new Response(stored.bytes, {
+          status: 200,
+          headers: {
+            "Content-Type": "text/plain; charset=utf-8",
+            "Content-Disposition": attachmentDisposition(fileName),
+            "X-Export-Mode": "raw-original",
+          },
+        }),
+        request,
+      )
+    }
     return withCors(
       new Response(body, {
         status: 200,

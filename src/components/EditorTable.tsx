@@ -30,6 +30,7 @@ import {
   CloudOff,
   Quote,
   Flag,
+  CaptionsOff,
 } from "lucide-react"
 import { InlineToolsTab, useHasInlineTools } from "@/components/tools/ToolMounts"
 import { FillsTwiceIndicator } from "@/components/ui/fills-twice-indicator"
@@ -160,6 +161,7 @@ import { isWordSeekClick, timingFromClick } from "@/lib/audio/seek-word-click"
 import { KaraokeReadText } from "./KaraokeReadText"
 import { resolveCurrentCellIndex } from "@/lib/editor/current-index"
 import { startRowFlash } from "@/lib/editor/row-flash"
+import { isPlaybackStart, rowNeedsReveal, type SeenPlaying } from "@/lib/editor/playing-row-reveal"
 import { useCellAudio } from "@/hooks/useCellAudio"
 import { isSourceSegmentSelected } from "@/lib/audio/batch-audio"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -191,7 +193,11 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { InfoNote, NOTE_CONTENT_CLASS, NoteOnClick } from "@/components/ui/info-note"
 import { CellPresenceBadges } from "./CellPresenceBadges"
 import { categorizeAiError } from "@/lib/audio/ai-error"
-import { CellAiStatusPopover } from "./CellAiStatusPopover"
+// AQU-1619: the row shows a failed transcription itself, instead of leaving it
+// to the Recording tab inside cell details.
+import { clearTranscribeStatus, useTranscribeStatus, type TranscribeStatus } from "@/lib/audio/transcribe-status"
+import { transcribeTake } from "@/lib/audio/transcribe-take"
+import { CellAiStatusPopover, type AiStatusAction } from "./CellAiStatusPopover"
 import { InlineAiError } from "./InlineAiError"
 import { CellNumberPill } from "./cell/CellNumberPill"
 import {
@@ -738,6 +744,63 @@ function SynthStatusBadge({
     )
   }
   return null
+}
+
+/**
+ * AQU-1619: the gutter's view of a FAILED transcription, beside the synth badge
+ * and drawn the same way — icon trigger, full heading/explanation/actions in the
+ * popover.
+ *
+ * The failure was always recorded (`transcribe-status.ts`, keyed by the clip),
+ * but the only thing reading it was the Recording tab's badge inside cell
+ * details. So a hosted run that hit the per-user rate limit left the row looking
+ * exactly like a line nobody had tried yet: "Too many requests right now", and
+ * the Retry that goes with it, were a panel-open away on every one of the rows
+ * that got refused.
+ *
+ * Only the error state. The progress states (model download, "transcribing",
+ * the "✓ N words" flash) stay the Recording tab's — a w-5 gutter cannot say
+ * them, and a run in flight is already visible on the timeline.
+ */
+function TranscribeStatusBadge({
+  status, audioId, onRetry,
+}: {
+  status: TranscribeStatus
+  /** The clip the status is filed under — dismissing clears that key. */
+  audioId: string
+  /** Re-runs ASR on this line. Absent (no session / no clip) offers only Dismiss. */
+  onRetry?: () => void
+}) {
+  const t = useT()
+  if (status.kind !== "error") return null
+  const error = categorizeAiError(status.message)
+  const dismiss = () => clearTranscribeStatus(audioId)
+  const actions: AiStatusAction[] = []
+  if (onRetry) {
+    // Same label and same dismiss-then-run order as the Recording tab's badge,
+    // so the two surfaces offer one action, not two that differ.
+    actions.push({ label: "Retry", primary: true, onClick: () => { dismiss(); onRetry() } })
+  }
+  return (
+    <CellAiStatusPopover
+      error={error}
+      actions={actions}
+      onDismiss={dismiss}
+      trigger={
+        <button
+          type="button"
+          aria-label={t("workspace.transcribeBadge.failed")}
+          data-testid="transcribe-status-error"
+          className={cn(
+            gutterIconShell,
+            "bg-destructive/15 text-destructive hover:bg-destructive/25",
+          )}
+        >
+          <CaptionsOff className="h-3 w-3" />
+        </button>
+      }
+    />
+  )
 }
 
 // Stable empty sentinels so per-cell "map.get(id) ?? []" derivations keep a
@@ -2066,6 +2129,38 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     return true
   }, [clearChapterNavigationSelection, flashCellDom, programmaticListScroll, revealCellPage])
 
+  /**
+   * AQU-1636: a row whose audio has just started asks to be brought into
+   * view. The row cannot do this itself: the list is virtualized with
+   * recycled, estimated-height rows, so a DOM `scrollIntoView` on the row
+   * walks every scrollable ancestor into a coordinate space the list is
+   * still correcting, and — not being stamped — reads back as a user scroll,
+   * which silently releases playback-follow. It goes through
+   * `programmaticListScroll` like every other code-driven list scroll.
+   *
+   * No follow intent is issued either way: starting a clip is neither the
+   * user asking to watch the queue nor navigating away from it, so whatever
+   * follow state they were in survives.
+   */
+  const revealRowForPlayback = useCallback((cellId: string) => {
+    const index = displayCellIdsRef.current.indexOf(cellId)
+    if (index < 0) return
+    const viewport = listRootRef.current
+    const root = getListQueryRoot()
+    // Measured against the LIST's viewport, not the window: a row can sit
+    // under the sticky header while the window still "shows" it, and an
+    // expanded row can be taller than the viewport it already fills.
+    if (viewport && root) {
+      const row = root.querySelector<HTMLElement>(
+        `[data-cell-id="${CSS.escape(cellId)}"][data-index]`,
+      )
+      if (row && !rowNeedsReveal(row.getBoundingClientRect(), viewport.getBoundingClientRect())) {
+        return
+      }
+    }
+    programmaticListScroll(index, { viewPosition: 0.5, animated: true })
+  }, [getListQueryRoot, programmaticListScroll])
+
   // AQU-1689: a Who's Who mention jump (previous/next mention, the panel's
   // first mention) scrolls and flashes like a search hit.
   useEffect(() => {
@@ -3121,6 +3216,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           ttsSettings={ttsSettings}
           isAnonymous={isAnonymous}
           onJumpToCell={onJumpToCell}
+          onRevealForPlayback={revealRowForPlayback}
           micDenied={micDenied}
           onOpenAudioSetup={onOpenAudioSetup}
           onProjectChanged={onProjectChanged}
@@ -4383,6 +4479,9 @@ interface MemoizedRowProps {
   ttsSettings?: ProjectTtsSettings
   isAnonymous?: boolean
   onJumpToCell?: (cellId: string) => void
+  /** AQU-1636: this row's audio just started — ask the LIST to bring the row
+   *  into view (never a DOM scroll; see `revealRowForPlayback` on the table). */
+  onRevealForPlayback?: (cellId: string) => void
   micDenied?: boolean
   onOpenAudioSetup?: () => void
   onProjectChanged?: () => void
@@ -4470,7 +4569,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     getFootnoteDetails,
     onSeekToCue, cuePlaying, onPauseCue, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled,
     sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, isAnonymous,
-    onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
+    onJumpToCell, onRevealForPlayback, micDenied, onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
     onOpenAudioSetup,
     onCellCommitted, onValidated, repetitionCounts, getPendingTargetEventId, reservePendingTargetCommit, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
     onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
@@ -4638,6 +4737,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         ttsSettings={ttsSettings}
         isAnonymous={isAnonymous}
         onJumpToCell={onJumpToCell}
+        onRevealForPlayback={onRevealForPlayback}
         micDenied={micDenied}
         onOpenAudioSetup={onOpenAudioSetup}
         onProjectChanged={onProjectChanged}
@@ -4841,6 +4941,9 @@ interface EditorRowProps {
   ttsSettings?: ProjectTtsSettings
   isAnonymous?: boolean
   onJumpToCell?: (cellId: string) => void
+  /** AQU-1636: this row's audio just started — ask the LIST to bring the row
+   *  into view (never a DOM scroll; see `revealRowForPlayback` on the table). */
+  onRevealForPlayback?: (cellId: string) => void
   micDenied?: boolean
   onOpenAudioSetup?: () => void
   onProjectChanged?: () => void
@@ -5755,7 +5858,7 @@ function EditorRow({
   onDragStart, onDragEnter, onSelectionPointerDown, onNavigateCell,
   onEscapeToGrid, onGridRowKeyNav,
   rowIndex, contentNumber, versePart, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols, castGutter, ttsSettings,
-  isAnonymous, micDenied,
+  isAnonymous, onRevealForPlayback, micDenied,
   onOpenAudioSetup, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
   onCellCommitted, onValidated, repetitionCount, getPendingTargetEventId, reservePendingTargetCommit, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
   onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
@@ -7594,23 +7697,36 @@ function EditorRow({
   // When this cell starts playing, gently bring it into view if it's
   // off-screen. Skips when the user is actively interacting with another cell
   // (focus inside an editable element).
-  const wasPlayingRef = useRef(false)
+  //
+  // AQU-1636: this used to scroll the row's own DOM node
+  // (`scrollIntoView({ block: "center" })`) off a per-mount `wasPlaying`
+  // flag, and both halves misbehaved on a transcribed media file — where one
+  // mp3 is split into many short rows, so playing a line from the rail scrolls
+  // through plenty of them:
+  //   * a raw DOM scroll walks every scrollable ANCESTOR and lands in a
+  //     coordinate space the virtualized list is still correcting (recycled
+  //     rows, estimated heights), and being unstamped it reads as a USER
+  //     scroll, which silently kills playback-follow. Every code-driven list
+  //     scroll goes through `programmaticListScroll` for exactly that reason,
+  //     so this one asks the TABLE to reveal the row by id instead.
+  //   * the flag starts `false` on each mount, so a row remounting while its
+  //     clip was already sounding counted as a fresh start and yanked the list
+  //     back onto itself — the user could not scroll away during playback.
+  //     `isPlaybackStart` only fires on a false → true transition this row
+  //     observed itself.
+  const seenPlayingRef = useRef<SeenPlaying>(null)
   useEffect(() => {
-    const wasPlaying = wasPlayingRef.current
+    const previous = seenPlayingRef.current
     const anyPlaying = audioController.isPlaying || generatedVoiceController.isPlaying
-    wasPlayingRef.current = anyPlaying
-    if (!wasPlaying && anyPlaying && rowRef.current) {
-      const rect = rowRef.current.getBoundingClientRect()
-      const fullyVisible = rect.top >= 0 && rect.bottom <= window.innerHeight
-      const ae = document.activeElement
-      const userIsTyping = ae instanceof HTMLElement && (
-        ae.isContentEditable || ae.tagName === "INPUT" || ae.tagName === "TEXTAREA"
-      )
-      if (!fullyVisible && !userIsTyping) {
-        rowRef.current.scrollIntoView({ behavior: "smooth", block: "center" })
-      }
-    }
-  }, [audioController.isPlaying, generatedVoiceController.isPlaying])
+    seenPlayingRef.current = anyPlaying
+    if (!isPlaybackStart(previous, anyPlaying)) return
+    const ae = document.activeElement
+    const userIsTyping = ae instanceof HTMLElement && (
+      ae.isContentEditable || ae.tagName === "INPUT" || ae.tagName === "TEXTAREA"
+    )
+    if (userIsTyping) return
+    onRevealForPlayback?.(cell.id)
+  }, [audioController.isPlaying, generatedVoiceController.isPlaying, cell.id, onRevealForPlayback])
   // The transcribe / correct-transcript handlers moved into CellTakeBlock
   // (2026-08-22) so they can be scoped to whichever cell OWNS the recording —
   // a linked heard line's take must write to the cue sibling, not to this row.
@@ -8089,6 +8205,28 @@ function EditorRow({
   const isSynthBusy = synthStatus.kind === "loading" || synthStatus.kind === "synthesizing"
   const isSynthError = synthStatus.kind === "error"
 
+  // AQU-1619: this line's ASR outcome, on the clip the batch runner and the
+  // Recording tab both file it under (`cell.selectedAudioId`) — so the row reads
+  // exactly the status those runs write, with no second store to keep in step.
+  const rowAudioId = cell.selectedAudioId
+  const transcribeStatus = useTranscribeStatus(rowAudioId)
+  const isTranscribeError = transcribeStatus.kind === "error"
+  // Retry runs the same sequence the Recording tab's Transcribe button runs
+  // (`transcribe-take.ts`): ASR language by provenance, then the flush that
+  // lands the timings. Without a clip there is nothing to re-run.
+  const handleRetryTranscribe = useCallback(() => {
+    if (!rowAudioId) return
+    void transcribeTake({
+      project,
+      owner: cell,
+      selectedAudioId: rowAudioId,
+      slot: cell.attachments?.[rowAudioId]?.slot,
+      session: rowSession,
+      ...(activeLane ? { targetLang: activeLane } : {}),
+      ...(onCellCommitted ? { onCommitted: onCellCommitted } : {}),
+    })
+  }, [rowAudioId, project, cell, rowSession, activeLane, onCellCommitted])
+
   // Human references help people and DOM agents identify a cell.
   const namedRef = namedCellRef(cell)
   const cellRef = namedRef || t("editor.row.rowFallbackRef", { index: rowIndex + 1 })
@@ -8537,6 +8675,15 @@ function EditorRow({
                 )}
                 {(isSynthBusy || isSynthError) && (
                   <SynthStatusBadge status={synthStatus} cellId={cell.id} projectId={project.id} onOpenAudioSetup={onOpenAudioSetup} />
+                )}
+                {/* AQU-1619: a refused transcription, on the row that was
+                    refused — not only inside cell details. */}
+                {isTranscribeError && rowAudioId && (
+                  <TranscribeStatusBadge
+                    status={transcribeStatus}
+                    audioId={rowAudioId}
+                    {...(rowSession ? { onRetry: handleRetryTranscribe } : {})}
+                  />
                 )}
                 {/* AQU-599: persistent "has comment" indicator. Unlike the
                     action-rail comment button (which only appears on

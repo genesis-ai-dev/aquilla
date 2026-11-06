@@ -171,7 +171,10 @@ export async function handleExportBundleRequest(
   // round-trip. A file with nothing to say — no cells, or none validated under
   // ?validated=1 — is skipped rather than shipped as an empty entry.
   for (const { file_id, name } of plainTextCandidates) {
-    const body = await buildPlainTextExport(db, projectId, file_id, lane, { validatedOnly })
+    // AQU-2383: the builder also reports whether the rebuild is untouched, so
+    // the per-file route can serve the stored upload instead. These files have
+    // no stored upload by definition, so only the rebuilt body applies here.
+    const { body } = await buildPlainTextExport(db, projectId, file_id, lane, { validatedOnly })
     if (!body.trim()) continue
     entries.push({
       name: uniqueZipEntryName(txtName(name ?? "", file_id), usedNames),

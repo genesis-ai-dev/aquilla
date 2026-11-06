@@ -19,6 +19,15 @@ name: Release deploy
 # "release tags" ruleset) pushes the tag; without it GITHUB_TOKEN is tried,
 # and a ruleset that refuses it fails the run after the deploy has already
 # gone live — the tag is then a person's job (scripts/tag-release.sh).
+# DISCORD_RELEASE_WEBHOOK_URL (a webhook on #aquilla-alerts, the channel
+# monitor-worker pages) gets one line per release that goes live, per
+# failed deploy, and per stall; unset, the notices are ::warning::s.
+#
+# A stall — the open release held by a red `release-verify` — is not left
+# for a person to notice. scripts/release-stall.mjs reads the failed jobs'
+# logs: a runner or network fault is rerun once (the next hour deploys it);
+# a failure in the slice, or a second fault, is posted with an @mention so a
+# person or the release agent looks (docs/RELEASE-RISK-GATES.md).
 
 on:
   schedule:
@@ -73,6 +82,31 @@ jobs:
             require("fs").appendFileSync(process.env.GITHUB_OUTPUT, out.join("\n") + "\n")
             require("fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${c.deploy ? "Deploys" : "No deploy"}: ${c.reason}${c.branch ? ` (${c.branch} @ ${c.sha})` : ""}\n`)
           ' "$RUNNER_TEMP/check.json"
+      # Only a verify failure gets here (the script says "none" for anything
+      # else). actions: write above is what lets it rerun the failed jobs.
+      - name: Unstick or report a stalled release
+        if: steps.check.outputs.deploy != 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+          # The on-call roles monitor-worker pages (monitor-worker/wrangler.toml).
+          MENTION: '<@&1564768432677847051>'
+        run: |
+          node scripts/release-stall.mjs "$RUNNER_TEMP/check.json" > "$RUNNER_TEMP/stall.json"
+          cat "$RUNNER_TEMP/stall.json"
+          node -e '
+            const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"))
+            if (s.action === "none") process.exit(0)
+            const where = `${s.branch} @ ${String(s.sha).slice(0, 9)}`
+            const jobs = (s.jobs ?? []).map((j) => `• ${j.name}: ${j.excerpt}`).join("\n")
+            const stuck = s.stalledMinutes >= 60 ? `${Math.round(s.stalledMinutes / 60)} h` : `${s.stalledMinutes} min`
+            const line = s.action === "rerun"
+              ? `🔁 Release ${where}: release-verify failed on a runner/network fault; rerunning failed jobs once (stuck ${stuck}).\n${jobs}\n${s.runUrl}`
+              : `${process.env.MENTION} ⛔ Release ${where} is stuck ${stuck}: ${s.reason}.\n${jobs}\n${s.runUrl}`
+            require("fs").writeFileSync(process.argv[2], line)
+            require("fs").appendFileSync(process.env.GITHUB_STEP_SUMMARY, `Stall: ${s.action} — ${s.reason}\n`)
+          ' "$RUNNER_TEMP/stall.json" "$RUNNER_TEMP/notice.txt"
+          test -s "$RUNNER_TEMP/notice.txt" && bash scripts/release-discord-notify.sh "$(cat "$RUNNER_TEMP/notice.txt")" || true
 
   deploy:
     needs: check
@@ -99,6 +133,11 @@ jobs:
       NEON_DEV_BRANCH: dev
       # tag-release.sh records the GitHub Deployment and pushes the calver tag.
       GITHUB_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+      # Signs the desktop hot bundle deploy:aquilla publishes after the tag
+      # (scripts/desktop-bundle-publish.ts; ed25519 PKCS#8 PEM from
+      # `pnpm desktop:bundle:keygen`). Unset, the publish is a ::warning::, not
+      # a failure — docs/superpowers/specs/2026-11-05-desktop-hot-bundle.md.
+      DESKTOP_BUNDLE_SIGNING_KEY: ${{ secrets.DESKTOP_BUNDLE_SIGNING_KEY }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -165,3 +204,15 @@ jobs:
           tag="$(git tag --points-at HEAD --list '20*' | sort -V | tail -1)"
           test -n "$tag" || { echo "::error::no calver tag on HEAD after the deploy"; exit 1; }
           gh workflow run notify-help-bot.yml --ref dev -f tag="$tag" -f sha="$(git rev-parse HEAD)"
+      - name: Post the release to Discord
+        env:
+          DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+        run: |
+          tag="$(git tag --points-at HEAD --list '20*' | sort -V | tail -1)"
+          bash scripts/release-discord-notify.sh "🚀 Production is on ${tag} (${DEPLOY_REF_NAME} @ $(git rev-parse --short HEAD)). https://github.com/${GITHUB_REPOSITORY}/releases/tag/${tag}"
+      - name: Post the failed deploy to Discord
+        if: failure()
+        env:
+          DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+        run: |
+          bash scripts/release-discord-notify.sh "<@&1564768432677847051> ❌ Production deploy of ${DEPLOY_REF_NAME} @ $(git rev-parse --short HEAD) failed. https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"

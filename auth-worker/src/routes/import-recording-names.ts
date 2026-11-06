@@ -174,7 +174,7 @@ type Gate = { ok: true; orgId: number } | { ok: false; status: 403; body: { erro
 async function mayChangeSaved(env: Env, user: Variables["user"], projectId: string): Promise<Gate> {
   const role = await resolveProjectRole(env, user, projectId)
   if (!role || role.level < MIN_ASK_ROLE) {
-    return { ok: false, status: 403, body: { error: "project_lead_required", message: "Project lead access is required to keep a naming for the team." } }
+    return { ok: false, status: 403, body: { error: "project_lead_required", message: "Project Lead access is required to keep a naming for the team." } }
   }
   const orgId = await projectOrg(env, projectId)
   if (!orgId || (await getEffectiveOrgRole(env, orgId, user)) == null) {
@@ -188,7 +188,7 @@ names.post("/recording-names", authMiddleware, zValidator("json", ruleRequestSch
   const user = c.get("user")
   const role = await resolveProjectRole(c.env, user, input.projectId)
   if (!role || role.level < MIN_ASK_ROLE) {
-    return c.json({ error: "project_lead_required", message: "Project lead access is required to import files." }, 403)
+    return c.json({ error: "project_lead_required", message: "Project Lead access is required to import files." }, 403)
   }
   if (!c.env.OPENROUTER_API_KEY) {
     return c.json({ error: "naming_rule_unavailable", message: "The assistant is not set up here" }, 503)

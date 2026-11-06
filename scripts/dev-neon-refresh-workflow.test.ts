@@ -107,27 +107,27 @@ describe("the copy's credentials and bounds", () => {
   })
 
   it("warns and skips, rather than failing the refresh, when those secrets are absent", () => {
-    // AQU-2113 has not landed yet. A missing key must cost the audio copy and
+    // AQU-2113 has not landed yet. A missing key must cost the media copy and
     // nothing else — and must ANNOUNCE itself on the run page, not in a step
     // log nobody opens (the AQU-1344 lesson).
     const run = step("media_copy").run ?? ""
     expect(run).toMatch(/if \[ -z "\$R2_ACCOUNT_ID" \]/)
-    expect(run).toMatch(/::warning title=Dev audio copy skipped::/)
+    expect(run).toMatch(/::warning title=Dev media copy skipped::/)
     expect(run).toMatch(/exit 0/)
   })
 
   it("passes the per-run budget and concurrency explicitly", () => {
     // A run with no budget would spend the whole job's wall clock and be killed
     // by Actions before it could report anything.
-    expect(step("media_copy").run).toMatch(/--budget-minutes "\$DEV_AUDIO_COPY_BUDGET_MINUTES"/)
-    expect(step("media_copy").run).toMatch(/--concurrency "\$DEV_AUDIO_COPY_CONCURRENCY"/)
-    expect(Number(job.env.DEV_AUDIO_COPY_BUDGET_MINUTES)).toBeGreaterThan(0)
-    expect(Number(job.env.DEV_AUDIO_COPY_CONCURRENCY)).toBeGreaterThan(0)
+    expect(step("media_copy").run).toMatch(/--budget-minutes "\$DEV_MEDIA_COPY_BUDGET_MINUTES"/)
+    expect(step("media_copy").run).toMatch(/--concurrency "\$DEV_MEDIA_COPY_CONCURRENCY"/)
+    expect(Number(job.env.DEV_MEDIA_COPY_BUDGET_MINUTES)).toBeGreaterThan(0)
+    expect(Number(job.env.DEV_MEDIA_COPY_CONCURRENCY)).toBeGreaterThan(0)
   })
 
   it("gives the job more wall clock than it gives the copy", () => {
     // Otherwise Actions kills the step mid-copy and the run page says nothing.
-    expect(job["timeout-minutes"]).toBeGreaterThan(Number(job.env.DEV_AUDIO_COPY_BUDGET_MINUTES))
+    expect(job["timeout-minutes"]).toBeGreaterThan(Number(job.env.DEV_MEDIA_COPY_BUDGET_MINUTES))
   })
 
   it("runs the copy through neon-target, so the branch it reads is recorded", () => {

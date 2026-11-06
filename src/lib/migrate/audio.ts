@@ -9,7 +9,7 @@
 // for now (only the active clip per slot).
 
 import type { CodexCell } from "../codex-editor/types"
-import { audioAttachEventId, audioSelectEventId, audioValidateEventId } from "./ids"
+import { audioAttachEventId, audioProjectionRepairEventId, audioSelectEventId, audioValidateEventId } from "./ids"
 import type { IngestEvent } from "./types"
 
 export interface AudioImport {
@@ -134,6 +134,24 @@ export interface AudioEventOptions {
   fileId: string
   fallbackAuthor: string
   fallbackTs: number
+  /** Append an immutable historical take without selecting or resurrecting it. */
+  historyOnly?: boolean
+}
+
+/** Only for a separately audited missing projection of the CURRENT source take.
+ * The executor must verify the original event, absent destination row, no delete
+ * or newer app selection, and exact source bytes immediately before applying.
+ * The repair fills only an absent row from its original logged attach and
+ * surviving votes. It never replaces a row or another selected take. */
+export function selectedAudioProjectionRepairEvent(
+  cellId: string, a: AudioImport, opts: AudioEventOptions,
+  proof: { originalEventId: string; sourceOid: string; sourceSelectedAudioId: string },
+): IngestEvent {
+  const event = audioAttachEvent(cellId, a, { ...opts, historyOnly: false })
+  if (proof.originalEventId !== event.id || proof.sourceSelectedAudioId !== a.legacyAudioId
+    || !/^[a-f0-9]{64}$/.test(proof.sourceOid)) throw new Error("Invalid selected audio projection repair proof")
+  return { ...event, id: audioProjectionRepairEventId(event.id, proof.sourceOid),
+    payload: { ...(event.payload as Record<string, unknown>), restoreProjectionOf: event.id } }
 }
 
 export function audioAttachEvent(cellId: string, a: AudioImport, opts: AudioEventOptions): IngestEvent {
@@ -149,6 +167,7 @@ export function audioAttachEvent(cellId: string, a: AudioImport, opts: AudioEven
       audioId: a.aquillaAudioId,
       url: `frontier-audio://${a.aquillaAudioId}`,
       slot: a.slot,
+      ...(opts.historyOnly ? { historyOnly: true } : {}),
       ...(a.mimeType ? { mimeType: a.mimeType } : {}),
       ...(a.durationMs != null ? { durationMs: a.durationMs } : {}),
     },

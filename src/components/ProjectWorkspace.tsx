@@ -14106,7 +14106,9 @@ export function ProjectWorkspace() {
       }),
     [activeFile?.coreMediaUrl, activeFile?.type, activeFile?.corpusMarker, isSubtitleFile, audioCueSibling],
   )
-  const mediaStart = useMemo(() => startingLayout(mediaKind), [mediaKind])
+  // AQU-2343: any file whose film panel shows starts from the film shares.
+  const filmShown = showVideoPane && Boolean(activeFile?.coreMediaUrl)
+  const mediaStart = useMemo(() => startingLayout(mediaKind, filmShown), [mediaKind, filmShown])
   // Media redesign, layout (canvas board 23): the timeline across the top, the
   // film and the text in the two areas below it, each foldable to nothing,
   // movable, and able to take the whole view — per person, per file.
@@ -14117,7 +14119,7 @@ export function ProjectWorkspace() {
   const dock = useMediaDock({
     fileId: activeFileId,
     timelineStacked,
-    filmPresent: showVideoPane && Boolean(activeFile?.coreMediaUrl),
+    filmPresent: filmShown,
     start: mediaStart,
     left: dockLeft,
     // A hidden text panel stays mounted (frozen, or a tab behind the film), so

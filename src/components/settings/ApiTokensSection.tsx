@@ -151,7 +151,7 @@ function useOrgsAndProjects(jwt: string | null): {
         }
         setOrgs([])
         setProjects([])
-        setError(toUserFacingError(error, "token scopes").message)
+        setError(toUserFacingError(error).message)
       })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => {

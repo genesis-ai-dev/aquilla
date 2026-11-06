@@ -1,0 +1,31 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`golden: richly marked book (BOM, CRLF, intro, notes, poetry, lists) > locks the unit ID list 1`] = `
+[
+  "MAT 0:0/h#0",
+  "MAT 0:0/toc1#0",
+  "MAT 0:0/toc2#0",
+  "MAT 0:0/toc3#0",
+  "MAT 0:0/mt1#0",
+  "MAT 0:0/imt1#0",
+  "MAT 0:0/ip#0",
+  "MAT 0:0/ip#1",
+  "MAT 0:0/iot#0",
+  "MAT 0:0/io1#0",
+  "MAT 1:0/s1#0",
+  "MAT 1:0/r#0",
+  "MAT 1:1",
+  "MAT 1:2",
+  "MAT 1:3-4",
+  "MAT 1:3-4/s1#0",
+  "MAT 1:5",
+  "MAT 1:6",
+  "MAT 2:0/s#0",
+  "MAT 2:1",
+  "MAT 2:2",
+  "MAT 2:2/s1#0",
+  "MAT 2:2/s2#0",
+  "MAT 2:3",
+  "MAT 2:4",
+]
+`;

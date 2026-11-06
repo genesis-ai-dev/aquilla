@@ -2790,8 +2790,6 @@ export const fr: Catalog = {
   "org.egressSettings.roleOptionViewer": "{role} — toute personne ayant accès au projet",
   "org.egressSettings.roleOptionOwner": "{role} — par défaut",
   "org.egressSettings.saveFailedFallback": "Impossible d'enregistrer l'autorisation d'extraction.",
-  "org.addLanguagePopover.triggerLabel": "Langue",
-  "org.addLanguagePopover.conflictError": "Les langues ont changé ailleurs. Rechargées — réessayez d'en ajouter une.",
   "org.setupChecklist.heading": "Démarrez votre organisation",
   "org.setupChecklist.dismissAriaLabel": "Ignorer la liste de vérification",
   "org.setupChecklist.progress": "{done} sur {total} terminées",

@@ -97,7 +97,7 @@ context-blind (the "general *lord* vs *Adonai* vs *Yahweh*" case).
 | Situation | Check emitted | Severity |
 |---|---|---|
 | Source bears the concept, target has none of its approved renderings | `source-requires-target` | `minor` |
-| Target contains a forbidden rendering | `target-forbids` | `major` |
+| Source bears the concept, target contains a forbidden rendering | `target-forbids` | `major` |
 
 **Both severities are soft. Nothing terminology-related hard-blocks.** Severity
 drives presentation and triage only — icon and colour in the rule drawer and the
@@ -105,6 +105,13 @@ cell issues tab, and the `violation-major` / `violation-minor` ribbon marks. A
 translator can commit, validate, and export a cell that carries either, and any
 infraction can be waived. Rule and check violations are also a *sibling* surface
 to health: per AD-14 they are never folded into the health score.
+
+Both checks are scoped by the SAME source condition: the concept's source
+pattern. A forbidden rendering is usually an ordinary word that is wrong only
+as a rendering of one concept, so `target-forbids` carries that pattern as
+`check.sourcePattern` and applies only to a cell whose source bears the concept
+(AQU-1712). Hand-authored `target-forbids` rules carry no `sourcePattern` and
+stay unconditional.
 
 Draft and deprecated concepts compile to nothing at all.
 

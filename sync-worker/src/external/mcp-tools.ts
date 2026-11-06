@@ -7,6 +7,8 @@
 // tool to call. `inputSchema` is JSON Schema (draft 2020-12 subset) so hosts can
 // validate arguments before dispatch.
 
+import { PROJECT_SETTINGS_KEYS } from '../../../db/shared/project-settings-keys'
+
 /** MCP tool annotations (spec `ToolAnnotations`). Hosts use them to decide
  *  when to ask the user before a call: ChatGPT's "ask before changes" setting
  *  keys off readOnlyHint / destructiveHint, and app review requires them. */
@@ -140,8 +142,14 @@ const TOOL_SPECS: McpToolSpec[] = [
     name: 'get_project_settings',
     description:
       'Read a project\'s settings blob and its LIVE settings version (AQU-1176). Returns ' +
-      '{ projectId, settings, version, updatedAt, translationInstructions, ' +
-      'translationInstructionsStored }. `translationInstructions` is the RESOLVED project ' +
+      '{ projectId, settings, builtinChecks, builtinChecksByLane, version, updatedAt, ' +
+      'translationInstructions, translationInstructionsStored }. `settings` is the raw stored ' +
+      'blob and holds only OVERRIDES. `builtinChecks` is READ-ONLY — every check in force as ' +
+      '[{ id, name, enabled, severity, overridden }], defaults with the project\'s ' +
+      '`algorithmicChecks` laid over them (`builtinChecksByLane` does the same per lane). ' +
+      'Turn a check on or off by patching `algorithmicChecks` (per lane: ' +
+      '`algorithmicChecksByLane`) — patching `builtinChecks` is refused, it is not a settings ' +
+      'key (AQU-2402). `translationInstructions` is the RESOLVED project ' +
       'instructions — the exact text every drafting prompt carries (copilot, in-app agent ' +
       'and its draft tool, DraftCells, Autopilot); `translationInstructionsStored: false` ' +
       'means it is composed on read from the brief, a customized systemPrompt, Living Memory ' +
@@ -196,7 +204,26 @@ const TOOL_SPECS: McpToolSpec[] = [
           items: {
             type: 'object',
             properties: {
-              key: { type: 'string', description: 'Top-level settings key, e.g. "translationInstructions" (the one text every drafting prompt reads). sourceLanguage, targetLanguage, targetLanes, and archivedLanes are not settings.' },
+              key: {
+                type: 'string',
+                // AQU-2402: the writable keys are NAMED here, generated from the
+                // registry so they cannot drift. This schema is the only place an
+                // agent on the OAuth connector can learn them: that surface
+                // rewrites this tool's description and drops describe_command
+                // altogether (external/mcp-chatgpt-tools.ts), so a key name had to
+                // be guessed one validation_failed at a time.
+                enum: [...PROJECT_SETTINGS_KEYS],
+                description:
+                  'Top-level settings key, e.g. "translationInstructions" (the one text every ' +
+                  'drafting prompt reads). The writable keys are: ' + PROJECT_SETTINGS_KEYS.join(', ') + '. ' +
+                  'Built-in checks are written as "algorithmicChecks" — ' +
+                  '{ "<checkId>": { "enabled": boolean, "severity"?: "major" | "minor" } } — which is NOT the ' +
+                  '`builtinChecks` shape get_project_settings reads them back as; per-lane overrides are ' +
+                  '"algorithmicChecksByLane". sourceLanguage, targetLanguage, targetLanes, and archivedLanes ' +
+                  'are not settings, and "terminology" is retired (AQU-1724) — write key terms with ' +
+                  'term.create / term.update events in an EmitEvents changeset. An unknown key is refused at ' +
+                  'prepare with the full key list and, where one is obvious, the key you meant.',
+              },
               value: { description: 'Any JSON value; replaces that key wholesale.' },
             },
             required: ['key', 'value'],
@@ -209,6 +236,92 @@ const TOOL_SPECS: McpToolSpec[] = [
         changesetId: { type: 'string', description: 'Optional client-supplied UUIDv7 for idempotency.' },
       },
       required: ['projectId', 'ops', 'ifMatchVersion'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'prepare_set_brief',
+    description:
+      'Stage a SECTION-SCOPED write of the project translation brief as a changeset ' +
+      '(AQU-2407 — the MCP door onto the SetBrief command). Use this instead of ' +
+      'patch_settings { key: "translationBrief" }: that replaces the whole brief record ' +
+      'wholesale, so you must hand-write l2Markdown, l1Summary, version and updatedBy and ' +
+      'nothing checks they agree with the answers. Here you send ANSWERS ONLY — the server ' +
+      'merges them into the live brief (unnamed sections keep their value), reassembles ' +
+      'l2Markdown from the code-owned section order, stamps version / updatedAt / updatedBy ' +
+      'from this credential, and re-renders the L1 summary on commit so the brief reaches ' +
+      'the copilot. Args: projectId (required), parameters (partial map of section id → ' +
+      'answer text; call describe_command({ kind: "SetBrief" }) for the section ids — an ' +
+      'unknown id is validation_failed and stages nothing), freeformNotes (replaces the ' +
+      'notes block), ifMatchVersion (optional settings version from get_project_settings; ' +
+      'omitted, the live version is read and pinned for you), changesetId (optional ' +
+      'UUIDv7 for idempotency). At least one of parameters / freeformNotes is required. ' +
+      'Floor MAINTAINER; SetBrief must be the SOLE command in its changeset. Returns ' +
+      '{ changesetId, summary, digest, mode, approvalUrl? } exactly like prepare_translations ' +
+      '— nothing is applied until confirm_changeset (ask mode: a human approves first). The ' +
+      "commit receipt's briefSummary says whether the L1 summary rendered; if it did not, " +
+      'the sections are still committed — call regenerate_brief_summary.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        parameters: {
+          type: 'object',
+          description:
+            'Brief section id → answer text. Partial: only the named sections are written. ' +
+            'Section ids come from describe_command({ kind: "SetBrief" }); each answer caps ' +
+            'at 4000 characters.',
+          additionalProperties: { type: 'string' },
+        },
+        freeformNotes: {
+          type: 'string',
+          description: 'Replaces the brief\'s freeform notes block (≤ 8000 characters).',
+        },
+        ifMatchVersion: {
+          type: 'number',
+          description:
+            'Optional live SETTINGS version from get_project_settings (not the brief\'s own ' +
+            'version). Omit it and the server reads and pins the live version; pass it to ' +
+            'assert nothing changed since you read the brief (plan_stale on drift).',
+        },
+        changesetId: { type: 'string', description: 'Optional client-supplied UUIDv7 for idempotency.' },
+      },
+      required: ['projectId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'regenerate_brief_summary',
+    description:
+      "Stage a re-render of the translation brief's L1 summary from its CURRENT sections " +
+      '(AQU-2407 — the MCP door onto the RegenerateBriefSummary command). This is the ' +
+      'in-app "Regenerate summary" button: the server renders the summary with its own ' +
+      'prompt and 1600-char cap and writes l1Summary / l1GeneratedAt / l1ModelId back. Call ' +
+      'it when a brief was edited without a render, or when a prepare_set_brief receipt ' +
+      'reported briefSummary.rendered: false. While a project has not written ' +
+      'translationInstructions, this summary is what the brief contributes to every drafting ' +
+      'prompt (see parts.instructions in get_prompt_preview); once instructions are written ' +
+      'the summary reaches no prompt and this is a no-op for the AI. Args: projectId ' +
+      '(required), ifMatchVersion (optional settings version from get_project_settings; ' +
+      'omitted, the live version is read and pinned for you), changesetId (optional UUIDv7). ' +
+      'Floor MAINTAINER; sole command in its changeset. A brief with no filled section and no ' +
+      'notes is validation_failed ("nothing to summarize") — write it with prepare_set_brief ' +
+      'first. The model call runs at commit BEFORE the approval is consumed, so a failed ' +
+      'render answers job_failed / rate_limited and leaves the changeset committable for a ' +
+      'retry.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        ifMatchVersion: {
+          type: 'number',
+          description:
+            'Optional live SETTINGS version from get_project_settings. Omit it and the ' +
+            'server reads and pins the live version.',
+        },
+        changesetId: { type: 'string', description: 'Optional client-supplied UUIDv7 for idempotency.' },
+      },
+      required: ['projectId'],
       additionalProperties: false,
     },
   },
@@ -1386,6 +1499,10 @@ export const TOOL_KINDS: Record<string, ToolKind> = {
   get_project: 'read',
   get_project_settings: 'read',
   patch_settings: 'stage',
+  // AQU-2407: both stage a changeset only; the brief write (and the L1
+  // render it pays for) happens at confirm_changeset.
+  prepare_set_brief: 'stage',
+  regenerate_brief_summary: 'stage',
   describe_command: 'read',
   get_skill: 'read',
   search_project: 'read',

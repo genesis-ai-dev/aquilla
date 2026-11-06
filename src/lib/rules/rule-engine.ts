@@ -146,6 +146,29 @@ function checkRule(
       : "i"
   switch (check.type) {
     case "target-forbids": {
+      // AQU-1712: an optional SOURCE condition. A forbidden rendering is
+      // usually an ordinary word that is wrong only as a rendering of one
+      // concept, so a compiled `term:` rule carries that concept's source
+      // pattern and the check applies only to a cell whose source bears it —
+      // the same pattern and flags the concept's approved rule matches its
+      // source side with. Autopilot's lintTerminology and the worker's
+      // project-wide scan already judge it that way; this is what makes the
+      // editor agree (AQU-1711). Hand-authored rules carry no `sourcePattern`
+      // and stay unconditional.
+      if (check.sourcePattern !== undefined) {
+        const sourceRe = compile(check.sourcePattern, "g" + caseFlag + uflag)
+        if (!sourceRe) return null
+        // `matchAll` works on a clone, so the cached regex keeps no state.
+        // Zero-length matches are not instances, as in source-requires-target.
+        let sourceBearsTerm = false
+        for (const m of source.matchAll(sourceRe)) {
+          if (m.index !== undefined && m[0].length > 0) {
+            sourceBearsTerm = true
+            break
+          }
+        }
+        if (!sourceBearsTerm) return null
+      }
       const re = compile(check.targetPattern, "g" + caseFlag + uflag)
       if (!re) return null
       const spans: import("@/lib/parsers/types").InfractionSpan[] = []

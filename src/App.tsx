@@ -107,6 +107,9 @@ const ParatextBookPage = lazy(() =>
 const ThisComputerPage = lazy(() =>
   import("@/pages/ThisComputer/ThisComputerPage").then((m) => ({ default: m.ThisComputerPage })),
 )
+const ParatextOpenPage = lazy(() =>
+  import("@/pages/ParatextBridge/ParatextOpenPage").then((m) => ({ default: m.ParatextOpenPage })),
+)
 const ResetPassword = lazy(() =>
   import("@/pages/ResetPassword").then((m) => ({ default: m.ResetPassword })),
 )
@@ -491,6 +494,7 @@ function AppRoutes() {
         <Route path="/this-computer" element={<LazyRoute><ThisComputerPage /></LazyRoute>} />
         <Route path="/paratext" element={<LazyRoute><ParatextProjectsPage /></LazyRoute>} />
         <Route path="/paratext/book" element={<LazyRoute><ParatextBookPage /></LazyRoute>} />
+        <Route path="/paratext/open" element={<LazyRoute><ParatextOpenPage /></LazyRoute>} />
         <Route path="/preferences" element={<Preferences />} />
         <Route path="/preferences/:section" element={<Preferences />} />
 

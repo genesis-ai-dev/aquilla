@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom"
-import { BookOpen, FolderPlus, RefreshCw, X } from "lucide-react"
+import { BookOpen, ExternalLink, FolderPlus, RefreshCw, X } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { ThisComputerSidebar } from "@/components/this-computer/ThisComputerSidebar"
 import { ThisComputerBreadcrumb } from "@/components/this-computer/ThisComputerBreadcrumb"
@@ -103,7 +103,15 @@ export function ParatextProjectsPage() {
                           {!p.utf8 ? ` · ${t("paratextBridge.notUtf8")}` : ""}
                         </CardDescription>
                       </CardHeader>
-                      <CardContent>
+                      <CardContent className="space-y-3">
+                        <Button
+                          size="sm"
+                          disabled={!p.utf8 || p.books.length === 0}
+                          data-testid="paratext-open-in-aquilla"
+                          onClick={() => navigate(`/paratext/open?${new URLSearchParams({ project: p.path }).toString()}`)}
+                        >
+                          <ExternalLink />{t("paratextBridge.openInAquilla")}
+                        </Button>
                         <div className="flex flex-wrap gap-1">
                           {p.books.map((b) => (
                             <Button

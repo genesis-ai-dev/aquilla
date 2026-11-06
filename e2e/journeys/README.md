@@ -131,6 +131,9 @@ everyone. Name them in stories; never paste an id.
   (68 characters) is empty too, and exists only so a story about a
   truncated project name has one long enough to truncate — the next
   longest is 52 (AQU-1436, absorbing AQU-1437).
+  `qa-819 aqu-1272 pointed-hebrew 20260924230332` is for terminology
+  matching: pointed Hebrew, prefixes, and a substring negative case
+  (AQU-1412).
 - **AI drafting:** hosted drafting works on a preview with no key of
   anyone's. `scripts/cloudflare-stack-preview.mjs` refuses to deploy an
   auth preview without the platform `OPENROUTER_API_KEY` (AQU-1500), and
@@ -204,6 +207,24 @@ them.
   voices-roundtrip-film.mp4` — and import it as its own `video` file.
   Stories that must hear something only need it to have audio, not to be
   that exact clip.
+- `qa-819 aqu-1272 pointed-hebrew 20260924230332` (AQU-1412). Upload
+  `e2e/fixtures/pointed-hebrew-terms.usfm` as the source file. It holds
+  the three cells a terminology claim needs: GEN 1:2 has the prefixed
+  form `וְהָאָ֗רֶץ` as plain text, GEN 1:3 has the same word inside
+  `\bd …\bd*`, so it renders bold and terms are looked up one marked
+  segment at a time (`UsfmSourceText`), and GEN 1:4 has `graceful`, the
+  negative control. Rich-HTML source such as IDML takes a third path,
+  `decorateTermsInHtml`, which this file does not reach. Then:
+  1. In Terminology, add two concepts, both `active`: source term
+     `הָאָ֗רֶץ` rendered `earth`, and source term `grace` rendered
+     `gracia`.
+  2. In Project settings > Terminology > **Prefixes**, add `ו`, `ה`, and
+     `ב`. Saved prefixes show as chips beside the input; the input itself
+     is the add field and stays empty.
+
+  A walk should find the Hebrew term in GEN 1:2 and GEN 1:3 through the
+  prefix, and should not find `grace` inside `graceful`. Nothing here
+  needs an AI key.
 - **Set up AI is not on this list, and cannot be.** It is answered per
   browser profile, not per project, so rebuilding the database neither
   loses it nor restores it. See the AI-drafting fixture note above for the

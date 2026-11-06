@@ -168,6 +168,16 @@ pub fn bundle_booted(state: State<'_, HotBundleState>) -> Result<(), String> {
     state.store()?.booted()
 }
 
+/// The web bundle currently being served (downloaded hot bundle, else the embedded one).
+/// Read by the About window; never fails, falling back to the shell version.
+pub fn current_bundle_version(app: &AppHandle) -> String {
+    let downloaded = app.try_state::<HotBundleState>().and_then(|state| {
+        let store = state.store().ok()?;
+        store.current_version().and_then(|v| store.info(&v)).map(|i| i.version)
+    });
+    downloaded.unwrap_or_else(|| embedded_version(app))
+}
+
 #[tauri::command]
 pub fn get_bundle_status(app: AppHandle, state: State<'_, HotBundleState>) -> Result<BundleStatus, String> {
     let store = state.store()?;

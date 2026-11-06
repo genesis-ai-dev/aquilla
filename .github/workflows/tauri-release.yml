@@ -146,6 +146,7 @@ jobs:
       # tauri.conf.json still carries the scaffolded placeholder updater
       # endpoint/pubkey — see src-tauri/tauri.conf.json plugins.updater.
       - name: Guard against placeholder updater config
+        shell: bash # grep + if/fi; Windows defaults to pwsh (run 42158434956)
         run: |
           if grep -q 'REPLACE_ORG\|REPLACE_WITH_OUTPUT_OF' src-tauri/tauri.conf.json; then
             echo "::error file=src-tauri/tauri.conf.json::plugins.updater.pubkey still carries the scaffolded placeholder — a tagged release would ship with an unverifiable auto-updater. The endpoint is already set (genesis-ai-dev/aquilla releases); run 'npx tauri signer generate' and paste the public key into plugins.updater.pubkey (the private key goes in TAURI_SIGNING_PRIVATE_KEY), or set plugins.updater.active to false."

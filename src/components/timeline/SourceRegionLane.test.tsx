@@ -4,9 +4,11 @@
 // sub-0.2s gap rule is pinned because a real VTT carries 1–100ms rounding gaps
 // between most consecutive cues, and a sliver chip at every one reads as dirt.
 
+import { Profiler, act } from "react"
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { SourceRegionLane } from "./SourceRegionLane"
+import { createTimelineScrollBus, TimelineScrollBusContext } from "./timeline-scroll-bus"
 import { deriveSourceRegions } from "@/lib/timeline/source-regions"
 import { chipRadiusPx } from "@/lib/timeline/scale"
 import type { CellData } from "@/hooks/useCells"
@@ -249,6 +251,36 @@ describe("SourceRegionLane", () => {
     // Scrolled 500px in, the label is held 10px inside the visible edge.
     expect(label.style.left).toBe("510px")
     expect(gap.textContent).not.toContain("10:35.0")
+  })
+
+  it("holds a film-length label on the scroll variable, so a scroll does not render the lane", () => {
+    const bus = createTimelineScrollBus()
+    let commits = 0
+    render(
+      <TimelineScrollBusContext.Provider value={bus}>
+        <Profiler id="lane" onRender={() => { commits += 1 }}>
+          <SourceRegionLane
+            map={deriveSourceRegions([], 635)}
+            cells={[]}
+            pxPerSec={10}
+            viewStartSec={0}
+            viewEndSec={635}
+            selectedId={null}
+            editable
+            onSelect={() => {}}
+            onSeek={() => {}}
+            onSeekSec={() => {}}
+            gapLabel="The video's own sound"
+          />
+        </Profiler>
+      </TimelineScrollBusContext.Provider>,
+    )
+    const label = screen.getByTestId("tl-source-gap-label")
+    expect(label.style.left).toContain("var(--tl-scroll-left")
+    const painted = commits
+    act(() => { bus.set(800, 400) })
+    expect(commits).toBe(painted)
+    expect(label.style.left).toContain("var(--tl-scroll-left")
   })
 
   it("draws no placeholder at all when asked to hide them", () => {

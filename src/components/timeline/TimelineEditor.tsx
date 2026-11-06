@@ -145,6 +145,8 @@ import {
   adjustTrackDrop,
   canDragTrack,
   commitTrackReorder,
+  paintLaneNode,
+  paintLaneShifts,
   resolveTrackDrop,
   type TrackLaneShift,
 } from "./track-gutter-dnd"
@@ -1747,19 +1749,18 @@ export function TimelineEditor({
   const lastProgrammaticScrollAt = useRef(0)
   /** The track in the air, so it cannot be hidden mid-drag. */
   const [draggedTrackId, setDraggedTrackId] = useState<string | null>(null)
-  /** Lane copies of each row's slide, keyed by track id. */
-  const [laneShifts, setLaneShifts] = useState<ReadonlyMap<string, TrackLaneShift>>(() => new Map())
+  /** Lane copies of each row's slide. A ref, painted onto the lane nodes:
+   *  storing it in state re-rendered every time column on each pointer move. */
+  const editorRef = useRef<HTMLDivElement>(null)
+  const laneShiftsRef = useRef<Map<string, TrackLaneShift>>(new Map())
   const reportLaneShift = useCallback((id: string, shift: TrackLaneShift | null) => {
-    setLaneShifts((prev) => {
-      // y 0 is a real position while a drag is underway: the lane has to ease
-      // back to it. Only a null report means the row is at rest again.
-      if (shift == null) {
-        if (!prev.has(id)) return prev
-        const next = new Map(prev)
-        next.delete(id)
-        return next
-      }
-      const current = prev.get(id)
+    const shifts = laneShiftsRef.current
+    // y 0 is a real position while a drag is underway: the lane has to ease
+    // back to it. Only a null report means the row is at rest again.
+    if (shift == null) {
+      if (!shifts.delete(id)) return
+    } else {
+      const current = shifts.get(id)
       if (
         current
         && current.y === shift.y
@@ -1767,12 +1768,15 @@ export function TimelineEditor({
         && current.transition === shift.transition
         && current.hold === shift.hold
       ) {
-        return prev
+        return
       }
-      const next = new Map(prev)
-      next.set(id, shift)
-      return next
-    })
+      shifts.set(id, shift)
+    }
+    const root = editorRef.current
+    if (root) paintLaneShifts(root, shifts)
+  }, [])
+  const bindLaneShift = useCallback((node: HTMLDivElement | null) => {
+    if (node) paintLaneNode(node, laneShiftsRef.current)
   }, [])
   const clock = useTimelineClock()
   // AQU-1758: read (never rendered from) when a take's ⋯ opens its menu.
@@ -1961,10 +1965,12 @@ export function TimelineEditor({
     const el = scrollRef.current
     if (!el) return
     setViewportPx(el.clientWidth)
+    el.style.setProperty("--tl-scroll-left", `${el.scrollLeft}px`)
     scrollBus.set(el.scrollLeft, el.clientWidth)
     if (typeof ResizeObserver === "undefined") return // happy-dom
     const ro = new ResizeObserver(() => {
       setViewportPx(el.clientWidth)
+      el.style.setProperty("--tl-scroll-left", `${el.scrollLeft}px`)
       scrollBus.set(el.scrollLeft, el.clientWidth)
     })
     ro.observe(el)
@@ -3109,6 +3115,9 @@ export function TimelineEditor({
     if (inner) inner.style.transform = `translateY(${-el.scrollTop}px)`
     if (el.scrollLeft === lastScrollLeft.current) return
     lastScrollLeft.current = el.scrollLeft
+    // The film-length gap label reads this. Publishing it through React
+    // re-rendered every source cue on the wheel tick.
+    el.style.setProperty("--tl-scroll-left", `${el.scrollLeft}px`)
     scrollBus.set(el.scrollLeft, el.clientWidth)
     // A MANUAL scroll while playback runs means "stop following me". Our own
     // programmatic scrolls fire this handler too — the 150ms stamp window
@@ -4735,24 +4744,6 @@ export function TimelineEditor({
     )
   }
 
-  function laneShiftStyle(trackId: string, groupId: string | null | undefined): CSSProperties | undefined {
-    const own = laneShifts.get(trackId)
-    const parent = groupId ? laneShifts.get(groupId) : undefined
-    if (!own && !parent) return undefined
-    const y = (own?.y ?? 0) + (parent?.y ?? 0)
-    const transition = own?.transition ?? parent?.transition
-    // A transform on this wrapper is a stacking context, which lets chips paint
-    // over the playhead. It is present only while a row is away from its place
-    // or easing back. Before the first slide, the curve is armed on its own.
-    if (y === 0 && !own?.hold && !parent?.hold) {
-      return transition ? { transition } : undefined
-    }
-    return {
-      transform: `translateY(${y}px)`,
-      transition,
-    }
-  }
-
   function renderTrackRows(startSec: number, endSec: number) {
     return trackRows.map((row) => {
       const lane = laneForTrack(row, { startSec, endSec })
@@ -4807,9 +4798,10 @@ export function TimelineEditor({
                     <ContextMenuTrigger
                       render={
                         <div
+                          ref={bindLaneShift}
                           data-tl-track-lane={row.track.id}
+                          data-tl-lane-group={row.depth === 1 ? row.track.groupId ?? undefined : undefined}
                           className={cn(selectedTrackIdSet.has(row.track.id) && "bg-accent/40")}
-                          style={laneShiftStyle(row.track.id, row.depth === 1 ? row.track.groupId : null)}
                           // AQU-1684: a drag under way in this lane keeps it
                           // from being hidden. Capture, because the chips own
                           // their pointerdown.
@@ -4843,7 +4835,9 @@ export function TimelineEditor({
     // (which pieces of a chip still fit) rather than merely be that tall.
     return (
     <div
+      ref={editorRef}
       data-testid="tl-editor"
+      data-tl-lane-epoch={laneEpoch.current}
       className="flex h-full min-h-0 flex-col overflow-hidden"
       style={
         {

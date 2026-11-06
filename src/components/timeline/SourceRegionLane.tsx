@@ -20,12 +20,8 @@
 // stretch of source audio"; this row should look exactly like an mp3 import's,
 // not invent its own.
 
-import { memo, useContext, useSyncExternalStore } from "react"
-import {
-  TimelineScrollBusContext,
-  emptyScrollLeft,
-  subscribeNoScroll,
-} from "./timeline-scroll-bus"
+import { memo, useContext } from "react"
+import { TimelineScrollBusContext } from "./timeline-scroll-bus"
 import { TRACK_DASH_CLASS, trackHueVarsFor } from "@/lib/timeline/track-colors"
 import { secToPx, isVisible, chipRadiusPx } from "@/lib/timeline/scale"
 import { MIN_ADDABLE_SPAN_SEC } from "@/lib/timeline/lane-timing"
@@ -127,15 +123,10 @@ function SourceRegionLaneImpl({
 }: SourceRegionLaneProps) {
   const t = useT()
   const originPx = useTimelineOriginPx()
-  // The editor publishes scroll on a bus so a wheel tick does not re-render
-  // every lane. Outside the editor (the lane's own tests) the prop stands.
+  // The editor publishes horizontal scroll as `--tl-scroll-left` on the
+  // scrollport. Subscribing here re-rendered every cue on the wheel tick.
+  // Outside the editor (this lane's own tests) `scrollLeftPx` stands.
   const scrollBus = useContext(TimelineScrollBusContext)
-  const liveScrollLeft = useSyncExternalStore(
-    scrollBus ? scrollBus.subscribe : subscribeNoScroll,
-    scrollBus ? scrollBus.getLeft : emptyScrollLeft,
-    scrollBus ? scrollBus.getLeft : emptyScrollLeft,
-  )
-  const scrollLeft = scrollBus ? liveScrollLeft : scrollLeftPx
   const spanOf = (c: CellData): { start: number; end: number } => {
     const start = c.startTime ?? 0
     return { start, end: c.endTime ?? start }
@@ -239,9 +230,15 @@ function SourceRegionLaneImpl({
               // Held at the visible left edge, so it stays readable on a chip
               // that runs the whole length of the film. (Not `sticky`: the
               // chip's overflow-hidden makes the chip its scroll container.)
+              // The scroll variable is inherited from the scrollport, so a
+              // wheel tick moves the label without rendering this lane.
               <span data-testid="tl-source-gap-label"
                 className="absolute inset-y-0 flex items-center whitespace-nowrap text-xs text-muted-foreground"
-                style={{ left: `${10 + Math.max(0, Math.min(scrollLeft - secToPx(g.startSec, pxPerSec), widthPx - 160))}px` }}>
+                style={{
+                  left: scrollBus
+                    ? `calc(10px + clamp(0px, var(--tl-scroll-left, 0px) - ${secToPx(g.startSec, pxPerSec)}px, ${Math.max(0, widthPx - 160)}px))`
+                    : `${10 + Math.max(0, Math.min(scrollLeftPx - secToPx(g.startSec, pxPerSec), widthPx - 160))}px`,
+                }}>
                 {gapLabel}
               </span>
             ) : (

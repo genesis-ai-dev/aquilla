@@ -61,6 +61,46 @@ export type TrackLaneShift = {
 const rowSlide = { duration: 180, easing: "cubic-bezier(0.2, 0, 0, 1)" }
 const rowSlideCss = `transform ${rowSlide.duration}ms ${rowSlide.easing}`
 
+/**
+ * The lane beside a sliding name. A transform here is a stacking context, so
+ * it exists only while the row is away from its place or easing back. A folder
+ * member adds its folder's shift: the gutter nests the member inside the
+ * folder's transform, and the lanes are siblings, so they have to add it.
+ */
+export function laneShiftCss(
+  trackId: string,
+  groupId: string | null | undefined,
+  shifts: ReadonlyMap<string, TrackLaneShift>,
+): { transform: string; transition: string } | null {
+  const own = shifts.get(trackId)
+  const parent = groupId ? shifts.get(groupId) : undefined
+  if (!own && !parent) return null
+  const y = (own?.y ?? 0) + (parent?.y ?? 0)
+  const transition = own?.transition ?? parent?.transition ?? ""
+  if (y === 0 && !own?.hold && !parent?.hold) {
+    return transition ? { transform: "", transition } : null
+  }
+  return { transform: `translateY(${y}px)`, transition }
+}
+
+/** Write one lane's shift. Reads the inline style, so it does not reflow. */
+export function paintLaneNode(node: HTMLElement, shifts: ReadonlyMap<string, TrackLaneShift>): void {
+  const id = node.getAttribute("data-tl-track-lane")
+  if (!id) return
+  const css = laneShiftCss(id, node.getAttribute("data-tl-lane-group"), shifts)
+  const transform = css?.transform ?? ""
+  const transition = css?.transition ?? ""
+  if (node.style.transform !== transform) node.style.transform = transform
+  if (node.style.transition !== transition) node.style.transition = transition
+}
+
+/** Every mounted copy of the lanes. A time column mounts its own set. */
+export function paintLaneShifts(root: ParentNode, shifts: ReadonlyMap<string, TrackLaneShift>): void {
+  for (const node of root.querySelectorAll<HTMLElement>("[data-tl-track-lane]")) {
+    paintLaneNode(node, shifts)
+  }
+}
+
 const accessibility = {
   screenReaderInstructions: { draggable: "" },
   announcements: {

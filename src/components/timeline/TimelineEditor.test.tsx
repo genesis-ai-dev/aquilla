@@ -4508,12 +4508,16 @@ describe("TimelineEditor — dragging a track row reorders it", () => {
     expect(lane?.style.transition).toContain("180ms")
     expect(lane?.style.transform).toMatch(/translateY\(-?\d/)
     expect(lane?.style.transform).not.toBe("translateY(0px)")
+    // The slide is painted onto the lanes. Easing back changes the transform
+    // and must not render the editor — that re-rendered every time column.
+    const epoch = screen.getByTestId("tl-editor").getAttribute("data-tl-lane-epoch")
 
     fireEvent.pointerMove(document, trackPointer(start.x, start.y))
     expect(audio.style.transition).toContain("180ms")
     expect(audio.style.transform).toContain("translate3d(0px, 0px, 0)")
     expect(lane?.style.transition).toContain("180ms")
     expect(lane?.style.transform).toBe("translateY(0px)")
+    expect(screen.getByTestId("tl-editor").getAttribute("data-tl-lane-epoch")).toBe(epoch)
     fireEvent.pointerUp(document, trackPointer(start.x, start.y, 0))
   })
 })

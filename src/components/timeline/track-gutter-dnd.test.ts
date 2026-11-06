@@ -6,6 +6,8 @@ import {
   adjustTrackDrop,
   canDragTrack,
   commitTrackReorder,
+  paintLaneShifts,
+  type TrackLaneShift,
   type TrackPointerDrop,
 } from "./track-gutter-dnd"
 
@@ -81,6 +83,36 @@ describe("commitTrackReorder", () => {
     const above = adjustTrackDrop(folded, overLast, { y: 10, overTop: 0, overHeight: 40 })
     expect(below.toPosition).toBe(2)
     expect(above.toPosition).toBe(1)
+  })
+
+  it("paints a lane's shift onto every copy, and a member follows its folder", () => {
+    const root = document.createElement("div")
+    const lane = document.createElement("div")
+    lane.setAttribute("data-tl-track-lane", "source-audio")
+    const copy = document.createElement("div")
+    copy.setAttribute("data-tl-track-lane", "source-audio")
+    const member = document.createElement("div")
+    member.setAttribute("data-tl-track-lane", "target-audio")
+    member.setAttribute("data-tl-lane-group", "grp")
+    root.append(lane, copy, member)
+    const slide = "transform 180ms cubic-bezier(0.2, 0, 0, 1)"
+    const shifts = new Map<string, TrackLaneShift>([
+      ["source-audio", { y: -36, hidden: false, transition: slide, hold: true }],
+      ["grp", { y: 48, hidden: false, transition: slide, hold: true }],
+    ])
+    paintLaneShifts(root, shifts)
+    expect(lane.style.transform).toBe("translateY(-36px)")
+    expect(copy.style.transform).toBe("translateY(-36px)")
+    expect(lane.style.transition).toBe(slide)
+    expect(member.style.transform).toBe("translateY(48px)")
+    shifts.set("source-audio", { y: 0, hidden: false, transition: slide, hold: true })
+    paintLaneShifts(root, shifts)
+    expect(lane.style.transform).toBe("translateY(0px)")
+    shifts.delete("source-audio")
+    shifts.delete("grp")
+    paintLaneShifts(root, shifts)
+    expect(lane.style.transform).toBe("")
+    expect(member.style.transform).toBe("")
   })
 
   it("offers a drag when the track can change places", () => {

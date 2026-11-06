@@ -537,6 +537,27 @@ can show that an upload returns at once and that a small document reaches
 run, that a long run is never shown as stalled, or that a retry cannot start a
 second job over a live one. Walk those on development or production.
 
+**A preview's Postgres is `dev`'s, and the preview deploy does not migrate it
+(AQU-1435).** Previews bind the development Hyperdrive, and that database is
+migrated only from the `dev` branch — `deploy:aquilla:dev:*` chains
+`neon:status:dev`, which exits non-zero per pending migration, so a real deploy
+cannot outrun its schema. `scripts/cloudflare-stack-preview.mjs` has no
+equivalent gate and no database credentials to run one, so a PR that adds a
+column and reads it deploys happily against a database without it, and every
+affected route answers a bare 500. Worse, a reader on a shared path (for
+example `validateApiCredential`, on every `/api/v1/external/*` request) takes a
+whole API down rather than only the surface the PR touched.
+
+The preview deploy does not fail on this — failing would cost QA the preview
+entirely — it **names** it. `scripts/cloudflare-preview-comment.mjs` reads the
+PR's file list and the QA-preview comment carries a **Postgres migrations**
+section: each file the PR adds under `db/postgres/migrations/` (such a file is
+by definition not on `dev`, hence pending on development storage), an explicit
+"this PR carries none" when there are none, or "unknown" if the listing could
+not be read. The same line goes to the build log. So read a 500 on a
+migration-bearing preview as pending schema until an operator has run `pnpm
+neon:apply:dev`, not as a defect in the change.
+
 **What to do instead.** Verify the two halves separately rather than end to end:
 
 1. Probe the auth preview directly to prove the route exists and is gated —

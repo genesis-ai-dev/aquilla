@@ -3229,8 +3229,6 @@ export const es: Catalog = {
   "org.egressSettings.roleOptionViewer": "{role} — cualquier persona con acceso al proyecto",
   "org.egressSettings.roleOptionOwner": "{role} — predeterminado",
   "org.egressSettings.saveFailedFallback": "No se pudo guardar el permiso de egreso de datos.",
-  "org.addLanguagePopover.triggerLabel": "Idioma",
-  "org.addLanguagePopover.conflictError": "Los idiomas cambiaron en otro lugar. Recargados — intenta agregarlos de nuevo.",
   "org.setupChecklist.heading": "Empieza con tu organización",
   "org.setupChecklist.dismissAriaLabel": "Descartar la lista de verificación",
   "org.setupChecklist.progress": "{done} de {total} completados",

@@ -18,6 +18,21 @@ section of [`DEPLOYMENT-ENVIRONMENTS.md`](DEPLOYMENT-ENVIRONMENTS.md).
 
 ## Smoke tests (do anytime — no signing required)
 
+### Unsigned CI build
+
+The `tauri-build` workflow (Actions → tauri-build → Run workflow; also runs on
+PRs touching `src-tauri/**`) builds every release target without signing
+secrets and uploads the installers as artifacts, plus the Tauri smoke suite.
+Run it before tagging. Its macOS builds are ad-hoc signed, not notarized:
+`xattr -dr com.apple.quarantine /Applications/Aquilla.app` before first launch.
+
+`src-tauri/tauri.unsigned.conf.json` (this workflow, and the release's e2e
+build) and `src-tauri/tauri.release.conf.json` (the signed release) both blank
+`beforeBuildCommand`, so the bundle packages the hosted `dist/` the workflow
+built with production hosts. The release config also turns on
+`createUpdaterArtifacts`; without it Tauri v2 writes no `.sig` files and no
+`latest.json`, and installed apps never update.
+
 ### Debug bundle launches
 
 ```bash

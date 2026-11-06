@@ -10,7 +10,14 @@ export type BuiltinCheckId = import("../../../db/shared/builtin-checks").Builtin
 
 export type RuleCheck =
   | { type: "source-requires-target"; sourcePattern: string; targetPattern: string; caseSensitive?: boolean }
-  | { type: "target-forbids"; targetPattern: string; caseSensitive?: boolean }
+  /**
+   * `sourcePattern` (AQU-1712) is an optional SOURCE condition: when present,
+   * the forbidden target pattern is only an infraction in a cell whose source
+   * matches it. Compiled terminology rules carry the concept's source pattern,
+   * because a forbidden rendering is wrong only as a rendering of that concept.
+   * Hand-authored rules carry no `sourcePattern` and stay unconditional.
+   */
+  | { type: "target-forbids"; targetPattern: string; sourcePattern?: string; caseSensitive?: boolean }
   | { type: "source-target-match"; pattern: string }
   /**
    * `punctuation` (AQU-1906) is resolved per LANE by `resolveBuiltinRules`

@@ -3244,8 +3244,6 @@ export const hi: Catalog = {
   "org.egressSettings.roleOptionViewer": "{role} — परियोजना पहुँच वाला कोई भी",
   "org.egressSettings.roleOptionOwner": "{role} — डिफ़ॉल्ट",
   "org.egressSettings.saveFailedFallback": "निर्गम अनुमति सहेजी नहीं जा सकी।",
-  "org.addLanguagePopover.triggerLabel": "भाषा",
-  "org.addLanguagePopover.conflictError": "भाषाएँ कहीं और बदलीं। फिर लोड हुआ — जोड़ने की फिर कोशिश करें।",
   "org.setupChecklist.heading": "अपना संगठन शुरू करें",
   "org.setupChecklist.dismissAriaLabel": "चेकलिस्ट खारिज करें",
   "org.setupChecklist.progress": "{total} में से {done} पूरे",

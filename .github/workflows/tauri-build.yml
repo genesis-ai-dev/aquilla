@@ -78,6 +78,8 @@ jobs:
       # of rebuilding it without the hosted env.
       - run: pnpm run build:hosted
         env:
+          # tsc -b runs out of Node's default heap on the 7 GB macOS runners.
+          NODE_OPTIONS: --max-old-space-size=6144
           VITE_AUTH_BASE: https://api.aquilla.app/identity
           VITE_SYNC_WORKER_HOST: api.aquilla.app/sync
           VITE_CHAT_BASE: https://api.aquilla.app/chat

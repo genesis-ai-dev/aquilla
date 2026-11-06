@@ -60,7 +60,12 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       # DEVEX-1: typecheck + unit tests gate the release build
+      # The Apple-silicon runner has ~7 GB; Node's default heap aborted tsc there
+      # ("Abort trap: 6", exit 134) on the first v0.2.0 run. ci.yml typechecks on
+      # a larger Linux runner and never needed this.
       - run: npx tsc -b --noEmit
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
 
       - run: pnpm test
 

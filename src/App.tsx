@@ -54,7 +54,7 @@ import { isJwtExpired } from "@/lib/frontier/auth"
 import { SessionHydrationError } from "@/components/SessionHydrationError"
 import { AccountTransitionError } from "@/components/AccountTransitionError"
 import { isSessionHydrationRequiredPath } from "@/lib/navigation/session-routes"
-import { VersionBadge } from "@/components/VersionBadge"
+import { InFlowVersionProvider, VersionBadge } from "@/components/VersionBadge"
 import { UpdateOnNavigate } from "@/components/UpdateIndicator"
 import { hydratePrefetchStatus } from "@/lib/audio/prefetch"
 import { probeOpfsAvailability } from "@/lib/storage/opfs-availability"
@@ -390,6 +390,7 @@ export default function App() {
       <PersonPrefsSyncMount />
       <TooltipProvider delay={600}>
         <SyncingProvider>
+        <InFlowVersionProvider>
           <PrivateModeBanner />
           {/* AQU-1865: nearly-full origin storage — the caches shed themselves,
               but only the user can free the disk. */}
@@ -428,6 +429,7 @@ export default function App() {
           <VersionBadge />
           <UpdateOnNavigate />
           <Toaster />
+        </InFlowVersionProvider>
         </SyncingProvider>
       </TooltipProvider>
     </OfflineStoreProvider>

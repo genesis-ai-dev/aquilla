@@ -599,8 +599,15 @@ export function TakesStrip({
   )
 
   // AQU-1767 (Sam, 2026-10-15): pieces numbered by where they sit, worked out
-  // here. A piece renamed on its own goes by that name (decision 7).
-  const names = useMemo(() => pieceNames(takes), [takes])
+  // here. A piece renamed on its own goes by that name (decision 7). Only the
+  // pieces of a split take: one never split goes by `displayLabel`, which
+  // keeps a saved version's "· version N" (AQU-2327).
+  const names = useMemo(() => {
+    const split = new Set(
+      takeRows(takes).flatMap((row) => (row.pieces.length > 1 ? row.pieces.map((p) => p.audioId) : [])),
+    )
+    return new Map([...pieceNames(takes)].filter(([id]) => split.has(id)))
+  }, [takes])
   /** The name a row shows and a rename starts from: a piece's own or numbered
    *  name, a take never split its stored one. (A split take's row is named by
    *  `splitLabel`.) */

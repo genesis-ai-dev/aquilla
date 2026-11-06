@@ -9,15 +9,23 @@
  * happy-dom has no layout engine, so this asserts structure, not geometry.
  */
 
-import { describe, it, expect, afterEach, vi } from "vitest"
+import { describe, it, expect, afterEach, vi, type Mock } from "vitest"
 import { render, cleanup, within, fireEvent } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 import { EditorTable } from "./EditorTable"
 import { EditorActionsProvider } from "@/context/EditorActionsContext"
 import { CellStore } from "@/hooks/useActiveCellStore"
+import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { CellRow } from "@/lib/sync/cells-read-types"
+
+type SaveCellLabel = (cell: CellData, label: string | null) => void
+
+/** A full `syncRole` at `level`; the gate reads only `level`. */
+function role(level: number): NonNullable<ProjectRecord["syncRole"]> {
+  return { level, name: "member", source: "member", fetchedAt: "2026-11-05T00:00:00.000Z" }
+}
 
 vi.mock("@legendapp/list/react", async () => {
   const React = await import("react")
@@ -58,7 +66,7 @@ function makeProject(over: Partial<ProjectRecord> = {}): ProjectRecord {
     createdAt: "2026-01-01T00:00:00Z",
     files: [],
     members: [],
-    syncRole: { level: 600, source: "member" },
+    syncRole: role(600),
     ...over,
   } as ProjectRecord
 }
@@ -85,7 +93,7 @@ const ROWS: CellRow[] = [
   ...cellRows("cast", { cellLabel: "Pericope", cast_name: "Mary" }),
 ]
 
-function renderTable(opts: { project?: ProjectRecord; onSaveCellLabel?: ReturnType<typeof vi.fn>; cellLabelsEnabled?: boolean } = {}) {
+function renderTable(opts: { project?: ProjectRecord; onSaveCellLabel?: Mock<SaveCellLabel>; cellLabelsEnabled?: boolean } = {}) {
   const project = opts.project ?? makeProject()
   const store = new CellStore()
   store.setRuntime({ projectId: project.id, fileId: "file-1", username: "tester", requiredValidations: 1, auditStats: new Map() })
@@ -149,7 +157,7 @@ describe("cell label — corner slot (AQU-2408)", () => {
 
 describe("cell label — the Label row by tier (AQU-2408)", () => {
   it("a maintainer may type it, and saving hands the cell and the new label to the parent", () => {
-    const onSaveCellLabel = vi.fn()
+    const onSaveCellLabel = vi.fn<SaveCellLabel>()
     renderTable({ onSaveCellLabel })
     const r = expand("labelled")
     const input = within(r).getByTestId("cell-label-input")
@@ -165,8 +173,8 @@ describe("cell label — the Label row by tier (AQU-2408)", () => {
   })
 
   it("a project lead reads it as plain text while the tier is maintainer, and types it once the project opens the tier", () => {
-    const onSaveCellLabel = vi.fn()
-    renderTable({ onSaveCellLabel, project: makeProject({ syncRole: { level: 500, source: "member" } }) })
+    const onSaveCellLabel = vi.fn<SaveCellLabel>()
+    renderTable({ onSaveCellLabel, project: makeProject({ syncRole: role(500) }) })
     let r = expand("labelled")
     expect(within(r).getByTestId("cell-label-text")).toHaveTextContent("Pericope")
     expect(within(r).queryByTestId("cell-label-input")).toBeNull()
@@ -174,7 +182,7 @@ describe("cell label — the Label row by tier (AQU-2408)", () => {
 
     renderTable({
       onSaveCellLabel,
-      project: makeProject({ syncRole: { level: 500, source: "member" }, cellLabelFloor: "project_lead" }),
+      project: makeProject({ syncRole: role(500), cellLabelFloor: "project_lead" }),
     })
     r = expand("labelled")
     expect(within(r).getByTestId("cell-label-input")).toHaveValue("Pericope")
@@ -182,8 +190,8 @@ describe("cell label — the Label row by tier (AQU-2408)", () => {
 
   it("a contributor never gets the field, and sees no row at all on an unlabelled cell", () => {
     renderTable({
-      onSaveCellLabel: vi.fn(),
-      project: makeProject({ syncRole: { level: 400, source: "member" }, cellLabelFloor: "project_lead" }),
+      onSaveCellLabel: vi.fn<SaveCellLabel>(),
+      project: makeProject({ syncRole: role(400), cellLabelFloor: "project_lead" }),
     })
     const labelled = expand("labelled")
     expect(within(labelled).getByTestId("cell-label-text")).toHaveTextContent("Pericope")

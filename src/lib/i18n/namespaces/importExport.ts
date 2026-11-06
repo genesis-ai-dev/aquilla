@@ -1212,6 +1212,19 @@ export const importExport = defineNamespace({
     "importExport.dcs.resyncHint": "Scans the source at the pinned version for cells that were imported " +
       "incorrectly. Nothing is changed until you confirm.",
     "importExport.dcs.resyncNoChanges": "Everything already matches the pinned source.",
+    // AQU-1896: a scan that resolved or read none of the project's files checked
+    // NOTHING — it must never render as the reassuring "everything matches".
+    "importExport.dcs.resyncNoFilesResolved": plural({
+      one: "Nothing was checked: this project's source file was not found at the pinned version. It may have " +
+        "been renamed or removed upstream, or the source link needs re-importing.",
+      other: "Nothing was checked: none of this project's {count} source files were found at the pinned version. " +
+        "They may have been renamed or removed upstream, or the source link needs re-importing.",
+    }),
+    "importExport.dcs.resyncNoFilesRead": plural({
+      one: "Nothing was checked: the pinned version lists this project's source file but no longer serves it.",
+      other: "Nothing was checked: the pinned version lists this project's {count} source files but no longer " +
+        "serves any of them.",
+    }),
     "importExport.dcs.resyncRemovalWarning": plural({
       one: "{count} cell will be removed — translations attached to them will be hidden.",
       other: "{count} cells will be removed — translations attached to them will be hidden.",

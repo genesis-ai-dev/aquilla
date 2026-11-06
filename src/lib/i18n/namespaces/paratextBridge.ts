@@ -76,6 +76,16 @@ export const paratextBridge = defineNamespace({
     "paratextBridge.book.conflict.allowMarkers": "Write it anyway",
     "paratextBridge.book.conflict.missing": "This unit no longer exists in the file.",
     "paratextBridge.book.backup": "A copy of the previous file is kept outside the project folder.",
+
+    "paratextBridge.notes.toggle": "Notes",
+    "paratextBridge.notes.count": plural({ one: "{count} note", other: "{count} notes" }),
+    "paratextBridge.notes.none": "No notes of yours on this verse yet.",
+    "paratextBridge.notes.placeholder": "Write a note for your team. It appears in Paratext's Notes list.",
+    "paratextBridge.notes.add": "Add note in Paratext",
+    "paratextBridge.notes.adding": "Adding",
+    "paratextBridge.notes.added": "Note added to {file}",
+    "paratextBridge.notes.failed": "The note was not written. {reason}",
+    "paratextBridge.notes.ownOnly": "Showing your notes only. Notes from other team members are in Paratext.",
   },
   context: {
     _context: {
@@ -94,6 +104,9 @@ export const paratextBridge = defineNamespace({
       "paratextBridge.book.fileChanged": { description: "Notice when Paratext or Send/Receive changed the open book.", placeholders: { count: "Units whose text changed." } },
       "paratextBridge.book.refused": { description: "Write refused; nothing changed on disk.", placeholders: { reason: "One of the refused.* strings." } },
       "paratextBridge.book.refused.proof": { description: "Write refused because the byte-level check failed.", placeholders: { details: "Technical list, often English." } },
+      "paratextBridge.notes.count": { description: "Count on the per-verse notes button.", placeholders: { count: "Number of the user's notes on that verse." } },
+      "paratextBridge.notes.added": { description: "Toast after a note was written into the Paratext project.", placeholders: { file: "Notes file name like Notes_Jane.xml." } },
+      "paratextBridge.notes.failed": { description: "Toast when a note could not be written; nothing changed on disk.", placeholders: { reason: "Technical reason, often English." } },
       "paratextBridge.book.conflict.stale": { description: "Explains a clobber: Paratext overwrote Aquilla's edits from a stale copy.", placeholders: { count: "Number of reverted edits." } },
     },
   },

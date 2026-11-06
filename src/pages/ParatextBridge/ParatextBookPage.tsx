@@ -17,6 +17,9 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import { useParatextDiscovery } from "@/lib/paratext-bridge/use-paratext-discovery"
 import { useParatextBook } from "@/lib/paratext-bridge/use-paratext-book"
+import { useParatextNotes } from "@/lib/paratext-bridge/use-paratext-notes"
+import { notesForUnit } from "@/lib/paratext-bridge/notes"
+import { ParatextUnitNotes } from "./ParatextUnitNotes"
 import { editDenial } from "@/lib/paratext-bridge/access"
 import type { Unit } from "@/lib/paratext-bridge/units"
 import { getBookName } from "@/lib/file-labeling/bible-book-names"
@@ -33,6 +36,7 @@ export function ParatextBookPage() {
   const project = useMemo(() => d.projects.find((p) => p.path === projectPath) ?? null, [d.projects, projectPath])
   const registered = d.discovery?.registeredUser?.name ?? null
   const [book, act] = useParatextBook(project, fileName, registered)
+  const [notes, noteAct] = useParatextNotes(project, registered)
 
   const chapters = useMemo(() => {
     const out = new Map<number, Unit[]>()
@@ -58,6 +62,18 @@ export function ParatextBookPage() {
     } else if (r.written > 0) {
       toast.add({ type: "success", title: t("paratextBridge.book.written", { count: r.written, file: r.file }), description: t("paratextBridge.book.backup") })
     }
+  }
+
+  const addNote = async (u: Unit, text: string) => {
+    if (!book.units) return false
+    const r = await noteAct.addNote(book.units.book, u, text)
+    if ("refused" in r) {
+      const reason = r.refused.startsWith("proof:") ? t("paratextBridge.book.refused.proof", { details: r.refused.slice(6) }) : r.refused
+      toast.add({ type: "error", title: t("paratextBridge.notes.failed", { reason }) })
+      return false
+    }
+    toast.add({ type: "success", title: t("paratextBridge.notes.added", { file: r.file }) })
+    return true
   }
 
   const chapterDenied = (chapter: number) =>
@@ -117,6 +133,8 @@ export function ParatextBookPage() {
             </div>
           ) : null}
           {book.error ? <p className="text-sm text-destructive">{book.error}</p> : null}
+          {notes.error ? <p className="text-sm text-destructive">{notes.error}</p> : null}
+          {book.units && !notes.loading ? <p className="mb-4 text-xs text-muted-foreground">{t("paratextBridge.notes.ownOnly")}</p> : null}
 
           {book.loading && !book.units ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground"><Spinner />{t("paratextBridge.book.loading", { file: fileName ?? "" })}</div>
@@ -134,8 +152,9 @@ export function ParatextBookPage() {
                       const edit = book.edits.get(u.id)
                       const value = edit?.text ?? u.text
                       const label = u.kind === "verse" ? u.verse : `\\${u.marker}`
+                      const unitNotes = notesForUnit(notes.notes, book.units?.book ?? "", u)
                       return (
-                        <div key={u.id} className="grid grid-cols-[4rem_1fr] items-start gap-2" data-unit-id={u.id}>
+                        <div key={u.id} className="grid grid-cols-[4rem_1fr_auto] items-start gap-2" data-unit-id={u.id}>
                           <span className={"pt-2 text-end font-mono text-xs " + (edit ? "text-primary" : "text-muted-foreground")} title={u.id}>{label}</span>
                           <Textarea
                             value={value}
@@ -144,6 +163,7 @@ export function ParatextBookPage() {
                             className={"min-h-8 resize-none " + (u.kind !== "verse" ? "font-medium " : "") + (edit ? "border-primary/60 " : "")}
                             onChange={(e) => void act.setEditText(u, e.target.value)}
                           />
+                          <ParatextUnitNotes unitId={u.id} notes={unitNotes} canAdd={!!registered} onAdd={(text) => addNote(u, text)} />
                         </div>
                       )
                     })}

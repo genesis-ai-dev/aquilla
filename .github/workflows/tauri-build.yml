@@ -27,6 +27,10 @@ permissions:
 
 jobs:
   build:
+    # Only PRs from branches in this repo (contributors with write access) —
+    # fork PRs would otherwise publish installers built from unreviewed code
+    # as artifacts of this public repo.
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
     strategy:
       fail-fast: false
       matrix:

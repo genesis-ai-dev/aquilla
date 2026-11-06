@@ -78,15 +78,17 @@ export function useParatextDiscovery({ autoStart = true }: DiscoveryOptions = {}
   const addRoot = useCallback((path: string) => apply(() => paratextTauri.addRoot(path)), [apply])
   const removeRoot = useCallback((path: string) => apply(() => paratextTauri.removeRoot(path)), [apply])
 
+  // No cancellation flag here on purpose: StrictMode (dev) runs this effect,
+  // cleans it up and runs it again, and the second run must not start a second
+  // scan, so the `started` guard skips it. A cancel flag set by that cleanup
+  // would then throw the only result away and the page would load forever.
   useEffect(() => {
     if (!supported || !autoStart || started.current) return
     started.current = true
-    let cancelled = false
     void paratextTauri.discover()
-      .then((d) => { if (!cancelled) setDiscovery(d) })
-      .catch((e: unknown) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)) })
-      .finally(() => { if (!cancelled) setLoading(false) })
-    return () => { cancelled = true }
+      .then((d) => setDiscovery(d))
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setLoading(false))
   }, [supported, autoStart])
 
   // Memoised on the discovery result: consumers key effects on a project's

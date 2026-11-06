@@ -11,6 +11,7 @@ import { EmptyState } from "@/components/ui/empty"
 import { Spinner } from "@/components/ui/spinner"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useParatextDiscovery, type BridgeProject } from "@/lib/paratext-bridge/use-paratext-discovery"
+import { pickFolder } from "@/lib/paratext-bridge/tauri"
 import { getBookName } from "@/lib/file-labeling/bible-book-names"
 
 const PARATEXT_DOCS_URL =
@@ -29,7 +30,7 @@ export function ParatextProjectsPage() {
   const d = useParatextDiscovery()
 
   const addFolder = async () => {
-    const path = window.prompt(t("paratextBridge.addFolderPrompt"))
+    const path = await pickFolder(t("paratextBridge.thisComputer.pickFolderTitle"))
     if (path?.trim()) await d.addRoot(path.trim())
   }
 

@@ -56,6 +56,14 @@ export const paratextTauri = {
   isRunning: () => invoke<boolean>("paratext_is_running"),
 }
 
+/** Native "choose a folder" dialog. Resolves null when the user cancels. */
+export async function pickFolder(title: string): Promise<string | null> {
+  if (!isTauriRuntime()) return null
+  const { open } = await import("@tauri-apps/plugin-dialog")
+  const picked = await open({ directory: true, multiple: false, title })
+  return typeof picked === "string" ? picked : null
+}
+
 /** Subscribe to folder-change events. Returns an unlisten function. */
 export async function onParatextFileChanged(handler: (e: FileChangedEvent) => void): Promise<() => void> {
   if (!isTauriRuntime()) return () => {}

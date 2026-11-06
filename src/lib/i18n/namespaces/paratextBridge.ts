@@ -57,6 +57,14 @@ export const paratextBridge = defineNamespace({
     "paratextBridge.thisComputer.found": plural({ one: "{count} Paratext project found", other: "{count} Paratext projects found" }),
     "paratextBridge.thisComputer.openAll": "Open Paratext projects",
     "paratextBridge.thisComputer.scanFailed": "The search could not finish. {error}",
+    "paratextBridge.thisComputer.folders": "Folders",
+    "paratextBridge.thisComputer.foldersHint":
+      "Each folder Aquilla looks in for Paratext projects, and what it found there. Add any folder on this computer.",
+    "paratextBridge.thisComputer.addFolder": "Add folder…",
+    "paratextBridge.thisComputer.pickFolderTitle": "Choose a folder with Paratext projects",
+    "paratextBridge.thisComputer.noProjectsInFolder": "No Paratext projects in this folder.",
+    "paratextBridge.thisComputer.notSearched": "Not searched yet",
+    "paratextBridge.thisComputer.otherProjects": "Elsewhere",
 
     "paratextBridge.book.back": "All projects",
     "paratextBridge.book.loading": "Reading {file}",

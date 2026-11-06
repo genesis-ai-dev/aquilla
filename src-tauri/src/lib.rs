@@ -22,7 +22,8 @@ pub fn run() {
         .register_uri_scheme_protocol(about::SCHEME, about::serve_request)
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_deep_link::init())
-        .plugin(tauri_plugin_opener::init());
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init());
 
     #[cfg(debug_assertions)]
     {

@@ -56,6 +56,7 @@
     "test:daemon": "NODE_OPTIONS=--expose-gc vitest run scripts/migrate-daemon",
     "scan:secrets": "tsx scripts/secret-scan.ts",
     "check:doc-pins": "tsx scripts/check-doc-pins.ts",
+    "check:hooks": "tsx scripts/check-hooks.ts",
     "admin:request": "tsx scripts/admin-request.ts",
     "test:idml": "pnpm --filter @aquilla/idml-roundtrip test",
     "build:idml": "pnpm --filter @aquilla/idml-roundtrip build",

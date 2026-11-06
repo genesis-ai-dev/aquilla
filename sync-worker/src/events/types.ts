@@ -120,6 +120,7 @@ export type EventKind =
   // Restore a soft-deleted file (project_lead+). Non-chain-mutating — clears
   // `files.deleted_at`. Cells and audio remain intact throughout.
   | 'file.restore'
+  | 'file.revision'
   // Comments (non-chain-mutating; contributor-level).
   | 'comment.create'
   | 'comment.edit'
@@ -952,6 +953,24 @@ export interface EventPayloads {
   // Restore a soft-deleted file. Non-chain-mutating; parentId omitted.
   // Clears `files.deleted_at`. All cells and audio remain intact.
   'file.restore': Record<string, never>
+  // AQU-2459: one revision of the file's source side — one parse of one
+  // artifact, aligned against the previous revision (decision 0007). The unit
+  // list lives in the R2 manifest; this payload is the index row. Written only
+  // by the revisions route (events/revisions-route.ts), never by a client, so
+  // dispatch refuses it on POST /events. Non-chain-mutating; parentId omitted.
+  'file.revision': {
+    revisionN: number
+    parentRevisionN: number | null
+    artifactSha256: string
+    /** `<filterId>@<walk>` — db/shared/file-revision.ts::parseFilterStamp. */
+    stamp: string
+    optionsHash: string
+    manifestR2Key: string
+    unitCount: number
+    counts: { equal: number; changed: number; moved: number; inserted: number; deleted: number }
+    /** import | reimport | adopt | drive | git | dcs | langquest */
+    origin: string
+  }
 
   // ── Comments (non-chain-mutating) ──────────────────────────────────────
   'comment.create': {

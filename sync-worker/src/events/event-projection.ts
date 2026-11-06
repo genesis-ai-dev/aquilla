@@ -50,6 +50,7 @@ import { coerceExternalIds } from '../../../src/lib/terminology/external-ids'
 import { buildRemovedCellArchiveStmt, buildRemovedCellRestoreStmts } from './removed-cell-archive'
 
 export { laneIdResolveBinds, laneIdResolveSql } from './lane-id-sql'
+import { buildFileRevisionIndexStmts } from './file-revision-sql'
 
 // AQU-1693: a concept's Bible entity link. Nothing upstream validates an
 // app-pushed term.* payload, so the projector coerces it: a malformed value
@@ -3506,6 +3507,19 @@ case 'cell.audio.attach': {
         }),
       )
       return ['file_milestones']
+    }
+
+    case 'file.revision': {
+      // AQU-2459: the index row + the file head. Replay-safe (upsert). The
+      // cells projection for a revision is set-based from the R2 manifest in
+      // revisions-route.ts / file-revision-sql.ts and is NOT reproduced here:
+      // rebuild.ts has no manifest in hand (see decision 0007, not covered).
+      const p = event.payload as EventPayloads['file.revision']
+      if (!event.fileId) {
+        throw new Error(`file.revision event ${event.id} is missing fileId`)
+      }
+      stmts.push(...buildFileRevisionIndexStmts(db, event.projectId, event.fileId, event.id, event.author, event.serverTs, p))
+      return ['files']
     }
 
     case 'file.milestone.remove': {

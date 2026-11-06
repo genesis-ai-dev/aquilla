@@ -154,6 +154,9 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   // Require PROJECT_LEAD (500) — same as file.create and source.* imports.
   'file.delete': ROLE.PROJECT_LEAD,
   'file.restore': ROLE.PROJECT_LEAD,
+  // AQU-2459: server-emitted by the revisions route only (same floor as the
+  // route's own check); dispatch refuses it from POST /events regardless.
+  'file.revision': ROLE.PROJECT_LEAD,
 
   // Comments: any commenter+ can write, edit, delete, or resolve their own
   // comment. Server-side ownership enforcement (only the author can edit/delete

@@ -734,6 +734,7 @@ describe("fileType from the Codex notebook (AQU-2211)", () => {
     ["spreadsheet-tsv", "tsv"],
     ["tms", "tmx"],
     ["docx", "docx"],
+    ["docx-roundtrip", "docx"],
   ])("importerType %s lands as %s", (importerType, fileType) => {
     expect(fileCreate(pairWith({ importerType }))).toMatchObject({ fileType })
   })

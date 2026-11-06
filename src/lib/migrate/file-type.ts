@@ -72,6 +72,9 @@ const IMPORTER_FILE_TYPES: ReadonlyMap<string, LegacyFileType | "subtitle"> = ne
   ["spreadsheet-tsv", "tsv"],
   ["tms", "tmx"],
   ["docx", "docx"],
+  // Codex's newer Word importer (seen on 19 dev files, 2026-11-06); the same
+  // format, with round-trip locators Aquilla does not read.
+  ["docx-roundtrip", "docx"],
 ])
 
 const SUBTITLE_TYPES_BY_EXT: ReadonlyMap<string, SubtitleFileType> = new Map<string, SubtitleFileType>([

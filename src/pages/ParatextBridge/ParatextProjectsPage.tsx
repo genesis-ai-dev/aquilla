@@ -1,8 +1,8 @@
 import { useNavigate } from "react-router-dom"
 import { BookOpen, FolderPlus, RefreshCw, X } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
-import { OrgSidebar } from "@/components/org/OrgSidebar"
-import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
+import { ThisComputerSidebar } from "@/components/this-computer/ThisComputerSidebar"
+import { ThisComputerBreadcrumb } from "@/components/this-computer/ThisComputerBreadcrumb"
 import { Page, PageHeader } from "@/components/ui/page"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -35,8 +35,8 @@ export function ParatextProjectsPage() {
 
   return (
     <AppShell
-      sidebar={<OrgSidebar />}
-      header={<OrgBreadcrumb section={t("paratextBridge.title")} />}
+      sidebar={<ThisComputerSidebar />}
+      header={<ThisComputerBreadcrumb trail={[{ label: t("paratextBridge.title") }]} />}
       statusBar={null}
       main={
         <Page>

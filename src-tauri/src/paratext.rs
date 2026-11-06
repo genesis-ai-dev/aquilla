@@ -309,14 +309,30 @@ fn registry_roots() -> Vec<Root> {
             out.push(Root { path: dir, source: "registry" });
         }
     }
-    out.push(Root { path: "C:\\My Paratext 9 Projects".to_string(), source: "default" });
-    out.push(Root { path: "C:\\My Paratext 8 Projects".to_string(), source: "default" });
     out
 }
 
 #[cfg(not(windows))]
 fn registry_roots() -> Vec<Root> {
     Vec::new()
+}
+
+// The folders Paratext creates by default, independent of any registry or
+// Wine lookup. Pure on `home` so the list itself is testable: on Windows the
+// installer's `C:\My Paratext N Projects`; on Linux (Paratext 9 for Linux) and
+// anything else Unix-like, `~/ParatextNProjects`. Wine prefixes add their own
+// `drive_c` defaults in `wine_roots`.
+fn platform_default_roots(home: Option<&Path>) -> Vec<Root> {
+    let mut out = Vec::new();
+    if cfg!(windows) {
+        out.push(Root { path: "C:\\My Paratext 9 Projects".to_string(), source: "default" });
+        out.push(Root { path: "C:\\My Paratext 8 Projects".to_string(), source: "default" });
+    } else if let Some(home) = home {
+        for name in ["Paratext9Projects", "Paratext8Projects"] {
+            out.push(Root { path: home.join(name).to_string_lossy().into_owned(), source: "default" });
+        }
+    }
+    out
 }
 
 fn wine_prefixes() -> Vec<PathBuf> {
@@ -432,25 +448,33 @@ fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
         .map_err(|e| format!("EIO: app_data_dir: {e}"))
 }
 
-fn load_user_roots(app: &AppHandle) -> Vec<String> {
-    let Ok(dir) = app_data_dir(app) else {
-        return Vec::new();
-    };
+// The user's linked folders live in `<app data>/paratext-roots.json` as a
+// plain JSON array, so they survive restarts and app updates. Parameterised
+// on the directory so the round trip is testable without an AppHandle.
+fn read_roots_file(dir: &Path) -> Vec<String> {
     std::fs::read_to_string(dir.join(ROOTS_FILE))
         .ok()
         .and_then(|s| serde_json::from_str::<Vec<String>>(&s).ok())
         .unwrap_or_default()
 }
 
-fn save_user_roots(app: &AppHandle, roots: &[String]) -> Result<(), String> {
-    let dir = app_data_dir(app)?;
-    std::fs::create_dir_all(&dir).map_err(|e| format!("EIO: mkdir {dir:?}: {e}"))?;
+fn write_roots_file(dir: &Path, roots: &[String]) -> Result<(), String> {
+    std::fs::create_dir_all(dir).map_err(|e| format!("EIO: mkdir {dir:?}: {e}"))?;
     let json = serde_json::to_string_pretty(roots).map_err(|e| format!("EIO: {e}"))?;
     std::fs::write(dir.join(ROOTS_FILE), json).map_err(|e| format!("EIO: write roots: {e}"))
 }
 
+fn load_user_roots(app: &AppHandle) -> Vec<String> {
+    app_data_dir(app).map(|dir| read_roots_file(&dir)).unwrap_or_default()
+}
+
+fn save_user_roots(app: &AppHandle, roots: &[String]) -> Result<(), String> {
+    write_roots_file(&app_data_dir(app)?, roots)
+}
+
 fn run_discovery(app: &AppHandle) -> Discovery {
     let mut candidates = registry_roots();
+    candidates.extend(platform_default_roots(dirs::home_dir().as_deref()));
     candidates.extend(wine_roots());
     candidates.extend(load_user_roots(app).into_iter().map(|p| Root { path: p, source: "user" }));
     let (roots, projects) = discover_in_roots(candidates);
@@ -488,6 +512,14 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> 
 #[tauri::command]
 pub async fn paratext_discover(app: AppHandle) -> Result<Discovery, String> {
     blocking(move || run_discovery(&app)).await
+}
+
+/// The folders the user linked, without scanning anything. The "This
+/// computer" workspace lists these before the first Paratext scan, so no
+/// Paratext location is read until the user has asked for it.
+#[tauri::command]
+pub async fn paratext_user_roots(app: AppHandle) -> Result<Vec<String>, String> {
+    blocking(move || load_user_roots(&app)).await
 }
 
 #[tauri::command]
@@ -792,6 +824,42 @@ mod tests {
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
         assert!(names.iter().all(|n| !n.ends_with(".bak")), "{names:?}");
+    }
+
+    // The "Find Paratext projects on this computer" scan promises to look in
+    // the places Paratext itself creates. If this list drifts, the scan
+    // silently misses a stock install, so the exact paths are pinned here.
+    #[test]
+    fn platform_defaults_are_the_folders_paratext_creates() {
+        let home = Path::new(if cfg!(windows) { "C:\\Users\\u" } else { "/home/u" });
+        let paths: Vec<String> = platform_default_roots(Some(home)).into_iter().map(|r| r.path).collect();
+        if cfg!(windows) {
+            assert_eq!(paths, vec!["C:\\My Paratext 9 Projects", "C:\\My Paratext 8 Projects"]);
+        } else {
+            assert_eq!(paths, vec!["/home/u/Paratext9Projects", "/home/u/Paratext8Projects"]);
+            // No home dir means no guess: a bogus relative path would be
+            // scanned against the cwd.
+            assert!(platform_default_roots(None).is_empty());
+        }
+        assert!(platform_default_roots(Some(home)).iter().all(|r| r.source == "default"));
+    }
+
+    // A linked folder must come back after a restart (the file is the only
+    // thing that survives), and a missing or corrupt file must read as "no
+    // folders" rather than fail discovery.
+    #[test]
+    fn linked_roots_round_trip_through_the_roots_file() {
+        let dir = std::env::temp_dir().join(format!("aq-pt-roots-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(read_roots_file(&dir).is_empty(), "missing file reads as empty");
+
+        let roots = vec!["/data/Team Projects".to_string(), "/data/TPP1".to_string()];
+        write_roots_file(&dir, &roots).unwrap();
+        assert_eq!(read_roots_file(&dir), roots);
+
+        std::fs::write(dir.join(ROOTS_FILE), "{not json").unwrap();
+        assert!(read_roots_file(&dir).is_empty(), "corrupt file reads as empty");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

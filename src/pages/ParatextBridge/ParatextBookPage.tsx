@@ -2,8 +2,8 @@ import { useMemo } from "react"
 import { Link, useSearchParams } from "react-router-dom"
 import { ArrowLeft, Save } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
-import { OrgSidebar } from "@/components/org/OrgSidebar"
-import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
+import { ThisComputerSidebar } from "@/components/this-computer/ThisComputerSidebar"
+import { ThisComputerBreadcrumb } from "@/components/this-computer/ThisComputerBreadcrumb"
 import { Page, PageHeader } from "@/components/ui/page"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -65,8 +65,8 @@ export function ParatextBookPage() {
 
   return (
     <AppShell
-      sidebar={<OrgSidebar />}
-      header={<OrgBreadcrumb section={title} parent={{ label: t("paratextBridge.title"), to: "/paratext" }} />}
+      sidebar={<ThisComputerSidebar />}
+      header={<ThisComputerBreadcrumb trail={[{ label: t("paratextBridge.title"), to: "/paratext" }, { label: title }]} />}
       statusBar={null}
       main={
         <Page>

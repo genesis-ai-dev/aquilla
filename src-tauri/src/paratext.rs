@@ -676,6 +676,9 @@ mod tests {
 "Settings_Directory"="D:\\nope"
 "#;
 
+    // Wine prefixes only exist on macOS/Linux; on Windows `Path::join("d:")`
+    // is drive-relative and replaces the prefix, so the host paths differ.
+    #[cfg(not(windows))]
     #[test]
     fn parses_settings_dir_from_system_reg_and_maps_to_drive_c() {
         assert_eq!(parse_system_reg_settings_dir(REG).as_deref(), Some("C:\\"));

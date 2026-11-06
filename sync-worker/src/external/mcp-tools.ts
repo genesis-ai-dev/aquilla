@@ -7,6 +7,8 @@
 // tool to call. `inputSchema` is JSON Schema (draft 2020-12 subset) so hosts can
 // validate arguments before dispatch.
 
+import { PROJECT_SETTINGS_KEYS } from '../../../db/shared/project-settings-keys'
+
 /** MCP tool annotations (spec `ToolAnnotations`). Hosts use them to decide
  *  when to ask the user before a call: ChatGPT's "ask before changes" setting
  *  keys off readOnlyHint / destructiveHint, and app review requires them. */
@@ -140,8 +142,14 @@ const TOOL_SPECS: McpToolSpec[] = [
     name: 'get_project_settings',
     description:
       'Read a project\'s settings blob and its LIVE settings version (AQU-1176). Returns ' +
-      '{ projectId, settings, version, updatedAt, translationInstructions, ' +
-      'translationInstructionsStored }. `translationInstructions` is the RESOLVED project ' +
+      '{ projectId, settings, builtinChecks, builtinChecksByLane, version, updatedAt, ' +
+      'translationInstructions, translationInstructionsStored }. `settings` is the raw stored ' +
+      'blob and holds only OVERRIDES. `builtinChecks` is READ-ONLY — every check in force as ' +
+      '[{ id, name, enabled, severity, overridden }], defaults with the project\'s ' +
+      '`algorithmicChecks` laid over them (`builtinChecksByLane` does the same per lane). ' +
+      'Turn a check on or off by patching `algorithmicChecks` (per lane: ' +
+      '`algorithmicChecksByLane`) — patching `builtinChecks` is refused, it is not a settings ' +
+      'key (AQU-2402). `translationInstructions` is the RESOLVED project ' +
       'instructions — the exact text every drafting prompt carries (copilot, in-app agent ' +
       'and its draft tool, DraftCells, Autopilot); `translationInstructionsStored: false` ' +
       'means it is composed on read from the brief, a customized systemPrompt, Living Memory ' +
@@ -196,7 +204,26 @@ const TOOL_SPECS: McpToolSpec[] = [
           items: {
             type: 'object',
             properties: {
-              key: { type: 'string', description: 'Top-level settings key, e.g. "translationInstructions" (the one text every drafting prompt reads). sourceLanguage, targetLanguage, targetLanes, and archivedLanes are not settings.' },
+              key: {
+                type: 'string',
+                // AQU-2402: the writable keys are NAMED here, generated from the
+                // registry so they cannot drift. This schema is the only place an
+                // agent on the OAuth connector can learn them: that surface
+                // rewrites this tool's description and drops describe_command
+                // altogether (external/mcp-chatgpt-tools.ts), so a key name had to
+                // be guessed one validation_failed at a time.
+                enum: [...PROJECT_SETTINGS_KEYS],
+                description:
+                  'Top-level settings key, e.g. "translationInstructions" (the one text every ' +
+                  'drafting prompt reads). The writable keys are: ' + PROJECT_SETTINGS_KEYS.join(', ') + '. ' +
+                  'Built-in checks are written as "algorithmicChecks" — ' +
+                  '{ "<checkId>": { "enabled": boolean, "severity"?: "major" | "minor" } } — which is NOT the ' +
+                  '`builtinChecks` shape get_project_settings reads them back as; per-lane overrides are ' +
+                  '"algorithmicChecksByLane". sourceLanguage, targetLanguage, targetLanes, and archivedLanes ' +
+                  'are not settings, and "terminology" is retired (AQU-1724) — write key terms with ' +
+                  'term.create / term.update events in an EmitEvents changeset. An unknown key is refused at ' +
+                  'prepare with the full key list and, where one is obvious, the key you meant.',
+              },
               value: { description: 'Any JSON value; replaces that key wholesale.' },
             },
             required: ['key', 'value'],

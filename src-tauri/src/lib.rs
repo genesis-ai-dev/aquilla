@@ -2,6 +2,7 @@ mod app_update;
 mod auth;
 mod connectivity;
 mod fs_bridge;
+mod hot_bundle;
 mod keychain;
 mod llm_proxy;
 mod paratext;
@@ -9,11 +10,14 @@ mod repo_root;
 mod shutdown_guard;
 
 use llm_proxy::LlmConfig;
-use tauri::Manager;
+use tauri::{Manager, WebviewWindowBuilder};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut builder = tauri::Builder::default()
+        // Managed before `setup` so the `app://` handler can find it on the first request.
+        .manage(hot_bundle::HotBundleState::default())
+        .register_uri_scheme_protocol(hot_bundle::SCHEME, hot_bundle::serve_request)
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init());
@@ -46,6 +50,16 @@ pub fn run() {
             }
 
             auth::setup_deep_link_handler(app)?;
+
+            // Decide which bundle the `app://` scheme serves before any window asks for it.
+            hot_bundle::prepare(app)?;
+            // Label stays "main" so capabilities/default.json keeps applying.
+            WebviewWindowBuilder::new(app, "main", hot_bundle::window_url(app)?)
+                .title("Aquilla")
+                .inner_size(800.0, 600.0)
+                .resizable(true)
+                .build()?;
+            hot_bundle::start(app.handle());
 
             connectivity::start_connectivity_loop(app.handle().clone());
 
@@ -101,6 +115,9 @@ pub fn run() {
                     paratext::paratext_watch,
                     paratext::paratext_unwatch,
                     paratext::paratext_is_running,
+                    hot_bundle::check_bundle_update,
+                    hot_bundle::bundle_booted,
+                    hot_bundle::get_bundle_status,
                 ]
             }
             #[cfg(not(feature = "e2e-webdriver"))]
@@ -136,6 +153,9 @@ pub fn run() {
                     paratext::paratext_watch,
                     paratext::paratext_unwatch,
                     paratext::paratext_is_running,
+                    hot_bundle::check_bundle_update,
+                    hot_bundle::bundle_booted,
+                    hot_bundle::get_bundle_status,
                 ]
             }
         })

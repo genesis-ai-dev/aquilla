@@ -9,11 +9,12 @@ a non-functional updater:
 | Placeholder in `src-tauri/tauri.conf.json` | Needs |
 | --- | --- |
 | `plugins.updater.pubkey` → `REPLACE_WITH_OUTPUT_OF_npx_tauri_signer_generate` | the updater public key |
-| `plugins.updater.endpoints[0]` → `.../REPLACE_ORG/...` | the real GitHub org/user |
 | `bundle.macOS.signingIdentity` → `null` | the Developer ID identity |
 | `bundle.macOS.providerShortName` → `null` | the Apple team ID |
 
-The shell ships as `Codex` (`productName`), identifier `com.frontierrnd.codex`.
+The shell ships as `Aquilla` (`productName`), identifier `com.frontierrnd.aquilla`.
+The web bundle inside it updates hourly on its own channel — see the "Desktop"
+section of [`DEPLOYMENT-ENVIRONMENTS.md`](DEPLOYMENT-ENVIRONMENTS.md).
 
 ## Smoke tests (do anytime — no signing required)
 
@@ -21,7 +22,7 @@ The shell ships as `Codex` (`productName`), identifier `com.frontierrnd.codex`.
 
 ```bash
 pnpm tauri:build -- --debug
-open src-tauri/target/debug/bundle/macos/Codex.app
+open src-tauri/target/debug/bundle/macos/Aquilla.app
 ```
 
 Expected: the same window as `pnpm tauri:dev`, but loading the production Vite
@@ -36,7 +37,7 @@ In a `pnpm tauri:dev` window:
 3. Open it, edit a cell, sync
 4. Confirm the edit round-trips (re-pull, see your change)
 
-The data lives at `~/Library/Application Support/com.frontierrnd.codex/repos/` —
+The data lives at `~/Library/Application Support/com.frontierrnd.aquilla/repos/` —
 `ls` it to confirm `.git/` and a working tree are there. Watch the Rust process
 stdout for any `EIO`/`ENOENT`/`EINVAL` from the fs bridge.
 
@@ -47,12 +48,12 @@ stdout for any `EIO`/`ENOENT`/`EINVAL` from the fs bridge.
 1. **Generate the updater signing keypair** (separate from the code-signing certs)
 
    ```bash
-   npx tauri signer generate -w ~/.tauri/codex-updater.key
+   npx tauri signer generate -w ~/.tauri/aquilla-updater.key
    ```
 
    Save the private key + password in 1Password.
 
-2. **Fill the placeholders in `src-tauri/tauri.conf.json`** — the four rows in
+2. **Fill the placeholders in `src-tauri/tauri.conf.json`** — the rows in
    the table above. Match `signingIdentity` to an entry from
    `security find-identity -v -p codesigning`.
 
@@ -62,7 +63,9 @@ stdout for any `EIO`/`ENOENT`/`EINVAL` from the fs bridge.
    `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`,
    `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`,
    `WINDOWS_CERTIFICATE`, `WINDOWS_CERTIFICATE_PASSWORD`,
-   `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
+   `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, plus
+   `AQUILLA_BUNDLE_PUBKEY` (hot-bundle verification key, from
+   `pnpm desktop:bundle:keygen`; the workflow fails without it).
    Reuse the existing certs from the other apps.
 
    ⚠ Any push of a `v*` tag reaches this job and these secrets, and the job

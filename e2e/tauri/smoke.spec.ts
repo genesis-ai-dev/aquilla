@@ -71,7 +71,7 @@ describe("Tauri desktop shell", () => {
     expect(typeof online).toBe("boolean")
   })
 
-  it("wires a simulated codex:// deep-link callback into the keychain", async () => {
+  it("wires a simulated aquilla:// deep-link callback into the keychain", async () => {
     // WebDriver can't trigger a real OS URL-open event, and @wdio/tauri-service's own
     // triggerDeeplink() only injects a JS-layer event this app has no listener for (see file
     // header) — so this exercises the same parse -> store -> emit wiring `handle_callback_url`
@@ -80,7 +80,7 @@ describe("Tauri desktop shell", () => {
     await invoke("clear_token")
 
     await invoke("simulate_deep_link_callback", {
-      url: "codex://auth/callback?token=deep-link-jwt&refresh=deep-link-refresh",
+      url: "aquilla://auth/callback?token=deep-link-jwt&refresh=deep-link-refresh",
     })
 
     const token = await invoke<string>("get_token")

@@ -1514,9 +1514,9 @@ export const editor = defineNamespace({
     "editor.dock.resetInfoAria": "About your layout",
     "editor.dock.rememberedNote": "Remembered for you, for this file. Your teammates keep their own arrangement of {file}.",
     "editor.dock.startDub":
-      "Reset layout returns to the starting layout for a dubbing episode: the film large beside the text, the timeline at its usual height.",
+      "Reset layout returns to the starting layout for a file with a film: the timeline a little under half the height, and the film about a third of the width beside the text.",
     "editor.dock.startSubtitles":
-      "Reset layout returns to the starting layout for a subtitles file: the text large beside a smaller film, the timeline shorter.",
+      "Reset layout returns to the starting layout for a file with a film: the timeline a little under half the height, and the film about a third of the width beside the text.",
     "editor.dock.startScripture":
       "Reset layout returns to the starting layout for a scripture book: the timeline tall above the text.",
     "editor.dock.startPlain":

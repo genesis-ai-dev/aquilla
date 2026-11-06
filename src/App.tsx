@@ -28,6 +28,7 @@ import { PersonPrefsSyncMount } from "@/components/PersonPrefsSyncMount"
 import { ConflictToast } from "@/components/ConflictToast"
 import { OfflineLeaderWatchdog } from "@/components/OfflineLeaderWatchdog"
 import { DesktopUpdatePrompt } from "@/components/DesktopUpdatePrompt"
+import { HotBundleBoot } from "@/components/HotBundleBoot"
 import { NewerOfflineDataNotice } from "@/components/NewerOfflineDataNotice"
 import { OfflineProjectAccessWatch } from "@/components/OfflineProjectAccessWatch"
 import { OfflineRefusedWritesNotice } from "@/components/OfflineRefusedWritesNotice"
@@ -96,6 +97,12 @@ const Signup = lazy(() =>
 )
 const BillingSelection = lazy(() =>
   import("@/pages/BillingSelection").then((m) => ({ default: m.BillingSelection })),
+)
+const ParatextProjectsPage = lazy(() =>
+  import("@/pages/ParatextBridge/ParatextProjectsPage").then((m) => ({ default: m.ParatextProjectsPage })),
+)
+const ParatextBookPage = lazy(() =>
+  import("@/pages/ParatextBridge/ParatextBookPage").then((m) => ({ default: m.ParatextBookPage })),
 )
 const ResetPassword = lazy(() =>
   import("@/pages/ResetPassword").then((m) => ({ default: m.ResetPassword })),
@@ -390,6 +397,7 @@ export default function App() {
           <ConflictToast />
           <OfflineLeaderWatchdog />
           <DesktopUpdatePrompt />
+          <HotBundleBoot />
           <NewerOfflineDataNotice />
           <OfflineProjectAccessWatch />
           <OfflineRefusedWritesNotice />
@@ -474,6 +482,8 @@ function AppRoutes() {
         {/* Curated marketing/demo auto-login — see components/MarketingLoginRoute.tsx */}
         <Route path="/__marketing/login" element={<MarketingLoginRoute />} />
 
+        <Route path="/paratext" element={<LazyRoute><ParatextProjectsPage /></LazyRoute>} />
+        <Route path="/paratext/book" element={<LazyRoute><ParatextBookPage /></LazyRoute>} />
         <Route path="/preferences" element={<Preferences />} />
         <Route path="/preferences/:section" element={<Preferences />} />
 

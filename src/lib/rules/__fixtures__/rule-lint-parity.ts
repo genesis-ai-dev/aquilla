@@ -18,7 +18,7 @@
  */
 
 export type ParityRuleCheck =
-  | { type: "target-forbids"; targetPattern: string; caseSensitive?: boolean }
+  | { type: "target-forbids"; targetPattern: string; sourcePattern?: string; caseSensitive?: boolean }
   | { type: "source-requires-target"; sourcePattern: string; targetPattern: string; caseSensitive?: boolean }
 
 export interface RuleLintParityCase {
@@ -38,6 +38,25 @@ const GRACE: ParityRuleCheck = { type: "source-requires-target", sourcePattern: 
 export const RULE_LINT_PARITY_CASES: RuleLintParityCase[] = [
   // Patterns are regexes. The rule editor stores regex by default, and its
   // literal mode stores the text already escaped.
+  // AQU-1712: `target-forbids` takes an optional SOURCE condition. Compiled
+  // terminology rules carry one, because a forbidden rendering is wrong only
+  // as a rendering of its concept.
+  {
+    name: "source condition: a forbidden rendering applies when the source bears the term",
+    ruleId: "term:baptize:forbidden:sumergir",
+    check: { type: "target-forbids", targetPattern: "sumergir", sourcePattern: "baptiz" },
+    source: "to baptize them",
+    target: "para sumergir la red",
+    flagged: true,
+  },
+  {
+    name: "source condition: it does not apply when the source lacks the term",
+    ruleId: "term:baptize:forbidden:sumergir",
+    check: { type: "target-forbids", targetPattern: "sumergir", sourcePattern: "baptiz" },
+    source: "to lower the net into the water",
+    target: "para sumergir la red",
+    flagged: false,
+  },
   {
     name: "regex syntax: `colou?r` forbids 'color' too",
     ruleId: "user-regex",

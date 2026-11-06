@@ -6,6 +6,13 @@ export interface CreateProjectOpts {
   target?: string
 }
 
+/** Anchored matcher for a locator `hasText` filter, so a cell whose text merely
+ * *contains* the name does not match. Escapes regex metacharacters because
+ * project names are user data. */
+function exactText(value: string): RegExp {
+  return new RegExp(`^\\s*${value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`)
+}
+
 /** Page object for the dashboard route ("/").
  *
  * Methods are user-intent verbs (createProject, openProject, deleteProject)
@@ -76,7 +83,7 @@ export class Dashboard {
     // same 15s budget, still waiting on the loaded overview.
     await expect(dialog).toBeHidden({ timeout: 10_000 })
     await expect(this.page).toHaveURL(/\/projects\/[^/?#]+(?:[?#].*)?$/, { timeout: 15_000 })
-    const heading = this.page.getByRole("heading", { name, exact: true })
+    const heading = this.projectOverviewHeading(name)
     await expect(async () => {
       // Genuine UI branch: unreachable banner vs loaded overview.
       const retry = this.page.getByRole("button", { name: /^Retry$/i })
@@ -84,6 +91,29 @@ export class Dashboard {
       await expect(heading).toBeVisible({ timeout: 3_000 })
     }).toPass({ timeout: 15_000 })
     return name
+  }
+
+  /** The project Overview page's title (`<h1>`, src/components/org/ProjectOverview.tsx).
+   *
+   * AQU-1664: a bare `getByRole("heading", { name })` also matched the
+   * "Created <name> in <destination>" success toast, whose title renders as an
+   * `<h2>` containing the project name — two headings, so Playwright's strict
+   * mode failed before the test could act. Pinning the name to an exact match
+   * *and* the level to 1 names the overview title and nothing else. Selector
+   * lives here so specs cannot re-introduce the loose lookup. */
+  projectOverviewHeading(name: string): Locator {
+    return this.page.getByRole("heading", { name, exact: true, level: 1 })
+  }
+
+  /** A project's name cell in the org Projects table (OrgProjectsDataTable).
+   *
+   * AQU-1664: asserting a project's presence/absence with `getByText(name)`
+   * read the whole page, so the create toast — on screen for several seconds
+   * after a create, and carrying the project name — and the Overview
+   * breadcrumb both counted as "the project is listed". Scoping to the table's
+   * own name cell asks the question the spec means: is there a row for it? */
+  projectRow(name: string): Locator {
+    return this.page.getByTestId("project-table-name").filter({ hasText: exactText(name) })
   }
 
   async openCreateProjectDialog(): Promise<Locator> {

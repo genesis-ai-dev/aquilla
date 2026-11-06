@@ -230,13 +230,14 @@ export const TERMINOLOGY_LINT_PARITY_CASES: TerminologyLintParityCase[] = [
     editor: ["term:jehovah:forbidden:Jehová"],
   },
   {
-    name: "forbidden: the editor flags a forbidden rendering even when the source lacks the term",
+    // AQU-1712: "sumergir" is an ordinary word here ("to submerge the net"),
+    // wrong only as a rendering of `baptize`. Both sides require the source to
+    // bear the concept, so neither flags this cell.
+    name: "forbidden: a forbidden rendering is not flagged when the source lacks the term",
     concepts: [BAPTIZE],
     source: "to lower the net into the water",
     target: "para sumergir la red en el agua",
-    editor: ["term:baptize:forbidden:sumergir"],
-    // Autopilot applies the intended source condition; the editor does not yet.
-    server: { flagged: [], until: "AQU-1712" },
+    editor: [],
   },
 
   // Never flagged.

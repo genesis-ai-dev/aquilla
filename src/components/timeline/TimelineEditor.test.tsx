@@ -1822,14 +1822,14 @@ describe("TimelineEditor — audio-first mode", () => {
     expect(screen.queryByTestId("tl-stand-in-info")).toBeNull()
   })
 
-  it("a file timed to a film only follows its source: plain text, why on a click, even for a lead (AQU-2204, AQU-2260)", async () => {
-    renderAt("dubbing", { onChangeTimingMode: vi.fn(), timingFilmTimed: true })
+  it("a file with a film can still be switched by a lead — nothing ever locks (Oct 27–28)", async () => {
+    const onChange = vi.fn()
+    renderAt("dubbing", { onChangeTimingMode: onChange, coreMediaUrl: "https://cdn.test/ep1/master.m3u8" })
     const control = screen.getByTestId("tl-timing-mode")
-    expect(control).toHaveAttribute("data-mode", "dubbing")
-    expect(control).toHaveAttribute("data-locked", "film")
-    expect(screen.queryByTestId("tl-timing-mode-trigger")).toBeNull()
-    expect(screen.getByTestId("tl-timing-mode-dubbing")).toHaveTextContent(/^Follows source$/)
-    await expectClickNote(screen.getByTestId("tl-timing-mode-reason"), /timed to the film, so it always follows its source/)
+    expect(control).not.toHaveAttribute("data-locked")
+    fireEvent.click(screen.getByTestId("tl-timing-mode-trigger"))
+    fireEvent.click(await screen.findByTestId("tl-timing-mode-audioFirst"))
+    expect(onChange).toHaveBeenCalledWith("audioFirst")
   })
 
   // Sam, 2026-10-15: the Bluetooth note sits beside the timing switch, its

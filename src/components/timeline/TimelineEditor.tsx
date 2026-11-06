@@ -550,10 +550,6 @@ export interface TimelineEditorProps {
    *  only one mode it can be in — a picker with a single choice, or a label
    *  saying so, is a question the user cannot act on. */
   hideTimingMode?: boolean
-  /** AQU-2204: the file is timed to a film (footage linked, or an audio cue
-   *  file), so it can only follow its source: the Timing control shows
-   *  "Follows source" as plain text with an (i) saying why. */
-  timingFilmTimed?: boolean
   /** AQU-2204 (board 24): the file has no times and no source recording, so
    *  there is nothing to follow: "Follows source" is greyed out with why. */
   timingSourceUnavailable?: boolean
@@ -1338,7 +1334,6 @@ export function TimelineEditor({
   timingMode = "dubbing",
   onChangeTimingMode,
   hideTimingMode = false,
-  timingFilmTimed = false,
   timingSourceUnavailable = false,
   soundSource,
   layoutControls,
@@ -4680,14 +4675,12 @@ export function TimelineEditor({
       {/* AQU-2204: the file's one Timing control ("Follows source" /
           "Follows recordings"), after Sources in the top bar (board 55).
           `onChangeTimingMode` absent = below project lead = plain text;
-          `timingFilmTimed` = a file timed to a film, which only follows its
-          source. */}
+          nothing else ever locks it (Sam, Oct 28). */}
       {!hideTimingMode && (
         <TimingModeControl
           size="bar"
           mode={timingMode}
           onChange={onChangeTimingMode}
-          filmTimed={timingFilmTimed}
           sourceUnavailable={timingSourceUnavailable}
           lengths={timingLengths}
           // AQU-2204: ONE (i) for the dashed stand-in lines, not one per chip

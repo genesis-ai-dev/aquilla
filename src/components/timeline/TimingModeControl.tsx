@@ -12,13 +12,13 @@
 // play controls, and that bar mounts this component as it is. Everything it
 // needs arrives as props, and it reaches into nothing.
 //
-// Three states, one shape ("⏱ <choice>", "Timing" on hover — canvas board
+// Two states, one shape ("⏱ <choice>", "Timing" on hover — canvas board
 // 55, option E: no "Timing:" label, and no length or (i) in the bar):
 //   - changeable: the choice is a dropdown with the two choices and a line each;
 //   - read-only (below project lead): the choice as plain text; a click on it
-//     says who can change it (AQU-2260: never on hover);
-//   - locked (a file timed to a film): "Follows source" as plain text; a click
-//     on it says the lines are timed to the film.
+//     says who can change it (AQU-2260: never on hover).
+// Nothing else locks it (Sam, Oct 28): a file with a film only STARTS on
+// "Follows source" (AQU-2227).
 //
 // Board 22 as drawn: the menu opens with "What decides how long each line is",
 // each choice shows how long the file comes out with it, and a last line says
@@ -65,8 +65,6 @@ export interface TimingModeControlProps {
   mode: AudioTimingMode
   /** Change THIS FILE's choice. Absent = below project lead: read-only. */
   onChange?(mode: AudioTimingMode): void
-  /** The file is timed to a film, so it can only follow its source. */
-  filmTimed?: boolean
   /** The file has no times and no source audio: nothing to follow, so it can
    *  only follow its recordings (board 24). */
   sourceUnavailable?: boolean
@@ -116,23 +114,21 @@ function TimingMenuInfoLine({ children, label, text, testId, lineTestId, classNa
 }
 
 export function TimingModeControl({
-  mode, onChange, filmTimed = false, sourceUnavailable = false, lengths, size = "default", standInInfo, className,
+  mode, onChange, sourceUnavailable = false, lengths, size = "default", standInInfo, className,
 }: TimingModeControlProps) {
   const bar = size === "bar"
   const t = useT()
-  // A film-timed file is shown as following its source whatever reaches here,
-  // and a file with nothing to follow as following its recordings: the
+  // A file with nothing to follow is shown as following its recordings: the
   // resolver already says so, and the control must never claim otherwise.
-  const shown: AudioTimingMode = filmTimed ? "dubbing" : sourceUnavailable ? "audioFirst" : mode
+  // Nothing else is ever locked (Sam, Oct 28).
+  const shown: AudioTimingMode = sourceUnavailable ? "audioFirst" : mode
   const name = t(TIMING_CHOICE_KEYS[shown].name)
-  const changeable = Boolean(onChange) && !filmTimed
-  const infoText = filmTimed
-    ? t("editor.timeline.timingLockedFilm")
-    : !changeable
-      ? t("editor.timeline.timingInfoReadOnly")
-      : sourceUnavailable
-        ? t("editor.timeline.timingInfoNothingToFollow")
-        : t("editor.timeline.timingInfo")
+  const changeable = Boolean(onChange)
+  const infoText = !changeable
+    ? t("editor.timeline.timingInfoReadOnly")
+    : sourceUnavailable
+      ? t("editor.timeline.timingInfoNothingToFollow")
+      : t("editor.timeline.timingInfo")
   const lengthOf = (m: AudioTimingMode): string | null => {
     const sec = lengths?.[m]
     return sec != null && Number.isFinite(sec) && sec > 0 ? formatFileLength(t, sec) : null
@@ -142,7 +138,7 @@ export function TimingModeControl({
     <div
       data-testid="tl-timing-mode"
       data-mode={shown}
-      data-locked={filmTimed ? "film" : changeable ? undefined : "role"}
+      data-locked={changeable ? undefined : "role"}
       className={cn("inline-flex shrink-0 items-center gap-1", bar ? "text-[0.8rem]" : "text-[11px]", className)}
     >
       {changeable ? (
@@ -225,8 +221,8 @@ export function TimingModeControl({
         </DropdownMenu>
       ) : (
         // Read-only: the choice as plain text. What the menu's (i) would say
-        // — who can change it, or that the film sets the timing — opens in a
-        // small note on a click of the text and shuts on a second click.
+        // — who can change it — opens in a small note on a click of the text
+        // and shuts on a second click.
         // AQU-2260 (Sam, Oct 29): nothing explains itself on hover, and a
         // short label that explains itself is its own button; board 55,
         // option E keeps the bar free of (i)s, so the text is that button.

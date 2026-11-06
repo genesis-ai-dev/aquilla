@@ -951,8 +951,6 @@ export const editor = defineNamespace({
       "Follows source keeps every line where the source puts it, with its pauses. Follows " +
       "recordings plays the lines back to back at their recordings' length. Only a project " +
       "lead or above can change this file's timing.",
-    "editor.timeline.timingLockedFilm":
-      "This file's lines are timed to the film, so it always follows its source.",
     "editor.timeline.standInInfoAria": "Why some lines show no times",
     "editor.timeline.standInInfo":
       "A line with no times of its own and no recording yet still takes room on the timeline, " +
@@ -7436,12 +7434,6 @@ export const editor = defineNamespace({
         description:
           "The same (i) tooltip for someone below project lead, who sees the timing as " +
           "plain text: the two choices in brief, then who can change it.",
-      },
-      "editor.timeline.timingLockedFilm": {
-        description:
-          "Tooltip of the (i) beside 'Timing: Follows source' on a file whose lines are " +
-          "timed to a film (a linked video, or an audio cue file): why it cannot follow its " +
-          "recordings.",
       },
       "editor.timeline.standInInfoAria": {
         description:

@@ -121,7 +121,7 @@ import { fileOrderedBy, infractionSeverity, isMediaFileType, isTranslationMemory
 import { resolveBibleEnrichment } from "../../db/shared/bible-enrichments"
 import { isBibleDataExperimentOn, isBibleOpen } from "@/lib/bible-data/experiment"
 import { hasNothingToFollow } from "@/lib/timeline/stand-in"
-import { isAudioCueFile, isExtensionDataFile, isFilmTimedFile, isHiddenTimelineFile, isSubtitleImportFile, resolveFileTimingMode, type AudioTimingMode } from "@/lib/parsers/types"
+import { isAudioCueFile, isExtensionDataFile, isHiddenTimelineFile, isSubtitleImportFile, linkSwitchesTimingToSource, resolveFileTimingMode, type AudioTimingMode } from "@/lib/parsers/types"
 import { isAutopilotVisible } from "@/lib/features/flags"
 import { isDiscourseFile } from "@/lib/contextual/discourse-file"
 import {
@@ -506,6 +506,7 @@ import { filmLabelFor, MediaTopBar } from "@/components/timeline/MediaTopBar"
 import { MediaStatusRing } from "@/components/timeline/MediaStatusRing"
 import { PanelMenuItemsContext, regionControls } from "@/components/timeline/MediaPanelChrome"
 import { TimingModeChangedDialog } from "./timeline/TimingModeChangedDialog"
+import { LinkVideoTimingDialog } from "./timeline/LinkVideoTimingDialog"
 import { useTimingModeAck } from "@/hooks/useTimingModeAck"
 import { PeerPresence } from "./PeerPresence"
 import { ViewSettingsMenu, type ViewSettingsMenuHandle } from "./ViewSettingsMenu"
@@ -2977,26 +2978,18 @@ export function ProjectWorkspace() {
   // timing-mode resolver. The hand-rolled check this replaced missed `sbv`,
   // which imports to exactly the same timed cues as the other two.
   const isSubtitleFile = isSubtitleImportFile(activeFile)
-  // AQU-1565 follow-up: a file linked to a YouTube video is timed to that
-  // video, so it defaults to Original timing and the Media view shows the
-  // video. The legacy project-level Free timing no longer reaches it; a Free
-  // timing chosen on the file itself (through the video-stays-hidden warning)
-  // still stands, so the timing control stays on these files.
-  const timedToLinkedVideo = youTubeVideoId(activeFile?.coreMediaUrl ?? "") != null
   // AQU-1704: which subtitle imports have only ONE timing mode available, and
   // so get no picker. Not "is a subtitle import" — that hid the control from
   // audio-only dubbing projects, whose source is an SRT with no video and for
   // which Free timing is the whole point. Read through the same predicate the
   // resolver uses so the picker and the mode can never disagree.
   //
-  // AQU-2204 (Sam, Oct 26): widened to every file TIMED TO A FILM — an audio
-  // cue file, whose cues transcribe the film. Those offer only "Follows
-  // source"; the control shows it with an (i). AQU-2253: a linked film on its
-  // own no longer counts — it runs on its own clock in both timings.
+  // AQU-2204 (Sam, Oct 26; corrected Oct 27–28): a file TIMED TO A FILM —
+  // footage linked of any kind, or an audio cue file — only STARTS on
+  // "Follows source"; a lead can still switch it. Nothing ever locks.
   const fileHasAudioCues = (hydratedProject?.files ?? []).some(
     (f) => isAudioCueFile(f) && f.anchorFileId === activeFileId,
   )
-  const timingFilmTimed = isFilmTimedFile({ hasAudioCues: fileHasAudioCues })
   // AQU-2204 (board 24): a file whose lines have no times and no source
   // recording has NOTHING TO FOLLOW, so it follows its recordings and the
   // control greys "Follows source" out. AQU-1758: every file has the timeline
@@ -3012,10 +3005,9 @@ export function ProjectWorkspace() {
   // AQU-646 SUB-53 / pre-merge round: which job THIS FILE is for. The mode is
   // file-level (files.meta via file.timing.set); a file with no mode of its
   // own inherits the legacy project-level value (so projects that chose Free
-  // timing in Project Settings keep it), else "Follows source". AQU-2204: a
-  // file timed to a film always follows its source.
+  // timing in Project Settings keep it), else "Follows source". AQU-2227: a
+  // file timed to a film STARTS on Follows source; its own choice still wins.
   const timingMode = resolveFileTimingMode(activeFile, project ?? undefined, {
-    timedToLinkedVideo,
     hasAudioCues: fileHasAudioCues,
     nothingToFollow: timingNothingToFollow,
   })
@@ -3024,7 +3016,6 @@ export function ProjectWorkspace() {
   // flips the resolved mode the moment a file's lines load, and nobody changed
   // anything.
   const timingChoiceMode = resolveFileTimingMode(activeFile, project ?? undefined, {
-    timedToLinkedVideo,
     hasAudioCues: fileHasAudioCues,
   })
 
@@ -4493,9 +4484,9 @@ export function ProjectWorkspace() {
   // rather than letting the dialog close on a write that never happened.
   //
   // AQU-1748: linking or clearing footage can flip the file's RESOLVED timing
-  // mode as a side effect (AQU-2253: a file with no timing of its own starts on
-  // Follows source once a film is linked, whatever its project's old Free
-  // timing setting says; clearing it brings that back). Register that as our
+  // mode as a side effect (AQU-2227: a file with no choice of its own starts on
+  // Follows source once a film is linked, and clearing the film takes it back
+  // to the project's mode). Register that as our
   // own write, or useTimingModeAck reads it as a collaborator's change and
   // blames "someone with settings access" for the user's own click. `timingAck`
   // is declared far below this callback, so it is reached through a ref that
@@ -4570,17 +4561,36 @@ export function ProjectWorkspace() {
     },
     [activeFileId, readFilmLink, writeFilmLink],
   )
+  // Flow B (2026-08-05; AQU-2227): linking a film that will move the file onto
+  // Follows source says so first. NOTE the mode is computed INLINE — the
+  // `timingMode` const is declared ~2,700 lines below this callback (a
+  // temporal-dead-zone hazard in the deps). Pre-merge round: the mode is
+  // per-FILE now, resolved off the active file.
+  const [pendingVideoUrl, setPendingVideoUrl] = useState<string | null>(null)
   /** The URL dialog lives here rather than in the timeline toolbar, because the
    *  video pane offers the same action from its could-not-load state. */
   const [linkVideoOpen, setLinkVideoOpen] = useState(false)
-  // AQU-2253: linking a film no longer asks first. A film runs on its own
-  // clock in both timings, so a file that follows its recordings keeps doing
-  // so (the "Linking a film makes this file follow its source" dialog went).
   const handleLinkVideo = useCallback(
     (url: string | null) => {
-      void applyLinkVideo(url)
+      // AQU-2227: a film only STARTS a file on Follows source, so linking one
+      // switches a file that follows its recordings only when it has no choice
+      // of its own and something to follow. Say so first in that case alone; a
+      // file whose own choice stands is linked without a dialog that would
+      // promise a switch that never happens. AQU-2253 runs the film on its own
+      // clock in both timings, but a film still starts a file with no choice
+      // of its own on Follows source, so that one switch is still real.
+      if (
+        linkSwitchesTimingToSource(activeFile, project ?? undefined, url, {
+          hasAudioCues: fileHasAudioCues,
+          nothingToFollow: timingNothingToFollow,
+        })
+      ) {
+        setPendingVideoUrl(url)
+        return
+      }
+      void applyLinkVideo(url) // clearing never prompts
     },
-    [applyLinkVideo],
+    [activeFile, project, applyLinkVideo, fileHasAudioCues, timingNothingToFollow],
   )
 
   // ── AQU-646 stage 2: the audio VTT's cues ────────────────────────────────
@@ -13690,7 +13700,7 @@ export function ProjectWorkspace() {
     [canEditLines, placement, insertSlots, rowActions],
   )
 
-  // (AQU-2204: `timingMode` is resolved up beside `timingFilmTimed`, so the row
+  // (AQU-2204: `timingMode` is resolved up beside the film check, so the row
   // context and the link-video prompt can read it without a TDZ hazard.)
   // AQU-646 stage 2: which rows a file derives is a question about the file,
   // and this is the only place that can answer it — tracks.ts is deliberately
@@ -14007,10 +14017,10 @@ export function ProjectWorkspace() {
     })
     return durations.length ? Math.max(...durations) : undefined
   }, [videoDurationForTable, audioMergedCells])
-  // Flow A (file-scoped): switching a file that HAS a linked video to Free
-  // timing hides the video — confirm before emitting. Holds the FILE the
-  // warning was raised for, not a bare flag, so the confirm can only ever
-  // apply to that file.
+  // Whether the film shows. A file that follows its recordings hides it, and
+  // the timeline's own notice says why. Nothing asks before that switch: Flow
+  // A's confirm went with the AQU-2204 lock and was not brought back when
+  // AQU-2227 let a lead switch a file with a film.
   const showVideoPane = shouldShowVideoPane({
     timelineStacked,
     coreMediaUrl: activeFile?.coreMediaUrl,
@@ -14468,11 +14478,6 @@ export function ProjectWorkspace() {
   )
   const handleChangeTimingMode = useCallback(
     (mode: AudioTimingMode) => {
-      // AQU-646, rescoped by AQU-1704 and AQU-2204: a file timed to a film has
-      // no "Follows recordings" to switch to, and the control offers none.
-      // Silent because it is unreachable from the UI; this exists so no
-      // programmatic caller can write a mode the resolver would then ignore.
-      if (mode === "audioFirst" && timingFilmTimed) return
       // AQU-2204 (board 24): with nothing to follow, Follows source isn't offered.
       if (mode === "dubbing" && timingNothingToFollow) return
       if (!activeFileId) return
@@ -14488,7 +14493,7 @@ export function ProjectWorkspace() {
       }
       void applyTimingMode(mode, activeFileId)
     },
-    [activeFileId, timingFilmTimed, timingNothingToFollow, applyTimingMode],
+    [activeFileId, timingNothingToFollow, applyTimingMode],
   )
   // AQU-1767 phase 2: one track action is one history step. Each change keeps
   // the fields its verb wrote, as they were before and as they are after;
@@ -18128,7 +18133,6 @@ export function ProjectWorkspace() {
                     // still draw the read-only label, and its "only a
                     // maintainer can change this" title would be a lie — a
                     // maintainer cannot change it here either.
-                    timingFilmTimed={timingFilmTimed}
                     timingSourceUnavailable={timingNothingToFollow}
                     // Media redesign, layout: Full screen, Fold and the ⋯, in
                     // the timeline's corner cell beside "Tracks".
@@ -19692,6 +19696,15 @@ export function ProjectWorkspace() {
           }
         />
       )}
+      <LinkVideoTimingDialog
+        open={pendingVideoUrl !== null}
+        onCancel={() => setPendingVideoUrl(null)}
+        onLinkAnyway={() => {
+          const u = pendingVideoUrl
+          setPendingVideoUrl(null)
+          if (u) void applyLinkVideo(u)
+        }}
+      />
       {/* FRO-272: "Recently deleted" trash list — opened from the pinned
           sidebar row (project_lead+); was an inline expander in the files panel. */}
       <Dialog open={trashOpen} onOpenChange={setTrashOpen}>

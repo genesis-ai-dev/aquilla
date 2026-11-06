@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event"
 import type { ReactNode } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { Toaster, toast } from "@/components/ui/toast"
+import type { BundleEventName, BundleEventPayloads, StagedBundle } from "@/lib/offline/bundle-update"
 import { events, schema } from "@/lib/offline/schema"
 import { DesktopUpdatePrompt, type DesktopUpdateCommands } from "./DesktopUpdatePrompt"
 
@@ -74,15 +75,40 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-function fakeCommands(version: string | null = "1.2.0"): DesktopUpdateCommands & {
+type BundleListeners = { [Name in BundleEventName]: Set<(payload: BundleEventPayloads[Name]) => void> }
+
+type FakeCommands = DesktopUpdateCommands & {
   download: ReturnType<typeof vi.fn>
   install: ReturnType<typeof vi.fn>
-} {
+  checkBundle: ReturnType<typeof vi.fn>
+  restart: ReturnType<typeof vi.fn>
+  /** Fires a shell event into whatever the component subscribed. */
+  emit: <Name extends BundleEventName>(name: Name, payload: BundleEventPayloads[Name]) => void
+}
+
+function fakeCommands(version: string | null = "1.2.0", staged: StagedBundle | null = null): FakeCommands {
+  const listeners: BundleListeners = {
+    "bundle://staged": new Set(),
+    "bundle://shell-outdated": new Set(),
+    "bundle://rolled-back": new Set(),
+  }
   return {
     download: vi.fn(async () => (version ? { version, notes: null } : null)),
     install: vi.fn(async () => {}),
+    checkBundle: vi.fn(async () => staged),
+    restart: vi.fn(async () => {}),
+    subscribe: (name, onEvent) => {
+      const set = listeners[name] as Set<typeof onEvent>
+      set.add(onEvent)
+      return () => set.delete(onEvent)
+    },
+    emit: (name, payload) => {
+      for (const listener of listeners[name]) listener(payload)
+    },
   }
 }
+
+const STAGED: StagedBundle = { version: "2026.11.05.03", sha: "abc123" }
 
 function renderPrompt(commands: DesktopUpdateCommands, graceMs = 60_000) {
   return render(
@@ -180,8 +206,8 @@ describe("DesktopUpdatePrompt", () => {
     const commands = fakeCommands()
     renderPrompt(commands)
 
-    expect(await screen.findByText(/couldn't check whether all your changes have reached the server/)).toBeInTheDocument()
-    expect(screen.queryByText("Aquilla 1.2.0 is ready to install.")).toBeNull()
+    expect(await screen.findByText("Aquilla 1.2.0 is ready to install.")).toBeInTheDocument()
+    expect(screen.getByText(/couldn't confirm that every change has reached the server/)).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Update anyway" }))
     expect(commands.install).toHaveBeenCalledTimes(1)
   })
@@ -218,8 +244,9 @@ describe("DesktopUpdatePrompt", () => {
     outboxUnreadable = true
     renderPrompt(fakeCommands())
 
-    expect(await screen.findByText(/couldn't check whether all your changes have reached the server/)).toBeInTheDocument()
-    expect(screen.queryByText("Aquilla 1.2.0 is ready to install.")).toBeNull()
+    expect(await screen.findByText("Aquilla 1.2.0 is ready to install.")).toBeInTheDocument()
+    expect(screen.getByText(/couldn't confirm that every change has reached the server/)).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Restart to update" })).toBeNull()
   })
 
   it("ignores a second click after the install has started the shutdown", async () => {
@@ -258,5 +285,122 @@ describe("DesktopUpdatePrompt", () => {
 
     await user.click(await screen.findByRole("button", { name: "Restart to update" }))
     await waitFor(() => expect(screen.queryByRole("button", { name: "Restart to update" })).toBeNull())
+  })
+
+  describe("staged hot bundle", () => {
+    it("offers a restart straight away when a bundle is staged and nothing is queued", async () => {
+      const user = userEvent.setup()
+      const commands = fakeCommands(null, STAGED)
+      renderPrompt(commands)
+
+      expect(await screen.findByText("Aquilla 2026.11.05.03 is ready to install.")).toBeInTheDocument()
+      await user.click(screen.getByRole("button", { name: "Restart to update" }))
+      // A hot bundle applies on relaunch; the shell installer must not run.
+      expect(commands.restart).toHaveBeenCalledTimes(1)
+      expect(commands.install).not.toHaveBeenCalled()
+    })
+
+    it("never offers the restart while offline edits are still queued, then offers it once they land", async () => {
+      // The staged bundle applies on the next launch, so restarting with a
+      // non-empty queue would be exactly the data loss update-gate.ts exists to prevent.
+      store!.commit(queued("q1"))
+      const commands = fakeCommands(null, STAGED)
+      renderPrompt(commands)
+      await waitFor(() => expect(commands.checkBundle).toHaveBeenCalled())
+      await settle()
+      expect(screen.queryByText(/is ready/)).toBeNull()
+      expect(screen.queryByRole("button", { name: "Restart to update" })).toBeNull()
+
+      act(() => store!.commit(events.eventDequeued({ id: "q1" })))
+      expect(await screen.findByText("Aquilla 2026.11.05.03 is ready to install.")).toBeInTheDocument()
+      expect(commands.restart).not.toHaveBeenCalled()
+    })
+
+    it("holds the restart while the IndexedDB outbox still has edits", async () => {
+      outbox = { count: 1, failed: 0 }
+      const commands = fakeCommands(null, STAGED)
+      renderPrompt(commands)
+      await waitFor(() => expect(commands.checkBundle).toHaveBeenCalled())
+      await settle()
+      expect(screen.queryByText(/is ready/)).toBeNull()
+
+      act(() => setOutbox({ count: 0, failed: 0 }))
+      expect(await screen.findByText("Aquilla 2026.11.05.03 is ready to install.")).toBeInTheDocument()
+    })
+
+    it("does not check for a staged bundle while offline, and checks once back online", async () => {
+      online = false
+      const commands = fakeCommands(null, STAGED)
+      const view = renderPrompt(commands)
+      await settle()
+      expect(commands.checkBundle).not.toHaveBeenCalled()
+
+      online = true
+      view.rerender(
+        <>
+          <Toaster />
+          <DesktopUpdatePrompt commands={commands} graceMs={60_000} />
+        </>,
+      )
+      expect(await screen.findByText("Aquilla 2026.11.05.03 is ready to install.")).toBeInTheDocument()
+    })
+
+    it("offers a bundle the shell stages after mount via bundle://staged", async () => {
+      const commands = fakeCommands(null, null)
+      renderPrompt(commands)
+      await waitFor(() => expect(commands.checkBundle).toHaveBeenCalled())
+      await settle()
+      expect(document.querySelector('[data-slot="toast"]')).toBeNull()
+
+      act(() => commands.emit("bundle://staged", STAGED))
+      expect(await screen.findByText("Aquilla 2026.11.05.03 is ready to install.")).toBeInTheDocument()
+    })
+
+    it("prefers the shell update when both are pending, since installing it relaunches anyway", async () => {
+      const user = userEvent.setup()
+      const commands = fakeCommands("1.2.0", STAGED)
+      renderPrompt(commands)
+
+      expect(await screen.findByText("Aquilla 1.2.0 is ready to install.")).toBeInTheDocument()
+      await user.click(screen.getByRole("button", { name: "Restart to update" }))
+      expect(commands.install).toHaveBeenCalledTimes(1)
+      expect(commands.restart).not.toHaveBeenCalled()
+    })
+
+    it("re-runs the shell update check at once when the shell is too old for the newest bundle", async () => {
+      const commands = fakeCommands(null)
+      renderPrompt(commands)
+      await waitFor(() => expect(commands.download).toHaveBeenCalledTimes(1))
+
+      commands.download.mockResolvedValue({ version: "1.3.0", notes: null })
+      act(() => commands.emit("bundle://shell-outdated", { minShellVersion: "1.3.0" }))
+      expect(await screen.findByText("Aquilla 1.3.0 is ready to install.")).toBeInTheDocument()
+    })
+
+    it("warns once when the shell rolled back a bundle that never booted", async () => {
+      const commands = fakeCommands(null)
+      renderPrompt(commands)
+      await settle()
+
+      act(() => commands.emit("bundle://rolled-back", { version: "2026.11.05.02" }))
+      act(() => commands.emit("bundle://rolled-back", { version: "2026.11.05.02" }))
+      expect(
+        await screen.findAllByText("Aquilla reverted to the previous version after an update failed to start."),
+      ).toHaveLength(1)
+    })
+
+    it("keeps the offer up when the relaunch fails, since the bundle is still staged", async () => {
+      const user = userEvent.setup()
+      vi.spyOn(console, "warn").mockImplementation(() => {})
+      const commands = fakeCommands(null, STAGED)
+      commands.restart.mockRejectedValueOnce(new Error("relaunch refused"))
+      renderPrompt(commands)
+
+      const button = await screen.findByRole("button", { name: "Restart to update" })
+      await user.click(button)
+      await settle()
+      await user.click(button)
+      expect(commands.restart).toHaveBeenCalledTimes(2)
+    })
   })
 })

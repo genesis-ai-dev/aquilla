@@ -99,6 +99,10 @@ pub fn start_connectivity_loop(app: tauri::AppHandle) {
             let prev = STATE.swap(state_for(online), Ordering::Relaxed);
             if state_changed(prev, state_for(online)) {
                 let _ = app.emit("connectivity://changed", serde_json::json!({ "online": online }));
+                // The launch check covers UNKNOWN→ONLINE; this is the reconnect case.
+                if prev == OFFLINE && online {
+                    crate::hot_bundle::on_online(app.clone());
+                }
             }
             tokio::time::sleep(POLL_INTERVAL).await;
         }

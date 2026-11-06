@@ -44,13 +44,9 @@ import { takeTrackVars } from "@/lib/timeline/take-colors"
 import { TRACK_DOT_CLASS } from "@/lib/timeline/track-colors"
 import { persistTakeTrim, trimMs } from "@/lib/audio/persist-trim"
 import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
-import { transcribeCell } from "@/lib/audio/transcribe"
-import { isSourceSegmentSelected } from "@/lib/audio/batch-audio"
+import { transcribeTake } from "@/lib/audio/transcribe-take"
 import { isGeneratedTake } from "@/lib/audio/track-audio"
-import { laneLanguageForTag } from "@/lib/lanes/lane-language"
-import { laneLanguage } from "@/lib/lanes/lane-display"
 import { saveTranscript } from "@/lib/transcript-cleanup/save"
-import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { tokenizeWords } from "@/lib/audio/timings"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { fmtShortCalendarDate } from "@/lib/format-date"
@@ -296,36 +292,24 @@ function CellTakeBlockView({
 
   const handleTranscribe = useCallback(async () => {
     if (!selectedAudioId) return
-    // The ASR language follows the AUDIO, by provenance: an imported media
-    // segment is source speech, every take voices the target text.
-    const sourceLane = project.lanes?.find((lane) => lane.role === "source")
-    const language = isSourceSegmentSelected(owner)
-      ? laneLanguage(sourceLane ?? { role: "source" }, {
-          role: "source",
-          legacyTag: sourceLane?.legacyTag ?? null,
-        })
-      : laneLanguageForTag(targetLang ?? "", project.lanes) ?? undefined
-    // THIS take, on its own slot: the transcriber reads the cell's selected
-    // recording, which for a take on an added track is a different take —
-    // that block used to transcribe the default track's recording instead.
-    await transcribeCell({
-      cell: { ...owner, selectedAudioId },
+    // AQU-1619: the sequence (language by provenance, run, flush, poke the
+    // owner's attachment read) lives in `transcribe-take.ts`, because the
+    // source/target row's Retry runs exactly the same one. THIS take, on its
+    // own slot: the transcriber reads the cell's selected recording, which for
+    // a take on an added track is a different take — that block used to
+    // transcribe the default track's recording instead. A split take is
+    // transcribed whole (Sam, 2026-10-14). For a linked take the owner is the
+    // cue sibling, which is the read the row's linked takes are drawn from.
+    await transcribeTake({
+      project,
+      owner,
+      selectedAudioId,
       slot: attachment?.slot,
       session,
-      projectId: project.id,
-      language,
-      // AQU-1978: the timings are written in this lane, never the `''` one.
       ...(targetLang ? { targetLang } : {}),
-      askAgain: true,
-      // A split take is transcribed whole (Sam, 2026-10-14).
       ...(split ? { pieces: split } : {}),
+      ...(onCommitted ? { onCommitted } : {}),
     })
-    // The transcript rides a queued cell.audio.attach — flush it, then poke the
-    // OWNER's file so its attachment read picks the timings up. For a linked
-    // take that is the cue sibling, which is exactly the read the row's linked
-    // takes are drawn from.
-    await onCommitted?.(owner.id)
-    notifyAudioAttachmentsChanged(owner.fileId)
   }, [owner, selectedAudioId, attachment?.slot, session, project, targetLang, onCommitted, split])
 
   // AQU-981: "Join into one recording" — a split take (cut, or uploaded in

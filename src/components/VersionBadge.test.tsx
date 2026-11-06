@@ -1,71 +1,43 @@
-import { render, screen } from "@testing-library/react"
-import { MemoryRouter } from "react-router-dom"
+// AQU-2260 (Sam, Oct 29): the environment badge says what it means on a click,
+// never on hover; the build button's hover only shows the build it copies.
 import { describe, expect, it } from "vitest"
-import { I18nProvider } from "@/lib/i18n/I18nProvider"
+import { screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { MemoryRouter } from "react-router-dom"
+import { renderWithTooltips, expectClickNote } from "@/test-utils/tooltip"
 import { InFlowVersionProvider, VersionBadge, VersionTag } from "./VersionBadge"
 
-/**
- * The floating <VersionBadge/> exists for pages with no chrome. Wherever a page
- * renders its own in-flow version line (the AppShell rail footer, an auth-page
- * footer), the floating one must disappear — otherwise it stacks on the rail
- * footer and covers the account switcher, Help and localization. The decision is
- * driven by what is mounted, not by a route list, so a page that adopts AppShell
- * without anyone remembering a list (the Paratext bridge pages did) still works.
- */
-function renderApp(page: React.ReactNode, { withProvider = true } = {}) {
-  const tree = (
-    <>
-      {page}
-      <VersionBadge />
-    </>
-  )
-  return render(
-    <MemoryRouter initialEntries={["/paratext"]}>
-      <I18nProvider>
-        {withProvider ? <InFlowVersionProvider>{tree}</InFlowVersionProvider> : tree}
-      </I18nProvider>
-    </MemoryRouter>,
-  )
-}
-
-const copyButtons = () => screen.getAllByRole("button", { name: "Copy build info" })
-
-describe("floating VersionBadge", () => {
-  it("shows on a page with no in-flow version line", () => {
-    renderApp(null)
-    expect(copyButtons()).toHaveLength(1)
+describe("VersionTag", () => {
+  it("the build button's hover names the build and nothing more", async () => {
+    renderWithTooltips(<MemoryRouter><VersionTag /></MemoryRouter>)
+    await userEvent.setup().hover(screen.getByRole("button", { name: "Copy build info" }))
+    const tip = await screen.findByRole("tooltip")
+    expect(tip.textContent).not.toMatch(/Click to copy/)
   })
 
-  it("stands down while a rail VersionTag is mounted, whatever the route", () => {
-    renderApp(<VersionTag />)
-    // Only the rail's own copy button remains.
-    expect(copyButtons()).toHaveLength(1)
-    expect(screen.queryByText(/^v\d/, { selector: "span.max-w-\\[min\\(70vw\\,24rem\\)\\]" })).toBeNull()
+  it("the environment badge says what it means, on click", async () => {
+    renderWithTooltips(<MemoryRouter><VersionTag /></MemoryRouter>)
+    const badge = screen.queryByRole("button", { name: /Not production/ })
+    // Production builds draw no badge at all; every test build is not production.
+    expect(badge).not.toBeNull()
+    await expectClickNote(badge!, /nothing you see here is production data/)
+  })
+})
+
+describe("VersionBadge", () => {
+  it("auth pages show one inline build control instead of a floating duplicate", () => {
+    // AQU-2439: the floating badge stands down because the inline one is
+    // mounted, not because of the route — so the provider is what matters here.
+    renderWithTooltips(<MemoryRouter initialEntries={["/join"]}>
+      <InFlowVersionProvider><VersionBadge /><VersionBadge inline /></InFlowVersionProvider>
+    </MemoryRouter>)
+    expect(screen.getAllByRole("button", { name: "Copy build info" })).toHaveLength(1)
   })
 
-  it("stands down while an inline auth-footer badge is mounted", () => {
-    renderApp(<VersionBadge inline />)
-    expect(copyButtons()).toHaveLength(1)
-  })
-
-  it("comes back once the in-flow line unmounts", () => {
-    const { rerender } = renderApp(<VersionTag />)
-    expect(copyButtons()).toHaveLength(1)
-    rerender(
-      <MemoryRouter initialEntries={["/paratext"]}>
-        <I18nProvider>
-          <InFlowVersionProvider>
-            <VersionBadge />
-          </InFlowVersionProvider>
-        </I18nProvider>
-      </MemoryRouter>,
-    )
-    expect(copyButtons()).toHaveLength(1)
-    expect(document.querySelector(".fixed.bottom-3")).not.toBeNull()
-  })
-
-  it("renders without a provider (standalone tests of VersionTag)", () => {
-    renderApp(<VersionTag />, { withProvider: false })
-    expect(copyButtons()).toHaveLength(2)
+  it("the floating build button's hover names the build and nothing more", async () => {
+    renderWithTooltips(<MemoryRouter initialEntries={["/not-found"]}><VersionBadge /></MemoryRouter>)
+    await userEvent.setup().hover(screen.getByRole("button", { name: "Copy build info" }))
+    const tip = await screen.findByRole("tooltip")
+    expect(tip.textContent).not.toMatch(/Click to copy/)
   })
 })

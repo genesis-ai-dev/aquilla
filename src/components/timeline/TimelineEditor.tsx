@@ -58,7 +58,7 @@ import { canCutAt } from "@/lib/audio/cut-take"
 import { isTextEntryTarget } from "@/lib/history/arbiter"
 import { deriveLanes } from "@/lib/timeline/lanes"
 import { standInEstimator } from "@/lib/timeline/stand-in"
-import { layOutProgramme } from "@/lib/timeline/programme"
+import { layOutProgramme, programmeLines, recordingsLines } from "@/lib/timeline/programme"
 import { hasTiming } from "@/lib/timeline/derive"
 import { deriveSourceRegions, EMPTY_SOURCE_REGIONS } from "@/lib/timeline/source-regions"
 import { isUserAddedLine } from "@/lib/timeline/user-lines"
@@ -2199,14 +2199,27 @@ export function TimelineEditor({
     () => JSON.parse(programmeTracksKey) as ReturnType<typeof programmeTrackSlots>,
     [programmeTracksKey],
   )
+  // Group D (Nov 5): a file with an audio cue file keeps its takes on the cue
+  // sheet's heard lines (`targetCells`, merged with their audio), so following
+  // the recordings it is THEIR lines that are laid end to end, as the
+  // transport plays them (`recordingsLines`). The subtitle cards and the
+  // Source cues row stay with the film, on the film's clock.
+  const recordedCells = recordingsLines(cells, audioCues ? targetCells : null, true)
+  const heardLines = useMemo(
+    () => (recordedCells === cells ? null : programmeLines(recordedCells).lines),
+    [recordedCells, cells],
+  )
   const timingLengths = useMemo(() => {
     let sourceEnd = 0
     for (const c of cells) if (hasTiming(c) && typeof c.endTime === "number") sourceEnd = Math.max(sourceEnd, c.endTime)
     const filmSec = subtitleFileWithFootage && videoDurationSec ? videoDurationSec : 0
     // AQU-1758: the same layout the transport plays and the bottom strip shows.
-    const recorded = layOutProgramme(cells, programmeTracks).programme
+    const recorded = layOutProgramme(recordedCells, programmeTracks).programme
     return { dubbing: Math.max(sourceEnd, filmSec) || null, audioFirst: recorded.totalSec || null }
-  }, [cells, subtitleFileWithFootage, videoDurationSec, programmeTracks])
+  }, [cells, recordedCells, subtitleFileWithFootage, videoDurationSec, programmeTracks])
+  // The lines this file's programme is laid out from: an imported recording's
+  // sections, else the heard lines of an audio cue file, else the subtitles.
+  const programmeCells = dialogue.length > 0 ? dialogue : (heardLines ?? subtitle)
   // SUB-53: the single answer to "where does this go on the track?". Dubbing
   // returns the pre-SUB-53 geometry verbatim; audio-first returns the laid-out
   // programme. Everything below reads positions through this.
@@ -2217,15 +2230,15 @@ export function TimelineEditor({
         cells,
         // AQU-1704: Free timing on a video-less subtitle import. No media cells,
         // so the cues are the verses; export stitches them the same way.
-        dialogue.length > 0 ? dialogue : subtitle,
+        programmeCells,
         subtitleFileWithFootage ? videoDurationSec : null,
         // AQU-2204: following the recordings, every unrecorded line takes a
         // stand-in length from its words, timed file or not. AQU-2252: the
         // takes on the file's added tracks set their lines' lengths too, but
         // for the tracks made layers.
-        { standInLenSec: standInEstimator(dialogue.length > 0 ? dialogue : subtitle), ...programmeTracks },
+        { standInLenSec: standInEstimator(programmeCells), ...programmeTracks },
       ),
-    [timingMode, cells, dialogue, subtitle, subtitleFileWithFootage, videoDurationSec, programmeTracks],
+    [timingMode, cells, programmeCells, subtitleFileWithFootage, videoDurationSec, programmeTracks],
   )
   // AQU-2267 (Sam, Oct 29): the OTHER timing, laid out the same way. A move
   // moves a take by the same distance in both timings, each held by its own
@@ -2238,7 +2251,7 @@ export function TimelineEditor({
   const getOtherLayout = useCallback((): TimelineLayout => {
     const other: AudioTimingMode = timingMode === "audioFirst" ? "dubbing" : "audioFirst"
     const lanes = timelineLanes(cells, other)
-    const lines = lanes.dialogue.length > 0 ? lanes.dialogue : lanes.subtitle
+    const lines = lanes.dialogue.length > 0 ? lanes.dialogue : (heardLines ?? lanes.subtitle)
     return buildTimelineLayout(
       other,
       cells,
@@ -2246,7 +2259,7 @@ export function TimelineEditor({
       subtitleFileWithFootage ? videoDurationSec : null,
       { standInLenSec: standInEstimator(lines), ...programmeTracks },
     )
-  }, [timingMode, cells, subtitleFileWithFootage, videoDurationSec, programmeTracks])
+  }, [timingMode, cells, heardLines, subtitleFileWithFootage, videoDurationSec, programmeTracks])
   // The TEXT cues' regions. NOTHING RENDERS THESE ANY MORE — the band they fed
   // is gone. They survive for `addableSpans` below, i.e. for the two places that
   // ask "is there a stretch of film here with no line on it": the pencil in the

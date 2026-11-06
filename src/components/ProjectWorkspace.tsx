@@ -352,7 +352,7 @@ import {
 import { deriveSourceRegions, insertSlotsByCell, EMPTY_INSERT_SLOTS } from "@/lib/timeline/source-regions"
 import { deriveTracksForFile } from "@/lib/timeline/tracks"
 import { filmKindOf, filmPiecesFor, filmVoicesProgramme } from "@/lib/timeline/film-pieces"
-import { layOutProgramme } from "@/lib/timeline/programme"
+import { layOutProgramme, recordingsLines } from "@/lib/timeline/programme"
 import { nextFolderName } from "@/lib/timeline/track-names"
 import { applyPendingOrders, renormaliseOrders, settledPendingOrders } from "@/lib/timeline/track-reorder"
 import { folderIdsOf, folderMembers, orderForScopeAppend, trackScope } from "@/lib/timeline/track-groups"
@@ -14300,7 +14300,12 @@ export function ProjectWorkspace() {
   // AQU-1118: which row is playing right now, so its "Play from this cue"
   // button can turn into Pause. The bottom bar's own answer, from the same hook
   // and the same inputs, so the row and the bar can never disagree about it.
-  const fileCellIds = useMemo(() => new Set(audioMergedCells.map((c) => c.id)), [audioMergedCells])
+  // Group D: following the recordings, a file with an audio cue file plays its
+  // heard lines (`playbackCells` below), so the queue on them is this file's.
+  const fileCellIds = useMemo(
+    () => new Set([...audioMergedCells, ...recordingsLines([], audioCueCells, timingMode === "audioFirst")].map((c) => c.id)),
+    [audioMergedCells, audioCueCells, timingMode],
+  )
   const anyFileCellClockIsFileTime = useMemo(
     () => audioMergedCells.some((c) => queueClockIsFileTime(c)),
     [audioMergedCells],
@@ -14354,13 +14359,28 @@ export function ProjectWorkspace() {
     () => scopeCells(timelineLines, timelineChapter),
     [timelineLines, timelineChapter],
   )
+  // Group D (Nov 5): what Play all, Space and a timeline seek play. Following
+  // the recordings, a file with an audio cue file plays its heard lines — its
+  // takes live on them, never on its subtitle lines — laid out as the
+  // timeline draws them (`recordingsLines`). Every other file: its own lines.
+  const playbackCells = useMemo(
+    () => recordingsLines(timelineCells, audioCueCells, timingMode === "audioFirst"),
+    [timelineCells, audioCueCells, timingMode],
+  )
+  // The film follows the queue on the lines it plays, and captions the one
+  // playing: the heard lines too, when it plays them.
+  const filmPaneCells = useMemo(
+    () => (playbackCells === timelineCells ? audioMergedCells : [...audioMergedCells, ...playbackCells]),
+    [playbackCells, timelineCells, audioMergedCells],
+  )
   // The bottom strip reads its own audio and merges it in; it gets the same
-  // lines by id.
+  // lines by id (the heard lines, already merged, when it plays them).
   const timelineBarCells = useMemo(() => {
+    if (playbackCells !== timelineCells) return playbackCells
     if (timelineCells === audioMergedCells) return legacyCells
     const ids = new Set(timelineCells.map((c) => c.id))
     return legacyCells.filter((c) => ids.has(c.id))
-  }, [audioMergedCells, legacyCells, timelineCells])
+  }, [audioMergedCells, legacyCells, timelineCells, playbackCells])
   // A book's chapter comes from the table: the chapter on screen, as it
   // scrolls. Scrolling is reading, never a pick, so it leaves playback alone —
   // a paused Play all resumes where it was, and the timeline stays on its
@@ -15661,9 +15681,9 @@ export function ProjectWorkspace() {
   const filmPieces = useMemo(
     () =>
       filmKind === "imported" && timingMode === "audioFirst"
-        ? filmPiecesFor(layOutProgramme(timelineCells, programmeTracks).programme)
+        ? filmPiecesFor(layOutProgramme(playbackCells, programmeTracks).programme)
         : null,
-    [filmKind, timingMode, timelineCells, programmeTracks],
+    [filmKind, timingMode, playbackCells, programmeTracks],
   )
   const layerTrackSlotsKey = programmeTracks.layerTrackSlots.join("\u0000")
   useEffect(() => {
@@ -15688,13 +15708,14 @@ export function ProjectWorkspace() {
         timing: timingMode,
         runs: timelineScopes.length > 0
           ? timelineScopes.map((chapter) => scopeCells(timelineLines, chapter))
-          : [timelineLines],
+          // Group D: a cue file following the recordings plays its heard lines.
+          : [playbackCells !== timelineCells ? playbackCells : timelineLines],
         clockCells: virtualIsTransport ? dubDriverCells : null,
         slots: targetSlots,
         // AQU-2252: laid out with the tracks the queue plays them with.
         tracks: programmeTracks,
       }),
-    [timingMode, timelineScopes, timelineLines, virtualIsTransport, dubDriverCells, targetSlots, programmeTracks],
+    [timingMode, timelineScopes, timelineLines, playbackCells, timelineCells, virtualIsTransport, dubDriverCells, targetSlots, programmeTracks],
   )
 
   // Smooth-playback layer 1: while the Media lens is open, quietly stock the
@@ -15851,18 +15872,18 @@ export function ProjectWorkspace() {
     // seconds it hands over mean the same thing to the queue.
     const activeForThisFile =
       (qs.kind === "playing" || qs.kind === "paused" || qs.kind === "loading") &&
-      timelineCells.some((c) => c.id === qs.cellId)
+      playbackCells.some((c) => c.id === qs.cellId)
     if (activeForThisFile) {
       seekQueueToTime(sec)
       return
     }
     if (!frontierSession?.jwt) return // cueing needs a session to mint audio tokens
     startQueueAtTime(
-      { cells: timelineCells, projectId: project.id, session: frontierSession },
+      { cells: playbackCells, projectId: project.id, session: frontierSession },
       sec,
       { play: false },
     )
-  }, [project?.id, timelineCells, frontierSession, videoIsTransport, virtualIsTransport, recordingCellId])
+  }, [project?.id, playbackCells, frontierSession, videoIsTransport, virtualIsTransport, recordingCellId])
 
   /** AQU-1117: "Play from this cue" — the same routing as an ordinary seek,
    *  with the start riding along on the stamp so the film begins at the cue
@@ -15909,7 +15930,7 @@ export function ProjectWorkspace() {
     const qs = getQueueState()
     const activeForThisFile =
       (qs.kind === "playing" || qs.kind === "paused" || qs.kind === "loading") &&
-      timelineCells.some((c) => c.id === qs.cellId)
+      playbackCells.some((c) => c.id === qs.cellId)
     if (activeForThisFile) {
       // "loading" counts as playing for the toggle: Space during a readiness
       // gate cancels the pending start rather than futilely resuming it.
@@ -15924,12 +15945,12 @@ export function ProjectWorkspace() {
     // one (AQU-666), and mark that explicit so a missing clip is surfaced
     // there rather than skipped past (AQU-660).
     const from = timelineSelectedCellId
-      ? timelineCells.findIndex((c) => c.id === timelineSelectedCellId)
+      ? playbackCells.findIndex((c) => c.id === timelineSelectedCellId)
       : -1
-    const ctx = { cells: timelineCells, projectId: project.id, session: frontierSession }
+    const ctx = { cells: playbackCells, projectId: project.id, session: frontierSession }
     if (from >= 0) startQueue(ctx, from, true)
     else startQueueAtTime(ctx, 0, { play: true })
-  }, [project?.id, timelineCells, frontierSession, timelineSelectedCellId, videoIsTransport, virtualIsTransport, timelineAudioLoaded])
+  }, [project?.id, playbackCells, frontierSession, timelineSelectedCellId, videoIsTransport, virtualIsTransport, timelineAudioLoaded])
 
   // AQU-654: count outstanding (non-waived) LQA/validation infractions on the
   // active file. Export never hard-blocks on these — the count only drives a
@@ -18234,7 +18255,7 @@ export function ProjectWorkspace() {
                   // AQU-646 stage 2: the pane's header now carries the
                   // film's mute button, and audibility is stored per file.
                   fileId={activeFile.id}
-                  cells={audioMergedCells}
+                  cells={filmPaneCells}
                   seekSec={videoSeek}
                   togglePlay={videoToggle}
                   suspended={recordingCellId !== null}

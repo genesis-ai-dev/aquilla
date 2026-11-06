@@ -572,6 +572,28 @@ export function programmeLines(cells: readonly CellData[]): { lines: CellData[];
 }
 
 /**
+ * Group D (Nov 5, AQU-2253 + AQU-2227): the cells a file is laid out and played
+ * from when it follows its recordings. A file with an audio cue file keeps its
+ * takes on the cue sheet's heard lines, never on its subtitle lines, so it is
+ * the heard lines that are laid end to end and played. The subtitle cards and
+ * the Source cues row stay with the film, on the film's clock, as a linked
+ * film's own lines do.
+ * Every other file (an imported recording's sections stay its lines), and
+ * every file following its source: its own lines. The
+ * one answer the timeline and the transport both ask, so the dubs drawn are
+ * the dubs played.
+ */
+export function recordingsLines(
+  own: readonly CellData[],
+  heardLines: readonly CellData[] | null | undefined,
+  followsRecordings: boolean,
+): readonly CellData[] {
+  if (!followsRecordings || !heardLines || heardLines.length === 0) return own
+  // An imported recording's own sections stay its lines, as `programmeLines` has them.
+  return own.some((c) => (c.medium ?? "text") === "media") ? own : heardLines
+}
+
+/**
  * AQU-1758: a file's lines laid out end to end — `programmeLines`, then
  * `buildProgramme` with the stand-in estimator (AQU-2204: following the
  * recordings, every unrecorded line takes its stand-in, timed file or not).

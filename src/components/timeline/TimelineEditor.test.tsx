@@ -4504,6 +4504,49 @@ describe("TimelineEditor — an added track finds its takes where they actually 
     expect(within(lane).queryByTestId("tl-target-empty-s1")).toBeNull()
   })
 
+  // Group D (Nov 5, 2253 + 2227): a project lead can switch a file with an
+  // audio cue file to Follows recordings. Its takes live on the cue sheet's
+  // heard lines, so following the recordings it is THEIR lines that are laid
+  // end to end. Laid out from the subtitle lines, which hold no take, the
+  // Target audio row came up empty and Play all had nothing to play.
+  describe("an audio cue file following the recordings (group D)", () => {
+    const take = (id: string, ms: number) => ({
+      selectedAudioId: `audio-${id}-take.webm`,
+      attachments: { [`audio-${id}-take.webm`]: { type: "audio", url: "frontier-audio://t", durationMs: ms } },
+    })
+    const heard = [
+      cell({ id: "cue1", fileId: "f1-cues", original: "Line one.", startTime: 1, endTime: 4, ...take("cue1", 6_000) } as Partial<CellData>),
+      cell({ id: "cue2", fileId: "f1-cues", original: "Line two.", startTime: 5, endTime: 8, ...take("cue2", 2_000) } as Partial<CellData>),
+    ]
+    const raw = heard.map(({ attachments: _a, selectedAudioId: _s, ...c }) => c as CellData)
+    const renderAt = (timingMode: "audioFirst" | "dubbing") =>
+      render(
+        <TimelineEditor
+          fileId="f1" coreMediaUrl={null} editable
+          cells={subtitleCells}
+          audioCues={raw}
+          targetCells={heard}
+          timingMode={timingMode}
+          onRetimeSubtitle={() => {}}
+        />,
+      )
+
+    it("lays the heard lines' dubs end to end", () => {
+      renderAt("audioFirst")
+      const one = screen.getByTestId("tl-target-cue1")
+      const two = screen.getByTestId("tl-target-cue2")
+      expect(parseFloat(one.style.left)).toBeCloseTo(0, 0)
+      expect(parseFloat(one.style.width)).toBeCloseTo(6 * 38, 0)
+      expect(parseFloat(two.style.left)).toBeCloseTo(6 * 38, 0)
+    })
+
+    it("following the source, the same dubs stay on their heard lines' own times", () => {
+      renderAt("dubbing")
+      expect(parseFloat(screen.getByTestId("tl-target-cue1").style.left)).toBeCloseTo(1 * 38, 0)
+      expect(parseFloat(screen.getByTestId("tl-target-cue2").style.left)).toBeCloseTo(5 * 38, 0)
+    })
+  })
+
   // ── AQU-646 stage 6C ───────────────────────────────────────────────────────
   //
   // Sam, 2026-08-27: "the first new track I added didn't let me add any audio

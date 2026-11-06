@@ -11,6 +11,7 @@ import {
   programmeLines,
   programmeToSource,
   programmeToTarget,
+  recordingsLines,
   slotAtProgrammeSec,
   slotForCell,
   sourceFileSecToProgramme,
@@ -571,5 +572,27 @@ describe("moving a take inside its line (AQU-2215)", () => {
       const prog = buildProgramme([cell], { standInLenSec: () => 2 })
       expect(canCarryTargetLead(cell, prog.byCellId.get("u")!)).toBe(false)
     })
+  })
+})
+
+// Group D (Nov 5): the lines a file is laid out and played from following its
+// recordings — the ONE answer the timeline and the transport both ask.
+describe("recordingsLines (group D)", () => {
+  const own = [verse("s1", 0, 4, undefined, { medium: "text" })]
+  const heard = [verse("cue1", 1, 4, undefined, { medium: undefined }), verse("cue2", 5, 8, undefined, { medium: undefined })]
+
+  it("a file with an audio cue file follows its heard lines, where its takes live", () => {
+    expect(recordingsLines(own, heard, true)).toBe(heard)
+  })
+
+  it("following the source, and on every other file, its own lines", () => {
+    expect(recordingsLines(own, heard, false)).toBe(own)
+    expect(recordingsLines(own, null, true)).toBe(own)
+    expect(recordingsLines(own, [], true)).toBe(own)
+  })
+
+  it("an imported recording's own sections stay its lines", () => {
+    const sections = [verse("m1", 0, 4)]
+    expect(recordingsLines(sections, heard, true)).toBe(sections)
   })
 })

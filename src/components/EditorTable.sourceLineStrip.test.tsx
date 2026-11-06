@@ -222,10 +222,10 @@ const editing = (over: Record<string, unknown> = {}) => ({
   ...over,
 }) as NonNullable<Parameters<typeof EditorTable>[0]["sourceLineEditing"]>
 
-/** The cell's one menu button, and opening it. */
+/** The source cell, which is the context-menu trigger, and opening it. */
 const menuBtn = (cellId: string) =>
   within(rowEl(cellId)).getByTestId(`cell-menu-${cellId}`)
-const openMenu = (cellId: string) => { fireEvent.click(menuBtn(cellId)) }
+const openMenu = (cellId: string) => { fireEvent.contextMenu(menuBtn(cellId)) }
 /** Menus are a popup layer, so entries are found on `screen`, not in the row. */
 const entry = (name: "insert-above" | "insert-below" | "remove" | "edit-source" | "edit-timestamps") =>
   screen.findByTestId(`cell-menu-${name}`)
@@ -248,29 +248,27 @@ describe("EditorTable — the row's structural controls", () => {
   it("renders nothing at all when there is nothing to offer", async () => {
     // The one case that still hides: no access. A contributor on an untimed
     // file with the workflow off can edit no source text, restructure nothing
-    // and retime nothing, so the trigger itself does not render — a
-    // permanently empty menu would be furniture.
+    // and retime nothing, so the cell is not a menu trigger — a permanently
+    // empty menu would be furniture.
     renderTable({ project: projectAt(400) })
     await screen.findByText("First cue")
     expect(screen.queryByTestId("cell-menu-cue-a")).toBeNull()
   })
 
-  it("sits where the pencil did, quiet until the row is reached for", async () => {
-    // The placement IS a fix in its own right: two earlier cuts put this
-    // control outside the row (clipped away by the list's paint containment)
-    // and then floating in the middle of it. It now shares the pencil's corner,
-    // which is the one place a source-cell action has always lived.
-    //
-    // AQU-1134 rides on the z-index: the term action rail pops up over this
-    // corner at z-20 and used to render BEHIND the pencil, so the trigger
-    // stays below it.
+  it("opens from a right-click on the source cell", async () => {
+    // The menu used to be a three-dot button in the cell's corner. It is the
+    // source cell itself now: right-click the text, and the text stays
+    // selectable (the trigger's default is select-none).
     renderTable({ sourceLineEditing: editing() })
     await screen.findByText("First cue")
     const trigger = menuBtn("cue-a")
-    expect(trigger.className).toContain("end-1")
-    expect(trigger.className).toContain("top-1")
-    expect(trigger.className).toContain("z-10")
-    expect(trigger.className).toContain("opacity-0")
+    expect(trigger).toHaveAttribute("data-editor-cell-surface", "source")
+    expect(trigger).toHaveAttribute("data-slot", "context-menu-trigger")
+    expect(trigger.className).toContain("select-text")
+    expect(trigger.className).not.toContain("select-none")
+    expect(within(rowEl("cue-a")).queryByRole("button", { name: "Cell actions" })).toBeNull()
+    fireEvent.contextMenu(trigger)
+    expect(await entry("insert-above")).toBeInTheDocument()
   })
 
   it("gives EVERY row a menu, including one with no room after it", async () => {

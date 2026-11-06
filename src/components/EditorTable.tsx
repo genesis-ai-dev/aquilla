@@ -20,7 +20,6 @@ import {
   ArrowUp,
   ArrowDown,
   Clock,
-  MoreVertical,
   Bold,
   VolumeX,
   Eye,
@@ -178,12 +177,12 @@ import { fmtClock, fmtDragTime } from "@/components/timeline/format"
 import { takeTrackName } from "@/lib/timeline/take-colors"
 import { isUserAddedLine } from "@/lib/timeline/user-line-origin"
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { InfoNote, NOTE_CONTENT_CLASS, NoteOnClick } from "@/components/ui/info-note"
 import { CellPresenceBadges } from "./CellPresenceBadges"
@@ -284,7 +283,6 @@ import { useEditorActions } from "@/context/EditorActionsContext"
 import { isInMemberScope } from "@/lib/sync/member-scopes"
 import { textValidationBlock, textValidationScope } from "@/lib/review/text-validation-policy"
 import { SourceSelectionToolbar } from "./SourceSelectionToolbar"
-import { SOURCE_CELL_MENU_Z } from "@/lib/editor/source-cell-layers"
 import { buildSourceChip, type ContextChip } from "@/lib/agent/context-chip"
 import { ownCastName } from "@/lib/timeline/cue-character"
 import { parseTimestampRange } from "@/lib/video/vtt-generator"
@@ -3847,14 +3845,24 @@ function CellTimestampsPopover({
 }
 
 /**
+ * The timestamps popover anchors to a corner of the source column. The context
+ * menu itself does not render a DOM node, so the anchor has to be placed inside
+ * the column (the `relative` box) by the column, not by this wrapper.
+ */
+const CellMenuAnchorContext = React.createContext<React.ReactNode>(null)
+
+/** The timestamps popover, placed inside the source column so it anchors there. */
+function CellMenuAnchorSlot() {
+  return React.useContext(CellMenuAnchorContext)
+}
+
+/**
  * AQU-1068 item 5: THE source cell's menu.
  *
- * Ryder, relaying the Biblica debrief (2026-09-05): the pencil "should be more
- * like a three-dot menu so it can offer more than 'edit text'". Until now this
- * cell carried two unrelated affordances — a pencil floated at the source
- * column's top-right, and a separate `[×][+]` corner that appeared on row
- * hover. Two controls, one cell, neither hinting at the other. This is both of
- * them, in the pencil's place.
+ * Right-click (or long-press) the source cell. The entries are the ones that
+ * used to live on the corner pencil and then the three-dot button: edit the
+ * source text, edit timestamps, insert a row either side, split at quotes,
+ * hide, remove.
  *
  * Every entry follows round 4's rule: an action this row cannot take is
  * RENDERED, disabled, with its reason — an absent control cannot tell you
@@ -3867,8 +3875,14 @@ function CellTimestampsPopover({
  * clock (Sam, 2026-09-09). That is not a permission or a property of the row —
  * an ordinary text file simply has no timings, and a permanently dead entry on
  * every text project is furniture rather than an explanation.
+ *
+ * Nothing to offer at all (the tier does not admit you, or the source is
+ * mirrored from upstream): the cell renders as given, with the browser's own
+ * menu. Those never change while you are in the file, so a permanently empty
+ * menu would be furniture.
  */
 function CellSourceMenu({
+  children,
   cellId,
   /** Insert after this row. */
   onInsertBelow,
@@ -3904,6 +3918,8 @@ function CellSourceMenu({
   onToggleHidden,
   hiddenDisabledReason,
 }: {
+  /** The source column. It becomes the menu's trigger. */
+  children: React.ReactElement
   cellId: string
   onInsertBelow?: () => void
   belowDisabledReason?: string | null
@@ -3924,7 +3940,6 @@ function CellSourceMenu({
   hiddenDisabledReason?: string | null
 }) {
   const t = useT()
-  const [open, setOpen] = useState(false)
   const [timesOpen, setTimesOpen] = useState(false)
 
   const structural = onInsertAbove !== undefined || onInsertBelow !== undefined || onRemove !== undefined
@@ -3933,45 +3948,29 @@ function CellSourceMenu({
   // source-edit permission rather than on the add/remove tier, so it is its own
   // flag rather than another term in `structural`.
   const parkable = onToggleHidden !== undefined || Boolean(hiddenDisabledReason)
-  // Nothing to offer at all: no menu. This is the PROJECT-level case the
-  // corner already handled by not rendering — the tier does not admit you, or
-  // the source is mirrored from upstream. Those never change while you are in
-  // the file, so a permanently dead button would be furniture.
-  if (!structural && !parkable && !onToggleSourceEdit && !sourceEditDisabledReason && !timestamps) return null
+  const offered = structural || parkable || Boolean(onToggleSourceEdit) || Boolean(sourceEditDisabledReason) || Boolean(timestamps)
+  if (!offered) return children
+
+  const anchor = timestamps ? (
+    <CellTimestampsPopover
+      cellId={cellId}
+      open={timesOpen}
+      onOpenChange={setTimesOpen}
+      {...timestamps}
+    />
+  ) : null
 
   return (
-    <>
-      <DropdownMenu open={open} onOpenChange={setOpen}>
-        <DropdownMenuTrigger
-          render={
-            <button
-              type="button"
-              data-testid={`cell-menu-${cellId}`}
-              aria-label={t("editor.cellMenu.trigger")}
-              title={t("editor.cellMenu.trigger")}
-              onClick={(e) => e.stopPropagation()}
-              className={cn(
-                // AQU-1134: the term action rail pops up over this corner and
-                // must render in FRONT of it. Both layers are owned by
-                // source-cell-layers.ts — don't hand-edit this one, the bug
-                // was the two being equal (z-10 each), which handed the
-                // painting order to DOM order and put this button on top.
-                "absolute end-1 top-1 flex size-6 shrink-0 items-center justify-center rounded-md",
-                SOURCE_CELL_MENU_Z,
-                "text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground",
-                // Present but quiet until the row is reached for, exactly as
-                // the pencil was. `open` pins it so the trigger does not fade
-                // out from under its own menu.
-                open || sourceEditing
-                  ? "bg-primary/10 text-primary opacity-100"
-                  : "opacity-0 focus-visible:opacity-100 [.group:hover:not([data-follow-hover-lock]_*)_&]:opacity-100",
-              )}
-            >
-              <MoreVertical className="h-3.5 w-3.5" />
-            </button>
-          }
+    <CellMenuAnchorContext.Provider value={anchor}>
+      <ContextMenu>
+        <ContextMenuTrigger
+          // The trigger's own class is `select-none`. Source text has to stay
+          // selectable (add-to-termbase / Ask AI), so this wins the merge.
+          className="select-text"
+          data-testid={`cell-menu-${cellId}`}
+          render={children}
         />
-        <DropdownMenuContent align="end" className="min-w-[13rem]">
+        <ContextMenuContent className="min-w-[13rem]">
           {(onToggleSourceEdit || sourceEditDisabledReason) && (
             <RowInsertItem
               testId="cell-menu-edit-source"
@@ -3995,7 +3994,7 @@ function CellSourceMenu({
             />
           )}
           {(structural || parkable) && (onToggleSourceEdit || sourceEditDisabledReason || timestamps) && (
-            <DropdownMenuSeparator />
+            <ContextMenuSeparator />
           )}
           {parkable && (
             <RowInsertItem
@@ -4042,17 +4041,9 @@ function CellSourceMenu({
               />
             </>
           )}
-        </DropdownMenuContent>
-      </DropdownMenu>
-      {timestamps && (
-        <CellTimestampsPopover
-          cellId={cellId}
-          open={timesOpen}
-          onOpenChange={setTimesOpen}
-          {...timestamps}
-        />
-      )}
-    </>
+        </ContextMenuContent>
+      </ContextMenu>
+    </CellMenuAnchorContext.Provider>
   )
 }
 
@@ -4080,7 +4071,7 @@ function RowInsertItem({
 }) {
   const disabled = Boolean(reason) || !onSelect
   return (
-    <DropdownMenuItem
+    <ContextMenuItem
       data-testid={testId}
       disabled={disabled}
       onClick={() => { if (!disabled) onSelect?.() }}
@@ -4094,7 +4085,7 @@ function RowInsertItem({
           </span>
         ) : null}
       </span>
-    </DropdownMenuItem>
+    </ContextMenuItem>
   )
 }
 
@@ -8402,21 +8393,46 @@ function EditorRow({
           </div>
         </div>
 
-        {/* Source column. */}
+        {/* Source column. Right-click opens the cell menu (edit source, hide,
+            insert, timestamps). The wrapper renders no DOM of its own, so this
+            div stays the grid item. */}
+        <CellSourceMenu
+          cellId={cell.id}
+          sourceEditing={sourceEditing}
+          onToggleSourceEdit={canEditSourceForCell ? toggleSourceEdit : undefined}
+          // The DCS pin used to show a padlock where the pencil sat, so the
+          // affordance never silently vanished (AQU-615). It is the same
+          // idea, now as the entry's own reason.
+          sourceEditDisabledReason={canEditSourceForCell ? null : sourceReadOnlyReasonForCell}
+          onInsertAbove={insertAbove}
+          aboveDisabledReason={insertAboveReason}
+          onInsertBelow={insertBelow}
+          belowDisabledReason={insertBelowReason}
+          onRemove={structuralEditing ? () => onRemoveCell?.(cell.id) : undefined}
+          removeDisabledReason={removeReason}
+          onSplitAtQuotes={splitAtQuotes}
+          splitDisabledReason={splitReason}
+          timestamps={timestamps}
+          // AQU-1422: the reversible sibling of Remove. `onToggleHidden` is
+          // the role gate (absent ⇒ no entry at all); the reason is the DCS
+          // pin's, the same one Edit text shows.
+          hidden={cellHidden}
+          onToggleHidden={onToggleHidden}
+          hiddenDisabledReason={mayParkCells && onSetCellHidden ? hiddenDisabledReason : null}
+        >
         <div
           data-showcase="editor.source"
           ref={sourceColRef}
           className={cn(
             // The showcase node IS the text surface so it fills the whole
-            // source column. pe-7 clears the floating pencil.
-            // select-text: global chrome disables selection; source must stay
-            // selectable for add-to-termbase / Ask AI from selection.
+            // source column. select-text: global chrome disables selection;
+            // source must stay selectable for add-to-termbase / Ask AI.
             // AQU-1101: min-w-0 + break-words. `minmax(0,1fr)` floors the
             // TRACK, but a grid item keeps `min-width: auto` and would still
             // overflow its area on an unbreakable token; min-w-0 lets it
             // shrink and break-words (inherited by the text below) breaks the
             // token instead of blowing the column out.
-            "relative col-start-2 flex h-full min-h-[40px] min-w-0 flex-col break-words rounded-lg px-2 py-1.5 pe-7 select-text transition-[colors,opacity] md:col-auto",
+            "relative col-start-2 flex h-full min-h-[40px] min-w-0 flex-col break-words rounded-lg px-2 py-1.5 select-text transition-[colors,opacity] md:col-auto",
             // Match the target well — same muted fill + ring (not a darker
             // primary-tinted edit chrome).
             "focus-within:bg-muted focus-within:ring-1 focus-within:ring-ring/40 focus-within:ring-inset",
@@ -8451,12 +8467,6 @@ function EditorRow({
               onToolbarMouseUp={handleToolbarMouseUp}
             />
           )}
-          {/* AQU-1068 item 5: ONE menu for this cell, in the pencil's place.
-              Edit its source text, edit its timestamps, insert a cell either
-              side of it, take it out. Floated to the column's top-right so
-              it costs no layout, rather than taking a slot in the context
-              line below — that line is reserved for column alignment and is
-              usually empty, so it has no room to spare. */}
           {sourceWarningOpen && (
             <SourceEditWarningDialog
               onCancel={() => setSourceWarningOpen(false)}
@@ -8466,30 +8476,7 @@ function EditorRow({
               }}
             />
           )}
-          <CellSourceMenu
-            cellId={cell.id}
-            sourceEditing={sourceEditing}
-            onToggleSourceEdit={canEditSourceForCell ? toggleSourceEdit : undefined}
-            // The DCS pin used to show a padlock where the pencil sat, so the
-            // affordance never silently vanished (AQU-615). It is the same
-            // idea, now as the entry's own reason.
-            sourceEditDisabledReason={canEditSourceForCell ? null : sourceReadOnlyReasonForCell}
-            onInsertAbove={insertAbove}
-            aboveDisabledReason={insertAboveReason}
-            onInsertBelow={insertBelow}
-            belowDisabledReason={insertBelowReason}
-            onRemove={structuralEditing ? () => onRemoveCell?.(cell.id) : undefined}
-            removeDisabledReason={removeReason}
-            onSplitAtQuotes={splitAtQuotes}
-            splitDisabledReason={splitReason}
-            timestamps={timestamps}
-            // AQU-1422: the reversible sibling of Remove. `onToggleHidden` is
-            // the role gate (absent ⇒ no entry at all); the reason is the DCS
-            // pin's, the same one Edit text shows.
-            hidden={cellHidden}
-            onToggleHidden={onToggleHidden}
-            hiddenDisabledReason={mayParkCells && onSetCellHidden ? hiddenDisabledReason : null}
-          />
+          <CellMenuAnchorSlot />
           {/* Context line. Rendered even when empty: its 20px (h-4 + mb-1)
               mirrors the target column's header lane, and that mirror is what
               puts the two columns' first text lines on the same baseline. Drop
@@ -8710,6 +8697,7 @@ function EditorRow({
             </div>
           )}
         </div>
+        </CellSourceMenu>
 
         {/* Target column — TipTap is inline so typing is unchanged. Everything
             else (waveform, transcript preview, backtranslation, infractions

@@ -196,8 +196,7 @@ test("a member staffed on one lane cannot see or write the other", async ({ alic
   await expect(esValidation).toHaveAttribute("aria-pressed", "false")
 
   const sourceRow = aliceWs.cellRow(0)
-  await sourceRow.hover()
-  await sourceRow.getByRole("button", { name: "Cell actions" }).click()
+  await sourceRow.getByLabel("Source text").click({ button: "right" })
   await alice.getByTestId("cell-menu-edit-source").click()
   const sourceEditor = alice.getByRole("textbox", { name: "Edit source text" })
   await sourceEditor.fill(nextSource)

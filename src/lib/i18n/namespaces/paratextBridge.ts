@@ -4,7 +4,6 @@ import { defineNamespace, plural } from "./types"
  *  edited in place, with Paratext's own Send/Receive carrying the changes. */
 export const paratextBridge = defineNamespace({
   keys: {
-    "paratextBridge.entry": "Paratext projects on this computer",
     "paratextBridge.title": "Paratext projects",
     "paratextBridge.description":
       "Projects Paratext keeps on this computer. Edit them here; Paratext's Send/Receive carries your changes to the team.",
@@ -36,6 +35,28 @@ export const paratextBridge = defineNamespace({
     "paratextBridge.rootSource.wine": "From Paratext under Wine",
     "paratextBridge.rootSource.default": "Default location",
     "paratextBridge.rootSource.user": "Added by you",
+
+    "paratextBridge.thisComputer.title": "This computer",
+    "paratextBridge.thisComputer.switcherMeta": "On this device",
+    "paratextBridge.thisComputer.description":
+      "Folders and Paratext projects on this device. Aquilla reads them here and writes your edits back to the same files; nothing is uploaded.",
+    "paratextBridge.thisComputer.linkedFolders": "Linked folders",
+    "paratextBridge.thisComputer.linkedFoldersHint":
+      "Folders you have pointed Aquilla at. They are searched for Paratext projects along with the usual locations.",
+    "paratextBridge.thisComputer.noLinkedFolders": "No folders linked yet.",
+    "paratextBridge.thisComputer.linkFolder": "Link a folder",
+    "paratextBridge.thisComputer.unlinkFolder": "Unlink this folder",
+    "paratextBridge.thisComputer.paratextSection": "Paratext projects",
+    "paratextBridge.thisComputer.find": "Find Paratext projects on this computer",
+    "paratextBridge.thisComputer.prep.title": "Before the first search",
+    "paratextBridge.thisComputer.prep.body":
+      "Aquilla will read the Paratext project folder on this computer: the location Paratext's settings point to, the usual “My Paratext 9 Projects” folders, and any folder you linked above.",
+    "paratextBridge.thisComputer.prep.permission":
+      "Your computer may ask whether Aquilla can access these folders. Allow it, or the search finds nothing.",
+    "paratextBridge.thisComputer.prep.private": "Nothing leaves this computer.",
+    "paratextBridge.thisComputer.found": plural({ one: "{count} Paratext project found", other: "{count} Paratext projects found" }),
+    "paratextBridge.thisComputer.openAll": "Open Paratext projects",
+    "paratextBridge.thisComputer.scanFailed": "The search could not finish. {error}",
 
     "paratextBridge.book.back": "All projects",
     "paratextBridge.book.loading": "Reading {file}",
@@ -86,6 +107,9 @@ export const paratextBridge = defineNamespace({
       "paratextBridge.browser.docs": { description: "Link to the help page about Paratext projects.", maxLength: 24 },
       "paratextBridge.registeredAs": { description: "Who Paratext says is registered on this computer.", placeholders: { name: "Person's name from Paratext's registration." } },
       "paratextBridge.booksCount": { description: "Book count under a project card.", placeholders: { count: "Number of books." } },
+      "paratextBridge.thisComputer.switcherMeta": { description: "Muted meta text beside 'This computer' in the organization switcher, like 'Personal workspace' beside a user's own org.", maxLength: 20 },
+      "paratextBridge.thisComputer.found": { description: "Result line after a Paratext scan.", placeholders: { count: "Number of projects found." } },
+      "paratextBridge.thisComputer.scanFailed": { description: "The Paratext scan threw.", placeholders: { error: "Technical error text, often English." } },
       "paratextBridge.book.loading": { description: "Shown while a book file is read.", placeholders: { file: "File name like 41MATTPP1.SFM." } },
       "paratextBridge.book.chapter": { description: "Chapter group heading.", placeholders: { n: "Chapter number." } },
       "paratextBridge.book.pending": { description: "Count of unsaved edits.", placeholders: { count: "Number of edited units." } },

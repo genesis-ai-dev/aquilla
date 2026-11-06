@@ -17,6 +17,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { FrontierAuthError, isJwtExpired } from "@/lib/frontier/auth"
 import { onboardingForBillingNext } from "@/lib/billing/intent"
 import { safeLoginNext } from "@/lib/navigation/login-path"
+import { isTauriRuntime } from "@/lib/offline/is-tauri"
 import { FrontierForgotPasswordForm } from "@/components/git-import/FrontierForgotPasswordForm"
 import { isFieldInvalid } from "@/lib/forms/field-state"
 import { requiredString } from "@/lib/forms/schemas"
@@ -203,6 +204,14 @@ export function Login() {
                 className="font-medium text-foreground underline-offset-4 hover:underline"
               >
                 {t("auth.login.createAccountLink")}
+              </Link>
+            </p>
+          )}
+          {/* Desktop only: the Paratext bridge works on local files and needs no Aquilla account. */}
+          {mode === "login" && isTauriRuntime() && (
+            <p className="text-center text-sm text-muted-foreground">
+              <Link to="/paratext" className="font-medium text-foreground underline-offset-4 hover:underline" data-testid="login-paratext-link">
+                {t("paratextBridge.entry")}
               </Link>
             </p>
           )}

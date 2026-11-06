@@ -222,6 +222,18 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
     expect(screen.getByText("Maintainer")).toBeInTheDocument()
   })
 
+  it("AQU-2105: marks a LangQuest-linked project with the logo and its sync state; unlinked rows carry no mark", () => {
+    renderTable([
+      baseProject({ id: "lq", name: "Kalam", langquest: { language: "Kalam", health: "broken", lastSyncedAt: null } }),
+      baseProject({ id: "plain", name: "Plain" }),
+    ])
+    const mark = screen.getByTestId("langquest-list-mark")
+    expect(mark).toHaveAttribute("data-health", "broken")
+    expect(mark).toHaveAttribute("aria-label", "Follows Kalam on LangQuest: Sync broken, reconnect LangQuest")
+    expect(within(screen.getByText("Kalam").closest("span")!.parentElement!).getByTestId("langquest-list-mark")).toBe(mark)
+    expect(screen.getAllByTestId("langquest-list-mark")).toHaveLength(1)
+  })
+
   it("renders one chip per lane with the '' default lane first, labeled with the target language", () => {
     const p = baseProject({
       id: "p1",

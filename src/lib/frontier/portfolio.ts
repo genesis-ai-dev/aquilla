@@ -161,6 +161,12 @@ export interface PortfolioProject {
   unitsDone?: number
   /** Past their target date with no Done mark. Counted server-side. */
   unitsOverdue?: number
+  /**
+   * AQU-2105: set on a project that follows a LangQuest language — which one,
+   * and whether its sync is healthy. `broken` is a token LangQuest no longer
+   * honours (reconnect the org); `stalled` is a failed or overdue sync.
+   */
+  langquest?: { language: string; health: "synced" | "stalled" | "broken"; lastSyncedAt: string | null } | null
 }
 
 /**

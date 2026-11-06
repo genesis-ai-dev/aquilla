@@ -515,7 +515,6 @@ export const workspace = defineNamespace({
       other: "Every «{name}» line in this file ({count})",
     }),
     "workspace.castGutterVoice.scopeEverywhere": "Every «{name}» line, in every episode",
-    "workspace.castGutterVoice.scopeNoCharacter": "This line has no character, so the voice is for this line only.",
     "workspace.castGutterVoice.clearOneFileAtATime": "Choose this line or this file to remove a character.",
 
     // -- hooks/useOpenWorkspace --
@@ -2223,11 +2222,6 @@ export const workspace = defineNamespace({
           "its lines in every episode (every file of the project) speak with " +
           "this voice, except lines given a voice of their own.",
         placeholders: { name: "The character (speaker) name on this line." },
-      },
-      "workspace.castGutterVoice.scopeNoCharacter": {
-        description:
-          "Shown in place of the three choices when the line has no character: " +
-          "a voice picked here can only be for this line.",
       },
       "workspace.castGutterVoice.clearOneFileAtATime": {
         description:

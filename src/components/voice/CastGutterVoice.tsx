@@ -4,10 +4,11 @@
 // the voice picker. PURE assignment — picking a character never synthesizes
 // (generation stays an explicit act elsewhere).
 //
-// SCOPE (Sam, Oct 23; replaces the "Apply to all «name» lines" checkbox): the
-// footer asks how far the pick reaches — this line (the default every time the
-// picker opens), every line of the character in this file, or the character in
-// every episode. A line without a character has only the first.
+// SCOPE (Sam, Oct 23; replaces the "Apply to all «name» lines" checkbox): when
+// the line has a character, the footer asks how far the pick reaches — this
+// line (the default every time the picker opens), every line of the character
+// in this file, or the character in every episode. A line without a character
+// is this line only, with no note under the list.
 //
 // Explicit casting renders solid; a line merely falling back to the default/
 // narrator voice renders as an EMPTY dashed ring marked "NC" (Sam, 2026-08-20,
@@ -26,8 +27,9 @@ import { useState } from "react"
 import { Mic, Plus } from "lucide-react"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { cn } from "@/lib/utils"
 import { NoCharacterAvatar, VoiceAvatar } from "./VoiceAvatar"
-import { VoicePickerContent } from "./VoiceCombobox"
+import { VoicePickerContent, voicePickerRowClass } from "./VoiceCombobox"
 import type { Voice } from "@/lib/parsers/types"
 import type { CastScope } from "@/lib/audio/character-cast"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -141,7 +143,7 @@ export function CastGutterVoice({ voice, explicit, castName, editable, voices, o
           {trigger}
         </PopoverTrigger>
       </AppTooltip>
-      <PopoverContent align="start" side="right" className="w-60 p-2">
+      <PopoverContent align="start" side="right" className="w-60 gap-0 overflow-hidden p-2">
         <VoicePickerContent
           voices={voices}
           activeId={explicit ? voice.id : undefined}
@@ -161,7 +163,7 @@ export function CastGutterVoice({ voice, explicit, castName, editable, voices, o
                   onClear({ scope: pickScope })
                   setOpen(false)
                 }}
-                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-sm transition-colors hover:bg-accent/50 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent"
+                className={cn(voicePickerRowClass, "disabled:cursor-not-allowed disabled:hover:bg-transparent")}
               >
                 <NoCharacterAvatar size={20} />
                 <span className="flex min-w-0 flex-1 flex-col">
@@ -177,9 +179,8 @@ export function CastGutterVoice({ voice, explicit, castName, editable, voices, o
             onPick(voiceId, { scope: pickScope })
             setOpen(false)
           }}
-          footer={
-            <>
-            {onAddVoice && (
+          afterList={
+            onAddVoice ? (
               <button
                 type="button"
                 data-testid="gutter-voice-add"
@@ -187,16 +188,18 @@ export function CastGutterVoice({ voice, explicit, castName, editable, voices, o
                   setOpen(false)
                   onAddVoice()
                 }}
-                className="mt-1 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-sm font-medium transition-colors hover:bg-accent/50"
+                className={voicePickerRowClass}
               >
                 <span className="grid size-5 place-items-center rounded-md border border-dashed border-muted-foreground text-muted-foreground">
                   <Plus className="size-3" />
                 </span>
                 {t("audio.castGutter.addVoice")}
               </button>
-            )}
-            {castName ? (
-              <fieldset className="mt-1.5 flex flex-col gap-1 border-t border-border pt-1.5 text-xs text-muted-foreground">
+            ) : undefined
+          }
+          footer={
+            castName ? (
+              <fieldset className="mt-2 flex flex-col gap-1 border-t border-border pt-2 text-xs text-muted-foreground">
                 <legend className="mb-0.5">{t("workspace.castGutterVoice.scopeLegend")}</legend>
                 {(
                   [
@@ -224,12 +227,7 @@ export function CastGutterVoice({ voice, explicit, castName, editable, voices, o
                   </label>
                 ))}
               </fieldset>
-            ) : (
-              <p data-testid="gutter-voice-scope-none" className="mt-1.5 border-t border-border pt-1.5 text-xs text-muted-foreground">
-                {t("workspace.castGutterVoice.scopeNoCharacter")}
-              </p>
-            )}
-            </>
+            ) : undefined
           }
         />
       </PopoverContent>

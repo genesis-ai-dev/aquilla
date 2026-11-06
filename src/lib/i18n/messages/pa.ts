@@ -7696,7 +7696,6 @@ export const pa: Catalog = {
   "workspace.castGutterVoice.scopeFile": "ਇਸ ਫ਼ਾਈਲ ਵਿੱਚ ਹਰ «{name}» ਕਤਾਰ",
   "workspace.castGutterVoice.scopeFileCount": {"forms":{"one":"ਇਸ ਫ਼ਾਈਲ ਵਿੱਚ ਹਰ «{name}» ਕਤਾਰ ({count})","other":"ਇਸ ਫ਼ਾਈਲ ਵਿੱਚ ਹਰ «{name}» ਕਤਾਰ ({count})"},"countVar":"count"},
   "workspace.castGutterVoice.scopeEverywhere": "ਹਰ ਐਪੀਸੋਡ ਵਿੱਚ ਹਰ «{name}» ਕਤਾਰ",
-  "workspace.castGutterVoice.scopeNoCharacter": "ਇਸ ਕਤਾਰ ਦਾ ਕੋਈ ਪਾਤਰ ਨਹੀਂ, ਇਸ ਲਈ ਆਵਾਜ਼ ਸਿਰਫ਼ ਇਸ ਕਤਾਰ ਲਈ ਹੈ.",
   "workspace.castGutterVoice.clearOneFileAtATime": "ਇੱਕ ਪਾਤਰ ਹਟਾਉਣ ਲਈ ਇਹ ਕਤਾਰ ਜਾਂ ਇਹ ਫ਼ਾਈਲ ਚੁਣੋ.",
   "workspace.openWorkspace.openingProject": "ਪ੍ਰੋਜੈਕਟ ਖੁੱਲ੍ਹ ਰਿਹਾ ਹੈ",
   "workspace.fileSort.lastUpdated": "ਆਖ਼ਰੀ ਅੱਪਡੇਟ",

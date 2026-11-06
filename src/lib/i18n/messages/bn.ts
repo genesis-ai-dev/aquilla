@@ -7717,7 +7717,6 @@ export const bn: Catalog = {
   "workspace.castGutterVoice.scopeFile": "এই ফাইলের প্রতিটি «{name}» লাইন",
   "workspace.castGutterVoice.scopeFileCount": {"forms":{"one":"এই ফাইলের প্রতিটি «{name}» লাইন ({count})","other":"এই ফাইলের প্রতিটি «{name}» লাইন ({count})"},"countVar":"count"},
   "workspace.castGutterVoice.scopeEverywhere": "প্রতিটি পর্বে, প্রতিটি «{name}» লাইন",
-  "workspace.castGutterVoice.scopeNoCharacter": "এই লাইনে কোনো চরিত্র নেই, তাই কণ্ঠ শুধু এই লাইনের।",
   "workspace.castGutterVoice.clearOneFileAtATime": "একটি চরিত্র সরাতে এই লাইন বা এই ফাইল বেছে নিন।",
   "workspace.openWorkspace.openingProject": "প্রকল্প খোলা হচ্ছে",
   "workspace.fileSort.lastUpdated": "শেষ হালনাগাদ",

@@ -82,7 +82,7 @@ function capture(re: RegExp, names: readonly Placeholder[], text: string): Parti
  */
 export function applyNamingRule(rule: NamingRule, fileName: string): string | null {
   // One Unicode form for every name: "versículo" typed on a Mac (decomposed)
-  // reads like the same word typed anywhere else, and "１２" like "12".
+  // reads like the same word typed anywhere else, and "１２" and "١٢" like "12".
   const name = normalizeName(fileName)
   const stem = stemOf(name)
   for (const compiled of compileRule(rule)) {
@@ -113,9 +113,10 @@ export function applyNamingRule(rule: NamingRule, fileName: string): string | nu
 
 /** The names' shape, digits blanked and the extension left out, so ".mp3"
  *  and ".ogg" recordings share a rule: "MAT_1_LN619.ogg" → "mat_#_ln#". The
- *  team's saved rules are kept under it. */
+ *  team's saved rules are kept under it. Digits in any script are blanked, so
+ *  "Mt-ch١٩_v٠١" has the shape of "Mt-ch19_v01" (AQU-2435). */
 export function nameShape(fileName: string): string {
-  return stemOf(fileName.normalize("NFKC").toLowerCase()).replace(/\d+/g, "#")
+  return stemOf(normalizeName(fileName).toLowerCase()).replace(/\d+/g, "#")
 }
 
 /** Code point order: the same on every machine, whatever its language. */

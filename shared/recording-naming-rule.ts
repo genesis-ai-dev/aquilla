@@ -15,6 +15,7 @@
 // sides read "Mt" and "Mark" the same way.
 
 import { BookNameIndex, bookKey, englishBookName } from "../src/lib/audio/bulk-upload/book-names"
+import { toWesternDigits } from "./decimal-digits"
 
 /** The 66 USFM book codes a rule may name, in canonical order. Pinned to the
  *  bulk upload's own book table by naming-rule.test.ts. */
@@ -96,9 +97,11 @@ function escapeLiteral(text: string): string {
 }
 
 /** Names and patterns are compared in one Unicode form: accents composed,
- *  full-width digits as ASCII digits. */
+ *  full-width digits as ASCII digits, and every script's own digits (١٩, १९)
+ *  as 0–9, the way bulk upload's name reader reads them (AQU-2329). So a rule
+ *  worked out for "Mt-ch19_v01" reads "Mt-ch١٩_v٠١" too (AQU-2435). */
 export function normalizeName(text: string): string {
-  return text.normalize("NFKC")
+  return toWesternDigits(text.normalize("NFKC"))
 }
 
 type Kind = "literal" | "letters" | "digits" | "part" | "any"

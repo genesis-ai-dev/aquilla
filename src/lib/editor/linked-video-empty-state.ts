@@ -113,6 +113,15 @@ export interface MediaEmptyGates {
 }
 
 /**
+ * AQU-1681's rows from the film's own sound are not offered for now. Making
+ * them stored a copy of that sound as the file's source recording, and Sam
+ * ruled (Oct 29) that a film's sound never splits off into Source audio: "for
+ * now… way down the line, it would be possible to extract the audio from that
+ * track". The step and its code stay, ready for that day.
+ */
+const FILM_SOUND_ROWS_OFFERED = false
+
+/**
  * The role gates for those offers, in one place so a test can pin them. Each
  * mirrors the server's floor for the write it leads to; offering below that
  * floor leaves a person with a button that fails, or worse, half an import:
@@ -148,6 +157,7 @@ export function mediaEmptyGates(input: {
     offerCaptionRows: input.captionRowsMode && maintainer,
     canImportCaptions: input.captionRowsMode ? maintainer : input.canEditTracks,
     canUploadSourceMedia: canAttachSourceAudio(input.roleLevel ?? null),
-    offerVideoSoundRows: input.captionRowsMode && maintainer && canReadVideoSound(input.linkedVideoUrl),
+    offerVideoSoundRows: FILM_SOUND_ROWS_OFFERED && input.captionRowsMode && maintainer
+      && canReadVideoSound(input.linkedVideoUrl),
   }
 }

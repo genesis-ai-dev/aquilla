@@ -56,7 +56,8 @@ export interface UseTransportForFileArgs {
    * on screen. Absent reads as `"recording"`, which is the old rule exactly.
    */
   playbackSource?: PlaybackSource
-  /** AQU-1704: Free timing is the queue's, never the virtual clock's. See `virtualOwnsFile`. */
+  /** AQU-1704: Free timing is the queue's, never the virtual clock's. See `virtualOwnsFile`.
+   *  AQU-2253: nor the picture's — see `videoOwnsFile`. */
   freeTiming?: boolean
 }
 
@@ -89,6 +90,9 @@ export function useTransportForFile({
     coreMediaUrl,
     recordingDrivesPlayback(anyCellClockIsFileTime, playbackSource),
     paneOnScreen,
+    // AQU-2253: following the recordings the film is on screen but follows
+    // the programme, which is the queue's.
+    freeTiming,
   )
   // Unconditional, like the video's — these are cheap module subscriptions, and
   // the CHOICE is made in the pure selector, so a file gaining or losing its

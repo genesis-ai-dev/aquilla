@@ -58,7 +58,8 @@ import {
   type PlaybackSource,
 } from "@/lib/audio/playback-source"
 import { pauseAllTransports } from "@/lib/audio/transport-pause"
-import { videoSyncAction } from "./video-sync"
+import { VIDEO_END_GUARD_SEC, VIDEO_PAUSED_SNAP_SEC, videoSyncAction } from "./video-sync"
+import { filmMomentAt, type FilmPiece } from "@/lib/timeline/film-pieces"
 import { nextScrubSeek } from "./video-seek-coalesce"
 import {
   forgetStallSample,
@@ -153,6 +154,30 @@ export interface MediaVideoPaneProps {
    *  exactly as Space and the playback bar's button do (the workspace hands
    *  its timeline toggle). Absent means the picture takes no clicks of ours. */
   onPictureClick?: () => void
+  /**
+   * AQU-2253: the file follows its recordings. The film is shown there now,
+   * running on its own clock: the queue's programme is the transport, and the
+   * picture follows the programme's second exactly as it follows a recording's
+   * file second — the playhead's time is the film's time. Unlike that
+   * arrangement it keeps its OWN sound, which plays straight through with the
+   * picture (Sam, Oct 29); the Source audio row's mute silences it.
+   */
+  followsRecordings?: boolean
+  /**
+   * AQU-2253 (Sam, Oct 30): the film was IMPORTED through the importer (a
+   * video uploaded like any other file), not linked. Its sound is the Source
+   * audio row's, by the rules any uploaded recording follows, so the element
+   * is always muted — in both timings, whatever the Source audio mute says.
+   */
+  importedFilm?: boolean
+  /**
+   * AQU-2253 (Sam, Oct 30): an imported film following the recordings, cut
+   * into its lines' pieces (lib/timeline/film-pieces). The queue's programme
+   * second is a moment of the TIMELINE then, and the picture shows the piece
+   * under it: that line's own stretch of the film, its last frame held while
+   * a longer recording finishes. Null or absent: the film's own clock.
+   */
+  filmPieces?: readonly FilmPiece[] | null
   sourceDirectionMode?: DirectionMode
   targetDirectionMode?: DirectionMode
   sourceTextDirection?: TextDirection
@@ -173,6 +198,9 @@ export function MediaVideoPane({
   onVideoDuration,
   onChangeVideo,
   onPictureClick,
+  followsRecordings = false,
+  importedFilm = false,
+  filmPieces = null,
   sourceDirectionMode = "auto",
   targetDirectionMode = "auto",
   sourceTextDirection = "ltr",
@@ -258,7 +286,9 @@ export function MediaVideoPane({
    * film defaults to the recording, which is the arrangement it always had.
    */
   const playbackSource = usePlaybackSource(fileId, src)
-  const slaved = recordingDrivesPlayback(recordingCell != null, playbackSource)
+  // AQU-2253: following the recordings the programme drives, so the picture is
+  // slaved there whether or not a recording exists.
+  const slaved = followsRecordings || recordingDrivesPlayback(recordingCell != null, playbackSource)
   /** The sound menu exists only where there is a choice to make: a YouTube
    *  picture over a file that also carries an uploaded recording. */
   const offerSoundSource = youTube && recordingCell != null
@@ -327,7 +357,12 @@ export function MediaVideoPane({
     if (slaved || standaloneCellId == null) return undefined
     return cells.find((c) => c.id === standaloneCellId)
   }, [cells, queue.cellId, slaved, standaloneCellId])
-  const clockIsFileTime = queueClockIsFileTime(soundingCell)
+  // Is the queue's clock a second of the FILM? A recording's file second is;
+  // following the recordings so is the programme's (AQU-2253), and a take
+  // played on its own per-take clock never is.
+  const clockIsFileTime = followsRecordings
+    ? queue.progress.programmeClock
+    : queueClockIsFileTime(soundingCell)
 
   /**
    * Publish where the picture is, for everything that is not this pane: the
@@ -690,13 +725,43 @@ export function MediaVideoPane({
 
   // ── The transport. One effect owns play/pause AND position, so the two can
   // never disagree about what the queue is doing.
-  const tickSec = queue.progress.currentTime
+  const queueTickSec = queue.progress.currentTime
   const rate = queue.progress.rate
+  // AQU-2253 (Sam, Oct 30): an imported film following the recordings is cut
+  // into its lines' pieces, so the programme's second is turned into the
+  // film's own: the moment of the piece under the playhead, or that piece's
+  // last frame, held, while a longer recording finishes.
+  const cutFilm = followsRecordings && filmPieces != null && filmPieces.length > 0
+  const moment = cutFilm && clockIsFileTime ? filmMomentAt(filmPieces!, queueTickSec) : null
+  const tickSec = moment ? moment.sec : queueTickSec
+  const holding = moment?.held === true
+  /** AQU-2253: the timeline second the playhead was last put at, by the queue
+   *  running or paused on this file, or by a seek — what an imported film's
+   *  picture is placed by while nothing plays (see below). */
+  const playheadSecRef = useRef<number | null>(null)
   useEffect(() => {
     const video = videoRef.current
     if (!video || !slaved || failed) return
     const now = Date.now()
     const prev = prevTickRef.current
+    if (clockIsFileTime && queue.kind !== "idle" && queue.kind !== "error") playheadSecRef.current = queueTickSec
+    if (holding && queue.kind !== "idle" && queue.kind !== "error") {
+      // The line's recording runs longer than its stretch of the film: the
+      // picture stays on that stretch's last frame until the line ends. Paused
+      // there, and sent there once if it is anywhere else.
+      prevTickRef.current = null
+      wantPlayRef.current = false
+      video.pause()
+      if (Math.abs(video.currentTime - tickSec) > VIDEO_PAUSED_SNAP_SEC) {
+        try {
+          video.currentTime = tickSec
+          lastSeekAtRef.current = now
+        } catch {
+          /* not seekable yet — the next tick re-issues it */
+        }
+      }
+      return
+    }
     const action = videoSyncAction({
       kind: queue.kind,
       clockIsFileTime,
@@ -719,6 +784,20 @@ export function MediaVideoPane({
       return
     }
 
+    if (action.kind === "end") {
+      // AQU-2253: past the film's end the panel holds the last frame.
+      prevTickRef.current = null
+      wantPlayRef.current = false
+      video.pause()
+      try {
+        video.currentTime = action.sec
+        lastSeekAtRef.current = now
+      } catch {
+        /* not seekable yet — the next tick re-issues it */
+      }
+      return
+    }
+
     if (prev?.sec !== tickSec) prevTickRef.current = { sec: tickSec, at: now }
 
     if (action.kind === "seek") {
@@ -733,7 +812,29 @@ export function MediaVideoPane({
     wantPlayRef.current = queue.playing
     if (queue.playing) requestPlay(video)
     else video.pause()
-  }, [slaved, failed, queue.kind, queue.playing, clockIsFileTime, tickSec, rate, mediaEpoch, requestPlay])
+  }, [slaved, failed, queue.kind, queue.playing, clockIsFileTime, tickSec, queueTickSec, holding, rate, mediaEpoch, requestPlay])
+
+  // AQU-2253: an imported film while nothing plays — the file just opened, or
+  // its timing just switched (which stops the queue). The playhead stays on its
+  // second, which now means a moment of the other timing, so the picture is put
+  // where that second is under the rule in force: the piece under it following
+  // the recordings, that second of the film following the source. Without
+  // this the panel went on showing the frame of the other timing.
+  useEffect(() => {
+    const video = videoRef.current
+    if (!importedFilm || !video || !slaved || failed || queue.kind !== "idle") return
+    const at = playheadSecRef.current ?? 0
+    const sec = cutFilm ? (filmMomentAt(filmPieces!, at)?.sec ?? at) : at
+    if (Math.abs(video.currentTime - sec) <= VIDEO_PAUSED_SNAP_SEC) return
+    video.pause()
+    try {
+      video.currentTime = sec
+      lastSeekAtRef.current = Date.now()
+      prevTickRef.current = null
+    } catch {
+      /* not seekable yet — re-run when the element reloads (mediaEpoch) */
+    }
+  }, [importedFilm, slaved, failed, queue.kind, cutFilm, filmPieces, mediaEpoch])
 
   // Playback speed. Set both, because `defaultPlaybackRate` is what survives a
   // load, and re-apply whenever the element reloads. This is the STARTING
@@ -755,6 +856,14 @@ export function MediaVideoPane({
    *  new nonce also carries the flag that belongs to it. */
   const seekWantsPlayRef = useRef(false)
   seekWantsPlayRef.current = seekSec?.play === true
+  /** AQU-2253: the pieces an explicit seek lands in, read through a ref for
+   *  the same reason (the seek effect is keyed on its nonce alone). Kept by an
+   *  effect declared before that one, so it is current when the seek runs. */
+  const filmPiecesRef = useRef<readonly FilmPiece[] | null>(null)
+  const seekPieces = cutFilm ? filmPieces : null
+  useEffect(() => {
+    filmPiecesRef.current = seekPieces
+  }, [seekPieces])
   /** A target held back because the element was still seeking. */
   const pendingScrubSeekRef = useRef<number | null>(null)
   /** The one place `currentTime` is written for a requested seek, so the
@@ -764,7 +873,11 @@ export function MediaVideoPane({
     const video = videoRef.current
     if (!video) return
     try {
-      video.currentTime = sec
+      // AQU-2253: a seek past the film's end lands on its last frame, the same
+      // place a playhead running off the end leaves it (see video-sync).
+      video.currentTime = Number.isFinite(video.duration) && video.duration > 0
+        ? Math.min(sec, Math.max(0, video.duration - VIDEO_END_GUARD_SEC))
+        : sec
       lastSeekAtRef.current = Date.now()
       prevTickRef.current = null
       // The clock is about to jump, and a jump BACKWARDS looks exactly like a
@@ -794,7 +907,13 @@ export function MediaVideoPane({
     // moved the playhead but not the frame would leave the two contradicting
     // each other on screen.
     if (!video) return
-    const sec = Math.max(0, seekTarget)
+    // AQU-2253: an imported film cut into pieces goes to the piece under the
+    // timeline's second, not to that second of the film.
+    playheadSecRef.current = Math.max(0, seekTarget)
+    const pieces = filmPiecesRef.current
+    const sec = pieces && pieces.length > 0
+      ? (filmMomentAt(pieces, Math.max(0, seekTarget))?.sec ?? Math.max(0, seekTarget))
+      : Math.max(0, seekTarget)
     // AQU-646 stage 5: NEVER TWO SEEKS IN FLIGHT.
     //
     // Dragging the playhead asks the picture to move continuously, and hls.js
@@ -1168,7 +1287,12 @@ export function MediaVideoPane({
           // into the queue store, which reaches the queue's own elements; there
           // are none in this arrangement, so the pane honours the flag directly.
           // (AQU-646, 2026-08-11 / 2026-08-13)
-          muted={slaved || !sourceAudible}
+          // AQU-2253: following the recordings it is slaved AND keeps its own
+          // sound, which plays straight through with the picture.
+          // AQU-2253 (Sam, Oct 30): an imported film is always silent: its
+          // sound is the Source audio row's, by the rules any uploaded
+          // recording follows in each timing.
+          muted={importedFilm || (slaved && !followsRecordings) || !sourceAudible}
           // NO NATIVE CONTROLS, in either arrangement (2026-08-14, Sam).
           //
           // The standalone picture used to keep them, on the reasoning that it

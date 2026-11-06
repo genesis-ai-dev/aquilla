@@ -840,7 +840,6 @@ export const zh_Hant: Catalog = {
   "editor.timeline.snapToggleAria": "貼齊相鄰邊界",
   "editor.timeline.snapOnTooltip": "貼齊已開啟 — 邊界會自動吸附到相鄰區塊",
   "editor.timeline.snapOffTooltip": "貼齊已關閉",
-  "editor.timeline.videoHiddenNote": "已連結的影片在此隱藏 — 影片只能依原始錄音的時間播放，而這個檢視方式已不再依循該時間。",
   "editor.timeline.outputLatencyNote": "藍牙音訊會比應用程式送出的時間晚一瞬間才抵達。播放頭已依可測得的延遲調整，但仍有一小段無法測量 — 精細對時請以耳朵為準，不要只看那條線。",
   "editor.timeline.outputDeviceChangedToast": "播放已暫停 — 音訊輸出裝置已變更。",
   "editor.timeline.colorCyan": "青色",

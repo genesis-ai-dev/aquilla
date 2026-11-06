@@ -14,6 +14,7 @@
 import { describe, expect, it } from "vitest"
 import {
   DEFAULT_TRACK_IDS,
+  SOURCE_CUES_TRACK_NAME,
   TRACK_KIND_LABELS,
   deriveDefaultTracks,
   deriveTracksForFile,
@@ -89,7 +90,7 @@ describe("deriveDefaultTracks", () => {
       { ...MEDIA, hasAudioCues: true },
       SUBTITLE_IMPORT,
       { ...SUBTITLE_IMPORT, hasAudioCues: true },
-      { ...SUBTITLE_IMPORT, hasLinkedVideoSound: true },
+      { ...SUBTITLE_IMPORT, hasLinkedFilm: true },
       { isSubtitleImport: true, hasMediaCells: true, hasAudioCues: true },
     ]
     for (const context of contexts) {
@@ -112,13 +113,30 @@ describe("deriveDefaultTracks", () => {
 })
 
 describe("deriveDefaultTracks — the derivation context", () => {
-  // Sam, Oct 5 (AQU-1566): a subtitle file linked to a video keeps its Source
-  // audio row for the video's own sound, cues or not.
-  it("keeps a linked video's Source audio row on a subtitle file with no cues", () => {
-    expect(deriveDefaultTracks({ ...SUBTITLE_IMPORT, hasLinkedVideoSound: true }).map((t) => t.id)).toEqual([
-      "source-subtitles", "target-subtitles", "source-audio", "target-audio",
+  // Sam, Oct 29: "source audio track only shows up when the source that is
+  // imported is literally just audio." A film's own sound lives on the film
+  // track and never makes a Source audio row, on a subtitle file or a book.
+  it("never draws a Source audio row for a linked film's own sound", () => {
+    expect(deriveDefaultTracks({ ...SUBTITLE_IMPORT, hasLinkedFilm: true }).map((t) => t.id)).toEqual([
+      "source-subtitles", "target-subtitles", "target-audio",
     ])
-    expect(deriveDefaultTracks(SUBTITLE_IMPORT).map((t) => t.id)).not.toContain("source-audio")
+    expect(deriveDefaultTracks({
+      isSubtitleImport: false, hasMediaCells: false, hasAudioCues: false, sequenceOrdered: true, hasLinkedFilm: true,
+    }).map((t) => t.id)).toEqual(["source-subtitles", "target-audio"])
+  })
+
+  // Sam, Oct 29: no migration, nothing hidden. A film file that already has a
+  // Source audio track (rows made from the film's sound before this rule, or a
+  // video uploaded as the file's recording) keeps it exactly as it was.
+  it("keeps the Source audio row a film file already has from real source audio", () => {
+    expect(deriveDefaultTracks({ ...SUBTITLE_IMPORT, hasLinkedFilm: true, hasMediaCells: true }).map((t) => t.id))
+      .toContain("source-audio")
+    expect(deriveDefaultTracks({
+      isSubtitleImport: false, hasMediaCells: false, hasAudioCues: false, sequenceOrdered: true,
+      hasLinkedFilm: true, hasSourceAudio: true,
+    }).map((t) => t.id)).toEqual(["source-subtitles", "source-audio", "target-audio"])
+    expect(deriveDefaultTracks({ ...SUBTITLE_IMPORT, hasLinkedFilm: true, hasAudioCues: true }).map((t) => t.id))
+      .toContain("source-audio")
   })
 
   it("gives a media file the stage-1 shape, labels included", () => {
@@ -153,13 +171,51 @@ describe("deriveDefaultTracks — the derivation context", () => {
     ])
   })
 
-  it("draws it once there are cues for it to hold", () => {
+  it("draws it once there are cues for it to hold, as the Source cues row", () => {
     expect(shape(deriveDefaultTracks({ ...SUBTITLE_IMPORT, hasAudioCues: true }))).toEqual([
       ["source-subtitles", "source-subtitles", "Source text", 0, null],
       ["target-subtitles", "target-subtitles", "Target text", 1, null],
-      ["source-audio", "source-audio", "Source audio", 2, null],
+      ["source-audio", "source-audio", "Source cues", 2, null],
       ["target-audio", "target-audio", "Target audio", 3, null],
     ])
+  })
+
+  // Sam, Oct 30: the row that holds the audio VTT's cues is "Source cues". The
+  // kind and id stay "source-audio" (persisted in trackOverrides), so only the
+  // name moves, and a row of real source audio keeps "Source audio".
+  describe("the Source cues name", () => {
+    const BOOK: TrackDerivationContext = {
+      isSubtitleImport: false, hasMediaCells: false, hasAudioCues: false, sequenceOrdered: true,
+    }
+    const sourceRow = (context: TrackDerivationContext) =>
+      deriveDefaultTracks(context).find((t) => t.id === "source-audio")
+
+    it("names the cue row Source cues on a film's subtitle file and on a book with only cues", () => {
+      expect(SOURCE_CUES_TRACK_NAME).toBe("Source cues")
+      expect(sourceRow({ ...SUBTITLE_IMPORT, hasAudioCues: true, hasLinkedFilm: true })?.name).toBe("Source cues")
+      expect(sourceRow({ ...BOOK, hasAudioCues: true })?.name).toBe("Source cues")
+    })
+
+    it("keeps Source audio for a row of real source audio", () => {
+      expect(sourceRow({ ...BOOK, hasSourceAudio: true })?.name).toBe("Source audio")
+      expect(sourceRow({ ...BOOK, hasSourceAudio: true, hasAudioCues: true })?.name).toBe("Source audio")
+      expect(sourceRow(MEDIA)?.name).toBe("Source audio")
+    })
+
+    // Sam, Oct 30: a YouTube film plus an uploaded recording of the source is a
+    // media file (the recording's rows), so the recording keeps its own Source
+    // audio row beside the film.
+    it("keeps a YouTube film's uploaded recording on its own Source audio row", () => {
+      expect(sourceRow({ ...MEDIA, hasLinkedFilm: true })?.name).toBe("Source audio")
+    })
+
+    it("still gives way to a rename", () => {
+      const tracks = deriveTracksForFile(
+        { trackOverrides: { "source-audio": { name: "Heard lines" } } },
+        { ...SUBTITLE_IMPORT, hasAudioCues: true },
+      )
+      expect(tracks.find((t) => t.id === "source-audio")?.name).toBe("Heard lines")
+    })
   })
 
   it("keeps every other row's order identical across that row appearing", () => {
@@ -192,7 +248,7 @@ describe("deriveDefaultTracks — the derivation context", () => {
     const BOOK: TrackDerivationContext = {
       isSubtitleImport: false, hasMediaCells: false, hasAudioCues: false, sequenceOrdered: true,
     }
-    for (const extra of [{ hasSourceAudio: true }, { hasAudioCues: true }, { hasLinkedVideoSound: true }]) {
+    for (const extra of [{ hasSourceAudio: true }, { hasAudioCues: true }]) {
       expect(deriveDefaultTracks({ ...BOOK, ...extra }).map((t) => t.id)).toEqual([
         "source-subtitles", "source-audio", "target-audio",
       ])

@@ -1146,9 +1146,10 @@ export const editor = defineNamespace({
     "editor.history.stepEditSource": "Edit the source text",
     "editor.history.stepChangeSetting": "Change: {setting}",
     "editor.history.stepUnknown": "A change made in a newer version of Aquilla",
-    "editor.timeline.videoHiddenNote":
-      "The linked film is hidden here. It plays to the source's times, and this file now follows its " +
-      "recordings.",
+    "editor.timeline.filmTrack": "Film",
+    "editor.timeline.filmStripAria": "The film, {name}",
+    "editor.timeline.filmHeld": "held {sec} s",
+    "editor.timeline.filmCut": "cut {sec} s",
     "editor.timeline.bluetoothPill": "Bluetooth",
     "editor.timeline.bluetoothPillInfo": "About playing through Bluetooth",
     "editor.timeline.outputLatencyNote":
@@ -1502,7 +1503,6 @@ export const editor = defineNamespace({
     "editor.dock.stateFolded": "folded",
     "editor.dock.stateBehind": "a tab behind {panel}",
     "editor.dock.stateFull": "full screen",
-    "editor.dock.filmHiddenByTiming": "Hidden while the file follows its recordings",
     "editor.dock.fullNote": "Full screen folded {folded}. Restoring unfolds just those.",
     "editor.dock.fullOn": "Full screen is on",
     "editor.dock.fullInfoAria": "About full screen",
@@ -1635,7 +1635,8 @@ export const editor = defineNamespace({
     "editor.timeline.menuStopLinking": "Stop linking",
     "editor.timeline.menuCheckCharacters": "Check characters",
     "editor.timeline.menuFilm": "Film",
-    "editor.timeline.menuAudioCues": "Audio cues",
+    // Sam, Oct 30: the cues are the "Source cues", here and on the timeline.
+    "editor.timeline.menuAudioCues": "Source cues",
     "editor.timeline.badgeCharactersSubtitle": "{count} subtitle",
     "editor.timeline.badgeCharactersHeard": "{count} heard",
     "editor.timeline.badgeCharactersBoth": "{subtitle} + {heard}",
@@ -1811,12 +1812,12 @@ export const editor = defineNamespace({
     "editor.timeline.audioVttTitleReplace": "Replace the audio VTT",
     "editor.timeline.audioVttTitleNew": "Import an audio VTT",
     "editor.timeline.audioVttDescription":
-      "The cues become a read-only Source audio track on this file's timeline — " +
+      "The cues become a read-only Source cues track on this file's timeline — " +
       "the transcript of what is said in the film, on the film's own timings. The " +
       "dialogue table below is untouched: no rows are added to \"{fileName}\", and " +
       "nothing here is translated or exported.",
     "editor.timeline.audioVttDescriptionReplacing":
-      "The audio track this file has now will be replaced.",
+      "The Source cues track this file has now will be replaced.",
     "editor.timeline.audioVttCueSummary": "{count} cues, {span}",
     "editor.timeline.audioVttRepairedShortForm":
       "{count} short-form timestamps read as minutes and seconds.",
@@ -1862,7 +1863,7 @@ export const editor = defineNamespace({
       "{lead} and will no longer be reachable. The audio itself is kept, but " +
       "nothing in the app would show it.",
     "editor.timeline.audioVttRemoveLead":
-      "Take the Source audio track off \"{fileName}\"? The {count} cues and every " +
+      "Take the Source cues track off \"{fileName}\"? The {count} cues and every " +
       "subtitle pairing go with it.",
     "editor.timeline.audioVttRemoveTakesLead": plural({
       one: "{count} recording sits on those cues",
@@ -3744,12 +3745,6 @@ export const editor = defineNamespace({
           "Lower-case words joined after a place with ' · ' in a Panels menu row's tooltip: " +
           "this panel is full screen, everything else folded.",
       },
-      "editor.dock.filmHiddenByTiming": {
-        description:
-          "Where the film is, in the Panels menu and the film button's menu, while " +
-          "the file follows its recordings — which hides the film, because the " +
-          "re-flowed audio no longer follows the original footage.",
-      },
       "editor.dock.fullOn": {
         description:
           "The one short line at the top of the Panels menu while a panel is full screen, " +
@@ -3882,7 +3877,7 @@ export const editor = defineNamespace({
       },
       "editor.timeline.badgeImportedCount": {
         description:
-          "State badge on the Sources menu's 'Audio cues' row, saying how many " +
+          "State badge on the Sources menu's 'Source cues' row, saying how many " +
           "cues the file already carries. Lower-case, no period — it sits beside " +
           "the row's label as a status, not a sentence.",
         placeholders: {
@@ -4810,7 +4805,10 @@ export const editor = defineNamespace({
         description: "Sources menu row for the film (video) linked to this file; its badge says Linked or Not linked.",
       },
       "editor.timeline.menuAudioCues": {
-        description: "Sources menu row for the file's audio cues (imported from an audio VTT); its badge says how many.",
+        description:
+          "Sources menu row for the file's source cues: the timed transcript of what is said in the film, " +
+          "imported from an audio VTT. The same name as the timeline row that shows those cues, so say it " +
+          "the same way in both places. Its badge says how many.",
       },
       "editor.timeline.badgeCharactersSubtitle": {
         description: "Badge on the Characters row: how many characters came from the subtitles. Short; 'subtitle' qualifies the count.",
@@ -7743,12 +7741,34 @@ export const editor = defineNamespace({
       "editor.history.stepEditSource": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): the source text of a line was edited (one editing session). A short verb phrase.", maxLength: 40 },
       "editor.history.stepUnknown": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel) when the step was made on another of the person's devices running a newer version of the app, so this version has no name for it.", maxLength: 60 },
       "editor.history.stepChangeSetting": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): one project setting was changed. {setting} is the setting's own name as Project settings shows it, for example 'Who can export'.", placeholders: { setting: "The name of the setting that was changed." }, maxLength: 60 },
-      "editor.timeline.videoHiddenNote": {
+      "editor.timeline.filmTrack": {
         description:
-          "Note replacing the linked video player when the file is in free-timing " +
-          "mode. The video can only play on the original recording's clock, and this " +
-          "view no longer lays clips out on that clock, so showing it would drift " +
-          "against the audio. Explains an absence — not an error.",
+          "The name of the row pinned at the top of the media view's timeline whenever a film " +
+          "(a linked film) is open: a strip of the film's frames on its own clock. Under it, " +
+          "in smaller text, the film's file name.",
+      },
+      "editor.timeline.filmStripAria": {
+        description:
+          "Screen-reader name of the film strip on the timeline's Film row. Clicking the strip " +
+          "moves the playhead, and the film, to that moment.",
+        placeholders: { name: "The film's name, e.g. 'showcase-film.webm'." },
+      },
+      "editor.timeline.filmHeld": {
+        description:
+          "Small white mark over a film imported as a file, on the timeline's Film row, while " +
+          "the file follows its recordings: this line's recording runs longer than the line's " +
+          "own stretch of film, so the film's last frame is held still for this long. Lower case.",
+        placeholders: { sec: "Seconds, with one decimal, e.g. '1.7'." },
+        maxLength: 18,
+      },
+      "editor.timeline.filmCut": {
+        description:
+          "Small white mark at the right edge of a piece of a film imported as a file, on the " +
+          "timeline's Film row, while the file follows its recordings: this line's recording " +
+          "is shorter than the line's own stretch of film, so this much of the stretch is cut " +
+          "away (as its original sound is). Lower case.",
+        placeholders: { sec: "Seconds, with one decimal, e.g. '0.4'." },
+        maxLength: 18,
       },
       "editor.timeline.bluetoothPill": {
         description:
@@ -10267,7 +10287,8 @@ export const editor = defineNamespace({
         description:
           "Explanatory paragraph under the title of the 'import an audio VTT' " +
           "dialog. Says what the import adds (a read-only track of the film's " +
-          "spoken dialogue) and, just as importantly, what it does NOT touch.",
+          "spoken dialogue, named 'Source cues' on the timeline) and, just as " +
+          "importantly, what it does NOT touch.",
         placeholders: {
           fileName: "Name of the text file the track attaches to, e.g. 'ep101.vtt'. Content — never translate it.",
         },
@@ -10385,10 +10406,10 @@ export const editor = defineNamespace({
       },
       "editor.timeline.audioVttRemoveLead": {
         description:
-          "The question asked by the second step of removing the audio track, " +
-          "naming the file and what goes with the track.",
+          "The question asked by the second step of removing the Source cues track " +
+          "(the timeline row of the film's cues), naming the file and what goes with the track.",
         placeholders: {
-          fileName: "Name of the text file losing its audio track. Content — never translate it.",
+          fileName: "Name of the text file losing its Source cues track. Content — never translate it.",
           count: "Number of cues that would be removed.",
         },
       },

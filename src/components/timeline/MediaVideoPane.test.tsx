@@ -308,6 +308,175 @@ describe("MediaVideoPane", () => {
     })
   })
 
+  // AQU-2253: following the recordings, the film is shown and runs on the
+  // programme's clock — the playhead's time is the film's time — and it keeps
+  // its own sound, which plays straight through with its picture.
+  describe("following the recordings", () => {
+    const subs = [
+      cell({ id: "s1", medium: "text", original: "Line one", translated: "Ligne un", startTime: 0.5, endTime: 4, attachments: { a1: { url: "blob:x", type: "audio" } } }),
+      cell({ id: "s2", medium: "text", original: "Line two", translated: "Ligne deux", startTime: 4.6, endTime: 8.8 }),
+    ]
+    const renderFollowing = (props: Partial<React.ComponentProps<typeof MediaVideoPane>> = {}) =>
+      render(<MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={subs} followsRecordings {...props} />)
+
+    it("follows the programme instead of driving, and keeps the film's own sound", () => {
+      renderFollowing()
+      expect(screen.getByTestId("tl-video-pane")).toHaveAttribute("data-video-state", "slaved")
+      expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(false)
+    })
+
+    it("the Source audio mute silences it", () => {
+      mockAudibility = { source: false, target: true }
+      renderFollowing()
+      expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(true)
+    })
+
+    it("goes to the programme's second, the same moment as the playhead", () => {
+      const view = renderFollowing()
+      const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
+      Object.defineProperty(video, "duration", { value: 27, configurable: true })
+      video.play = vi.fn(() => Promise.resolve())
+      sounding("s1", { progress: { currentTime: 12.5, duration: 20, rate: 1, volume: 1, programmeClock: true } })
+      view.rerender(<MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={subs} followsRecordings />)
+      expect(video.currentTime).toBe(12.5)
+    })
+
+    it("a take played on its own clock leaves the film where it is", () => {
+      const view = renderFollowing()
+      const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
+      Object.defineProperty(video, "duration", { value: 27, configurable: true })
+      video.currentTime = 3
+      sounding("s1", { progress: { currentTime: 1.2, duration: 3.1, rate: 1, volume: 1, programmeClock: false } })
+      view.rerender(<MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={subs} followsRecordings />)
+      expect(video.currentTime).toBe(3)
+    })
+  })
+
+  // AQU-2253 (Sam, Oct 30): an IMPORTED film (a video uploaded through the
+  // importer) is picture only — its sound is the Source audio row's — and
+  // following the recordings it is cut into its lines' pieces.
+  describe("an imported film", () => {
+    const UPLOAD = "frontier-audio://f1/audio-f1-1-film.webm"
+    const lines = [
+      cell({ id: "a", original: "Line a", attachments: {}, startTime: 0.5, endTime: 4 }),
+      cell({ id: "b", original: "Line b", attachments: {}, startTime: 4.6, endTime: 8.8 }),
+    ]
+    // Line a fits its 3.5 s exactly; line b's recording is 6 s against 4.2 s
+    // of film, so its piece holds from 7.7 s to 9.5 s on the timeline.
+    const pieces = [
+      { cellId: "a", atSec: 0, lenSec: 3.5, filmStartSec: 0.5, filmEndSec: 4.0 },
+      { cellId: "b", atSec: 3.5, lenSec: 6, filmStartSec: 4.6, filmEndSec: 8.8 },
+    ]
+    const pane = (props: Partial<React.ComponentProps<typeof MediaVideoPane>> = {}) => (
+      <MediaVideoPane src={UPLOAD} fileId="f1" cells={lines} importedFilm {...props} />
+    )
+    const programmeAt = (sec: number, cellId: string, over: Partial<QueueForFile> = {}) =>
+      sounding(cellId, { progress: { currentTime: sec, duration: 9.5, rate: 1, volume: 1, programmeClock: true }, ...over })
+    const media = () => {
+      const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
+      Object.defineProperty(video, "duration", { value: 27, configurable: true })
+      video.play = vi.fn(() => Promise.resolve())
+      video.pause = vi.fn() as unknown as HTMLVideoElement["pause"]
+      return video
+    }
+
+    it("is muted following the source, whatever the Source audio mute says", () => {
+      mockAudibility = { source: true, target: true }
+      render(pane())
+      expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(true)
+    })
+
+    it("is muted following the recordings too, where a linked film keeps its own sound", () => {
+      mockAudibility = { source: true, target: true }
+      const view = render(pane({ followsRecordings: true, filmPieces: pieces }))
+      expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(true)
+      // The same pane on a linked film plays its own sound (unchanged).
+      view.unmount()
+      render(<MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={lines} followsRecordings />)
+      expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(false)
+    })
+
+    it("following the recordings, shows the piece under the playhead: that line's own stretch", () => {
+      const view = render(pane({ followsRecordings: true, filmPieces: pieces }))
+      const video = media()
+      programmeAt(1, "a")
+      view.rerender(pane({ followsRecordings: true, filmPieces: pieces }))
+      expect(video.currentTime).toBe(1.5)
+      // 5 s on the timeline is 1.5 s into line b's piece: 6.1 s of the film,
+      // not 5 s (the film's own clock, which a linked film would show). A
+      // second later, past the seek cooldown.
+      const now = Date.now()
+      const clock = vi.spyOn(Date, "now").mockReturnValue(now + 1000)
+      try {
+        programmeAt(5, "b")
+        view.rerender(pane({ followsRecordings: true, filmPieces: pieces }))
+        expect(video.currentTime).toBeCloseTo(6.1, 6)
+        expect(video.play).toHaveBeenCalled()
+      } finally {
+        clock.mockRestore()
+      }
+    })
+
+    it("a recording longer than its line's original: the last frame of the line's stretch, held still", () => {
+      const view = render(pane({ followsRecordings: true, filmPieces: pieces }))
+      const video = media()
+      programmeAt(8.5, "b")
+      view.rerender(pane({ followsRecordings: true, filmPieces: pieces }))
+      expect(video.currentTime).toBeCloseTo(8.76, 6)
+      expect(video.pause).toHaveBeenCalled()
+      ;(video.play as ReturnType<typeof vi.fn>).mockClear()
+      programmeAt(9.2, "b")
+      view.rerender(pane({ followsRecordings: true, filmPieces: pieces }))
+      expect(video.currentTime).toBeCloseTo(8.76, 6)
+      expect(video.play).not.toHaveBeenCalled()
+    })
+
+    it("an explicit seek lands in the piece under the timeline's second", () => {
+      const view = render(pane({ followsRecordings: true, filmPieces: pieces }))
+      const video = media()
+      view.rerender(pane({ followsRecordings: true, filmPieces: pieces, seekSec: { sec: 4, nonce: 1 } }))
+      expect(video.currentTime).toBeCloseTo(5.1, 6)
+    })
+
+    it("opened following the recordings with nothing playing: the first line's piece, not the film's 0:00", () => {
+      render(pane({ followsRecordings: true, filmPieces: pieces }))
+      expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).currentTime).toBe(0.5)
+    })
+
+    it("switching timing while nothing plays puts the picture where the playhead's second is in the new timing", () => {
+      // Paused following the recordings at 5 s: line b's piece, 6.1 s of film.
+      const view = render(pane({ followsRecordings: true, filmPieces: pieces }))
+      const video = media()
+      programmeAt(5, "b", { playing: false, running: false, kind: "paused" })
+      view.rerender(pane({ followsRecordings: true, filmPieces: pieces }))
+      expect(video.currentTime).toBeCloseTo(6.1, 6)
+      // The switch stops the queue; the playhead stays on 5, which following
+      // the source is 5 s of the film.
+      mockQueue = { ...mockQueue, active: false, playing: false, running: false, cellId: null, kind: "idle" }
+      view.rerender(pane())
+      expect(video.currentTime).toBe(5)
+      // …and back: 5 s on the recordings' timeline is line b's piece again.
+      view.rerender(pane({ followsRecordings: true, filmPieces: pieces }))
+      expect(video.currentTime).toBeCloseTo(6.1, 6)
+    })
+
+    it("following the source, the film's own clock: the recording's second is the film's", () => {
+      const view = render(pane())
+      const video = media()
+      sounding("b", { progress: { currentTime: 5, duration: 27, rate: 1, volume: 1, programmeClock: false } })
+      view.rerender(pane())
+      expect(video.currentTime).toBe(5)
+    })
+
+    it("a linked film following the recordings keeps the film's own clock, pieces or none", () => {
+      const view = render(<MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={lines} followsRecordings />)
+      const video = media()
+      programmeAt(5, "b")
+      view.rerender(<MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={lines} followsRecordings />)
+      expect(video.currentTime).toBe(5)
+    })
+  })
+
   it("is a muted picture surface with no competing controls", () => {
     renderPane()
     const video = screen.getByTestId("video-pane-media") as HTMLVideoElement

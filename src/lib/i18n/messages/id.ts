@@ -840,7 +840,6 @@ export const id: Catalog = {
   "editor.timeline.snapToggleAria": "Rekatkan ke tepi tetangga",
   "editor.timeline.snapOnTooltip": "Perekatan aktif — tepi menempel ke tetangganya",
   "editor.timeline.snapOffTooltip": "Perekatan nonaktif",
-  "editor.timeline.videoHiddenNote": "Video yang tertaut disembunyikan di sini — video diputar pada pewaktuan rekaman asli, yang tidak lagi diikuti tampilan ini.",
   "editor.timeline.outputLatencyNote": "Audio Bluetooth tiba sesaat setelah aplikasi mengirimnya. Kepala putar disesuaikan dengan jeda yang dapat diukur, tetapi sebagian kecil tidak terukur — untuk pewaktuan halus, percayai telinga Anda ketimbang garisnya.",
   "editor.timeline.outputDeviceChangedToast": "Pemutaran dijeda — keluaran audio berubah.",
   "editor.timeline.colorCyan": "Sian",

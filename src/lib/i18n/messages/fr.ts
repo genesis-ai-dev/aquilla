@@ -834,7 +834,6 @@ export const fr: Catalog = {
   "editor.timeline.snapToggleAria": "Aimanter aux bords voisins",
   "editor.timeline.snapOnTooltip": "Aimantation activée — les bords s'aimantent aux voisins",
   "editor.timeline.snapOffTooltip": "Aimantation désactivée",
-  "editor.timeline.videoHiddenNote": "La vidéo liée est masquée ici — elle se lit selon le minutage de l'enregistrement original, que cette vue ne suit plus.",
   "editor.timeline.outputLatencyNote": "L'audio Bluetooth arrive un instant après son envoi par l'application. Le curseur de lecture est ajusté selon le délai mesurable, mais une partie reste impossible à mesurer — fiez-vous à votre oreille plutôt qu'au trait pour un minutage précis.",
   "editor.timeline.outputDeviceChangedToast": "Lecture interrompue — la sortie audio a changé.",
   "editor.timeline.colorAzure": "Azur",

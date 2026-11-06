@@ -1108,3 +1108,54 @@ describe("audio-first transport — a pause before the take (AQU-2204)", () => {
     expect(getQueueProgress().currentTime).toBeGreaterThanOrEqual(0.29)
   })
 })
+
+// AQU-2253 (Sam, Oct 29): following the recordings on a file with a film, the
+// film's own sound plays straight through with its picture, so the programme
+// must not ALSO voice the original line by line — that would be the same
+// speech twice, out of step. The original still clocks its verses (silently),
+// so nothing about the layout or the hand-on changes.
+describe("audio-first transport — the film voices the original (AQU-2253)", () => {
+  it("the original plays muted while the film carries the sound, and its verse still runs", async () => {
+    const { setProgrammeSourceVoicedByFilm } = await import("./play-queue")
+    setProgrammeSourceVoicedByFilm(true)
+    try {
+      const cells = [verse("v1", 0, 6, 11_000), verse("v2", 6, 16, 4_000)]
+      setQueueTimingMode("audioFirst")
+      startQueue(ctxFor(cells), 0)
+      await settle()
+      expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "v1" })
+      expect(sourceEl()!.paused).toBe(false)
+      expect(sourceEl()!.muted).toBe(true)
+      expect(dubEl("v1")!.muted).toBe(false)
+    } finally {
+      setProgrammeSourceVoicedByFilm(false)
+    }
+  })
+
+  it("turning it on mid-play silences the original at once; off gives it back", async () => {
+    const { setProgrammeSourceVoicedByFilm } = await import("./play-queue")
+    const cells = [verse("v1", 0, 6, 11_000)]
+    setQueueTimingMode("audioFirst")
+    startQueue(ctxFor(cells), 0)
+    await settle()
+    expect(sourceEl()!.muted).toBe(false)
+    setProgrammeSourceVoicedByFilm(true)
+    expect(sourceEl()!.muted).toBe(true)
+    setProgrammeSourceVoicedByFilm(false)
+    expect(sourceEl()!.muted).toBe(false)
+  })
+
+  it("following the source the recording stays the sound (the picture is the silent one)", async () => {
+    const { setProgrammeSourceVoicedByFilm } = await import("./play-queue")
+    setProgrammeSourceVoicedByFilm(true)
+    try {
+      const cells = [verse("v1", 0, 6, 11_000)]
+      setQueueTimingMode("dubbing")
+      startQueue(ctxFor(cells), 0)
+      await settle()
+      expect(sourceEl()!.muted).toBe(false)
+    } finally {
+      setProgrammeSourceVoicedByFilm(false)
+    }
+  })
+})

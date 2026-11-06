@@ -851,7 +851,6 @@ export const ru: Catalog = {
   "editor.timeline.snapToggleAria": "Прилипание к краям соседних фрагментов",
   "editor.timeline.snapOnTooltip": "Прилипание включено — края притягиваются к соседям",
   "editor.timeline.snapOffTooltip": "Прилипание выключено",
-  "editor.timeline.videoHiddenNote": "Привязанное видео здесь скрыто — оно идёт по таймингу оригинальной записи, за которым это представление больше не следует.",
   "editor.timeline.outputLatencyNote": "Звук по Bluetooth приходит чуть позже, чем приложение его отправляет. Курсор воспроизведения учитывает задержку, которую можно измерить, но часть задержки измерить нельзя — для точного тайминга доверяйте слуху, а не линии.",
   "editor.timeline.outputDeviceChangedToast": "Воспроизведение приостановлено — устройство вывода звука изменилось.",
   "editor.timeline.colorCyan": "Голубой",

@@ -66,6 +66,8 @@ import { isImportedRow } from "@/lib/cell-editing-gate"
 import { Spinner } from "@/components/ui/spinner"
 import { OverflowMenu, type OverflowMenuItem } from "@/components/OverflowMenu"
 import { SourceRegionLane } from "./SourceRegionLane"
+import { FilmTrackLane } from "./FilmTrackLane"
+import { filmKindOf, filmPiecesFor } from "@/lib/timeline/film-pieces"
 import { VideoSoundSourcePicker } from "./VideoSoundSourcePicker"
 import type { PlaybackSource } from "@/lib/audio/playback-source"
 import type { LaneLinkOverlay } from "./CueLinkOverlay"
@@ -134,7 +136,7 @@ import {
   type TrackRow,
 } from "@/lib/timeline/track-groups"
 import { loadCollapsedFolders, loadHiddenTracks, saveCollapsedFolders, saveHiddenTracks, toggleCollapsed } from "@/lib/timeline/track-collapse"
-import { TRACK_ACCENT_CLASS, TRACK_DOT_CLASS, trackHueVarsFor } from "@/lib/timeline/track-colors"
+import { filmTrackHueVars, TRACK_ACCENT_CLASS, TRACK_DOT_CLASS, trackHueVarsFor } from "@/lib/timeline/track-colors"
 import type { SummarySpan } from "@/lib/timeline/summary-band"
 import { TimelineFolderLane } from "./TimelineFolderLane"
 import { RowMetricsContext, useRowMetrics, type RowMetrics } from "./useRowMetrics"
@@ -313,7 +315,7 @@ export interface TimelineEditorProps {
    * (the link dialog, which also clears it) and Hide / Show. Absent: the
    * Sources menu's plain "Film" row, which opens the link dialog.
    */
-  film?: { name: string; hiddenByTiming: boolean; showing: boolean; onHide(): void; onShow(): void }
+  film?: { name: string; showing: boolean; onHide(): void; onShow(): void }
   /**
    * AQU-646: add a line over a stretch of the film that has no cell of its own
    * — the "T" in the Subtitles track, and the mic in the Target audio track
@@ -2444,11 +2446,9 @@ export function TimelineEditor({
           disabled: !canLinkVideo, testId: "top-film-change", onClick: onRequestLinkVideo,
         })
       }
-      items.push(film.hiddenByTiming
-        ? { id: "film-hidden", type: "label", label: t("editor.dock.filmHiddenByTiming") }
-        : film.showing
-          ? { id: "film-hide", label: t("editor.dock.filmHide"), icon: EyeOff, testId: "top-film-hide", onClick: film.onHide }
-          : { id: "film-show", label: t("editor.dock.filmShow"), icon: Film, testId: "top-film-show", onClick: film.onShow })
+      items.push(film.showing
+        ? { id: "film-hide", label: t("editor.dock.filmHide"), icon: EyeOff, testId: "top-film-hide", onClick: film.onHide }
+        : { id: "film-show", label: t("editor.dock.filmShow"), icon: Film, testId: "top-film-show", onClick: film.onShow })
       items.push({ id: "sources-heading", type: "label", label: t("editor.timeline.sourcesMenu") })
     }
     // AQU-1758 (Sam's decision 7): everything else in Sources is behind the
@@ -2857,9 +2857,8 @@ export function TimelineEditor({
    * that plays, so an empty Target audio lane, or a Source audio lane on a
    * file with no sound at all, offered a mute that did nothing you could hear.
    *
-   *  - Source audio: its recording's segments, or a linked video's own sound.
-   *    The film only sounds where the picture plays, and in Free timing it is
-   *    hidden and silent.
+   *  - Source audio: its recording's segments. A linked film's own sound is
+   *    the film track's to mute (Sam, Oct 29), not this lane's.
    *  - Target audio and added tracks: at least one take on the lane.
    *
    * The caller keeps the button on a lane that is muted right now, whatever
@@ -2868,7 +2867,7 @@ export function TimelineEditor({
   function laneHasSound(track: TimelineTrack): boolean {
     switch (track.kind) {
       case "source-audio":
-        return dialogue.length > 0 || (Boolean(coreMediaUrl) && !audioFirst)
+        return dialogue.length > 0
       case "target-audio":
         return targetItems.length > 0
       case "audio":
@@ -2933,7 +2932,21 @@ export function TimelineEditor({
     return out
   }
 
-  const durationSec = Math.max(layout.totalSec, independentTextLayout.totalSec)
+  // AQU-2253: the film track runs from 0:00 to the film's end on its own clock,
+  // in both timings, so the timeline reaches at least that far: following the
+  // recordings the lines can end well before the film does.
+  const filmTrackSec = coreMediaUrl && videoDurationSec && videoDurationSec > 0 ? videoDurationSec : 0
+  // AQU-2253 (Sam, Oct 30): an IMPORTED film is cut along its source cues
+  // (lib/timeline/film-pieces). Following the recordings each line's piece
+  // sits in its line's slot, laid out by the same programme the lanes and the
+  // transport use, so the film lasts as long as its lines and no longer.
+  // Following the source its pieces sit end to end: the one strip.
+  const filmKind = useMemo(() => filmKindOf(coreMediaUrl, cells), [coreMediaUrl, cells])
+  const filmPieces = useMemo(
+    () => (audioFirst && filmKind === "imported" ? filmPiecesFor(layout.programme) : null),
+    [audioFirst, filmKind, layout.programme],
+  )
+  const durationSec = Math.max(layout.totalSec, independentTextLayout.totalSec, filmPieces ? 0 : filmTrackSec)
   const trackWidthPx = secToPx(durationSec, pxPerSec)
   // A short file's timeline still runs to the edge of the view — the ruler and
   // every row's ground — rather than stopping where the file ends (Sam, Oct
@@ -4246,16 +4259,16 @@ export function TimelineEditor({
             snapEnabled={snapOn}
             // Sam's D3: on an empty linked video the row is one dashed chip
             // the length of the film, and what it stands for is the video's
-            // own sound. In Free timing the video is hidden and silent, so
-            // the row says nothing at all rather than claim it. (Sam, Oct 5:
-            // the same holds once the captions are rows — a linked video with
-            // no audio cues keeps the one labelled band.)
+            // own sound. (Sam, Oct 5: the same holds once the captions are
+            // rows — a linked video with no audio cues keeps the one labelled
+            // band.) AQU-2253: in both timings — following the recordings the
+            // film and its sound play straight through on the film's clock,
+            // so the band runs from 0:00 to the film's end there too.
             gapLabel={
-              (linkedVideoEmpty || (coreMediaUrl && (audioCues?.length ?? 0) === 0)) && !audioFirst
+              linkedVideoEmpty || (coreMediaUrl && (audioCues?.length ?? 0) === 0)
                 ? t("editor.timeline.soundSourceVideo")
                 : undefined
             }
-            hideGaps={Boolean(linkedVideoEmpty) && audioFirst}
             scrollLeftPx={scrollLeft}
           />
         )
@@ -4930,20 +4943,6 @@ export function TimelineEditor({
         </div>
       )}
 
-      {/* SUB-53: a video runs on the original recording's clock, so it cannot
-          follow a re-flowed track — say so rather than let it drift silently
-          against the audio. In Original's timing the video renders beside the
-          text table instead (MediaVideoPane), which is why only the note is
-          left here. */}
-      {coreMediaUrl && audioFirst && (
-        <div
-          data-testid="tl-video-hidden-note"
-          className="shrink-0 border-b border-border bg-muted/30 px-3 py-1.5 text-[11px] text-muted-foreground"
-        >
-          {t("editor.timeline.videoHiddenNote")}
-        </div>
-      )}
-
       {/* Pre-merge round: recordings from before duration capture have no
           measured length — their chips draw at guessed widths, and Free
           timing cannot lay them out. The fix is deliberate (a button), never
@@ -5155,6 +5154,29 @@ export function TimelineEditor({
               role={onReorderTrack ? "list" : undefined}
               aria-label={onReorderTrack ? t("editor.timeline.gutterReorderAria") : undefined}
             >
+              {/* AQU-2253 (board 56): the film, pinned above every track
+                  whenever one is linked. Not a track in the contract — it
+                  cannot be moved, renamed or coloured — so it carries no
+                  reorder handle and no menu, and the drag code, which counts
+                  `[data-tl-track-row]`, never sees it. Its header is just
+                  "Film" and the film's name. Sam, Oct 29: the film's own sound
+                  lives with the film, never as Source audio, so its one button
+                  is that sound's mute (the same "source" switch the video
+                  element has always obeyed). A film file that already has a
+                  Source audio recording of its own keeps that switch on the
+                  Source audio row, exactly where it was (no change for old
+                  files), so one switch never shows twice. */}
+              {coreMediaUrl && (
+                <LaneLabel
+                  data-testid="tl-film-track-label"
+                  name={t("editor.timeline.filmTrack")}
+                  sub={film?.name ?? ""}
+                  dot={TRACK_DOT_CLASS}
+                  hueVars={filmTrackHueVars()}
+                  collapsed={gutterCollapsed}
+                  trailing={dialogue.length > 0 ? undefined : speakerToggle("source", "the film's own sound")}
+                />
+              )}
               {/* The gutter is the track list, exactly as the lanes beside it are —
                   one row here per row there, in the same order, off the same
                   array. `name` comes from the track and not from the kind, which
@@ -5447,6 +5469,21 @@ export function TimelineEditor({
                 onScrubMove={moveScrub}
                 onScrubEnd={endScrub}
               />
+              {coreMediaUrl && (
+                <FilmTrackLane
+                  src={coreMediaUrl}
+                  fileId={fileId}
+                  projectId={project?.id}
+                  session={session}
+                  filmSec={filmTrackSec || null}
+                  pxPerSec={pxPerSec}
+                  viewStartSec={viewStartSec}
+                  viewEndSec={viewEndSec}
+                  name={film?.name ?? t("editor.timeline.filmTrack")}
+                  onSeekSec={seekTo}
+                  pieces={filmPieces}
+                />
+              )}
               {trackRows.map((row) => {
                 const lane = laneForTrack(row)
                 // A row with NO MENU CAPABILITY at all — a viewer — is the row

@@ -1042,7 +1042,6 @@ export const sw: Catalog = {
   "editor.history.reasonGone": "Kilichobadilishwa hakipo tena.",
   "editor.history.reasonUnavailable": "Hatua hii haiwezi kutenduliwa tena.",
   "editor.history.reasonFailed": "Haikuweza kuhifadhiwa. Jaribu tena.",
-  "editor.timeline.videoHiddenNote": "Video iliyounganishwa imefichwa hapa — inacheza kwa muda wa rekodi asili, ambao mwonekano huu haufuati tena.",
   "editor.timeline.bluetoothPillInfo": "Kuhusu kucheza kupitia Bluetooth",
   "editor.timeline.outputLatencyNote": "Sauti ya Bluetooth hufika muda mfupi baada ya programu kuituma. Kiashiria kinarekebishwa kwa ucheleweshaji unaopimika, lakini kiasi kidogo hakipimiki — amini masikio yako kuliko mstari kwa muda sahihi.",
   "editor.timeline.outputDeviceChangedToast": "Uchezaji umesitishwa — sauti inayotoka imebadilika.",

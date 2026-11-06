@@ -1,7 +1,5 @@
 // Where the media lens's video pane is shown, and how wide. (AQU-646)
 
-import type { AudioTimingMode } from "@/lib/parsers/types"
-
 /** Wide enough to read burned-in captions, narrow enough to leave the table
  *  usable at 1280px: the row reserves ~174px of chrome before its two fluid
  *  columns, so every pixel here costs the target column half as much again. */
@@ -30,17 +28,18 @@ const VIDEO_PANE_WIDTH_KEY = "aquilla:video-pane-width"
 export interface VideoPaneGateInput {
   timelineStacked: boolean
   coreMediaUrl: string | null | undefined
-  timingMode: AudioTimingMode
 }
 
 /**
- * Free timing deliberately keeps hiding the video (the timeline re-flows to the
- * translations' own lengths, which the original footage cannot follow) — the
- * timeline shows an explanatory note there instead. Exported so the gate has
- * test coverage: nothing renders ProjectWorkspace itself.
+ * The film is shown wherever the media lens is, in both timings (AQU-2253,
+ * Sam, Oct 29: "there's legit no reason to chop up the video… I just want it
+ * completely separately playing through"). It runs on its own clock: following
+ * the recordings the takes re-flow and the film does not, so the two simply
+ * start together at 0:00. It used to be hidden there, behind a note. Exported
+ * so the gate has test coverage: nothing renders ProjectWorkspace itself.
  */
-export function shouldShowVideoPane({ timelineStacked, coreMediaUrl, timingMode }: VideoPaneGateInput): boolean {
-  return Boolean(timelineStacked && coreMediaUrl && timingMode !== "audioFirst")
+export function shouldShowVideoPane({ timelineStacked, coreMediaUrl }: VideoPaneGateInput): boolean {
+  return Boolean(timelineStacked && coreMediaUrl)
 }
 
 /**

@@ -837,7 +837,6 @@ export const ms: Catalog = {
   "editor.timeline.snapToggleAria": "Lekat pada tepi bersebelahan",
   "editor.timeline.snapOnTooltip": "Lekat aktif — tepi tertarik ke tepi sebelah",
   "editor.timeline.snapOffTooltip": "Lekat tidak aktif",
-  "editor.timeline.videoHiddenNote": "Video terpaut disembunyikan di sini — ia dimainkan mengikut masa rakaman asal, yang tidak lagi diikuti oleh paparan ini.",
   "editor.timeline.outputLatencyNote": "Audio Bluetooth sampai seketika selepas apl menghantarnya. Penanda main dilaras untuk kelewatan yang dapat diukur, tetapi sedikit yang tidak dapat diukur — percayai telinga anda lebih daripada garisan untuk masa yang halus.",
   "editor.timeline.outputDeviceChangedToast": "Main balik dijeda — keluaran audio berubah.",
   "editor.timeline.colorCyan": "Sian",

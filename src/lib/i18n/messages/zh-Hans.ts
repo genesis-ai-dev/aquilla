@@ -840,7 +840,6 @@ export const zh_Hans: Catalog = {
   "editor.timeline.snapToggleAria": "贴齐相邻边界",
   "editor.timeline.snapOnTooltip": "贴齐已打开 — 边界会自动吸附到相邻区块",
   "editor.timeline.snapOffTooltip": "贴齐已关闭",
-  "editor.timeline.videoHiddenNote": "已链接的视频在此隐藏 — 视频只能依原始录音的时间播放，而这个查看方式已不再依循该时间。",
   "editor.timeline.outputLatencyNote": "蓝牙音频会比应用发出的信号稍晚到达。播放头已按可测延迟做了调整，但仍有一小段无法测量 — 精细对时请以耳朵为准，不要只看那条线。",
   "editor.timeline.outputDeviceChangedToast": "播放已暂停 — 音频输出已更改。",
   "editor.timeline.colorCyan": "青色",

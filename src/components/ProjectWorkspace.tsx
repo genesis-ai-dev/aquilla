@@ -221,7 +221,7 @@ import { CloneVoiceModalHost } from "./voice/CloneVoiceModalHost"
 import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
 import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
   setQueueTargetSlots, setQueueLayerTrackSlots, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying,
-  hasAnyPlayableAudio, onQueueRanOut, stopQueue } from "@/lib/audio/play-queue"
+  hasAnyPlayableAudio, onQueueRanOut, stopQueue, setProgrammeSourceVoicedByFilm } from "@/lib/audio/play-queue"
 import {
   chapterOfCell, nextPlayableChapter, resolveTimelineChapter, scopeCells, sequenceTimelineCells,
   timelineChaptersOf, type TimelineChapter,
@@ -351,6 +351,8 @@ import {
 } from "@/lib/audio/linked-takes"
 import { deriveSourceRegions, insertSlotsByCell, EMPTY_INSERT_SLOTS } from "@/lib/timeline/source-regions"
 import { deriveTracksForFile } from "@/lib/timeline/tracks"
+import { filmKindOf, filmPiecesFor, filmVoicesProgramme } from "@/lib/timeline/film-pieces"
+import { layOutProgramme } from "@/lib/timeline/programme"
 import { nextFolderName } from "@/lib/timeline/track-names"
 import { applyPendingOrders, renormaliseOrders, settledPendingOrders } from "@/lib/timeline/track-reorder"
 import { folderIdsOf, folderMembers, orderForScopeAppend, trackScope } from "@/lib/timeline/track-groups"
@@ -465,7 +467,6 @@ import { SidebarProjectSection } from "./SidebarProjectSection"
 import { LIVING_MEMORY_ICON } from "./LivingMemoryButton"
 import { SuggestionBanner } from "./SuggestionBanner"
 import { ConfirmActionDialog } from "./ConfirmActionDialog"
-import { LinkVideoTimingDialog } from "./timeline/LinkVideoTimingDialog"
 import { LinkVideoUrlDialog } from "./timeline/LinkVideoUrlDialog"
 import { ImportAudioVttDialog } from "./timeline/ImportAudioVttDialog"
 import { ImportTimelineTextDialog } from "./import/ImportTimelineTextDialog"
@@ -2988,13 +2989,14 @@ export function ProjectWorkspace() {
   // which Free timing is the whole point. Read through the same predicate the
   // resolver uses so the picker and the mode can never disagree.
   //
-  // AQU-2204 (Sam, Oct 26): widened to every file TIMED TO A FILM — footage
-  // linked of any kind, or an audio cue file, whose cues transcribe the film.
-  // Those offer only "Follows source"; the control shows it with an (i).
+  // AQU-2204 (Sam, Oct 26): widened to every file TIMED TO A FILM — an audio
+  // cue file, whose cues transcribe the film. Those offer only "Follows
+  // source"; the control shows it with an (i). AQU-2253: a linked film on its
+  // own no longer counts — it runs on its own clock in both timings.
   const fileHasAudioCues = (hydratedProject?.files ?? []).some(
     (f) => isAudioCueFile(f) && f.anchorFileId === activeFileId,
   )
-  const timingFilmTimed = isFilmTimedFile(activeFile, { hasAudioCues: fileHasAudioCues })
+  const timingFilmTimed = isFilmTimedFile({ hasAudioCues: fileHasAudioCues })
   // AQU-2204 (board 24): a file whose lines have no times and no source
   // recording has NOTHING TO FOLLOW, so it follows its recordings and the
   // control greys "Follows source" out. AQU-1758: every file has the timeline
@@ -4491,8 +4493,9 @@ export function ProjectWorkspace() {
   // rather than letting the dialog close on a write that never happened.
   //
   // AQU-1748: linking or clearing footage can flip the file's RESOLVED timing
-  // mode as a side effect (a subtitle import with a video is always Original
-  // timing; clearing it brings back the file's own mode). Register that as our
+  // mode as a side effect (AQU-2253: a file with no timing of its own starts on
+  // Follows source once a film is linked, whatever its project's old Free
+  // timing setting says; clearing it brings that back). Register that as our
   // own write, or useTimingModeAck reads it as a collaborator's change and
   // blames "someone with settings access" for the user's own click. `timingAck`
   // is declared far below this callback, so it is reached through a ref that
@@ -4567,31 +4570,17 @@ export function ProjectWorkspace() {
     },
     [activeFileId, readFilmLink, writeFilmLink],
   )
-  // Flow B (2026-08-05): linking a video while in Free timing prompts to
-  // switch back (declinable, with the video-stays-hidden warning). NOTE the
-  // mode is computed INLINE — the `timingMode` const is declared ~2,700 lines
-  // below this callback (a temporal-dead-zone hazard in the deps). Pre-merge
-  // round: the mode is per-FILE now, resolved off the active file.
-  const [pendingVideoUrl, setPendingVideoUrl] = useState<string | null>(null)
   /** The URL dialog lives here rather than in the timeline toolbar, because the
    *  video pane offers the same action from its could-not-load state. */
   const [linkVideoOpen, setLinkVideoOpen] = useState(false)
+  // AQU-2253: linking a film no longer asks first. A film runs on its own
+  // clock in both timings, so a file that follows its recordings keeps doing
+  // so (the "Linking a film makes this file follow its source" dialog went).
   const handleLinkVideo = useCallback(
     (url: string | null) => {
-      // AQU-2204: a file timed to a film always follows its source, so linking
-      // footage to a file that follows its recordings SWITCHES it — say so
-      // first. Asked of the file as it is now (before the link): that is the
-      // state the person is about to leave.
-      if (
-        url &&
-        resolveFileTimingMode(activeFile, project ?? undefined, { hasAudioCues: fileHasAudioCues, nothingToFollow: timingNothingToFollow }) === "audioFirst"
-      ) {
-        setPendingVideoUrl(url)
-        return
-      }
-      void applyLinkVideo(url) // clearing never prompts
+      void applyLinkVideo(url)
     },
-    [activeFile, project, applyLinkVideo, fileHasAudioCues, timingNothingToFollow],
+    [applyLinkVideo],
   )
 
   // ── AQU-646 stage 2: the audio VTT's cues ────────────────────────────────
@@ -13720,16 +13709,15 @@ export function ProjectWorkspace() {
       // a sibling still loading: the row exists, drawn empty, rather than
       // appearing a moment after the timeline settles.
       hasAudioCues: audioCues !== null,
-      // AQU-1566 (Sam, Oct 5): a subtitle file linked to a video keeps its
-      // Source audio row for the video's own sound. Not in Free timing, where
-      // the video is hidden and silent.
-      hasLinkedVideoSound: Boolean(activeFile?.coreMediaUrl) && timingMode !== "audioFirst",
+      // Sam, Oct 29: a linked film's own sound lives on the film track and
+      // never makes a Source audio row (see tracks.ts).
+      hasLinkedFilm: Boolean(activeFile?.coreMediaUrl),
       // AQU-1758: a book or document, and whether it has a source recording
       // of its own.
       sequenceOrdered: !activeFileTimeOrdered,
       hasSourceAudio: audioMergedCells.some((c) => sourceClipAudioForCell(c) != null),
     }),
-    [isSubtitleFile, audioMergedCells, audioCues, activeFile?.coreMediaUrl, timingMode, activeFileTimeOrdered],
+    [isSubtitleFile, audioMergedCells, audioCues, activeFile?.coreMediaUrl, activeFileTimeOrdered],
   )
   // Stage 1 wired the real merge before anything wrote to it; stage 3 is the
   // first emitter. This is the SETTLED list — what the server says, with no
@@ -14026,7 +14014,6 @@ export function ProjectWorkspace() {
   const showVideoPane = shouldShowVideoPane({
     timelineStacked,
     coreMediaUrl: activeFile?.coreMediaUrl,
-    timingMode,
   })
   /**
    * Stage 3: re-apply the stored timeline height on a FILE switch.
@@ -14148,8 +14135,9 @@ export function ProjectWorkspace() {
    *
    * A subtitle file timed against footage has no imported source recording, so
    * the play queue's clock means nothing here and the video is the player. The
-   * pane being on screen is part of the test, not just a video being linked: in
-   * Free timing the pane is hidden and the queue owns playback.
+   * pane being on screen is part of the test, not just a video being linked.
+   * Following the recordings (AQU-2253) the pane is on screen but the queue's
+   * programme owns playback, and the picture follows its clock.
    *
    * Round 6: written once. Three places needed this answer and only two had it
    * — the third (an explicit timeline seek) went on cueing the queue, which is
@@ -14162,8 +14150,11 @@ export function ProjectWorkspace() {
         activeFile?.coreMediaUrl,
         recordingDrivesPlayback(anyCellClockIsFileTime, playbackSource),
         showVideoPane,
+        // AQU-2253: following the recordings the film is on screen and follows
+        // the programme, which only the queue plays.
+        timingMode === "audioFirst",
       ),
-    [activeFile?.coreMediaUrl, anyCellClockIsFileTime, playbackSource, showVideoPane],
+    [activeFile?.coreMediaUrl, anyCellClockIsFileTime, playbackSource, showVideoPane, timingMode],
   )
 
   // AQU-646 round 5: DUBS OVER THE PICTURE.
@@ -14174,9 +14165,32 @@ export function ProjectWorkspace() {
   // parameter, so the picture's clock drives the same overlays, with the same
   // trims, the same pool and the same Target speaker button.
   //
-  // Driving is gated on the pane being on screen: in Free timing there is no
-  // picture to be in sync with, and the queue owns playback there.
+  // Driving is gated on the picture owning the file: following the recordings
+  // the queue's programme plays the takes and the picture follows it.
   const videoDrivesDubs = videoIsTransport
+  // AQU-2253 (Sam, Oct 30): which kind of film this is. A LINKED film (YouTube,
+  // a film link) plays straight through with its own sound; an IMPORTED one (a
+  // video uploaded through the importer, stored once as the film and as every
+  // line's recording) is cut along its source cues, and its sound is the
+  // Source audio row's alone (lib/timeline/film-pieces).
+  const filmKind = useMemo(
+    () => filmKindOf(activeFile?.coreMediaUrl, audioMergedCells),
+    [activeFile?.coreMediaUrl, audioMergedCells],
+  )
+  // AQU-2253: following the recordings a LINKED film's own sound plays
+  // straight through with its picture, so the programme plays its original
+  // muted (it still clocks the lines) rather than voicing the same speech
+  // twice. An imported film is silent: its Source audio row is the sound, by
+  // the rules any uploaded recording follows.
+  const filmVoicesTheProgramme = filmVoicesProgramme({
+    kind: filmKind,
+    paneOnScreen: showVideoPane,
+    followsRecordings: timingMode === "audioFirst",
+  })
+  useEffect(() => {
+    setProgrammeSourceVoicedByFilm(filmVoicesTheProgramme)
+    return () => setProgrammeSourceVoicedByFilm(false)
+  }, [filmVoicesTheProgramme])
   // Stage 4: the driver fires takes over the picture at cell boundaries, so it
   // has to be given whichever cells actually hold them — the audio cues once a
   // cue sibling exists. It takes plain CellData, so this is the entire change
@@ -15635,6 +15649,17 @@ export function ProjectWorkspace() {
     () => JSON.parse(programmeTracksKey) as ReturnType<typeof programmeTrackSlots>,
     [programmeTracksKey],
   )
+  // AQU-2253 (Sam, Oct 30): an imported film following the recordings is cut
+  // into its lines' pieces, laid out by the programme the timeline draws and
+  // the queue plays — the same lines and tracks — so the Film panel shows the
+  // piece under the playhead. Null otherwise: the film's own clock.
+  const filmPieces = useMemo(
+    () =>
+      filmKind === "imported" && timingMode === "audioFirst"
+        ? filmPiecesFor(layOutProgramme(timelineCells, programmeTracks).programme)
+        : null,
+    [filmKind, timingMode, timelineCells, programmeTracks],
+  )
   const layerTrackSlotsKey = programmeTracks.layerTrackSlots.join("\u0000")
   useEffect(() => {
     setQueueLayerTrackSlots(layerTrackSlotsKey ? layerTrackSlotsKey.split("\u0000") : [])
@@ -15859,10 +15884,9 @@ export function ProjectWorkspace() {
     // PICTURE is the transport — hand it the press. Gated on the same test the
     // pane uses to decide it is standalone, so a file whose queue can run is
     // untouched.
-    // Gated on the pane being ON SCREEN, not merely on a video being linked.
-    // In Free timing the pane is hidden, so this used to hand the press to a
-    // nonce nothing consumes and Space went dead — the queue owns the transport
-    // there and should get it.
+    // Gated on the picture OWNING the file, not merely on a video being linked.
+    // Following the recordings the queue owns the transport (the picture
+    // follows it, AQU-2253), so the press goes to the queue there.
     if (videoIsTransport) {
       setVideoToggle((prev) => ({ nonce: (prev?.nonce ?? 0) + 1 }))
       return
@@ -17886,7 +17910,6 @@ export function ProjectWorkspace() {
                               dock={dock}
                               fileName={fileDisplayName(activeFile)}
                               kind={mediaKind}
-                              filmHiddenByTiming={Boolean(activeFile.coreMediaUrl) && !showVideoPane}
                             />
                           ),
                         })
@@ -18014,7 +18037,6 @@ export function ProjectWorkspace() {
                     // Board 55: the film's own actions head the Sources menu.
                     film={activeFile?.coreMediaUrl ? {
                       name: filmLabelFor(activeFile.coreMediaUrl, linkedVideoBaseName),
-                      hiddenByTiming: !showVideoPane,
                       showing: dock.view.isShowing("film"),
                       // A tab beside the text: the text shows instead. Alone
                       // in its area: the area folds.
@@ -18219,6 +18241,14 @@ export function ProjectWorkspace() {
                   // Sam, Oct 5: a click on a YouTube picture is the
                   // transport's Play/Pause, never YouTube's own.
                   onPictureClick={handleTimelineTogglePlay}
+                  // AQU-2253: following the recordings the film is shown on
+                  // its own clock, following the programme's playhead.
+                  followsRecordings={timingMode === "audioFirst"}
+                  // AQU-2253 (Sam, Oct 30): an imported film is always
+                  // silent, and following the recordings shows the piece of
+                  // the line under the playhead.
+                  importedFilm={filmKind === "imported"}
+                  filmPieces={filmPieces}
                   sourceDirectionMode={fileMeta.sourceDirectionMode}
                   targetDirectionMode={fileMeta.targetDirectionMode}
                   sourceTextDirection={fileMeta.sourceTextDirection}
@@ -19662,15 +19692,6 @@ export function ProjectWorkspace() {
           }
         />
       )}
-      <LinkVideoTimingDialog
-        open={pendingVideoUrl !== null}
-        onCancel={() => setPendingVideoUrl(null)}
-        onLinkAnyway={() => {
-          const u = pendingVideoUrl
-          setPendingVideoUrl(null)
-          if (u) void applyLinkVideo(u)
-        }}
-      />
       {/* FRO-272: "Recently deleted" trash list — opened from the pinned
           sidebar row (project_lead+); was an inline expander in the files panel. */}
       <Dialog open={trashOpen} onOpenChange={setTrashOpen}>

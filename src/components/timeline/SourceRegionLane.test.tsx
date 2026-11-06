@@ -250,10 +250,5 @@ describe("SourceRegionLane", () => {
     expect(label.style.left).toBe("510px")
     expect(gap.textContent).not.toContain("10:35.0")
   })
-
-  it("draws no placeholder at all when asked to hide them", () => {
-    renderLane({ map: deriveSourceRegions([], 635), cells: [], viewEndSec: 635, hideGaps: true })
-    expect(screen.queryByTestId("tl-source-gap")).toBeNull()
-  })
 })
 

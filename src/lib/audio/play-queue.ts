@@ -324,7 +324,7 @@ export function setQueueAudibility(next: TrackAudibility): void {
     target: Boolean(next.target),
     ...(next.bySlot ? { bySlot: { ...next.bySlot } } : {}),
   }
-  if (currentAudio) currentAudio.muted = !audibility.source
+  if (currentAudio) currentAudio.muted = sourceElementMuted(currentAudio)
   // PER ENTRY now, not one blanket flag. Adding `slot` to `OverlayEntry` is
   // what gave this sweep something to discriminate on — before it, every
   // overlay in the pool followed the single `target` boolean and there was no
@@ -334,6 +334,29 @@ export function setQueueAudibility(next: TrackAudibility): void {
 }
 
 export function getQueueAudibility(): TrackAudibility { return audibility }
+
+// ── AQU-2253: the film voices the original ──────────────────────────────────
+//
+// Following the recordings on a file with a film, the film's own sound plays
+// straight through with its picture (Sam, Oct 29), on its own clock. The
+// programme's original — the same speech, cut into each line's window — must
+// then go quiet, or it would sound twice and out of step. It still PLAYS, muted,
+// so it goes on clocking its verses exactly as before: nothing about the
+// layout, the hand-on or "Skip lines with nothing to play" changes. Following
+// the source the recording stays the sound and the picture is the silent one,
+// so this only ever touches the programme's own source element.
+let progSourceVoicedByFilm = false
+/** The element `progOpenSource` opened, the only one this ever mutes. */
+let progSourceAudio: HTMLAudioElement | null = null
+
+function sourceElementMuted(el: HTMLAudioElement): boolean {
+  return !audibility.source || (progSourceVoicedByFilm && el === progSourceAudio && timingMode === "audioFirst")
+}
+
+export function setProgrammeSourceVoicedByFilm(on: boolean): void {
+  progSourceVoicedByFilm = on
+  if (currentAudio) currentAudio.muted = sourceElementMuted(currentAudio)
+}
 
 export function useQueueAudibility(): TrackAudibility {
   return useSyncExternalStore(
@@ -1962,11 +1985,12 @@ async function progOpenSource(cell: CellData, atClipSec: number): Promise<"open"
 
   const audio = new Audio(resolved.src)
   currentAudio = audio
+  progSourceAudio = audio
   currentUrl = resolved.objectUrl
   currentAttachmentUrl = src.url
   audio.playbackRate = progress.rate
   audio.volume = progress.volume
-  audio.muted = !audibility.source
+  audio.muted = sourceElementMuted(audio)
   mixLineElement(audio, cell, currentAttachmentUrl)
   pendingStartSeconds = atClipSec
 
@@ -2312,7 +2336,16 @@ function progSeekTo(sec: number, wantPlay: boolean, explicit = true): void {
 export function setQueueTimingMode(mode: AudioTimingMode): void {
   if (timingMode === mode) return
   timingMode = mode
+  // AQU-2253: a picture (or the built-in clock) already driving the dubs keeps
+  // its context. The workspace starts that driver in the same commit that
+  // reports the flip — a file with a film switching to Follows source — and
+  // dropping the context here left the film playing with every take silent.
+  const driven = externalDubs ? activeContext : null
   stopQueue()
+  if (driven && externalDubs) {
+    activeContext = driven
+    externalDubs.restock = true
+  }
 }
 
 export function getQueueTimingMode(): AudioTimingMode {

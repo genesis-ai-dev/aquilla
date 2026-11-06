@@ -41,7 +41,8 @@ describe("timeline menus go through translation (AQU-2259)", () => {
       expect(row.textContent?.trimStart().startsWith("⟦")).toBe(true)
     }
     expect(screen.getByRole("menuitem", { name: /⟦Film⟧/ })).toBeInTheDocument()
-    expect(screen.getByRole("menuitem", { name: /⟦Audio cues⟧/ })).toBeInTheDocument()
+    // Sam, Oct 30: the cues row is "Source cues", as on the timeline.
+    expect(screen.getByRole("menuitem", { name: /⟦Source cues⟧/ })).toBeInTheDocument()
     expect(screen.getByRole("menuitem", { name: /⟦Subtitles⟧/ })).toBeInTheDocument()
     expect(screen.getByRole("menuitem", { name: /⟦Characters⟧/ })).toBeInTheDocument()
   })

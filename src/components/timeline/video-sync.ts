@@ -36,6 +36,10 @@ export type VideoSyncAction =
   | { kind: "seek"; sec: number }
   /** Leave the element alone — it is freewheeling correctly. */
   | { kind: "none" }
+  /** AQU-2253: the clock is past the film's end. Put the picture on its last
+   *  frame (`sec`) and pause there: the strip has ended under the playhead,
+   *  and the panel must not go on showing wherever the film was before. */
+  | { kind: "end"; sec: number }
 
 /** How far a tick may sit from its prediction before it counts as a real
  *  discontinuity rather than tick jitter. Comfortably above the ~250ms tick
@@ -98,7 +102,9 @@ export interface VideoSyncInput {
   /** Queue state ALREADY scoped to this file (see queue-scope.ts). */
   kind: QueueState["kind"]
   /** False when the queue's master is a per-cell take, whose clock restarts at
-   *  0 and is therefore not a position on the file at all. */
+   *  0 and is therefore not a position on the file at all. AQU-2253: following
+   *  the recordings the programme's clock counts — its seconds are the film's
+   *  seconds, since the film runs on its own clock from 0:00. */
   clockIsFileTime: boolean
   /** The queue's newest published time. */
   tickSec: number
@@ -128,8 +134,15 @@ export function videoSyncAction(input: VideoSyncInput): VideoSyncAction {
   // Metadata not in yet (or a broken file): nothing is seekable.
   if (!Number.isFinite(duration) || duration <= 0) return { kind: "pause" }
 
-  // The dub is longer than the footage, or we're at the very tail — hold.
-  if (tickSec > duration - VIDEO_END_GUARD_SEC) return { kind: "pause" }
+  // The dub is longer than the footage, or we're at the very tail — hold the
+  // last frame. AQU-2253: a playhead that JUMPS there (a click, a skipped line,
+  // a book longer than its film) would otherwise leave the picture on the
+  // frame it was showing before the jump, so it is sent to the end once; a
+  // picture already there just stays paused.
+  const lastFrameSec = Math.max(0, duration - VIDEO_END_GUARD_SEC)
+  if (tickSec > lastFrameSec) {
+    return videoSec < lastFrameSec - VIDEO_PAUSED_SNAP_SEC ? { kind: "end", sec: lastFrameSec } : { kind: "pause" }
+  }
 
   // A cross-clip resolve republishes progress transiently; the queue re-seeds
   // the clock to the landing target synchronously, so chasing it here would

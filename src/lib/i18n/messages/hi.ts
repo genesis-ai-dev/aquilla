@@ -1017,7 +1017,6 @@ export const hi: Catalog = {
   "editor.history.reasonGone": "जो उसने बदला वह अब नहीं।",
   "editor.history.reasonUnavailable": "यह चरण अब पूर्ववत नहीं हो सकता।",
   "editor.history.reasonFailed": "वह सहेजा नहीं जा सका। फिर कोशिश करें।",
-  "editor.timeline.videoHiddenNote": "जुड़ा वीडियो यहाँ छिपा है — वह मूल रिकॉर्डिंग के समय पर चलता है, जिसका यह दृश्य अब पालन नहीं करता।",
   "editor.timeline.bluetoothPillInfo": "Bluetooth से चलाने के बारे में",
   "editor.timeline.outputLatencyNote": "Bluetooth ऑडियो ऐप के भेजने के क्षण बाद पहुँचता है। प्लेहेड उस देरी के लिए समायोजित है जिसे वह माप सकता है, पर थोड़ी मापी नहीं जा सकती — बारीक समय के लिए पंक्ति से अधिक अपने कानों पर भरोसा करें।",
   "editor.timeline.outputDeviceChangedToast": "चलाना ठहरा — ऑडियो आउटपुट बदल गया।",

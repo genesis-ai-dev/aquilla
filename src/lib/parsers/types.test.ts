@@ -7,7 +7,6 @@ import {
   isAudioCueFile,
   isHiddenTimelineFile,
   isSubtitleImportFile,
-  isVideoTimedSubtitleFile,
   projectHasScriptureFiles,
   resolveBibleResourcesEnabled,
   isFilmTimedFile,
@@ -159,24 +158,6 @@ describe("hidden timeline content", () => {
   })
 })
 
-describe("isVideoTimedSubtitleFile", () => {
-  it.each(["vtt", "srt", "sbv"] as const)("%s with footage linked is video-timed", (type) => {
-    expect(isVideoTimedSubtitleFile({ type, coreMediaUrl: "https://example.test/ep1.mp4" })).toBe(true)
-  })
-
-  it.each(["vtt", "srt", "sbv"] as const)("%s with no footage is not", (type) => {
-    expect(isVideoTimedSubtitleFile({ type })).toBe(false)
-    expect(isVideoTimedSubtitleFile({ type, coreMediaUrl: null })).toBe(false)
-    expect(isVideoTimedSubtitleFile({ type, coreMediaUrl: "" })).toBe(false)
-  })
-
-  it("a non-subtitle file is never video-timed, footage or not", () => {
-    expect(isVideoTimedSubtitleFile({ type: "audio", coreMediaUrl: "https://example.test/ep1.mp4" })).toBe(false)
-    expect(isVideoTimedSubtitleFile(null)).toBe(false)
-    expect(isVideoTimedSubtitleFile(undefined)).toBe(false)
-  })
-})
-
 describe("resolveFileTimingMode", () => {
   it.each(["vtt", "srt", "sbv"] as const)(
     "%s with footage linked still ignores the legacy project-level audioFirst",
@@ -190,17 +171,15 @@ describe("resolveFileTimingMode", () => {
     },
   )
 
-  // The AQU-646 guard, kept for files with footage: the picker is hidden for
-  // them, so a stored audioFirst must be inert. Covers a value written before
-  // AQU-646 or by an older client, AND the AQU-1704 flow where a maintainer
-  // picks Free timing on a video-less SRT and then links a video (which leaves
-  // the stored mode in place).
+  // AQU-2253 lifts the AQU-646 guard: the film runs on its own clock in both
+  // timings, so the picker is offered on these files and their own stored
+  // choice is the one they follow.
   it.each(["vtt", "srt", "sbv"] as const)(
-    "%s with footage linked ignores its own stored audioFirst, whoever wrote it",
+    "%s with footage linked follows its own stored choice (AQU-2253)",
     (type) => {
       expect(
         resolveFileTimingMode({ type, coreMediaUrl: "https://example.test/ep1.mp4", timingMode: "audioFirst" }, null),
-      ).toBe("dubbing")
+      ).toBe("audioFirst")
     },
   )
 
@@ -261,16 +240,26 @@ describe("resolveFileTimingMode", () => {
     expect(resolveFileTimingMode({ type: "audio" }, { audioTimingMode: "audioFirst" }, opts)).toBe("dubbing")
   })
 
-  // AQU-2204 (Sam, Oct 26): a file timed to a film ONLY follows its source —
-  // the Free timing it could once pick through the video-stays-hidden warning
-  // is gone, and a stored choice from then no longer re-flows it.
-  it("a file with any footage linked follows its source, whatever it stored (AQU-2204)", () => {
+  // AQU-2253 (Sam, Oct 29): the film runs on its own clock in both timings,
+  // so a linked film no longer locks a file to its source. It still STARTS
+  // there: the project's legacy Free timing does not reach it, only the file's
+  // own choice does.
+  it("a file with footage linked keeps its own choice, either timing (AQU-2253)", () => {
     const youTube = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
     expect(
       resolveFileTimingMode({ type: "video", coreMediaUrl: youTube, timingMode: "audioFirst" }, null, { timedToLinkedVideo: true }),
-    ).toBe("dubbing")
+    ).toBe("audioFirst")
     expect(
       resolveFileTimingMode({ type: "audio", coreMediaUrl: "https://cdn.test/ep1/master.m3u8", timingMode: "audioFirst" }, null),
+    ).toBe("audioFirst")
+    expect(
+      resolveFileTimingMode({ type: "vtt", coreMediaUrl: "https://cdn.test/ep1/master.m3u8", timingMode: "dubbing" }, null),
+    ).toBe("dubbing")
+  })
+
+  it("a file with footage linked starts on Follows source, whatever the project says (AQU-2253)", () => {
+    expect(
+      resolveFileTimingMode({ type: "vtt", coreMediaUrl: "https://cdn.test/ep1/master.m3u8" }, { audioTimingMode: "audioFirst" }),
     ).toBe("dubbing")
   })
 
@@ -288,15 +277,19 @@ describe("resolveFileTimingMode", () => {
   })
 })
 
-describe("isFilmTimedFile (AQU-2204)", () => {
-  it("is any file with footage linked, or with an audio cue file", () => {
-    expect(isFilmTimedFile({ coreMediaUrl: "https://cdn.test/ep1/master.m3u8" })).toBe(true)
-    expect(isFilmTimedFile({ coreMediaUrl: null }, { hasAudioCues: true })).toBe(true)
+describe("isFilmTimedFile (AQU-2204, AQU-2253)", () => {
+  it("is a file with an audio cue file, whose cues transcribe the film", () => {
+    expect(isFilmTimedFile({ hasAudioCues: true })).toBe(true)
+  })
+
+  it("is not a file whose only tie to a film is the film itself — it runs on its own clock (AQU-2253)", () => {
+    // The film is the caller's to know about; this asks only about cues.
+    expect(isFilmTimedFile({ hasAudioCues: false })).toBe(false)
   })
 
   it("is not a file with neither (a LOTE sermon, a Bible book)", () => {
-    expect(isFilmTimedFile({ coreMediaUrl: null })).toBe(false)
-    expect(isFilmTimedFile(null)).toBe(false)
+    expect(isFilmTimedFile({})).toBe(false)
+    expect(isFilmTimedFile()).toBe(false)
   })
 })
 
@@ -306,9 +299,15 @@ describe("resolveFileTimingMode — nothing to follow (AQU-2204, board 24)", () 
     expect(resolveFileTimingMode({ type: "usfm" } as never, null, { nothingToFollow: true })).toBe("audioFirst")
   })
 
-  it("a film still wins: its lines are timed to it", () => {
+  it("a book with a film linked still has nothing to follow: the film runs on its own clock (AQU-2253)", () => {
     expect(
-      resolveFileTimingMode({ type: "vtt", coreMediaUrl: "https://x.test/f.mp4" } as never, null, { nothingToFollow: true }),
+      resolveFileTimingMode({ type: "helloao", coreMediaUrl: "https://x.test/f.webm" } as never, null, { nothingToFollow: true }),
+    ).toBe("audioFirst")
+  })
+
+  it("an audio cue file still wins: its lines are timed to the film", () => {
+    expect(
+      resolveFileTimingMode({ type: "vtt" } as never, null, { nothingToFollow: true, hasAudioCues: true }),
     ).toBe("dubbing")
   })
 })
@@ -328,12 +327,10 @@ describe("resolveFileTimingMode — where each file starts (AQU-2204, board 23)"
     expect(resolveFileTimingMode({ type: "vtt", timingMode: "audioFirst" } as never, null)).toBe("audioFirst")
   })
 
-  it("a file with a linked film only follows its source, whatever it stored", () => {
+  it("a new file with a linked film starts on Follows source, and may follow its recordings (AQU-2253)", () => {
+    expect(resolveFileTimingMode({ type: "vtt", coreMediaUrl: "https://x.test/f.mp4" } as never, null)).toBe("dubbing")
     expect(
       resolveFileTimingMode({ type: "vtt", timingMode: "audioFirst", coreMediaUrl: "https://x.test/f.mp4" } as never, null),
-    ).toBe("dubbing")
-    expect(
-      resolveFileTimingMode({ type: "mp4", timingMode: "audioFirst", coreMediaUrl: "https://youtu.be/x" } as never, null),
-    ).toBe("dubbing")
+    ).toBe("audioFirst")
   })
 })

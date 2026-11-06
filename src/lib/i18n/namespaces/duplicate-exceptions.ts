@@ -233,13 +233,6 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "translator render this column with interface-language wording, which is " +
     "wrong for a content column, and several languages distinguish the two " +
     "senses lexically rather than by context.",
-  "org.addLanguagePopover.triggerLabel":
-    "Visible text of a small chip BUTTON beside a project row that opens the " +
-    "add-a-language-lane popover; it names an action's object, not a heading. " +
-    "org.orgHome.table.languageHeader is the noun heading of a table column, and " +
-    "language.label names the interface-language switcher. Button object, column " +
-    "heading, and interface-chrome name take different forms in languages that " +
-    "inflect for grammatical role, so one shared string cannot serve all three.",
 
   // -- AQU-511/AQU-832 org-namespace dedupe (WS-11) --------------------------
   // The org.ts sweep left 41+ keys re-minting English another namespace (or
@@ -528,6 +521,17 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "or not set}'), never read on its own. A standalone Title-Case hint and an " +
     "inline lower-case template fragment take different forms in languages " +
     "that case- or register-mark that distinction.",
+  "rules.checkDrawer.approveSpelling":
+    "Imperative button on a spelling card in the file-check panel (AQU-1737) " +
+    "that accepts a suspected word form as this project's own spelling, " +
+    "clearing every occurrence of it at once. rules.surface.approveButton " +
+    "promotes a project-level translation rule up to org scope, agent.approve " +
+    "accepts an agent's staged proposal, and editor.station.approve casts an " +
+    "audio-validation vote — four independent human-gate acts on four " +
+    "different kinds of object, already split from each other at " +
+    "agent.approve above. They share only the English verb 'Approve', and a " +
+    "language that inflects the act by what is being approved cannot borrow " +
+    "one translation for the others.",
   "rules.editor.mode.forbidden":
     "One value of the fixed three-option RULE MODE enum (Forbidden/Required/" +
     "Must match) selected in RuleEditor's Mode field, describing how a " +

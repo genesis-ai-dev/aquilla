@@ -1467,3 +1467,64 @@ sees differently:
   `reviewed_by = "aqu-2342:moved-to-decisions"`. A proposal whose text breaks the memory
   rules (over 10 KB, a secret-looking string) is left pending. The `/brief/proposals` routes
   still answer, unchanged; approving one there writes the legacy brief row only.
+
+## Status addendum (2026-11-05, AQU-2402 — unknown settings keys name the keys themselves)
+
+Setting a built-in check through the Claude/ChatGPT **OAuth connector** was a guessing
+game. `PatchSettings` refused an unrecognised key with "call
+`describe_command("PatchSettings")` for the valid keys" — and that tool is deliberately
+absent from the OAuth profile's tool list (`external/mcp-chatgpt-tools.ts`:
+`MCP_TOOLS.filter(t => t.name !== 'describe_command')`), so the only hint on offer could
+not be followed. The key was found by reading a Linear title.
+
+- **The refusal names the keys.** `validateSettingsKeyValue` now returns
+  `unknownSettingsKeyMessage(key)` (`db/shared/project-settings-keys.ts`): the key that was
+  sent, the writable key the caller probably meant where one is unambiguous, and then
+  every writable key, generated from `PROJECT_SETTINGS_KEYS`. `describe_command` is still
+  cited for the per-key *types*, but it is no longer the only way out.
+- **The read name points at the write key.** `SETTINGS_KEY_ALIASES` maps the obvious
+  wrong names onto the right one — above all `builtinChecks` → `algorithmicChecks` (a read
+  returns the checks under a name that cannot be written back) and `builtinChecksByLane` →
+  `algorithmicChecksByLane`, plus `checks`, `qualityChecks`, `brief`, `instructions`,
+  `tts`. `suggestSettingsKey` also folds case and separators (`algorithmic_checks`), and
+  stays silent when a probe matches more than one key.
+- **Every bad op is reported.** `validatePatchSettingsCommand` used to return at the first
+  problem, so `details` carried only `ops[0]` and each wrong key cost its own round trip.
+  It now reports one issue per bad op and refuses the command once at the end.
+- **The tool schema names them too.** `patch_settings`'s `ops[].key` carries the writable
+  keys as a JSON Schema `enum` plus the same list in prose, so a caller holding nothing
+  but the tool list can turn a check on or off. The OAuth profile rewrites tool
+  *descriptions* but keeps `inputSchema`, which is why the list lives there.
+  `get_project_settings` now says in so many words that `builtinChecks` is read-only and
+  `algorithmicChecks` is the key that writes it.
+
+## Status addendum (2026-11-05, AQU-2407 — the brief is writable as answers over MCP)
+
+`SetBrief` and `RegenerateBriefSummary` existed on the REST changeset surface but on no MCP
+tool, so an MCP-only agent that wanted to set a brief reached for `patch_settings { key:
+"translationBrief" }` and wrote the whole record by hand: `parameters`, `freeformNotes`,
+`l2Markdown`, `l1Summary`, `version`, `updatedAt`, `updatedBy`, `l1GeneratedAt`. That works
+and still does — but nothing checks that a hand-written `l2Markdown` / `l1Summary` agree
+with the answers, and the provenance fields are whatever the agent typed.
+
+- **`prepare_set_brief { projectId, parameters?, freeformNotes?, ifMatchVersion?,
+  changesetId? }`** — the MCP door onto `SetBrief`. Answers only: the server merges the
+  named sections into the live brief (unnamed sections keep their value), reassembles
+  `l2Markdown` in the code-owned section order, stamps `version` / `updatedAt` /
+  `updatedBy` from the credential, and re-renders the L1 summary best-effort at commit. All
+  of that is `commands-set-brief.ts`, unchanged — `mcp-handlers.ts` marshals arguments and
+  nothing else.
+- **`regenerate_brief_summary { projectId, ifMatchVersion?, changesetId? }`** — the MCP door
+  onto `RegenerateBriefSummary`: the agent's equivalent of the in-app "Regenerate summary"
+  button, for a brief whose sections were committed without a render (the commit receipt's
+  `briefSummary.rendered: false`) or edited in-app without one.
+- **`ifMatchVersion` is OPTIONAL on both tools**, unlike `patch_settings`. Neither command
+  asks the caller to read-modify-write the key, so the mandatory version only bought a
+  round trip — and an agent that gave up on it reached for `patch_settings`. Omitted, the
+  handler reads the live version through the same delegated settings read
+  `get_project_settings` serves (identical scope, role and throttle gates) and pins it;
+  passed, it is honoured verbatim, which is how a caller asserts the brief has not moved
+  since it read it. Drift still answers `plan_stale` at prepare and again at commit.
+- **`get_capabilities.translationBrief`** names both tools beside `get_project_settings`,
+  because the brief lives *inside* the settings blob and an agent that found
+  `patch_settings` first had no reason to look further.

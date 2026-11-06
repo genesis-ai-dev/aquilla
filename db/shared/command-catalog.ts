@@ -213,7 +213,7 @@ Example: \`{ "kind": "PatchSettings", "projectId": "p1", "ops": [{ "key": "trans
     tier: 'structural',
     agentReachable: true,
     paramsDoc: `### SetBrief
-Params: \`{ projectId, parameters?, freeformNotes?, ifMatchVersion }\` — sole command; at least one of \`parameters\`/\`freeformNotes\`.
+Params: \`{ projectId, parameters?, freeformNotes?, ifMatchVersion }\` — sole command; at least one of \`parameters\`/\`freeformNotes\`. Over MCP use the \`prepare_set_brief\` tool (AQU-2407), where \`ifMatchVersion\` is optional — omitted, the server pins the live settings version; \`prepare_translations\`'s \`commands\` argument does not accept this kind.
 \`parameters\` is a PARTIAL map of brief section id → answer text: named sections are replaced, every unnamed section keeps its live value. Section ids (interview order):
 - Purpose & audience: \`purpose\`, \`audience\`, \`useAndMedium\`, \`motiveSponsor\`
 - Standards: \`sourceTexts\`, \`targetVariety\`, \`registerNaturalness\`, \`literalness\`, \`keyTerms\`, \`constraints\`, \`qualityBar\`
@@ -233,7 +233,7 @@ Example: \`{ "kind": "SetBrief", "projectId": "p1", "parameters": { "audience": 
     tier: 'structural',
     agentReachable: true,
     paramsDoc: `### RegenerateBriefSummary
-Params: \`{ projectId, ifMatchVersion }\` — sole command; REST changesets only (like SetBrief, not offered through the MCP prepare tools).
+Params: \`{ projectId, ifMatchVersion }\` — sole command; stage it with the \`regenerate_brief_summary\` MCP tool (AQU-2407, \`ifMatchVersion\` optional there) or a REST changeset. \`prepare_translations\`'s \`commands\` argument does not accept this kind.
 Renders \`translationBrief.l1Summary\` from the brief's CURRENT sections + notes with the same prompt and 1600-char cap the in-app "Regenerate summary" button uses, and writes \`l1Summary\` / \`l1GeneratedAt\` / \`l1ModelId\` back through the version-guarded settings write. Prompts read \`translationInstructions\`, not the brief: while a project has not written instructions, the L1 summary is what the brief contributes to them on read (see \`parts.instructions\` in the prompt-preview read), so this refreshes that contribution. Once \`translationInstructions\` is written, the summary no longer reaches any prompt.
 Gotchas:
 - Needs at least one filled section or \`freeformNotes\`; otherwise \`validation_failed\` "nothing to summarize" (nothing staged).
@@ -250,7 +250,7 @@ Example: \`{ "kind": "RegenerateBriefSummary", "projectId": "p1", "ifMatchVersio
     tier: 'structural',
     agentReachable: true,
     paramsDoc: `### ProjectSetup
-Params: \`{ projectId, settings?, lanes?, brief?, members?, imports? }\` — sole command; at least one block. REST changesets only (like SetBrief, not offered through the MCP prepare tools). ALWAYS ask-mode: one changeset, one approval URL, one commit.
+Params: \`{ projectId, settings?, lanes?, brief?, members?, imports? }\` — sole command; at least one block. REST changesets only — it is not offered through the MCP prepare tools. ALWAYS ask-mode: one changeset, one approval URL, one commit.
 The server expands it into a fixed step order and chains the version guards ITSELF, which is why \`plan_stale\` cannot occur inside a plan:
 1. \`settings\` — non-policy keys, one write.
 2. \`settings\` — policy keys, restrictive direction only, re-checked against the LIVE blob at commit.

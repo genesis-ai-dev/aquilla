@@ -306,6 +306,24 @@ export async function exportDocx(
   // Append any trailing content after the last paragraph match.
   rebuilt += xml.slice(lastIndex)
 
+  // AQU-2383: the surgical scan spliced nothing, so `word/document.xml` is
+  // the one the client uploaded and no other part was ever written. Hand back
+  // the original package rather than a re-zip of it: `generateAsync` rewrites
+  // member order, compression and local headers, so an untouched export would
+  // otherwise come back as a different file than the upload — which is the
+  // whole complaint behind the untouched-export rule. The counts are already
+  // final here, so the result still reports the walk honestly.
+  if (rebuilt === xml) {
+    return {
+      blob: new Blob([rawDocxBytes], { type: DOCX_MIME }),
+      injected,
+      untouched,
+      removed,
+      inserted,
+      warnings,
+    }
+  }
+
   // Write modified XML back — only word/document.xml changes; all other parts untouched.
   zip.file("word/document.xml", rebuilt)
 

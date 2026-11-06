@@ -46,6 +46,7 @@ function seedCell(args: {
   valueHtml?: string | null
   targetLang?: string
   laneId?: string | null
+  hidden?: boolean
 }) {
   store.commit(
     events.cellSynced({
@@ -63,6 +64,7 @@ function seedCell(args: {
       aiDrafted: args.aiDrafted ?? false,
       sequenceIndex: args.sequenceIndex,
       canonicalRef: args.canonicalRef ?? null,
+      hidden: args.hidden,
     }),
   )
 }
@@ -165,6 +167,14 @@ describe("readOfflineFileCells", () => {
     expect(row.aiDraft).toBeUndefined()
     expect(row.endorsementCount).toBeUndefined()
     expect(row.metadata).toBeUndefined()
+    expect("hidden" in row).toBe(false)
+  })
+
+  it("marks a parked cell's source row hidden, as the server does (AQU-1422)", () => {
+    seedCell({ fileId: "file1", cellId: "c1", side: "source", value: "a", sequenceIndex: 0, hidden: true })
+    seedCell({ fileId: "file1", cellId: "c2", side: "source", value: "b", sequenceIndex: 1, hidden: false })
+    const rows = readOfflineFileCells(store, "proj1", "file1")
+    expect(rows.map((r) => r.hidden)).toEqual([true, undefined])
   })
 
   it("falls back to '' / null for a row synced before it had a value or event", () => {

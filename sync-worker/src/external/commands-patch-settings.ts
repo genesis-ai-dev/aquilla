@@ -146,48 +146,62 @@ export function validatePatchSettingsCommand(
   }
   const ops: PatchSettingsOp[] = []
   const seen = new Set<string>()
+  // AQU-2402: EVERY bad op is reported, not only `ops[0]`. The loop used to
+  // return at the first problem, so a patch with two misnamed keys cost one
+  // round trip per key — an agent correcting a guessed key name learned about
+  // the second only after fixing the first. Each op pushes its own issue and
+  // the loop runs on; a single bad op still refuses the whole command.
+  let bad = false
   for (const [opIndex, rawOp] of c.ops.entries()) {
     if (typeof rawOp !== 'object' || rawOp === null || Array.isArray(rawOp)) {
       issues.push({ index, message: `PatchSettings.ops[${opIndex}] must be an object` })
-      return null
+      bad = true
+      continue
     }
     const op = rawOp as Record<string, unknown>
     if (!isNonEmptyString(op.key)) {
       issues.push({ index, message: `PatchSettings.ops[${opIndex}].key must be a non-empty string` })
-      return null
+      bad = true
+      continue
     }
     if (DANGEROUS_SETTINGS_KEYS.has(op.key)) {
       issues.push({ index, message: `PatchSettings.ops[${opIndex}].key "${op.key}" is a reserved key and cannot be used` })
-      return null
+      bad = true
+      continue
     }
     if ((RETIRED_LANE_SETTINGS_KEYS as readonly string[]).includes(op.key)) {
       issues.push({ index, message: RETIRED_LANE_SETTINGS_MESSAGE })
-      return null
+      bad = true
+      continue
     }
     if (!('value' in op)) {
       issues.push({ index, message: `PatchSettings.ops[${opIndex}].value is required (null to store null)` })
-      return null
+      bad = true
+      continue
     }
     // AQU-1224: a key the settings schema doesn't carry is a TYPO, not a new
     // setting — reject it here so nothing reaches the human approval queue,
-    // and name the key so the caller can correct it (describe_command lists
-    // the legal ones). Policy keys get the same type check (AQU-1282: they are
-    // writable now), so a mistyped value names the key rather than reading as
-    // a loosening attempt.
+    // and name the key so the caller can correct it (the message lists the
+    // legal ones, AQU-2402). Policy keys get the same type check (AQU-1282:
+    // they are writable now), so a mistyped value names the key rather than
+    // reading as a loosening attempt.
     const problem = validateSettingsKeyValue(op.key, op.value)
     if (problem) {
       issues.push({ index, message: `PatchSettings.ops[${opIndex}]: ${problem}` })
-      return null
+      bad = true
+      continue
     }
     // A duplicate key is a caller bug (later would silently clobber earlier),
     // unlike SetTranslation's loop-generated cell batches — reject, don't warn.
     if (seen.has(op.key)) {
       issues.push({ index, message: `PatchSettings.ops[${opIndex}].key "${op.key}" appears more than once` })
-      return null
+      bad = true
+      continue
     }
     seen.add(op.key)
     ops.push({ key: op.key, value: op.value })
   }
+  if (bad) return null
   return { kind: 'PatchSettings', projectId: c.projectId, ops, ifMatchVersion: c.ifMatchVersion }
 }
 

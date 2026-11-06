@@ -226,7 +226,7 @@ describe('MCP tools/list', () => {
     })
   })
 
-  it('returns all 35 tools each with an input schema', async () => {
+  it('returns all 37 tools each with an input schema', async () => {
     const env = makeEnv(tdb.db)
     const token = await credToken(tdb)
     const res = await rpc(env, token, { jsonrpc: '2.0', id: 2, method: 'tools/list' })
@@ -248,6 +248,8 @@ describe('MCP tools/list', () => {
         // AQU-1175 termbase read.
         'list_terms',
         'patch_settings', 'prepare_import',
+        // AQU-2407 brief writes.
+        'prepare_set_brief', 'regenerate_brief_summary',
         'prepare_translations', 'preview_import', 'read_cell_memory', 'read_comments',
         'read_content', 'read_history',
         // AQU-1231 quality reads.
@@ -258,7 +260,7 @@ describe('MCP tools/list', () => {
         'upload_artifact', 'wait_for_changeset',
       ].sort(),
     )
-    expect(body.result.tools).toHaveLength(35)
+    expect(body.result.tools).toHaveLength(37)
     for (const tool of body.result.tools) {
       expect(typeof tool.description).toBe('string')
       expect(tool.description.length).toBeGreaterThan(20)
@@ -772,6 +774,199 @@ describe('MCP tools/call — settings + command discovery', () => {
     const { payload, isError } = toolPayload(((await noVersion.json()) as any).result)
     expect(isError).toBe(true)
     expect((payload as any).error.message).toContain('get_project_settings')
+  })
+
+  // AQU-2407: the brief lives INSIDE the settings blob, so patch_settings was
+  // the only MCP door onto it — and it replaces a key wholesale, which meant
+  // hand-writing l2Markdown, l1Summary and the provenance fields and hoping
+  // they agreed with the answers.
+  const BRIEF_KEY = 'translationBrief'
+
+  /** Env with the brief-summary backend wired, plus a stub for it. Returns the
+   *  URLs it was called with, so "prepare stages only" is checkable. */
+  function envWithRenderer(summary: string, model = 'test/brief-model') {
+    const calls: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        calls.push(typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url)
+        return Response.json({ summary, model })
+      }),
+    )
+    return { env: { ...makeEnv(tdb.db), AUTH_WORKER_URL: 'https://identity.test' }, calls }
+  }
+
+  async function storedSettings(): Promise<Record<string, any>> {
+    const rows = await tdb.rows<{ settings: string; version: number }>('project_settings')
+    return { ...JSON.parse(rows[0].settings), __version: rows[0].version }
+  }
+
+  it('prepare_set_brief takes answers only — the server assembles l2Markdown, stamps provenance, and renders the summary', async () => {
+    await promoteToMaintainer()
+    await seedSettings({ systemPrompt: 'keep' }, 1)
+    const { env, calls } = envWithRenderer('Plain-register translation for rural youth.')
+    const token = await credToken(tdb)
+
+    const stageRes = await rpc(env, token, {
+      jsonrpc: '2.0', id: 60, method: 'tools/call',
+      params: {
+        name: 'prepare_set_brief',
+        arguments: {
+          projectId: PROJECT,
+          parameters: { audience: 'Rural youth, 15-25' },
+          freeformNotes: 'Keep verse numbers.',
+        },
+      },
+    })
+    const staged = toolPayload(((await stageRes.json()) as any).result)
+    expect(staged.isError, JSON.stringify(staged.payload)).toBe(false)
+    const { changesetId, digest } = staged.payload as { changesetId: string; digest: string }
+    // Staging is not the render: the model is only called at commit.
+    expect(calls).toHaveLength(0)
+
+    const commitRes = await rpc(env, token, {
+      jsonrpc: '2.0', id: 61, method: 'tools/call',
+      params: { name: 'confirm_changeset', arguments: { projectId: PROJECT, changesetId, digest } },
+    })
+    const committed = toolPayload(((await commitRes.json()) as any).result)
+    expect(committed.isError, JSON.stringify(committed.payload)).toBe(false)
+
+    const stored = await storedSettings()
+    const brief = stored[BRIEF_KEY]
+    expect(brief.parameters.audience).toBe('Rural youth, 15-25')
+    expect(brief.freeformNotes).toBe('Keep verse numbers.')
+    // None of these four was sent by the caller — they are the server's.
+    expect(brief.l2Markdown).toContain('Rural youth, 15-25')
+    expect(brief.updatedBy).toBe('alice')
+    expect(brief.l1Summary).toBe('Plain-register translation for rural youth.')
+    expect(brief.l1ModelId).toBe('test/brief-model')
+    // Field-scoped like patch_settings: the sibling key is untouched.
+    expect(stored.systemPrompt).toBe('keep')
+    vi.unstubAllGlobals()
+  })
+
+  it('prepare_set_brief pins the live settings version when ifMatchVersion is omitted, and honours one that is passed', async () => {
+    await promoteToMaintainer()
+    await seedSettings({ systemPrompt: 'keep' }, 7)
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb)
+
+    const auto = await rpc(env, token, {
+      jsonrpc: '2.0', id: 62, method: 'tools/call',
+      params: {
+        name: 'prepare_set_brief',
+        arguments: { projectId: PROJECT, parameters: { purpose: 'Church planting' } },
+      },
+    })
+    const staged = toolPayload(((await auto.json()) as any).result)
+    expect(staged.isError, JSON.stringify(staged.payload)).toBe(false)
+    expect((staged.payload as any).summary.ifMatchVersion).toBe(7)
+
+    const stale = await rpc(env, token, {
+      jsonrpc: '2.0', id: 63, method: 'tools/call',
+      params: {
+        name: 'prepare_set_brief',
+        arguments: { projectId: PROJECT, parameters: { purpose: 'Church planting' }, ifMatchVersion: 99 },
+      },
+    })
+    const { payload, isError } = toolPayload(((await stale.json()) as any).result)
+    expect(isError).toBe(true)
+    expect((payload as any).error.code).toBe('plan_stale')
+  })
+
+  it('prepare_set_brief refuses an empty patch and an unknown section id, staging nothing', async () => {
+    await promoteToMaintainer()
+    await seedSettings({ systemPrompt: 'keep' }, 1)
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb)
+
+    const empty = await rpc(env, token, {
+      jsonrpc: '2.0', id: 64, method: 'tools/call',
+      params: { name: 'prepare_set_brief', arguments: { projectId: PROJECT } },
+    })
+    const emptyResult = toolPayload(((await empty.json()) as any).result)
+    expect(emptyResult.isError).toBe(true)
+    expect((emptyResult.payload as any).error.code).toBe('validation_failed')
+    expect((emptyResult.payload as any).error.message).toContain('describe_command')
+
+    const unknown = await rpc(env, token, {
+      jsonrpc: '2.0', id: 65, method: 'tools/call',
+      params: {
+        name: 'prepare_set_brief',
+        arguments: { projectId: PROJECT, parameters: { audiance: 'typo' } },
+      },
+    })
+    const unknownResult = toolPayload(((await unknown.json()) as any).result)
+    expect(unknownResult.isError).toBe(true)
+    expect((unknownResult.payload as any).error.code).toBe('validation_failed')
+
+    const stored = await storedSettings()
+    expect(stored[BRIEF_KEY]).toBeUndefined()
+    expect(stored.__version).toBe(1)
+  })
+
+  it('regenerate_brief_summary re-renders the L1 of a brief written in-app, without touching its sections', async () => {
+    await promoteToMaintainer()
+    await seedSettings(
+      {
+        [BRIEF_KEY]: {
+          version: 2,
+          updatedAt: '2026-09-01T00:00:00.000Z',
+          updatedBy: 'human',
+          parameters: { purpose: 'Liturgical reading' },
+          freeformNotes: '',
+          l2Markdown: '# Translation Brief\n\n## Purpose & audience\n\n### Purpose / skopos\nLiturgical reading',
+          l1Summary: 'stale summary',
+          l1GeneratedAt: '2026-09-01T00:00:00.000Z',
+          l1ModelId: 'old/model',
+        },
+      },
+      3,
+    )
+    const { env, calls } = envWithRenderer('A liturgical, meaning-based translation.', 'test/brief-model-2')
+    const token = await credToken(tdb)
+
+    const stageRes = await rpc(env, token, {
+      jsonrpc: '2.0', id: 66, method: 'tools/call',
+      params: { name: 'regenerate_brief_summary', arguments: { projectId: PROJECT } },
+    })
+    const staged = toolPayload(((await stageRes.json()) as any).result)
+    expect(staged.isError, JSON.stringify(staged.payload)).toBe(false)
+    expect((staged.payload as any).summary.command).toBe('RegenerateBriefSummary')
+    expect((staged.payload as any).summary.ifMatchVersion).toBe(3)
+    expect(calls).toHaveLength(0)
+
+    const { changesetId, digest } = staged.payload as { changesetId: string; digest: string }
+    const commitRes = await rpc(env, token, {
+      jsonrpc: '2.0', id: 67, method: 'tools/call',
+      params: { name: 'confirm_changeset', arguments: { projectId: PROJECT, changesetId, digest } },
+    })
+    const committed = toolPayload(((await commitRes.json()) as any).result)
+    expect(committed.isError, JSON.stringify(committed.payload)).toBe(false)
+
+    const brief = (await storedSettings())[BRIEF_KEY]
+    expect(brief.l1Summary).toBe('A liturgical, meaning-based translation.')
+    expect(brief.l1ModelId).toBe('test/brief-model-2')
+    expect(brief.parameters.purpose).toBe('Liturgical reading')
+    vi.unstubAllGlobals()
+  })
+
+  it('regenerate_brief_summary refuses a brief with nothing to summarize rather than burning a model call', async () => {
+    await promoteToMaintainer()
+    await seedSettings({ systemPrompt: 'keep' }, 1)
+    const { env, calls } = envWithRenderer('never used')
+    const token = await credToken(tdb)
+
+    const res = await rpc(env, token, {
+      jsonrpc: '2.0', id: 68, method: 'tools/call',
+      params: { name: 'regenerate_brief_summary', arguments: { projectId: PROJECT } },
+    })
+    const { payload, isError } = toolPayload(((await res.json()) as any).result)
+    expect(isError).toBe(true)
+    expect((payload as any).error.code).toBe('validation_failed')
+    expect((payload as any).error.message).toMatch(/nothing to summarize/i)
+    expect(calls).toHaveLength(0)
+    vi.unstubAllGlobals()
   })
 })
 

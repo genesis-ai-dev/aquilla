@@ -8,7 +8,11 @@
 //
 // Candidates (all trained on the evaluated book only, like the product, unless
 // --train nt):
-//   A  completion/interlinear.ts on Greek surface forms (Dice < 50 pairs, else its EM)
+//   A  completion/interlinear.ts on Greek surface forms — the interlinear panel's
+//      own aligner, which is Dice below 50 pairs and word-align.ts above it,
+//      decoded one-to-one (AQU-1696 retired the one-directional EM it used to run
+//      here, so A and D now differ only in that decode and in A's plain surface
+//      tokens). A is therefore also the measurement of what the panel shows.
 //   B  the same on Greek lemmas
 //   C  A + the Who's Who constraints: proper noun → similar capitalized word
 //      (name-match.ts), and duplicate target words re-routed to keep the order

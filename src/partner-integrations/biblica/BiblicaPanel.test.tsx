@@ -130,6 +130,30 @@ describe("BiblicaPanel re-import", () => {
     })
   })
 
+  it("asks which title to use when the file was not imported as Biblica", async () => {
+    renderPanel({
+      fileId: "file-generic",
+      existingNames: ["Lesson.idml"],
+    })
+    expect(screen.getByRole("checkbox", { name: /This is an EBL file/ })).toBeTruthy()
+    fireEvent.click(screen.getByText("This is an EBL file"))
+    chooseFile()
+    fireEvent.click(screen.getByRole("button", { name: "Update this file" }))
+    await vi.waitFor(() => {
+      expect(importBiblicaStudyNotes).toHaveBeenCalledWith(
+        expect.any(File),
+        expect.objectContaining({
+          sidebarReimport: expect.objectContaining({
+            mode: "update",
+            targetFileId: "file-generic",
+          }),
+        }),
+        expect.any(Function),
+        expect.objectContaining({ edition: "ebl" }),
+      )
+    })
+  })
+
   it("shows how many cells the chosen package would add and update", async () => {
     renderPanel({
       fileId: "file-notes",

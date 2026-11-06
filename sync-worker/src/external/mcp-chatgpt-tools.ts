@@ -18,6 +18,11 @@ const OPERATIONS: Record<string, string> = {
   SplitCell: 'prepare_split_cell',
   HideCell: 'prepare_hide_cells',
   ShowCell: 'prepare_show_cells',
+  // AQU-2403: governance. Each is forced ask-mode by prepareMembership, so an
+  // `act` connection still cannot re-role a project's staff without a human.
+  InviteMember: 'prepare_invite_member',
+  SetRole: 'prepare_set_role',
+  RemoveMember: 'prepare_remove_member',
 }
 const prepare = MCP_TOOLS.find(t => t.name === 'prepare_translations')!
 const commandSchemas = (prepare.inputSchema.properties.commands as {

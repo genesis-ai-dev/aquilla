@@ -348,3 +348,65 @@ export async function resolveProjectRolesViaGrants(
   }
   return roles
 }
+
+/**
+ * Every grant row touching ONE project, for EVERY user — the roster twin of
+ * loadProjectGrants (AQU-2403).
+ *
+ * Same three reads and the same scope predicate as the single-user loader,
+ * minus the `user_id = ?` filter, so a caller can resolve the whole membership
+ * list with `resolveFromGrants` per user and no further I/O. Rows are grouped
+ * by user id; a user with no contributing path simply has no entry.
+ *
+ * Null when the project does not exist (identical to loadProjectGrants).
+ */
+export async function loadProjectGrantsForAllUsers(
+  db: AquillaDb,
+  projectId: string,
+): Promise<{
+  byUser: Map<string, AccessGrant[]>
+  attachedTeamIds: string[]
+  orgId: string | null
+  archivedAt: string | null
+} | null> {
+  const project = await db
+    .prepare(`SELECT org_id, archived_at FROM projects WHERE id = ?`)
+    .bind(projectId)
+    .first<{ org_id: number | string | null; archived_at: string | Date | null }>()
+  if (!project) return null
+  const orgId = toId(project.org_id)
+
+  const attachedRows = await db
+    .prepare(`SELECT DISTINCT group_id FROM group_project_grants WHERE project_id = ?`)
+    .bind(projectId)
+    .all<{ group_id: number | string }>()
+  const attachedTeamIds = (attachedRows.results ?? []).map((r) => String(r.group_id))
+
+  const { results } = await db
+    .prepare(
+      `SELECT user_id, scope_type, scope_id, role_level, source,
+              via_team_id, granted_by, granted_at
+         FROM access_grants
+        WHERE (scope_type = 'project' AND scope_id = ?)
+           OR (scope_type = 'org' AND scope_id = ?)
+           OR (scope_type = 'team' AND scope_id IN (
+                 SELECT group_id::TEXT FROM group_project_grants WHERE project_id = ?))`,
+    )
+    .bind(projectId, orgId ?? "", projectId)
+    .all<GrantRow>()
+
+  const byUser = new Map<string, AccessGrant[]>()
+  for (const row of results ?? []) {
+    const grant = toAccessGrant(row)
+    const existing = byUser.get(grant.userId)
+    if (existing) existing.push(grant)
+    else byUser.set(grant.userId, [grant])
+  }
+
+  return {
+    byUser,
+    attachedTeamIds,
+    orgId,
+    archivedAt: project.archived_at == null ? null : String(project.archived_at),
+  }
+}

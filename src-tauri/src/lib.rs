@@ -5,6 +5,7 @@ mod fs_bridge;
 mod hot_bundle;
 mod keychain;
 mod llm_proxy;
+mod paratext;
 mod repo_root;
 mod shutdown_guard;
 
@@ -75,6 +76,7 @@ pub fn run() {
             app.manage(llm_config);
             app.manage(shutdown_guard::ShutdownGuardState::new());
             app.manage(app_update::AppUpdateState::default());
+            app.manage(paratext::ParatextWatchers::default());
 
             Ok(())
         })
@@ -104,6 +106,15 @@ pub fn run() {
                     shutdown_guard::restart_app,
                     app_update::download_app_update,
                     app_update::install_app_update,
+                    paratext::paratext_discover,
+                    paratext::paratext_add_root,
+                    paratext::paratext_remove_root,
+                    paratext::paratext_read_file,
+                    paratext::paratext_hash_file,
+                    paratext::paratext_write_book,
+                    paratext::paratext_watch,
+                    paratext::paratext_unwatch,
+                    paratext::paratext_is_running,
                     hot_bundle::check_bundle_update,
                     hot_bundle::bundle_booted,
                     hot_bundle::get_bundle_status,
@@ -133,6 +144,15 @@ pub fn run() {
                     shutdown_guard::restart_app,
                     app_update::download_app_update,
                     app_update::install_app_update,
+                    paratext::paratext_discover,
+                    paratext::paratext_add_root,
+                    paratext::paratext_remove_root,
+                    paratext::paratext_read_file,
+                    paratext::paratext_hash_file,
+                    paratext::paratext_write_book,
+                    paratext::paratext_watch,
+                    paratext::paratext_unwatch,
+                    paratext::paratext_is_running,
                     hot_bundle::check_bundle_update,
                     hot_bundle::bundle_booted,
                     hot_bundle::get_bundle_status,

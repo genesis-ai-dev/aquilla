@@ -9,9 +9,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest
+          - os: macos-15
             target: aarch64-apple-darwin
-          - os: macos-15-intel
+          # Cross-compiled on the arm64 runner (GitHub retires macOS images ~yearly; Intel ones first).
+          - os: macos-15
             target: x86_64-apple-darwin
           - os: windows-latest
             target: x86_64-pc-windows-msvc
@@ -50,6 +51,7 @@ jobs:
       - uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           workspaces: src-tauri -> target
+          key: ${{ matrix.target }}
 
       - name: Install Linux deps
         if: startsWith(matrix.os, 'ubuntu-')
@@ -68,6 +70,19 @@ jobs:
       # (raw 32 bytes, hex; from `pnpm desktop:bundle:keygen`). It is a
       # compile-time option_env! in src-tauri, so every cargo build below
       # gets it. Without it a release shell would never accept hot bundles.
+      # Without it, bundling with createUpdaterArtifacts (tauri.release.conf.json)
+      # cannot sign the updater archives, so no release ever reaches installed
+      # apps. Its public half is plugins.updater.pubkey in tauri.conf.json.
+      - name: Guard against a missing updater signing key
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY secret is empty — the release would ship without updater signatures or latest.json. Add the private key matching plugins.updater.pubkey (and TAURI_SIGNING_PRIVATE_KEY_PASSWORD)."
+            exit 1
+          fi
+
       - name: Guard against a missing hot-bundle public key
         env:
           AQUILLA_BUNDLE_PUBKEY: ${{ secrets.AQUILLA_BUNDLE_PUBKEY }}
@@ -85,9 +100,13 @@ jobs:
 
       # Builds the embedded fallback bundle the shell serves until its first hot
       # bundle lands, so it must point at production hosts exactly like
-      # deploy:aquilla:spa (package.json) does.
+      # deploy:aquilla:spa (package.json) does. Both tauri builds below blank
+      # beforeBuildCommand (tauri.unsigned/release.conf.json) so they package
+      # this dist/ instead of rebuilding it without the hosted env.
       - run: pnpm run build:hosted
         env:
+          # tsc -b runs out of Node's default heap on the 7 GB macOS runners.
+          NODE_OPTIONS: --max-old-space-size=6144
           VITE_AUTH_BASE: https://api.aquilla.app/identity
           VITE_SYNC_WORKER_HOST: api.aquilla.app/sync
           VITE_CHAT_BASE: https://api.aquilla.app/chat
@@ -97,12 +116,24 @@ jobs:
       # e2e-webdriver feature (embedded WebDriver server, see src-tauri/src/lib.rs) and the
       # src-tauri/tauri.e2e.conf.json capability grant merged in — neither is ever part of
       # the real signed build below. A failure here blocks that OS's signed build/publish.
-      - run: pnpm run tauri:build:e2e
+      # = tauri:build:e2e, plus the unsigned config so it keeps the hosted dist/.
+      # The cross-compiled Intel build can't run on this arm64 runner, and its
+      # code is identical to the arm64 build that does run the suite.
+      - name: Build e2e binary
+        if: matrix.target != 'x86_64-apple-darwin'
+        run: pnpm tauri build --debug --no-bundle --features e2e-webdriver --config src-tauri/tauri.e2e.conf.json --config src-tauri/tauri.unsigned.conf.json
         env:
           AQUILLA_BUNDLE_PUBKEY: ${{ secrets.AQUILLA_BUNDLE_PUBKEY }}
 
       - name: Run Tauri e2e smoke suite
-        run: pnpm run test:e2e:tauri
+        if: matrix.target != 'x86_64-apple-darwin'
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            xvfb-run -a pnpm run test:e2e:tauri
+          else
+            pnpm run test:e2e:tauri
+          fi
 
       # Fail loudly (not silently ship a broken/unverifiable auto-updater) if
       # tauri.conf.json still carries the scaffolded placeholder updater
@@ -141,5 +172,5 @@ jobs:
           releaseName: "Aquilla ${{ github.ref_name }}"
           releaseDraft: true
           prerelease: false
-          args: --target ${{ matrix.target }}
+          args: --target ${{ matrix.target }} --config src-tauri/tauri.release.conf.json
           updaterJsonPreferNsis: true

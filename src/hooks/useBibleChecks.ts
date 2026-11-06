@@ -109,11 +109,17 @@ export function useBibleChecks(
 
   // The compile reads ids and refs only. Keying it on this string keeps cell
   // text (which changes on every keystroke) out of its inputs.
+  // A closed gate never reads the refs. Stringifying every cell of a long
+  // book (a whole Bible is tens of thousands) was on the same render that
+  // paints the timeline.
   const refsKey = useMemo(
-    () => JSON.stringify(cells.map((cell) => [cell.id, cell.globalReferences ?? []])),
-    [cells],
+    () => (enabled ? JSON.stringify(cells.map((cell) => [cell.id, cell.globalReferences ?? []])) : ""),
+    [enabled, cells],
   )
-  const book = useMemo(() => bookOfCells(JSON.parse(refsKey).map(toCell)), [refsKey])
+  const book = useMemo(() => {
+    if (!refsKey) return null
+    return bookOfCells((JSON.parse(refsKey) as [string, string[]][]).map(toCell))
+  }, [refsKey])
 
   const [layers, setLayers] = useState<LoadedLayers | null>(null)
   const active = gate.state === "on" && book !== null

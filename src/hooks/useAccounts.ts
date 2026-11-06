@@ -11,7 +11,7 @@ import {
 import { useQueryClient } from "@tanstack/react-query"
 import {
   addSession, activateSession, clearSession, removeSession,
-  loadAccountsSnapshot, publishDataOwner, subscribeSession, sessionKey,
+  loadAccountsSnapshot, publishDataOwner, rememberSessionJwt, subscribeSession, sessionKey,
   type SessionSummary,
 } from "@/lib/frontier/session-store"
 import {
@@ -248,6 +248,7 @@ const AccountsContext = createContext<AccountsContextValue | null>(null)
  */
 export function AccountsProvider({ children }: { children: ReactNode }) {
   const value = useAccountsState()
+  rememberSessionJwt(value.active?.jwt ?? null)
   return createElement(AccountsContext.Provider, { value }, children)
 }
 

@@ -362,6 +362,19 @@ export async function removeSession(key: string): Promise<void> {
   })
 }
 
+/** The active account's JWT once AccountsProvider has rendered it.
+ * A file route reads this during render so a sync-token mint can start
+ * before the lazy workspace's effects. */
+let renderedSessionJwt: string | null = null
+
+export function rememberSessionJwt(jwt: string | null): void {
+  renderedSessionJwt = jwt
+}
+
+export function peekSessionJwt(): string | null {
+  return renderedSessionJwt
+}
+
 export async function loadActiveSession(): Promise<FrontierSession | null> {
   const env = await readEnvelope()
   if (!env.active) return null

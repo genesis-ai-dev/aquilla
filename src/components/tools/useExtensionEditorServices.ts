@@ -22,7 +22,7 @@ import { readAtVersion } from "@/hooks/useActiveCellStore"
 import { createEditorStructureCache } from "@/lib/editor-structure-cache"
 import { usePericopeSuggestions } from "@/hooks/usePericopeSuggestions"
 import { resolvePericopeResumeBy } from "@/lib/pericope/resume"
-import { compareAddresses, parseRef } from "@/lib/pericope/sections"
+import { compareAddresses, parseRef, type VerseAddress } from "@/lib/pericope/sections"
 import { getBookName } from "@/lib/file-labeling/bible-book-names"
 import type { ToolCellStructure } from "@/lib/tools/editor-services"
 import { formatInfractionReason } from "@/lib/rules/format-infraction"
@@ -256,13 +256,19 @@ export function useExtensionEditorServices(args: ExtensionEditorServicesArgs): T
   const pericopeSuggestions = usePericopeSuggestions(pericopeResume)
   const pericopes = useMemo<ToolPericope[]>(() => {
     const store = args.store
-    const ids = store.getCellIds()
+    const byBook = new Map<string, { id: string; address: VerseAddress }[]>()
+    for (const id of store.getCellIds()) {
+      const parsed = parseRef(store.getCellView(id)?.group ?? "")
+      if (!parsed) continue
+      const list = byBook.get(parsed.book)
+      if (list) list.push({ id, address: parsed.address })
+      else byBook.set(parsed.book, [{ id, address: parsed.address }])
+    }
     const out: ToolPericope[] = []
     for (const s of pericopeSuggestions) {
-      const cellId = ids.find((id) => {
-        const parsed = parseRef(store.getCellView(id)?.group ?? "")
-        return Boolean(parsed && parsed.book === s.book && compareAddresses(parsed.address, s.start) >= 0 && compareAddresses(parsed.address, s.end) <= 0)
-      })
+      const cellId = byBook.get(s.book)?.find((row) =>
+        compareAddresses(row.address, s.start) >= 0 && compareAddresses(row.address, s.end) <= 0,
+      )?.id
       if (!cellId) continue
       out.push({
         key: s.key,

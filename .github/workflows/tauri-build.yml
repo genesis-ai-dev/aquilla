@@ -127,3 +127,56 @@ jobs:
           else
             pnpm run test:e2e:tauri
           fi
+
+  # One PR comment (edited in place on every run) and the run summary, linking
+  # each platform's installer artifact. Links need a GitHub login and expire
+  # with the artifacts (retention-days above).
+  links:
+    needs: build
+    if: ${{ !cancelled() && needs.build.result != 'skipped' }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      pull-requests: write
+    steps:
+      - name: Post installer links
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          run_url="https://github.com/$REPO/actions/runs/$RUN_ID"
+          artifacts=$(gh api "repos/$REPO/actions/runs/$RUN_ID/artifacts" --paginate --jq '.artifacts[] | [.name, .id, .expires_at[:10]] | @tsv')
+          jobs=$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs" --paginate --jq '.jobs[] | [.name, (.conclusion // .status)] | @tsv')
+
+          marker='<!-- tauri-build-links -->'
+          body="$marker"$'\n'"### Desktop test builds for \`${SHA:0:9}\`"$'\n\n'
+          body+="| Platform | Installer | Build |"$'\n'"|---|---|---|"$'\n'
+          expires=""
+          for row in "aarch64-apple-darwin|macOS (Apple Silicon)" "x86_64-apple-darwin|macOS (Intel)" "x86_64-pc-windows-msvc|Windows" "x86_64-unknown-linux-gnu|Linux"; do
+            target=${row%%|*}; label=${row#*|}
+            art=$(printf '%s\n' "$artifacts" | awk -F'\t' -v n="aquilla-$target" '$1 == n { print $2 "\t" $3 }')
+            result=$(printf '%s\n' "$jobs" | awk -F'\t' -v t="$target" 'index($1, t) { print $2 }')
+            if [ -n "$art" ]; then
+              link="[download](https://github.com/$REPO/actions/runs/$RUN_ID/artifacts/${art%%$'\t'*})"
+              expires=${art#*$'\t'}
+            else
+              link="none"
+            fi
+            body+="| $label | $link | ${result:-unknown} |"$'\n'
+          done
+          body+=$'\n'"Unsigned, for testing only. macOS: run \`xattr -dr com.apple.quarantine /Applications/Aquilla.app\` after installing (not notarized)."
+          body+=" Links need a GitHub login${expires:+ and expire $expires}. [Workflow run]($run_url)"$'\n'
+
+          printf '%s' "$body" >> "$GITHUB_STEP_SUMMARY"
+          [ -n "$PR" ] || exit 0
+
+          existing=$(gh api "repos/$REPO/issues/$PR/comments" --paginate --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\"))) | .id" | head -1)
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$existing" -f body="$body" > /dev/null
+          else
+            gh api -X POST "repos/$REPO/issues/$PR/comments" -f body="$body" > /dev/null
+          fi

@@ -67,8 +67,10 @@ describe("Tauri desktop shell", () => {
   })
 
   it("reports connectivity via the get_connectivity command", async () => {
-    const online = await invoke<boolean>("get_connectivity")
-    expect(typeof online).toBe("boolean")
+    // `None` (JS `null`) until the first probe completes — the SPA reads that as
+    // "unknown" (`useConnectivity`), so a fresh shell may legitimately report it.
+    const online = await invoke<boolean | null>("get_connectivity")
+    expect(online === null || typeof online === "boolean").toBe(true)
   })
 
   it("wires a simulated aquilla:// deep-link callback into the keychain", async () => {

@@ -8156,7 +8156,7 @@ function EditorRow({
           // Flat row in a continuous list: tinted by hover/selection overlays,
           // not shadows. Depth is gone by design — the Linear model reserves
           // elevation for floating layers.
-          "group relative grid gap-x-2 gap-y-1.5 ps-2.5 pe-2 py-2 transition-colors duration-150 ease-out md:gap-y-2 md:pe-4",
+          "group relative grid gap-x-2 gap-y-1.5 ps-2.5 pe-2 py-2 md:gap-y-2 md:pe-4",
           // The mic-permission help is anchored in the action rail. While it
           // is open, this row must become its own higher stacking layer and
           // allow the popover to escape the row; otherwise neighbouring rows

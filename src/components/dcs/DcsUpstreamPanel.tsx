@@ -49,6 +49,8 @@ import {
   type CurrentCell,
   type DeltaEmitters,
   type DeltaResult,
+  type RepairDeltaResult,
+  type RepairScan,
 } from "@/lib/dcs/delta"
 import type { DcsCatalogEntry, DcsCursor } from "@/lib/dcs/types"
 
@@ -89,10 +91,10 @@ type RepairState =
       kind: "scanned"
       entry: DcsCatalogEntry
       currentCells: Map<string, CurrentCell>
-      delta: DeltaResult
+      delta: RepairDeltaResult
     }
   | { kind: "applying" }
-  | { kind: "done"; repaired: number }
+  | { kind: "done"; repaired: number; scan: RepairScan }
   | { kind: "error"; message: string }
 
 type DetachState =
@@ -101,6 +103,58 @@ type DetachState =
   | { kind: "error"; message: string }
 
 /** True when the resolved prod release is ahead of the pinned cursor. */
+/**
+ * AQU-1896: the outcome line after a re-sync scan.
+ *
+ * Zero ops used to render one message — "Everything already matches the pinned
+ * source." — for two opposite states: a scan that re-read every held file and
+ * found them all correct, and a scan that resolved none of the project's files
+ * upstream and therefore read nothing at all. The second is not health: a
+ * project whose file ids no longer derive from any upstream path (renamed or
+ * removed upstream, or an id-scheme skew) was being told it was fine, and any
+ * future regression in file-id derivation was invisible here.
+ *
+ * So the reassuring copy is earned only by `fetchedFiles > 0`; a scan that
+ * reached nothing names the cause instead, and is NOT painted success-green.
+ */
+function RepairDoneMessage({
+  state,
+  t,
+}: {
+  state: { repaired: number; scan: RepairScan }
+  t: ReturnType<typeof useT>
+}) {
+  const { repaired, scan } = state
+  if (repaired > 0) {
+    return (
+      <p className="text-xs text-emerald-700 dark:text-emerald-400">
+        {t("importExport.dcs.resyncRepaired", { count: repaired })}
+      </p>
+    )
+  }
+  // Held nothing to begin with: there is genuinely nothing to check, and no
+  // false claim is being made about files the scan failed to reach.
+  if (scan.heldFiles > 0 && scan.resolvedFiles === 0) {
+    return (
+      <p className="text-xs text-amber-700 dark:text-amber-300" role="status">
+        {t("importExport.dcs.resyncNoFilesResolved", { count: scan.heldFiles })}
+      </p>
+    )
+  }
+  if (scan.resolvedFiles > 0 && scan.fetchedFiles === 0) {
+    return (
+      <p className="text-xs text-amber-700 dark:text-amber-300" role="status">
+        {t("importExport.dcs.resyncNoFilesRead", { count: scan.resolvedFiles })}
+      </p>
+    )
+  }
+  return (
+    <p className="text-xs text-emerald-700 dark:text-emerald-400">
+      {t("importExport.dcs.resyncNoChanges")}
+    </p>
+  )
+}
+
 function isNewer(cursor: DcsCursor, latest: DcsCatalogEntry): boolean {
   // Prefer the commit SHA (authoritative); fall back to the ref/tag name.
   if (latest.commitSha && cursor.commitSha) return latest.commitSha !== cursor.commitSha
@@ -385,9 +439,12 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
       })
       const total = delta.creates.length + delta.commits.length + delta.deletes.length
       if (total === 0) {
-        // Nothing diverges from the pinned source — report and stop; no
-        // confirm, no events.
-        setRepairState({ kind: "done", repaired: 0 })
+        // Zero ops — report and stop; no confirm, no events. AQU-1896: carry
+        // the scan through, because zero ops is only "nothing diverges" when
+        // the scan actually read something. A scan that resolved or read none
+        // of the project's files checked nothing, and the renderer says so
+        // instead of claiming a match.
+        setRepairState({ kind: "done", repaired: 0, scan: delta.scan })
         return
       }
       setRepairState({ kind: "scanned", entry, currentCells, delta })
@@ -431,6 +488,7 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
       setRepairState({
         kind: "done",
         repaired: delta.creates.length + delta.commits.length + delta.deletes.length,
+        scan: delta.scan,
       })
     } catch (err) {
       setRepairState({ kind: "error", message: err instanceof Error ? err.message : String(err) })
@@ -636,13 +694,7 @@ export function DcsUpstreamPanel({ projectId, roleLevel, client }: DcsUpstreamPa
                 />
               </div>
             )}
-            {repairState.kind === "done" && (
-              <p className="text-xs text-emerald-700 dark:text-emerald-400">
-                {repairState.repaired === 0
-                  ? t("importExport.dcs.resyncNoChanges")
-                  : t("importExport.dcs.resyncRepaired", { count: repairState.repaired })}
-              </p>
-            )}
+            {repairState.kind === "done" && <RepairDoneMessage state={repairState} t={t} />}
             {repairState.kind === "error" && (
               <p className="text-xs text-destructive">
                 {t("importExport.dcs.resyncFailed", { message: repairState.message })}

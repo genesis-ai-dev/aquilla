@@ -31,10 +31,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14
+          - os: macos-15
             target: aarch64-apple-darwin
-          # Cross-compiled on the arm64 runner; GitHub's Intel macos-13 image is retired.
-          - os: macos-14
+          # Cross-compiled on the arm64 runner (GitHub retires macOS images ~yearly; Intel ones first).
+          - os: macos-15
             target: x86_64-apple-darwin
           - os: windows-latest
             target: x86_64-pc-windows-msvc

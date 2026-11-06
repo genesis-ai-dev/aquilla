@@ -61,6 +61,18 @@ const openPopup = () =>
 const rightPress = (target: Element) =>
   fireEvent.pointerDown(target, { button: 2, buttons: 2 })
 
+describe("ContextMenu placement", () => {
+  it("opens under the pointer, left-aligned, and stays below it", () => {
+    render(<TwoRows />)
+
+    fireEvent.contextMenu(screen.getByText("Alpha"), { clientX: 40, clientY: 600 })
+
+    const popup = openPopup()
+    expect(popup).toHaveAttribute("data-side", "bottom")
+    expect(popup).toHaveAttribute("data-align", "start")
+  })
+})
+
 describe("ContextMenu reposition", () => {
   it("animates a menu opened from a cold right-click", () => {
     render(<TwoRows />)

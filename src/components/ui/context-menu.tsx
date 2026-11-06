@@ -103,17 +103,31 @@ function ContextMenuTrigger({
   )
 }
 
+/**
+ * Under the pointer, left edge on the click, opening downward. A context menu
+ * otherwise flips above the cursor, or slides up until the click sits on its
+ * bottom edge — a timeline chip at the bottom of the window always loses that.
+ * Neither axis is corrected, so the top stays under the click and the list
+ * scrolls in the space below it.
+ */
+const CONTEXT_MENU_COLLISION = {
+  side: "none",
+  align: "none",
+  fallbackAxisSide: "none",
+} as const
+
 function ContextMenuContent({
   className,
   align = "start",
-  alignOffset = 4,
-  side = "right",
-  sideOffset = 0,
+  alignOffset = 0,
+  side = "bottom",
+  sideOffset = 4,
+  collisionAvoidance = CONTEXT_MENU_COLLISION,
   ...props
 }: ContextMenuPrimitive.Popup.Props &
   Pick<
     ContextMenuPrimitive.Positioner.Props,
-    "align" | "alignOffset" | "side" | "sideOffset"
+    "align" | "alignOffset" | "side" | "sideOffset" | "collisionAvoidance"
   >) {
   const instant = React.useContext(ContextMenuInstantContext)
 
@@ -125,6 +139,7 @@ function ContextMenuContent({
         alignOffset={alignOffset}
         side={side}
         sideOffset={sideOffset}
+        collisionAvoidance={collisionAvoidance}
       >
         <ContextMenuPrimitive.Popup
           data-slot="context-menu-content"

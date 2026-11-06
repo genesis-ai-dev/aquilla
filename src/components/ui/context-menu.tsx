@@ -149,11 +149,11 @@ function ContextMenuContent({
           // `data-instant="click"` for every mouse-driven context menu (a
           // `contextmenu` event has `detail === 0`, which its keyboard-press
           // heuristic reads as a keyboard press), so a bare `data-instant`
-          // selector would delete every entrance. `animate-none!` beats the
-          // enter/exit utilities regardless of the order Tailwind emits them in.
+          // selector would delete every entrance. `transition-none!` beats the
+          // open/close transition regardless of the order Tailwind emits them in.
           className={cn(
             POPUP_BASE,
-            "min-w-36 data-[instant=trigger-change]:animate-none!",
+            "min-w-36 data-[instant=trigger-change]:transition-none!",
             className,
           )}
           {...props}

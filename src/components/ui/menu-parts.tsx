@@ -188,9 +188,17 @@ function MenuSubTrigger({
  * Popup chrome shared by every menu surface. Width and root-level positioning
  * stay with each surface's own `Content`, as does the `data-instant` reposition
  * rule that only a context menu can trigger.
+ *
+ * Open and close are transitions on `data-starting-style` / `data-ending-style`.
+ * Base UI paints the starting style for one frame with transitions disabled,
+ * then removes it, which is what a transition needs. A keyframe enter
+ * (`data-open:animate-in`) never shows: the popup mounts already open, and the
+ * registered enter variables resolve to their initial values on that first
+ * frame, so only the close — an attribute change on an element already on
+ * screen — plays.
  */
 const POPUP_BASE =
-  "z-50 max-h-(--available-height) origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-lg bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10 duration-100 outline-none data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95"
+  "z-50 max-h-(--available-height) origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-lg bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10 outline-none transition-[opacity,scale,translate] duration-100 ease-out data-starting-style:scale-95 data-starting-style:opacity-0 data-ending-style:scale-95 data-ending-style:opacity-0 data-[side=bottom]:data-starting-style:-translate-y-2 data-[side=inline-end]:data-starting-style:-translate-x-2 data-[side=inline-start]:data-starting-style:translate-x-2 data-[side=left]:data-starting-style:translate-x-2 data-[side=right]:data-starting-style:-translate-x-2 data-[side=top]:data-starting-style:translate-y-2"
 
 function MenuSub({ ...props }: MenuPrimitive.SubmenuRoot.Props) {
   return <MenuPrimitive.SubmenuRoot data-slot="menu-sub" {...props} />

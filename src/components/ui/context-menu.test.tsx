@@ -96,10 +96,11 @@ describe("ContextMenu reposition", () => {
 
     expect(screen.getByRole("menuitem", { name: "Act on Beta" })).toBeInTheDocument()
     expect(openPopup()).toHaveAttribute("data-instant", "trigger-change")
-    // The attribute is only half the contract — it has to defeat the enter and
-    // exit utilities carried by the same element.
-    expect(openPopup()).toHaveClass("data-[instant=trigger-change]:animate-none!")
-    expect(openPopup()).toHaveClass("data-open:animate-in")
+    // The attribute is only half the contract — it has to defeat the open and
+    // close transition carried by the same element.
+    expect(openPopup()).toHaveClass("data-[instant=trigger-change]:transition-none!")
+    expect(openPopup()).toHaveClass("data-starting-style:opacity-0")
+    expect(openPopup()).toHaveClass("data-ending-style:opacity-0")
   })
 
   it("animates again once the reposition window has passed", () => {

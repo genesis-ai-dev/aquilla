@@ -10,6 +10,7 @@ import {
   PACE_OTHER_CPS,
   standInEstimator,
   standInLenSec,
+  standInText,
   STAND_IN_MAX_SEC,
   STAND_IN_MIN_SEC,
 } from "./stand-in"
@@ -90,6 +91,43 @@ describe("the file's own pace", () => {
   it("falls back to each line's script default before then", () => {
     const cells = [line("d", "y".repeat(42))]
     expect(standInEstimator(cells)(cells[0])).toBeCloseTo(42 / PACE_ALPHABETIC_CPS, 5)
+  })
+})
+
+// Nov 5 (group D): an imported media section's `original` is its file's name,
+// a label for the screen and never words (lib/semantic-source-text). A section
+// reads its transcript; before it is transcribed it has no words, and so no
+// stand-in: a film imported as one section was laid out at the reading time of
+// "Film without subtitles.mp4", 1.9 s of a 29 s film.
+describe("an imported media section's words", () => {
+  const section = (transcription?: string): CellData =>
+    ({
+      id: "s1",
+      fileId: "f1",
+      medium: "media",
+      original: "Film without subtitles.mp4",
+      translated: "",
+      ...(transcription != null ? { transcription } : {}),
+      startTime: 0,
+      endTime: 29,
+    }) as unknown as CellData
+
+  it("are its transcript, never its file's name", () => {
+    expect(standInText(section("Line one. The boat leaves the harbour at dawn tomorrow."))).toBe(
+      "Line one. The boat leaves the harbour at dawn tomorrow.",
+    )
+    expect(standInText(section())).toBe("")
+  })
+
+  it("give no stand-in length while there are none, so the line keeps its own", () => {
+    const cells = [section()]
+    expect(standInEstimator(cells)(cells[0])).toBeNull()
+  })
+
+  it("its translation still comes first once there is one", () => {
+    const cell = { ...section(), translated: "Una línea." } as unknown as CellData
+    expect(standInEstimator([cell])(cell)).toBeCloseTo(STAND_IN_MIN_SEC, 5)
+    expect(standInText(cell)).toBe("Una línea.")
   })
 })
 

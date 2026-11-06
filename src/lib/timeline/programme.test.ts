@@ -18,6 +18,7 @@ import {
   withoutHiddenTakes,
   type Programme,
 } from "./programme"
+import { standInEstimator } from "./stand-in"
 import type { CellData } from "@/hooks/useCells"
 
 const SOURCE_ID = "audio-f1-1690000000-shared.mp3"
@@ -76,6 +77,27 @@ describe("buildProgramme — laying the verses out", () => {
     const prog = buildProgramme([verse("v1", 0, 9), verse("v2", 9, 12, { durationMs: 2_000 })], { standInLenSec: () => 2.5 })
     expect(prog.slots[0]).toMatchObject({ slotLenSec: 2.5, sourceLenSec: 2.5, clock: "source", standIn: true })
     expect(prog.slots[1].startSec).toBe(2.5)
+  })
+
+  // Nov 5 (group D): a line with no take and no words has nothing to read a
+  // stand-in from, so it keeps its own span. A film imported as one section,
+  // not yet transcribed, was laid out at the reading time of its file's name.
+  it("a line with no take and no words keeps its own length, so a film imported as one section isn't cut", () => {
+    const film = verse("s1", 0, 29, undefined, { original: "Film without subtitles.mp4" })
+    const prog = buildProgramme([film], { standInLenSec: standInEstimator([film]) })
+    expect(prog.slots[0]).toMatchObject({ slotLenSec: 29, sourceLenSec: 29, cardLenSec: 29, clock: "source" })
+    expect(prog.slots[0].standIn).toBeUndefined()
+    expect(prog.slots[0].sourceWindow).toEqual({ start: 0, end: 29 })
+    expect(prog.totalSec).toBe(29)
+  })
+
+  it("a section's transcript still sets its stand-in, not its file's name", () => {
+    // 55 characters at 14 a second: held a little past its 3.2 s, not cut to the 1.9 s of "Imported film.mp4".
+    const words = "Line one. The boat leaves the harbour at dawn tomorrow."
+    const line1 = verse("l1", 1.08, 4.26, undefined, { original: "Imported film.mp4", transcription: words })
+    const prog = buildProgramme([line1], { standInLenSec: standInEstimator([line1]) })
+    expect(prog.slots[0].slotLenSec).toBeCloseTo(words.length / 14, 5)
+    expect(prog.slots[0].standIn).toBe(true)
   })
 
   it("the TRANSLATION clocks the slot when it is the longer side", () => {

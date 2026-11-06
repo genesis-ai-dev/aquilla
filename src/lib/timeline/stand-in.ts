@@ -18,6 +18,7 @@
 // exactly like the rest of the programme.
 
 import { resolveTargetPieces, sourceClipAudioForCell } from "@/lib/audio/track-audio"
+import { effectiveSourceText } from "@/lib/cell-text"
 import { hasTiming } from "./derive"
 import { effectiveAttachmentDurationMs } from "./lane-timing"
 import type { CellData } from "@/hooks/useCells"
@@ -47,9 +48,14 @@ export function hasNothingToFollow(cells: readonly CellData[]): boolean {
   return cells.every((c) => !hasTiming(c) && sourceClipAudioForCell(c) == null)
 }
 
-/** The words a line is read from: its translation, else its source. */
-export function standInText(cell: Pick<CellData, "translated" | "original" | "transcription">): string {
-  return (cell.translated?.trim() || cell.original?.trim() || cell.transcription?.trim() || "").replace(/\s+/g, " ")
+/**
+ * The words a line is read from: its translation, else its source. An imported
+ * media section's `original` is its file's name, a label and never words
+ * (`effectiveSourceText`): it reads its transcript, and has none until then.
+ */
+export function standInText(cell: Pick<CellData, "translated" | "original" | "transcription" | "medium">): string {
+  const source = (cell.medium ?? "text") === "media" ? effectiveSourceText(cell) : cell.original?.trim() || cell.transcription
+  return (cell.translated?.trim() || source?.trim() || "").replace(/\s+/g, " ")
 }
 
 /** Characters as a reader voices them: code points, spaces between words included. */
@@ -118,12 +124,16 @@ export function standInLenSec(text: string, paceCps: number): number {
 
 /**
  * One estimator for a file: the learned pace when there is one, else each
- * line's script default. What `buildProgramme` calls for a line with no times.
+ * line's script default. What `buildProgramme` calls for a line with no take.
+ * A line with no words has nothing to read a stand-in from (null): a timed one
+ * keeps its own span, so a film imported as one section and not yet
+ * transcribed keeps its whole length (Nov 5, group D).
  */
-export function standInEstimator(cells: readonly CellData[]): (cell: CellData) => number {
+export function standInEstimator(cells: readonly CellData[]): (cell: CellData) => number | null {
   const learned = learnedPaceCps(cells)
   return (cell) => {
     const text = standInText(cell)
+    if (!text) return null
     return standInLenSec(text, learned ?? defaultPaceCps(text))
   }
 }

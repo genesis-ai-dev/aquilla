@@ -28,7 +28,7 @@ import { hasTiming, sortByLens } from "./derive"
 import { effectiveAttachmentDurationMs, MIN_TARGET_LEN_SEC, targetChipGeom } from "./lane-timing"
 import type { CellData } from "@/hooks/useCells"
 import { isHiddenCell } from "@/lib/cells/hidden"
-import { standInEstimator } from "./stand-in"
+import { standInEstimator, STAND_IN_MIN_SEC } from "./stand-in"
 import { isDefaultTrackSlot } from "./track-slots"
 
 /** A window on some clock, in seconds. */
@@ -231,7 +231,7 @@ export interface BuildProgrammeOptions {
    * line takes its place in the programme (its recording's length once it has
    * one, else this) instead of being left out.
    */
-  standInLenSec?(cell: CellData): number
+  standInLenSec?(cell: CellData): number | null
   /**
    * AQU-2252: which added tracks' takes are laid in — their slots. The
    * transport passes the file's tracks, the ones it plays, and so does the
@@ -447,7 +447,8 @@ export function buildProgramme(cells: readonly CellData[], opts?: BuildProgramme
     const untimed = nominalLenSec <= 0
     if (untimed) {
       if (!opts?.standInLenSec) continue
-      nominalLenSec = Math.max(MIN_TARGET_LEN_SEC, opts.standInLenSec(cell))
+      // A line with no times and no words still takes room, the shortest a stand-in gets.
+      nominalLenSec = Math.max(MIN_TARGET_LEN_SEC, opts.standInLenSec(cell) ?? STAND_IN_MIN_SEC)
     }
 
     // An untimed line has no window into any source recording to play.
@@ -487,7 +488,8 @@ export function buildProgramme(cells: readonly CellData[], opts?: BuildProgramme
     //   - a take whose length isn't known yet keeps the line's own span, which
     //     its chip already borrows;
     //   - a line with no take lasts its stand-in length, from its words (the
-    //     caller's estimator), else its own span;
+    //     caller's estimator), else its own span — a line with no words too
+    //     (Nov 5: a film imported as one section, not yet transcribed);
     // and the source sounds only as long as the line lasts: cut where it ends.
     // AQU-2252 (Sam, Oct 29): …a take on ANY track that sets line lengths,
     // each at its own place and length: the line lasts as long as the longest
@@ -498,11 +500,12 @@ export function buildProgramme(cells: readonly CellData[], opts?: BuildProgramme
       if (take.window && take.lenSec != null) recordedLenSec = Math.max(recordedLenSec, take.leadSec + take.lenSec)
     }
     const recorded = lengthTakes.length > 0
-    const usesStandIn = !recorded && (untimed || Boolean(opts?.standInLenSec))
+    const standInSec = !untimed && !recorded && opts?.standInLenSec ? opts.standInLenSec(cell) : null
+    const usesStandIn = !recorded && (untimed || standInSec != null)
     const unrecordedLenSec = untimed
       ? nominalLenSec
-      : opts?.standInLenSec
-        ? Math.max(MIN_TARGET_LEN_SEC, opts.standInLenSec(cell))
+      : standInSec != null
+        ? Math.max(MIN_TARGET_LEN_SEC, standInSec)
         : Math.max(nominalLenSec, MIN_TARGET_LEN_SEC)
     const slotLenSec = recordedLenSec > 0
       ? recordedLenSec

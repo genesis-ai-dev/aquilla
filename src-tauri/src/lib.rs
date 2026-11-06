@@ -60,7 +60,11 @@ pub fn run() {
             // Label stays "main" so capabilities/default.json keeps applying.
             WebviewWindowBuilder::new(app, "main", hot_bundle::window_url(app)?)
                 .title("Aquilla")
-                .inner_size(800.0, 600.0)
+                // Desktop-first default: fits a 13" laptop (1440x900 logical) with
+                // room to spare, and sits above the SPA's tablet breakpoint.
+                .inner_size(1280.0, 820.0)
+                .min_inner_size(900.0, 600.0)
+                .center()
                 .resizable(true)
                 .build()?;
             hot_bundle::start(app.handle());

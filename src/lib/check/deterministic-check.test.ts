@@ -551,3 +551,120 @@ describe("runDeterministicCheck with the check-pack-B scans", () => {
     expect(result.ruleFindings.find((group) => group.rule.id === "builtin:bkp:P2")).toBeUndefined()
   })
 })
+
+// ---------------------------------------------------------------------------
+// Cross-cell quotation continuity (AQU-1733)
+// ---------------------------------------------------------------------------
+
+describe("Quotation left open across cells (AQU-1733)", () => {
+  const quoteRules = resolveBuiltinRules(undefined).filter((r) => r.id === "builtin:unpaired-quotes")
+
+  it("is on by default as a minor check", () => {
+    expect(quoteRules).toHaveLength(1)
+    expect(quoteRules[0].enabled).toBe(true)
+    expect(quoteRules[0].severity).toBe("minor")
+  })
+
+  // The case no per-cell check can reach: the SOURCE carries the same
+  // imbalance (here, and always for a source that marks no quotations at all),
+  // so `unpaired-quotes` deliberately goes quiet on each cell in turn.
+  const opened = cell("And he said, “Follow me,", "Et il dit : « Suivez-moi,", { id: "opens" })
+  const continued = cell("and I will make you fishers of men.", "et je vous ferai pêcheurs d’hommes.", { id: "continues" })
+
+  it("the per-cell check alone says nothing about it", () => {
+    for (const c of [opened, continued]) {
+      expect(checkRulesForCell(c, "file-1", quoteRules)).toEqual([])
+    }
+  })
+
+  it("Check file flags it, on the cell that opened the quotation", async () => {
+    const result = await runDeterministicCheck({
+      fileId: "file-1",
+      cells: [opened, continued],
+      rules: quoteRules,
+      concepts: [],
+    })
+    expect(result.ruleFindings).toHaveLength(1)
+    expect(result.ruleFindings[0].infractions).toEqual([
+      expect.objectContaining({
+        cellId: "opens",
+        reason: "builtin:unpaired-quotes",
+        spans: [{ side: "target", start: 12, end: 13, matchedText: "«" }],
+      }),
+    ])
+    expect(result.totalFindingCount).toBe(1)
+  })
+
+  it("needs no configuration — nothing is passed but the project's own cells", async () => {
+    // The marks are read off the text itself (`inferQuoteMarks`), so a project
+    // that never filled the Language profile's quotation slot still gets the
+    // check. A recorded profile overrides it: under English marks the same
+    // French text has no quotation marks at all.
+    const result = await runDeterministicCheck({
+      fileId: "file-1",
+      cells: [opened, continued],
+      rules: quoteRules,
+      concepts: [],
+      languageProfile: { quoteMarks: { levels: [{ open: "“", close: "”" }], continuation: "reopen-each-paragraph" } },
+    })
+    expect(result.ruleFindings).toEqual([])
+  })
+
+  it("stays quiet once the quotation is closed, withdrawing the per-cell false alarm", async () => {
+    // The closing verse holds one quotation mark and nothing in its own text
+    // to pair it with, and its source marks no quotations at all, so the
+    // per-cell check reports it. The file pairs it with the « two cells back,
+    // so Check file must not.
+    const closed = cell("and I will make you fishers of men.", "et je vous ferai pêcheurs d’hommes. »", { id: "closes" })
+    expect(checkRulesForCell(closed, "file-1", quoteRules)).toEqual([
+      expect.objectContaining({ cellId: "closes", reason: "builtin:unpaired-quotes" }),
+    ])
+    const result = await runDeterministicCheck({
+      fileId: "file-1",
+      cells: [opened, closed],
+      rules: quoteRules,
+      concepts: [],
+    })
+    expect(result.ruleFindings).toEqual([])
+    expect(result.totalFindingCount).toBe(0)
+  })
+
+  it("stays quiet where the translation simply stops", async () => {
+    // The closing mark may be in the verse nobody has translated yet; a
+    // half-translated book must not report its whole quoted discourse.
+    const untranslated = cell("and I will make you fishers of men.", "", { id: "untranslated" })
+    const later = cell("Immediately they left their nets.", "Aussitôt ils laissèrent leurs filets.", { id: "later" })
+    const result = await runDeterministicCheck({
+      fileId: "file-1",
+      cells: [opened, untranslated, later],
+      rules: quoteRules,
+      concepts: [],
+    })
+    expect(result.ruleFindings).toEqual([])
+  })
+
+  it("reports one row when both passes see the same missing partner", async () => {
+    // Inside one cell the per-cell check fires too (the source is balanced
+    // here). The reviewer gets one finding, not two.
+    const inCell = cell("He said come with me.", "He said, “Come with me.", { id: "in-cell" })
+    expect(checkRulesForCell(inCell, "file-1", quoteRules)).toHaveLength(1)
+    const result = await runDeterministicCheck({
+      fileId: "file-1",
+      cells: [inCell],
+      rules: quoteRules,
+      concepts: [],
+    })
+    expect(result.ruleFindings[0].infractions).toHaveLength(1)
+  })
+
+  it("reports nothing when the project turned the check off", async () => {
+    const off = quoteRules.map((r) => ({ ...r, enabled: false }))
+    const result = await runDeterministicCheck({
+      fileId: "file-1",
+      cells: [opened, continued],
+      rules: off,
+      concepts: [],
+    })
+    expect(result.ruleFindings).toEqual([])
+  })
+})

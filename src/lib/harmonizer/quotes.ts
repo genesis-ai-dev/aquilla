@@ -20,62 +20,33 @@
 //           to put the mark inside the sentence is not something a
 //           deterministic rule should guess.
 
+import type { QuoteMarkPair } from "../../../db/shared/language-profile"
+import { inferQuoteMarks } from "../../../db/shared/quote-marks-inference"
 import type { HarmonizerCell, HarmonizerFinding, HarmonizerQuestion, HarmonyCheck } from "./types"
 
-export interface QuotePair {
-  open: string
-  close: string
-}
-
-/** Candidate primary pairs, most common first. Symmetric pairs toggle. */
-export const QUOTE_PAIRS: readonly QuotePair[] = [
-  { open: "“", close: "”" },
-  { open: "«", close: "»" },
-  { open: "„", close: "“" },
-  { open: "„", close: "”" },
-  { open: "»", close: "«" },
-  { open: "「", close: "」" },
-  { open: "『", close: "』" },
-  { open: "‘", close: "’" },
-  { open: "\"", close: "\"" },
-]
-
-function count(text: string, ch: string): number {
-  let n = 0
-  for (const c of text) if (c === ch) n++
-  return n
-}
-
-/** Complete pairs count double; a lone opening mark still counts, so a
- *  passage whose only quotation is the unclosed one still learns its pair. */
-function pairScore(texts: readonly string[], pair: QuotePair): number {
-  const joined = texts.join("\n")
-  const opens = count(joined, pair.open)
-  if (pair.open === pair.close) return opens
-  return 2 * Math.min(opens, count(joined, pair.close)) + (opens > 0 ? 1 : 0)
-}
+/** One nesting level's marks — the Language profile's own shape, so the
+ *  harmonizer and the checks describe a project's quotation system alike. */
+export type QuotePair = QuoteMarkPair
 
 /**
  * The quotation pair this project actually uses. Validated cells decide when
  * any of them quote; otherwise whatever the passage itself uses. A project
  * that has not quoted anything yet gets null — there is no realisation to be
  * consistent with, and inventing one is the model's job, not the checker's.
+ *
+ * AQU-1733: the scoring that answers this is `inferQuoteMarks`, in
+ * db/shared/quote-marks-inference.ts — deterministic, flag-free and shared
+ * with the Language profile card and the cross-cell quotation pass, so the
+ * harmonizer no longer owns a second copy of it behind the `harmonizer` flag.
+ * Only the outermost level is used here: this check follows one speech, and
+ * `findQuoteSpans` tracks a single pair.
  */
 export function learnQuotePair(cells: readonly HarmonizerCell[]): QuotePair | null {
-  const pick = (texts: readonly string[]): QuotePair | null => {
-    let best: QuotePair | null = null
-    let bestScore = 0
-    for (const pair of QUOTE_PAIRS) {
-      const s = pairScore(texts, pair)
-      if (s > bestScore) {
-        best = pair
-        bestScore = s
-      }
-    }
-    return best
-  }
-  const validated = cells.filter((c) => c.validated).map((c) => c.target)
-  return pick(validated) ?? pick(cells.map((c) => c.target))
+  const inferred = inferQuoteMarks(
+    cells.map((c) => c.target),
+    { validatedTexts: cells.filter((c) => c.validated).map((c) => c.target) },
+  )
+  return inferred?.levels[0] ?? null
 }
 
 export interface QuoteSpan {

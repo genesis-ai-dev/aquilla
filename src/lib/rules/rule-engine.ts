@@ -249,8 +249,12 @@ function checkRule(
       // needed for them and a keystroke still re-evaluates one cell. Built only
       // when there are conventions to pass: this runs once per rule per cell,
       // and a whole Bible is ~31k cells × ~20 rules (AQU-1864).
-      const spans = check.punctuation
-        ? def.run(source, cell.translated, { punctuation: check.punctuation })
+      // AQU-1735 adds `bookNames` the same way.
+      const spans = check.punctuation || check.bookNames?.length
+        ? def.run(source, cell.translated, {
+            ...(check.punctuation ? { punctuation: check.punctuation } : {}),
+            ...(check.bookNames?.length ? { bookNames: check.bookNames } : {}),
+          })
         : def.run(source, cell.translated)
       if (!spans || spans.length === 0) return null
       return {

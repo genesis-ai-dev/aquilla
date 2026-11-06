@@ -6,6 +6,7 @@ import type {
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { TFunction } from "@/lib/i18n/I18nProvider"
 import type { PunctuationConventions } from "../../../db/shared/punctuation-conventions"
+import type { ProjectBookName } from "./builtin-run-context"
 import { BUILTIN_CHECKS, BUILTIN_CHECK_IDS } from "./builtin-registry"
 import { BIBLE_BUILTIN_CHECK_IDS } from "./bible-builtin-checks"
 
@@ -50,6 +51,7 @@ const NAME_KEY: Record<BuiltinCheckId, MessageKey> = {
   "unpaired-quotes": "rules.builtin.unpairedQuotes.name",
   "untranslated-fragment": "rules.builtin.untranslatedFragment.name",
   "length-ratio": "rules.builtin.lengthRatio.name",
+  "scripture-reference": "rules.builtin.scriptureReference.name",
   "bkp:N1": "bibleChecks.n1.name",
   "bkp:N2": "bibleChecks.n2.name",
   // AQU-1697: the name autopilot already shows for this check.
@@ -102,6 +104,7 @@ const DESCRIPTION_KEY: Record<BuiltinCheckId, MessageKey> = {
   "unpaired-quotes": "rules.builtin.unpairedQuotes.description",
   "untranslated-fragment": "rules.builtin.untranslatedFragment.description",
   "length-ratio": "rules.builtin.lengthRatio.description",
+  "scripture-reference": "rules.builtin.scriptureReference.description",
   "bkp:N1": "bibleChecks.n1.description",
   "bkp:N2": "bibleChecks.n2.description",
   "bkp:M3": "bibleChecks.m3.description",
@@ -151,6 +154,9 @@ export const PUNCTUATION_CHECK_IDS: readonly BuiltinCheckId[] = [
   "punctuation-integrity",
 ]
 
+/** AQU-1735: the checks that read the project's book-name table. */
+export const BOOK_NAME_CHECK_IDS: readonly BuiltinCheckId[] = ["scripture-reference"]
+
 export interface ResolveBuiltinRulesOptions {
   /**
    * AQU-1688: the project's Bible data checks enrichment is on
@@ -170,6 +176,14 @@ export interface ResolveBuiltinRulesOptions {
    * what a lane with no recorded language and no Language profile slot gets.
    */
   punctuation?: PunctuationConventions | null
+  /**
+   * AQU-1735: the project's own names for Bible books, from
+   * `projectBookNames(project.files)`. Stamped onto the scripture-reference
+   * check so every consumer of this rule set judges a reference's book name
+   * the same way. Omitted or null leaves that check to the canon and the
+   * cell's own separators.
+   */
+  bookNames?: readonly ProjectBookName[] | null
 }
 
 /**
@@ -186,6 +200,7 @@ export function withBuiltinOverrides(
   rules: readonly TranslationRule[],
   overrides: Partial<Record<BuiltinCheckId, AlgorithmicCheckOverride>> | undefined,
   punctuation?: PunctuationConventions | null,
+  bookNames?: readonly ProjectBookName[] | null,
 ): TranslationRule[] {
   return rules.map((rule) => {
     if (rule.check.type !== "builtin") return rule
@@ -201,6 +216,7 @@ export function withBuiltinOverrides(
         type: "builtin",
         checkId,
         ...(punctuation && PUNCTUATION_CHECK_IDS.includes(checkId) ? { punctuation } : {}),
+        ...(bookNames?.length && BOOK_NAME_CHECK_IDS.includes(checkId) ? { bookNames } : {}),
       },
     }
   })
@@ -230,6 +246,9 @@ export function resolveBuiltinRules(
         checkId: id,
         ...(options.punctuation && PUNCTUATION_CHECK_IDS.includes(id)
           ? { punctuation: options.punctuation }
+          : {}),
+        ...(options.bookNames?.length && BOOK_NAME_CHECK_IDS.includes(id)
+          ? { bookNames: options.bookNames }
           : {}),
       },
     }

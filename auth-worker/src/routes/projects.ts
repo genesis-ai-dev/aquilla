@@ -1912,6 +1912,83 @@ projects.post(
 )
 
 // ──────────────────────────────────────────────────────────────────────────
+// DELETE /api/v2/projects/:projectId/members/me — leave the project
+// AQU-1993: self-service, so it carries none of the gates the maintainer+
+// moderation route below does (no role floor, no target-level cap, no admin
+// step-up). A contributor invited to a project they no longer want to be in
+// had no way out before this: the route below parses "me" as NaN, and its
+// role floor locked out everyone under maintainer anyway.
+//
+// Registered BEFORE `/:projectId/members/:userId` so that path cannot
+// capture "me" as a userId.
+//
+// Only a direct `project_members` row can be given up. Access that arrives
+// through the org, a team, or being the project's creator is not the
+// caller's to drop (AD-12 paths are additive), so the response reports
+// whether any access survived rather than pretending the project is gone.
+// ──────────────────────────────────────────────────────────────────────────
+
+projects.delete("/:projectId/members/me", authMiddleware, async (c) => {
+  const user = c.get("user")
+  const projectId = c.req.param("projectId") as string
+
+  const existing = await c.env.AQUILLA_PG.prepare(
+    "SELECT role_level FROM project_members WHERE project_id = ? AND user_id = ?",
+  )
+    .bind(projectId, user.id)
+    .first<{ role_level: number }>()
+  if (!existing) {
+    return c.json(
+      {
+        error: "no_direct_membership",
+        message:
+          "You have no individual membership on this project. Your access comes from your organization or a team — leave the organization or ask an owner to remove you.",
+      },
+      409,
+    )
+  }
+
+  await c.env.AQUILLA_PG.prepare(
+    "DELETE FROM project_members WHERE project_id = ? AND user_id = ?",
+  )
+    .bind(projectId, user.id)
+    .run()
+  // AQU-1818: a dropped direct membership must not leave lane rows behind.
+  forgetProjectRole(c.env, projectId, user.id)
+  await reconcileMemberProjectLanes(c.env.AQUILLA_PG, projectId, user.id, user.id)
+  await auditMembershipChange(c.env, user, {
+    action: "project.member.remove",
+    where: { scope: "project", projectId },
+    target: { id: user.id, username: user.username },
+    roleBefore: Number(existing.role_level),
+    roleAfter: null,
+  })
+  // The per-request memo still holds the pre-delete role resolved above.
+  forgetProjectRole(c.env, projectId, user.id)
+
+  // AQU-346: when no grant path survives, eject the caller's live WS sessions
+  // and denylist their still-valid sync tokens. Best-effort.
+  const surviving = await resolveProjectRole(c.env, user, projectId)
+  if (!surviving) {
+    const notifyPromise = notifySyncWorkerOfMemberRemoval(c.env, projectId, {
+      userId: user.id,
+      username: user.username,
+    })
+    try {
+      c.executionCtx.waitUntil(notifyPromise)
+    } catch {
+      void notifyPromise
+    }
+  }
+
+  return c.json({
+    left: true,
+    stillHasAccess: Boolean(surviving),
+    remainingSource: surviving ? surviving.source : null,
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────
 // DELETE /api/v2/projects/:projectId/members/:userId — maintainer+
 // ──────────────────────────────────────────────────────────────────────────
 

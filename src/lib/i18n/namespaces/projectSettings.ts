@@ -451,6 +451,21 @@ export const projectSettings = defineNamespace({
     "projectSettings.section.languages": "Languages",
     "projectSettings.section.import": "Import",
     "projectSettings.section.user": "User",
+    // ── AQU-1993: leaving a project (the one self-service control here) ──
+    "projectSettings.section.leaveProject": "Leave project",
+    "projectSettings.leave.rowLabel": "Leave project",
+    "projectSettings.leave.rowDescription":
+      "Give up your own access to this project. An owner or maintainer has to add you back.",
+    "projectSettings.leave.confirmTitle": "Leave {name}?",
+    "projectSettings.leave.confirmBody":
+      "You will lose your access to this project and anything in it. This does not delete the project for anyone else.",
+    "projectSettings.leave.leavingButton": "Leaving…",
+    "projectSettings.leave.leftToast": "You left {name}.",
+    "projectSettings.leave.stillHasAccess":
+      "Your individual access is gone, but your organization or a team still gives you access to this project.",
+    "projectSettings.leave.inheritedOnly":
+      "Your access to this project comes from your organization or a team, so there is nothing here for you to give up. Leave the organization instead, or ask an owner to remove you.",
+    "projectSettings.leave.failed": "Couldn't leave this project.",
     "projectSettings.section.members": "Team members",
     "projectSettings.section.aiInstructions": "AI drafting",
     "projectSettings.section.draftContext": "Draft context",
@@ -1584,6 +1599,20 @@ export const projectSettings = defineNamespace({
         "button text.",
     },
     keys: {
+      "projectSettings.leave.confirmTitle": {
+        description:
+          "Title of the confirm dialog a person opens to leave a project themselves "
+          + "(AQU-1993), not to remove someone else.",
+        placeholders: {
+          name: "The project's name — not translated.",
+        },
+      },
+      "projectSettings.leave.leftToast": {
+        description: "Success toast after the person left a project.",
+        placeholders: {
+          name: "The project's name — not translated.",
+        },
+      },
       "projectSettings.timeline.lockInfoAria": {
         description:
           "Accessible name of the (i) beside 'Lock the timings against dragging' in Project settings; " +

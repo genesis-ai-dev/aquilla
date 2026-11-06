@@ -135,6 +135,7 @@ import { ExperimentalFlagsSection } from "./ProjectSettings/ExperimentalFlagsSec
 import { LanguagesSection, type LaneDeliversOutcome } from "./ProjectSettings/LanguagesSection"
 import type { LaneDelivers } from "@/lib/lanes/lane-delivers"
 import { MembersSection } from "./ProjectSettings/MembersSection"
+import { LeaveProjectSection } from "./ProjectSettings/LeaveProjectSection"
 import { ProjectVisibilitySection } from "./ProjectSettings/ProjectVisibilitySection"
 import { KeyInUseLine } from "@/components/settings/KeyInUseLine"
 import { completionKeyInUse, geminiKeyInUse } from "@/lib/settings/key-in-use"
@@ -1013,6 +1014,10 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
     { id: "section-import", label: t("projectSettings.section.import"), keywords: ["import", "usfm", "front matter", "book title", "book name", "introduction", "toc", "running header", "paratext", "door43"] },
     // AQU-2259: only the "this setting moved" note is left here, until it expires.
     { id: "section-user", label: t("projectSettings.section.user"), keywords: ["username", "author"], visible: settingMovedNotesShowing() },
+    // AQU-1993: self-service, so it is NOT in the Members pane — that pane can
+    // be hidden by the organization's member-list policy, which would hide the
+    // way out from the very people who need it.
+    { id: "section-leave-project", label: t("projectSettings.section.leaveProject"), keywords: ["leave", "leave project", "remove me", "remove myself", "quit", "unsubscribe", "stop working on"], visible: isCloudProject },
     { id: "section-members", label: t("projectSettings.section.members"), keywords: ["members", "invite", "invite link", "link", "join", "share", "access", "role", "roster", "collaborator", "member list", "progress", "visibility", "who can see"], visible: canSeeMembers },
     // AQU-1068: a permission, so it lives with the roles rather than in the
     // Timeline card it grew out of — it governs ordinary text files now, not
@@ -1109,7 +1114,7 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
       description: t("projectSettings.group.generalDescription"),
       icon: SlidersHorizontal,
       hub: "project",
-      sectionIds: ["section-project-info", "section-languages", "section-cell-editing", "section-bible-resources", "section-import", "section-user"],
+      sectionIds: ["section-project-info", "section-languages", "section-cell-editing", "section-bible-resources", "section-import", "section-user", "section-leave-project"],
     },
     {
       id: "members",
@@ -1278,6 +1283,7 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
       "section-bible-resources",
       "section-import",
       "section-user",
+      "section-leave-project",
       "section-members",
       "section-instructions",
       "section-checks",
@@ -1840,6 +1846,13 @@ function ProjectSettingsPage({ modal = false }: ProjectSettingsProps) {
                 onNavigate={requestNavigate}
               />
             </SettingsGroup>
+          </div>
+        )}
+
+        {searchGroupLabel("section-leave-project")}
+        {id && sectionsToRender.some((s) => s.id === "section-leave-project") && (
+          <div id="section-leave-project">
+            <LeaveProjectSection projectId={id} projectName={project?.name ?? ""} />
           </div>
         )}
 

@@ -26,6 +26,7 @@ import { checkRulesForCell } from "@/lib/rules/rule-engine"
 import {
   scanTermConsistency,
   scanCapitalization,
+  scanSpelling,
   checkableRules,
   groupInfractionsByRule,
   runDeterministicCheck,
@@ -275,6 +276,98 @@ describe("scanCapitalization", () => {
 // ---------------------------------------------------------------------------
 // Rule pass helpers
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// scanSpelling (AQU-1737)
+// ---------------------------------------------------------------------------
+
+describe("scanSpelling", () => {
+  /** Writes "Yesu" four times and "Yeesu" once, with English sources. */
+  function yesuCells(): CellData[] {
+    return [
+      cell("Jesus said", "Yesu akasema", { cellLabel: "MRK 1:1" }),
+      cell("Jesus answered", "Yesu alijibu", { cellLabel: "MRK 1:2" }),
+      cell("Jesus went", "Yesu akaenda", { cellLabel: "MRK 1:3" }),
+      cell("Jesus called them", "Yesu akawaita", { cellLabel: "MRK 1:4" }),
+      cell("Jesus said again", "Yeesu akasema tena", { cellLabel: "MRK 1:5" }),
+    ]
+  }
+
+  it("flags a one-off variant of a frequent form and suggests that form", () => {
+    const cells = yesuCells()
+    const { findings, wordlistSize } = scanSpelling(cells, { minCommonOccurrences: 3 })
+    expect(findings).toHaveLength(1)
+    expect(findings[0]).toMatchObject({
+      form: "Yeesu",
+      suggestion: "Yesu",
+      suggestionOccurrences: 4,
+      reason: "sound-alike",
+    })
+    expect(findings[0].cells).toEqual([{ cellId: cells[4].id, cellLabel: "MRK 1:5" }])
+    expect(wordlistSize).toBeGreaterThan(0)
+  })
+
+  it("builds the wordlist from the target text, not the source", () => {
+    // "Jesus" is written five times in the source and never in the target, so
+    // it must not be in the project's wordlist — nor its source-only
+    // neighbours be offered as corrections of target words.
+    const { wordlistSize } = scanSpelling(
+      [cell("Jesus Jesus Jesus", "Yesu", { cellLabel: "MRK 1:1" })],
+      { minCommonOccurrences: 1 },
+    )
+    expect(wordlistSize).toBe(1)
+  })
+
+  it("never flags a form the source text already writes that way", () => {
+    // A name carried over from the source is not the translator's spelling.
+    const cells = [
+      cell("Paul wrote", "Paulo aliandika"),
+      cell("Paul said", "Paulo alisema"),
+      cell("Paul went", "Paulo alienda"),
+      cell("Paolo greeted", "Paolo alisalimu"),
+    ]
+    const { findings } = scanSpelling(cells, { minCommonOccurrences: 3 })
+    expect(findings.map((f) => f.form)).not.toContain("Paolo")
+  })
+
+  it("reports what frequency let through instead of passing silently", () => {
+    const cells = Array.from({ length: 100 }, (_, i) =>
+      cell(`verse ${i}`, "Yesu", { id: `y${i}` }),
+    )
+    const { approved, findings } = scanSpelling(cells)
+    expect(approved).toEqual([{ form: "Yesu", occurrences: 100 }])
+    expect(findings).toEqual([])
+  })
+
+  it("has nothing to say about a scope with no translated cells", () => {
+    expect(scanSpelling([cell("Jesus said", "")])).toEqual({
+      findings: [],
+      approved: [],
+      wordlistSize: 0,
+    })
+  })
+
+  it("stays quiet about a form the reviewer approved", () => {
+    const { findings } = scanSpelling(yesuCells(), {
+      minCommonOccurrences: 3,
+      approved: new Set(["Yeesu"]),
+    })
+    expect(findings).toEqual([])
+  })
+
+  it("rides runDeterministicCheck and counts toward its total", async () => {
+    const result = await runDeterministicCheck({
+      fileId: "file-1",
+      cells: yesuCells(),
+      rules: [],
+      concepts: [],
+      spelling: { minCommonOccurrences: 3 },
+    })
+    expect(result.spellingFindings.map((f) => f.form)).toEqual(["Yeesu"])
+    expect(result.wordlistSize).toBeGreaterThan(0)
+    expect(result.totalFindingCount).toBe(1)
+  })
+})
 
 describe("checkableRules", () => {
   it("excludes disabled rules and term-compiled rules (no double report)", () => {

@@ -16,8 +16,9 @@
  *     (instance counts add up 1:1: each sourceTerm hit needs a counterpart
  *      approved rendering, and extra renderings in the target are also a miss)
  *   each forbidden rendering → one `target-forbids` rule per rendering
- *     (target contains the forbidden text ⇒ violation; there is no source
- *      condition yet, see AQU-1712)
+ *     (the source bears the concept AND the target contains the forbidden
+ *      text ⇒ violation — the source condition rides on the check as
+ *      `sourcePattern`, AQU-1712)
  *
  * draft / deprecated concepts are skipped entirely.
  */

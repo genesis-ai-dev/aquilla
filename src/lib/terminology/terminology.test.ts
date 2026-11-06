@@ -96,6 +96,54 @@ describe("compileConceptsToRules", () => {
     expect(targetPatterns.some((p) => p.includes("specter"))).toBe(true)
   })
 
+  // AQU-1712: the forbidden rule carries the concept's source condition, so it
+  // is judged only in cells whose source bears the concept — the same pattern
+  // the concept's approved rule matches its source side with.
+  it("gives each forbidden rule the concept's source pattern, keeping the rule id", () => {
+    const concept = makeConcept({
+      sourceTerm: "spirit",
+      renderings: [{ rendering: "ghost", status: "forbidden" }],
+    })
+    const [approved] = compileConceptsToRules([makeConcept({ sourceTerm: "spirit" })])
+    const [forbidden] = compileConceptsToRules([concept])
+    expect(forbidden.id).toBe("term:c1:forbidden:ghost")
+    expect(forbidden.check.type).toBe("target-forbids")
+    if (forbidden.check.type === "target-forbids" && approved.check.type === "source-requires-target") {
+      expect(forbidden.check.sourcePattern).toBe(approved.check.sourcePattern)
+    }
+  })
+
+  it.each([
+    { name: "flagged when the source bears the term", original: "the spirit came", flagged: true },
+    { name: "not flagged when the source lacks the term", original: "a friendly host", flagged: false },
+  ])("forbidden rendering through compile → rule-engine: $name", ({ original, flagged }) => {
+    const concept = makeConcept({
+      sourceTerm: "spirit",
+      renderings: [{ rendering: "ghost", status: "forbidden" }],
+    })
+    const rules = compileConceptsToRules([concept])
+    const cell: CellData = {
+      id: "c1",
+      original,
+      translated: "the holy ghost",
+      fileId: "f1",
+      context: "",
+      group: "",
+      type: "text",
+      originalHtml: undefined,
+      status: "validated",
+      validationStatus: "none",
+      activeValidators: [],
+      validationHistory: [],
+      history: [],
+      threads: [],
+    }
+    const infractions = checkRules(new Map([["f1", [cell]]]), rules).get("c1") ?? []
+    expect(infractions.map((i) => i.ruleId)).toEqual(
+      flagged ? ["term:c1:forbidden:ghost"] : [],
+    )
+  })
+
   // AQU-764: the flag-vs-auto-replace question the team could not answer from
   // anywhere. The answer is documented in docs/UI-GLOSSARY.md "Terminology
   // enforcement — flag, never auto-replace"; these guard it.

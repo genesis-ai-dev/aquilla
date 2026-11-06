@@ -1179,16 +1179,42 @@ export function ImportDialog({
       <DialogContent className={cn("flex max-h-[90dvh] flex-col", screen === "recordingsReview" ? "sm:max-w-4xl" : "sm:max-w-2xl")}>
         <DialogHeader>
           <DialogTitle>
-            {reimportTarget && (screen === "upload" || screen === "preview" || screen === "partner") ? (
+            {reimportTarget && (screen === "upload" || screen === "partner" || screen === "gdrive") ? (
               <div className="flex min-w-0 items-center gap-2">
                 <ImportDialogBackButton
-                  onClick={() => onOpenChange(false)}
-                  label={t("common.cancel")}
+                  onClick={() => {
+                    // The file may have been read by the wrong importer. Back
+                    // returns to the chooser; the re-import of this file stays
+                    // in effect for whichever importer is picked next.
+                    setPartnerId(null)
+                    setIntent("source")
+                    setScreen("landing")
+                  }}
+                  label={t("importExport.dialog.backToImportTypes")}
                 />
                 <span className="min-w-0 truncate">
                   {t("importExport.reimport.title", { name: reimportTarget.name })}
                 </span>
               </div>
+            ) : reimportTarget && screen === "preview" ? (
+              <div className="flex min-w-0 items-center gap-2">
+                <ImportDialogBackButton
+                  onClick={() => {
+                    const returnScreen = previewState?.returnScreen ?? "upload"
+                    setPreviewState(null)
+                    setPreviewCommitError(null)
+                    setScreen(returnScreen)
+                  }}
+                  label={t("importExport.dialog.backToFileSelection")}
+                />
+                <span className="min-w-0 truncate">
+                  {t("importExport.reimport.title", { name: reimportTarget.name })}
+                </span>
+              </div>
+            ) : reimportTarget && screen === "landing" ? (
+              <span className="min-w-0 truncate">
+                {t("importExport.reimport.title", { name: reimportTarget.name })}
+              </span>
             ) : screen === "recordingsPick" || screen === "recordingsReview" ? (
               <div className="flex min-w-0 items-center gap-2">
                 <ImportDialogBackButton
@@ -1278,7 +1304,7 @@ export function ImportDialog({
         {screen !== "translationReview" && screen !== "recordingsReview" && (
         <DialogBody>
 
-        {screen === "landing" && translation && (
+        {screen === "landing" && translation && !reimportTarget && (
           <div className="pt-1 pb-4">
             <ImportIntentChoice
               value={intent}
@@ -1533,6 +1559,7 @@ export function ImportDialog({
             excludeFrontMatter={excludeFrontMatter}
             cellUnit={cellUnit}
             alignReimportedIdml={alignReimportedIdml}
+            reimportTarget={reimportTarget}
             onTranslationCheck={translationCheckFor("gdrive")}
           />
         )}

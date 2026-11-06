@@ -32,11 +32,13 @@ interface ScriptureSideRailProps {
   onSelect: (panel: RightRailPanel | null) => void
 }
 
-/** One slim rail of buttons that switches between the scripture side panels. */
+/** One slim rail of buttons that switches between the scripture side panels.
+ *  `pt-10` matches the chapter row (`min-h-10`) so the first tab sits on the
+ *  Source / Target rule. It stays put — it does not track that row. */
 export function ScriptureSideRail({ tabs, openPanel, onSelect }: ScriptureSideRailProps) {
   const t = useT()
   return (
-    <div className="hidden h-full w-9 shrink-0 flex-col items-center gap-1 border-s bg-background pt-2 sm:flex">
+    <div className="hidden h-full w-9 shrink-0 flex-col items-center border-s bg-background pt-10 sm:flex">
       {tabs.map((tab) => {
         const { icon: Icon, label, testId } = TAB[tab]
         const active = tab === openPanel

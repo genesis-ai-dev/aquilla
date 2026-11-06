@@ -3326,3 +3326,340 @@ output *is* the proof of deadness, per directive, with the rule named.
   environment's own guidance is not to run `playwright install` (a second download will not
   be found by this Playwright). Fails before any spec loads, so it cannot be sensitive to a
   comment-only diff. CI runs the gate.
+
+## 2026-11-06 — dead-code run: seven zero-reference exports in `src/lib`, and the one private helper that died with them
+
+**Done this run** (theme 1, dead-code deletion; 7 files, **63 deletions / 0 insertions**, no
+test file touched): `src/lib/admin/insights.ts`, `src/lib/audio/custom-voice.ts`,
+`src/lib/audio/inworld-voice-design.ts`, `src/lib/audio/voices.ts`,
+`src/lib/idml/align-styles.ts`, `src/lib/import/timeline-text.ts`,
+`src/lib/timeline/character-agreement.ts`. An eighth deletion was made, proven
+behavior-changing-by-artifact, and **reverted** — see the generated-bundle trap below.
+
+| deleted | file | what it was |
+| --- | --- | --- |
+| `AttentionKind` | `admin/insights.ts` | a one-line re-alias of `ProjectAttentionKind`; its sibling `AttentionReason` **is** used, which is why the pair read as live |
+| `CUSTOM_VOICE_TRAINING_MINUTES` | `audio/custom-voice.ts` | `= 45`, doc'd "for the 'ready in ~N min' hint" — no hint ever read it |
+| `InworldDesignPromptMode` | `audio/inworld-voice-design.ts` | union of the two `DESIGN_PROMPT_MODE_*` constants; the one live caller (`InworldVoiceDesignField.tsx:167`) uses the constant, never the type |
+| `isCharacterCastKey` | `audio/voices.ts` | `key.startsWith(CHARACTER_CAST_PREFIX)`; the prefix and `characterCastKey()` stay live |
+| `findEquivalentSlice` + `equivalentSpanEnd` | `idml/align-styles.ts` | 39 lines: an exported substring search with placement-character equivalence, plus the private helper that had no other caller |
+| `promoteTimelineTrackToRows` | `import/timeline-text.ts` | `createTrackRowsPromoter(args)()` — a one-call wrapper over a promoter that **is** live (`ProjectWorkspace.tsx`, `caption-rows.contract.test.js`) |
+| `DisagreementKind` | `timeline/character-agreement.ts` | a dead 3-member union that had also **drifted**: the live shape is `name?: { kind: "character" \| "naming" }` with `camera` as its own field, so the `"camera"` arm never described anything real |
+
+### Methodology: a repo-wide identifier index, not a per-symbol grep
+
+Per-symbol `grep -rn` over 11,786 exported declarations is not affordable, so this run built
+the index once: tokenize every identifier in every file under `src`, `e2e`, `scripts`,
+`parity`, `shared`, `docs`, `.github`, `.claude`, `packages`, `smart-tests`, `tools`,
+`tests`, `config`, `plugins`, `agents`, `walkthroughs`, `zapier`, `infra`, `db` and the
+four worker packages — **every** extension, not just `.ts`/`.tsx`, so a name mentioned only
+in a Markdown doc or a JSON fixture still counts as a reference — then ask, per exported
+symbol, which files other than its own mention it. That answers the 2026-11-04 entry's
+warning (*"a future dead-code run must grep `parity/` and `scripts/`, not just
+`src`/`e2e`"*) by construction, and it is conservative in the safe direction: it
+over-counts references, so a symbol it calls dead really is.
+
+Two numbers fell out of it that are worth keeping:
+
+- **Exactly 36 exported `src/` symbols are mentioned nowhere but their own declaration**
+  (0 other files, ≤1 self-mention). 14 of the 36 are partner-owned
+  (`src/partner-integrations/biblica/**`) and out of this routine's reach.
+- **2,154 more are "export-only dead"**: used inside their own file, exported for nobody.
+  See the candidate below — that is a far bigger, and much cheaper, pass than this one.
+
+`src/` has **no `export *` barrels at all** (`grep -rn "^export \*" src/` is empty), which
+is what makes the index sound: there is no file that re-exports a name it never writes, so
+a symbol with no other mention cannot be reachable through a star re-export. Every one of
+them was then confirmed by a literal repo-wide `grep -rn "\b<name>\b"` (excluding only
+`node_modules`, `.git` and `dist`) returning exactly **1** line — its own declaration —
+and `equivalentSpanEnd` returning exactly **2**, the declaration plus the single call from
+inside `findEquivalentSlice`, which is also in this diff.
+
+### THE TRAP OF THIS RUN: 23 `src/lib` files are inputs to a generated, shipped bundle
+
+`specDigest` in `src/lib/dcs/extension/door43-plan.ts` (a 2-line `contentHash(JSON.stringify(
+spec.cells))` doc'd "Stable hash used in progress messages / tests" — no progress message and
+no test calls it, and it was the file's only `contentHash` consumer) was the eighth deletion.
+It was deleted, it compiled, it lint-cleaned, and **it turned the suite red**:
+
+```
+FAIL src/lib/dcs/extension/door43-bundle.test.ts > the shipped Door43 importer bundle > is current with its inputs
+AssertionError: rebuild: npx tsx scripts/build-door43-extension.ts: expected 'e91a6b8c…' to be 'c3385661…'
+```
+
+`shared/tools/first-party/door43-importer.bundle.ts` is a **generated 143 KB artifact that
+ships to users** — the first-party Door43 importer extension, run in the sandboxed tool frame
+(AQU-1937). It carries `DOOR43_IMPORTER_INPUTS` (23 paths) and a sha256 over their contents,
+and `door43-bundle.test.ts:38` asserts the hash still matches. **Any** edit to any of those 23
+files, dead code included, fails that assertion until the bundle is rebuilt. The list is worth
+having here, because none of these files looks special from the inside:
+
+`src/lib/dcs/{catalog,cell-id,content-hash,import-plan,manifest,resource-map}.ts`,
+`src/lib/dcs/extension/{door43-choices,door43-importer-main,door43-plan}.ts`,
+`src/lib/dcs/routes/{obs,tsv-common,tsv-notes,tsv-questions,usfm}.ts`,
+`src/lib/file-labeling/bible-book-names.ts`, `src/lib/net/{resource-proxy,resource-proxy-handler}.ts`,
+`src/lib/parsers/{obs,text-splitter,usfm-lossless,usfm-markers,usfm}.ts`.
+
+**Rebuilding is NOT an option for this routine, and the reason is specific.** Running the
+generator does restore green, and the net size delta is exactly what a dead-code removal
+should be (−78 bytes). But the artifact is one minified line, and the rebuild **remangles it
+end to end**: a prefix/suffix trim of the old and new `DOOR43_IMPORTER_SCRIPT` strings leaves
+a common prefix of 8,461 chars and a common suffix of 3,822 chars, so ~131 KB of the 143 KB
+script differs. A reviewer cannot read that, and "the minifier says it is the same program"
+is not the proof this routine accepts. So the deletion was **reverted** (both the source and
+the regenerated bundle), the suite returned to its single pre-existing failure, and the
+deletion is logged here instead:
+
+- **Candidate**: delete `specDigest` and the `contentHash` import from `door43-plan.ts`, with
+  `npx tsx scripts/build-door43-extension.ts` in the same commit.
+- **Why deferred**: a cleanup diff would carry a 131 KB reshuffle of a shipped bundle.
+- **Proof needed**: it belongs in a change that is *already* rebuilding the bundle for its own
+  reasons (where the reshuffle is expected), or alongside a build-level check that the
+  rebuilt script is semantically equal — the `door43-bundle.test.ts` fake-frame run
+  ("an import run upserts exactly the built-in Door43 import's files and cells by id") is
+  the closest thing that exists and did pass on the rebuilt bundle, which a human may well
+  judge sufficient. Not this routine's call.
+
+### Freshness is the real filter, and it removed five candidates
+
+A zero-caller export that landed days ago is usually a seam a half-landed feature is about
+to use — deleting it deletes the next pull request's work, and worse, it erases the evidence
+that a shipped feature forgot to call it. So every candidate was dated with
+`git log --diff-filter=AM -S<name> -- <file>` first. **Deliberately not deleted:**
+
+- **`src/lib/paratext-bridge/hash.ts` `snapshotHash`** — landed **2026-11-05** with
+  `aaa434c5` (`feat(paratext): direct file bridge`). One day old; the bridge is still being
+  wired.
+- **`src/lib/formats/registry.ts` `loaderForFormatId`** — landed **2026-11-04** with
+  `693805cc` (AQU-2384, "one skeleton-plus-units contract for all parsers"). Sits beside
+  `registeredFormatIds()`/`boundFormatIds()`, which the contract's own ratchet reads.
+- **`src/lib/completion/tag-protection.ts` `subscribeInlineTagMasking`** — landed
+  **2026-11-05**, and deleting it would cascade: nothing else calls `listeners.add`, so the
+  whole listener set and `setInlineTagMaskingEnabled`'s notify loop would die with it. A
+  store with a notifier and no subscriber is a wiring gap, not dead weight.
+- **`src/components/parallel-bibles/EditorBibleColumns.tsx` `useBibleColumnsLayout`** and
+  **`src/lib/audio/shared-clip-decode.ts` `__resetSharedClipDecoderForTests`** — both
+  **2026-11-04**.
+- **`src/lib/sync/events-emit.ts` `emitFileMilestoneRemove`** — zero callers, but
+  `events-emit.ts` is a **frozen zone** for this routine (event type shapes). A client that
+  can no longer emit `file.milestone.remove` is a contract change however unreferenced the
+  emitter is. Left for a human.
+
+### Candidate: the gloss cache is write-only — `readLocalGloss` is dead, `writeLocalGloss` is not
+
+`src/lib/completion/gloss-record.ts` `readLocalGloss` (26 lines) is a clean zero-caller
+export and was the biggest single deletion on this run's shortlist. **It was deliberately
+left in place**, because deleting it would hide a likelier bug than the dead code it is:
+
+- `writeLocalGloss` **is** live — `ProjectWorkspace.tsx:7705` calls it on every gloss
+  correction (`if (project?.id) writeLocalGloss(project.id, record, activeLane)`).
+- Nothing reads what it writes. `ProjectWorkspace` hydrates glosses from the server through
+  `glossRecordFromHydrationRow` (`:7501`, `:7512`); the `localStorage` copy is written and
+  never read back.
+- The module's own header says a record "takes precedence over the computed gloss wherever
+  the cell is read" (AQU-1408 §1). A local copy nobody reads cannot take precedence over
+  anything, so either the reader was never wired (a correction is lost whenever the server
+  hydration is unavailable) or `writeLocalGloss` and its call site are the dead half.
+- **Why deferred**: deleting the *writer* and its call site is a behavior change (it stops a
+  `localStorage` write), and deleting the *reader* quietly removes the only evidence of the
+  asymmetry. Needs a human to say which half was intended. Proof it would need: whichever
+  half survives, an RTL test over the offline-resume path — which this routine may not add.
+- **`src/lib/prefs/person-prefs.ts` `listPersonPrefs`** is the mild version: it was born
+  uncalled in `ce19daa2` (2026-10-29, AQU-2264) and never had a caller — the sync walks
+  `registry` directly — so its doc string ("for Preferences → Recording and the sync") is
+  aspirational rather than stale. A speculative export, not a regression. Safe for a future
+  run once it is no longer fresh.
+
+### ISSUE-WORTHY, not a candidate: AQU-2259's display name was dropped by AQU-2300 a day later
+
+This one is not a cleanup opportunity, it is a **product regression hiding behind a green
+suite**, and it is why the freshness filter above exists. Please triage it — this run had no
+Linear access to file it.
+
+- `src/lib/frontier/auth.ts:383` `updateMyDisplayName` is a zero-caller export. It was added
+  by `f50cb6d6` (2026-10-29, Sam, **AQU-2259** "Keep the onboarding name as the account's
+  display name"), whose own message states the problem it fixed: *"Onboarding's 'What should
+  we call you?' was saved to a browser key nothing read, so the answer was thrown away."*
+- Its only caller was `OnboardingWizard.tsx`'s `saveDisplayName`, added in that same commit.
+- **`dc1f725a` (2026-10-30, `AQU-2300: replace onboarding with direct signup`) deleted the
+  whole wizard** — `OnboardingWizard.tsx` (297 lines), `steps/NameStep.tsx` (72, the "What
+  should we call you?" field) and **`OnboardingWizard.displayName.test.tsx` (73, the test
+  that pinned AQU-2259's behavior)**. One day after it shipped.
+- There is **no replacement writer**. `grep -rn "display_name" src/` over non-test source
+  returns four lines: the `auth.ts` doc comment, the `auth.ts` request body, and two
+  `user-chip` comments. `src/pages/Signup.tsx` collects no name, and there is no display-name
+  input in `src/components/settings/` or `src/pages/settings/` either. So for every account
+  created since 2026-10-30, `users.display_name` can only be null, and every reader of
+  `COALESCE(display_name, username)` that AQU-2259 was filed to improve — invite emails, the
+  access audit, the admin console, Monday's project manager — is back to showing the username.
+- **Why CI stayed green**: the server half is untouched and still fully tested.
+  `auth-worker/src/routes/auth.ts:744-802` still validates and persists `display_name`, and
+  `auth-worker/src/__tests__/auth-me-display-name.test.ts` still passes. The only test that
+  covered the client half was deleted *by the commit that removed the client half*, which is
+  exactly the manoeuvre AGENTS.md rule 5 forbids ("changed behavior means changed tests") read
+  the wrong way round: the test was removed with its subject, so nothing was left to go red.
+- **For whoever picks this up**: decide whether direct signup should collect a name (then
+  `updateMyDisplayName` gets its caller back, plus an RTL test), or whether display names are
+  settings-only (then it needs a settings field), or whether AQU-2259 is being reverted on
+  purpose (then the function, the route, and its test should all go together). This routine
+  deliberately did **not** delete the orphan, because deleting it would erase the only
+  remaining evidence that the feature ever shipped.
+
+### Candidate: 2,154 exported symbols in `src/` that nothing outside their own file uses
+
+The index's second number, and the largest single cleanup still open in the SPA. These are
+not dead code — each is used where it is defined — but each `export` keyword is a false
+public surface: it tells a reader the symbol is part of a module's contract, defeats
+`tsc`'s unused-local reporting, and keeps bundlers from proving the symbol local. Dropping
+the keyword (not the symbol) is behavior-preserving by the same proof this run used, and
+`pnpm build` catches any miscount immediately.
+
+- **Why deferred**: 2,154 sites is two orders of magnitude past a 300-line budget, and the
+  set has to be filtered first — a test file importing the symbol makes it live (and this
+  routine may not touch tests to find out), and a deliberate "exported for its test only"
+  convention may exist in places. Worth slicing by directory over several runs
+  (`src/lib/tools/*` alone holds 55), or scripting as one mechanical pass with human review.
+- **Proof needed**: the same identifier index (self-mentions > 1, other files = 0) plus
+  `pnpm build` green; the list must be regenerated per slice, since any new importer
+  elsewhere flips a row.
+
+### Candidate: `src/lib/offline/bundle-update.ts:1` points at a file that is now a directory
+
+Its header reads `(src-tauri/src/hot_bundle.rs; docs/superpowers/specs/2026-11-05-desktop-hot-bundle.md)`.
+The spec resolves; `src-tauri/src/hot_bundle.rs` does not — the module was split into
+`src-tauri/src/hot_bundle/{mod,serve,store,fetch}.rs`. One line, found by the pointer sweep
+below, and left for the next doc-drift run rather than mixed into a deletion diff.
+
+### The doc-drift axis is close to exhausted — here is the sweep, so the next run can skip it
+
+Ran first this cycle, before settling on dead code: extract every path-shaped token from
+comments in `src/` and the four worker packages (2,498 unique), then check which resolve.
+**108 did not, and 107 are false positives**, in four families worth naming so nobody
+re-mines this:
+
+1. **Package-relative pointers, which are correct.** ~40 hits. `auth-worker/src/routes/*.ts`
+   saying "mounted in `src/index.ts`" means `auth-worker/src/index.ts`. Likewise
+   `src/lib/agent/changeset-api.ts:38` ("mirroring **sync-worker** `CHANGESET_STATUSES`
+   (src/external/store.ts)") and `src/lib/parsers/types.ts:780` ("**sync-worker**
+   src/events/route.ts") — both name the package in the prose and the path relative to it.
+2. **Other repositories' layouts.** `auth-worker/src/lib/tabitha/client.ts:59` cites
+   TaBiThA's own `packages/types/src/patterns/scripture.ts`; the five `docs/agent-api.md`
+   hits in `*/langquest/*` cite LangQuest's repo ("LangQuest documents it in its own repo").
+   Neither is this repo's abandoned `packages/` layout, and neither is the local
+   `docs/AGENT-API.md`.
+3. **URL paths and vendor doc URLs** read as repo paths: `sync-worker/src/db-timeouts-route.ts`'s
+   four `/db/timeouts` route mentions, `elevenlabs-api.ts`'s `docs/api-reference`.
+4. **CSP directives**: `worker/security-headers.ts`'s `src/style-src/connect-src/`, `src/font-src`.
+
+The lone real hit is the `hot_bundle.rs` pointer above.
+
+### Gates recorded 2026-11-06 (`origin/dev` `0b57e52d`)
+
+- **`pnpm lint`** — exit 0 both times, **0 errors / 969 warnings** both times, and the output
+  is **byte-identical**, not merely identical once `line:col` is normalized: `diff` of the two
+  runs is empty. That is stronger than the last three runs managed, and it is a fact about
+  this diff rather than about this run's care — no pre-existing warning in any of the seven
+  files lived *below* a deleted line, so nothing shifted. The final run was made comparable
+  by `rm -rf packages/*/dist` first, for the **fifth** consecutive run: the baseline lint runs
+  before any build in a fresh container, so it never sees the git-ignored
+  `packages/idml-roundtrip/dist` output that the baseline `pnpm build` then generates. That is
+  the nested-`dist` `globalIgnores` candidate at the top of this file, still unfixed.
+- **`pnpm build`** — exit 0, baseline and final (`idml:gate` experimental, `tsc -b`,
+  `vite build`, `check-app-build` SPA-only output OK + asset sizes OK,
+  `check-brand-build aquilla` OK). Ran **twice** at the end, because the first final build
+  included the reverted `door43-plan.ts` deletion; both were green.
+- **`pnpm test`** — **baseline red, pre-existing, out of scope, and reproduced to the digit**:
+  1 failed / 2320 passed / 2 skipped (2323 files) and 1 failed / 26646 passed / 2
+  expected-fail / 23 skipped (26672 tests), *identical* before and after. Same single failure
+  both runs — `scripts/release-cut.test.ts > buildReleaseBranch against a scratch repo >
+  "fails loud when the pick cannot commit, and leaves nothing in progress"` — which sets
+  `commit.gpgsign true` with a deliberately bogus `gpg.program` and expects a throw this
+  container's git does not produce. The same failure the 2026-11-02 and 2026-11-04 runs
+  recorded; environment-dependent, in a test file this routine may not touch, so
+  `scripts/release-cut.test.ts` stays frozen. **The intermediate run is the one worth
+  reading**: with the eighth (`door43-plan.ts`) deletion in the tree it was 2 failed / 2319
+  passed, the second failure being `door43-bundle.test.ts > "is current with its inputs"` —
+  i.e. the suite caught the generated-artifact coupling by itself, which is the whole point of
+  running it. After the revert it returned to 1 failed, matching baseline exactly. No worker
+  suite was run: no worker package is in the diff.
+- **`pnpm test:e2e:smoke`** — **it RAN. For the first time in this ledger, the smoke gate
+  produced a real result instead of a container excuse** (the 2026-08-10/12/14, 2026-09-18,
+  2026-10-30 and 2026-11-02 runs died on missing Docker/Postgres; 2026-11-04 died on a
+  Playwright browser path). **112 of 115 specs pass. 3 fail, and those 3 fail identically on
+  a zero-diff `origin/dev`.** Full accounting:
+  - The sharded run was `1/3 shard(s) passed` with 10 failures: `[s2]` clean (33/33),
+    `[s1]` 7, `[s3]` 3.
+  - **7 of the 10 were the container, not the code**: `browserContext.newPage: Executable
+    doesn't exist at /opt/pw-browsers/ffmpeg-1013/ffmpeg-linux`, in the specs that open a
+    second video-recording context (`auth/login-account-setup-status` ×2,
+    `auth/session-expired-banner` ×2, `projects/onboarding` ×2, `projects/share-invite` ×1).
+    With that revision shimmed, **all 13 tests in those 4 files pass in 47s** (exit 0).
+  - **3 were real failures, and they are trunk's**: `editor/import-and-edit.smoke.spec.ts:339`,
+    the three parameterized YouTube caption imports (`srt`, `vtt`, `sbv`), each
+    `TimeoutError: locator.click: Timeout 15000ms exceeded` (one variant reached
+    `locator.evaluate` first). **A/B'd properly**: the file alone on this branch is
+    3 failed / 6 passed, and the file alone on a detached, byte-clean `origin/dev`
+    (`0b57e52d`, `git diff origin/dev --stat` empty) is **3 failed / 6 passed with the same
+    three titles**. Pre-existing, out of scope, and a candidate in its own right — see below.
+  - Worth noting *why* this was worth A/B-ing rather than waving off: this run deleted
+    `promoteTimelineTrackToRows` from `src/lib/import/timeline-text.ts`, which is the caption
+    **promotion** path, and the failing specs are caption **imports**. "The export had no
+    callers so it cannot matter" is the right reasoning and was still not the proof; the
+    control run is.
+
+### Container setup 2026-11-06 — the recipe that finally got the smoke gate running
+
+Four steps, three of them new to this ledger. Worth following verbatim next run.
+
+1. **`pnpm install --ignore-scripts`** — 9.5s, exit 0, `node_modules/.bin` has the 17 entries
+   the gates need (`eslint`, `tsc`, `tsx`, `vite`, `vitest`, `playwright`). No `pnpm rebuild`.
+2. **Postgres: `bash scripts/e2e-pg-native.sh` just works now.** The standing hand-rolled
+   recipe in the 2026-10-26 entry (uncomment `listen_addresses`, world-writable `pg_ctl -l`
+   path, `/usr/lib/postgresql/16/bin` not on `PATH`) is **obsolete** — the script does all of
+   it, prints `export E2E_PG_ADMIN_URL="postgresql://aquilla:aquilla@127.0.0.1:5432/postgres"`,
+   and `e2e-up.ts` takes the Docker-less `psql` path from there (`[e2e-up] Docker unavailable —
+   resetting via local psql`). Postgres 16.15. Export that variable before the suite.
+3. **NEW — the worker packages need their own `node_modules` even with no worker in the diff.**
+   `boot 3/8` dies at `timed out waiting for .../healthz` with the real cause buried in
+   `.e2e-logs-s0/mock-legacy-migration.log`: `Cannot find package 'bcryptjs' imported from
+   auth-worker/src/utils/password.ts`. The ERESOLVE blocker the 2026-10-14 entry logged is
+   **still present** (`@cloudflare/vitest-pool-workers@0.23.0` wants `vitest@^4.1.0`, the root
+   project has `vitest@4.1.12` — plain `npm ci` refuses), so: `cd auth-worker && npm ci
+   --legacy-peer-deps`, and `cd sync-worker && npm ci` (that one resolves clean). Neither
+   writes to the repo (`git status` stays clean afterwards).
+4. **NEW — Playwright revision shims, and there are TWO of them.** The repo's pinned
+   Playwright wants `chromium-1248` / `chromium_headless_shell-1248` and `ffmpeg-1013`; the
+   container ships `-1243` and `ffmpeg-1011`. The environment's own guidance forbids
+   `playwright install` (a second download is not what this Playwright looks for), so symlink
+   the revisions instead — outside the repo, so nothing lands in the diff:
+   ```
+   ln -sfn /opt/pw-browsers/chromium-1243 /opt/pw-browsers/chromium-1248
+   ln -sfn /opt/pw-browsers/chromium_headless_shell-1243 /opt/pw-browsers/chromium_headless_shell-1248
+   ln -sfn /opt/pw-browsers/ffmpeg-1011 /opt/pw-browsers/ffmpeg-1013
+   ```
+   The chromium pair gets the stacks booting; **the ffmpeg one is the easy half to miss**,
+   because it fails much later, only in specs that open a second video-recording context, and
+   it reads like a product failure (`browserContext.newPage` timing out) rather than a missing
+   binary. 1243-for-1248 and 1011-for-1013 were close enough that 112 specs passed on them.
+5. **Three parallel stacks saturate this container** — load average peaked at 18.4 and
+   individual specs stretched from ~15s to ~45s, so the sharded suite took ~35 minutes of
+   wall clock after an 8-step boot. It completed; it did not need a longer timeout. A targeted
+   single-stack re-run of 4 files took 47 seconds, which is the right tool for an A/B.
+
+### New candidate: `editor/import-and-edit.smoke.spec.ts:339` — YouTube caption import is red on trunk
+
+- **Found**: this run's baseline smoke, then A/B'd twice (branch and clean `origin/dev`).
+- **Symptom**: all three parameterized variants (`srt`, `vtt`, `sbv`) of "alice imports
+  YouTube \<fmt\> captions, persists across reload, and downloads original" fail at
+  `:339` with `locator.click`/`locator.evaluate` timing out after 15s. The other 6 tests in
+  the file pass. Screenshots were captured under
+  `test-results/editor-import-and-edit.smo-*-chromium/test-failed-1.png`.
+- **Why it is only a candidate here**: fixing it means either a product fix or a spec fix, and
+  this routine may do neither (it cannot touch `e2e/`, and a product fix is not a cleanup).
+  It is also not obviously this container's fault the way the ffmpeg set was — the three
+  failures are stable, fast (~22s each) and reproducible in isolation, which reads like a real
+  red journey rather than a timing flake, though a slow container cannot be ruled out for a
+  15s click budget under load. The single-stack re-run was NOT under load and still failed, so
+  load is unlikely to be the whole story.
+- **Proof needed**: a `/diagnose` pass on one variant with the trace on
+  (`--trace on`), which this routine deliberately leaves to a human or a debug run.

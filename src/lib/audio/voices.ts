@@ -115,10 +115,6 @@ export function characterCastKey(name: string): string {
   return CHARACTER_CAST_PREFIX + name.trim()
 }
 
-export function isCharacterCastKey(key: string): boolean {
-  return key.startsWith(CHARACTER_CAST_PREFIX)
-}
-
 /**
  * A cast-map value meaning "no voice from the cast": the line (or character)
  * speaks with its own pinned voice or the default. Stored by a lane sent back

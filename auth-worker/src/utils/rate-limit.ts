@@ -100,6 +100,8 @@ export const CREDENTIAL_MINT_MAX_PER_USER = 10
 export const ACCESS_LINK_REDEEM_MAX_PER_IP = 30
 
 export type RateLimitKind =
+  | "social_login"
+  | "social_link"
   | "login"
   | "password_reset_request"
   | "password_reset_attempt"

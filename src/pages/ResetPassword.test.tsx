@@ -186,3 +186,9 @@ describe("ResetPassword — recovery (TokenExpiredView) form", () => {
     expect(screen.getByRole("link", { name: /back to app/i })).toHaveAttribute("href", returnTo ?? "/")
   })
 })
+
+// Recovery imports the shared signup validators, not the optional Google flow.
+vi.mock("@/lib/frontier/google-login", () => ({
+  googleRequest: async () => ({ enabled: false }),
+  startGoogleLogin: vi.fn(),
+}))

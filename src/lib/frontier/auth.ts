@@ -423,7 +423,7 @@ export async function hydrateSessionEmails(): Promise<void> {
   await patchSessionEmails(updates);
 }
 
-async function finalizeSession(
+export async function finalizeSession(
   loginIdentifier: string,
   data: AuthResponse,
   emailHint?: string,

@@ -127,7 +127,7 @@ interface ResetTokenRow {
   expires_at: string
 }
 
-function legacyD1Config(
+export function legacyD1Config(
   env: AuthHonoEnv["Bindings"],
 ): FrontierD1Config | null {
   if (String(env.LEGACY_USER_MIGRATION_ENABLED).toLowerCase() !== "true") {

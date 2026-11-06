@@ -1,3 +1,4 @@
+import { GoogleLoginButton } from "@/components/auth/GoogleLoginButton"
 import { useForm } from "@tanstack/react-form"
 import { z } from "zod"
 import { useNavigate, useSearchParams, Navigate, Link } from "react-router-dom"
@@ -89,6 +90,7 @@ export function Login() {
           </CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-6">
+          {mode === "login" && <GoogleLoginButton next={next} />}
 
           {mode === "forgot" ? (
             <FrontierForgotPasswordForm onBack={() => setMode("login")} />

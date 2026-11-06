@@ -9,15 +9,16 @@
 // it), which is what lets Who's Who draw a tint solid or dotted by confidence;
 // see scripts/bridge-align-eval.ts for the measurement.
 //
-// Why not completion/interlinear.ts: its EM normalizes each SOURCE word's
-// counts over the target sentence, so a source word never competes with its
+// Why not completion/interlinear.ts' own EM: it normalized each SOURCE word's
+// counts over the target sentence, so a source word never competed with its
 // neighbours for a target word. On the same measurement it found a correct
 // link for 44% of John's Who's Who mention words (this: 81%), and its
 // confidence did not track precision: its mention links at confidence ≥ 0.7
-// were right 58% of the time, against 70% at ≥ 0.1. It also costs more: on
+// were right 58% of the time, against 70% at ≥ 0.1. It also cost more: on
 // John, 0.5 s and up to ~120 MB of heap against 0.1 s and ~25 MB here; on the
 // whole New Testament, 5.9 s and ~730 MB against 0.8 s and ~80 MB (Node 22).
-// interlinear.ts stays as it is for the interlinear panel.
+// AQU-1696 retired that EM: the interlinear panel is now a second caller of
+// this module, so the panel and Who's Who mean the same thing by a confidence.
 //
 // Pure and synchronous. Training is cancellable between EM passes and reports
 // progress, so a Web Worker can run it (bridge-align.worker.ts).
@@ -181,6 +182,36 @@ export function trainWordAlignModel(pairs: readonly AlignPair[], options: WordAl
     options.onProgress?.(++done, total)
   }
   return { srcVocab, tgtVocab, entryOf, fwd, bwd, lambda, nullProb: p0 }
+}
+
+/**
+ * P(target | source) for every pair the model observed, as source word → target
+ * word → probability: the forward table, read out by word.
+ *
+ * The NULL word is left out of both sides. "This source word went nowhere" is
+ * not a target candidate, and a caller ranking candidates for one source word
+ * (completion/interlinear.ts, terminology/equivalents.ts) would have to filter
+ * it back out. One entry per observed co-occurrence, so the result is as sparse
+ * as the training corpus.
+ */
+export function forwardProbabilities(model: WordAlignModel): Map<string, Map<string, number>> {
+  const srcWords = new Array<string>(model.srcVocab.size)
+  for (const [word, id] of model.srcVocab) srcWords[id] = word
+  const tgtWords = new Array<string>(model.tgtVocab.size)
+  for (const [word, id] of model.tgtVocab) tgtWords[id] = word
+
+  const out = new Map<string, Map<string, number>>()
+  for (const [key, entry] of model.entryOf) {
+    const p = model.fwd[entry]
+    if (p <= 0) continue
+    const src = srcWords[Math.floor(key / KEY_STRIDE)]
+    const tgt = tgtWords[key % KEY_STRIDE]
+    if (!src || !tgt) continue
+    let row = out.get(src)
+    if (row === undefined) out.set(src, (row = new Map<string, number>()))
+    row.set(tgt, p)
+  }
+  return out
 }
 
 function tableValue(model: WordAlignModel, table: Float64Array, s: number | undefined, t: number | undefined): number {

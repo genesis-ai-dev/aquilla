@@ -7,6 +7,7 @@
  */
 
 import { describe, it, expect } from "vitest"
+import { bridgeJhn4 } from "@/lib/bible-data/__fixtures__/bridge-jhn4"
 import {
   buildAlignmentModel,
   alignCell,
@@ -15,6 +16,7 @@ import {
   CONFIDENCE_MIN,
   CONFIDENCE_AMBER,
   CONFIDENCE_HIGH,
+  tokenize,
   type AlignmentSeed,
 } from "./interlinear"
 
@@ -323,24 +325,47 @@ describe("buildAlignmentModel — warm EM path", () => {
     expect(alignCell("xyzzy plugh", "zork frotz", model)).toEqual([])
   })
 
-  it("EM model excludes low-confidence noise below default threshold", () => {
+  it("EM model's threshold keeps exactly the links at or above it", () => {
     const model = buildAlignmentModel(WARM_CORPUS)
-    // Mismatched source/target rows — see the cold-start equivalent above,
-    // including why AQU-1408 moved this fixture off a duplicate-target pair.
+    // A matching pair, which straddles the high band: the weak links here are
+    // real suggestions the reader may not want, not noise.
     const source = "In the beginning God created the heavens and the earth"
-    const target = "Dieu vit que la lumière était bonne"
+    const target = "Au commencement Dieu créa les cieux et la terre"
 
     const unfiltered = alignCell(source, target, model, { threshold: 0 })
-    const noise = unfiltered.filter((l) => l.confidence < CONFIDENCE_MIN)
-    const signal = unfiltered.filter((l) => l.confidence >= CONFIDENCE_MIN)
+    const weak = unfiltered.filter((l) => l.confidence < CONFIDENCE_HIGH)
+    const strong = unfiltered.filter((l) => l.confidence >= CONFIDENCE_HIGH)
 
-    expect(noise.length).toBeGreaterThan(0)
+    // Guard against a vacuous test: the pair must fall on both sides of the band.
+    expect(weak.length).toBeGreaterThan(0)
+    expect(strong.length).toBeGreaterThan(0)
 
-    const filtered = alignCell(source, target, model)
-    expect(filtered).toEqual(signal)
-    for (const n of noise) {
-      expect(filtered).not.toContainEqual(n)
+    const filtered = alignCell(source, target, model, { threshold: CONFIDENCE_HIGH })
+    expect(filtered).toEqual(strong)
+    for (const w of weak) {
+      expect(filtered).not.toContainEqual(w)
     }
+  })
+
+  it("EM model does not pad a mismatched cell with sub-threshold links (AQU-1696)", () => {
+    const model = buildAlignmentModel(WARM_CORPUS)
+    const source = "In the beginning God created the heavens and the earth"
+
+    // The one-directional EM this replaced scored every (source, target) cell
+    // of the grid, so even a mismatched pair produced a link for nearly every
+    // source word and only the display threshold hid the tail. The
+    // two-directional aligner proposes a link where both directions agree, so
+    // a mismatched pair simply has less to say — and nothing it says is
+    // sub-threshold padding.
+    const matched = alignCell(source, "Au commencement Dieu créa les cieux et la terre", model, {
+      threshold: 0,
+    })
+    const mismatched = alignCell(source, "Dieu vit que la lumière était bonne", model, {
+      threshold: 0,
+    })
+
+    expect(mismatched.filter((l) => l.confidence < CONFIDENCE_MIN)).toEqual([])
+    expect(mismatched.length).toBeLessThan(matched.length)
   })
 
   it("EM model keeps a high-confidence link while dropping noise in the same cell", () => {
@@ -644,5 +669,108 @@ describe("edge cases", () => {
     expect(links.length).toBeGreaterThan(0)
     expect(links[0].srcToken).toBe("god")
     expect(links[0].tgtToken).toBe("dieu")
+  })
+})
+
+// ── AQU-1696: measured against Clear-Bible's manual alignment ────────────────
+
+/**
+ * The defect this guards: the warm path used to run a one-directional EM that
+ * normalized each SOURCE word's counts over the target sentence, so source
+ * words never competed for a target word. The visible consequence was not only
+ * low recall — the confidence number ran *backwards*, so the panel drew its
+ * most confident suggestions least accurately, and a reader who trusted the
+ * bold ones was worse off than one who read them all.
+ *
+ * The measurement is the same one `scripts/bridge-align-eval.ts` runs, on the
+ * chapter of gold checked in at `bible-data/__fixtures__/bridge-jhn4.json`
+ * (Clear-Bible's manual SBLGNT→BSB alignment, CC BY 4.0 — see its
+ * ATTRIBUTION.md). Training is on John 4's 54 verses alone, which is the hard
+ * end of what the panel sees: a reader opens one chapter.
+ *
+ * Numbers at the time of the fix, with the one-directional EM in brackets:
+ *   gold links recalled                37.0% [16.0%]
+ *   source words reaching gold         51.6% [22.3%]
+ *   precision, all links               61.3% [53.2%]
+ *   precision at confidence ≥ 0.5      67.4% [53.8%]
+ *   precision at confidence ≥ 0.7      71.9% [39.5%]
+ * The bars below sit under those with room to spare; they are there to catch a
+ * regression, not to pin the exact figures.
+ */
+describe("alignCell on John 4 against Clear-Bible's manual alignment (AQU-1696)", () => {
+  const verses = bridgeJhn4()
+  const greekOf = (verse: (typeof verses)[number]) => verse.words.map((word) => word.text).join(" ")
+  const model = buildAlignmentModel(
+    verses.map((verse) => ({ source: greekOf(verse), target: verse.bsb })),
+  )
+
+  /** Every predicted link for the chapter, paired with whether gold agrees. */
+  const predictions = verses.flatMap((verse) => {
+    const links = alignCell(greekOf(verse), verse.bsb, model)
+    return links.map((link) => ({
+      confidence: link.confidence,
+      right: verse.words[link.srcIndex].gold.includes(link.tgtIndex),
+    }))
+  })
+
+  const precisionAtLeast = (min: number) => {
+    const band = predictions.filter((p) => p.confidence >= min)
+    return { n: band.length, precision: band.filter((p) => p.right).length / band.length }
+  }
+
+  it("trains on the chapter's own verses, which puts it on the warm path", () => {
+    expect(verses).toHaveLength(54)
+    expect(model.isWarm).toBe(true)
+    // One token per pack word, so a gold index means what this test thinks it means.
+    for (const verse of verses) {
+      expect(tokenize(greekOf(verse))).toHaveLength(verse.words.length)
+    }
+  })
+
+  it("reaches a gold target for at least 40% of the source words that have one", () => {
+    let withGold = 0
+    let hit = 0
+    for (const verse of verses) {
+      const links = alignCell(greekOf(verse), verse.bsb, model)
+      verse.words.forEach((word, index) => {
+        if (word.gold.length === 0) return
+        withGold++
+        if (links.some((link) => link.srcIndex === index && word.gold.includes(link.tgtIndex))) hit++
+      })
+    }
+    expect(withGold).toBeGreaterThan(700)
+    expect(hit / withGold).toBeGreaterThan(0.4)
+  })
+
+  it("recalls at least 30% of the gold links", () => {
+    let gold = 0
+    let recalled = 0
+    for (const verse of verses) {
+      const links = alignCell(greekOf(verse), verse.bsb, model)
+      verse.words.forEach((word, index) => {
+        gold += word.gold.length
+        const got = links.filter((link) => link.srcIndex === index).map((link) => link.tgtIndex)
+        recalled += word.gold.filter((target) => got.includes(target)).length
+      })
+    }
+    expect(gold).toBeGreaterThan(1000)
+    expect(recalled / gold).toBeGreaterThan(0.3)
+  })
+
+  it("is calibrated: precision rises with confidence", () => {
+    const low = precisionAtLeast(CONFIDENCE_MIN)
+    const medium = precisionAtLeast(0.5)
+    const high = precisionAtLeast(0.7)
+
+    // Each band has to be worth measuring.
+    expect(low.n).toBeGreaterThan(300)
+    expect(high.n).toBeGreaterThan(50)
+
+    // This is the assertion the old aligner failed: it scored 53.2% / 53.8% /
+    // 39.5% across these three bands, so a bold suggestion was the least
+    // trustworthy kind.
+    expect(medium.precision).toBeGreaterThan(low.precision)
+    expect(high.precision).toBeGreaterThan(medium.precision)
+    expect(high.precision).toBeGreaterThan(0.6)
   })
 })

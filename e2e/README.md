@@ -44,7 +44,10 @@ states, and keyboard chrome belong in Vitest/RTL (`src/**/*.test.tsx`).
   ```
 
   The container path ignores it (it runs `psql` as `aquilla` inside
-  `aquilla-dev-pg`).
+  `aquilla-dev-pg`). Export it from your shell profile, not just the shell you
+  test in: the **pre-push hook** runs `test:e2e:affected`, and without the
+  variable the reset falls back to `postgresql:///postgres` and fails with
+  `role "<you>" does not exist` mid-push.
 
 - **Three `pnpm install` runs** — one at the repo root, one in `auth-worker/`, one in
   `sync-worker/`:

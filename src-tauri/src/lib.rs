@@ -1,3 +1,4 @@
+mod about;
 mod app_update;
 mod auth;
 mod connectivity;
@@ -18,6 +19,7 @@ pub fn run() {
         // Managed before `setup` so the `app://` handler can find it on the first request.
         .manage(hot_bundle::HotBundleState::default())
         .register_uri_scheme_protocol(hot_bundle::SCHEME, hot_bundle::serve_request)
+        .register_uri_scheme_protocol(about::SCHEME, about::serve_request)
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init());
@@ -39,6 +41,8 @@ pub fn run() {
     }
 
     builder
+        .menu(about::build_menu)
+        .on_menu_event(about::handle_menu_event)
         .on_window_event(shutdown_guard::handle_window_event)
         .setup(|app| {
             if cfg!(debug_assertions) {

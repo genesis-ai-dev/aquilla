@@ -245,9 +245,10 @@ function checksFor(concepts: Concept[], termMatching?: TermMatchingSettings): Co
  * the editor judges them (`ruleViolation`, AQU-1711). Both sides run the
  * shared table in src/lib/terminology/__fixtures__/terminology-lint-parity.ts.
  *
- * One deliberate difference: a forbidden rendering counts only when the
- * cell's SOURCE bears the concept. That is the intended rule; the editor's
- * `target-forbids` has no source condition yet (AQU-1712).
+ * A forbidden rendering counts only when the cell's SOURCE bears the concept.
+ * The editor applies the same condition: AQU-1712 put the concept's source
+ * pattern on the compiled `target-forbids` check, so the gate below is the
+ * same rule, not a difference.
  *
  * Hit ids are the client's compiled rule ids (`term:<conceptId>:approved`,
  * `term:<conceptId>:forbidden:<rendering>`) so findings stay attributable to

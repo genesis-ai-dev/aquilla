@@ -2808,8 +2808,6 @@ export const my: Catalog = {
   "org.egressSettings.roleOptionViewer": "{role} — ပရောဂျက်ဝင်ရောက်ခွင့်ရှိသူမည်သူမဆို",
   "org.egressSettings.roleOptionOwner": "{role} — မူလ",
   "org.egressSettings.saveFailedFallback": "ထုတ်ယူခွင့်ကို မသိမ်းနိုင်ပါ။",
-  "org.addLanguagePopover.triggerLabel": "ဘာသာစကား",
-  "org.addLanguagePopover.conflictError": "ဘာသာစကားများကို တခြားနေရာမှ ပြောင်းလဲထားသည်။ ပြန်တင်ပြီးပါပြီ — ထပ်ထည့်ကြည့်ပါ။",
   "org.setupChecklist.heading": "သင့်အဖွဲ့အစည်းကို စတင်လိုက်ပါ",
   "org.setupChecklist.dismissAriaLabel": "စစ်ဆေးရန်စာရင်း ပိတ်ရန်",
   "org.setupChecklist.progress": "{total} အနက် {done} ပြီးစီး",

@@ -99,6 +99,11 @@ jobs:
       NEON_DEV_BRANCH: dev
       # tag-release.sh records the GitHub Deployment and pushes the calver tag.
       GITHUB_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+      # Signs the desktop hot bundle deploy:aquilla publishes after the tag
+      # (scripts/desktop-bundle-publish.ts; ed25519 PKCS#8 PEM from
+      # `pnpm desktop:bundle:keygen`). Unset, the publish is a ::warning::, not
+      # a failure — docs/superpowers/specs/2026-11-05-desktop-hot-bundle.md.
+      DESKTOP_BUNDLE_SIGNING_KEY: ${{ secrets.DESKTOP_BUNDLE_SIGNING_KEY }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:

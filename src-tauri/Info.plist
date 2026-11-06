@@ -3,8 +3,8 @@
 <plist version="1.0">
 <dict>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Codex uses your microphone to record per-cell audio for translation projects.</string>
+    <string>Aquilla uses your microphone to record per-cell audio for translation projects.</string>
     <key>NSCameraUsageDescription</key>
-    <string>Codex may access your camera for future video recording features.</string>
+    <string>Aquilla may access your camera for future video recording features.</string>
 </dict>
 </plist>

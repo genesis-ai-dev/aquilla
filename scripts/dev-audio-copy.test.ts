@@ -2,12 +2,21 @@
 // is missing, that it never overwrites, and the two guards that keep the job off
 // production. The job moves user media between buckets, so every one of those is
 // locked here rather than left to a live run to discover.
+//
+// The uploaded-originals half: a file imported on prod exports on dev only if
+// the object its `file_source_blobs.r2_key` names was copied. The cases that
+// matter are a referenced original (copied), an unreferenced one (left to the
+// cleanup), the legacy `.../source/original.ext` shape (copied when a row names
+// it, invisible otherwise) and a row naming another project's key (not ours).
 import { describe, it, expect } from "vitest"
+import type { AquillaDb, AquillaStatement } from "../db/shim/postgres"
 import {
   copyProjectAudio,
   copyRefusal,
   expectedMediaKeys,
   formatCopyReport,
+  isOwnOriginal,
+  loadOriginalRefs,
   missingInDev,
   selectReferencedObjects,
   DEV_MEDIA_BUCKET,
@@ -19,11 +28,17 @@ import {
 
 const PROJECT = "p1"
 
+/** The Portuguese EBL IDML that 404ed on dev on 2026-11-06 — the original
+ *  this slice exists to carry. Its key, project and artifact ids verbatim. */
+const EBL_PROJECT = "97559250-e286-4d29-ba40-13c296f12ef9"
+const EBL_IDML_KEY = `artifacts/${EBL_PROJECT}/01a1afda-32d0-7711-b14e-230a0e56590c/original.idml`
+
 /** A project with: a live take, the piece a cut left behind, a voice clip. */
 function refs(overrides: Partial<ProjectMediaRefs> = {}): ProjectMediaRefs {
   return {
     audio: new Set(["f1/take-a.webm", "f1/take-b.webm"]),
     voice: new Set(["clip-1.webm"]),
+    original: new Set(),
     ...overrides,
   }
 }
@@ -65,6 +80,35 @@ describe("expectedMediaKeys", () => {
       "projects/p1/voices/clip-1.webm",
     ])
   })
+
+  it("expects a referenced original under either of the project's prefixes, and not one under another's", () => {
+    const keys = expectedMediaKeys(
+      PROJECT,
+      refs({
+        original: new Set([
+          "artifacts/p1/art-1/original.idml",
+          "projects/p1/files/f2/source/original.usfm",
+          "artifacts/p2/art-9/original.docx",
+        ]),
+      }),
+    )
+    expect(keys).toContain("artifacts/p1/art-1/original.idml")
+    expect(keys).toContain("projects/p1/files/f2/source/original.usfm")
+    expect(keys).not.toContain("artifacts/p2/art-9/original.docx")
+  })
+})
+
+describe("isOwnOriginal", () => {
+  it.each([
+    ["artifacts/p1/art-1/original.idml", true],
+    ["artifacts/p1/art-1", true],
+    ["projects/p1/files/f1/source/original.usfm", true],
+    ["artifacts/p2/art-1/original.idml", false],
+    ["projects/p10/files/f1/source/original.usfm", false],
+    ["artifacts/p1x/art-1/original.idml", false],
+  ])("%s → %s", (key, own) => {
+    expect(isOwnOriginal(PROJECT, key)).toBe(own)
+  })
 })
 
 describe("selectReferencedObjects", () => {
@@ -92,20 +136,71 @@ describe("selectReferencedObjects", () => {
     expect(selected.skippedUnreferenced).toBe(2)
   })
 
-  it("skips everything that is not swept media", () => {
+  it("skips everything that is neither swept media nor a referenced original", () => {
     const selected = selectReferencedObjects(
       PROJECT,
       [
         obj("projects/p1/files/f1/tail/0001"),
         obj("projects/p1/files/f1/checkpoints/0001"),
         obj("projects/p1/files/f1/attachments/shot.png"),
+        // A legacy original no row names: not swept media, so not an orphan
+        // either — just not this copy's business.
         obj("projects/p1/files/f1/source/original.usfm"),
-        obj("artifacts/p1/art-1"),
       ],
       refs(),
     )
     expect(selected.referenced).toEqual([])
-    expect(selected.skippedUnrecognized).toBe(5)
+    expect(selected.skippedUnrecognized).toBe(4)
+    expect(selected.skippedUnreferenced).toBe(0)
+  })
+
+  it("copies an uploaded original a blob or artifact row names, and tags it as one", () => {
+    const selected = selectReferencedObjects(
+      EBL_PROJECT,
+      [obj(EBL_IDML_KEY, 304_028)],
+      refs({ original: new Set([EBL_IDML_KEY]) }),
+    )
+    expect(selected.referenced).toEqual([{ key: EBL_IDML_KEY, size: 304_028, kind: "original" }])
+    expect(selected.skippedUnreferenced).toBe(0)
+    expect(selected.skippedUnrecognized).toBe(0)
+  })
+
+  it("leaves an original under artifacts/ that no row names — the cleanup's abandoned upload", () => {
+    const selected = selectReferencedObjects(
+      PROJECT,
+      [obj("artifacts/p1/art-gone/original.idml"), obj("artifacts/p1/art-agent")],
+      refs({ original: new Set(["artifacts/p1/art-live/original.idml"]) }),
+    )
+    expect(selected.referenced).toEqual([])
+    expect(selected.skippedUnreferenced).toBe(2)
+    expect(selected.skippedUnrecognized).toBe(0)
+  })
+
+  it("copies a legacy projects/…/source/original.ext key when a row names it", () => {
+    const legacy = "projects/p1/files/f1/source/original.usfm"
+    const selected = selectReferencedObjects(
+      PROJECT,
+      [obj(legacy), obj("projects/p1/files/f2/source/original.usfm")],
+      refs({ original: new Set([legacy]) }),
+    )
+    expect(selected.referenced.map((o) => [o.key, o.kind])).toEqual([[legacy, "original"]])
+    expect(selected.skippedUnrecognized).toBe(1)
+  })
+
+  it("tags takes and clips as media, so the report can tell them from originals", () => {
+    const selected = selectReferencedObjects(
+      PROJECT,
+      [obj("projects/p1/files/f1/audio/take-a.webm"), obj("projects/p1/voices/clip-1.webm")],
+      refs(),
+    )
+    expect(selected.referenced.map((o) => o.kind)).toEqual(["media", "media"])
+  })
+
+  it("never claims another project's original, even when a row of ours names it", () => {
+    const foreign = "artifacts/p2/art-1/original.idml"
+    const selected = selectReferencedObjects(PROJECT, [obj(foreign)], refs({ original: new Set([foreign]) }))
+    expect(selected.referenced).toEqual([])
+    expect(selected.skippedUnrecognized).toBe(1)
   })
 
   it("accepts a key whose id differs from the row only in case", () => {
@@ -149,7 +244,10 @@ function harness(
   return {
     copies,
     deps: {
-      listObjects: async (bucket) => (bucket === PROD_MEDIA_BUCKET ? prod : dev),
+      // Prefix-scoped, as R2's listing is: the copy lists two prefixes per
+      // bucket and must not see an object twice.
+      listObjects: async (bucket, prefix) =>
+        (bucket === PROD_MEDIA_BUCKET ? prod : dev).filter((o) => o.key.startsWith(prefix)),
       copyObject: async (sourceBucket, sourceKey, destBucket, destKey) => {
         if (options.failOn === sourceKey) throw new Error("CopyObject 500: boom")
         copies.push({ sourceBucket, key: sourceKey, destBucket, destKey })
@@ -227,6 +325,61 @@ describe("copyProjectAudio", () => {
     expect(copies).toEqual([])
   })
 
+  it("copies the originals the rows name alongside the takes, and counts them apart", async () => {
+    const legacy = "projects/p1/files/f2/source/original.usfm"
+    const artifact = "artifacts/p1/art-1/original.idml"
+    const present = "artifacts/p1/art-2/original.docx"
+    const abandoned = "artifacts/p1/art-gone/original.idml"
+    const { deps, copies } = harness(
+      [obj(take, 100), obj(legacy, 10), obj(artifact, 20), obj(present, 30), obj(abandoned, 40)],
+      [obj(present, 30)],
+      { refs: refs({ original: new Set([legacy, artifact, present]) }) },
+    )
+    const report = await copyProjectAudio(deps, { projectId: PROJECT, target: "dev" })
+    expect(copies.map((c) => c.key)).toEqual([take, legacy, artifact])
+    expect(report.referenced).toBe(4)
+    expect(report.copied).toBe(3)
+    expect(report.copiedBytes).toBe(130)
+    expect(report.originals).toEqual({ referenced: 3, alreadyInDev: 1, copied: 2, outsidePrefix: 0 })
+    expect(report.skippedUnreferenced).toBe(1)
+    // The take and clip rows still expect their bytes, and prod has neither
+    // `other` nor the clip; the originals that exist are not missing.
+    expect(report.missingInProd).toEqual([other, clip])
+  })
+
+  it("would select the Portuguese EBL IDML that 404ed on dev", async () => {
+    const { deps, copies } = harness([obj(EBL_IDML_KEY, 304_028)], [], {
+      refs: refs({ audio: new Set(), voice: new Set(), original: new Set([EBL_IDML_KEY]) }),
+    })
+    const report = await copyProjectAudio(deps, { projectId: EBL_PROJECT, target: "dev", dryRun: true })
+    expect(report.samples).toEqual([EBL_IDML_KEY])
+    expect(report.originals).toEqual({ referenced: 1, alreadyInDev: 0, copied: 0, outsidePrefix: 0 })
+    expect(report.missingInProd).toEqual([])
+    expect(copies).toEqual([])
+  })
+
+  it("reports an original a row names under another project's prefix, without copying or missing it", async () => {
+    const foreign = "artifacts/p2/art-1/original.idml"
+    const { deps, copies } = harness([obj(take)], [], {
+      refs: refs({ original: new Set([foreign]) }),
+    })
+    const report = await copyProjectAudio(deps, { projectId: PROJECT, target: "dev" })
+    expect(copies.map((c) => c.key)).toEqual([take])
+    expect(report.originals).toEqual({ referenced: 0, alreadyInDev: 0, copied: 0, outsidePrefix: 1 })
+    expect(report.missingInProd).not.toContain(foreign)
+  })
+
+  it("counts an original whose copy failed as not copied", async () => {
+    const artifact = "artifacts/p1/art-1/original.idml"
+    const { deps } = harness([obj(take), obj(artifact)], [], {
+      refs: refs({ original: new Set([artifact]) }),
+      failOn: artifact,
+    })
+    const report = await copyProjectAudio(deps, { projectId: PROJECT, target: "dev" })
+    expect(report.originals.copied).toBe(0)
+    expect(report.failed.map((f) => f.key)).toEqual([artifact])
+  })
+
   it.each([
     ["the destination is not the dev bucket", { target: "dev", destination: PROD_MEDIA_BUCKET }, /destination must be/],
     ["the database is production", { target: "production" }, /refusing to read production/],
@@ -254,18 +407,84 @@ describe("copyProjectAudio", () => {
     )
   })
 
-  it("scopes every read and write to the one project's prefix", async () => {
-    const prefixes: string[] = []
+  it("scopes every read and write to the one project's two prefixes", async () => {
+    const listed: string[] = []
     const { deps } = harness([obj(take)], [])
     const watched: DevAudioCopyDeps = {
       ...deps,
       listObjects: async (bucket, prefix) => {
-        prefixes.push(prefix)
+        listed.push(`${bucket} ${prefix}`)
         return deps.listObjects(bucket, prefix)
       },
     }
     await copyProjectAudio(watched, { projectId: PROJECT, target: "dev" })
-    expect(prefixes).toEqual(["projects/p1/", "projects/p1/"])
+    expect(listed.sort()).toEqual(
+      [
+        `${PROD_MEDIA_BUCKET} projects/p1/`,
+        `${PROD_MEDIA_BUCKET} artifacts/p1/`,
+        `${DEV_MEDIA_BUCKET} projects/p1/`,
+        `${DEV_MEDIA_BUCKET} artifacts/p1/`,
+      ].sort(),
+    )
+  })
+})
+
+/** A db double that records the query this module issues and replays rows. */
+function fakeDb(rows: Record<string, unknown>[]): { db: AquillaDb; queries: string[]; binds: unknown[][] } {
+  const queries: string[] = []
+  const binds: unknown[][] = []
+  const statement = (query: string): AquillaStatement => ({
+    bind: (...args: unknown[]) => {
+      binds.push(args)
+      return statement(query)
+    },
+    all: async () => ({ results: rows }) as never,
+    run: async () => ({ results: [] }) as never,
+    first: async () => null,
+    raw: async () => [],
+  })
+  return {
+    queries,
+    binds,
+    db: {
+      prepare: (query: string) => {
+        queries.push(query)
+        return statement(query)
+      },
+      batch: async () => [],
+      exec: async () => ({ count: 0, duration: 0 }),
+      close: async () => {},
+    },
+  }
+}
+
+describe("loadOriginalRefs", () => {
+  it("reads both tables an export can resolve an original through, for the one project", async () => {
+    const { db, queries, binds } = fakeDb([])
+    await loadOriginalRefs(db, PROJECT)
+    expect(queries).toHaveLength(1)
+    expect(queries[0]).toMatch(/FROM file_source_blobs WHERE project_id = \? AND r2_key IS NOT NULL/)
+    expect(queries[0]).toMatch(/FROM artifacts WHERE project_id = \? AND r2_key IS NOT NULL/)
+    expect(binds).toEqual([[PROJECT, PROJECT]])
+  })
+
+  it("keeps original keys of either shape and leaves takes to the audio rules", async () => {
+    const { db } = fakeDb([
+      { r2_key: EBL_IDML_KEY },
+      { r2_key: "projects/p1/files/f1/source/original.usfm" },
+      { r2_key: "artifacts/p1/art-agent" },
+      // A browser media import registers its recording as its own original:
+      // the cell_audio row, not this one, says whether it is live.
+      { r2_key: "projects/p1/files/f1/audio/take-a.webm" },
+      { r2_key: "projects/p1/voices/clip-1.webm" },
+      { r2_key: null },
+      { r2_key: "  " },
+    ])
+    expect([...(await loadOriginalRefs(db, PROJECT))].sort()).toEqual([
+      EBL_IDML_KEY,
+      "artifacts/p1/art-agent",
+      "projects/p1/files/f1/source/original.usfm",
+    ])
   })
 })
 
@@ -277,5 +496,18 @@ describe("formatCopyReport", () => {
     expect(text).toContain("would copy: 1")
     expect(text).not.toMatch(/^ {2}copied:/m)
     expect(text).toContain("1.0 MB")
+    expect(text).toContain("source originals: 0 referenced, 0 already in dev, would copy 0")
+  })
+
+  it("says how many originals were copied, were already there, and belong to another project", async () => {
+    const artifact = "artifacts/p1/art-1/original.idml"
+    const present = "artifacts/p1/art-2/original.docx"
+    const { deps } = harness([obj(artifact), obj(present)], [obj(present)], {
+      refs: refs({ original: new Set([artifact, present, "artifacts/p2/art-9/original.idml"]) }),
+    })
+    const report = await copyProjectAudio(deps, { projectId: PROJECT, target: "dev" })
+    expect(formatCopyReport(report)).toContain(
+      "source originals: 2 referenced, 1 already in dev, copied 1, 1 under another project's prefix",
+    )
   })
 })

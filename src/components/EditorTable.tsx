@@ -158,6 +158,7 @@ import { isWordSeekClick, timingFromClick } from "@/lib/audio/seek-word-click"
 import { KaraokeReadText } from "./KaraokeReadText"
 import { resolveCurrentCellIndex } from "@/lib/editor/current-index"
 import { startRowFlash } from "@/lib/editor/row-flash"
+import { isPlaybackStart, rowNeedsReveal, type SeenPlaying } from "@/lib/editor/playing-row-reveal"
 import { useCellAudio } from "@/hooks/useCellAudio"
 import { isSourceSegmentSelected } from "@/lib/audio/batch-audio"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -2060,6 +2061,38 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     return true
   }, [clearChapterNavigationSelection, flashCellDom, programmaticListScroll, revealCellPage])
 
+  /**
+   * AQU-1636: a row whose audio has just started asks to be brought into
+   * view. The row cannot do this itself: the list is virtualized with
+   * recycled, estimated-height rows, so a DOM `scrollIntoView` on the row
+   * walks every scrollable ancestor into a coordinate space the list is
+   * still correcting, and — not being stamped — reads back as a user scroll,
+   * which silently releases playback-follow. It goes through
+   * `programmaticListScroll` like every other code-driven list scroll.
+   *
+   * No follow intent is issued either way: starting a clip is neither the
+   * user asking to watch the queue nor navigating away from it, so whatever
+   * follow state they were in survives.
+   */
+  const revealRowForPlayback = useCallback((cellId: string) => {
+    const index = displayCellIdsRef.current.indexOf(cellId)
+    if (index < 0) return
+    const viewport = listRootRef.current
+    const root = getListQueryRoot()
+    // Measured against the LIST's viewport, not the window: a row can sit
+    // under the sticky header while the window still "shows" it, and an
+    // expanded row can be taller than the viewport it already fills.
+    if (viewport && root) {
+      const row = root.querySelector<HTMLElement>(
+        `[data-cell-id="${CSS.escape(cellId)}"][data-index]`,
+      )
+      if (row && !rowNeedsReveal(row.getBoundingClientRect(), viewport.getBoundingClientRect())) {
+        return
+      }
+    }
+    programmaticListScroll(index, { viewPosition: 0.5, animated: true })
+  }, [getListQueryRoot, programmaticListScroll])
+
   // AQU-1689: a Who's Who mention jump (previous/next mention, the panel's
   // first mention) scrolls and flashes like a search hit.
   useEffect(() => {
@@ -3114,6 +3147,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           ttsSettings={ttsSettings}
           isAnonymous={isAnonymous}
           onJumpToCell={onJumpToCell}
+          onRevealForPlayback={revealRowForPlayback}
           micDenied={micDenied}
           onOpenAudioSetup={onOpenAudioSetup}
           onProjectChanged={onProjectChanged}
@@ -4374,6 +4408,9 @@ interface MemoizedRowProps {
   ttsSettings?: ProjectTtsSettings
   isAnonymous?: boolean
   onJumpToCell?: (cellId: string) => void
+  /** AQU-1636: this row's audio just started — ask the LIST to bring the row
+   *  into view (never a DOM scroll; see `revealRowForPlayback` on the table). */
+  onRevealForPlayback?: (cellId: string) => void
   micDenied?: boolean
   onOpenAudioSetup?: () => void
   onProjectChanged?: () => void
@@ -4461,7 +4498,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     getFootnoteDetails,
     onSeekToCue, cuePlaying, onPauseCue, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled,
     sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, isAnonymous,
-    onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
+    onJumpToCell, onRevealForPlayback, micDenied, onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
     onOpenAudioSetup,
     onCellCommitted, onValidated, repetitionCounts, getPendingTargetEventId, reservePendingTargetCommit, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
     onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
@@ -4628,6 +4665,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         ttsSettings={ttsSettings}
         isAnonymous={isAnonymous}
         onJumpToCell={onJumpToCell}
+        onRevealForPlayback={onRevealForPlayback}
         micDenied={micDenied}
         onOpenAudioSetup={onOpenAudioSetup}
         onProjectChanged={onProjectChanged}
@@ -4830,6 +4868,9 @@ interface EditorRowProps {
   ttsSettings?: ProjectTtsSettings
   isAnonymous?: boolean
   onJumpToCell?: (cellId: string) => void
+  /** AQU-1636: this row's audio just started — ask the LIST to bring the row
+   *  into view (never a DOM scroll; see `revealRowForPlayback` on the table). */
+  onRevealForPlayback?: (cellId: string) => void
   micDenied?: boolean
   onOpenAudioSetup?: () => void
   onProjectChanged?: () => void
@@ -5743,7 +5784,7 @@ function EditorRow({
   onDragStart, onDragEnter, onSelectionPointerDown, onNavigateCell,
   onEscapeToGrid, onGridRowKeyNav,
   rowIndex, contentNumber, versePart, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols, castGutter, ttsSettings,
-  isAnonymous, micDenied,
+  isAnonymous, onRevealForPlayback, micDenied,
   onOpenAudioSetup, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
   onCellCommitted, onValidated, repetitionCount, getPendingTargetEventId, reservePendingTargetCommit, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
   onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
@@ -7582,23 +7623,36 @@ function EditorRow({
   // When this cell starts playing, gently bring it into view if it's
   // off-screen. Skips when the user is actively interacting with another cell
   // (focus inside an editable element).
-  const wasPlayingRef = useRef(false)
+  //
+  // AQU-1636: this used to scroll the row's own DOM node
+  // (`scrollIntoView({ block: "center" })`) off a per-mount `wasPlaying`
+  // flag, and both halves misbehaved on a transcribed media file — where one
+  // mp3 is split into many short rows, so playing a line from the rail scrolls
+  // through plenty of them:
+  //   * a raw DOM scroll walks every scrollable ANCESTOR and lands in a
+  //     coordinate space the virtualized list is still correcting (recycled
+  //     rows, estimated heights), and being unstamped it reads as a USER
+  //     scroll, which silently kills playback-follow. Every code-driven list
+  //     scroll goes through `programmaticListScroll` for exactly that reason,
+  //     so this one asks the TABLE to reveal the row by id instead.
+  //   * the flag starts `false` on each mount, so a row remounting while its
+  //     clip was already sounding counted as a fresh start and yanked the list
+  //     back onto itself — the user could not scroll away during playback.
+  //     `isPlaybackStart` only fires on a false → true transition this row
+  //     observed itself.
+  const seenPlayingRef = useRef<SeenPlaying>(null)
   useEffect(() => {
-    const wasPlaying = wasPlayingRef.current
+    const previous = seenPlayingRef.current
     const anyPlaying = audioController.isPlaying || generatedVoiceController.isPlaying
-    wasPlayingRef.current = anyPlaying
-    if (!wasPlaying && anyPlaying && rowRef.current) {
-      const rect = rowRef.current.getBoundingClientRect()
-      const fullyVisible = rect.top >= 0 && rect.bottom <= window.innerHeight
-      const ae = document.activeElement
-      const userIsTyping = ae instanceof HTMLElement && (
-        ae.isContentEditable || ae.tagName === "INPUT" || ae.tagName === "TEXTAREA"
-      )
-      if (!fullyVisible && !userIsTyping) {
-        rowRef.current.scrollIntoView({ behavior: "smooth", block: "center" })
-      }
-    }
-  }, [audioController.isPlaying, generatedVoiceController.isPlaying])
+    seenPlayingRef.current = anyPlaying
+    if (!isPlaybackStart(previous, anyPlaying)) return
+    const ae = document.activeElement
+    const userIsTyping = ae instanceof HTMLElement && (
+      ae.isContentEditable || ae.tagName === "INPUT" || ae.tagName === "TEXTAREA"
+    )
+    if (userIsTyping) return
+    onRevealForPlayback?.(cell.id)
+  }, [audioController.isPlaying, generatedVoiceController.isPlaying, cell.id, onRevealForPlayback])
   // The transcribe / correct-transcript handlers moved into CellTakeBlock
   // (2026-08-22) so they can be scoped to whichever cell OWNS the recording —
   // a linked heard line's take must write to the cue sibling, not to this row.

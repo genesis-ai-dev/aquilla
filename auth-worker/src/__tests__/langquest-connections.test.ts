@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import app from "../index"
 import { authHeader, jwtFor, seedUser } from "./helpers/db"
 import { DEFAULT_LANGQUEST_API_BASE } from "../lib/langquest/client"
-import { connectionHealth } from "../lib/langquest/connections"
+import { connectionHealth, linkSyncHealth } from "../lib/langquest/connections"
 import type { Env } from "../types"
 
 const aenv = env as unknown as Env
@@ -240,5 +240,39 @@ describe("connection health", () => {
     const link = await env.AQUILLA_PG.prepare("SELECT connection_id FROM langquest_links WHERE project_id = 'proj-1'").first<{ connection_id: string | null }>()
     expect(link).not.toBeNull()
     expect(link!.connection_id).toBeNull()
+  })
+})
+
+describe("the projects list marks linked projects (org portfolio)", () => {
+  it("says which language a project follows and whether its sync is healthy; unlinked projects carry null", async () => {
+    await seed()
+    installFake()
+    const { connection } = await connect("anna")
+    await request("anna", "PUT", "/api/v2/langquest/projects/proj-1/link", { connectionId: connection.id, languageId: "lang-kal" })
+    let res = await request("wendi", "GET", "/api/v2/orgs/1/portfolio")
+    expect(res.status).toBe(200)
+    type Row = { id: string; langquest: { language: string; health: string } | null }
+    let byId = Object.fromEntries(((await res.json()) as { projects: Row[] }).projects.map((p) => [p.id, p]))
+    expect(byId["proj-1"]!.langquest).toMatchObject({ language: "Kalam", health: "synced" })
+    expect(byId["proj-2"]!.langquest).toBeNull()
+    // A failed sync is stalled; a rejected token is broken.
+    await env.AQUILLA_PG.prepare("UPDATE langquest_links SET last_sync_error = 'boom' WHERE project_id = 'proj-1'").run()
+    res = await request("wendi", "GET", "/api/v2/orgs/1/portfolio")
+    byId = Object.fromEntries(((await res.json()) as { projects: Row[] }).projects.map((p) => [p.id, p]))
+    expect(byId["proj-1"]!.langquest!.health).toBe("stalled")
+    installFake({ tokens: [] })
+    await request("anna", "GET", "/api/v2/langquest/projects/proj-1/changes")
+    res = await request("wendi", "GET", "/api/v2/orgs/1/portfolio")
+    byId = Object.fromEntries(((await res.json()) as { projects: Row[] }).projects.map((p) => [p.id, p]))
+    expect(byId["proj-1"]!.langquest!.health).toBe("broken")
+  })
+
+  it("a link never synced a day after it was made is stalled; a fresh one is not", () => {
+    const base = { needs_reauth: false, token_expires_at: null, last_sync_error: null, last_synced_at: null }
+    const now = Date.parse("2026-11-06T12:00:00Z")
+    expect(linkSyncHealth({ ...base, created_at: "2026-11-06T11:00:00Z" }, now)).toBe("synced")
+    expect(linkSyncHealth({ ...base, created_at: "2026-11-04T11:00:00Z" }, now)).toBe("stalled")
+    expect(linkSyncHealth({ ...base, created_at: "2026-11-04T11:00:00Z", last_synced_at: "2026-11-06T11:30:00Z" }, now)).toBe("synced")
+    expect(linkSyncHealth({ ...base, created_at: "2026-11-06T11:00:00Z", token_expires_at: "2026-11-05T00:00:00Z" }, now)).toBe("broken")
   })
 })

@@ -218,3 +218,78 @@ export async function markConnectionOfLinkRejected(env: Env, projectId: string, 
     .bind(error, projectId)
     .run()
 }
+
+// ── Per-project sync state for lists ───────────────────────────────────────
+
+/** What a project list says about a LangQuest-linked project, next to its name. */
+export type LinkSyncHealth = "synced" | "stalled" | "broken"
+
+export interface ProjectLangQuestState {
+  language: string
+  health: LinkSyncHealth
+  lastSyncedAt: string | null
+}
+
+interface LinkStateRow {
+  project_id: string
+  language_name: string | null
+  needs_reauth: boolean
+  token_expires_at: string | Date | null
+  last_sync_error: string | null
+  last_synced_at: string | Date | null
+  created_at: string | Date
+}
+
+const NEVER_SYNCED_GRACE_MS = 24 * 60 * 60 * 1000
+
+/**
+ * `broken` is a token LangQuest no longer honours (the same verdict as the
+ * saved connection's needs_reauth / expired); `stalled` is a link whose last
+ * sync failed, or one that was never synced a day after it was made; `synced`
+ * is everything else, including a fresh link whose first import is still due.
+ */
+export function linkSyncHealth(row: Omit<LinkStateRow, "project_id" | "language_name">, now = Date.now()): LinkSyncHealth {
+  const exp = row.token_expires_at == null ? null : new Date(row.token_expires_at).getTime()
+  if (row.needs_reauth || (exp != null && Number.isFinite(exp) && exp <= now)) return "broken"
+  if (row.last_sync_error) return "stalled"
+  if (row.last_synced_at == null && new Date(row.created_at).getTime() + NEVER_SYNCED_GRACE_MS <= now) return "stalled"
+  return "synced"
+}
+
+/** Postgres's "relation does not exist": migration 0185 has not reached this database. */
+function isMissingLinkTable(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err)
+  return msg.includes("langquest_links") && (msg.includes("does not exist") || msg.includes("undefined_table"))
+}
+
+/** The LangQuest state of each linked project among `projectIds`; unlinked projects are absent. */
+export async function langquestStateByProject(
+  env: Env,
+  projectIds: string[],
+  now = Date.now(),
+): Promise<Map<string, ProjectLangQuestState>> {
+  const out = new Map<string, ProjectLangQuestState>()
+  if (projectIds.length === 0) return out
+  let rows: LinkStateRow[]
+  try {
+    rows = (
+      await env.AQUILLA_PG.prepare(
+        `SELECT project_id, language_name, needs_reauth, token_expires_at, last_sync_error, last_synced_at, created_at
+           FROM langquest_links WHERE project_id IN (${projectIds.map(() => "?").join(",")})`,
+      )
+        .bind(...projectIds)
+        .all<LinkStateRow>()
+    ).results
+  } catch (err) {
+    if (!isMissingLinkTable(err)) throw err
+    return out
+  }
+  for (const r of rows) {
+    out.set(r.project_id, {
+      language: r.language_name ?? "",
+      health: linkSyncHealth(r, now),
+      lastSyncedAt: iso(r.last_synced_at),
+    })
+  }
+  return out
+}

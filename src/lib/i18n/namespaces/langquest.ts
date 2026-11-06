@@ -45,6 +45,11 @@ export const langquest = defineNamespace({
     "langquest.wizard.linkedProjects": plural({ one: "{count} linked project", other: "{count} linked projects" }, "count"),
     "langquest.wizard.reconnect": "Reconnect",
     "langquest.wizard.needsReconnect": "LangQuest no longer accepts this organization's token. Reconnect it to continue.",
+    // Projects list: a linked project's badge next to its name
+    "langquest.list.ariaLabel": "Follows {language} on LangQuest: {state}",
+    "langquest.list.synced": "Synced",
+    "langquest.list.stalled": "Sync stalled",
+    "langquest.list.broken": "Sync broken, reconnect LangQuest",
     // Connection health (one word the UI acts on)
     "langquest.health.ok": "Connected",
     "langquest.health.needs_reauth": "Needs reconnecting",
@@ -165,6 +170,10 @@ export const langquest = defineNamespace({
       "langquest.panel.channelPlaceholder": { description: "Example channel name in the empty Channel field; a listening app's name. Can stay untranslated." },
       "langquest.wizard.languageLoading": { description: "Loading line while the wizard asks LangQuest for an organization's languages.", placeholders: { org: "LangQuest organization name." } },
       "langquest.wizard.linkedProjects": { description: "Under an organization in the wizard's org list: how many Aquilla projects import from it.", placeholders: { count: "Number of linked projects." } },
+      "langquest.list.ariaLabel": {
+        description: "Screen-reader name of the LangQuest mark beside a linked project's name in the projects list.",
+        placeholders: { language: "LangQuest language name.", state: "One of the langquest.list.* states, already translated." },
+      },
       "langquest.settings.connectedOn": { description: "When the token was saved.", placeholders: { date: "A formatted date." } },
       "langquest.settings.lastChecked": { description: "When LangQuest last confirmed the token.", placeholders: { when: "A formatted date and time." } },
       "langquest.settings.scopes": { description: "The token's LangQuest scopes, shown as-is.", placeholders: { scopes: "Comma-joined scope ids such as read, release." } },

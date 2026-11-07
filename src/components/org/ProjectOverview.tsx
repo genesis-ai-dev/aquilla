@@ -121,6 +121,7 @@ import {
 } from "./SectionVisibilityBadge"
 import { Badge } from "@/components/ui/badge"
 import { LangQuestLinkBadge } from "@/components/langquest/LangQuestLinkBadge"
+import { ParatextLinkBadge } from "@/components/paratext/ParatextLinkBadge"
 import { ProjectDeadlineStatuses, ProjectStatusChip } from "@/components/ProjectStatus"
 import {
   Dialog,
@@ -1902,6 +1903,7 @@ export function ProjectOverview() {
                         roleLevel={project?.syncRole?.level ?? null}
                         onSynced={() => void refresh()}
                       />
+                      <ParatextLinkBadge projectId={id} />
                     </div>
                     {/* Language pair */}
                     {languagePair && (

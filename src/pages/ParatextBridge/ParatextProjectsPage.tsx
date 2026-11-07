@@ -1,37 +1,21 @@
-import { useEffect, useState } from "react"
-import { Link } from "react-router-dom"
-import { BookOpen, ChevronRight, FolderPlus, RefreshCw, X } from "lucide-react"
+import { useMemo, useState } from "react"
+import { BookOpen, FolderPlus, RefreshCw, Search, X } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { ThisComputerSidebar } from "@/components/this-computer/ThisComputerSidebar"
 import { ThisComputerBreadcrumb } from "@/components/this-computer/ThisComputerBreadcrumb"
 import { Page, PageHeader } from "@/components/ui/page"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
 import { EmptyState } from "@/components/ui/empty"
 import { Spinner } from "@/components/ui/spinner"
 import { useT } from "@/lib/i18n/I18nProvider"
-import { useParatextDiscovery, type BridgeProject } from "@/lib/paratext-bridge/use-paratext-discovery"
+import { useParatextDiscovery } from "@/lib/paratext-bridge/use-paratext-discovery"
 import { pickFolder } from "@/lib/paratext-bridge/tauri"
-import { bridgeStore } from "@/lib/paratext-bridge/store"
+import { ParatextProjectRow, useLinkedGuids } from "@/components/paratext/ParatextProjectRow"
 
 const PARATEXT_DOCS_URL =
   `${(import.meta.env.VITE_DOCS_URL as string | undefined)?.trim() || "https://help.aquilla.app"}/projects/paratext-projects/`
-
-const paratextProjectPath = (project: BridgeProject) => `/paratext/project?${new URLSearchParams({ project: project.path }).toString()}`
-
-/** GUIDs of the projects already mirrored into Aquilla. */
-function useLinkedGuids(projects: readonly BridgeProject[]): Set<string> {
-  const [guids, setGuids] = useState<Set<string>>(new Set())
-  const key = projects.map((p) => p.guid).join("|")
-  useEffect(() => {
-    let cancelled = false
-    void Promise.all(projects.map(async (p) => ((await bridgeStore.link(p.guid).catch(() => null)) ? p.guid : null)))
-      .then((found) => { if (!cancelled) setGuids(new Set(found.filter((g): g is string => !!g))) })
-    return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key])
-  return guids
-}
 
 /** Desktop-only: Paratext projects found on this computer. One click opens a
  *  book; edits are written straight into the Paratext project folder. */
@@ -39,6 +23,12 @@ export function ParatextProjectsPage() {
   const t = useT()
   const d = useParatextDiscovery()
   const linked = useLinkedGuids(d.projects)
+  const [query, setQuery] = useState("")
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return d.projects
+    return d.projects.filter((p) => [p.settings.fullName, p.settings.name, p.settings.language].some((v) => v?.toLowerCase().includes(q)))
+  }, [d.projects, query])
 
   const addFolder = async () => {
     const path = await pickFolder(t("paratextBridge.thisComputer.pickFolderTitle"))
@@ -100,30 +90,17 @@ export function ParatextProjectsPage() {
               {d.projects.length === 0 ? (
                 <EmptyState icon={BookOpen} title={t("paratextBridge.noProjects")} description={t("paratextBridge.noProjectsHint")} />
               ) : (
+                <div className="space-y-3">
+                {d.projects.length > 5 ? (
+                  <div className="relative max-w-xs">
+                    <Search className="pointer-events-none absolute start-2.5 top-2.5 size-4 text-muted-foreground" aria-hidden />
+                    <Input className="ps-8" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("paratextBridge.project.search")} aria-label={t("paratextBridge.project.search")} data-testid="paratext-project-search" />
+                  </div>
+                ) : null}
                 <ul className="divide-y rounded-lg border bg-card" data-testid="paratext-project-list">
-                  {d.projects.map((p) => (
-                    <li key={p.path} data-testid="paratext-project">
-                      <Link to={paratextProjectPath(p)} className="flex items-center gap-3 px-4 py-3 hover:bg-accent/50">
-                        <BookOpen className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="truncate font-medium">{p.settings.fullName}</span>
-                            <Badge variant="outline">{p.settings.name}</Badge>
-                          </div>
-                          <div className="truncate text-xs text-muted-foreground">
-                            {t("paratextBridge.booksCount", { count: p.books.length })}
-                            {p.settings.language ? ` · ${p.settings.language}` : ""}
-                            {!p.utf8 ? ` · ${t("paratextBridge.notUtf8")}` : ""}
-                          </div>
-                        </div>
-                        <Badge variant={linked.has(p.guid) ? "default" : "outline"}>
-                          {linked.has(p.guid) ? t("paratextBridge.project.inAquilla") : t("paratextBridge.project.notInAquilla")}
-                        </Badge>
-                        <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-                      </Link>
-                    </li>
-                  ))}
+                  {shown.map((p) => <ParatextProjectRow key={p.path} project={p} linked={linked.has(p.guid)} />)}
                 </ul>
+                </div>
               )}
 
               {d.discovery && d.discovery.roots.length > 0 ? (

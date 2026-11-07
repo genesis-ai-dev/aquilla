@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { Link, useNavigate, useSearchParams } from "react-router-dom"
-import { ExternalLink, FolderOpen, RefreshCw } from "lucide-react"
+import { ExternalLink, FolderOpen, MoreHorizontal, RefreshCw } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { ThisComputerSidebar } from "@/components/this-computer/ThisComputerSidebar"
 import { ThisComputerBreadcrumb } from "@/components/this-computer/ThisComputerBreadcrumb"
@@ -8,6 +8,7 @@ import { PARATEXT_PATH } from "@/components/this-computer/routes"
 import { Page } from "@/components/ui/page"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Spinner } from "@/components/ui/spinner"
 import { toast } from "@/components/ui/toast"
 import { StatBar, StatTile } from "@/components/progress/StatTiles"
@@ -16,6 +17,7 @@ import { useParatextDiscovery, type BridgeProject } from "@/lib/paratext-bridge/
 import { useParatextProgress, type BookProgress, type BookStatus } from "@/lib/paratext-bridge/use-paratext-progress"
 import { bridgeStore, type MirrorLink } from "@/lib/paratext-bridge/store"
 import type { UserAccess } from "@/lib/paratext-bridge/access"
+import { projectOverviewPath } from "@/lib/navigation/org-paths"
 import { getBookName } from "@/lib/file-labeling/bible-book-names"
 
 const STATUSES: BookStatus[] = ["not-started", "in-progress", "complete"]
@@ -43,13 +45,27 @@ function Card({ title, hint, children, testId }: { title: string; hint?: string;
   )
 }
 
+/** "MAT, MRK (chapters 1-5, 7)": the books a member may edit when it is not all of them. */
+function grantSummary(user: UserAccess, t: ReturnType<typeof useT>): string {
+  return user.books
+    .map((b) => {
+      if (b.chapters.length === 0) return b.book
+      const ranges = b.chapters.map((c) => (c.from === c.to ? `${c.from}` : `${c.from}-${c.to}`)).join(", ")
+      return `${b.book} (${t("paratextBridge.project.chapters", { ranges })})`
+    })
+    .join(", ")
+}
+
 function TeamRow({ user, t }: { user: UserAccess; t: ReturnType<typeof useT> }) {
+  const grants = grantSummary(user, t)
   return (
     <li className="flex items-center justify-between gap-3 py-1.5 text-sm">
       <span className="truncate font-medium">{user.userName}</span>
-      <span className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
-        {user.allBooks ? t("paratextBridge.project.allBooks") : t("paratextBridge.project.someBooks", { count: user.books.length })}
-        <Badge variant="outline">{user.role}</Badge>
+      <span className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+        <span className="truncate" title={grants}>
+          {user.allBooks ? t("paratextBridge.project.allBooks") : grants || t("paratextBridge.project.someBooks", { count: 0 })}
+        </span>
+        <Badge variant="outline" className="shrink-0">{user.role}</Badge>
       </span>
     </li>
   )
@@ -68,6 +84,8 @@ export function ParatextProjectPage() {
   const progress = useParatextProgress(project)
   const [link, setLink] = useState<MirrorLink | null>(null)
   const guid = project?.guid ?? null
+  const [held, setHeld] = useState(0)
+  const heldBooks = link ? held : 0
 
   useEffect(() => {
     if (!guid) return
@@ -75,6 +93,14 @@ export function ParatextProjectPage() {
     void bridgeStore.link(guid).then((l) => { if (!cancelled) setLink(l) }).catch(() => undefined)
     return () => { cancelled = true }
   }, [guid])
+
+  useEffect(() => {
+    if (!guid || !link) return
+    let cancelled = false
+    void Promise.all(Object.keys(link.books).map((code) => bridgeStore.hold(guid, code).catch(() => false)))
+      .then((flags) => { if (!cancelled) setHeld(flags.filter(Boolean).length) })
+    return () => { cancelled = true }
+  }, [guid, link])
 
   const byStatus = useMemo(() => {
     const out: Record<BookStatus, BookProgress[]> = { "not-started": [], "in-progress": [], complete: [] }
@@ -136,9 +162,13 @@ export function ParatextProjectPage() {
               <Button disabled={!canOpen} data-testid="paratext-open-in-aquilla" onClick={() => navigate(openTarget(project, link))}>
                 <ExternalLink />{t("paratextBridge.project.open")}
               </Button>
-              <Button variant="outline" size="icon-sm" aria-label={t("paratextBridge.rescan")} disabled={d.loading} onClick={() => void d.refresh()}>
-                <RefreshCw />
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger render={<Button variant="outline" size="icon-sm" aria-label={t("paratextBridge.project.menu")}><MoreHorizontal /></Button>} />
+                <DropdownMenuContent align="end" className="min-w-44">
+                  <DropdownMenuItem disabled={d.loading} onClick={() => void d.refresh()}><RefreshCw />{t("paratextBridge.rescan")}</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => void copyPath()}><FolderOpen />{t("paratextBridge.project.reveal")}</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
         </div>
@@ -195,6 +225,20 @@ export function ParatextProjectPage() {
             </div>
           )}
         </Card>
+
+        {link ? (
+          <Card title={t("paratextBridge.project.mirror")} hint={t("paratextBridge.project.mirrorHint")} testId="paratext-mirror-card">
+            <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+              <div className="space-y-1">
+                <p>{t("paratextBridge.project.mirrorBooks")}: <span className="font-medium tabular-nums">{Object.keys(link.books).length} / {project.books.length}</span></p>
+                {heldBooks > 0 ? <p className="text-destructive" data-testid="paratext-mirror-held">{t("paratextBridge.project.mirrorHeld", { count: heldBooks })}</p> : null}
+              </div>
+              <Button variant="outline" size="sm" nativeButton={false} render={<Link to={projectOverviewPath(link.projectId)} />}>
+                <ExternalLink />{t("paratextBridge.project.openOverview")}
+              </Button>
+            </div>
+          </Card>
+        ) : null}
 
         <Card title={t("paratextBridge.project.team")} hint={t("paratextBridge.project.teamHint")} testId="paratext-team-card">
           {project.access && project.access.users.length > 0 ? (

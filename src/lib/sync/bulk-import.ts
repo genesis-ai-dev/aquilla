@@ -14,7 +14,8 @@
 import { EXTENSION_DATA_ROLE } from "../../../shared/tools/file-extension"
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
 import { enqueueOutboxEvents } from "./outbox"
-import { assertSourceUploadSize, uploadSourceOriginal } from "./source-upload"
+import { assertSourceUploadSize, sha256Hex, uploadSourceOriginal } from "./source-upload"
+import { postFileRevision, type RevisionImport } from "./revision-import"
 import {
   completeImportSession,
   recordLandedChunk,
@@ -158,6 +159,11 @@ export interface BulkUploadArgs {
    * one. Absent ⇒ a one-shot, non-resumable import (the pre-AQU-1859 path).
    * Resolve one with `resolveImportSession`. */
   session?: ImportSessionRecord
+  /** AQU-2459: send the parsed units as ONE file revision instead of N
+   *  `source.cell.create` rows. The first /import request still creates the
+   *  file (with zero cells), the original bytes still go to R2, and the
+   *  revision names that artifact's sha256. Requires `rawBytes`/`rawSource`. */
+  revision?: RevisionImport
   /** Mints a sync-token scoped to (projectId, fileId). */
   getToken: (fileId: string) => Promise<string | null>
   /** Smart Extensions apiRev 7: the extension running this import (with its
@@ -480,6 +486,10 @@ async function uploadSourceChunks(args: BulkUploadArgs): Promise<void> {
 
   const url = `${syncWorkerHttpOrigin()}/import`
   const total = args.cells.length
+  const revision = args.revision
+  if (revision && !(sourceBytes && sourceFormat)) {
+    throw new Error("A revision import needs the original bytes; import the file again from its source.")
+  }
   let uploaded = 0
   const session = args.session
   const stageEventId = session?.stageEventId ?? uuidv7()
@@ -492,8 +502,9 @@ async function uploadSourceChunks(args: BulkUploadArgs): Promise<void> {
 
   // Chunk offsets. `do…while` semantics: at least one request (carrying
   // file.create) even for a zero-cell file.
+  // A revision import sends the file row alone; its units travel once, below.
   const offsets: number[] = []
-  for (let offset = 0; offset === 0 || offset < args.cells.length; offset += CHUNK) {
+  for (let offset = 0; offset === 0 || (!revision && offset < args.cells.length); offset += CHUNK) {
     offsets.push(offset)
   }
 
@@ -508,7 +519,7 @@ async function uploadSourceChunks(args: BulkUploadArgs): Promise<void> {
 
   const sendChunk = async (offset: number, isFirst: boolean): Promise<void> => {
     if (args.signal?.aborted) throw new Error("Import cancelled")
-    const chunk = args.cells.slice(offset, offset + CHUNK)
+    const chunk = revision ? [] : args.cells.slice(offset, offset + CHUNK)
     const payload: Record<string, unknown> = {
       projectId: args.projectId,
       fileId: args.fileId,
@@ -668,6 +679,27 @@ async function uploadSourceChunks(args: BulkUploadArgs): Promise<void> {
     } catch (error) {
       uploadFailure = error
     }
+  }
+
+  // AQU-2459: the units land as one revision naming the artifact just stored.
+  // The artifact is not optional here: without it the revision has nothing to
+  // be a revision OF, so its failure is the import's failure. The checksum is
+  // computed here rather than read back, so a resumed session whose upload
+  // already landed can still name it.
+  if (revision && sourceBytes) {
+    if (uploadFailure !== null) throw uploadFailure
+    await postFileRevision({
+      projectId: args.projectId,
+      fileId: args.fileId,
+      artifactSha256: await sha256Hex(sourceBytes),
+      revision,
+      origin: "import",
+      getToken: args.getToken,
+      fetchImpl: fetchFn,
+      signal: args.signal,
+    })
+    uploaded = total
+    args.onProgress?.(uploaded, total)
   }
 
   // The remaining chunks are independent genesis source.cell.create batches:

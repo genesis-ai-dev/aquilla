@@ -67,6 +67,7 @@ import type { PartnerImportEdition, PartnerImportProgress } from "./partners/typ
 import { extractHtmlStrings } from "./parsers/html"
 import { extractEpubImport, type EpubSpineMember } from "./parsers/epub"
 import { bulkUploadSource, BULK_IMPORT_CHUNK, type BulkImportCell } from "./sync/bulk-import"
+import { canImportAsRevision, revisionUnitsFromCells } from "./sync/revision-import"
 import { importCellEventId, releaseImportSession, resolveImportSession } from "./sync/import-session"
 import {
   assertSourceUploadByteLength,
@@ -1893,6 +1894,19 @@ export async function emitParsedFile(
     onProgress: ctx.onCellEnqueued,
     signal: ctx.signal,
   }
+  // AQU-2459: a fresh import of a filter-backed format travels as one
+  // revision; everything else keeps the N-row path until its format is
+  // wrapped onto the contract.
+  const revision = canImportAsRevision({
+    fileType,
+    isReimport: Boolean(existingFileId),
+    hasTargets: targets.length > 0,
+    hasOriginalBytes: result.rawBytes !== undefined || result.rawSource !== undefined,
+    cells,
+  })
+    ? { stamp: shared.file.parserVersion, units: revisionUnitsFromCells(cells) }
+    : undefined
+
   if (existingFileId) {
     await reconcileSourceImport({
       ...shared,
@@ -1904,6 +1918,7 @@ export async function emitParsedFile(
   } else {
     await bulkUploadSource({
       ...shared,
+      ...(revision ? { revision } : {}),
       ...(!existingFileId && ctx.deferPublication ? { deferPublication: true } : {}),
     })
   }

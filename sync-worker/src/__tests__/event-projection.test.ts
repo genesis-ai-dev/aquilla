@@ -1029,6 +1029,7 @@ describe('isChainMutatingKind', () => {
     'file.rename': false,
     'file.delete': false,
     'file.restore': false,
+    'file.revision': false,
     'comment.create': false,
     'comment.edit': false,
     'comment.delete': false,

@@ -1,33 +1,44 @@
-import { useNavigate } from "react-router-dom"
-import { BookOpen, ExternalLink, FolderPlus, RefreshCw, X } from "lucide-react"
+import { useEffect, useState } from "react"
+import { Link } from "react-router-dom"
+import { BookOpen, ChevronRight, FolderPlus, RefreshCw, X } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { ThisComputerSidebar } from "@/components/this-computer/ThisComputerSidebar"
 import { ThisComputerBreadcrumb } from "@/components/this-computer/ThisComputerBreadcrumb"
 import { Page, PageHeader } from "@/components/ui/page"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { EmptyState } from "@/components/ui/empty"
 import { Spinner } from "@/components/ui/spinner"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useParatextDiscovery, type BridgeProject } from "@/lib/paratext-bridge/use-paratext-discovery"
 import { pickFolder } from "@/lib/paratext-bridge/tauri"
-import { getBookName } from "@/lib/file-labeling/bible-book-names"
+import { bridgeStore } from "@/lib/paratext-bridge/store"
 
 const PARATEXT_DOCS_URL =
   `${(import.meta.env.VITE_DOCS_URL as string | undefined)?.trim() || "https://help.aquilla.app"}/projects/paratext-projects/`
 
-function paratextBookPath(project: BridgeProject, fileName: string): string {
-  const q = new URLSearchParams({ project: project.path, file: fileName })
-  return `/paratext/book?${q.toString()}`
+const paratextProjectPath = (project: BridgeProject) => `/paratext/project?${new URLSearchParams({ project: project.path }).toString()}`
+
+/** GUIDs of the projects already mirrored into Aquilla. */
+function useLinkedGuids(projects: readonly BridgeProject[]): Set<string> {
+  const [guids, setGuids] = useState<Set<string>>(new Set())
+  const key = projects.map((p) => p.guid).join("|")
+  useEffect(() => {
+    let cancelled = false
+    void Promise.all(projects.map(async (p) => ((await bridgeStore.link(p.guid).catch(() => null)) ? p.guid : null)))
+      .then((found) => { if (!cancelled) setGuids(new Set(found.filter((g): g is string => !!g))) })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
+  return guids
 }
 
 /** Desktop-only: Paratext projects found on this computer. One click opens a
  *  book; edits are written straight into the Paratext project folder. */
 export function ParatextProjectsPage() {
   const t = useT()
-  const navigate = useNavigate()
   const d = useParatextDiscovery()
+  const linked = useLinkedGuids(d.projects)
 
   const addFolder = async () => {
     const path = await pickFolder(t("paratextBridge.thisComputer.pickFolderTitle"))
@@ -89,48 +100,30 @@ export function ParatextProjectsPage() {
               {d.projects.length === 0 ? (
                 <EmptyState icon={BookOpen} title={t("paratextBridge.noProjects")} description={t("paratextBridge.noProjectsHint")} />
               ) : (
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <ul className="divide-y rounded-lg border bg-card" data-testid="paratext-project-list">
                   {d.projects.map((p) => (
-                    <Card key={p.path} data-testid="paratext-project">
-                      <CardHeader>
-                        <CardTitle className="flex items-center justify-between gap-2">
-                          <span className="truncate">{p.settings.fullName}</span>
-                          <Badge variant="outline">{p.settings.name}</Badge>
-                        </CardTitle>
-                        <CardDescription>
-                          {t("paratextBridge.booksCount", { count: p.books.length })}
-                          {p.settings.language ? ` · ${p.settings.language}` : ""}
-                          {!p.utf8 ? ` · ${t("paratextBridge.notUtf8")}` : ""}
-                        </CardDescription>
-                      </CardHeader>
-                      <CardContent className="space-y-3">
-                        <Button
-                          size="sm"
-                          disabled={!p.utf8 || p.books.length === 0}
-                          data-testid="paratext-open-in-aquilla"
-                          onClick={() => navigate(`/paratext/open?${new URLSearchParams({ project: p.path }).toString()}`)}
-                        >
-                          <ExternalLink />{t("paratextBridge.openInAquilla")}
-                        </Button>
-                        <div className="flex flex-wrap gap-1">
-                          {p.books.map((b) => (
-                            <Button
-                              key={b.fileName}
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 px-2 font-mono text-xs"
-                              title={getBookName(b.code) ?? b.code}
-                              disabled={!p.utf8}
-                              onClick={() => navigate(paratextBookPath(p, b.fileName))}
-                            >
-                              {b.code}
-                            </Button>
-                          ))}
+                    <li key={p.path} data-testid="paratext-project">
+                      <Link to={paratextProjectPath(p)} className="flex items-center gap-3 px-4 py-3 hover:bg-accent/50">
+                        <BookOpen className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="truncate font-medium">{p.settings.fullName}</span>
+                            <Badge variant="outline">{p.settings.name}</Badge>
+                          </div>
+                          <div className="truncate text-xs text-muted-foreground">
+                            {t("paratextBridge.booksCount", { count: p.books.length })}
+                            {p.settings.language ? ` · ${p.settings.language}` : ""}
+                            {!p.utf8 ? ` · ${t("paratextBridge.notUtf8")}` : ""}
+                          </div>
                         </div>
-                      </CardContent>
-                    </Card>
+                        <Badge variant={linked.has(p.guid) ? "default" : "outline"}>
+                          {linked.has(p.guid) ? t("paratextBridge.project.inAquilla") : t("paratextBridge.project.notInAquilla")}
+                        </Badge>
+                        <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                      </Link>
+                    </li>
                   ))}
-                </div>
+                </ul>
               )}
 
               {d.discovery && d.discovery.roots.length > 0 ? (

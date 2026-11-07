@@ -2404,7 +2404,11 @@ export const editor = defineNamespace({
     "editor.ai.alignStylesNeeded": "This cell needs Align styles",
 
     // — Remaining action-rail tooltips ————————————————————————————
+    // AQU-2401: this one is no longer on the rail — it names the Play button
+    // in the left validation gutter, beside the audio check.
     "editor.audio.play": "Play audio",
+    "editor.audio.noRecordingNote": "Nothing recorded on this line to play",
+    "editor.audio.ariaNoRecording": "{ref}: nothing recorded to play",
     "editor.cue.playFrom": "Play from this cue",
     // AQU-1118: the same button while this row's line is the one playing.
     "editor.cue.pause": "Pause",
@@ -8533,7 +8537,7 @@ export const editor = defineNamespace({
       },
       "editor.audioValidation.ariaNoAudio": {
         description:
-          "Screen-reader label for the faded microphone on a line with no recording. " +
+          "Screen-reader label for the faded circle on a line with no recording. " +
           "{ref} is the line's reference, e.g. 'MRK 4:1'.",
         placeholders: {
           ref: "The cell's reference or fallback row number. Do not translate.",
@@ -9369,9 +9373,26 @@ export const editor = defineNamespace({
       },
       "editor.audio.play": {
         description:
-          "Tooltip on the action-rail play button for a cell's recording. Swaps " +
-          "with common.pause. Imperative.",
+          "Tooltip and accessible name of the play button in the row's left " +
+          "validation gutter, which plays that line's own recording. Swaps with " +
+          "common.pause while it is playing. Imperative.",
         maxLength: 18,
+      },
+      "editor.audio.noRecordingNote": {
+        description:
+          "Note that opens on a click of the faded play button in the row's left " +
+          "validation gutter, on a line with no recording in a file that has " +
+          "audio elsewhere. Says there is nothing to hear here, not that the " +
+          "button is broken.",
+        maxLength: 44,
+      },
+      "editor.audio.ariaNoRecording": {
+        description:
+          "Screen-reader label for that same faded play button. {ref} is the " +
+          "line's reference, e.g. 'MRK 4:1'.",
+        placeholders: {
+          ref: "The cell's reference or fallback row number. Do not translate.",
+        },
       },
       "editor.cue.playFrom": {
         description:

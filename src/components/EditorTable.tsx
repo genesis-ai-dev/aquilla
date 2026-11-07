@@ -216,6 +216,7 @@ import {
 import { TargetDraftActions, TargetReferenceActions } from "./cell/TargetCellActions"
 import { TargetValidationControl } from "./cell/TargetValidationControl"
 import { AudioValidationControl } from "./cell/AudioValidationControl"
+import { CellAudioPlayControl } from "./cell/CellAudioPlayControl"
 import { audioBlockedReason, lineValidationTakes } from "@/lib/audio/audio-validation-permissions"
 import { slotSelections } from "@/lib/sync/cell-audio-read-types"
 import { takePlayWindow } from "@/lib/audio/kept-window"
@@ -8088,14 +8089,17 @@ function EditorRow({
           ? "amber"
           : null
 
-  // AQU-200: the `⋯` now hides the two rail buttons that carried an
-  // at-a-glance signal of their own — open comments (primary dot) and an
-  // existing take (emerald dot on Play). Collapsing them must not make the
-  // row read as "nothing here", so the strongest of those signals moves onto
-  // the trigger. Comments win: an unread comment is addressed to a person,
-  // where "this line has audio" is only a state.
-  const railOverflowAttentionDot: "emerald" | "primary" | null =
-    openCommentCount > 0 ? "primary" : hasAudio ? "emerald" : null
+  // AQU-200 put a dot here for the two rail buttons it hid that carried an
+  // at-a-glance signal of their own — open comments (primary) and an existing
+  // take (emerald on Play) — so that collapsing them would not make the row
+  // read as "nothing here".
+  //
+  // AQU-2401: Play is visible again, in the gutter, so the emerald dot has
+  // nothing left to stand for — "this line has audio" is now said by the
+  // button itself being live rather than faded, a few pixels from the check
+  // that counts it. The dot is the open-comments signal only.
+  const railOverflowAttentionDot: "primary" | null =
+    openCommentCount > 0 ? "primary" : null
 
   // First-open auto-tab: prefer the most-attention-worthy tab — and in Media,
   // or in a language that delivers Audio, Recording (Sam, 2026-09-29;
@@ -8476,6 +8480,25 @@ function EditorRow({
       // 2026-09-22).
       canValidate={canValidate && isInMemberScope(myScopes, cell.fileId, activeLane)}
       onValidationChange={emitAudioValidationChange}
+    />
+  )
+
+  // AQU-2401: Play sits in the gutter beside that check, not behind the `⋯`.
+  // Same gate as the check — wherever the audio column is drawn, and nowhere
+  // else — and the same controller the rail button used, so the clip, its
+  // window and the loading state are unchanged. Not gated on `editable`:
+  // listening is not editing.
+  const audioPlayControl = audioColumn === "off" ? null : (
+    <CellAudioPlayControl
+      cellRef={cellRef}
+      checking={audioColumn === "checking"}
+      hasTake={hasAudio}
+      playing={railPlaying}
+      loading={audioController.state === "loading"}
+      onToggle={() => {
+        if (audioController.isPlaying) audioController.pause()
+        else void audioController.play()
+      }}
     />
   )
 
@@ -9231,6 +9254,7 @@ function EditorRow({
             <div className="flex flex-1 gap-1.5">
               {validationControl}
               {audioValidationControl}
+              {audioPlayControl}
             <EditorTargetCellWell
               className={showStyleAlignWarning || showPassToStyleSegments ? "pb-5 pe-6" : undefined}
               onClick={(event) => {
@@ -9838,30 +9862,11 @@ function EditorRow({
                 />
               )}
 
-              {hasAudio && (
-                <RailButton
-                  icon={
-                    railPlaying ? (
-                      <Pause className="h-3.5 w-3.5" />
-                    ) : (
-                      <Play className="h-3.5 w-3.5" />
-                    )
-                  }
-                  tooltip={railPlaying ? t("common.pause") : t("editor.audio.play")}
-                  onClick={() => {
-                    if (audioController.state === "loading") return
-                    if (audioController.isPlaying) audioController.pause()
-                    else void audioController.play()
-                  }}
-                  disabled={audioController.state === "loading"}
-                  toneClass={
-                    railPlaying
-                      ? "text-primary hover:text-primary"
-                      : undefined
-                  }
-                  dot="emerald"
-                />
-              )}
+              {/* AQU-2401: Play for this line's recording is no longer here —
+                  it is a direct button in the left validation gutter, beside
+                  the audio check it answers (`audioPlayControl`). "Play from
+                  this cue", further down, is a different button on a different
+                  sound (the file's master audio) and stays. */}
 
               {/* Round 5: no playOnly — generating here durably attaches the
                   voice; an untranslated line shows the button disabled with

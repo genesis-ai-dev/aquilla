@@ -639,10 +639,13 @@ export class Workspace {
 
   /**
    * AQU-200: the rail keeps only the AI-generate group as direct buttons —
-   * comments, history, record, play, TTS and footnote live behind a single
-   * `⋯`. Reveal the row's rail, open that overflow, and return the named
-   * action. The popup is portalled to the body, so the returned locator is
-   * page-scoped, NOT row-scoped: only one row's overflow is ever open.
+   * comments, history, TTS and footnote live behind a single `⋯`. (Record was
+   * promoted back out by AQU-2287; Play for the line's recording by AQU-2401,
+   * which put it in the left validation gutter beside the audio check — reach
+   * it by its own `cell-audio-play-button` testid, not through here.) Reveal
+   * the row's rail, open that overflow, and return the named action. The popup
+   * is portalled to the body, so the returned locator is page-scoped, NOT
+   * row-scoped: only one row's overflow is ever open.
    */
   async openRowAction(row: Locator, ariaLabel: string): Promise<Locator> {
     await row.scrollIntoViewIfNeeded()

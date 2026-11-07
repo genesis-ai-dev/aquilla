@@ -105,8 +105,12 @@ fn is_book_file(name: &str) -> bool {
     lower.ends_with(".sfm") || lower.ends_with(".usfm")
 }
 
+fn is_notes_file(name: &str) -> bool {
+    name.starts_with("Notes_") && name.to_ascii_lowercase().ends_with(".xml")
+}
+
 fn is_watched_file(name: &str) -> bool {
-    is_book_file(name) || name == "Settings.xml" || name == "ProjectUserAccess.xml"
+    is_book_file(name) || is_notes_file(name) || name == "Settings.xml" || name == "ProjectUserAccess.xml"
 }
 
 // Parses `Settings_Directory` out of a Wine `system.reg`. The value sits in a
@@ -255,18 +259,27 @@ fn discover_in_roots(candidates: Vec<Root>) -> (Vec<Root>, Vec<Project>) {
     (roots, projects)
 }
 
-// Core of paratext_write_book, parameterised on the backup dir so it is
-// testable. Hash mismatch writes nothing; otherwise the original bytes are
-// copied to the backup dir first and the new bytes are written in place.
+// Core of paratext_write_book / paratext_write_notes, parameterised on the
+// backup dir so it is testable. Hash mismatch writes nothing; otherwise the
+// original bytes are copied to the backup dir first and the new bytes are
+// written in place. `expected_blob_hash == None` means "the file must not
+// exist yet" (a user's first note creates their Notes_<User>.xml).
 fn write_book_core(
     project_path: &Path,
     file_name: &str,
     bytes: &[u8],
-    expected_blob_hash: &str,
+    expected_blob_hash: Option<&str>,
     backups_root: &Path,
 ) -> Result<WriteResult, String> {
     validate_file_name(file_name)?;
     let target = project_path.join(file_name);
+    let Some(expected_blob_hash) = expected_blob_hash else {
+        if target.exists() {
+            return Err(format!("EEXIST: {file_name} already exists in the project"));
+        }
+        std::fs::write(&target, bytes).map_err(|e| format!("EIO: write {file_name}: {e}"))?;
+        return Ok(WriteResult { backup_path: String::new(), new_blob_hash: sha256_hex(bytes) });
+    };
     if !target.is_file() {
         return Err(format!("ENOENT: {file_name} does not exist in the project"));
     }
@@ -587,7 +600,29 @@ pub async fn paratext_write_book(
     blocking(move || {
         let dir = resolve_project(&app, &project_path)?;
         let backups_root = app_data_dir(&app)?.join(BACKUPS_DIR);
-        write_book_core(&dir, &file_name, &bytes, &expected_blob_hash, &backups_root)
+        write_book_core(&dir, &file_name, &bytes, Some(&expected_blob_hash), &backups_root)
+    })
+    .await?
+}
+
+/// Write the registered user's `Notes_<User>.xml`. Same read-hash-backup-write
+/// as books; `expected_blob_hash: None` creates the file for a first note.
+#[tauri::command]
+pub async fn paratext_write_notes(
+    app: AppHandle,
+    project_path: String,
+    file_name: String,
+    bytes: Vec<u8>,
+    expected_blob_hash: Option<String>,
+) -> Result<WriteResult, String> {
+    validate_file_name(&file_name)?;
+    if !is_notes_file(&file_name) {
+        return Err(format!("EINVAL: not a Paratext notes file: {file_name:?}"));
+    }
+    blocking(move || {
+        let dir = resolve_project(&app, &project_path)?;
+        let backups_root = app_data_dir(&app)?.join(BACKUPS_DIR);
+        write_book_core(&dir, &file_name, &bytes, expected_blob_hash.as_deref(), &backups_root)
     })
     .await?
 }
@@ -798,20 +833,20 @@ mod tests {
         let original = b"\\id MAT\n\\c 1\n\\v 1 old".to_vec();
         std::fs::write(project.join("41MATTPP1.SFM"), &original).unwrap();
 
-        let err = write_book_core(&project, "41MATTPP1.SFM", b"new", "deadbeef", &backups).unwrap_err();
+        let err = write_book_core(&project, "41MATTPP1.SFM", b"new", Some("deadbeef"), &backups).unwrap_err();
         assert!(err.starts_with("EHASH: "), "{err}");
         assert_eq!(std::fs::read(project.join("41MATTPP1.SFM")).unwrap(), original);
         assert!(!backups.exists(), "mismatch must not create a backup");
 
-        assert!(write_book_core(&project, "99NEWTPP1.SFM", b"x", &sha256_hex(b""), &backups)
+        assert!(write_book_core(&project, "99NEWTPP1.SFM", b"x", Some(&sha256_hex(b"")), &backups)
             .unwrap_err()
             .starts_with("ENOENT: "));
-        assert!(write_book_core(&project, "../41MATTPP1.SFM", b"x", "", &backups)
+        assert!(write_book_core(&project, "../41MATTPP1.SFM", b"x", Some(""), &backups)
             .unwrap_err()
             .starts_with("EINVAL: "));
 
         let new_bytes = b"\\id MAT\n\\c 1\n\\v 1 new".to_vec();
-        let res = write_book_core(&project, "41MATTPP1.SFM", &new_bytes, &sha256_hex(&original), &backups).unwrap();
+        let res = write_book_core(&project, "41MATTPP1.SFM", &new_bytes, Some(&sha256_hex(&original)), &backups).unwrap();
         assert_eq!(std::fs::read(project.join("41MATTPP1.SFM")).unwrap(), new_bytes);
         assert_eq!(res.new_blob_hash, sha256_hex(&new_bytes));
         let backup = PathBuf::from(&res.backup_path);
@@ -863,13 +898,36 @@ mod tests {
     }
 
     #[test]
+    fn write_without_expected_hash_creates_a_new_file_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = make_project(tmp.path(), "TPP1", true);
+        let backups = tmp.path().join("backups");
+        let notes = "Notes_Ryder Wishart.xml";
+        let first = b"<CommentList/>".to_vec();
+        let res = write_book_core(&project, notes, &first, None, &backups).unwrap();
+        assert_eq!(std::fs::read(project.join(notes)).unwrap(), first);
+        assert_eq!(res.backup_path, "");
+        assert!(!backups.exists(), "creating a file has nothing to back up");
+        // A second create must not clobber what is there now.
+        let err = write_book_core(&project, notes, b"x", None, &backups).unwrap_err();
+        assert!(err.starts_with("EEXIST: "), "{err}");
+        assert_eq!(std::fs::read(project.join(notes)).unwrap(), first);
+        // From here on it is an ordinary hashed, backed-up write.
+        write_book_core(&project, notes, b"<CommentList>1</CommentList>", Some(&sha256_hex(&first)), &backups).unwrap();
+        assert!(backups.join("TPP1").exists());
+    }
+
+    #[test]
     fn watched_file_filter_covers_books_and_project_xml() {
         assert!(is_watched_file("41MATTPP1.SFM"));
         assert!(is_watched_file("41MATTPP1.sfm"));
         assert!(is_watched_file("x.usfm"));
         assert!(is_watched_file("Settings.xml"));
         assert!(is_watched_file("ProjectUserAccess.xml"));
+        assert!(is_watched_file("Notes_Ryder Wishart.xml"));
         assert!(!is_watched_file("unique.id"));
         assert!(!is_watched_file("Notes.xml"));
+        assert!(!is_notes_file("Notes.xml"));
+        assert!(!is_notes_file("41MATTPP1.SFM"));
     }
 }

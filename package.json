@@ -214,6 +214,7 @@
     "@tanstack/react-table": "^8.21.3",
     "@tanstack/react-virtual": "^3.14.24",
     "@tauri-apps/api": "^2.12.4",
+    "@tauri-apps/plugin-dialog": "^2.8.4",
     "@tiptap/core": "^3.32.1",
     "@tiptap/extension-bubble-menu": "^3.32.1",
     "@tiptap/extension-typography": "^3.32.1",

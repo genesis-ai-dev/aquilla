@@ -55,6 +55,8 @@ const MAINT_ORG: CreateTarget = { ...TIM_ORG, role: 600, teams: [TEAM, { teamId:
 async function openAndFill() {
   render(<ProjectCreateDialog onCreated={vi.fn()} orgId={10} />)
   fireEvent.click(screen.getByRole("button", { name: "New project" }))
+  // The wizard asks where the project comes from first (AQU-2105).
+  fireEvent.click(screen.getByTestId("project-source-scratch"))
   await screen.findByTestId("project-create-teams")
   fireEvent.change(screen.getByPlaceholderText("My translation project"), { target: { value: "Pattani" } })
   fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), { target: { value: "English" } })

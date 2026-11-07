@@ -66,7 +66,8 @@ describe("liveAudioProgress", () => {
       ["c1", entry({ seed: "file-1", role: "source" })],
       ["c2", entry({ seed: "file-1" })],
     ])
-    expect(liveAudioProgress(VERSES, audio, 1, true)).toEqual({ recorded: 0, audioValidated: 0 })
+    // The workspace always names the open file (AQU-2411).
+    expect(liveAudioProgress(VERSES, audio, 1, true, "file-1")).toEqual({ recorded: 0, audioValidated: 0 })
     expect(cellHasOwnTake("c1", audio.get("c1"))).toBe(false)
   })
 
@@ -103,5 +104,31 @@ describe("liveAudioProgress", () => {
 
   it("reports zeroes for a loaded map with no takes in it", () => {
     expect(liveAudioProgress(VERSES, new Map(), 1, true)).toEqual({ recorded: 0, audioValidated: 0 })
+  })
+})
+
+// AQU-2411: a take migrated from Codex carries Codex's file name as its id, no
+// line id in it. The server counts it; the footer and sidebar must too.
+describe("liveAudioProgress — takes migrated from Codex", () => {
+  const codex = (suffix: string, votes = 0): CellAudioEntry => {
+    const audioId = `audio-1719100000000-${suffix}.webm`
+    return {
+      attachments: { [audioId]: { audioId, slot: "recording", validatorCount: votes } } as CellAudioEntry["attachments"],
+      selectedBySlot: { recording: audioId },
+      selectedAudioId: audioId,
+      selectedGeneratedVoiceAudioId: null,
+      audioTimings: {},
+    }
+  }
+
+  it("counts a line whose chosen take came from Codex, and its validation", () => {
+    const audio = new Map([["c1", codex("k3j9x2m1p", 1)], ["c2", codex("q8w7e6r5t")]])
+    expect(liveAudioProgress(VERSES, audio, 1, true, "file-1")).toEqual({ recorded: 2, audioValidated: 1 })
+  })
+
+  it("does not count one untagged recording chosen on several lines", () => {
+    const shared = codex("sharedclip")
+    const audio = new Map([["c1", shared], ["c2", shared]])
+    expect(liveAudioProgress(VERSES, audio, 1, true, "file-1")).toEqual({ recorded: 0, audioValidated: 0 })
   })
 })

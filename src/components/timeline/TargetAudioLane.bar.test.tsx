@@ -73,12 +73,18 @@ describe("the bar's height", () => {
     expect(bar()!.style.fontSize).toBe("9px")
   })
 
-  it("goes under 30px, and today's corner marks come back", () => {
+  it("goes under 30px, and the approval becomes a strip along the top, with nothing on the waveform", () => {
     expect(chipHeightPx(40)).toBeLessThan(30)
     atRow(40, <TargetAudioLane {...base} items={[item({ validatorCount: 1, validators: ["sam"] })]} session={{ jwt: "t", username: "sam" } as never} />)
     expect(bar()).toBeNull()
-    // The corner tick, as it always was.
-    expect(screen.getByTestId("tl-target-c1-validated").className).toContain("bottom-1")
+    // Sam, Nov 2: the old corner circle covered short, narrow takes.
+    const strip = screen.getByTestId("tl-target-c1-validated")
+    expect(strip.className).toContain("top-0")
+    expect(strip.className).toContain("h-[3px]")
+    expect(strip.className).not.toContain("bottom-1")
+    expect(strip.querySelector("svg")).toBeNull()
+    expect(strip).toHaveAttribute("data-state", "full")
+    expect(strip).toHaveAccessibleName(/validated/i)
   })
 
   it("follows the clip height exactly: 14 from 40px, 12 from 30px, none below", () => {

@@ -6,6 +6,7 @@
 import { emitCellAudioRemove, emitCellAudioRename, enqueueEvents } from "@/lib/sync/events-emit"
 import { injectOptimisticAudioRemove, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { audioIdSeededWith } from "@/lib/audio/upload"
+import { isOwnTake, type TakeLine } from "@/lib/audio/own-take"
 import { recordStep, withGroup } from "@/lib/history/history"
 import { wholeTakeRenames } from "@/lib/audio/take-groups"
 
@@ -189,13 +190,16 @@ export async function renameWholeTake(args: {
  * recordings justified (onLastTakeRemoved).
  */
 export function hasOwnRecordingLeft(
-  takes: Iterable<{ audioId: string; voiceId?: string | null; isDeleted?: boolean }>,
+  takes: Iterable<{ audioId: string; voiceId?: string | null; isDeleted?: boolean; role?: "dub" | "source" | null }>,
   removedId: string,
-  cellId: string,
+  line: string | TakeLine,
 ): boolean {
   for (const t of takes) {
     if (t.audioId === removedId || t.isDeleted || t.voiceId) continue
-    if (audioIdSeededWith(t.audioId, cellId)) return true
+    // AQU-2411: given the line, the one own-take rule, so a take migrated from
+    // Codex counts. A bare id can't tell a verse from a section of an imported
+    // recording, so it keeps the strict test: tagged with the line's id.
+    if (typeof line === "string" ? audioIdSeededWith(t.audioId, line) : isOwnTake(line, t.audioId, t)) return true
   }
   return false
 }

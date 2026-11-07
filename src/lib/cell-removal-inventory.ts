@@ -12,7 +12,7 @@
 // for. It counts from the same data the surfaces already have — no fetch — so
 // the dialog cannot say something different from the table behind it.
 
-import { audioIdSeededWith } from "@/lib/audio/upload"
+import { isOwnTake } from "@/lib/audio/own-take"
 import { readImportMilestone } from "@/lib/milestone-navigation"
 import type { CellData } from "@/hooks/useCells"
 
@@ -52,13 +52,14 @@ export function buildCellRemovalInventory({
   commentCount,
   sharedTakeCount = 0,
 }: RemovalInventoryInput): CellRemovalInventory {
-  // `audioIdSeededWith` is what separates a take OF THIS CELL from the imported
-  // clip a whole file shares — counting the latter would tell someone they are
-  // about to destroy a recording that every other row also uses.
+  // The own-take rule (own-take.ts) is what separates a take OF THIS CELL from
+  // the imported clip a whole file shares — counting the latter would tell
+  // someone they are about to destroy a recording that every other row also
+  // uses. AQU-2411: a take migrated from Codex under an untagged id counts.
   let takeCount = 0
   for (const [audioId, att] of Object.entries(cell.attachments ?? {})) {
     if (att.isDeleted) continue
-    if (audioIdSeededWith(audioId, cell.id)) takeCount++
+    if (isOwnTake(cell, audioId, att)) takeCount++
   }
 
   const validatorCount = cell.activeValidators?.length ?? 0

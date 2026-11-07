@@ -134,6 +134,8 @@ const destinationLoaded = () => screen.findByTestId("project-create-destination"
 async function openDialog(orgId?: number) {
   render(<ProjectCreateDialog onCreated={vi.fn()} orgId={orgId} />)
   fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+  // The wizard asks where the project comes from first (AQU-2105).
+  fireEvent.click(screen.getByTestId("project-source-scratch"))
   await destinationLoaded()
 }
 
@@ -379,6 +381,8 @@ describe("ProjectCreateDialog — locks while it works (AQU-1519)", () => {
 
     // Reopening is a brand-new form, not the locked one it was abandoned in.
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
     await destinationLoaded()
     expect(screen.getByTestId("create-project-fields")).toBeEnabled()
     expect(screen.getByLabelText(/^Project name$/i)).toHaveValue("")

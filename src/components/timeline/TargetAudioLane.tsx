@@ -77,7 +77,7 @@ import type { CellData } from "@/hooks/useCells"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { takeBadgeState } from "@/components/cell/audio-validation-state"
 import { isHiddenCell } from "@/lib/cells/hidden"
-import { CHIP_VALIDATED_BADGE_CLASS, chipPlaylineClass } from "@/components/audio/chip-classes"
+import { chipPlaylineClass } from "@/components/audio/chip-classes"
 import type { TakeVoiceNote } from "@/lib/audio/take-voice"
 
 /** AQU-2235: a glyph in the name bar's right end — record, ⋯, play. No
@@ -1451,7 +1451,7 @@ function TargetAudioChip({
           className="pointer-events-none absolute bottom-1 left-6 z-10 flex max-w-[calc(100%-2rem)] min-w-0 items-center gap-1 rounded bg-background/70 px-1 text-[10px] leading-4 text-muted-foreground"
         >
           <Spinner className="size-3 shrink-0" />
-          <span className="truncate">{t("editor.voice.workingAs", { voice: voicingAs })}</span>
+          <span dir="auto" className="truncate">{t("editor.voice.workingAs", { voice: voicingAs })}</span>
         </span>
       )}
       {/* AQU-2235: THE NAME BAR (see `barH` above). Everything that used to
@@ -1497,6 +1497,8 @@ function TargetAudioChip({
               <span
                 ref={nameRef}
                 data-testid={`tl-target-${testKey}-name`}
+                // The take's name, in its own direction (AQU-2340).
+                dir="auto"
                 className="min-w-0 truncate font-semibold"
                 onDoubleClick={renameFromBar}
               >
@@ -1524,7 +1526,7 @@ function TargetAudioChip({
                 className="flex min-w-0 items-center gap-1 font-medium opacity-[0.72]"
               >
                 <Spinner className={barH >= 14 ? "h-2.5 w-2.5 shrink-0" : "h-[9px] w-[9px] shrink-0"} />
-                <span className="truncate">{t("editor.voice.workingAs", { voice: voicingAs })}</span>
+                <span dir="auto" className="truncate">{t("editor.voice.workingAs", { voice: voicingAs })}</span>
               </span>
             ) : null}
             {/* AQU-1758: the take's voice when it is not the line's, lighter;
@@ -1532,6 +1534,8 @@ function TargetAudioChip({
             {!voicingAs && barShowsVoice && (
               <span
                 data-testid={`tl-target-${testKey}-take-voice`}
+                // A voice's name, in its own direction (AQU-2340).
+                dir="auto"
                 className="min-w-0 truncate font-medium opacity-[0.72]"
               >
                 {voiceName}
@@ -1674,22 +1678,28 @@ function TargetAudioChip({
           )}
         </span>
       )}
-      {/* No bar (a clip under 30px): today's corner tick, as it always was. */}
+      {/* No bar (a clip under 30px): the approval is a thin strip along the
+          top edge, solid once the take is approved and paler while only you
+          have approved it, at any width. Nothing sits on the waveform: the
+          old corner tick was a 14px circle that covered a short or narrow
+          take and was cut off at its edge (Sam, Nov 2), and Logic shows a
+          short region the same way, as a strip of colour. */}
       {!hasBar && validatedState && (
         <span
+          role="img"
           data-testid={`tl-target-${testKey}-validated`}
+          data-state={validatedState}
           title={validatedState === "full"
             ? t("workspace.targetAudioLane.takeValidated")
             : t("workspace.targetAudioLane.takeValidatedByYou")}
           aria-label={validatedState === "full"
             ? t("workspace.targetAudioLane.takeValidated")
             : t("workspace.targetAudioLane.takeValidatedByYou")}
-          className={CHIP_VALIDATED_BADGE_CLASS}
-        >
-          {validatedState === "full"
-            ? <CheckCheck className="h-2.5 w-2.5" strokeWidth={3} />
-            : <Check className="h-2.5 w-2.5" strokeWidth={3} />}
-        </span>
+          className={cn(
+            "pointer-events-none absolute inset-x-0 top-0 z-10 h-[3px] rounded-t-[5px]",
+            validatedState === "full" ? "bg-green-500" : "bg-green-500/45",
+          )}
+        />
       )}
       {/* The preview's mini-playhead (2026-08-27, Sam): white, non-interactive,
           exists only while this chip's own preview sounds. Left/opacity are

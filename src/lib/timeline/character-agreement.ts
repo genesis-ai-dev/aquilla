@@ -26,14 +26,6 @@ export interface ComparableCell {
   original?: string
 }
 
-export type DisagreementKind =
-  /** The two sheets name different people. */
-  | "character"
-  /** Same person, different shot. */
-  | "camera"
-  /** Same person, spelled differently — a typo to fix in the source file. */
-  | "naming"
-
 /**
  * ONE ROW PER LINK, carrying every axis that disagrees — not one row per
  * disagreement.

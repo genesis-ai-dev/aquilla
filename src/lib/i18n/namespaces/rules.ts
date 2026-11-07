@@ -55,6 +55,8 @@ export const rules = defineNamespace({
     "rules.infraction.builtin.unpairedQuotes": "Unpaired quotation mark in translation",
     "rules.infraction.builtin.untranslatedFragment": "Source word left untranslated",
     "rules.infraction.builtin.lengthRatio": "Translation is much shorter or longer than the source",
+    "rules.infraction.builtin.scriptureReference":
+      "Scripture reference does not match the project's book names or the canon",
     "rules.infraction.builtin.placeholderIntegrity": plural({
       one: "Placeholder {tokens} missing in translation",
       other: "Placeholders {tokens} missing in translation",
@@ -114,6 +116,9 @@ export const rules = defineNamespace({
     "rules.builtin.lengthRatio.name": "Length mismatch",
     "rules.builtin.lengthRatio.description":
       "Translation is under 40% or over 250% of the source's length — a sign of a dropped or added clause. Off by default: normal length varies by language pair.",
+    "rules.builtin.scriptureReference.name": "Scripture references",
+    "rules.builtin.scriptureReference.description":
+      "Scripture references in the translation use the project's book names and name a chapter the canon has, with one separator throughout. Off by default: it needs the project's book names.",
 
     // ── Shared vocabulary ───────────────────────────────────────────────────
     "rules.severity.major": "Major",
@@ -646,6 +651,24 @@ export const rules = defineNamespace({
         description:
           "Finding shown on a row when the translation is far shorter or longer than the source, which " +
           "can mean part of the text was dropped or added.",
+      },
+      "rules.builtin.scriptureReference.name": {
+        description:
+          "Name of a built-in quality check in the built-in checks list. It flags a scripture " +
+          "reference (like \"John 3:16\") written with a book name the project does not use, or " +
+          "naming a chapter that does not exist. Short, like the other check names.",
+        maxLength: 30,
+      },
+      "rules.builtin.scriptureReference.description": {
+        description:
+          "One-line description under that check's name in the built-in checks list. The check is " +
+          "off by default because it needs the project's own book names.",
+      },
+      "rules.infraction.builtin.scriptureReference": {
+        description:
+          "Finding shown on a row when a scripture reference in the translation uses a book name the " +
+          "project does not use, names a chapter the Bible does not have, or separates chapter and " +
+          "verse differently from the other references in the same row.",
       },
       "rules.builtin.numberIntegrityExtra.name": {
         description:

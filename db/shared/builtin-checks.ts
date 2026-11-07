@@ -37,6 +37,7 @@ export const TEXT_CHECK_IDS = [
   'unpaired-quotes',
   'untranslated-fragment',
   'length-ratio',
+  'scripture-reference',
 ] as const
 export type TextCheckId = (typeof TEXT_CHECK_IDS)[number]
 
@@ -78,6 +79,10 @@ export const TEXT_CHECK_META: Readonly<Record<TextCheckId, TextCheckMeta>> = {
   "unpaired-quotes": { id: "unpaired-quotes", name: "Unpaired quotes", defaultSeverity: "minor", defaultEnabled: true },
   "untranslated-fragment": { id: "untranslated-fragment", name: "Untranslated words", defaultSeverity: "minor", defaultEnabled: true },
   "length-ratio": { id: "length-ratio", name: "Length mismatch", defaultSeverity: "minor", defaultEnabled: false },
+  // AQU-1735: off by default — the book-name half only means anything once the
+  // project has book names to compare against (Paratext's References row
+  // likewise needs its scripture-reference settings first).
+  "scripture-reference": { id: "scripture-reference", name: "Scripture references", defaultSeverity: "minor", defaultEnabled: false },
 }
 
 /** English names of the Bible data checks. Severity comes from db/shared/bible-checks/types.ts. */

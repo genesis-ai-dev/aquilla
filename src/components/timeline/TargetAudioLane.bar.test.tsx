@@ -389,7 +389,7 @@ describe("double-click the name to rename", () => {
     expect(onSeek).not.toHaveBeenCalled()
   })
 
-  it("renames a piece's whole take, by the take's own name", () => {
+  it("renames just that piece, from the name it is shown by (decision 7)", () => {
     const PIECE = "audio-c1-1700000500-piece.webm"
     const c = cell({
       [TAKE]: { type: "audio", url: "frontier-audio://t", slot: "recording", label: "Take 2 · 1", durationMs: 8000, trimEndMs: 3000 },
@@ -407,7 +407,7 @@ describe("double-click the name to rename", () => {
       />,
     )
     fireEvent.doubleClick(screen.getByTestId("tl-target-c1-p2-name"))
-    expect(actions.rename).toHaveBeenCalledWith("c1", PIECE, "Take 2")
+    expect(actions.rename).toHaveBeenCalledWith("c1", PIECE, "Take 2 · 2")
   })
 
   // A real browser never delivers that double-click to the name: the press

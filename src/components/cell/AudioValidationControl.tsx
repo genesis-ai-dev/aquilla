@@ -26,6 +26,12 @@ import { ValidatedOnLine } from "./ValidatedOnLine"
 
 export interface AudioValidationTake {
   audioId: string
+  /**
+   * Slice 3A: set on each piece of a cut take (the group's id). Pieces are
+   * approved one by one (decision 7), so a press on the line's control opens
+   * the list of pieces instead of voting on all of them at once.
+   */
+  pieceOf?: string
   /** The take's display name, or null to fall back to the track label. */
   label: string | null
   /** Which track it sits on. "recording" is the default track. */
@@ -279,6 +285,15 @@ export function AudioValidationControl({
     0,
   )
   const clickable = !readOnly && mineToGive.length > 0
+  // Slice 3A (decision 7): a cut take's pieces are approved one by one, each
+  // where it can be heard. While a piece still lacks my vote, a press opens
+  // the list of pieces, each with its own "Validate this piece", instead of
+  // voting on every piece at once (the old whole-take approve, removed). One
+  // left to give is just that piece, so a press votes on it, which is also
+  // how a surface showing a single piece (its row, its chip) keeps working.
+  const pressOpensPieces = clickable && mineToGive.length > 1
+    && mineToGive.some((take) => take.pieceOf != null)
+  const pressVotes = clickable && !pressOpensPieces
   // Why the viewer cannot add a vote, for the foot of the list. Nothing when
   // they can, or when every take already carries theirs. Read-only, it is
   // why nobody can vote HERE.
@@ -306,6 +321,8 @@ export function AudioValidationControl({
     // the news, whatever the recorded parts say.
     : unrecorded.length > 0 && !clickable
     ? t("editor.audioValidation.ariaPartUnrecorded", { ref: cellRef })
+    : pressOpensPieces
+    ? t("editor.audioValidation.ariaPiecesOneByOne", { done: mineDone, total: recorded.length, ref: cellRef })
     : state === "full"
     // "Click to remove your validation" only when there IS one of mine on
     // every take. A line others finished used to say it to someone who had
@@ -320,7 +337,11 @@ export function AudioValidationControl({
           ? t("editor.audioValidation.ariaYoursMoreNeeded", { ref: cellRef, count: shortBy })
           : t("editor.audioValidation.ariaValidated", { ref: cellRef }))
       : showFraction
-        ? t("editor.audioValidation.ariaPartlyValidated", {
+        // Slice 3A: a cut take's pieces are pieces, here too. With one piece
+        // left a press votes on it alone, so "the rest" is that piece.
+        ? t(recorded.every((take) => take.pieceOf != null)
+            ? "editor.audioValidation.ariaPiecesPartlyValidated"
+            : "editor.audioValidation.ariaPartlyValidated", {
             done: mineDone, total: recorded.length, ref: cellRef,
           })
         : state === "others"
@@ -447,7 +468,7 @@ export function AudioValidationControl({
       // A press on a line the viewer can still act on is the VOTE, not the
       // popover — the same bargain the text control strikes. Once there is
       // nothing left to give, the press opens the list instead.
-      if ((details.reason === "trigger-press" || details.reason === "keyboard") && clickable) {
+      if ((details.reason === "trigger-press" || details.reason === "keyboard") && pressVotes) {
         details.cancel()
         return
       }
@@ -455,8 +476,9 @@ export function AudioValidationControl({
     }}>
       {/* AQU-2260 (Oct 29, third pass): the list opens on a click, never on
           hover — on the check itself where a press does not vote, and on
-          the (i) under it where it does. */}
-      <PopoverTrigger render={renderButton(clickable ? validateAll : undefined)} />
+          the (i) under it where it does. Slice 3A: a press opens the list of
+          pieces instead of voting when there is more than one to validate. */}
+      <PopoverTrigger render={renderButton(pressVotes ? validateAll : undefined)} />
       <PopoverContent side="right" align="start" className="w-72 rounded-xl p-2">
         <ul className="space-y-1">
           {/* "Audio validated by", the twin of the text list's "Text validated
@@ -486,7 +508,11 @@ export function AudioValidationControl({
               <li key={take.audioId} className="rounded text-xs">
                 {displayed.length > 1 && (
                   <div className="mb-0.5 flex items-center gap-1 px-1 font-medium">
-                    <span className="truncate">{trackLabel(take)}</span>
+                    {/* Wraps, never truncates: a piece's own name ends the
+                        label ("“I'm scared.” · Target audio · Take 2 · 1"),
+                        and cut off it left every piece's row reading the same
+                        (slice 3A evidence, Oct 27). */}
+                    <span data-testid="audio-validation-take-label" className="min-w-0 break-words">{trackLabel(take)}</span>
                     {short > 0 && (
                       <span className="ms-auto shrink-0 text-[10px] font-normal text-muted-foreground">
                         {t("editor.audioValidation.needsMore", { count: short })}
@@ -499,7 +525,11 @@ export function AudioValidationControl({
                     {t("editor.audioValidation.notRecorded")}
                   </div>
                 ) : take.validators.length === 0 ? (
-                  <div className="px-1 py-1 text-muted-foreground">{t("editor.audioValidation.noValidators")}</div>
+                  <div className="px-1 py-1 text-muted-foreground">
+                    {take.pieceOf != null
+                      ? t("editor.audioValidation.noValidatorsPiece")
+                      : t("editor.audioValidation.noValidators")}
+                  </div>
                 ) : (
                   // The same breath between names as the text list's.
                   <ul className="space-y-0.5">
@@ -551,7 +581,9 @@ export function AudioValidationControl({
                     className="mt-0.5 rounded px-1 py-0.5 text-[11px] text-green-600 hover:bg-muted/60"
                     onClick={() => change(take.audioId, true)}
                   >
-                    {t("editor.audioValidation.validateThisTake")}
+                    {take.pieceOf != null
+                      ? t("editor.audioValidation.validateThisPiece")
+                      : t("editor.audioValidation.validateThisTake")}
                   </button>
                 )}
               </li>
@@ -587,7 +619,9 @@ export function AudioValidationControl({
   // hover is kept only where a click validates ("Audio not validated — click
   // to validate"); why a click would NOT opens on that click, in a small note
   // anchored to the check, and shuts on a second one.
-  const listInfo = hasVoterInfo && clickable ? (
+  // Slice 3A: where a press opens the pieces' list, the list needs no (i) of
+  // its own; the (i) is for lines where a press votes.
+  const listInfo = hasVoterInfo && pressVotes ? (
     <button
       ref={listInfoRef}
       type="button"
@@ -603,7 +637,9 @@ export function AudioValidationControl({
       <Info className="h-3 w-3" aria-hidden="true" />
     </button>
   ) : null
-  const wrapped = hasVoterInfo
+  // Pieces open their list even before anyone has voted: it is where each
+  // one is validated (slice 3A).
+  const wrapped = hasVoterInfo || pressOpensPieces
     ? <Fragment key="list">{body}{listInfo}</Fragment>
     : clickable
       ? (

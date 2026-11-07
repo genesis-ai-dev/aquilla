@@ -8,6 +8,7 @@ import { injectOptimisticAudioRemove, notifyAudioAttachmentsChanged } from "@/li
 import { audioIdSeededWith } from "@/lib/audio/upload"
 import { isOwnTake, type TakeLine } from "@/lib/audio/own-take"
 import { recordStep, withGroup } from "@/lib/history/history"
+import { wholeTakeRenames } from "@/lib/audio/take-groups"
 
 /**
  * Remove one take. SUB-48: the remove gets its own overlay, so the take leaves
@@ -158,10 +159,12 @@ export async function renameTake(args: {
 }
 
 /**
- * AQU-1767 (Sam, 2026-10-15): rename a split take — every piece, as ONE Undo
- * step. Each is stored as the new name numbered by where it sits in the
- * recording, the way the pieces are shown anyway (pieceNames works the
- * numbers out every time, whatever a piece has stored).
+ * AQU-1767 (Sam, 2026-10-15): rename a split take as a whole, as ONE Undo
+ * step. Each piece that goes by the take's name is stored as the new name
+ * numbered by where it sits in the recording, the way the pieces are shown
+ * anyway (pieceNames works the numbers out every time, whatever a piece has
+ * stored). A piece renamed on its own keeps its name (decision 7;
+ * `wholeTakeRenames` has the rule).
  */
 export async function renameWholeTake(args: {
   projectId: string
@@ -175,9 +178,7 @@ export async function renameWholeTake(args: {
 }): Promise<void> {
   const { pieces, name, ...where } = args
   await withGroup({ labelKey: "editor.history.stepRenameTake", fileId: args.fileId }, async () => {
-    for (const [i, piece] of pieces.entries()) {
-      await renameTake({ ...where, audioId: piece.audioId, label: `${name} · ${i + 1}`, labelBefore: piece.label ?? null })
-    }
+    for (const rename of wholeTakeRenames(pieces, name)) await renameTake({ ...where, ...rename })
   }, { alwaysGroup: true, owns: { cells: [args.cellId], kinds: ["take."] } })
 }
 

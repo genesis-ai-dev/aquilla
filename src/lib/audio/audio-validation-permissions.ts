@@ -10,6 +10,7 @@
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { AudioValidationTake } from "@/components/cell/AudioValidationControl"
 import {
+  pieceGroupOf,
   selectedDubTakes,
   type AudioAttachmentOut,
   type CellAudioEntry,
@@ -173,10 +174,20 @@ export function audioValidationTakes(
   const scope = audioValidationScope(project, policy)
   // AQU-1767: a piece goes by its take's name, numbered by where it sits.
   const names = pieceNames(Object.values(entry.attachments))
-  return selectedDubTakes(entry).map((take) => {
+  const selected = selectedDubTakes(entry)
+  // Slice 3A: which of them are pieces of a cut take (a group with more than
+  // one member), so a surface can keep each piece's approval its own.
+  const groupSize = new Map<string, number>()
+  for (const take of selected) {
+    const group = pieceGroupOf(take, take.audioId)
+    groupSize.set(group, (groupSize.get(group) ?? 0) + 1)
+  }
+  return selected.map((take) => {
     const verdict = canValidateTake(take, project, scope, policy.username)
+    const group = pieceGroupOf(take, take.audioId)
     return {
       audioId: take.audioId,
+      ...((groupSize.get(group) ?? 0) > 1 ? { pieceOf: group } : {}),
       label: names.get(take.audioId) ?? take.label ?? null,
       slot: take.slot,
       validatorCount: take.validatorCount ?? 0,
@@ -187,6 +198,24 @@ export function audioValidationTakes(
       ...(verdict.reason ? { blockedReason: reasonText(verdict.reason) } : {}),
     }
   })
+}
+
+/**
+ * Whether the viewer may vote on ONE take, and whether they have: what the
+ * timeline's right-click menu asks of the chip it opened on. A piece of a cut
+ * take answers for itself alone (decision 7, replacing Sam's 2026-10-15 ruling
+ * that a piece answered for its whole take). A take the line does not measure
+ * (not selected, or the source clip) takes no vote.
+ */
+export function takeVoteState(
+  entry: CellAudioEntry | undefined,
+  project: Parameters<typeof audioValidationTakes>[1],
+  policy: AudioValidationPolicy,
+  audioId: string,
+): { canVote: boolean; voted: boolean } {
+  const take = audioValidationTakes(entry, project, policy, () => "")
+    .find((x) => x.audioId === audioId && x.canValidate)
+  return { canVote: take != null, voted: take != null && take.validators.includes(policy.username) }
 }
 
 /** Where a take a line's audio check stands for LIVES: the row's own cell, or

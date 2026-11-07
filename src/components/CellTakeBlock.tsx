@@ -56,9 +56,10 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 import type { CodexCell, WordTiming } from "@/lib/codex-editor/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { AudioValidationControl } from "./cell/AudioValidationControl"
+import { PiecesApproved } from "./audio/PiecesApproved"
 import { useAudioValidation } from "@/hooks/useAudioValidation"
 import { hasOwnRecordingLeft, removeTake, removeWholeTake, renameTake, renameWholeTake } from "@/lib/audio/take-actions"
-import { takeBaseLabel } from "@/lib/audio/take-groups"
+import { splitTakeName } from "@/lib/audio/take-groups"
 import { pieceGroupOf, type AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
 import { TakesStrip, nextTakeLabel } from "@/components/AudioRecorder/TakesStrip"
 import { attachmentOutFrom } from "@/lib/audio/cut-take"
@@ -138,9 +139,10 @@ export interface CellTakeBlockProps {
    * AQU-1767 (Sam, 2026-10-14): the take that plays was SPLIT — its live
    * pieces, in clip order. It shows as one take ("Take 1 · split in 2"): one
    * waveform with the pieces lit and the cuts marked, Transcribe and Remove
-   * noise on the whole take, delete removing every piece, the approval
-   * covering every piece, and a row per piece under it (play, approve, rename,
-   * delete). Absent, or one piece: a take as before.
+   * noise on the whole take, delete removing every piece, and a row per piece
+   * under it (play, approve, rename, delete). Each piece is approved and named
+   * on its own there (decision 7), so the take itself takes no vote. Absent,
+   * or one piece: a take as before.
    */
   pieces?: readonly AudioAttachmentOut[]
   /** The line's take history, already read by the tab — for the piece rows. */
@@ -237,10 +239,17 @@ function CellTakeBlockView({
     surface: "recording-tab",
   })
   const split = pieces && pieces.length > 1 ? pieces : null
-  // A split take is approved as a whole from here: one press, every piece.
-  const validationTakes = split
-    ? split.flatMap((piece) => audioValidation.takeFor(owner, piece.audioId))
-    : audioValidation.takeFor(owner, selectedAudioId)
+  // A split take has no vote of its own: each piece is approved on its row
+  // below (decision 7, replacing Sam's 2026-10-15 ruling that the take was
+  // approved whole from here). It says how many of them are, read-only (Sam,
+  // 2026-10-22).
+  const validationTakes = split ? [] : audioValidation.takeFor(owner, selectedAudioId)
+  const pieceVotes = split
+    ? audioValidation.takesFor({
+        attachments: Object.fromEntries(split.map((p) => [p.audioId, p])),
+        selectedBySlot: { [split[0].slot]: split[0].audioId },
+      })
+    : []
 
   // AQU-1217: the part of the clip that plays for this line — the take's
   // stored trim, or, for an imported source-audio section, the section itself.
@@ -393,8 +402,11 @@ function CellTakeBlockView({
   const renameCancelledRef = useRef(false)
   const [renamed, setRenamed] = useState<{ audioId: string; from: string | null; to: string } | null>(null)
   const storedLabel = attachment?.label ?? null
+  // A split take goes by the name its pieces share; a piece renamed on its own
+  // does not change it (decision 7).
+  const takeName = split ? splitTakeName(split) : storedLabel
   const shownLabel =
-    renamed && renamed.audioId === selectedAudioId && renamed.from === storedLabel ? renamed.to : storedLabel
+    renamed && renamed.audioId === selectedAudioId && renamed.from === takeName ? renamed.to : takeName
   const commitRename = useCallback(async () => {
     setRenaming(false)
     if (renameCancelledRef.current) { renameCancelledRef.current = false; return }
@@ -402,9 +414,9 @@ function CellTakeBlockView({
     // Against the name as SHOWN: an unnamed take shows "Take", and saving
     // that unchanged would turn the placeholder into a real name. A split
     // take is shown, and renamed, by its own name (AQU-1767, Sam 2026-10-15).
-    const shownName = (split ? takeBaseLabel(shownLabel) : shownLabel) ?? t("audio.takesStrip.takeFallback")
+    const shownName = shownLabel ?? t("audio.takesStrip.takeFallback")
     if (!selectedAudioId || !label || label === shownName) return
-    setRenamed({ audioId: selectedAudioId, from: storedLabel, to: label })
+    setRenamed({ audioId: selectedAudioId, from: takeName, to: label })
     // Worked out before the try: a conditional inside one makes the React
     // Compiler skip the whole component (see handleDelete).
     const lane = targetLang ? { targetLang } : {}
@@ -417,7 +429,7 @@ function CellTakeBlockView({
     } catch {
       setRenamed(null)
     }
-  }, [renameDraft, selectedAudioId, shownLabel, storedLabel, split, project.id, owner.fileId, owner.id, username, t, targetLang])
+  }, [renameDraft, selectedAudioId, shownLabel, storedLabel, takeName, split, project.id, owner.fileId, owner.id, username, t, targetLang])
 
   const handleCorrectTranscript = useCallback(
     (corrected: string) => {
@@ -449,7 +461,7 @@ function CellTakeBlockView({
   const showTranscript = Boolean(timings && timings.length > 0) && (isSection || verdict.kind !== "match")
   const label = isSection
     ? t("editor.recordingTab.sourceSection")
-    : (split ? takeBaseLabel(shownLabel) : shownLabel) ?? t("audio.takesStrip.takeFallback")
+    : shownLabel ?? t("audio.takesStrip.takeFallback")
   // The length that PLAYS (AQU-1217: a trimmed take shows its trimmed
   // length) — the head said the whole file's while the timer under it said
   // the kept part's.
@@ -495,7 +507,9 @@ function CellTakeBlockView({
         ) : (
           <span data-testid="cell-take-label" className="font-medium">{label}</span>
         )}
-        {split && (
+        {/* Slice 3A (Sam, Oct 29): not beside the pieces count below, which
+            says how many pieces the take is in. */}
+        {split && pieceVotes.length === 0 && (
           <span data-testid="cell-take-split" className="text-muted-foreground">
             · {t("editor.recordingTab.splitInto", { count: split.length })}
           </span>
@@ -544,7 +558,8 @@ function CellTakeBlockView({
             testId="cell-take-verdict"
           />
         )}
-        {/* A split take is renamed whole, here; its pieces follow, numbered. */}
+        {/* A split take is renamed whole, here: the pieces that go by its
+            name follow, numbered; a piece renamed on its own keeps its name. */}
         {!isSection && selectedAudioId && !renaming && (
           <AppTooltip content={t("audio.takesStrip.renameTooltip")}>
             <Button
@@ -577,7 +592,16 @@ function CellTakeBlockView({
             else is said about the take — and the vote (Sam, 2026-09-30).
             This is the take that PLAYS, heard right here, so it can be
             validated here as from the line's audio check; the takes listed
-            under it show theirs read-only. */}
+            under it show theirs read-only. A split take's pieces carry theirs
+            on their own rows instead, and the take says how many are
+            approved. */}
+        {split && (
+          <PiecesApproved
+            pieces={pieceVotes}
+            requirement={audioValidation.validationRequirement}
+            testId="cell-take-pieces-approved"
+          />
+        )}
         {validationTakes.length > 0 && (
           <span data-testid="cell-take-validation" className="flex items-center">
             <AudioValidationControl
@@ -743,7 +767,8 @@ function CellTakeBlockView({
       </TakeWaveform>
       {split && (
         // A row per piece (Sam, 2026-10-14): play it, approve it, rename it,
-        // delete it.
+        // delete it. Approving and renaming are the piece's alone (decision 7);
+        // choosing stays with the whole take.
         <TakesStrip
           variant="pieces"
           projectId={project.id}

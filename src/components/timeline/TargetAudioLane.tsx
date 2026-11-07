@@ -56,7 +56,7 @@ import { clampMoveStart, movedTakePlace, pieceLeadInTakeSec, type TakePlace } fr
 import { sourceClipAudioForCell } from "@/lib/audio/track-audio"
 import { canCutAt } from "@/lib/audio/cut-take"
 import { pieceTrimLimitsMs } from "@/lib/sync/cell-audio-read-types"
-import { takeBaseLabel } from "@/lib/audio/take-groups"
+import { pieceNameIn, takeBaseLabel } from "@/lib/audio/take-groups"
 import { snapSpan, SNAP_THRESHOLD_PX } from "@/lib/timeline/snap"
 import { TRACK_BAR_CLASS, TRACK_CHIP_CLASS, TRACK_CHIP_PLAYING_CLASS, WAVE_LOOK, trackHueVars } from "@/lib/timeline/track-colors"
 import { isDenoisedAudioId } from "@/lib/audio/upload"
@@ -1021,8 +1021,9 @@ function TargetAudioChip({
     editable && !blade && takeMenu?.rename
       ? (e: React.MouseEvent) => {
           e.stopPropagation()
-          // A piece renames its whole take, by the take's own name — the menu's call.
-          takeMenu.rename?.(cell.id, chip.item.audioId, (isPiece ? takeBaseLabel(chipTake?.label) : chipTake?.label) ?? null)
+          // A piece is renamed on its own, from the name it is shown by
+          // (decision 7) — the menu's call.
+          takeMenu.rename?.(cell.id, chip.item.audioId, (isPiece ? pieceNameIn(cell.attachments, chip.item.audioId) : chipTake?.label) ?? null)
         }
       : undefined
   // The name's node, because a real double-click on it does NOT arrive there:
@@ -1908,8 +1909,8 @@ function TargetAudioChip({
               onClick={() => takeMenu?.vote?.(cell.id, audioId, !vote.voted)}
             >
               {vote.voted ? <X className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />}
-              {/* A piece is approved with its whole take (Sam, 2026-10-15). */}
-              {t(vote.voted ? "editor.timeline.takeMenuUnapprove" : "editor.timeline.takeMenuApprove")}
+              {/* A piece is approved on its own (decision 7). */}
+              {t(vote.voted ? "editor.timeline.takeMenuUnapprove" : isPiece ? "editor.timeline.takeMenuApprovePiece" : "editor.timeline.takeMenuApprove")}
             </ContextMenuItem>
           </>
         )}
@@ -1917,8 +1918,9 @@ function TargetAudioChip({
         {takeMenu?.rename && (
           <ContextMenuItem
             data-testid="tl-take-menu-rename"
-            // A piece renames its whole take, by the take's own name.
-            onClick={() => takeMenu.rename?.(cell.id, audioId, (isPiece ? takeBaseLabel(chipTake?.label) : chipTake?.label) ?? null)}
+            // A piece is renamed on its own, from the name it is shown by
+            // (decision 7).
+            onClick={() => takeMenu.rename?.(cell.id, audioId, (isPiece ? pieceNameIn(cell.attachments, audioId) : chipTake?.label) ?? null)}
           >
             <Pencil className="h-3.5 w-3.5" />
             {t("editor.timeline.takeMenuRename")}

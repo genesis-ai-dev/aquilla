@@ -22,7 +22,8 @@ pub fn run() {
         .register_uri_scheme_protocol(about::SCHEME, about::serve_request)
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_deep_link::init())
-        .plugin(tauri_plugin_opener::init());
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init());
 
     #[cfg(debug_assertions)]
     {
@@ -121,6 +122,7 @@ pub fn run() {
                     paratext::paratext_read_file,
                     paratext::paratext_hash_file,
                     paratext::paratext_write_book,
+                    paratext::paratext_write_notes,
                     paratext::paratext_watch,
                     paratext::paratext_unwatch,
                     paratext::paratext_is_running,
@@ -160,6 +162,7 @@ pub fn run() {
                     paratext::paratext_read_file,
                     paratext::paratext_hash_file,
                     paratext::paratext_write_book,
+                    paratext::paratext_write_notes,
                     paratext::paratext_watch,
                     paratext::paratext_unwatch,
                     paratext::paratext_is_running,

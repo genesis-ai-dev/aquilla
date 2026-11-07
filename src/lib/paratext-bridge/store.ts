@@ -2,6 +2,8 @@
 // on the device: pending edits, Aquilla's write log (previous/new rawHash per
 // unit, for clobber detection), the unit set Aquilla last saw per book, the
 // blob hashes of its own writes (echo detection) and per-book holds.
+// Version 2 adds `links`: which Aquilla project mirrors which Paratext project
+// (so the regular editor can write a book back through the bridge).
 //
 // Keys follow the plan: `pt:{projectGuid}:{unitId}` for unit-level rows and
 // `pt:{projectGuid}:{book}` for book-level rows.
@@ -17,6 +19,21 @@ interface BridgeSchema extends DBSchema {
   lastSeen: { key: string; value: { key: string; projectGuid: string; book: string; units: UnitSet; seenAt: number } }
   ownBlobs: { key: string; value: { key: string; projectGuid: string; book: string; blobHash: string; writtenAt: number }; indexes: { byBook: [string, string] } }
   holds: { key: string; value: { key: string; projectGuid: string; book: string; reason: "clobber"; since: number } }
+  links: { key: string; value: MirrorLink & { key: string }; indexes: { byProject: string } }
+}
+
+/** A Paratext project mirrored into a regular Aquilla project. One per GUID. */
+export interface MirrorLink {
+  projectGuid: string
+  /** Paratext project folder, as discovery reported it. */
+  projectPath: string
+  /** The Aquilla project the books were imported into. */
+  projectId: string
+  /** Book code → the Aquilla file that holds it and the SFM it came from. */
+  books: Record<string, { fileId: string; fileName: string }>
+  /** Target lane tag the import wrote (`''` = default lane). */
+  targetLang: string
+  createdAt: number
 }
 
 const DB_NAME = "aquilla-paratext-bridge"
@@ -24,13 +41,18 @@ const DB_NAME = "aquilla-paratext-bridge"
 let dbPromise: Promise<IDBPDatabase<BridgeSchema>> | null = null
 
 function db(): Promise<IDBPDatabase<BridgeSchema>> {
-  dbPromise ??= openDB<BridgeSchema>(DB_NAME, 1, {
-    upgrade(d) {
-      d.createObjectStore("pendingEdits", { keyPath: "key" }).createIndex("byBook", ["projectGuid", "book"])
-      d.createObjectStore("writeLog", { keyPath: "key" }).createIndex("byBook", ["projectGuid", "book"])
-      d.createObjectStore("lastSeen", { keyPath: "key" })
-      d.createObjectStore("ownBlobs", { keyPath: "key" }).createIndex("byBook", ["projectGuid", "book"])
-      d.createObjectStore("holds", { keyPath: "key" })
+  dbPromise ??= openDB<BridgeSchema>(DB_NAME, 2, {
+    upgrade(d, oldVersion) {
+      if (oldVersion < 1) {
+        d.createObjectStore("pendingEdits", { keyPath: "key" }).createIndex("byBook", ["projectGuid", "book"])
+        d.createObjectStore("writeLog", { keyPath: "key" }).createIndex("byBook", ["projectGuid", "book"])
+        d.createObjectStore("lastSeen", { keyPath: "key" })
+        d.createObjectStore("ownBlobs", { keyPath: "key" }).createIndex("byBook", ["projectGuid", "book"])
+        d.createObjectStore("holds", { keyPath: "key" })
+      }
+      if (oldVersion < 2) {
+        d.createObjectStore("links", { keyPath: "key" }).createIndex("byProject", "projectId")
+      }
     },
   })
   return dbPromise
@@ -98,5 +120,24 @@ export const bridgeStore = {
     const d = await db()
     if (on) await d.put("holds", { key: bookKey(guid, book), projectGuid: guid, book, reason: "clobber", since: Date.now() })
     else await d.delete("holds", bookKey(guid, book))
+  },
+
+  async link(guid: string): Promise<MirrorLink | null> {
+    const row = await (await db()).get("links", `pt:${guid}`)
+    if (!row) return null
+    const { key: _key, ...link } = row
+    return link
+  },
+  async linkForProject(projectId: string): Promise<MirrorLink | null> {
+    const row = await (await db()).getFromIndex("links", "byProject", projectId)
+    if (!row) return null
+    const { key: _key, ...link } = row
+    return link
+  },
+  async putLink(link: MirrorLink): Promise<void> {
+    await (await db()).put("links", { ...link, key: `pt:${link.projectGuid}` })
+  },
+  async deleteLink(guid: string): Promise<void> {
+    await (await db()).delete("links", `pt:${guid}`)
   },
 }

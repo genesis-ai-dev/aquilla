@@ -450,6 +450,7 @@ import { OrgBreadcrumb } from "./org/OrgBreadcrumb"
 import { WorkspaceHeader } from "./WorkspaceHeader"
 import { DcsSyncBadgeMount } from "@/components/dcs/DcsSyncBadge"
 import { LangQuestLinkBadge } from "@/components/langquest/LangQuestLinkBadge"
+import { ParatextBridgeBadge } from "@/components/paratext/ParatextBridgeBadge"
 import { useEditorLensPreference } from "@/hooks/useEditorLensPreference"
 import type { EditorLens } from "@/components/EditorModeToggle"
 import { TranscribeEditor, type TranscribeEditorHandle } from "@/components/transcribe/TranscribeEditor"
@@ -17469,6 +17470,18 @@ export function ProjectWorkspace() {
                 renders nothing when the project has no LangQuest link. */}
             {project && projectId && (
               <LangQuestLinkBadge projectId={projectId} roleLevel={serverRoleLevel} />
+            )}
+            {/* Paratext bridge (desktop): "Write to Paratext" + live inbound sync
+                on a project mirroring a Paratext project. Self-gated: renders
+                nothing in the browser or on an unlinked project. */}
+            {project && projectId && (
+              <ParatextBridgeBadge
+                projectId={projectId}
+                fileId={activeFileId}
+                lane={activeLane}
+                author={currentUsername}
+                getToken={getTokenForFile}
+              />
             )}
             {/* AQU-661: file-scoped actions live in the chapter-row File options
                 menu; Import + Settings stay as header buttons on this

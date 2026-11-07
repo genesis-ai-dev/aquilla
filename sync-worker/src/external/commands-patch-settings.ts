@@ -84,6 +84,9 @@ export const POLICY_SETTINGS_KEYS: readonly string[] = [
   // AQU-1068: the tier that decides who may add and remove cells. An agent
   // that could raise this could authorise its own restructuring of a file.
   'cellEditingFloor',
+  // AQU-2408: who may type a label on a cell. Lowering it to Project lead
+  // widens who can rename what a cell is called, so it is stricter-only too.
+  'cellLabelFloor',
   // AQU-1180: the switch that hides translator identity from agents. An agent
   // able to flip this could talk a human into approving a settings changeset
   // that turns its own team's names back on.

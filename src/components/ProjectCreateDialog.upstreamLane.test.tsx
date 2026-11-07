@@ -104,6 +104,8 @@ const LANES_TWO = [
 
 function fillBasics(): void {
   fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+  // The wizard asks where the project comes from first (AQU-2105).
+  fireEvent.click(screen.getByTestId("project-source-scratch"))
   fireEvent.change(screen.getByPlaceholderText("My translation project"), {
     target: { value: "Chaluba NT" },
   })

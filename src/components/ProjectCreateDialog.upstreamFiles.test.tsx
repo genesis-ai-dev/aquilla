@@ -119,6 +119,8 @@ function fillRequiredFields() {
 function openAdvanced() {
   render(<ProjectCreateDialog onCreated={vi.fn()} />)
   fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+  // The wizard asks where the project comes from first (AQU-2105).
+  fireEvent.click(screen.getByTestId("project-source-scratch"))
   fillRequiredFields()
   fireEvent.click(screen.getByText("Advanced: project shape"))
 }

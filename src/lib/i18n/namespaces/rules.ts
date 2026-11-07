@@ -169,6 +169,28 @@ export const rules = defineNamespace({
     }),
     "rules.checkDrawer.caseExceptionsLearned":
       "Not flagged — recurring in this text, so treated as the project's own spelling: {forms}",
+    // ── Spelling / project wordlist (AQU-1737) ──
+    "rules.checkDrawer.spelling": "Spelling ({count})",
+    "rules.checkDrawer.spellingSoundsLike": plural({
+      one: 'Sounds like "{suggestion}", which this text writes {suggestionCount} time.',
+      other: 'Sounds like "{suggestion}", which this text writes {suggestionCount} times.',
+    }),
+    "rules.checkDrawer.spellingCloseTo": plural({
+      one: 'Almost "{suggestion}", which this text writes {suggestionCount} time.',
+      other: 'Almost "{suggestion}", which this text writes {suggestionCount} times.',
+    }),
+    "rules.checkDrawer.approveSpelling": "Approve",
+    "rules.checkDrawer.approveSpellingAriaLabel": 'Approve the spelling "{form}" everywhere it occurs',
+    "rules.checkDrawer.spellingApproved": plural({
+      one: "{count} spelling approved — every occurrence cleared.",
+      other: "{count} spellings approved — every occurrence cleared.",
+    }),
+    "rules.checkDrawer.spellingAutoApproved":
+      "Not flagged — written often enough in this text to be treated as correct: {forms}",
+    "rules.checkDrawer.wordlistSize": plural({
+      one: "Wordlist: {count} word form.",
+      other: "Wordlist: {count} word forms.",
+    }),
     "rules.checkDrawer.otherTermsClean": plural({
       one: "{count} other term checked with no issues.",
       other: "{count} other terms checked with no issues.",
@@ -799,6 +821,50 @@ export const rules = defineNamespace({
         description:
           "Footnote under the mixed-capitalization section naming the word forms the check learned to allow because they recur in the project's own text (a noun-class prefix like 'kiSwahili', a brand name). Lets a reviewer confirm or reject what was let through.",
         placeholders: { forms: "The excepted word forms, comma-joined — raw cell content, never translated." },
+      },
+      "rules.checkDrawer.spelling": {
+        description:
+          "Section heading in the check-file findings drawer, counting suspected misspellings — rare word forms that look or sound like a form the project writes often.",
+        placeholders: { count: "Number of suspected misspellings." },
+      },
+      "rules.checkDrawer.spellingSoundsLike": {
+        description:
+          "Headline of one spelling card, under the suspected word form itself (raw cell content, never translated). Says which spelling the project usually writes, because the two forms fold to the same sound.",
+        placeholders: {
+          suggestion: "The spelling the project usually writes — raw cell content, never translated.",
+          suggestionCount: "How many times the project writes that spelling.",
+        },
+      },
+      "rules.checkDrawer.spellingCloseTo": {
+        description:
+          "Same as rules.checkDrawer.spellingSoundsLike, but for a form that is only a character or two away from the usual spelling rather than a sound-alike of it.",
+        placeholders: {
+          suggestion: "The spelling the project usually writes — raw cell content, never translated.",
+          suggestionCount: "How many times the project writes that spelling.",
+        },
+      },
+      "rules.checkDrawer.approveSpelling": {
+        description:
+          "Button on a spelling card that accepts the suspected form as correct, clearing every occurrence of it at once. Keep it short — it sits inside a narrow card.",
+      },
+      "rules.checkDrawer.approveSpellingAriaLabel": {
+        description: "Accessible label for the spelling card's Approve button.",
+        placeholders: { form: "The word form being approved — raw cell content, never translated." },
+      },
+      "rules.checkDrawer.spellingApproved": {
+        description:
+          "Footnote under the spelling section counting the spellings the reviewer approved during this check, each of which cleared all of its occurrences.",
+        placeholders: { count: "How many spellings the reviewer approved." },
+      },
+      "rules.checkDrawer.spellingAutoApproved": {
+        description:
+          "Footnote under the spelling section naming the word forms the check treated as correct because the text writes them often. Lets a reviewer see what was let through instead of trusting a silent pass.",
+        placeholders: { forms: "The approved word forms, comma-joined — raw cell content, never translated." },
+      },
+      "rules.checkDrawer.wordlistSize": {
+        description:
+          "Footnote under the spelling section stating how many distinct word forms the project wordlist the check built holds.",
+        placeholders: { count: "Number of distinct word forms." },
       },
       "rules.checkDrawer.otherTermsClean": {
         description:

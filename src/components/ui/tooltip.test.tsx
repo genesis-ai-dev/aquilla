@@ -1,11 +1,18 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { Button } from "@/components/ui/button"
 import { AppTooltip, TooltipProvider } from "@/components/ui/tooltip"
 
 describe("AppTooltip", () => {
+  afterEach(() => { vi.useRealTimers() })
+
   it("honors an immediate per-tooltip delay override", async () => {
+    // AQU-1916: the override is a TIMING claim — this tooltip must open on the
+    // per-tooltip delay of 0, not the provider's 600 ms. A real 250 ms window
+    // asserted that by being shorter than 600 ms, which made machine speed
+    // decide correctness. On a fake clock the claim is exact: open at t=0.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
     render(
       <TooltipProvider delay={600}>
         <AppTooltip content="Deadline details" delay={0}>
@@ -18,9 +25,10 @@ describe("AppTooltip", () => {
     fireEvent.pointerEnter(trigger, { pointerType: "mouse" })
     fireEvent.mouseEnter(trigger)
 
-    await waitFor(() => {
-      expect(screen.getByRole("tooltip")).toHaveTextContent("Deadline details")
-    }, { timeout: 250 })
+    // No logical time passes: had the override been ignored, the provider's
+    // 600 ms timer would still be pending and nothing would be open.
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Deadline details")
     expect(screen.getByRole("tooltip").closest("[data-side]")).toHaveAttribute(
       "data-side",
       "bottom",
@@ -165,7 +173,11 @@ describe("AppTooltip", () => {
         )
       }
 
+      // AQU-1916: these two ran against real 500 ms windows, so machine speed
+      // decided correctness. The provider delay here is 0, so the exact claim
+      // is "opens with no delay" — asserted on a fake clock at t=0.
       it("opens on hover after a disabled control becomes enabled", async () => {
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
         const { rerender } = render(<Bar disabled />)
         rerender(<Bar disabled={false} />)
         const button = screen.getByRole("button", { name: "Validate text" })
@@ -173,21 +185,20 @@ describe("AppTooltip", () => {
         fireEvent.pointerEnter(button, { pointerType: "mouse" })
         fireEvent.mouseEnter(button)
 
-        await waitFor(() => {
-          expect(screen.getByRole("tooltip")).toHaveTextContent(tip)
-        }, { timeout: 500 })
+        await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+        expect(screen.getByRole("tooltip")).toHaveTextContent(tip)
       })
 
       it("opens its note on click after an enabled control becomes disabled", async () => {
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
         const { rerender } = render(<Bar disabled={false} />)
         rerender(<Bar disabled />)
         const standIn = document.querySelector('[data-slot="tooltip-disabled-trigger"]')!
         expect(standIn).not.toBeNull()
         fireEvent.click(standIn)
 
-        await waitFor(() => {
-          expect(document.querySelector('[data-slot="disabled-reason-note"]')).toHaveTextContent(tip)
-        }, { timeout: 500 })
+        await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+        expect(document.querySelector('[data-slot="disabled-reason-note"]')).toHaveTextContent(tip)
       })
     })
 

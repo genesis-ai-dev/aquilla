@@ -29,6 +29,7 @@ const LANE_FREE_KINDS: ReadonlySet<string> = new Set([
   "cue.links",
   "cast.assign",
   "lines.fromRecording",
+  "cell.label",
   "file.importRecording",
   "source.text",
 ])

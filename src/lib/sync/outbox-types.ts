@@ -124,6 +124,10 @@ export type OutboxEventKind =
   // AQU-438: Cast/character label assignment (non-chain-mutating; contributor+).
   // Writes cast_name into cells.metadata JSONB without touching target text.
   | "cast.assign"
+  // AQU-2408: a hand-typed label on a cell (non-chain-mutating; project lead+
+  // by static floor, the project's `cellLabelFloor` tier on top). Writes
+  // `cellLabel` into the source row's metadata JSONB. Metadata, never a voice.
+  | "cell.label.set"
   // Timeline editor: retime a cell (move/stretch). Non-chain-mutating — updates
   // start_ms/end_ms on both sides without moving cells.event_id.
   | "cell.retime"
@@ -398,6 +402,10 @@ export interface OutboxEventPayloads {
   // Audio attachments. Bytes already live in R2 before these are emitted.
   "cell.audio.attach": {
     audioId: string
+    /** Immutable legacy history: insert unselected; leave an existing take untouched. */
+    historyOnly?: boolean
+    /** Audited missing-row repair; retain the original attach's creation time. */
+    restoreProjectionOf?: string
     url: string
     /** AQU-646: an OPEN string. `cell_audio.slot` is unconstrained TEXT, and an
      *  extra target-audio track addresses its takes by its own track id. The
@@ -816,6 +824,15 @@ export interface OutboxEventPayloads {
      * such column.
      */
     lineNumber?: string | null
+  }
+
+  // AQU-2408: a hand-typed label on a cell — docs/decisions/0007. The
+  // projection merges `cellLabel` into cells.metadata on the SOURCE row (the
+  // key legacy Codex notebooks already carry); null removes it. Never
+  // cast_name, never a voice.
+  "cell.label.set": {
+    /** The label to show on the cell. Null removes it. */
+    label: string | null
   }
 
   // Timeline editor: retime a cell (move/stretch). cellId is on the envelope.

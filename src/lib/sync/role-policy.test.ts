@@ -173,6 +173,18 @@ describe("role-policy (client mirror)", () => {
     expect(canPerform("cast.assign", ROLE.MAINTAINER)).toBe(true)
   })
 
+  it("lets a project lead label a cell, but not a contributor (AQU-2408)", () => {
+    // A label is metadata on the line, not a character: it sits a rung below
+    // cast.assign. Project lead is the static floor — the lowest rung the
+    // project's cellLabelFloor tier can admit; the tier itself (maintainer
+    // unless opened) is enforced by src/lib/cell-label-gate.ts.
+    expect(requiredRoleFor("cell.label.set")).toBe(ROLE.PROJECT_LEAD)
+    expect(canPerform("cell.label.set", ROLE.CONTRIBUTOR)).toBe(false)
+    expect(canPerform("cell.label.set", ROLE.PROJECT_LEAD)).toBe(true)
+    expect(canPerform("cell.label.set", ROLE.MAINTAINER)).toBe(true)
+    expect(requiredRoleFor("cell.label.set")!).toBeLessThan(requiredRoleFor("cast.assign")!)
+  })
+
   it("knows about cast.assign at all", () => {
     // It was absent from this mirror until 2026-08-18. `canPerform` fails open
     // on an unknown kind, so the character-import button's own permission check

@@ -86,18 +86,21 @@ describe("takeState / lineState", () => {
 // ── What the line draws ───────────────────────────────────────────────────
 
 describe("the readout", () => {
-  // Sam, 2026-09-23: a line with nothing recorded draws a FADED mic that
+  // Sam, 2026-09-23: a line with nothing recorded draws a FADED mark that
   // casts no vote, so the gutter column is full on every row. (Replaces the
   // empty slot of 2026-09-21.) AQU-2260 (Oct 29): why it is faded opens on a
-  // click, never a hover.
-  it("draws a faded mic on a line with no recording, which says why on a click", async () => {
+  // click, never a hover. AQU-2401: the mark is a circle, not a microphone.
+  it("draws a faded circle on a line with no recording, which says why on a click", async () => {
     const { onValidationChange } = draw([])
     expect(button()).toBeNull()
     const faded = screen.getByTestId("audio-validation-unavailable")
     expect(faded.tagName).toBe("SPAN")
     expect(faded).toHaveAccessibleName(/no audio to validate/i)
     expect(faded.className).toContain("opacity-40")
-    expect(faded.querySelector("svg")).not.toBeNull()
+    // AQU-2401: a circle, and specifically NOT a microphone — the header's
+    // mic (AQU-2139) is what names the column, once.
+    expect(faded.querySelector("svg.lucide-circle")).not.toBeNull()
+    expect(faded.querySelector("svg.lucide-mic")).toBeNull()
     await expectClickNote(faded, "No audio to validate")
     expect(onValidationChange).not.toHaveBeenCalled()
   })
@@ -111,7 +114,7 @@ describe("the readout", () => {
   // Sam, 2026-10-01 (the 3G pass): while the line's recordings are still
   // being read, an empty set is not "no audio". The slot pulses in the app's
   // skeleton style instead — not a button, and saying what it waits for.
-  it("holds a placeholder, not the faded mic, while the recordings are being read", () => {
+  it("holds a placeholder, not the faded circle, while the recordings are being read", () => {
     draw([], { checking: true })
     expect(button()).toBeNull()
     expect(screen.queryByTestId("audio-validation-unavailable")).toBeNull()
@@ -141,28 +144,61 @@ describe("the readout", () => {
   // Sam, 2026-09-21: on a second account, a line somebody else had already
   // validated looked exactly like one nobody had touched. The text control
   // fills its circle for that state; this one only stepped the grey, which is
-  // invisible at 14px. The mic's capsule now fills the same way — and only the
-  // capsule, because lucide's mic stand is an open path that fills as a blob.
-  it("fills the mic's capsule when someone else has validated but I have not", () => {
+  // invisible at 14px. It filled the mic's CAPSULE for a while (the stand is
+  // an open path that fills as a blob) — AQU-2401 made the glyph a circle, so
+  // it is now the text control's own whole-glyph fill.
+  it("fills the circle when someone else has validated but I have not", () => {
     draw([take({ audioId: "a", validatorCount: 1, validators: ["bo"] })], { validationRequirement: 2 })
     const icon = button()!.querySelector("svg")!
-    expect(icon.getAttribute("class")).toContain("[&_rect]:fill-current")
-    // The stand must NOT be filled — that is the difference between a filled
-    // mic and a solid blob.
-    expect(icon.getAttribute("class")).not.toContain("fill-current path")
-    expect(icon.querySelector("rect")).not.toBeNull()
+    expect(icon.getAttribute("class")).toContain("lucide-circle")
+    expect(icon.getAttribute("fill")).toBe("currentColor")
+    // The capsule-only workaround is gone with the microphone it was for.
+    expect(icon.getAttribute("class")).not.toContain("[&_rect]:fill-current")
   })
 
-  it("leaves the mic hollow when nobody has validated", () => {
+  it("leaves the circle hollow when nobody has validated", () => {
     draw([take({ audioId: "a" })], { validationRequirement: 2 })
-    expect(button()!.querySelector("svg")!.getAttribute("class")).not.toContain("fill-current")
+    const icon = button()!.querySelector("svg")!
+    expect(icon.getAttribute("class")).toContain("lucide-circle")
+    expect(icon.getAttribute("fill")).not.toBe("currentColor")
   })
 
-  // Once the viewer has voted the icon is a CHECK, not a mic, so the fill
+  // Once the viewer has voted the icon is a CHECK, not a circle, so the fill
   // would have nothing to act on — and must not be asked to.
   it("does not fill once I have validated", () => {
     draw([take({ audioId: "a", validatorCount: 1, validators: ["ana"] })], { validationRequirement: 2 })
-    expect(button()!.querySelector("svg")!.getAttribute("class")).not.toContain("fill-current")
+    const icon = button()!.querySelector("svg")!
+    expect(icon.getAttribute("class")).toContain("lucide-check")
+    expect(icon.getAttribute("fill")).not.toBe("currentColor")
+  })
+
+  // AQU-2401, the whole point of the change: the two checks beside each other
+  // now draw the SAME glyph for the same state, so a reviewer reads one shape
+  // vocabulary down the gutter. The microphone that used to be here repeated
+  // on every row what the header's mic (AQU-2139) says once.
+  it.each([
+    ["none", [] as string[], 2, "lucide-circle"],
+    ["others", ["bo"], 2, "lucide-circle"],
+    ["self", ["ana"], 2, "lucide-check"],
+    ["full", ["ana"], 1, "lucide-check-check"],
+  ])("draws the text control's own glyph for %s, and never a microphone", (_state, validators, requirement, expected) => {
+    draw(
+      [take({ audioId: "a", validatorCount: validators.length, validators })],
+      { validationRequirement: requirement },
+    )
+    const icon = button()!.querySelector("svg")!
+    expect(icon.getAttribute("class")).toContain(expected)
+    expect(button()!.querySelector("svg.lucide-mic")).toBeNull()
+  })
+
+  // Every surface that draws the audio vote shares this component, so the
+  // inline one (the Recording tab's take block, the timeline's takes strip)
+  // must show the same circle — a vote looks the same wherever it is shown.
+  it("draws the same circle inline, in the take block and the takes strip", () => {
+    draw([take({ audioId: "a" })], { validationRequirement: 2, variant: "inline" })
+    const icon = button()!.querySelector("svg")!
+    expect(icon.getAttribute("class")).toContain("lucide-circle")
+    expect(button()!.querySelector("svg.lucide-mic")).toBeNull()
   })
 
   it("shows no fraction on an ordinary one-take line", () => {

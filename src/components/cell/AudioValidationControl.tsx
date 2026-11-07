@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type SyntheticEvent } from "react"
-import { Check, CheckCheck, Info, Mic, Trash2 } from "lucide-react"
+import { Check, CheckCheck, Circle, Info, Trash2 } from "lucide-react"
 import { AppTooltip } from "@/components/ui/tooltip"
 import type { Popover as PopoverPrimitive } from "@base-ui/react/popover"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -88,7 +88,7 @@ interface AudioValidationControlProps {
   /**
    * The line's recordings have not been read yet (the gutter only). Until they
    * have, an empty set means "not known", not "nothing recorded", so the slot
-   * holds a placeholder instead of the faded "no audio" mic — and instead of a
+   * holds a placeholder instead of the faded "no audio" circle — and instead of a
    * partial count that would change as the heard lines' takes arrive.
    */
   checking?: boolean
@@ -234,7 +234,13 @@ export function AudioValidationControl({
     for (const take of mineToGive) change(take.audioId, true)
   }
 
-  const Icon = state === "full" ? CheckCheck : state === "self" ? Check : Mic
+  // AQU-2401: the SAME glyphs the text control draws — hollow circle,
+  // filled circle, check, double check. The microphone this used to draw
+  // (AQU-490) dated from before the table header marked the two columns
+  // with the text and audio glyphs (AQU-2139), so since then it repeated on
+  // every row what the header says once. Two checks of one shape also read
+  // as the pair they are, and the header's mic is what tells them apart.
+  const Icon = state === "full" ? CheckCheck : state === "self" ? Check : Circle
   const colorClass = state === "full" || state === "self"
     ? "text-green-500"
     : state === "others" ? "text-muted-foreground/60" : "text-muted-foreground/30"
@@ -248,14 +254,14 @@ export function AudioValidationControl({
    * "somebody has" looked identical, which is precisely the state a second
    * validator needs to find.
    *
-   * Only the CAPSULE fills, not the whole mic. Lucide's mic is three
-   * sub-elements and the U-shaped stand is an open path: SVG closes a path
-   * implicitly to fill it, so a blanket `fill` turns the lower two-thirds of
-   * the icon into a solid blob. The capsule is the one closed shape in it,
-   * and filling that alone reads exactly as the text control's filled circle
-   * does at the same size.
+   * AQU-2401: now the icon IS a circle, this is the text control's own
+   * `fill="currentColor"` on the whole glyph, not the capsule-only
+   * `[&_rect]:fill-current` the microphone needed (lucide's mic is three
+   * sub-elements whose U-shaped stand is an open path, and SVG closes a path
+   * implicitly to fill it, so a blanket fill turned the lower two-thirds of
+   * it into a solid blob). The two checks now fill identically.
    */
-  const fillCapsule = state === "others"
+  const fillCircle = state === "others"
 
   const hasVoterInfo = displayed.some((take) => take.validators.length > 0)
   const blocked = displayed.find((take) => !take.canValidate && take.blockedReason)
@@ -391,8 +397,9 @@ export function AudioValidationControl({
       // colour is what says so. (Same trap as the AQU-1068 tooltip.)
     >
       <Icon
-        className={cn("relative h-3.5 w-3.5", fillCapsule && "[&_rect]:fill-current")}
+        className="relative h-3.5 w-3.5"
         strokeWidth={2.5}
+        {...(fillCircle ? { fill: "currentColor" } : {})}
       />
       {showFraction && (
         <span className="text-[10px] font-medium tabular-nums leading-none" data-testid="audio-validation-fraction">
@@ -402,7 +409,7 @@ export function AudioValidationControl({
     </button>
   )
 
-  // A line with nothing recorded draws a FADED mic in the gutter (Sam,
+  // A line with nothing recorded draws a FADED circle in the gutter (Sam,
   // 2026-09-23, reversing the empty slot of 09-21): both gutter columns read
   // full on every row, and "nothing to validate" looks different from "not
   // validated yet". A span, not a disabled button — no tab stop, and it still
@@ -441,7 +448,7 @@ export function AudioValidationControl({
             aria-label={t("editor.audioValidation.ariaNoAudio", { ref: cellRef })}
             className="flex h-6 w-6 items-center justify-center text-muted-foreground/30 opacity-40"
           >
-            <Mic className="h-3.5 w-3.5" strokeWidth={2.5} />
+            <Circle className="h-3.5 w-3.5" strokeWidth={2.5} />
           </span>
         </NoteOnClick>
       </div>
@@ -601,7 +608,7 @@ export function AudioValidationControl({
   // text said "click to validate", and "you recorded this" was unreachable.
   //
   // THE KEYS ARE LOAD-BEARING. Every line first draws before its audio has
-  // loaded, so as the faded "no audio" mic; the take arrives a moment later.
+  // loaded, so as the faded "no audio" circle; the take arrives a moment later.
   // Without distinct keys React reuses that tooltip for the real button, and
   // Base UI attaches its hover listeners ONCE, to the element it first saw —
   // the span that has just been thrown away. The real button then never opened

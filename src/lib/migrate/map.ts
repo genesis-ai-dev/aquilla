@@ -30,6 +30,7 @@ import {
 import type { IngestEvent } from "./types"
 import { decodeHtmlEntities } from "../html-entities"
 import { isKnownBookCode } from "../file-labeling/bible-book-names"
+import { legacyCodexFileMeta, legacyFileTypeFor } from "./file-type"
 import { validateIdmlTranslation } from "@aquilla/idml-roundtrip"
 import {
   canonicalIdmlCellMetadata,
@@ -270,6 +271,14 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
     : "not-idml"
   // An IDML pair is a layout document, never Scripture — no book code.
   const bookCode = idml ? undefined : legacyBookCodeFor(pair.name)
+  // AQU-2211: the type the file had in Codex, from the notebook's own record of
+  // its importer (file-type.ts). An IDML pair keeps its structural detection;
+  // anything the rule cannot place stays `codex`, as every migrated file did
+  // before. The raw origin facts ride along in `projectionMeta` — the one
+  // file.create payload key the projection copies into `files.meta` verbatim —
+  // as `meta.legacyCodex`, so nothing is lost where no mapping has been decided.
+  const legacyMeta = legacyCodexFileMeta(pair)
+  const fileType = idml ? "idml" : legacyFileTypeFor(legacyMeta) ?? "codex"
 
   events.push({
     id: fileCreateEventId(projectId, fileId),
@@ -281,8 +290,9 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
     clientTs: fallbackTs,
     payload: {
       name: pair.name,
-      fileType: idml ? "idml" : "codex",
+      fileType,
       ...(bookCode ? { bookCode } : {}),
+      ...(legacyMeta ? { projectionMeta: { legacyCodex: legacyMeta } } : {}),
       ...(idml
         ? {
             kind: "idml",

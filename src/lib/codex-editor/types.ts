@@ -219,6 +219,16 @@ export interface CodexNotebookMetadata {
   lineNumbersEnabled?: boolean;
   textDirection?: "ltr" | "rtl";
   videoUrl?: string;
+  /** Which Codex importer produced the notebook (codex-editor's
+   *  `FileImporterType`: "usfm", "subtitles", "docx", "ebibleCorpus", …).
+   *  Absent on older notebooks. Typed as `string` because notebooks in the
+   *  wild carry values outside the current union. AQU-2211. */
+  importerType?: string;
+  /** The uploaded file's name ("MAT.idml", "mydoc.docx"). Rarely set in
+   *  practice — `originalName` usually carries the extension. AQU-2211. */
+  originalFileName?: string;
+  /** True for an audio import with no source text. AQU-2211. */
+  audioOnly?: boolean;
   sourceCreatedAt?: string;
   codexLastModified?: string;
   navigation?: unknown[];

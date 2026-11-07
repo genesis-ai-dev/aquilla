@@ -2676,7 +2676,8 @@ export function TimelineEditor({
   // gate was guarding a case that can no longer arise.
   const resolveTarget = resolveTargetAudio
   // AQU-1767: ONE CHIP PER PIECE. A take cut in two is two selected pieces of
-  // one group; each is drawn, moved, trimmed and approved on its own.
+  // one group; each is drawn, moved, trimmed, approved and renamed on its own
+  // (approving and renaming since decision 7), and chosen with its whole take.
   const targetItems = useMemo<TargetAudioItem[]>(
     () => targetSource.flatMap((c) => piecesAsItems(c, resolveTargetPieces(c))),
     [targetSource],

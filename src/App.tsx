@@ -104,6 +104,12 @@ const ParatextProjectsPage = lazy(() =>
 const ParatextBookPage = lazy(() =>
   import("@/pages/ParatextBridge/ParatextBookPage").then((m) => ({ default: m.ParatextBookPage })),
 )
+const ThisComputerPage = lazy(() =>
+  import("@/pages/ThisComputer/ThisComputerPage").then((m) => ({ default: m.ThisComputerPage })),
+)
+const ParatextOpenPage = lazy(() =>
+  import("@/pages/ParatextBridge/ParatextOpenPage").then((m) => ({ default: m.ParatextOpenPage })),
+)
 const ResetPassword = lazy(() =>
   import("@/pages/ResetPassword").then((m) => ({ default: m.ResetPassword })),
 )
@@ -484,8 +490,11 @@ function AppRoutes() {
         {/* Curated marketing/demo auto-login — see components/MarketingLoginRoute.tsx */}
         <Route path="/__marketing/login" element={<MarketingLoginRoute />} />
 
+        {/* Desktop-only "This computer" workspace: linked folders + Paratext projects on this device. */}
+        <Route path="/this-computer" element={<LazyRoute><ThisComputerPage /></LazyRoute>} />
         <Route path="/paratext" element={<LazyRoute><ParatextProjectsPage /></LazyRoute>} />
         <Route path="/paratext/book" element={<LazyRoute><ParatextBookPage /></LazyRoute>} />
+        <Route path="/paratext/open" element={<LazyRoute><ParatextOpenPage /></LazyRoute>} />
         <Route path="/preferences" element={<Preferences />} />
         <Route path="/preferences/:section" element={<Preferences />} />
 

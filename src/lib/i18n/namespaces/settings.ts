@@ -480,6 +480,20 @@ export const settings = defineNamespace({
     "settings.orgIdentity.deleteBlockedProjects":
       "This organization still has projects. Remove them before deleting the organization.",
     "settings.orgIdentity.deleteFailed": "Couldn't delete this organization.",
+    // ── AQU-1993: leaving an organization (self-service, not moderation) ──
+    "settings.orgIdentity.leaveOrganization": "Leave organization",
+    "settings.orgIdentity.leaveRowDescription":
+      "Give up your own access to this organization. Projects you were added to individually stay with you until you leave each of those too.",
+    "settings.orgIdentity.leaveConfirmTitle": "Leave {name}?",
+    "settings.orgIdentity.leaveConfirmBody":
+      "You will lose your organization-wide access to {name} and your place on its teams. An owner has to invite you back.",
+    "settings.orgIdentity.leavingButton": "Leaving…",
+    "settings.orgIdentity.leftToast": "You left {name}.",
+    "settings.orgIdentity.leaveFailed": "Couldn't leave this organization.",
+    "settings.orgIdentity.leaveBlockedLastOwner":
+      "You are the only owner of this organization. Make someone else an owner, or delete the organization, before you leave.",
+    "settings.orgIdentity.leaveBlockedPersonal":
+      "This is your personal workspace. Delete it instead of leaving it.",
     // "Organization name" (label, sr-only FieldLabel, placeholder) →
     // org.createDialog.nameLabel (identical text)
     // "Danger zone" → settings.teamSettings.dangerZoneLabel (identical text)
@@ -934,6 +948,28 @@ export const settings = defineNamespace({
           link:
             "A <Link> element whose visible text is the 'Preferences' string " +
             "(reused from nav.account.preferences) — not a plain value.",
+        },
+      },
+      "settings.orgIdentity.leaveConfirmTitle": {
+        description:
+          "Title of the confirm dialog that a person opens to leave an organization "
+          + "themselves (AQU-1993), not to remove someone else.",
+        placeholders: {
+          name: "The organization's name — not translated.",
+        },
+      },
+      "settings.orgIdentity.leaveConfirmBody": {
+        description:
+          "Body of the confirm dialog for leaving an organization. States what the "
+          + "person gives up and that an owner must invite them back.",
+        placeholders: {
+          name: "The organization's name — not translated.",
+        },
+      },
+      "settings.orgIdentity.leftToast": {
+        description: "Success toast after the person left an organization.",
+        placeholders: {
+          name: "The organization's name — not translated.",
         },
       },
       "settings.orgIdentity.deleteConfirmBody": {

@@ -8,6 +8,8 @@ import {
   addProjectMember,
   addProjectMembers,
   removeProjectMember,
+  leaveProject,
+  NoDirectMembershipError,
   type ProjectMember,
 } from "./members";
 
@@ -257,6 +259,49 @@ describe("removeProjectMember", () => {
     expect(global.fetch).toHaveBeenCalledWith(
       expect.stringContaining("/api/v2/projects/p1/members/11"),
       expect.objectContaining({ method: "DELETE" })
+    );
+  });
+});
+
+// AQU-1993: self-service. Unlike removeProjectMember (maintainer+), this is
+// the route an invited contributor can actually use on themselves.
+describe("leaveProject", () => {
+  it("DELETEs /projects/:id/members/me and reports access is gone", async () => {
+    (global.fetch as any).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ left: true, stillHasAccess: false, remainingSource: null }),
+        { status: 200 }
+      )
+    );
+    const result = await leaveProject("jwt", "p1");
+    expect(result).toEqual({ stillHasAccess: false, remainingSource: null });
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringContaining("/api/v2/projects/p1/members/me"),
+      expect.objectContaining({ method: "DELETE" })
+    );
+  });
+
+  // Inherited access is not the caller's to drop, so the result says what
+  // survived rather than implying the project is gone.
+  it("reports the surviving grant path", async () => {
+    (global.fetch as any).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ left: true, stillHasAccess: true, remainingSource: "org" }),
+        { status: 200 }
+      )
+    );
+    expect(await leaveProject("jwt", "p1")).toEqual({
+      stillHasAccess: true,
+      remainingSource: "org",
+    });
+  });
+
+  it("maps the 409 with no individual grant to its own error", async () => {
+    (global.fetch as any).mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "no_direct_membership" }), { status: 409 })
+    );
+    await expect(leaveProject("jwt", "p1")).rejects.toBeInstanceOf(
+      NoDirectMembershipError
     );
   });
 });

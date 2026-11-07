@@ -49,6 +49,11 @@ export interface Unit {
   verse: string
   /** Marker name for non-verse units ("s1", "ip"); undefined for verses. */
   marker?: string
+  /** The importer's reference for the same segment (`parseUsfmLossless`'s
+   *  `ref`: `MAT 5:3` for verses, `MAT 5:s1:3` for headings) — how a cell in
+   *  a mirrored Aquilla project (`canonicalRef`) finds its unit. Equal to `id`
+   *  for verses; headings count differently, hence the separate field. */
+  ref: string
   /** The unit's text exactly as the bytes decode, trailing line break trimmed. */
   text: string
   span: UnitSpan
@@ -139,6 +144,7 @@ interface Draft {
   chapter: number
   verse: string
   marker?: string
+  ref: string
   text: string
   charStart: number
   charEnd: number
@@ -166,6 +172,7 @@ export async function deriveUnits(bytes: Uint8Array): Promise<UnitSet> {
       book,
       chapter: v.chapter,
       verse: v.number,
+      ref: v.ref,
       text: text.slice(v.textStart, end),
       charStart: v.textStart,
       charEnd: end,
@@ -197,6 +204,7 @@ export async function deriveUnits(bytes: Uint8Array): Promise<UnitSet> {
       chapter: scopeChapter,
       verse: scopeVerse,
       marker: h.marker,
+      ref: h.ref,
       text: text.slice(h.textStart, end),
       charStart: h.textStart,
       charEnd: end,
@@ -226,7 +234,7 @@ export async function deriveUnits(bytes: Uint8Array): Promise<UnitSet> {
       return {
         id: d.id, kind: d.kind, book: d.book, chapter: d.chapter, verse: d.verse,
         ...(d.marker ? { marker: d.marker } : {}),
-        text: d.text, span, rawHash, textHash,
+        ref: d.ref, text: d.text, span, rawHash, textHash,
       }
     }),
   )

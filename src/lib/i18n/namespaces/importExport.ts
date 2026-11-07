@@ -1106,8 +1106,10 @@ export const importExport = defineNamespace({
     "importExport.errors.sourceUploadTooLarge": "Source upload failed: the original file exceeds the {maxSize} limit.",
     "importExport.errors.couldNotGetUploadToken": "Couldn't get an upload token — sign in and try again.",
     "importExport.errors.sourceUploadNetworkFailed": "Source upload failed: {detail}",
+    "importExport.errors.sourceUploadRefused": "Source upload failed: {reason}",
     "importExport.errors.sourceUploadFailed": "Source upload failed",
     "importExport.errors.artifactBindingNetworkFailed": "Artifact binding failed: {detail}",
+    "importExport.errors.artifactBindingRefused": "Artifact binding failed: {reason}",
     "importExport.errors.artifactBindingFailed": "Artifact binding failed",
 
     // — Thrown-error triage: src/lib/import.ts target-import apply (AQU-1669) —
@@ -2827,6 +2829,32 @@ export const importExport = defineNamespace({
         description:
           "Thrown when binding an already-uploaded artifact to another file fails at the network level. {detail} is the raw underlying error, interpolated as data.",
         placeholders: { detail: "Raw network-error message — not translated." },
+      },
+      "importExport.errors.sourceUploadRefused": {
+        description:
+          "Thrown when the server answers the source-upload request with an error " +
+          "status, shown in red in the import dialog. {reason} is a complete sentence " +
+          "that is already in the user's language — the app's own wording for that " +
+          "status, such as \"Your session expired — sign in again.\" or \"You are " +
+          "Contributor here. Project Lead is required.\" — or, for a validation " +
+          "refusal, the server's short raw reason.",
+        placeholders: {
+          reason:
+            "A sentence already translated elsewhere, or raw server text — not " +
+            "translated here.",
+        },
+      },
+      "importExport.errors.artifactBindingRefused": {
+        description:
+          "Thrown when the server answers the request to bind an already-uploaded " +
+          "artifact to another file with an error status. Same shape as " +
+          "importExport.errors.sourceUploadRefused: {reason} is a complete sentence " +
+          "already in the user's language, or a validation refusal's short raw reason.",
+        placeholders: {
+          reason:
+            "A sentence already translated elsewhere, or raw server text — not " +
+            "translated here.",
+        },
       },
       "importExport.manifestWarnings.duplicateCanonicalRef": {
         description:

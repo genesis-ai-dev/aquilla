@@ -42,3 +42,29 @@ describe("bridgeStore", () => {
     expect(await bridgeStore.hold(GUID, "MAT")).toBe(false)
   })
 })
+
+describe("bridgeStore links", () => {
+  beforeEach(() => {
+    globalThis.indexedDB = new IDBFactory()
+    resetBridgeStoreForTests()
+  })
+
+  it("finds a mirror link by Paratext GUID and by Aquilla project id", async () => {
+    const link = {
+      projectGuid: GUID, projectPath: "/p/TPP1", projectId: "proj-1", targetLang: "",
+      books: { MAT: { fileId: "f-mat", fileName: "41MATTPP1.SFM" } }, createdAt: 1,
+    }
+    expect(await bridgeStore.link(GUID)).toBeNull()
+    await bridgeStore.putLink(link)
+    expect(await bridgeStore.link(GUID)).toEqual(link)
+    expect(await bridgeStore.linkForProject("proj-1")).toEqual(link)
+    expect(await bridgeStore.linkForProject("other")).toBeNull()
+    // A second import of the same Paratext project replaces the link: one
+    // mirror per GUID, so the badge never has two candidates.
+    await bridgeStore.putLink({ ...link, projectId: "proj-2" })
+    expect((await bridgeStore.link(GUID))?.projectId).toBe("proj-2")
+    expect(await bridgeStore.linkForProject("proj-1")).toBeNull()
+    await bridgeStore.deleteLink(GUID)
+    expect(await bridgeStore.link(GUID)).toBeNull()
+  })
+})

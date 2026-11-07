@@ -135,6 +135,13 @@ export const editor = defineNamespace({
     "editor.cell.addComment": "Add comment",
     "editor.cell.closeDetails": "Close cell details",
 
+    // — Cell details, as a pop-up modal (AQU-2021) ————————————————
+    "editor.cellDetail.title": "{ref} details",
+    "editor.cellDetail.description":
+      "Recording, back-translation, notes and history for this cell.",
+    "editor.cellDetail.previous": "Previous cell",
+    "editor.cellDetail.next": "Next cell",
+
     // — Waveform strip under a translated cell ——————————————————————
     "editor.waveform.scrubber": "Audio scrubber",
     "editor.waveform.seekTooltip": "Click to seek",
@@ -1061,6 +1068,7 @@ export const editor = defineNamespace({
     "editor.history.stepChooseTake": "Choose take",
     "editor.history.stepDeleteTake": "Delete take",
     "editor.history.stepRenameTake": "Rename take",
+    "editor.history.stepCellLabel": "Change cell label",
     "editor.history.stepAddTrack": "Add track",
     "editor.history.stepAddFolder": "Make folder",
     "editor.history.stepRenameTrack": "Rename track",
@@ -2515,6 +2523,11 @@ export const editor = defineNamespace({
     // — Expansion tabs: issues and metadata ————————————————————————
     "editor.expansion.issues": "Issues",
     "editor.expansion.metadata": "Metadata",
+    // AQU-2408: the cell's own label, typed in the expansion panel. Metadata,
+    // never a voice or a character (docs/decisions/0007).
+    "editor.cellLabel.title": "Label",
+    "editor.cellLabel.placeholder": "Add a label",
+    "editor.cellLabel.inputAria": "Cell label",
     "editor.metadata.showOnCells": "Show {key} on cells",
     "editor.issues.none": "No translation rule issues on this cell.",
     "editor.issues.waived": "Waived",
@@ -4116,6 +4129,38 @@ export const editor = defineNamespace({
           "Screen-reader name of the X button in the header of the panel that " +
           "expands under a cell row (back-translation, audio, footnotes, history). " +
           "It collapses that panel only; it does not close the file or the editor.",
+      },
+      "editor.cellDetail.title": {
+        description:
+          "Heading of the pop-up that opens when someone double-clicks a cell " +
+          "row — the same tabs the panel under the row shows, given the whole " +
+          "screen. '{ref}' is the cell's own name, a scripture reference like " +
+          "'GEN 1:1' or a line number. Keep it short; it sits on one line beside " +
+          "the previous/next controls.",
+        maxLength: 32,
+        placeholders: {
+          ref: "The cell's own name — a scripture reference such as 'GEN 1:1', or 'row 12' when the file has no references.",
+        },
+      },
+      "editor.cellDetail.description": {
+        description:
+          "One line under that heading saying what the pop-up holds, so someone " +
+          "who opened it by accident can see what it is for. The four nouns are " +
+          "the tabs inside it.",
+      },
+      "editor.cellDetail.previous": {
+        description:
+          "Screen-reader name of the control that moves the open pop-up to the " +
+          "cell ABOVE this one in the file, without closing it. Disabled on the " +
+          "first cell.",
+        maxLength: 24,
+      },
+      "editor.cellDetail.next": {
+        description:
+          "Screen-reader name of the control that moves the open pop-up to the " +
+          "cell BELOW this one in the file, without closing it. Disabled on the " +
+          "last cell.",
+        maxLength: 24,
       },
       "editor.waveform.scrubber": {
         description:
@@ -7682,6 +7727,7 @@ export const editor = defineNamespace({
       "editor.history.stepChooseTake": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): the user chose which take (recording) plays for a line. A short verb phrase.", maxLength: 40 },
       "editor.history.stepDeleteTake": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a take (recording or generated voice) was deleted. A short verb phrase.", maxLength: 40 },
       "editor.history.stepRenameTake": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a take (recording) was renamed. A short verb phrase.", maxLength: 40 },
+      "editor.history.stepCellLabel": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a cell's label (a short note typed on the line) was set, changed or cleared. A short verb phrase.", maxLength: 40 },
       "editor.history.stepAddTrack": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): an audio track was added to the timeline. A short verb phrase.", maxLength: 40 },
       "editor.history.stepAddFolder": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a folder of timeline tracks was made. A short verb phrase.", maxLength: 40 },
       "editor.history.stepRenameTrack": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a timeline track was renamed. A short verb phrase.", maxLength: 40 },
@@ -9762,6 +9808,22 @@ export const editor = defineNamespace({
           "cell (a checklist of project conventions), beside a warning icon. Plural " +
           "noun; the tab is disabled when there are none.",
         maxLength: 16,
+      },
+      "editor.cellLabel.title": {
+        description:
+          "Label of the row at the top of a cell's expansion panel that holds the cell's " +
+          "own label — a short note typed on the line (a section name, a reviewer's " +
+          "mark). A noun. It is not a voice or a character.",
+        maxLength: 14,
+      },
+      "editor.cellLabel.placeholder": {
+        description:
+          "Placeholder inside the empty cell-label text field, inviting the person to " +
+          "type one. A short imperative.",
+        maxLength: 24,
+      },
+      "editor.cellLabel.inputAria": {
+        description: "Screen-reader name of the cell-label text field in a cell's expansion panel.",
       },
       "editor.expansion.metadata": {
         description:

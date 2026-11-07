@@ -22,7 +22,8 @@ pub fn run() {
         .register_uri_scheme_protocol(about::SCHEME, about::serve_request)
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_deep_link::init())
-        .plugin(tauri_plugin_opener::init());
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init());
 
     #[cfg(debug_assertions)]
     {
@@ -60,7 +61,11 @@ pub fn run() {
             // Label stays "main" so capabilities/default.json keeps applying.
             WebviewWindowBuilder::new(app, "main", hot_bundle::window_url(app)?)
                 .title("Aquilla")
-                .inner_size(800.0, 600.0)
+                // Desktop-first default: fits a 13" laptop (1440x900 logical) with
+                // room to spare, and sits above the SPA's tablet breakpoint.
+                .inner_size(1280.0, 820.0)
+                .min_inner_size(900.0, 600.0)
+                .center()
                 .resizable(true)
                 .build()?;
             hot_bundle::start(app.handle());
@@ -111,11 +116,13 @@ pub fn run() {
                     app_update::download_app_update,
                     app_update::install_app_update,
                     paratext::paratext_discover,
+                    paratext::paratext_user_roots,
                     paratext::paratext_add_root,
                     paratext::paratext_remove_root,
                     paratext::paratext_read_file,
                     paratext::paratext_hash_file,
                     paratext::paratext_write_book,
+                    paratext::paratext_write_notes,
                     paratext::paratext_watch,
                     paratext::paratext_unwatch,
                     paratext::paratext_is_running,
@@ -149,11 +156,13 @@ pub fn run() {
                     app_update::download_app_update,
                     app_update::install_app_update,
                     paratext::paratext_discover,
+                    paratext::paratext_user_roots,
                     paratext::paratext_add_root,
                     paratext::paratext_remove_root,
                     paratext::paratext_read_file,
                     paratext::paratext_hash_file,
                     paratext::paratext_write_book,
+                    paratext::paratext_write_notes,
                     paratext::paratext_watch,
                     paratext::paratext_unwatch,
                     paratext::paratext_is_running,

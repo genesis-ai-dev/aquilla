@@ -15,7 +15,7 @@ import { toast } from "@/components/ui/toast"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useI18n } from "@/lib/i18n/I18nProvider"
-import { deleteOrg, OrgHasProjectsError, renameOrg } from "@/lib/frontier/orgs"
+import { deleteOrg, leaveOrg, LeaveOrgBlockedError, OrgHasProjectsError, renameOrg } from "@/lib/frontier/orgs"
 import { ROLE } from "@/lib/frontier/roles"
 import { useSubmitError } from "@/lib/forms/submit-error"
 import { orgHomePath, orgOverviewPath } from "@/lib/navigation/org-paths"
@@ -30,11 +30,21 @@ export function OrgSettingsIdentity() {
   const jwt = session?.jwt ?? null
   const canEdit = (activeOrg?.role.level ?? 0) >= ROLE.MAINTAINER
   const canDelete = (activeOrg?.role.level ?? 0) >= ROLE.OWNER
+  // AQU-1993: anyone whose access to this org is a real membership may give it
+  // up. Not the personal workspace (that one is deleted, not left) and not an
+  // org only visible through the platform-admin allowlist (no membership to
+  // drop — the server would 404). The last-owner refusal is the server's call;
+  // owner count is not in this payload, so the error is surfaced instead of
+  // hiding the control and leaving the owner with no explanation.
+  const canLeave =
+    activeOrg != null && !activeOrg.personal && !activeOrg.viaPlatformAdmin
 
   const [name, setName] = useState(activeOrg?.name ?? "")
   const [nameError, setNameError] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [confirmLeave, setConfirmLeave] = useState(false)
+  const [leaving, setLeaving] = useState(false)
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
 
   useEffect(() => {
@@ -93,6 +103,41 @@ export function OrgSettingsIdentity() {
     }
   }
 
+  async function handleLeave() {
+    if (!canLeave || !jwt || activeOrgId == null) return
+    const leftId = activeOrgId
+    const leftName = activeOrg?.name ?? ""
+    setLeaving(true)
+    clearSubmitError()
+    try {
+      await leaveOrg(jwt, leftId)
+      setConfirmLeave(false)
+      toast.add({ type: "success", title: t("settings.orgIdentity.leftToast", { name: leftName }) })
+      const list = await refresh()
+      const next = list.find((org) => org.id !== leftId)
+      if (next) {
+        setActiveOrg(next.id)
+        navigate(orgOverviewPath(next.id))
+      } else {
+        setAllOrgs()
+        navigate(orgHomePath("all"))
+      }
+    } catch (err) {
+      setSubmitError(
+        err instanceof LeaveOrgBlockedError
+          ? err.reason === "last_owner"
+            ? t("settings.orgIdentity.leaveBlockedLastOwner")
+            : t("settings.orgIdentity.leaveBlockedPersonal")
+          : err instanceof Error && err.message
+            ? err.message
+            : t("settings.orgIdentity.leaveFailed"),
+      )
+      setConfirmLeave(false)
+    } finally {
+      setLeaving(false)
+    }
+  }
+
   const orgName = activeOrg?.name ?? ""
 
   return (
@@ -135,25 +180,73 @@ export function OrgSettingsIdentity() {
         />
       </SettingsGroup>
 
-      {canDelete ? (
+      {canDelete || canLeave ? (
         <SettingsGroup label={t("settings.teamSettings.dangerZoneLabel")}>
-          <SettingsRow
-            label={t("settings.orgIdentity.deleteOrganization")}
-            description={t("settings.orgIdentity.deleteRowDescription")}
-            control={
-              <Button
-                type="button"
-                variant="destructive"
-                onClick={() => setConfirmDelete(true)}
-              >
-                {t("settings.orgIdentity.deleteOrganization")}
-              </Button>
-            }
-          />
+          {canLeave ? (
+            <SettingsRow
+              label={t("settings.orgIdentity.leaveOrganization")}
+              description={t("settings.orgIdentity.leaveRowDescription")}
+              control={
+                <Button
+                  type="button"
+                  variant="destructive"
+                  onClick={() => setConfirmLeave(true)}
+                >
+                  {t("settings.orgIdentity.leaveOrganization")}
+                </Button>
+              }
+            />
+          ) : null}
+          {canDelete ? (
+            <SettingsRow
+              label={t("settings.orgIdentity.deleteOrganization")}
+              description={t("settings.orgIdentity.deleteRowDescription")}
+              control={
+                <Button
+                  type="button"
+                  variant="destructive"
+                  onClick={() => setConfirmDelete(true)}
+                >
+                  {t("settings.orgIdentity.deleteOrganization")}
+                </Button>
+              }
+            />
+          ) : null}
         </SettingsGroup>
       ) : null}
 
       {submitError ? <FieldError role="alert">{submitError}</FieldError> : null}
+
+      {canLeave ? (
+        <Dialog open={confirmLeave} onOpenChange={(open) => { if (!open) setConfirmLeave(false) }}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>{t("settings.orgIdentity.leaveConfirmTitle", { name: orgName })}</DialogTitle>
+            </DialogHeader>
+            <p className="text-sm text-muted-foreground">
+              {t("settings.orgIdentity.leaveConfirmBody", { name: orgName })}
+            </p>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setConfirmLeave(false)}
+                disabled={leaving}
+              >
+                {t("common.cancel")}
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={() => { void handleLeave() }}
+                disabled={leaving}
+              >
+                {leaving ? t("settings.orgIdentity.leavingButton") : t("settings.orgIdentity.leaveOrganization")}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      ) : null}
 
       {canDelete ? (
         <Dialog open={confirmDelete} onOpenChange={(open) => { if (!open) setConfirmDelete(false) }}>

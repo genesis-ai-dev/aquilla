@@ -124,6 +124,10 @@ export type OutboxEventKind =
   // AQU-438: Cast/character label assignment (non-chain-mutating; contributor+).
   // Writes cast_name into cells.metadata JSONB without touching target text.
   | "cast.assign"
+  // AQU-2408: a hand-typed label on a cell (non-chain-mutating; project lead+
+  // by static floor, the project's `cellLabelFloor` tier on top). Writes
+  // `cellLabel` into the source row's metadata JSONB. Metadata, never a voice.
+  | "cell.label.set"
   // Timeline editor: retime a cell (move/stretch). Non-chain-mutating — updates
   // start_ms/end_ms on both sides without moving cells.event_id.
   | "cell.retime"
@@ -820,6 +824,15 @@ export interface OutboxEventPayloads {
      * such column.
      */
     lineNumber?: string | null
+  }
+
+  // AQU-2408: a hand-typed label on a cell — docs/decisions/0007. The
+  // projection merges `cellLabel` into cells.metadata on the SOURCE row (the
+  // key legacy Codex notebooks already carry); null removes it. Never
+  // cast_name, never a voice.
+  "cell.label.set": {
+    /** The label to show on the cell. Null removes it. */
+    label: string | null
   }
 
   // Timeline editor: retime a cell (move/stretch). cellId is on the envelope.

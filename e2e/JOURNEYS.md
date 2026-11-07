@@ -247,6 +247,12 @@ UI chrome that used to be one smoke file per click is covered under
 - View settings, tab strip, selection bar, outbox inspector, term-lookup popover,
   video attachment dialog, cell-expansion Escape close, setup-checklist expand/skip
   (except survives-refresh, which stays smoke)
+- A cell's detail view as a pop-up modal (AQU-2021): double-clicking a row opens
+  the same tab shell as a modal with previous/next through the displayed cells,
+  and a double-click inside the open editor still selects a word rather than
+  opening it. Covered in RTL (`EditorTable.cellDetailModal.test.tsx`). UI-only,
+  no new smoke: one more way into a view the chevron already reaches, writing
+  nothing of its own.
 - AI availability after an offline → online cycle (AQU-1377): a health probe forced
   while the browser is offline records no snapshot, the browser `online` event forces
   a fresh probe that re-enables the AI controls, and a batch refused because the

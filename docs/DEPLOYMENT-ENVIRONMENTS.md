@@ -99,26 +99,34 @@ org's encrypted Monday tokens and the dev Worker could otherwise use them
 (AQU-1775; `pnpm neon:scrub:dev` runs the same scrub by hand, `--dry-run` to
 count first). **The restore copies rows, not blobs**, so every audio take it
 brings over points at an R2 object `aquilla-snapshots-dev` does not hold and
-playback on `dev.aquilla.app` 404s;
+playback on `dev.aquilla.app` 404s — and every imported file's uploaded
+original (`file_source_blobs.r2_key` / `artifacts.r2_key`) is likewise a row
+without bytes, so its export 404s "source bytes missing from storage";
 `pnpm neon:copy-dev-audio:dev -- --project <id>` copies that one project's
-referenced audio across, `--dry-run` to report first (AQU-2114). It copies only
-what the nightly cleanup protects — the same reference queries, shared in
-`db/shared/media-refs.ts`, so dev never copies what dev then deletes — needs
-`R2_ACCOUNT_ID` plus the AQU-2113 copy key
+referenced audio and originals across, `--dry-run` to report first (AQU-2114).
+For takes and voice clips it copies only what the nightly cleanup protects —
+the same reference queries, shared in `db/shared/media-refs.ts`, so dev never
+copies what dev then deletes; for originals, exactly the keys the project's
+rows name (`loadOriginalRefs` in `scripts/dev-audio-copy.ts`), under
+`artifacts/<project>/` or the legacy `projects/<project>/files/<file>/source/`
+shape. It needs `R2_ACCOUNT_ID` plus the AQU-2113 copy key
 (`R2_DEV_MEDIA_COPY_ACCESS_KEY_ID` / `R2_DEV_MEDIA_COPY_SECRET_ACCESS_KEY`), and
 refuses any destination but the dev bucket and any database but the dev branch.
 
-**Audio follows the rows, as its own step.** The restore copies every audio row
-and none of the bytes, so the scheduled refresh ends with a `Copy prod audio to
-dev` step that runs the copy across every project with media, most recently
-active first (AQU-2115, `pnpm neon:copy-dev-audio-all:dev`). It is the LAST step
+**Media follows the rows, as its own step.** The restore copies every audio
+and original row and none of the bytes, so the scheduled refresh ends with a
+`Copy prod media to dev` step that runs the copy across every project with
+media, most recently active first (AQU-2115,
+`pnpm neon:copy-dev-audio-all:dev`). It is the LAST step
 in the job on purpose: the restore has already succeeded by then, so a copy
 failure turns only that step red and `dev.aquilla.app` still shows the data the
 restore wrote. The first backfill (~561k objects / 167 GB) is bigger than one
-run, so each run takes a wall-clock budget (`DEV_AUDIO_COPY_BUDGET_MINUTES`),
+run, so each run takes a wall-clock budget (`DEV_MEDIA_COPY_BUDGET_MINUTES`),
 stops at a project boundary, and resumes on the next run — there is no cursor,
 only the rule that an object already in dev is never copied twice. Every run
-writes its counts to the run page's summary. Two dispatch inputs bracket it:
+writes its counts to the run page's summary, with the source originals broken
+out so a still-404ing export can be told from a backfill that has not reached
+the project yet. Two dispatch inputs bracket it:
 `preflight_only` copies nothing, and `media_copy_only` copies without restoring
 (use it to push the backfill along during the day, or to re-run after a
 failure). Without `R2_ACCOUNT_ID` and the AQU-2113 copy key the step prints a
@@ -528,6 +536,27 @@ can show that an upload returns at once and that a small document reaches
 "Indexed", but it CANNOT show that a large document is summarized fully in one
 run, that a long run is never shown as stalled, or that a retry cannot start a
 second job over a live one. Walk those on development or production.
+
+**A preview's Postgres is `dev`'s, and the preview deploy does not migrate it
+(AQU-1435).** Previews bind the development Hyperdrive, and that database is
+migrated only from the `dev` branch — `deploy:aquilla:dev:*` chains
+`neon:status:dev`, which exits non-zero per pending migration, so a real deploy
+cannot outrun its schema. `scripts/cloudflare-stack-preview.mjs` has no
+equivalent gate and no database credentials to run one, so a PR that adds a
+column and reads it deploys happily against a database without it, and every
+affected route answers a bare 500. Worse, a reader on a shared path (for
+example `validateApiCredential`, on every `/api/v1/external/*` request) takes a
+whole API down rather than only the surface the PR touched.
+
+The preview deploy does not fail on this — failing would cost QA the preview
+entirely — it **names** it. `scripts/cloudflare-preview-comment.mjs` reads the
+PR's file list and the QA-preview comment carries a **Postgres migrations**
+section: each file the PR adds under `db/postgres/migrations/` (such a file is
+by definition not on `dev`, hence pending on development storage), an explicit
+"this PR carries none" when there are none, or "unknown" if the listing could
+not be read. The same line goes to the build log. So read a 500 on a
+migration-bearing preview as pending schema until an operator has run `pnpm
+neon:apply:dev`, not as a defect in the change.
 
 **What to do instead.** Verify the two halves separately rather than end to end:
 

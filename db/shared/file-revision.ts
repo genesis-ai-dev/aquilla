@@ -1,6 +1,6 @@
 // Virtual source cells — the pure core (spec:
 // docs/superpowers/specs/2026-11-06-virtual-source-cells-file-revisions.md,
-// decision docs/decisions/0007-file-revisions-and-derived-source-cells.md).
+// decision docs/decisions/0008-file-revisions-and-derived-source-cells.md).
 //
 // A file's source side is DERIVED: an immutable artifact, a filter stamp, and a
 // chain of revisions. Each revision is one parse of one blob, aligned against

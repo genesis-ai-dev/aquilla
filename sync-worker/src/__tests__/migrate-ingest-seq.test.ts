@@ -9,6 +9,9 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest"
 import { handleMigrateIngestRequest } from "../events/migrate-ingest-route"
 import { makeTestDb, type TestDb } from "./helpers/pg-test-db"
+import { buildCellAudioEvents } from "../../../src/lib/migrate/audio-copy"
+import { selectedAudioProjectionRepairEvent, type AudioImport } from "../../../src/lib/migrate/audio"
+import { handleRebuildProjectionRequest } from "../events/rebuild"
 
 const SECRET = "test-secret"
 const PROJECT = "proj-mig"
@@ -70,6 +73,129 @@ async function eventSeqs(): Promise<Array<{ id: string; server_seq: number }>> {
 }
 
 describe("migrate-ingest seq pre-allocation (AQU-1005)", () => {
+  it("repairs an audited missing selected-audio projection without deleting its old event or validation, and rebuilds identically", async () => {
+    const cellId = "missing-projection"
+    const take: AudioImport = {
+      legacyAudioId: "trimmed", aquillaAudioId: "trimmed.webm", diskRelPath: ".project/attachments/files/trimmed.webm",
+      slot: "recording", createdAt: 1600000000000,
+      validatedBy: [{ username: "validator", creationTimestamp: 1600000001000, updatedTimestamp: 1600000001000, isDeleted: false }],
+    }
+    const opts = { projectId: PROJECT, fileId: FILE, fallbackAuthor: "legacy-import", fallbackTs: 1600000000000 }
+    const original = buildCellAudioEvents(cellId, [take], take.aquillaAudioId, opts)
+    expect((await handleMigrateIngestRequest(ingestRequest(original), env()))?.status).toBe(200)
+    // Reproduce the live inconsistency: saved events + vote, absent audio row.
+    await t.pg.query("DELETE FROM cell_audio")
+    expect((await handleMigrateIngestRequest(ingestRequest(original), env()))?.status).toBe(200)
+    expect((await t.pg.query("SELECT * FROM cell_audio")).rows).toHaveLength(0)
+    const proof = { originalEventId: original[0].id, sourceOid: "a".repeat(64), sourceSelectedAudioId: take.legacyAudioId }
+    for (const invalid of [{ ...proof, originalEventId: "wrong" }, { ...proof, sourceOid: "bad" }, { ...proof, sourceSelectedAudioId: "another" }]) {
+      expect(() => selectedAudioProjectionRepairEvent(cellId, take, opts, invalid)).toThrow("Invalid selected audio projection repair proof")
+    }
+    const repair = selectedAudioProjectionRepairEvent(cellId, take, opts, proof)
+    expect(repair.id).not.toBe(original[0].id)
+    expect(selectedAudioProjectionRepairEvent(cellId, take, opts, proof)).toEqual(repair)
+    const repaired = await handleMigrateIngestRequest(ingestRequest([repair]), env())
+    expect(await repaired!.json()).toMatchObject({ accepted: 1, replayed: 0 })
+    const after = (await t.pg.query("SELECT * FROM cell_audio")).rows
+    expect(after).toHaveLength(1)
+    expect(after[0]).toMatchObject({ selected: 1, deleted: 0, validator_count: 1, event_id: original[0].id })
+    expect((await t.pg.query("SELECT * FROM events WHERE id=$1", [original[0].id])).rows).toHaveLength(1)
+    const retry = await handleMigrateIngestRequest(ingestRequest([repair]), env())
+    expect(await retry!.json()).toMatchObject({ accepted: 0, replayed: 1 })
+    await t.pg.query("DELETE FROM cell_audio")
+    const rebuild = await handleRebuildProjectionRequest(new Request(`https://sync.test/admin/projects/${PROJECT}/rebuild-projection?fullReplay=1`, {
+      method: "POST", headers: { Authorization: `Bearer ${SECRET}` },
+    }), env())
+    expect(rebuild?.status, await rebuild?.clone().text()).toBe(200)
+    expect((await t.pg.query("SELECT * FROM cell_audio")).rows).toEqual(after)
+    // Destination guards also run inside projection, after the offline audit:
+    // app deletion/selection changes must win if they race the repair.
+    for (const change of ["deleted", "purged-deletion", "cleared", "other-selected"] as const) {
+      await t.reset()
+      await handleMigrateIngestRequest(ingestRequest(original), env())
+      const action: IngestEventIn = change === "other-selected"
+        ? { ...original[0], id: "app-new", author: "app-user", payload: { audioId: "new.wav", url: "frontier-audio://new.wav", slot: "recording" } }
+        : { ...original[0], id: "app-action", author: "app-user", kind: change === "cleared" ? "cell.audio.select" : "cell.audio.remove",
+            payload: { audioId: change === "cleared" ? null : take.aquillaAudioId, slot: "recording" } }
+      expect((await handleMigrateIngestRequest(ingestRequest([action]), env()))?.status).toBe(200)
+      if (change !== "deleted") await t.pg.query("DELETE FROM cell_audio WHERE audio_id=$1", [take.aquillaAudioId])
+      const beforeRepair = (await t.pg.query<Record<string, unknown>>("SELECT * FROM cell_audio ORDER BY audio_id")).rows
+      expect((await handleMigrateIngestRequest(ingestRequest([repair]), env()))?.status).toBe(200)
+      const rows = (await t.pg.query<Record<string, unknown>>("SELECT * FROM cell_audio ORDER BY audio_id")).rows
+      for (const row of beforeRepair) expect(rows.find(x => x.audio_id === row.audio_id)).toEqual(row)
+      const recovered = rows.find(x => x.audio_id === take.aquillaAudioId)
+      if (change === "purged-deletion") expect(recovered).toBeUndefined()
+      else expect(recovered).toMatchObject({ selected: 0, deleted: change === "deleted" ? 1 : 0 })
+    }
+  }, 120_000)
+
+  it("recovers historical audio without changing selection or reviving an app-deleted take, including replay", async () => {
+    const capability = await handleMigrateIngestRequest(new Request("https://sync.test/migrate/ingest", {
+      headers: { Authorization: `Bearer ${SECRET}` },
+    }), env())
+    expect(await capability!.json()).toEqual({ capabilities: ["audio-history-attach-v1", "audio-projection-repair-v1"] })
+    for (const state of ["selected", "none", "deleted"] as const) {
+      await t.reset()
+      const cellId = `audio-${state}`
+      const ordinary: IngestEventIn = {
+        id: `app-attach-${state}`, kind: "cell.audio.attach", fileId: FILE, cellId,
+        author: "app-user", clientTs: 1700000000000,
+        payload: { audioId: state === "deleted" ? "old.wav" : "current.wav", url: "frontier-audio://current.wav", slot: "recording" },
+      }
+      const seed = await handleMigrateIngestRequest(ingestRequest([ordinary]), env())
+      expect(seed?.status).toBe(200)
+      if (state !== "selected") {
+        const action = await handleMigrateIngestRequest(ingestRequest([{
+          ...ordinary, id: `app-${state}`, kind: state === "deleted" ? "cell.audio.remove" : "cell.audio.select",
+          payload: { audioId: state === "deleted" ? "old.wav" : null, slot: "recording" },
+        }]), env())
+        expect(action?.status).toBe(200)
+      }
+      const before = (await t.pg.query<Record<string, unknown>>("SELECT * FROM cell_audio ORDER BY audio_id")).rows
+      // Actual daemon producer -> actual ingest handler -> real Postgres projection.
+      const recovery = buildCellAudioEvents(cellId, [{
+        legacyAudioId: "old", aquillaAudioId: "old.wav", diskRelPath: ".project/attachments/files/old.wav",
+        slot: "recording", createdBy: "original-author", createdAt: 1600000000000,
+      }], null, { projectId: PROJECT, fileId: FILE, fallbackAuthor: "legacy-import", fallbackTs: 1800000000000, preserveUnselectedHistory: true })
+      expect(recovery).toHaveLength(1)
+      expect(recovery[0].payload).toMatchObject({ historyOnly: true })
+      const response = await handleMigrateIngestRequest(ingestRequest(recovery), env())
+      expect(response?.status).toBe(200)
+      const after = (await t.pg.query<Record<string, unknown>>("SELECT * FROM cell_audio ORDER BY audio_id")).rows
+      for (const row of before) expect(after.find(x => x.audio_id === row.audio_id)).toEqual(row)
+      if (state !== "deleted") {
+        expect(after.find(x => x.audio_id === "old.wav")).toMatchObject({ selected: 0, deleted: 0, created_by: "original-author", created_ts: 1600000000000 })
+      }
+      const replay = await handleMigrateIngestRequest(ingestRequest(recovery), env())
+      expect(replay?.status).toBe(200)
+      expect((await t.pg.query("SELECT * FROM cell_audio ORDER BY audio_id")).rows).toEqual(after)
+      // Rebuild normally retains audio rows. Empty only this isolated fixture
+      // too, to prove the saved payload recreates the same state from scratch.
+      await t.pg.query("DELETE FROM cell_audio")
+      const rebuild = await handleRebuildProjectionRequest(new Request(`https://sync.test/admin/projects/${PROJECT}/rebuild-projection?fullReplay=1`, {
+        method: "POST", headers: { Authorization: `Bearer ${SECRET}` },
+      }), env())
+      expect(rebuild?.status, await rebuild?.clone().text()).toBe(200)
+      expect((await t.pg.query("SELECT * FROM cell_audio ORDER BY audio_id")).rows).toEqual(after)
+      // A later removal must still replay as a tombstone, not cause the earlier
+      // historical attach to disappear by reading a future event out of order.
+      const remove = { ...ordinary, id: `later-remove-${state}`, kind: "cell.audio.remove", payload: { audioId: "old.wav" } }
+      expect((await handleMigrateIngestRequest(ingestRequest([remove]), env()))?.status).toBe(200)
+      const deleted = (await t.pg.query("SELECT * FROM cell_audio ORDER BY audio_id")).rows
+      await t.pg.query("DELETE FROM cell_audio")
+      const replayDeleted = await handleRebuildProjectionRequest(new Request(`https://sync.test/admin/projects/${PROJECT}/rebuild-projection?fullReplay=1`, {
+        method: "POST", headers: { Authorization: `Bearer ${SECRET}` },
+      }), env())
+      expect(replayDeleted?.status).toBe(200)
+      expect((await t.pg.query("SELECT * FROM cell_audio ORDER BY audio_id")).rows).toEqual(deleted)
+      // Even if a tombstone row was purged, its logged removal prevents a later
+      // recovery from bringing the recording back.
+      await t.pg.query("DELETE FROM cell_audio WHERE audio_id='old.wav'")
+      expect((await handleMigrateIngestRequest(ingestRequest([{ ...recovery[0], id: `new-recovery-${state}` }]), env()))?.status).toBe(200)
+      expect((await t.pg.query("SELECT * FROM cell_audio WHERE audio_id='old.wav'")).rows).toHaveLength(0)
+    }
+  }, 120_000)
+
   it("assigns unique ascending seqs from one allocated block (eventsOnly firehose)", async () => {
     const events = ["e1", "e2", "e3", "e4", "e5"].map((id, i) => cellCreate(id, `c${i}`, `v${i}`))
     const res = await handleMigrateIngestRequest(ingestRequest(events, { eventsOnly: true }), env())

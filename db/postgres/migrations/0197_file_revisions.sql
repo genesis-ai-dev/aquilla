@@ -9,7 +9,7 @@
 --
 -- `files.head_revision_n` NULL means a legacy, materialized file: it takes
 -- today's import paths unchanged until the revisions route adopts it (revision
--- 1 written from its current cells, ids preserved). Decision 0007.
+-- 1 written from its current cells, ids preserved). Decision 0008.
 
 ALTER TABLE files ADD COLUMN IF NOT EXISTS head_revision_n INTEGER;
 

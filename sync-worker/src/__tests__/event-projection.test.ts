@@ -1049,6 +1049,8 @@ describe('isChainMutatingKind', () => {
     'assignment.unassign': false,
     'project.link-source': false,
     'cast.assign': false,
+    // AQU-2408: a typed label is one metadata key on the source row; never the chain.
+    'cell.label.set': false,
     'cell.retime': false,
     'cell.audio.rename': false,
     'cell.audio.trim': false,

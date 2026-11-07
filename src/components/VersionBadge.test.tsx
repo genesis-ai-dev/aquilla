@@ -5,7 +5,7 @@ import { screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter } from "react-router-dom"
 import { renderWithTooltips, expectClickNote } from "@/test-utils/tooltip"
-import { VersionBadge, VersionTag } from "./VersionBadge"
+import { InFlowVersionProvider, VersionBadge, VersionTag } from "./VersionBadge"
 
 describe("VersionTag", () => {
   it("the build button's hover names the build and nothing more", async () => {
@@ -26,8 +26,10 @@ describe("VersionTag", () => {
 
 describe("VersionBadge", () => {
   it("auth pages show one inline build control instead of a floating duplicate", () => {
+    // AQU-2439: the floating badge stands down because the inline one is
+    // mounted, not because of the route — so the provider is what matters here.
     renderWithTooltips(<MemoryRouter initialEntries={["/join"]}>
-      <VersionBadge /><VersionBadge inline />
+      <InFlowVersionProvider><VersionBadge /><VersionBadge inline /></InFlowVersionProvider>
     </MemoryRouter>)
     expect(screen.getAllByRole("button", { name: "Copy build info" })).toHaveLength(1)
   })

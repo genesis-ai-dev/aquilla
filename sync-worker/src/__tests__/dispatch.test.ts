@@ -56,6 +56,7 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     'assignment.unassign': { assignmentId: 'as-1' },
     'project.link-source': { sourceProjectId: 'upstream-proj-1' },
     'cast.assign': { castName: 'Narrator' },
+    'cell.label.set': { label: 'Pericope' },
     'cell.retime': { startMs: 0, endMs: 1000 },
     'cell.audio.rename': { audioId: 'audio-1.wav', label: 'Take 3' },
     'cell.audio.trim': { audioId: 'audio-1.wav', trimStartMs: 250, trimEndMs: 3000 },

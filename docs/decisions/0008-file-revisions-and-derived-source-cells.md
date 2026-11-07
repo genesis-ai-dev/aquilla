@@ -1,4 +1,4 @@
-# 0007 — File revisions and derived source cells
+# 0008 — File revisions and derived source cells
 
 *Decided 2026-11-06 (AQU-2459). Increments 1 and 2 of the spec
 `docs/superpowers/specs/2026-11-06-virtual-source-cells-file-revisions.md`.*

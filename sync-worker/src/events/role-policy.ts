@@ -227,6 +227,12 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   //   than a crash, because the client mirror throws before anything reaches the
   //   durable outbox.
   'cast.assign': ROLE.MAINTAINER,
+  // AQU-2408: a hand-typed cell label is metadata, not casting. PROJECT_LEAD is
+  // the lowest rung the project's `cellLabelFloor` setting can admit; the
+  // setting itself (maintainer unless set otherwise) is enforced where the
+  // Label field is drawn, exactly like `cellEditingFloor`. See
+  // docs/decisions/0007-cell-labels-are-metadata-never-cast.md.
+  'cell.label.set': ROLE.PROJECT_LEAD,
 
   // Timeline editor: retiming a cell (move/stretch) is a translator-level edit.
   'cell.retime': ROLE.CONTRIBUTOR,

@@ -1,8 +1,8 @@
 import { useNavigate } from "react-router-dom"
-import { BookOpen, FolderPlus, RefreshCw, X } from "lucide-react"
+import { BookOpen, ExternalLink, FolderPlus, RefreshCw, X } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
-import { OrgSidebar } from "@/components/org/OrgSidebar"
-import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
+import { ThisComputerSidebar } from "@/components/this-computer/ThisComputerSidebar"
+import { ThisComputerBreadcrumb } from "@/components/this-computer/ThisComputerBreadcrumb"
 import { Page, PageHeader } from "@/components/ui/page"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -11,6 +11,7 @@ import { EmptyState } from "@/components/ui/empty"
 import { Spinner } from "@/components/ui/spinner"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useParatextDiscovery, type BridgeProject } from "@/lib/paratext-bridge/use-paratext-discovery"
+import { pickFolder } from "@/lib/paratext-bridge/tauri"
 import { getBookName } from "@/lib/file-labeling/bible-book-names"
 
 const PARATEXT_DOCS_URL =
@@ -29,14 +30,14 @@ export function ParatextProjectsPage() {
   const d = useParatextDiscovery()
 
   const addFolder = async () => {
-    const path = window.prompt(t("paratextBridge.addFolderPrompt"))
+    const path = await pickFolder(t("paratextBridge.thisComputer.pickFolderTitle"))
     if (path?.trim()) await d.addRoot(path.trim())
   }
 
   return (
     <AppShell
-      sidebar={<OrgSidebar />}
-      header={<OrgBreadcrumb section={t("paratextBridge.title")} />}
+      sidebar={<ThisComputerSidebar />}
+      header={<ThisComputerBreadcrumb trail={[{ label: t("paratextBridge.title") }]} />}
       statusBar={null}
       main={
         <Page>
@@ -102,7 +103,15 @@ export function ParatextProjectsPage() {
                           {!p.utf8 ? ` · ${t("paratextBridge.notUtf8")}` : ""}
                         </CardDescription>
                       </CardHeader>
-                      <CardContent>
+                      <CardContent className="space-y-3">
+                        <Button
+                          size="sm"
+                          disabled={!p.utf8 || p.books.length === 0}
+                          data-testid="paratext-open-in-aquilla"
+                          onClick={() => navigate(`/paratext/open?${new URLSearchParams({ project: p.path }).toString()}`)}
+                        >
+                          <ExternalLink />{t("paratextBridge.openInAquilla")}
+                        </Button>
                         <div className="flex flex-wrap gap-1">
                           {p.books.map((b) => (
                             <Button

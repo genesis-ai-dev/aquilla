@@ -761,7 +761,7 @@ CREATE TABLE files (
     structural_filled_count   INTEGER NOT NULL DEFAULT 0,
     structural_approved_count INTEGER NOT NULL DEFAULT 0,
     structural_ai_drafted_count INTEGER NOT NULL DEFAULT 0,
-    -- AQU-2459: head of the file's revision chain (migration 0196). NULL =
+    -- AQU-2459: head of the file's revision chain (migration 0197). NULL =
     -- legacy materialized file; set once the revisions route adopts it.
     head_revision_n INTEGER,
     UNIQUE (id, project_id)
@@ -1202,9 +1202,9 @@ CREATE TABLE cell_glosses (
 -- envelope (a re-import replaces that wholesale). The covered cells are
 -- resolved at read time by walking the file's cell order between the anchors,
 -- so nothing stored can fall out of step with the file.
--- AQU-2459: one row per revision of a file's source side (migration 0196).
+-- AQU-2459: one row per revision of a file's source side (migration 0197).
 -- The aligned unit list lives in R2 at manifest_r2_key; this row is the index
--- and the counts. See db/shared/file-revision.ts and decision 0007.
+-- and the counts. See db/shared/file-revision.ts and decision 0008.
 CREATE TABLE file_revisions (
     project_id        TEXT NOT NULL,
     file_id           TEXT NOT NULL,
@@ -2066,6 +2066,31 @@ CREATE TABLE IF NOT EXISTS integration_item_links (
   PRIMARY KEY (link_id, entity_kind, entity_id)
 );
 
+-- LangQuest account-level connections (0196_langquest_connections.sql): one
+-- per (Aquilla user, LangQuest organization), the encrypted lqp_ token, and
+-- its health (needs_reauth / last_checked_at / last_error). Links made from a
+-- connection point at it and carry their own token_enc copy.
+CREATE TABLE IF NOT EXISTS langquest_connections (
+  id               TEXT PRIMARY KEY,
+  user_id          BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  api_base         TEXT NOT NULL,
+  lq_org_id        TEXT NOT NULL,
+  lq_org_name      TEXT,
+  token_enc        TEXT NOT NULL,            -- AES-GCM, base64(iv||ciphertext)
+  environment      TEXT,                     -- deployment that stored the token (AQU-1775)
+  token_id         TEXT,
+  token_name       TEXT,
+  scopes           JSONB NOT NULL DEFAULT '[]'::jsonb,
+  all_languages    BOOLEAN NOT NULL DEFAULT TRUE,
+  token_expires_at TIMESTAMPTZ,
+  needs_reauth     BOOLEAN NOT NULL DEFAULT FALSE,
+  last_checked_at  TIMESTAMPTZ,
+  last_error       TEXT,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (user_id, lq_org_id)
+);
+
 -- LangQuest live links (0185_langquest_links.sql): one per project, the
 -- encrypted lqp_ token, the change-feed cursor, and the passage→cell map.
 CREATE TABLE IF NOT EXISTS langquest_links (
@@ -2088,8 +2113,11 @@ CREATE TABLE IF NOT EXISTS langquest_links (
   last_sync_error   TEXT,
   created_by        TEXT NOT NULL,
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  connection_id     TEXT REFERENCES langquest_connections(id) ON DELETE SET NULL  -- 0196: the account-level connection the link was made from
 );
+
+CREATE INDEX IF NOT EXISTS idx_langquest_links_connection ON langquest_links(connection_id);
 
 CREATE TABLE IF NOT EXISTS langquest_passages (
   project_id  TEXT NOT NULL REFERENCES langquest_links(project_id) ON DELETE CASCADE,

@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button"
 import { useState } from "react"
 import { Navigate, useLocation, useNavigate, useParams, type Location } from "react-router-dom"
-import { Bell, Cpu, Gauge, KeyRound, Mic, PanelLeft, ServerCog, UserRound } from "lucide-react"
+import { Bell, Cpu, Gauge, KeyRound, Link2, Mic, PanelLeft, ServerCog, UserRound } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
@@ -38,6 +38,7 @@ import { UsageSection } from "@/components/settings/UsageSection"
 import { ShareUsageDataSetting } from "@/components/settings/ShareUsageDataSetting"
 import { ApiTokensSection } from "@/components/settings/ApiTokensSection"
 import { CommentNotificationsSection } from "@/components/settings/CommentNotificationsSection"
+import { LangQuestConnectionsSection } from "@/components/settings/LangQuestConnectionsSection"
 import {
   RecordingPreferencesScope,
   RecordingPreferencesSection,
@@ -476,6 +477,16 @@ const PREFERENCE_SECTIONS: PreferenceSection[] = [
     group: "Account",
     icon: Gauge,
     render: () => <UsageSection />,
+  },
+  {
+    // AQU-2105: the LangQuest organizations this account holds a token for,
+    // with each token's health. Made from the New-project wizard, managed here.
+    slug: "connected-orgs",
+    titleKey: "langquest.settings.title",
+    descriptionKey: "langquest.settings.description",
+    group: "Account",
+    icon: Link2,
+    render: () => <LangQuestConnectionsSection />,
   },
   {
     slug: "api-tokens",

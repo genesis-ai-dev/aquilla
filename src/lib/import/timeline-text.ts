@@ -233,10 +233,6 @@ export function createTrackRowsPromoter(args: PromoteTrackToRowsArgs) {
   }
 }
 
-export function promoteTimelineTrackToRows(args: PromoteTrackToRowsArgs): Promise<void> {
-  return createTrackRowsPromoter(args)()
-}
-
 /** AQU-1566: the server refused a promotion because the linked video already
  *  has rows (someone else got there first, or the rows had not loaded). The
  *  caller shows those rows and says so instead of a raw HTTP error. Matches the

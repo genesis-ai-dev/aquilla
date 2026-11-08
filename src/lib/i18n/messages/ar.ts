@@ -1023,7 +1023,6 @@ export const ar: Catalog = {
   "editor.timeline.subtitleSourceCueSummary": "{count} مقطعًا نصيًّا، {span}",
   "editor.timeline.subtitleSourceCueSummaryUntimed": "{count} مقطعًا نصيًّا، ولا يحمل أيٌّ منها توقيتًا.",
   "editor.timeline.subtitleSourceRepairedShortForm": "قُرئت {count} من الطوابع الزمنية المختصرة على أنها دقائق وثوانٍ.",
-  "editor.timeline.subtitleSourceDroppedCues": "تم تخطّي {count} من الأسطر لأنها لا تحمل نصًّا صالحًا.",
   "editor.timeline.subtitleSourceUntimedCues": "{count} من المقاطع النصية بلا توقيت ولن تظهر على المخطط الزمني.",
   "editor.timeline.subtitleSourceImport": "استخراج المقاطع النصية",
   "editor.timeline.subtitleSourceImportCues": "استخراج {count} مقطعًا",

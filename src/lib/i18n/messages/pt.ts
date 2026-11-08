@@ -1229,7 +1229,6 @@ export const pt: Catalog = {
   "editor.timeline.subtitleSourceCueSummary": "{count} entradas, {span}",
   "editor.timeline.subtitleSourceCueSummaryUntimed": "{count} entradas, nenhuma com tempo.",
   "editor.timeline.subtitleSourceRepairedShortForm": "{count} marcações de tempo em formato curto foram lidas como minutos e segundos.",
-  "editor.timeline.subtitleSourceDroppedCues": "{count} linhas não tinham texto utilizável e foram ignoradas.",
   "editor.timeline.subtitleSourceUntimedCues": "{count} entradas não têm tempo e não aparecerão na linha do tempo.",
   "editor.timeline.subtitleSourceImport": "Extrair entradas",
   "editor.timeline.subtitleSourceImportCues": "Extrair {count} entradas",

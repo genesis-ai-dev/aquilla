@@ -1024,7 +1024,6 @@ export const fr: Catalog = {
   "editor.timeline.subtitleSourceCueSummary": "{count} répliques, {span}",
   "editor.timeline.subtitleSourceCueSummaryUntimed": "{count} répliques, aucune minutée.",
   "editor.timeline.subtitleSourceRepairedShortForm": "{count} horodatages au format court lus comme minutes et secondes.",
-  "editor.timeline.subtitleSourceDroppedCues": "{count} lignes sans texte exploitable ont été ignorées.",
   "editor.timeline.subtitleSourceUntimedCues": "{count} répliques sans minutage n’apparaîtront pas sur la chronologie.",
   "editor.timeline.subtitleSourceImport": "Extraire les répliques",
   "editor.timeline.subtitleSourceImportCues": "Extraire {count} répliques",

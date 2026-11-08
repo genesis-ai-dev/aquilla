@@ -1030,7 +1030,6 @@ export const id: Catalog = {
   "editor.timeline.subtitleSourceCueSummary": "{count} isyarat, {span}",
   "editor.timeline.subtitleSourceCueSummaryUntimed": "{count} isyarat, tidak ada yang memiliki waktu.",
   "editor.timeline.subtitleSourceRepairedShortForm": "{count} penanda waktu bentuk singkat dibaca sebagai menit dan detik.",
-  "editor.timeline.subtitleSourceDroppedCues": "{count} baris tidak berisi teks yang dapat dipakai dan dilewati.",
   "editor.timeline.subtitleSourceUntimedCues": "{count} isyarat tidak memiliki waktu dan tidak akan muncul di lini masa.",
   "editor.timeline.subtitleSourceImport": "Ekstrak isyarat",
   "editor.timeline.subtitleSourceImportCues": "Ekstrak {count} isyarat",

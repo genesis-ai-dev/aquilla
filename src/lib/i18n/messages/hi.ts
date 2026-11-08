@@ -1233,7 +1233,6 @@ export const hi: Catalog = {
   "editor.timeline.subtitleSourceCueSummary": "{count} संकेत, {span}",
   "editor.timeline.subtitleSourceCueSummaryUntimed": "{count} संकेत, उनमें से कोई समयबद्ध नहीं।",
   "editor.timeline.subtitleSourceRepairedShortForm": "{count} लघु समय-मुद्राएँ मिनट और सेकंड के रूप में पढ़ी गईं।",
-  "editor.timeline.subtitleSourceDroppedCues": "{count} पंक्तियों में कोई उपयोगी पाठ नहीं था और वे छोड़ी गईं।",
   "editor.timeline.subtitleSourceUntimedCues": "{count} संकेतों का कोई समय नहीं और वे समयरेखा पर नहीं दिखेंगे।",
   "editor.timeline.subtitleSourceImport": "संकेत निकालें",
   "editor.timeline.subtitleSourceImportCues": "{count} संकेत निकालें",

@@ -1970,8 +1970,6 @@ export const editor = defineNamespace({
       "{count} cues, none of them timed.",
     "editor.timeline.subtitleSourceRepairedShortForm":
       "{count} short-form timestamps read as minutes and seconds.",
-    "editor.timeline.subtitleSourceDroppedCues":
-      "{count} lines carried no usable text and were skipped.",
     "editor.timeline.subtitleSourceUntimedCues":
       "{count} cues carry no timing and won't appear on the timeline.",
     "editor.timeline.subtitleSourceImport": "Extract cues",
@@ -10739,12 +10737,6 @@ export const editor = defineNamespace({
           "Note under the file summary: some timestamps were written in a short " +
           "form and were read as minutes and seconds rather than hours and minutes.",
         placeholders: { count: "Number of timestamps that were read that way." },
-      },
-      "editor.timeline.subtitleSourceDroppedCues": {
-        description:
-          "Note under the file summary: some lines looked like a cue but had no " +
-          "text under them, so nothing was imported for them.",
-        placeholders: { count: "Number of lines skipped." },
       },
       "editor.timeline.subtitleSourceUntimedCues": {
         description:

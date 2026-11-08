@@ -59,17 +59,35 @@ describe("YouTube captions import preparation", () => {
     expect(result.rawSourceFormat).toBe("srt")
   })
 
+  // Import map X-D-silent-cue-drop / M-caption-rules: a cue whose time can't
+  // be read is left out and counted, as Upload files does with the same file.
   it.each([["srt", srt], ["vtt", vtt], ["sbv", sbv]])(
-    "does not silently discard a malformed cue from %s", (format, valid) => {
+    "does not silently discard a malformed cue from %s: it counts it", (format, valid) => {
       const broken = format === "sbv"
         ? "0:00:05,0:00:06\nMissing fractions\n"
         : "00:00:05 --> 00:00:06\nMissing fractions\n"
-      expect(() => prepareYouTubeCaptionImport({
+      const result = prepareYouTubeCaptionImport({
         url: "https://youtu.be/dQw4w9WgXcQ", captionName: `Captions.${format}`,
         captionText: valid + "\n" + broken,
-      })).toThrow("could not be read")
+      })
+      expect(result.droppedCues).toBe(1)
+      expect(result.strings.map(cue => cue.original)).not.toContain("Missing fractions")
     },
   )
+
+  it("counts a cue whose time has a typo in it, which used to vanish without a word", () => {
+    const captionText = vtt + "\n00:00:xx.000 --> 00:00:12.000\nThe typo cue\n"
+    const result = prepareYouTubeCaptionImport({
+      url: "https://youtu.be/dQw4w9WgXcQ", captionName: "Captions.vtt", captionText,
+    })
+    expect(result.droppedCues).toBe(1)
+  })
+
+  it("counts nothing when every cue is read", () => {
+    expect(prepareYouTubeCaptionImport({
+      url: "https://youtu.be/dQw4w9WgXcQ", captionName: "Captions.vtt", captionText: vtt,
+    }).droppedCues).toBe(0)
+  })
 
   it.each([
     { url: "https://example.com/video", captionName: "captions.srt", captionText: srt },

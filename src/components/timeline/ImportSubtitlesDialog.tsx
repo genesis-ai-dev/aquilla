@@ -150,7 +150,9 @@ export function ImportSubtitlesDialog({ open, textFileName, filmUrl, onConfirm, 
             )}
             {report.droppedCues > 0 && (
               <p className="text-xs text-muted-foreground" data-testid="import-subtitles-dropped">
-                {t("editor.timeline.subtitleSourceDroppedCues", { count: report.droppedCues })}
+                {/* Upload files' own notice for the same problem (import map
+                    M-caption-rules: one set of messages behind every door). */}
+                {t("importExport.notices.subtitleCuesUnreadable", { count: report.droppedCues })}
               </p>
             )}
             {report.untimedCues > 0 && (

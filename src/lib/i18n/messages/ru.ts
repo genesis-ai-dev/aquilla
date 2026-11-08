@@ -1044,7 +1044,6 @@ export const ru: Catalog = {
   "editor.timeline.subtitleSourceCueSummary": "Реплик: {count}, {span}",
   "editor.timeline.subtitleSourceCueSummaryUntimed": "Реплик: {count}, ни одна не имеет тайминга.",
   "editor.timeline.subtitleSourceRepairedShortForm": "Коротких временных меток, прочитанных как минуты и секунды: {count}.",
-  "editor.timeline.subtitleSourceDroppedCues": "Строк без пригодного текста пропущено: {count}.",
   "editor.timeline.subtitleSourceUntimedCues": "Реплик без тайминга: {count}. Они не появятся на временной шкале.",
   "editor.timeline.subtitleSourceImport": "Извлечь реплики",
   "editor.timeline.subtitleSourceImportCues": "Извлечь реплики: {count}",

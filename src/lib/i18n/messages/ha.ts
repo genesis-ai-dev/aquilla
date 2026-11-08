@@ -1272,7 +1272,6 @@ export const ha: Catalog = {
   "editor.timeline.subtitleSourceCueSummary": "alamomi {count}, {span}",
   "editor.timeline.subtitleSourceCueSummaryUntimed": "alamomi {count}, babu ɗaya da yake da lokaci.",
   "editor.timeline.subtitleSourceRepairedShortForm": "An karanta tambarin lokaci na gajeren tsari {count} a matsayin mintuna da daƙiƙu.",
-  "editor.timeline.subtitleSourceDroppedCues": "An tsallake layuka {count} saboda babu rubutu mai amfani.",
   "editor.timeline.subtitleSourceUntimedCues": "Alamomi {count} ba su da lokaci kuma ba za su bayyana a jadawali ba.",
   "editor.timeline.subtitleSourceImport": "Ku fitar da alamomi",
   "editor.timeline.subtitleSourceImportCues": "Ku fitar da alamomi {count}",

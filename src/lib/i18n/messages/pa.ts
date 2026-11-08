@@ -1272,7 +1272,6 @@ export const pa: Catalog = {
   "editor.timeline.subtitleSourceCueSummary": "{count} ਕਿਊ, {span}",
   "editor.timeline.subtitleSourceCueSummaryUntimed": "{count} ਕਿਊ, ਇਨ੍ਹਾਂ ਵਿੱਚੋਂ ਕਿਸੇ ਦਾ ਸਮਾਂ ਨਹੀਂ.",
   "editor.timeline.subtitleSourceRepairedShortForm": "{count} ਛੋਟੇ ਟਾਈਮਸਟੈਂਪ ਮਿੰਟ ਅਤੇ ਸਕਿੰਟ ਵਜੋਂ ਪੜ੍ਹੇ ਗਏ.",
-  "editor.timeline.subtitleSourceDroppedCues": "{count} ਲਾਈਨਾਂ ਵਿੱਚ ਵਰਤਣਯੋਗ ਲਿਖਤ ਨਹੀਂ ਸੀ ਅਤੇ ਛੱਡ ਦਿੱਤੀਆਂ ਗਈਆਂ.",
   "editor.timeline.subtitleSourceUntimedCues": "{count} ਕਿਊ ਦਾ ਕੋਈ ਸਮਾਂ ਨਹੀਂ ਅਤੇ ਉਹ ਟਾਈਮਲਾਈਨ ਉੱਤੇ ਨਹੀਂ ਦਿਖਣਗੇ.",
   "editor.timeline.subtitleSourceImport": "ਕਿਊ ਕੱਢੋ",
   "editor.timeline.subtitleSourceImportCues": "{count} ਕਿਊ ਕੱਢੋ",

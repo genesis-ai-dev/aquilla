@@ -1017,7 +1017,6 @@ export const ms: Catalog = {
   "editor.timeline.subtitleSourceCueSummary": "{count} isyarat, {span}",
   "editor.timeline.subtitleSourceCueSummaryUntimed": "{count} isyarat, tiada satu pun yang bermasa.",
   "editor.timeline.subtitleSourceRepairedShortForm": "{count} cap masa bentuk pendek dibaca sebagai minit dan saat.",
-  "editor.timeline.subtitleSourceDroppedCues": "{count} baris tidak mempunyai teks yang boleh digunakan dan dilangkau.",
   "editor.timeline.subtitleSourceUntimedCues": "{count} isyarat tidak mempunyai masa dan tidak akan muncul pada garis masa.",
   "editor.timeline.subtitleSourceImport": "Ekstrak isyarat",
   "editor.timeline.subtitleSourceImportCues": "Ekstrak {count} isyarat",

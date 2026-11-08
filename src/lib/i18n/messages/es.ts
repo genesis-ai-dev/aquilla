@@ -1227,7 +1227,6 @@ export const es: Catalog = {
   "editor.timeline.subtitleSourceCueSummary": "{count} entradas, {span}",
   "editor.timeline.subtitleSourceCueSummaryUntimed": "{count} entradas, ninguna con tiempo.",
   "editor.timeline.subtitleSourceRepairedShortForm": "{count} marcas de tiempo en formato corto se leyeron como minutos y segundos.",
-  "editor.timeline.subtitleSourceDroppedCues": "{count} líneas no tenían texto usable y se omitieron.",
   "editor.timeline.subtitleSourceUntimedCues": "{count} entradas no tienen tiempo y no aparecerán en la línea de tiempo.",
   "editor.timeline.subtitleSourceImport": "Extraer entradas",
   "editor.timeline.subtitleSourceImportCues": "Extraer {count} entradas",

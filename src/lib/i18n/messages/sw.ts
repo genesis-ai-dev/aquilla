@@ -1265,7 +1265,6 @@ export const sw: Catalog = {
   "editor.timeline.subtitleSourceCueSummary": "{count} kauli, {span}",
   "editor.timeline.subtitleSourceCueSummaryUntimed": "{count} kauli, hakuna iliyo na muda.",
   "editor.timeline.subtitleSourceRepairedShortForm": "{count} alama za muda za umbo fupi zimesomwa kama dakika na sekunde.",
-  "editor.timeline.subtitleSourceDroppedCues": "Mistari {count} haikuwa na maandishi yanayofaa na imerukwa.",
   "editor.timeline.subtitleSourceUntimedCues": "Kauli {count} hazina muda na hazitaonekana kwenye mpangilio wa muda.",
   "editor.timeline.subtitleSourceImport": "Dondoa kauli",
   "editor.timeline.subtitleSourceImportCues": "Dondoa {count} kauli",

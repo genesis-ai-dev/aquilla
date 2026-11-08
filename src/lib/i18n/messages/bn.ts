@@ -1274,7 +1274,6 @@ export const bn: Catalog = {
   "editor.timeline.subtitleSourceCueSummary": "{count}টি কিউ, {span}",
   "editor.timeline.subtitleSourceCueSummaryUntimed": "{count}টি কিউ, একটিরও সময় নেই।",
   "editor.timeline.subtitleSourceRepairedShortForm": "{count}টি সংক্ষিপ্ত টাইমস্ট্যাম্প মিনিট ও সেকেন্ড হিসেবে পড়া হয়েছে।",
-  "editor.timeline.subtitleSourceDroppedCues": "{count}টি লাইনে ব্যবহারযোগ্য লেখা ছিল না, তাই বাদ।",
   "editor.timeline.subtitleSourceUntimedCues": "{count}টি কিউয়ের সময় নেই এবং টাইমলাইনে দেখাবে না।",
   "editor.timeline.subtitleSourceImport": "কিউ বের করুন",
   "editor.timeline.subtitleSourceImportCues": "{count}টি কিউ বের করুন",

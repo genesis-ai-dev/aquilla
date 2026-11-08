@@ -157,6 +157,28 @@ describe("YouTubeImportPanel", () => {
     expect(publish).toHaveBeenCalledTimes(2)
   })
 
+  // Import map X-D-silent-cue-drop (Nov 2): a cue with a typo in its time
+  // vanished from the preview and the import without a word.
+  it("says how many cue times it could not read, as Upload files does", async () => {
+    renderPanel()
+    fillYouTubeLink("https://youtu.be/dQw4w9WgXcQ")
+    fireEvent.click(screen.getByLabelText("Import a caption export"))
+    await selectFile(makeFile(`WEBVTT
+
+00:00:01.000 --> 00:00:02.000
+Hello world
+
+00:00:xx.000 --> 00:00:12.000
+Lost words
+`, "Captions.vtt"))
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: /preview captions/i }))
+    })
+    await waitFor(() => expect(screen.getByText(/hello world/i)).toBeInTheDocument())
+    expect(screen.getByTestId("youtube-captions-unreadable")).toHaveTextContent(
+      "1 cue time could not be read, so its wording is not in this import.")
+  })
+
   it("links a picture without requiring captions", async () => {
     const onImported = vi.fn()
     renderPanel({ onImported })

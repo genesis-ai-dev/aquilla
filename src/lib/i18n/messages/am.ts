@@ -1272,7 +1272,6 @@ export const am: Catalog = {
   "editor.timeline.subtitleSourceCueSummary": "{count} ምልክቶች፣ {span}",
   "editor.timeline.subtitleSourceCueSummaryUntimed": "{count} ምልክቶች፣ አንዳቸውም ያልተጣሩ።",
   "editor.timeline.subtitleSourceRepairedShortForm": "{count} አጭር ቅርጽ የጊዜ ማህተሞች እንደ ደቂቃ እና ሰከንድ ተነብበዋል።",
-  "editor.timeline.subtitleSourceDroppedCues": "{count} መስመሮች ጥቅም ላይ የሚውል ጽሑፍ አልያዙም እና ተዘለዋል።",
   "editor.timeline.subtitleSourceUntimedCues": "{count} ምልክቶች ጊዜ የላቸውም እና በጊዜ መስመሩ ላይ አይታዩም።",
   "editor.timeline.subtitleSourceImport": "ምልክቶች ያውጡ",
   "editor.timeline.subtitleSourceImportCues": "{count} ምልክቶች ያውጡ",

@@ -215,6 +215,13 @@ export function YouTubeImportPanel({ ctx, onImported }: {
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       {shown && <>
         {frames.state && <FramesAsHundredthsNotice state={frames.state} onChange={frames.setPick} />}
+        {/* Import map X-D-silent-cue-drop: Upload files' own notice, for the
+            same file read through this door. */}
+        {"droppedCues" in shown && shown.droppedCues > 0 && (
+          <p data-testid="youtube-captions-unreadable" className="text-sm text-amber-700 dark:text-amber-400">
+            {t("importExport.notices.subtitleCuesUnreadable", { count: shown.droppedCues })}
+          </p>
+        )}
         {shown.strings.length === 0 ? <p className="font-medium">{shown.name}</p>
           : <div className="max-h-72 overflow-auto rounded-md border">
           <table className="w-full text-sm">

@@ -142,7 +142,16 @@ untimed
     // The malformed range never opens a cue, so it reports as dropped rather
     // than as an untimed row — the silent-loss case the parser's strictness
     // creates and `repairShortFormCueTimestamps` exists to narrow.
-    expect(screen.getByTestId("import-subtitles-dropped")).toHaveTextContent("1")
+    expect(screen.getByTestId("import-subtitles-dropped")).toHaveTextContent(
+      "1 cue time could not be read, so its wording is not in this import.")
+  })
+
+  it("counts an SBV block whose time line can't be read (import map X-D-silent-cue-drop)", async () => {
+    open()
+    pick("0:00:01.000,0:00:04.000\nOne\n\nno time here\nTwo\n\n0:00:09.000,0:00:18.000\nThree\n", "ep.sbv")
+    await waitFor(() => expect(screen.getByTestId("import-subtitles-confirm")).not.toBeDisabled())
+    expect(screen.getByTestId("import-subtitles-dropped")).toHaveTextContent(
+      "1 cue time could not be read, so its wording is not in this import.")
   })
 })
 

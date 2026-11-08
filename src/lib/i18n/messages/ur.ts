@@ -1272,7 +1272,6 @@ export const ur: Catalog = {
   "editor.timeline.subtitleSourceCueSummary": "{count} کیوز، {span}",
   "editor.timeline.subtitleSourceCueSummaryUntimed": "{count} کیوز، ان میں سے کسی کا وقت نہیں۔",
   "editor.timeline.subtitleSourceRepairedShortForm": "{count} مختصر ٹائم سٹیمپ منٹ اور سیکنڈ پڑھے گئے۔",
-  "editor.timeline.subtitleSourceDroppedCues": "{count} سطروں میں قابل استعمال متن نہیں تھا اور وہ چھوڑ دی گئیں۔",
   "editor.timeline.subtitleSourceUntimedCues": "{count} کیوز کا وقت نہیں اور وہ ٹائم لائن پر نہیں آئیں گی۔",
   "editor.timeline.subtitleSourceImport": "کیوز نکالیں",
   "editor.timeline.subtitleSourceImportCues": "{count} کیوز نکالیں",

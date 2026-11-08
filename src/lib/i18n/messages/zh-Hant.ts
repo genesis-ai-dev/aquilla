@@ -1023,7 +1023,6 @@ export const zh_Hant: Catalog = {
   "editor.timeline.subtitleSourceCueSummary": "{count} 個字幕段，{span}",
   "editor.timeline.subtitleSourceCueSummaryUntimed": "{count} 個字幕段，皆無時間資訊。",
   "editor.timeline.subtitleSourceRepairedShortForm": "{count} 個簡短時間戳記已視為分秒。",
-  "editor.timeline.subtitleSourceDroppedCues": "{count} 行沒有可用文字，已略過。",
   "editor.timeline.subtitleSourceUntimedCues": "{count} 個字幕段沒有時間資訊，不會出現在時間軸上。",
   "editor.timeline.subtitleSourceImport": "擷取字幕段",
   "editor.timeline.subtitleSourceImportCues": "擷取 {count} 個字幕段",

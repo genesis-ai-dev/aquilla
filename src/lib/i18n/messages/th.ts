@@ -1023,7 +1023,6 @@ export const th: Catalog = {
   "editor.timeline.subtitleSourceCueSummary": "{count} คิว, {span}",
   "editor.timeline.subtitleSourceCueSummaryUntimed": "{count} คิว ไม่มีการกำหนดเวลา",
   "editor.timeline.subtitleSourceRepairedShortForm": "ตีความการประทับเวลาแบบสั้น {count} รายการเป็นนาทีและวินาที",
-  "editor.timeline.subtitleSourceDroppedCues": "ข้าม {count} บรรทัดที่ไม่มีข้อความที่ใช้ได้",
   "editor.timeline.subtitleSourceUntimedCues": "{count} คิวไม่มีการกำหนดเวลาและจะไม่ปรากฏบนไทม์ไลน์",
   "editor.timeline.subtitleSourceImport": "ดึงคิว",
   "editor.timeline.subtitleSourceImportCues": "ดึง {count} คิว",

@@ -1023,7 +1023,6 @@ export const my: Catalog = {
   "editor.timeline.subtitleSourceCueSummary": "cue {count} ခု၊ {span}",
   "editor.timeline.subtitleSourceCueSummaryUntimed": "cue {count} ခု၊ တစ်ခုမျှ အချိန်မသတ်မှတ်ထားပါ။",
   "editor.timeline.subtitleSourceRepairedShortForm": "အတိုကောက် အချိန်မှတ်တမ်း {count} ခုကို မိနစ်နှင့် စက္ကန့်အဖြစ် ဖတ်ယူခဲ့သည်။",
-  "editor.timeline.subtitleSourceDroppedCues": "အသုံးပြုနိုင်သော စာသား မပါသည့် စာကြောင်း {count} ကြောင်းကို ကျော်ခဲ့သည်။",
   "editor.timeline.subtitleSourceUntimedCues": "cue {count} ခုတွင် အချိန်မပါသဖြင့် အချိန်ဇယားတွင် မပေါ်ပါ။",
   "editor.timeline.subtitleSourceImport": "cue များ ထုတ်ယူရန်",
   "editor.timeline.subtitleSourceImportCues": "cue {count} ခု ထုတ်ယူရန်",

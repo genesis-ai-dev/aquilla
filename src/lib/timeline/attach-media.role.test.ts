@@ -42,6 +42,7 @@ vi.mock("@/lib/import", () => ({
 }))
 
 vi.mock("@/lib/audio/upload", () => ({
+  MAX_AUDIO_OBJECT_BYTES: 2 * 1024 * 1024 * 1024,
   buildAudioId: (id: string) => `${id}-clip`,
   uploadCellAudio: vi.fn(async () => {
     emitted.uploads += 1
@@ -173,5 +174,17 @@ describe("attachMediaFileToTimeline: a video's picture", () => {
     expect((await attachMediaFileToTimeline(soundOnlyWebm(), ctx, { keepPicture: true })).film).toBeUndefined()
     const wav = new File([new Uint8Array(16)], "episode.wav", { type: "audio/wav" })
     expect((await attachMediaFileToTimeline(wav, ctx, { keepPicture: true })).film).toBeUndefined()
+  })
+})
+
+// Import map D#20: a file dropped on an empty file over the limit is refused
+// up front, with the importer's sentence, before anything is uploaded.
+describe("attachMediaFileToTimeline: over the limit", () => {
+  it("says the importer's sentence and uploads nothing", async () => {
+    asRole(ROLE.PROJECT_LEAD)
+    const huge = new File(["x"], "Episode 101.mov", { type: "video/quicktime" })
+    Object.defineProperty(huge, "size", { value: 3 * 1024 * 1024 * 1024 })
+    await expect(attachMediaFileToTimeline(huge, ctx)).rejects.toThrow("Episode 101.mov exceeds the 2 GB media import limit.")
+    expect(emitted.uploads).toBe(0)
   })
 })

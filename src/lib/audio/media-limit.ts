@@ -4,8 +4,10 @@
 // "This file is 2.1 GB — the limit is 2.0 GB. Split the recording, or
 // compress it first." in English only, and the YouTube panel's "Choose a
 // non-empty audio or video within the upload limit." with no number. Every
-// path now says the importer's sentence, which is translated, and reads the
-// limit from MAX_AUDIO_OBJECT_BYTES (AQU-1975) so it can't drift.
+// way in (the importer, the YouTube panel, a file dropped on an empty file)
+// now refuses such a file first with the importer's sentence, translated,
+// reading the limit from MAX_AUDIO_OBJECT_BYTES (AQU-1975) so it can't drift.
+// The upload's own backstop says the same sentence in English.
 
 import { formatByteLimit } from "@/lib/i18n/format"
 import { normalizeLocale } from "@/lib/i18n/locales"

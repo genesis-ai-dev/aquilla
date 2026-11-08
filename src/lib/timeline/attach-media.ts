@@ -12,7 +12,8 @@
 import { v7 as uuidv7 } from "uuid"
 import { computeMediaSegmentSpecs, mediaSegmentSpecsFromSpeech } from "@/lib/import"
 import { recordMediaImportSeed, buildMediaSeedCells } from "@/lib/audio/auto-transcribe"
-import { buildAudioId, deleteCellAudio, uploadCellAudio } from "@/lib/audio/upload"
+import { buildAudioId, deleteCellAudio, MAX_AUDIO_OBJECT_BYTES, uploadCellAudio } from "@/lib/audio/upload"
+import { mediaFileTooLargeMessage } from "@/lib/audio/media-limit"
 import { emitCellAudioAttach, emitSourceCellCreate, InsufficientRoleError } from "@/lib/sync/events-emit"
 import { getCqrsOutboxBridge } from "@/lib/sync/cqrs-bridge"
 import { canAttachSourceAudio, SOURCE_AUDIO_ATTACH_FLOOR } from "@/lib/sync/role-policy"
@@ -64,6 +65,7 @@ export async function attachMediaFileToTimeline(
   opts: AttachMediaFileOptions = {},
 ): Promise<{ segments: number; lines: MadeLine[]; film?: string }> {
   assertMayAttachSourceAudio()
+  if (file.size > MAX_AUDIO_OBJECT_BYTES) throw new Error(mediaFileTooLargeMessage(file.name))
   const { durationMs, specs } = opts.analysis
     ? {
         durationMs: opts.analysis.durationMs,

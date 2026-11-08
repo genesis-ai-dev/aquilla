@@ -471,6 +471,47 @@ export const audio = defineNamespace({
     // AQU-1681: hosted transcription allows 60 requests per 15 minutes; a
     // batch that reaches it waits and carries on by itself.
     "audio.bulkProgress.waitingForLimit": "Transcription limit reached, continuing at {time}",
+    // AQU-2375: the end of a transcription run says how many rows landed and
+    // how many did not, and a run a page reload stopped is carried on.
+    "audio.transcribeRun.progressSections": plural({
+      one: "Transcribing {count} section of \"{name}\"…",
+      other: "Transcribing {count} sections of \"{name}\"…",
+    }),
+    "audio.transcribeRun.progressRecordings": plural({
+      one: "Transcribing {count} recording…",
+      other: "Transcribing {count} recordings…",
+    }),
+    "audio.transcribeRun.progressCount": "Transcribing — {done} of {count} done…",
+    "audio.transcribeRun.carryingOn": "Carrying on transcribing \"{name}\" after the page reloaded — {done} of {count} done…",
+    "audio.transcribeRun.waitingForFile":
+      "Transcribing \"{name}\" stopped when the page reloaded, at {done} of {count}. It carries on when you open \"{name}\".",
+    "audio.transcribeRun.doneSections": plural({
+      one: "Transcribed {count} section of \"{name}\".",
+      other: "Transcribed {count} sections of \"{name}\".",
+    }),
+    "audio.transcribeRun.doneRecordings": plural({
+      one: "Transcribed {count} recording.",
+      other: "Transcribed {count} recordings.",
+    }),
+    "audio.transcribeRun.partialSections": plural({
+      one: "Transcribed {done} of {count} section of \"{name}\".",
+      other: "Transcribed {done} of {count} sections of \"{name}\".",
+    }),
+    "audio.transcribeRun.partialRecordings": plural({
+      one: "Transcribed {done} of {count} recording.",
+      other: "Transcribed {done} of {count} recordings.",
+    }),
+    "audio.transcribeRun.failedAllNamed": "Couldn't transcribe \"{name}\": {reason}",
+    "audio.transcribeRun.failedAll": "Couldn't transcribe: {reason}",
+    "audio.transcribeRun.stopped": "Transcription stopped — {done} of {count} done.",
+    "audio.transcribeRun.failedSome": plural({
+      one: "{count} couldn't be transcribed: {reason}",
+      other: "{count} couldn't be transcribed. The first one said: {reason}",
+    }),
+    "audio.transcribeRun.retry": plural({
+      one: "Retry {count}",
+      other: "Retry the {count}",
+    }),
 
     // BatchVoiceDialog (AQU-1722) — "Generate voice" on the selection bar:
     // speak every selected line in one chosen voice.
@@ -2692,6 +2733,92 @@ export const audio = defineNamespace({
           "an hour, so the batch pauses and carries on by itself at the time shown. " +
           "Nothing is lost and the person does not need to do anything.",
         placeholders: { time: "Clock time the batch carries on, e.g. 7:45 PM, in the reader's locale." },
+      },
+      "audio.transcribeRun.progressSections": {
+        description:
+          "Progress toast title when a recording's sections start being transcribed into " +
+          "text (speech recognition), before any is done.",
+        placeholders: { count: "How many sections will be transcribed.", name: "The recording's file name." },
+      },
+      "audio.transcribeRun.progressRecordings": {
+        description:
+          "Progress toast title when several recordings start being transcribed into text " +
+          "(speech recognition), before any is done.",
+        placeholders: { count: "How many recordings will be transcribed." },
+      },
+      "audio.transcribeRun.progressCount": {
+        description: "Progress toast title while a transcription run goes on.",
+        placeholders: { done: "How many are done so far.", count: "How many the run will do in all." },
+      },
+      "audio.transcribeRun.carryingOn": {
+        description:
+          "Progress toast title when the app picks a transcription run back up by itself " +
+          "after the browser page was reloaded part-way through. Nothing is lost.",
+        placeholders: {
+          name: "The file name.",
+          done: "How many were already done before the reload.",
+          count: "How many the run will do in all.",
+        },
+      },
+      "audio.transcribeRun.waitingForFile": {
+        description:
+          "Toast after a page reload, when a transcription run was stopped part-way by the " +
+          "reload and its file is not open. The run picks up again by itself when the " +
+          "person opens that file.",
+        placeholders: {
+          name: "The file name (appears twice).",
+          done: "How many were done before the reload.",
+          count: "How many the run will do in all.",
+        },
+      },
+      "audio.transcribeRun.doneSections": {
+        description: "Toast when every section of a recording was transcribed into text.",
+        placeholders: { count: "How many sections.", name: "The recording's file name." },
+      },
+      "audio.transcribeRun.doneRecordings": {
+        description: "Toast when every recording in a run was transcribed into text.",
+        placeholders: { count: "How many recordings." },
+      },
+      "audio.transcribeRun.partialSections": {
+        description:
+          "Toast title when some, but not all, sections of a recording were transcribed. " +
+          "The line under it says how many could not be and why.",
+        placeholders: {
+          done: "How many were transcribed.",
+          count: "How many the run set out to do.",
+          name: "The recording's file name.",
+        },
+      },
+      "audio.transcribeRun.partialRecordings": {
+        description:
+          "Toast title when some, but not all, recordings in a run were transcribed. The " +
+          "line under it says how many could not be and why.",
+        placeholders: { done: "How many were transcribed.", count: "How many the run set out to do." },
+      },
+      "audio.transcribeRun.failedAllNamed": {
+        description: "Toast when none of a recording's sections could be transcribed.",
+        placeholders: { name: "The recording's file name.", reason: "The error, as the service gave it." },
+      },
+      "audio.transcribeRun.failedAll": {
+        description: "Toast when none of the recordings in a run could be transcribed.",
+        placeholders: { reason: "The error, as the service gave it." },
+      },
+      "audio.transcribeRun.stopped": {
+        description: "Toast when someone cancelled a transcription run part-way.",
+        placeholders: { done: "How many were done before it stopped.", count: "How many the run set out to do." },
+      },
+      "audio.transcribeRun.failedSome": {
+        description:
+          "Line under a transcription toast: how many sections or recordings could not be " +
+          "transcribed, and the error the first of them gave.",
+        placeholders: { count: "How many failed.", reason: "The first error, as the service gave it." },
+      },
+      "audio.transcribeRun.retry": {
+        description:
+          "Button on the toast that transcribes again only the sections or recordings that " +
+          "failed. 'the {count}' means those failed ones.",
+        placeholders: { count: "How many failed." },
+        maxLength: 24,
       },
       "audio.batchVoice.title": {
         description:

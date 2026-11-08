@@ -10,7 +10,7 @@ import { createOpfsFs } from "@/lib/fs/opfs-fs"
 import { MemoryDirectoryHandle } from "@/lib/fs/__test__/mem-fs-handles"
 import { __setRootForTests, __flushAudioCacheForTests, audioCachePut, audioCacheGet } from "./bytes-cache"
 import { __resetOpfsAvailabilityForTests } from "@/lib/storage/opfs-availability"
-import { transcribeCell, slicePcmToTrim, __setTranscribeAudioForTests } from "./transcribe"
+import { transcribeCell, transcribeCellOutcome, slicePcmToTrim, __setTranscribeAudioForTests } from "./transcribe"
 import { releaseSharedClipPcm, sharedClipWindow } from "./shared-clip-pcm"
 import { getTranscribeStatus, clearTranscribeStatus } from "./transcribe-status"
 import { buildFrontierAudioUrl } from "./upload"
@@ -117,6 +117,39 @@ describe("transcribeCell — local-first bytes (FRO-355)", () => {
     const status = getTranscribeStatus(FULL_ID)
     expect(status.kind).toBe("error")
     expect(status.kind === "error" && status.message).toMatch(/boom/)
+  })
+})
+
+// ── AQU-2375: a batch must tell a failed row from an empty one ─────────────
+//
+// `transcribeCell` answers 0 for both, so a batch counting rows could only
+// guess. `transcribeCellOutcome` says which.
+
+describe("transcribeCellOutcome", () => {
+  it("says done, with the word count, when the transcript landed", async () => {
+    fetchCellAudio.mockResolvedValue(new Uint8Array([9, 9, 9]))
+    __setTranscribeAudioForTests(fakeTranscribe(["hola", "mundo"]))
+    expect(await transcribeCellOutcome({ cell: makeCell(), session, projectId: "proj-1" }))
+      .toEqual({ kind: "done", words: 2 })
+  })
+
+  it("says failed, with why, when the recording could not be read", async () => {
+    fetchCellAudio.mockRejectedValue(new Error("boom: R2 unreachable"))
+    __setTranscribeAudioForTests(fakeTranscribe(["x"]))
+    const outcome = await transcribeCellOutcome({ cell: makeCell(), session, projectId: "proj-1" })
+    expect(outcome.kind).toBe("failed")
+    expect(outcome.kind === "failed" && outcome.message).toMatch(/boom/)
+  })
+
+  it("says failed for a row it cannot even start (signed out, nothing cached)", async () => {
+    __setTranscribeAudioForTests(fakeTranscribe(["x"]))
+    const outcome = await transcribeCellOutcome({ cell: makeCell(), session: null, projectId: "proj-1" })
+    expect(outcome.kind).toBe("failed")
+  })
+
+  it("says skipped for a row with no recording", async () => {
+    expect(await transcribeCellOutcome({ cell: { ...makeCell(), selectedAudioId: undefined }, session, projectId: "proj-1" }))
+      .toEqual({ kind: "skipped" })
   })
 })
 

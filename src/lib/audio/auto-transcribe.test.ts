@@ -3,7 +3,7 @@
 
 import { setTranscriptionProvider } from "./transcription-preference"
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { setTranscribeStatus, clearTranscribeStatus } from "./transcribe-status"
+import { clearTranscribeStatus } from "./transcribe-status"
 
 const requestAiModelConsent = vi.fn(async (_model: unknown) => true)
 vi.mock("./ai-consent", async (importOriginal) => {
@@ -209,25 +209,54 @@ describe("a run the backend rejected is reported as a failure, not a success", (
 
   afterEach(() => clearTranscribeStatus("c.mp3"))
 
-  it("routes a batch that left an error to onFailed, and never to onDone", async () => {
-    runTranscribeAll.mockImplementation(async () => {
-      setTranscribeStatus("c.mp3", { kind: "error", message: "HTTP 500" })
-    })
+  const ran = (over: Record<string, unknown>) => ({ total: 1, transcribed: 1, failed: [], notRun: 0, cancelled: false, started: true, ...over })
+
+  it("routes a run where no row transcribed to onFailed, and never to onDone", async () => {
+    const report = ran({ transcribed: 0, failed: [{ cellId: "c1", message: "HTTP 500" }] })
+    runTranscribeAll.mockImplementation(async () => report as never)
     const onDone = vi.fn()
     const onFailed = vi.fn()
     await autoTranscribeImportedMedia({ seed, projectId: "p1", session: null, onDone, onFailed })
-    expect(onFailed).toHaveBeenCalledWith("HTTP 500")
+    expect(onFailed).toHaveBeenCalledWith("HTTP 500", report)
     expect(onDone).not.toHaveBeenCalled()
   })
 
   it("still reports a real run through onDone", async () => {
-    runTranscribeAll.mockImplementation(async () => {
-      setTranscribeStatus("c.mp3", { kind: "done", wordCount: 3, durationMs: 10 })
-    })
+    runTranscribeAll.mockImplementation(async () => ran({}) as never)
     const onDone = vi.fn()
     const onFailed = vi.fn()
     await autoTranscribeImportedMedia({ seed, projectId: "p1", session: null, onDone, onFailed })
     expect(onDone).toHaveBeenCalledTimes(1)
     expect(onFailed).not.toHaveBeenCalled()
+  })
+
+  // AQU-2375: the shared clip's status is per recording, so a run where some
+  // rows failed used to end on "Transcribed N sections". The batch now counts
+  // each row.
+  it("routes a run where SOME rows failed to onPartial, never to a flat onDone", async () => {
+    const report = ran({ total: 3, transcribed: 2, failed: [{ cellId: "c2", message: "HTTP 500" }] })
+    runTranscribeAll.mockImplementation(async () => report as never)
+    const onDone = vi.fn()
+    const onFailed = vi.fn()
+    const onPartial = vi.fn()
+    await autoTranscribeImportedMedia({ seed, projectId: "p1", session: null, onDone, onFailed, onPartial })
+    expect(onPartial).toHaveBeenCalledWith(report)
+    expect(onDone).not.toHaveBeenCalled()
+    expect(onFailed).not.toHaveBeenCalled()
+  })
+
+  it("says nothing for a run that never started", async () => {
+    runTranscribeAll.mockImplementation(async () => ran({ started: false, total: 0, transcribed: 0 }) as never)
+    const onDone = vi.fn()
+    await autoTranscribeImportedMedia({ seed, projectId: "p1", session: null, onDone })
+    expect(onDone).not.toHaveBeenCalled()
+  })
+
+  it("keeps the run when it knows the recording's name, so a reload doesn't end it", async () => {
+    runTranscribeAll.mockImplementation(async () => ran({}) as never)
+    await autoTranscribeImportedMedia({ seed, projectId: "p1", session: null, fileName: "c.mp3" })
+    expect(runTranscribeAll).toHaveBeenCalledWith(expect.objectContaining({
+      keep: { fileId: "f3", fileName: "c.mp3", kind: "import" },
+    }))
   })
 })

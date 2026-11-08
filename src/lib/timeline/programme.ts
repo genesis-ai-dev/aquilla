@@ -490,6 +490,12 @@ export function buildProgramme(cells: readonly CellData[], opts?: BuildProgramme
     //   - a line with no take lasts its stand-in length, from its words (the
     //     caller's estimator), else its own span — a line with no words too
     //     (Nov 5: a film imported as one section, not yet transcribed);
+    //   - Nov 8 (the film bundle): …but a line with no take that has its OWN
+    //     original to hear lasts that original's length. What plays there is
+    //     the original, whole; a stand-in cut it at a reading-time guess, and
+    //     an imported film's pieces read "cut 2.4 s" on lines nobody had
+    //     recorded. The stand-in stays for a line with nothing to hear (a
+    //     book with no reading, a heard line of an audio cue file);
     // and the source sounds only as long as the line lasts: cut where it ends.
     // AQU-2252 (Sam, Oct 29): …a take on ANY track that sets line lengths,
     // each at its own place and length: the line lasts as long as the longest
@@ -500,7 +506,8 @@ export function buildProgramme(cells: readonly CellData[], opts?: BuildProgramme
       if (take.window && take.lenSec != null) recordedLenSec = Math.max(recordedLenSec, take.leadSec + take.lenSec)
     }
     const recorded = lengthTakes.length > 0
-    const standInSec = !untimed && !recorded && opts?.standInLenSec ? opts.standInLenSec(cell) : null
+    const standInSec =
+      !untimed && !recorded && fullSourceStart == null && opts?.standInLenSec ? opts.standInLenSec(cell) : null
     const usesStandIn = !recorded && (untimed || standInSec != null)
     const unrecordedLenSec = untimed
       ? nominalLenSec

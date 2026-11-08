@@ -146,12 +146,18 @@ describe("filmPiecesFor — the film cut along its source cues", () => {
     }
   })
 
-  it("a line with no take keeps its stand-in length, and its piece is cut or held to it", () => {
-    const { programme } = layOutProgramme([line("a", 0.5, 4.0, 3.5), line("b", 4.6, 8.8)])
-    const [, b] = filmPiecesFor(programme)
-    const slot = programme.byCellId.get("b")!
-    expect(b.lenSec).toBe(slot.slotLenSec)
-    expect(b.filmEndSec - b.filmStartSec).toBeCloseTo(Math.min(4.2, slot.slotLenSec), 9)
+  // Nov 8 (the film bundle; import map X-D-filmtrack-cut): a line nobody has
+  // recorded plays its original whole, so its piece is its whole stretch and
+  // nothing says "cut". A transcript used to set a reading-time stand-in
+  // ("Hi." is 1.5 s against a 4.2 s line) and cut the piece to it.
+  it("a line with no take shows its whole stretch: no cut, no hold", () => {
+    const b = { ...line("b", 4.6, 8.8), transcription: "Hi." } as CellData
+    const { programme } = layOutProgramme([line("a", 0.5, 4.0, 3.5), b])
+    const [, piece] = filmPiecesFor(programme)
+    expect(piece).toMatchObject({ cellId: "b", filmStartSec: 4.6, filmEndSec: 8.8 })
+    expect(piece.lenSec).toBeCloseTo(4.2, 9)
+    expect(piece.cutSec).toBeUndefined()
+    expect(pieceHeldSec(piece)).toBe(0)
   })
 
   it("a line with no original to hear has no piece", () => {

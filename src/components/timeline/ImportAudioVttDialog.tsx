@@ -16,6 +16,7 @@ import { useEffect, useMemo, useState } from "react"
 import { v7 as uuidv7 } from "uuid"
 
 import { Button } from "@/components/ui/button"
+import { FileDropBox } from "@/components/ui/file-drop-box"
 import {
   Dialog,
   DialogContent,
@@ -282,7 +283,7 @@ export function ImportAudioVttDialog({
             )}
           </div>
         ) : (
-          <div className="flex flex-col items-center gap-2 rounded-lg border-2 border-dashed border-muted p-6 text-center">
+          <FileDropBox className="gap-2" testId="import-audio-vtt-drop" onFile={(file) => void handleFile(file)}>
             <label>
               <span className="inline-flex cursor-pointer items-center rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium transition-colors hover:bg-accent">
                 {t("editor.timeline.audioVttChoose")}
@@ -304,7 +305,7 @@ export function ImportAudioVttDialog({
             <p className="text-xs text-muted-foreground">
               {t("editor.timeline.audioVttPickHint")}
             </p>
-          </div>
+          </FileDropBox>
         )}
 
         {/* THE TIMING NOTE (Sam, 2026-08-21: this was a five-paragraph amber

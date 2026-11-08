@@ -18,6 +18,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 
 import { Button } from "@/components/ui/button"
+import { FileDropBox } from "@/components/ui/file-drop-box"
 import {
   Dialog,
   DialogContent,
@@ -95,6 +96,9 @@ interface Picked {
   sheetIndex: number
   /** Which button was used. The file is then checked against it. */
   kind: CharacterSheetKind
+  /** Dropped on the box rather than picked under a button, so no button said
+   *  which sheet it is: it is read as the side it fits (X-G-dead-drop). */
+  dropped?: boolean
 }
 
 export function ImportCharactersDialog(props: Props) {
@@ -206,7 +210,15 @@ function ImportCharactersContent({
   // not belong to, silently. A CELL with no row is the opposite and is fine.
   const mismatched = active != null && active.unmatchedRows.length > 0
 
-  const handleFile = async (file: File, kind: CharacterSheetKind) => {
+  // A dropped sheet came with no button to say which it is. Read first as the
+  // subtitle sheet, it moves to the side it fits, so the "use the other
+  // button" refusal below is only ever for a sheet picked under a button.
+  useEffect(() => {
+    if (!picked?.dropped || !wrongKind) return
+    setPicked({ ...picked, kind: picked.kind === "audio" ? "subtitle" : "audio", dropped: false })
+  }, [picked, wrongKind])
+
+  const handleFile = async (file: File, kind: CharacterSheetKind, dropped = false) => {
     const generation = ++readGeneration.current
     setPicked(null)
     setError(null)
@@ -224,7 +236,7 @@ function ImportCharactersContent({
       if (sheets.length === 0 || (sheets[0].rows.length ?? 0) < 2) {
         return setError(t("editor.timeline.charactersNoRows"))
       }
-      setPicked({ fileName: file.name, sheets, sheetIndex: 0, kind })
+      setPicked({ fileName: file.name, sheets, sheetIndex: 0, kind, ...(dropped ? { dropped } : {}) })
     } catch (cause) {
       if (readGeneration.current !== generation) return
       setError(cause instanceof Error ? cause.message : String(cause))
@@ -403,7 +415,8 @@ function ImportCharactersContent({
             )}
           </div>
         ) : (
-          <div className="flex flex-col items-center gap-3 rounded-lg border-2 border-dashed border-muted p-6 text-center">
+          <FileDropBox className="gap-3" testId="import-characters-drop"
+            onFile={(file) => void handleFile(file, "subtitle", Boolean(audioCues && audioCues.length > 0))}>
             {/* TWO SHEETS, KEYED TO OPPOSITE SIDES of the same script — one row
                 per subtitle line, one per heard line. Either can come first;
                 whichever exists reaches the other side through the links, and
@@ -460,7 +473,7 @@ function ImportCharactersContent({
                 </>
               ) : null}
             </p>
-          </div>
+          </FileDropBox>
         )}
 
         {error && (

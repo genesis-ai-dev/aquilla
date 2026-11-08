@@ -16,6 +16,7 @@
 import { useEffect, useMemo, useState } from "react"
 
 import { Button } from "@/components/ui/button"
+import { FileDropBox } from "@/components/ui/file-drop-box"
 import {
   Dialog,
   DialogContent,
@@ -167,7 +168,7 @@ export function ImportSubtitlesDialog({ open, textFileName, filmUrl, onConfirm, 
             )}
           </div>
         ) : (
-          <div className="flex flex-col items-center gap-2 rounded-lg border-2 border-dashed border-muted p-6 text-center">
+          <FileDropBox className="gap-2" testId="import-subtitles-drop" onFile={(file) => void handleFile(file)}>
             <label>
               <span className="inline-flex cursor-pointer items-center rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium transition-colors hover:bg-accent">
                 {t("editor.timeline.subtitleSourceChoose")}
@@ -189,7 +190,7 @@ export function ImportSubtitlesDialog({ open, textFileName, filmUrl, onConfirm, 
             <p className="text-xs text-muted-foreground">
               {t("editor.timeline.subtitleSourcePickHint")}
             </p>
-          </div>
+          </FileDropBox>
         )}
 
         {error && (

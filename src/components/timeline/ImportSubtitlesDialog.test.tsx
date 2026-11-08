@@ -196,3 +196,17 @@ describe("times written as frame numbers in hundredths (AQU-2197)", () => {
     expect(screen.queryByTestId("frames-as-hundredths")).toBeNull()
   })
 })
+
+// Import map X-G-dead-drop (Nov 2): the dashed box drew like a drop target, but
+// a dropped file did nothing.
+describe("ImportSubtitlesDialog's drop box", () => {
+  it("takes a dropped file, as the button does, and lights up while one is over it", async () => {
+    open()
+    const box = screen.getByTestId("import-subtitles-drop")
+    fireEvent.dragOver(box)
+    expect(box).toHaveAttribute("data-drag-over", "true")
+    fireEvent.drop(box, { dataTransfer: { files: [new File([VTT], "survival-ep1.vtt", { type: "text/plain" })] } })
+    await waitFor(() => expect(screen.getByTestId("import-subtitles-confirm")).not.toBeDisabled())
+    expect(screen.getByTestId("import-subtitles-summary")).toHaveTextContent("2 cues, 0:01 – 0:06")
+  })
+})

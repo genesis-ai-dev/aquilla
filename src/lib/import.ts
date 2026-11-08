@@ -591,6 +591,14 @@ export interface ImportContext {
     cues: readonly TranslatableString[]
     artifact?: TargetImportArtifact
   }
+  /**
+   * AQU-2426 (Sam, Nov 3 and 5): with no wording, how the recording comes in.
+   * Nothing brought in is cut into lines or transcribed on its own: it comes in
+   * WHOLE, as one Source audio line, unless the person chose Import and
+   * transcribe…, which then finds the lines from its words once it is in
+   * (the workspace consumes the seed this leaves). Default "whole".
+   */
+  mediaMode?: "whole" | "transcribe"
 }
 
 type PrepareImportContext = Pick<
@@ -2038,6 +2046,18 @@ export function mediaSegmentSpecsFromSpeech(
     : [{ cellId: uuidv7(), ...(durationMs !== undefined ? { startMs: 0, endMs: Math.round(durationMs) } : {}) }]
 }
 
+/**
+ * AQU-2426: a recording brought in whole — one line over its measured length
+ * (untimed if even that can't be read; the editor flags it). The line's
+ * attachment plays the whole clip, so it has no trim.
+ */
+export async function wholeRecordingSpecs(
+  file: Blob,
+): Promise<{ durationMs: number | undefined; specs: MediaSegmentSpec[] }> {
+  const durationMs = await probeMediaDurationMs(file).catch(() => undefined)
+  return { durationMs, specs: mediaSegmentSpecsFromSpeech([], durationMs) }
+}
+
 /** Import source media as timed segments, preserving the uploaded clip once. */
 export async function emitMediaFile(
   file: File,
@@ -2074,9 +2094,11 @@ export function createMediaFileCommit(
     ctx.signal?.throwIfAborted()
     const suppliedDuration = ctx.mediaTextSource
       ? await probeMediaDurationMs(file).catch(() => undefined) : undefined
+    // AQU-2426: with no wording the recording comes in whole, one line over
+    // its full length; nothing decodes it to look for pauses.
     const { durationMs, specs } = ctx.mediaTextSource
       ? { durationMs: suppliedDuration, specs: createMediaCueSpecs(ctx.mediaTextSource.cues, suppliedDuration) }
-      : await computeMediaSegmentSpecs(file)
+      : await wholeRecordingSpecs(file)
 
     const cells: BulkImportCell[] = specs.map((s, i) => ({
       id: uuidv7(),
@@ -2186,10 +2208,12 @@ export function createMediaFileCommit(
         signal: ctx.signal,
       })
 
-      // AQU-646: seed the post-import auto-transcribe — the workspace's
-      // import-completion handler consumes this (the cell store won't have these
-      // cells, let alone their attachments, until an unawaitable revalidate).
-      if (!ctx.mediaTextSource) recordMediaImportSeed({
+      // AQU-2426: only when the person chose Import and transcribe…, seed the
+      // run that finds the lines from the words — the workspace's
+      // import-completion handler consumes this (the cell store won't have
+      // these cells, let alone their attachments, until an unawaitable
+      // revalidate). A recording imported whole is left as it is.
+      if (!ctx.mediaTextSource && ctx.mediaMode === "transcribe") recordMediaImportSeed({
         fileId,
         cells: buildMediaSeedCells({
           fileId,

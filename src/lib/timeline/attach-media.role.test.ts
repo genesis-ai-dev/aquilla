@@ -30,7 +30,8 @@ vi.mock("@/lib/sync/events-emit", async (importOriginal) => {
 })
 
 vi.mock("@/lib/import", () => ({
-  computeMediaSegmentSpecs: vi.fn(async () => ({
+  mediaSegmentSpecsFromSpeech: vi.fn(() => []),
+  wholeRecordingSpecs: vi.fn(async () => ({
     durationMs: 8000,
     specs: [
       { cellId: "seg-1", startMs: 0, endMs: 4000, trimStartMs: 0, trimEndMs: 4000 },

@@ -82,3 +82,10 @@ describe("splitRecordingLine", () => {
     expect(calls).toEqual([])
   })
 })
+
+describe("piecesFromCuts with words", () => {
+  it("a dropped cut hands its words to the piece before", () => {
+    const pieces = piecesFromCuts(whole, [10_000, 10_050], ["One.", "Two.", "Three."])
+    expect(pieces.map((p) => p.text)).toEqual(["One.", "Two. Three."])
+  })
+})

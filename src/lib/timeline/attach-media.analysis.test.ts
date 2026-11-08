@@ -35,6 +35,9 @@ vi.mock("@/lib/import", async (importOriginal) => {
     computeMediaSegmentSpecs: vi.fn(async () => {
       throw new Error("the clip must not be decoded again")
     }),
+    wholeRecordingSpecs: vi.fn(async () => {
+      throw new Error("the clip must not be probed again")
+    }),
   }
 })
 

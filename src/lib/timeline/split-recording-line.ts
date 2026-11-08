@@ -80,12 +80,23 @@ export function piecesFromCuts(
   texts?: readonly string[],
 ): LinePiece[] {
   const { lo, hi } = lineWindow(line)
-  const kept: number[] = []
-  for (const c of [...cuts].sort((a, b) => a - b)) {
-    const prev = kept.length ? kept[kept.length - 1] : lo
-    if (c - prev >= MIN_PIECE_MS && hi - c >= MIN_PIECE_MS) kept.push(Math.round(c))
+  // texts[0] is the first piece's; texts[i + 1] belongs to the piece starting
+  // at cuts[i]. A cut that is dropped hands its words to the piece before.
+  const paired = cuts.map((c, i) => ({ at: c, text: texts?.[i + 1] })).sort((a, b) => a.at - b.at)
+  const bounds = [lo]
+  const pieceTexts: Array<string | undefined> = [texts?.[0]]
+  const join = (a: string | undefined, b: string | undefined) =>
+    a === undefined ? b : b === undefined ? a : [a, b].filter((x) => x.trim()).join(" ")
+  for (const { at, text } of paired) {
+    const prev = bounds[bounds.length - 1]
+    if (at - prev >= MIN_PIECE_MS && hi - at >= MIN_PIECE_MS) {
+      bounds.push(Math.round(at))
+      pieceTexts.push(text)
+    } else {
+      pieceTexts[pieceTexts.length - 1] = join(pieceTexts[pieceTexts.length - 1], text)
+    }
   }
-  const bounds = [lo, ...kept, hi]
+  bounds.push(hi)
   const at = (clipMs: number) => line.startMs + (clipMs - lo)
   const last = bounds.length - 2
   return bounds.slice(0, -1).map((b, i) => ({
@@ -93,7 +104,7 @@ export function piecesFromCuts(
     endMs: i === last ? line.endMs : at(bounds[i + 1]),
     trimStartMs: b,
     trimEndMs: bounds[i + 1],
-    ...(texts?.[i] !== undefined ? { text: texts[i] } : {}),
+    ...(texts && pieceTexts[i] !== undefined ? { text: pieceTexts[i] } : {}),
   }))
 }
 

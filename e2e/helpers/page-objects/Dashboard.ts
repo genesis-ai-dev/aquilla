@@ -126,6 +126,9 @@ export class Dashboard {
     // role="dialog", so a bare lookup matches two elements once create succeeds.
     const dialog = this.page.getByRole("dialog", { name: /^Create New Project$/i })
     await expect(dialog).toBeVisible({ timeout: 5_000 })
+    // AQU-2105: the dialog opens on "Where does this project come from?".
+    // "Start from scratch" leads to the form the callers fill in.
+    await dialog.getByTestId("project-source-scratch").click()
     return dialog
   }
 

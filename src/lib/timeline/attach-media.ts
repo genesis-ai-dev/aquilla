@@ -17,6 +17,8 @@ import { emitCellAudioAttach, emitSourceCellCreate, InsufficientRoleError } from
 import { getCqrsOutboxBridge } from "@/lib/sync/cqrs-bridge"
 import { canAttachSourceAudio, SOURCE_AUDIO_ATTACH_FLOOR } from "@/lib/sync/role-policy"
 import { primeSharedClipPcm } from "@/lib/audio/shared-clip-pcm"
+import { importedMediaType } from "@/lib/import/media-picture"
+import { detectFileType } from "@/lib/parsers/types"
 
 /** A line the recording became, and the event that made it (decision 11:
  *  the caller records "Make lines from a recording" as an Undo step). */
@@ -45,6 +47,11 @@ export interface AttachMediaFileOptions {
   signal?: AbortSignal
   /** Called as the stored copy is uploaded, then as the rows are made. */
   onPhase?: (phase: "save" | "rows") => void
+  /** The file has no film yet, so a video's picture becomes its film, as an
+   *  Upload files import's does: the result's `film` is the stored upload,
+   *  for the caller to set as the file's film. Off when a film is already
+   *  linked: a recording added beside it never replaces it. */
+  keepPicture?: boolean
 }
 
 /**
@@ -55,7 +62,7 @@ export async function attachMediaFileToTimeline(
   file: File,
   ctx: AttachMediaContext,
   opts: AttachMediaFileOptions = {},
-): Promise<{ segments: number; lines: MadeLine[] }> {
+): Promise<{ segments: number; lines: MadeLine[]; film?: string }> {
   assertMayAttachSourceAudio()
   const { durationMs, specs } = opts.analysis
     ? {
@@ -146,7 +153,12 @@ export async function attachMediaFileToTimeline(
     }),
   })
 
-  return { segments: specs.length, lines }
+  // A video dropped on an empty file kept only its sound, and its picture was
+  // lost. Its picture is the same stored upload, as an imported film's is.
+  const typeFromName = detectFileType(file.name)
+  const film = opts.keepPicture && typeFromName && (await importedMediaType(file, typeFromName)) === "video"
+    ? upload.url : undefined
+  return { segments: specs.length, lines, ...(film ? { film } : {}) }
 }
 
 /**

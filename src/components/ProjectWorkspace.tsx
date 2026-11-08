@@ -3662,17 +3662,21 @@ export function ProjectWorkspace() {
     })
   }, [])
 
+  /** `applyLinkVideo`, declared far below: a video dropped on an empty file
+   *  keeps its picture as the file's film through the same write. */
+  const applyLinkVideoRef = useRef<((url: string | null) => Promise<void>) | null>(null)
   const handleAttachMediaFile = useCallback(async (file: File) => {
     if (!project?.id || !activeFileId) return
-    const { lines } = await attachMediaFileToTimeline(file, {
+    const { lines, film } = await attachMediaFileToTimeline(file, {
       projectId: project.id,
       fileId: activeFileId,
       author: currentUsername,
       getToken: getTokenForFile,
-    })
+    }, { keepPicture: !activeFile?.coreMediaUrl })
     await finishSourceMediaAttach(activeFileId, activeFile?.name ?? file.name)
     recordRecordingLines(activeFileId, lines)
-  }, [project?.id, activeFileId, activeFile?.name, currentUsername, getTokenForFile, finishSourceMediaAttach, recordRecordingLines])
+    if (film) await applyLinkVideoRef.current?.(film)
+  }, [project?.id, activeFileId, activeFile?.name, activeFile?.coreMediaUrl, currentUsername, getTokenForFile, finishSourceMediaAttach, recordRecordingLines])
 
   const handleAttachMediaUrl = useCallback(async (url: string) => {
     if (!project?.id || !activeFileId) return
@@ -4565,6 +4569,7 @@ export function ProjectWorkspace() {
     },
     [activeFileId, readFilmLink, writeFilmLink],
   )
+  useEffect(() => { applyLinkVideoRef.current = applyLinkVideo }, [applyLinkVideo])
   // Flow B (2026-08-05; AQU-2227): linking a film that will move the file onto
   // Follows source says so first. NOTE the mode is computed INLINE — the
   // `timingMode` const is declared ~2,700 lines below this callback (a

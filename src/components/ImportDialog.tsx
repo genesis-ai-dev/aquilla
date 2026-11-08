@@ -2514,9 +2514,16 @@ function idmlParsePhase(
   })
 }
 
-function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError, onSpreadsheetFile, onJsonFile, excludeFrontMatter, cellUnit, variant = "upload", onTranslationCheck, alignReimportedIdml, reimportTarget = null }: UploadPanelProps) {
+function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError, onSpreadsheetFile, onJsonFile, excludeFrontMatter, cellUnit, variant = "upload", onTranslationCheck, alignReimportedIdml, reimportTarget: reimportTargetProp = null }: UploadPanelProps) {
   const analytics = useAccountAnalytics()
   const t = useT()
+  // A recording or film can't replace a document's contents. Re-import says so
+  // and offers to bring it in as a new file instead, through the ordinary
+  // import (it used to skip every step and make that new file silently).
+  const [mediaOnReimport, setMediaOnReimport] = useState<File | null>(null)
+  const [importAsNew, setImportAsNew] = useState<File | null>(null)
+  const [importedAsNew, setImportedAsNew] = useState(false)
+  const reimportTarget = importedAsNew ? null : reimportTargetProp
   const [importing, setImporting] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -2554,6 +2561,11 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       const list = Array.from(files)
       if (reimportTarget && list.length !== 1) {
         setError(t("importExport.reimport.oneFile"))
+        return
+      }
+      setMediaOnReimport(null)
+      if (reimportTarget && isMediaUpload(list[0])) {
+        setMediaOnReimport(list[0])
         return
       }
       // A Paratext project (zipped, or a folder/multi-select containing
@@ -2607,6 +2619,14 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, t, reimportTarget]
   )
+  // Runs after the render that cleared the re-import target, so this is the
+  // ordinary import: no target file, every usual step.
+  useEffect(() => {
+    if (!importAsNew || reimportTarget) return
+    const file = importAsNew
+    setImportAsNew(null)
+    void handleFiles([file])
+  }, [importAsNew, reimportTarget, handleFiles])
 
   /** Inner helper: import a resolved list of files (after collision resolution).
    *
@@ -3192,8 +3212,32 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
         </>
       )}
       {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+      {mediaOnReimport && reimportTargetProp && !importing && (
+        <div className="mt-3 flex max-w-sm flex-col items-center gap-2 text-center" data-testid="reimport-media-notice">
+          <p className="text-sm">
+            {t("importExport.reimport.mediaCannotReplace", { fileName: mediaOnReimport.name, name: reimportTargetProp.name })}
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setImportAsNew(mediaOnReimport)
+              setMediaOnReimport(null)
+              setImportedAsNew(true)
+            }}
+          >
+            {t("importExport.reimport.importMediaAsNew")}
+          </Button>
+        </div>
+      )}
     </div>
   )
+}
+
+/** An audio or video upload, by the importer's own reading of its name. */
+function isMediaUpload(file: File): boolean {
+  const type = detectFileType(file.name)
+  return !!type && isMediaFileType(type)
 }
 
 interface ParatextChoiceProps {

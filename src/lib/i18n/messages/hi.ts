@@ -914,7 +914,6 @@ export const hi: Catalog = {
   "editor.timeline.laneUntimed": "बिना समय",
   "editor.timeline.laneUntimedSub": "अभी कोई टाइमकोड नहीं",
   "editor.timeline.sourcesMenu": "स्रोत",
-  "editor.timeline.sourcesMenuAria": "इस फ़ाइल में सामग्री जोड़ें",
   "editor.timeline.checkMenu": "जाँच",
   "editor.timeline.checkMenuLinking": "जोड़ना",
   "editor.timeline.checkMenuAria": "इस फ़ाइल की जोड़ियाँ और पात्र जाँचें",

@@ -939,7 +939,6 @@ export const am: Catalog = {
   "editor.timeline.laneUntimed": "ጊዜ ያልተሰጠው",
   "editor.timeline.laneUntimedSub": "እስካሁን የጊዜ ኮድ የለም",
   "editor.timeline.sourcesMenu": "ምንጮች",
-  "editor.timeline.sourcesMenuAria": "ለዚህ ፋይል ቁሳቁስ ያያይዙ",
   "editor.timeline.checkMenu": "ይፈትሹ",
   "editor.timeline.checkMenuLinking": "በማያያዝ ላይ",
   "editor.timeline.checkMenuAria": "የዚህን ፋይል ጥንዶች እና ገጸ-ባህሪያት ይፈትሹ",

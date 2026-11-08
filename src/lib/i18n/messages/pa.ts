@@ -939,7 +939,6 @@ export const pa: Catalog = {
   "editor.timeline.laneUntimed": "ਬਿਨਾਂ ਸਮਾਂ",
   "editor.timeline.laneUntimedSub": "ਅਜੇ ਕੋਈ ਟਾਈਮਕੋਡ ਨਹੀਂ",
   "editor.timeline.sourcesMenu": "ਸਰੋਤ",
-  "editor.timeline.sourcesMenuAria": "ਇਸ ਫ਼ਾਈਲ ਨਾਲ ਸਮੱਗਰੀ ਜੋੜੋ",
   "editor.timeline.checkMenu": "ਜਾਂਚ",
   "editor.timeline.checkMenuLinking": "ਜੋੜ",
   "editor.timeline.checkMenuAria": "ਇਸ ਫ਼ਾਈਲ ਦੇ ਜੋੜੇ ਅਤੇ ਪਾਤਰ ਜਾਂਚੋ",

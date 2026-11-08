@@ -920,8 +920,12 @@ export const editor = defineNamespace({
     // AQU-646 stage 6: one menu for everything that attaches material to the
     // file already open, as distinct from Import, which mints a new file.
     "editor.timeline.sourcesMenu": "Sources",
-    "editor.timeline.sourcesTip": "Film and sources",
-    "editor.timeline.sourcesMenuAria": "Attach material to this file",
+    // D#7: why a Sources row is greyed, behind its (i).
+    "editor.timeline.sourcesFilmLeadOnly": "Only a Project Lead or above can link or change the film.",
+    "editor.timeline.sourcesCuesMaintainerOnly": "Only a Maintainer or above can import Source cues.",
+    "editor.timeline.sourcesSubtitlesMaintainerOnly": "Only a Maintainer or above can extract subtitles.",
+    "editor.timeline.sourcesSubtitlesAlreadyIn": "This file's subtitles are already imported.",
+    "editor.timeline.sourcesCharactersMaintainerOnly": "Only a Maintainer or above can import characters.",
     "editor.timeline.checkMenu": "Check",
     "editor.timeline.checkMenuLinking": "Linking",
     "editor.timeline.checkMenuAria": "Check this file's pairings and characters",
@@ -1911,7 +1915,7 @@ export const editor = defineNamespace({
     // — Extract subtitles dialog (AQU-1139) ————————————————————
     "editor.timeline.subtitleSourceTitle": "Extract subtitles",
     "editor.timeline.subtitleSourceDescription":
-      "Read the subtitle text and timings out of a sidecar file into " +
+      "Read the subtitle text and timings out of the subtitle file that came with the clip into " +
       "\"{fileName}\", so the clip already on it has something to translate.",
     "editor.timeline.subtitleSourceChoose": "Choose subtitle file",
     "editor.timeline.subtitleSourcePickHint":
@@ -7367,12 +7371,13 @@ export const editor = defineNamespace({
           "middle dot separates the two — keep the two-word shape.",
         maxLength: 22,
       },
-      "editor.timeline.sourcesMenuAria": {
+      "editor.timeline.sourcesMenu": {
         description:
-          "Accessible name of the timeline's Sources menu button, whose visible " +
-          "label is just 'Sources'. Names what the menu does: it attaches material " +
-          "— a film, the heard lines, a character sheet — to the file already open, " +
-          "as opposed to the Import button, which creates a new file.",
+          "The timeline's Sources menu: its heading inside the menu, and also the hover text and " +
+          "screen-reader name of the icon-only top-bar button that opens it. The menu holds the " +
+          "linked film first, then the file's other sources (heard lines, subtitles, character " +
+          "sheets). One word, the same in all three places.",
+        maxLength: 24,
       },
       "editor.timeline.checkMenuAria": {
         description:
@@ -7505,12 +7510,6 @@ export const editor = defineNamespace({
           "Hover text of the Timing control in the media view's top bar, which shows only the current " +
           "choice ('Follows source' / 'Follows recordings') with no label of its own.",
         maxLength: 20,
-      },
-      "editor.timeline.sourcesTip": {
-        description:
-          "Hover text of the top bar's Sources button, which is only an icon: its menu holds the " +
-          "linked film first, then the file's other sources (audio lines, character sheets, subtitles).",
-        maxLength: 40,
       },
       "editor.timeline.timingMenuAria": {
         description:
@@ -10635,7 +10634,7 @@ export const editor = defineNamespace({
       "editor.timeline.subtitleSourceDescription": {
         description:
           "Explanatory line under the Extract subtitles dialog's title: where the " +
-          "cues come from (a sidecar file that shipped with the clip) and which " +
+          "cues come from (the subtitle file that came with the clip) and which " +
           "file they will land on.",
         placeholders: {
           fileName: "Name of the time-ordered file the cues will be written to, e.g. 'survival-ep1'. Content — never translate it.",

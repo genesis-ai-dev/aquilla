@@ -820,7 +820,6 @@ export const id: Catalog = {
   "editor.timeline.laneUntimed": "Tanpa waktu",
   "editor.timeline.laneUntimedSub": "belum ada kode waktu",
   "editor.timeline.sourcesMenu": "Sumber",
-  "editor.timeline.sourcesMenuAria": "Lampirkan materi ke file ini",
   "editor.timeline.checkMenu": "Periksa",
   "editor.timeline.checkMenuLinking": "Penautan",
   "editor.timeline.checkMenuAria": "Periksa pemasangan dan karakter file ini",

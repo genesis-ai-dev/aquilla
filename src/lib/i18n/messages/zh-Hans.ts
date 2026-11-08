@@ -820,7 +820,6 @@ export const zh_Hans: Catalog = {
   "editor.timeline.laneUntimed": "未定时",
   "editor.timeline.laneUntimedSub": "尚无时间码",
   "editor.timeline.sourcesMenu": "素材来源",
-  "editor.timeline.sourcesMenuAria": "为此文件附加素材",
   "editor.timeline.checkMenu": "检查",
   "editor.timeline.checkMenuLinking": "配对关系",
   "editor.timeline.checkMenuAria": "检查此文件的配对关系与角色",

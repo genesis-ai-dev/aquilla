@@ -820,7 +820,6 @@ export const my: Catalog = {
   "editor.timeline.laneUntimed": "အချိန်မသတ်",
   "editor.timeline.laneUntimedSub": "အချိန်ကုဒ်မရှိသေး",
   "editor.timeline.sourcesMenu": "ရင်းမြစ်များ",
-  "editor.timeline.sourcesMenuAria": "ဤဖိုင်သို့ ပစ္စည်းချိတ်ရန်",
   "editor.timeline.checkMenu": "စစ်ဆေးရန်",
   "editor.timeline.checkMenuLinking": "တွဲချိတ်ခြင်း",
   "editor.timeline.checkMenuAria": "ဤဖိုင်၏ တွဲချိတ်မှုနှင့် ဇာတ်ကောင်များကို စစ်ဆေးရန်",

@@ -940,7 +940,6 @@ export const bn: Catalog = {
   "editor.timeline.laneUntimed": "সময়হীন",
   "editor.timeline.laneUntimedSub": "এখনো টাইমকোড নেই",
   "editor.timeline.sourcesMenu": "উৎসসমূহ",
-  "editor.timeline.sourcesMenuAria": "এই ফাইলে উপাদান যোগ করুন",
   "editor.timeline.checkMenu": "পরীক্ষা",
   "editor.timeline.checkMenuLinking": "লিংক হচ্ছে",
   "editor.timeline.checkMenuAria": "এই ফাইলের জোড়া ও চরিত্র পরীক্ষা করুন",

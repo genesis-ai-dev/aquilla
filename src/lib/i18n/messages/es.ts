@@ -908,7 +908,6 @@ export const es: Catalog = {
   "editor.timeline.laneUntimed": "Sin tiempo",
   "editor.timeline.laneUntimedSub": "aún sin tiempo",
   "editor.timeline.sourcesMenu": "Orígenes",
-  "editor.timeline.sourcesMenuAria": "Adjuntar material a este archivo",
   "editor.timeline.checkMenu": "Revisar",
   "editor.timeline.checkMenuLinking": "Vinculando",
   "editor.timeline.checkMenuAria": "Revisar los emparejamientos y los personajes de este archivo",

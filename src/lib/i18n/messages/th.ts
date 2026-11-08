@@ -820,7 +820,6 @@ export const th: Catalog = {
   "editor.timeline.laneUntimed": "ไม่ระบุเวลา",
   "editor.timeline.laneUntimedSub": "ยังไม่มีไทม์โค้ด",
   "editor.timeline.sourcesMenu": "แหล่ง",
-  "editor.timeline.sourcesMenuAria": "แนบสื่อเข้าไฟล์นี้",
   "editor.timeline.checkMenu": "ตรวจสอบ",
   "editor.timeline.checkMenuLinking": "การจับคู่",
   "editor.timeline.checkMenuAria": "ตรวจสอบการจับคู่และตัวละครของไฟล์นี้",

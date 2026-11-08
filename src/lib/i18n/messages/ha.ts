@@ -939,7 +939,6 @@ export const ha: Catalog = {
   "editor.timeline.laneUntimed": "Ba su da lokaci",
   "editor.timeline.laneUntimedSub": "babu lambar lokaci tukuna",
   "editor.timeline.sourcesMenu": "Kayayyaki",
-  "editor.timeline.sourcesMenuAria": "Ku haɗa kayan aiki ga wannan fayil",
   "editor.timeline.checkMenu": "Duba",
   "editor.timeline.checkMenuLinking": "Haɗawa",
   "editor.timeline.checkMenuAria": "Ku duba haɗin wannan fayil da halaye",

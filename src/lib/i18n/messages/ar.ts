@@ -820,7 +820,6 @@ export const ar: Catalog = {
   "editor.timeline.laneUntimed": "بلا توقيت",
   "editor.timeline.laneUntimedSub": "لا رمز زمني بعد",
   "editor.timeline.sourcesMenu": "المصادر",
-  "editor.timeline.sourcesMenuAria": "إرفاق مادة بهذا الملف",
   "editor.timeline.checkMenu": "فحص",
   "editor.timeline.checkMenuLinking": "الإقران",
   "editor.timeline.checkMenuAria": "فحص إقرانات هذا الملف وشخصياته",

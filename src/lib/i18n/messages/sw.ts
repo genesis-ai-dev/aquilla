@@ -939,7 +939,6 @@ export const sw: Catalog = {
   "editor.timeline.laneUntimed": "Bila muda",
   "editor.timeline.laneUntimedSub": "hakuna muda bado",
   "editor.timeline.sourcesMenu": "Vyanzo",
-  "editor.timeline.sourcesMenuAria": "Ambatanisha nyenzo kwenye faili hii",
   "editor.timeline.checkMenu": "Kagua",
   "editor.timeline.checkMenuLinking": "Inaoanisha",
   "editor.timeline.checkMenuAria": "Kagua uoanishaji na wahusika wa faili hii",

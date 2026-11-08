@@ -2584,6 +2584,34 @@ describe("TimelineEditor — rows come from the track model", () => {
     expect(attach).toHaveBeenCalledOnce()
   })
 
+  // D#7 (import map, Nov 2): a greyed Sources row says why, behind its (i).
+  it("says why each greyed Sources row is greyed", () => {
+    render(<TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+      onRetimeSubtitle={() => {}}
+      onRequestLinkVideo={vi.fn()} canLinkVideo={false}
+      onRequestImportAudioVtt={vi.fn()} canImportAudioVtt={false}
+      onRequestExtractSubtitles={vi.fn()} canExtractSubtitles={false}
+      onRequestImportCharacters={vi.fn()} canImportCharacters={false}
+      // Sources shows only while one of its rows can be used.
+      onRequestImportCaptions={vi.fn()} canImportCaptions />)
+    fireEvent.click(screen.getByTestId("tl-sources-menu"))
+    const why = (name: RegExp) => screen.getByRole("menuitem", { name })
+    expect(why(/^Film/)).toHaveAccessibleDescription("Only a Project Lead or above can link or change the film.")
+    expect(why(/^Source cues/)).toHaveAccessibleDescription("Only a Maintainer or above can import Source cues.")
+    expect(why(/^Subtitle/)).toHaveAccessibleDescription("Only a Maintainer or above can extract subtitles.")
+    expect(why(/^Characters/)).toHaveAccessibleDescription("Only a Maintainer or above can import characters.")
+  })
+
+  it("says a file's subtitles are already in when that is why Subtitles is greyed", () => {
+    render(<TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+      onRetimeSubtitle={() => {}}
+      onRequestExtractSubtitles={vi.fn()} canExtractSubtitles subtitleCueCount={12}
+      onRequestImportCaptions={vi.fn()} canImportCaptions />)
+    fireEvent.click(screen.getByTestId("tl-sources-menu"))
+    expect(screen.getByRole("menuitem", { name: /^Subtitle/ }))
+      .toHaveAccessibleDescription("This file's subtitles are already imported.")
+  })
+
   it("opens script alignment from Sources with track-editing permission", () => {
     const align = vi.fn()
     render(<TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={rowCells}
@@ -6215,12 +6243,14 @@ describe("TimelineEditor — the media view's top bar (board 55, option E)", () 
     expect(inTimelineSettings(() => screen.getByTestId("tl-menu-undo"))).toBeInTheDocument()
   })
 
-  it("draws Sources as its icon alone, 'Film and sources' on hover, the film first in its menu", async () => {
+  it("draws Sources as its icon alone, called 'Sources' on hover and to screen readers, the film first in its menu", async () => {
     const { film, onLink } = drawBar()
     const sources = await screen.findByTestId("tl-sources-menu")
     expect(sources.textContent).toBe("")
     expect(sources.querySelectorAll("svg")).toHaveLength(1)
-    await expectTooltip(sources, /^Film and sources$/)
+    // D#24: one name everywhere, the same as the menu's own heading.
+    expect(sources).toHaveAccessibleName("Sources")
+    await expectTooltip(sources, /^Sources$/)
     fireEvent.click(sources)
     const menu = await screen.findByRole("menu")
     const text = menu.textContent ?? ""

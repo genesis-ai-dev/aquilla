@@ -814,7 +814,6 @@ export const fr: Catalog = {
   "editor.timeline.laneTargetAudioSub": "prises · générées",
   "editor.timeline.laneUntimed": "Sans minutage",
   "editor.timeline.laneUntimedSub": "pas encore de code temporel",
-  "editor.timeline.sourcesMenuAria": "Associer du matériel à ce fichier",
   "editor.timeline.checkMenu": "Vérifier",
   "editor.timeline.checkMenuLinking": "Association",
   "editor.timeline.checkMenuAria": "Vérifier les associations et les personnages de ce fichier",

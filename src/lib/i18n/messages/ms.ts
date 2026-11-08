@@ -817,7 +817,6 @@ export const ms: Catalog = {
   "editor.timeline.laneUntimed": "Tanpa masa",
   "editor.timeline.laneUntimedSub": "belum ada kod masa",
   "editor.timeline.sourcesMenu": "Sumber",
-  "editor.timeline.sourcesMenuAria": "Lampirkan bahan pada fail ini",
   "editor.timeline.checkMenu": "Periksa",
   "editor.timeline.checkMenuLinking": "Pemautan",
   "editor.timeline.checkMenuAria": "Periksa pasangan dan watak fail ini",

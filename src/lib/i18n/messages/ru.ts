@@ -831,7 +831,6 @@ export const ru: Catalog = {
   "editor.timeline.laneUntimed": "Без тайминга",
   "editor.timeline.laneUntimedSub": "таймкода пока нет",
   "editor.timeline.sourcesMenu": "Источники",
-  "editor.timeline.sourcesMenuAria": "Прикрепить материалы к этому файлу",
   "editor.timeline.checkMenu": "Проверка",
   "editor.timeline.checkMenuLinking": "Связывание",
   "editor.timeline.checkMenuAria": "Проверить пары и персонажей в этом файле",

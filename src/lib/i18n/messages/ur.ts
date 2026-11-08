@@ -939,7 +939,6 @@ export const ur: Catalog = {
   "editor.timeline.laneUntimed": "بے وقت",
   "editor.timeline.laneUntimedSub": "ابھی ٹائم کوڈ نہیں",
   "editor.timeline.sourcesMenu": "ماخذ",
-  "editor.timeline.sourcesMenuAria": "اس فائل سے مواد منسلک کریں",
   "editor.timeline.checkMenu": "جانچ",
   "editor.timeline.checkMenuLinking": "جوڑنا",
   "editor.timeline.checkMenuAria": "اس فائل کے جوڑے اور کردار چیک کریں",

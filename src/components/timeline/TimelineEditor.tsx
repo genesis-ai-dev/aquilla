@@ -60,7 +60,7 @@ import { deriveLanes } from "@/lib/timeline/lanes"
 import { standInEstimator } from "@/lib/timeline/stand-in"
 import { layOutProgramme, programmeLines, recordingsLines } from "@/lib/timeline/programme"
 import { hasTiming } from "@/lib/timeline/derive"
-import { deriveSourceRegions, EMPTY_SOURCE_REGIONS } from "@/lib/timeline/source-regions"
+import { deriveSourceRegions, EMPTY_SOURCE_REGIONS, type SourceRegionMap } from "@/lib/timeline/source-regions"
 import { isUserAddedLine } from "@/lib/timeline/user-lines"
 import { isImportedRow } from "@/lib/cell-editing-gate"
 import { Spinner } from "@/components/ui/spinner"
@@ -68,6 +68,7 @@ import { OverflowMenu, type OverflowMenuItem } from "@/components/OverflowMenu"
 import { SourceRegionLane } from "./SourceRegionLane"
 import { FilmTrackLane } from "./FilmTrackLane"
 import { filmKindOf, filmPiecesFor } from "@/lib/timeline/film-pieces"
+import { cueIdOfChip, cuesOnFilmPieces, filmFolderPlan, FILM_FOLDER_ID } from "@/lib/timeline/film-folder"
 import { VideoSoundSourcePicker } from "./VideoSoundSourcePicker"
 import type { PlaybackSource } from "@/lib/audio/playback-source"
 import type { LaneLinkOverlay } from "./CueLinkOverlay"
@@ -103,6 +104,7 @@ import { gutterWidthPx, loadGutterCollapsed, saveGutterCollapsed } from "@/lib/t
 import { CORNER_ICON_BTN, PanelControlButtons, TimelineMenu, dockKeys, type RegionLayoutControls } from "./MediaPanelChrome"
 import {
   deriveTracksForFile,
+  SOURCE_CUES_TRACK_NAME,
   type TimelineTrack,
   type TrackKind,
 } from "@/lib/timeline/tracks"
@@ -315,7 +317,15 @@ export interface TimelineEditorProps {
    * (the link dialog, which also clears it) and Hide / Show. Absent: the
    * Sources menu's plain "Film" row, which opens the link dialog.
    */
-  film?: { name: string; showing: boolean; onHide(): void; onShow(): void }
+  film?: {
+    name: string
+    /** The file's own name, e.g. "TheChosen_101_720p.mov": an imported film's
+     *  folder is called this (Nov 8). Absent, the folder takes `name`. */
+    fileName?: string
+    showing: boolean
+    onHide(): void
+    onShow(): void
+  }
   /**
    * AQU-646: add a line over a stretch of the film that has no cell of its own
    * — the "T" in the Subtitles track, and the mic in the Target audio track
@@ -1438,7 +1448,16 @@ export function TimelineEditor({
    * lanes render the same list, in the same order" a property of the code
    * rather than a coincidence two `.map` calls have to keep agreeing on.
    */
-  const trackRows = buildTrackRows(tracks, collapsedFolders, hiddenTrackIds)
+  // Nov 8 (the film bundle): an IMPORTED film's picture, sound and heard
+  // lines are one folder at the top, named after the file
+  // (lib/timeline/film-folder). It is drawn as a pinned block where the film
+  // alone sat, so its Source audio row leaves the list below — the list the
+  // drag code measures — and no write can ever name the folder.
+  const filmKind = useMemo(() => filmKindOf(coreMediaUrl, cells), [coreMediaUrl, cells])
+  const filmFolder = filmFolderPlan({ filmKind, tracks, hasAudioCues: audioCues != null })
+  const listedTracks = filmFolder ? filmFolder.rest : tracks
+  const filmFolderOpen = filmFolder != null && !collapsedFolders.has(FILM_FOLDER_ID)
+  const trackRows = buildTrackRows(listedTracks, collapsedFolders, hiddenTrackIds)
 
   function toggleFolder(folderId: string) {
     setCollapsedFolders((prev) => {
@@ -1538,7 +1557,7 @@ export function TimelineEditor({
     })
   }
   /** What "Hidden tracks" lists: hidden ones that still exist, never a folder. */
-  const hiddenTracks = hiddenTracksOf(tracks, hiddenTrackIds)
+  const hiddenTracks = hiddenTracksOf(listedTracks, hiddenTrackIds)
 
   /**
    * AQU-646 stage 2b: which TRACKS are selected.
@@ -2953,11 +2972,21 @@ export function TimelineEditor({
   // sits in its line's slot, laid out by the same programme the lanes and the
   // transport use, so the film lasts as long as its lines and no longer.
   // Following the source its pieces sit end to end: the one strip.
-  const filmKind = useMemo(() => filmKindOf(coreMediaUrl, cells), [coreMediaUrl, cells])
+  // (`filmKind` is worked out up beside the track list, for the film's folder.)
   const filmPieces = useMemo(
     () => (audioFirst && filmKind === "imported" ? filmPiecesFor(layout.programme) : null),
     [audioFirst, filmKind, layout.programme],
   )
+  // The heard lines in the film's folder, following the recordings: drawn
+  // inside the pieces that show their stretch of film (cuesOnFilmPieces), as
+  // copies for drawing only. Following the source they sit where they are, on
+  // the film's clock, so the row's own map serves.
+  //
+  // NOT `useMemo`: a hand-written memo here made the React Compiler skip this
+  // whole component ("existing memoization could not be preserved"). It
+  // memoises these for us.
+  const folderCues = filmFolder?.showCues && filmPieces ? cuesOnFilmPieces(audioCues ?? [], filmPieces) : null
+  const folderCueRegions = folderCues ? deriveSourceRegions(folderCues, layout.totalSec) : null
   const durationSec = Math.max(layout.totalSec, independentTextLayout.totalSec, filmPieces ? 0 : filmTrackSec)
   const trackWidthPx = secToPx(durationSec, pxPerSec)
   // A short file's timeline still runs to the edge of the view — the ruler and
@@ -4138,6 +4167,240 @@ export function TimelineEditor({
   // handler above — hoisting it to module scope would mean threading twenty
   // reactive values through a parameter object, and the first one anybody
   // forgot to pass would be a lane that quietly stopped updating.
+  /** The film's lane, as the track drawn alone or inside its folder. */
+  function filmLane(summary = false): ReactNode {
+    if (!coreMediaUrl) return null
+    return (
+      <FilmTrackLane
+        src={coreMediaUrl}
+        fileId={fileId}
+        projectId={project?.id}
+        session={session}
+        filmSec={filmTrackSec || null}
+        pxPerSec={pxPerSec}
+        viewStartSec={viewStartSec}
+        viewEndSec={viewEndSec}
+        name={film?.name ?? t("editor.timeline.filmTrack")}
+        onSeekSec={seekTo}
+        pieces={filmPieces}
+        summary={summary}
+      />
+    )
+  }
+
+  /**
+   * Nov 8 (the film bundle): an IMPORTED film's folder, in the gutter. A
+   * heading named after the file, then, open, the Film, its Source audio and
+   * (with an audio cue file) its Source cues, each indented. Pinned where the
+   * film alone sat: no grip, no menu, nothing to rename, nothing to drag out or
+   * in (lib/timeline/film-folder).
+   *
+   * ONE SOUND SWITCH, SHOWN ONCE. The film's sound is its Source audio, so the
+   * speaker is that row's while the folder is open and the heading's while it
+   * is folded. The film itself is always silent here, and the heard lines are
+   * text, so neither row has one.
+   */
+  function filmFolderGutter(): ReactNode {
+    if (!filmFolder) return null
+    const sourceAudio = filmFolder.sourceAudio
+    const sourceRender = TRACK_RENDER["source-audio"]
+    const sourceSpeaker =
+      sourceAudio && (laneHasSound(sourceAudio) || !trackAudible(audibility, "source"))
+        ? speakerToggle("source", sourceRender.speakerName)
+        : null
+    const memberCount = 1 + (sourceAudio ? 1 : 0) + (filmFolder.showCues ? 1 : 0)
+    return (
+      <>
+        <LaneLabel
+          data-testid="tl-film-folder-label"
+          name={film?.fileName?.trim() || film?.name || t("editor.timeline.filmTrack")}
+          sub=""
+          dot={TRACK_DOT_CLASS}
+          collapsed={gutterCollapsed}
+          folder={{
+            trackId: FILM_FOLDER_ID,
+            collapsed: !filmFolderOpen,
+            memberCount,
+            onToggle: () => toggleFolder(FILM_FOLDER_ID),
+          }}
+          // A click on the heading opens and folds it, as on any folder; the
+          // triangle and the speaker own their own clicks.
+          onRowClick={(e) => {
+            if (e.target instanceof Element && e.target.closest("button, input")) return
+            toggleFolder(FILM_FOLDER_ID)
+          }}
+          trailing={filmFolderOpen ? undefined : sourceSpeaker}
+        />
+        {filmFolderOpen && (
+          <>
+            <LaneLabel
+              data-testid="tl-film-track-label"
+              name={t("editor.timeline.filmTrack")}
+              sub={t("editor.timeline.filmFolderPictureSub")}
+              dot={TRACK_DOT_CLASS}
+              hueVars={filmTrackHueVars()}
+              collapsed={gutterCollapsed}
+              indented
+            />
+            {sourceAudio && (
+              <LaneLabel
+                data-testid="tl-film-folder-source-audio-label"
+                name={sourceAudio.name}
+                sub={sourceRender.sub}
+                dot={sourceRender.dot}
+                hueVars={trackHueVarsFor(sourceAudio.kind, sourceAudio.color)}
+                collapsed={gutterCollapsed}
+                indented
+                subSlot={
+                  soundSource ? (
+                    <VideoSoundSourcePicker
+                      variant="lane"
+                      value={soundSource.value}
+                      recordingName={soundSource.recordingName}
+                      onChange={soundSource.onChange}
+                    />
+                  ) : undefined
+                }
+                trailing={sourceSpeaker}
+              />
+            )}
+            {filmFolder.showCues && (
+              <LaneLabel
+                data-testid="tl-film-folder-cues-label"
+                name={SOURCE_CUES_TRACK_NAME}
+                sub={t("editor.timeline.filmFolderCuesSub")}
+                dot={sourceRender.dot}
+                hueVars={trackHueVarsFor("source-audio", null)}
+                collapsed={gutterCollapsed}
+                indented
+              />
+            )}
+          </>
+        )}
+      </>
+    )
+  }
+
+  /** …and its lanes, row for row: the heading's band (the film's pictures,
+   *  cut at the lines, while folded), then the open folder's three lanes. */
+  function filmFolderLanes(): ReactNode {
+    if (!filmFolder) return null
+    const headH = folderRowHPx(rowMetrics.rowH)
+    // The folded band is the film in miniature: the same strip, in a chip box
+    // sized to the slim heading rather than to a track.
+    const pad = 3
+    const chipH = Math.max(1, headH - 2 * pad)
+    return (
+      <>
+        <div
+          data-testid={`tl-folder-lane-${FILM_FOLDER_ID}`}
+          data-collapsed={filmFolderOpen ? undefined : ""}
+          className="relative border-b border-border bg-[color:var(--tl-folder-band)]"
+          style={{
+            height: `${headH}px`,
+            ...({ "--tl-row-h": `${headH}px`, "--tl-chip-top": `${pad}px`, "--tl-chip-h": `${chipH}px` } as CSSProperties),
+          }}
+        >
+          {!filmFolderOpen && (
+            <RowMetricsContext.Provider value={{ rowH: headH, chipH, chipPad: pad }}>
+              {filmLane(true)}
+            </RowMetricsContext.Provider>
+          )}
+        </div>
+        {filmFolderOpen && (
+          <>
+            {filmLane()}
+            {filmFolder.sourceAudio &&
+              laneForTrack({ track: filmFolder.sourceAudio, depth: 1, members: [], collapsed: false })}
+            {filmFolder.showCues &&
+              audioCueLane(
+                "film-folder-cues",
+                folderCues && folderCueRegions ? { cues: folderCues, regions: folderCueRegions } : null,
+              )}
+          </>
+        )}
+      </>
+    )
+  }
+
+  /**
+   * The heard lines' lane: the audio cue file's cues, a transcript of the
+   * film's own speech. The Source-audio row's second tenant on a file with no
+   * media cells, and (Nov 8) the Source cues row inside an imported film's
+   * folder, beside that film's Source audio.
+   *
+   * `moved` is that folder's drawing following the recordings: copies moved
+   * into the film's pieces (cuesOnFilmPieces). Their times on screen are not
+   * their times, so they can't be dragged or linked from there; a click
+   * selects the heard line itself.
+   */
+  function audioCueLane(key: string, moved?: { cues: CellData[]; regions: SourceRegionMap } | null): ReactNode {
+    if (moved) {
+      return (
+        <SourceRegionLane
+          key={key}
+          map={moved.regions}
+          cells={moved.cues}
+          pxPerSec={pxPerSec}
+          viewStartSec={viewStartSec}
+          viewEndSec={viewEndSec}
+          selectedId={selectedId}
+          editable={editable}
+          onSelect={(id) => selectCueFromChip(cueIdOfChip(id))}
+          onSeek={(id) => {
+            const chip = moved.cues.find((c) => c.id === id)
+            if (chip && typeof chip.startTime === "number") seekTo(chip.startTime)
+          }}
+          onSeekSec={seekTo}
+          scrollLeftPx={scrollLeft}
+        />
+      )
+    }
+    return (
+      <SourceRegionLane
+        key={key}
+        map={audioRegions}
+        cells={audioCues ?? []}
+        pxPerSec={pxPerSec}
+        viewStartSec={viewStartSec}
+        viewEndSec={viewEndSec}
+        selectedId={selectedId}
+        editable={editable}
+        // AUDIO CHIPS SELECT, AND ALWAYS SHOULD HAVE. Stage 2 refused it
+        // because selection drove three TEXT-cell surfaces at once and a
+        // cue has a row in none of them — but the fix was to separate them,
+        // not to make the chip inert. It now draws as selected and fills
+        // the timing readout (`currentCell` searches the cues); reaching
+        // the dialogue table goes through the cue's LINKS, which is a
+        // question stage 4 can finally answer and stage 2 could not.
+        onSelect={selectCueFromChip}
+        onSeek={seekAudioCue}
+        onSeekSec={seekTo}
+        linkOverlay={cueLinkOverlay}
+        // Matt's QA (2026-08-21): THE LOCK COVERS THE AUDIO CHIPS TOO —
+        // Sam's original ruling on the timing lock, which this row never
+        // received. No user-inserted exemption here: nobody hand-adds a
+        // heard line, so locked means frozen, full stop.
+        retimable={!timingLocked}
+        onRetime={onRetimeCue}
+        snapEnabled={snapOn}
+        // Sam's D3: on an empty linked video the row is one dashed chip
+        // the length of the film, and what it stands for is the video's
+        // own sound. (Sam, Oct 5: the same holds once the captions are
+        // rows — a linked video with no audio cues keeps the one labelled
+        // band.) AQU-2253: in both timings — following the recordings the
+        // film and its sound play straight through on the film's clock,
+        // so the band runs from 0:00 to the film's end there too.
+        gapLabel={
+          linkedVideoEmpty || (coreMediaUrl && (audioCues?.length ?? 0) === 0)
+            ? t("editor.timeline.soundSourceVideo")
+            : undefined
+        }
+        scrollLeftPx={scrollLeft}
+      />
+    )
+  }
+
   function laneForTrack(row: TrackRow): ReactNode {
     const track = row.track
     if (track.contentFileId && ["source-subtitles", "target-subtitles"].includes(track.kind)) {
@@ -4242,47 +4505,7 @@ export function TimelineEditor({
         return dialogue.length > 0 ? (
           <TimelineLane key={track.id} cells={dialogue} variant="dialogue" retimable={false} {...laneProps} />
         ) : (
-          <SourceRegionLane
-            key={track.id}
-            map={audioRegions}
-            cells={audioCues ?? []}
-            pxPerSec={pxPerSec}
-            viewStartSec={viewStartSec}
-            viewEndSec={viewEndSec}
-            selectedId={selectedId}
-            editable={editable}
-            // AUDIO CHIPS SELECT, AND ALWAYS SHOULD HAVE. Stage 2 refused it
-            // because selection drove three TEXT-cell surfaces at once and a
-            // cue has a row in none of them — but the fix was to separate them,
-            // not to make the chip inert. It now draws as selected and fills
-            // the timing readout (`currentCell` searches the cues); reaching
-            // the dialogue table goes through the cue's LINKS, which is a
-            // question stage 4 can finally answer and stage 2 could not.
-            onSelect={selectCueFromChip}
-            onSeek={seekAudioCue}
-            onSeekSec={seekTo}
-            linkOverlay={cueLinkOverlay}
-            // Matt's QA (2026-08-21): THE LOCK COVERS THE AUDIO CHIPS TOO —
-            // Sam's original ruling on the timing lock, which this row never
-            // received. No user-inserted exemption here: nobody hand-adds a
-            // heard line, so locked means frozen, full stop.
-            retimable={!timingLocked}
-            onRetime={onRetimeCue}
-            snapEnabled={snapOn}
-            // Sam's D3: on an empty linked video the row is one dashed chip
-            // the length of the film, and what it stands for is the video's
-            // own sound. (Sam, Oct 5: the same holds once the captions are
-            // rows — a linked video with no audio cues keeps the one labelled
-            // band.) AQU-2253: in both timings — following the recordings the
-            // film and its sound play straight through on the film's clock,
-            // so the band runs from 0:00 to the film's end there too.
-            gapLabel={
-              linkedVideoEmpty || (coreMediaUrl && (audioCues?.length ?? 0) === 0)
-                ? t("editor.timeline.soundSourceVideo")
-                : undefined
-            }
-            scrollLeftPx={scrollLeft}
-          />
+          audioCueLane(track.id)
         )
       case "target-subtitles":
         // The translation of each cue, at the cue's own timings — the same
@@ -5195,7 +5418,7 @@ export function TimelineEditor({
                   Source audio recording of its own keeps that switch on the
                   Source audio row, exactly where it was (no change for old
                   files), so one switch never shows twice. */}
-              {coreMediaUrl && (
+              {coreMediaUrl && !filmFolder && (
                 <LaneLabel
                   data-testid="tl-film-track-label"
                   name={t("editor.timeline.filmTrack")}
@@ -5206,6 +5429,7 @@ export function TimelineEditor({
                   trailing={dialogue.length > 0 ? undefined : speakerToggle("source", "the film's own sound")}
                 />
               )}
+              {filmFolderGutter()}
               {/* The gutter is the track list, exactly as the lanes beside it are —
                   one row here per row there, in the same order, off the same
                   array. `name` comes from the track and not from the kind, which
@@ -5498,21 +5722,8 @@ export function TimelineEditor({
                 onScrubMove={moveScrub}
                 onScrubEnd={endScrub}
               />
-              {coreMediaUrl && (
-                <FilmTrackLane
-                  src={coreMediaUrl}
-                  fileId={fileId}
-                  projectId={project?.id}
-                  session={session}
-                  filmSec={filmTrackSec || null}
-                  pxPerSec={pxPerSec}
-                  viewStartSec={viewStartSec}
-                  viewEndSec={viewEndSec}
-                  name={film?.name ?? t("editor.timeline.filmTrack")}
-                  onSeekSec={seekTo}
-                  pieces={filmPieces}
-                />
-              )}
+              {coreMediaUrl && !filmFolder && filmLane()}
+              {filmFolderLanes()}
               {trackRows.map((row) => {
                 const lane = laneForTrack(row)
                 // A row with NO MENU CAPABILITY at all — a viewer — is the row

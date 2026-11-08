@@ -6416,7 +6416,8 @@ describe("TimelineEditor — an imported film is cut along its source cues", () 
 
   it.each(["dubbing", "audioFirst"] as const)("keeps its Source audio row, cut into its lines, in %s; the film's row has no mute of its own", (mode) => {
     draw(mode)
-    expect(gutterNames()[0]).toBe("Film")
+    // Nov 8: inside the film's folder, named after the file.
+    expect(gutterNames().slice(0, 2)).toEqual(["Imported film.webm", "Film"])
     expect(gutterNames()).toContain("Source audio")
     expect(gutterNames()).not.toContain("Source cues")
     expect(within(screen.getByTestId("tl-film-track-label")).queryByRole("button")).toBeNull()
@@ -6469,6 +6470,125 @@ describe("TimelineEditor — an imported film is cut along its source cues", () 
     draw("audioFirst", { coreMediaUrl: "https://www.youtube.com/watch?v=aqbHRKZ1bVs" })
     expect(screen.getByTestId("tl-film-lane")).toHaveAttribute("data-film-kind", "one-strip")
     expect(screen.queryAllByTestId("tl-film-piece")).toHaveLength(0)
+  })
+})
+
+// Nov 8 (the film bundle): an imported film's picture, sound and heard lines
+// are one folder at the top, named after the file (lib/timeline/film-folder).
+// Derived every time, never stored: pinned, nothing to rename or drag.
+describe("TimelineEditor — an imported film's folder", () => {
+  const UPLOAD = "frontier-audio://ep9/audio-ep9-1690000000-film.webm"
+  const SOURCE_ID = "audio-ep9-1690000000-film.webm"
+  const film = { name: "Imported film", fileName: "Imported film.webm", showing: true, onHide: vi.fn(), onShow: vi.fn() }
+  const line = (id: string, start: number, end: number, takeSec?: number) => {
+    const takeId = `audio-${id}-1700000000-take.webm`
+    return cell({
+      id, fileId: "ep9", medium: "media", startTime: start, endTime: end, original: "Imported film.webm",
+      ...(takeSec != null ? { selectedAudioId: takeId } : {}),
+      attachments: {
+        [SOURCE_ID]: { type: "audio", url: UPLOAD, trimStartMs: start * 1000, trimEndMs: end * 1000, durationMs: 27_080 },
+        ...(takeSec != null ? { [takeId]: { type: "audio", url: "frontier-audio://take", durationMs: takeSec * 1000 } } : {}),
+      },
+    } as unknown as Partial<CellData>)
+  }
+  const lines = [line("a", 0.5, 4.0, 3.5), line("b", 4.6, 8.8, 6.0), line("c", 9.2, 13.5, 2.0)]
+  // The heard lines of its audio cue file, on the film's own clock.
+  const heard = [
+    cell({ id: "h1", original: "Whoa there", startTime: 1.0, endTime: 2.0 }),
+    cell({ id: "h2", original: "Easy now", startTime: 5.0, endTime: 6.0 }),
+  ]
+  const draw = (mode: "dubbing" | "audioFirst", over: Record<string, unknown> = {}) =>
+    renderWithTooltips(
+      <TimelineEditor
+        fileId="ep9folder" coreMediaUrl={UPLOAD} film={film} editable cells={lines} timingMode={mode}
+        tracks={deriveTracksForFile(null, { isSubtitleImport: false, hasMediaCells: true, hasAudioCues: false, hasSourceAudio: true })}
+        onRetimeSubtitle={() => {}}
+        onReorderTrack={() => {}}
+        onRenameTrack={() => {}}
+        {...over}
+      />,
+    )
+  const gutterNames = () =>
+    Array.from(screen.getByTestId("tl-scroll").previousElementSibling!.querySelectorAll("span.font-semibold")).map((el) => el.textContent)
+
+  beforeEach(() => {
+    topOwner.value = 1
+    resetVideoDurationsForTests()
+    setVideoDurationSec(UPLOAD, 27.08)
+    localStorage.removeItem("aquilla:tlFoldersClosed:ep9folder")
+  })
+
+  it("holds the film and its Source audio, under the file's name, with Source text outside it", () => {
+    draw("dubbing")
+    expect(gutterNames()).toEqual(["Imported film.webm", "Film", "Source audio", "Source text", "Target audio"])
+    expect(screen.getByTestId("tl-folder-toggle-film-folder")).toHaveAttribute("aria-expanded", "true")
+  })
+
+  it("with an audio cue file, the heard lines get their own row inside it, beside the Source audio", () => {
+    draw("dubbing", { audioCues: heard })
+    expect(gutterNames()).toEqual(["Imported film.webm", "Film", "Source audio", "Source cues", "Source text", "Target audio"])
+    // Both rows draw: the film's sound, cut into its lines, and the heard lines.
+    expect(screen.getAllByTestId("tl-lane").some((lane) => lane.getAttribute("data-variant") === "dialogue")).toBe(true)
+    expect(within(screen.getByTestId("tl-source-regions")).getAllByTestId(/^tl-card-h/)).toHaveLength(2)
+    // One switch for the one sound: on the Source audio row, not on the heard lines.
+    expect(within(screen.getByTestId("tl-film-folder-source-audio-label")).getByTestId("tl-speaker-source")).toBeInTheDocument()
+    expect(within(screen.getByTestId("tl-film-folder-cues-label")).queryByRole("button")).toBeNull()
+  })
+
+  it("is pinned: no grip, no menu, and its rows are not among the rows a drag moves", () => {
+    draw("dubbing", { audioCues: heard })
+    for (const id of ["tl-film-folder-label", "tl-film-track-label", "tl-film-folder-source-audio-label", "tl-film-folder-cues-label"]) {
+      const row = screen.getByTestId(id)
+      expect(row).not.toHaveAttribute("data-tl-track-row")
+      expect(within(row).queryByTestId(/^tl-track-grip-/)).toBeNull()
+      expect(within(row).queryByTestId(/^tl-track-menu-/)).toBeNull()
+    }
+    // The rows a drag measures are the tracks below it, Source audio not among them.
+    const gutter = screen.getByTestId("tl-scroll").previousElementSibling!
+    expect(gutter.querySelectorAll("[data-tl-track-row]")).toHaveLength(2)
+  })
+
+  it("folds to one slim row showing the film, and its speaker moves to the heading", () => {
+    draw("audioFirst", { audioCues: heard })
+    fireEvent.click(screen.getByTestId("tl-folder-toggle-film-folder"))
+    expect(gutterNames()).toEqual(["Imported film.webm", "Source text", "Target audio"])
+    const band = screen.getByTestId("tl-folder-lane-film-folder")
+    expect(band).toHaveAttribute("data-collapsed")
+    // The film strip is the summary: its pieces, cut at the lines.
+    expect(within(band).getByTestId("tl-film-lane")).toHaveAttribute("data-summary")
+    expect(within(band).getAllByTestId("tl-film-piece")).toHaveLength(3)
+    expect(screen.queryByTestId("tl-source-regions")).toBeNull()
+    expect(within(screen.getByTestId("tl-film-folder-label")).getByTestId("tl-speaker-source")).toBeInTheDocument()
+    expect(screen.getAllByTestId("tl-speaker-source")).toHaveLength(1)
+    // Folding is personal, kept for this file.
+    expect(localStorage.getItem("aquilla:tlFoldersClosed:ep9folder")).toContain("film-folder")
+    fireEvent.click(screen.getByTestId("tl-folder-toggle-film-folder"))
+    expect(gutterNames()).toContain("Source cues")
+  })
+
+  it("following the recordings, the heard lines move with the film's pieces", () => {
+    draw("audioFirst", { audioCues: heard })
+    const [a, b] = screen.getAllByTestId("tl-film-piece")
+    const lane = screen.getByTestId("tl-source-regions")
+    // h1 is the film's 1.0 s, 0.5 s into line a's stretch; h2 is 5.0 s, 0.4 s into line b's.
+    const pxPerSec = (parseFloat(b.style.left) - parseFloat(a.style.left)) / 3.5
+    const h1 = within(lane).getByTestId("tl-card-h1")
+    const h2 = within(lane).getByTestId("tl-card-h2")
+    expect(parseFloat(h1.style.left)).toBeCloseTo(parseFloat(a.style.left) + 0.5 * pxPerSec, 0)
+    expect(parseFloat(h2.style.left)).toBeCloseTo(parseFloat(b.style.left) + 0.4 * pxPerSec, 0)
+  })
+
+  it("a linked film gets no folder", () => {
+    draw("dubbing", { coreMediaUrl: "https://www.youtube.com/watch?v=aqbHRKZ1bVs" })
+    expect(screen.queryByTestId("tl-film-folder-label")).toBeNull()
+    expect(gutterNames()[0]).toBe("Film")
+  })
+
+  it("following the recordings, a line nobody has recorded shows its whole stretch of film, never \"cut\"", () => {
+    const unrecorded = [line("a", 0.5, 4.0), { ...line("b", 4.6, 8.8), transcription: "Hi." } as CellData]
+    draw("audioFirst", { cells: unrecorded })
+    expect(screen.getAllByTestId("tl-film-piece")).toHaveLength(2)
+    expect(screen.queryAllByTestId("tl-film-cut")).toHaveLength(0)
   })
 })
 

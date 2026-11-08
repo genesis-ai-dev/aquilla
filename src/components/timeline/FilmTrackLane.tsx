@@ -67,6 +67,12 @@ export interface FilmTrackLaneProps {
    * Null or absent: the one strip.
    */
   pieces?: readonly FilmPiece[] | null
+  /**
+   * Nov 8: drawn as a folded folder's summary band (an imported film's folder,
+   * lib/timeline/film-folder): it fills the folder's slim row, whose height
+   * and chip box the caller sets, with no edge of its own.
+   */
+  summary?: boolean
 }
 
 /** The strip's 1 px dark edge (board 56). */
@@ -95,6 +101,7 @@ export function FilmTrackLane({
   onSeekSec,
   frameFor,
   pieces,
+  summary = false,
 }: FilmTrackLaneProps) {
   const t = useT()
   const { chipH } = useRowMetrics()
@@ -185,7 +192,8 @@ export function FilmTrackLane({
     <div
       data-testid="tl-film-lane"
       data-film-kind={cut ? "imported-pieces" : "one-strip"}
-      className={`relative ${TL_ROW_H_CLASS} border-b border-border`}
+      data-summary={summary ? "" : undefined}
+      className={summary ? "relative h-full" : `relative ${TL_ROW_H_CLASS} border-b border-border`}
       style={filmTrackHueVars()}
     >
       {frames.grabber}

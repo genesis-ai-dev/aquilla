@@ -74,9 +74,22 @@ describe("buildProgramme — laying the verses out", () => {
     expect(prog.slots[1].startSec).toBe(4)
   })
 
-  it("a line with no take takes its stand-in length, not its original's (AQU-2204)", () => {
+  // Nov 8 (the film bundle): what plays on a line nobody has recorded is its
+  // original, so the line lasts the original's length and the original plays
+  // whole. A stand-in cut it at a reading-time guess, and an imported film's
+  // pieces read "cut 2.4 s" on every unrecorded line.
+  it("a line with no take and its own original lasts the original's length, played whole", () => {
     const prog = buildProgramme([verse("v1", 0, 9), verse("v2", 9, 12, { durationMs: 2_000 })], { standInLenSec: () => 2.5 })
-    expect(prog.slots[0]).toMatchObject({ slotLenSec: 2.5, sourceLenSec: 2.5, clock: "source", standIn: true })
+    expect(prog.slots[0]).toMatchObject({ slotLenSec: 9, sourceLenSec: 9, clock: "source" })
+    expect(prog.slots[0].standIn).toBeUndefined()
+    expect(prog.slots[0].sourceWindow).toEqual({ start: 0, end: 9 })
+    expect(prog.slots[1].startSec).toBe(9)
+  })
+
+  it("a timed line with no take and nothing to hear still takes its stand-in length (AQU-2204)", () => {
+    const silent = verse("v1", 0, 9, undefined, { attachments: {} })
+    const prog = buildProgramme([silent, verse("v2", 9, 12, { durationMs: 2_000 })], { standInLenSec: () => 2.5 })
+    expect(prog.slots[0]).toMatchObject({ slotLenSec: 2.5, sourceLenSec: 0, standIn: true })
     expect(prog.slots[1].startSec).toBe(2.5)
   })
 
@@ -92,13 +105,14 @@ describe("buildProgramme — laying the verses out", () => {
     expect(prog.totalSec).toBe(29)
   })
 
-  it("a section's transcript still sets its stand-in, not its file's name", () => {
-    // 55 characters at 14 a second: held a little past its 3.2 s, not cut to the 1.9 s of "Imported film.mp4".
+  it("a transcribed section with no take keeps its own length too: its words set no stand-in over its original", () => {
+    // 55 characters at 14 a second would be a 3.9 s stand-in against its 3.18 s.
     const words = "Line one. The boat leaves the harbour at dawn tomorrow."
     const line1 = verse("l1", 1.08, 4.26, undefined, { original: "Imported film.mp4", transcription: words })
     const prog = buildProgramme([line1], { standInLenSec: standInEstimator([line1]) })
-    expect(prog.slots[0].slotLenSec).toBeCloseTo(words.length / 14, 5)
-    expect(prog.slots[0].standIn).toBe(true)
+    expect(prog.slots[0].slotLenSec).toBeCloseTo(3.18, 5)
+    expect(prog.slots[0].sourceLenSec).toBeCloseTo(3.18, 5)
+    expect(prog.slots[0].standIn).toBeUndefined()
   })
 
   it("the TRANSLATION clocks the slot when it is the longer side", () => {

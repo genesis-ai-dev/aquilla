@@ -18113,6 +18113,9 @@ export function ProjectWorkspace() {
                     // Board 55: the film's own actions head the Sources menu.
                     film={activeFile?.coreMediaUrl ? {
                       name: filmLabelFor(activeFile.coreMediaUrl, linkedVideoBaseName),
+                      // Nov 8: an imported film's folder on the timeline is
+                      // called after the file itself.
+                      fileName: activeFile.name,
                       showing: dock.view.isShowing("film"),
                       // A tab beside the text: the text shows instead. Alone
                       // in its area: the area folds.

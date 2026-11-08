@@ -21,12 +21,11 @@ import { proxyOrigin } from "./net/resource-proxy"
 // This module runs outside React (plain import-pipeline code, no hooks), so it
 // uses the standalone t() rather than useT() — see src/lib/i18n/standalone.ts.
 import { t } from "./i18n/standalone"
-import { formatByteLimit } from "./i18n/format"
-import { normalizeLocale } from "./i18n/locales"
-import { readStoredLocale } from "./i18n/store"
 import type { CellUnit, FileType, FileReference, TranslatableString, OrderedBy } from "./parsers/types"
 import type { SpeakerAssignment } from "./import/cast-from-speakers"
 import { detectFileType, isMediaFileType, TRANSLATION_MEMORY_FILE_KIND } from "./parsers/types"
+import { importedMediaType } from "./import/media-picture"
+import { mediaFileTooLargeMessage } from "./audio/media-limit"
 import { buildAudioId, MAX_AUDIO_OBJECT_BYTES, uploadCellAudio } from "./audio/upload"
 import { analyseSpeechInFile } from "./audio/speech-analysis"
 import { tileSegments } from "./timeline/tile-segments"
@@ -2058,19 +2057,16 @@ export function createMediaFileCommit(
   const videoEventId = uuidv7()
   const videoId = ctx.mediaPictureUrl ? youTubeVideoId(ctx.mediaPictureUrl) : null
   const pictureUrl = videoId ? `https://www.youtube.com/watch?v=${videoId}` : undefined
+  let storedType: FileType = fileType
   const prepare = async () => {
     if (ctx.mediaPictureUrl && !videoId) throw new Error("Enter a YouTube video link.")
     if (file.size === 0) throw new Error(t("importExport.errors.emptyFile", { fileName: file.name }))
     // AQU-1853: large media rides the multipart upload path, so the gate is
     // the whole-object ceiling, not the single-request one.
-    if (file.size > MAX_AUDIO_OBJECT_BYTES) {
-      // AQU-1975: interpolate the ceiling rather than naming it in the copy —
-      // the string outlived the 95 MB cap it used to quote.
-      const locale = normalizeLocale(readStoredLocale())
-      throw new Error(t("importExport.errors.mediaFileTooLarge", {
-        fileName: file.name, limit: formatByteLimit(MAX_AUDIO_OBJECT_BYTES, locale),
-      }))
-    }
+    if (file.size > MAX_AUDIO_OBJECT_BYTES) throw new Error(mediaFileTooLargeMessage(file.name))
+    // A file named like a video but holding no picture (a browser recording
+    // is a sound-only .webm) comes in as audio, with no film (import map D#2).
+    storedType = await importedMediaType(file, fileType)
     ctx.signal?.throwIfAborted()
     const suppliedDuration = ctx.mediaTextSource
       ? await probeMediaDurationMs(file).catch(() => undefined) : undefined
@@ -2095,10 +2091,10 @@ export function createMediaFileCommit(
       file: {
         id: uuidv7(),
         name: file.name,
-        fileType,
+        fileType: storedType,
         role: "source",
-        kind: importedFileKind(fileType),
-        importFormat: fileType,
+        kind: importedFileKind(storedType),
+        importFormat: storedType,
         parserVersion: "workspace-import-v1",
         sourceLanguage: ctx.sourceLanguage,
         targetLanguage: ctx.targetLanguage,
@@ -2164,7 +2160,7 @@ export function createMediaFileCommit(
       await publishStagedImport({
         projectId: ctx.projectId,
         fileId,
-        ...(pictureUrl || fileType === "video"
+        ...(pictureUrl || storedType === "video"
           ? { coreMediaUrl: pictureUrl ?? upload.url } : {}),
         publishEventId, videoEventId,
         attachments: specs.map((s) => ({
@@ -2203,12 +2199,12 @@ export function createMediaFileCommit(
       result = {
         id: fileId,
         name: file.name,
-        type: fileType,
+        type: storedType,
         createdAt: new Date().toISOString(),
         cellCount: cells.length,
         orderedBy: "time",
         hasOriginalSource: true,
-        ...(pictureUrl || fileType === "video"
+        ...(pictureUrl || storedType === "video"
           ? { coreMediaUrl: pictureUrl ?? upload.url } : {}),
       }
       return result

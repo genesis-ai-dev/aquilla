@@ -1320,6 +1320,12 @@ export const editor = defineNamespace({
     "editor.timeline.linkVideoInvalid":
       "That doesn't look like a web address. It should start with http:// or https://.",
     "editor.timeline.linkVideoClear": "Clear film",
+    // Import map D#14: an imported film is shown by its name, never by its
+    // internal upload address.
+    "editor.timeline.linkVideoImported":
+      "This file's film is {name}, imported with it. To use a linked film instead, enter its address.",
+    "editor.timeline.linkVideoImportedClear":
+      "Clearing the film takes away its picture only. Its sound stays as the file's Source audio.",
     "editor.timeline.chipHeadingSubtitle": "Subtitle",
     "editor.timeline.chipSpeaker": "Speaker",
     "editor.timeline.chipCamera": "Camera",
@@ -7394,6 +7400,17 @@ export const editor = defineNamespace({
           fileName: "The picked file's name, e.g. 'episode-101.vtt'. Never translate it.",
           limit: "The size limit, already formatted, e.g. '95.0 MB'. Never translate it.",
         },
+      },
+      "editor.timeline.linkVideoImported": {
+        description:
+          "In the Change film dialog of a file whose film was imported with it (a video uploaded through Import), above the address field. Names the film; the field is for a link to use instead.",
+        placeholders: {
+          name: "The file's name, which is the imported film's name. Do not translate.",
+        },
+      },
+      "editor.timeline.linkVideoImportedClear": {
+        description:
+          "Under the address field of the Change film dialog, for an imported film: what the Clear film button does. 'Source audio' is the name of a timeline row.",
       },
       "editor.timeline.changeVideo": {
         description:

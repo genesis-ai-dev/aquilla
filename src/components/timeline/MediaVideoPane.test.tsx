@@ -686,6 +686,27 @@ describe("MediaVideoPane", () => {
     expect(onChangeVideo).toHaveBeenCalledTimes(1)
   })
 
+  // Import map D#14: the card printed the address the film was fetched from,
+  // signed token and all. An imported film's card gives a reason, never it.
+  it("never shows an imported film's signed address when it will not load", async () => {
+    render(<MediaVideoPane
+      src="frontier-audio://imported.mp4"
+      projectId="p1" fileId="f1" cells={[]}
+      session={{ username: "dev", jwt: "identity" } as FrontierSession}
+    />)
+    await waitFor(() => expect(screen.getByTestId("video-pane-media").getAttribute("src")).toContain("picture-token"))
+    fireEvent.error(screen.getByTestId("video-pane-media"))
+    expect(screen.getByTestId("video-pane-error-reason")).toBeInTheDocument()
+    expect(screen.getByTestId("tl-video-pane").textContent).not.toMatch(/picture-token|frontier-audio|\/audio\//)
+  })
+
+  it("offers only Retry when no way to change the film is given", () => {
+    renderPane()
+    fireEvent.error(screen.getByTestId("video-pane-media"))
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Change film" })).toBeNull()
+  })
+
   // ── Round 6: waiting for the picture before starting it ──────────────────
   //
   // Sam's report: pause mid-film, drag the playhead back, press play

@@ -39,6 +39,7 @@ vi.mock("@/lib/import", async (importOriginal) => {
 })
 
 vi.mock("@/lib/audio/upload", () => ({
+  MAX_AUDIO_OBJECT_BYTES: 2 * 1024 * 1024 * 1024,
   buildAudioId: (id: string) => `${id}-clip`,
   uploadCellAudio: vi.fn(async (args: { signal?: AbortSignal }) => {
     emitted.uploadSignals.push(args.signal)

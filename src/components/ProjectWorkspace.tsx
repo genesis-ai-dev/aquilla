@@ -2688,8 +2688,9 @@ export function ProjectWorkspace() {
   // bottom bar it has always had (below).
   const activeFileOnTimeline = Boolean(activeFileForLens) && (activeFileTimeOrdered || !extensionEditorActive)
   // AQU-1758 (Sam's decision 7): the Film button and the timeline's Sources
-  // menu, together, by the project's setting (unset: off for books).
-  const filmAndSourcesOn = filmAndSourcesShown(project?.filmAndSources, project?.files)
+  // menu, together, by the project's setting (unset: off for books, on for a
+  // recording or film's own file).
+  const filmAndSourcesOn = filmAndSourcesShown(project?.filmAndSources, project?.files, activeFileForLens)
   /** Media lens = the timeline STACKED over the always-rendered text table
    *  (one EditorTable instance across both lenses — the imperative ref,
    *  selection singleton, and presence claims stay single). */
@@ -3800,17 +3801,21 @@ export function ProjectWorkspace() {
     })
   }, [])
 
+  /** `applyLinkVideo`, declared far below: a video dropped on an empty file
+   *  keeps its picture as the file's film through the same write. */
+  const applyLinkVideoRef = useRef<((url: string | null) => Promise<void>) | null>(null)
   const handleAttachMediaFile = useCallback(async (file: File) => {
     if (!project?.id || !activeFileId) return
-    const { lines } = await attachMediaFileToTimeline(file, {
+    const { lines, film } = await attachMediaFileToTimeline(file, {
       projectId: project.id,
       fileId: activeFileId,
       author: currentUsername,
       getToken: getTokenForFile,
-    })
+    }, { keepPicture: !activeFile?.coreMediaUrl })
     await finishSourceMediaAttach(activeFileId, activeFile?.name ?? file.name)
     recordRecordingLines(activeFileId, lines)
-  }, [project?.id, activeFileId, activeFile?.name, currentUsername, getTokenForFile, finishSourceMediaAttach, recordRecordingLines])
+    if (film) await applyLinkVideoRef.current?.(film)
+  }, [project?.id, activeFileId, activeFile?.name, activeFile?.coreMediaUrl, currentUsername, getTokenForFile, finishSourceMediaAttach, recordRecordingLines])
 
   const handleAttachMediaUrl = useCallback(async (url: string) => {
     if (!project?.id || !activeFileId) return
@@ -4703,6 +4708,7 @@ export function ProjectWorkspace() {
     },
     [activeFileId, readFilmLink, writeFilmLink],
   )
+  useEffect(() => { applyLinkVideoRef.current = applyLinkVideo }, [applyLinkVideo])
   // Flow B (2026-08-05; AQU-2227): linking a film that will move the file onto
   // Follows source says so first. NOTE the mode is computed INLINE — the
   // `timingMode` const is declared ~2,700 lines below this callback (a
@@ -18460,7 +18466,10 @@ export function ProjectWorkspace() {
                   onVideoTime={setVideoClockSec}
                   onVideoPlaying={setVideoClockPlaying}
                   onVideoDuration={setVideoDurationSec}
-                  onChangeVideo={() => setLinkVideoOpen(true)}
+                  // Import map D#15: only someone who may link a film is
+                  // offered another; everyone else gets Retry.
+                  onChangeVideo={canPerform("file.video.set", project?.syncRole?.level ?? null)
+                    ? () => setLinkVideoOpen(true) : undefined}
                   // Sam, Oct 5: a click on a YouTube picture is the
                   // transport's Play/Pause, never YouTube's own.
                   onPictureClick={handleTimelineTogglePlay}
@@ -19724,6 +19733,7 @@ export function ProjectWorkspace() {
       <LinkVideoUrlDialog
         open={linkVideoOpen}
         currentUrl={activeFile?.coreMediaUrl ?? null}
+        filmName={activeFile?.name ?? null}
         onCancel={() => setLinkVideoOpen(false)}
         onSave={(url) => {
           // Close FIRST: on the Free-timing path handleLinkVideo opens a second

@@ -1344,6 +1344,8 @@ export const importExport = defineNamespace({
     "importExport.reimport.title": "Re-import {name}",
     "importExport.reimport.oneFile": "Choose one file to re-import.",
     "importExport.reimport.oneDocument": "Re-import takes one document, not a project or a set of books.",
+    "importExport.reimport.mediaCannotReplace": "{fileName} is a recording or film, so it can't replace what's in {name}. You can bring it in as a new file instead.",
+    "importExport.reimport.importMediaAsNew": "Import as a new file",
     "importExport.reimport.update": "Update this file",
     "importExport.reimport.updatedCopy": "Make updated copy",
     "importExport.reimport.blankCopy": "Make a blank copy",
@@ -3790,6 +3792,18 @@ export const importExport = defineNamespace({
       "importExport.reimport.oneDocument": {
         description:
           "Error shown when the chosen upload is a multi-book project or otherwise not a single document.",
+      },
+      "importExport.reimport.mediaCannotReplace": {
+        description:
+          "Shown on a file's Re-import when the chosen upload is an audio or video file, which cannot update a document in place. A button to import it as a new file follows.",
+        placeholders: {
+          fileName: "The chosen audio or video file's name. Do not translate.",
+          name: "The name of the file being re-imported. Do not translate.",
+        },
+      },
+      "importExport.reimport.importMediaAsNew": {
+        description:
+          "Button under the message that a recording or film can't replace a file: imports the chosen audio or video as a new file, through the ordinary import.",
       },
       "importExport.reimport.update": {
         description:

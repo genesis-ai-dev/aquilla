@@ -5,6 +5,7 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { createMediaFileCommit, probeMediaDurationMs,
   type EmitParsedFileResult, type ImportContext } from "@/lib/import"
 import { MAX_AUDIO_OBJECT_BYTES } from "@/lib/audio/upload"
+import { mediaFileTooLargeMessage } from "@/lib/audio/media-limit"
 import { prepareEmbeddedSubtitleSources } from "@/lib/import/embedded-subtitle-sources"
 import { type MediaTextSourceOption } from "@/lib/import/media-cues"
 import { MediaImportPreviewDialog } from "./MediaImportPreviewDialog"
@@ -76,9 +77,8 @@ export function YouTubeImportPanel({ ctx, onImported }: {
           throw new Error("Choose a supported audio or video file.")
         }
         // AQU-1853: multipart upload handles anything over the single-request cap.
-        if (media.size === 0 || media.size > MAX_AUDIO_OBJECT_BYTES) {
-          throw new Error("Choose a non-empty audio or video within the upload limit.")
-        }
+        if (media.size === 0) throw new Error(t("importExport.errors.emptyFile", { fileName: media.name }))
+        if (media.size > MAX_AUDIO_OBJECT_BYTES) throw new Error(mediaFileTooLargeMessage(media.name))
         const prepared = prepareYouTubePictureImport({ url, name: media.name })
         const sources = /\.(mp4|m4a)$/i.test(media.name)
           ? prepareEmbeddedSubtitleSources(await media.arrayBuffer()).map((option, index) => ({
@@ -148,7 +148,7 @@ export function YouTubeImportPanel({ ctx, onImported }: {
     <>
     {mediaReview && <MediaImportPreviewDialog
       mediaName={mediaReview.file.name} sources={mediaReview.sources}
-      durationMs={mediaReview.durationMs} busy={busy}
+      durationMs={mediaReview.durationMs} busy={busy} frameCheck={{ filmFile: mediaReview.file }}
       confirmLabel={t("importExport.youtube.importMedia")}
       onCancel={() => setMediaReview(null)} onConfirm={mediaTextSource => {
         const active = controller.current

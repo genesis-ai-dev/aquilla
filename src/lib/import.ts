@@ -822,15 +822,19 @@ export async function prepareImportFile(
   ctx: PrepareImportContext,
 ): Promise<PreparedImportFile> {
   if (file.size === 0) throw new Error(t("importExport.errors.emptyFile", { fileName: file.name }))
+  const extensionType = detectFileType(file.name)
+  // A film or recording is checked against its own 2 GB ceiling where it is
+  // uploaded, in parts (emitMediaFile, AQU-1853). The 95 MB ceiling below is
+  // the text source's: run first, it refused every film over 95 MB, so the
+  // media ceiling could never be reached (AQU-2344).
+  if (extensionType && isMediaFileType(extensionType)) return { fileType: extensionType, results: [] }
   // Fail before parsing/decompression and before any server event. The same
   // ceiling is enforced again by the artifact route as a trust boundary.
   assertSourceUploadByteLength(file.size)
-  const extensionType = detectFileType(file.name)
   if (extensionType) {
-    // Opaque packages/media need their deterministic binary adapter. Textual
+    // Opaque packages need their deterministic binary adapter. Textual
     // extensions are sniffed as content first so a USFM document named .txt,
     // or an XLIFF named .xml by an upstream tool, is not flattened as prose.
-    if (isMediaFileType(extensionType)) return { fileType: extensionType, results: [] }
     try {
       if (extensionType === "docx" || extensionType === "pptx" || extensionType === "idml" || extensionType === "epub") {
         return preparedParsedFile(

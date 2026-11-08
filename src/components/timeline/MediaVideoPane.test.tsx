@@ -678,7 +678,10 @@ describe("MediaVideoPane", () => {
 
     expect(screen.getByTestId("tl-video-pane")).toHaveAttribute("data-video-state", "error")
     expect(screen.getByText("This film could not be loaded")).toBeInTheDocument()
-    expect(screen.getByText("https://cdn/episode.webm")).toBeInTheDocument()
+    // A reason in a sentence, not the raw address (import map X-D-youtube-film-card).
+    expect(screen.getByTestId("video-pane-error-reason")).toHaveTextContent(
+      "The film at cdn didn't play. Check that the link still works.")
+    expect(screen.queryByText("https://cdn/episode.webm")).toBeNull()
     fireEvent.click(screen.getByRole("button", { name: "Change film" }))
     expect(onChangeVideo).toHaveBeenCalledTimes(1)
   })
@@ -1215,6 +1218,21 @@ describe("a YouTube link", () => {
     const config = (media as HTMLElement & { config?: { origin?: string; cc_load_policy?: number } }).config
     expect(config?.cc_load_policy).toBe(0)
     expect(config?.origin).toBe(window.location.origin)
+  })
+
+  // Import map X-D-youtube-film-card (Nov 2): the card printed the watch
+  // address and said nothing a person could act on.
+  it("says what YouTube's player said when it fails, not the address", () => {
+    renderPane({ src: YT })
+    const media = screen.getByTestId("video-pane-media") as HTMLElement & { error?: unknown }
+    // The real element keeps the iframe player's error on `error`.
+    media.error = { code: 150, message: "YouTube iframe player error #150" }
+    fireEvent.error(media)
+    expect(screen.getByTestId("video-pane-error-reason")).toHaveTextContent(
+      "The video's owner doesn't let it play on other sites.")
+    expect(screen.queryByText(/youtu/)).toBeNull()
+    expect(screen.getByTestId("video-pane-open-youtube"))
+      .toHaveAttribute("href", "https://www.youtube.com/watch?v=dQw4w9WgXcQ")
   })
 
   // Walk r2 (2026-10-05): the element's shadow :host carries min-width 300px,

@@ -1235,6 +1235,20 @@ export const editor = defineNamespace({
     "editor.timeline.videoPanePicture": "picture",
     "editor.timeline.videoPaneBar": "bar",
     "editor.timeline.videoPaneErrorTitle": "This film could not be loaded",
+    // Import map X-D-youtube-film-card: the reason under the title, in place of
+    // the raw address. The YouTube ones follow the iframe player's error codes.
+    "editor.timeline.videoPaneErrorYouTube":
+      "YouTube didn't play this video here. Check that it plays on YouTube and that you're online, then retry.",
+    "editor.timeline.videoPaneErrorYouTubeMissing":
+      "YouTube says this video is private, removed, or doesn't exist.",
+    "editor.timeline.videoPaneErrorYouTubeNoEmbed":
+      "The video's owner doesn't let it play on other sites. They can allow it in YouTube Studio.",
+    "editor.timeline.videoPaneErrorYouTubeBadLink": "This link doesn't point to a YouTube video.",
+    "editor.timeline.videoPaneErrorUpload":
+      "The film uploaded with this file didn't play. Check that you're online, then retry.",
+    "editor.timeline.videoPaneErrorLink":
+      "The film at {host} didn't play. Check that the link still works.",
+    "editor.timeline.videoPaneOpenOnYouTube": "Open on YouTube",
     // No `videoPaneRetry` or `videoPaneChangeVideo` here: the pane's two
     // buttons reuse `common.retry` and `editor.timeline.changeVideo`. Minting a
     // second key for a word the catalog already carries gives a translator two
@@ -7307,6 +7321,12 @@ export const editor = defineNamespace({
           "scrolled to the moving playback marker. When on, the view chases " +
           "playback; when off the user scrolls freely. 'Playhead' is the audio/video " +
           "term for the current-position marker.",
+      },
+      "editor.timeline.videoPaneErrorLink": {
+        description:
+          "Reason on the Film panel's error card when a film linked by its web address won't " +
+          "play. Replaces the raw address the card used to print.",
+        placeholders: { host: "The web site the film is on, e.g. 'cdn.example.com'. Never translate it." },
       },
       "editor.timeline.changeVideo": {
         description:

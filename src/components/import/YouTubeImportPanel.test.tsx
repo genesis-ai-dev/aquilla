@@ -175,7 +175,12 @@ describe("YouTubeImportPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Link film" }))
     await waitFor(() => expect(onImported).toHaveBeenCalledOnce())
   })
-  it("offers automatic captions from original media with the YouTube picture", async () => {
+  // AQU-2426: original media with no captions asks whole or transcribed; the
+  // recording is never cut or transcribed without that choice.
+  it.each([
+    ["Import whole recording", "whole"],
+    ["Transcribe and import", "transcribe"],
+  ] as const)("original media with no captions: %s, with the YouTube picture", async (button, mode) => {
     const onImported = vi.fn()
     vi.mocked(createMediaFileCommit).mockReturnValue(async () => ({
       id: "media1", name: "clip.mp3", type: "audio", createdAt: "2026-10-01",
@@ -187,13 +192,19 @@ describe("YouTubeImportPanel", () => {
     await selectFile(new File(["audio"], "clip.mp3", { type: "audio/mpeg" }))
     fireEvent.click(screen.getByRole("button", { name: "Preview import" }))
     await screen.findByRole("dialog")
-    fireEvent.click(screen.getByRole("button", { name: "Import media and link the film" }))
+    expect(screen.queryByRole("button", { name: "Transcribe audio" })).not.toBeInTheDocument()
+    if (mode === "transcribe") {
+      fireEvent.click(screen.getByRole("button", { name: "Import and transcribe…" }))
+      expect(await screen.findByText("Requests")).toBeInTheDocument()
+    }
+    fireEvent.click(screen.getByRole("button", { name: button }))
     await waitFor(() => expect(onImported).toHaveBeenCalledOnce())
     expect(createMediaFileCommit).toHaveBeenCalledWith(
       expect.objectContaining({ name: "clip.mp3" }), "audio",
       expect.objectContaining({
         mediaPictureUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
         mediaTextSource: undefined,
+        mediaMode: mode,
       }),
     )
   })

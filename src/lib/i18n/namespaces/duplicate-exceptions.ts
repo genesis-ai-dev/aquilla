@@ -215,6 +215,13 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "translator has to keep the three parallel. Reusing the lens tab's or the " +
     "export card's 'Audio' would tie a deliverable choice to a UI mode or a file " +
     "label, and an edit to either would silently break the set.",
+  "audio.transcribeCost.audioLabel":
+    "AQU-2426: the label of one line in the 'what transcribing will cost' box, " +
+    "beside 'Requests', 'Roughly how long' and 'Model', saying how much audio will " +
+    "be sent (e.g. 'Audio  52 minutes'). It is worded as a set with those labels, " +
+    "a quantity being measured, not a mode, a column or a log placeholder; reusing " +
+    "nav.lens.audio or nav.outbox.previewAudio would tie a cost label to a UI tab " +
+    "or a diagnostics row.",
   "nav.lens.audio":
     "A standalone heading — the Audio column of the organization's project table " +
     "and the Audio side of the character check — read on its own. " +

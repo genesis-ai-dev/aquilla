@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react"
+import { useContext, useEffect, useId, useMemo, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -8,6 +8,8 @@ import { MAX_AUDIO_OBJECT_BYTES } from "@/lib/audio/upload"
 import { prepareEmbeddedSubtitleSources } from "@/lib/import/embedded-subtitle-sources"
 import { type MediaTextSourceOption } from "@/lib/import/media-cues"
 import { MediaImportPreviewDialog } from "./MediaImportPreviewDialog"
+import { RecordingImportChoiceDialog } from "./RecordingImportChoiceDialog"
+import { localTranscribeChoice, TranscribeChoiceContext, type TranscribeChoiceInfo } from "./recording-choice-context"
 import { FramesAsHundredthsNotice, useFramesAsHundredths } from "./FramesAsHundredthsNotice"
 import { decodeImportText } from "@/lib/import/ai-recipe"
 import { createYouTubeCaptionCommit } from "@/lib/import/youtube-caption-commit"
@@ -34,7 +36,10 @@ export function YouTubeImportPanel({ ctx, onImported }: {
     videoUrl: string
     sources: MediaTextSourceOption[]
     durationMs?: number
+    /** AQU-2426: with no captions to use, the last step asks whole or transcribed. */
+    choice?: TranscribeChoiceInfo
   } | null>(null)
+  const prepareTranscribeChoice = useContext(TranscribeChoiceContext)
   const [preview, setPreview] = useState<PreparedYouTubeCaptionImport | PreparedYouTubePictureImport | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -88,9 +93,12 @@ export function YouTubeImportPanel({ ctx, onImported }: {
             }),
           })) : []
         const durationMs = await probeMediaDurationMs(media).catch(() => undefined)
+        const choice = sources.length > 0 ? undefined : prepareTranscribeChoice
+          ? await prepareTranscribeChoice([durationMs]).catch(() => localTranscribeChoice(ctx.author, [durationMs]))
+          : localTranscribeChoice(ctx.author, [durationMs])
         active.signal.throwIfAborted()
         setMediaReview({ file: media, fileType: fileType as "audio" | "video",
-          videoUrl: prepared.videoUrl, sources, durationMs })
+          videoUrl: prepared.videoUrl, sources, durationMs, ...(choice ? { choice } : {}) })
         return
       }
       let prepared: PreparedYouTubeCaptionImport | PreparedYouTubePictureImport
@@ -146,21 +154,33 @@ export function YouTubeImportPanel({ ctx, onImported }: {
   }
   return (
     <>
-    {mediaReview && <MediaImportPreviewDialog
-      mediaName={mediaReview.file.name} sources={mediaReview.sources}
-      durationMs={mediaReview.durationMs} busy={busy}
-      confirmLabel={t("importExport.youtube.importMedia")}
-      onCancel={() => setMediaReview(null)} onConfirm={mediaTextSource => {
+    {mediaReview && (() => {
+      const importWith = (mediaTextSource: MediaTextSourceOption["source"] | undefined, mediaMode?: "whole" | "transcribe") => {
         const active = controller.current
         const mediaCommit = createMediaFileCommit(mediaReview.file, mediaReview.fileType, {
           ...ctx, mediaPictureUrl: mediaReview.videoUrl, mediaTextSource,
+          ...(mediaMode ? { mediaMode } : {}),
           signal: ctx.signal ? AbortSignal.any([ctx.signal, active.signal]) : active.signal,
         })
         commit.current = async () => ({ ref: await mediaCommit(), speakerPairs: [] })
         setPreview(prepareYouTubePictureImport({ url: mediaReview.videoUrl, name: mediaReview.file.name }))
         setMediaReview(null)
         void publish()
-      }} />}
+      }
+      // AQU-2426: no captions to use — whole, or transcribed, chosen here; with
+      // captions there is no question and "Transcribe audio" is gone.
+      return mediaReview.choice ? <RecordingImportChoiceDialog
+        files={[{ name: mediaReview.file.name, sizeBytes: mediaReview.file.size, durationMs: mediaReview.durationMs, isVideo: mediaReview.fileType === "video" }]}
+        block={mediaReview.choice.block} cost={mediaReview.choice.cost}
+        languageTag={mediaReview.choice.languageTag} credits={mediaReview.choice.credits} busy={busy}
+        onCancel={() => setMediaReview(null)}
+        onWhole={() => importWith(undefined, "whole")}
+        onTranscribe={() => importWith(undefined, "transcribe")} /> : <MediaImportPreviewDialog
+        mediaName={mediaReview.file.name} sources={mediaReview.sources}
+        durationMs={mediaReview.durationMs} busy={busy} allowAutomatic={false}
+        confirmLabel={t("importExport.youtube.importMedia")}
+        onCancel={() => setMediaReview(null)} onConfirm={mediaTextSource => importWith(mediaTextSource)} />
+    })()}
     <div className="space-y-4" aria-busy={busy}>
       <p className="text-sm text-muted-foreground">
         {t("importExport.youtube.description")}

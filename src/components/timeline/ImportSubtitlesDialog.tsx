@@ -25,7 +25,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { decodeImportText, MAX_UNKNOWN_TEXT_BYTES } from "@/lib/import/ai-recipe"
+import { decodeImportText } from "@/lib/import/ai-recipe"
+import { captionFileLimitLabel, MAX_CAPTION_FILE_BYTES } from "@/lib/import/caption-file-limit"
 import {
   parseSubtitleSidecar,
   SUBTITLE_SIDECAR_ACCEPT,
@@ -35,7 +36,7 @@ import {
   FramesAsHundredthsNotice,
   useFramesAsHundredths,
 } from "@/components/import/FramesAsHundredthsNotice"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 import { fmtClock } from "./format"
 
 interface Props {
@@ -58,7 +59,7 @@ function cueSpan(parsed: ParsedSubtitleSidecar): string | null {
 }
 
 export function ImportSubtitlesDialog({ open, textFileName, filmUrl, onConfirm, onCancel }: Props) {
-  const t = useT()
+  const { t, locale } = useI18n()
   const [picked, setPicked] = useState<{
     parsed: ParsedSubtitleSidecar
     fileName: string
@@ -79,8 +80,8 @@ export function ImportSubtitlesDialog({ open, textFileName, filmUrl, onConfirm, 
       setError(t("editor.timeline.importFileEmpty"))
       return
     }
-    if (file.size > MAX_UNKNOWN_TEXT_BYTES) {
-      setError(t("editor.timeline.importTooLargeText", { fileName: file.name }))
+    if (file.size > MAX_CAPTION_FILE_BYTES) {
+      setError(t("editor.timeline.importTooLarge", { fileName: file.name, limit: captionFileLimitLabel(locale) }))
       return
     }
     try {

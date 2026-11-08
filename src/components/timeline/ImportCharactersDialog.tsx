@@ -28,7 +28,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { parseCsvToSheet, parseXlsxToSheets, type SpreadsheetSheet } from "@/lib/parsers/spreadsheet"
-import { decodeImportText, MAX_UNKNOWN_TEXT_BYTES } from "@/lib/import/ai-recipe"
+import { decodeImportText } from "@/lib/import/ai-recipe"
+import { captionFileLimitLabel, MAX_CAPTION_FILE_BYTES } from "@/lib/import/caption-file-limit"
 import {
   guessCharacterColumns,
   planCharacterAssignments,
@@ -41,7 +42,7 @@ import {
   type AlignableCue,
   type AudioCharacterPlan,
 } from "@/lib/import/audio-character-sheet"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 
 /**
@@ -128,7 +129,7 @@ function ImportCharactersContent({
   onClearAudio,
   onCancel,
 }: Props) {
-  const t = useT()
+  const { t, locale } = useI18n()
   const [picked, setPicked] = useState<Picked | null>(null)
   const [error, setError] = useState<string | null>(null)
   const readGeneration = useRef(0)
@@ -223,8 +224,8 @@ function ImportCharactersContent({
     setPicked(null)
     setError(null)
     if (file.size === 0) return setError(t("editor.timeline.importFileEmpty"))
-    if (file.size > MAX_UNKNOWN_TEXT_BYTES) {
-      return setError(t("editor.timeline.importTooLargeSheet", { fileName: file.name }))
+    if (file.size > MAX_CAPTION_FILE_BYTES) {
+      return setError(t("editor.timeline.importTooLarge", { fileName: file.name, limit: captionFileLimitLabel(locale) }))
     }
     try {
       const buffer = await file.arrayBuffer()

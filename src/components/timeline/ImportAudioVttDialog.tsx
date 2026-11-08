@@ -36,12 +36,13 @@ import {
   type TimebaseCorrection,
   type TimebaseVerdict,
 } from "@/lib/import/timebase"
-import { decodeImportText, MAX_UNKNOWN_TEXT_BYTES } from "@/lib/import/ai-recipe"
+import { decodeImportText } from "@/lib/import/ai-recipe"
+import { captionFileLimitLabel, MAX_CAPTION_FILE_BYTES } from "@/lib/import/caption-file-limit"
 import {
   FramesAsHundredthsNotice,
   useFramesAsHundredths,
 } from "@/components/import/FramesAsHundredthsNotice"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 import { fmtClock } from "./format"
 
@@ -108,7 +109,7 @@ export function ImportAudioVttDialog({
   filmUrl,
   onCancel,
 }: Props) {
-  const t = useT()
+  const { t, locale } = useI18n()
   const [picked, setPicked] = useState<{ parsed: ParsedAudioVtt; fileName: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
   /** Removal asks twice, in place. It takes a whole track away and — when
@@ -212,8 +213,8 @@ export function ImportAudioVttDialog({
       setError(t("editor.timeline.importFileEmpty"))
       return
     }
-    if (file.size > MAX_UNKNOWN_TEXT_BYTES) {
-      setError(t("editor.timeline.importTooLargeText", { fileName: file.name }))
+    if (file.size > MAX_CAPTION_FILE_BYTES) {
+      setError(t("editor.timeline.importTooLarge", { fileName: file.name, limit: captionFileLimitLabel(locale) }))
       return
     }
     try {

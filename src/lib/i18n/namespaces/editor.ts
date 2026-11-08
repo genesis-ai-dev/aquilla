@@ -1951,8 +1951,9 @@ export const editor = defineNamespace({
     "editor.timeline.audioCuesRemoveFailed": "Couldn't remove the Source cues.",
     "editor.timeline.audioCuesRemoveFailedReason": "Couldn't remove the Source cues: {reason}",
     "editor.timeline.importFileEmpty": "That file is empty.",
-    "editor.timeline.importTooLargeText":
-      "\"{fileName}\" is larger than the 10 MB limit for text imports.",
+    // Import map M-caption-rules: one limit behind every door, the one Upload
+    // files has (caption-file-limit.ts).
+    "editor.timeline.importTooLarge": "\"{fileName}\" is larger than the {limit} limit for imports.",
     // One key, three call sites: the answer to "are you sure?" is the same
     // sentence in the audio-VTT removal and in both character clears.
     "editor.timeline.keepThem": "Keep them",
@@ -2054,8 +2055,6 @@ export const editor = defineNamespace({
     "editor.timeline.charactersAssignCount": "Assign {count} characters",
     "editor.timeline.charactersAssign": "Assign characters",
     "editor.timeline.charactersNoRows": "That spreadsheet has no rows.",
-    "editor.timeline.importTooLargeSheet":
-      "\"{fileName}\" is larger than the 10 MB limit for imports.",
 
     // — Character-check drawer (where the two sheets disagree) ——————
     "editor.timeline.characterCheckSpeakerSettled":
@@ -7385,6 +7384,15 @@ export const editor = defineNamespace({
         description: "Toast when removing the Source cues fails, followed by the reason.",
         placeholders: { reason: "The reason it failed, already worded. Never translate it." },
       },
+      "editor.timeline.importTooLarge": {
+        description:
+          "Error in the Source cues, Subtitles and Characters dialogs when the picked file is " +
+          "over the import size limit.",
+        placeholders: {
+          fileName: "The picked file's name, e.g. 'episode-101.vtt'. Never translate it.",
+          limit: "The size limit, already formatted, e.g. '95.0 MB'. Never translate it.",
+        },
+      },
       "editor.timeline.changeVideo": {
         description:
           "The same toolbar button when a video is already attached; it replaces the " +
@@ -10702,12 +10710,6 @@ export const editor = defineNamespace({
           "track for the first time.",
         placeholders: { count: "Number of cues that will be imported." },
       },
-      "editor.timeline.importTooLargeText": {
-        description:
-          "Inline refusal shown in the dialog when the picked text file is over " +
-          "the size limit. '10 MB' is a unit and a number; keep it as it is.",
-        placeholders: { fileName: "Name of the file the user picked. Content — never translate it." },
-      },
       "editor.timeline.subtitleSourceDescription": {
         description:
           "Explanatory line under the Extract subtitles dialog's title: where the " +
@@ -10954,12 +10956,6 @@ export const editor = defineNamespace({
           "Confirm button of the characters dialog once a sheet has been read and " +
           "accepted, naming how many lines it will write to.",
         placeholders: { count: "Number of lines that will be given a character." },
-      },
-      "editor.timeline.importTooLargeSheet": {
-        description:
-          "Inline refusal shown in the dialog when the picked spreadsheet is over " +
-          "the size limit. '10 MB' is a unit and a number; keep it as it is.",
-        placeholders: { fileName: "Name of the file the user picked. Content — never translate it." },
       },
       "editor.timeline.characterCheckSpeakerSettled": {
         description:

@@ -445,6 +445,22 @@ export function __setTranscribeAudioForTests(fn: typeof transcribeAudio | null):
 }
 
 /**
+ * AQU-2375: how one row's transcription ended, so a batch can count what
+ * landed and what did not. The per-cell status store cannot: an imported
+ * recording's rows share ONE source-clip audioId, so its status is per clip.
+ *
+ *   done     — the transcript (or a take's word timings) was stored; `words`
+ *              may be 0 for a stretch with no speech in it.
+ *   failed   — nothing was stored, for the reason in `message`.
+ *   skipped  — nothing to do: no recording on the row, or the on-device
+ *              model's consent was declined.
+ */
+export type TranscribeRowOutcome =
+  | { kind: "done"; words: number }
+  | { kind: "failed"; message: string }
+  | { kind: "skipped" }
+
+/**
  * Transcribe a single cell's selected audio. Drives the per-cell
  * transcribe-status store (so CellTranscribeBadge shows progress), then
  * re-emits a cell.audio.attach with the word-level timings so they land in
@@ -452,11 +468,19 @@ export function __setTranscribeAudioForTests(fn: typeof transcribeAudio | null):
  *
  * Returns the word count on success, or 0 if the cell has no audio / consent
  * was denied. Never throws — errors are stored in transcribe-status.
+ * A batch that needs to tell a failure from an empty row uses
+ * `transcribeCellOutcome`.
  */
 export async function transcribeCell(args: TranscribeCellArgs): Promise<number> {
+  const outcome = await transcribeCellOutcome(args)
+  return outcome.kind === "done" ? outcome.words : 0
+}
+
+/** `transcribeCell`, saying how the row ended (AQU-2375). Never throws. */
+export async function transcribeCellOutcome(args: TranscribeCellArgs): Promise<TranscribeRowOutcome> {
   const { cell, session, projectId, language, slot: slotArg, targetLang, askAgain, prerecognised } = args
   const audioId = cell.selectedAudioId
-  if (!audioId) return 0
+  if (!audioId) return { kind: "skipped" }
 
   // Early guards write an error status instead of returning silently — the
   // Recording tab renders these via CellTranscribeBadge, and a bare `return 0`
@@ -464,14 +488,16 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
   const attachment = cell.attachments?.[audioId]
   const attachmentUrl = attachment?.url
   if (!attachmentUrl) {
-    setTranscribeStatus(audioId, { kind: "error", message: t("audio.error.noDownloadableAudio") })
-    return 0
+    const message = t("audio.error.noDownloadableAudio")
+    setTranscribeStatus(audioId, { kind: "error", message })
+    return { kind: "failed", message }
   }
 
   const frontier = parseFrontierAudioUrl(attachmentUrl)
   if (!frontier) {
-    setTranscribeStatus(audioId, { kind: "error", message: t("audio.error.notTranscribableLocation") })
-    return 0
+    const message = t("audio.error.notTranscribableLocation")
+    setTranscribeStatus(audioId, { kind: "error", message })
+    return { kind: "failed", message }
   }
 
   // AQU-646 / SUB-29: is this the SOURCE CLIP shared by the file's rows, or
@@ -491,8 +517,9 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
   // sign-in guard moves below the cache probe.
   const cached = clipHeld ? null : await audioCacheGet(frontier.audioId, frontier.ext)
   if (!clipHeld && !cached && !session?.jwt) {
-    setTranscribeStatus(audioId, { kind: "error", message: t("audio.error.signInToTranscribe") })
-    return 0
+    const message = t("audio.error.signInToTranscribe")
+    setTranscribeStatus(audioId, { kind: "error", message })
+    return { kind: "failed", message }
   }
 
   setTranscribeStatus(audioId, { kind: "loading", loaded: 0, total: 0, file: "" })
@@ -676,16 +703,14 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
       wordCount,
       durationMs: Date.now() - t0,
     })
-    return wordCount
+    return { kind: "done", words: wordCount }
   } catch (e) {
     if (e instanceof AiModelConsentDeniedError) {
       setTranscribeStatus(audioId, { kind: "idle" })
-      return 0
+      return { kind: "skipped" }
     }
-    setTranscribeStatus(audioId, {
-      kind: "error",
-      message: e instanceof Error ? e.message : String(e),
-    })
-    return 0
+    const message = e instanceof Error ? e.message : String(e)
+    setTranscribeStatus(audioId, { kind: "error", message })
+    return { kind: "failed", message }
   }
 }

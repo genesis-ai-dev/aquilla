@@ -104,7 +104,7 @@ export async function runBatchJobs<T>(
 
 import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
-import { transcribeCell, type TranscriptionResult } from "./transcribe"
+import { transcribeCellOutcome, type TranscribeRowOutcome, type TranscriptionResult } from "./transcribe"
 import { planTranscriptionChunks, transcribeChunk, type TranscriptionChunk } from "./transcribe-chunked"
 import { sourceClipWindowSeconds } from "./transcribe-hosted"
 import { pinSharedClipPcm } from "./shared-clip-pcm"
@@ -114,6 +114,7 @@ import { batchAudioSeconds, zeroShotBatchCostLine } from "./zero-shot-batch"
 import { confirmZeroShotBatch } from "./omni-warmup-toast"
 import { audioIdSeededWith } from "./upload"
 import { getTranscribeStatus } from "./transcribe-status"
+import { startStoredTranscribeRun, type StoredTranscribeRun, type TranscribeRunHandle, type TranscribeRunKind } from "./transcribe-runs"
 import { generateCellVoice } from "./voice-generate-helpers"
 import { ttsStatusKey, getTtsStatus } from "./tts"
 import type { ProjectRecord } from "@/lib/parsers/types"
@@ -184,7 +185,56 @@ export interface TranscribeAllArgs {
   /** AQU-1681: the hosted limit paused the batch until this time (epoch ms);
    *  null when it carries on. For a caller showing its own progress. */
   onWaiting?: (untilMs: number | null) => void
+  /**
+   * AQU-2375: keep this run so a page reload does not end it. The page that
+   * next opens `fileId` carries it on (see transcribe-runs.ts). Omitted, the
+   * run lives and dies with the page, as before.
+   */
+  keep?: { fileId: string; fileName: string; kind: TranscribeRunKind }
+  /**
+   * AQU-2375: this run carries on a kept run that a reload stopped. `cells`
+   * are its rows still to do; what already landed or failed is in `stored`,
+   * so the progress and the report count the whole run. The run's own cost
+   * choice is reused: nobody is asked again.
+   */
+  carryOn?: {
+    stored: StoredTranscribeRun
+    handle: TranscribeRunHandle
+    /** The rows that failed before the reload, as this page has them, so the
+     *  report's Retry can reach them too. */
+    failedCells?: CellData[]
+  }
 }
+
+/** AQU-2375: one row that did not transcribe, and why. `cell` is there for a
+ *  row of this page's run; a row that failed before a reload has only its id. */
+export interface TranscribeRowFailure {
+  cellId: string
+  message: string
+  cell?: CellData
+}
+
+/**
+ * AQU-2375: what a run did, counted per row — so the end of a run can say how
+ * many landed and how many did not, instead of one flat "Transcribed N".
+ * A run that carried on after a reload counts the whole run.
+ */
+export interface TranscribeRunReport {
+  /** Rows the run set out to transcribe. 0 when there was nothing to do or
+   *  the cost was declined (`started` is then false). */
+  total: number
+  /** Rows whose transcript (or word timings) landed. */
+  transcribed: number
+  /** Rows that failed. */
+  failed: TranscribeRowFailure[]
+  /** Rows never reached, because the run was cancelled. */
+  notRun: number
+  cancelled: boolean
+  /** False when nothing ran at all. */
+  started: boolean
+}
+
+const NOTHING_RAN: TranscribeRunReport = { total: 0, transcribed: 0, failed: [], notRun: 0, cancelled: false, started: false }
 
 /** AQU-928: is there any audio on this cell to run ASR over? The first gate of
  *  `needsTranscription`, split out because a forced (user-selected) run needs
@@ -221,8 +271,8 @@ export function isSourceSegmentSelected(c: CellData): boolean {
  * Run ASR on every cell that needs it (see `needsTranscription`).
  * Uses the same per-cell `transcribeCell` path the per-cell badge uses.
  */
-export async function runTranscribeAll(args: TranscribeAllArgs): Promise<void> {
-  const { cells, projectId, session } = args
+export async function runTranscribeAll(args: TranscribeAllArgs): Promise<TranscribeRunReport> {
+  const { cells, projectId, session, carryOn } = args
   const targetLanguage = args.targetLanguage ?? args.language
 
   const targets = cells.filter((c) => {
@@ -236,23 +286,66 @@ export async function runTranscribeAll(args: TranscribeAllArgs): Promise<void> {
     return true
   })
 
-  if (targets.length === 0) return
+  // AQU-2375: carrying a run on counts what landed before the reload.
+  const priorDone = carryOn ? carryOn.stored.doneIds.length : 0
+  const priorFailed: TranscribeRowFailure[] = carryOn
+    ? carryOn.stored.failed
+        .filter((f) => !targets.some((c) => c.id === f.cellId))
+        .map((f) => {
+          const cell = carryOn.failedCells?.find((c) => c.id === f.cellId)
+          return cell ? { ...f, cell } : { ...f }
+        })
+    : []
+  const total = carryOn ? Math.max(carryOn.stored.cellIds.length, priorDone + priorFailed.length + targets.length) : targets.length
 
-  // A zero-shot batch shows its cost first; a single run never does.
-  let forceAutoModel = false
-  if (session && usesHostedTranscription(session, projectId)
+  if (targets.length === 0) {
+    if (!carryOn) return NOTHING_RAN
+    carryOn.handle.end()
+    return { total, transcribed: priorDone, failed: priorFailed, notRun: total - priorDone - priorFailed.length, cancelled: false, started: true }
+  }
+
+  // A zero-shot batch shows its cost first; a single run never does. A run
+  // carried on after a reload was already agreed to, so it keeps its choice.
+  let forceAutoModel = carryOn?.stored.forceAutoModel ?? false
+  if (!carryOn && session && usesHostedTranscription(session, projectId)
     && getTranscriptionModel(session.username) === "omni-zs") {
     const costLine = await zeroShotBatchCostLine({
       jwt: session.jwt, projectId, orgId: args.orgId, audioSec: batchAudioSeconds(targets),
     })
     const choice = await (args.confirmZeroShot ?? confirmZeroShotBatch)({ count: targets.length, costLine })
-    if (choice === "cancel") return
+    if (choice === "cancel") return NOTHING_RAN
     forceAutoModel = choice === "auto"
   }
 
+  // AQU-2375: keep the run (or the one carried on) until it ends.
+  const kept: TranscribeRunHandle | null = carryOn?.handle ?? (args.keep
+    ? startStoredTranscribeRun({
+        id: `${args.keep.fileId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+        projectId,
+        fileId: args.keep.fileId,
+        fileName: args.keep.fileName,
+        kind: args.keep.kind,
+        cellIds: targets.map((c) => c.id),
+        force: Boolean(args.force),
+        ...(forceAutoModel ? { forceAutoModel } : {}),
+        ...(args.sourceLanguage ? { sourceLanguage: args.sourceLanguage } : {}),
+        ...(targetLanguage ? { targetLanguage } : {}),
+        ...(args.targetLang ? { targetLang: args.targetLang } : {}),
+      })
+    : null)
+
+  const outcomes = new Map<string, TranscribeRowOutcome>()
+  const noteRow = (cell: CellData, outcome: TranscribeRowOutcome) => {
+    // Cancel ends a row that was waiting out the limit by throwing, which
+    // the row reports as a failure; it was stopped, not failed.
+    const ended: TranscribeRowOutcome = outcome.kind === "failed" && _transcribeCancelFlag ? { kind: "skipped" } : outcome
+    outcomes.set(cell.id, ended)
+    kept?.row(cell.id, ended)
+  }
+
   _transcribeCancelFlag = false
-  args.onProgress?.(0, targets.length)
-  let completed = 0
+  args.onProgress?.(priorDone, total)
+  let completed = priorDone
 
   // AQU-646/SUB-29: language follows the audio by PROVENANCE — source
   // segments are source speech; every take (incl. dub takes on media cells)
@@ -261,7 +354,7 @@ export async function runTranscribeAll(args: TranscribeAllArgs): Promise<void> {
     isSourceSegmentSelected(cell) ? (args.sourceLanguage ?? targetLanguage) : targetLanguage
   const waitForLimit = (retryAfterSeconds: number) => waitOutTranscriptionLimit(retryAfterSeconds, args.onWaiting)
   const transcribeRow = (cell: CellData, prerecognised?: TranscriptionResult) =>
-    transcribeCell({
+    transcribeCellOutcome({
       cell,
       session,
       projectId,
@@ -296,18 +389,22 @@ export async function runTranscribeAll(args: TranscribeAllArgs): Promise<void> {
   try {
     await runBatchJobs(
       jobs,
-      (job) =>
-        "chunk" in job
-          ? transcribeChunk(job.chunk, {
-              session: session!,
-              projectId,
-              language: languageFor(job.chunk.rows[0]!.cell),
-              onRateLimited: waitForLimit,
-              onWarming: waitForLimit,
-              transcribeRow,
-              isCancelled: () => _transcribeCancelFlag,
-            })
-          : transcribeRow(job.cell),
+      async (job) => {
+        if ("chunk" in job) {
+          const byRow = await transcribeChunk(job.chunk, {
+            session: session!,
+            projectId,
+            language: languageFor(job.chunk.rows[0]!.cell),
+            onRateLimited: waitForLimit,
+            onWarming: waitForLimit,
+            transcribeRow,
+            isCancelled: () => _transcribeCancelFlag,
+          })
+          for (const { cell } of job.chunk.rows) noteRow(cell, byRow.get(cell.id) ?? { kind: "skipped" })
+        } else {
+          noteRow(job.cell, await transcribeRow(job.cell))
+        }
+      },
       {
         kind: "transcribe",
         isCancelled: () => _transcribeCancelFlag,
@@ -316,12 +413,30 @@ export async function runTranscribeAll(args: TranscribeAllArgs): Promise<void> {
           // The per-cell badge handles its own state; this is for whoever is
           // watching the whole batch rather than one line.
           completed += weightOf(job)
-          args.onProgress?.(completed, targets.length)
+          args.onProgress?.(completed, total)
         },
       },
     )
   } finally {
     unpin()
+    // Ended, cancelled or thrown: the run is over, so nothing carries it on.
+    kept?.end()
+  }
+
+  const failed: TranscribeRowFailure[] = [...priorFailed]
+  let transcribed = priorDone
+  for (const cell of targets) {
+    const outcome = outcomes.get(cell.id)
+    if (outcome?.kind === "done") transcribed++
+    else if (outcome?.kind === "failed") failed.push({ cellId: cell.id, message: outcome.message, cell })
+  }
+  return {
+    total,
+    transcribed,
+    failed,
+    notRun: Math.max(0, total - transcribed - failed.length),
+    cancelled: _transcribeCancelFlag,
+    started: true,
   }
 }
 

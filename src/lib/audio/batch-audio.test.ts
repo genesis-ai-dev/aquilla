@@ -19,7 +19,7 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 // ---------------------------------------------------------------------------
 
 vi.mock("./transcribe", () => ({
-  transcribeCell: vi.fn(async () => 5),
+  transcribeCellOutcome: vi.fn(async () => ({ kind: "done" as const, words: 5 })),
 }))
 
 vi.mock("./voice-generate-helpers", () => ({
@@ -72,14 +72,14 @@ describe("runTranscribeAll", () => {
   })
 
   it("skips cells without selectedAudioId", async () => {
-    const { transcribeCell } = await import("./transcribe")
+    const { transcribeCellOutcome } = await import("./transcribe")
     const cells = [makeCell({ selectedAudioId: undefined })]
     await runTranscribeAll({ cells, projectId: "proj1", session: mockSession })
-    expect(transcribeCell).not.toHaveBeenCalled()
+    expect(transcribeCellOutcome).not.toHaveBeenCalled()
   })
 
   it("skips cells that already have timings", async () => {
-    const { transcribeCell } = await import("./transcribe")
+    const { transcribeCellOutcome } = await import("./transcribe")
     const cells = [
       makeCell({
         selectedAudioId: "a1",
@@ -88,11 +88,11 @@ describe("runTranscribeAll", () => {
       }),
     ]
     await runTranscribeAll({ cells, projectId: "proj1", session: mockSession })
-    expect(transcribeCell).not.toHaveBeenCalled()
+    expect(transcribeCellOutcome).not.toHaveBeenCalled()
   })
 
-  it("calls transcribeCell once per eligible cell", async () => {
-    const { transcribeCell } = await import("./transcribe")
+  it("calls transcribeCellOutcome once per eligible cell", async () => {
+    const { transcribeCellOutcome } = await import("./transcribe")
     const cells = [
       makeCell({
         id: "c1",
@@ -106,7 +106,7 @@ describe("runTranscribeAll", () => {
       }),
     ]
     await runTranscribeAll({ cells, projectId: "proj1", session: mockSession })
-    expect(transcribeCell).toHaveBeenCalledTimes(2)
+    expect(transcribeCellOutcome).toHaveBeenCalledTimes(2)
   })
 
   it("reflects done count in progress store when complete", async () => {
@@ -125,7 +125,7 @@ describe("runTranscribeAll", () => {
   it("hands every cell the lane being worked in (AQU-1978)", async () => {
     // Each take's timings ride a re-attach that deselects within the lane it
     // names; with no lane that was the `''` lane, on every line of the batch.
-    const { transcribeCell } = await import("./transcribe")
+    const { transcribeCellOutcome } = await import("./transcribe")
     const cells = [
       makeCell({
         id: "c1",
@@ -134,7 +134,7 @@ describe("runTranscribeAll", () => {
       }),
     ]
     await runTranscribeAll({ cells, projectId: "proj1", session: mockSession, targetLanguage: "Spanish", targetLang: "es-lane" })
-    expect(transcribeCell).toHaveBeenCalledWith(
+    expect(transcribeCellOutcome).toHaveBeenCalledWith(
       expect.objectContaining({ language: "Spanish", targetLang: "es-lane" }),
     )
   })
@@ -159,48 +159,48 @@ describe("runTranscribeAll — force (an explicitly chosen scope)", () => {
     })
 
   it("re-transcribes a cell that already has timings", async () => {
-    const { transcribeCell } = await import("./transcribe")
+    const { transcribeCellOutcome } = await import("./transcribe")
     const cells = [
       withAudio("c1", "a1", { audioTimings: { a1: [{ word: "hi", start: 0, end: 2, t0: 0, t1: 0.5 }] } }),
     ]
     await runTranscribeAll({ cells, projectId: "proj1", session: mockSession, force: true })
-    expect(transcribeCell).toHaveBeenCalledTimes(1)
+    expect(transcribeCellOutcome).toHaveBeenCalledTimes(1)
   })
 
   it("re-transcribes a media section that already has a transcript", async () => {
-    const { transcribeCell } = await import("./transcribe")
+    const { transcribeCellOutcome } = await import("./transcribe")
     const cells = [withAudio("c1", "src-a1", { medium: "media", transcription: "already here" })]
     await runTranscribeAll({ cells, projectId: "proj1", session: mockSession, force: true })
-    expect(transcribeCell).toHaveBeenCalledTimes(1)
+    expect(transcribeCellOutcome).toHaveBeenCalledTimes(1)
   })
 
   it("still skips cells with no audio to transcribe", async () => {
-    const { transcribeCell } = await import("./transcribe")
+    const { transcribeCellOutcome } = await import("./transcribe")
     const cells = [makeCell({ id: "c1", selectedAudioId: undefined })]
     await runTranscribeAll({ cells, projectId: "proj1", session: mockSession, force: true })
-    expect(transcribeCell).not.toHaveBeenCalled()
+    expect(transcribeCellOutcome).not.toHaveBeenCalled()
   })
 
   it("still skips a cell whose transcription is already in flight", async () => {
-    const { transcribeCell } = await import("./transcribe")
+    const { transcribeCellOutcome } = await import("./transcribe")
     const { getTranscribeStatus } = await import("./transcribe-status")
     vi.mocked(getTranscribeStatus).mockReturnValue({ kind: "transcribing" } as ReturnType<typeof getTranscribeStatus>)
     await runTranscribeAll({
       cells: [withAudio("c1", "a1")], projectId: "proj1", session: mockSession, force: true,
     })
-    expect(transcribeCell).not.toHaveBeenCalled()
+    expect(transcribeCellOutcome).not.toHaveBeenCalled()
     vi.mocked(getTranscribeStatus).mockReturnValue({ kind: "idle" } as ReturnType<typeof getTranscribeStatus>)
   })
 
   it("runs ONLY the cells it was given — the rest of the file is untouched", async () => {
-    const { transcribeCell } = await import("./transcribe")
+    const { transcribeCellOutcome } = await import("./transcribe")
     // The caller has already narrowed to the selection; the batch must not
     // widen it back out to every cell it could find work for.
     await runTranscribeAll({
       cells: [withAudio("c2", "a2")], projectId: "proj1", session: mockSession, force: true,
     })
-    expect(transcribeCell).toHaveBeenCalledTimes(1)
-    expect(vi.mocked(transcribeCell).mock.calls[0][0].cell.id).toBe("c2")
+    expect(transcribeCellOutcome).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(transcribeCellOutcome).mock.calls[0][0].cell.id).toBe("c2")
   })
 })
 
@@ -295,7 +295,7 @@ describe("runTranscribeAll — language follows the audio (AQU-646)", () => {
   })
 
   it("media segments get sourceLanguage, recorded takes get targetLanguage", async () => {
-    const { transcribeCell } = await import("./transcribe")
+    const { transcribeCellOutcome } = await import("./transcribe")
     const cells = [
       makeCell({ id: "m1", medium: "media", selectedAudioId: "a1", attachments: att("a1") }),
       makeCell({ id: "t1", selectedAudioId: "a2", attachments: att("a2") }),
@@ -307,7 +307,7 @@ describe("runTranscribeAll — language follows the audio (AQU-646)", () => {
       sourceLanguage: "fra",
       targetLanguage: "spa",
     })
-    const calls = (transcribeCell as unknown as ReturnType<typeof vi.fn>).mock.calls.map(
+    const calls = (transcribeCellOutcome as unknown as ReturnType<typeof vi.fn>).mock.calls.map(
       (c) => c[0] as { cell: CellData; language?: string },
     )
     expect(calls.find((c) => c.cell.id === "m1")?.language).toBe("fra")
@@ -315,10 +315,10 @@ describe("runTranscribeAll — language follows the audio (AQU-646)", () => {
   })
 
   it("media segments fall back to the target language when no sourceLanguage is given", async () => {
-    const { transcribeCell } = await import("./transcribe")
+    const { transcribeCellOutcome } = await import("./transcribe")
     const cells = [makeCell({ id: "m1", medium: "media", selectedAudioId: "a1", attachments: att("a1") })]
     await runTranscribeAll({ cells, projectId: "proj1", session: mockSession, language: "spa" })
-    const call = (transcribeCell as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0] as { language?: string }
+    const call = (transcribeCellOutcome as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0] as { language?: string }
     expect(call.language).toBe("spa")
   })
 })
@@ -393,17 +393,17 @@ describe("runTranscribeAll — a minute at a time (AQU-1681)", () => {
   beforeEach(async () => {
     vi.clearAllMocks()
     const chunked = await import("./transcribe-chunked")
-    vi.spyOn(chunked, "transcribeChunk").mockResolvedValue(undefined)
+    vi.spyOn(chunked, "transcribeChunk").mockResolvedValue(new Map())
   })
 
   it("sends a hosted batch's rows as one minute, counting every row toward progress", async () => {
-    const { transcribeCell } = await import("./transcribe")
+    const { transcribeCellOutcome } = await import("./transcribe")
     const { transcribeChunk } = await import("./transcribe-chunked")
     const seen: [number, number][] = []
     await runTranscribeAll({ cells: rows(), projectId: "p1", session: mockSession, onProgress: (d, t) => seen.push([d, t]) })
     expect(vi.mocked(transcribeChunk)).toHaveBeenCalledTimes(1)
     expect(vi.mocked(transcribeChunk).mock.calls[0]![0].rows.map((r) => r.cell.id)).toEqual(["r1", "r2", "r3"])
-    expect(transcribeCell).not.toHaveBeenCalled()
+    expect(transcribeCellOutcome).not.toHaveBeenCalled()
     expect(seen).toEqual([[0, 3], [3, 3]])
   })
 
@@ -415,7 +415,7 @@ describe("runTranscribeAll — a minute at a time (AQU-1681)", () => {
   })
 
   it("packs only as much as the account's model takes in one request", async () => {
-    const { transcribeCell } = await import("./transcribe")
+    const { transcribeCellOutcome } = await import("./transcribe")
     const { transcribeChunk } = await import("./transcribe-chunked")
     const { setTranscriptionModel } = await import("./transcription-model")
     const twelve = () => [shared("r1", 0, 12_000), shared("r2", 13_000, 25_000), shared("r3", 26_000, 38_000)]
@@ -427,16 +427,16 @@ describe("runTranscribeAll — a minute at a time (AQU-1681)", () => {
     }
     // 12 + 0.5 + 12 s fits Omnilingual's 30 s; the third row would not.
     expect(vi.mocked(transcribeChunk).mock.calls.map(([c]) => c.rows.map((r) => r.cell.id))).toEqual([["r1", "r2"]])
-    expect(vi.mocked(transcribeCell).mock.calls.map(([a]) => a.cell.id)).toEqual(["r3"])
+    expect(vi.mocked(transcribeCellOutcome).mock.calls.map(([a]) => a.cell.id)).toEqual(["r3"])
   })
 
   it("stays row by row for a chosen selection and for on-device Whisper", async () => {
-    const { transcribeCell } = await import("./transcribe")
+    const { transcribeCellOutcome } = await import("./transcribe")
     const { transcribeChunk } = await import("./transcribe-chunked")
     await runTranscribeAll({ cells: rows(), projectId: "p1", session: mockSession, force: true })
     await runTranscribeAll({ cells: rows(), projectId: "p1", session: null })
     expect(transcribeChunk).not.toHaveBeenCalled()
-    expect(transcribeCell).toHaveBeenCalledTimes(6)
+    expect(transcribeCellOutcome).toHaveBeenCalledTimes(6)
   })
 
   it("waits out the hosted limit, showing when it carries on, and stops waiting on Cancel", async () => {
@@ -446,6 +446,7 @@ describe("runTranscribeAll — a minute at a time (AQU-1681)", () => {
     vi.mocked(transcribeChunk).mockImplementation(async (_chunk, ctx) => {
       waited = ctx.onRateLimited!(420)
       await waited.catch(() => {})
+      return new Map()
     })
     const onWaiting = vi.fn()
     const run = runTranscribeAll({ cells: rows(), projectId: "p1", session: mockSession, onWaiting })
@@ -468,6 +469,7 @@ describe("runTranscribeAll — a minute at a time (AQU-1681)", () => {
     primeSharedClipPcm(`${CLIP}.m4a`, new Float32Array(16))
     vi.mocked(transcribeChunk).mockImplementation(async () => {
       await new Promise((resolve) => setTimeout(resolve, 20 * 60_000))
+      return new Map()
     })
     const run = runTranscribeAll({ cells: rows(), projectId: "p1", session: mockSession })
     await vi.advanceTimersByTimeAsync(19 * 60_000)
@@ -477,5 +479,84 @@ describe("runTranscribeAll — a minute at a time (AQU-1681)", () => {
     await vi.advanceTimersByTimeAsync(SHARED_CLIP_IDLE_MS)
     expect(hasSharedClipPcm(`${CLIP}.m4a`)).toBe(false)
     vi.useRealTimers()
+  })
+})
+
+// ── AQU-2375: a run counts its rows, and is kept so a reload doesn't end it ──
+
+describe("runTranscribeAll reports each row (AQU-2375)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+  })
+
+  const take = (id: string) => makeCell({
+    id,
+    selectedAudioId: `${id}-take`,
+    attachments: { [`${id}-take`]: { type: "audio", url: `frontier-audio://${id}-take.webm` } } as unknown as CellData["attachments"],
+  })
+
+  it("counts what landed and what failed, instead of one flat success", async () => {
+    const { transcribeCellOutcome } = await import("./transcribe")
+    vi.mocked(transcribeCellOutcome).mockImplementation(async ({ cell }) =>
+      cell.id === "c2" ? { kind: "failed", message: "HTTP 500" } : { kind: "done", words: 3 })
+    const report = await runTranscribeAll({ cells: [take("c1"), take("c2"), take("c3")], projectId: "p1", session: null })
+    expect(report).toMatchObject({ total: 3, transcribed: 2, notRun: 0, cancelled: false, started: true })
+    expect(report.failed.map((f) => [f.cellId, f.message, f.cell?.id])).toEqual([["c2", "HTTP 500", "c2"]])
+  })
+
+  it("says nothing ran when there was nothing to transcribe", async () => {
+    const report = await runTranscribeAll({ cells: [makeCell()], projectId: "p1", session: null })
+    expect(report.started).toBe(false)
+  })
+
+  it("keeps the run while it goes and forgets it when it ends", async () => {
+    const { transcribeCellOutcome } = await import("./transcribe")
+    const { __storedTranscribeRuns } = await import("./transcribe-runs")
+    let seenWhileRunning = 0
+    vi.mocked(transcribeCellOutcome).mockImplementation(async () => {
+      seenWhileRunning = __storedTranscribeRuns().length
+      return { kind: "done", words: 1 }
+    })
+    await runTranscribeAll({
+      cells: [take("c1")], projectId: "p1", session: null,
+      keep: { fileId: "f1", fileName: "Session 4.mp3", kind: "all" },
+    })
+    expect(seenWhileRunning).toBe(1)
+    expect(__storedTranscribeRuns()).toEqual([])
+  })
+
+  it("carries a stopped run on: counts what landed before, and reports the whole run", async () => {
+    const { transcribeCellOutcome } = await import("./transcribe")
+    vi.mocked(transcribeCellOutcome).mockResolvedValue({ kind: "done", words: 2 })
+    const handle = { id: "run-1", row: vi.fn(), end: vi.fn() }
+    const stored = {
+      id: "run-1", projectId: "p1", fileId: "f1", fileName: "a.mp3", kind: "all" as const,
+      cellIds: ["c1", "c2", "c3", "c4"], doneIds: ["c1"], failed: [{ cellId: "c2", message: "HTTP 500" }],
+      force: false, startedAt: 0, beatAt: 0, tab: "old",
+    }
+    const progress: [number, number][] = []
+    const report = await runTranscribeAll({
+      cells: [take("c3"), take("c4")], projectId: "p1", session: null,
+      carryOn: { stored, handle, failedCells: [take("c2")] },
+      onProgress: (d, t) => progress.push([d, t]),
+    })
+    expect(progress[0]).toEqual([1, 4])
+    expect(progress.at(-1)).toEqual([3, 4])
+    expect(report).toMatchObject({ total: 4, transcribed: 3 })
+    expect(report.failed.map((f) => [f.cellId, f.cell?.id])).toEqual([["c2", "c2"]])
+    expect(handle.row).toHaveBeenCalledTimes(2)
+    expect(handle.end).toHaveBeenCalledTimes(1)
+  })
+
+  it("a row stopped by Cancel is not counted as failed", async () => {
+    const { transcribeCellOutcome } = await import("./transcribe")
+    vi.mocked(transcribeCellOutcome).mockImplementation(async () => {
+      cancelBatchTranscribe()
+      return { kind: "failed", message: "transcription cancelled" }
+    })
+    const report = await runTranscribeAll({ cells: [take("c1")], projectId: "p1", session: null })
+    expect(report.failed).toEqual([])
+    expect(report.cancelled).toBe(true)
   })
 })

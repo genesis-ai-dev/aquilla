@@ -5,7 +5,9 @@ import { importedMediaType, mediaHasPicture } from "./media-picture"
 
 // ── Tiny containers, built byte by byte ─────────────────────────────────────
 
-function box(type: string, ...payload: Uint8Array[]): Uint8Array {
+type Bytes = Uint8Array<ArrayBuffer>
+
+function box(type: string, ...payload: Bytes[]): Bytes {
   const size = 8 + payload.reduce((n, p) => n + p.length, 0)
   const out = new Uint8Array(size)
   new DataView(out.buffer).setUint32(0, size)
@@ -27,7 +29,7 @@ function mp4(handlers: string[], moovFirst = true): Blob {
 }
 
 /** EBML element with a one-byte size (payloads here stay under 127 bytes). */
-function el(id: number[], ...payload: Uint8Array[]): Uint8Array {
+function el(id: number[], ...payload: Bytes[]): Bytes {
   const size = payload.reduce((n, p) => n + p.length, 0)
   const out = new Uint8Array(id.length + 1 + size)
   out.set(id, 0)

@@ -75,7 +75,7 @@ vi.mock("@/lib/audio/upload", async (importOriginal) => ({
 }))
 vi.mock("@/lib/audio/bytes-cache", () => ({ audioCacheGet: vi.fn(async () => null), audioCachePutBlob: vi.fn(async () => {}) }))
 vi.mock("@/lib/audio/project-audio-state", () => ({ markProjectHasAudioDataSoon: vi.fn() }))
-vi.mock("@/lib/audio/transcribe-status", () => ({ setTranscribeStatus: vi.fn() }))
+vi.mock("@/lib/audio/transcribe-status", () => ({ setTranscribeStatus: vi.fn(), waitAtTranscribeLimit: () => async () => {} }))
 const transcribeSpy = vi.hoisted(() => vi.fn(async (..._args: unknown[]) => {}))
 vi.mock("@/lib/audio/transcribe", () => ({ transcribeCell: (...args: unknown[]) => transcribeSpy(...args) }))
 const activeAudio = vi.hoisted(() => ({ value: null as null | { isPlaying: () => boolean; pause: () => void } }))
@@ -189,6 +189,8 @@ describe("the take after Stop", () => {
     await waitFor(() => expect(transcribeSpy).toHaveBeenCalled())
     const { cell } = transcribeSpy.mock.calls.at(-1)![0] as { cell: { selectedAudioId: string; attachments: Record<string, unknown> } }
     expect(cell.attachments[cell.selectedAudioId]).toMatchObject({ trimStartMs: 700, trimEndMs: 2960 })
+    // AQU-2426: past the hourly limit the take waits and transcribes by itself.
+    expect(typeof (transcribeSpy.mock.calls.at(-1)![0] as { onRateLimited?: unknown }).onRateLimited).toBe("function")
   })
 
   it("saves exactly today's window when the lines are left alone", async () => {

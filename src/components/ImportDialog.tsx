@@ -2533,6 +2533,8 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
   const [mediaReview, setMediaReview] = useState<{
     id: string
     mediaName: string
+    /** The recording or film itself, for the frame check's rate. */
+    media: File
     durationMs?: number
     sources: MediaTextSourceOption[]
   } | null>(null)
@@ -2756,7 +2758,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
           if (parseController.signal.aborted) return null
           return new Promise(resolve => {
             mediaReviewResolver.current = resolve
-            setMediaReview({ id: uuidv7(), mediaName: media.name, sources, durationMs })
+            setMediaReview({ id: uuidv7(), mediaName: media.name, media, sources, durationMs })
           })
         }, async media => {
           if (!/\.(mp4|m4a)$/i.test(media.name)) return []
@@ -2799,8 +2801,11 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
 
           // AQU-2197: an update of a file with a linked film reads that film's
           // frame rate for the frame check.
+          // A file ⋯ Re-import names its file up front, with no collision
+          // answer to read it from.
           const filmUrls = new Map(remainingResults.flatMap((result) => {
-            const id = reimportKeysFor(result).map((key) => fileIds?.get(key)).find(Boolean)
+            const id = reimportTarget?.fileId
+              ?? reimportKeysFor(result).map((key) => fileIds?.get(key)).find(Boolean)
             const url = id ? existingFiles?.find((file) => file.id === id)?.coreMediaUrl : null
             return url ? [[result.name, url] as const] : []
           }))
@@ -3108,7 +3113,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
     }
     return <MediaImportPreviewDialog key={mediaReview.id}
       mediaName={mediaReview.mediaName} sources={mediaReview.sources}
-      durationMs={mediaReview.durationMs}
+      durationMs={mediaReview.durationMs} frameCheck={{ filmFile: mediaReview.media }}
       onConfirm={source => finishReview(source)} onCancel={() => finishReview(null)} />
   }
   if (variant === "gdrive" && !importing) {

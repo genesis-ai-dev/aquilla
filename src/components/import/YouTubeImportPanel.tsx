@@ -148,7 +148,7 @@ export function YouTubeImportPanel({ ctx, onImported }: {
     <>
     {mediaReview && <MediaImportPreviewDialog
       mediaName={mediaReview.file.name} sources={mediaReview.sources}
-      durationMs={mediaReview.durationMs} busy={busy}
+      durationMs={mediaReview.durationMs} busy={busy} frameCheck={{ filmFile: mediaReview.file }}
       confirmLabel={t("importExport.youtube.importMedia")}
       onCancel={() => setMediaReview(null)} onConfirm={mediaTextSource => {
         const active = controller.current

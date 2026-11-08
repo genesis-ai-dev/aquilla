@@ -267,7 +267,10 @@ import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
-import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll, needsTranscription, takesNeedingMeasure, runMeasureAll, type SynthTarget } from "@/lib/audio/batch-audio"
+import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll, needsTranscription, takesNeedingMeasure, runMeasureAll, type SynthTarget, type TranscribeRunReport } from "@/lib/audio/batch-audio"
+import { transcribeRunProgressTitle, transcribeRunToast } from "@/lib/audio/transcribe-report"
+import type { StoredTranscribeRun, TranscribeRunHandle, TranscribeRunKind } from "@/lib/audio/transcribe-runs"
+import { useCarryOnTranscribeRuns } from "@/hooks/useCarryOnTranscribeRuns"
 import { changeCellVoice, changeVoiceBlocker, changeVoiceSourceTake } from "@/lib/audio/change-voice"
 import { planChangeVoiceAll, runChangeVoiceAll } from "@/lib/audio/change-voice-batch"
 import { getTtsStatus, ttsStatusKey } from "@/lib/audio/tts"
@@ -3584,13 +3587,15 @@ export function ProjectWorkspace() {
    * toast says when the hosted limit has paused the run and when it carries
    * on — up to a quarter of an hour that would otherwise look like a hang.
    */
-  const startAutoTranscribe = useCallback((seed: MediaImportSeed, fileName: string) => {
-    if (!project?.id) return
+  /**
+   * AQU-2375: a transcription run's progress toast, kept on screen until the
+   * run's last word. Created lazily (see `startAutoTranscribe`), and it says
+   * when the hosted limit has paused the run.
+   */
+  const makeTranscribeProgressToast = useCallback(() => {
     let toastId: string | null = null
-    let lastTotal = 0
     let title = ""
     let waitingUntil: number | null = null
-    const plural = (n: number) => (n === 1 ? "" : "s")
     const show = () => {
       const description = waitingUntil !== null
         ? t("audio.bulkProgress.waitingForLimit", { time: formatLocaleTime(waitingUntil) })
@@ -3598,8 +3603,152 @@ export function ProjectWorkspace() {
       if (toastId === null) toastId = toast.add({ type: "loading", title, description, timeout: 0 })
       else toast.update(toastId, { type: "loading", title, description })
     }
+    return {
+      progress(next: string) { title = next; show() },
+      waiting(until: number | null) { waitingUntil = until; if (toastId !== null) show() },
+      get id() { return toastId },
+    }
+  }, [t, formatLocaleTime])
+
+  /** AQU-2375: retries the rows of a run that failed; set below, once the
+   *  runner it calls exists. */
+  const retryTranscribeRowsRef = useRef<(cells: CellData[], kind: TranscribeRunKind, fileId: string, fileName: string) => void>(() => {})
+
+  /**
+   * AQU-2375: a run's last word, from its per-row report. Some rows failed:
+   * it says how many landed and how many did not, with a Retry for just
+   * those. Never a flat "Transcribed N" over a run where some failed.
+   * `quiet` (the selected sections, which never had a toast) speaks only
+   * when something went wrong.
+   */
+  const showTranscribeRunEnd = useCallback((
+    report: TranscribeRunReport,
+    opts: { kind: TranscribeRunKind; fileId: string; fileName: string; toastId: string | null; quiet?: boolean },
+  ) => {
+    const said = transcribeRunToast(report, { kind: opts.kind, ...(opts.kind === "import" ? { fileName: opts.fileName } : {}) })
+    if (!said) return
+    if (opts.quiet && said.type === "success") return
+    // A failed row from before a reload has only its id; the Retry finds it
+    // again in the file it is on.
+    const retryCells = report.failed.flatMap((f) => (f.cell ? [f.cell] : []))
+    const actionProps = said.retryLabel && retryCells.length > 0
+      ? {
+          children: said.retryLabel,
+          onClick: () => retryTranscribeRowsRef.current(retryCells, opts.kind, opts.fileId, opts.fileName),
+        }
+      : undefined
+    const content = { type: said.type, title: said.title, description: said.description, actionProps }
+    if (opts.toastId !== null) toast.update(opts.toastId, content)
+    else toast.add(content)
+  }, [])
+
+  /**
+   * AQU-2375: run a transcription batch with its progress toast and an
+   * honest last word, kept so a page reload doesn't end it. Shared by
+   * Transcribe all, the selected sections, a Retry of the rows that failed,
+   * and a run a reload stopped (`carryOn`).
+   */
+  const runTranscriptionReported = useCallback(async (o: {
+    cells: CellData[]
+    kind: TranscribeRunKind
+    /** The file the run belongs to: the page that opens it carries it on. */
+    fileId: string
+    fileName: string
+    force?: boolean
+    carryOn?: { stored: StoredTranscribeRun; handle: TranscribeRunHandle; failedCells?: CellData[] }
+    /** Progress and success unsaid; only trouble is (the selected sections). */
+    quiet?: boolean
+  }) => {
+    if (!project) {
+      o.carryOn?.handle.end()
+      return
+    }
+    const progress = makeTranscribeProgressToast()
+    let first = true
+    const touched = new Set(o.cells.map((c) => c.fileId))
+    let report: TranscribeRunReport
+    try {
+      report = await runBatchTranscribeAll({
+        cells: o.cells,
+        projectId: project.id,
+        session: frontierSession ?? null,
+        orgId: project.orgId,
+        // AQU-646: language follows the audio — media segments are source
+        // speech, recorded takes voice the target text (per-cell in the batch).
+        // A run carried on keeps the languages it was started with.
+        sourceLanguage: o.carryOn?.stored.sourceLanguage ?? activeSourceLanguage,
+        targetLanguage: o.carryOn?.stored.targetLanguage ?? activeLaneTargetLanguage,
+        // AQU-1978: each take's timings are written in the run's lane.
+        ...((o.carryOn ? o.carryOn.stored.targetLang : activeLane) ? { targetLang: (o.carryOn ? o.carryOn.stored.targetLang : activeLane)! } : {}),
+        ...(o.force ? { force: true } : {}),
+        ...(o.carryOn
+          ? { carryOn: o.carryOn }
+          : { keep: { fileId: o.fileId, fileName: o.fileName, kind: o.kind } }),
+        ...(!o.quiet || o.carryOn ? {
+          onProgress: (done: number, total: number) => {
+            progress.progress(transcribeRunProgressTitle({
+              kind: o.kind,
+              ...(o.kind === "import" || o.carryOn ? { fileName: o.fileName } : {}),
+              done,
+              total,
+              carriedOn: Boolean(o.carryOn),
+              first,
+            }))
+            first = false
+          },
+        } : {}),
+        onWaiting: (until) => progress.waiting(until),
+      })
+    } catch (e) {
+      console.warn("[transcribe] batch failed:", e)
+      const reason = e instanceof Error ? e.message : String(e)
+      const failedTitle = t("audio.transcribeRun.failedAll", { reason })
+      if (progress.id !== null) toast.update(progress.id, { type: "error", title: failedTitle, description: undefined })
+      else toast.add({ type: "error", title: failedTitle })
+      return
+    } finally {
+      // AQU-783: the batch enqueues one cell.audio.attach per row but never
+      // revalidates — flush once and pull the file, so every transcript and
+      // timing that landed shows now. EVERY file the run touched: a cue file's
+      // transcripts land in its hidden sibling.
+      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      await refreshOutboxPending()
+      revalidateCells()
+      for (const id of touched) notifyAudioAttachmentsChanged(id)
+    }
+    showTranscribeRunEnd(report, { kind: o.kind, fileId: o.fileId, fileName: o.fileName, toastId: progress.id, quiet: o.quiet })
+  }, [
+    project, frontierSession, activeSourceLanguage, activeLaneTargetLanguage, activeLane,
+    getTokenForProjectFile, refreshOutboxPending, revalidateCells, makeTranscribeProgressToast, showTranscribeRunEnd, t,
+  ])
+  retryTranscribeRowsRef.current = (cells, kind, fileId, fileName) => {
+    // The rows that failed, again, row by row: a Retry is the person asking
+    // for exactly those.
+    void runTranscriptionReported({ cells, kind, fileId, fileName, force: true })
+  }
+
+  const startAutoTranscribe = useCallback((seed: MediaImportSeed, fileName: string) => {
+    if (!project?.id) return
+    const progress = makeTranscribeProgressToast()
+    let first = true
+    // AQU-2375: whatever the run's outcome, the transcripts that landed are
+    // sent and shown, and the last word comes from its per-row report.
+    const finish = async (report: TranscribeRunReport | undefined, lastTotal: number) => {
+      // Transcripts ride outbox-queued cell.audio.attach emits — flush so
+      // they land, then pull the projection with the new source text.
+      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      revalidateCells()
+      // Only if something was actually reported — see the lazy toast above.
+      if (progress.id === null) return
+      showTranscribeRunEnd(
+        report ?? { total: lastTotal, transcribed: lastTotal, failed: [], notRun: 0, cancelled: false, started: true },
+        { kind: "import", fileId: seed.fileId, fileName, toastId: progress.id },
+      )
+    }
+    let lastTotal = 0
     void autoTranscribeImportedMedia({
       seed,
+      fileName,
       projectId: project.id,
       session: frontierSession ?? null,
       sourceLanguage: activeSourceLanguage,
@@ -3609,33 +3758,23 @@ export function ProjectWorkspace() {
         // The zeroth call lands BEFORE the Whisper model is fetched, which on
         // a cold run is most of the minute — so the first thing on screen
         // says what is happening rather than counting from nothing.
-        title =
-          done === 0
-            ? `Transcribing ${total} section${plural(total)} of "${fileName}"\u2026`
-            : `Transcribing \u2014 ${done} of ${total} done\u2026`
-        show()
+        progress.progress(transcribeRunProgressTitle({ kind: "import", fileName, done, total, first }))
+        first = false
       },
-      onWaiting: (until) => {
-        waitingUntil = until
-        if (toastId !== null) show()
-      },
-      onFailed: (message) => {
-        if (toastId !== null) toast.update(toastId, { type: "error", title: `Couldn't transcribe "${fileName}": ${message}`, description: undefined })
-      },
-      onDone: async () => {
-        // Transcripts ride outbox-queued cell.audio.attach emits — flush so
-        // they land, then pull the projection with the new source text.
-        await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
-        revalidateCells()
-        // Only if something was actually reported — see the lazy toast above.
-        // AQU-1917: a run the ASR backend rejected no longer lands here (it
-        // goes to onFailed), so this success line can be trusted again.
-        if (toastId !== null) {
-          toast.update(toastId, { type: "success", title: `Transcribed ${lastTotal} section${plural(lastTotal)} of "${fileName}".`, description: undefined })
+      onWaiting: (until) => progress.waiting(until),
+      onFailed: (message, report) => {
+        if (report) {
+          void finish(report, lastTotal)
+          return
+        }
+        if (progress.id !== null) {
+          toast.update(progress.id, { type: "error", title: t("audio.transcribeRun.failedAllNamed", { name: fileName, reason: message }), description: undefined })
         }
       },
+      onPartial: (report) => finish(report, lastTotal),
+      onDone: (report) => finish(report, lastTotal),
     })
-  }, [project?.id, activeSourceLanguage, activeLaneTargetLanguage, frontierSession, getTokenForProjectFile, revalidateCells, t, formatLocaleTime])
+  }, [project?.id, activeSourceLanguage, activeLaneTargetLanguage, frontierSession, getTokenForProjectFile, revalidateCells, t, makeTranscribeProgressToast, showTranscribeRunEnd])
 
   /** After a recording lands on a file as its rows: send the rows, show
    *  them, and transcribe them. Shared by the upload and, AQU-1681, the
@@ -11692,6 +11831,49 @@ export function ProjectWorkspace() {
   )
   workspaceAudioByCellIdRef.current = workspaceAudioByCellId
 
+  // AQU-2375: a transcription run a page reload stopped is carried on here,
+  // by itself, once its file is open and that file's rows and recordings have
+  // loaded (before then, a row still to do can't be told from a row with
+  // nothing on it). A run on another file is said once, with where it stopped.
+  useCarryOnTranscribeRuns({
+    projectId: project?.id,
+    activeFileId,
+    ready: editorFirstPaint && workspaceAudioLoaded && !heardLinesLoading,
+    version: [workspaceAudioByCellId, audioCueCells, cellStoreVersion],
+    carryOn: (run, handle) => {
+      const pool = audioCueCells ?? mergeCellsWithAudio(getActiveCells(), workspaceAudioByCellIdRef.current)
+      const byId = new Map(pool.map((c) => [c.id, c]))
+      const settled = new Set([...run.doneIds, ...run.failed.map((f) => f.cellId)])
+      const cells = run.cellIds.filter((id) => !settled.has(id)).flatMap((id) => {
+        const cell = byId.get(id)
+        return cell ? [cell] : []
+      })
+      const failedCells = run.failed.flatMap((f) => {
+        const cell = byId.get(f.cellId)
+        return cell ? [cell] : []
+      })
+      void runTranscriptionReported({
+        cells,
+        kind: run.kind,
+        fileId: run.fileId,
+        fileName: run.fileName,
+        force: run.force,
+        carryOn: { stored: run, handle, failedCells },
+        quiet: run.kind === "sections",
+      })
+    },
+    announce: (run) => {
+      toast.add({
+        type: "info",
+        title: t("audio.transcribeRun.waitingForFile", {
+          name: run.fileName,
+          done: run.doneIds.length,
+          count: run.cellIds.length,
+        }),
+      })
+    },
+  })
+
   // AQU-646: tell the cell store which lines carry a recording of their OWN, so
   // a dub with no text counts as translated work in the status bar, file
   // progress, validation status and the rule engine.
@@ -12468,59 +12650,16 @@ export function ProjectWorkspace() {
       // number offered and the work done cannot disagree.
       const cells =
         audioCueCells ?? mergeCellsWithAudio(getActiveCells(), workspaceAudioByCellId)
-      void (async () => {
-        // Same lazy toast as the mp3 auto-transcribe: created on the first
-        // progress call, so a run with nothing to transcribe never leaves a
-        // spinner hanging. The banner still tracks per-cell state; the toast
-        // is the count that survives scrolling away from the table.
-        let toastId: string | null = null
-        let lastDone = 0
-        let lastTotal = 0
-        const plural = (n: number) => (n === 1 ? "" : "s")
-        await runBatchTranscribeAll({
-          cells,
-          projectId: project.id,
-          session: frontierSession ?? null,
-          orgId: project.orgId,
-          // AQU-646: language follows the audio — media segments are source
-          // speech, recorded takes voice the target text (per-cell in the batch).
-          sourceLanguage: activeSourceLanguage,
-          targetLanguage: activeLaneTargetLanguage,
-          // AQU-1978: each take's timings are written in this lane.
-          ...(activeLane ? { targetLang: activeLane } : {}),
-          onProgress: (done, total) => {
-            lastDone = done
-            lastTotal = total
-            // The zeroth call lands BEFORE the Whisper model is fetched — on a
-            // cold run that is most of the wait, so say what is happening
-            // rather than counting from nothing.
-            const title = done === 0
-              ? `Transcribing ${total} recording${plural(total)}…`
-              : `Transcribing — ${done} of ${total} done…`
-            if (toastId === null) toastId = toast.add({ type: "loading", title, timeout: 0 })
-            else toast.update(toastId, { type: "loading", title })
-          },
-        })
-        // AQU-783: the batch enqueues one cell.audio.attach per cell but never
-        // revalidated, so the transcripts only surfaced after a manual reload.
-        // Flush the outbox once and revalidate the file so every transcript +
-        // timing appears immediately.
-        await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
-        await refreshOutboxPending()
-        revalidateCells()
-        // EVERY file the run touched, not just the one on screen: a cue file's
-        // transcripts land in the hidden sibling, and poking only the active id
-        // left them invisible until a reload. Same rule as
-        // `handleTranscribeSections`.
-        for (const id of new Set(cells.map((c) => c.fileId))) notifyAudioAttachmentsChanged(id)
-        // Only if something was actually reported — see the lazy toast above.
-        // A short count means the banner's Cancel was pressed mid-run.
-        if (toastId !== null) {
-          toast.update(toastId, lastDone < lastTotal
-            ? { type: "info", title: `Transcription stopped — ${lastDone} of ${lastTotal} done.` }
-            : { type: "success", title: `Transcribed ${lastTotal} recording${plural(lastTotal)}.` })
-        }
-      })()
+      // Same lazy toast as the post-import run: created on the first progress
+      // call, so a run with nothing to transcribe never leaves a spinner
+      // hanging. AQU-2375: kept so a reload doesn't end it, and its last word
+      // counts the rows that failed, with a Retry for them.
+      void runTranscriptionReported({
+        cells,
+        kind: "all",
+        fileId: activeFileId,
+        fileName: activeFile?.name ?? "",
+      })
     },
     runSynthAll: () => {
       if (!activeFileId || !project) return
@@ -12589,7 +12728,7 @@ export function ProjectWorkspace() {
     // own path — one read, one optimistic apply, one batch.
     runSplitAtQuotes: () => { void handleSplitAtQuotes(quoteSplitFileCandidates().cellIds) },
     navigate,
-  }), [handleSplitAtQuotes, quoteSplitFileCandidates, activeFileId, completeBatch, getActiveCells, cellSummaries, project, audioProject, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, revalidateCells, workspaceAudioByCellId, audioValidationByCellId, audioCueCells, myScopes, t, reportBatchValidate, batchValidateSummary, tts.settings, tts.laneSettings, activeSourceLanguage, activeLaneTargetLanguage])
+  }), [handleSplitAtQuotes, quoteSplitFileCandidates, activeFileId, completeBatch, getActiveCells, cellSummaries, project, audioProject, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, revalidateCells, workspaceAudioByCellId, audioValidationByCellId, audioCueCells, myScopes, t, reportBatchValidate, batchValidateSummary, tts.settings, tts.laneSettings, activeSourceLanguage, activeLaneTargetLanguage, runTranscriptionReported, activeFile])
 
   // AQU-661: the dynamic primary-action button was removed; its actions now live
   // in the ⋯ overflow menu. This preserves the button's confirmation flow —
@@ -13444,32 +13583,19 @@ export function ProjectWorkspace() {
       // EVERY FILE THE RUN ACTUALLY TOUCHED, not just the one on screen. The
       // takes live in the cue sibling, so notifying only the active file leaves
       // the timeline showing pre-transcription state until a reload.
-      const touchedFileIds = [...new Set(cells.map((c) => c.fileId))]
-      void (async () => {
-        await runBatchTranscribeAll({
-          cells,
-          projectId: project.id,
-          session: frontierSession ?? null,
-          orgId: project.orgId,
-          sourceLanguage: activeSourceLanguage,
-          targetLanguage: activeLaneTargetLanguage,
-          // AQU-1978: each take's timings are written in this lane.
-          ...(activeLane ? { targetLang: activeLane } : {}),
-          force: true,
-        })
-        // AQU-783: the batch enqueues one cell.audio.attach per cell but never
-        // revalidates — without this the transcripts only surface on reload.
-        await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
-        await refreshOutboxPending()
-        revalidateCells()
-        for (const id of touchedFileIds) notifyAudioAttachmentsChanged(id)
-      })()
+      // The run flushes and pokes every file it touched (the takes may live in
+      // the cue sibling). AQU-2375: quiet as before unless a row failed, then
+      // it says how many and offers to retry them.
+      void runTranscriptionReported({
+        cells,
+        kind: "sections",
+        fileId: activeFileId,
+        fileName: activeFileNameRef.current ?? "",
+        force: true,
+        quiet: true,
+      })
     },
-    [
-      activeFileId, project, takeCellsFor, frontierSession,
-      getTokenForProjectFile, refreshOutboxPending, revalidateCells,
-      activeSourceLanguage, activeLaneTargetLanguage, activeLane,
-    ],
+    [activeFileId, project, takeCellsFor, runTranscriptionReported],
   )
 
   // AQU-646 round 8: the text table's add/remove controls. Live only in the

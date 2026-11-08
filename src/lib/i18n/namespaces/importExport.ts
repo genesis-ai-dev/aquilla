@@ -1103,6 +1103,9 @@ export const importExport = defineNamespace({
 
     // — Thrown-error triage: src/lib/sync/source-upload.ts —
     "importExport.errors.sourceUploadEmpty": "Source upload failed: the original file is empty.",
+    // Import map X-D-film-refusal-text: the server's refusal of a film address.
+    "importExport.errors.filmRefused":
+      "This film couldn't be saved with the file. Only a YouTube video's link, or a film uploaded with this file, can be.",
     "importExport.errors.sourceUploadTooLarge": "Source upload failed: the original file exceeds the {maxSize} limit.",
     "importExport.errors.couldNotGetUploadToken": "Couldn't get an upload token — sign in and try again.",
     "importExport.errors.sourceUploadNetworkFailed": "Source upload failed: {detail}",

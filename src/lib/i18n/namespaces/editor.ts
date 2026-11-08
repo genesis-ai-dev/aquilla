@@ -1157,6 +1157,8 @@ export const editor = defineNamespace({
     "editor.timeline.filmStripAria": "The film, {name}",
     "editor.timeline.filmHeld": "held {sec} s",
     "editor.timeline.filmCut": "cut {sec} s",
+    "editor.timeline.filmFolderPictureSub": "picture",
+    "editor.timeline.filmFolderCuesSub": "heard lines",
     "editor.timeline.bluetoothPill": "Bluetooth",
     "editor.timeline.bluetoothPillInfo": "About playing through Bluetooth",
     "editor.timeline.outputLatencyNote":
@@ -7822,6 +7824,20 @@ export const editor = defineNamespace({
           "own stretch of film, so the film's last frame is held still for this long. Lower case.",
         placeholders: { sec: "Seconds, with one decimal, e.g. '1.7'." },
         maxLength: 18,
+      },
+      "editor.timeline.filmFolderPictureSub": {
+        description:
+          "Small grey second line under 'Film' in the timeline's left column, for a film imported " +
+          "as a file. The film sits in a folder named after the file, beside its 'Source audio' " +
+          "row ('original speech'), and this row is only its picture. Lower case, one or two words.",
+        maxLength: 24,
+      },
+      "editor.timeline.filmFolderCuesSub": {
+        description:
+          "Small grey second line under 'Source cues' in the timeline's left column, inside the " +
+          "folder of a film imported as a file. The row shows the lines heard in the film, from " +
+          "its audio cue file (a transcript of the film's own speech). Lower case, one or two words.",
+        maxLength: 24,
       },
       "editor.timeline.filmCut": {
         description:

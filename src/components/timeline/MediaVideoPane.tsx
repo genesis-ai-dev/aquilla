@@ -150,6 +150,9 @@ export interface MediaVideoPaneProps {
   onVideoDuration?: (src: string, sec: number | null) => void
   /** Opens the link-video dialog — offered when the source will not load. */
   onChangeVideo?: () => void
+  /** An imported film's name, shown instead of its stored address when it
+   *  fails to load (import map D#14). */
+  filmName?: string
   /** A click on a YouTube picture: play or pause through Aquilla's transport,
    *  exactly as Space and the playback bar's button do (the workspace hands
    *  its timeline toggle). Absent means the picture takes no clicks of ours. */
@@ -184,6 +187,9 @@ export interface MediaVideoPaneProps {
   targetTextDirection?: TextDirection
 }
 
+/** An imported film's stored address: an upload, not a link anyone typed. */
+const UPLOADED_FILM_SCHEME = "frontier-audio://"
+
 export function MediaVideoPane({
   src: storedSrc,
   projectId,
@@ -197,6 +203,7 @@ export function MediaVideoPane({
   onVideoPlaying,
   onVideoDuration,
   onChangeVideo,
+  filmName,
   onPictureClick,
   followsRecordings = false,
   importedFilm = false,
@@ -1232,7 +1239,7 @@ export function MediaVideoPane({
     // failed.
     return (
       <VideoPaneErrorCard
-        src={src}
+        src={storedSrc.startsWith(UPLOADED_FILM_SCHEME) ? filmName ?? "" : storedSrc}
         onRetry={() => { setFailed(false); setLoadAttempt((n) => n + 1) }}
         onChangeVideo={onChangeVideo}
       />

@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 export interface VideoPaneErrorCardProps {
+  /** What the film is, as the person knows it: the link they gave, or an
+   *  imported film's name. Never the signed address it was fetched from. */
   src: string
   onRetry(): void
   onChangeVideo?: () => void
@@ -27,7 +29,7 @@ export function VideoPaneErrorCard({ src, onRetry, onChangeVideo }: VideoPaneErr
           <Film className="h-3.5 w-3.5 shrink-0" />
           {t("editor.timeline.videoPaneErrorTitle")}
         </div>
-        <p className="break-all text-[11px] leading-snug text-muted-foreground">{src}</p>
+        {src && <p className="break-all text-[11px] leading-snug text-muted-foreground">{src}</p>}
         <div className="flex flex-wrap gap-2">
           {/* Re-saving the same URL cannot clear this by itself — the address
               is unchanged, so nothing about the element would differ. The

@@ -18312,7 +18312,11 @@ export function ProjectWorkspace() {
                   onVideoTime={setVideoClockSec}
                   onVideoPlaying={setVideoClockPlaying}
                   onVideoDuration={setVideoDurationSec}
-                  onChangeVideo={() => setLinkVideoOpen(true)}
+                  // Import map D#15: only someone who may link a film is
+                  // offered another; everyone else gets Retry.
+                  onChangeVideo={canPerform("file.video.set", project?.syncRole?.level ?? null)
+                    ? () => setLinkVideoOpen(true) : undefined}
+                  filmName={activeFile.name}
                   // Sam, Oct 5: a click on a YouTube picture is the
                   // transport's Play/Pause, never YouTube's own.
                   onPictureClick={handleTimelineTogglePlay}
@@ -19576,6 +19580,7 @@ export function ProjectWorkspace() {
       <LinkVideoUrlDialog
         open={linkVideoOpen}
         currentUrl={activeFile?.coreMediaUrl ?? null}
+        filmName={activeFile?.name ?? null}
         onCancel={() => setLinkVideoOpen(false)}
         onSave={(url) => {
           // Close FIRST: on the Free-timing path handleLinkVideo opens a second

@@ -29,6 +29,7 @@ import type { AudioUploadResult, SyncTokenForFile } from "@/lib/audio/upload"
 // `upload.ts` reaches this module through a dynamic import, so this direction
 // is the only static edge — no import cycle.
 import { MAX_AUDIO_OBJECT_BYTES, buildFrontierAudioUrl } from "@/lib/audio/upload"
+import { mediaFileTooLargeMessage } from "@/lib/audio/media-limit"
 
 /** Fallback part size when the server does not advertise one. Mirrors
  *  AUDIO_UPLOAD_PART_BYTES in sync-worker/src/audio-multipart.ts. */
@@ -136,11 +137,7 @@ export async function uploadCellAudioMultipart(
   } = args
   if (blob.size === 0) throw new Error("audio upload: file is empty")
   if (blob.size > MAX_AUDIO_OBJECT_BYTES) {
-    const gb = (n: number) => (n / (1024 * 1024 * 1024)).toFixed(1)
-    throw new Error(
-      `This file is ${gb(blob.size)} GB — the limit is ${gb(MAX_AUDIO_OBJECT_BYTES)} GB. `
-      + "Split the recording, or compress it first.",
-    )
+    throw new Error(mediaFileTooLargeMessage(artifactName ?? (blob instanceof File ? blob.name : `${audioId}.${ext}`)))
   }
 
   const fetchFn = args.fetchFn ?? fetch

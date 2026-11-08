@@ -197,6 +197,23 @@ describe("YouTubeImportPanel", () => {
       }),
     )
   })
+  // Import map D#20: the same 2 GB limit was told three ways; this one had no
+  // number and lumped an empty file in with it.
+  it("says an original over the limit is, the importer's way, and an empty one is empty", async () => {
+    renderPanel()
+    fillYouTubeLink("https://youtu.be/dQw4w9WgXcQ")
+    fireEvent.click(screen.getByLabelText("Use original audio or video"))
+    const huge = new File(["x"], "Episode 101.mov", { type: "video/quicktime" })
+    Object.defineProperty(huge, "size", { value: 3 * 1024 * 1024 * 1024 })
+    await selectFile(huge)
+    fireEvent.click(screen.getByRole("button", { name: "Preview import" }))
+    expect(await screen.findByText("Episode 101.mov exceeds the 2 GB media import limit.")).toBeInTheDocument()
+
+    await selectFile(new File([], "Empty.mov", { type: "video/quicktime" }))
+    fireEvent.click(screen.getByRole("button", { name: "Preview import" }))
+    expect(await screen.findByText("Empty.mov is empty.")).toBeInTheDocument()
+  })
+
   it("reviews and edits embedded captions in original media", async () => {
     const onImported = vi.fn()
     vi.mocked(createMediaFileCommit).mockReturnValue(async () => ({

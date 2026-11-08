@@ -199,25 +199,23 @@ function ImportCharactersContent({
 
   const fitsSubtitle = asSubtitle ? asSubtitle.assignments.length : 0
   const fitsAudio = asAudio ? asAudio.assignments.length : 0
+  // A dropped sheet came with no button to say which it is, so it is read as
+  // the side it fits; the "use the other button" refusal below is only ever
+  // for a sheet picked under a button (X-G-dead-drop).
+  const kind: CharacterSheetKind | null = picked == null ? null
+    : picked.dropped ? (fitsAudio > fitsSubtitle * 2 ? "audio" : "subtitle")
+      : picked.kind
   const wrongKind =
     picked != null &&
-    (picked.kind === "audio" ? fitsSubtitle > fitsAudio * 2 : fitsAudio > fitsSubtitle * 2)
+    (kind === "audio" ? fitsSubtitle > fitsAudio * 2 : fitsAudio > fitsSubtitle * 2)
 
-  const plan = !wrongKind && picked?.kind === "subtitle" ? asSubtitle : null
-  const audioPlan = !wrongKind && picked?.kind === "audio" ? asAudio : null
+  const plan = !wrongKind && kind === "subtitle" ? asSubtitle : null
+  const audioPlan = !wrongKind && kind === "audio" ? asAudio : null
   const active: { assignments: unknown[]; unmatchedRows: number[] } | null = plan ?? audioPlan
   // THE refusal. A row that matches no line means this sheet is not this
   // episode's — going ahead would put hundreds of characters on lines they do
   // not belong to, silently. A CELL with no row is the opposite and is fine.
   const mismatched = active != null && active.unmatchedRows.length > 0
-
-  // A dropped sheet came with no button to say which it is. Read first as the
-  // subtitle sheet, it moves to the side it fits, so the "use the other
-  // button" refusal below is only ever for a sheet picked under a button.
-  useEffect(() => {
-    if (!picked?.dropped || !wrongKind) return
-    setPicked({ ...picked, kind: picked.kind === "audio" ? "subtitle" : "audio", dropped: false })
-  }, [picked, wrongKind])
 
   const handleFile = async (file: File, kind: CharacterSheetKind, dropped = false) => {
     const generation = ++readGeneration.current
@@ -299,14 +297,14 @@ function ImportCharactersContent({
                 <p>
                   <RichMessage
                     k={
-                      picked!.kind === "audio"
+                      kind === "audio"
                         ? "editor.timeline.charactersWrongKindAudio"
                         : "editor.timeline.charactersWrongKindSubtitle"
                     }
                     values={{
                       sheet: (
                         <span className="font-medium">
-                          {picked!.kind === "audio"
+                          {kind === "audio"
                             ? t("editor.timeline.charactersSubtitleSheet")
                             : t("editor.timeline.charactersAudioSheet")}
                         </span>
@@ -327,7 +325,7 @@ function ImportCharactersContent({
                       lead: (
                         <span className="font-medium">
                           {t(
-                            picked!.kind === "audio"
+                            kind === "audio"
                               ? "editor.timeline.charactersMismatchLeadAudio"
                               : "editor.timeline.charactersMismatchLeadSubtitle",
                             {
@@ -354,7 +352,7 @@ function ImportCharactersContent({
                       lead: (
                         <span className="font-medium">
                           {t(
-                            picked!.kind === "audio"
+                            kind === "audio"
                               ? "editor.timeline.charactersAssignedLeadAudio"
                               : "editor.timeline.charactersAssignedLeadSubtitle",
                             { count: active!.assignments.length },
@@ -375,7 +373,7 @@ function ImportCharactersContent({
                 {(plan?.cellsWithoutRow ?? audioPlan?.cuesWithoutRow ?? 0) > 0 && (
                   <p className="mt-1 text-muted-foreground">
                     {t(
-                      picked!.kind === "audio"
+                      kind === "audio"
                         ? "editor.timeline.charactersWithoutRowAudio"
                         : "editor.timeline.charactersWithoutRowSubtitle",
                       { count: plan?.cellsWithoutRow ?? audioPlan?.cuesWithoutRow ?? 0 },

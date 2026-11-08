@@ -13,28 +13,12 @@ import { Film } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { useT } from "@/lib/i18n/I18nProvider"
-import type { MessageKey } from "@/lib/i18n/messages/en"
-
-/** Which film failed: a YouTube film (with the player's error code, when it
- *  gave one), one uploaded with this file, or one at a link. */
-export type FilmFailure =
-  | { kind: "youtube"; code: number | null; watchUrl: string }
-  | { kind: "upload" }
-  | { kind: "link"; host: string }
+import { youTubeFailureKey, type FilmFailure } from "@/lib/timeline/film-failure"
 
 export interface VideoPaneErrorCardProps {
   failure: FilmFailure
   onRetry(): void
   onChangeVideo?: () => void
-}
-
-/** The YouTube iframe player's error codes
- *  (developers.google.com/youtube/iframe_api_reference#onError). */
-export function youTubeFailureKey(code: number | null): MessageKey {
-  if (code === 100) return "editor.timeline.videoPaneErrorYouTubeMissing"
-  if (code === 101 || code === 150) return "editor.timeline.videoPaneErrorYouTubeNoEmbed"
-  if (code === 2) return "editor.timeline.videoPaneErrorYouTubeBadLink"
-  return "editor.timeline.videoPaneErrorYouTube"
 }
 
 export function VideoPaneErrorCard({ failure, onRetry, onChangeVideo }: VideoPaneErrorCardProps) {

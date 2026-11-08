@@ -69,7 +69,8 @@ import {
   type StallState,
 } from "./video-stall"
 import { DEFAULT_VIDEO_ASPECT, fitPictureRect, intrinsicAspect } from "./video-frame"
-import { VideoPaneErrorCard, type FilmFailure } from "./VideoPaneErrorCard"
+import { VideoPaneErrorCard } from "./VideoPaneErrorCard"
+import { filmFailure } from "@/lib/timeline/film-failure"
 import { VideoPaneCaption } from "./VideoPaneCaption"
 import { VideoPaneControls } from "./VideoPaneControls"
 import {
@@ -182,28 +183,6 @@ export interface MediaVideoPaneProps {
   targetDirectionMode?: DirectionMode
   sourceTextDirection?: TextDirection
   targetTextDirection?: TextDirection
-}
-
-/** What the error card says failed, without the raw address: a YouTube film
- *  (and what its player said), a film uploaded with this file (its stored
- *  address is an upload, its played address a signed one), or a film at a
- *  link, named by its host. */
-export function filmFailure(
-  storedSrc: string,
-  playedSrc: string,
-  youTube: boolean,
-  youTubeCode: number | null,
-): FilmFailure {
-  if (youTube) {
-    const id = youTubeVideoId(playedSrc) ?? youTubeVideoId(storedSrc)
-    return { kind: "youtube", code: youTubeCode, watchUrl: id ? `https://www.youtube.com/watch?v=${id}` : playedSrc }
-  }
-  if (storedSrc.startsWith("frontier-audio://")) return { kind: "upload" }
-  try {
-    return { kind: "link", host: new URL(storedSrc).host || storedSrc }
-  } catch {
-    return { kind: "link", host: storedSrc }
-  }
 }
 
 export function MediaVideoPane({

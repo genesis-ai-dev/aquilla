@@ -3,7 +3,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 import { VideoPaneErrorCard } from "./VideoPaneErrorCard"
-import { filmFailure } from "./MediaVideoPane"
+import { filmFailure } from "@/lib/timeline/film-failure"
 
 const WATCH = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 

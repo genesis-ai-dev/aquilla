@@ -41,7 +41,7 @@ import {
   extractVttStrings,
   repairShortFormCueTimestamps,
 } from "@/lib/parsers/subtitle"
-import { extractSbvStrings } from "@/lib/parsers/sbv"
+import { countSbvUnreadableTimes, extractSbvStrings } from "@/lib/parsers/sbv"
 import { emitSourceCellCreate } from "@/lib/sync/events-emit"
 
 /** `accept` for the sidecar picker — the three formats `isSubtitleImportFile`
@@ -138,7 +138,10 @@ export function parseSubtitleSidecar(fileName: string, content: string): ParsedS
       repairedShortForm: format === "vtt" ? repaired.repaired : 0,
       // Never negative: a `-->` inside a NOTE block inflates the loose count
       // without the parser having refused anything.
-      droppedCues: format === "sbv" ? 0 : Math.max(0, repaired.cueLines - cues.length),
+      // SBV writes no `-->`, so its blocks are counted on their own terms.
+      droppedCues: format === "sbv"
+        ? countSbvUnreadableTimes(content)
+        : Math.max(0, repaired.cueLines - cues.length),
       untimedCues,
       // Min/max rather than first/last: a sidecar is not guaranteed to be
       // sorted, and a span read off the ends of an unsorted file is wrong in

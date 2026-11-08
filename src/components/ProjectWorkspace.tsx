@@ -307,7 +307,7 @@ import {
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
 import { canHarmonize, emitCastAssign, emitCellLabelSet, emitSourceCellCommit, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitCellGlossSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellAudioUnvalidate, emitCellAudioSelect, emitCellAudioDeselect, emitSourceCellRestore, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioGain, emitCellAudioPlace, emitCellAudioCut, emitCellAudioUncut, emitCellAudioRemove, emitCellAudioRename, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitFileMilestoneSet, emitTermCreate, emitTermUpdate, enqueueEvents } from "@/lib/sync/events-emit"
-import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
+import { autoLinkable, pairedLineCounts, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
 import { postSplitCastCopies, resolveCellEditingFloor, resolveTimingLocked } from "@/lib/sync/project-settings"
 import { buildCastRemovals, carriesCharacterSheetData } from "@/lib/import/cast-from-speakers"
@@ -5998,7 +5998,7 @@ export function ProjectWorkspace() {
       // fails at the network rather than queueing — say so up front instead of
       // showing a spinner that can only end in a request error.
       if (!navigator.onLine) {
-        toast.add({ type: "error", title: "Audio cues can't be imported while offline." })
+        toast.add({ type: "error", title: t("editor.timeline.audioCuesImportOffline") })
         return
       }
       // NO TAKES-EXIST REFUSAL ANY MORE. This path is a FIRST import now — the
@@ -6015,7 +6015,7 @@ export function ProjectWorkspace() {
       // The slowest thing in the app — ~650 cells written, then ~650 links —
       // behind a dialog that has already closed. Silence until it finishes
       // reads as nothing having happened.
-      const importToastId = toast.add({ type: "loading", title: `Importing ${cues.length} audio cues…`, timeout: 0 })
+      const importToastId = toast.add({ type: "loading", title: t("editor.timeline.audioCuesImporting", { count: cues.length }), timeout: 0 })
       let uploaded
       try {
         uploaded = await uploadAudioCueFile({
@@ -6041,7 +6041,9 @@ export function ProjectWorkspace() {
           getToken: getTokenForFile,
         })
       } catch (e) {
-        toast.update(importToastId, { type: "error", title: e instanceof Error ? `Couldn't import the audio cues: ${e.message}` : "Couldn't import the audio cues." })
+        toast.update(importToastId, { type: "error", title: e instanceof Error
+          ? t("editor.timeline.audioCuesImportFailedReason", { reason: e.message })
+          : t("editor.timeline.audioCuesImportFailed") })
         return
       }
       try {
@@ -6053,7 +6055,7 @@ export function ProjectWorkspace() {
         // Not an error the user has to act on: the new cues are in, and the
         // newest-id rule above means the stale sibling is invisible either way.
         console.warn("[audio-cues] replacing sibling: delete failed", e)
-        toast.add({ type: "warning", title: "The new audio cues are in, but the ones they replaced couldn't be tidied away." })
+        toast.add({ type: "warning", title: t("editor.timeline.audioCuesReplacedNotTidied") })
       }
       // The cues exist now, so put them on screen BEFORE pairing them. Pairing
       // is several hundred events and takes a few seconds; running it first
@@ -6070,9 +6072,13 @@ export function ProjectWorkspace() {
       // than none. Failure is non-fatal — the cues are already in and the
       // pairings can be made by hand in linking mode.
       let linkCount = 0
+      // Pairing is many-to-many, so the toast counts the heard lines that
+      // found a subtitle line, never the pairings (import map
+      // X-avtt-paired-count: 548 heard lines read "paired 648 of them").
+      let paired = { heardLines: 0, subtitleLines: 0 }
       setCueLinksPending(true)
       try {
-        toast.update(importToastId, { type: "loading", title: `Imported ${uploaded.cellCount} audio cues — pairing them with the subtitles…` })
+        toast.update(importToastId, { type: "loading", title: t("editor.timeline.audioCuesPairing") })
         // AQU-1147: fresh read at call time, no version dependency (see handleResolveCharacter).
         const plans = autoLinkable(planCueLinks({
           textCells: cellStore.getAllSummaries(),
@@ -6092,22 +6098,26 @@ export function ProjectWorkspace() {
           })
           linkCount++
           // Same throttle as reportCharacterWrite, same reason: the loop
-          // `await`s per link, so every update is its own render.
+          // `await`s per link, so every update is its own render. Progress is
+          // a share of the work, since pairings are not lines.
           if (linkCount % 10 === 0 || linkCount === plans.length) {
-            toast.update(importToastId, { type: "loading", title: `Pairing heard lines with subtitles — ${linkCount} of ${plans.length}…` })
+            toast.update(importToastId, { type: "loading", title: t("editor.timeline.audioCuesPairingProgress", {
+              percent: Math.round((linkCount / plans.length) * 100),
+            }) })
           }
         }
+        paired = pairedLineCounts(plans)
         // ~650 events for a full episode, and MAX_BATCH is 100 — so this is
         // several round trips. Awaited before the success toast so the message
         // is not claiming work the queue has not done yet.
         if (linkCount > 0) {
-          toast.update(importToastId, { type: "loading", title: `Paired ${linkCount} heard lines — saving to the server…` })
+          toast.update(importToastId, { type: "loading", title: t("editor.timeline.audioCuesSavingPairs") })
           await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
         }
         refreshCueLinks()
       } catch (e) {
         console.warn("[audio-cues] auto-linking failed", e)
-        toast.add({ type: "warning", title: "The cues are in, but pairing them with the subtitles didn't finish." })
+        toast.add({ type: "warning", title: t("editor.timeline.audioCuesPairingStopped") })
       } finally {
         setCueLinksPending(false)
       }
@@ -6115,11 +6125,12 @@ export function ProjectWorkspace() {
       // Sam, 2026-08-21: no frame-rate talk anywhere a user reads. The dialog's
       // FYI line already said the timings would be adjusted; the manifest keeps
       // the details for whoever debugs.
-      toast.update(importToastId, { type: "success", title: linkCount > 0
-          ? `Imported ${uploaded.cellCount} audio cues, and paired ${linkCount} of them with subtitle lines.`
-          : `Imported ${uploaded.cellCount} audio cues.` })
+      const imported = t("editor.timeline.audioCuesImported", { count: uploaded.cellCount })
+      toast.update(importToastId, { type: "success", title: paired.heardLines > 0
+          ? `${imported} ${t("editor.timeline.audioCuesFoundLines", { count: paired.heardLines })}`
+          : imported })
     },
-    [project?.id, activeFile, audioCueSiblings, currentUsername, getTokenForFile, getTokenForProjectFile, refresh, refreshCueLinks, cellStore],
+    [project?.id, activeFile, audioCueSiblings, currentUsername, getTokenForFile, getTokenForProjectFile, refresh, refreshCueLinks, cellStore, t],
   )
 
   /**
@@ -6344,23 +6355,31 @@ export function ProjectWorkspace() {
   const handleRemoveAudioCues = useCallback(async () => {
     if (!project?.id || audioCueSiblings.length === 0) return
     if (!navigator.onLine) {
-      toast.add({ type: "error", title: "Audio cues can't be removed while offline." })
+      toast.add({ type: "error", title: t("editor.timeline.audioCuesRemoveOffline") })
       return
     }
+    // Said at once (import map X-D-remove-cues-silent): the dialog has closed,
+    // and the success toast waited on the server, so for seconds nothing on
+    // screen said anything was happening.
+    const removeToastId = toast.add({ type: "loading", title: t("editor.timeline.audioCuesRemoving"), timeout: 0 })
     try {
       for (const f of audioCueSiblings) {
         await emitFileDelete({ projectId: project.id, fileId: f.id, author: currentUsername })
       }
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
     } catch (e) {
-      toast.add({ type: "error", title: e instanceof Error ? `Couldn't remove the audio cues: ${e.message}` : "Couldn't remove the audio cues." })
+      toast.update(removeToastId, { type: "error", title: e instanceof Error
+        ? t("editor.timeline.audioCuesRemoveFailedReason", { reason: e.message })
+        : t("editor.timeline.audioCuesRemoveFailed") })
       return
     }
     // The sibling is found by scanning the project's files, so the track only
     // disappears once that list is re-read.
     refresh()
-    toast.add({ type: "success", title: "Removed the audio cues. The Source audio track is gone." })
-  }, [project?.id, audioCueSiblings, currentUsername, getTokenForProjectFile, refresh])
+    // No Undo: removing the cues is not a History step. The dialog said where
+    // they go; the toast says it again.
+    toast.update(removeToastId, { type: "success", title: t("editor.timeline.audioCuesRemoved") })
+  }, [project?.id, audioCueSiblings, currentUsername, getTokenForProjectFile, refresh, t])
 
   // Nothing reads this any more (round 8 removed the dead cue clock below), but
   // the player it belongs to comes back with the event grammar in v1.x, so the

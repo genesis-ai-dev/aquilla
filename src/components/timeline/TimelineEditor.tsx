@@ -2462,6 +2462,11 @@ export function TimelineEditor({
     // clean and greyed out (Sam, Oct 5 — a badge beside "Attach captions" was
     // too many words for one row).
     const trackEditingOff = t("editor.timeline.trackEditingOffHint")
+    // D#7 (import map, Nov 2): every greyed row says why, behind its (i).
+    // Linking a film is a Project Lead action (role-policy `file.video.set`);
+    // the other sources are the Maintainer's (ProjectWorkspace's
+    // `canManageSources`).
+    const filmLeadOnly = t("editor.timeline.sourcesFilmLeadOnly")
     // Board 55, option E: with a film linked, the menu opens with it — its
     // name, Change, Hide or Show — and the other sources follow under their
     // own heading.
@@ -2473,7 +2478,8 @@ export function TimelineEditor({
       if (onRequestLinkVideo) {
         items.push({
           id: "film-change", label: t("editor.dock.filmChange"), icon: Link2,
-          disabled: !canLinkVideo, testId: "top-film-change", onClick: onRequestLinkVideo,
+          disabled: !canLinkVideo, disabledReason: filmLeadOnly,
+          testId: "top-film-change", onClick: onRequestLinkVideo,
         })
       }
       items.push(film.showing
@@ -2492,6 +2498,7 @@ export function TimelineEditor({
         label: t("editor.timeline.menuFilm"),
         icon: Film,
         disabled: !canLinkVideo,
+        disabledReason: filmLeadOnly,
         badge: (
           <span className="text-[11px] text-muted-foreground">
             {coreMediaUrl ? t("editor.timeline.badgeLinked") : t("editor.timeline.badgeNotLinked")}
@@ -2506,6 +2513,7 @@ export function TimelineEditor({
         label: t("editor.timeline.menuAudioCues"),
         icon: AudioLines,
         disabled: !canImportAudioVtt,
+        disabledReason: t("editor.timeline.sourcesCuesMaintainerOnly"),
         badge: (
           <span className="text-[11px] text-muted-foreground">
             {hasAudioCueTrack
@@ -2542,6 +2550,9 @@ export function TimelineEditor({
         label: t("editor.timeline.laneSubtitle"),
         icon: Captions,
         disabled: !canExtractSubtitles || subtitleCueCount > 0,
+        disabledReason: subtitleCueCount > 0
+          ? t("editor.timeline.sourcesSubtitlesAlreadyIn")
+          : t("editor.timeline.sourcesSubtitlesMaintainerOnly"),
         badge: (
           <span className="text-[11px] text-muted-foreground">
             {subtitleCueCount > 0
@@ -2558,6 +2569,7 @@ export function TimelineEditor({
         label: t("editor.timeline.charactersTitle"),
         icon: Users,
         disabled: !canImportCharacters,
+        disabledReason: t("editor.timeline.sourcesCharactersMaintainerOnly"),
         badge: charactersWriting ? (
           <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
             <Spinner className="h-3 w-3" /> {t("common.saving")}
@@ -4906,10 +4918,13 @@ export function TimelineEditor({
           triggerSize="icon-sm"
           // Board 55, option E: its icon alone — no chevron (Sam, Oct 28:
           // "shouldn't have a dropdown arrow"), like Check beside it.
-          triggerTooltip={t("editor.timeline.sourcesTip")}
+          // D#24: one name, "Sources", on hover, for screen readers and as
+          // the menu's own heading (it was "Film and sources", "Attach
+          // material to this file" and "Sources").
+          triggerTooltip={t("editor.timeline.sourcesMenu")}
           triggerIcon={FolderInput}
           testId="tl-sources-menu"
-          ariaLabel={t("editor.timeline.sourcesMenuAria")}
+          ariaLabel={t("editor.timeline.sourcesMenu")}
         />
       )}
       {/* AQU-2204: the file's one Timing control ("Follows source" /

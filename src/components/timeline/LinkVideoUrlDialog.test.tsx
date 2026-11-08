@@ -65,3 +65,22 @@ describe("LinkVideoUrlDialog", () => {
     expect(h.onSave).not.toHaveBeenCalled()
   })
 })
+
+describe("LinkVideoUrlDialog: one short line, the rest behind the (i) (D#17, D#13)", () => {
+  it("says one short line, and opens the rest in place on a click", () => {
+    renderDialog()
+    expect(screen.getByText("Paste the address of the film this file was dubbed from.")).toBeInTheDocument()
+    const more = screen.getByTestId("link-video-more")
+    expect(more).toHaveAttribute("data-open", "false")
+    fireEvent.click(screen.getByTestId("link-video-more-toggle"))
+    expect(more).toHaveAttribute("data-open", "true")
+    expect(more).toHaveTextContent(/A YouTube link or a direct link to a video file both work/)
+  })
+
+  it("has its own placeholder, saying what the field takes", () => {
+    renderDialog()
+    expect(screen.getByTestId("link-video-url-input")).toHaveAttribute(
+      "placeholder", "A YouTube link, or a link to a video file",
+    )
+  })
+})

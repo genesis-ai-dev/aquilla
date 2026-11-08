@@ -559,3 +559,18 @@ describe.skipIf(!haveSamples)("against The Chosen episode 101", () => {
     expect(texts.find((t) => t.id === forHebrew[0].textCellId)?.original).toContain("Messiah")
   })
 })
+
+describe("pairedLineCounts (import map X-avtt-paired-count)", () => {
+  it("counts the heard lines and subtitle lines joined, not the pairings", async () => {
+    const { pairedLineCounts } = await import("./cue-links")
+    // Heard line q1 performs two subtitle lines; q2 and q3 share one.
+    const plans = [
+      { textCellId: "s1", cueCellId: "q1" },
+      { textCellId: "s2", cueCellId: "q1" },
+      { textCellId: "s3", cueCellId: "q2" },
+      { textCellId: "s3", cueCellId: "q3" },
+    ]
+    expect(pairedLineCounts(plans)).toEqual({ heardLines: 3, subtitleLines: 3 })
+    expect(pairedLineCounts([])).toEqual({ heardLines: 0, subtitleLines: 0 })
+  })
+})

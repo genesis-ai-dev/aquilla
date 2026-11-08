@@ -142,7 +142,16 @@ untimed
     // The malformed range never opens a cue, so it reports as dropped rather
     // than as an untimed row — the silent-loss case the parser's strictness
     // creates and `repairShortFormCueTimestamps` exists to narrow.
-    expect(screen.getByTestId("import-subtitles-dropped")).toHaveTextContent("1")
+    expect(screen.getByTestId("import-subtitles-dropped")).toHaveTextContent(
+      "1 cue time could not be read, so its wording is not in this import.")
+  })
+
+  it("counts an SBV block whose time line can't be read (import map X-D-silent-cue-drop)", async () => {
+    open()
+    pick("0:00:01.000,0:00:04.000\nOne\n\nno time here\nTwo\n\n0:00:09.000,0:00:18.000\nThree\n", "ep.sbv")
+    await waitFor(() => expect(screen.getByTestId("import-subtitles-confirm")).not.toBeDisabled())
+    expect(screen.getByTestId("import-subtitles-dropped")).toHaveTextContent(
+      "1 cue time could not be read, so its wording is not in this import.")
   })
 })
 
@@ -194,5 +203,19 @@ describe("times written as frame numbers in hundredths (AQU-2197)", () => {
     pick(properlyTimedVtt(), "ok.vtt")
     await waitFor(() => expect(screen.getByTestId("import-subtitles-summary")).toBeInTheDocument())
     expect(screen.queryByTestId("frames-as-hundredths")).toBeNull()
+  })
+})
+
+// Import map X-G-dead-drop (Nov 2): the dashed box drew like a drop target, but
+// a dropped file did nothing.
+describe("ImportSubtitlesDialog's drop box", () => {
+  it("takes a dropped file, as the button does, and lights up while one is over it", async () => {
+    open()
+    const box = screen.getByTestId("import-subtitles-drop")
+    fireEvent.dragOver(box)
+    expect(box).toHaveAttribute("data-drag-over", "true")
+    fireEvent.drop(box, { dataTransfer: { files: [new File([VTT], "survival-ep1.vtt", { type: "text/plain" })] } })
+    await waitFor(() => expect(screen.getByTestId("import-subtitles-confirm")).not.toBeDisabled())
+    expect(screen.getByTestId("import-subtitles-summary")).toHaveTextContent("2 cues, 0:01 – 0:06")
   })
 })

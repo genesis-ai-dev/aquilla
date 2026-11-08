@@ -70,6 +70,7 @@ import {
 } from "./video-stall"
 import { DEFAULT_VIDEO_ASPECT, fitPictureRect, intrinsicAspect } from "./video-frame"
 import { VideoPaneErrorCard } from "./VideoPaneErrorCard"
+import { filmFailure } from "@/lib/timeline/film-failure"
 import { VideoPaneCaption } from "./VideoPaneCaption"
 import { VideoPaneControls } from "./VideoPaneControls"
 import {
@@ -213,6 +214,8 @@ export function MediaVideoPane({
   const [mode, setModeState] = useState<SubtitleMode>(() => readSubtitleMode())
   const [placement, setPlacementState] = useState<CaptionPlacement>(() => readCaptionPlacement())
   const [failed, setFailed] = useState(false)
+  /** The YouTube player's error code when it failed (null: none given). */
+  const [youTubeErrorCode, setYouTubeErrorCode] = useState<number | null>(null)
   const [needsGesture, setNeedsGesture] = useState(false)
   /** Bumped by loadedmetadata/durationchange: the media load algorithm resets
    *  playbackRate when the source changes, so rate has to be re-applied. */
@@ -1232,7 +1235,7 @@ export function MediaVideoPane({
     // failed.
     return (
       <VideoPaneErrorCard
-        src={src}
+        failure={filmFailure(storedSrc, src, youTube, youTubeErrorCode)}
         onRetry={() => { setFailed(false); setLoadAttempt((n) => n + 1) }}
         onChangeVideo={onChangeVideo}
       />
@@ -1322,7 +1325,13 @@ export function MediaVideoPane({
           // exists to survive, so a stall detector built on them ran never; the
           // watchdog above samples the clock instead and needs nothing from the
           // element beyond the time it is willing to admit to.
-          onError={() => {
+          onError={(e) => {
+            // The YouTube element keeps the iframe player's error code on its
+            // `error`; a <video>'s MediaError codes mean something else.
+            const code = youTube
+              ? (e.currentTarget as { error?: { code?: unknown } | null }).error?.code
+              : undefined
+            setYouTubeErrorCode(typeof code === "number" ? code : null)
             setFailed(true)
             // Whatever length we had is no longer trustworthy — a track sized
             // to a video that will not load is worse than one sized to the cues.

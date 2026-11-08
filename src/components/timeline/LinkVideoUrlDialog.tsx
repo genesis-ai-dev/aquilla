@@ -17,6 +17,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -47,6 +48,9 @@ export function LinkVideoUrlDialog({ open, currentUrl, onSave, onCancel }: Props
   const t = useT()
   const [value, setValue] = useState(currentUrl ?? "")
   const [touched, setTouched] = useState(false)
+  // One short line; the rest (how its sound plays) behind a click (i) that
+  // opens in place (D#17: the old 60-word paragraph).
+  const [moreOpen, toggleMore] = useInfoOpen()
 
   useEffect(() => {
     if (open) {
@@ -63,9 +67,19 @@ export function LinkVideoUrlDialog({ open, currentUrl, onSave, onCancel }: Props
       <DialogContent data-testid="link-video-url-dialog">
         <DialogHeader>
           <DialogTitle>{currentUrl ? t("editor.timeline.linkVideoTitleChange") : t("editor.timeline.linkVideoTitleNew")}</DialogTitle>
-          <DialogDescription>
-            {t("editor.timeline.linkVideoDescription")}
+          <DialogDescription className="flex items-start gap-1">
+            <span className="min-w-0">{t("editor.timeline.linkVideoLead")}</span>
+            <InfoToggle
+              open={moreOpen}
+              onToggle={toggleMore}
+              label={t("editor.timeline.linkVideoMoreLabel")}
+              controls="link-video-more"
+              testId="link-video-more-toggle"
+            />
           </DialogDescription>
+          <InfoReveal open={moreOpen} id="link-video-more" testId="link-video-more" className="text-sm text-muted-foreground">
+            {t("editor.timeline.linkVideoMore")}
+          </InfoReveal>
         </DialogHeader>
         <div className="flex flex-col gap-2">
           <Label htmlFor="link-video-url">{t("editor.timeline.linkVideoAddressLabel")}</Label>
@@ -74,7 +88,9 @@ export function LinkVideoUrlDialog({ open, currentUrl, onSave, onCancel }: Props
             data-testid="link-video-url-input"
             value={value}
             autoFocus
-            placeholder="https://example.com/episode.mp4"
+            // Its own placeholder (D#13): the empty-file card's address field
+            // takes a different kind of link and stores it differently.
+            placeholder={t("editor.timeline.linkVideoPlaceholder")}
             onChange={(e) => { setValue(e.target.value); setTouched(true) }}
             onKeyDown={(e) => { if (e.key === "Enter" && canSave) onSave(value.trim()) }}
           />

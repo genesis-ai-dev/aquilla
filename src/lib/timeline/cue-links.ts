@@ -92,6 +92,22 @@ const CROSS_SCRIPT_MIN_FRAC = 0.5
 
 
 /**
+ * How many heard lines, and how many subtitle lines, a set of pairings joins.
+ * Pairing is many-to-many (one heard line can perform two subtitle lines, and
+ * two heard lines one), so the number of pairings is neither: Sam's import of
+ * 548 heard lines read "paired 648 of them" (import map X-avtt-paired-count).
+ */
+export function pairedLineCounts(plans: readonly Pick<CueLinkPlan, "textCellId" | "cueCellId">[]): {
+  heardLines: number
+  subtitleLines: number
+} {
+  return {
+    heardLines: new Set(plans.map((p) => p.cueCellId)).size,
+    subtitleLines: new Set(plans.map((p) => p.textCellId)).size,
+  }
+}
+
+/**
  * Tokenise for comparison.
  *
  * NOT `normalizeSource`/`sourceSimilarity` from lib/analysis/buckets.ts, which

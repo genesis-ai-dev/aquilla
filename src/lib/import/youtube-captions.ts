@@ -1,5 +1,5 @@
 import type { TranslatableString } from "../parsers/core-types"
-import { extractSbvStrings } from "../parsers/sbv"
+import { countSbvUnreadableTimes, extractSbvStrings } from "../parsers/sbv"
 import { extractSrtStrings, extractVttStrings,
   repairShortFormCueTimestamps } from "../parsers/subtitle"
 import { youTubeVideoId } from "../video/youtube"
@@ -15,6 +15,9 @@ export interface PreparedYouTubeCaptionImport {
   name: string
   videoUrl: string
   strings: TranslatableString[]
+  /** Cues whose time could not be read, so their wording is not in `strings`.
+   *  The preview says how many, with Upload files' own notice. */
+  droppedCues: number
   rawSource?: string
   rawSourceFormat: "srt" | "vtt" | "sbv"
   rawBytes?: ArrayBuffer
@@ -59,12 +62,13 @@ export function prepareYouTubeCaptionImport(
     : extension === "srt" ? extractSrtStrings(captionBody)
       : extractVttStrings(repaired.text)
   if (!strings.length) throw new Error("The caption export contains no timed text.")
-  const expectedCues = extension === "sbv"
-    ? captionBody.split(/\n\s*\n/).filter(block => block.trim()).length
-    : repaired.cueLines
-  if (strings.length !== expectedCues) {
-    throw new Error("Some caption cues could not be read. Correct their timings and import again.")
-  }
+  // A cue whose time can't be read is left out and counted, as Upload files
+  // does with the same file (import map X-D-silent-cue-drop, M-caption-rules:
+  // one rule behind every door). Before, a typo the count missed vanished
+  // without a word, and one it caught refused the whole file.
+  const droppedCues = extension === "sbv"
+    ? countSbvUnreadableTimes(captionBody)
+    : Math.max(0, repaired.cueLines - strings.length)
   if (strings.some(cue => !cue.original.trim()
       || !Number.isFinite(cue.start) || !Number.isFinite(cue.end)
       || cue.start! < 0 || Math.round(cue.end! * 1000) <= Math.round(cue.start! * 1000))) {
@@ -74,7 +78,7 @@ export function prepareYouTubeCaptionImport(
   const name = input.captionName.replace(/\.(srt|vtt|sbv)$/i, "").trim()
   if (!name) throw new Error("Give the caption export a file name.")
   return {
-    name, videoUrl: `https://www.youtube.com/watch?v=${videoId}`, strings,
+    name, videoUrl: `https://www.youtube.com/watch?v=${videoId}`, strings, droppedCues,
     rawSourceFormat: extension,
     ...(input.rawBytes !== undefined
       ? { rawBytes: input.rawBytes } : { rawSource: input.captionText }),

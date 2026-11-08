@@ -214,6 +214,9 @@ export const editor = defineNamespace({
     "editor.media.choose": "Choose media file",
     "editor.media.adding": "Adding media to this file…",
     "editor.media.urlLabel": "Media URL",
+    // D#13: not Link a film's placeholder. This field becomes Source audio, and
+    // a YouTube link is refused here.
+    "editor.media.urlPlaceholder": "A direct link to an audio or video file (not YouTube)",
     "editor.media.attach": "Attach",
     "editor.media.urlHint":
       "Or paste a direct media URL — the clip streams from its source; only " +
@@ -917,8 +920,12 @@ export const editor = defineNamespace({
     // AQU-646 stage 6: one menu for everything that attaches material to the
     // file already open, as distinct from Import, which mints a new file.
     "editor.timeline.sourcesMenu": "Sources",
-    "editor.timeline.sourcesTip": "Film and sources",
-    "editor.timeline.sourcesMenuAria": "Attach material to this file",
+    // D#7: why a Sources row is greyed, behind its (i).
+    "editor.timeline.sourcesFilmLeadOnly": "Only a Project Lead or above can link or change the film.",
+    "editor.timeline.sourcesCuesMaintainerOnly": "Only a Maintainer or above can import Source cues.",
+    "editor.timeline.sourcesSubtitlesMaintainerOnly": "Only a Maintainer or above can extract subtitles.",
+    "editor.timeline.sourcesSubtitlesAlreadyIn": "This file's subtitles are already imported.",
+    "editor.timeline.sourcesCharactersMaintainerOnly": "Only a Maintainer or above can import characters.",
     "editor.timeline.checkMenu": "Check",
     "editor.timeline.checkMenuLinking": "Linking",
     "editor.timeline.checkMenuAria": "Check this file's pairings and characters",
@@ -1230,6 +1237,20 @@ export const editor = defineNamespace({
     "editor.timeline.videoPanePicture": "picture",
     "editor.timeline.videoPaneBar": "bar",
     "editor.timeline.videoPaneErrorTitle": "This film could not be loaded",
+    // Import map X-D-youtube-film-card: the reason under the title, in place of
+    // the raw address. The YouTube ones follow the iframe player's error codes.
+    "editor.timeline.videoPaneErrorYouTube":
+      "YouTube didn't play this video here. Check that it plays on YouTube and that you're online, then retry.",
+    "editor.timeline.videoPaneErrorYouTubeMissing":
+      "YouTube says this video is private, removed, or doesn't exist.",
+    "editor.timeline.videoPaneErrorYouTubeNoEmbed":
+      "The video's owner doesn't let it play on other sites. They can allow it in YouTube Studio.",
+    "editor.timeline.videoPaneErrorYouTubeBadLink": "This link doesn't point to a YouTube video.",
+    "editor.timeline.videoPaneErrorUpload":
+      "The film uploaded with this file didn't play. Check that you're online, then retry.",
+    "editor.timeline.videoPaneErrorLink":
+      "The film at {host} didn't play. Check that the link still works.",
+    "editor.timeline.videoPaneOpenOnYouTube": "Open on YouTube",
     // No `videoPaneRetry` or `videoPaneChangeVideo` here: the pane's two
     // buttons reuse `common.retry` and `editor.timeline.changeVideo`. Minting a
     // second key for a word the catalog already carries gives a translator two
@@ -1280,13 +1301,21 @@ export const editor = defineNamespace({
     // The link-video dialog and the chip strip's field labels.
     "editor.timeline.linkVideoTitleChange": "Change the linked film",
     "editor.timeline.linkVideoTitleNew": "Link a film",
-    // AQU-2259: it used to say the video always plays muted. It is muted only
-    // while the file's uploaded recording is what plays (MediaVideoPane).
-    "editor.timeline.linkVideoDescription":
-      "Paste the address of the film this file was dubbed from. It plays beside the text, in step " +
-      "with the timeline. When the file has an uploaded recording, you hear that recording and the " +
-      "film is muted; a film on YouTube keeps its own sound until you pick the recording from its " +
-      "Sound menu.",
+    // D#17 (import map, Nov 2): one short line, the rest behind a click (i).
+    // The film's sound: a linked film plays with its own sound; with an
+    // uploaded recording beside it, that recording is what plays while the
+    // file follows its source (MediaVideoPane), and following the recordings
+    // the film's own sound plays straight through (AQU-2253).
+    "editor.timeline.linkVideoLead": "Paste the address of the film this file was dubbed from.",
+    "editor.timeline.linkVideoMoreLabel": "About linking a film",
+    "editor.timeline.linkVideoMore":
+      "It plays beside the text, in step with the timeline, with its own sound. A YouTube link or " +
+      "a direct link to a video file both work. When the file also has an uploaded recording of its " +
+      "source, you hear that recording while the file follows its source and the film is muted; a " +
+      "film on YouTube keeps its own sound until you pick the recording from its Sound menu. " +
+      "Following the recordings, the film plays with its own sound.",
+    // D#13: not the empty-file card's placeholder, which takes a different link.
+    "editor.timeline.linkVideoPlaceholder": "A YouTube link, or a link to a video file",
     "editor.timeline.linkVideoAddressLabel": "Film address",
     "editor.timeline.linkVideoInvalid":
       "That doesn't look like a web address. It should start with http:// or https://.",
@@ -1892,9 +1921,41 @@ export const editor = defineNamespace({
     "editor.timeline.audioVttImportCues": "Import {count} cues",
     "editor.timeline.audioVttNoCues":
       "This doesn't look like an audio VTT — no timed cues found.",
+    // The audio VTT import and removal toasts (were hard-coded English). The
+    // finished import counts heard lines, never pairings: pairing is
+    // many-to-many (import map X-avtt-paired-count).
+    "editor.timeline.audioCuesImporting": plural({
+      one: "Importing {count} heard line…",
+      other: "Importing {count} heard lines…",
+    }),
+    "editor.timeline.audioCuesPairing": "Pairing the heard lines with the subtitle lines…",
+    "editor.timeline.audioCuesPairingProgress": "Pairing the heard lines with the subtitle lines… {percent}%",
+    "editor.timeline.audioCuesSavingPairs": "Saving the pairings…",
+    "editor.timeline.audioCuesImported": plural({
+      one: "Imported {count} heard line.",
+      other: "Imported {count} heard lines.",
+    }),
+    "editor.timeline.audioCuesFoundLines": plural({
+      one: "{count} of them found its subtitle line.",
+      other: "{count} of them found their subtitle lines.",
+    }),
+    "editor.timeline.audioCuesPairingStopped":
+      "The heard lines are in, but pairing them with the subtitle lines didn't finish. You can pair them by hand.",
+    "editor.timeline.audioCuesImportOffline": "Heard lines can't be imported while offline.",
+    "editor.timeline.audioCuesImportFailed": "Couldn't import the heard lines.",
+    "editor.timeline.audioCuesImportFailedReason": "Couldn't import the heard lines: {reason}",
+    "editor.timeline.audioCuesReplacedNotTidied":
+      "The new heard lines are in, but the ones they replaced couldn't be tidied away.",
+    "editor.timeline.audioCuesRemoving": "Removing the Source cues…",
+    "editor.timeline.audioCuesRemoved":
+      "Removed the Source cues. A Project Lead can bring them back from Recently deleted.",
+    "editor.timeline.audioCuesRemoveOffline": "The Source cues can't be removed while offline.",
+    "editor.timeline.audioCuesRemoveFailed": "Couldn't remove the Source cues.",
+    "editor.timeline.audioCuesRemoveFailedReason": "Couldn't remove the Source cues: {reason}",
     "editor.timeline.importFileEmpty": "That file is empty.",
-    "editor.timeline.importTooLargeText":
-      "\"{fileName}\" is larger than the 10 MB limit for text imports.",
+    // Import map M-caption-rules: one limit behind every door, the one Upload
+    // files has (caption-file-limit.ts).
+    "editor.timeline.importTooLarge": "\"{fileName}\" is larger than the {limit} limit for imports.",
     // One key, three call sites: the answer to "are you sure?" is the same
     // sentence in the audio-VTT removal and in both character clears.
     "editor.timeline.keepThem": "Keep them",
@@ -1902,7 +1963,7 @@ export const editor = defineNamespace({
     // — Extract subtitles dialog (AQU-1139) ————————————————————
     "editor.timeline.subtitleSourceTitle": "Extract subtitles",
     "editor.timeline.subtitleSourceDescription":
-      "Read the subtitle text and timings out of a sidecar file into " +
+      "Read the subtitle text and timings out of the subtitle file that came with the clip into " +
       "\"{fileName}\", so the clip already on it has something to translate.",
     "editor.timeline.subtitleSourceChoose": "Choose subtitle file",
     "editor.timeline.subtitleSourcePickHint":
@@ -1912,8 +1973,6 @@ export const editor = defineNamespace({
       "{count} cues, none of them timed.",
     "editor.timeline.subtitleSourceRepairedShortForm":
       "{count} short-form timestamps read as minutes and seconds.",
-    "editor.timeline.subtitleSourceDroppedCues":
-      "{count} lines carried no usable text and were skipped.",
     "editor.timeline.subtitleSourceUntimedCues":
       "{count} cues carry no timing and won't appear on the timeline.",
     "editor.timeline.subtitleSourceImport": "Extract cues",
@@ -1998,8 +2057,6 @@ export const editor = defineNamespace({
     "editor.timeline.charactersAssignCount": "Assign {count} characters",
     "editor.timeline.charactersAssign": "Assign characters",
     "editor.timeline.charactersNoRows": "That spreadsheet has no rows.",
-    "editor.timeline.importTooLargeSheet":
-      "\"{fileName}\" is larger than the 10 MB limit for imports.",
 
     // — Character-check drawer (where the two sheets disagree) ——————
     "editor.timeline.characterCheckSpeakerSettled":
@@ -4512,6 +4569,23 @@ export const editor = defineNamespace({
         description:
           "Status line replacing the drop zone while the chosen media is being " +
           "attached, beside a spinner. Present-participle status text.",
+      },
+      "editor.timeline.linkVideoMoreLabel": {
+        description:
+          "Screen-reader name of the (i) button beside the Link a film dialog's one-line " +
+          "description. Clicking it opens the rest of the explanation in place, under the line.",
+      },
+      "editor.timeline.linkVideoPlaceholder": {
+        description:
+          "Grey example text inside the Link a film dialog's address field, shown while it is " +
+          "empty. Says what kind of address the field takes: a YouTube link or a direct link to " +
+          "a video file.",
+      },
+      "editor.media.urlPlaceholder": {
+        description:
+          "Grey example text inside the address field on an empty file's media card, shown while " +
+          "it is empty. This field takes a direct link to an audio or video file, which becomes the " +
+          "file's source recording; a YouTube link does not work here, so it says so.",
       },
       "editor.media.urlLabel": {
         description:
@@ -7278,6 +7352,49 @@ export const editor = defineNamespace({
           "playback; when off the user scrolls freely. 'Playhead' is the audio/video " +
           "term for the current-position marker.",
       },
+      "editor.timeline.videoPaneErrorLink": {
+        description:
+          "Reason on the Film panel's error card when a film linked by its web address won't " +
+          "play. Replaces the raw address the card used to print.",
+        placeholders: { host: "The web site the film is on, e.g. 'cdn.example.com'. Never translate it." },
+      },
+      "editor.timeline.audioCuesImporting": {
+        description: "Toast while an audio VTT's heard lines (the lines actually spoken in the film) are being imported.",
+        placeholders: { count: "How many heard lines the file has." },
+      },
+      "editor.timeline.audioCuesPairingProgress": {
+        description: "Toast while the imported heard lines are paired with the file's subtitle lines.",
+        placeholders: { percent: "How much of the pairing is done, a whole number from 0 to 100." },
+      },
+      "editor.timeline.audioCuesImported": {
+        description:
+          "First sentence of the toast when an audio VTT import finishes. A second sentence " +
+          "(editor.timeline.audioCuesFoundLines) may follow it.",
+        placeholders: { count: "How many heard lines were imported." },
+      },
+      "editor.timeline.audioCuesFoundLines": {
+        description:
+          "Second sentence of the finished import's toast: how many of the imported heard lines " +
+          "were paired with a subtitle line. 'them' is the heard lines of the first sentence.",
+        placeholders: { count: "How many heard lines were paired with at least one subtitle line." },
+      },
+      "editor.timeline.audioCuesImportFailedReason": {
+        description: "Toast when an audio VTT import fails, followed by the reason.",
+        placeholders: { reason: "The reason it failed, already worded. Never translate it." },
+      },
+      "editor.timeline.audioCuesRemoveFailedReason": {
+        description: "Toast when removing the Source cues fails, followed by the reason.",
+        placeholders: { reason: "The reason it failed, already worded. Never translate it." },
+      },
+      "editor.timeline.importTooLarge": {
+        description:
+          "Error in the Source cues, Subtitles and Characters dialogs when the picked file is " +
+          "over the import size limit.",
+        placeholders: {
+          fileName: "The picked file's name, e.g. 'episode-101.vtt'. Never translate it.",
+          limit: "The size limit, already formatted, e.g. '95.0 MB'. Never translate it.",
+        },
+      },
       "editor.timeline.changeVideo": {
         description:
           "The same toolbar button when a video is already attached; it replaces the " +
@@ -7341,12 +7458,13 @@ export const editor = defineNamespace({
           "middle dot separates the two — keep the two-word shape.",
         maxLength: 22,
       },
-      "editor.timeline.sourcesMenuAria": {
+      "editor.timeline.sourcesMenu": {
         description:
-          "Accessible name of the timeline's Sources menu button, whose visible " +
-          "label is just 'Sources'. Names what the menu does: it attaches material " +
-          "— a film, the heard lines, a character sheet — to the file already open, " +
-          "as opposed to the Import button, which creates a new file.",
+          "The timeline's Sources menu: its heading inside the menu, and also the hover text and " +
+          "screen-reader name of the icon-only top-bar button that opens it. The menu holds the " +
+          "linked film first, then the file's other sources (heard lines, subtitles, character " +
+          "sheets). One word, the same in all three places.",
+        maxLength: 24,
       },
       "editor.timeline.checkMenuAria": {
         description:
@@ -7479,12 +7597,6 @@ export const editor = defineNamespace({
           "Hover text of the Timing control in the media view's top bar, which shows only the current " +
           "choice ('Follows source' / 'Follows recordings') with no label of its own.",
         maxLength: 20,
-      },
-      "editor.timeline.sourcesTip": {
-        description:
-          "Hover text of the top bar's Sources button, which is only an icon: its menu holds the " +
-          "linked film first, then the file's other sources (audio lines, character sheets, subtitles).",
-        maxLength: 40,
       },
       "editor.timeline.timingMenuAria": {
         description:
@@ -10614,16 +10726,10 @@ export const editor = defineNamespace({
           "track for the first time.",
         placeholders: { count: "Number of cues that will be imported." },
       },
-      "editor.timeline.importTooLargeText": {
-        description:
-          "Inline refusal shown in the dialog when the picked text file is over " +
-          "the size limit. '10 MB' is a unit and a number; keep it as it is.",
-        placeholders: { fileName: "Name of the file the user picked. Content — never translate it." },
-      },
       "editor.timeline.subtitleSourceDescription": {
         description:
           "Explanatory line under the Extract subtitles dialog's title: where the " +
-          "cues come from (a sidecar file that shipped with the clip) and which " +
+          "cues come from (the subtitle file that came with the clip) and which " +
           "file they will land on.",
         placeholders: {
           fileName: "Name of the time-ordered file the cues will be written to, e.g. 'survival-ep1'. Content — never translate it.",
@@ -10649,12 +10755,6 @@ export const editor = defineNamespace({
           "Note under the file summary: some timestamps were written in a short " +
           "form and were read as minutes and seconds rather than hours and minutes.",
         placeholders: { count: "Number of timestamps that were read that way." },
-      },
-      "editor.timeline.subtitleSourceDroppedCues": {
-        description:
-          "Note under the file summary: some lines looked like a cue but had no " +
-          "text under them, so nothing was imported for them.",
-        placeholders: { count: "Number of lines skipped." },
       },
       "editor.timeline.subtitleSourceUntimedCues": {
         description:
@@ -10872,12 +10972,6 @@ export const editor = defineNamespace({
           "Confirm button of the characters dialog once a sheet has been read and " +
           "accepted, naming how many lines it will write to.",
         placeholders: { count: "Number of lines that will be given a character." },
-      },
-      "editor.timeline.importTooLargeSheet": {
-        description:
-          "Inline refusal shown in the dialog when the picked spreadsheet is over " +
-          "the size limit. '10 MB' is a unit and a number; keep it as it is.",
-        placeholders: { fileName: "Name of the file the user picked. Content — never translate it." },
       },
       "editor.timeline.characterCheckSpeakerSettled": {
         description:

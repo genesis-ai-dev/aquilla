@@ -18,6 +18,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 
 import { Button } from "@/components/ui/button"
+import { FileDropBox } from "@/components/ui/file-drop-box"
 import {
   Dialog,
   DialogContent,
@@ -27,7 +28,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { parseCsvToSheet, parseXlsxToSheets, type SpreadsheetSheet } from "@/lib/parsers/spreadsheet"
-import { decodeImportText, MAX_UNKNOWN_TEXT_BYTES } from "@/lib/import/ai-recipe"
+import { decodeImportText } from "@/lib/import/ai-recipe"
+import { captionFileLimitLabel, MAX_CAPTION_FILE_BYTES } from "@/lib/import/caption-file-limit"
 import {
   guessCharacterColumns,
   planCharacterAssignments,
@@ -40,7 +42,7 @@ import {
   type AlignableCue,
   type AudioCharacterPlan,
 } from "@/lib/import/audio-character-sheet"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 
 /**
@@ -95,6 +97,9 @@ interface Picked {
   sheetIndex: number
   /** Which button was used. The file is then checked against it. */
   kind: CharacterSheetKind
+  /** Dropped on the box rather than picked under a button, so no button said
+   *  which sheet it is: it is read as the side it fits (X-G-dead-drop). */
+  dropped?: boolean
 }
 
 export function ImportCharactersDialog(props: Props) {
@@ -124,7 +129,7 @@ function ImportCharactersContent({
   onClearAudio,
   onCancel,
 }: Props) {
-  const t = useT()
+  const { t, locale } = useI18n()
   const [picked, setPicked] = useState<Picked | null>(null)
   const [error, setError] = useState<string | null>(null)
   const readGeneration = useRef(0)
@@ -194,25 +199,31 @@ function ImportCharactersContent({
 
   const fitsSubtitle = asSubtitle ? asSubtitle.assignments.length : 0
   const fitsAudio = asAudio ? asAudio.assignments.length : 0
+  // A dropped sheet came with no button to say which it is, so it is read as
+  // the side it fits; the "use the other button" refusal below is only ever
+  // for a sheet picked under a button (X-G-dead-drop).
+  const kind: CharacterSheetKind | null = picked == null ? null
+    : picked.dropped ? (fitsAudio > fitsSubtitle * 2 ? "audio" : "subtitle")
+      : picked.kind
   const wrongKind =
     picked != null &&
-    (picked.kind === "audio" ? fitsSubtitle > fitsAudio * 2 : fitsAudio > fitsSubtitle * 2)
+    (kind === "audio" ? fitsSubtitle > fitsAudio * 2 : fitsAudio > fitsSubtitle * 2)
 
-  const plan = !wrongKind && picked?.kind === "subtitle" ? asSubtitle : null
-  const audioPlan = !wrongKind && picked?.kind === "audio" ? asAudio : null
+  const plan = !wrongKind && kind === "subtitle" ? asSubtitle : null
+  const audioPlan = !wrongKind && kind === "audio" ? asAudio : null
   const active: { assignments: unknown[]; unmatchedRows: number[] } | null = plan ?? audioPlan
   // THE refusal. A row that matches no line means this sheet is not this
   // episode's — going ahead would put hundreds of characters on lines they do
   // not belong to, silently. A CELL with no row is the opposite and is fine.
   const mismatched = active != null && active.unmatchedRows.length > 0
 
-  const handleFile = async (file: File, kind: CharacterSheetKind) => {
+  const handleFile = async (file: File, kind: CharacterSheetKind, dropped = false) => {
     const generation = ++readGeneration.current
     setPicked(null)
     setError(null)
     if (file.size === 0) return setError(t("editor.timeline.importFileEmpty"))
-    if (file.size > MAX_UNKNOWN_TEXT_BYTES) {
-      return setError(t("editor.timeline.importTooLargeSheet", { fileName: file.name }))
+    if (file.size > MAX_CAPTION_FILE_BYTES) {
+      return setError(t("editor.timeline.importTooLarge", { fileName: file.name, limit: captionFileLimitLabel(locale) }))
     }
     try {
       const buffer = await file.arrayBuffer()
@@ -224,7 +235,7 @@ function ImportCharactersContent({
       if (sheets.length === 0 || (sheets[0].rows.length ?? 0) < 2) {
         return setError(t("editor.timeline.charactersNoRows"))
       }
-      setPicked({ fileName: file.name, sheets, sheetIndex: 0, kind })
+      setPicked({ fileName: file.name, sheets, sheetIndex: 0, kind, ...(dropped ? { dropped } : {}) })
     } catch (cause) {
       if (readGeneration.current !== generation) return
       setError(cause instanceof Error ? cause.message : String(cause))
@@ -286,14 +297,14 @@ function ImportCharactersContent({
                 <p>
                   <RichMessage
                     k={
-                      picked!.kind === "audio"
+                      kind === "audio"
                         ? "editor.timeline.charactersWrongKindAudio"
                         : "editor.timeline.charactersWrongKindSubtitle"
                     }
                     values={{
                       sheet: (
                         <span className="font-medium">
-                          {picked!.kind === "audio"
+                          {kind === "audio"
                             ? t("editor.timeline.charactersSubtitleSheet")
                             : t("editor.timeline.charactersAudioSheet")}
                         </span>
@@ -314,7 +325,7 @@ function ImportCharactersContent({
                       lead: (
                         <span className="font-medium">
                           {t(
-                            picked!.kind === "audio"
+                            kind === "audio"
                               ? "editor.timeline.charactersMismatchLeadAudio"
                               : "editor.timeline.charactersMismatchLeadSubtitle",
                             {
@@ -341,7 +352,7 @@ function ImportCharactersContent({
                       lead: (
                         <span className="font-medium">
                           {t(
-                            picked!.kind === "audio"
+                            kind === "audio"
                               ? "editor.timeline.charactersAssignedLeadAudio"
                               : "editor.timeline.charactersAssignedLeadSubtitle",
                             { count: active!.assignments.length },
@@ -362,7 +373,7 @@ function ImportCharactersContent({
                 {(plan?.cellsWithoutRow ?? audioPlan?.cuesWithoutRow ?? 0) > 0 && (
                   <p className="mt-1 text-muted-foreground">
                     {t(
-                      picked!.kind === "audio"
+                      kind === "audio"
                         ? "editor.timeline.charactersWithoutRowAudio"
                         : "editor.timeline.charactersWithoutRowSubtitle",
                       { count: plan?.cellsWithoutRow ?? audioPlan?.cuesWithoutRow ?? 0 },
@@ -403,7 +414,8 @@ function ImportCharactersContent({
             )}
           </div>
         ) : (
-          <div className="flex flex-col items-center gap-3 rounded-lg border-2 border-dashed border-muted p-6 text-center">
+          <FileDropBox className="gap-3" testId="import-characters-drop"
+            onFile={(file) => void handleFile(file, "subtitle", Boolean(audioCues && audioCues.length > 0))}>
             {/* TWO SHEETS, KEYED TO OPPOSITE SIDES of the same script — one row
                 per subtitle line, one per heard line. Either can come first;
                 whichever exists reaches the other side through the links, and
@@ -460,7 +472,7 @@ function ImportCharactersContent({
                 </>
               ) : null}
             </p>
-          </div>
+          </FileDropBox>
         )}
 
         {error && (

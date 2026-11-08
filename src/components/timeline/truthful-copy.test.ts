@@ -21,7 +21,8 @@ describe("sentences that match the app (AQU-2259)", () => {
   })
 
   it("the Link a video dialog does not promise the video always plays muted", () => {
-    const description = t("editor.timeline.linkVideoDescription")
+    // Its one short line opens this text from a click (i) since import map D#17.
+    const description = t("editor.timeline.linkVideoMore")
     expect(description).not.toMatch(/muted and in step/)
     expect(description).toMatch(/uploaded recording/)
     expect(description).toMatch(/film on YouTube keeps its own sound/)

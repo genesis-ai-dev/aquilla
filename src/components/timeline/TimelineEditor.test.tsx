@@ -5426,8 +5426,9 @@ describe("TimelineEditor — the track names pass under the Tracks header (AQU-2
     expect(screen.getByTestId("tl-gutter-rule").classList).toContain("z-20")
   })
 
-  // Arabic and Urdu flip `<html dir>`, and the grid with it: the column goes on
-  // the right, and the edge it shares with the lanes is its LEFT one.
+  // Logical sides name the edge the column shares with the lanes. The grid is
+  // pinned left to right (AQU-2340), so that edge is the right one in every
+  // language; the logical names keep it true if that ever changes.
   it("puts the divider and the rule on the lanes' edge in either direction", () => {
     render(<TimelineEditor {...props} onReorderTrack={() => {}} />)
     expect(header().classList).toContain("border-e")

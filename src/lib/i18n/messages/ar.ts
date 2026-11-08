@@ -2810,8 +2810,6 @@ export const ar: Catalog = {
   "org.egressSettings.roleOptionViewer": "{role} — أي شخص لديه وصول إلى المشروع",
   "org.egressSettings.roleOptionOwner": "{role} — الافتراضي",
   "org.egressSettings.saveFailedFallback": "تعذّر حفظ صلاحية التصدير.",
-  "org.addLanguagePopover.triggerLabel": "اللغة",
-  "org.addLanguagePopover.conflictError": "تغيّرت اللغات في مكان آخر. تمت إعادة التحميل — حاول الإضافة مرة أخرى.",
   "org.setupChecklist.heading": "ابدأ باستخدام مؤسستك",
   "org.setupChecklist.dismissAriaLabel": "إغلاق قائمة المهام",
   "org.setupChecklist.progress": "{done} من {total} مكتمل",

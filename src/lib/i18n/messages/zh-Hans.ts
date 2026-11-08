@@ -2808,8 +2808,6 @@ export const zh_Hans: Catalog = {
   "org.egressSettings.roleOptionViewer": "{role}——任何有项目权限的人",
   "org.egressSettings.roleOptionOwner": "{role}——默认",
   "org.egressSettings.saveFailedFallback": "无法保存导出权限。",
-  "org.addLanguagePopover.triggerLabel": "语言",
-  "org.addLanguagePopover.conflictError": "语言已在别处变更。已重新加载 — 请再次尝试添加。",
   "org.setupChecklist.heading": "让您的组织开始运作",
   "org.setupChecklist.dismissAriaLabel": "关闭检查清单",
   "org.setupChecklist.progress": "已完成 {total} 之 {done}",

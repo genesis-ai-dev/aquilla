@@ -45,11 +45,37 @@ the target's `NEON_*` credentials, not just the Cloudflare pair: without them th
 guard fails closed on a missing credential instead of reporting the schema state,
 which published the SPA while neither Worker could go out (AQU-1539).
 
-**Migrate first, then deploy.** `npm run neon:apply:dev` / `neon:apply:prod`
+**Migrate first, then deploy.** `pnpm neon:apply:dev` / `neon:apply:prod`
 applies pending `db/postgres/migrations/` files to the target Neon branch; only
-then does any deploy command get past its guard. Migrations are never applied
-automatically by a deploy path or by an agent — that is a deliberate human step
-(`npm run neon:status:dev` / `:prod` is the read-only check the guard runs).
+then does any deploy command get past its guard. Who applies differs by target:
+
+- **Production: a person.** `neon:apply:prod` (with the `--snapshot` decision
+  below) is a deliberate human step; no deploy path or agent applies production
+  migrations, and `deploy:aquilla` and the hourly release line fail closed on a
+  pending one.
+- **Development: the merge.** While the repository variable `AUTO_DEV_DEPLOY` is
+  `on` (it has been since 2026-11-02), `dev-deploy.yml` runs `neon:apply:dev` on
+  every push to `dev` and then `deploy:aquilla:dev` — see "Deployment
+  ownership". Running `deploy:aquilla:dev` by hand still means applying first.
+
+`neon:status:dev` / `:prod` is the read-only check the guard runs, and `apply`
+ends with the same check: every migration file must have its `schema_migrations`
+row, and the tables, columns, named constraints, indexes and RLS policies in
+`db/postgres/schema.sql` must match the live database. A ledger row whose file
+is not in the tree is only a warning (`⚠ ledger row has no matching file:`); a
+live schema that differs from `schema.sql` is drift and fails (`✗ schema
+drift:` … `FAIL — do not deploy workers against this DB`), so the dev deploy
+stops before its "Deploy dev" step and dev.aquilla.app stays on the previous
+build. **Never apply an unmerged branch's migration to the shared dev Neon
+branch.** Previews run on development storage and do not apply migrations, so
+`neon:apply:dev` from a PR branch looks like the way to exercise one — but dev's
+`schema.sql` lacks that change, so every dev deploy fails on drift from then
+until the nightly refresh (`dev-neon-refresh.yml`, 04:07 Eastern) restores dev
+from production; the warning line names the file, and so the PR. (2026-11-05,
+PR #1838 `0194_google_login.sql`: twenty-odd red dev deploys and dev.aquilla.app
+a day behind `dev`.) Exercise a branch migration on the local stack
+(`pnpm neon:apply:local`) instead; if dev Neon must carry it for a live walk,
+say so in the PR and expect dev deploys to stay red until the next refresh.
 
 Each file commits together with its `schema_migrations` row, so a migration is
 either applied and recorded or neither; a file needing `CREATE INDEX
@@ -73,26 +99,34 @@ org's encrypted Monday tokens and the dev Worker could otherwise use them
 (AQU-1775; `pnpm neon:scrub:dev` runs the same scrub by hand, `--dry-run` to
 count first). **The restore copies rows, not blobs**, so every audio take it
 brings over points at an R2 object `aquilla-snapshots-dev` does not hold and
-playback on `dev.aquilla.app` 404s;
+playback on `dev.aquilla.app` 404s — and every imported file's uploaded
+original (`file_source_blobs.r2_key` / `artifacts.r2_key`) is likewise a row
+without bytes, so its export 404s "source bytes missing from storage";
 `pnpm neon:copy-dev-audio:dev -- --project <id>` copies that one project's
-referenced audio across, `--dry-run` to report first (AQU-2114). It copies only
-what the nightly cleanup protects — the same reference queries, shared in
-`db/shared/media-refs.ts`, so dev never copies what dev then deletes — needs
-`R2_ACCOUNT_ID` plus the AQU-2113 copy key
+referenced audio and originals across, `--dry-run` to report first (AQU-2114).
+For takes and voice clips it copies only what the nightly cleanup protects —
+the same reference queries, shared in `db/shared/media-refs.ts`, so dev never
+copies what dev then deletes; for originals, exactly the keys the project's
+rows name (`loadOriginalRefs` in `scripts/dev-audio-copy.ts`), under
+`artifacts/<project>/` or the legacy `projects/<project>/files/<file>/source/`
+shape. It needs `R2_ACCOUNT_ID` plus the AQU-2113 copy key
 (`R2_DEV_MEDIA_COPY_ACCESS_KEY_ID` / `R2_DEV_MEDIA_COPY_SECRET_ACCESS_KEY`), and
 refuses any destination but the dev bucket and any database but the dev branch.
 
-**Audio follows the rows, as its own step.** The restore copies every audio row
-and none of the bytes, so the scheduled refresh ends with a `Copy prod audio to
-dev` step that runs the copy across every project with media, most recently
-active first (AQU-2115, `pnpm neon:copy-dev-audio-all:dev`). It is the LAST step
+**Media follows the rows, as its own step.** The restore copies every audio
+and original row and none of the bytes, so the scheduled refresh ends with a
+`Copy prod media to dev` step that runs the copy across every project with
+media, most recently active first (AQU-2115,
+`pnpm neon:copy-dev-audio-all:dev`). It is the LAST step
 in the job on purpose: the restore has already succeeded by then, so a copy
 failure turns only that step red and `dev.aquilla.app` still shows the data the
 restore wrote. The first backfill (~561k objects / 167 GB) is bigger than one
-run, so each run takes a wall-clock budget (`DEV_AUDIO_COPY_BUDGET_MINUTES`),
+run, so each run takes a wall-clock budget (`DEV_MEDIA_COPY_BUDGET_MINUTES`),
 stops at a project boundary, and resumes on the next run — there is no cursor,
 only the rule that an object already in dev is never copied twice. Every run
-writes its counts to the run page's summary. Two dispatch inputs bracket it:
+writes its counts to the run page's summary, with the source originals broken
+out so a still-404ing export can be told from a backfill that has not reached
+the project yet. Two dispatch inputs bracket it:
 `preflight_only` copies nothing, and `media_copy_only` copies without restoring
 (use it to push the backfill along during the day, or to re-run after a
 failure). Without `R2_ACCOUNT_ID` and the AQU-2113 copy key the step prints a
@@ -341,6 +375,42 @@ release (add first, remove in a later release). Apply the release's migrations
 to the target Neon branch *before* step 3 — every surface's deploy guard fails
 closed on a pending migration, and nothing publishes until it passes.
 
+## Desktop
+
+The Tauri shell (`src-tauri/`) updates on two channels
+(`docs/superpowers/specs/2026-11-05-desktop-hot-bundle.md`):
+
+- **Web bundle — hourly, automatic.** `deploy:aquilla` ends with
+  `tsx scripts/desktop-bundle-publish.ts production`, after `tag-release.sh`, so
+  the calver tag is the bundle version. It tars `dist/`, signs a manifest
+  (ed25519 over the spec's canonical string) and uploads
+  `production/<calver>/bundle.tar.gz` and `production/latest.json` to the R2
+  bucket `aquilla-desktop-bundles`, public at `https://desktop-bundles.aquilla.app`
+  (custom domain attached in the Cloudflare dashboard, not in this repo). The
+  shell fetches `latest.json` on launch and when it comes online, verifies the
+  signature, stages the bundle and applies it on the next launch. `pnpm
+  desktop:bundle:publish development --dry-run` builds and prints the manifest
+  without uploading.
+- **Native shell — rare, signed.** `tauri-release.yml` on a `v*` tag, gated by the
+  `desktop-release-signing` environment; its `pnpm run build:hosted` step embeds a
+  production-host fallback bundle. The existing Tauri updater (GitHub Releases
+  `latest.json`) ships it.
+
+Secrets:
+
+| Secret | Used by |
+| --- | --- |
+| `DESKTOP_BUNDLE_SIGNING_KEY` | `release-deploy.yml` → `desktop-bundle-publish.ts`. PKCS#8 PEM ed25519 private key from `pnpm desktop:bundle:keygen`. Unset: the publish prints a `::warning::` and the web release still succeeds. |
+| `AQUILLA_BUNDLE_PUBKEY` | `tauri-release.yml`; the matching raw 32-byte public key (hex), compiled into the shell via `option_env!`. The workflow fails if it is empty. |
+| `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Tauri updater signature for the shell (`npx tauri signer generate`; public half in `tauri.conf.json` `plugins.updater.pubkey`). |
+| `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`, `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY` | macOS code signing + notarization. |
+| `WINDOWS_CERTIFICATE`, `WINDOWS_CERTIFICATE_PASSWORD` | Windows code signing (optional). |
+
+**Version-bump rule.** A change to any `#[tauri::command]`, IPC event name or
+capability bumps `version` in `src-tauri/tauri.conf.json` and `src-tauri/Cargo.toml`.
+That version is published as `minShellVersion` in every bundle from that commit on;
+an older shell does not download such a bundle and instead prompts for a shell update.
+
 ## Deployment ownership
 
 Live Aquilla deployments require an explicit human/operator action or one of
@@ -370,7 +440,12 @@ dedicated `aquilla-web-preview` Worker. All six production/development Workers
 remain disconnected from Git. The preview Worker has no custom domain or live
 route. Its build deploys matching auth/sync previews and never promotes a live version or changes
 production/development traffic. `versification-tool` remains disconnected
-because it has no deployable Wrangler application.
+because it has no deployable Wrangler application. A preview never applies
+migrations either: it runs the branch's Workers against the shared dev Neon
+branch as it stands, so a branch that adds a migration cannot exercise the new
+table or column on its preview until the migration is on `dev` and the dev
+deploy has applied it. "Migrate first, then deploy" above says why the answer
+is not `neon:apply:dev` from the branch.
 
 The consolidated `.github/workflows/ci.yml` runs on pull requests into `dev`
 (lint, `i18n:check`, the secret scan, unit tests, worker tests, and
@@ -461,6 +536,27 @@ can show that an upload returns at once and that a small document reaches
 "Indexed", but it CANNOT show that a large document is summarized fully in one
 run, that a long run is never shown as stalled, or that a retry cannot start a
 second job over a live one. Walk those on development or production.
+
+**A preview's Postgres is `dev`'s, and the preview deploy does not migrate it
+(AQU-1435).** Previews bind the development Hyperdrive, and that database is
+migrated only from the `dev` branch — `deploy:aquilla:dev:*` chains
+`neon:status:dev`, which exits non-zero per pending migration, so a real deploy
+cannot outrun its schema. `scripts/cloudflare-stack-preview.mjs` has no
+equivalent gate and no database credentials to run one, so a PR that adds a
+column and reads it deploys happily against a database without it, and every
+affected route answers a bare 500. Worse, a reader on a shared path (for
+example `validateApiCredential`, on every `/api/v1/external/*` request) takes a
+whole API down rather than only the surface the PR touched.
+
+The preview deploy does not fail on this — failing would cost QA the preview
+entirely — it **names** it. `scripts/cloudflare-preview-comment.mjs` reads the
+PR's file list and the QA-preview comment carries a **Postgres migrations**
+section: each file the PR adds under `db/postgres/migrations/` (such a file is
+by definition not on `dev`, hence pending on development storage), an explicit
+"this PR carries none" when there are none, or "unknown" if the listing could
+not be read. The same line goes to the build log. So read a 500 on a
+migration-bearing preview as pending schema until an operator has run `pnpm
+neon:apply:dev`, not as a defect in the change.
 
 **What to do instead.** Verify the two halves separately rather than end to end:
 

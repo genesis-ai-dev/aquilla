@@ -12,7 +12,8 @@ pub async fn open_auth_browser(app: tauri::AppHandle, auth_url: String) -> Resul
         .map_err(|e| e.to_string())
 }
 
-/// Registers the deep-link handler for `codex://auth/callback` URLs.
+/// Registers the deep-link handler for `aquilla://auth/callback` URLs
+/// (`codex://` is still accepted for older dev installs; the parser is scheme-agnostic).
 /// Call this once from `lib.rs` inside the `.setup()` closure.
 pub fn setup_deep_link_handler(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     use tauri_plugin_deep_link::DeepLinkExt;
@@ -28,7 +29,7 @@ pub fn setup_deep_link_handler(app: &tauri::App) -> Result<(), Box<dyn std::erro
     Ok(())
 }
 
-/// Parses a `codex://auth/callback?token=<jwt>&refresh=<refresh_token>` URL,
+/// Parses an `aquilla://auth/callback?token=<jwt>&refresh=<refresh_token>` URL,
 /// persists the credentials to the OS keychain, and notifies the SPA.
 fn handle_callback_url(app: &tauri::AppHandle, url_str: &str) {
     match parse_and_store(app, url_str) {

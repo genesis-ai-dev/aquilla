@@ -38,7 +38,9 @@ abandoned — if you find docs or memory describing `apps/workspace/`, `packages
 │                       #   rollout/, shim/ (D1-compatible executor over Hyperdrive)
 ├── worker/             # root SPA-serving Worker (index.ts + og/) for the production deploy
 ├── infra/modal/        # Modal services: voice_forge.py, diarization.py, omni_asr.py
-├── src-tauri/          # Tauri desktop shell
+├── src-tauri/          # Tauri desktop shell. Hot-bundle update channel: docs/superpowers/specs/
+│                       #   2026-11-05-desktop-hot-bundle.md. Rust command/event/capability
+│                       #   changes bump the tauri.conf.json version (= minShellVersion).
 ├── e2e/                # Playwright specs + page objects + JOURNEYS.md (see AGENTS.md)
 │                       #   specs/partner-integrations/<partner>/ is partner-owned
 ├── scripts/            # dev-stack.ts (local full stack), e2e-up.ts, brand/build helpers

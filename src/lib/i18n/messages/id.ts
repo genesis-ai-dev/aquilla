@@ -2806,8 +2806,6 @@ export const id: Catalog = {
   "org.egressSettings.roleOptionViewer": "{role} — siapa pun yang punya akses proyek",
   "org.egressSettings.roleOptionOwner": "{role} — bawaan",
   "org.egressSettings.saveFailedFallback": "Tidak dapat menyimpan izin pengeluaran data.",
-  "org.addLanguagePopover.triggerLabel": "Bahasa",
-  "org.addLanguagePopover.conflictError": "Daftar bahasa berubah di tempat lain. Sudah dimuat ulang — coba tambahkan lagi.",
   "org.setupChecklist.heading": "Mulai jalankan organisasi Anda",
   "org.setupChecklist.dismissAriaLabel": "Abaikan daftar periksa",
   "org.setupChecklist.progress": "{done} dari {total} selesai",

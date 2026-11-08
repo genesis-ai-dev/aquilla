@@ -2808,8 +2808,6 @@ export const zh_Hant: Catalog = {
   "org.egressSettings.roleOptionViewer": "{role}：所有具專案存取權限者",
   "org.egressSettings.roleOptionOwner": "{role}：預設",
   "org.egressSettings.saveFailedFallback": "無法儲存匯出權限。",
-  "org.addLanguagePopover.triggerLabel": "語言",
-  "org.addLanguagePopover.conflictError": "語言已在別處變更。已重新載入 — 請再次嘗試新增。",
   "org.setupChecklist.heading": "讓您的組織開始運作",
   "org.setupChecklist.dismissAriaLabel": "關閉檢查清單",
   "org.setupChecklist.progress": "已完成 {total} 之 {done}",

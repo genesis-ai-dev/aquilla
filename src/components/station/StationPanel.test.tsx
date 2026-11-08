@@ -1,9 +1,9 @@
 // AQU-2327: the Station's heading, its empty state, and its Undo, Save and Approve.
 import { useState } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { __resetStationTargetForTests, openInStation } from "@/lib/station/target"
+import { __resetStationTargetForTests, getStationTarget, openInStation } from "@/lib/station/target"
 import { StationSave } from "./StationEdits"
 import { StationHeader, StationPanel, approvalState, versionKinds, versionOf } from "./StationPanel"
 import type { StationHost, StationTake } from "./station-host"
@@ -135,6 +135,12 @@ describe("the Station", () => {
     expect(help.getAttribute("data-open")).toBe("true")
     expect(help.textContent).toContain("Drag the round knob at a top corner inward")
     expect(help.textContent).toContain("Space plays")
+    // Saving says what Save does now (found in the Nov 2 browser check: it
+    // still said edits wait for Save as new version, and the original is
+    // always kept).
+    expect(help.textContent).toContain("Save saves over the take")
+    expect(help.textContent).toContain("Save's ▾ saves a new version")
+    expect(help.textContent).not.toContain("always kept")
     fireEvent.click(info)
     expect(help.getAttribute("data-open")).toBe("false")
   })
@@ -154,8 +160,109 @@ describe("the Station", () => {
       expect(fireEvent.keyDown(screen.getByTestId("station-undo"), { key: " ", code: "Space" })).toBe(true)
       // A Russian layout types "л" on the L key: it still loops.
       expect(fireEvent.keyDown(screen.getByTestId("station"), { key: "л", code: "KeyL" })).toBe(false)
+      // AltGr+S (Polish ś) arrives as Ctrl+Alt+S: it isn't Save, and stays the page's.
+      expect(fireEvent.keyDown(screen.getByTestId("station"), { key: "ś", code: "KeyS", ctrlKey: true, altKey: true })).toBe(true)
+      // ⌘Enter stops at the Station: the timeline would rewind.
+      expect(fireEvent.keyDown(screen.getByTestId("station"), { key: "Enter", code: "Enter", metaKey: true })).toBe(false)
     } finally {
       window.removeEventListener("keydown", onWindow)
+    }
+  })
+
+  // Found in the Nov 2 browser check: Undo of a Save took the saved take away
+  // and brought back the one it was made from, but the Station said "This
+  // recording is no longer here."
+  it("when Undo takes a saved take away, it opens the take it was made from again", () => {
+    const orig = makeTake()
+    const savedAtt = { url: "frontier-audio://v.wav", type: "audio", label: "Take 2", validators: [], validatorCount: 0, referenceAudioId: "t2.webm" }
+    const cell = { id: "c331", castName: "JESUS", attachments: { "t2.webm": orig.att, "v.wav": savedAtt } } as unknown as StationTake["cell"]
+    let savedGone = false
+    let origGone = true
+    const readTake = (_cellId: string, audioId: string): StationTake | null =>
+      audioId === "v.wav" && !savedGone
+        ? { fileId: "f1", cell, att: savedAtt as StationTake["att"] }
+        : audioId === "t2.webm" && !origGone
+          ? { fileId: "f1", cell, att: orig.att }
+          : null
+    openInStation({ fileId: "f1", cellId: "c331", audioId: "v.wav" })
+    const { rerender } = render(<StationPanel host={makeHost(null, { readTake })} visible />)
+    expect(screen.getByText("Take 2 · line 331")).toBeTruthy()
+    // Undo: the saved take goes, and the take it was saved over comes back.
+    savedGone = true
+    origGone = false
+    act(() => rerender(<StationPanel host={makeHost(null, { readTake })} visible />))
+    expect(getStationTarget()?.audioId).toBe("t2.webm")
+    expect(screen.queryByTestId("station-note")).toBeNull()
+    expect(screen.getByText("Take 2 · line 331")).toBeTruthy()
+  })
+
+  it("when a take and the one it was made from are both gone, it says so", () => {
+    const savedAtt = { url: "frontier-audio://v.wav", type: "audio", label: "Take 2", validators: [], validatorCount: 0, referenceAudioId: "t2.webm" }
+    const cell = { id: "c331", attachments: { "v.wav": savedAtt } } as unknown as StationTake["cell"]
+    let gone = false
+    const readTake = (_c: string, audioId: string): StationTake | null => (audioId === "v.wav" && !gone ? { fileId: "f1", cell, att: savedAtt as StationTake["att"] } : null)
+    openInStation({ fileId: "f1", cellId: "c331", audioId: "v.wav" })
+    const { rerender } = render(<StationPanel host={makeHost(null, { readTake })} visible />)
+    gone = true
+    act(() => rerender(<StationPanel host={makeHost(null, { readTake })} visible />))
+    expect(getStationTarget()?.audioId).toBe("v.wav")
+    expect(screen.getByTestId("station-note").textContent).toMatch(/no longer here/)
+  })
+
+  // Found in the Nov 2 browser check: after Insert › Record now (or Stop,
+  // Keep, Record again) the button pressed went away and the focus with it,
+  // so Space and Esc no longer stopped the recording.
+  it("keeps the focus in the Station when a button pressed in it goes away", () => {
+    const take = makeTake()
+    openInStation({ fileId: "f1", cellId: "c331", audioId: "t2.webm" }, { message: "Saved over Take 2 on line 331." })
+    render(<StationPanel host={makeHost(take)} visible />)
+    const close = within(screen.getByTestId("station-message")).getByRole("button")
+    close.focus()
+    fireEvent.click(close)
+    expect(screen.queryByTestId("station-message")).toBeNull()
+    expect(document.activeElement).toBe(screen.getByTestId("station"))
+  })
+
+  // Found in the Nov 2 browser re-check: Stop is disabled while the recording
+  // finishes, which drops the focus without removing the button (React then
+  // reuses it as Keep), so Enter didn't keep the new recording.
+  it("takes the focus back when a control in it loses the focus to nothing, though it is still there", () => {
+    const take = makeTake()
+    openInStation({ fileId: "f1", cellId: "c331", audioId: "t2.webm" })
+    const { rerender } = render(<StationPanel host={makeHost(take)} visible />)
+    const undo = screen.getByTestId("station-undo")
+    undo.focus()
+    undo.blur()
+    expect(document.activeElement).toBe(document.body)
+    rerender(<StationPanel host={makeHost(take)} visible />)
+    expect(document.activeElement).toBe(screen.getByTestId("station"))
+  })
+
+  it("leaves the focus alone after a press outside the Station", () => {
+    const take = makeTake()
+    openInStation({ fileId: "f1", cellId: "c331", audioId: "t2.webm" })
+    const { rerender } = render(<StationPanel host={makeHost(take)} visible />)
+    const undo = screen.getByTestId("station-undo")
+    undo.focus()
+    fireEvent.pointerDown(document.body)
+    undo.blur()
+    rerender(<StationPanel host={makeHost(take)} visible />)
+    expect(document.activeElement).toBe(document.body)
+  })
+
+  it("leaves the focus alone when you move it out of the Station", () => {
+    const take = makeTake()
+    openInStation({ fileId: "f1", cellId: "c331", audioId: "t2.webm" })
+    const outside = document.createElement("button")
+    document.body.appendChild(outside)
+    try {
+      render(<StationPanel host={makeHost(take)} visible />)
+      screen.getByTestId("station-undo").focus()
+      outside.focus()
+      fireEvent.click(screen.getByTestId("station-info"))
+      expect(document.activeElement).toBe(outside)
+    } finally {
+      outside.remove()
     }
   })
 
@@ -176,6 +283,18 @@ describe("the Station", () => {
     fireEvent.pointerEnter(screen.getByTestId("station-lane"))
     expect(within(row).getByText(/Drag across the waveform/)).toBe(hint)
     expect(hint.className).toContain("opacity-0")
+  })
+
+  // Found in the Nov 2 browser check: the row was 28 px at rest and 30 px
+  // with Record now's line or the typing help in it (their 24 px buttons and
+  // the row's 6 px under them), so the lane lost 2 px each time they showed.
+  it("sizes the hint's row for the tallest line it holds, so the lane keeps its height when Record now's line shows", () => {
+    const take = makeTake()
+    openInStation({ fileId: "f1", cellId: "c331", audioId: "t2.webm" })
+    render(<StationPanel host={makeHost(take)} visible />)
+    const row = screen.getByTestId("station-status-row")
+    expect(row.className).toMatch(/(^|\s)min-h-\[30px\](\s|$)/)
+    expect(row.className).toMatch(/(^|\s)pb-1\.5(\s|$)/)
   })
 
   it("opens the source recording to listen only, and says why (Q10)", () => {

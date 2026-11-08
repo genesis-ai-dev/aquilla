@@ -2795,8 +2795,6 @@ export const ms: Catalog = {
   "org.egressSettings.roleOptionViewer": "{role} — sesiapa yang mempunyai akses projek",
   "org.egressSettings.roleOptionOwner": "{role} — lalai",
   "org.egressSettings.saveFailedFallback": "Tidak dapat menyimpan kebenaran eksport.",
-  "org.addLanguagePopover.triggerLabel": "Bahasa",
-  "org.addLanguagePopover.conflictError": "Bahasa telah diubah di tempat lain. Dimuatkan semula — cuba tambah semula.",
   "org.setupChecklist.heading": "Mulakan organisasi anda",
   "org.setupChecklist.dismissAriaLabel": "Ketepikan senarai semak",
   "org.setupChecklist.progress": "{done} daripada {total} siap",

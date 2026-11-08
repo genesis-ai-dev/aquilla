@@ -1,5 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from "react"
-import { useLocation } from "react-router-dom"
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react"
 import { Check } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -36,36 +45,41 @@ const label = formatBuildLabel(IDENTITY)
 const railLabel = formatBuildRailLabel(IDENTITY)
 const title = formatBuildInfo(IDENTITY)
 
-// Routes where AppShell / LeftDock already render <VersionTag/> in the left-rail
-// footer. The floating <VersionBadge/> must stand down there or it stacks on top
-// of the in-rail tag and covers the account switcher / report button.
-export function hasChromeVersionTag(pathname: string): boolean {
-  const segs = pathname.split("/").filter(Boolean)
-  if (segs.length === 0) return true // "/" — resumes org overview
+/**
+ * Whether an in-flow version line (the rail <VersionTag/>, or an inline
+ * <VersionBadge/> in an auth-page footer) is mounted somewhere on the page. The
+ * floating <VersionBadge/> stands down while one is, so it never stacks on top
+ * of the rail footer and covers the account switcher, Help or localization.
+ *
+ * A mount count rather than a route list: the list leaked every time a page
+ * adopted AppShell without being added to it (the Paratext bridge pages were
+ * the latest), and the fixed badge then sat on top of the rail's own tag.
+ */
+interface InFlowVersionRegistry {
+  mounted: number
+  register: () => () => void
+}
 
-  const root = segs[0]
+const InFlowVersionContext = createContext<InFlowVersionRegistry>({
+  mounted: 0,
+  register: () => () => {},
+})
 
-  // Org shell (OrgSidebar + footer VersionTag).
-  if (root === "orgs") return true
+/** Wrap the app once, above both the routes and the floating <VersionBadge/>. */
+export function InFlowVersionProvider({ children }: { children: ReactNode }) {
+  const [mounted, setMounted] = useState(0)
+  const register = useCallback(() => {
+    setMounted((n) => n + 1)
+    return () => setMounted((n) => n - 1)
+  }, [])
+  const value = useMemo(() => ({ mounted, register }), [mounted, register])
+  return <InFlowVersionContext.Provider value={value}>{children}</InFlowVersionContext.Provider>
+}
 
-  // Remaining AppShell pages that keep the floating badge suppressed.
-  if (
-    root === "projects" ||
-    root === "preferences" ||
-    root === "admin" ||
-    root === "shared"
-  ) {
-    return true
-  }
-
-  // Project workspace (LeftDock or AppShell footer VersionTag) — editor dock routes
-  // and AppShell pages like settings. Bare debug dumps stay badge-only.
-  if (root === "project" && segs.length >= 2) {
-    if (segs.includes("debug")) return false
-    return true
-  }
-
-  return false
+/** Layout effect, so the floating badge is gone before the first paint. */
+function useRegisterInFlowVersion() {
+  const { register } = useContext(InFlowVersionContext)
+  useLayoutEffect(() => register(), [register])
 }
 
 // AQU-1022: which backend (and so which database) this build talks to. Resolved
@@ -144,6 +158,7 @@ function useCopyBuildInfo() {
 export function VersionTag() {
   const t = useT()
   const { copied, copy } = useCopyBuildInfo()
+  useRegisterInFlowVersion()
 
   return (
     <div
@@ -191,20 +206,26 @@ export function VersionTag() {
   )
 }
 
-/**
- * Standalone auth pages provide their own footer so build info cannot cover
- * form controls on small screens.
- */
-function hasAuthPageVersionTag(pathname: string): boolean {
-  return /^\/(?:login|signup|onboarding|reset-password|join|join-org)(?:\/|$)/.test(pathname)
-}
-
 /** Floating on other screens without chrome; inline inside an AuthPage footer. */
 export function VersionBadge({ inline = false }: { inline?: boolean }) {
+  return inline ? <InlineVersionBadge /> : <FloatingVersionBadge />
+}
+
+/** An auth-page footer's own copy; registers so the floating one stands down. */
+function InlineVersionBadge() {
+  useRegisterInFlowVersion()
+  return <VersionBadgeBody inline />
+}
+
+function FloatingVersionBadge() {
+  const { mounted } = useContext(InFlowVersionContext)
+  if (mounted > 0) return null
+  return <VersionBadgeBody inline={false} />
+}
+
+function VersionBadgeBody({ inline }: { inline: boolean }) {
   const t = useT()
-  const { pathname } = useLocation()
   const { copied, copy } = useCopyBuildInfo()
-  if (!inline && (hasChromeVersionTag(pathname) || hasAuthPageVersionTag(pathname))) return null
 
   return (
     <div className={cn(

@@ -2835,8 +2835,6 @@ export const ru: Catalog = {
   "org.egressSettings.roleOptionViewer": "{role} — любой, у кого есть доступ к проекту",
   "org.egressSettings.roleOptionOwner": "{role} — по умолчанию",
   "org.egressSettings.saveFailedFallback": "Не удалось сохранить права на выгрузку.",
-  "org.addLanguagePopover.triggerLabel": "Язык",
-  "org.addLanguagePopover.conflictError": "Языки изменились в другом месте. Данные обновлены — попробуйте добавить снова.",
   "org.setupChecklist.heading": "Начните работу в организации",
   "org.setupChecklist.dismissAriaLabel": "Скрыть список",
   "org.setupChecklist.progress": "выполнено {done} из {total}",

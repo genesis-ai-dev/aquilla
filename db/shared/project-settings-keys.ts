@@ -241,6 +241,9 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
     kind: 'enum',
     values: ['none', 'commenter', 'reviewer', 'contributor', 'project_lead', 'maintainer'],
   },
+  // AQU-2408: who may type a label on a cell. Two rungs only; an absent key
+  // reads as maintainer (db/shared/cell-label-floor.ts).
+  cellLabelFloor: { kind: 'enum', values: ['maintainer', 'project_lead'] },
   // AQU-1771: this project's own floors for who sees its member list and each
   // member's progress. Stricter-only: the project enforces the higher of its
   // own value and its org's (db/shared/visibility-floors.ts), and an agent

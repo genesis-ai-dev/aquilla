@@ -2807,8 +2807,6 @@ export const th: Catalog = {
   "org.egressSettings.roleOptionViewer": "{role} — ทุกคนที่เข้าถึงโปรเจกต์ได้",
   "org.egressSettings.roleOptionOwner": "{role} — ค่าเริ่มต้น",
   "org.egressSettings.saveFailedFallback": "บันทึกสิทธิ์การส่งออกไม่ได้",
-  "org.addLanguagePopover.triggerLabel": "ภาษา",
-  "org.addLanguagePopover.conflictError": "มีการเปลี่ยนแปลงภาษาที่อื่น โหลดใหม่แล้ว — ลองเพิ่มอีกครั้ง",
   "org.setupChecklist.heading": "เริ่มต้นใช้งานองค์กรของคุณ",
   "org.setupChecklist.dismissAriaLabel": "ปิดรายการตรวจสอบ",
   "org.setupChecklist.progress": "{done} จาก {total} เสร็จสมบูรณ์",

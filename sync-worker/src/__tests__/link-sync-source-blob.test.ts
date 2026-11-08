@@ -239,7 +239,14 @@ describe("mirrorSync — a linked file keeps its original artifact (AQU-2345)", 
     }
   })
 
-  it("never overwrites an original the downstream recorded itself", async () => {
+  // AQU-2438: the sweep repairs every linked file on each sync, not only the
+  // ones a window touched, so what "never overwrites" protects has to be said
+  // precisely. A file the language project imported ITSELF is a copy of
+  // nothing — no `meta.upstreamFileId` stamp and not the mirror's derived id —
+  // so the sweep never pairs it and its original stays its own. The linked copy
+  // beside it points at the UPSTREAM's current object, which it keeps following
+  // (AQU-2345: "when the upstream re-imports the file, the copy follows").
+  it("never overwrites an original a file of the project's own recorded itself", async () => {
     const t = await makeTestDb()
     try {
       await seedProjects(t)
@@ -247,16 +254,28 @@ describe("mirrorSync — a linked file keeps its original artifact (AQU-2345)", 
       await mirrorSync(t.db, DOWNSTREAM)
       // The control case: a file imported into the language project directly
       // from IDML has its own bytes, and they stay its own.
-      await t.pg.query(`UPDATE file_source_blobs SET r2_key = $1 WHERE file_id = $2`, [
-        "artifacts/own/import.idml",
-        DOWNSTREAM_FILE,
-      ])
+      const ownFile = "file-own-idml-import"
+      const ownKey = "artifacts/own/import.idml"
+      await t.pg.query(
+        `INSERT INTO files (id, project_id, name, kind, event_id, created_by, created_at, updated_at, meta)
+         VALUES ($1, $2, 'Own Import', 'idml', 'evt-own-import', 'lead', 1, 1, '{}')`,
+        [ownFile, DOWNSTREAM],
+      )
+      await t.pg.query(
+        `INSERT INTO file_source_blobs (file_id, project_id, format, raw_source, r2_key, size_bytes, created_at)
+         VALUES ($1, $2, 'idml', NULL, $3, $4, 1)`,
+        [ownFile, DOWNSTREAM, ownKey, IDML_BYTES.byteLength],
+      )
 
       await mirrorSync(t.db, DOWNSTREAM)
 
-      expect(await blobRows(t, DOWNSTREAM)).toMatchObject([
-        { r2_key: "artifacts/own/import.idml" },
-      ])
+      const rows = await blobRows(t, DOWNSTREAM)
+      expect(rows).toHaveLength(2)
+      expect(rows.find((r) => r.file_id === ownFile)).toMatchObject({ r2_key: ownKey })
+      expect(rows.find((r) => r.file_id === DOWNSTREAM_FILE)).toMatchObject({ r2_key: R2_KEY })
+      // Its type is the project's own too: the sweep leaves the row alone.
+      const own = await t.pg.query<{ kind: string | null }>(`SELECT kind FROM files WHERE id = $1`, [ownFile])
+      expect(own.rows[0]?.kind).toBe("idml")
     } finally {
       await t.close()
     }

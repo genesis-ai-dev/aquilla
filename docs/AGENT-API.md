@@ -452,6 +452,7 @@ CRUD surface with MCP bolted on.
 | Translation | `prepare_translations` |
 | Transcription | `transcribe_audio`, `transcription_status` — **implemented (Omnilingual ASR, 2026-10-16)**: speech to text with word timings for a cell's selected take or raw WAV, including low-resource languages through Omnilingual zero-shot. Output only; store results with a changeset (`SetTranslation` for a target take, `SetTranscription` for a source media cell). See the addendum at the end. |
 | Verification | `run_checks` — structured, actionable failures (e.g. `"term 'covenant' rendered 3 ways: [refs]"`), never a bare 400. The term-consistency half of this now exists as `read_term_consistency` (above); `run_checks` remains unimplemented for the RULE pass. |
+| Membership | `list_members` — **implemented (AQU-2403)**: the project roster, `{ userId, username, role, roleName, roleSource, direct }`, highest role first, alongside `total` and `truncated` (capped at 500 rows, not paged: the rows kept are the top of the ladder, so a cut never hides somebody a membership command could be aimed at). Floored at MAINTAINER 600, the same floor as changing membership, so the read half of governance is never visible to a credential that cannot act on it; a caller below the floor gets `permission_denied`, not an empty list. `role` is the EFFECTIVE (max-wins, AD-12) level — the same number `commands-membership.ts`'s target cap is judged against, resolved through the shared `resolveFromGrants` so the roster and the gate cannot drift. `direct` says whether a `project_members` row exists, which is what picks the command: `SetRole`/`RemoveMember` act on that row only and 409 `not_a_direct_member` without one, while `InviteMember` 409s `already_member` with one. `roleSource` (`override`/`group`/`org`/`creator`) is why `RemoveMember` is not revocation — the other paths are additive and survive it. REST: `GET …/projects/:projectId/members`. The three write commands (`InviteMember`, `SetRole`, `RemoveMember` — AQU-1185) now have MCP staging via `prepare_translations`'s `commands` argument and, on the OAuth connector, the dedicated `prepare_invite_member` / `prepare_set_role` / `prepare_remove_member` tools; prepare forces ask-mode on all three, so an `act` credential still cannot re-role a project's staff without a human at the approvalUrl. People are named by USERNAME, not email. |
 | Changesets | `get_changeset`, `confirm_changeset`, `discard_changeset` |
 | Jobs | `get_job` |
 | Export | `prepare_export`, `get_export` — shipped instead as the synchronous `export_file` (AQU-858); the job-shaped pair is still open |
@@ -1496,3 +1497,34 @@ not be followed. The key was found by reading a Linear title.
   *descriptions* but keeps `inputSchema`, which is why the list lives there.
   `get_project_settings` now says in so many words that `builtinChecks` is read-only and
   `algorithmicChecks` is the key that writes it.
+
+## Status addendum (2026-11-05, AQU-2407 — the brief is writable as answers over MCP)
+
+`SetBrief` and `RegenerateBriefSummary` existed on the REST changeset surface but on no MCP
+tool, so an MCP-only agent that wanted to set a brief reached for `patch_settings { key:
+"translationBrief" }` and wrote the whole record by hand: `parameters`, `freeformNotes`,
+`l2Markdown`, `l1Summary`, `version`, `updatedAt`, `updatedBy`, `l1GeneratedAt`. That works
+and still does — but nothing checks that a hand-written `l2Markdown` / `l1Summary` agree
+with the answers, and the provenance fields are whatever the agent typed.
+
+- **`prepare_set_brief { projectId, parameters?, freeformNotes?, ifMatchVersion?,
+  changesetId? }`** — the MCP door onto `SetBrief`. Answers only: the server merges the
+  named sections into the live brief (unnamed sections keep their value), reassembles
+  `l2Markdown` in the code-owned section order, stamps `version` / `updatedAt` /
+  `updatedBy` from the credential, and re-renders the L1 summary best-effort at commit. All
+  of that is `commands-set-brief.ts`, unchanged — `mcp-handlers.ts` marshals arguments and
+  nothing else.
+- **`regenerate_brief_summary { projectId, ifMatchVersion?, changesetId? }`** — the MCP door
+  onto `RegenerateBriefSummary`: the agent's equivalent of the in-app "Regenerate summary"
+  button, for a brief whose sections were committed without a render (the commit receipt's
+  `briefSummary.rendered: false`) or edited in-app without one.
+- **`ifMatchVersion` is OPTIONAL on both tools**, unlike `patch_settings`. Neither command
+  asks the caller to read-modify-write the key, so the mandatory version only bought a
+  round trip — and an agent that gave up on it reached for `patch_settings`. Omitted, the
+  handler reads the live version through the same delegated settings read
+  `get_project_settings` serves (identical scope, role and throttle gates) and pins it;
+  passed, it is honoured verbatim, which is how a caller asserts the brief has not moved
+  since it read it. Drift still answers `plan_stale` at prepare and again at commit.
+- **`get_capabilities.translationBrief`** names both tools beside `get_project_settings`,
+  because the brief lives *inside* the settings blob and an agent that found
+  `patch_settings` first had no reason to look further.

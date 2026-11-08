@@ -2685,8 +2685,9 @@ export function ProjectWorkspace() {
   // bottom bar it has always had (below).
   const activeFileOnTimeline = Boolean(activeFileForLens) && (activeFileTimeOrdered || !extensionEditorActive)
   // AQU-1758 (Sam's decision 7): the Film button and the timeline's Sources
-  // menu, together, by the project's setting (unset: off for books).
-  const filmAndSourcesOn = filmAndSourcesShown(project?.filmAndSources, project?.files)
+  // menu, together, by the project's setting (unset: off for books, on for a
+  // recording or film's own file).
+  const filmAndSourcesOn = filmAndSourcesShown(project?.filmAndSources, project?.files, activeFileForLens)
   /** Media lens = the timeline STACKED over the always-rendered text table
    *  (one EditorTable instance across both lenses — the imperative ref,
    *  selection singleton, and presence claims stay single). */

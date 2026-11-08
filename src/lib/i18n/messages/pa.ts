@@ -1111,7 +1111,6 @@ export const pa: Catalog = {
   "editor.timeline.addLineHere": "ਇੱਥੇ ਇੱਕ ਲਾਈਨ ਜੋੜੋ",
   "editor.timeline.linkVideoTitleChange": "ਜੁੜੀ ਵੀਡੀਓ ਬਦਲੋ",
   "editor.timeline.linkVideoTitleNew": "ਵੀਡੀਓ ਜੋੜੋ",
-  "editor.timeline.linkVideoDescription": "ਉਸ ਵੀਡੀਓ ਦਾ ਪਤਾ ਚਿਪਕਾਓ ਜਿਸ ਤੋਂ ਇਸ ਫ਼ਾਈਲ ਦਾ ਡਬ ਬਣਿਆ. ਇਹ ਲਿਖਤ ਦੇ ਨਾਲ ਚੱਲਦੀ ਹੈ, ਮੂਟ ਅਤੇ ਆਡੀਓ ਨਾਲ ਮਿਲੀ ਹੋਈ — ਜੋ ਰਿਕਾਰਡਿੰਗ ਤੁਸੀਂ ਸੁਣਦੇ ਹੋ ਉਹ ਹਮੇਸ਼ਾ ਟਾਈਮਲਾਈਨ ਵਾਲੀ ਹੁੰਦੀ ਹੈ.",
   "editor.timeline.linkVideoAddressLabel": "ਵੀਡੀਓ ਪਤਾ",
   "editor.timeline.linkVideoInvalid": "ਇਹ ਵੈੱਬ ਪਤਾ ਨਹੀਂ ਲੱਗਦਾ. ਇਹ http:// ਜਾਂ https:// ਨਾਲ ਸ਼ੁਰੂ ਹੋਣਾ ਚਾਹੀਦਾ ਹੈ.",
   "editor.timeline.linkVideoClear": "ਵੀਡੀਓ ਸਾਫ਼ ਕਰੋ",

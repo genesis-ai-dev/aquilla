@@ -1073,7 +1073,6 @@ export const es: Catalog = {
   "editor.timeline.addLineHere": "Agregar una línea aquí",
   "editor.timeline.linkVideoTitleChange": "Cambiar el vídeo vinculado",
   "editor.timeline.linkVideoTitleNew": "Vincular un vídeo",
-  "editor.timeline.linkVideoDescription": "Pega la dirección del vídeo del que se dobló este archivo. Se reproduce junto al texto, silenciado y sincronizado con el audio — la grabación que escuchas es siempre la de la línea de tiempo.",
   "editor.timeline.linkVideoAddressLabel": "Dirección del vídeo",
   "editor.timeline.linkVideoInvalid": "Eso no parece una dirección web. Debe empezar con http:// o https://.",
   "editor.timeline.linkVideoClear": "Borrar vídeo",

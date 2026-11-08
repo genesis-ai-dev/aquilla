@@ -1111,7 +1111,6 @@ export const am: Catalog = {
   "editor.timeline.addLineHere": "እዚህ መስመር ይጨምሩ",
   "editor.timeline.linkVideoTitleChange": "የተያያዘውን ቪዲዮ ይቀይሩ",
   "editor.timeline.linkVideoTitleNew": "ቪዲዮ ያያይዙ",
-  "editor.timeline.linkVideoDescription": "ይህ ፋይል የተደገመበትን ቪዲዮ አድራሻ ይለጥፉ። ከጽሑፉ ጎን ይጫወታል፣ ድምጸ-ከል ሆኖ እና ከድምጹ ጋር ተመሳስሎ — የሚሰሙት ቀረጻ ሁልጊዜ በጊዜ መስመሩ ላይ ያለው ነው።",
   "editor.timeline.linkVideoAddressLabel": "የቪዲዮ አድራሻ",
   "editor.timeline.linkVideoInvalid": "ያ የድር አድራሻ አይመስልም። በ http:// ወይም https:// መጀመር አለበት።",
   "editor.timeline.linkVideoClear": "ቪዲዮ አጽዱ",

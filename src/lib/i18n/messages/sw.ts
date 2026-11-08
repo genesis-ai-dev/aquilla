@@ -1104,7 +1104,6 @@ export const sw: Catalog = {
   "editor.timeline.addLineHere": "Ongeza mstari hapa",
   "editor.timeline.linkVideoTitleChange": "Badilisha video iliyounganishwa",
   "editor.timeline.linkVideoTitleNew": "Unganisha video",
-  "editor.timeline.linkVideoDescription": "Bandika anwani ya video ambayo faili hii ilitafsiriwa kwa sauti kutoka kwayo. Inacheza kando ya maandishi, kimya na sambamba na sauti — rekodi unayosikia daima ni ile iliyo kwenye ratiba.",
   "editor.timeline.linkVideoAddressLabel": "Anwani ya video",
   "editor.timeline.linkVideoInvalid": "Hiyo haionekani kama anwani ya wavuti. Inapaswa kuanza na http:// au https://.",
   "editor.timeline.linkVideoClear": "Ondoa video",

@@ -894,7 +894,6 @@ export const my: Catalog = {
   "editor.timeline.addLineHere": "ဤနေရာတွင် စာကြောင်းထည့်ရန်",
   "editor.timeline.linkVideoTitleChange": "ချိတ်ထားသော ဗီဒီယို ပြောင်းရန်",
   "editor.timeline.linkVideoTitleNew": "ဗီဒီယိုချိတ်ရန်",
-  "editor.timeline.linkVideoDescription": "ဤဖိုင်ကို အသံထပ်ထားသော ဗီဒီယို၏ လိပ်စာကို ကူးထည့်ပါ။ စာသားဘေးတွင် အသံပိတ်၍ အသံနှင့် တစ်ဆက်တည်း ဖွင့်သည် — သင်ကြားရသော အသံသွင်းချက်သည် အချိန်ဇယားပေါ်ရှိအရာသာ ဖြစ်သည်။",
   "editor.timeline.linkVideoAddressLabel": "ဗီဒီယိုလိပ်စာ",
   "editor.timeline.linkVideoInvalid": "ဝက်ဘ်လိပ်စာ မတူပါ။ http:// သို့မဟုတ် https:// ဖြင့် စသင့်သည်။",
   "editor.timeline.linkVideoClear": "ဗီဒီယို ရှင်းရန်",

@@ -1113,7 +1113,6 @@ export const bn: Catalog = {
   "editor.timeline.addLineHere": "এখানে একটি লাইন যোগ করুন",
   "editor.timeline.linkVideoTitleChange": "যুক্ত ভিডিও বদলান",
   "editor.timeline.linkVideoTitleNew": "একটি ভিডিও লিংক করুন",
-  "editor.timeline.linkVideoDescription": "এই ফাইল যে ভিডিও থেকে ডাব করা, তার ঠিকানা পেস্ট করুন। এটি লেখার পাশে চলে, মিউট এবং অডিওর সাথে তালে — আপনি যা শোনেন তা সবসময় টাইমলাইনেরটা।",
   "editor.timeline.linkVideoAddressLabel": "ভিডিওর ঠিকানা",
   "editor.timeline.linkVideoInvalid": "এটিকে ওয়েব ঠিকানা মনে হচ্ছে না। এটি http:// বা https:// দিয়ে শুরু হওয়া উচিত।",
   "editor.timeline.linkVideoClear": "ভিডিও মুছুন",

@@ -894,7 +894,6 @@ export const th: Catalog = {
   "editor.timeline.addLineHere": "เพิ่มบรรทัดที่นี่",
   "editor.timeline.linkVideoTitleChange": "เปลี่ยนวิดีโอที่เชื่อมไว้",
   "editor.timeline.linkVideoTitleNew": "ลิงก์วิดีโอ",
-  "editor.timeline.linkVideoDescription": "วางที่อยู่ของวิดีโอที่ไฟล์นี้พากย์มา วิดีโอจะเล่นข้างข้อความ ปิดเสียงและตามจังหวะไฟล์เสียง — เสียงที่ได้ยินคือเสียงบนไทม์ไลน์เสมอ",
   "editor.timeline.linkVideoAddressLabel": "ที่อยู่วิดีโอ",
   "editor.timeline.linkVideoInvalid": "นี่ไม่เหมือนที่อยู่เว็บ ควรขึ้นต้นด้วย http:// หรือ https://",
   "editor.timeline.linkVideoClear": "ล้างวิดีโอ",

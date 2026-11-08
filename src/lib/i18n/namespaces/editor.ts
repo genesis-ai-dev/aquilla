@@ -214,6 +214,9 @@ export const editor = defineNamespace({
     "editor.media.choose": "Choose media file",
     "editor.media.adding": "Adding media to this file…",
     "editor.media.urlLabel": "Media URL",
+    // D#13: not Link a film's placeholder. This field becomes Source audio, and
+    // a YouTube link is refused here.
+    "editor.media.urlPlaceholder": "A direct link to an audio or video file (not YouTube)",
     "editor.media.attach": "Attach",
     "editor.media.urlHint":
       "Or paste a direct media URL — the clip streams from its source; only " +
@@ -1278,13 +1281,21 @@ export const editor = defineNamespace({
     // The link-video dialog and the chip strip's field labels.
     "editor.timeline.linkVideoTitleChange": "Change the linked film",
     "editor.timeline.linkVideoTitleNew": "Link a film",
-    // AQU-2259: it used to say the video always plays muted. It is muted only
-    // while the file's uploaded recording is what plays (MediaVideoPane).
-    "editor.timeline.linkVideoDescription":
-      "Paste the address of the film this file was dubbed from. It plays beside the text, in step " +
-      "with the timeline. When the file has an uploaded recording, you hear that recording and the " +
-      "film is muted; a film on YouTube keeps its own sound until you pick the recording from its " +
-      "Sound menu.",
+    // D#17 (import map, Nov 2): one short line, the rest behind a click (i).
+    // The film's sound: a linked film plays with its own sound; with an
+    // uploaded recording beside it, that recording is what plays while the
+    // file follows its source (MediaVideoPane), and following the recordings
+    // the film's own sound plays straight through (AQU-2253).
+    "editor.timeline.linkVideoLead": "Paste the address of the film this file was dubbed from.",
+    "editor.timeline.linkVideoMoreLabel": "About linking a film",
+    "editor.timeline.linkVideoMore":
+      "It plays beside the text, in step with the timeline, with its own sound. A YouTube link or " +
+      "a direct link to a video file both work. When the file also has an uploaded recording of its " +
+      "source, you hear that recording while the file follows its source and the film is muted; a " +
+      "film on YouTube keeps its own sound until you pick the recording from its Sound menu. " +
+      "Following the recordings, the film plays with its own sound.",
+    // D#13: not the empty-file card's placeholder, which takes a different link.
+    "editor.timeline.linkVideoPlaceholder": "A YouTube link, or a link to a video file",
     "editor.timeline.linkVideoAddressLabel": "Film address",
     "editor.timeline.linkVideoInvalid":
       "That doesn't look like a web address. It should start with http:// or https://.",
@@ -4510,6 +4521,23 @@ export const editor = defineNamespace({
         description:
           "Status line replacing the drop zone while the chosen media is being " +
           "attached, beside a spinner. Present-participle status text.",
+      },
+      "editor.timeline.linkVideoMoreLabel": {
+        description:
+          "Screen-reader name of the (i) button beside the Link a film dialog's one-line " +
+          "description. Clicking it opens the rest of the explanation in place, under the line.",
+      },
+      "editor.timeline.linkVideoPlaceholder": {
+        description:
+          "Grey example text inside the Link a film dialog's address field, shown while it is " +
+          "empty. Says what kind of address the field takes: a YouTube link or a direct link to " +
+          "a video file.",
+      },
+      "editor.media.urlPlaceholder": {
+        description:
+          "Grey example text inside the address field on an empty file's media card, shown while " +
+          "it is empty. This field takes a direct link to an audio or video file, which becomes the " +
+          "file's source recording; a YouTube link does not work here, so it says so.",
       },
       "editor.media.urlLabel": {
         description:

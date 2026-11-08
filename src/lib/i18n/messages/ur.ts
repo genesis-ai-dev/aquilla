@@ -1111,7 +1111,6 @@ export const ur: Catalog = {
   "editor.timeline.addLineHere": "یہاں ایک سطر شامل کریں",
   "editor.timeline.linkVideoTitleChange": "منسلک ویڈیو بدلیں",
   "editor.timeline.linkVideoTitleNew": "ویڈیو جوڑیں",
-  "editor.timeline.linkVideoDescription": "اس ویڈیو کا پتہ چسپاں کریں جس سے یہ فائل ڈب ہوئی۔ وہ متن کے ساتھ چلتی ہے، خاموش اور آڈیو کے ساتھ ہم قدم — جو ریکارڈنگ آپ سنتے ہیں وہ ہمیشہ ٹائم لائن والی ہوتی ہے۔",
   "editor.timeline.linkVideoAddressLabel": "ویڈیو کا پتہ",
   "editor.timeline.linkVideoInvalid": "یہ ویب پتہ نہیں لگتا۔ اسے http:// یا https:// سے شروع ہونا چاہیے۔",
   "editor.timeline.linkVideoClear": "ویڈیو ہٹائیں",

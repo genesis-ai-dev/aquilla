@@ -1111,7 +1111,6 @@ export const ha: Catalog = {
   "editor.timeline.addLineHere": "Ku ƙara layi a nan",
   "editor.timeline.linkVideoTitleChange": "Ku canza bidiyon da aka haɗa",
   "editor.timeline.linkVideoTitleNew": "Ku haɗa bidiyo",
-  "editor.timeline.linkVideoDescription": "Ku manna adireshin bidiyon da aka yi wa wannan fayil dub. Yana kunnawa kusa da rubutu, a shiru kuma daidai da sauti — rikodin da kuke ji koyaushe shi ne na jadawali.",
   "editor.timeline.linkVideoAddressLabel": "Adireshin bidiyo",
   "editor.timeline.linkVideoInvalid": "Wannan ba ya kama da adireshin yanar gizo. Ya kamata ya fara da http:// ko https://.",
   "editor.timeline.linkVideoClear": "Ku share bidiyo",

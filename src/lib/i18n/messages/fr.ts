@@ -890,7 +890,6 @@ export const fr: Catalog = {
   "editor.timeline.addLineHere": "Ajouter une ligne ici",
   "editor.timeline.linkVideoTitleChange": "Changer la vidéo liée",
   "editor.timeline.linkVideoTitleNew": "Lier une vidéo",
-  "editor.timeline.linkVideoDescription": "Collez l'adresse de la vidéo à partir de laquelle ce fichier a été doublé. Elle se lit à côté du texte, sans le son, en synchronisation avec l'audio — l'enregistrement que vous entendez est toujours celui de la chronologie.",
   "editor.timeline.linkVideoAddressLabel": "Adresse de la vidéo",
   "editor.timeline.linkVideoInvalid": "Cela ne ressemble pas à une adresse web. Elle doit commencer par http:// ou https://.",
   "editor.timeline.linkVideoClear": "Effacer la vidéo",

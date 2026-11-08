@@ -897,7 +897,6 @@ export const id: Catalog = {
   "editor.timeline.addLineHere": "Tambahkan baris di sini",
   "editor.timeline.linkVideoTitleChange": "Ganti video yang tertaut",
   "editor.timeline.linkVideoTitleNew": "Tautkan sebuah video",
-  "editor.timeline.linkVideoDescription": "Tempel alamat video yang menjadi sumber sulih suara file ini. Video diputar di samping teks, tanpa suara dan seirama dengan audio — rekaman yang Anda dengar selalu yang ada di lini masa.",
   "editor.timeline.linkVideoAddressLabel": "Alamat video",
   "editor.timeline.linkVideoInvalid": "Itu tidak tampak seperti alamat web. Seharusnya diawali http:// atau https://.",
   "editor.timeline.linkVideoClear": "Hapus video",

@@ -910,7 +910,6 @@ export const ru: Catalog = {
   "editor.timeline.addLineHere": "Добавить строку здесь",
   "editor.timeline.linkVideoTitleChange": "Изменить привязанное видео",
   "editor.timeline.linkVideoTitleNew": "Привязать видео",
-  "editor.timeline.linkVideoDescription": "Вставьте адрес видео, с которого сделан дубляж этого файла. Оно воспроизводится рядом с текстом, без звука и синхронно с аудио — вы всегда слышите запись с таймлайна.",
   "editor.timeline.linkVideoAddressLabel": "Адрес видео",
   "editor.timeline.linkVideoInvalid": "Это не похоже на веб-адрес. Он должен начинаться с http:// или https://.",
   "editor.timeline.linkVideoClear": "Удалить видео",

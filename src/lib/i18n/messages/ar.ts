@@ -894,7 +894,6 @@ export const ar: Catalog = {
   "editor.timeline.addLineHere": "إضافة سطر هنا",
   "editor.timeline.linkVideoTitleChange": "تغيير الفيديو المرتبط",
   "editor.timeline.linkVideoTitleNew": "ربط فيديو",
-  "editor.timeline.linkVideoDescription": "الصق عنوان الفيديو الذي دُبلج منه هذا الملف. يُشغَّل بجانب النص، مكتومًا ومتزامنًا مع الصوت — والتسجيل الذي تسمعه هو دائمًا الذي على الخط الزمني.",
   "editor.timeline.linkVideoAddressLabel": "عنوان الفيديو",
   "editor.timeline.linkVideoInvalid": "هذا لا يبدو عنوان ويب. ينبغي أن يبدأ بـ http:// أو https://.",
   "editor.timeline.linkVideoClear": "مسح الفيديو",

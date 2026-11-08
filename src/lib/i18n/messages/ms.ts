@@ -889,7 +889,6 @@ export const ms: Catalog = {
   "editor.timeline.addLineHere": "Tambah baris di sini",
   "editor.timeline.linkVideoTitleChange": "Tukar video terpaut",
   "editor.timeline.linkVideoTitleNew": "Pautkan video",
-  "editor.timeline.linkVideoDescription": "Tampal alamat video yang fail ini disuarakan daripadanya. Ia dimainkan di sisi teks, disenyapkan dan seiring dengan audio — rakaman yang anda dengar sentiasa yang pada garis masa.",
   "editor.timeline.linkVideoAddressLabel": "Alamat video",
   "editor.timeline.linkVideoInvalid": "Itu nampaknya bukan alamat web. Ia sepatutnya bermula dengan http:// atau https://.",
   "editor.timeline.linkVideoClear": "Kosongkan video",

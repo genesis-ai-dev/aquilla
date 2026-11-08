@@ -894,7 +894,6 @@ export const zh_Hant: Catalog = {
   "editor.timeline.addLineHere": "在這裡新增一行",
   "editor.timeline.linkVideoTitleChange": "更換已連結的影片",
   "editor.timeline.linkVideoTitleNew": "連結一部影片",
-  "editor.timeline.linkVideoDescription": "請貼上這個檔案配音所依據的影片網址。影片會在文字旁播放，靜音並與音訊同步 — 您聽到的錄音一律是時間軸上的那一份。",
   "editor.timeline.linkVideoAddressLabel": "影片網址",
   "editor.timeline.linkVideoInvalid": "這看起來不像網址。它應該以 http:// 或 https:// 開頭。",
   "editor.timeline.linkVideoClear": "清除影片",

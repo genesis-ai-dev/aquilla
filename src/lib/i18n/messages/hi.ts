@@ -1080,7 +1080,6 @@ export const hi: Catalog = {
   "editor.timeline.addLineHere": "यहाँ एक पंक्ति जोड़ें",
   "editor.timeline.linkVideoTitleChange": "जुड़ा वीडियो बदलें",
   "editor.timeline.linkVideoTitleNew": "एक वीडियो जोड़ें",
-  "editor.timeline.linkVideoDescription": "उस वीडियो का पता चिपकाएँ जिससे यह फ़ाइल डब हुई। वह पाठ के पास चलता है, म्यूट और ऑडियो के कदम में — जो रिकॉर्डिंग आप सुनते हैं वह हमेशा समयरेखा वाली है।",
   "editor.timeline.linkVideoAddressLabel": "वीडियो पता",
   "editor.timeline.linkVideoInvalid": "वह वेब पता नहीं लगता। वह http:// या https:// से शुरू होना चाहिए।",
   "editor.timeline.linkVideoClear": "वीडियो साफ़ करें",

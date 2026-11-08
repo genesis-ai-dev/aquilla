@@ -1919,6 +1919,37 @@ export const editor = defineNamespace({
     "editor.timeline.audioVttImportCues": "Import {count} cues",
     "editor.timeline.audioVttNoCues":
       "This doesn't look like an audio VTT — no timed cues found.",
+    // The audio VTT import and removal toasts (were hard-coded English). The
+    // finished import counts heard lines, never pairings: pairing is
+    // many-to-many (import map X-avtt-paired-count).
+    "editor.timeline.audioCuesImporting": plural({
+      one: "Importing {count} heard line…",
+      other: "Importing {count} heard lines…",
+    }),
+    "editor.timeline.audioCuesPairing": "Pairing the heard lines with the subtitle lines…",
+    "editor.timeline.audioCuesPairingProgress": "Pairing the heard lines with the subtitle lines… {percent}%",
+    "editor.timeline.audioCuesSavingPairs": "Saving the pairings…",
+    "editor.timeline.audioCuesImported": plural({
+      one: "Imported {count} heard line.",
+      other: "Imported {count} heard lines.",
+    }),
+    "editor.timeline.audioCuesFoundLines": plural({
+      one: "{count} of them found its subtitle line.",
+      other: "{count} of them found their subtitle lines.",
+    }),
+    "editor.timeline.audioCuesPairingStopped":
+      "The heard lines are in, but pairing them with the subtitle lines didn't finish. You can pair them by hand.",
+    "editor.timeline.audioCuesImportOffline": "Heard lines can't be imported while offline.",
+    "editor.timeline.audioCuesImportFailed": "Couldn't import the heard lines.",
+    "editor.timeline.audioCuesImportFailedReason": "Couldn't import the heard lines: {reason}",
+    "editor.timeline.audioCuesReplacedNotTidied":
+      "The new heard lines are in, but the ones they replaced couldn't be tidied away.",
+    "editor.timeline.audioCuesRemoving": "Removing the Source cues…",
+    "editor.timeline.audioCuesRemoved":
+      "Removed the Source cues. A Project Lead can bring them back from Recently deleted.",
+    "editor.timeline.audioCuesRemoveOffline": "The Source cues can't be removed while offline.",
+    "editor.timeline.audioCuesRemoveFailed": "Couldn't remove the Source cues.",
+    "editor.timeline.audioCuesRemoveFailedReason": "Couldn't remove the Source cues: {reason}",
     "editor.timeline.importFileEmpty": "That file is empty.",
     "editor.timeline.importTooLargeText":
       "\"{fileName}\" is larger than the 10 MB limit for text imports.",
@@ -7327,6 +7358,34 @@ export const editor = defineNamespace({
           "Reason on the Film panel's error card when a film linked by its web address won't " +
           "play. Replaces the raw address the card used to print.",
         placeholders: { host: "The web site the film is on, e.g. 'cdn.example.com'. Never translate it." },
+      },
+      "editor.timeline.audioCuesImporting": {
+        description: "Toast while an audio VTT's heard lines (the lines actually spoken in the film) are being imported.",
+        placeholders: { count: "How many heard lines the file has." },
+      },
+      "editor.timeline.audioCuesPairingProgress": {
+        description: "Toast while the imported heard lines are paired with the file's subtitle lines.",
+        placeholders: { percent: "How much of the pairing is done, a whole number from 0 to 100." },
+      },
+      "editor.timeline.audioCuesImported": {
+        description:
+          "First sentence of the toast when an audio VTT import finishes. A second sentence " +
+          "(editor.timeline.audioCuesFoundLines) may follow it.",
+        placeholders: { count: "How many heard lines were imported." },
+      },
+      "editor.timeline.audioCuesFoundLines": {
+        description:
+          "Second sentence of the finished import's toast: how many of the imported heard lines " +
+          "were paired with a subtitle line. 'them' is the heard lines of the first sentence.",
+        placeholders: { count: "How many heard lines were paired with at least one subtitle line." },
+      },
+      "editor.timeline.audioCuesImportFailedReason": {
+        description: "Toast when an audio VTT import fails, followed by the reason.",
+        placeholders: { reason: "The reason it failed, already worded. Never translate it." },
+      },
+      "editor.timeline.audioCuesRemoveFailedReason": {
+        description: "Toast when removing the Source cues fails, followed by the reason.",
+        placeholders: { reason: "The reason it failed, already worded. Never translate it." },
       },
       "editor.timeline.changeVideo": {
         description:

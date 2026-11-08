@@ -197,6 +197,8 @@ import type { MessageKey } from "@/lib/i18n/messages/en"
 export interface TimelineEditorProps {
   cells: CellData[]
   coreMediaUrl: string | null
+  /** AQU-2426: a Source audio clip's own menu (Split into lines…) and its "Not split into lines yet" notice. */
+  sourceClipExtras?: (cell: CellData) => Pick<import("./TimelineCard").TimelineCardProps, "recordingMenu" | "notice"> | null
   /**
    * AQU-646 stage 6B: is the VIRTUAL clock driving this file?
    *
@@ -1261,6 +1263,7 @@ const NO_SUMMARY_SPANS: SummarySpan[] = []
 export function TimelineEditor({
   cells,
   coreMediaUrl,
+  sourceClipExtras,
   editable,
   fileId,
   onRetimeSubtitle,
@@ -4240,7 +4243,8 @@ export function TimelineEditor({
         // transcript chips over the film's own speech, with a dashed empty chip
         // across each stretch where nobody talks.
         return dialogue.length > 0 ? (
-          <TimelineLane key={track.id} cells={dialogue} variant="dialogue" retimable={false} {...laneProps} />
+          <TimelineLane key={track.id} cells={dialogue} variant="dialogue" retimable={false} {...laneProps}
+            {...(sourceClipExtras ? { cardExtras: sourceClipExtras } : {})} />
         ) : (
           <SourceRegionLane
             key={track.id}

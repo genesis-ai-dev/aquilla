@@ -2783,11 +2783,22 @@ export function planTargetOverlay(
   // AQU-1767: a take CUT into pieces sounds piece by piece. The one that
   // matters now is the first whose audible end is still ahead of the clock;
   // the piece after it is armed when it fires (`nextDueSec`).
+  // AQU-2432 (review, Nov 9): …and that is not sounding already. A piece
+  // dragged over the end of the piece before it is planned on its own: it
+  // fires at its own start while the earlier one rings on (it used to wait for
+  // the earlier one to end and come in partway through), and while it is
+  // still ahead it stays ARMED — "keep" would drop its arm, and under a source
+  // recording nothing asks for it again.
   const pieces = resolveTargetPieces(cell, isDefaultSlot ? undefined : slot)
     .map((p) => ({ ref: p, geom: targetChipGeom(cell, cell.attachments?.[p.audioId]) }))
     .sort((a, b) => (a.geom?.start ?? 0) - (b.geom?.start ?? 0))
   const cut = pieces.length > 1
-  const currentIdx = cut ? pieces.findIndex((p) => (p.geom?.end ?? Infinity) > masterSec) : 0
+  const currentIdx = cut
+    ? pieces.findIndex((p) =>
+        (p.geom?.end ?? Infinity) > masterSec &&
+        !(reason === "advance" && sounding.has(overlayPieceKey(cell.id, slot, p.ref.audioId))),
+      )
+    : 0
   if (currentIdx < 0) return reason === "seek" ? { kind: "silence" } : { kind: "keep" }
   const piece = cut ? pieces[currentIdx].ref : target
   const nextDueSec = cut ? pieces[currentIdx + 1]?.geom?.start : undefined
@@ -2990,6 +3001,21 @@ function applyTargetOverlays(
   stockUpcomingDubs(cells, masterSec, opts)
 }
 
+/** AQU-2432 (review, Nov 9): whether two attachments are pieces of ONE cut take
+ *  on this line whose windows overlap — the `later` one dragged back over the
+ *  end of the `earlier` one, which is still inside its window when it starts. */
+function piecesOverlap(cell: CellData, earlier: string, later: string): boolean {
+  if (earlier === later) return false
+  const a = cell.attachments?.[earlier]
+  const b = cell.attachments?.[later]
+  if (!a || !b) return false
+  const root = (id: string, att: { pieceOf?: string | null }) => att.pieceOf ?? id
+  if (root(earlier, a) !== root(later, b)) return false
+  const endSec = targetChipGeom(cell, a)?.end
+  const startSec = targetChipGeom(cell, b)?.start
+  return endSec != null && startSec != null && endSec - startSec > 0.01
+}
+
 /** The fire body, callable WITHOUT touching `pendingDub` — the early-dub tick
  *  fires a LATER section's dub while the current section's own dub can still
  *  be legitimately armed; running it through applyTargetOverlay would clobber
@@ -3014,8 +3040,13 @@ function executeFire(
   //
   // AQU-2252: a layer replaces only ITSELF — two pieces of one take on one
   // track are two layers, each where it was put, and may ring together.
+  //
+  // AQU-2432 (review, Nov 9): following the source, neither does a piece of a
+  // cut take replace the piece before it that it was dragged over — the
+  // earlier one rings on to its own end, as two whole takes do.
   const prior = overlayPool.find((e) =>
-    e.cellId === plan.cellId && e.slot === plan.slot && (plan.layer ? e.layer != null && e.audioId === plan.audioId : !e.layer),
+    e.cellId === plan.cellId && e.slot === plan.slot && (plan.layer ? e.layer != null && e.audioId === plan.audioId : !e.layer) &&
+    !(!plan.layer && timingMode !== "audioFirst" && piecesOverlap(cell, e.audioId, plan.audioId)),
   )
   if (prior) removeOverlayEntry(prior)
   // Bounded pool: evict the OLDEST ringing dub at the cap — a layer before a
@@ -3262,7 +3293,6 @@ function disposeDubStash(): void {
 /** How many takes ahead each track keeps ready: the next to start and the one
  *  after it, so a short take is not over before its successor has loaded. */
 const STOCK_AHEAD = 2
-const NO_SOUNDING: ReadonlySet<string> = new Set()
 
 /**
  * The takes (or pieces) on one track that start next after `atSec`, soonest
@@ -3278,15 +3308,24 @@ export function planUpcomingDubs(
   const slot = opts?.slot ?? RECORDING_SLOT
   const upcoming: Array<DubStock & { dueSec: number }> = []
   for (let i = 0; i < cells.length; i++) {
-    const now = planTargetOverlay(cells, i, NO_SOUNDING, "advance", atSec, opts)
-    if (now.kind === "arm") {
-      const due = planTargetOverlay(cells, i, NO_SOUNDING, "advance", now.dueSec, opts)
-      if (due.kind !== "fire") continue
-      const { cellId, audioId, url, startAtClipSec, stopAtClipSec } = due
-      upcoming.push({ cellId, slot, audioId, url, startAtClipSec, stopAtClipSec, dueSec: now.dueSec })
-    } else if (now.kind === "fire" && now.nextPiece && now.nextDueSec != null) {
+    // AQU-2432 (review, Nov 9): what sounds now is looked past, piece by piece,
+    // to the first one still ahead — so a piece dragged over the one before it
+    // is made ready as itself, for its own start, and one already sounding in
+    // the overlap is not made ready a second time.
+    const heard = new Set<string>()
+    for (let n = 0; n < 64; n++) {
+      const now = planTargetOverlay(cells, i, heard, "advance", atSec, opts)
+      if (now.kind === "arm") {
+        const due = planTargetOverlay(cells, i, heard, "advance", now.dueSec, opts)
+        if (due.kind !== "fire") break
+        const { cellId, audioId, url, startAtClipSec, stopAtClipSec } = due
+        upcoming.push({ cellId, slot, audioId, url, startAtClipSec, stopAtClipSec, dueSec: now.dueSec })
+        break
+      }
+      if (now.kind !== "fire") break
       // Sounding now: its next piece is what this line starts next.
-      upcoming.push({ cellId: now.cellId, slot, ...now.nextPiece, dueSec: now.nextDueSec })
+      heard.add(overlayKey(now.cellId, slot))
+      heard.add(overlayPieceKey(now.cellId, slot, now.audioId))
     }
   }
   return upcoming.sort((a, b) => a.dueSec - b.dueSec).slice(0, STOCK_AHEAD)

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
+import { OptionalMark } from "@/components/ui/field"
 import { importSdbh, SdbhImportCancelledError, type SdbhImportProgress } from "@/lib/import-sdbh"
 import { SDBH_MAX_REFERENCES, type SdbhNotImportedField } from "@/lib/parsers/sdbh"
 import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
@@ -101,13 +102,15 @@ export function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPan
           k="importExport.sdbh.description"
           values={{
             dictName: <span className="font-medium">{t("importExport.sdbh.dictionaryName")}</span>,
+            // i18n-exempt example filename
             masterFile: <code>SDBH-en.JSON</code>,
+            // i18n-exempt example filename
             localizedFile: <code>SDBH-es.JSON</code>,
           }}
         />
       </p>
       <div className="flex flex-col gap-2">
-        <Button variant="outline" size="sm" nativeButton={false} render={<label />}>
+        <Button variant="outline" nativeButton={false} render={<label />}>
           {masterFile ? masterFile.name : t("importExport.sdbh.chooseMaster")}
           <input
             type="file"
@@ -120,8 +123,8 @@ export function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPan
             disabled={importing}
           />
         </Button>
-        <Button variant="outline" size="sm" nativeButton={false} render={<label />}>
-          {localizedFile ? localizedFile.name : t("importExport.sdbh.chooseLocalized")}
+        <Button variant="outline" nativeButton={false} render={<label />}>
+          {localizedFile ? localizedFile.name : <>{t("importExport.sdbh.chooseLocalized")} <OptionalMark /></>}
           <input
             type="file"
             className="hidden"

@@ -25,7 +25,6 @@ import {
   FieldError,
   FieldGroup,
   FieldLabel,
-  OptionalMark,
 } from "@/components/ui/field"
 import {
   InputGroup,
@@ -73,7 +72,7 @@ import { MediaImportPreviewDialog } from "@/components/import/MediaImportPreview
 import { reviewMediaCompanions } from "@/lib/import/media-companion-batch"
 import { prepareEmbeddedSubtitleSources } from "@/lib/import/embedded-subtitle-sources"
 import type { MediaTextSource, MediaTextSourceOption } from "@/lib/import/media-cues"
-import { importSdbh, type SdbhImportProgress } from "@/lib/import-sdbh"
+import { SdbhPanel } from "@/components/import/SdbhPanel"
 import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
 import { PreviewPanel, type ImportUploadProgress, type PreviewConfirmOptions } from "@/components/import/PreviewPanel"
 import { UsfmStructureFindings } from "@/components/import/UsfmStructureFindings"
@@ -4936,156 +4935,9 @@ function DcsPanel({ projectId, getToken, defaultLang, patchDcsCursor, onImported
   )
 }
 
-// ---------------------------------------------------------------------------
-// SDBH Hebrew Lexicon panel — UBS MARBLE editions. The master (usually
-// English) edition supplies structure + source text; an optional localized
-// edition pre-fills the target column. Cell ids are the shared LEXIDs, so the
-// localization can later be exported losslessly back into the MARBLE XML.
-// ---------------------------------------------------------------------------
-
-interface SdbhPanelProps {
-  projectId: string
-  username: string
-  getToken: (fileId: string) => Promise<string | null>
-  onImported: (
-    refs: FileReference[],
-    inferredLanguages?: { sourceLanguage?: string; targetLanguage?: string },
-    skipped?: { book: string; reason: string }[],
-  ) => void | Promise<void>
-}
-
-function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPanelProps) {
-  const t = useT()
-  const [masterFile, setMasterFile] = useState<File | null>(null)
-  const [localizedFile, setLocalizedFile] = useState<File | null>(null)
-  const [importing, setImporting] = useState(false)
-  const [progress, setProgress] = useState<SdbhImportProgress | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const abortRef = useRef<AbortController | null>(null)
-
-  useEffect(() => {
-    return () => abortRef.current?.abort()
-  }, [])
-
-  async function handleImport() {
-    if (!masterFile || importing) return
-    setImporting(true)
-    setError(null)
-    setProgress({ phase: "parse" })
-    abortRef.current = new AbortController()
-    try {
-      assertSourceUploadByteLength(masterFile.size)
-      if (localizedFile) assertSourceUploadByteLength(localizedFile.size)
-      const masterJson = await masterFile.text()
-      const localizedJson = localizedFile ? await localizedFile.text() : null
-      const summary = await importSdbh(
-        masterJson,
-        localizedJson,
-        { projectId, author: username, getToken, signal: abortRef.current.signal },
-        setProgress,
-        {
-          master: { name: masterFile.name, bytes: await masterFile.arrayBuffer() },
-          ...(localizedFile ? {
-            localized: { name: localizedFile.name, bytes: await localizedFile.arrayBuffer() },
-          } : {}),
-        },
-      )
-      await onImported(summary.refs, {
-        sourceLanguage: "hbo",
-        ...(summary.targetLanguageCode ? { targetLanguage: summary.targetLanguageCode } : {}),
-      }, summary.skipped)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t("importExport.errors.importFailed"))
-    } finally {
-      setImporting(false)
-      setProgress(null)
-      abortRef.current = null
-    }
-  }
-
-  const pct =
-    progress?.cellsTotal && progress.cellsTotal > 0
-      ? Math.round(((progress.cellsEnqueued ?? 0) / progress.cellsTotal) * 100)
-      : 0
-
-  return (
-    <div className="flex flex-col gap-4 py-2">
-      <p className="text-xs text-muted-foreground">
-        <RichMessage
-          k="importExport.sdbh.description"
-          values={{
-            dictName: <span className="font-medium">{t("importExport.sdbh.dictionaryName")}</span>,
-            // i18n-exempt example filename
-            masterFile: <code>SDBH-en.JSON</code>,
-            // i18n-exempt example filename
-            localizedFile: <code>SDBH-es.JSON</code>,
-          }}
-        />
-      </p>
-      <div className="flex flex-col gap-2">
-        <Button variant="outline" nativeButton={false} render={<label />}>
-          {masterFile ? masterFile.name : t("importExport.sdbh.chooseMaster")}
-          <input
-            type="file"
-            className="hidden"
-            accept=".json,.JSON"
-            onChange={(e) => {
-              setMasterFile(e.target.files?.[0] ?? null)
-              setError(null)
-            }}
-            disabled={importing}
-          />
-        </Button>
-        <Button variant="outline" nativeButton={false} render={<label />}>
-          {localizedFile ? localizedFile.name : <>{t("importExport.sdbh.chooseLocalized")} <OptionalMark /></>}
-          <input
-            type="file"
-            className="hidden"
-            accept=".json,.JSON"
-            onChange={(e) => {
-              setLocalizedFile(e.target.files?.[0] ?? null)
-              setError(null)
-            }}
-            disabled={importing}
-          />
-        </Button>
-      </div>
-      {progress && (
-        <div className="text-xs text-muted-foreground">
-          {progress.phase === "parse" ? (
-            <p>{t("importExport.sdbh.parsingLexicon")}</p>
-          ) : (
-            <>
-              <p>
-                {progress.phase === "source"
-                  ? t("importExport.sdbh.uploadingSource")
-                  : t("importExport.sdbh.prefillingTranslations")}
-                {progress.fileIndex
-                  ? ` — ${t("importExport.sdbh.fileProgress", { index: progress.fileIndex, count: progress.fileCount ?? 0 })}`
-                  : ""}
-                {progress.cellsTotal
-                  ? `: ${t("importExport.sdbh.cellsProgress", {
-                      enqueued: (progress.cellsEnqueued ?? 0).toLocaleString(),
-                      total: progress.cellsTotal.toLocaleString(),
-                    })}`
-                  : ""}
-              </p>
-              <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-muted">
-                <div className="h-full bg-primary transition-all" style={{ width: `${pct}%` }} />
-              </div>
-            </>
-          )}
-        </div>
-      )}
-      {error && <p className="text-sm text-destructive">{error}</p>}
-      <div className="flex justify-end">
-        <Button onClick={handleImport} disabled={!masterFile || importing}>
-          {importing ? t("importExport.action.importing") : t("nav.workspaceActions.import")}
-        </Button>
-      </div>
-    </div>
-  )
-}
+// The SDBH Hebrew Lexicon panel lives in ./import/SdbhPanel. AQU-2487 (import
+// sweep, Nov 2): a second copy used to sit here, and AQU-1369's "Some reference
+// lists will not be imported" question was added to the other one only.
 
 // ---------------------------------------------------------------------------
 // Macula Hebrew + Greek panel (AQU-178)

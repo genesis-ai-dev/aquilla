@@ -359,7 +359,7 @@ import {
 } from "@/lib/audio/linked-takes"
 import { deriveSourceRegions, insertSlotsByCell, EMPTY_INSERT_SLOTS } from "@/lib/timeline/source-regions"
 import { deriveTracksForFile } from "@/lib/timeline/tracks"
-import { filmKindOf, filmPiecesFor, filmVoicesProgramme, linkedFilmRunOnSec } from "@/lib/timeline/film-pieces"
+import { filmKindOf, filmPiecesFor, filmVoicesProgramme, linkedFilmRunOnSec, programmeFilmFor, stripLinesFor } from "@/lib/timeline/film-pieces"
 import { layOutProgramme, playsHeardLines, recordingsLines } from "@/lib/timeline/programme"
 import { nextFolderName } from "@/lib/timeline/track-names"
 import { applyPendingOrders, renormaliseOrders, settledPendingOrders } from "@/lib/timeline/track-reorder"
@@ -15165,8 +15165,11 @@ export function ProjectWorkspace() {
     durationSec: videoDurationForTable,
     chapterOfABook: timelineScopes.length > 0,
   })
+  // AQU-2253 (review, Nov 9): the film's lines and the lists Space, a click on
+  // the timeline and the bottom strip start the queue with must be the same
+  // lines (`programmeFilmFor`; ProjectWorkspace.filmRunLines.test.ts).
   const programmeFilm = useMemo(
-    () => (filmRunOnSec != null ? { endSec: filmRunOnSec, cellIds: new Set(playbackCells.map((c) => c.id)) } : null),
+    () => programmeFilmFor(filmRunOnSec, playbackCells),
     [filmRunOnSec, playbackCells],
   )
   // No cleanup between changes: taking the film away for a beat would end a
@@ -15186,12 +15189,10 @@ export function ProjectWorkspace() {
   )
   // The bottom strip reads its own audio and merges it in; it gets the same
   // lines by id (the heard lines, already merged, when it plays them).
-  const timelineBarCells = useMemo(() => {
-    if (playbackCells !== timelineCells) return playbackCells
-    if (timelineCells === audioMergedCells) return legacyCells
-    const ids = new Set(timelineCells.map((c) => c.id))
-    return legacyCells.filter((c) => ids.has(c.id))
-  }, [audioMergedCells, legacyCells, timelineCells, playbackCells])
+  const timelineBarCells = useMemo(
+    () => stripLinesFor(playbackCells, timelineCells, audioMergedCells, legacyCells),
+    [audioMergedCells, legacyCells, timelineCells, playbackCells],
+  )
   // A book's chapter comes from the table: the chapter on screen, as it
   // scrolls. Scrolling is reading, never a pick, so it leaves playback alone —
   // a paused Play all resumes where it was, and the timeline stays on its

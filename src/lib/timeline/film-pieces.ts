@@ -121,6 +121,46 @@ export function linkedFilmRunOnSec(args: {
 }
 
 /**
+ * AQU-2253 (review, Nov 9): the film as the queue is told it (play-queue's
+ * `setProgrammeFilm`): its length, and the ids of the lines Play plays on its
+ * file. Null where Play ends with the lines (`linkedFilmRunOnSec` said null).
+ *
+ * The whole of "Play runs on to the film's end" hangs on one equality: these
+ * ids must be exactly the ids of the list each caller starts the queue with.
+ * Those are Space and a click on the timeline (`lines` itself) and the bottom
+ * strip (`stripLinesFor(lines, …)`). A list that differs by one line switches
+ * the feature off without a sign: Play ends with the lines again and, with
+ * nothing recorded, the strip's Play goes off. So the three take their lists
+ * from here, and ProjectWorkspace.filmRunLines.test.ts holds them to it.
+ */
+export function programmeFilmFor(
+  runOnSec: number | null,
+  lines: readonly { id: string }[],
+): { endSec: number; cellIds: Set<string> } | null {
+  return runOnSec != null ? { endSec: runOnSec, cellIds: new Set(lines.map((c) => c.id)) } : null
+}
+
+/**
+ * The lines the bottom strip is handed: the lines Play plays (`playbackLines`,
+ * what `programmeFilmFor` names), by id. The strip reads its own audio and
+ * merges it in, so it gets them plain (`plainLines`, the file's lines without
+ * audio; `mergedLines` is the same lines with it), cut down to the timeline's
+ * (a book's chapter); the heard lines, already merged, where the file plays
+ * those.
+ */
+export function stripLinesFor<C extends { id: string }>(
+  playbackLines: C[],
+  timelineLines: C[],
+  mergedLines: C[],
+  plainLines: C[],
+): C[] {
+  if (playbackLines !== timelineLines) return playbackLines
+  if (timelineLines === mergedLines) return plainLines
+  const ids = new Set(timelineLines.map((c) => c.id))
+  return plainLines.filter((c) => ids.has(c.id))
+}
+
+/**
  * One line's piece of an imported film, following the recordings: where it
  * sits on the timeline (the line's slot) and which stretch of the film it
  * shows. `atSec`/`lenSec` are timeline seconds, `filmStartSec`/`filmEndSec`

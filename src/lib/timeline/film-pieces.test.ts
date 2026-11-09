@@ -10,6 +10,8 @@ import {
   filmPiecesFor,
   filmVoicesProgramme,
   linkedFilmRunOnSec,
+  programmeFilmFor,
+  stripLinesFor,
   pieceHeldSec,
   visibleFilmPieceStrips,
   type FilmPiece,
@@ -302,5 +304,49 @@ describe("visibleFilmPieceStrips — the strip's frames come from each piece's o
     const tiles = strips[0].tiles
     expect(Math.min(...tiles.map((t) => t.leftPx))).toBeGreaterThanOrEqual(Math.floor((5 * 40 - 140) / 58) * 58)
     expect(Math.max(...tiles.map((t) => t.leftPx))).toBeLessThan(7 * 40 - 140)
+  })
+})
+
+// AQU-2253 (review, Nov 9): the film's lines and the bottom strip's lines are
+// the lines Play plays, by id (the queue-side proof is in
+// components/ProjectWorkspace.filmRunLines.test.ts).
+describe("programmeFilmFor and stripLinesFor: one list of lines, by id", () => {
+  const ids = (lines: readonly { id: string }[]) => lines.map((c) => c.id)
+  const plain = [{ id: "a" }, { id: "b" }, { id: "c" }]
+  const merged = plain.map((c) => ({ ...c }))
+
+  it("no film to run on over: nothing is named", () => {
+    expect(programmeFilmFor(null, plain)).toBeNull()
+  })
+
+  it("names the film's length and exactly the lines Play plays", () => {
+    const film = programmeFilmFor(2700, merged)
+    expect(film?.endSec).toBe(2700)
+    expect([...(film?.cellIds ?? [])]).toEqual(["a", "b", "c"])
+  })
+
+  it("the strip gets the file's lines plain when the timeline draws them all", () => {
+    expect(stripLinesFor(merged, merged, merged, plain)).toBe(plain)
+  })
+
+  it("only the timeline's lines when it draws fewer (a book's chapter)", () => {
+    const chapter = [merged[0], merged[2]]
+    const strip = stripLinesFor(chapter, chapter, merged, plain)
+    expect(ids(strip)).toEqual(["a", "c"])
+    expect(strip[0]).toBe(plain[0])
+  })
+
+  it("the heard lines themselves where the file plays those", () => {
+    const heard = [{ id: "h1" }, { id: "h2" }]
+    expect(stripLinesFor(heard, merged, merged, plain)).toBe(heard)
+  })
+
+  it("whichever it is, the strip's ids are the film's ids", () => {
+    const chapter = [merged[1]]
+    const cases: [{ id: string }[], { id: string }[]][] = [[merged, merged], [chapter, chapter], [[{ id: "h1" }], merged]]
+    for (const [playback, timeline] of cases) {
+      const film = programmeFilmFor(60, playback)
+      expect(ids(stripLinesFor(playback, timeline, merged, plain)).sort()).toEqual([...(film?.cellIds ?? [])].sort())
+    }
   })
 })

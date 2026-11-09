@@ -5,6 +5,8 @@
 //
 //   * the lane's punctuation conventions — the marks the two punctuation
 //     checks judge the target by (db/shared/punctuation-conventions.ts);
+//   * the lane's number format — the separators and digits the number-format
+//     check judges the target by (AQU-2430, db/shared/number-format.ts);
 //   * the lane's built-in check overrides — a maintainer may switch a check
 //     off, or change its severity, for ONE lane, on top of the project-wide
 //     `algorithmicChecks` every lane already shared.
@@ -18,6 +20,7 @@ import type {
 } from "@/lib/parsers/types"
 import { laneLanguage, laneLanguageCode } from "@/lib/lanes/lane-display"
 import { readLanguageProfile } from "../../../db/shared/language-profile"
+import { resolveNumberFormat, type ResolvedNumberFormat } from "../../../db/shared/number-format"
 import { resolvePunctuation, type ResolvedPunctuation } from "../../../db/shared/punctuation-conventions"
 
 type LaneRow = NonNullable<ProjectRecord["lanes"]>[number]
@@ -87,6 +90,24 @@ export function lanePunctuation(
   return resolvePunctuation({
     language: laneLanguageForChecks(project, lane),
     profile: readLanguageProfile(project?.languageProfile).punctuation ?? null,
+  })
+}
+
+/**
+ * The number format in force in `lane`: the project's Language profile slot
+ * laid over CLDR's answer for the lane's language, else that answer alone,
+ * else none — which leaves the number-format check silent (AQU-2430).
+ *
+ * The Language profile is a PROJECT-level record, so a filled slot applies in
+ * every lane, exactly as it does for punctuation.
+ */
+export function laneNumberFormat(
+  project: Pick<ProjectRecord, "lanes" | "targetLanguage" | "languageProfile"> | null | undefined,
+  lane: string,
+): ResolvedNumberFormat {
+  return resolveNumberFormat({
+    language: laneLanguageForChecks(project, lane),
+    profile: readLanguageProfile(project?.languageProfile).numberFormat ?? null,
   })
 }
 

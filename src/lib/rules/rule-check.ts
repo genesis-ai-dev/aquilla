@@ -34,4 +34,10 @@ export type RuleCheck =
        * builtin branch. Never stored.
        */
       bookNames?: readonly import("../lqa/builtin-run-context").ProjectBookName[] | null
+      /**
+       * `numberFormat` (AQU-2430) rides the same way: resolved per LANE by
+       * `resolveBuiltinRules` and read by `rule-engine`'s builtin branch.
+       * Never stored.
+       */
+      numberFormat?: import("../../../db/shared/number-format").NumberFormatConventions | null
     }

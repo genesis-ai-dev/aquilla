@@ -17,9 +17,18 @@ const MODEL_KEY: Record<SourceModel, "settings.transcription.model.whisper" | "s
   "omni-ctc": "settings.transcription.model.omni",
 }
 
-/** "52 minutes", "1 hour 40 minutes", "40 seconds". */
+/** "52 minutes", "1 hour 40 minutes", "1 minute 12 seconds", "40 seconds".
+ *  Under ten minutes the seconds are kept, so 72 s reads "1 minute 12
+ *  seconds" beside its 2 one-minute requests, never "1 minute". */
 export function audioLength(t: T, ms: number): string {
   if (ms < 60_000) return t("audio.transcribeCost.seconds", { count: Math.max(1, Math.round(ms / 1000)) })
+  if (ms < 10 * 60_000) {
+    const total = Math.round(ms / 1000)
+    const whole = Math.floor(total / 60)
+    const rest = total % 60
+    const m = t("audio.transcribeCost.minutes", { count: whole })
+    return rest === 0 ? m : t("audio.transcribeCost.minutesAndSeconds", { minutes: m, seconds: t("audio.transcribeCost.seconds", { count: rest }) })
+  }
   const minutes = audioMinutes(ms)
   if (minutes < 60) return t("audio.transcribeCost.minutes", { count: minutes })
   const hours = Math.floor(minutes / 60)

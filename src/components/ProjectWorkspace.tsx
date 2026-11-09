@@ -269,9 +269,9 @@ import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
 import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll, needsTranscription, takesNeedingMeasure, runMeasureAll, type SynthTarget, type TranscribeRunReport } from "@/lib/audio/batch-audio"
 import { lineWordsToast, transcribeRunProgressTitle, transcribeRunToast } from "@/lib/audio/transcribe-report"
-import { runLineWords, type LineWordsIdentity } from "@/lib/audio/line-words-run"
+import { runLineWords, wordsOf, type LineWordsIdentity } from "@/lib/audio/line-words-run"
 import type { StoredTranscribeRun, TranscribeRunHandle, TranscribeRunKind } from "@/lib/audio/transcribe-runs"
-import { pageIsLeaving } from "@/lib/audio/transcribe-runs"
+import { dropStoredTranscribeRun, findLineWordsRun, pageIsLeaving } from "@/lib/audio/transcribe-runs"
 import { useCarryOnTranscribeRuns } from "@/hooks/useCarryOnTranscribeRuns"
 import { changeCellVoice, changeVoiceBlocker, changeVoiceSourceTake } from "@/lib/audio/change-voice"
 import { planChangeVoiceAll, runChangeVoiceAll } from "@/lib/audio/change-voice-batch"
@@ -425,7 +425,7 @@ import type { TranscribeChoiceInfo } from "@/components/import/recording-choice-
 import { RecordingImportChoiceDialog } from "@/components/import/RecordingImportChoiceDialog"
 import { probeMediaDurationMs } from "@/lib/import"
 import { needsSplitNotice, sourceRecordingLine } from "@/lib/timeline/recording-line"
-import { piecesFromCuts, splitRecordingLine, writeLineWindow, type LinePiece, type RecordingLine } from "@/lib/timeline/split-recording-line"
+import { piecesFromCuts, splitRecordingLine, textsForPieces, writeLineWindow, type LinePiece, type RecordingLine } from "@/lib/timeline/split-recording-line"
 import { cutsFromWords, loadLinePcm, pauseCuts, type LineAudio } from "@/lib/audio/recording-split"
 import { transcribeBlock } from "@/lib/audio/transcribe-access"
 import { estimateTranscriptionCost } from "@/lib/audio/transcription-cost"
@@ -10625,8 +10625,25 @@ export function ProjectWorkspace() {
     line: RecordingLine, pieces: readonly LinePiece[], titleKey: "editor.splitLines.done" | "editor.splitLines.importDone" = "editor.splitLines.done",
   ): Promise<boolean> => {
     try {
-      const result = await splitRecordingLine({ line, pieces, author: currentUsername })
+      // A split at pauses on a line whose words were already found (kept from
+      // a words run nobody split by): each new line gets the words in its own
+      // stretch, by their timings — never the first line all of them.
+      let toWrite = pieces
+      let usedRunId: string | null = null
+      if (pieces.every((p) => p.text === undefined)) {
+        const lo = line.trimStartMs ?? 0
+        const hi = line.trimEndMs ?? line.durationMs ?? lo + (line.endMs - line.startMs)
+        const kept = findLineWordsRun({ projectId: line.projectId, fileId: line.fileId, cellId: line.cellId, audioId: line.audioId, lo, hi })
+        const keptWords = kept?.line ? wordsOf(kept.line).words : []
+        if (kept && keptWords.length > 0) {
+          const texts = textsForPieces(pieces, lo, keptWords)
+          toWrite = pieces.map((p, i) => ({ ...p, text: texts[i] ?? "" }))
+          usedRunId = kept.id
+        }
+      }
+      const result = await splitRecordingLine({ line, pieces: toWrite, author: currentUsername })
       if (!result) return false
+      if (usedRunId) dropStoredTranscribeRun(usedRunId)
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       revalidateCells()
       recordStep({

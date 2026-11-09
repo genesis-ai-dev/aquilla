@@ -15,7 +15,7 @@ vi.mock("@/lib/sync/events-emit", () => {
   }
 })
 
-import { piecesFromCuts, splitRecordingLine, type RecordingLine } from "./split-recording-line"
+import { piecesFromCuts, splitRecordingLine, textsForPieces, type RecordingLine } from "./split-recording-line"
 
 const whole: RecordingLine = {
   projectId: "p", fileId: "f", cellId: "c1", name: "Ruth 1 intro.m4a",
@@ -89,3 +89,31 @@ describe("piecesFromCuts with words", () => {
     expect(pieces.map((p) => p.text)).toEqual(["One.", "Two. Three."])
   })
 })
+
+describe("words kept on a whole line, shared out by a later split", () => {
+  // Words from a words run nobody split by, seconds from the stretch's start.
+  const kept = [
+    { text: "In", start: 0.5, end: 0.8 }, { text: "the", start: 0.9, end: 1.0 }, { text: "beginning.", start: 1.1, end: 1.6 },
+    { text: "Ruth", start: 12.0, end: 12.4 }, { text: "went.", start: 12.5, end: 13.0 },
+    { text: "Naomi", start: 30.2, end: 30.8 }, { text: "wept.", start: 31.0, end: 31.5 },
+  ]
+
+  it("each piece gets the words whose middle falls in its stretch; a piece with none gets none", () => {
+    const pieces = piecesFromCuts(whole, [10_000, 20_000, 28_000])
+    expect(textsForPieces(pieces, 0, kept)).toEqual(["In the beginning.", "Ruth went.", "", "Naomi wept."])
+  })
+
+  it("counts from the stretch's start on the recording", () => {
+    const line = { ...whole, trimStartMs: 5_000, trimEndMs: 45_000 }
+    const pieces = piecesFromCuts(line, [15_000])
+    // "Ruth" at 12 s from the stretch's start is 17 s on the recording: the second piece.
+    expect(textsForPieces(pieces, 5_000, kept)).toEqual(["In the beginning.", "Ruth went. Naomi wept."])
+  })
+
+  it("an empty first piece clears the words the whole line kept", async () => {
+    const pieces = piecesFromCuts(whole, [10_000]).map((p, i) => ({ ...p, text: i === 0 ? "" : "Ruth went." }))
+    await splitRecordingLine({ line: whole, pieces, author: "lee", mintId: () => "n1" })
+    expect(calls.find((c) => c.kind === "attach" && c.input.cellId === "c1")?.input).toMatchObject({ transcription: "" })
+  })
+})
+

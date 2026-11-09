@@ -21,6 +21,7 @@
 
 import { v7 as uuidv7 } from "uuid"
 import { sequenceBetween } from "./derive"
+import { joinWords } from "@/lib/audio/lines-from-words"
 import {
   emitCellAudioAttach, emitCellAudioTrim, emitCellRetime, emitSourceCellCreate, emitSourceCellReorder,
 } from "@/lib/sync/events-emit"
@@ -108,6 +109,27 @@ export function piecesFromCuts(
   }))
 }
 
+/**
+ * Words already found on a whole line (kept from a words run nobody split by,
+ * seconds from `lo`, the stretch's start on the recording), shared out to the
+ * pieces of a later split: each word goes to the piece its middle falls in.
+ * A piece with no words gets "" — never another piece's words.
+ */
+export function textsForPieces(
+  pieces: readonly Pick<LinePiece, "trimStartMs" | "trimEndMs">[],
+  lo: number,
+  words: readonly { text: string; start: number; end: number }[],
+): string[] {
+  const groups: Array<Array<{ text: string }>> = pieces.map(() => [])
+  for (const w of words) {
+    const mid = lo + ((w.start + w.end) / 2) * 1000
+    let i = pieces.findIndex((p) => mid >= p.trimStartMs && mid < p.trimEndMs)
+    if (i < 0) i = mid < (pieces[0]?.trimStartMs ?? 0) ? 0 : pieces.length - 1
+    groups[i]!.push(w)
+  }
+  return groups.map((g) => joinWords(g))
+}
+
 /** What the line was before the split, for Undo. */
 export interface LineBefore {
   startMs: number
@@ -158,8 +180,9 @@ export async function splitRecordingLine(args: {
   const [first, ...rest] = pieces
   await emitCellRetime({ ...base, cellId: line.cellId, startMs: first.startMs, endMs: first.endMs })
   await emitCellAudioTrim({ ...base, cellId: line.cellId, audioId: line.audioId, trimStartMs: first.trimStartMs, trimEndMs: first.trimEndMs })
-  if (first.text) {
-    // The words land on the line's own source text, as transcription writes them.
+  if (first.text !== undefined) {
+    // The words land on the line's own source text, as transcription writes them
+    // ("" clears words the whole line had kept, when none fall in this piece).
     await emitCellAudioAttach({ ...base, ...attachShared, cellId: line.cellId, transcription: first.text })
   }
 

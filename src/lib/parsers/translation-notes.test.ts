@@ -2,6 +2,8 @@
 
 import { describe, it, expect } from "vitest"
 import { parseTnTsv } from "./translation-notes"
+import { tsvNotesRoute } from "@/lib/dcs/routes/tsv-notes"
+import type { DcsCatalogEntry, DcsManifest } from "@/lib/dcs/types"
 import {
   readNoteReferenceMetadata,
   supportReferenceLabel,
@@ -247,5 +249,49 @@ front:intro\tabc0\t\t\t\t0\t# Introduction to Genesis
     for (const name of ["tn_GEN_rev.tsv", "rev_tn_GEN.tsv", "titus-notes-rev.tsv", "notes_job.tsv", "GEN_tn.tsv", "57-TIT_act.tsv"]) {
       expect(parseTnTsv(CURRENT, name), name).toMatchObject({ notes: [], skippedCount: 3 })
     }
+  })
+})
+
+// AQU-2487 (review, Nov 9): the tile left the file's "\n" marks in the note as
+// text and glued the Tags column onto it; the same file through Door43 came in
+// with real line breaks and the Note text alone.
+describe("parseTnTsv — reads the note the way the Door43 import does", () => {
+  const FILE = [
+    "Reference\tID\tTags\tSupportReference\tQuote\tOccurrence\tNote",
+    "front:intro\tabc0\t\t\t\t0\t# Introduction to Genesis\\n\\n## Part 1\\n\\nGenesis begins.",
+    "1:1\tabc1\tkeyterm\trc://*/ta/man/translate/figs-merism\tהַשָּׁמַ֖יִם\t1\tThis is a **merism**.",
+  ].join("\n")
+
+  it("turns the file's \\n marks into line breaks and shows the note's formatting", () => {
+    const { notes, strings } = parseTnTsv(FILE, "tn_GEN.tsv")
+    expect(notes[0].body).toBe("# Introduction to Genesis\n\n## Part 1\n\nGenesis begins.")
+    expect(strings[0].original).toBe(notes[0].body)
+    expect(strings[0].originalHtml).toBe("<h1>Introduction to Genesis</h1><h2>Part 1</h2><p>Genesis begins.</p>")
+    expect(strings[1].originalHtml).toBe("<p>This is a <b>merism</b>.</p>")
+  })
+
+  it("keeps Tags out of the note, beside its other reference columns", () => {
+    const { notes, strings } = parseTnTsv(FILE, "tn_GEN.tsv")
+    expect(notes[1].body).toBe("This is a **merism**.")
+    expect(notes[1].supportRef).toBe("rc://*/ta/man/translate/figs-merism")
+    expect(strings[1].metadata).toEqual({
+      tags: "keyterm",
+      supportReference: "rc://*/ta/man/translate/figs-merism",
+      quote: "הַשָּׁמַ֖יִם",
+      occurrence: "1",
+    })
+  })
+
+  it("gives the same note text, formatting and reference columns as Door43 for the same file", () => {
+    const door43 = tsvNotesRoute.parse({
+      entry: { fullName: "unfoldingWord/en_tn" } as DcsCatalogEntry,
+      manifest: {} as DcsManifest,
+      projectId: "p1",
+      files: new Map([["tn_GEN.tsv", FILE]]),
+    })[0].cells
+    const { strings } = parseTnTsv(FILE, "tn_GEN.tsv")
+    expect(strings.map((s) => ({ value: s.original, valueHtml: s.originalHtml, canonicalRef: s.context, metadata: s.metadata }))).toEqual(
+      door43.map((c) => ({ value: c.value, valueHtml: c.valueHtml, canonicalRef: c.canonicalRef, metadata: c.metadata })),
+    )
   })
 })

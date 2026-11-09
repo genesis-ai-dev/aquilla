@@ -34,6 +34,7 @@
 
 import { v7 as uuidv7 } from "uuid"
 import type { TranslatableString } from "./types"
+import { tsvMarkdownToHtml, unescapeTsvProse } from "../dcs/routes/tsv-common"
 import { BOOK_CODES_BY_NUMBER } from "../paratext-bridge/book-codes"
 
 export interface TranslationNote {
@@ -48,6 +49,8 @@ export interface TranslationNote {
   origQuote?: string
   /** Raw `Occurrence` column — which instance of `origQuote` in the verse. */
   occurrence?: string
+  /** The `Tags` column, when the file has one beside its support reference. */
+  tags?: string
   /** The formatted note body (may include Markdown) */
   body: string
 }
@@ -138,6 +141,12 @@ export function parseTnTsv(tsvText: string, fileName?: string): TnParseResult {
   const iReference = col(["reference", "ref"])
   const iId = col(["id"])
   const iSupportRef = col(["supportreference", "support_reference", "supportref", "tags"])
+  // AQU-2487 (review, Nov 9): today's unfoldingWord files have Tags AND
+  // SupportReference. Tags was only a second name for the support reference,
+  // so with both present it fell into the note ("keyterm<tab>This is…"). It is
+  // its own reference column, carried under the key the Door43 import uses.
+  const iTags = col(["tags"])
+  const ownTags = iTags !== -1 && iTags !== iSupportRef
   const iQuote = col(["origquote", "orig_quote", "quote"])
   const iOccurrence = col(["occurrence", "occurrences"])
 
@@ -186,6 +195,7 @@ export function parseTnTsv(tsvText: string, fileName?: string): TnParseResult {
     const origQuote = iQuote !== -1 ? (cols[iQuote] ?? "").trim() || undefined : undefined
     const occurrence =
       iOccurrence !== -1 ? (cols[iOccurrence] ?? "").trim() || undefined : undefined
+    const tags = ownTags ? (cols[iTags] ?? "").trim() || undefined : undefined
 
     // Build body from remaining columns (everything not already consumed as metadata).
     // Collect indices of known metadata columns so we can skip them for the body.
@@ -201,17 +211,24 @@ export function parseTnTsv(tsvText: string, fileName?: string): TnParseResult {
     if (iSupportRef !== -1) metaCols.add(iSupportRef)
     if (iQuote !== -1) metaCols.add(iQuote)
     if (iOccurrence !== -1) metaCols.add(iOccurrence)
+    if (ownTags) metaCols.add(iTags)
 
     const bodyParts = cols
       .map((c, idx) => (metaCols.has(idx) ? null : c.trim()))
       .filter((c): c is string => c !== null && c.length > 0)
-    const body = bodyParts.join("\t")
+    // AQU-2487 (review, Nov 9): a TSV cell can't hold a line break, so the file
+    // writes one as the two characters "\n". The Door43 import unfolds them
+    // and renders the note's markdown; this reads the note with the same code,
+    // so an introduction is headings and paragraphs here too, not one run of
+    // text with "\n" in it.
+    const body = unescapeTsvProse(bodyParts.join("\t"))
 
     const note: TranslationNote = { canonicalRef, body }
     if (noteId) note.noteId = noteId
     if (supportRef) note.supportRef = supportRef
     if (origQuote) note.origQuote = origQuote
     if (occurrence) note.occurrence = occurrence
+    if (tags) note.tags = tags
 
     notes.push(note)
 
@@ -220,6 +237,7 @@ export function parseTnTsv(tsvText: string, fileName?: string): TnParseResult {
     // are written, so a row without a quote produces no metadata at all rather
     // than a bucket of nulls.
     const cellMetadata: Record<string, string> = {}
+    if (tags) cellMetadata.tags = tags
     if (origQuote) cellMetadata.quote = origQuote
     if (occurrence) cellMetadata.occurrence = occurrence
     if (supportRef) cellMetadata.supportReference = supportRef
@@ -231,6 +249,7 @@ export function parseTnTsv(tsvText: string, fileName?: string): TnParseResult {
     strings.push({
       id: uuidv7(),
       original: body,
+      ...(body ? { originalHtml: tsvMarkdownToHtml(body) } : {}),
       translated: "",
       context: canonicalRef,
       group: canonicalRef,

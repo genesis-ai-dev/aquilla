@@ -354,6 +354,7 @@ import {
   primaryAudioHome,
   resolveAudioHomes,
   resolveSynthTargets,
+  takesLiveOnHeardLines,
   type SynthTargetPlan,
 } from "@/lib/audio/linked-takes"
 import { deriveSourceRegions, insertSlotsByCell, EMPTY_INSERT_SLOTS } from "@/lib/timeline/source-regions"
@@ -4877,8 +4878,19 @@ export function ProjectWorkspace() {
   )
   setCueAnchorOverridesRef.current = (cellId, offsetMs) =>
     setCueAnchorOverrides((prev) => new Map(prev).set(cellId, offsetMs))
+  // AQU-2460: an imported film's own lines hold its takes, with its heard
+  // lines (Source cues) beside them as text. Only a linked film's subtitle
+  // file records its dubs on the heard lines. Heard lines that already hold
+  // takes (recorded on an imported film before this) stay where they are, so
+  // nothing recorded disappears.
+  const filmIsUpload = (activeFile?.coreMediaUrl ?? "").startsWith("frontier-audio://")
+  const cuesHoldTakes = useMemo(() => {
+    for (const entry of cueAudioByCellId.values()) if (Object.keys(entry.attachments).length > 0) return true
+    return false
+  }, [cueAudioByCellId])
+  const takesOnCues = takesLiveOnHeardLines({ filmIsUpload, heardLinesHoldTakes: cuesHoldTakes })
   const audioCueCells = useMemo(() => {
-    if (!audioCues) return null
+    if (!audioCues || !takesOnCues) return null
     const merged = mergeCellsWithAudio(audioCues, cueAudioByCellId)
     if (cueAnchorOverrides.size === 0) return merged
     return merged.map((c) => {
@@ -4887,7 +4899,7 @@ export function ProjectWorkspace() {
         ? c
         : { ...c, metadata: { ...(c.metadata ?? {}), target_offset_ms: offset } }
     })
-  }, [audioCues, cueAudioByCellId, cueAnchorOverrides])
+  }, [audioCues, cueAudioByCellId, cueAnchorOverrides, takesOnCues])
   // AQU-2125: what a save folds — read at save time (see `castFoldLinesRef`).
   castFoldLinesRef.current = () => castLinesOf([...cellSummaries, ...(audioCueCells ?? [])])
   cueTakeCountRef.current = () => {
@@ -12317,15 +12329,15 @@ export function ProjectWorkspace() {
           delivers: activeLaneDelivers,
           ownAudio: audioValidationByCellId,
           fileId: activeFileId,
-          cueIds: audioCueSibling && audioCues ? audioCues.map((cue) => cue.id) : null,
-          cueAudio: audioCueSibling ? cueAudioByCellId : null,
-          cueFileId: audioCueSibling?.id ?? null,
+          cueIds: audioCueSibling && audioCues && takesOnCues ? audioCues.map((cue) => cue.id) : null,
+          cueAudio: audioCueSibling && takesOnCues ? cueAudioByCellId : null,
+          cueFileId: takesOnCues ? (audioCueSibling?.id ?? null) : null,
           cuesForText: cueLinks.cuesForText,
           audioThreshold: project ? readValidationCountAudio(project) : 1,
         })
       : NO_LANE_TAKES,
     [laneCountsRecordings, activeLaneDelivers, audioValidationByCellId, activeFileId, audioCueSibling, audioCues,
-      cueAudioByCellId, cueLinks.cuesForText, project],
+      cueAudioByCellId, cueLinks.cuesForText, project, takesOnCues],
   )
   useEffect(() => {
     // In a language that counts its recordings, "carries a take of its own"

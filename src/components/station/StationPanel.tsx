@@ -287,6 +287,10 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
       const atts = take.cell.attachments ?? {}
       const isPiece = Boolean(take.att.pieceOf) || Object.values(atts).some((a) => !a.isDeleted && a.pieceOf === target.audioId)
       const pieceRoot = take.att.pieceOf ?? target.audioId
+      // AQU-2493 (review, Nov 9): the take's other pieces, for the save's Undo.
+      const otherPieces = Object.entries(atts)
+        .filter(([id, a]) => id !== target.audioId && !a.isDeleted && (a.pieceOf ?? id) === pieceRoot)
+        .map(([id]) => id)
       const placements: VersionPlacement[] = targets.map((p) => {
         const isOpen = p.cell.id === target.cellId
         // The open clip keeps the kept part as edited; another placement keeps
@@ -314,7 +318,7 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
           level: isOpen
             ? { gainDb: ed.level.gainDb || null, fadeInMs: ed.level.fadeIn > 0 ? Math.round(ed.level.fadeIn * 1000) : null, fadeOutMs: ed.level.fadeOut > 0 ? Math.round(ed.level.fadeOut * 1000) : null }
             : { gainDb: p.att.gainDb ?? null, fadeInMs: p.att.fadeInMs ?? null, fadeOutMs: p.att.fadeOutMs ?? null },
-          ...(isOpen && isPiece ? { pieceOf: pieceRoot } : {}),
+          ...(isOpen && isPiece ? { pieceOf: pieceRoot, otherPieces } : {}),
         }
       })
       const res = await saveStationVersion({

@@ -90,6 +90,13 @@ export interface TakeAddData {
   pieces?: string[]
   /** The window it was born with, when the action set one. */
   window?: TakeWindow
+  /**
+   * AQU-2493 (review, Nov 9): the pieces that were in its take already when
+   * the action added it AS a piece (the Station saving one piece of a cut
+   * take: the piece it replaced, and the others). They are not a change made
+   * since, so undo accepts them; absent on any other add.
+   */
+  joined?: string[]
 }
 
 export interface TakeStepContext {
@@ -195,8 +202,10 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
         }
         // Cut, trimmed or partly removed since: someone has worked on it.
         if (live.length !== ids.length) return CHANGED
+        // AQU-2493 (review, Nov 9): a piece that joined a cut take counts
+        // only the pieces that came after it; the ones it joined were there.
         const group = ctx.liveGroup?.(d.cellId, d.audioId)
-        if (group && group.some((id) => !ids.includes(id))) return CHANGED
+        if (group && group.some((id) => !ids.includes(id) && !(d.joined ?? []).includes(id))) return CHANGED
         const first = ctx.readTake(d.cellId, d.audioId)
         if (d.window && first && !sameWindow(first, d.window)) return CHANGED
         const playingNow = ctx.selectedIn(d.cellId, d.slot)

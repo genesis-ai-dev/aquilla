@@ -2242,9 +2242,13 @@ export function TimelineEditor({
     const recorded = layOutProgramme(recordedCells, programmeTracks).programme
     return { dubbing: Math.max(sourceEnd, filmSec) || null, audioFirst: recorded.totalSec || null }
   }, [cells, recordedCells, subtitleFileWithFootage, videoDurationSec, programmeTracks])
-  // The lines this file's programme is laid out from: an imported recording's
-  // sections, else the heard lines of an audio cue file, else the subtitles.
-  const programmeCells = dialogue.length > 0 ? dialogue : (heardLines ?? subtitle)
+  // The lines this file's programme is laid out from: the heard lines of an
+  // audio cue file where its takes live on them, else an imported recording's
+  // sections, else the subtitles.
+  // AQU-2227 (review, Nov 9): the heard lines come first. With the recording's
+  // sections first, a file that has both was laid out from lines holding no
+  // take, and every take chip vanished following the recordings.
+  const programmeCells = heardLines ?? (dialogue.length > 0 ? dialogue : subtitle)
   // SUB-53: the single answer to "where does this go on the track?". Dubbing
   // returns the pre-SUB-53 geometry verbatim; audio-first returns the laid-out
   // programme. Everything below reads positions through this.
@@ -2276,7 +2280,7 @@ export function TimelineEditor({
   const getOtherLayout = useCallback((): TimelineLayout => {
     const other: AudioTimingMode = timingMode === "audioFirst" ? "dubbing" : "audioFirst"
     const lanes = timelineLanes(cells, other)
-    const lines = lanes.dialogue.length > 0 ? lanes.dialogue : (heardLines ?? lanes.subtitle)
+    const lines = heardLines ?? (lanes.dialogue.length > 0 ? lanes.dialogue : lanes.subtitle)
     return buildTimelineLayout(
       other,
       cells,

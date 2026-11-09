@@ -4576,6 +4576,34 @@ describe("TimelineEditor — an added track finds its takes where they actually 
       expect(parseFloat(screen.getByTestId("tl-target-cue1").style.left)).toBeCloseTo(1 * 38, 0)
       expect(parseFloat(screen.getByTestId("tl-target-cue2").style.left)).toBeCloseTo(5 * 38, 0)
     })
+
+    // AQU-2227 (review, Nov 9): the same file with recording lines of its own
+    // (an uploaded recording cut into lines beside a linked film, or an
+    // imported film whose heard lines already hold takes). Laid out from the
+    // recording's lines, no heard line had a place: every take vanished from
+    // the Target audio row and the file looked unrecorded.
+    it("keeps the heard lines' dubs on the timeline when the file has recording lines of its own", () => {
+      const clip = { "audio-f1-1690000000-shared.mp3": { type: "audio", url: "frontier-audio://src" } }
+      const recordingLines = [
+        cell({ id: "m1", original: "One", medium: "media", startTime: 0, endTime: 10, attachments: clip } as Partial<CellData>),
+        cell({ id: "m2", original: "Two", medium: "media", startTime: 10, endTime: 20, attachments: clip } as Partial<CellData>),
+      ]
+      render(
+        <TimelineEditor
+          fileId="f1" coreMediaUrl="https://cdn/episode.m3u8" editable
+          cells={recordingLines}
+          audioCues={raw}
+          targetCells={heard}
+          timingMode="audioFirst"
+          onRetimeSubtitle={() => {}}
+        />,
+      )
+      const one = screen.getByTestId("tl-target-cue1")
+      const two = screen.getByTestId("tl-target-cue2")
+      expect(parseFloat(one.style.left)).toBeCloseTo(0, 0)
+      expect(parseFloat(one.style.width)).toBeCloseTo(6 * 38, 0)
+      expect(parseFloat(two.style.left)).toBeCloseTo(6 * 38, 0)
+    })
   })
 
   // ── AQU-646 stage 6C ───────────────────────────────────────────────────────

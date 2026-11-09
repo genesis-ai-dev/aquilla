@@ -360,7 +360,7 @@ import {
 import { deriveSourceRegions, insertSlotsByCell, EMPTY_INSERT_SLOTS } from "@/lib/timeline/source-regions"
 import { deriveTracksForFile } from "@/lib/timeline/tracks"
 import { filmKindOf, filmPiecesFor, filmVoicesProgramme } from "@/lib/timeline/film-pieces"
-import { layOutProgramme, recordingsLines } from "@/lib/timeline/programme"
+import { layOutProgramme, playsHeardLines, recordingsLines } from "@/lib/timeline/programme"
 import { nextFolderName } from "@/lib/timeline/track-names"
 import { applyPendingOrders, renormaliseOrders, settledPendingOrders } from "@/lib/timeline/track-reorder"
 import { folderIdsOf, folderMembers, orderForScopeAppend, trackScope } from "@/lib/timeline/track-groups"
@@ -14881,11 +14881,15 @@ export function ProjectWorkspace() {
   // as the sound is heard on its lines, and a film that cannot play leaves
   // the lines' original audible.
   const [filmFailed, setFilmFailed] = useState(false)
+  // AQU-2227 (review, Nov 9): a file that plays its heard lines (its takes
+  // live on them) does not play its own recording lines, so the recording
+  // cannot be the sound there: the film's own sound is the original.
+  const heardLinesPlay = playsHeardLines(audioCueCells, timingMode === "audioFirst")
   const filmVoicesTheProgramme = filmVoicesProgramme({
     kind: filmKind,
     paneOnScreen: showVideoPane,
     followsRecordings: timingMode === "audioFirst",
-    recordingIsTheSound: recordingDrivesPlayback(anyCellClockIsFileTime, playbackSource),
+    recordingIsTheSound: !heardLinesPlay && recordingDrivesPlayback(anyCellClockIsFileTime, playbackSource),
     filmFailed,
   })
   useEffect(() => {
@@ -19022,6 +19026,9 @@ export function ProjectWorkspace() {
                   // AQU-2253 (review, Nov 9): a film that cannot play
                   // voices nothing, so the lines' original stays audible.
                   onFilmFailed={setFilmFailed}
+                  // AQU-2227 (review, Nov 9): where the heard lines are what
+                  // plays, the film's own sound is the original.
+                  playsHeardLines={heardLinesPlay}
                   // AQU-2253 (Sam, Oct 30): an imported film is always
                   // silent, and following the recordings shows the piece of
                   // the line under the playhead.

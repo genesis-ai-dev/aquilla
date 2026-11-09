@@ -369,6 +369,26 @@ describe("MediaVideoPane", () => {
       })
     })
 
+    // AQU-2227 (review, Nov 9): a file that plays its heard lines (its takes
+    // live on them) does not play its own recording lines, so the film's own
+    // sound is the original there, linked or imported.
+    describe("on a file that plays its heard lines", () => {
+      it("a streamed film beside an uploaded recording keeps its own sound", () => {
+        renderFollowing({ cells: CELLS, playsHeardLines: true })
+        expect(screen.getByTestId("tl-video-pane")).toHaveAttribute("data-video-state", "slaved")
+        expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(false)
+      })
+
+      it("an imported film voices the original too, and the Source audio mute still silences it", () => {
+        const view = renderFollowing({ cells: CELLS, importedFilm: true, playsHeardLines: true })
+        expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(false)
+        view.unmount()
+        mockAudibility = { source: false, target: true }
+        renderFollowing({ cells: CELLS, importedFilm: true, playsHeardLines: true })
+        expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(true)
+      })
+    })
+
     // AQU-2253 (review, Nov 9): a film that cannot play voices nothing, so the
     // workspace is told and gives the lines' original its sound back.
     it("tells the workspace when the film could not be loaded, and again when it is retried or leaves", () => {

@@ -585,19 +585,40 @@ export function programmeLines(cells: readonly CellData[]): { lines: CellData[];
  * the heard lines that are laid end to end and played. The subtitle cards and
  * the Source cues row stay with the film, on the film's clock, as a linked
  * film's own lines do.
- * Every other file (an imported recording's sections stay its lines), and
- * every file following its source: its own lines. The
+ * Every other file, and every file following its source: its own lines. The
  * one answer the timeline and the transport both ask, so the dubs drawn are
  * the dubs played.
+ *
+ * AQU-2227 (review, Nov 9): `heardLines` are handed over only where the
+ * file's takes LIVE on them (`takesLiveOnHeardLines`, the workspace's one
+ * answer: its merged heard lines are null everywhere else), and then they are
+ * what is laid out, whether or not the file has recording lines of its own.
+ * It used to keep a recording's own sections here, from before an imported
+ * film's takes moved onto its own lines (AQU-2460). That left two files
+ * (an uploaded recording with a linked film and an audio cue file; an
+ * imported film whose heard lines already hold takes) laid out from lines
+ * that hold no take, so every take vanished from the timeline and from
+ * playback. An imported recording with no heard lines handed over keeps its
+ * sections, as `programmeLines` has them.
  */
 export function recordingsLines<L extends readonly CellData[]>(
   own: L,
   heardLines: L | null | undefined,
   followsRecordings: boolean,
 ): L {
-  if (!followsRecordings || !heardLines || heardLines.length === 0) return own
-  // An imported recording's own sections stay its lines, as `programmeLines` has them.
-  return own.some((c) => (c.medium ?? "text") === "media") ? own : heardLines
+  return playsHeardLines(heardLines, followsRecordings) ? (heardLines as L) : own
+}
+
+/**
+ * AQU-2227 (review, Nov 9): whether a file following its recordings is laid
+ * out and played from its heard lines (`recordingsLines`' own test, for the
+ * callers that need the answer and not the lines).
+ */
+export function playsHeardLines(
+  heardLines: readonly CellData[] | null | undefined,
+  followsRecordings: boolean,
+): boolean {
+  return followsRecordings && heardLines != null && heardLines.length > 0
 }
 
 /**

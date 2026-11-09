@@ -55,3 +55,31 @@ export function sourceRecordingLine(cell: CellData): SourceRecordingLine | null 
 export function needsSplitNotice(line: SourceRecordingLine | null): boolean {
   return Boolean(line && line.whole && line.readable && line.hi - line.lo > NOT_SPLIT_NOTICE_MIN_MS)
 }
+
+/** A line's name that reads as a file's name: one line, ending in an extension. */
+const FILE_NAME = /^[^\n]*\.[A-Za-z0-9]{2,5}$/
+
+/**
+ * AQU-2461 (review, Nov 9): the name of a film that is an upload, for Change
+ * film. A film brought in through Upload files has its file named after it,
+ * but a video dropped on an empty file's card does not: the file keeps its
+ * own name ("Episode 1 subtitles"), and the upload's name ("episode1.mov")
+ * is what its Source audio lines carry (the attach writes each line's name
+ * as the upload's file name, and a split keeps it). So the name is the one on
+ * a source line that plays this upload; without one, the file's name.
+ */
+export function uploadedFilmName(
+  cells: readonly CellData[],
+  filmUrl: string | null | undefined,
+  fileName: string | null | undefined,
+): string | null {
+  if (filmUrl) {
+    for (const cell of cells) {
+      if (sourceClipAudioForCell(cell)?.url !== filmUrl) continue
+      const name = (cell.original ?? "").trim()
+      // Only a file's name: never a line's wording, should someone have typed over it.
+      if (FILE_NAME.test(name)) return name
+    }
+  }
+  return fileName ?? null
+}

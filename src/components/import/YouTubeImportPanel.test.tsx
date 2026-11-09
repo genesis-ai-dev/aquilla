@@ -247,6 +247,37 @@ Lost words
     expect(await screen.findByText("Empty.mov is empty.")).toBeInTheDocument()
   })
 
+  // AQU-2344 (review, Nov 9): looking for captions inside an .mp4 reads the
+  // whole file into memory. Upload files only does that up to the source
+  // ceiling; this door did it for a 1.8 GB episode, which stalls or fails on a
+  // phone. It has the same guard now, and both doors say the file was not
+  // checked.
+  it("does not read a big film into memory to look for captions, and says it wasn't checked", async () => {
+    renderPanel()
+    fillYouTubeLink("https://youtu.be/dQw4w9WgXcQ")
+    fireEvent.click(screen.getByLabelText("Use original audio or video"))
+    const episode = new File(["x"], "Episode 101.mp4", { type: "video/mp4" })
+    Object.defineProperty(episode, "size", { value: 1.8 * 1024 * 1024 * 1024 })
+    const read = vi.spyOn(episode, "arrayBuffer")
+    await selectFile(episode)
+    fireEvent.click(screen.getByRole("button", { name: "Preview import" }))
+    expect(await screen.findByTestId("recording-import-choice")).toBeInTheDocument()
+    expect(read).not.toHaveBeenCalled()
+    expect(screen.getByTestId("recording-import-captions-unread")).toHaveTextContent(
+      "Episode 101.mp4 is over 95.0 MB, so it was not checked for captions inside it. If it has any, import them as a subtitle file along with it.",
+    )
+  })
+
+  it("a small original with no captions inside gets no such note", async () => {
+    renderPanel()
+    fillYouTubeLink("https://youtu.be/dQw4w9WgXcQ")
+    fireEvent.click(screen.getByLabelText("Use original audio or video"))
+    await selectFile(new File(["x"], "clip.mp3", { type: "audio/mpeg" }))
+    fireEvent.click(screen.getByRole("button", { name: "Preview import" }))
+    expect(await screen.findByTestId("recording-import-choice")).toBeInTheDocument()
+    expect(screen.queryByTestId("recording-import-captions-unread")).toBeNull()
+  })
+
   it("reviews and edits embedded captions in original media", async () => {
     const onImported = vi.fn()
     vi.mocked(createMediaFileCommit).mockReturnValue(async () => ({

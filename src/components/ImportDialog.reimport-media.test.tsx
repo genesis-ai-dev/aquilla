@@ -43,6 +43,14 @@ vi.mock("@/components/ui/scroll-area", () => ({
   ),
 }))
 
+// Google Drive hands the dialog the files it downloaded; here, at a click.
+const drivePick = vi.hoisted(() => ({ files: [] as File[] }))
+vi.mock("@/components/import/GoogleDrivePanel", () => ({
+  GoogleDrivePanel: ({ onFiles }: { onFiles: (files: File[], origins: Map<string, Record<string, unknown>>) => void | Promise<void> }) => (
+    <button type="button" onClick={() => void onFiles(drivePick.files, new Map())}>Pick from Drive</button>
+  ),
+}))
+
 import { ImportDialog } from "./ImportDialog"
 import { importFile } from "@/lib/import"
 
@@ -103,5 +111,55 @@ describe("Re-import with a recording or film", () => {
     expect(file).toBe(film)
     expect(options).not.toHaveProperty("sidebarReimport")
     expect(screen.queryByTestId("reimport-media-notice")).not.toBeInTheDocument()
+  })
+})
+
+// AQU-2461 (review, Nov 9): through Google Drive the same re-import said and
+// did nothing at all. The notice was set, but the Drive screen returns before
+// the place it is drawn.
+describe("Re-import with a recording through Google Drive", () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  async function openDrive() {
+    render(<ImportDialog {...baseProps} reimportTarget={{ fileId: "subs", name: "Episode 1.vtt" }} />)
+    // Re-import opens on Upload files; Back offers the other ways in.
+    fireEvent.click(await screen.findByRole("button", { name: "Back to import types" }))
+    fireEvent.click(await screen.findByText("Google Drive"))
+    return screen.findByRole("button", { name: "Pick from Drive" })
+  }
+
+  it("says it can't replace the file, as Upload files does", async () => {
+    drivePick.files = [new File([new Uint8Array(16)], "Reading.mp3")]
+    const pick = await openDrive()
+    await act(async () => {
+      fireEvent.click(pick)
+      await new Promise((r) => setTimeout(r, 0))
+    })
+    expect(await screen.findByTestId("reimport-media-notice")).toHaveTextContent(
+      "Reading.mp3 is a recording or film, so it can't replace what's in Episode 1.vtt.",
+    )
+    expect(importFile).not.toHaveBeenCalled()
+  })
+
+  it("imports it as a new file when the person asks", async () => {
+    const recording = new File([new Uint8Array(16)], "Reading.mp3")
+    drivePick.files = [recording]
+    const pick = await openDrive()
+    await act(async () => {
+      fireEvent.click(pick)
+      await new Promise((r) => setTimeout(r, 0))
+    })
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: "Import as a new file" }))
+      await new Promise((r) => setTimeout(r, 0))
+    })
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: "Import whole recording" }))
+      await new Promise((r) => setTimeout(r, 0))
+    })
+    await waitFor(() => expect(importFile).toHaveBeenCalledTimes(1))
+    const [file, options] = vi.mocked(importFile).mock.calls[0] as unknown as [File, Record<string, unknown>]
+    expect(file).toBe(recording)
+    expect(options).not.toHaveProperty("sidebarReimport")
   })
 })

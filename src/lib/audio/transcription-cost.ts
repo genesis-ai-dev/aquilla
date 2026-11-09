@@ -6,9 +6,13 @@
 // find out:
 //   • minutes, from each recording's measured length;
 //   • requests, one per window of audio: a minute on Whisper and Qwen, 30 s on
-//     Omnilingual (`hostedWindowSeconds`), so "one for each minute" or two;
-//   • roughly how long, at two requests at a time of about 8 s each, plus the
-//     wait at the hosted limit (60 requests per person every 15 minutes,
+//     Omnilingual (`hostedWindowSeconds`), so "one for each minute" or two.
+//     A window is cut at the quietest moment in its last 5 s (asr-windows.ts),
+//     so it runs a little short and a long recording takes a few more requests
+//     than its minutes: the count is "about", from the middle of that range;
+//   • roughly how long, at one request at a time (as the words run sends them,
+//     line-words-run.ts) of about 8 s each, plus the wait at the hosted limit
+//     (60 requests per person every 15 minutes,
 //     auth-worker/src/routes/transcription.ts) once a run passes it;
 //   • the model, from the person's Preferences, with Automatic resolved for the
 //     project's language the way the server routes it (asr-catalog).
@@ -22,9 +26,25 @@ import type { TranscriptionModel } from "./transcription-model"
 /** The hosted limit: requests per person per window (transcription.ts). */
 export const HOSTED_REQUEST_LIMIT = 60
 export const HOSTED_LIMIT_WINDOW_SEC = 15 * 60
-/** Requests in flight at once, and roughly how long each takes. */
-export const REQUESTS_AT_ONCE = 2
+/** Requests in flight at once, and roughly how long each takes. One at a
+ *  time: the words run awaits each window before the next (review, Nov 9;
+ *  this said two, so a run took about twice as long as shown). */
+export const REQUESTS_AT_ONCE = 1
 export const SECONDS_PER_REQUEST = 8
+/** How far back from its full length a window's cut may fall (asr-windows.ts
+ *  SEARCH_SEC): a window carries between `windowSec − 5` and `windowSec`. */
+export const WINDOW_CUT_SEARCH_SEC = 5
+
+/**
+ * About how many requests `ms` of audio takes at `windowSec` a window. Audio
+ * that fits one window is one request. Longer audio is counted at the middle
+ * of what a window can carry, so the figure is neither the fewest the run
+ * could send (which it used to be, and ran a few over) nor the most.
+ */
+export function requestsFor(ms: number, windowSec: number): number {
+  if (!(ms > windowSec * 1000)) return 1
+  return Math.ceil(ms / ((windowSec - WINDOW_CUT_SEARCH_SEC / 2) * 1000) - 1e-9)
+}
 
 /** The model that will actually run on a source recording. */
 export type SourceModel = "whisper" | "qwen3-asr" | "omni-ctc"
@@ -86,7 +106,7 @@ export function estimateTranscriptionCost(args: {
   for (const ms of args.durationsMs) {
     const len = typeof ms === "number" && Number.isFinite(ms) && ms > 0 ? ms : 0
     audioMs += len
-    requests += Math.max(1, Math.ceil(len / (windowSec * 1000) - 1e-9))
+    requests += requestsFor(len, windowSec)
   }
   if (args.onDevice) {
     return {
@@ -108,7 +128,7 @@ export function estimateTranscriptionCost(args: {
 }
 
 /**
- * Rough seconds for `requests` hosted requests: two at a time, ~8 s each, and
+ * Rough seconds for `requests` hosted requests: one at a time, ~8 s each, and
  * past every 60 a wait until the quarter-hour since that block began is up.
  */
 export function hostedRunSeconds(requests: number): number {

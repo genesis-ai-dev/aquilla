@@ -42,6 +42,7 @@ import { RichMessage } from "@/lib/i18n/RichMessage"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import {
   importFile,
+  measureByDecodingMs,
   probeMediaDurationMs,
   importEBible,
   importObs,
@@ -73,11 +74,10 @@ import { MediaImportPreviewDialog } from "@/components/import/MediaImportPreview
 import { RecordingImportChoiceDialog, type RecordingChoiceFile } from "@/components/import/RecordingImportChoiceDialog"
 import { localTranscribeChoice, TranscribeChoiceContext, type PrepareTranscribeChoice, type TranscribeChoiceInfo } from "@/components/import/recording-choice-context"
 import { reviewMediaCompanions } from "@/lib/import/media-companion-batch"
-import { prepareEmbeddedSubtitleSources } from "@/lib/import/embedded-subtitle-sources"
+import { embeddedCaptionsUnread, mayCarryEmbeddedCaptions, prepareEmbeddedSubtitleSources } from "@/lib/import/embedded-subtitle-sources"
 import type { MediaTextSource, MediaTextSourceOption } from "@/lib/import/media-cues"
 import { importSdbh, type SdbhImportProgress } from "@/lib/import-sdbh"
 import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
-import { MAX_SOURCE_ARTIFACT_BYTES } from "../../shared/import-contract"
 import { PreviewPanel, type ImportUploadProgress, type PreviewConfirmOptions } from "@/components/import/PreviewPanel"
 import { UsfmStructureFindings } from "@/components/import/UsfmStructureFindings"
 import { formatBytesProgress } from "@/lib/format-bytes"
@@ -2565,7 +2565,11 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
   const recordingChoiceResolver = useRef<((mode: "whole" | "transcribe" | null) => void) | null>(null)
   const askRecordingModes = useCallback(async (bare: readonly File[]): Promise<Map<File, "whole" | "transcribe"> | null> => {
     if (bare.length === 0) return new Map()
-    const durations = await Promise.all(bare.map((file) => probeMediaDurationMs(file).catch(() => undefined)))
+    // AQU-2426 (review, Nov 9): a browser recording has no length in its
+    // header; it is measured by decoding, as the import itself does, so the
+    // cost shown is for its real length.
+    const durations = await Promise.all(bare.map((file) =>
+      probeMediaDurationMs(file).catch(() => measureByDecodingMs(file)).catch(() => undefined)))
     const info = prepareTranscribeChoice
       ? await prepareTranscribeChoice(durations).catch(() => localTranscribeChoice(username, durations))
       : localTranscribeChoice(username, durations)
@@ -2578,6 +2582,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
           sizeBytes: file.size,
           durationMs: durations[i],
           isVideo: detectFileType(file.name) === "video",
+          captionsNotRead: embeddedCaptionsUnread(file),
         })),
         info,
       })
@@ -2809,13 +2814,14 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
             setMediaReview({ id: uuidv7(), mediaName: media.name, media, sources, durationMs })
           })
         }, async media => {
-          if (!/\.(mp4|m4a)$/i.test(media.name)) return []
+          if (!mayCarryEmbeddedCaptions(media.name)) return []
           parseController.signal.throwIfAborted()
           // Finding its captions reads the whole file into memory, so only a
           // file within the source ceiling is read for them. A larger one (a
           // whole episode) imports without its embedded captions instead of
-          // being refused with the text-file limit (AQU-2344).
-          if (media.size > MAX_SOURCE_ARTIFACT_BYTES) return []
+          // being refused with the text-file limit (AQU-2344). Review, Nov 9:
+          // the last step says it was not checked (`captionsNotRead` below).
+          if (embeddedCaptionsUnread(media)) return []
           const bytes = await media.arrayBuffer()
           parseController.signal.throwIfAborted()
           return prepareEmbeddedSubtitleSources(bytes).map((source, index) => ({
@@ -3199,18 +3205,43 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       onWhole={() => finishChoice("whole")} onTranscribe={() => finishChoice("transcribe")}
       onCancel={() => finishChoice(null)} />
   }
+  // A recording or film given to Re-import can't replace the file: say so, and
+  // offer it as a new file. AQU-2461 (review, Nov 9): drawn by both ways in.
+  // Only Upload files drew it, so the same pick through Google Drive said and
+  // did nothing at all.
+  const reimportMediaNotice = mediaOnReimport && reimportTargetProp && !importing ? (
+    <div className="mt-3 flex max-w-sm flex-col items-center gap-2 text-center" data-testid="reimport-media-notice">
+      <p className="text-sm">
+        {t("importExport.reimport.mediaCannotReplace", { fileName: mediaOnReimport.name, name: reimportTargetProp.name })}
+      </p>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => {
+          setImportAsNew(mediaOnReimport)
+          setMediaOnReimport(null)
+          setImportedAsNew(true)
+        }}
+      >
+        {t("importExport.reimport.importMediaAsNew")}
+      </Button>
+    </div>
+  ) : null
   if (variant === "gdrive" && !importing) {
     return (
-      <div>
-        <GoogleDrivePanel
-          onFiles={async (files, origins) => {
-            // Cleared in doCommit's finally — the preview flow commits later
-            // from a closure, so clearing here would race the actual upload.
-            originsRef.current = origins
-            await handleFiles(files)
-          }}
-        />
-        {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+      <div className="flex flex-col items-center">
+        <div className="w-full">
+          <GoogleDrivePanel
+            onFiles={async (files, origins) => {
+              // Cleared in doCommit's finally — the preview flow commits later
+              // from a closure, so clearing here would race the actual upload.
+              originsRef.current = origins
+              await handleFiles(files)
+            }}
+          />
+          {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+        </div>
+        {reimportMediaNotice}
       </div>
     )
   }
@@ -3300,24 +3331,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
         </>
       )}
       {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
-      {mediaOnReimport && reimportTargetProp && !importing && (
-        <div className="mt-3 flex max-w-sm flex-col items-center gap-2 text-center" data-testid="reimport-media-notice">
-          <p className="text-sm">
-            {t("importExport.reimport.mediaCannotReplace", { fileName: mediaOnReimport.name, name: reimportTargetProp.name })}
-          </p>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setImportAsNew(mediaOnReimport)
-              setMediaOnReimport(null)
-              setImportedAsNew(true)
-            }}
-          >
-            {t("importExport.reimport.importMediaAsNew")}
-          </Button>
-        </div>
-      )}
+      {reimportMediaNotice}
     </div>
   )
 }

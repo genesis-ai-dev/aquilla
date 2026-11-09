@@ -424,8 +424,8 @@ import { NotSplitNoticeClip } from "@/components/timeline/NotSplitNotice"
 import { fmtCueClock } from "@/components/timeline/format"
 import type { TranscribeChoiceInfo } from "@/components/import/recording-choice-context"
 import { RecordingImportChoiceDialog } from "@/components/import/RecordingImportChoiceDialog"
-import { probeMediaDurationMs } from "@/lib/import"
-import { needsSplitNotice, sourceRecordingLine } from "@/lib/timeline/recording-line"
+import { measureByDecodingMs, probeMediaDurationMs } from "@/lib/import"
+import { needsSplitNotice, sourceRecordingLine, uploadedFilmName } from "@/lib/timeline/recording-line"
 import { piecesFromCuts, splitRecordingLine, textsForPieces, writeLineWindow, type LinePiece, type RecordingLine } from "@/lib/timeline/split-recording-line"
 import { cutsFromWords, loadLinePcm, pauseCuts, type LineAudio } from "@/lib/audio/recording-split"
 import { transcribeBlock } from "@/lib/audio/transcribe-access"
@@ -3771,7 +3771,7 @@ export function ProjectWorkspace() {
 
   /** `applyLinkVideo`, declared far below: a video dropped on an empty file
    *  keeps its picture as the file's film through the same write. */
-  const applyLinkVideoRef = useRef<((url: string | null) => Promise<void>) | null>(null)
+  const applyLinkVideoRef = useRef<((url: string | null, forFileId?: string) => Promise<void>) | null>(null)
   const handleAttachMediaFile = useCallback(async (file: File) => {
     if (!project?.id || !activeFileId) return
     const mode = askAttachChoiceRef.current ? await askAttachChoiceRef.current(file) : "whole"
@@ -3784,7 +3784,9 @@ export function ProjectWorkspace() {
     }, { keepPicture: !activeFile?.coreMediaUrl, mode })
     await finishSourceMediaAttach(activeFileId, activeFile?.name ?? file.name)
     recordRecordingLines(activeFileId, lines)
-    if (film) await applyLinkVideoRef.current?.(film)
+    // AQU-2461 (review, Nov 9): for THIS file, the one the video was dropped
+    // on. The upload takes minutes; whichever file is open by now is not it.
+    if (film) await applyLinkVideoRef.current?.(film, activeFileId)
   }, [project?.id, activeFileId, activeFile?.name, activeFile?.coreMediaUrl, currentUsername, getTokenForFile, finishSourceMediaAttach, recordRecordingLines])
 
   const handleAttachMediaUrl = useCallback(async (url: string) => {
@@ -4731,27 +4733,35 @@ export function ProjectWorkspace() {
   // Decision 11: the film each file was last given from here, until the
   // project read catches up — so an Undo right after a link sees it.
   const filmWrittenRef = useRef<Map<string, PendingFilm>>(new Map())
-  /** Write the open file's film; false when it was refused (said in a toast). */
+  /** Write a file's film (the open file's, unless another is named); false
+   *  when it was refused (said in a toast). */
   const writeFilmLink = useCallback(
-    async (url: string | null): Promise<boolean> => {
-      if (!project?.id || !activeFileId) return false
+    async (url: string | null, forFileId?: string): Promise<boolean> => {
+      // AQU-2461 (review, Nov 9): a video dropped on an empty file names its
+      // file, because a different one may be open by the time it has uploaded.
+      const fileId = forFileId ?? activeFileId
+      if (!project?.id || !fileId) return false
+      const open = fileId === activeFileId
+      const file = open ? activeFile : project.files.find((f) => f.id === fileId) ?? null
       const nextMode = resolveFileTimingMode(
-        activeFile ? { ...activeFile, coreMediaUrl: url } : null,
+        file ? { ...file, coreMediaUrl: url } : null,
         project,
         { hasAudioCues: fileHasAudioCues, nothingToFollow: timingNothingToFollow },
       )
+      // The timing note is the open file's: what it has to follow is only
+      // known for the file on screen.
       const modeWillChange =
-        nextMode !== resolveFileTimingMode(activeFile, project, { hasAudioCues: fileHasAudioCues, nothingToFollow: timingNothingToFollow })
+        open && nextMode !== resolveFileTimingMode(file, project, { hasAudioCues: fileHasAudioCues, nothingToFollow: timingNothingToFollow })
       if (modeWillChange) timingAckOwnWriteRef.current?.note(nextMode)
       try {
         await emitFileVideoSet({
           projectId: project.id,
-          fileId: activeFileId,
+          fileId,
           coreMediaUrl: url,
           author: currentUsername,
         })
         await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
-        filmWrittenRef.current.set(activeFileId, { url, readBefore: activeFile?.coreMediaUrl ?? null })
+        filmWrittenRef.current.set(fileId, { url, readBefore: file?.coreMediaUrl ?? null })
         refresh()
         return true
       } catch (e) {
@@ -4781,21 +4791,25 @@ export function ProjectWorkspace() {
     [activeFileId, activeFile],
   )
   const applyLinkVideo = useCallback(
-    async (url: string | null) => {
-      if (!activeFileId) return
-      const before = readFilmLink(activeFileId) ?? null
-      if (!(await writeFilmLink(url))) return
+    async (url: string | null, forFileId?: string) => {
+      // AQU-2461 (review, Nov 9): the open file's film, unless the caller
+      // names the file (a video dropped on a file that is no longer open).
+      const fileId = forFileId ?? activeFileId
+      if (!fileId) return
+      const other = fileId === activeFileId ? null : project?.files.find((f) => f.id === fileId) ?? null
+      const before = (other ? other.coreMediaUrl : readFilmLink(fileId)) ?? null
+      if (!(await writeFilmLink(url, fileId))) return
       // Decision 11: linking, replacing or clearing the film is an Undo step.
       if (before === url) return
       recordStep({
         kind: "film.link",
-        data: { fileId: activeFileId, before, after: url },
+        data: { fileId, before, after: url },
         labelKey: url ? "editor.history.stepLinkFilm" : "editor.history.stepUnlinkFilm",
-        fileId: activeFileId,
-        fileName: activeFileNameRef.current,
+        fileId,
+        fileName: other ? other.name : activeFileNameRef.current,
       })
     },
-    [activeFileId, readFilmLink, writeFilmLink],
+    [activeFileId, project?.files, readFilmLink, writeFilmLink],
   )
   useEffect(() => { applyLinkVideoRef.current = applyLinkVideo }, [applyLinkVideo])
   // Flow B (2026-08-05; AQU-2227): linking a film that will move the file onto
@@ -10701,14 +10715,19 @@ export function ProjectWorkspace() {
     if (!transcriptionOnDevice && frontierSession?.jwt && project?.id) {
       const found = await transcriptionCredits({
         jwt: frontierSession.jwt, projectId: project.id, orgId: project.orgId ?? null, audioSec: cost.audioMs / 1000,
+        model: cost.model,
       }).catch(() => null)
       if (found) {
         orgCredits = found.orgCredits ?? orgCredits
         if (found.orgCredits) setTranscribeOrgCredits(found.orgCredits)
-        const credits = Math.max(1, Math.round(found.credits))
-        creditsLine = found.percent != null
-          ? t("audio.transcribeCost.creditsShare", { credits, percent: found.percent })
-          : t("audio.transcribeCost.creditsOnly", { credits })
+        // AQU-2426 (review, Nov 9): no figure when the model's price isn't
+        // known here (Whisper, Qwen): the Credits line is left out.
+        if (found.credits != null) {
+          const credits = Math.max(1, Math.round(found.credits))
+          creditsLine = found.percent != null
+            ? t("audio.transcribeCost.creditsShare", { credits, percent: found.percent })
+            : t("audio.transcribeCost.creditsOnly", { credits })
+        }
       }
     }
     return {
@@ -11031,7 +11050,9 @@ export function ProjectWorkspace() {
     resolve: (mode: "whole" | "transcribe" | null) => void
   } | null>(null)
   askAttachChoiceRef.current = async (file) => {
-    const durationMs = await probeMediaDurationMs(file).catch(() => undefined)
+    // AQU-2426 (review, Nov 9): a browser recording's length is not in its
+    // header; measured by decoding, as the attach itself does.
+    const durationMs = await probeMediaDurationMs(file).catch(() => measureByDecodingMs(file)).catch(() => undefined)
     const info = await prepareTranscribeChoice([durationMs])
     return new Promise((resolve) => {
       setAttachChoice({
@@ -11062,11 +11083,15 @@ export function ProjectWorkspace() {
           onTranscribe={() => openSplitIntoLines(cell.id, "sentences", cell)}
           onSplitAtPauses={() => { void splitAtPausesNow(cell.id, cell) }} />
       : null
-    const recordingMenu = canSplitLines && src.readable
+    // AQU-2426 (review, Nov 9): a recording added by web address is streamed,
+    // not stored, so it can't be split here. Its menu still shows Split into
+    // lines…, greyed, with that reason, instead of nothing at all.
+    const recordingMenu = canSplitLines
       ? {
           details: t("editor.splitLines.clipDetails", { length: fmtCueClock((src.hi - src.lo) / 1000) }),
           name: cell.original || activeFileNameRef.current || "",
           onSplitIntoLines: () => openSplitIntoLines(cell.id, "pauses", cell),
+          ...(src.readable ? {} : { splitDisabledReason: t("editor.splitLines.cannotRead") }),
         }
       : undefined
     if (!notice && !recordingMenu) return null
@@ -13947,6 +13972,13 @@ export function ProjectWorkspace() {
   const audioMergedCells = useMemo(
     () => mergeCellsWithAudio(legacyCells, workspaceAudioByCellId),
     [legacyCells, workspaceAudioByCellId],
+  )
+  // AQU-2461 (review, Nov 9): Change film names the film itself. A video
+  // dropped on an empty file is not named after the file; the upload's name is
+  // on its Source audio line.
+  const activeFilmName = useMemo(
+    () => uploadedFilmName(audioMergedCells, activeFile?.coreMediaUrl, activeFile?.name),
+    [audioMergedCells, activeFile?.coreMediaUrl, activeFile?.name],
   )
   // AQU-1758: what the New voice dialog can clone from — a dubbing file's
   // takes live on its audio cues, and the timeline's take menu seeds it with one.
@@ -20342,7 +20374,7 @@ export function ProjectWorkspace() {
       <LinkVideoUrlDialog
         open={linkVideoOpen}
         currentUrl={activeFile?.coreMediaUrl ?? null}
-        filmName={activeFile?.name ?? null}
+        filmName={activeFilmName}
         onCancel={() => setLinkVideoOpen(false)}
         onSave={(url) => {
           // Close FIRST: on the Free-timing path handleLinkVideo opens a second

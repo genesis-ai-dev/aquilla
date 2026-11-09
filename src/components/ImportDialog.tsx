@@ -74,11 +74,10 @@ import { MediaImportPreviewDialog } from "@/components/import/MediaImportPreview
 import { RecordingImportChoiceDialog, type RecordingChoiceFile } from "@/components/import/RecordingImportChoiceDialog"
 import { localTranscribeChoice, TranscribeChoiceContext, type PrepareTranscribeChoice, type TranscribeChoiceInfo } from "@/components/import/recording-choice-context"
 import { reviewMediaCompanions } from "@/lib/import/media-companion-batch"
-import { prepareEmbeddedSubtitleSources } from "@/lib/import/embedded-subtitle-sources"
+import { embeddedCaptionsUnread, mayCarryEmbeddedCaptions, prepareEmbeddedSubtitleSources } from "@/lib/import/embedded-subtitle-sources"
 import type { MediaTextSource, MediaTextSourceOption } from "@/lib/import/media-cues"
 import { importSdbh, type SdbhImportProgress } from "@/lib/import-sdbh"
 import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
-import { MAX_SOURCE_ARTIFACT_BYTES } from "../../shared/import-contract"
 import { PreviewPanel, type ImportUploadProgress, type PreviewConfirmOptions } from "@/components/import/PreviewPanel"
 import { UsfmStructureFindings } from "@/components/import/UsfmStructureFindings"
 import { formatBytesProgress } from "@/lib/format-bytes"
@@ -2583,6 +2582,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
           sizeBytes: file.size,
           durationMs: durations[i],
           isVideo: detectFileType(file.name) === "video",
+          captionsNotRead: embeddedCaptionsUnread(file),
         })),
         info,
       })
@@ -2814,13 +2814,14 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
             setMediaReview({ id: uuidv7(), mediaName: media.name, media, sources, durationMs })
           })
         }, async media => {
-          if (!/\.(mp4|m4a)$/i.test(media.name)) return []
+          if (!mayCarryEmbeddedCaptions(media.name)) return []
           parseController.signal.throwIfAborted()
           // Finding its captions reads the whole file into memory, so only a
           // file within the source ceiling is read for them. A larger one (a
           // whole episode) imports without its embedded captions instead of
-          // being refused with the text-file limit (AQU-2344).
-          if (media.size > MAX_SOURCE_ARTIFACT_BYTES) return []
+          // being refused with the text-file limit (AQU-2344). Review, Nov 9:
+          // the last step says it was not checked (`captionsNotRead` below).
+          if (embeddedCaptionsUnread(media)) return []
           const bytes = await media.arrayBuffer()
           parseController.signal.throwIfAborted()
           return prepareEmbeddedSubtitleSources(bytes).map((source, index) => ({

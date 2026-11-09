@@ -6,7 +6,7 @@ import { createMediaFileCommit, measureByDecodingMs, probeMediaDurationMs,
   type EmitParsedFileResult, type ImportContext } from "@/lib/import"
 import { MAX_AUDIO_OBJECT_BYTES } from "@/lib/audio/upload"
 import { mediaFileTooLargeMessage } from "@/lib/audio/media-limit"
-import { prepareEmbeddedSubtitleSources } from "@/lib/import/embedded-subtitle-sources"
+import { embeddedCaptionsUnread, mayCarryEmbeddedCaptions, prepareEmbeddedSubtitleSources } from "@/lib/import/embedded-subtitle-sources"
 import { type MediaTextSourceOption } from "@/lib/import/media-cues"
 import { MediaImportPreviewDialog } from "./MediaImportPreviewDialog"
 import { RecordingImportChoiceDialog } from "./RecordingImportChoiceDialog"
@@ -85,7 +85,10 @@ export function YouTubeImportPanel({ ctx, onImported }: {
         if (media.size === 0) throw new Error(t("importExport.errors.emptyFile", { fileName: media.name }))
         if (media.size > MAX_AUDIO_OBJECT_BYTES) throw new Error(mediaFileTooLargeMessage(media.name))
         const prepared = prepareYouTubePictureImport({ url, name: media.name })
-        const sources = /\.(mp4|m4a)$/i.test(media.name)
+        // AQU-2344 (review, Nov 9): Upload files' own guard. Looking for
+        // captions holds the whole file in memory, so a film over the source
+        // ceiling is not read for them; the last step says it wasn't checked.
+        const sources = mayCarryEmbeddedCaptions(media.name) && !embeddedCaptionsUnread(media)
           ? prepareEmbeddedSubtitleSources(await media.arrayBuffer()).map((option, index) => ({
             ...option, label: t(option.language
               ? "importExport.mediaPreview.embeddedLanguage" : "importExport.mediaPreview.embedded", {
@@ -172,7 +175,8 @@ export function YouTubeImportPanel({ ctx, onImported }: {
       // AQU-2426: no captions to use — whole, or transcribed, chosen here; with
       // captions there is no question and "Transcribe audio" is gone.
       return mediaReview.choice ? <RecordingImportChoiceDialog
-        files={[{ name: mediaReview.file.name, sizeBytes: mediaReview.file.size, durationMs: mediaReview.durationMs, isVideo: mediaReview.fileType === "video" }]}
+        files={[{ name: mediaReview.file.name, sizeBytes: mediaReview.file.size, durationMs: mediaReview.durationMs, isVideo: mediaReview.fileType === "video",
+          captionsNotRead: embeddedCaptionsUnread(mediaReview.file) }]}
         block={mediaReview.choice.block} cost={mediaReview.choice.cost}
         languageTag={mediaReview.choice.languageTag} credits={mediaReview.choice.credits} busy={busy}
         onCancel={() => setMediaReview(null)}

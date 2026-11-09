@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/dialog"
 import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
 import { fmtCueClock } from "@/components/timeline/format"
+import { captionFileLimitLabel } from "@/lib/import/caption-file-limit"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { roleNameKey } from "@/lib/frontier/roles"
 import type { TranscribeBlock } from "@/lib/audio/transcribe-access"
@@ -32,6 +33,10 @@ export interface RecordingChoiceFile {
   sizeBytes: number
   durationMs?: number
   isVideo: boolean
+  /** AQU-2344 (review, Nov 9): an .mp4 or .m4a too big to be read for captions
+   *  inside it (embedded-subtitle-sources.ts). It lands here as if it had
+   *  none, so this step says it was not checked. */
+  captionsNotRead?: boolean
 }
 
 type T = ReturnType<typeof useT>
@@ -76,6 +81,7 @@ export function RecordingImportChoiceDialog({
   const many = files.length > 1
   const name = files[0]?.name ?? ""
   const total = files.reduce((sum, f) => sum + (f.durationMs ?? 0), 0)
+  const unchecked = files.filter((f) => f.captionsNotRead)
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open && !busy) onCancel() }}>
@@ -112,6 +118,13 @@ export function RecordingImportChoiceDialog({
                   )}
                 </ul>
                 <p className="text-sm text-muted-foreground">{t(many ? "importExport.recordingChoice.wholeNoteMany" : "importExport.recordingChoice.wholeNote")}</p>
+                {unchecked.length > 0 && (
+                  <p className="text-sm text-muted-foreground" data-testid="recording-import-captions-unread">
+                    {t("importExport.recordingChoice.captionsNotRead", {
+                      count: unchecked.length, name: unchecked[0]!.name, maxSize: captionFileLimitLabel(locale),
+                    })}
+                  </p>
+                )}
               </div>
             </DialogBody>
             <DialogFooter className="sm:flex-col sm:items-stretch">

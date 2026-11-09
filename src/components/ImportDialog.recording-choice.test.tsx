@@ -89,6 +89,29 @@ describe("the import's last step for a recording with no subtitle file (AQU-2426
     for (const call of mockImportFile.mock.calls) expect(call[1]).toMatchObject({ mediaMode: "whole" })
   })
 
+  // AQU-2344 (review, Nov 9): captions inside an .mp4 over the source ceiling
+  // are not read (it would hold the whole film in memory). The film landed on
+  // this step as if it had none, with nothing said.
+  it("says when a film was too big to be checked for captions inside it", async () => {
+    renderDialog()
+    fireEvent.click(screen.getByText("Upload files"))
+    const episode = new File([new Uint8Array([0, 1, 2])], "Episode 101.mp4", { type: "video/mp4" })
+    Object.defineProperty(episode, "size", { value: 1.8 * 1024 * 1024 * 1024 })
+    const read = vi.spyOn(episode, "arrayBuffer")
+    fireEvent.change(document.querySelectorAll('input[type="file"]')[0], { target: { files: [episode] } })
+    await screen.findByTestId("recording-import-choice")
+    expect(read).not.toHaveBeenCalled()
+    expect(screen.getByTestId("recording-import-captions-unread")).toHaveTextContent(
+      "Episode 101.mp4 is over 95.0 MB, so it was not checked for captions inside it. If it has any, import them as a subtitle file along with it.",
+    )
+  })
+
+  it("says nothing of the kind for a recording that was checked, or never holds captions", async () => {
+    renderDialog()
+    await dropRecordings("Session 4.mp3")
+    expect(screen.queryByTestId("recording-import-captions-unread")).toBeNull()
+  })
+
   it("Cancel imports nothing", async () => {
     renderDialog()
     await dropRecordings("Session 4.mp3")

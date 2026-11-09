@@ -123,7 +123,10 @@ export function reviewCueLinks({
   const crossScriptCandidates: ReviewCandidate[] = []
   const weakCandidates: ReviewCandidate[] = []
   for (const plan of planCueLinks({ textCells, audioCues })) {
-    if (plan.basis === "words") continue
+    // AQU-2460 (review, Nov 9): a pairing made on timing alone (a line not
+    // transcribed yet) is written without asking, as `words` is, so it is not
+    // a proposal either.
+    if (plan.basis === "words" || plan.basis === "timing") continue
     // Scored well and then explained nothing the cue did not already have
     // explained — the matcher's own answer is that this is not a pairing.
     // Proposing it here would put the junk back in front of a person as if it

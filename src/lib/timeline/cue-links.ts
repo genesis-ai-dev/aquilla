@@ -46,9 +46,15 @@ export interface LinkableCue {
  * (`medium: "media"`) carries the media's file name as its text, the same on
  * every line; its words are in its transcription. Pairing on the name paired
  * nothing on an imported film (import map, Nov 8).
+ *
+ * AQU-2460 (review, Nov 9): a media line that has not been transcribed has NO
+ * words. It used to fall back to the name here, so a film imported whole (the
+ * Nov 8 default) still paired nothing, and a heard line that happened to say
+ * the film's name paired on it. With no words, the time overlap decides
+ * (`timing` below).
  */
 export function pairingWords(cell: Pick<LinkableCue, "original" | "medium" | "transcription">): string {
-  if (cell.medium === "media" && cell.transcription?.trim()) return cell.transcription
+  if (cell.medium === "media") return cell.transcription?.trim() ? cell.transcription : ""
   return cell.original ?? ""
 }
 
@@ -64,15 +70,20 @@ export function pairingWords(cell: Pick<LinkableCue, "original" | "medium" | "tr
  *    enough to be sure.
  *  - `redundant`: the pairing scored well enough, and then explained nothing
  *    the cue did not already have explained. See `claimWords`.
+ *  - `timing` (AQU-2460 review, Nov 9): the line is a stretch of an imported
+ *    recording or film that has not been transcribed, so it has no words to
+ *    compare. The line IS that stretch of the sound and the heard line is a
+ *    transcript of the same sound, so a heard line that falls inside the
+ *    stretch is heard in that line. Safe to pair automatically.
  *
- * Only `words` is auto-linked. The middle two are surfaced in the review drawer
+ * Only `words` and `timing` are auto-linked. The middle two are surfaced in the review drawer
  * as proposals, because a pairing nothing verified should be a person's
  * decision rather than something they have to notice was made for them.
  * `redundant` is neither linked nor proposed — it is kept in the returned plan
  * so a report can say what was dropped and why, since "nothing appeared" is a
  * hard thing to check.
  */
-export type CueLinkBasis = "words" | "cross-script" | "weak-words" | "redundant"
+export type CueLinkBasis = "words" | "cross-script" | "weak-words" | "redundant" | "timing"
 
 export interface CueLinkPlan {
   /** The subtitle cell. */
@@ -88,7 +99,7 @@ export interface CueLinkPlan {
 /** The pairings safe to write without asking. Every emit path filters through
  *  this; the review drawer reads the whole list. */
 export function autoLinkable(plans: readonly CueLinkPlan[]): CueLinkPlan[] {
-  return plans.filter((p) => p.basis === "words")
+  return plans.filter((p) => p.basis === "words" || p.basis === "timing")
 }
 
 /** Below this the two cues merely touch; they do not overlap. */
@@ -380,7 +391,8 @@ function claimWords(
     // Different writing systems have no comparable words, so there is nothing
     // to claim and nothing to be redundant against — every one of them would
     // contribute the empty set and be thrown away. Their timing rule stands.
-    .filter((c) => c.plan.basis !== "cross-script")
+    // AQU-2460 (review, Nov 9): nor has a line that is not transcribed yet.
+    .filter((c) => c.plan.basis !== "cross-script" && c.plan.basis !== "timing")
     // Total, and independent of input order, so the same two files always
     // produce the same links.
     .sort(
@@ -557,6 +569,21 @@ export function planCueLinks({ textCells, audioCues }: PlanCueLinksArgs): CueLin
       const shorter = Math.min(cue.endTime - cue.startTime, text.endTime - text.startTime)
       const frac = shorter > 0 ? overlap / shorter : 0
       const subtitleText = pairingWords(text)
+      // AQU-2460 (review, Nov 9): a line of an imported recording or film
+      // with no transcription yet has no words, so the spans decide alone,
+      // held to the bar the other wordless rule (different scripts) uses.
+      if (text.medium === "media" && subtitleText.trim() === "") {
+        if (frac >= CROSS_SCRIPT_MIN_FRAC) {
+          const plan: CueLinkPlan = {
+            textCellId: text.id,
+            cueCellId: cue.id,
+            confidence: frac,
+            basis: "timing",
+          }
+          push(plan, 0, frac, overlap, cue.startTime, text.startTime)
+        }
+        continue
+      }
       const subtitleScript = dominantScript(subtitleText)
 
       // Different writing systems: the words cannot be compared, so the spans

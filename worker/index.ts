@@ -82,6 +82,7 @@ export default {
 // lines 96-97, 182).
 //
 // Derived from src/App.tsx route table. Update this list when app routes change.
+// Note: /settings is NOT a top-level route (settings live under /orgs/:orgId/settings).
 const SPA_ROUTE_PATTERNS = [
   "/",
   "/app",
@@ -113,7 +114,7 @@ const SPA_ROUTE_PATTERNS = [
   /^\/preferences\//,
   /^\/billing\//,
   /^\/paratext\//,
-  // Dev/marketing routes
+  // Dev/marketing routes (includes both login and logout)
   /^\/__dev\//,
   /^\/__marketing\//,
 ]
@@ -184,22 +185,23 @@ async function route(req: Request, env: Env): Promise<Response> {
     
     // If the asset binding returned the SPA shell (index.html), this is an
     // unknown path that shouldn't get the 200 fallback — return 404 instead.
-    // The SPA shell is always text/html and has a known length (~13-14KB).
-    // Real public HTML files like google*.html are much smaller and should
-    // pass through.
+    // Detect the SPA shell by a stable content marker rather than size: the
+    // shell always contains the comment "This file is the APP shell" (line 9
+    // of index.html). Real verification HTML files don't have this marker.
     if (asset.ok && contentType.includes("text/html")) {
-      const contentLength = parseInt(asset.headers.get("Content-Length") ?? "0", 10)
-      // The built index.html is ~13,802 bytes. Real verification files are <1KB.
-      // If it's large HTML, it's the SPA shell being served for an unknown path.
-      if (contentLength > 5000) {
+      const html = await asset.text()
+      // The SPA shell has a distinctive comment that no real public HTML file has.
+      if (html.includes("This file is the APP shell")) {
         return new Response("Page not found", {
           status: 404,
           headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
         })
       }
+      // Real public HTML file (e.g., google*.html) — serve it.
+      return new Response(html, asset)
     }
     
-    // Real static file (image, small HTML, etc.) — serve it.
+    // Real static file (image, audio, etc.) — serve it.
     return asset
   }
 

@@ -21,13 +21,15 @@ const SPA_HTML = `<!doctype html><html><head>
 </head><body></body></html>`
 
 // Minimal mock for the ASSETS binding: returns a Response whose body is the
-// resolved pathname so tests can assert which file was requested.
+// resolved pathname so tests can assert which file was requested. For unknown
+// paths, mimics the SPA fallback by returning the shell (with the marker).
 function makeEnv() {
   return {
     ASSETS: {
       fetch: async (req: Request | string): Promise<Response> => {
         const url = new URL(typeof req === "string" ? req : req.url)
-        return new Response(`served:${url.pathname}`, {
+        // Simulate the SPA fallback: unknown paths get index.html with the marker
+        return new Response(`<!-- This file is the APP shell -->\n<html>served:${url.pathname}</html>`, {
           status: 200,
           headers: { "Content-Type": "text/html" },
         })
@@ -50,28 +52,28 @@ describe("worker/index — routing", () => {
   // When this Worker sees one on a preview alias, it falls through to the SPA.
   it("GET / passes through to ASSETS (SPA shell)", async () => {
     const res = await fetchWorker("/")
-    expect(await res.text()).toBe("served:/")
+    expect(await res.text()).toContain("served:/")
   })
 
   it("GET /beta passes through to ASSETS — no marketing routing here", async () => {
     const res = await fetchWorker("/beta")
-    expect(await res.text()).toBe("served:/beta")
+    expect(await res.text()).toContain("served:/beta")
   })
 
   it("GET /project/abc passes through to ASSETS unchanged", async () => {
     const res = await fetchWorker("/project/abc")
-    expect(await res.text()).toBe("served:/project/abc")
+    expect(await res.text()).toContain("served:/project/abc")
   })
 
   // /app is the stable entry target linked by the separate marketing site.
   it("GET /app passes through to ASSETS (SPA shell)", async () => {
     const res = await fetchWorker("/app")
-    expect(await res.text()).toBe("served:/app")
+    expect(await res.text()).toContain("served:/app")
   })
 
   it("GET /app is served the SPA shell even when signed in (aq_hint=1)", async () => {
     const res = await fetchWorker("/app", "aq_hint=1")
-    expect(await res.text()).toBe("served:/app")
+    expect(await res.text()).toContain("served:/app")
   })
 
   // AQU-795 / AQU-719 regression guard: a previously Google-indexed interior URL
@@ -80,16 +82,28 @@ describe("worker/index — routing", () => {
   // bounced to marketing and never the old "page not found until you navigate
   // from home" symptom. Marketing routes never reach this Worker on the live
   // custom domains because their more-specific Worker routes win first.
+  //
+  // Note: /settings is NOT a top-level route in current App.tsx (settings live
+  // under /orgs/:orgId/settings), so it correctly gets a 404. This is proper SEO
+  // behavior for a path with no React route.
   it("GET interior deep links pass through to ASSETS (SPA shell), not marketing", async () => {
-    for (const path of ["/orgs/abc", "/project/abc/editor", "/shared", "/settings"]) {
+    for (const path of ["/orgs/abc", "/project/abc/editor", "/shared"]) {
       const res = await fetchWorker(path)
-      expect(await res.text(), `${path} must reach the SPA shell`).toBe(`served:${path}`)
+      expect(res.status, `${path} should return 200`).toBe(200)
+      expect(await res.text(), `${path} must reach the SPA shell`).toContain(`served:${path}`)
     }
   })
 
-  it("GET /join/xyz passes through to ASSETS (non-HTML body unchanged)", async () => {
+  it("GET /settings returns 404 (no top-level /settings route in App.tsx)", async () => {
+    const res = await fetchWorker("/settings")
+    expect(res.status).toBe(404)
+    expect(await res.text()).toBe("Page not found")
+  })
+
+  it("GET /join/xyz passes through to ASSETS (SPA shell for invite routes)", async () => {
     const res = await fetchWorker("/join/xyz")
-    expect(await res.text()).toBe("served:/join/xyz")
+    expect(res.status).toBe(200)
+    expect(await res.text()).toContain("served:/join/xyz")
   })
 
   it("GET /join/:token rewrites social meta to invite copy when ASSETS returns HTML", async () => {
@@ -181,7 +195,13 @@ describe("worker/index — routing", () => {
 
   it("GET /__dev/login passes through to ASSETS unchanged", async () => {
     const res = await fetchWorker("/__dev/login")
-    expect(await res.text()).toBe("served:/__dev/login")
+    expect(await res.text()).toContain("served:/__dev/login")
+  })
+
+  it("GET /__dev/logout passes through to ASSETS (SPA shell)", async () => {
+    const res = await fetchWorker("/__dev/logout")
+    expect(res.status).toBe(200)
+    expect(await res.text()).toContain("served:/__dev/logout")
   })
 
   // Soft-404 fix: unknown paths should return a real 404, not the SPA shell
@@ -286,18 +306,36 @@ describe("worker/index — routing", () => {
     expect(res.headers.get("Content-Type")).toBe("audio/mpeg")
   })
 
-  it("GET /nonexistent when ASSETS returns the SPA shell (large HTML) gets 404", async () => {
+  it("GET /nonexistent when ASSETS returns the SPA shell (with marker) gets 404", async () => {
     const { default: worker } = await import("./index")
     const env = {
       ASSETS: {
         fetch: async (): Promise<Response> =>
-          new Response(SPA_HTML + "x".repeat(13000), {
+          new Response("<!-- This file is the APP shell -->\n" + SPA_HTML, {
             status: 200,
             headers: { "Content-Type": "text/html", "Content-Length": "13802" },
           }),
       },
     }
     const res = await worker.fetch(new Request("https://aquilla.app/nonexistent-path"), env)
+    expect(res.status).toBe(404)
+    expect(res.headers.get("Content-Type")).toContain("text/plain")
+    expect(await res.text()).toBe("Page not found")
+  })
+
+  it("GET /nonexistent when ASSETS returns the SPA shell without Content-Length still gets 404", async () => {
+    const { default: worker } = await import("./index")
+    const env = {
+      ASSETS: {
+        fetch: async (): Promise<Response> =>
+          new Response("<!-- This file is the APP shell -->\n" + SPA_HTML, {
+            status: 200,
+            headers: { "Content-Type": "text/html" },
+            // No Content-Length header
+          }),
+      },
+    }
+    const res = await worker.fetch(new Request("https://aquilla.app/another-nonexistent"), env)
     expect(res.status).toBe(404)
     expect(res.headers.get("Content-Type")).toContain("text/plain")
     expect(await res.text()).toBe("Page not found")
@@ -322,11 +360,15 @@ describe("worker/index — routing", () => {
       "/link/tokenabc",
       "/approve/changeset123",
       "/__dev/login",
+      "/__dev/logout",
+      "/__marketing/login",
     ]
     for (const path of knownRoutes) {
       const res = await fetchWorker(path)
       expect(res.status, `${path} should return 200`).toBe(200)
-      expect(await res.text(), `${path} should serve the path`).toContain(`served:${path}`)
+      const body = await res.text()
+      expect(body, `${path} should serve content`).toContain(`served:${path}`)
+      expect(body, `${path} should have SPA marker`).toContain("This file is the APP shell")
     }
   })
 

@@ -20,39 +20,13 @@ const SPA_HTML = `<!doctype html><html><head>
   <meta name="twitter:description" content="Aquilla — translators, lifted." />
 </head><body></body></html>`
 
-// Minimal mock for the ASSETS binding: returns a Response whose body is the
-// resolved pathname so tests can assert which file was requested. Mimics the
-// real Workers asset binding: known app routes and unknown paths get index.html
-// with the SPA marker (not_found_handling = "single-page-application"), while
-// unknown paths would get the shell in production.
+// Minimal mock for the ASSETS binding. Mimics the real Workers asset binding:
+// `not_found_handling = "single-page-application"` returns index.html (with the
+// SPA marker) for EVERY path that is not a real static file. The Worker, not
+// the mock, decides which paths should 404.
 //
-// Known SPA routes that get the shell (matches SPA_ROUTE_PATTERNS):
-const MOCK_SPA_ROUTES = [
-  "/",
-  "/app",
-  "/login",
-  "/signup",
-  "/onboarding",
-  "/projects",
-  "/shared",
-  "/preferences",
-  "/admin",
-  "/debug",
-  "/oauth/consent",
-  "/oauth/callback",
-  /^\/orgs\//,
-  /^\/project\//,
-  /^\/__dev\//,
-]
-
-function isMockSpaRoute(pathname: string): boolean {
-  const normalized = pathname === "/" ? "/" : pathname.replace(/\/$/, "")
-  return MOCK_SPA_ROUTES.some(pattern => {
-    if (typeof pattern === "string") return normalized === pattern
-    return pattern.test(normalized)
-  })
-}
-
+// Tests that mock real files (PNG, SVG, mp3, verification HTML) provide their
+// own custom `env` with a specific response.
 function makeEnv() {
   return {
     ASSETS: {
@@ -60,30 +34,12 @@ function makeEnv() {
         const url = new URL(typeof req === "string" ? req : req.url)
         const pathname = url.pathname
         
-        // Simulate the real asset binding: known routes and unknown paths both
-        // get index.html with the marker (the Worker decides which is which).
-        if (isMockSpaRoute(pathname) || pathname.startsWith("/nonexistent") || pathname.startsWith("/fake-") || pathname.startsWith("/blog/")) {
-          return new Response(`<!-- This file is the APP shell -->\n<html>served:${pathname}</html>`, {
-            status: 200,
-            headers: { "Content-Type": "text/html" },
-          })
-        }
-        
-        // Marketing paths (/beta, /privacy, /terms, /bible-translation) would be
-        // owned by the marketing Worker on production. On preview aliases this
-        // Worker sees them, but they should 404 (not served by this Worker).
-        // Return the shell so the Worker's soft-404 logic catches them.
-        if (pathname === "/beta" || pathname === "/privacy" || pathname === "/terms" || pathname === "/bible-translation" || pathname === "/settings") {
-          return new Response(`<!-- This file is the APP shell -->\n<html>served:${pathname}</html>`, {
-            status: 200,
-            headers: { "Content-Type": "text/html" },
-          })
-        }
-        
-        // Real files (images, etc.) don't have the marker
-        return new Response(`served:${pathname}`, {
+        // Simulate the real asset binding: not_found_handling = "single-page-application"
+        // returns index.html with the SPA marker for every path (real routes, unknown
+        // paths, marketing paths - everything). The Worker decides what to do with it.
+        return new Response(`<!-- This file is the APP shell -->\n<html>served:${pathname}</html>`, {
           status: 200,
-          headers: { "Content-Type": "text/plain" },
+          headers: { "Content-Type": "text/html" },
         })
       },
     },

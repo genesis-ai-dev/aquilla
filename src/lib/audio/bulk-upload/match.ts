@@ -538,7 +538,7 @@ export function needsLength(assignments: readonly Assignment[]): number[] {
   return assignments.flatMap((a) => (a.reason?.code === "chapterOrVerse" && a.reason.lengthMs == null ? [a.index] : []))
 }
 
-function interpretBible(r: ReadRecording, nums: NameNumber[], singleChapter: boolean, lone?: LoneReading): Interpreted {
+function interpretBible(r: ReadRecording, nums: NameNumber[], singleChapter: boolean, lone?: LoneReading, onlyChapterHere = singleChapter): Interpreted {
   const reading = r.reading
   const take = reading.numbers.find((n) => n.marker === "take")?.value
   const markedPart = reading.numbers.find((n) => n.marker === "part")
@@ -574,7 +574,7 @@ function interpretBible(r: ReadRecording, nums: NameNumber[], singleChapter: boo
   let rest = plain
   if (chapter == null && verseMark) {
     if (plain.length > 0) { chapter = plain[0].value; rest = plain.slice(1) }
-    else if (singleChapter) chapter = 1
+    else if (onlyChapterHere) chapter = 1
     else return { wanted: { kind: "error", reason: { code: "noVerseChapter", verse: verseMark.value } }, ...base }
   }
   if (chapter == null) {
@@ -893,7 +893,15 @@ export function matchRecordings(
       for (const r of rawGroup) out.set(r.index, { index: r.index, reason: { code: "noBook" } })
       continue
     }
-    const singleChapter = fi.chapters.size === 1 && fi.chapters.has(1)
+    // AQU-2487 (import sweep, Nov 2): a book has one chapter when the BOOK
+    // does (Jude, Obadiah), not when the project happens to hold only its
+    // chapter 1. A project with just Jonah 1 read "Jonah 1.wav" as verse 1:1
+    // and "Jonah 2.wav" as 1:2, against the rule shown to the person: "A name
+    // with a chapter and no verse is one recording for the whole chapter".
+    // The lines decide only for a book whose chapter count isn't known.
+    const onlyChapterHere = fi.chapters.size === 1 && fi.chapters.has(1)
+    const bookChapters = fi.file.bookCode ? LAST_VERSES[fi.file.bookCode]?.length : undefined
+    const singleChapter = bookChapters != null ? bookChapters === 1 : onlyChapterHere
     // Outside a Bible book a name holds no book: "This is 12" is line 12, not
     // Isaiah. Inside one, a folder's number that is not one of the book's
     // chapters ("2023") is not a chapter folder.
@@ -918,7 +926,7 @@ export function matchRecordings(
       if (fi.bible && fi.file.bookCode && r.reading.book && r.reading.book.code !== fi.file.bookCode) {
         return { r, res: { reason: { code: "otherBook", book: englishBookName(r.reading.book.code), fileName: bookLabel(fi) } as UnmatchedReason } as Resolved, interp: null as Interpreted | null }
       }
-      const interp = fi.bible ? interpretBible(r, nums.get(r.index)!, singleChapter, lone.has(r.index) ? loneReading : undefined) : interpretLines(r, nums.get(r.index)!)
+      const interp = fi.bible ? interpretBible(r, nums.get(r.index)!, singleChapter, lone.has(r.index) ? loneReading : undefined, onlyChapterHere) : interpretLines(r, nums.get(r.index)!)
       return { r, res: refuseRangeOnTimed(fi, resolve(fi, interp.wanted, interp.part)), interp }
     })
 

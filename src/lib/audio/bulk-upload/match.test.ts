@@ -512,6 +512,29 @@ describe("a number alone in a Bible book, decided by the count", () => {
     expect(assignments.map((a) => a.cellIds)).toEqual([["jud:1:5"], ["jud:1:6"]])
   })
 
+  // AQU-2487 (import sweep, Nov 2): "one chapter" was read from the project's
+  // lines, so a project holding only Jonah 1 treated Jonah as a book with no
+  // chapters, and "Jonah 1.wav" landed on verse 1:1.
+  it("a project holding only chapter 1 of a longer book still reads a chapter as a chapter", () => {
+    const jonah1 = book("jon", "JON", "Jonah", [17])
+    const jonScope: MatchScope = { kind: "file", fileId: "jon" }
+    const whole = run([audio("rec/Jonah 1.wav")], [jonah1], jonScope).assignments[0]
+    expect(whole).toMatchObject({ read: "Jonah 1" })
+    expect(whole.cellIds).toHaveLength(17)
+    // Chapter 2 is not in this project: it finds no line, not Jonah 1:2.
+    const second = run([audio("rec/Jonah 2.wav")], [jonah1], jonScope).assignments[0]
+    expect(second.cellIds).toBeUndefined()
+    expect(second.reason).toBeDefined()
+    // A name that says "verse" needs no chapter while only one is here.
+    const verse = run([audio("rec/Jonah verse 3.wav")], [jonah1], jonScope).assignments[0]
+    expect(verse.cellIds).toEqual(["jon:1:3"])
+    // Numbers alone: seventeen of them are the seventeen verses.
+    const files = Array.from({ length: 17 }, (_, i) => audio(`rec/${String(i + 1).padStart(2, "0")}.wav`))
+    expect(run(files, [jonah1], jonScope).assignments.map((a) => a.cellIds)).toEqual(
+      Array.from({ length: 17 }, (_, i) => [`jon:1:${i + 1}`]),
+    )
+  })
+
   it("when both counts fit, it can't tell", () => {
     // Three chapters of one verse each: three files fit both.
     const tiny = book("gen", "GEN", "Genesis", [1, 1, 1])

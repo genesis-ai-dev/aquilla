@@ -639,3 +639,24 @@ describe("why a rule isn't kept", () => {
     expect(j.notKept).toEqual(["bookWord", "notAllPlaced", "scattered"])
   })
 })
+
+// AQU-2496 (review, Nov 9): the rule's {book} stopped at the first mark on a
+// letter, so a rule could never read a book named in Hindi, Bengali, Thai or
+// vowelled Arabic.
+describe("a rule's {book} reads a name written with marks on its letters", () => {
+  it.each([
+    ["Hindi", "उत्पत्ति"],
+    ["Bengali", "আদিপুস্তক"],
+    ["Thai", "มัทธิว"],
+    ["vowelled Arabic", "تَكْوِين"],
+  ])("%s", (_script, word) => {
+    const rule = parseNamingRule({ templates: [{ pattern: "{book} {chapter}-{verse}" }], books: { [word]: "GEN" } })!
+    expect(applyNamingRule(rule, `${word} 1-2.mp3`)).toBe("GEN 1:2.mp3")
+  })
+
+  it("still reads Latin book words, and never a digit or a separator as part of one", () => {
+    const rule = parseNamingRule({ templates: [{ pattern: "{book}-ch{chapter}_v{verse}" }], books: { Mt: "MAT" } })!
+    expect(applyNamingRule(rule, "Mt-ch19_v01.ogg")).toBe("MAT 19:1.ogg")
+    expect(applyNamingRule(rule, "Mt_x-ch19_v01.ogg")).toBeNull()
+  })
+})

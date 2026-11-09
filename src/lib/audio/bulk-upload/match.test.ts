@@ -928,3 +928,52 @@ describe("names written in another script's digits", () => {
     expect(a.cellIds).toEqual(["lesson3#2"])
   })
 })
+
+// AQU-2496 (review, Nov 9): a book's name in a script that writes vowels and
+// joined consonants as marks on a letter (Hindi, Bengali, Thai, vowelled
+// Arabic) was cut into pieces at every mark, so no name the project uses for
+// the book was ever found in a file's name.
+describe("a book named in a script that writes marks on its letters", () => {
+  const gen = book("gen", "GEN", "Genesis", [31, 25])
+  const mat = book("mat", "MAT", "Matthew", [25, 23])
+  const NAMES: [script: string, name: string, code: "GEN" | "MAT"][] = [
+    ["Hindi", "उत्पत्ति", "GEN"],
+    ["Bengali", "আদিপুস্তক", "GEN"],
+    ["Thai", "มัทธิว", "MAT"],
+    ["vowelled Arabic", "تَكْوِين", "GEN"],
+    ["Persian, joined with a zero-width non-joiner", "پیدایش‌نامه", "GEN"],
+  ]
+  const indexWith = (name: string, code: string) => {
+    const index = new BookNameIndex()
+    index.addProjectName(name, code)
+    return index
+  }
+
+  it.each(NAMES)("%s: the name is read whole, as the project's book", (_script, name, code) => {
+    const r = readName(`${name} 1-2.mp3`, indexWith(name, code))
+    expect(r.book).toEqual({ code, fromProject: true })
+    expect(r.numbers.map((n) => n.value)).toEqual([1, 2])
+  })
+
+  it.each(NAMES)("%s: a whole-project upload finds the book and the verse", (_script, name, code) => {
+    const files = [audio(`${name} 1-1.mp3`), audio(`${name} 2-3.mp3`), audio(`${name}/1-4.mp3`)]
+    const { assignments } = run(files, [gen, mat], { kind: "project" }, indexWith(name, code))
+    const id = code.toLowerCase()
+    expect(assignments.map((a) => a.cellIds?.[0] ?? a.reason?.code)).toEqual([`${id}:1:1`, `${id}:2:3`, `${id}:1:4`])
+  })
+
+  it("two words of such a name are still two words", () => {
+    const r = readName("पहला शमूएल 3-4.mp3", indexWith("पहला शमूएल", "1SA"))
+    expect(r.book?.code).toBe("1SA")
+    expect(r.numbers.map((n) => n.value)).toEqual([3, 4])
+  })
+
+  it("names in Latin letters and plain Arabic read as before", () => {
+    const index = indexWith("Genèse", "GEN")
+    index.addProjectName("تكوين", "GEN")
+    expect(readName("Genèse 1-1.mp3", index).book?.code).toBe("GEN")
+    expect(readName("Genèse 1-1.mp3", index).book?.code).toBe("GEN")
+    expect(readName("تكوين 1-1.mp3", index).book?.code).toBe("GEN")
+    expect(readName("Genesis 1-1a.mp3", index).numbers.map((n) => [n.value, n.letter])).toEqual([[1, undefined], [1, "a"]])
+  })
+})

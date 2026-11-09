@@ -117,7 +117,12 @@ function tokenize(stem: string): Tok[] {
   // AQU-2329: a script's own digits (٥, ۵, ५, ৫, ၅, ๕…) read as 0–9; NFKC leaves them alone.
   const text = splitChineseMarkers(toWesternDigits(stem.normalize("NFKC")))
   const out: Tok[] = []
-  const re = /(\d+)|(\p{L}+)|([^\p{L}\d]+)/gu
+  // AQU-2496 (review, Nov 9): a word is its letters AND the marks written on
+  // them. Hindi, Bengali, Thai and vowelled Arabic write vowels and joined
+  // consonants as marks ("उत्पत्ति", "تَكْوِين"); cut at each mark, no book name
+  // in those scripts was ever read. A zero-width joiner or non-joiner between
+  // two letters (Persian, Bengali) stays inside the word too.
+  const re = /(\d+)|(\p{L}(?:[\p{L}\p{M}]|[\u200c\u200d](?=[\p{L}\p{M}]))*)|([^\p{L}\d]+)/gu
   let m: RegExpExecArray | null
   while ((m = re.exec(text)) !== null) {
     if (m[1] !== undefined) out.push({ kind: "num", text: m[1], value: Number(m[1]) })
@@ -164,7 +169,7 @@ function findBooks(toks: Tok[], index: BookNameIndex): BookHit[] {
       const tok = toks[j]
       if (tok.kind === "sep") { j++; n--; continue }
       if (tok.kind === "num" && (n > 0 || tok.value > 3 || tok.letter)) break
-      text += (text && tok.kind === "word" && /\p{L}$/u.test(text) ? " " : "") + tok.text
+      text += (text && tok.kind === "word" && /[\p{L}\p{M}]$/u.test(text) ? " " : "") + tok.text
       const after = nextSignificant(toks, j + 1)
       const beforeNumber = after < toks.length && toks[after].kind === "num"
       // A lone digit is never a book on its own.

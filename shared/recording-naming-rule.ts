@@ -67,7 +67,10 @@ export interface NamingRule {
 
 /** The placeholders a template may use, and what each one captures. */
 const PLACEHOLDERS = {
-  book: "([1-3]?\\s?[\\p{L}][\\p{L}.']{0,29}?)",
+  // AQU-2496 (review, Nov 9): a book word is its letters and the marks written
+  // on them, as the bulk upload's own name reader takes a word, so a rule reads
+  // a book named in Hindi, Bengali, Thai or vowelled Arabic ("उत्पत्ति").
+  book: "([1-3]?\\s?[\\p{L}][\\p{L}\\p{M}\\u200c\\u200d.']{0,29}?)",
   chapter: "(\\d{1,3})",
   verse: "(\\d{1,3})",
   /** The last verse of a recording of several ("v01-03"): with {verse}, a range. */

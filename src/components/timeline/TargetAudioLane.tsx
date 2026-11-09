@@ -328,6 +328,7 @@ export interface ChangeVoiceMenuState {
 function TargetAudioChip({
   chip,
   prevChip,
+  prevReach = null,
   prevMeetSec,
   nextChipStartSec,
   nextMeetSec,
@@ -385,6 +386,10 @@ function TargetAudioChip({
   /** The PREVIOUS chip's span — a chip can begin before its own section
    *  (end-based drag bounds), so its head can lie under this neighbour. */
   prevChip: { start: number; end: number; usingFallback: boolean } | null
+  /** AQU-2432: of the chips before this one on its track, the one whose end
+   *  reaches furthest — what a take dragged earlier over the end of the take
+   *  before it, following the recordings, is drawn short from. */
+  prevReach?: { start: number; end: number; usingFallback: boolean } | null
   /** 2026-08-08 / 2026-08-27: when the PREVIOUS chip and this one trespass on
    *  EACH OTHER, its end is no place to yield at — both rest-cut to this
    *  shared meet point instead (`dualFaultMeetSec`, resolved once in the
@@ -647,22 +652,32 @@ function TargetAudioChip({
   // there is nothing to run past and nothing to collide with — the warnings
   // would fire on every single line and mean nothing. AQU-2252: a take on a
   // track made a layer is the exception — its line does not hold it.
-  const overflow = freeRules ? "none" : chipOverflowState(span, section, prevChip, nextChipStartSec)
-  const overlaps = freeRules
-    ? { headSec: null, tailSec: null }
-    : chipOverlaps(span, prevChip, nextChipStartSec)
+  //
+  // AQU-2432 (Sam, Nov 6): …but a take may now be dragged earlier, over the
+  // end of the take before it on its track. That overlap is allowed but not
+  // desirable ("Logic doesn't allow overlap at pretty much at all"), so it
+  // keeps today's red warning, the way two takes that collide following the
+  // source wear it: the take moved over the one before it is the one at
+  // fault — red, drawn from where the earlier take ends with the arrow strip
+  // at its start, whole on hover, and its details say how much it overlaps.
+  // The earlier take is never at fault here (its line grows to hold it).
+  const freeOverlaps = freeRules ? chipOverlaps(span, prevReach, null) : null
+  const overflow = freeOverlaps
+    ? (freeOverlaps.headSec != null ? "overlap" : "none")
+    : chipOverflowState(span, section, prevChip, nextChipStartSec)
+  const overlaps = freeOverlaps ?? chipOverlaps(span, prevChip, nextChipStartSec)
   // Blame the trespasser: a warning belongs to THIS chip only for territory
   // it left its section to claim (mirrors the chipOverflowState rule). The
   // number is masked on fallback chips — never derived from a guessed width.
   // The head number depends on the PREVIOUS chip's end too, so it is also
   // masked when THAT width is a guess (starts are always measured, so the
   // tail number needs no such mask).
-  const { head: headTrespass, tail: tailTrespass } = freeRules
-    ? { head: false, tail: false }
+  const { head: headTrespass, tail: tailTrespass } = freeOverlaps
+    ? { head: freeOverlaps.headSec != null, tail: false }
     : chipTrespass(span, section, prevChip, nextChipStartSec)
   const tailOverlapSec = tailTrespass && !geom.usingFallback ? overlaps.tailSec : null
   const headOverlapSec =
-    headTrespass && !geom.usingFallback && !prevChip?.usingFallback ? overlaps.headSec : null
+    headTrespass && !geom.usingFallback && !(freeOverlaps ? prevReach : prevChip)?.usingFallback ? overlaps.headSec : null
   // AQU-2215: following the recordings, only a take that can hold a pause
   // before its line is movable — a split take's pieces and a take of unknown
   // length are placed end to end and have nowhere to go, so they keep the
@@ -697,9 +712,13 @@ function TargetAudioChip({
   // true edge visibly ACROSS the neighbour's resting cut, so the collision
   // the red warns about can actually be seen.
   // SUB-53: inert in audio-first (verses are laid out end to end) — but for a
-  // take on a track made a layer (AQU-2252), which its line does not hold.
+  // take on a track made a layer (AQU-2252), which its line does not hold, and
+  // AQU-2432 a take dragged over the end of the one before it, drawn from
+  // where the takes before it end.
   const engaged = hovered || drag !== null
-  const headCutSec = headTrespass ? (prevMeetSec ?? prevChip?.end ?? section.start) : null
+  const headCutSec = headTrespass
+    ? (freeOverlaps ? (prevReach?.end ?? section.start) : (prevMeetSec ?? prevChip?.end ?? section.start))
+    : null
   const tailCutSec = tailTrespass ? (nextMeetSec ?? nextChipStartSec ?? section.end) : null
   const paintedStart = !engaged && headCutSec != null ? headCutSec : span.start
   const paintedEnd = !engaged && tailCutSec != null ? tailCutSec : span.end
@@ -2135,6 +2154,18 @@ export function TargetAudioLane({
         })
       : []
 
+  // AQU-2432: for each chip, the chip before it on this track that reaches
+  // furthest — a long take can run on past the short one after it, over the
+  // next (following the recordings, three at once).
+  const reachBefore: ({ start: number; end: number; usingFallback: boolean } | null)[] = []
+  {
+    let reach: { start: number; end: number; usingFallback: boolean } | null = null
+    for (const c of chips) {
+      reachBefore.push(reach)
+      if (!reach || c.geom.end > reach.end) reach = { start: c.geom.start, end: c.geom.end, usingFallback: c.geom.usingFallback }
+    }
+  }
+
   // 2026-08-08: every chip's fault flags, resolved once. A chip needs its
   // NEIGHBOUR's flag as well as its own: when both trespass on each other,
   // neither's edge is a valid place to stop, so they meet at a shared point
@@ -2276,6 +2307,7 @@ export function TargetAudioLane({
                   }
                 : null
             }
+            prevReach={reachBefore[i]}
             prevMeetSec={i > 0 ? meetAfter[i - 1] : null}
             nextChipStartSec={chips[i + 1]?.geom.start ?? null}
             nextMeetSec={meetAfter[i]}

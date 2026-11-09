@@ -1748,12 +1748,13 @@ describe("TimelineEditor — audio-first mode", () => {
       expect(place).toEqual({ targetOffsetMs: -800, recordingsOffsetMs: 200 })
     })
 
-    it("0.5 s left following the source: −1.5 s there, and following the recordings no further than its line's start", () => {
+    it("0.5 s left following the source: −1.5 s there, and the same 0.5 s back over line 1's take following the recordings (AQU-2432)", () => {
+      // Before AQU-2432 it stopped on its line's start following the recordings.
       const onRetimeTarget = vi.fn()
       renderSermon("dubbing", onRetimeTarget)
       dragBy(screen.getByTestId("tl-target-l2"), -0.5)
       const [, , , place] = onRetimeTarget.mock.calls[0] as [string, number, string, unknown]
-      expect(place).toEqual({ targetOffsetMs: -1_500, recordingsOffsetMs: 0 })
+      expect(place).toEqual({ targetOffsetMs: -1_500, recordingsOffsetMs: -500 })
     })
   })
 

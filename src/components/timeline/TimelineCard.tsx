@@ -303,6 +303,10 @@ export function TimelineCard({
       window.removeEventListener("pointermove", onMove)
       window.removeEventListener("pointerup", onUp)
       setDrag(null)
+      // AQU-2491 (review, Nov 9): a press that never crossed the drag
+      // threshold is a click, and a click retimes nothing. The release used
+      // to save the pixel or two the hand slipped.
+      if (!movedRef.current) return
       const s = proposeSpan(mode, pxToSec(ev.clientX - startX, pxPerSec))
       if (s.startSec !== startSec || s.endSec !== endSec) {
         onRetime(cell.id, s.startSec, s.endSec)

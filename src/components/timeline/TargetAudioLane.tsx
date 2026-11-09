@@ -830,6 +830,13 @@ function TargetAudioChip({
       window.removeEventListener("pointerup", onUp)
       window.removeEventListener("pointercancel", onCancel)
       setDrag(null)
+      // AQU-2491 (review, Nov 9): a press that never crossed the drag
+      // threshold is a click, and a click saves nothing. The threshold used to
+      // decide only "was this a click"; the release still saved the pixel or
+      // two the hand slipped, so choosing a take, or double-clicking its name
+      // to rename it, moved it in both timings (and a slip on a trim handle
+      // trimmed it).
+      if (!movedRef.current) return
       const s = proposeSpan(mode, pxToSec(ev.clientX - startX, pxPerSec))
       if (mode === "move") {
         // AQU-2215: the layout inverts the drag, because only it knows what

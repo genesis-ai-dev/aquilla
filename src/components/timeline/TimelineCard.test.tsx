@@ -73,6 +73,24 @@ describe("TimelineCard", () => {
     expect(onRetime).toHaveBeenCalledWith("c1", 2, 4)
   })
 
+  // AQU-2491 (review, Nov 9): a click is not a move. A press let go within
+  // the 3px click threshold used to save a retime whenever the pointer had
+  // slipped at all (75 ms at this zoom), so clicking a cue to select it could
+  // shift its timing.
+  it("does not retime on a press let go within the click threshold", () => {
+    const onRetime = vi.fn()
+    render(<TimelineCard cell={cell()} {...base} variant="subtitle" selected onSelect={() => {}} onRetime={onRetime} />)
+    const el = screen.getByTestId("tl-card-c1")
+    fireEvent.pointerDown(el, { clientX: 100, pointerId: 1 })
+    fireEvent.pointerMove(window, { clientX: 103 })
+    fireEvent.pointerUp(window, { clientX: 103 })
+    const grips = el.querySelectorAll("span.cursor-ew-resize")
+    fireEvent.pointerDown(grips[1] as Element, { clientX: 200, pointerId: 2 })
+    fireEvent.pointerMove(window, { clientX: 198 })
+    fireEvent.pointerUp(window, { clientX: 198 })
+    expect(onRetime).not.toHaveBeenCalled()
+  })
+
   // AQU-646 stage 2. This is a REGRESSION TEST FOR A LIVE BUG, not hardening:
   // before the guard, a right-press began a real drag and `pointerup` emitted,
   // so right-dragging across a card rewrote its timing. It surfaced because

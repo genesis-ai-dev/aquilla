@@ -14,6 +14,7 @@ import { TargetAudioLane, type TakeMenuActions, type TargetAudioItem } from "./T
 import { RowMetricsContext } from "./useRowMetrics"
 import { chipHeightPx, chipPadPx, nameBarPx } from "@/lib/timeline/row-metrics"
 import type { CellData } from "@/hooks/useCells"
+import { buildTimelineLayout } from "@/lib/timeline/layout"
 
 const SOURCE_ID = "audio-f1-1690000000-shared.mp3"
 const TAKE = "audio-c1-1700000000-take.webm"
@@ -464,6 +465,86 @@ describe("drag the bar to move the take", () => {
     render(<TargetAudioLane {...base} masterHonorsTrims items={[item({ durationMs: 4000 })]} onTrimTarget={vi.fn()} />)
     expect(screen.getByTestId("tl-target-c1-handle-l").style.top).toBe("14px")
     expect(screen.getByTestId("tl-target-c1-handle-r").style.top).toBe("14px")
+  })
+})
+
+// AQU-2491 (review, Nov 9): a click is not a move. The hand slips a pixel or
+// two between press and release on any ordinary click, and on both presses of
+// the double-click that renames. The 3px threshold decided only "was this a
+// click"; the release saved whenever the shift was not exactly 0 ms, so the
+// click chose the take AND moved it (75 ms at this zoom, with an Undo step),
+// in both timings. Following the recordings that slip became a pause before
+// the take and lengthened its line.
+describe("a click on a take does not move it (AQU-2491)", () => {
+  /** Press, slip `dx` px, let go: what a click really is. */
+  function click(el: Element, dx: number) {
+    fireEvent.pointerDown(el, { button: 0, clientX: 100, pointerId: 1 })
+    fireEvent.pointerMove(window, { clientX: 100 + dx })
+    fireEvent.pointerUp(window, { clientX: 100 + dx })
+  }
+
+  it("following the source: a press let go 3px away saves nothing", () => {
+    const onRetimeTarget = vi.fn()
+    render(<TargetAudioLane {...base} items={[item({ durationMs: 4000 })]} onRetimeTarget={onRetimeTarget} />)
+    click(screen.getByTestId("tl-target-c1-name"), 3)
+    click(screen.getByTestId("tl-target-c1-name"), -2)
+    expect(onRetimeTarget).not.toHaveBeenCalled()
+  })
+
+  it("following the recordings: it adds no pause before the take", () => {
+    const onRetimeTarget = vi.fn()
+    const it0 = item({ durationMs: 4000 })
+    const layout = buildTimelineLayout("audioFirst", [it0.cell], [it0.cell], null, { standInLenSec: () => 2 })
+    render(<TargetAudioLane {...base} layout={layout} items={[it0]} onRetimeTarget={onRetimeTarget} />)
+    click(screen.getByTestId("tl-target-c1-name"), 3)
+    expect(onRetimeTarget).not.toHaveBeenCalled()
+    // …and a real drag there still moves it.
+    click(screen.getByTestId("tl-target-c1-name"), 40)
+    expect(onRetimeTarget).toHaveBeenCalledTimes(1)
+  })
+
+  it("a piece of a cut take stays put too", () => {
+    const PIECE = "audio-c1-1700000500-piece.webm"
+    const c = cell({
+      [TAKE]: { type: "audio", url: "frontier-audio://t", slot: "recording", label: "Take 2 · 1", durationMs: 8000, trimEndMs: 3000 },
+      [PIECE]: { type: "audio", url: "frontier-audio://t", slot: "recording", label: "Take 2 · 2", pieceOf: TAKE, durationMs: 8000, trimStartMs: 3000 },
+    })
+    const onRetimeTarget = vi.fn()
+    render(
+      <TargetAudioLane
+        {...base}
+        onRetimeTarget={onRetimeTarget}
+        items={[
+          { cell: c, kind: "take", audioId: TAKE, pieceIndex: 0, pieceCount: 2 },
+          { cell: c, kind: "take", audioId: PIECE, pieceIndex: 1, pieceCount: 2 },
+        ]}
+      />,
+    )
+    click(screen.getByTestId("tl-target-c1-p2-name"), 2)
+    expect(onRetimeTarget).not.toHaveBeenCalled()
+  })
+
+  it("the double-click that renames moves nothing", () => {
+    const actions = menu()
+    const onRetimeTarget = vi.fn()
+    render(<TargetAudioLane {...base} items={[item({ durationMs: 4000 })]} takeMenu={actions} onRetimeTarget={onRetimeTarget} />)
+    const name = screen.getByTestId("tl-target-c1-name")
+    click(name, 2)
+    click(name, 1)
+    fireEvent.doubleClick(name)
+    expect(actions.rename).toHaveBeenCalledWith("c1", TAKE, "Take 2")
+    expect(onRetimeTarget).not.toHaveBeenCalled()
+  })
+
+  it("a press on a trim handle let go 2px away trims nothing", () => {
+    const onTrimTarget = vi.fn()
+    render(<TargetAudioLane {...base} masterHonorsTrims items={[item({ durationMs: 4000 })]} onTrimTarget={onTrimTarget} />)
+    click(screen.getByTestId("tl-target-c1-handle-r"), -2)
+    click(screen.getByTestId("tl-target-c1-handle-l"), 3)
+    expect(onTrimTarget).not.toHaveBeenCalled()
+    // …and a real drag on it still trims.
+    click(screen.getByTestId("tl-target-c1-handle-r"), -40)
+    expect(onTrimTarget).toHaveBeenCalledTimes(1)
   })
 })
 

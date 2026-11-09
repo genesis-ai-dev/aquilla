@@ -4508,6 +4508,16 @@ export function skipForward(): void {
     void progPlaySlot(next, null, true)
     return
   }
+  // AQU-2495 (review, Nov 9): following the recordings, with the run over
+  // (`progIndex` is -1 again), Next fell through to the line-by-line player
+  // below: line 1 played on its take's own clock, so the playhead stood still
+  // and a film following it stayed stopped. It starts the first line as Play
+  // does. (A file that plays line by line in this timing is never idle here
+  // mid-run, and `startQueue` takes that path for it as before.)
+  if (timingMode === "audioFirst" && state.kind === "idle") {
+    startQueue(activeContext, 0)
+    return
+  }
   const next = findNextPlayable(activeContext.cells, dubbingSkipAnchor() + 1)
   if (next < 0) {
     stopQueue()

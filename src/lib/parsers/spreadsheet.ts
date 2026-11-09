@@ -562,12 +562,16 @@ export function matchPairedRowsToSourceCells(
       if (row.ref) orphans.push({ ref: row.ref, text: row.translated })
       continue
     }
-    // AQU-2487 (review, Nov 9): a blank translation is no translation, so a
-    // blank row never takes a line. With a reference on two rows and the first
-    // one blank, the blank row won: the line was listed with empty text and
-    // the row holding the translation was counted as unmatched. The first row
-    // WITH a translation takes the line. (AQU-2473 sets the same rule for every
-    // blank row, with this same check; the two agree.)
+    // AQU-2473: a blank translation is no translation. Pairing it made an
+    // empty "incoming" text, which showed as a conflict on a line that already
+    // had one, and Select all + Import then replaced that translation with
+    // nothing (with Target translation left on "ignore", every row). The file
+    // review has always refused this: a blank spreadsheet cell must never
+    // clear an existing translation. The line is left unmatched, so it is
+    // counted with the lines this file has nothing for.
+    // AQU-2487 (review, Nov 9): the same check settles a reference that is on
+    // two rows with the first one blank: the first row WITH a translation
+    // takes the line.
     if (row.translated.trim().length === 0) continue
     // AQU-2487 (import sweep, Nov 2): a reference that appears twice gives its
     // line the first row only. Both rows used to be listed, ticked together,

@@ -418,6 +418,23 @@ describe("matchPairedRowsToSourceCells", () => {
     { id: "r3", original: "Orphan", translated: "Orphelin", ref: "GEN 99:99", castName: undefined, start: undefined, end: undefined },
   ]
 
+  // AQU-2473: a row with a blank translation used to pair as an empty
+  // translation, a "conflict" that Select all + Import committed over the
+  // line's existing text.
+  it("never pairs a blank translation, so it cannot replace an existing one", () => {
+    const blankRows = [
+      { id: "b1", original: "The earth", translated: "", ref: "GEN 1:2", castName: undefined, start: undefined, end: undefined },
+      { id: "b2", original: "And God said", translated: "   ", ref: "GEN 1:3", castName: undefined, start: undefined, end: undefined },
+      { id: "b3", original: "In the beginning", translated: "Au commencement", ref: "GEN 1:1", castName: undefined, start: undefined, end: undefined },
+    ]
+    const result = matchPairedRowsToSourceCells(blankRows, sourceCells)
+    expect(result.matched.map((m) => m.cellId)).toEqual(["cell-1"])
+    expect(result.matched.some((m) => m.incomingText.trim() === "")).toBe(false)
+    // The two lines the file had nothing for are counted as not covered.
+    expect(result.unmatchedSourceCount).toBe(2)
+    expect(result.orphans).toEqual([])
+  })
+
   it("matches rows to source cells by ref", () => {
     const result = matchPairedRowsToSourceCells(mappedRows, sourceCells)
     expect(result.matched).toHaveLength(2)

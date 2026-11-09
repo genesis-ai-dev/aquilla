@@ -77,16 +77,18 @@ describe("a move, in both timings (AQU-2267)", () => {
     expect(moved.anchorSec).toBeCloseTo(3.6, 5)
   })
 
-  it("0.5 s left following the source: −1.5 s there, and following the recordings no further than its line's start", () => {
+  it("0.5 s left following the source: −1.5 s there, and following the recordings 0.5 s back over the end of line 1's take (AQU-2432)", () => {
+    // Before AQU-2432 it stopped on its line's start following the recordings
+    // (0). Sam, Nov 6 (rule 1): the same distance in both timings.
     const cells = sermon()
     const { source, recordings } = layouts(cells)
     const take = { cell: cells[1], audioId: takeId("l2") }
-    expect(drag(source, recordings, mainTrack(cells), take, -0.5)!.place).toEqual({ targetOffsetMs: -1_500, recordingsOffsetMs: 0 })
-    // With a pause of 0.3 s of its own there, it loses all of it and stops.
+    expect(drag(source, recordings, mainTrack(cells), take, -0.5)!.place).toEqual({ targetOffsetMs: -1_500, recordingsOffsetMs: -500 })
+    // With a pause of 0.3 s of its own there, it loses all of it and goes 0.2 s further.
     const paused = sermon({ durationMs: 4_600, targetOffsetMs: -1_000, recordingsOffsetMs: 300 })
     const p = layouts(paused)
     expect(drag(p.source, p.recordings, mainTrack(paused), { cell: paused[1], audioId: takeId("l2") }, -0.5)!.place)
-      .toEqual({ targetOffsetMs: -1_500, recordingsOffsetMs: 0 })
+      .toEqual({ targetOffsetMs: -1_500, recordingsOffsetMs: -200 })
   })
 
   it("0.5 s right following the source moves the pause the same 0.5 s following the recordings", () => {
@@ -289,12 +291,13 @@ describe("a layer moved following the source (AQU-2267)", () => {
 
 describe("clampMoveStart — the lane's move clamp (AQU-2267)", () => {
   const section = { start: 3, end: 6 }
-  it("free (a voice take following the recordings): only its line's start", () => {
-    expect(clampMoveStart(1, { free: true, lineStartSec: 2, section, lenSec: 1, prevChipStartSec: 2.5, nextChipStartSec: 2.6, trimStartSec: 0 })).toBe(2)
-    expect(clampMoveStart(40, { free: true, lineStartSec: 2, section, lenSec: 1, prevChipStartSec: null, nextChipStartSec: 3, trimStartSec: 0 })).toBe(40)
+  it("free (a voice take following the recordings): only its floor (AQU-2432: the start of the take before it) and, for a piece, its ceiling", () => {
+    expect(clampMoveStart(1, { free: true, floorSec: 2, section, lenSec: 1, prevChipStartSec: 2.5, nextChipStartSec: 2.6, trimStartSec: 0 })).toBe(2)
+    expect(clampMoveStart(40, { free: true, floorSec: 2, section, lenSec: 1, prevChipStartSec: null, nextChipStartSec: 3, trimStartSec: 0 })).toBe(40)
+    expect(clampMoveStart(40, { free: true, floorSec: 2, ceilSec: 5, section, lenSec: 1, prevChipStartSec: null, nextChipStartSec: 3, trimStartSec: 0 })).toBe(5)
   })
   it("not free: touching its line, between its neighbours' starts, never before the start of the file", () => {
-    const c = { free: false, lineStartSec: null, section, lenSec: 1, prevChipStartSec: null, nextChipStartSec: null, trimStartSec: 0 }
+    const c = { free: false, floorSec: null, section, lenSec: 1, prevChipStartSec: null, nextChipStartSec: null, trimStartSec: 0 }
     expect(clampMoveStart(9, c)).toBeCloseTo(maxAudibleStartSec(section), 5)
     expect(clampMoveStart(0, c)).toBeCloseTo(minAudibleEndSec(section) - 1, 5)
     expect(clampMoveStart(5, { ...c, nextChipStartSec: 4 })).toBe(4)
@@ -302,7 +305,7 @@ describe("clampMoveStart — the lane's move clamp (AQU-2267)", () => {
     expect(clampMoveStart(2.1, { ...c, lenSec: 3, trimStartSec: 2.3 })).toBe(2.3)
   })
   it("not free, a later piece of a take: its ceiling moves out by how far into the take its sound starts", () => {
-    const c = { free: false, lineStartSec: null, section, lenSec: 1, prevChipStartSec: null, nextChipStartSec: null, trimStartSec: 0 }
+    const c = { free: false, floorSec: null, section, lenSec: 1, prevChipStartSec: null, nextChipStartSec: null, trimStartSec: 0 }
     expect(clampMoveStart(9, { ...c, leadInTakeSec: 2.5 })).toBeCloseTo(maxAudibleStartSec(section) + 2.5, 5)
     expect(clampMoveStart(7, { ...c, leadInTakeSec: 2.5 })).toBe(7)
   })
@@ -313,5 +316,116 @@ describe("placeAfterMoveMs (AQU-2267)", () => {
     const cells = [line("l1", 0, 3, {})]
     const { recordings } = layouts(cells)
     expect(placeAfterMoveMs(recordings, mainTrack(cells), { cell: cells[0], audioId: takeId("l1") }, 1)).toBeNull()
+  })
+})
+
+// AQU-2432 (Sam, Nov 6): following the recordings a take can now be dragged
+// EARLIER, over the end of the take before it on its track, so one speaker
+// comes in before the other has finished — the same distance in both timings
+// (rule 1), up to the start of the take before it and never past (rule 4),
+// and the same for the pieces of a cut take and for a voice track (rule 6).
+describe("a take dragged over the end of the take before it (AQU-2432)", () => {
+  it("0.5 s left following the recordings: −0.5 s there, and the same 0.5 s following the source", () => {
+    const cells = sermon({ durationMs: 4_600 })
+    const { source, recordings } = layouts(cells)
+    const take = { cell: cells[1], audioId: takeId("l2") }
+    expect(drag(recordings, source, mainTrack(cells), take, -0.5)!.place).toEqual({ targetOffsetMs: -500, recordingsOffsetMs: -500 })
+  })
+
+  it("no further back than the start of the take before it: line 1's take starts at 0 s, line 2 would start at 2.6 s", () => {
+    const cells = sermon({ durationMs: 4_600 })
+    const { source, recordings } = layouts(cells)
+    const take = { cell: cells[1], audioId: takeId("l2") }
+    expect(movedStartSec(recordings, mainTrack(cells), take, -5)).toBeCloseTo(0, 5)
+    expect(drag(recordings, source, mainTrack(cells), take, -5)!.place.recordingsOffsetMs).toBe(-2_600)
+  })
+
+  it("…which is a place before its line further than its line is from the start of the file", () => {
+    // Line 2 starts 0.4 s into the file; following the recordings it would
+    // start at 2.6 s, behind a 2.6 s take. Pulled back 2 s, its place there
+    // is −2 s — the file's own start means nothing following the recordings.
+    const cells = [line("l1", 0, 0.4, { durationMs: 2_600 }), line("l2", 0.4, 3, { durationMs: 1_000 })]
+    const { recordings } = layouts(cells)
+    const moved = drag(recordings, null, mainTrack(cells), { cell: cells[1], audioId: takeId("l2") }, -2)!
+    expect(moved.place.recordingsOffsetMs).toBe(-2_000)
+  })
+
+  it("the first line's take has nothing before it, so it stays at the start of the file", () => {
+    const cells = sermon()
+    const { source, recordings } = layouts(cells)
+    expect(drag(recordings, source, mainTrack(cells), { cell: cells[0], audioId: takeId("l1") }, -1)).toBeNull()
+  })
+
+  it("a take already pulled back is measured from where its line would start", () => {
+    const cells = sermon({ durationMs: 4_600, targetOffsetMs: -1_000, recordingsOffsetMs: -500 })
+    const { recordings } = layouts(cells)
+    const take = { cell: cells[1], audioId: takeId("l2") }
+    // Line 2 starts at 2.1 s now; its take with it.
+    expect(recordings.targetGeom(cells[1], cells[1].attachments![takeId("l2")] as never, takeId("l2"))!.start).toBeCloseTo(2.1, 5)
+    expect(drag(recordings, null, mainTrack(cells), take, -0.3)!.place.recordingsOffsetMs).toBe(-800)
+    expect(drag(recordings, null, mainTrack(cells), take, 0.8)!.place.recordingsOffsetMs).toBe(300)
+  })
+
+  describe("pieces of a cut take", () => {
+    const TAKE = takeId("a")
+    const PIECE = "audio-a-1700000900-piece.wav"
+    // Line a, 2–6 s, after a 2 s take: following the recordings its take's
+    // first piece (1.5 s) sits at 2 s and its second (1.2 s) right after, at 3.5 s.
+    const cut = () => {
+      const cell = {
+        ...line("a", 2, 6),
+        selectedAudioId: TAKE,
+        attachments: {
+          [TAKE]: { type: "audio", url: "frontier-audio://take", slot: "recording", durationMs: 4000, trimEndMs: 1500 },
+          [PIECE]: { type: "audio", url: "frontier-audio://take", slot: "recording", pieceOf: TAKE, durationMs: 4000, trimStartMs: 2500, trimEndMs: 3700 },
+          [SOURCE_ID]: { type: "audio", url: "frontier-audio://src" },
+        },
+      } as unknown as CellData
+      const cells = [line("l0", 0, 2, { durationMs: 2_000 }), cell]
+      const track = [{ cell: cells[0], audioId: takeId("l0") }, { cell, audioId: TAKE }, { cell, audioId: PIECE }]
+      return { cell, cells, track }
+    }
+
+    it("a piece dragged 1 s left sounds over the end of the piece in front", () => {
+      const { cell, cells, track } = cut()
+      const { source, recordings } = layouts(cells)
+      const moved = drag(recordings, source, track, { cell, audioId: PIECE }, -1)!
+      expect(moved.place).toEqual({ targetOffsetMs: -1_000, recordingsOffsetMs: -1_000 })
+      const after = { ...cell, attachments: { ...cell.attachments, [PIECE]: { ...cell.attachments![PIECE], ...moved.place } } } as unknown as CellData
+      expect(layouts([cells[0], after]).recordings.targetGeom(after, after.attachments![PIECE] as never, PIECE)!.start).toBeCloseTo(2.5, 5)
+    })
+
+    it("…no further back than that piece's start", () => {
+      const { cell, cells, track } = cut()
+      const { recordings } = layouts(cells)
+      expect(movedStartSec(recordings, track, { cell, audioId: PIECE }, -3)).toBeCloseTo(2, 5)
+    })
+
+    it("and a piece dragged right stops at the start of the piece after it, so the two never swap", () => {
+      const { cell, cells, track } = cut()
+      const { recordings } = layouts(cells)
+      expect(movedStartSec(recordings, track, { cell, audioId: TAKE }, 3)).toBeCloseTo(3.5, 5)
+    })
+
+    it("the first piece is pulled back over the take before it, as a take is", () => {
+      const { cell, cells, track } = cut()
+      const { recordings } = layouts(cells)
+      expect(movedStartSec(recordings, track, { cell, audioId: TAKE }, -5)).toBeCloseTo(0, 5)
+    })
+  })
+
+  it("a take on a voice track is pulled back over the voice take before it, no further than its start", () => {
+    const opts = { layerSlots: [TRACK] }
+    const cells = [
+      line("l1", 0, 3, { durationMs: 2_000 }, { durationMs: 1_000, recordingsOffsetMs: 300 }),
+      line("l2", 3, 6, { durationMs: 2_000 }, { durationMs: 1_000 }),
+    ]
+    const { recordings } = layouts(cells, opts)
+    const voice = cells.map((cell) => ({ cell, audioId: trackId(cell.id) }))
+    const take = { cell: cells[1], audioId: trackId("l2") }
+    // Line 2 would start at 2 s; line 1's voice take starts at 0.3 s.
+    expect(movedStartSec(recordings, voice, take, -1)).toBeCloseTo(1, 5)
+    expect(movedStartSec(recordings, voice, take, -5)).toBeCloseTo(0.3, 5)
+    expect(drag(recordings, null, voice, take, -1)!.place.recordingsOffsetMs).toBe(-1_000)
   })
 })

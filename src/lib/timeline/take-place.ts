@@ -33,7 +33,10 @@
 //   - following the source: the end-based bounds against its line, its
 //     neighbours on the track, never before the start of the file;
 //   - following the recordings, on the main track or a voice track: never
-//     before its line's start (a pause cannot be negative);
+//     before its line's start (a pause cannot be negative) — until AQU-2432
+//     (Sam, Nov 6): back over the end of the take before it on its track, up
+//     to that take's start and never past it, the line pulled back with it;
+//     a piece of a cut take, between the pieces either side of it;
 //   - following the recordings, on a layer: its lead-in limit, the takes either
 //     side of it on its track, never before the start of the file (AQU-2252).
 // A timing that cannot place the take at all (a book's line has no place on
@@ -73,11 +76,18 @@ export interface PlacedTake {
 export interface MoveClamp {
   /**
    * Following the recordings, a take on the main track or a voice track: its
-   * line grows to hold it, so the only bound is its line's start.
+   * line grows to hold it, so the only bounds are `floorSec` and `ceilSec`.
    */
   free: boolean
-  /** Where its line starts on the programme clock (the free bound). */
-  lineStartSec: number | null
+  /**
+   * The free bounds, on the programme clock (`TimelineLayout.moveBounds`).
+   * Before AQU-2432 the floor was its line's start. AQU-2432 (Sam, Nov 6): the
+   * start of the take before it on its track — it may be dragged earlier over
+   * that take's end, never past its start. The ceiling: for a piece of a cut
+   * take, the start of the piece after it (null for a take, whose line grows).
+   */
+  floorSec: number | null
+  ceilSec?: number | null
   /** The span it is measured against (`TimelineLayout.chipSection`). */
   section: SpanSec
   /** Its audible length. */
@@ -129,7 +139,7 @@ export function pieceLeadInTakeSec(cell: CellData, audioId: string): number {
  * floors applied last, so they win when the bounds cross.
  */
 export function clampMoveStart(start: number, c: MoveClamp): number {
-  if (c.free) return Math.max(start, c.lineStartSec ?? start)
+  if (c.free) return Math.max(Math.min(start, c.ceilSec ?? Infinity), c.floorSec ?? -Infinity)
   const capped = Math.min(start, maxAudibleStartSec(c.section) + (c.leadInTakeSec ?? 0), c.nextChipStartSec ?? Infinity)
   return Math.max(capped, minAudibleEndSec(c.section) - c.lenSec, c.prevChipStartSec ?? -Infinity, c.trimStartSec)
 }
@@ -139,6 +149,20 @@ const FILE_CLOCK: TimelineLayout = buildTimelineLayout("dubbing", [], [])
 
 type Timing = "source" | "recordings"
 const timingOf = (layout: TimelineLayout): Timing => (layout.mode === "audioFirst" ? "recordings" : "source")
+
+/**
+ * The place to store for a clip start at `anchorSec`, in ms from its line's
+ * start, in `layout`'s timing. Following the source it is never before the
+ * start of the file (`targetOffsetMsFor`). AQU-2432: following the recordings
+ * the file's clock means nothing — a take pulled back over the take before it
+ * can sit further before its line than its line is from the file's start.
+ */
+function placeMsFor(layout: TimelineLayout, cell: CellData, anchorSec: number): number {
+  if (layout.mode !== "audioFirst") return targetOffsetMsFor(cell, anchorSec)
+  const timed = typeof cell.startTime === "number" && Number.isFinite(cell.startTime)
+  const ms = Math.round(anchorSec * 1000) - (timed ? Math.round(cell.startTime! * 1000) : 0)
+  return ms === 0 ? 0 : ms
+}
 
 /**
  * The take's place in one timing as that timing reads it NOW, in ms — for a
@@ -185,9 +209,11 @@ export function movedStartSec(
   const i = chips.findIndex((c) => isTake(c.take))
   if (i < 0) return null
   const chip = chips[i]
+  const bounds = layout.moveBounds(cell, cell.attachments?.[audioId], audioId)
   return clampMoveStart(chip.start + deltaSec, {
     free: layout.mode === "audioFirst" && layout.takeRole(cell, audioId) !== "layer",
-    lineStartSec: layout.programme?.byCellId.get(cell.id)?.startSec ?? null,
+    floorSec: bounds?.floorSec ?? null,
+    ceilSec: bounds?.ceilSec ?? null,
     section: chip.section,
     lenSec: chip.end - chip.start,
     prevChipStartSec: chips[i - 1]?.start ?? null,
@@ -211,7 +237,7 @@ export function placeAfterMoveMs(
   const start = movedStartSec(layout, track, take, deltaSec)
   if (start == null) return null
   const anchor = layout.retimeAnchorSec(take.cell, take.cell.attachments?.[take.audioId], start, take.audioId)
-  return anchor == null ? null : targetOffsetMsFor(take.cell, anchor)
+  return anchor == null ? null : placeMsFor(layout, take.cell, anchor)
 }
 
 export interface MovedTake {
@@ -246,8 +272,8 @@ export function movedTakePlace(args: {
   const to = here.retimeAnchorSec(cell, att, args.toStartSec, audioId)
   const from = here.retimeAnchorSec(cell, att, args.fromStartSec, audioId)
   if (to == null || from == null) return null
-  const hereMs = targetOffsetMsFor(cell, to)
-  const deltaMs = hereMs - targetOffsetMsFor(cell, from)
+  const hereMs = placeMsFor(here, cell, to)
+  const deltaMs = hereMs - placeMsFor(here, cell, from)
   if (deltaMs === 0) return null
   const otherTiming: Timing = timingOf(here) === "source" ? "recordings" : "source"
   const other = args.other && timingOf(args.other) === otherTiming ? args.other : null

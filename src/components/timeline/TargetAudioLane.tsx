@@ -563,14 +563,22 @@ function TargetAudioChip({
       // line's own start, because a pause cannot be negative (dragging left
       // shortens it back to none and stops).
       //
+      // AQU-2432 (Sam, Nov 6): …and now past it, earlier, over the end of the
+      // take before it on this track, so one speaker can come in before the
+      // other has finished — up to that take's start, never past it (the two
+      // may overlap but never swap order); a piece of a cut take, between the
+      // pieces either side of it. The layout answers both (`moveBounds`).
+      //
       // AQU-2252: …except a take on a track made a layer, whose line does not
       // grow to hold it: every bound above applies to it, against its line.
       //
       // AQU-2267: the arithmetic is `clampMoveStart`, shared with the move's
       // other timing, which it carries the take into by the same distance.
+      const bounds = freeRules ? (layout?.moveBounds(cell, chipAtt, chip.item.audioId) ?? null) : null
       start = clampMoveStart(start, {
         free: freeRules,
-        lineStartSec: chip.slot?.startSec ?? null,
+        floorSec: bounds?.floorSec ?? chip.slot?.startSec ?? null,
+        ceilSec: bounds?.ceilSec ?? null,
         section,
         lenSec: len,
         prevChipStartSec: prevChip?.start ?? null,

@@ -658,6 +658,9 @@ export async function rehydrateShadowsFromOutbox(projectId: string, fileId: stri
       const url = payload.url
       const slot = payload.slot
       if (typeof audioId !== "string" || typeof url !== "string") continue
+      // AQU-2426 (review, Nov 9): a words-only re-attach adds no clip and
+      // chooses none, so it has nothing to show while it is queued.
+      if (payload.wordsOnly === true) continue
       // ANY non-empty slot. (AQU-646 stage 3)
       //
       // This used to accept only the two well-known names, which meant a

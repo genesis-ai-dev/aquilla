@@ -410,6 +410,9 @@ export interface OutboxEventPayloads {
     historyOnly?: boolean
     /** Audited missing-row repair; retain the original attach's creation time. */
     restoreProjectionOf?: string
+    /** AQU-2426 (review, Nov 9): adds what is known about a clip already on the
+     *  line (its words) and chooses nothing; see the sync-worker's copy. */
+    wordsOnly?: boolean
     url: string
     /** AQU-646: an OPEN string. `cell_audio.slot` is unconstrained TEXT, and an
      *  extra target-audio track addresses its takes by its own track id. The

@@ -597,6 +597,13 @@ export interface EventPayloads {
     historyOnly?: boolean
     /** Audited missing-row repair; retain the original attach's creation time. */
     restoreProjectionOf?: string
+    /**
+     * AQU-2426 (review, Nov 9): this re-attach only adds what is known about a
+     * clip already on the line (its words). It chooses nothing: no other clip
+     * in the slot is deselected, in any lane, and this clip's own selected and
+     * removed marks stay as they are.
+     */
+    wordsOnly?: boolean
     /** Open string (AQU-646): extra target tracks use the track id as the slot. */
     slot: string
     mimeType?: string

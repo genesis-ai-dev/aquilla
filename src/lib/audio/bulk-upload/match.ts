@@ -670,6 +670,9 @@ interface FileIndex {
   numbered: TargetLine[]
   /** Position of each line in `numbered`. */
   numberedPos: Map<string, number>
+  /** The one book every verse line's reference names ("JON"), when they all
+   *  name the same one: the book of a file that carries no book code. */
+  refBook: string | null
 }
 
 function indexFile(file: TargetFile): FileIndex {
@@ -677,10 +680,12 @@ function indexFile(file: TargetFile): FileIndex {
   const verses = new Map<string, TargetLine>()
   const chapters = new Map<number, TargetLine[]>()
   const verseLines: TargetLine[] = []
+  const refBooks = new Set<string>()
   for (const line of content) {
     const m = line.ref ? VERSE_REF.exec(line.ref) : null
     if (!m) continue
     verseLines.push(line)
+    refBooks.add(m[1])
     const chapter = Number(m[2])
     const from = Number(m[3])
     const to = m[5] ? Number(m[5]) : from
@@ -711,6 +716,7 @@ function indexFile(file: TargetFile): FileIndex {
     position: new Map(content.map((l, i) => [l.cellId, i])),
     numbered,
     numberedPos: new Map(numbered.map((l, i) => [l.cellId, i])),
+    refBook: refBooks.size === 1 ? [...refBooks][0] : null,
   }
 }
 
@@ -900,7 +906,11 @@ export function matchRecordings(
     // with a chapter and no verse is one recording for the whole chapter".
     // The lines decide only for a book whose chapter count isn't known.
     const onlyChapterHere = fi.chapters.size === 1 && fi.chapters.has(1)
-    const bookChapters = fi.file.bookCode ? LAST_VERSES[fi.file.bookCode]?.length : undefined
+    // AQU-2487 (review, Nov 9): a file with no book code (a sheet named
+    // "chapter one" whose lines are JON 1:1…) is still that book: its lines'
+    // references all name it, so its chapter count is known without guessing.
+    const chaptersOf = fi.file.bookCode ?? fi.refBook
+    const bookChapters = chaptersOf ? LAST_VERSES[chaptersOf]?.length : undefined
     const singleChapter = bookChapters != null ? bookChapters === 1 : onlyChapterHere
     // Outside a Bible book a name holds no book: "This is 12" is line 12, not
     // Isaiah. Inside one, a folder's number that is not one of the book's

@@ -556,6 +556,23 @@ describe("a number alone in a Bible book, decided by the count", () => {
     expect(assignments.map((a) => a.cellIds)).toEqual([1, 2, 3, 4, 5].map((v) => [`jon:1:${v}`]))
   })
 
+  // AQU-2487 (review, Nov 9): a file with no book code (a sheet named "chapter
+  // one") whose lines all carry JON references is still Jonah, a book of four
+  // chapters: "Jonah 1.wav" is the chapter there too.
+  it("a file with no book code takes its book from its lines' references", () => {
+    const sheet: TargetFile = { ...book("sheet", "JON", "chapter one", [17]), bookCode: null }
+    const sheetScope: MatchScope = { kind: "file", fileId: "sheet" }
+    const whole = run([audio("rec/Jonah 1.wav")], [sheet], sheetScope).assignments[0]
+    expect(whole.cellIds).toHaveLength(17)
+    const second = run([audio("rec/Jonah 2.wav")], [sheet], sheetScope).assignments[0]
+    expect(second.cellIds).toBeUndefined()
+    expect(second.reason).toBeDefined()
+    // Jude's one chapter, the same way: every number is a verse.
+    const jude: TargetFile = { ...book("j", "JUD", "letter", [25]), bookCode: null }
+    const five = run([audio("rec/Jude 5.wav")], [jude], { kind: "file", fileId: "j" }).assignments[0]
+    expect(five.cellIds).toEqual(["j:1:5"])
+  })
+
   it("when both counts fit, it can't tell", () => {
     // Three chapters of one verse each: three files fit both.
     const tiny = book("gen", "GEN", "Genesis", [1, 1, 1])

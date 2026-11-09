@@ -868,3 +868,75 @@ describe("where only the film plays, the film is the clock", () => {
     expect(getQueueProgress().currentTime).toBeCloseTo(7, 1)
   })
 })
+
+// AQU-2253 (review, Nov 9), finding 6: with nothing recorded, a change of
+// speed in the middle of a line left the playhead at the old speed until the
+// line's end while the film changed at once, so the film was pulled back (or
+// pushed on) to the playhead again and again. The playhead takes the new speed
+// at once, on every clock it can be held on.
+describe("a change of speed in the middle of a line with nothing to play", () => {
+  // Three stand-ins of 1.5 s: [0, 1.5), [1.5, 3), [3, 4.5).
+  const unrecorded = () => [line("b1"), line("b2"), line("b3")]
+
+  it("nothing recorded, a linked film: the playhead is the film's, so it is at the new speed at once", async () => {
+    const cells = unrecorded()
+    linkFilm(10, cells)
+    startQueue(ctxFor(cells), 0)
+    await wait(500)
+    expect(getQueueProgress().currentTime).toBeCloseTo(0.5, 1)
+    setQueueRate(2)
+    // Half a second at double speed is a second of film: 1.5 s, not 1.0 s.
+    await wait(500)
+    expect(getQueueProgress().currentTime).toBeCloseTo(1.5, 1)
+    await wait(500)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(2.5, 1)
+  })
+
+  it("the same with Skip lines with nothing to play off", async () => {
+    setSkipSilentLinesPref(false)
+    const cells = unrecorded()
+    linkFilm(10, cells)
+    startQueue(ctxFor(cells), 0)
+    await wait(500)
+    setQueueRate(2)
+    await wait(500)
+    expect(getQueueProgress().currentTime).toBeCloseTo(1.5, 1)
+  })
+
+  it("with no film, a line crossed in silence (the setting off) takes the new speed at once too", async () => {
+    setSkipSilentLinesPref(false)
+    startQueue(ctxFor(unrecorded()), 0)
+    await wait(500)
+    expect(getQueueProgress().currentTime).toBeCloseTo(0.5, 1)
+    setQueueRate(2)
+    await wait(300)
+    expect(getQueueProgress().currentTime).toBeCloseTo(1.1, 1)
+    // b1 ends 0.5 s after the change, not a full second after.
+    await wait(250)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    // And slower: b2's 1.5 s take 3 s from here.
+    setQueueRate(0.5)
+    await wait(2_000)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    await wait(1_100)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+  })
+
+  it("a silent line between recorded ones, under a film that follows the queue, takes the new speed at once", async () => {
+    setSkipSilentLinesPref(false)
+    // b1 recorded 2 s [0, 2); b2 a stand-in [2, 3.5); b3 recorded 1 s [3.5, 4.5).
+    const cells = [line("b1", 2_000), line("b2"), line("b3", 1_000)]
+    linkFilm(10, cells)
+    startQueue(ctxFor(cells), 0)
+    await wait()
+    el("b1")!.tick(2)
+    await wait(500)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    expect(getQueueProgress().filmClock).toBe(false)
+    expect(getQueueProgress().currentTime).toBeCloseTo(2.5, 1)
+    setQueueRate(2)
+    await wait(300)
+    expect(getQueueProgress().currentTime).toBeCloseTo(3.1, 1)
+  })
+})

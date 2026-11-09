@@ -427,7 +427,7 @@ export function setProgrammeFilm(film: ProgrammeFilm | null): void {
     // are for the moment not the run's (a line added, and the run's own list
     // arriving a beat later) changes nothing: the next word settles it.
     if (!film || progFilmEndSec > 0) {
-      progReenterFilmTail(true)
+      progReenterFilmTail()
       progFilmLineRecheck()
     }
   }
@@ -832,7 +832,10 @@ export function setQueueRate(rate: number): void {
   aimTakeEdge()
   // AQU-2253 (Sam, Nov 9): over a linked film's tail the clock is a held one,
   // armed at the old speed; the film has just changed speed, so it follows.
-  progReenterFilmTail()
+  // AQU-2253 (review, Nov 9): so does every held clock: a line crossed in
+  // silence or a take's pause kept the old speed to its end, while a film
+  // above it changed at once and was pulled back to the playhead.
+  progLeadRetime()
 }
 
 /** Set queue volume 0..1 (applies live + to subsequent tracks). An element
@@ -1532,11 +1535,12 @@ function progArmHold(
     if (progLead !== hold) return
     setProgress({ currentTime: progLeadNowSec(hold) })
   }, tickMs)
-  hold.timer = setTimeout(() => {
+  hold.end = () => {
     if (progLead !== hold) return
     progClearLead()
     onEnd()
-  }, Math.max(0, ((endSec - atSec) / rate) * 1000))
+  }
+  hold.timer = setTimeout(hold.end, Math.max(0, ((endSec - atSec) / rate) * 1000))
   progLead = hold
 }
 
@@ -1758,18 +1762,14 @@ function progFilmClockDone(lead: ProgLead, sec: number, over: boolean): void {
 
 /**
  * AQU-2253 (Sam, Nov 9): playing over a linked film's tail, the held clock was
- * armed for one speed and one end. A change of speed, or of the film (its
- * length arriving, or the film failing), re-enters the stretch from where the
- * clock is now, so the playhead goes on at the film's speed to the film's
- * end; with nothing left to run on over, the run ends here.
- * `filmWas`: the film itself changed, so the hold may have been the film's
- * even though the run no longer has one.
+ * armed for one end. A change of the film (its length arriving, or the film
+ * failing) re-enters the stretch from where the clock is now, so the playhead
+ * goes on to the film's end; with nothing left to run on over, the run ends
+ * here. (A change of speed re-times the hold in place: `progLeadRetime`.)
  */
-function progReenterFilmTail(filmWas = false): void {
+function progReenterFilmTail(): void {
   const lead = progLead
   if (!lead || lead.then !== "hold" || !progRunning()) return
-  // (A change of speed needs nothing where the film is the clock.)
-  if (!filmWas && (progFilmEndSec <= 0 || lead.film)) return
   const slots = programme?.slots ?? []
   const last = slots[slots.length - 1]
   if (!last || progIndex !== slots.length - 1) return
@@ -1873,6 +1873,9 @@ interface ProgLead {
   endSec: number
   timer: ReturnType<typeof setTimeout> | null
   ticker: ReturnType<typeof setInterval> | null
+  /** What `timer` runs when the hold is over (kept so a change of speed can
+   *  re-time it, `progLeadRetime`). */
+  end?: () => void
   /** AQU-2253 (review, Nov 9): the FILM is this hold's clock, not a timer
    *  (`progArmFilmClock`); `atSec` is then the clock, moved on by the film's
    *  reports. `sec`: the film's last report; `heardAt`: when it last moved;
@@ -1912,8 +1915,22 @@ function progArmLead(slot: ProgrammeSlot, atSec: number, explicit: boolean, then
     if (progLead !== lead) return
     setProgress({ currentTime: progLeadNowSec(lead) })
   }, 100)
-  lead.timer = setTimeout(() => progLeadEnd(lead), Math.max(0, ((endSec - atSec) / rate) * 1000))
+  lead.end = () => progLeadEnd(lead)
+  lead.timer = setTimeout(lead.end, Math.max(0, ((endSec - atSec) / rate) * 1000))
   progLead = lead
+}
+
+/** AQU-2253 (review, Nov 9): a held clock on a timer takes a change of speed
+ *  at once, from where it is, and ends when the new speed says. (Not the
+ *  film's clock, which is at whatever speed the film is.) */
+function progLeadRetime(): void {
+  const lead = progLead
+  if (!lead || lead.film || lead.timer == null || !lead.end) return
+  lead.atSec = progLeadNowSec(lead)
+  lead.startedAt = performance.now()
+  lead.rate = progress.rate || 1
+  clearTimeout(lead.timer)
+  lead.timer = setTimeout(lead.end, Math.max(0, ((lead.endSec - lead.atSec) / lead.rate) * 1000))
 }
 
 function progLeadEnd(lead: ProgLead): void {

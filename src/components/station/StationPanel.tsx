@@ -426,10 +426,21 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
     else if (k === " ") {
       if (spacebarShouldToggle(e.nativeEvent)) ed.togglePlay()
       else handled = false
-    } else if (letter === "k") void ed.keepSelection()
+    }
+    // AQU-2493 (review, Nov 9): K is the Keep button's key, so it follows the
+    // button: nothing on the imported source recording (listen only: its trim
+    // is what transcription reads as the speech bounds) and nothing for
+    // someone who may not change takes. The key still stops here.
+    else if (letter === "k") {
+      if (editable) void ed.keepSelection()
+    }
     else if ((k === "Backspace" || k === "Delete") && editable && !tooLong) ed.deleteSelection()
     else if (letter === "i" && editable && !tooLong && ed.sel) setInsertOpen(true)
-    else if (letter === "a") approve()
+    // AQU-2493 (review, Nov 9): the source recording shows no Approve button
+    // (it is never approved), so A does nothing on it either.
+    else if (letter === "a") {
+      if (!isSource) approve()
+    }
     else if (k === "=" || k === "+") ed.zoomBy(2)
     else if (k === "-") ed.zoomBy(0.5)
     else if (letter === "l") ed.toggleLoop()

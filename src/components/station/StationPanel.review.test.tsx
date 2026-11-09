@@ -158,3 +158,38 @@ describe("the Station's Save with inserted audio that can't be loaded again (fin
     expect(samples[RATE * 2]).toBeCloseTo(0.5)
   })
 })
+
+describe("the Station's K (Keep this) follows the Keep button (finding 10)", () => {
+  it("does nothing on the imported source recording, which opens to listen only", async () => {
+    const { host, lane } = await open(makeTake({ role: "source" } as never))
+    selectRange(lane, 1, 3)
+    expect(screen.getByTestId("station-selection")).toBeTruthy()
+    expect(screen.queryByTestId("station-keep")).toBeNull()
+    fireEvent.keyDown(screen.getByTestId("station"), { key: "k", code: "KeyK" })
+    await act(async () => {})
+    expect(host.trim).not.toHaveBeenCalled()
+    // The selection is still there to play and loop.
+    expect(screen.getByTestId("station-selection")).toBeTruthy()
+  })
+
+  it("does nothing for someone who may not change takes", async () => {
+    const { host, lane } = await open(makeTake(), { editable: false })
+    selectRange(lane, 1, 3)
+    fireEvent.keyDown(screen.getByTestId("station"), { key: "k", code: "KeyK" })
+    await act(async () => {})
+    expect(host.trim).not.toHaveBeenCalled()
+  })
+
+  it("still keeps the selection on a take you may change", async () => {
+    const { host, lane } = await open(makeTake())
+    selectRange(lane, 1, 3)
+    fireEvent.keyDown(screen.getByTestId("station"), { key: "k", code: "KeyK" })
+    await waitFor(() => expect(host.trim).toHaveBeenCalledWith("c331", "t2.webm", { trimStartMs: 1000, trimEndMs: 3000 }))
+  })
+
+  it("A does not approve the source recording, which is never approved", async () => {
+    const { host } = await open(makeTake({ role: "source" } as never))
+    fireEvent.keyDown(screen.getByTestId("station"), { key: "a", code: "KeyA" })
+    expect(host.vote).not.toHaveBeenCalled()
+  })
+})

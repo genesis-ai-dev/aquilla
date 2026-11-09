@@ -3,7 +3,7 @@
 // look at fewer of them.
 
 import { describe, expect, it } from "vitest"
-import { buildLayerSchedule, layerIndexAfter, layersDueAt, layersSoundIn, NO_LAYERS, type LayerSchedule } from "./play-queue-layers"
+import { buildLayerSchedule, layerIndexAfter, layersDueAt, layersSoundIn, lineTailAt, NO_LAYERS, type LayerSchedule } from "./play-queue-layers"
 import { buildProgramme } from "@/lib/timeline/programme"
 import type { CellData } from "@/hooks/useCells"
 
@@ -87,5 +87,34 @@ describe("the layer schedule (AQU-2252)", () => {
     expect(scheduleOf(unmeasured).layers).toHaveLength(0)
     expect(layersDueAt(NO_LAYERS, 3, 0.012)).toEqual([])
     expect(layersSoundIn(NO_LAYERS, 0, Infinity)).toBe(false)
+  })
+})
+
+// AQU-2432 (Sam, Nov 6): a line's own take that plays on past its line — the
+// line after it was pulled back over it — is in the schedule from its line's
+// end to its own, so a jump into that stretch plays it there.
+describe("a take that plays on past its line (AQU-2432)", () => {
+  const take = (id: string, mainMs: number, recordingsOffsetMs?: number): CellData => {
+    const mainId = `audio-${id}-1700000000-main.webm`
+    return {
+      id, fileId: "f1", original: `${id} words`, translated: "", medium: "text",
+      selectedAudioId: mainId,
+      attachments: { [mainId]: { type: "audio", url: `http://audio.test/${id}.webm`, slot: "recording", durationMs: mainMs, ...(recordingsOffsetMs != null ? { recordingsOffsetMs } : {}) } },
+    } as unknown as CellData
+  }
+
+  it("holds the end of the earlier take, on the main track, from where its line ends", () => {
+    const cells = [take("b1", 3000), take("b2", 2000, -1000)]
+    const s = buildLayerSchedule(buildProgramme(cells, { standInLenSec: () => 1 }), cells)
+    expect(s.layers).toHaveLength(1)
+    expect(s.layers[0]).toMatchObject({ cellId: "b1", slot: "recording", tail: true, startSec: 2, window: { start: 2, end: 3 } })
+    expect(s.layers[0].endSec).toBeCloseTo(3, 5)
+    expect(lineTailAt(s, "b1", 2)).toBe(s.layers[0])
+    expect(lineTailAt(s, "b2", 2)).toBeNull()
+  })
+
+  it("holds nothing for takes end to end", () => {
+    const cells = [take("b1", 3000), take("b2", 2000)]
+    expect(buildLayerSchedule(buildProgramme(cells, { standInLenSec: () => 1 }), cells)).toBe(NO_LAYERS)
   })
 })

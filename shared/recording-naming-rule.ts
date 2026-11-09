@@ -38,6 +38,9 @@ const MAX_PLACEHOLDERS = 6
 /** Text to ignore, at most twice a template: more makes a name slow to read. */
 const MAX_ANY = 2
 const MAX_BOOK_WORDS = 30
+/** Why an answer was refused, as told to the assistant on the one re-ask, is
+ *  never longer than this (AQU-2496). */
+export const MAX_REFUSAL_CHARS = 400
 
 /** One way the names are written, matched against the file name without its
  *  extension. Only the file name: the assistant is never shown the folders, so
@@ -83,6 +86,8 @@ const PLACEHOLDERS = {
 } as const
 export type Placeholder = keyof typeof PLACEHOLDERS
 
+const PLACEHOLDER_LIST = Object.keys(PLACEHOLDERS).map((name) => `{${name}}`).join(" ")
+
 function isPlaceholder(name: string): name is Placeholder {
   // Own keys only: "{constructor}" must never reach Object.prototype.
   return Object.hasOwn(PLACEHOLDERS, name)
@@ -118,11 +123,17 @@ type Kind = "literal" | "letters" | "digits" | "part" | "any"
  *   - any other placeholder twice: only one of its values could be used
  *     ("v{verse}-{verse}" kept the last verse of "v01-03"). A range is
  *     "{verse}-{toVerse}" (review, Oct 30).
- * A part run straight on to a number can only be its letter ("4a").
+ * A part run straight on to a number can only be its letter ("4a"), and that
+ * letter may be missing: "v{verse}{part}" fits "v01" as well as "v02a", so one
+ * template reads a folder that mixes whole verses and pieces (AQU-2496,
+ * review, Nov 9; before, "v01" needed a second template and was left unplaced).
+ *
+ * A refused template comes back as the reason, a clause the assistant is told
+ * when it is asked once more (`whyRuleRefused`).
  */
-function compilePart(raw: string): { re: RegExp; names: Placeholder[] } | null {
+function compilePart(raw: string): { re: RegExp; names: Placeholder[] } | string {
   const pattern = normalizeName(raw)
-  if (pattern.length === 0 || pattern.length > MAX_PATTERN) return null
+  if (pattern.length === 0 || pattern.length > MAX_PATTERN) return `a template must be 1 to ${MAX_PATTERN} characters long`
   const names: Placeholder[] = []
   let source = ""
   let last: Kind | null = null
@@ -131,45 +142,55 @@ function compilePart(raw: string): { re: RegExp; names: Placeholder[] } | null {
     const m = /^\{([a-zA-Z_]+)\}/.exec(rest)
     if (m) {
       const name = m[1]
-      if (!isPlaceholder(name)) return null
-      if (name !== "any" && names.includes(name)) return null
+      if (!isPlaceholder(name)) return `{${name}} is not a placeholder; the only placeholders are ${PLACEHOLDER_LIST}`
+      if (name !== "any" && names.includes(name)) return `{${name}} is used twice; only {any} may be used twice`
       const kind: Kind = name === "book" ? "letters" : name === "any" ? "any" : name === "part" ? "part" : "digits"
       if (last !== null && last !== "literal") {
-        if (last === kind || kind === "any" || last === "any") return null
-        if (kind === "part" && last === "letters") return null
-        if ((kind === "digits" || kind === "letters") && last === "part") return null
+        if (kind === "any" || last === "any") return "{any} can't sit right beside another placeholder; write the literal text that separates them, or use a second template"
+        if (last === kind) return kind === "digits" ? "two number placeholders sit side by side with no text between them" : "two placeholders of one kind sit side by side with no text between them"
+        if (kind === "part" && last === "letters") return "{part} can't come straight after {book}"
+        if ((kind === "digits" || kind === "letters") && last === "part") return "only literal text may come straight after {part}"
       }
       names.push(name)
-      source += kind === "part" && last === "digits" ? "([a-h])" : PLACEHOLDERS[name]
+      source += kind === "part" && last === "digits" ? "([a-h])?" : PLACEHOLDERS[name]
       last = kind
       rest = rest.slice(m[0].length)
       continue
     }
     const next = rest.search(/\{[a-zA-Z_]+\}/)
     const literal = next < 0 ? rest : rest.slice(0, next)
-    if (literal.includes("{") || literal.includes("}")) return null
+    if (literal.includes("{") || literal.includes("}")) return "braces are only for placeholders, written exactly as listed; a placeholder can't be optional or hold anything but its name"
     source += escapeLiteral(literal)
     last = "literal"
     rest = rest.slice(literal.length)
   }
-  if (names.length === 0 || names.length > MAX_PLACEHOLDERS) return null
-  if (names.filter((n) => n === "any").length > MAX_ANY) return null
+  if (names.length === 0) return "a template needs at least one placeholder"
+  if (names.length > MAX_PLACEHOLDERS) return `a template may use at most ${MAX_PLACEHOLDERS} placeholders`
+  if (names.filter((n) => n === "any").length > MAX_ANY) return `{any} may be used at most ${MAX_ANY} times in a template`
   try {
     return { re: new RegExp(`^${source}$`, "iu"), names }
   } catch {
-    return null
+    return "the template could not be read"
   }
 }
 
-export function compileTemplate(template: NameTemplate): CompiledTemplate | null {
+/** A template compiled, or why it can't be. */
+function compileOrWhy(template: NameTemplate): CompiledTemplate | string {
   // A template read off any other shape (a folder from an older answer) is
   // nothing this app can apply.
-  if (Object.keys(template).some((key) => key !== "pattern")) return null
+  if (Object.keys(template).some((key) => key !== "pattern")) return "a template holds only its \"pattern\""
   const name = compilePart(template.pattern)
-  if (!name) return null
+  if (typeof name === "string") return name
   // A range's end needs its start, read as a chapter's verse.
-  if (name.names.includes("toVerse") && (!name.names.includes("verse") || name.names.includes("verseInBook"))) return null
+  if (name.names.includes("toVerse") && (!name.names.includes("verse") || name.names.includes("verseInBook"))) {
+    return "{toVerse} needs {verse} in the same template, and can't be used with {verseInBook}"
+  }
   return { re: name.re, names: name.names }
+}
+
+export function compileTemplate(template: NameTemplate): CompiledTemplate | null {
+  const compiled = compileOrWhy(template)
+  return typeof compiled === "string" ? null : compiled
 }
 
 const compiledRules = new WeakMap<NamingRule, CompiledTemplate[]>()
@@ -241,6 +262,39 @@ export function parseNamingRule(value: unknown): NamingRule | null {
   } catch {
     return null
   }
+}
+
+/**
+ * AQU-2496 (review, Nov 9): why `parseNamingRule` refused an answer, in a
+ * sentence the assistant is told when it is asked once more. Without it the
+ * same question got the same unusable answer every time. Call it only for an
+ * answer `parseNamingRule` refused. Never throws, and never longer than
+ * MAX_REFUSAL_CHARS.
+ */
+export function whyRuleRefused(value: unknown): string {
+  let why: string
+  try {
+    why = refusal(value)
+  } catch {
+    why = "The answer was not in the format asked for."
+  }
+  return why.slice(0, MAX_REFUSAL_CHARS)
+}
+
+function refusal(value: unknown): string {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "The answer was not one JSON object in the format asked for."
+  const templates = (value as Record<string, unknown>).templates
+  if (!Array.isArray(templates) || templates.length < 1) return "The answer had no \"templates\" list."
+  if (templates.length > 2) return `The answer had ${templates.length} templates, and at most two are allowed.`
+  for (const t of templates as unknown[]) {
+    if (!t || typeof t !== "object" || Array.isArray(t)) return "Each template must be {\"pattern\": string}."
+    const { pattern, folder } = t as Record<string, unknown>
+    if (typeof pattern !== "string") return "Each template must be {\"pattern\": string}."
+    if (folder !== undefined && folder !== null && (typeof folder !== "string" || folder.trim())) return "A template is about the file name only, never its folder."
+    const compiled = compileOrWhy({ pattern })
+    if (typeof compiled === "string") return `The template ${JSON.stringify(pattern.slice(0, MAX_PATTERN))} can't be used: ${compiled}.`
+  }
+  return "The templates were usable, but \"books\", \"book\", \"chapter\", \"file\" or \"explanation\" was not in the format asked for."
 }
 
 function parse(value: unknown): NamingRule | null {

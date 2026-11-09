@@ -424,6 +424,15 @@ export function RecordingsReview({
         names: sampleNames(retryOf ? retryOf.failures.map((f) => f.name) : eligible.map((i) => inputs[i].name)),
         outline: projectOutline(projectFileInfos(projectFiles, new BookNameIndex())),
         ...(retryOf ? { previous: retryOf.first.rule, failures: retryOf.failures } : {}),
+        // AQU-2496 (review, Nov 9): an answer the server refuses with a
+        // reason is asked about once more, with the reason, while one of the
+        // folder's two calls is left.
+        anotherCall: () => {
+          if (callCount.current >= MAX_ASSISTANT_CALLS) return false
+          callCount.current += 1
+          setCallsMade(callCount.current)
+          return true
+        },
         signal: controller.signal,
       })
       if (controller.signal.aborted) return

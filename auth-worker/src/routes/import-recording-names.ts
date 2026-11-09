@@ -41,8 +41,10 @@ import { logVendorTimeout, vendorDeadline, vendorTimeoutMessage } from "../../..
 import {
   isSavableRule,
   MAX_OUTLINE_CHARS,
+  MAX_REFUSAL_CHARS,
   MAX_RULE_NAMES,
   parseNamingRule,
+  whyRuleRefused,
   type NamingRule,
   type ProjectBooks,
 } from "../../../shared/recording-naming-rule"
@@ -85,6 +87,9 @@ const ruleRequestSchema = z.object({
   /** The retry: the rule that was tried, and only the names it failed on. */
   previous: ruleField.optional(),
   failures: z.array(failureSchema).max(MAX_RULE_NAMES).optional(),
+  /** AQU-2496 (review, Nov 9): why the last answer for these names was
+   *  refused (this route's own `reason`), sent back for the one re-ask. */
+  refused: z.string().trim().min(1).max(MAX_REFUSAL_CHARS).optional(),
 })
 
 const shapesSchema = z.array(z.string().min(1).max(255)).min(1).max(MAX_SHAPES_PER_SAVE)
@@ -121,6 +126,13 @@ export function promptFor(input: z.output<typeof ruleRequestSchema>): Array<{ ro
     "A template is the file name WITHOUT its extension, written as literal text plus placeholders: {book} {chapter} {verse} {toVerse} {verseInBook} {line} {take} {part} {any}.",
     "{toVerse} is the last verse of a recording that covers several verses, after {verse} (\"v01-03\" is \"v{verse}-{toVerse}\"). {verseInBook} is a verse counted from the book's first verse. {line} is a line's position in a document. {any} is text to ignore.",
     "Use each placeholder at most once in a template ({any} may appear twice). Never put two number placeholders side by side without text between them.",
+    // AQU-2496 (review, Nov 9): a folder mixing "v01" with "v02a" and "v02b"
+    // failed every time. Nothing said what {part} and {take} are, that a
+    // placeholder can't be optional, or that {any} can't touch another one.
+    "{part} is a piece of one line recorded in several files: one or two digits, or a letter a to h (\"v02a\" and \"v02b\" are \"v{verse}{part}\"; \"v02_p1\" is \"v{verse}_p{part}\"). {take} is the number of a retake of the same line (\"v02_take3\" is \"v{verse}_take{take}\").",
+    "Write a placeholder exactly as listed. A placeholder is never optional: there is no \"{part?}\", and no placeholder but the ones listed. The one exception: a {part} letter written straight after a number may be missing, so \"v{verse}{part}\" fits both \"v01\" and \"v02a\".",
+    "When some names have a piece or a take and others don't, and it isn't that letter, use two templates: one with the placeholder and one without (\"v{verse}_p{part}\" and \"v{verse}\").",
+    "{any} can never sit right beside another placeholder: write the literal text that separates them.",
     "\"books\" maps a book word used in the names to the USFM code of the book that word names (\"Mt\": \"MAT\"), from the outline. \"book\" and \"chapter\" are constants for when the names never say them. \"file\" names the project file when the recordings are for a document, not a Bible book.",
     "Use at most two templates. \"explanation\" is one plain sentence a person reads, saying what each part of the names means.",
     "Each file name below is a JSON string.",
@@ -137,6 +149,12 @@ export function promptFor(input: z.output<typeof ruleRequestSchema>): Array<{ ro
           "<failed-names>",
           ...input.failures.map((f) => `${JSON.stringify(f.name)} → ${f.made != null ? JSON.stringify(f.made) : "no template fitted"} (${JSON.stringify(f.reason)})`),
           "</failed-names>",
+        ]
+      : []),
+    ...(input.refused
+      ? [
+          "Your last answer for these names was refused, for the reason below (a JSON string). Return a rule that avoids it.",
+          `<refused-because>${JSON.stringify(input.refused)}</refused-because>`,
         ]
       : []),
   ].join("\n")
@@ -248,10 +266,12 @@ names.post("/recording-names", authMiddleware, zValidator("json", ruleRequestSch
     try {
       decoded = JSON.parse(stripCodeFence(content))
     } catch {
-      return c.json({ error: "invalid_naming_rule", message: "The assistant's answer wasn't readable." }, 502)
+      return c.json({ error: "invalid_naming_rule", message: "The assistant's answer wasn't readable.", reason: "The answer was not valid JSON. Return the JSON object only." }, 502)
     }
     const rule = parseNamingRule(decoded)
-    if (!rule) return c.json({ error: "invalid_naming_rule", message: "The assistant's rule wasn't usable." }, 502)
+    // AQU-2496 (review, Nov 9): the refusal says why, so the browser can ask
+    // once more with the reason instead of getting the same answer again.
+    if (!rule) return c.json({ error: "invalid_naming_rule", message: "The assistant's rule wasn't usable.", reason: whyRuleRefused(decoded) }, 502)
     if (!usage) {
       const cost = typeof data.usage?.cost === "number" && data.usage.cost > 0 ? data.usage.cost * 100 : 1
       await recordCredit(c.env.AQUILLA_PG, orgId, user.id, "llm", cost, 1)

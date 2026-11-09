@@ -54,6 +54,9 @@ type Route = { method: string; url: string; body: Record<string, unknown> | null
 /** An answer that fails, and one that never comes until the request is aborted. */
 const FAIL = Symbol("fail")
 const HANG = Symbol("hang")
+/** An answer the server refuses, saying why (AQU-2496). */
+const REFUSED = Symbol("refused")
+const REFUSED_WHY = "The template \"{book}-ch{chapter}_v{verse}{any}\" can't be used: {any} can't sit right beside another placeholder."
 let calls: Route[] = []
 let answers: unknown[] = []
 let saved: Record<string, unknown> = {}
@@ -98,6 +101,9 @@ beforeEach(() => {
         return new Promise<Response>((_, reject) => {
           init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")))
         })
+      }
+      if (answer === REFUSED) {
+        return new Response(JSON.stringify({ error: "invalid_naming_rule", reason: REFUSED_WHY }), { status: 502 })
       }
       if (answer === FAIL) {
         await new Promise((r) => setTimeout(r, 20))
@@ -283,6 +289,45 @@ describe("at most two calls for a folder (review, Oct 30)", () => {
     await waitFor(() => expect(asks()).toHaveLength(2))
     again.unmount()
     expect(asks()[1].signal?.aborted).toBe(true)
+  })
+})
+
+// AQU-2496 (review, Nov 9): an answer the server refused came back the same
+// however often it was asked for, so a folder mixing "v01" with "v02a" failed
+// every time. The refusal now says why, and the one re-ask carries the reason.
+describe("an answer the server refuses is asked about once more, with the reason", () => {
+  it("asks again on its own, sends the reason, and places the files by the second answer", async () => {
+    answers = [REFUSED, RULE]
+    review()
+    fireEvent.click(await enabledAsk())
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(3))
+    expect(asks()).toHaveLength(2)
+    expect(asks()[0].body).not.toHaveProperty("refused")
+    expect(asks()[1].body).toMatchObject({ names: NAMES, refused: REFUSED_WHY })
+    expect(asks()[0].headers.get("Idempotency-Key")).not.toBe(asks()[1].headers.get("Idempotency-Key"))
+    expect(screen.queryByTestId("recordings-assistant-problem")).toBeNull()
+  })
+
+  it("counts as the folder's second call: a second refusal ends it, and the offer doesn't come back", async () => {
+    answers = [REFUSED, REFUSED, RULE]
+    review()
+    fireEvent.click(await enabledAsk())
+    const problem = await screen.findByTestId("recordings-assistant-problem")
+    expect(problem).toHaveTextContent("The assistant couldn't work out the naming")
+    expect(problem).not.toHaveTextContent("Try again")
+    await settle()
+    expect(asks()).toHaveLength(2)
+    expect(screen.queryByTestId("recordings-assistant-ask")).toBeNull()
+  })
+
+  it("is never a third call after a retry: a refused retry leaves the first answer's files placed", async () => {
+    answers = [RULE, REFUSED, RULE]
+    review(["Mt-ch19_v01.ogg", "Mt-ch19_v02.ogg", "Mt-ch19_v99.ogg"])
+    fireEvent.click(await enabledAsk())
+    await waitFor(() => expect(asks()).toHaveLength(2))
+    await settle()
+    expect(asks()).toHaveLength(2)
+    expect(screen.getAllByTestId("recordings-row")).toHaveLength(2)
   })
 })
 

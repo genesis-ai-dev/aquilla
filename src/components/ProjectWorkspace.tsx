@@ -3728,6 +3728,8 @@ export function ProjectWorkspace() {
       revalidateCells()
       for (const id of touched) notifyAudioAttachmentsChanged(id)
     }
+    // AQU-2375 (review, Nov 9): the page is going; the next one carries it on.
+    if (report.interrupted) return
     showTranscribeRunEnd(report, { kind: o.kind, fileId: o.fileId, fileName: o.fileName, toastId: progress.id, quiet: o.quiet })
   }, [
     project, frontierSession, activeSourceLanguage, activeLaneTargetLanguage, activeLane,

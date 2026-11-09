@@ -114,7 +114,7 @@ import { batchAudioSeconds, zeroShotBatchCostLine } from "./zero-shot-batch"
 import { confirmZeroShotBatch } from "./omni-warmup-toast"
 import { audioIdSeededWith } from "./upload"
 import { getTranscribeStatus } from "./transcribe-status"
-import { startStoredTranscribeRun, type StoredTranscribeRun, type TranscribeRunHandle, type TranscribeRunKind } from "./transcribe-runs"
+import { pageIsLeaving, startStoredTranscribeRun, type StoredTranscribeRun, type TranscribeRunHandle, type TranscribeRunKind } from "./transcribe-runs"
 import { generateCellVoice } from "./voice-generate-helpers"
 import { ttsStatusKey, getTtsStatus } from "./tts"
 import type { ProjectRecord } from "@/lib/parsers/types"
@@ -232,6 +232,10 @@ export interface TranscribeRunReport {
   cancelled: boolean
   /** False when nothing ran at all. */
   started: boolean
+  /** AQU-2375 (review, Nov 9): the page went away mid-run (a reload). Nothing
+   *  failed and the run is still kept, for the next page to carry on; callers
+   *  say nothing. */
+  interrupted?: boolean
 }
 
 const NOTHING_RAN: TranscribeRunReport = { total: 0, transcribed: 0, failed: [], notRun: 0, cancelled: false, started: false }
@@ -338,7 +342,10 @@ export async function runTranscribeAll(args: TranscribeAllArgs): Promise<Transcr
   const noteRow = (cell: CellData, outcome: TranscribeRowOutcome) => {
     // Cancel ends a row that was waiting out the limit by throwing, which
     // the row reports as a failure; it was stopped, not failed.
-    const ended: TranscribeRowOutcome = outcome.kind === "failed" && _transcribeCancelFlag ? { kind: "skipped" } : outcome
+    // AQU-2375 (review, Nov 9): nor did a row fail whose request a reload cut
+    // off. Written down as failed, the run carried on would skip it and report
+    // "Failed to fetch"; unwritten, it is simply still to do.
+    const ended: TranscribeRowOutcome = outcome.kind === "failed" && (_transcribeCancelFlag || pageIsLeaving()) ? { kind: "skipped" } : outcome
     outcomes.set(cell.id, ended)
     kept?.row(cell.id, ended)
   }
@@ -407,7 +414,8 @@ export async function runTranscribeAll(args: TranscribeAllArgs): Promise<Transcr
       },
       {
         kind: "transcribe",
-        isCancelled: () => _transcribeCancelFlag,
+        // A page that is going sends nothing more.
+        isCancelled: () => _transcribeCancelFlag || pageIsLeaving(),
         weightOf,
         onItemDone: (job) => {
           // The per-cell badge handles its own state; this is for whoever is
@@ -420,8 +428,12 @@ export async function runTranscribeAll(args: TranscribeAllArgs): Promise<Transcr
   } finally {
     unpin()
     // Ended, cancelled or thrown: the run is over, so nothing carries it on.
-    kept?.end()
+    // AQU-2375 (review, Nov 9): unless the page is going. A reload fails the
+    // request in flight and script outlives it long enough to get here; ending
+    // the run then deleted the record the next page carries on from.
+    if (!pageIsLeaving()) kept?.end()
   }
+  const interrupted = pageIsLeaving()
 
   const failed: TranscribeRowFailure[] = [...priorFailed]
   let transcribed = priorDone
@@ -437,6 +449,7 @@ export async function runTranscribeAll(args: TranscribeAllArgs): Promise<Transcr
     notRun: Math.max(0, total - transcribed - failed.length),
     cancelled: _transcribeCancelFlag,
     started: true,
+    ...(interrupted ? { interrupted: true } : {}),
   }
 }
 

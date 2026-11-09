@@ -66,6 +66,25 @@ describe("dominantScript", () => {
 })
 
 describe("planCueLinks", () => {
+  it("pairs an imported film's lines on their words, not on the file name they all carry", () => {
+    const line = (id: string, start: number, end: number, words: string) => ({
+      ...cue(id, start, end, "Episode 101.mov"), medium: "media", transcription: words,
+    })
+    const plans = autoLinkable(planCueLinks({
+      textCells: [line("l1", 10, 12, "I see him."), line("l2", 14, 16, "Where is she going?")],
+      audioCues: [cue("cue-1", 10.1, 11.9, "I see him."), cue("cue-2", 14.1, 15.8, "Where is she going?")],
+    }))
+    expect(plans.map((p) => [p.textCellId, p.cueCellId])).toEqual([["l1", "cue-1"], ["l2", "cue-2"]])
+  })
+
+  it("a text line keeps pairing on its own text", () => {
+    const plans = autoLinkable(planCueLinks({
+      textCells: [{ ...cue("sub-1", 10, 12, "I see him."), medium: "text", transcription: "ignored words" }],
+      audioCues: [cue("cue-1", 10.1, 11.9, "I see him.")],
+    }))
+    expect(plans).toHaveLength(1)
+  })
+
   it("pairs a plain one-to-one line", () => {
     const plans = planCueLinks({
       textCells: [cue("sub-1", 10, 12, "I see him.")],

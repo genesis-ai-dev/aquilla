@@ -35,6 +35,21 @@ export interface LinkableCue {
   endTime?: number
   /** The cue's own words — subtitle text on one side, transcript on the other. */
   original?: string
+  /** A line of an imported recording or film says only the media's name in
+   *  `original`; its words are its transcription. */
+  medium?: string
+  transcription?: string
+}
+
+/**
+ * The words a line is paired on. A line of an imported recording or film
+ * (`medium: "media"`) carries the media's file name as its text, the same on
+ * every line; its words are in its transcription. Pairing on the name paired
+ * nothing on an imported film (import map, Nov 8).
+ */
+export function pairingWords(cell: Pick<LinkableCue, "original" | "medium" | "transcription">): string {
+  if (cell.medium === "media" && cell.transcription?.trim()) return cell.transcription
+  return cell.original ?? ""
 }
 
 /**
@@ -530,7 +545,7 @@ export function planCueLinks({ textCells, audioCues }: PlanCueLinksArgs): CueLin
   }
 
   for (const cue of cues) {
-    const cueText = cue.original ?? ""
+    const cueText = pairingWords(cue)
     const cueScript = dominantScript(cueText)
     for (const text of texts) {
       // Sorted by start, so once a subtitle begins after this cue ends, so does
@@ -541,7 +556,7 @@ export function planCueLinks({ textCells, audioCues }: PlanCueLinksArgs): CueLin
 
       const shorter = Math.min(cue.endTime - cue.startTime, text.endTime - text.startTime)
       const frac = shorter > 0 ? overlap / shorter : 0
-      const subtitleText = text.original ?? ""
+      const subtitleText = pairingWords(text)
       const subtitleScript = dominantScript(subtitleText)
 
       // Different writing systems: the words cannot be compared, so the spans
@@ -586,9 +601,9 @@ export function planCueLinks({ textCells, audioCues }: PlanCueLinksArgs): CueLin
   // judged against each other.
   claimWords(
     candidates,
-    new Map(texts.map((c) => [c.id, c.original ?? ""])),
-    new Map(cues.map((c) => [c.id, c.original ?? ""])),
-    distinctiveWords([...texts, ...cues].map((c) => c.original ?? "")),
+    new Map(texts.map((c) => [c.id, pairingWords(c)])),
+    new Map(cues.map((c) => [c.id, pairingWords(c)])),
+    distinctiveWords([...texts, ...cues].map((c) => pairingWords(c))),
   )
 
   // Returned in the order they were found — cue by cue, subtitle by subtitle —

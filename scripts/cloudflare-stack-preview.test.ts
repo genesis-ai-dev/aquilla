@@ -144,10 +144,15 @@ describe("full-stack Cloudflare previews", () => {
 
   it("preserves the sync Durable Object migration history", () => {
     const config = previewConfig("sync", { cwd: "/repo" })
-    expect(config.previews.durable_objects?.bindings).toEqual([{ name: "ProjectSync", class_name: "ProjectSync" }])
+    expect(config.previews.durable_objects?.bindings).toEqual([
+      { name: "ProjectSync", class_name: "ProjectSync" },
+      { name: "DriveFolderPoller", class_name: "DriveFolderPoller" },
+    ])
+    // Appended, never rewritten: a changed earlier tag fails the deploy.
     expect(config.migrations).toEqual([
       { tag: "v1", new_sqlite_classes: ["FileSync"] },
       { tag: "v2", new_sqlite_classes: ["ProjectSync"] },
+      { tag: "v3", new_sqlite_classes: ["DriveFolderPoller"] },
     ])
   })
 

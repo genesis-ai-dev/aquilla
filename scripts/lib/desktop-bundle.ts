@@ -203,7 +203,7 @@ export function parseSigningKey(value: string): SigningKeyParse {
     return { ok: false, reason: "contains literal \\n sequences; the PEM needs real line breaks" }
   }
   if (!/^-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(text)) {
-    return { ok: false, reason: "does not start with a -----BEGIN PRIVATE KEY----- line, so it is not a PEM" }
+    return { ok: false, reason: "does not start with a BEGIN PRIVATE KEY line, so it is not a PEM" }
   }
   if (!text.includes("\n")) {
     return { ok: false, reason: "is on a single line; the PEM's line breaks were lost in the paste" }
@@ -241,7 +241,7 @@ export function resolveSigningKey(
       error:
         `${SIGNING_KEY_ENV} is set but ${parsed.reason}. `
         + "Set the repo secret to the whole multi-line PKCS#8 PEM `pnpm desktop:bundle:keygen` prints, "
-        + "from -----BEGIN PRIVATE KEY----- to -----END PRIVATE KEY-----.",
+        + "from its BEGIN PRIVATE KEY line to its END PRIVATE KEY line.",
     }
   }
   if (dryRun) {

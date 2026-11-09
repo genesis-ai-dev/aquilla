@@ -184,6 +184,55 @@ describe("worker/index — routing", () => {
     expect(await res.text()).toBe("served:/__dev/login")
   })
 
+  // Soft-404 fix: unknown paths should return a real 404, not the SPA shell
+  it("GET /nonexistent-xyz returns 404 instead of the SPA shell", async () => {
+    const res = await fetchWorker("/nonexistent-xyz")
+    expect(res.status).toBe(404)
+    expect(res.headers.get("Content-Type")).toContain("text/plain")
+    expect(res.headers.get("Cache-Control")).toBe("no-store")
+    expect(await res.text()).not.toContain("<html")
+    expect(await res.text()).toBe("Page not found")
+  })
+
+  it("GET /fake-marketing-page returns 404 instead of the SPA shell", async () => {
+    const res = await fetchWorker("/fake-marketing-page")
+    expect(res.status).toBe(404)
+    expect(await res.text()).toBe("Page not found")
+  })
+
+  it("GET /blog/nonexistent returns 404 instead of the SPA shell", async () => {
+    const res = await fetchWorker("/blog/nonexistent")
+    expect(res.status).toBe(404)
+    expect(await res.text()).toBe("Page not found")
+  })
+
+  // Real SPA routes should still work with 200
+  it("known SPA routes still get the SPA shell with 200", async () => {
+    const knownRoutes = [
+      "/",
+      "/app",
+      "/onboarding",
+      "/login",
+      "/signup",
+      "/projects",
+      "/shared",
+      "/preferences",
+      "/orgs/abc123",
+      "/project/xyz/editor",
+      "/join/token123",
+      "/join-org/token456",
+      "/check/token789",
+      "/link/tokenabc",
+      "/approve/changeset123",
+      "/__dev/login",
+    ]
+    for (const path of knownRoutes) {
+      const res = await fetchWorker(path)
+      expect(res.status, `${path} should return 200`).toBe(200)
+      expect(await res.text(), `${path} should serve the path`).toContain(`served:${path}`)
+    }
+  })
+
   // AQU-1405: a chunk from a build that has been replaced must not come back as
   // the SPA shell with a 200 — the browser would try to parse HTML as a module
   // (and may cache it under the .js URL). The mock env answers text/html for

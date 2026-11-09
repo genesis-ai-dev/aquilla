@@ -76,6 +76,57 @@ export default {
   },
 }
 
+// Known SPA route patterns. Paths matching these should get the SPA shell with
+// a 200. Everything else gets a real 404. This fixes the soft-404 SEO issue
+// where crawlers see 200 for nonexistent paths (docs/specs/2026-07-31-marketing-app-namespace-design.md
+// lines 96-97, 182).
+//
+// Derived from src/App.tsx route table. Update this list when app routes change.
+const SPA_ROUTE_PATTERNS = [
+  "/",
+  "/app",
+  "/onboarding",
+  "/login",
+  "/signup",
+  "/reset-password",
+  "/verify-email",
+  "/connect-agent",
+  "/oauth/consent",
+  "/oauth/callback",
+  "/projects",
+  "/shared",
+  "/preferences",
+  "/billing/select",
+  "/admin",
+  "/debug",
+  "/this-computer",
+  "/paratext",
+  // Parametric routes
+  /^\/join\//,
+  /^\/join-org\//,
+  /^\/check\//,
+  /^\/link\//,
+  /^\/approve\//,
+  /^\/projects\//,
+  /^\/project\//,
+  /^\/orgs\//,
+  /^\/preferences\//,
+  /^\/billing\//,
+  /^\/paratext\//,
+  // Dev/marketing routes
+  /^\/__dev\//,
+  /^\/__marketing\//,
+]
+
+function isKnownSpaRoute(pathname: string): boolean {
+  return SPA_ROUTE_PATTERNS.some(pattern => {
+    if (typeof pattern === "string") {
+      return pathname === pattern
+    }
+    return pattern.test(pathname)
+  })
+}
+
 async function route(req: Request, env: Env): Promise<Response> {
   const url = new URL(req.url)
 
@@ -119,8 +170,18 @@ async function route(req: Request, env: Env): Promise<Response> {
     })
   }
 
-  // Everything else: hand off to the static-asset binding.
+  // Soft-404 fix: check if this path is a known SPA route. Unknown paths
+  // get a real 404 instead of the SPA shell with a 200, fixing the SEO issue
+  // where Google treats unknown paths returning 200 as soft-404s.
+  if (!isKnownSpaRoute(url.pathname)) {
+    return new Response("Page not found", {
+      status: 404,
+      headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
+    })
+  }
+
+  // Known SPA routes: hand off to the static-asset binding.
   // Workers `not_found_handling = "single-page-application"` rewrites
-  // unknown paths to index.html — React Router handles the rest.
+  // these to index.html — React Router handles the rest.
   return env.ASSETS.fetch(req)
 }

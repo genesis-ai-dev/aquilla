@@ -277,6 +277,10 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
   // only or everywhere it is placed (slice 6).
   const save = async (how: SaveHow) => {
     if (!ed.pcm || !unsaved || saving) return
+    // AQU-2493 (review, Nov 9): never while Record now counts in, records or
+    // finishes. The recording so far is only its drawing; a save then wrote a
+    // click and silence in its place and the recording itself was lost.
+    if (recording) return
     // AQU-2493 (review, Nov 9): inserted audio with no samples here (a draft
     // brought back after a reload, its file or recording gone from this
     // device, or not loaded again yet) would be saved as silence. Save waits,
@@ -495,6 +499,7 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
         places={placeLines}
         unsaved={unsaved}
         undoUnsaved={ed.undoUnsaved}
+        recording={recording}
         isSource={isSource}
         controlsInfo={editable}
         {...(unsaved
@@ -505,6 +510,7 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
                   places={placeLines}
                   openLine={line}
                   saving={saving}
+                  locked={recording}
                   onSave={(how) => void save(how)}
                   menuOpen={saveMenu}
                   onMenuOpen={setSaveMenu}
@@ -584,6 +590,7 @@ export function StationHeader({
   places,
   unsaved = false,
   undoUnsaved,
+  recording = false,
   isSource = false,
   notSaved,
   save,
@@ -597,6 +604,9 @@ export function StationHeader({
   /** Unsaved sound edits: it waits again (40b), and Undo takes them back first. */
   unsaved?: boolean
   undoUnsaved?(): boolean
+  /** AQU-2493 (review, Nov 9): Record now is counting in, recording or
+   *  finishing. Undo waits: it would take an edit out from under the take. */
+  recording?: boolean
   /** Q10: the imported source recording — named as the source, with no
    *  approval status (it is never approved) and no "placed on". */
   isSource?: boolean
@@ -640,13 +650,16 @@ export function StationHeader({
   // the line's text, timing and visibility are not the Station's to undo.
   const mine = useMemo(() => stationStepMatch(cellId, audioId), [cellId, audioId])
   const step = STATION_PICKS.undoButton === "project" ? (view.nextUndo ?? null) : view.canUndo ? newestMatchingStep(mine) : null
-  const canUndo = unsaved || step != null
-  const undoTip = unsaved
-    ? t("editor.station.undoUnsaved")
-    : step
-      ? t("editor.station.undoTip")
-      : t("editor.station.nothingToUndo")
+  const canUndo = !recording && (unsaved || step != null)
+  const undoTip = recording
+    ? t("editor.station.undoWhileRecording")
+    : unsaved
+      ? t("editor.station.undoUnsaved")
+      : step
+        ? t("editor.station.undoTip")
+        : t("editor.station.nothingToUndo")
   const undo = () => {
+    if (recording) return
     if (unsaved && undoUnsaved?.()) return
     if (!step) return
     void (STATION_PICKS.undoButton === "project" ? undoLast() : undoStepById(step.id)).then((r) => {

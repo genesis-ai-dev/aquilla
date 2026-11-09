@@ -12,6 +12,12 @@ const mocks = vi.hoisted(() => ({
   cached: new Map<string, Uint8Array>(),
   /** Ids whose read from that cache never comes back in the test. */
   slow: new Set<string>(),
+  /** Record now, as the Station's recorder reports it. */
+  rec: { phase: { kind: "idle" } as { kind: string; at?: number }, busy: false },
+}))
+vi.mock("./StationRecorder", () => ({
+  useStationRecorder: () => ({ ...mocks.rec, recording: mocks.rec.phase.kind === "recording", count: null, elapsedMs: 0, start() {}, stop() {}, keep() {}, again() {}, drop() {} }),
+  StationRecordBar: () => null,
 }))
 vi.mock("@/lib/station/load", () => ({
   // Five seconds of a ramp, so every sample says where it came from.
@@ -109,6 +115,7 @@ beforeEach(() => {
   localStorage.clear()
   mocks.cached.clear()
   mocks.slow.clear()
+  mocks.rec = { phase: { kind: "idle" }, busy: false }
   mocks.save.mockClear()
 })
 afterEach(() => __resetStationTargetForTests())
@@ -253,5 +260,39 @@ describe("a Station save holds the take's place when its Start moved with the ed
     seedDraft({ ops: [{ kind: "del", a: 2, b: 3 }], trim: { a: 1, b: -1 } })
     await open(placedTake())
     expect(await saved()).toMatchObject({ trimStartMs: 1000, targetOffsetMs: 10_000, recordingsOffsetMs: 500 })
+  })
+})
+
+describe("while Record now is running, Save and the Station's Undo wait (finding 15)", () => {
+  const unsavedDelete = () =>
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({ ops: [{ kind: "del", a: 2, b: 3 }], trim: null, sources: {}, undo: [{ ops: [], trim: null }], scope: "clip" }))
+
+  for (const kind of ["counting", "recording", "finishing"]) {
+    it(`Save does nothing and Undo is greyed while it is ${kind}`, async () => {
+      unsavedDelete()
+      mocks.rec = { phase: { kind, at: 1 }, busy: true }
+      await open(makeTake())
+      fireEvent.click(screen.getByTestId("station-save"))
+      await act(async () => {})
+      expect(mocks.save).not.toHaveBeenCalled()
+      expect((screen.getByTestId("station-save") as HTMLButtonElement).disabled).toBe(true)
+      expect((screen.getByTestId("station-save-more") as HTMLButtonElement).disabled).toBe(true)
+      const undo = screen.getByTestId("station-undo")
+      expect(undo.getAttribute("aria-disabled")).toBe("true")
+      expect(undo.getAttribute("aria-label")).toMatch(/Stop the recording first/)
+      fireEvent.click(undo)
+      // The unsaved delete is still there: Undo took nothing back mid-take.
+      expect(screen.getByTestId("station-not-saved")).toBeTruthy()
+    })
+  }
+
+  it("once the recording is stopped and waits for Keep, Save and Undo work again", async () => {
+    unsavedDelete()
+    mocks.rec = { phase: { kind: "pending", at: 1 }, busy: true }
+    await open(makeTake())
+    expect((screen.getByTestId("station-save") as HTMLButtonElement).disabled).toBe(false)
+    expect(screen.getByTestId("station-undo").getAttribute("aria-disabled")).toBe("false")
+    fireEvent.click(screen.getByTestId("station-save"))
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledTimes(1))
   })
 })

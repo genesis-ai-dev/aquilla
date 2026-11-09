@@ -10901,12 +10901,23 @@ export function ProjectWorkspace() {
     let toastId: string | null = null
     let first = true
     let title = t("editor.splitLines.importTranscribing", { name })
+    // AQU-2426 / AQU-2375 (review, Nov 9): the run's toast has a Cancel. The
+    // minute already sent finishes, then it stops and is parked.
+    const stop = new AbortController()
+    const cancelAction = {
+      children: t("common.cancel"),
+      onClick: () => {
+        stop.abort()
+        if (toastId !== null) toast.update(toastId, { type: "loading", title: t("audio.lineWords.stopping", { name }), description: undefined, actionProps: undefined })
+      },
+    }
     const show = (description?: string) => {
-      if (toastId === null) toastId = toast.add({ type: "loading", title, description, timeout: 0 })
+      if (stop.signal.aborted) return
+      if (toastId === null) toastId = toast.add({ type: "loading", title, description, timeout: 0, actionProps: cancelAction })
       else toast.update(toastId, { type: "loading", title, description })
     }
     const say = (content: { type: "success" | "error" | "info"; title: string; description?: string; timeout?: number; actionProps?: { children: string; onClick: () => void } }) => {
-      if (toastId !== null) toast.update(toastId, { description: undefined, ...content })
+      if (toastId !== null) toast.update(toastId, { description: undefined, actionProps: undefined, ...content })
       else toast.add(content)
     }
     // AQU-2426 (review, Nov 9): Import and transcribe… ends in a split. Someone
@@ -10925,6 +10936,7 @@ export function ProjectWorkspace() {
           ...(transcribeLanguageTag ? { languageTag: transcribeLanguageTag } : {}),
           purpose: o.purpose,
           identity: o.identity,
+          signal: stop.signal,
           ...(o.carryOn ? { carryOn: o.carryOn } : {}),
           onProgress: (done, total) => {
             title = first && o.carryOn
@@ -10946,8 +10958,9 @@ export function ProjectWorkspace() {
         const said = lineWordsToast(report, name)
         if (said) {
           // The line keeps the words it has; the run keeps them for Retry.
+          // (Stopped by Cancel: the run keeps them, the line is left alone.)
           handle?.park()
-          await keepWordsOnLine(o.line, report.text)
+          if (!report.cancelled) await keepWordsOnLine(o.line, report.text)
           say({
             type: said.type,
             title: said.title,

@@ -103,6 +103,17 @@ export function transcribeRunProgressTitle(opts: {
  */
 export function lineWordsToast(report: LineWordsReport, name: string): TranscribeRunToast | null {
   if (report.done >= report.total) return null
+  // AQU-2426 / AQU-2375 (review, Nov 9): stopped with its Cancel. Nothing
+  // failed, and nothing was written to the line: the words so far wait in the
+  // kept run for whoever transcribes the rest.
+  if (report.cancelled) {
+    return {
+      type: "info",
+      title: t("audio.lineWords.stopped", { done: report.done, count: report.total, name }),
+      description: t("audio.lineWords.stoppedKept"),
+      retryLabel: t("audio.lineWords.transcribeRest"),
+    }
+  }
   const missing = report.total - report.done
   const reason = report.failed[0]?.message ?? ""
   const retryLabel = t("audio.transcribeRun.retry", { count: missing })

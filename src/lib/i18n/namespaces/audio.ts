@@ -524,6 +524,13 @@ export const audio = defineNamespace({
       other: "Transcribed {done} of {count} minutes of \"{name}\".",
     }),
     "audio.lineWords.staysWhole": "It stays one line, with the words it has, until every minute is transcribed.",
+    "audio.lineWords.stopping": "Stopping \"{name}\" after this minute…",
+    "audio.lineWords.stopped": plural({
+      one: "Stopped transcribing \"{name}\" — {done} of {count} minute done.",
+      other: "Stopped transcribing \"{name}\" — {done} of {count} minutes done.",
+    }),
+    "audio.lineWords.stoppedKept": "It is still one line. The words so far are kept, so transcribing it again sends only the rest.",
+    "audio.lineWords.transcribeRest": "Transcribe the rest",
     "audio.lineWords.readyAfterReload":
       "Finished transcribing \"{name}\" after the page reloaded. Its words are on the line, and Split into lines… › At sentences, with words uses them at no cost.",
     "audio.lineWords.dialogPartial": plural({
@@ -2897,6 +2904,33 @@ export const audio = defineNamespace({
           "Line under a transcription toast: the recording is not cut into lines yet. It " +
           "stays one line and keeps the words that were transcribed; Retry transcribes the " +
           "minutes still missing.",
+      },
+      "audio.lineWords.stopping": {
+        description:
+          "Progress toast title right after someone pressed Cancel on a recording that is " +
+          "being transcribed a minute at a time. The minute already sent finishes, then it stops.",
+        placeholders: { name: "The recording's file name." },
+      },
+      "audio.lineWords.stopped": {
+        description:
+          "Toast title after someone cancelled the transcription of a recording part-way. " +
+          "The recording was not cut into lines.",
+        placeholders: {
+          name: "The recording's file name.",
+          done: "How many minutes were transcribed before it was stopped.",
+          count: "How many minutes the recording has (rounded up).",
+        },
+      },
+      "audio.lineWords.stoppedKept": {
+        description:
+          "Line under the 'Stopped transcribing' toast title: the recording is still one line, " +
+          "and the minutes already transcribed are remembered so they are not paid for twice.",
+      },
+      "audio.lineWords.transcribeRest": {
+        description:
+          "Button on the 'Stopped transcribing' toast: transcribes the minutes that were not " +
+          "done before Cancel was pressed.",
+        maxLength: 28,
       },
       "audio.lineWords.readyAfterReload": {
         description:

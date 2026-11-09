@@ -8,7 +8,8 @@
 //   • At sentences, with words shows what it will cost first; its button
 //     transcribes, then the preview shows the cuts at sentence ends and each
 //     line's words. Cancel after that keeps the words on the line (they were
-//     paid for); nothing is split.
+//     paid for); nothing is split. Cancel while it is still transcribing
+//     stops it: no further minute is sent, and nothing is written.
 //   • Someone who may not transcribe sees At sentences greyed, with a click (i)
 //     saying what it does and why it isn't available here.
 //   • A translation or takes already on the line stay on the first new line,
@@ -182,6 +183,11 @@ export function SplitIntoLinesDialog(props: SplitIntoLinesDialogProps) {
   const partialText = useRef("")
   /** The kept run behind the words shown: dropped once they are split. */
   const keptRunId = useRef<string | null>(null)
+  // AQU-2426 / AQU-2375 (review, Nov 9): Cancel stops a transcription that is
+  // still running, as does the dialog going away. It used to close and leave
+  // every remaining minute to be sent and charged with nothing on screen.
+  const stopRun = useRef<AbortController | null>(null)
+  useEffect(() => () => stopRun.current?.abort(), [])
 
   useEffect(() => {
     let live = true
@@ -211,6 +217,7 @@ export function SplitIntoLinesDialog(props: SplitIntoLinesDialogProps) {
   }
   const close = () => {
     closed.current = true
+    stopRun.current?.abort()
     if (words) keepWordsOnce(words.text)
     else if (partialText.current) keepWordsOnce(partialText.current)
     props.onClose()
@@ -219,12 +226,15 @@ export function SplitIntoLinesDialog(props: SplitIntoLinesDialogProps) {
   const transcribe = async () => {
     setTranscribing("running")
     setTranscribeError(null)
+    const stop = new AbortController()
+    stopRun.current = stop
     try {
       // A minute at a time, kept as it lands (line-words-run.ts); a kept run
       // on this stretch is taken over, so only what is missing is sent.
       const { report, handle } = await runLineWords({
         audio, session, ...(languageTag ? { languageTag } : {}),
         purpose: "dialog",
+        signal: stop.signal,
         ...(props.keepAs ? { identity: { cellId: props.keepAs.cellId, audioId: props.keepAs.audioId, name: props.keepAs.fileName } } : {}),
         onRateLimited: async (sec) => {
           setTranscribing("waiting")
@@ -237,6 +247,9 @@ export function SplitIntoLinesDialog(props: SplitIntoLinesDialogProps) {
       // Parked either way: nothing runs now, and the words wait for a split.
       handle?.park()
       keptRunId.current = report.runId
+      // Stopped by Cancel with minutes still to do: nothing is written to the
+      // line. The parked run keeps the words, so the next try sends the rest.
+      if (report.cancelled) return
       if (report.done < report.total) {
         // Some minutes failed: no preview, and the words so far stay put.
         partialText.current = report.text

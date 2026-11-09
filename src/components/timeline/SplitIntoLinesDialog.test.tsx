@@ -141,6 +141,30 @@ describe("Split into lines… (AQU-2426)", () => {
     expect(props.onKeepWords).toHaveBeenCalledWith("First.")
   })
 
+  // AQU-2426 / AQU-2375 (review, Nov 9): Cancel stops a transcription that is
+  // still running. It used to close the dialog and send every other minute
+  // unseen, then write the whole text to the line.
+  it("Cancel while it transcribes stops the run: no more minutes are sent and nothing is written", async () => {
+    const pcm = new Float32Array(150 * PCM_RATE)
+    for (let i = 0; i < pcm.length; i++) pcm[i] = 0.4 * Math.sin(i / 5)
+    vi.mocked(loadLinePcm).mockResolvedValue(pcm)
+    let finishFirst: (v: { words: never[]; text: string }) => void = () => {}
+    transcribeLineWords.mockImplementationOnce(() => new Promise((resolve) => { finishFirst = resolve }))
+    transcribeLineWords.mockResolvedValue({ words: [], text: "more." })
+    const props = renderDialog({
+      initialMode: "sentences", durationMs: 150_000, endMs: 150_000,
+      audio: { projectId: "p", fileId: "f", url: "frontier-audio://p/f/clip.m4a", lo: 0, hi: 150_000 },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Transcribe and preview" }))
+    await waitFor(() => expect(transcribeLineWords).toHaveBeenCalledTimes(1))
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(props.onClose).toHaveBeenCalled()
+    finishFirst({ words: [], text: "First minute." })
+    await new Promise((r) => setTimeout(r, 20))
+    expect(transcribeLineWords).toHaveBeenCalledTimes(1)
+    expect(props.onKeepWords).not.toHaveBeenCalled()
+  })
+
   it("someone who may not transcribe sees At sentences greyed, with the reason behind a click", async () => {
     renderDialog({ block: { kind: "import", floor: 600 }, initialMode: "sentences" })
     expect(await screen.findByTestId("split-preview")).toBeInTheDocument()

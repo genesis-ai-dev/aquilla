@@ -61,6 +61,10 @@ export interface LineWordsReport {
    *  left as it is for the next page to carry on. Callers neither park it
    *  nor say anything. */
   interrupted?: boolean
+  /** AQU-2426 / AQU-2375 (review, Nov 9): the person stopped it with minutes
+   *  still to do. Nothing failed; the caller parks the run, so the words paid
+   *  for are kept and the next run on the line sends only the rest. */
+  cancelled?: boolean
 }
 
 export interface LineWordsRun {
@@ -105,12 +109,29 @@ export interface RunLineWordsArgs {
   onProgress?: (done: number, total: number) => void
   /** The hosted limit refused a request: wait this long, then it is sent again. */
   onRateLimited?: (retryAfterSeconds: number) => Promise<void>
+  /**
+   * AQU-2426 / AQU-2375 (review, Nov 9): Cancel. Once aborted, no further
+   * minute is sent and a wait at the hosted limit ends at once. The minute
+   * already with the service finishes (it is paid for) and its words are kept.
+   */
+  signal?: AbortSignal
   /** @internal test seams. */
   deps?: {
     transcribe?: typeof transcribeLineWords
     loadPcm?: typeof loadLinePcm
     newId?: () => string
   }
+}
+
+/** `wait`, or a rejection the moment `signal` aborts, whichever is first. */
+function endOnAbort(wait: Promise<void>, signal: AbortSignal | undefined): Promise<void> {
+  if (!signal) return wait
+  if (signal.aborted) return Promise.reject(new Error("cancelled"))
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = () => reject(new Error("cancelled"))
+    signal.addEventListener("abort", onAbort, { once: true })
+    wait.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort))
+  })
 }
 
 function newRunId(): string {
@@ -182,6 +203,12 @@ export async function runLineWords(args: RunLineWordsArgs): Promise<LineWordsRun
   let inARow = 0
   let stopReason: string | null = null
   let interrupted = false
+  let cancelled = false
+  const stopped = () => args.signal?.aborted === true
+  // A wait at the limit ends with Cancel, and the request is not sent again.
+  const onRateLimited = args.onRateLimited
+    ? (sec: number) => endOnAbort(args.onRateLimited!(sec), args.signal)
+    : undefined
   for (let i = 0; i < total; i++) {
     const key = lineWindowKey(i)
     if (line.words[key]) continue
@@ -189,13 +216,17 @@ export async function runLineWords(args: RunLineWordsArgs): Promise<LineWordsRun
       failed.push({ key, message: stopReason })
       continue
     }
+    if (stopped()) {
+      cancelled = true
+      break
+    }
     const win = line.windows[i]!
     try {
       const got = await transcribe({
         line: { ...audio, lo: win.lo, hi: win.hi },
         session: args.session,
         ...(tag ? { languageTag: tag } : {}),
-        ...(args.onRateLimited ? { onRateLimited: args.onRateLimited } : {}),
+        ...(onRateLimited ? { onRateLimited } : {}),
       })
       // The window's words are from ITS start; the line's are from the line's.
       const shift = (win.lo - audio.lo) / 1000
@@ -207,6 +238,11 @@ export async function runLineWords(args: RunLineWordsArgs): Promise<LineWordsRun
       // A request cut off because the page is going: not a failed minute.
       if (pageIsLeaving()) {
         interrupted = true
+        break
+      }
+      // Stopped while it waited at the limit: not a failed minute either.
+      if (stopped()) {
+        cancelled = true
         break
       }
       const message = err instanceof Error ? err.message : String(err)
@@ -222,6 +258,7 @@ export async function runLineWords(args: RunLineWordsArgs): Promise<LineWordsRun
     report: {
       total, done: doneCount(), failed, words: all.words, text: all.text, runId: handle?.id ?? null,
       ...(interrupted ? { interrupted: true } : {}),
+      ...(cancelled ? { cancelled: true } : {}),
     },
     handle,
   }

@@ -529,7 +529,7 @@ describe("runTranscribeAll reports each row (AQU-2375)", () => {
   it("carries a stopped run on: counts what landed before, and reports the whole run", async () => {
     const { transcribeCellOutcome } = await import("./transcribe")
     vi.mocked(transcribeCellOutcome).mockResolvedValue({ kind: "done", words: 2 })
-    const handle = { id: "run-1", row: vi.fn(), end: vi.fn() }
+    const handle = { id: "run-1", row: vi.fn(), end: vi.fn(), park: vi.fn() }
     const stored = {
       id: "run-1", projectId: "p1", fileId: "f1", fileName: "a.mp3", kind: "all" as const,
       cellIds: ["c1", "c2", "c3", "c4"], doneIds: ["c1"], failed: [{ cellId: "c2", message: "HTTP 500" }],

@@ -512,6 +512,24 @@ export const audio = defineNamespace({
       one: "Retry {count}",
       other: "Retry the {count}",
     }),
+    // AQU-2426 × AQU-2375: one line's words (Import and transcribe…, Split
+    // into lines… › At sentences, with words), a window of at most a minute
+    // at a time, kept as they land.
+    "audio.lineWords.progress": plural({
+      one: "Transcribing \"{name}\" to find its lines — {done} of {count} minute…",
+      other: "Transcribing \"{name}\" to find its lines — {done} of {count} minutes…",
+    }),
+    "audio.lineWords.partial": plural({
+      one: "Transcribed {done} of {count} minute of \"{name}\".",
+      other: "Transcribed {done} of {count} minutes of \"{name}\".",
+    }),
+    "audio.lineWords.staysWhole": "It stays one line, with the words it has, until every minute is transcribed.",
+    "audio.lineWords.readyAfterReload":
+      "Finished transcribing \"{name}\" after the page reloaded. Its words are on the line, and Split into lines… › At sentences, with words uses them at no cost.",
+    "audio.lineWords.dialogPartial": plural({
+      one: "{done} of {count} minute is transcribed. The rest couldn't be: {reason} Transcribing again sends only the rest; the words so far stay on the line.",
+      other: "{done} of {count} minutes are transcribed. The rest couldn't be: {reason} Transcribing again sends only the rest; the words so far stay on the line.",
+    }),
 
     // BatchVoiceDialog (AQU-1722) — "Generate voice" on the selection bar:
     // speak every selected line in one chosen voice.
@@ -2849,6 +2867,54 @@ export const audio = defineNamespace({
           "failed. 'the {count}' means those failed ones.",
         placeholders: { count: "How many failed." },
         maxLength: 24,
+      },
+      "audio.lineWords.progress": {
+        description:
+          "Progress toast title while one recording is transcribed into text (speech " +
+          "recognition) so it can be cut into lines at its sentences. It goes a minute of " +
+          "audio at a time.",
+        placeholders: {
+          name: "The recording's file name.",
+          done: "How many minutes are transcribed so far.",
+          count: "How many minutes the recording has (rounded up).",
+        },
+      },
+      "audio.lineWords.partial": {
+        description:
+          "Toast title when only some minutes of a recording could be transcribed. The " +
+          "recording is not cut into lines yet; the lines under the title say why and that " +
+          "it stays one line.",
+        placeholders: {
+          done: "How many minutes were transcribed.",
+          count: "How many minutes the recording has (rounded up).",
+          name: "The recording's file name.",
+        },
+      },
+      "audio.lineWords.staysWhole": {
+        description:
+          "Line under a transcription toast: the recording is not cut into lines yet. It " +
+          "stays one line and keeps the words that were transcribed; Retry transcribes the " +
+          "minutes still missing.",
+      },
+      "audio.lineWords.readyAfterReload": {
+        description:
+          "Toast after a page reload: a recording that was being transcribed in the Split " +
+          "into lines dialog finished by itself. Its words were put on the line, and " +
+          "choosing 'At sentences, with words' in Split into lines… again costs nothing. " +
+          "'Split into lines…' and 'At sentences, with words' are the names of a menu item " +
+          "and a choice in that dialog.",
+        placeholders: { name: "The recording's file name." },
+      },
+      "audio.lineWords.dialogPartial": {
+        description:
+          "Message in the Split into lines dialog when only some minutes of the recording " +
+          "could be transcribed. Pressing the transcribe button again sends only the minutes " +
+          "still missing. {reason} is a full sentence and ends with its own full stop.",
+        placeholders: {
+          done: "How many minutes were transcribed.",
+          count: "How many minutes the recording has (rounded up).",
+          reason: "The first error, as the service gave it.",
+        },
       },
       "audio.batchVoice.title": {
         description:

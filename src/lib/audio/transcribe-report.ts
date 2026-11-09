@@ -9,6 +9,7 @@
 import { t } from "@/lib/i18n/standalone"
 import type { TranscribeRunReport } from "./batch-audio"
 import type { TranscribeRunKind } from "./transcribe-runs"
+import type { LineWordsReport } from "./line-words-run"
 
 export interface TranscribeRunToast {
   type: "success" | "error" | "info"
@@ -92,4 +93,26 @@ export function transcribeRunProgressTitle(opts: {
       : t("audio.transcribeRun.progressRecordings", { count: opts.total })
   }
   return t("audio.transcribeRun.progressCount", { done: opts.done, count: opts.total })
+}
+
+/**
+ * AQU-2426 × AQU-2375: what a line's words run says when it ends without words
+ * for every minute, or null when it has them all (the caller splits). The line
+ * is never split then: it stays whole, keeps the words it has, and Retry sends
+ * only the minutes still missing.
+ */
+export function lineWordsToast(report: LineWordsReport, name: string): TranscribeRunToast | null {
+  if (report.done >= report.total) return null
+  const missing = report.total - report.done
+  const reason = report.failed[0]?.message ?? ""
+  const retryLabel = t("audio.transcribeRun.retry", { count: missing })
+  if (report.done === 0) {
+    return { type: "error", title: t("editor.splitLines.importFailed", { name, reason }), retryLabel }
+  }
+  return {
+    type: "error",
+    title: t("audio.lineWords.partial", { done: report.done, count: report.total, name }),
+    description: `${t("audio.transcribeRun.failedSome", { count: missing, reason })} ${t("audio.lineWords.staysWhole")}`,
+    retryLabel,
+  }
 }

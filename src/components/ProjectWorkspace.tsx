@@ -268,7 +268,8 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
 import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll, needsTranscription, takesNeedingMeasure, runMeasureAll, type SynthTarget, type TranscribeRunReport } from "@/lib/audio/batch-audio"
-import { transcribeRunProgressTitle, transcribeRunToast } from "@/lib/audio/transcribe-report"
+import { lineWordsToast, transcribeRunProgressTitle, transcribeRunToast } from "@/lib/audio/transcribe-report"
+import { runLineWords, type LineWordsIdentity } from "@/lib/audio/line-words-run"
 import type { StoredTranscribeRun, TranscribeRunHandle, TranscribeRunKind } from "@/lib/audio/transcribe-runs"
 import { useCarryOnTranscribeRuns } from "@/hooks/useCarryOnTranscribeRuns"
 import { changeCellVoice, changeVoiceBlocker, changeVoiceSourceTake } from "@/lib/audio/change-voice"
@@ -424,7 +425,7 @@ import { RecordingImportChoiceDialog } from "@/components/import/RecordingImport
 import { probeMediaDurationMs } from "@/lib/import"
 import { needsSplitNotice, sourceRecordingLine } from "@/lib/timeline/recording-line"
 import { piecesFromCuts, splitRecordingLine, writeLineWindow, type LinePiece, type RecordingLine } from "@/lib/timeline/split-recording-line"
-import { cutsFromWords, loadLinePcm, pauseCuts, transcribeLineWords, type LineAudio } from "@/lib/audio/recording-split"
+import { cutsFromWords, loadLinePcm, pauseCuts, type LineAudio } from "@/lib/audio/recording-split"
 import { transcribeBlock } from "@/lib/audio/transcribe-access"
 import { estimateTranscriptionCost } from "@/lib/audio/transcription-cost"
 import { transcriptionCredits } from "@/lib/audio/transcription-credits"
@@ -10708,6 +10709,106 @@ export function ProjectWorkspace() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- lineAudioOf is pure
   }, [recordingLineFor, frontierSession, applyLineSplit, t])
 
+  /**
+   * AQU-2426 × AQU-2375: one line's words, found a minute at a time and kept as
+   * they land (line-words-run.ts), then the line split at its sentences. Used
+   * by Import and transcribe… and by a words run a page reload stopped. Some
+   * minutes failed: the line is NOT split. It stays whole with the words it
+   * has, and Retry sends only the minutes still missing.
+   */
+  const runLineWordsReported = (o: {
+    line: RecordingLine
+    /** The stretch, ms on the recording's clock (a carried-on run's own). */
+    audio: LineAudio
+    identity: LineWordsIdentity
+    purpose: "import" | "dialog"
+    carryOn?: { stored: StoredTranscribeRun; handle: TranscribeRunHandle }
+  }) => {
+    const name = o.identity.name
+    let toastId: string | null = null
+    let first = true
+    let title = t("editor.splitLines.importTranscribing", { name })
+    const show = (description?: string) => {
+      if (toastId === null) toastId = toast.add({ type: "loading", title, description, timeout: 0 })
+      else toast.update(toastId, { type: "loading", title, description })
+    }
+    const say = (content: { type: "success" | "error" | "info"; title: string; description?: string; timeout?: number; actionProps?: { children: string; onClick: () => void } }) => {
+      if (toastId !== null) toast.update(toastId, { description: undefined, ...content })
+      else toast.add(content)
+    }
+    void (async () => {
+      try {
+        const { report, handle } = await runLineWords({
+          audio: o.audio,
+          session: frontierSession ?? null,
+          ...(transcribeLanguageTag ? { languageTag: transcribeLanguageTag } : {}),
+          purpose: o.purpose,
+          identity: o.identity,
+          ...(o.carryOn ? { carryOn: o.carryOn } : {}),
+          onProgress: (done, total) => {
+            title = first && o.carryOn
+              ? t("audio.transcribeRun.carryingOn", { name, done, count: total })
+              : t("audio.lineWords.progress", { name, done, count: total })
+            first = false
+            show()
+          },
+          // Past the hosted limit it waits and carries on by itself.
+          onRateLimited: async (sec) => {
+            show(t("editor.splitLines.waiting"))
+            await new Promise((r) => setTimeout(r, Math.max(1, sec) * 1000))
+            show()
+          },
+        })
+        const said = lineWordsToast(report, name)
+        if (said) {
+          // The line keeps the words it has; the run keeps them for Retry.
+          handle?.park()
+          await keepWordsOnLine(o.line, report.text)
+          say({
+            type: said.type,
+            title: said.title,
+            ...(said.description ? { description: said.description } : {}),
+            ...(said.retryLabel ? { actionProps: { children: said.retryLabel, onClick: () => runLineWordsReported({ ...o, carryOn: undefined }) } } : {}),
+          })
+          return
+        }
+        if (report.words.length === 0 || !report.text.trim()) {
+          handle?.end()
+          say({ type: "info", title: t("editor.splitLines.importNoWords", { name }), timeout: 8000 })
+          return
+        }
+        if (o.purpose === "dialog") {
+          // Started in Split into lines… and finished after a reload: nobody has
+          // seen the lines, so nothing is split. The words go on the line, and
+          // the kept run makes At sentences, with words free next time.
+          handle?.park()
+          await keepWordsOnLine(o.line, report.text)
+          say({ type: "success", title: t("audio.lineWords.readyAfterReload", { name }), timeout: 12_000 })
+          return
+        }
+        const cut = cutsFromWords(report.words, o.audio)
+        const pieces = piecesFromCuts(o.line, cut.cuts, cut.texts)
+        if (pieces.length < 2) {
+          await keepWordsOnLine(o.line, report.text)
+          handle?.end()
+          say({ type: "success", title: t("editor.splitLines.importDone", { name, count: 1 }), timeout: 8000 })
+          return
+        }
+        if (toastId !== null) toast.close(toastId)
+        // A split that failed (it says so) keeps the words for the next try.
+        if (await applyLineSplit(o.line, pieces, "editor.splitLines.importDone")) handle?.end()
+        else handle?.park()
+      } catch (err) {
+        // The recording couldn't be read to plan the run: nothing was sent.
+        o.carryOn?.handle.park()
+        say({
+          type: "error",
+          title: t("editor.splitLines.importFailed", { name, reason: err instanceof Error ? err.message : String(err) }),
+        })
+      }
+    })()
+  }
+
   // Import and transcribe…: the recording came in whole as one line; find its
   // lines from its words, then split it (an Undo step like any split).
   runTranscribeSeedRef.current = (seed, fileName) => {
@@ -10723,41 +10824,36 @@ export function ProjectWorkspace() {
       ...(att.durationMs != null ? { durationMs: att.durationMs } : {}),
       sequenceIndex: 0, successor: null,
     }
-    const audio = lineAudioOf(line)
-    const session = frontierSession ?? null
-    void (async () => {
-      const id = toast.add({ type: "loading", title: t("editor.splitLines.importTranscribing", { name: fileName }), timeout: 0 })
-      try {
-        const result = await transcribeLineWords({
-          line: audio, session, languageTag: transcribeLanguageTag,
-          // Past the hosted limit it waits and carries on by itself.
-          onRateLimited: async (sec) => {
-            toast.update(id, { type: "loading", title: t("editor.splitLines.importTranscribing", { name: fileName }), description: t("editor.splitLines.waiting") })
-            await new Promise((r) => setTimeout(r, Math.max(1, sec) * 1000))
-            toast.update(id, { type: "loading", title: t("editor.splitLines.importTranscribing", { name: fileName }), description: undefined })
-          },
-        })
-        if (result.words.length === 0 || !result.text.trim()) {
-          toast.update(id, { type: "info", title: t("editor.splitLines.importNoWords", { name: fileName }), description: undefined, timeout: 8000 })
-          return
-        }
-        const cut = cutsFromWords(result.words, audio)
-        const pieces = piecesFromCuts(line, cut.cuts, cut.texts)
-        if (pieces.length < 2) {
-          await keepWordsOnLine(line, result.text)
-          toast.update(id, { type: "success", title: t("editor.splitLines.importDone", { name: fileName, count: 1 }), description: undefined, timeout: 8000 })
-          return
-        }
-        toast.close(id)
-        await applyLineSplit(line, pieces, "editor.splitLines.importDone")
-      } catch (err) {
-        toast.update(id, {
-          type: "error",
-          title: t("editor.splitLines.importFailed", { name: fileName, reason: err instanceof Error ? err.message : String(err) }),
-          description: undefined,
-        })
-      }
-    })()
+    runLineWordsReported({
+      line,
+      audio: lineAudioOf(line),
+      identity: { cellId: cell.id, audioId, name: fileName },
+      purpose: "import",
+    })
+  }
+
+  /** A words run a reload stopped, on the open file: carried on from its own
+   *  windows, if its line is still the stretch it was started on. */
+  const carryOnLineWords = (run: StoredTranscribeRun, handle: TranscribeRunHandle) => {
+    const kept = run.line
+    const line = kept ? recordingLineFor(kept.cellId) : null
+    if (!kept || !line || line.audioId !== kept.audioId) {
+      // The line is gone or was split meanwhile: its words fit nothing now.
+      handle.end()
+      return
+    }
+    const stretch = lineAudioOf(line)
+    if (Math.abs(stretch.lo - kept.lo) > 5 || Math.abs(stretch.hi - kept.hi) > 5) {
+      handle.end()
+      return
+    }
+    runLineWordsReported({
+      line,
+      audio: { projectId: run.projectId, fileId: run.fileId, url: kept.url, lo: kept.lo, hi: kept.hi },
+      identity: { cellId: kept.cellId, audioId: kept.audioId, name: run.fileName },
+      purpose: kept.purpose,
+      carryOn: { stored: run, handle },
+    })
   }
 
   const [attachChoice, setAttachChoice] = useState<{
@@ -12110,6 +12206,11 @@ export function ProjectWorkspace() {
     ready: editorFirstPaint && workspaceAudioLoaded && !heardLinesLoading,
     version: [workspaceAudioByCellId, audioCueCells, cellStoreVersion],
     carryOn: (run, handle) => {
+      // AQU-2426: one line's words, carried on window by window.
+      if (run.kind === "lineWords") {
+        carryOnLineWords(run, handle)
+        return
+      }
       const pool = audioCueCells ?? mergeCellsWithAudio(getActiveCells(), workspaceAudioByCellIdRef.current)
       const byId = new Map(pool.map((c) => [c.id, c]))
       const settled = new Set([...run.doneIds, ...run.failed.map((f) => f.cellId)])
@@ -19559,6 +19660,7 @@ export function ProjectWorkspace() {
             block={splitDialog.info.block}
             initialMode={splitDialog.mode}
             keepsLine={splitDialog.keepsLine}
+            keepAs={{ cellId: splitDialog.line.cellId, audioId: splitDialog.line.audioId, fileName: activeFileNameRef.current || splitDialog.line.name }}
             onSplit={(pieces) => applyLineSplit(splitDialog.line, pieces)}
             onKeepWords={(text) => { void keepWordsOnLine(splitDialog.line, text) }}
             onClose={() => setSplitDialog(null)}

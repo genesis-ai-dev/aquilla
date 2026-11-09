@@ -24,6 +24,7 @@ vi.mock("@/lib/audio/recording-split", async (importOriginal) => {
 vi.mock("@/lib/audio/transcribe", () => ({ audioBytesToWhisperPcm: vi.fn(), readClipBytes: vi.fn(), transcribeAudio: vi.fn() }))
 
 import { SplitIntoLinesDialog, type SplitIntoLinesDialogProps } from "./SplitIntoLinesDialog"
+import { loadLinePcm } from "@/lib/audio/recording-split"
 import { estimateTranscriptionCost } from "@/lib/audio/transcription-cost"
 
 function renderDialog(over: Partial<SplitIntoLinesDialogProps> = {}) {
@@ -88,6 +89,56 @@ describe("Split into lines… (AQU-2426)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
     expect(props.onKeepWords).toHaveBeenCalledWith("Hello.")
     expect(props.onSplit).not.toHaveBeenCalled()
+  })
+
+  // AQU-2426 × AQU-2375: a minute at a time, kept as it lands. A minute that
+  // fails leaves no preview and no split; transcribing again sends only it.
+  it("a minute that fails: says so, keeps the words so far, and the next try sends only that minute", async () => {
+    localStorage.clear()
+    const long = new Float32Array(130 * PCM_RATE).map((_, i) => 0.4 * Math.sin(i / 5))
+    vi.mocked(loadLinePcm).mockResolvedValueOnce(long).mockResolvedValueOnce(long)
+    let call = 0
+    transcribeLineWords.mockImplementation(async ({ line }: { line: { lo: number } }) => {
+      call++
+      if (call === 2) throw new Error("HTTP 503.")
+      return { words: [{ text: `Said${line.lo}.`, start: 0.5, end: 1 }], text: `Said${line.lo}.` }
+    })
+    const props = renderDialog({
+      initialMode: "sentences", endMs: 130_000, durationMs: 130_000,
+      audio: { projectId: "p", fileId: "f", url: "frontier-audio://p/f/clip.m4a", lo: 0, hi: 130_000 },
+      keepAs: { cellId: "c1", audioId: "clip", fileName: "Session 4.mp3" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Transcribe and preview" }))
+    expect(await screen.findByText(/2 of 3 minutes are transcribed\. The rest couldn't be: HTTP 503\./)).toBeInTheDocument()
+    expect(transcribeLineWords).toHaveBeenCalledTimes(3)
+    expect(screen.queryByTestId("split-words")).toBeNull()
+
+    fireEvent.click(screen.getByRole("button", { name: "Transcribe and preview" }))
+    expect(await screen.findByTestId("split-words")).toBeInTheDocument()
+    expect(transcribeLineWords).toHaveBeenCalledTimes(4)
+    transcribeLineWords.mockReset()
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(vi.mocked(props.onKeepWords).mock.calls[0][0]).toMatch(/^Said0\. Said\d+\. Said\d+\.$/)
+  })
+
+  it("Cancel after a minute failed keeps the words it has on the line", async () => {
+    localStorage.clear()
+    const long = new Float32Array(130 * PCM_RATE).map((_, i) => 0.4 * Math.sin(i / 5))
+    vi.mocked(loadLinePcm).mockResolvedValueOnce(long).mockResolvedValueOnce(long)
+    transcribeLineWords.mockImplementation(async ({ line }: { line: { lo: number } }) => {
+      if (line.lo > 0) throw new Error("HTTP 503.")
+      return { words: [{ text: "First.", start: 0.5, end: 1 }], text: "First." }
+    })
+    const props = renderDialog({
+      initialMode: "sentences", endMs: 130_000, durationMs: 130_000,
+      audio: { projectId: "p", fileId: "f", url: "frontier-audio://p/f/clip.m4a", lo: 0, hi: 130_000 },
+      keepAs: { cellId: "c1", audioId: "clip", fileName: "Session 4.mp3" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Transcribe and preview" }))
+    await screen.findByText(/1 of 3 minutes are transcribed/)
+    transcribeLineWords.mockReset()
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(props.onKeepWords).toHaveBeenCalledWith("First.")
   })
 
   it("someone who may not transcribe sees At sentences greyed, with the reason behind a click", async () => {

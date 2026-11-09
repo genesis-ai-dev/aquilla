@@ -33,8 +33,10 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import type { TranscribeBlock } from "@/lib/audio/transcribe-access"
 import type { TranscriptionCost } from "@/lib/audio/transcription-cost"
 import {
-  cutsFromWords, loadLinePcm, pauseCuts, PCM_RATE, previewPeaks, transcribeLineWords, type LineAudio,
+  cutsFromWords, loadLinePcm, pauseCuts, PCM_RATE, previewPeaks, type LineAudio,
 } from "@/lib/audio/recording-split"
+import { runLineWords } from "@/lib/audio/line-words-run"
+import { dropStoredTranscribeRun } from "@/lib/audio/transcribe-runs"
 import type { WordLine } from "@/lib/audio/lines-from-words"
 import { piecesFromCuts, type LinePiece } from "@/lib/timeline/split-recording-line"
 
@@ -150,6 +152,10 @@ export interface SplitIntoLinesDialogProps {
   initialMode?: SplitMode
   /** The line already has a translation or takes. */
   keepsLine: boolean
+  /** AQU-2426 × AQU-2375: keep the words run under this line, so a reload or a
+   *  failed minute never loses words already paid for, and a later run on the
+   *  same stretch sends only what is missing. Absent: not kept. */
+  keepAs?: { cellId: string; audioId: string; fileName: string }
   /** Write the split; false when it failed (the dialog stays open). */
   onSplit(pieces: LinePiece[]): Promise<boolean>
   /** Words came back but nothing was split: keep them on the line. */
@@ -172,6 +178,10 @@ export function SplitIntoLinesDialog(props: SplitIntoLinesDialogProps) {
   const play = usePartPlayer()
   const closed = useRef(false)
   const keptWords = useRef(false)
+  /** Words from a run that didn't get every minute: they stay on the line. */
+  const partialText = useRef("")
+  /** The kept run behind the words shown: dropped once they are split. */
+  const keptRunId = useRef<string | null>(null)
 
   useEffect(() => {
     let live = true
@@ -202,6 +212,7 @@ export function SplitIntoLinesDialog(props: SplitIntoLinesDialogProps) {
   const close = () => {
     closed.current = true
     if (words) keepWordsOnce(words.text)
+    else if (partialText.current) keepWordsOnce(partialText.current)
     props.onClose()
   }
 
@@ -209,21 +220,41 @@ export function SplitIntoLinesDialog(props: SplitIntoLinesDialogProps) {
     setTranscribing("running")
     setTranscribeError(null)
     try {
-      const result = await transcribeLineWords({
-        line: audio, session, languageTag,
+      // A minute at a time, kept as it lands (line-words-run.ts); a kept run
+      // on this stretch is taken over, so only what is missing is sent.
+      const { report, handle } = await runLineWords({
+        audio, session, ...(languageTag ? { languageTag } : {}),
+        purpose: "dialog",
+        ...(props.keepAs ? { identity: { cellId: props.keepAs.cellId, audioId: props.keepAs.audioId, name: props.keepAs.fileName } } : {}),
         onRateLimited: async (sec) => {
           setTranscribing("waiting")
           await new Promise((r) => setTimeout(r, Math.max(1, sec) * 1000))
           setTranscribing("running")
         },
       })
-      const cut = cutsFromWords(result.words, audio)
-      if (closed.current) {
-        // Cancelled while it ran: the words were paid for, so they stay.
-        keepWordsOnce(result.text)
+      // Parked either way: nothing runs now, and the words wait for a split.
+      handle?.park()
+      keptRunId.current = report.runId
+      if (report.done < report.total) {
+        // Some minutes failed: no preview, and the words so far stay put.
+        partialText.current = report.text
+        if (closed.current) {
+          keepWordsOnce(report.text)
+          return
+        }
+        setTranscribeError(t("audio.lineWords.dialogPartial", {
+          done: report.done, count: report.total, reason: report.failed[0]?.message ?? "",
+        }))
         return
       }
-      setWords({ ...cut, text: result.text })
+      partialText.current = ""
+      const cut = cutsFromWords(report.words, audio)
+      if (closed.current) {
+        // Cancelled while it ran: the words were paid for, so they stay.
+        keepWordsOnce(report.text)
+        return
+      }
+      setWords({ ...cut, text: report.text })
     } catch (err) {
       if (!closed.current) setTranscribeError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -236,6 +267,8 @@ export function SplitIntoLinesDialog(props: SplitIntoLinesDialogProps) {
     setBusy(true)
     const ok = await props.onSplit(pieces)
     if (ok) {
+      // Split by its words (or at pauses): the kept words have done their job.
+      if (keptRunId.current) dropStoredTranscribeRun(keptRunId.current)
       closed.current = true
       props.onClose()
     } else setBusy(false)

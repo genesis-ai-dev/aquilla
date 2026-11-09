@@ -40,6 +40,7 @@ import {
   setVideoSoundingCellId,
   setVideoVolume,
   useVideoSoundingCellId,
+  useVideoVolume,
 } from "@/lib/timeline/video-clock"
 import { clearVideoControllerIf, setVideoController, type VideoController } from "@/lib/timeline/video-controller"
 import { claimActiveAudio, clearActiveAudioIf, type ActiveAudioController } from "@/lib/audio/audio-coordinator"
@@ -946,6 +947,24 @@ export function MediaVideoPane({
     video.playbackRate = rate
   }, [rate, slaved, mediaEpoch])
 
+  // AQU-2253 (review, Nov 9): following the recordings the bottom strip's
+  // volume and mute are the queue's, and the film's own sound is part of what
+  // plays there: under the lines, and all there is over its tail. So it takes
+  // the queue's volume, and at zero (the strip's mute) it is muted, which is
+  // the part iPhone and iPad honour (they ignore an element's volume). Back
+  // following the source, where the strip sets the film's volume itself, the
+  // film has its own again.
+  const queueVolume = queue.progress.volume
+  const ownVolume = useVideoVolume()
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video || !followsRecordings) return
+    video.volume = Math.max(0, Math.min(1, queueVolume))
+    return () => {
+      video.volume = ownVolume
+    }
+  }, [followsRecordings, queueVolume, ownVolume, mediaEpoch])
+
   // An explicit seek from the timeline. Applied whatever the queue thinks.
   const seekNonce = seekSec?.nonce
   const seekTarget = seekSec?.sec
@@ -1395,7 +1414,9 @@ export function MediaVideoPane({
           // recording follows in each timing.
           // AQU-2227 (review, Nov 9): a file that plays its heard lines has
           // only the film to voice the original, imported or linked.
-          muted={(importedFilm && !playsHeardLines) || recordingIsTheSound || !sourceAudible}
+          // AQU-2253 (review, Nov 9): and the bottom strip's mute, which
+          // following the recordings is the queue's volume at zero.
+          muted={(importedFilm && !playsHeardLines) || recordingIsTheSound || !sourceAudible || (followsRecordings && queueVolume === 0)}
           // NO NATIVE CONTROLS, in either arrangement (2026-08-14, Sam).
           //
           // The standalone picture used to keep them, on the reasoning that it

@@ -409,6 +409,75 @@ describe("MediaVideoPane", () => {
       })
     })
 
+    // AQU-2253 (review, Nov 9), finding 4: following the recordings the bottom
+    // strip's volume and mute are the queue's, and they did nothing to the
+    // film's own sound, which is part of what plays under the lines and all
+    // there is over the tail. The film takes the queue's volume, and is muted
+    // at zero (the strip's mute, and the part iPhone and iPad honour).
+    describe("the bottom strip's volume and mute reach the film's own sound", () => {
+      const following = (over: Partial<React.ComponentProps<typeof MediaVideoPane>> = {}) => (
+        <MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={subs} followsRecordings {...over} />
+      )
+      const volumeAt = (volume: number, filmTail = false) =>
+        sounding("s2", { progress: { currentTime: filmTail ? 12 : 6, duration: 27, rate: 1, volume, programmeClock: true, filmTail, filmClock: filmTail } })
+      const media = () => screen.getByTestId("video-pane-media") as HTMLVideoElement
+
+      it("under a line, the film's sound is at the strip's volume", () => {
+        volumeAt(0.4)
+        render(following())
+        expect(media().volume).toBeCloseTo(0.4, 5)
+        expect(media().muted).toBe(false)
+      })
+
+      it("over the film's tail too, and it follows the slider as it is dragged", () => {
+        volumeAt(0.4, true)
+        const view = render(following())
+        expect(media().volume).toBeCloseTo(0.4, 5)
+        volumeAt(0.15, true)
+        view.rerender(following())
+        expect(media().volume).toBeCloseTo(0.15, 5)
+      })
+
+      it("the strip's mute (volume zero) mutes the film, and unmuting brings it back", () => {
+        volumeAt(0, true)
+        const view = render(following())
+        expect(media().muted).toBe(true)
+        volumeAt(1, true)
+        view.rerender(following())
+        expect(media().muted).toBe(false)
+        expect(media().volume).toBe(1)
+      })
+
+      it("before anything plays, the volume already set on the strip is the film's", () => {
+        mockQueue = { ...mockQueue, progress: { ...mockQueue.progress, volume: 0.25 } }
+        render(following())
+        expect(media().volume).toBeCloseTo(0.25, 5)
+      })
+
+      it("the Source audio row's speaker still mutes it, whatever the volume", () => {
+        mockAudibility = { source: false, target: true }
+        volumeAt(0.8)
+        render(following())
+        expect(media().muted).toBe(true)
+      })
+
+      it("back following the source, the film has its own volume again", () => {
+        volumeAt(0.4)
+        const view = render(following())
+        expect(media().volume).toBeCloseTo(0.4, 5)
+        mockQueue = { ...mockQueue, active: false, playing: false, running: false, cellId: null, kind: "idle" }
+        view.rerender(following({ followsRecordings: false }))
+        expect(media().volume).toBe(1)
+      })
+
+      it("following the source, the queue's volume is not the film's", () => {
+        mockQueue = { ...mockQueue, progress: { ...mockQueue.progress, volume: 0.4 } }
+        render(following({ followsRecordings: false }))
+        expect(media().volume).toBe(1)
+        expect(media().muted).toBe(false)
+      })
+    })
+
     // AQU-2253 (review, Nov 9), finding 2: over the film's tail, and for the
     // whole run when nothing is recorded, only the film plays, so the film is
     // the clock (the queue says so: `filmClock`). The pane reports the film's

@@ -3760,3 +3760,53 @@ remain**: `importDialog.*` (6) and `common.*` (3, including the one
 - **`src/lib/i18n/` is not an input to the shipped Door43 importer bundle** — the 2026-11-06
   trap re-checked against `shared/tools/first-party/door43-importer.bundle.ts`, which
   mentions no i18n path, so no generated artifact needed rebuilding.
+
+### Baseline 2026-11-09 (`origin/dev` `5ab9c702`) — one pre-existing failure, reproducible
+
+| gate | result |
+| --- | --- |
+| `pnpm lint` | **exit 0** — 971 problems, 0 errors |
+| `pnpm build` | **exit 0** (`tsc -b` + `vite build` + brand check) |
+| `pnpm test` | **exit 1** — 1 failed / 2359 passed / 2 skipped (2362 files); 1 failed / 27149 passed / 1 expected fail / 23 skipped (27174 tests), 1460s |
+
+The final gate reproduced those numbers **exactly** — same file counts, same test counts,
+same single failure.
+
+**`scripts/release-cut.test.ts > buildReleaseBranch against a scratch repo > fails loud when
+the pick cannot commit, and leaves nothing in progress` — pre-existing, out of scope, and
+NOT a flake.** It sets `commit.gpgsign=true` with `gpg.program` pointed at a non-existent
+binary and expects `buildReleaseBranch()` to throw; in a cloud sandbox the commit succeeds
+anyway, so `expect(…).toThrow()` gets `undefined`. Reproduced in isolation on a clean tree
+(`pnpm test scripts/release-cut.test.ts` → 1 failed / 16 passed), so a future run should
+expect a red `pnpm test` on trunk from this one test and re-baseline rather than assume
+green. That file is frozen by the routine's own rule. Listed for Ryder rather than filed:
+it is a test-environment assumption, not a product bug, and the fix (assert on the signing
+precondition, or skip when git will not sign) has to touch the test file.
+
+**Two sandbox-only environment findings from this run**, recorded because each one presents
+as a product bug and cost this run three failed e2e attempts to tell apart from one:
+
+- **`pnpm test:e2e:smoke` cannot boot in a cloud sandbox without three fixes**, none of them
+  repo changes: (1) the harness resolves `/opt/pw-browsers/chromium-1248` while the image
+  ships `chromium-1243` — symlink it plus the matching `chromium_headless_shell`;
+  (2) specs that record video want `/opt/pw-browsers/ffmpeg-1013/ffmpeg-linux` against a
+  shipped `ffmpeg-1011` — this accounted for **7 of 10** failures in the first real run, all
+  in auth/session/onboarding specs, surfacing as `browserContext.newPage: Executable doesn't
+  exist`, which reads like an auth regression and is not one; (3) no Docker, so start the
+  image's own Postgres 16 (`pg_ctlcluster 16 main start`), create the `aquilla` superuser and
+  export `E2E_PG_ADMIN_URL` — the repo already documents this path
+  (`scripts/e2e-pg-native.sh`, AQU-1820).
+- **`auth-worker`'s own `npm ci` fails on a peer conflict** and only succeeds with
+  `--legacy-peer-deps`: its lockfile pins `vitest@5` while
+  `@cloudflare/vitest-pool-workers@0.23.0` peers on `vitest@^4`. Pre-existing on `dev`,
+  unrelated to this diff, and it blocks the e2e stack's identity worker from booting at all
+  (the mock legacy-migration service dies on `Cannot find package 'bcryptjs'`). Worth a
+  ticket if a human confirms CI is not quietly papering over it.
+
+**The 3 smoke failures that survived all three fixes are also pre-existing**, proven rather
+than argued: `editor/import-and-edit.smoke.spec.ts:339` ("alice imports YouTube srt/vtt/sbv
+captions, persists across reload, and downloads original") times out at line 365 waiting for
+the `Play all` media-playback button. `origin/dev` was checked out detached in the same
+sandbox and the same spec run against it — **the same 3 fail with the same timeout at the
+same line** (3 failed / 6 passed). Shards 2 and 3 of the final smoke run were fully green
+(37 and 33 passed); shard 1 was 42 passed / 3 failed.

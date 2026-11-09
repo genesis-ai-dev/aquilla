@@ -64,7 +64,7 @@ export const importExport = defineNamespace({
     "importExport.scriptAlignment.trackName": "Track name",
     "importExport.scriptAlignment.destination": "Destination track",
     "importExport.scriptAlignment.newTrack": "New track",
-    "importExport.scriptAlignment.overwrite": "{count} segments in this track will be overwritten.",
+    "importExport.scriptAlignment.overwrite": plural({ one: "{count} segment in this track will be overwritten.", other: "{count} segments in this track will be overwritten." }),
     "importExport.scriptAlignment.align": "Align script",
     "importExport.scriptAlignment.aligning": "Aligning script…",
     "importExport.scriptAlignment.use": "Use aligned segments",

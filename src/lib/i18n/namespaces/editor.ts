@@ -1862,12 +1862,16 @@ export const editor = defineNamespace({
       "nothing here is translated or exported.",
     "editor.timeline.audioVttDescriptionReplacing":
       "The Source cues track this file has now will be replaced.",
-    "editor.timeline.audioVttCueSummary": "{count} cues, {span}",
-    "editor.timeline.audioVttRepairedShortForm":
-      "{count} short-form timestamps read as minutes and seconds.",
-    "editor.timeline.audioVttStrippedTags": "Formatting removed from {count} cues.",
-    "editor.timeline.audioVttDroppedCues":
-      "{count} lines carried no usable text and were skipped.",
+    "editor.timeline.audioVttCueSummary": plural({ one: "{count} cue, {span}", other: "{count} cues, {span}" }),
+    "editor.timeline.audioVttRepairedShortForm": plural({
+      one: "{count} short-form timestamp read as minutes and seconds.",
+      other: "{count} short-form timestamps read as minutes and seconds.",
+    }),
+    "editor.timeline.audioVttStrippedTags": plural({ one: "Formatting removed from {count} cue.", other: "Formatting removed from {count} cues." }),
+    "editor.timeline.audioVttDroppedCues": plural({
+      one: "{count} line carried no usable text and was skipped.",
+      other: "{count} lines carried no usable text and were skipped.",
+    }),
     "editor.timeline.audioVttChoose": "Choose audio VTT",
     "editor.timeline.audioVttPickHint":
       "The episode's audio VTT — usually the one marked AUDIO_ONLY.",
@@ -1886,7 +1890,7 @@ export const editor = defineNamespace({
       one: "{count} recording",
       other: "{count} recordings",
     }),
-    "editor.timeline.audioVttRetimeShift": "{count} shift by up to {seconds} seconds",
+    "editor.timeline.audioVttRetimeShift": plural({ one: "{count} shifts by up to {seconds} seconds", other: "{count} shift by up to {seconds} seconds" }),
     "editor.timeline.audioVttCreates": plural({
       one: "{count} new cue will be added.",
       other: "{count} new cues will be added.",
@@ -1923,8 +1927,8 @@ export const editor = defineNamespace({
     "editor.timeline.audioVttRemove": "Remove audio cues",
     "editor.timeline.audioVttImport": "Import cues",
     "editor.timeline.audioVttNothingToUpdate": "Nothing to update",
-    "editor.timeline.audioVttUpdateCues": "Update {count} cues",
-    "editor.timeline.audioVttImportCues": "Import {count} cues",
+    "editor.timeline.audioVttUpdateCues": plural({ one: "Update {count} cue", other: "Update {count} cues" }),
+    "editor.timeline.audioVttImportCues": plural({ one: "Import {count} cue", other: "Import {count} cues" }),
     "editor.timeline.audioVttNoCues":
       "This doesn't look like an audio VTT — no timed cues found.",
     // The audio VTT import and removal toasts (were hard-coded English). The
@@ -1974,7 +1978,7 @@ export const editor = defineNamespace({
     "editor.timeline.subtitleSourceChoose": "Choose subtitle file",
     "editor.timeline.subtitleSourcePickHint":
       "The .vtt, .srt or .sbv file that came with the clip.",
-    "editor.timeline.subtitleSourceCueSummary": "{count} cues, {span}",
+    "editor.timeline.subtitleSourceCueSummary": plural({ one: "{count} cue, {span}", other: "{count} cues, {span}" }),
     "editor.timeline.subtitleSourceCueSummaryUntimed":
       "{count} cues, none of them timed.",
     "editor.timeline.subtitleSourceRepairedShortForm":
@@ -1982,15 +1986,15 @@ export const editor = defineNamespace({
     "editor.timeline.subtitleSourceUntimedCues":
       "{count} cues carry no timing and won't appear on the timeline.",
     "editor.timeline.subtitleSourceImport": "Extract cues",
-    "editor.timeline.subtitleSourceImportCues": "Extract {count} cues",
-    "editor.timeline.subtitleSourceDone": "Extracted {count} cues into \"{fileName}\".",
+    "editor.timeline.subtitleSourceImportCues": plural({ one: "Extract {count} cue", other: "Extract {count} cues" }),
+    "editor.timeline.subtitleSourceDone": plural({ one: "Extracted {count} cue into \"{fileName}\".", other: "Extracted {count} cues into \"{fileName}\"." }),
     "editor.timeline.subtitleSourceFailed": "Couldn't extract those subtitles: {reason}",
 
     // — Import characters dialog ——————————————————————————————
     "editor.timeline.charactersTitle": "Characters",
     "editor.timeline.charactersImportTitle": "Import characters",
-    "editor.timeline.charactersSubtitleLines": "{count} subtitle lines",
-    "editor.timeline.charactersHeardLines": "{count} heard lines",
+    "editor.timeline.charactersSubtitleLines": plural({ one: "{count} subtitle line", other: "{count} subtitle lines" }),
+    "editor.timeline.charactersHeardLines": plural({ one: "{count} heard line", other: "{count} heard lines" }),
     "editor.timeline.charactersBothSides": "{subtitle} and {audio}",
     "editor.timeline.charactersImportedSummary":
       "{summary} carry a character. Import a sheet to replace a side, or clear one " +
@@ -2018,8 +2022,8 @@ export const editor = defineNamespace({
     "editor.timeline.charactersMismatch":
       "{lead} — starting at row {row}. That normally means the spreadsheet belongs " +
       "to a different episode. Nothing has been changed.",
-    "editor.timeline.charactersAssignedLeadAudio": "{count} heard lines get a character",
-    "editor.timeline.charactersAssignedLeadSubtitle": "{count} lines get a character",
+    "editor.timeline.charactersAssignedLeadAudio": plural({ one: "{count} heard line gets a character", other: "{count} heard lines get a character" }),
+    "editor.timeline.charactersAssignedLeadSubtitle": plural({ one: "{count} line gets a character", other: "{count} lines get a character" }),
     "editor.timeline.charactersAssignedSummary":
       "{lead}, {people} people in all. Camera state comes across with them.",
     "editor.timeline.charactersBlankRows":
@@ -2060,7 +2064,7 @@ export const editor = defineNamespace({
     "editor.timeline.charactersClearAudioNone": "They show no character at all.",
     "editor.timeline.charactersClearSubtitles": "Clear subtitles",
     "editor.timeline.charactersClearHeardLines": "Clear heard lines",
-    "editor.timeline.charactersAssignCount": "Assign {count} characters",
+    "editor.timeline.charactersAssignCount": plural({ one: "Assign {count} character", other: "Assign {count} characters" }),
     "editor.timeline.charactersAssign": "Assign characters",
     "editor.timeline.charactersNoRows": "That spreadsheet has no rows.",
 

@@ -122,6 +122,8 @@ async function pickCorpusTarget() {
 async function openLinkedTargetWithUpstream(optionName: RegExp) {
   render(<ProjectCreateDialog onCreated={vi.fn()} />)
   fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+  // The wizard asks where the project comes from first (AQU-2105).
+  fireEvent.click(screen.getByTestId("project-source-scratch"))
 
   fireEvent.change(screen.getByPlaceholderText("My translation project"), {
     target: { value: "French Episode 1" },
@@ -215,6 +217,8 @@ describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)",
   it("does not render when no upstream project is chosen yet", () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
     fireEvent.click(screen.getByText("Advanced: project shape"))
     fireEvent.click(screen.getByText(/Linked target/i))
 
@@ -224,6 +228,8 @@ describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)",
   it("does not show the recommendation on self-contained clone + Its Source", async () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
     fireEvent.change(screen.getByPlaceholderText("My translation project"), {
       target: { value: "French Episode 1" },
     })
@@ -295,6 +301,8 @@ describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)",
 
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
     fireEvent.change(screen.getByPlaceholderText("My translation project"), {
       target: { value: "English Episode 1" },
     })

@@ -119,6 +119,8 @@ const SEARCH = "Search projects"
 function openLinkedShape() {
   render(<ProjectCreateDialog onCreated={vi.fn()} />)
   fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+  // The wizard asks where the project comes from first (AQU-2105).
+  fireEvent.click(screen.getByTestId("project-source-scratch"))
   fireEvent.click(screen.getByText("Advanced: project shape"))
   fireEvent.click(screen.getByText(/Linked target/i))
 }
@@ -217,6 +219,8 @@ describe("ProjectCreateDialog — searchable upstream picker (AQU-1518)", () => 
     const user = userEvent.setup()
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
     fireEvent.click(screen.getByText("Advanced: project shape"))
 
     // Self-contained + an upstream = the one-time clone path, which asks the

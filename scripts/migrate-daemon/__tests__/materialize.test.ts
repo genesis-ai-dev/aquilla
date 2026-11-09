@@ -228,6 +228,27 @@ describe("materialize", () => {
     db.close()
   })
 
+  it("carries the Codex importer's type and origin facts into the plan (AQU-2211)", async () => {
+    const db = new DaemonDb(":memory:")
+    const dir = makeProjectDir(["TheChosen_101"])
+    // The daemon reads the same notebooks migrate-all does; stamp the importer
+    // the way Codex's subtitle importer does on the .codex side.
+    const codexPath = path.join(dir, "files/target", "TheChosen_101.codex")
+    const notebook = JSON.parse(fs.readFileSync(codexPath, "utf8")) as { metadata: Record<string, unknown> }
+    notebook.metadata = { ...notebook.metadata, importerType: "subtitles", originalName: "TheChosen_101_en_5&2.srt" }
+    fs.writeFileSync(codexPath, JSON.stringify(notebook))
+
+    const r = await materialize(deps(db), { job: job(), project: seed(db), dir, httpUrlToRepo: "https://git/x.git" })
+    const lines = []
+    for await (const b of readPlan(r.planPath, 100)) lines.push(...b)
+    const fileCreate = lines.find((l) => l.event.kind === "file.create")
+    expect(fileCreate?.event.payload).toMatchObject({
+      fileType: "srt",
+      projectionMeta: { legacyCodex: { importerType: "subtitles", originalName: "TheChosen_101_en_5&2.srt" } },
+    })
+    db.close()
+  })
+
   it("CONTENT_LOGIC_VERSION matches scripts/migrate-all.ts", () => {
     const src = fs.readFileSync(path.resolve(__dirname, "../../migrate-all.ts"), "utf8")
     const m = src.match(/const CONTENT_LOGIC_VERSION = (\d+)/)

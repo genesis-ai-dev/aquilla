@@ -12,19 +12,21 @@
 // `selectedDubTakes` exists in one place:
 //
 //   - RECORDED is a take of this line's OWN. The imported source clip is
-//     seeded with the FILE's id and shared across every cell, so only a
-//     cell-seeded take counts; otherwise one attached programme audio would
-//     report a whole subtitle file as fully recorded.
+//     seeded with the FILE's id and shared across every cell, so it never
+//     counts; otherwise one attached programme audio would report a whole
+//     subtitle file as fully recorded. A take migrated from Codex, whose id
+//     carries no line id, counts as the server already counts it (AQU-2411).
 //   - VALIDATED is the WEAKEST chosen take meeting the project's audio
 //     requirement (`cellAudioVotes` is that minimum), and a line that is not
 //     recorded can never be validated.
 //   - The structural-cell policy subtracts from BOTH halves, as it does for
 //     text: a voiced chapter heading must not count as work when the policy
 //     says nobody has to do it.
-// Straight from the shared module `@/lib/audio/upload` re-exports it from, so
-// this pure counter does not pull the upload path (and its dynamic multipart
-// import) into every surface that draws a progress bar.
-import { audioIdSeededWith } from "../../../db/shared/audio-id"
+// The own-take rule comes from `@/lib/audio/own-take`, which reads the id
+// convention straight from db/shared, so this pure counter does not pull the
+// upload path (and its dynamic multipart import) into every surface that
+// draws a progress bar.
+import { isOwnSelection, sharedSelections, type TakeLine } from "@/lib/audio/own-take"
 import {
   cellAudioVotes,
   isTakeValidated,
@@ -37,6 +39,8 @@ import { isStructuralCell } from "@/lib/cells/structural"
 export interface AudioProgressCell {
   id: string
   type?: string | null
+  /** AQU-2411: lets a file-tagged recording be told apart on any line. */
+  fileId?: string | null
 }
 
 export interface LiveAudioCounts {
@@ -44,11 +48,18 @@ export interface LiveAudioCounts {
   audioValidated: number
 }
 
-/** Does this line carry a take of its OWN, in any slot? */
-export function cellHasOwnTake(cellId: string, entry: CellAudioEntry | undefined): boolean {
+/**
+ * Does this line carry a take of its OWN, in any slot? `shared` is
+ * `sharedSelections` over the whole file (AQU-2411, see own-take.ts).
+ */
+export function cellHasOwnTake(
+  line: string | Pick<TakeLine, "id" | "fileId">,
+  entry: CellAudioEntry | undefined,
+  shared: ReadonlySet<string> | null = null,
+): boolean {
   if (!entry) return false
   for (const selected of Object.values(slotSelections(entry))) {
-    if (selected && audioIdSeededWith(selected, cellId)) return true
+    if (isOwnSelection(line, selected, entry.attachments[selected], shared)) return true
   }
   return false
 }
@@ -66,14 +77,17 @@ export function liveAudioProgress(
   audioByCellId: ReadonlyMap<string, CellAudioEntry> | null,
   audioValidationRequirement: number,
   countStructural: boolean,
+  /** AQU-2411: the open file, for cells that don't carry their own `fileId`. */
+  fileId: string | null = null,
 ): LiveAudioCounts | null {
   if (!audioByCellId) return null
   let recorded = 0
   let audioValidated = 0
+  const shared = sharedSelections(audioByCellId.values())
   for (const cell of cells) {
     if (!countStructural && isStructuralCell(cell.type)) continue
     const entry = audioByCellId.get(cell.id)
-    if (!cellHasOwnTake(cell.id, entry) || !entry) continue
+    if (!cellHasOwnTake({ id: cell.id, fileId: cell.fileId ?? fileId }, entry, shared) || !entry) continue
     recorded += 1
     const votes = cellAudioVotes(entry)
     if (votes != null && isTakeValidated({ validatorCount: votes }, audioValidationRequirement)) {

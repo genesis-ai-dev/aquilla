@@ -53,6 +53,7 @@ export const POLICY_DIRECTION_TABLE: readonly { key: string; restrictiveDirectio
   { key: 'validationRoleFloorAudio', restrictiveDirection: 'a higher rung: reviewer < project_lead < maintainer (unset reads as reviewer)' },
   { key: 'harmonize_min_role', restrictiveDirection: 'a higher rung: project_lead < maintainer (unset reads as project_lead)' },
   { key: 'cellEditingFloor', restrictiveDirection: 'a higher rung: commenter < reviewer < contributor < project_lead < maintainer < "none" (unset reads as "none" — nobody)' },
+  { key: 'cellLabelFloor', restrictiveDirection: 'a higher rung: project_lead < maintainer (unset reads as maintainer)' },
   { key: 'validationNamedUsers', restrictiveDirection: 'empty → named, or dropping names from a non-empty list (unset/empty reads as anyone above the floor; adding a name to a non-empty list admits someone new)' },
   { key: 'validationNamedUsersAudio', restrictiveDirection: 'empty → named, or dropping names from a non-empty list (unset/empty reads as anyone above the floor; adding a name to a non-empty list admits someone new)' },
   // AQU-1771: who may see the project's member list / each member's progress.
@@ -156,6 +157,8 @@ const RULES: Readonly<Record<string, PolicyRule>> = {
     ['commenter', 'reviewer', 'contributor', 'project_lead', 'maintainer', 'none'],
     'none',
   ),
+  // db/shared/cell-label-floor.ts: an absent key admits maintainers only.
+  cellLabelFloor: ladder(['project_lead', 'maintainer'], 'maintainer'),
   rosterViewMinRole: visibilityFloorRule,
   memberProgressViewMinRole: visibilityFloorRule,
   importMinRole: importFloorRule,

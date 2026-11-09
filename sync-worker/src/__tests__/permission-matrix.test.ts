@@ -231,6 +231,13 @@ const idsDigest = (json: unknown): string => {
   return `ids=${data.map((d) => d.id ?? d.projectId ?? "?").sort().join(",")}`
 }
 
+/** AQU-2403: the roster rows, as username:role, so the golden records WHO a
+ *  principal may see and at what level, not just that the call answered 200. */
+const membersDigest = (json: unknown): string => {
+  const data = (json as { data?: Array<{ username?: string; role?: number }> })?.data ?? []
+  return `members=${data.map((m) => `${m.username ?? "?"}:${m.role ?? "?"}`).sort().join(",")}`
+}
+
 function newCellEvent(projectId: string, author: string): unknown {
   return {
     id: `evt-${projectId}-${author}-${Math.random().toString(36).slice(2, 10)}`,
@@ -264,6 +271,10 @@ function probes(principal: Principal): Probe[] {
     { method: "GET", path: `/api/v1/external/projects/${P1}` },
     { method: "GET", path: `/api/v1/external/projects/${P2}` },
     { method: "GET", path: `/api/v1/external/projects/${P1}/files` },
+    // AQU-2403: the governance roster. MAINTAINER-floored, so most principals
+    // here must get 403 — the golden is what pins "permission_denied, not an
+    // empty list" for every one of them at once.
+    { method: "GET", path: `/api/v1/external/projects/${P1}/members`, digest: membersDigest },
     { method: "GET", path: `/api/v1/external/projects/${P1}/files/${FILE}/export?lane=deflane1` },
     {
       method: "POST",

@@ -311,6 +311,12 @@ makes the work impossible to review or revert cleanly.
   checkout's versions, and Vite will not serve files from outside the worktree, so e2e
   cannot load wa-sqlite. The Playwright chromium build for this lockfile may be missing
   too. `pnpm worktree:new` does the frozen installs and `pnpm exec playwright install chromium`.
+- **An install that skipped husky leaves the hooks dead, silently.** `pnpm i
+  --ignore-scripts` — the escape hatch when a package's postinstall cannot reach its
+  download host — also skips `prepare`, so `core.hooksPath` is never set and every hook
+  does nothing (AQU-2161). After any such install, run **`pnpm check:hooks`**: it exits
+  non-zero and names the fix when the wiring is missing. `pnpm worktree:new` runs the same
+  check itself. If it fails, `pnpm run prepare` arms them.
 - **Start clean.** Before picking up a ticket, the working tree should be clean (or your
   changes stashed). Don't start AQU-B on top of AQU-A's uncommitted spillover.
 - **Don't cross-commit.** A commit's `AQU-###` must match the branch's ticket. The

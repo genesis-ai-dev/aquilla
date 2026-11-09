@@ -1,7 +1,7 @@
 // AQU-2302: the assistant works out a folder's naming only when the person
 // asks, once, with one retry at most; the rule it gives is applied and checked
 // here, and a team's saved rule is used with no call at all.
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { TargetFile, TargetLine } from "@/lib/audio/bulk-upload/match"
 
@@ -108,9 +108,18 @@ beforeEach(() => {
     return new Response("{}", { status: 404 })
   })
 })
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => {
+  // Unmount while the fetch spy is still up. React defers a render's effects
+  // past the test's last wait when the render overran the scheduler's slice
+  // (a loaded runner), and the saved-namings lookup an unmount then flushes
+  // must meet the spy, not the off-machine guard; the preview's own unmount
+  // cleanup aborts it.
+  cleanup()
+  vi.restoreAllMocks()
+})
 
 const asks = () => calls.filter((c) => c.method === "POST" && c.url.endsWith("/recording-names"))
+const lookups = () => calls.filter((c) => c.method === "GET" && c.url.includes("/recording-names/saved"))
 const saves = () => calls.filter((c) => c.method === "POST" && c.url.endsWith("/recording-names/saved"))
 const forgets = () => calls.filter((c) => c.method === "DELETE" && c.url.endsWith("/recording-names/saved"))
 const settle = (ms = 300) => new Promise((r) => setTimeout(r, ms))
@@ -162,8 +171,11 @@ async function chooseByHand(rowIndex: number, option: string) {
 describe("the assistant is offered, never asked on its own", () => {
   it("offers to work out the naming when none of the known namings fits, and asks nothing yet", async () => {
     review()
-    expect(await screen.findByTestId("recordings-assistant-ask")).toBeInTheDocument()
+    // The offer once the team's saved namings have answered: that lookup is
+    // the preview's one call, and the test ends after it, not under it.
+    expect(await enabledAsk()).toBeInTheDocument()
     expect(screen.getAllByTestId("recordings-unmatched-row")).toHaveLength(3)
+    expect(lookups()).toHaveLength(1)
     expect(asks()).toHaveLength(0)
   })
 

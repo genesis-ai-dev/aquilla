@@ -77,7 +77,7 @@ import {
 } from "./project-do-hibernation"
 import type { OutboxRawEvent } from "./project-do-types"
 import { mondayNotifyProject, notifyMondayProgress } from "./monday-notify"
-import { LINK_SYNC_INVOCATION_BUDGET_MS, mirrorSync, type MirrorSyncResult } from "./events/link-sync"
+import { LINK_SYNC_INVOCATION_BUDGET_MS, mirrorSync, r2RevisionManifestReader, type MirrorSyncResult } from "./events/link-sync"
 import { makePostgres } from "../../db/shim/postgres"
 import { createRerunSingleFlight } from "./lib/rerun-single-flight"
 import { serviceBearerMatches } from "./lib/service-auth"
@@ -239,6 +239,8 @@ interface ConnectionState {
 
 interface DOEnv {
   SYNC_SECRET_KEY?: string
+  /** AQU-2459: the worker's R2 bucket; link sync reads revision manifests. */
+  SNAPSHOTS?: R2Bucket
   ALLOW_UNAUTHENTICATED?: string
   /**
    * Deployment label ("production" | "development" | "local" | unset). Read
@@ -404,7 +406,10 @@ export class ProjectSync extends DurableObject<DOEnv> {
       // AQU-1563: one invocation does a bounded slice of a large sync and
       // reports `more`; the /link/sync route calls again until the link is
       // caught up, so neither CPU time nor memory here grows with the upstream.
-      return await mirrorSync(db as AquillaDb, projectId, { budgetMs: LINK_SYNC_INVOCATION_BUDGET_MS })
+      return await mirrorSync(db as AquillaDb, projectId, {
+        budgetMs: LINK_SYNC_INVOCATION_BUDGET_MS,
+        readRevisionManifest: r2RevisionManifestReader(this.env.SNAPSHOTS),
+      })
     } finally {
       if (!this.env.AQUILLA_PG) void (db as { close(): Promise<void> }).close?.()
     }

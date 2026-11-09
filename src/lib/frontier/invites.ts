@@ -34,7 +34,7 @@ export async function getOrgInvites(jwt: string, orgId: number): Promise<OrgInvi
     `${FRONTIER_BASE}/api/v2/orgs/${orgId}/invites`,
     { headers: authHeaders(jwt) },
   )
-  await throwIfElevationRequired(res, "org invites")
+  await throwIfElevationRequired(res, "org")
   if (!res.ok) throw new UserError(res.status, await readError(res))
   return ((await res.json()) as { invites: OrgInvite[] }).invites
 }
@@ -47,7 +47,7 @@ export async function revokeOrgInvite(jwt: string, orgId: number, token: string)
       headers: authHeaders(jwt),
     },
   )
-  await throwIfElevationRequired(res, "revoke org invite")
+  await throwIfElevationRequired(res, "invite")
   if (!res.ok) throw new UserError(res.status, await readError(res))
 }
 
@@ -79,7 +79,7 @@ export async function createAccessLink(
       body: JSON.stringify(body),
     },
   )
-  await throwIfElevationRequired(res, "create access link")
+  await throwIfElevationRequired(res, "invite")
   if (!res.ok) throw new UserError(res.status, await readError(res))
   return (await res.json()) as CreateAccessLinkResponse
 }
@@ -92,7 +92,7 @@ export async function revokeAccessLink(jwt: string, token: string): Promise<void
       headers: authHeaders(jwt),
     },
   )
-  await throwIfElevationRequired(res, "revoke access link")
+  await throwIfElevationRequired(res, "invite")
   if (!res.ok) throw new UserError(res.status, await readError(res))
 }
 
@@ -125,7 +125,7 @@ export async function createMultiProjectInvite(
       body: JSON.stringify(body),
     },
   )
-  await throwIfElevationRequired(res, "create multi-project invite")
+  await throwIfElevationRequired(res, "invite")
   if (!res.ok) throw new UserError(res.status, await readError(res))
   return (await res.json()) as CreateMultiProjectInviteResponse
 }

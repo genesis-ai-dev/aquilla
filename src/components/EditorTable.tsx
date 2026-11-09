@@ -49,12 +49,14 @@ import { cellNeedsSourceReview } from "@/lib/cells/source-review"
 import { lockHolderForCell } from "@/hooks/useFocusLock"
 import {
   type CellFootnoteDetails,
+  type CellNavigationEntry,
   type CellStore,
   readAtVersion,
   useCellIds,
   useCellStoreVersion,
   useCellView,
 } from "@/hooks/useActiveCellStore"
+import { userMilestoneIdFromKey } from "@/lib/editor/user-milestone-spans"
 import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
 import {
   audioColumnFor, fileHasAudio, fileLastSeenWithAudio, rememberFileAudio, type AudioColumn,
@@ -139,6 +141,8 @@ import { useManualStyleAlign, useStyleAlignDirtyMatch } from "@/lib/store/style-
 import { useIsMediaCursorCell, useMediaSyncActive } from "@/lib/timeline/media-cursor"
 import { useUiSlot } from "@/lib/ui-slots"
 import { CastGutterVoice } from "@/components/voice/CastGutterVoice"
+import { CellLabelRow } from "@/components/CellLabelRow"
+import { canEditCellLabel } from "@/lib/cell-label-gate"
 import { projectTargetLaneLanguages, showVoiceLanguageBadge } from "@/lib/audio/inworld-voices"
 import { queueClockIsFileTime, useIsQueueCurrentCell, useQueueCellPlayhead, useQueueCurrentCellId } from "@/lib/audio/play-queue"
 import { useVideoClockPlaying, useVideoSoundingCellId } from "@/lib/timeline/video-clock"
@@ -151,7 +155,8 @@ import {
 } from "@/lib/editor/cell-rail-pin"
 import { shouldDismissCellErrorsOnBlur } from "@/lib/editor/cell-error-dismiss"
 import { openActivationInputCapture, type ActivationInputCapture } from "@/lib/editor/activation-input-capture"
-import { CellExpansion } from "./CellExpansion"
+import { CellExpansion, type CellExpansionTab } from "./CellExpansion"
+import { CellDetailDialog } from "./CellDetailDialog"
 import { CellMetadataTab, hasCellMetadata } from "./CellMetadataTab"
 import { displayFieldLabel, displayFieldValue, useCellDisplayFields } from "@/lib/store/cell-display-fields"
 import { activeWordRange, findActiveTimingIndex } from "@/lib/audio/timings"
@@ -213,10 +218,15 @@ import {
 import { TargetDraftActions, TargetReferenceActions } from "./cell/TargetCellActions"
 import { TargetValidationControl } from "./cell/TargetValidationControl"
 import { AudioValidationControl } from "./cell/AudioValidationControl"
+import { CellAudioPlayControl } from "./cell/CellAudioPlayControl"
 import { audioBlockedReason, lineValidationTakes } from "@/lib/audio/audio-validation-permissions"
 import { slotSelections } from "@/lib/sync/cell-audio-read-types"
 import { takePlayWindow } from "@/lib/audio/kept-window"
-import { MilestoneNavigator, type MilestoneNavigationItem } from "./ChapterNavigator"
+import {
+  MilestoneNavigator,
+  type MilestoneNavigationItem,
+  type MilestoneNavigatorEditing,
+} from "./ChapterNavigator"
 import type { LaneDelivers } from "@/lib/lanes/lane-delivers"
 import { PericopeSuggestions } from "./PericopeSuggestions"
 import type { PericopeSuggestion } from "@/lib/pericope/suggest"
@@ -1102,6 +1112,10 @@ interface EditorTableProps {
   /** AQU-1408 §1: called when the user saves a correction to the statistical
    *  gloss. Parent emits `cell.gloss.set`. Empty text withdraws the correction. */
   onSaveGloss?: (cell: CellData, glossText: string) => void
+  /** AQU-2408: called when the person saves the cell's own label from the
+   *  expansion panel's Label row. Parent emits `cell.label.set`; null clears.
+   *  Metadata, never a voice (docs/decisions/0007). */
+  onSaveCellLabel?: (cell: CellData, label: string | null) => void
   /** The statistical gloss to show for a cell: the contributor's saved
    *  correction when one still describes this text, else the corpus-derived
    *  gloss computed on demand (AQU-1408 §1). */
@@ -1230,6 +1244,13 @@ interface EditorTableProps {
   /** Optional controls on the right of the chapter navigation row. */
   chapterNavTrailing?: React.ReactNode
   /**
+   * AQU-2310: rename / edit range / remove a milestone from a navigator row,
+   * and "New milestone…". Passed unconditionally, like `onSetMilestone`: the
+   * table applies the same role and live-link gate the cell menu does, so the
+   * navigator and the cell menu cannot disagree about who may divide a file.
+   */
+  milestoneEditing?: MilestoneNavigatorEditing
+  /**
    * AQU-1758: the chapter (milestone key) the table is on, whenever it
    * changes — the one the chapter picker names. A book's timeline shows this
    * chapter. Null when the file has no chapters.
@@ -1263,6 +1284,56 @@ interface EditorTableProps {
   onAdoptVoicesAsCast?: (assignments: readonly VoiceCastAssignment[]) => void
 }
 
+/**
+ * AQU-2308: may this person name, rename, re-range or remove a run of this
+ * file's lines? One answer for the cell menu and the navigator (AQU-2310).
+ *
+ * `canPerform` against the SAME role table `file.milestone.set` is enforced
+ * by, not a re-derived rank — and it is the Maintainer floor, a rung above
+ * the park/edit-source gate, because a division relayouts the navigator for
+ * everyone who opens the file. (`file.milestone.remove` sits on the same rung.)
+ *
+ * The live-link test is the one `canEditSource` makes for itself: a
+ * downstream project mirroring another's source is read-only structure, so
+ * the entries are absent for every role there. It is NOT gated on
+ * `canEditSource` itself — that flag is forced false by a DCS pin for every
+ * role, and a DCS pin protects the source TEXT; which divisions this file is
+ * navigated by is still this project's own business.
+ */
+function maySetMilestonesIn(project: ProjectRecord): boolean {
+  return canPerform("file.milestone.set", project.syncRole?.level ?? null)
+    && project.sourceLinkMode !== "live"
+}
+
+/**
+ * AQU-2310: the hand-set milestones nested inside one division, for a file
+ * whose navigator does not list jump ranges (anything but IDML).
+ *
+ * The store already lists them as the division's subsections (AQU-2308), but
+ * only IDML files ever passed subsections to the navigator, so on a Scripture
+ * file "The calming of the storm" was derived and never shown. They travel as
+ * `named`, not `subsections`, so the chapter stays a destination of its own.
+ */
+function namedSubsectionsOf(entry: CellNavigationEntry): Pick<MilestoneNavigationItem, "named"> {
+  const named = entry.subsections.filter((subsection) => (
+    userMilestoneIdFromKey(subsection.key) !== null
+  ))
+  if (named.length === 0) return {}
+  return {
+    named: named.map((subsection) => ({
+      key: subsection.key,
+      label: subsection.label,
+      firstCellId: subsection.firstCellId,
+      translated: subsection.translated,
+      validated: subsection.validated,
+      total: subsection.total,
+      textTranslated: subsection.textTranslated,
+      audioRecorded: subsection.audioRecorded,
+      audioValidated: subsection.audioValidated,
+    })),
+  }
+}
+
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
   project, cellStore, fileType, username, activeLane = "", activeLaneId = null, audioOnlyLane = false, laneDelivers = null, lanes, archivedLanes, archivedLaneLabel = null, languagesLoading = false, onLaneChange, scopedLanes, defaultLaneLabel, laneLabels, laneCodes,
   onEditTargetLanguage, onAddLane,
@@ -1274,7 +1345,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   backtranslationByCellId,
   linkedTakesByCell,
   heardLinesLoading = false,
-  onSaveBacktranslation, onSaveGloss, getStatisticalBt,
+  onSaveBacktranslation, onSaveGloss, onSaveCellLabel, getStatisticalBt,
   cellOpenCommentCount,
   onSeekToCue,
   playingCueCellId = null,
@@ -1311,6 +1382,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onVisibleFootnotesChange,
   onFootnoteCreated,
   chapterNavTrailing,
+  milestoneEditing,
   onActiveChapterChange,
   onChapterPicked,
   bibleOpen = false,
@@ -2123,6 +2195,52 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     return true
   }, [clearChapterNavigationSelection, flashCellDom, programmaticListScroll, revealCellPage])
 
+  // AQU-2021: which cell has its detail view open as a pop-up modal (Joel
+  // could only reach that view through the small chevron on the hover rail).
+  // The state is the TABLE's, not the row's, for two reasons: only one cell's
+  // details may be open at a time, and previous/next has to walk
+  // `displayCellIds` — which the row cannot see.
+  const [detailCellId, setDetailCellId] = useState<string | null>(null)
+  const detailCellIdRef = useRef<string | null>(null)
+  detailCellIdRef.current = detailCellId
+
+  const openCellDetail = useCallback((cellId: string) => {
+    setDetailCellId(cellId)
+  }, [])
+
+  const closeCellDetail = useCallback(() => {
+    setDetailCellId(null)
+  }, [])
+
+  /**
+   * Step the open modal to the cell before or after it, in DISPLAY order.
+   *
+   * The scroll is not cosmetic: the list is virtualized (LegendList recycles
+   * rows), the dialog is rendered by the row whose cell is open, and the modal
+   * covers the table — so without bringing the new row into the window, a few
+   * steps would walk out of it and the dialog would unmount mid-read.
+   */
+  const stepCellDetail = useCallback((delta: 1 | -1) => {
+    const current = detailCellIdRef.current
+    if (!current) return
+    const list = displayCellIdsRef.current
+    const index = list.indexOf(current)
+    if (index < 0) return
+    const next = list[index + delta]
+    if (!next) return
+    setDetailCellId(next)
+    scrollToDisplayCell(next)
+  }, [scrollToDisplayCell])
+
+  // A cell that leaves the displayed list (filter, chapter page, file switch)
+  // takes its modal with it — the same guard `activeEditorCellId` and
+  // `focusedRailCellId` carry above.
+  useEffect(() => {
+    if (!detailCellId) return
+    if (displayCellIds.includes(detailCellId)) return
+    setDetailCellId(null)
+  }, [detailCellId, displayCellIds])
+
   /**
    * AQU-1636: a row whose audio has just started asks to be brought into
    * view. The row cannot do this itself: the list is virtualized with
@@ -2580,7 +2698,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                   audioValidated: subsection.audioValidated,
                 })),
               }
-            : {}),
+            : namedSubsectionsOf(entry)),
         }
       })
     }),
@@ -2712,7 +2830,10 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   const handleChapterSelect = useCallback((key: string, subsectionKey?: string) => {
     const entry = milestoneNavigation.find((candidate) => candidate.key === key)
-    const subsection = idmlMilestoneNavigation
+    // AQU-2310: a hand-set milestone nested under a chapter is listed on every
+    // file, not only IDML, so its key is a place to go on every file too.
+    const subsection = subsectionKey
+      && (idmlMilestoneNavigation || userMilestoneIdFromKey(subsectionKey) !== null)
       ? entry?.subsections.find((candidate) => candidate.key === subsectionKey)
       : undefined
     const targetCellId = subsection?.firstCellId ?? entry?.firstCellId
@@ -3127,6 +3248,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           audioOnlyLane={audioOnlyLane}
           isEditorActive={activeEditorCellId === cell.id}
           isRowFocused={isRailFocusPinned(focusedRailCellId, cell.id)}
+          detailOpen={detailCellId === cell.id}
+          detailHasPrev={index > 0}
+          detailHasNext={index < displayCellIds.length - 1}
+          onOpenCellDetail={openCellDetail}
+          onCloseCellDetail={closeCellDetail}
+          onStepCellDetail={stepCellDetail}
           onRowFocusPin={handleRowFocusPin}
           onRowFocusRelease={handleRowFocusRelease}
           onClearCellErrors={onClearCellErrors}
@@ -3188,6 +3315,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onBacktranslate={onBacktranslate}
           onSaveBacktranslation={onSaveBacktranslation}
           onSaveGloss={onSaveGloss}
+          onSaveCellLabel={onSaveCellLabel}
           getStatisticalBt={getStatisticalBt}
           getFootnoteDetails={getFootnoteDetails}
           cellOpenCommentCount={cellOpenCommentCount}
@@ -3274,6 +3402,14 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     castGutter,
     ttsSettings,
     focusedRailCellId,
+    // AQU-2021: which cell's detail modal is open has to be a dependency for
+    // the same reason `activeEditorCellId` is — the rendered rows carry it as
+    // a prop, so a stale `renderItem` would leave LegendList showing the old
+    // answer. The three handlers beside it are stable.
+    detailCellId,
+    openCellDetail,
+    closeCellDetail,
+    stepCellDetail,
     handleRowFocusPin,
     handleRowFocusRelease,
     onClearCellErrors,
@@ -3350,6 +3486,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     onReleaseCell,
     onSaveBacktranslation,
     onSaveGloss,
+    onSaveCellLabel,
     onSeekToCue,
     playingCueCellId,
     onPauseCue,
@@ -3375,6 +3512,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   const showMilestoneNav = !castGutter && milestoneNavigationItems.length > 0 && Boolean(activeChapterLabel)
   const showStripNav = castGutter && milestoneNavigationItems.length > 0 && Boolean(activeChapterLabel)
+  // AQU-2310: the navigator's edit controls answer to the same gate as the
+  // cell menu's "Set a new milestone…".
+  const navigatorMilestoneEditing = maySetMilestonesIn(project) ? milestoneEditing : undefined
   // The strip registers its slot by name — it is itself portaled into the
   // media band (one commit after this table), so the old one-shot
   // querySelector in a mount effect would run too early and never retry.
@@ -3404,6 +3544,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 onSelect={handleChapterSelect}
                 pageByMilestone={splitByMilestone}
                 delivers={laneDelivers}
+                editing={navigatorMilestoneEditing}
               />
             </div>
             {/* AQU-515 — renders nothing unless the file addresses scripture
@@ -3478,6 +3619,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 onSelect={handleChapterSelect}
                 pageByMilestone={splitByMilestone}
                 delivers={laneDelivers}
+                editing={navigatorMilestoneEditing}
               />
             </div>,
             stripNavSlot,
@@ -4330,6 +4472,19 @@ interface MemoizedRowProps {
    *  the table's `focusedRailCellId`). Drives the rail's focus pin so a stale
    *  focus-out on some other row can never keep its rail revealed. */
   isRowFocused: boolean
+  /** AQU-2021: this cell's detail view is open as a pop-up modal. The table
+   *  owns which cell that is — only one may be open, and previous/next walks
+   *  the displayed list, which a row cannot see. */
+  detailOpen: boolean
+  /** AQU-2021: a cell precedes / follows this one in the displayed list, so
+   *  the modal's previous / next control is live. */
+  detailHasPrev: boolean
+  detailHasNext: boolean
+  /** AQU-2021: double-clicking the row opens its detail view. */
+  onOpenCellDetail: (cellId: string) => void
+  onCloseCellDetail: () => void
+  /** AQU-2021: move the open modal one cell back (-1) or on (+1). */
+  onStepCellDetail: (delta: 1 | -1) => void
   /** AQU-669: called when focus enters this row — sets the exclusive owner. */
   onRowFocusPin: (cellId: string) => void
   /** AQU-669: called when focus leaves this row — clears the owner if still ours. */
@@ -4447,6 +4602,7 @@ interface MemoizedRowProps {
   onBacktranslate?: (cell: CellData, source: BacktranslationActionSource) => void
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
   onSaveGloss?: (cell: CellData, glossText: string) => void
+  onSaveCellLabel?: (cell: CellData, label: string | null) => void
   getStatisticalBt?: (translatedText: string, cellId: string) => GlossReading
   getFootnoteDetails: (cellId: string) => CellFootnoteDetails
   cellOpenCommentCount?: Map<string, number>
@@ -4543,6 +4699,12 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     targetFontSize,
     isEditorActive,
     isRowFocused,
+    detailOpen,
+    detailHasPrev,
+    detailHasNext,
+    onOpenCellDetail,
+    onCloseCellDetail,
+    onStepCellDetail,
     onRowFocusPin,
     onRowFocusRelease,
     onClearCellErrors,
@@ -4556,7 +4718,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     structuralEditing, untimedInserts,
     insertAboveStartSec, insertAboveEndSec, insertBelowStartSec, insertBelowEndSec,
     prevStartSec, nextStartSec, timedFile,
-    isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation, onSaveGloss, getStatisticalBt,
+    isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation, onSaveGloss, onSaveCellLabel, getStatisticalBt,
     getFootnoteDetails,
     onSeekToCue, cuePlaying, onPauseCue, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled,
     sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, isAnonymous,
@@ -4706,6 +4868,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onBacktranslate={onBacktranslate}
         onSaveBacktranslation={onSaveBacktranslation}
         onSaveGloss={onSaveGloss}
+        onSaveCellLabel={onSaveCellLabel}
         getStatisticalBt={getStatisticalBt}
         getFootnoteDetails={getFootnoteDetails}
         openCommentCount={openCommentCount}
@@ -4769,6 +4932,12 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onFootnoteCreated={onFootnoteCreated}
         sourceFootnoteNumberOffset={sourceFootnoteNumberOffset}
         targetFootnoteNumberOffset={targetFootnoteNumberOffset}
+        detailOpen={detailOpen}
+        detailHasPrev={detailHasPrev}
+        detailHasNext={detailHasNext}
+        onOpenCellDetail={onOpenCellDetail}
+        onCloseCellDetail={onCloseCellDetail}
+        onStepCellDetail={onStepCellDetail}
       />
     </div>
   )
@@ -4786,6 +4955,19 @@ interface EditorRowProps {
   /** Media redesign slice 2: no text check mark in an Audio language. */
   audioOnlyLane?: boolean
   isEditorActive: boolean
+  /** AQU-2021: this cell's detail view is open as a pop-up modal. The table
+   *  owns which cell that is — only one may be open, and previous/next walks
+   *  the displayed list, which a row cannot see. */
+  detailOpen: boolean
+  /** AQU-2021: a cell precedes / follows this one in the displayed list, so
+   *  the modal's previous / next control is live. */
+  detailHasPrev: boolean
+  detailHasNext: boolean
+  /** AQU-2021: double-clicking the row opens its detail view. */
+  onOpenCellDetail: (cellId: string) => void
+  onCloseCellDetail: () => void
+  /** AQU-2021: move the open modal one cell back (-1) or on (+1). */
+  onStepCellDetail: (delta: 1 | -1) => void
   /** AQU-669: this row is the single exclusive focus-pin owner. */
   isRowFocused: boolean
   /** AQU-669: report focus entering / leaving this row to the exclusive owner. */
@@ -4891,6 +5073,7 @@ interface EditorRowProps {
   onBacktranslate?: (cell: CellData, source: BacktranslationActionSource) => void
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
   onSaveGloss?: (cell: CellData, glossText: string) => void
+  onSaveCellLabel?: (cell: CellData, label: string | null) => void
   getStatisticalBt?: (translatedText: string, cellId: string) => GlossReading
   getFootnoteDetails: (cellId: string) => CellFootnoteDetails
   /** FRO-207: Lazily returns the interlinear alignment model. */
@@ -5824,7 +6007,9 @@ function MetadataFieldLabels({
 const NO_TOKEN = () => Promise.resolve(null)
 
 function EditorRow({
-  project, cell, linkedTakes, audioColumn, audioOnlyLane = false, isEditorActive, isRowFocused, onRowFocusPin, onRowFocusRelease, onClearCellErrors, onActivateEditor, getEditorActivationVersion, onDeactivateEditor,
+  project, cell, linkedTakes, audioColumn, audioOnlyLane = false, isEditorActive, isRowFocused,
+  detailOpen, detailHasPrev, detailHasNext, onOpenCellDetail, onCloseCellDetail, onStepCellDetail,
+  onRowFocusPin, onRowFocusRelease, onClearCellErrors, onActivateEditor, getEditorActivationVersion, onDeactivateEditor,
   username, activeLane = "", editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable, isLoading,
   completionPreview, loadingPhase,
   cellExamples, exampleOriginFor, highlights, error, healthRibbonPoint,
@@ -5837,6 +6022,7 @@ function EditorRow({
   prevStartSec = null, nextStartSec = null, timedFile,
   isBacktranslationConfigured, isBacktranslating, backtranslationError, onBacktranslate, onSaveBacktranslation,
   onSaveGloss,
+  onSaveCellLabel,
   getStatisticalBt,
   getFootnoteDetails,
   openCommentCount,
@@ -6114,6 +6300,15 @@ function EditorRow({
   const [localTargetDraft, setLocalTargetDraft] = useState<{ value: string; valueHtml?: string } | null>(null)
   const [expanded, setExpanded] = useState(false)
   const [expansionTab, setExpansionTab] = useState<string>("backtranslation")
+  // AQU-2021: the detail view is reachable two ways now — the rail chevron
+  // (`expanded`, the panel that drops under the row) and a double-click on the
+  // row (`detailOpen`, the same tabs in a pop-up modal). Everything that is
+  // about the TABS being on screen — which tab opens first, whether the
+  // back-translation alignment model is worth loading — keys off this flag, so
+  // both surfaces behave the same. Everything about the ROW's own appearance
+  // (its shading, the rail pin, `data-cell-expanded`) still keys off
+  // `expanded`: the modal is not the row opening up.
+  const detailPanelOpen = expanded || detailOpen
   const [btAlignmentOpen, setBtAlignmentOpen] = useState(false)
   const hasSourceFootnoteMarker = (cell.original ?? "").includes("\\f")
   // AQU-646 stage 3f: where this row's audio belongs — itself on every ordinary
@@ -6231,24 +6426,7 @@ function EditorRow({
     ? () => onSetCellHidden(cell.id, !cellHidden)
     : undefined
 
-  /**
-   * AQU-2308: may this person name a range of this file's lines?
-   *
-   * `canPerform` against the SAME role table `file.milestone.set` is enforced
-   * by, not a re-derived rank — and it is the Maintainer floor, a rung above
-   * the park/edit-source gate above, because a division relayouts the
-   * navigator for everyone who opens the file.
-   *
-   * The live-link test is the one `canEditSource` makes for itself: a
-   * downstream project mirroring another's source is read-only structure, so
-   * the entry is absent for every role there. It is NOT gated on
-   * `canEditSource` itself — that flag is forced false by a DCS pin for every
-   * role, and a DCS pin protects the source TEXT; which divisions this file is
-   * navigated by is still this project's own business.
-   */
-  const maySetMilestones = canPerform("file.milestone.set", project.syncRole?.level ?? null)
-    && project.sourceLinkMode !== "live"
-  const onSetMilestoneForCell = maySetMilestones && onSetMilestone
+  const onSetMilestoneForCell = maySetMilestonesIn(project) && onSetMilestone
     ? () => onSetMilestone(cell.id)
     : undefined
 
@@ -6390,7 +6568,7 @@ function EditorRow({
   const showFootnotesInExpansion = footnoteViewMode === "off" && mayHaveFootnotes
   const shouldHydrateFootnotes =
     showFootnotesInline ||
-    (expanded && expansionTab === "footnotes" && showFootnotesInExpansion)
+    (detailPanelOpen && expansionTab === "footnotes" && showFootnotesInExpansion)
   const allFootnotes = useMemo(
     () => shouldHydrateFootnotes ? getFootnoteDetails(cell.id) : EMPTY_CELL_FOOTNOTE_DETAILS,
     [cell.id, cell.original, visibleTranslated, getFootnoteDetails, shouldHydrateFootnotes],
@@ -7835,6 +8013,13 @@ function EditorRow({
   // it is always a string and never nullish, and cell.transcription was never
   // consulted.) The 40px gutter column is reserved unconditionally, so a
   // missing circle read as a missing CONTROL rather than a missing column.
+  // AQU-2408: who may type the cell's label. The project's tier (maintainer
+  // unless opened to project leads) is enforced here, where the field is drawn,
+  // exactly as the cell-editing tier is; the server's static floor (project
+  // lead) sits underneath. docs/decisions/0007-cell-labels-are-metadata-never-cast.md.
+  const mayEditCellLabel =
+    Boolean(onSaveCellLabel) &&
+    canEditCellLabel({ roleLevel: project.syncRole?.level ?? null, settings: project })
   const speaksInGutter = castGutter && !isStructuralCell(cell.type)
   const gutterVoice = speaksInGutter
     ? resolveCastVoice(ttsSettings, cell, cell.ttsSettings?.voiceId)
@@ -7907,10 +8092,10 @@ function EditorRow({
 
   // ── Expansion state ───────────────────────────────────────────────────────
   const alignmentModelForExpansion = useMemo(() => {
-    if (!btAlignmentOpen || !expanded || expansionTab !== "backtranslation") return null
+    if (!btAlignmentOpen || !detailPanelOpen || expansionTab !== "backtranslation") return null
     if (!cell.original.trim() || !visibleTranslated.trim()) return null
     return getAlignmentModel?.() ?? null
-  }, [btAlignmentOpen, cell.original, visibleTranslated, expanded, expansionTab, getAlignmentModel])
+  }, [btAlignmentOpen, cell.original, visibleTranslated, detailPanelOpen, expansionTab, getAlignmentModel])
 
   // AQU-462: original-language morphology for the Macula Hebrew/Greek source
   // behind this row. Gated on the same open-alignment condition as the model
@@ -7918,7 +8103,7 @@ function EditorRow({
   // read for the row a translator is looking at, never for the file. Files with
   // no morphology answer with an empty list and the strip stays hidden.
   const { words: originalWords } = useCellMorph({
-    enabled: btAlignmentOpen && expanded && expansionTab === "backtranslation",
+    enabled: btAlignmentOpen && detailPanelOpen && expansionTab === "backtranslation",
     projectId: project.id,
     fileId: cell.fileId ?? null,
     cellId: cell.id,
@@ -7959,14 +8144,17 @@ function EditorRow({
           ? "amber"
           : null
 
-  // AQU-200: the `⋯` now hides the two rail buttons that carried an
-  // at-a-glance signal of their own — open comments (primary dot) and an
-  // existing take (emerald dot on Play). Collapsing them must not make the
-  // row read as "nothing here", so the strongest of those signals moves onto
-  // the trigger. Comments win: an unread comment is addressed to a person,
-  // where "this line has audio" is only a state.
-  const railOverflowAttentionDot: "emerald" | "primary" | null =
-    openCommentCount > 0 ? "primary" : hasAudio ? "emerald" : null
+  // AQU-200 put a dot here for the two rail buttons it hid that carried an
+  // at-a-glance signal of their own — open comments (primary) and an existing
+  // take (emerald on Play) — so that collapsing them would not make the row
+  // read as "nothing here".
+  //
+  // AQU-2401: Play is visible again, in the gutter, so the emerald dot has
+  // nothing left to stand for — "this line has audio" is now said by the
+  // button itself being live rather than faded, a few pixels from the check
+  // that counts it. The dot is the open-comments signal only.
+  const railOverflowAttentionDot: "primary" | null =
+    openCommentCount > 0 ? "primary" : null
 
   // First-open auto-tab: prefer the most-attention-worthy tab — and in Media,
   // or in a language that delivers Audio, Recording (Sam, 2026-09-29;
@@ -7975,7 +8163,7 @@ function EditorRow({
   // clicks) wins. `castGutter` is the table under the timeline: Media.
   const previousExpandedRef = useRef(false)
   useEffect(() => {
-    if (expanded && !previousExpandedRef.current) {
+    if (detailPanelOpen && !previousExpandedRef.current) {
       setExpansionTab(initialExpansionTab({
         hasIssues: cellInfractions.length > 0,
         transcriptNeedsAttention,
@@ -7983,8 +8171,8 @@ function EditorRow({
         media: castGutter,
       }))
     }
-    previousExpandedRef.current = expanded
-  }, [expanded, cellInfractions.length, transcriptNeedsAttention, audioOnlyLane, castGutter])
+    previousExpandedRef.current = detailPanelOpen
+  }, [detailPanelOpen, cellInfractions.length, transcriptNeedsAttention, audioOnlyLane, castGutter])
 
   useEffect(() => {
     if (expansionTab === "footnotes" && !showFootnotesInExpansion) {
@@ -7993,8 +8181,8 @@ function EditorRow({
   }, [expansionTab, showFootnotesInExpansion])
 
   useEffect(() => {
-    if (!expanded || expansionTab !== "backtranslation") setBtAlignmentOpen(false)
-  }, [expanded, expansionTab])
+    if (!detailPanelOpen || expansionTab !== "backtranslation") setBtAlignmentOpen(false)
+  }, [detailPanelOpen, expansionTab])
 
   // AQU-354: reveal the rail on the ephemeral triggers, but idle-collapse it
   // after a short pause so it stops covering the "changed elsewhere while you
@@ -8027,11 +8215,11 @@ function EditorRow({
   // live "as you translate" check and AI-vs-pairs disagreement can render
   // without waiting on a collapsed expander.
   const glossReading = useMemo((): GlossReading => {
-    if (!expanded || expansionTab !== "backtranslation" || !visibleTranslated.trim()) {
+    if (!detailPanelOpen || expansionTab !== "backtranslation" || !visibleTranslated.trim()) {
       return EMPTY_GLOSS_READING
     }
     return getStatisticalBt?.(visibleTranslated, cell.id) ?? EMPTY_GLOSS_READING
-  }, [expanded, expansionTab, visibleTranslated, getStatisticalBt, cell.id])
+  }, [detailPanelOpen, expansionTab, visibleTranslated, getStatisticalBt, cell.id])
 
   // Stable rail handlers
   const handleRowMouseEnter = () => {
@@ -8117,6 +8305,25 @@ function EditorRow({
       e.preventDefault()
       e.stopPropagation()
     }
+  }
+
+  /**
+   * AQU-2021: double-click the row → open this cell's detail view as a pop-up
+   * modal. Before this, the only way in was the small chevron on the hover
+   * rail, which testers did not find.
+   *
+   * `isInteractiveTarget` is the whole guard against breaking text selection:
+   * it matches `[contenteditable=true]`, so a double-click inside the open
+   * TipTap editor still selects a word and never opens the modal. It also
+   * spares buttons, links and inputs, whose own double-click means something
+   * else. Cmd/Ctrl-double-click belongs to multi-select (see handleRowClick).
+   */
+  const handleRowDoubleClick = (e: React.MouseEvent) => {
+    if (e.metaKey || e.ctrlKey) return
+    if (isInteractiveTarget(e.target)) return
+    e.preventDefault()
+    e.stopPropagation()
+    onOpenCellDetail(cell.id)
   }
 
   // Inline rule click → open the standard bottom-right violation toast. Keep
@@ -8331,6 +8538,25 @@ function EditorRow({
     />
   )
 
+  // AQU-2401: Play sits in the gutter beside that check, not behind the `⋯`.
+  // Same gate as the check — wherever the audio column is drawn, and nowhere
+  // else — and the same controller the rail button used, so the clip, its
+  // window and the loading state are unchanged. Not gated on `editable`:
+  // listening is not editing.
+  const audioPlayControl = audioColumn === "off" ? null : (
+    <CellAudioPlayControl
+      cellRef={cellRef}
+      checking={audioColumn === "checking"}
+      hasTake={hasAudio}
+      playing={railPlaying}
+      loading={audioController.state === "loading"}
+      onToggle={() => {
+        if (audioController.isPlaying) audioController.pause()
+        else void audioController.play()
+      }}
+    />
+  )
+
   const cellStateLabel =
     cell.status === "validated" ? t("editor.state.validated") :
     cell.status === "empty" ? t("editor.state.empty") :
@@ -8497,6 +8723,7 @@ function EditorRow({
         onBlurCapture={handleRowBlurCapture}
         onMouseDownCapture={handleRowMouseDownCapture}
         onClick={handleRowClick}
+        onDoubleClick={handleRowDoubleClick}
         onKeyDown={handleGridRowKeyDown}
         // AQU-2173: the `⋯` menu now opens without taking the caret off this
         // row's editor, so an Escape meant to dismiss the menu would otherwise
@@ -9082,6 +9309,7 @@ function EditorRow({
             <div className="flex flex-1 gap-1.5">
               {validationControl}
               {audioValidationControl}
+              {audioPlayControl}
             <EditorTargetCellWell
               className={showStyleAlignWarning || showPassToStyleSegments ? "pb-5 pe-6" : undefined}
               onClick={(event) => {
@@ -9689,30 +9917,11 @@ function EditorRow({
                 />
               )}
 
-              {hasAudio && (
-                <RailButton
-                  icon={
-                    railPlaying ? (
-                      <Pause className="h-3.5 w-3.5" />
-                    ) : (
-                      <Play className="h-3.5 w-3.5" />
-                    )
-                  }
-                  tooltip={railPlaying ? t("common.pause") : t("editor.audio.play")}
-                  onClick={() => {
-                    if (audioController.state === "loading") return
-                    if (audioController.isPlaying) audioController.pause()
-                    else void audioController.play()
-                  }}
-                  disabled={audioController.state === "loading"}
-                  toneClass={
-                    railPlaying
-                      ? "text-primary hover:text-primary"
-                      : undefined
-                  }
-                  dot="emerald"
-                />
-              )}
+              {/* AQU-2401: Play for this line's recording is no longer here —
+                  it is a direct button in the left validation gutter, beside
+                  the audio check it answers (`audioPlayControl`). "Play from
+                  this cue", further down, is a different button on a different
+                  sound (the file's master audio) and stays. */}
 
               {/* Round 5: no playOnly — generating here durably attaches the
                   voice; an untranslated line shows the button disabled with
@@ -9740,7 +9949,6 @@ function EditorRow({
                 text={visibleTranslated}
                 original={effectiveSourceText(cell)}
                 context={cell.context}
-                cellLabel={cell.cellLabel}
                 sourceLanguage={project.sourceLanguage}
                 targetLanguage={project.targetLanguage}
                 projectTtsSettings={project.ttsSettings}
@@ -9847,14 +10055,13 @@ function EditorRow({
           waveform + transcript, infractions detail, edit history. Indented to
           align under the content columns (past the gutter) so it reads as the
           row's child, and only mounted while open so collapsed rows stay flush. */}
-      {expanded && (
-      <div className="ps-[3.75rem] pe-4 pb-2">
-        <CellExpansion
-          open={expanded}
-          tab={expansionTab}
-          onTabChange={setExpansionTab}
-          onClose={() => setExpanded(false)}
-          tabs={[
+      {detailPanelOpen && (() => {
+        // AQU-2021: ONE set of tabs, two surfaces. The chevron on the rail
+        // drops them under the row (`expanded`); a double-click on the row puts
+        // the same tabs in a pop-up modal (`detailOpen`), where the cell has
+        // the screen to itself. Built here, in the row, because every tab's
+        // content is wired to this row's data and callbacks.
+        const detailTabs: CellExpansionTab[] = [
             {
               value: "health",
               icon: <Activity className="h-3 w-3" />,
@@ -10073,10 +10280,53 @@ function EditorRow({
               label: t("extensions.inline.tab"),
               renderContent: () => <InlineToolsTab fileId={cell.fileId} cellId={cell.id} />,
             }] : []),
-          ]}
-        />
-      </div>
-      )}
+        ]
+        // The cell's own label — a note on the line, metadata, never a voice
+        // (AQU-2408). Read by everyone it is shown to; typed at or above the
+        // project's label tier. Sits above the tabs because it is about the
+        // whole line, not one lens on it.
+        const labelRow = (
+          <CellLabelRow
+            label={cell.cellLabel ?? null}
+            editable={mayEditCellLabel}
+            onSave={onSaveCellLabel ? (label) => onSaveCellLabel(cell, label) : undefined}
+          />
+        )
+        const panel = (
+          <CellExpansion
+            open
+            presentation={detailOpen ? "modal" : "inline"}
+            tab={expansionTab}
+            onTabChange={setExpansionTab}
+            // In the modal the dialog owns closing (its X, Esc, the backdrop),
+            // so the panel must not draw a second close affordance.
+            onClose={detailOpen ? undefined : () => setExpanded(false)}
+            tabs={detailTabs}
+          />
+        )
+        if (detailOpen) {
+          return (
+            <CellDetailDialog
+              open
+              cellRef={cellRef}
+              onClose={onCloseCellDetail}
+              onPrev={() => onStepCellDetail(-1)}
+              onNext={() => onStepCellDetail(1)}
+              hasPrev={detailHasPrev}
+              hasNext={detailHasNext}
+            >
+              {labelRow}
+              {panel}
+            </CellDetailDialog>
+          )
+        }
+        return (
+          <div className="ps-[3.75rem] pe-4 pb-2">
+            {labelRow}
+            {panel}
+          </div>
+        )
+      })()}
 
       {openRuleId && (() => {
         // AQU-1740: `partitionInfractions` can split one rule across an active

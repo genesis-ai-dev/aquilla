@@ -1,5 +1,5 @@
 import { notifyElevationRequired, type ElevationReason } from "@/lib/errors/elevation-required-signal"
-import { isElevationRequiredBody, UserError } from "@/lib/errors/user-error"
+import { isElevationRequiredBody, UserError, type ErrorContext } from "@/lib/errors/user-error"
 import { loadActiveSession } from "./session-store"
 import type { FrontierSession } from "./types"
 
@@ -10,7 +10,10 @@ import type { FrontierSession } from "./types"
  * carrying the raw body. Any other response is left untouched: the body is read
  * from a clone, so the caller can still consume `res`.
  */
-export async function throwIfElevationRequired(res: Response, context?: string): Promise<void> {
+export async function throwIfElevationRequired(
+  res: Response,
+  context?: ErrorContext,
+): Promise<void> {
   if (res.status !== 403) return
   const raw = await res.clone().text().catch(() => "")
   if (!isElevationRequiredBody(raw)) return

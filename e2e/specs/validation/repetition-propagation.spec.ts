@@ -129,7 +129,17 @@ test("Validate text on a selection asks about its repetitions and can validate t
   const dialog = alice.getByTestId("repetition-choice-dialog")
   await expect(dialog).toBeVisible()
   await dialog.getByRole("button", { name: "Validate 1 more row" }).click()
-  await expect(alice.getByText("Also validated 1 repeated row.")).toBeVisible({ timeout: 10_000 })
+  // AQU-2177: a bulk run that reached repeated rows reports in the dialog that
+  // NAMES them, grouped by what it did to them, under the run's own summary —
+  // not a toast that counted them and vanished.
+  const signedOff = alice.getByTestId("repetition-validated-dialog")
+  await expect(signedOff).toBeVisible({ timeout: 10_000 })
+  await expect(signedOff.getByText("Validated 1 cell")).toBeVisible()
+  const validated = signedOff.getByTestId("repetition-validated-group-validated")
+  await expect(validated.getByText("Validated 1 repeated row")).toBeVisible()
+  await expect(validated.getByRole("listitem")).toHaveCount(1)
+  await signedOff.getByRole("button", { name: "Done", exact: true }).click()
+  await expect(signedOff).toHaveCount(0)
 
   await expect.poll(async () => {
     const targets = await readProjectedCells(jwt, seeded, "target")

@@ -132,6 +132,37 @@ describe("cellAudioVotes", () => {
   })
 })
 
+// Decision 7: each piece of a cut take is approved on its own, and the line
+// reads approved once every piece on it is (the server's MIN over every
+// selected dub row, db/shared/audio-progress.ts, asked from this side).
+describe("a line holding a cut take", () => {
+  const piece = (audioId: string, startMs: number, votes: number, over: Partial<AudioAttachmentOut> = {}) =>
+    take({ audioId, trimStartMs: startMs, validatorCount: votes, ...(audioId === "p1" ? {} : { pieceOf: "p1" }), ...over })
+
+  it("measures every piece on its own: the weakest piece decides", () => {
+    const line = (v3: number) => entry([piece("p1", 0, 2), piece("p2", 1000, 2), piece("p3", 2000, v3)], { recording: "p1" })
+    expect(selectedDubTakes(line(0)).map((t) => t.audioId)).toEqual(["p1", "p2", "p3"])
+    expect(isCellAudioValidated(line(0), 2)).toBe(false)
+    expect(isCellAudioValidated(line(1), 2)).toBe(false)
+    expect(cellAudioVotes(line(1))).toBe(1)
+    expect(isCellAudioValidated(line(2), 2)).toBe(true)
+  })
+
+  it("reads approved once the only unapproved piece is deleted", () => {
+    const line = entry(
+      [piece("p1", 0, 2), piece("p2", 1000, 2), { ...piece("p3", 2000, 0), isDeleted: true } as AudioAttachmentOut],
+      { recording: "p1" },
+    )
+    expect(isCellAudioValidated(line, 2)).toBe(true)
+  })
+
+  it("is measured the same whichever piece the slot points at", () => {
+    const takes = [piece("p1", 0, 2), piece("p2", 1000, 1)]
+    expect(cellAudioVotes(entry(takes, { recording: "p1" }))).toBe(1)
+    expect(cellAudioVotes(entry(takes, { recording: "p2" }))).toBe(1)
+  })
+})
+
 describe("hasValidatedTake", () => {
   it("finds the viewer among the validators", () => {
     const t = take({ audioId: "a1", validators: ["ana", "bo"] })

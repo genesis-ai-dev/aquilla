@@ -3,6 +3,7 @@ import {
   bulkUploadSource,
   publishStagedImport,
   reconcileSourceImport,
+  reviseSourceImport,
   type BulkImportCell,
 } from "./bulk-import"
 import * as sourceUpload from "./source-upload"
@@ -16,6 +17,9 @@ vi.mock("./sync-worker-url", () => ({
 vi.mock("./source-upload", () => ({
   assertSourceUploadSize: vi.fn(),
   uploadSourceOriginal: vi.fn().mockResolvedValue({ artifactId: "artifact-1", key: "key", sha256: "digest" }),
+  // Real digest: the revision path names the artifact by it (AQU-2459).
+  sha256Hex: async (bytes: ArrayBuffer) =>
+    Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (b) => b.toString(16).padStart(2, "0")).join(""),
 }))
 
 function makeCell(i: number): BulkImportCell {
@@ -699,5 +703,134 @@ describe("reconcileSourceImport", () => {
       updateSourceSidecar: true,
       profileId: "builtin:biblica-study-notes",
     }))
+  })
+})
+
+describe("bulkUploadSource — revision import (AQU-2459)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.clearAllMocks()
+  })
+
+  it("creates the file with zero cells, stores the bytes, posts ONE revision, then finalizes", async () => {
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = []
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(url), body: JSON.parse(String(init?.body)) })
+      return Response.json(String(url).endsWith("/revisions") ? { noop: false, revisionN: 1 } : { accepted: 0 })
+    }) as unknown as typeof fetch
+    const cells = [makeCell(0), makeCell(1), makeCell(2)]
+    const progress: number[] = []
+    await bulkUploadSource({
+      projectId: "p1",
+      fileId: "f1",
+      file: { id: "file-evt", name: "doc.docx", fileType: "docx", parserVersion: "builtin:docx@1" },
+      cells,
+      rawBytes: new TextEncoder().encode("hello").buffer as ArrayBuffer,
+      rawSourceFormat: "docx",
+      revision: {
+        stamp: "builtin:docx@1",
+        units: cells.map((c, i) => ({ unitKey: `p[${i}]`, positional: true, text: c.value, sequenceIndex: i })),
+      },
+      getToken: async () => "tok",
+      onProgress: (n) => progress.push(n),
+      fetchImpl: fetchMock,
+    })
+    expect(calls.map((c) => c.url)).toEqual([
+      "https://sync.example/import",
+      "https://sync.example/api/v1/projects/p1/files/f1/revisions",
+      "https://sync.example/import",
+    ])
+    // file.create travels with no cells; the units go once, as a revision.
+    expect(calls[0].body.file).toMatchObject({ name: "doc.docx" })
+    expect(calls[0].body.cells).toEqual([])
+    expect(calls[1].body).toMatchObject({
+      stamp: "builtin:docx@1",
+      origin: "import",
+      // The finalize (calls[2]) recomputes the counters, so the route skips it.
+      finalizeFollows: true,
+      // sha256("hello")
+      artifactSha256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+    })
+    expect((calls[1].body.units as unknown[]).length).toBe(3)
+    expect(calls[2].body).toMatchObject({ complete: true, cells: [] })
+    expect(sourceUpload.uploadSourceOriginal).toHaveBeenCalledTimes(1)
+    expect(progress.at(-1)).toBe(3)
+  })
+
+  it("refuses a revision import that has no original bytes before anything is sent", async () => {
+    const fetchMock = vi.fn() as unknown as typeof fetch
+    await expect(
+      bulkUploadSource({
+        projectId: "p1",
+        fileId: "f1",
+        file: { id: "file-evt", name: "doc.docx" },
+        cells: [makeCell(0)],
+        revision: { stamp: "docx@1", units: [] },
+        getToken: async () => "tok",
+        fetchImpl: fetchMock,
+      }),
+    ).rejects.toThrow(/original bytes/)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+
+// Why: "Update existing" must move cells, files.meta (export rebuilds the
+// document from its import manifest) and the source pointer together. The
+// client's part is to store the bytes WITHOUT moving the pointer, then hand
+// the server the artifact it stored, the checksum the server computed, and
+// the file metadata, in the one revision request.
+describe("reviseSourceImport (AQU-2459)", () => {
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it("stores the bytes without moving the pointer, then posts one reimport revision with the file metadata", async () => {
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = []
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(url), body: JSON.parse(String(init?.body)) })
+      return Response.json({ noop: false, revisionN: 3 })
+    }) as unknown as typeof fetch
+    vi.mocked(sourceUpload.uploadSourceOriginal).mockResolvedValueOnce({ artifactId: "artifact-1", key: "key", sha256: "digest" })
+    const file = { id: "file-evt-2", name: "doc.docx", fileType: "docx", parserVersion: "builtin:docx@1", importManifest: { v: 2 } }
+    const result = await reviseSourceImport({
+      projectId: "p1",
+      fileId: "f1",
+      file,
+      cells: [makeCell(0)],
+      rawBytes: new TextEncoder().encode("v2").buffer as ArrayBuffer,
+      rawSourceFormat: "docx",
+      revision: { stamp: "builtin:docx@1", units: [{ unitKey: "docx:p[0]", positional: true, text: "x", sequenceIndex: 0 }] },
+      getToken: async () => "tok",
+      fetchImpl: fetchMock,
+    })
+    expect(result.revisionN).toBe(3)
+    expect(sourceUpload.uploadSourceOriginal).toHaveBeenCalledWith(expect.objectContaining({ updateSourceSidecar: false, fileId: "f1" }))
+    expect(calls.map((c) => c.url)).toEqual(["https://sync.example/api/v1/projects/p1/files/f1/revisions"])
+    expect(calls[0].body).toMatchObject({
+      origin: "reimport",
+      artifactSha256: "digest",
+      artifactId: "artifact-1",
+      rawSourceFormat: "docx",
+      file: { importManifest: { v: 2 } },
+    })
+    // No finalize follows a re-import: the route must recompute the counters.
+    expect(calls[0].body.finalizeFollows).toBeUndefined()
+  })
+
+  it("refuses before any request when the original bytes are missing", async () => {
+    const fetchMock = vi.fn() as unknown as typeof fetch
+    await expect(
+      reviseSourceImport({
+        projectId: "p1",
+        fileId: "f1",
+        file: { id: "e", name: "doc.docx" },
+        cells: [makeCell(0)],
+        revision: { stamp: "docx@1", units: [] },
+        getToken: async () => "tok",
+        fetchImpl: fetchMock,
+      }),
+    ).rejects.toThrow(/original bytes/)
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(sourceUpload.uploadSourceOriginal).not.toHaveBeenCalled()
   })
 })

@@ -5,7 +5,7 @@
 import { ROLE } from "@/lib/frontier/roles"
 import { FLOOR_LABEL } from "@/pages/settings/constants"
 import type { MessageKey } from "@/lib/i18n/messages/en"
-import type { CellEditingTier } from "@/lib/sync/project-settings"
+import type { CellEditingTier, CellLabelTier } from "@/lib/sync/project-settings"
 
 /**
  * AQU-1068: the cell-editing tiers, in the order they are offered.
@@ -57,3 +57,18 @@ export function cellEditingTierLabel(
   if (option.level == null) return t("projectSettings.mediaDefaults.cellEditingNobody")
   return FLOOR_LABEL[option.level] ?? t(option.labelKey)
 }
+
+/**
+ * AQU-2408: the cell-label tiers — who may type a label on a cell. Two rungs by
+ * decision (Matt, 2026-11-05), the default (maintainer) first like every other
+ * floor control on the page. The row text reuses the cell-editing ladder's
+ * role names, so the two controls under "Content structure" read the same.
+ */
+export const CELL_LABEL_FLOOR_OPTIONS: readonly {
+  value: CellLabelTier
+  level: number
+  labelKey: MessageKey
+}[] = [
+  { value: "maintainer", level: ROLE.MAINTAINER, labelKey: "projectSettings.cellEditing.optionMaintainer" },
+  { value: "project_lead", level: ROLE.PROJECT_LEAD, labelKey: "projectSettings.cellEditing.optionProjectLead" },
+]

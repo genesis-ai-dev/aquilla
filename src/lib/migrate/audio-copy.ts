@@ -83,11 +83,14 @@ export function buildCellAudioEvents(
   cellId: string,
   copiedTakes: AudioImport[],
   selectedAquillaAudioId: string | null,
-  opts: AudioEventOptions,
+  opts: AudioEventOptions & { preserveUnselectedHistory?: boolean },
 ): IngestEvent[] {
   const events: IngestEvent[] = []
   for (const take of copiedTakes) {
-    events.push(audioAttachEvent(cellId, take, opts))
+    events.push(audioAttachEvent(cellId, take, {
+      ...opts,
+      historyOnly: opts.preserveUnselectedHistory === true && take.aquillaAudioId !== selectedAquillaAudioId,
+    }))
     // AQU-490: the take's Codex validations ride immediately behind its
     // attach, so a validate can never precede the row it votes on.
     events.push(...audioValidateEvents(cellId, take, opts))

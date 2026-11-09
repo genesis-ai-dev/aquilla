@@ -13,16 +13,17 @@ version: 2
 # PR-volume control — the cooldown is a floor on a release's age, not a cap on
 # how late a bump may land. Don't conflate the two when tuning either.
 
-# agent-worker's npm deps and its Dockerfile base image ride ONE pull request.
-# The Sandbox SDK client (@cloudflare/sandbox) and the container it drives
-# (docker.io/cloudflare/sandbox:<version>-python) must be the exact same
-# version: the SDK logs `version_mismatch` on startup otherwise, and
-# agent-worker/test/runtime-policy.test.ts fails. An npm-only group bumped the
-# SDK twice (0.7.0 -> 0.12.5, 0.12.5 -> 0.12.9) and left the Dockerfile behind
-# both times, because a single-ecosystem PR cannot touch a Dockerfile.
-# Cloudflare publishes both artifacts together and both entries share the same
-# 7-day cooldown, so they resolve to the same release; if a PR ever pairs
-# different versions, align them by hand before merging.
+# agent-worker's npm deps and its Dockerfile images ride ONE pull request.
+# The Sandbox SDK client (@cloudflare/sandbox) and the `sandbox-shim` helper it
+# runs inside the container (the `FROM docker.io/cloudflare/sandbox:<version>
+# AS sandbox-shim` donor stage in agent-worker/Dockerfile) speak a versioned
+# protocol and must be the exact same release; agent-worker/test/
+# runtime-policy.test.ts fails otherwise. An npm-only group bumped the SDK
+# twice (0.7.0 -> 0.12.5, 0.12.5 -> 0.12.9) and left the Dockerfile behind both
+# times, because a single-ecosystem PR cannot touch a Dockerfile. Cloudflare
+# publishes both artifacts together and both entries share the same 7-day
+# cooldown, so they resolve to the same release; if a PR ever pairs different
+# versions, align them by hand before merging.
 multi-ecosystem-groups:
   agent-worker:
     schedule:
@@ -103,20 +104,11 @@ updates:
       - "*"
     cooldown:
       default-days: 7
-    ignore:
-      # @cloudflare/sandbox 1.0 is a ground-up rewrite ("a migration, not a
-      # version bump", per its release notes): the `Sandbox` base class and
-      # `getSandbox` that src/index.ts, resolve-sandbox.ts and types.ts build
-      # on are gone, and the 1.x container image ships no `-python` tag, so the
-      # docker entry below cannot follow the SDK anyway. PR #1758 paired SDK
-      # 1.0.3 with image 0.12.14-python and failed type-check. Remove once a
-      # deliberate migration lands.
-      - dependency-name: "@cloudflare/sandbox"
-        update-types:
-          - "version-update:semver-major"
 
-  # The Dockerfile's FROM tag. Dependabot keeps the `-python` suffix when it
-  # picks a newer tag.
+  # The Dockerfile's FROM lines: the python runtime base and the
+  # cloudflare/sandbox donor stage that carries sandbox-shim. Dependabot reads
+  # FROM lines only, which is why the shim is a named stage rather than a bare
+  # `COPY --from=docker.io/...`.
   - package-ecosystem: docker
     directory: "/agent-worker"
     multi-ecosystem-group: agent-worker
@@ -125,9 +117,12 @@ updates:
     cooldown:
       default-days: 7
     ignore:
-      # Held to the 0.x line with the SDK pin above; the two must match.
-      - dependency-name: "cloudflare/sandbox"
+      # The Python minor is a deliberate choice: every wheel pinned in the
+      # Dockerfile is built per interpreter minor, so 3.13 -> 3.14 is a tested
+      # change, not a tag bump.
+      - dependency-name: "python"
         update-types:
+          - "version-update:semver-minor"
           - "version-update:semver-major"
 
   - package-ecosystem: cargo

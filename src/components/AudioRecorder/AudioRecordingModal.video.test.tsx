@@ -427,10 +427,32 @@ describe("AudioRecordingModal — the countdown preference", () => {
     installAudioContextSpy()
     localStorage.setItem("aq.recording-countdown.v1", "fast")
     resetRecordingCountdownCacheForTests()
-    render(modal(projectNoFilesKey))
-    fireEvent.click(screen.getByTestId("rec-start"))
-    await waitFor(() => expect(screen.getByText("3")).toBeInTheDocument())
-    await waitFor(() => expect(recorderStart).toHaveBeenCalledTimes(1), { timeout: 2500 })
+    // AQU-1916: the old 2500 ms window told Fast (1.5 s) from Normal (3 s)
+    // only by sitting between them, so a loaded machine could fail a correct
+    // build. On a fake clock the step is named outright: three counts of
+    // Fast's 500 ms, and nothing before the last millisecond of it.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
+    try {
+      render(modal(projectNoFilesKey))
+      fireEvent.click(screen.getByTestId("rec-start"))
+      // The flow is kicked off a setTimeout(…, 0), so let that land first.
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      expect(screen.getByText("3")).toBeInTheDocument()
+
+      // Spelled out, not read back from COUNTDOWN_STEP_MS: a test that derives
+      // its expectation from the constant it guards cannot catch that constant
+      // being changed to Normal's 1000 ms.
+      const fastZeroMs = 1500 // three counts of 500 ms
+      await act(async () => { await vi.advanceTimersByTimeAsync(fastZeroMs - 1) })
+      // One millisecond short of zero the take has NOT been armed. A Normal
+      // count (1 s a step) would still be two seconds away here.
+      expect(recorderStart).not.toHaveBeenCalled()
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+      expect(recorderStart).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

@@ -61,7 +61,7 @@
 // alongside `data` when present). Errors: `{ error: { code, message } }`
 // with codes from external/errors.ts.
 
-import { externalError } from "./errors"
+import { errorResponse, externalError } from "./errors"
 import { resolveExternalLaneParam } from "./external-lane"
 import { listProjectsForCredential } from "./projects-list"
 import { assertOrgInCredentialScope, handleExternalOrgReadRequest } from "./org-read-routes"
@@ -78,6 +78,7 @@ import { handleExternalActivityRequest } from "./activity-route"
 import { handleExternalPendingChangesetsRequest } from "./pending-changesets-route"
 import { handlePromptPreview } from "./prompt-preview"
 import { loadProjectDetail } from "./project-detail"
+import { listProjectMembers, MEMBERS_READ_FLOOR } from "./members-read"
 import { loadEffectiveChecks } from "./effective-checks"
 import {
   authenticateAndScope,
@@ -100,6 +101,7 @@ const FILES_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/files$/
 const CELL_HISTORY_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/cells\/([^/]+)\/history$/
 const SETTINGS_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/settings$/
 const PROMPT_PREVIEW_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/cells\/([^/]+)\/prompt-preview$/
+const MEMBERS_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/members$/
 
 // ---------------------------------------------------------------------------
 // GET /api/v1/external/me — cold-start step 1: prove the token works, learn
@@ -614,6 +616,53 @@ async function handleExternalPromptPreview(
 }
 
 // ---------------------------------------------------------------------------
+// GET /api/v1/external/projects/:projectId/members — the governance roster
+// (AQU-2403): who is on the project, at what effective role, by which grant
+// path, and whether they hold a direct `project_members` row.
+//
+// MAINTAINER-floored, like the InviteMember / SetRole / RemoveMember commands
+// it feeds. Before this read, an agent could only discover the roster by
+// staging a membership command and reading the `conflict` code back.
+// ---------------------------------------------------------------------------
+
+async function handleExternalProjectMembers(
+  request: Request,
+  env: ExternalReadsEnv,
+  projectId: string,
+): Promise<Response> {
+  const authed = await authenticateAndScope(request, env, projectId)
+  if (!authed.ok) return authed.response
+  if (env.AQUILLA_PG) {
+    const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.ctx.credential)
+    if (limited) return limited
+  }
+  if (authed.ctx.role < MEMBERS_READ_FLOOR) {
+    // Same envelope and the same `requiredRole` detail as
+    // commands-membership.ts's callerLevelOrDenial, so a caller that already
+    // handles the write half's refusal needs no new branch for the read.
+    return errorResponse(
+      "permission_denied",
+      "project role >= maintainer required to read the membership roster",
+      { requiredRole: MEMBERS_READ_FLOOR },
+    )
+  }
+
+  const roster = await listProjectMembers(env.AQUILLA_PG as AquillaDb, projectId)
+  // authenticateAndScope already 404s an unknown id; null here means the
+  // project was deleted between the two reads.
+  if (!roster) return externalError("not_found", "project not found", 404)
+  // `total` and `truncated` are always present, so a capped roster says so
+  // rather than reading as the whole list. nextCursor is null by design: this
+  // read does not page (see MEMBERS_MAX_ROWS).
+  return Response.json({
+    data: roster.members,
+    total: roster.total,
+    truncated: roster.truncated,
+    nextCursor: null,
+  })
+}
+
+// ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
 
@@ -676,6 +725,9 @@ export async function handleExternalReadRequest(
   if (match) {
     return handleExternalCellHistory(request, env, decodeURIComponent(match[1]), decodeURIComponent(match[2]))
   }
+
+  match = url.pathname.match(MEMBERS_RE)
+  if (match) return handleExternalProjectMembers(request, env, decodeURIComponent(match[1]))
 
   match = url.pathname.match(SETTINGS_RE)
   if (match) return handleExternalProjectSettings(request, env, decodeURIComponent(match[1]))

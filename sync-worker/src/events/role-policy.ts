@@ -154,6 +154,9 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   // Require PROJECT_LEAD (500) — same as file.create and source.* imports.
   'file.delete': ROLE.PROJECT_LEAD,
   'file.restore': ROLE.PROJECT_LEAD,
+  // AQU-2459: server-emitted by the revisions route only (same floor as the
+  // route's own check); dispatch refuses it from POST /events regardless.
+  'file.revision': ROLE.PROJECT_LEAD,
 
   // Comments: any commenter+ can write, edit, delete, or resolve their own
   // comment. Server-side ownership enforcement (only the author can edit/delete
@@ -224,6 +227,12 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   //   than a crash, because the client mirror throws before anything reaches the
   //   durable outbox.
   'cast.assign': ROLE.MAINTAINER,
+  // AQU-2408: a hand-typed cell label is metadata, not casting. PROJECT_LEAD is
+  // the lowest rung the project's `cellLabelFloor` setting can admit; the
+  // setting itself (maintainer unless set otherwise) is enforced where the
+  // Label field is drawn, exactly like `cellEditingFloor`. See
+  // docs/decisions/0007-cell-labels-are-metadata-never-cast.md.
+  'cell.label.set': ROLE.PROJECT_LEAD,
 
   // Timeline editor: retiming a cell (move/stretch) is a translator-level edit.
   'cell.retime': ROLE.CONTRIBUTOR,

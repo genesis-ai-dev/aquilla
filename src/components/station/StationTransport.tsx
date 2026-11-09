@@ -226,8 +226,10 @@ export function StationTransport({
           the hint is always laid out and only fades, and the typing help or
           Record now's line sits over it. The lane above fills what is left,
           so a row that came and went made it jump (Sam, Nov 2: it grew on
-          hover, when the hint stepped aside). */}
-      <div data-testid="station-status-row" className="grid min-h-7 shrink-0 items-center px-3 pb-1.5">
+          hover, when the hint stepped aside). Its height is the tallest line's:
+          Record now's and the typing help's 24 px buttons and the 6 px under
+          them, so the lane keeps its height when they show too. */}
+      <div data-testid="station-status-row" className="grid min-h-[30px] shrink-0 items-center px-3 pb-1.5">
         <div
           aria-hidden={!calm || typing != null || status != null}
           className={cn(

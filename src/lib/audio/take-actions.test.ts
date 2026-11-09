@@ -18,7 +18,7 @@ vi.mock("@/lib/history/history", () => ({
   recordStep: vi.fn((step: Record<string, unknown>) => { recorded.steps.push(step) }),
 }))
 
-import { enqueueTakeRemovals, removeWholeTake } from "./take-actions"
+import { enqueueTakeRemovals, hasOwnRecordingLeft, removeWholeTake } from "./take-actions"
 import { getOptimisticShadows, subscribeOptimisticAudioAttachment } from "./audio-attachments-bus"
 
 describe("enqueueTakeRemovals", () => {
@@ -73,5 +73,29 @@ describe("removeWholeTake", () => {
       kind: "take.remove",
       data: { cellId: "c1", audioId: "t1", slot: "recording", wasSelected: true, pieces: ["p2"] },
     })
+  })
+})
+
+// AQU-2411: given the line, "is any recording left?" follows the one own-take
+// rule, so a take migrated from Codex under an untagged id still counts.
+describe("hasOwnRecordingLeft", () => {
+  const CODEX = "audio-1719100000000-k3j9x2m1p.webm"
+  const NEW = "audio-c1-1762300000000-abc123def"
+  const SOURCE = "audio-f1-1762300000000-zzz999yyy"
+  const verse = { id: "c1", fileId: "f1" }
+
+  it("finds a Codex take left on a verse after removing a newer one", () => {
+    const takes = [{ audioId: NEW }, { audioId: CODEX }]
+    expect(hasOwnRecordingLeft(takes, NEW, verse)).toBe(true)
+  })
+
+  it("does not count the file's own recording, a generated voice, or a section's untagged recording", () => {
+    expect(hasOwnRecordingLeft([{ audioId: NEW }, { audioId: SOURCE }], NEW, verse)).toBe(false)
+    expect(hasOwnRecordingLeft([{ audioId: NEW }, { audioId: CODEX, voiceId: "v1" }], NEW, verse)).toBe(false)
+    expect(hasOwnRecordingLeft([{ audioId: NEW }, { audioId: CODEX }], NEW, { ...verse, medium: "media" })).toBe(false)
+  })
+
+  it("keeps the strict test when only the line's id is known", () => {
+    expect(hasOwnRecordingLeft([{ audioId: NEW }, { audioId: CODEX }], NEW, "c1")).toBe(false)
   })
 })

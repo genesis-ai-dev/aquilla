@@ -16,7 +16,13 @@
 // ten-second "Validated N repeated rows" toast, which never said which rows,
 // but a dialog that names each one and waits to be dismissed
 // (`RepetitionValidatedDialog`). The fill-only toast stays a toast — it fires
-// after nearly every typed translation with repeats. Bulk is AQU-2177.
+// after nearly every typed translation with repeats.
+//
+// AQU-2177 took the same dialog to BULK runs, which do not do one thing to
+// their repeats: the dialog groups them by what the run did — signed off,
+// filled but still needing validation, or left alone because the run's own
+// rows disagreed — under the run's own summary. A run that touched no repeat
+// keeps the summary toast, and so does a failed one.
 //
 // The planning is pure (`lib/workflow/repetition-validation.ts`); this hook
 // asks, writes, and undoes.
@@ -31,9 +37,13 @@ import {
 } from "@/components/repetition/RepetitionDialogs"
 import {
   RepetitionValidatedDialog,
+  type RepetitionValidatedGroup,
   type RepetitionValidatedReport,
 } from "@/components/repetition/RepetitionValidatedDialog"
-import { describeValidatedRepetitionRows } from "@/components/repetition/validated-rows"
+import {
+  describeValidatedRepetitionRows,
+  type ValidatedRepetitionRow,
+} from "@/components/repetition/validated-rows"
 import type { CellData } from "@/hooks/useCells"
 import { namedCellRef } from "@/lib/cell-named-ref"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -99,6 +109,22 @@ interface WrittenFill {
   eventId: string
 }
 
+/**
+ * AQU-2177: the repeated rows a bulk run reached, named — what the dialog
+ * lists, in file order, one list per thing the run did to them. Empty lists
+ * are normal: a run that signed every repeat off has only `validated`.
+ */
+export interface BulkRepetitionRows {
+  /** Repeats signed off along with the run. */
+  validated: readonly ValidatedRepetitionRow[]
+  /** Repeats that got the text but no vote — they still need validating. */
+  filled: readonly ValidatedRepetitionRow[]
+  /** Repeats left as they were, because the run's own rows disagreed. */
+  skipped: readonly ValidatedRepetitionRow[]
+}
+
+const NO_BULK_ROWS: BulkRepetitionRows = { validated: [], filled: [], skipped: [] }
+
 /** What a bulk run did beyond its own rows, for the summary toast. */
 export interface BulkRepetitionOutcome {
   /** Repetitions signed off. */
@@ -107,8 +133,17 @@ export interface BulkRepetitionOutcome {
   filledOnly: number
   /** Repetitions left alone because their group's translations disagreed. */
   skipped: number
+  /** AQU-2177: the same rows, named, for the dialog. Counts and lists agree. */
+  rows: BulkRepetitionRows
   /** Reverts the whole gesture: the run's votes, the repetitions' votes and fills. */
   undo: (() => Promise<void>) | null
+}
+
+/** A bulk run's own summary, as `batchValidateToast` words it. */
+export interface BulkValidateMessage {
+  type: "success" | "info" | "error"
+  title: string
+  description?: string
 }
 
 export interface BulkRepetitionRun {
@@ -136,6 +171,12 @@ export interface UseRepetitionValidation {
     note: string | null
     actionProps?: { children: string; onClick: () => void }
   }
+  /**
+   * AQU-2177: a bulk run's ONE report. The dialog, naming the repeated rows it
+   * reached, when it reached any; otherwise today's summary toast — which is
+   * also what a failed run gets, since there is nothing to stand behind.
+   */
+  reportBulk: (message: BulkValidateMessage, outcome: BulkRepetitionOutcome | null) => void
   /** Mount once; renders the dialogs while a question is open. */
   dialogs: ReactNode
 }
@@ -147,7 +188,7 @@ const TOAST_TIMEOUT_MS = 10_000
  * and Undo its repetitions add (AQU-1486). Undo closes the toast it ran from.
  */
 export function showBulkValidateToast(
-  message: { type: "success" | "info" | "error"; title: string; description?: string },
+  message: BulkValidateMessage,
   extras: ReturnType<UseRepetitionValidation["bulkToastExtras"]>,
 ): void {
   const description = [message.description, extras.note].filter(Boolean).join(" ")
@@ -231,7 +272,7 @@ export function useRepetitionValidation(args: UseRepetitionValidationArgs): UseR
   // here, not in the dialog, because the ban is on running the revert twice —
   // not on clicking a button twice.
   const [report, setReport] = useState<
-    (RepetitionValidatedReport & { id: number; undo: () => Promise<void> }) | null
+    (RepetitionValidatedReport & { id: number; undo: (() => Promise<void>) | null }) | null
   >(null)
   const reportSeqRef = useRef(0)
   const closeReport = useCallback(() => setReport(null), [])
@@ -386,14 +427,18 @@ export function useRepetitionValidation(args: UseRepetitionValidationArgs): UseR
     { viaMemory, undo }: { viaMemory: boolean; undo: () => Promise<void> },
   ) => {
     const filledWith = new Map(fills.map((f) => [f.commit.cellId, f.commit.value]))
+    const rows = describeValidatedRepetitionRows(cellIds, getCells(), filledWith)
     reportSeqRef.current += 1
     setReport({
       id: reportSeqRef.current,
-      rows: describeValidatedRepetitionRows(cellIds, getCells(), filledWith),
+      title: t("editor.repetition.validated", { count: rows.length }),
+      description: t("editor.repetition.validatedBody", { count: rows.length }),
+      // One gesture, one outcome: no headings to tell apart (AQU-2177).
+      groups: [{ key: "validated", heading: null, rows }],
       viaMemory,
       undo: once(undo),
     })
-  }, [getCells])
+  }, [getCells, t])
 
   // ── One row ───────────────────────────────────────────────────────────────
 
@@ -570,13 +615,15 @@ export function useRepetitionValidation(args: UseRepetitionValidationArgs): UseR
         const fills: RepetitionCommit[] = []
         const fromCell = new Map<string, string>()
         const validateIds: string[] = []
-        let skipped = 0
+        // AQU-2177: the dialog names the skipped rows too — they are exactly
+        // the ones the reviewer still has to deal with.
+        const skippedIds: string[] = []
         for (const { group, candidate } of decisions) {
           const targets = group.targets
             .map((target) => current.get(target.id))
             .filter((c): c is CellData => c !== undefined && c.status !== "validated" && isWritable(c))
           if (!candidate) {
-            skipped += targets.length
+            skippedIds.push(...targets.map((c) => c.id))
             continue
           }
           const plan = planGroupRepetition({ group: { ...group, targets }, candidate, username, resolveParentId })
@@ -587,7 +634,11 @@ export function useRepetitionValidation(args: UseRepetitionValidationArgs): UseR
           validateIds.push(...plan.validateIds)
         }
         const written = await writeFills(fills, (c) => fromCell.get(c.cellId) ?? c.cellId)
-        if (written === null) return { validated: 0, filledOnly: 0, skipped, undo: null }
+        // The outbox refused the fills, so nothing the run planned happened.
+        // No rows are named: this ends in the summary toast, as it did before.
+        if (written === null) {
+          return { validated: 0, filledOnly: 0, skipped: skippedIds.length, rows: NO_BULK_ROWS, undo: null }
+        }
 
         // Decision 7: repetition votes count toward the batch size.
         const allowed = choice === "all"
@@ -600,12 +651,23 @@ export function useRepetitionValidation(args: UseRepetitionValidationArgs): UseR
           console.warn("[repetition-propagation] validate failed:", error)
         }
         const voted = new Set(votes.map((v) => v.cellId))
-        const filledOnly = written.filter((f) => !voted.has(f.commit.cellId)).length
+        const filledOnlyIds = written.filter((f) => !voted.has(f.commit.cellId)).map((f) => f.commit.cellId)
         const touched = written.length > 0 || votes.length > 0
+        // Named AFTER the writes, from the same ids the counts are taken from,
+        // so the lists and the numbers beside them cannot disagree. `cells` is
+        // re-read because a fill changes the text a row now holds.
+        const filledWith = new Map(written.map((f) => [f.commit.cellId, f.commit.value]))
+        const cells = getCells()
+        const name = (ids: readonly string[]) => describeValidatedRepetitionRows(ids, cells, filledWith)
         return {
           validated: votes.length,
-          filledOnly,
-          skipped,
+          filledOnly: filledOnlyIds.length,
+          skipped: skippedIds.length,
+          rows: {
+            validated: name(votes.map((v) => v.cellId)),
+            filled: name(filledOnlyIds),
+            skipped: name(skippedIds),
+          },
           undo: touched ? once(() => undoGesture([...seedVotes, ...votes], written)) : null,
         }
       },
@@ -639,10 +701,50 @@ export function useRepetitionValidation(args: UseRepetitionValidationArgs): UseR
     }
   }, [t])
 
+  /**
+   * AQU-2177: one bulk run, one report. The dialog when the run reached a
+   * repeated row — it names them in up to three groups, and a group with no
+   * rows is left out, so the headings and their counts describe only what
+   * happened. Otherwise (no repeats outside the run, nothing written, or a
+   * failed run) today's summary toast, with the repetitions' note and Undo.
+   */
+  const reportBulk = useCallback((
+    message: BulkValidateMessage,
+    outcome: BulkRepetitionOutcome | null,
+  ) => {
+    const rows = outcome?.rows
+    const groups: RepetitionValidatedGroup[] = rows
+      ? ([
+        { key: "validated", heading: t("editor.repetition.bulkGroupValidated", { count: rows.validated.length }), rows: rows.validated },
+        { key: "filled", heading: t("editor.repetition.bulkGroupFilled", { count: rows.filled.length }), rows: rows.filled },
+        { key: "skipped", heading: t("editor.repetition.bulkGroupSkipped", { count: rows.skipped.length }), rows: rows.skipped },
+      ] as const).filter((group) => group.rows.length > 0)
+      : []
+    // An error is not a report: the run's own message is the whole story, and
+    // a dialog standing over a half-written run would overstate it.
+    if (groups.length === 0 || message.type === "error") {
+      showBulkValidateToast(message, bulkToastExtras(outcome))
+      return
+    }
+    const undo = outcome?.undo ?? null
+    reportSeqRef.current += 1
+    setReport({
+      id: reportSeqRef.current,
+      title: message.title,
+      description: message.description ?? t("editor.repetition.bulkReportBody"),
+      groups,
+      // The bulk toast never offered it either: the remembered answer is
+      // forgotten from the choice dialog, not from the report (AQU-1486).
+      viaMemory: false,
+      undo,
+    })
+  }, [t, bulkToastExtras])
+
   return {
     handleCellValidated,
     prepareBulkRepetitions,
     bulkToastExtras,
+    reportBulk,
     dialogs: (
       <>
         <RepetitionDialogs prompt={prompt} onAnswer={onAnswer} />
@@ -651,7 +753,7 @@ export function useRepetitionValidation(args: UseRepetitionValidationArgs): UseR
             key={report.id}
             report={report}
             onGoToRow={(cellId) => { closeReport(); goToCell(cellId) }}
-            onUndo={() => { closeReport(); void report.undo() }}
+            onUndo={report.undo ? () => { closeReport(); void report.undo?.() } : null}
             onAskEachTime={forgetChoice}
             onClose={closeReport}
           />

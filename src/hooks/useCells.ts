@@ -426,6 +426,12 @@ export function buildCellData(
   // not reach consumers as a marker name.
   const rawParagraphMarker = source?.metadata?.paragraphMarker
   const paragraphMarker = typeof rawParagraphMarker === "string" && rawParagraphMarker !== "" ? rawParagraphMarker : undefined
+  // AQU-2408: the cell's own label — typed through `cell.label.set`, or the
+  // one a legacy Codex notebook carried in this very key. Source row only,
+  // strict non-empty string; a blank or non-string value is no label at all.
+  const rawCellLabel = source?.metadata?.cellLabel
+  const trimmedCellLabel = typeof rawCellLabel === "string" ? rawCellLabel.trim() : ""
+  const cellLabel = trimmedCellLabel !== "" ? trimmedCellLabel : undefined
 
   return {
     id: cellId,
@@ -464,6 +470,7 @@ export function buildCellData(
     cameraState,
     metadata,
     paragraphStart: paragraphStart || undefined,
+    ...(cellLabel !== undefined ? { cellLabel } : {}),
     paragraphMarker: paragraphStart ? paragraphMarker : undefined,
     // AQU-1422: source row only, deliberately — see the field's doc comment.
     hidden: source?.hidden === true ? true : undefined,

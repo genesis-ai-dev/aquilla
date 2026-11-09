@@ -42,6 +42,7 @@ import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missi
 import { NoteOnClick } from "@/components/ui/info-note"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { LangQuestListMark } from "@/components/langquest/LangQuestListMark"
 import { TableEmptyState } from "@/components/ui/page"
 import { MenuItem, MenuSeparator } from "@/components/ui/menu-parts"
 import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
@@ -337,6 +338,7 @@ export function OrgProjectsDataTable({
                     {t("org.guestOrgHome.newBadge")}
                   </Badge>
                 )}
+                {p.langquest && <LangQuestListMark state={p.langquest} />}
                 {!embedded && <OfflineProjectBadge projectId={p.id} />}
               </span>
             )

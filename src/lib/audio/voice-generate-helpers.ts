@@ -126,7 +126,8 @@ export async function generateCellVoice(args: GenerateCellVoiceArgs): Promise<bo
         // SUB-28: media sections speak through their transcript, not the filename.
         original: effectiveSourceText(cell),
         context: cell.context,
-        cellLabel: cell.cellLabel,
+        // AQU-2408: no cellLabel — a typed label is a note on the line, not
+        // voice direction (docs/decisions/0007). The placeholder renders empty.
       },
       session,
       username,

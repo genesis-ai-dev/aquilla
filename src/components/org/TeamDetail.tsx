@@ -256,7 +256,7 @@ export function TeamDetail() {
         void notifySessionExpiredIfCurrent(jwt)
       }
       setOrgMembers([])
-      setAddError(toUserFacingError(error, "organization members").message)
+      setAddError(toUserFacingError(error, "org").message)
     })
     return () => { cancelled = true }
   }, [isAdmin, jwt, activeOrgId, teamScopeKey])

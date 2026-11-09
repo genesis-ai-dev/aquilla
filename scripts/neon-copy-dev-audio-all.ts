@@ -1,11 +1,13 @@
 #!/usr/bin/env tsx
-// AQU-2115 — make EVERY production project's audio play on dev.aquilla.app,
-// as a step of the nightly "Refresh Dev Neon Branch" workflow.
+// AQU-2115 — make EVERY production project's audio play, and its imported
+// files export, on dev.aquilla.app, as a step of the nightly "Refresh Dev Neon
+// Branch" workflow.
 //
-// AQU-2114 copies one project you name. This asks the restored dev database
-// which projects reference media at all, orders them newest-activity-first, and
-// runs that same copy across them under a concurrency limit and a wall-clock
-// budget. The first backfill is bigger than one night (~561k objects / 167 GB),
+// AQU-2114 copies one project you name: its takes, its voice clips and the
+// uploaded source originals its exports read. This asks the restored dev
+// database which projects reference any of those, orders them
+// newest-activity-first, and runs that same copy across them under a
+// concurrency limit and a wall-clock budget. The first backfill is bigger than one night (~561k objects / 167 GB),
 // so a run copies what it can and stops at a project boundary; the next run
 // resumes without a cursor, because an object already in dev is never copied
 // twice.
@@ -35,6 +37,7 @@ import { makeMaintenancePostgres } from "../db/shim/postgres"
 import {
   copyProjectAudio,
   formatCopyReport,
+  loadOriginalRefs,
   DEV_MEDIA_BUCKET,
   PROD_MEDIA_BUCKET,
   type ListedObject,
@@ -93,7 +96,7 @@ function publishSummary(markdown: string): void {
   } catch (error) {
     // A summary we could not write must not fail a copy that worked.
     console.log(
-      `::warning title=Dev audio copy summary not written::${error instanceof Error ? error.message : String(error)}`,
+      `::warning title=Dev media copy summary not written::${error instanceof Error ? error.message : String(error)}`,
     )
   }
 }
@@ -129,6 +132,8 @@ async function main() {
               loadRefs: async (id) => ({
                 audio: await loadAudioRefs(db, id),
                 voice: await loadVoiceRefs(db, id),
+                // Plus the uploaded originals an export reads.
+                original: await loadOriginalRefs(db, id),
               }),
             },
             {
@@ -164,7 +169,7 @@ if (process.argv[1]?.endsWith("neon-copy-dev-audio-all.ts")) {
     const message = error instanceof Error ? error.message : String(error)
     console.error(message)
     if (process.env.GITHUB_ACTIONS === "true") {
-      console.log(`::error title=Dev audio copy failed::${message.split("\n")[0]}`)
+      console.log(`::error title=Dev media copy failed::${message.split("\n")[0]}`)
     }
     process.exit(1)
   })

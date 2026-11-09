@@ -102,6 +102,8 @@ export function overlaySettings(
   assign("validationNamedUsersAudio", settings.validationNamedUsersAudio)
   assign("allowSelfValidationAudio", settings.allowSelfValidationAudio ?? orgDefaults?.media?.allowSelfValidationAudio)
   assign("cellEditingFloor", settings.cellEditingFloor ?? orgDefaults?.media?.cellEditingFloor)
+  // AQU-2408: who may type a cell's label. No org default: absent = maintainer.
+  assign("cellLabelFloor", settings.cellLabelFloor)
   // AQU-646 stage 2: the second gate on track editing. Must reach the workspace
   // or the add-track button and the colour menu would be invisible everywhere,
   // since they render only when this is on.

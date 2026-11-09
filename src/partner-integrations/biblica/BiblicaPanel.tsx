@@ -61,12 +61,15 @@ function BiblicaOption({
   )
 }
 
-function editionForProfile(profileId: string | undefined, corpusMarker: string | undefined): BiblicaEdition {
+/** The edition this file was imported with, or null when the profile is not a
+ *  Biblica one — a generic import has nothing to lock, so the person re-importing
+ *  still has to say which template to read. */
+function editionFromImport(profileId: string | undefined, corpusMarker: string | undefined): BiblicaEdition | null {
   if (profileId === TREASURE_HUNT_PROFILE_ID || corpusMarker === "Treasure Hunt Bible") return "treasure-hunt"
   if (profileId === REACH4LIFE_PROFILE_ID || corpusMarker === "Reach 4 Life") return "reach4life"
   if (profileId === EBL_PROFILE_ID || corpusMarker === "Equipping Biblical Leaders") return "ebl"
   if (profileId === BIBLICA_NOTES_PROFILE_ID || corpusMarker === "Biblica Study Notes") return "study-notes"
-  return "study-notes"
+  return null
 }
 
 function BiblicaPanel({
@@ -92,11 +95,11 @@ function BiblicaPanel({
   // study Bible marks its notes, the next two mark scripture instead, and an EBL
   // guide has no scripture to mark — and nothing in the package says which title
   // it is, so the person importing it does. One edition at a time, hence a single
-  // value rather than a flag per title. A re-import already knows which template
-  // created the file, so that choice stays locked.
-  const [edition, setEdition] = useState<BiblicaEdition>(
-    editionForProfile(reimport?.profileId, reimport?.corpusMarker),
-  )
+  // value rather than a flag per title. A re-import that already names a Biblica
+  // template keeps that edition. One that does not — the file was read by a
+  // different importer — still asks.
+  const knownEdition = editionFromImport(reimport?.profileId, reimport?.corpusMarker)
+  const [edition, setEdition] = useState<BiblicaEdition>(knownEdition ?? "study-notes")
   const [changes, setChanges] = useState<ReimportChangeCounts | null>(null)
   const [reading, setReading] = useState(false)
   const existingSource = reimport?.existingSource
@@ -228,8 +231,9 @@ function BiblicaPanel({
       </div>
       {/* Which template to read the package with — a different question, and the
           three answers are alternatives, so they are grouped away from the cut
-          setting above rather than sitting in one undifferentiated list. */}
-      {!reimport && (
+          setting above rather than sitting in one undifferentiated list. Hidden
+          only when this re-import already knows the template. */}
+      {knownEdition == null && (
       <fieldset className="flex flex-col gap-2 border-t border-border/60 pt-4">
         <legend className="sr-only">{t("importExport.biblica.editionQuestion")}</legend>
         <div className="flex flex-col gap-0.5">

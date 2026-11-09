@@ -1,5 +1,9 @@
 // "Set a new milestone…" — name a start→end range of this file's cells. (AQU-2308)
 //
+// AQU-2310: the same form renames or re-ranges one from the chapter navigator
+// (see `SetMilestoneDialogMode`), so a correction is checked by exactly the
+// rules that let the milestone in.
+//
 // Three questions and nothing else: a name, a first line, a last line. The
 // range is what makes this different from the canceled marker design (AQU-2185,
 // which named ONE cell and ran to the next marker, so "lines 50 to 70 are The
@@ -26,6 +30,7 @@ import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field
 import { Input } from "@/components/ui/input"
 import { SearchSelect, type SearchSelectOption } from "@/components/ui/search-select"
 import { useT } from "@/lib/i18n/I18nProvider"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 import {
   milestoneDraftLabel,
   type MilestoneDraftCell,
@@ -48,10 +53,24 @@ export interface MilestoneDraftSubmission {
 }
 
 /**
+ * What the dialog is for. (AQU-2310)
+ *
+ *   * `create` — name a new range (the cell menu, or the navigator's
+ *     "New milestone…").
+ *   * `rename` — change only the name. The range is shown, so the person can
+ *     see which lines they are naming, but locked: on an app-made "Part N" the
+ *     whole point is "exactly the cells this row covered", and on a hand-set
+ *     milestone the range has its own entry.
+ *   * `editRange` — change the range of a hand-set milestone, and its name if
+ *     they like, in the same form.
+ */
+export type SetMilestoneDialogMode = "create" | "rename" | "editRange"
+
+/**
  * MOUNTED PER DRAFT, deliberately. There is no `open` prop: the workspace
  * renders this only while a range is being named, so the pickers and the name
- * come back empty by construction rather than by a reset effect whose
- * dependencies someone has to keep right. (The same shape
+ * come back to the draft's prefill by construction rather than by a reset
+ * effect whose dependencies someone has to keep right. (The same shape
  * `SourceEditWarningDialog` uses.)
  */
 export interface SetMilestoneDialogProps {
@@ -63,10 +82,21 @@ export interface SetMilestoneDialogProps {
   divisions: readonly (ImportMilestone | undefined)[]
   /** The file's milestones as stored, so an overlap can be refused BY NAME. */
   existing: readonly FileMilestone[]
-  /** Prefilled edges — the clicked row, or a shift-click selection's edges. */
+  /** Prefilled edges — the clicked row, a shift-click selection's edges, or
+   *  the edges of the row being renamed or edited. Empty for "New milestone…". */
   initialStartCellId: string
   initialEndCellId: string
   onSubmit: (draft: MilestoneDraftSubmission) => void
+  /** Defaults to `create`. */
+  mode?: SetMilestoneDialogMode
+  /** The name the row has now — the record's, or the app-made row's label. */
+  initialName?: string
+  /**
+   * The stored record being edited, so the overlap check does not count it
+   * against itself. Absent when saving writes a NEW record — which includes
+   * renaming an app-made part.
+   */
+  milestoneId?: string
 }
 
 export function SetMilestoneDialog({
@@ -77,11 +107,15 @@ export function SetMilestoneDialog({
   initialStartCellId,
   initialEndCellId,
   onSubmit,
+  mode = "create",
+  initialName = "",
+  milestoneId,
 }: SetMilestoneDialogProps) {
   const t = useT()
-  const [name, setName] = useState("")
+  const [name, setName] = useState(initialName)
   const [startCellId, setStartCellId] = useState(initialStartCellId)
   const [endCellId, setEndCellId] = useState(initialEndCellId)
+  const rangeLocked = mode === "rename"
 
   const order = useMemo(() => cells.map((cell) => cell.cellId), [cells])
   const startIndex = order.indexOf(startCellId)
@@ -102,23 +136,40 @@ export function SetMilestoneDialog({
     order,
     divisions,
     existing,
-    { name, startCellId, endCellId },
+    { id: milestoneId, name, startCellId, endCellId },
     normalizeMilestoneName,
   )
   const message = refusalMessage(refusal, t)
+  // A blank name is the opening state of a NEW milestone, so it only holds the
+  // button there. Clearing the name of one that already has one is a mistake
+  // worth naming — the old name is kept, and the person should know why.
+  const nameMessage = mode !== "create" && refusal?.reason === "blank-name"
+    ? t("editor.setMilestone.blankName")
+    : null
+  // Saving an edit that changes nothing would write an event that changes
+  // nothing — and on an app-made part, a hand-set milestone called "Part 1".
+  const unchanged = mode !== "create"
+    && normalizeMilestoneName(name) === normalizeMilestoneName(initialName)
+    && startCellId === initialStartCellId
+    && endCellId === initialEndCellId
+  const copy = DIALOG_COPY[mode]
 
   return (
     <Dialog open onOpenChange={(next) => { if (!next) onDismiss() }}>
-      <DialogContent data-testid="set-milestone-dialog" className="sm:max-w-md">
+      <DialogContent
+        data-testid="set-milestone-dialog"
+        data-mode={mode}
+        className="sm:max-w-md"
+      >
         <DialogHeader>
-          <DialogTitle>{t("editor.setMilestone.title")}</DialogTitle>
-          <DialogDescription>{t("editor.setMilestone.description")}</DialogDescription>
+          <DialogTitle>{t(copy.title, { name: initialName })}</DialogTitle>
+          <DialogDescription>{t(copy.description)}</DialogDescription>
         </DialogHeader>
         <form
           autoComplete="off"
           onSubmit={(e) => {
             e.preventDefault()
-            if (refusal !== null) return
+            if (refusal !== null || unchanged) return
             onSubmit({ name, startCellId, endCellId })
           }}
         >
@@ -134,8 +185,12 @@ export function SetMilestoneDialog({
                 maxLength={MILESTONE_NAME_MAX_LENGTH}
                 placeholder={t("editor.setMilestone.namePlaceholder")}
                 onChange={(e) => setName(e.target.value)}
+                aria-invalid={nameMessage ? true : undefined}
                 autoFocus
               />
+              {nameMessage ? (
+                <FieldError data-testid="set-milestone-name-refusal">{nameMessage}</FieldError>
+              ) : null}
             </Field>
             <Field>
               <FieldLabel htmlFor="set-milestone-start">
@@ -147,6 +202,8 @@ export function SetMilestoneDialog({
                 className="w-full!"
                 options={startOptions}
                 value={startCellId}
+                disabled={rangeLocked}
+                placeholder={t("editor.setMilestone.startPlaceholder")}
                 searchPlaceholder={t("editor.setMilestone.searchPlaceholder")}
                 emptyText={t("editor.setMilestone.noMatches")}
                 optionTestId={(option) => `set-milestone-start-${option.value}`}
@@ -174,6 +231,7 @@ export function SetMilestoneDialog({
                 className="w-full!"
                 options={endOptions}
                 value={endCellId}
+                disabled={rangeLocked}
                 placeholder={t("editor.setMilestone.endPlaceholder")}
                 searchPlaceholder={t("editor.setMilestone.searchPlaceholder")}
                 emptyText={t("editor.setMilestone.noMatches")}
@@ -192,9 +250,9 @@ export function SetMilestoneDialog({
             <Button
               type="submit"
               data-testid="set-milestone-save"
-              disabled={refusal !== null}
+              disabled={refusal !== null || unchanged}
             >
-              {t("editor.setMilestone.save")}
+              {t(copy.save)}
             </Button>
           </DialogFooter>
         </form>
@@ -202,6 +260,28 @@ export function SetMilestoneDialog({
     </Dialog>
   )
 }
+
+const DIALOG_COPY = {
+  create: {
+    title: "editor.setMilestone.title",
+    description: "editor.setMilestone.description",
+    save: "editor.setMilestone.save",
+  },
+  rename: {
+    title: "editor.setMilestone.renameTitle",
+    description: "editor.setMilestone.renameDescription",
+    save: "editor.setMilestone.renameSave",
+  },
+  editRange: {
+    title: "editor.setMilestone.editRangeTitle",
+    description: "editor.setMilestone.editRangeDescription",
+    save: "common.saveChanges",
+  },
+} as const satisfies Record<SetMilestoneDialogMode, {
+  title: MessageKey
+  description: MessageKey
+  save: MessageKey
+}>
 
 function toOption(cell: MilestoneDraftCell): SearchSelectOption {
   return {

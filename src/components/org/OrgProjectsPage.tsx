@@ -46,8 +46,7 @@ import type { OrgProjectRow } from "./OrgProjectsDataTable"
 import { isProjectNew, readProjectOpenedAt } from "@/lib/frontier/opened-shared-store"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Page, PageHeader } from "@/components/ui/page"
-import { Archive, BookOpen } from "lucide-react"
-import { isTauriRuntime } from "@/lib/offline/is-tauri"
+import { Archive } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 
@@ -269,14 +268,6 @@ export function OrgProjectsPage() {
                   : t("org.orgProjectsPage.pageDescription")
               }
               inset={false}
-              actions={
-                isTauriRuntime() ? (
-                  <Button variant="outline" size="sm" nativeButton={false} render={<Link to="/paratext" />}>
-                    <BookOpen />
-                    {t("paratextBridge.entry")}
-                  </Button>
-                ) : null
-              }
             />
           </div>
           {portfolio.error || directory.error ? (

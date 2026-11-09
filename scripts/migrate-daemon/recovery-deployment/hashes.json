@@ -1,0 +1,50 @@
+{
+  "src/lib/migrate/audio.ts": {
+    "before": "f25ccb87ee96352c6ef77813e23e45bbeb618c5c1dfc2633342e2ecfe3f2be67",
+    "after": "3a04c28f0cfc80de43109df62665d0a0561d77c5870f0a556e150ee05ba1f3f1"
+  },
+  "src/lib/migrate/audio-copy.ts": {
+    "before": "62ba0d5333ce9a9869a64aa5b726420f5bf14b43e2b40c49488672fedadac3b9",
+    "after": "0b319518532b93672ec47214813745cf47edb467453f4a51adfec48e5f153c63"
+  },
+  "scripts/migrate-daemon/recording-proof.ts": {
+    "before": null,
+    "after": "816ee977bc2cd1c2fd2feeaecbac15d69a7c1085f7923a1be7b1b875a968b520"
+  },
+  "scripts/migrate-daemon/pointer-recovery.ts": {
+    "before": "cb81c06f59ba943bdba112fb0a7522ade3af192f538955ff8d9c5127c094e787",
+    "after": "8becbd3a0c86f8db27ad80e1de758ee5bccf33078cfd5f58b30790a4df14433a"
+  },
+  "scripts/migrate-daemon/revalidate-history.ts": {
+    "before": "61d2eca679fc1269ebf653b9d3cd00648acd57a740f3127fd9ecf82c992ea19b",
+    "after": "6ac569afaae35d13f7c0f1ec310efc230a3823ae632e32ee441b3fdd3eab50c8"
+  },
+  "scripts/migrate-daemon/historical-policy.ts": {
+    "before": "a76007327c1515163dacc22139837a1dd9e7af4e989e246a9682121d3e61deee",
+    "after": "e7aa385381f716bf2b292dd9be4b8e78f55a1d93abba5499c1b40c1dc975994d"
+  },
+  "scripts/migrate-daemon/loop.ts": {
+    "before": "74eaf7949dccab2fbf3520c37784d7f3fc8cd1f840e12ff5cf2e5ab2c27189b4",
+    "after": "565fb07c42b034de8e52f179c1cc0bf1723b825d50faf2e2ac1dd357e9a44728"
+  },
+  "scripts/migrate-daemon/stages/audio.ts": {
+    "before": "8288a8b4aae3cdfb0ca21cdfb5cfce5019ca89cbe247fb4826808df722ebc135",
+    "after": "6286fcb2882604da54635ca357bad4aada73fb38da362d1dab0b7745f07079c5"
+  },
+  "scripts/migrate-daemon/http.ts": {
+    "before": "ddf9f752dad3d4b42439c6a0643e8e06fae5cc1e2b9b6673018f65b429c5c9f9",
+    "after": "b4f176479c2bbf571d577124e1b26769428b4f942e3f95668fda450bde875a94"
+  },
+  "scripts/migrate-daemon/__tests__/audio.test.ts": {
+    "before": "c307835e214519171bcee1ac212ee03157007d4057e434c4661c722d767e2b93",
+    "after": "f3bc2c95225a7466bab218a2c3dcec93fc6a0811bee55b7d2a8db67e3d438f68"
+  },
+  "src/lib/migrate/ids.ts": {
+    "before": "df04e70c4aa0a568ffb542c539709d56dc38213d6485725bc0395bede8942441",
+    "after": "7417b8eee2dbadd3581cbac0e613a2d020dda8f9a21e3ca6e5e6d123e3b0d00d"
+  },
+  "scripts/migrate-daemon/__tests__/http.test.ts": {
+    "before": "91af286318299b8c78cea9f0f07a6da902cb23ccf12e50c25e564109d54a1678",
+    "after": "bf690f247c0dfcee1a3293819675a939eab644e5dc341927f8cf0c36e2b459fe"
+  }
+}

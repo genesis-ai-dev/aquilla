@@ -16,6 +16,7 @@ abA wait --load networkidle >/dev/null
 abA open "$BASE/orgs/$ORG/projects" >/dev/null && abA wait --load networkidle >/dev/null
 abA find role button click --name "New project" >/dev/null || fail "New project button"
 abA wait --text "Create new project" >/dev/null || fail "create dialog"
+abA find testid "project-source-scratch" click >/dev/null || fail "Start from scratch (AQU-2105 source step)"
 abA find label "Project name" fill "$NAME" >/dev/null || fail "name field"
 abA find label "Source language" fill "en" >/dev/null || fail "source field"
 abA find label "Language lanes" fill "fr" >/dev/null || fail "lanes field"

@@ -1,5 +1,5 @@
 // AQU-1768: org-level defaults for the timeline and recording settings —
-// the timing lock, timeline track editing, who may add and remove lines,
+// the timing lock, timeline track editing, who may add and remove cells,
 // validating your own recordings, and the minimum role to validate a
 // recording. Projects follow these unless they set their own in Project
 // settings; the server's gates resolve the same way.

@@ -8,7 +8,6 @@ import type { AdminProject, AdminOrg, AdminUser } from "@/lib/frontier/admin"
 import {
   PROJECT_STATUS_LABEL,
   portfolioActivityStatus,
-  type ProjectAttentionKind,
   type ProjectAttentionReason,
 } from "@/lib/project-status"
 
@@ -55,7 +54,6 @@ export function isStalled(
   ) === "stalled"
 }
 
-export type AttentionKind = ProjectAttentionKind
 export type AttentionReason = ProjectAttentionReason
 
 /**

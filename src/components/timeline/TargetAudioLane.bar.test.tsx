@@ -73,12 +73,18 @@ describe("the bar's height", () => {
     expect(bar()!.style.fontSize).toBe("9px")
   })
 
-  it("goes under 30px, and today's corner marks come back", () => {
+  it("goes under 30px, and the approval becomes a strip along the top, with nothing on the waveform", () => {
     expect(chipHeightPx(40)).toBeLessThan(30)
     atRow(40, <TargetAudioLane {...base} items={[item({ validatorCount: 1, validators: ["sam"] })]} session={{ jwt: "t", username: "sam" } as never} />)
     expect(bar()).toBeNull()
-    // The corner tick, as it always was.
-    expect(screen.getByTestId("tl-target-c1-validated").className).toContain("bottom-1")
+    // Sam, Nov 2: the old corner circle covered short, narrow takes.
+    const strip = screen.getByTestId("tl-target-c1-validated")
+    expect(strip.className).toContain("top-0")
+    expect(strip.className).toContain("h-[3px]")
+    expect(strip.className).not.toContain("bottom-1")
+    expect(strip.querySelector("svg")).toBeNull()
+    expect(strip).toHaveAttribute("data-state", "full")
+    expect(strip).toHaveAccessibleName(/validated/i)
   })
 
   it("follows the clip height exactly: 14 from 40px, 12 from 30px, none below", () => {
@@ -383,7 +389,7 @@ describe("double-click the name to rename", () => {
     expect(onSeek).not.toHaveBeenCalled()
   })
 
-  it("renames a piece's whole take, by the take's own name", () => {
+  it("renames just that piece, from the name it is shown by (decision 7)", () => {
     const PIECE = "audio-c1-1700000500-piece.webm"
     const c = cell({
       [TAKE]: { type: "audio", url: "frontier-audio://t", slot: "recording", label: "Take 2 · 1", durationMs: 8000, trimEndMs: 3000 },
@@ -401,7 +407,7 @@ describe("double-click the name to rename", () => {
       />,
     )
     fireEvent.doubleClick(screen.getByTestId("tl-target-c1-p2-name"))
-    expect(actions.rename).toHaveBeenCalledWith("c1", PIECE, "Take 2")
+    expect(actions.rename).toHaveBeenCalledWith("c1", PIECE, "Take 2 · 2")
   })
 
   // A real browser never delivers that double-click to the name: the press

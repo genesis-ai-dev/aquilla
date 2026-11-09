@@ -14,6 +14,7 @@ vi.mock("@/lib/sync/events-emit", () => ({
   emitCellAudioRemove: vi.fn(async (x: unknown) => (calls.remove.push(x), "ev")),
 }))
 
+import { historyView, resetHistoryForTests, setHistoryScope } from "@/lib/history/history"
 import { saveStationVersion, type VersionPlacement } from "./save"
 
 const base: VersionPlacement = {
@@ -101,6 +102,27 @@ describe("Save as new version", () => {
     expect(calls.attach).toHaveLength(2)
     for (const a of calls.attach) expect(a).toMatchObject({ label: "Take 2", versionChanges: { ...changes, over: true } })
     expect(calls.remove.map((r) => (r as { audioId: string }).audioId)).toEqual(["t2.webm", "t1.webm"])
+  })
+
+  // Found in the Nov 2 browser check: Undo after a plain Save said "Undid:
+  // Save a new version".
+  it("names the Undo step by what Save did: over the take, or a new version", async () => {
+    resetHistoryForTests()
+    setHistoryScope("p", "ana")
+    const args = {
+      projectId: "p",
+      samples: new Float32Array(4800),
+      rate: 48000,
+      placements: [base],
+      author: "ana",
+      getSyncToken: async () => "jwt",
+      where: { fileId: "f" },
+    }
+    await saveStationVersion({ ...args, mode: "over" })
+    expect(historyView().nextUndo?.labelKey).toBe("editor.history.stepStationSaveOver")
+    await saveStationVersion({ ...args, placements: [base, { ...base, cellId: "c316" }], mode: "new" })
+    expect(historyView().nextUndo?.labelKey).toBe("editor.history.stepStationVersion")
+    resetHistoryForTests()
   })
 
   it("Save as new version keeps the original", async () => {

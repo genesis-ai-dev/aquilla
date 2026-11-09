@@ -20,6 +20,7 @@ import * as corruptedCharacters from "./check-functions/corrupted-characters"
 import * as unpairedQuotes from "./check-functions/unpaired-quotes"
 import * as untranslatedFragment from "./check-functions/untranslated-fragment"
 import * as lengthRatio from "./check-functions/length-ratio"
+import * as scriptureReference from "./check-functions/scripture-reference"
 
 export interface BuiltinCheckDefinition {
   id: BuiltinCheckId
@@ -191,6 +192,16 @@ export const BUILTIN_CHECKS: Record<BuiltinCheckId, BuiltinCheckDefinition> = {
     runsOnEmptyTarget: false,
     run: lengthRatio.runCheck,
     message: lengthRatio.MESSAGE,
+  },
+  // AQU-1735: the References half of Paratext parity. Off by default; reads
+  // the project's book-name table off `context.bookNames`.
+  "scripture-reference": {
+    ...TEXT_CHECK_META["scripture-reference"],
+    description:
+      "Scripture references in the translation use the project's book names and name a chapter the canon has, with one separator throughout. Off by default: it needs the project's book names.",
+    runsOnEmptyTarget: false,
+    run: scriptureReference.runCheck,
+    message: scriptureReference.MESSAGE,
   },
 }
 

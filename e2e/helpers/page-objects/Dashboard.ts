@@ -6,6 +6,17 @@ export interface CreateProjectOpts {
   target?: string
 }
 
+/** The New-project wizard's first step (AQU-2105, src/components/ProjectSourceStep.tsx):
+ * where the project comes from. Both answers land on the same details form —
+ * "linked" with the linked-target shape preselected. LangQuest has its own
+ * multi-step panel and is not reachable through this helper. */
+export type CreateProjectOrigin = "scratch" | "linked"
+
+const ORIGIN_TEST_ID: Record<CreateProjectOrigin, string> = {
+  scratch: "project-source-scratch",
+  linked: "project-source-linked",
+}
+
 /** Anchored matcher for a locator `hasText` filter, so a cell whose text merely
  * *contains* the name does not match. Escapes regex metacharacters because
  * project names are user data. */
@@ -116,7 +127,13 @@ export class Dashboard {
     return this.page.getByTestId("project-table-name").filter({ hasText: exactText(name) })
   }
 
-  async openCreateProjectDialog(): Promise<Locator> {
+  /** Open the New-project dialog and answer its first step, returning the
+   * dialog once the details form (Project name, languages, …) is on screen.
+   *
+   * AQU-2105 made the dialog a wizard that always opens on "Where does this
+   * project come from?" (the wizard starts there and resets to it on close),
+   * so the details fields do not exist until an origin is picked. */
+  async openCreateProjectDialog(origin: CreateProjectOrigin = "scratch"): Promise<Locator> {
     // A freshly-reset org renders three "+ New Project" buttons on /projects:
     // the page header, the empty-state "Create your first project" CTA, and the
     // org setup checklist. They all open the same create dialog, so scope to the
@@ -126,6 +143,9 @@ export class Dashboard {
     // role="dialog", so a bare lookup matches two elements once create succeeds.
     const dialog = this.page.getByRole("dialog", { name: /^Create New Project$/i })
     await expect(dialog).toBeVisible({ timeout: 5_000 })
+    await dialog.getByTestId(ORIGIN_TEST_ID[origin]).click()
+    // The fieldset wraps every details field for both origins.
+    await expect(dialog.getByTestId("create-project-fields")).toBeVisible({ timeout: 5_000 })
     return dialog
   }
 

@@ -215,7 +215,7 @@ describe("AdminInvitesSection", () => {
     it("(d) elevation 403 on mint: raises the step-up signal", async () => {
       clearElevationRequired()
       vi.spyOn(invitesModule, "createAccessLink").mockImplementation(async () => {
-        await throwIfElevationRequired(elevation403(), "create access link")
+        await throwIfElevationRequired(elevation403(), "invite")
         throw new Error("unreachable")
       })
       const user = await openMintDialog()
@@ -272,7 +272,7 @@ describe("AdminInvitesSection", () => {
     it("(d) elevation 403 on multi-project invite: raises the step-up signal", async () => {
       clearElevationRequired()
       vi.spyOn(invitesModule, "createMultiProjectInvite").mockImplementation(async () => {
-        await throwIfElevationRequired(elevation403(), "create multi-project invite")
+        await throwIfElevationRequired(elevation403(), "invite")
         throw new Error("unreachable")
       })
       const user = await openInviteDialog()
@@ -299,7 +299,7 @@ describe("AdminInvitesSection", () => {
       },
     ])
     const revoke = vi.spyOn(invitesModule, "revokeOrgInvite").mockImplementation(async () => {
-      await throwIfElevationRequired(elevation403(), "revoke org invite")
+      await throwIfElevationRequired(elevation403(), "invite")
     })
     const toastSpy = vi.spyOn(toastModule.toast, "add")
     const user = userEvent.setup()

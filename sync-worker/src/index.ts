@@ -70,6 +70,7 @@ import { handleMigrateGroupsRequest } from "./events/migrate-groups-route"
 import { handleMigrateUsersReadRequest } from "./events/migrate-users-read-route"
 import { handleMigrateWebhookRequest } from "./events/migrate-webhook-route"
 import { handleSourceUploadRequest } from "./events/source-upload-route"
+import { handleRevisionsRequest } from "./events/revisions-route"
 import { handleExportSourceRequest } from "./events/export-route"
 import { handleExportBundleRequest } from "./events/export-bundle-route"
 import { handleOriginalDownloadRequest } from "./events/original-download-route"
@@ -632,6 +633,9 @@ const worker = {
     if (migrateWebhookInbox) return migrateWebhookInbox
     const sourceUploadResponse = await handleSourceUploadRequest(request, env)
     if (sourceUploadResponse) return sourceUploadResponse
+    // AQU-2459: one revision of a file's source side (handler adds CORS).
+    const revisionsResponse = await handleRevisionsRequest(request, env, routeCtx)
+    if (revisionsResponse) return revisionsResponse
     const exportSourceResponse = await handleExportSourceRequest(request, env)
     if (exportSourceResponse) return exportSourceResponse
     const exportBundleResponse = await handleExportBundleRequest(request, env)

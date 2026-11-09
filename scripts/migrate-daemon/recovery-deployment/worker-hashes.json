@@ -1,0 +1,10 @@
+{
+  "index.js": {
+    "before": "d0cf450834507543b67d3bb9ca32db89b4de8a65d0f78c55adab7b7772ef91fc",
+    "after": "96494aba729ab0923484d6cbbc4409059f81d9af19a141e018b89d19ac27e1f7"
+  },
+  "production-migration.js": {
+    "before": "14edc57308fad1778c1dd8e0189abd622ae1b1906cb0b623fb15c8cdbe183260",
+    "after": "469bcdbc34f596733d96b1f3c0c8ab758d5cc96d512d3b567bf64594ab554227"
+  }
+}

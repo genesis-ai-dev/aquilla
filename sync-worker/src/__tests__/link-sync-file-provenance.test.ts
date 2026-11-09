@@ -263,6 +263,34 @@ describe("mirrorSync — a mirrored file keeps the upstream's type and original 
     }
   })
 
+  // AQU-2438: the window pass only ever repairs the files that window touched,
+  // so a copy whose upstream is FINISHED — every EBL language project, every
+  // linked BSB batch — was never reached: `kind` stayed NULL, the file read as
+  // `fileType: codex`, and the IDML download stayed behind "Repair". The sweep
+  // at the top of every sync is whole-project for exactly this run.
+  it("repairs a copy on a sync with nothing to mirror at all (AQU-2438)", async () => {
+    const t = await makeTestDb()
+    try {
+      await seedProjects(t)
+      await seedUpstreamFile(t, { fileType: "idml", bookCode: "GEN" })
+      await seedUpstreamBlob(t)
+      expect((await mirrorSync(t.db, DOWNSTREAM)).ranSync).toBe(true)
+      await stripProvenance(t)
+
+      // The link is caught up and the upstream has emitted nothing since: no
+      // window runs, and the fold returns having mirrored nothing.
+      const result = await mirrorSync(t.db, DOWNSTREAM)
+      expect(result.ranSync).toBe(false)
+      expect(result.filesMirrored).toBe(0)
+      expect(result.cellsMirrored).toBe(0)
+
+      expect(await downstreamFileRow(t)).toEqual({ kind: "idml", role: null, book_code: "GEN" })
+      expect(await downstreamBlob(t)).toEqual({ project_id: DOWNSTREAM, ...UPSTREAM_BLOB })
+    } finally {
+      await t.close()
+    }
+  })
+
   it("follows the upstream's original when the upstream file is re-imported", async () => {
     const t = await makeTestDb()
     try {

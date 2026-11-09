@@ -9,6 +9,7 @@
     "core:default",
     "deep-link:default",
     "opener:default",
+    "dialog:allow-open",
     "mcp-bridge:default"
   ]
 }

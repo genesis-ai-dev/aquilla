@@ -989,6 +989,20 @@ export async function handleCellsReadRequest(
           { headers: cacheHeaders(etag) },
         )
       }
+      // AQU-2459: a `file.revision` rewrites many source rows under ONE event
+      // with no cell_id, so the per-cell probe below cannot see it. A revision
+      // past the cursor is a full resync.
+      const revisionPast = await env.AQUILLA_PG.prepare(
+        "SELECT 1 AS present FROM events WHERE project_id = ? AND file_id = ? AND server_seq > ? AND kind = 'file.revision' LIMIT 1",
+      )
+        .bind(projectId, fileId, since)
+        .first<{ present: number }>()
+      if (revisionPast) {
+        return Response.json(
+          { resync: true, maxServerSeq, projectEpoch },
+          { headers: cacheHeaders(etag) },
+        )
+      }
       // Cells touched by any event past the cursor. cell_id IS NULL events
       // (file.rename, project-scoped) bump the watermark but change no rows.
       // idx_events_project_seq makes the seq-range scan cheap when `since`

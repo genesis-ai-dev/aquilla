@@ -35,8 +35,6 @@ export const CUSTOM_VOICE_MAX_MINUTES = 60
 /** Same per-recording cap the worker enforces (MAX_VOICE_CLIP_BYTES). */
 export const CUSTOM_VOICE_MAX_CLIP_BYTES = 20 * 1024 * 1024
 export const CUSTOM_VOICE_MAX_CLIPS = 40
-/** Wall-clock a training run takes, for the "ready in ~N min" hint. */
-export const CUSTOM_VOICE_TRAINING_MINUTES = 45
 
 export type CustomVoiceState = "queued" | "training" | "ready" | "failed"
 

@@ -102,7 +102,8 @@ export async function saveStationVersion(args: SaveVersionArgs): Promise<SavedVe
   let attached = 0
   try {
     await withGroup(
-      { labelKey: "editor.history.stepStationVersion", fileId: args.where.fileId, fileName: args.where.fileName ?? null },
+      // Its name in Undo, the toast and History: what this Save did.
+      { labelKey: over ? "editor.history.stepStationSaveOver" : "editor.history.stepStationVersion", fileId: args.where.fileId, fileName: args.where.fileName ?? null },
       async () => {
         for (const p of args.placements) {
           const audioId = p === first ? objectId : `${buildAudioId(p.cellId)}.${up.ext}`

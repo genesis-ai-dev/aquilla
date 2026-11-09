@@ -9,6 +9,7 @@ import type {
 } from "@/lib/parsers/types"
 import { patchProject } from "@/lib/store/project-index"
 import { resolveBuiltinRules } from "@/lib/lqa/builtin-resolver"
+import { projectBookNames } from "@/lib/lqa/project-book-names"
 import {
   laneCheckOverrides,
   lanePunctuation,
@@ -205,9 +206,14 @@ export function useRules(
           ).conventions,
     [projectLanes, projectTargetLanguage, projectLanguageProfile, lane],
   )
+  // AQU-1735: the project's own names for Bible books, for the
+  // scripture-reference check. Derived from the file list, which is where a
+  // Paratext BookNames.xml and a USFM file's \toc lines already land.
+  const projectFiles = project?.files
+  const bookNames = useMemo(() => projectBookNames(projectFiles), [projectFiles])
   const builtinRules = useMemo(
-    () => resolveBuiltinRules(algorithmicChecks, { bibleChecks, punctuation }),
-    [algorithmicChecks, bibleChecks, punctuation],
+    () => resolveBuiltinRules(algorithmicChecks, { bibleChecks, punctuation, bookNames }),
+    [algorithmicChecks, bibleChecks, punctuation, bookNames],
   )
 
   // Subscribed (org-managed) concepts union local terminology, subscribed

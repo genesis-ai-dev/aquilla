@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { isTauriRuntime } from "../offline/is-tauri"
 import { paratextTauri, type Discovery, type DiscoveredProject } from "./tauri"
 import { parseParatextSettings, isUtf8Project, booksPresent, bookCodeFromProjectFile, type ParatextSettings } from "./project"
@@ -46,13 +46,23 @@ export interface DiscoveryState {
   removeRoot: (path: string) => Promise<void>
 }
 
-export function useParatextDiscovery(): DiscoveryState {
+export interface DiscoveryOptions {
+  /** Scan on mount (default). `false` waits for `refresh()`: the "This
+   *  computer" workspace asks before reading any Paratext folder. */
+  autoStart?: boolean
+}
+
+export function useParatextDiscovery({ autoStart = true }: DiscoveryOptions = {}): DiscoveryState {
   const supported = isTauriRuntime()
-  const [loading, setLoading] = useState(supported)
+  const [loading, setLoading] = useState(supported && autoStart)
   const [error, setError] = useState<string | null>(null)
   const [discovery, setDiscovery] = useState<Discovery | null>(null)
+  // One automatic scan per mount at most: `autoStart` may flip to true after a
+  // user-initiated scan succeeded, and that must not scan a second time.
+  const started = useRef(false)
 
   const apply = useCallback(async (run: () => Promise<Discovery>) => {
+    started.current = true
     setLoading(true)
     setError(null)
     try {
@@ -68,15 +78,18 @@ export function useParatextDiscovery(): DiscoveryState {
   const addRoot = useCallback((path: string) => apply(() => paratextTauri.addRoot(path)), [apply])
   const removeRoot = useCallback((path: string) => apply(() => paratextTauri.removeRoot(path)), [apply])
 
+  // No cancellation flag here on purpose: StrictMode (dev) runs this effect,
+  // cleans it up and runs it again, and the second run must not start a second
+  // scan, so the `started` guard skips it. A cancel flag set by that cleanup
+  // would then throw the only result away and the page would load forever.
   useEffect(() => {
-    if (!supported) return
-    let cancelled = false
+    if (!supported || !autoStart || started.current) return
+    started.current = true
     void paratextTauri.discover()
-      .then((d) => { if (!cancelled) setDiscovery(d) })
-      .catch((e: unknown) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)) })
-      .finally(() => { if (!cancelled) setLoading(false) })
-    return () => { cancelled = true }
-  }, [supported])
+      .then((d) => setDiscovery(d))
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setLoading(false))
+  }, [supported, autoStart])
 
   // Memoised on the discovery result: consumers key effects on a project's
   // identity, so a fresh array per render would re-run them without end.

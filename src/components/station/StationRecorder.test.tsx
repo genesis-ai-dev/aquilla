@@ -116,4 +116,23 @@ describe("Record now in the Station", () => {
     rerender({ e: fakeEditor(2) })
     expect(result.current.phase.kind).toBe("idle")
   })
+
+  it("while recording, Space anywhere stops it and the timeline's Space stands down (Nov 2 shortcut review)", async () => {
+    const { isAudioShortcutOverridden } = await import("@/lib/audio/audio-coordinator")
+    const ed = fakeEditor()
+    const { result, rerender } = renderHook(({ e }) => useStationRecorder(e, vi.fn()), { initialProps: { e: ed } })
+    act(() => result.current.start(0.5))
+    await waitFor(() => expect(rec.start).toHaveBeenCalled())
+    rec.state = { kind: "recording", startedAt: 0 }
+    rerender({ e: ed })
+    expect(result.current.phase.kind).toBe("recording")
+    expect(isAudioShortcutOverridden()).toBe(true)
+    // Space with the focus outside the Station (on the page itself).
+    act(() => {
+      document.body.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true }))
+    })
+    expect(rec.stop).toHaveBeenCalled()
+    expect(result.current.phase.kind).toBe("finishing")
+  })
 })
+

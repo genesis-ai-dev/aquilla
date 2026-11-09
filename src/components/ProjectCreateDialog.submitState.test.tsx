@@ -72,6 +72,8 @@ describe("ProjectCreateDialog — submit in-flight state (AQU-711)", () => {
   it("opts create fields out of Chrome contact autocomplete", () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: "New project" }))
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
 
     const name = screen.getByLabelText(/^Project name$/i)
     expect(name).toHaveAttribute("autocomplete", "off")
@@ -100,6 +102,8 @@ describe("ProjectCreateDialog — submit in-flight state (AQU-711)", () => {
 
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: "New project" }))
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
     await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
     fillValidSelfContained()
 
@@ -124,6 +128,8 @@ describe("ProjectCreateDialog — submit in-flight state (AQU-711)", () => {
 
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: "New project" }))
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
     await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets
     fillValidSelfContained()
 
@@ -151,6 +157,8 @@ describe("ProjectCreateDialog — submit in-flight state (AQU-711)", () => {
 
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: "New project" }))
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
     fillValidSelfContained()
 
     await screen.findByTestId("project-create-destination") // AQU-1352: submit waits for targets

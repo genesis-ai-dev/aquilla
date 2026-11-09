@@ -33,6 +33,7 @@ function report(over: Partial<DevAudioCopyReport> = {}): DevAudioCopyReport {
     alreadyInDev: 0,
     copied: 0,
     copiedBytes: 0,
+    originals: { referenced: 0, alreadyInDev: 0, copied: 0, outsidePrefix: 0 },
     missingInProd: [],
     failed: [],
     skippedUnrecognized: 0,
@@ -70,17 +71,20 @@ function fakeDb(rows: Record<string, unknown>[]): { db: AquillaDb; queries: stri
   }
 }
 
-describe("which projects the copy owes audio to", () => {
-  it("asks for all four media sources, not just takes", async () => {
-    // Every source `db/shared/media-refs.ts` reads per project has to appear
-    // here, or a project whose only media is one of them is never offered a
-    // copy and stays silent on dev.
+describe("which projects the copy owes media to", () => {
+  it("asks for every media source, not just takes", async () => {
+    // Every source the per-project reference loads read has to appear here,
+    // or a project whose only media is one of them is never offered a copy and
+    // stays silent — or un-exportable — on dev.
     const { db, queries } = fakeDb([])
     await loadAudioProjects(db)
     expect(queries).toHaveLength(1)
     const sql = queries[0]!
     expect(sql).toMatch(/FROM cell_audio/)
-    expect(sql).toMatch(/FROM artifacts/)
+    // Every artifact row, not only audio ones: a source upload's original is
+    // what its export reads.
+    expect(sql).toMatch(/FROM artifacts\s+WHERE r2_key IS NOT NULL/)
+    expect(sql).toMatch(/FROM file_source_blobs\s+WHERE r2_key IS NOT NULL/)
     expect(sql).toMatch(/FROM diarization_jobs/)
     expect(sql).toMatch(/project_settings/)
     expect(sql).toMatch(/designPreviewAudioId/)
@@ -203,6 +207,7 @@ describe("running across every project", () => {
             alreadyInDev: 2,
             copied: 3,
             copiedBytes: 300,
+            originals: { referenced: 2, alreadyInDev: 1, copied: 1, outsidePrefix: 0 },
             missingInProd: ["gone"],
             failed: [{ key: "k", error: "boom" }],
           })
@@ -218,6 +223,9 @@ describe("running across every project", () => {
     expect(result.alreadyInDev).toBe(4)
     expect(result.copied).toBe(6)
     expect(result.copiedBytes).toBe(600)
+    expect(result.originalsReferenced).toBe(4)
+    expect(result.originalsAlreadyInDev).toBe(2)
+    expect(result.originalsCopied).toBe(2)
     expect(result.missingInProd).toBe(2)
     expect(result.failedObjects).toBe(2)
   })
@@ -312,6 +320,7 @@ describe("the run-page summary", () => {
             alreadyInDev: 1,
             copied: 3,
             copiedBytes: 1_500_000,
+            originals: { referenced: 2, alreadyInDev: 1, copied: 1, outsidePrefix: 0 },
             missingInProd: ["gone"],
           }),
         now: () => 0,
@@ -326,6 +335,9 @@ describe("the run-page summary", () => {
       "referenced objects",
       "already in dev",
       "copied",
+      "source originals referenced | 2",
+      "source originals already in dev | 1",
+      "source originals copied | 1",
       "missing in prod",
       "failed objects",
       "failed projects",
@@ -334,6 +346,27 @@ describe("the run-page summary", () => {
     ]) {
       expect(summary).toContain(label)
     }
+  })
+
+  it("reports originals a dry run would copy as such", async () => {
+    const result = await copyAllProjectAudio(
+      {
+        listProjects: async () => [project("a", 1)],
+        copyOne: async (projectId) =>
+          report({
+            projectId,
+            dryRun: true,
+            referenced: 3,
+            alreadyInDev: 1,
+            originals: { referenced: 2, alreadyInDev: 1, copied: 0, outsidePrefix: 0 },
+          }),
+        now: () => 0,
+      },
+      { dryRun: true },
+    )
+    const summary = formatCopyAllReport(result)
+    expect(summary).toMatch(/source originals would copy \| 1/)
+    expect(summary).not.toMatch(/source originals copied/)
   })
 
   it("headlines a failure rather than burying it in a row", async () => {
@@ -348,7 +381,7 @@ describe("the run-page summary", () => {
       {},
     )
     const summary = formatCopyAllReport(result)
-    expect(summary).toMatch(/^## Copy prod audio to dev — ⚠️ 1 project\(s\) failed/)
+    expect(summary).toMatch(/^## Copy prod media to dev — ⚠️ 1 project\(s\) failed/)
     expect(summary).toMatch(/`bad`: denied/)
   })
 
@@ -364,6 +397,9 @@ describe("the run-page summary", () => {
       alreadyInDev: 0,
       copied: 0,
       copiedBytes: 0,
+      originalsReferenced: 0,
+      originalsAlreadyInDev: 0,
+      originalsCopied: 0,
       missingInProd: 0,
       failedObjects: 0,
       durationMs: 125_000,

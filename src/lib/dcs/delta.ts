@@ -263,6 +263,38 @@ export interface ComputeRepairDeltaArgs {
 }
 
 /**
+ * AQU-1896: how much of the project's held source the scan actually looked at.
+ *
+ * The op counts alone cannot tell two opposite outcomes apart — "I re-read
+ * every file you hold and they all hash-match" and "I resolved none of your
+ * files in the pinned source, so I read nothing" are both
+ * `{creates: [], commits: [], deletes: []}`. Reporting what the scan reached
+ * lets the caller say which one happened instead of calling both a match.
+ */
+export interface RepairScan {
+  /** Distinct source files this project holds, per the projection. */
+  heldFiles: number
+  /** Held files that resolved to a path in the pinned ref's tree. Zero here
+   *  with `heldFiles > 0` means nothing was checked: the ids could not be
+   *  derived from any upstream path (a renamed/removed path upstream, or an
+   *  id-scheme skew — AQU-1891). */
+  resolvedFiles: number
+  /** Resolved files whose bytes were actually read at the pinned ref. A tree
+   *  path that 404s at the ref is skipped rather than fatal (see
+   *  `fetchRawFiles`), so this can be lower than `resolvedFiles` — and zero
+   *  here also means nothing was checked. */
+  fetchedFiles: number
+}
+
+export interface RepairDeltaResult extends DeltaResult {
+  /** What the scan reached. See `RepairScan` — a zero-op result is only a
+   *  clean bill of health when `fetchedFiles > 0`. */
+  scan: RepairScan
+}
+
+const EMPTY_REPAIR_SCAN: RepairScan = { heldFiles: 0, resolvedFiles: 0, fetchedFiles: 0 }
+
+/**
  * Re-parse ALL adapter-held files at the pinned ref and diff against the
  * projection. Fetches only files the adapter holds: every route derives its
  * fileId as `dcsFileId(projectId, repo, path)`, so tree paths are pre-filtered
@@ -271,9 +303,13 @@ export interface ComputeRepairDeltaArgs {
  * pre-AQU-1891 project-agnostic id so repair still reaches a pre-fix project's
  * files.
  */
-export async function computeRepairDelta(args: ComputeRepairDeltaArgs): Promise<DeltaResult> {
+export async function computeRepairDelta(
+  args: ComputeRepairDeltaArgs,
+): Promise<RepairDeltaResult> {
   const { client, entry, currentCells } = args
-  if (currentCells.size === 0) return { creates: [], commits: [], deletes: [] }
+  if (currentCells.size === 0) {
+    return { creates: [], commits: [], deletes: [], scan: EMPTY_REPAIR_SCAN }
+  }
 
   const owner = entry.owner
   const repoName = entry.name
@@ -293,11 +329,18 @@ export async function computeRepairDelta(args: ComputeRepairDeltaArgs): Promise<
   for (const c of currentCells.values()) adapterFileIds.add(c.fileId)
 
   const tree = await client.getTree(owner, repoName, entry.ref)
-  const held = tree.filter(
-    (path) =>
-      path !== MANIFEST_PATH &&
-      resolveHeldFileId(adapterFileIds, args.projectId, repo, path) !== undefined,
-  )
+  // AQU-1896: count the HELD FILE IDS the tree resolved, not the tree paths, so
+  // the figure is comparable with `heldFiles` (two upstream paths resolving to
+  // one held file would otherwise over-count).
+  const resolvedFileIds = new Set<string>()
+  const held: string[] = []
+  for (const path of tree) {
+    if (path === MANIFEST_PATH) continue
+    const heldId = resolveHeldFileId(adapterFileIds, args.projectId, repo, path)
+    if (heldId === undefined) continue
+    resolvedFileIds.add(heldId)
+    held.push(path)
+  }
   const fileTexts = await fetchRawFiles(
     client,
     { owner, repoName, ref: entry.ref, refKind },
@@ -305,6 +348,11 @@ export async function computeRepairDelta(args: ComputeRepairDeltaArgs): Promise<
     "Repair cancelled",
     args.signal,
   )
+  const scan: RepairScan = {
+    heldFiles: adapterFileIds.size,
+    resolvedFiles: resolvedFileIds.size,
+    fetchedFiles: fileTexts.size,
+  }
 
   const parsedFiles = route.parse({
     entry,
@@ -313,7 +361,7 @@ export async function computeRepairDelta(args: ComputeRepairDeltaArgs): Promise<
     files: fileTexts,
     options: { excludeFrontMatter: args.excludeFrontMatter },
   })
-  return classifyAgainstCurrent(parsedFiles, currentCells, repo)
+  return { ...classifyAgainstCurrent(parsedFiles, currentCells, repo), scan }
 }
 
 /**

@@ -31,31 +31,44 @@ export function mediaFileKind(input: MediaFileKindInput): MediaFileKind {
   return "plain"
 }
 
+/** A panel's size: pixels, or a share of the space its group has. */
+export type PanelSize = number | `${number}%`
+
+/**
+ * AQU-2343 (Sam, Nov 2, from a screenshot of the arrangement he wanted): a
+ * file whose film shows starts with the timeline a little under half the
+ * media view's height and the film about a third of the row below it, the
+ * text taking the rest. Shares, not pixels, so it looks the same on any
+ * window.
+ */
+export const FILM_TIMELINE_SHARE = "45%"
+export const FILM_WIDTH_SHARE = "38%"
+
 export interface StartingLayout {
-  /** The timeline panel's height, px. */
-  timelineHeight: number
-  /** The film's width, px — only used when a film is shown. */
-  videoWidth: number
+  /** The timeline panel's height: pixels, or a share of the media view. */
+  timelineHeight: PanelSize
+  /** The film's width: pixels, or a share of the row below the timeline —
+   *  only used when a film is shown. */
+  videoWidth: PanelSize
 }
 
 /**
- * - dub: the film large, beside the lines it is dubbed against (480 px), with
- *   the timeline at its usual height.
- * - subtitles: the text large — the film at today's 288 px, the timeline
- *   shorter (220 px), since subtitles are worked line by line in the table.
+ * - A file whose film shows (a dubbing episode, a subtitles file, or any
+ *   other file with a film linked): the shares above (AQU-2343).
  * - scripture: no film, so the timeline gets the room (460 px).
- * - plain: today's defaults.
+ * - plain: the timeline at its usual height.
  *
- * The numbers are the docking mock-up's (Media Redesign canvas, board 18).
+ * The pixel numbers are the docking mock-up's (Media Redesign canvas,
+ * board 18). `filmShown` is whether the film panel shows; a dubbing or
+ * subtitles file has a film by definition.
  */
-export function startingLayout(kind: MediaFileKind): StartingLayout {
+export function startingLayout(kind: MediaFileKind, filmShown = kind === "dub" || kind === "subtitles"): StartingLayout {
+  if (filmShown) return { timelineHeight: FILM_TIMELINE_SHARE, videoWidth: FILM_WIDTH_SHARE }
   switch (kind) {
-    case "dub":
-      return { timelineHeight: TIMELINE_PANE_DEFAULT_HEIGHT, videoWidth: 480 }
-    case "subtitles":
-      return { timelineHeight: 220, videoWidth: VIDEO_PANE_DEFAULT_WIDTH }
     case "scripture":
       return { timelineHeight: 460, videoWidth: VIDEO_PANE_DEFAULT_WIDTH }
+    case "dub":
+    case "subtitles":
     case "plain":
       return { timelineHeight: TIMELINE_PANE_DEFAULT_HEIGHT, videoWidth: VIDEO_PANE_DEFAULT_WIDTH }
   }

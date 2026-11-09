@@ -39,6 +39,8 @@ async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T
 
 export const paratextTauri = {
   discover: () => invoke<Discovery>("paratext_discover"),
+  /** Linked folders only; reads nothing inside them. */
+  userRoots: () => invoke<string[]>("paratext_user_roots"),
   addRoot: (path: string) => invoke<Discovery>("paratext_add_root", { path }),
   removeRoot: (path: string) => invoke<Discovery>("paratext_remove_root", { path }),
   readFile: async (projectPath: string, fileName: string) =>
@@ -46,9 +48,20 @@ export const paratextTauri = {
   hashFile: (projectPath: string, fileName: string) => invoke<string>("paratext_hash_file", { projectPath, fileName }),
   writeBook: (projectPath: string, fileName: string, bytes: Uint8Array, expectedBlobHash: string) =>
     invoke<WriteResult>("paratext_write_book", { projectPath, fileName, bytes: Array.from(bytes), expectedBlobHash }),
+  /** `expectedBlobHash === null` creates the user's first notes file; the Rust side refuses if one exists. */
+  writeNotes: (projectPath: string, fileName: string, bytes: Uint8Array, expectedBlobHash: string | null) =>
+    invoke<WriteResult>("paratext_write_notes", { projectPath, fileName, bytes: Array.from(bytes), expectedBlobHash }),
   watch: (projectPath: string) => invoke<void>("paratext_watch", { projectPath }),
   unwatch: (projectPath: string) => invoke<void>("paratext_unwatch", { projectPath }),
   isRunning: () => invoke<boolean>("paratext_is_running"),
+}
+
+/** Native "choose a folder" dialog. Resolves null when the user cancels. */
+export async function pickFolder(title: string): Promise<string | null> {
+  if (!isTauriRuntime()) return null
+  const { open } = await import("@tauri-apps/plugin-dialog")
+  const picked = await open({ directory: true, multiple: false, title })
+  return typeof picked === "string" ? picked : null
 }
 
 /** Subscribe to folder-change events. Returns an unlisten function. */

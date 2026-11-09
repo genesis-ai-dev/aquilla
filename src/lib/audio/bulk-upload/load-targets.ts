@@ -6,6 +6,7 @@ import { fetchAllFileCells, fetchFileCells } from "@/lib/sync/cells-read"
 import type { CellRow } from "@/lib/sync/cells-read-types"
 import { fetchFileAudioAttachments } from "@/lib/sync/cell-audio-read"
 import { cellHasOwnTake } from "@/lib/progress/audio-progress-cells"
+import { sharedSelections } from "@/lib/audio/own-take"
 import { isStructuralCell } from "@/lib/cells/structural"
 import { bookCodeFromFileName, isKnownBookCode } from "@/lib/file-labeling/bible-book-names"
 import { usfmDisplayText } from "@/lib/parsers/usfm-display"
@@ -91,6 +92,8 @@ export async function loadTargetFile(
     fetchFileAudioAttachments(projectId, file.fileId, jwt, lane).catch(() => null),
   ])
   const targetById = new Map(target.map((row) => [row.cellId, row]))
+  // AQU-2411: a recording chosen on several lines is the shared source one.
+  const shared = audio ? sharedSelections(Object.values(audio.cells)) : null
   const lines: TargetLine[] = []
   // A subtitle or film file: its lines have times (a cue's start).
   let timed = false
@@ -102,7 +105,7 @@ export async function loadTargetFile(
       ref: row.canonicalRef,
       text: lineText(row, targetById.get(row.cellId)),
       structural: isStructuralCell(row.type),
-      hasRecording: cellHasOwnTake(row.cellId, audio?.cells[row.cellId]),
+      hasRecording: cellHasOwnTake({ id: row.cellId, fileId: file.fileId }, audio?.cells[row.cellId], shared),
     })
   }
   return { fileId: file.fileId, name: file.name, bookCode: file.bookCode, lines, timed }

@@ -73,6 +73,7 @@ import {
   projectFileCountersRecomputeStmt,
   type PersistedEvent,
 } from './event-projection'
+import { buildCellStmtsFromManifest, type StoredRevisionManifest } from './file-revision-apply'
 import {
   buildClaimWinners,
   ChainHeadReplay,
@@ -144,6 +145,41 @@ class RebuildFailed extends Error {}
 interface SnapshotSeed {
   env: ProjectionSnapshotEnv
   manifest: ProjectionSnapshotManifest
+}
+
+/**
+ * AQU-2459: the manifests of this project's `file.revision` events, read from
+ * R2 BEFORE the transaction opens (the same rule as the snapshot manifest: the
+ * transaction never waits on R2). Keyed by event id. A revision whose manifest
+ * cannot be read is a RebuildFailed when its event is replayed — a revisioned
+ * file's cells come from nowhere else.
+ */
+type RevisionManifests = Map<string, StoredRevisionManifest>
+
+async function readRevisionManifests(
+  db: AquillaDb,
+  env: Pick<RebuildEnv, 'SNAPSHOTS'>,
+  projectId: string,
+): Promise<RevisionManifests> {
+  const out: RevisionManifests = new Map()
+  const { results } = await db
+    .prepare(`SELECT id, payload FROM events WHERE project_id = ? AND kind = 'file.revision'`)
+    .bind(projectId)
+    .all<{ id: string; payload: string }>()
+  if (!results?.length || !env.SNAPSHOTS) return out
+  for (const row of results) {
+    let key: string | undefined
+    try {
+      key = (JSON.parse(row.payload) as { manifestR2Key?: string }).manifestR2Key
+    } catch {
+      continue
+    }
+    if (!key) continue
+    const obj = await env.SNAPSHOTS.get(key)
+    if (!obj) continue
+    out.set(row.id, JSON.parse(await obj.text()) as StoredRevisionManifest)
+  }
+  return out
 }
 
 interface RebuildOutcome {
@@ -232,7 +268,8 @@ export async function handleRebuildProjectionRequest(
 
   let outcome: RebuildOutcome
   try {
-    outcome = await db.transaction((tx) => rebuildProjection(tx, projectId, seed))
+    const revisionManifests = await readRevisionManifests(db, env, projectId)
+    outcome = await db.transaction((tx) => rebuildProjection(tx, projectId, seed, revisionManifests))
   } catch (err) {
     if (err instanceof RebuildFailed) {
       return new Response(err.message, { status: 500 })
@@ -264,7 +301,14 @@ async function rebuildProjection(
   tx: AquillaDb,
   projectId: string,
   seed: SnapshotSeed | null,
+  revisionManifests: RevisionManifests = new Map(),
 ): Promise<RebuildOutcome> {
+  // AQU-2459: a revision's replay tombstones what its PARENT revision carried
+  // and it does not. The parent is looked up by number among every manifest
+  // read above, never "the last one replayed": a snapshot-seeded rebuild
+  // (AQU-1833) does not replay revisions older than the snapshot.
+  const manifestByRevision = new Map<string, StoredRevisionManifest>()
+  for (const m of revisionManifests.values()) manifestByRevision.set(`${m.fileId}:${m.revisionN}`, m)
   // 1. Wipe the projection for this project. Rolled back with everything else
   //    if the replay below fails.
   await wipeProjection(tx, projectId)
@@ -477,8 +521,49 @@ async function rebuildProjection(
         // Defer the O(N²) per-cell file-counter recompute; do it once, set-based,
         // after the replay (step 4b) — the 67%-of-time fix, now in the rebuild.
         buildEventProjectionStmts(tx, event, stmts, { deferFileCounters: true })
+        if (row.kind === 'file.revision' && row.file_id) {
+          // AQU-2459: a revision's cells live in its manifest, not in events.
+          const manifest = revisionManifests.get(row.id)
+          if (!manifest) {
+            throw new RebuildFailed(
+              `file.revision ${row.id} has no readable manifest in R2; a revisioned file cannot be rebuilt without it`,
+            )
+          }
+          let previous = new Set<string>()
+          if (manifest.parentRevisionN != null) {
+            const parent = manifestByRevision.get(`${row.file_id}:${manifest.parentRevisionN}`)
+            if (!parent) {
+              throw new RebuildFailed(
+                `file.revision ${row.id} names parent revision ${manifest.parentRevisionN} whose manifest is not readable in R2`,
+              )
+            }
+            previous = new Set(parent.units.map((u) => u.cellId))
+          }
+          stmts.push(
+            ...buildCellStmtsFromManifest(tx, {
+              projectId,
+              fileId: row.file_id,
+              manifest,
+              previousCellIds: previous,
+              author: row.author,
+              serverTs: row.server_ts,
+            }),
+          )
+          // Later target commits chain on these source heads.
+          replay.seedFromCellRows(
+            manifest.units.map((u) => ({
+              file_id: row.file_id as string,
+              cell_id: u.cellId,
+              side: 'source',
+              lane_id: '',
+              event_id: u.eventId,
+              upstream_seq: null,
+            })),
+          )
+        }
         eventsProjected += 1
       } catch (err) {
+        if (err instanceof RebuildFailed) throw err
         throw new RebuildFailed(
           `failed to build projection for event ${row.id} (kind: ${row.kind}): ${String(err)}`,
         )

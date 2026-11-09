@@ -38,10 +38,16 @@ interface Props {
   onClose?: () => void
   /** Optional className for the outer wrapper. */
   className?: string
+  /** AQU-2021: where the shell is being shown. `inline` (the default) is the
+   *  panel that drops under the row and draws its own frame. `modal` is the
+   *  same tabs inside `CellDetailDialog`, which owns the surface, the heading
+   *  and Esc — so the frame, the entrance animation and this component's own
+   *  Esc handler all stand down. */
+  presentation?: "inline" | "modal"
 }
 
 export function CellExpansion({
-  open, tab, onTabChange, tabs, onClose, className,
+  open, tab, onTabChange, tabs, onClose, className, presentation = "inline",
 }: Props) {
   const t = useT()
   const wrapperRef = useRef<HTMLDivElement | null>(null)
@@ -78,8 +84,12 @@ export function CellExpansion({
 
   // Esc to close. Listen on the wrapper so we don't compete with global Esc
   // handlers when the panel isn't focused.
+  //
+  // AQU-2021: never in `modal` presentation. This handler stops Escape dead on
+  // the wrapper, so inside a dialog it would swallow the key before the dialog
+  // sees it and the modal could only be closed by the mouse.
   useEffect(() => {
-    if (!open) return
+    if (!open || presentation === "modal") return
     const el = wrapperRef.current
     if (!el) return
     const handler = (e: globalThis.KeyboardEvent) => {
@@ -90,7 +100,7 @@ export function CellExpansion({
     }
     el.addEventListener("keydown", handler)
     return () => el.removeEventListener("keydown", handler)
-  }, [open, onClose])
+  }, [open, onClose, presentation])
 
   useEffect(() => {
     if (!open || !activeTab || activeTab.value === tab) return
@@ -103,14 +113,17 @@ export function CellExpansion({
     <div
       ref={wrapperRef}
       className={cn(
-        // Faint, bordered, contained block — indented under its row (by the
-        // caller) and bounded with that row by the list divider, so it reads
-        // as the row's child rather than a sibling of the next row.
-        "mt-1.5 overflow-hidden rounded-lg border border-border bg-muted/40",
-        // Entrance animation. CSS-only so we don't pull in a motion lib.
-        "data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-top-1",
+        presentation === "inline" && [
+          // Faint, bordered, contained block — indented under its row (by the
+          // caller) and bounded with that row by the list divider, so it reads
+          // as the row's child rather than a sibling of the next row.
+          "mt-1.5 overflow-hidden rounded-lg border border-border bg-muted/40",
+          // Entrance animation. CSS-only so we don't pull in a motion lib.
+          "data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-top-1",
+        ],
         className,
       )}
+      data-cell-detail-presentation={presentation}
       data-state={open ? "open" : "closed"}
       // We don't want clicks inside the expansion to bubble up and trigger
       // row-level handlers (e.g. selection toggling).

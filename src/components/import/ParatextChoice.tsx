@@ -38,6 +38,9 @@ interface ParatextChoiceProps {
   /** AQU-634: per-project USFM front-matter opt-out (forwarded to
    *  prepareParatextProject). */
   excludeFrontMatter?: boolean
+  /** Start on the source-Bible picker (the Paratext bridge's "Open in Aquilla"
+   *  always imports as target). Default: the source-or-target choice. */
+  initialMode?: "choose" | "pickSource"
 }
 
 /** Preview + source-vs-target choice for a detected Paratext project (AQU-310:
@@ -47,12 +50,12 @@ interface ParatextChoiceProps {
  *  (aligned by verse ref). */
 export function ParatextChoice({
   entries, bookCount, projectId, username, sourceLanguage, targetLanguage, targetLang, getToken, onImported, onCancel,
-  existingFiles, onCollision, excludeFrontMatter,
+  existingFiles, onCollision, excludeFrontMatter, initialMode = "choose",
 }: ParatextChoiceProps) {
   const analytics = useAccountAnalytics()
   const { locale } = useI18n()
   const t = useT()
-  const [mode, setMode] = useState<"choose" | "pickSource" | "importing">("choose")
+  const [mode, setMode] = useState<"choose" | "pickSource" | "importing">(initialMode)
   const [plan, setPlan] = useState<ParatextPlan | null>(null)
   const [phase, setPhase] = useState("")
   const [progress, setProgress] = useState<{ count: number; total: number; bookLabel: string } | null>(null)
@@ -83,6 +86,17 @@ export function ParatextChoice({
       })
     return () => { cancelled = true }
   }, [entries, projectId, excludeFrontMatter, t, analytics])
+
+  // Starting on the picker needs the translation list that `startTarget`
+  // would otherwise fetch on the way in.
+  useEffect(() => {
+    if (initialMode !== "pickSource") return
+    let cancelled = false
+    fetchTranslationsList()
+      .then((list) => { if (!cancelled) setTranslations(list) })
+      .catch((err: unknown) => { if (!cancelled) setError(err instanceof Error ? err.message : t("importExport.paratext.couldNotLoadSourceList")) })
+    return () => { cancelled = true }
+  }, [initialMode, t])
 
   function onProgress(p: ParatextImportProgress) {
     const bookLabel = p.book

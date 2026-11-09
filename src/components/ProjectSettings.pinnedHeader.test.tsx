@@ -17,7 +17,7 @@
 //      than carrying the header along.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, cleanup } from "@testing-library/react"
+import { render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { ProjectSettings, ProjectSettingsDialog } from "./ProjectSettings"
 
@@ -226,4 +226,15 @@ describe("ProjectSettings — pinned header (AQU-2030)", () => {
     editProjectTitle("Renamed from the modal")
     expect(pinnedHeader().contains(screen.getByTestId("settings-undo"))).toBe(true)
   })
+
+  // Nov 2 shortcut review: the dialog used to open with the focus on its first
+  // button, the settings Undo, so Space or Enter on opening undid a settings
+  // change. It opens with the focus on itself.
+  it("opens with the focus on the dialog itself, not on a button", async () => {
+    renderModal()
+    const dialog = screen.getByTestId("project-settings-dialog")
+    await waitFor(() => expect(document.activeElement).toBe(dialog))
+    expect(screen.getByTestId("settings-undo")).not.toBe(document.activeElement)
+  })
 })
+

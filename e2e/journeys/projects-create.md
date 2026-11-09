@@ -10,7 +10,7 @@ Smoke twin: `e2e/specs/projects/create.smoke.spec.ts`
 ## Steps
 
 1. Open the org's **Projects** page.
-2. Click **New project**.
+2. Click **New project**. The dialog first asks where the project comes from (AQU-2105); click **Start from scratch**.
 3. In the **Create new project** dialog, type a unique title, `en` in **Source language**, and `fr` in **Language lanes**. The language fields are comboboxes that accept a typed code; no option list needs to open.
 4. Click **Create project**.
 5. You land on the new project's overview page, `/projects/<id>`. Its title is the page heading.

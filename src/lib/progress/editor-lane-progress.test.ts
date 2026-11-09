@@ -52,7 +52,7 @@ describe("which lines are recorded and approved in the open language", () => {
       selectedAudioId: audioId,
     } as CellAudioEntry
     const takes = editorLaneTakes({
-      delivers: "audio", ownAudio: new Map([["v9", entry]]), cueIds: null, cueAudio: null,
+      delivers: "audio", ownAudio: new Map([["v9", entry]]), fileId: "file-1", cueIds: null, cueAudio: null,
       cuesForText: new Map(), audioThreshold: 1,
     })
     expect(takes.recorded.size).toBe(0)
@@ -150,5 +150,26 @@ describe("the other files' bars come from the Plan's own read", () => {
       // …and the two halves on their own, for the file row's two bars.
       textTranslated: 9, textValidated: 7, recorded: 6, audioValidated: 6,
     })
+  })
+})
+
+// AQU-2411: Xiang's Genesis — verses recorded in Codex, migrated under Codex's
+// file names. Recorded in the open language, as the Plan already says.
+describe("which lines are recorded — takes migrated from Codex", () => {
+  it("counts a verse whose chosen take carries no line id", () => {
+    const tagged = recorded("v1", 1)
+    const audioId = "audio-1719100000000-k3j9x2m1p.webm"
+    const codex = {
+      ...tagged,
+      attachments: { [audioId]: { ...Object.values(tagged.attachments)[0], audioId } },
+      selectedBySlot: { recording: audioId },
+      selectedAudioId: audioId,
+    } as CellAudioEntry
+    const takes = editorLaneTakes({
+      delivers: "audio", ownAudio: new Map([["v1", codex]]), fileId: "file-1", cueIds: null, cueAudio: null,
+      cuesForText: new Map(), audioThreshold: 1,
+    })
+    expect([...takes.recorded]).toEqual(["v1"])
+    expect([...takes.approved]).toEqual(["v1"])
   })
 })

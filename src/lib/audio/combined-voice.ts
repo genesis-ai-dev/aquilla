@@ -149,7 +149,7 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
           targetLanguage,
           original: effectiveSourceText(chosen[0]),
           context: chosen[0].context,
-          cellLabel: chosen[0].cellLabel,
+          // AQU-2408: no cellLabel — a typed label is not voice direction.
         },
         onProgress: (p) => setAll(
           p.status === "ready" || (p.total > 0 && p.loaded >= p.total)

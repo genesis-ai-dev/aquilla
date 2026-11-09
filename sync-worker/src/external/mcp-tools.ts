@@ -828,6 +828,45 @@ const TOOL_SPECS: McpToolSpec[] = [
     },
   },
   {
+    name: 'list_members',
+    description:
+      'Read the project MEMBERSHIP ROSTER — who has access, at what effective role, by which ' +
+      'grant path. One entry per person: userId, username, role (the canonical level: 100 ' +
+      'viewer · 200 commenter · 300 reviewer · 400 contributor · 500 project_lead · ' +
+      '600 maintainer · 700 owner), roleName, roleSource and direct. Highest role first. ' +
+      'Requires project MAINTAINER (600) — the same floor as changing membership; below it ' +
+      'you get permission_denied, not an empty list.\n\n' +
+      'READ THIS BEFORE STAGING A MEMBERSHIP CHANGE. Two fields decide which command is ' +
+      'legal, and neither can be guessed:\n' +
+      '1. `direct` — true when the person holds a `project_members` row. SetRole and ' +
+      'RemoveMember act ONLY on that row and are rejected with conflict ' +
+      '`not_a_direct_member` without one; somebody whose access comes from the org, a team ' +
+      'or being the project creator (direct: false) is given a row with InviteMember ' +
+      'instead. Conversely InviteMember on a direct member is rejected with conflict ' +
+      '`already_member` — re-role them with SetRole.\n' +
+      '2. `role` — the EFFECTIVE (max-wins) level the target cap is judged against: unless ' +
+      'you are OWNER (700) you cannot touch anyone whose role is >= your own, and never ' +
+      'yourself. Check here rather than discovering it as permission_denied on a staged plan.\n\n' +
+      'roleSource names the winning path: `override` (a direct row), `group` (a team grant), ' +
+      '`org` (an organization role), `creator` (they created the project). RemoveMember drops ' +
+      'the direct row only — org / team / creator paths are additive (AD-12) and still confer ' +
+      'access afterwards, so a removal can legitimately leave the person on this list at a ' +
+      'lower role.\n\n' +
+      'The response is { data, total, truncated, nextCursor: null }. This read does not page: ' +
+      'at most 500 rows come back, highest role first, and `truncated: true` with a larger ' +
+      '`total` means the project is reached by more people than that (an org whose every ' +
+      'member holds its projects through the org path) — the rows you get are the top of the ' +
+      'ladder, so the people a membership command could be aimed at are never the ones cut. ' +
+      'Errors: permission_denied (403), scope_denied (403), not_found (404), ' +
+      'rate_limited (429). This tool performs no membership writes.',
+    inputSchema: {
+      type: 'object',
+      properties: { ...projectIdProp },
+      required: ['projectId'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'prepare_translations',
     description:
       'Stage a batch of commands as an immutable changeset (execution plan) WITHOUT applying ' +
@@ -926,7 +965,20 @@ const TOOL_SPECS: McpToolSpec[] = [
       'the destructive one. Both require PROJECT_LEAD. Several may share one changeset, but ' +
       'they cannot mix with other kinds and hides cannot mix with shows (stage two plans). ' +
       'Refused at prepare when the cell does not exist or is already in the state you asked ' +
-      'for. Cell reads carry `hidden` so you can see what is already parked and skip it.',
+      'for. Cell reads carry `hidden` so you can see what is already parked and skip it.\n' +
+      '  { kind: "InviteMember", projectId, username, role } / ' +
+      '{ kind: "SetRole", projectId, username, role } / ' +
+      '{ kind: "RemoveMember", projectId, username } — MEMBERSHIP (AQU-2403). Call ' +
+      'list_members first: its `direct` field picks InviteMember (no row yet) over SetRole ' +
+      '(row exists), and its `role` is the effective level the caps are judged against. ' +
+      'Requires project MAINTAINER (600), and prepare ALWAYS stages these ask-mode whatever ' +
+      'the credential\'s mode — membership is governance, so every change passes a human at ' +
+      'the approvalUrl. You cannot grant a role above your own (permission_denied ' +
+      '`role_above_caller`), act on yourself (`self_target`), or touch anyone whose effective ' +
+      'role is >= yours unless you are OWNER (`target_outranks_caller`). Membership commands ' +
+      'batch with each other — at most 25, one per person — but never with other kinds, and ' +
+      'each command\'s projectId must equal the changeset\'s. RemoveMember drops the direct ' +
+      'row only; org / team / creator paths are additive (AD-12) and keep conferring access.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -959,7 +1011,8 @@ const TOOL_SPECS: McpToolSpec[] = [
           type: 'array',
           description:
             'CreateOrg / CreateProject / UpdateProjectSettings / LinkMedia / DraftCells / ' +
-            'InsertCell / DeleteCell / SplitCell / HideCell / ShowCell commands to stage ' +
+            'InsertCell / DeleteCell / SplitCell / HideCell / ShowCell / InviteMember / ' +
+            'SetRole / RemoveMember commands to stage ' +
             '(Agent API v1.1) — see this ' +
             'tool\'s description for per-kind shape, role gates, and sole-command rules. ' +
             'PlanImport is not accepted here (REST-only).',
@@ -1174,6 +1227,76 @@ const TOOL_SPECS: McpToolSpec[] = [
                   cellId: { type: 'string' },
                 },
                 required: ['kind', 'fileId', 'cellId'],
+                additionalProperties: false,
+              },
+              {
+                type: 'object',
+                properties: {
+                  kind: {
+                    type: 'string',
+                    enum: ['InviteMember', 'SetRole'],
+                    description:
+                      'InviteMember grants a person a NEW direct project_members row at ' +
+                      '`role`; SetRole changes the role on a row they already hold. They are ' +
+                      'not interchangeable: InviteMember on an existing direct member is ' +
+                      'rejected (conflict `already_member`) so an invite can never silently ' +
+                      'demote, and SetRole on somebody with no direct row is rejected ' +
+                      '(conflict `not_a_direct_member`) so a re-role can never silently grant ' +
+                      'new access. Call list_members first — its `direct` field is what picks ' +
+                      'between them.',
+                  },
+                  projectId: {
+                    type: 'string',
+                    description:
+                      'Must equal this tool call\'s projectId — the changeset\'s own project. ' +
+                      'Membership commands name their project explicitly so a batch cannot ' +
+                      'straddle two.',
+                  },
+                  username: {
+                    type: 'string',
+                    description:
+                      'The person\'s Aquilla username, as list_members reports it ' +
+                      '(case-insensitive). People are named by username on this API, not by ' +
+                      'email. An unknown name is not_found, never a silently created account.',
+                  },
+                  role: {
+                    type: 'number',
+                    enum: [100, 200, 300, 400, 500, 600, 700],
+                    description:
+                      'Canonical level: 100 viewer, 200 commenter, 300 reviewer, 400 ' +
+                      'contributor, 500 project_lead, 600 maintainer, 700 owner.',
+                  },
+                },
+                required: ['kind', 'projectId', 'username', 'role'],
+                additionalProperties: false,
+              },
+              {
+                type: 'object',
+                properties: {
+                  kind: {
+                    type: 'string',
+                    enum: ['RemoveMember'],
+                    description:
+                      'Drops the person\'s DIRECT project_members row. Org, team and creator ' +
+                      'grant paths are additive (AD-12) and are untouched, so somebody who ' +
+                      'also holds the project through one of those keeps access at that ' +
+                      'level — check roleSource in list_members before promising a removal ' +
+                      'ends their access. Rejected with conflict `not_a_direct_member` when ' +
+                      'there is no row to remove.',
+                  },
+                  projectId: {
+                    type: 'string',
+                    description:
+                      'Must equal this tool call\'s projectId — the changeset\'s own project. ' +
+                      'Membership commands name their project explicitly so a batch cannot ' +
+                      'straddle two.',
+                  },
+                  username: {
+                    type: 'string',
+                    description: 'The person\'s Aquilla username, as list_members reports it.',
+                  },
+                },
+                required: ['kind', 'projectId', 'username'],
                 additionalProperties: false,
               },
             ],
@@ -1521,6 +1644,7 @@ export const TOOL_KINDS: Record<string, ToolKind> = {
   read_quality: 'read',
   read_term_consistency: 'read',
   list_terms: 'read',
+  list_members: 'read',
   prepare_translations: 'stage',
   upload_artifact: 'upload',
   preview_import: 'read',

@@ -403,6 +403,45 @@ export async function removeOrgMember(
   }
 }
 
+/**
+ * AQU-1993: why leaving was refused. Both reasons are actionable, so the UI
+ * says which one it was instead of showing a bare 409.
+ */
+export class LeaveOrgBlockedError extends Error {
+  readonly reason: "last_owner" | "cannot_leave_personal_org"
+  constructor(reason: "last_owner" | "cannot_leave_personal_org") {
+    super(reason)
+    this.name = "LeaveOrgBlockedError"
+    this.reason = reason
+  }
+}
+
+/**
+ * DELETE /api/v2/orgs/:orgId/members/me — leave the organization yourself
+ * (AQU-1993). Distinct from `removeOrgMember`, which is the owner-only
+ * moderation route and refuses self-removal.
+ *
+ * Leaving drops the org-wide role and the caller's team rows in that org. A
+ * project they were added to individually still reaches them — they leave
+ * each of those with `leaveProject`.
+ */
+export async function leaveOrg(jwt: string, orgId: number): Promise<void> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/members/me`, {
+    method: "DELETE",
+    headers: authHeaders(jwt),
+  })
+  if (res.status === 409) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null
+    if (body?.error === "last_owner" || body?.error === "cannot_leave_personal_org") {
+      throw new LeaveOrgBlockedError(body.error)
+    }
+  }
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw new UserError(res.status, text, "org")
+  }
+}
+
 export async function listOrgMemberProjects(
   jwt: string, orgId: number, userId: number
 ): Promise<OrgMemberProject[]> {

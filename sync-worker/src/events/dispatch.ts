@@ -277,6 +277,7 @@ export function dispatchEvent(
     case 'cell.backtranslation.set':
     case 'cell.gloss.set':
     case 'cast.assign':
+    case 'cell.label.set':
     case 'cell.retime':
     case 'cell.lane.retime':
     case 'source.cell.mirror':
@@ -330,6 +331,12 @@ export function dispatchEvent(
       }
       return { ok: true, result: { stmts: [], eventFrame: linkFrame, dirtyTables: [] } }
     }
+
+    case 'file.revision':
+      // AQU-2459: written by the revisions route in-process (it calls
+      // buildEventProjectionStmts directly). A client cannot mint one — its
+      // manifest is in R2 and its cells projection is set-based there.
+      return { ok: false, status: 400, reason: 'file.revision is written by the revisions route, not POST /events' }
 
     default: {
       // Exhaustiveness check.

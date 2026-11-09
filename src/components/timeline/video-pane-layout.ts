@@ -1,6 +1,7 @@
 // Where the media lens's video pane is shown, and how wide. (AQU-646)
 
 import type { AudioTimingMode } from "@/lib/parsers/types"
+import type { PanelSize } from "./media-layout-start"
 
 /** Wide enough to read burned-in captions, narrow enough to leave the table
  *  usable at 1280px: the row reserves ~174px of chrome before its two fluid
@@ -62,8 +63,9 @@ const RESET_WIDTH = "reset"
 
 export function readStoredVideoPaneWidth(
   fileId?: string | null,
-  fallback: number = VIDEO_PANE_DEFAULT_WIDTH,
-): number {
+  // Pixels, or a share of the row for a file with a film (AQU-2343).
+  fallback: PanelSize = VIDEO_PANE_DEFAULT_WIDTH,
+): PanelSize {
   if (typeof window === "undefined" || !fileId) return fallback
   try {
     const own = window.localStorage.getItem(videoPaneWidthKey(fileId))

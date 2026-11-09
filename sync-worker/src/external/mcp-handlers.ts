@@ -379,6 +379,32 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
         '("blank" or "divide"); both halves come out unvalidated either way. MergeCells is ' +
         'NOT available — see docs/AGENT-API.md for why it is deferred.',
     },
+    membership: {
+      readTool: 'list_members',
+      mcpStagingTool: 'prepare_translations',
+      commitTool: 'confirm_changeset',
+      commandKinds: ['InviteMember', 'SetRole', 'RemoveMember'],
+      note:
+        'Read the roster with list_members, then stage InviteMember / SetRole / RemoveMember ' +
+        'via prepare_translations\'s `commands` argument and commit with confirm_changeset. ' +
+        'Receipt-only (a plain project_members row write, not an event). People are named by ' +
+        'USERNAME, not email, exactly as list_members reports them. Every one of these ' +
+        'requires project role >= MAINTAINER (600) and prepare ALWAYS stages them in ' +
+        'ask-mode regardless of the credential\'s mode — membership is governance, so each ' +
+        'change passes a human at the approvalUrl before it can commit. Caps, all ' +
+        'permission_denied: you cannot grant a role above your own (`role_above_caller`), ' +
+        'act on yourself (`self_target`), or touch anyone whose EFFECTIVE role is >= yours ' +
+        'unless you are OWNER (`target_outranks_caller`). list_members\'s `direct` field ' +
+        'picks the command — InviteMember needs no existing project_members row and is ' +
+        'rejected with conflict `already_member` if there is one; SetRole and RemoveMember ' +
+        'need one and are rejected with conflict `not_a_direct_member` without it. ' +
+        'RemoveMember drops the direct row only: org, team and creator grant paths are ' +
+        'additive (AD-12) and keep conferring access, so check roleSource before promising ' +
+        'that a removal ends somebody\'s access. Membership commands batch with each other ' +
+        '(at most 25, one per person) but never with other command kinds, and each ' +
+        'command\'s projectId must equal the changeset\'s. Receipt shape: { credentialId, ' +
+        'channel, changesetId, command: "Membership", appliedAt, projectId, membership[] }.',
+    },
     multiLanguage: {
       note:
         'A project holds a source lane and any number of target lanes. Each lane has an id, ' +
@@ -923,6 +949,18 @@ async function listTerms(
   if (cursor) params.set('cursor', cursor)
   const qs = params.toString()
   return runQualityRead(env, token, `${encodeURIComponent(projectId)}/terms${qs ? `?${qs}` : ''}`)
+}
+
+/** AQU-2403: the governance roster (MAINTAINER-floored) that the InviteMember /
+ *  SetRole / RemoveMember commands are built from. */
+async function listMembers(
+  env: ExternalEnv,
+  token: string,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const projectId = str(args, 'projectId')
+  if (!projectId) return fail('validation_failed', 'projectId is required')
+  return runRead(env, token, `${encodeURIComponent(projectId)}/members`)
 }
 
 async function readTermConsistency(
@@ -1579,6 +1617,8 @@ export async function callTool(
       return readTermConsistency(env, token, args)
     case 'list_terms':
       return listTerms(env, token, args)
+    case 'list_members':
+      return listMembers(env, token, args)
     case 'prepare_translations':
       return prepareTranslations(env, token, args, ctx)
     case 'patch_settings':

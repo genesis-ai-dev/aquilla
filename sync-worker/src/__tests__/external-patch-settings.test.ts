@@ -586,6 +586,8 @@ const POLICY_DIRECTION_CASES: {
   { key: 'allowSelfValidationAudio', tighten: { from: undefined, to: false }, loosen: { from: false, to: true } },
   { key: 'validationRoleFloorAudio', tighten: { from: 'reviewer', to: 'project_lead' }, loosen: { from: 'maintainer', to: null } },
   { key: 'validationNamedUsersAudio', tighten: { from: undefined, to: ['a'] }, loosen: { from: ['a'], to: [] } },
+  // AQU-2408: unset reads as Maintainer, so lowering to Project lead loosens.
+  { key: 'cellLabelFloor', tighten: { from: 'project_lead', to: 'maintainer' }, loosen: { from: 'maintainer', to: 'project_lead' } },
   // AQU-1771: the project's own visibility floors. The org sets none here, so
   // its floor is Maintainer; clearing a stricter value goes back to it.
   { key: 'rosterViewMinRole', tighten: { from: undefined, to: 700 }, loosen: { from: 700, to: null } },

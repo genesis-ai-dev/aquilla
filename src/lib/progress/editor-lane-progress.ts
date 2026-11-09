@@ -15,6 +15,7 @@ import {
 import { laneCountsAudio, laneMeasure, type LaneDelivers } from "@/lib/lanes/lane-delivers"
 import { planAudioTotal, type PlanUnit } from "@/lib/plan/plan-status"
 import { cellHasOwnTake } from "./audio-progress-cells"
+import { sharedSelections } from "@/lib/audio/own-take"
 import type { FileStats } from "./file-summary-progress"
 
 const NONE: ReadonlySet<string> = new Set()
@@ -60,31 +61,36 @@ export function editorLaneTakes(args: {
   delivers: LaneDelivers | null | undefined
   /** The open file's own recordings in the active language, by line. */
   ownAudio: ReadonlyMap<string, CellAudioEntry>
+  /** AQU-2411: the open file, so its own recording never counts as a take. */
+  fileId?: string | null
   /** The audio-cue sheet's lines, when the file has one. */
   cueIds: readonly string[] | null
   /** The cue sheet's recordings in the active language, by heard line. */
   cueAudio: ReadonlyMap<string, CellAudioEntry> | null
+  /** The cue sheet itself, as `fileId` is the open file. */
+  cueFileId?: string | null
   /** subtitle line → the heard lines performing it. */
   cuesForText: ReadonlyMap<string, readonly string[]>
   /** The project's "Required validators (audio)". */
   audioThreshold: number
 }): EditorLaneTakes {
   if (!laneCountsAudio(args.delivers)) return NO_LANE_TAKES
-  const recordedIn = (audio: ReadonlyMap<string, CellAudioEntry>) => {
+  const recordedIn = (audio: ReadonlyMap<string, CellAudioEntry>, fileId: string | null) => {
     const recorded = new Set<string>()
     const approved = new Set<string>()
+    const shared = sharedSelections(audio.values())
     for (const [cellId, entry] of audio) {
       // A take of the line's OWN (AQU-2110's rule): a file's imported source
       // clip sits selected on every line and records none of them.
-      if (cellAudioVotes(entry) == null || !cellHasOwnTake(cellId, entry)) continue
+      if (cellAudioVotes(entry) == null || !cellHasOwnTake({ id: cellId, fileId }, entry, shared)) continue
       recorded.add(cellId)
       if (isCellAudioValidated(entry, args.audioThreshold)) approved.add(cellId)
     }
     return { recorded, approved }
   }
-  if (!args.cueIds || !args.cueAudio) return { ...recordedIn(args.ownAudio), heard: null, performed: null }
+  if (!args.cueIds || !args.cueAudio) return { ...recordedIn(args.ownAudio, args.fileId ?? null), heard: null, performed: null }
 
-  const cues = recordedIn(args.cueAudio)
+  const cues = recordedIn(args.cueAudio, args.cueFileId ?? null)
   const recorded = new Set<string>()
   const approved = new Set<string>()
   const performed = new Set<string>()

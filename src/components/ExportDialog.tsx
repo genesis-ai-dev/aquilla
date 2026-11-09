@@ -328,6 +328,17 @@ const NATIVE_EXPORT_BY_FILE_TYPE: Partial<Record<string, ExportFormat>> = {
   tsv: "tsv",
 }
 
+/** The formats that write the translation into the client's own uploaded
+ *  package (`fetchSourceSidecar`) rather than building a file from the cells.
+ *  Without that upload they cannot run. AQU-2211. */
+const ROUND_TRIP_EXPORT_FORMATS: ReadonlySet<ExportFormat> = new Set<ExportFormat>([
+  "usfm",
+  "docx",
+  "pptx",
+  "idml",
+  "json",
+])
+
 interface ExportDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -377,6 +388,16 @@ interface ExportDialogProps {
    * and open the format list instead.
    */
   activeFileType?: string | null
+  /**
+   * AQU-2211: whether the active file's original upload is on the server
+   * (`hasOriginalSource` on the file record — a `file_source_blobs` row). The
+   * round-trip formats (USFM, Word, PowerPoint, IDML, JSON) write the
+   * translation INTO that upload, so without it they cannot work and are not
+   * offered: a file migrated from Codex now carries its real type ("docx",
+   * "usfm") but no original (AQU-991). `undefined` means not known — the
+   * formats are offered as before.
+   */
+  activeFileHasOriginalSource?: boolean
   /** All project files — used only for project-scope USFM zip. */
   projectFiles: { id: string; name: string; type: string }[]
   /**
@@ -464,6 +485,19 @@ function profileIdFromCells(cells: readonly CellData[]): string | null {
   return null
 }
 
+/**
+ * AQU-2437: the primary "Download <name>.<ext>" button carries the file name,
+ * which can run to sixty characters. The shared button style forbids wrapping
+ * (`whitespace-nowrap`), so a long name made the button wider than its card
+ * and handed the dialog body a horizontal scrollbar. The label wraps on its
+ * own and the button grows taller instead: `py-1.75` keeps a one-line label at
+ * the same 36px as `size="lg"`, and `items-start` + `mt-0.5` on the icon keep
+ * it on the first line rather than floating between two.
+ */
+const WRAPPING_DOWNLOAD_BUTTON = "h-auto w-full items-start justify-center py-1.75"
+/** `wrap-anywhere`, so a name with no spaces still breaks instead of overflowing. */
+const WRAPPING_DOWNLOAD_LABEL = "min-w-0 whitespace-normal wrap-anywhere"
+
 function idmlBlob(bytes: Uint8Array, type: string): Blob {
   return new Blob(
     [bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer],
@@ -502,6 +536,7 @@ export function ExportDialog({
   activeFileId,
   activeFileName,
   activeFileType = null,
+  activeFileHasOriginalSource,
   projectFiles,
   reportFiles,
   characterResolutions,
@@ -525,7 +560,15 @@ export function ExportDialog({
   // The file's own format is the default export — "give me my file back".
   // Types without a 1:1 native exporter (ebible, obs, audio, video, sdbh, …)
   // have no primary download; the format list opens instead.
-  const nativeFormatId = activeFileType ? NATIVE_EXPORT_BY_FILE_TYPE[activeFileType] ?? null : null
+  // AQU-2211: a round-trip format needs the original upload. When the server
+  // says this file has none (a file migrated from Codex), there is no primary
+  // download either, and the format list opens instead.
+  const roundTripAvailable = activeFileHasOriginalSource !== false
+  const nativeFormatCandidate = activeFileType ? NATIVE_EXPORT_BY_FILE_TYPE[activeFileType] ?? null : null
+  const nativeFormatId =
+    nativeFormatCandidate && ROUND_TRIP_EXPORT_FORMATS.has(nativeFormatCandidate) && !roundTripAvailable
+      ? null
+      : nativeFormatCandidate
   const effectiveIdmlCopy = idmlOrgEligible(orgId, import.meta.env)
     ? CURRENT_IDML_FORMAT_COPY
     : idmlFormatCopy({})
@@ -1007,13 +1050,17 @@ export function ExportDialog({
   const hasSdbhFiles = projectFiles.some((f) => f.type === "sdbh")
 
   /**
-   * AQU-2182/AQU-2210: the Web page lays out one Bible book. A USFM file is one
-   * by definition; a `codex` file only when its lines carry Bible verse
-   * references — migrated Codex projects also store dubbing episodes, Pilgrim's
-   * Progress and commentaries as `codex`, and only the lines tell them apart.
+   * AQU-2182/AQU-2210: the Web page lays out one Bible book. A USFM or eBible
+   * file is one by definition (AQU-2211: a migrated book now lands as either);
+   * a `codex` file only when its lines carry Bible verse references — migrated
+   * Codex projects also store dubbing episodes, Pilgrim's Progress and
+   * commentaries as `codex`, and only the lines tell them apart.
    */
   const offersHtmlPage = useMemo(
-    () => activeFileType === "usfm" || (activeFileType === "codex" && hasBibleVerses(cells)),
+    () =>
+      activeFileType === "usfm"
+      || activeFileType === "ebible"
+      || (activeFileType === "codex" && hasBibleVerses(cells)),
     [activeFileType, cells],
   )
 
@@ -1030,11 +1077,12 @@ export function ExportDialog({
    */
   const foldFormats = useMemo(() => {
     const visible = formatOptions.filter((f) => {
-      if (f.id === "usfm") return activeFileType === "usfm"
-      if (f.id === "docx") return activeFileType === "docx" // AQU-233: only for docx imports
-      if (f.id === "pptx") return activeFileType === "pptx" // AQU-152a: only for pptx imports
-      if (f.id === "idml") return activeFileType === "idml" // only for idml imports
-      if (f.id === "json") return activeFileType === "json" // AQU-525: only for json imports
+      // AQU-2211: the round-trip formats also need the file's original upload.
+      if (f.id === "usfm") return activeFileType === "usfm" && roundTripAvailable
+      if (f.id === "docx") return activeFileType === "docx" && roundTripAvailable // AQU-233: only for docx imports
+      if (f.id === "pptx") return activeFileType === "pptx" && roundTripAvailable // AQU-152a: only for pptx imports
+      if (f.id === "idml") return activeFileType === "idml" && roundTripAvailable // only for idml imports
+      if (f.id === "json") return activeFileType === "json" && roundTripAvailable // AQU-525: only for json imports
       if (f.id === "html") return offersHtmlPage // AQU-2182/AQU-2210: a Bible book only
       if (f.id === "sdbh-xml") return hasSdbhFiles // SDBH round-trip: only for lexicon projects
       if (f.id === "plain-text-dump") return false // shown in Advanced section only
@@ -1056,7 +1104,7 @@ export function ExportDialog({
       return at === -1 ? first.length : at
     }
     return [...rest].sort((a, b) => rank(a.id) - rank(b.id))
-  }, [activeFileType, formatOptions, hasSdbhFiles, isDubbingFile, nativeFormatId, offersHtmlPage])
+  }, [activeFileType, formatOptions, hasSdbhFiles, isDubbingFile, nativeFormatId, offersHtmlPage, roundTripAvailable])
 
 
   // A selected format can also vanish without a file switch (sdbh-xml is
@@ -2587,7 +2635,7 @@ export function ExportDialog({
                     renderVttOptions({ showSource: effectiveSubtitleTarget === "subtitle" })}
                   <Button
                     size="lg"
-                    className="w-full justify-center"
+                    className={WRAPPING_DOWNLOAD_BUTTON}
                     onClick={() =>
                       handleExport(nativeOption.id, {
                         audioCues: effectiveSubtitleTarget === "audio",
@@ -2596,10 +2644,16 @@ export function ExportDialog({
                     disabled={!activeFileId || isBusy}
                     aria-busy={isBusy}
                   >
-                    {isBusy ? <Spinner aria-hidden="true" /> : <Download className="h-4 w-4" aria-hidden="true" />}
-                    {t("importExport.dialog.downloadFile", {
-                      fileName: `${buildExportStem(false)}${effectiveSubtitleTarget === "audio" ? "_audio" : ""}${nativeOption.ext}`,
-                    })}
+                    {isBusy ? (
+                      <Spinner className="mt-0.5" aria-hidden="true" />
+                    ) : (
+                      <Download className="mt-0.5 h-4 w-4" aria-hidden="true" />
+                    )}
+                    <span className={WRAPPING_DOWNLOAD_LABEL}>
+                      {t("importExport.dialog.downloadFile", {
+                        fileName: `${buildExportStem(false)}${effectiveSubtitleTarget === "audio" ? "_audio" : ""}${nativeOption.ext}`,
+                      })}
+                    </span>
                   </Button>
                 </div>
               </details>
@@ -2612,17 +2666,19 @@ export function ExportDialog({
           <div className="flex flex-col gap-2 rounded-xl border border-border/60 bg-accent/30 px-3 py-3">
             <Button
               size="lg"
-              className="w-full justify-center"
+              className={WRAPPING_DOWNLOAD_BUTTON}
               onClick={() => handleExport(nativeOption.id)}
               disabled={!activeFileId || isBusy}
               aria-busy={isBusy}
             >
               {isBusy ? (
-                <Spinner aria-hidden="true" />
+                <Spinner className="mt-0.5" aria-hidden="true" />
               ) : (
-                <Download className="h-4 w-4" aria-hidden="true" />
+                <Download className="mt-0.5 h-4 w-4" aria-hidden="true" />
               )}
-              {t("importExport.dialog.downloadFile", { fileName: `${buildExportStem(false)}${nativeOption.ext}` })}
+              <span className={WRAPPING_DOWNLOAD_LABEL}>
+                {t("importExport.dialog.downloadFile", { fileName: `${buildExportStem(false)}${nativeOption.ext}` })}
+              </span>
             </Button>
             <p className="text-xs text-muted-foreground text-center leading-relaxed">
               {t("importExport.dialog.nativeFormatHint", { label: t(nativeOption.labelKey) })}

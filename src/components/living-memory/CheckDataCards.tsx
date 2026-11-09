@@ -28,6 +28,11 @@ export interface CheckDataCardsProps {
   /** The page's shared settings (the same hook instance `patch` belongs to). */
   settings: ProjectWideSettings
   canEdit: boolean
+  /**
+   * AQU-1733: the project's own translated text, in reading order, so the
+   * Language profile can offer the quotation marks the project already uses.
+   */
+  sampleTexts?: readonly string[]
   /** Who is editing: an edited decision is theirs, and so is the Undo step. */
   sessionUsername: string | null | undefined
   sessionJwt: string | null | undefined
@@ -42,7 +47,7 @@ export function CheckDataCards(props: CheckDataCardsProps) {
   )
 }
 
-function CheckDataCardsInner({ project, settings, canEdit, sessionUsername, sessionJwt, patch }: CheckDataCardsProps) {
+function CheckDataCardsInner({ project, settings, canEdit, sampleTexts, sessionUsername, sessionJwt, patch }: CheckDataCardsProps) {
   const t = useT()
   const jwt = sessionJwt ?? null
   const getJwt = useCallback(() => jwt, [jwt])
@@ -62,6 +67,7 @@ function CheckDataCardsInner({ project, settings, canEdit, sessionUsername, sess
       <LanguageProfileSection
         value={settings.languageProfile}
         targetLanguage={settings.targetLanguage ?? project.targetLanguage ?? ""}
+        sampleTexts={sampleTexts}
         canEdit={canEdit}
         disabledTooltip={disabledTooltip}
         patch={commit.recordedPatch()}

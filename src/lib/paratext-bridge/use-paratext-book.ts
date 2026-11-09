@@ -5,11 +5,12 @@
 // decides goes through the pure modules (units, write-back, classify, access).
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { deriveUnits, type Unit, type UnitSet } from "./units"
-import { planWriteBack, type PendingEdit, type WriteBackConflict } from "./write-back"
-import { classifyChanges, keepMine, type ClassifiedUnit } from "./classify"
+import type { Unit, UnitSet } from "./units"
+import type { PendingEdit, WriteBackConflict } from "./write-back"
+import { keepMine, type ClassifiedUnit } from "./classify"
 import { editDenial, type EditDenial } from "./access"
 import { bridgeStore } from "./store"
+import { reconcileBook, writeBookEdits } from "./book-sync"
 import { onParatextFileChanged, paratextTauri } from "./tauri"
 import type { BridgeProject } from "./use-paratext-discovery"
 
@@ -63,34 +64,17 @@ export function useParatextBook(project: BridgeProject | null, fileName: string 
     if (!project || !fileName || !guid) return
     setState((s) => ({ ...s, loading: true, error: null }))
     try {
-      const bytes = await paratextTauri.readFile(project.path, fileName)
-      const units = await deriveUnits(bytes)
-      const book = units.book
+      const r = await reconcileBook({ projectPath: project.path, fileName, guid })
+      const book = r.units.book
       bookRef.current = book
-      const [pending, written, lastSeen, own, hold] = await Promise.all([
-        bridgeStore.pendingEdits(guid, book),
-        bridgeStore.writeLog(guid, book),
-        bridgeStore.lastSeen(guid, book),
-        bridgeStore.ownBlobHashes(guid, book),
-        bridgeStore.hold(guid, book),
-      ])
-      let conflicts: ClassifiedUnit[] = []
-      let theirs = 0
-      let onHold = hold
-      if (lastSeen && lastSeen.blobHash !== units.blobHash) {
-        const r = classifyChanges({ lastSeen, current: units, pending, written }, own)
-        if (!r.echo) {
-          conflicts = r.units.filter((u) => u.case === "stale-revert" || u.case === "both-changed")
-          theirs = r.units.filter((u) => u.case === "theirs-only").length
-          if (r.clobbers > 0 && !onHold) { onHold = true; await bridgeStore.setHold(guid, book, true) }
-        }
-      }
-      await bridgeStore.setLastSeen(guid, book, units)
-      const edits = new Map(pending.map((p) => [p.unitId, p]))
-      unitsRef.current = units
+      // The textarea page has no cells of its own: Paratext's changes become
+      // the new base the moment they are seen.
+      await bridgeStore.setLastSeen(guid, book, r.units)
+      const edits = new Map(r.pending.map((p) => [p.unitId, p]))
+      unitsRef.current = r.units
       editsRef.current = edits
       setState({
-        loading: false, error: null, units, edits, conflicts, refusals: [], onHold, writing: false, theirsCount: theirs,
+        loading: false, error: null, units: r.units, edits, conflicts: r.conflicts, refusals: [], onHold: r.onHold, writing: false, theirsCount: r.theirs.length,
         denial: computeDenial(book, 0) === "chapter-not-granted" ? null : computeDenial(book, 0),
       })
     } catch (e) {
@@ -116,20 +100,22 @@ export function useParatextBook(project: BridgeProject | null, fileName: string 
 
   const setEditText = useCallback(async (unit: Unit, text: string) => {
     if (!guid || !bookRef.current) return
+    const book = bookRef.current
     const next = new Map(editsRef.current)
     // Keep the text exactly as typed: trimming here would eat a trailing space
     // on every keystroke. planWriteBack trims trailing whitespace at write time.
     const trimmed = text.replace(/[ \t\r\n]+$/, "")
-    if (trimmed === unit.text.replace(/[ \t\r\n]+$/, "")) {
-      next.delete(unit.id)
-      await bridgeStore.deletePendingEdits(guid, [unit.id])
-    } else {
-      const edit = { unitId: unit.id, text, baseRawHash: unit.rawHash }
-      next.set(unit.id, edit)
-      await bridgeStore.putPendingEdit(guid, bookRef.current, edit)
-    }
+    const reverted = trimmed === unit.text.replace(/[ \t\r\n]+$/, "")
+    const edit = { unitId: unit.id, text, baseRawHash: unit.rawHash }
+    if (reverted) next.delete(unit.id)
+    else next.set(unit.id, edit)
+    // Update React state before touching IndexedDB: the textarea is controlled,
+    // and a render with the old value between the keystroke and the awaited
+    // write resets the caret to the end of the field.
     editsRef.current = next
     setState((s) => ({ ...s, edits: next }))
+    if (reverted) await bridgeStore.deletePendingEdits(guid, [unit.id])
+    else await bridgeStore.putPendingEdit(guid, book, edit)
   }, [guid])
 
   const discardEdits = useCallback(async () => {
@@ -142,43 +128,23 @@ export function useParatextBook(project: BridgeProject | null, fileName: string 
   const write = useCallback(async (opts?: { allowMarkerChanges?: Set<string> }) => {
     const units = unitsRef.current
     if (!project || !fileName || !guid || !units) return { refused: "not-loaded" }
-    const book = units.book
-    if (await bridgeStore.hold(guid, book)) return { refused: "hold" }
     const edits = [...editsRef.current.values()]
     if (edits.length === 0) return { written: 0, file: fileName }
     setState((s) => ({ ...s, writing: true }))
-    try {
-      // Re-read right before writing; the plan hashes against these bytes and
-      // the Rust side refuses if the file moved between read and write.
-      const current = await paratextTauri.readFile(project.path, fileName)
-      const plan = await planWriteBack(current, edits, { allowMarkerChanges: opts?.allowMarkerChanges })
-      if (plan.proofFailures.length > 0) {
-        return { refused: `proof:${plan.proofFailures.join("; ")}` }
-      }
-      if (plan.bytes && plan.after) {
-        const before = await deriveUnits(current)
-        await paratextTauri.writeBook(project.path, fileName, plan.bytes, before.blobHash)
-        await bridgeStore.recordOwnBlob(guid, book, plan.after.blobHash)
-        await bridgeStore.recordWrites(guid, book, plan.applied)
-        await bridgeStore.deletePendingEdits(guid, plan.applied.map((a) => a.unitId))
-        await bridgeStore.setLastSeen(guid, book, plan.after)
-        unitsRef.current = plan.after
-        const remaining = new Map(editsRef.current)
-        for (const a of plan.applied) remaining.delete(a.unitId)
-        editsRef.current = remaining
-        setState((s) => ({ ...s, units: plan.after!, edits: remaining, refusals: plan.conflicts, writing: false }))
-      } else {
-        setState((s) => ({ ...s, refusals: plan.conflicts, writing: false }))
-      }
-      // base-mismatch conflicts mean the file moved under us: reload to classify.
-      if (plan.conflicts.some((c) => c.reason === "base-mismatch")) void load()
-      return { written: plan.applied.length, file: fileName }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
+    const r = await writeBookEdits({ projectPath: project.path, fileName, guid }, edits, { allowMarkerChanges: opts?.allowMarkerChanges })
+    if (r.kind === "refused") {
       setState((s) => ({ ...s, writing: false }))
-      if (msg.startsWith("EHASH")) { void load(); return { refused: "hash" } }
-      return { refused: msg }
+      if (r.reason === "hash") void load()
+      return { refused: r.reason }
     }
+    const remaining = new Map(editsRef.current)
+    for (const id of r.applied) remaining.delete(id)
+    editsRef.current = remaining
+    if (r.after) unitsRef.current = r.after
+    setState((s) => ({ ...s, units: r.after ?? s.units, edits: remaining, refusals: r.conflicts, writing: false }))
+    // base-mismatch conflicts mean the file moved under us: reload to classify.
+    if (r.conflicts.some((c) => c.reason === "base-mismatch")) void load()
+    return { written: r.applied.length, file: fileName }
   }, [project, fileName, guid, load])
 
   const resolveOne = useCallback(async (c: ClassifiedUnit, choice: "mine" | "theirs") => {

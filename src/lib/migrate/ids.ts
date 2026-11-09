@@ -18,6 +18,12 @@ export const AQUILLA_MIGRATION_NS = "7f3c8a91-2b4d-4e6f-9a8c-1d3e5f2b4a6c"
 
 const u5 = (seed: string): string => uuidv5(seed, AQUILLA_MIGRATION_NS)
 
+/** Audited repair of a missing audio projection whose original event is already
+ * logged. Keep that original event/ledger entry; this repair has its own stable
+ * identity, tied to the verified source bytes. Never use it for routine retries. */
+export const audioProjectionRepairEventId = (originalEventId: string, sourceOid: string): string =>
+  u5(`audio-projection-repair:v1:${originalEventId}:${sourceOid}`)
+
 /** Source of the legacy project key: a GitLab numeric project id, or the
  *  `metadata.json.projectId` of a local working copy. They get distinct
  *  prefixes so the two paths can never collide on the same aquilla project. */

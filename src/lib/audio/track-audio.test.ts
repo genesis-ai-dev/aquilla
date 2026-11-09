@@ -242,3 +242,37 @@ describe("resolveTargetAudio — an added track's own slot", () => {
     expect(resolveTargetAudio(c, "recording")).toEqual(expected)
   })
 })
+
+// ── AQU-2411: takes migrated from Codex ─────────────────────────────────────
+//
+// The migration keeps Codex's file name as the take's id, and Codex tagged
+// takes with no line id (or its own spelling of the verse) until Dec 2025. On
+// a text line that untagged take IS the line's take: Xiang's Genesis showed it
+// in the Recording tab and nowhere on the timeline.
+describe("resolveTargetAudio — a take migrated from Codex", () => {
+  const CODEX = "audio-1719100000000-k3j9x2m1p.webm"
+  const CODEX_VERSE = "audio-gen-1:1-1730000000000-q8w7e6r5t.webm"
+
+  it("is a verse's take on the default track", () => {
+    for (const id of [CODEX, CODEX_VERSE]) {
+      const c = cell({ medium: undefined, selectedAudioId: id, attachments: { [id]: att("frontier-audio://legacy") } })
+      expect(resolveTargetAudio(c)).toEqual({ audioId: id, url: "frontier-audio://legacy", kind: "take" })
+    }
+  })
+
+  it("stays the source recording on a section of an imported recording", () => {
+    const c = cell({ medium: "media", selectedAudioId: CODEX, attachments: { [CODEX]: att("frontier-audio://legacy") } })
+    expect(resolveTargetAudio(c)).toBeNull()
+  })
+
+  it("never turns the file's own recording into a verse's take", () => {
+    const c = cell({ medium: "text", selectedAudioId: SOURCE_ID, attachments: { [SOURCE_ID]: att("frontier-audio://src") } })
+    expect(resolveTargetAudio(c)).toBeNull()
+    const marked = cell({
+      medium: "text",
+      selectedAudioId: CODEX,
+      attachments: { [CODEX]: { ...att("frontier-audio://src"), role: "source" as const } },
+    })
+    expect(resolveTargetAudio(marked)).toBeNull()
+  })
+})

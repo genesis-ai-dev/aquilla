@@ -128,3 +128,41 @@ describe("audioProgressCellIds (AQU-2110)", () => {
     expect(sameAudioProgressCellIds(EMPTY_AUDIO_PROGRESS_CELL_IDS, audioProgressCellIds(new Map(), 1))).toBe(true)
   })
 })
+
+// AQU-2411: a take migrated from Codex keeps Codex's file name as its id, which
+// carries no line id. The server already counts it (a chosen `dub` row); the
+// chapter picker read the line as unrecorded.
+describe("audioProgressCellIds — takes migrated from Codex (AQU-2411)", () => {
+  /** A take under Codex's pre-Oct-2025 name: no line id in it at all. */
+  const codexTake = (suffix: string, opts: { validatorCount?: number; role?: "dub" | "source" } = {}): AudioAttachmentOut => ({
+    ...take("ignored", "recording", opts),
+    audioId: `audio-1719100000000-${suffix}.webm`,
+    url: `frontier-audio://audio-1719100000000-${suffix}.webm`,
+  })
+
+  it("counts a line whose chosen take is an untagged Codex take, and validates it like any other", () => {
+    const map = new Map<string, CellAudioEntry>([
+      ["c1", entry([codexTake("k3j9x2m1p", { validatorCount: 1 })])],
+      ["c2", entry([codexTake("q8w7e6r5t")])],
+    ])
+    const ids = audioProgressCellIds(map, 1)
+    expect([...ids.recorded].sort()).toEqual(["c1", "c2"])
+    expect([...ids.audioValidated]).toEqual(["c1"])
+  })
+
+  it("still counts nothing for an untagged recording chosen on every line, or one marked source", () => {
+    const shared = codexTake("sharedclip")
+    const sharedMap = new Map<string, CellAudioEntry>([
+      ["c1", entry([shared])],
+      ["c2", entry([shared])],
+    ])
+    expect(audioProgressCellIds(sharedMap, 1)).toBe(EMPTY_AUDIO_PROGRESS_CELL_IDS)
+    const marked = new Map<string, CellAudioEntry>([["c1", entry([codexTake("marked", { role: "source" })])]])
+    expect(audioProgressCellIds(marked, 1)).toBe(EMPTY_AUDIO_PROGRESS_CELL_IDS)
+  })
+
+  it("keeps the strict rule when asked about one line without the file's others", () => {
+    expect(cellHasOwnTake("c1", entry([codexTake("k3j9x2m1p")]))).toBe(false)
+    expect(cellHasOwnTake("c1", entry([codexTake("k3j9x2m1p")]), new Set())).toBe(true)
+  })
+})

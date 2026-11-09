@@ -141,6 +141,8 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
   it("shows the live intro + upstream picker + corpus choice for the linked-target shape", async () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
     // Self-contained Advanced shows the optional clone path, not the live one.
     fireEvent.click(screen.getByText("Advanced: project shape"))
     expect(screen.getByText(/import a/i)).toBeTruthy()
@@ -157,6 +159,8 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
   it("shows the upstream project name on the trigger after selection, not its UUID", async () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
     fireEvent.click(screen.getByText("Advanced: project shape"))
     fireEvent.click(screen.getByText(/Linked target/i))
 
@@ -172,6 +176,8 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
   it("creates the project then links it to the chosen upstream with mode/consumes", async () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
 
     fireEvent.change(screen.getByPlaceholderText("My translation project"), { target: { value: "French Episode 1" } })
     fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), { target: { value: "English" } })
@@ -213,6 +219,8 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
   it("applies extra target lanes on the linked-target shape too", async () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
 
     fireEvent.change(screen.getByPlaceholderText("My translation project"), { target: { value: "Multilingual Linked" } })
     fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), { target: { value: "English" } })
@@ -251,6 +259,8 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
 
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
 
     fireEvent.change(screen.getByPlaceholderText("My translation project"), { target: { value: "French Episode 1" } })
     fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), { target: { value: "English" } })
@@ -301,6 +311,8 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
 
     async function createLinkedTarget() {
       fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+      // The wizard asks where the project comes from first (AQU-2105).
+      fireEvent.click(screen.getByTestId("project-source-scratch"))
       fireEvent.change(screen.getByPlaceholderText("My translation project"), { target: { value: "French Episode 1" } })
       fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), { target: { value: "English" } })
       fireEvent.change(screen.getByPlaceholderText(/French, conversational Swahili/i), { target: { value: "French" } })
@@ -368,6 +380,8 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
   it("shows validation when upstream project is missing for linked-target", async () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
     fireEvent.change(screen.getByPlaceholderText("My translation project"), { target: { value: "X" } })
     fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), { target: { value: "English" } })
     fireEvent.change(screen.getByPlaceholderText(/French, conversational Swahili/i), { target: { value: "French" } })
@@ -383,6 +397,8 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
   it("shows validation when corpus choice is missing for linked-target", async () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+    // The wizard asks where the project comes from first (AQU-2105).
+    fireEvent.click(screen.getByTestId("project-source-scratch"))
     fireEvent.change(screen.getByPlaceholderText("My translation project"), { target: { value: "X" } })
     fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), { target: { value: "English" } })
     fireEvent.change(screen.getByPlaceholderText(/French, conversational Swahili/i), { target: { value: "French" } })

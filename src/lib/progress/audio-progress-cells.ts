@@ -14,11 +14,14 @@
 //
 //   - RECORDED is a take of this line's OWN, in any slot. The imported source
 //     clip is seeded with the FILE's id and sits selected on every cell of a
-//     media file, so only a cell-seeded take counts; otherwise one attached
-//     programme audio would report a whole subtitle file as fully recorded.
-//     This is exactly the membership test `ownTakeCellIds` applies, so the
-//     picker's "recorded" can never disagree with the "translated" the same
-//     take earned the line before this change.
+//     media file, so it never counts; otherwise one attached programme audio
+//     would report a whole subtitle file as fully recorded. AQU-2411: a take
+//     whose id carries no line id (one migrated from Codex) counts unless it
+//     is marked a source recording or is chosen on other lines too — the
+//     server, which reads the row's role, already counted it. This is exactly
+//     the membership test `ownTakeCellIds` applies, so the picker's
+//     "recorded" can never disagree with the "translated" the same take
+//     earned the line before this change.
 //   - AUDIO VALIDATED is the WEAKEST chosen take meeting the project's audio
 //     requirement — `cellAudioVotes` is that minimum, and `isTakeValidated` is
 //     the one comparison every audio surface draws "validated" by. A line that
@@ -30,7 +33,7 @@
 //
 // Pure, so the store's tests can drive it with hand-built entries and the
 // workspace can memoize it on the attachment map alone.
-import { audioIdSeededWith } from "../../../db/shared/audio-id"
+import { isOwnSelection, sharedSelections, type TakeLine } from "@/lib/audio/own-take"
 import {
   cellAudioVotes,
   isTakeValidated,
@@ -53,11 +56,21 @@ export const EMPTY_AUDIO_PROGRESS_CELL_IDS: AudioProgressCellIds = Object.freeze
   audioValidated: EMPTY_IDS,
 })
 
-/** Does this line carry a take of its OWN, in any slot? */
-export function cellHasOwnTake(cellId: string, entry: CellAudioEntry | undefined): boolean {
+/**
+ * Does this line carry a take of its OWN, in any slot?
+ *
+ * `shared` is `sharedSelections` over the whole file (AQU-2411). Leave it out
+ * only when the file's other lines can't be seen: then only a take tagged
+ * with this line's id counts.
+ */
+export function cellHasOwnTake(
+  line: string | Pick<TakeLine, "id" | "fileId">,
+  entry: CellAudioEntry | undefined,
+  shared: ReadonlySet<string> | null = null,
+): boolean {
   if (!entry) return false
   for (const selected of Object.values(slotSelections(entry))) {
-    if (selected && audioIdSeededWith(selected, cellId)) return true
+    if (isOwnSelection(line, selected, entry.attachments[selected], shared)) return true
   }
   return false
 }
@@ -70,11 +83,13 @@ export function cellHasOwnTake(cellId: string, entry: CellAudioEntry | undefined
 export function audioProgressCellIds(
   audioByCellId: ReadonlyMap<string, CellAudioEntry>,
   audioValidationRequirement: number,
+  fileId: string | null = null,
 ): AudioProgressCellIds {
   const recorded = new Set<string>()
   const audioValidated = new Set<string>()
+  const shared = sharedSelections(audioByCellId.values())
   for (const [cellId, entry] of audioByCellId) {
-    if (!cellHasOwnTake(cellId, entry)) continue
+    if (!cellHasOwnTake({ id: cellId, fileId }, entry, shared)) continue
     recorded.add(cellId)
     const votes = cellAudioVotes(entry)
     if (votes != null && isTakeValidated({ validatorCount: votes }, audioValidationRequirement)) {

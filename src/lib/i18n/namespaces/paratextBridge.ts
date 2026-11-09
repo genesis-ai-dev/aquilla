@@ -4,7 +4,6 @@ import { defineNamespace, plural } from "./types"
  *  edited in place, with Paratext's own Send/Receive carrying the changes. */
 export const paratextBridge = defineNamespace({
   keys: {
-    "paratextBridge.entry": "Paratext projects on this computer",
     "paratextBridge.title": "Paratext projects",
     "paratextBridge.description":
       "Projects Paratext keeps on this computer. Edit them here; Paratext's Send/Receive carries your changes to the team.",
@@ -36,6 +35,36 @@ export const paratextBridge = defineNamespace({
     "paratextBridge.rootSource.wine": "From Paratext under Wine",
     "paratextBridge.rootSource.default": "Default location",
     "paratextBridge.rootSource.user": "Added by you",
+
+    "paratextBridge.thisComputer.title": "This computer",
+    "paratextBridge.thisComputer.switcherMeta": "On this device",
+    "paratextBridge.thisComputer.description":
+      "Folders and Paratext projects on this device. Aquilla reads them here and writes your edits back to the same files; nothing is uploaded.",
+    "paratextBridge.thisComputer.linkedFolders": "Linked folders",
+    "paratextBridge.thisComputer.linkedFoldersHint":
+      "Folders you have pointed Aquilla at. They are searched for Paratext projects along with the usual locations.",
+    "paratextBridge.thisComputer.noLinkedFolders": "No folders linked yet.",
+    "paratextBridge.thisComputer.linkFolder": "Link a folder",
+    "paratextBridge.thisComputer.unlinkFolder": "Unlink this folder",
+    "paratextBridge.thisComputer.paratextSection": "Paratext projects",
+    "paratextBridge.thisComputer.find": "Find Paratext projects on this computer",
+    "paratextBridge.thisComputer.prep.title": "Before the first search",
+    "paratextBridge.thisComputer.prep.body":
+      "Aquilla will read the Paratext project folder on this computer: the location Paratext's settings point to, the usual “My Paratext 9 Projects” folders, and any folder you linked above.",
+    "paratextBridge.thisComputer.prep.permission":
+      "Your computer may ask whether Aquilla can access these folders. Allow it, or the search finds nothing.",
+    "paratextBridge.thisComputer.prep.private": "Nothing leaves this computer.",
+    "paratextBridge.thisComputer.found": plural({ one: "{count} Paratext project found", other: "{count} Paratext projects found" }),
+    "paratextBridge.thisComputer.openAll": "Open Paratext projects",
+    "paratextBridge.thisComputer.scanFailed": "The search could not finish. {error}",
+    "paratextBridge.thisComputer.folders": "Folders",
+    "paratextBridge.thisComputer.foldersHint":
+      "Each folder Aquilla looks in for Paratext projects, and what it found there. Add any folder on this computer.",
+    "paratextBridge.thisComputer.addFolder": "Add folder…",
+    "paratextBridge.thisComputer.pickFolderTitle": "Choose a folder with Paratext projects",
+    "paratextBridge.thisComputer.noProjectsInFolder": "No Paratext projects in this folder.",
+    "paratextBridge.thisComputer.notSearched": "Not searched yet",
+    "paratextBridge.thisComputer.otherProjects": "Elsewhere",
 
     "paratextBridge.book.back": "All projects",
     "paratextBridge.book.loading": "Reading {file}",
@@ -76,6 +105,31 @@ export const paratextBridge = defineNamespace({
     "paratextBridge.book.conflict.allowMarkers": "Write it anyway",
     "paratextBridge.book.conflict.missing": "This unit no longer exists in the file.",
     "paratextBridge.book.backup": "A copy of the previous file is kept outside the project folder.",
+
+    "paratextBridge.notes.toggle": "Notes",
+    "paratextBridge.notes.count": plural({ one: "{count} note", other: "{count} notes" }),
+    "paratextBridge.notes.none": "No notes of yours on this verse yet.",
+    "paratextBridge.notes.placeholder": "Write a note for your team. It appears in Paratext's Notes list.",
+    "paratextBridge.notes.add": "Add note in Paratext",
+    "paratextBridge.notes.adding": "Adding",
+    "paratextBridge.notes.added": "Note added to {file}",
+    "paratextBridge.notes.failed": "The note was not written. {reason}",
+    "paratextBridge.notes.ownOnly": "Showing your notes only. Notes from other team members are in Paratext.",
+    "paratextBridge.openInAquilla": "Open in Aquilla",
+    "paratextBridge.open.title": "Open in Aquilla",
+    "paratextBridge.open.description":
+      "Aquilla keeps a copy of this project's books with the full editor. Writing sends your changes back into the Paratext project folder.",
+    "paratextBridge.open.needLogin": "Sign in to Aquilla first; the mirrored project is created in your organization.",
+    "paratextBridge.open.reading": "Reading the project folder",
+    "paratextBridge.open.creating": "Creating the Aquilla project",
+    "paratextBridge.mirror.badge": "Paratext · {book}",
+    "paratextBridge.mirror.badgeAria": "Paratext bridge",
+    "paratextBridge.mirror.title": "Paratext bridge",
+    "paratextBridge.mirror.description": "This file mirrors {file}. Paratext's own changes arrive here as you work.",
+    "paratextBridge.mirror.unmapped": plural({
+      one: "{count} cell has no matching line in the Paratext file and was left out.",
+      other: "{count} cells have no matching line in the Paratext file and were left out.",
+    }),
   },
   context: {
     _context: {
@@ -86,6 +140,9 @@ export const paratextBridge = defineNamespace({
       "paratextBridge.browser.docs": { description: "Link to the help page about Paratext projects.", maxLength: 24 },
       "paratextBridge.registeredAs": { description: "Who Paratext says is registered on this computer.", placeholders: { name: "Person's name from Paratext's registration." } },
       "paratextBridge.booksCount": { description: "Book count under a project card.", placeholders: { count: "Number of books." } },
+      "paratextBridge.thisComputer.switcherMeta": { description: "Muted meta text beside 'This computer' in the organization switcher, like 'Personal workspace' beside a user's own org.", maxLength: 20 },
+      "paratextBridge.thisComputer.found": { description: "Result line after a Paratext scan.", placeholders: { count: "Number of projects found." } },
+      "paratextBridge.thisComputer.scanFailed": { description: "The Paratext scan threw.", placeholders: { error: "Technical error text, often English." } },
       "paratextBridge.book.loading": { description: "Shown while a book file is read.", placeholders: { file: "File name like 41MATTPP1.SFM." } },
       "paratextBridge.book.chapter": { description: "Chapter group heading.", placeholders: { n: "Chapter number." } },
       "paratextBridge.book.pending": { description: "Count of unsaved edits.", placeholders: { count: "Number of edited units." } },
@@ -94,7 +151,14 @@ export const paratextBridge = defineNamespace({
       "paratextBridge.book.fileChanged": { description: "Notice when Paratext or Send/Receive changed the open book.", placeholders: { count: "Units whose text changed." } },
       "paratextBridge.book.refused": { description: "Write refused; nothing changed on disk.", placeholders: { reason: "One of the refused.* strings." } },
       "paratextBridge.book.refused.proof": { description: "Write refused because the byte-level check failed.", placeholders: { details: "Technical list, often English." } },
+      "paratextBridge.notes.count": { description: "Count on the per-verse notes button.", placeholders: { count: "Number of the user's notes on that verse." } },
+      "paratextBridge.notes.added": { description: "Toast after a note was written into the Paratext project.", placeholders: { file: "Notes file name like Notes_Jane.xml." } },
+      "paratextBridge.notes.failed": { description: "Toast when a note could not be written; nothing changed on disk.", placeholders: { reason: "Technical reason, often English." } },
       "paratextBridge.book.conflict.stale": { description: "Explains a clobber: Paratext overwrote Aquilla's edits from a stale copy.", placeholders: { count: "Number of reverted edits." } },
+      "paratextBridge.mirror.badgeAria": { description: "Accessible name of the header badge button that opens the Paratext bridge panel." },
+      "paratextBridge.mirror.badge": { description: "Editor header badge on a project mirroring a Paratext project.", placeholders: { book: "Three-letter book code like MAT." } },
+      "paratextBridge.mirror.description": { description: "Which Paratext file the open Aquilla file mirrors.", placeholders: { file: "File name like 41MATTPP1.SFM." } },
+      "paratextBridge.mirror.unmapped": { description: "Cells skipped on write because the file has no line for their reference.", placeholders: { count: "Number of cells." } },
     },
   },
   surfaces: [],

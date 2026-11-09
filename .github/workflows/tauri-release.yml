@@ -178,7 +178,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Aquilla ${{ github.ref_name }}"
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           args: --target ${{ matrix.target }} --config src-tauri/tauri.release.conf.json
           updaterJsonPreferNsis: true

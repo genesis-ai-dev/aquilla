@@ -28,10 +28,14 @@ describe('shared built-in check table', () => {
     }
   })
 
-  it('lists the 18 text checks alone by default, plus the Bible checks when asked', () => {
-    expect(effectiveChecks(undefined)).toHaveLength(18)
+  it('lists every text check alone by default, plus the Bible checks when asked', () => {
+    // Counted off TEXT_CHECK_IDS rather than a literal: adding a check is a
+    // one-line change to that list and should not also edit this assertion.
+    expect(effectiveChecks(undefined)).toHaveLength(TEXT_CHECK_IDS.length)
     expect(effectiveChecks(undefined).some((c) => c.id.startsWith('bkp:'))).toBe(false)
-    expect(effectiveChecks(undefined, { bibleChecks: true })).toHaveLength(18 + BIBLE_CHECK_IDS.length)
+    expect(effectiveChecks(undefined, { bibleChecks: true })).toHaveLength(
+      TEXT_CHECK_IDS.length + BIBLE_CHECK_IDS.length,
+    )
   })
 
   it('resolves exactly as the Rules page does, for project and lane overrides', () => {

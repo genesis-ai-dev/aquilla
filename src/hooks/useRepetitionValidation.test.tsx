@@ -3,6 +3,10 @@
 //
 // AQU-2176 — and what the reviewer is TOLD: a "Validate all" now reports the
 // rows it signed off in a dialog that names them, not a toast that counts them.
+//
+// AQU-2177 — and so does a BULK run, which does not do one thing to its
+// repeats: the dialog groups them by what the run did, and a run that reached
+// none of them keeps the summary toast.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { act, render, screen, waitFor, fireEvent, within } from "@testing-library/react"
@@ -282,5 +286,107 @@ describe("useRepetitionValidation", () => {
       { kind: "unvalidate", cellId: "a2", editEventId: "t-a2" },
     ])
     expect(emitted.commits.slice(1).map((c) => [c.cellId, c.value, c.parentId])).toEqual([["a3", "", "commit-1"]])
+  })
+
+  // ── AQU-2177: a bulk run's report ──────────────────────────────────────────
+
+  const SOURCE_B = "The grace of our Lord be with you."
+  /** A run that validates, fills and skips — one group of each in the dialog. */
+  function bulkThreeOutcomes() {
+    return [
+      makeCell({ id: "a1", translated: "Neema.", status: "unvalidated" }),
+      makeCell({ id: "a2", translated: "Amani.", status: "unvalidated" }),
+      makeCell({ id: "a3" }),
+      makeCell({ id: "b1", original: SOURCE_B, translated: "Baraka.", status: "unvalidated" }),
+      makeCell({ id: "b2", original: SOURCE_B }),
+      makeCell({ id: "b3", original: SOURCE_B }),
+    ]
+  }
+
+  it("a bulk run names its repeats grouped by what it did to them (AQU-2177)", async () => {
+    const goToCell = vi.fn()
+    const api = setup(bulkThreeOutcomes(), { goToCell })
+    // Batch validation size 4 over 3 validated rows leaves room for ONE vote,
+    // so of the two rows this run fills, only the first is signed off.
+    let prepared: ReturnType<UseRepetitionValidation["prepareBulkRepetitions"]> = null
+    act(() => { prepared = api.current.prepareBulkRepetitions(["a1", "a2", "b1"], { cap: 4 }) })
+
+    await screen.findByTestId("repetition-choice-dialog")
+    fireEvent.click(screen.getByRole("button", { name: "Validate 1 more row" }))
+    // The run's own rows disagree about the first source: leave its repeat be.
+    await screen.findByTestId("repetition-conflict-dialog")
+    fireEvent.click(screen.getByRole("radio", { name: /Skip/ }))
+    fireEvent.click(screen.getByRole("button", { name: "Use this choice" }))
+    const run = await act(async () => prepared)
+
+    const outcome = await act(() => run!.apply([
+      { cellId: "a1", fileId: "f1", editEventId: "t-a1" },
+      { cellId: "a2", fileId: "f1", editEventId: "t-a2" },
+      { cellId: "b1", fileId: "f1", editEventId: "t-b1" },
+    ]))
+    expect(outcome).toMatchObject({ validated: 1, filledOnly: 1, skipped: 1 })
+
+    act(() => { api.current.reportBulk({ type: "success", title: "Validated 3 rows" }, outcome) })
+    const dialog = await screen.findByTestId("repetition-validated-dialog")
+    // The run's OWN summary is the title; the groups carry the repeats, each
+    // heading's count matching the rows under it, and no toast is raised.
+    expect(within(dialog).getByText("Validated 3 rows")).toBeTruthy()
+    expect(toasts).toEqual([])
+    const group = (key: string) => within(dialog).getByTestId(`repetition-validated-group-${key}`)
+    expect(group("validated").textContent).toBe("Validated 1 repeated rowRow 5Baraka.")
+    expect(group("filled").textContent).toBe("Filled 1 repeated row, still needs validatingRow 6Baraka.")
+    // A skipped row keeps its text, which here is none — only its number.
+    expect(group("skipped").textContent).toBe("Left 1 repeated row as it was (translations disagreed)Row 3")
+
+    fireEvent.click(within(group("skipped")).getByRole("button"))
+    expect(goToCell).toHaveBeenCalledWith("a3")
+    await waitFor(() => expect(screen.queryByTestId("repetition-validated-dialog")).toBeNull())
+  })
+
+  it("a bulk run's Undo reverts the whole gesture from the dialog (AQU-2177)", async () => {
+    const api = setup(bulkThreeOutcomes())
+    let prepared: ReturnType<UseRepetitionValidation["prepareBulkRepetitions"]> = null
+    act(() => { prepared = api.current.prepareBulkRepetitions(["a1", "a2", "b1"], { cap: 4 }) })
+    await screen.findByTestId("repetition-choice-dialog")
+    fireEvent.click(screen.getByRole("button", { name: "Validate 1 more row" }))
+    await screen.findByTestId("repetition-conflict-dialog")
+    fireEvent.click(screen.getByRole("button", { name: "Use this choice" }))
+    const run = await act(async () => prepared)
+    const outcome = await act(() => run!.apply([
+      { cellId: "a1", fileId: "f1", editEventId: "t-a1" },
+    ]))
+    act(() => { api.current.reportBulk({ type: "success", title: "Validated 3 rows" }, outcome) })
+
+    const dialog = await screen.findByTestId("repetition-validated-dialog")
+    await act(async () => { fireEvent.click(within(dialog).getByRole("button", { name: "Undo" })) })
+    await waitFor(() => expect(screen.queryByTestId("repetition-validated-dialog")).toBeNull())
+    // The run's own vote goes back too, and every fill is reverted.
+    await waitFor(() => expect(emitted.votes.filter((v) => v.kind === "unvalidate")).toEqual([
+      { kind: "unvalidate", cellId: "a1", editEventId: "t-a1" },
+    ]))
+    expect(emitted.commits.filter((c) => c.value === "").map((c) => c.cellId).sort()).toEqual(["a3", "b2", "b3"])
+  })
+
+  it("a bulk run that reached no repeat keeps the summary toast (AQU-2177)", async () => {
+    const api = setup([makeCell({ id: "only", translated: "Neema.", status: "unvalidated" })])
+    // Nothing repeats, so there was nothing to prepare and nothing to name.
+    expect(api.current.prepareBulkRepetitions(["only"])).toBeNull()
+    act(() => { api.current.reportBulk({ type: "success", title: "Validated 1 row" }, null) })
+    expect(screen.queryByTestId("repetition-validated-dialog")).toBeNull()
+    expect(lastToast().title).toBe("Validated 1 row")
+  })
+
+  it("a failed bulk run keeps its error toast, whatever its repeats did (AQU-2177)", async () => {
+    const api = setup(bulkThreeOutcomes())
+    const outcome = {
+      validated: 0,
+      filledOnly: 0,
+      skipped: 1,
+      rows: { validated: [], filled: [], skipped: [{ cellId: "a3", number: "3", ref: null, text: "" }] },
+      undo: null,
+    }
+    act(() => { api.current.reportBulk({ type: "error", title: "Couldn't validate" }, outcome) })
+    expect(screen.queryByTestId("repetition-validated-dialog")).toBeNull()
+    expect(lastToast().title).toBe("Couldn't validate")
   })
 })

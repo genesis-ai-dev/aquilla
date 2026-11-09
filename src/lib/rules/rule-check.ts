@@ -28,4 +28,10 @@ export type RuleCheck =
       type: "builtin"
       checkId: BuiltinCheckId
       punctuation?: import("../../../db/shared/punctuation-conventions").PunctuationConventions | null
+      /**
+       * `bookNames` (AQU-1735) rides the same way `punctuation` does: resolved
+       * per project by `resolveBuiltinRules` and read by `rule-engine`'s
+       * builtin branch. Never stored.
+       */
+      bookNames?: readonly import("../lqa/builtin-run-context").ProjectBookName[] | null
     }

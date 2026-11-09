@@ -9,7 +9,10 @@
 // "Refresh Dev Neon Branch" workflow restores every project's audio ROWS and
 // none of their BYTES, so every project with audio 404s on dev until somebody
 // remembers to run the one-project copy for it. This runs AQU-2114's copy
-// across all of them, as its own workflow step after the restore.
+// across all of them, as its own workflow step after the restore. The same
+// copy carries each project's uploaded source originals, so a file imported on
+// prod exports on dev after the next refresh instead of 404ing "source bytes
+// missing from storage".
 //
 // THE THREE CONSTRAINTS THAT SHAPE IT:
 //  1. The first backfill is ~561k objects / 167 GB. It cannot finish in one
@@ -35,7 +38,8 @@ export const DEFAULT_BUDGET_MINUTES = 240
 /** Example project ids carried in the report, so a dry run is reviewable. */
 export const MAX_SAMPLE_PROJECTS = 10
 
-/** A project the restored dev rows say has audio, with the recency that orders it. */
+/** A project the restored dev rows say has media — audio, or an uploaded
+ *  source original — with the recency that orders it. */
 export interface AudioProject {
   projectId: string
   name: string | null
@@ -48,22 +52,25 @@ export interface AudioProject {
  * Every project the restored dev database says references media, newest audio
  * activity first.
  *
- * The four sources are the four `db/shared/media-refs.ts` reference queries
- * read per project, lifted to "which projects would those return anything for":
- * live takes, agent-API audio artifacts, queued/running diarization jobs, and
- * voices/ clips the settings blob points at: a voice's Inworld voice-design
- * preview (`designPreviewAudioId`), and a trained custom voice (`customVoice`),
- * whose training recordings live under voices/ and are listed by its consent
- * record rather than by any row. A project missed here is a project that stays
- * silent on dev, so the union is deliberately wider than "has a take" — a
- * project whose only media is a voice's clips still needs its bytes. (A
- * quick-clone `referenceAudioId` is not a reason on its own: such a project has
- * no takes to play, and an Inworld quick clone whose clip was not copied fails
- * only its own generation on dev. Pre-AQU-2291 Gemini clones play as plain TTS.)
+ * The sources are the reference queries read per project, lifted to "which
+ * projects would those return anything for". From `db/shared/media-refs.ts`:
+ * live takes, queued/running diarization jobs, and voices/ clips the settings
+ * blob points at: a voice's Inworld voice-design preview
+ * (`designPreviewAudioId`), and a trained custom voice (`customVoice`), whose
+ * training recordings live under voices/ and are listed by its consent record
+ * rather than by any row. From `loadOriginalRefs` in dev-audio-copy.ts: any
+ * `artifacts` row (agent-API audio and source uploads alike) and any
+ * `file_source_blobs` row with an R2 key — the uploaded originals an export
+ * reads, so a text-only project imported on prod is offered a copy too. A
+ * project missed here is a project that stays silent, or un-exportable, on dev,
+ * so the union is deliberately wider than "has a take". (A quick-clone
+ * `referenceAudioId` is not a reason on its own: such a project has no takes to
+ * play, and an Inworld quick clone whose clip was not copied fails only its own
+ * generation on dev. Pre-AQU-2291 Gemini clones play as plain TTS.)
  *
  * Recency comes from `cell_audio.created_ts` (ms, the take's own clock) and
  * falls back to the project's `updated_at`, so a project whose only media is a
- * voice clip still sorts somewhere sensible instead of last.
+ * voice clip or an original still sorts somewhere sensible instead of last.
  */
 export async function loadAudioProjects(db: AquillaDb): Promise<AudioProject[]> {
   const rows = await db
@@ -76,7 +83,11 @@ export async function loadAudioProjects(db: AquillaDb): Promise<AudioProject[]> 
          UNION
          SELECT project_id, NULL::bigint
            FROM artifacts
-          WHERE kind = 'audio' AND audio_id IS NOT NULL
+          WHERE r2_key IS NOT NULL
+         UNION
+         SELECT project_id, NULL::bigint
+           FROM file_source_blobs
+          WHERE r2_key IS NOT NULL
          UNION
          SELECT project_id, NULL::bigint
            FROM diarization_jobs
@@ -184,6 +195,11 @@ export interface CopyAllReport {
   alreadyInDev: number
   copied: number
   copiedBytes: number
+  /** The uploaded-originals subset of the three counts above, summed. Says
+   *  whether files imported on prod will export on dev. */
+  originalsReferenced: number
+  originalsAlreadyInDev: number
+  originalsCopied: number
   /** Referenced rows whose object is absent from prod too, summed. Reported,
    *  never an error: the row outlived its bytes. */
   missingInProd: number
@@ -229,6 +245,9 @@ export async function copyAllProjectAudio(
     alreadyInDev: 0,
     copied: 0,
     copiedBytes: 0,
+    originalsReferenced: 0,
+    originalsAlreadyInDev: 0,
+    originalsCopied: 0,
     missingInProd: 0,
     failedObjects: 0,
     durationMs: 0,
@@ -255,6 +274,9 @@ export async function copyAllProjectAudio(
         report.alreadyInDev += one.alreadyInDev
         report.copied += one.copied
         report.copiedBytes += one.copiedBytes
+        report.originalsReferenced += one.originals.referenced
+        report.originalsAlreadyInDev += one.originals.alreadyInDev
+        report.originalsCopied += one.originals.copied
         report.missingInProd += one.missingInProd.length
         report.failedObjects += one.failed.length
         // A dry run reports what it WOULD copy, so sample on the gap rather
@@ -304,7 +326,7 @@ export function formatCopyAllReport(report: CopyAllReport): string {
       ? "⏳ time budget reached — the next run resumes"
       : "✅ every project with media is in dev"
   const lines = [
-    `## Copy prod audio to dev — ${headline}`,
+    `## Copy prod media to dev — ${headline}`,
     "",
     `| metric | value |`,
     `|---|---|`,
@@ -316,6 +338,13 @@ export function formatCopyAllReport(report: CopyAllReport): string {
     report.dryRun
       ? `| would copy | ${report.referenced - report.alreadyInDev} |`
       : `| copied | ${report.copied} (${mb(report.copiedBytes)}) |`,
+    // Of which source originals — a handful of objects beside the takes, but
+    // the ones that decide whether a prod import exports on dev.
+    `| source originals referenced | ${report.originalsReferenced} |`,
+    `| source originals already in dev | ${report.originalsAlreadyInDev} |`,
+    report.dryRun
+      ? `| source originals would copy | ${report.originalsReferenced - report.originalsAlreadyInDev} |`
+      : `| source originals copied | ${report.originalsCopied} |`,
     `| missing in prod | ${report.missingInProd} |`,
     `| failed objects | ${report.failedObjects} |`,
     `| failed projects | ${report.projectsFailed.length} |`,

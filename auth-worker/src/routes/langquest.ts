@@ -2,7 +2,9 @@
 //
 //   POST   /inspect                          signed in — { token }: what the token reaches and may do (stores nothing)
 //   GET    /projects/:projectId/link         any project member — the link (never the token), or { link: null }
-//   PUT    /projects/:projectId/link         project maintainer+ — { token, languageId }: checked with LangQuest, stored encrypted
+//   PUT    /projects/:projectId/link         project maintainer+ — { token | connectionId, languageId }: checked with
+//                                             LangQuest, stored encrypted; a pasted token also becomes/refreshes the
+//                                             caller's account-level connection (routes/langquest-connections.ts)
 //   DELETE /projects/:projectId/link         project maintainer+ — unlink (?revoke=1 also revokes the token at LangQuest)
 //   GET    /projects/:projectId/state        project lead+ — feed cursor + the passage→cell map, for a sync
 //   POST   /projects/:projectId/state        project lead+ — record what a sync imported (map rows, cursor, outcome)
@@ -37,6 +39,7 @@ import {
   type LangQuestScope,
 } from "../lib/langquest/client"
 import { encryptLangQuestToken, getLangQuestToken } from "../lib/langquest/tokens"
+import { getOwnConnection, markConnectionOfLinkRejected, upsertConnection } from "../lib/langquest/connections"
 import { MANAGE_MIN_ROLE, projectGuard } from "./_integration-helpers"
 
 const langquest = new Hono<AuthHonoEnv>()
@@ -64,6 +67,7 @@ interface LinkRow {
   last_sync_error: string | null
   created_by: string
   created_at: string | Date
+  connection_id: string | null
 }
 
 const iso = (v: string | Date | null): string | null =>
@@ -84,6 +88,7 @@ function linkOut(row: LinkRow) {
     lastSyncError: row.last_sync_error,
     linkedBy: row.created_by,
     linkedAt: iso(row.created_at),
+    connectionId: row.connection_id,
   }
 }
 
@@ -109,6 +114,8 @@ async function langquestFailure(
       )
         .bind(projectId)
         .run()
+      // The account-level connection the link was made from holds the same token.
+      await markConnectionOfLinkRejected(c.env, projectId, err.message)
     }
     // 410 is LangQuest's expired feed cursor: the caller starts over from a full listing.
     const status = err.status === 410 ? 410 : err.tokenRejected ? 401 : err.status === 403 ? 403 : 502
@@ -188,19 +195,50 @@ langquest.get("/projects/:projectId/link", authMiddleware, async (c) => {
   }
 })
 
-const putLinkSchema = tokenSchema.extend({ languageId: z.string().min(1).max(500) })
+// A pasted token, or one of the caller's saved connections (AQU-2105 follow-up:
+// linking a second language from the same LangQuest org re-pastes nothing).
+const putLinkSchema = z.union([
+  tokenSchema.extend({ languageId: z.string().min(1).max(500) }),
+  z.object({ connectionId: z.string().uuid(), languageId: z.string().min(1).max(500) }),
+])
 
 langquest.put("/projects/:projectId/link", authMiddleware, zValidator("json", putLinkSchema), async (c) => {
   const guard = await projectGuard(c, MANAGE_MIN_ROLE)
   if (guard instanceof Response) return guard
-  const { token, languageId } = c.req.valid("json")
-  const base = langquestApiBase(c.env)
+  const body = c.req.valid("json")
+  const { languageId } = body
+  const user = c.get("user")
+  let base = langquestApiBase(c.env)
+  let token: string
+  let connectionId: string | null = null
+  if ("connectionId" in body) {
+    const conn = await getOwnConnection(c.env, user.id, body.connectionId)
+    if (!conn) return c.json({ error: "no such LangQuest connection" }, 404)
+    try {
+      token = await getLangQuestToken(c.env, conn)
+    } catch (err) {
+      return langquestFailure(c, err)
+    }
+    base = conn.api_base
+    connectionId = conn.id
+  } else {
+    token = body.token
+  }
   let me: LangQuestMe
   try {
     me = await new LangQuestClient(base, token).me()
   } catch (err) {
+    if (connectionId && err instanceof LangQuestApiError && err.tokenRejected) {
+      await c.env.AQUILLA_PG.prepare(
+        "UPDATE langquest_connections SET needs_reauth = TRUE, last_checked_at = now(), last_error = ?, updated_at = now() WHERE id = ?",
+      )
+        .bind(err.message, connectionId)
+        .run()
+    }
     return langquestFailure(c, err)
   }
+  // A token pasted here is the user's connection to that org from now on.
+  if (!connectionId) connectionId = (await upsertConnection(c.env, user.id, token, base, me)).id
   const language = me.languages.find((l) => l.languageId === languageId)
   if (!language || language.can.read == null) {
     return c.json({ error: "this token cannot read that language", reason: "language_not_readable" }, 400)
@@ -209,9 +247,10 @@ langquest.put("/projects/:projectId/link", authMiddleware, zValidator("json", pu
   const stmts = [
     c.env.AQUILLA_PG.prepare(
       `INSERT INTO langquest_links (project_id, token_enc, environment, api_base, lq_org_id, lq_org_name,
-         language_id, language_name, language_code, token_id, scopes, can, token_expires_at, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         language_id, language_name, language_code, token_id, scopes, can, token_expires_at, created_by, connection_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (project_id) DO UPDATE SET
+         connection_id = excluded.connection_id,
          token_enc = excluded.token_enc, environment = excluded.environment, api_base = excluded.api_base,
          lq_org_id = excluded.lq_org_id, lq_org_name = excluded.lq_org_name,
          language_id = excluded.language_id, language_name = excluded.language_name,
@@ -232,7 +271,8 @@ langquest.put("/projects/:projectId/link", authMiddleware, zValidator("json", pu
       JSON.stringify(me.token.scopes),
       JSON.stringify(language.can),
       me.token.expiresAt,
-      c.get("user").username,
+      user.username,
+      connectionId,
     ),
   ]
   // A new token for the same language keeps what was imported; another

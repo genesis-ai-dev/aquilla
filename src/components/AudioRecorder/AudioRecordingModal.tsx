@@ -32,7 +32,7 @@ import {
 import type { TimelineTrack } from "@/lib/timeline/tracks"
 import { DEFAULT_TARGET_TRACK_ID } from "@/lib/timeline/track-slots"
 import { slotSelections, type AudioAttachmentOut, type CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
-import { groupSelection, groupTakesByTrack, listedTakeCount as countListedTakes, piecesOf, takeBaseLabel } from "@/lib/audio/take-groups"
+import { groupSelection, groupTakesByTrack, listedTakeCount as countListedTakes, piecesOf, splitTakeName } from "@/lib/audio/take-groups"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { composeTakeWindow, defaultTakeWindow } from "@/lib/audio/take-margins"
 import { keptLengthSec } from "@/lib/audio/trim-edit"
@@ -2507,7 +2507,7 @@ export function AudioRecordingModal({
                   <div data-testid="rec-ready-take" className="space-y-1">
                     <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                       {t("audio.recordingModal.readyTakeCaption", {
-                        label: (readySplit ? takeBaseLabel(readyAtt.label) : readyAtt.label) ?? t("audio.takesStrip.takeFallback"),
+                        label: (readySplit ? splitTakeName(readySplit) : readyAtt.label) ?? t("audio.takesStrip.takeFallback"),
                         // Tenths rounded DOWN, as the target bar below
                         // prints them — the two must never disagree, nor
                         // with the Recording tab (take-length.ts).

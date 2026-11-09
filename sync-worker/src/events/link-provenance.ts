@@ -1,28 +1,26 @@
 // AQU-2345 — repair the provenance of the files a source link brought into a
 // project: the type they were imported as, and a pointer at the upstream's
-// original. The two rules live in db/shared/link-file-provenance.ts and every
-// mirror window applies them to the files it touches; this module applies them
-// to a WHOLE project, for `POST /admin/link-provenance` (admin.ts) — the
-// backfill for files linked before the mirror carried either. Nothing here
-// touches a cell, a translation or a validation: it writes `files.kind`,
-// `files.role` and `files.book_code` where they are NULL, and
-// `file_source_blobs` rows.
+// original. The two rules, and the whole-project sweep that applies them, live
+// in db/shared/link-file-provenance.ts; every link sync runs that sweep
+// (AQU-2438), and this module is the on-demand way to run it for one project
+// or for all of them — `POST /admin/link-provenance` (admin.ts), the backfill
+// for a project nobody has opened since. Nothing here touches a cell, a
+// translation or a validation: it writes `files.kind`, `files.role` and
+// `files.book_code` where they are NULL, and `file_source_blobs` rows, and it
+// reports what it did.
 //
-// The pairing is the one the detach snapshot uses (auth-worker
-// snapshotSourceFiles): `meta.upstreamFileId`, the stamp every copy made since
-// AQU-1547 carries, else the deterministic id a live mirror gives its copies,
-// which covers rows mirrored before the stamp. A file matching neither is the
-// project's own — an import of its own, or (AQU-1679) a file adopted under the
-// link — and is reported, not touched.
+// The pairing (in the shared sweep) is the one the detach snapshot uses
+// (auth-worker snapshotSourceFiles): `meta.upstreamFileId`, the stamp every
+// copy made since AQU-1547 carries, else the deterministic id a live mirror
+// gives its copies, which covers rows mirrored before the stamp. A file
+// matching neither is the project's own — an import of its own, or (AQU-1679)
+// a file adopted under the link — and is reported, not touched.
 
 import { makePostgres } from '../../../db/shim/postgres'
 import { parseSourceLinkAdoption } from '../../../db/shared/source-link-adopt'
-import {
-  applyLinkedFileProvenance,
-  type LinkedFilePair,
-} from '../../../db/shared/link-file-provenance'
+import { applyProjectLinkedFileProvenance } from '../../../db/shared/link-file-provenance'
 import { scheduledDeploymentEnvironmentError } from '../environment-guard'
-import { deterministicDownstreamFileId, loadLink, parseMetaObject } from './link-sync'
+import { deterministicDownstreamFileId, loadLink } from './link-sync'
 
 export interface LinkProvenanceReport {
   projectId: string
@@ -64,46 +62,17 @@ export async function repairLinkedFileProvenance(
   const now = options.now ?? Date.now()
 
   const adoption = parseSourceLinkAdoption(link.source_link_adopt)
-  const adoptedOwnIds = new Set(Object.values(adoption?.files ?? {}))
 
-  // Every upstream file, Recently deleted included: a copy of a file the
-  // upstream has since set aside is still that file's material, and the
-  // upstream's original row outlives the tombstone.
-  const upstreamRows = await db
-    .prepare(`SELECT id FROM files WHERE project_id = ?`)
-    .bind(upstreamProjectId)
-    .all<{ id: string }>()
-  const upstreamIds = new Set(upstreamRows.results.map((r) => r.id))
-  const upstreamOfMirroredId = new Map<string, string>()
-  for (const id of upstreamIds) upstreamOfMirroredId.set(deterministicDownstreamFileId(downstreamProjectId, id), id)
-
-  const copies = await db
-    .prepare(`SELECT id, meta FROM files WHERE project_id = ? AND deleted_at IS NULL`)
-    .bind(downstreamProjectId)
-    .all<{ id: string; meta: string | null }>()
-  const pairs: LinkedFilePair[] = []
-  const ownFiles: string[] = []
-  for (const row of copies.results) {
-    if (adoptedOwnIds.has(row.id)) {
-      ownFiles.push(row.id)
-      continue
-    }
-    const stamped = parseMetaObject(row.meta).upstreamFileId
-    const upstreamFileId =
-      typeof stamped === 'string' && upstreamIds.has(stamped)
-        ? stamped
-        : upstreamOfMirroredId.get(row.id)
-    if (!upstreamFileId) {
-      ownFiles.push(row.id)
-      continue
-    }
-    pairs.push({ upstreamFileId, downstreamFileId: row.id })
-  }
-
-  const plan = await applyLinkedFileProvenance(db, {
+  // AQU-2438: the pairing and both rules are the shared whole-project sweep
+  // every link sync now runs (db/shared/link-file-provenance.ts) — this route
+  // is the on-demand way to run it, not a second implementation of it, so the
+  // backfill and the per-sync repair cannot drift apart.
+  const { plan, pairs, ownFileIds: ownFiles } = await applyProjectLinkedFileProvenance(db, {
     upstreamProjectId,
     downstreamProjectId,
-    pairs,
+    downstreamFileIdOf: (upstreamFileId) =>
+      deterministicDownstreamFileId(downstreamProjectId, upstreamFileId),
+    adoptedDownstreamFileIds: new Set(Object.values(adoption?.files ?? {})),
     now,
     dryRun,
   })

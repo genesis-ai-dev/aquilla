@@ -1032,3 +1032,105 @@ describe("a take landing over the film's tail that makes the lines longer than t
     expect(getQueueProgress().currentTime).toBeCloseTo(2, 2)
   })
 })
+
+// AQU-2253 (review, Nov 9), finding 3: switching to another file while the
+// first one's film played out left the queue running on the first file,
+// unseen, until that film's length had passed, and going back to it started
+// its film again with no press. The workspace says which file is on screen
+// with its word about the film; a run the film is the clock of ends at once
+// when another file comes on screen, whatever that file is.
+describe("switching to another file while the film plays", () => {
+  const unrecorded = () => [line("b1"), line("b2"), line("b3")]
+  const filmOf = (endSec: number, cells: CellData[]) => ({ endSec, cellIds: new Set(cells.map((c) => c.id)) })
+  /** Episode 1 ("f1"): its lines played out, a second of its 60 s film's tail. */
+  async function episodeOneOverItsTail(): Promise<CellData[]> {
+    const cells = recorded()
+    setProgrammeFilm(filmOf(60, cells), "f1")
+    await playTheLinesOut(cells)
+    await wait(1_000)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    return cells
+  }
+
+  it("to a file with its own film: the run ends at once, and going back does not start the film", async () => {
+    const cells = await episodeOneOverItsTail()
+    // Episode 2 comes on screen, with its own film and lines.
+    setProgrammeFilm({ endSec: 45, cellIds: new Set(["x1", "x2"]) }, "f2")
+    expect(getQueueState().kind).toBe("idle")
+    // A switch is not the lines running out: nothing carries on from it.
+    expect(ranOut).toBe(0)
+    // Back to episode 1 inside what was left of its film.
+    setProgrammeFilm(filmOf(60, cells), "f1")
+    await wait(10_000)
+    expect(getQueueState().kind).toBe("idle")
+    expect(film.reports).toBe(4)
+  })
+
+  it("to a file with no film: the same", async () => {
+    await episodeOneOverItsTail()
+    setProgrammeFilm(null, "f2")
+    expect(getQueueState().kind).toBe("idle")
+    expect(ranOut).toBe(0)
+  })
+
+  it("with nothing recorded, whatever Skip lines with nothing to play says: the run ends at once", async () => {
+    for (const skip of [true, false]) {
+      setSkipSilentLinesPref(skip)
+      const cells = unrecorded()
+      setProgrammeFilm(filmOf(60, cells), "f1")
+      startQueue(ctxFor(cells), 0)
+      await wait(500)
+      expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b1" })
+      setProgrammeFilm(null, "f2")
+      expect(getQueueState().kind).toBe("idle")
+      await wait(10_000)
+      expect(getQueueState().kind).toBe("idle")
+    }
+  })
+
+  it("while the film waits (buffering), too", async () => {
+    const cells = recorded()
+    setProgrammeFilm(filmOf(60, cells), "f1")
+    film.stuck = true
+    await playTheLinesOut(cells)
+    await wait(2_000)
+    expect(getQueueState()).toMatchObject({ kind: "loading", cellId: "b2" })
+    setProgrammeFilm({ endSec: 45, cellIds: new Set(["x1", "x2"]) }, "f2")
+    expect(getQueueState().kind).toBe("idle")
+  })
+
+  it("the same file's lines changing is not a switch: the tail plays on", async () => {
+    const cells = await episodeOneOverItsTail()
+    const more = [line("b0"), ...cells]
+    setProgrammeFilm(filmOf(60, more), "f1")
+    updateQueueCells(more)
+    setProgrammeFilm(filmOf(60, more), "f1")
+    await wait(2_000)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(8, 1)
+  })
+
+  it("a run still on its recorded lines is left alone, and ends with its lines as on any file", async () => {
+    const cells = recorded()
+    setProgrammeFilm(filmOf(60, cells), "f1")
+    startQueue(ctxFor(cells), 0)
+    await wait()
+    setProgrammeFilm({ endSec: 45, cellIds: new Set(["x1", "x2"]) }, "f2")
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b1" })
+    el("b1")!.tick(2)
+    await wait()
+    el("b2")!.tick(3)
+    await wait()
+    expect(getQueueState().kind).toBe("idle")
+  })
+
+  it("paused over the tail, it stays paused there, and is still paused on coming back", async () => {
+    const cells = await episodeOneOverItsTail()
+    pauseQueue()
+    setProgrammeFilm({ endSec: 45, cellIds: new Set(["x1", "x2"]) }, "f2")
+    setProgrammeFilm(filmOf(60, cells), "f1")
+    await wait(5_000)
+    expect(getQueueState()).toMatchObject({ kind: "paused", cellId: "b2" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(6, 1)
+  })
+})

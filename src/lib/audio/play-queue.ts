@@ -416,7 +416,21 @@ let progFilmEndSec = 0
  *  `progPlaysThroughSilence`. */
 let progFilmCarriesLines = false
 
-export function setProgrammeFilm(film: ProgrammeFilm | null): void {
+/** AQU-2253 (review, Nov 9): the file the workspace's last word was about:
+ *  the one on screen. */
+let progFilmFileId: string | null = null
+
+export function setProgrammeFilm(film: ProgrammeFilm | null, fileId: string | null = null): void {
+  // AQU-2253 (review, Nov 9): another file has come on screen. A run the film
+  // is the clock of ends at once, whatever the other file is: its film left
+  // the screen with its panel, so nothing would move the run's clock or end
+  // it, and left running it would start the film by itself when its file came
+  // back. (A run still on its recorded lines plays them out as on any file,
+  // and a paused one stays paused.) Not the lines running out: nothing is told.
+  if (fileId !== progFilmFileId) {
+    progFilmFileId = fileId
+    if (progLead?.film && progRunning()) progFinish()
+  }
   if (progFilm === film) return
   if (progFilm && film && progFilm.endSec === film.endSec && progFilm.cellIds === film.cellIds) return
   progFilm = film

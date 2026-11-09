@@ -15171,9 +15171,12 @@ export function ProjectWorkspace() {
   )
   // No cleanup between changes: taking the film away for a beat would end a
   // run that is playing over its tail. It is taken away when the workspace goes.
+  // AQU-2253 (review, Nov 9): with the file it is said about, so a run the
+  // film is the clock of ends when another file comes on screen.
+  const programmeFilmFileId = activeFile?.id ?? null
   useEffect(() => {
-    setProgrammeFilm(programmeFilm)
-  }, [programmeFilm])
+    setProgrammeFilm(programmeFilm, programmeFilmFileId)
+  }, [programmeFilm, programmeFilmFileId])
   useEffect(() => () => setProgrammeFilm(null), [])
   // The film follows the queue on the lines it plays, and captions the one
   // playing: the heard lines too, when it plays them.

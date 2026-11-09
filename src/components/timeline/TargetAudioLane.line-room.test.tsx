@@ -178,13 +178,14 @@ describe("the marker for a line with too little room (AQU-2432, Nov 9, rule 8)",
     expect(screen.getByTestId("tl-line-marker-b-tab").getAttribute("aria-label")).toMatch(/^Genesis 1:3 isn't recorded yet\./)
   })
 
-  it("clicking it selects that line, as clicking its box would, and takes the playhead to it", () => {
+  it("clicking it selects that line, as clicking its box would, and leaves the playhead where it is, as a click on a take does", () => {
     const onSelect = vi.fn()
     const onSeek = vi.fn()
     renderLane(book({ roomMs: 0 }), { onSelect, onSeek })
     fireEvent.click(screen.getByTestId("tl-line-marker-b-tab"))
+    expect(onSelect).toHaveBeenCalledTimes(1)
     expect(onSelect).toHaveBeenCalledWith("b")
-    expect(onSeek).toHaveBeenCalledWith("b")
+    expect(onSeek).not.toHaveBeenCalled()
   })
 
   it("the keyboard reaches it: it is a button, and Space still plays", () => {

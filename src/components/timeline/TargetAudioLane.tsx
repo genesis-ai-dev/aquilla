@@ -2425,8 +2425,11 @@ export function TargetAudioLane({
           key={`marker-${marker.cell.id}`}
           marker={marker}
           selected={selectedId === marker.cell.id}
+          // A click selects the line and leaves the playhead where it is, as
+          // a click on a take in this row does (Sam, 2026-10-14). On the
+          // line's own text rows the marker also takes the playhead to it,
+          // as a click on its box there does.
           onSelect={onSelect}
-          onSeek={onSeek}
           // Over every take at rest (their paint order counts down from the
           // number of takes); a hovered, selected or dragged take is 1000 up.
           zIndex={chips.length + 1}

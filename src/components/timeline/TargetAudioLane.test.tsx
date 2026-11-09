@@ -458,7 +458,9 @@ describe("TargetAudioLane — trimmed geometry (round 7)", () => {
     expect(trims.trimStartMs).toBe(1000)
   })
 
-  it("END-based bounds: the stored anchor can never go below file zero", () => {
+  // AQU-2495 (review, Nov 9): it was the clip's start that could not go below
+  // file zero, which kept a head-trimmed take's sound a head trim into the file.
+  it("END-based bounds: the take's sound can never start below file zero; its trimmed-off head may", () => {
     const onRetimeTarget = vi.fn()
     render(
       <TargetAudioLane
@@ -468,13 +470,34 @@ describe("TargetAudioLane — trimmed geometry (round 7)", () => {
       />,
     )
     // Visual [11, 22] (anchor 10, trimmed head). End-bound would allow start
-    // −0.95, but audible start ≥ trimStart keeps the anchor ≥ 0.
+    // −0.95, but audible start ≥ 0: the clip's start goes its 1 s head trim
+    // before the file's, and no further.
     const chip = screen.getByTestId("tl-target-c1")
     fireEvent.pointerDown(chip, { clientX: 440, pointerId: 1 })
-    fireEvent.pointerMove(window, { clientX: 0 }) // −11s
-    fireEvent.pointerUp(window, { clientX: 0 })
+    fireEvent.pointerMove(window, { clientX: -200 }) // −16s
+    fireEvent.pointerUp(window, { clientX: -200 })
     const [, anchor] = onRetimeTarget.mock.calls[0] as [string, number]
-    expect(anchor).toBeCloseTo(0)
+    expect(anchor).toBeCloseTo(-1)
+  })
+
+  it("the left trim handle brings a trimmed head back only as far as the start of the file (AQU-2495)", () => {
+    const onTrimTarget = vi.fn()
+    // A line at 2–12 s; the take's clip starts 3 s BEFORE the file (its place
+    // is 5 s before its line), its first 4 s trimmed off: it sounds from 1 s.
+    const head = item(
+      { startTime: 2, endTime: 12 } as Partial<CellData>,
+      10000,
+      "c1",
+      { trimStartMs: 4000, targetOffsetMs: -5000 } as { trimStartMs: number },
+    )
+    render(<TargetAudioLane {...base} items={[head]} onTrimTarget={onTrimTarget} />)
+    const handle = screen.getByTestId("tl-target-c1-handle-l")
+    fireEvent.pointerDown(handle, { clientX: 40, pointerId: 1 }) // audible start 1 s
+    fireEvent.pointerMove(window, { clientX: -200 }) // −6 s → would un-trim past the file's start
+    fireEvent.pointerUp(window, { clientX: -200 })
+    const [, , trims] = onTrimTarget.mock.calls[0] as [string, string, { trimStartMs?: number }]
+    // 3 s of the clip sit before the file's start and stay trimmed off.
+    expect(trims.trimStartMs).toBe(3000)
   })
 
   it("the left trim handle follows a chip that begins before its section", () => {

@@ -186,6 +186,12 @@ export function LivingMemoryPage({
   // The full validated-cell corpus is an expensive all-files query. Only the
   // Examples pane consumes it; every other pane renders from project/settings.
   const validatedExamplesEnabled = activeSection?.id === "examples"
+  // AQU-1733: the Checks pane reads the corpus too, so the Language profile can
+  // offer the quotation marks the project's own text already uses instead of
+  // asking the lead to type three levels in. Only with the Bible data
+  // experiment on, which is also the only condition under which that card is
+  // rendered (below) — no other project pays for the read.
+  const quoteSampleEnabled = activeSection?.id === "checks" && !!project && isBibleDataExperimentOn(project)
   // AQU-2001: read the corpus in the lane this page is viewing. An omitted
   // lane selects the legacy default lane, which holds no target rows on a
   // project translated into a named lane — the Examples pane then showed its
@@ -193,9 +199,24 @@ export function LivingMemoryPage({
   const { cells, isLoading, isEmpty, error: cellsError } = useLivingMemory({
     projectId: projectId ?? "",
     project,
-    enabled: validatedExamplesEnabled,
+    enabled: validatedExamplesEnabled || quoteSampleEnabled,
     lane: activeLane ?? "",
   })
+
+  // The validated text in reading order (the corpus read returns it by
+  // recency). Reading order matters: `inferQuoteMarks` reads the paragraph
+  // convention at the seam between one cell and the next.
+  const quoteSampleTexts = useMemo(() => {
+    if (!quoteSampleEnabled) return undefined
+    return [...cells]
+      .sort((a, b) => {
+        if (a.fileName !== b.fileName) return a.fileName < b.fileName ? -1 : 1
+        const ag = a.group || a.id
+        const bg = b.group || b.id
+        return ag < bg ? -1 : ag > bg ? 1 : 0
+      })
+      .map((cell) => cell.translated)
+  }, [cells, quoteSampleEnabled])
 
   const { state: livenessState, label: livenessLabel } = useLiveness(cells.length)
 
@@ -454,6 +475,7 @@ export function LivingMemoryPage({
                         project={project}
                         settings={settings}
                         canEdit={entriesReady && canEdit}
+                        sampleTexts={quoteSampleTexts}
                         sessionUsername={session?.username}
                         sessionJwt={session?.jwt}
                         patch={patchSettings}

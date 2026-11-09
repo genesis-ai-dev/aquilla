@@ -109,6 +109,12 @@ const UNCOVERED: Record<string, string> = {
   // to "covered" while enforcing nothing, which is the one outcome the header
   // of this file argues against.
   file_milestones: "never granted to app_runtime",
+  // AQU-2459 (0197): the index row per revision of a file's source side
+  // (artifact sha, filter stamp, R2 manifest key, counts). Written and read
+  // only through the sync-worker perimeter — the revisions route and rebuild —
+  // so, as with file_milestones, it is not granted to app_runtime and a policy
+  // `TO app_runtime` would be inert.
+  file_revisions: "never granted to app_runtime",
   // AQU-1813 (0172): the lanes a team attachment covers. Unlike
   // group_project_grants, app_user_can_access_project() never reads it.
   group_project_lanes: "never granted to app_runtime",

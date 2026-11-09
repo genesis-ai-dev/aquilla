@@ -275,7 +275,8 @@ export function deriveMilestoneNavigation(
  * breaks, and each later run gets a suffixed one so it lists as its own entry.
  *
  * Re-keying does not re-LABEL. `renumberParts` below renumbers "Part N",
- * because that number is pure invention and a stale one reads as a gap. A
+ * because that number is pure invention and a repeated one reads as one
+ * part listed twice. A
  * 5-minute bucket's label is its clock range, which stays true of both halves
  * of a split bucket, so two rows may legitimately read "05:00–10:00" — that is
  * what they both are.
@@ -309,19 +310,36 @@ function splitInterruptedRuns(
 }
 
 /**
- * Renumber "Part N" over the parts that are actually listed.
+ * Number "Part N" over the parts that are actually listed.
  *
- * "Part N" is an invention of the app's, numbered by position in the file. Once
- * a hand-set milestone has taken a stretch out, the surviving parts must be
- * numbered 1..N over themselves or the navigator shows a gap ("Part 1 · The
- * storm · Part 3") or, after a split, the same number twice.
+ * "Part N" is an invention of the app's, numbered by position in the file. A
+ * part KEEPS the number the file gave it unless an earlier part already holds
+ * that number or a higher one, in which case it takes the next free one. So
+ * the numbers only ever climb, and:
+ *
+ *   * a milestone strictly inside a part, which splits it into two runs that
+ *     both still read "Part 1", gives the second run "Part 2" and moves every
+ *     later part up one — never the same number twice;
+ *   * a milestone that takes over whole parts, or the ends of them, leaves
+ *     every other part's number alone. AQU-2310: renaming "Part 1" to
+ *     "Opening" must not turn "Part 2" into "Part 1" — a person who just
+ *     renamed Part 1 would read a new "Part 1" as their rename not taking.
+ *
+ * The cost is a visible gap when a milestone takes over a whole part in the
+ * middle ("Part 1 · The storm · Part 3"), which is also exactly what renaming
+ * Part 2 means. (AQU-2308 renumbered every part over itself, gap-free, which
+ * relabelled the neighbours of every rename.)
  */
 function renumberParts(resolved: ImportMilestone[]): void {
   const ordinalByKey = new Map<string, number>()
+  let highest = 0
   for (const division of resolved) {
     if (division?.kind !== "part") continue
     if (ordinalByKey.has(division.key)) continue
-    ordinalByKey.set(division.key, ordinalByKey.size + 1)
+    const own = Number.parseInt(division.shortLabel, 10)
+    const ordinal = Number.isFinite(own) && own > highest ? own : highest + 1
+    ordinalByKey.set(division.key, ordinal)
+    highest = ordinal
   }
   if (ordinalByKey.size === 0) return
   const relabelled = new Map<string, ImportMilestone>()

@@ -11,7 +11,7 @@ invitee's dashboard")
 
 ## Steps
 
-1. **Alice**: from `/orgs/1/projects` click **New project**. Fill **Project name** with a unique name, **Source language** with `en`, **Language lanes** with `fr`. Click **Create project**.
+1. **Alice**: from `/orgs/1/projects` click **New project**, then **Start from scratch**. Fill **Project name** with a unique name, **Source language** with `en`, **Language lanes** with `fr`. Click **Create project**.
 2. **Alice**: on the project overview, click **Project settings**.
 3. **Alice**: click **Members Roles & invites**.
 4. **Alice**: click **Add a member**, then click the **Invite link** tab.

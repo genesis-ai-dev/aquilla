@@ -47,6 +47,13 @@ export interface UseFileMilestonesResult {
   setMilestoneLocally(milestone: FileMilestone): void
   /** Paint a removal immediately. */
   removeMilestoneLocally(milestoneId: string): void
+  /**
+   * AQU-2310: drop this device's pending edit to one milestone, so it shows
+   * whatever the server holds. What a refused write takes back — painting a
+   * removal instead would hide a milestone the server still has, and the
+   * overlay would never retire because the server never agrees.
+   */
+  forgetMilestoneLocally(milestoneId: string): void
   refresh(): void
 }
 
@@ -146,6 +153,15 @@ export function useFileMilestones({
     setOverrides((prev) => new Map(prev).set(milestoneId, undefined))
   }, [])
 
+  const forgetMilestoneLocally = useCallback((milestoneId: string) => {
+    setOverrides((prev) => {
+      if (!prev.has(milestoneId)) return prev
+      const next = new Map(prev)
+      next.delete(milestoneId)
+      return next
+    })
+  }, [])
+
   const refresh = useCallback(() => setRefreshKey((k) => k + 1), [])
 
   const milestones = useMemo<readonly FileMilestone[]>(() => {
@@ -175,6 +191,7 @@ export function useFileMilestones({
     error,
     setMilestoneLocally,
     removeMilestoneLocally,
+    forgetMilestoneLocally,
     refresh,
   }
 }

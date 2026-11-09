@@ -148,6 +148,24 @@ jobs:
           EXPECTED: ${{ needs.check.outputs.sha }}
         run: |
           test "$(git rev-parse HEAD)" = "$EXPECTED" || { echo "::error::branch moved since the check"; exit 1; }
+      # The two Discord notices at the end run scripts/release-discord-notify.sh,
+      # which belongs to this workflow file — GitHub runs it from dev — while the
+      # checkout above is the release branch. A release stack that has not picked
+      # the PR carrying the script (#1907, held as risk:infra) has no copy, and
+      # `bash: No such file or directory` turned every failure notice from
+      # 2026.11.06.04 to 2026.11.09.01 into an exit 127 on top of the real
+      # failure. Take the copy from the commit this run's workflow came from:
+      # GITHUB_SHA is still GitHub's own value here, dev's commit (the deploy
+      # step re-exports it as the release HEAD in its own shell only), and
+      # fetch-depth 0 fetched it. Should even that commit lack the script, the
+      # notices warn and post nothing: a notice must never fail a deploy.
+      - name: Stage the Discord notifier from this workflow's commit
+        run: |
+          notifier="$RUNNER_TEMP/release-discord-notify.sh"
+          if ! git show "$GITHUB_SHA:scripts/release-discord-notify.sh" > "$notifier" 2>/dev/null; then
+            printf '%s\n' '#!/usr/bin/env bash' \
+              'echo "::warning::scripts/release-discord-notify.sh is not in the workflow commit; not posting: $1"' > "$notifier"
+          fi
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
@@ -209,10 +227,10 @@ jobs:
           DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
         run: |
           tag="$(git tag --points-at HEAD --list '20*' | sort -V | tail -1)"
-          bash scripts/release-discord-notify.sh "🚀 Production is on ${tag} (${DEPLOY_REF_NAME} @ $(git rev-parse --short HEAD)). https://github.com/${GITHUB_REPOSITORY}/releases/tag/${tag}"
+          bash "$RUNNER_TEMP/release-discord-notify.sh" "🚀 Production is on ${tag} (${DEPLOY_REF_NAME} @ $(git rev-parse --short HEAD)). https://github.com/${GITHUB_REPOSITORY}/releases/tag/${tag}"
       - name: Post the failed deploy to Discord
         if: failure()
         env:
           DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
         run: |
-          bash scripts/release-discord-notify.sh "<@&1564768432677847051> ❌ Production deploy of ${DEPLOY_REF_NAME} @ $(git rev-parse --short HEAD) failed. https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          bash "$RUNNER_TEMP/release-discord-notify.sh" "<@&1564768432677847051> ❌ Production deploy of ${DEPLOY_REF_NAME} @ $(git rev-parse --short HEAD) failed. https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"

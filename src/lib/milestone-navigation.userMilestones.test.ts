@@ -92,6 +92,41 @@ describe("deriveMilestoneNavigation with hand-set milestones", () => {
       .not.toBe(result.orderedMilestones[2].milestone.key)
   })
 
+  // AQU-2310: renaming an app-made part writes a hand-set milestone over
+  // exactly its cells. The other parts must read as they did — a rename that
+  // turned "Part 2" into "Part 1" would look like the rename had not taken.
+  it("leaves the other parts' numbers alone when a whole part is renamed", () => {
+    const cells = plainTextFile(120)
+    const before = labels(cells, [record("ms", "c49", "c69", "The storm")])
+    expect(before.orderedMilestones.map((group) => group.milestone.label))
+      .toEqual(["Part 1", "The storm", "Part 2", "Part 3"])
+    const part1 = before.orderedMilestones[0]
+
+    const after = labels(cells, [
+      record("ms", "c49", "c69", "The storm"),
+      record("opening", part1.cellIds[0], part1.cellIds.at(-1)!, "Opening"),
+    ])
+
+    expect(after.orderedMilestones.map((group) => group.milestone.label))
+      .toEqual(["Opening", "The storm", "Part 2", "Part 3"])
+    // Exactly the cells Part 1 had…
+    expect(after.orderedMilestones[0].cellIds).toEqual(part1.cellIds)
+    // …and every other row is the row it was.
+    for (const index of [1, 2, 3]) {
+      expect(after.orderedMilestones[index].cellIds)
+        .toEqual(before.orderedMilestones[index].cellIds)
+      expect(after.orderedMilestones[index].milestone.shortLabel)
+        .toBe(before.orderedMilestones[index].milestone.shortLabel)
+    }
+  })
+
+  it("keeps a part's own number when a whole part in the middle is renamed", () => {
+    const result = labels(plainTextFile(120), [record("ms", "c50", "c99", "Middle")])
+
+    expect(result.orderedMilestones.map((group) => group.milestone.label))
+      .toEqual(["Part 1", "Middle", "Part 3"])
+  })
+
   it("nests inside a chapter without moving, renaming or re-counting it", () => {
     const cells = [
       persisted("m3-1", chapter("MRK", 3)),

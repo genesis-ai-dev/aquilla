@@ -295,7 +295,9 @@ that is one more reason the bots should run against previews.
   elements (`wait "table"`) rather than placeholder text.
 - After clicking a cell's read view, wait for the editable element to
   mount and type into it by ref. Typing at "current focus" is lost.
-- Language pickers on the create dialog accept a typed code (`en`, `fr`).
+- The create dialog opens on "Where does this project come from?" (AQU-2105);
+  click **Start from scratch** (`find testid "project-source-scratch"`) before
+  filling its fields. Its language pickers accept a typed code (`en`, `fr`).
 - Give the upload command an absolute path; the daemon resolves relative
   paths from its own working directory.
 - Popovers and dialogs portal outside the row. Scope snapshots to `main` or

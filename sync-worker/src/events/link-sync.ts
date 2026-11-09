@@ -88,6 +88,7 @@ import {
   type LinkedFilePair,
 } from '../../../db/shared/link-file-provenance'
 import { loadAdoptedCellIds, runAdoption } from './link-adopt'
+import type { StoredRevisionManifest } from './file-revision-apply'
 import { selectByCellKeys, type CellKey } from '../lib/cell-key-lookup'
 
 const BATCH_LIMIT = 100
@@ -136,6 +137,9 @@ const LANE_KINDS_SOURCE = [
   // NOOP) and the delta never pulls the file id in, so the downstream copy
   // keeps the old name forever.
   'file.rename',
+  // AQU-2459: one event carries a whole revision of a file's source side; the
+  // fold expands it from its manifest (see foldRevision).
+  'file.revision',
 ] as const
 
 /** AQU-477: additional lane-relevant kinds for `consumes: 'target'` links —
@@ -620,6 +624,115 @@ interface FoldedCell {
   transcription?: string | null
   cameraState?: string | null
   metadata?: Record<string, unknown> | null
+  /**
+   * AQU-2459: set for cells expanded from a `file.revision`. One revision event
+   * carries every changed cell, so its id cannot name each mirror event; the
+   * mirror id derives from this per-cell key instead of `eventId`.
+   */
+  mirrorKey?: string
+  /**
+   * AQU-2459: the revision moved this cell's anchor (an insert or delete next
+   * to it, or a move) without changing its text. The hash-equal skip would
+   * drop it and leave two cells on one anchor downstream, so it always emits.
+   */
+  reanchor?: boolean
+}
+
+/** AQU-2459: reads a revision manifest from R2 by key; null when missing. */
+export type RevisionManifestReader = (r2Key: string) => Promise<StoredRevisionManifest | null>
+
+/** AQU-2459: the reader over the SNAPSHOTS bucket, or undefined when unbound. */
+export function r2RevisionManifestReader(bucket: R2Bucket | undefined): RevisionManifestReader | undefined {
+  if (!bucket) return undefined
+  return async (key) => {
+    const obj = await bucket.get(key)
+    return obj ? (JSON.parse(await obj.text()) as StoredRevisionManifest) : null
+  }
+}
+
+/**
+ * AQU-2459: a `file.revision` folded as the per-cell changes it made, relative
+ * to its parent revision's manifest:
+ *   - units whose source row took this revision's event (changed/inserted),
+ *   - units whose anchor differs from the parent's (text equal, place moved),
+ *   - parent units this revision no longer carries (deletes).
+ * Unchanged units in place are left out: earlier events already mirrored them.
+ * A revision whose manifest cannot be read throws: the cursor must not move
+ * past cells the downstream never received.
+ */
+async function foldRevision(
+  db: AquillaDb,
+  upstreamProjectId: string,
+  row: UpstreamDeltaRow,
+  revisions: RevisionManifestReader | undefined,
+): Promise<FoldedCell[]> {
+  const fileId = row.file_id as string
+  let payload: { manifestR2Key?: unknown; parentRevisionN?: unknown }
+  try {
+    payload = JSON.parse(row.payload) as typeof payload
+  } catch {
+    throw new Error(`file.revision ${row.id} has an unreadable payload`)
+  }
+  if (!revisions) throw new Error(`file.revision ${row.id}: link sync has no revision manifest reader`)
+  if (typeof payload.manifestR2Key !== 'string') throw new Error(`file.revision ${row.id} names no manifest`)
+  const manifest = await revisions(payload.manifestR2Key)
+  if (!manifest) throw new Error(`file.revision ${row.id}: manifest ${payload.manifestR2Key} is not readable`)
+  let parentUnits: StoredRevisionManifest['units'] = []
+  if (typeof payload.parentRevisionN === 'number') {
+    const parentRow = await db
+      .prepare('SELECT manifest_r2_key FROM file_revisions WHERE project_id = ? AND file_id = ? AND revision_n = ?')
+      .bind(upstreamProjectId, fileId, payload.parentRevisionN)
+      .first<{ manifest_r2_key: string }>()
+    const parent = parentRow ? await revisions(parentRow.manifest_r2_key) : null
+    if (!parent) throw new Error(`file.revision ${row.id}: parent revision ${payload.parentRevisionN} manifest is not readable`)
+    parentUnits = parent.units
+  }
+  const parentAnchor = new Map(parentUnits.map((u, i) => [u.cellId, i === 0 ? null : parentUnits[i - 1].cellId]))
+  const current = new Set(manifest.units.map((u) => u.cellId))
+  const out: FoldedCell[] = []
+  manifest.units.forEach((unit, i) => {
+    const anchor = i === 0 ? null : manifest.units[i - 1].cellId
+    const textChanged = unit.eventId === row.id
+    const reanchor = !textChanged && parentAnchor.get(unit.cellId) !== anchor
+    if (!textChanged && !reanchor) return
+    out.push({
+      fileId,
+      cellId: unit.cellId,
+      eventId: unit.eventId,
+      seq: row.server_seq,
+      deleted: false,
+      value: unit.text,
+      valueHtml: unit.html ?? null,
+      type: unit.type ?? null,
+      canonicalRef: unit.canonicalRef ?? null,
+      anchorCellId: anchor,
+      startMs: null,
+      endMs: null,
+      metadata: unit.metadata ?? null,
+      mirrorKey: `${row.id}\0${unit.cellId}`,
+      ...(reanchor ? { reanchor: true } : {}),
+    })
+  })
+  for (const unit of parentUnits) {
+    if (current.has(unit.cellId)) continue
+    out.push({
+      fileId,
+      cellId: unit.cellId,
+      eventId: row.id,
+      seq: row.server_seq,
+      deleted: true,
+      value: '',
+      valueHtml: null,
+      type: unit.type ?? null,
+      canonicalRef: unit.canonicalRef ?? null,
+      anchorCellId: parentAnchor.get(unit.cellId) ?? null,
+      startMs: null,
+      endMs: null,
+      metadata: null,
+      mirrorKey: `${row.id}\0${unit.cellId}`,
+    })
+  }
+  return out
 }
 
 /**
@@ -714,6 +827,8 @@ async function loadDelta(
   untilSeq: number,
   /** AQU-1560: restrict the read to these upstream files (a backfill). */
   onlyFileIds?: readonly string[],
+  /** AQU-2459: reads `file.revision` manifests (see foldRevision). */
+  revisions?: RevisionManifestReader,
 ): Promise<{ cells: Map<string, FoldedCell>; fileIds: Set<string> }> {
   const kindList = LANE_KINDS_SOURCE.map((k) => `'${k}'`).join(', ')
   const fileFilter = fileFilterSql(onlyFileIds)
@@ -765,6 +880,14 @@ async function loadDelta(
   for (const row of results) {
     if (!row.file_id) continue
     fileIds.add(row.file_id)
+    if (row.kind === 'file.revision') {
+      // AQU-2459: later per-cell events in the window still override these,
+      // exactly as they would a create.
+      for (const cell of await foldRevision(db, upstreamProjectId, row, revisions)) {
+        cells.set(`${cell.fileId}\0${cell.cellId}`, cell)
+      }
+      continue
+    }
     if (!row.cell_id || stale.has(row.id)) continue
     const key = `${row.file_id}\0${row.cell_id}`
     if (row.kind === 'source.cell.restore') {
@@ -1337,10 +1460,11 @@ async function loadDeltaTargetConsumption(
   laneTag: string,
   /** AQU-1560: restrict both lane reads to these upstream files (a backfill). */
   onlyFileIds?: readonly string[],
+  revisions?: RevisionManifestReader,
 ): Promise<{ cells: Map<string, FoldedCell>; fileIds: Set<string> }> {
   // 1. Structural-lane delta (reuses the source-consumption fold verbatim —
   //    it already extracts file ids + per-cell source-side fields/deletes).
-  const structuralDelta = await loadDelta(db, upstreamProjectId, sinceSeq, untilSeq, onlyFileIds)
+  const structuralDelta = await loadDelta(db, upstreamProjectId, sinceSeq, untilSeq, onlyFileIds, revisions)
 
   // 2. Target-lane delta: which cells had a target commit or validation
   //    change in this window.
@@ -1389,6 +1513,7 @@ async function loadDeltaTargetConsumption(
         fileId,
         cellId,
         eventId: structuralFold.eventId,
+        ...(structuralFold.mirrorKey ? { mirrorKey: structuralFold.mirrorKey } : {}),
         seq: structuralFold.seq,
         deleted: true,
         value: '',
@@ -1483,6 +1608,8 @@ async function loadDeltaTargetConsumption(
       fileId,
       cellId,
       eventId,
+      // AQU-2459: the structural event won, and it is a revision.
+      ...(structuralFold?.mirrorKey && eventId === structuralFold.eventId ? { mirrorKey: structuralFold.mirrorKey } : {}),
       seq,
       deleted: false,
       value: value ?? '',
@@ -1704,6 +1831,9 @@ export interface MirrorSyncOptions {
   budgetMs?: number
   /** Clock for the budget (tests). */
   now?: () => number
+  /** AQU-2459: reads `file.revision` manifests from R2. An upstream revision
+   *  with no reader fails the sync rather than skipping its cells. */
+  readRevisionManifest?: RevisionManifestReader
 }
 
 /**
@@ -1892,6 +2022,7 @@ export async function mirrorSync(
       windowBytes,
       outOfBudget: () => total.windows > 0 && now() >= deadline,
       onWindow: addWindow,
+      revisions: opts.readRevisionManifest,
     })
     if (outcome.status !== 'done') {
       // Out of budget, or the pending set changed under this run (a lead added
@@ -1931,6 +2062,7 @@ export async function mirrorSync(
       sinceSeq,
       untilSeq,
       head,
+      revisions: opts.readRevisionManifest,
     })
     addWindow(window)
     total.toSeq = untilSeq
@@ -1944,6 +2076,8 @@ export async function mirrorSync(
 }
 
 interface RunBackfillArgs {
+  /** AQU-2459: see MirrorSyncOptions.readRevisionManifest. */
+  revisions?: RevisionManifestReader
   downstreamProjectId: string
   upstreamProjectId: string
   consumes: LinkConsumes
@@ -2026,6 +2160,7 @@ async function runBackfill(db: AquillaDb, args: RunBackfillArgs): Promise<RunBac
       untilSeq,
       head: args.head,
       backfill: { fileIds, final: untilSeq >= cursor },
+      revisions: args.revisions,
     })
     args.onWindow(window)
     const next = serializeSourceLinkBackfill({ fileIds, doneSeq: untilSeq })
@@ -2126,6 +2261,8 @@ async function windowEndSeq(
 }
 
 interface MirrorWindowArgs {
+  /** AQU-2459: see MirrorSyncOptions.readRevisionManifest. */
+  revisions?: RevisionManifestReader
   downstreamProjectId: string
   upstreamProjectId: string
   consumes: LinkConsumes
@@ -2241,8 +2378,8 @@ async function mirrorWindow(db: AquillaDb, args: MirrorWindowArgs): Promise<Mirr
   const onlyFileIds = backfill?.fileIds
   const { cells: folded, fileIds: deltaFileIds } =
     consumes === 'target'
-      ? await loadDeltaTargetConsumption(db, upstreamProjectId, sinceSeq, untilSeq, gate, laneTag, onlyFileIds)
-      : await loadDelta(db, upstreamProjectId, sinceSeq, untilSeq, onlyFileIds)
+      ? await loadDeltaTargetConsumption(db, upstreamProjectId, sinceSeq, untilSeq, gate, laneTag, onlyFileIds, args.revisions)
+      : await loadDelta(db, upstreamProjectId, sinceSeq, untilSeq, onlyFileIds, args.revisions)
 
   // AQU-1559: a link that follows a fixed list of upstream files drops the rest
   // of the delta here, at the single point both folds converge, so neither the
@@ -2526,7 +2663,7 @@ async function mirrorWindow(db: AquillaDb, args: MirrorWindowArgs): Promise<Mirr
       if (!local || local.tombstoned) continue
       // Otherwise always emit (idempotent via deterministic id + monotonic
       // guard); hash suppression doesn't apply to deletes.
-      const eventId = deterministicMirrorEventId(downstreamProjectId, cell.eventId)
+      const eventId = deterministicMirrorEventId(downstreamProjectId, cell.mirrorKey ?? cell.eventId)
       const payload: EventPayloads['source.cell.mirror'] = {
         value: '',
         deleted: true,
@@ -2562,7 +2699,7 @@ async function mirrorWindow(db: AquillaDb, args: MirrorWindowArgs): Promise<Mirr
     // about visibility, which is "unchanged" and leaves the old rule intact.
     const visibilityUnchanged =
       cell.hidden === undefined || cell.hidden === (local?.hidden ?? false)
-    if (local && !local.tombstoned && local.contentHash === newHash && visibilityUnchanged) {
+    if (local && !local.tombstoned && local.contentHash === newHash && visibilityUnchanged && !cell.reanchor) {
       // No-op suppression (§5): content unchanged (e.g. whitespace-normalized
       // re-import). upstream_event_id is allowed to lag on unchanged content
       // — §6 staleness is hash-aware, so this is harmless. Never for a
@@ -2572,7 +2709,7 @@ async function mirrorWindow(db: AquillaDb, args: MirrorWindowArgs): Promise<Mirr
       continue
     }
 
-    const eventId = deterministicMirrorEventId(downstreamProjectId, cell.eventId)
+    const eventId = deterministicMirrorEventId(downstreamProjectId, cell.mirrorKey ?? cell.eventId)
     const payload: EventPayloads['source.cell.mirror'] = {
       value: cell.value,
       valueHtml: cell.valueHtml ?? undefined,

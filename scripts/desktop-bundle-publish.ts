@@ -2,12 +2,17 @@
 // Runs at the end of `deploy:aquilla`, after tag-release.sh, so the calver tag
 // on HEAD is the bundle version. Spec: docs/superpowers/specs/2026-11-05-desktop-hot-bundle.md.
 //
+//   tsx scripts/desktop-bundle-publish.ts production --preflight
 //   tsx scripts/desktop-bundle-publish.ts production
 //   tsx scripts/desktop-bundle-publish.ts development --dry-run [--dist <dir>]
 //
 // Exit codes: a missing DESKTOP_BUNDLE_SIGNING_KEY is a ::warning:: and exit 0
 // (the web release must not break before the key exists); every other failure
-// is non-zero.
+// is non-zero, a key that is set but does not parse included. `--preflight`
+// asks only what can be answered before the build — does the key parse, does
+// tauri.conf.json carry a shell version — and `deploy:aquilla` runs it first,
+// so a bad secret stops the chain before anything reaches production rather
+// than after the tag, where it left 2026.11.06.04 … 2026.11.09.01 red.
 
 import { spawnSync } from "node:child_process"
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
@@ -58,19 +63,33 @@ async function main(): Promise<void> {
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error))
   }
-  const { env, dryRun } = args
-  const dist = path.resolve(repoRoot, args.dist)
-  if (!existsSync(path.join(dist, "index.html"))) {
-    fail(`${dist}/index.html does not exist; build the SPA first`)
-  }
+  const { env, dryRun, preflight } = args
 
+  // The key before anything else: a secret that does not parse must stop the
+  // deploy chain here, ahead of the SPA build, not after production is live.
   const signing = resolveSigningKey(process.env[SIGNING_KEY_ENV], dryRun)
+  if (signing.kind === "invalid") fail(signing.error)
   if (signing.kind === "skip") {
     console.log(signing.warning)
     return
   }
   if (signing.kind === "ephemeral") {
     log(`${SIGNING_KEY_ENV} is unset; dry run signs with an EPHEMERAL key (pubkey ${signing.publicKeyHex}). No shell will accept this manifest.`)
+  }
+  const minShellVersion = readMinShellVersion(
+    readFileSync(path.join(repoRoot, "src-tauri/tauri.conf.json"), "utf8"),
+  )
+  if (preflight) {
+    const signer = signing.kind === "provided"
+      ? `${SIGNING_KEY_ENV} parses as an ed25519 key`
+      : "an ephemeral key signs this dry run"
+    log(`preflight ok: ${signer}; minShellVersion ${minShellVersion}; nothing built or deployed`)
+    return
+  }
+
+  const dist = path.resolve(repoRoot, args.dist)
+  if (!existsSync(path.join(dist, "index.html"))) {
+    fail(`${dist}/index.html does not exist; build the SPA first`)
   }
 
   const sha = git(["rev-parse", "HEAD"]).trim()
@@ -80,9 +99,6 @@ async function main(): Promise<void> {
     version = `0000.00.00.00-dryrun-${sha.slice(0, 7)}`
     log(`HEAD carries no calver tag; dry run uses ${version}`)
   }
-  const minShellVersion = readMinShellVersion(
-    readFileSync(path.join(repoRoot, "src-tauri/tauri.conf.json"), "utf8"),
-  )
 
   const work = mkdtempSync(path.join(tmpdir(), "aquilla-desktop-bundle-"))
   try {
@@ -101,7 +117,7 @@ async function main(): Promise<void> {
       minShellVersion,
       createdAt: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
     }
-    const manifest = signManifest(fields, signing.privateKeyPem)
+    const manifest = signManifest(fields, signing.privateKey)
     const manifestPath = path.join(work, "latest.json")
     writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
     log(`manifest:\n${JSON.stringify(manifest, null, 2)}`)

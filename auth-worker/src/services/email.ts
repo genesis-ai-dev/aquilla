@@ -5,6 +5,7 @@
 // so reset/invite emails look the same as before the provider swap.
 
 import type { Env } from "../types"
+import { feedbackPageLink } from "./feedback-link"
 
 // Replies to our transactional mail must reach a human. EMAIL_FROM is an
 // unmonitored `noreply@`, so every send sets Reply-To to this (routed) inbox
@@ -683,6 +684,8 @@ export interface FeedbackRouteEmail {
   projectName?: string | null
   route: string
   fileId?: string | null
+  /** Display name of the file, looked up by the server (AQU-2466). */
+  fileName?: string | null
   sessionReplayUrl?: string | null
   screenshotKey?: string | null
   /** True when the user attached a screenshot but it was not kept. */
@@ -723,14 +726,19 @@ export function buildFeedbackRouteEmail(r: FeedbackRouteEmail): {
   )
 
   const email = r.userEmail.trim() || NO_USER_EMAIL
-  const rows: [string, string][] = [
+  // A row's third element, when present, is the URL its value links to.
+  const rows: [string, string, string?][] = [
     ["User", r.username.trim()],
   ]
   if (r.displayName?.trim()) rows.push(["Name", r.displayName.trim()])
   rows.push(["Email", email], ["Org", org])
   if (project) rows.push(["Project", project])
-  rows.push(["Page", r.route.trim() || "(unknown)"])
-  if (r.fileId?.trim()) rows.push(["File", r.fileId.trim()])
+  const page = feedbackPageLink(r.route, project)
+  if (page) rows.push(["Page", page.text, page.url])
+  else rows.push(["Page", r.route.trim() || "(unknown)"])
+  // The name when the server found one; the id the client sent otherwise.
+  const file = r.fileName?.trim() || r.fileId?.trim()
+  if (file) rows.push(["File", file])
   rows.push(["Sent", r.sentAt])
   if (r.sessionReplayUrl?.trim()) rows.push(["Session replay", r.sessionReplayUrl.trim()])
   if (r.screenshotKey) {
@@ -754,8 +762,12 @@ export function buildFeedbackRouteEmail(r: FeedbackRouteEmail): {
           <table style="border-collapse: collapse; width: 100%; font-size: 0.9rem;">
             ${rows
               .map(
-                ([k, v]) =>
-                  `<tr><td style="padding: 4px 12px 4px 0; color: #6b7280; vertical-align: top; white-space: nowrap;">${escapeHtml(k)}</td><td style="padding: 4px 0; word-break: break-word;">${escapeHtml(v)}</td></tr>`,
+                ([k, v, href]) =>
+                  `<tr><td style="padding: 4px 12px 4px 0; color: #6b7280; vertical-align: top; white-space: nowrap;">${escapeHtml(k)}</td><td style="padding: 4px 0; word-break: break-word;">${
+                    href
+                      ? `<a href="${escapeHtml(href)}" style="color: #2563eb;">${escapeHtml(v)}</a>`
+                      : escapeHtml(v)
+                  }</td></tr>`,
               )
               .join("\n            ")}
           </table>
@@ -763,7 +775,10 @@ export function buildFeedbackRouteEmail(r: FeedbackRouteEmail): {
       </body>
     </html>
   `.trim()
-  const text = `${description}\n\n${rows.map(([k, v]) => `${k}: ${v}`).join("\n")}`
+  // Plain text cannot hide a URL behind words, so it follows the text.
+  const text = `${description}\n\n${rows
+    .map(([k, v, href]) => (href ? `${k}: ${v} <${href}>` : `${k}: ${v}`))
+    .join("\n")}`
   return { subject, html, text }
 }
 

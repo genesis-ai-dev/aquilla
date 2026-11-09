@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { ROLE } from "@/lib/frontier/roles"
 import type { KnowledgeDocument } from "@/lib/frontier/knowledge-base"
 import type { RuleApplicability, StyleRule } from "@/lib/rules/style-rule-types"
@@ -231,6 +231,97 @@ describe("StyleChecks — candidates queue", () => {
   it("shows the pending count badge", async () => {
     await renderSection()
     expect(screen.getByText("1 awaiting review")).toBeInTheDocument()
+  })
+})
+
+// ── Batched review (AQU-2366) ──────────────────────────────────────────────
+
+describe("StyleChecks — batched proposal review", () => {
+  /** `count` proposals, instructions numbered so a batch boundary is visible. */
+  function proposals(count: number): StyleRule[] {
+    return Array.from({ length: count }, (_, i) =>
+      makeRule({ id: `cand-${i + 1}`, instruction: `Proposed rule ${i + 1}` }),
+    )
+  }
+
+  it("shows one batch of ten and reveals the rest through Show more", async () => {
+    mockHook({ rules: proposals(12) })
+    await renderSection()
+
+    expect(screen.getByText("Proposed rule 10")).toBeInTheDocument()
+    expect(screen.queryByText("Proposed rule 11")).not.toBeInTheDocument()
+    // The count badge still reports every pending proposal, batched or not.
+    expect(screen.getByText("12 awaiting review")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Show 2 more" }))
+
+    expect(screen.getByText("Proposed rule 11")).toBeInTheDocument()
+    expect(screen.getByText("Proposed rule 12")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Show \d+ more/ })).not.toBeInTheDocument()
+  })
+
+  it("leaves the approved library unaffected by the number of proposals", async () => {
+    mockHook({
+      rules: [
+        ...proposals(12),
+        makeRule({ id: "r-approved", status: "approved", instruction: "Keep sentences short" }),
+      ],
+    })
+    await renderSection()
+
+    // AQU-2366 acceptance: approved rows are the library, proposals are not.
+    expect(screen.getByText("Keep sentences short")).toBeInTheDocument()
+    expect(screen.getAllByRole("switch")).toHaveLength(1)
+  })
+
+  it("dismisses everything past the visible batch in one action, and can undo it", async () => {
+    mockHook({ rules: proposals(12) })
+    await renderSection()
+    // Installed after mount on purpose: RTL's `waitFor` does not recognise
+    // vitest's fake timers, so faking them around `render` would stall it.
+    vi.useFakeTimers()
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Dismiss the remaining 2" }))
+
+      // Staged, not sent: the queue drops them and offers the undo.
+      expect(screen.queryByText("Proposed rule 11")).not.toBeInTheDocument()
+      expect(screen.getByText("2 proposed rules dismissed")).toBeInTheDocument()
+      expect(review).not.toHaveBeenCalled()
+
+      fireEvent.click(screen.getByRole("button", { name: "Undo" }))
+      act(() => { vi.advanceTimersByTime(60_000) })
+
+      expect(screen.queryByText("2 proposed rules dismissed")).not.toBeInTheDocument()
+      expect(review).not.toHaveBeenCalled()
+      expect(screen.getByRole("button", { name: "Dismiss the remaining 2" })).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("rejects the dismissed proposals once the undo window closes", async () => {
+    mockHook({ rules: proposals(12) })
+    await renderSection()
+    vi.useFakeTimers()
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Dismiss the remaining 2" }))
+      // Awaited: the parent walks the ids one verdict at a time.
+      await act(async () => { vi.advanceTimersByTime(8_000) })
+
+      expect(review).toHaveBeenCalledTimes(2)
+      expect(review).toHaveBeenCalledWith("cand-11", "reject")
+      expect(review).toHaveBeenCalledWith("cand-12", "reject")
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("offers no bulk dismissal below Project Lead", async () => {
+    mockHook({ rules: proposals(12) })
+    await renderSection(ROLE.CONTRIBUTOR)
+
+    expect(screen.getByRole("button", { name: "Show 2 more" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Dismiss the remaining/ })).not.toBeInTheDocument()
   })
 })
 

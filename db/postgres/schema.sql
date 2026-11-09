@@ -761,6 +761,9 @@ CREATE TABLE files (
     structural_filled_count   INTEGER NOT NULL DEFAULT 0,
     structural_approved_count INTEGER NOT NULL DEFAULT 0,
     structural_ai_drafted_count INTEGER NOT NULL DEFAULT 0,
+    -- AQU-2459: head of the file's revision chain (migration 0197). NULL =
+    -- legacy materialized file; set once the revisions route adopts it.
+    head_revision_n INTEGER,
     UNIQUE (id, project_id)
 );
 
@@ -1199,6 +1202,30 @@ CREATE TABLE cell_glosses (
 -- envelope (a re-import replaces that wholesale). The covered cells are
 -- resolved at read time by walking the file's cell order between the anchors,
 -- so nothing stored can fall out of step with the file.
+-- AQU-2459: one row per revision of a file's source side (migration 0197).
+-- The aligned unit list lives in R2 at manifest_r2_key; this row is the index
+-- and the counts. See db/shared/file-revision.ts and decision 0008.
+CREATE TABLE file_revisions (
+    project_id        TEXT NOT NULL,
+    file_id           TEXT NOT NULL,
+    revision_n        INTEGER NOT NULL,
+    parent_revision_n INTEGER,
+    artifact_sha256   TEXT NOT NULL,
+    filter_stamp      TEXT NOT NULL,
+    options_hash      TEXT NOT NULL,
+    manifest_r2_key   TEXT NOT NULL,
+    unit_count        INTEGER NOT NULL,
+    inserted_count    INTEGER NOT NULL DEFAULT 0,
+    changed_count     INTEGER NOT NULL DEFAULT 0,
+    moved_count       INTEGER NOT NULL DEFAULT 0,
+    deleted_count     INTEGER NOT NULL DEFAULT 0,
+    origin            TEXT NOT NULL,
+    event_id          TEXT NOT NULL,
+    author            TEXT NOT NULL,
+    created_at        BIGINT NOT NULL,
+    PRIMARY KEY (project_id, file_id, revision_n)
+);
+
 CREATE TABLE file_milestones (
     project_id    TEXT NOT NULL,
     file_id       TEXT NOT NULL,

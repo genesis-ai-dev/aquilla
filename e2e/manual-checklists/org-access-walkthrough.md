@@ -22,7 +22,7 @@
 
 - [ ] Sign in as Alice (owner)
 - [ ] Navigate to Projects (`/projects`)
-- [ ] Click "New Project", enter name "Manual Test Project", set source/target language, click "Create Project"
+- [ ] Click "New Project", choose "Start from scratch", enter name "Manual Test Project", set source/target language, click "Create Project"
 - [ ] **Expected**: "Manual Test Project" appears in the project list
 
 ### 1.2 Bob cannot see the project (not a member yet)

@@ -152,7 +152,7 @@ export function RuleDrawer({
   }
 
   return (
-    <RightSidebarPanel storageKey="rule" defaultWidth={320} resizeLabel="Resize rule panel">
+    <RightSidebarPanel storageKey="rule" defaultWidth={320} resizeLabel={t("editor.panel.resizeRule")}>
       <div className="flex h-full w-full flex-col border-l bg-card">
       <div className="flex items-center justify-between border-b p-2">
         <div className="flex items-center gap-2">

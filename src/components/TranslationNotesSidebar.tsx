@@ -171,11 +171,11 @@ export function TranslationNotesSidebar({
 
       setNotes(allNotes)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load translation notes")
+      setError(err instanceof Error ? err.message : t("editor.translationNotes.loadFailed"))
     } finally {
       setLoading(false)
     }
-  }, [projectId, getToken])
+  }, [projectId, getToken, t])
 
   useEffect(() => {
     if (!visible || !canonicalRef) {
@@ -202,7 +202,7 @@ export function TranslationNotesSidebar({
   }
 
   return (
-    <RightSidebarPanel storageKey="translation-notes" defaultWidth={288} resizeLabel="Resize translation notes panel">
+    <RightSidebarPanel storageKey="translation-notes" defaultWidth={288} resizeLabel={t("editor.panel.resizeTranslationNotes")}>
     <div
       className={cn(
         "flex h-full w-full flex-col border-s bg-card text-sm",

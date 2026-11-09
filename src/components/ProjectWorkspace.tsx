@@ -10681,15 +10681,18 @@ export function ProjectWorkspace() {
   // (timing-authority.ts) — so the buttons show to exactly those people.
   const canSplitLines = canAttachSourceAudio(splitRoleLevel)
     && (!timingLocked || splitRoleLevel == null || splitRoleLevel >= ROLE.MAINTAINER)
+  // AQU-2426 (review, Nov 9): why not, for a split that is refused before it starts.
+  const cannotSplitReason = canAttachSourceAudio(splitRoleLevel) ? t("editor.cellMenu.timingLocked") : t("editor.splitLines.noPermission")
   // The org's credits, read once when someone first asks what transcribing
   // costs; until then nothing is blocked on them (the server still refuses).
   const [transcribeOrgCredits, setTranscribeOrgCredits] = useState<import("@/lib/sync/credits").OrgCredits | null>(null)
   const transcribeBlockNow = useMemo(() => transcribeBlock({
     level: splitRoleLevel,
     importMinRole: orgImportMinRole,
+    timingLocked,
     onDevice: transcriptionOnDevice,
     credits: transcribeOrgCredits,
-  }), [splitRoleLevel, orgImportMinRole, transcriptionOnDevice, transcribeOrgCredits])
+  }), [splitRoleLevel, orgImportMinRole, timingLocked, transcriptionOnDevice, transcribeOrgCredits])
 
   /** What the import's last step and Split into lines… show about transcribing. */
   const prepareTranscribeChoice = useCallback(async (durationsMs: readonly (number | undefined)[]): Promise<TranscribeChoiceInfo> => {
@@ -10712,12 +10715,12 @@ export function ProjectWorkspace() {
       }
     }
     return {
-      block: transcribeBlock({ level: splitRoleLevel, importMinRole: orgImportMinRole, onDevice: transcriptionOnDevice, credits: orgCredits }),
+      block: transcribeBlock({ level: splitRoleLevel, importMinRole: orgImportMinRole, timingLocked, onDevice: transcriptionOnDevice, credits: orgCredits }),
       cost,
       credits: creditsLine,
       ...(transcribeLanguageTag ? { languageTag: transcribeLanguageTag } : {}),
     }
-  }, [chosenTranscriptionModel, transcribeLanguageTag, transcriptionOnDevice, frontierSession?.jwt, project?.id, project?.orgId, transcribeOrgCredits, splitRoleLevel, orgImportMinRole, t])
+  }, [chosenTranscriptionModel, transcribeLanguageTag, transcriptionOnDevice, frontierSession?.jwt, project?.id, project?.orgId, transcribeOrgCredits, splitRoleLevel, orgImportMinRole, timingLocked, t])
 
   /** The open file's line, as a split writes it. */
   // Store cells carry no recordings (see the Fortify note on getActiveCell):
@@ -10765,6 +10768,14 @@ export function ProjectWorkspace() {
   const applyLineSplit = useCallback(async (
     line: RecordingLine, pieces: readonly LinePiece[], titleKey: "editor.splitLines.done" | "editor.splitLines.importDone" = "editor.splitLines.done",
   ): Promise<boolean> => {
+    // AQU-2426 (review, Nov 9): someone who may not split here is refused
+    // before anything is queued. The server judges each event on its own, so a
+    // split from below the timing lock's floor half-applied: the new lines
+    // landed and the first line's retime did not.
+    if (!canSplitLines) {
+      toast.add({ type: "error", title: t("editor.splitLines.failed", { name: line.name, reason: cannotSplitReason }) })
+      return false
+    }
     try {
       // A split at pauses on a line whose words were already found (kept from
       // a words run nobody split by): each new line gets the words in its own
@@ -10816,7 +10827,7 @@ export function ProjectWorkspace() {
       toast.add({ type: "error", title: t("editor.splitLines.failed", { name: line.name, reason: err instanceof Error ? err.message : String(err) }) })
       return false
     }
-  }, [currentUsername, getTokenForProjectFile, revalidateCells, t])
+  }, [currentUsername, getTokenForProjectFile, revalidateCells, canSplitLines, cannotSplitReason, t])
 
   /** The words came back but nothing was split: they land on the line itself. */
   const keepWordsOnLine = useCallback(async (line: RecordingLine, text: string) => {
@@ -10900,6 +10911,14 @@ export function ProjectWorkspace() {
     const say = (content: { type: "success" | "error" | "info"; title: string; description?: string; timeout?: number; actionProps?: { children: string; onClick: () => void } }) => {
       if (toastId !== null) toast.update(toastId, { description: undefined, ...content })
       else toast.add(content)
+    }
+    // AQU-2426 (review, Nov 9): Import and transcribe… ends in a split. Someone
+    // who may not split here is told before a single minute is sent or paid
+    // for; a run carried on keeps the words it has for someone who may.
+    if (o.purpose === "import" && !canSplitLines) {
+      o.carryOn?.handle.park()
+      say({ type: "error", title: t("editor.splitLines.importFailed", { name, reason: cannotSplitReason }) })
+      return
     }
     void (async () => {
       try {

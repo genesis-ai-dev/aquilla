@@ -562,6 +562,14 @@ export function matchPairedRowsToSourceCells(
       if (row.ref) orphans.push({ ref: row.ref, text: row.translated })
       continue
     }
+    // AQU-2473: a blank translation is no translation. Pairing it made an
+    // empty "incoming" text, which showed as a conflict on a line that already
+    // had one, and Select all + Import then replaced that translation with
+    // nothing (with Target translation left on "ignore", every row). The file
+    // review has always refused this: a blank spreadsheet cell must never
+    // clear an existing translation. The line is left unmatched, so it is
+    // counted with the lines this file has nothing for.
+    if (row.translated.trim().length === 0) continue
     matchedRefs.add(row.ref)
     const currentText = cell.translated ?? ""
     const parentId = resolveTargetCommitParent({

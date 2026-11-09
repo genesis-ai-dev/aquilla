@@ -2726,6 +2726,21 @@ export const editor = defineNamespace({
       one: "Left {count} repeated row as it was, because the translations disagreed.",
       other: "Left {count} repeated rows as they were, because the translations disagreed.",
     }, "count"),
+    // AQU-2177 — the same three outcomes as headings in the dialog that names
+    // the rows, instead of sentences appended to a toast that counted them.
+    "editor.repetition.bulkReportBody": "Choose a row to go to it.",
+    "editor.repetition.bulkGroupValidated": plural({
+      one: "Validated {count} repeated row",
+      other: "Validated {count} repeated rows",
+    }, "count"),
+    "editor.repetition.bulkGroupFilled": plural({
+      one: "Filled {count} repeated row, still needs validating",
+      other: "Filled {count} repeated rows, still need validating",
+    }, "count"),
+    "editor.repetition.bulkGroupSkipped": plural({
+      one: "Left {count} repeated row as it was (translations disagreed)",
+      other: "Left {count} repeated rows as they were (translations disagreed)",
+    }, "count"),
     "editor.repetition.conflictTitle": "These repeated rows disagree",
     "editor.repetition.conflictBody": plural({
       one: "Rows you are validating translate this source text in different ways. Which translation should the {count} other row get?",
@@ -2884,6 +2899,39 @@ export const editor = defineNamespace({
           "disagreed about their translation and the user chose to skip them.",
         placeholders: {
           count: "How many repeated rows were left unchanged. Always 1 or more.",
+        },
+      },
+      "editor.repetition.bulkReportBody": {
+        description:
+          "Body of the dialog that reports a bulk validation, used when the run " +
+          "itself had nothing more to say than its title. Tells the user the " +
+          "listed rows below are clickable and jump the editor to them.",
+      },
+      "editor.repetition.bulkGroupValidated": {
+        description:
+          "Heading over one group of rows in that dialog: rows outside the run " +
+          "that were validated as well, because they repeat a validated row's " +
+          "source text. The rows follow as a list. Keep it short.",
+        placeholders: {
+          count: "How many repeated rows are listed under this heading. Always 1 or more.",
+        },
+      },
+      "editor.repetition.bulkGroupFilled": {
+        description:
+          "Heading over one group of rows in that dialog: rows outside the run " +
+          "that received the translation but were not validated, so someone " +
+          "still has to validate them. The rows follow as a list. Keep it short.",
+        placeholders: {
+          count: "How many repeated rows are listed under this heading. Always 1 or more.",
+        },
+      },
+      "editor.repetition.bulkGroupSkipped": {
+        description:
+          "Heading over one group of rows in that dialog: rows left untouched " +
+          "because the validated rows disagreed about their translation and the " +
+          "user chose to skip them. The rows follow as a list. Keep it short.",
+        placeholders: {
+          count: "How many repeated rows are listed under this heading. Always 1 or more.",
         },
       },
       "editor.repetition.conflictBody": {

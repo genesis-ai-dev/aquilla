@@ -460,4 +460,31 @@ describe("matchPairedRowsToSourceCells", () => {
     // The second row is counted with the rows that found no line.
     expect(result.orphans).toEqual([{ ref: "GEN 1:1", text: "Au début" }])
   })
+
+  // AQU-2487 (review, Nov 9): "the first row takes the line" let a blank first
+  // row win: the line was listed with an empty translation, ticked, and the
+  // row that held the translation was counted as unmatched.
+  it("gives the line to the first row that has a translation, never to a blank one", () => {
+    const blankFirst = [
+      { ...mappedRows[0], id: "r1a", translated: "" },
+      { ...mappedRows[0], id: "r1b", translated: "   " },
+      { ...mappedRows[0], id: "r1c", translated: "Au commencement" },
+      mappedRows[1],
+    ]
+    const result = matchPairedRowsToSourceCells(blankFirst, sourceCells)
+    expect(result.matched.map((m) => [m.cellId, m.incomingText])).toEqual([
+      ["cell-1", "Au commencement"],
+      ["cell-2", "La terre"],
+    ])
+    // A blank row is not a translation that found no line.
+    expect(result.orphans).toEqual([])
+    // Only GEN 1:3, which the sheet has no row for, is left uncovered.
+    expect(result.unmatchedSourceCount).toBe(1)
+
+    // A reference whose only row is blank leaves its line alone.
+    const onlyBlank = matchPairedRowsToSourceCells([{ ...mappedRows[1], translated: "" }], sourceCells)
+    expect(onlyBlank.matched).toEqual([])
+    expect(onlyBlank.orphans).toEqual([])
+    expect(onlyBlank.unmatchedSourceCount).toBe(3)
+  })
 })

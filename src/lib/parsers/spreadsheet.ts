@@ -562,6 +562,13 @@ export function matchPairedRowsToSourceCells(
       if (row.ref) orphans.push({ ref: row.ref, text: row.translated })
       continue
     }
+    // AQU-2487 (review, Nov 9): a blank translation is no translation, so a
+    // blank row never takes a line. With a reference on two rows and the first
+    // one blank, the blank row won: the line was listed with empty text and
+    // the row holding the translation was counted as unmatched. The first row
+    // WITH a translation takes the line. (AQU-2473 sets the same rule for every
+    // blank row, with this same check; the two agree.)
+    if (row.translated.trim().length === 0) continue
     // AQU-2487 (import sweep, Nov 2): a reference that appears twice gives its
     // line the first row only. Both rows used to be listed, ticked together,
     // and written onto the same line. The second is counted as unmatched, as

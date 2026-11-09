@@ -190,8 +190,9 @@ describe("worker/index — routing", () => {
     expect(res.status).toBe(404)
     expect(res.headers.get("Content-Type")).toContain("text/plain")
     expect(res.headers.get("Cache-Control")).toBe("no-store")
-    expect(await res.text()).not.toContain("<html")
-    expect(await res.text()).toBe("Page not found")
+    const body = await res.text()
+    expect(body).toBe("Page not found")
+    expect(body).not.toContain("<html")
   })
 
   it("GET /fake-marketing-page returns 404 instead of the SPA shell", async () => {
@@ -203,6 +204,102 @@ describe("worker/index — routing", () => {
   it("GET /blog/nonexistent returns 404 instead of the SPA shell", async () => {
     const res = await fetchWorker("/blog/nonexistent")
     expect(res.status).toBe(404)
+    expect(await res.text()).toBe("Page not found")
+  })
+
+  // Real static files outside /assets/ must still be served, not 404'd
+  it("GET /aquilla-invite-og-1200x630.png serves the real file, not 404", async () => {
+    const { default: worker } = await import("./index")
+    const env = {
+      ASSETS: {
+        fetch: async (): Promise<Response> =>
+          new Response("PNG binary data", {
+            status: 200,
+            headers: { "Content-Type": "image/png", "Content-Length": "12345" },
+          }),
+      },
+    }
+    const res = await worker.fetch(
+      new Request("https://aquilla.app/aquilla-invite-og-1200x630.png"),
+      env,
+    )
+    expect(res.status).toBe(200)
+    expect(res.headers.get("Content-Type")).toBe("image/png")
+    expect(await res.text()).toBe("PNG binary data")
+  })
+
+  it("GET /favicon.svg serves the real file, not 404", async () => {
+    const { default: worker } = await import("./index")
+    const env = {
+      ASSETS: {
+        fetch: async (): Promise<Response> =>
+          new Response("<svg>...</svg>", {
+            status: 200,
+            headers: { "Content-Type": "image/svg+xml", "Content-Length": "1234" },
+          }),
+      },
+    }
+    const res = await worker.fetch(new Request("https://aquilla.app/favicon.svg"), env)
+    expect(res.status).toBe(200)
+    expect(res.headers.get("Content-Type")).toBe("image/svg+xml")
+    expect(await res.text()).toBe("<svg>...</svg>")
+  })
+
+  it("GET /google4279c85270b47b1a.html serves the real verification file, not 404 or SPA shell", async () => {
+    const { default: worker } = await import("./index")
+    const env = {
+      ASSETS: {
+        fetch: async (): Promise<Response> =>
+          new Response("google-site-verification: google4279c85270b47b1a.html", {
+            status: 200,
+            headers: { "Content-Type": "text/html", "Content-Length": "58" },
+          }),
+      },
+    }
+    const res = await worker.fetch(
+      new Request("https://aquilla.app/google4279c85270b47b1a.html"),
+      env,
+    )
+    expect(res.status).toBe(200)
+    expect(res.headers.get("Content-Type")).toBe("text/html")
+    const body = await res.text()
+    expect(body).toBe("google-site-verification: google4279c85270b47b1a.html")
+    expect(body).not.toContain("<!doctype html>")
+  })
+
+  it("GET /character-voices/narrator.mp3 serves the real file, not 404", async () => {
+    const { default: worker } = await import("./index")
+    const env = {
+      ASSETS: {
+        fetch: async (): Promise<Response> =>
+          new Response("audio data", {
+            status: 200,
+            headers: { "Content-Type": "audio/mpeg", "Content-Length": "98765" },
+          }),
+      },
+    }
+    const res = await worker.fetch(
+      new Request("https://aquilla.app/character-voices/narrator.mp3"),
+      env,
+    )
+    expect(res.status).toBe(200)
+    expect(res.headers.get("Content-Type")).toBe("audio/mpeg")
+  })
+
+  it("GET /nonexistent when ASSETS returns the SPA shell (large HTML) gets 404", async () => {
+    const { default: worker } = await import("./index")
+    const env = {
+      ASSETS: {
+        fetch: async (): Promise<Response> =>
+          new Response(SPA_HTML + "x".repeat(13000), {
+            status: 200,
+            headers: { "Content-Type": "text/html", "Content-Length": "13802" },
+          }),
+      },
+    }
+    const res = await worker.fetch(new Request("https://aquilla.app/nonexistent-path"), env)
+    expect(res.status).toBe(404)
+    expect(res.headers.get("Content-Type")).toContain("text/plain")
     expect(await res.text()).toBe("Page not found")
   })
 

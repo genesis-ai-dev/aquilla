@@ -170,14 +170,37 @@ async function route(req: Request, env: Env): Promise<Response> {
     })
   }
 
-  // Soft-404 fix: check if this path is a known SPA route. Unknown paths
-  // get a real 404 instead of the SPA shell with a 200, fixing the SEO issue
-  // where Google treats unknown paths returning 200 as soft-404s.
+  // Soft-404 fix: for paths that are not known SPA routes, check if a real
+  // static file exists. If the asset binding returns a genuine file (not the
+  // SPA fallback), serve it. Only return 404 when the binding has applied
+  // the SPA fallback (index.html) for a path that shouldn't get it.
+  //
+  // This handles public files not under /assets/ like /aquilla-invite-og-1200x630.png,
+  // /favicon.svg, /icons.svg, /character-voices/*, and /google*.html (Search
+  // Console verification).
   if (!isKnownSpaRoute(url.pathname)) {
-    return new Response("Page not found", {
-      status: 404,
-      headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
-    })
+    const asset = await env.ASSETS.fetch(req)
+    const contentType = asset.headers.get("Content-Type") ?? ""
+    
+    // If the asset binding returned the SPA shell (index.html), this is an
+    // unknown path that shouldn't get the 200 fallback — return 404 instead.
+    // The SPA shell is always text/html and has a known length (~13-14KB).
+    // Real public HTML files like google*.html are much smaller and should
+    // pass through.
+    if (asset.ok && contentType.includes("text/html")) {
+      const contentLength = parseInt(asset.headers.get("Content-Length") ?? "0", 10)
+      // The built index.html is ~13,802 bytes. Real verification files are <1KB.
+      // If it's large HTML, it's the SPA shell being served for an unknown path.
+      if (contentLength > 5000) {
+        return new Response("Page not found", {
+          status: 404,
+          headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
+        })
+      }
+    }
+    
+    // Real static file (image, small HTML, etc.) — serve it.
+    return asset
   }
 
   // Known SPA routes: hand off to the static-asset binding.

@@ -485,6 +485,8 @@ export const audio = defineNamespace({
     "audio.transcribeRun.carryingOn": "Carrying on transcribing \"{name}\" after the page reloaded — {done} of {count} done…",
     "audio.transcribeRun.waitingForFile":
       "Transcribing \"{name}\" stopped when the page reloaded, at {done} of {count}. It carries on when you open \"{name}\".",
+    "audio.transcribeRun.waitingForLanguage":
+      "Transcribing \"{name}\" stopped when the page reloaded, at {done} of {count}. It was started in {language}, and carries on when you open this file in {language}.",
     "audio.transcribeRun.doneSections": plural({
       one: "Transcribed {count} section of \"{name}\".",
       other: "Transcribed {count} sections of \"{name}\".",
@@ -2826,6 +2828,19 @@ export const audio = defineNamespace({
           name: "The file name (appears twice).",
           done: "How many were done before the reload.",
           count: "How many the run will do in all.",
+        },
+      },
+      "audio.transcribeRun.waitingForLanguage": {
+        description:
+          "Toast after a page reload, when a transcription run over recorded takes was " +
+          "stopped part-way by the reload and its file is now open in a different target " +
+          "language than the one the run was started in. The run picks up again by itself " +
+          "when the person switches the file to that language.",
+        placeholders: {
+          name: "The file name.",
+          done: "How many were done before the reload.",
+          count: "How many the run will do in all.",
+          language: "The target language the run was started in, e.g. 'French' (appears twice).",
         },
       },
       "audio.transcribeRun.doneSections": {

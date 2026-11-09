@@ -14,11 +14,13 @@ import { CARRY_ON_SETTLE_MS, useCarryOnTranscribeRuns } from "./useCarryOnTransc
 let clock = 5_000_000
 
 /** A run started by an earlier page, which then reloaded. */
-function leaveStoppedRun(fileId = "f1") {
+function leaveStoppedRun(fileId = "f1", who: { username?: string; lane?: string; kind?: "import" | "all" | "lineWords" } = {}) {
   __setTranscribeRunEnvForTests({ tab: "old-page", now: () => clock, locks: null })
   startStoredTranscribeRun({
-    id: `run-${fileId}`, projectId: "p1", fileId, fileName: `${fileId}.mp3`, kind: "import",
+    id: `run-${fileId}`, projectId: "p1", fileId, fileName: `${fileId}.mp3`, kind: who.kind ?? "import",
     cellIds: ["a", "b"], force: false,
+    ...(who.username !== undefined ? { username: who.username } : {}),
+    ...(who.lane !== undefined ? { lane: who.lane } : {}),
   })
   vi.clearAllTimers()
   clock += STALE_MS
@@ -66,5 +68,59 @@ describe("useCarryOnTranscribeRuns", () => {
     expect(announce.mock.calls[0]![0]).toMatchObject({ id: "run-f2" })
     expect(carryOn).not.toHaveBeenCalled()
     expect(__storedTranscribeRuns()).toHaveLength(1)
+  })
+
+  // AQU-2375 (review, Nov 9): a run belongs to the person who started it and,
+  // for takes, to the language it was started in.
+  it("leaves a run someone else started on this computer alone, and says nothing", async () => {
+    leaveStoppedRun("f1", { username: "amina" })
+    leaveStoppedRun("f2", { username: "amina" })
+    const carryOn = vi.fn()
+    const announce = vi.fn()
+    renderHook(() => useCarryOnTranscribeRuns({
+      projectId: "p1", activeFileId: "f1", ready: true, version: 0, username: "baraka", lane: "", carryOn, announce,
+    }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(CARRY_ON_SETTLE_MS + 100) })
+    expect(carryOn).not.toHaveBeenCalled()
+    expect(announce).not.toHaveBeenCalled()
+    expect(__storedTranscribeRuns()).toHaveLength(2)
+  })
+
+  it("a run started in another language waits for that language: said once, carried on when it is opened", async () => {
+    leaveStoppedRun("f1", { username: "amina", lane: "fr", kind: "all" })
+    const carryOn = vi.fn((_run, handle: { end: () => void }) => handle.end())
+    const announce = vi.fn()
+    const { rerender } = renderHook((p: { lane: string; v: number }) => useCarryOnTranscribeRuns({
+      projectId: "p1", activeFileId: "f1", ready: true, version: p.v, username: "amina", lane: p.lane, carryOn, announce,
+    }), { initialProps: { lane: "sw", v: 0 } })
+    await act(async () => { await vi.advanceTimersByTimeAsync(CARRY_ON_SETTLE_MS + 100) })
+    rerender({ lane: "sw", v: 1 })
+    await act(async () => { await vi.advanceTimersByTimeAsync(CARRY_ON_SETTLE_MS + 100) })
+    expect(carryOn).not.toHaveBeenCalled()
+    expect(announce).toHaveBeenCalledTimes(1)
+    expect(announce.mock.calls[0]).toMatchObject([{ id: "run-f1" }, "lane"])
+    rerender({ lane: "fr", v: 1 })
+    await act(async () => { await vi.advanceTimersByTimeAsync(CARRY_ON_SETTLE_MS + 100) })
+    expect(carryOn).toHaveBeenCalledTimes(1)
+  })
+
+  it("a line's words run is the source recording's: carried on in any language", async () => {
+    leaveStoppedRun("f1", { username: "amina", lane: "fr", kind: "lineWords" })
+    const carryOn = vi.fn((_run, handle: { end: () => void }) => handle.end())
+    renderHook(() => useCarryOnTranscribeRuns({
+      projectId: "p1", activeFileId: "f1", ready: true, version: 0, username: "amina", lane: "sw", carryOn, announce: vi.fn(),
+    }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(CARRY_ON_SETTLE_MS + 100) })
+    expect(carryOn).toHaveBeenCalledTimes(1)
+  })
+
+  it("a run kept before runs named their person is carried on as before", async () => {
+    leaveStoppedRun("f1")
+    const carryOn = vi.fn((_run, handle: { end: () => void }) => handle.end())
+    renderHook(() => useCarryOnTranscribeRuns({
+      projectId: "p1", activeFileId: "f1", ready: true, version: 0, username: "baraka", lane: "sw", carryOn, announce: vi.fn(),
+    }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(CARRY_ON_SETTLE_MS + 100) })
+    expect(carryOn).toHaveBeenCalledTimes(1)
   })
 })

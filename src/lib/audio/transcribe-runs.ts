@@ -107,6 +107,17 @@ export interface StoredTranscribeRun {
   beatAt: number
   /** That page's id. */
   tab: string
+  /**
+   * AQU-2375 (review, Nov 9): who started it (their sign-in name), and the
+   * language lane it was started in ("" = the default lane). A run is carried
+   * on only by that person, and a run over takes only with that language
+   * open: carried on by whoever opened the file next, it ran under their
+   * account and limit, and in another language it transcribed that
+   * language's takes as this one's. Absent on a run kept before this, or
+   * started signed out: carried on as before.
+   */
+  username?: string
+  lane?: string
   /** AQU-2426: a line's words (kind "lineWords"). */
   line?: StoredLineWords
   /** AQU-2426: a line run that ended with windows still to do, kept for the
@@ -357,6 +368,23 @@ export function startStoredTranscribeRun(
   }
   writeAll([...readAll().filter((r) => r.id !== run.id), run])
   return makeHandle(run.id, holdLock(run.id, false))
+}
+
+/**
+ * AQU-2375 (review, Nov 9): may the page of this person, with this language
+ * open, carry the run on? "person": someone else started it. "lane": it was
+ * started in another language. A field not given is not checked. A line's
+ * words run and the run after an import are about the source recording, so
+ * their language never matters.
+ */
+export function transcribeRunFits(
+  run: Pick<StoredTranscribeRun, "kind" | "username" | "lane">,
+  here: { username?: string | null; lane?: string },
+): "ok" | "person" | "lane" {
+  if (run.username !== undefined && here.username !== undefined && run.username !== here.username) return "person"
+  const overTakes = run.kind === "all" || run.kind === "sections"
+  if (overTakes && run.lane !== undefined && here.lane !== undefined && run.lane !== here.lane) return "lane"
+  return "ok"
 }
 
 /**

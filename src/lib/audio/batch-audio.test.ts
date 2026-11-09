@@ -526,6 +526,22 @@ describe("runTranscribeAll reports each row (AQU-2375)", () => {
     expect(__storedTranscribeRuns()).toEqual([])
   })
 
+  // AQU-2375 (review, Nov 9)
+  it("keeps who started the run and the language it was started in", async () => {
+    const { transcribeCellOutcome } = await import("./transcribe")
+    const { __storedTranscribeRuns } = await import("./transcribe-runs")
+    let kept: { username?: string; lane?: string } | undefined
+    vi.mocked(transcribeCellOutcome).mockImplementation(async () => {
+      kept = __storedTranscribeRuns()[0]
+      return { kind: "done", words: 1 }
+    })
+    await runTranscribeAll({
+      cells: [take("c1")], projectId: "p1", session: { username: "amina", jwt: "j" } as never, targetLang: "fr",
+      keep: { fileId: "f1", fileName: "Session 4.mp3", kind: "all" },
+    })
+    expect(kept).toMatchObject({ username: "amina", lane: "fr" })
+  })
+
   it("carries a stopped run on: counts what landed before, and reports the whole run", async () => {
     const { transcribeCellOutcome } = await import("./transcribe")
     vi.mocked(transcribeCellOutcome).mockResolvedValue({ kind: "done", words: 2 })

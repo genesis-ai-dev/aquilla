@@ -190,6 +190,8 @@ export async function runLineWords(args: RunLineWordsArgs): Promise<LineWordsRun
         kind: "lineWords",
         cellIds: line.windows.map((_, i) => lineWindowKey(i)),
         force: false,
+        // AQU-2375 (review, Nov 9): whose run; only they carry it on.
+        ...(args.session?.username ? { username: args.session.username } : {}),
         line,
       })
     }

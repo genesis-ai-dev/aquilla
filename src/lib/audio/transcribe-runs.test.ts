@@ -12,6 +12,7 @@ import {
   findLineWordsRun,
   interruptedTranscribeRuns,
   startStoredTranscribeRun,
+  transcribeRunFits,
   type LockManagerLike,
 } from "./transcribe-runs"
 
@@ -244,5 +245,25 @@ describe("when storage is full", () => {
     } finally {
       setItem.mockRestore()
     }
+  })
+})
+
+// AQU-2375 (review, Nov 9)
+describe("transcribeRunFits: whose run it is, and which language's", () => {
+  it("only the person who started a run carries it on", () => {
+    expect(transcribeRunFits({ kind: "all", username: "amina", lane: "" }, { username: "amina", lane: "" })).toBe("ok")
+    expect(transcribeRunFits({ kind: "all", username: "amina", lane: "" }, { username: "baraka", lane: "" })).toBe("person")
+    expect(transcribeRunFits({ kind: "lineWords", username: "amina" }, { username: null, lane: "" })).toBe("person")
+  })
+
+  it("a run over takes waits for the language it was started in; one over the source recording does not", () => {
+    expect(transcribeRunFits({ kind: "all", username: "amina", lane: "fr" }, { username: "amina", lane: "" })).toBe("lane")
+    expect(transcribeRunFits({ kind: "sections", username: "amina", lane: "" }, { username: "amina", lane: "fr" })).toBe("lane")
+    expect(transcribeRunFits({ kind: "lineWords", username: "amina", lane: "fr" }, { username: "amina", lane: "" })).toBe("ok")
+    expect(transcribeRunFits({ kind: "import", username: "amina", lane: "fr" }, { username: "amina", lane: "" })).toBe("ok")
+  })
+
+  it("a run kept before runs named their person and language is carried on as before", () => {
+    expect(transcribeRunFits({ kind: "all" }, { username: "baraka", lane: "fr" })).toBe("ok")
   })
 })

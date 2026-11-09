@@ -11,6 +11,7 @@ import { getBatchProgress } from "@/lib/audio/batch-progress"
 import {
   claimStoredTranscribeRun,
   interruptedTranscribeRuns,
+  transcribeRunFits,
   type StoredTranscribeRun,
   type TranscribeRunHandle,
 } from "@/lib/audio/transcribe-runs"
@@ -29,15 +30,26 @@ export interface CarryOnTranscribeRunsArgs {
   ready: boolean
   /** Changes whenever the open file's rows or recordings change. */
   version: unknown
+  /**
+   * AQU-2375 (review, Nov 9): who is signed in (null = nobody) and the
+   * language lane that is open. A run someone else started is left for them,
+   * unsaid; a run over takes started in another language waits for that
+   * language. Not given: not checked.
+   */
+  username?: string | null
+  lane?: string
   /** Carry the run on in this page. `handle` is this page's claim on it. */
   carryOn: (run: StoredTranscribeRun, handle: TranscribeRunHandle) => void
-  /** The run's file is not the open one: say where it stopped. Once per run. */
-  announce: (run: StoredTranscribeRun) => void
+  /** The run can't be carried on here yet: say where it stopped. Once per run
+   *  and reason. "file": its file is not the open one. "lane": its file is
+   *  open, in another language than the run's. */
+  announce: (run: StoredTranscribeRun, why: "file" | "lane") => void
 }
 
 export function useCarryOnTranscribeRuns(args: CarryOnTranscribeRunsArgs): void {
-  const { projectId, activeFileId, ready, version } = args
+  const { projectId, activeFileId, ready, version, username, lane } = args
   const announced = useRef(new Set<string>())
+  const announcedLane = useRef(new Set<string>())
   const handled = useRef(new Set<string>())
   const callbacks = useRef({ carryOn: args.carryOn, announce: args.announce })
   // The latest callbacks, for the effects below (declared first, so it runs
@@ -54,14 +66,16 @@ export function useCarryOnTranscribeRuns(args: CarryOnTranscribeRunsArgs): void 
       if (gone) return
       for (const run of runs) {
         if (run.fileId === activeFileId || announced.current.has(run.id)) continue
+        // Someone else's run is theirs to hear about.
+        if (transcribeRunFits(run, { username }) === "person") continue
         announced.current.add(run.id)
-        callbacks.current.announce(run)
+        callbacks.current.announce(run, "file")
       }
     })
     return () => { gone = true }
     // The open file is read, not watched: switching files must not say it again.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId])
+  }, [projectId, username])
 
   // The open file's runs: carried on once its rows have settled.
   useEffect(() => {
@@ -79,6 +93,17 @@ export function useCarryOnTranscribeRuns(args: CarryOnTranscribeRunsArgs): void 
         .filter((r) => r.fileId === activeFileId && !handled.current.has(r.id))
       for (const run of runs) {
         if (gone) return
+        // Not this person's, or not this language's: left where it is (and
+        // not marked handled, so it is picked up once the language is opened).
+        const fits = transcribeRunFits(run, { username, lane })
+        if (fits === "person") continue
+        if (fits === "lane") {
+          if (!announcedLane.current.has(run.id)) {
+            announcedLane.current.add(run.id)
+            callbacks.current.announce(run, "lane")
+          }
+          continue
+        }
         const handle = await claimStoredTranscribeRun(run.id)
         handled.current.add(run.id)
         if (!handle) continue
@@ -93,5 +118,5 @@ export function useCarryOnTranscribeRuns(args: CarryOnTranscribeRunsArgs): void 
       gone = true
       if (timer !== null) clearTimeout(timer)
     }
-  }, [projectId, activeFileId, ready, version])
+  }, [projectId, activeFileId, ready, version, username, lane])
 }

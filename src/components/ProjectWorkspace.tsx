@@ -12423,6 +12423,10 @@ export function ProjectWorkspace() {
     activeFileId,
     ready: editorFirstPaint && workspaceAudioLoaded && !heardLinesLoading,
     version: [workspaceAudioByCellId, audioCueCells, cellStoreVersion],
+    // AQU-2375 (review, Nov 9): only the person who started a run carries it
+    // on, and a run over takes only in the language it was started in.
+    username: frontierSession?.username ?? null,
+    lane: activeLane,
     carryOn: (run, handle) => {
       // AQU-2426: one line's words, carried on window by window.
       if (run.kind === "lineWords") {
@@ -12450,14 +12454,13 @@ export function ProjectWorkspace() {
         quiet: run.kind === "sections",
       })
     },
-    announce: (run) => {
+    announce: (run, why) => {
+      const at = { name: run.fileName, done: run.doneIds.length, count: run.cellIds.length }
       toast.add({
         type: "info",
-        title: t("audio.transcribeRun.waitingForFile", {
-          name: run.fileName,
-          done: run.doneIds.length,
-          count: run.cellIds.length,
-        }),
+        title: why === "lane"
+          ? t("audio.transcribeRun.waitingForLanguage", { ...at, language: historyLaneName(run.lane ?? "") })
+          : t("audio.transcribeRun.waitingForFile", at),
       })
     },
   })

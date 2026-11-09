@@ -331,6 +331,9 @@ export async function runTranscribeAll(args: TranscribeAllArgs): Promise<Transcr
         kind: args.keep.kind,
         cellIds: targets.map((c) => c.id),
         force: Boolean(args.force),
+        // AQU-2375 (review, Nov 9): whose run, and in which language.
+        ...(session?.username ? { username: session.username } : {}),
+        lane: args.targetLang ?? "",
         ...(forceAutoModel ? { forceAutoModel } : {}),
         ...(args.sourceLanguage ? { sourceLanguage: args.sourceLanguage } : {}),
         ...(targetLanguage ? { targetLanguage } : {}),

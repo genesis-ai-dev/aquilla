@@ -151,8 +151,12 @@ export interface TimelineCardProps {
    * AQU-2426: a SOURCE recording clip's own menu — a ⋯ on hover (as on a
    * take) and the same menu on a right-click: what the clip is, then Split
    * into lines…. Absent on every other card.
+   *
+   * AQU-2426 (review, Nov 9): `splitDisabledReason` greys Split into lines…
+   * and says why under it: a recording added by web address is streamed, not
+   * stored, so it can't be split here.
    */
-  recordingMenu?: { details: string; name: string; onSplitIntoLines(): void }
+  recordingMenu?: { details: string; name: string; onSplitIntoLines(): void; splitDisabledReason?: string | null }
   /** AQU-2426: drawn inside the clip after its name and times ("Not split into lines yet"). */
   notice?: ReactNode
 }
@@ -596,9 +600,18 @@ export function TimelineCard({
           <span className="truncate">{recordingMenu.name}</span>
         </div>
         <ContextMenuSeparator />
-        <ContextMenuItem data-testid={`tl-card-${cell.id}-split-lines`} onClick={recordingMenu.onSplitIntoLines}>
-          <Rows3 className="mr-2 h-3.5 w-3.5" />
-          {t("editor.splitLines.menuItem")}
+        <ContextMenuItem data-testid={`tl-card-${cell.id}-split-lines`}
+          disabled={Boolean(recordingMenu.splitDisabledReason)}
+          onClick={() => { if (!recordingMenu.splitDisabledReason) recordingMenu.onSplitIntoLines() }}>
+          <Rows3 className="mr-2 h-3.5 w-3.5 shrink-0" />
+          <span className="flex min-w-0 flex-col">
+            <span>{t("editor.splitLines.menuItem")}</span>
+            {recordingMenu.splitDisabledReason ? (
+              <span data-testid={`tl-card-${cell.id}-split-lines-reason`} className="text-xs text-muted-foreground">
+                {recordingMenu.splitDisabledReason}
+              </span>
+            ) : null}
+          </span>
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>

@@ -4188,6 +4188,7 @@ function CellSourceMenu({
   onSplitAtQuotes,
   splitDisabledReason,
   onSplitIntoLines,
+  splitIntoLinesDisabledReason,
   /** Toggling the inline source editor open and shut. Absent ⇒ this person
    *  may not edit source text here at all. */
   sourceEditing,
@@ -4221,6 +4222,9 @@ function CellSourceMenu({
   splitDisabledReason?: string | null
   /** AQU-2426: split this source recording into lines (never on a take). */
   onSplitIntoLines?: () => void
+  /** AQU-2426 (review, Nov 9): why this source recording can't be split here
+   *  (it is streamed from a web address): the entry shows greyed, with this. */
+  splitIntoLinesDisabledReason?: string | null
   sourceEditing?: boolean
   onToggleSourceEdit?: () => void
   sourceEditDisabledReason?: string | null
@@ -4247,7 +4251,7 @@ function CellSourceMenu({
   // the source is mirrored from upstream. Those never change while you are in
   // the file, so a permanently dead button would be furniture.
   if (
-    !structural && !parkable && !onSetMilestone && !onSplitIntoLines
+    !structural && !parkable && !onSetMilestone && !onSplitIntoLines && !splitIntoLinesDisabledReason
     && !onToggleSourceEdit && !sourceEditDisabledReason && !timestamps
   ) return null
 
@@ -4332,11 +4336,12 @@ function CellSourceMenu({
               onSelect={onToggleHidden}
             />
           )}
-          {!structural && onSplitIntoLines && (
+          {!structural && (onSplitIntoLines || splitIntoLinesDisabledReason) && (
             <RowInsertItem
               testId="cell-menu-split-lines"
               icon={<Rows3 className="mr-2 h-3.5 w-3.5 shrink-0" />}
               label={t("editor.splitLines.menuItem")}
+              reason={splitIntoLinesDisabledReason}
               onSelect={onSplitIntoLines}
             />
           )}
@@ -4366,11 +4371,12 @@ function CellSourceMenu({
                 />
               )}
               {/* AQU-2426: after Insert below, where Split at quotes sits on text files. */}
-              {onSplitIntoLines && (
+              {(onSplitIntoLines || splitIntoLinesDisabledReason) && (
                 <RowInsertItem
                   testId="cell-menu-split-lines"
                   icon={<Rows3 className="mr-2 h-3.5 w-3.5 shrink-0" />}
                   label={t("editor.splitLines.menuItem")}
+                  reason={splitIntoLinesDisabledReason}
                   onSelect={onSplitIntoLines}
                 />
               )}
@@ -6111,6 +6117,12 @@ function EditorRow({
   const splitIntoLines = splitLines?.canSplit && sourceLine?.readable
     ? () => splitLines.onSplitIntoLines(cell.id, "pauses", cell)
     : undefined
+  // AQU-2426 (review, Nov 9): a recording added by web address is streamed,
+  // not stored, so it can't be split here. The entry shows greyed with that
+  // reason instead of being missing with nothing said.
+  const splitIntoLinesReason = splitLines?.canSplit && sourceLine && !sourceLine.readable
+    ? t("editor.splitLines.cannotRead")
+    : null
   // AQU-633: a scoped member can only validate cells in their assigned lane/file.
   // Combine the role capability with the per-cell scope check so an out-of-scope
   // cell greys the toggle instead of offering a guaranteed-403 validate. Unscoped
@@ -9036,6 +9048,7 @@ function EditorRow({
             onSplitAtQuotes={splitAtQuotes}
             splitDisabledReason={splitReason}
             onSplitIntoLines={splitIntoLines}
+            splitIntoLinesDisabledReason={splitIntoLinesReason}
             timestamps={timestamps}
             // AQU-1422: the reversible sibling of Remove. `onToggleHidden` is
             // the role gate (absent ⇒ no entry at all); the reason is the DCS

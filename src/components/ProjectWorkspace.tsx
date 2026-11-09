@@ -11083,11 +11083,15 @@ export function ProjectWorkspace() {
           onTranscribe={() => openSplitIntoLines(cell.id, "sentences", cell)}
           onSplitAtPauses={() => { void splitAtPausesNow(cell.id, cell) }} />
       : null
-    const recordingMenu = canSplitLines && src.readable
+    // AQU-2426 (review, Nov 9): a recording added by web address is streamed,
+    // not stored, so it can't be split here. Its menu still shows Split into
+    // lines…, greyed, with that reason, instead of nothing at all.
+    const recordingMenu = canSplitLines
       ? {
           details: t("editor.splitLines.clipDetails", { length: fmtCueClock((src.hi - src.lo) / 1000) }),
           name: cell.original || activeFileNameRef.current || "",
           onSplitIntoLines: () => openSplitIntoLines(cell.id, "pauses", cell),
+          ...(src.readable ? {} : { splitDisabledReason: t("editor.splitLines.cannotRead") }),
         }
       : undefined
     if (!notice && !recordingMenu) return null

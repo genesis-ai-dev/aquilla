@@ -142,8 +142,12 @@ interface Props {
    * = repetitions are left alone, as before.
    */
   prepareBulkRepetitions?: UseRepetitionValidation["prepareBulkRepetitions"]
-  /** AQU-1486: the note and Undo a run's repetitions add to its one toast. */
-  bulkRepetitionToastExtras?: UseRepetitionValidation["bulkToastExtras"]
+  /**
+   * AQU-1486 / AQU-2177: the run's one report — the dialog naming the repeated
+   * rows it reached, or the summary toast with their note and Undo when it
+   * reached none. Absent = the plain summary toast.
+   */
+  reportBulkRepetitions?: UseRepetitionValidation["reportBulk"]
 }
 
 type Running =
@@ -153,7 +157,7 @@ type Running =
   | { kind: "voice" }
   | { kind: "validate-audio" }
 
-export function SelectionBar({ project, cellStore, session, username, activeLane, myScopes, audioByCellId, linkedTakesByCell, completeBatch, audioMode, audioOnlyLane = false, orderedBy, mediaLayer = false, onVoiceTogether, onHarmonize, canHarmonize = true, onValidationCommitted, prepareBulkRepetitions, bulkRepetitionToastExtras }: Props) {
+export function SelectionBar({ project, cellStore, session, username, activeLane, myScopes, audioByCellId, linkedTakesByCell, completeBatch, audioMode, audioOnlyLane = false, orderedBy, mediaLayer = false, onVoiceTogether, onHarmonize, canHarmonize = true, onValidationCommitted, prepareBulkRepetitions, reportBulkRepetitions }: Props) {
   const analytics = useAccountAnalytics()
   const t = useT()
   // AQU-1503: skip clauses join the way a list is written in the reader's
@@ -648,15 +652,18 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
       )
       analytics.capture(BATCH_VALIDATE_ATTEMPTED, batchValidateTelemetry(summary, "selection"))
       const message = batchValidateToast(summary, t, formatLocaleList)
-      // One message for the whole gesture: the repetitions' note and Undo ride on it.
-      showBulkValidateToast(message, bulkRepetitionToastExtras?.(repetitions) ?? { note: null })
+      // One message for the whole gesture. AQU-2177: a run that reached
+      // repeated rows reports in the dialog that names them; one that reached
+      // none keeps this toast, with the repetitions' note and Undo on it.
+      if (reportBulkRepetitions) reportBulkRepetitions(message, repetitions)
+      else showBulkValidateToast(message, { note: null })
       // AQU-616: flush the just-enqueued validates now instead of waiting for
       // the ~5s periodic flusher, so the confirmed/synced state lands promptly.
       if (summary.validatable.length > 0) onValidationCommitted?.()
     } finally {
       setRunning({ kind: "idle" })
     }
-  }, [selectedCells, username, activeLane, myScopes, isBusy, project.id, onValidationCommitted, t, formatLocaleList, allowSelfValidation, textScopeCanValidate, noPermissionReason, prepareBulkRepetitions, bulkRepetitionToastExtras, analytics])
+  }, [selectedCells, username, activeLane, myScopes, isBusy, project.id, onValidationCommitted, t, formatLocaleList, allowSelfValidation, textScopeCanValidate, noPermissionReason, prepareBulkRepetitions, reportBulkRepetitions, analytics])
 
   const onUnvalidate = useCallback(() => {
     if (isBusy) return

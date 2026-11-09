@@ -48,9 +48,12 @@ The production release line already builds `dist/`. After `tag-release.sh` succe
 The signature is ed25519 over the canonical signing string
 `schema\nversion\nsha\nurl\nsha256\nsize\nminShellVersion\ncreatedAt` (fields joined by
 `\n`, no trailing newline). The private key lives only in the
-`DESKTOP_BUNDLE_SIGNING_KEY` repo secret (PKCS#8 PEM). The public key is compiled into
-the shell. `minShellVersion` is the `version` in `src-tauri/tauri.conf.json` at the
-commit being released, so bumping the shell version is also what raises the floor.
+`DESKTOP_BUNDLE_SIGNING_KEY` repo secret (PKCS#8 PEM). `deploy:aquilla` runs the
+publisher with `--preflight` before the SPA build: an unset secret is a warning and the
+publish is skipped, while a secret that is set but does not parse as an ed25519 PKCS#8
+PEM stops the chain there, before anything reaches production. The public key is
+compiled into the shell. `minShellVersion` is the `version` in `src-tauri/tauri.conf.json`
+at the commit being released, so bumping the shell version is also what raises the floor.
 
 The shell (`src-tauri/src/hot_bundle.rs`):
 

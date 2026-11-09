@@ -9,6 +9,7 @@ import {
   __setTranscribeRunEnvForTests,
   __storedTranscribeRuns,
   claimStoredTranscribeRun,
+  findLineWordsRun,
   interruptedTranscribeRuns,
   startStoredTranscribeRun,
   type LockManagerLike,
@@ -137,5 +138,77 @@ describe("with Web Locks", () => {
     const handle = await claimStoredTranscribeRun("run-1")
     expect(handle).not.toBeNull()
     handle!.end()
+  })
+})
+
+// AQU-2426 × AQU-2375: one line's words are a kept run too, window by window.
+describe("a line's words run", () => {
+  const startLine = (id = "words-1") => startStoredTranscribeRun({
+    id,
+    projectId: "p1",
+    fileId: "f1",
+    fileName: "LOTE – Session 4.mp3",
+    kind: "lineWords",
+    cellIds: ["w0", "w1", "w2"],
+    force: false,
+    line: {
+      cellId: "c1", audioId: "a1", url: "frontier-audio://p1/f1/a1.mp3", lo: 0, hi: 150_000,
+      windows: [{ lo: 0, hi: 60_000 }, { lo: 60_000, hi: 120_000 }, { lo: 120_000, hi: 150_000 }],
+      words: {},
+      purpose: "import",
+    },
+  })
+  const match = { projectId: "p1", fileId: "f1", cellId: "c1", audioId: "a1", lo: 0, hi: 150_000 }
+
+  it("keeps each window's words as they land", async () => {
+    const run = startLine()
+    run.row("w0", { kind: "done", lineWords: { words: [{ text: "In", start: 0.2, end: 0.4 }], text: "In" } })
+    await vi.advanceTimersByTimeAsync(1_000)
+    const [stored] = __storedTranscribeRuns()
+    expect(stored!.doneIds).toEqual(["w0"])
+    expect(stored!.line!.words).toEqual({ w0: { words: [{ text: "In", start: 0.2, end: 0.4 }], text: "In" } })
+  })
+
+  it("parked, it keeps what it has at once, and is never carried on by itself", async () => {
+    const run = startLine()
+    run.row("w0", { kind: "done", lineWords: { words: [], text: "In the beginning" } })
+    run.row("w1", { kind: "failed", message: "HTTP 503" })
+    run.park()
+    // Written without waiting for the throttle: the page may be about to go.
+    const [stored] = __storedTranscribeRuns()
+    expect(stored!.parked).toBe(true)
+    expect(stored!.line!.words.w0!.text).toBe("In the beginning")
+    expect(stored!.failed).toEqual([{ cellId: "w1", message: "HTTP 503" }])
+    __setTranscribeRunEnvForTests({ tab: "page-2" })
+    clock += STALE_MS * 2
+    expect(await interruptedTranscribeRuns("p1")).toEqual([])
+  })
+
+  it("is found by its line and stretch, and taken over runs again", async () => {
+    const run = startLine()
+    run.park()
+    expect(findLineWordsRun(match)?.id).toBe("words-1")
+    expect(findLineWordsRun({ ...match, hi: 140_000 })).toBeNull()
+    expect(findLineWordsRun({ ...match, cellId: "c2" })).toBeNull()
+    __setTranscribeRunEnvForTests({ tab: "page-2" })
+    const claiming = claimStoredTranscribeRun("words-1")
+    await vi.advanceTimersByTimeAsync(100)
+    expect(await claiming).not.toBeNull()
+    const [stored] = __storedTranscribeRuns()
+    expect(stored!.parked).toBeUndefined()
+    expect(stored!.tab).toBe("page-2")
+  })
+
+  it("stopped by a reload (not parked), it is carried on like any run", async () => {
+    startLine()
+    __setTranscribeRunEnvForTests({ tab: "page-2" })
+    clock += STALE_MS
+    expect((await interruptedTranscribeRuns("p1")).map((r) => r.id)).toEqual(["words-1"])
+  })
+
+  it("a week-old kept run is not found", () => {
+    startLine().park()
+    clock += MAX_AGE_MS
+    expect(findLineWordsRun(match)).toBeNull()
   })
 })

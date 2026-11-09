@@ -16,6 +16,15 @@
 // record nobody has stamped for a while is interrupted. Carrying a run on
 // claims it the same way, so two tabs never both pick it up.
 //
+// A LINE'S WORDS (AQU-2426's Import and transcribe…, and Split into lines… ›
+// At sentences, with words) are kept here too, as a run of kind "lineWords":
+// one recording line's stretch cut into windows of at most a minute (one
+// hosted request each), with each window's words kept as they land, so words
+// already paid for are never lost to a reload or a failed window. A line run
+// that ended with some windows still to do is PARKED: nobody carries it on by
+// itself, and the next words run on the same stretch of the same line takes
+// it over and sends only the windows still missing.
+//
 // Per browser profile, in localStorage, like the model consent it sits beside:
 // a run is one person's, on one device, and a page reload is all it has to
 // survive. Never shared through sync.
@@ -31,9 +40,44 @@ export const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
 /** Row bookkeeping is written at most this often while rows land. */
 const WRITE_THROTTLE_MS = 1_000
 
-/** Which button started the run: the post-import run, Transcribe all, or the
- *  sections someone selected on the timeline. */
-export type TranscribeRunKind = "import" | "all" | "sections"
+/** Which button started the run: the post-import run, Transcribe all, the
+ *  sections someone selected on the timeline, or one line's words (AQU-2426:
+ *  Import and transcribe…, Split into lines… › At sentences, with words). */
+export type TranscribeRunKind = "import" | "all" | "sections" | "lineWords"
+
+/** A word, seconds from the start of its line's stretch. */
+export interface StoredWord {
+  text: string
+  start: number
+  end: number
+}
+
+/**
+ * AQU-2426: what a "lineWords" run is about. Its rows (`cellIds`) are the
+ * windows' keys, `w0`, `w1`…, so the row bookkeeping above counts windows.
+ */
+export interface StoredLineWords {
+  /** The line, and the recording its stretch is cut from. */
+  cellId: string
+  audioId: string
+  url: string
+  /** The stretch, ms on the recording's clock. */
+  lo: number
+  hi: number
+  /** Each window's stretch, ms on the recording's clock, in order. */
+  windows: Array<{ lo: number; hi: number }>
+  /** Each finished window's words, by its key. */
+  words: Record<string, { words: StoredWord[]; text: string }>
+  languageTag?: string
+  /** "import": split once every window has words (Import and transcribe…).
+   *  "dialog": the person previews the lines in Split into lines…. */
+  purpose: "import" | "dialog"
+}
+
+/** A window's key in a line run. */
+export function lineWindowKey(index: number): string {
+  return `w${index}`
+}
 
 export interface StoredTranscribeRun {
   id: string
@@ -60,14 +104,25 @@ export interface StoredTranscribeRun {
   beatAt: number
   /** That page's id. */
   tab: string
+  /** AQU-2426: a line's words (kind "lineWords"). */
+  line?: StoredLineWords
+  /** AQU-2426: a line run that ended with windows still to do, kept for the
+   *  next words run on that line. Never carried on by itself. */
+  parked?: boolean
 }
 
 export interface TranscribeRunHandle {
   readonly id: string
-  /** Record how one row ended. */
-  row(cellId: string, outcome: { kind: "done" } | { kind: "failed"; message: string } | { kind: "skipped" }): void
+  /** Record how one row ended. A line run's window keeps its words. */
+  row(
+    cellId: string,
+    outcome: { kind: "done"; lineWords?: { words: StoredWord[]; text: string } } | { kind: "failed"; message: string } | { kind: "skipped" },
+  ): void
   /** The run finished, failed or was cancelled: forget it. */
   end(): void
+  /** AQU-2426: stop running it but keep what it has, for the next words run on
+   *  the same line (see `findLineWordsRun`). Nobody carries it on by itself. */
+  park(): void
 }
 
 // ─── storage ──────────────────────────────────────────────────────────────
@@ -202,12 +257,20 @@ function makeHandle(id: string, lock: { release: () => void }): TranscribeRunHan
         if (outcome.kind === "done") {
           if (!run.doneIds.includes(cellId)) run.doneIds.push(cellId)
           run.failed = run.failed.filter((f) => f.cellId !== cellId)
+          if (outcome.lineWords && run.line) run.line = { ...run.line, words: { ...run.line.words, [cellId]: outcome.lineWords } }
         } else if (outcome.kind === "failed") {
           run.failed = [...run.failed.filter((f) => f.cellId !== cellId), { cellId, message: outcome.message }]
         }
         // skipped: nothing to keep — a row that was never transcribed is still
         // to do, and carrying the run on finds it again.
       })
+      // A line's words were paid for and land a minute's worth at a time:
+      // written at once, so a reload right after never loses them.
+      if (outcome.kind === "done" && outcome.lineWords) {
+        if (flushTimer !== null) clearTimeout(flushTimer)
+        flush()
+        return
+      }
       if (flushTimer === null) flushTimer = setTimeout(flush, WRITE_THROTTLE_MS)
     },
     end() {
@@ -217,6 +280,20 @@ function makeHandle(id: string, lock: { release: () => void }): TranscribeRunHan
       if (flushTimer !== null) clearTimeout(flushTimer)
       pending = []
       dropStoredTranscribeRun(id)
+      lock.release()
+    },
+    park() {
+      if (ended) return
+      ended = true
+      clearInterval(beat)
+      if (flushTimer !== null) clearTimeout(flushTimer)
+      // What landed is written now, not on the throttle: the page may go next.
+      const apply = pending
+      pending = []
+      update(id, (run) => {
+        for (const fn of apply) fn(run)
+        return { ...run, parked: true, beatAt: now(), tab: tabId }
+      })
       lock.release()
     },
   }
@@ -250,7 +327,7 @@ export async function interruptedTranscribeRuns(projectId: string): Promise<Stor
   const all = readAll()
   const fresh = all.filter((r) => now() - r.startedAt < MAX_AGE_MS)
   if (fresh.length !== all.length) writeAll(fresh)
-  const mine = fresh.filter((r) => r.projectId === projectId && r.tab !== tabId)
+  const mine = fresh.filter((r) => r.projectId === projectId && r.tab !== tabId && !r.parked)
   if (mine.length === 0) return []
   const manager = locks()
   if (manager) {
@@ -273,7 +350,8 @@ export async function claimStoredTranscribeRun(id: string): Promise<TranscribeRu
   let claimed = false
   update(id, (run) => {
     claimed = true
-    return { ...run, beatAt: stamped, tab: tabId }
+    // A parked run taken over runs again (undefined is not written).
+    return { ...run, parked: undefined, beatAt: stamped, tab: tabId }
   })
   if (!claimed) {
     lock.release()
@@ -287,4 +365,24 @@ export async function claimStoredTranscribeRun(id: string): Promise<TranscribeRu
     if (!run || run.tab !== tabId) return null
   }
   return makeHandle(id, lock)
+}
+
+/**
+ * AQU-2426: the kept words run on this stretch of this line, if any, whether
+ * parked or stopped by a reload. The next words run on it takes it over, so
+ * only the windows still without words are sent.
+ */
+export function findLineWordsRun(match: {
+  projectId: string
+  fileId: string
+  cellId: string
+  audioId: string
+  lo: number
+  hi: number
+}): StoredTranscribeRun | null {
+  const fresh = readAll().filter((r) => now() - r.startedAt < MAX_AGE_MS)
+  return fresh.find((r) => r.kind === "lineWords" && r.line
+    && r.projectId === match.projectId && r.fileId === match.fileId
+    && r.line.cellId === match.cellId && r.line.audioId === match.audioId
+    && r.line.lo === match.lo && r.line.hi === match.hi) ?? null
 }

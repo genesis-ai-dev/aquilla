@@ -269,3 +269,42 @@ describe("exportAudioByChapter — a book's dragged-open pauses", () => {
   })
 })
 
+
+// AQU-2432 (Sam, Nov 6, rule 7): a verse's take dragged over the end of the
+// verse before it starts that much before it ends in the chapter too, and the
+// two are mixed, as playback plays them.
+describe("exportAudioByChapter — a verse dragged over the end of the one before it (AQU-2432)", () => {
+  const MS = TARGET_RATE / 1000
+  const verse = (id: string, ref: string, recordingsOffsetMs?: number) =>
+    cell({
+      id,
+      group: ref,
+      selectedAudioId: `audio-${id}-1700000000-take`,
+      attachments: {
+        [`audio-${id}-1700000000-take`]: {
+          url: `frontier-audio://audio-${id}-1700000000-take.wav`, type: "audio", durationMs: 100,
+          ...(recordingsOffsetMs != null ? { recordingsOffsetMs } : {}),
+        },
+      } as CellData["attachments"],
+    })
+  const run = (cells: CellData[]) =>
+    exportAudioByChapter({
+      cells,
+      projectId: "p1",
+      fetchBytes: async ({ audioId }) => new TextEncoder().encode(audioId),
+      decode: async (bytes) => new Float32Array(100 * MS).fill(new TextDecoder().decode(bytes).includes("-v1-") ? 0.5 : 0.25),
+    })
+
+  it("starts it 60 ms before the verse before it ends, and mixes the two", async () => {
+    const samples = await pcmFromWav((await run([verse("v1", "RUT 1:1"), verse("v2", "RUT 1:2", -60)])).blob)
+    expect(samples).toHaveLength(140 * MS)
+    expect(samples[10]).toBe(quantisePcm16(0.5))
+    expect(samples[80 * MS]).toBe(quantisePcm16(0.75))
+    expect(samples.at(-1)).toBe(quantisePcm16(0.25))
+  })
+
+  it("verses end to end are joined end to end, as before", async () => {
+    const samples = await pcmFromWav((await run([verse("v1", "RUT 1:1"), verse("v2", "RUT 1:2")])).blob)
+    expect(samples).toHaveLength(200 * MS)
+  })
+})

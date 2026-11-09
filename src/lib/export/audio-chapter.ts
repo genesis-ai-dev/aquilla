@@ -16,12 +16,17 @@
 // A pause someone dragged open before a verse's take, or between two pieces
 // of a cut take, plays as silence in the app, so it goes in as silence here,
 // and every piece of a cut take is stitched in (book-line-parts.ts).
+//
+// AQU-2432 (Sam, Nov 6): …and so does an OVERLAP. A verse's take dragged over
+// the end of the one before it (or a piece over the piece in front) starts
+// that much before it ends here too, and the two are mixed, as playback plays
+// them (overlap-mix.ts).
 
 import { applyClipLevelPcm, levelFields } from "@/lib/export/clip-level"
 import JSZip from "jszip"
 
 import { resolvePcmWindow } from "@/lib/audio/pcm-window"
-import { concatPcm, TARGET_RATE } from "@/lib/audio/decode-mono"
+import { TARGET_RATE } from "@/lib/audio/decode-mono"
 import { encodeWavPcm16 } from "@/lib/audio/wav-encode"
 import { parseFrontierAudioUrl } from "@/lib/audio/upload"
 import type { CellData } from "@/hooks/useCells"
@@ -30,7 +35,8 @@ import { chapterLabelForCell } from "./chapter-scope"
 import { characterKey } from "./audio-by-character"
 import { defaultTrackTakeId, isSilencedForExport } from "./audio-validation-scope"
 import { isUserAddedLine } from "@/lib/timeline/user-line-origin"
-import { bookLineParts } from "./book-line-parts"
+import { bookLineOverlaps, bookLineParts } from "./book-line-parts"
+import { mixPcm, type MixPart } from "./overlap-mix"
 
 export interface ChapterClip {
   cellId: string
@@ -77,6 +83,9 @@ export interface ChapterClip {
  *  own trims and its own validation. */
 export type ChapterClipPart =
   | { kind: "silence"; ms: number }
+  /** AQU-2432: the take after this starts this long before the take before
+   *  it ends, mixed with it. */
+  | { kind: "overlap"; ms: number }
   | ({ kind: "take" } & Pick<ChapterClip, "audioId" | "url" | "trimStartMs" | "trimEndMs" | "silenced" | "durationMs" | "gainDb" | "fadeInMs" | "fadeOutMs">)
 
 export interface GroupAudioByChapterOptions {
@@ -329,7 +338,7 @@ function bookPartsFor(cell: CellData, audioId: string): { parts: ChapterClipPart
   if (!layout || (layout.length === 1 && layout[0].kind === "take")) return {}
   const parts: ChapterClipPart[] = []
   for (const part of layout) {
-    if (part.kind === "silence") {
+    if (part.kind === "silence" || part.kind === "overlap") {
       parts.push(part)
       continue
     }
@@ -426,6 +435,8 @@ export async function exportAudioByChapter(args: ExportChapterArgs): Promise<Exp
     includeChapterHeadings: args.includeChapterHeadings,
   })
   const cellById = new Map(args.cells.map((c) => [c.id, c]))
+  // AQU-2432: which verses start over the end of the one before them.
+  const overlaps = bookLineOverlaps(args.cells)
   const totalClips = groups.reduce((n, g) => n + g.clips.length, 0)
   const pcmByClip = new Map<string, Promise<Float32Array | null>>()
   const chapterWavs: { name: string; blob: Blob }[] = []
@@ -495,19 +506,27 @@ export async function exportAudioByChapter(args: ExportChapterArgs): Promise<Exp
     }
   }
 
+  const samplesOf = (ms: number) => Math.round((ms / 1000) * TARGET_RATE)
   for (const group of groups) {
-    const pcmClips: Float32Array[] = []
+    const pcmClips: MixPart<Float32Array>[] = []
+    let prevCellId: string | null = null
     for (const clip of group.clips) {
       const cell = cellById.get(clip.cellId)!
       // AQU-1758: a book's line as playback lays it out — the pause before the
       // take and between a cut take's pieces as silence, every piece in it.
+      // AQU-2432: a piece over the end of the one in front, mixed with it.
       const parts: ChapterClipPart[] = clip.parts ?? [{ kind: "take", ...clip }]
-      const line: Float32Array[] = []
+      const line: MixPart<Float32Array>[] = []
+      let overlapNext = 0
       let lineSilenced = 0
       let readable = true
       for (const part of parts) {
         if (part.kind === "silence") {
-          line.push(new Float32Array(Math.round((part.ms / 1000) * TARGET_RATE)))
+          line.push({ audio: new Float32Array(samplesOf(part.ms)), overlap: 0 })
+          continue
+        }
+        if (part.kind === "overlap") {
+          overlapNext = samplesOf(part.ms)
           continue
         }
         const take = await takeSamples(cell, { ...part, cellId: clip.cellId })
@@ -515,11 +534,16 @@ export async function exportAudioByChapter(args: ExportChapterArgs): Promise<Exp
           readable = false
           break
         }
-        line.push(take.samples)
+        line.push({ audio: take.samples, overlap: overlapNext })
+        overlapNext = 0
         if (take.silenced) lineSilenced += 1
       }
       if (readable) {
-        pcmClips.push(...line)
+        // AQU-2432: over the end of the verse before it, when that is the
+        // verse it follows here.
+        const over = overlaps.get(clip.cellId)
+        pcmClips.push({ audio: mixPcm(line), overlap: over && over.afterCellId === prevCellId ? samplesOf(over.ms) : 0 })
+        prevCellId = clip.cellId
         silenced += lineSilenced
       } else {
         skipped += 1
@@ -528,7 +552,7 @@ export async function exportAudioByChapter(args: ExportChapterArgs): Promise<Exp
       args.onProgress?.(done, totalClips)
     }
     if (pcmClips.length === 0) continue
-    const joined = concatPcm(pcmClips)
+    const joined = mixPcm(pcmClips)
     chapterWavs.push({ name: chapterFileName(group), blob: encodeWavPcm16(joined, TARGET_RATE) })
   }
 

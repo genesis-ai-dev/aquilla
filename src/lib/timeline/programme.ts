@@ -30,6 +30,7 @@ import type { CellData } from "@/hooks/useCells"
 import { isHiddenCell } from "@/lib/cells/hidden"
 import { standInEstimator } from "./stand-in"
 import { isDefaultTrackSlot } from "./track-slots"
+import { storedRoomSec, type LineRoomChange } from "./line-room"
 
 /** A window on some clock, in seconds. */
 export interface Window {
@@ -105,6 +106,15 @@ export interface ProgrammeSlot {
    * timings. Absent when nothing of the line starts before that.
    */
   pulledBackSec?: number
+  /**
+   * AQU-2432 (Sam, Nov 9): an UNRECORDED line whose ROOM was made smaller than
+   * its natural length — the next take dragged earlier against it
+   * (lib/timeline/line-room). `slotLenSec` is its room, down to 0; this is the
+   * natural length it would last, and gets back when that take is dragged
+   * later. Absent on a line at its natural length, and on every line with a
+   * take (its take sets its length; a stored room is ignored).
+   */
+  naturalLenSec?: number
   /**
    * AQU-2252: the line's takes on every track but the Language lane's main
    * one, piece by piece. Absent when it has none. See `ProgrammeLayer`.
@@ -186,6 +196,10 @@ export interface ProgrammePiece {
 
 /** A pause shorter than this is a placement wobble, not a pause. */
 export const MIN_TARGET_LEAD_SEC = 0.05
+
+/** AQU-2432: a room within this of the line's natural length is that length
+ *  (the room is stored in whole ms; the natural length is not). */
+const ROOM_EPS_SEC = 0.0005
 
 /**
  * AQU-2204 / AQU-1758: the pause a take (or a piece of one) asks for before
@@ -301,6 +315,17 @@ function lastClipStartSec(slot: ProgrammeSlot, track: string | null): number | n
 }
 
 /**
+ * AQU-2432 (Sam, Nov 9): a line NOBODY HAS RECORDED — no take on the main
+ * track nor on any track that sets line lengths, so its length is its natural
+ * one (a stand-in, its own span, its original's) or the room it was given. A
+ * take on a track made a layer sets nothing, so it does not count; a take
+ * whose length is not known yet does.
+ */
+export function isUnrecordedSlot(slot: ProgrammeSlot): boolean {
+  return slot.targetLenSec === 0 && !slot.layers?.some((l) => l.setsLength)
+}
+
+/**
  * AQU-2432 (Sam, Nov 6, rule 4): the earliest a take on `track` (null: the
  * main track) in the line after `prev` may start, following the recordings —
  * the start of the take before it on its track: up to it, never past, so the
@@ -308,9 +333,16 @@ function lastClipStartSec(slot: ProgrammeSlot, track: string | null): number | n
  * before it either (the lines keep their order, whatever is on the track),
  * and the first line never before the start of the file. On the programme
  * clock. The timeline's move clamp asks the same (`TimelineLayout.moveBounds`).
+ *
+ * AQU-2432 (Sam, Nov 9): OVERLAP IS ONLY OVER A TAKE. When the line before is
+ * unrecorded there is no take to come in over, so the take starts no earlier
+ * than that line's end — and a pull-back stored on it from before this rule
+ * reads as none. What a drag against such a line changes is that line's ROOM
+ * (`roomsForMove`), never the take.
  */
 export function pullFloorSec(prev: ProgrammeSlot | null, track: string | null): number {
   if (!prev) return 0
+  if (isUnrecordedSlot(prev)) return prev.startSec + prev.slotLenSec
   return Math.max(prev.startSec, lastClipStartSec(prev, track) ?? -Infinity)
 }
 
@@ -693,16 +725,31 @@ export function buildProgramme(cells: readonly CellData[], opts?: BuildProgramme
       : opts?.standInLenSec
         ? Math.max(MIN_TARGET_LEN_SEC, opts.standInLenSec(cell))
         : Math.max(nominalLenSec, MIN_TARGET_LEN_SEC)
+    // AQU-2432 (Sam, Nov 9): AN UNRECORDED LINE'S ROOM. The next take dragged
+    // earlier against a line nobody has recorded makes that line's room
+    // smaller, down to nothing; the room is the line's own (stored on it, per
+    // language — lib/timeline/line-room), never the dragged take's. It is at
+    // most the line's natural length, and it is ignored the moment the line
+    // has a take: its take sets its length then, as for any recorded line, so
+    // a room closed long ago can never turn into an overlap.
+    const roomSec = recorded ? null : storedRoomSec(cell)
+    const roomCut = roomSec != null && roomSec < unrecordedLenSec - ROOM_EPS_SEC
     const slotLenSec = recordedLenSec > 0
       ? recordedLenSec
       : recorded
         ? Math.max(nominalLenSec, MIN_TARGET_LEN_SEC)
-        : unrecordedLenSec
+        : roomCut
+          ? roomSec
+          : unrecordedLenSec
     // A verse whose source clip is gone (generated-voice-only, or a lone take)
     // has NO original to hear; one that runs past the line is cut at its end.
+    // AQU-2432 (Sam, Nov 9): a room shorter than the original cuts it there
+    // too, and a line with no room at all has none of it left to hear.
     const sourceLenSec = fullSourceStart != null ? Math.min(nominalLenSec, slotLenSec) : 0
     const sourceWindow: Window | null =
-      fullSourceStart != null ? { start: fullSourceStart, end: fullSourceStart + sourceLenSec } : null
+      fullSourceStart != null && !(roomCut && sourceLenSec <= 0)
+        ? { start: fullSourceStart, end: fullSourceStart + sourceLenSec }
+        : null
     // The take clocks its line (the source never outlasts it now); a line with
     // no take is clocked by its source, else nothing plays and playback steps
     // over it. AQU-2252: a take on another track never clocks its line — the
@@ -728,6 +775,7 @@ export function buildProgramme(cells: readonly CellData[], opts?: BuildProgramme
       ...(usesStandIn ? { standIn: true as const } : {}),
       ...(targetLeadSec > 0 ? { targetLeadSec } : {}),
       ...(pulledBackSec > 0 ? { pulledBackSec } : {}),
+      ...(roomCut ? { naturalLenSec: unrecordedLenSec } : {}),
       ...(layers.length > 0 ? { layers } : {}),
     }
     slots.push(slot)
@@ -1071,4 +1119,94 @@ export function pieceLeadSecForMove(
       ? Math.max(lead, prevStart)
       : prevEnd
   return placed - heard
+}
+
+/** AQU-2432 (Sam, Nov 9): what a move does to the rooms of the unrecorded
+ *  lines before a take's line — see `roomsForMove`. */
+export interface RoomMove {
+  /** Each line whose room the move changes, with the room it is left. */
+  rooms: LineRoomChange[]
+  /**
+   * Where the take's own start goes, ON THE LAYOUT AS IT IS NOW, once the
+   * rooms have taken their share of the move: what its own place (the pause
+   * before it) is then read from. The same as where it was when the rooms
+   * took all of it — nothing is stored on the take then.
+   */
+  takeStartSec: number
+}
+
+/** AQU-2432: the unrecorded lines directly before `slot`, nearest first. */
+function unrecordedRunBefore(prog: Programme, slot: ProgrammeSlot): ProgrammeSlot[] {
+  const run: ProgrammeSlot[] = []
+  for (let i = slotIndex(prog, slot.cellId) - 1; i >= 0 && isUnrecordedSlot(prog.slots[i]); i--) run.push(prog.slots[i])
+  return run
+}
+
+/**
+ * AQU-2432 (Sam, Nov 9, rule 4): how far EARLIER a take of `slot` may be
+ * dragged by closing the rooms of the unrecorded lines directly before its
+ * line — to where they start: the end of the nearest recorded line before it
+ * (the start of the file with none). It stops there; it does not go on to
+ * overlap that recorded take across the empty lines. Null when the line
+ * before is recorded (or there is none): no room to close.
+ */
+export function roomFloorSec(prog: Programme, slot: ProgrammeSlot): number | null {
+  const run = unrecordedRunBefore(prog, slot)
+  return run.length > 0 ? run[run.length - 1].startSec : null
+}
+
+/**
+ * AQU-2432 (Sam, Nov 9): A DRAG AGAINST AN UNRECORDED LINE SETS THAT LINE'S
+ * ROOM. For a take of `slot` (on the main track or a track that sets line
+ * lengths; a cut take's first piece) moved from `fromStartSec` to
+ * `toStartSec`, both on the programme clock as it is now:
+ *
+ *   - EARLIER: its own pause closes first (as it always did); past its line's
+ *     start, the line before gives up room, down to nothing, then the
+ *     unrecorded line before that, and so on — each its own room;
+ *   - LATER: the line before gets room back first, up to its natural length,
+ *     then the unrecorded line before that; only past that does the rest of
+ *     the drag become the take's own pause.
+ *
+ * The line directly before the take is always the one that changes first, so
+ * what its marker says ("drag the next take later to give it room") is true
+ * of the next drag. Null when the move changes no room (the line before is
+ * recorded, or the move is under the wobble): the move is the take's alone.
+ */
+export function roomsForMove(
+  prog: Programme,
+  slot: ProgrammeSlot,
+  fromStartSec: number,
+  toStartSec: number,
+): RoomMove | null {
+  const run = unrecordedRunBefore(prog, slot)
+  if (run.length === 0) return null
+  const delta = toStartSec - fromStartSec
+  const rooms: LineRoomChange[] = []
+  if (delta < 0) {
+    const ownPause = Math.min(Math.max(0, fromStartSec - naturalStartSec(slot)), -delta)
+    let close = -delta - ownPause
+    if (close < MIN_TARGET_LEAD_SEC) return null
+    for (const line of run) {
+      const by = Math.min(line.slotLenSec, close)
+      if (by <= 0) continue
+      rooms.push({ cellId: line.cellId, roomMs: Math.max(0, Math.round((line.slotLenSec - by) * 1000)) })
+      close -= by
+      if (close <= ROOM_EPS_SEC) break
+    }
+    return rooms.length > 0 ? { rooms, takeStartSec: fromStartSec - ownPause } : null
+  }
+  if (delta < MIN_TARGET_LEAD_SEC) return null
+  let give = delta
+  for (const line of run) {
+    const natural = line.naturalLenSec ?? line.slotLenSec
+    const by = Math.min(natural - line.slotLenSec, give)
+    if (by <= 0) continue
+    const room = line.slotLenSec + by
+    // Back at its natural length: nothing is stored.
+    rooms.push({ cellId: line.cellId, roomMs: room >= natural - ROOM_EPS_SEC ? null : Math.round(room * 1000) })
+    give -= by
+    if (give <= ROOM_EPS_SEC) break
+  }
+  return rooms.length > 0 ? { rooms, takeStartSec: fromStartSec + Math.max(0, give) } : null
 }

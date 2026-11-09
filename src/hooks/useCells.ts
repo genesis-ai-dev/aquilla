@@ -152,6 +152,14 @@ export interface CellData {
   ttsSettings?: CellTtsSettings
   startTime?: number
   endTime?: number
+  /**
+   * AQU-2432 (Sam, Nov 9): the ROOM this line is given, in ms, while it has no
+   * recording and its file follows its recordings — made smaller than its
+   * natural length by dragging the next take earlier against it. For the
+   * language being worked in; stamped by the cell store from the source row's
+   * metadata (lib/timeline/line-room). Absent: its natural length.
+   */
+  recordingsRoomMs?: number
   /** Timeline-segment-model (Scope A). Intrinsic order key; fractional ranks
    *  allow inserts between neighbors. Falls back to array index on read. */
   sequenceIndex?: number

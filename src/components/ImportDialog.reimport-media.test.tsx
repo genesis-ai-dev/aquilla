@@ -24,6 +24,7 @@ vi.mock("@/lib/import", () => ({
   applyEBibleTargetImport: vi.fn(),
   parseFile: vi.fn(async () => []),
   prepareImportFile: vi.fn(async () => ({ fileType: "audio", results: [] })),
+  probeMediaDurationMs: vi.fn(async () => 60_000),
 }))
 vi.mock("@/lib/import/cast-from-speakers", () => ({ buildCastAdditions: vi.fn(() => ({})) }))
 vi.mock("@/lib/import/file-entries", () => ({
@@ -89,6 +90,11 @@ describe("Re-import with a recording or film", () => {
 
     await act(async () => {
       fireEvent.click(await screen.findByRole("button", { name: "Import as a new file" }))
+      await new Promise((r) => setTimeout(r, 0))
+    })
+    // AQU-2426: with no subtitle file, the import's last step asks first.
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: "Import whole recording" }))
       await new Promise((r) => setTimeout(r, 0))
     })
 

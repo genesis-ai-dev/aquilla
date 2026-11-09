@@ -145,3 +145,38 @@ describe("file.importRecording", () => {
     })
   })
 })
+
+describe("lines.split (AQU-2426)", () => {
+  const split = {
+    fileId: "f1", cellId: "l0", audioId: "clip",
+    before: { startMs: 0, endMs: 40_000, trimStartMs: null, trimEndMs: null },
+    after: { startMs: 0, endMs: 10_000, trimStartMs: 0, trimEndMs: 10_000 },
+    lines: [{ cellId: "l1", eventId: "e1" }, { cellId: "l2", eventId: "e2" }],
+  }
+  const linesAfterSplit = () => new Map<string, Line>([
+    ["l1", { untouched: true, head: "e1" }],
+    ["l2", { untouched: true, head: "e2" }],
+  ])
+
+  it("undo removes the new lines and gives the line its whole window back; redo splits it again", async () => {
+    const lines = linesAfterSplit()
+    const { ctx, handlers } = ctxFor(lines)
+    const windows: unknown[] = []
+    ctx.writeLineWindow = vi.fn(async (_d, w) => { windows.push(w); return true })
+    expect(await handlers["lines.split"].undo(split)).toEqual({ kind: "done" })
+    expect(lines.size).toBe(0)
+    expect(windows).toEqual([split.before])
+    expect(await handlers["lines.split"].redo(split)).toEqual({ kind: "done" })
+    expect([...lines.keys()].sort()).toEqual(["l1", "l2"])
+    expect(windows).toEqual([split.before, split.after])
+  })
+
+  it("leaves the line as it is when a new line has been worked on", async () => {
+    const lines = linesAfterSplit()
+    lines.set("l2", { untouched: false, head: "e9" })
+    const { ctx, handlers } = ctxFor(lines)
+    ctx.writeLineWindow = vi.fn(async () => true)
+    expect(await handlers["lines.split"].undo(split)).toEqual({ kind: "skipped", reason: "linesChanged" })
+    expect(ctx.writeLineWindow).not.toHaveBeenCalled()
+  })
+})

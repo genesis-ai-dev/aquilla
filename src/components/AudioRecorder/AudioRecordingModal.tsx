@@ -8,6 +8,7 @@
 // "capture-and-save" hook is not reused here because the modal adds a
 // preview/retake step between stop and upload.
 
+import { waitAtTranscribeLimit } from "@/lib/audio/transcribe-status"
 import { type ChangeEvent, cloneElement, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { AlertCircle, Check, ChevronLeft, ChevronRight, ChevronsRight, ChevronUp, Lock, Maximize2, Mic, Minimize2, PanelBottom, Pencil, RefreshCw, RotateCcw, Settings2, Sparkles, Square, Timer, TimerOff, Upload, Volume2, VolumeX, X } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -1608,6 +1609,9 @@ export function AudioRecordingModal({
         // sibling-deselect would drop that track's real take. This is the
         // caller that knows, so it says.
         slot: targetSlot,
+        // AQU-2426: past the hourly limit the take waits and transcribes by
+        // itself once the limit allows, rather than staying untranscribed.
+        onRateLimited: waitAtTranscribeLimit(fullAudioId),
         // AQU-1978: …and the lane, for the same reason: the timings re-attach
         // deselects within the lane it names, and naming none meant `''`.
         ...(laneTag ? { targetLang: laneTag } : {}),

@@ -15,7 +15,7 @@ describe("a video's picture kept from the empty-file card", () => {
   const body = source.slice(start, source.indexOf("\n  const ", start + 10))
 
   it("asks for the picture only when the file has no film yet", () => {
-    expect(body).toContain("{ keepPicture: !activeFile?.coreMediaUrl }")
+    expect(body).toMatch(/\{ keepPicture: !activeFile\?\.coreMediaUrl[,}]/)
   })
 
   it("sets it through Link a film's own write, after the lines are made", () => {

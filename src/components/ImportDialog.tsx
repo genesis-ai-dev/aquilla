@@ -1,5 +1,5 @@
 import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { ExtensionMarker, ExtensionStripe } from "@/components/tools/ExtensionMarker"
 import { ExtensionImportPanel } from "@/components/tools/ExtensionImportPanel"
 import { useToolsMount } from "@/components/tools/ToolsMountContext"
@@ -70,6 +70,8 @@ import { countReimportDiff, type ReimportCountedCell } from "@/lib/import/reimpo
 import { fetchAllFileCells } from "@/lib/sync/cells-read"
 import { GoogleDrivePanel } from "@/components/import/GoogleDrivePanel"
 import { MediaImportPreviewDialog } from "@/components/import/MediaImportPreviewDialog"
+import { RecordingImportChoiceDialog, type RecordingChoiceFile } from "@/components/import/RecordingImportChoiceDialog"
+import { localTranscribeChoice, TranscribeChoiceContext, type PrepareTranscribeChoice, type TranscribeChoiceInfo } from "@/components/import/recording-choice-context"
 import { reviewMediaCompanions } from "@/lib/import/media-companion-batch"
 import { prepareEmbeddedSubtitleSources } from "@/lib/import/embedded-subtitle-sources"
 import type { MediaTextSource, MediaTextSourceOption } from "@/lib/import/media-cues"
@@ -361,6 +363,12 @@ function translationCheckTitle(t: ReturnType<typeof useT>, layout: TranslationCh
 interface ImportDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /**
+   * AQU-2426: what the last step of a recording with no subtitle file needs
+   * to know about transcribing (may this person, what it costs). Without it,
+   * nothing is blocked and the cost comes from this browser's Preferences.
+   */
+  prepareTranscribeChoice?: PrepareTranscribeChoice
   projectId: string
   username: string
   sourceLanguage: string
@@ -472,6 +480,7 @@ function skipStorageKey(projectId: string) {
 export function ImportDialog({
   open,
   onOpenChange,
+  prepareTranscribeChoice,
   projectId,
   username,
   sourceLanguage,
@@ -1455,14 +1464,17 @@ export function ImportDialog({
         )}
 
         {screen === "youtube" && (
+          <TranscribeChoiceContext.Provider value={prepareTranscribeChoice ?? null}>
           <YouTubeImportPanel
             ctx={{ projectId, author: username, sourceLanguage,
               targetLanguage, targetLang, getToken }}
             onImported={handleChildImported}
           />
+          </TranscribeChoiceContext.Provider>
         )}
 
         {screen === "upload" && (
+          <TranscribeChoiceContext.Provider value={prepareTranscribeChoice ?? null}>
           <UploadPanel
             projectId={projectId}
             username={username}
@@ -1511,9 +1523,11 @@ export function ImportDialog({
             reimportTarget={reimportTarget}
             onTranslationCheck={translationCheckFor("upload")}
           />
+          </TranscribeChoiceContext.Provider>
         )}
 
         {screen === "gdrive" && (
+          <TranscribeChoiceContext.Provider value={prepareTranscribeChoice ?? null}>
           <UploadPanel
             variant="gdrive"
             projectId={projectId}
@@ -1563,6 +1577,7 @@ export function ImportDialog({
             reimportTarget={reimportTarget}
             onTranslationCheck={translationCheckFor("gdrive")}
           />
+          </TranscribeChoiceContext.Provider>
         )}
 
         {screen === "ebible" && (
@@ -2539,6 +2554,37 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
     sources: MediaTextSourceOption[]
   } | null>(null)
   const mediaReviewResolver = useRef<((source: MediaTextSource | undefined | null) => void) | null>(null)
+  // AQU-2426: the last step for recordings with no subtitle file — whole, or
+  // transcribed — asked once for all of them. null resolves = Cancel.
+  const prepareTranscribeChoice = useContext(TranscribeChoiceContext)
+  const [recordingChoice, setRecordingChoice] = useState<{
+    id: string
+    files: RecordingChoiceFile[]
+    info: TranscribeChoiceInfo
+  } | null>(null)
+  const recordingChoiceResolver = useRef<((mode: "whole" | "transcribe" | null) => void) | null>(null)
+  const askRecordingModes = useCallback(async (bare: readonly File[]): Promise<Map<File, "whole" | "transcribe"> | null> => {
+    if (bare.length === 0) return new Map()
+    const durations = await Promise.all(bare.map((file) => probeMediaDurationMs(file).catch(() => undefined)))
+    const info = prepareTranscribeChoice
+      ? await prepareTranscribeChoice(durations).catch(() => localTranscribeChoice(username, durations))
+      : localTranscribeChoice(username, durations)
+    const mode = await new Promise<"whole" | "transcribe" | null>((resolve) => {
+      recordingChoiceResolver.current = resolve
+      setRecordingChoice({
+        id: uuidv7(),
+        files: bare.map((file, i) => ({
+          name: file.name,
+          sizeBytes: file.size,
+          durationMs: durations[i],
+          isVideo: detectFileType(file.name) === "video",
+        })),
+        info,
+      })
+    })
+    if (mode === null) return null
+    return new Map(bare.map((file) => [file, mode] as const))
+  }, [prepareTranscribeChoice, username])
   // AQU-823: per-file Drive provenance (normalized name → origin), set by the
   // gdrive variant just before handleFiles and stamped into importManifest.
   const originsRef = useRef<Map<string, Record<string, unknown>> | null>(null)
@@ -2551,6 +2597,8 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
     parseAbortRef.current?.abort()
     mediaReviewResolver.current?.(null)
     mediaReviewResolver.current = null
+    recordingChoiceResolver.current?.(null)
+    recordingChoiceResolver.current = null
   }, [])
   // Set when a dropped/selected set is a Paratext project — we pause to ask
   // whether it's a source text or a translation-in-progress (target) before
@@ -2787,6 +2835,16 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
           if (parseAbortRef.current === parseController) parseAbortRef.current = null
         }
         if (reviewed === null) return
+        // AQU-2426: recordings with no wording chosen get the last step.
+        const reviewedSources = reviewed.sources
+        const recordingModes = await askRecordingModes(
+          mediaFiles.filter((file) => !reviewedSources.has(file) && reviewed.files.includes(file)),
+        )
+        if (recordingModes === null) {
+          setImporting(false)
+          setPhase("")
+          return
+        }
         const toPreview = async (files: File[], fileIds: ReadonlyMap<string, string> | undefined) => {
           const remainingResults = files.flatMap(file => preparedByFile.get(file)?.results ?? [])
           if (reimportTarget && (remainingResults.length !== 1 || mediaFiles.length > 0)) {
@@ -2795,7 +2853,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
             return
           }
           if (remainingResults.length === 0 && mediaFiles.length > 0) {
-            await doCommit(files, preparedByFile, fileIds, reviewed.sources)
+            await doCommit(files, preparedByFile, fileIds, reviewed.sources, undefined, recordingModes)
             return
           }
 
@@ -2839,7 +2897,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
                 })
               }
             }
-            await doCommit(files, preparedByFile, fileIds, reviewed.sources, options?.reimportChoice)
+            await doCommit(files, preparedByFile, fileIds, reviewed.sources, options?.reimportChoice, recordingModes)
           }, filmUrls)
         }
 
@@ -2864,11 +2922,18 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
         return
       }
 
-      // No preview (media-only batch, or no onPreview callback) — commit immediately.
-      await doCommit(list, undefined, reimportFileIds)
+      // No preview (media-only batch, or no onPreview callback) — commit after
+      // the last step (AQU-2426): whole, or transcribed.
+      const recordingModes = await askRecordingModes(mediaFiles)
+      if (recordingModes === null) {
+        setImporting(false)
+        setPhase("")
+        return
+      }
+      await doCommit(list, undefined, reimportFileIds, undefined, undefined, recordingModes)
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [projectId, username, sourceLanguage, targetLanguage, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onPreview, onSpreadsheetFile, onJsonFile, onTranslationCheck, t, reimportTarget, analytics]
+    [projectId, username, sourceLanguage, targetLanguage, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onPreview, onSpreadsheetFile, onJsonFile, onTranslationCheck, t, reimportTarget, analytics, askRecordingModes]
   )
 
   /** Upload all files (called after preview confirmation, or directly for media). */
@@ -2879,6 +2944,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       reimportFileIds?: ReadonlyMap<string, string>,
       mediaSources?: ReadonlyMap<File, MediaTextSource>,
       reimportChoice?: "update" | "updated-copy" | "blank",
+      mediaModes?: ReadonlyMap<File, "whole" | "transcribe">,
     ) => {
       setImporting(true)
       setProgress(null)
@@ -2957,6 +3023,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
               },
             } : {}),
             mediaTextSource: mediaSources?.get(file),
+            ...(mediaModes?.get(file) ? { mediaMode: mediaModes.get(file) } : {}),
             origins: originsRef.current ?? undefined,
             getToken,
             alignReimportedIdml,
@@ -3111,10 +3178,26 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       setMediaReview(null)
       resolve?.(source)
     }
+    // AQU-2426: with a subtitle file there is no question; "Transcribe audio"
+    // is gone from Text source (to transcribe instead, import the recording
+    // on its own).
     return <MediaImportPreviewDialog key={mediaReview.id}
       mediaName={mediaReview.mediaName} sources={mediaReview.sources}
-      durationMs={mediaReview.durationMs} frameCheck={{ filmFile: mediaReview.media }}
+      durationMs={mediaReview.durationMs} allowAutomatic={false} frameCheck={{ filmFile: mediaReview.media }}
       onConfirm={source => finishReview(source)} onCancel={() => finishReview(null)} />
+  }
+  if (recordingChoice) {
+    const finishChoice = (mode: "whole" | "transcribe" | null) => {
+      const resolve = recordingChoiceResolver.current
+      recordingChoiceResolver.current = null
+      setRecordingChoice(null)
+      resolve?.(mode)
+    }
+    return <RecordingImportChoiceDialog key={recordingChoice.id}
+      files={recordingChoice.files} block={recordingChoice.info.block} cost={recordingChoice.info.cost}
+      languageTag={recordingChoice.info.languageTag} credits={recordingChoice.info.credits}
+      onWhole={() => finishChoice("whole")} onTranscribe={() => finishChoice("transcribe")}
+      onCancel={() => finishChoice(null)} />
   }
   if (variant === "gdrive" && !importing) {
     return (

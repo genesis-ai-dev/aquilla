@@ -80,7 +80,7 @@ describe("uploadCellAudio size guard", () => {
         blob,
         getSyncToken,
       }),
-    ).rejects.toThrow(/2\.0 GB.*limit is 2\.0 GB.*Split the recording/s)
+    ).rejects.toThrow(/exceeds the 2 GB media import limit/)
 
     // The guard must run before any token fetch or network round-trip.
     expect(getSyncToken).not.toHaveBeenCalled()

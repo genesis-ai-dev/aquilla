@@ -140,7 +140,7 @@ import { fetchContextualDrafts } from "@/lib/contextual/transport"
 import { ContextualRunPillMount } from "./contextual/ContextualRunPill"
 import type { CellData } from "@/hooks/useCells"
 import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
-import { consumeMediaImportSeed, autoTranscribeImportedMedia, type MediaImportSeed } from "@/lib/audio/auto-transcribe"
+import { consumeMediaImportSeed, type MediaImportSeed } from "@/lib/audio/auto-transcribe"
 import { warmFileDubs } from "@/lib/audio/warm-dubs"
 import { effectiveSourceText, projectedSourceValue, sourceCommitFields } from "@/lib/cell-text"
 import {
@@ -278,7 +278,7 @@ import { injectOptimisticAudioTrim,
   injectOptimisticAudioPlace, injectOptimisticAudioAttachment, injectOptimisticAudioRemove, injectOptimisticAudioDeselect,
   notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { attachmentOutFrom, canCutAt, newPieceAudioId, pieceLabels } from "@/lib/audio/cut-take"
-import { recordGroup, recordStep, registerStepKinds, setHistoryRemote, setHistoryScope, setLaneSwitcher, setFileNamer, setOpenFileProbe, withGroup, type LaneSwitch } from "@/lib/history/history"
+import { newestMatchingStep, recordGroup, recordStep, registerStepKinds, undoStepById, setHistoryRemote, setHistoryScope, setLaneSwitcher, setFileNamer, setOpenFileProbe, withGroup, type LaneSwitch } from "@/lib/history/history"
 import { httpHistoryRemote } from "@/lib/history/history-remote"
 import { laneAccessFor, laneShownReady, waitUntilReady, type LaneAccess } from "@/lib/history/lane-switch"
 import { CastStepBuilder, castValueOf, filmNow, mediaStepHandlers, type CastValue, type CueLinksData, type CueLinkWrite, type PendingFilm } from "@/lib/history/media-steps"
@@ -306,7 +306,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { canHarmonize, emitCastAssign, emitCellLabelSet, emitSourceCellCommit, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitCellGlossSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellAudioUnvalidate, emitCellAudioSelect, emitCellAudioDeselect, emitSourceCellRestore, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioGain, emitCellAudioPlace, emitCellAudioCut, emitCellAudioUncut, emitCellAudioRemove, emitCellAudioRename, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitFileMilestoneSet, emitTermCreate, emitTermUpdate, enqueueEvents } from "@/lib/sync/events-emit"
+import { canHarmonize, emitCastAssign, emitCellLabelSet, emitSourceCellCommit, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitCellGlossSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellAudioUnvalidate, emitCellAudioSelect, emitCellAudioDeselect, emitSourceCellRestore, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioGain, emitCellAudioPlace, emitCellAudioCut, emitCellAudioUncut, emitCellAudioRemove, emitCellAudioRename, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitFileMilestoneSet, emitTermCreate, emitTermUpdate, enqueueEvents, emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { autoLinkable, pairedLineCounts, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
 import { postSplitCastCopies, resolveCellEditingFloor, resolveTimingLocked } from "@/lib/sync/project-settings"
@@ -366,7 +366,7 @@ import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { TimelineEditor } from "@/components/timeline/TimelineEditor"
 import type { ChangeVoiceMenuState } from "@/components/timeline/TargetAudioLane"
 import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/sync/cell-lock-state"
-import { canPerform, canImportSourceFiles, importDenialFloor, canOpenAssignUi, canSwitchLanes, laneDelegateLanes, scopedLanesFor } from "@/lib/sync/role-policy"
+import { canAttachSourceAudio, canPerform, canImportSourceFiles, importDenialFloor, canOpenAssignUi, canSwitchLanes, laneDelegateLanes, scopedLanesFor } from "@/lib/sync/role-policy"
 import { laneComboboxOptions } from "@/components/lane-options"
 import { laneScopesAsTags } from "@/lib/lanes/scope-ids"
 import { denialMessage, denialMessageForEvent } from "@/lib/permissions/denial"
@@ -416,6 +416,20 @@ import { removeAttachmentFromCell } from "@/lib/attachments/attach-file"
 import type { CellAttachmentRecord } from "@/lib/sync/cell-attachments-read-types"
 import { MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download, SplitSquareVertical, BarChart3, Blocks, Loader2, RefreshCw } from "lucide-react"
 import { toast } from "@/components/ui/toast"
+import { SplitIntoLinesDialog, type SplitMode } from "@/components/timeline/SplitIntoLinesDialog"
+import { NotSplitNoticeClip } from "@/components/timeline/NotSplitNotice"
+import { fmtCueClock } from "@/components/timeline/format"
+import type { TranscribeChoiceInfo } from "@/components/import/recording-choice-context"
+import { RecordingImportChoiceDialog } from "@/components/import/RecordingImportChoiceDialog"
+import { probeMediaDurationMs } from "@/lib/import"
+import { needsSplitNotice, sourceRecordingLine } from "@/lib/timeline/recording-line"
+import { piecesFromCuts, splitRecordingLine, writeLineWindow, type LinePiece, type RecordingLine } from "@/lib/timeline/split-recording-line"
+import { cutsFromWords, loadLinePcm, pauseCuts, transcribeLineWords, type LineAudio } from "@/lib/audio/recording-split"
+import { transcribeBlock } from "@/lib/audio/transcribe-access"
+import { estimateTranscriptionCost } from "@/lib/audio/transcription-cost"
+import { transcriptionCredits } from "@/lib/audio/transcription-credits"
+import { useTranscriptionModel } from "@/lib/audio/transcription-model"
+import { useTranscriptionProvider } from "@/lib/audio/transcription-preference"
 import { setMicHeld } from "@/lib/audio/mic-hold"
 import { startOutputDeviceWatch } from "@/lib/audio/output-device-watch"
 import { AgentDockPanel } from "./AgentDockPanel"
@@ -3571,26 +3585,14 @@ export function ProjectWorkspace() {
   // direct URL. The Import dialog can't do this — it always creates a new
   // time-ordered file. Errors propagate to TimelineAddMedia, which renders them.
   /**
-   * AQU-646: auto-transcribe a file's new media sections — importing (or
-   * attaching) a recording must surface source text without hunting for the
-   * Transcribe button. Fire and forget: the consent dialog (first run) +
-   * progress toast + per-cell badges carry the UX; a denial simply leaves
-   * manual transcribe available.
-   *
-   * Sam, 2026-08-18: an imported MP3 takes about a minute to come back with
-   * any text, and until it does the file looks empty and broken. The toast is
-   * CREATED LAZILY, on the first progress call — a consent denial or a file
-   * with nothing to transcribe never reports, so neither of those leaves a
-   * spinner hanging over a run that is not happening.
-   *
-   * AQU-1681: shared by the import, the recording upload and the linked
-   * video's own sound (the two attach flows had no toast at all), and the
-   * toast says when the hosted limit has paused the run and when it carries
-   * on — up to a quarter of an hour that would otherwise look like a hang.
+   * AQU-2426: a recording brought in with Import and transcribe… leaves a
+   * seed; once it is in, its lines are found from its words. Nothing else is
+   * transcribed on its own any more (Sam, Nov 3 and 5). The runner is defined
+   * further down, with Split into lines…, and reached through this ref.
    */
   /**
    * AQU-2375: a transcription run's progress toast, kept on screen until the
-   * run's last word. Created lazily (see `startAutoTranscribe`), and it says
+   * run's last word. Created lazily, on its first progress, and it says
    * when the hosted limit has paused the run.
    */
   const makeTranscribeProgressToast = useCallback(() => {
@@ -3728,54 +3730,11 @@ export function ProjectWorkspace() {
     void runTranscriptionReported({ cells, kind, fileId, fileName, force: true })
   }
 
-  const startAutoTranscribe = useCallback((seed: MediaImportSeed, fileName: string) => {
-    if (!project?.id) return
-    const progress = makeTranscribeProgressToast()
-    let first = true
-    // AQU-2375: whatever the run's outcome, the transcripts that landed are
-    // sent and shown, and the last word comes from its per-row report.
-    const finish = async (report: TranscribeRunReport | undefined, lastTotal: number) => {
-      // Transcripts ride outbox-queued cell.audio.attach emits — flush so
-      // they land, then pull the projection with the new source text.
-      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
-      revalidateCells()
-      // Only if something was actually reported — see the lazy toast above.
-      if (progress.id === null) return
-      showTranscribeRunEnd(
-        report ?? { total: lastTotal, transcribed: lastTotal, failed: [], notRun: 0, cancelled: false, started: true },
-        { kind: "import", fileId: seed.fileId, fileName, toastId: progress.id },
-      )
-    }
-    let lastTotal = 0
-    void autoTranscribeImportedMedia({
-      seed,
-      fileName,
-      projectId: project.id,
-      session: frontierSession ?? null,
-      sourceLanguage: activeSourceLanguage,
-      targetLanguage: activeLaneTargetLanguage,
-      onProgress: (done, total) => {
-        lastTotal = total
-        // The zeroth call lands BEFORE the Whisper model is fetched, which on
-        // a cold run is most of the minute — so the first thing on screen
-        // says what is happening rather than counting from nothing.
-        progress.progress(transcribeRunProgressTitle({ kind: "import", fileName, done, total, first }))
-        first = false
-      },
-      onWaiting: (until) => progress.waiting(until),
-      onFailed: (message, report) => {
-        if (report) {
-          void finish(report, lastTotal)
-          return
-        }
-        if (progress.id !== null) {
-          toast.update(progress.id, { type: "error", title: t("audio.transcribeRun.failedAllNamed", { name: fileName, reason: message }), description: undefined })
-        }
-      },
-      onPartial: (report) => finish(report, lastTotal),
-      onDone: (report) => finish(report, lastTotal),
-    })
-  }, [project?.id, activeSourceLanguage, activeLaneTargetLanguage, frontierSession, getTokenForProjectFile, revalidateCells, t, makeTranscribeProgressToast, showTranscribeRunEnd])
+  const runTranscribeSeedRef = useRef<((seed: MediaImportSeed, fileName: string) => void) | null>(null)
+  /** AQU-2426: a recording dropped or chosen on an empty file's card, or added
+   *  on a linked film's card, ends on the import's last step too: whole, or
+   *  transcribed. null = Cancel. Defined with Split into lines…. */
+  const askAttachChoiceRef = useRef<((file: File) => Promise<"whole" | "transcribe" | null>) | null>(null)
 
   /** After a recording lands on a file as its rows: send the rows, show
    *  them, and transcribe them. Shared by the upload and, AQU-1681, the
@@ -3786,8 +3745,8 @@ export function ProjectWorkspace() {
     // AQU-646: the attach flow seeds auto-transcribe too — same "file gained
     // media sections" moment as an import (see handleImported).
     const seed = consumeMediaImportSeed(fileId)
-    if (seed) startAutoTranscribe(seed, fileName)
-  }, [getTokenForProjectFile, revalidateCells, startAutoTranscribe])
+    if (seed) runTranscribeSeedRef.current?.(seed, fileName)
+  }, [getTokenForProjectFile, revalidateCells])
 
   /** Decision 11: "Make lines from a recording" is an Undo step (P13.6). */
   const recordRecordingLines = useCallback((fileId: string, lines: readonly MadeLine[]) => {
@@ -3806,12 +3765,14 @@ export function ProjectWorkspace() {
   const applyLinkVideoRef = useRef<((url: string | null) => Promise<void>) | null>(null)
   const handleAttachMediaFile = useCallback(async (file: File) => {
     if (!project?.id || !activeFileId) return
+    const mode = askAttachChoiceRef.current ? await askAttachChoiceRef.current(file) : "whole"
+    if (mode === null) return
     const { lines, film } = await attachMediaFileToTimeline(file, {
       projectId: project.id,
       fileId: activeFileId,
       author: currentUsername,
       getToken: getTokenForFile,
-    }, { keepPicture: !activeFile?.coreMediaUrl })
+    }, { keepPicture: !activeFile?.coreMediaUrl, mode })
     await finishSourceMediaAttach(activeFileId, activeFile?.name ?? file.name)
     recordRecordingLines(activeFileId, lines)
     if (film) await applyLinkVideoRef.current?.(film)
@@ -10565,6 +10526,288 @@ export function ProjectWorkspace() {
     [tts.laneSettings],
   )
 
+
+  // ── AQU-2426: Split into lines…, "Not split into lines yet", who may
+  //    transcribe, and Import and transcribe… once the recording is in. ──
+  const transcriptionOnDevice = useTranscriptionProvider(currentUsername) === "local"
+  const chosenTranscriptionModel = useTranscriptionModel(currentUsername)
+  const transcribeLanguageTag = activeSourceLanguage || undefined
+  const splitRoleLevel = project?.syncRole?.level ?? null
+  // A split writes the line's own source audio (Project lead and up) and
+  // retimes it, which a locked timeline keeps for Maintainers
+  // (timing-authority.ts) — so the buttons show to exactly those people.
+  const canSplitLines = canAttachSourceAudio(splitRoleLevel)
+    && (!timingLocked || splitRoleLevel == null || splitRoleLevel >= ROLE.MAINTAINER)
+  // The org's credits, read once when someone first asks what transcribing
+  // costs; until then nothing is blocked on them (the server still refuses).
+  const [transcribeOrgCredits, setTranscribeOrgCredits] = useState<import("@/lib/sync/credits").OrgCredits | null>(null)
+  const transcribeBlockNow = useMemo(() => transcribeBlock({
+    level: splitRoleLevel,
+    importMinRole: orgImportMinRole,
+    onDevice: transcriptionOnDevice,
+    credits: transcribeOrgCredits,
+  }), [splitRoleLevel, orgImportMinRole, transcriptionOnDevice, transcribeOrgCredits])
+
+  /** What the import's last step and Split into lines… show about transcribing. */
+  const prepareTranscribeChoice = useCallback(async (durationsMs: readonly (number | undefined)[]): Promise<TranscribeChoiceInfo> => {
+    const cost = estimateTranscriptionCost({
+      durationsMs, chosenModel: chosenTranscriptionModel, languageTag: transcribeLanguageTag, onDevice: transcriptionOnDevice,
+    })
+    let creditsLine: string | null = null
+    let orgCredits = transcribeOrgCredits
+    if (!transcriptionOnDevice && frontierSession?.jwt && project?.id) {
+      const found = await transcriptionCredits({
+        jwt: frontierSession.jwt, projectId: project.id, orgId: project.orgId ?? null, audioSec: cost.audioMs / 1000,
+      }).catch(() => null)
+      if (found) {
+        orgCredits = found.orgCredits ?? orgCredits
+        if (found.orgCredits) setTranscribeOrgCredits(found.orgCredits)
+        const credits = Math.max(1, Math.round(found.credits))
+        creditsLine = found.percent != null
+          ? t("audio.transcribeCost.creditsShare", { credits, percent: found.percent })
+          : t("audio.transcribeCost.creditsOnly", { credits })
+      }
+    }
+    return {
+      block: transcribeBlock({ level: splitRoleLevel, importMinRole: orgImportMinRole, onDevice: transcriptionOnDevice, credits: orgCredits }),
+      cost,
+      credits: creditsLine,
+      ...(transcribeLanguageTag ? { languageTag: transcribeLanguageTag } : {}),
+    }
+  }, [chosenTranscriptionModel, transcribeLanguageTag, transcriptionOnDevice, frontierSession?.jwt, project?.id, project?.orgId, transcribeOrgCredits, splitRoleLevel, orgImportMinRole, t])
+
+  /** The open file's line, as a split writes it. */
+  const recordingLineFor = useCallback((cellId: string): RecordingLine | null => {
+    if (!project?.id) return null
+    const cell = getActiveCell(cellId)
+    const src = cell ? sourceRecordingLine(cell) : null
+    if (!cell || !src) return null
+    const att = cell.attachments?.[src.audioId]
+    const plan = cellStore.getInsertPlan(cellId, "below")
+    const startMs = Math.round((cell.startTime ?? 0) * 1000)
+    return {
+      projectId: project.id,
+      fileId: cell.fileId,
+      cellId,
+      name: cell.original || activeFileNameRef.current || "",
+      startMs,
+      endMs: Math.round(cell.endTime !== undefined ? cell.endTime * 1000 : startMs + (src.hi - src.lo)),
+      audioId: src.audioId,
+      url: src.url,
+      ...(src.durationMs !== undefined ? { durationMs: src.durationMs } : {}),
+      ...(att?.trimStartMs != null ? { trimStartMs: att.trimStartMs } : {}),
+      ...(att?.trimEndMs != null ? { trimEndMs: att.trimEndMs } : {}),
+      ...(cellStore.getCellView(cellId)?.sequenceIndex != null ? { sequenceIndex: cellStore.getCellView(cellId)!.sequenceIndex } : {}),
+      successor: plan?.reanchor
+        ? { ...plan.reanchor, ...(plan.sequenceAfter != null ? { sequenceIndex: plan.sequenceAfter } : {}) }
+        : null,
+    }
+  }, [project?.id, getActiveCell, cellStore])
+
+  const lineAudioOf = (line: RecordingLine): LineAudio => ({
+    projectId: line.projectId,
+    fileId: line.fileId,
+    url: line.url,
+    lo: line.trimStartMs ?? 0,
+    hi: line.trimEndMs ?? line.durationMs ?? (line.trimStartMs ?? 0) + (line.endMs - line.startMs),
+  })
+
+  /** Write a split, record it for Undo, and say so with Undo on the toast. */
+  const applyLineSplit = useCallback(async (
+    line: RecordingLine, pieces: readonly LinePiece[], titleKey: "editor.splitLines.done" | "editor.splitLines.importDone" = "editor.splitLines.done",
+  ): Promise<boolean> => {
+    try {
+      const result = await splitRecordingLine({ line, pieces, author: currentUsername })
+      if (!result) return false
+      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      revalidateCells()
+      recordStep({
+        kind: "lines.split",
+        data: {
+          fileId: line.fileId, cellId: line.cellId, audioId: line.audioId,
+          before: result.before,
+          after: { startMs: result.first.startMs, endMs: result.first.endMs, trimStartMs: result.first.trimStartMs, trimEndMs: result.first.trimEndMs },
+          lines: result.created,
+        },
+        labelKey: "editor.history.stepSplitLines",
+        fileId: line.fileId,
+        fileName: line.name,
+      })
+      toast.add({
+        type: "success",
+        title: t(titleKey, { name: line.name, count: pieces.length }),
+        timeout: 10_000,
+        actionProps: {
+          children: t("editor.splitLines.undo"),
+          onClick: () => {
+            const step = newestMatchingStep((kind, data) => kind === "lines.split" && (data as { cellId?: string } | null)?.cellId === line.cellId)
+            if (step) void undoStepById(step.id)
+          },
+        },
+      })
+      return true
+    } catch (err) {
+      toast.add({ type: "error", title: t("editor.splitLines.failed", { name: line.name, reason: err instanceof Error ? err.message : String(err) }) })
+      return false
+    }
+  }, [currentUsername, getTokenForProjectFile, revalidateCells, t])
+
+  /** The words came back but nothing was split: they land on the line itself. */
+  const keepWordsOnLine = useCallback(async (line: RecordingLine, text: string) => {
+    if (!text.trim()) return
+    try {
+      await emitCellAudioAttach({
+        projectId: line.projectId, fileId: line.fileId, cellId: line.cellId,
+        audioId: line.audioId, url: line.url, slot: "recording", role: "source",
+        ...(line.durationMs !== undefined ? { durationMs: Math.round(line.durationMs) } : {}),
+        transcription: text.trim(),
+        author: currentUsername,
+      })
+      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      revalidateCells()
+    } catch (err) {
+      console.warn("[split-lines] keeping the words failed:", err)
+    }
+  }, [currentUsername, getTokenForProjectFile, revalidateCells])
+
+  const [splitDialog, setSplitDialog] = useState<{ line: RecordingLine; mode: SplitMode; info: TranscribeChoiceInfo; keepsLine: boolean } | null>(null)
+  const openSplitIntoLines = useCallback((cellId: string, mode: SplitMode) => {
+    const line = recordingLineFor(cellId)
+    const cell = getActiveCell(cellId)
+    if (!line || !cell) return
+    if (!sourceRecordingLine(cell)?.readable) {
+      toast.add({ type: "error", title: t("editor.splitLines.cannotRead") })
+      return
+    }
+    const audio = lineAudioOf(line)
+    void prepareTranscribeChoice([audio.hi - audio.lo]).then((info) => {
+      const keepsLine = Boolean((cell.translated ?? "").trim()) || Boolean(cell.hasOwnTake)
+      setSplitDialog({ line, mode, info, keepsLine })
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- lineAudioOf is pure
+  }, [recordingLineFor, getActiveCell, prepareTranscribeChoice, t])
+
+  /** The notice's Split at pauses: straight away, with a toast and Undo. */
+  const splitAtPausesNow = useCallback(async (cellId: string) => {
+    const line = recordingLineFor(cellId)
+    if (!line) return
+    const audio = lineAudioOf(line)
+    const id = toast.add({ type: "loading", title: t("editor.splitLines.reading"), timeout: 0 })
+    try {
+      const pcm = await loadLinePcm(audio, frontierSession ?? null)
+      const pieces = piecesFromCuts(line, pauseCuts(pcm, audio.lo))
+      if (pieces.length < 2) {
+        toast.update(id, { type: "info", title: t("editor.splitLines.noPauses"), timeout: 6000 })
+        return
+      }
+      toast.close(id)
+      await applyLineSplit(line, pieces)
+    } catch (err) {
+      toast.update(id, { type: "error", title: t("editor.splitLines.readFailed", { reason: err instanceof Error ? err.message : String(err) }) })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- lineAudioOf is pure
+  }, [recordingLineFor, frontierSession, applyLineSplit, t])
+
+  // Import and transcribe…: the recording came in whole as one line; find its
+  // lines from its words, then split it (an Undo step like any split).
+  runTranscribeSeedRef.current = (seed, fileName) => {
+    const cell = seed.cells.length === 1 ? seed.cells[0] : null
+    const audioId = cell?.selectedAudioId
+    const att = cell && audioId ? cell.attachments?.[audioId] : undefined
+    if (!project?.id || !cell || !audioId || !att?.url) return
+    const startMs = Math.round((cell.startTime ?? 0) * 1000)
+    const endMs = Math.round(cell.endTime !== undefined ? cell.endTime * 1000 : startMs + (att.durationMs ?? 0))
+    const line: RecordingLine = {
+      projectId: project.id, fileId: seed.fileId, cellId: cell.id, name: fileName,
+      startMs, endMs, audioId, url: att.url,
+      ...(att.durationMs != null ? { durationMs: att.durationMs } : {}),
+      sequenceIndex: 0, successor: null,
+    }
+    const audio = lineAudioOf(line)
+    const session = frontierSession ?? null
+    void (async () => {
+      const id = toast.add({ type: "loading", title: t("editor.splitLines.importTranscribing", { name: fileName }), timeout: 0 })
+      try {
+        const result = await transcribeLineWords({
+          line: audio, session, languageTag: transcribeLanguageTag,
+          // Past the hosted limit it waits and carries on by itself.
+          onRateLimited: async (sec) => {
+            toast.update(id, { type: "loading", title: t("editor.splitLines.importTranscribing", { name: fileName }), description: t("editor.splitLines.waiting") })
+            await new Promise((r) => setTimeout(r, Math.max(1, sec) * 1000))
+            toast.update(id, { type: "loading", title: t("editor.splitLines.importTranscribing", { name: fileName }), description: undefined })
+          },
+        })
+        if (result.words.length === 0 || !result.text.trim()) {
+          toast.update(id, { type: "info", title: t("editor.splitLines.importNoWords", { name: fileName }), description: undefined, timeout: 8000 })
+          return
+        }
+        const cut = cutsFromWords(result.words, audio)
+        const pieces = piecesFromCuts(line, cut.cuts, cut.texts)
+        if (pieces.length < 2) {
+          await keepWordsOnLine(line, result.text)
+          toast.update(id, { type: "success", title: t("editor.splitLines.importDone", { name: fileName, count: 1 }), description: undefined, timeout: 8000 })
+          return
+        }
+        toast.close(id)
+        await applyLineSplit(line, pieces, "editor.splitLines.importDone")
+      } catch (err) {
+        toast.update(id, {
+          type: "error",
+          title: t("editor.splitLines.importFailed", { name: fileName, reason: err instanceof Error ? err.message : String(err) }),
+          description: undefined,
+        })
+      }
+    })()
+  }
+
+  const [attachChoice, setAttachChoice] = useState<{
+    file: { name: string; sizeBytes: number; durationMs?: number; isVideo: boolean }
+    info: TranscribeChoiceInfo
+    resolve: (mode: "whole" | "transcribe" | null) => void
+  } | null>(null)
+  askAttachChoiceRef.current = async (file) => {
+    const durationMs = await probeMediaDurationMs(file).catch(() => undefined)
+    const info = await prepareTranscribeChoice([durationMs])
+    return new Promise((resolve) => {
+      setAttachChoice({
+        file: { name: file.name, sizeBytes: file.size, durationMs, isVideo: file.type.startsWith("video/") },
+        info,
+        resolve,
+      })
+    })
+  }
+  const finishAttachChoice = (mode: "whole" | "transcribe" | null) => {
+    attachChoice?.resolve(mode)
+    setAttachChoice(null)
+  }
+
+  const splitLinesActions = useMemo(() => ({
+    canSplit: canSplitLines,
+    block: transcribeBlockNow,
+    onSplitIntoLines: openSplitIntoLines,
+    onSplitAtPauses: (cellId: string) => { void splitAtPausesNow(cellId) },
+  }), [canSplitLines, transcribeBlockNow, openSplitIntoLines, splitAtPausesNow])
+
+  /** The Source audio clip's own menu and notice on the timeline. */
+  const sourceClipExtras = useCallback((cell: CellData) => {
+    const src = sourceRecordingLine(cell)
+    if (!src) return null
+    const notice = needsSplitNotice(src)
+      ? <NotSplitNoticeClip canSplit={canSplitLines} block={transcribeBlockNow}
+          onTranscribe={() => openSplitIntoLines(cell.id, "sentences")}
+          onSplitAtPauses={() => { void splitAtPausesNow(cell.id) }} />
+      : null
+    const recordingMenu = canSplitLines && src.readable
+      ? {
+          details: t("editor.splitLines.clipDetails", { length: fmtCueClock((src.hi - src.lo) / 1000) }),
+          name: cell.original || activeFileNameRef.current || "",
+          onSplitIntoLines: () => openSplitIntoLines(cell.id, "pauses"),
+        }
+      : undefined
+    if (!notice && !recordingMenu) return null
+    return { ...(recordingMenu ? { recordingMenu } : {}), ...(notice ? { notice } : {}) }
+  }, [canSplitLines, transcribeBlockNow, openSplitIntoLines, splitAtPausesNow, t])
+
   const editorActionsValue = useMemo(() => ({
     onInfractionClick: handleInfractionClick,
     onOpenComments: handleOpenComments,
@@ -10596,6 +10839,7 @@ export function ProjectWorkspace() {
     onInsertCellBeside: handleInsertCellBeside,
     onRemoveCell: handleRemoveCell,
     onSplitAtQuotes: handleRequestSplitAtQuotes, // AQU-1759
+    splitLines: splitLinesActions, // AQU-2426
     // AQU-1422: passed unconditionally — the ROLE gate is applied in the row,
     // with `canPerform` against the same table the emitter enforces, because
     // that is where the DCS/live-linked reasons already live.
@@ -10610,7 +10854,7 @@ export function ProjectWorkspace() {
     // AQU-2204: following its recordings, a file shows no source times — so
     // a line's "Edit timestamps" is unavailable, with the reason.
     followsRecordings: timingMode === "audioFirst",
-  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenAttachment, attachmentsByCell, handleAttachmentAdded, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, trainFromTake, handleLineVoicePicked, handleApplyLineVoice, addVoiceForLine, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleCountCastLines, handleTakeSaved, handleLastTakeRemoved, audioHomeFor, myScopes, cellStore, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleRequestSplitAtQuotes, handleSetCellHiddenStable, handleSetMilestoneFromCell, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings, timingMode])
+  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenAttachment, attachmentsByCell, handleAttachmentAdded, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, trainFromTake, handleLineVoicePicked, handleApplyLineVoice, addVoiceForLine, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleCountCastLines, handleTakeSaved, handleLastTakeRemoved, audioHomeFor, myScopes, cellStore, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleRequestSplitAtQuotes, splitLinesActions, handleSetCellHiddenStable, handleSetMilestoneFromCell, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings, timingMode])
 
 
   // Drives the editor-area rendering: loading skeleton vs. empty state vs.
@@ -15638,9 +15882,23 @@ export function ProjectWorkspace() {
         },
         trashFile: (fileId) => handleDeleteFile(fileId),
         restoreFile: (fileId) => handleRestoreFile(fileId),
+        // AQU-2426: Split into lines…'s first line gets its window back on
+        // Undo, and narrowed again on Redo.
+        writeLineWindow: async (d, w) => {
+          if (!project?.id) return false
+          try {
+            await writeLineWindow({ projectId: project.id, fileId: d.fileId, cellId: d.cellId, audioId: d.audioId, author: currentUsername, ...w })
+            await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+            revalidateCells()
+            return true
+          } catch (err) {
+            console.warn("[split-lines] undo write failed:", err)
+            return false
+          }
+        },
       }),
     )
-  }, [lineUntouched, removeLineCore, applyRestoreRow, activeFileId, cellsLoading, getActiveCells, handleDeleteFile, handleRestoreFile, syncRoleLevel])
+  }, [lineUntouched, removeLineCore, applyRestoreRow, activeFileId, cellsLoading, getActiveCells, handleDeleteFile, handleRestoreFile, syncRoleLevel, project?.id, currentUsername, getTokenForProjectFile, revalidateCells])
 
   useEffect(() => {
     const readAtt = (cellId: string, audioId: string) => readTake(cellId, audioId)?.att ?? null
@@ -17188,11 +17446,12 @@ export function ProjectWorkspace() {
     refresh()
     revalidateCells()
 
-    // AQU-646: auto-transcribe the imported sections (startAutoTranscribe).
+    // AQU-2426: a recording imported with Import and transcribe… finds its
+    // lines from its words now; one imported whole is left as it is.
     for (const ref of refs) {
       if (!isMediaFileType(ref.type)) continue
       const seed = consumeMediaImportSeed(ref.id)
-      if (seed) startAutoTranscribe(seed, ref.name)
+      if (seed) runTranscribeSeedRef.current?.(seed, ref.name)
     }
     // Decision 11, gap 30: importing a recording as a new file is an Undo
     // step; Undo moves the file to Recently deleted while nobody has worked
@@ -18216,6 +18475,7 @@ export function ProjectWorkspace() {
                   >
                   <TimelineEditor
                     cells={timelineCells}
+                    sourceClipExtras={sourceClipExtras}
                     // AQU-1758: a book's text has no times to drag it to.
                     sequenceOrdered={!activeFileTimeOrdered}
                     showSources={filmAndSourcesOn}
@@ -19267,7 +19527,44 @@ export function ProjectWorkspace() {
       )}
       <Suspense fallback={null}>
         {/* FRO-287 glue: existingFiles activates the re-import collision guard. */}
-        <ImportDialog open={importOpen} onOpenChange={(next) => {
+        {attachChoice && (
+          <RecordingImportChoiceDialog
+            files={[attachChoice.file]}
+            block={attachChoice.info.block}
+            cost={attachChoice.info.cost}
+            {...(attachChoice.info.languageTag ? { languageTag: attachChoice.info.languageTag } : {})}
+            credits={attachChoice.info.credits}
+            onWhole={() => finishAttachChoice("whole")}
+            onTranscribe={() => finishAttachChoice("transcribe")}
+            onCancel={() => finishAttachChoice(null)}
+          />
+        )}
+        {splitDialog && (
+          <SplitIntoLinesDialog
+            name={splitDialog.line.name}
+            startMs={splitDialog.line.startMs}
+            endMs={splitDialog.line.endMs}
+            {...(splitDialog.line.durationMs !== undefined ? { durationMs: splitDialog.line.durationMs } : {})}
+            audio={{
+              projectId: splitDialog.line.projectId,
+              fileId: splitDialog.line.fileId,
+              url: splitDialog.line.url,
+              lo: splitDialog.line.trimStartMs ?? 0,
+              hi: splitDialog.line.trimEndMs ?? splitDialog.line.durationMs ?? (splitDialog.line.trimStartMs ?? 0) + (splitDialog.line.endMs - splitDialog.line.startMs),
+            }}
+            session={frontierSession ?? null}
+            {...(splitDialog.info.languageTag ? { languageTag: splitDialog.info.languageTag } : {})}
+            wordsCost={splitDialog.info.cost}
+            credits={splitDialog.info.credits}
+            block={splitDialog.info.block}
+            initialMode={splitDialog.mode}
+            keepsLine={splitDialog.keepsLine}
+            onSplit={(pieces) => applyLineSplit(splitDialog.line, pieces)}
+            onKeepWords={(text) => { void keepWordsOnLine(splitDialog.line, text) }}
+            onClose={() => setSplitDialog(null)}
+          />
+        )}
+        <ImportDialog open={importOpen} prepareTranscribeChoice={prepareTranscribeChoice} onOpenChange={(next) => {
             setImportOpen(next)
             if (!next) setReimportTarget(null)
             if (!next) setRecordingsTarget(null)

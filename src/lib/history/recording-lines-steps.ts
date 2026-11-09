@@ -33,6 +33,28 @@ export interface RecordingLinesData {
 
 export interface ImportedRecordingData { fileId: string }
 
+/** A line's place on the timeline and its stretch of the recording. */
+export interface LineWindow {
+  startMs: number
+  endMs: number
+  trimStartMs: number | null
+  trimEndMs: number | null
+}
+
+/**
+ * AQU-2426: Split into lines…. The line itself became the first piece, and
+ * `lines` were made after it. Undo removes those (by the "lines.fromRecording"
+ * rule: only while untouched) and gives the line its whole window back; Redo
+ * restores them and narrows the line again.
+ */
+export interface SplitLinesData extends RecordingLinesData {
+  fileId: string
+  cellId: string
+  audioId: string
+  before: LineWindow
+  after: LineWindow
+}
+
 export interface RecordingLinesContext {
   /** Whether a line is still as it was made (null when it is not there). */
   lineUntouched(cellId: string, createdEventId: string | null): boolean | null
@@ -60,32 +82,52 @@ export interface RecordingLinesContext {
    *  when the write was refused and the file stayed where it was. */
   trashFile(fileId: string): Promise<boolean>
   restoreFile(fileId: string): Promise<boolean>
+  /** AQU-2426: set a line's timing and trim. False when refused. Absent: a
+   *  split cannot be undone here. */
+  writeLineWindow?(d: { fileId: string; cellId: string; audioId: string }, w: LineWindow): Promise<boolean>
 }
 
 export function recordingLinesStepHandlers(ctx: RecordingLinesContext): Record<string, StepHandler<never>> {
+  const fromRecording = {
+    async undo(d: RecordingLinesData): Promise<StepOutcome> {
+      const states = d.lines.map((l) => ctx.lineUntouched(l.cellId, l.eventId))
+      if (states.every((s) => s === null)) return GONE
+      if (states.some((s) => s !== true)) return CHANGED
+      if (ctx.mayRemoveLine && d.lines.some((l) => ctx.lineUntouched(l.cellId, null) !== null && !ctx.mayRemoveLine!(l.cellId, l.eventId))) {
+        return { kind: "skipped", reason: "notAllowed" }
+      }
+      // Last first: each removal then has no line after it to re-point.
+      let removed = 0
+      for (const l of [...d.lines].reverse()) if (await ctx.removeLine(l.cellId, l.eventId)) removed += 1
+      if (removed === 0) return { kind: "failed", error: new Error("the lines could not be removed") }
+      return removed < d.lines.length ? { kind: "done", partial: { skipped: d.lines.length - removed } } : DONE
+    },
+    async redo(d: RecordingLinesData): Promise<StepOutcome> {
+      if (d.lines.some((l) => ctx.lineUntouched(l.cellId, null) !== null)) return CHANGED
+      let restored = 0
+      for (const l of d.lines) if (await ctx.restoreLine(l.cellId)) restored += 1
+      if (restored === 0) return GONE
+      return restored < d.lines.length ? { kind: "done", partial: { skipped: d.lines.length - restored } } : DONE
+    },
+  }
   return {
-    "lines.fromRecording": {
-      async undo(d: RecordingLinesData) {
-        const states = d.lines.map((l) => ctx.lineUntouched(l.cellId, l.eventId))
-        if (states.every((s) => s === null)) return GONE
-        if (states.some((s) => s !== true)) return CHANGED
-        if (ctx.mayRemoveLine && d.lines.some((l) => ctx.lineUntouched(l.cellId, null) !== null && !ctx.mayRemoveLine!(l.cellId, l.eventId))) {
-          return { kind: "skipped", reason: "notAllowed" }
-        }
-        // Last first: each removal then has no line after it to re-point.
-        let removed = 0
-        for (const l of [...d.lines].reverse()) if (await ctx.removeLine(l.cellId, l.eventId)) removed += 1
-        if (removed === 0) return { kind: "failed", error: new Error("the lines could not be removed") }
-        return removed < d.lines.length ? { kind: "done", partial: { skipped: d.lines.length - removed } } : DONE
+    "lines.split": {
+      async undo(d: SplitLinesData) {
+        if (!ctx.writeLineWindow) return { kind: "skipped", reason: "notAllowed" }
+        const removed = await fromRecording.undo(d)
+        if (removed.kind !== "done") return removed
+        if (!(await ctx.writeLineWindow(d, d.before))) return { kind: "failed", error: new Error("the line could not be put back") }
+        return removed
       },
-      async redo(d: RecordingLinesData) {
-        if (d.lines.some((l) => ctx.lineUntouched(l.cellId, null) !== null)) return CHANGED
-        let restored = 0
-        for (const l of d.lines) if (await ctx.restoreLine(l.cellId)) restored += 1
-        if (restored === 0) return GONE
-        return restored < d.lines.length ? { kind: "done", partial: { skipped: d.lines.length - restored } } : DONE
+      async redo(d: SplitLinesData) {
+        if (!ctx.writeLineWindow) return { kind: "skipped", reason: "notAllowed" }
+        const restored = await fromRecording.redo(d)
+        if (restored.kind !== "done") return restored
+        if (!(await ctx.writeLineWindow(d, d.after))) return { kind: "failed", error: new Error("the line could not be split again") }
+        return restored
       },
     } as StepHandler<never>,
+    "lines.fromRecording": fromRecording as StepHandler<never>,
     "file.importRecording": {
       async undo(d: ImportedRecordingData) {
         const state = ctx.fileState(d.fileId)

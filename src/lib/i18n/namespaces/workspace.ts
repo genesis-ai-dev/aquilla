@@ -550,6 +550,9 @@ export const workspace = defineNamespace({
       "Translation-memory, in-context-exact and machine-translation bands read zero because nothing fills them yet — they are listed so the rate card stays complete.",
     "workspace.analysis.ratesNote": "Rates are the defaults and are not editable yet.",
     "workspace.analysis.skipped": "Source text could not be read for: {names}. Those files are not in the totals.",
+    // AQU-2426: a mic take waiting out the hourly limit.
+    "workspace.transcribeBadge.waitingForLimitPill": "Waiting at the limit",
+    "workspace.transcribeBadge.waitingForLimitTooltip": "Transcription takes up to 60 requests every 15 minutes for each person. This take waits and transcribes by itself once the limit allows.",
   },
   context: {
     _context: {
@@ -2320,6 +2323,9 @@ export const workspace = defineNamespace({
           "comma-separated list of file names.",
         placeholders: { names: "Comma-separated names of the files that could not be read." },
       },
+      // AQU-2426: a mic take waiting out the hourly limit.
+      "workspace.transcribeBadge.waitingForLimitPill": { description: "Short status on a take recorded with the mic whose transcription is waiting out the hourly transcription limit; it carries on by itself.", maxLength: 24 },
+      "workspace.transcribeBadge.waitingForLimitTooltip": { description: "Text a click on the 'Waiting at the limit' status opens." },
     },
   },
   surfaces: [],

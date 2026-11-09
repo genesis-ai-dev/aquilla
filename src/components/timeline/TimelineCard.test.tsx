@@ -590,3 +590,24 @@ describe("TimelineCard — a hidden line", () => {
     expect(screen.getByTestId("tl-card-c1")).not.toHaveAttribute("data-hidden-line")
   })
 })
+
+// AQU-2426: a source recording clip has its own menu — a ⋯ on hover and the
+// same menu on a right-click — with what it is and Split into lines….
+describe("TimelineCard — a source recording's menu (AQU-2426)", () => {
+  const menu = { details: "Source recording · 0:40", name: "Ruth 1 intro.m4a", onSplitIntoLines: vi.fn() }
+  it("opens on a right-click and offers Split into lines…", async () => {
+    render(<TimelineCard cell={cell()} {...base} variant="dialogue" onSelect={() => {}} onRetime={() => {}} recordingMenu={menu} />)
+    fireEvent.contextMenu(screen.getByTestId("tl-card-c1"))
+    expect(await screen.findByText("Source recording · 0:40")).toBeInTheDocument()
+    fireEvent.click(screen.getByText("Split into lines…"))
+    expect(menu.onSplitIntoLines).toHaveBeenCalledOnce()
+  })
+  it("shows its ⋯ and its notice, and no menu on a subtitle card", () => {
+    const { unmount } = render(<TimelineCard cell={cell()} {...base} variant="dialogue" onSelect={() => {}} onRetime={() => {}}
+      recordingMenu={menu} notice={<span>Not split into lines yet</span>} />)
+    expect(screen.getByTestId("tl-card-c1-more")).toBeInTheDocument()
+    unmount()
+    render(<TimelineCard cell={cell()} {...base} variant="subtitle" onSelect={() => {}} onRetime={() => {}} recordingMenu={menu} />)
+    expect(screen.queryByTestId("tl-card-c1-more")).not.toBeInTheDocument()
+  })
+})

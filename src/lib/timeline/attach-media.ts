@@ -3,14 +3,16 @@
 // The Import dialog can't do this — `emitMediaFile` always creates a NEW
 // time-ordered file — so a subtitle file (VTT/SRT) had no way to get its
 // clip into the media layer. Two paths:
-//   • upload a local audio/video file: bytes go to R2 once, silence-split
-//     segments attach the shared clip with trim windows (same shape as the
-//     importer and diarization);
+//   • upload a local audio/video file: bytes go to R2 once and become ONE
+//     line over the whole recording (AQU-2426: split later, by choice, with
+//     Split into lines…). A caller that already found the speech (a linked
+//     video's own sound) still gets its segments, each attaching the shared
+//     clip with a trim window (the importer's and diarization's shape);
 //   • link a media URL: the clip stays at its source and playback streams it —
 //     only timing/metadata is captured, nothing is copied into project storage.
 
 import { v7 as uuidv7 } from "uuid"
-import { computeMediaSegmentSpecs, mediaSegmentSpecsFromSpeech } from "@/lib/import"
+import { mediaSegmentSpecsFromSpeech, wholeRecordingSpecs } from "@/lib/import"
 import { recordMediaImportSeed, buildMediaSeedCells } from "@/lib/audio/auto-transcribe"
 import { buildAudioId, deleteCellAudio, MAX_AUDIO_OBJECT_BYTES, uploadCellAudio } from "@/lib/audio/upload"
 import { mediaFileTooLargeMessage } from "@/lib/audio/media-limit"
@@ -53,6 +55,13 @@ export interface AttachMediaFileOptions {
    *  for the caller to set as the file's film. Off when a film is already
    *  linked: a recording added beside it never replaces it. */
   keepPicture?: boolean
+  /**
+   * AQU-2426: nothing brought in is cut or transcribed on its own. "whole"
+   * (the default) makes one line over the whole recording; "transcribe" does
+   * the same and leaves a seed for the workspace to find the lines from the
+   * words (Import and transcribe…).
+   */
+  mode?: "whole" | "transcribe"
 }
 
 /**
@@ -71,7 +80,7 @@ export async function attachMediaFileToTimeline(
         durationMs: opts.analysis.durationMs,
         specs: mediaSegmentSpecsFromSpeech(opts.analysis.segments, opts.analysis.durationMs),
       }
-    : await computeMediaSegmentSpecs(file)
+    : await wholeRecordingSpecs(file)
 
   const ext = (file.name.split(".").pop() || "bin").toLowerCase()
   const audioId = buildAudioId(ctx.fileId)
@@ -140,10 +149,11 @@ export async function attachMediaFileToTimeline(
     throw err
   }
 
-  // AQU-646: seed the post-attach auto-transcribe (consumed by the workspace
-  // after its flush + revalidate). NOTE this flow attaches WITHOUT the `.ext`
-  // suffix on audioId — the seed mirrors exactly what it emitted.
-  recordMediaImportSeed({
+  // AQU-2426: only Import and transcribe… seeds the run that finds the lines
+  // from the words (consumed by the workspace after its flush + revalidate).
+  // NOTE this flow attaches WITHOUT the `.ext` suffix on audioId — the seed
+  // mirrors exactly what it emitted.
+  if (opts.mode === "transcribe") recordMediaImportSeed({
     fileId: ctx.fileId,
     cells: buildMediaSeedCells({
       fileId: ctx.fileId,

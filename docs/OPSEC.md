@@ -472,9 +472,28 @@
 > pooled Hyperdrive connection for as many round trips as they cared to send.
 > It was the only one of this worker's three per-element batch sites with no
 > caller bound; now capped at 500 ids of ≤256 chars. **17 of 50** route modules
-> now decide. Still open: neither termbase write records an actor (11-02's audit
-> gap in a second place), and `member-scopes.ts` is the new head of the queue —
-> `undecided` in the ledger *and* the next uncapped caller array.
+> now decide. **OPS-55** came from the pass's own pull request rather than from
+> the code it was reading, and is **reported, not fixed**: the **Adversarial Jev**
+> gate posted *"No failures found."* on three commits while **14 of its 18
+> attacks never ran** (*"Model provider returned HTTP 404; no action
+> executed"*), because `harnessHealth` in `smart-tests/adversarial/health.ts`
+> declares a run unhealthy only when `attacks.every(… === "inconclusive")` — so a
+> partial outage is indistinguishable from a healthy run, the four survivors
+> being exactly the four attacks that need no model agent. Coverage fell from
+> **3 inconclusive / 15 passed** (#1927, 11-07) to **14 / 4** (#1934 and #1941,
+> 11-09), green throughout, which is the AQU-1899 dead-canary mode the gate's own
+> README cites as the reason that rule exists. The two cross-project
+> **authorization** attacks are among the dark ones, and
+> `redteam.edit-other-project` passed on 11-07 — so the adversarial suite's
+> authorization coverage went dark inside two days while the gate reported
+> success. Not fixed here for two scope reasons: tightening the threshold would
+> turn the job red on every open PR until the provider is restored, and it is not
+> auth/session code; the patch is written out in the pass, reusing the
+> `agentNeverActed` predicate `health.ts` already exports. Still open: neither
+> termbase write records an actor (11-02's audit gap in a second place);
+> `member-scopes.ts` is the new head of the queue — `undecided` in the ledger
+> *and* the next uncapped caller array; and until the provider is restored a
+> green Adversarial Jev comment should be read as its counts, not its headline.
 
 _Standing OPSEC review of Aquilla's handling of sensitive data. Complements
 `docs/SECURITY-NOTES-2026-06-10.md` (application-security findings, June audit)

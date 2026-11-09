@@ -35,6 +35,13 @@ New findings continue the **OPS-n** series at **OPS-53**._
    router do not merely change rows: one forges the consent, the other mints the
    grant that rests on it.
 
+4. **One finding came from this pass's own PR rather than from the code it was
+   reading.** The adversarial gate posted "No failures found" on PR #1941 while
+   14 of its 18 attacks had never run, including both cross-project
+   authorization attacks. That is OPS-55, and it is reported rather than fixed:
+   the fix changes a CI gate's pass/fail behaviour for every open PR, which is
+   not this pass's call to make unilaterally.
+
 Every finding is labelled **FACT** (verified against a file:line or reproduced
 at this commit) or **JUDGMENT** (reasoned inference). No survey agent was used.
 
@@ -214,6 +221,100 @@ subscription list (`src/lib/terminology/subscriptions-api.ts`), bounded by the
 published termbases in one org, and the id length matches
 `routes/invites.ts`'s `projectIds`.
 
+### OPS-55 — The adversarial gate reports "No failures found" while 14 of its 18 attacks never ran, because its health rule only fails when *every* attack is inconclusive — and the two cross-project authorization attacks are among the dark ones — **REPORTED, NOT FIXED** [FACT]
+
+Noticed on this pass's own pull request, and confirmed to be a standing
+condition rather than an artefact of this diff.
+
+**The three data points.** Same suite, same 18 attacks, three commits:
+
+| when | PR | commit | result |
+|---|---|---|---|
+| 2026-11-07 17:03 UTC | #1927 | `80f89cf8` | inconclusive **3** · passed **15** |
+| 2026-11-09 12:47 UTC | #1934 | `4d0ec069` | inconclusive **14** · passed **4** |
+| 2026-11-09 15:28 UTC | #1941 (this pass) | `5de83b32` | inconclusive **14** · passed **4** |
+
+Every one of the 14 carries the same note: *"Not attributable to the product:
+the harness never exercised it (Model provider returned HTTP 404; no action
+executed.)"* **All three runs are green, and all three comments open with "No
+failures found."**
+
+**Why green is wrong here, in the gate's own words.**
+`smart-tests/adversarial/README.md` states the contract: *"the job is green
+whenever the harness actually tested the commit, failures or not. It goes **red**
+when the run said nothing about the commit"* — and then names this exact failure
+mode as the reason the rule exists: *"A dead canary once read green on every PR
+for days (AQU-1899)."* The harness did not test this commit in any meaningful
+sense; it tested 4 attacks of 18 and said nothing about the other 14.
+
+**The mechanism, in one line.** `harnessHealth` in
+`smart-tests/adversarial/health.ts`:
+
+```ts
+if (attacks.length > 0 && attacks.every((entry) => entry.evidence?.outcome.verdict === "inconclusive" || !entry.evidence)) {
+  return { available: false, reason: "Every attack ended inconclusive." }
+}
+return { available: true, reason: "" }
+```
+
+`every`. The run is declared unhealthy only on a **total** outage;
+`run-reporter.ts`'s `onEnd` then sets `process.exitCode = 1` solely on
+`!health.available`. A partial outage — even a 14-of-18 one — is indistinguishable
+from a healthy run, because the four survivors make `every` false. The four that
+survive on both 11-09 runs are the same four, and they are the four that do not
+need the model agent to act: `signoff.reload-mid-click`,
+`signoff.two-reviewers`, `redteam.rename-to-empty`, `redteam.double-signoff`.
+
+**Why this belongs in the auth & session slot, and not only in a CI ledger.**
+The two attacks that probe **cross-project write authorization** are
+`redteam.edit-other-project` and `redteam.viewer-wipe-file`. Both are
+inconclusive on both 11-09 runs, and `redteam.edit-other-project` **passed on
+11-07**, so the suite's authorization coverage specifically went dark inside the
+last two days — while the gate kept reporting success. This series spends its
+budget on exactly the class of bug those two attacks exist to catch; OPS-53
+above is one. A second control that silently stopped measuring is the shape
+OPS-38 named — *"a second control was deliberately left thinner in reliance on a
+control nobody had measured"* — and the gate's own AQU-1899 note says the repo
+has been here before.
+
+**JUDGMENT, stated as such:** the HTTP 404 itself is almost certainly a
+configuration or credential fact about the Jev harness's model provider (a
+retired model id, or an expired key), not a product defect — nothing in this
+repo can tell us which, because the provider is external. The *finding* is not
+the 404; it is that a 404 of this size reads as a pass.
+
+**Why this pass does not fix it.** Two reasons, both about scope rather than
+difficulty:
+
+* **Changing the threshold changes CI for every open PR.** Tightening
+  `harnessHealth` from unanimity to a coverage floor would, today, turn the
+  adversarial job red on every PR in the repository until the provider is
+  restored. That is the correct end state and it is emphatically not a change to
+  land quietly inside an unrelated security PR.
+* **It is not auth/session code**, which is this slot's scope, and the series'
+  convention for exactly this case is to report with a patch rather than apply
+  one — OPS-21 (the red PR gate), OPS-24 (the credit-cap race) and OPS-32 (the
+  PAT throttle) were all handled that way.
+
+**The patch, for whoever takes it.** The repo already has the predicate this
+needs. `health.ts` exports `agentNeverActed`, whose `NO_INPUT_REPORTED` set
+already matches `/no action executed/` — the very string all 14 notes carry — and
+it is documented as *"the harness's own admission that it never exercised the
+product."* So the smallest honest change is to count those admissions in
+`harnessHealth` and fail on a share rather than on unanimity, e.g.:
+
+```ts
+const acted = attacks.filter((e) => e.evidence && !agentNeverActed(e.evidence.agents))
+if (attacks.length > 0 && acted.length < Math.ceil(attacks.length / 2)) {
+  return { available: false, reason: `Only ${acted.length} of ${attacks.length} attacks reached the product.` }
+}
+```
+
+Pair it with restoring the model provider, which is an operator action, and with
+a `comment.ts` line that prints the acted/planned ratio, so the next partial
+outage is legible from the PR comment instead of requiring someone to count
+table rows across two PRs — which is how this one was found.
+
 ---
 
 ## Reviewed, no new finding
@@ -278,7 +379,16 @@ published termbases in one org, and the id length matches
    untrusted browser — reads the upstream termbase in full. If any org wants
    termbase reads held to a higher floor than project membership, that is a
    setting to add beside `rosterViewMinRole` / `exportMinRole`, not a patch.
-4. **Still outstanding and unchanged from earlier passes:** 10-26's audit of
+4. **Restore the Jev model provider, then tighten `harnessHealth` (OPS-55).**
+   In that order, because tightening first turns the adversarial job red on every
+   open PR. Until both are done, treat a green **Adversarial Jev** comment as
+   saying nothing: read its `inconclusive` / `passed` counts, and compare them
+   against a run from before 2026-11-08 (#1927's 3/15) rather than against the
+   headline. In particular `redteam.edit-other-project` and
+   `redteam.viewer-wipe-file` — the suite's only cross-project authorization
+   attacks, and the ones most relevant to this review series — have not run on
+   any commit since 11-07.
+5. **Still outstanding and unchanged from earlier passes:** 10-26's audit of
    `integration_connections` / `integration_links` for rows written on platform
    authority; the QA-walker identity question 10-12 left open (platform-admin
    paths are not QA-walkable on any preview — `scripts/cloudflare-stack-preview.mjs`
@@ -342,7 +452,20 @@ fix was applied — the series' standard decisive check.
   remaining output is the `partyserver` `TS2307`s from `sync-worker`, whose
   package is not installed in this environment — same as 09-28 through 11-02).
 * `npx eslint` on all three changed/new files: **0 errors, 0 warnings.**
-* Full `auth-worker` suite (`npx vitest run`): see the note appended below.
+* Root `npx tsc -b --force`: **exit 0, no diagnostics** — the ledger file lives
+  under `scripts/`, which `tsconfig.node.json` owns rather than `auth-worker`'s
+  own `tsc`, so the auth-worker typecheck above does not cover it.
+* Full `auth-worker` suite (`npx vitest run`): **407 files, 4771 passing, 2
+  expected-fail, 0 failures** (956 s). Nothing red remains in this package to
+  distinguish from the change under review — the condition that makes a suite
+  run worth anything as evidence — and it is clean for the fourth pass running.
+  11-02 measured 392 files / 4599 passing; the 15 new files and 172 new tests
+  since include this pass's own, and the two expected-fails are the same two.
+* **OPS-55 was verified by comparison, not by a test**, since it is a finding
+  about a gate's own pass rule: the three adversarial comments cited above were
+  read from PRs #1927, #1934 and #1941, and the `every`-based rule that lets the
+  middle two read green is quoted from `smart-tests/adversarial/health.ts` at
+  this commit. Nothing in this change alters that gate.
 
 Environment note, for whoever re-runs this: **no dependencies were installed in
 this container at session start**, and `npm install` in `auth-worker` now fails

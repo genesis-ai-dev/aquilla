@@ -71,7 +71,7 @@ import {
   renderingsForLane,
   replaceLaneRenderings,
 } from "@/lib/terminology/rendering-lane"
-import { importTermbaseFile } from "@/lib/terminology/import-format"
+import { importTermbaseFile, termsNotAlreadyListed } from "@/lib/terminology/import-format"
 import { GlossaryRow } from "@/components/GlossaryRow"
 import { TerminologyTermDetail } from "@/components/TerminologyTermDetail"
 import { TerminologyMergeDialog } from "@/components/TerminologyMergeDialog"
@@ -664,7 +664,15 @@ export function GlossaryEditor({
                 ),
               }))
             : imported
-          void persist({ terminology: [...(p.terminology ?? []), ...stamped] })
+          // AQU-2487 (import sweep, Nov 2): a term the list already has,
+          // word for word, is not added a second time.
+          const existing = p.terminology ?? []
+          const fresh = termsNotAlreadyListed(existing, stamped)
+          if (fresh.length === 0) {
+            setError(t("terminology.editor.importNothingNew"))
+            return
+          }
+          void persist({ terminology: [...existing, ...fresh] })
         } catch (err) {
           setError(err instanceof Error ? err.message : t("terminology.editor.errorImportFailed"))
         }

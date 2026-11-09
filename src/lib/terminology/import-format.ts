@@ -49,3 +49,37 @@ export function importTermbaseFile(fileName: string, text: string): Concept[] {
       return importConceptsCsv(text)
   }
 }
+
+function sameSourceTerm(a: Concept, b: Concept): boolean {
+  const x = a.sourceTerm.trim()
+  const y = b.sourceTerm.trim()
+  return a.caseSensitive || b.caseSensitive ? x === y : x.toLowerCase() === y.toLowerCase()
+}
+
+/** True when `existing` already says everything `imported` says. */
+function alreadySays(existing: Concept, imported: Concept): boolean {
+  if (!sameSourceTerm(existing, imported)) return false
+  const note = imported.notes?.trim()
+  if (note && !(existing.notes ?? "").includes(note)) return false
+  if (imported.externalIds && JSON.stringify(imported.externalIds) !== JSON.stringify(existing.externalIds)) return false
+  return imported.renderings.every((wanted) =>
+    existing.renderings.some(
+      (have) =>
+        (have.laneId ?? "") === (wanted.laneId ?? "") &&
+        have.status === wanted.status &&
+        have.rendering.trim().toLowerCase() === wanted.rendering.trim().toLowerCase(),
+    ),
+  )
+}
+
+/**
+ * AQU-2487 (import sweep, Nov 2): the imported terms the list doesn't have yet.
+ * Import used to append every term in the file, so importing a word list a
+ * second time doubled all of it. A term is left out only when one already in
+ * the list has the same source term and already carries every rendering (same
+ * language, same status), note and Bible link the file gives it. A term the
+ * file CHANGES still comes in as its own entry, as before.
+ */
+export function termsNotAlreadyListed(existing: readonly Concept[], imported: readonly Concept[]): Concept[] {
+  return imported.filter((term) => !existing.some((have) => alreadySays(have, term)))
+}

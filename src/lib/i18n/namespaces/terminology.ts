@@ -58,6 +58,7 @@ export const terminology = defineNamespace({
     "terminology.editor.errorSourceAndRenderingRequired":
       "A source term and rendering are required before the term can be active.",
     "terminology.editor.errorImportFailed": "Import failed",
+    "terminology.editor.importNothingNew": "Every term in this file is already in the list, so nothing was added.",
     "terminology.editor.findingTerms": "Finding terms…",
     "terminology.editor.suggestTerms": "Suggest terms",
     "terminology.editor.exportCsv": "Export CSV",

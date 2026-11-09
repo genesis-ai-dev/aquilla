@@ -22,11 +22,30 @@ export const CARRY_ON_SETTLE_MS = 2_000
 /** Look again this often while another transcription is running. */
 const BUSY_RETRY_MS = 5_000
 
+/**
+ * AQU-2375 (review, Nov 9): may a run be carried on yet? Only once EVERY row of
+ * the open file is in, with its recordings. A long file's rows arrive in pages
+ * (500, then 2,000 at a time), and "first paint" is the first page: a run
+ * carried on then dropped each row not in the store yet, reported them as
+ * never reached, and ended its record.
+ */
+export function carryOnReady(file: {
+  /** The first page of rows has painted. */
+  firstPaint: boolean
+  /** Rows are still arriving. */
+  rowsLoading: boolean
+  recordingsLoaded: boolean
+  heardLinesLoading: boolean
+}): boolean {
+  return file.firstPaint && !file.rowsLoading && file.recordingsLoaded && !file.heardLinesLoading
+}
+
 export interface CarryOnTranscribeRunsArgs {
   projectId: string | null | undefined
   activeFileId: string | null | undefined
   /** True once the open file's rows AND their recordings have loaded: the
-   *  rows still to do can only be told from rows with nothing to do then. */
+   *  rows still to do can only be told from rows with nothing to do then
+   *  (`carryOnReady`). */
   ready: boolean
   /** Changes whenever the open file's rows or recordings change. */
   version: unknown

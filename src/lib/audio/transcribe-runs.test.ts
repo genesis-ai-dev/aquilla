@@ -6,6 +6,7 @@ import {
   HEARTBEAT_MS,
   MAX_AGE_MS,
   STALE_MS,
+  __setPageLeavingForTests,
   __setTranscribeRunEnvForTests,
   __storedTranscribeRuns,
   claimStoredTranscribeRun,
@@ -265,5 +266,23 @@ describe("transcribeRunFits: whose run it is, and which language's", () => {
 
   it("a run kept before runs named their person and language is carried on as before", () => {
     expect(transcribeRunFits({ kind: "all" }, { username: "baraka", lane: "fr" })).toBe("ok")
+  })
+})
+
+// AQU-2375 (review, Nov 9): rows are written at most once a second, so the
+// ones that landed just before a reload were missing from the record, and the
+// run carried on reported "880 of 900" with all 900 transcribed.
+describe("when the page goes away", () => {
+  it("writes the rows that landed in the last second at once", () => {
+    const run = start()
+    run.row("a", { kind: "done" })
+    expect(__storedTranscribeRuns()[0]!.doneIds).toEqual([])
+    try {
+      window.dispatchEvent(new Event("pagehide"))
+      expect(__storedTranscribeRuns()[0]!.doneIds).toEqual(["a"])
+    } finally {
+      __setPageLeavingForTests(false)
+      run.end()
+    }
   })
 })

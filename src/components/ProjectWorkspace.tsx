@@ -272,7 +272,7 @@ import { lineWordsToast, transcribeRunProgressTitle, transcribeRunToast } from "
 import { runLineWords, wordsOf, type LineWordsIdentity } from "@/lib/audio/line-words-run"
 import type { StoredTranscribeRun, TranscribeRunHandle, TranscribeRunKind } from "@/lib/audio/transcribe-runs"
 import { findLineWordsRun, pageIsLeaving } from "@/lib/audio/transcribe-runs"
-import { useCarryOnTranscribeRuns } from "@/hooks/useCarryOnTranscribeRuns"
+import { carryOnReady, useCarryOnTranscribeRuns } from "@/hooks/useCarryOnTranscribeRuns"
 import { changeCellVoice, changeVoiceBlocker, changeVoiceSourceTake } from "@/lib/audio/change-voice"
 import { planChangeVoiceAll, runChangeVoiceAll } from "@/lib/audio/change-voice-batch"
 import { getTtsStatus, ttsStatusKey } from "@/lib/audio/tts"
@@ -12421,7 +12421,9 @@ export function ProjectWorkspace() {
   useCarryOnTranscribeRuns({
     projectId: project?.id,
     activeFileId,
-    ready: editorFirstPaint && workspaceAudioLoaded && !heardLinesLoading,
+    // AQU-2375 (review, Nov 9): …and ALL its rows, not just the first page.
+    // (A load that failed has not brought them all in either.)
+    ready: carryOnReady({ firstPaint: editorFirstPaint, rowsLoading: cellsLoading || Boolean(cellsError), recordingsLoaded: workspaceAudioLoaded, heardLinesLoading }),
     version: [workspaceAudioByCellId, audioCueCells, cellStoreVersion],
     // AQU-2375 (review, Nov 9): only the person who started a run carries it
     // on, and a run over takes only in the language it was started in.

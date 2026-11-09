@@ -300,6 +300,18 @@ function makeHandle(id: string, lock: { release: () => void }): TranscribeRunHan
   const beat = setInterval(() => {
     if (!ended) update(id, (run) => ({ ...run, beatAt: now(), tab: tabId }))
   }, HEARTBEAT_MS)
+  // AQU-2375 (review, Nov 9): the page is going, and with it the throttle's
+  // timer. What landed in the last second is written now, or the run carried
+  // on counts rows as never reached that were transcribed.
+  const onPageHide = () => {
+    if (ended) return
+    if (flushTimer !== null) clearTimeout(flushTimer)
+    flush()
+  }
+  if (typeof window !== "undefined") window.addEventListener("pagehide", onPageHide)
+  const unhook = () => {
+    if (typeof window !== "undefined") window.removeEventListener("pagehide", onPageHide)
+  }
   return {
     id,
     row(cellId, outcome) {
@@ -328,6 +340,7 @@ function makeHandle(id: string, lock: { release: () => void }): TranscribeRunHan
       if (ended) return
       ended = true
       clearInterval(beat)
+      unhook()
       if (flushTimer !== null) clearTimeout(flushTimer)
       pending = []
       dropStoredTranscribeRun(id)
@@ -337,6 +350,7 @@ function makeHandle(id: string, lock: { release: () => void }): TranscribeRunHan
       if (ended) return
       ended = true
       clearInterval(beat)
+      unhook()
       if (flushTimer !== null) clearTimeout(flushTimer)
       // What landed is written now, not on the throttle: the page may go next.
       const apply = pending

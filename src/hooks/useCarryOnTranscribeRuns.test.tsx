@@ -9,7 +9,7 @@ import {
   __storedTranscribeRuns,
   startStoredTranscribeRun,
 } from "@/lib/audio/transcribe-runs"
-import { CARRY_ON_SETTLE_MS, useCarryOnTranscribeRuns } from "./useCarryOnTranscribeRuns"
+import { CARRY_ON_SETTLE_MS, carryOnReady, useCarryOnTranscribeRuns } from "./useCarryOnTranscribeRuns"
 
 let clock = 5_000_000
 
@@ -122,5 +122,42 @@ describe("useCarryOnTranscribeRuns", () => {
     }))
     await act(async () => { await vi.advanceTimersByTimeAsync(CARRY_ON_SETTLE_MS + 100) })
     expect(carryOn).toHaveBeenCalledTimes(1)
+  })
+
+  // AQU-2375 (review, Nov 9): a long file's rows arrive in pages (500, then
+  // 2,000 at a time). "First paint" is the first page; a run carried on then
+  // drops every row not in yet and reports them as never reached.
+  describe("a long file whose later rows are slow to arrive", () => {
+    const loading = { firstPaint: true, rowsLoading: true, recordingsLoaded: true, heardLinesLoading: false }
+
+    it("is not ready while rows are still loading, however long a page takes", async () => {
+      expect(carryOnReady(loading)).toBe(false)
+      expect(carryOnReady({ ...loading, rowsLoading: false })).toBe(true)
+      expect(carryOnReady({ ...loading, rowsLoading: false, firstPaint: false })).toBe(false)
+      expect(carryOnReady({ ...loading, rowsLoading: false, recordingsLoaded: false })).toBe(false)
+      expect(carryOnReady({ ...loading, rowsLoading: false, heardLinesLoading: true })).toBe(false)
+
+      leaveStoppedRun("f1")
+      const carryOn = vi.fn((_run, handle: { end: () => void }) => handle.end())
+      const { rerender } = renderHook((p: { rowsLoading: boolean; rows: number }) => useCarryOnTranscribeRuns({
+        projectId: "p1", activeFileId: "f1", ready: carryOnReady({ ...loading, rowsLoading: p.rowsLoading }), version: p.rows, carryOn, announce: vi.fn(),
+      }), { initialProps: { rowsLoading: true, rows: 500 } })
+      // The second page takes longer than the settle wait.
+      await act(async () => { await vi.advanceTimersByTimeAsync(CARRY_ON_SETTLE_MS * 2) })
+      expect(carryOn).not.toHaveBeenCalled()
+      rerender({ rowsLoading: false, rows: 900 })
+      await act(async () => { await vi.advanceTimersByTimeAsync(CARRY_ON_SETTLE_MS + 100) })
+      expect(carryOn).toHaveBeenCalledTimes(1)
+    })
+
+    it("(why) first paint plus recordings, the old rule, carries on with the first page only", async () => {
+      leaveStoppedRun("f1")
+      const carryOn = vi.fn((_run, handle: { end: () => void }) => handle.end())
+      renderHook(() => useCarryOnTranscribeRuns({
+        projectId: "p1", activeFileId: "f1", ready: loading.firstPaint && loading.recordingsLoaded && !loading.heardLinesLoading, version: 500, carryOn, announce: vi.fn(),
+      }))
+      await act(async () => { await vi.advanceTimersByTimeAsync(CARRY_ON_SETTLE_MS * 2) })
+      expect(carryOn).toHaveBeenCalledTimes(1)
+    })
   })
 })

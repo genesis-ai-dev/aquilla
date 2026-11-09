@@ -288,7 +288,9 @@ function setProgress(patch: Partial<QueueProgress>): void {
   progress = {
     ...next,
     programmeClock,
-    filmTail: programmeClock && progOverFilmTail(next.currentTime),
+    // AQU-2253 (review, Nov 9): …or the run is carrying on as the tail it
+    // already was, though a take has since made the lines longer.
+    filmTail: programmeClock && (progLead?.filmTail === true || progOverFilmTail(next.currentTime)),
     // …or the clock in hand IS the film's, whatever the lines under it do.
     filmClock: programmeClock && (progLead?.film != null || progFilmIsClockAt(next.currentTime)),
   }
@@ -1636,6 +1638,12 @@ function progEnterTail(atSec: number, autoplay: boolean, explicit: boolean): boo
       filmRuns ? FILM_TAIL_TICK_MS : undefined,
     )
   }
+  // AQU-2253 (review, Nov 9): the film's tail, and it stays so while this hold
+  // is in hand. A take landing now that makes the lines longer than the
+  // playhead does not turn the run back into a line (its caption back on the
+  // picture, the take run over in silence as if it were playing): the run
+  // carries on as the tail it is, and the take is heard on the next Play.
+  if (progLead && filmRuns) progLead.filmTail = true
   progLayersSync(at)
   return true
 }
@@ -1770,24 +1778,30 @@ function progFilmClockDone(lead: ProgLead, sec: number, over: boolean): void {
 function progReenterFilmTail(): void {
   const lead = progLead
   if (!lead || lead.then !== "hold" || !progRunning()) return
+  const now = progLeadNowSec(lead)
+  const finish = () => {
+    const ctx = activeContext
+    progFinish()
+    notifyRanOut(ctx)
+  }
+  if (lead.film) {
+    // The film's own clock, wherever the lines now end under it: it runs to
+    // the film's new end, and with no film any more the run ends here.
+    if (progFilmEndSec - now > FILM_END_GUARD_SEC) lead.endSec = progFilmEndSec - FILM_END_GUARD_SEC
+    else finish()
+    return
+  }
   const slots = programme?.slots ?? []
   const last = slots[slots.length - 1]
   if (!last || progIndex !== slots.length - 1) return
-  const now = progLeadNowSec(lead)
   if (now < last.startSec + last.slotLenSec - 0.001) return
-  if (lead.film && progFilmIsClockAt(now)) {
-    // Still the film's clock: only where it ends has moved.
-    lead.endSec = progFilmEndSec - FILM_END_GUARD_SEC
-    return
-  }
   if (progEnterTail(now, true, lead.explicit)) return
-  const ctx = activeContext
-  progFinish()
-  notifyRanOut(ctx)
+  finish()
 }
 
 /** AQU-2252: is the transport in the stretch after the last line? */
 function progInTail(): boolean {
+  if (progLead?.filmTail) return true
   const slots = programme?.slots ?? []
   const last = slots[slots.length - 1]
   return Boolean(last && progIndex === slots.length - 1 && progress.currentTime >= last.startSec + last.slotLenSec - 0.001)
@@ -1873,6 +1887,9 @@ interface ProgLead {
   endSec: number
   timer: ReturnType<typeof setTimeout> | null
   ticker: ReturnType<typeof setInterval> | null
+  /** AQU-2253 (review, Nov 9): this hold is a linked film's tail, and stays
+   *  one whatever the lines under it come to (`progEnterTail`). */
+  filmTail?: boolean
   /** What `timer` runs when the hold is over (kept so a change of speed can
    *  re-time it, `progLeadRetime`). */
   end?: () => void
@@ -4755,6 +4772,14 @@ export async function resumeQueue(): Promise<void> {
     if (!slot) return
     // AQU-2252: paused after the last line, under a layer playing out.
     if (progInTail() && progEnterTail(progress.currentTime, true, progCuedExplicit)) return
+    // AQU-2253 (review, Nov 9): paused over the film's tail after a take
+    // landed and made the lines longer, the playhead is on a line now, and not
+    // the one the tail followed. Play plays that line, from the playhead.
+    const here = programme ? slotAtProgrammeSec(programme, progress.currentTime) : null
+    if (here && here !== slot) {
+      progSeekTo(progress.currentTime, true, progCuedExplicit)
+      return
+    }
     // AQU-2204: paused inside a take's pause — re-enter, so the rest of the
     // pause is waited out before the take.
     if (slot.targetWindow && (slot.targetLeadSec ?? 0) > progress.currentTime - slot.startSec + 0.001) {

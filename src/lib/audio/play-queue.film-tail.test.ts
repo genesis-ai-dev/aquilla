@@ -940,3 +940,95 @@ describe("a change of speed in the middle of a line with nothing to play", () =>
     expect(getQueueProgress().currentTime).toBeCloseTo(3.1, 1)
   })
 })
+
+// AQU-2253 (review, Nov 9), finding 7: a take that lands while the film is
+// playing out, and makes the lines longer than where the playhead is. The
+// run was neither one thing nor the other: it kept its tail's clock but said
+// it was on a line again (the last line's caption came back), ran over the
+// new take in silence, and Pause then Play jumped to the start of a line.
+// The run carries on as the tail it already is; the take is heard on the
+// next Play, from where the playhead is.
+describe("a take landing over the film's tail that makes the lines longer than the playhead", () => {
+  // b1 [0, 2), b2 [2, 5), and then b3 arrives: 9 s, [5, 14). The film is 20 s.
+  const withB3 = () => [...recorded(), line("b3", 9_000)]
+  /** Play the lines out, 2 s of the film's tail (7 s), then b3 lands. */
+  async function tailThenTake(): Promise<void> {
+    const cells = recorded()
+    linkFilm(20, cells)
+    await playTheLinesOut(cells)
+    await wait(2_000)
+    expect(getQueueProgress().currentTime).toBeCloseTo(7, 1)
+    // The bar hands the queue the lines; the workspace names them for the film.
+    updateQueueCells(withB3())
+    linkFilm(20, withB3())
+  }
+
+  it("the run carries on as the film's tail: on the film's clock, no line shown as playing, to the film's end", async () => {
+    await tailThenTake()
+    await wait(3_000)
+    expect(getQueueState()).toMatchObject({ kind: "playing" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(10, 1)
+    expect(getQueueProgress().filmClock).toBe(true)
+    // Still the tail: no caption comes back, no row is shown as playing.
+    expect(getQueueProgress().filmTail).toBe(true)
+    // The take is not started in the middle, and nothing else sounds.
+    expect(anythingSounding()).toBe(false)
+    await wait(10_050)
+    expect(getQueueState().kind).toBe("idle")
+    expect(ranOut).toBe(1)
+  })
+
+  it("the new take is heard on the next Play, from where the playhead is", async () => {
+    await tailThenTake()
+    await wait(1_000)
+    pauseQueue()
+    expect(getQueueProgress().currentTime).toBeCloseTo(8, 1)
+    await resumeQueue()
+    await wait()
+    // 8 s is 3 s into b3: that line plays, from there.
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+    expect(el("b3")!.paused).toBe(false)
+    expect(el("b3")!.currentTime).toBeCloseTo(3, 1)
+    expect(getQueueProgress().filmTail).toBe(false)
+    expect(getQueueProgress().filmClock).toBe(false)
+  })
+
+  it("a take that makes the last line itself longer: the same, and Play plays that line from the playhead", async () => {
+    const cells = recorded()
+    linkFilm(20, cells)
+    await playTheLinesOut(cells)
+    await wait(2_000)
+    // b2 re-recorded: 9 s, [2, 11). The playhead, at 7 s, is inside it.
+    const longer = [line("b1", 2_000), line("b2", 9_000)]
+    updateQueueCells(longer)
+    linkFilm(20, longer)
+    await wait(1_000)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(8, 1)
+    expect(getQueueProgress().filmTail).toBe(true)
+    expect(anythingSounding()).toBe(false)
+    pauseQueue()
+    await resumeQueue()
+    await wait()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    expect(getQueueProgress().filmTail).toBe(false)
+    expect(anythingSounding()).toBe(true)
+  })
+
+  it("the film taken away then ends the run there, as over any tail", async () => {
+    await tailThenTake()
+    await wait(1_000)
+    setProgrammeFilm(null)
+    expect(getQueueState().kind).toBe("idle")
+    expect(ranOut).toBe(1)
+  })
+
+  it("previous line goes back to the line the tail followed", async () => {
+    await tailThenTake()
+    await wait(1_000)
+    skipBack()
+    await wait()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(2, 2)
+  })
+})

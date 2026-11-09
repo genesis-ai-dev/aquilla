@@ -23,7 +23,7 @@ interface HealthRibbonProps {
   testId?: string
 }
 
-function description(point: HealthRibbonPoint): string {
+function description(point: HealthRibbonPoint, t: TFunction): string {
   const raw = point.rawScore === undefined ? undefined : Math.round(point.rawScore)
   const trend = point.smoothedScore === undefined ? undefined : Math.round(point.smoothedScore)
 
@@ -34,10 +34,10 @@ function description(point: HealthRibbonPoint): string {
       ? `Automatic health ${raw}%`
       : `Automatic health ${raw}% · local trend ${trend}%`
   }
-  if (raw === undefined) return "Pre-translation source evidence unavailable"
+  if (raw === undefined) return t("editor.health.evidenceUnavailable")
   return trend === undefined || trend === raw
-    ? `Pre-translation source evidence ${raw}%`
-    : `Pre-translation source evidence ${raw}% · local trend ${trend}%`
+    ? t("editor.health.evidence", { raw })
+    : t("editor.health.evidenceTrend", { raw, trend })
 }
 
 function tooltipContent(
@@ -64,8 +64,10 @@ function tooltipContent(
       <div className="space-y-1">
         <p className="font-medium">
           {raw === undefined
-            ? "Automatic estimate pending"
-            : `Automatic estimate ${raw}%${trend === undefined || trend === raw ? "" : ` · local trend ${trend}%`}`}
+            ? t("editor.health.estimatePending")
+            : trend === undefined || trend === raw
+              ? t("editor.health.estimate", { raw })
+              : t("editor.health.estimateTrend", { raw, trend })}
         </p>
         <p>{t("agentWorkspace.automaticHealthHelp")}</p>
         {issueDetail(issueLabel, issues)}
@@ -77,8 +79,10 @@ function tooltipContent(
     <div className="space-y-1">
       <p className="font-medium">
         {raw === undefined
-          ? "Pre-translation source evidence unavailable"
-          : `Source evidence ${raw}%${trend === undefined || trend === raw ? "" : ` · local trend ${trend}%`}`}
+          ? t("editor.health.evidenceUnavailable")
+          : trend === undefined || trend === raw
+            ? t("editor.health.evidence", { raw })
+            : t("editor.health.evidenceTrend", { raw, trend })}
       </p>
       <p>{t("agentWorkspace.sourceCoverageHelp")}</p>
       {issueDetail(issueLabel, issues)}
@@ -111,7 +115,7 @@ export function HealthRibbon({
       ? "Major automatic issue"
       : hasIssue ? "Automatic issue" : ""
   const issueLabel = namedIssues || issueHint || genericLabel
-  const label = `${description(point)}${issueLabel ? ` · ${genericLabel ? genericLabel.toLowerCase() : issueLabel}` : ""}`
+  const label = `${description(point, t)}${issueLabel ? ` · ${genericLabel ? genericLabel.toLowerCase() : issueLabel}` : ""}`
   const score = point.smoothedScore
   const opacity = healthRibbonOpacity(point)
 

@@ -120,6 +120,28 @@ describe('POST /files/:f/revisions', () => {
     expect(files[0].cell_count).toBe(3)
   })
 
+  // Why: the file-counter recompute is a full-file scan (2.6 s on a 10k-cell
+  // file, local stack) and a fresh import's /import finalize runs it anyway.
+  // Running it in the revision too made revision imports ~3 s slower than the
+  // N-event path. With `finalizeFollows` the route leaves it to the finalize,
+  // and the end state is the same.
+  it('with finalizeFollows the counters are left to the import finalize, which sets them', async () => {
+    const { post, rows, env, token } = await setup()
+    const res = await post({ artifactSha256: SHA_A, stamp: 'docx@1', finalizeFollows: true, units: [para(0, 'One'), para(1, 'Two'), para(2, 'Three')] })
+    expect(res?.status).toBe(200)
+    expect((await rows<{ cell_count: number }>('files'))[0].cell_count ?? 0).toBe(0)
+    const finalize = await handleBulkImportRequest(
+      new Request('https://x/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ projectId: PROJECT, fileId: FILE, cells: [], complete: true }),
+      }),
+      env as never,
+    )
+    expect(finalize?.status).toBe(200)
+    expect((await rows<{ cell_count: number }>('files'))[0].cell_count).toBe(3)
+  })
+
   it('the same artifact + stamp again is a no-op', async () => {
     const { post, rows } = await setup()
     await post({ artifactSha256: SHA_A, stamp: 'docx@1', units: [para(0, 'One')] })

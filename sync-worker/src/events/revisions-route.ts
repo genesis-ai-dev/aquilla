@@ -75,6 +75,11 @@ interface RevisionRequestBody {
    *  as the cells. Sent together with `rawSourceFormat`. */
   artifactId?: string
   rawSourceFormat?: string
+  /** A fresh import's `/import` finalize (`complete: true`) follows this
+   *  request and recomputes the file counters and progress. The route skips
+   *  its own copy of that full-file scan, which doubled a 10k-cell import's
+   *  database time. Re-imports send no finalize and leave this unset. */
+  finalizeFollows?: boolean
 }
 
 interface FileRow {
@@ -288,6 +293,7 @@ export async function handleRevisionsRequest(
     counts: delta.counts,
     cellStmts: [...cellStmts, ...fileStmts],
     prefix,
+    skipRecompute: body.finalizeFollows === true,
   })
   if (!applied.ok) return withCors(new Response(applied.reason, { status: 500 }), request)
 
@@ -363,6 +369,8 @@ interface WriteArgs {
   counts: EventPayloads['file.revision']['counts']
   cellStmts: AquillaStatement[]
   prefix: string
+  /** See RevisionRequestBody.finalizeFollows. */
+  skipRecompute?: boolean
 }
 
 /**
@@ -426,7 +434,7 @@ async function writeRevision(
     ]
     buildEventProjectionStmts(db, event, stmts)
     stmts.push(...args.cellStmts)
-    if (args.cellStmts.length > 0) {
+    if (args.cellStmts.length > 0 && !args.skipRecompute) {
       stmts.push(fileCountersRecomputeStmt(db, args.projectId, args.fileId, args.serverTs))
       stmts.push(...fullProgressRecomputeStmts(db, args.projectId, args.fileId, args.serverTs))
     }
@@ -473,6 +481,9 @@ function parseBody(text: string): { ok: true; body: RevisionRequestBody } | { ok
   if (r.rawSourceFormat !== undefined && (typeof r.rawSourceFormat !== 'string' || !r.rawSourceFormat)) {
     return { ok: false, reason: 'rawSourceFormat must be a string' }
   }
+  if (r.finalizeFollows !== undefined && typeof r.finalizeFollows !== 'boolean') {
+    return { ok: false, reason: 'finalizeFollows must be a boolean' }
+  }
   if ((r.artifactId === undefined) !== (r.rawSourceFormat === undefined)) {
     return { ok: false, reason: 'artifactId and rawSourceFormat must be provided together' }
   }
@@ -487,6 +498,7 @@ function parseBody(text: string): { ok: true; body: RevisionRequestBody } | { ok
       ...(r.file !== undefined ? { file: r.file as ReconcileFileMeta } : {}),
       ...(typeof r.artifactId === 'string' ? { artifactId: r.artifactId } : {}),
       ...(typeof r.rawSourceFormat === 'string' ? { rawSourceFormat: r.rawSourceFormat } : {}),
+      ...(r.finalizeFollows === true ? { finalizeFollows: true } : {}),
     },
   }
 }

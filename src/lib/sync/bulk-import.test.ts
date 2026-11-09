@@ -746,6 +746,8 @@ describe("bulkUploadSource — revision import (AQU-2459)", () => {
     expect(calls[1].body).toMatchObject({
       stamp: "builtin:docx@1",
       origin: "import",
+      // The finalize (calls[2]) recomputes the counters, so the route skips it.
+      finalizeFollows: true,
       // sha256("hello")
       artifactSha256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
     })
@@ -811,6 +813,8 @@ describe("reviseSourceImport (AQU-2459)", () => {
       rawSourceFormat: "docx",
       file: { importManifest: { v: 2 } },
     })
+    // No finalize follows a re-import: the route must recompute the counters.
+    expect(calls[0].body.finalizeFollows).toBeUndefined()
   })
 
   it("refuses before any request when the original bytes are missing", async () => {

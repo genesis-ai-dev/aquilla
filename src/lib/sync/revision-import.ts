@@ -97,6 +97,9 @@ export interface PostFileRevisionArgs {
   file?: BulkImportFileMeta
   artifactId?: string
   rawSourceFormat?: string
+  /** The caller sends the `/import` finalize next, which recomputes the
+   *  file's counters; the route then skips its own copy of that scan. */
+  finalizeFollows?: boolean
   getToken: (fileId: string) => Promise<string | null>
   fetchImpl?: typeof fetch
   signal?: AbortSignal
@@ -124,6 +127,7 @@ export async function postFileRevision(args: PostFileRevisionArgs): Promise<File
     ...(args.artifactId && args.rawSourceFormat
       ? { artifactId: args.artifactId, rawSourceFormat: args.rawSourceFormat }
       : {}),
+    ...(args.finalizeFollows ? { finalizeFollows: true } : {}),
   })
   let token = await args.getToken(args.fileId)
   for (let attempt = 0; attempt < 2; attempt++) {

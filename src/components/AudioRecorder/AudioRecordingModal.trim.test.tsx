@@ -53,8 +53,10 @@ vi.mock("@/lib/audio/audio-attachments-bus", () => ({
 }))
 const emitAttach = vi.hoisted(() => vi.fn(async (..._args: unknown[]) => "evt-attach"))
 const emitRetime = vi.hoisted(() => vi.fn(async (..._args: unknown[]) => "evt-retime"))
+const emitPlace = vi.hoisted(() => vi.fn(async (..._args: unknown[]) => "evt-place"))
 vi.mock("@/lib/sync/events-emit", () => ({
   emitCellLaneRetime: (...args: unknown[]) => emitRetime(...args),
+  emitCellAudioPlace: (...args: unknown[]) => emitPlace(...args),
   emitCellAudioAttach: (...args: unknown[]) => emitAttach(...args),
   emitCellAudioSelect: vi.fn(async () => "evt"),
   emitCellAudioValidate: vi.fn(async () => "evt"),
@@ -145,6 +147,7 @@ beforeEach(() => {
   emitAttach.mockClear()
   transcribeSpy.mockClear()
   emitRetime.mockClear()
+  emitPlace.mockClear()
   recorderState.value = wavTake()
 })
 
@@ -182,9 +185,12 @@ describe("the take after Stop", () => {
     fireEvent.click(screen.getByTestId("rec-save"))
     await waitFor(() => expect(emitAttach).toHaveBeenCalledTimes(1))
     expect(emitAttach.mock.calls[0][0]).toMatchObject({ durationMs: 3600, trimStartMs: 700, trimEndMs: 2960 })
-    await waitFor(() => expect(emitRetime).toHaveBeenCalledTimes(1))
+    // AQU-2491 (review, Nov 9): the place is the new take's own; the line's
+    // other takes are not moved by it.
+    await waitFor(() => expect(emitPlace).toHaveBeenCalledTimes(1))
     // audible start = anchor + head trim = (10000 - 700) + 700 = the cue's start
-    expect(emitRetime.mock.calls[0][0]).toMatchObject({ targetOffsetMs: -700 })
+    expect(emitPlace.mock.calls[0][0]).toMatchObject({ targetOffsetMs: -700, recordingsOffsetMs: null })
+    expect(emitRetime).not.toHaveBeenCalled()
     // The transcript is of the kept part too.
     await waitFor(() => expect(transcribeSpy).toHaveBeenCalled())
     const { cell } = transcribeSpy.mock.calls.at(-1)![0] as { cell: { selectedAudioId: string; attachments: Record<string, unknown> } }
@@ -197,8 +203,9 @@ describe("the take after Stop", () => {
     fireEvent.click(screen.getByTestId("rec-save"))
     await waitFor(() => expect(emitAttach).toHaveBeenCalledTimes(1))
     expect(emitAttach.mock.calls[0][0]).toMatchObject({ trimStartMs: 200, trimEndMs: 3360 })
-    await waitFor(() => expect(emitRetime).toHaveBeenCalledTimes(1))
-    expect(emitRetime.mock.calls[0][0]).toMatchObject({ targetOffsetMs: -200 })
+    await waitFor(() => expect(emitPlace).toHaveBeenCalledTimes(1))
+    expect(emitPlace.mock.calls[0][0]).toMatchObject({ targetOffsetMs: -200, recordingsOffsetMs: null })
+    expect(emitRetime).not.toHaveBeenCalled()
   })
 
   it("puts the lines back where they started", async () => {

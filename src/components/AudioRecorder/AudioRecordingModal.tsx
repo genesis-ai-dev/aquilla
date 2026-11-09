@@ -86,7 +86,7 @@ import { playingInSlot, recordTakeAdded } from "@/lib/history/take-steps"
 import { recordingLimitsFor } from "@/lib/audio/recording-limits"
 import { MAX_AUDIO_UPLOAD_BYTES, audioIdSeededWith, buildAudioId, uploadCellAudio, deleteCellAudio, fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { audioCachePutBlob } from "@/lib/audio/bytes-cache"
-import { emitCellAudioAttach, emitCellAudioValidate, emitCellLaneRetime } from "@/lib/sync/events-emit"
+import { emitCellAudioAttach, emitCellAudioPlace, emitCellAudioValidate } from "@/lib/sync/events-emit"
 import { audioValidationScope } from "@/lib/audio/audio-validation-permissions"
 import { shouldAutoValidateFreshRecording } from "@/lib/review/auto-validation"
 import { notifyAudioAttachmentsChanged, injectOptimisticAudioAttachment } from "@/lib/audio/audio-attachments-bus"
@@ -1402,6 +1402,14 @@ export function AudioRecordingModal({
         operator,
         durationMs: takeDurationMs,
       })
+      // AQU-2491 (review, Nov 9): the place is THIS TAKE'S, never the line's.
+      // Written on the line it moved every take there with no place of its
+      // own (other tracks, other languages), and Undo left them moved. On a
+      // timed line with no pre-roll to undo, the take's first sample is the
+      // line's start, said outright so a place an older save left on the line
+      // can't pull it early. A line with no times gets no place, as before.
+      const cueTimed = typeof activeCell.startTime === "number" && Number.isFinite(activeCell.startTime)
+      const takePlaceMs = laneOffsetMs ?? (cueTimed ? 0 : null)
       const audioId = buildAudioId(activeCell.id)
       // Warm the OPFS byte cache BEFORE upload (FRO-355), keyed exactly as
       // transcribeCell/useCellAudio look bytes up (audioId+ext of the
@@ -1495,6 +1503,8 @@ export function AudioRecordingModal({
         // trip) until the server projection lands and silently corrected it.
         trimStartMs: takeTrimWindow.trimStartMs ?? null,
         trimEndMs: takeTrimWindow.trimEndMs ?? null,
+        // AQU-2491 (review, Nov 9): and its own place, written just below.
+        ...(takePlaceMs != null ? { targetOffsetMs: takePlaceMs } : {}),
         // The take's provenance, so the strip's control reads right before
         // the projection comes back: a dub, recorded by me, and — when the
         // rule says so — already carrying my vote.
@@ -1556,13 +1566,19 @@ export function AudioRecordingModal({
       // attached, and it merely sits `preRollMs` late until someone drags it.
       // (targetOffsetMsFor clamps at file zero, so a line in the first 200ms of
       // the film keeps what runway it has — and the trim inherits the clamp.)
-      if (laneOffsetMs != null) {
+      //
+      // AQU-2491 (review, Nov 9): stored on the TAKE (`cell.audio.place`), the
+      // write a drag on the timeline makes. No place of its own following the
+      // recordings: that timing reads this one, as it read the line's before.
+      if (takePlaceMs != null) {
         try {
-          await emitCellLaneRetime({
+          await emitCellAudioPlace({
             projectId: project.id,
             fileId: activeCell.fileId,
             cellId: activeCell.id,
-            targetOffsetMs: laneOffsetMs,
+            audioId: savedTakeId,
+            targetOffsetMs: takePlaceMs,
+            recordingsOffsetMs: null,
             ...(laneTag ? { targetLang: laneTag } : {}),
             author: username,
           })

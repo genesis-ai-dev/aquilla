@@ -47,7 +47,7 @@ vi.mock("@/lib/audio/audio-attachments-bus", () => ({
   injectOptimisticAudioRemove: vi.fn(),
 }))
 vi.mock("@/lib/sync/events-emit", () => ({
-  emitCellLaneRetime: vi.fn(async () => "evt"),
+  emitCellAudioPlace: vi.fn(async () => "evt"),
   emitCellAudioAttach: vi.fn(async () => "evt"),
   emitCellAudioSelect: vi.fn(async () => "evt"),
   emitCellAudioValidate: vi.fn(async () => "evt"),

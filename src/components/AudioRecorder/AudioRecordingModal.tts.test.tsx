@@ -48,7 +48,7 @@ const emitDeselect = vi.fn(async (..._args: unknown[]) => "evt-deselect")
 vi.mock("@/lib/sync/events-emit", () => ({
   emitCellAudioDeselect: (...args: unknown[]) => emitDeselect(...args),
   emitCellAudioValidate: vi.fn(async () => "evt"),
-  emitCellLaneRetime: vi.fn(async () => "evt"),
+  emitCellAudioPlace: vi.fn(async () => "evt"),
   emitCellAudioAttach: (...args: unknown[]) => emitAttach(...args),
   emitCellAudioSelect: (...args: unknown[]) => emitSelect(...args),
   emitCellAudioRemove: vi.fn(async () => "evt"),

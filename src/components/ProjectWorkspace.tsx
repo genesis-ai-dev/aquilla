@@ -8769,6 +8769,10 @@ export function ProjectWorkspace() {
         contextFor: healthCellCheckContext,
         // AQU-1697: the Bible data scans over the whole file (headings, verse numbering).
         bibleScan: await bibleFileScan(),
+        // AQU-1733: the cross-cell quotation pass reads the project's quotation
+        // marks from here; with the slot empty it infers them from the file's
+        // own text, so this is not gated on any experiment.
+        languageProfile: project?.languageProfile,
       })
       // Bail if the active file changed mid-run — don't clobber the new file's
       // state with this (now stale) file's findings.
@@ -8777,7 +8781,7 @@ export function ProjectWorkspace() {
     } finally {
       setCheckRunning(false)
     }
-  }, [activeFileId, checkRunning, closeCommentsPanel, getActiveCells, rules, laneEditorConcepts, project?.termMatching, healthCellCheckContext, bibleFileScan])
+  }, [activeFileId, checkRunning, closeCommentsPanel, getActiveCells, rules, laneEditorConcepts, project?.termMatching, project?.languageProfile, healthCellCheckContext, bibleFileScan])
 
   // A check run describes one file's cells; switching files invalidates it.
   useEffect(() => {

@@ -11,7 +11,7 @@
 // joining the page's deferred Save bar. The slot is merged over the stored
 // profile, so saving it never wipes another slot.
 
-import { useState, type ReactNode } from "react"
+import { useMemo, useState, type ReactNode } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { SettingsBlock, SettingsGroup, SettingsRow } from "@/components/ui/page"
@@ -30,6 +30,7 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { useFormat } from "@/lib/i18n/format"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
 import { defaultQuoteMarks } from "@/lib/bible-data/quote-mark-defaults"
+import { inferQuoteMarks } from "../../../db/shared/quote-marks-inference"
 import { draftFromQuoteMarks, quoteMarksFromDraft, type QuoteMarksDraft } from "@/lib/bible-data/quote-marks-draft"
 import {
   QUOTE_CONTINUATION_STYLES,
@@ -60,6 +61,14 @@ export interface LanguageProfileSectionProps {
   value: LanguageProfile | undefined
   /** The project's target language, for "Use defaults for …". */
   targetLanguage: string
+  /**
+   * AQU-1733: the project's own translated text, in reading order, for "Use
+   * the marks found in this project's text". The quotation system a project
+   * uses is already visible in what it has translated, so the lead confirms or
+   * edits what the text shows instead of filling the levels in from scratch.
+   * Omitted (or showing no quotation) hides that button.
+   */
+  sampleTexts?: readonly string[]
   /** Mirrors the server's maintainer floor for the settings PATCH. */
   canEdit: boolean
   /** Why the controls are locked (role or offline), or null. */
@@ -67,7 +76,7 @@ export interface LanguageProfileSectionProps {
   patch: (partial: ProjectWideSettings) => Promise<PatchOutcome>
 }
 
-export function LanguageProfileSection({ value, targetLanguage, canEdit, disabledTooltip, patch }: LanguageProfileSectionProps) {
+export function LanguageProfileSection({ value, targetLanguage, sampleTexts, canEdit, disabledTooltip, patch }: LanguageProfileSectionProps) {
   const t = useT()
   const format = useFormat()
   const profile = readLanguageProfile(value)
@@ -83,6 +92,10 @@ export function LanguageProfileSection({ value, targetLanguage, canEdit, disable
     setDraft(draftFromQuoteMarks(stored))
   }
   const defaults = defaultQuoteMarks(targetLanguage)
+  // AQU-1733: what the project's text itself shows. Null while it has
+  // quoted nothing — there is no system to read off, and a guess there would
+  // only make the quotation checks fire on marks the project never used.
+  const detected = useMemo(() => inferQuoteMarks(sampleTexts ?? []), [sampleTexts])
   const disabled = !canEdit || saving
 
   const setMark = (level: number, side: "open" | "close", mark: string) => {
@@ -198,6 +211,19 @@ export function LanguageProfileSection({ value, targetLanguage, canEdit, disable
         }
       />
       <SettingsBlock className="flex flex-wrap items-center gap-2">
+        {detected ? (
+          <Button
+            type="button"
+            variant="outline"
+            disabled={disabled}
+            onClick={() => {
+              setStatus(null)
+              setDraft(draftFromQuoteMarks(detected))
+            }}
+          >
+            {t("bibleData.profile.detect")}
+          </Button>
+        ) : null}
         {defaults ? (
           <Button
             type="button"

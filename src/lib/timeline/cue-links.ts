@@ -46,9 +46,14 @@ export interface LinkableCue {
  * (`medium: "media"`) carries the media's file name as its text, the same on
  * every line; its words are in its transcription. Pairing on the name paired
  * nothing on an imported film (import map, Nov 8).
+ *
+ * AQU-2460 (review, Nov 9): a media line that has not been transcribed has NO
+ * words, never the file's name. It used to fall back to the name here, so a
+ * heard line that happened to say the film's name paired on it. With no words
+ * it pairs with nothing until it has a transcription.
  */
 export function pairingWords(cell: Pick<LinkableCue, "original" | "medium" | "transcription">): string {
-  if (cell.medium === "media" && cell.transcription?.trim()) return cell.transcription
+  if (cell.medium === "media") return cell.transcription?.trim() ? cell.transcription : ""
   return cell.original ?? ""
 }
 

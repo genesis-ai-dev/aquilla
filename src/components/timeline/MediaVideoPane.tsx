@@ -165,6 +165,23 @@ export interface MediaVideoPaneProps {
    */
   followsRecordings?: boolean
   /**
+   * AQU-2253 (review, Nov 9): whether the film could not be loaded (the error
+   * card is up). Following the recordings the workspace quiets the lines'
+   * original while a linked film voices it; a film that cannot play voices
+   * nothing, so the workspace has to know. False again on a retry, a new
+   * address, and when the pane leaves.
+   */
+  onFilmFailed?: (failed: boolean) => void
+  /**
+   * AQU-2227 (review, Nov 9): following the recordings, this file is laid out
+   * and played from its audio cue file's heard lines, where its takes live
+   * (`playsHeardLines`). The file's own recording lines are not what plays
+   * then, so nothing else voices the original: the film's own sound does,
+   * straight through, as on any subtitle file with heard lines. That holds
+   * for an imported film too, and whatever the sound pick says.
+   */
+  playsHeardLines?: boolean
+  /**
    * AQU-2253 (Sam, Oct 30): the film was IMPORTED through the importer (a
    * video uploaded like any other file), not linked. Its sound is the Source
    * audio row's, by the rules any uploaded recording follows, so the element
@@ -200,6 +217,8 @@ export function MediaVideoPane({
   onChangeVideo,
   onPictureClick,
   followsRecordings = false,
+  onFilmFailed,
+  playsHeardLines = false,
   importedFilm = false,
   filmPieces = null,
   sourceDirectionMode = "auto",
@@ -214,6 +233,12 @@ export function MediaVideoPane({
   const [mode, setModeState] = useState<SubtitleMode>(() => readSubtitleMode())
   const [placement, setPlacementState] = useState<CaptionPlacement>(() => readCaptionPlacement())
   const [failed, setFailed] = useState(false)
+  // AQU-2253 (review, Nov 9): a film that cannot play voices nothing.
+  useEffect(() => {
+    if (!onFilmFailed) return
+    onFilmFailed(failed)
+    return () => onFilmFailed(false)
+  }, [failed, onFilmFailed])
   /** The YouTube player's error code when it failed (null: none given). */
   const [youTubeErrorCode, setYouTubeErrorCode] = useState<number | null>(null)
   const [needsGesture, setNeedsGesture] = useState(false)
@@ -291,7 +316,14 @@ export function MediaVideoPane({
   const playbackSource = usePlaybackSource(fileId, src)
   // AQU-2253: following the recordings the programme drives, so the picture is
   // slaved there whether or not a recording exists.
-  const slaved = followsRecordings || recordingDrivesPlayback(recordingCell != null, playbackSource)
+  // AQU-2253 (review, Nov 9): the sound pick counts in both timings. Where the
+  // uploaded recording is the sound picked, the film is the quiet one,
+  // following the recordings as much as following the source.
+  // AQU-2227 (review, Nov 9): unless the file plays its heard lines: the
+  // recording is not in what plays then, so the film's sound is the original.
+  const recordingDrives = recordingDrivesPlayback(recordingCell != null, playbackSource)
+  const recordingIsTheSound = recordingDrives && !playsHeardLines
+  const slaved = followsRecordings || recordingDrives
   /** The sound menu exists only where there is a choice to make: a YouTube
    *  picture over a file that also carries an uploaded recording. */
   const offerSoundSource = youTube && recordingCell != null
@@ -1292,10 +1324,14 @@ export function MediaVideoPane({
           // (AQU-646, 2026-08-11 / 2026-08-13)
           // AQU-2253: following the recordings it is slaved AND keeps its own
           // sound, which plays straight through with the picture.
+          // AQU-2253 (review, Nov 9): unless the uploaded recording is the
+          // sound picked; then the film is silent in both timings.
           // AQU-2253 (Sam, Oct 30): an imported film is always silent: its
           // sound is the Source audio row's, by the rules any uploaded
           // recording follows in each timing.
-          muted={importedFilm || (slaved && !followsRecordings) || !sourceAudible}
+          // AQU-2227 (review, Nov 9): a file that plays its heard lines has
+          // only the film to voice the original, imported or linked.
+          muted={(importedFilm && !playsHeardLines) || recordingIsTheSound || !sourceAudible}
           // NO NATIVE CONTROLS, in either arrangement (2026-08-14, Sam).
           //
           // The standalone picture used to keep them, on the reasoning that it

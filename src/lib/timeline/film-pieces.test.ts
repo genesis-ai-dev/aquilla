@@ -99,6 +99,28 @@ describe("filmVoicesProgramme — whose sound plays following the recordings", (
     expect(filmVoicesProgramme({ kind: "linked", paneOnScreen: false, followsRecordings: true })).toBe(false)
     expect(filmVoicesProgramme({ kind: null, paneOnScreen: true, followsRecordings: true })).toBe(false)
   })
+
+  // AQU-2253 (review, Nov 9): the sound pick and a film that cannot play count
+  // following the recordings too, as they always have following the source.
+  it("the recording was picked as the sound: the film stays quiet and the lines' original is heard", () => {
+    expect(
+      filmVoicesProgramme({ kind: "linked", paneOnScreen: true, followsRecordings: true, recordingIsTheSound: true }),
+    ).toBe(false)
+  })
+
+  it("a film that could not be loaded voices nothing, so the lines' original is heard", () => {
+    expect(
+      filmVoicesProgramme({ kind: "linked", paneOnScreen: true, followsRecordings: true, filmFailed: true }),
+    ).toBe(false)
+  })
+
+  it("the film's own sound picked and the film playing: the film voices the programme", () => {
+    expect(
+      filmVoicesProgramme({
+        kind: "linked", paneOnScreen: true, followsRecordings: true, recordingIsTheSound: false, filmFailed: false,
+      }),
+    ).toBe(true)
+  })
 })
 
 describe("filmPiecesFor — the film cut along its source cues", () => {

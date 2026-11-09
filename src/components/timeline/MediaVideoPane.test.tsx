@@ -341,6 +341,66 @@ describe("MediaVideoPane", () => {
       expect(video.currentTime).toBe(12.5)
     })
 
+    // AQU-2253 (review, Nov 9): the sound pick counts following the recordings
+    // too. A streamed film beside an uploaded recording starts on the
+    // recording (today's default), so the film is the quiet one in both
+    // timings; a YouTube film starts on its own sound until the person picks
+    // the recording.
+    describe("beside an uploaded recording", () => {
+      const YT = "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
+      afterEach(() => {
+        localStorage.removeItem(playbackSourceKey("f1"))
+        __resetPlaybackSourceForTests()
+      })
+
+      it("a streamed film stays quiet: the recording is the sound, as it is following the source", () => {
+        renderFollowing({ cells: CELLS })
+        expect(screen.getByTestId("tl-video-pane")).toHaveAttribute("data-video-state", "slaved")
+        expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(true)
+      })
+
+      it("a YouTube film keeps its own sound until the recording is picked, then goes quiet", async () => {
+        renderFollowing({ cells: CELLS, src: YT })
+        expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(false)
+        fireEvent.click(screen.getByTestId("video-sound-source-picker"))
+        fireEvent.click(await screen.findByTestId("video-sound-source-recording"))
+        expect(screen.getByTestId("tl-video-pane")).toHaveAttribute("data-video-state", "slaved")
+        expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(true)
+      })
+    })
+
+    // AQU-2227 (review, Nov 9): a file that plays its heard lines (its takes
+    // live on them) does not play its own recording lines, so the film's own
+    // sound is the original there, linked or imported.
+    describe("on a file that plays its heard lines", () => {
+      it("a streamed film beside an uploaded recording keeps its own sound", () => {
+        renderFollowing({ cells: CELLS, playsHeardLines: true })
+        expect(screen.getByTestId("tl-video-pane")).toHaveAttribute("data-video-state", "slaved")
+        expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(false)
+      })
+
+      it("an imported film voices the original too, and the Source audio mute still silences it", () => {
+        const view = renderFollowing({ cells: CELLS, importedFilm: true, playsHeardLines: true })
+        expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(false)
+        view.unmount()
+        mockAudibility = { source: false, target: true }
+        renderFollowing({ cells: CELLS, importedFilm: true, playsHeardLines: true })
+        expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(true)
+      })
+    })
+
+    // AQU-2253 (review, Nov 9): a film that cannot play voices nothing, so the
+    // workspace is told and gives the lines' original its sound back.
+    it("tells the workspace when the film could not be loaded, and again when it is retried or leaves", () => {
+      const onFilmFailed = vi.fn()
+      const view = renderFollowing({ onFilmFailed })
+      expect(onFilmFailed).toHaveBeenLastCalledWith(false)
+      fireEvent.error(screen.getByTestId("video-pane-media"))
+      expect(onFilmFailed).toHaveBeenLastCalledWith(true)
+      view.unmount()
+      expect(onFilmFailed).toHaveBeenLastCalledWith(false)
+    })
+
     it("a take played on its own clock leaves the film where it is", () => {
       const view = renderFollowing()
       const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
@@ -391,8 +451,11 @@ describe("MediaVideoPane", () => {
       const view = render(pane({ followsRecordings: true, filmPieces: pieces }))
       expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(true)
       // The same pane on a linked film plays its own sound (unchanged).
+      // AQU-2253 (review, Nov 9): on lines with no uploaded recording; beside
+      // one, the sound pick decides (see "beside an uploaded recording").
       view.unmount()
-      render(<MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={lines} followsRecordings />)
+      const textLines = lines.map((l) => ({ ...l, medium: "text", attachments: undefined }) as unknown as CellData)
+      render(<MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={textLines} followsRecordings />)
       expect((screen.getByTestId("video-pane-media") as HTMLVideoElement).muted).toBe(false)
     })
 

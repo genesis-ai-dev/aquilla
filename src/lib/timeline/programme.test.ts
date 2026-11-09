@@ -8,6 +8,7 @@ import {
   cellStartProgrammeSec,
   leadSecForMove,
   MIN_TARGET_LEAD_SEC,
+  playsHeardLines,
   programmeLines,
   programmeToSource,
   programmeToTarget,
@@ -605,8 +606,25 @@ describe("recordingsLines (group D)", () => {
     expect(recordingsLines(own, [], true)).toBe(own)
   })
 
-  it("an imported recording's own sections stay its lines", () => {
+  // AQU-2227 (review, Nov 9): the heard lines are handed over only where the
+  // file's takes live on them (an uploaded recording with a linked film and
+  // an audio cue file; heard lines that already hold takes). Laid out from
+  // the recording's own sections there, no heard line had a place and every
+  // take vanished from the timeline and from playback.
+  it("a file with recording sections of its own still follows its heard lines, where its takes live", () => {
     const sections = [verse("m1", 0, 4)]
-    expect(recordingsLines(sections, heard, true)).toBe(sections)
+    const withTake = [verse("cue1", 1, 4, { durationMs: 6_000 }, { medium: undefined })]
+    expect(recordingsLines(sections, withTake, true)).toBe(withTake)
+    const played = buildProgramme(recordingsLines(sections, withTake, true))
+    expect(played.byCellId.get("cue1")?.targetWindow).toEqual({ start: 0, end: 6 })
+    expect(playsHeardLines(withTake, true)).toBe(true)
+  })
+
+  it("with no heard lines handed over (takes on its own lines), a recording's sections stay its lines", () => {
+    const sections = [verse("m1", 0, 4)]
+    expect(recordingsLines(sections, null, true)).toBe(sections)
+    expect(recordingsLines(sections, heard, false)).toBe(sections)
+    expect(playsHeardLines(null, true)).toBe(false)
+    expect(playsHeardLines(heard, false)).toBe(false)
   })
 })

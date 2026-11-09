@@ -77,6 +77,31 @@ describe("planCueLinks", () => {
     expect(plans.map((p) => [p.textCellId, p.cueCellId])).toEqual([["l1", "cue-1"], ["l2", "cue-2"]])
   })
 
+  // AQU-2460 (review, Nov 9): a line of an imported film that has not been
+  // transcribed has no words, never the file name every line carries. It
+  // pairs with nothing until it has a transcription.
+  describe("an imported film's lines with no transcription yet", () => {
+    const bare = (id: string, start: number, end: number, name = "Episode 101.mov") => ({
+      ...cue(id, start, end, name), medium: "media",
+    })
+
+    it("the file name is never read as the line's words, even when a heard line says them", () => {
+      const plans = planCueLinks({
+        textCells: [bare("film", 0, 60, "The Shepherd.mov")],
+        audioCues: [cue("cue-1", 10.1, 11.9, "The shepherd."), cue("cue-2", 14.1, 15.8, "Where is she going?")],
+      })
+      expect(plans).toEqual([])
+    })
+
+    it("a transcribed line beside it still pairs on its words", () => {
+      const plans = planCueLinks({
+        textCells: [{ ...bare("l1", 0, 12), transcription: "I see him." }, bare("l2", 12, 24)],
+        audioCues: [cue("cue-1", 10.1, 11.9, "I see him."), cue("cue-2", 14.1, 15.8, "Where is she going?")],
+      })
+      expect(plans.map((p) => [p.textCellId, p.cueCellId, p.basis])).toEqual([["l1", "cue-1", "words"]])
+    })
+  })
+
   it("a text line keeps pairing on its own text", () => {
     const plans = autoLinkable(planCueLinks({
       textCells: [{ ...cue("sub-1", 10, 12, "I see him."), medium: "text", transcription: "ignored words" }],

@@ -72,9 +72,14 @@ export interface LineWordsRun {
 /** Windows of at most a minute over the stretch, ms on the recording's clock. */
 export function planLineWindows(pcm: Float32Array, audio: Pick<LineAudio, "lo" | "hi">): Array<{ lo: number; hi: number }> {
   const starts = windowStarts(pcm, LINE_WINDOW_SEC, true)
+  // AQU-2426 (review, Nov 9): a line whose length was never measured has no
+  // stretch (hi = lo), and a window ending where it starts reads as "the whole
+  // clip" (pcm-window.ts): the last window sent the recording a second time.
+  // The stretch then ends where the decoded audio does.
+  const end = audio.hi > audio.lo ? audio.hi : audio.lo + Math.round((pcm.length / PCM_RATE) * 1000)
   return starts.map((s, i) => ({
     lo: i === 0 ? audio.lo : audio.lo + Math.round((s / PCM_RATE) * 1000),
-    hi: i === starts.length - 1 ? audio.hi : audio.lo + Math.round((starts[i + 1]! / PCM_RATE) * 1000),
+    hi: i === starts.length - 1 ? end : audio.lo + Math.round((starts[i + 1]! / PCM_RATE) * 1000),
   }))
 }
 

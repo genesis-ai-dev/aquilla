@@ -424,7 +424,7 @@ import { NotSplitNoticeClip } from "@/components/timeline/NotSplitNotice"
 import { fmtCueClock } from "@/components/timeline/format"
 import type { TranscribeChoiceInfo } from "@/components/import/recording-choice-context"
 import { RecordingImportChoiceDialog } from "@/components/import/RecordingImportChoiceDialog"
-import { probeMediaDurationMs } from "@/lib/import"
+import { measureByDecodingMs, probeMediaDurationMs } from "@/lib/import"
 import { needsSplitNotice, sourceRecordingLine } from "@/lib/timeline/recording-line"
 import { piecesFromCuts, splitRecordingLine, textsForPieces, writeLineWindow, type LinePiece, type RecordingLine } from "@/lib/timeline/split-recording-line"
 import { cutsFromWords, loadLinePcm, pauseCuts, type LineAudio } from "@/lib/audio/recording-split"
@@ -11031,7 +11031,9 @@ export function ProjectWorkspace() {
     resolve: (mode: "whole" | "transcribe" | null) => void
   } | null>(null)
   askAttachChoiceRef.current = async (file) => {
-    const durationMs = await probeMediaDurationMs(file).catch(() => undefined)
+    // AQU-2426 (review, Nov 9): a browser recording's length is not in its
+    // header; measured by decoding, as the attach itself does.
+    const durationMs = await probeMediaDurationMs(file).catch(() => measureByDecodingMs(file)).catch(() => undefined)
     const info = await prepareTranscribeChoice([durationMs])
     return new Promise((resolve) => {
       setAttachChoice({

@@ -42,6 +42,7 @@ import { RichMessage } from "@/lib/i18n/RichMessage"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import {
   importFile,
+  measureByDecodingMs,
   probeMediaDurationMs,
   importEBible,
   importObs,
@@ -2565,7 +2566,11 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
   const recordingChoiceResolver = useRef<((mode: "whole" | "transcribe" | null) => void) | null>(null)
   const askRecordingModes = useCallback(async (bare: readonly File[]): Promise<Map<File, "whole" | "transcribe"> | null> => {
     if (bare.length === 0) return new Map()
-    const durations = await Promise.all(bare.map((file) => probeMediaDurationMs(file).catch(() => undefined)))
+    // AQU-2426 (review, Nov 9): a browser recording has no length in its
+    // header; it is measured by decoding, as the import itself does, so the
+    // cost shown is for its real length.
+    const durations = await Promise.all(bare.map((file) =>
+      probeMediaDurationMs(file).catch(() => measureByDecodingMs(file)).catch(() => undefined)))
     const info = prepareTranscribeChoice
       ? await prepareTranscribeChoice(durations).catch(() => localTranscribeChoice(username, durations))
       : localTranscribeChoice(username, durations)

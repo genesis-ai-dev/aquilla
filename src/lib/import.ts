@@ -2079,7 +2079,10 @@ export function mediaSegmentSpecsFromSpeech(
 export async function wholeRecordingSpecs(
   file: Blob,
 ): Promise<{ durationMs: number | undefined; specs: MediaSegmentSpec[] }> {
-  const durationMs = await probeMediaDurationMs(file).catch(() => undefined)
+  // AQU-2426 (review, Nov 9): what a browser records has no duration header,
+  // so the probe alone left it a line with no length — nothing offered to
+  // split it. Its length is measured by decoding instead.
+  const durationMs = await probeMediaDurationMs(file).catch(() => measureByDecodingMs(file))
   return { durationMs, specs: mediaSegmentSpecsFromSpeech([], durationMs) }
 }
 
@@ -2309,6 +2312,22 @@ export async function probeDurationMsSafe(blob: Blob, timeoutMs = 15_000): Promi
   } catch {
     return undefined
   }
+}
+
+/** The most a recording may weigh to be decoded only to measure it: the whole
+ *  file is held in memory, decoded. A long film never is. */
+export const DECODE_TO_MEASURE_LIMIT_BYTES = 16 * 1024 * 1024
+
+/**
+ * AQU-2426 (review, Nov 9): a recording's length when its header has none
+ * (what a browser records: a MediaRecorder .webm), by decoding it. For the
+ * import's own measuring, after `probeMediaDurationMs` has failed. Undefined
+ * when it is too big to decode whole or can't be decoded: the recording then
+ * comes in unmeasured, as before.
+ */
+export async function measureByDecodingMs(file: Blob): Promise<number | undefined> {
+  if (file.size > DECODE_TO_MEASURE_LIMIT_BYTES) return undefined
+  return decodeDurationMs(file).catch(() => undefined)
 }
 
 /** Exact duration by decoding the samples. Throws when the platform can't. */

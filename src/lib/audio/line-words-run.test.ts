@@ -54,6 +54,35 @@ describe("planLineWindows", () => {
   })
 })
 
+// AQU-2426 (review, Nov 9): a line whose length was never measured (lo = hi =
+// 0) planned its last window to end at 0, which reads as "the whole clip": a
+// 5-minute recording was sent as ten minutes and its text came back twice.
+describe("a line with no measured length (AQU-2426 review)", () => {
+  it("plans its windows over the recording as decoded, the last one ending where it ends", () => {
+    const windows = planLineWindows(pcm(300), { lo: 0, hi: 0 })
+    expect(windows.at(-1)!.hi).toBe(300_000)
+    for (const w of windows) {
+      expect(w.hi).toBeGreaterThan(w.lo)
+      expect(w.hi - w.lo).toBeLessThanOrEqual(LINE_WINDOW_SEC * 1000)
+    }
+  })
+
+  it("sends each minute once: five minutes of audio for a five-minute recording", async () => {
+    const sent: Array<{ lo: number; hi: number }> = []
+    const transcribe = vi.fn(async ({ line }: { line: LineAudio }) => {
+      sent.push({ lo: line.lo, hi: line.hi })
+      return wordsFor(line)
+    })
+    const { report } = await runLineWords({
+      audio: { ...audio, lo: 0, hi: 0 }, session: null, purpose: "import", identity,
+      deps: { transcribe, loadPcm: async () => pcm(300), newId: () => "words-1" },
+    })
+    expect(sent.every((w) => w.hi > w.lo)).toBe(true)
+    expect(sent.reduce((ms, w) => ms + (w.hi - w.lo), 0)).toBe(300_000)
+    expect(report.failed).toEqual([])
+  })
+})
+
 describe("runLineWords", () => {
   it("transcribes each window once, puts its words on the line's clock, and keeps them", async () => {
     const transcribe = vi.fn(async ({ line }: { line: LineAudio }) => wordsFor(line))

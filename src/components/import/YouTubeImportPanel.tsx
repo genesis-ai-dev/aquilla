@@ -2,7 +2,7 @@ import { useContext, useEffect, useId, useMemo, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useT } from "@/lib/i18n/I18nProvider"
-import { createMediaFileCommit, probeMediaDurationMs,
+import { createMediaFileCommit, measureByDecodingMs, probeMediaDurationMs,
   type EmitParsedFileResult, type ImportContext } from "@/lib/import"
 import { MAX_AUDIO_OBJECT_BYTES } from "@/lib/audio/upload"
 import { mediaFileTooLargeMessage } from "@/lib/audio/media-limit"
@@ -92,7 +92,9 @@ export function YouTubeImportPanel({ ctx, onImported }: {
               number: index + 1, language: option.language ?? "",
             }),
           })) : []
-        const durationMs = await probeMediaDurationMs(media).catch(() => undefined)
+        // AQU-2426 (review, Nov 9): a browser recording's length is not in
+        // its header; measured by decoding, as the import itself does.
+        const durationMs = await probeMediaDurationMs(media).catch(() => measureByDecodingMs(media)).catch(() => undefined)
         const choice = sources.length > 0 ? undefined : prepareTranscribeChoice
           ? await prepareTranscribeChoice([durationMs]).catch(() => localTranscribeChoice(ctx.author, [durationMs]))
           : localTranscribeChoice(ctx.author, [durationMs])

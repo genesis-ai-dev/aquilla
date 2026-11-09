@@ -2051,7 +2051,16 @@ case 'cell.audio.attach': {
       const attachPieceOf = typeof p.pieceOf === 'string' && p.pieceOf !== '' && p.pieceOf !== p.audioId
         ? p.pieceOf
         : null
-      stmts.push(
+      // AQU-2426 (review, Nov 9): a WORDS-ONLY re-attach chooses nothing. It
+      // adds what is known about a clip already on the line (a line's words
+      // after Split into lines… or Import and transcribe…) and leaves every
+      // lane's chosen take, and this clip's own selected and removed marks,
+      // exactly as they are. Sent as an ordinary source re-attach it claimed
+      // the slot in every lane, so each language's take on the line was
+      // un-chosen; with no role it still claimed the '' lane's. Stated in the
+      // payload so a projection rebuild agrees with ingest.
+      const wordsOnly = p.wordsOnly === true
+      if (!wordsOnly) stmts.push(
         db
           .prepare(
             `UPDATE cell_audio SET selected = 0
@@ -2118,7 +2127,7 @@ case 'cell.audio.attach': {
               voice_id, reference_audio_id, duration_ms, label, trim_start_ms, trim_end_ms,
               timings_json, asr_text, asr_model, transcript_ai,
               selected, deleted, event_id, created_ts, role, created_by, lane_id, piece_of
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?,
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${wordsOnly ? 0 : 1}, 0, ?, ?, ?, ?,
                       ${attachPieceOf ? attachPieceLaneSql() : audioLaneResolveSql()}, ?)
             ON CONFLICT(project_id, file_id, cell_id, audio_id) DO UPDATE SET
               slot               = excluded.slot,
@@ -2142,8 +2151,8 @@ case 'cell.audio.attach': {
               transcript_ai      = CASE WHEN excluded.transcript_ai IS NOT NULL THEN excluded.transcript_ai
                                         WHEN excluded.timings_json IS NOT NULL THEN NULL
                                         ELSE cell_audio.transcript_ai END,
-              selected           = 1,
-              deleted            = 0,
+              selected           = ${wordsOnly ? 'cell_audio.selected' : '1'},
+              deleted            = ${wordsOnly ? 'cell_audio.deleted' : '0'},
               event_id           = excluded.event_id,
               -- AQU-490: created_by is FILL-ONLY, and deliberately so. A
               -- re-attach is routine — the transcription lands ~800ms after

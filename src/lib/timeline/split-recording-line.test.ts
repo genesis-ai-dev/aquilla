@@ -15,7 +15,7 @@ vi.mock("@/lib/sync/events-emit", () => {
   }
 })
 
-import { piecesFromCuts, splitRecordingLine, textsForPieces, type RecordingLine } from "./split-recording-line"
+import { piecesFromCuts, splitRecordingLine, textsForPieces, writeLineWords, type RecordingLine } from "./split-recording-line"
 
 const whole: RecordingLine = {
   projectId: "p", fileId: "f", cellId: "c1", name: "Ruth 1 intro.m4a",
@@ -65,7 +65,10 @@ describe("splitRecordingLine", () => {
     // The first piece is the line itself, narrowed.
     expect(calls[0].input).toMatchObject({ cellId: "c1", startMs: 0, endMs: 10_000 })
     expect(calls[1].input).toMatchObject({ cellId: "c1", trimStartMs: 0, trimEndMs: 10_000 })
-    expect(calls[2].input).toMatchObject({ cellId: "c1", transcription: "A.", role: "source" })
+    // AQU-2426 (review, Nov 9): its words ride a words-only re-attach that
+    // names no role, so the takes already chosen on the line stay chosen.
+    expect(calls[2].input).toMatchObject({ cellId: "c1", audioId: "f-clip.m4a", slot: "recording", transcription: "A.", wordsOnly: true })
+    expect(calls[2].input.role).toBeUndefined()
     // New lines share the recording, each with its own window, chained in order.
     expect(calls[3].input).toMatchObject({ cellId: "new1", anchorCellId: "c1", medium: "media", startMs: 10_000, endMs: 25_000, transcription: "B." })
     expect(calls[4].input).toMatchObject({ cellId: "new1", audioId: "f-clip.m4a", trimStartMs: 10_000, trimEndMs: 25_000, role: "source", slot: "recording" })
@@ -117,3 +120,15 @@ describe("words kept on a whole line, shared out by a later split", () => {
   })
 })
 
+
+describe("writeLineWords (AQU-2426 review, Nov 9)", () => {
+  it("puts words on a line without claiming its recording slot", async () => {
+    await writeLineWords({ line: whole, text: "The whole transcript.", author: "lee" })
+    expect(calls.map((c) => c.kind)).toEqual(["attach"])
+    expect(calls[0].input).toMatchObject({
+      projectId: "p", fileId: "f", cellId: "c1", audioId: "f-clip.m4a", url: whole.url, slot: "recording",
+      transcription: "The whole transcript.", wordsOnly: true, author: "lee",
+    })
+    expect(calls[0].input.role).toBeUndefined()
+  })
+})

@@ -9,7 +9,7 @@
 //
 //   • the FIRST piece stays the line itself (same cell id), so a translation,
 //     takes or anything else already on the line stay on the first new line,
-//     as the dialog says;
+//     as the dialog says — and the takes stay chosen (writeLineWords);
 //   • every other piece is a new line right after it, sharing the recording
 //     with its own trim window (the shape the importer gives a recording cut at
 //     its pauses: same audioId, url and role "source");
@@ -149,6 +149,37 @@ export interface SplitResult {
 }
 
 /**
+ * Put words on a line that is already there: the first piece of a split, or a
+ * whole line whose words came back with nothing split.
+ *
+ * AQU-2426 (review, Nov 9): a words-only re-attach of the line's own source
+ * clip, with no `role`. Sent as `role: "source"` it claimed the recording slot
+ * in every language, so every take chosen on the line was un-chosen and the
+ * line read as unrecorded until each was picked again.
+ */
+export async function writeLineWords(args: {
+  line: Pick<RecordingLine, "projectId" | "fileId" | "cellId" | "audioId" | "url" | "durationMs" | "mimeType">
+  /** "" clears the words the line had. */
+  text: string
+  author: string
+}): Promise<void> {
+  const { line } = args
+  await emitCellAudioAttach({
+    projectId: line.projectId,
+    fileId: line.fileId,
+    cellId: line.cellId,
+    audioId: line.audioId,
+    url: line.url,
+    slot: "recording",
+    ...(line.mimeType ? { mimeType: line.mimeType } : {}),
+    ...(line.durationMs !== undefined ? { durationMs: Math.round(line.durationMs) } : {}),
+    transcription: args.text,
+    wordsOnly: true,
+    author: args.author,
+  })
+}
+
+/**
  * Write the split. Needs at least two pieces; with fewer, nothing is written
  * and null comes back.
  */
@@ -183,7 +214,7 @@ export async function splitRecordingLine(args: {
   if (first.text !== undefined) {
     // The words land on the line's own source text, as transcription writes them
     // ("" clears words the whole line had kept, when none fall in this piece).
-    await emitCellAudioAttach({ ...base, ...attachShared, cellId: line.cellId, transcription: first.text })
+    await writeLineWords({ line, text: first.text, author })
   }
 
   const created: SplitResult["created"] = []

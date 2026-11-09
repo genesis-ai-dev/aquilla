@@ -182,6 +182,17 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
     return (first.trimEndMs ?? null) === c.before.trimEndMs
   }
 
+  // AQU-2492 (review, Nov 9): the take to CHOOSE when a step goes back to
+  // `id`. A take is named by its first piece, and a cut take whose first piece
+  // was deleted is still a take: any piece that is left chooses it (the whole
+  // group plays; a removed piece stays removed). Null when nothing of it is
+  // left. A step never chooses a deleted take: that is how the server brings
+  // one back, and it would silently reverse whoever deleted it.
+  const liveOf = (cellId: string, id: string): string | null => {
+    if (ctx.readTake(cellId, id)) return id
+    return (ctx.liveGroup?.(cellId, id) ?? []).find((piece) => ctx.readTake(cellId, piece)) ?? null
+  }
+
   const handlers: Record<string, StepHandler<never>> = {
     "take.add": {
       async undo(d: TakeAddData) {
@@ -206,9 +217,12 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
         }
         // The slot plays what it played before — unless someone has chosen
         // another take since, or that one is gone.
-        const before = d.selectedBefore ? ctx.readTake(d.cellId, d.selectedBefore) : null
-        if (playingNow === d.audioId && d.selectedBefore && before && (before.slot ?? d.slot) === d.slot) {
-          await ctx.select(d.cellId, d.slot, d.selectedBefore)
+        // AQU-2492: a cut take that played before is chosen by a piece that
+        // is left, when its first piece has been deleted since.
+        const beforeId = d.selectedBefore ? liveOf(d.cellId, d.selectedBefore) : null
+        const before = beforeId ? ctx.readTake(d.cellId, beforeId) : null
+        if (playingNow === d.audioId && beforeId && before && (before.slot ?? d.slot) === d.slot) {
+          await ctx.select(d.cellId, d.slot, beforeId)
         }
         ctx.takeRemoved?.(d.cellId, ids)
         return DONE
@@ -261,13 +275,18 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
     "take.select": {
       async undo(d: TakeSelectData) {
         if (ctx.selectedIn(d.cellId, d.slot) !== d.after) return CHANGED
-        await ctx.select(d.cellId, d.slot, d.before)
+        // AQU-2492: the take to go back to was deleted since (by anyone).
+        // Choosing it would bring it back, so the step is left alone.
+        const back = d.before ? liveOf(d.cellId, d.before) : null
+        if (d.before && !back) return GONE
+        await ctx.select(d.cellId, d.slot, back)
         return DONE
       },
       async redo(d: TakeSelectData) {
         if (ctx.selectedIn(d.cellId, d.slot) !== d.before) return CHANGED
-        if (d.after && !ctx.readTake(d.cellId, d.after)) return GONE
-        await ctx.select(d.cellId, d.slot, d.after)
+        const again = d.after ? liveOf(d.cellId, d.after) : null
+        if (d.after && !again) return GONE
+        await ctx.select(d.cellId, d.slot, again)
         return DONE
       },
     } as StepHandler<never>,

@@ -289,3 +289,74 @@ describe("take.select that emptied a slot", () => {
     expect(select).toHaveBeenLastCalledWith("c", "recording", null)
   })
 })
+
+// AQU-2492 (review, Nov 9), finding 6: Undo never brings back a take a
+// colleague deleted, and a cut take with its first piece deleted is still a
+// take. Choosing a deleted take is how the server un-deletes one, so an Undo
+// that went back to "the take that played before" quietly reversed someone's
+// delete. And a cut take is named by its first piece: with that piece deleted
+// the step read the whole take as gone and left the line playing nothing.
+describe("going back to a take that was deleted since (AQU-2492)", () => {
+  const group = (takes: Takes) => (_c: string, id: string) =>
+    Object.keys(takes).filter((k) => !takes[k].isDeleted && (takes[k].pieceOf ?? k) === (takes[id]?.pieceOf ?? id))
+
+  it("undoing 'chose a take' is skipped when the take to go back to was deleted, and nothing is chosen", async () => {
+    const takes: Takes = { a: { isDeleted: true }, b: {} }
+    const { ctx, handlers } = ctxFor(takes, { selectedIn: () => "b", liveGroup: group(takes) })
+    const data = { cellId: "c", slot: "recording", before: "a", after: "b" }
+    expect(await handlers["take.select"].undo(data)).toEqual({ kind: "skipped", reason: "gone" })
+    expect(ctx.select).not.toHaveBeenCalled()
+  })
+
+  it("…and on an added track, the same", async () => {
+    const takes: Takes = { a: { isDeleted: true, slot: "track-9" }, b: { slot: "track-9" } }
+    const { ctx, handlers } = ctxFor(takes, { selectedIn: (_c, slot) => (slot === "track-9" ? "b" : null), liveGroup: group(takes) })
+    expect(await handlers["take.select"].undo({ cellId: "c", slot: "track-9", before: "a", after: "b" })).toEqual({ kind: "skipped", reason: "gone" })
+    expect(ctx.select).not.toHaveBeenCalled()
+  })
+
+  it("a cut take whose first piece was deleted is chosen again by a piece that is left", async () => {
+    const takes: Takes = { a: { isDeleted: true }, a2: { pieceOf: "a" }, a3: { pieceOf: "a" }, b: {} }
+    const { ctx, handlers } = ctxFor(takes, { selectedIn: () => "b", liveGroup: group(takes) })
+    expect(await handlers["take.select"].undo({ cellId: "c", slot: "recording", before: "a", after: "b" })).toEqual({ kind: "done" })
+    // Never the deleted first piece: choosing it would bring it back.
+    expect(ctx.select).toHaveBeenCalledTimes(1)
+    expect(ctx.select).toHaveBeenCalledWith("c", "recording", "a2")
+  })
+
+  it("redoing 'chose a take' chooses a piece that is left, and is skipped as gone when none is", async () => {
+    const takes: Takes = { a: {}, b: { isDeleted: true }, b2: { pieceOf: "b" } }
+    const { ctx, handlers } = ctxFor(takes, { selectedIn: () => "a", liveGroup: group(takes) })
+    const data = { cellId: "c", slot: "recording", before: "a", after: "b" }
+    expect(await handlers["take.select"].redo(data)).toEqual({ kind: "done" })
+    expect(ctx.select).toHaveBeenCalledWith("c", "recording", "b2")
+    takes.b2 = { pieceOf: "b", isDeleted: true }
+    expect(await handlers["take.select"].redo(data)).toEqual({ kind: "skipped", reason: "gone" })
+    expect(ctx.select).toHaveBeenCalledTimes(1)
+  })
+
+  it("undoing a new recording plays the cut take's remaining pieces again", async () => {
+    const takes: Takes = { old: { isDeleted: true, slot: "recording" }, old2: { pieceOf: "old", slot: "recording" }, new: { slot: "recording" } }
+    const playing = { id: "new" as string | null }
+    const { ctx, handlers } = ctxFor(takes, {
+      selectedIn: () => playing.id,
+      remove: vi.fn(async (_c, id) => { takes[id] = { ...takes[id], isDeleted: true } }),
+      select: vi.fn(async (_c, _s, id) => { playing.id = id }),
+      liveGroup: group(takes),
+    })
+    const added = { cellId: "c", audioId: "new", slot: "recording", selectedBefore: "old" }
+    expect(await handlers["take.add"].undo(added)).toEqual({ kind: "done" })
+    expect(ctx.select).toHaveBeenCalledWith("c", "recording", "old2")
+  })
+
+  it("undoing a new recording leaves the slot empty when the take that played before was deleted whole", async () => {
+    const takes: Takes = { old: { isDeleted: true }, new: {} }
+    const { ctx, handlers } = ctxFor(takes, {
+      selectedIn: () => "new",
+      remove: vi.fn(async (_c, id) => { takes[id] = { ...takes[id], isDeleted: true } }),
+      liveGroup: group(takes),
+    })
+    expect(await handlers["take.add"].undo({ cellId: "c", audioId: "new", slot: "recording", selectedBefore: "old" })).toEqual({ kind: "done" })
+    expect(ctx.select).not.toHaveBeenCalled()
+  })
+})

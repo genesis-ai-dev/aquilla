@@ -87,7 +87,7 @@ describe("Split into lines… (AQU-2426)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Transcribe and preview" }))
     await screen.findByTestId("split-words")
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
-    expect(props.onKeepWords).toHaveBeenCalledWith("Hello.")
+    expect(props.onKeepWords).toHaveBeenCalledWith("Hello.", { words: [{ text: "Hello.", start: 0.5, end: 1 }] })
     expect(props.onSplit).not.toHaveBeenCalled()
   })
 
@@ -138,7 +138,8 @@ describe("Split into lines… (AQU-2426)", () => {
     await screen.findByText(/1 of 3 minutes are transcribed/)
     transcribeLineWords.mockReset()
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
-    expect(props.onKeepWords).toHaveBeenCalledWith("First.")
+    // …with the timed words behind them (AQU-2426 review, Nov 9: word timings).
+    expect(props.onKeepWords).toHaveBeenCalledWith("First.", { words: [{ text: "First.", start: 0.5, end: 1 }] })
   })
 
   // AQU-2426 (review, Nov 9): the words that were paid for outlive the split,

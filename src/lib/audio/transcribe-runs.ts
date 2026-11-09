@@ -53,6 +53,8 @@ export interface StoredWord {
   text: string
   start: number
   end: number
+  /** As the transcription heard it, when a learned correction changed it. */
+  heard?: string
 }
 
 /**
@@ -69,8 +71,8 @@ export interface StoredLineWords {
   hi: number
   /** Each window's stretch, ms on the recording's clock, in order. */
   windows: Array<{ lo: number; hi: number }>
-  /** Each finished window's words, by its key. */
-  words: Record<string, { words: StoredWord[]; text: string }>
+  /** Each finished window's words, by its key (and the model that heard them). */
+  words: Record<string, { words: StoredWord[]; text: string; model?: string }>
   languageTag?: string
   /** "import": split once every window has words (Import and transcribe…).
    *  "dialog": the person previews the lines in Split into lines…. */
@@ -130,7 +132,7 @@ export interface TranscribeRunHandle {
   /** Record how one row ended. A line run's window keeps its words. */
   row(
     cellId: string,
-    outcome: { kind: "done"; lineWords?: { words: StoredWord[]; text: string } } | { kind: "failed"; message: string } | { kind: "skipped" },
+    outcome: { kind: "done"; lineWords?: { words: StoredWord[]; text: string; model?: string } } | { kind: "failed"; message: string } | { kind: "skipped" },
   ): void
   /** The run finished, failed or was cancelled: forget it. */
   end(): void

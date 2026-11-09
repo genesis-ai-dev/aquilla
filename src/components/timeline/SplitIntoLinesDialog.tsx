@@ -38,7 +38,7 @@ import {
 } from "@/lib/audio/recording-split"
 import { runLineWords } from "@/lib/audio/line-words-run"
 import type { WordLine } from "@/lib/audio/lines-from-words"
-import { piecesFromCuts, type LinePiece } from "@/lib/timeline/split-recording-line"
+import { piecesFromCuts, type LineHeard, type LinePiece } from "@/lib/timeline/split-recording-line"
 
 export type SplitMode = "pauses" | "sentences"
 
@@ -157,9 +157,9 @@ export interface SplitIntoLinesDialogProps {
    *  same stretch sends only what is missing. Absent: not kept. */
   keepAs?: { cellId: string; audioId: string; fileName: string }
   /** Write the split; false when it failed (the dialog stays open). */
-  onSplit(pieces: LinePiece[]): Promise<boolean>
+  onSplit(pieces: LinePiece[], heard?: LineHeard): Promise<boolean>
   /** Words came back but nothing was split: keep them on the line. */
-  onKeepWords(text: string): void
+  onKeepWords(text: string, heard?: LineHeard): void
   onClose(): void
 }
 
@@ -180,6 +180,9 @@ export function SplitIntoLinesDialog(props: SplitIntoLinesDialogProps) {
   const keptWords = useRef(false)
   /** Words from a run that didn't get every minute: they stay on the line. */
   const partialText = useRef("")
+  // AQU-2426 (review, Nov 9): the timed words behind the text, so the lines
+  // written from it get their word timings and what was heard as well.
+  const heard = useRef<LineHeard | undefined>(undefined)
   // AQU-2426 / AQU-2375 (review, Nov 9): Cancel stops a transcription that is
   // still running, as does the dialog going away. It used to close and leave
   // every remaining minute to be sent and charged with nothing on screen.
@@ -210,7 +213,7 @@ export function SplitIntoLinesDialog(props: SplitIntoLinesDialogProps) {
   const keepWordsOnce = (text: string) => {
     if (keptWords.current || !text.trim()) return
     keptWords.current = true
-    props.onKeepWords(text)
+    props.onKeepWords(text, heard.current)
   }
   const close = () => {
     closed.current = true
@@ -243,6 +246,7 @@ export function SplitIntoLinesDialog(props: SplitIntoLinesDialogProps) {
       if (report.interrupted) return
       // Parked either way: nothing runs now, and the words wait for a split.
       handle?.park()
+      heard.current = { words: report.words, ...(report.model ? { model: report.model } : {}) }
       // Stopped by Cancel with minutes still to do: nothing is written to the
       // line. The parked run keeps the words, so the next try sends the rest.
       if (report.cancelled) return
@@ -276,7 +280,7 @@ export function SplitIntoLinesDialog(props: SplitIntoLinesDialogProps) {
   const split = async () => {
     if (!pieces || pieces.length < 2) return
     setBusy(true)
-    const ok = await props.onSplit(pieces)
+    const ok = await props.onSplit(pieces, mode === "sentences" ? heard.current : undefined)
     if (ok) {
       // AQU-2426 (review, Nov 9): the kept words stay kept (parked) after the
       // split. Dropped here, Undo left a whole line whose words had to be

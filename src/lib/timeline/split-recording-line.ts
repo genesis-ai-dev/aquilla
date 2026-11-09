@@ -21,8 +21,8 @@
 
 import { v7 as uuidv7 } from "uuid"
 import { sequenceBetween } from "./derive"
-import { joinWords } from "@/lib/audio/lines-from-words"
-import { tokenizeWords } from "@/lib/audio/timings"
+import { joinWords, type TimedWord } from "@/lib/audio/lines-from-words"
+import { alignChunks, tokenizeWords } from "@/lib/audio/timings"
 import {
   emitCellAudioAttach, emitCellAudioTrim, emitCellRetime, emitSourceCellCreate, emitSourceCellReorder,
 } from "@/lib/sync/events-emit"
@@ -249,6 +249,40 @@ export interface SplitResult {
 }
 
 /**
+ * AQU-2426 (review, Nov 9): the timed words a line's text was made from
+ * (seconds from the LINE's start), so each line written from them also gets
+ * its word timings (the word-by-word highlight while playing) and, when a
+ * transcription `model` heard them, the record of what it heard (what the
+ * cleanup step learns from). Without a model the times are just times: a
+ * transcript's stored timings, not what was heard.
+ */
+export interface LineHeard {
+  words: readonly TimedWord[]
+  model?: string
+}
+
+/** The timings and heard text for `text` over one stretch of the line. */
+function heardFor(
+  text: string,
+  stretch: { trimStartMs: number; trimEndMs: number } | null,
+  lo: number,
+  heard: LineHeard | undefined,
+): Pick<Parameters<typeof emitCellAudioAttach>[0], "timings" | "asr"> {
+  if (!heard) return {}
+  const shift = stretch ? (stretch.trimStartMs - lo) / 1000 : 0
+  const own = heard.words.filter((w) => {
+    if (!stretch) return true
+    const mid = lo + ((w.start + w.end) / 2) * 1000
+    return mid >= stretch.trimStartMs && mid < stretch.trimEndMs
+  })
+  // Always stated, even empty: timings left from before the split would sit
+  // under a text they no longer belong to.
+  const timings = alignChunks(own.map((w) => ({ text: w.text, start: Math.max(0, w.start - shift), end: Math.max(0, w.end - shift) })), text)
+  const heardText = joinWords(own.map((w) => ({ text: w.heard ?? w.text })))
+  return { timings, ...(heard.model && heardText ? { asr: { text: heardText, model: heard.model } } : {}) }
+}
+
+/**
  * Put words on a line that is already there: the first piece of a split, or a
  * whole line whose words came back with nothing split.
  *
@@ -262,6 +296,11 @@ export async function writeLineWords(args: {
   /** "" clears the words the line had. */
   text: string
   author: string
+  /** The words `text` was made from. */
+  heard?: LineHeard
+  /** The line's stretch and the heard words' zero, when it is one piece of a
+   *  split; absent, every heard word is the line's. */
+  stretch?: { trimStartMs: number; trimEndMs: number; lo: number }
 }): Promise<void> {
   const { line } = args
   await emitCellAudioAttach({
@@ -274,6 +313,7 @@ export async function writeLineWords(args: {
     ...(line.mimeType ? { mimeType: line.mimeType } : {}),
     ...(line.durationMs !== undefined ? { durationMs: Math.round(line.durationMs) } : {}),
     transcription: args.text,
+    ...heardFor(args.text, args.stretch ?? null, args.stretch?.lo ?? 0, args.heard),
     wordsOnly: true,
     author: args.author,
   })
@@ -288,9 +328,12 @@ export async function splitRecordingLine(args: {
   pieces: readonly LinePiece[]
   author: string
   mintId?: () => string
+  /** The words the pieces' texts were made from, seconds from the line's start. */
+  heard?: LineHeard
 }): Promise<SplitResult | null> {
-  const { line, pieces, author } = args
+  const { line, pieces, author, heard } = args
   if (pieces.length < 2) return null
+  const { lo } = lineWindow(line)
   const mint = args.mintId ?? uuidv7
   const base = { projectId: line.projectId, fileId: line.fileId, author }
   const before: LineBefore = {
@@ -314,7 +357,7 @@ export async function splitRecordingLine(args: {
   if (first.text !== undefined) {
     // The words land on the line's own source text, as transcription writes them
     // ("" clears words the whole line had kept, when none fall in this piece).
-    await writeLineWords({ line, text: first.text, author })
+    await writeLineWords({ line, text: first.text, author, heard, stretch: { trimStartMs: first.trimStartMs, trimEndMs: first.trimEndMs, lo } })
   }
 
   const created: SplitResult["created"] = []
@@ -344,7 +387,7 @@ export async function splitRecordingLine(args: {
       cellId,
       trimStartMs: piece.trimStartMs,
       trimEndMs: piece.trimEndMs,
-      ...(piece.text ? { transcription: piece.text } : {}),
+      ...(piece.text ? { transcription: piece.text, ...heardFor(piece.text, piece, lo, heard) } : {}),
       surface: "timeline",
     })
     created.push({ cellId, eventId })

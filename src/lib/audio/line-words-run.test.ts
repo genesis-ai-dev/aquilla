@@ -259,3 +259,20 @@ describe("runLineWords when it is cancelled", () => {
     expect(said.retryLabel).toBe("Transcribe the rest")
   })
 })
+
+// AQU-2426 (review, Nov 9)
+describe("runLineWords keeps what was heard", () => {
+  it("the model, and a word as it was heard before a learned correction, come back and are kept", async () => {
+    const transcribe = vi.fn(async ({ line }: { line: LineAudio }) => ({
+      words: [{ text: "Ruth", start: 0.5, end: 1, heard: "Root" }], text: `Ruth at ${line.lo}.`, model: "whisper-large-v3",
+    }))
+    const { report } = await runLineWords({
+      audio, session: null, purpose: "import", identity,
+      deps: { transcribe, loadPcm: async () => pcm(150), newId: () => "words-h" },
+    })
+    expect(report.model).toBe("whisper-large-v3")
+    expect(report.words.every((w) => w.heard === "Root")).toBe(true)
+    const kept = __storedTranscribeRuns()[0]!.line!
+    expect(kept.words.w0).toMatchObject({ model: "whisper-large-v3", words: [{ text: "Ruth", heard: "Root" }] })
+  })
+})

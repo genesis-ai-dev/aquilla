@@ -55,6 +55,8 @@ export interface LineWordsReport {
   /** Every word that landed, seconds from the line's start, in order. */
   words: TimedWord[]
   text: string
+  /** AQU-2426 (review, Nov 9): the model that heard them, when it said. */
+  model?: string
   /** The kept run; null when there is nothing to keep it under. */
   runId: string | null
   /** The page went away mid-run (a reload): nothing failed, and the run is
@@ -83,16 +85,18 @@ export function planLineWindows(pcm: Float32Array, audio: Pick<LineAudio, "lo" |
 }
 
 /** Every kept window's words, in order, as one list and one text. */
-export function wordsOf(line: StoredLineWords): { words: TimedWord[]; text: string } {
+export function wordsOf(line: StoredLineWords): { words: TimedWord[]; text: string; model?: string } {
   const words: TimedWord[] = []
   const texts: string[] = []
+  let model: string | undefined
   line.windows.forEach((_, i) => {
     const got = line.words[lineWindowKey(i)]
     if (!got) return
     words.push(...got.words)
     if (got.text.trim()) texts.push(got.text.trim())
+    model ??= got.model
   })
-  return { words, text: texts.length ? joinWords(texts.map((text) => ({ text }))) : "" }
+  return { words, text: texts.length ? joinWords(texts.map((text) => ({ text }))) : "", ...(model ? { model } : {}) }
 }
 
 export interface RunLineWordsArgs {
@@ -232,9 +236,10 @@ export async function runLineWords(args: RunLineWordsArgs): Promise<LineWordsRun
       })
       // The window's words are from ITS start; the line's are from the line's.
       const shift = (win.lo - audio.lo) / 1000
-      const words = got.words.map((w) => ({ text: w.text, start: w.start + shift, end: w.end + shift }))
-      line.words[key] = { words, text: got.text }
-      handle?.row(key, { kind: "done", lineWords: { words, text: got.text } })
+      const words = got.words.map((w) => ({ ...w, start: w.start + shift, end: w.end + shift }))
+      const kept = { words, text: got.text, ...(got.model ? { model: got.model } : {}) }
+      line.words[key] = kept
+      handle?.row(key, { kind: "done", lineWords: kept })
       inARow = 0
     } catch (err) {
       // A request cut off because the page is going: not a failed minute.
@@ -259,6 +264,7 @@ export async function runLineWords(args: RunLineWordsArgs): Promise<LineWordsRun
   return {
     report: {
       total, done: doneCount(), failed, words: all.words, text: all.text, runId: handle?.id ?? null,
+      ...(all.model ? { model: all.model } : {}),
       ...(interrupted ? { interrupted: true } : {}),
       ...(cancelled ? { cancelled: true } : {}),
     },

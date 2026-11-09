@@ -426,7 +426,7 @@ import type { TranscribeChoiceInfo } from "@/components/import/recording-choice-
 import { RecordingImportChoiceDialog } from "@/components/import/RecordingImportChoiceDialog"
 import { probeMediaDurationMs } from "@/lib/import"
 import { needsSplitNotice, sourceRecordingLine } from "@/lib/timeline/recording-line"
-import { piecesFromCuts, splitRecordingLine, textsForSplit, writeLineWindow, writeLineWords, type LinePiece, type RecordingLine } from "@/lib/timeline/split-recording-line"
+import { piecesFromCuts, splitRecordingLine, textsForSplit, writeLineWindow, writeLineWords, type LineHeard, type LinePiece, type RecordingLine } from "@/lib/timeline/split-recording-line"
 import { cutsFromWords, loadLinePcm, pauseCuts, type LineAudio } from "@/lib/audio/recording-split"
 import { transcribeBlock } from "@/lib/audio/transcribe-access"
 import { estimateTranscriptionCost } from "@/lib/audio/transcription-cost"
@@ -10769,6 +10769,9 @@ export function ProjectWorkspace() {
   /** Write a split, record it for Undo, and say so with Undo on the toast. */
   const applyLineSplit = useCallback(async (
     line: RecordingLine, pieces: readonly LinePiece[], titleKey: "editor.splitLines.done" | "editor.splitLines.importDone" = "editor.splitLines.done",
+    // AQU-2426 (review, Nov 9): the words the pieces' texts were made from, so
+    // each line gets its word timings and what was heard, not just its text.
+    given?: LineHeard,
   ): Promise<boolean> => {
     // AQU-2426 (review, Nov 9): someone who may not split here is refused
     // before anything is queued. The server judges each event on its own, so a
@@ -10787,20 +10790,22 @@ export function ProjectWorkspace() {
       // correction typed since is kept.
       let toWrite = pieces
       let textStayed = false
+      let heard = given
       const lineNow = cellWithAudio(line.cellId)
       if (pieces.every((p) => p.text === undefined)) {
         const lo = line.trimStartMs ?? 0
         const hi = line.trimEndMs ?? line.durationMs ?? lo + (line.endMs - line.startMs)
         const kept = findLineWordsRun({ projectId: line.projectId, fileId: line.fileId, cellId: line.cellId, audioId: line.audioId, lo, hi })
-        const shared = textsForSplit({
-          pieces, lo,
-          lineText: lineNow?.transcription ?? "",
-          kept: kept?.line ? wordsOf(kept.line) : null,
-          timings: lineNow?.audioTimings?.[line.audioId],
-        })
+        const keptWords = kept?.line ? wordsOf(kept.line) : null
+        const timings = lineNow?.audioTimings?.[line.audioId]
+        const shared = textsForSplit({ pieces, lo, lineText: lineNow?.transcription ?? "", kept: keptWords, timings })
         if (shared.texts) {
           const texts = shared.texts
           toWrite = pieces.map((p, i) => ({ ...p, text: texts[i] ?? "" }))
+          // The times the text was shared out by go with it to each line.
+          heard = keptWords && keptWords.words.length > 0
+            ? keptWords
+            : timings?.length ? { words: timings.map((w) => ({ text: w.word, start: w.t0, end: w.t1 })) } : undefined
         }
         textStayed = shared.stayed
       }
@@ -10809,7 +10814,7 @@ export function ProjectWorkspace() {
       // it the whole recording back with that one sentence. The kept words are
       // no longer dropped here either, so splitting again after Undo is free.
       const textBefore = lineNow?.transcription ?? ""
-      const result = await splitRecordingLine({ line, pieces: toWrite, author: currentUsername })
+      const result = await splitRecordingLine({ line, pieces: toWrite, author: currentUsername, ...(heard ? { heard } : {}) })
       if (!result) return false
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       revalidateCells()
@@ -10848,11 +10853,11 @@ export function ProjectWorkspace() {
   }, [currentUsername, getTokenForProjectFile, revalidateCells, canSplitLines, cannotSplitReason, cellWithAudio, t])
 
   /** The words came back but nothing was split: they land on the line itself. */
-  const keepWordsOnLine = useCallback(async (line: RecordingLine, text: string) => {
+  const keepWordsOnLine = useCallback(async (line: RecordingLine, text: string, heard?: LineHeard) => {
     if (!text.trim()) return
     try {
       // AQU-2426 (review, Nov 9): words only, so the line's takes stay chosen.
-      await writeLineWords({ line, text: text.trim(), author: currentUsername })
+      await writeLineWords({ line, text: text.trim(), author: currentUsername, ...(heard ? { heard } : {}) })
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       revalidateCells()
     } catch (err) {
@@ -10976,7 +10981,7 @@ export function ProjectWorkspace() {
           // The line keeps the words it has; the run keeps them for Retry.
           // (Stopped by Cancel: the run keeps them, the line is left alone.)
           handle?.park()
-          if (!report.cancelled) await keepWordsOnLine(o.line, report.text)
+          if (!report.cancelled) await keepWordsOnLine(o.line, report.text, report)
           say({
             type: said.type,
             title: said.title,
@@ -10995,14 +11000,14 @@ export function ProjectWorkspace() {
           // seen the lines, so nothing is split. The words go on the line, and
           // the kept run makes At sentences, with words free next time.
           handle?.park()
-          await keepWordsOnLine(o.line, report.text)
+          await keepWordsOnLine(o.line, report.text, report)
           say({ type: "success", title: t("audio.lineWords.readyAfterReload", { name }), timeout: 12_000 })
           return
         }
         const cut = cutsFromWords(report.words, o.audio)
         const pieces = piecesFromCuts(o.line, cut.cuts, cut.texts)
         if (pieces.length < 2) {
-          await keepWordsOnLine(o.line, report.text)
+          await keepWordsOnLine(o.line, report.text, report)
           handle?.end()
           say({ type: "success", title: t("editor.splitLines.importDone", { name, count: 1 }), timeout: 8000 })
           return
@@ -11010,7 +11015,7 @@ export function ProjectWorkspace() {
         if (toastId !== null) toast.close(toastId)
         // The words stay kept either way: a split that failed (it says so) has
         // them for the next try, and one that landed has them for after Undo.
-        await applyLineSplit(o.line, pieces, "editor.splitLines.importDone")
+        await applyLineSplit(o.line, pieces, "editor.splitLines.importDone", report)
         handle?.park()
       } catch (err) {
         if (pageIsLeaving()) return
@@ -19904,8 +19909,8 @@ export function ProjectWorkspace() {
             initialMode={splitDialog.mode}
             keepsLine={splitDialog.keepsLine}
             keepAs={{ cellId: splitDialog.line.cellId, audioId: splitDialog.line.audioId, fileName: activeFileNameRef.current || splitDialog.line.name }}
-            onSplit={(pieces) => applyLineSplit(splitDialog.line, pieces)}
-            onKeepWords={(text) => { void keepWordsOnLine(splitDialog.line, text) }}
+            onSplit={(pieces, heard) => applyLineSplit(splitDialog.line, pieces, undefined, heard)}
+            onKeepWords={(text, heard) => { void keepWordsOnLine(splitDialog.line, text, heard) }}
             onClose={() => setSplitDialog(null)}
           />
         )}

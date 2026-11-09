@@ -16,7 +16,7 @@
  * the server enforces.
  */
 
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
 import { AlertTriangle } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { useStyleRules } from "@/hooks/useStyleRules"
@@ -188,6 +188,17 @@ export function StyleChecks({
   }, [completionSettings, session])
 
   const candidates = rules.filter((rule) => rule.status === "proposed")
+
+  // Sequential on purpose (AQU-2366): a staged dismissal can carry dozens of
+  // proposals, and every verdict refetches the library.
+  const dismissMany = useCallback(
+    (ids: readonly string[]) => {
+      void (async () => {
+        for (const id of ids) await review(id, "reject")
+      })()
+    },
+    [review],
+  )
   const openRows = applicabilityRule ? applicability.filter((row) => row.ruleId === applicabilityRule.id) : []
 
   const reviewQueue = candidates.length === 0 ? null : (
@@ -211,6 +222,7 @@ export function StyleChecks({
         docNames={docNames}
         onReview={(id, action) => { void review(id, action) }}
         onSave={(id, patch) => { void updateRule(id, patch) }}
+        onDismissMany={dismissMany}
       />
     </section>
   )

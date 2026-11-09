@@ -237,7 +237,7 @@
     "jszip": "^3.10.2",
     "lucide-react": "^1.66.0",
     "onnxruntime-web": "1.31.1",
-    "postgres": "^3.4.9",
+    "postgres": "^4.0.0",
     "posthog-js": "^1.444.2",
     "react": "^19.3.1",
     "react-day-picker": "^10.0.2",

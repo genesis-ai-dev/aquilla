@@ -110,7 +110,13 @@ export interface RecordingsPickerProps {
 export function RecordingsPicker({ fileName, languageLabel, onFiles }: RecordingsPickerProps) {
   const t = useT()
   const [dragOver, setDragOver] = useState(false)
-  const take = (list: ChosenFile[]) => { if (list.length > 0) onFiles(list) }
+  // AQU-2487 (import sweep, Nov 2): an empty folder, or a drop the browser
+  // can't read, used to do nothing and say nothing. It now says so.
+  const [nothingFound, setNothingFound] = useState(false)
+  const take = (list: ChosenFile[]) => {
+    setNothingFound(list.length === 0)
+    if (list.length > 0) onFiles(list)
+  }
   return (
     <div className="space-y-3 py-1" data-testid="recordings-picker">
       <p className="text-sm text-muted-foreground">
@@ -127,7 +133,7 @@ export function RecordingsPicker({ fileName, languageLabel, onFiles }: Recording
         onDrop={(e) => {
           e.preventDefault()
           setDragOver(false)
-          void chosenFromDrop(e.dataTransfer).then(take)
+          void chosenFromDrop(e.dataTransfer).then(take, () => take([]))
         }}
       >
         <p className="mb-2 text-sm text-muted-foreground">{t("recordingsUpload.pick.dragDrop")}</p>
@@ -158,6 +164,11 @@ export function RecordingsPicker({ fileName, languageLabel, onFiles }: Recording
         </div>
         <p className="mt-3 text-xs text-muted-foreground">{t("recordingsUpload.pick.formats")}</p>
       </div>
+      {nothingFound && (
+        <p role="alert" className="text-sm text-destructive" data-testid="recordings-nothing-found">
+          {t("recordingsUpload.pick.nothingFound")}
+        </p>
+      )}
       <p className="text-xs text-muted-foreground">
         {languageLabel ? t("recordingsUpload.pick.language", { language: languageLabel }) : t("recordingsUpload.pick.languageDefault")}{" "}
         {t("recordingsUpload.pick.safe")}

@@ -85,6 +85,7 @@ const KEYS = {
     "recordingsUpload.pick.introFile": "Choose the recordings for {fileName}, or a folder of them. Each file finds its line by its name.",
     "recordingsUpload.pick.safe": "Nothing uploads until you've checked where each recording goes.",
     "recordingsUpload.pick.dragDrop": "Drag recordings or a folder here, or",
+    "recordingsUpload.pick.nothingFound": "No files were found there. Choose recordings, or a folder with recordings in it.",
     "recordingsUpload.pick.language": "They go into {language}, the language you're working in.",
     "recordingsUpload.pick.languageDefault": "They go into the language you're working in.",
     "recordingsUpload.pick.formats": "WAV, MP3, M4A, OGG, FLAC and other audio files a browser can play.",

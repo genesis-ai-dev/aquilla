@@ -551,6 +551,93 @@ describe("a take on another track running on past the last line (AQU-2252), besi
   })
 })
 
+describe("nothing recorded yet, Skip lines with nothing to play ON (the default)", () => {
+  // Three stand-ins of 1.5 s: [0, 1.5), [1.5, 3), [3, 4.5).
+  const unrecorded = () => [line("b1"), line("b2"), line("b3")]
+
+  it("with no film there is nothing to play, as before", async () => {
+    startQueue(ctxFor(unrecorded()), 0)
+    await wait()
+    expect(getQueueState().kind).toBe("idle")
+  })
+
+  it("with a linked film, Play runs the film: across the lines and on to the film's end", async () => {
+    const cells = unrecorded()
+    linkFilm(10, cells)
+    startQueue(ctxFor(cells), 0)
+    await wait()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b1" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(0, 2)
+    expect(getQueueProgress().duration).toBeCloseTo(10, 5)
+
+    // The film is not cut: the clock runs straight across each line.
+    await wait(2_000)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(2, 1)
+    await wait(2_000)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+    // Past the last line, at 4.5 s, and on.
+    await wait(2_000)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(6, 1)
+    await wait(4_050)
+    expect(getQueueState().kind).toBe("idle")
+    expect(ranOut).toBe(1)
+  })
+
+  it("Space with nothing selected (Play from the start) runs it too", async () => {
+    const cells = unrecorded()
+    linkFilm(10, cells)
+    startQueueAtTime(ctxFor(cells), 0, { play: true })
+    await wait(1_000)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b1" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(1, 1)
+  })
+
+  it("Play from a click on a line starts the film there", async () => {
+    const cells = unrecorded()
+    linkFilm(10, cells)
+    startQueueAtTime(ctxFor(cells), 2, { play: false })
+    await wait()
+    expect(getQueueState()).toMatchObject({ kind: "paused", cellId: "b2" })
+    await resumeQueue()
+    await wait(500)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(2.5, 1)
+  })
+
+  it("a film shorter than the lines plays to about its end and stops: the lines after it are still skipped", async () => {
+    const cells = unrecorded()
+    linkFilm(2, cells)
+    startQueue(ctxFor(cells), 0)
+    await wait()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b1" })
+    // b2 starts at 1.5 s, while the film still runs; b3 starts after its end.
+    await wait(1_600)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    await wait(1_500)
+    expect(getQueueState().kind).toBe("idle")
+  })
+
+  it("once a line is recorded, lines with nothing to play are skipped as before, and the film's tail still plays", async () => {
+    // b1 a stand-in [0, 1.5); b2 recorded 3 s [1.5, 4.5); b3 a stand-in [4.5, 6).
+    const cells = [line("b1"), line("b2", 3_000), line("b3")]
+    linkFilm(10, cells)
+    startQueue(ctxFor(cells), 0)
+    await wait()
+    // Straight to the recorded line.
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(1.5, 2)
+    el("b2")!.tick(3)
+    await wait()
+    // b3 is skipped: on to the film after the lines' end, at 6 s.
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(6, 2)
+    await wait(4_050)
+    expect(getQueueState().kind).toBe("idle")
+  })
+})
+
 describe("nothing recorded yet, Skip lines with nothing to play OFF", () => {
   beforeEach(() => setSkipSilentLinesPref(false))
 

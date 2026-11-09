@@ -188,9 +188,11 @@ export function VoicePlaybackBar({
   // makes the cells file-timed, which hands the file from the picture or the
   // virtual clock to the queue. A press in that window went to the engine that
   // was about to lose the file, so nothing sounded (AQU-1643).
+  // AQU-2253 (Sam, Nov 9): …or a linked film to run: with nothing recorded
+  // yet, Play was off here and the film could not be watched in this timing.
   const canPlay = useMemo(
-    () => audioLoaded && (drivesVideo || hasAnyPlayableAudio(cells)),
-    [audioLoaded, drivesVideo, cells],
+    () => audioLoaded && (drivesVideo || filmRunsOn || hasAnyPlayableAudio(cells)),
+    [audioLoaded, drivesVideo, filmRunsOn, cells],
   )
   const activeIndex = transport.cellId ? cells.findIndex((c) => c.id === transport.cellId) : -1
   const activeCell = activeIndex >= 0 ? cells[activeIndex] : undefined

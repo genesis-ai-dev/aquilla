@@ -450,7 +450,8 @@ describe("VoicePlaybackBar — the strip's length (AQU-1758)", () => {
 // AQU-2253 (Sam, Nov 9): following the recordings a LINKED film plays on its
 // own clock, so Play runs to whichever ends later: the lines or the film. The
 // workspace tells the queue the film's length and which lines are its file's
-// (`setProgrammeFilm`); the strip shows the length Play will run to.
+// (`setProgrammeFilm`); the strip offers Play wherever there is a film to run,
+// and shows the length Play will run to.
 describe("VoicePlaybackBar: a linked film following the recordings (AQU-2253)", () => {
   const session = { jwt: "t" } as unknown as FrontierSession
   const take = (id: string, ms: number): CellData => {
@@ -461,6 +462,8 @@ describe("VoicePlaybackBar: a linked film following the recordings (AQU-2253)", 
       attachments: { [audioId]: { type: "audio", url: "frontier-audio://take", durationMs: ms } },
     } as Partial<CellData>)
   }
+  // Nothing recorded yet: two lines with words and no take.
+  const UNRECORDED = [cell({ id: "u1", original: "One" }), cell({ id: "u2", original: "Two" })]
   // Two recorded lines, 87.94 s laid end to end.
   const RECORDED = [take("v1", 43_700), take("v2", 44_240)]
   const strip = (cells: CellData[], over: Partial<React.ComponentProps<typeof VoicePlaybackBar>> = {}) => (
@@ -479,6 +482,41 @@ describe("VoicePlaybackBar: a linked film following the recordings (AQU-2253)", 
   })
   afterEach(() => {
     act(() => setProgrammeFilm(null))
+  })
+
+  it("nothing recorded yet and no film to run: Play is off, as before", () => {
+    render(strip(UNRECORDED))
+    expect((screen.getByTestId("transport-play") as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it("nothing recorded yet: Play is offered, and runs the film", () => {
+    render(strip(UNRECORDED))
+    filmFor(UNRECORDED, 2700)
+    const play = screen.getByTestId("transport-play") as HTMLButtonElement
+    expect(play.disabled).toBe(false)
+    fireEvent.click(play)
+    expect(startQueue).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(startQueue).mock.calls[0][0].cells.map((c) => c.id)).toEqual(["u1", "u2"])
+  })
+
+  it("a film that could not be loaded (the workspace takes it away): Play goes off again", () => {
+    render(strip(UNRECORDED))
+    filmFor(UNRECORDED, 2700)
+    expect((screen.getByTestId("transport-play") as HTMLButtonElement).disabled).toBe(false)
+    act(() => setProgrammeFilm(null))
+    expect((screen.getByTestId("transport-play") as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it("another file's film does not switch Play on here", () => {
+    render(strip(UNRECORDED))
+    act(() => setProgrammeFilm({ endSec: 2700, cellIds: new Set(["x1", "x2"]) }))
+    expect((screen.getByTestId("transport-play") as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it("following the source the film's length is not the strip's business", () => {
+    render(strip(UNRECORDED, { freeTiming: false, videoPaneOnScreen: false }))
+    filmFor(UNRECORDED, 2700)
+    expect((screen.getByTestId("transport-play") as HTMLButtonElement).disabled).toBe(true)
   })
 
   it("before play, the length shown is the film's when it outlasts the lines", () => {

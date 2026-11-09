@@ -399,6 +399,9 @@ const progFilmListeners = new Set<() => void>()
  *  has no film to run on over. Worked out when either changes
  *  (`progFilmResolve`), never per line. */
 let progFilmEndSec = 0
+/** Nothing in the run has anything to play, and it has a film: see
+ *  `progPlaysThroughSilence`. */
+let progFilmCarriesLines = false
 
 export function setProgrammeFilm(film: ProgrammeFilm | null): void {
   if (progFilm === film) return
@@ -453,6 +456,7 @@ function progFilmResolve(): void {
     timingMode === "audioFirst" && film && ctx && prog && prog.slots.length > 0 && progRunIsTheFilms(film, ctx),
   )
   progFilmEndSec = applies && film ? film.endSec : 0
+  progFilmCarriesLines = applies && progNextWithSound(0) < 0 && progUnderLayers.size === 0
 }
 
 /** Is this programme second past the last line, on a run with a film to run
@@ -1212,7 +1216,15 @@ function progSlotHasSound(slot: ProgrammeSlot): boolean {
  * planTargetOverlay holds back only its take (play-queue.hidden-lines.test.ts).
  */
 function progPlaysThroughSilence(slot: ProgrammeSlot): boolean {
-  return slotHasNothingToPlay(slot, progHiddenCellIds, progUnderLayers) && !getSkipSilentLinesPref()
+  if (!slotHasNothingToPlay(slot, progHiddenCellIds, progUnderLayers)) return false
+  if (!getSkipSilentLinesPref()) return true
+  // AQU-2253 (Sam, Nov 9): nothing recorded yet on a file with a linked film.
+  // The film plays on its own clock, so Play runs the film: with no line that
+  // has anything to play there is nothing to skip TO, and skipping every line
+  // meant Play did nothing at all. The clock runs across the lines the film
+  // is still running under, and on over its tail. Once any line has something
+  // to play, lines with nothing are skipped again, as the setting says.
+  return progFilmCarriesLines && slot.startSec < progFilmEndSec - HOLD_MIN_SEC
 }
 
 /** The next verse playback goes to, from `from` onward: one with anything to

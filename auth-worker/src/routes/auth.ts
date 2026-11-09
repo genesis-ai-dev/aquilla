@@ -90,8 +90,23 @@ const auth = new Hono<AuthHonoEnv>()
 
 const MAX_PASSWORD_LENGTH = 1024
 
+// [Pen test] Auth & session mgmt (2026-11-09): usernames were free-form, so a
+// new account could carry zero-width / bidi-override / control characters.
+// Those render identically to a real collaborator's name in presence, @mentions
+// and "<inviter> invited you" emails (and `LOWER()` uniqueness treats "admin"
+// and "admin\u200b" as different accounts). Reject Unicode control/format/
+// separator code points other than the plain space and surrounding whitespace
+// — ordinary names (including non-Latin scripts and inner spaces) are untouched,
+// and the signup form already trims.
+const INVISIBLE_USERNAME_CHARS = /[\p{Cc}\p{Cf}\p{Co}\p{Cs}\p{Zl}\p{Zp}\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]/u
+export function isAcceptableUsername(value: string): boolean {
+  return value === value.trim() && !INVISIBLE_USERNAME_CHARS.test(value)
+}
+
 const registerSchema = z.object({
-  username: z.string().min(3).max(50),
+  username: z.string().min(3).max(50).refine(isAcceptableUsername, {
+    message: "Username contains invisible or control characters",
+  }),
   email: z.string().email(),
   // Upper bound caps scrypt/bcrypt CPU cost from absurdly long inputs.
   password: z.string().min(8).max(MAX_PASSWORD_LENGTH),

@@ -49,12 +49,14 @@ import { cellNeedsSourceReview } from "@/lib/cells/source-review"
 import { lockHolderForCell } from "@/hooks/useFocusLock"
 import {
   type CellFootnoteDetails,
+  type CellNavigationEntry,
   type CellStore,
   readAtVersion,
   useCellIds,
   useCellStoreVersion,
   useCellView,
 } from "@/hooks/useActiveCellStore"
+import { userMilestoneIdFromKey } from "@/lib/editor/user-milestone-spans"
 import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
 import {
   audioColumnFor, fileHasAudio, fileLastSeenWithAudio, rememberFileAudio, type AudioColumn,
@@ -220,7 +222,11 @@ import { CellAudioPlayControl } from "./cell/CellAudioPlayControl"
 import { audioBlockedReason, lineValidationTakes } from "@/lib/audio/audio-validation-permissions"
 import { slotSelections } from "@/lib/sync/cell-audio-read-types"
 import { takePlayWindow } from "@/lib/audio/kept-window"
-import { MilestoneNavigator, type MilestoneNavigationItem } from "./ChapterNavigator"
+import {
+  MilestoneNavigator,
+  type MilestoneNavigationItem,
+  type MilestoneNavigatorEditing,
+} from "./ChapterNavigator"
 import type { LaneDelivers } from "@/lib/lanes/lane-delivers"
 import { PericopeSuggestions } from "./PericopeSuggestions"
 import type { PericopeSuggestion } from "@/lib/pericope/suggest"
@@ -1238,6 +1244,13 @@ interface EditorTableProps {
   /** Optional controls on the right of the chapter navigation row. */
   chapterNavTrailing?: React.ReactNode
   /**
+   * AQU-2310: rename / edit range / remove a milestone from a navigator row,
+   * and "New milestone…". Passed unconditionally, like `onSetMilestone`: the
+   * table applies the same role and live-link gate the cell menu does, so the
+   * navigator and the cell menu cannot disagree about who may divide a file.
+   */
+  milestoneEditing?: MilestoneNavigatorEditing
+  /**
    * AQU-1758: the chapter (milestone key) the table is on, whenever it
    * changes — the one the chapter picker names. A book's timeline shows this
    * chapter. Null when the file has no chapters.
@@ -1269,6 +1282,56 @@ interface EditorTableProps {
    * voice details offer no "Adopt voices as cast".
    */
   onAdoptVoicesAsCast?: (assignments: readonly VoiceCastAssignment[]) => void
+}
+
+/**
+ * AQU-2308: may this person name, rename, re-range or remove a run of this
+ * file's lines? One answer for the cell menu and the navigator (AQU-2310).
+ *
+ * `canPerform` against the SAME role table `file.milestone.set` is enforced
+ * by, not a re-derived rank — and it is the Maintainer floor, a rung above
+ * the park/edit-source gate, because a division relayouts the navigator for
+ * everyone who opens the file. (`file.milestone.remove` sits on the same rung.)
+ *
+ * The live-link test is the one `canEditSource` makes for itself: a
+ * downstream project mirroring another's source is read-only structure, so
+ * the entries are absent for every role there. It is NOT gated on
+ * `canEditSource` itself — that flag is forced false by a DCS pin for every
+ * role, and a DCS pin protects the source TEXT; which divisions this file is
+ * navigated by is still this project's own business.
+ */
+function maySetMilestonesIn(project: ProjectRecord): boolean {
+  return canPerform("file.milestone.set", project.syncRole?.level ?? null)
+    && project.sourceLinkMode !== "live"
+}
+
+/**
+ * AQU-2310: the hand-set milestones nested inside one division, for a file
+ * whose navigator does not list jump ranges (anything but IDML).
+ *
+ * The store already lists them as the division's subsections (AQU-2308), but
+ * only IDML files ever passed subsections to the navigator, so on a Scripture
+ * file "The calming of the storm" was derived and never shown. They travel as
+ * `named`, not `subsections`, so the chapter stays a destination of its own.
+ */
+function namedSubsectionsOf(entry: CellNavigationEntry): Pick<MilestoneNavigationItem, "named"> {
+  const named = entry.subsections.filter((subsection) => (
+    userMilestoneIdFromKey(subsection.key) !== null
+  ))
+  if (named.length === 0) return {}
+  return {
+    named: named.map((subsection) => ({
+      key: subsection.key,
+      label: subsection.label,
+      firstCellId: subsection.firstCellId,
+      translated: subsection.translated,
+      validated: subsection.validated,
+      total: subsection.total,
+      textTranslated: subsection.textTranslated,
+      audioRecorded: subsection.audioRecorded,
+      audioValidated: subsection.audioValidated,
+    })),
+  }
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
@@ -1319,6 +1382,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onVisibleFootnotesChange,
   onFootnoteCreated,
   chapterNavTrailing,
+  milestoneEditing,
   onActiveChapterChange,
   onChapterPicked,
   bibleOpen = false,
@@ -2634,7 +2698,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                   audioValidated: subsection.audioValidated,
                 })),
               }
-            : {}),
+            : namedSubsectionsOf(entry)),
         }
       })
     }),
@@ -2766,7 +2830,10 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   const handleChapterSelect = useCallback((key: string, subsectionKey?: string) => {
     const entry = milestoneNavigation.find((candidate) => candidate.key === key)
-    const subsection = idmlMilestoneNavigation
+    // AQU-2310: a hand-set milestone nested under a chapter is listed on every
+    // file, not only IDML, so its key is a place to go on every file too.
+    const subsection = subsectionKey
+      && (idmlMilestoneNavigation || userMilestoneIdFromKey(subsectionKey) !== null)
       ? entry?.subsections.find((candidate) => candidate.key === subsectionKey)
       : undefined
     const targetCellId = subsection?.firstCellId ?? entry?.firstCellId
@@ -3445,6 +3512,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   const showMilestoneNav = !castGutter && milestoneNavigationItems.length > 0 && Boolean(activeChapterLabel)
   const showStripNav = castGutter && milestoneNavigationItems.length > 0 && Boolean(activeChapterLabel)
+  // AQU-2310: the navigator's edit controls answer to the same gate as the
+  // cell menu's "Set a new milestone…".
+  const navigatorMilestoneEditing = maySetMilestonesIn(project) ? milestoneEditing : undefined
   // The strip registers its slot by name — it is itself portaled into the
   // media band (one commit after this table), so the old one-shot
   // querySelector in a mount effect would run too early and never retry.
@@ -3474,6 +3544,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 onSelect={handleChapterSelect}
                 pageByMilestone={splitByMilestone}
                 delivers={laneDelivers}
+                editing={navigatorMilestoneEditing}
               />
             </div>
             {/* AQU-515 — renders nothing unless the file addresses scripture
@@ -3548,6 +3619,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 onSelect={handleChapterSelect}
                 pageByMilestone={splitByMilestone}
                 delivers={laneDelivers}
+                editing={navigatorMilestoneEditing}
               />
             </div>,
             stripNavSlot,
@@ -6354,24 +6426,7 @@ function EditorRow({
     ? () => onSetCellHidden(cell.id, !cellHidden)
     : undefined
 
-  /**
-   * AQU-2308: may this person name a range of this file's lines?
-   *
-   * `canPerform` against the SAME role table `file.milestone.set` is enforced
-   * by, not a re-derived rank — and it is the Maintainer floor, a rung above
-   * the park/edit-source gate above, because a division relayouts the
-   * navigator for everyone who opens the file.
-   *
-   * The live-link test is the one `canEditSource` makes for itself: a
-   * downstream project mirroring another's source is read-only structure, so
-   * the entry is absent for every role there. It is NOT gated on
-   * `canEditSource` itself — that flag is forced false by a DCS pin for every
-   * role, and a DCS pin protects the source TEXT; which divisions this file is
-   * navigated by is still this project's own business.
-   */
-  const maySetMilestones = canPerform("file.milestone.set", project.syncRole?.level ?? null)
-    && project.sourceLinkMode !== "live"
-  const onSetMilestoneForCell = maySetMilestones && onSetMilestone
+  const onSetMilestoneForCell = maySetMilestonesIn(project) && onSetMilestone
     ? () => onSetMilestone(cell.id)
     : undefined
 

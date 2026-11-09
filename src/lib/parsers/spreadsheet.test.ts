@@ -443,4 +443,21 @@ describe("matchPairedRowsToSourceCells", () => {
     const result = matchPairedRowsToSourceCells(mappedRows, sourceCells)
     expect(result.matched[0].parentId).toBe("evt-1")
   })
+
+  // AQU-2487 (import sweep, Nov 2): two rows with one reference were both
+  // listed, both ticked, and both written onto the same line.
+  it("gives a line one translation when two rows carry the same reference", () => {
+    const twice = [
+      mappedRows[0],
+      { ...mappedRows[0], id: "r1b", translated: "Au début" },
+      mappedRows[1],
+    ]
+    const result = matchPairedRowsToSourceCells(twice, sourceCells)
+    expect(result.matched.map((m) => [m.cellId, m.incomingText])).toEqual([
+      ["cell-1", "Au commencement"],
+      ["cell-2", "La terre"],
+    ])
+    // The second row is counted with the rows that found no line.
+    expect(result.orphans).toEqual([{ ref: "GEN 1:1", text: "Au début" }])
+  })
 })

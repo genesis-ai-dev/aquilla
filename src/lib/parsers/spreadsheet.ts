@@ -562,6 +562,14 @@ export function matchPairedRowsToSourceCells(
       if (row.ref) orphans.push({ ref: row.ref, text: row.translated })
       continue
     }
+    // AQU-2487 (import sweep, Nov 2): a reference that appears twice gives its
+    // line the first row only. Both rows used to be listed, ticked together,
+    // and written onto the same line. The second is counted as unmatched, as
+    // the file review does ("This reference appears twice").
+    if (matchedRefs.has(row.ref)) {
+      orphans.push({ ref: row.ref, text: row.translated })
+      continue
+    }
     matchedRefs.add(row.ref)
     const currentText = cell.translated ?? ""
     const parentId = resolveTargetCommitParent({

@@ -55,7 +55,7 @@ export interface ReconcileRouteEnv {
   ProjectSync?: DurableObjectNamespace
 }
 
-interface ReconcileFileMeta {
+export interface ReconcileFileMeta {
   id: string
   name: string
   fileType?: string
@@ -790,7 +790,7 @@ function buildGatedTargetInsert(
   ).bind(...binds)
 }
 
-function mergeFileMeta(existing: unknown, incoming: ReconcileFileMeta): Record<string, unknown> {
+export function mergeFileMeta(existing: unknown, incoming: ReconcileFileMeta): Record<string, unknown> {
   const meta = { ...objectRecord(existing) }
   // AQU-1596: a re-import's language claim is recorded as declared, next to
   // whatever legacy keys the existing blob already carries (left untouched —

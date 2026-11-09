@@ -119,3 +119,38 @@ describe("an overlap on a book (AQU-2432)", () => {
     expect(bookLineOverlaps(timed).size).toBe(0)
   })
 })
+
+// AQU-2432 (Sam, Nov 9): a drag against a verse NOBODY HAS RECORDED sets that
+// verse's room; it is never an overlap. These exports join a book's takes end
+// to end and leave unrecorded verses out, so whatever room such a verse has,
+// the takes either side of it come out end to end — and they still do the day
+// someone records it.
+describe("an unrecorded verse between two takes (AQU-2432, Nov 9)", () => {
+  const V1 = "audio-v1-1700000000-take.wav", V2 = "audio-v2-1700000000-take.wav", V3 = "audio-v3-1700000000-take.wav"
+  const empty = (over: Partial<CellData> = {}) => ({ ...verse("v2", {}, over), selectedAudioId: undefined }) as CellData
+  const v1 = () => verse("v1", { [V1]: { type: "audio", url: `frontier-audio://${V1}`, durationMs: 5000 } })
+  const v3 = (recordingsOffsetMs?: number) =>
+    verse("v3", { [V3]: { type: "audio", url: `frontier-audio://${V3}`, durationMs: 6000, ...(recordingsOffsetMs != null ? { recordingsOffsetMs } : {}) } })
+
+  it("its room closed to nothing: no overlap, the takes either side are end to end", () => {
+    expect(bookLineOverlaps([v1(), empty({ recordingsRoomMs: 0 }), v3()]).size).toBe(0)
+  })
+
+  it("whatever its room, the export is the same: the room is silence these exports never carried", () => {
+    for (const roomMs of [undefined, 2500, 0]) {
+      expect(bookLineOverlaps([v1(), empty(roomMs != null ? { recordingsRoomMs: roomMs } : {}), v3()]).size).toBe(0)
+    }
+  })
+
+  it("an old pull-back stored on the take after it reads as none: no overlap is mixed across the empty verse", () => {
+    expect(bookLineOverlaps([v1(), empty(), v3(-4000)]).size).toBe(0)
+    expect(bookLineOverlaps([v1(), empty({ recordingsRoomMs: 0 }), v3(-4000)]).size).toBe(0)
+  })
+
+  it("Sam's scenario: the room closed, then the verse recorded at 3 s — three takes end to end, nothing mixed", () => {
+    const recorded = verse("v2", { [V2]: { type: "audio", url: `frontier-audio://${V2}`, durationMs: 3000 } }, { recordingsRoomMs: 0 })
+    expect(bookLineOverlaps([v1(), recorded, v3()]).size).toBe(0)
+    // Each verse on its own is just its take: no silence, no overlap.
+    expect(bookLineParts(recorded, V2)).toEqual([{ kind: "take", attachmentId: V2 }])
+  })
+})

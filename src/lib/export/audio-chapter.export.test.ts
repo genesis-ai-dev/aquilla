@@ -308,3 +308,62 @@ describe("exportAudioByChapter — a verse dragged over the end of the one befor
     expect(samples).toHaveLength(200 * MS)
   })
 })
+
+// AQU-2432 (Sam, Nov 9): a drag against a verse nobody has recorded sets that
+// verse's room, never an overlap — so in the chapter the takes either side of
+// it are joined end to end, and stay so the day someone records it.
+describe("exportAudioByChapter — an unrecorded verse whose room was closed (AQU-2432, Nov 9)", () => {
+  const MS = TARGET_RATE / 1000
+  const level: Record<string, number> = { v1: 0.5, v2: 0.125, v3: 0.25 }
+  const verse = (id: string, ref: string, over: Partial<CellData> = {}, recordingsOffsetMs?: number) =>
+    cell({
+      id,
+      group: ref,
+      selectedAudioId: `audio-${id}-1700000000-take`,
+      attachments: {
+        [`audio-${id}-1700000000-take`]: {
+          url: `frontier-audio://audio-${id}-1700000000-take.wav`, type: "audio", durationMs: 100,
+          ...(recordingsOffsetMs != null ? { recordingsOffsetMs } : {}),
+        },
+      } as CellData["attachments"],
+      ...over,
+    })
+  const unrecorded = (roomMs?: number) =>
+    cell({ id: "v2", group: "RUT 1:2", original: "v2 words", ...(roomMs != null ? { recordingsRoomMs: roomMs } : {}) })
+  const run = (cells: CellData[]) =>
+    exportAudioByChapter({
+      cells,
+      projectId: "p1",
+      fetchBytes: async ({ audioId }) => new TextEncoder().encode(audioId),
+      decode: async (bytes) => {
+        const id = new TextDecoder().decode(bytes)
+        return new Float32Array(100 * MS).fill(level[id.split("-")[1]] ?? 0)
+      },
+    })
+
+  it("the takes either side are end to end, whatever room the empty verse has — even with an old pull-back on the take after it", async () => {
+    for (const cells of [
+      [verse("v1", "RUT 1:1"), unrecorded(), verse("v3", "RUT 1:3")],
+      [verse("v1", "RUT 1:1"), unrecorded(0), verse("v3", "RUT 1:3")],
+      [verse("v1", "RUT 1:1"), unrecorded(0), verse("v3", "RUT 1:3", {}, -60)],
+    ]) {
+      const samples = await pcmFromWav((await run(cells)).blob)
+      expect(samples).toHaveLength(200 * MS)
+      expect(samples[100 * MS - 1]).toBe(quantisePcm16(0.5))
+      expect(samples[100 * MS]).toBe(quantisePcm16(0.25))
+    }
+  })
+
+  it("once the verse is recorded its take takes its place between them: three takes end to end, nothing mixed", async () => {
+    const samples = await pcmFromWav((await run([
+      verse("v1", "RUT 1:1"),
+      verse("v2", "RUT 1:2", { recordingsRoomMs: 0 }),
+      verse("v3", "RUT 1:3"),
+    ])).blob)
+    expect(samples).toHaveLength(300 * MS)
+    expect(samples[100 * MS - 1]).toBe(quantisePcm16(0.5))
+    expect(samples[100 * MS]).toBe(quantisePcm16(0.125))
+    expect(samples[200 * MS - 1]).toBe(quantisePcm16(0.125))
+    expect(samples[200 * MS]).toBe(quantisePcm16(0.25))
+  })
+})

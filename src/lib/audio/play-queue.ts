@@ -1070,6 +1070,11 @@ function progSlotHasSound(slot: ProgrammeSlot): boolean {
  * planTargetOverlay holds back only its take (play-queue.hidden-lines.test.ts).
  */
 function progPlaysThroughSilence(slot: ProgrammeSlot): boolean {
+  // AQU-2432 (Sam, Nov 9): an unrecorded line whose ROOM was closed to nothing
+  // (the next take dragged earlier against it) has no time to play through —
+  // it is stepped over whichever way the setting is, so the take after it
+  // follows the take before it at once and it is never "the line playing".
+  if (slot.slotLenSec <= HOLD_MIN_SEC) return false
   return slotHasNothingToPlay(slot, progHiddenCellIds, progUnderLayers) && !getSkipSilentLinesPref()
 }
 

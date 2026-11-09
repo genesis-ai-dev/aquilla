@@ -1355,6 +1355,10 @@ export const importExport = defineNamespace({
       one: "{count} cell updated",
       other: "{count} cells updated",
     }),
+    "importExport.reimport.missing": plural({
+      one: "{count} cell no longer in the file",
+      other: "{count} cells no longer in the file",
+    }),
     "importExport.reimport.analysis": "Analysis",
     "importExport.reimport.noChanges": "Nothing in this file has changed.",
     "importExport.reimport.more": plural({
@@ -3829,6 +3833,13 @@ export const importExport = defineNamespace({
           "Heading inside the re-import Analysis window for cells whose source text changed. The list of those cells follows it.",
         placeholders: {
           count: "Number of cells whose source text changed; also selects the plural form.",
+        },
+      },
+      "importExport.reimport.missing": {
+        description:
+          "Heading inside the re-import Analysis window for cells that are in the file now and are not in the uploaded document. The list of those cells follows it. Shown only when there is at least one.",
+        placeholders: {
+          count: "Number of cells the uploaded document no longer has; also selects the plural form.",
         },
       },
       "importExport.reimport.analysis": {

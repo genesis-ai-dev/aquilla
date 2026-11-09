@@ -51,7 +51,10 @@ function ChangeList({
   )
 }
 
-/** Added and updated cells, compared with the file being re-imported. */
+/**
+ * Added and updated cells, compared with the file being re-imported, and
+ * (AQU-2487, import sweep, Nov 2) the cells the upload no longer has.
+ */
 export function ReimportAnalysis({ changes }: { changes: ReimportChangeCounts }) {
   const t = useT()
   return (
@@ -70,7 +73,13 @@ export function ReimportAnalysis({ changes }: { changes: ReimportChangeCounts })
         cells={changes.updatedCells}
         showPrevious
       />
-      {changes.added === 0 && changes.updated === 0 && (
+      {changes.removed > 0 && (
+        <ChangeList
+          title={t("importExport.reimport.missing", { count: changes.removed })}
+          cells={changes.removedCells}
+        />
+      )}
+      {changes.added === 0 && changes.updated === 0 && changes.removed === 0 && (
         <p className="text-xs text-muted-foreground">{t("importExport.reimport.noChanges")}</p>
       )}
     </section>

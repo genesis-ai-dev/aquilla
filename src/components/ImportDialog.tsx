@@ -680,6 +680,7 @@ export function ImportDialog({
           canonicalRef: row.canonicalRef,
           anchorCellId: row.anchorCellId,
           ...(row.metadata ? { metadata: row.metadata } : {}),
+          ...(row.hidden ? { hidden: true } : {}),
         })))
       } catch {
         if (!cancelled) setReimportSources(null)

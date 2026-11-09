@@ -85,6 +85,15 @@ describe("which lines get a marker", () => {
   })
 })
 
+describe("at the very start of the file", () => {
+  it("the tab stays on the timeline: it starts at the edge instead of hanging off it, and the line keeps its place", () => {
+    const cells = [bookLine("a", { roomMs: 0 }), bookLine("b", { takeMs: 6_000 })]
+    const [m] = markers(cells)
+    expect(m.atPx).toBe(0)
+    expect(m.tabLeftPx).toBe(0)
+  })
+})
+
 describe("several markers at one seam", () => {
   it("their tabs sit side by side, in the lines' order, so each can be pointed at; each line keeps its own place", () => {
     const cells = [

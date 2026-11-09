@@ -64,9 +64,10 @@ export function emptyLineMarkers(args: {
     const atPx = (slot.startSec + slot.slotLenSec / 2) * pxPerSec
     out.push({ cell, atPx, tabLeftPx: atPx - LINE_MARKER_TAB_PX / 2, roomSec: slot.slotLenSec, position: positions.get(cell.id) ?? 0 })
   }
-  // Tabs that would land on each other sit side by side, in the lines' order.
+  // Tabs that would land on each other sit side by side, in the lines' order —
+  // and none hangs off the start of the timeline, where it could not be seen.
   out.sort((a, b) => a.position - b.position)
-  let taken = -Infinity
+  let taken = 0
   for (const m of out) {
     m.tabLeftPx = Math.max(m.tabLeftPx, taken)
     taken = m.tabLeftPx + LINE_MARKER_TAB_PX

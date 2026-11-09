@@ -28,7 +28,7 @@ export interface LintRule {
   enabled: boolean
   check:
     | { type: "source-requires-target"; sourcePattern: string; targetPattern: string; caseSensitive?: boolean }
-    | { type: "target-forbids"; targetPattern: string; caseSensitive?: boolean }
+    | { type: "target-forbids"; targetPattern: string; sourcePattern?: string; caseSensitive?: boolean }
     | { type: string; [k: string]: unknown }
 }
 
@@ -95,6 +95,14 @@ export type RuleViolation =
 export function ruleViolation(rule: LintRule, sourceText: string, afterText: string): RuleViolation | null {
   const c = rule.check
   if (c.type === "target-forbids" && typeof c.targetPattern === "string") {
+    // AQU-1712: an optional SOURCE condition, as the editor applies it. A
+    // compiled `term:` rule carries its concept's source pattern, so the
+    // forbidden rendering is judged only in a cell whose source bears the
+    // concept. Hand-authored rules carry none and stay unconditional.
+    if (typeof c.sourcePattern === "string") {
+      const sourceRe = compileRulePattern(rule, c.sourcePattern)
+      if (!sourceRe || countMatches(sourceText, sourceRe) === 0) return null
+    }
     return compileRulePattern(rule, c.targetPattern)?.test(afterText) ? { type: "target-forbids" } : null
   }
   if (

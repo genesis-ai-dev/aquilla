@@ -389,45 +389,6 @@ export function snapPlacementToWording(
   return snapped
 }
 
-/** First place `needle` occurs in `haystack` at or after `from`, using the same character equivalences as a style placement. */
-export function findEquivalentSlice(
-  haystack: string,
-  needle: string,
-  from = 0,
-): { start: number; end: number } | undefined {
-  if (!needle) return undefined
-  for (let start = Math.max(0, from); start < haystack.length; start += 1) {
-    const end = equivalentSpanEnd(haystack, needle, start)
-    if (end !== undefined) return { start, end }
-  }
-  return undefined
-}
-
-function equivalentSpanEnd(haystack: string, needle: string, start: number): number | undefined {
-  let haystackIndex = start
-  let needleIndex = 0
-  while (needleIndex < needle.length) {
-    if (haystackIndex < haystack.length && haystack[haystackIndex] === "\u00AD") {
-      haystackIndex += 1
-      continue
-    }
-    if (needle[needleIndex] === "\u00AD") {
-      needleIndex += 1
-      continue
-    }
-    if (haystackIndex >= haystack.length) return undefined
-    if (isPlacementSpace(haystack[haystackIndex]!) && isPlacementSpace(needle[needleIndex]!)) {
-      while (haystackIndex < haystack.length && isPlacementSpace(haystack[haystackIndex]!)) haystackIndex += 1
-      while (needleIndex < needle.length && isPlacementSpace(needle[needleIndex]!)) needleIndex += 1
-      continue
-    }
-    if (!equivalentPlacementChar(haystack, needle, haystackIndex, needleIndex)) return undefined
-    haystackIndex += 1
-    needleIndex += 1
-  }
-  return haystackIndex
-}
-
 function equivalentPlacementChar(
   original: string,
   model: string,

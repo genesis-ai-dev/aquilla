@@ -127,6 +127,30 @@ everyone. Name them in stories; never paste an id.
   (Genesis 1-2, four verse cells), so a chapter row under a file that is
   not open can be clicked; `QA Smoke Project` and `QA Org Search B`, both
   empty, for org, search, and import stories; `subtitle-test` for media.
+  `QA Long Project Name For Truncation And Ellipsis Acceptance Criteria`
+  (68 characters) is empty too, and exists only so a story about a
+  truncated project name has one long enough to truncate — the next
+  longest is 52 (AQU-1436, absorbing AQU-1437).
+  `qa-819 aqu-1272 pointed-hebrew 20260924230332` is for terminology
+  matching: pointed Hebrew, prefixes, and a substring negative case
+  (AQU-1412).
+- **AI drafting:** hosted drafting works on a preview with no key of
+  anyone's. `scripts/cloudflare-stack-preview.mjs` refuses to deploy an
+  auth preview without the platform `OPENROUTER_API_KEY` (AQU-1500), and
+  a project that has never customized its provider resolves to the hosted
+  one (`DEFAULT_COMPLETION_SETTINGS`). What is **not** fixture data is the
+  one-time **Set up AI** answer: `aiProviderChosen` is device-local — it
+  lives in this browser's IDB project row, overlaid onto the server's copy
+  by `overlayDeviceLocalSettings` (`src/hooks/useProject.ts`), and there is
+  no such column in Postgres — so nothing seeded on the project or in the
+  database can pre-answer it, and a fresh browser profile always starts
+  with the per-cell sparkle tooltip reading **"Set up AI to enable"**.
+  Answer it once per profile, on the project you are walking: click the
+  sparkle on a target cell (that is what opens the chooser), leave
+  **Aquilla AI** (Recommended) selected, and click **Continue**. The
+  tooltip then reads **"Translate with AI"** and drafts land. It survives
+  a preview rebuild and a dev-database reset, because it was never in
+  either; it is lost when the browser profile is (AQU-1436).
 - **Media:** in `subtitle-test`, files `001` to `012` are the repo's
   synthetic parity corpus (`parity/corpus/files/vtt/`). They have no
   film, no audio cues, and no takes; silence there is not a bug.
@@ -160,7 +184,10 @@ them.
   server-side. Hand its password to the bot runner as
   `AQUILLA_QA_ADMIN_PASSWORD`. To check it took, sign in on any branch preview
   and open `/admin`: a non-admin is redirected to `/orgs/all`.
-- `QA Smoke Project` and `QA Org Search B` — create empty. No import.
+- `QA Smoke Project`, `QA Org Search B`, and
+  `QA Long Project Name For Truncation And Ellipsis Acceptance Criteria`
+  — create empty. No import. Spell the long one exactly: a shorter name
+  does not truncate, which is the only thing it is for.
 - `english to burmese` — import the Bible in Basic English (`eng-engBBE`)
   from the eBible catalogue in the import dialog.
 - `QA Scripture Verse Resources` — import the Berean Standard Bible
@@ -180,6 +207,29 @@ them.
   voices-roundtrip-film.mp4` — and import it as its own `video` file.
   Stories that must hear something only need it to have audio, not to be
   that exact clip.
+- `qa-819 aqu-1272 pointed-hebrew 20260924230332` (AQU-1412). Upload
+  `e2e/fixtures/pointed-hebrew-terms.usfm` as the source file. It holds
+  the three cells a terminology claim needs: GEN 1:2 has the prefixed
+  form `וְהָאָ֗רֶץ` as plain text, GEN 1:3 has the same word inside
+  `\bd …\bd*`, so it renders bold and terms are looked up one marked
+  segment at a time (`UsfmSourceText`), and GEN 1:4 has `graceful`, the
+  negative control. Rich-HTML source such as IDML takes a third path,
+  `decorateTermsInHtml`, which this file does not reach. Then:
+  1. In Terminology, add two concepts, both `active`: source term
+     `הָאָ֗רֶץ` rendered `earth`, and source term `grace` rendered
+     `gracia`.
+  2. In Project settings > Terminology > **Prefixes**, add `ו`, `ה`, and
+     `ב`. Saved prefixes show as chips beside the input; the input itself
+     is the add field and stays empty.
+
+  A walk should find the Hebrew term in GEN 1:2 and GEN 1:3 through the
+  prefix, and should not find `grace` inside `graceful`. Nothing here
+  needs an AI key.
+- **Set up AI is not on this list, and cannot be.** It is answered per
+  browser profile, not per project, so rebuilding the database neither
+  loses it nor restores it. See the AI-drafting fixture note above for the
+  one-off click, and `PR-BOT.md` for how to report an AI-control claim
+  when it is unanswered.
 
 ### The two gaps that are still open, and what to do about each
 

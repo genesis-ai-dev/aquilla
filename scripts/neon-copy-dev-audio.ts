@@ -1,9 +1,11 @@
 #!/usr/bin/env tsx
-// AQU-2114 — make one production project's audio play on dev.aquilla.app.
+// AQU-2114 — make one production project's audio play, and its imported files
+// export, on dev.aquilla.app.
 //
 // The nightly "Refresh Dev Neon Branch" workflow restores Neon `dev` from
 // `production`, which copies every audio ROW but none of the audio BYTES, so a
-// migrated project's takes 404 on dev. This copies the bytes the restored rows
+// migrated project's takes 404 on dev — and the same for the uploaded source
+// originals its exports read. This copies the bytes the restored rows
 // reference — and only those — from `aquilla-snapshots` into
 // `aquilla-snapshots-dev`, key for key.
 //
@@ -29,6 +31,7 @@ import { makeMaintenancePostgres } from "../db/shim/postgres"
 import {
   copyProjectAudio,
   formatCopyReport,
+  loadOriginalRefs,
   DEV_MEDIA_BUCKET,
   PROD_MEDIA_BUCKET,
   type ListedObject,
@@ -97,6 +100,8 @@ async function main() {
         loadRefs: async (id) => ({
           audio: await loadAudioRefs(db, id),
           voice: await loadVoiceRefs(db, id),
+          // Plus the uploaded originals an export reads.
+          original: await loadOriginalRefs(db, id),
         }),
       },
       {

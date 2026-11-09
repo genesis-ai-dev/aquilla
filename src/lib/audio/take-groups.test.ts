@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
-import { groupSelection, groupTakesByTrack, listedTakeCount, originalRecordingId, pieceNames, piecesOf, playingTakeId, takeBaseLabel, takeRows } from "./take-groups"
+import { groupSelection, groupTakesByTrack, listedTakeCount, originalRecordingId, pieceNameIn, pieceNames, piecesOf, playingTakeId, splitTakeName, takeBaseLabel, takeRows, wholeTakeRenames } from "./take-groups"
 
 const att = (audioId: string, slot: string, over: Partial<AudioAttachmentOut> = {}): AudioAttachmentOut => ({
   audioId, url: `frontier-audio://${audioId}`, slot, mimeType: null, voiceId: null, referenceAudioId: null,
@@ -112,6 +112,69 @@ describe("pieceNames", () => {
       att("c", { label: "Take 2 · 3", pieceOf: "a", trimStartMs: 3000 }),
     ])
     expect(names.get("c")).toBe("Take 2 · 2")
+  })
+  // Decision 7: each piece has its own name.
+  it("keeps a piece renamed on its own by that name, its siblings numbered around it", () => {
+    const names = pieceNames([
+      att("a", { label: "Take 2 · 1" }),
+      att("b", { label: "Chorus", pieceOf: "a", trimStartMs: 2000 }),
+      att("c", { label: "Take 2 · 3", pieceOf: "a", trimStartMs: 3000 }),
+    ])
+    expect([names.get("a"), names.get("b"), names.get("c")]).toEqual(["Take 2 · 1", "Chorus", "Take 2 · 3"])
+  })
+  it("keeps the take's name when its first piece is the one renamed", () => {
+    const takes = [
+      att("a", { label: "Intro" }),
+      att("b", { label: "Take 2 · 2", pieceOf: "a", trimStartMs: 2000 }),
+      att("c", { label: "Take 2 · 3", pieceOf: "a", trimStartMs: 3000 }),
+    ]
+    const names = pieceNames(takes)
+    expect([names.get("a"), names.get("b"), names.get("c")]).toEqual(["Intro", "Take 2 · 2", "Take 2 · 3"])
+    expect(splitTakeName(takes)).toBe("Take 2")
+  })
+})
+
+describe("splitTakeName", () => {
+  it("is the name the numbered pieces share, most of them first, then the earliest", () => {
+    expect(splitTakeName([{ label: "Take 3 · 1" }, { label: "Take 3 · 2" }])).toBe("Take 3")
+    expect(splitTakeName([{ label: "Verse · 4" }, { label: "Take 3 · 2" }, { label: "Take 3 · 3" }])).toBe("Take 3")
+    expect(splitTakeName([{ label: "Take 3 · 1" }, { label: "Verse · 4" }])).toBe("Take 3")
+  })
+  it("is null when no piece carries a numbered name", () => {
+    expect(splitTakeName([{ label: "Intro" }, { label: null }])).toBeNull()
+  })
+})
+
+describe("pieceNameIn", () => {
+  const attachments = {
+    a: { label: "Take 2 · 1", trimEndMs: 2000 },
+    b: { label: "Take 2 · 5", pieceOf: "a", trimStartMs: 2000 },
+    x: { label: "Take 1" },
+  }
+  it("reads the name a take or piece is shown by off a cell's attachments", () => {
+    expect(pieceNameIn(attachments, "b")).toBe("Take 2 · 2")
+    expect(pieceNameIn(attachments, "x")).toBe("Take 1")
+    expect(pieceNameIn(attachments, "gone")).toBeNull()
+  })
+})
+
+describe("wholeTakeRenames", () => {
+  it("renames every piece of a take whose pieces all go by its name, numbered by where each sits", () => {
+    expect(wholeTakeRenames([{ audioId: "a", label: "Take 2 · 1" }, { audioId: "b", label: "Take 2 · 7" }], "Hello")).toEqual([
+      { audioId: "a", label: "Hello · 1", labelBefore: "Take 2 · 1" },
+      { audioId: "b", label: "Hello · 2", labelBefore: "Take 2 · 7" },
+    ])
+  })
+  it("leaves a piece renamed on its own alone", () => {
+    expect(wholeTakeRenames([
+      { audioId: "a", label: "Take 2 · 1" },
+      { audioId: "b", label: "Chorus" },
+      { audioId: "c", label: "Take 2 · 3" },
+    ], "Hello").map((r) => [r.audioId, r.label])).toEqual([["a", "Hello · 1"], ["c", "Hello · 3"]])
+  })
+  it("renames them all when every piece has a name of its own", () => {
+    expect(wholeTakeRenames([{ audioId: "a", label: "Intro" }, { audioId: "b", label: "Chorus" }], "Hello").map((r) => r.label))
+      .toEqual(["Hello · 1", "Hello · 2"])
   })
 })
 

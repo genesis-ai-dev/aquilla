@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest"
-import { render } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { StrictMode, createRef, useEffect, useRef } from "react"
 import type { ComponentProps, ReactNode } from "react"
@@ -94,9 +94,9 @@ function makeStore(rows: CellRow[]): CellStore {
   return store
 }
 
-type TableExtras = Pick<ComponentProps<typeof EditorTable>, "sourceLineEditing">
+type TableExtras = Pick<ComponentProps<typeof EditorTable>, "sourceLineEditing" | "orderedBy" | "parallelBibles">
 
-function renderTable(store: CellStore) {
+function renderTable(store: CellStore, initial: TableExtras = {}) {
   const ref = createRef<EditorTableHandle>()
   const qc = new QueryClient()
   const tree = (extras: TableExtras = {}) => (
@@ -127,14 +127,52 @@ function renderTable(store: CellStore) {
       </EditorActionsProvider>
     </QueryClientProvider>
   )
-  const { rerender } = render(tree())
+  const { rerender } = render(tree(initial))
   return {
     get current() { return ref.current },
     rerender: (extras: TableExtras) => rerender(tree(extras)),
   }
 }
 
+vi.mock("@/lib/parsers/helloao", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/parsers/helloao")>("@/lib/parsers/helloao")
+  return {
+    ...actual,
+    fetchHelloaoTranslations: vi.fn(async () => []),
+    fetchHelloaoChapter: vi.fn(async () => ({
+      translation: { id: "BSB" },
+      book: { id: "JHN", numberOfChapters: 21 },
+      chapter: { number: 3, content: [1, 2, 3].map((n) => ({ type: "verse", number: n, content: [`BSB verse ${n}`] })) },
+    })),
+    prefetchHelloaoChapter: vi.fn(),
+  }
+})
+
+function verseRow(cellId: string, ref: string | null, type = "text"): CellRow {
+  return {
+    cellId, side: "source", value: `src-${cellId}`, valueHtml: null, type,
+    canonicalRef: ref, anchorCellId: null, eventId: `${cellId}-source`,
+    sourceEventId: null, lastEditor: null, lastEditAt: 1, validated: false, wordCount: 1,
+  } as CellRow
+}
+
 describe("EditorTableHandle.scrollToCellId (AQU-646)", () => {
+  it("lands on the same display row with Bible verses making the rows taller", async () => {
+    const ref = renderTable(
+      makeStore([verseRow("h", "JHN 3", "heading"), verseRow("v1", "JHN 3:1"), verseRow("v2", "JHN 3:2"), verseRow("v3", "JHN 3:3")]),
+      {
+        orderedBy: undefined,
+        parallelBibles: { projectId: project.id, projectDefaults: ["BSB"], canSetProjectDefaults: false, onSetProjectDefaults: async () => true },
+      },
+    )
+    // happy-dom measures 0px, so the Bibles stack under the source text.
+    await screen.findByText("BSB verse 3")
+    expect(document.querySelector('[data-cell-id="h"] [data-testid="bible-stack"]')).toBeNull()
+    scrollToIndex.mockClear()
+    expect(ref.current?.scrollToCellId("v3")).toBe(true)
+    expect(scrollToIndex).toHaveBeenCalledWith(expect.objectContaining({ index: 3 }))
+  })
+
   it("resolves the DISPLAY index on a time-ordered file whose store order ≠ time order", () => {
     // Store order: late, early — display (time) order re-sorts to early, late.
     const ref = renderTable(makeStore([

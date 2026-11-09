@@ -59,6 +59,7 @@ import { bibleParticipants } from "../namespaces/bibleParticipants"
 import { bibleVoices } from "../namespaces/bibleVoices"
 import { transcribe } from "../namespaces/transcribe"
 import { recordingsUpload } from "../namespaces/recordingsUpload"
+import { paratextBridge } from "../namespaces/paratextBridge"
 import type { MessageValue } from "../plurals"
 
 export const en = {
@@ -102,6 +103,7 @@ export const en = {
   ...bibleVoices.keys,
   ...transcribe.keys,
   ...recordingsUpload.keys,
+  ...paratextBridge.keys,
 } as const
 
 export type MessageKey = keyof typeof en

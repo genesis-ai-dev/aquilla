@@ -40,6 +40,7 @@ const STATIC_REASON_KEY: Partial<Record<RuleInfractionReason, MessageKey>> = {
   "builtin:unpaired-quotes": "rules.infraction.builtin.unpairedQuotes",
   "builtin:untranslated-fragment": "rules.infraction.builtin.untranslatedFragment",
   "builtin:length-ratio": "rules.infraction.builtin.lengthRatio",
+  "builtin:scripture-reference": "rules.infraction.builtin.scriptureReference",
 }
 
 /** Just the predicate — "This term is in the source…", "Placeholder {age} missing…". */

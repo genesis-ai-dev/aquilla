@@ -39,6 +39,29 @@ export interface LangQuestLink {
   lastSyncError: string | null
   linkedBy: string
   linkedAt: string | null
+  /** The account-level connection the link was made from; null for a link made before 0196. */
+  connectionId: string | null
+}
+
+/**
+ * What a saved connection's token looks like from here. `expired` is read off
+ * the token's own expiry; `needs_reauth` is LangQuest's verdict (revoked, or
+ * made on another deployment); `unreachable` is a probe that got no verdict.
+ */
+export type LangQuestConnectionHealth = "ok" | "needs_reauth" | "expired" | "unreachable"
+
+/** A user's connection to one LangQuest organization (GET /connections). Never carries the token. */
+export interface LangQuestConnection {
+  id: string
+  apiBase: string
+  org: { id: string; name: string }
+  token: { id: string | null; name: string; scopes: LangQuestScope[]; expiresAt: string | null; allLanguages: boolean }
+  health: LangQuestConnectionHealth
+  lastCheckedAt: string | null
+  lastError: string | null
+  linkedProjects: number
+  connectedAt: string | null
+  updatedAt: string | null
 }
 
 export interface LangQuestAudioCard {

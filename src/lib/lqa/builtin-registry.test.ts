@@ -22,6 +22,7 @@ describe("builtin-registry", () => {
       "unpaired-quotes",
       "untranslated-fragment",
       "length-ratio",
+      "scripture-reference",
     ])
   })
 
@@ -40,12 +41,14 @@ describe("builtin-registry", () => {
     }
   })
 
-  // length-ratio is off because normal length varies too much by language pair.
-  it("only abbreviation-mismatch and length-ratio are off by default", () => {
+  // length-ratio is off because normal length varies too much by language pair;
+  // scripture-reference (AQU-1735) because its book-name half needs the
+  // project's own book names first.
+  it("only abbreviation-mismatch, length-ratio and scripture-reference are off by default", () => {
+    const off = new Set(["abbreviation-mismatch", "length-ratio", "scripture-reference"])
     for (const id of BUILTIN_CHECK_IDS) {
       const def = BUILTIN_CHECKS[id]
-      if (id === "abbreviation-mismatch" || id === "length-ratio") expect(def.defaultEnabled).toBe(false)
-      else expect(def.defaultEnabled).toBe(true)
+      expect(def.defaultEnabled).toBe(!off.has(id))
     }
   })
 

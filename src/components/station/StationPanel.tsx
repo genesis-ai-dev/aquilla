@@ -69,8 +69,20 @@ export function StationPanel({ host, visible }: { host: StationHost | null; visi
     )
   }
   const take = target && host ? host.readTake(target.cellId, target.audioId) : null
+  // Undo of a Save takes the saved take away and brings back the one it was
+  // made from: the Station opens that one again rather than saying the
+  // recording is gone (found in the Nov 2 browser check).
+  const madeFrom = take?.att.referenceAudioId ?? null
+  const [origin, setOrigin] = useState<{ audioId: string; from: string } | null>(null)
+  if (target && madeFrom && (origin?.audioId !== target.audioId || origin.from !== madeFrom)) {
+    setOrigin({ audioId: target.audioId, from: madeFrom })
+  }
+  const backTo = !take && target && host && origin?.audioId === target.audioId && host.readTake(target.cellId, origin.from) ? origin.from : null
+  useEffect(() => {
+    if (backTo && target) openInStation({ ...target, audioId: backTo })
+  }, [backTo, target])
   if (!target || !host) return <StationEmpty />
-  if (!take) return <StationNote>{<GoneText />}</StationNote>
+  if (!take) return backTo ? null : <StationNote>{<GoneText />}</StationNote>
   return (
     <StationOpen
       key={`${target.fileId}|${target.cellId}|${target.audioId}`}
@@ -338,6 +350,28 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
     }
   }
 
+  // A button pressed in the Station that goes away when pressed (Insert ›
+  // Record now, Keep, Record again, Delete this, the message's Close), or is
+  // disabled for a moment (Stop, while the recording finishes), took the
+  // focus with it, so Space, Esc, Enter and ⌘S stopped reaching the Station
+  // (found in the Nov 2 browser check). When the focus was last in the
+  // Station and has fallen to nothing, without a press somewhere else on the
+  // page, the Station takes it back.
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  const lastFocused = useRef<HTMLElement | null>(null)
+  useEffect(() => {
+    const onDown = (e: globalThis.PointerEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) lastFocused.current = null
+    }
+    document.addEventListener("pointerdown", onDown, true)
+    return () => document.removeEventListener("pointerdown", onDown, true)
+  }, [])
+  useEffect(() => {
+    const was = lastFocused.current
+    const now = document.activeElement
+    if (was && was !== now && (now == null || now === document.body)) rootRef.current?.focus({ preventScroll: true })
+  })
+
   // Item 33: the keys, while the Station has the focus. A text field keeps
   // its own. ⌘Z takes back an unsaved edit first; otherwise it is the
   // project's own Undo (Q4), which the window's shortcut runs.
@@ -366,9 +400,13 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
     }
     const mod = e.metaKey || e.ctrlKey
     let handled = true
-    if (mod && !e.shiftKey && letter === "z") handled = ed.undoUnsaved()
+    // Never with Alt: AltGr on a Windows layout arrives as Ctrl+Alt, and
+    // AltGr+S types ś in Polish (Nov 2 shortcut review).
+    if (mod && !e.altKey && !e.shiftKey && letter === "z") handled = ed.undoUnsaved()
     // ⌘S is Save: over the take, wherever it is used (Sam, Nov 2).
-    else if (mod && letter === "s") void save({ mode: "over", scope: "all" })
+    else if (mod && !e.altKey && letter === "s") void save({ mode: "over", scope: "all" })
+    // The timeline's ⌘Enter (back to the start) would rewind it from here.
+    else if (mod && k === "Enter") handled = true
     else if (mod || e.altKey) handled = false
     // Space presses a focused button rather than playing (playback-keys.ts).
     else if (k === " ") {
@@ -396,8 +434,12 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
 
   return (
     <div
+      ref={rootRef}
       data-testid="station"
       tabIndex={0}
+      onFocus={(e) => {
+        lastFocused.current = e.target as HTMLElement
+      }}
       // Item 33: Esc here clears the selection and closes Insert; while there
       // is one of those, full screen's own Esc stands down (useMediaDock).
       data-owns-escape={ed.sel != null || insertOpen || rec.busy ? "true" : undefined}

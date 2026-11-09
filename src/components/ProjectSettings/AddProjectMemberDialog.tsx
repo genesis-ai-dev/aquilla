@@ -87,7 +87,7 @@ export function AddProjectMemberDialog({
         setRosterLoad({
           key: rosterKey,
           members: [],
-          error: toUserFacingError(error, "organization members").message,
+          error: toUserFacingError(error, "org").message,
         })
       })
     return () => { alive = false }

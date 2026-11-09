@@ -2,31 +2,15 @@
 // API (bible.helloao.org). Shows the currently-viewed verse across the bible
 // versions the user has pinned, auto-tracking scroll position in the editor.
 //
-// API kindness: only per-chapter endpoints are used (the granularity the API
-// is designed for), fetches fire only while the panel is open, chapter
-// responses are promise-cached in the helloao client (scrolling within a
-// chapter costs zero requests), and chapter changes are debounced so fast
-// scrolling doesn't burst-fetch every chapter passed over. The neighbouring
-// chapters are warmed after the visible one lands (AQU-843) — steady-state
-// reading therefore pays the same one request per chapter it always did, just
-// early enough that the panel is populated on arrival.
-//
-// Pinned versions persist in localStorage per user (not project settings) —
-// helps are a personal reading aid, not project data.
+// The same versions also show as Bible columns in the editor itself
+// (parallel-bibles/EditorBibleColumns): both read one set of pins — the
+// translator's own for this project, else the project defaults a lead set —
+// so adding or removing a version in either place changes both.
+// Chapter loading (and its API-kindness rules) lives in useParallelChapters.
 
-import { useEffect, useMemo, useRef, useState } from "react"
-import {
-  adjacentChapters,
-  fetchHelloaoChapter,
-  fetchHelloaoTranslations,
-  flattenHelloaoContent,
-  HelloaoChapterNotFoundError,
-  prefetchHelloaoChapter,
-  type HelloaoTranslation,
-} from "@/lib/parsers/helloao"
-import { referencePrefetchAllowed } from "@/lib/net/prefetch-policy"
+import { useMemo, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
-import { BookMarked, Plus, Search, X } from "lucide-react"
+import { BookMarked, Plus, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { EmptyState } from "@/components/ui/empty"
 import { Spinner } from "@/components/ui/spinner"
@@ -34,13 +18,17 @@ import { ErrorBoundary } from "./ErrorBoundary"
 import { ResourcePaneCrash, ResourcePaneError } from "./ResourcePaneError"
 import { RightSidebarPanel } from "./RightSidebarPanel"
 import { useT } from "@/lib/i18n/I18nProvider"
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@/components/ui/input-group"
+import { sameVersionList } from "@/lib/parallel-bibles/pinned-versions"
+import { alignVersion, mapEnglishRef, versificationScheme } from "@/lib/parallel-bibles/versification"
+import { verseTextPresentation, verseTextStyle } from "@/lib/parallel-bibles/version-display"
+import { referenceShape } from "./parallel-bibles/bible-cells"
+import { chapterKey } from "./parallel-bibles/chapter-data"
+import { useHelloaoCatalogue, usePinnedVersions, versionLabel } from "./parallel-bibles/useBibleVersions"
+import { useParallelChapters } from "./parallel-bibles/useParallelChapters"
+import { VersificationMark } from "./parallel-bibles/VersificationMark"
+import { VersionCredit } from "./parallel-bibles/VersionCredit"
+import { VersionPicker } from "./parallel-bibles/VersionPicker"
 
-const VERSIONS_STORAGE_KEY = "aquilla:parallel-bibles:versions"
 const OPEN_STORAGE_KEY_PREFIX = "aquilla:parallel-bibles:"
 
 function openStateKey(projectId: string): string {
@@ -60,25 +48,6 @@ export function writeParallelBiblesOpen(projectId: string, value: boolean): void
     window.localStorage.setItem(openStateKey(projectId), value ? "true" : "false")
   } catch {
     // localStorage may be unavailable — ignore
-  }
-}
-
-function readPinnedVersions(): string[] {
-  try {
-    const raw = window.localStorage.getItem(VERSIONS_STORAGE_KEY)
-    if (!raw) return []
-    const parsed = JSON.parse(raw) as unknown
-    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : []
-  } catch {
-    return []
-  }
-}
-
-function writePinnedVersions(ids: string[]): void {
-  try {
-    window.localStorage.setItem(VERSIONS_STORAGE_KEY, JSON.stringify(ids))
-  } catch {
-    // ignore
   }
 }
 
@@ -102,12 +71,14 @@ interface ParallelBiblesSidebarProps {
   open: boolean
   onToggle: () => void
   className?: string
-}
-
-interface VersionVerses {
-  /** verse number → flattened text for the loaded chapter */
-  verses: Map<number, string>
-  error?: string
+  /** Keys the translator's own pins per project. Absent: the one global list. */
+  projectId?: string
+  /** The project's default versions, shown while the translator has no pins of their own. */
+  projectDefaults?: readonly string[]
+  /** Project lead and up: may save the shown versions as the project defaults. */
+  canSetProjectDefaults?: boolean
+  /** Saves the project defaults; resolves true when the server took them. */
+  onSetProjectDefaults?: (ids: string[]) => Promise<boolean>
 }
 
 /** A render throw inside the pane stays inside the pane (AQU-849) — without
@@ -124,15 +95,21 @@ export function ParallelBiblesSidebar(props: ParallelBiblesSidebarProps) {
   )
 }
 
-function ParallelBiblesSidebarBody({ trackedRef, open, onToggle, className }: ParallelBiblesSidebarProps) {
+function ParallelBiblesSidebarBody({
+  trackedRef,
+  open,
+  onToggle,
+  className,
+  projectId,
+  projectDefaults,
+  canSetProjectDefaults = false,
+  onSetProjectDefaults,
+}: ParallelBiblesSidebarProps) {
   const t = useT()
-  const [pinned, setPinned] = useState<string[]>(() => readPinnedVersions())
+  const pins = usePinnedVersions(projectId, projectDefaults)
+  const { pinned } = pins
   const [pickerOpen, setPickerOpen] = useState(false)
-  const [translations, setTranslations] = useState<HelloaoTranslation[] | null>(null)
-  const [translationsErr, setTranslationsErr] = useState<string | null>(null)
-  const [query, setQuery] = useState("")
-  // (version id, book, chapter) → loaded verses, rebuilt as the chapter changes
-  const [chapterData, setChapterData] = useState<Map<string, VersionVerses>>(new Map())
+  const [defaultsStatus, setDefaultsStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle")
   // Bumped by the inline Retry buttons. A lookup that failed while the reader
   // stays on one verse has nothing else to re-trigger its effect, which is why
   // a dead pane used to need a page reload (AQU-849).
@@ -144,139 +121,31 @@ function ParallelBiblesSidebarBody({ trackedRef, open, onToggle, className }: Pa
   if (parsed) lastParsedRef.current = parsed
   const tracked = parsed ?? lastParsedRef.current
 
-  // Debounced chapter key — fast scrolling across chapters shouldn't fetch
-  // every chapter passed over.
-  const chapterKey = tracked ? `${tracked.book}/${tracked.chapter}` : null
-  const [debouncedChapterKey, setDebouncedChapterKey] = useState(chapterKey)
-  useEffect(() => {
-    if (chapterKey === debouncedChapterKey) return
-    const t = window.setTimeout(() => setDebouncedChapterKey(chapterKey), 250)
-    return () => window.clearTimeout(t)
-  }, [chapterKey, debouncedChapterKey])
+  // Names, credits, script and numbering all come from the catalogue.
+  const catalogue = useHelloaoCatalogue(pickerOpen || (open && pinned.length > 0))
+  const translationById = catalogue.byId
 
-  // Load the translations list lazily: when the picker opens, or when the
-  // panel is open with pinned versions (so cards show names, not raw ids).
-  // `translationsErr` guards against a retry loop (setting it re-runs this
-  // effect); clearing it from Retry is what re-arms the fetch.
-  const needTranslations = pickerOpen || (open && pinned.length > 0)
-  useEffect(() => {
-    if (!needTranslations || translations || translationsErr) return
-    let cancelled = false
-    fetchHelloaoTranslations()
-      .then((list) => {
-        if (!cancelled) setTranslations(list)
-      })
-      .catch((err) => {
-        if (!cancelled) setTranslationsErr(err instanceof Error ? err.message : String(err))
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [needTranslations, translations, translationsErr])
+  const trackedKey = tracked ? `${tracked.book} ${tracked.chapter} ${tracked.verse ?? ""}` : ""
+  const refs = useMemo(() => {
+    if (!trackedKey) return []
+    const [book, chapter, verse] = trackedKey.split(" ")
+    return [{ book, chapter: Number(chapter), verse: verse ? Number(verse) : null }]
+  }, [trackedKey])
+  const { chapterData, forget } = useParallelChapters({
+    open,
+    pinned,
+    refs,
+    translationById,
+    retryNonce,
+  })
 
-  // Fetch the tracked chapter for every pinned version. fetchHelloaoChapter
-  // promise-caches per (version, book, chapter) so repeat visits are free.
-  useEffect(() => {
-    if (!open || !debouncedChapterKey || pinned.length === 0) return
-    const [book, chapterStr] = debouncedChapterKey.split("/")
-    const chapter = Number(chapterStr)
-    let cancelled = false
-
-    const loads = pinned.map((versionId) =>
-      fetchHelloaoChapter(versionId, book, chapter)
-        .then((res) => {
-          if (cancelled) return null
-          const verses = new Map<number, string>()
-          for (const node of res.chapter.content) {
-            if (node.type === "verse") {
-              verses.set(node.number, flattenHelloaoContent(node.content))
-            }
-          }
-          setChapterData((prev) => {
-            const next = new Map(prev)
-            next.set(`${versionId}/${book}/${chapter}`, { verses })
-            return next
-          })
-          return res
-        })
-        .catch((err) => {
-          if (cancelled) return null
-          // A version that simply doesn't carry this chapter is an absence, not
-          // a failure: it lands as an empty chapter and renders "no text".
-          const missing = err instanceof HelloaoChapterNotFoundError
-          setChapterData((prev) => {
-            const next = new Map(prev)
-            next.set(`${versionId}/${book}/${chapter}`, {
-              verses: new Map(),
-              error: missing ? undefined : err instanceof Error ? err.message : String(err),
-            })
-            return next
-          })
-          return null
-        }),
-    )
-
-    // AQU-843: once the visible chapter has landed for every pinned version,
-    // warm the chapters either side so crossing a chapter boundary mid-scroll
-    // reads from cache instead of leaving the panel blank on arrival. Ordered
-    // after the visible fetches on purpose — on a weak link a preload must
-    // never compete with the text the translator is waiting on. The book's
-    // chapter count comes off the response we just got, so the warm never
-    // spends a request on a chapter past the end of the book.
-    void Promise.all(loads).then((results) => {
-      if (cancelled || !referencePrefetchAllowed()) return
-      const numberOfChapters = results.find((res) => res !== null)?.book.numberOfChapters
-      if (!numberOfChapters) return
-      for (const target of adjacentChapters(chapter, numberOfChapters)) {
-        for (const versionId of pinned) prefetchHelloaoChapter(versionId, book, target)
-      }
-    })
-
-    return () => {
-      cancelled = true
-    }
-  }, [open, debouncedChapterKey, pinned, retryNonce])
-
-  function pinVersion(id: string) {
-    setPinned((prev) => {
-      if (prev.includes(id)) return prev
-      const next = [...prev, id]
-      writePinnedVersions(next)
-      return next
-    })
-    setPickerOpen(false)
-    setQuery("")
+  async function makeProjectDefaults() {
+    if (!onSetProjectDefaults) return
+    setDefaultsStatus("saving")
+    const ok = await onSetProjectDefaults([...pinned])
+    if (ok) pins.followProjectDefaults()
+    setDefaultsStatus(ok ? "saved" : "failed")
   }
-
-  function unpinVersion(id: string) {
-    setPinned((prev) => {
-      const next = prev.filter((v) => v !== id)
-      writePinnedVersions(next)
-      return next
-    })
-  }
-
-  const translationById = useMemo(() => {
-    const map = new Map<string, HelloaoTranslation>()
-    for (const t of translations ?? []) map.set(t.id, t)
-    return map
-  }, [translations])
-
-  const filteredTranslations = useMemo(() => {
-    if (!translations) return []
-    const q = query.trim().toLowerCase()
-    const pool = q
-      ? translations.filter(
-          (t) =>
-            t.id.toLowerCase().includes(q) ||
-            t.name.toLowerCase().includes(q) ||
-            t.englishName.toLowerCase().includes(q) ||
-            t.languageEnglishName.toLowerCase().includes(q) ||
-            t.languageName.toLowerCase().includes(q)
-        )
-      : translations
-    return pool.filter((t) => !pinned.includes(t.id)).slice(0, 50)
-  }, [translations, query, pinned])
 
   // Closed: slim edge tab so the helps are one click away while reading.
   if (!open) {
@@ -302,6 +171,17 @@ function ParallelBiblesSidebarBody({ trackedRef, open, onToggle, className }: Pa
   const trackedLabel = tracked
     ? `${tracked.book} ${tracked.chapter}${tracked.verse ? `:${tracked.verse}` : ""}`
     : null
+  const labelOf = (id: string) => versionLabel(id, translationById.get(id))
+  const reference = tracked
+    ? referenceShape(pinned, translationById, chapterData, tracked.book, tracked.chapter, labelOf)
+    : undefined
+
+  const differsFromDefaults = !sameVersionList(pinned, projectDefaults)
+  const showMakeDefaults =
+    canSetProjectDefaults && !!onSetProjectDefaults && pins.source === "personal"
+    && pinned.length > 0 && differsFromDefaults
+  const showFollowDefaults =
+    pins.source === "personal" && (projectDefaults?.length ?? 0) > 0 && differsFromDefaults
 
   return (
     <RightSidebarPanel
@@ -351,27 +231,40 @@ function ParallelBiblesSidebarBody({ trackedRef, open, onToggle, className }: Pa
         ) : (
           <div className="divide-y">
             {pinned.map((versionId) => {
-              const data = chapterData.get(`${versionId}/${tracked.book}/${tracked.chapter}`)
               const meta = translationById.get(versionId)
-              const verseText =
-                tracked.verse !== null ? data?.verses.get(tracked.verse) : undefined
+              const scheme = versificationScheme(meta?.language)
+              const mapped = mapEnglishRef(scheme, tracked.book, tracked.chapter, tracked.verse)
+              const key = chapterKey(versionId, tracked.book, mapped.chapter)
+              const data = chapterData.get(key)
+              const alignment = alignVersion({
+                scheme,
+                book: tracked.book,
+                chapter: tracked.chapter,
+                verse: tracked.verse,
+                loaded: data && !data.error && data.shape.verseCount > 0 ? data.shape : undefined,
+                reference: reference && { ...reference, isSelf: reference.versionId === versionId },
+              })
+              const verseText = alignment.verse !== null ? data?.verses.get(alignment.verse) : undefined
+              const presentation = verseTextPresentation(meta)
+              const text = verseTextStyle(presentation, "verse")
               return (
                 <div key={versionId} className="group px-3 py-2.5">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-medium text-muted-foreground/70">
-                      {meta ? (meta.shortName || meta.id) : versionId}
-                    </span>
+                    <span className="text-xs font-medium text-muted-foreground/70">{labelOf(versionId)}</span>
                     <Button
                       type="button"
                       variant="ghost"
                       size="icon-xs"
                       aria-label={t("editor.bibles.removeVersion", { version: versionId })}
-                      onClick={() => unpinVersion(versionId)}
+                      onClick={() => pins.unpin(versionId)}
                       className="text-muted-foreground/0 transition-colors hover:text-foreground group-hover:text-muted-foreground"
                     >
                       <X />
                     </Button>
                   </div>
+                  {alignment.note && data && !data.error && (
+                    <VersificationMark note={alignment.note} className="mt-1" />
+                  )}
                   {data?.error ? (
                     <ResourcePaneError
                       className="mt-1"
@@ -379,11 +272,7 @@ function ParallelBiblesSidebarBody({ trackedRef, open, onToggle, className }: Pa
                       // Drop the latched failure first, so the retry shows the
                       // spinner rather than the error it is clearing.
                       onRetry={() => {
-                        setChapterData((prev) => {
-                          const next = new Map(prev)
-                          next.delete(`${versionId}/${tracked.book}/${tracked.chapter}`)
-                          return next
-                        })
+                        forget(key)
                         setRetryNonce((n) => n + 1)
                       }}
                       retryLabel={t("editor.bibles.retryVersion", { version: versionId })}
@@ -397,80 +286,86 @@ function ParallelBiblesSidebarBody({ trackedRef, open, onToggle, className }: Pa
                       {t("editor.bibles.scrollToVerse")}
                     </p>
                   ) : verseText ? (
-                    <p className="mt-1 text-xs leading-relaxed text-foreground/90">{verseText}</p>
+                    <p
+                      dir={presentation.dir}
+                      lang={presentation.lang}
+                      style={text.style}
+                      className={cn("mt-1 text-start text-foreground/90", text.className)}
+                    >
+                      {verseText}
+                    </p>
                   ) : (
                     <p className="mt-1 text-xs text-muted-foreground">
                       {t("editor.bibles.noTextForRef", { ref: trackedLabel ?? "" })}
                     </p>
                   )}
+                  <VersionCredit versionId={versionId} meta={meta} className="mt-1" />
                 </div>
               )
             })}
           </div>
         )}
 
-        {/* Version picker */}
         {pickerOpen && (
           <div className="border-t p-3">
-            <InputGroup>
-              <InputGroupAddon>
-                <Search />
-              </InputGroupAddon>
-              <InputGroupInput
-                autoFocus
-                placeholder={t("editor.bibles.searchPlaceholder")}
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                aria-label={t("editor.bibles.searchLabel")}
-              />
-            </InputGroup>
-            {translationsErr ? (
-              <ResourcePaneError
-                className="mt-2"
-                message={t("editor.bibles.failedToLoad", { error: translationsErr })}
-                onRetry={() => {
-                  setTranslationsErr(null)
-                  setRetryNonce((n) => n + 1)
-                }}
-                retryLabel={t("editor.bibles.retryVersions")}
-              />
-            ) : !translations ? (
-              <p className="mt-2 text-xs text-muted-foreground">{t("editor.bibles.loadingVersions")}</p>
-            ) : (
-              <ul className="mt-2 max-h-48 overflow-y-auto rounded border">
-                {filteredTranslations.length === 0 && (
-                  <li className="p-2 text-xs text-muted-foreground">{t("editor.bibles.noMatches")}</li>
-                )}
-                {filteredTranslations.map((t) => (
-                  <li key={t.id}>
-                    <button
-                      type="button"
-                      onClick={() => pinVersion(t.id)}
-                      className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent"
-                    >
-                      <span className="truncate">{t.englishName || t.name}</span>
-                      <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
-                        {t.id}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <VersionPicker
+              translations={catalogue.translations}
+              error={catalogue.error}
+              onRetry={() => {
+                catalogue.retry()
+                setRetryNonce((n) => n + 1)
+              }}
+              exclude={pinned}
+              onPick={(id) => {
+                pins.pin(id)
+                setDefaultsStatus("idle")
+                setPickerOpen(false)
+              }}
+            />
           </div>
         )}
       </div>
 
-      {/* Footer: add-version + attribution */}
+      {/* Footer: add-version, project defaults, attribution */}
       <div className="border-t px-3 py-2">
-        <button
-          type="button"
-          onClick={() => setPickerOpen((v) => !v)}
-          className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
-        >
-          <Plus className="h-3.5 w-3.5" />
-          {pickerOpen ? t("editor.bibles.closePicker") : t("editor.bibles.addVersion")}
-        </button>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <button
+            type="button"
+            onClick={() => setPickerOpen((v) => !v)}
+            className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            {pickerOpen ? t("editor.bibles.closePicker") : t("editor.bibles.addVersion")}
+          </button>
+          {showMakeDefaults && (
+            <button
+              type="button"
+              disabled={defaultsStatus === "saving"}
+              onClick={() => void makeProjectDefaults()}
+              className="text-xs text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline disabled:opacity-50"
+            >
+              {t("editor.bibles.makeProjectDefaults")}
+            </button>
+          )}
+          {showFollowDefaults && (
+            <button
+              type="button"
+              onClick={pins.followProjectDefaults}
+              className="text-xs text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
+            >
+              {t("editor.bibles.useProjectDefaults")}
+            </button>
+          )}
+        </div>
+        {(pins.source === "project" || defaultsStatus === "failed") && (
+          <p role="status" className="mt-1 text-[11px] text-muted-foreground">
+            {defaultsStatus === "failed"
+              ? t("editor.bibles.projectDefaultsFailed")
+              : defaultsStatus === "saved"
+                ? t("editor.bibles.projectDefaultsSaved")
+                : t("editor.bibles.usingProjectDefaults")}
+          </p>
+        )}
         <p className="mt-1 text-[10px] text-muted-foreground/60">
           {t("editor.bibles.attribution")}{" "}
           <a

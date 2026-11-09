@@ -168,6 +168,19 @@ describe("ExportDialog — Web page export by file type (AQU-2210)", () => {
     expect(webPageRadio()).not.toBeNull()
   })
 
+  it("offers Web page for an eBible book — what a migrated Scripture book may now be (AQU-2211)", () => {
+    render(
+      <ExportDialog
+        {...BASE_PROPS}
+        activeFileName="RUT"
+        activeFileType="ebible"
+        projectFiles={[{ id: "f-book", name: "RUT", type: "ebible" }]}
+      />,
+    )
+    openFoldIfClosed()
+    expect(webPageRadio()).not.toBeNull()
+  })
+
   it.each([
     ["docx", "notes.docx"],
     ["srt", "episode.srt"],

@@ -23,6 +23,12 @@ export const error = defineNamespace({
     "error.notFound.description": "The link you followed doesn't exist or may have moved.",
     "error.notFound.goHome": "Go home",
     "error.network.contextSuffix": " for this {context}",
+    // AQU-1821: the nouns error.network.contextSuffix may be given. The three
+    // scope nouns it also needs (org / team / project) are already carried by
+    // org.access.scope.*; these are the ones no other surface names.
+    "error.network.context.user": "user",
+    "error.network.context.invite": "invite",
+    "error.network.context.changeset": "changeset",
     "error.network.badRequest": "The request was invalid{contextSuffix}. Check your input and try again.",
     "error.network.sessionExpired": "Your session expired — sign in again.",
     "error.network.forbidden": "You don't have permission to do that{contextSuffix}.",
@@ -204,10 +210,34 @@ export const error = defineNamespace({
           "caller knows what kind of thing failed (e.g. 'project', 'invite'), e.g. " +
           "' for this project'. Never shown alone — always substituted into another " +
           "key's {contextSuffix} placeholder. Keep the leading space so it reads " +
-          "correctly appended to the sentence.",
+          "correctly appended to the sentence. AQU-1821: {context} is itself a " +
+          "translated noun from this catalogue, so translate the clause as a whole " +
+          "phrase — if your language has no translation for the noun, the app drops " +
+          "this clause rather than showing the English word.",
         placeholders: {
-          context: "Short lowercase noun naming what failed, e.g. 'project' or 'member'.",
+          context:
+            "The already-translated noun naming what failed, taken from " +
+            "org.access.scope.* or error.network.context.* — never an English word " +
+            "supplied by the code.",
         },
+      },
+      "error.network.context.user": {
+        description:
+          "AQU-1821: the noun 'user' substituted into error.network.contextSuffix's " +
+          "{context} when a request about one person's account failed. Lowercase, " +
+          "mid-sentence, and inflected as 'for this ___' requires in your language.",
+      },
+      "error.network.context.invite": {
+        description:
+          "AQU-1821: the noun 'invite' substituted into error.network.contextSuffix's " +
+          "{context} when a request about an email invitation failed. Lowercase and " +
+          "mid-sentence; the same word as the Invite surfaces use.",
+      },
+      "error.network.context.changeset": {
+        description:
+          "AQU-1821: the noun 'changeset' substituted into error.network.contextSuffix's " +
+          "{context} when a request about an agent's staged changeset failed. Lowercase " +
+          "and mid-sentence; the same word as the approval surfaces use.",
       },
       "error.network.badRequest": {
         description:
@@ -215,7 +245,12 @@ export const error = defineNamespace({
           "(sync-worker, auth-worker, agent API) shown inline or in a toast. Non-" +
           "technical — never shows the raw server validation string.",
         placeholders: {
-          contextSuffix: "Either empty, or the rendered error.network.contextSuffix string — insert exactly as given, do not add extra spacing.",
+          contextSuffix:
+            "Either empty, or the rendered error.network.contextSuffix clause — " +
+            "insert exactly as given, do not add extra spacing. AQU-1821: it is " +
+            "empty whenever the caller named no object, and also whenever this " +
+            "locale has no translation for that object's noun, so the sentence " +
+            "must read correctly on its own.",
         },
       },
       "error.network.sessionExpired": {
@@ -228,7 +263,12 @@ export const error = defineNamespace({
           "Generic message for an HTTP 403 response — the signed-in account isn't " +
           "allowed to perform the action. Non-technical, doesn't blame the user.",
         placeholders: {
-          contextSuffix: "Either empty, or the rendered error.network.contextSuffix string — insert exactly as given, do not add extra spacing.",
+          contextSuffix:
+            "Either empty, or the rendered error.network.contextSuffix clause — " +
+            "insert exactly as given, do not add extra spacing. AQU-1821: it is " +
+            "empty whenever the caller named no object, and also whenever this " +
+            "locale has no translation for that object's noun, so the sentence " +
+            "must read correctly on its own.",
         },
       },
       "error.network.elevationRequired": {
@@ -262,7 +302,12 @@ export const error = defineNamespace({
           "Generic message for an HTTP 404 response — the requested item is gone " +
           "or was never there.",
         placeholders: {
-          contextSuffix: "Either empty, or the rendered error.network.contextSuffix string — insert exactly as given, do not add extra spacing.",
+          contextSuffix:
+            "Either empty, or the rendered error.network.contextSuffix clause — " +
+            "insert exactly as given, do not add extra spacing. AQU-1821: it is " +
+            "empty whenever the caller named no object, and also whenever this " +
+            "locale has no translation for that object's noun, so the sentence " +
+            "must read correctly on its own.",
         },
       },
       "error.network.conflict": {
@@ -270,7 +315,12 @@ export const error = defineNamespace({
           "Generic message for an HTTP 409 response — another change landed first. " +
           "Tells the user what to do next (refresh and retry).",
         placeholders: {
-          contextSuffix: "Either empty, or the rendered error.network.contextSuffix string — insert exactly as given, do not add extra spacing.",
+          contextSuffix:
+            "Either empty, or the rendered error.network.contextSuffix clause — " +
+            "insert exactly as given, do not add extra spacing. AQU-1821: it is " +
+            "empty whenever the caller named no object, and also whenever this " +
+            "locale has no translation for that object's noun, so the sentence " +
+            "must read correctly on its own.",
         },
       },
       "error.network.gone": {
@@ -278,7 +328,12 @@ export const error = defineNamespace({
           "Generic message for an HTTP 410 response — the item was intentionally " +
           "and permanently removed (distinct from 404's 'no longer exists').",
         placeholders: {
-          contextSuffix: "Either empty, or the rendered error.network.contextSuffix string — insert exactly as given, do not add extra spacing.",
+          contextSuffix:
+            "Either empty, or the rendered error.network.contextSuffix clause — " +
+            "insert exactly as given, do not add extra spacing. AQU-1821: it is " +
+            "empty whenever the caller named no object, and also whenever this " +
+            "locale has no translation for that object's noun, so the sentence " +
+            "must read correctly on its own.",
         },
       },
       "error.network.tooManyRequests": {

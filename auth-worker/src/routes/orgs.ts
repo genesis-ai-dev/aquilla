@@ -1490,6 +1490,96 @@ orgs.post("/accept-invite", zValidator("json", acceptOrgInviteBody), async (c) =
   })
 })
 
+/**
+ * DELETE /api/v2/orgs/:orgId/members/me — leave the organization (AQU-1993).
+ *
+ * Self-service, so it carries none of the gates the owner-only moderation
+ * route below does: no owner role, no admin step-up elevation. The only
+ * access given up is the caller's own.
+ *
+ * Registered BEFORE `/:orgId/members/:userId` so that path cannot capture
+ * "me" as a userId (it would parseInt to NaN and 400).
+ *
+ * Two refusals:
+ *   - the caller is the org's last owner — nobody would be left who can
+ *     administer it, so transfer ownership (or delete the org) first;
+ *   - the org is the caller's own personal workspace — it exists to hold
+ *     their own work, so DELETE /orgs/:orgId is the operation they want.
+ *
+ * Mirrors the owner-removal cascade exactly: the org_members row plus the
+ * caller's team rows in this org. Direct project_members rows in the org's
+ * projects are deliberately NOT touched — an individually shared project
+ * survives losing org-wide access (the same rule RemoveOrgMemberDialog
+ * states), and the caller can now leave each of those projects themselves
+ * via DELETE /projects/:projectId/members/me.
+ */
+orgs.delete("/:orgId/members/me", async (c) => {
+  const user = c.get("user")
+  const orgId = parseInt(c.req.param("orgId"), 10)
+  if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
+
+  const role = await getOrgMemberRole(c.env, orgId, user.id)
+  if (role == null) {
+    return c.json({ error: "not a member of this organization" }, 404)
+  }
+
+  // Strictly billing_scope 'personal', NOT findPersonalOrg's legacy NULL
+  // fallback: a legacy team org also has a NULL scope, and its owner must get
+  // the last-owner / transfer-ownership answer rather than being told their
+  // team is a personal workspace.
+  const personal = await c.env.AQUILLA_PG.prepare(
+    `SELECT 1 AS present FROM organizations
+      WHERE id = ? AND owner_user_id = ? AND billing_scope = 'personal'`,
+  )
+    .bind(orgId, user.id)
+    .first<{ present: number }>()
+  if (personal) {
+    return c.json(
+      {
+        error: "cannot_leave_personal_org",
+        message: "This is your personal workspace. Delete it instead of leaving it.",
+      },
+      409,
+    )
+  }
+
+  if (role >= ROLE.OWNER) {
+    const anotherOwner = await c.env.AQUILLA_PG.prepare(
+      `SELECT 1 AS present FROM org_members
+        WHERE org_id = ? AND user_id <> ? AND role_level >= ?
+        LIMIT 1`,
+    )
+      .bind(orgId, user.id, ROLE.OWNER)
+      .first<{ present: number }>()
+    if (!anotherOwner) {
+      return c.json(
+        {
+          error: "last_owner",
+          message:
+            "You are the only owner of this organization. Make someone else an owner, or delete the organization, before you leave.",
+        },
+        409,
+      )
+    }
+  }
+
+  await c.env.AQUILLA_PG.batch([
+    c.env.AQUILLA_PG.prepare("DELETE FROM org_members WHERE org_id = ? AND user_id = ?").bind(orgId, user.id),
+    c.env.AQUILLA_PG.prepare(
+      `DELETE FROM group_members WHERE user_id = ? AND group_id IN (SELECT id FROM groups WHERE org_id = ?)`,
+    ).bind(user.id, orgId),
+  ])
+  await auditMembershipChange(c.env, user, {
+    action: "org.member.remove",
+    where: { scope: "org", orgId },
+    target: { id: user.id, username: user.username },
+    roleBefore: role,
+    roleAfter: null,
+  })
+
+  return c.json({ left: true })
+})
+
 /** DELETE /api/v2/orgs/:orgId/members/:userId — owner-only. */
 orgs.delete("/:orgId/members/:userId", async (c) => {
   const user = c.get("user")

@@ -18,8 +18,9 @@ export interface HelloaoTranslation {
   englishName: string
   shortName: string
   language: string // ISO 639-3
-  languageName: string
-  languageEnglishName: string
+  /** Absent on a couple of catalogue entries. */
+  languageName?: string
+  languageEnglishName?: string
   textDirection: string
   licenseUrl: string
   website: string

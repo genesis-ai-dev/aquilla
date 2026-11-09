@@ -167,6 +167,11 @@ export type EventKind =
   // cells.event_id). Writes cast_name into cells.metadata JSONB without touching
   // target text. Contributor-level — a PM/project-lead labels cells for voice actors.
   | 'cast.assign'
+  // AQU-2408: a hand-typed label on a cell. Non-chain-mutating (does NOT move
+  // cells.event_id). Writes `cellLabel` into the SOURCE row's metadata JSONB
+  // without touching text. Metadata, never a speaker or a voice — see
+  // docs/decisions/0007-cell-labels-are-metadata-never-cast.md.
+  | 'cell.label.set'
   // Timeline editor: retime a cell (move/stretch). Non-chain-mutating — updates
   // start_ms/end_ms on both the source and target rows without moving cells.event_id.
   | 'cell.retime'
@@ -198,6 +203,18 @@ export type EventKind =
   // emits this kind until stage 3 puts renaming and adding tracks in the UI.
   // Shipping the pipeline first means stage 3 is a UI change, not a migration.
   | 'file.track.set'
+  // AQU-2308: a hand-set milestone — a named start->end range of cells in one
+  // file — upserted by id, and removed by id. File-scoped and
+  // NON-CHAIN-MUTATING by construction: no parentId, and the projection
+  // touches only `file_milestones`, never a cell row. That is what makes
+  // setting a division cost nothing: no lane's translation goes stale, no
+  // cell's head advances, no source-changed marker appears anywhere.
+  //
+  // Maintainer floor, for the file.track.set reason rather than the
+  // file.rename one: a division relayouts the navigator for every
+  // collaborator who opens the file.
+  | 'file.milestone.set'
+  | 'file.milestone.remove'
   // Stage 4: one edge between a SUBTITLE cell and an AUDIO CUE, the two cue
   // lists an episode ships with. Many-to-many — a sentence the subtitles keep
   // whole may be performed as two heard lines, and one heard line may cover
@@ -575,6 +592,10 @@ export interface EventPayloads {
   'cell.audio.attach': {
     audioId: string
     url: string
+    /** Immutable legacy history: insert unselected; leave an existing take untouched. */
+    historyOnly?: boolean
+    /** Audited missing-row repair; retain the original attach's creation time. */
+    restoreProjectionOf?: string
     /** Open string (AQU-646): extra target tracks use the track id as the slot. */
     slot: string
     mimeType?: string
@@ -1153,6 +1174,15 @@ export interface EventPayloads {
     lineNumber?: string | null
   }
 
+  // AQU-2408: a hand-typed label on a cell (docs/decisions/0007). Stored as
+  // cells.metadata.cellLabel on the SOURCE row — the key legacy Codex notebooks
+  // already carry — so scoped search and the editor's corner label read both
+  // the same way. Null removes the key. Never cast_name, never a voice.
+  'cell.label.set': {
+    /** The label to show on the cell. Null (or blank) removes it. */
+    label: string | null
+  }
+
   // ── Timeline editor (non-chain-mutating) ────────────────────────────────
   // Retime a cell (move/stretch). cellId rides on the envelope; the projection
   // updates start_ms/end_ms on both the source and target rows.
@@ -1221,6 +1251,30 @@ export interface EventPayloads {
        *  length while the file follows its recordings); null clears it. */
       setsLineLengths?: boolean | null
     } | null
+  }
+
+  // AQU-2308: upsert one hand-set milestone by id. The covered cells are NOT
+  // in the payload — only the two anchors are, and the navigator resolves the
+  // run between them from the file's live cell order, so a cell inserted
+  // inside the range is covered without a second write.
+  //
+  // The handler refuses a blank or whitespace-only name and an over-long one
+  // (db/shared/file-milestones.ts owns that rule, shared with the dialog so
+  // the two cannot disagree). It does NOT check for overlaps or for crossing a
+  // file-supplied division: those need the file's derived divisions, which live
+  // in the client, so the dialog refuses them and the derivation resolves any
+  // that reach the store anyway (earliest start wins).
+  'file.milestone.set': {
+    milestoneId: string
+    name: string
+    startCellId: string
+    endCellId: string
+  }
+  // AQU-2308: drop one hand-set milestone by id. Idempotent — removing one
+  // that is already gone is a no-op, not an error, so a retried outbox entry
+  // never wedges.
+  'file.milestone.remove': {
+    milestoneId: string
   }
 
   // ── AQU-476: live source links — mirror engine (server-emitted) ────────

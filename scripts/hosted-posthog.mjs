@@ -22,6 +22,8 @@ if (process.argv[1]
   const result = spawnSync("npm", ["run", "build"], {
     env: hostedPosthogEnv(),
     stdio: "inherit",
+    // npm is npm.cmd on Windows, which Node only spawns through a shell.
+    shell: process.platform === "win32",
   })
   if (result.error) throw result.error
   process.exit(result.status ?? 1)

@@ -55,6 +55,7 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     'assignment.unassign': { assignmentId: 'as-1' },
     'project.link-source': { sourceProjectId: 'upstream-proj-1' },
     'cast.assign': { castName: 'Narrator' },
+    'cell.label.set': { label: 'Pericope' },
     'cell.retime': { startMs: 0, endMs: 1000 },
     'cell.audio.rename': { audioId: 'audio-1.wav', label: 'Take 3' },
     'cell.audio.trim': { audioId: 'audio-1.wav', trimStartMs: 250, trimEndMs: 3000 },
@@ -85,6 +86,10 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     'file.extension.set': { extension: { kind: 'reference', tags: ['uw'] } },
     'file.reorder': { sortIndex: 1024 },
     'file.track.set': { trackId: 'source-subtitles', patch: { name: 'Captions' } },
+    'file.milestone.set': {
+      milestoneId: 'ms-1', name: 'The storm', startCellId: 'cell-1', endCellId: 'cell-2',
+    },
+    'file.milestone.remove': { milestoneId: 'ms-1' },
     'source.cell.mirror': {
       value: 'x',
       upstream: { projectId: 'proj-up', cellId: 'cell-1', eventId: 'evt-up-1', seq: 1, side: 'source', contentHash: 'abc' },

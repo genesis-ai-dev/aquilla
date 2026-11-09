@@ -9,7 +9,9 @@
  *
  * Per file: a `?since=` delta when a trusted cursor exists (sync_cursors),
  * else a full stream. The cursor rules mirror useCells.ts (M2-1 / AQU-943):
- *  - a cursor is trusted only with BOTH a watermark and a project epoch;
+ *  - a cursor is trusted only with BOTH a watermark and a project epoch, and
+ *    only at the current CELL_FIELDS_VERSION (so a newly tracked row field
+ *    reaches rows that haven't changed since);
  *  - a torn full stream (watermark moved between pages) mints no cursor;
  *  - if any server row was skipped to protect a queued local edit, the
  *    cursor holds instead of advancing past it.
@@ -22,11 +24,13 @@
 import type { Store } from "@livestore/livestore"
 import type { CellRow } from "@/lib/sync/cells-read-types"
 import {
+  CellsReadError,
   fetchCellsDelta as fetchCellsDeltaDefault,
+  fetchFile as fetchFileDefault,
   fetchProjectFiles as fetchProjectFilesDefault,
   streamFileCells as streamFileCellsDefault,
 } from "@/lib/sync/cells-read"
-import { events, localLaneKey, syncCursorId, tables, type schema } from "./schema"
+import { CELL_FIELDS_VERSION, events, localLaneKey, syncCursorId, tables, type schema } from "./schema"
 
 type OfflineStore = Store<typeof schema>
 type CellSyncedArgs = Parameters<typeof events.cellSynced>[0]
@@ -76,6 +80,8 @@ export function toCellSyncedArgs(projectId: string, fileId: string, row: CellRow
     aiDrafted: row.aiDrafted ?? false,
     sequenceIndex: row.sequenceIndex ?? 0,
     canonicalRef: row.canonicalRef,
+    // AQU-1422: the server sends the key only on a hidden (source) row.
+    hidden: row.hidden === true,
   }
 }
 
@@ -90,18 +96,21 @@ export function sameAsLocal(local: LocalCell, args: CellSyncedArgs): boolean {
     local.validated === args.validated &&
     local.aiDrafted === args.aiDrafted &&
     local.sequenceIndex === args.sequenceIndex &&
-    local.canonicalRef === args.canonicalRef
+    local.canonicalRef === args.canonicalRef &&
+    local.hidden === (args.hidden ?? false)
   )
 }
 
 export interface CatchUpDeps {
   fetchProjectFiles: typeof fetchProjectFilesDefault
+  fetchFile: typeof fetchFileDefault
   fetchCellsDelta: typeof fetchCellsDeltaDefault
   streamFileCells: typeof streamFileCellsDefault
 }
 
 const defaultDeps: CatchUpDeps = {
   fetchProjectFiles: fetchProjectFilesDefault,
+  fetchFile: fetchFileDefault,
   fetchCellsDelta: fetchCellsDeltaDefault,
   streamFileCells: streamFileCellsDefault,
 }
@@ -214,8 +223,16 @@ function setCursor(
   projectEpoch: number | null,
 ): void {
   const current = readCursor(store, projectId, fileId)
-  if (current && current.serverSeq === serverSeq && current.projectEpoch === projectEpoch) return
-  store.commit(events.syncCursorSet({ projectId, fileId, serverSeq, projectEpoch }))
+  const fieldsVersion = serverSeq === null ? null : CELL_FIELDS_VERSION
+  if (
+    current &&
+    current.serverSeq === serverSeq &&
+    current.projectEpoch === projectEpoch &&
+    current.fieldsVersion === fieldsVersion
+  ) {
+    return
+  }
+  store.commit(events.syncCursorSet({ projectId, fileId, serverSeq, projectEpoch, fieldsVersion }))
 }
 
 /**
@@ -281,7 +298,9 @@ async function catchUpFile(
   const cursor = readCursor(store, projectId, fileId)
   const since = cursor?.serverSeq ?? null
   const epoch = cursor?.projectEpoch ?? null
-  if (since === null || epoch === null) return fullSyncFile(store, projectId, fileId, token, deps)
+  if (since === null || epoch === null || cursor?.fieldsVersion !== CELL_FIELDS_VERSION) {
+    return fullSyncFile(store, projectId, fileId, token, deps)
+  }
 
   const result = await deps.fetchCellsDelta(projectId, fileId, since, token, undefined, epoch)
   if (result.kind === "resync") return fullSyncFile(store, projectId, fileId, token, deps)
@@ -295,10 +314,46 @@ async function catchUpFile(
 }
 
 /**
+ * Whether a file missing from the listing is really gone. The listing is paged
+ * by last edit, so a file edited mid-listing can jump ahead of the cursor and
+ * be left off every page; the single-file read is the authority. It returns a
+ * soft-deleted file with `deletedAt` set, and 404 for one with no row left.
+ * Any other failure keeps the file — the next catch-up asks again.
+ */
+async function isGoneOnServer(projectId: string, fileId: string, token: string, deps: CatchUpDeps): Promise<boolean> {
+  try {
+    const file = await deps.fetchFile(projectId, fileId, token)
+    return file.deletedAt != null
+  } catch (err) {
+    return err instanceof CellsReadError && err.status === 404
+  }
+}
+
+/**
+ * Drops a file the server no longer lists (deleted, or out of this user's
+ * reach) from the local copy, returning how many cell rows went. Uses the
+ * existing row events rather than a new file-level one: deletes are rare, and
+ * a new event would mean a new offline data generation. A file with queued
+ * writes stays until they resolve — they are the user's unsent work, and the
+ * server's verdict on them (refused, most likely) is what the user should see.
+ * Its cursor goes back to null, so a file restored later streams in whole.
+ */
+function removeFile(store: OfflineStore, projectId: string, fileId: string): number {
+  if (store.query(tables.eventQueue.select("id").where({ projectId, fileId }).first()) !== undefined) return 0
+  const removals = store
+    .query(tables.cells.select().where({ projectId, fileId }))
+    .map(({ cellId, side, laneKey }) => ({ cellId, side, laneKey }))
+  commitBatched(store, projectId, fileId, [], removals)
+  if (readCursor(store, projectId, fileId)) setCursor(store, projectId, fileId, null, null)
+  store.commit(events.fileRemoved({ id: fileId }))
+  return removals.length
+}
+
+/**
  * Brings every file of `projectId` level with the server. `token` is a
  * sync-worker token for the project (a file-scoped token authorizes every
- * file's read). Adds files created since download; files deleted on the
- * server are left in place for now.
+ * file's read). Adds files created since download and removes files deleted
+ * on the server.
  */
 export async function catchUpProject(
   store: OfflineStore,
@@ -315,9 +370,16 @@ export async function catchUpProject(
     )
   }
 
+  const fileIds = files.map((f) => f.fileId)
+  const serverFiles = new Set(fileIds)
   let rowsChanged = 0
-  for (const file of files) {
-    rowsChanged += await catchUpFile(store, projectId, file.fileId, token, deps)
+  for (const fileId of localFiles) {
+    if (serverFiles.has(fileId)) continue
+    if (await isGoneOnServer(projectId, fileId, token, deps)) rowsChanged += removeFile(store, projectId, fileId)
+    else fileIds.push(fileId)
+  }
+  for (const fileId of fileIds) {
+    rowsChanged += await catchUpFile(store, projectId, fileId, token, deps)
   }
 
   const row = store.query(tables.offlineProjects.select().where({ projectId }).first())
@@ -326,5 +388,5 @@ export async function catchUpProject(
       events.offlineProjectStatusSet({ projectId, status: "ready", syncedAt: new Date(), queueDepth: row.queueDepth }),
     )
   }
-  return { filesChecked: files.length, rowsChanged }
+  return { filesChecked: fileIds.length, rowsChanged }
 }

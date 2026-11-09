@@ -122,6 +122,14 @@ const REQUIRED_ROLE: Record<string, number> = {
   "file.reorder": ROLE.PROJECT_LEAD,
   "file.delete": ROLE.PROJECT_LEAD,
   "file.restore": ROLE.PROJECT_LEAD,
+  // AQU-2308: hand-set milestones. MAINTAINER, matching file.track.set — a
+  // division relayouts the navigator for everyone who opens the file. This
+  // mirror matters more than it looks: `canPerform` fails OPEN on a kind it
+  // has never heard of (see the AQU-646 note below), so without these two rows
+  // the cell menu would offer "Set a new milestone…" to a contributor and the
+  // server's 403 would be the only thing stopping them.
+  "file.milestone.set": ROLE.MAINTAINER,
+  "file.milestone.remove": ROLE.MAINTAINER,
 
   // These are the SELF floors — the bar to touch your own comment. Acting on
   // someone else's carries a second, higher floor; see FOREIGN_COMMENT_ROLE.
@@ -171,6 +179,11 @@ const REQUIRED_ROLE: Record<string, number> = {
   //   than a crash, because the client mirror throws before anything reaches the
   //   durable outbox.
   "cast.assign": ROLE.MAINTAINER,
+  // AQU-2408: a hand-typed cell label is metadata, not casting. Project lead is
+  // the LOWEST rung the project's `cellLabelFloor` tier can admit; the tier
+  // itself (maintainer unless set otherwise) is enforced where the Label field
+  // is drawn (src/lib/cell-label-gate.ts), like `cellEditingFloor`.
+  "cell.label.set": ROLE.PROJECT_LEAD,
   // AQU-2204 (Sam, Oct 26): project lead and above choose what a file's
   // timeline follows ("Follows source" / "Follows recordings"), per file, for
   // everyone on it. Was maintainer (the Project Settings clearance it came from).

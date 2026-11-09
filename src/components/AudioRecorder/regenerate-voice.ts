@@ -4,6 +4,7 @@
 
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
 import { audioIdSeededWith } from "@/lib/audio/upload"
+import { isOwnTake } from "@/lib/audio/own-take"
 import { emitCellAudioDeselect, emitCellAudioSelect } from "@/lib/sync/events-emit"
 import {
   injectOptimisticAudioAttachment,
@@ -96,7 +97,7 @@ async function regenerate(args: RegenerateVoiceArgs): Promise<boolean> {
   // siblings in one slot, so picking either deselects the other through the
   // per-(cell, slot) rule the server already enforces.
   const recSel = isDefaultTrackSlot(targetSlot) ? entry?.selectedAudioId : null
-  if (recSel && audioIdSeededWith(recSel, cell.id)) {
+  if (recSel && isOwnTake(cell, recSel, entry?.attachments[recSel])) {
     const where = {
       projectId: project.id, fileId: cell.fileId, cellId: cell.id, slot: "recording", author: username,
       ...(laneTag ? { targetLang: laneTag } : {}),

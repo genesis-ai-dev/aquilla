@@ -1,5 +1,5 @@
 // Types for the Aquilla Batch Translation API v1 — mirror of the FROZEN
-// BATCH_ENDPOINT_CONTRACT.md. Do not change shapes without a /batch/v2.
+// docs/BATCH_ENDPOINT_CONTRACT.md. Do not change shapes without a /batch/v2.
 
 export interface BatchSegmentInput {
   id: string

@@ -30,6 +30,7 @@ const PLACEHOLDERS: Record<string, string> = {
   recordings: "A phrase with a count, such as '12 recordings'.",
   lines: "A phrase with a count, such as '12 lines'.",
   list: "A list of lines and how many takes each gets, such as '2 takes on Genesis 1:1 and 3 takes on Genesis 1:4'.",
+  word: "A word taken from the audio file's name, in whatever language the file was named in, such as 'mstari'. Keep it as it is.",
   explanation: "One sentence the AI assistant wrote about what each part of the file names means, in English, such as 'Mt is Matthew, then the chapter and the verse.'",
 }
 
@@ -188,6 +189,7 @@ const KEYS = {
     "recordingsUpload.reason.noSuchLine": "This file has {count} lines, so there is no line {line}.",
     "recordingsUpload.reason.noNumber": "Its name has no verse or line number, and the other files' names do.",
     "recordingsUpload.reason.tooManyNumbers": "Its name has too many numbers to tell which line it is.",
+    "recordingsUpload.reason.wordBeforeNumber": "The app doesn't know the word “{word}” in its name, so it can't tell what the number after it means.",
     "recordingsUpload.reason.pastLastLine": "There are more files than lines. This file has {count} lines.",
     "recordingsUpload.reason.beforeFirstLine": "Starting the order earlier left this file before the first line.",
     "recordingsUpload.reason.duplicate": "{other} already goes to {target}.",
@@ -306,6 +308,7 @@ const OWN_NOTES: Partial<Record<Key, ContextEntry>> = {
   "recordingsUpload.reason.rangeOnTimedFile": { description: "Why a recording whose name covers several lines (a range such as '004-006', or a whole chapter) is not uploaded into a subtitle or film file: each of that file's lines has its own start time, so each needs its own recording. A full sentence." },
   "recordingsUpload.reason.bookNumberUnclear": { description: "Why a recording named with numbers only (such as '41_001_001') is not uploaded in a whole-project upload: its first number is a book number, and the two common ways of numbering the books give different books for it (41 is Mark in one and Matthew in the other), and the project has both. {first} and {second} are the two books' names. A full sentence, then what to do." },
   "recordingsUpload.reason.unplayableFormat": { description: "Why a recording is not uploaded: it is a kind of audio file (such as .wma or .aiff) that web browsers can't play, so it would never play once uploaded. {ext} is the file's extension without the dot, such as 'wma'. Keep the extensions as written. A full sentence." },
+  "recordingsUpload.reason.wordBeforeNumber": { description: "Why a recording is not uploaded into a Bible book: its name gives one number, then a word the app doesn't know, then another number (such as 'Ruthu sura 2 mstari 5', where 'mstari' is Swahili for verse), so the app can't tell whether the second number is a verse. {word} is that word, exactly as the file is named. A full sentence." },
   "recordingsUpload.reason.rangeBackwards": { description: "Why a recording whose name covers several verses or lines (such as 'Genesis 1-5-3') is not uploaded: its range ends before it starts, which is usually a typo. {from} and {to} are where the name says it starts and ends (such as 'Genesis 1:5' and 'Genesis 1:3', or 'line 5' and 'line 3'). A full sentence." },
   "recordingsUpload.reason.bookVerseDisagree": { description: "Why a recording is not uploaded into a Bible book: its name holds a verse's place counted from the book's first verse (such as 'LN619' in 'MAT_1_LN619') and a verse number within the chapter, and the two point to different verses. {count} is the place in the book, {verse} the verse number in the name, {ref} the verse the place points to (such as 'Matthew 19:1'). A full sentence." },
   "recordingsUpload.reason.noSuchBookVerse": { description: "Why a recording is not uploaded into a Bible book: its name holds a verse's place counted from the book's first verse (such as 'LN2000'), and the book has fewer verses than that in this project. A full sentence." },

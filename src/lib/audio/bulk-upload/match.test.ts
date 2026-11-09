@@ -977,3 +977,77 @@ describe("a book named in a script that writes marks on its letters", () => {
     expect(readName("Genesis 1-1a.mp3", index).numbers.map((n) => [n.value, n.letter])).toEqual([[1, undefined], [1, "a"]])
   })
 })
+
+// AQU-2496 (review, Nov 9): a word the app doesn't know between the chapter
+// and the verse ("Ruthu sura 2 mstari 5": Swahili for chapter and verse) ended
+// the reference at the chapter. A folder of Ruth's 85 verses landed as four
+// whole-chapter recordings and 81 "duplicates", and the assistant was never
+// offered, because nothing looked unread.
+describe("a word the app doesn't know between the chapter and the verse", () => {
+  const RUTH = [22, 23, 18, 22]
+  const ruth = book("rut", "RUT", "Ruth", RUTH)
+  const swahili = () => {
+    const index = new BookNameIndex()
+    index.addProjectName("Ruthu", "RUT")
+    return index
+  }
+  const everyVerse = RUTH.flatMap((count, ci) => Array.from({ length: count }, (_, v) => audio(`Ruthu sura ${ci + 1} mstari ${v + 1}.mp3`)))
+  const unread = { code: "wordBeforeNumber", word: "mstari" }
+
+  it("a folder of Ruth's 85 verses is listed as unread, none placed as a chapter or a duplicate", () => {
+    const { assignments, jobs } = run(everyVerse, [ruth], { kind: "project" }, swahili())
+    expect(assignments).toHaveLength(85)
+    expect(assignments.every((a) => !a.cellIds)).toBe(true)
+    expect(new Set(assignments.map((a) => JSON.stringify(a.reason)))).toEqual(new Set([JSON.stringify(unread)]))
+    expect(jobs).toEqual([])
+  })
+
+  it("one chapter's files uploaded into the book are unread too, not 23 takes of one verse", () => {
+    const files = Array.from({ length: 23 }, (_, v) => audio(`sura 2 mstari ${v + 1}.mp3`))
+    const read = readRecordings(files, { scope: { kind: "file", fileId: "rut" }, index: new BookNameIndex(), projectFiles: [{ fileId: "rut", name: "Ruth", bookCode: "RUT" }], maxBytes: 2048 * MB })
+    // The preview reads the lengths when the count can't tell: short, so verses.
+    const lengths = new Map(files.map((_, i) => [i, 8_000]))
+    const assignments = matchRecordings(read, new Map([["rut", ruth]]), { lengths })
+    expect(assignments.map((a) => a.reason)).toEqual(files.map(() => unread))
+  })
+
+  it("a single such file is unread, and so is one in a book of one chapter", () => {
+    expect(run([audio("Ruthu sura 2 mstari 5.mp3")], [ruth], { kind: "project" }, swahili()).assignments[0].reason).toEqual(unread)
+    const jude = book("jud", "JUD", "Jude", [25])
+    const a = run([audio("sura 1 mstari 5.mp3"), audio("sura 1 mstari 6.mp3")], [jude], { kind: "file", fileId: "jud" }).assignments
+    expect(a.map((x) => x.reason)).toEqual([unread, unread])
+  })
+
+  it("the well-named files beside them still land", () => {
+    const files = [audio("Ruth 1-1.mp3"), audio("Ruthu sura 2 mstari 5.mp3"), audio("Ruthu sura 2 mstari 6.mp3"), audio("Ruth 1-2.mp3")]
+    const { assignments } = run(files, [ruth], { kind: "project" }, swahili())
+    expect(assignments.map((a) => a.cellIds?.[0] ?? a.reason?.code)).toEqual(["rut:1:1", "wordBeforeNumber", "wordBeforeNumber", "rut:1:2"])
+  })
+
+  it("a whole chapter with a word and a number that is no verse of it is still the chapter", () => {
+    const one = run([audio("Ruth 3 ESV 2023.mp3")], [ruth], { kind: "file", fileId: "rut" }).assignments[0]
+    expect(one.cellIds).toHaveLength(18)
+    // A number every chapter's file ends with (a revision) is not a verse either.
+    const files = [audio("Ruth 1 rev 2.mp3"), audio("Ruth 2 rev 2.mp3"), audio("Ruth 3 rev 2.mp3")]
+    expect(run(files, [ruth], { kind: "file", fileId: "rut" }).assignments.map((a) => a.cellIds?.length)).toEqual([22, 23, 18])
+  })
+
+  it("a name that already gave its chapter and verse keeps them, whatever follows", () => {
+    const files = [audio("Ruth 1-5 ENGESV 2023.mp3"), audio("Ruth 1-6 final 2.mp3")]
+    expect(run(files, [ruth], { kind: "file", fileId: "rut" }).assignments.map((a) => a.cellIds)).toEqual([["rut:1:5"], ["rut:1:6"]])
+  })
+
+  it("a document's line numbers read as before", () => {
+    const letter = doc("d", "Letter", 20)
+    const files = [audio("Letter 3 final 2.mp3"), audio("Letter 4 final 5.mp3")]
+    expect(run(files, [letter], { kind: "file", fileId: "d" }).assignments.map((a) => a.cellIds)).toEqual([["d#3"], ["d#4"]])
+  })
+
+  it("readName says which word ended the reference and the numbers after it", () => {
+    const r = readName("Ruthu sura 2 mstari 5.mp3", swahili())
+    expect(r.numbers.map((n) => n.value)).toEqual([2])
+    expect(r.afterWord).toEqual({ word: "mstari", numbers: [5] })
+    expect(readName("Genesis 1-1.mp3", swahili()).afterWord).toBeNull()
+    expect(readName("Genesis 1-1 copy.mp3", swahili()).afterWord).toBeNull()
+  })
+})

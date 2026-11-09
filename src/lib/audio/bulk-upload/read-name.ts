@@ -35,6 +35,12 @@ export interface NameReading {
    *  no table knows — the hint that the project may call its books something
    *  the built-in table does not. */
   unknownBookWord: string | null
+  /** AQU-2496 (review, Nov 9): the numbers left unread because an ordinary
+   *  word came before them, and that word: "mstari" and 5 in "Ruthu sura 2
+   *  mstari 5", "ENGESV" and 2023 in "Genesis 1-1 ENGESV 2023". Null when no
+   *  number follows such a word. Whether those numbers mattered is match.ts's
+   *  call (`cutShortByWord`). */
+  afterWord: { word: string; numbers: number[] } | null
 }
 
 const DASHES = /^(?:-|–|—|‑|‐|−|~|～|to|through|thru|至|到)$/u
@@ -206,6 +212,8 @@ export function readName(fileName: string, index: BookNameIndex): NameReading {
   let stopped = false
   const startAt = hit ? hit.end + 1 : 0
   let unknownBookWord: string | null = null
+  let afterWord: NameReading["afterWord"] = null
+  let stopWord = ""
 
   for (let i = 0; i < toks.length; i++) {
     const t = toks[i]
@@ -253,6 +261,7 @@ export function readName(fileName: string, index: BookNameIndex): NameReading {
       }
       // An ordinary word after the numbers ends the reference: "Genesis 1-1
       // ENGESV 2023" must not read 2023 as a part.
+      if (started && !stopped) stopWord = t.text
       if (started) stopped = true
       if (!hit && !started) {
         const after = nextSignificant(toks, i + 1)
@@ -263,7 +272,10 @@ export function readName(fileName: string, index: BookNameIndex): NameReading {
       continue
     }
     // A number.
-    if (stopped) continue
+    if (stopped) {
+      afterWord = { word: stopWord, numbers: [...(afterWord?.numbers ?? []), t.value] }
+      continue
+    }
     const sep = pendingSep.trim().length > 0 ? pendingSep.trim() : pendingSep.length > 0 ? " " : ""
     numbers.push({
       value: t.value,
@@ -283,6 +295,7 @@ export function readName(fileName: string, index: BookNameIndex): NameReading {
     partWord,
     words,
     unknownBookWord: hit ? null : unknownBookWord,
+    afterWord,
   }
 }
 

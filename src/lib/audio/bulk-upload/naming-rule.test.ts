@@ -660,3 +660,20 @@ describe("a rule's {book} reads a name written with marks on its letters", () =>
     expect(applyNamingRule(rule, "Mt_x-ch19_v01.ogg")).toBeNull()
   })
 })
+
+// AQU-2496 (review, Nov 9): names an unknown word cut short were placed or
+// called duplicates, both of which never go to the assistant.
+describe("a name an unknown word cut short goes to the assistant", () => {
+  it("is offered, and a rule that says what the words mean places every file", () => {
+    const ruth = book("rut", "RUT", "Ruth", [22, 23, 18, 22])
+    const paths = ["Files/Ruthu sura 2 mstari 5.mp3", "Files/Ruthu sura 2 mstari 6.mp3", "Files/Ruthu sura 3 mstari 1.mp3"]
+    const index = new BookNameIndex()
+    index.addProjectName("Ruthu", "RUT")
+    const read = readRecordings(paths.map(audio), { scope: { kind: "project" }, index, projectFiles: [{ fileId: "rut", name: "Ruth", bookCode: "RUT" }], maxBytes: 1 << 30 })
+    const before = matchRecordings(read, new Map([["rut", ruth]]))
+    expect(before.map((a) => a.reason?.code)).toEqual(["wordBeforeNumber", "wordBeforeNumber", "wordBeforeNumber"])
+    expect(before.every(ruleEligible)).toBe(true)
+    const rule = parseNamingRule({ templates: [{ pattern: "{book} sura {chapter} mstari {verse}" }], books: { Ruthu: "RUT" } })!
+    expect(land(rule, paths, [ruth])).toEqual(["rut:2:5", "rut:2:6", "rut:3:1"])
+  })
+})

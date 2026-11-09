@@ -206,6 +206,17 @@ export const terminology = defineNamespace({
       other: "{count} awaiting review",
     }),
     "terminology.livingMemory.styleRules.candidates.empty": "Nothing is waiting for review.",
+    // AQU-2366: the batched review queue. "Show {count} more" reuses the shared
+    // common.listShowMore of the capped-list trio rather than adding a twin.
+    "terminology.livingMemory.styleRules.candidates.dismissRest": plural({
+      one: "Dismiss the remaining {count}",
+      other: "Dismiss the remaining {count}",
+    }),
+    "terminology.livingMemory.styleRules.candidates.dismissedNotice": plural({
+      one: "{count} proposed rule dismissed",
+      other: "{count} proposed rules dismissed",
+    }),
+    "terminology.livingMemory.styleRules.candidates.undoDismiss": "Undo",
     "terminology.livingMemory.styleRules.candidates.citation": "Extracted from {doc}",
     "terminology.livingMemory.styleRules.candidates.editTitle": "Edit proposed rule",
     "terminology.livingMemory.styleRules.candidates.editDescription":
@@ -808,6 +819,24 @@ export const terminology = defineNamespace({
           "Badge beside the 'Proposed rules' heading counting the extracted style rules " +
           "still awaiting a human verdict; {count} is that count.",
         placeholders: { count: "Number of proposed style rules awaiting review." },
+      },
+      "terminology.livingMemory.styleRules.candidates.dismissRest": {
+        description:
+          "Button under the visible batch of proposed style rules that rejects every " +
+          "proposal past that batch in one action; {count} is how many would go.",
+        placeholders: { count: "Number of proposals past the visible batch." },
+      },
+      "terminology.livingMemory.styleRules.candidates.dismissedNotice": {
+        description:
+          "Line in the bar that replaces the dismissed proposals, reporting how many " +
+          "were dismissed; {count} is that number. The bar carries the Undo button, " +
+          "and the dismissal is only sent once the bar goes away.",
+        placeholders: { count: "Number of proposals just dismissed." },
+      },
+      "terminology.livingMemory.styleRules.candidates.undoDismiss": {
+        description:
+          "Button in that bar which takes the dismissal back, returning those " +
+          "proposals to the review queue. One or two words.",
       },
       "terminology.livingMemory.styleRules.candidates.citation": {
         description:

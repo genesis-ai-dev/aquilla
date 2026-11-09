@@ -15,6 +15,12 @@
  */
 
 import { filterTtsSettingsToVisibleLanes, restoreHiddenTtsSettings } from "./voice-wall"
+import {
+  filterLaneChecksToVisibleLanes,
+  filterRulesToVisibleLanes,
+  restoreHiddenLaneChecks,
+  restoreHiddenLaneRules,
+} from "./checks-wall"
 
 /** Viewer. A grant below this does not reveal a lane. Matches frontier/roles. */
 const VIEWER = 100
@@ -119,6 +125,10 @@ export function labelsForGrantedLanes(lanes: readonly LaneIdentity[], grantedIds
  * AQU-1418 lane rows (`response.lanes`) ride the same response: behind the
  * wall only the granted target lane rows are kept, like `targetLanes`.
  * Source lane rows are not hidden by the wall.
+ *
+ * Every settings key that names a lane is trimmed here, not only the lane
+ * registry: the per-lane voice maps (AQU-2043, voice-wall.ts) and the
+ * per-lane check overrides and lane-scoped rules (AQU-2205, checks-wall.ts).
  */
 export function filterSettingsToVisibleLanes<
   T extends { settings: Record<string, unknown>; lanes?: readonly { id: string; role: string }[] },
@@ -140,6 +150,16 @@ export function filterSettingsToVisibleLanes<
   }
   if (isSettingsRecord(settings.ttsSettings)) {
     settings.ttsSettings = filterTtsSettingsToVisibleLanes(settings.ttsSettings, visible, lanes)
+  }
+  // AQU-2205: the two other lane-tagged keys. Both carry a lane tag, which is
+  // the language name, so neither may show a lane this caller has no grant on.
+  if (isSettingsRecord(settings.algorithmicChecksByLane)) {
+    settings.algorithmicChecksByLane = filterLaneChecksToVisibleLanes(
+      settings.algorithmicChecksByLane, visible, lanes,
+    )
+  }
+  if (Array.isArray(settings.rules)) {
+    settings.rules = filterRulesToVisibleLanes(settings.rules, visible, lanes)
   }
   const rows = response.lanes
   if (rows === undefined) return { ...response, settings }
@@ -220,6 +240,19 @@ export function restoreHiddenLaneSettings(
       visible,
       lanes,
     )
+  }
+  // AQU-2205: same restore for the keys the read wall now trims. Each helper
+  // returns null when the stored row hid nothing, so a blob with no hidden
+  // lane entries is left exactly as the caller sent it.
+  if (isSettingsRecord(stored.algorithmicChecksByLane)) {
+    const checks = restoreHiddenLaneChecks(
+      stored.algorithmicChecksByLane, incoming.algorithmicChecksByLane, visible, lanes,
+    )
+    if (checks) settings.algorithmicChecksByLane = checks
+  }
+  if (Array.isArray(stored.rules)) {
+    const rules = restoreHiddenLaneRules(stored.rules, incoming.rules, visible, lanes)
+    if (rules) settings.rules = rules
   }
   return { ok: true, settings }
 }

@@ -1,0 +1,160 @@
+// AQU-2493 (review, Nov 9): the Station's Save, Keep, Delete, Insert and Undo
+// with a recording loaded — what the Nov 9 review found, each pinned here.
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { __resetStationTargetForTests, openInStation } from "@/lib/station/target"
+import type { StationHost, StationTake } from "./station-host"
+
+const RATE = 48000
+const mocks = vi.hoisted(() => ({
+  save: vi.fn(async (_args: unknown) => ({ audioIds: ["new.wav"], url: "frontier-audio://new.wav", durationMs: 1000 })),
+  /** What the device's audio cache still holds, by id. */
+  cached: new Map<string, Uint8Array>(),
+  /** Ids whose read from that cache never comes back in the test. */
+  slow: new Set<string>(),
+}))
+vi.mock("@/lib/station/load", () => ({
+  // Five seconds of a ramp, so every sample says where it came from.
+  loadStationPcm: async () => {
+    const data = new Float32Array(48000 * 5)
+    for (let i = 0; i < data.length; i++) data[i] = i / data.length
+    return { data, rate: 48000, peak: 1, duration: 5 }
+  },
+  pcmKey: (u: string) => u,
+  putStationPcm: (_k: string, data: Float32Array, rate = 48000) => ({ data, rate, peak: 1, duration: data.length / rate }),
+}))
+vi.mock("@/lib/station/save", () => ({ saveStationVersion: mocks.save }))
+vi.mock("@/lib/audio/bytes-cache", () => ({
+  audioCacheGet: (id: string) => (mocks.slow.has(id) ? new Promise(() => {}) : Promise.resolve(mocks.cached.get(id) ?? null)),
+  audioCachePutBlob: async () => {},
+}))
+vi.mock("@/lib/audio/decode-mono", () => ({ TARGET_RATE: 48000, decodeToMono48k: async () => new Float32Array(48000 * 2).fill(0.5) }))
+vi.mock("@/lib/station/preview", () => ({
+  previewCanMix: () => false,
+  StationPreview: class {
+    playing = false
+    setSamples() {}
+    setBlob() {}
+    setLevel() {}
+    setRate() {}
+    setLoop() {}
+    play() {}
+    pause() {}
+    dispose() {}
+  },
+}))
+
+const { StationPanel } = await import("./StationPanel")
+
+const TARGET = { fileId: "f1", cellId: "c331", audioId: "t2.webm" }
+const DRAFT_KEY = "aquilla:stationDraft:f1|c331|t2.webm"
+
+function makeTake(over: Partial<StationTake["att"]> = {}): StationTake {
+  const att = { url: "frontier-audio://t2.webm", type: "audio", label: "Take 2", validators: [], validatorCount: 0, ...over }
+  return {
+    fileId: "f1",
+    cell: { id: "c331", attachments: { "t2.webm": att } } as unknown as StationTake["cell"],
+    att: att as StationTake["att"],
+  }
+}
+
+function makeHost(take: StationTake, over: Partial<StationHost> = {}): StationHost {
+  return {
+    project: { id: "p1" } as StationHost["project"],
+    username: "ana",
+    editable: true,
+    getSyncToken: async () => "jwt",
+    readTake: () => take,
+    lineName: () => "line 331",
+    trackVars: () => ({ "--tl-track-hue": "#2489eb" }),
+    voteState: () => ({ canVote: true, voted: false }),
+    vote: vi.fn(async () => {}),
+    trim: vi.fn(async () => {}),
+    approvalsNeeded: 1,
+    pauseOtherPlayback: () => {},
+    reportHistory: () => {},
+    setLevel: vi.fn(async () => {}),
+    selectedIn: () => "t2.webm",
+    fileName: () => null,
+    insertChoices: () => [],
+    placementsOf: () => [take],
+    removeNoise: async () => null,
+    changeVoice: () => null,
+    ...over,
+  }
+}
+
+/** Open the Station on the take and wait for its recording to load. */
+async function open(take: StationTake, over: Partial<StationHost> = {}) {
+  const host = makeHost(take, over)
+  openInStation(TARGET)
+  render(<StationPanel host={host} visible />)
+  // The lane is 1000 px wide: 200 px a second on the five-second recording.
+  const lane = screen.getByTestId("station-lane")
+  lane.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1000, height: 128, right: 1000, bottom: 128, x: 0, y: 0, toJSON: () => ({}) })
+  await waitFor(() => expect(screen.getByTestId("station-status-row")).toBeTruthy())
+  await act(async () => {})
+  return { host, lane }
+}
+
+/** Drag across the lane from `a` to `b` seconds. */
+function selectRange(lane: HTMLElement, a: number, b: number) {
+  fireEvent.pointerDown(lane, { button: 0, clientX: a * 200, clientY: 10, pointerId: 1 })
+  fireEvent.pointerMove(lane, { clientX: b * 200, clientY: 10, pointerId: 1 })
+  fireEvent.pointerUp(lane, { clientX: b * 200, clientY: 10, pointerId: 1 })
+}
+
+beforeEach(() => {
+  localStorage.clear()
+  mocks.cached.clear()
+  mocks.slow.clear()
+  mocks.save.mockClear()
+})
+afterEach(() => __resetStationTargetForTests())
+
+describe("the Station's Save with inserted audio that can't be loaded again (finding 5)", () => {
+  const draftWithInsert = () =>
+    localStorage.setItem(
+      DRAFT_KEY,
+      JSON.stringify({
+        ops: [{ kind: "ins", at: 1, src: "station-insert-x", len: 2, label: "the file “amen”" }],
+        trim: null,
+        sources: { "station-insert-x": { kind: "file", cacheId: "station-insert-x", ext: "wav", label: "the file “amen”" } },
+        undo: [{ ops: [], trim: null }],
+        scope: "clip",
+      }),
+    )
+
+  it("refuses to save silence in its place, and says why", async () => {
+    draftWithInsert()
+    await open(makeTake())
+    fireEvent.click(screen.getByTestId("station-save"))
+    await act(async () => {})
+    expect(mocks.save).not.toHaveBeenCalled()
+    expect(screen.getByTestId("station-message").textContent).toMatch(/inserted .* no longer on this device/)
+    // The change is still there to undo.
+    expect(screen.getByTestId("station-not-saved")).toBeTruthy()
+  })
+
+  it("waits, saying so, while the inserted audio is still loading again", async () => {
+    draftWithInsert()
+    mocks.slow.add("station-insert-x")
+    await open(makeTake())
+    fireEvent.click(screen.getByTestId("station-save"))
+    await act(async () => {})
+    expect(mocks.save).not.toHaveBeenCalled()
+    expect(screen.getByTestId("station-message").textContent).toMatch(/still loading/)
+  })
+
+  it("saves as usual once the inserted audio has loaded again", async () => {
+    draftWithInsert()
+    mocks.cached.set("station-insert-x", new Uint8Array(4))
+    await open(makeTake())
+    fireEvent.click(screen.getByTestId("station-save"))
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledTimes(1))
+    const { samples } = mocks.save.mock.calls[0][0] as { samples: Float32Array }
+    expect(samples.length).toBe(RATE * 7)
+    // The insert's own sound, not silence.
+    expect(samples[RATE * 2]).toBeCloseTo(0.5)
+  })
+})

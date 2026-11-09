@@ -275,6 +275,15 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
   // only or everywhere it is placed (slice 6).
   const save = async (how: SaveHow) => {
     if (!ed.pcm || !unsaved || saving) return
+    // AQU-2493 (review, Nov 9): inserted audio with no samples here (a draft
+    // brought back after a reload, its file or recording gone from this
+    // device, or not loaded again yet) would be saved as silence. Save waits,
+    // and says why.
+    if (ed.insertsMissing) {
+      setSaveMenu(false)
+      setMessage(t(ed.insertsMissing === "lost" ? "editor.station.insertLost" : "editor.station.insertLoading"))
+      return
+    }
     setSaving(true)
     setSaveMenu(false)
     ed.pause()

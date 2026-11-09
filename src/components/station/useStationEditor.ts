@@ -101,20 +101,26 @@ export function useStationEditor(host: StationHost, take: StationTake, target: S
     [pcm, sources, live],
   )
   // A draft brought back after a reload: load its inserted audio again.
+  // AQU-2493 (review, Nov 9): an insert whose audio can't be loaded again (a
+  // file or a recording made here lives only in this device's audio cache,
+  // which drops its oldest entries) is remembered as lost, so Save can refuse
+  // to write silence in its place.
   const restoring = useRef(new Set<string>())
+  const [lost, setLost] = useState<ReadonlySet<string>>(() => new Set())
   useEffect(() => {
     for (const [id, meta] of Object.entries(draft.sources)) {
       if (sources[id] || restoring.current.has(id)) continue
       restoring.current.add(id)
       const done = (p: PcmSource | null) => {
         if (p) setSources((m) => ({ ...m, [id]: p }))
+        else setLost((m) => new Set(m).add(id))
       }
       if (meta.kind === "take") {
-        loadStationPcm({ url: meta.url, projectId: project.id, fileId: meta.fileId, getSyncToken }).then(done, () => {})
+        loadStationPcm({ url: meta.url, projectId: project.id, fileId: meta.fileId, getSyncToken }).then(done, () => done(null))
       } else {
         void audioCacheGet(meta.cacheId, meta.ext)
           .then((bytes) => (bytes ? decodeToMono48k(bytes) : null))
-          .then((data) => done(data ? putStationPcm(id, data) : null), () => {})
+          .then((data) => done(data ? putStationPcm(id, data) : null), () => done(null))
       }
     }
   }, [draft.sources, sources, project.id, getSyncToken])
@@ -124,6 +130,14 @@ export function useStationEditor(host: StationHost, take: StationTake, target: S
     return placeSegments(segmentsOf(BASE_SRC, pcm?.duration ?? 0, shown))
   }, [pcm, ops, live])
   const length = useMemo(() => Math.max(MIN_KEPT_SEC, lengthOf(placed)), [placed])
+  // AQU-2493 (review, Nov 9): inserted audio still in the recording that has
+  // no samples here: "loading" while it is being loaded again, "lost" when it
+  // can't be. Either way a save would write silence where it sits.
+  const insertsMissing = useMemo((): "loading" | "lost" | null => {
+    const without = placed.filter((g) => g.src !== BASE_SRC && g.src !== LIVE_SRC && !sources[g.src])
+    if (without.length === 0) return null
+    return without.some((g) => lost.has(g.src)) ? "lost" : "loading"
+  }, [placed, sources, lost])
 
   // ——— The kept part: the take's stored trim (carried through any unsaved
   // edits so it keeps its sound), or the draft's own, or the edge being dragged.
@@ -402,6 +416,7 @@ export function useStationEditor(host: StationHost, take: StationTake, target: S
     sources,
     setSources,
     placed,
+    insertsMissing,
     length,
     trimA,
     trimB,

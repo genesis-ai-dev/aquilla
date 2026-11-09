@@ -1460,6 +1460,8 @@ export const editor = defineNamespace({
     "editor.station.savedEverywhere": "Saved as version {n}, used everywhere ({lines}). The original recording is kept.",
     "editor.station.saveFailed": "The new version couldn’t be saved: {message}",
     "editor.station.notAudio": "“{name}” isn’t an audio file the browser can read.",
+    "editor.station.insertLost": "Not saved: audio you inserted is no longer on this device, so it would be saved as silence. Undo to take it out, then insert it again.",
+    "editor.station.insertLoading": "Not saved yet: the audio you inserted is still loading. Try Save again in a moment.",
     "editor.station.keptForLater": "Your changes to {name} are kept until you save or undo them.",
     "editor.station.undoUnsaved": "Undo the last unsaved change",
     "editor.station.fileLabel": "the file “{name}”",
@@ -3601,6 +3603,12 @@ export const editor = defineNamespace({
         placeholders: {
           name: "The file's name.",
         },
+      },
+      "editor.station.insertLost": {
+        description: "Message when Save is pressed in the Station while audio inserted before a reload (a file, or a recording made there) can no longer be loaded on this device. Nothing is saved; 'Undo' is the Station's Undo button.",
+      },
+      "editor.station.insertLoading": {
+        description: "Message when Save is pressed in the Station before audio inserted earlier has finished loading again after a reload. Nothing is saved yet.",
       },
       "editor.station.keptForLater": {
         description: "Message when switching away from a recording with unsaved changes.",

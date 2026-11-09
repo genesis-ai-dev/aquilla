@@ -37,12 +37,53 @@ async function driveFetch(token: string, url: string, fetchFn: typeof fetch): Pr
   return response
 }
 
-/** The folder's name. Throws when the id is not a folder the account can see. */
-export async function getDriveFolder(token: string, folderId: string, fetchFn: typeof fetch = fetch): Promise<{ id: string; name: string }> {
-  const url = `${DRIVE_API}/files/${encodeURIComponent(folderId)}?fields=id,name,mimeType&supportsAllDrives=true`
-  const body = (await (await driveFetch(token, url, fetchFn)).json()) as { id: string; name: string; mimeType: string }
+export interface DriveFolder {
+  id: string
+  name: string
+  /** Lower-cased emails of the people who own or can edit the folder, plus
+   *  the person who shared it with the service account. Only these may link it. */
+  editorEmails: string[]
+}
+
+const EDITOR_ROLES = new Set(['owner', 'organizer', 'fileOrganizer', 'writer'])
+
+/** The folder and who controls it. Throws when the id is not a folder the account can see. */
+export async function getDriveFolder(token: string, folderId: string, fetchFn: typeof fetch = fetch): Promise<DriveFolder> {
+  const fields = 'id,name,mimeType,owners(emailAddress),sharingUser(emailAddress),permissions(type,role,emailAddress)'
+  const url = `${DRIVE_API}/files/${encodeURIComponent(folderId)}?fields=${encodeURIComponent(fields)}&supportsAllDrives=true`
+  const body = (await (await driveFetch(token, url, fetchFn)).json()) as {
+    id: string
+    name: string
+    mimeType: string
+    owners?: Array<{ emailAddress?: string }>
+    sharingUser?: { emailAddress?: string }
+    permissions?: Array<{ type?: string; role?: string; emailAddress?: string }>
+  }
   if (body.mimeType !== DRIVE_FOLDER_MIME) throw new Error(`Drive item ${folderId} is not a folder`)
-  return { id: body.id, name: body.name }
+  const emails = new Set<string>()
+  const add = (email: string | undefined) => {
+    if (email) emails.add(email.trim().toLowerCase())
+  }
+  for (const owner of body.owners ?? []) add(owner.emailAddress)
+  add(body.sharingUser?.emailAddress)
+  for (const perm of body.permissions ?? []) {
+    if (perm.type === 'user' && perm.role && EDITOR_ROLES.has(perm.role)) add(perm.emailAddress)
+  }
+  return { id: body.id, name: body.name, editorEmails: [...emails] }
+}
+
+/**
+ * Every project shares ONE service account, so "the account can read it" says
+ * nothing about who may link it: without this check, a lead in any project who
+ * learned another team's folder id could copy its documents into their own
+ * project. The person linking must own or edit the folder in Drive under the
+ * same email as their Aquilla account. `ENVIRONMENT=local` (the dev stack,
+ * whose users have made-up emails) skips it; no deployed profile sets that.
+ */
+export function mayLinkDriveFolder(folder: Pick<DriveFolder, 'editorEmails'>, userEmail: string | null | undefined, environment: string | undefined): boolean {
+  if (environment === 'local') return true
+  if (!userEmail) return false
+  return folder.editorEmails.includes(userEmail.trim().toLowerCase())
 }
 
 /** Every non-trashed direct child of the folder (no recursion into subfolders). */

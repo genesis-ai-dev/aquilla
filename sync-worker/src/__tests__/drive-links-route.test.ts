@@ -23,7 +23,7 @@ async function serviceAccountJson(): Promise<string> {
     true,
     ['sign', 'verify'],
   )) as CryptoKeyPair
-  const pkcs8 = new Uint8Array(await crypto.subtle.exportKey('pkcs8', pair.privateKey))
+  const pkcs8 = new Uint8Array((await crypto.subtle.exportKey('pkcs8', pair.privateKey)) as ArrayBuffer)
   return JSON.stringify({ client_email: EMAIL, private_key: `-----BEGIN PRIVATE KEY-----\n${btoa(String.fromCharCode(...pkcs8))}\n-----END PRIVATE KEY-----\n` })
 }
 
@@ -62,13 +62,20 @@ async function setup() {
   return { db, rows, env, poller, call }
 }
 
-/** Google: the token endpoint, plus a folder lookup that answers `folderStatus`. */
-function stubGoogle(folderStatus: number) {
+/** Google: the token endpoint, plus a folder lookup that answers `folderStatus`
+ *  for a folder whose editors are `editors`. */
+function stubGoogle(folderStatus: number, editors: string[] = ['lead@x']) {
   vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url)
     if (url.hostname === 'oauth2.googleapis.com') return Response.json({ access_token: 't', expires_in: 3600 })
     if (folderStatus !== 200) return new Response('File not found', { status: folderStatus })
-    return Response.json({ id: '1AbCdEfGhIjKlMnOp', name: 'Live chapters', mimeType: 'application/vnd.google-apps.folder' })
+    return Response.json({
+      id: '1AbCdEfGhIjKlMnOp',
+      name: 'Live chapters',
+      mimeType: 'application/vnd.google-apps.folder',
+      owners: [{ emailAddress: 'owner@x' }],
+      permissions: editors.map((emailAddress) => ({ type: 'user', role: 'writer', emailAddress })),
+    })
   })
 }
 
@@ -93,6 +100,17 @@ describe('Drive links route', () => {
     expect(res?.status).toBe(422)
     expect(((await res!.json()) as { error: string }).error).toContain(EMAIL)
     expect(await t.rows('drive_folder_links')).toEqual([])
+  })
+
+  it("refuses a folder the lead does not own or edit in Drive, even though it is shared with the service account", async () => {
+    // Every project shares one service account: a folder another team shared
+    // with it must not be linkable by a lead who merely learned its id.
+    const t = await setup()
+    stubGoogle(200, ['someone-else@x'])
+    const res = await t.call('POST', '', 500, { folder: FOLDER_URL })
+    expect(res?.status).toBe(403)
+    expect(await t.rows('drive_folder_links')).toEqual([])
+    expect(t.poller.started).toEqual([])
   })
 
   it('saves a shared folder from its URL and starts its poller', async () => {

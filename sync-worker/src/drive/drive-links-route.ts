@@ -14,7 +14,7 @@ import { verifyTokenForProject } from '../auth'
 import { ROLE } from '../events/role-policy'
 import { uuidv7 } from '../external/uuid'
 import { parseServiceAccountKey, serviceAccountAccessToken } from './google-auth'
-import { driveFolderIdFromInput, getDriveFolder } from './drive-api'
+import { driveFolderIdFromInput, getDriveFolder, mayLinkDriveFolder, type DriveFolder } from './drive-api'
 
 const LIST_RE = /^\/api\/v1\/projects\/([^/]+)\/drive-links$/
 const ONE_RE = /^\/api\/v1\/projects\/([^/]+)\/drive-links\/([^/]+)$/
@@ -25,6 +25,7 @@ export interface DriveLinksEnv {
   SYNC_SECRET_KEY?: string
   GOOGLE_SERVICE_ACCOUNT_JSON?: string
   DriveFolderPoller?: DurableObjectNamespace
+  ENVIRONMENT?: string
 }
 
 interface LinkRow {
@@ -109,13 +110,17 @@ export async function handleDriveLinksRequest(request: Request, env: DriveLinksE
     if (!folderId) return reply('folder must be a Google Drive folder link or id', 400)
     const email = serviceAccountEmail(env)
     if (!email) return reply('Drive sync is not configured on this server (GOOGLE_SERVICE_ACCOUNT_JSON)', 503)
-    let folder: { id: string; name: string }
+    let folder: DriveFolder
     try {
       const token = await serviceAccountAccessToken(parseServiceAccountKey(env.GOOGLE_SERVICE_ACCOUNT_JSON))
       folder = await getDriveFolder(token, folderId)
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err)
       return json({ error: `Cannot open that folder. Share it with ${email} (Viewer is enough). ${detail}` }, 422)
+    }
+    const user = await db.prepare('SELECT email FROM users WHERE id = ?').bind(auth.claims.userId).first<{ email: string | null }>()
+    if (!mayLinkDriveFolder(folder, user?.email, env.ENVIRONMENT)) {
+      return json({ error: 'Only an owner or editor of this folder in Google Drive can link it. Sign in to Aquilla with the same email you use in Drive.' }, 403)
     }
     const existing = await db
       .prepare('SELECT id FROM drive_folder_links WHERE project_id = ? AND folder_id = ?')

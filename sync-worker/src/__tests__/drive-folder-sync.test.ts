@@ -61,7 +61,7 @@ beforeAll(async () => {
     true,
     ['sign', 'verify'],
   )) as CryptoKeyPair
-  const pkcs8 = new Uint8Array(await crypto.subtle.exportKey('pkcs8', pair.privateKey))
+  const pkcs8 = new Uint8Array((await crypto.subtle.exportKey('pkcs8', pair.privateKey)) as ArrayBuffer)
   const pem = `-----BEGIN PRIVATE KEY-----\n${btoa(String.fromCharCode(...pkcs8))}\n-----END PRIVATE KEY-----\n`
   serviceAccountJson = JSON.stringify({ client_email: 'aquilla-sync@test.iam.gserviceaccount.com', private_key: pem })
 })
@@ -70,6 +70,8 @@ beforeAll(async () => {
 function fakeDrive() {
   const docs = new Map<string, { name: string; version: number; bytes: Uint8Array }>()
   const calls = { token: 0, list: 0, export: 0 }
+  /** Who can edit the folder in Drive (the linking lead is lead@x). */
+  const editors = new Set(['lead@x'])
   const fetchFn = (async (input: RequestInfo | URL) => {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url)
     if (url.hostname === 'oauth2.googleapis.com') {
@@ -80,6 +82,15 @@ function fakeDrive() {
       calls.list++
       return Response.json({
         files: [...docs].map(([id, d]) => ({ id, name: d.name, mimeType: GOOGLE_DOC_MIME, version: String(d.version) })),
+      })
+    }
+    if (url.pathname === `/drive/v3/files/${FOLDER}`) {
+      return Response.json({
+        id: FOLDER,
+        name: 'Live',
+        mimeType: 'application/vnd.google-apps.folder',
+        owners: [{ emailAddress: 'owner@x' }],
+        permissions: [...editors].map((emailAddress) => ({ type: 'user', role: 'writer', emailAddress })),
       })
     }
     const exportMatch = /^\/drive\/v3\/files\/([^/]+)\/export$/.exec(url.pathname)
@@ -93,6 +104,7 @@ function fakeDrive() {
   return {
     fetchFn,
     calls,
+    editors,
     async put(id: string, name: string, paras: string[]) {
       const prev = docs.get(id)
       docs.set(id, { name, version: (prev?.version ?? 0) + 1, bytes: await docx(paras) })
@@ -215,6 +227,18 @@ describe('Drive folder sync', () => {
     expect(t.drive.calls.list).toBe(0)
     const link = await t.db.prepare('SELECT last_error FROM drive_folder_links WHERE id = ?').bind(LINK).first<{ last_error: string }>()
     expect(link?.last_error).toMatch(/no longer a project lead/)
+  })
+
+  it('stops feeding the folder in once the linking lead loses edit access in Drive', async () => {
+    const t = await setup()
+    await t.drive.put(DOC, 'Chapter 1', ['First paragraph.'])
+    t.drive.editors.delete('lead@x')
+
+    const result = await t.sync()
+
+    expect(result.created).toEqual([])
+    expect(result.errors.join(' ')).toMatch(/no longer an owner or editor/)
+    expect(t.drive.calls.list).toBe(0)
   })
 
   it('does not bring back a file that was deleted in Aquilla', async () => {

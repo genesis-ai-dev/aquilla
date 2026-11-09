@@ -27,9 +27,11 @@ import { parseServiceAccountKey, serviceAccountAccessToken } from './google-auth
 import {
   aquillaFileName,
   downloadDriveFileAsDocx,
+  getDriveFolder,
   GOOGLE_DOC_MIME,
   isSyncableDriveFile,
   listDriveFolder,
+  mayLinkDriveFolder,
   type DriveFile,
 } from './drive-api'
 import { docxRevisionUnits } from './drive-units'
@@ -38,6 +40,7 @@ export type DriveSyncEnv = ImportRouteEnv & RevisionsRouteEnv & {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
   GOOGLE_SERVICE_ACCOUNT_JSON?: string
+  ENVIRONMENT?: string
 }
 
 export interface DriveLinkRow {
@@ -128,6 +131,12 @@ export async function syncDriveFolderLink(env: DriveSyncEnv, linkId: string, dep
     }
 
     const accessToken = await serviceAccountAccessToken(parseServiceAccountKey(env.GOOGLE_SERVICE_ACCOUNT_JSON), fetchFn, now)
+    // Re-checked every pass: someone who loses edit access to the folder in
+    // Drive stops feeding it into this project.
+    const user = await db.prepare('SELECT email FROM users WHERE id = ?').bind(link.user_id).first<{ email: string | null }>()
+    if (!mayLinkDriveFolder(await getDriveFolder(accessToken, link.folder_id, fetchFn), user?.email, env.ENVIRONMENT)) {
+      throw new Error(`${link.username} is no longer an owner or editor of this folder in Google Drive`)
+    }
     const driveFiles = (await listDriveFolder(accessToken, link.folder_id, fetchFn)).filter(isSyncableDriveFile)
     const cursorRows = await db
       .prepare('SELECT drive_file_id, file_id, drive_version, artifact_sha256 FROM drive_folder_files WHERE link_id = ?')

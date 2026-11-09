@@ -131,6 +131,7 @@ import { YouTubeImportPanel } from "@/components/import/YouTubeImportPanel"
 import { SpreadsheetImportPanel } from "@/components/import/SpreadsheetImportPanel"
 import { JsonImportPanel } from "@/components/import/JsonImportPanel"
 import { PairedImportPanel } from "@/components/import/PairedImportPanel"
+import { toast } from "@/components/ui/toast"
 import { DcsCatalogBrowser } from "@/components/dcs/DcsCatalogBrowser"
 import { importDcsResource } from "@/lib/dcs/import-dcs"
 import { DcsClient } from "@/lib/dcs/catalog"
@@ -4848,6 +4849,10 @@ function DcsPanel({ projectId, getToken, defaultLang, patchDcsCursor, onImported
       }
       setSummary({ files: result.files, cells: result.cells, ref: result.cursor.ref, pinned })
       setStage("done")
+      // AQU-2487 (import sweep, Nov 2): the summary below is replaced as soon
+      // as `onImported` closes the dialog or moves it on, and it carried the
+      // only word that the release was not pinned. Say it where it lasts.
+      if (!pinned) toast.add({ type: "warning", title: t("importExport.dcs.couldNotPin") })
       // Refresh the project and retain a per-file report if only part landed.
       await onImported(
         result.refs,

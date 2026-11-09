@@ -83,6 +83,9 @@ const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a
 
 interface SubmitOptions {
   description?: string
+  whatHappened?: string
+  tryingTo?: string
+  expected?: string
   route?: string
   projectId?: string
   fileId?: string
@@ -95,6 +98,9 @@ interface SubmitOptions {
 async function submit(opts: SubmitOptions = {}): Promise<Response> {
   const form = new FormData()
   if (opts.description !== undefined) form.set("description", opts.description)
+  if (opts.whatHappened !== undefined) form.set("whatHappened", opts.whatHappened)
+  if (opts.tryingTo !== undefined) form.set("tryingTo", opts.tryingTo)
+  if (opts.expected !== undefined) form.set("expected", opts.expected)
   if (opts.route !== undefined) form.set("route", opts.route)
   if (opts.projectId !== undefined) form.set("projectId", opts.projectId)
   if (opts.fileId !== undefined) form.set("fileId", opts.fileId)
@@ -151,7 +157,8 @@ describe("POST /api/v2/feedback", () => {
     expect(post.url).toBe(WEBHOOK)
     const embed = post.payload.embeds[0]
     expect(embed.title).toContain("fb-basic")
-    expect(embed.description).toBe("The editor eats my first keystroke.")
+    // Legacy `description` (older clients) is read as "What happened?".
+    expect(embed.description).toBe("**What happened?**\nThe editor eats my first keystroke.")
     expect(fieldValue(post, "User")).toMatch(/fb-basic \(id \d+\)/)
     expect(fieldValue(post, "User")).toContain("fb-basic@example.com")
     // p1 is not a project this user can read, so there is no name to show:
@@ -159,6 +166,48 @@ describe("POST /api/v2/feedback", () => {
     expect(fieldValue(post, "Page")).toBe("[/project/p1/file/f1](https://aquilla.app/project/p1/file/f1)")
     expect(fieldValue(post, "File")).toBe("f1")
     expect(fieldValue(post, "Session replay")).toBe("https://posthog.example/replay/abc")
+  })
+
+  it("shows each of the three answers under its own heading on the card", async () => {
+    const jwt = await signedInUser("fb-three")
+    const discord = mockDiscord()
+
+    const res = await submit({
+      whatHappened: "The page went blank.",
+      tryingTo: "Export my project.",
+      expected: "A download.",
+      jwt,
+      overrides: withWebhook,
+    })
+
+    expect(res.status).toBe(201)
+    expect(discord.posted[0].payload.embeds[0].description).toBe(
+      "**What happened?**\nThe page went blank.\n\n" +
+        "**What were you trying to do?**\nExport my project.\n\n" +
+        "**What did you expect to happen?**\nA download.",
+    )
+  })
+
+  it("sends with only What happened filled, and prefers it over a legacy description", async () => {
+    const jwt = await signedInUser("fb-only")
+    const discord = mockDiscord()
+
+    const res = await submit({ whatHappened: "Only this.", description: "ignored", jwt, overrides: withWebhook })
+
+    expect(res.status).toBe(201)
+    const text = discord.posted[0].payload.embeds[0].description
+    expect(text).toBe("**What happened?**\nOnly this.")
+    expect(text).not.toContain("trying to do")
+  })
+
+  it("rejects an over-long optional answer", async () => {
+    const jwt = await signedInUser("fb-longopt")
+    const res = await submit({
+      whatHappened: "ok",
+      expected: "x".repeat(MAX_FEEDBACK_DESCRIPTION_CHARS + 1),
+      jwt,
+    })
+    expect(res.status).toBe(400)
   })
 
   it("names the org and project when the reporter can read the project", async () => {
@@ -441,7 +490,7 @@ describe("POST /api/v2/feedback", () => {
     const post = discord.posted[0]
     expect(post.payload.embeds[0].description.length).toBeLessThanOrEqual(4096)
     expect(post.payload.embeds[0].description).toContain("description.txt")
-    expect(await post.files["files[0]"].text()).toBe(text)
+    expect(await post.files["files[0]"].text()).toBe(`What happened?\n${text}`)
   })
 
   it("does not let a description ping @everyone", async () => {
@@ -521,7 +570,7 @@ describe("POST /api/v2/feedback", () => {
 
 describe("buildFeedbackRouteEmail page and file rows (AQU-2466)", () => {
   const base = {
-    description: "Verse 3 will not save.",
+    answers: { whatHappened: "Verse 3 will not save." },
     username: "reporter",
     userEmail: "reporter@example.com",
     orgName: "File Org",

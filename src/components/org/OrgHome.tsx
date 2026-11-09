@@ -49,20 +49,32 @@ const PANEL_MAX_H =
  * as each permission lands, the breadcrumb holds the org's place, and the
  * body shows one cursor where the dashboard will start.
  */
+// The sidebar and breadcrumb (which hold the org picker) stay live while the
+// dashboard data loads: only the page body is the inert loading template, so
+// the user can jump straight into one org without waiting on the all-orgs
+// rollup.
 function OrgHomeLoadingTemplate() {
   return (
     <div data-testid="org-home-loading-template" className="h-full">
-      <AppShell
-        sidebar={<OrgSidebar />}
-        header={<OrgBreadcrumb section="Overview" isProjectsLanding />}
-        statusBar={null}
-        main={
-          <Page size="wide">
-            <LoadingCursor className="text-xl" />
-          </Page>
-        }
-      />
+      <Page size="wide">
+        <LoadingCursor className="text-xl" />
+      </Page>
     </div>
+  )
+}
+
+function OrgHomeLoadingShell({ label }: { label: string }) {
+  return (
+    <AppShell
+      sidebar={<OrgSidebar />}
+      header={<OrgBreadcrumb section="Overview" isProjectsLanding />}
+      statusBar={null}
+      main={
+        <LoadingOverlay label={label} data-testid="org-home-loading">
+          <OrgHomeLoadingTemplate />
+        </LoadingOverlay>
+      }
+    />
   )
 }
 
@@ -292,11 +304,7 @@ export function OrgHome() {
   // The template is intentionally disconnected from partial org/project state:
   // unknown values remain skeletons and startup has one visual transition.
   if (orgShellLoading) {
-    return (
-      <LoadingOverlay label={t("org.orgHome.loadingDashboard")} data-testid="org-home-loading">
-        <OrgHomeLoadingTemplate />
-      </LoadingOverlay>
-    )
+    return <OrgHomeLoadingShell label={t("org.orgHome.loadingDashboard")} />
   }
 
   // AQU-864: `/orgs/all` has something to aggregate at 2+ memberships, a
@@ -374,11 +382,7 @@ export function OrgHome() {
   }
 
   if (portfolioScopeKey != null && resolvedPortfolioScopeKey !== portfolioScopeKey) {
-    return (
-      <LoadingOverlay label={t("org.orgHome.loadingDashboard")} data-testid="org-home-loading">
-        <OrgHomeLoadingTemplate />
-      </LoadingOverlay>
-    )
+    return <OrgHomeLoadingShell label={t("org.orgHome.loadingDashboard")} />
   }
 
   // Rollup stats. Computed on the server from the same visible projects the

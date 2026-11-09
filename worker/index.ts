@@ -120,11 +120,14 @@ const SPA_ROUTE_PATTERNS = [
 ]
 
 function isKnownSpaRoute(pathname: string): boolean {
+  // Normalize: strip trailing slash except for root "/"
+  const normalized = pathname === "/" ? "/" : pathname.replace(/\/$/, "")
+  
   return SPA_ROUTE_PATTERNS.some(pattern => {
     if (typeof pattern === "string") {
-      return pathname === pattern
+      return normalized === pattern
     }
-    return pattern.test(pathname)
+    return pattern.test(normalized)
   })
 }
 

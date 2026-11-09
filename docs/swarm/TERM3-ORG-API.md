@@ -29,6 +29,14 @@ viewer 100 · contributor 400 · project_lead 500 · maintainer 600 · owner 700
 Project roles resolve via `resolveProjectRole` (AD-12 max-wins across
 direct/group/org/creator). All routes require `authMiddleware` (Bearer JWT).
 
+**OPS-53 (`docs/OPSEC-REVIEW-2026-11-09.md`):** every **write** below (1, 2, 5,
+6, 7) additionally requires an **elevated** session when the caller clears its
+floor on platform-admin power alone — `resolveProjectRole` contributes level
+700 for every platform operator, which satisfied a 600 floor by definition. Such
+a caller gets `403 { error: "elevation required to <act> with platform-admin
+access" }`. An operator with a genuine grant on the project is unaffected, and
+the three reads (3, 4, 8) are deliberately left open per AQU-2003.
+
 ## Endpoints
 
 ### 1. POST `/api/v2/projects/:id/termbase/publish` — maintainer 600+
@@ -66,7 +74,10 @@ re-POST updates priority. When `priority` is omitted it appends at the end.
 ### 7. PATCH `/api/v2/projects/:id/termbase/subscriptions` — maintainer 600+
 Body `{ order: string[] }` — `termbaseProjectId`s in desired precedence;
 index 0 = priority 0 = highest precedence. Unknown ids are ignored.
+`order` holds at most **500** ids of **≤256** chars each (OPS-54); past either
+bound the request is rejected before the handler runs.
 - 200 `{ subscriptions: [...] }` (same shape as GET)
+- 400 validation error (order too long, or an id too long)
 
 ### 8. GET `/api/v2/projects/:termbaseProjectId/termbase/concepts` — Q19 implicit grant
 

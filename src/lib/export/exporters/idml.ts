@@ -22,6 +22,7 @@ import {
 import {
   chooseIdmlHtmlMatchingTranslation,
   idmlEditableSlotText,
+  idmlTargetHoldsTranslation,
 } from "@/lib/idml/protected-html"
 import { normalizePartnerIdmlTargetHtml } from "@/lib/partners/registry"
 
@@ -275,7 +276,20 @@ function cellContract(cell: CellData): CellContract {
       `Cell ${cellLabel(cell)} is missing protected source HTML. Re-import the original IDML to repair it.`,
     )
   }
+  const rejoin = readIdmlRejoinMetadata(cell.metadata)
+  // A cell nobody has translated contributes nothing to the package, whatever
+  // state its target is in. A file a source link brought in has no target rows
+  // at all until someone types; a file whose source a link replaced, or a
+  // re-import changed, still holds the empty shell of the OLD source, which
+  // marks a slot editable that is locked now (or the reverse) and so cannot
+  // validate. Neither is a translation to export or a reason to refuse one —
+  // the paragraph stays as the publisher set it, exactly as an untouched cell
+  // of a fresh import does. A target with words in it is still held to the
+  // full proof below.
+  const untranslated = cell.translated.trim().length === 0
+    && !idmlTargetHoldsTranslation(cell.translatedHtml)
   if (!cell.translatedHtml) {
+    if (untranslated) return untranslatedContract(cell, locator, metadata, rejoin)
     throw new IdmlWebExportError(
       `Cell ${cellLabel(cell)} is missing protected target HTML. Re-import the original IDML to repair it.`,
     )
@@ -287,6 +301,7 @@ function cellContract(cell: CellData): CellContract {
     metadata,
   )
   if (!validation.valid) {
+    if (untranslated) return untranslatedContract(cell, locator, metadata, rejoin)
     throw new IdmlWebExportError(
       `Cell ${cellLabel(cell)} changed a protected IDML anchor.`,
       validation.diagnostics,
@@ -326,7 +341,6 @@ function cellContract(cell: CellData): CellContract {
       `Cell ${cellLabel(cell)} has translated plain text but no text inside its protected IDML slots. Re-open the cell or re-import the original IDML to repair it.`,
     )
   }
-  const rejoin = readIdmlRejoinMetadata(cell.metadata)
   return {
     cell,
     locator,
@@ -335,6 +349,25 @@ function cellContract(cell: CellData): CellContract {
     targetHtml,
     targetSlots,
     hasTranslation,
+    ...(rejoin ? { rejoin } : {}),
+  }
+}
+
+/** The contract of a cell with nothing to export: the unit keeps its source text. */
+function untranslatedContract(
+  cell: CellData,
+  locator: IdmlLocator,
+  metadata: IdmlFormatMetadataV2,
+  rejoin: IdmlRejoinMetadata | undefined,
+): CellContract {
+  return {
+    cell,
+    locator,
+    metadata,
+    sourceHtml: cell.originalHtml ?? "",
+    targetHtml: "",
+    targetSlots: [],
+    hasTranslation: false,
     ...(rejoin ? { rejoin } : {}),
   }
 }

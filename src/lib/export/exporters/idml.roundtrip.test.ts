@@ -5,6 +5,7 @@ import {
   parseIdml,
   renderIdmlUnitHtml,
   validateExport,
+  validateIdmlTranslation,
   type IdmlTranslationUnit,
 } from "@aquilla/idml-roundtrip"
 import type { CellData } from "@/hooks/useCells"
@@ -116,10 +117,15 @@ describe("strict web IDML export adapter", () => {
     const unit = unitById(parsed.units, "heading")
     const missingLocator = cellFor(unit)
     missingLocator.metadata = { idml: unit.metadata }
+    // A translation whose protected HTML is gone, and one whose anchors moved:
+    // words the package cannot place block the download. (An EMPTY target in
+    // either state is an untranslated cell — see the next test.)
     const missingTarget = cellFor(unit)
+    missingTarget.translated = "Chapitre un"
     missingTarget.translatedHtml = undefined
     const changedAnchor = cellFor(unit)
-    changedAnchor.translatedHtml = changedAnchor.translatedHtml?.replace(
+    changedAnchor.translated = "Chapitre un"
+    changedAnchor.translatedHtml = targetHtml(unit, ["Chapitre un"]).replace(
       'data-idml-slot="0"',
       'data-idml-slot="9"',
     )
@@ -136,6 +142,51 @@ describe("strict web IDML export adapter", () => {
         exportIdml(raw.slice(0), [cell], directExecutor),
       ).rejects.toBeInstanceOf(IdmlWebExportError)
     }
+  })
+
+  // WHY: a file a source link brought in has no target rows until someone
+  // types, and a file whose source the link replaced (or a re-import changed)
+  // still carries the empty shell of the OLD source — a slot it marks editable
+  // is locked now, so the shell fails the anchor proof ("IDML slot N
+  // editability was changed"). Neither cell holds a translation, so neither may
+  // stop the download: the paragraph keeps the publisher's text, as any
+  // untouched cell does, while a translated cell beside them still exports.
+  it("leaves an untranslated cell alone when its target is missing or is the shell of an older source", async () => {
+    const raw = await buildFixture()
+    const parsed = await parseIdml(raw)
+    const cells = parsed.units.map((unit) => cellFor(unit))
+    const heading = unitById(parsed.units, "heading")
+    const mixed = unitById(parsed.units, "mixed")
+    const noTargetRow = cells.find((cell) => cell.id === heading.id)!
+    noTargetRow.translatedHtml = undefined
+    const staleShell = cells.find((cell) => cell.id === mixed.id)!
+    // The shell an earlier import wrote, back when the bold run was locked.
+    staleShell.translatedHtml = emptyTargetHtml(mixed).replace(
+      'data-idml-slot="1" data-idml-character-style="CharacterStyle/Bold" data-idml-protected="slot">',
+      'data-idml-slot="1" data-idml-character-style="CharacterStyle/Bold" data-idml-protected="slot" contenteditable="false">LORD',
+    )
+    expect(validateIdmlTranslation(mixed.sourceHtml, staleShell.translatedHtml, mixed.metadata).valid).toBe(false)
+    replaceCell(cells, unitById(parsed.units, "footnote"), ["note traduite"])
+
+    const result = await exportIdml(raw.slice(0), cells, directExecutor)
+
+    expect(result.report.translated).toBe(1)
+    const zip = await JSZip.loadAsync(await result.blob.arrayBuffer())
+    const outputStory = await zip.file(STORY)!.async("string")
+    expect(outputStory).toContain("<Content>note traduite</Content>")
+    expect(outputStory).toContain("<Content>Chapter One</Content>")
+    expect(outputStory).toContain("<Content>LORD</Content>")
+
+    // Words typed into a stale shell are a translation the package cannot
+    // place: that cell still blocks, with the repair offer.
+    const typedIntoStaleShell = cellFor(mixed)
+    typedIntoStaleShell.translatedHtml = staleShell.translatedHtml.replace(
+      'data-idml-protected="slot">',
+      'data-idml-protected="slot">le ',
+    )
+    await expect(
+      exportIdml(raw.slice(0), [typedIntoStaleShell], directExecutor),
+    ).rejects.toBeInstanceOf(IdmlWebExportError)
   })
 })
 

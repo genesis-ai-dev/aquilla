@@ -35,6 +35,13 @@ export interface AgentProposal {
   runId: string
   events: StagedEvent[]
   summary: string
+  /**
+   * AQU-2398: the events are mutually-exclusive ALTERNATIVE wordings of one
+   * cell, not a set of changes to apply together. The reviewer picks exactly
+   * one; the rest are discarded unwritten. Additive and optional — a proposal
+   * without it is an ordinary apply-all proposal.
+   */
+  alternatives?: boolean
 }
 
 export interface StagedEvent {

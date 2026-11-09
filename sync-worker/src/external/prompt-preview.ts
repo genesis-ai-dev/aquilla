@@ -63,7 +63,10 @@ import {
 } from "../lib/branching-search/settings"
 import { resolveLane } from "../../../db/shared/lane-ref"
 import { loadProjectSettings } from "../../../db/shared/projects"
-import { loadTranslationInstructions } from "../../../db/shared/load-translation-instructions"
+import {
+  legacySystemPromptSetting,
+  loadTranslationInstructions,
+} from "../../../db/shared/load-translation-instructions"
 import { customSystemPromptText } from "../../../db/shared/translation-instructions"
 import { listProjectLanes } from "../../../db/shared/lanes"
 import { styleInstructionsForCells } from "../../../db/shared/style-instructions"
@@ -330,15 +333,19 @@ export async function buildPromptPreview(
   // AQU-2342: fixed role text + the one instructions text. A legacy prompt
   // that only ever lived in the nested completionSettings copy still feeds
   // migrate-on-read, exactly as the SPA's record overlay does.
+  //
+  // AQU-2422: that resolution is `legacySystemPromptSetting`, the SAME lookup
+  // the live drafting paths get inside `loadTranslationInstructions` — the
+  // blob is handed over raw, so this read cannot see a `systemPrompt` the
+  // draft call would not. It is re-derived here only for the warning below.
   const systemPrompt = DEFAULT_SYSTEM_PROMPT
-  const legacySystemPrompt =
-    stringSetting(settings, "systemPrompt") || stringSetting(completion, "systemPrompt")
+  const legacySystemPrompt = legacySystemPromptSetting(settings)
   // The legacy agent brief is read too, exactly as the editor gets it from the
   // settings GET, so the preview and every server path resolve the same text.
   const { text: instructions, stored: instructionsStored } = await loadTranslationInstructions(
     db,
     projectId,
-    { ...settings, systemPrompt: legacySystemPrompt },
+    settings,
   )
   const topK = clampInt(completion.top_k, DEFAULT_APPROVED_EXAMPLE_COUNT, 1, MAX_TOP_K)
   const exampleFormat =

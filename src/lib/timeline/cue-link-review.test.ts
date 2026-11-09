@@ -145,35 +145,6 @@ describe("what never ranks", () => {
   })
 })
 
-// AQU-2460 (review, Nov 9): a heard line inside a line of an imported film
-// that has not been transcribed is proposed on timing, in a group of its own,
-// and never written without asking.
-describe("a line with no transcription yet", () => {
-  const bare = (id: string, start: number, end: number): LinkableCue => ({
-    ...cue(id, start, end, "Episode 101.mov"), medium: "media",
-  })
-  const textCells = [bare("film", 0, 60)]
-  const audioCues = [cue("c1", 10.1, 11.9, "I see him."), cue("c2", 14.1, 15.8, "Where is she going?")]
-
-  it("proposes each heard line inside it, apart from the different-writing-systems group", () => {
-    const r = reviewCueLinks({ textCells, audioCues, links: [] })
-    expect(r.timingCandidates.map((c) => [c.textCellId, c.cueCellId])).toEqual([["film", "c1"], ["film", "c2"]])
-    expect(r.crossScriptCandidates).toEqual([])
-    expect(r.weakCandidates).toEqual([])
-    expect(r.unpairedCues).toEqual([])
-    expect(r.actionable).toBe(2)
-  })
-
-  it("goes on proposing the next heard line once the line holds one pairing, and never a paired or declined one", () => {
-    const paired = reviewCueLinks({ textCells, audioCues, links: [link("film", "c1")] })
-    expect(paired.timingCandidates.map((c) => c.cueCellId)).toEqual(["c2"])
-    const declined = reviewCueLinks({
-      textCells, audioCues, links: [], rejected: [{ fromCellId: "film", toCellId: "c2" }],
-    })
-    expect(declined.timingCandidates.map((c) => c.cueCellId)).toEqual(["c1"])
-  })
-})
-
 describe("what the matcher declines to pair", () => {
   // Sam, 2026-08-15: these are FLAGGED rather than written. Nothing verified
   // what the two lines say, so the person decides.

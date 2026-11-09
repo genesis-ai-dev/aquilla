@@ -68,10 +68,6 @@ export interface CueLinkReview {
    *  line up but the two sides are in different writing systems, so nothing
    *  compared what they say. Strong, unverified — a person's call. */
   crossScriptCandidates: ReviewCandidate[]
-  /** AQU-2460 (review, Nov 9): the heard line falls inside a line of an
-   *  imported recording or film that has not been transcribed, so there were
-   *  no words to compare. Found by the matcher and deliberately not paired. */
-  timingCandidates: ReviewCandidate[]
   /** Overlapping in time with a little shared wording, but not enough to be
    *  sure. Also found by the matcher and deliberately not paired. */
   weakCandidates: ReviewCandidate[]
@@ -126,7 +122,6 @@ export function reviewCueLinks({
   // analysis already did the work, and throwing it away would be lossy.
   const crossScriptCandidates: ReviewCandidate[] = []
   const weakCandidates: ReviewCandidate[] = []
-  const timingCandidates: ReviewCandidate[] = []
   for (const plan of planCueLinks({ textCells, audioCues })) {
     if (plan.basis === "words") continue
     // Scored well and then explained nothing the cue did not already have
@@ -134,25 +129,20 @@ export function reviewCueLinks({
     // Proposing it here would put the junk back in front of a person as if it
     // were a finding. (The `else` below would file it under weak wording.)
     if (plan.basis === "redundant") continue
-    // AQU-2460 (review, Nov 9): a line not transcribed yet (`timing`) is a
-    // stretch of sound that can hold many heard lines, so its having one
-    // pairing already does not rule out the next heard line inside it.
-    const timing = plan.basis === "timing"
-    if (cueToText.has(plan.cueCellId) || (!timing && textToCue.has(plan.textCellId))) continue
+    if (cueToText.has(plan.cueCellId) || textToCue.has(plan.textCellId)) continue
     if (declined.has(key(plan.textCellId, plan.cueCellId))) continue
     const cue = audioCues.find((c) => c.id === plan.cueCellId)
     const text = textCells.find((c) => c.id === plan.textCellId)
     const row: ReviewCandidate = {
       cueCellId: plan.cueCellId,
       textCellId: plan.textCellId,
-      similarity: plan.basis === "cross-script" || timing ? 0 : plan.confidence,
+      similarity: plan.basis === "cross-script" ? 0 : plan.confidence,
       gapSec: Math.abs((cue?.startTime ?? 0) - (text?.startTime ?? 0)),
     }
-    ;(timing ? timingCandidates : plan.basis === "cross-script" ? crossScriptCandidates : weakCandidates).push(row)
+    ;(plan.basis === "cross-script" ? crossScriptCandidates : weakCandidates).push(row)
   }
-  const matcherProposals = [...crossScriptCandidates, ...weakCandidates, ...timingCandidates]
-  const proposedCues = new Set(matcherProposals.map((r) => r.cueCellId))
-  const proposedText = new Set(matcherProposals.map((r) => r.textCellId))
+  const proposedCues = new Set([...crossScriptCandidates, ...weakCandidates].map((r) => r.cueCellId))
+  const proposedText = new Set([...crossScriptCandidates, ...weakCandidates].map((r) => r.textCellId))
 
   const confident: ReviewCandidate[] = []
   const uncertain: ReviewCandidate[] = []
@@ -247,7 +237,6 @@ export function reviewCueLinks({
   return {
     confident,
     crossScriptCandidates,
-    timingCandidates,
     weakCandidates,
     uncertain,
     unpairedCues,
@@ -257,7 +246,6 @@ export function reviewCueLinks({
     actionable:
       confident.length +
       crossScriptCandidates.length +
-      timingCandidates.length +
       weakCandidates.length +
       uncertain.length +
       lowConfidence.length +

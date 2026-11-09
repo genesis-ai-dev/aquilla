@@ -366,20 +366,6 @@ export function CueLinkDrawer({
               </Section>
             )}
 
-            {/* AQU-2460 (review, Nov 9): a heard line inside a line that has
-                not been transcribed yet. Proposed, never paired for you. One
-                heard line can sit across two such lines, so the key is the pair. */}
-            {review.timingCandidates.length > 0 && (
-              <Section
-                title={t("editor.timeline.cueLinkTimingCandidatesTitle")}
-                hint={t("editor.timeline.cueLinkTimingCandidatesHint")}
-              >
-                {review.timingCandidates.map((row) => (
-                  <CandidateRow key={`${row.textCellId}:${row.cueCellId}`} row={row} {...rowProps} />
-                ))}
-              </Section>
-            )}
-
             {review.weakCandidates.length > 0 && (
               <Section
                 title={t("editor.timeline.cueLinkWeakTitle")}

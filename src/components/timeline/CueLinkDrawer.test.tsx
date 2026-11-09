@@ -36,7 +36,6 @@ const cueById = new Map([
 const review = (over: Partial<CueLinkReview> = {}): CueLinkReview => ({
   confident: [],
   crossScriptCandidates: [],
-  timingCandidates: [],
   weakCandidates: [],
   uncertain: [],
   unpairedCues: [],
@@ -175,15 +174,6 @@ describe("what the matcher found but would not pair", () => {
   it("offers a cross-script match as its own group", () => {
     renderDrawer(review({ crossScriptCandidates: [row], actionable: 1 }))
     expect(screen.getByText(/Different writing systems/)).toBeInTheDocument()
-    expect(screen.getByTestId("cue-link-pair-c4")).toBeInTheDocument()
-  })
-
-  // AQU-2460 (review, Nov 9): a heard line inside a line that has not been
-  // transcribed yet is offered, never paired for the person.
-  it("offers a heard line inside a line not transcribed yet as its own group", () => {
-    renderDrawer(review({ timingCandidates: [row], actionable: 1 }))
-    expect(screen.getByText("Line not transcribed yet")).toBeInTheDocument()
-    expect(screen.queryByText(/Different writing systems/)).toBeNull()
     expect(screen.getByTestId("cue-link-pair-c4")).toBeInTheDocument()
   })
 

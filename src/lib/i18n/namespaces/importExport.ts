@@ -1654,8 +1654,9 @@ export const importExport = defineNamespace({
     "importExport.recordingChoice.descriptionMany": plural({ one: "None of them came with a subtitle file. Choose once for all {count}.", other: "None of them came with a subtitle file. Choose once for all {count}." }),
     "importExport.recordingChoice.wholeNote": "Whole, it comes in as one line, and you can split it into lines later from its ⋯ menu.",
     "importExport.recordingChoice.wholeNoteMany": "Whole, each comes in as one line, and you can split them into lines later from their ⋯ menu.",
-    "importExport.recordingChoice.captionsNotRead": plural({
-      one: "{name} is over {maxSize}, so it was not checked for captions inside it. If it has any, import them as a subtitle file along with it.",
+    "importExport.recordingChoice.captionsNotRead": "{name} is over {maxSize}, so it was not checked for captions inside it. If it has any, import them as a subtitle file along with it.",
+    "importExport.recordingChoice.captionsNotReadMany": plural({
+      one: "{count} of these is over {maxSize}, so it was not checked for captions inside it. If it has any, import them as a subtitle file along with it.",
       other: "{count} of these are over {maxSize}, so they were not checked for captions inside them. If they have any, import them as subtitle files along with them.",
     }),
     "importExport.recordingChoice.inAll": "In all",
@@ -5157,7 +5158,8 @@ export const importExport = defineNamespace({
       "importExport.recordingChoice.descriptionMany": { description: "Description under the title when several recordings with no subtitle file are imported together; one choice applies to all.", placeholders: { count: "How many recordings (always 2 or more)." } },
       "importExport.recordingChoice.wholeNote": { description: "Note under the recording's name in the last import step: what 'Import whole recording' does. '⋯' is the More menu." },
       "importExport.recordingChoice.wholeNoteMany": { description: "Same note as importExport.recordingChoice.wholeNote, for several recordings." },
-      "importExport.recordingChoice.captionsNotRead": { description: "Note in the last import step when a film (.mp4) or recording (.m4a) was too big to be read for captions stored inside it, so it is offered as if it had none. Says so and what to do. Singular or plural by how many such files.", placeholders: { name: "The file's name, e.g. 'Episode 101.mp4' (used in the singular only).", count: "How many files were not checked.", maxSize: "The size limit, e.g. '95.0 MB'." } },
+      "importExport.recordingChoice.captionsNotRead": { description: "Note in the last import step when ONE film (.mp4) or recording (.m4a) was too big to be read for captions stored inside it, so it is offered as if it had none. Says so and what to do.", placeholders: { name: "The file's name, e.g. 'Episode 101.mp4'.", maxSize: "The size limit, e.g. '95.0 MB'." } },
+      "importExport.recordingChoice.captionsNotReadMany": { description: "The same note when SEVERAL of the files being imported were too big to be read for captions stored inside them.", placeholders: { count: "How many files were not checked.", maxSize: "The size limit, e.g. '95.0 MB'." } },
       "importExport.recordingChoice.inAll": { description: "Label of the total row under a list of recordings to import, before their total length.", maxLength: 20 },
       "importExport.recordingChoice.list": { description: "Accessible name of the list of recordings in the last import step (screen readers only)." },
       "importExport.recordingChoice.importWhole": { description: "Button in the last import step: bring the recording in as one line, without transcribing it. Singular or plural by how many recordings are being imported.", maxLength: 32 },

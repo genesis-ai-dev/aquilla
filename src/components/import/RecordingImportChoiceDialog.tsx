@@ -122,9 +122,9 @@ export function RecordingImportChoiceDialog({
                 <p className="text-sm text-muted-foreground">{t(many ? "importExport.recordingChoice.wholeNoteMany" : "importExport.recordingChoice.wholeNote")}</p>
                 {unchecked.length > 0 && (
                   <p className="text-sm text-muted-foreground" data-testid="recording-import-captions-unread">
-                    {t("importExport.recordingChoice.captionsNotRead", {
-                      count: unchecked.length, name: unchecked[0]!.name, maxSize: captionFileLimitLabel(locale),
-                    })}
+                    {unchecked.length === 1
+                      ? t("importExport.recordingChoice.captionsNotRead", { name: unchecked[0]!.name, maxSize: captionFileLimitLabel(locale) })
+                      : t("importExport.recordingChoice.captionsNotReadMany", { count: unchecked.length, maxSize: captionFileLimitLabel(locale) })}
                   </p>
                 )}
               </div>

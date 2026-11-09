@@ -13,7 +13,7 @@ import { useAccountAnalytics } from "@/hooks/useAccountAnalytics"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { recordGroup, type StepInput } from "@/lib/history/history"
-import { AudioLines, Languages, Sparkles, Wand2, X } from "lucide-react"
+import { AudioLines, Languages, Play, Sparkles, Wand2, X } from "lucide-react"
 import { toast } from "@/components/ui/toast"
 import { Spinner } from "@/components/ui/spinner"
 import type { CellData } from "@/hooks/useCells"
@@ -29,6 +29,7 @@ import { emitCellValidate, emitCellUnvalidate, emitCellAudioValidate, emitCellAu
 import { useAudioValidationCommit } from "@/lib/audio/audio-validation-commit"
 import { isBulkAudioValidatableByMe, isBulkAudioUnvalidatableByMe } from "@/lib/review/bulk-audio-validation"
 import { fileHasAudio as fileHasAnyAudio } from "@/lib/audio/file-has-audio"
+import { hasPlayableAudio, startQueue } from "@/lib/audio/play-queue"
 import { mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import { BatchVoiceDialog } from "@/components/voice/BatchVoiceDialog"
 import { audioEntryFromCell, audioValidationTakes } from "@/lib/audio/audio-validation-permissions"
@@ -334,6 +335,47 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
     () => (audioByCellId ? mergeCellsWithAudio(selectedCells, audioByCellId) : selectedCells),
     [selectedCells, audioByCellId],
   )
+
+  // AQU-2123: the selection in the order the TABLE shows it. `getCellsByIds`
+  // preserves the order of the ids it is handed, and the selection set is in
+  // the order the user picked the lines — so shift-clicking verse 10 and then
+  // verse 2 would otherwise play 10 before 2. A range run is "verses 2 to 10",
+  // never "the order I happened to click".
+  const playbackRange = useMemo(() => {
+    const rank = new Map(fileCellIds.map((id, i) => [id, i]))
+    return [...selectedCellsWithAudio].sort(
+      (a, b) => (rank.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.id) ?? Number.MAX_SAFE_INTEGER),
+    )
+  }, [selectedCellsWithAudio, fileCellIds])
+  // The lines a range run will actually sound. The queue skips a selected line
+  // with no audio and carries on, so this is a count for the button's badge and
+  // the has-anything-to-play test — not a filter on what is handed to the queue
+  // (dropping the silent lines would be the same run, one highlight short).
+  const playableSelectedCount = useMemo(
+    () => playbackRange.filter(hasPlayableAudio).length,
+    [playbackRange],
+  )
+
+  /**
+   * AQU-2123: play the chosen lines back to back, hands-free, and STOP after
+   * the last one — the Chinese Lg Project team leads' way of reviewing a
+   * recorded range (verses 2-10) without clicking every line's own play.
+   *
+   * `snapshot: true` is what bounds the run, and it is doing two jobs:
+   *   - ProjectWorkspace's `onQueueRanOut` listener ignores a snapshot context,
+   *     so a range run does NOT roll on into the next chapter the way "Play
+   *     all" deliberately does;
+   *   - `updateQueueCells` refuses to clobber a snapshot context's cells, so
+   *     the playback bar's keep-cells-fresh effect cannot swap the whole file
+   *     back in and march the run past verse 10.
+   * It also keeps the file-wide playhead from being yanked to the left edge
+   * (`progOwnsProgressClock`). This is the same contract a single line's own
+   * play button already uses; a range is just a longer deliberate subset.
+   */
+  const onPlaySelected = useCallback(() => {
+    if (!session?.jwt) return
+    startQueue({ cells: playbackRange, projectId: project.id, session, snapshot: true }, 0, true)
+  }, [playbackRange, project.id, session])
 
   // AQU-1722: a line's name the way the reader sees it — its reference, else
   // the table's # column, else nothing. The same rule the partial-validate
@@ -731,6 +773,34 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
         )}
       </span>
       <div className="mx-1 h-5 w-px rounded-lg" />
+      {/* AQU-2123: hands-free review of a chosen range. First of the audio
+          actions because it is the one a team lead reaching for a selection in
+          the Audio lens wants: listen to what is there, then decide. Offered on
+          an audio-only lane too (there is audio to hear and no text to voice),
+          which is why this is the one audio action not gated on `audioOnlyLane`. */}
+      {audioMode && (
+        <AppTooltip content={
+          !session?.jwt ? t("editor.selection.playSelectedUnavailable") :
+          playableSelectedCount === 0 ? t("editor.selection.playSelectedNoAudio") :
+          null
+        }>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            onClick={onPlaySelected}
+            disabled={playableSelectedCount === 0 || !session?.jwt}
+          >
+            <Play className="me-1 h-3.5 w-3.5" />
+            {t("editor.selection.playSelected")}
+            {playableSelectedCount > 0 && (
+              <span className="ms-1 rounded-md bg-foreground/10 px-1.5 py-0.5 tabular-nums">
+                {playableSelectedCount}
+              </span>
+            )}
+          </Button>
+        </AppTooltip>
+      )}
       {/* AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button.
           These carry their own words, so they have none. Why one is greyed
           out opens on a click on it; what Voice together and Generate voice

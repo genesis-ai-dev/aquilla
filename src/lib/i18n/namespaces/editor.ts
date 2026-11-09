@@ -699,6 +699,9 @@ export const editor = defineNamespace({
     "editor.selection.actions": "Selection actions",
     "editor.selection.count": "{count} selected",
     "editor.selection.needTranslation": "({count} need translation)",
+    "editor.selection.playSelected": "Play selected",
+    "editor.selection.playSelectedNoAudio": "None of the selected lines has audio yet",
+    "editor.selection.playSelectedUnavailable": "Playback isn't available here",
     "editor.selection.voiceTogether": "Voice together",
     "editor.selection.voiceUnavailable": "Voicing isn't available here",
     "editor.selection.voiceNeedTwo": "Select at least two translated lines",
@@ -6744,6 +6747,25 @@ export const editor = defineNamespace({
           "cells are still empty. Parenthesised because it qualifies the count " +
           "before it.",
         placeholders: { count: "Number of selected cells with no translation yet." },
+      },
+      "editor.selection.playSelected": {
+        description:
+          "Button in the selection toolbar (Audio only) that plays the selected " +
+          "lines' audio one after another, in the order the table shows them, and " +
+          "stops after the last one. 'Play' is a verb. A number beside it counts " +
+          "the selected lines that have audio to play.",
+        maxLength: 22,
+      },
+      "editor.selection.playSelectedNoAudio": {
+        description:
+          "Tooltip when the play-selected button is disabled because not one of " +
+          "the selected lines has any audio recorded or generated yet, so there " +
+          "is nothing to play.",
+      },
+      "editor.selection.playSelectedUnavailable": {
+        description:
+          "Tooltip when the play-selected button is disabled because this project " +
+          "is not signed in to the audio service, so no clip can be fetched.",
       },
       "editor.selection.voiceTogether": {
         description:

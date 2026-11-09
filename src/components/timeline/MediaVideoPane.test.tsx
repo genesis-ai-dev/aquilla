@@ -341,6 +341,62 @@ describe("MediaVideoPane", () => {
       expect(video.currentTime).toBe(12.5)
     })
 
+    // AQU-2253 (Sam, Nov 9): a linked film plays on its own clock, so Play
+    // runs on past the last line to the film's end. The queue keeps its clock
+    // running there (still "playing", still on the last line, which is how it
+    // stays this file's), and the picture simply carries on.
+    describe("over the film's tail, after the last line", () => {
+      // A new element each time: the queue here is a mock the pane reads on render.
+      const following = () => <MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={subs} followsRecordings />
+      const at = (sec: number, filmTail: boolean) =>
+        sounding("s2", { progress: { currentTime: sec, duration: 27, rate: 1, volume: 1, programmeClock: true, filmTail } })
+
+      it("the picture is left running: not stopped, not sent anywhere, as the clock runs on", () => {
+        vi.useFakeTimers()
+        try {
+          vi.setSystemTime(1_000_000)
+          const view = render(following())
+          const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
+          Object.defineProperty(video, "duration", { value: 27, configurable: true })
+          video.play = vi.fn(() => Promise.resolve())
+          video.pause = vi.fn()
+          // The last line plays to its end at 9 s…
+          at(8.9, false)
+          view.rerender(following())
+          expect(video.currentTime).toBe(8.9)
+          // …and the clock runs on over the film, a beat at a time.
+          let seeks = 0
+          let sec = 8.9
+          Object.defineProperty(video, "currentTime", {
+            configurable: true,
+            get: () => sec,
+            set: (v: number) => { seeks++; sec = v },
+          })
+          for (const tick of [9.0, 9.1, 9.2, 9.3]) {
+            vi.setSystemTime(1_000_000 + Math.round((tick - 8.9) * 1000))
+            sec = tick // the film, playing on by itself
+            at(tick, true)
+            view.rerender(following())
+          }
+          expect(seeks).toBe(0)
+          expect(video.pause).not.toHaveBeenCalled()
+          expect(video.muted).toBe(false)
+        } finally {
+          vi.useRealTimers()
+        }
+      })
+
+      it("the last line's caption does not stay on the picture", () => {
+        const view = render(following())
+        at(8, false)
+        view.rerender(following())
+        expect(screen.getByTestId("video-pane-caption-target")).toHaveTextContent("Ligne deux")
+        at(9.2, true)
+        view.rerender(following())
+        expect(screen.queryByTestId("video-pane-caption")).toBeNull()
+      })
+    })
+
     // AQU-2253 (review, Nov 9): the sound pick counts following the recordings
     // too. A streamed film beside an uploaded recording starts on the
     // recording (today's default), so the film is the quiet one in both

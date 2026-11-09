@@ -18,7 +18,7 @@ import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
 import { cn } from "@/lib/utils"
 import {
   hasAnyPlayableAudio, pauseQueue, queueClockIsFileTime, resumeQueue, seekQueueToTime,
-  setQueueRate, setQueueVolume, skipBack, skipForward, startQueue, updateQueueCells,
+  setQueueRate, setQueueVolume, skipBack, skipForward, startQueue, updateQueueCells, useProgrammeFilmEndSec,
 } from "@/lib/audio/play-queue"
 import { toggleAudibility, useQueueAudibility } from "@/lib/audio/audibility"
 import { useTransportForFile } from "@/hooks/useTransportForFile"
@@ -174,7 +174,14 @@ export function VoicePlaybackBar({
       : 0),
     [showsLaidOut, cells, programmeTracks],
   )
-  const shownLengthSec = showsLaidOut ? laidOutSec : duration
+  // AQU-2253 (Sam, Nov 9): following the recordings a LINKED film plays on its
+  // own clock, so Play runs to whichever ends later: the lines or the film.
+  // The film's length where these lines have one to run on over (the
+  // workspace's word, through the queue), else null. Before play the length
+  // shown reaches the film's end, as the queue's own does once it plays.
+  const filmEndSec = useProgrammeFilmEndSec(cellIds)
+  const filmRunsOn = freeTiming && transport.source === "queue" && filmEndSec != null
+  const shownLengthSec = showsLaidOut ? Math.max(laidOutSec, filmRunsOn ? filmEndSec : 0) : duration
 
   // A picture is always playable; the queue needs a clip to play. Neither is
   // knowable before the file's attachments are read: a source clip arriving

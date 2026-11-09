@@ -86,6 +86,41 @@ export function filmVoicesProgramme(args: {
 }
 
 /**
+ * AQU-2253 (Sam, Nov 9): following the recordings, a LINKED film plays on its
+ * own clock, so Play runs to whichever ends later: the lines or the film.
+ * This is the film's length where that holds, for the queue to run its clock
+ * on to (play-queue's `setProgrammeFilm`), and null wherever Play ends with
+ * the lines as it always did:
+ *
+ *   - following the source (the film or the recording is the transport);
+ *   - an imported film, which is cut into its lines and lasts as long as they;
+ *   - a film that could not be loaded, so nothing waits on a dead film;
+ *   - a film that is not on screen, or whose length is not known yet;
+ *   - one chapter of a book on the timeline: the lines there are a chapter's,
+ *     and Play all goes on into the next chapter when they end.
+ *
+ * The sound pick does not count here. It decides what is HEARD over the
+ * lines (`filmVoicesProgramme`) and whether the film is muted; the picture
+ * runs on to its end either way, with whichever sound was picked for it.
+ */
+export function linkedFilmRunOnSec(args: {
+  kind: FilmKind | null
+  paneOnScreen: boolean
+  followsRecordings: boolean
+  /** The film pane is showing "This film could not be loaded". */
+  filmFailed?: boolean
+  /** The film's length (lib/timeline/video-duration); null while unknown. */
+  durationSec: number | null | undefined
+  /** The timeline shows one chapter of a book. */
+  chapterOfABook?: boolean
+}): number | null {
+  if (args.kind !== "linked" || !args.paneOnScreen || !args.followsRecordings) return null
+  if (args.filmFailed || args.chapterOfABook) return null
+  const sec = args.durationSec
+  return typeof sec === "number" && Number.isFinite(sec) && sec > 0 ? sec : null
+}
+
+/**
  * One line's piece of an imported film, following the recordings: where it
  * sits on the timeline (the line's slot) and which stretch of the film it
  * shows. `atSec`/`lenSec` are timeline seconds, `filmStartSec`/`filmEndSec`

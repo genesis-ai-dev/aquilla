@@ -9,6 +9,7 @@ import {
   filmMomentAt,
   filmPiecesFor,
   filmVoicesProgramme,
+  linkedFilmRunOnSec,
   pieceHeldSec,
   visibleFilmPieceStrips,
   type FilmPiece,
@@ -120,6 +121,43 @@ describe("filmVoicesProgramme — whose sound plays following the recordings", (
         kind: "linked", paneOnScreen: true, followsRecordings: true, recordingIsTheSound: false, filmFailed: false,
       }),
     ).toBe(true)
+  })
+})
+
+// AQU-2253 (Sam, Nov 9): following the recordings a LINKED film plays on its
+// own clock, so Play runs to whichever ends later: the lines or the film.
+describe("linkedFilmRunOnSec: the film Play runs on over, following the recordings", () => {
+  const linked = { kind: "linked", paneOnScreen: true, followsRecordings: true, durationSec: 2700 } as const
+
+  it("a linked film on screen: its length", () => {
+    expect(linkedFilmRunOnSec(linked)).toBe(2700)
+  })
+
+  it("following the source: nothing, the film or the recording is the transport there", () => {
+    expect(linkedFilmRunOnSec({ ...linked, followsRecordings: false })).toBeNull()
+  })
+
+  it("an imported film: nothing, it is cut into its lines and ends with them", () => {
+    expect(linkedFilmRunOnSec({ ...linked, kind: "imported" })).toBeNull()
+  })
+
+  it("a film that could not be loaded: nothing, Play ends where the lines end", () => {
+    expect(linkedFilmRunOnSec({ ...linked, filmFailed: true })).toBeNull()
+  })
+
+  it("no film, or none on screen: nothing", () => {
+    expect(linkedFilmRunOnSec({ ...linked, kind: null })).toBeNull()
+    expect(linkedFilmRunOnSec({ ...linked, paneOnScreen: false })).toBeNull()
+  })
+
+  it("a length not known yet, or not a length: nothing", () => {
+    expect(linkedFilmRunOnSec({ ...linked, durationSec: null })).toBeNull()
+    expect(linkedFilmRunOnSec({ ...linked, durationSec: 0 })).toBeNull()
+    expect(linkedFilmRunOnSec({ ...linked, durationSec: Number.NaN })).toBeNull()
+  })
+
+  it("one chapter of a book on the timeline: nothing, Play all goes on into the next chapter", () => {
+    expect(linkedFilmRunOnSec({ ...linked, chapterOfABook: true })).toBeNull()
   })
 })
 

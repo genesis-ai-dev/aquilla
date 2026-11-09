@@ -385,13 +385,18 @@ export function MediaVideoPane({
   useEffect(() => {
     if (slaved) setVideoSoundingCellId(null)
   }, [slaved])
+  const queueOverFilmTail = followsRecordings && queue.progress.filmTail === true
   const soundingCell = useMemo(() => {
     // The queue wins whenever it is running, unconditionally — today's exact
     // rule, so nothing about the dubbing arrangement changes.
-    if (queue.cellId != null) return cells.find((c) => c.id === queue.cellId)
+    // AQU-2253 (Sam, Nov 9): but over a linked film's tail, past the last
+    // line, no line is playing: the queue only stays on the last line there
+    // to keep its clock this file's, and that line's caption would sit on the
+    // picture for the rest of the film.
+    if (queue.cellId != null) return queueOverFilmTail ? undefined : cells.find((c) => c.id === queue.cellId)
     if (slaved || standaloneCellId == null) return undefined
     return cells.find((c) => c.id === standaloneCellId)
-  }, [cells, queue.cellId, slaved, standaloneCellId])
+  }, [cells, queue.cellId, queueOverFilmTail, slaved, standaloneCellId])
   // Is the queue's clock a second of the FILM? A recording's file second is;
   // following the recordings so is the programme's (AQU-2253), and a take
   // played on its own per-take clock never is.

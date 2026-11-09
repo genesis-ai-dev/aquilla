@@ -70,7 +70,7 @@ vi.mock("@/lib/timeline/programme", async (importActual) => {
 })
 
 import { VoicePlaybackBar } from "./VoicePlaybackBar"
-import { startQueue, setQueueRate, __setQueuePlaybackForTests } from "@/lib/audio/play-queue"
+import { startQueue, setQueueRate, setProgrammeFilm, __setQueuePlaybackForTests } from "@/lib/audio/play-queue"
 import { layOutProgramme } from "@/lib/timeline/programme"
 import { TimingModeControl } from "@/components/timeline/TimingModeControl"
 import { pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
@@ -444,5 +444,53 @@ describe("VoicePlaybackBar — the strip's length (AQU-1758)", () => {
     expect(layOutProgramme(cells, tracks).programme.totalSec).toBeCloseTo(117.94, 2)
     render(<VoicePlaybackBar variant="strip" cells={cells} projectId="p" session={null} settings={undefined} freeTiming programmeTracks={tracks} />)
     expect(screen.getByTestId("transport-time")).toHaveTextContent("0:00 / 1:31")
+  })
+})
+
+// AQU-2253 (Sam, Nov 9): following the recordings a LINKED film plays on its
+// own clock, so Play runs to whichever ends later: the lines or the film. The
+// workspace tells the queue the film's length and which lines are its file's
+// (`setProgrammeFilm`); the strip shows the length Play will run to.
+describe("VoicePlaybackBar: a linked film following the recordings (AQU-2253)", () => {
+  const session = { jwt: "t" } as unknown as FrontierSession
+  const take = (id: string, ms: number): CellData => {
+    const audioId = `audio-${id}-1700000000-take.wav`
+    return cell({
+      id, cellLabel: id, translated: "",
+      selectedAudioId: audioId,
+      attachments: { [audioId]: { type: "audio", url: "frontier-audio://take", durationMs: ms } },
+    } as Partial<CellData>)
+  }
+  // Two recorded lines, 87.94 s laid end to end.
+  const RECORDED = [take("v1", 43_700), take("v2", 44_240)]
+  const strip = (cells: CellData[], over: Partial<React.ComponentProps<typeof VoicePlaybackBar>> = {}) => (
+    <VoicePlaybackBar
+      variant="strip" cells={cells} projectId="p" session={session} settings={undefined}
+      coreMediaUrl="https://films.test/episode.m3u8" videoPaneOnScreen freeTiming {...over}
+    />
+  )
+  const filmFor = (cells: CellData[], endSec: number) =>
+    act(() => setProgrammeFilm({ endSec, cellIds: new Set(cells.map((c) => c.id)) }))
+
+  beforeEach(() => {
+    transportSource.value = "queue"
+    vi.mocked(startQueue).mockClear()
+    __setQueuePlaybackForTests({ cellId: null, currentTime: 0, playing: false, duration: 0 })
+  })
+  afterEach(() => {
+    act(() => setProgrammeFilm(null))
+  })
+
+  it("before play, the length shown is the film's when it outlasts the lines", () => {
+    render(strip(RECORDED))
+    expect(screen.getByTestId("transport-time")).toHaveTextContent("0:00 / 1:28")
+    filmFor(RECORDED, 2700)
+    expect(screen.getByTestId("transport-time")).toHaveTextContent("0:00 / 45:00")
+  })
+
+  it("before play, a film shorter than the lines leaves the lines' length", () => {
+    render(strip(RECORDED))
+    filmFor(RECORDED, 30)
+    expect(screen.getByTestId("transport-time")).toHaveTextContent("0:00 / 1:28")
   })
 })

@@ -221,7 +221,7 @@ import { CloneVoiceModalHost } from "./voice/CloneVoiceModalHost"
 import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
 import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
   setQueueTargetSlots, setQueueLayerTrackSlots, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying,
-  hasAnyPlayableAudio, onQueueRanOut, stopQueue, setProgrammeSourceVoicedByFilm } from "@/lib/audio/play-queue"
+  hasAnyPlayableAudio, onQueueRanOut, stopQueue, setProgrammeSourceVoicedByFilm, setProgrammeFilm } from "@/lib/audio/play-queue"
 import {
   chapterOfCell, nextPlayableChapter, resolveTimelineChapter, scopeCells, sequenceTimelineCells,
   timelineChaptersOf, type TimelineChapter,
@@ -359,7 +359,7 @@ import {
 } from "@/lib/audio/linked-takes"
 import { deriveSourceRegions, insertSlotsByCell, EMPTY_INSERT_SLOTS } from "@/lib/timeline/source-regions"
 import { deriveTracksForFile } from "@/lib/timeline/tracks"
-import { filmKindOf, filmPiecesFor, filmVoicesProgramme } from "@/lib/timeline/film-pieces"
+import { filmKindOf, filmPiecesFor, filmVoicesProgramme, linkedFilmRunOnSec } from "@/lib/timeline/film-pieces"
 import { layOutProgramme, playsHeardLines, recordingsLines } from "@/lib/timeline/programme"
 import { nextFolderName } from "@/lib/timeline/track-names"
 import { applyPendingOrders, renormaliseOrders, settledPendingOrders } from "@/lib/timeline/track-reorder"
@@ -15150,6 +15150,31 @@ export function ProjectWorkspace() {
     () => recordingsLines(timelineCells, audioCueCells, timingMode === "audioFirst"),
     [timelineCells, audioCueCells, timingMode],
   )
+  // AQU-2253 (Sam, Nov 9): following the recordings a LINKED film plays on its
+  // own clock, so Play runs to whichever ends later: the lines or the film.
+  // The queue is told how long the film is and which lines are this file's,
+  // and keeps its clock running past the last line to the film's end; the
+  // picture, already following that clock, carries on with its own sound.
+  // Null wherever Play ends with the lines as before (`linkedFilmRunOnSec`):
+  // following the source, an imported film, a film that could not be loaded.
+  const filmRunOnSec = linkedFilmRunOnSec({
+    kind: filmKind,
+    paneOnScreen: showVideoPane,
+    followsRecordings: timingMode === "audioFirst",
+    filmFailed,
+    durationSec: videoDurationForTable,
+    chapterOfABook: timelineScopes.length > 0,
+  })
+  const programmeFilm = useMemo(
+    () => (filmRunOnSec != null ? { endSec: filmRunOnSec, cellIds: new Set(playbackCells.map((c) => c.id)) } : null),
+    [filmRunOnSec, playbackCells],
+  )
+  // No cleanup between changes: taking the film away for a beat would end a
+  // run that is playing over its tail. It is taken away when the workspace goes.
+  useEffect(() => {
+    setProgrammeFilm(programmeFilm)
+  }, [programmeFilm])
+  useEffect(() => () => setProgrammeFilm(null), [])
   // The film follows the queue on the lines it plays, and captions the one
   // playing: the heard lines too, when it plays them.
   const filmPaneCells = useMemo(

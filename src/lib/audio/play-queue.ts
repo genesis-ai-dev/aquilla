@@ -257,6 +257,15 @@ export interface QueueProgress {
    * set per call site, so it cannot drift from whichever path wrote the value.
    */
   programmeClock: boolean
+  /**
+   * AQU-2253 (Sam, Nov 9): true while the programme's clock is past the last
+   * line, running on over a linked film's tail (`progEnterTail`). The queue's
+   * state still names the last line there, which is how the run stays its
+   * file's; this says no line is playing, so nothing captions the film with
+   * the last line's words for the rest of its length. Derived with
+   * `programmeClock`, in the same place.
+   */
+  filmTail?: boolean
 }
 
 let progress: QueueProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1, programmeClock: false }
@@ -269,7 +278,9 @@ function setProgress(patch: Partial<QueueProgress>): void {
   // each of the ~15 writers: the programme and dubbing paths both write
   // `currentTime`, and a writer that forgot the tag would silently hand a
   // per-clip second to a consumer painting a programme position. (AQU-1747)
-  progress = { ...progress, ...patch, programmeClock: progOwnsProgressClock() }
+  const programmeClock = progOwnsProgressClock()
+  const next = { ...progress, ...patch }
+  progress = { ...next, programmeClock, filmTail: programmeClock && progOverFilmTail(next.currentTime) }
   notifyProgress()
 }
 
@@ -356,6 +367,108 @@ function sourceElementMuted(el: HTMLAudioElement): boolean {
 export function setProgrammeSourceVoicedByFilm(on: boolean): void {
   progSourceVoicedByFilm = on
   if (currentAudio) currentAudio.muted = sourceElementMuted(currentAudio)
+}
+
+// ── AQU-2253 (Sam, Nov 9): a linked film runs on past the lines ─────────────
+//
+// Following the recordings, a LINKED film plays on its own clock, so Play runs
+// to whichever ends later: the lines or the film. The film is never the
+// queue's to play: its picture follows the programme's clock, with its own
+// sound (MediaVideoPane). So all the queue does is keep that clock running
+// past the last line, to the film's end, exactly as it does under a take on
+// another track that runs on past the last line (`progEnterTail`); the picture,
+// already playing, simply carries on, and nothing here ever starts it.
+//
+// The workspace says how long the film is and whose it is (`setProgrammeFilm`),
+// and says nothing (null) wherever Play must end with the lines as it always
+// did: following the source, an imported film (cut into its lines), a film
+// that could not be loaded, one that is not on screen, a length not known yet.
+// The lines are named so that only a run of that file's whole list runs on
+// over its film: one line played on its own, a run of some of the lines (a
+// selection) and another file's lines all end where their lines end.
+export interface ProgrammeFilm {
+  /** The film's length: its end on its own clock, which following the
+   *  recordings is the programme's. */
+  endSec: number
+  /** The lines Play plays on the film's file. */
+  cellIds: ReadonlySet<string>
+}
+let progFilm: ProgrammeFilm | null = null
+const progFilmListeners = new Set<() => void>()
+/** The film's end for the run the programme is laid out for; 0 when the run
+ *  has no film to run on over. Worked out when either changes
+ *  (`progFilmResolve`), never per line. */
+let progFilmEndSec = 0
+
+export function setProgrammeFilm(film: ProgrammeFilm | null): void {
+  if (progFilm === film) return
+  if (progFilm && film && progFilm.endSec === film.endSec && progFilm.cellIds === film.cellIds) return
+  progFilm = film
+  progFilmResolve()
+  if (timingMode === "audioFirst" && programme && progIndex >= 0) {
+    setProgress({ duration: progEndSec(programme) })
+    // Over the film's tail already: its clock runs to the film's NEW end, or,
+    // with no film any more (it could not be loaded), the run ends here
+    // rather than wait out a film that is not playing. A film whose lines
+    // are for the moment not the run's (a line added, and the run's own list
+    // arriving a beat later) changes nothing: the next word settles it.
+    if (!film || progFilmEndSec > 0) progReenterFilmTail(true)
+  }
+  for (const l of progFilmListeners) l()
+}
+
+/**
+ * The length of the linked film Play runs on over, for the surface showing
+ * these lines; null when there is none (see `setProgrammeFilm`). The bottom
+ * strip reads it: Play is offered while there is a film to run, and the length
+ * shown before anything plays reaches the film's end.
+ */
+export function useProgrammeFilmEndSec(cellIds: ReadonlySet<string>): number | null {
+  const film = useSyncExternalStore(
+    (l) => {
+      progFilmListeners.add(l)
+      return () => { progFilmListeners.delete(l) }
+    },
+    () => progFilm,
+    () => progFilm,
+  )
+  return useMemo(() => {
+    if (!film || film.cellIds.size === 0 || film.cellIds.size !== cellIds.size) return null
+    for (const id of cellIds) if (!film.cellIds.has(id)) return null
+    return film.endSec
+  }, [film, cellIds])
+}
+
+/** Whether the run in hand is the film's: the whole list of its file's lines. */
+function progRunIsTheFilms(film: ProgrammeFilm, ctx: PlayContext): boolean {
+  if (ctx.snapshot || ctx.cells.length === 0 || ctx.cells.length !== film.cellIds.size) return false
+  return ctx.cells.every((c) => film.cellIds.has(c.id))
+}
+
+function progFilmResolve(): void {
+  const film = progFilm
+  const ctx = activeContext
+  const prog = programme
+  const applies = Boolean(
+    timingMode === "audioFirst" && film && ctx && prog && prog.slots.length > 0 && progRunIsTheFilms(film, ctx),
+  )
+  progFilmEndSec = applies && film ? film.endSec : 0
+}
+
+/** Is this programme second past the last line, on a run with a film to run
+ *  on over? (`QueueProgress.filmTail`) */
+function progOverFilmTail(sec: number): boolean {
+  if (progFilmEndSec <= 0) return false
+  const slots = programme?.slots ?? []
+  const last = slots[slots.length - 1]
+  if (!last || progIndex !== slots.length - 1) return false
+  const linesEnd = last.startSec + last.slotLenSec
+  return progFilmEndSec - linesEnd > HOLD_MIN_SEC && sec >= linesEnd - 0.001
+}
+
+/** How long the run is: the programme, or a linked film that outlasts it. */
+function progEndSec(prog: Programme): number {
+  return Math.max(prog.totalSec, progFilmEndSec)
 }
 
 export function useQueueAudibility(): TrackAudibility {
@@ -689,6 +802,9 @@ export function setQueueRate(rate: number): void {
   for (const e of overlayPool) if (e.element) e.element.playbackRate = rate
   setProgress({ rate })
   aimTakeEdge()
+  // AQU-2253 (Sam, Nov 9): over a linked film's tail the clock is a held one,
+  // armed at the old speed; the film has just changed speed, so it follows.
+  progReenterFilmTail()
 }
 
 /** Set queue volume 0..1 (applies live + to subsequent tracks). An element
@@ -1022,6 +1138,7 @@ function progRebuild(): void {
     progHiddenCellIds = new Set()
     progUnderLayers = new Set()
     progLayers = NO_LAYERS
+    progFilmResolve()
     return
   }
   // Must match the timeline's own ordering exactly, or the transport and the
@@ -1053,13 +1170,16 @@ function progRebuild(): void {
     progHiddenCellIds = new Set()
     progUnderLayers = new Set()
     progLayers = NO_LAYERS
+    progFilmResolve()
     return
   }
   programme = played.programme
   progHiddenCellIds = played.hiddenCellIds
   progUnderLayers = played.underLayers
   progLayers = buildLayerSchedule(programme, ctx.cells)
-  setProgress({ duration: programme.totalSec })
+  // AQU-2253 (Sam, Nov 9): …or as long as a linked film that outlasts the lines.
+  progFilmResolve()
+  setProgress({ duration: progEndSec(programme) })
 }
 
 /** A verse with something to hear: an original or a take the programme can
@@ -1362,6 +1482,7 @@ function progArmHold(
   explicit: boolean,
   endSec = slot.startSec + slot.slotLenSec,
   onEnd: () => void = progAdvance,
+  tickMs = 100,
 ): void {
   progClearLead()
   const rate = progress.rate || 1
@@ -1374,7 +1495,7 @@ function progArmHold(
   hold.ticker = setInterval(() => {
     if (progLead !== hold) return
     setProgress({ currentTime: progLeadNowSec(hold) })
-  }, 100)
+  }, tickMs)
   hold.timer = setTimeout(() => {
     if (progLead !== hold) return
     progClearLead()
@@ -1385,6 +1506,8 @@ function progArmHold(
 
 /** A rest this short is a clock's rounding, not a stretch worth holding. */
 const HOLD_MIN_SEC = 0.02
+/** AQU-2253: how often the clock is published over a linked film's tail. */
+const FILM_TAIL_TICK_MS = 250
 
 /**
  * AQU-2252 (Sam, Oct 29): the line's own sides — its take on the main track,
@@ -1419,6 +1542,12 @@ function progLineEnded(atSec: number): void {
  * in silence under the layer from `atSec` (never before the last line's end)
  * to the programme's end, then playback finishes. False when nothing sounds
  * there, which leaves the caller to finish (or land) as it always did.
+ *
+ * AQU-2253 (Sam, Nov 9): a LINKED film plays on its own clock, so the same
+ * stretch is held while the film still runs there, to the film's end: Play
+ * runs to whichever ends later, the lines or the film. Its picture and sound
+ * are the film panel's, already following this clock; none of the queue's own
+ * players sound there (but a layer still playing out).
  */
 function progEnterTail(atSec: number, autoplay: boolean, explicit: boolean): boolean {
   const prog = programme
@@ -1426,14 +1555,17 @@ function progEnterTail(atSec: number, autoplay: boolean, explicit: boolean): boo
   const last = prog?.slots[lastIndex]
   if (!prog || !last) return false
   const at = Math.max(atSec, last.startSec + last.slotLenSec)
-  if (prog.totalSec - at <= HOLD_MIN_SEC || !layersSoundIn(progLayers, at + HOLD_MIN_SEC, Infinity)) return false
+  const layerRuns = prog.totalSec - at > HOLD_MIN_SEC && layersSoundIn(progLayers, at + HOLD_MIN_SEC, Infinity)
+  const filmRuns = progFilmEndSec - at > HOLD_MIN_SEC
+  if (!layerRuns && !filmRuns) return false
+  const endSec = Math.max(layerRuns ? prog.totalSec : 0, filmRuns ? progFilmEndSec : 0)
   progIndex = lastIndex
   progStartEndStop()
   progClearGate()
   progClearLead()
   for (const e of [...overlayPool]) if (!e.layer) removeOverlayEntry(e)
   progQuiet(currentAudio)
-  setProgress({ currentTime: at, duration: prog.totalSec })
+  setProgress({ currentTime: at, duration: progEndSec(prog) })
   if (!autoplay) {
     progCuedExplicit = explicit
     setState({ kind: "paused", ...progStateCell() })
@@ -1441,13 +1573,41 @@ function progEnterTail(atSec: number, autoplay: boolean, explicit: boolean): boo
     return true
   }
   setState({ kind: "playing", ...progStateCell() })
-  progArmHold(last, at, explicit, prog.totalSec, () => {
+  // A film's tail can last many minutes, so its clock is published at the
+  // pace a playing recording publishes its own (about four times a second,
+  // which is what the picture and the playhead are built to follow) rather
+  // than at a short hold's ten.
+  progArmHold(last, at, explicit, endSec, () => {
     const ctx = activeContext
     progFinish()
     notifyRanOut(ctx)
-  })
+  }, filmRuns ? FILM_TAIL_TICK_MS : undefined)
   progLayersSync(at)
   return true
+}
+
+/**
+ * AQU-2253 (Sam, Nov 9): playing over a linked film's tail, the held clock was
+ * armed for one speed and one end. A change of speed, or of the film (its
+ * length arriving, or the film failing), re-enters the stretch from where the
+ * clock is now, so the playhead goes on at the film's speed to the film's
+ * end; with nothing left to run on over, the run ends here.
+ * `filmWas`: the film itself changed, so the hold may have been the film's
+ * even though the run no longer has one.
+ */
+function progReenterFilmTail(filmWas = false): void {
+  const lead = progLead
+  if (!lead || lead.then !== "hold" || state.kind !== "playing") return
+  if (!filmWas && progFilmEndSec <= 0) return
+  const slots = programme?.slots ?? []
+  const last = slots[slots.length - 1]
+  if (!last || progIndex !== slots.length - 1) return
+  const now = progLeadNowSec(lead)
+  if (now < last.startSec + last.slotLenSec - 0.001) return
+  if (progEnterTail(now, true, lead.explicit)) return
+  const ctx = activeContext
+  progFinish()
+  notifyRanOut(ctx)
 }
 
 /** AQU-2252: is the transport in the stretch after the last line? */
@@ -1721,7 +1881,7 @@ function progStartSides(gate: ProgGate): void {
     slot = prog.slots[idx]
   }
   const into = Math.min(gate.into, Math.max(0, slot.slotLenSec - 0.001))
-  setProgress({ currentTime: slot.startSec + into, duration: prog.totalSec })
+  setProgress({ currentTime: slot.startSec + into, duration: progEndSec(prog) })
 
   const dubEl = gate.dueTarget
     ? (progMainEntry(gate.cellId)?.element ?? null)
@@ -2191,7 +2351,7 @@ async function progPlaySlot(
   // Park the clock at the landing position. Under a gate this is where the
   // playhead honestly WAITS (state "loading" — no rAF extrapolation) instead
   // of running ahead and snapping back when the dub's first tick lands.
-  setProgress({ currentTime: at, duration: prog.totalSec })
+  setProgress({ currentTime: at, duration: progEndSec(prog) })
   ctx.onCellChange?.(progStateCell().cellIndex, slot.cellId)
 
   if (!autoplay) {

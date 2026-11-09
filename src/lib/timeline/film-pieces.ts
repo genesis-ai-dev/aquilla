@@ -64,12 +64,24 @@ export function filmKindOf(
  * plays straight through with its picture. An imported film: never, its Source
  * audio row is the sound, cut into the lines as any uploaded recording is.
  * Following the source the recording is always the sound.
+ *
+ * AQU-2253 (review, Nov 9): two things count here exactly as they do following
+ * the source. The sound pick: where the file has an uploaded recording and it
+ * is the sound picked (`recordingDrivesPlayback`: the default beside a
+ * streamed film, a pick in the sound menu beside a YouTube film), the
+ * recording is heard on its lines and the film is the quiet one. And a film
+ * that could not be loaded voices nothing, so the lines' original is heard.
  */
 export function filmVoicesProgramme(args: {
   kind: FilmKind | null
   paneOnScreen: boolean
   followsRecordings: boolean
+  /** The file's uploaded recording is the sound picked (playback-source). */
+  recordingIsTheSound?: boolean
+  /** The film pane is showing "This film could not be loaded". */
+  filmFailed?: boolean
 }): boolean {
+  if (args.recordingIsTheSound || args.filmFailed) return false
   return args.kind === "linked" && args.paneOnScreen && args.followsRecordings
 }
 

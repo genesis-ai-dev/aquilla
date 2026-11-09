@@ -14876,10 +14876,17 @@ export function ProjectWorkspace() {
   // muted (it still clocks the lines) rather than voicing the same speech
   // twice. An imported film is silent: its Source audio row is the sound, by
   // the rules any uploaded recording follows.
+  // AQU-2253 (review, Nov 9): the sound pick and a film that could not be
+  // loaded count following the recordings too: the uploaded recording picked
+  // as the sound is heard on its lines, and a film that cannot play leaves
+  // the lines' original audible.
+  const [filmFailed, setFilmFailed] = useState(false)
   const filmVoicesTheProgramme = filmVoicesProgramme({
     kind: filmKind,
     paneOnScreen: showVideoPane,
     followsRecordings: timingMode === "audioFirst",
+    recordingIsTheSound: recordingDrivesPlayback(anyCellClockIsFileTime, playbackSource),
+    filmFailed,
   })
   useEffect(() => {
     setProgrammeSourceVoicedByFilm(filmVoicesTheProgramme)
@@ -19012,6 +19019,9 @@ export function ProjectWorkspace() {
                   // AQU-2253: following the recordings the film is shown on
                   // its own clock, following the programme's playhead.
                   followsRecordings={timingMode === "audioFirst"}
+                  // AQU-2253 (review, Nov 9): a film that cannot play
+                  // voices nothing, so the lines' original stays audible.
+                  onFilmFailed={setFilmFailed}
                   // AQU-2253 (Sam, Oct 30): an imported film is always
                   // silent, and following the recordings shows the piece of
                   // the line under the playhead.

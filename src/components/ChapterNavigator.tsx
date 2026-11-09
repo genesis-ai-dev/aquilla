@@ -16,10 +16,23 @@ import {
   CheckCheck,
   CheckIcon,
   CornerDownRight,
+  Ellipsis,
+  Plus,
   type LucideIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+} from "@/components/ui/dropdown-menu"
+import {
+  milestoneRowActions,
+  type MilestoneRowAction,
+} from "@/lib/editor/user-milestone-spans"
 import { groupChaptersByBook } from "@/lib/sidebar/book-sections"
 import {
   Combobox,
@@ -57,12 +70,61 @@ export interface MilestoneNavigationItem extends MilestoneProgress {
   shortLabel: string
   description: string
   subsections?: readonly MilestoneNavigationSubsection[]
+  /**
+   * AQU-2310: hand-set milestones nested inside this division, on a file whose
+   * divisions are not split into jump ranges (Scripture, prose — anything but
+   * IDML). Listed as their own rows under the division, always, rather than as
+   * `subsections`: the division itself stays a destination, prev/next still
+   * step division by division, and the trigger still names the division.
+   */
+  named?: readonly MilestoneNavigationSubsection[]
 }
 
 export interface MilestoneNavigationSubsection extends MilestoneProgress {
   key: string
   label: string
   firstCellId: string
+}
+
+/**
+ * AQU-2310: correcting milestones from the navigator. Passed only for someone
+ * at or above the milestone floor — absent, no row has an edit control and
+ * there is no "New milestone…" entry, which is the whole permission story on
+ * this side (the server enforces the same floor on the events).
+ */
+export interface MilestoneNavigatorEditing {
+  /**
+   * A row's edit control chose an action. `key` is that row's own key — a
+   * top-level entry's, or a nested hand-set milestone's subsection key —
+   * and the caller resolves it against the store, which knows the cells.
+   */
+  onAction: (key: string, action: MilestoneRowAction) => void
+  /** "New milestone…": the form, with nothing filled in. */
+  onNew: () => void
+}
+
+/** What one row's edit control was opened on. */
+interface RowMenuTarget {
+  key: string
+  label: string
+  actions: readonly MilestoneRowAction[]
+  /** Where the control WAS. The list closes as the menu opens, so the menu is
+   *  anchored to a snapshot of the control's rect, not to the control. */
+  anchor: { getBoundingClientRect: () => DOMRect }
+}
+
+const ROW_ACTION_LABEL: Record<MilestoneRowAction, MessageKey> = {
+  rename: "editor.milestone.rowActions.rename",
+  editRange: "editor.milestone.rowActions.editRange",
+  remove: "editor.milestone.rowActions.remove",
+}
+
+/** What a row's edit control offers — none for book headings. */
+function rowActionsFor(row: NavigationRow): readonly MilestoneRowAction[] {
+  if (row.bookHeader) return []
+  return row.subsection
+    ? milestoneRowActions({ key: row.subsection.key })
+    : milestoneRowActions({ key: row.milestone.key, kind: row.milestone.kind })
 }
 
 /**
@@ -73,6 +135,9 @@ interface NavigationRow {
   key: string
   milestone: MilestoneNavigationItem
   subsection?: MilestoneNavigationSubsection
+  /** AQU-2310: the subsection is a hand-set milestone from `named`, shown by
+   *  its own name rather than as a cell range. */
+  named?: boolean
   /**
    * AQU-1187: a book name heading above the chapters of one book, for a file
    * that spans several books. Present only on heading rows, which label the
@@ -118,7 +183,7 @@ export function milestoneMatchesSearch(item: MilestoneNavigationItem, query: str
 
   return `${item.label} ${item.shortLabel} ${item.description} ${
     item.subsections?.map((subsection) => subsection.label).join(" ") ?? ""
-  }`
+  } ${item.named?.map((named) => named.label).join(" ") ?? ""}`
     .toLocaleLowerCase()
     .includes(normalizedQuery)
 }
@@ -394,12 +459,58 @@ function TruncatedLabel({ text, className }: { text: string; className?: string 
   )
 }
 
+/**
+ * AQU-2310: the edit control at the end of one row.
+ *
+ * A Base UI combobox option keeps focus on the search box and commits on
+ * click, so the control stops its own pointer and mouse events from reaching
+ * the option (no navigation), and prevents mousedown's default (focus stays in
+ * the search box, so the list does not close on blur before the click lands).
+ * It deliberately does NOT host the menu: an option swallows the mousedown a
+ * nested menu trigger opens on, so the menu lives beside the combobox and the
+ * control only says which row it was opened on.
+ */
+function RowEditControl({ label, onOpen }: {
+  label: string
+  onOpen: (anchor: RowMenuTarget["anchor"]) => void
+}) {
+  const t = useT()
+  const text = t("editor.milestone.rowActions.label", { label })
+  const stop = (event: { stopPropagation: () => void }) => event.stopPropagation()
+  return (
+    <button
+      type="button"
+      data-testid="milestone-row-edit"
+      aria-label={text}
+      title={text}
+      tabIndex={-1}
+      className="flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-background hover:text-foreground"
+      onPointerDown={stop}
+      onPointerUp={stop}
+      onMouseDown={(event) => {
+        event.stopPropagation()
+        event.preventDefault()
+      }}
+      onMouseUp={stop}
+      onClick={(event) => {
+        event.stopPropagation()
+        const rect = event.currentTarget.getBoundingClientRect()
+        onOpen({ getBoundingClientRect: () => rect })
+      }}
+    >
+      <Ellipsis aria-hidden="true" className="size-4" />
+    </button>
+  )
+}
+
 function VirtualizedMilestoneList({
   activeRowKey,
   expandedKey,
   open,
   progressView,
   virtualizerRef,
+  onOpenRowMenu,
+  reserveEditColumn,
 }: {
   activeRowKey: string
   expandedKey: string
@@ -407,6 +518,11 @@ function VirtualizedMilestoneList({
   /** AQU-2110: the file's choice of progress figures, shared by every row. */
   progressView: MilestoneProgressView
   virtualizerRef: RefObject<MilestoneListVirtualizer | null>
+  /** AQU-2310: absent ⇒ no row has an edit control. */
+  onOpenRowMenu?: (target: RowMenuTarget) => void
+  /** Hold the control's width on rows without one, so the progress columns
+   *  of a file mixing editable and fixed rows still line up. */
+  reserveEditColumn: boolean
 }) {
   const t = useT()
   const filteredItems = ComboboxPrimitive.useFilteredItems<NavigationRow>()
@@ -482,6 +598,8 @@ function VirtualizedMilestoneList({
             const isActive = row.key === activeRowKey
             const subsection = row.subsection
             const expandable = !subsection && Boolean(row.milestone.subsections?.length)
+            const rowActions = onOpenRowMenu ? rowActionsFor(row) : []
+            const rowLabel = subsection ? subsection.label : row.milestone.label
 
             if (row.bookHeader) {
               // Still a Combobox.Item so Base UI's index bookkeeping (and the
@@ -547,7 +665,9 @@ function VirtualizedMilestoneList({
                         className="size-3.5 shrink-0 text-muted-foreground"
                       />
                       <TruncatedLabel
-                        text={t("editor.milestone.cellRange", { range: subsection.label })}
+                        text={row.named
+                          ? subsection.label
+                          : t("editor.milestone.cellRange", { range: subsection.label })}
                       />
                     </span>
                     <ProgressSummary view={progressView} {...subsection} />
@@ -566,6 +686,19 @@ function VirtualizedMilestoneList({
                     <ProgressSummary view={progressView} {...row.milestone} />
                   </>
                 )}
+                {onOpenRowMenu && rowActions.length > 0 ? (
+                  <RowEditControl
+                    label={rowLabel}
+                    onOpen={(anchor) => onOpenRowMenu({
+                      key: row.key,
+                      label: rowLabel,
+                      actions: rowActions,
+                      anchor,
+                    })}
+                  />
+                ) : reserveEditColumn ? (
+                  <span className="size-6 shrink-0" aria-hidden="true" />
+                ) : null}
                 {expandable ? (
                   <ChevronRight
                     aria-hidden="true"
@@ -599,12 +732,15 @@ export function MilestoneNavigator({
   compact = false,
   pageByMilestone = false,
   delivers = null,
+  editing,
 }: {
   items: MilestoneNavigationItem[]
   activeKey: string
   activeSubsectionKey?: string
   onSelect: (key: string, subsectionKey?: string) => void
   compact?: boolean
+  /** AQU-2310: present only for someone allowed to set milestones. */
+  editing?: MilestoneNavigatorEditing
   /**
    * Split-into-milestones view: prev/next turn a whole division at a time, and
    * the trigger names that division rather than a 50-cell jump range inside it.
@@ -622,6 +758,21 @@ export function MilestoneNavigator({
   const [open, setOpen] = useState(false)
   const [expandedKey, setExpandedKey] = useState(activeKey)
   const [iconOnlyTrigger, setIconOnlyTrigger] = useState(false)
+  // AQU-2310: the row whose edit control was clicked. Kept after the menu
+  // shuts (only `rowMenuOpen` flips) so its label does not blank out while
+  // the menu plays its exit animation.
+  const [rowMenu, setRowMenu] = useState<RowMenuTarget | null>(null)
+  const [rowMenuOpen, setRowMenuOpen] = useState(false)
+  // Only files where some row CAN be edited give up the column; a Scripture
+  // file with nothing nested keeps every pixel AQU-1485 bought its titles.
+  const reserveEditColumn = useMemo(
+    () => Boolean(editing) && items.some((item) => (
+      milestoneRowActions({ key: item.key, kind: item.kind }).length > 0
+      || [...(item.subsections ?? []), ...(item.named ?? [])]
+        .some((sub) => milestoneRowActions({ key: sub.key }).length > 0)
+    )),
+    [editing, items],
+  )
   const virtualizerRef = useRef<MilestoneListVirtualizer | null>(null)
   const buttonGroupRef = useRef<HTMLDivElement | null>(null)
   const pickerCentered = useMinWidthLg()
@@ -676,9 +827,20 @@ export function MilestoneNavigator({
     () => {
       const rowsFor = (milestone: MilestoneNavigationItem): NavigationRow[] => {
         const milestoneRow: NavigationRow = { key: milestone.key, milestone }
-        if (milestone.key !== expandedKey || !milestone.subsections?.length) return [milestoneRow]
+        // AQU-2310: a nested hand-set milestone is always listed — it is a
+        // named place a person chose, not a jump range to page through.
+        const namedRows = (milestone.named ?? []).map((subsection): NavigationRow => ({
+          key: subsection.key,
+          milestone,
+          subsection,
+          named: true,
+        }))
+        if (milestone.key !== expandedKey || !milestone.subsections?.length) {
+          return [milestoneRow, ...namedRows]
+        }
         return [
           milestoneRow,
+          ...namedRows,
           ...milestone.subsections.map((subsection): NavigationRow => ({
             key: subsection.key,
             milestone,
@@ -748,6 +910,12 @@ export function MilestoneNavigator({
     if (nextOpen) setExpandedKey(active.key)
   }
 
+  const openRowMenu = (target: RowMenuTarget) => {
+    setOpen(false)
+    setRowMenu(target)
+    setRowMenuOpen(true)
+  }
+
   return (
     <nav aria-label={t("editor.milestone.region")} className="flex w-full min-w-24 max-w-full items-center lg:w-auto">
       <ButtonGroup
@@ -801,7 +969,9 @@ export function MilestoneNavigator({
             row.bookHeader
               ? row.bookHeader
               : row.subsection
-                ? t("editor.milestone.cellRange", { range: row.subsection.label })
+                ? row.named
+                  ? row.subsection.label
+                  : t("editor.milestone.cellRange", { range: row.subsection.label })
                 : row.milestone.label
           )}
           itemToStringValue={(row) => row.key}
@@ -916,9 +1086,34 @@ export function MilestoneNavigator({
                   open={open}
                   progressView={progressView}
                   virtualizerRef={virtualizerRef}
+                  onOpenRowMenu={editing ? openRowMenu : undefined}
+                  reserveEditColumn={reserveEditColumn}
                 />
               </ComboboxGroup>
             </ComboboxList>
+            {editing ? (
+              <>
+                <ComboboxSeparator className="mx-0 my-0" />
+                <div className="p-1">
+                  {/* AQU-2310. A plain button, not a list option: it is not a
+                      destination, and search must never filter it away. */}
+                  <button
+                    type="button"
+                    data-testid="milestone-new"
+                    className="flex w-full cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-hidden hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent"
+                    // Keep focus in the search box until the click lands.
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => {
+                      setOpen(false)
+                      editing.onNew()
+                    }}
+                  >
+                    <Plus aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+                    {t("editor.milestone.newMilestone")}
+                  </button>
+                </div>
+              </>
+            ) : null}
           </ComboboxContent>
         </Combobox>
         <Button
@@ -935,6 +1130,35 @@ export function MilestoneNavigator({
           <ChevronRight />
         </Button>
       </ButtonGroup>
+      {editing ? (
+        // AQU-2310: one menu for every row, beside the combobox rather than in
+        // it — see RowEditControl for why it cannot live in the option.
+        <DropdownMenu open={rowMenuOpen} onOpenChange={setRowMenuOpen}>
+          <DropdownMenuContent
+            anchor={rowMenu?.anchor}
+            align="end"
+            className="w-auto min-w-44"
+            data-testid="milestone-row-menu"
+          >
+            <DropdownMenuGroup>
+              <DropdownMenuLabel className="max-w-64 truncate">{rowMenu?.label}</DropdownMenuLabel>
+              {rowMenu?.actions.map((action) => (
+                <DropdownMenuItem
+                  key={action}
+                  data-testid={`milestone-row-${action}`}
+                  variant={action === "remove" ? "destructive" : "default"}
+                  onClick={() => {
+                    setRowMenuOpen(false)
+                    editing.onAction(rowMenu.key, action)
+                  }}
+                >
+                  {t(ROW_ACTION_LABEL[action])}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : null}
     </nav>
   )
 }

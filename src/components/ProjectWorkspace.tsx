@@ -303,7 +303,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { canHarmonize, emitCastAssign, emitCellLabelSet, emitSourceCellCommit, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitCellGlossSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellAudioUnvalidate, emitCellAudioSelect, emitCellAudioDeselect, emitSourceCellRestore, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioGain, emitCellAudioPlace, emitCellAudioCut, emitCellAudioUncut, emitCellAudioRemove, emitCellAudioRename, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitFileMilestoneSet, emitTermCreate, emitTermUpdate, enqueueEvents } from "@/lib/sync/events-emit"
+import { canHarmonize, emitCastAssign, emitCellLabelSet, emitSourceCellCommit, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitCellGlossSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellAudioUnvalidate, emitCellAudioSelect, emitCellAudioDeselect, emitSourceCellRestore, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioGain, emitCellAudioPlace, emitCellAudioCut, emitCellAudioUncut, emitCellAudioRemove, emitCellAudioRename, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitFileMilestoneSet, emitFileMilestoneRemove, emitTermCreate, emitTermUpdate, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
 import { postSplitCastCopies, resolveCellEditingFloor, resolveTimingLocked } from "@/lib/sync/project-settings"
@@ -656,8 +656,13 @@ import {
 import {
   SetMilestoneDialog,
   type MilestoneDraftSubmission,
+  type SetMilestoneDialogMode,
 } from "@/components/editor/SetMilestoneDialog"
-import { normalizeMilestoneName } from "../../db/shared/file-milestones"
+import {
+  userMilestoneIdFromKey,
+  type MilestoneRowAction,
+} from "@/lib/editor/user-milestone-spans"
+import { normalizeMilestoneName, type FileMilestone } from "../../db/shared/file-milestones"
 import {
   setVisibleCellIds as setEditorViewportVisibleCellIds,
   setTrackedCellRef as setEditorViewportTrackedCellRef,
@@ -2030,12 +2035,13 @@ export function ProjectWorkspace() {
     projectId: project?.id ?? null,
     fileId: activeFileId,
   })
-  // All three are `useCallback`-stable for the hook's life, so pulling them out
+  // All four are `useCallback`-stable for the hook's life, so pulling them out
   // keeps them out of the dep arrays that would otherwise churn on the whole
   // result object — including the WS effect's, which must not resubscribe.
   const {
     setMilestoneLocally: paintMilestone,
     removeMilestoneLocally: unpaintMilestone,
+    forgetMilestoneLocally: forgetPaintedMilestone,
     refresh: refreshFileMilestones,
   } = fileMilestones
   // AQU-538: useActiveCellStore serves the ACTUAL workspace cell list; it now
@@ -3922,18 +3928,83 @@ export function ProjectWorkspace() {
    * AQU-2308: the range "Set a new milestone…" is open on, or null when it is
    * shut. Held here rather than in the row because the prefill, the pickers and
    * the refusals all need the file's cell ORDER, which only the store has.
+   *
+   * AQU-2310: the same draft renames or re-ranges one from the navigator.
+   * `milestoneId` is the record being edited; absent, saving writes a new one —
+   * which is also what renaming an app-made "Part N" does.
    */
-  const [milestoneDraft, setMilestoneDraft] = useState<
-    { startCellId: string; endCellId: string } | null
-  >(null)
+  const [milestoneDraft, setMilestoneDraft] = useState<{
+    mode: SetMilestoneDialogMode
+    startCellId: string
+    endCellId: string
+    name?: string
+    milestoneId?: string
+  } | null>(null)
 
   const handleSetMilestoneFromCell = useCallback((cellId: string) => {
     // The DISPLAY order, which is what the navigator derives its divisions from
     // and therefore what the stored anchors are resolved against.
-    setMilestoneDraft(
-      milestoneDraftPrefill(cellStore.getCellIdsForLens(), cellId, getSelectedIds()),
-    )
+    setMilestoneDraft({
+      mode: "create",
+      ...milestoneDraftPrefill(cellStore.getCellIdsForLens(), cellId, getSelectedIds()),
+    })
   }, [cellStore])
+
+  /** AQU-2310: hand-set milestone awaiting its one "are you sure". */
+  const [pendingMilestoneRemoval, setPendingMilestoneRemoval] = useState<FileMilestone | null>(null)
+
+  // Read through a ref so the navigator's handlers stay stable while the
+  // overlay churns — they only need the records at the moment of the click.
+  const fileMilestonesRef = useRef(fileMilestones.milestones)
+  useEffect(() => {
+    fileMilestonesRef.current = fileMilestones.milestones
+  }, [fileMilestones.milestones])
+
+  /**
+   * AQU-2310: an action from a navigator row's edit control.
+   *
+   * The navigator only knows the row's KEY; the store knows its cells. A
+   * hand-set row is resolved to its stored record. An app-made row (which only
+   * offers Rename…) is resolved to the first and last cell it covers in the
+   * display order — the same order and the same entries the navigator drew it
+   * from — so the record a rename writes covers exactly the row's cells.
+   */
+  const handleMilestoneRowAction = useCallback((key: string, action: MilestoneRowAction) => {
+    const milestoneId = userMilestoneIdFromKey(key)
+    if (milestoneId !== null) {
+      const record = fileMilestonesRef.current.find((m) => m.id === milestoneId)
+      if (!record) return
+      if (action === "remove") {
+        setPendingMilestoneRemoval(record)
+        return
+      }
+      setMilestoneDraft({
+        mode: action,
+        milestoneId: record.id,
+        name: record.name,
+        startCellId: record.startCellId,
+        endCellId: record.endCellId,
+      })
+      return
+    }
+    if (action !== "rename") return
+    const order = cellStore.getCellIdsForLens()
+    const entry = cellStore.getNavigationIndex(order).find((e) => e.key === key)
+    const first = entry?.cellIds[0]
+    const last = entry?.cellIds.at(-1)
+    if (!entry || first === undefined || last === undefined) return
+    setMilestoneDraft({ mode: "rename", name: entry.label, startCellId: first, endCellId: last })
+  }, [cellStore])
+
+  /** AQU-2310: "New milestone…" — the form with nothing filled in. */
+  const handleNewMilestone = useCallback(() => {
+    setMilestoneDraft({ mode: "create", startCellId: "", endCellId: "" })
+  }, [])
+
+  const milestoneEditing = useMemo(
+    () => ({ onAction: handleMilestoneRowAction, onNew: handleNewMilestone }),
+    [handleMilestoneRowAction, handleNewMilestone],
+  )
 
   /**
    * Write one hand-set milestone.
@@ -3944,7 +4015,10 @@ export function ProjectWorkspace() {
    * `useFileMilestones` — so a refusal has to retract it explicitly rather than
    * wait for a clock to run out.
    */
-  const handleSubmitMilestone = useCallback(async (draft: MilestoneDraftSubmission) => {
+  const handleSubmitMilestone = useCallback(async (
+    draft: MilestoneDraftSubmission,
+    existingId?: string,
+  ) => {
     const projectId = project?.id
     const fileId = activeFileId
     if (!projectId || !fileId) return
@@ -3953,7 +4027,10 @@ export function ProjectWorkspace() {
     // which throws on one.
     const name = normalizeMilestoneName(draft.name)
     if (name === null) return
-    const milestoneId = uuidv7()
+    // AQU-2310: an edit re-sends `file.milestone.set` under the SAME id — the
+    // projection upserts by id, so rename and re-range are one event each and
+    // no second record ever exists.
+    const milestoneId = existingId ?? uuidv7()
     const record = {
       id: milestoneId,
       name,
@@ -3962,8 +4039,10 @@ export function ProjectWorkspace() {
     }
     setMilestoneDraft(null)
     paintMilestone(record)
+    // Drop the pending edit and show whatever the server holds: nothing for a
+    // refused create, the old name or range for a refused edit.
     const retract = () => {
-      unpaintMilestone(milestoneId)
+      forgetPaintedMilestone(milestoneId)
       refreshFileMilestones()
     }
     try {
@@ -4000,8 +4079,54 @@ export function ProjectWorkspace() {
       toast.add({ type: "error", title: t("editor.setMilestone.saveFailed") })
     }
   }, [
-    project?.id, activeFileId, currentUsername, paintMilestone, unpaintMilestone,
+    project?.id, activeFileId, currentUsername, paintMilestone, forgetPaintedMilestone,
     refreshFileMilestones, getTokenForProjectFile, toast, t,
+  ])
+
+  /**
+   * AQU-2310: remove one hand-set milestone. Its cells fold back into whatever
+   * the file or the app divides them into — the derivation simply stops seeing
+   * the record — and nothing on those cells is written.
+   */
+  const handleRemoveMilestone = useCallback(async (record: FileMilestone) => {
+    const projectId = project?.id
+    const fileId = activeFileId
+    if (!projectId || !fileId) return
+    unpaintMilestone(record.id)
+    const retract = () => {
+      forgetPaintedMilestone(record.id)
+      refreshFileMilestones()
+    }
+    try {
+      await emitFileMilestoneRemove({
+        projectId,
+        fileId,
+        milestoneId: record.id,
+        author: currentUsername,
+      })
+      await flushOutboxBatch({
+        getTokenForFile: getTokenForProjectFile,
+        onRejected: (entries) => {
+          const mine = entries.filter((r) => (
+            r.kind === "file.milestone.remove" && r.fileId === fileId
+          ))
+          if (mine.length === 0) return
+          retract()
+          toast.add({
+            type: "error",
+            title: t("editor.removeMilestone.failed"),
+            description: mine[0].reason,
+          })
+        },
+      })
+      refreshFileMilestones()
+    } catch {
+      retract()
+      toast.add({ type: "error", title: t("editor.removeMilestone.failed") })
+    }
+  }, [
+    project?.id, activeFileId, currentUsername, unpaintMilestone, forgetPaintedMilestone,
+    refreshFileMilestones, getTokenForProjectFile, t,
   ])
 
   /**
@@ -18497,6 +18622,8 @@ export function ProjectWorkspace() {
             // above the timeline — don't render it twice. Chapter picker +
             // file options live in the in-editor row above Source/Target.
             chapterNavTrailing={timelineStacked ? undefined : fileChapterToolbar ?? undefined}
+            // AQU-2310: gated on role and live link inside the table.
+            milestoneEditing={milestoneEditing}
             // AQU-1758: a book's timeline shows the chapter the table is on.
             onActiveChapterChange={sequenceTimeline ? handleTableChapterChange : undefined}
             onChapterPicked={sequenceTimeline ? handleChapterPicked : undefined}
@@ -19502,9 +19629,25 @@ export function ProjectWorkspace() {
           existing={fileMilestones.milestones}
           initialStartCellId={milestoneDraft.startCellId}
           initialEndCellId={milestoneDraft.endCellId}
-          onSubmit={(draft) => { void handleSubmitMilestone(draft) }}
+          mode={milestoneDraft.mode}
+          initialName={milestoneDraft.name}
+          milestoneId={milestoneDraft.milestoneId}
+          onSubmit={(draft) => { void handleSubmitMilestone(draft, milestoneDraft.milestoneId) }}
         />
       )}
+      {/* AQU-2310: removing a hand-set milestone asks once. */}
+      <ConfirmActionDialog
+        open={pendingMilestoneRemoval !== null}
+        onOpenChange={(v) => { if (!v) setPendingMilestoneRemoval(null) }}
+        title={t("editor.removeMilestone.title", { name: pendingMilestoneRemoval?.name ?? "" })}
+        description={t("editor.removeMilestone.description")}
+        confirmLabel={t("editor.removeMilestone.confirm")}
+        variant="destructive"
+        onConfirm={() => {
+          if (pendingMilestoneRemoval) void handleRemoveMilestone(pendingMilestoneRemoval)
+          setPendingMilestoneRemoval(null)
+        }}
+      />
       {/* AQU-1759: what a split will make, before it makes it. */}
       <SplitAtQuotesDialog
         pieces={pendingQuoteSplit?.pieces ?? null}

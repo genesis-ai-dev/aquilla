@@ -26,6 +26,10 @@ export interface ProjectProgress {
   books: BookProgress[]
   verses: number
   written: number
+  /** False while books are still being read: `books` holds those read so far. */
+  complete: boolean
+  /** How many book files the project has, read or not. */
+  total: number
 }
 
 export function bookStatus(verses: number, written: number): BookStatus {
@@ -33,9 +37,11 @@ export function bookStatus(verses: number, written: number): BookStatus {
   return verses > 0 && written >= verses ? "complete" : "in-progress"
 }
 
-export function summarizeProgress(books: BookProgress[]): ProjectProgress {
+export function summarizeProgress(books: BookProgress[], total = books.length): ProjectProgress {
   return {
     books,
+    complete: books.length >= total,
+    total,
     verses: books.reduce((n, b) => n + b.verses, 0),
     written: books.reduce((n, b) => n + b.written, 0),
   }
@@ -108,8 +114,13 @@ async function readCounts(projectPath: string, fileName: string, cache: Record<s
   return counts
 }
 
+// A large project takes a while to read the first time, so what has been read
+// so far is published every few books rather than only at the end.
+const PUBLISH_EVERY = 8
+
 /** Reads every book of the project, one at a time so a 66-book project does
- *  not load the UI thread. `null` while reading. */
+ *  not load the UI thread. `null` until the first books are in; `complete` is
+ *  false until the last one is. */
 export function useParatextProgress(project: BridgeProject | null): ProjectProgress | null {
   const [result, setResult] = useState<{ path: string; progress: ProjectProgress } | null>(null)
   const path = project?.path ?? null
@@ -128,9 +139,12 @@ export function useParatextProgress(project: BridgeProject | null): ProjectProgr
           books.push({ code: b.code, fileName: b.fileName, verses: 0, written: 0, status: "not-started", unreadable: true })
         }
         if (cancelled) return
+        if (books.length % PUBLISH_EVERY === 0 && books.length < project.books.length) {
+          setResult({ path: project.path, progress: summarizeProgress([...books], project.books.length) })
+        }
       }
       writeCache(cache)
-      if (!cancelled) setResult({ path: project.path, progress: summarizeProgress(books) })
+      if (!cancelled) setResult({ path: project.path, progress: summarizeProgress(books, project.books.length) })
     }
     void run()
     return () => { cancelled = true }

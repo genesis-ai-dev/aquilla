@@ -292,6 +292,9 @@ import { useHistoryReporter } from "@/components/history/useHistoryReporter"
 import { useSettingsStepKinds } from "@/components/ProjectSettings/useSettingsStepKinds"
 import { playingInSlot, takeStepHandlers, type CutRecord, type StoredTakePlace, type TakeLevel } from "@/lib/history/take-steps"
 import type { TakePlace } from "@/lib/timeline/take-place"
+import { lineRoomStepHandlers, type LineRoomStepData } from "@/lib/history/line-room-steps"
+import { lineRoomKey, type LineRoomChange } from "@/lib/timeline/line-room"
+import type { TakeRoomsMove } from "@/components/timeline/TargetAudioLane"
 import { enqueueTakeRemovals, hasOwnRecordingLeft, removeTake, renameTake } from "@/lib/audio/take-actions"
 import { pieceNameIn } from "@/lib/audio/take-groups"
 import { regenerateVoiceTake } from "./AudioRecorder/regenerate-voice"
@@ -4420,6 +4423,72 @@ export function ProjectWorkspace() {
       await applyTakePlace(cellId, audioId, after)
     },
     [applyTakePlace, activeFileId],
+  )
+
+  // AQU-2432 (Sam, Nov 9): AN UNRECORDED LINE'S ROOM, following the recordings.
+  // Dragging the next take earlier against a line nobody has recorded makes
+  // THAT LINE's room smaller (later: gives it back). The room is the line's,
+  // for the language being worked in (lib/timeline/line-room): it rides the
+  // line's own timeline event into the source row's metadata, under a key that
+  // carries the language, is shown at once, and reaches every device like the
+  // take's place does.
+  const applyLineRooms = useCallback(
+    async (rooms: readonly LineRoomChange[]) => {
+      if (!project?.id || !activeFileId || rooms.length === 0) return
+      const key = lineRoomKey(activeLane)
+      for (const r of rooms) applyOptimisticCellTiming(r.cellId, { metadata: { [key]: r.roomMs } })
+      for (const r of rooms) {
+        await emitCellLaneRetime({
+          projectId: project.id,
+          fileId: activeFileId,
+          cellId: r.cellId,
+          recordingsRoomMs: r.roomMs,
+          ...(activeLane ? { targetLang: activeLane } : {}),
+          author: currentUsername,
+        })
+      }
+      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      revalidateCells()
+    },
+    [project?.id, activeFileId, activeLane, currentUsername, applyOptimisticCellTiming, getTokenForProjectFile, revalidateCells],
+  )
+  // One drag, one step: every room it changed, and the take's own place when
+  // the drag changed that too (its pause closes first on the way earlier, and
+  // opens once the rooms are whole on the way later).
+  const handleMoveTakeRooms = useCallback(
+    async (move: TakeRoomsMove) => {
+      const owner = resolveTakeCellRef.current(move.cellId)
+      if (!owner) return
+      const att = owner.cell.attachments?.[move.audioId]
+      recordStep<LineRoomStepData>({
+        kind: "line.room",
+        data: {
+          rooms: move.rooms.map((r) => ({
+            cellId: r.cellId,
+            before: getActiveCell(r.cellId)?.recordingsRoomMs ?? null,
+            after: r.roomMs,
+          })),
+          ...(move.take
+            ? {
+                take: {
+                  cellId: move.cellId,
+                  audioId: move.audioId,
+                  before: att?.targetOffsetMs ?? null,
+                  after: move.take.place.targetOffsetMs,
+                  recordingsBefore: att?.recordingsOffsetMs ?? null,
+                  recordingsAfter: move.take.place.recordingsOffsetMs,
+                },
+              }
+            : {}),
+        },
+        labelKey: "editor.history.stepLineRoom",
+        fileId: activeFileId,
+        fileName: activeFileNameRef.current,
+      })
+      await applyLineRooms(move.rooms)
+      if (move.take) await applyTakePlace(move.cellId, move.audioId, move.take.place)
+    },
+    [applyLineRooms, applyTakePlace, getActiveCell, activeFileId],
   )
 
   // AQU-1767 phase 1: CUT dub takes into independent pieces — from the blade
@@ -15632,6 +15701,16 @@ export function ProjectWorkspace() {
         },
         takeRestored: (cellId) => handleTakeSaved(cellId),
       }),
+      // AQU-2432 (Sam, Nov 9): a drag that changed unrecorded lines' rooms.
+      ...lineRoomStepHandlers({
+        readRoom: (cellId) => {
+          const cell = getActiveCell(cellId)
+          return cell ? (cell.recordingsRoomMs ?? null) : undefined
+        },
+        applyRooms: applyLineRooms,
+        readTake: readAtt,
+        applyPlace: (cellId, audioId, place) => applyTakePlace(cellId, audioId, place),
+      }),
       ...rowStepHandlers({
         readRow: (cellId) => {
           const cell = getActiveCell(cellId)
@@ -15740,6 +15819,7 @@ export function ProjectWorkspace() {
     return unregister
   }, [
     readTake, applyTakeTrim, applyTakeGain, applyTakePlace, applyTakeCut, applyTakeUncut, applyTakeRemove, applyTakeRename, applyTakeSelect,
+    applyLineRooms,
     handleLastTakeRemoved, handleTakeSaved,
     getActiveCell, readRowTiming, cellStore, applyRetimeSubtitle, applyCellHidden, removeLineCore, applyRestoreRow, applyRepoint,
     activeLane, applyTargetText, project?.id, currentUsername, getTokenForProjectFile, revalidateAuditStats, revalidateCell,
@@ -18173,6 +18253,7 @@ export function ProjectWorkspace() {
                     // retimes are not caught by the lock.
                     timingLocked={timingLocked}
                     onRetimeTarget={handleRetimeTarget}
+                    onMoveTakeRooms={handleMoveTakeRooms}
                     onRetimeCue={handleRetimeAudioCue}
                     onTrimTarget={handleTrimTarget}
                     onCutTargets={handleCutTargets}

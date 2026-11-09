@@ -965,6 +965,12 @@ export const editor = defineNamespace({
       "A line with no times of its own and no recording yet still takes room on the timeline, " +
       "at a stand-in length worked out from its text at the language's reading pace. It has no " +
       "real time, so it shows none. Recording the line replaces the stand-in with the recording's length.",
+    // AQU-2432 (Sam, Nov 9): the marker for an unrecorded line whose room was
+    // closed by dragging the next take earlier against it.
+    "editor.timeline.lineMarkerNoRoom":
+      "{line} isn't recorded yet. It has no room here. Drag the next take later to give it room.",
+    "editor.timeline.lineMarkerNarrowRoom":
+      "{line} isn't recorded yet. It has only {seconds} s of room here. Drag the next take later to give it room.",
     "editor.timeline.timingMenuHeading": "What decides how long each line is",
     "editor.timeline.timingMenuMuteNote": "Muting a track only changes what you hear. It never moves anything.",
     "editor.timeline.timingSourceUnavailable": "This file has no times and no source recording to follow.",
@@ -1032,6 +1038,7 @@ export const editor = defineNamespace({
     "editor.history.stepCutMany": "Cut takes",
     "editor.history.stepTrim": "Trim take",
     "editor.history.stepMove": "Move take",
+    "editor.history.stepLineRoom": "Change a line's room",
     "editor.history.undone": "Undid: {step}",
     "editor.history.redone": "Redid: {step}",
     "editor.history.skippedChanged": "Skipped “{step}”: it was changed since",
@@ -7592,6 +7599,23 @@ export const editor = defineNamespace({
           "Tooltip of that (i): why a line with no times and no recording still takes room " +
           "on the timeline (a stand-in length from its text) and why it shows no time.",
       },
+      "editor.timeline.lineMarkerNoRoom": {
+        description:
+          "Tooltip and screen-reader name of a small dashed marker on the timeline, between two " +
+          "recordings. It marks a line nobody has recorded yet whose room on the timeline was " +
+          "closed to nothing, by dragging the next recording earlier against it. Says which line, " +
+          "that it has no recording, and how to give it room again. Plain sentences.",
+        placeholders: { line: "The line's name: its reference ('Genesis 1:3'), its label, or 'Line 12'." },
+      },
+      "editor.timeline.lineMarkerNarrowRoom": {
+        description:
+          "The same marker's tooltip when the line still has a little room, too narrow to draw " +
+          "as a box. Says how many seconds of room it has.",
+        placeholders: {
+          line: "The line's name: its reference ('Genesis 1:3'), its label, or 'Line 12'.",
+          seconds: "The room in seconds, to one decimal, e.g. '0.2'. 's' after it is the unit, seconds.",
+        },
+      },
       "editor.timeline.timingMenuHeading": {
         description:
           "First line of the Timing menu (choices 'Follows source' / 'Follows recordings'), " +
@@ -7774,6 +7798,13 @@ export const editor = defineNamespace({
       "editor.history.stepMove": {
         description:
           "Name of one step in the edit history: a take was dragged to a new time. Short verb phrase.",
+        maxLength: 30,
+      },
+      "editor.history.stepLineRoom": {
+        description:
+          "Name of one step in the edit history: a take was dragged against a line nobody has " +
+          "recorded yet, which made that line's room on the timeline smaller or larger. Short " +
+          "verb phrase.",
         maxLength: 30,
       },
       "editor.history.undone": {

@@ -21,6 +21,8 @@ import { TimelineSlotButton } from "./TimelineSlotButton"
 import { MIN_SLOT_PX, useHotSlot } from "./slot-hover"
 import { subtitleSpanSec } from "@/lib/timeline/lane-timing"
 import { TimelineCard } from "./TimelineCard"
+import { EmptyLineMarker } from "./EmptyLineMarker"
+import { emptyLineMarkers } from "@/lib/timeline/line-markers"
 import type { SelectMods } from "./selection"
 import { CueLinkOverlay, type LaneLinkOverlay } from "./CueLinkOverlay"
 import type { TimelineLayout } from "@/lib/timeline/layout"
@@ -168,6 +170,15 @@ export function TimelineLane({
     return isVisible(s.start, s.end, viewStartSec, viewEndSec)
   })
 
+  // AQU-2432 (Sam, Nov 9, rule 8): following the recordings, a line nobody
+  // has recorded can have its room closed, down to nothing, by dragging the
+  // next take earlier against it. Its box here would then be a sliver under
+  // the next line's box, so the line would vanish from its own rows. It is
+  // drawn as the marker the takes row shows instead (lib/timeline/line-markers
+  // says which lines; a hidden line keeps the faded box it has always had).
+  const lineMarkers = emptyLineMarkers({ cells, programme: layout?.programme, pxPerSec, viewStartSec, viewEndSec })
+  const markedCellIds = new Set(lineMarkers.map((m) => m.cell.id))
+
   // Snap candidates per card: every OTHER visible card's effective edges, plus
   // (for a media subtitle card) its own frozen section edges — dragging back
   // flush to the source split is the common "undo my accidental nudge".
@@ -243,6 +254,8 @@ export function TimelineLane({
         </div>
       ))}
       {visible.map((c) => {
+        // AQU-2432: its marker, below, stands for it.
+        if (markedCellIds.has(c.id)) return null
         // An AND, never a replacement: the lane-wide flag still has the last
         // word, so a lane that was frozen (SUB-53's re-flowed track) cannot be
         // thawed by a permissive per-cell predicate.
@@ -272,6 +285,15 @@ export function TimelineLane({
         />
         )
       })}
+      {lineMarkers.map((marker) => (
+        <EmptyLineMarker
+          key={`marker-${marker.cell.id}`}
+          marker={marker}
+          selected={selectedId === marker.cell.id}
+          onSelect={onSelect}
+          onSeek={onSeek}
+        />
+      ))}
       {linkOverlay && (
         <CueLinkOverlay
           items={visible.map((c) => {

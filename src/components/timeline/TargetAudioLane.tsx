@@ -53,6 +53,9 @@ import {
   type TargetChipGeom,
 } from "@/lib/timeline/lane-timing"
 import { clampMoveStart, movedTakePlace, pieceLeadInTakeSec, type TakePlace } from "@/lib/timeline/take-place"
+import type { LineRoomChange } from "@/lib/timeline/line-room"
+import { emptyLineMarkers } from "@/lib/timeline/line-markers"
+import { EmptyLineMarker } from "./EmptyLineMarker"
 import { sourceClipAudioForCell } from "@/lib/audio/track-audio"
 import { canCutAt } from "@/lib/audio/cut-take"
 import { pieceTrimLimitsMs } from "@/lib/sync/cell-audio-read-types"
@@ -84,6 +87,22 @@ import type { TakeVoiceNote } from "@/lib/audio/take-voice"
  *  button is drawn around it (board 54); the bar's height is its target. */
 const BAR_GLYPH_CLASS =
   "inline-flex h-full w-3.5 items-center justify-center rounded-[3px] text-current opacity-80 outline-none hover:opacity-100 focus-visible:ring-1 focus-visible:ring-ring"
+
+/**
+ * AQU-2432 (Sam, Nov 9): a take's move that changed the room of the
+ * unrecorded lines before its line. One user action, one history step.
+ */
+export interface TakeRoomsMove {
+  cellId: string
+  audioId: string
+  /** Each line whose room the move changed, with the room it is left (ms;
+   *  null: back at its natural length, nothing stored). */
+  rooms: LineRoomChange[]
+  /** The take's own place after the move, when the move changed that too (its
+   *  pause closed first, or opened once the rooms were whole). Null when the
+   *  rooms took all of it: nothing is stored on the take. */
+  take: { anchorSec: number; place: TakePlace } | null
+}
 
 export interface TargetAudioItem {
   cell: CellData
@@ -165,6 +184,15 @@ export interface TargetAudioLaneProps {
    *  after the move (`movedTakePlace`). `anchorSec` stays the anchor in the
    *  timing the move was made in. */
   onRetimeTarget?(cellId: string, anchorSec: number, audioId: string, place: TakePlace): void
+  /**
+   * AQU-2432 (Sam, Nov 9): a move that changed the ROOM of the unrecorded
+   * lines before the take's line — following the recordings, a drag against a
+   * line nobody has recorded sets that line's room, never the take's place.
+   * Called INSTEAD of `onRetimeTarget` for such a move, so it is one step:
+   * every room it changed, and the take's own place when the move changed
+   * that too (its pause). Absent, a take stops at its own line's start.
+   */
+  onMoveTakeRooms?(move: TakeRoomsMove): void
   /** Round 7: trim a chip — the COMPLETE desired trim state (both keys
    *  resolved; undefined clears a key back to the clip edge). */
   onTrimTarget?(cellId: string, audioId: string, trims: { trimStartMs?: number; trimEndMs?: number }): void
@@ -185,6 +213,11 @@ export interface TargetAudioLaneProps {
    *  row reveals a record button on hover, so starting a line doesn't need a
    *  trip to the detail pane. */
   emptyCells?: CellData[]
+  /** AQU-2432 (Sam, Nov 9): draw the marker for a line of `emptyCells` whose
+   *  room was closed too narrow to draw (lib/timeline/line-markers). On by
+   *  default; off on a track made a layer, whose takes are not laid end to
+   *  end, so it has no seam to mark. */
+  lineMarkers?: boolean
   /** AQU-646: stretches of film with no cell at all. The mic here creates the
    *  blank line first and then opens the recorder. */
   emptySpans?: readonly { startSec: number; endSec: number }[]
@@ -344,6 +377,7 @@ function TargetAudioChip({
   onSelectTake,
   onSeek,
   onRetimeTarget,
+  onMoveTakeRooms,
   onTrimTarget,
   bladeActive = false,
   onCutTarget,
@@ -422,6 +456,8 @@ function TargetAudioChip({
    *  would make dragging one chip move the other. AQU-2267: `place` is the
    *  take's place in both timings after the move. */
   onRetimeTarget?(cellId: string, anchorSec: number, audioId: string, place: TakePlace): void
+  /** AQU-2432 (Sam, Nov 9): see `TargetAudioLaneProps.onMoveTakeRooms`. */
+  onMoveTakeRooms?(move: TakeRoomsMove): void
   onTrimTarget?(cellId: string, audioId: string, trims: { trimStartMs?: number; trimEndMs?: number }): void
   bladeActive?: boolean
   onCutTarget?(cellId: string, audioId: string, atMs: number): void
@@ -579,10 +615,16 @@ function TargetAudioChip({
       //
       // AQU-2267: the arithmetic is `clampMoveStart`, shared with the move's
       // other timing, which it carries the take into by the same distance.
+      //
+      // AQU-2432 (Sam, Nov 9): against a line NOBODY HAS RECORDED there is no
+      // take to come in over. The drag goes on earlier all the same, by
+      // closing that line's room (and the rooms of the unrecorded lines
+      // before it), and stops at the end of the nearest recorded line — where
+      // it can be saved (`onMoveTakeRooms`); elsewhere at its own line's start.
       const bounds = freeRules ? (layout?.moveBounds(cell, chipAtt, chip.item.audioId) ?? null) : null
       start = clampMoveStart(start, {
         free: freeRules,
-        floorSec: bounds?.floorSec ?? chip.slot?.startSec ?? null,
+        floorSec: (onMoveTakeRooms ? bounds?.roomFloorSec : undefined) ?? bounds?.floorSec ?? chip.slot?.startSec ?? null,
         ceilSec: bounds?.ceilSec ?? null,
         section,
         lenSec: len,
@@ -873,14 +915,31 @@ function TargetAudioChip({
         // compared with the take's place FOLLOWING THE SOURCE, so following
         // the recordings such a nudge put a take that led its line back on
         // its line's start.)
+        //
+        // AQU-2432 (Sam, Nov 9): a drag against a line nobody has recorded
+        // sets THAT LINE'S ROOM. The rooms take their share of the move first
+        // (`roomsForMove`); the take's own place is read from what is left,
+        // and when the rooms took all of it nothing is stored on the take.
+        const roomMove = onMoveTakeRooms
+          ? (layout?.roomsForMove(cell, chipAtt, chip.item.audioId, geom.start, s.start) ?? null)
+          : null
         const moved = movedTakePlace({
           here: layout,
           other: getOtherLayout?.(),
           track,
           take: chip.item,
           fromStartSec: geom.start,
-          toStartSec: s.start,
+          toStartSec: roomMove ? roomMove.takeStartSec : s.start,
         })
+        if (roomMove) {
+          onMoveTakeRooms?.({
+            cellId: cell.id,
+            audioId: chip.item.audioId,
+            rooms: roomMove.rooms,
+            take: moved ? { anchorSec: moved.anchorSec, place: moved.place } : null,
+          })
+          return
+        }
         if (!moved) return
         onRetimeTarget?.(cell.id, moved.anchorSec, chip.item.audioId, moved.place)
         return
@@ -1987,6 +2046,7 @@ export function TargetAudioLane({
   onSelectTake,
   onSeek,
   onRetimeTarget,
+  onMoveTakeRooms,
   onTrimTarget,
   bladeActive = false,
   onCutTarget,
@@ -1996,6 +2056,7 @@ export function TargetAudioLane({
   onOpenRecording,
   validationRequirementAudio,
   emptyCells,
+  lineMarkers: showLineMarkers = true,
   emptySpans,
   onAddLineAndRecord,
   projectId,
@@ -2136,11 +2197,26 @@ export function TargetAudioLane({
   // SUB-51: a record button hiding in the empty space under each dub-free
   // section. Rendered BEFORE the chips and with no z-index, so a real chip —
   // including an overlong neighbour painting across — always wins the pointer.
+  //
+  // AQU-2432 (Sam, Nov 9, rule 8): a line whose room was closed too narrow to
+  // draw — down to none — is drawn as a marker at the seam instead, so it is
+  // always possible to see that a line sits there (lib/timeline/line-markers).
+  // It shows to everyone, whether or not they can record.
+  const lineMarkers = emptyLineMarkers({
+    cells: showLineMarkers ? (emptyCells ?? []) : [],
+    programme: layout?.programme,
+    pxPerSec,
+    viewStartSec,
+    viewEndSec,
+  })
+  const markedCellIds = new Set(lineMarkers.map((m) => m.cell.id))
   const emptySlots =
     editable && onOpenRecording
       ? (emptyCells ?? []).flatMap((cell) => {
           // A hidden line is not recorded onto from the timeline.
           if (isHiddenCell(cell)) return []
+          // Its marker stands for it: selecting it there is how it is recorded.
+          if (markedCellIds.has(cell.id)) return []
           // SUB-53: an un-dubbed verse's slot is just its original's length,
           // so the button sits over exactly where the dub will land.
           const span = layout?.spanFor(cell, "source") ?? null
@@ -2328,6 +2404,7 @@ export function TargetAudioLane({
             onSelectTake={onSelectTake}
             onSeek={onSeek}
             onRetimeTarget={onRetimeTarget}
+            onMoveTakeRooms={onMoveTakeRooms}
             onTrimTarget={onTrimTarget}
             bladeActive={bladeActive}
             onCutTarget={onCutTarget}
@@ -2343,6 +2420,18 @@ export function TargetAudioLane({
           />
         ) : null,
       )}
+      {lineMarkers.map((marker) => (
+        <EmptyLineMarker
+          key={`marker-${marker.cell.id}`}
+          marker={marker}
+          selected={selectedId === marker.cell.id}
+          onSelect={onSelect}
+          onSeek={onSeek}
+          // Over every take at rest (their paint order counts down from the
+          // number of takes); a hovered, selected or dragged take is 1000 up.
+          zIndex={chips.length + 1}
+        />
+      ))}
     </div>
   )
 }

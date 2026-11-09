@@ -8,6 +8,14 @@
 @theme inline {
     --font-heading: var(--font-sans);
     --font-sans: 'Geist Variable', sans-serif;
+    /* AQU-2464: lighter weight scale, matching help.aquilla.app. The help site sets
+       nearly all text in the same Geist Variable at 400 with headings at 500-600,
+       while the app leans on font-medium (~960 uses) and font-semibold (~200),
+       which reads heavier. Lightening the tokens one step lightens every surface
+       at once without touching components. */
+    --font-weight-medium: 400;
+    --font-weight-semibold: 500;
+    --font-weight-bold: 600;
     --color-sidebar-ring: var(--sidebar-ring);
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -588,6 +596,10 @@
   }
   html {
     @apply font-sans;
+    /* AQU-2464: antialiased smoothing, as on help.aquilla.app. Without it macOS
+       Safari draws Geist with heavier strokes. */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
     overscroll-behavior: none;
   }
   /* The frame's no-scroll rule, only while the frame is on screen. */

@@ -244,3 +244,39 @@ describe("EditorTable — Set a new milestone…", () => {
     expect(noEntry()).toBeNull()
   })
 })
+
+// AQU-2310: the navigator's edit controls answer to the SAME gate as the cell
+// menu's entry — one helper, so the two cannot drift apart. A one-line file
+// lists a single app-made "Part 1", which a maintainer may rename.
+describe("EditorTable — editing milestones from the navigator", () => {
+  const editing = () => ({ onAction: vi.fn(), onNew: vi.fn() })
+  const openNavigator = async () => {
+    fireEvent.click(await screen.findByRole("combobox", { name: /Part 1/ }))
+  }
+
+  it("gives a maintainer New milestone… and a control on Part 1", async () => {
+    const milestoneEditing = editing()
+    renderTable({ milestoneEditing })
+    await screen.findByText("First line")
+
+    await openNavigator()
+    expect(await screen.findByTestId("milestone-new")).toBeInTheDocument()
+    expect(screen.getAllByTestId("milestone-row-edit")).toHaveLength(1)
+    fireEvent.click(screen.getByTestId("milestone-new"))
+    expect(milestoneEditing.onNew).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    ["a project lead", projectAt(ROLE.PROJECT_LEAD)],
+    ["a maintainer on a live-linked downstream project", projectAt(ROLE.MAINTAINER, { sourceLinkMode: "live" })],
+  ])("gives %s neither", async (_who, project) => {
+    renderTable({ project, milestoneEditing: editing() })
+    await screen.findByText("First line")
+
+    await openNavigator()
+    // The list itself is open, so this is the controls being absent.
+    await screen.findByRole("option", { name: /Part 1/ })
+    expect(screen.queryByTestId("milestone-new")).toBeNull()
+    expect(screen.queryAllByTestId("milestone-row-edit")).toHaveLength(0)
+  })
+})

@@ -5,7 +5,7 @@
 //       description      (required, ≤ 5000 chars) — what the user typed
 //       route            (optional) — SPA pathname they were on
 //       projectId        (optional)
-//       fileId           (optional)
+//       fileId           (optional) — the server looks up its name for the report
 //       sessionReplayUrl (optional) — posthog replay link, when analytics are on
 //       screenshot       (optional) — image/png|jpeg|webp, ≤ MAX_FEEDBACK_SCREENSHOT_BYTES
 //     → { ok, feedbackId, delivered, screenshotKey, emailedRoutes }
@@ -29,7 +29,8 @@
 // The card names the org, project and user id. The browser only sends the
 // project id, and a client-sent org name could be anything, so the server looks
 // the project and org up itself, and only when the reporter can read that
-// project: otherwise a user could probe org names by guessing project ids.
+// project: otherwise a user could probe org names by guessing project ids. The
+// file name comes from the same lookup, under the same rule (AQU-2466).
 //
 // Storage and Discord both degrade rather than fail. A missing SNAPSHOTS binding
 // drops the archive copy and says so on the card; a missing webhook secret
@@ -93,6 +94,8 @@ interface ProjectContext {
   orgId: number | null
   orgName: string | null
   projectName: string | null
+  /** Display name of the reported file, when it belongs to that project. */
+  fileName: string | null
 }
 
 /** Project and org names for the card. Best effort: a failed lookup, an
@@ -102,9 +105,10 @@ async function lookupProjectContext(
   env: Env,
   user: AuthUser,
   projectId: string | null,
+  fileId: string | null,
   route: string,
 ): Promise<ProjectContext> {
-  const none: ProjectContext = { orgId: null, orgName: null, projectName: null }
+  const none: ProjectContext = { orgId: null, orgName: null, projectName: null, fileName: null }
   try {
     if (!projectId) {
       // No project: the user may be on an org page (/orgs/:orgId, e.g. stuck
@@ -115,7 +119,7 @@ async function lookupProjectContext(
       const org = await env.AQUILLA_PG.prepare("SELECT name FROM organizations WHERE id = ?")
         .bind(orgId)
         .first<{ name: string | null }>()
-      return { orgId, orgName: org?.name ?? null, projectName: null }
+      return { orgId, orgName: org?.name ?? null, projectName: null, fileName: null }
     }
     const role = await resolveProjectRole(env, user, projectId)
     if (!role) return none
@@ -127,7 +131,19 @@ async function lookupProjectContext(
       .bind(projectId)
       .first<{ project_name: string | null; org_id: number | null; org_name: string | null }>()
     if (!row) return none
-    return { orgId: row.org_id, orgName: row.org_name, projectName: row.project_name }
+    // Scoped to the project the reporter can read, so a guessed file id from
+    // another project names nothing.
+    const file = fileId
+      ? await env.AQUILLA_PG.prepare("SELECT name FROM files WHERE id = ? AND project_id = ?")
+          .bind(fileId, projectId)
+          .first<{ name: string | null }>()
+      : null
+    return {
+      orgId: row.org_id,
+      orgName: row.org_name,
+      projectName: row.project_name,
+      fileName: file?.name?.trim() || null,
+    }
   } catch (err) {
     console.warn("[feedback] project/org lookup failed:", err)
     return none
@@ -211,8 +227,9 @@ feedback.post("/", authMiddleware, async (c) => {
   }
 
   const projectId = field(body, "projectId")
+  const fileId = field(body, "fileId")
   const route = field(body, "route") ?? ""
-  const context = await lookupProjectContext(c.env, user, projectId, route)
+  const context = await lookupProjectContext(c.env, user, projectId, fileId, route)
   const attachment: FeedbackAttachment | null =
     screenshotBytes && screenshotExt
       ? {
@@ -222,7 +239,6 @@ feedback.post("/", authMiddleware, async (c) => {
         }
       : null
 
-  const fileId = field(body, "fileId")
   const sessionReplayUrl = field(body, "sessionReplayUrl")
   const screenshotDropped = screenshotBytes !== null && screenshotKey === null
 
@@ -239,6 +255,7 @@ feedback.post("/", authMiddleware, async (c) => {
       projectName: context.projectName,
       route,
       fileId,
+      fileName: context.fileName,
       sessionReplayUrl,
       screenshotKey,
       screenshotDropped,

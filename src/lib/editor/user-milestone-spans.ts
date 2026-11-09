@@ -26,12 +26,65 @@
 // by the dialog, and skipped here if it reaches the store another way.
 
 import type { FileMilestone, ResolvedMilestoneSpan } from "../../../db/shared/file-milestones"
-import { resolveMilestoneSpans } from "../../../db/shared/file-milestones"
+import { isValidMilestoneId, resolveMilestoneSpans } from "../../../db/shared/file-milestones"
 import type { ImportMilestone, ImportMilestoneKind } from "../../../shared/import-contract"
 
 /** Divisions the app made up because the file offered none. */
 export function isAppInventedMilestoneKind(kind: ImportMilestoneKind | undefined): boolean {
   return kind === "part" || kind === "time-range" || kind === "ai-section"
+}
+
+const USER_MILESTONE_KEY_PREFIX = "user:"
+
+/** The navigator key a hand-set milestone is listed under. */
+export function userMilestoneKey(milestoneId: string): string {
+  return `${USER_MILESTONE_KEY_PREFIX}${milestoneId}`
+}
+
+/**
+ * The record behind a navigator key, or null when the key is not a hand-set
+ * milestone's own. (AQU-2310)
+ *
+ * The id alphabet has no colon, so the 50-cell jump ranges listed under a long
+ * hand-set milestone (`user:<id>:range:<cell>`) answer null: they are a way
+ * into the milestone, not the milestone.
+ */
+export function userMilestoneIdFromKey(key: string): string | null {
+  if (!key.startsWith(USER_MILESTONE_KEY_PREFIX)) return null
+  const id = key.slice(USER_MILESTONE_KEY_PREFIX.length)
+  return isValidMilestoneId(id) ? id : null
+}
+
+/** What the navigator's per-row edit control can do. (AQU-2310) */
+export type MilestoneRowAction = "rename" | "editRange" | "remove"
+
+const HAND_SET_ROW_ACTIONS: readonly MilestoneRowAction[] = ["rename", "editRange", "remove"]
+const APP_MADE_ROW_ACTIONS: readonly MilestoneRowAction[] = ["rename"]
+const NO_ROW_ACTIONS: readonly MilestoneRowAction[] = []
+
+/**
+ * What the edit control on one navigator row offers. (AQU-2310)
+ *
+ *   * A hand-set milestone — top-level, or nested under a chapter — can be
+ *     renamed, re-ranged and removed: it is a record a person made.
+ *   * A division the APP invented ("Part N", a 5-minute range, an AI section)
+ *     can only be renamed, and renaming it makes a hand-set milestone over
+ *     exactly its cells. Its range is the app's arithmetic, so there is
+ *     nothing to re-range; and there is no record to remove.
+ *   * A division the FILE supplied (a chapter, a heading, a slide, a story) and
+ *     a 50-cell jump range offer nothing. They are the document's structure, or
+ *     a way into it, and the navigator never edits either.
+ *
+ * Pass a subsection row without `kind`: a subsection is either a nested
+ * hand-set milestone, recognised by its key, or a jump range.
+ */
+export function milestoneRowActions(row: {
+  key: string
+  kind?: ImportMilestoneKind
+}): readonly MilestoneRowAction[] {
+  if (userMilestoneIdFromKey(row.key) !== null) return HAND_SET_ROW_ACTIONS
+  if (isAppInventedMilestoneKind(row.kind)) return APP_MADE_ROW_ACTIONS
+  return NO_ROW_ACTIONS
 }
 
 export type UserMilestonePlacement =
@@ -81,7 +134,7 @@ export const USER_MILESTONE_BADGE = "◆"
 
 export function userMilestoneIdentity(record: FileMilestone, _ordinal: number): ImportMilestone {
   return {
-    key: `user:${record.id}`,
+    key: userMilestoneKey(record.id),
     kind: "user",
     label: record.name,
     shortLabel: USER_MILESTONE_BADGE,
@@ -230,7 +283,19 @@ export function refusalForUserMilestone(
   const divisions: (ImportMilestone | undefined)[] = []
   for (let index = startIndex; index <= endIndex; index += 1) divisions.push(resolved[index])
 
-  const everyOneInvented = divisions.every((d) => isAppInventedMilestoneKind(d?.kind))
+  // AQU-2310: `resolved` is the navigator AFTER hand-set milestones, so when
+  // the draft edits one in place, the cells it already holds read as its own
+  // `user:` division rather than whatever lies underneath. A milestone only
+  // ever REPLACES app-invented divisions — a nested one leaves its chapter in
+  // place — so its own division stands for app-invented cells here. Without
+  // this, widening "The storm" by one line was refused as crossing The storm.
+  const ownKey = draft.id !== undefined ? userMilestoneKey(draft.id) : undefined
+  const invented = (division: ImportMilestone | undefined) => (
+    isAppInventedMilestoneKind(division?.kind)
+    || (ownKey !== undefined && division?.key === ownKey)
+  )
+
+  const everyOneInvented = divisions.every(invented)
   if (everyOneInvented) return null
 
   const firstKey = divisions[0]?.key
@@ -240,7 +305,7 @@ export function refusalForUserMilestone(
   // Name the division the range runs INTO, which is the boundary the person
   // has to respect. When what it runs into is an app-invented neighbour, the
   // division it STARTED in is the file-supplied one, so name that instead.
-  const named = isAppInventedMilestoneKind(straddled?.kind) ? divisions[0] : straddled
+  const named = invented(straddled) ? divisions[0] : straddled
   return {
     reason: "crosses-division",
     divisionLabel: named?.label ?? named?.key ?? "",

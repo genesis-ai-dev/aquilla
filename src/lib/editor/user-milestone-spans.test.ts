@@ -3,10 +3,13 @@ import { normalizeMilestoneName, type FileMilestone } from "../../../db/shared/f
 import type { ImportMilestone } from "../../../shared/import-contract"
 import {
   isAppInventedMilestoneKind,
+  milestoneRowActions,
   planUserMilestones,
   refusalForUserMilestone,
   USER_MILESTONE_BADGE,
   userMilestoneIdentity,
+  userMilestoneIdFromKey,
+  userMilestoneKey,
 } from "./user-milestone-spans"
 
 const part = (n: number): ImportMilestone => ({
@@ -195,5 +198,86 @@ describe("refusalForUserMilestone", () => {
       [record("ms-1", "c0", "c2", "The storm")],
       { name: "Next", startCellId: "c3", endCellId: "c5" }, norm,
     )).toBeNull()
+  })
+
+  // AQU-2310: the dialog is handed the navigator's divisions AFTER hand-set
+  // milestones, so the cells a milestone holds read as its own `user:`
+  // division. Widening it into the part beside it is not crossing anything.
+  describe("editing a milestone in place, against the navigator's divisions", () => {
+    const storm = record("ms-1", "c1", "c2", "The storm")
+    const stormDivision = userMilestoneIdentity(storm, 1)
+    const navigator = [part(1), stormDivision, stormDivision, part(2), part(2)]
+
+    it("lets it grow into the app-made part beside it", () => {
+      expect(refusalForUserMilestone(
+        order(5), navigator, [storm],
+        { id: "ms-1", name: "The storm", startCellId: "c1", endCellId: "c3" }, norm,
+      )).toBeNull()
+    })
+
+    it("still refuses a NEW range reaching into it, by name", () => {
+      expect(refusalForUserMilestone(
+        order(5), navigator, [storm],
+        { name: "Other", startCellId: "c2", endCellId: "c3" }, norm,
+      )).toEqual({ reason: "overlaps", milestoneName: "The storm" })
+    })
+
+    it("refuses a nested one running out of its chapter, naming the chapter", () => {
+      const calming = record("ms-2", "c1", "c2", "The calming")
+      expect(refusalForUserMilestone(
+        order(4), [chapter(4), chapter(4), chapter(4), chapter(5)], [calming],
+        { id: "ms-2", name: "The calming", startCellId: "c1", endCellId: "c3" }, norm,
+      )).toEqual({ reason: "crosses-division", divisionLabel: "Mark 5" })
+    })
+  })
+})
+
+describe("userMilestoneIdFromKey", () => {
+  it("reads the record id back out of a hand-set milestone's key", () => {
+    expect(userMilestoneIdFromKey(userMilestoneKey("ms-1"))).toBe("ms-1")
+  })
+
+  it.each([
+    "part:c0",
+    "scripture:MRK:4",
+    // The 50-cell jump ranges under a long hand-set milestone.
+    "user:ms-1:range:c50",
+    "user:",
+  ])("is null for %o", (key) => {
+    expect(userMilestoneIdFromKey(key)).toBeNull()
+  })
+})
+
+describe("milestoneRowActions", () => {
+  it("offers rename, edit range and remove on a hand-set milestone", () => {
+    expect(milestoneRowActions({ key: "user:ms-1", kind: "user" }))
+      .toEqual(["rename", "editRange", "remove"])
+  })
+
+  it("offers the same on one nested under a chapter, which carries no kind", () => {
+    expect(milestoneRowActions({ key: "user:ms-1" })).toEqual(["rename", "editRange", "remove"])
+  })
+
+  it.each([
+    ["part:c0", "part"],
+    ["part:c0#2", "part"],
+    ["time:300000", "time-range"],
+    ["ai:c0", "ai-section"],
+  ] as const)("offers only rename on the app-made row %o", (key, kind) => {
+    expect(milestoneRowActions({ key, kind })).toEqual(["rename"])
+  })
+
+  it.each([
+    ["scripture:MRK:4", "chapter"],
+    ["heading:intro", "section"],
+    ["slide:3", "slide"],
+    ["story:s1", "story"],
+  ] as const)("offers nothing on the file-supplied row %o", (key, kind) => {
+    expect(milestoneRowActions({ key, kind })).toEqual([])
+  })
+
+  it("offers nothing on a 50-cell jump range", () => {
+    expect(milestoneRowActions({ key: "scripture:MRK:4:range:c50" })).toEqual([])
+    expect(milestoneRowActions({ key: "user:ms-1:range:c50" })).toEqual([])
   })
 })

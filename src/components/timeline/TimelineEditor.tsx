@@ -5493,7 +5493,12 @@ export function TimelineEditor({
                     sub={
                       audioFirst && track.kind === "audio" && track.setsLineLengths === false
                         ? t("editor.timeline.laneLayerSub")
-                        : render.sub
+                        // The Source audio row holding only an audio VTT's cues
+                        // is the Source cues row: its sub-line says "heard
+                        // lines", as inside an imported film's folder.
+                        : track.kind === "source-audio" && dialogue.length === 0 && (audioCues?.length ?? 0) > 0
+                          ? t("editor.timeline.filmFolderCuesSub")
+                          : render.sub
                     }
                     dot={render.dot}
                     // Every row but a FOLDER, which is a heading rather than a

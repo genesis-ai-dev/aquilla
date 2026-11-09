@@ -324,7 +324,11 @@ export function deriveDefaultTracks(context?: TrackDerivationContext | null): Ti
   // these numbers are never compared against anything but each other. That
   // invisibility is the guarantee the whole renumber hangs on; it is the
   // highest-blast-radius part of the change and tracks.test.ts pins it twice.
-  if (!context || context.hasMediaCells || (!context.isSubtitleImport && !context.sequenceOrdered)) {
+  // A linked film with nothing of its own yet (a YouTube film linked with no
+  // lines): its sound is the film track's, so the legacy shape's empty Source
+  // audio row ("The film's own sound") is never drawn — the rows below decide.
+  const linkedFilmOnly = Boolean(context?.hasLinkedFilm) && !context?.hasSourceAudio
+  if (!context || context.hasMediaCells || (!context.isSubtitleImport && !context.sequenceOrdered && !linkedFilmOnly)) {
     return [trackRow("source-subtitles"), trackRow("source-audio"), trackRow("target-audio")]
   }
   // AQU-1758: a book or document opens on the timeline since the Audio view

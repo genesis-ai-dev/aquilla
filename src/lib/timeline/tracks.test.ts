@@ -610,3 +610,27 @@ describe("deriveTracksForFile", () => {
     ])
   })
 })
+
+describe("a YouTube film linked with no lines yet (Nov 8)", () => {
+  it("draws no Source audio row: the film's sound is the film track's", () => {
+    const ids = deriveDefaultTracks({
+      isSubtitleImport: false, hasMediaCells: false, hasAudioCues: false, sequenceOrdered: false,
+      hasLinkedFilm: true, hasSourceAudio: false,
+    }).map((t) => t.id)
+    expect(ids).not.toContain("source-audio")
+    expect(ids).toEqual(["source-subtitles", "target-audio"])
+  })
+  it("with a recording of its own, the Source audio row is drawn", () => {
+    const ids = deriveDefaultTracks({
+      isSubtitleImport: false, hasMediaCells: false, hasAudioCues: false, sequenceOrdered: false,
+      hasLinkedFilm: true, hasSourceAudio: true,
+    }).map((t) => t.id)
+    expect(ids).toContain("source-audio")
+  })
+  it("a time-ordered file with no film keeps the three rows it always had", () => {
+    expect(deriveDefaultTracks({
+      isSubtitleImport: false, hasMediaCells: false, hasAudioCues: false, sequenceOrdered: false,
+    }).map((t) => t.id)).toEqual(["source-subtitles", "source-audio", "target-audio"])
+  })
+})
+

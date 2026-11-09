@@ -2738,6 +2738,9 @@ describe("TimelineEditor — rows come from the track model", () => {
     // Sam, Oct 30: a row of cues is "Source cues", not "Source audio".
     expect(gutterNames()).toEqual(["Source text", "Target text", "Source cues", "Target audio"])
     expect(laneRows()).toEqual(["subtitle", "target-subtitle", "source-audio-cues", "tl-target-lane"])
+    // Nov 8: its sub-line says what it holds, as in an imported film's folder.
+    expect(screen.getByText("heard lines")).toBeInTheDocument()
+    expect(screen.queryByText("original speech")).toBeNull()
   })
 
   it("the Target-subtitles row shows the translation, not the source text", () => {

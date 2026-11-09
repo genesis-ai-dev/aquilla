@@ -12214,7 +12214,7 @@ export function ProjectWorkspace() {
   // and its report are built here, so they reach it through this ref.
   const prepareBulkRepetitionsRef = useRef<{
     prepare: UseRepetitionValidation["prepareBulkRepetitions"]
-    toastExtras: UseRepetitionValidation["bulkToastExtras"]
+    report: UseRepetitionValidation["reportBulk"]
   } | null>(null)
 
   /**
@@ -12232,8 +12232,11 @@ export function ProjectWorkspace() {
     ) => {
       analytics.capture(BATCH_VALIDATE_ATTEMPTED, batchValidateTelemetry(summary, source))
       const message = batchValidateToast(summary, t, formatLocaleList)
-      // AQU-1486: still ONE message — the repetitions' note and Undo ride on it.
-      showBulkValidateToast(message, prepareBulkRepetitionsRef.current?.toastExtras(repetitions) ?? { note: null })
+      // AQU-1486: still ONE message. AQU-2177: when the run reached repeated
+      // rows that message is the dialog naming them, not a toast counting them.
+      const report = prepareBulkRepetitionsRef.current
+      if (report) report.report(message, repetitions)
+      else showBulkValidateToast(message, { note: null })
     },
     [t, formatLocaleList, analytics],
   )
@@ -16046,7 +16049,7 @@ export function ProjectWorkspace() {
   const {
     handleCellValidated,
     prepareBulkRepetitions,
-    bulkToastExtras,
+    reportBulk: reportBulkRepetitions,
     dialogs: repetitionDialogs,
   } = useRepetitionValidation({
     enabled: autoPropagateRepetitions,
@@ -16074,8 +16077,8 @@ export function ProjectWorkspace() {
   // The "Batch validate text…" action is built above this point; it reaches
   // the bulk planner through this ref.
   useEffect(() => {
-    prepareBulkRepetitionsRef.current = { prepare: prepareBulkRepetitions, toastExtras: bulkToastExtras }
-  }, [prepareBulkRepetitions, bulkToastExtras])
+    prepareBulkRepetitionsRef.current = { prepare: prepareBulkRepetitions, report: reportBulkRepetitions }
+  }, [prepareBulkRepetitions, reportBulkRepetitions])
 
   // Target edits made beside the agent use the editor's normal commit chain;
   // the workbench is another view of the document, not a separate draft store.
@@ -17533,7 +17536,7 @@ export function ProjectWorkspace() {
                   completeBatch={completeBatch}
                   onValidationCommitted={handleBulkValidationCommitted}
                   prepareBulkRepetitions={prepareBulkRepetitions}
-                  bulkRepetitionToastExtras={bulkToastExtras}
+                  reportBulkRepetitions={reportBulkRepetitions}
                   audioMode={lens === "audio"}
                   audioOnlyLane={activeLaneDelivers === "audio"}
                   orderedBy={activeFile ? fileOrderedBy(activeFile) : undefined}

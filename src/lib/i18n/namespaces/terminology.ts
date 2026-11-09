@@ -404,20 +404,6 @@ export const terminology = defineNamespace({
     "terminology.mergeDialog.merging": "Merging…",
     "terminology.mergeDialog.confirmMerge": "Confirm merge",
 
-    // ── TerminologyReviewQueue.tsx ───────────────────────────────────────────
-    "terminology.reviewQueue.approveAria": "Approve concept {term}",
-    "terminology.reviewQueue.rejectAria": "Reject concept {term}",
-    // "Read-only" permission badge → common.readOnly (identical text)
-    "terminology.reviewQueue.readOnlyTooltip":
-      "Requires the Project Lead role or higher to approve/reject concepts.",
-    "terminology.reviewQueue.emptyTitle": "No concepts awaiting review.",
-    "terminology.reviewQueue.emptyDescription":
-      "Draft concepts promoted from candidates will appear here.",
-    "terminology.reviewQueue.awaitingReviewCount": plural({
-      one: "concept awaiting review",
-      other: "concepts awaiting review",
-    }),
-
     // ── EquivalentsPanel.tsx ─────────────────────────────────────────────────
     "terminology.equivalents.promoteButton": "Add",
     "terminology.equivalents.approvedHeading": "Approved translations",
@@ -961,24 +947,6 @@ export const terminology = defineNamespace({
           "count when the server scan stopped before the end of the project; {count} is " +
           "the occurrences found so far, so the real total is that or more.",
         placeholders: { count: "Occurrences found before the scan stopped — a lower bound." },
-      },
-      "terminology.reviewQueue.approveAria": {
-        description:
-          "Accessible name for the checkmark button approving a draft concept; {term} " +
-          "is the concept's own source headword (not translated).",
-        placeholders: { term: "The concept's source headword, verbatim (not translated)." },
-      },
-      "terminology.reviewQueue.rejectAria": {
-        description:
-          "Accessible name for the X button rejecting (deleting) a draft concept; {term} " +
-          "is the concept's own source headword (not translated).",
-        placeholders: { term: "The concept's source headword, verbatim (not translated)." },
-      },
-      "terminology.reviewQueue.awaitingReviewCount": {
-        description:
-          "Collapsible header phrase for the review queue, following a separate numeral " +
-          "badge; no {count} placeholder appears in the text itself, but the locale's " +
-          "CLDR category still must be selected from the same count.",
       },
       "terminology.equivalents.noManagedRenderings": {
         description:

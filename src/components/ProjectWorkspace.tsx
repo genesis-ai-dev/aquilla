@@ -425,7 +425,7 @@ import { fmtCueClock } from "@/components/timeline/format"
 import type { TranscribeChoiceInfo } from "@/components/import/recording-choice-context"
 import { RecordingImportChoiceDialog } from "@/components/import/RecordingImportChoiceDialog"
 import { measureByDecodingMs, probeMediaDurationMs } from "@/lib/import"
-import { needsSplitNotice, sourceRecordingLine } from "@/lib/timeline/recording-line"
+import { needsSplitNotice, sourceRecordingLine, uploadedFilmName } from "@/lib/timeline/recording-line"
 import { piecesFromCuts, splitRecordingLine, textsForPieces, writeLineWindow, type LinePiece, type RecordingLine } from "@/lib/timeline/split-recording-line"
 import { cutsFromWords, loadLinePcm, pauseCuts, type LineAudio } from "@/lib/audio/recording-split"
 import { transcribeBlock } from "@/lib/audio/transcribe-access"
@@ -13969,6 +13969,13 @@ export function ProjectWorkspace() {
     () => mergeCellsWithAudio(legacyCells, workspaceAudioByCellId),
     [legacyCells, workspaceAudioByCellId],
   )
+  // AQU-2461 (review, Nov 9): Change film names the film itself. A video
+  // dropped on an empty file is not named after the file; the upload's name is
+  // on its Source audio line.
+  const activeFilmName = useMemo(
+    () => uploadedFilmName(audioMergedCells, activeFile?.coreMediaUrl, activeFile?.name),
+    [audioMergedCells, activeFile?.coreMediaUrl, activeFile?.name],
+  )
   // AQU-1758: what the New voice dialog can clone from — a dubbing file's
   // takes live on its audio cues, and the timeline's take menu seeds it with one.
   const cloneVoiceCells = useMemo(
@@ -20346,7 +20353,7 @@ export function ProjectWorkspace() {
       <LinkVideoUrlDialog
         open={linkVideoOpen}
         currentUrl={activeFile?.coreMediaUrl ?? null}
-        filmName={activeFile?.name ?? null}
+        filmName={activeFilmName}
         onCancel={() => setLinkVideoOpen(false)}
         onSave={(url) => {
           // Close FIRST: on the Free-timing path handleLinkVideo opens a second

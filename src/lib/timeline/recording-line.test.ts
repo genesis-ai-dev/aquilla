@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest"
 vi.mock("@/lib/audio/transcribe", () => ({ audioBytesToWhisperPcm: vi.fn(), readClipBytes: vi.fn(), transcribeAudio: vi.fn() }))
 
 import type { CellData } from "@/hooks/useCells"
-import { needsSplitNotice, sourceRecordingLine } from "./recording-line"
+import { needsSplitNotice, sourceRecordingLine, uploadedFilmName } from "./recording-line"
 
 const clip = "audio-f1-1793000000000-abc.mp3"
 const line = (att: Record<string, unknown>, extra: Partial<CellData> = {}): CellData => ({
@@ -40,5 +40,38 @@ describe("sourceRecordingLine (AQU-2426)", () => {
     const l = sourceRecordingLine(line({ url: "https://cdn.example.com/sermon.mp3", durationMs: 3_134_000 }))
     expect(l?.readable).toBe(false)
     expect(needsSplitNotice(l)).toBe(false)
+  })
+})
+
+// AQU-2461 (review, Nov 9): Change film named an uploaded film by the FILE's
+// name. That is right for a film brought in through Upload files (the file is
+// named after it), and wrong for a video dropped on an empty file's card:
+// "This file's film is Episode 1 subtitles, imported with it."
+describe("uploadedFilmName (AQU-2461 review)", () => {
+  const film = "frontier-audio://p/f1/f1-clip.mov"
+  const sourceLine = (original: string, url = film): CellData =>
+    line({ url }, { original } as Partial<CellData>)
+
+  it("is the upload's own name, which its Source audio line carries", () => {
+    expect(uploadedFilmName([sourceLine("episode1.mov")], film, "Episode 1 subtitles")).toBe("episode1.mov")
+  })
+
+  it("is the same on every line a split made from it", () => {
+    const cells = [sourceLine("episode1.mov"), { ...sourceLine("episode1.mov"), id: "c2" }]
+    expect(uploadedFilmName(cells, film, "Episode 1 subtitles")).toBe("episode1.mov")
+  })
+
+  it("falls back to the file's name when no line plays that upload", () => {
+    expect(uploadedFilmName([sourceLine("other.mp3", "frontier-audio://p/f1/f1-other.mp3")], film, "Episode 101.mov")).toBe("Episode 101.mov")
+    expect(uploadedFilmName([], film, "Episode 101.mov")).toBe("Episode 101.mov")
+  })
+
+  it("never shows a line's wording as the film's name", () => {
+    expect(uploadedFilmName([sourceLine("In the beginning was the Word.")], film, "John 1")).toBe("John 1")
+    expect(uploadedFilmName([sourceLine("")], film, "John 1")).toBe("John 1")
+  })
+
+  it("has nothing to say without a film or a name", () => {
+    expect(uploadedFilmName([sourceLine("episode1.mov")], null, undefined)).toBeNull()
   })
 })

@@ -60,3 +60,14 @@ describe("a video's picture goes to the file it was dropped on", () => {
     expect(write).toMatch(/const modeWillChange =\s*open &&/)
   })
 })
+
+// AQU-2461 (review, Nov 9): Change film names the film, not the file it is on.
+describe("Change film on a video dropped on an empty file", () => {
+  it("names the upload (its Source audio line's name), not the file", () => {
+    const source = readFileSync(join(__dirname, "ProjectWorkspace.tsx"), "utf8")
+    const start = source.indexOf("<LinkVideoUrlDialog")
+    const dialog = source.slice(start, source.indexOf("/>", start))
+    expect(dialog).toContain("filmName={activeFilmName}")
+    expect(source).toMatch(/const activeFilmName = useMemo\(\s*\(\) => uploadedFilmName\(audioMergedCells, activeFile\?\.coreMediaUrl, activeFile\?\.name\),/)
+  })
+})

@@ -22,6 +22,7 @@
 import { v7 as uuidv7 } from "uuid"
 import { sequenceBetween } from "./derive"
 import { joinWords } from "@/lib/audio/lines-from-words"
+import { tokenizeWords } from "@/lib/audio/timings"
 import {
   emitCellAudioAttach, emitCellAudioTrim, emitCellRetime, emitSourceCellCreate, emitSourceCellReorder,
 } from "@/lib/sync/events-emit"
@@ -128,6 +129,105 @@ export function textsForPieces(
     groups[i]!.push(w)
   }
   return groups.map((g) => joinWords(g))
+}
+
+/** Letters and digits only: punctuation and capitals are retyped freely. */
+const wordCore = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "")
+
+/**
+ * AQU-2426 (review, Nov 9): a line's OWN text, shared out to the pieces of a
+ * split by word times that go with it (seconds from `lo`): its transcript's
+ * stored timings, or a kept words run when the text was corrected since.
+ *
+ * Each piece gets one unbroken stretch of the text as it is written now, so
+ * punctuation and anything someone corrected stay exactly as typed, and no
+ * word is lost or repeated. Only where each piece STARTS is taken from the
+ * times: the word that starts it is found again in the text by itself and the
+ * word before it, near where it should be, so words added or taken out
+ * elsewhere don't move the breaks.
+ *
+ * Null when it can't be done: no text, no times, or text so different in
+ * length from the timed words that their times say nothing about it.
+ */
+export function shareTextByWordTimes(
+  pieces: readonly Pick<LinePiece, "trimStartMs" | "trimEndMs">[],
+  lo: number,
+  text: string,
+  words: readonly { text: string; start: number; end: number }[],
+): string[] | null {
+  const tokens = tokenizeWords(text)
+  const n = tokens.length
+  const m = words.length
+  if (n === 0 || m === 0 || pieces.length === 0) return null
+  if (n > m * 2 + 4 || m > n * 2 + 4) return null
+  const cores = tokens.map((tok) => wordCore(tok.word))
+  const timed = words.map((w) => wordCore(w.text))
+  /** The token the timed word `w` is, or where it would be. */
+  const tokenOf = (w: number): number => {
+    if (w <= 0) return 0
+    if (w >= m) return n
+    if (n === m) return w
+    const guess = Math.min(n - 1, Math.max(1, Math.round((w * n) / m)))
+    const reach = Math.abs(n - m) + 8
+    const near = (ok: (x: number) => boolean): number | null => {
+      for (let d = 0; d <= reach; d++) {
+        for (const x of d === 0 ? [guess] : [guess + d, guess - d]) {
+          if (x >= 1 && x < n && ok(x)) return x
+        }
+      }
+      return null
+    }
+    return near((x) => timed[w] !== "" && cores[x] === timed[w] && cores[x - 1] === timed[w - 1])
+      ?? near((x) => timed[w] !== "" && cores[x] === timed[w])
+      ?? guess
+  }
+  const mids = words.map((w) => lo + ((w.start + w.end) / 2) * 1000)
+  const starts = [0]
+  for (let i = 1; i < pieces.length; i++) {
+    const first = mids.findIndex((mid) => mid >= pieces[i]!.trimStartMs)
+    starts.push(Math.max(starts[i - 1]!, tokenOf(first < 0 ? m : first)))
+  }
+  starts.push(n)
+  return pieces.map((_, i) =>
+    starts[i]! < starts[i + 1]! ? text.slice(tokens[starts[i]!]!.start, tokens[starts[i + 1]! - 1]!.end) : "")
+}
+
+/**
+ * AQU-2426 (review, Nov 9): each piece's text for a split that brings no words
+ * of its own (At pauses), on a line that may already have its text.
+ *
+ *   • A kept words run, and the line's text is still those words (or the
+ *     words never reached the line): each piece gets the words in its stretch.
+ *   • A kept run, but someone corrected the text since: the corrected text is
+ *     shared out by the run's word times. The raw words used to overwrite it.
+ *   • No kept run (the text came from Transcribe all, another device, or more
+ *     than a week ago): shared out by the transcript's stored word times. It
+ *     used to stay whole on the first piece.
+ *   • Text with no word times to go by stays on the first piece (`stayed`),
+ *     and the caller says so.
+ */
+export function textsForSplit(args: {
+  pieces: readonly Pick<LinePiece, "trimStartMs" | "trimEndMs">[]
+  /** The stretch's start on the recording, ms. */
+  lo: number
+  lineText: string
+  kept: { words: readonly { text: string; start: number; end: number }[]; text: string } | null
+  /** The transcript's stored word timings (seconds from the stretch's start). */
+  timings: readonly { word: string; t0: number; t1: number }[] | undefined
+}): { texts: string[] | null; stayed: boolean } {
+  const { pieces, lo } = args
+  const text = args.lineText.trim()
+  if (args.kept && args.kept.words.length > 0) {
+    if (!text || text === args.kept.text.trim()) return { texts: textsForPieces(pieces, lo, args.kept.words), stayed: false }
+    const shared = shareTextByWordTimes(pieces, lo, text, args.kept.words)
+    if (shared) return { texts: shared, stayed: false }
+  }
+  if (!text) return { texts: null, stayed: false }
+  if (args.timings && args.timings.length > 0) {
+    const shared = shareTextByWordTimes(pieces, lo, text, args.timings.map((w) => ({ text: w.word, start: w.t0, end: w.t1 })))
+    if (shared) return { texts: shared, stayed: false }
+  }
+  return { texts: null, stayed: true }
 }
 
 /** What the line was before the split, for Undo. */

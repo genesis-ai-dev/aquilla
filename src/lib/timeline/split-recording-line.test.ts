@@ -15,7 +15,9 @@ vi.mock("@/lib/sync/events-emit", () => {
   }
 })
 
-import { piecesFromCuts, splitRecordingLine, textsForPieces, writeLineWords, type RecordingLine } from "./split-recording-line"
+import {
+  piecesFromCuts, shareTextByWordTimes, splitRecordingLine, textsForPieces, textsForSplit, writeLineWords, type RecordingLine,
+} from "./split-recording-line"
 
 const whole: RecordingLine = {
   projectId: "p", fileId: "f", cellId: "c1", name: "Ruth 1 intro.m4a",
@@ -130,5 +132,87 @@ describe("writeLineWords (AQU-2426 review, Nov 9)", () => {
       transcription: "The whole transcript.", wordsOnly: true, author: "lee",
     })
     expect(calls[0].input.role).toBeUndefined()
+  })
+})
+
+// AQU-2426 (review, Nov 9): a split with no words of its own (At pauses) on a
+// line that already has its text. The whole transcript used to stay on the
+// first new line unless a words run was still kept in this browser.
+describe("a line's own text, shared out by word times", () => {
+  // Seconds from the stretch's start, as a transcript's stored timings are.
+  const timed = [
+    { text: "In", start: 0.5, end: 0.8 }, { text: "the", start: 0.9, end: 1.0 }, { text: "beginning.", start: 1.1, end: 1.6 },
+    { text: "Ruth", start: 12.0, end: 12.4 }, { text: "went.", start: 12.5, end: 13.0 },
+    { text: "Naomi", start: 30.2, end: 30.8 }, { text: "wept.", start: 31.0, end: 31.5 },
+  ]
+  const pieces = piecesFromCuts(whole, [10_000, 20_000, 28_000])
+
+  it("each line gets its own stretch of the text; a line with no words gets none", () => {
+    expect(shareTextByWordTimes(pieces, 0, "In the beginning. Ruth went. Naomi wept.", timed))
+      .toEqual(["In the beginning.", "Ruth went.", "", "Naomi wept."])
+  })
+
+  it("keeps what someone corrected, in the line it belongs to", () => {
+    expect(shareTextByWordTimes(pieces, 0, "In the beginning: Ruth left. Naomi wept!", timed))
+      .toEqual(["In the beginning:", "Ruth left.", "", "Naomi wept!"])
+  })
+
+  it("still finds each line's start after words were added or taken out", () => {
+    expect(shareTextByWordTimes(pieces, 0, "Long ago, in the beginning. Ruth went away. Naomi wept.", timed))
+      .toEqual(["Long ago, in the beginning.", "Ruth went away.", "", "Naomi wept."])
+    expect(shareTextByWordTimes(pieces, 0, "The beginning. Ruth went. Naomi wept.", timed))
+      .toEqual(["The beginning.", "Ruth went.", "", "Naomi wept."])
+  })
+
+  it("never loses or repeats a word, whatever the edit", () => {
+    const text = "Completely different words were typed here by someone later on."
+    const shared = shareTextByWordTimes(pieces, 0, text, timed)
+    if (shared) expect(shared.filter(Boolean).join(" ")).toBe(text)
+  })
+
+  it("can't be done with no word times, or for no text", () => {
+    expect(shareTextByWordTimes(pieces, 0, "In the beginning.", [])).toBeNull()
+    expect(shareTextByWordTimes(pieces, 0, "  ", timed)).toBeNull()
+  })
+
+  it("counts from the stretch's start on the recording", () => {
+    const line = { ...whole, trimStartMs: 5_000, trimEndMs: 45_000 }
+    expect(shareTextByWordTimes(piecesFromCuts(line, [15_000]), 5_000, "In the beginning. Ruth went. Naomi wept.", timed))
+      .toEqual(["In the beginning.", "Ruth went. Naomi wept."])
+  })
+})
+
+describe("textsForSplit: where a split at pauses gets each line's text", () => {
+  const timed = [
+    { text: "In", start: 0.5, end: 0.8 }, { text: "the", start: 0.9, end: 1.0 }, { text: "beginning.", start: 1.1, end: 1.6 },
+    { text: "Ruth", start: 12.0, end: 12.4 }, { text: "went.", start: 12.5, end: 13.0 },
+  ]
+  const pieces = piecesFromCuts(whole, [10_000])
+  const stored = timed.map((w) => ({ word: w.text, t0: w.start, t1: w.end, start: 0, end: 0 }))
+
+  it("the text came from Transcribe all (no kept words run): shared out by its stored word times", () => {
+    expect(textsForSplit({ pieces, lo: 0, lineText: "In the beginning. Ruth went.", kept: null, timings: stored }))
+      .toEqual({ texts: ["In the beginning.", "Ruth went."], stayed: false })
+  })
+
+  it("a kept words run, and the line's text is still its words: each line gets its words", () => {
+    expect(textsForSplit({ pieces, lo: 0, lineText: "In the beginning. Ruth went.", kept: { words: timed, text: "In the beginning. Ruth went." }, timings: undefined }))
+      .toEqual({ texts: ["In the beginning.", "Ruth went."], stayed: false })
+    // The words never reached the line (Import and transcribe…, then Undo).
+    expect(textsForSplit({ pieces, lo: 0, lineText: "", kept: { words: timed, text: "In the beginning. Ruth went." }, timings: undefined }))
+      .toEqual({ texts: ["In the beginning.", "Ruth went."], stayed: false })
+  })
+
+  it("a kept words run, but the text was corrected since: the corrections win", () => {
+    expect(textsForSplit({ pieces, lo: 0, lineText: "In the beginning. Ruth left.", kept: { words: timed, text: "In the beginning. Ruth went." }, timings: undefined }))
+      .toEqual({ texts: ["In the beginning.", "Ruth left."], stayed: false })
+  })
+
+  it("text with no word times at all stays on the first line, and that is known", () => {
+    expect(textsForSplit({ pieces, lo: 0, lineText: "Typed by hand.", kept: null, timings: [] })).toEqual({ texts: null, stayed: true })
+  })
+
+  it("no text: nothing to share and nothing stayed", () => {
+    expect(textsForSplit({ pieces, lo: 0, lineText: "", kept: null, timings: undefined })).toEqual({ texts: null, stayed: false })
   })
 })

@@ -426,7 +426,7 @@ import type { TranscribeChoiceInfo } from "@/components/import/recording-choice-
 import { RecordingImportChoiceDialog } from "@/components/import/RecordingImportChoiceDialog"
 import { probeMediaDurationMs } from "@/lib/import"
 import { needsSplitNotice, sourceRecordingLine } from "@/lib/timeline/recording-line"
-import { piecesFromCuts, splitRecordingLine, textsForPieces, writeLineWindow, writeLineWords, type LinePiece, type RecordingLine } from "@/lib/timeline/split-recording-line"
+import { piecesFromCuts, splitRecordingLine, textsForSplit, writeLineWindow, writeLineWords, type LinePiece, type RecordingLine } from "@/lib/timeline/split-recording-line"
 import { cutsFromWords, loadLinePcm, pauseCuts, type LineAudio } from "@/lib/audio/recording-split"
 import { transcribeBlock } from "@/lib/audio/transcribe-access"
 import { estimateTranscriptionCost } from "@/lib/audio/transcription-cost"
@@ -10779,25 +10779,36 @@ export function ProjectWorkspace() {
       return false
     }
     try {
-      // A split at pauses on a line whose words were already found (kept from
-      // a words run nobody split by): each new line gets the words in its own
-      // stretch, by their timings — never the first line all of them.
+      // A split at pauses on a line that already has its words: each new line
+      // gets the text in its own stretch — never the first line all of it.
+      // AQU-2426 (review, Nov 9): from a kept words run, or else from the
+      // transcript's own stored word times (textsForSplit), so text that came
+      // from Transcribe all or another device is shared out too, and a
+      // correction typed since is kept.
       let toWrite = pieces
+      let textStayed = false
+      const lineNow = cellWithAudio(line.cellId)
       if (pieces.every((p) => p.text === undefined)) {
         const lo = line.trimStartMs ?? 0
         const hi = line.trimEndMs ?? line.durationMs ?? lo + (line.endMs - line.startMs)
         const kept = findLineWordsRun({ projectId: line.projectId, fileId: line.fileId, cellId: line.cellId, audioId: line.audioId, lo, hi })
-        const keptWords = kept?.line ? wordsOf(kept.line).words : []
-        if (kept && keptWords.length > 0) {
-          const texts = textsForPieces(pieces, lo, keptWords)
+        const shared = textsForSplit({
+          pieces, lo,
+          lineText: lineNow?.transcription ?? "",
+          kept: kept?.line ? wordsOf(kept.line) : null,
+          timings: lineNow?.audioTimings?.[line.audioId],
+        })
+        if (shared.texts) {
+          const texts = shared.texts
           toWrite = pieces.map((p, i) => ({ ...p, text: texts[i] ?? "" }))
         }
+        textStayed = shared.stayed
       }
       // AQU-2426 (review, Nov 9): the line's text as it is now, for Undo. A
       // split by words leaves only the first sentence on it; Undo used to give
       // it the whole recording back with that one sentence. The kept words are
       // no longer dropped here either, so splitting again after Undo is free.
-      const textBefore = getActiveCell(line.cellId)?.transcription ?? ""
+      const textBefore = lineNow?.transcription ?? ""
       const result = await splitRecordingLine({ line, pieces: toWrite, author: currentUsername })
       if (!result) return false
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
@@ -10818,6 +10829,8 @@ export function ProjectWorkspace() {
       toast.add({
         type: "success",
         title: t(titleKey, { name: line.name, count: pieces.length }),
+        // Text with no word times to share it out by: said, not left to be found.
+        ...(textStayed ? { description: t("editor.splitLines.textStayed") } : {}),
         timeout: 10_000,
         actionProps: {
           children: t("editor.splitLines.undo"),
@@ -10832,7 +10845,7 @@ export function ProjectWorkspace() {
       toast.add({ type: "error", title: t("editor.splitLines.failed", { name: line.name, reason: err instanceof Error ? err.message : String(err) }) })
       return false
     }
-  }, [currentUsername, getTokenForProjectFile, revalidateCells, canSplitLines, cannotSplitReason, getActiveCell, t])
+  }, [currentUsername, getTokenForProjectFile, revalidateCells, canSplitLines, cannotSplitReason, cellWithAudio, t])
 
   /** The words came back but nothing was split: they land on the line itself. */
   const keepWordsOnLine = useCallback(async (line: RecordingLine, text: string) => {

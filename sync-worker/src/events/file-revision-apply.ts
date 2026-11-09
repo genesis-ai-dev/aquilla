@@ -94,6 +94,37 @@ export async function loadAdoptableUnits(
   })
 }
 
+/**
+ * The head manifest describes `cells` only until a per-cell source write lands
+ * on the file (a source edit, split, /import/reconcile, agent insert, mirror
+ * window). Compare the live source rows with the head, in order, by cell id and
+ * event id. Equal: returns null, the head is current. Different: returns the
+ * live rows as units, keeping the head's unitKey/positional for cells the head
+ * already knew (so alignment keys stay stable) and a derived key for the rest.
+ */
+export function liveUnitsIfDrifted(
+  head: StoredRevisionManifest,
+  live: readonly StoredRevisionUnit[] | null,
+): StoredRevisionUnit[] | null {
+  const rows = live ?? []
+  const same =
+    rows.length === head.units.length &&
+    rows.every((u, i) => u.cellId === head.units[i].cellId && u.eventId === head.units[i].eventId)
+  if (same) return null
+  const known = new Map(head.units.map((u) => [u.cellId, u]))
+  // Keys the head already gave a live cell are reserved first, so a new cell
+  // can never take one and push a known cell off its own key.
+  const used = new Set(rows.flatMap((u) => (known.has(u.cellId) ? [known.get(u.cellId)!.unitKey] : [])))
+  return rows.map((u) => {
+    const prior = known.get(u.cellId)
+    if (prior) return { ...u, unitKey: prior.unitKey, positional: prior.positional }
+    let unitKey = u.unitKey
+    for (let n = 2; used.has(unitKey); n++) unitKey = `${u.unitKey}#${n}`
+    used.add(unitKey)
+    return { ...u, unitKey }
+  })
+}
+
 function parseMetadata(raw: unknown): Record<string, unknown> {
   if (raw && typeof raw === 'object' && !Array.isArray(raw)) return raw as Record<string, unknown>
   if (typeof raw === 'string') {
@@ -216,11 +247,15 @@ function cellStmtsForUnits(
     stmts.push(
       db
         .prepare(
-          `UPDATE cells SET tombstoned_at = ?, last_edit_at = ?
+          // Hidden as well as tombstoned: the editor hides `hidden_at` rows
+          // (the reconcile re-import's treatment of a removed unit) and would
+          // otherwise list a tombstoned row as a live one. An earlier hide keeps
+          // its own time.
+          `UPDATE cells SET tombstoned_at = ?, hidden_at = COALESCE(hidden_at, ?), last_edit_at = ?
            WHERE project_id = ? AND file_id = ? AND side = 'source' AND tombstoned_at IS NULL
              AND cell_id IN (${chunk.map(() => '?').join(', ')})`,
         )
-        .bind(args.serverTs, args.serverTs, args.projectId, args.fileId, ...chunk),
+        .bind(args.serverTs, args.serverTs, args.serverTs, args.projectId, args.fileId, ...chunk),
     )
   }
   return stmts

@@ -45,13 +45,19 @@ describe("revisionUnitsFromCells", () => {
 })
 
 describe("canImportAsRevision", () => {
-  const base = { fileType: "docx", isReimport: false, hasTargets: false, hasOriginalBytes: true, cells: [cell(0)] }
+  const base = { fileType: "docx", reimport: false as const, hasTargets: false, hasOriginalBytes: true, cells: [cell(0)] }
   it("takes a fresh, source-only, filter-backed import with its bytes", () => {
     expect(REVISION_IMPORT_FORMATS.has("docx")).toBe(true)
     expect(canImportAsRevision(base)).toBe(true)
   })
-  it("refuses re-imports, bilingual rows, formats without a filter, missing bytes and media rows", () => {
-    expect(canImportAsRevision({ ...base, isReimport: true })).toBe(false)
+  // Why: "Update existing" is a plain revision; review apply and "Make updated
+  // copy" unvalidate, repin and clone, which only /import/reconcile does yet.
+  it("takes the plain update re-import, and leaves review apply and fork on reconcile", () => {
+    expect(canImportAsRevision({ ...base, reimport: "update" })).toBe(true)
+    expect(canImportAsRevision({ ...base, reimport: "review" })).toBe(false)
+    expect(canImportAsRevision({ ...base, reimport: "fork" })).toBe(false)
+  })
+  it("refuses bilingual rows, formats without a filter, missing bytes and media rows", () => {
     expect(canImportAsRevision({ ...base, hasTargets: true })).toBe(false)
     expect(canImportAsRevision({ ...base, fileType: "usfm" })).toBe(false)
     expect(canImportAsRevision({ ...base, hasOriginalBytes: false })).toBe(false)

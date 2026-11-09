@@ -9,6 +9,8 @@ import { handleRevisionsRequest, revisionEventId, ADOPTED_STAMP } from '../event
 import { handleBulkImportRequest } from '../events/import-route'
 import { handleStaleSourceRequest } from '../events/stale-source-route'
 import { handleRebuildProjectionRequest } from '../events/rebuild'
+import { writeProjectionSnapshot } from '../events/projection-snapshot'
+import { handleCellsReadRequest } from '../events/cells-read-route'
 import { makeTestDb } from './helpers/pg-test-db'
 import { makeTestToken } from './helpers/auth'
 import { revisionCellId } from '../../../db/shared/file-revision'
@@ -72,7 +74,7 @@ async function setup() {
       env,
     )
   const sourceCells = async () =>
-    (await rows<{ cell_id: string; value: string; event_id: string; anchor_cell_id: string | null; tombstoned_at: number | null; side: string }>('cells'))
+    (await rows<{ cell_id: string; value: string; event_id: string; anchor_cell_id: string | null; tombstoned_at: number | null; hidden_at: number | null; side: string }>('cells'))
       .filter((c) => c.side === 'source')
   return { db, rows, token, bucket, env, post, sourceCells }
 }
@@ -171,6 +173,9 @@ describe('POST /files/:f/revisions', () => {
     // Deleted cell: tombstoned, still present.
     const gone = after.find((c) => c.value === 'A second paragraph about weather.')
     expect(gone?.tombstoned_at).not.toBeNull()
+    // Hidden too: the editor hides `hidden` rows (as after a reconcile
+    // re-import) but shows a merely tombstoned row as a normal one.
+    expect(gone?.hidden_at).not.toBeNull()
     expect((await rows<{ cell_count: number }>('files'))[0].cell_count).toBe(4)
   })
 
@@ -272,6 +277,285 @@ describe('POST /files/:f/revisions', () => {
     expect(res?.status).toBe(200)
     const after = await sourceCells()
     expect(snapshot(after)).toEqual(snapshot(before))
+  })
+
+  // Why: a revisioned file still takes per-cell source writes (a lead's source
+  // edit, a split, /import/reconcile, an agent insert, a mirror window). Those
+  // change `cells` but not the head manifest. If the next revision aligned
+  // against the stale manifest, an `equal` unit would rewind its row to an old
+  // event id, and a hand-inserted cell would be left anchored beside a manifest
+  // cell — two cells on one anchor, a forked chain. The route must align
+  // against what the file holds NOW, and record that as a revision so a
+  // rebuild replays the same thing.
+  it('aligns against live cells when per-cell source writes landed after the head revision', async () => {
+    const { post, db, rows, sourceCells } = await setup()
+    const r1 = (await (await post({
+      artifactSha256: SHA_A,
+      stamp: 'docx@1',
+      units: [para(0, 'Alpha paragraph text'), para(1, 'Beta paragraph text'), para(2, 'Gamma paragraph text')],
+    }))!.json()) as { eventId: string }
+    const cells = await sourceCells()
+    const alpha = cells.find((c) => c.value === 'Alpha paragraph text')!
+    const beta = cells.find((c) => c.value === 'Beta paragraph text')!
+    // Model what a source.cell.commit and a source.cell.create would project:
+    // Beta edited by hand (new event id), a new cell X inserted after Alpha.
+    await db
+      .prepare(`UPDATE cells SET value = ?, event_id = ? WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`)
+      .bind('Beta paragraph text, fixed by hand', 'ev-hand-edit', PROJECT, FILE, beta.cell_id)
+      .run()
+    await db
+      .prepare(
+        `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, anchor_cell_id, lane_id, validated, word_count, content_hash, last_editor, last_edit_at, sequence_index)
+         SELECT ?, ?, 'c-hand-x', 'source', 'Hand inserted line', 'ev-hand-x', ?, (SELECT id FROM lanes WHERE project_id = ? AND role = 'source' LIMIT 1), 0, 3, 'h', 'lead', 2, 1`,
+      )
+      .bind(PROJECT, FILE, alpha.cell_id, PROJECT)
+      .run()
+    await db
+      .prepare(`UPDATE cells SET anchor_cell_id = 'c-hand-x' WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`)
+      .bind(PROJECT, FILE, beta.cell_id)
+      .run()
+
+    // The upstream file changed too: Gamma edited. Beta is back to its file text.
+    const res = await post({
+      artifactSha256: SHA_B,
+      stamp: 'docx@1',
+      origin: 'reimport',
+      units: [para(0, 'Alpha paragraph text'), para(1, 'Beta paragraph text'), para(2, 'Gamma paragraph text, revised')],
+    })
+    const body = (await res!.json()) as { revisionN: number; eventId: string; counts: Record<string, number> }
+    expect(res?.status).toBe(200)
+    // r2 records the live state (origin 'adopt'); r3 is the import.
+    expect(body.revisionN).toBe(3)
+    const revs = await rows<{ revision_n: number; origin: string; unit_count: number }>('file_revisions')
+    expect(revs.map((r) => [r.revision_n, r.origin, r.unit_count])).toEqual([
+      [1, 'import', 3],
+      [2, 'adopt', 4],
+      [3, 'reimport', 3],
+    ])
+
+    const live = (await sourceCells()).filter((c) => c.tombstoned_at == null)
+    const byId = new Map(live.map((c) => [c.cell_id, c]))
+    // Alpha untouched since r1: keeps the r1 event (pin stays valid).
+    expect(byId.get(alpha.cell_id)?.event_id).toBe(r1.eventId)
+    // Beta: same id, and its event moves FORWARD to r3 — never back to r1.
+    expect(byId.get(beta.cell_id)?.value).toBe('Beta paragraph text')
+    expect(byId.get(beta.cell_id)?.event_id).toBe(body.eventId)
+    // The hand-inserted line is not in the file: tombstoned, not left dangling.
+    expect(byId.has('c-hand-x')).toBe(false)
+    // One chain: no two live cells share an anchor.
+    const anchors = live.map((c) => c.anchor_cell_id ?? '<head>')
+    expect(new Set(anchors).size).toBe(anchors.length)
+  })
+
+  it('without per-cell writes since the head, no extra revision is written', async () => {
+    const { post, rows } = await setup()
+    await post({ artifactSha256: SHA_A, stamp: 'docx@1', units: [para(0, 'One line'), para(1, 'Two line')] })
+    const res = await post({ artifactSha256: SHA_B, stamp: 'docx@1', units: [para(0, 'One line'), para(1, 'Two lines')] })
+    expect(((await res!.json()) as { revisionN: number }).revisionN).toBe(2)
+    expect((await rows('file_revisions')).length).toBe(2)
+  })
+
+  // Why: a snapshot-seeded rebuild (AQU-1833) replays only the log's tail, so
+  // a revision before the snapshot is never replayed. The next revision must
+  // still know which cells its parent held, or what it dropped stays live.
+  it('a snapshot-seeded rebuild still tombstones what a post-snapshot revision dropped', async () => {
+    const { post, env, db, sourceCells } = await setup()
+    const listable = env.SNAPSHOTS as unknown as ReturnType<typeof makeStubBucket> & { list?: unknown }
+    listable.list = async ({ prefix = '' }: { prefix?: string } = {}) => ({
+      objects: listable._allKeys().filter((k) => k.startsWith(prefix)).map((key) => ({ key, size: 1, uploaded: new Date() })),
+      truncated: false,
+      cursor: undefined,
+    })
+    await post({ artifactSha256: SHA_A, stamp: 'docx@1', units: [para(0, 'Stays here'), para(1, 'Goes away later'), para(2, 'Also stays')] })
+    const written = await writeProjectionSnapshot({ SNAPSHOTS: env.SNAPSHOTS } as never, db, PROJECT, { minNewEvents: 0 })
+    expect(written).not.toBeNull()
+    await post({ artifactSha256: SHA_B, stamp: 'docx@1', units: [para(0, 'Stays here'), para(1, 'Also stays')] })
+    const before = await sourceCells()
+    const shape = (rs: typeof before) =>
+      rs.map((c) => [c.cell_id, c.value, c.event_id, c.anchor_cell_id, c.tombstoned_at == null ? 'live' : 'tomb']).sort()
+
+    const res = await handleRebuildProjectionRequest(
+      new Request(`https://x/admin/projects/${PROJECT}/rebuild-projection`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${SECRET}` },
+      }),
+      env as never,
+    )
+    expect(res?.status).toBe(200)
+    const report = (await res!.json()) as { snapshotSeq: number | null }
+    expect(report.snapshotSeq).not.toBeNull()
+    expect(shape(await sourceCells())).toEqual(shape(before))
+  })
+
+  // Re-import through the route (AQU-2459 increment 3). Why: /import/reconcile
+  // does two file-level writes besides cells — the new import manifest goes
+  // into files.meta (export rebuilds the document from it) and the "current
+  // original" pointer moves to the new bytes. A re-import that moved the cells
+  // but not those two would export the OLD document around NEW text. They must
+  // land in the same batch as the cells, or not at all.
+  describe('re-import', () => {
+    const insertArtifact = async (db: Awaited<ReturnType<typeof setup>>['db'], id: string, sha: string, key: string, at: string) =>
+      db
+        .prepare(
+          `INSERT INTO artifacts (id, project_id, uploaded_by_user_id, name, size_bytes, sha256, r2_key, file_id, kind, created_at)
+           VALUES (?::uuid, ?, '1', 'doc.docx', 10, ?, ?, ?, 'source', ?::timestamptz)`,
+        )
+        .bind(id, PROJECT, sha, key, FILE, at)
+        .run()
+    const ART_A = '018f6b2e-0000-7000-8000-00000000000a'
+    const ART_B = '018f6b2e-0000-7000-8000-00000000000b'
+    const fileMeta = (manifest: Record<string, unknown>) => ({
+      id: '018f6b2e-0000-7000-8000-0000000000f2',
+      name: 'doc.docx',
+      fileType: 'docx',
+      importFormat: 'docx',
+      parserVersion: 'builtin:docx@1',
+      importManifest: manifest,
+    })
+
+    it('writes the import manifest and the source pointer with the cells', async () => {
+      const { post, db, rows } = await setup()
+      await post({ artifactSha256: SHA_A, stamp: 'builtin:docx@1', units: [para(0, 'One line'), para(1, 'Two line')] })
+      await insertArtifact(db, ART_B, SHA_B, 'artifacts/p1/b/original.docx', '2026-11-08T00:00:00Z')
+      const res = await post({
+        artifactSha256: SHA_B,
+        stamp: 'builtin:docx@1',
+        origin: 'reimport',
+        artifactId: ART_B,
+        rawSourceFormat: 'docx',
+        file: fileMeta({ version: 'v2' }),
+        units: [para(0, 'One line'), para(1, 'Two lines now')],
+      })
+      expect(res?.status).toBe(200)
+      const file = (await rows<{ meta: unknown }>('files'))[0]
+      const meta = (typeof file.meta === 'string' ? JSON.parse(file.meta) : file.meta) as Record<string, unknown>
+      expect(meta.aquillaImport).toEqual({ version: 'v2' })
+      expect(meta.parserVersion).toBe('builtin:docx@1')
+      const blobs = await rows<{ file_id: string; r2_key: string; format: string }>('file_source_blobs')
+      expect(blobs).toEqual([expect.objectContaining({ file_id: FILE, r2_key: 'artifacts/p1/b/original.docx', format: 'docx' })])
+    })
+
+    it('refuses an artifact whose checksum is not the one the revision names, and writes nothing', async () => {
+      const { post, db, rows } = await setup()
+      await post({ artifactSha256: SHA_A, stamp: 'builtin:docx@1', units: [para(0, 'One line')] })
+      await insertArtifact(db, ART_B, SHA_B, 'artifacts/p1/b/original.docx', '2026-11-08T00:00:00Z')
+      const res = await post({
+        artifactSha256: SHA_C,
+        stamp: 'builtin:docx@1',
+        artifactId: ART_B,
+        rawSourceFormat: 'docx',
+        file: fileMeta({ version: 'v2' }),
+        units: [para(0, 'Changed line')],
+      })
+      expect(res?.status).toBe(409)
+      expect((await rows('file_revisions')).length).toBe(1)
+      expect(await rows('file_source_blobs')).toEqual([])
+    })
+
+    it('adopting a legacy file names the CURRENT original, not the bytes being imported', async () => {
+      const { post, db, rows, env, token } = await setup()
+      await handleBulkImportRequest(
+        new Request('https://x/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            projectId: PROJECT,
+            fileId: FILE,
+            cells: [{ id: 'ev-c1', cellId: 'c1', anchorCellId: null, value: 'Legacy line', sequenceIndex: 0, metadata: { aquillaImport: { unitKey: 'docx:p[0]' } } }],
+          }),
+        }),
+        env as never,
+      )
+      await insertArtifact(db, ART_A, SHA_A, 'artifacts/p1/a/original.docx', '2026-11-01T00:00:00Z')
+      await db
+        .prepare(`INSERT INTO file_source_blobs (file_id, project_id, format, r2_key, size_bytes, created_at) VALUES (?, ?, 'docx', ?, 10, 1)`)
+        .bind(FILE, PROJECT, 'artifacts/p1/a/original.docx')
+        .run()
+      // The client uploads the new bytes BEFORE it posts the revision, so the
+      // newest artifact row is the incoming one.
+      await insertArtifact(db, ART_B, SHA_B, 'artifacts/p1/b/original.docx', '2026-11-08T00:00:00Z')
+      const res = await post({
+        artifactSha256: SHA_B,
+        stamp: 'builtin:docx@1',
+        origin: 'reimport',
+        artifactId: ART_B,
+        rawSourceFormat: 'docx',
+        file: fileMeta({ version: 'v2' }),
+        units: [para(0, 'Legacy line'), para(1, 'New line')],
+      })
+      expect(res?.status).toBe(200)
+      const revs = await rows<{ revision_n: number; origin: string; artifact_sha256: string }>('file_revisions')
+      expect(revs.map((r) => [r.revision_n, r.origin, r.artifact_sha256])).toEqual([
+        [1, 'adopt', SHA_A],
+        [2, 'reimport', SHA_B],
+      ])
+    })
+
+    // Why: reconcile pairs docx paragraphs by position key (docx:p[2]), so an
+    // inserted paragraph moved every later translation down one cell. The
+    // revision path pairs by content, so each translation stays with its text.
+    it('an inserted paragraph does not move translations on a legacy file', async () => {
+      const { post, env, token, sourceCells } = await setup()
+      const texts = ['Chapter one', 'The first paragraph stays the same.', 'The second paragraph will be edited.', 'The end.']
+      await handleBulkImportRequest(
+        new Request('https://x/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            projectId: PROJECT,
+            fileId: FILE,
+            cells: texts.map((value, i) => ({
+              id: `ev-l${i}`,
+              cellId: `l${i}`,
+              anchorCellId: i === 0 ? null : `l${i - 1}`,
+              value,
+              sequenceIndex: i,
+              metadata: { aquillaImport: { unitKey: `docx:p[${i}]` } },
+            })),
+          }),
+        }),
+        env as never,
+      )
+      const res = await post({
+        artifactSha256: SHA_B,
+        stamp: 'builtin:docx@1',
+        origin: 'reimport',
+        units: [
+          para(0, 'Chapter one'),
+          para(1, 'The first paragraph stays the same.'),
+          para(2, 'A brand new paragraph.'),
+          para(3, 'The second paragraph was edited.'),
+          para(4, 'The end.'),
+        ],
+      })
+      expect(res?.status).toBe(200)
+      const live = new Map((await sourceCells()).filter((c) => c.tombstoned_at == null).map((c) => [c.value, c.cell_id]))
+      expect(live.get('The second paragraph was edited.')).toBe('l2')
+      expect(live.get('The end.')).toBe('l3')
+      expect(live.get('A brand new paragraph.')).toBe(revisionCellId(FILE, 2, 'docx:p[2]'))
+    })
+  })
+
+  // Why: a warm editor refreshes with `?since=<cursor>`, and the delta lists
+  // changed cells from `events.cell_id`. A revision is ONE event with no
+  // cell_id, so without this the delta came back empty and the editor kept
+  // showing the previous revision's text after a reload (found on the local
+  // stack). The answer is a full resync: a revision replaces many cells at once.
+  it('a delta read past a revision tells the client to resync', async () => {
+    const { post, db, token } = await setup()
+    await post({ artifactSha256: SHA_A, stamp: 'docx@1', units: [para(0, 'One line'), para(1, 'Two line')] })
+    const read = async (query: string) => {
+      const res = await handleCellsReadRequest(
+        new Request(`https://x/api/v1/projects/${PROJECT}/files/${FILE}/cells${query}`, { headers: { Authorization: `Bearer ${token}` } }),
+        { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET } as never,
+      )
+      return (await res!.json()) as { maxServerSeq?: number; resync?: boolean; cells?: unknown[] }
+    }
+    const full = await read('')
+    expect(typeof full.maxServerSeq).toBe('number')
+    await post({ artifactSha256: SHA_B, stamp: 'docx@1', units: [para(0, 'One line'), para(1, 'Two lines, edited')] })
+    const delta = await read(`?since=${full.maxServerSeq}`)
+    expect(delta.resync).toBe(true)
   })
 
   it('a rebuild refuses loudly when a revision manifest is unreadable', async () => {

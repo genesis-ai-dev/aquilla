@@ -15,7 +15,7 @@ import { EXTENSION_DATA_ROLE } from "../../../shared/tools/file-extension"
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
 import { enqueueOutboxEvents } from "./outbox"
 import { assertSourceUploadSize, sha256Hex, uploadSourceOriginal } from "./source-upload"
-import { postFileRevision, type RevisionImport } from "./revision-import"
+import { postFileRevision, type FileRevisionResult, type RevisionImport } from "./revision-import"
 import {
   completeImportSession,
   recordLandedChunk,
@@ -373,6 +373,57 @@ export async function reconcileSourceImport(args: ReconcileSourceArgs): Promise<
   // The immutable artifact remains audit-visible but unselected when this
   // fails; the old live sidecar and every existing cell remain untouched.
   throw lastError ?? new Error(`Re-import ${fileEventId} failed`)
+}
+
+/**
+ * AQU-2459: the plain "Update existing" re-import as ONE file revision.
+ *
+ * The original is stored first without moving the source pointer (as
+ * reconcile does); the revisions route then aligns the units by content,
+ * writes the cells, merges the file metadata and moves the pointer in one
+ * batch. A failure leaves the old cells, metadata and pointer as they were.
+ */
+export async function reviseSourceImport(
+  args: ReconcileSourceArgs & { revision: RevisionImport },
+): Promise<FileRevisionResult> {
+  const fetchFn = args.fetchImpl ?? fetch
+  if (args.signal?.aborted) throw new Error("Import cancelled")
+  const { bytes, format } = sourceArtifactInput(args)
+  if (!bytes || !format) {
+    throw new Error("A revision import needs the original bytes; import the file again from its source.")
+  }
+  const uploaded = await uploadSourceOriginal({
+    projectId: args.projectId,
+    fileId: args.fileId,
+    artifactId: uuidv7(),
+    bytes,
+    format,
+    artifactName: args.file.name,
+    bindingRole: args.artifactBindingRole ?? "source",
+    targetLang: args.artifactTargetLang,
+    profileId: args.file.parserVersion?.split("@")[0],
+    profileVersion: args.file.parserVersion?.split("@")[1],
+    fidelity: args.artifactFidelity,
+    updateSourceSidecar: false,
+    getToken: args.getToken,
+    fetchFn,
+    signal: args.signal,
+  })
+  const result = await postFileRevision({
+    projectId: args.projectId,
+    fileId: args.fileId,
+    artifactSha256: uploaded.sha256,
+    revision: args.revision,
+    origin: "reimport",
+    file: args.file,
+    artifactId: uploaded.artifactId,
+    rawSourceFormat: format,
+    getToken: args.getToken,
+    fetchImpl: fetchFn,
+    signal: args.signal,
+  })
+  args.onProgress?.(args.cells.length, args.cells.length)
+  return result
 }
 
 /**

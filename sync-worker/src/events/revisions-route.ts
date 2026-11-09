@@ -38,11 +38,13 @@ import { ensureProjectLanes } from '../../../db/shared/lanes'
 import {
   buildRevisionCellStmts,
   buildStoredManifest,
+  liveUnitsIfDrifted,
   loadAdoptableUnits,
   validateUnitInputs,
   type StoredRevisionManifest,
 } from './file-revision-apply'
 import type { EventPayloads } from './types'
+import { mergeFileMeta, type ReconcileFileMeta } from './import-reconcile-route'
 
 const PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/files\/([^/]+)\/revisions$/
 const SHA256_RE = /^[0-9a-f]{64}$/
@@ -64,6 +66,15 @@ interface RevisionRequestBody {
   optionsHash: string
   origin: string
   units: RevisionUnitInput[]
+  /** Re-import: the file metadata the importer built (import manifest,
+   *  parserVersion, languages), merged into files.meta exactly as
+   *  /import/reconcile does. */
+  file?: ReconcileFileMeta
+  /** Re-import: the artifact the client just stored. Its sha256 must be
+   *  `artifactSha256`; the file's source pointer moves to it in the same batch
+   *  as the cells. Sent together with `rawSourceFormat`. */
+  artifactId?: string
+  rawSourceFormat?: string
 }
 
 interface FileRow {
@@ -129,6 +140,22 @@ export async function handleRevisionsRequest(
   const prefix = r2KeyPrefix(env)
   const serverTs = Date.now()
 
+  let artifact: { r2_key: string; size_bytes: number } | null = null
+  if (body.artifactId) {
+    const row = await db
+      .prepare(
+        `SELECT r2_key, size_bytes, sha256 FROM artifacts
+         WHERE id::text = ? AND project_id = ? AND file_id = ? AND kind = 'source'`,
+      )
+      .bind(body.artifactId, projectId, fileId)
+      .first<{ r2_key: string; size_bytes: number; sha256: string }>()
+    if (!row) return withCors(new Response('source artifact not found', { status: 409 }), request)
+    if (row.sha256 !== body.artifactSha256) {
+      return withCors(new Response('source artifact checksum does not match artifactSha256', { status: 409 }), request)
+    }
+    artifact = row
+  }
+
   // cells.lane_id is NOT NULL and resolved by subquery, so a project with no
   // lane rows yet gets its default pair first (same guard as /import).
   const anyLane = await db.prepare('SELECT 1 AS present FROM lanes WHERE project_id = ? LIMIT 1').bind(projectId).first<{ present: number }>()
@@ -151,37 +178,48 @@ export async function handleRevisionsRequest(
     const obj = await env.SNAPSHOTS.get(row.manifest_r2_key)
     if (!obj) return withCors(new Response('head revision manifest missing from R2', { status: 500 }), request)
     head = JSON.parse(await obj.text()) as StoredRevisionManifest
+    // Per-cell source writes since the head (edit, split, reconcile, agent,
+    // mirror) leave the manifest behind `cells`. Re-adopt the live rows as the
+    // next revision so alignment, and a later rebuild, start from what the
+    // file actually holds.
+    const drifted = liveUnitsIfDrifted(head, await loadAdoptableUnits(db, projectId, fileId))
+    if (drifted) {
+      const readopted = await writeAdoptedRevision(db, env, {
+        projectId,
+        fileId,
+        revisionN: head.revisionN + 1,
+        parentRevisionN: head.revisionN,
+        stamp: head.stamp,
+        optionsHash: head.optionsHash,
+        artifactSha256: head.artifactSha256,
+        units: drifted,
+        author,
+        serverTs,
+        prefix,
+      })
+      if (!readopted.ok) return withCors(new Response(readopted.reason, { status: 500 }), request)
+      head = readopted.manifest
+      adopted = true
+    }
   } else {
     // Adopt: a materialized file joins the chain with its ids untouched.
     const adoptable = await loadAdoptableUnits(db, projectId, fileId)
     if (adoptable) {
-      const stamp = parserVersionFromMeta(file.meta) ?? ADOPTED_STAMP
-      const artifactSha = await latestArtifactSha(db, projectId, fileId)
-      const eventId = revisionEventId(fileId, 1, artifactSha, stamp)
-      const manifest: StoredRevisionManifest = {
+      const applied = await writeAdoptedRevision(db, env, {
+        projectId,
         fileId,
         revisionN: 1,
         parentRevisionN: null,
-        stamp,
+        stamp: parserVersionFromMeta(file.meta) ?? ADOPTED_STAMP,
         optionsHash: hashOptions({}),
-        artifactSha256: artifactSha,
-        adopted: true,
+        artifactSha256: await currentArtifactSha(db, projectId, fileId, body.artifactSha256),
         units: adoptable,
-      }
-      const applied = await writeRevision(db, env, {
-        projectId,
-        fileId,
-        manifest,
-        eventId,
         author,
         serverTs,
-        origin: 'adopt',
-        counts: { equal: 0, changed: 0, moved: 0, inserted: adoptable.length, deleted: 0 },
-        cellStmts: [],
         prefix,
       })
       if (!applied.ok) return withCors(new Response(applied.reason, { status: 500 }), request)
-      head = manifest
+      head = applied.manifest
       adopted = true
     }
   }
@@ -216,6 +254,29 @@ export async function handleRevisionsRequest(
     units: delta.units,
     deleted: delta.deleted,
   })
+  // Re-import: the file's own row moves with its cells, in one batch.
+  const fileStmts: AquillaStatement[] = []
+  if (body.file) {
+    fileStmts.push(
+      db
+        .prepare('UPDATE files SET meta = ?, updated_at = ? WHERE id = ? AND project_id = ?')
+        .bind(JSON.stringify(mergeFileMeta(file.meta, body.file)), serverTs + 1, fileId, projectId),
+    )
+  }
+  if (artifact && body.rawSourceFormat) {
+    fileStmts.push(
+      db
+        .prepare(
+          `INSERT INTO file_source_blobs (file_id, project_id, format, raw_source, r2_key, size_bytes, created_at)
+           VALUES (?, ?, ?, NULL, ?, ?, ?)
+           ON CONFLICT (file_id) DO UPDATE SET
+             project_id = EXCLUDED.project_id, format = EXCLUDED.format, raw_source = NULL,
+             r2_key = EXCLUDED.r2_key, size_bytes = EXCLUDED.size_bytes, created_at = EXCLUDED.created_at
+           WHERE file_source_blobs.project_id = EXCLUDED.project_id`,
+        )
+        .bind(fileId, projectId, body.rawSourceFormat, artifact.r2_key, Number(artifact.size_bytes), serverTs + 1),
+    )
+  }
   const applied = await writeRevision(db, env, {
     projectId,
     fileId,
@@ -225,7 +286,7 @@ export async function handleRevisionsRequest(
     serverTs: serverTs + 1,
     origin: body.origin,
     counts: delta.counts,
-    cellStmts,
+    cellStmts: [...cellStmts, ...fileStmts],
     prefix,
   })
   if (!applied.ok) return withCors(new Response(applied.reason, { status: 500 }), request)
@@ -242,6 +303,53 @@ export async function handleRevisionsRequest(
     Response.json({ noop: false, revisionN, eventId, adopted, counts: delta.counts, unitCount: delta.units.length }),
     request,
   )
+}
+
+/**
+ * Record the file's CURRENT source rows as a revision, ids and event ids
+ * untouched, without writing `cells`: a legacy file's first revision, or a
+ * re-adoption after per-cell writes moved `cells` past the head.
+ */
+async function writeAdoptedRevision(
+  db: AquillaDb,
+  env: RevisionsRouteEnv,
+  args: {
+    projectId: string
+    fileId: string
+    revisionN: number
+    parentRevisionN: number | null
+    stamp: string
+    optionsHash: string
+    artifactSha256: string
+    units: StoredRevisionManifest['units']
+    author: string
+    serverTs: number
+    prefix: string
+  },
+): Promise<{ ok: true; manifest: StoredRevisionManifest } | { ok: false; reason: string }> {
+  const manifest: StoredRevisionManifest = {
+    fileId: args.fileId,
+    revisionN: args.revisionN,
+    parentRevisionN: args.parentRevisionN,
+    stamp: args.stamp,
+    optionsHash: args.optionsHash,
+    artifactSha256: args.artifactSha256,
+    adopted: true,
+    units: args.units,
+  }
+  const applied = await writeRevision(db, env, {
+    projectId: args.projectId,
+    fileId: args.fileId,
+    manifest,
+    eventId: revisionEventId(args.fileId, args.revisionN, args.artifactSha256, args.stamp),
+    author: args.author,
+    serverTs: args.serverTs,
+    origin: 'adopt',
+    counts: { equal: 0, changed: 0, moved: 0, inserted: args.units.length, deleted: 0 },
+    cellStmts: [],
+    prefix: args.prefix,
+  })
+  return applied.ok ? { ok: true, manifest } : applied
 }
 
 interface WriteArgs {
@@ -352,7 +460,35 @@ function parseBody(text: string): { ok: true; body: RevisionRequestBody } | { ok
   if (typeof optionsHash !== 'string' || !optionsHash) return { ok: false, reason: 'optionsHash must be a string' }
   const units = validateUnitInputs(r.units)
   if (!units.ok) return units
-  return { ok: true, body: { artifactSha256: r.artifactSha256, stamp: r.stamp, optionsHash, origin, units: units.units } }
+  if (r.file !== undefined) {
+    const f = r.file as Record<string, unknown> | null
+    if (!f || typeof f !== 'object' || Array.isArray(f) || typeof f.id !== 'string' || !f.id || typeof f.name !== 'string' || !f.name) {
+      return { ok: false, reason: 'file must be an object with an id and a name' }
+    }
+    if (f.importManifest !== undefined && (!f.importManifest || typeof f.importManifest !== 'object' || Array.isArray(f.importManifest))) {
+      return { ok: false, reason: 'file.importManifest must be an object' }
+    }
+  }
+  if (r.artifactId !== undefined && (typeof r.artifactId !== 'string' || !r.artifactId)) return { ok: false, reason: 'artifactId must be a string' }
+  if (r.rawSourceFormat !== undefined && (typeof r.rawSourceFormat !== 'string' || !r.rawSourceFormat)) {
+    return { ok: false, reason: 'rawSourceFormat must be a string' }
+  }
+  if ((r.artifactId === undefined) !== (r.rawSourceFormat === undefined)) {
+    return { ok: false, reason: 'artifactId and rawSourceFormat must be provided together' }
+  }
+  return {
+    ok: true,
+    body: {
+      artifactSha256: r.artifactSha256,
+      stamp: r.stamp,
+      optionsHash,
+      origin,
+      units: units.units,
+      ...(r.file !== undefined ? { file: r.file as ReconcileFileMeta } : {}),
+      ...(typeof r.artifactId === 'string' ? { artifactId: r.artifactId } : {}),
+      ...(typeof r.rawSourceFormat === 'string' ? { rawSourceFormat: r.rawSourceFormat } : {}),
+    },
+  }
 }
 
 function parserVersionFromMeta(meta: string | null): string | null {
@@ -365,13 +501,29 @@ function parserVersionFromMeta(meta: string | null): string | null {
   }
 }
 
-async function latestArtifactSha(db: AquillaDb, projectId: string, fileId: string): Promise<string> {
+/**
+ * The sha256 of the original a legacy file holds NOW, for its adopted
+ * revision 1. The source pointer (file_source_blobs) names it; without one,
+ * the newest source artifact that is not the incoming re-import (the client
+ * stores the new bytes before it posts the revision).
+ */
+async function currentArtifactSha(db: AquillaDb, projectId: string, fileId: string, incomingSha: string): Promise<string> {
+  const pointed = await db
+    .prepare(
+      `SELECT a.sha256 FROM file_source_blobs b
+       JOIN artifacts a ON a.project_id = b.project_id AND a.r2_key = b.r2_key AND a.kind = 'source'
+       WHERE b.file_id = ? AND b.project_id = ?
+       ORDER BY a.created_at DESC LIMIT 1`,
+    )
+    .bind(fileId, projectId)
+    .first<{ sha256: string | null }>()
+  if (pointed?.sha256) return pointed.sha256
   const row = await db
     .prepare(
-      `SELECT sha256 FROM artifacts WHERE project_id = ? AND file_id = ? AND kind = 'source'
+      `SELECT sha256 FROM artifacts WHERE project_id = ? AND file_id = ? AND kind = 'source' AND sha256 <> ?
        ORDER BY created_at DESC LIMIT 1`,
     )
-    .bind(projectId, fileId)
+    .bind(projectId, fileId, incomingSha)
     .first<{ sha256: string | null }>()
   return row?.sha256 ?? ''
 }

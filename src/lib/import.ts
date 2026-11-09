@@ -53,6 +53,7 @@ import {
   bulkUploadMorphRows,
   publishStagedImport,
   reconcileSourceImport,
+  reviseSourceImport,
   type MorphRow,
   type TargetCommit,
 } from "./sync/bulk-import"
@@ -1897,9 +1898,16 @@ export async function emitParsedFile(
   // AQU-2459: a fresh import of a filter-backed format travels as one
   // revision; everything else keeps the N-row path until its format is
   // wrapped onto the contract.
+  const reimport = !existingFileId
+    ? false
+    : sidebar?.fork && sidebar.sourceFileId
+      ? "fork" as const
+      : sidebar?.reviewChangedSource
+        ? "review" as const
+        : "update" as const
   const revision = canImportAsRevision({
     fileType,
-    isReimport: Boolean(existingFileId),
+    reimport,
     hasTargets: targets.length > 0,
     hasOriginalBytes: result.rawBytes !== undefined || result.rawSource !== undefined,
     cells,
@@ -1907,7 +1915,10 @@ export async function emitParsedFile(
     ? { stamp: shared.file.parserVersion, units: revisionUnitsFromCells(cells) }
     : undefined
 
-  if (existingFileId) {
+  if (existingFileId && revision) {
+    // AQU-2459: "Update existing" aligns by content as one revision.
+    await reviseSourceImport({ ...shared, revision })
+  } else if (existingFileId) {
     await reconcileSourceImport({
       ...shared,
       ...(sidebar?.reviewChangedSource ? { reviewChangedSource: true as const } : {}),

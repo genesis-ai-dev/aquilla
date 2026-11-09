@@ -303,9 +303,12 @@ async function rebuildProjection(
   seed: SnapshotSeed | null,
   revisionManifests: RevisionManifests = new Map(),
 ): Promise<RebuildOutcome> {
-  // AQU-2459: per file, the cell ids the last replayed revision carried, so
-  // the next revision's replay tombstones what it dropped.
-  const revisionCellIds = new Map<string, Set<string>>()
+  // AQU-2459: a revision's replay tombstones what its PARENT revision carried
+  // and it does not. The parent is looked up by number among every manifest
+  // read above, never "the last one replayed": a snapshot-seeded rebuild
+  // (AQU-1833) does not replay revisions older than the snapshot.
+  const manifestByRevision = new Map<string, StoredRevisionManifest>()
+  for (const m of revisionManifests.values()) manifestByRevision.set(`${m.fileId}:${m.revisionN}`, m)
   // 1. Wipe the projection for this project. Rolled back with everything else
   //    if the replay below fails.
   await wipeProjection(tx, projectId)
@@ -526,7 +529,16 @@ async function rebuildProjection(
               `file.revision ${row.id} has no readable manifest in R2; a revisioned file cannot be rebuilt without it`,
             )
           }
-          const previous = revisionCellIds.get(row.file_id) ?? new Set<string>()
+          let previous = new Set<string>()
+          if (manifest.parentRevisionN != null) {
+            const parent = manifestByRevision.get(`${row.file_id}:${manifest.parentRevisionN}`)
+            if (!parent) {
+              throw new RebuildFailed(
+                `file.revision ${row.id} names parent revision ${manifest.parentRevisionN} whose manifest is not readable in R2`,
+              )
+            }
+            previous = new Set(parent.units.map((u) => u.cellId))
+          }
           stmts.push(
             ...buildCellStmtsFromManifest(tx, {
               projectId,
@@ -537,7 +549,6 @@ async function rebuildProjection(
               serverTs: row.server_ts,
             }),
           )
-          revisionCellIds.set(row.file_id, new Set(manifest.units.map((u) => u.cellId)))
           // Later target commits chain on these source heads.
           replay.seedFromCellRows(
             manifest.units.map((u) => ({

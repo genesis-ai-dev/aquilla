@@ -11,7 +11,7 @@
 import type { RevisionUnitInput } from "../../../db/shared/file-revision"
 import { FORMAT_DESCRIPTORS } from "../formats/descriptors"
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
-import type { BulkImportCell } from "./bulk-import"
+import type { BulkImportCell, BulkImportFileMeta } from "./bulk-import"
 
 /** Kill switch: `VITE_IMPORT_VIA_REVISIONS=0` restores the N-event import. */
 export const REVISION_IMPORT_ENABLED: boolean = import.meta.env?.VITE_IMPORT_VIA_REVISIONS !== "0"
@@ -62,17 +62,20 @@ export function revisionUnitsFromCells(cells: readonly BulkImportCell[]): Revisi
 /** True when this import can travel as a revision instead of N cell events. */
 export function canImportAsRevision(args: {
   fileType: string | undefined
-  isReimport: boolean
+  /** `update` is the plain "Update existing" re-import, which a revision
+   *  covers. The sidebar review apply and "Make updated copy" (fork) still go
+   *  through /import/reconcile: they unvalidate, repin and clone, which the
+   *  revisions route does not do. */
+  reimport: false | "update" | "review" | "fork"
   hasTargets: boolean
   hasOriginalBytes: boolean
   cells: readonly BulkImportCell[]
 }): boolean {
   if (!REVISION_IMPORT_ENABLED) return false
   if (!args.fileType || !REVISION_IMPORT_FORMATS.has(args.fileType)) return false
-  // Re-import keeps its reconcile path for now (increment 3 covers fresh
-  // imports); bilingual and media imports carry rows the revision has no
-  // slot for.
-  if (args.isReimport || args.hasTargets || !args.hasOriginalBytes) return false
+  // Bilingual and media imports carry rows the revision has no slot for.
+  if (args.reimport === "review" || args.reimport === "fork") return false
+  if (args.hasTargets || !args.hasOriginalBytes) return false
   return args.cells.every((cell) => (cell.medium ?? "text") === "text" && cell.startMs === undefined)
 }
 
@@ -89,6 +92,11 @@ export interface PostFileRevisionArgs {
   artifactSha256: string
   revision: RevisionImport
   origin?: "import" | "reimport"
+  /** Re-import only: merged into files.meta with the cells (import manifest,
+   *  parserVersion), and the stored artifact the source pointer moves to. */
+  file?: BulkImportFileMeta
+  artifactId?: string
+  rawSourceFormat?: string
   getToken: (fileId: string) => Promise<string | null>
   fetchImpl?: typeof fetch
   signal?: AbortSignal
@@ -112,6 +120,10 @@ export async function postFileRevision(args: PostFileRevisionArgs): Promise<File
     ...(args.revision.optionsHash ? { optionsHash: args.revision.optionsHash } : {}),
     origin: args.origin ?? "import",
     units: args.revision.units,
+    ...(args.file ? { file: args.file } : {}),
+    ...(args.artifactId && args.rawSourceFormat
+      ? { artifactId: args.artifactId, rawSourceFormat: args.rawSourceFormat }
+      : {}),
   })
   let token = await args.getToken(args.fileId)
   for (let attempt = 0; attempt < 2; attempt++) {

@@ -11004,12 +11004,15 @@ export function ProjectWorkspace() {
       cellsLoading,
       cellsError,
       hasLinkedPicture: activeFile?.orderedBy === "time" && Boolean(activeFile.coreMediaUrl),
+      // An empty time-ordered file someone here may add media to opens on its
+      // "No media on this file yet" card, the way a recording or film comes in.
+      offersMediaCard: activeFile?.orderedBy === "time" && canAttachSourceAudio(project?.syncRole?.level ?? null),
       // AQU-1901: no rows until the open lane can be named — paired with the
       // '' fallback they read "empty" on a project with only tagged lanes.
       lanesLoading: lanesPending,
     }),
     [activeFileId, cellSummaries.length, fileSyncStatus, cellsLoading, cellsError,
-      activeFile?.orderedBy, activeFile?.coreMediaUrl, lanesPending]
+      activeFile?.orderedBy, activeFile?.coreMediaUrl, lanesPending, project?.syncRole?.level]
   )
 
   const showFileStats = centerSurface === "editor"

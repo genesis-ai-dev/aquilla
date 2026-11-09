@@ -10,8 +10,12 @@
 // could not be loaded, or following the source, it says nothing and playback
 // ends where the lines end, as it always did.
 //
-// The clock after the last line is a held ticker, not an element, so these
-// tests drive fake timers.
+// AQU-2253 (review, Nov 9): where only the film plays (its tail, and the whole
+// run when nothing is recorded) the FILM is the clock, as it is following the
+// source: the film panel reports the film's second (`tickProgrammeFilm`) and
+// the queue's clock takes it. So these tests run a stand-in for the panel's
+// film (`film`, below) on fake timers: it follows the queue as the panel does
+// and reports four times a second. `film.stuck` is a film that is buffering.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
@@ -30,6 +34,7 @@ import {
   startQueue,
   startQueueAtTime,
   stopQueue,
+  tickProgrammeFilm,
   updateQueueCells,
   type PlayContext,
 } from "./play-queue"
@@ -155,6 +160,30 @@ async function playTheLinesOut(cells: CellData[], over: Partial<PlayContext> = {
 let ranOut = 0
 let stopRanOut: () => void = () => {}
 
+/**
+ * The film in its panel, as MediaVideoPane runs it: while the queue runs it
+ * plays; under a line it is kept at the queue's clock; where the film is the
+ * clock it is only sent to the queue's second when that is far from its own
+ * (a seek), and it reports its own second four times a second, unless it is
+ * `stuck` (buffering, or not started).
+ */
+const film = { sec: 0, stuck: false, reports: 0 }
+let filmTimer: ReturnType<typeof setInterval> | null = null
+function filmBeat(): void {
+  const kind = getQueueState().kind
+  const p = getQueueProgress()
+  if ((kind !== "playing" && kind !== "loading") || !p.programmeClock) return
+  if (!p.filmClock) {
+    film.sec = p.currentTime
+    return
+  }
+  if (Math.abs(film.sec - p.currentTime) > 0.85) film.sec = p.currentTime
+  if (film.stuck) return
+  film.sec += 0.25 * p.rate
+  film.reports++
+  tickProgrammeFilm(film.sec)
+}
+
 beforeEach(() => {
   FakeAudio.instances = []
   vi.stubGlobal("Audio", FakeAudio)
@@ -166,9 +195,15 @@ beforeEach(() => {
   setQueueTimingMode("audioFirst")
   ranOut = 0
   stopRanOut = onQueueRanOut(() => { ranOut++ })
+  film.sec = 0
+  film.stuck = false
+  film.reports = 0
+  filmTimer = setInterval(filmBeat, 250)
 })
 
 afterEach(() => {
+  if (filmTimer != null) clearInterval(filmTimer)
+  filmTimer = null
   stopRanOut()
   stopQueue()
   setProgrammeFilm(null)
@@ -415,7 +450,9 @@ describe("over the film's tail, the transport's other commands", () => {
     expect(getQueueProgress().duration).toBeCloseTo(12, 5)
     await wait(3_000)
     expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
-    expect(getQueueProgress().currentTime).toBeCloseTo(9, 1)
+    // The take's last second on the queue's clock, then the film's from 7 s
+    // (the stand-in film here joins a beat behind, and is waited for).
+    expect(Math.abs(getQueueProgress().currentTime - 9)).toBeLessThanOrEqual(0.3)
     await wait(3_050)
     expect(getQueueState().kind).toBe("idle")
   })
@@ -662,5 +699,172 @@ describe("nothing recorded yet, Skip lines with nothing to play OFF", () => {
     expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
     await wait(1_050)
     expect(getQueueState().kind).toBe("idle")
+  })
+})
+
+// AQU-2253 (review, Nov 9), finding 2: over the film's tail, and for the whole
+// run when nothing is recorded, the playhead ran on a timer that never waited
+// for the film. A film that was buffering was skipped forward to the timer,
+// and one the browser refused to start was run past, to the end, behind
+// "Click to start". The film is the clock there now.
+describe("where only the film plays, the film is the clock", () => {
+  const unrecorded = () => [line("b1"), line("b2"), line("b3")]
+
+  it("says so over the tail and when nothing is recorded, and not under a recorded line", async () => {
+    const cells = recorded()
+    linkFilm(12, cells)
+    startQueue(ctxFor(cells), 0)
+    await wait()
+    expect(getQueueProgress().filmClock).toBe(false)
+    el("b1")!.tick(2)
+    await wait()
+    el("b2")!.tick(3)
+    await wait()
+    expect(getQueueProgress().filmClock).toBe(true)
+    stopQueue()
+
+    const none = unrecorded()
+    linkFilm(10, none)
+    startQueue(ctxFor(none), 0)
+    await wait()
+    expect(getQueueProgress().filmClock).toBe(true)
+  })
+
+  it("over the tail, a film that is buffering holds the playhead where it is and the transport says loading; it carries on when the film does", async () => {
+    const cells = recorded()
+    linkFilm(12, cells)
+    await playTheLinesOut(cells)
+    await wait(1_000)
+    expect(getQueueProgress().currentTime).toBeCloseTo(6, 1)
+
+    film.stuck = true
+    await wait(5_000)
+    // Not run on to 11 s over a film that is not playing.
+    expect(getQueueProgress().currentTime).toBeCloseTo(6, 1)
+    expect(getQueueState()).toMatchObject({ kind: "loading", cellId: "b2" })
+    expect(ranOut).toBe(0)
+
+    film.stuck = false
+    await wait(1_000)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(7, 1)
+  })
+
+  it("a film that never starts never reaches the end: the run waits, and a pause while it waits is a pause", async () => {
+    const cells = recorded()
+    linkFilm(12, cells)
+    film.stuck = true
+    await playTheLinesOut(cells)
+    // Longer than the whole tail.
+    await wait(30_000)
+    expect(getQueueState()).toMatchObject({ kind: "loading", cellId: "b2" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(5, 1)
+    expect(ranOut).toBe(0)
+
+    pauseQueue()
+    expect(getQueueState()).toMatchObject({ kind: "paused", cellId: "b2" })
+    await wait(5_000)
+    expect(getQueueState()).toMatchObject({ kind: "paused" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(5, 1)
+  })
+
+  it("nothing recorded: the playhead does not leave the start until the film plays", async () => {
+    const cells = unrecorded()
+    linkFilm(10, cells)
+    film.stuck = true
+    startQueue(ctxFor(cells), 0)
+    await wait(4_000)
+    // Not two lines on, over a film still loading.
+    expect(getQueueState()).toMatchObject({ kind: "loading", cellId: "b1" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(0, 2)
+
+    film.stuck = false
+    await wait(2_000)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(2, 1)
+  })
+
+  it("the playhead is where the film is: a film a little ahead is taken up, one a little behind is waited for", async () => {
+    const cells = recorded()
+    linkFilm(12, cells)
+    await playTheLinesOut(cells)
+    // The panel's film, a third of a second ahead of the lines' end.
+    tickProgrammeFilm(5.3)
+    expect(getQueueProgress().currentTime).toBeCloseTo(5.3, 5)
+    // An older report (behind the clock) never takes the playhead back.
+    tickProgrammeFilm(5.1)
+    expect(getQueueProgress().currentTime).toBeCloseTo(5.3, 5)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+  })
+
+  it("the run ends when the film reaches its end, not when a timer says it should have", async () => {
+    const cells = recorded()
+    linkFilm(12, cells)
+    await playTheLinesOut(cells)
+    // The film lost four seconds to buffering on the way.
+    await wait(2_000)
+    film.stuck = true
+    await wait(4_000)
+    film.stuck = false
+    await wait(3_000)
+    // 7 s of wall time since the lines ended would have been the timer's end.
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(10, 1)
+    await wait(2_050)
+    expect(getQueueState().kind).toBe("idle")
+    expect(ranOut).toBe(1)
+  })
+
+  it("a film that turns out shorter than its stored length ends the run when it says it is over", async () => {
+    const cells = recorded()
+    linkFilm(12, cells)
+    await playTheLinesOut(cells)
+    await wait(1_000)
+    film.stuck = true
+    tickProgrammeFilm(6.2, true)
+    expect(getQueueState().kind).toBe("idle")
+    expect(ranOut).toBe(1)
+  })
+
+  it("the film taken away while it carries the lines does not leave the run waiting on it", async () => {
+    const cells = unrecorded()
+    linkFilm(10, cells)
+    startQueue(ctxFor(cells), 0)
+    await wait(500)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b1" })
+    setProgrammeFilm(null)
+    await wait(5_000)
+    expect(getQueueState().kind).toBe("idle")
+  })
+
+  it("a take landing while the film carries the lines does not leave the run waiting on the film", async () => {
+    const cells = unrecorded()
+    linkFilm(10, cells)
+    startQueue(ctxFor(cells), 0)
+    await wait(500)
+    expect(getQueueProgress().filmClock).toBe(true)
+    // b3 is recorded now: the film no longer carries the lines.
+    updateQueueCells([line("b1"), line("b2"), line("b3", 2_000)])
+    await wait(1_100)
+    // The rest of b1 was crossed; b2 has nothing and is skipped; b3 plays.
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+    expect(el("b3")!.paused).toBe(false)
+  })
+
+  it("a take on another track still playing out after the last line keeps its own clock, then the film's takes over", async () => {
+    setQueueTargetSlots(["recording", TRACK])
+    setQueueLayerTrackSlots([TRACK])
+    // b2's Track 1 take runs to 7 s, 2 s past the lines' end; the film to 12 s.
+    const cells = [line("b1", 2_000), line("b2", 3_000, 5_000)]
+    linkFilm(12, cells)
+    await playTheLinesOut(cells)
+    expect(getQueueProgress().filmClock).toBe(false)
+    film.stuck = true
+    await wait(2_050)
+    // The take has played out on the queue's own clock; from here the film's.
+    expect(getQueueProgress().filmClock).toBe(true)
+    await wait(3_000)
+    expect(getQueueState()).toMatchObject({ kind: "loading", cellId: "b2" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(7, 1)
   })
 })

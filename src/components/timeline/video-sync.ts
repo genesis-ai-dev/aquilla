@@ -119,10 +119,15 @@ export interface VideoSyncInput {
   /** `video.duration` — NaN until metadata loads. */
   duration: number
   lastSeekAt: number | null
+  /** AQU-2253 (review, Nov 9): the FILM is the clock here (following the
+   *  recordings, over the film's tail or with nothing recorded): the queue's
+   *  clock is the film's own second, reported back by the pane. */
+  filmIsClock?: boolean
 }
 
 export function videoSyncAction(input: VideoSyncInput): VideoSyncAction {
   const { kind, clockIsFileTime, tickSec, videoSec, prevTickSec, prevTickAt, now, rate, duration, lastSeekAt } = input
+  const filmIsClock = input.filmIsClock === true
 
   // The queue zeroes its progress when it disposes the master — at end of file,
   // on stop, and on error. Reading that as a position would rewind the film the
@@ -142,6 +147,21 @@ export function videoSyncAction(input: VideoSyncInput): VideoSyncAction {
   const lastFrameSec = Math.max(0, duration - VIDEO_END_GUARD_SEC)
   if (tickSec > lastFrameSec) {
     return videoSec < lastFrameSec - VIDEO_PAUSED_SNAP_SEC ? { kind: "end", sec: lastFrameSec } : { kind: "pause" }
+  }
+
+  // AQU-2253 (review, Nov 9): the film is the clock. Near the playhead it is
+  // left alone (the playhead takes it up, or waits for it), also while the
+  // transport waits ("loading"). Far from it, the playhead was put somewhere
+  // else: it goes there, with no cooldown, as no later tick would re-issue a
+  // dropped seek. Paused, the rule below still moves it with every scrub.
+  // (This clock never goes back by itself, so one that has was put back, by
+  // Previous line, say: the film goes there however short the step.)
+  if (filmIsClock && kind !== "paused") {
+    const putBack = prevTickSec != null
+      && tickSec < prevTickSec - VIDEO_PAUSED_SNAP_SEC
+      && videoSec > tickSec + VIDEO_PAUSED_SNAP_SEC
+    if (!putBack && Math.abs(videoSec - tickSec) <= videoDriftBarSec(rate)) return { kind: "none" }
+    return { kind: "seek", sec: Math.max(0, tickSec) }
   }
 
   // A cross-clip resolve republishes progress transiently; the queue re-seeds

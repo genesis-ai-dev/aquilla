@@ -39,9 +39,21 @@ vi.mock("@/lib/audio/play-queue", () => ({
   getQueueAudibility: () => mockAudibility,
   setQueueAudibility: () => {},
   stopQueue: () => stopQueue(),
+  // AQU-2253 (review, Nov 9): where the film is the clock the pane reports the
+  // film's second to the queue, and pauses and resumes it around a film the
+  // browser will not start.
+  getQueueProgress: () => mockQueue.progress,
+  tickProgrammeFilm: (...args: [number, boolean?]) => tickProgrammeFilm(...args),
+  pauseQueue: () => pauseQueue(),
+  resumeQueue: () => resumeQueue(),
 }))
 // Hoisted with the mock above, so the factory can reach it.
-const { stopQueue } = vi.hoisted(() => ({ stopQueue: vi.fn() }))
+const { stopQueue, tickProgrammeFilm, pauseQueue, resumeQueue } = vi.hoisted(() => ({
+  stopQueue: vi.fn(),
+  tickProgrammeFilm: vi.fn(),
+  pauseQueue: vi.fn(),
+  resumeQueue: vi.fn(async () => {}),
+}))
 
 // AQU-1565 follow-up: the sound menu stops both players before it hands the
 // transport over. Spied, so a test can see the pause without real audio.
@@ -394,6 +406,200 @@ describe("MediaVideoPane", () => {
         at(9.2, true)
         view.rerender(following())
         expect(screen.queryByTestId("video-pane-caption")).toBeNull()
+      })
+    })
+
+    // AQU-2253 (review, Nov 9), finding 2: over the film's tail, and for the
+    // whole run when nothing is recorded, only the film plays, so the film is
+    // the clock (the queue says so: `filmClock`). The pane reports the film's
+    // own second, keeps the film wanted while the transport waits on it, and
+    // recovers it the way it does following the source.
+    describe("where only the film plays, the film is the clock", () => {
+      const following = () => <MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={subs} followsRecordings />
+      type Kind = "playing" | "loading" | "paused"
+      const clockAt = (sec: number, kind: Kind = "playing", filmClock = true) =>
+        sounding("s2", {
+          kind,
+          playing: kind === "playing",
+          running: kind !== "paused",
+          progress: { currentTime: sec, duration: 27, rate: 1, volume: 1, programmeClock: true, filmTail: filmClock, filmClock },
+        })
+      /** The pane over a film at `filmSec`, with the queue's clock at `clockSec`. */
+      const mount = (filmSec: number, clockSec: number, kind: Kind = "playing", filmClock = true) => {
+        const view = render(following())
+        const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
+        const film = { sec: filmSec, seeks: [] as number[] }
+        Object.defineProperty(video, "duration", { value: 27, configurable: true })
+        Object.defineProperty(video, "currentTime", {
+          configurable: true,
+          get: () => film.sec,
+          set: (v: number) => { film.seeks.push(v); film.sec = v },
+        })
+        video.play = vi.fn(() => Promise.resolve())
+        video.pause = vi.fn()
+        clockAt(clockSec, kind, filmClock)
+        view.rerender(following())
+        return { view, video, film }
+      }
+      beforeEach(() => {
+        tickProgrammeFilm.mockClear()
+        pauseQueue.mockClear()
+        resumeQueue.mockClear()
+      })
+
+      it("reports the film's own second to the queue as the film plays", () => {
+        const { video, film } = mount(9.2, 9.0)
+        film.sec = 9.45
+        fireEvent.timeUpdate(video)
+        expect(tickProgrammeFilm).toHaveBeenCalledWith(9.45)
+      })
+
+      it("reports nothing under a line the queue plays: there the film follows the queue", () => {
+        const { video, film } = mount(4.0, 4.0, "playing", false)
+        film.sec = 4.25
+        fireEvent.timeUpdate(video)
+        expect(tickProgrammeFilm).not.toHaveBeenCalled()
+      })
+
+      it("does not report a film that is somewhere else, or still on its way to a seek", () => {
+        const { video, film } = mount(9.0, 9.0)
+        // Where it was before a seek that has not landed yet.
+        film.sec = 20
+        fireEvent.timeUpdate(video)
+        Object.defineProperty(video, "seeking", { value: true, configurable: true })
+        film.sec = 9.2
+        fireEvent.timeUpdate(video)
+        expect(tickProgrammeFilm).not.toHaveBeenCalled()
+      })
+
+      it("put back a little (Previous line on a short line), it goes back, and does not report from where it was first", () => {
+        const { video, film, view } = mount(10.2, 10.25)
+        // The queue's clock has gone back half a second; the pane has not rendered it yet.
+        clockAt(9.75)
+        film.sec = 10.45
+        fireEvent.timeUpdate(video)
+        expect(tickProgrammeFilm).not.toHaveBeenCalled()
+        view.rerender(following())
+        expect(film.seeks).toEqual([9.75])
+      })
+
+      it("is not sent anywhere while it is near the clock, ahead or behind, from the first beat", () => {
+        const { film, view } = mount(8.4, 9.0)
+        clockAt(9.0, "loading")
+        view.rerender(following())
+        film.sec = 9.6
+        clockAt(9.0, "playing")
+        view.rerender(following())
+        expect(film.seeks).toEqual([])
+      })
+
+      it("is sent to the playhead when the playhead is put somewhere else", () => {
+        const { film, view, video } = mount(9.0, 9.0)
+        clockAt(20, "playing")
+        view.rerender(following())
+        expect(film.seeks).toEqual([20])
+        expect(video.pause).not.toHaveBeenCalled()
+      })
+
+      it("is kept playing, not paused, while the transport waits for it", () => {
+        const { video } = mount(9.0, 9.0, "loading")
+        expect(video.pause).not.toHaveBeenCalled()
+        expect(video.play).toHaveBeenCalled()
+      })
+
+      it("under a line that is still loading the film is paused, as before", () => {
+        const { video } = mount(4.0, 4.0, "loading", false)
+        expect(video.pause).toHaveBeenCalled()
+        expect(video.play).not.toHaveBeenCalled()
+      })
+
+      it("a film the browser will not start pauses the transport behind Click to start, and the click starts both", async () => {
+        const view = render(following())
+        const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
+        Object.defineProperty(video, "duration", { value: 27, configurable: true })
+        video.pause = vi.fn()
+        video.play = vi.fn(() => Promise.reject(new Error("NotAllowedError")))
+        clockAt(9.0)
+        view.rerender(following())
+        const overlay = await screen.findByTestId("video-pane-play-gesture")
+        expect(pauseQueue).toHaveBeenCalled()
+
+        // The queue paused, as asked. The click is the gesture: the film is
+        // started inside it, and the transport with it.
+        clockAt(9.0, "paused")
+        view.rerender(following())
+        video.play = vi.fn(() => Promise.resolve())
+        fireEvent.click(overlay)
+        expect(video.play).toHaveBeenCalled()
+        expect(resumeQueue).toHaveBeenCalled()
+      })
+
+      it("under a line, a film the browser will not start does not stop the lines", async () => {
+        const view = render(following())
+        const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
+        Object.defineProperty(video, "duration", { value: 27, configurable: true })
+        video.pause = vi.fn()
+        video.play = vi.fn(() => Promise.reject(new Error("NotAllowedError")))
+        clockAt(4.0, "playing", false)
+        view.rerender(following())
+        await screen.findByTestId("video-pane-play-gesture")
+        expect(pauseQueue).not.toHaveBeenCalled()
+      })
+
+      it("tells the queue the film is over when the clock is at the film's own last frame", () => {
+        // The stored length said more than the 27 s the film really has.
+        // The picture is put on its last frame, and says so.
+        mount(26.5, 26.9)
+        expect(tickProgrammeFilm).toHaveBeenCalledWith(26.75, true)
+      })
+
+      describe("a film that has stopped without saying so", () => {
+        beforeEach(() => vi.useFakeTimers())
+        afterEach(() => vi.useRealTimers())
+        const tick = (n = 1) => act(() => { vi.advanceTimersByTime(1000 * n) })
+        /** A film that claims to be running and whose clock does not move. */
+        const wedge = (video: HTMLVideoElement) => {
+          Object.defineProperty(video, "duration", { value: 27, configurable: true })
+          Object.defineProperty(video, "readyState", { value: 4, configurable: true })
+          Object.defineProperty(video, "seeking", { value: false, configurable: true })
+          Object.defineProperty(video, "paused", { value: false, configurable: true })
+          Object.defineProperty(video, "ended", { value: false, configurable: true })
+          Object.defineProperty(video, "currentTime", { value: 9, writable: true, configurable: true })
+          video.play = vi.fn(() => Promise.resolve())
+          video.pause = vi.fn()
+          video.load = vi.fn()
+          return video
+        }
+
+        it("is put through the recovery it gets following the source, and the transport pauses when that runs out", () => {
+          const view = render(following())
+          const video = wedge(screen.getByTestId("video-pane-media") as HTMLVideoElement)
+          clockAt(9.0, "loading")
+          view.rerender(following())
+          ;(video.play as ReturnType<typeof vi.fn>).mockClear()
+          tick(3) // a baseline, two frozen samples: the nudge
+          expect(video.play).toHaveBeenCalled()
+          tick(2) // reopen the source
+          expect(video.load).toHaveBeenCalled()
+          tick(3) // rebuild the element
+          const rebuilt = wedge(screen.getByTestId("video-pane-media") as HTMLVideoElement)
+          expect(rebuilt).not.toBe(video)
+          expect(pauseQueue).not.toHaveBeenCalled()
+          tick(3) // still stuck: out of ideas
+          expect(screen.getByTestId("video-pane-play-gesture")).toBeInTheDocument()
+          expect(pauseQueue).toHaveBeenCalled()
+          // The bar's spinner is the queue's here, not the picture's own.
+          expect(getVideoBuffering()).toBe(false)
+        })
+
+        it("is left alone under a line the queue plays, as before", () => {
+          const view = render(following())
+          const video = wedge(screen.getByTestId("video-pane-media") as HTMLVideoElement)
+          clockAt(4.0, "playing", false)
+          view.rerender(following())
+          tick(10)
+          expect(video.load).not.toHaveBeenCalled()
+        })
       })
     })
 

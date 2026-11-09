@@ -25,7 +25,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { cn } from "@/lib/utils"
 import type { CellData } from "@/hooks/useCells"
 import { seedAudibility, useQueueAudibility } from "@/lib/audio/audibility"
-import { queueClockIsFileTime, stopQueue, useQueueForFile } from "@/lib/audio/play-queue"
+import {
+  getQueueProgress, pauseQueue, queueClockIsFileTime, resumeQueue, stopQueue, tickProgrammeFilm, useQueueForFile,
+} from "@/lib/audio/play-queue"
 import { effectiveSourceText } from "@/lib/cell-text"
 import type { DirectionMode, TextDirection } from "@/lib/text-direction"
 import { cellIdAtSec } from "@/lib/timeline/source-regions"
@@ -58,7 +60,7 @@ import {
   type PlaybackSource,
 } from "@/lib/audio/playback-source"
 import { pauseAllTransports } from "@/lib/audio/transport-pause"
-import { VIDEO_END_GUARD_SEC, VIDEO_PAUSED_SNAP_SEC, videoSyncAction } from "./video-sync"
+import { VIDEO_END_GUARD_SEC, VIDEO_PAUSED_SNAP_SEC, videoDriftBarSec, videoSyncAction } from "./video-sync"
 import { filmMomentAt, type FilmPiece } from "@/lib/timeline/film-pieces"
 import { nextScrubSeek } from "./video-seek-coalesce"
 import {
@@ -403,6 +405,24 @@ export function MediaVideoPane({
   const clockIsFileTime = followsRecordings
     ? queue.progress.programmeClock
     : queueClockIsFileTime(soundingCell)
+  /**
+   * AQU-2253 (review, Nov 9): following the recordings, where only the film
+   * plays (its tail, and the lines while nothing is recorded) the FILM is the
+   * clock, as it is following the source; the queue says where. There the
+   * pane reports the film's second instead of chasing the queue's, keeps the
+   * film wanted while the transport waits on it, and runs the stall watchdog.
+   */
+  const filmIsClock = followsRecordings && queue.active && queue.progress.filmClock === true
+  const filmIsClockRef = useRef(false)
+  useEffect(() => {
+    filmIsClockRef.current = filmIsClock
+  }, [filmIsClock])
+  /** The browser will not start the film without a click. Where the film is
+   *  the clock the transport pauses: nothing runs on behind the overlay. */
+  const askForClick = useCallback(() => {
+    setNeedsGesture(true)
+    if (filmIsClockRef.current) pauseQueue()
+  }, [])
 
   /**
    * Publish where the picture is, for everything that is not this pane: the
@@ -439,9 +459,24 @@ export function MediaVideoPane({
   /** Whether the transport still wants the picture running, read by the retry
    *  below so a rejection that arrives after a pause cannot restart it. */
   const wantPlayRef = useRef(false)
+  /** AQU-2253 (review, Nov 9): when a slaved picture was last newly asked to
+   *  play: the stall watchdog's patience for a cold start. */
+  const wantSinceRef = useRef(0)
   const retryTimerRef = useRef<number | null>(null)
   /** Abandons a readiness wait in progress. Null when nothing is waiting. */
   const pendingPlayRef = useRef<(() => void) | null>(null)
+  /** The film's `timeupdate`, where the film is the clock. Only a film that is
+   *  where the playhead is counts, never one on its way to a seek. */
+  const reportFilmClock = useCallback((video: HTMLVideoElement) => {
+    if (video.seeking) return
+    const { currentTime, rate } = getQueueProgress()
+    if (Math.abs(video.currentTime - currentTime) > videoDriftBarSec(rate)) return
+    // Nor one the playhead has just been put back from (Previous line), before
+    // the pane has sent it there: its second would take the playhead forward again.
+    const seen = prevTickRef.current?.sec
+    if (seen != null && currentTime < seen - VIDEO_PAUSED_SNAP_SEC) return
+    tickProgrammeFilm(video.currentTime)
+  }, [])
 
   useEffect(
     () => () => {
@@ -466,7 +501,7 @@ export function MediaVideoPane({
       // on the next tick, then stop asking and offer a click instead.
       playFailuresRef.current += 1
       if (playFailuresRef.current >= 2) {
-        setNeedsGesture(true)
+        askForClick()
         return
       }
       retryTimerRef.current = window.setTimeout(() => {
@@ -476,12 +511,12 @@ export function MediaVideoPane({
         if (retry && typeof retry.catch === "function") {
           retry.catch((e: unknown) => {
             if (e instanceof Error && e.name === "AbortError") return
-            setNeedsGesture(true)
+            askForClick()
           })
         }
       }, 0)
     })
-  }, [])
+  }, [askForClick])
 
   /** Give up on a readiness wait, and stop reporting one. Safe to call when
    *  nothing is waiting. */
@@ -598,9 +633,18 @@ export function MediaVideoPane({
   useEffect(() => {
     // Slaved, the queue re-issues play and corrective seeks every tick, which
     // is its own watchdog — and a second one would fight it.
-    if (slaved) {
+    // AQU-2253 (review, Nov 9): unless the film is the clock. Then nothing
+    // re-issues anything, so a stopped film gets this watchdog and its ladder,
+    // as following the source. The spinner is the queue's there (it hears no
+    // reports), so the picture's own "buffering" and "playing" are not written.
+    if (slaved && !filmIsClock) {
       stallRef.current = IDLE_STALL_STATE
       return
+    }
+    const report = (buffering: boolean, playing: boolean) => {
+      if (slaved) return
+      setVideoBuffering(buffering)
+      onVideoPlayingRef.current?.(playing)
     }
     const id = window.setInterval(() => {
       const video = videoRef.current
@@ -613,33 +657,33 @@ export function MediaVideoPane({
         paused: video.paused,
         ended: video.ended,
         seeking: video.seeking,
-        pendingPlay: pendingPlayRef.current != null,
+        // AQU-2253 (review, Nov 9): …or, where the film is the clock (no
+        // readiness wait there), a film still opening: the same patience.
+        pendingPlay: pendingPlayRef.current != null
+          || (slaved && video.readyState < VIDEO_READY_STATE && Date.now() - wantSinceRef.current < VIDEO_READY_TIMEOUT_MS),
       })
       stallRef.current = step.state
       const action = step.action
       if (action.kind === "none") return
 
       if (action.kind === "recovered") {
-        setVideoBuffering(false)
-        onVideoPlayingRef.current?.(true)
+        report(false, true)
         return
       }
 
       if (action.kind === "giveUp") {
-        setVideoBuffering(false)
+        report(false, false)
         wantPlayRef.current = false
-        onVideoPlayingRef.current?.(false)
         // Stop the element too, so its own flag agrees with the intent we just
         // abandoned. A wedged picture that unwedges itself an hour later must
         // not start playing at a user who has long since moved on.
         video.pause()
-        setNeedsGesture(true)
+        askForClick()
         return
       }
 
       // A rung. Whatever we are about to try, stop claiming playback first.
-      setVideoBuffering(true)
-      onVideoPlayingRef.current?.(false)
+      report(true, false)
       const stream = streamRef.current
       const at = video.currentTime
 
@@ -679,7 +723,7 @@ export function MediaVideoPane({
       setLoadAttempt((n) => n + 1)
     }, STALL_TICK_MS)
     return () => window.clearInterval(id)
-  }, [slaved])
+  }, [slaved, filmIsClock, askForClick])
 
   /**
    * A YOUTUBE PICTURE DOES NOT SURVIVE A MOVE. The dock moves the film between
@@ -813,7 +857,12 @@ export function MediaVideoPane({
       rate,
       duration: video.duration,
       lastSeekAt: lastSeekAtRef.current,
+      filmIsClock,
     })
+    // AQU-2253 (review, Nov 9): the film is the clock and is held on its own
+    // last frame: the queue is told it is over, whatever length was stored.
+    const filmIsOver = filmIsClock && queue.running && clockIsFileTime
+      && Number.isFinite(video.duration) && video.duration > 0
 
     if (action.kind === "pause") {
       // Terminal or unusable: forget the anchor so the next real playback
@@ -821,6 +870,7 @@ export function MediaVideoPane({
       prevTickRef.current = null
       wantPlayRef.current = false
       video.pause()
+      if (filmIsOver) tickProgrammeFilm(video.currentTime, true)
       return
     }
 
@@ -835,6 +885,7 @@ export function MediaVideoPane({
       } catch {
         /* not seekable yet — the next tick re-issues it */
       }
+      if (filmIsOver) tickProgrammeFilm(video.currentTime, true)
       return
     }
 
@@ -849,10 +900,18 @@ export function MediaVideoPane({
       }
     }
 
-    wantPlayRef.current = queue.playing
-    if (queue.playing) requestPlay(video)
+    // AQU-2253 (review, Nov 9): where the film is the clock, "loading" is the
+    // transport waiting FOR the film, so the film stays wanted through it.
+    // A newly wanted film is a fresh start for the stall watchdog.
+    const wantFilm = queue.playing || (filmIsClock && queue.kind === "loading")
+    if (wantFilm && !wantPlayRef.current) {
+      stallRef.current = IDLE_STALL_STATE
+      wantSinceRef.current = now
+    }
+    wantPlayRef.current = wantFilm
+    if (wantFilm) requestPlay(video)
     else video.pause()
-  }, [slaved, failed, queue.kind, queue.playing, clockIsFileTime, tickSec, queueTickSec, holding, rate, mediaEpoch, requestPlay])
+  }, [slaved, failed, queue.kind, queue.playing, queue.running, filmIsClock, clockIsFileTime, tickSec, queueTickSec, holding, rate, mediaEpoch, requestPlay])
 
   // AQU-2253: an imported film while nothing plays — the file just opened, or
   // its timing just switched (which stops the queue). The playhead stays on its
@@ -1407,7 +1466,8 @@ export function MediaVideoPane({
           }}
           onTimeUpdate={
             slaved
-              ? undefined
+              // AQU-2253 (review, Nov 9): the film's second is the clock.
+              ? (filmIsClock ? (e) => reportFilmClock(e.currentTarget) : undefined)
               : (e) => publishPosition(e.currentTarget.currentTime)
           }
           // Round 6: a seek's own landing. `timeupdate` is silent for the whole
@@ -1490,6 +1550,9 @@ export function MediaVideoPane({
               // user activation does not survive being deferred to a `canplay`
               // listener. Waiting here would break the only escape hatch.
               if (video) requestPlay(video)
+              // AQU-2253 (review, Nov 9): where the film is the clock the
+              // transport paused on the refusal; the click starts both.
+              if (filmIsClock && queue.kind === "paused") void resumeQueue()
             }}
             className="absolute inset-0 z-20 flex items-center justify-center bg-black/40 text-xs font-medium text-white"
           >

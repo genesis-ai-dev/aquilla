@@ -279,6 +279,17 @@ export function laneOfAudioEvent(payload: unknown): string {
 }
 
 /**
+ * AQU-2432 (Sam, Nov 9): the `cells.metadata` key an unrecorded line's room is
+ * stored under for a language — `recordings_room_ms` for the project's default
+ * one (tag `''`), `recordings_room_ms:<tag>` for any other. The client reads
+ * the same key (src/lib/timeline/line-room.ts, `lineRoomKey`); the two must
+ * agree.
+ */
+export function lineRoomMetadataKey(laneTag: string): string {
+  return laneTag ? `recordings_room_ms:${laneTag}` : 'recordings_room_ms'
+}
+
+/**
  * AQU-1589: the lane tag a `cell.backtranslation.set` event names.
  *
  * Its own function for the same reason as {@link laneOfAudioEvent}: a
@@ -3487,6 +3498,46 @@ case 'cell.audio.attach': {
           )
         }
         // Non-number, non-null values (corrupt replay data) are skipped.
+      }
+      // AQU-2432 (Sam, Nov 9): an unrecorded line's ROOM following the
+      // recordings — how long the line lasts while it has no take, made
+      // smaller than its natural length by dragging the next take earlier
+      // against it. It is the LINE's (nothing is stored on the dragged take),
+      // and it is PER LANGUAGE, because whether a line is recorded is: so the
+      // key carries the language the event names — plain for the default one,
+      // `recordings_room_ms:<tag>` for any other. The same per-key merge as
+      // the keys above, so two people closing two lines' rooms, or a room and
+      // a subtitle span, never clobber each other. The key is BOUND, never
+      // written into the SQL: a language tag is a string someone chose.
+      // Number (≥ 0, 0 included: "no room" is not "no room stored") sets;
+      // null clears, back to the natural length; anything else is skipped.
+      const room = p.recordingsRoomMs
+      if (room !== undefined) {
+        const roomKey = lineRoomMetadataKey(laneOfAudioEvent(event.payload))
+        if (typeof room === 'number' && Number.isFinite(room) && room >= 0) {
+          stmts.push(
+            db
+              .prepare(
+                `UPDATE cells
+                 SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(?::text, ?::bigint)
+                 WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
+              )
+              .bind(roomKey, Math.round(room), event.projectId, event.fileId, event.cellId),
+          )
+        } else if (room === null) {
+          stmts.push(
+            db
+              .prepare(
+                `UPDATE cells
+                 SET metadata = CASE
+                   WHEN metadata IS NULL THEN NULL
+                   ELSE metadata - ?::text
+                 END
+                 WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
+              )
+              .bind(roomKey, event.projectId, event.fileId, event.cellId),
+          )
+        }
       }
       return ['cells']
     }

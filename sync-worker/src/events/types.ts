@@ -1221,6 +1221,15 @@ export interface EventPayloads {
     // — still projected so historical events replay, never written any more.
     targetOffsetMs?: number | null
     targetStartMs?: number | null
+    /**
+     * AQU-2432 (Sam, Nov 9): the ROOM this line is given, in ms, while it has
+     * no recording and its file follows its recordings — made smaller than its
+     * natural length by dragging the next take earlier against it. The line's
+     * own, never the dragged take's, and PER LANGUAGE: stored under a metadata
+     * key that carries `targetLang` (`lineRoomMetadataKey`). ≥ 0, and 0 is a
+     * real value (no room at all). Null clears it (the natural length).
+     */
+    recordingsRoomMs?: number | null
     /** AQU-1462: lane this presentation timing belongs to. Omitted when shared. */
     targetLang?: string
     /** AQU-1612: the lane row's id. Stamped alongside `targetLang`; both must name the same lane. */

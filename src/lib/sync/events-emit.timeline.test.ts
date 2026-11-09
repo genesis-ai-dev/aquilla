@@ -8,6 +8,7 @@ vi.mock("./outbox", () => ({ enqueueOutboxEvent: vi.fn(async () => {}), enqueueO
 import {
   emitCellAudioTrim,
   emitCellAudioUncut,
+  emitCellLaneRetime,
   emitCellLinkSet,
   emitCellRetime,
   emitFileTrackSet,
@@ -221,5 +222,24 @@ describe("emitCellAudioUncut (AQU-1767)", () => {
       removeAudioId: "piece.wav", audioId: "a1.wav", trimStartMs: 200, trimEndMs: 3000, author: "u",
     })
     expect((batch.mock.calls[0]![0] as any[]).map((e) => e.kind)).toEqual(["cell.audio.remove", "cell.audio.trim"])
+  })
+})
+
+// AQU-2432 (Sam, Nov 9): an unrecorded line's ROOM following the recordings
+// rides the line's own timeline event, for the language being worked in.
+describe("emitCellLaneRetime: a line's room (AQU-2432)", () => {
+  it("states the room and the language it is for, on the LINE (no take is named)", async () => {
+    await emitCellLaneRetime({ projectId: "p1", fileId: "f1", cellId: "c2", recordingsRoomMs: 1500.4, targetLang: "fr", author: "u" })
+    const ev = mockEnqueue.mock.calls.at(-1)![0] as any
+    expect(ev.kind).toBe("cell.lane.retime")
+    expect(ev.cellId).toBe("c2")
+    expect(ev.payload).toEqual({ recordingsRoomMs: 1500, targetLang: "fr" })
+  })
+
+  it("a room of 0 is sent (no room at all), and null clears it back to the natural length", async () => {
+    await emitCellLaneRetime({ projectId: "p1", fileId: "f1", cellId: "c2", recordingsRoomMs: 0, author: "u" })
+    expect((mockEnqueue.mock.calls.at(-1)![0] as any).payload).toEqual({ recordingsRoomMs: 0 })
+    await emitCellLaneRetime({ projectId: "p1", fileId: "f1", cellId: "c2", recordingsRoomMs: null, author: "u" })
+    expect((mockEnqueue.mock.calls.at(-1)![0] as any).payload).toEqual({ recordingsRoomMs: null })
   })
 })

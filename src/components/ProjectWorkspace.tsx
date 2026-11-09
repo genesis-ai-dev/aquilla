@@ -10578,9 +10578,15 @@ export function ProjectWorkspace() {
   }, [chosenTranscriptionModel, transcribeLanguageTag, transcriptionOnDevice, frontierSession?.jwt, project?.id, project?.orgId, transcribeOrgCredits, splitRoleLevel, orgImportMinRole, t])
 
   /** The open file's line, as a split writes it. */
-  const recordingLineFor = useCallback((cellId: string): RecordingLine | null => {
+  // Store cells carry no recordings (see the Fortify note on getActiveCell):
+  // merge the line's own before reading its source recording.
+  const cellWithAudio = useCallback((cellId: string): CellData | null => {
+    const raw = getActiveCell(cellId)
+    return raw ? mergeCellsWithAudio([raw], workspaceAudioByCellIdRef.current)[0] ?? raw : null
+  }, [getActiveCell])
+  const recordingLineFor = useCallback((cellId: string, given?: CellData): RecordingLine | null => {
     if (!project?.id) return null
-    const cell = getActiveCell(cellId)
+    const cell = given ?? cellWithAudio(cellId)
     const src = cell ? sourceRecordingLine(cell) : null
     if (!cell || !src) return null
     const att = cell.attachments?.[src.audioId]
@@ -10603,7 +10609,7 @@ export function ProjectWorkspace() {
         ? { ...plan.reanchor, ...(plan.sequenceAfter != null ? { sequenceIndex: plan.sequenceAfter } : {}) }
         : null,
     }
-  }, [project?.id, getActiveCell, cellStore])
+  }, [project?.id, cellWithAudio, cellStore])
 
   const lineAudioOf = (line: RecordingLine): LineAudio => ({
     projectId: line.projectId,
@@ -10672,9 +10678,9 @@ export function ProjectWorkspace() {
   }, [currentUsername, getTokenForProjectFile, revalidateCells])
 
   const [splitDialog, setSplitDialog] = useState<{ line: RecordingLine; mode: SplitMode; info: TranscribeChoiceInfo; keepsLine: boolean } | null>(null)
-  const openSplitIntoLines = useCallback((cellId: string, mode: SplitMode) => {
-    const line = recordingLineFor(cellId)
-    const cell = getActiveCell(cellId)
+  const openSplitIntoLines = useCallback((cellId: string, mode: SplitMode, given?: CellData) => {
+    const line = recordingLineFor(cellId, given)
+    const cell = given ?? cellWithAudio(cellId)
     if (!line || !cell) return
     if (!sourceRecordingLine(cell)?.readable) {
       toast.add({ type: "error", title: t("editor.splitLines.cannotRead") })
@@ -10686,11 +10692,11 @@ export function ProjectWorkspace() {
       setSplitDialog({ line, mode, info, keepsLine })
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- lineAudioOf is pure
-  }, [recordingLineFor, getActiveCell, prepareTranscribeChoice, t])
+  }, [recordingLineFor, cellWithAudio, prepareTranscribeChoice, t])
 
   /** The notice's Split at pauses: straight away, with a toast and Undo. */
-  const splitAtPausesNow = useCallback(async (cellId: string) => {
-    const line = recordingLineFor(cellId)
+  const splitAtPausesNow = useCallback(async (cellId: string, given?: CellData) => {
+    const line = recordingLineFor(cellId, given)
     if (!line) return
     const audio = lineAudioOf(line)
     const id = toast.add({ type: "loading", title: t("editor.splitLines.reading"), timeout: 0 })
@@ -10881,7 +10887,7 @@ export function ProjectWorkspace() {
     canSplit: canSplitLines,
     block: transcribeBlockNow,
     onSplitIntoLines: openSplitIntoLines,
-    onSplitAtPauses: (cellId: string) => { void splitAtPausesNow(cellId) },
+    onSplitAtPauses: (cellId: string, cell?: CellData) => { void splitAtPausesNow(cellId, cell) },
   }), [canSplitLines, transcribeBlockNow, openSplitIntoLines, splitAtPausesNow])
 
   /** The Source audio clip's own menu and notice on the timeline. */
@@ -10890,14 +10896,14 @@ export function ProjectWorkspace() {
     if (!src) return null
     const notice = needsSplitNotice(src)
       ? <NotSplitNoticeClip canSplit={canSplitLines} block={transcribeBlockNow}
-          onTranscribe={() => openSplitIntoLines(cell.id, "sentences")}
-          onSplitAtPauses={() => { void splitAtPausesNow(cell.id) }} />
+          onTranscribe={() => openSplitIntoLines(cell.id, "sentences", cell)}
+          onSplitAtPauses={() => { void splitAtPausesNow(cell.id, cell) }} />
       : null
     const recordingMenu = canSplitLines && src.readable
       ? {
           details: t("editor.splitLines.clipDetails", { length: fmtCueClock((src.hi - src.lo) / 1000) }),
           name: cell.original || activeFileNameRef.current || "",
-          onSplitIntoLines: () => openSplitIntoLines(cell.id, "pauses"),
+          onSplitIntoLines: () => openSplitIntoLines(cell.id, "pauses", cell),
         }
       : undefined
     if (!notice && !recordingMenu) return null

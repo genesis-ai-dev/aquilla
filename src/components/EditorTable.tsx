@@ -6037,7 +6037,7 @@ function EditorRow({
   )
   const showSplitNotice = needsSplitNotice(sourceLine)
   const splitIntoLines = splitLines?.canSplit && sourceLine?.readable
-    ? () => splitLines.onSplitIntoLines(cell.id, "pauses")
+    ? () => splitLines.onSplitIntoLines(cell.id, "pauses", cell)
     : undefined
   // AQU-633: a scoped member can only validate cells in their assigned lane/file.
   // Combine the role capability with the per-cell scope check so an out-of-scope
@@ -9216,8 +9216,8 @@ function EditorRow({
             <NotSplitNoticeText
               canSplit={splitLines.canSplit}
               block={splitLines.block}
-              onTranscribe={() => splitLines.onSplitIntoLines(cell.id, "sentences")}
-              onSplitAtPauses={() => splitLines.onSplitAtPauses(cell.id)}
+              onTranscribe={() => splitLines.onSplitIntoLines(cell.id, "sentences", cell)}
+              onSplitAtPauses={() => splitLines.onSplitAtPauses(cell.id, cell)}
             />
           )}
         </div>

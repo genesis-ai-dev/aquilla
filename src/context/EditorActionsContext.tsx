@@ -23,10 +23,11 @@ export interface SplitLinesActions {
   canSplit: boolean
   /** Why this person may not transcribe here, or null. */
   block: import("@/lib/audio/transcribe-access").TranscribeBlock | null
-  /** Open Split into lines… on this line, on At pauses or At sentences. */
-  onSplitIntoLines(cellId: string, mode: "pauses" | "sentences"): void
+  /** Open Split into lines… on this line, on At pauses or At sentences. The
+   *  row's own cell, with its recordings: store cells carry none. */
+  onSplitIntoLines(cellId: string, mode: "pauses" | "sentences", cell?: import("@/hooks/useCells").CellData): void
   /** Split this line at its pauses straight away, with a toast and Undo. */
-  onSplitAtPauses(cellId: string): void
+  onSplitAtPauses(cellId: string, cell?: import("@/hooks/useCells").CellData): void
 }
 
 export interface EditorActionsContextValue {

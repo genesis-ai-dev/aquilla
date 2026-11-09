@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type ReactNode,
   type RefObject,
 } from "react"
 import { observeElementRect, useVirtualizer } from "@tanstack/react-virtual"
@@ -599,6 +600,7 @@ export function MilestoneNavigator({
   compact = false,
   pageByMilestone = false,
   delivers = null,
+  extraAction,
 }: {
   items: MilestoneNavigationItem[]
   activeKey: string
@@ -617,6 +619,8 @@ export function MilestoneNavigator({
    * file's own evidence decides.
    */
   delivers?: LaneDelivers | null
+  /** An extra icon button joined into the group, between the picker and "next". */
+  extraAction?: ReactNode
 }) {
   const t = useT()
   const [open, setOpen] = useState(false)
@@ -921,6 +925,7 @@ export function MilestoneNavigator({
             </ComboboxList>
           </ComboboxContent>
         </Combobox>
+        {extraAction}
         <Button
           variant="outline"
           size="icon"

@@ -3474,14 +3474,16 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 onSelect={handleChapterSelect}
                 pageByMilestone={splitByMilestone}
                 delivers={laneDelivers}
+                // AQU-515 — renders nothing unless the file addresses scripture
+                // and the book still has passages left to work.
+                extraAction={(
+                  <PericopeSuggestions
+                    suggestions={pericopeSuggestions}
+                    onSelect={handlePericopeSelect}
+                  />
+                )}
               />
             </div>
-            {/* AQU-515 — renders nothing unless the file addresses scripture
-                and the book still has passages left to work. */}
-            <PericopeSuggestions
-              suggestions={pericopeSuggestions}
-              onSelect={handlePericopeSelect}
-            />
           </div>
         ) : null}
         {chapterNavTrailing ? (

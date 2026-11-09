@@ -32,6 +32,21 @@ export interface IdmlExportResult {
   blob: Blob
   report: IdmlExportReport
   diagnostics: readonly IdmlDiagnostic[]
+  /** Translated cells left out because their paragraph is not in this package. */
+  omitted: readonly IdmlOmittedTranslation[]
+}
+
+/**
+ * A translated cell whose locator names a paragraph this IDML package does not
+ * have. A file whose source a link replaced keeps the lines only it had
+ * ("lines only your file has will stay as they are"); their locators still
+ * point into the package the file was imported from, so the upstream's
+ * package has nowhere to put them.
+ */
+export interface IdmlOmittedTranslation {
+  readonly cellId: string
+  readonly cellLabel: string
+  readonly text: string
 }
 
 export interface IdmlExportExecutor {
@@ -66,7 +81,16 @@ export async function exportIdml(
   // strict export can still transfer the exact original without cloning it a
   // second time.
   const parsed = await worker.parse(rawIdmlBytes.slice(0))
-  const translations = buildTranslations(cells, parsed.units)
+  const { translations, omitted } = buildTranslations(cells, parsed.units)
+  // A few kept lines after a source replace are expected; most translations
+  // having no paragraph means the package is not the one the cells describe
+  // (the file's original pointer is wrong), and a download with a handful of
+  // translations in it would hide that.
+  if (omitted.length > 0 && omitted.length > translations.length) {
+    throw new IdmlWebExportError(
+      `${omitted.length} of ${omitted.length + translations.length} translated cells are not part of this IDML package; the file's original does not match its cells. Re-import the original IDML to repair it.`,
+    )
+  }
   const exported = await worker.export(rawIdmlBytes, translations)
   const validationBytes = exactArrayBuffer(exported.bytes)
   const diagnostics = await worker.validate(validationBytes, parsed.manifest)
@@ -90,6 +114,7 @@ export async function exportIdml(
     blob: new Blob([exactArrayBuffer(repaired)], { type: IDML_MIME }),
     report: exported.report,
     diagnostics,
+    omitted,
   }
 }
 
@@ -126,8 +151,9 @@ interface CellContract {
 function buildTranslations(
   cells: readonly CellData[],
   units: readonly IdmlTranslationUnit[],
-): readonly IdmlTranslation[] {
+): { translations: readonly IdmlTranslation[]; omitted: readonly IdmlOmittedTranslation[] } {
   const translations: IdmlTranslation[] = []
+  const omitted: IdmlOmittedTranslation[] = []
   const groups = new Map<string, CellContract[]>()
 
   for (const cell of cells) {
@@ -153,6 +179,10 @@ function buildTranslations(
       continue
     }
     if (!contract.hasTranslation) continue
+    if (!packageParagraph(contract.locator, units)) {
+      omitted.push(omittedTranslation(contract))
+      continue
+    }
     translations.push({
       unitId: contract.cell.id,
       locator: contract.locator,
@@ -163,10 +193,41 @@ function buildTranslations(
   }
 
   for (const group of groups.values()) {
+    const first = group[0]
+    if (first && !packageParagraph(first.locator, units)) {
+      for (const sibling of group) {
+        if (sibling.hasTranslation) omitted.push(omittedTranslation(sibling))
+      }
+      continue
+    }
     const merged = mergeSlicedUnit(group, units)
     if (merged) translations.push(merged)
   }
-  return translations
+  return { translations, omitted }
+}
+
+function omittedTranslation(contract: CellContract): IdmlOmittedTranslation {
+  const { cell } = contract
+  // Named the way the editor shows the line: its label, or its source text
+  // when it has none — a raw locator says nothing to the person reading it.
+  const source = cell.original.replace(/\s+/g, " ").trim()
+  return {
+    cellId: cell.id,
+    cellLabel: cell.cellLabel ?? (source.length > 48 ? `${source.slice(0, 47)}…` : source || cell.id),
+    text: cell.translated,
+  }
+}
+
+/** The package paragraph a locator addresses, if the package has it. */
+function packageParagraph(
+  locator: IdmlLocator,
+  units: readonly IdmlTranslationUnit[],
+): IdmlTranslationUnit | undefined {
+  return units.find((unit) => (
+    unit.locator.memberPath === locator.memberPath
+    && unit.locator.elementPath === locator.elementPath
+    && (!locator.elementId || unit.locator.elementId === locator.elementId)
+  ))
 }
 
 /**
@@ -236,11 +297,7 @@ function ownerUnit(
   units: readonly IdmlTranslationUnit[],
   label: string,
 ): IdmlTranslationUnit {
-  const paragraph = units.find((unit) => (
-    unit.locator.memberPath === locator.memberPath
-    && unit.locator.elementPath === locator.elementPath
-    && (!locator.elementId || unit.locator.elementId === locator.elementId)
-  ))
+  const paragraph = packageParagraph(locator, units)
   const owner = paragraph ? projectIdmlUnitToLocator(paragraph, locator) : undefined
   if (!owner) {
     throw new IdmlWebExportError(

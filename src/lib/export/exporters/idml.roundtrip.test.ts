@@ -188,6 +188,45 @@ describe("strict web IDML export adapter", () => {
       exportIdml(raw.slice(0), [typedIntoStaleShell], directExecutor),
     ).rejects.toBeInstanceOf(IdmlWebExportError)
   })
+
+  // WHY: a file whose source a link replaced keeps the lines only it had, and
+  // their locators still name paragraphs of the package it was imported from.
+  // The linked package has nowhere to put them, so the download leaves them
+  // out and names them — one blocked line must not hold back 500 placed ones.
+  // Most translations having no paragraph is the other way round: the package
+  // is not the one the cells describe, and that still blocks.
+  it("leaves out a translated line whose paragraph this package does not have, and blocks when most are like that", async () => {
+    const raw = await buildFixture()
+    const parsed = await parseIdml(raw)
+    const cells = parsed.units.map((unit) => cellFor(unit))
+    replaceCell(cells, unitById(parsed.units, "heading"), ["Chapitre un"])
+    const kept = cellFor(unitById(parsed.units, "footnote"))
+    kept.id = "Stories/Story_u999.xml#/idPkg:Story[1]/Story[1]/ParagraphStyleRange[7]:part-0"
+    kept.cellLabel = "27:34"
+    kept.translated = "27.34"
+    kept.translatedHtml = targetHtml(unitById(parsed.units, "footnote"), ["27.34"])
+    kept.metadata = {
+      ...kept.metadata,
+      aquillaImport: {
+        sourceLocator: {
+          ...unitById(parsed.units, "footnote").locator,
+          memberPath: "Stories/Story_u999.xml",
+          elementId: "old-footnote",
+        },
+      },
+    }
+
+    const result = await exportIdml(raw.slice(0), [...cells, kept], directExecutor)
+
+    expect(result.report.translated).toBe(1)
+    expect(result.omitted).toEqual([{ cellId: kept.id, cellLabel: "27:34", text: "27.34" }])
+    const zip = await JSZip.loadAsync(await result.blob.arrayBuffer())
+    expect(await zip.file(STORY)!.async("string")).toContain("<Content>Chapitre un</Content>")
+
+    await expect(
+      exportIdml(raw.slice(0), [kept], directExecutor),
+    ).rejects.toThrow(/not part of this IDML package/)
+  })
 })
 
 function unitById(

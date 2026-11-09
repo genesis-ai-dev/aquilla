@@ -271,7 +271,7 @@ import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynth
 import { lineWordsToast, transcribeRunProgressTitle, transcribeRunToast } from "@/lib/audio/transcribe-report"
 import { runLineWords, wordsOf, type LineWordsIdentity } from "@/lib/audio/line-words-run"
 import type { StoredTranscribeRun, TranscribeRunHandle, TranscribeRunKind } from "@/lib/audio/transcribe-runs"
-import { dropStoredTranscribeRun, findLineWordsRun, pageIsLeaving } from "@/lib/audio/transcribe-runs"
+import { findLineWordsRun, pageIsLeaving } from "@/lib/audio/transcribe-runs"
 import { useCarryOnTranscribeRuns } from "@/hooks/useCarryOnTranscribeRuns"
 import { changeCellVoice, changeVoiceBlocker, changeVoiceSourceTake } from "@/lib/audio/change-voice"
 import { planChangeVoiceAll, runChangeVoiceAll } from "@/lib/audio/change-voice-batch"
@@ -10783,7 +10783,6 @@ export function ProjectWorkspace() {
       // a words run nobody split by): each new line gets the words in its own
       // stretch, by their timings — never the first line all of them.
       let toWrite = pieces
-      let usedRunId: string | null = null
       if (pieces.every((p) => p.text === undefined)) {
         const lo = line.trimStartMs ?? 0
         const hi = line.trimEndMs ?? line.durationMs ?? lo + (line.endMs - line.startMs)
@@ -10792,12 +10791,15 @@ export function ProjectWorkspace() {
         if (kept && keptWords.length > 0) {
           const texts = textsForPieces(pieces, lo, keptWords)
           toWrite = pieces.map((p, i) => ({ ...p, text: texts[i] ?? "" }))
-          usedRunId = kept.id
         }
       }
+      // AQU-2426 (review, Nov 9): the line's text as it is now, for Undo. A
+      // split by words leaves only the first sentence on it; Undo used to give
+      // it the whole recording back with that one sentence. The kept words are
+      // no longer dropped here either, so splitting again after Undo is free.
+      const textBefore = getActiveCell(line.cellId)?.transcription ?? ""
       const result = await splitRecordingLine({ line, pieces: toWrite, author: currentUsername })
       if (!result) return false
-      if (usedRunId) dropStoredTranscribeRun(usedRunId)
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       revalidateCells()
       recordStep({
@@ -10807,6 +10809,7 @@ export function ProjectWorkspace() {
           before: result.before,
           after: { startMs: result.first.startMs, endMs: result.first.endMs, trimStartMs: result.first.trimStartMs, trimEndMs: result.first.trimEndMs },
           lines: result.created,
+          ...(result.first.text !== undefined ? { text: { before: textBefore, after: result.first.text } } : {}),
         },
         labelKey: "editor.history.stepSplitLines",
         fileId: line.fileId,
@@ -10829,7 +10832,7 @@ export function ProjectWorkspace() {
       toast.add({ type: "error", title: t("editor.splitLines.failed", { name: line.name, reason: err instanceof Error ? err.message : String(err) }) })
       return false
     }
-  }, [currentUsername, getTokenForProjectFile, revalidateCells, canSplitLines, cannotSplitReason, t])
+  }, [currentUsername, getTokenForProjectFile, revalidateCells, canSplitLines, cannotSplitReason, getActiveCell, t])
 
   /** The words came back but nothing was split: they land on the line itself. */
   const keepWordsOnLine = useCallback(async (line: RecordingLine, text: string) => {
@@ -10992,9 +10995,10 @@ export function ProjectWorkspace() {
           return
         }
         if (toastId !== null) toast.close(toastId)
-        // A split that failed (it says so) keeps the words for the next try.
-        if (await applyLineSplit(o.line, pieces, "editor.splitLines.importDone")) handle?.end()
-        else handle?.park()
+        // The words stay kept either way: a split that failed (it says so) has
+        // them for the next try, and one that landed has them for after Undo.
+        await applyLineSplit(o.line, pieces, "editor.splitLines.importDone")
+        handle?.park()
       } catch (err) {
         if (pageIsLeaving()) return
         // The recording couldn't be read to plan the run: nothing was sent.
@@ -16201,9 +16205,24 @@ export function ProjectWorkspace() {
             return false
           }
         },
+        // AQU-2426 (review, Nov 9): …and its text back, as it was.
+        lineText: (cellId) => getActiveCell(cellId)?.transcription ?? (getActiveCell(cellId) ? "" : null),
+        writeLineText: async (d, text) => {
+          const url = cellWithAudio(d.cellId)?.attachments?.[d.audioId]?.url
+          if (!project?.id || !url) return false
+          try {
+            await writeLineWords({ line: { projectId: project.id, fileId: d.fileId, cellId: d.cellId, audioId: d.audioId, url }, text, author: currentUsername })
+            await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+            revalidateCells()
+            return true
+          } catch (err) {
+            console.warn("[split-lines] undo text write failed:", err)
+            return false
+          }
+        },
       }),
     )
-  }, [lineUntouched, removeLineCore, applyRestoreRow, activeFileId, cellsLoading, getActiveCells, handleDeleteFile, handleRestoreFile, syncRoleLevel, project?.id, currentUsername, getTokenForProjectFile, revalidateCells])
+  }, [lineUntouched, removeLineCore, applyRestoreRow, activeFileId, cellsLoading, getActiveCells, handleDeleteFile, handleRestoreFile, syncRoleLevel, project?.id, currentUsername, getTokenForProjectFile, revalidateCells, getActiveCell, cellWithAudio])
 
   useEffect(() => {
     const readAtt = (cellId: string, audioId: string) => readTake(cellId, audioId)?.att ?? null

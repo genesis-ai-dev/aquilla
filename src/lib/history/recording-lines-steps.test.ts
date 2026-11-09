@@ -179,4 +179,59 @@ describe("lines.split (AQU-2426)", () => {
     expect(await handlers["lines.split"].undo(split)).toEqual({ kind: "skipped", reason: "linesChanged" })
     expect(ctx.writeLineWindow).not.toHaveBeenCalled()
   })
+
+  // AQU-2426 (review, Nov 9): a split by words rewrote the first line's text to
+  // its first sentence, and Undo left it there over the whole recording.
+  describe("a split that wrote the first line's words", () => {
+    const byWords = { ...split, text: { before: "The whole transcript. Of all of it.", after: "The whole transcript." } }
+
+    it("undo puts the line's text back as it was; redo writes the first sentence again", async () => {
+      const { ctx, handlers } = ctxFor(linesAfterSplit())
+      let text = byWords.text.after
+      ctx.writeLineWindow = vi.fn(async () => true)
+      ctx.lineText = () => text
+      ctx.writeLineText = vi.fn(async (_d, next) => { text = next; return true })
+      expect(await handlers["lines.split"].undo(byWords)).toEqual({ kind: "done" })
+      expect(text).toBe("The whole transcript. Of all of it.")
+      expect(await handlers["lines.split"].redo(byWords)).toEqual({ kind: "done" })
+      expect(text).toBe("The whole transcript.")
+    })
+
+    it("a line that had no text before goes back to none", async () => {
+      const { ctx, handlers } = ctxFor(linesAfterSplit())
+      ctx.writeLineWindow = vi.fn(async () => true)
+      ctx.lineText = () => "First sentence."
+      ctx.writeLineText = vi.fn(async () => true)
+      await handlers["lines.split"].undo({ ...split, text: { before: "", after: "First sentence." } })
+      expect(ctx.writeLineText).toHaveBeenCalledWith(expect.objectContaining({ cellId: "l0" }), "")
+    })
+
+    it("leaves text someone has corrected since the split", async () => {
+      const { ctx, handlers } = ctxFor(linesAfterSplit())
+      ctx.writeLineWindow = vi.fn(async () => true)
+      ctx.lineText = () => "The whole transcript, corrected."
+      ctx.writeLineText = vi.fn(async () => true)
+      expect(await handlers["lines.split"].undo(byWords)).toEqual({ kind: "done" })
+      expect(ctx.writeLineWindow).toHaveBeenCalled()
+      expect(ctx.writeLineText).not.toHaveBeenCalled()
+    })
+
+    it("says so when the text could not be put back", async () => {
+      const { ctx, handlers } = ctxFor(linesAfterSplit())
+      ctx.writeLineWindow = vi.fn(async () => true)
+      ctx.lineText = () => byWords.text.after
+      ctx.writeLineText = vi.fn(async () => false)
+      expect((await handlers["lines.split"].undo(byWords)).kind).toBe("failed")
+    })
+
+    it("a split at pauses writes no text either way", async () => {
+      const { ctx, handlers } = ctxFor(linesAfterSplit())
+      ctx.writeLineWindow = vi.fn(async () => true)
+      ctx.lineText = () => "Anything."
+      ctx.writeLineText = vi.fn(async () => true)
+      await handlers["lines.split"].undo(split)
+      await handlers["lines.split"].redo(split)
+      expect(ctx.writeLineText).not.toHaveBeenCalled()
+    })
+  })
 })

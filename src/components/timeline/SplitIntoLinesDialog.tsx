@@ -37,7 +37,6 @@ import {
   cutsFromWords, loadLinePcm, pauseCuts, PCM_RATE, previewPeaks, type LineAudio,
 } from "@/lib/audio/recording-split"
 import { runLineWords } from "@/lib/audio/line-words-run"
-import { dropStoredTranscribeRun } from "@/lib/audio/transcribe-runs"
 import type { WordLine } from "@/lib/audio/lines-from-words"
 import { piecesFromCuts, type LinePiece } from "@/lib/timeline/split-recording-line"
 
@@ -181,8 +180,6 @@ export function SplitIntoLinesDialog(props: SplitIntoLinesDialogProps) {
   const keptWords = useRef(false)
   /** Words from a run that didn't get every minute: they stay on the line. */
   const partialText = useRef("")
-  /** The kept run behind the words shown: dropped once they are split. */
-  const keptRunId = useRef<string | null>(null)
   // AQU-2426 / AQU-2375 (review, Nov 9): Cancel stops a transcription that is
   // still running, as does the dialog going away. It used to close and leave
   // every remaining minute to be sent and charged with nothing on screen.
@@ -246,7 +243,6 @@ export function SplitIntoLinesDialog(props: SplitIntoLinesDialogProps) {
       if (report.interrupted) return
       // Parked either way: nothing runs now, and the words wait for a split.
       handle?.park()
-      keptRunId.current = report.runId
       // Stopped by Cancel with minutes still to do: nothing is written to the
       // line. The parked run keeps the words, so the next try sends the rest.
       if (report.cancelled) return
@@ -282,8 +278,9 @@ export function SplitIntoLinesDialog(props: SplitIntoLinesDialogProps) {
     setBusy(true)
     const ok = await props.onSplit(pieces)
     if (ok) {
-      // Split by its words (or at pauses): the kept words have done their job.
-      if (keptRunId.current) dropStoredTranscribeRun(keptRunId.current)
+      // AQU-2426 (review, Nov 9): the kept words stay kept (parked) after the
+      // split. Dropped here, Undo left a whole line whose words had to be
+      // paid for again.
       closed.current = true
       props.onClose()
     } else setBusy(false)

@@ -44,8 +44,8 @@ export interface LineWindow {
 /**
  * AQU-2426: Split into lines…. The line itself became the first piece, and
  * `lines` were made after it. Undo removes those (by the "lines.fromRecording"
- * rule: only while untouched) and gives the line its whole window back; Redo
- * restores them and narrows the line again.
+ * rule: only while untouched) and gives the line its whole window and its
+ * text back; Redo restores them and narrows the line again.
  */
 export interface SplitLinesData extends RecordingLinesData {
   fileId: string
@@ -53,6 +53,14 @@ export interface SplitLinesData extends RecordingLinesData {
   audioId: string
   before: LineWindow
   after: LineWindow
+  /**
+   * AQU-2426 (review, Nov 9): the line's own text, when the split rewrote it
+   * (a split by words leaves the first sentence on it). Undo puts `before`
+   * back and Redo `after`, each only while the text is still what the other
+   * left: a correction typed since is never overwritten. Absent for a split
+   * that wrote no text (at pauses, on a line with no kept words).
+   */
+  text?: { before: string; after: string }
 }
 
 export interface RecordingLinesContext {
@@ -85,6 +93,10 @@ export interface RecordingLinesContext {
   /** AQU-2426: set a line's timing and trim. False when refused. Absent: a
    *  split cannot be undone here. */
   writeLineWindow?(d: { fileId: string; cellId: string; audioId: string }, w: LineWindow): Promise<boolean>
+  /** AQU-2426 (review, Nov 9): a line's text now; null when it can't be told. */
+  lineText?(cellId: string): string | null
+  /** …and set it ("" clears it). False when refused. */
+  writeLineText?(d: { fileId: string; cellId: string; audioId: string }, text: string): Promise<boolean>
 }
 
 export function recordingLinesStepHandlers(ctx: RecordingLinesContext): Record<string, StepHandler<never>> {
@@ -110,6 +122,13 @@ export function recordingLinesStepHandlers(ctx: RecordingLinesContext): Record<s
       return restored < d.lines.length ? { kind: "done", partial: { skipped: d.lines.length - restored } } : DONE
     },
   }
+  /** The line's text goes from `from` to `to`, unless it is no longer `from`. */
+  const moveText = async (d: SplitLinesData, from: string, to: string): Promise<boolean> => {
+    if (!d.text || !ctx.writeLineText || from === to) return true
+    const now = ctx.lineText?.(d.cellId)
+    if (now == null || now.trim() !== from.trim()) return true
+    return ctx.writeLineText(d, to)
+  }
   return {
     "lines.split": {
       async undo(d: SplitLinesData) {
@@ -117,6 +136,7 @@ export function recordingLinesStepHandlers(ctx: RecordingLinesContext): Record<s
         const removed = await fromRecording.undo(d)
         if (removed.kind !== "done") return removed
         if (!(await ctx.writeLineWindow(d, d.before))) return { kind: "failed", error: new Error("the line could not be put back") }
+        if (d.text && !(await moveText(d, d.text.after, d.text.before))) return { kind: "failed", error: new Error("the line's text could not be put back") }
         return removed
       },
       async redo(d: SplitLinesData) {
@@ -124,6 +144,7 @@ export function recordingLinesStepHandlers(ctx: RecordingLinesContext): Record<s
         const restored = await fromRecording.redo(d)
         if (restored.kind !== "done") return restored
         if (!(await ctx.writeLineWindow(d, d.after))) return { kind: "failed", error: new Error("the line could not be split again") }
+        if (d.text && !(await moveText(d, d.text.before, d.text.after))) return { kind: "failed", error: new Error("the line's text could not be written again") }
         return restored
       },
     } as StepHandler<never>,

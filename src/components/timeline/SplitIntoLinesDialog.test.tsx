@@ -141,6 +141,28 @@ describe("Split into lines… (AQU-2426)", () => {
     expect(props.onKeepWords).toHaveBeenCalledWith("First.")
   })
 
+  // AQU-2426 (review, Nov 9): the words that were paid for outlive the split,
+  // so Undo (the whole line back) doesn't mean paying for them again.
+  it("splitting by its words keeps the words kept", async () => {
+    localStorage.clear()
+    transcribeLineWords.mockResolvedValue({
+      words: [
+        { text: "In", start: 0.5, end: 0.8 }, { text: "the", start: 0.8, end: 1.0 }, { text: "beginning.", start: 1.0, end: 2.9 },
+        { text: "God", start: 4.5, end: 5.0 }, { text: "spoke.", start: 5.0, end: 7.0 },
+      ],
+      text: "In the beginning. God spoke.",
+    })
+    const props = renderDialog({ initialMode: "sentences", keepAs: { cellId: "c1", audioId: "clip", fileName: "Ruth 1 intro.m4a" } })
+    fireEvent.click(screen.getByRole("button", { name: "Transcribe and preview" }))
+    await screen.findByTestId("split-words")
+    fireEvent.click(screen.getByRole("button", { name: "Split into 2 lines" }))
+    await waitFor(() => expect(props.onClose).toHaveBeenCalled())
+    const { findLineWordsRun } = await import("@/lib/audio/transcribe-runs")
+    const kept = findLineWordsRun({ projectId: "p", fileId: "f", cellId: "c1", audioId: "clip", lo: 0, hi: 12_000 })
+    expect(kept?.parked).toBe(true)
+    expect(kept?.line?.words.w0?.text).toBe("In the beginning. God spoke.")
+  })
+
   // AQU-2426 / AQU-2375 (review, Nov 9): Cancel stops a transcription that is
   // still running. It used to close the dialog and send every other minute
   // unseen, then write the whole text to the line.

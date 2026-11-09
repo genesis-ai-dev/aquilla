@@ -212,3 +212,37 @@ describe("a line's words run", () => {
     expect(findLineWordsRun(match)).toBeNull()
   })
 })
+
+// AQU-2426 (review, Nov 9): a line's words now stay kept after the split that
+// used them (so Undo doesn't cost them), which makes old parked runs the
+// thing to give up when the browser's storage is full.
+describe("when storage is full", () => {
+  it("gives up the oldest parked words so a new run is still kept", () => {
+    const parked = (id: string) => {
+      const run = startStoredTranscribeRun({
+        id, projectId: "p1", fileId: "f1", fileName: "Session 4.mp3", kind: "lineWords", cellIds: ["w0"], force: false,
+        line: { cellId: id, audioId: "a1", url: "frontier-audio://p1/f1/a1.mp3", lo: 0, hi: 60_000, windows: [{ lo: 0, hi: 60_000 }], words: {}, purpose: "import" },
+      })
+      run.row("w0", { kind: "done", lineWords: { words: [], text: "x".repeat(400) } })
+      run.park()
+    }
+    parked("old")
+    clock += 60_000
+    parked("newer")
+    clock += 60_000
+    // Room for what is there now, and not for one run more.
+    const room = JSON.stringify(__storedTranscribeRuns()).length + 50
+    const real = localStorage.setItem.bind(localStorage)
+    const setItem = vi.spyOn(localStorage, "setItem").mockImplementation((key: string, value: string) => {
+      if (value.length > room) throw new DOMException("full", "QuotaExceededError")
+      real(key, value)
+    })
+    try {
+      const run = start("run-now")
+      expect(__storedTranscribeRuns().map((r) => r.id).sort()).toEqual(["newer", "run-now"])
+      run.end()
+    } finally {
+      setItem.mockRestore()
+    }
+  })
+})

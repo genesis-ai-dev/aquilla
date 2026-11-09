@@ -23,7 +23,10 @@
 // already paid for are never lost to a reload or a failed window. A line run
 // that ended with some windows still to do is PARKED: nobody carries it on by
 // itself, and the next words run on the same stretch of the same line takes
-// it over and sends only the windows still missing.
+// it over and sends only the windows still missing. A run whose words were
+// split by stays parked too (AQU-2426 review, Nov 9): Undo gives the line its
+// whole stretch back, and splitting it by its words again then costs nothing.
+// Like any run it is forgotten after a week.
 //
 // Per browser profile, in localStorage, like the model consent it sits beside:
 // a run is one person's, on one device, and a page reload is all it has to
@@ -139,12 +142,24 @@ function readAll(): StoredTranscribeRun[] {
 }
 
 function writeAll(runs: StoredTranscribeRun[]): void {
-  try {
-    if (runs.length === 0) globalThis.localStorage?.removeItem(STORAGE_KEY)
-    else globalThis.localStorage?.setItem(STORAGE_KEY, JSON.stringify(runs))
-  } catch {
-    // Private mode or a full quota: the run still runs, it just won't outlive
-    // the page — exactly as before this record existed.
+  let keep = runs
+  for (;;) {
+    try {
+      if (keep.length === 0) globalThis.localStorage?.removeItem(STORAGE_KEY)
+      else globalThis.localStorage?.setItem(STORAGE_KEY, JSON.stringify(keep))
+      return
+    } catch {
+      // AQU-2426 (review, Nov 9): a full quota. Parked words are the bulk of
+      // what is kept (a long recording's are a few hundred KB, and they now
+      // outlive the split that used them, for Undo), and they are a saving,
+      // not a run in progress: the oldest go first, so a run that is going
+      // can still be kept.
+      const oldest = keep.filter((r) => r.parked).sort((a, b) => a.startedAt - b.startedAt)[0]
+      // Private mode, or nothing left to give up: the run still runs, it just
+      // won't outlive the page — exactly as before this record existed.
+      if (!oldest) return
+      keep = keep.filter((r) => r !== oldest)
+    }
   }
 }
 

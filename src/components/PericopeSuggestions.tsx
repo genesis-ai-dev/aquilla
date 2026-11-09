@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Sparkles } from "lucide-react"
+import { ArrowRightToLine } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Popover,
@@ -15,7 +15,8 @@ import type { VerseAddress } from "@/lib/pericope/sections"
 /**
  * "Where should I work next?" for a book of the Bible (AQU-515).
  *
- * The chapter picker beside this lists every division in the file; this lists
+ * Rendered as an icon button inside the chapter navigator's button group
+ * (prev, picker, this, next). The chapter picker lists every division in the file; this lists
  * the two-to-four ranges that surveyed Bibles actually break at, starting from
  * where the translator left off. It renders nothing when there is nothing to
  * suggest — a non-scripture file, a finished book, a dataset that did not load
@@ -38,21 +39,16 @@ export function PericopeSuggestions({
       <PopoverTrigger
         render={
           <Button
-            variant="ghost"
-            size="sm"
-            className="shrink-0 gap-1.5 text-xs"
+            variant="outline"
+            size="icon"
+            aria-label={t("editor.pericope.trigger")}
             title={t("editor.pericope.trigger")}
           >
-            <Sparkles aria-hidden="true" className="size-3.5" />
-            {/* Icon-only when the chapter row is tight, so the label never
-                spills over the neighbouring toolbar buttons. */}
-            <span className="sr-only xl:not-sr-only">
-              {t("editor.pericope.trigger")}
-            </span>
+            <ArrowRightToLine aria-hidden="true" />
           </Button>
         }
       />
-      <PopoverContent align="start" className="w-72 p-2">
+      <PopoverContent align="end" className="w-72 p-2">
         <PopoverTitle className="px-2 pb-1 text-xs font-medium text-muted-foreground">
           {t("editor.pericope.heading")}
         </PopoverTitle>

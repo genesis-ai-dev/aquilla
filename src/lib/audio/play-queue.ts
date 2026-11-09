@@ -88,11 +88,16 @@ function runningCellId(): string | null {
   return state.kind === "playing" || state.kind === "loading" ? state.cellId : null
 }
 
-/** True while the queue is RUNNING (playing/loading) this exact cell. */
+/** True while the queue is RUNNING (playing/loading) this exact cell.
+ *
+ *  AQU-2253 (review, Nov 9): but not over a linked film's tail. The queue
+ *  stays on the last line there (which keeps it the current line, where the
+ *  table rests: `useQueueCurrentCellId`), and no line is playing, so the row
+ *  does not keep its "playing" ring for the rest of the film. */
 export function useIsQueueCurrentCell(cellId: string | undefined): boolean {
   return useSyncExternalStore(
-    subscribe,
-    () => (cellId != null ? runningCellId() === cellId : false),
+    subscribeClock,
+    () => (cellId != null && !progress.filmTail ? runningCellId() === cellId : false),
     () => false,
   )
 }
@@ -115,6 +120,8 @@ export function useQueueCellPlayhead(cellId: string | undefined): number | null 
     subscribeClock,
     () => {
       if (!cellId || state.kind !== "playing" || state.cellId !== cellId) return null
+      // AQU-2253 (review, Nov 9): over a linked film's tail no line is sounding.
+      if (progress.filmTail) return null
       return progress.currentTime
     },
     () => null,

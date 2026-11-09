@@ -18,6 +18,7 @@
 // and reports four times a second. `film.stuck` is a film that is buffering.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { act, renderHook } from "@testing-library/react"
 import {
   getQueueProgress,
   getQueueState,
@@ -36,6 +37,9 @@ import {
   stopQueue,
   tickProgrammeFilm,
   updateQueueCells,
+  useIsQueueCurrentCell,
+  useQueueCellPlayhead,
+  useQueueCurrentCellId,
   type PlayContext,
 } from "./play-queue"
 import { resetSkipSilentLinesPrefCacheForTests, setSkipSilentLinesPref } from "@/lib/store/skip-silent-lines-pref"
@@ -1132,5 +1136,59 @@ describe("switching to another file while the film plays", () => {
     await wait(5_000)
     expect(getQueueState()).toMatchObject({ kind: "paused", cellId: "b2" })
     expect(getQueueProgress().currentTime).toBeCloseTo(6, 1)
+  })
+})
+
+// AQU-2253 (review, Nov 9), finding 5: for the whole of the film's tail the
+// last line kept its "playing" ring and tint in the lines table (the caption
+// was taken off the picture, the row was not). Over the tail the last line
+// stays the current line, where the table and its cursor rest (Sam, Oct 7),
+// but it is not shown as playing.
+describe("the lines table over the film's tail", () => {
+  it("the last line stays the current line and is not shown as playing; back on the line, it is again", async () => {
+    const cells = recorded()
+    linkFilm(12, cells)
+    const shownPlaying = renderHook(() => useIsQueueCurrentCell("b2"))
+    const currentLine = renderHook(() => useQueueCurrentCellId())
+    const wordClock = renderHook(() => useQueueCellPlayhead("b2"))
+
+    await act(async () => {
+      startQueue(ctxFor(cells), 0)
+      await wait()
+      el("b1")!.tick(2)
+      await wait()
+    })
+    // b2 is the line playing.
+    expect(shownPlaying.result.current).toBe(true)
+    expect(currentLine.result.current).toBe("b2")
+
+    await act(async () => {
+      el("b2")!.tick(3)
+      await wait(1_000)
+    })
+    // Over the tail: still the current line, no ring, no words lit by the clock.
+    expect(getQueueProgress().filmTail).toBe(true)
+    expect(shownPlaying.result.current).toBe(false)
+    expect(currentLine.result.current).toBe("b2")
+    expect(wordClock.result.current).toBeNull()
+
+    await act(async () => {
+      seekQueueToTime(3, { play: true })
+      await wait()
+    })
+    expect(shownPlaying.result.current).toBe(true)
+    expect(wordClock.result.current).not.toBeNull()
+  })
+
+  it("a take on another track playing out after the last line, with no film: the last line is still shown as playing", async () => {
+    setQueueTargetSlots(["recording", TRACK])
+    setQueueLayerTrackSlots([TRACK])
+    const shownPlaying = renderHook(() => useIsQueueCurrentCell("b2"))
+    await act(async () => {
+      await playTheLinesOut([line("b1", 2_000), line("b2", 3_000, 5_000)])
+      await wait(500)
+    })
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    expect(shownPlaying.result.current).toBe(true)
   })
 })

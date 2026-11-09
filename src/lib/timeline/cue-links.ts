@@ -50,8 +50,8 @@ export interface LinkableCue {
  * AQU-2460 (review, Nov 9): a media line that has not been transcribed has NO
  * words. It used to fall back to the name here, so a film imported whole (the
  * Nov 8 default) still paired nothing, and a heard line that happened to say
- * the film's name paired on it. With no words, the time overlap decides
- * (`timing` below).
+ * the film's name paired on it. With no words, the time overlap is all there
+ * is, and it is only ever proposed (`timing` below).
  */
 export function pairingWords(cell: Pick<LinkableCue, "original" | "medium" | "transcription">): string {
   if (cell.medium === "media") return cell.transcription?.trim() ? cell.transcription : ""
@@ -72,11 +72,12 @@ export function pairingWords(cell: Pick<LinkableCue, "original" | "medium" | "tr
  *    the cue did not already have explained. See `claimWords`.
  *  - `timing` (AQU-2460 review, Nov 9): the line is a stretch of an imported
  *    recording or film that has not been transcribed, so it has no words to
- *    compare. The line IS that stretch of the sound and the heard line is a
- *    transcript of the same sound, so a heard line that falls inside the
- *    stretch is heard in that line. Safe to pair automatically.
+ *    compare, and the heard line falls inside that stretch. Proposed, never
+ *    written: a film imported whole would have every heard line paired with
+ *    its one line, and after a later split those pairings would all sit on
+ *    the first piece, a wrong pairing nobody chose.
  *
- * Only `words` and `timing` are auto-linked. The middle two are surfaced in the review drawer
+ * Only `words` is auto-linked. The middle two are surfaced in the review drawer
  * as proposals, because a pairing nothing verified should be a person's
  * decision rather than something they have to notice was made for them.
  * `redundant` is neither linked nor proposed — it is kept in the returned plan
@@ -99,7 +100,7 @@ export interface CueLinkPlan {
 /** The pairings safe to write without asking. Every emit path filters through
  *  this; the review drawer reads the whole list. */
 export function autoLinkable(plans: readonly CueLinkPlan[]): CueLinkPlan[] {
-  return plans.filter((p) => p.basis === "words" || p.basis === "timing")
+  return plans.filter((p) => p.basis === "words")
 }
 
 /** Below this the two cues merely touch; they do not overlap. */
@@ -570,8 +571,9 @@ export function planCueLinks({ textCells, audioCues }: PlanCueLinksArgs): CueLin
       const frac = shorter > 0 ? overlap / shorter : 0
       const subtitleText = pairingWords(text)
       // AQU-2460 (review, Nov 9): a line of an imported recording or film
-      // with no transcription yet has no words, so the spans decide alone,
-      // held to the bar the other wordless rule (different scripts) uses.
+      // with no transcription yet has no words, so the spans are all there
+      // is, held to the bar the other wordless rule (different scripts) uses.
+      // A proposal for the review drawer, as that one is; never auto-linked.
       if (text.medium === "media" && subtitleText.trim() === "") {
         if (frac >= CROSS_SCRIPT_MIN_FRAC) {
           const plan: CueLinkPlan = {

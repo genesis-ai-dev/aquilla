@@ -2131,6 +2131,10 @@ export const editor = defineNamespace({
     "editor.timeline.cueLinkCrossScriptCandidatesHint":
       "The timings line up, but nothing could compare the words — so this was not " +
       "paired for you.",
+    "editor.timeline.cueLinkTimingCandidatesTitle": "Line not transcribed yet",
+    "editor.timeline.cueLinkTimingCandidatesHint":
+      "The heard line falls inside this line, but the line has no transcription " +
+      "yet, so there were no words to compare. It was not paired for you.",
     "editor.timeline.cueLinkWeakTitle": "Overlapping, few words match",
     "editor.timeline.cueLinkWeakHint":
       "Enough shared wording to notice, not enough to pair on its own.",

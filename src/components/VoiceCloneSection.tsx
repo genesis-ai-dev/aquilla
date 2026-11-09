@@ -25,6 +25,14 @@ import {
   fetchVoiceReference,
 } from "@/lib/audio/voice-clone"
 
+/**
+ * AQU-2487 (import sweep, Nov 2): a reference clip belongs to the project, not
+ * to a file, and its routes take any of the project's sync tokens. With no
+ * file open (the Voices panel on "No file selected") this stands in for the
+ * file the token is minted for, as `ELEVENLABS_PROJECT_SCOPE_FILE_ID` does.
+ */
+const VOICE_PROJECT_SCOPE_FILE_ID = "_voices"
+
 const AUDIO_EXTS = new Set(["wav", "webm", "mp3", "m4a", "ogg", "oga", "opus", "flac", "aac"])
 
 function extFromFile(file: File): string {
@@ -74,7 +82,11 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange,
   const [pulse, setPulse] = useState(false)
   const [dragOver, setDragOver] = useState(false)
 
-  const hasContext = Boolean(projectId && fileId && session?.jwt)
+  // AQU-2487 (import sweep, Nov 2): the clip is stored for the project, so no
+  // file has to be open. The Voices panel with no file selected used to say
+  // "Open this from a project workspace…" from inside the project.
+  const tokenFileId = fileId || VOICE_PROJECT_SCOPE_FILE_ID
+  const hasContext = Boolean(projectId && session?.jwt)
 
   // When asked to, bring the recorder into view and pulse so the next step is
   // unmistakable.
@@ -89,7 +101,7 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange,
 
   const upload = useCallback(
     async (blob: Blob, ext: string) => {
-      if (!projectId || !fileId) {
+      if (!projectId) {
         setStatus({ kind: "error", message: t("audio.clone.errorNoContext") })
         return
       }
@@ -106,7 +118,7 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange,
         const referenceAudioId = buildVoiceReferenceId(ext)
         await uploadVoiceReference({
           projectId,
-          fileId,
+          fileId: tokenFileId,
           referenceAudioId,
           blob,
           getSyncToken: audioSyncTokenFetcherForSession(session ?? null),
@@ -117,7 +129,7 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange,
         setStatus({ kind: "error", message: e instanceof Error ? e.message : String(e) })
       }
     },
-    [projectId, fileId, session, onChange, t],
+    [projectId, tokenFileId, session, onChange, t],
   )
 
   // When a recording stops, auto-upload the captured blob exactly once.
@@ -181,7 +193,7 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange,
             <ReferencePreview
               key={voice.referenceAudioId}
               projectId={projectId!}
-              fileId={fileId!}
+              fileId={tokenFileId}
               referenceAudioId={voice.referenceAudioId}
               session={session ?? null}
             />

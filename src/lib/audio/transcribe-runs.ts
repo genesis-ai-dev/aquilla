@@ -178,6 +178,31 @@ export function __storedTranscribeRuns(): StoredTranscribeRun[] {
 
 // ─── this page, and the clock ─────────────────────────────────────────────
 
+// A reload tears the page down mid-request: the request in flight is cut off
+// and rejects. That is the page leaving, not the service failing — a run cut
+// off this way is left as it is, so the next page carries it on. `pagehide`
+// is the page really going; `beforeunload` can still be called off (a "leave
+// this page?" prompt), so its mark clears itself if the page is still here.
+let leaving = false
+if (typeof window !== "undefined") {
+  window.addEventListener("pagehide", () => { leaving = true })
+  window.addEventListener("pageshow", () => { leaving = false })
+  window.addEventListener("beforeunload", () => {
+    leaving = true
+    setTimeout(() => { leaving = false }, 2000)
+  })
+}
+
+/** True while the page is going away (a reload, closing the tab). */
+export function pageIsLeaving(): boolean {
+  return leaving
+}
+
+/** @internal — tests pretend the page is going away. */
+export function __setPageLeavingForTests(value: boolean): void {
+  leaving = value
+}
+
 let tabId = `tab-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`
 let now = () => Date.now()
 let locksOverride: LockManagerLike | null | undefined

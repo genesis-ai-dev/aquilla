@@ -232,6 +232,8 @@ export function SplitIntoLinesDialog(props: SplitIntoLinesDialogProps) {
           setTranscribing("running")
         },
       })
+      // The page is going (a reload): left as it is, for the next page.
+      if (report.interrupted) return
       // Parked either way: nothing runs now, and the words wait for a split.
       handle?.park()
       keptRunId.current = report.runId

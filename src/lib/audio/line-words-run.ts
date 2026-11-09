@@ -29,6 +29,7 @@ import {
   type StoredLineWords,
   type StoredTranscribeRun,
   type TranscribeRunHandle,
+  pageIsLeaving,
 } from "./transcribe-runs"
 
 /** The most audio one window carries: one hosted request (Whisper, Qwen). */
@@ -56,6 +57,10 @@ export interface LineWordsReport {
   text: string
   /** The kept run; null when there is nothing to keep it under. */
   runId: string | null
+  /** The page went away mid-run (a reload): nothing failed, and the run is
+   *  left as it is for the next page to carry on. Callers neither park it
+   *  nor say anything. */
+  interrupted?: boolean
 }
 
 export interface LineWordsRun {
@@ -176,6 +181,7 @@ export async function runLineWords(args: RunLineWordsArgs): Promise<LineWordsRun
   const tag = line.languageTag ?? args.languageTag
   let inARow = 0
   let stopReason: string | null = null
+  let interrupted = false
   for (let i = 0; i < total; i++) {
     const key = lineWindowKey(i)
     if (line.words[key]) continue
@@ -198,6 +204,11 @@ export async function runLineWords(args: RunLineWordsArgs): Promise<LineWordsRun
       handle?.row(key, { kind: "done", lineWords: { words, text: got.text } })
       inARow = 0
     } catch (err) {
+      // A request cut off because the page is going: not a failed minute.
+      if (pageIsLeaving()) {
+        interrupted = true
+        break
+      }
       const message = err instanceof Error ? err.message : String(err)
       failed.push({ key, message })
       handle?.row(key, { kind: "failed", message })
@@ -208,7 +219,10 @@ export async function runLineWords(args: RunLineWordsArgs): Promise<LineWordsRun
 
   const all = wordsOf(line)
   return {
-    report: { total, done: doneCount(), failed, words: all.words, text: all.text, runId: handle?.id ?? null },
+    report: {
+      total, done: doneCount(), failed, words: all.words, text: all.text, runId: handle?.id ?? null,
+      ...(interrupted ? { interrupted: true } : {}),
+    },
     handle,
   }
 }

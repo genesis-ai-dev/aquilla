@@ -6,8 +6,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { LINE_WINDOW_SEC, planLineWindows, runLineWords, STOP_AFTER_FAILURES } from "./line-words-run"
 import { lineWordsToast } from "./transcribe-report"
 import {
+  __setPageLeavingForTests,
   __setTranscribeRunEnvForTests,
   __storedTranscribeRuns,
+  interruptedTranscribeRuns,
   claimStoredTranscribeRun,
 } from "./transcribe-runs"
 import type { LineAudio } from "./recording-split"
@@ -29,6 +31,7 @@ function wordsFor(line: { lo: number; hi: number }) {
 }
 
 beforeEach(() => {
+  __setPageLeavingForTests(false)
   localStorage.clear()
   __setTranscribeRunEnvForTests({ tab: "page-1", now: () => 1_000_000, locks: null })
 })
@@ -170,3 +173,34 @@ describe("lineWordsToast", () => {
     expect(said.retryLabel).toBe("Retry the 3")
   })
 })
+
+describe("runLineWords when the page goes away", () => {
+  it("a request cut off by a reload is not a failed minute: the run is left for the next page", async () => {
+    let calls = 0
+    const transcribe = vi.fn(async ({ line }: { line: LineAudio }) => {
+      calls++
+      if (calls === 2) {
+        // The reload tears the page down mid-request.
+        __setPageLeavingForTests(true)
+        throw new TypeError("Load failed")
+      }
+      return wordsFor(line)
+    })
+    const { report, handle } = await runLineWords({
+      audio, session: null, purpose: "import", identity,
+      deps: { transcribe, loadPcm: async () => pcm(150), newId: () => "words-r" },
+    })
+    expect(report.interrupted).toBe(true)
+    expect(report.failed).toEqual([])
+    expect(report.done).toBe(1)
+    // Nothing after the cut-off was sent.
+    expect(transcribe).toHaveBeenCalledTimes(2)
+    expect(handle).not.toBeNull()
+    // Another page sees it as stopped by a reload, not parked.
+    __setTranscribeRunEnvForTests({ tab: "page-2", now: () => 1_000_000 + 60 * 60_000 })
+    const stopped = await interruptedTranscribeRuns("p1")
+    expect(stopped.map((r) => r.id)).toEqual(["words-r"])
+    expect(stopped[0]!.parked).toBeFalsy()
+  })
+})
+

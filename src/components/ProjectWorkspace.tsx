@@ -271,6 +271,7 @@ import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynth
 import { lineWordsToast, transcribeRunProgressTitle, transcribeRunToast } from "@/lib/audio/transcribe-report"
 import { runLineWords, type LineWordsIdentity } from "@/lib/audio/line-words-run"
 import type { StoredTranscribeRun, TranscribeRunHandle, TranscribeRunKind } from "@/lib/audio/transcribe-runs"
+import { pageIsLeaving } from "@/lib/audio/transcribe-runs"
 import { useCarryOnTranscribeRuns } from "@/hooks/useCarryOnTranscribeRuns"
 import { changeCellVoice, changeVoiceBlocker, changeVoiceSourceTake } from "@/lib/audio/change-voice"
 import { planChangeVoiceAll, runChangeVoiceAll } from "@/lib/audio/change-voice-batch"
@@ -10765,6 +10766,9 @@ export function ProjectWorkspace() {
             show()
           },
         })
+        // The page is going (a reload): the run is left as it is, for the
+        // next page to carry on. Nothing to park and nobody to tell.
+        if (report.interrupted) return
         const said = lineWordsToast(report, name)
         if (said) {
           // The line keeps the words it has; the run keeps them for Retry.
@@ -10805,6 +10809,7 @@ export function ProjectWorkspace() {
         if (await applyLineSplit(o.line, pieces, "editor.splitLines.importDone")) handle?.end()
         else handle?.park()
       } catch (err) {
+        if (pageIsLeaving()) return
         // The recording couldn't be read to plan the run: nothing was sent.
         o.carryOn?.handle.park()
         say({

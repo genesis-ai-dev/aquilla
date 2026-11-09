@@ -1359,6 +1359,10 @@ export const importExport = defineNamespace({
       one: "{count} cell no longer in the file",
       other: "{count} cells no longer in the file",
     }),
+    "importExport.reimport.updateHidesMissing": plural({
+      one: "Update this file hides the {count} cell that is no longer in the file, along with its translation.",
+      other: "Update this file hides the {count} cells that are no longer in the file, along with their translations.",
+    }),
     "importExport.reimport.analysis": "Analysis",
     "importExport.reimport.noChanges": "Nothing in this file has changed.",
     "importExport.reimport.more": plural({
@@ -3838,6 +3842,13 @@ export const importExport = defineNamespace({
       "importExport.reimport.missing": {
         description:
           "Heading inside the re-import Analysis window for cells that are in the file now and are not in the uploaded document. The list of those cells follows it. Shown only when there is at least one.",
+        placeholders: {
+          count: "Number of cells the uploaded document no longer has; also selects the plural form.",
+        },
+      },
+      "importExport.reimport.updateHidesMissing": {
+        description:
+          "One line under the three re-import buttons, shown only when the uploaded document no longer has some cells. Says what the primary button does with them; the two copy buttons do not hide anything. 'Update this file' must match the importExport.reimport.update button label.",
         placeholders: {
           count: "Number of cells the uploaded document no longer has; also selects the plural form.",
         },

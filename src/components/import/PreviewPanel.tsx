@@ -13,13 +13,13 @@
  * never mistaken for "doing nothing".
  */
 
-import { useMemo, useState } from "react"
+import { useId, useMemo, useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import type { ImportResult } from "@/lib/import"
 import type { ReimportChangeCounts } from "@/lib/import/reimport-diff"
-import { ReimportAnalysis } from "@/components/import/ReimportAnalysis"
+import { ReimportAnalysis, ReimportUpdateNote } from "@/components/import/ReimportAnalysis"
 import { UsfmStructureFindings } from "@/components/import/UsfmStructureFindings"
 import {
   FramesAsHundredthsNotice,
@@ -97,6 +97,10 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
   const { locale } = useI18n()
   const t = useT()
   const [confirming, setConfirming] = useState(false)
+  // AQU-2487 (review, Nov 9): only "Update this file" hides the cells the new
+  // file no longer has; the line that says so is tied to that button.
+  const updateNoteId = useId()
+  const removedCount = reimport ? reimportChanges?.removed ?? 0 : 0
   const epubMembers = useMemo(
     () => results.flatMap((result) => result.epubMembers ?? []),
     [results],
@@ -349,7 +353,11 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
               <Button variant="outline" onClick={() => { void handleConfirm("updated-copy") }} disabled={confirming || totalCells === 0}>
                 {t("importExport.reimport.updatedCopy")}
               </Button>
-              <Button onClick={() => { void handleConfirm("update") }} disabled={confirming || totalCells === 0}>
+              <Button
+                onClick={() => { void handleConfirm("update") }}
+                disabled={confirming || totalCells === 0}
+                aria-describedby={removedCount > 0 ? updateNoteId : undefined}
+              >
                 {t("importExport.reimport.update")}
               </Button>
             </>
@@ -359,6 +367,7 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
             </Button>
           )}
         </div>
+        {reimport && <ReimportUpdateNote id={updateNoteId} removed={removedCount} />}
       </div>
     </div>
   )

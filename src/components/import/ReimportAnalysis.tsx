@@ -52,6 +52,23 @@ function ChangeList({
 }
 
 /**
+ * AQU-2487 (review, Nov 9): of the three re-import choices only "Update this
+ * file" hides the cells the upload no longer has; the two copies leave the
+ * file as it is. The Analysis heading stays a plain count, and this one line
+ * sits under the buttons (the Update button is described by it, `id`) so the
+ * person knows before pressing it. Nothing is shown when no cell is missing.
+ */
+export function ReimportUpdateNote({ id, removed }: { id: string; removed: number }) {
+  const t = useT()
+  if (removed <= 0) return null
+  return (
+    <p id={id} className="w-full text-end text-xs text-muted-foreground" data-testid="reimport-update-note">
+      {t("importExport.reimport.updateHidesMissing", { count: removed })}
+    </p>
+  )
+}
+
+/**
  * Added and updated cells, compared with the file being re-imported, and
  * (AQU-2487, import sweep, Nov 2) the cells the upload no longer has.
  */

@@ -149,7 +149,7 @@ const rowOf = async (target: string) => (await screen.findByText(target)).closes
 beforeEach(() => __resetFileAudioMemoryForTests())
 
 describe("EditorTable — audio validation across the whole gutter", () => {
-  it("draws a control on the line with a recording and a faded mic on the line without", async () => {
+  it("draws a control on the line with a recording and a faded circle on the line without", async () => {
     audioState.byCellId = new Map([["cell-1", entry([take("t1", "recording")])]])
     renderTable()
     const withTake = await rowOf("bonjour cell-1")
@@ -161,7 +161,7 @@ describe("EditorTable — audio validation across the whole gutter", () => {
   })
 
   // AQU-1495 (Sam, 2026-10-01): the column belongs to files with audio. Until
-  // then a file with none drew a faded mic on every line (09-23), so removing
+  // then a file with none drew a faded mark on every line (09-23), so removing
   // a project's last recording left the column standing, and a text-only
   // project wore it on every line it had.
   it("draws no audio column when the file has no audio at all", async () => {
@@ -191,6 +191,12 @@ describe("EditorTable — audio validation across the whole gutter", () => {
     const marks = screen.getByTestId("table-check-marks")
     expect(within(marks).getByRole("img", { name: "Text validation" })).toBeInTheDocument()
     expect(within(marks).getByRole("img", { name: "Audio validation" })).toBeInTheDocument()
+    // AQU-2401: the header's marks reproduce the row's widths, and the row's
+    // gutter now ends with a 24px Play. The mic names the audio CHECK; the
+    // Play slot is held open, unmarked, so the Target heading stays over the
+    // target boxes. Three slots in the header, two of them marks.
+    expect(marks.children).toHaveLength(3)
+    expect(marks.children[2].getAttribute("aria-hidden")).toBe("true")
   })
 })
 
@@ -236,7 +242,7 @@ describe("EditorTable — removing recordings", () => {
 
 describe("EditorTable — a line with only audio", () => {
   // Sam, 2026-09-22: an audio-only line offered BOTH controls, so you could
-  // "validate" a translation that did not exist. Only the mic now.
+  // "validate" a translation that did not exist. Only the audio check now.
   it("gets the audio control and not the text one", async () => {
     audioState.byCellId = new Map([["cell-1", entry([take("t1", "recording")])]])
     const s = store()
@@ -433,5 +439,142 @@ describe("EditorTable — the audio check waits for the file's recordings", () =
     expect(screen.queryByTestId("audio-validation-checking")).toBeNull()
     expect(within(withTake).getByTestId("audio-validation-button")).toBeInTheDocument()
     expect(within(without).getByTestId("audio-validation-unavailable")).toBeInTheDocument()
+  })
+})
+
+// AQU-2401: ▶ Play for the line's own recording, promoted out of the `⋯` into
+// the left validation gutter beside the audio check it answers.
+//
+// The workflow this is for (AQU-490) is listen → validate, line after line.
+// With Play behind the `⋯` the listen half cost two clicks on EVERY line,
+// while the check that answers it already sat in the gutter (AQU-592). AQU-200
+// wrote the rule for moving one back out — an action frequent enough to earn a
+// direct slot is promoted, with nothing else changing — and AQU-2287 applied
+// it to Record.
+describe("EditorTable — Play sits in the gutter, not behind the ⋯", () => {
+  const playButton = (row: HTMLElement) => within(row).queryByTestId("cell-audio-play-button")
+  const fadedPlay = (row: HTMLElement) => within(row).queryByTestId("cell-audio-play-unavailable")
+  const overflowTrigger = (row: HTMLElement) =>
+    row.querySelector<HTMLElement>("[data-slot=cell-action-rail-overflow]")!
+
+  it("draws Play in the gutter, after the audio check, on a line with a recording", async () => {
+    audioState.byCellId = new Map([["cell-1", entry([take("t1", "recording")])]])
+    renderTable()
+    const row = await rowOf("bonjour cell-1")
+    const play = playButton(row)!
+    expect(play).toBeInTheDocument()
+    expect(play).toHaveAccessibleName("Play audio")
+    expect(fadedPlay(row)).toBeNull()
+
+    // ORDER IS THE POINT: text check, audio check, Play, then the target. A
+    // reviewer presses Play, listens, and presses the check without leaving
+    // the strip, so the three must be siblings in that order.
+    const gutter = row.querySelector<HTMLElement>("[data-testid=validation-gutter]")!
+    const slots = Array.from(gutter.parentElement!.children).map((el) => el.getAttribute("data-testid"))
+    expect(slots.slice(0, 3)).toEqual([
+      "validation-gutter", "audio-validation-gutter", "cell-audio-play-gutter",
+    ])
+  })
+
+  // The two clicks this change removes. The `⋯` still holds everything else it
+  // held; only the recording's Play left. ("Play from this cue" is a different
+  // button on a different sound — the file's master audio, AQU-1118 — and this
+  // fixture is not a timed file, so it is absent here for its own reason.)
+  it("leaves no Play for the recording inside the ⋯", async () => {
+    audioState.byCellId = new Map([["cell-1", entry([take("t1", "recording")])]])
+    renderTable()
+    const row = await rowOf("bonjour cell-1")
+    fireEvent.click(overflowTrigger(row))
+    const menu = await screen.findByRole("dialog")
+    expect(within(menu).queryByRole("button", { name: "Play audio" })).toBeNull()
+    // …and the gutter's one is still the only one on the row.
+    expect(within(row).getAllByTestId("cell-audio-play-button")).toHaveLength(1)
+  })
+
+  // Sam's rule for an empty line (2026-09-23), now applied to Play as well as
+  // the check: the gutter reads full on every row, so the target text's left
+  // edge never shifts between rows.
+  it("draws a faded Play, no tab stop, on a line with no recording in a file that has some", async () => {
+    audioState.byCellId = new Map([["cell-1", entry([take("t1", "recording")])]])
+    renderTable()
+    const without = await rowOf("bonjour cell-2")
+    expect(playButton(without)).toBeNull()
+    const faded = fadedPlay(without)!
+    expect(faded.tagName).toBe("SPAN")
+    expect(faded).toHaveAccessibleName(/nothing recorded to play/i)
+    expect(faded.className).toContain("opacity-40")
+    // The mark is the button, and it is NOT a Tab stop — one per row would
+    // otherwise put a dead stop between every check and the next row.
+    expect(faded.closest("[data-slot=note-on-click]")?.getAttribute("tabindex")).toBe("-1")
+    // Both slots are still drawn, so the target text starts in the same place.
+    expect(within(without).getByTestId("audio-validation-gutter")).toBeInTheDocument()
+    expect(within(without).getByTestId("cell-audio-play-gutter")).toBeInTheDocument()
+  })
+
+  it("says what there is nothing of, on a click", async () => {
+    audioState.byCellId = new Map([["cell-1", entry([take("t1", "recording")])]])
+    renderTable()
+    const without = await rowOf("bonjour cell-2")
+    fireEvent.click(fadedPlay(without)!)
+    expect(await screen.findByText(/nothing recorded on this line to play/i)).toBeInTheDocument()
+  })
+
+  // AQU-1495's rule, which Play inherits by being gated on the same column: a
+  // text-only file has no audio column, so it gets no Play either, and its
+  // rail is exactly as it was.
+  it("draws no Play at all in a file with no audio", async () => {
+    audioState.byCellId = new Map()
+    renderTable()
+    await screen.findByText("bonjour cell-1")
+    expect(screen.queryByTestId("cell-audio-play-gutter")).toBeNull()
+    expect(screen.queryByTestId("cell-audio-play-button")).toBeNull()
+    expect(screen.queryByTestId("cell-audio-play-unavailable")).toBeNull()
+  })
+
+  // The 3G pass's rule (Sam, 2026-10-01), which Play inherits too: before the
+  // recordings are read, an absent take is not "no recording". The slot holds
+  // its width and offers nothing to press, so the row cannot shuffle under the
+  // pointer a moment later.
+  it("reserves the slot, pressable by nothing, while the recordings are being read", async () => {
+    audioState.byCellId = new Map([["cell-1", entry([take("t1", "recording")])]])
+    renderTable().unmount()
+    audioState.byCellId = new Map()
+    audioState.hasLoaded = false
+    try {
+      renderTable()
+      await screen.findByText("bonjour cell-1")
+      expect(screen.getAllByTestId("cell-audio-play-gutter")).toHaveLength(2)
+      expect(screen.queryByTestId("cell-audio-play-button")).toBeNull()
+      expect(screen.queryByTestId("cell-audio-play-unavailable")).toBeNull()
+    } finally {
+      audioState.hasLoaded = true
+    }
+  })
+
+  // AQU-200 put an emerald dot on the `⋯` to stand for the Play it had hidden.
+  // Play is visible again, so the dot has nothing left to stand for — "this
+  // line has audio" is now said by the button being live rather than faded, a
+  // few pixels from the check that counts it.
+  it("shows no dot on the ⋯ for a line with a recording and no open comments", async () => {
+    audioState.byCellId = new Map([["cell-1", entry([take("t1", "recording")])]])
+    renderTable()
+    const row = await rowOf("bonjour cell-1")
+    expect(overflowTrigger(row).querySelector("span[aria-hidden]")).toBeNull()
+  })
+
+  // …and the one signal it still carries is unaffected. Comments win the dot
+  // because an unread comment is addressed to a person, where "this line has
+  // audio" is only a state.
+  it("still shows the primary dot for an open comment", async () => {
+    audioState.byCellId = new Map([["cell-1", entry([take("t1", "recording")])]])
+    render(
+      <MemoryRouter><QueryClientProvider client={new QueryClient()}><EditorActionsProvider value={{}}>
+        <EditorTable {...tableProps(project)} cellOpenCommentCount={new Map([["cell-1", 1]])} />
+      </EditorActionsProvider></QueryClientProvider></MemoryRouter>,
+    )
+    const row = await rowOf("bonjour cell-1")
+    const dot = overflowTrigger(row).querySelector("span[aria-hidden]")
+    expect(dot).not.toBeNull()
+    expect(dot!.className).toContain("bg-primary")
   })
 })

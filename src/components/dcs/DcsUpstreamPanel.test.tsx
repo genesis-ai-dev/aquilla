@@ -15,7 +15,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { DcsUpstreamPanel } from "./DcsUpstreamPanel"
 import type { DcsCatalogEntry, DcsCursor } from "@/lib/dcs/types"
-import type { DeltaResult, DeltaEmitters } from "@/lib/dcs/delta"
+import type { DeltaResult, DeltaEmitters, RepairDeltaResult } from "@/lib/dcs/delta"
 
 // ── Session + settings hooks ────────────────────────────────────────────────
 
@@ -122,8 +122,16 @@ const cannedDelta: DeltaResult = {
   deletes: ["TIT-1-9"],
 }
 
+// AQU-1896: a repair result also carries what the scan reached. A scan that
+// produced ops necessarily read something, so the canned repair is a scan that
+// resolved and read the one held file.
+const cannedRepairDelta: RepairDeltaResult = {
+  ...cannedDelta,
+  scan: { heldFiles: 1, resolvedFiles: 1, fetchedFiles: 1 },
+}
+
 const mockComputeDelta = vi.fn().mockResolvedValue(cannedDelta)
-const mockComputeRepairDelta = vi.fn().mockResolvedValue(cannedDelta)
+const mockComputeRepairDelta = vi.fn().mockResolvedValue(cannedRepairDelta)
 const mockApplyDelta = vi.fn(
   async (delta: DeltaResult, emitters: DeltaEmitters, ctx: { repo: string; sha: string }) => {
     for (const { cell, fileId } of delta.creates) {
@@ -192,7 +200,7 @@ describe("DcsUpstreamPanel", () => {
     }))
     mockBulkPostEvents.mockClear().mockResolvedValue({ posted: 0, rejected: [], stale: [] })
     mockComputeDelta.mockClear().mockResolvedValue(cannedDelta)
-    mockComputeRepairDelta.mockClear().mockResolvedValue(cannedDelta)
+    mockComputeRepairDelta.mockClear().mockResolvedValue(cannedRepairDelta)
     mockApplyDelta.mockClear()
   })
 
@@ -412,8 +420,15 @@ describe("DcsUpstreamPanel", () => {
     expect(mockPatch).not.toHaveBeenCalled()
   })
 
-  it("Re-sync content reports 'already matches' when the repair delta is empty", async () => {
-    mockComputeRepairDelta.mockResolvedValue({ creates: [], commits: [], deletes: [] })
+  it("Re-sync content reports 'already matches' when the repair delta is empty AND the scan read something", async () => {
+    // AQU-1896: the reassuring copy is earned by a scan that actually re-read
+    // the project's files. Zero ops alone no longer buys it.
+    mockComputeRepairDelta.mockResolvedValue({
+      creates: [],
+      commits: [],
+      deletes: [],
+      scan: { heldFiles: 2, resolvedFiles: 2, fetchedFiles: 2 },
+    })
     const client = makeClient(V89, [])
     render(<DcsUpstreamPanel projectId="adapter-1" roleLevel={600} client={client} />)
     fireEvent.click(screen.getByRole("button", { name: /re-sync content/i }))
@@ -421,6 +436,69 @@ describe("DcsUpstreamPanel", () => {
       expect(screen.getByText(/everything already matches/i)).toBeInTheDocument()
     })
     expect(mockBulkPostEvents).not.toHaveBeenCalled()
+  })
+
+  it("Re-sync content that resolved NONE of the project's files says so instead of claiming a match (AQU-1896)", async () => {
+    // The state the QA bot hit: the project's file ids could not be derived
+    // from any upstream path, so no book was fetched — and the panel reported
+    // that everything matched. The op counts are identical to the healthy
+    // case; only the scan distinguishes them.
+    mockComputeRepairDelta.mockResolvedValue({
+      creates: [],
+      commits: [],
+      deletes: [],
+      scan: { heldFiles: 3, resolvedFiles: 0, fetchedFiles: 0 },
+    })
+    const client = makeClient(V89, [])
+    render(<DcsUpstreamPanel projectId="adapter-1" roleLevel={600} client={client} />)
+    fireEvent.click(screen.getByRole("button", { name: /re-sync content/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/nothing was checked/i)).toBeInTheDocument()
+    })
+    // It names what it could not find, with the count it tried.
+    expect(screen.getByText(/none of this project's 3 source files/i)).toBeInTheDocument()
+    // And it must NOT claim a match.
+    expect(screen.queryByText(/everything already matches/i)).not.toBeInTheDocument()
+    expect(mockBulkPostEvents).not.toHaveBeenCalled()
+  })
+
+  it("Re-sync content whose resolved paths are no longer served names that cause, not a match (AQU-1896)", async () => {
+    // The legitimate variant: the pinned tree still lists the held paths but
+    // the ref no longer serves them, so again nothing was compared.
+    mockComputeRepairDelta.mockResolvedValue({
+      creates: [],
+      commits: [],
+      deletes: [],
+      scan: { heldFiles: 2, resolvedFiles: 2, fetchedFiles: 0 },
+    })
+    const client = makeClient(V89, [])
+    render(<DcsUpstreamPanel projectId="adapter-1" roleLevel={600} client={client} />)
+    fireEvent.click(screen.getByRole("button", { name: /re-sync content/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/no longer serves/i)).toBeInTheDocument()
+    })
+    expect(screen.getByText(/nothing was checked/i)).toBeInTheDocument()
+    expect(screen.queryByText(/everything already matches/i)).not.toBeInTheDocument()
+  })
+
+  it("a DCS project holding no source cells at all still reads as in sync, not as an alarm (AQU-1896)", async () => {
+    // Nothing held means nothing to check and no false claim about files the
+    // scan failed to reach — the reassuring copy stays correct here.
+    mockComputeRepairDelta.mockResolvedValue({
+      creates: [],
+      commits: [],
+      deletes: [],
+      scan: { heldFiles: 0, resolvedFiles: 0, fetchedFiles: 0 },
+    })
+    const client = makeClient(V89, [])
+    render(<DcsUpstreamPanel projectId="adapter-1" roleLevel={600} client={client} />)
+    fireEvent.click(screen.getByRole("button", { name: /re-sync content/i }))
+    await waitFor(() => {
+      expect(screen.getByText(/everything already matches/i)).toBeInTheDocument()
+    })
+    expect(screen.queryByText(/nothing was checked/i)).not.toBeInTheDocument()
   })
 
   it("Re-sync apply ABORTS without events when the cursor vanished between confirm and apply (detach race)", async () => {

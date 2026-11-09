@@ -123,6 +123,7 @@ import editHistoryRoutes from "./routes/edit-history"
 import mondayRoutes from "./routes/monday"
 import airtableRoutes from "./routes/airtable"
 import langquestRoutes from "./routes/langquest"
+import langquestConnectionRoutes from "./routes/langquest-connections"
 import contactRoutes from "./routes/contact"
 import feedbackRoutes from "./routes/feedback"
 import billingWorkspaceRoutes from "./routes/billing-workspace"
@@ -418,6 +419,9 @@ app.route("/api/v2/monday", mondayRoutes)
 // (lib/integrations/push.ts), including the sync-worker nudge above.
 app.route("/api/v2/airtable", airtableRoutes)
 app.route("/api/v2/langquest", langquestRoutes)
+// Account-level LangQuest connections (one token per user per LangQuest org),
+// which the project links above are made from.
+app.route("/api/v2/langquest", langquestConnectionRoutes)
 // External API credentials (PATs) for the Agent API (AQU-533 §2). Mint/list/
 // revoke; live role is re-resolved on every downstream API call.
 app.route("/api/v2/credentials", credentialsRoutes)

@@ -135,6 +135,13 @@ export const editor = defineNamespace({
     "editor.cell.addComment": "Add comment",
     "editor.cell.closeDetails": "Close cell details",
 
+    // — Cell details, as a pop-up modal (AQU-2021) ————————————————
+    "editor.cellDetail.title": "{ref} details",
+    "editor.cellDetail.description":
+      "Recording, back-translation, notes and history for this cell.",
+    "editor.cellDetail.previous": "Previous cell",
+    "editor.cellDetail.next": "Next cell",
+
     // — Waveform strip under a translated cell ——————————————————————
     "editor.waveform.scrubber": "Audio scrubber",
     "editor.waveform.seekTooltip": "Click to seek",
@@ -1061,6 +1068,7 @@ export const editor = defineNamespace({
     "editor.history.stepChooseTake": "Choose take",
     "editor.history.stepDeleteTake": "Delete take",
     "editor.history.stepRenameTake": "Rename take",
+    "editor.history.stepCellLabel": "Change cell label",
     "editor.history.stepAddTrack": "Add track",
     "editor.history.stepAddFolder": "Make folder",
     "editor.history.stepRenameTrack": "Rename track",
@@ -1131,6 +1139,7 @@ export const editor = defineNamespace({
     "editor.history.stepChangeVoice": "Change the voice",
     "editor.history.stepRemoveNoise": "Remove noise",
     "editor.history.stepStationVersion": "Save a new version",
+    "editor.history.stepStationSaveOver": "Save over a take",
     "editor.history.stepTakeLevel": "Change volume or fades",
     "editor.history.stepLinesFromRecording": "Make lines from a recording",
     "editor.history.stepImportRecording": "Import recording",
@@ -1332,7 +1341,7 @@ export const editor = defineNamespace({
     "editor.station.helpFadesTerm": "Fades",
     "editor.station.helpFades": "Drag the round knob at a top corner inward to fade in or out. Click it to turn the fade on or off.",
     "editor.station.helpSaveTerm": "Saving",
-    "editor.station.helpSave": "Cuts and inserts wait until you choose Save as new version. The original recording is always kept.",
+    "editor.station.helpSave": "Cuts and inserts wait until you save. Save saves over the take, and Undo brings the old sound back. Save's ▾ saves a new version instead and keeps the original.",
     "editor.station.helpKeysTerm": "Keys",
     "editor.station.helpKeys": "Space plays, K keeps, ⌫ deletes, I inserts, A approves, L loops, + and − zoom, {mod}Z undoes, {mod}S saves. After Record now, Enter keeps the new recording.",
     "editor.station.startFlag": "Start {time}",
@@ -1407,7 +1416,7 @@ export const editor = defineNamespace({
     "editor.station.makesVersion": "Makes a new version",
     "editor.station.hDraftDeleted": "{n}. Deleted {len} at {time} · not saved yet",
     "editor.station.hDraftInserted": "{n}. Inserted {label} ({len}) at {time} · not saved yet",
-    "editor.station.hint": "Drag across the waveform to select a part; click to place the cursor. Drag Start or End to trim. Space plays; K keeps, ⌫ deletes, I inserts, {mod}Z undoes.",
+    "editor.station.hint": "Drag across the waveform to select a part; click to place the cursor. Drag Start or End to trim. Space plays; K keeps, ⌫ deletes, I inserts, A approves, {mod}Z undoes.",
     "editor.station.fromLibrary": "From the library",
     "editor.station.libraryEmpty": "No other recordings in this file yet.",
     "editor.station.fromFile": "From a file…",
@@ -1514,9 +1523,9 @@ export const editor = defineNamespace({
     "editor.dock.resetInfoAria": "About your layout",
     "editor.dock.rememberedNote": "Remembered for you, for this file. Your teammates keep their own arrangement of {file}.",
     "editor.dock.startDub":
-      "Reset layout returns to the starting layout for a dubbing episode: the film large beside the text, the timeline at its usual height.",
+      "Reset layout returns to the starting layout for a file with a film: the timeline a little under half the height, and the film about a third of the width beside the text.",
     "editor.dock.startSubtitles":
-      "Reset layout returns to the starting layout for a subtitles file: the text large beside a smaller film, the timeline shorter.",
+      "Reset layout returns to the starting layout for a file with a film: the timeline a little under half the height, and the film about a third of the width beside the text.",
     "editor.dock.startScripture":
       "Reset layout returns to the starting layout for a scripture book: the timeline tall above the text.",
     "editor.dock.startPlain":
@@ -2213,6 +2222,11 @@ export const editor = defineNamespace({
       "Audio validated by others — {ref}. Click to add your validation.",
     "editor.audioValidation.ariaValidatedNoAction": "Audio validated — {ref}.",
     "editor.audioValidation.validateThisTake": "Validate this take",
+    "editor.audioValidation.validateThisPiece": "Validate this piece",
+    "editor.audioValidation.ariaPiecesOneByOne":
+      "You have validated {done} of {total} pieces — {ref}. Open the list to validate each piece.",
+    "editor.audioValidation.ariaPiecesPartlyValidated":
+      "You have validated {done} of {total} pieces — {ref}. Click to validate the rest.",
     "editor.audioValidation.ariaNotValidated": "Audio not validated — {ref}. Click to validate.",
     "editor.audioValidation.ariaNotValidatedByYou": "Audio not validated — {ref}.",
     "editor.audioValidation.ariaOthersValidated": plural({
@@ -2230,6 +2244,7 @@ export const editor = defineNamespace({
       other: "{count} more validators needed",
     }),
     "editor.audioValidation.noValidators": "Nobody has validated this take",
+    "editor.audioValidation.noValidatorsPiece": "Nobody has validated this piece",
     "editor.audioValidation.notRecorded": "Not recorded yet",
     "editor.audioValidation.partNotRecordedTooltip": "Part of this line is not recorded yet",
     "editor.audioValidation.ariaPartUnrecorded": "Part of this line is not recorded yet — {ref}.",
@@ -2395,7 +2410,11 @@ export const editor = defineNamespace({
     "editor.ai.alignStylesNeeded": "This cell needs Align styles",
 
     // — Remaining action-rail tooltips ————————————————————————————
+    // AQU-2401: this one is no longer on the rail — it names the Play button
+    // in the left validation gutter, beside the audio check.
     "editor.audio.play": "Play audio",
+    "editor.audio.noRecordingNote": "Nothing recorded on this line to play",
+    "editor.audio.ariaNoRecording": "{ref}: nothing recorded to play",
     "editor.cue.playFrom": "Play from this cue",
     // AQU-1118: the same button while this row's line is the one playing.
     "editor.cue.pause": "Pause",
@@ -2497,6 +2516,18 @@ export const editor = defineNamespace({
       one: "{count} piece",
       other: "{count} pieces",
     }),
+    // Decision 7 (Sam, 2026-10-22): a cut take takes no vote of its own.
+    "editor.recordingTab.piecesApproved": plural({
+      one: "{approved} of {count} piece approved",
+      other: "{approved} of {count} pieces approved",
+    }),
+    // Slice 3A (Sam, Oct 29): the same count, shorter, for a row too narrow
+    // for the whole sentence — first without "pieces", then as a fraction.
+    "editor.recordingTab.piecesApprovedShort": plural({
+      one: "{approved} of {count} approved",
+      other: "{approved} of {count} approved",
+    }),
+    "editor.recordingTab.piecesApprovedTiny": "{approved}/{count}",
     "editor.recordingTab.matches": "Matches the text",
     "editor.recordingTab.differs": plural({
       one: "{count} word differs",
@@ -2514,6 +2545,11 @@ export const editor = defineNamespace({
     // — Expansion tabs: issues and metadata ————————————————————————
     "editor.expansion.issues": "Issues",
     "editor.expansion.metadata": "Metadata",
+    // AQU-2408: the cell's own label, typed in the expansion panel. Metadata,
+    // never a voice or a character (docs/decisions/0007).
+    "editor.cellLabel.title": "Label",
+    "editor.cellLabel.placeholder": "Add a label",
+    "editor.cellLabel.inputAria": "Cell label",
     "editor.metadata.showOnCells": "Show {key} on cells",
     "editor.issues.none": "No translation rule issues on this cell.",
     "editor.issues.waived": "Waived",
@@ -3099,7 +3135,7 @@ export const editor = defineNamespace({
       "editor.station.helpFadesTerm": { description: "Term in the Station's (i) explanation: fades." },
       "editor.station.helpFades": { description: "The Station's (i) explanation: the round fade knobs at the waveform's top corners." },
       "editor.station.helpSaveTerm": { description: "Term in the Station's (i) explanation: saving a new version." },
-      "editor.station.helpSave": { description: "The Station's (i) explanation: unsaved edits and Save as new version." },
+      "editor.station.helpSave": { description: "The Station's (i) explanation: unsaved edits; Save, which saves over the take; and Save's ▾ menu, which saves a new version instead. Keep the ▾ symbol as it is." },
       "editor.station.helpKeysTerm": { description: "Term in the Station's (i) explanation: keyboard shortcuts." },
       "editor.station.helpKeys": {
         description: "The Station's (i) explanation: its keyboard shortcuts. Keep the key symbols as they are.",
@@ -4115,6 +4151,38 @@ export const editor = defineNamespace({
           "Screen-reader name of the X button in the header of the panel that " +
           "expands under a cell row (back-translation, audio, footnotes, history). " +
           "It collapses that panel only; it does not close the file or the editor.",
+      },
+      "editor.cellDetail.title": {
+        description:
+          "Heading of the pop-up that opens when someone double-clicks a cell " +
+          "row — the same tabs the panel under the row shows, given the whole " +
+          "screen. '{ref}' is the cell's own name, a scripture reference like " +
+          "'GEN 1:1' or a line number. Keep it short; it sits on one line beside " +
+          "the previous/next controls.",
+        maxLength: 32,
+        placeholders: {
+          ref: "The cell's own name — a scripture reference such as 'GEN 1:1', or 'row 12' when the file has no references.",
+        },
+      },
+      "editor.cellDetail.description": {
+        description:
+          "One line under that heading saying what the pop-up holds, so someone " +
+          "who opened it by accident can see what it is for. The four nouns are " +
+          "the tabs inside it.",
+      },
+      "editor.cellDetail.previous": {
+        description:
+          "Screen-reader name of the control that moves the open pop-up to the " +
+          "cell ABOVE this one in the file, without closing it. Disabled on the " +
+          "first cell.",
+        maxLength: 24,
+      },
+      "editor.cellDetail.next": {
+        description:
+          "Screen-reader name of the control that moves the open pop-up to the " +
+          "cell BELOW this one in the file, without closing it. Disabled on the " +
+          "last cell.",
+        maxLength: 24,
       },
       "editor.waveform.scrubber": {
         description:
@@ -7681,6 +7749,7 @@ export const editor = defineNamespace({
       "editor.history.stepChooseTake": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): the user chose which take (recording) plays for a line. A short verb phrase.", maxLength: 40 },
       "editor.history.stepDeleteTake": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a take (recording or generated voice) was deleted. A short verb phrase.", maxLength: 40 },
       "editor.history.stepRenameTake": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a take (recording) was renamed. A short verb phrase.", maxLength: 40 },
+      "editor.history.stepCellLabel": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a cell's label (a short note typed on the line) was set, changed or cleared. A short verb phrase.", maxLength: 40 },
       "editor.history.stepAddTrack": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): an audio track was added to the timeline. A short verb phrase.", maxLength: 40 },
       "editor.history.stepAddFolder": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a folder of timeline tracks was made. A short verb phrase.", maxLength: 40 },
       "editor.history.stepRenameTrack": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a timeline track was renamed. A short verb phrase.", maxLength: 40 },
@@ -7731,6 +7800,7 @@ export const editor = defineNamespace({
       "editor.history.stepChangeVoice": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a take was converted to another (cloned) voice, which adds the converted take. A short verb phrase.", maxLength: 40 },
       "editor.history.stepTakeLevel": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): a take's volume or its fade in/out was changed in the Station. A short verb phrase.", maxLength: 40 },
       "editor.history.stepStationVersion": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): an edited recording was saved from the Station as a new version, which adds a take that plays instead of the old one. A short verb phrase.", maxLength: 40 },
+      "editor.history.stepStationSaveOver": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): an edited recording was saved from the Station over the take it was made from, which replaces that take. A short verb phrase.", maxLength: 40 },
       "editor.history.stepRemoveNoise": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): background noise was removed from a take, which adds a cleaned take. A short verb phrase.", maxLength: 40 },
       "editor.history.stepLinesFromRecording": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): an audio or video file was split into new lines (rows) of the open file, with their transcripts. A short verb phrase.", maxLength: 40 },
       "editor.history.stepImportRecording": { description: "Name of one step in the edit history (Undo/Redo tooltips, toasts and the History panel): an audio or video file was imported as a new file of lines. Undo moves the new file to Recently deleted. A short verb phrase.", maxLength: 40 },
@@ -8485,7 +8555,7 @@ export const editor = defineNamespace({
       },
       "editor.audioValidation.ariaNoAudio": {
         description:
-          "Screen-reader label for the faded microphone on a line with no recording. " +
+          "Screen-reader label for the faded circle on a line with no recording. " +
           "{ref} is the line's reference, e.g. 'MRK 4:1'.",
         placeholders: {
           ref: "The cell's reference or fallback row number. Do not translate.",
@@ -8524,6 +8594,29 @@ export const editor = defineNamespace({
         placeholders: {
           done: "How many of the line's takes have reached the required number of validators.",
           total: "How many takes the line has, one per track.",
+          ref: "The line's reference, e.g. 'GEN 1:1'.",
+        },
+      },
+      "editor.audioValidation.ariaPiecesPartlyValidated": {
+        description:
+          "Screen-reader name of a line's audio check when its take was cut into pieces, " +
+          "this person has validated some of them, and pressing the check validates the " +
+          "one piece left. Each piece is validated on its own.",
+        placeholders: {
+          done: "How many of the take's pieces this person has validated.",
+          total: "How many pieces the take was cut into.",
+          ref: "The line's reference, e.g. 'GEN 1:1'.",
+        },
+      },
+      "editor.audioValidation.ariaPiecesOneByOne": {
+        description:
+          "Screen-reader name of a line's audio check when its take was cut into pieces " +
+          "and more than one piece still needs this person's validation. Each piece is " +
+          "validated on its own, so pressing the check opens the list of pieces rather " +
+          "than validating them all.",
+        placeholders: {
+          done: "How many of the take's pieces this person has validated.",
+          total: "How many pieces the take was cut into.",
           ref: "The line's reference, e.g. 'GEN 1:1'.",
         },
       },
@@ -8587,6 +8680,12 @@ export const editor = defineNamespace({
       },
       "editor.audioValidation.noValidators": {
         description: "Shown for a take in the popover that nobody has validated yet.",
+        maxLength: 36,
+      },
+      "editor.audioValidation.noValidatorsPiece": {
+        description:
+          "Shown for one piece of a cut take in the popover when nobody has validated " +
+          "that piece yet. Each piece is validated on its own.",
         maxLength: 36,
       },
       "editor.audioValidation.notRecorded": {
@@ -9321,9 +9420,26 @@ export const editor = defineNamespace({
       },
       "editor.audio.play": {
         description:
-          "Tooltip on the action-rail play button for a cell's recording. Swaps " +
-          "with common.pause. Imperative.",
+          "Tooltip and accessible name of the play button in the row's left " +
+          "validation gutter, which plays that line's own recording. Swaps with " +
+          "common.pause while it is playing. Imperative.",
         maxLength: 18,
+      },
+      "editor.audio.noRecordingNote": {
+        description:
+          "Note that opens on a click of the faded play button in the row's left " +
+          "validation gutter, on a line with no recording in a file that has " +
+          "audio elsewhere. Says there is nothing to hear here, not that the " +
+          "button is broken.",
+        maxLength: 44,
+      },
+      "editor.audio.ariaNoRecording": {
+        description:
+          "Screen-reader label for that same faded play button. {ref} is the " +
+          "line's reference, e.g. 'MRK 4:1'.",
+        placeholders: {
+          ref: "The cell's reference or fallback row number. Do not translate.",
+        },
       },
       "editor.cue.playFrom": {
         description:
@@ -9689,6 +9805,41 @@ export const editor = defineNamespace({
         placeholders: { count: "How many pieces the take is in. Always 2 or more." },
         maxLength: 24,
       },
+      "editor.recordingTab.piecesApproved": {
+        description:
+          "Read-only status beside a split take's name, in the Recording tab and the recorder's " +
+          "list of takes. Each piece of the take is approved (validated) on its own, so the " +
+          "take says how many of its pieces are, e.g. '2 of 3 pieces approved'. Count-governed.",
+        placeholders: {
+          approved: "How many of the pieces are approved. 0 up to {count}.",
+          count: "How many pieces the take is in. Always 2 or more.",
+        },
+        maxLength: 32,
+      },
+      "editor.recordingTab.piecesApprovedShort": {
+        description:
+          "A shorter form of editor.recordingTab.piecesApproved, shown instead of it when the " +
+          "row is too narrow for the whole sentence (the recorder's list of takes is narrow): " +
+          "the word 'pieces' is left out, e.g. '2 of 3 approved'. The whole sentence is still " +
+          "the hover text and what a screen reader reads. Count-governed.",
+        placeholders: {
+          approved: "How many of the pieces are approved. 0 up to {count}.",
+          count: "How many pieces the take is in. Always 2 or more.",
+        },
+        maxLength: 20,
+      },
+      "editor.recordingTab.piecesApprovedTiny": {
+        description:
+          "The shortest form of editor.recordingTab.piecesApproved, for a row too narrow even " +
+          "for editor.recordingTab.piecesApprovedShort: how many pieces of a split take are " +
+          "approved, as a fraction, e.g. '2/3'. Keep it as short as the English; change the " +
+          "slash only if your language writes fractions differently.",
+        placeholders: {
+          approved: "How many of the pieces are approved. 0 up to {count}.",
+          count: "How many pieces the take is in. Always 2 or more.",
+        },
+        maxLength: 8,
+      },
       "editor.recordingTab.matches": {
         description:
           "Beside a take in the Recording tab: the words heard in the recording (from its " +
@@ -9760,6 +9911,22 @@ export const editor = defineNamespace({
           "cell (a checklist of project conventions), beside a warning icon. Plural " +
           "noun; the tab is disabled when there are none.",
         maxLength: 16,
+      },
+      "editor.cellLabel.title": {
+        description:
+          "Label of the row at the top of a cell's expansion panel that holds the cell's " +
+          "own label — a short note typed on the line (a section name, a reviewer's " +
+          "mark). A noun. It is not a voice or a character.",
+        maxLength: 14,
+      },
+      "editor.cellLabel.placeholder": {
+        description:
+          "Placeholder inside the empty cell-label text field, inviting the person to " +
+          "type one. A short imperative.",
+        maxLength: 24,
+      },
+      "editor.cellLabel.inputAria": {
+        description: "Screen-reader name of the cell-label text field in a cell's expansion panel.",
       },
       "editor.expansion.metadata": {
         description:

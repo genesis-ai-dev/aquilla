@@ -230,8 +230,21 @@ export const settings = defineNamespace({
       "Whether imported timings are locked against dragging. Projects use this unless they set their own.",
     "settings.mediaDefaults.allowTrackEditingDescription":
       "Whether maintainers may add, group and recolour timeline tracks. On unless you turn it off. Projects use this unless they set their own.",
+    // AQU-1967: this row names CELLS — its label always did, and so does the
+    // project page's copy of it — and it carries the one rule that decides
+    // whether the rung picked here means what an org admin reads into it:
+    // removing an IMPORTED cell needs a maintainer whatever this says
+    // (cell-editing-gate.ts `canRemoveImportedCells`, mirrored at the
+    // perimeter in sync-worker authorize.ts). Biblica ETT set the tier to
+    // Project Lead expecting their leads to be able to delete cells; every
+    // cell in a project imported from USFM is an imported cell, so each lead's
+    // Remove entry stayed disabled and the setting read as broken. The project
+    // page said so already (projectSettings.cellEditing.description) and this
+    // one did not, which is the whole of that surprise.
     "settings.mediaDefaults.cellEditingFloorDescription":
-      "Who may add and remove lines. Projects use this unless they set their own.",
+      "Who may add and remove cells. Removing a cell also removes its translations, recordings and "
+      + "comments; removing an imported cell always needs a maintainer, whatever this is set to. "
+      + "Projects use this unless they set their own.",
     "settings.mediaDefaults.allowSelfValidationAudioDescription":
       "Whether people may validate their own recordings. Projects use this unless they set their own.",
     "settings.mediaDefaults.validationRoleFloorAudioDescription":
@@ -467,6 +480,20 @@ export const settings = defineNamespace({
     "settings.orgIdentity.deleteBlockedProjects":
       "This organization still has projects. Remove them before deleting the organization.",
     "settings.orgIdentity.deleteFailed": "Couldn't delete this organization.",
+    // ── AQU-1993: leaving an organization (self-service, not moderation) ──
+    "settings.orgIdentity.leaveOrganization": "Leave organization",
+    "settings.orgIdentity.leaveRowDescription":
+      "Give up your own access to this organization. Projects you were added to individually stay with you until you leave each of those too.",
+    "settings.orgIdentity.leaveConfirmTitle": "Leave {name}?",
+    "settings.orgIdentity.leaveConfirmBody":
+      "You will lose your organization-wide access to {name} and your place on its teams. An owner has to invite you back.",
+    "settings.orgIdentity.leavingButton": "Leaving…",
+    "settings.orgIdentity.leftToast": "You left {name}.",
+    "settings.orgIdentity.leaveFailed": "Couldn't leave this organization.",
+    "settings.orgIdentity.leaveBlockedLastOwner":
+      "You are the only owner of this organization. Make someone else an owner, or delete the organization, before you leave.",
+    "settings.orgIdentity.leaveBlockedPersonal":
+      "This is your personal workspace. Delete it instead of leaving it.",
     // "Organization name" (label, sr-only FieldLabel, placeholder) →
     // org.createDialog.nameLabel (identical text)
     // "Danger zone" → settings.teamSettings.dangerZoneLabel (identical text)
@@ -870,7 +897,7 @@ export const settings = defineNamespace({
       "settings.mediaDefaults.groupLabel": {
         description:
           "Heading of a group on the organization's Project defaults page holding the timeline and recording defaults " +
-          "(timing lock, track editing, who may add and remove lines, recording validation).",
+          "(timing lock, track editing, who may add and remove cells, recording validation).",
       },
       "settings.mediaDefaults.timingLockedDescription": {
         description: "Help text under the timing-lock row in that group. An on/off switch sits beside it.",
@@ -921,6 +948,28 @@ export const settings = defineNamespace({
           link:
             "A <Link> element whose visible text is the 'Preferences' string " +
             "(reused from nav.account.preferences) — not a plain value.",
+        },
+      },
+      "settings.orgIdentity.leaveConfirmTitle": {
+        description:
+          "Title of the confirm dialog that a person opens to leave an organization "
+          + "themselves (AQU-1993), not to remove someone else.",
+        placeholders: {
+          name: "The organization's name — not translated.",
+        },
+      },
+      "settings.orgIdentity.leaveConfirmBody": {
+        description:
+          "Body of the confirm dialog for leaving an organization. States what the "
+          + "person gives up and that an owner must invite them back.",
+        placeholders: {
+          name: "The organization's name — not translated.",
+        },
+      },
+      "settings.orgIdentity.leftToast": {
+        description: "Success toast after the person left an organization.",
+        placeholders: {
+          name: "The organization's name — not translated.",
         },
       },
       "settings.orgIdentity.deleteConfirmBody": {

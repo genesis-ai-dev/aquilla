@@ -376,6 +376,58 @@ export async function removeProjectMember(
   invalidateProjectRosters();
 }
 
+/** AQU-1993: the outcome of leaving a project. */
+export interface LeaveProjectResult {
+  /** True when a surviving org / team / creator path still grants access. */
+  stillHasAccess: boolean;
+  /** Which path survived, when one did. */
+  remainingSource: ProjectMemberRole["source"] | "platform" | null;
+}
+
+/**
+ * AQU-1993: the caller has no individual grant to give up — their access is
+ * inherited, so leaving the project is not theirs to do.
+ */
+export class NoDirectMembershipError extends Error {
+  constructor() {
+    super("no_direct_membership");
+    this.name = "NoDirectMembershipError";
+  }
+}
+
+/**
+ * DELETE /api/v2/projects/:projectId/members/me — leave the project
+ * (AQU-1993). Self-service, unlike `removeProjectMember`, which is the
+ * maintainer+ moderation route.
+ *
+ * Only a direct grant can be given up. Access inherited from the
+ * organization, a team, or being the project's creator survives, and the
+ * result says so rather than implying the project is gone.
+ */
+export async function leaveProject(
+  jwt: string,
+  projectId: string
+): Promise<LeaveProjectResult> {
+  const res = await fetch(
+    `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/members/me`,
+    { method: "DELETE", headers: authHeaders(jwt) }
+  );
+  if (res.status === 409) {
+    const body = (await res.json().catch(() => null)) as { error?: string } | null;
+    if (body?.error === "no_direct_membership") throw new NoDirectMembershipError();
+  }
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new UserError(res.status, text, "project");
+  }
+  const body = (await res.json()) as LeaveProjectResult;
+  invalidateProjectRosters();
+  return {
+    stillHasAccess: Boolean(body.stillHasAccess),
+    remainingSource: body.remainingSource ?? null,
+  };
+}
+
 export interface RevokeAllResult {
   /** True when a direct project_members row was deleted. */
   removed: boolean

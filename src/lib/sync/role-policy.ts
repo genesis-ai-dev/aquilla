@@ -179,6 +179,11 @@ const REQUIRED_ROLE: Record<string, number> = {
   //   than a crash, because the client mirror throws before anything reaches the
   //   durable outbox.
   "cast.assign": ROLE.MAINTAINER,
+  // AQU-2408: a hand-typed cell label is metadata, not casting. Project lead is
+  // the LOWEST rung the project's `cellLabelFloor` tier can admit; the tier
+  // itself (maintainer unless set otherwise) is enforced where the Label field
+  // is drawn (src/lib/cell-label-gate.ts), like `cellEditingFloor`.
+  "cell.label.set": ROLE.PROJECT_LEAD,
   // AQU-2204 (Sam, Oct 26): project lead and above choose what a file's
   // timeline follows ("Follows source" / "Follows recordings"), per file, for
   // everyone on it. Was maintainer (the Project Settings clearance it came from).

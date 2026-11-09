@@ -9,6 +9,7 @@ import { handleExternalReadRequest } from "../external/read-routes"
 import { mintApiToken } from "../../../db/shared/api-credentials"
 import { makeTestDb, type TestDb } from "./helpers/pg-test-db"
 import { bumpRateLimit, userRateLimitIdentifier } from "../../../db/shared/rate-limit"
+import { TEXT_CHECK_IDS } from "../../../db/shared/builtin-checks"
 
 const SECRET = "test-secret"
 const CRED_1 = "00000000-0000-0000-0000-000000000001"
@@ -198,7 +199,9 @@ describe("external read surface", () => {
       it("lists the defaults for a project that never stored an override, without Bible checks", async () => {
         await seedSettings({ targetLanguage: "fr" }, 1)
         const body = await readChecks()
-        expect(body.builtinChecks).toHaveLength(18)
+        // Counted off the shared table, so adding a text check does not also
+        // edit this assertion.
+        expect(body.builtinChecks).toHaveLength(TEXT_CHECK_IDS.length)
         expect(byId(body.builtinChecks, "usfm-structure")).toEqual({
           id: "usfm-structure", name: "USFM markers", enabled: true, severity: "major", overridden: false,
         })

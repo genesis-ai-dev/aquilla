@@ -104,6 +104,21 @@ describe("TakesStrip — audio validation", () => {
     expect(emitUnvalidate).not.toHaveBeenCalled()
   })
 
+  // Decision 7 (Sam, 2026-10-22): a split take's own row takes no vote; each
+  // piece is voted on from its own row under it (TakesStrip.pieces.test.tsx).
+  it("takes no vote for every piece at once on a split take's row", async () => {
+    draw([
+      take({ audioId: "p1", label: "Take 2 · 1", trimEndMs: 1000, validatorCount: 0, validators: [] }),
+      take({ audioId: "p2", label: "Take 2 · 2", trimStartMs: 1000, pieceOf: "p1", validatorCount: 0, validators: [] }),
+    ], "p1")
+    expect(within(screen.getByTestId("take-row-p1")).queryByTestId("audio-validation-button")).toBeNull()
+    const marks = screen.getAllByTestId("audio-validation-button")
+    expect(marks).toHaveLength(2)
+    await userEvent.click(marks[0])
+    expect(emitValidate).toHaveBeenCalledTimes(1)
+    expect(emitValidate.mock.calls[0][0]).toMatchObject({ audioId: "p1" })
+  })
+
   // The role guard is defensive rather than decorative: a keyboard or
   // programmatic trigger reaches the emit too, and a guaranteed 403 must not
   // enter the outbox.

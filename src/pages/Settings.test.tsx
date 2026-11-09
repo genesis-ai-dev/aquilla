@@ -1,9 +1,9 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
-import { render, screen, waitFor, fireEvent } from "@testing-library/react"
+import { render, screen, waitFor, fireEvent, within } from "@testing-library/react"
 import { MemoryRouter, Navigate, Route, Routes } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { Settings, OrgSettingsIdentity, OrgSettingsKnowledge, OrgSettingsSecurity } from "./Settings"
-import { renameOrg, listMyOrgs, deleteOrg, OrgHasProjectsError } from "@/lib/frontier/orgs"
+import { renameOrg, listMyOrgs, deleteOrg, leaveOrg, LeaveOrgBlockedError, OrgHasProjectsError } from "@/lib/frontier/orgs"
 import { toast } from "@/components/ui/toast"
 
 // AQU-1277: OrgProvider loads the project directory via
@@ -33,6 +33,15 @@ vi.mock("@/lib/frontier/orgs", () => ({
   listMyOrgs: vi.fn(async () => [{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }]),
   renameOrg: vi.fn(async () => {}),
   deleteOrg: vi.fn(async () => {}),
+  leaveOrg: vi.fn(async () => {}),
+  LeaveOrgBlockedError: class LeaveOrgBlockedError extends Error {
+    reason: "last_owner" | "cannot_leave_personal_org"
+    constructor(reason: "last_owner" | "cannot_leave_personal_org") {
+      super(reason)
+      this.name = "LeaveOrgBlockedError"
+      this.reason = reason
+    }
+  },
   OrgHasProjectsError: class OrgHasProjectsError extends Error {
     projectCount: number
     constructor(projectCount: number) {
@@ -107,6 +116,8 @@ beforeEach(() => {
   vi.mocked(listMyOrgs).mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }])
   vi.mocked(deleteOrg).mockReset()
   vi.mocked(deleteOrg).mockResolvedValue(undefined)
+  vi.mocked(leaveOrg).mockReset()
+  vi.mocked(leaveOrg).mockResolvedValue(undefined)
 })
 afterEach(() => vi.clearAllMocks())
 
@@ -196,13 +207,49 @@ describe("Org Settings", () => {
     expect(screen.getByText("Danger zone")).toBeInTheDocument()
   })
 
-  it("hides the Danger zone from a maintainer who can still rename", async () => {
+  // AQU-1993: the Danger zone is no longer owner-only — every member gets
+  // "Leave organization" there. Deleting the org stays owner-only.
+  it("offers a maintainer Leave but not Delete in the Danger zone", async () => {
     vi.mocked(listMyOrgs).mockResolvedValueOnce([{ id: 1, name: "Come and See", role: { level: 600, name: "maintainer" } }])
     renderSettings("/orgs/1/settings/identity")
     const input = await screen.findByLabelText(/^Organization name$/i)
     await waitFor(() => expect(input).toHaveValue("Come and See"))
     expect(input).toBeEnabled()
     expect(screen.queryByRole("button", { name: /delete organization/i })).toBeNull()
+    expect(screen.getByRole("button", { name: /leave organization/i })).toBeInTheDocument()
+  })
+
+  it("leaves the organization after confirm and switches to another org", async () => {
+    renderSettings("/orgs/1/settings/identity")
+    fireEvent.click(await screen.findByRole("button", { name: /leave organization/i }))
+    expect(await screen.findByRole("heading", { name: "Leave Come and See?" })).toBeInTheDocument()
+    vi.mocked(listMyOrgs).mockResolvedValueOnce([
+      { id: 2, name: "Fresh workspace", role: { level: 700, name: "owner" } },
+    ])
+    const dialog = await screen.findByRole("dialog")
+    fireEvent.click(within(dialog).getByRole("button", { name: /leave organization/i }))
+    await waitFor(() => expect(leaveOrg).toHaveBeenCalledWith("jwt", 1))
+    expect(await screen.findByText("Org overview")).toBeInTheDocument()
+    expect(localStorage.getItem("org:active")).toBe("2")
+  })
+
+  it("keeps the membership and names the fix when the caller is the last owner", async () => {
+    vi.mocked(leaveOrg).mockRejectedValueOnce(new LeaveOrgBlockedError("last_owner"))
+    renderSettings("/orgs/1/settings/identity")
+    fireEvent.click(await screen.findByRole("button", { name: /leave organization/i }))
+    const dialog = await screen.findByRole("dialog")
+    fireEvent.click(within(dialog).getByRole("button", { name: /leave organization/i }))
+    expect(await screen.findByRole("alert")).toHaveTextContent(/only owner of this organization/i)
+  })
+
+  // The personal workspace is deleted, not left, so the control is absent.
+  it("offers no Leave on the caller's own personal workspace", async () => {
+    vi.mocked(listMyOrgs).mockResolvedValueOnce([
+      { id: 1, name: "Come and See", role: { level: 700, name: "owner" }, personal: true },
+    ])
+    renderSettings("/orgs/1/settings/identity")
+    await screen.findByRole("button", { name: /delete organization/i })
+    expect(screen.queryByRole("button", { name: /leave organization/i })).toBeNull()
   })
 
   it("leaves the organization in place when delete is cancelled", async () => {

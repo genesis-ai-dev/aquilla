@@ -24,6 +24,7 @@ not a micro-spec farm.
 | Agent connection | Browser consent issues a scoped credential; OAuth selects current organizations in Act mode; later organizations stay excluded; OAuth is MCP-bound while device tokens retain REST access; MCP artifact upload → preview → import → commit persists source content; revocation blocks access | `e2e/specs/agent/agent-connection.smoke.spec.ts` |
 | Agent workbench | The workbench shows the file open in the editor — the Document view lists its cells, a reload keeps them, and Text returns to the same file (AQU-1496) | `e2e/specs/agent/workbench-open-file.smoke.spec.ts` |
 | Orgs | Add member to org, member sees it | `e2e/specs/orgs/members.smoke.spec.ts` |
+| Orgs | A member leaves an organization, and a member leaves a project they were individually added to; the last owner and a personal workspace are refused, and inherited project access survives the dropped direct grant and is reported rather than implied gone (AQU-1993). No new smoke: a regression here leaves someone a member they wanted to stop being — it loses no data, access or committed artifact — and the guards it has to keep (last owner, personal workspace, inherited-only, the cascade) are server rules, covered where they live. | Covered in worker integration (`auth-worker/src/__tests__/leave-org-and-project.test.ts` — both routes against real Postgres: the cascade to team rows, the last-owner and personal-workspace refusals, the inherited-only refusal, and the surviving-path report) and RTL/unit (`src/pages/Settings.test.tsx` — the Danger-zone control for a non-owner, the confirm → leave → org switch, the last-owner message, and its absence on a personal workspace; `src/components/ProjectSettings/LeaveProjectSection.test.tsx` — confirm-first, navigate away only when access is really gone, and both refusals; `src/lib/frontier/orgs.test.ts` / `members.test.ts` — the clients) |
 | Orgs | Account switcher sessions | `e2e/specs/orgs/account-switcher.smoke.spec.ts` |
 | Orgs | Preferences persist across reload | `e2e/specs/orgs/preferences-persist-reload.smoke.spec.ts` |
 | Orgs | Billing & usage preserves existing access and distinguishes persisted personal/team scope across creation, navigation, and reload; selected-plan links require an explicit workspace and reject incompatible scope; offer tabs, cadence, Stripe-derived display, and workspace plan review are covered in RTL; authenticated review restrictions and current-price validation are covered in worker integration tests; sandbox checkout → signed initial payment → workspace plan, retries, confirmed checkout expiry/replacement, rollback, isolation, and JSON persistence are covered against real Postgres; signed renewal/failure/recovery/cancellation, delayed events, concurrent revisions, and atomic lifecycle rollback are covered against real Postgres; effective Free allowance after payment failure crosses Postgres → API → browser; existing-plan upgrade/downgrade review preserves Stripe proration parameters and renewal timing through real signed activation → review → Postgres; its API client and review UI are covered in RTL; native single-item catalog → checkout → signed activation → scope-specific hosted portal is covered in worker/real-Postgres tests; captured Stripe upgrade/credit-downgrade/cancel_at shapes, early invoice replay, and concurrent native update retries preserve usage anchors in real-Postgres tests; durable provider-cost reservations and settlements compose signed activation with exact-period admission, equal per-tool multipliers, concurrent request limits, retries, and Free fallback in real-Postgres tests (local authenticated chat JSON/SSE, import-classification, agent per-step (orchestrator turn and nested drafting), and autopilot graph-call admission/settlement (owner-funded background runs pause at the span edge on exhaustion), including hosted Whisper admission and settlement from real client WAVs, charged malformed output, weekly exhaustion mid-run, and held-request reconciliation from provider generation records, are covered through the real handlers and Postgres; live-provider and other endpoint wiring remains pending); Manage billing and safe portal failures are covered in RTL; hosted portal sessions are covered through signed activation → Postgres → authenticated route → Stripe request in worker and real-Postgres tests; paid plan/cadence/period display is covered in RTL and persisted plan reload/workspace isolation crosses Postgres → API → browser | `e2e/specs/orgs/org-settings-billing.smoke.spec.ts` |
@@ -233,9 +234,26 @@ UI chrome that used to be one smoke file per click is covered under
   `EditorTable.editorActions.test.tsx`). Pending-edit page-hide flush is covered
   in `TranslatedEditor.commit.test.tsx` and import-and-edit smoke.
 
+- A cell's own label (AQU-2408): typed in the expansion panel's Label row at or
+  above the project's `cellLabelFloor` tier (maintainer unless opened to project
+  leads), stored as `metadata.cellLabel` on the source row by the non-chain
+  `cell.label.set` event, shown in the corner label slot beneath an assigned
+  voice or cast name, and never a voice itself. Covered in RTL
+  (`CellLabelRow.test.tsx`, `EditorTable.cellLabelRow.test.tsx`,
+  `ProjectSettings.cellLabel.test.tsx`), with the projection, floors, read model
+  and undo step pinned in `sync-worker/src/__tests__/cell-label-set.test.ts`,
+  `cell-label-gate.test.ts`, `cell-label-floor.test.ts`, `label-steps.test.ts`
+  and `useCells.cellLabel.test.ts`. UI-only, no new smoke: the write rides the
+  same outbox → sync-worker → Postgres path every metadata event already uses.
 - View settings, tab strip, selection bar, outbox inspector, term-lookup popover,
   video attachment dialog, cell-expansion Escape close, setup-checklist expand/skip
   (except survives-refresh, which stays smoke)
+- A cell's detail view as a pop-up modal (AQU-2021): double-clicking a row opens
+  the same tab shell as a modal with previous/next through the displayed cells,
+  and a double-click inside the open editor still selects a word rather than
+  opening it. Covered in RTL (`EditorTable.cellDetailModal.test.tsx`). UI-only,
+  no new smoke: one more way into a view the chevron already reaches, writing
+  nothing of its own.
 - AI availability after an offline → online cycle (AQU-1377): a health probe forced
   while the browser is offline records no snapshot, the browser `online` event forces
   a fresh probe that re-enables the AI controls, and a batch refused because the

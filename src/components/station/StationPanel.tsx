@@ -18,6 +18,7 @@ import { historyView, newestMatchingStep, subscribeHistory, undoLast, undoStepBy
 import { useT } from "@/lib/i18n/I18nProvider"
 import { audioIdSeededWith } from "@/lib/audio/upload"
 import { isGeneratedTake } from "@/lib/audio/track-audio"
+import { placeHoldingStart } from "@/lib/station/hold-place"
 import { stationStepMatch } from "@/lib/station/own-steps"
 import { levelsShown, STATION_PICKS } from "@/lib/station/picks"
 import { setStationUi } from "@/lib/station/ui"
@@ -313,6 +314,14 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
             )
         const slot = p.att.slot ?? "recording"
         const fromAudioId = Object.entries(p.cell.attachments ?? {}).find(([, a]) => a === p.att)?.[0] ?? target.audioId
+        // AQU-2493 (review, Nov 9): a delete or an insert before Start moved
+        // Start inside the recording; the clip moves the other way, so the
+        // take still sounds where it did (lib/station/hold-place.ts). Measured
+        // from the STORED Start carried through the edits, so a Start dragged
+        // before saving stays a trim, as Keep is.
+        const startWasMs = p.att.trimStartMs ?? 0
+        const startNowMs = Math.round(mapWindow({ start: startWasMs / 1000, end: startWasMs / 1000 }, ed.ops).start * 1000)
+        const held = placeHoldingStart(p.cell, isOpen ? target.audioId : fromAudioId, startNowMs - startWasMs, host.takeIsLayer(p.fileId, p.att.slot))
         return {
           fileId: p.fileId,
           cellId: p.cell.id,
@@ -321,8 +330,7 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
           label: p.att.label ?? null,
           trimStartMs: w.start > 0.0005 ? Math.round(w.start * 1000) : null,
           trimEndMs: w.end < L - 0.0005 ? Math.round(w.end * 1000) : null,
-          targetOffsetMs: p.att.targetOffsetMs ?? null,
-          recordingsOffsetMs: p.att.recordingsOffsetMs ?? null,
+          ...held,
           selectedBefore: host.selectedIn(p.cell.id, slot),
           // Its volume and fades go with it: the clip's, not the recording's.
           level: isOpen

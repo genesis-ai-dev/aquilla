@@ -46,6 +46,7 @@ function makeHost(take: StationTake | null, over: Partial<StationHost> = {}): St
     placementsOf: () => (take ? [take] : []),
     removeNoise: async () => null,
     changeVoice: () => null,
+    takeIsLayer: () => false,
     ...over,
   }
 }

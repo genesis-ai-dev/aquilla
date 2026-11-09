@@ -80,6 +80,7 @@ function makeHost(take: StationTake, over: Partial<StationHost> = {}): StationHo
     placementsOf: () => [take],
     removeNoise: async () => null,
     changeVoice: () => null,
+    takeIsLayer: () => false,
     ...over,
   }
 }
@@ -191,5 +192,66 @@ describe("the Station's K (Keep this) follows the Keep button (finding 10)", () 
     const { host } = await open(makeTake({ role: "source" } as never))
     fireEvent.keyDown(screen.getByTestId("station"), { key: "a", code: "KeyA" })
     expect(host.vote).not.toHaveBeenCalled()
+  })
+})
+
+describe("a Station save holds the take's place when its Start moved with the edit (finding 14)", () => {
+  type Placed = { trimStartMs: number | null; targetOffsetMs: number | null; recordingsOffsetMs: number | null }
+  const saved = async (): Promise<Placed> => {
+    fireEvent.click(screen.getByTestId("station-save"))
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledTimes(1))
+    return (mocks.save.mock.calls[0][0] as { placements: Placed[] }).placements[0]
+  }
+  /** A take whose Start is at 0.20 s, sounding 10.2 s into its line's file. */
+  const placedTake = (over: Partial<StationTake["att"]> = {}) => makeTake({ trimStartMs: 200, targetOffsetMs: 10_000, recordingsOffsetMs: 500, ...over })
+  const deleteRange = (lane: HTMLElement, a: number, b: number) => {
+    selectRange(lane, a, b)
+    fireEvent.keyDown(screen.getByTestId("station"), { key: "Delete", code: "Delete" })
+  }
+  const seedDraft = (draft: { ops: unknown[]; trim?: { a: number; b: number } | null; sources?: Record<string, unknown> }) =>
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({ trim: null, sources: {}, undo: [{ ops: [], trim: null }], scope: "clip", ...draft }))
+
+  it("deleting from the left edge past Start leaves the sound where it was following the source, and the pause as it was following the recordings", async () => {
+    const { lane } = await open(placedTake())
+    deleteRange(lane, 0, 0.8)
+    // Start is at the new recording's edge now: 0.2 s earlier in the clip, so
+    // the clip sits 0.2 s later and its sound still starts at 10.2 s.
+    expect(await saved()).toMatchObject({ trimStartMs: null, targetOffsetMs: 10_200, recordingsOffsetMs: 500 })
+  })
+
+  it("on a layer track the sound stays put following the recordings too", async () => {
+    const { lane } = await open(placedTake(), { takeIsLayer: () => true })
+    deleteRange(lane, 0, 0.8)
+    expect(await saved()).toMatchObject({ trimStartMs: null, targetOffsetMs: 10_200, recordingsOffsetMs: 700 })
+  })
+
+  it("inserting two seconds at the very start does not push the kept part two seconds later", async () => {
+    seedDraft({
+      ops: [{ kind: "ins", at: 0, src: "station-insert-x", len: 2, label: "the file “amen”" }],
+      sources: { "station-insert-x": { kind: "file", cacheId: "station-insert-x", ext: "wav", label: "the file “amen”" } },
+    })
+    mocks.cached.set("station-insert-x", new Uint8Array(4))
+    await open(placedTake())
+    expect(await saved()).toMatchObject({ trimStartMs: 2200, targetOffsetMs: 8_000, recordingsOffsetMs: 500 })
+  })
+
+  it("a take nobody has placed gets a place of its own, so it stays at its line's start", async () => {
+    const take = makeTake({ trimStartMs: 200 })
+    Object.assign(take.cell, { startTime: 10, endTime: 15 })
+    const { lane } = await open(take)
+    deleteRange(lane, 0, 0.8)
+    expect(await saved()).toMatchObject({ trimStartMs: null, targetOffsetMs: 200, recordingsOffsetMs: 0 })
+  })
+
+  it("an edit after Start moves nothing", async () => {
+    const { lane } = await open(placedTake())
+    deleteRange(lane, 2, 3)
+    expect(await saved()).toMatchObject({ trimStartMs: 200, targetOffsetMs: 10_000, recordingsOffsetMs: 500 })
+  })
+
+  it("a Start you dragged yourself before saving is a trim, as Keep is: the sound stays and the place is not shifted", async () => {
+    seedDraft({ ops: [{ kind: "del", a: 2, b: 3 }], trim: { a: 1, b: -1 } })
+    await open(placedTake())
+    expect(await saved()).toMatchObject({ trimStartMs: 1000, targetOffsetMs: 10_000, recordingsOffsetMs: 500 })
   })
 })

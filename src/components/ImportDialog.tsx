@@ -3204,18 +3204,43 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       onWhole={() => finishChoice("whole")} onTranscribe={() => finishChoice("transcribe")}
       onCancel={() => finishChoice(null)} />
   }
+  // A recording or film given to Re-import can't replace the file: say so, and
+  // offer it as a new file. AQU-2461 (review, Nov 9): drawn by both ways in.
+  // Only Upload files drew it, so the same pick through Google Drive said and
+  // did nothing at all.
+  const reimportMediaNotice = mediaOnReimport && reimportTargetProp && !importing ? (
+    <div className="mt-3 flex max-w-sm flex-col items-center gap-2 text-center" data-testid="reimport-media-notice">
+      <p className="text-sm">
+        {t("importExport.reimport.mediaCannotReplace", { fileName: mediaOnReimport.name, name: reimportTargetProp.name })}
+      </p>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => {
+          setImportAsNew(mediaOnReimport)
+          setMediaOnReimport(null)
+          setImportedAsNew(true)
+        }}
+      >
+        {t("importExport.reimport.importMediaAsNew")}
+      </Button>
+    </div>
+  ) : null
   if (variant === "gdrive" && !importing) {
     return (
-      <div>
-        <GoogleDrivePanel
-          onFiles={async (files, origins) => {
-            // Cleared in doCommit's finally — the preview flow commits later
-            // from a closure, so clearing here would race the actual upload.
-            originsRef.current = origins
-            await handleFiles(files)
-          }}
-        />
-        {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+      <div className="flex flex-col items-center">
+        <div className="w-full">
+          <GoogleDrivePanel
+            onFiles={async (files, origins) => {
+              // Cleared in doCommit's finally — the preview flow commits later
+              // from a closure, so clearing here would race the actual upload.
+              originsRef.current = origins
+              await handleFiles(files)
+            }}
+          />
+          {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+        </div>
+        {reimportMediaNotice}
       </div>
     )
   }
@@ -3305,24 +3330,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
         </>
       )}
       {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
-      {mediaOnReimport && reimportTargetProp && !importing && (
-        <div className="mt-3 flex max-w-sm flex-col items-center gap-2 text-center" data-testid="reimport-media-notice">
-          <p className="text-sm">
-            {t("importExport.reimport.mediaCannotReplace", { fileName: mediaOnReimport.name, name: reimportTargetProp.name })}
-          </p>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setImportAsNew(mediaOnReimport)
-              setMediaOnReimport(null)
-              setImportedAsNew(true)
-            }}
-          >
-            {t("importExport.reimport.importMediaAsNew")}
-          </Button>
-        </div>
-      )}
+      {reimportMediaNotice}
     </div>
   )
 }

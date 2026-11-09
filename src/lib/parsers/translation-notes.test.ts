@@ -231,4 +231,21 @@ front:intro\tabc0\t\t\t\t0\t# Introduction to Genesis
     expect(parseTnTsv(CURRENT, "my_new_notes.tsv")).toMatchObject({ notes: [], skippedCount: 3 })
     expect(parseTnTsv(CURRENT)).toMatchObject({ notes: [], skippedCount: 3 })
   })
+
+  // AQU-2487 (review, Nov 9): the book is read only where unfoldingWord puts
+  // it (right after "tn", or as "NN-BOOK" at the start). "tn_GEN_rev.tsv" was
+  // filed under Revelation and "notes_job.tsv" under Job, with nothing said.
+  it("reads the book right after tn, whatever follows it", () => {
+    for (const name of ["tn_GEN_en.tsv", "tn_GEN_v86.tsv", "hi_tn_GEN.tsv", "en_tn_01-GEN.tsv", "tn_GEN (1).tsv", "tn_GEN - Copy.tsv", "TN_gen.TSV"]) {
+      expect(parseTnTsv(CURRENT, name).notes[1]?.canonicalRef, name).toBe("GEN 1:1")
+    }
+    expect(parseTnTsv(CURRENT, "tn_1JN.tsv").notes[1].canonicalRef).toBe("1JN 1:1")
+    expect(parseTnTsv(CURRENT, "tn_OBS.tsv").notes[1].canonicalRef).toBe("OBS 1:1")
+  })
+
+  it("does not guess when the name holds two books, or the book is somewhere else", () => {
+    for (const name of ["tn_GEN_rev.tsv", "rev_tn_GEN.tsv", "titus-notes-rev.tsv", "notes_job.tsv", "GEN_tn.tsv", "57-TIT_act.tsv"]) {
+      expect(parseTnTsv(CURRENT, name), name).toMatchObject({ notes: [], skippedCount: 3 })
+    }
+  })
 })

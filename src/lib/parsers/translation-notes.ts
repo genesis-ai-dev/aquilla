@@ -34,7 +34,6 @@
 
 import { v7 as uuidv7 } from "uuid"
 import type { TranslatableString } from "./types"
-import { bookCodeFromTsv } from "../dcs/routes/tsv-common"
 import { BOOK_CODES_BY_NUMBER } from "../paratext-bridge/book-codes"
 
 export interface TranslationNote {
@@ -79,13 +78,35 @@ const TN_BOOKS: ReadonlySet<string> = new Set([...BOOK_CODES_BY_NUMBER.slice(0, 
 
 /**
  * AQU-2487 (import sweep, Nov 2): the book a notes file is for, from its name
- * (`tn_GEN.tsv`, `en_tn_57-TIT.tsv`), read the way the Door43 route reads it.
- * Null when the name holds no book, so "my_new_notes.tsv" is not book "NEW".
+ * (`tn_GEN.tsv`, `en_tn_57-TIT.tsv`). Null when the name holds no book, so
+ * "my_new_notes.tsv" is not book "NEW".
+ *
+ * AQU-2487 (review, Nov 9): read only where unfoldingWord puts the book: the
+ * word right after "tn" (`tn_GEN.tsv`, `tn_GEN_en.tsv`, `en_tn_57-TIT.tsv`),
+ * or "NN-BOOK" at the start (`57-tit.tsv`). The Door43 reader's "last word
+ * that looks like a book" filed `tn_GEN_rev.tsv` under Revelation and
+ * `notes_job.tsv` under Job. A name that holds a second, different book, or
+ * holds its book anywhere else, is not guessed at: null, and the rows are
+ * refused as having no book.
  */
 function bookFromTnFileName(fileName: string | undefined): string | null {
   if (!fileName) return null
-  const book = bookCodeFromTsv(fileName, "")
-  return TN_BOOKS.has(book) ? book : null
+  const base = (fileName.split(/[\\/]/).pop() ?? fileName).replace(/\.tsv$/i, "")
+  const words = base.split(/[^A-Za-z0-9]+/).filter(Boolean)
+  const asBook = (word: string | undefined): string | null => {
+    const code = word?.toUpperCase()
+    return code && TN_BOOKS.has(code) ? code : null
+  }
+  const isNumber = (word: string | undefined): boolean => word != null && /^\d+$/.test(word)
+  const tn = words.findIndex((w) => w.toLowerCase() === "tn")
+  // Without "tn", only the numbered form at the very start.
+  if (tn === -1 && !isNumber(words[0])) return null
+  let at = tn + 1
+  if (isNumber(words[at])) at++
+  const book = asBook(words[at])
+  if (!book) return null
+  const other = words.some((w, i) => i !== at && asBook(w) != null && asBook(w) !== book)
+  return other ? null : book
 }
 
 export function parseTnTsv(tsvText: string, fileName?: string): TnParseResult {

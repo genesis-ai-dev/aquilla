@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
-import { OptionalMark } from "@/components/ui/field"
 import { importSdbh, SdbhImportCancelledError, type SdbhImportProgress } from "@/lib/import-sdbh"
 import { SDBH_MAX_REFERENCES, type SdbhNotImportedField } from "@/lib/parsers/sdbh"
 import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
@@ -124,7 +123,9 @@ export function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPan
           />
         </Button>
         <Button variant="outline" nativeButton={false} render={<label />}>
-          {localizedFile ? localizedFile.name : <>{t("importExport.sdbh.chooseLocalized")} <OptionalMark /></>}
+          {/* AQU-2487 (review, Nov 9): the label already ends in "(optional)"; an
+              OptionalMark after it said it twice. */}
+          {localizedFile ? localizedFile.name : t("importExport.sdbh.chooseLocalized")}
           <input
             type="file"
             className="hidden"
@@ -146,7 +147,7 @@ export function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPan
               max: formatNumber(SDBH_MAX_REFERENCES, locale),
             })}
           </p>
-          <ul className="list-disc pl-4">
+          <ul className="list-disc ps-4">
             {notImported.slice(0, 5).map((f) => (
               <li key={f.conId}>
                 {t("importExport.sdbh.notImported.item", { lemma: f.lemma, count: formatNumber(f.count, locale) })}

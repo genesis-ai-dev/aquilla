@@ -380,9 +380,13 @@ closed on a pending migration, and nothing publishes until it passes.
 The Tauri shell (`src-tauri/`) updates on two channels
 (`docs/superpowers/specs/2026-11-05-desktop-hot-bundle.md`):
 
-- **Web bundle — hourly, automatic.** `deploy:aquilla` ends with
-  `tsx scripts/desktop-bundle-publish.ts production`, after `tag-release.sh`, so
-  the calver tag is the bundle version. It tars `dist/`, signs a manifest
+- **Web bundle — hourly, automatic.** `deploy:aquilla` opens with
+  `tsx scripts/desktop-bundle-publish.ts production --preflight`, which parses the
+  signing key (and `tauri.conf.json`'s shell version) before the SPA build so a
+  secret that is set but malformed stops the chain before anything reaches
+  production, and ends with `tsx scripts/desktop-bundle-publish.ts production`,
+  after `tag-release.sh`, so the calver tag is the bundle version. The publish
+  tars `dist/`, signs a manifest
   (ed25519 over the spec's canonical string) and uploads
   `production/<calver>/bundle.tar.gz` and `production/latest.json` to the R2
   bucket `aquilla-desktop-bundles`, public at `https://desktop-bundles.aquilla.app`
@@ -400,7 +404,7 @@ Secrets:
 
 | Secret | Used by |
 | --- | --- |
-| `DESKTOP_BUNDLE_SIGNING_KEY` | `release-deploy.yml` → `desktop-bundle-publish.ts`. PKCS#8 PEM ed25519 private key from `pnpm desktop:bundle:keygen`. Unset: the publish prints a `::warning::` and the web release still succeeds. |
+| `DESKTOP_BUNDLE_SIGNING_KEY` | `release-deploy.yml` → `desktop-bundle-publish.ts`. PKCS#8 PEM ed25519 private key from `pnpm desktop:bundle:keygen`, pasted whole with its line breaks. Unset: the publish prints a `::warning::` and the web release still succeeds. Set but not that PEM (one line, literal `\n`, the hex pubkey, …): the `--preflight` at the head of `deploy:aquilla` fails with what the value looks like, before any deploy. |
 | `AQUILLA_BUNDLE_PUBKEY` | `tauri-release.yml`; the matching raw 32-byte public key (hex), compiled into the shell via `option_env!`. The workflow fails if it is empty. |
 | `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Tauri updater signature for the shell (`npx tauri signer generate`; public half in `tauri.conf.json` `plugins.updater.pubkey`). |
 | `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`, `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY` | macOS code signing + notarization. |

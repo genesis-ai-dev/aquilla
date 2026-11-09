@@ -19,6 +19,7 @@ import { chipRadiusPx } from "@/lib/timeline/scale"
 import { RowMetricsContext } from "./useRowMetrics"
 import { chipHeightPx, chipPadPx } from "@/lib/timeline/row-metrics"
 import type { CellData } from "@/hooks/useCells"
+import { missingTakeKey } from "@/lib/audio/track-audio"
 
 const SOURCE_ID = "audio-f1-1690000000-shared.mp3"
 
@@ -64,6 +65,9 @@ async function expectTakeDetails(key: string, text: RegExp) {
   expect(details.textContent).toMatch(text)
   return details
 }
+
+/** AQU-2495: the missing mark is asked by take — `item()`'s take of c1. */
+const C1_TAKE_MISSING = new Set([missingTakeKey("c1", "audio-c1-1700000000-take.webm")])
 
 const base = {
   // AQU-490: required on the lane so no call site can silently fall back to a
@@ -1083,7 +1087,7 @@ describe("TargetAudioLane — saving indicator (SUB-48)", () => {
 describe("TargetAudioLane — missing badge + loading spinner (2026-08-05)", () => {
   it("a definitively missing dub shows the red badge and says so on hover", async () => {
     renderWithTooltips(
-      <TargetAudioLane {...base} items={[item({}, 4000)]} missingCellIds={new Set(["c1"])} />,
+      <TargetAudioLane {...base} items={[item({}, 4000)]} missingTakeKeys={C1_TAKE_MISSING} />,
     )
     const chip = screen.getByTestId("tl-target-c1")
     expect(chip).toHaveAttribute("data-missing", "true")
@@ -1095,6 +1099,31 @@ describe("TargetAudioLane — missing badge + loading spinner (2026-08-05)", () 
     render(<TargetAudioLane {...base} items={[item({}, 4000)]} loadingCellId="c1" />)
     expect(screen.getByTestId("tl-target-c1")).toHaveAttribute("data-loading", "true")
     expect(screen.getByTestId("tl-target-c1-loading")).toBeInTheDocument()
+  })
+
+  // AQU-2495 (review, Nov 9): a line's main take whose file is gone marked the
+  // line's healthy take on a voice track too, and every piece of a cut take.
+  it("marks only the take whose audio is missing: not the line's take on another track, nor another take's pieces", () => {
+    const voiceId = "audio-c1-1700000500-voice.webm"
+    const main = item({}, 4000)
+    const cell = {
+      ...main.cell,
+      selectedBySlot: { "trk-1": voiceId },
+      attachments: {
+        ...main.cell.attachments,
+        [voiceId]: { type: "audio", url: "frontier-audio://voice", slot: "trk-1", durationMs: 4000 },
+      },
+    } as unknown as CellData
+    // The voice track's lane, while the main track's take is the one marked.
+    const { unmount } = render(
+      <TargetAudioLane {...base} items={[{ cell, kind: "take", audioId: voiceId }]} missingTakeKeys={C1_TAKE_MISSING} />,
+    )
+    expect(screen.getByTestId("tl-target-c1")).not.toHaveAttribute("data-missing", "true")
+    expect(screen.queryByTestId("tl-target-c1-missing")).toBeNull()
+    unmount()
+    // …and the main track's lane shows it.
+    render(<TargetAudioLane {...base} items={[{ cell, kind: "take", audioId: main.audioId }]} missingTakeKeys={C1_TAKE_MISSING} />)
+    expect(screen.getByTestId("tl-target-c1")).toHaveAttribute("data-missing", "true")
   })
 
   it("the corner is a PRIORITY slot: missing beats loading beats saving — one glyph max", () => {
@@ -1112,7 +1141,7 @@ describe("TargetAudioLane — missing badge + loading spinner (2026-08-05)", () 
         {...base}
         items={[{ ...it_, cell: pendingCell }]}
         loadingCellId="c1"
-        missingCellIds={new Set(["c1"])}
+        missingTakeKeys={C1_TAKE_MISSING}
       />,
     )
     expect(screen.getByTestId("tl-target-c1-missing")).toBeInTheDocument()
@@ -1127,7 +1156,7 @@ describe("TargetAudioLane — missing badge + loading spinner (2026-08-05)", () 
       <TargetAudioLane
         {...base}
         items={[item({}, 1000)]}
-        missingCellIds={new Set(["c1"])}
+        missingTakeKeys={C1_TAKE_MISSING}
         onOpenRecording={() => {}}
       />,
     )
@@ -1502,7 +1531,7 @@ describe("TargetAudioLane — the sparkle on generated chips", () => {
   // where appearing never moves the name.
   it("keeps leading the bar beside a corner state glyph, which sits at the right end", () => {
     render(
-      <TargetAudioLane {...base} items={[generated()]} missingCellIds={new Set(["c1"])} />,
+      <TargetAudioLane {...base} items={[generated()]} missingTakeKeys={C1_TAKE_MISSING} />,
     )
     const bar = screen.getByTestId("tl-target-c1-bar")
     const missing = screen.getByTestId("tl-target-c1-missing")
@@ -1570,7 +1599,7 @@ describe("TargetAudioLane — the play button (stage 5)", () => {
   // The top-left corner is a single priority slot, and three of its four states
   // mean the clip cannot play anyway.
   it("yields the corner to a state glyph", () => {
-    render(<TargetAudioLane {...wired} items={[item({}, 4000)]} missingCellIds={new Set(["c1"])} />)
+    render(<TargetAudioLane {...wired} items={[item({}, 4000)]} missingTakeKeys={C1_TAKE_MISSING} />)
     expect(screen.getByTestId("tl-target-c1-missing")).toBeInTheDocument()
     expect(screen.queryByTestId("tl-target-c1-play")).toBeNull()
   })

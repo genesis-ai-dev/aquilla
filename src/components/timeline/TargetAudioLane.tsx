@@ -53,7 +53,7 @@ import {
   type TargetChipGeom,
 } from "@/lib/timeline/lane-timing"
 import { clampMoveStart, movedTakePlace, pieceLeadInTakeSec, type TakePlace } from "@/lib/timeline/take-place"
-import { sourceClipAudioForCell } from "@/lib/audio/track-audio"
+import { missingTakeKey, sourceClipAudioForCell } from "@/lib/audio/track-audio"
 import { canCutAt } from "@/lib/audio/cut-take"
 import { pieceTrimLimitsMs } from "@/lib/sync/cell-audio-read-types"
 import { pieceNameIn, takeBaseLabel } from "@/lib/audio/take-groups"
@@ -124,9 +124,11 @@ export interface TargetAudioLaneProps {
   /** The verse the transport is WAITING ON (queue state "loading") — its chip
    *  shows a small spinner while the readiness gate parks. */
   loadingCellId?: string | null
-  /** Cells whose dub audio definitively 404'd — their chips carry a missing
-   *  badge (decision 2026-08-05). */
-  missingCellIds?: ReadonlySet<string>
+  /** The takes whose dub audio definitively 404'd — their chips carry a
+   *  missing badge (decision 2026-08-05). AQU-2495 (review, Nov 9): each a
+   *  `missingTakeKey(cellId, audioId)`. It was the line's id, which marked
+   *  every take of the line, on every track. */
+  missingTakeKeys?: ReadonlySet<string>
   editable: boolean
   /**
    * DOES THE THING DRIVING PLAYBACK HONOUR A DUB'S TRIMS?
@@ -1955,7 +1957,7 @@ export function TargetAudioLane({
   selectedId,
   selectedTakeCellId = null,
   loadingCellId,
-  missingCellIds,
+  missingTakeKeys,
   editable,
   masterHonorsTrims,
   snapEnabled,
@@ -2284,7 +2286,7 @@ export function TargetAudioLane({
               selectedTakeCellId === chip.item.cell.id ? "take" : selectedId === chip.item.cell.id ? "line" : false
             }
             loading={loadingCellId === chip.item.cell.id}
-            missing={missingCellIds?.has(chip.item.cell.id) ?? false}
+            missing={missingTakeKeys?.has(missingTakeKey(chip.item.cell.id, chip.item.audioId)) ?? false}
             editable={editable}
             snap={{ enabled: Boolean(snapEnabled), candidates: candidatesFor(chip.item.audioId, chip.section) }}
             onSelect={onSelect}

@@ -7,7 +7,7 @@
 import { useMemo, useSyncExternalStore } from "react"
 import type { CellData } from "@/hooks/useCells"
 import { fetchCellAudio, getCellAudioStreamUrl, parseFrontierAudioUrl, audioIdSeededWith, probeCellAudioPresent } from "./upload"
-import { activeTargetForCell, resolveTargetAudio, resolveTargetPieces, sourceClipAudioForCell, type TargetAudioRef } from "./track-audio"
+import { activeTargetForCell, missingTakeKey, resolveTargetAudio, resolveTargetPieces, sourceClipAudioForCell, type TargetAudioRef } from "./track-audio"
 import { isDefaultTrackSlot, RECORDING_SLOT, slotAudible } from "@/lib/timeline/track-slots"
 import { selectedPieceIds } from "@/lib/sync/cell-audio-read-types"
 import { effectiveAttachmentDurationMs, targetChipGeom, targetDueSec } from "@/lib/timeline/lane-timing"
@@ -169,13 +169,17 @@ export function __setQueuePlaybackForTests(next: {
 // ── Missing-clip registry (decision 2026-08-05) ─────────────────────────────
 // Lines whose dub audio DEFINITIVELY 404'd (deleted, or an upload that never
 // completed) — the timeline paints a per-chip badge from this, so the user is
-// told even when the verse keeps playing on its other side. cellId → the dub
-// attachment audioId that died (the identity the clearing sweep checks).
+// told even when the verse keeps playing on its other side. One entry per
+// dead dub attachment (the identity the clearing sweep checks).
 // Never marked from a probe "unknown" (a flaky network must read as today's
 // transient behavior) and never for a pendingSync clip (an outbox take
 // legitimately 404s server-side — that is "saving", not "missing").
 
-const missingClips = new Map<string, string>()
+// AQU-2495 (review, Nov 9): kept and asked BY TAKE (`missingTakeKey`), not by
+// line. A line can hold a take on every track, and a cut take's pieces; one
+// entry per line marked them all when one file was gone, and could hold only
+// one of two dead takes.
+const missingClips = new Map<string, { cellId: string; audioId: string }>()
 const EMPTY_MISSING: ReadonlySet<string> = new Set()
 /** Cached snapshot — useSyncExternalStore needs a STABLE reference between
  *  changes or every consumer re-renders on every check. */
@@ -188,24 +192,27 @@ function notifyMissing(): void {
 }
 
 function markClipMissing(cellId: string, audioId: string): void {
-  if (missingClips.get(cellId) === audioId) return
+  if (missingClips.has(missingTakeKey(cellId, audioId))) return
   const cell = activeContext?.cells.find((c) => c.id === cellId)
   if (cell?.attachments?.[audioId]?.pendingSync) return // saving, not missing
-  missingClips.set(cellId, audioId)
+  // The pieces of a cut take are one file: gone for one, gone for all.
+  const pieces = selectedPieceIds(cell?.attachments, audioId)
+  for (const id of pieces.length > 0 ? pieces : [audioId]) missingClips.set(missingTakeKey(cellId, id), { cellId, audioId: id })
   notifyMissing()
 }
 
 /** Re-derive the registry against a fresh cell list: an entry survives only
- *  while its cell still exists and still points at the SAME dead clip. */
+ *  while its cell still exists and its track still plays the SAME dead clip. */
 function sweepMissingClips(cells: readonly CellData[]): void {
   if (missingClips.size === 0) return
   const byId = new Map(cells.map((c) => [c.id, c]))
   let changed = false
-  for (const [cellId, audioId] of missingClips) {
+  for (const [key, { cellId, audioId }] of missingClips) {
     const cell = byId.get(cellId)
-    const target = cell ? resolveTargetAudio(cell) : null
-    if (!cell || target?.audioId !== audioId || cell.attachments?.[audioId]?.pendingSync) {
-      missingClips.delete(cellId)
+    const att = cell?.attachments?.[audioId]
+    const slot = att?.slot != null && !isDefaultTrackSlot(att.slot) ? att.slot : undefined
+    if (!cell || !att || att.pendingSync || !resolveTargetPieces(cell, slot).some((p) => p.audioId === audioId)) {
+      missingClips.delete(key)
       changed = true
     }
   }
@@ -217,13 +224,19 @@ function subscribeMissing(listener: () => void): () => void {
   return () => { missingListeners.delete(listener) }
 }
 
-/** Cells whose dub audio is definitively missing (server 404). */
-export function useMissingClipCells(): ReadonlySet<string> {
+/** The takes whose dub audio is definitively missing (server 404), each as
+ *  `missingTakeKey(cellId, audioId)`. */
+export function useMissingClipTakes(): ReadonlySet<string> {
   return useSyncExternalStore(subscribeMissing, () => missingSnapshot, () => EMPTY_MISSING)
 }
 
-export function getMissingClipCells(): ReadonlySet<string> {
+export function getMissingClipTakes(): ReadonlySet<string> {
   return missingSnapshot
+}
+
+/** The lines holding such a take. */
+export function getMissingClipCells(): ReadonlySet<string> {
+  return new Set([...missingClips.values()].map((m) => m.cellId))
 }
 
 /** @internal — test isolation. */
@@ -1654,11 +1667,15 @@ function progSurfaceMissing(cellId: string): void {
 function classifyTargetFailure(
   cellId: string,
   cause: unknown | undefined,
+  audioId?: string,
 ): "missing" | "other" | Promise<"missing" | "other"> {
   if (cause !== undefined) return isMissingAudioError(cause) ? "missing" : "other"
   const ctx = activeContext
   const cell = ctx?.cells.find((c) => c.id === cellId)
-  const target = cell ? resolveTargetAudio(cell) : null
+  // AQU-2495 (review, Nov 9): the take that failed is the one asked after — a
+  // voice track's take was answered with the main track's.
+  const failed = audioId ? cell?.attachments?.[audioId] : undefined
+  const target = failed && !failed.isDeleted ? { audioId: audioId!, url: failed.url } : cell ? resolveTargetAudio(cell) : null
   if (!ctx || !cell || !target) return "other"
   const frontier = parseFrontierAudioUrl(target.url)
   if (!frontier) return "other"
@@ -1798,7 +1815,17 @@ function progOnTargetFinished(entry: OverlayEntry, reason: "ended" | "error", ca
   // AQU-2252: a layer ending ends nothing but itself. One that failed is not
   // fired again until the next jump, or it would be re-fetched every beat.
   if (entry.layer) {
-    if (reason === "error") progLayerFailed.add(overlayPieceKey(entry.cellId, entry.slot, entry.audioId))
+    if (reason === "error") {
+      progLayerFailed.add(overlayPieceKey(entry.cellId, entry.slot, entry.audioId))
+      // AQU-2495 (review, Nov 9): …and one whose file is gone says so on its
+      // own clip, as a line's main take does.
+      const verdict = classifyTargetFailure(entry.cellId, cause, entry.audioId)
+      const applyMark = (v: "missing" | "other") => {
+        if (v === "missing") markClipMissing(entry.cellId, entry.audioId)
+      }
+      if (typeof verdict === "string") applyMark(verdict)
+      else void verdict.then(applyMark)
+    }
     return
   }
   const gate = timingMode === "audioFirst" ? progGate : null
@@ -1812,7 +1839,7 @@ function progOnTargetFinished(entry: OverlayEntry, reason: "ended" | "error", ca
   // overlay 404s badge their chip too — with zero transport change there.
   // The badge may appear a beat after the strike.
   if (reason === "error" && !fatalExplicit) {
-    const verdict = classifyTargetFailure(entry.cellId, cause)
+    const verdict = classifyTargetFailure(entry.cellId, cause, entry.audioId)
     const applyMark = (v: "missing" | "other") => {
       if (v === "missing") markClipMissing(entry.cellId, entry.audioId)
     }
@@ -1830,7 +1857,7 @@ function progOnTargetFinished(entry: OverlayEntry, reason: "ended" | "error", ca
       // immediately; anything else → today's strike-and-advance. The
       // still-armed 6s patience timer backstops a hung probe, and the
       // gate-identity check discards a verdict that lost to a seek-away.
-      const verdict = classifyTargetFailure(entry.cellId, cause)
+      const verdict = classifyTargetFailure(entry.cellId, cause, entry.audioId)
       const settle = (v: "missing" | "other") => {
         if (progGate !== gate) return // superseded (seek-away / timeout won)
         if (v === "missing") {

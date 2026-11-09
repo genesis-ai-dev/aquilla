@@ -87,7 +87,7 @@ vi.mock("@/lib/audio/play-queue", async () => {
     // drift from the guard that keeps one file's queue out of another's timeline.
     useQueueForFile: (cellIds: ReadonlySet<string>) =>
       selectQueueForFile(mockQueueState, mockProgress, cellIds),
-    useMissingClipCells: () => mockMissingCells,
+    useMissingClipTakes: () => mockMissingCells,
     MISSING_AUDIO_MESSAGE: "This clip's audio is missing.",
     // 2026-08-11: the editor gates its clock write on this. Built over the REAL
     // sourceClipAudioForCell (side-effect-free) for the same reason as

@@ -145,7 +145,7 @@ import { RowMetricsContext, useRowMetrics, type RowMetrics } from "./useRowMetri
 // write behind lib/audio/audibility, because the video pane's header carries a
 // mute button too now and two components each merging a toggle into their OWN
 // copy of the preference clobber one another.
-import { useQueueForFile, useMissingClipCells, queueClockIsFileTime } from "@/lib/audio/play-queue"
+import { useQueueForFile, useMissingClipTakes, queueClockIsFileTime } from "@/lib/audio/play-queue"
 import { seedAudibility, toggleAudibility, trackAudible, useQueueAudibility } from "@/lib/audio/audibility"
 
 import { isInEditableContext, isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
@@ -1872,7 +1872,8 @@ export function TimelineEditor({
   // its chip ("loading" is exactly the parked-gate/cold-load state and
   // carries the cellId), and a definitively 404'd dub shows a missing badge.
   const loadingCellId = queue.kind === "loading" ? queue.cellId : null
-  const missingCellIds = useMissingClipCells()
+  // AQU-2495 (review, Nov 9): by take, so one dead file marks one clip.
+  const missingTakeKeys = useMissingClipTakes()
   // 2026-08-11: the queue's progress is only a FILE position when the master
   // element is the shared source clip. On a take it is a per-take clock that
   // restarts at 0 — play-queue says outright that "no consumer may treat [it]
@@ -4298,7 +4299,7 @@ export function TimelineEditor({
             selectedId={selectedId}
             selectedTakeCellId={takeSelCellFor(RECORDING_SLOT)}
             loadingCellId={loadingCellId}
-            missingCellIds={missingCellIds}
+            missingTakeKeys={missingTakeKeys}
             editable={editable}
             masterHonorsTrims={masterHonorsTrims}
             snapEnabled={snapOn && !audioFirst}
@@ -4386,7 +4387,7 @@ export function TimelineEditor({
             selectedId={selectedId}
             selectedTakeCellId={takeSelCellFor(slotForTrack(track.id))}
             loadingCellId={loadingCellId}
-            missingCellIds={missingCellIds}
+            missingTakeKeys={missingTakeKeys}
             editable={editable}
             masterHonorsTrims={masterHonorsTrims}
             // AQU-2252: a layer's takes snap as they do following the source.

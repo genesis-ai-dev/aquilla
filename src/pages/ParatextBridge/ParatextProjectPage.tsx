@@ -82,6 +82,9 @@ export function ParatextProjectPage() {
   const d = useParatextDiscovery()
   const project = useMemo(() => d.projects.find((p) => p.path === projectPath) ?? null, [d.projects, projectPath])
   const progress = useParatextProgress(project)
+  const reading = progress
+    ? t("paratextBridge.project.readingCount", { done: progress.books.length, total: progress.total })
+    : t("paratextBridge.project.reading")
   const [link, setLink] = useState<MirrorLink | null>(null)
   const guid = project?.guid ?? null
   const [held, setHeld] = useState(0)
@@ -174,8 +177,8 @@ export function ParatextProjectPage() {
         </div>
 
         <Card title={t("paratextBridge.project.progress")} testId="paratext-progress-card">
-          {!project.utf8 ? null : !progress ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground"><Spinner />{t("paratextBridge.project.reading")}</div>
+          {!project.utf8 ? null : !progress?.complete ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground"><Spinner />{reading}</div>
           ) : (
             <>
               <div className="mb-4 flex flex-wrap gap-3">
@@ -194,8 +197,10 @@ export function ParatextProjectPage() {
 
         <Card title={t("paratextBridge.project.books")} testId="paratext-books-card">
           {!project.utf8 ? null : !progress ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground"><Spinner />{t("paratextBridge.project.reading")}</div>
+            <div className="flex items-center gap-2 text-sm text-muted-foreground"><Spinner />{reading}</div>
           ) : (
+            <>
+            {progress.complete ? null : <div className="mb-3 flex items-center gap-2 text-sm text-muted-foreground"><Spinner />{reading}</div>}
             <div className="grid gap-4 md:grid-cols-3">
               {STATUSES.map((status) => (
                 <div key={status} data-testid={`paratext-books-${status}`}>
@@ -223,6 +228,7 @@ export function ParatextProjectPage() {
                 </div>
               ))}
             </div>
+            </>
           )}
         </Card>
 

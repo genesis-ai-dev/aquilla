@@ -85,7 +85,9 @@ describe("book status", () => {
 
   it("sums verses across books", () => {
     const b = (code: string, verses: number, written: number) => ({ code, fileName: code, verses, written, status: bookStatus(verses, written), unreadable: false })
-    expect(summarizeProgress([b("GEN", 10, 4), b("EXO", 5, 5)])).toMatchObject({ verses: 15, written: 9 })
+    expect(summarizeProgress([b("GEN", 10, 4), b("EXO", 5, 5)])).toMatchObject({ verses: 15, written: 9, complete: true })
+    // Fewer books read than the project has: still reading.
+    expect(summarizeProgress([b("GEN", 10, 4)], 3)).toMatchObject({ complete: false, total: 3 })
   })
 })
 
@@ -99,6 +101,19 @@ describe("ParatextProjectPage", () => {
     const inProgress = await screen.findByTestId("paratext-books-in-progress")
     await waitFor(() => expect(within(inProgress).getByText("2 of 1071")).toBeInTheDocument())
     expect(within(screen.getByTestId("paratext-books-complete")).queryByRole("link")).toBeNull()
+  })
+
+  it("shows the books read so far while a large project is still being counted", async () => {
+    const names = ["41MAT", "42MRK", "43LUK", "44JHN", "45ACT", "46ROM", "471CO", "482CO", "49GAL"].map((n) => `${n}TPP1.SFM`)
+    discover.mockResolvedValue({ ...FOUND, projects: [{ ...FOUND.projects[0], bookFiles: names }] })
+    // The ninth book never finishes reading, so the page stays partial.
+    readFile.mockImplementation((_p: string, f: string) => (f.startsWith("49") ? new Promise(() => {}) : Promise.resolve(MAT)))
+    renderPage()
+    const books = await screen.findByTestId("paratext-books-card")
+    await waitFor(() => expect(within(books).getByText("Reading the books: 8 of 9")).toBeInTheDocument())
+    expect(within(screen.getByTestId("paratext-books-in-progress")).getAllByRole("link")).toHaveLength(8)
+    // No totals until every book is in: they would be wrong.
+    expect(within(screen.getByTestId("paratext-progress-card")).queryByText("Verses written")).toBeNull()
   })
 
   it("shows Paratext's roles in the team card", async () => {

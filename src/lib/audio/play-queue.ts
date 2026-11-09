@@ -11,7 +11,7 @@ import { activeTargetForCell, resolveTargetAudio, resolveTargetPieces, sourceCli
 import { isDefaultTrackSlot, RECORDING_SLOT, slotAudible } from "@/lib/timeline/track-slots"
 import { selectedPieceIds } from "@/lib/sync/cell-audio-read-types"
 import { effectiveAttachmentDurationMs, targetChipGeom, targetDueSec } from "@/lib/timeline/lane-timing"
-import { playedProgramme, slotAtProgrammeSec, slotHasNothingToPlay, type Programme, type ProgrammeSlot } from "@/lib/timeline/programme"
+import { playedProgramme, slotAtProgrammeSec, slotHasNothingToPlay, type BuildProgrammeOptions, type Programme, type ProgrammeSlot } from "@/lib/timeline/programme"
 import { buildLayerSchedule, layerIndexAfter, layersDueAt, layersSoundIn, NO_LAYERS, type LayerSchedule, type ProgLayerRef } from "./play-queue-layers"
 import type { AudioTimingMode } from "@/lib/parsers/types"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
@@ -4609,9 +4609,25 @@ export function hasPlayableAudio(cell: CellData): boolean {
 }
 
 /** Whether any cell in the list has playable audio. Drives the bar's
- *  Play button enablement. */
-export function hasAnyPlayableAudio(cells: CellData[]): boolean {
-  return cells.some(hasPlayableAudio)
+ *  Play button enablement.
+ *
+ *  AQU-2495 (review, Nov 9): following the recordings, a take on an added
+ *  track is played too (AQU-2252 lays the tracks into the programme), so a
+ *  chapter recorded only on added tracks has something to play. Asked of the
+ *  programme as the queue plays it, the answer "Skip lines with nothing to
+ *  play" already uses. `as` is for a caller that renders before the queue is
+ *  told the file's timing and tracks (the play strip); absent, the queue's own. */
+export function hasAnyPlayableAudio(
+  cells: CellData[],
+  as?: { freeTiming: boolean; tracks?: Pick<BuildProgrammeOptions, "layerSlots" | "layerTrackSlots"> },
+): boolean {
+  if (cells.some(hasPlayableAudio)) return true
+  if (!(as ? as.freeTiming : timingMode === "audioFirst")) return false
+  const played = playedProgramme(cells, as?.tracks ?? {
+    layerSlots: targetSlots.filter((slot) => !isDefaultTrackSlot(slot)),
+    layerTrackSlots,
+  })
+  return played != null && played.underLayers.size > 0
 }
 
 // ── Dubs over a linked picture (AQU-646 round 5) ────────────────────────────

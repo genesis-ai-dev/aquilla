@@ -24,14 +24,7 @@ import {
   uploadVoiceReference,
   fetchVoiceReference,
 } from "@/lib/audio/voice-clone"
-
-/**
- * AQU-2487 (import sweep, Nov 2): a reference clip belongs to the project, not
- * to a file, and its routes take any of the project's sync tokens. With no
- * file open (the Voices panel on "No file selected") this stands in for the
- * file the token is minted for, as `ELEVENLABS_PROJECT_SCOPE_FILE_ID` does.
- */
-const VOICE_PROJECT_SCOPE_FILE_ID = "_voices"
+import { VOICE_PROJECT_SCOPE_FILE_ID } from "@/lib/audio/voice-project-scope"
 
 const AUDIO_EXTS = new Set(["wav", "webm", "mp3", "m4a", "ogg", "oga", "opus", "flac", "aac"])
 

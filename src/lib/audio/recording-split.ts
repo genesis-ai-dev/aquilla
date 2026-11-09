@@ -118,7 +118,12 @@ export async function transcribeLineWords(args: {
   const learned = loadTranscriptCorrections(line.projectId)
   const fix = (s: string) => (learned.length ? applyCorrections(s, learned) : s)
   return {
-    words: raw.chunks.map((c) => ({ text: fix(c.text), start: c.start, end: c.end })),
+    // AQU-2426 (review, Nov 9): what was heard rides along where a correction
+    // changed it, so the lines made from these words can keep it (`asr`).
+    words: raw.chunks.map((c) => {
+      const text = fix(c.text)
+      return { text, start: c.start, end: c.end, ...(text !== c.text ? { heard: c.text } : {}) }
+    }),
     text: fix(raw.text),
     ...(raw.model ? { model: raw.model } : {}),
   }

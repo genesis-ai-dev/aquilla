@@ -526,6 +526,22 @@ describe("runTranscribeAll reports each row (AQU-2375)", () => {
     expect(__storedTranscribeRuns()).toEqual([])
   })
 
+  // AQU-2375 (review, Nov 9)
+  it("keeps who started the run and the language it was started in", async () => {
+    const { transcribeCellOutcome } = await import("./transcribe")
+    const { __storedTranscribeRuns } = await import("./transcribe-runs")
+    let kept: { username?: string; lane?: string } | undefined
+    vi.mocked(transcribeCellOutcome).mockImplementation(async () => {
+      kept = __storedTranscribeRuns()[0]
+      return { kind: "done", words: 1 }
+    })
+    await runTranscribeAll({
+      cells: [take("c1")], projectId: "p1", session: { username: "amina", jwt: "j" } as never, targetLang: "fr",
+      keep: { fileId: "f1", fileName: "Session 4.mp3", kind: "all" },
+    })
+    expect(kept).toMatchObject({ username: "amina", lane: "fr" })
+  })
+
   it("carries a stopped run on: counts what landed before, and reports the whole run", async () => {
     const { transcribeCellOutcome } = await import("./transcribe")
     vi.mocked(transcribeCellOutcome).mockResolvedValue({ kind: "done", words: 2 })
@@ -547,6 +563,38 @@ describe("runTranscribeAll reports each row (AQU-2375)", () => {
     expect(report.failed.map((f) => [f.cellId, f.cell?.id])).toEqual([["c2", "c2"]])
     expect(handle.row).toHaveBeenCalledTimes(2)
     expect(handle.end).toHaveBeenCalledTimes(1)
+  })
+
+  // AQU-2375 (review, Nov 9): a reload cuts the request in flight off, and
+  // script lives long enough to see it fail. That is the page going, not the
+  // rows failing: the run stays kept, with no failures written, for the next
+  // page to carry on.
+  it("a reload mid-run leaves the run kept, with nothing marked failed", async () => {
+    const { transcribeCellOutcome } = await import("./transcribe")
+    const { __storedTranscribeRuns, __setPageLeavingForTests, dropStoredTranscribeRun } = await import("./transcribe-runs")
+    const sent: string[] = []
+    vi.mocked(transcribeCellOutcome).mockImplementation(async ({ cell }) => {
+      sent.push(cell.id)
+      if (cell.id === "c1") return { kind: "done", words: 3 }
+      __setPageLeavingForTests(true)
+      return { kind: "failed", message: "Failed to fetch" }
+    })
+    try {
+      const report = await runTranscribeAll({
+        cells: [take("c1"), take("c2"), take("c3")], projectId: "p1", session: null,
+        keep: { fileId: "f1", fileName: "Session 4.mp3", kind: "all" },
+      })
+      expect(report.interrupted).toBe(true)
+      expect(report.failed).toEqual([])
+      // The row after the one cut off is never sent.
+      expect(sent).toEqual(["c1", "c2"])
+      const kept = __storedTranscribeRuns()
+      expect(kept.map((r) => r.cellIds)).toEqual([["c1", "c2", "c3"]])
+      expect(kept[0]!.failed).toEqual([])
+    } finally {
+      __setPageLeavingForTests(false)
+      for (const run of __storedTranscribeRuns()) dropStoredTranscribeRun(run.id)
+    }
   })
 
   it("a row stopped by Cancel is not counted as failed", async () => {

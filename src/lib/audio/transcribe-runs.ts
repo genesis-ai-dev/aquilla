@@ -23,7 +23,10 @@
 // already paid for are never lost to a reload or a failed window. A line run
 // that ended with some windows still to do is PARKED: nobody carries it on by
 // itself, and the next words run on the same stretch of the same line takes
-// it over and sends only the windows still missing.
+// it over and sends only the windows still missing. A run whose words were
+// split by stays parked too (AQU-2426 review, Nov 9): Undo gives the line its
+// whole stretch back, and splitting it by its words again then costs nothing.
+// Like any run it is forgotten after a week.
 //
 // Per browser profile, in localStorage, like the model consent it sits beside:
 // a run is one person's, on one device, and a page reload is all it has to
@@ -50,6 +53,8 @@ export interface StoredWord {
   text: string
   start: number
   end: number
+  /** As the transcription heard it, when a learned correction changed it. */
+  heard?: string
 }
 
 /**
@@ -66,8 +71,8 @@ export interface StoredLineWords {
   hi: number
   /** Each window's stretch, ms on the recording's clock, in order. */
   windows: Array<{ lo: number; hi: number }>
-  /** Each finished window's words, by its key. */
-  words: Record<string, { words: StoredWord[]; text: string }>
+  /** Each finished window's words, by its key (and the model that heard them). */
+  words: Record<string, { words: StoredWord[]; text: string; model?: string }>
   languageTag?: string
   /** "import": split once every window has words (Import and transcribe…).
    *  "dialog": the person previews the lines in Split into lines…. */
@@ -104,6 +109,17 @@ export interface StoredTranscribeRun {
   beatAt: number
   /** That page's id. */
   tab: string
+  /**
+   * AQU-2375 (review, Nov 9): who started it (their sign-in name), and the
+   * language lane it was started in ("" = the default lane). A run is carried
+   * on only by that person, and a run over takes only with that language
+   * open: carried on by whoever opened the file next, it ran under their
+   * account and limit, and in another language it transcribed that
+   * language's takes as this one's. Absent on a run kept before this, or
+   * started signed out: carried on as before.
+   */
+  username?: string
+  lane?: string
   /** AQU-2426: a line's words (kind "lineWords"). */
   line?: StoredLineWords
   /** AQU-2426: a line run that ended with windows still to do, kept for the
@@ -116,7 +132,7 @@ export interface TranscribeRunHandle {
   /** Record how one row ended. A line run's window keeps its words. */
   row(
     cellId: string,
-    outcome: { kind: "done"; lineWords?: { words: StoredWord[]; text: string } } | { kind: "failed"; message: string } | { kind: "skipped" },
+    outcome: { kind: "done"; lineWords?: { words: StoredWord[]; text: string; model?: string } } | { kind: "failed"; message: string } | { kind: "skipped" },
   ): void
   /** The run finished, failed or was cancelled: forget it. */
   end(): void
@@ -139,12 +155,24 @@ function readAll(): StoredTranscribeRun[] {
 }
 
 function writeAll(runs: StoredTranscribeRun[]): void {
-  try {
-    if (runs.length === 0) globalThis.localStorage?.removeItem(STORAGE_KEY)
-    else globalThis.localStorage?.setItem(STORAGE_KEY, JSON.stringify(runs))
-  } catch {
-    // Private mode or a full quota: the run still runs, it just won't outlive
-    // the page — exactly as before this record existed.
+  let keep = runs
+  for (;;) {
+    try {
+      if (keep.length === 0) globalThis.localStorage?.removeItem(STORAGE_KEY)
+      else globalThis.localStorage?.setItem(STORAGE_KEY, JSON.stringify(keep))
+      return
+    } catch {
+      // AQU-2426 (review, Nov 9): a full quota. Parked words are the bulk of
+      // what is kept (a long recording's are a few hundred KB, and they now
+      // outlive the split that used them, for Undo), and they are a saving,
+      // not a run in progress: the oldest go first, so a run that is going
+      // can still be kept.
+      const oldest = keep.filter((r) => r.parked).sort((a, b) => a.startedAt - b.startedAt)[0]
+      // Private mode, or nothing left to give up: the run still runs, it just
+      // won't outlive the page — exactly as before this record existed.
+      if (!oldest) return
+      keep = keep.filter((r) => r !== oldest)
+    }
   }
 }
 
@@ -274,6 +302,18 @@ function makeHandle(id: string, lock: { release: () => void }): TranscribeRunHan
   const beat = setInterval(() => {
     if (!ended) update(id, (run) => ({ ...run, beatAt: now(), tab: tabId }))
   }, HEARTBEAT_MS)
+  // AQU-2375 (review, Nov 9): the page is going, and with it the throttle's
+  // timer. What landed in the last second is written now, or the run carried
+  // on counts rows as never reached that were transcribed.
+  const onPageHide = () => {
+    if (ended) return
+    if (flushTimer !== null) clearTimeout(flushTimer)
+    flush()
+  }
+  if (typeof window !== "undefined") window.addEventListener("pagehide", onPageHide)
+  const unhook = () => {
+    if (typeof window !== "undefined") window.removeEventListener("pagehide", onPageHide)
+  }
   return {
     id,
     row(cellId, outcome) {
@@ -302,6 +342,7 @@ function makeHandle(id: string, lock: { release: () => void }): TranscribeRunHan
       if (ended) return
       ended = true
       clearInterval(beat)
+      unhook()
       if (flushTimer !== null) clearTimeout(flushTimer)
       pending = []
       dropStoredTranscribeRun(id)
@@ -311,6 +352,7 @@ function makeHandle(id: string, lock: { release: () => void }): TranscribeRunHan
       if (ended) return
       ended = true
       clearInterval(beat)
+      unhook()
       if (flushTimer !== null) clearTimeout(flushTimer)
       // What landed is written now, not on the throttle: the page may go next.
       const apply = pending
@@ -342,6 +384,23 @@ export function startStoredTranscribeRun(
   }
   writeAll([...readAll().filter((r) => r.id !== run.id), run])
   return makeHandle(run.id, holdLock(run.id, false))
+}
+
+/**
+ * AQU-2375 (review, Nov 9): may the page of this person, with this language
+ * open, carry the run on? "person": someone else started it. "lane": it was
+ * started in another language. A field not given is not checked. A line's
+ * words run and the run after an import are about the source recording, so
+ * their language never matters.
+ */
+export function transcribeRunFits(
+  run: Pick<StoredTranscribeRun, "kind" | "username" | "lane">,
+  here: { username?: string | null; lane?: string },
+): "ok" | "person" | "lane" {
+  if (run.username !== undefined && here.username !== undefined && run.username !== here.username) return "person"
+  const overTakes = run.kind === "all" || run.kind === "sections"
+  if (overTakes && run.lane !== undefined && here.lane !== undefined && run.lane !== here.lane) return "lane"
+  return "ok"
 }
 
 /**

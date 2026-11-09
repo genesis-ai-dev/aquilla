@@ -7,7 +7,13 @@
 //   2. they clear the hosted transcription floor (Contributor,
 //      auth-worker/src/routes/transcription.ts TRANSCRIBE_MIN_ROLE) — with
 //      today's defaults (1) is the stricter;
-//   3. the organization can pay: its AI credits are not used up for today or
+//   3. they may split the line the words are for. AQU-2426 (review, Nov 9):
+//      transcribing a recording ends in a split, and a split retimes the line,
+//      which a project with locked timing keeps for Maintainers
+//      (sync-worker timing-authority.ts). Without this a Project lead's run was
+//      paid for and then half-applied: the new lines landed, the retime of the
+//      first one was refused;
+//   4. the organization can pay: its AI credits are not used up for today or
 //      this week (an enforced cap). On this device (Whisper in the browser)
 //      nothing is paid, so the credits never stop it.
 // Otherwise Transcribe… is shown greyed, with a click (i) saying why. Split at
@@ -22,6 +28,7 @@ export const TRANSCRIBE_MIN_ROLE = ROLE.CONTRIBUTOR
 
 export type TranscribeBlock =
   | { kind: "import"; floor: number }
+  | { kind: "timingLocked"; floor: number }
   | { kind: "creditsToday" }
   | { kind: "creditsWeek" }
 
@@ -31,6 +38,8 @@ export function transcribeBlock(args: {
   level: number | null | undefined
   /** The org's import floor (`importMinRole`), when it has one. */
   importMinRole?: number | null
+  /** Timing is locked for this project (absent = not locked). */
+  timingLocked?: boolean
   /** Transcribing on this device: nothing is paid. */
   onDevice: boolean
   /** The org's credits, when this person may read them; null = not known. */
@@ -39,6 +48,9 @@ export function transcribeBlock(args: {
   const floorRole = args.importMinRole ?? undefined
   if (!canImportSourceFiles(args.level, floorRole) || (args.level != null && args.level < TRANSCRIBE_MIN_ROLE)) {
     return { kind: "import", floor: Math.max(importDenialFloor(floorRole), TRANSCRIBE_MIN_ROLE) }
+  }
+  if (args.timingLocked && args.level != null && args.level < ROLE.MAINTAINER) {
+    return { kind: "timingLocked", floor: ROLE.MAINTAINER }
   }
   if (args.onDevice || !args.credits?.config.enforce) return null
   if (args.credits.remaining.daily <= 0) return { kind: "creditsToday" }

@@ -55,12 +55,18 @@ export interface LineWordsReport {
   /** Every word that landed, seconds from the line's start, in order. */
   words: TimedWord[]
   text: string
+  /** AQU-2426 (review, Nov 9): the model that heard them, when it said. */
+  model?: string
   /** The kept run; null when there is nothing to keep it under. */
   runId: string | null
   /** The page went away mid-run (a reload): nothing failed, and the run is
    *  left as it is for the next page to carry on. Callers neither park it
    *  nor say anything. */
   interrupted?: boolean
+  /** AQU-2426 / AQU-2375 (review, Nov 9): the person stopped it with minutes
+   *  still to do. Nothing failed; the caller parks the run, so the words paid
+   *  for are kept and the next run on the line sends only the rest. */
+  cancelled?: boolean
 }
 
 export interface LineWordsRun {
@@ -84,16 +90,18 @@ export function planLineWindows(pcm: Float32Array, audio: Pick<LineAudio, "lo" |
 }
 
 /** Every kept window's words, in order, as one list and one text. */
-export function wordsOf(line: StoredLineWords): { words: TimedWord[]; text: string } {
+export function wordsOf(line: StoredLineWords): { words: TimedWord[]; text: string; model?: string } {
   const words: TimedWord[] = []
   const texts: string[] = []
+  let model: string | undefined
   line.windows.forEach((_, i) => {
     const got = line.words[lineWindowKey(i)]
     if (!got) return
     words.push(...got.words)
     if (got.text.trim()) texts.push(got.text.trim())
+    model ??= got.model
   })
-  return { words, text: texts.length ? joinWords(texts.map((text) => ({ text }))) : "" }
+  return { words, text: texts.length ? joinWords(texts.map((text) => ({ text }))) : "", ...(model ? { model } : {}) }
 }
 
 export interface RunLineWordsArgs {
@@ -110,12 +118,29 @@ export interface RunLineWordsArgs {
   onProgress?: (done: number, total: number) => void
   /** The hosted limit refused a request: wait this long, then it is sent again. */
   onRateLimited?: (retryAfterSeconds: number) => Promise<void>
+  /**
+   * AQU-2426 / AQU-2375 (review, Nov 9): Cancel. Once aborted, no further
+   * minute is sent and a wait at the hosted limit ends at once. The minute
+   * already with the service finishes (it is paid for) and its words are kept.
+   */
+  signal?: AbortSignal
   /** @internal test seams. */
   deps?: {
     transcribe?: typeof transcribeLineWords
     loadPcm?: typeof loadLinePcm
     newId?: () => string
   }
+}
+
+/** `wait`, or a rejection the moment `signal` aborts, whichever is first. */
+function endOnAbort(wait: Promise<void>, signal: AbortSignal | undefined): Promise<void> {
+  if (!signal) return wait
+  if (signal.aborted) return Promise.reject(new Error("cancelled"))
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = () => reject(new Error("cancelled"))
+    signal.addEventListener("abort", onAbort, { once: true })
+    wait.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort))
+  })
 }
 
 function newRunId(): string {
@@ -174,6 +199,8 @@ export async function runLineWords(args: RunLineWordsArgs): Promise<LineWordsRun
         kind: "lineWords",
         cellIds: line.windows.map((_, i) => lineWindowKey(i)),
         force: false,
+        // AQU-2375 (review, Nov 9): whose run; only they carry it on.
+        ...(args.session?.username ? { username: args.session.username } : {}),
         line,
       })
     }
@@ -187,6 +214,12 @@ export async function runLineWords(args: RunLineWordsArgs): Promise<LineWordsRun
   let inARow = 0
   let stopReason: string | null = null
   let interrupted = false
+  let cancelled = false
+  const stopped = () => args.signal?.aborted === true
+  // A wait at the limit ends with Cancel, and the request is not sent again.
+  const onRateLimited = args.onRateLimited
+    ? (sec: number) => endOnAbort(args.onRateLimited!(sec), args.signal)
+    : undefined
   for (let i = 0; i < total; i++) {
     const key = lineWindowKey(i)
     if (line.words[key]) continue
@@ -194,24 +227,34 @@ export async function runLineWords(args: RunLineWordsArgs): Promise<LineWordsRun
       failed.push({ key, message: stopReason })
       continue
     }
+    if (stopped()) {
+      cancelled = true
+      break
+    }
     const win = line.windows[i]!
     try {
       const got = await transcribe({
         line: { ...audio, lo: win.lo, hi: win.hi },
         session: args.session,
         ...(tag ? { languageTag: tag } : {}),
-        ...(args.onRateLimited ? { onRateLimited: args.onRateLimited } : {}),
+        ...(onRateLimited ? { onRateLimited } : {}),
       })
       // The window's words are from ITS start; the line's are from the line's.
       const shift = (win.lo - audio.lo) / 1000
-      const words = got.words.map((w) => ({ text: w.text, start: w.start + shift, end: w.end + shift }))
-      line.words[key] = { words, text: got.text }
-      handle?.row(key, { kind: "done", lineWords: { words, text: got.text } })
+      const words = got.words.map((w) => ({ ...w, start: w.start + shift, end: w.end + shift }))
+      const kept = { words, text: got.text, ...(got.model ? { model: got.model } : {}) }
+      line.words[key] = kept
+      handle?.row(key, { kind: "done", lineWords: kept })
       inARow = 0
     } catch (err) {
       // A request cut off because the page is going: not a failed minute.
       if (pageIsLeaving()) {
         interrupted = true
+        break
+      }
+      // Stopped while it waited at the limit: not a failed minute either.
+      if (stopped()) {
+        cancelled = true
         break
       }
       const message = err instanceof Error ? err.message : String(err)
@@ -226,7 +269,9 @@ export async function runLineWords(args: RunLineWordsArgs): Promise<LineWordsRun
   return {
     report: {
       total, done: doneCount(), failed, words: all.words, text: all.text, runId: handle?.id ?? null,
+      ...(all.model ? { model: all.model } : {}),
       ...(interrupted ? { interrupted: true } : {}),
+      ...(cancelled ? { cancelled: true } : {}),
     },
     handle,
   }

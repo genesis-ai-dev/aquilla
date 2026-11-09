@@ -233,3 +233,75 @@ describe("runLineWords when the page goes away", () => {
   })
 })
 
+
+// AQU-2426 / AQU-2375 (review, Nov 9): a words run can be stopped.
+describe("runLineWords when it is cancelled", () => {
+  it("the minute being transcribed is kept, nothing more is sent, and nothing is marked failed", async () => {
+    const stop = new AbortController()
+    const transcribe = vi.fn(async ({ line }: { line: LineAudio }) => {
+      stop.abort()
+      return wordsFor(line)
+    })
+    const { report, handle } = await runLineWords({
+      audio, session: null, purpose: "import", identity, signal: stop.signal,
+      deps: { transcribe, loadPcm: async () => pcm(150), newId: () => "words-c" },
+    })
+    expect(transcribe).toHaveBeenCalledTimes(1)
+    expect(report.cancelled).toBe(true)
+    expect(report).toMatchObject({ total: 3, done: 1, failed: [] })
+    // Parked, the words paid for wait for the next run, which sends the rest.
+    handle!.park()
+    const kept = __storedTranscribeRuns()[0]!
+    expect(kept.parked).toBe(true)
+    expect(Object.keys(kept.line!.words)).toEqual(["w0"])
+    expect(kept.failed).toEqual([])
+  })
+
+  it("cancelled while waiting at the limit: the wait ends and the request is not sent again", async () => {
+    const stop = new AbortController()
+    let sends = 0
+    const transcribe = vi.fn(async ({ line, onRateLimited }: { line: LineAudio; onRateLimited?: (sec: number) => Promise<void> }) => {
+      sends++
+      // The hosted limit refuses it: wait, then it would be sent again.
+      await onRateLimited?.(900)
+      sends++
+      return wordsFor(line)
+    })
+    const run = runLineWords({
+      audio, session: null, purpose: "import", identity, signal: stop.signal,
+      onRateLimited: () => new Promise<void>(() => {}),
+      deps: { transcribe, loadPcm: async () => pcm(150), newId: () => "words-w" },
+    })
+    await new Promise((r) => setTimeout(r, 0))
+    stop.abort()
+    const { report } = await run
+    expect(sends).toBe(1)
+    expect(report.cancelled).toBe(true)
+    expect(report).toMatchObject({ total: 3, done: 0, failed: [] })
+  })
+
+  it("says it was stopped, how far it got, and offers the rest", () => {
+    const said = lineWordsToast({ words: [], text: "", runId: "words-1", total: 52, done: 2, failed: [], cancelled: true }, "Session 4.mp3")!
+    expect(said.type).toBe("info")
+    expect(said.title).toBe("Stopped transcribing \"Session 4.mp3\" — 2 of 52 minutes done.")
+    expect(said.description).toBe("It is still one line. The words so far are kept, so transcribing it again sends only the rest.")
+    expect(said.retryLabel).toBe("Transcribe the rest")
+  })
+})
+
+// AQU-2426 (review, Nov 9)
+describe("runLineWords keeps what was heard", () => {
+  it("the model, and a word as it was heard before a learned correction, come back and are kept", async () => {
+    const transcribe = vi.fn(async ({ line }: { line: LineAudio }) => ({
+      words: [{ text: "Ruth", start: 0.5, end: 1, heard: "Root" }], text: `Ruth at ${line.lo}.`, model: "whisper-large-v3",
+    }))
+    const { report } = await runLineWords({
+      audio, session: null, purpose: "import", identity,
+      deps: { transcribe, loadPcm: async () => pcm(150), newId: () => "words-h" },
+    })
+    expect(report.model).toBe("whisper-large-v3")
+    expect(report.words.every((w) => w.heard === "Root")).toBe(true)
+    const kept = __storedTranscribeRuns()[0]!.line!
+    expect(kept.words.w0).toMatchObject({ model: "whisper-large-v3", words: [{ text: "Ruth", heard: "Root" }] })
+  })
+})

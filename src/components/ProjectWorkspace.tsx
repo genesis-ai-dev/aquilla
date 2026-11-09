@@ -271,8 +271,8 @@ import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynth
 import { lineWordsToast, transcribeRunProgressTitle, transcribeRunToast } from "@/lib/audio/transcribe-report"
 import { runLineWords, wordsOf, type LineWordsIdentity } from "@/lib/audio/line-words-run"
 import type { StoredTranscribeRun, TranscribeRunHandle, TranscribeRunKind } from "@/lib/audio/transcribe-runs"
-import { dropStoredTranscribeRun, findLineWordsRun, pageIsLeaving } from "@/lib/audio/transcribe-runs"
-import { useCarryOnTranscribeRuns } from "@/hooks/useCarryOnTranscribeRuns"
+import { findLineWordsRun, pageIsLeaving } from "@/lib/audio/transcribe-runs"
+import { carryOnReady, useCarryOnTranscribeRuns } from "@/hooks/useCarryOnTranscribeRuns"
 import { changeCellVoice, changeVoiceBlocker, changeVoiceSourceTake } from "@/lib/audio/change-voice"
 import { planChangeVoiceAll, runChangeVoiceAll } from "@/lib/audio/change-voice-batch"
 import { getTtsStatus, ttsStatusKey } from "@/lib/audio/tts"
@@ -308,7 +308,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { canHarmonize, emitCastAssign, emitCellLabelSet, emitSourceCellCommit, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitCellGlossSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellAudioUnvalidate, emitCellAudioSelect, emitCellAudioDeselect, emitSourceCellRestore, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioGain, emitCellAudioPlace, emitCellAudioCut, emitCellAudioUncut, emitCellAudioRemove, emitCellAudioRename, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitFileMilestoneSet, emitFileMilestoneRemove, emitTermCreate, emitTermUpdate, enqueueEvents, emitCellAudioAttach } from "@/lib/sync/events-emit"
+import { canHarmonize, emitCastAssign, emitCellLabelSet, emitSourceCellCommit, emitCellHarmonize, emitSourceCellVisibilitySet, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitCellGlossSet, emitFileRename, emitFileCorpusSet, emitFileReorder, emitFileDelete, emitFileRestore, emitCellValidate, emitCellAudioValidate, emitCellUnvalidate, emitCellAudioUnvalidate, emitCellAudioSelect, emitCellAudioDeselect, emitSourceCellRestore, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioGain, emitCellAudioPlace, emitCellAudioCut, emitCellAudioUncut, emitCellAudioRemove, emitCellAudioRename, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitFileMilestoneSet, emitFileMilestoneRemove, emitTermCreate, emitTermUpdate, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, pairedLineCounts, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
 import { postSplitCastCopies, resolveCellEditingFloor, resolveTimingLocked } from "@/lib/sync/project-settings"
@@ -426,7 +426,7 @@ import type { TranscribeChoiceInfo } from "@/components/import/recording-choice-
 import { RecordingImportChoiceDialog } from "@/components/import/RecordingImportChoiceDialog"
 import { measureByDecodingMs, probeMediaDurationMs } from "@/lib/import"
 import { needsSplitNotice, sourceRecordingLine, uploadedFilmName } from "@/lib/timeline/recording-line"
-import { piecesFromCuts, splitRecordingLine, textsForPieces, writeLineWindow, type LinePiece, type RecordingLine } from "@/lib/timeline/split-recording-line"
+import { piecesFromCuts, splitRecordingLine, textsForSplit, writeLineWindow, writeLineWords, type LineHeard, type LinePiece, type RecordingLine } from "@/lib/timeline/split-recording-line"
 import { cutsFromWords, loadLinePcm, pauseCuts, type LineAudio } from "@/lib/audio/recording-split"
 import { transcribeBlock } from "@/lib/audio/transcribe-access"
 import { estimateTranscriptionCost } from "@/lib/audio/transcription-cost"
@@ -3728,6 +3728,8 @@ export function ProjectWorkspace() {
       revalidateCells()
       for (const id of touched) notifyAudioAttachmentsChanged(id)
     }
+    // AQU-2375 (review, Nov 9): the page is going; the next one carries it on.
+    if (report.interrupted) return
     showTranscribeRunEnd(report, { kind: o.kind, fileId: o.fileId, fileName: o.fileName, toastId: progress.id, quiet: o.quiet })
   }, [
     project, frontierSession, activeSourceLanguage, activeLaneTargetLanguage, activeLane,
@@ -10695,15 +10697,18 @@ export function ProjectWorkspace() {
   // (timing-authority.ts) — so the buttons show to exactly those people.
   const canSplitLines = canAttachSourceAudio(splitRoleLevel)
     && (!timingLocked || splitRoleLevel == null || splitRoleLevel >= ROLE.MAINTAINER)
+  // AQU-2426 (review, Nov 9): why not, for a split that is refused before it starts.
+  const cannotSplitReason = canAttachSourceAudio(splitRoleLevel) ? t("editor.cellMenu.timingLocked") : t("editor.splitLines.noPermission")
   // The org's credits, read once when someone first asks what transcribing
   // costs; until then nothing is blocked on them (the server still refuses).
   const [transcribeOrgCredits, setTranscribeOrgCredits] = useState<import("@/lib/sync/credits").OrgCredits | null>(null)
   const transcribeBlockNow = useMemo(() => transcribeBlock({
     level: splitRoleLevel,
     importMinRole: orgImportMinRole,
+    timingLocked,
     onDevice: transcriptionOnDevice,
     credits: transcribeOrgCredits,
-  }), [splitRoleLevel, orgImportMinRole, transcriptionOnDevice, transcribeOrgCredits])
+  }), [splitRoleLevel, orgImportMinRole, timingLocked, transcriptionOnDevice, transcribeOrgCredits])
 
   /** What the import's last step and Split into lines… show about transcribing. */
   const prepareTranscribeChoice = useCallback(async (durationsMs: readonly (number | undefined)[]): Promise<TranscribeChoiceInfo> => {
@@ -10731,12 +10736,12 @@ export function ProjectWorkspace() {
       }
     }
     return {
-      block: transcribeBlock({ level: splitRoleLevel, importMinRole: orgImportMinRole, onDevice: transcriptionOnDevice, credits: orgCredits }),
+      block: transcribeBlock({ level: splitRoleLevel, importMinRole: orgImportMinRole, timingLocked, onDevice: transcriptionOnDevice, credits: orgCredits }),
       cost,
       credits: creditsLine,
       ...(transcribeLanguageTag ? { languageTag: transcribeLanguageTag } : {}),
     }
-  }, [chosenTranscriptionModel, transcribeLanguageTag, transcriptionOnDevice, frontierSession?.jwt, project?.id, project?.orgId, transcribeOrgCredits, splitRoleLevel, orgImportMinRole, t])
+  }, [chosenTranscriptionModel, transcribeLanguageTag, transcriptionOnDevice, frontierSession?.jwt, project?.id, project?.orgId, transcribeOrgCredits, splitRoleLevel, orgImportMinRole, timingLocked, t])
 
   /** The open file's line, as a split writes it. */
   // Store cells carry no recordings (see the Fortify note on getActiveCell):
@@ -10783,27 +10788,53 @@ export function ProjectWorkspace() {
   /** Write a split, record it for Undo, and say so with Undo on the toast. */
   const applyLineSplit = useCallback(async (
     line: RecordingLine, pieces: readonly LinePiece[], titleKey: "editor.splitLines.done" | "editor.splitLines.importDone" = "editor.splitLines.done",
+    // AQU-2426 (review, Nov 9): the words the pieces' texts were made from, so
+    // each line gets its word timings and what was heard, not just its text.
+    given?: LineHeard,
   ): Promise<boolean> => {
+    // AQU-2426 (review, Nov 9): someone who may not split here is refused
+    // before anything is queued. The server judges each event on its own, so a
+    // split from below the timing lock's floor half-applied: the new lines
+    // landed and the first line's retime did not.
+    if (!canSplitLines) {
+      toast.add({ type: "error", title: t("editor.splitLines.failed", { name: line.name, reason: cannotSplitReason }) })
+      return false
+    }
     try {
-      // A split at pauses on a line whose words were already found (kept from
-      // a words run nobody split by): each new line gets the words in its own
-      // stretch, by their timings — never the first line all of them.
+      // A split at pauses on a line that already has its words: each new line
+      // gets the text in its own stretch — never the first line all of it.
+      // AQU-2426 (review, Nov 9): from a kept words run, or else from the
+      // transcript's own stored word times (textsForSplit), so text that came
+      // from Transcribe all or another device is shared out too, and a
+      // correction typed since is kept.
       let toWrite = pieces
-      let usedRunId: string | null = null
+      let textStayed = false
+      let heard = given
+      const lineNow = cellWithAudio(line.cellId)
       if (pieces.every((p) => p.text === undefined)) {
         const lo = line.trimStartMs ?? 0
         const hi = line.trimEndMs ?? line.durationMs ?? lo + (line.endMs - line.startMs)
         const kept = findLineWordsRun({ projectId: line.projectId, fileId: line.fileId, cellId: line.cellId, audioId: line.audioId, lo, hi })
-        const keptWords = kept?.line ? wordsOf(kept.line).words : []
-        if (kept && keptWords.length > 0) {
-          const texts = textsForPieces(pieces, lo, keptWords)
+        const keptWords = kept?.line ? wordsOf(kept.line) : null
+        const timings = lineNow?.audioTimings?.[line.audioId]
+        const shared = textsForSplit({ pieces, lo, lineText: lineNow?.transcription ?? "", kept: keptWords, timings })
+        if (shared.texts) {
+          const texts = shared.texts
           toWrite = pieces.map((p, i) => ({ ...p, text: texts[i] ?? "" }))
-          usedRunId = kept.id
+          // The times the text was shared out by go with it to each line.
+          heard = keptWords && keptWords.words.length > 0
+            ? keptWords
+            : timings?.length ? { words: timings.map((w) => ({ text: w.word, start: w.t0, end: w.t1 })) } : undefined
         }
+        textStayed = shared.stayed
       }
-      const result = await splitRecordingLine({ line, pieces: toWrite, author: currentUsername })
+      // AQU-2426 (review, Nov 9): the line's text as it is now, for Undo. A
+      // split by words leaves only the first sentence on it; Undo used to give
+      // it the whole recording back with that one sentence. The kept words are
+      // no longer dropped here either, so splitting again after Undo is free.
+      const textBefore = lineNow?.transcription ?? ""
+      const result = await splitRecordingLine({ line, pieces: toWrite, author: currentUsername, ...(heard ? { heard } : {}) })
       if (!result) return false
-      if (usedRunId) dropStoredTranscribeRun(usedRunId)
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       revalidateCells()
       recordStep({
@@ -10813,6 +10844,7 @@ export function ProjectWorkspace() {
           before: result.before,
           after: { startMs: result.first.startMs, endMs: result.first.endMs, trimStartMs: result.first.trimStartMs, trimEndMs: result.first.trimEndMs },
           lines: result.created,
+          ...(result.first.text !== undefined ? { text: { before: textBefore, after: result.first.text } } : {}),
         },
         labelKey: "editor.history.stepSplitLines",
         fileId: line.fileId,
@@ -10821,6 +10853,8 @@ export function ProjectWorkspace() {
       toast.add({
         type: "success",
         title: t(titleKey, { name: line.name, count: pieces.length }),
+        // Text with no word times to share it out by: said, not left to be found.
+        ...(textStayed ? { description: t("editor.splitLines.textStayed") } : {}),
         timeout: 10_000,
         actionProps: {
           children: t("editor.splitLines.undo"),
@@ -10835,19 +10869,14 @@ export function ProjectWorkspace() {
       toast.add({ type: "error", title: t("editor.splitLines.failed", { name: line.name, reason: err instanceof Error ? err.message : String(err) }) })
       return false
     }
-  }, [currentUsername, getTokenForProjectFile, revalidateCells, t])
+  }, [currentUsername, getTokenForProjectFile, revalidateCells, canSplitLines, cannotSplitReason, cellWithAudio, t])
 
   /** The words came back but nothing was split: they land on the line itself. */
-  const keepWordsOnLine = useCallback(async (line: RecordingLine, text: string) => {
+  const keepWordsOnLine = useCallback(async (line: RecordingLine, text: string, heard?: LineHeard) => {
     if (!text.trim()) return
     try {
-      await emitCellAudioAttach({
-        projectId: line.projectId, fileId: line.fileId, cellId: line.cellId,
-        audioId: line.audioId, url: line.url, slot: "recording", role: "source",
-        ...(line.durationMs !== undefined ? { durationMs: Math.round(line.durationMs) } : {}),
-        transcription: text.trim(),
-        author: currentUsername,
-      })
+      // AQU-2426 (review, Nov 9): words only, so the line's takes stay chosen.
+      await writeLineWords({ line, text: text.trim(), author: currentUsername, ...(heard ? { heard } : {}) })
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       revalidateCells()
     } catch (err) {
@@ -10912,13 +10941,32 @@ export function ProjectWorkspace() {
     let toastId: string | null = null
     let first = true
     let title = t("editor.splitLines.importTranscribing", { name })
+    // AQU-2426 / AQU-2375 (review, Nov 9): the run's toast has a Cancel. The
+    // minute already sent finishes, then it stops and is parked.
+    const stop = new AbortController()
+    const cancelAction = {
+      children: t("common.cancel"),
+      onClick: () => {
+        stop.abort()
+        if (toastId !== null) toast.update(toastId, { type: "loading", title: t("audio.lineWords.stopping", { name }), description: undefined, actionProps: undefined })
+      },
+    }
     const show = (description?: string) => {
-      if (toastId === null) toastId = toast.add({ type: "loading", title, description, timeout: 0 })
+      if (stop.signal.aborted) return
+      if (toastId === null) toastId = toast.add({ type: "loading", title, description, timeout: 0, actionProps: cancelAction })
       else toast.update(toastId, { type: "loading", title, description })
     }
     const say = (content: { type: "success" | "error" | "info"; title: string; description?: string; timeout?: number; actionProps?: { children: string; onClick: () => void } }) => {
-      if (toastId !== null) toast.update(toastId, { description: undefined, ...content })
+      if (toastId !== null) toast.update(toastId, { description: undefined, actionProps: undefined, ...content })
       else toast.add(content)
+    }
+    // AQU-2426 (review, Nov 9): Import and transcribe… ends in a split. Someone
+    // who may not split here is told before a single minute is sent or paid
+    // for; a run carried on keeps the words it has for someone who may.
+    if (o.purpose === "import" && !canSplitLines) {
+      o.carryOn?.handle.park()
+      say({ type: "error", title: t("editor.splitLines.importFailed", { name, reason: cannotSplitReason }) })
+      return
     }
     void (async () => {
       try {
@@ -10928,6 +10976,7 @@ export function ProjectWorkspace() {
           ...(transcribeLanguageTag ? { languageTag: transcribeLanguageTag } : {}),
           purpose: o.purpose,
           identity: o.identity,
+          signal: stop.signal,
           ...(o.carryOn ? { carryOn: o.carryOn } : {}),
           onProgress: (done, total) => {
             title = first && o.carryOn
@@ -10949,8 +10998,9 @@ export function ProjectWorkspace() {
         const said = lineWordsToast(report, name)
         if (said) {
           // The line keeps the words it has; the run keeps them for Retry.
+          // (Stopped by Cancel: the run keeps them, the line is left alone.)
           handle?.park()
-          await keepWordsOnLine(o.line, report.text)
+          if (!report.cancelled) await keepWordsOnLine(o.line, report.text, report)
           say({
             type: said.type,
             title: said.title,
@@ -10969,22 +11019,23 @@ export function ProjectWorkspace() {
           // seen the lines, so nothing is split. The words go on the line, and
           // the kept run makes At sentences, with words free next time.
           handle?.park()
-          await keepWordsOnLine(o.line, report.text)
+          await keepWordsOnLine(o.line, report.text, report)
           say({ type: "success", title: t("audio.lineWords.readyAfterReload", { name }), timeout: 12_000 })
           return
         }
         const cut = cutsFromWords(report.words, o.audio)
         const pieces = piecesFromCuts(o.line, cut.cuts, cut.texts)
         if (pieces.length < 2) {
-          await keepWordsOnLine(o.line, report.text)
+          await keepWordsOnLine(o.line, report.text, report)
           handle?.end()
           say({ type: "success", title: t("editor.splitLines.importDone", { name, count: 1 }), timeout: 8000 })
           return
         }
         if (toastId !== null) toast.close(toastId)
-        // A split that failed (it says so) keeps the words for the next try.
-        if (await applyLineSplit(o.line, pieces, "editor.splitLines.importDone")) handle?.end()
-        else handle?.park()
+        // The words stay kept either way: a split that failed (it says so) has
+        // them for the next try, and one that landed has them for after Undo.
+        await applyLineSplit(o.line, pieces, "editor.splitLines.importDone", report)
+        handle?.park()
       } catch (err) {
         if (pageIsLeaving()) return
         // The recording couldn't be read to plan the run: nothing was sent.
@@ -12400,8 +12451,14 @@ export function ProjectWorkspace() {
   useCarryOnTranscribeRuns({
     projectId: project?.id,
     activeFileId,
-    ready: editorFirstPaint && workspaceAudioLoaded && !heardLinesLoading,
+    // AQU-2375 (review, Nov 9): …and ALL its rows, not just the first page.
+    // (A load that failed has not brought them all in either.)
+    ready: carryOnReady({ firstPaint: editorFirstPaint, rowsLoading: cellsLoading || Boolean(cellsError), recordingsLoaded: workspaceAudioLoaded, heardLinesLoading }),
     version: [workspaceAudioByCellId, audioCueCells, cellStoreVersion],
+    // AQU-2375 (review, Nov 9): only the person who started a run carries it
+    // on, and a run over takes only in the language it was started in.
+    username: frontierSession?.username ?? null,
+    lane: activeLane,
     carryOn: (run, handle) => {
       // AQU-2426: one line's words, carried on window by window.
       if (run.kind === "lineWords") {
@@ -12429,14 +12486,13 @@ export function ProjectWorkspace() {
         quiet: run.kind === "sections",
       })
     },
-    announce: (run) => {
+    announce: (run, why) => {
+      const at = { name: run.fileName, done: run.doneIds.length, count: run.cellIds.length }
       toast.add({
         type: "info",
-        title: t("audio.transcribeRun.waitingForFile", {
-          name: run.fileName,
-          done: run.doneIds.length,
-          count: run.cellIds.length,
-        }),
+        title: why === "lane"
+          ? t("audio.transcribeRun.waitingForLanguage", { ...at, language: historyLaneName(run.lane ?? "") })
+          : t("audio.transcribeRun.waitingForFile", at),
       })
     },
   })
@@ -16215,9 +16271,24 @@ export function ProjectWorkspace() {
             return false
           }
         },
+        // AQU-2426 (review, Nov 9): …and its text back, as it was.
+        lineText: (cellId) => getActiveCell(cellId)?.transcription ?? (getActiveCell(cellId) ? "" : null),
+        writeLineText: async (d, text) => {
+          const url = cellWithAudio(d.cellId)?.attachments?.[d.audioId]?.url
+          if (!project?.id || !url) return false
+          try {
+            await writeLineWords({ line: { projectId: project.id, fileId: d.fileId, cellId: d.cellId, audioId: d.audioId, url }, text, author: currentUsername })
+            await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+            revalidateCells()
+            return true
+          } catch (err) {
+            console.warn("[split-lines] undo text write failed:", err)
+            return false
+          }
+        },
       }),
     )
-  }, [lineUntouched, removeLineCore, applyRestoreRow, activeFileId, cellsLoading, getActiveCells, handleDeleteFile, handleRestoreFile, syncRoleLevel, project?.id, currentUsername, getTokenForProjectFile, revalidateCells])
+  }, [lineUntouched, removeLineCore, applyRestoreRow, activeFileId, cellsLoading, getActiveCells, handleDeleteFile, handleRestoreFile, syncRoleLevel, project?.id, currentUsername, getTokenForProjectFile, revalidateCells, getActiveCell, cellWithAudio])
 
   useEffect(() => {
     const readAtt = (cellId: string, audioId: string) => readTake(cellId, audioId)?.att ?? null
@@ -19887,8 +19958,8 @@ export function ProjectWorkspace() {
             initialMode={splitDialog.mode}
             keepsLine={splitDialog.keepsLine}
             keepAs={{ cellId: splitDialog.line.cellId, audioId: splitDialog.line.audioId, fileName: activeFileNameRef.current || splitDialog.line.name }}
-            onSplit={(pieces) => applyLineSplit(splitDialog.line, pieces)}
-            onKeepWords={(text) => { void keepWordsOnLine(splitDialog.line, text) }}
+            onSplit={(pieces, heard) => applyLineSplit(splitDialog.line, pieces, undefined, heard)}
+            onKeepWords={(text, heard) => { void keepWordsOnLine(splitDialog.line, text, heard) }}
             onClose={() => setSplitDialog(null)}
           />
         )}

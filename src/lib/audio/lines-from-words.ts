@@ -15,6 +15,9 @@ export interface TimedWord {
   /** Seconds from the start of the recording (or the line being split). */
   start: number
   end: number
+  /** AQU-2426 (review, Nov 9): the word as the transcription heard it, when a
+   *  learned correction changed it. Absent: `text` is what was heard. */
+  heard?: string
 }
 
 export interface WordLine {

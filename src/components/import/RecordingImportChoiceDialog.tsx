@@ -43,14 +43,16 @@ type T = ReturnType<typeof useT>
 
 /** Why transcribing isn't available, as one or two sentences. */
 export function transcribeBlockReason(t: T, block: TranscribeBlock, after?: string): string {
+  const role = (floor: number) => {
+    const key = roleNameKey(floor)
+    return key ? t(key, { count: 1 }) : String(floor)
+  }
   const reason = block.kind === "import"
-    ? t("audio.transcribeBlock.import", {
-        role: (() => {
-          const key = roleNameKey(block.floor)
-          return key ? t(key, { count: 1 }) : String(block.floor)
-        })(),
-      })
-    : t(block.kind === "creditsToday" ? "audio.transcribeBlock.creditsToday" : "audio.transcribeBlock.creditsWeek")
+    ? t("audio.transcribeBlock.import", { role: role(block.floor) })
+    // AQU-2426 (review, Nov 9): locked timing keeps the split for Maintainers.
+    : block.kind === "timingLocked"
+      ? t("audio.transcribeBlock.timingLocked", { role: role(block.floor) })
+      : t(block.kind === "creditsToday" ? "audio.transcribeBlock.creditsToday" : "audio.transcribeBlock.creditsWeek")
   return after ? `${reason} ${after}` : reason
 }
 

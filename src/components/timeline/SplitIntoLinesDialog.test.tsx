@@ -87,7 +87,7 @@ describe("Split into lines… (AQU-2426)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Transcribe and preview" }))
     await screen.findByTestId("split-words")
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
-    expect(props.onKeepWords).toHaveBeenCalledWith("Hello.")
+    expect(props.onKeepWords).toHaveBeenCalledWith("Hello.", { words: [{ text: "Hello.", start: 0.5, end: 1 }] })
     expect(props.onSplit).not.toHaveBeenCalled()
   })
 
@@ -138,7 +138,54 @@ describe("Split into lines… (AQU-2426)", () => {
     await screen.findByText(/1 of 3 minutes are transcribed/)
     transcribeLineWords.mockReset()
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
-    expect(props.onKeepWords).toHaveBeenCalledWith("First.")
+    // …with the timed words behind them (AQU-2426 review, Nov 9: word timings).
+    expect(props.onKeepWords).toHaveBeenCalledWith("First.", { words: [{ text: "First.", start: 0.5, end: 1 }] })
+  })
+
+  // AQU-2426 (review, Nov 9): the words that were paid for outlive the split,
+  // so Undo (the whole line back) doesn't mean paying for them again.
+  it("splitting by its words keeps the words kept", async () => {
+    localStorage.clear()
+    transcribeLineWords.mockResolvedValue({
+      words: [
+        { text: "In", start: 0.5, end: 0.8 }, { text: "the", start: 0.8, end: 1.0 }, { text: "beginning.", start: 1.0, end: 2.9 },
+        { text: "God", start: 4.5, end: 5.0 }, { text: "spoke.", start: 5.0, end: 7.0 },
+      ],
+      text: "In the beginning. God spoke.",
+    })
+    const props = renderDialog({ initialMode: "sentences", keepAs: { cellId: "c1", audioId: "clip", fileName: "Ruth 1 intro.m4a" } })
+    fireEvent.click(screen.getByRole("button", { name: "Transcribe and preview" }))
+    await screen.findByTestId("split-words")
+    fireEvent.click(screen.getByRole("button", { name: "Split into 2 lines" }))
+    await waitFor(() => expect(props.onClose).toHaveBeenCalled())
+    const { findLineWordsRun } = await import("@/lib/audio/transcribe-runs")
+    const kept = findLineWordsRun({ projectId: "p", fileId: "f", cellId: "c1", audioId: "clip", lo: 0, hi: 12_000 })
+    expect(kept?.parked).toBe(true)
+    expect(kept?.line?.words.w0?.text).toBe("In the beginning. God spoke.")
+  })
+
+  // AQU-2426 / AQU-2375 (review, Nov 9): Cancel stops a transcription that is
+  // still running. It used to close the dialog and send every other minute
+  // unseen, then write the whole text to the line.
+  it("Cancel while it transcribes stops the run: no more minutes are sent and nothing is written", async () => {
+    const pcm = new Float32Array(150 * PCM_RATE)
+    for (let i = 0; i < pcm.length; i++) pcm[i] = 0.4 * Math.sin(i / 5)
+    vi.mocked(loadLinePcm).mockResolvedValue(pcm)
+    let finishFirst: (v: { words: never[]; text: string }) => void = () => {}
+    transcribeLineWords.mockImplementationOnce(() => new Promise((resolve) => { finishFirst = resolve }))
+    transcribeLineWords.mockResolvedValue({ words: [], text: "more." })
+    const props = renderDialog({
+      initialMode: "sentences", durationMs: 150_000, endMs: 150_000,
+      audio: { projectId: "p", fileId: "f", url: "frontier-audio://p/f/clip.m4a", lo: 0, hi: 150_000 },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Transcribe and preview" }))
+    await waitFor(() => expect(transcribeLineWords).toHaveBeenCalledTimes(1))
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(props.onClose).toHaveBeenCalled()
+    finishFirst({ words: [], text: "First minute." })
+    await new Promise((r) => setTimeout(r, 20))
+    expect(transcribeLineWords).toHaveBeenCalledTimes(1)
+    expect(props.onKeepWords).not.toHaveBeenCalled()
   })
 
   it("someone who may not transcribe sees At sentences greyed, with the reason behind a click", async () => {

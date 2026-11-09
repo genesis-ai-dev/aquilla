@@ -485,6 +485,8 @@ export const audio = defineNamespace({
     "audio.transcribeRun.carryingOn": "Carrying on transcribing \"{name}\" after the page reloaded — {done} of {count} done…",
     "audio.transcribeRun.waitingForFile":
       "Transcribing \"{name}\" stopped when the page reloaded, at {done} of {count}. It carries on when you open \"{name}\".",
+    "audio.transcribeRun.waitingForLanguage":
+      "Transcribing \"{name}\" stopped when the page reloaded, at {done} of {count}. It was started in {language}, and carries on when you open this file in {language}.",
     "audio.transcribeRun.doneSections": plural({
       one: "Transcribed {count} section of \"{name}\".",
       other: "Transcribed {count} sections of \"{name}\".",
@@ -524,6 +526,13 @@ export const audio = defineNamespace({
       other: "Transcribed {done} of {count} minutes of \"{name}\".",
     }),
     "audio.lineWords.staysWhole": "It stays one line, with the words it has, until every minute is transcribed.",
+    "audio.lineWords.stopping": "Stopping \"{name}\" after this minute…",
+    "audio.lineWords.stopped": plural({
+      one: "Stopped transcribing \"{name}\" — {done} of {count} minute done.",
+      other: "Stopped transcribing \"{name}\" — {done} of {count} minutes done.",
+    }),
+    "audio.lineWords.stoppedKept": "It is still one line. The words so far are kept, so transcribing it again sends only the rest.",
+    "audio.lineWords.transcribeRest": "Transcribe the rest",
     "audio.lineWords.readyAfterReload":
       "Finished transcribing \"{name}\" after the page reloaded. Its words are on the line, and Split into lines… › At sentences, with words uses them at no cost.",
     "audio.lineWords.dialogPartial": plural({
@@ -887,6 +896,7 @@ export const audio = defineNamespace({
     "audio.transcribeCost.creditsShare": "About {credits} credits, {percent}% of this week's remaining",
     "audio.transcribeCost.creditsOnly": "About {credits} credits",
     "audio.transcribeBlock.import": "Only people who can import files in this project can transcribe, and in this project that is {role} and up (Project settings → Who can import files).",
+    "audio.transcribeBlock.timingLocked": "Transcribing a recording cuts it into lines, which changes their timing. Timing is locked for this project, so only {role} and up can do that.",
     "audio.transcribeBlock.creditsToday": "Your organization has reached today's AI limit, so transcription is off until it resets at midnight.",
     "audio.transcribeBlock.creditsWeek": "Your organization has reached this week's AI limit, so transcription is off until it resets next week.",
     "audio.transcribeBlock.splitFree": "Split at pauses is free and works now.",
@@ -2820,6 +2830,19 @@ export const audio = defineNamespace({
           count: "How many the run will do in all.",
         },
       },
+      "audio.transcribeRun.waitingForLanguage": {
+        description:
+          "Toast after a page reload, when a transcription run over recorded takes was " +
+          "stopped part-way by the reload and its file is now open in a different target " +
+          "language than the one the run was started in. The run picks up again by itself " +
+          "when the person switches the file to that language.",
+        placeholders: {
+          name: "The file name.",
+          done: "How many were done before the reload.",
+          count: "How many the run will do in all.",
+          language: "The target language the run was started in, e.g. 'French' (appears twice).",
+        },
+      },
       "audio.transcribeRun.doneSections": {
         description: "Toast when every section of a recording was transcribed into text.",
         placeholders: { count: "How many sections.", name: "The recording's file name." },
@@ -2896,6 +2919,33 @@ export const audio = defineNamespace({
           "Line under a transcription toast: the recording is not cut into lines yet. It " +
           "stays one line and keeps the words that were transcribed; Retry transcribes the " +
           "minutes still missing.",
+      },
+      "audio.lineWords.stopping": {
+        description:
+          "Progress toast title right after someone pressed Cancel on a recording that is " +
+          "being transcribed a minute at a time. The minute already sent finishes, then it stops.",
+        placeholders: { name: "The recording's file name." },
+      },
+      "audio.lineWords.stopped": {
+        description:
+          "Toast title after someone cancelled the transcription of a recording part-way. " +
+          "The recording was not cut into lines.",
+        placeholders: {
+          name: "The recording's file name.",
+          done: "How many minutes were transcribed before it was stopped.",
+          count: "How many minutes the recording has (rounded up).",
+        },
+      },
+      "audio.lineWords.stoppedKept": {
+        description:
+          "Line under the 'Stopped transcribing' toast title: the recording is still one line, " +
+          "and the minutes already transcribed are remembered so they are not paid for twice.",
+      },
+      "audio.lineWords.transcribeRest": {
+        description:
+          "Button on the 'Stopped transcribing' toast: transcribes the minutes that were not " +
+          "done before Cancel was pressed.",
+        maxLength: 28,
       },
       "audio.lineWords.readyAfterReload": {
         description:
@@ -3823,6 +3873,7 @@ export const audio = defineNamespace({
       "audio.transcribeCost.creditsShare": { description: "The Credits cost line, e.g. 'About 40 credits, 3% of this week's remaining'.", placeholders: { credits: "A number of credits.", percent: "A whole percentage." } },
       "audio.transcribeCost.creditsOnly": { description: "The Credits cost line when this week's balance can't be read.", placeholders: { credits: "A number of credits." } },
       "audio.transcribeBlock.import": { description: "Why someone can't transcribe a recording: their role is below who may import files.", placeholders: { role: "A role name, e.g. 'Project lead'." } },
+      "audio.transcribeBlock.timingLocked": { description: "Why someone can't transcribe a recording: transcribing splits it into lines, and this project's timing is locked, which only higher roles may change.", placeholders: { role: "A role name, e.g. 'Maintainer'." } },
       "audio.transcribeBlock.creditsToday": { description: "Why no one can transcribe right now: the organization used its AI credits for today." },
       "audio.transcribeBlock.creditsWeek": { description: "Why no one can transcribe right now: the organization used its AI credits for this week." },
       "audio.transcribeBlock.splitFree": { description: "Added after the reason transcription isn't available, where 'Split at pauses' is offered beside it." },

@@ -6,12 +6,14 @@ import {
   HEARTBEAT_MS,
   MAX_AGE_MS,
   STALE_MS,
+  __setPageLeavingForTests,
   __setTranscribeRunEnvForTests,
   __storedTranscribeRuns,
   claimStoredTranscribeRun,
   findLineWordsRun,
   interruptedTranscribeRuns,
   startStoredTranscribeRun,
+  transcribeRunFits,
   type LockManagerLike,
 } from "./transcribe-runs"
 
@@ -210,5 +212,77 @@ describe("a line's words run", () => {
     startLine().park()
     clock += MAX_AGE_MS
     expect(findLineWordsRun(match)).toBeNull()
+  })
+})
+
+// AQU-2426 (review, Nov 9): a line's words now stay kept after the split that
+// used them (so Undo doesn't cost them), which makes old parked runs the
+// thing to give up when the browser's storage is full.
+describe("when storage is full", () => {
+  it("gives up the oldest parked words so a new run is still kept", () => {
+    const parked = (id: string) => {
+      const run = startStoredTranscribeRun({
+        id, projectId: "p1", fileId: "f1", fileName: "Session 4.mp3", kind: "lineWords", cellIds: ["w0"], force: false,
+        line: { cellId: id, audioId: "a1", url: "frontier-audio://p1/f1/a1.mp3", lo: 0, hi: 60_000, windows: [{ lo: 0, hi: 60_000 }], words: {}, purpose: "import" },
+      })
+      run.row("w0", { kind: "done", lineWords: { words: [], text: "x".repeat(400) } })
+      run.park()
+    }
+    parked("old")
+    clock += 60_000
+    parked("newer")
+    clock += 60_000
+    // Room for what is there now, and not for one run more.
+    const room = JSON.stringify(__storedTranscribeRuns()).length + 50
+    const real = localStorage.setItem.bind(localStorage)
+    const setItem = vi.spyOn(localStorage, "setItem").mockImplementation((key: string, value: string) => {
+      if (value.length > room) throw new DOMException("full", "QuotaExceededError")
+      real(key, value)
+    })
+    try {
+      const run = start("run-now")
+      expect(__storedTranscribeRuns().map((r) => r.id).sort()).toEqual(["newer", "run-now"])
+      run.end()
+    } finally {
+      setItem.mockRestore()
+    }
+  })
+})
+
+// AQU-2375 (review, Nov 9)
+describe("transcribeRunFits: whose run it is, and which language's", () => {
+  it("only the person who started a run carries it on", () => {
+    expect(transcribeRunFits({ kind: "all", username: "amina", lane: "" }, { username: "amina", lane: "" })).toBe("ok")
+    expect(transcribeRunFits({ kind: "all", username: "amina", lane: "" }, { username: "baraka", lane: "" })).toBe("person")
+    expect(transcribeRunFits({ kind: "lineWords", username: "amina" }, { username: null, lane: "" })).toBe("person")
+  })
+
+  it("a run over takes waits for the language it was started in; one over the source recording does not", () => {
+    expect(transcribeRunFits({ kind: "all", username: "amina", lane: "fr" }, { username: "amina", lane: "" })).toBe("lane")
+    expect(transcribeRunFits({ kind: "sections", username: "amina", lane: "" }, { username: "amina", lane: "fr" })).toBe("lane")
+    expect(transcribeRunFits({ kind: "lineWords", username: "amina", lane: "fr" }, { username: "amina", lane: "" })).toBe("ok")
+    expect(transcribeRunFits({ kind: "import", username: "amina", lane: "fr" }, { username: "amina", lane: "" })).toBe("ok")
+  })
+
+  it("a run kept before runs named their person and language is carried on as before", () => {
+    expect(transcribeRunFits({ kind: "all" }, { username: "baraka", lane: "fr" })).toBe("ok")
+  })
+})
+
+// AQU-2375 (review, Nov 9): rows are written at most once a second, so the
+// ones that landed just before a reload were missing from the record, and the
+// run carried on reported "880 of 900" with all 900 transcribed.
+describe("when the page goes away", () => {
+  it("writes the rows that landed in the last second at once", () => {
+    const run = start()
+    run.row("a", { kind: "done" })
+    expect(__storedTranscribeRuns()[0]!.doneIds).toEqual([])
+    try {
+      window.dispatchEvent(new Event("pagehide"))
+      expect(__storedTranscribeRuns()[0]!.doneIds).toEqual(["a"])
+    } finally {
+      __setPageLeavingForTests(false)
+      run.end()
+    }
   })
 })

@@ -30,5 +30,22 @@ describe("transcribeBlock (AQU-2426: both rules, whichever is stricter, and the 
 
   it("fails open when the role is unknown (a local project)", () => {
     expect(transcribeBlock({ level: null, onDevice: false })).toBeNull()
+    expect(transcribeBlock({ level: null, onDevice: false, timingLocked: true })).toBeNull()
+  })
+
+  // AQU-2426 (review, Nov 9): transcribing a recording ends in a split, and a
+  // split retimes the line, which a locked project keeps for Maintainers.
+  it("a Project lead can't transcribe while timing is locked; a Maintainer can", () => {
+    expect(transcribeBlock({ level: ROLE.PROJECT_LEAD, onDevice: false, timingLocked: true }))
+      .toEqual({ kind: "timingLocked", floor: ROLE.MAINTAINER })
+    expect(transcribeBlock({ level: ROLE.PROJECT_LEAD, onDevice: true, timingLocked: true }))
+      .toEqual({ kind: "timingLocked", floor: ROLE.MAINTAINER })
+    expect(transcribeBlock({ level: ROLE.MAINTAINER, onDevice: false, timingLocked: true })).toBeNull()
+    expect(transcribeBlock({ level: ROLE.PROJECT_LEAD, onDevice: false, timingLocked: false })).toBeNull()
+  })
+
+  it("names the import rule first when both stop someone", () => {
+    expect(transcribeBlock({ level: ROLE.CONTRIBUTOR, onDevice: false, timingLocked: true }))
+      .toEqual({ kind: "import", floor: ROLE.PROJECT_LEAD })
   })
 })

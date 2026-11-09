@@ -2376,6 +2376,27 @@ export const editor = defineNamespace({
     "editor.setMilestone.overlaps":
       "This range overlaps \u201c{name}\u201d. Two milestones cannot share a line.",
     "editor.setMilestone.saveFailed": "That milestone could not be set.",
+    // AQU-2310: correcting a milestone from the chapter navigator.
+    "editor.setMilestone.startPlaceholder": "Pick the first line",
+    "editor.setMilestone.blankName": "A milestone needs a name. The old one is kept until you give it another.",
+    "editor.setMilestone.renameTitle": "Rename “{name}”",
+    "editor.setMilestone.renameDescription":
+      "The new name shows wherever these lines are listed. The lines themselves stay as they are.",
+    "editor.setMilestone.renameSave": "Rename",
+    "editor.setMilestone.editRangeTitle": "Edit “{name}”",
+    "editor.setMilestone.editRangeDescription":
+      "Change which lines this milestone covers. Nothing on the lines themselves changes.",
+    "editor.milestone.rowActions.label": "Edit “{label}”",
+    "editor.milestone.rowActions.rename": "Rename…",
+    "editor.milestone.rowActions.editRange": "Edit range…",
+    "editor.milestone.rowActions.remove": "Remove",
+    "editor.milestone.newMilestone": "New milestone…",
+    "editor.removeMilestone.title": "Remove “{name}”?",
+    "editor.removeMilestone.description":
+      "Its lines go back to the chapter or parts they were in before it was set. " +
+      "Nothing on them changes — text, recordings, comments and validations stay as they are.",
+    "editor.removeMilestone.confirm": "Remove milestone",
+    "editor.removeMilestone.failed": "That milestone could not be removed.",
     "editor.source.textAria": "Source text",
     "editor.source.editText": "Edit source text",
     "editor.source.multiLaneTitle": "Change the source every language lane shares?",
@@ -9243,6 +9264,110 @@ export const editor = defineNamespace({
           "Error toast when the milestone could not be written — the device is " +
           "offline, or the server refused it. The form's own checks catch every " +
           "refusal a person can cause, so this is the unexpected case.",
+      },
+      // AQU-2310: the same form, opened from a row of the chapter navigator to
+      // correct a milestone, plus the row's own edit menu.
+      "editor.setMilestone.startPlaceholder": {
+        description:
+          "What the first-line picker shows while nothing is chosen — when the " +
+          "form was opened from the navigator's \"New milestone…\" rather than from " +
+          "a line. Imperative; pairs with the last-line picker's placeholder.",
+        maxLength: 24,
+      },
+      "editor.setMilestone.blankName": {
+        description:
+          "Shown under the name field when someone renaming a milestone clears its " +
+          "name. The form will not save a blank name, and the milestone keeps the " +
+          "name it had. A full sentence.",
+      },
+      "editor.setMilestone.renameTitle": {
+        description:
+          "Title of the form when it renames one entry of the file's navigator — a " +
+          "milestone a person set, or a division the app numbered itself (\"Part 2\"). " +
+          "Keep the quotation marks around the name.",
+        placeholders: {
+          name: "The entry's current name — typed by a maintainer, or the app's own \"Part 2\". Content; never translate it.",
+        },
+        maxLength: 40,
+      },
+      "editor.setMilestone.renameDescription": {
+        description:
+          "One sentence under that title: only the name changes, and the lines it " +
+          "covers stay exactly as they are.",
+      },
+      "editor.setMilestone.renameSave": {
+        description: "The rename form's confirm button. Imperative.",
+        maxLength: 18,
+      },
+      "editor.setMilestone.editRangeTitle": {
+        description:
+          "Title of the form when it changes which lines a hand-set milestone " +
+          "covers. Keep the quotation marks around the name.",
+        placeholders: {
+          name: "The milestone's current name, exactly as a maintainer typed it. Content; never translate it.",
+        },
+        maxLength: 40,
+      },
+      "editor.setMilestone.editRangeDescription": {
+        description:
+          "One sentence under that title: the person is moving where the milestone " +
+          "starts or finishes, and nothing written or recorded on those lines changes.",
+      },
+      "editor.milestone.rowActions.label": {
+        description:
+          "Screen-reader name and hover text of the small icon button at the end of " +
+          "one row of the chapter navigator. It opens a menu to rename, re-range or " +
+          "remove that entry. Only maintainers see it. Keep the quotation marks.",
+        placeholders: {
+          label: "The row's name — \"Part 2\", or a name a maintainer typed. Content; never translate it.",
+        },
+      },
+      "editor.milestone.rowActions.rename": {
+        description:
+          "Menu entry on a navigator row that opens a form for giving the entry a new " +
+          "name. The ellipsis is the house convention for an entry that opens a form.",
+        maxLength: 20,
+      },
+      "editor.milestone.rowActions.editRange": {
+        description:
+          "Menu entry on a navigator row that opens a form for changing which lines a " +
+          "hand-set milestone covers. \"Range\" is the run of lines from first to last.",
+        maxLength: 20,
+      },
+      "editor.milestone.rowActions.remove": {
+        description:
+          "Menu entry on a navigator row that removes a hand-set milestone after one " +
+          "confirmation. Its lines go back to whatever divided them before; nothing " +
+          "written on them is touched.",
+        maxLength: 20,
+      },
+      "editor.milestone.newMilestone": {
+        description:
+          "Entry at the foot of the chapter navigator's list that opens the form for " +
+          "naming a new run of lines, with nothing filled in. Only maintainers see it.",
+        maxLength: 28,
+      },
+      "editor.removeMilestone.title": {
+        description: "Title of the confirmation before a hand-set milestone is removed.",
+        placeholders: {
+          name: "The milestone's name, exactly as a maintainer typed it. Content; never translate it.",
+        },
+        maxLength: 48,
+      },
+      "editor.removeMilestone.description": {
+        description:
+          "Body of that confirmation: removing a milestone only removes the name over " +
+          "a run of lines — they fold back into the chapter, or the numbered parts, " +
+          "they belonged to — and none of the work on those lines is lost.",
+      },
+      "editor.removeMilestone.confirm": {
+        description: "The confirmation's destructive button.",
+        maxLength: 20,
+      },
+      "editor.removeMilestone.failed": {
+        description:
+          "Error toast when removing a milestone could not be written — offline, or " +
+          "the server refused it. The milestone stays listed.",
       },
       "editor.cellMenu.startLabel": {
         description:

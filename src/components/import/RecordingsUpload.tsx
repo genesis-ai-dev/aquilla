@@ -945,6 +945,15 @@ function ReviewBody({
             {t("recordingsUpload.preview.recordedCount", { count: fmt(recordedCount) })}
           </p>
         )}
+        {/* AQU-2496 (review, Nov 9; Sam's call: say it, no grouped Undo): a
+            bulk upload records no Undo step, so the preview says so before
+            the person commits. Deleting a new recording doesn't bring the
+            line's earlier one back into play, so that is said where it applies. */}
+        {uploadCount > 0 && (
+          <p className="text-xs text-muted-foreground" data-testid="recordings-no-undo-note">
+            {t(recordedCount > 0 ? "recordingsUpload.preview.noUndoRecorded" : "recordingsUpload.preview.noUndo")}
+          </p>
+        )}
         <p className="text-xs text-muted-foreground">
           {languageLabel ? t("recordingsUpload.pick.language", { language: languageLabel }) : t("recordingsUpload.pick.languageDefault")}
         </p>

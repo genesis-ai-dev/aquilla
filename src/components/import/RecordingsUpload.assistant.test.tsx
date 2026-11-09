@@ -846,3 +846,37 @@ describe("whether the naming will be kept", () => {
     expect(screen.queryByTestId("recordings-assistant-keep")).toBeNull()
   })
 })
+
+// AQU-2496 (review, Nov 9; Sam's call the same day: say it, don't build a
+// grouped Undo). A bulk upload records no Undo step, so the preview says so
+// before the person commits, and how to take it back.
+describe("the preview says a bulk upload can't be undone", () => {
+  const PLACED = ["Matthew 19-1.ogg", "Matthew 19-2.ogg"]
+
+  it("says so in one line, with how to take it back, before anything uploads", async () => {
+    review(PLACED)
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(2))
+    const note = screen.getByTestId("recordings-no-undo-note")
+    expect(note).toHaveTextContent("This can't be undone with Undo. To take it back, delete the recordings it adds.")
+    expect(note).not.toHaveTextContent("earlier recording")
+    expect(started).not.toHaveBeenCalled()
+  })
+
+  it("adds what else it takes on a line that already had a recording: choosing the earlier one again", async () => {
+    const recorded = matthew()
+    recorded.lines = recorded.lines.map((line) => (line.cellId === "mat:19:2" ? { ...line, hasRecording: true } : line))
+    vi.mocked(loadTargetFile).mockResolvedValueOnce(recorded)
+    review(PLACED)
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(2))
+    expect(screen.getByTestId("recordings-recorded-note")).toBeInTheDocument()
+    expect(screen.getByTestId("recordings-no-undo-note")).toHaveTextContent(
+      "This can't be undone with Undo. To take it back, delete the recordings it adds, and choose the earlier recording again on each line that had one.",
+    )
+  })
+
+  it("says nothing when no file can be placed, since nothing would upload", async () => {
+    review()
+    await enabledAsk()
+    expect(screen.queryByTestId("recordings-no-undo-note")).toBeNull()
+  })
+})

@@ -10701,14 +10701,19 @@ export function ProjectWorkspace() {
     if (!transcriptionOnDevice && frontierSession?.jwt && project?.id) {
       const found = await transcriptionCredits({
         jwt: frontierSession.jwt, projectId: project.id, orgId: project.orgId ?? null, audioSec: cost.audioMs / 1000,
+        model: cost.model,
       }).catch(() => null)
       if (found) {
         orgCredits = found.orgCredits ?? orgCredits
         if (found.orgCredits) setTranscribeOrgCredits(found.orgCredits)
-        const credits = Math.max(1, Math.round(found.credits))
-        creditsLine = found.percent != null
-          ? t("audio.transcribeCost.creditsShare", { credits, percent: found.percent })
-          : t("audio.transcribeCost.creditsOnly", { credits })
+        // AQU-2426 (review, Nov 9): no figure when the model's price isn't
+        // known here (Whisper, Qwen): the Credits line is left out.
+        if (found.credits != null) {
+          const credits = Math.max(1, Math.round(found.credits))
+          creditsLine = found.percent != null
+            ? t("audio.transcribeCost.creditsShare", { credits, percent: found.percent })
+            : t("audio.transcribeCost.creditsOnly", { credits })
+        }
       }
     }
     return {

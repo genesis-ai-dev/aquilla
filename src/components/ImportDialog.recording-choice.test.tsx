@@ -70,8 +70,9 @@ describe("the import's last step for a recording with no subtitle file (AQU-2426
     renderDialog()
     await dropRecordings("Session 4.mp3")
     fireEvent.click(screen.getByRole("button", { name: "Import and transcribe…" }))
-    expect(await screen.findByText("53, one for each minute")).toBeInTheDocument()
-    expect(screen.getByText("About 4 minutes")).toBeInTheDocument()
+    // Review, Nov 9: a few more requests than minutes, sent one at a time.
+    expect(await screen.findByText("About 55, one for each minute")).toBeInTheDocument()
+    expect(screen.getByText("About 7 minutes")).toBeInTheDocument()
     expect(mockImportFile).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole("button", { name: "Transcribe and import" }))
     await waitFor(() => expect(mockImportFile).toHaveBeenCalledOnce())

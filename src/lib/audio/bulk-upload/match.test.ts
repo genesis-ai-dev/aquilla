@@ -535,6 +535,27 @@ describe("a number alone in a Bible book, decided by the count", () => {
     )
   })
 
+  // AQU-2487 (review, Nov 9): the chapter-as-a-chapter fix is for names that
+  // say the book or the chapter. A number alone in a project holding one
+  // chapter is a verse, as it was before that fix: one file always "fits" one
+  // chapter, so the count is no evidence that it is the whole chapter.
+  it("a project holding only chapter 1 of a longer book reads a number alone as a verse", () => {
+    const jonah1 = book("jon", "JON", "Jonah", [17])
+    const jonScope: MatchScope = { kind: "file", fileId: "jon" }
+    const one = run([audio("rec/01.wav")], [jonah1], jonScope).assignments[0]
+    expect(one).toMatchObject({ read: "Jonah 1:1", cellIds: ["jon:1:1"] })
+    const seven = run([audio("rec/07.wav")], [jonah1], jonScope).assignments[0]
+    expect(seven).toMatchObject({ read: "Jonah 1:7", cellIds: ["jon:1:7"] })
+    // Two parts of verse 3.
+    const parts = run([audio("rec/03a.wav"), audio("rec/03b.wav")], [jonah1], jonScope).assignments
+    expect(parts.map((a) => a.cellIds)).toEqual([["jon:1:3"], ["jon:1:3"]])
+    // Five of them, whatever their length, never wait on "chapters or verses?".
+    const five = Array.from({ length: 5 }, (_, i) => audio(`rec/0${i + 1}.wav`))
+    const { assignments } = run(five, [jonah1], jonScope)
+    expect(needsLength(assignments)).toEqual([])
+    expect(assignments.map((a) => a.cellIds)).toEqual([1, 2, 3, 4, 5].map((v) => [`jon:1:${v}`]))
+  })
+
   it("when both counts fit, it can't tell", () => {
     // Three chapters of one verse each: three files fit both.
     const tiny = book("gen", "GEN", "Genesis", [1, 1, 1])

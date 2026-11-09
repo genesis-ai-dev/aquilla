@@ -917,7 +917,12 @@ export function matchRecordings(
         if (n) lone.set(r.index, n)
       }
     }
-    const loneReading = lone.size > 0 ? readLoneNumbers(fi, lone, singleChapter, opts.lengths) : undefined
+    // AQU-2487 (review, Nov 9): the book's own chapter count decides only for
+    // a name that says the book or the chapter ("Jonah 1.wav"). A number alone
+    // ("01.wav", "07.wav") in a project holding one chapter is a verse, as in
+    // a one-chapter book: one file always "fits" one chapter, so the count
+    // would call an 8-second verse the whole chapter without reading its length.
+    const loneReading = lone.size > 0 ? readLoneNumbers(fi, lone, singleChapter || onlyChapterHere, opts.lengths) : undefined
     const byLength = loneReading && loneReading.as !== "unknown" && loneReading.byLengthMs != null
       ? { as: loneReading.as, ms: loneReading.byLengthMs }
       : undefined

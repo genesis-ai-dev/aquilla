@@ -64,7 +64,7 @@ export class Pcm16Mixer {
   private readonly out: Blob[] = []
   /** What a later part may still sound over: one untouched blob, or several
    *  parts already mixed into one stretch. */
-  private pending: { blob: Blob; samples: number } | { pcm: Int16Array } | null = null
+  private pending: { blob: Blob; samples: number } | { pcm: Int16Array<ArrayBuffer> } | null = null
   /** Where the last part ends inside `pending`, in samples. */
   private lastEnd = 0
   private written = 0
@@ -116,13 +116,13 @@ export class Pcm16Mixer {
   }
 }
 
-function grow(pcm: Int16Array, length: number): Int16Array {
+function grow(pcm: Int16Array<ArrayBuffer>, length: number): Int16Array<ArrayBuffer> {
   const out = new Int16Array(length)
   out.set(pcm)
   return out
 }
 
-async function readPcm16(blob: Blob, samples: number): Promise<Int16Array> {
+async function readPcm16(blob: Blob, samples: number): Promise<Int16Array<ArrayBuffer>> {
   const buf = await blob.arrayBuffer()
   return new Int16Array(buf, 0, Math.min(samples, Math.floor(buf.byteLength / 2)))
 }

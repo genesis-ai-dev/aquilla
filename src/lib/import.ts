@@ -1416,7 +1416,7 @@ export async function importTranslationNotes(
   assertSourceUploadByteLength(file.size)
   const rawBytes = await file.arrayBuffer()
   const text = decodeImportText(rawBytes, file.name)
-  const { strings, skippedCount } = parseTnTsv(text)
+  const { strings, skippedCount } = parseTnTsv(text, file.name)
 
   if (strings.length === 0) {
     throw new Error(

@@ -198,3 +198,37 @@ describe("parseTnTsv — original-language quote (AQU-527)", () => {
     expect(supportReferenceLabel(read.supportReference!)).toBe("creation")
   })
 })
+
+// AQU-2487 (import sweep, Nov 2): the format unfoldingWord publishes today.
+// Its Reference column is "1:1"; the book is only in the file name.
+describe("parseTnTsv — current unfoldingWord format (book in the file name)", () => {
+  const CURRENT = `Reference\tID\tTags\tSupportReference\tQuote\tOccurrence\tNote
+front:intro\tabc0\t\t\t\t0\t# Introduction to Genesis
+1:1\tabc1\t\trc://*/ta/man/translate/figs-merism\tהַשָּׁמַ֖יִם\t1\tThis is a merism.
+1:2\tabc2\t\t\t\t1\tNote for verse 2.`
+
+  it("takes the book from the file name", () => {
+    const { notes, strings, skippedCount } = parseTnTsv(CURRENT, "tn_GEN.tsv")
+    expect(skippedCount).toBe(0)
+    expect(notes.map((n) => n.canonicalRef)).toEqual(["GEN front:intro", "GEN 1:1", "GEN 1:2"])
+    expect(strings[1].globalReferences).toEqual(["GEN 1:1"])
+    expect(strings[1].section).toBe("GEN 1")
+    expect(notes[1].origQuote).toBe("הַשָּׁמַ֖יִם")
+  })
+
+  it("reads the book from the other names these files are given", () => {
+    for (const name of ["en_tn_57-TIT.tsv", "57-tit.tsv", "tn_tit.TSV"]) {
+      expect(parseTnTsv(CURRENT, name).notes[1].canonicalRef).toBe("TIT 1:1")
+    }
+  })
+
+  it("a reference that names its book keeps it, whatever the file is called", () => {
+    const { notes } = parseTnTsv("Reference\tID\tNote\nMAT 5:3\tx\tBlessed.", "tn_GEN.tsv")
+    expect(notes[0].canonicalRef).toBe("MAT 5:3")
+  })
+
+  it("still skips the rows when the file name names no book", () => {
+    expect(parseTnTsv(CURRENT, "my_new_notes.tsv")).toMatchObject({ notes: [], skippedCount: 3 })
+    expect(parseTnTsv(CURRENT)).toMatchObject({ notes: [], skippedCount: 3 })
+  })
+})

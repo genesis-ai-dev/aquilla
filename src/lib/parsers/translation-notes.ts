@@ -34,6 +34,8 @@
 
 import { v7 as uuidv7 } from "uuid"
 import type { TranslatableString } from "./types"
+import { bookCodeFromTsv } from "../dcs/routes/tsv-common"
+import { BOOK_CODES_BY_NUMBER } from "../paratext-bridge/book-codes"
 
 export interface TranslationNote {
   /** "BOOK CH:V" — e.g. "GEN 1:1" */
@@ -67,11 +69,26 @@ export interface TnParseResult {
  * - UTF-8 BOM at the start
  * - Windows (\r\n) and Unix (\n) line endings
  * - Any column order (reads the header row)
- * - The "Reference" single-column format (splits on ":")
+ * - The "Reference" single-column format ("GEN 1:1", or "1:1" with the book
+ *   taken from `fileName`)
  * - Missing optional columns (note id, support ref)
  * - Empty trailing lines
  */
-export function parseTnTsv(tsvText: string): TnParseResult {
+/** The 66 books unfoldingWord publishes notes for, plus Open Bible Stories. */
+const TN_BOOKS: ReadonlySet<string> = new Set([...BOOK_CODES_BY_NUMBER.slice(0, 66), "OBS"])
+
+/**
+ * AQU-2487 (import sweep, Nov 2): the book a notes file is for, from its name
+ * (`tn_GEN.tsv`, `en_tn_57-TIT.tsv`), read the way the Door43 route reads it.
+ * Null when the name holds no book, so "my_new_notes.tsv" is not book "NEW".
+ */
+function bookFromTnFileName(fileName: string | undefined): string | null {
+  if (!fileName) return null
+  const book = bookCodeFromTsv(fileName, "")
+  return TN_BOOKS.has(book) ? book : null
+}
+
+export function parseTnTsv(tsvText: string, fileName?: string): TnParseResult {
   // Strip BOM
   if (tsvText.charCodeAt(0) === 0xfeff) tsvText = tsvText.slice(1)
 
@@ -104,6 +121,7 @@ export function parseTnTsv(tsvText: string): TnParseResult {
   const iOccurrence = col(["occurrence", "occurrences"])
 
   const threeCol = iBook !== -1 && iChapter !== -1 && iVerse !== -1
+  const fileBook = bookFromTnFileName(fileName)
 
   const notes: TranslationNote[] = []
   const strings: TranslatableString[] = []
@@ -128,8 +146,12 @@ export function parseTnTsv(tsvText: string): TnParseResult {
       // Reference column may be "ch:v" or "book ch:v"
       const raw = (cols[iReference] ?? "").trim()
       if (raw.includes(":")) {
-        // If it already has a space before the colon-containing part, treat as full ref
-        canonicalRef = raw.includes(" ") ? raw : null
+        // If it already has a space before the colon-containing part, treat as full ref.
+        // AQU-2487 (import sweep, Nov 2): a bare "1:1" is what unfoldingWord
+        // publishes now, with the book only in the file name. Every such row
+        // used to be skipped, so the whole file was refused here while the
+        // same file imported through Door43.
+        canonicalRef = raw.includes(" ") ? raw : fileBook ? `${fileBook} ${raw}` : null
       }
     }
 

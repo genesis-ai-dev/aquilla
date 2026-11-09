@@ -8,7 +8,7 @@
 // selection brings its own actions; the rest appears where and when it is
 // needed.
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react"
 import { AudioWaveform, Check, Undo2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
@@ -18,6 +18,7 @@ import { historyView, newestMatchingStep, subscribeHistory, undoLast, undoStepBy
 import { useT } from "@/lib/i18n/I18nProvider"
 import { audioIdSeededWith } from "@/lib/audio/upload"
 import { isGeneratedTake } from "@/lib/audio/track-audio"
+import { stationStepMatch } from "@/lib/station/own-steps"
 import { levelsShown, STATION_PICKS } from "@/lib/station/picks"
 import { setStationUi } from "@/lib/station/ui"
 import { audioCachePutBlob } from "@/lib/audio/bytes-cache"
@@ -616,13 +617,9 @@ export function StationHeader({
   // change to THIS recording, even if you have changed other things since;
   // ⌘Z stays the project's newest step. Unsaved edits go first.
   const view = useSyncExternalStore(subscribeHistory, historyView, historyView)
-  const mine = useCallback(
-    (_kind: string, data: unknown) => {
-      const d = data as { cellId?: string; audioId?: string } | null
-      return d?.cellId === cellId && (d.audioId === undefined || d.audioId === audioId)
-    },
-    [cellId, audioId],
-  )
+  // AQU-2493 (review, Nov 9): only steps that change or approve THIS take;
+  // the line's text, timing and visibility are not the Station's to undo.
+  const mine = useMemo(() => stationStepMatch(cellId, audioId), [cellId, audioId])
   const step = STATION_PICKS.undoButton === "project" ? (view.nextUndo ?? null) : view.canUndo ? newestMatchingStep(mine) : null
   const canUndo = unsaved || step != null
   const undoTip = unsaved

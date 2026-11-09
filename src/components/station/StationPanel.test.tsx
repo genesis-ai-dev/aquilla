@@ -3,6 +3,8 @@ import { useState } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { historyReady, recordStep, registerStepKinds, resetHistoryForTests, setHistoryScope, type StepHandler } from "@/lib/history/history"
+import { clearHistoryStoreForTests } from "@/lib/history/history-store"
 import { __resetStationTargetForTests, getStationTarget, openInStation } from "@/lib/station/target"
 import { StationSave } from "./StationEdits"
 import { StationHeader, StationPanel, approvalState, versionKinds, versionOf } from "./StationPanel"
@@ -84,6 +86,74 @@ describe("the Station", () => {
     const take = makeTake()
     render(<StationHeader host={makeHost(take)} take={take} target={{ fileId: "f1", cellId: "c331", audioId: "t2.webm" }} />)
     expect(screen.getByTestId("station-undo").getAttribute("aria-disabled")).toBe("true")
+  })
+
+  // AQU-2493 (review, Nov 9; Sam, Oct 30: the Station's Undo undoes only the
+  // Station's last change). It lit up for, and took back, any step on the
+  // same line that named no take: a translation edit, a text approval, a
+  // retime, a hide.
+  describe("its own Undo acts only on changes to the open recording", () => {
+    const target = { fileId: "f1", cellId: "c331", audioId: "t2.webm" }
+    const undone: string[] = []
+    const handler = { undo: async (d: { name: string }) => (undone.push(d.name), { kind: "done" }), redo: async () => ({ kind: "done" }) } as unknown as StepHandler<never>
+    const KINDS = ["text.commit", "vote.text", "row.retime", "row.hidden", "take.select", "take.gain", "take.window", "take.add", "vote.audio"]
+    async function history() {
+      resetHistoryForTests()
+      await clearHistoryStoreForTests()
+      undone.length = 0
+      registerStepKinds(Object.fromEntries(KINDS.map((k) => [k, handler])))
+      setHistoryScope("p1", "ana")
+      await historyReady()
+    }
+    const step = (kind: string, data: Record<string, unknown>) => recordStep({ kind, data: { name: kind, ...data }, labelKey: "x", lane: null })
+    const greyed = () => screen.getByTestId("station-undo").getAttribute("aria-disabled") === "true"
+    afterEach(() => resetHistoryForTests())
+
+    it("stays greyed after a translation edit, a text approval, a retime, a hide or a take choice on the same line", async () => {
+      await history()
+      step("text.commit", { cellId: "c331", side: "target", lane: "" })
+      step("vote.text", { cellId: "c331", lane: "", voted: true })
+      step("row.retime", { cellId: "c331" })
+      step("row.hidden", { cellId: "c331", hidden: true })
+      step("take.select", { cellId: "c331", slot: "recording", before: "t1.webm", after: "t2.webm" })
+      const take = makeTake()
+      render(<StationHeader host={makeHost(take)} take={take} target={target} />)
+      expect(greyed()).toBe(true)
+      fireEvent.click(screen.getByTestId("station-undo"))
+      await act(async () => {})
+      expect(undone).toEqual([])
+    })
+
+    it("stays greyed for a change to another take of the line", async () => {
+      await history()
+      step("take.gain", { cellId: "c331", audioId: "t1.webm" })
+      const take = makeTake()
+      render(<StationHeader host={makeHost(take)} take={take} target={target} />)
+      expect(greyed()).toBe(true)
+    })
+
+    it("takes back this recording's last change, past newer changes to the line's text", async () => {
+      await history()
+      step("take.gain", { cellId: "c331", audioId: "t2.webm" })
+      step("text.commit", { cellId: "c331", side: "target", lane: "" })
+      step("row.hidden", { cellId: "c331", hidden: true })
+      const take = makeTake()
+      render(<StationHeader host={makeHost(take)} take={take} target={target} />)
+      expect(greyed()).toBe(false)
+      fireEvent.click(screen.getByTestId("station-undo"))
+      await waitFor(() => expect(undone).toEqual(["take.gain"]))
+    })
+
+    it("counts a trim, a save and an approval of this recording as its own", async () => {
+      for (const kind of ["take.window", "take.add", "vote.audio"]) {
+        await history()
+        step(kind, { cellId: "c331", audioId: "t2.webm" })
+        const take = makeTake()
+        const { unmount } = render(<StationHeader host={makeHost(take)} take={take} target={target} />)
+        expect(greyed()).toBe(false)
+        unmount()
+      }
+    })
   })
 
   it("an unsaved change shows as text under the name and Save sits between Undo and Approve, with no banner (Nov 2)", () => {

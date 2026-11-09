@@ -23,12 +23,14 @@
 // do not grow with the upstream.
 
 import { verifyTokenForProject } from '../auth'
-import { LINK_SYNC_INVOCATION_BUDGET_MS, mirrorSync, type MirrorSyncResult } from './link-sync'
+import { LINK_SYNC_INVOCATION_BUDGET_MS, mirrorSync, r2RevisionManifestReader, type MirrorSyncResult } from './link-sync'
 
 export interface LinkSyncRouteEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
   ProjectSync?: DurableObjectNamespace
+  /** AQU-2459: revision manifests (in-process sync only; the DO has its own). */
+  SNAPSHOTS?: R2Bucket
 }
 
 const PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/link\/sync$/
@@ -118,7 +120,11 @@ export async function handleLinkSyncRequest(
   } else {
     // No DO bound (dev/test without the DO namespace) — run in-process.
     // No single-flight guarantee in this mode; acceptable for local/test use.
-    runOnce = () => mirrorSync(AQUILLA_PG, projectId, { budgetMs: LINK_SYNC_INVOCATION_BUDGET_MS })
+    runOnce = () =>
+      mirrorSync(AQUILLA_PG, projectId, {
+        budgetMs: LINK_SYNC_INVOCATION_BUDGET_MS,
+        readRevisionManifest: r2RevisionManifestReader(env.SNAPSHOTS),
+      })
   }
 
   let result: MirrorSyncResult

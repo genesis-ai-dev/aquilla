@@ -75,6 +75,14 @@ export async function handleMigrateProjectRequest(
     const db = env.AQUILLA_PG
     const project = await db.prepare('SELECT id, name, org_id, archived_at FROM projects WHERE id = ?')
       .bind(projectId).first<{ id: string; name: string; org_id: number; archived_at: string | null }>()
+    // Archive admission is a read-only decision to NOT write. Stable identity and
+    // admin authentication still apply, but mutable placement must not prevent
+    // parking an archived destination. Active responses below validate placement
+    // again, so unarchiving never admits a transfer into the wrong org/team.
+    if (params.get('archiveStatus') === 'true' && project?.archived_at != null) {
+      return Response.json({ safetyVersion: 1, projectId, exists: true,
+        name: project.name, archived: true, placementDeferred: true })
+    }
     if (project && (Number(project.org_id) !== orgId)) {
       return Response.json({ error: 'Target project belongs to another org', code: 'TARGET_ORG_MISMATCH' }, { status: 409 })
     }

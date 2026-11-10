@@ -155,9 +155,28 @@ export const nav = defineNamespace({
     ),
     "nav.workspaceActions.batchValidate.nothingToValidate":
       "Nothing in this file can be batch-validated right now.",
-    // Optional trailing clause (AQU-586 per-run cap), concatenated last in the
-    // confirmation body built from the keys above — same composition as
-    // moreAfterThis.
+    // AQU-2507: the trailing clause the confirmation body actually uses now.
+    // One action validates the whole file; this says how it gets there, so a
+    // reviewer accepting a 2,870-cell pretranslated book is not left wondering
+    // whether they have to click again.
+    "nav.workspaceActions.batchValidate.runsToCompletion": plural(
+      {
+        one:
+          " It saves in batches of {cap} cell and keeps going until the file " +
+          "is done — one click is enough.",
+        other:
+          " It saves in batches of {cap} cells and keeps going until the file " +
+          "is done — one click is enough.",
+      },
+      "cap",
+    ),
+    // AQU-586's per-run cap note. RETIRED by AQU-2507 — nothing renders it,
+    // because the file-wide run no longer stops at the project's batch size.
+    // Left in the catalog rather than deleted: the 18 non-English catalogs are
+    // generated files that still carry a translation for it, and
+    // `unknownCatalogKeys` rejects a key they have and English does not.
+    // `runsToCompletion` above is a NEW key, not a reword, so no catalog can
+    // keep serving the sentence that became false.
     "nav.workspaceActions.batchValidate.capNote": plural(
       {
         one:
@@ -898,11 +917,23 @@ export const nav = defineNamespace({
           "a period and no trailing space.",
         maxLength: 160,
       },
+      "nav.workspaceActions.batchValidate.runsToCompletion": {
+        description:
+          "Clause appended last in that confirmation body when the run will take " +
+          "more than one batch. It reassures the reader that the single click " +
+          "finishes the file (AQU-2507); do NOT word it as an instruction to run " +
+          "again. Leading space is intentional.",
+        placeholders: {
+          cap: "How many cells the run saves per batch. Selects the plural form.",
+        },
+        maxLength: 140,
+      },
       "nav.workspaceActions.batchValidate.capNote": {
         description:
-          "Optional clause appended last in that confirmation body when the " +
-          "project caps how many cells one batch-validate run processes. Leading " +
-          "space is intentional.",
+          "RETIRED (AQU-2507) and no longer rendered anywhere: the file-wide run " +
+          "validates the whole file instead of stopping at the project's batch " +
+          "size. Kept only so the generated non-English catalogs stay valid. " +
+          "Leading space is intentional.",
         placeholders: {
           cap: "The project's configured per-run validation cap.",
         },

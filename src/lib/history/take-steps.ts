@@ -462,6 +462,9 @@ export function recordTakeAdded(
   how: keyof typeof TAKE_ADD_LABELS,
   data: TakeAddData,
   where: { fileId: string; fileName?: string | null },
+  /** AQU-2492 (review, Nov 9): recorded as the action starts, waiting on it
+   *  (`recordStep`'s `pending`). */
+  opts?: { pending?: Promise<boolean> },
 ): void {
   recordStep<TakeAddData>({
     kind: "take.add",
@@ -469,7 +472,7 @@ export function recordTakeAdded(
     labelKey: TAKE_ADD_LABELS[how],
     fileId: where.fileId,
     ...(where.fileName ? { fileName: where.fileName } : {}),
-  })
+  }, undefined, opts)
 }
 
 /**

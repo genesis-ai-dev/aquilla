@@ -251,13 +251,26 @@ describe("generateCombinedVoice routing", () => {
   // on every line, and each line names the voice that played before it.
   it("records one Undo step, an added voice on every line it voiced", async () => {
     vi.resetModules()
-    const groups: Array<{ label: Record<string, unknown>; parts: Array<Record<string, unknown>> }> = []
+    const groups: Array<{ label: Record<string, unknown>; parts: Array<Record<string, unknown>>; pending?: Promise<boolean> }> = []
+    // AQU-2492 (review, Nov 9), finding 15: recorded as it STARTS (before the
+    // clip is made), waiting on it, and filled in with the clip's id when it lands.
+    let groupsAtSynth = -1
+    let completed: unknown = null
     vi.doMock("@/lib/history/history", async (orig) => ({
       ...(await orig<typeof import("@/lib/history/history")>()),
-      recordGroup: (label: Record<string, unknown>, parts: Array<Record<string, unknown>>) => { groups.push({ label, parts }) },
+      recordGroup: (label: Record<string, unknown>, parts: Array<Record<string, unknown>>, opts?: { pending?: Promise<boolean> }) => {
+        groups.push({ label, parts, pending: opts?.pending })
+        return "group-1"
+      },
+      completeStep: (id: string, update: (d: unknown) => unknown) => {
+        completed = { id, data: update({ steps: groups[0]!.parts }) }
+      },
     }))
     vi.doMock("@/lib/sync/tts", () => ({
-      synthesizeCellTts: vi.fn(async () => ({ audioId: "a", durationSeconds: 1, objectName: "a.wav", url: "frontier-audio://a.wav" })),
+      synthesizeCellTts: vi.fn(async () => {
+        groupsAtSynth = groups.length
+        return { audioId: "a", durationSeconds: 1, objectName: "a.wav", url: "frontier-audio://a.wav" }
+      }),
     }))
     vi.doMock("./tts", () => ({ synthesizeForCell: vi.fn(), setTtsStatus: vi.fn(), ttsStatusKey: (s: string) => s }))
     vi.doMock("./voices", () => ({
@@ -295,7 +308,10 @@ describe("generateCombinedVoice routing", () => {
     // window the clip was attached with (none: the whole clip), so once the
     // line's slice is set the Undo is skipped as "changed since" and never
     // takes the voice off over it.
-    expect(groups[0].parts).toEqual([
+    expect(groupsAtSynth).toBe(1)
+    expect(await groups[0].pending).toBe(true)
+    expect(completed).toMatchObject({ id: "group-1" })
+    expect((completed as { data: { steps: unknown[] } }).data.steps).toEqual([
       expect.objectContaining({ kind: "take.add", fileId: "f", data: { cellId: "c1", audioId: result.audioId, slot: "generatedVoice", selectedBefore: "old-voice.wav", window: {} } }),
       expect.objectContaining({ kind: "take.add", fileId: "f", data: { cellId: "c2", audioId: result.audioId, slot: "generatedVoice", selectedBefore: null, window: {} } }),
     ])

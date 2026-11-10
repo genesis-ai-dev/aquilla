@@ -1795,6 +1795,22 @@ function progFilmClockDone(lead: ProgLead, sec: number, over: boolean): void {
   // playhead does not step back to the line's start at every line.
   const slot = slotAtProgrammeSec(prog, sec)
   const index = slot ? prog.slots.indexOf(slot) : -1
+  // AQU-2253 (review 2, Nov 9): …but never past a line with sound of its own.
+  // The film reports about four times a second, so one report can land past
+  // a short take between two lines it carries (a "Yes", a laugh: under about
+  // a quarter of a second at 1x, half a second at 2x). The first such line it
+  // passed plays, from its start; the film then follows it, as under any take.
+  // (Past the last line: every line after this one was passed. A line with
+  // no time of its own to play is no stop, whatever sounds across it.)
+  const reached = slot ? index : prog.slots.length
+  for (let i = progIndex + 1; i < reached; i++) {
+    const passed = prog.slots[i]
+    if (passed.slotLenSec <= HOLD_MIN_SEC) continue
+    if (progSlotHasSound(passed) || progSlotHolds(passed, passed.startSec)) {
+      void progPlaySlot(i, null, true, false, true)
+      return
+    }
+  }
   if (slot && index >= progIndex && progPlaysThroughSilence(slot)) {
     void progPlaySlot(index, sec, true, false)
     return

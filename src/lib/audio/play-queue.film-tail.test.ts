@@ -1593,3 +1593,83 @@ describe("Skip lines with nothing to play lands only where there is nothing at a
     })
   })
 })
+
+// AQU-2253 (review 2, Nov 9), finding 3: under a line with nothing of its own
+// the playhead is the film's own report, about four times a second. A report
+// that landed past the end of the NEXT line too, where the line after that was
+// also the film's, went straight there: a short take in between (a "Yes", a
+// laugh) was never heard, and nothing showed it.
+describe("a short take between two lines the film carries is played, however the film's reports fall", () => {
+  /** The panel's film, reporting by hand: the stand-in stays quiet. */
+  const reportsAt = async (secs: number[]) => {
+    for (const sec of secs) {
+      await wait(250)
+      tickProgrammeFilm(sec)
+    }
+    await wait()
+  }
+
+  it("a report landing past a 0.2 s take: the take plays from its start, then the film carries on", async () => {
+    // b1 a stand-in [0, 1.5); b2 recorded 0.2 s [1.5, 1.7); b3 a stand-in [1.7, 3.2).
+    const cells = [line("b1"), line("b2", 200), line("b3")]
+    linkFilm(10, cells)
+    film.stuck = true
+    startQueue(ctxFor(cells), 0)
+    await wait()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b1" })
+    // Uneven steps: the last lands at 1.70, past b2's end.
+    await reportsAt([0.2, 0.45, 0.7, 0.95, 1.2, 1.45, 1.7])
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(1.5, 2)
+    expect(el("b2")!.paused).toBe(false)
+    expect(getQueueProgress().filmClock).toBe(false)
+    // The take plays out; the film carries b3.
+    el("b2")!.tick(0.2)
+    await wait()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+    expect(getQueueProgress().filmClock).toBe(true)
+  })
+
+  it("at double speed too: a 0.4 s take a report lands past is played", async () => {
+    setQueueRate(2)
+    // b1 a stand-in [0, 1.5); b2 recorded 0.4 s [1.5, 1.9); b3 a stand-in [1.9, 3.4).
+    const cells = [line("b1"), line("b2", 400), line("b3")]
+    linkFilm(10, cells)
+    film.stuck = true
+    startQueue(ctxFor(cells), 0)
+    await wait()
+    // Half a second of film per beat; the last lands at 1.95.
+    await reportsAt([0.45, 0.95, 1.45, 1.95])
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(1.5, 2)
+    expect(el("b2")!.paused).toBe(false)
+  })
+
+  it("a report landing past two lines the film carries, with nothing recorded between, still goes straight on", async () => {
+    // b1 [0, 1.5), b2 [1.5, 3), b3 [3, 4.5): all stand-ins.
+    const cells = [line("b1"), line("b2"), line("b3")]
+    linkFilm(10, cells)
+    film.stuck = true
+    startQueue(ctxFor(cells), 0)
+    await wait()
+    await reportsAt([0.5, 1.0, 3.2])
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(3.2, 2)
+  })
+
+  it("the film ending inside a line is not a line passed: the rest of it is crossed, then the take after it plays at its place", async () => {
+    // b1 [0, 1.5) and b2 [1.5, 3) stand-ins; b3 recorded 1 s [3, 4). The film is 2 s.
+    const cells = [line("b1"), line("b2"), line("b3", 1_000)]
+    linkFilm(2, cells)
+    film.stuck = true
+    startQueue(ctxFor(cells), 0)
+    await wait()
+    await reportsAt([0.5, 1.0, 1.5, 1.75])
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(1.75, 1)
+    await wait(950)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    await wait(400)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+  })
+})

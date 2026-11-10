@@ -307,7 +307,7 @@ describe("a line with no room, under a layer (AQU-2432)", () => {
     for (let i = 0; i < 12; i++) {
       await Promise.resolve()
       const s = getQueueState()
-      if (s.kind !== "idle" && "cellId" in s) playing.push(s.cellId)
+      if (s.kind !== "idle" && "cellId" in s && s.cellId) playing.push(s.cellId)
     }
     await settle()
     expect(playing).not.toContain("b")

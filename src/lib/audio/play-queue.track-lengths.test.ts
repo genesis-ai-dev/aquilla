@@ -530,7 +530,7 @@ describe("an unrecorded line's room, on lines with an original (AQU-2432)", () =
     for (let i = 0; i < 12; i++) {
       await Promise.resolve()
       const st = getQueueState()
-      if (st.kind !== "idle" && "cellId" in st) playing.push(st.cellId)
+      if (st.kind !== "idle" && "cellId" in st && st.cellId) playing.push(st.cellId)
     }
     await settle()
     expect(playing).not.toContain("s2")

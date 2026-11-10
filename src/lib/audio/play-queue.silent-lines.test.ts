@@ -15,6 +15,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   getQueueProgress,
   getQueueState,
+  hasAnyPlayableAudio,
+  linesHaveAnythingToPlay,
   onQueueRanOut,
   pauseQueue,
   resumeQueue,
@@ -374,5 +376,64 @@ describe.each([
     } finally {
       off()
     }
+  })
+})
+
+// AQU-2253 (Sam, Nov 9): "the rule 'skip lines with nothing to play' should
+// only land when there is literally nothing to play: recorded or source." A
+// line whose only sound is its original (a section of an imported recording
+// nobody has recorded over) has its source to play: it is never skipped, and
+// it is something to play for the Play button and for Play all's run into the
+// next chapter, whether or not the original is the line's selected audio.
+describe("a line with only its original is never skipped (Sam, Nov 9)", () => {
+  const SOURCE_ID = "audio-f1-1690000000-shared.mp3"
+  /** A section of an imported recording, nothing recorded over it. */
+  const section = (id: string, start: number, end: number, selected: boolean): CellData =>
+    ({
+      id,
+      fileId: "f1",
+      original: `${id} words`,
+      translated: "",
+      medium: "media",
+      startTime: start,
+      endTime: end,
+      ...(selected ? { selectedAudioId: SOURCE_ID } : {}),
+      attachments: { [SOURCE_ID]: { type: "audio", url: "http://audio.test/clip.mp3" } },
+    }) as unknown as CellData
+
+  /** A timed line of the same file with a take of `takeMs`, and no original. */
+  const timed = (id: string, start: number, end: number, takeMs?: number): CellData =>
+    ({ ...bookLine(id, takeMs), medium: "media", startTime: start, endTime: end }) as CellData
+
+  for (const selected of [true, false]) {
+    const which = selected ? "the line's selected audio" : "not the line's selected audio"
+
+    it(`with Skip on, Play all plays it (the original ${which})`, async () => {
+      // b1 recorded 2 s [0, 2); s2 only its original, 3 s [2, 5); b3 recorded 3 s [5, 8).
+      startQueue(ctxFor([timed("b1", 0, 2, 2_000), section("s2", 10, 13, selected), timed("b3", 20, 23, 3_000)]), 0)
+      await wait()
+      dubEl("b1")!.tick(2)
+      await wait()
+      expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "s2" })
+      expect(getQueueProgress().currentTime).toBeCloseTo(2, 2)
+      expect(FakeAudio.instances.some((a) => a.src.includes("clip.mp3") && !a.paused)).toBe(true)
+    })
+
+    it(`next line goes to it, and the Play button has something to play (the original ${which})`, async () => {
+      const cells = [timed("b1", 0, 2, 2_000), section("s2", 10, 13, selected), timed("b3", 20, 23, 3_000)]
+      startQueue(ctxFor(cells), 0)
+      await wait()
+      skipForward()
+      await wait()
+      expect(getQueueState()).toMatchObject({ cellId: "s2" })
+      // Only originals, nothing recorded: still something to play.
+      expect(hasAnyPlayableAudio([section("s1", 0, 3, selected), section("s2", 3, 6, selected)])).toBe(true)
+      expect(linesHaveAnythingToPlay([section("s1", 0, 3, selected)], null)).toBe(true)
+    })
+  }
+
+  it("a line with no recording and no original is still nothing to play", () => {
+    expect(hasAnyPlayableAudio([bookLine("b1"), bookLine("b2")])).toBe(false)
+    expect(linesHaveAnythingToPlay([bookLine("b1"), bookLine("b2")], null)).toBe(false)
   })
 })

@@ -5069,9 +5069,15 @@ export function updateQueueCells(cells: CellData[]): void {
 }
 
 /** Whether any cell in the list has playable audio. Drives the bar's
- *  Play button enablement. */
+ *  Play button enablement.
+ *
+ *  AQU-2253 (Sam, Nov 9): "recorded or source". What the queue plays for a
+ *  line (`masterAudioForCell`): a section of an imported recording plays its
+ *  original whether or not that is the line's selected audio, so a line with
+ *  only its original is something to play here too, as it is to the queue,
+ *  which never skips it. */
 export function hasAnyPlayableAudio(cells: CellData[]): boolean {
-  return cells.some((c) => pickPlayableAudio(c) !== undefined)
+  return cells.some((c) => masterAudioForCell(c) !== undefined)
 }
 
 /**

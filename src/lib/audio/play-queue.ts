@@ -1760,6 +1760,29 @@ function progForgetFilmQuiet(): void {
   setProgress({})
 }
 
+/**
+ * Film bundle merge (Nov 9): the film, heard from again, takes back the rest
+ * of the line the queue's timer was crossing for it. The panel reads
+ * `filmClock`, which is true again the moment the film is not quiet, to know
+ * that the film is the clock: there it stops keeping the film with the
+ * playhead and runs its stall watchdog (nudge, recover, rebuild, "Click to
+ * start"). Left on the timer, the playhead ran on over a film the panel no
+ * longer kept with it, and a film stalling again was nudged, re-seeked and
+ * rebuilt under a clock that was not the film's. Now, as on any line the film
+ * carries, a stall is waited for, and after 3 s given up again.
+ */
+function progFilmBackOnLine(): void {
+  const lead = progLead
+  const slot = progCurrentSlot()
+  if (!lead || lead.film || lead.then !== "next" || !slot || lead.cellId !== slot.cellId) return
+  if (!progRunning() || state.kind !== "playing") return
+  const now = progLeadNowSec(lead)
+  if (!progFilmIsClockAt(now)) return
+  const lineEnd = slot.startSec + slot.slotLenSec
+  progArmFilmClock(slot, now, lead.explicit, "next", Math.min(lineEnd, progFilmCoverSec - FILM_END_GUARD_SEC), null)
+  setProgress({ currentTime: now })
+}
+
 /** Hold the clock on the FILM from `atSec`: over the rest of a line with
  *  nothing to play ("next", then the line the film has reached) or over the
  *  film's tail ("hold", then `onEnd`). No timer moves or ends it; its ticker
@@ -1801,8 +1824,10 @@ export function tickProgrammeFilm(sec: number, over = false): void {
   // from again once it reports moving on (the panel reports it while it
   // follows the playhead too); the next line it carries is its clock again.
   if (progFilmQuiet && progRunning() && Number.isFinite(sec)) {
-    if (progFilmQuietSec != null && sec > progFilmQuietSec + 0.001) progForgetFilmQuiet()
-    else progFilmQuietSec = sec
+    if (progFilmQuietSec != null && sec > progFilmQuietSec + 0.001) {
+      progForgetFilmQuiet()
+      progFilmBackOnLine()
+    } else progFilmQuietSec = sec
   }
   const lead = progLead
   const film = lead?.film

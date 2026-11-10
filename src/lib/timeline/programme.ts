@@ -116,6 +116,14 @@ export interface ProgrammeSlot {
    */
   naturalLenSec?: number
   /**
+   * AQU-2432 (review, Nov 9): an unrecorded line with a room STORED at or
+   * above its natural length (its words were shortened since): the room
+   * narrows nothing and is not set, and the next drag that writes this line's
+   * room or the next take's place clears it (`roomsForMove`) — left stored, it
+   * cut the line again the day its words grew back.
+   */
+  staleRoom?: true
+  /**
    * AQU-2252: the line's takes on every track but the Language lane's main
    * one, piece by piece. Absent when it has none. See `ProgrammeLayer`.
    */
@@ -776,6 +784,7 @@ export function buildProgramme(cells: readonly CellData[], opts?: BuildProgramme
       ...(targetLeadSec > 0 ? { targetLeadSec } : {}),
       ...(pulledBackSec > 0 ? { pulledBackSec } : {}),
       ...(roomCut ? { naturalLenSec: unrecordedLenSec } : {}),
+      ...(roomSec != null && !roomCut ? { staleRoom: true as const } : {}),
       ...(layers.length > 0 ? { layers } : {}),
     }
     slots.push(slot)
@@ -1189,12 +1198,15 @@ export function roomsForMove(
   const run = unrecordedRunBefore(prog, slot)
   if (run.length === 0) return null
   const delta = toStartSec - fromStartSec
+  // A nudge under the wobble writes nothing at all.
+  if (Math.abs(delta) < MIN_TARGET_LEAD_SEC) return null
   const rooms: LineRoomChange[] = []
+  let takeStartSec: number
   if (delta < 0) {
     const ownPause = Math.min(Math.max(0, fromStartSec - naturalStartSec(slot)), -delta)
     let close = -delta - ownPause
-    if (close < MIN_TARGET_LEAD_SEC) return null
-    for (const line of run) {
+    takeStartSec = fromStartSec - ownPause
+    for (const line of close < MIN_TARGET_LEAD_SEC ? [] : run) {
       const by = Math.min(line.slotLenSec, close)
       if (by <= 0) continue
       // AQU-2432 (review, Nov 9): a sliver under MIN_ROOM_SEC is none.
@@ -1202,24 +1214,31 @@ export function roomsForMove(
       close -= by
       if (close <= ROOM_EPS_SEC) break
     }
-    return rooms.length > 0 ? { rooms, takeStartSec: fromStartSec - ownPause } : null
+  } else {
+    let give = delta
+    for (const line of run) {
+      const natural = line.naturalLenSec ?? line.slotLenSec
+      const by = Math.min(natural - line.slotLenSec, give)
+      if (by <= 0) continue
+      const room = line.slotLenSec + by
+      // Back at its natural length: nothing is stored. AQU-2432 (review,
+      // Nov 9): a sliver under MIN_ROOM_SEC is none, and a line with none
+      // already is left as it is.
+      const roomMs = room >= natural - ROOM_EPS_SEC ? null : roomMsToStore(room)
+      if (!(roomMs === 0 && line.slotLenSec === 0)) rooms.push({ cellId: line.cellId, roomMs })
+      give -= by
+      if (give <= ROOM_EPS_SEC) break
+    }
+    takeStartSec = fromStartSec + Math.max(0, give)
   }
-  if (delta < MIN_TARGET_LEAD_SEC) return null
-  let give = delta
+  // AQU-2432 (review, Nov 9): a room stored at or above its line's natural
+  // length narrows nothing; this move writes a room or the take's own place,
+  // so it clears every such room before the take in the same step.
+  const touched = new Set(rooms.map((r) => r.cellId))
   for (const line of run) {
-    const natural = line.naturalLenSec ?? line.slotLenSec
-    const by = Math.min(natural - line.slotLenSec, give)
-    if (by <= 0) continue
-    const room = line.slotLenSec + by
-    // Back at its natural length: nothing is stored. AQU-2432 (review,
-    // Nov 9): a sliver under MIN_ROOM_SEC is none, and a line with none
-    // already is left as it is.
-    const roomMs = room >= natural - ROOM_EPS_SEC ? null : roomMsToStore(room)
-    if (!(roomMs === 0 && line.slotLenSec === 0)) rooms.push({ cellId: line.cellId, roomMs })
-    give -= by
-    if (give <= ROOM_EPS_SEC) break
+    if (line.staleRoom && !touched.has(line.cellId)) rooms.push({ cellId: line.cellId, roomMs: null })
   }
-  return rooms.length > 0 ? { rooms, takeStartSec: fromStartSec + Math.max(0, give) } : null
+  return rooms.length > 0 ? { rooms, takeStartSec } : null
 }
 
 /**

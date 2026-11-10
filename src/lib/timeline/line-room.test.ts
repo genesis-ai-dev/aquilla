@@ -225,6 +225,45 @@ describe("2. dragging later gives the room back first, then is the take's own pa
     expect(c.startSec + (c.targetLeadSec ?? 0)).toBe(11) // where it was dropped
   })
 
+  // AQU-2432 (review, Nov 9): a stored room that no longer narrows its line
+  // (its natural length shrank below it: the text was shortened) is not set —
+  // and the next write of that line's room or of the next take's place clears
+  // it, so it can never cut the line again later by itself.
+  describe("a stored room at or above the line's natural length", () => {
+    const natural = (bSec: number): BuildProgrammeOptions => ({ standInLenSec: (c) => (c.id === "b" ? bSec : 4) })
+    const cells = () => [bookLine("a", { take: { durationMs: 5_000 } }), bookLine("b", { roomMs: 3_000 }), bookLine("c", { take: { durationMs: 6_000 } })]
+
+    it("is not set: the line shows whole", () => {
+      expect(spans(cells(), natural(4))).toEqual([[0, 5], [5, 8], [8, 14]])
+      expect(spans(cells(), natural(2))).toEqual([[0, 5], [5, 7], [7, 13]])
+      expect(buildProgramme(cells(), natural(2)).slots[1].naturalLenSec).toBeUndefined()
+    })
+
+    it("is cleared by the next take's drag later, in the same step as the take's pause — so the text growing again cuts nothing", () => {
+      const { rooms, place } = drag(cells(), "c", 9, natural(2))
+      expect(rooms).toEqual([{ cellId: "b", roomMs: null }])
+      expect(place?.recordingsOffsetMs).toBe(2_000)
+      const after = withRooms(cells(), rooms!)
+      expect(spans(after, natural(6))).toEqual([[0, 5], [5, 11], [11, 17]])
+    })
+
+    it("is cleared by the next take's drag earlier that closes only the take's own pause", () => {
+      const paused = cells().map((c) => (c.id === "c" ? bookLine("c", { take: { durationMs: 6_000, recordingsOffsetMs: 1_000 } }) : c))
+      // c's line starts at 7, its take at 8; dragged to 7: the pause closes.
+      const { rooms, place } = drag(paused, "c", 7, natural(2))
+      expect(rooms).toEqual([{ cellId: "b", roomMs: null }])
+      expect(place?.recordingsOffsetMs).toBe(0)
+    })
+
+    it("is replaced when the drag closes the line's room", () => {
+      expect(drag(cells(), "c", 6, natural(2)).rooms).toEqual([{ cellId: "b", roomMs: 1_000 }])
+    })
+
+    it("a nudge under the wobble writes nothing, so it stays as it is", () => {
+      expect(drag(cells(), "c", 7.02, natural(2)).rooms).toBeNull()
+    })
+  })
+
   it("with the room whole, a drag later is the take's pause alone, as before", () => {
     const whole = [bookLine("a", { take: { durationMs: 5_000 } }), bookLine("b"), bookLine("c", { take: { durationMs: 6_000 } })]
     const { rooms, place } = drag(whole, "c", 10.5)

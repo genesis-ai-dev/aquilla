@@ -683,6 +683,19 @@ Known gap: Agent API keys (`aqk_…`) and MCP OAuth tokens are checked by the
 sync Worker straight from Postgres, which does not read this list. Minting a
 new key on dev is gated; keys copied from prod by the nightly refresh are not.
 
+### No emailed admin code on dev (AQU-2470)
+
+Because the list closes dev, platform admins there skip the emailed 6-digit
+step-up code: the admin console and admin-power writes (for example adding a
+member to another org's project) go straight through. Audit rows are still
+written. `adminElevationRequired` in `auth-worker/src/middleware/platform-admin.ts`
+makes the skip with the same test the list uses, so it applies to
+`aquilla-dev-identity` only. Production, the per-branch previews, and a Worker
+whose name is unset or unknown still ask for the code.
+`ADMIN_REQUIRE_ELEVATION` stays `"true"` in the development profile so that, if
+the name test ever stops matching, the code comes back instead of the console
+opening.
+
 ## Change checklist
 
 An environment change is one atomic contract change. Update and verify all of:

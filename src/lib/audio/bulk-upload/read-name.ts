@@ -61,6 +61,24 @@ const MARKERS: ReadonlyMap<string, NumberMarker> = new Map([
   ...["take", "tk"].map((w) => [w, "take"] as const),
 ])
 
+/**
+ * AQU-2496 (review, Nov 9): words that mean "take" or "version", or another
+ * copy of the same recording, in the languages teams name files in. After a
+ * reference's numbers, the number such a word gives is that take's, never a
+ * verse: "Génesis 1 toma 2" is the whole of Genesis 1, take 2. ("take" and
+ * "tk" are take markers anywhere, in MARKERS.) Expected to grow: add a word
+ * here when a team's names use one the app doesn't know yet.
+ */
+const TAKE_OR_VERSION_WORDS: ReadonlySet<string> = new Set([
+  // take
+  "toma", "tomada", "prise", "aufnahme", "ripresa", "opname", "дубль",
+  // version, revision
+  "version", "versión", "versao", "versão", "versione", "versie", "fassung",
+  "rev", "revision", "révision", "revisión", "revisao", "revisão",
+  // another copy of one recording ("Genesis 1 copy 2", as a Mac names it)
+  "copy", "copia", "cópia", "copie", "kopie",
+])
+
 /** Markers written after their number. */
 const POSTFIX_MARKERS = new Set(["章", "篇", "节", "節"])
 
@@ -294,6 +312,11 @@ export function readName(fileName: string, index: BookNameIndex): NameReading {
         pendingSep += ` ${w} `
         continue
       }
+      if (started && !stopped && TAKE_OR_VERSION_WORDS.has(w)) {
+        pendingMarker = "take"
+        pendingSep = ""
+        continue
+      }
       // An ordinary word after the numbers ends the reference: "Genesis 1-1
       // ENGESV 2023" must not read 2023 as a part.
       if (started && !stopped) stopWord = t.text
@@ -308,7 +331,10 @@ export function readName(fileName: string, index: BookNameIndex): NameReading {
     }
     // A number.
     if (stopped) {
-      afterStop.push(t.value)
+      // AQU-2496 (review, Nov 9): digits run on to the letters before them
+      // ("RVR60", "NIV84", "…O2DA") are part of that word, a version's code,
+      // never a verse.
+      if (toks[i - 1]?.kind !== "word") afterStop.push(t.value)
       continue
     }
     const sep = pendingSep.trim().length > 0 ? pendingSep.trim() : pendingSep.length > 0 ? " " : ""

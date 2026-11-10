@@ -16,6 +16,7 @@ import {
   type TargetFile,
   type TargetLine,
 } from "./match"
+import { LAST_VERSES } from "./verse-counts"
 
 const MB = 1024 * 1024
 
@@ -886,6 +887,68 @@ describe("Bible audio named the Digital Bible Platform's way", () => {
   it("other names that start with a letter and a number read as before", () => {
     expect(chapterOf("A01 Genesis 1-3.mp3")).toEqual(["GEN", [1, 3]])
     expect(chapterOf("B2_Genesis_4.mp3")).toEqual(["GEN", [4]])
+  })
+})
+
+// AQU-2496 (review, Nov 9): the rule that lists "Ruthu sura 2 mstari 5" as
+// unread also refused whole-chapter names dev read right: one chapter of a
+// "Genesis 24 RVR60" folder (only Genesis 24 has a verse 60), and every take
+// or version of a chapter ("Génesis 1 toma 2", "Psalm 23 Version 2").
+describe("a whole chapter's name with a version code, a take or a version after it", () => {
+  const real = (fileId: string, code: string, name: string) => book(fileId, code, name, [...LAST_VERSES[code]])
+  const gen = real("gen", "GEN", "Genesis")
+  const inBook = (fileId: string): MatchScope => ({ kind: "file", fileId })
+
+  it("a version code run on to its number is never a verse: every chapter lands", () => {
+    const genesis = Array.from({ length: 50 }, (_, i) => audio(`Genesis/Genesis ${i + 1} RVR60.mp3`))
+    const g = run(genesis, [gen], inBook("gen")).assignments
+    expect(g.map((a) => a.read)).toEqual(genesis.map((_, i) => `Genesis ${i + 1}`))
+    expect(g[23].cellIds).toHaveLength(67)
+    const john = Array.from({ length: 21 }, (_, i) => audio(`John/John ${i + 1} RVR60.mp3`))
+    expect(run(john, [real("jhn", "JHN", "John")], inBook("jhn")).assignments[5].read).toBe("John 6")
+    const psalms = Array.from({ length: 150 }, (_, i) => audio(`Psalms/Psalms ${i + 1} NIV84.mp3`))
+    const p = run(psalms, [real("psa", "PSA", "Psalms")], inBook("psa")).assignments
+    expect(p.every((a) => a.cellIds)).toBe(true)
+    expect(p[118]).toMatchObject({ read: "Psalms 119" })
+  })
+
+  it("a word for a take or a version gives the take's number, never a verse", () => {
+    const index = new BookNameIndex()
+    index.addProjectName("Génesis", "GEN")
+    const files = ["Génesis 1 toma 1", "Génesis 1 toma 2", "Génesis 2 toma 1", "Génesis 3 toma 1"].map((n) => audio(`Génesis/${n}.mp3`))
+    const a = run(files, [gen], inBook("gen"), index).assignments
+    // As on dev: each chapter's first take lands; a second take of a whole
+    // chapter can't share its lines.
+    expect(a.map((x) => x.read ?? x.reason?.code)).toEqual(["Genesis 1", "duplicate", "Genesis 2", "Genesis 3"])
+    expect(a[0].take).toBe(1)
+    const psalms = [audio("Psalm 23 Version 2.mp3"), audio("Psalm 24 Version 1.mp3")]
+    const p = run(psalms, [real("psa", "PSA", "Psalms")], inBook("psa")).assignments
+    expect(p.map((x) => [x.read, x.take])).toEqual([["Psalms 23", 2], ["Psalms 24", 1]])
+  })
+
+  it.each(["take", "toma", "prise", "version", "versión", "versão", "rev", "copy"])("%s, after the chapter, is followed by a take's number", (word) => {
+    const r = readName(`Ruth 2 ${word} 3.mp3`, new BookNameIndex())
+    expect(r.numbers.map((n) => [n.value, n.marker])).toEqual([[2, undefined], [3, "take"]])
+    expect(r.afterWord).toBeNull()
+  })
+
+  it("before any number such a word is an ordinary word, as it was", () => {
+    const letter = doc("d", "Letter", 20)
+    expect(run([audio("Letter version 4.mp3")], [letter], inBook("d")).assignments[0].cellIds).toEqual(["d#4"])
+  })
+
+  // The call (review, Nov 9): "Ruth 1 ESV 16" can be the whole chapter in the
+  // ESV's 2016 edition, or Ruth 1:16 in the ESV, and the two put the
+  // recording on 22 lines or on one. 16 is a verse of Ruth 1, so the name is
+  // listed with the word, the assistant offered and the line one click away,
+  // rather than one verse's recording silently sounding over the chapter.
+  // Written as one code ("ESV16"), or with a number no verse of the book
+  // has ("ESV 2016"), it is the chapter.
+  it("a code and a number a verse of the chapter could be is asked about; run together, or past every verse, it is the chapter", () => {
+    const ruth = real("rut", "RUT", "Ruth")
+    expect(run([audio("Ruth 1 ESV 16.mp3")], [ruth], inBook("rut")).assignments[0].reason).toEqual({ code: "wordBeforeNumber", word: "ESV" })
+    expect(run([audio("Ruth 1 ESV16.mp3")], [ruth], inBook("rut")).assignments[0].cellIds).toHaveLength(22)
+    expect(run([audio("Ruth 1 ESV 2016.mp3")], [ruth], inBook("rut")).assignments[0].cellIds).toHaveLength(22)
   })
 })
 

@@ -43,8 +43,7 @@ import { keptWindowSec, piecesWindowSec, type KeptWindow } from "@/lib/audio/kep
 import { takeTrackVars } from "@/lib/timeline/take-colors"
 import { TRACK_DOT_CLASS } from "@/lib/timeline/track-colors"
 import { persistTakeTrim, trimMs } from "@/lib/audio/persist-trim"
-import { recordStep } from "@/lib/history/history"
-import { playingInSlot } from "@/lib/history/take-steps"
+import { playingInSlot, recordTakeWindowRun } from "@/lib/history/take-steps"
 import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
 import { transcribeTake } from "@/lib/audio/transcribe-take"
 import { isGeneratedTake } from "@/lib/audio/track-audio"
@@ -279,13 +278,10 @@ function CellTakeBlockView({
     // (possibly on another line). The step and its guard are the timeline's.
     const before = { trimStartMs: attachment.trimStartMs ?? undefined, trimEndMs: attachment.trimEndMs ?? undefined }
     const after = { trimStartMs: trimMs(start) ?? undefined, trimEndMs: trimMs(end) ?? undefined }
+    // Finding 14 (same review): a held arrow key saves on every repeat; a run
+    // of them close together is one step.
     if (before.trimStartMs !== after.trimStartMs || before.trimEndMs !== after.trimEndMs) {
-      recordStep({
-        kind: "take.window",
-        data: { cellId: owner.id, audioId: selectedAudioId, before, after },
-        labelKey: "editor.history.stepTrim",
-        fileId: owner.fileId,
-      })
+      recordTakeWindowRun({ cellId: owner.id, audioId: selectedAudioId, before, after }, { fileId: owner.fileId })
     }
     void persistTakeTrim({
       projectId: project.id,

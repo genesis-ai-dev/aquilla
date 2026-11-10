@@ -1,9 +1,20 @@
 // AQU-1767: undo and redo of trims, moves, cuts — and (phase 2) choosing,
 // deleting and renaming takes — with the "changed since" guard.
-import { describe, it, expect, vi } from "vitest"
-import { takeStepHandlers, type CutRecord, type TakeStepContext } from "./take-steps"
+import { beforeEach, describe, it, expect, vi } from "vitest"
+import { recordTakeWindowRun, takeStepHandlers, type CutRecord, type TakeStepContext } from "./take-steps"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
-import type { StepHandler } from "./history"
+import {
+  historyReady,
+  historyView,
+  matchingSteps,
+  recordStep,
+  registerStepKinds,
+  resetHistoryForTests,
+  setHistoryScope,
+  undoLast,
+  type StepHandler,
+} from "./history"
+import { clearHistoryStoreForTests } from "./history-store"
 
 type Takes = Record<string, Partial<CodexCellAttachment>>
 
@@ -723,5 +734,42 @@ describe("undoing and redoing a delete (AQU-2492)", () => {
     const { ctx, handlers } = line(takes, { id: "take1" })
     expect(await handlers["take.remove"].redo(removed)).toEqual({ kind: "done" })
     expect(ctx.remove).toHaveBeenCalledWith("c", "take1")
+  })
+})
+
+// AQU-2492 (review, Nov 9), finding 14: holding an arrow key on a Recording-
+// tab trim line saves on every key repeat. A run of window changes on one
+// take, close together, is ONE step — as a timeline drag is — not one per
+// repeat pushing older steps out of the history.
+describe("a run of trim nudges is one step (AQU-2492)", () => {
+  beforeEach(async () => {
+    resetHistoryForTests()
+    await clearHistoryStoreForTests()
+    setHistoryScope("p1", "sam")
+    await historyReady()
+  })
+  const nudge = (audioId: string, fromEnd: number, toEnd: number, at: number) =>
+    recordTakeWindowRun({ cellId: "c1", audioId, before: { trimEndMs: fromEnd }, after: { trimEndMs: toEnd } }, { fileId: "f1" }, at)
+
+  it("ninety repeats of a held key make one step, from where the run started to where it ended", () => {
+    recordStep({ kind: "test.older", data: {}, labelKey: "older" })
+    for (let i = 0; i < 90; i++) nudge("a", 3000 - i * 10, 3000 - (i + 1) * 10, 1_000 + i * 33)
+    const undo = matchingSteps((kind) => kind === "take.window").undo
+    expect(undo).toHaveLength(1)
+    const data = matchingSteps((kind, d) => kind === "take.window" && (d as { before: { trimEndMs: number }; after: { trimEndMs: number } }).before.trimEndMs === 3000 && (d as { after: { trimEndMs: number } }).after.trimEndMs === 2100)
+    expect(data.undo).toHaveLength(1)
+    expect(historyView().undoSteps.map((s) => s.labelKey)).toEqual(["older", "editor.history.stepTrim"])
+  })
+
+  it("a pause, another take, or an Undo in between starts a new step", async () => {
+    nudge("a", 3000, 2990, 1_000)
+    nudge("a", 2990, 2980, 3_500) // after a pause
+    nudge("b", 1000, 990, 3_600) // another take
+    expect(matchingSteps((kind) => kind === "take.window").undo).toHaveLength(3)
+    registerStepKinds({ "take.window": { undo: async () => ({ kind: "done" }), redo: async () => ({ kind: "done" }) } as StepHandler<never> })
+    await undoLast()
+    nudge("b", 1000, 990, 3_700) // right after the Undo: a step of its own
+    expect(matchingSteps((kind) => kind === "take.window").undo).toHaveLength(3)
+    expect(matchingSteps((kind) => kind === "take.window").redo).toHaveLength(0)
   })
 })

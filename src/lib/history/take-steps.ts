@@ -9,7 +9,7 @@
  * testable without a component, and lets a step saved yesterday be undone
  * today by whatever workspace is open now.
  */
-import { recordStep, type StepHandler, type StepOutcome } from "./history"
+import { completeStep, historyView, recordStep, type StepHandler, type StepOutcome } from "./history"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import { clearTakeUndone, markTakeUndone } from "@/lib/audio/undone-takes"
 
@@ -503,6 +503,34 @@ export function recordTakeAdded(
     fileId: where.fileId,
     ...(where.fileName ? { fileName: where.fileName } : {}),
   }, undefined, opts)
+}
+
+/**
+ * AQU-2492 (review, Nov 9), finding 14: how close together two changes to one
+ * take's window must be to count as one gesture. Comfortably over a held
+ * key's first repeat delay and a steady run of presses.
+ */
+export const TRIM_RUN_MS = 1000
+
+let trimRun: { key: string; id: string; at: number } | null = null
+
+/**
+ * Record a change to a take's window (its trim) — but a run of them on one
+ * take, each within {@link TRIM_RUN_MS} of the last and still the newest
+ * step, is ONE step, from where the run began to where it ended, as a
+ * timeline drag is. Holding an arrow key on a trim line saves on every key
+ * repeat, and a step per repeat pushed most older steps out of the history.
+ */
+export function recordTakeWindowRun(data: TakeWindowData, where: { fileId: string }, now = Date.now()): void {
+  const key = `${where.fileId}\u0000${data.cellId}\u0000${data.audioId}`
+  const run = trimRun
+  if (run && run.key === key && now - run.at <= TRIM_RUN_MS && historyView().nextUndo?.id === run.id) {
+    completeStep(run.id, (d) => ({ ...(d as TakeWindowData), after: data.after }))
+    run.at = now
+    return
+  }
+  const id = recordStep<TakeWindowData>({ kind: "take.window", data, labelKey: "editor.history.stepTrim", fileId: where.fileId })
+  trimRun = id ? { key, id, at: now } : null
 }
 
 /**

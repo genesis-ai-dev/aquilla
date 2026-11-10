@@ -1,14 +1,17 @@
 # AQU-2506 archive admission contract
 
 Archived projects are intentionally skipped, not transferred and not completed.
-The authenticated GET `/migrate/project?archiveStatus=true` validates stable identity,
-organization and team grant before returning `archived: boolean`. Placement failures
-remain 409 even when archived; legacy callers still receive 409 for archives.
+The authenticated GET `/migrate/project?archiveStatus=true` validates stable identity
+before returning `archived: true, placementDeferred: true` for a confirmed archived
+destination. This read-only skip defers organization/team checks; it does not authorize
+writes. Active responses require valid organization and team grant. Legacy callers
+still receive 409 for archives or placement failures. A group named `archived-projects`
+is not evidence of an archive flag.
 
 The daemon parks both content and audio jobs as `skipped_archived`, retaining their
 revision and prior attempt count. New revisions update the parked job without
 unparking it. Read-only checks every 15 minutes resume jobs only after a successful
-active response; a changed placement/access/endpoint failure stays parked but sets
+active response; an active placement mismatch or access/endpoint failure stays parked but sets
 an error that monitoring must report. Unarchive does not relax any write fence.
 The latest queued revision is re-fetched on resume. Two Healthchecks remain.
 
@@ -38,3 +41,10 @@ Tests cover endpoint through actual SyncClient, persistent job state and latest
 revision handling. Monitoring reporting changes are an overlay because AQU-2472 is
 not merged in this base. No product UI or application realtime-sync spec changes;
 this runbook specifies the legacy migration admission contract.
+
+AQU-2519 changes only endpoint admission ordering; the already-deployed boolean
+archive client and parked-job scheduler consume it unchanged. No daemon restart or
+queue rewrite is needed. After endpoint deployment, verify the next ordinary retry
+parks the affected jobs, and the observer reports them as skipped without alerts.
+Projects without a verified identity or organization mapping remain discovery
+failures: do not infer archival from a source namespace or suppress those failures.

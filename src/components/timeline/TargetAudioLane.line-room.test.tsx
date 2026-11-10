@@ -180,8 +180,8 @@ describe("the marker for a line with too little room (AQU-2432, Nov 9, rule 8)",
 
   it("a narrow room says how much it has", () => {
     renderLane(book({ roomMs: 200 }))
-    expect(screen.getByTestId("tl-line-marker-b-tab")).toHaveAttribute(
-      "aria-label",
+    // AQU-2432 (review, Nov 9): the number is isolated for right-to-left prose.
+    expect(screen.getByTestId("tl-line-marker-b-tab").getAttribute("aria-label")?.replace(/[⁦-⁩]/g, "")).toBe(
       "Line 2 isn't recorded yet. It has only 0.2 s of room here. Drag the next take later to give it room.",
     )
   })

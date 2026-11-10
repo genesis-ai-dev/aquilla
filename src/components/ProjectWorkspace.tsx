@@ -292,6 +292,7 @@ import { useHistoryReporter } from "@/components/history/useHistoryReporter"
 import { useSettingsStepKinds } from "@/components/ProjectSettings/useSettingsStepKinds"
 import { playingInSlot, setTakeAddedHeals, takeStepHandlers, type CutRecord, type StoredTakePlace, type TakeAddData, type TakeLevel, type TakePlaceData } from "@/lib/history/take-steps"
 import { pullBacksWokenBy } from "@/lib/timeline/programme"
+import { createEditorStructureCache, tableLineNumber } from "@/lib/editor-structure-cache"
 import type { TakePlace } from "@/lib/timeline/take-place"
 import { applyLineRoomMove, lineRoomStepHandlers, type LineRoomStepData } from "@/lib/history/line-room-steps"
 import { lineRoomKey, stampLineRooms, writeLineRooms, type LineRoomChange } from "@/lib/timeline/line-room"
@@ -10516,6 +10517,13 @@ export function ProjectWorkspace() {
   const handleLastTakeRemoved = useCallback((cellId: string) => {
     lastTakeRemovedRef.current(cellId)
   }, [])
+  // AQU-2432 (review, Nov 9): the table's # column for a line, so the
+  // timeline's marker for a line with no room names it as the table does.
+  // Read when a marker asks (few, and only lines with no room); one identity.
+  const tableNumberCache = useMemo(() => createEditorStructureCache(), [cellStore])
+  const lineNumberForRef = useRef<(cellId: string) => string | null>(() => null)
+  lineNumberForRef.current = (cellId) => tableLineNumber(cellStore, tableNumberCache, cellId)
+  const lineNumberFor = useCallback((cellId: string) => lineNumberForRef.current(cellId), [])
 
   /** Stable wrapper over the ref above — see `audioHomeRef`. */
   const audioHomeFor = useCallback((cell: CellData) => audioHomeRef.current(cell), [])
@@ -10660,6 +10668,7 @@ export function ProjectWorkspace() {
     countCastLines: handleCountCastLines, // 2026-09-28: "Apply to all «name» lines (N)"
     onTakeSaved: handleTakeSaved, // AQU-646: a take gives a text-less line a target row
     onLastTakeRemoved: handleLastTakeRemoved, // …and deleting its last one takes that back
+    lineNumberFor, // AQU-2432 (review, Nov 9): what the table numbers a line
     audioHomeFor, // AQU-646 stage 3f: where this row's audio belongs
     myScopes, // AQU-633: per-cell validate scope gate
     cellStore, // AQU-1271: the add-concept popover subscribes for its match preview
@@ -10684,7 +10693,7 @@ export function ProjectWorkspace() {
     // AQU-2204: following its recordings, a file shows no source times — so
     // a line's "Edit timestamps" is unavailable, with the reason.
     followsRecordings: timingMode === "audioFirst",
-  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenAttachment, attachmentsByCell, handleAttachmentAdded, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, trainFromTake, handleLineVoicePicked, handleApplyLineVoice, addVoiceForLine, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleCountCastLines, handleTakeSaved, handleLastTakeRemoved, audioHomeFor, myScopes, cellStore, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleRequestSplitAtQuotes, handleSetCellHiddenStable, handleSetMilestoneFromCell, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings, timingMode])
+  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenAttachment, attachmentsByCell, handleAttachmentAdded, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, trainFromTake, handleLineVoicePicked, handleApplyLineVoice, addVoiceForLine, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleCountCastLines, handleTakeSaved, handleLastTakeRemoved, lineNumberFor, audioHomeFor, myScopes, cellStore, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleRequestSplitAtQuotes, handleSetCellHiddenStable, handleSetMilestoneFromCell, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings, timingMode])
 
 
   // Drives the editor-area rendering: loading skeleton vs. empty state vs.

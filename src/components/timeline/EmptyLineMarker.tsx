@@ -27,20 +27,24 @@ import { MIN_ROOM_SEC } from "@/lib/timeline/line-room"
 import { TRACK_DASH_CLASS } from "@/lib/timeline/track-colors"
 import { parseScriptureReference } from "@/lib/scripture-reference"
 import { cn } from "@/lib/utils"
-
+import { useEditorActions } from "@/context/EditorActionsContext"
+import { useFormat } from "@/lib/i18n/format"
 
 /** What the marker calls its line: its own label, its reference, else its
- *  number among the timeline's lines. */
+ *  number. AQU-2432 (review, Nov 9): the number is the one the text table's
+ *  # column shows for it (`tableNumber`); its place among the lines the
+ *  timeline lays out (a book's chapter) only when the table has none. */
 export function markerLineName(
   cell: Pick<CellData, "cellLabel" | "group" | "globalReferences">,
   position: number,
   t: ReturnType<typeof useT>,
+  tableNumber?: string | null,
 ): string {
   const label = cell.cellLabel?.trim()
   if (label) return label
   const ref = parseScriptureReference(cell.group) ?? parseScriptureReference(cell.globalReferences?.[0])
   if (ref?.verse) return `${ref.bookName} ${ref.chapter}:${ref.verse}`
-  return t("editor.row.lineAria", { number: position })
+  return t("editor.row.lineAria", { number: tableNumber || position })
 }
 
 export function EmptyLineMarker({
@@ -62,11 +66,18 @@ export function EmptyLineMarker({
   onSeek?(cellId: string): void
 }) {
   const t = useT()
+  const fmt = useFormat()
+  const { lineNumberFor } = useEditorActions()
   const { cell, atPx, tabLeftPx, roomSec, position } = marker
-  const line = markerLineName(cell, position, t)
+  const line = markerLineName(cell, position, t, lineNumberFor?.(cell.id))
+  // AQU-2432 (review, Nov 9): the seconds in the reader's own number format,
+  // isolated like every number in translated prose.
   const says = roomSec < MIN_ROOM_SEC
     ? t("editor.timeline.lineMarkerNoRoom", { line })
-    : t("editor.timeline.lineMarkerNarrowRoom", { line, seconds: roomSec.toFixed(1) })
+    : t("editor.timeline.lineMarkerNarrowRoom", {
+        line,
+        seconds: fmt.isolate(fmt.number(roomSec, { minimumFractionDigits: 1, maximumFractionDigits: 1 })),
+      })
   return (
     <div
       data-testid={`tl-line-marker-${cell.id}`}

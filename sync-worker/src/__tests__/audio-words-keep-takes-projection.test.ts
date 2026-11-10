@@ -133,6 +133,44 @@ describe('a line gets its words without losing its chosen takes', () => {
     expect(await chosen()).toEqual({ [SRC]: 1 })
   })
 
+  // AQU-2426 (browser pass, Nov 9): Undo of a split writes the line's whole
+  // text back with its word times and what was heard, by the same words-only
+  // re-attach. The page's own test (ProjectWorkspace.splitTextView.test.ts)
+  // projects the events with these rules; this pins them on the server.
+  it("Undo's write puts the whole text, its word times and what was heard back, and the takes stay chosen", async () => {
+    const t = (word: string, t0: number) => ({ word, t0, t1: t0 + 0.3, start: 0, end: word.length })
+    const whole = [t('In', 0.1), t('the', 0.5), t('beginning.', 0.9), t('Ruth', 5.2), t('went.', 5.6)]
+    await project('cell.audio.attach', {
+      audioId: SRC, url: URL, slot: 'recording', transcription: 'In the beginning. Ruth went.', wordsOnly: true,
+      timings: whole, asr: { text: 'In the beginning. Root went.', model: 'whisper-large-v3' },
+    })
+    // The split's first line: its sentence, its own times, its own heard text.
+    await project('cell.audio.trim', { audioId: SRC, trimStartMs: 0, trimEndMs: 4_200 })
+    await project('cell.audio.attach', {
+      audioId: SRC, url: URL, slot: 'recording', transcription: 'In the beginning.', wordsOnly: true,
+      timings: whole.slice(0, 3), asr: { text: 'In the beginning.', model: 'whisper-large-v3' },
+    })
+    // Undo: the text with what went with it, then the whole stretch.
+    await project('cell.audio.attach', {
+      audioId: SRC, url: URL, slot: 'recording', transcription: 'In the beginning. Ruth went.', wordsOnly: true,
+      timings: whole, asr: { text: 'In the beginning. Root went.', model: 'whisper-large-v3' },
+    })
+    await project('cell.audio.trim', { audioId: SRC, trimStartMs: null, trimEndMs: null })
+    const row = (await h.pg.query<{ timings_json: string | null; asr_text: string | null }>(
+      `SELECT timings_json, asr_text FROM cell_audio WHERE cell_id = '${C}' AND audio_id = '${SRC}'`,
+    )).rows[0]!
+    expect(await lineText()).toBe('In the beginning. Ruth went.')
+    expect(JSON.parse(row.timings_json ?? '[]')).toEqual(whole)
+    expect(row.asr_text).toBe('In the beginning. Root went.')
+    expect(await chosen()).toEqual({ [SRC]: 0, 'take-fr': 1, 'take-sw': 1 })
+    // A line that had no words: no times either ([] clears them; absent keeps them).
+    await project('cell.audio.attach', { audioId: SRC, url: URL, slot: 'recording', transcription: '', wordsOnly: true, timings: [] })
+    expect(await lineText()).toBe('')
+    expect((await h.pg.query<{ timings_json: string | null }>(
+      `SELECT timings_json FROM cell_audio WHERE cell_id = '${C}' AND audio_id = '${SRC}'`,
+    )).rows[0]!.timings_json).toBe('[]')
+  })
+
   // The shapes this replaces, pinned so nobody reaches for them again.
   it("(why) the same write as role 'source' un-chooses the takes in every language", async () => {
     await project('cell.audio.attach', {

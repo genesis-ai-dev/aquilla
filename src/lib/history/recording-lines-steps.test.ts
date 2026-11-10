@@ -203,25 +203,74 @@ describe("lines.split (AQU-2426)", () => {
       ctx.lineText = () => "First sentence."
       ctx.writeLineText = vi.fn(async () => true)
       await handlers["lines.split"].undo({ ...split, text: { before: "", after: "First sentence." } })
-      expect(ctx.writeLineText).toHaveBeenCalledWith(expect.objectContaining({ cellId: "l0" }), "")
+      expect(ctx.writeLineText).toHaveBeenCalledWith(expect.objectContaining({ cellId: "l0" }), "", undefined)
     })
 
-    it("leaves text someone has corrected since the split", async () => {
-      const { ctx, handlers } = ctxFor(linesAfterSplit())
+    // AQU-2426 (browser pass, Nov 9): this used to remove the new lines and
+    // give the line its whole window back with only the corrected first
+    // sentence on it: the rest of the transcript was gone. Now the step is
+    // left alone, as for any line worked on since.
+    it("leaves the whole split as it is when the first line's text was corrected since", async () => {
+      const lines = linesAfterSplit()
+      const { ctx, handlers } = ctxFor(lines)
       ctx.writeLineWindow = vi.fn(async () => true)
       ctx.lineText = () => "The whole transcript, corrected."
       ctx.writeLineText = vi.fn(async () => true)
-      expect(await handlers["lines.split"].undo(byWords)).toEqual({ kind: "done" })
-      expect(ctx.writeLineWindow).toHaveBeenCalled()
+      expect(await handlers["lines.split"].undo(byWords)).toEqual({ kind: "skipped", reason: "linesChanged" })
+      expect(lines.size).toBe(2)
+      expect(ctx.writeLineWindow).not.toHaveBeenCalled()
       expect(ctx.writeLineText).not.toHaveBeenCalled()
     })
 
-    it("says so when the text could not be put back", async () => {
-      const { ctx, handlers } = ctxFor(linesAfterSplit())
+    // AQU-2426 (browser pass, Nov 9): it used to find this out after the lines
+    // were removed and the window written, leaving the first sentence alone
+    // over the whole recording.
+    it("says so when the text could not be put back, before anything else is changed", async () => {
+      const lines = linesAfterSplit()
+      const { ctx, handlers } = ctxFor(lines)
       ctx.writeLineWindow = vi.fn(async () => true)
       ctx.lineText = () => byWords.text.after
       ctx.writeLineText = vi.fn(async () => false)
       expect((await handlers["lines.split"].undo(byWords)).kind).toBe("failed")
+      expect(lines.size).toBe(2)
+      expect(ctx.removeLine).not.toHaveBeenCalled()
+      expect(ctx.writeLineWindow).not.toHaveBeenCalled()
+    })
+
+    it("puts the text back even when the page has not yet read back the split's own text", async () => {
+      const { ctx, handlers } = ctxFor(linesAfterSplit())
+      ctx.writeLineWindow = vi.fn(async () => true)
+      ctx.lineText = () => byWords.text.before
+      ctx.writeLineText = vi.fn(async () => true)
+      expect(await handlers["lines.split"].undo(byWords)).toEqual({ kind: "done" })
+      expect(ctx.writeLineText).toHaveBeenCalledWith(expect.objectContaining({ cellId: "l0" }), byWords.text.before, undefined)
+    })
+
+    it("the word times and what was heard go back with each text", async () => {
+      const { ctx, handlers } = ctxFor(linesAfterSplit())
+      let text = byWords.text.after
+      const written: unknown[] = []
+      ctx.writeLineWindow = vi.fn(async () => true)
+      ctx.lineText = () => text
+      ctx.writeLineText = vi.fn(async (_d, next, words) => { text = next; written.push(words); return true })
+      const whole = { timings: [{ word: "The", t0: 0, t1: 0.3, start: 0, end: 3 }], asr: { text: "The whole", model: "m" } }
+      const firstOnly = { timings: [] }
+      const step = { ...byWords, words: { before: whole, after: firstOnly } }
+      await handlers["lines.split"].undo(step)
+      await handlers["lines.split"].redo(step)
+      expect(written).toEqual([whole, firstOnly])
+    })
+
+    it("when no line could be removed after the text went back, the split's own text is written again", async () => {
+      const { ctx, handlers } = ctxFor(linesAfterSplit())
+      let text = byWords.text.after
+      ctx.writeLineWindow = vi.fn(async () => true)
+      ctx.removeLine = vi.fn(async () => false)
+      ctx.lineText = () => text
+      ctx.writeLineText = vi.fn(async (_d, next) => { text = next; return true })
+      expect((await handlers["lines.split"].undo(byWords)).kind).toBe("failed")
+      expect(text).toBe(byWords.text.after)
+      expect(ctx.writeLineWindow).not.toHaveBeenCalled()
     })
 
     it("a split at pauses writes no text either way", async () => {

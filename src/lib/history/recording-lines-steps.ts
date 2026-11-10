@@ -18,6 +18,7 @@
  * Both belong to every language (step-lane.ts).
  */
 import type { StepHandler, StepOutcome } from "./history"
+import type { LineWordsMeta } from "@/lib/timeline/split-recording-line"
 
 const DONE: StepOutcome = { kind: "done" }
 const GONE: StepOutcome = { kind: "skipped", reason: "gone" }
@@ -61,6 +62,15 @@ export interface SplitLinesData extends RecordingLinesData {
    * that wrote no text (at pauses, on a line with no kept words).
    */
   text?: { before: string; after: string }
+  /**
+   * AQU-2426 (browser pass, Nov 9): the word times and heard text that went
+   * with each text, written back with it. Undo used to put the text back over
+   * the first sentence's times, so the line could not be shared out again.
+   */
+  words?: { before: LineWordsMeta; after: LineWordsMeta }
+  /** AQU-2426 (browser pass, Nov 9): the recording's address, so the text can
+   *  be written back without finding the line's recordings first. */
+  url?: string
 }
 
 export interface RecordingLinesContext {
@@ -93,26 +103,33 @@ export interface RecordingLinesContext {
   /** AQU-2426: set a line's timing and trim. False when refused. Absent: a
    *  split cannot be undone here. */
   writeLineWindow?(d: { fileId: string; cellId: string; audioId: string }, w: LineWindow): Promise<boolean>
-  /** AQU-2426 (review, Nov 9): a line's text now; null when it can't be told. */
+  /** AQU-2426 (review, Nov 9): a line's text now; null when the line is not there. */
   lineText?(cellId: string): string | null
-  /** …and set it ("" clears it). False when refused. */
-  writeLineText?(d: { fileId: string; cellId: string; audioId: string }, text: string): Promise<boolean>
+  /** …and set it ("" clears it), with the words that go with it. False when refused. */
+  writeLineText?(d: { fileId: string; cellId: string; audioId: string; url?: string }, text: string, words?: LineWordsMeta): Promise<boolean>
 }
 
 export function recordingLinesStepHandlers(ctx: RecordingLinesContext): Record<string, StepHandler<never>> {
+  /** Why the lines can't be removed, asked before anything is written. */
+  const refuseRemoval = (d: RecordingLinesData): StepOutcome | null => {
+    const states = d.lines.map((l) => ctx.lineUntouched(l.cellId, l.eventId))
+    if (states.every((s) => s === null)) return GONE
+    if (states.some((s) => s !== true)) return CHANGED
+    if (ctx.mayRemoveLine && d.lines.some((l) => ctx.lineUntouched(l.cellId, null) !== null && !ctx.mayRemoveLine!(l.cellId, l.eventId))) {
+      return { kind: "skipped", reason: "notAllowed" }
+    }
+    return null
+  }
+  const removeAll = async (d: RecordingLinesData): Promise<StepOutcome> => {
+    // Last first: each removal then has no line after it to re-point.
+    let removed = 0
+    for (const l of [...d.lines].reverse()) if (await ctx.removeLine(l.cellId, l.eventId)) removed += 1
+    if (removed === 0) return { kind: "failed", error: new Error("the lines could not be removed") }
+    return removed < d.lines.length ? { kind: "done", partial: { skipped: d.lines.length - removed } } : DONE
+  }
   const fromRecording = {
     async undo(d: RecordingLinesData): Promise<StepOutcome> {
-      const states = d.lines.map((l) => ctx.lineUntouched(l.cellId, l.eventId))
-      if (states.every((s) => s === null)) return GONE
-      if (states.some((s) => s !== true)) return CHANGED
-      if (ctx.mayRemoveLine && d.lines.some((l) => ctx.lineUntouched(l.cellId, null) !== null && !ctx.mayRemoveLine!(l.cellId, l.eventId))) {
-        return { kind: "skipped", reason: "notAllowed" }
-      }
-      // Last first: each removal then has no line after it to re-point.
-      let removed = 0
-      for (const l of [...d.lines].reverse()) if (await ctx.removeLine(l.cellId, l.eventId)) removed += 1
-      if (removed === 0) return { kind: "failed", error: new Error("the lines could not be removed") }
-      return removed < d.lines.length ? { kind: "done", partial: { skipped: d.lines.length - removed } } : DONE
+      return refuseRemoval(d) ?? removeAll(d)
     },
     async redo(d: RecordingLinesData): Promise<StepOutcome> {
       if (d.lines.some((l) => ctx.lineUntouched(l.cellId, null) !== null)) return CHANGED
@@ -122,29 +139,57 @@ export function recordingLinesStepHandlers(ctx: RecordingLinesContext): Record<s
       return restored < d.lines.length ? { kind: "done", partial: { skipped: d.lines.length - restored } } : DONE
     },
   }
-  /** The line's text goes from `from` to `to`, unless it is no longer `from`. */
-  const moveText = async (d: SplitLinesData, from: string, to: string): Promise<boolean> => {
-    if (!d.text || !ctx.writeLineText || from === to) return true
-    const now = ctx.lineText?.(d.cellId)
-    if (now == null || now.trim() !== from.trim()) return true
-    return ctx.writeLineText(d, to)
+  /**
+   * AQU-2426 (browser pass, Nov 9): may the line's text go from `from` to
+   * `to`? Asked before anything is written. It is written when the line reads
+   * `from`, and also when it already reads `to` (a page that has not yet read
+   * back the split's own text); anything else is a correction typed since,
+   * and the whole step is left alone. Undo used to write the window, remove
+   * the lines and only then find it could not put the text back, leaving the
+   * whole recording with its first sentence and the rest of the transcript
+   * gone.
+   */
+  const textMove = (d: SplitLinesData, from: string, to: string): "none" | "write" | "changed" | "gone" => {
+    if (!d.text || !ctx.writeLineText) return "none"
+    const now = ctx.lineText ? ctx.lineText(d.cellId) : from
+    if (now === null) return "gone"
+    return now.trim() === from.trim() || now.trim() === to.trim() ? "write" : "changed"
   }
   return {
     "lines.split": {
       async undo(d: SplitLinesData) {
         if (!ctx.writeLineWindow) return { kind: "skipped", reason: "notAllowed" }
-        const removed = await fromRecording.undo(d)
-        if (removed.kind !== "done") return removed
+        const text = textMove(d, d.text?.after ?? "", d.text?.before ?? "")
+        if (text === "gone") return GONE
+        if (text === "changed") return CHANGED
+        const refused = refuseRemoval(d)
+        if (refused) return refused
+        // The text first: should anything after it be refused, the whole
+        // transcript is on the line, never lost.
+        if (text === "write" && !(await ctx.writeLineText!(d, d.text!.before, d.words?.before))) {
+          return { kind: "failed", error: new Error("the line's text could not be put back") }
+        }
+        const removed = await removeAll(d)
+        if (removed.kind !== "done") {
+          // Nothing was removed: the split stands, so its first line's text does too.
+          if (text === "write") await ctx.writeLineText!(d, d.text!.after, d.words?.after)
+          return removed
+        }
         if (!(await ctx.writeLineWindow(d, d.before))) return { kind: "failed", error: new Error("the line could not be put back") }
-        if (d.text && !(await moveText(d, d.text.after, d.text.before))) return { kind: "failed", error: new Error("the line's text could not be put back") }
         return removed
       },
       async redo(d: SplitLinesData) {
         if (!ctx.writeLineWindow) return { kind: "skipped", reason: "notAllowed" }
+        const text = textMove(d, d.text?.before ?? "", d.text?.after ?? "")
+        if (text === "gone") return GONE
+        if (text === "changed") return CHANGED
         const restored = await fromRecording.redo(d)
         if (restored.kind !== "done") return restored
         if (!(await ctx.writeLineWindow(d, d.after))) return { kind: "failed", error: new Error("the line could not be split again") }
-        if (d.text && !(await moveText(d, d.text.before, d.text.after))) return { kind: "failed", error: new Error("the line's text could not be written again") }
+        // The text last: the lines it was shared out to are back first.
+        if (text === "write" && !(await ctx.writeLineText!(d, d.text!.after, d.words?.after))) {
+          return { kind: "failed", error: new Error("the line's text could not be written again") }
+        }
         return restored
       },
     } as StepHandler<never>,

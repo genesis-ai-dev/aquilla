@@ -427,7 +427,7 @@ import type { TranscribeChoiceInfo } from "@/components/import/recording-choice-
 import { RecordingImportChoiceDialog } from "@/components/import/RecordingImportChoiceDialog"
 import { measureByDecodingMs, probeMediaDurationMs } from "@/lib/import"
 import { needsSplitNotice, sourceRecordingLine, uploadedFilmName } from "@/lib/timeline/recording-line"
-import { piecesFromCuts, planLineSplit, splitRecordingLine, writeLineWindow, writeLineWords, type LineHeard, type LinePiece, type RecordingLine } from "@/lib/timeline/split-recording-line"
+import { piecesFromCuts, planLineSplit, splitRecordingLine, splitStepData, untilSplitShows, writeLineWindow, writeLineWords, writeSplitLineWords, type LineHeard, type LinePiece, type RecordingLine } from "@/lib/timeline/split-recording-line"
 import { cutsFromWords, loadLinePcm, pauseCuts, type LineAudio } from "@/lib/audio/recording-split"
 import { transcribeBlock } from "@/lib/audio/transcribe-access"
 import { estimateTranscriptionCost } from "@/lib/audio/transcription-cost"
@@ -10810,9 +10810,10 @@ export function ProjectWorkspace() {
       // from Transcribe all or another device is shared out too, and a
       // correction typed since is kept.
       // AQU-2426 (browser pass, Nov 9): worked out by planLineSplit from the
-      // line with its recordings merged in (cellWithAudio). The line's text as
-      // it is now goes into the Undo step; the kept words are not dropped, so
-      // splitting again after Undo is free.
+      // line with its recordings merged in (cellWithAudio), and the line's
+      // words as they are now (text, word times, what was heard) go into the
+      // Undo step. The kept words are not dropped either, so splitting again
+      // after Undo is free.
       const lo = line.trimStartMs ?? 0
       const hi = line.trimEndMs ?? line.durationMs ?? lo + (line.endMs - line.startMs)
       const kept = pieces.every((p) => p.text === undefined)
@@ -10823,19 +10824,18 @@ export function ProjectWorkspace() {
       if (!result) return false
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       revalidateCells()
+      // AQU-2426 (browser pass, Nov 9): a split lands over several seconds;
+      // Undo waits until the page shows every new line, rather than finding
+      // some missing and giving the split up as changed.
+      let shown = false
+      const landed = untilSplitShows(() => result.created.every((c) => getActiveCell(c.cellId) != null)).then((ok) => { shown = true; return ok })
       recordStep({
         kind: "lines.split",
-        data: {
-          fileId: line.fileId, cellId: line.cellId, audioId: line.audioId,
-          before: result.before,
-          after: { startMs: result.first.startMs, endMs: result.first.endMs, trimStartMs: result.first.trimStartMs, trimEndMs: result.first.trimEndMs },
-          lines: result.created,
-          ...(result.first.text !== undefined ? { text: { before: plan.before.text, after: result.first.text } } : {}),
-        },
+        data: splitStepData(line, plan, result),
         labelKey: "editor.history.stepSplitLines",
         fileId: line.fileId,
         fileName: line.name,
-      })
+      }, undefined, { pending: landed })
       toast.add({
         type: "success",
         title: t(titleKey, { name: line.name, count: pieces.length }),
@@ -10846,7 +10846,10 @@ export function ProjectWorkspace() {
           children: t("editor.splitLines.undo"),
           onClick: () => {
             const step = newestMatchingStep((kind, data) => kind === "lines.split" && (data as { cellId?: string } | null)?.cellId === line.cellId)
-            if (step) void undoStepById(step.id)
+            if (!step) return
+            if (!shown) toast.add({ type: "info", title: t("editor.splitLines.undoWaits"), timeout: 6000 })
+            // What Undo did, or why it didn't: said, as ⌘Z says it.
+            void undoStepById(step.id).then((r) => { if (r) reportHistory("undo", r) })
           },
         },
       })
@@ -10855,7 +10858,7 @@ export function ProjectWorkspace() {
       toast.add({ type: "error", title: t("editor.splitLines.failed", { name: line.name, reason: err instanceof Error ? err.message : String(err) }) })
       return false
     }
-  }, [currentUsername, getTokenForProjectFile, revalidateCells, canSplitLines, cannotSplitReason, cellWithAudio, t])
+  }, [currentUsername, getTokenForProjectFile, revalidateCells, canSplitLines, cannotSplitReason, cellWithAudio, getActiveCell, reportHistory, t])
 
   /** The words came back but nothing was split: they land on the line itself. */
   const keepWordsOnLine = useCallback(async (line: RecordingLine, text: string, heard?: LineHeard) => {
@@ -16288,11 +16291,12 @@ export function ProjectWorkspace() {
         },
         // AQU-2426 (review, Nov 9): …and its text back, as it was.
         lineText: (cellId) => getActiveCell(cellId)?.transcription ?? (getActiveCell(cellId) ? "" : null),
-        writeLineText: async (d, text) => {
-          const url = cellWithAudio(d.cellId)?.attachments?.[d.audioId]?.url
-          if (!project?.id || !url) return false
+        // AQU-2426 (browser pass, Nov 9): with its word times, to the recording
+        // the step names (the Text view could not find it, so Undo gave up).
+        writeLineText: async (d, text, words) => {
+          if (!project?.id) return false
           try {
-            await writeLineWords({ line: { projectId: project.id, fileId: d.fileId, cellId: d.cellId, audioId: d.audioId, url }, text, author: currentUsername })
+            if (!(await writeSplitLineWords({ projectId: project.id, d, cell: cellWithAudio(d.cellId), text, ...(words ? { words } : {}), author: currentUsername }))) return false
             await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
             revalidateCells()
             return true

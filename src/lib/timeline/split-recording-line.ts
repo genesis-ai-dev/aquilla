@@ -27,6 +27,8 @@ import {
   emitCellAudioAttach, emitCellAudioTrim, emitCellRetime, emitSourceCellCreate, emitSourceCellReorder,
 } from "@/lib/sync/events-emit"
 import type { CellData } from "@/hooks/useCells"
+import type { WordTiming } from "@/lib/codex-editor/types"
+import type { SplitLinesData } from "@/lib/history/recording-lines-steps"
 
 /** A source line of shared recording, as the split needs it. */
 export interface RecordingLine {
@@ -242,6 +244,19 @@ export function textsForSplit(args: {
  */
 export type TextStayed = false | "noTimes" | "noMatch"
 
+/**
+ * AQU-2426 (browser pass, Nov 9): what goes with a line's text: its word
+ * times (seconds from the start of its stretch of the recording) and what the
+ * transcription heard. Undo and Redo of a split write these back with the
+ * text, so the line can be split again with the same result.
+ */
+export interface LineWordsMeta {
+  /** [] means none. Absent: not known, left as they are. */
+  timings?: WordTiming[]
+  asr?: { text: string; model: string }
+  transcriptAi?: { model: string; at: number; changes: number }
+}
+
 /** What a split will write, worked out from the line as it is now. */
 export interface SplitPlan {
   /** The pieces, each with its text when the line's text is shared out. */
@@ -250,8 +265,8 @@ export interface SplitPlan {
   heard?: LineHeard
   /** The text stayed whole on the first line, and why (the toast says so). */
   stayed: TextStayed
-  /** The line's text before the split, for Undo. */
-  before: { text: string }
+  /** The line's words before the split, for Undo. */
+  before: { text: string } & LineWordsMeta
 }
 
 /**
@@ -275,8 +290,18 @@ export function planLineSplit(args: {
 }): SplitPlan {
   const { line, cell } = args
   const lo = line.trimStartMs ?? 0
+  const att = cell?.attachments?.[line.audioId]
   const stored = cell?.audioTimings?.[line.audioId]
-  const before: SplitPlan["before"] = { text: cell?.transcription ?? "" }
+  const textBefore = cell?.transcription ?? ""
+  // Known when the recording itself was read (then none stored means none),
+  // or when there is no text (no words, no times).
+  const timingsBefore = stored ?? (att || !textBefore.trim() ? [] : undefined)
+  const before: SplitPlan["before"] = {
+    text: textBefore,
+    ...(timingsBefore ? { timings: timingsBefore } : {}),
+    ...(att?.asrText && att.asrModel ? { asr: { text: att.asrText, model: att.asrModel } } : {}),
+    ...(att?.transcriptAi ? { transcriptAi: att.transcriptAi } : {}),
+  }
   // A split at pauses on a line that already has its words: each new line
   // gets the text in its own stretch, never the first line all of it (from a
   // kept words run, or else the transcript's own stored word times).
@@ -299,6 +324,82 @@ export function planLineSplit(args: {
   }
 }
 
+/**
+ * AQU-2426 (browser pass, Nov 9): the Undo step of a split. It carries the
+ * recording's address and the words that went with each text, so Undo and
+ * Redo need nothing looked up: in the Text view the line's recording was not
+ * found, and Undo gave up on the text after it had removed the new lines.
+ */
+export function splitStepData(line: RecordingLine, plan: SplitPlan, result: SplitResult): SplitLinesData {
+  const first = result.first
+  return {
+    fileId: line.fileId, cellId: line.cellId, audioId: line.audioId, url: line.url,
+    before: result.before,
+    after: { startMs: first.startMs, endMs: first.endMs, trimStartMs: first.trimStartMs, trimEndMs: first.trimEndMs },
+    lines: result.created,
+    ...(first.text !== undefined
+      ? {
+          text: { before: plan.before.text, after: first.text },
+          words: { before: metaOf(plan.before), after: result.firstWords ?? {} },
+        }
+      : {}),
+  }
+}
+
+const metaOf = (w: LineWordsMeta): LineWordsMeta => ({
+  ...(w.timings ? { timings: w.timings } : {}),
+  ...(w.asr ? { asr: w.asr } : {}),
+  ...(w.transcriptAi ? { transcriptAi: w.transcriptAi } : {}),
+})
+
+/**
+ * AQU-2426 (browser pass, Nov 9): Undo's and Redo's write of a split line's
+ * text and its words. False when the line's recording can't be named, before
+ * anything is written.
+ */
+export async function writeSplitLineWords(args: {
+  projectId: string
+  d: { fileId: string; cellId: string; audioId: string; url?: string }
+  /** For a step kept without its url: the line now, recordings merged in. */
+  cell: Pick<CellData, "attachments"> | null
+  text: string
+  words?: LineWordsMeta
+  author: string
+}): Promise<boolean> {
+  const { d } = args
+  const url = d.url ?? args.cell?.attachments?.[d.audioId]?.url
+  if (!url) return false
+  await writeLineWords({
+    line: { projectId: args.projectId, fileId: d.fileId, cellId: d.cellId, audioId: d.audioId, url },
+    text: args.text,
+    author: args.author,
+    words: args.words ?? {},
+  })
+  return true
+}
+
+/**
+ * AQU-2426 (browser pass, Nov 9): resolves once the page shows every line a
+ * split made, or after `timeoutMs` either way (always true: the split itself
+ * was queued). The server can take several seconds, on a slow line half a
+ * minute, to have them all back; Undo waits for this, because pressed sooner
+ * it found lines still missing and gave the split up as "changed since".
+ */
+export function untilSplitShows(shows: () => boolean, opts: { timeoutMs?: number; everyMs?: number } = {}): Promise<boolean> {
+  const timeoutMs = opts.timeoutMs ?? 60_000
+  const everyMs = opts.everyMs ?? 250
+  const startedAt = Date.now()
+  return new Promise((resolve) => {
+    const look = () => {
+      let done = true
+      try { done = shows() || Date.now() - startedAt >= timeoutMs } catch { done = true }
+      if (done) resolve(true)
+      else setTimeout(look, everyMs)
+    }
+    look()
+  })
+}
+
 /** What the line was before the split, for Undo. */
 export interface LineBefore {
   startMs: number
@@ -313,6 +414,8 @@ export interface SplitResult {
   before: LineBefore
   /** The first piece, for Redo. */
   first: LinePiece
+  /** AQU-2426 (browser pass, Nov 9): the words written with its text, for Redo. */
+  firstWords?: LineWordsMeta
   /** The line that now follows the last piece (re-pointed), if any. */
   successorCellId: string | null
 }
@@ -370,8 +473,14 @@ export async function writeLineWords(args: {
   /** The line's stretch and the heard words' zero, when it is one piece of a
    *  split; absent, every heard word is the line's. */
   stretch?: { trimStartMs: number; trimEndMs: number; lo: number }
-}): Promise<void> {
+  /** AQU-2426 (browser pass, Nov 9): exactly these words instead (Undo and
+   *  Redo of a split put back what the line had). */
+  words?: LineWordsMeta
+}): Promise<LineWordsMeta> {
   const { line } = args
+  const words: LineWordsMeta = args.words
+    ? metaOf(args.words)
+    : heardFor(args.text, args.stretch ?? null, args.stretch?.lo ?? 0, args.heard)
   await emitCellAudioAttach({
     projectId: line.projectId,
     fileId: line.fileId,
@@ -382,10 +491,11 @@ export async function writeLineWords(args: {
     ...(line.mimeType ? { mimeType: line.mimeType } : {}),
     ...(line.durationMs !== undefined ? { durationMs: Math.round(line.durationMs) } : {}),
     transcription: args.text,
-    ...heardFor(args.text, args.stretch ?? null, args.stretch?.lo ?? 0, args.heard),
+    ...words,
     wordsOnly: true,
     author: args.author,
   })
+  return words
 }
 
 /**
@@ -423,10 +533,11 @@ export async function splitRecordingLine(args: {
   const [first, ...rest] = pieces
   await emitCellRetime({ ...base, cellId: line.cellId, startMs: first.startMs, endMs: first.endMs })
   await emitCellAudioTrim({ ...base, cellId: line.cellId, audioId: line.audioId, trimStartMs: first.trimStartMs, trimEndMs: first.trimEndMs })
+  let firstWords: LineWordsMeta | undefined
   if (first.text !== undefined) {
     // The words land on the line's own source text, as transcription writes them
     // ("" clears words the whole line had kept, when none fall in this piece).
-    await writeLineWords({ line, text: first.text, author, heard, stretch: { trimStartMs: first.trimStartMs, trimEndMs: first.trimEndMs, lo } })
+    firstWords = await writeLineWords({ line, text: first.text, author, heard, stretch: { trimStartMs: first.trimStartMs, trimEndMs: first.trimEndMs, lo } })
   }
 
   const created: SplitResult["created"] = []
@@ -470,7 +581,7 @@ export async function splitRecordingLine(args: {
       anchorCellId: prev,
     })
   }
-  return { created, before, first, successorCellId: line.successor?.cellId ?? null }
+  return { created, before, first, ...(firstWords ? { firstWords } : {}), successorCellId: line.successor?.cellId ?? null }
 }
 
 /** Put the first line's timing and trim back (Undo), or forward again (Redo). */

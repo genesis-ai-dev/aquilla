@@ -21,6 +21,7 @@ import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { Voice } from "@/lib/parsers/types"
 import { GENERATED_VOICE_SLOT, RECORDING_SLOT } from "@/lib/timeline/track-slots"
+import { pieceGroupOf, slotSelections } from "@/lib/sync/cell-audio-read-types"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { playingInSlot, recordTakeAdded } from "@/lib/history/take-steps"
 import { probeDurationMsSafe } from "@/lib/import"
@@ -89,8 +90,14 @@ function isImportedSourceClip(cell: CellData, audioId: string, att: CodexCellAtt
  * The take Change voice acts on: the cell's playable take (recording first,
  * then generated voice — the order the voice panel plays them in), never the
  * imported programme clip, whose object is the whole file's audio.
+ *
+ * AQU-2499 (review, Nov 9): with `audioId`, the take the person picked (a take
+ * on an added track, or the one open in the Station) rather than the main
+ * track's. A piece of the take playing in its track stands for that take, as
+ * on the main track: the whole take, whichever piece was right-clicked.
  */
-export function changeVoiceSourceTake(cell: CellData): ChangeVoiceTake | null {
+export function changeVoiceSourceTake(cell: CellData, audioId?: string): ChangeVoiceTake | null {
+  if (audioId) return pickedTake(cell, audioId)
   for (const audioId of [cell.selectedAudioId, cell.selectedGeneratedVoiceAudioId]) {
     if (!audioId) continue
     const att = cell.attachments?.[audioId]
@@ -100,6 +107,22 @@ export function changeVoiceSourceTake(cell: CellData): ChangeVoiceTake | null {
     return { audioId, slot, attachment: att }
   }
   return null
+}
+
+function pickedTake(cell: CellData, audioId: string): ChangeVoiceTake | null {
+  const att = cell.attachments?.[audioId]
+  if (!att || att.isDeleted || isImportedSourceClip(cell, audioId, att)) return null
+  const slot = att.slot ?? (audioId === cell.selectedGeneratedVoiceAudioId ? GENERATED_VOICE_SLOT : RECORDING_SLOT)
+  const playing = slotSelections({
+    selectedBySlot: cell.selectedBySlot,
+    selectedAudioId: cell.selectedAudioId ?? null,
+    selectedGeneratedVoiceAudioId: cell.selectedGeneratedVoiceAudioId ?? null,
+  })[slot]
+  const playingAtt = playing ? cell.attachments?.[playing] : undefined
+  if (playing && playingAtt && !playingAtt.isDeleted && pieceGroupOf(playingAtt, playing) === pieceGroupOf(att, audioId)) {
+    return { audioId: playing, slot, attachment: playingAtt }
+  }
+  return { audioId, slot, attachment: att }
 }
 
 /**
@@ -141,8 +164,9 @@ export function originalTakeId(
 /** Why Change voice can't run on a cell, or null when it can. */
 export type ChangeVoiceBlocker = "no-take" | "not-trained" | "up-to-date"
 
-export function changeVoiceBlocker(cell: CellData, voice: Voice): ChangeVoiceBlocker | null {
-  const take = changeVoiceSourceTake(cell)
+/** `audioId`: the take the person picked (AQU-2499); else the line's own. */
+export function changeVoiceBlocker(cell: CellData, voice: Voice, audioId?: string): ChangeVoiceBlocker | null {
+  const take = changeVoiceSourceTake(cell, audioId)
   if (!take) return "no-take"
   const key = voiceConversionKey(voice)
   if (!key) return "not-trained"
@@ -172,6 +196,8 @@ export interface ChangeVoiceArgs {
   targetLang?: string
   /** Decision 11: record an Undo step for the changed take. Bulk runs leave it off. */
   recordStep?: boolean
+  /** AQU-2499: the take picked (an added track's, the Station's); else the line's own. */
+  audioId?: string
 }
 
 export interface ChangeVoiceResult {
@@ -183,7 +209,7 @@ export interface ChangeVoiceResult {
 export async function changeVoiceForCell(args: ChangeVoiceArgs): Promise<ChangeVoiceResult> {
   const { projectId, cell, voice, session, author } = args
   if (!session?.jwt) throw new Error("Not signed in — sign in again to change the voice.")
-  const take = changeVoiceSourceTake(cell)
+  const take = changeVoiceSourceTake(cell, args.audioId)
   if (!take) throw new Error("This line has no take to change.")
   const elevenLabs = isElevenLabsVoice(voice) ? voice.elevenLabs : undefined
   if (!voice.libraryVoiceId && !elevenLabs) {

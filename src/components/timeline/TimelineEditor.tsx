@@ -276,9 +276,10 @@ export interface TimelineEditorProps {
   onRegenerateVoice?(cellId: string, slot: string): void
   /** AQU-2026: re-voice one line's existing take into its cast voice. Both
    *  halves are needed for the item to appear — the run and the state that
-   *  says what it may do (see `TakeMenuActions`). */
-  onChangeVoice?(cellId: string): void
-  changeVoiceStateFor?(cellId: string): ChangeVoiceMenuState | null
+   *  says what it may do (see `TakeMenuActions`). AQU-2499: both name the
+   *  take right-clicked, so an added track's take is the one re-voiced. */
+  onChangeVoice?(cellId: string, take?: { audioId?: string }): void
+  changeVoiceStateFor?(cellId: string, audioId?: string): ChangeVoiceMenuState | null
   /** AQU-1758 / AQU-2291: "Train a voice from this recording" on a take's
    *  menu. Absent leaves it out (someone who may not make voices). */
   onTrainFromTake?(cellId: string, audioId: string): void
@@ -2830,7 +2831,7 @@ export function TimelineEditor({
           ...(onOpenRecording ? { reRecord: (cellId: string) => onOpenRecording(cellId, slot) } : {}),
           ...(onRegenerateVoice ? { regenerate: (cellId: string) => onRegenerateVoice(cellId, slot) } : {}),
           ...(onChangeVoice && changeVoiceStateFor
-            ? { changeVoice: onChangeVoice, changeVoiceState: changeVoiceStateFor }
+            ? { changeVoice: (cellId: string, audioId: string) => onChangeVoice(cellId, { audioId }), changeVoiceState: changeVoiceStateFor }
             : {}),
           ...(onTrainFromTake ? { trainFromTake: onTrainFromTake } : {}),
           // The line's own voice and its take: the line's own track only.

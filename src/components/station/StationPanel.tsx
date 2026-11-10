@@ -204,7 +204,7 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
           })
           .catch((e: unknown) => setMessage(t("editor.station.saveFailed", { message: e instanceof Error ? e.message : String(e) })))
       },
-      changeVoice: () => setMessage(host.changeVoice(target.cellId) ?? t("editor.station.voiceStarted")),
+      changeVoice: () => setMessage(host.changeVoice(target.cellId, target.audioId) ?? t("editor.station.voiceStarted")),
     })
     return () => setStationUi({ removeNoise: null, changeVoice: null })
   }, [editable, host, target, line, versionNext, t])

@@ -278,15 +278,16 @@ export interface TakeMenuActions {
   regenerate?(cellId: string): void
   /**
    * AQU-2026: re-voice this line's own take into its cast voice. Nothing is
-   * synthesized from text — the words and timing are kept.
+   * synthesized from text — the words and timing are kept. AQU-2499: names
+   * the take right-clicked, so an added track's take is the one re-voiced.
    */
-  changeVoice?(cellId: string): void
+  changeVoice?(cellId: string, audioId: string): void
   /**
-   * AQU-2026: what Change voice can do on this line, or `null` to leave the
+   * AQU-2026: what Change voice can do on this take, or `null` to leave the
    * item out of the menu entirely (a line whose only sound is the film's own
    * programme audio has nothing of its own to convert).
    */
-  changeVoiceState?(cellId: string): ChangeVoiceMenuState | null
+  changeVoiceState?(cellId: string, audioId: string): ChangeVoiceMenuState | null
   /**
    * AQU-1758 / AQU-2291: "Train a voice from this recording" — New voice on
    * the Train voice tab, THIS take already added as its first recording.
@@ -1778,11 +1779,12 @@ function TargetAudioChip({
   // itself.
   const audioId = chip.item.audioId
   const vote = takeMenu?.vote && takeMenu.voteState ? takeMenu.voteState(cell.id, audioId) : null
-  // AQU-2026: the per-line Change voice. The state is read off the line, not
-  // this chip: it converts the take the Audio tab's voice card would, which on
-  // a cut take is the whole take whichever piece was right-clicked.
+  // AQU-2026: the per-line Change voice. On a cut take it converts the whole
+  // take whichever piece was right-clicked. AQU-2499 (review, Nov 9): it names
+  // this chip's take, so on an added track it is that track's take, not the
+  // main track's.
   const changeVoice = takeMenu?.changeVoice && takeMenu.changeVoiceState
-    ? takeMenu.changeVoiceState(cell.id)
+    ? takeMenu.changeVoiceState(cell.id, audioId)
     : null
   // The item's reason: a voice with no trained model, a take already in this
   // voice, or a conversion already running on this line (no extra words).
@@ -1883,7 +1885,7 @@ function TargetAudioChip({
           <ContextMenuItem
             data-testid="tl-take-menu-change-voice"
             disabled={changeVoiceBlocked != null}
-            onClick={() => { if (changeVoiceBlocked == null) takeMenu.changeVoice?.(cell.id) }}
+            onClick={() => { if (changeVoiceBlocked == null) takeMenu.changeVoice?.(cell.id, audioId) }}
           >
             <AudioLines className="h-3.5 w-3.5" />
             {changeVoiceReason ?? t("editor.voice.changeVoice")}

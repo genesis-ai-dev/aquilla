@@ -120,6 +120,89 @@ describe("changeVoiceSourceTake", () => {
   })
 })
 
+// AQU-2499 (review, Nov 9): Change voice on an added track's take, or on the
+// take open in the Station, re-voiced the main track's take instead.
+describe("changeVoiceSourceTake on a take the person picked", () => {
+  const MAIN = "audio-GEN_1_1-1-abc.webm"
+  const ADDED = "audio-GEN_1_1-2-added.webm"
+  const TRACK = "0199aaaa-track"
+  const withAdded = (over: Partial<CellData> = {}) => cell({
+    selectedBySlot: { recording: MAIN, [TRACK]: ADDED },
+    attachments: {
+      [MAIN]: att({ slot: "recording", label: "Take 1", url: `frontier-audio://${MAIN}` }),
+      [ADDED]: att({ slot: TRACK, label: "Take 1", url: `frontier-audio://${ADDED}` }),
+    },
+    ...over,
+  })
+
+  it("acts on the added track's take, in its own track", () => {
+    expect(changeVoiceSourceTake(withAdded(), ADDED)).toMatchObject({ audioId: ADDED, slot: TRACK })
+    // The line-wide pick is still the main track's.
+    expect(changeVoiceSourceTake(withAdded())).toMatchObject({ audioId: MAIN, slot: "recording" })
+  })
+
+  it("finds an added track's take when the main track is empty", () => {
+    const c = withAdded({
+      selectedAudioId: undefined,
+      selectedBySlot: { [TRACK]: ADDED },
+      attachments: { [ADDED]: att({ slot: TRACK, url: `frontier-audio://${ADDED}` }) },
+    })
+    expect(changeVoiceSourceTake(c)).toBeNull()
+    expect(changeVoiceSourceTake(c, ADDED)).toMatchObject({ audioId: ADDED, slot: TRACK })
+  })
+
+  it("acts on an older version open in the Station, not the one playing", () => {
+    const OLD = "audio-GEN_1_1-0-old.webm"
+    const c = withAdded()
+    c.attachments![OLD] = att({ slot: "recording", label: "Take 0", url: `frontier-audio://${OLD}` })
+    expect(changeVoiceSourceTake(c, OLD)).toMatchObject({ audioId: OLD, slot: "recording" })
+  })
+
+  it("reads a piece of a cut take as the whole take playing in its track", () => {
+    const PIECE = "audio-GEN_1_1-3-piece.webm"
+    const c = withAdded()
+    c.attachments![PIECE] = att({ slot: TRACK, url: `frontier-audio://${ADDED}`, pieceOf: ADDED })
+    expect(changeVoiceSourceTake(c, PIECE)).toMatchObject({ audioId: ADDED, slot: TRACK })
+    // A cut take already in this voice reads as done from either piece.
+    const vc = `vc-${HEARTH_FP}-audio-GEN_1_1-4-z.wav`
+    const done = withAdded({ selectedBySlot: { recording: MAIN, [TRACK]: vc } })
+    done.attachments![vc] = att({ slot: TRACK, voiceId: "v-hearth", url: `frontier-audio://${vc}` })
+    done.attachments![PIECE] = att({ slot: TRACK, voiceId: "v-hearth", url: `frontier-audio://${vc}`, pieceOf: vc })
+    expect(changeVoiceBlocker(done, hearth, PIECE)).toBe("up-to-date")
+  })
+
+  it("says the picked take is up to date, whatever the main track holds", () => {
+    const vc = `vc-${HEARTH_FP}-audio-GEN_1_1-4-z.wav`
+    const c = withAdded({ selectedBySlot: { recording: MAIN, [TRACK]: vc } })
+    c.attachments![vc] = att({ slot: TRACK, voiceId: "v-hearth", url: `frontier-audio://${vc}` })
+    expect(changeVoiceBlocker(c, hearth, vc)).toBe("up-to-date")
+    expect(changeVoiceBlocker(c, hearth)).toBeNull()
+  })
+
+  it("has nothing to convert on a deleted take or the imported programme clip", () => {
+    const c = withAdded()
+    c.attachments![ADDED] = { ...c.attachments![ADDED], isDeleted: true }
+    expect(changeVoiceSourceTake(c, ADDED)).toBeNull()
+    const SRC = "audio-FILE1-1-src.mp3"
+    const media = cell({
+      medium: "media",
+      selectedAudioId: SRC,
+      attachments: { [SRC]: att({ slot: "recording", role: "source" }) },
+    } as Partial<CellData>)
+    expect(changeVoiceSourceTake(media, SRC)).toBeNull()
+  })
+
+  it("converts the added track's take and lands the new take on that track", async () => {
+    convertToLibraryVoice.mockResolvedValue({
+      audioId: `vc-${HEARTH_FP}-audio-GEN_1_1-9-q`, ext: "wav", url: `frontier-audio://vc-${HEARTH_FP}-audio-GEN_1_1-9-q.wav`, bytes: 3,
+    })
+    await changeVoiceForCell({ projectId: "p1", cell: withAdded(), voice: hearth, session, author: "dev", audioId: ADDED })
+    expect(convertToLibraryVoice.mock.calls[0][0]).toMatchObject({ sourceAudioId: ADDED })
+    expect(emitCellAudioAttach).toHaveBeenCalledWith(expect.objectContaining({ slot: TRACK, referenceAudioId: ADDED }))
+    expect(injectOptimisticAudioAttachment).toHaveBeenCalledWith("f1", "GEN 1:1", expect.objectContaining({ slot: TRACK }), "evt-1")
+  })
+})
+
 describe("generateSlotOverVoiceChange", () => {
   it("lands a later synthesis in the converted take's slot so it becomes the one that sounds", () => {
     expect(generateSlotOverVoiceChange(cell({

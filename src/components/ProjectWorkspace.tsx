@@ -13224,24 +13224,26 @@ export function ProjectWorkspace() {
    * generated voice and never the film's programme audio.
    */
   const timelineChangeVoiceState = useCallback(
-    (cellId: string): ChangeVoiceMenuState | null => {
+    // AQU-2499 (review, Nov 9): `audioId` is the take right-clicked or open
+    // in the Station, so an added track's take is the one judged.
+    (cellId: string, audioId?: string): ChangeVoiceMenuState | null => {
       const owner = resolveTakeCellRef.current(cellId)
       if (!owner) return null
       const { cell } = owner
       // Nothing of this line's own to convert — the menu says nothing at all,
       // as the voice card renders no button on `no-take`.
-      const take = changeVoiceSourceTake(cell)
+      const take = changeVoiceSourceTake(cell, audioId)
       if (!take) return null
       const voice = resolveCastVoice(tts.laneSettings, cell, cell.ttsSettings?.voiceId)
       const status = getTtsStatus(ttsStatusKey(cell.id))
       const busy = status.kind === "loading" || status.kind === "synthesizing"
-      return { voiceName: voice.name, blocker: busy ? "busy" : changeVoiceBlocker(cell, voice) }
+      return { voiceName: voice.name, blocker: busy ? "busy" : changeVoiceBlocker(cell, voice, audioId) }
     },
     [tts.laneSettings],
   )
 
   const handleChangeTimelineVoice = useCallback(
-    async (cellId: string, opts?: { voice?: Voice }) => {
+    async (cellId: string, opts?: { voice?: Voice; audioId?: string }) => {
       if (!project || !frontierSession) return
       const owner = resolveTakeCellRef.current(cellId)
       if (!owner) return
@@ -13251,7 +13253,7 @@ export function ProjectWorkspace() {
       const voice = opts?.voice ?? resolveCastVoice(tts.laneSettings, cell, cell.ttsSettings?.voiceId)
       // The menu disables what cannot run, but it was drawn from an earlier
       // render: re-check before spending a conversion.
-      if (changeVoiceBlocker(cell, voice) != null) return
+      if (changeVoiceBlocker(cell, voice, opts?.audioId) != null) return
       toast.add({ type: "info", title: t("editor.timeline.changeVoiceStarted", { name: voice.name }) })
       const ok = await whileVoicingAs(cellId, voice.name, () => changeCellVoice({
         projectId: project.id,
@@ -13261,6 +13263,7 @@ export function ProjectWorkspace() {
         author: currentUsername,
         ...(activeLane ? { targetLang: activeLane } : {}),
         recordStep: true, // decision 11: an Undo step
+        ...(opts?.audioId ? { audioId: opts.audioId } : {}), // AQU-2499
       }))
       if (ok) {
         toast.add({ type: "success", title: t("editor.timeline.changeVoiceDone", { name: voice.name }) })
@@ -13460,12 +13463,13 @@ export function ProjectWorkspace() {
             })
         return res.audioId
       },
-      changeVoice: (cellId) => {
-        const state = timelineChangeVoiceState(cellId)
+      changeVoice: (cellId, audioId) => {
+        // AQU-2499 (review, Nov 9): the take open here, not the main track's.
+        const state = timelineChangeVoiceState(cellId, audioId)
         // AQU-2291: one conversion, no quality to pick — it runs when nothing
         // blocks it, else the Station says why not.
         if (!state || state.blocker != null) return t("editor.station.voiceUnavailable")
-        handleChangeTimelineVoice(cellId)
+        handleChangeTimelineVoice(cellId, { audioId })
         return null
       },
       approvalsNeeded: Math.max(1, project.validationCountAudio ?? 1),

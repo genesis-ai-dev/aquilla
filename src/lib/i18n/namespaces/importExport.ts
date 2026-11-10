@@ -966,6 +966,12 @@ export const importExport = defineNamespace({
     }),
     "importExport.status.validatingProtectedTranslations": "Validating protected translations…",
     "importExport.status.downloadedIdmlUnchanged": "Downloaded {fileName} (no translations — original bytes returned unchanged)",
+    // A file whose source a link replaced keeps the lines only it had; their
+    // paragraphs are not in the linked package, so the export leaves them out.
+    "importExport.status.idmlLinesLeftOut": plural({
+      one: "{count} translated line is not part of this IDML package and was left out: {labels}",
+      other: "{count} translated lines are not part of this IDML package and were left out: {labels}",
+    }),
     "importExport.status.decodingAudio": "Decoding audio…",
     "importExport.status.decodingCount": "Decoding {done}/{total}…",
     "importExport.status.exportedAudioByCharacter": "Exported audio by character",
@@ -2608,6 +2614,17 @@ export const importExport = defineNamespace({
       "importExport.status.downloadedIdmlUnchanged": {
         description: "Success-status message after an IDML export with no translations — the original bytes were returned unchanged.",
         placeholders: { fileName: "Name of the downloaded file — not translated." },
+      },
+      "importExport.status.idmlLinesLeftOut": {
+        description:
+          "Second sentence of the success status after an IDML export, shown only when some " +
+          "translated lines belong to paragraphs the InDesign package does not have (a file " +
+          "whose source a link replaced keeps the lines only it had) and so were left out of " +
+          "the download. Ends with the list of those lines' labels.",
+        placeholders: {
+          count: "How many translated lines were left out; governs the plural form.",
+          labels: "Comma-separated cell labels of the lines left out, as the editor shows them — not translated.",
+        },
       },
       "importExport.status.decodingPercent": {
         description:

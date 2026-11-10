@@ -1,8 +1,8 @@
 # 0009 — Connector support access
 
-*Decided and recorded 2026-11-10 (AQU-2504). Behaviour spec: the
-aquilla-specs repo, Access Control — Permission Semantics, § Connector support
-access.*
+*Decided and recorded 2026-11-10 (AQU-2504). Amended the same day to cover
+WRITES — see § Writes below. Behaviour spec: the aquilla-specs repo, Access
+Control — Permission Semantics, § Connector support access.*
 
 ## Context
 
@@ -47,19 +47,80 @@ Three rules follow from that, and they are the ones a reviewer should apply:
   org/project narrowing in both list queries, and steps 1–2 of the read gate,
   are untouched. A support credential is minted with no allowlist and no scope,
   so there is nothing to intersect.
-- **It is tried last.** `sync-worker/src/external/read-auth.ts::claimSupportAccess`
+- **It is tried last.** `sync-worker/src/external/support-access.ts::claimSupportAccess`
   runs only after the live role resolved to nothing, so an operator who is a
   genuine member keeps their genuine attribution — and is not audited for
-  reading their own org.
-- **It is read-only, by the ceiling that already exists.** Consent forces
-  `access: 'read'`, which
-  `sync-worker/src/external/token-bridge.ts::assertCredentialMayWrite` and the
-  `mintInternalSyncToken` backstop behind it already refuse at every write
-  surface. There is no new cross-tenant write path to get wrong.
+  reading their own org. One consequence worth knowing: a platform admin who
+  holds a *lower* genuine role somewhere (a Viewer seat in a customer's project)
+  resolves on that role, not on support access, so support work there is bounded
+  by the seat they actually hold. Dropping the seat restores the full grant.
+- **It widens which projects a credential reaches, never what the credential
+  itself may do.** A read-only credential stays read-only:
+  `sync-worker/src/external/token-bridge.ts::assertCredentialMayWrite` refuses
+  it at every write surface exactly as before, and
+  `sync-worker/src/external/support-access.ts::claimSupportAccessForWrite`
+  declines for the same reason rather than upgrading it.
 
 Every access that rested on support access writes one `admin_audit_log` row via
-`db/shared/support-access-audit.ts::auditSupportAccessRead` — one per project
-opened, one per enumeration naming everything it returned.
+`db/shared/support-access-audit.ts` — one per project opened, one per
+enumeration naming everything it returned, and one per write.
+
+## Writes
+
+Writes were read-only in the first version and are now included (AQU-2504,
+Ryder's decision of 2026-11-09: support often needs to change things). Consent
+no longer forces `access: 'read'`; what bounds the cross-tenant write is the same
+three live conditions, plus two additions.
+
+**One resolver, not a check per surface.** The external write tier had nine
+sites each running `resolveProjectRoleShared(db, { id: cred.userId }, projectId)`
+and refusing on null — prepare, commit, the changeset authority check, the three
+changesets routes and the token bridge. They now resolve through
+`sync-worker/src/external/support-access.ts::resolveCallerProjectRoleForWrite`
+and `::resolveCallerProjectRoleForGate`, because threading an access rule
+through nine call sites by hand is how one of them ends up with a check the
+others never got.
+
+**The perimeter exemption is the load-bearing part.** A support write reaches
+`POST /events` like any other external write, and the live membership re-check
+there (`sync-worker/src/events/route.ts`, FRO-346) answers "revoked" for a
+support engineer — correctly, since they have no membership rows in the
+customer's project. The token therefore carries a new claim, `support: true`
+(`SyncTokenClaims`/`EventClaims`), minted only by `mintInternalSyncToken`, and
+that claim stands down **that gate and nothing else**: `src` stays `'external'`,
+so every other external-token rule in `authorize.ts` still applies and the role
+floors are unchanged.
+
+This is deliberately *not* done by stamping `src: 'platform'`, which would hand
+the token the blanket `ADMIN_EMAILS` exemption — the opposite of an opt-in,
+time-boxed, audited grant. The revocation story the membership check exists to
+enforce is preserved rather than dropped: `validateApiCredential` recomputes the
+grant, the window and the `platform_admins` row on every call before the token
+is minted, so revoking the row or letting the window close stops the next write
+just as deleting a membership row does.
+
+**Writes are audited fail-closed.** `auditSupportAccessWrite` inserts the row
+*before* the write token exists and **throws** if the insert fails, which the
+caller turns into a refusal. "Every cross-org access writes an audit row" is not
+satisfied by "usually", and the cost of failing closed is a retry while the cost
+of failing open is an unrecorded edit inside a customer's project. Reads keep
+the opposite discipline (best-effort, after authorization) for the opposite
+reason.
+
+The early gates — prepare, commit's floor, the authority check, the changesets
+routes — audit as cross-tenant **reads**, not writes. They expose project state
+rather than changing it, so a prepare → commit sequence leaves one read row per
+call plus one write row for the write itself, rather than one act counted three
+times as three writes.
+
+**Attribution.** `buildProvenance` (`sync-worker/src/external/commit-gates.ts`)
+stamps `support_access: { platform_admin: true }` into `events.provenance`
+beside the identity `human_authority` already carries, so "what touched this
+cell" — the column AQU-533 made the one place to look — distinguishes a platform
+admin's support write from a member's own edit. The parameter is **required**,
+not optional, because there are eight provenance call sites across `commit.ts`
+and the three command engines, and an optional flag is one a future site forgets
+to pass, leaving a cross-tenant write indistinguishable from a member's.
 
 ## Consequences
 
@@ -80,13 +141,24 @@ opened, one per enumeration naming everything it returned.
 
 ## Not covered yet
 
-- **Writes.** Read-only was the decision for the first version; the shape for
-  later is a staged changeset the customer's own team approves, not a wider
-  ceiling.
-- **Surfaces beyond listing and reading orgs and projects.** Member rosters
+- **Surfacing the attribution in the UI.** The marking is on the event
+  (`events.provenance.support_access`), but `cell-history-read-route.ts` selects
+  `author` and not `provenance`, so no client reads it yet, and neither the cell
+  history panel nor the validation records render a platform-admin badge. The
+  ticket's "an org owner sees a platform admin did it" is therefore satisfied in
+  the data and **not yet in the interface**. That read path plus its badge is
+  the remaining work.
+- **Write surfaces beyond the changeset path.** The core write path — staging,
+  committing and applying a changeset through `POST /events` — is covered. The
+  specialised command surfaces resolve their own roles and stay
+  membership-gated: `UpdateProjectSettings` (the sub-gates in `prepare.ts` and
+  `commit.ts`), style rules, briefs, memory, membership and project setup. A
+  support changeset containing one of those commands passes the outer gate and
+  is refused by the inner one, which is the intended, narrower perimeter.
+- **Read surfaces beyond listing and reading orgs and projects.** Member rosters
   (`sync-worker/src/external/members-read.ts`) and artifacts
   (`sync-worker/src/external/artifacts-route.ts`) resolve their own roles and
-  stay membership-gated. That is a narrower perimeter than the grant's wording
-  suggests, deliberately.
-- **Whether an org owner can see support access in their own org.** The audit
-  log is internal today. Nothing in this record promises otherwise.
+  stay membership-gated. Also deliberately narrower than the grant's wording.
+- **Whether an org owner can see the audit log for their own org.** It is
+  internal; Ryder's 2026-11-09 note settles that attribution in the normal
+  places is enough and no separate owner-facing log is needed.

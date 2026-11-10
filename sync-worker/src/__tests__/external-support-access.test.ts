@@ -3,9 +3,10 @@
 // The connector used to be strictly member-scoped: orgs-list.ts, projects-list.ts
 // and read-auth.ts all resolved membership and nothing else, so a support
 // engineer could not look at the project a customer was messaging them about.
-// A platform admin may now opt into a time-boxed, read-only, cross-tenant grant
+// A platform admin may now opt into a time-boxed, audited, cross-tenant grant
 // at connector consent (auth-worker/src/routes/mcp-oauth.ts, covered by its own
-// suite). This suite covers what that grant does once the token exists.
+// suite). This suite covers what that grant does once the token exists — reads
+// AND WRITES (the writes half landed second; see the `writes` block below).
 //
 // The load-bearing assertions are the three the ticket names:
 //
@@ -17,7 +18,10 @@
 //   3. every cross-tenant access writes an `admin_audit_log` row naming the
 //      admin, the org or project, and the tool called — and reading a project
 //      the admin genuinely belongs to writes nothing, so the trail only ever
-//      holds the reads it exists to show.
+//      holds the reads it exists to show;
+//   4. a support WRITE lands in the customer's project, is audited as a write,
+//      and is attributed to the platform admin in the event's provenance so the
+//      org's own members can see who made the change.
 
 import { describe, it, expect, beforeEach, vi } from "vitest"
 
@@ -34,6 +38,7 @@ import { handleExternalReadRequest } from "../external/read-routes"
 import { handleExternalChangesetsRequest } from "../external/changesets-route"
 import { callTool, type McpToolResult } from "../external/mcp-handlers"
 import { mintApiToken, validateApiCredential } from "../../../db/shared/api-credentials"
+import { mintInternalSyncToken } from "../external/token-bridge"
 import type { ExternalEnv } from "../external/types"
 import { makeTestDb, type TestDb } from "./helpers/pg-test-db"
 
@@ -60,10 +65,17 @@ interface SeedCredentialOpts {
   /** Where the time box sits. Default: open. */
   window?: "open" | "closed" | "none"
   access?: "read" | "write"
+  /** Credential org scope. Unset (the support-access shape) means every org. */
+  orgId?: number
 }
 
-/** Mint a real `aqk_` token and persist its hash, the way consent would. */
-async function seedCredential(testDb: TestDb, opts: SeedCredentialOpts): Promise<string> {
+/** Mint a real `aqk_` token and persist its hash, the way consent would.
+ *  Returns the credential id too, which the write tests need to seed the
+ *  ask-mode approval a commit consumes. */
+async function seedCredentialWithId(
+  testDb: TestDb,
+  opts: SeedCredentialOpts,
+): Promise<{ token: string; credentialId: string }> {
   const { token, tokenHash, tokenPrefix } = await mintApiToken()
   credSeq += 1
   const id = `00000000-0000-0000-0000-${String(credSeq).padStart(12, "0")}`
@@ -75,11 +87,37 @@ async function seedCredential(testDb: TestDb, opts: SeedCredentialOpts): Promise
         : "now() + interval '6 hours'"
   await testDb.pg.query(
     `INSERT INTO api_credentials
-       (id, user_id, name, token_prefix, token_hash, mode, access, support_access, support_access_until)
-     VALUES ($1, $2, 'test', $3, $4, 'act', $5, $6, ${until})`,
-    [id, String(opts.userId), tokenPrefix, tokenHash, opts.access ?? "read", opts.supportAccess ?? false],
+       (id, user_id, name, token_prefix, token_hash, mode, access, org_id, support_access, support_access_until)
+     VALUES ($1, $2, 'test', $3, $4, 'act', $5, $6, $7, ${until})`,
+    [
+      id,
+      String(opts.userId),
+      tokenPrefix,
+      tokenHash,
+      opts.access ?? "read",
+      opts.orgId === undefined ? null : String(opts.orgId),
+      opts.supportAccess ?? false,
+    ],
   )
-  return token
+  return { token, credentialId: id }
+}
+
+async function seedCredential(testDb: TestDb, opts: SeedCredentialOpts): Promise<string> {
+  return (await seedCredentialWithId(testDb, opts)).token
+}
+
+/** The stored credential id behind a token. */
+async function credentialIdOf(testDb: TestDb, token: string): Promise<string> {
+  const cred = await validateApiCredential(testDb.db, token)
+  if (!cred) throw new Error("credential did not validate")
+  return cred.credentialId
+}
+
+/** The claims of a minted internal sync token. Signature-checked elsewhere;
+ *  here we only need to read what was stamped. */
+function decodeClaims(token: string): Record<string, unknown> {
+  const payload = token.split(".")[1]!
+  return JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/"))) as Record<string, unknown>
 }
 
 function env(testDb: TestDb) {
@@ -113,6 +151,15 @@ async function tool(
   if (!cred) throw new Error("credential did not validate")
   const result = (await callTool(name, args, env(testDb) as unknown as ExternalEnv, cred, token)) as McpToolResult
   return JSON.parse(result.content[0].text) as Record<string, unknown>
+}
+
+interface PrepareBody {
+  changeset: { id: string; status: string; autonomyMode: string }
+  digest: string
+}
+
+interface CommitBody {
+  receipt: { fileId?: string; appliedCount?: number }
 }
 
 interface AuditRow {
@@ -354,10 +401,11 @@ describe("AQU-2504 connector support access", () => {
   // The write ceiling.
   // -------------------------------------------------------------------------
 
-  it("is read-only: a support credential cannot stage a changeset in the customer's project", async () => {
-    // Consent mints these `access: 'read'` (auth-worker mcp-oauth.ts forces it),
-    // which is the ceiling every write surface already honours. This pins that
-    // the cross-tenant READ widening did not quietly open a write path.
+  it("a READ-ONLY support credential still cannot stage a changeset, support access or not", async () => {
+    // The writes half (AQU-2504) lifted the forced `access: 'read'` at consent,
+    // but NOT this ceiling: support access widens which PROJECTS a credential
+    // reaches, never what the credential itself may do. A support engineer who
+    // connected a read-only host gets the cross-tenant reads and nothing more.
     const token = await seedCredential(testDb, { userId: ADA, supportAccess: true, access: "read" })
     const cred = await validateApiCredential(testDb.db, token)
     expect(cred?.access).toBe("read")
@@ -385,5 +433,383 @@ describe("AQU-2504 connector support access", () => {
     const body = (await res!.json()) as { error: { code: string; message: string } }
     expect(body.error.code).toBe("scope_denied")
     expect(body.error.message).toMatch(/read-only/)
+  })
+
+  // -------------------------------------------------------------------------
+  // 4. Writes (AQU-2504, the writes half).
+  //
+  // The customer's project is built through the real agent API AS THE CUSTOMER
+  // (cass, who owns the org), so the thing ada writes into is a genuine
+  // project with real lanes, a real file and a real cell — not a hand-seeded
+  // row that might not resemble one. Then ada, a member of nothing here,
+  // writes into it on support access alone.
+  // -------------------------------------------------------------------------
+
+  describe("writes", () => {
+    const WRITE_PROJECT = "cust-write"
+
+    function changesetsUrl(projectId: string): string {
+      return `https://worker/api/v1/external/projects/${projectId}/changesets`
+    }
+
+    /** Stage a changeset. */
+    async function prepare(
+      token: string,
+      projectId: string,
+      commands: unknown[],
+    ): Promise<{ status: number; body: PrepareBody & { error?: { code: string; message: string } } }> {
+      const res = (await handleExternalChangesetsRequest(
+        new Request(changesetsUrl(projectId), {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ commands }),
+        }),
+        env(testDb) as unknown as ExternalEnv,
+      ))!
+      return { status: res.status, body: (await res.json()) as PrepareBody & { error?: { code: string; message: string } } }
+    }
+
+    /** Commit a staged changeset, seeding the approval an ask-mode plan needs. */
+    async function commit(
+      token: string,
+      projectId: string,
+      credentialId: string,
+      userId: number,
+      prep: PrepareBody,
+    ): Promise<{ status: number; body: CommitBody & { error?: { code: string; message: string } } }> {
+      if (prep.changeset.autonomyMode === "ask") {
+        await testDb.db
+          .prepare(
+            `INSERT INTO changeset_confirmations
+               (id, changeset_id, user_id, credential_id, digest, expires_at, consumed_at)
+             VALUES (?, ?, ?, ?, ?, ?, NULL)`,
+          )
+          .bind(
+            `conf-${prep.changeset.id}`,
+            prep.changeset.id,
+            String(userId),
+            credentialId,
+            prep.digest,
+            new Date(Date.now() + 60_000).toISOString(),
+          )
+          .run()
+      }
+      const res = (await handleExternalChangesetsRequest(
+        new Request(`${changesetsUrl(projectId)}/${prep.changeset.id}/commit`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        env(testDb) as unknown as ExternalEnv,
+      ))!
+      return { status: res.status, body: (await res.json()) as CommitBody & { error?: { code: string; message: string } } }
+    }
+
+    /** Prepare + commit; both must succeed. */
+    async function apply(
+      token: string,
+      projectId: string,
+      credentialId: string,
+      userId: number,
+      commands: unknown[],
+    ): Promise<CommitBody> {
+      const prep = await prepare(token, projectId, commands)
+      expect(prep.status, JSON.stringify(prep.body)).toBe(200)
+      const done = await commit(token, projectId, credentialId, userId, prep.body)
+      expect(done.status, JSON.stringify(done.body)).toBe(200)
+      return done.body
+    }
+
+    /**
+     * Build the customer's project as the customer: a project in their org, one
+     * target lane, one imported file with one cell. Returns what a write needs
+     * to address that cell.
+     */
+    async function seedCustomerProject(): Promise<{
+      fileId: string
+      cellId: string
+      laneId: string
+    }> {
+      const { token, credentialId } = await seedCredentialWithId(testDb, {
+        userId: CASS,
+        access: "write",
+        orgId: CUSTOMER,
+      })
+      await apply(token, WRITE_PROJECT, credentialId, CASS, [
+        {
+          kind: "CreateProject",
+          name: "Customer Write Project",
+          orgId: CUSTOMER,
+          lanes: [
+            { role: "source", language: "en" },
+            { role: "target", language: "fr" },
+          ],
+        },
+      ])
+      const lanes = await testDb.pg.query<{ id: string }>(
+        `SELECT id FROM lanes WHERE project_id = $1 AND role = 'target'`,
+        [WRITE_PROJECT],
+      )
+      const laneId = lanes.rows[0]!.id
+      const imported = await apply(token, WRITE_PROJECT, credentialId, CASS, [
+        {
+          kind: "PlanImport",
+          fileName: "gen.txt",
+          fileType: "txt",
+          cells: [{ ref: "1:1", content: "In the beginning" }],
+        },
+      ])
+      const fileId = imported.receipt.fileId!
+      const cells = await testDb.pg.query<{ cell_id: string }>(
+        `SELECT cell_id FROM cells
+          WHERE project_id = $1 AND file_id = $2 AND side = 'source'
+          ORDER BY cell_id`,
+        [WRITE_PROJECT, fileId],
+      )
+      return { fileId, cellId: cells.rows[0]!.cell_id, laneId }
+    }
+
+    function setTranslation(
+      fileId: string,
+      cellId: string,
+      laneId: string,
+      value: string,
+    ): Record<string, unknown> {
+      return {
+        kind: "SetTranslation",
+        fileId,
+        cellId,
+        laneId,
+        value,
+        valueHtml: `<p>${value}</p>`,
+      }
+    }
+
+    /** The target cell's committed text, or null when nothing landed. */
+    async function translationOf(cellId: string, laneId: string): Promise<string | null> {
+      const { rows } = await testDb.pg.query<{ value: string | null }>(
+        `SELECT value FROM cells
+          WHERE project_id = $1 AND cell_id = $2 AND lane_id = $3 AND side = 'target'`,
+        [WRITE_PROJECT, cellId, laneId],
+      )
+      return rows[0]?.value ?? null
+    }
+
+    /** The provenance envelope stamped on the cell's latest target event. */
+    async function latestTargetProvenance(
+      cellId: string,
+    ): Promise<Record<string, unknown> | null> {
+      const { rows } = await testDb.pg.query<{ provenance: unknown }>(
+        `SELECT provenance FROM events
+          WHERE project_id = $1 AND cell_id = $2 AND kind = 'target.cell.commit'
+          ORDER BY server_seq DESC LIMIT 1`,
+        [WRITE_PROJECT, cellId],
+      )
+      const raw = rows[0]?.provenance
+      if (raw == null) return null
+      return (typeof raw === "string" ? JSON.parse(raw) : raw) as Record<string, unknown>
+    }
+
+    it("a write-capable support credential writes into the customer's project", async () => {
+      const seeded = await seedCustomerProject()
+      // ada is a member of NOTHING in the customer's org — this is the whole
+      // point. Without support access the same call is a 403 (asserted below).
+      const { token, credentialId } = await seedCredentialWithId(testDb, {
+        userId: ADA,
+        supportAccess: true,
+        access: "write",
+      })
+      await apply(token, WRITE_PROJECT, credentialId, ADA, [
+        setTranslation(seeded.fileId, seeded.cellId, seeded.laneId, "Au commencement"),
+      ])
+      expect(await translationOf(seeded.cellId, seeded.laneId)).toBe("Au commencement")
+    })
+
+    it("attributes the write to the platform admin in the event's provenance", async () => {
+      const seeded = await seedCustomerProject()
+      const { token, credentialId } = await seedCredentialWithId(testDb, {
+        userId: ADA,
+        supportAccess: true,
+        access: "write",
+      })
+      await apply(token, WRITE_PROJECT, credentialId, ADA, [
+        setTranslation(seeded.fileId, seeded.cellId, seeded.laneId, "Au commencement"),
+      ])
+
+      // The ticket: "a new translation or a validation shows that a platform
+      // admin did it", for the org's own members, in the normal places —
+      // `events.provenance` being the one column "what touched this cell" is
+      // read from.
+      const provenance = await latestTargetProvenance(seeded.cellId)
+      expect(provenance).not.toBeNull()
+      expect(provenance!.support_access).toEqual({ platform_admin: true })
+      expect((provenance!.human_authority as { user_id: string }).user_id).toBe(String(ADA))
+    })
+
+    it("marks nothing when a MEMBER writes — the marking means platform power, not agent", async () => {
+      const seeded = await seedCustomerProject()
+      const { token, credentialId } = await seedCredentialWithId(testDb, {
+        userId: CASS,
+        access: "write",
+        orgId: CUSTOMER,
+      })
+      await apply(token, WRITE_PROJECT, credentialId, CASS, [
+        setTranslation(seeded.fileId, seeded.cellId, seeded.laneId, "Au commencement"),
+      ])
+      const provenance = await latestTargetProvenance(seeded.cellId)
+      expect(provenance).not.toBeNull()
+      expect(provenance!.support_access).toBeUndefined()
+    })
+
+    it("audits the write as a write, naming the admin, the project, the org and the tool", async () => {
+      const seeded = await seedCustomerProject()
+      // Reads taken while building the fixture were cass's own and logged
+      // nothing; start the write from a clean trail.
+      await testDb.pg.query("DELETE FROM admin_audit_log")
+      const { token, credentialId } = await seedCredentialWithId(testDb, {
+        userId: ADA,
+        supportAccess: true,
+        access: "write",
+      })
+      await apply(token, WRITE_PROJECT, credentialId, ADA, [
+        setTranslation(seeded.fileId, seeded.cellId, seeded.laneId, "Au commencement"),
+      ])
+
+      const rows = await auditRows(testDb)
+      const writes = rows.filter((r) => r.action === "connector.project.write")
+      expect(writes.length).toBe(1)
+      expect(writes[0]!.userId).toBe(String(ADA))
+      expect(writes[0]!.detail.projectId).toBe(WRITE_PROJECT)
+      expect(writes[0]!.detail.orgId).toBe(String(CUSTOMER))
+      expect(writes[0]!.detail.credentialId).toBe(credentialId)
+      expect(writes[0]!.detail.via).toBe("connector")
+      expect(typeof writes[0]!.detail.tool).toBe("string")
+      // The write token is minted per (project, file), so the row names the
+      // file — several rows from one multi-file commit each say something
+      // distinct instead of repeating "wrote in this project".
+      expect(writes[0]!.detail.fileId).toBe(seeded.fileId)
+
+      // The prepare and commit gates that led here are cross-tenant READS of
+      // project state, recorded as such — so the trail distinguishes "looked"
+      // from "changed" instead of counting one act as three writes.
+      expect(rows.some((r) => r.action === "connector.project.read")).toBe(true)
+    })
+
+    it("refuses the write once the window closes, exactly as before the grant existed", async () => {
+      const seeded = await seedCustomerProject()
+      const { token } = await seedCredentialWithId(testDb, {
+        userId: ADA,
+        supportAccess: true,
+        access: "write",
+        window: "closed",
+      })
+      const prep = await prepare(token, WRITE_PROJECT, [
+        setTranslation(seeded.fileId, seeded.cellId, seeded.laneId, "Au commencement"),
+      ])
+      expect(prep.status).toBe(403)
+      expect(prep.body.error?.code).toBe("permission_denied")
+      expect(await translationOf(seeded.cellId, seeded.laneId)).toBeNull()
+    })
+
+    it("refuses the write for a grant-holder who is not on the platform-admin allowlist", async () => {
+      const seeded = await seedCustomerProject()
+      // dev holds an identical grant inside an open window and is NOT in
+      // platform_admins — the allowlist is the load-bearing condition.
+      const { token } = await seedCredentialWithId(testDb, {
+        userId: DEV,
+        supportAccess: true,
+        access: "write",
+      })
+      const prep = await prepare(token, WRITE_PROJECT, [
+        setTranslation(seeded.fileId, seeded.cellId, seeded.laneId, "Au commencement"),
+      ])
+      expect(prep.status).toBe(403)
+      expect(await translationOf(seeded.cellId, seeded.laneId)).toBeNull()
+      expect(await auditRows(testDb)).toEqual([])
+    })
+
+    it("refuses the write for an admin with no support grant at all", async () => {
+      const seeded = await seedCustomerProject()
+      const { token } = await seedCredentialWithId(testDb, {
+        userId: ADA,
+        supportAccess: false,
+        access: "write",
+      })
+      const prep = await prepare(token, WRITE_PROJECT, [
+        setTranslation(seeded.fileId, seeded.cellId, seeded.laneId, "Au commencement"),
+      ])
+      expect(prep.status).toBe(403)
+      expect(await translationOf(seeded.cellId, seeded.laneId)).toBeNull()
+    })
+
+    it("puts the `support` claim on the token ONLY when support access opened the project", async () => {
+      // The claim is the whole exemption: it is what stands the write
+      // perimeter's live membership re-check down. It is minted in exactly one
+      // place (token-bridge.ts) and is signature-protected like `src`, so the
+      // thing worth pinning is its TRIGGER — that a genuine member's external
+      // token never carries it, and a support credential's does.
+      const seeded = await seedCustomerProject()
+
+      const member = await validateApiCredential(
+        testDb.db,
+        (await seedCredentialWithId(testDb, { userId: CASS, access: "write", orgId: CUSTOMER })).token,
+      )
+      const memberToken = await mintInternalSyncToken(
+        { SYNC_SECRET_KEY: SECRET },
+        testDb.db,
+        member!,
+        WRITE_PROJECT,
+        seeded.fileId,
+      )
+      expect(decodeClaims(memberToken).support).toBeUndefined()
+      expect(decodeClaims(memberToken).src).toBe("external")
+
+      const admin = await validateApiCredential(
+        testDb.db,
+        (await seedCredentialWithId(testDb, { userId: ADA, supportAccess: true, access: "write" })).token,
+      )
+      const supportToken = await mintInternalSyncToken(
+        { SYNC_SECRET_KEY: SECRET },
+        testDb.db,
+        admin!,
+        WRITE_PROJECT,
+        seeded.fileId,
+      )
+      const claims = decodeClaims(supportToken)
+      expect(claims.support).toBe(true)
+      // Still an EXTERNAL token, not a platform one — the exemption is scoped
+      // to the membership gate and must not pick up the blanket ADMIN_EMAILS
+      // exemption that `src: 'platform'` carries.
+      expect(claims.src).toBe("external")
+      expect(claims.role).toBe(700)
+    })
+
+    it("refuses the write when the audit row cannot be written — fail closed", async () => {
+      // "Every cross-org access writes an audit row" is not satisfied by
+      // "usually". An unrecordable cross-tenant write must not apply, so the
+      // write audit throws where the read audit swallows.
+      const seeded = await seedCustomerProject()
+      const { token } = await seedCredentialWithId(testDb, {
+        userId: ADA,
+        supportAccess: true,
+        access: "write",
+      })
+      await testDb.pg.query("DROP TABLE admin_audit_log")
+      const prep = await prepare(token, WRITE_PROJECT, [
+        setTranslation(seeded.fileId, seeded.cellId, seeded.laneId, "Au commencement"),
+      ])
+      // The staging gate's own audit is best-effort, so prepare still succeeds;
+      // the WRITE is what must not land.
+      if (prep.status === 200) {
+        const done = await commit(
+          token,
+          WRITE_PROJECT,
+          await credentialIdOf(testDb, token),
+          ADA,
+          prep.body,
+        )
+        expect(done.status).not.toBe(200)
+      }
+      expect(await translationOf(seeded.cellId, seeded.laneId)).toBeNull()
+    })
   })
 })

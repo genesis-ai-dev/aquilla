@@ -17,11 +17,12 @@
 //
 // AQU-2504 adds one opt-in beside the org picker: a platform admin with an
 // active step-up elevation may approve SUPPORT ACCESS instead of choosing orgs.
-// That credential carries no org allowlist at all and is minted read-only with
-// a time-boxed `support_access_until`; while that window is open the connector
-// can list and read any org and project (sync-worker external/orgs-list.ts,
-// projects-list.ts, read-auth.ts), and every cross-tenant read writes an
-// `admin_audit_log` row. Everyday connector consent is untouched.
+// That credential carries no org allowlist at all and is minted with a
+// time-boxed `support_access_until`; while that window is open the connector can
+// list, read AND WRITE in any org and project (sync-worker external/orgs-list.ts,
+// projects-list.ts, read-auth.ts, support-access.ts), every cross-tenant access
+// writes an `admin_audit_log` row, and every support write is attributed to the
+// admin in the event's provenance. Everyday connector consent is untouched.
 //
 // Clients register by URL (Client ID Metadata Documents, see
 // lib/mcp-oauth/client-metadata.ts); there is no dynamic registration
@@ -391,14 +392,17 @@ mcpOAuthPublicRoutes.post("/oauth/token", bodyLimit({ maxSize: 8192 }), noStore,
   const credentialId = crypto.randomUUID()
   // Consume and mint in ONE statement: a concurrent redemption finds the code
   // already consumed and mints nothing.
-  // AQU-2504: a support-access token is minted read-only and with its window
-  // already ticking. 'read' is forced rather than carried from the code because
-  // the first version is read-only by decision, and `access: 'read'` is the one
-  // ceiling every write surface already honours (sync-worker
-  // external/token-bridge.ts `assertCredentialMayWrite`, and the
-  // mintInternalSyncToken backstop behind it) — so there is no cross-tenant
-  // write path that could be forgotten. The window is set from the database's
-  // clock, not the Worker's.
+  // AQU-2504: a support-access token is minted with its window already ticking,
+  // from the database's clock rather than the Worker's.
+  //
+  // It carries the code's own `access` — WRITES INCLUDED. The read-only slice
+  // forced 'read' here; Ryder's 2026-11-09 decision made writes a requirement,
+  // so the ceiling is gone and the cross-tenant write path is gated instead by
+  // the three live conditions (grant, open window, `platform_admins` row,
+  // re-checked on every call in validateApiCredential), audited fail-closed
+  // before the write token is minted, and attributed to the admin in the
+  // event's provenance. See sync-worker/src/external/support-access.ts and
+  // docs/decisions/0009-connector-support-access.md.
   const credential = await db.prepare(
     `WITH claimed AS (
        UPDATE mcp_oauth_codes SET status = 'consumed', credential_id = ?
@@ -407,8 +411,7 @@ mcpOAuthPublicRoutes.post("/oauth/token", bodyLimit({ maxSize: 8192 }), noStore,
      ) INSERT INTO api_credentials
        (id, user_id, name, token_prefix, token_hash, mode, access, org_id, project_id, expires_at, org_ids,
         oauth_resource, support_access, support_access_until)
-       SELECT ?, user_id, client_name, ?, ?, mode,
-              CASE WHEN support_access THEN 'read' ELSE access END,
+       SELECT ?, user_id, client_name, ?, ?, mode, access,
               org_id, project_id, NULL, org_ids, COALESCE(resource, ?), support_access,
               CASE WHEN support_access THEN now() + (? || ' hours')::interval ELSE NULL END
        FROM claimed RETURNING id`,
@@ -517,7 +520,12 @@ mcpOAuthConsentRoutes.post("/decision", async (c) => {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::text::jsonb, ?, now() + interval '${CODE_TTL}')`,
   ).bind(await sha256Hex(code), v.client.clientId, v.client.clientName, input.redirect_uri,
     input.code_challenge ?? "", v.resource, String(user.id), mode,
-    supportAccess ? "read" : access,
+    // AQU-2504 (writes): support access no longer forces 'read'. Writes are
+    // required — support often needs to change things — and a support engineer
+    // connecting an MCP host gets the same read-write access any host gets.
+    // The cross-tenant reach is bounded by the support window and the live
+    // `platform_admins` row, not by a read-only ceiling.
+    access,
     supportAccess ? null : JSON.stringify(orgIds), supportAccess).run()
   // Bounded retention; codes are useless minutes after issue.
   await c.env.AQUILLA_PG.prepare("DELETE FROM mcp_oauth_codes WHERE expires_at < now() - interval '1 day'").run()

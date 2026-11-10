@@ -21,6 +21,28 @@ export interface SyncTokenClaims {
    */
   src?: string
   /**
+   * AQU-2504: this is a connector SUPPORT-ACCESS write token — minted by
+   * sync-worker/src/external/token-bridge.ts for a platform admin whose
+   * time-boxed support grant, and nothing else, opened this project.
+   *
+   * It exempts the token from ONE thing: the live membership re-check on the
+   * write perimeter (events/route.ts). A support engineer deliberately has no
+   * membership rows in a customer's project, so that check's "revoked" is the
+   * right answer to the wrong question — the grant it should be judged against
+   * is the support window, which `validateApiCredential` re-checks on every
+   * call before this token is ever minted.
+   *
+   * It exempts the token from NOTHING ELSE. `src` stays `"external"`, so every
+   * external-token rule in authorize.ts still applies, and the role floors are
+   * unchanged. This is deliberately NOT done by stamping `src: "platform"`,
+   * which would hand the token the blanket ADMIN_EMAILS exemption — the
+   * opposite of this ticket's narrow, opt-in, audited grant.
+   *
+   * ABSENT means no, like every other optional claim here: the safe value has
+   * to be the one you get by forgetting the field.
+   */
+  support?: boolean
+  /**
    * AQU-553: additive lane/file write restrictions. ABSENT = unscoped =
    * today's behavior (unrestricted within the role floor). When present,
    * authorize gates chain-mutating target.* writes and cell.validate/

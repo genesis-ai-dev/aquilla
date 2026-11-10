@@ -25,6 +25,9 @@
 // attribution, and is not audited, because reading your own org through the
 // connector is ordinary use. Steps 1 and 2 are untouched — support access never
 // widens the credential's own org/project scope.
+//
+// The rule, the ordering and the audit live in ./support-access.ts, shared with
+// the WRITE paths since the writes half landed.
 
 import { credentialAllowsOrganization } from '../../../db/shared/api-credentials'
 import { sign } from "hono/jwt"
@@ -35,7 +38,7 @@ import { READ_WALL_MAINTAINER, laneReadWallEnabled } from "../../../src/lib/lane
 import { externalError } from "./errors"
 import { AUTH_HINT } from "./discovery-route"
 import { validateApiCredentialRequest, type ApiCredentialContext } from "../../../db/shared/api-credentials"
-import { auditSupportAccessRead } from "../../../db/shared/support-access-audit"
+import { claimSupportAccess, PLATFORM_ROLE_LEVEL } from "./support-access"
 import { resolveProjectRoleShared } from "../../../db/shared/project-roles"
 import { enforceRateLimit, userRateLimitIdentifier } from "../../../db/shared/rate-limit"
 
@@ -81,11 +84,12 @@ export async function authenticateCredential(
   return { ok: true, credential }
 }
 
-/** Owner-level, the contribution resolveProjectRoleShared gives the `platform`
- *  path (AQU-2504). Mirrors ROLE.OWNER / db/shared/project-roles.ts. Exported
- *  for callers that resolve the project role themselves — see
- *  {@link claimSupportAccess}. */
-export const PLATFORM_ROLE_LEVEL = 700
+// AQU-2504: `claimSupportAccess` and `PLATFORM_ROLE_LEVEL` moved to
+// ./support-access.ts when the writes half landed, so the read gate and the
+// write paths decide support access in one place. Re-exported because callers
+// that resolve the project role themselves import them from here (mcp-handlers'
+// `get_project`, and the AQU-2504 tests).
+export { claimSupportAccess, PLATFORM_ROLE_LEVEL } from "./support-access"
 
 export interface AuthedContext {
   credential: ApiCredentialContext
@@ -93,9 +97,9 @@ export interface AuthedContext {
    *  (nonexistent) role field — the credential only carries autonomy/scope. */
   role: number
   /** AQU-2504: true when the ONLY thing granting this project was support
-   *  access — i.e. the caller has no genuine grant here. Write surfaces refuse
-   *  the credential anyway (it is minted `access: 'read'`); this says the
-   *  access was cross-tenant, which is what the audit trail records. */
+   *  access — i.e. the caller has no genuine grant here. Says the access was
+   *  cross-tenant, which is what the audit trail records, and (on the write
+   *  paths) what the event's provenance is stamped with. */
   viaSupportAccess?: boolean
 }
 
@@ -174,44 +178,6 @@ export async function scopeCredentialToProject(
   }
 
   return { ok: false, response: externalError("permission_denied", "no project membership", 403) }
-}
-
-/**
- * AQU-2504: may this credential open `projectId` on SUPPORT ACCESS alone, and
- * if so, record it?
- *
- * Call it only AFTER the live role has resolved to nothing — support access is
- * the last path tried, never the first, so an operator who is a genuine member
- * keeps their own attribution and is not audited for reading their own org.
- * Returns false (and writes nothing) for every credential without live support
- * access, which is every credential but a platform admin's inside their window.
- *
- * Exported because `get_project` (mcp-handlers.ts) resolves the project role
- * itself rather than through {@link scopeCredentialToProject}, and the MCP and
- * REST adapters must not disagree about who can open a project — the same
- * drift the orgs-list / projects-list pairing exists to prevent.
- *
- * Deliberately NOT implemented by passing the platform-admin allowlist into
- * `resolveProjectRoleShared`: that would hand every connector credential of
- * every platform admin cross-tenant reach, which is exactly the blanket
- * elevation this ticket replaces with an opt-in, time-boxed grant.
- */
-export async function claimSupportAccess(
-  db: AquillaDb,
-  credential: ApiCredentialContext,
-  projectId: string,
-  tool: string,
-  orgId: string | null,
-): Promise<boolean> {
-  if (credential.supportAccess !== true) return false
-  await auditSupportAccessRead(db, credential.userId, {
-    action: "connector.project.read",
-    credentialId: credential.credentialId,
-    tool,
-    orgId,
-    projectId,
-  })
-  return true
 }
 
 /** Mint a short-lived (30s) internal sync-token JWT so we can call the

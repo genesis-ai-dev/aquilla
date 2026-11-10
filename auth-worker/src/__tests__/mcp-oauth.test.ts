@@ -679,7 +679,7 @@ describe("AQU-2504 connector support access", () => {
     expect((await response.json()) as { error: string }).toMatchObject({ error: "scope_denied" })
   })
 
-  it("mints a read-only, time-boxed, allowlist-free credential for an elevated admin", async () => {
+  it("mints a write-capable, time-boxed, allowlist-free credential for an elevated admin", async () => {
     const jwt = await seed()
     await makePlatformAdmin("alice")
     await elevate(jwt)
@@ -703,15 +703,20 @@ describe("AQU-2504 connector support access", () => {
     expect(cred).not.toBeNull()
     // The whole point: support access is live on this credential…
     expect(cred?.supportAccess).toBe(true)
-    // …and it is read-only, so there is no cross-tenant WRITE path at all.
-    expect(cred?.access).toBe("read")
+    // …and WRITES are included (Ryder, 2026-11-09 — support often needs to
+    // change things). The read-only slice forced `access: 'read'` here; what
+    // bounds the cross-tenant reach now is the window plus the live
+    // `platform_admins` row, with the write audited fail-closed and attributed
+    // to the admin in the event's provenance (sync-worker external/
+    // support-access.ts). An MCP host always consents read-write.
+    expect(cred?.access).toBe("write")
     // …and it carries no org/project scope to intersect against.
     expect(cred?.orgIds).toBeUndefined()
     expect(cred?.orgId).toBeNull()
     expect(cred?.projectId).toBeNull()
 
     const row = await credentialRow(cred?.credentialId as string)
-    expect(row).toMatchObject({ access: "read", support_access: true, window_open: true })
+    expect(row).toMatchObject({ access: "write", support_access: true, window_open: true })
   })
 
   it("refuses the mint when the admin left the allowlist between consent and redemption", async () => {

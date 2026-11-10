@@ -279,6 +279,11 @@ export interface QueueProgress {
    *  own second, reported by the film panel, and waits when the film does.
    *  False under a line the queue plays, where the film follows the queue. */
   filmClock?: boolean
+  /** AQU-2253 (review 2, Nov 9): true while the queue has given up waiting on
+   *  the film as a line's clock (it said nothing for 3 s) and is listening for
+   *  it: the panel reports the film's second while it follows the playhead,
+   *  and once it is heard moving it is the clock again on the next line. */
+  filmQuiet?: boolean
 }
 
 let progress: QueueProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1, programmeClock: false }
@@ -301,6 +306,7 @@ function setProgress(patch: Partial<QueueProgress>): void {
     filmTail: programmeClock && (progLead?.filmTail === true || progOverFilmTail(next.currentTime)),
     // …or the clock in hand IS the film's, whatever the lines under it do.
     filmClock: programmeClock && (progLead?.film != null || progFilmIsClockAt(next.currentTime)),
+    filmQuiet: programmeClock && progFilmQuiet,
   }
   notifyProgress()
 }
@@ -429,6 +435,17 @@ let progFilmEndSec = 0
  *  behind them). A line with nothing of its own that starts before it has the
  *  film to play (`progFilmPlaysUnder`). */
 let progFilmCoverSec = 0
+/** AQU-2253 (review 2, Nov 9): the film said nothing for 3 s while it was a
+ *  line's clock (`FILM_CLOCK_PATIENCE_MS`): a film whose length never came in,
+ *  a YouTube player that never loaded, a seek that never landed. Until it is
+ *  heard from again, a line it plays behind with nothing of its own is crossed
+ *  on the queue's own timer with the film following, as under a recorded
+ *  line, and never skipped. Over the film's tail there is nothing but the
+ *  film, and the run still waits for it. */
+let progFilmQuiet = false
+/** The film's last second heard while it was quiet: it is back once a later
+ *  report has moved on from it. */
+let progFilmQuietSec: number | null = null
 
 /** AQU-2253 (review, Nov 9): the file the workspace's last word was about:
  *  the one on screen. */
@@ -450,6 +467,9 @@ export function setProgrammeFilm(film: ProgrammeFilm | null, fileId: string | nu
     progFilm && film && progFilm.endSec === film.endSec && progFilm.cellIds === film.cellIds &&
     (progFilm.runsOn !== false) === (film.runsOn !== false)
   ) return
+  // AQU-2253 (review 2, Nov 9): its length come in (or changed), or the film
+  // gone or back: a film that went quiet gets a fresh chance.
+  if (!film || !progFilm || film.endSec !== progFilm.endSec) progForgetFilmQuiet()
   progFilm = film
   progFilmResolve()
   if (timingMode === "audioFirst" && programme && progIndex >= 0) {
@@ -520,6 +540,9 @@ function progFilmPlaysUnder(slot: ProgrammeSlot): boolean {
 function progFilmIsClockAt(sec: number): boolean {
   if (progFilmCoverSec - sec <= FILM_END_GUARD_SEC) return false
   if (progOverFilmTail(sec)) return !layersSoundIn(progLayers, sec + HOLD_MIN_SEC, Infinity)
+  // AQU-2253 (review 2, Nov 9): a film that went quiet as a line's clock is
+  // not one until it is heard from again (`progFilmGoneQuiet`).
+  if (progFilmQuiet) return false
   const slot = programme ? slotAtProgrammeSec(programme, sec) : null
   return slot != null && progFilmPlaysUnder(slot)
 }
@@ -1323,6 +1346,7 @@ function progNextWithSound(from: number): number {
 function progFinish(): void {
   progClearGate()
   progClearLead()
+  progForgetFilmQuiet() // AQU-2253 (review 2): the next run gives the film a fresh chance
   progClearLayerTimer()
   progLayerFailed.clear()
   progStopEndStop()
@@ -1704,6 +1728,30 @@ const FILM_CLOCK_WAIT_MS = 800
 /** The film's clock ends this far short of the film's end: the panel holds
  *  the last quarter second as a still frame (video-sync's end guard). */
 const FILM_END_GUARD_SEC = 0.3
+/** AQU-2253 (review 2, Nov 9): no word from the film for this long while it is
+ *  the clock on a LINE, and it is given up as the clock (`progFilmGoneQuiet`).
+ *  The queue has no stall figure of its own for a film to reuse (800 ms above
+ *  only says "loading"; the readiness gate's 6 s is a take's patience), so 3 s:
+ *  well past an ordinary film start or rebuffer, and before the panel's stall
+ *  ladder would give up and ask for a click (about 8 s and more). */
+const FILM_CLOCK_PATIENCE_MS = 3_000
+
+/** The film is the clock no longer: the line in hand is crossed on. */
+function progFilmGoneQuiet(): void {
+  progFilmQuiet = true
+  progFilmQuietSec = null
+  progFilmLineRecheck()
+  setProgress({})
+}
+
+/** A fresh chance for the film: heard from again, its length come in or
+ *  changed, or a new run. */
+function progForgetFilmQuiet(): void {
+  if (!progFilmQuiet) return
+  progFilmQuiet = false
+  progFilmQuietSec = null
+  setProgress({})
+}
 
 /** Hold the clock on the FILM from `atSec`: over the rest of a line with
  *  nothing to play ("next", then the line the film has reached) or over the
@@ -1719,8 +1767,15 @@ function progArmFilmClock(
     film: { sec: null, heardAt: now, moving: false, onEnd },
   }
   lead.ticker = setInterval(() => {
-    if (progLead !== lead || state.kind !== "playing") return
-    if (performance.now() - lead.film!.heardAt < FILM_CLOCK_WAIT_MS) return
+    if (progLead !== lead || (state.kind !== "playing" && state.kind !== "loading")) return
+    const quietMs = performance.now() - lead.film!.heardAt
+    // AQU-2253 (review 2, Nov 9): on a line, waited for long enough: the rest
+    // of the line is crossed on the queue's own timer (never skipped).
+    if (lead.then === "next" && quietMs >= FILM_CLOCK_PATIENCE_MS) {
+      progFilmGoneQuiet()
+      return
+    }
+    if (state.kind !== "playing" || quietMs < FILM_CLOCK_WAIT_MS) return
     lead.film!.moving = false
     setState({ kind: "loading", ...progStateCell() })
   }, FILM_TAIL_TICK_MS)
@@ -1735,6 +1790,13 @@ function progArmFilmClock(
  * behind is waited for.
  */
 export function tickProgrammeFilm(sec: number, over = false): void {
+  // AQU-2253 (review 2, Nov 9): a film given up as a line's clock is heard
+  // from again once it reports moving on (the panel reports it while it
+  // follows the playhead too); the next line it carries is its clock again.
+  if (progFilmQuiet && progRunning() && Number.isFinite(sec)) {
+    if (progFilmQuietSec != null && sec > progFilmQuietSec + 0.001) progForgetFilmQuiet()
+    else progFilmQuietSec = sec
+  }
   const lead = progLead
   const film = lead?.film
   if (!lead || !film || !progRunning() || !Number.isFinite(sec)) return
@@ -4586,6 +4648,7 @@ export function startQueue(ctx: PlayContext, fromIndex: number, explicit = false
   activeContext = ctx
   if (timingMode === "audioFirst" && progEngageForContext()) {
     progLayersPurge() // AQU-2252: a fresh start
+    progForgetFilmQuiet()
     const start = progStartIndexFor(ctx.cells, fromIndex)
     if (start < 0) {
       // FORTIFY: exit through progFinish so the gate/interval/prefetch die
@@ -4923,6 +4986,7 @@ export async function resumeQueue(): Promise<void> {
 export function stopQueue(): void {
   progClearGate()
   progClearLead()
+  progForgetFilmQuiet()
   progClearLayerTimer()
   progLayerFailed.clear()
   progStopEndStop()

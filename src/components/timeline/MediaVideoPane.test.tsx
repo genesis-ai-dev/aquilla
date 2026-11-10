@@ -615,6 +615,59 @@ describe("MediaVideoPane", () => {
         expect(pauseQueue).not.toHaveBeenCalled()
       })
 
+      // AQU-2253 (review 2, Nov 9), finding 2: the transport waits for the
+      // film where it is the clock, so a film whose length has not come in
+      // must still be asked to play there, or the wait never ends.
+      it("a film whose length has not come in yet is asked to play where it is the clock", () => {
+        for (const kind of ["loading", "playing"] as const) {
+          const view = render(following())
+          const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
+          Object.defineProperty(video, "duration", { value: Number.NaN, configurable: true })
+          video.play = vi.fn(() => Promise.resolve())
+          video.pause = vi.fn()
+          clockAt(9.0, kind)
+          view.rerender(following())
+          expect(video.play, kind).toHaveBeenCalled()
+          expect(video.pause, kind).not.toHaveBeenCalled()
+          view.unmount()
+        }
+      })
+
+      it("a YouTube film, its length not reported yet, is asked to play there too", () => {
+        const youTube = () => <MediaVideoPane src="https://youtu.be/dQw4w9WgXcQ" fileId="f1" cells={subs} followsRecordings />
+        const view = render(youTube())
+        const media = screen.getByTestId("video-pane-media") as HTMLVideoElement
+        expect(media.tagName.toLowerCase()).toBe("youtube-video")
+        Object.defineProperty(media, "duration", { value: Number.NaN, configurable: true })
+        media.play = vi.fn(() => Promise.resolve())
+        media.pause = vi.fn()
+        clockAt(9.0, "loading")
+        view.rerender(youTube())
+        expect(media.play).toHaveBeenCalled()
+        expect(media.pause).not.toHaveBeenCalled()
+      })
+
+      it("under a line the queue plays, a film with no length yet is paused, as before", () => {
+        const view = render(following())
+        const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
+        Object.defineProperty(video, "duration", { value: Number.NaN, configurable: true })
+        video.play = vi.fn(() => Promise.resolve())
+        video.pause = vi.fn()
+        clockAt(4.0, "playing", false)
+        view.rerender(following())
+        expect(video.pause).toHaveBeenCalled()
+        expect(video.play).not.toHaveBeenCalled()
+      })
+
+      it("while the queue listens for a film it gave up waiting on, the film's second is reported as it follows the playhead", () => {
+        const { video, film, view } = mount(4.0, 4.0, "playing", false)
+        sounding("s2", { progress: { currentTime: 4.0, duration: 27, rate: 1, volume: 1, programmeClock: true, filmClock: false, filmQuiet: true } })
+        view.rerender(following())
+        film.sec = 4.25
+        fireEvent.timeUpdate(video)
+        expect(tickProgrammeFilm).toHaveBeenCalledWith(4.25)
+      })
+
       it("tells the queue the film is over when the clock is at the film's own last frame", () => {
         // The stored length said more than the 27 s the film really has.
         // The picture is put on its last frame, and says so.

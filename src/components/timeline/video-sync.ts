@@ -125,6 +125,16 @@ export interface VideoSyncInput {
   filmIsClock?: boolean
 }
 
+/** Where the film is the clock and the transport is not paused: left alone
+ *  near the playhead, sent to it when the playhead was put elsewhere. */
+function filmClockAction({ tickSec, videoSec, prevTickSec, rate }: VideoSyncInput): VideoSyncAction {
+  const putBack = prevTickSec != null
+    && tickSec < prevTickSec - VIDEO_PAUSED_SNAP_SEC
+    && videoSec > tickSec + VIDEO_PAUSED_SNAP_SEC
+  if (!putBack && Math.abs(videoSec - tickSec) <= videoDriftBarSec(rate)) return { kind: "none" }
+  return { kind: "seek", sec: Math.max(0, tickSec) }
+}
+
 export function videoSyncAction(input: VideoSyncInput): VideoSyncAction {
   const { kind, clockIsFileTime, tickSec, videoSec, prevTickSec, prevTickAt, now, rate, duration, lastSeekAt } = input
   const filmIsClock = input.filmIsClock === true
@@ -137,7 +147,21 @@ export function videoSyncAction(input: VideoSyncInput): VideoSyncAction {
   if (!clockIsFileTime) return { kind: "pause" }
 
   // Metadata not in yet (or a broken file): nothing is seekable.
-  if (!Number.isFinite(duration) || duration <= 0) return { kind: "pause" }
+  // AQU-2253 (review 2, Nov 9): …but where the film is the clock the
+  // transport is waiting for exactly this film to play, so it is asked to,
+  // length or no length (playing it is what loads it). Paused, it stays put.
+  const lengthKnown = Number.isFinite(duration) && duration > 0
+  if (!lengthKnown && !(filmIsClock && kind !== "paused")) return { kind: "pause" }
+
+  // AQU-2253 (review, Nov 9): the film is the clock. Near the playhead it is
+  // left alone (the playhead takes it up, or waits for it), also while the
+  // transport waits ("loading"). Far from it, the playhead was put somewhere
+  // else: it goes there, with no cooldown, as no later tick would re-issue a
+  // dropped seek. Paused, the rule below still moves it with every scrub.
+  // (This clock never goes back by itself, so one that has was put back, by
+  // Previous line, say: the film goes there however short the step.)
+  // Its last frame (below) needs its length; until that is known, this.
+  if (!lengthKnown) return filmClockAction(input)
 
   // The dub is longer than the footage, or we're at the very tail — hold the
   // last frame. AQU-2253: a playhead that JUMPS there (a click, a skipped line,
@@ -149,20 +173,8 @@ export function videoSyncAction(input: VideoSyncInput): VideoSyncAction {
     return videoSec < lastFrameSec - VIDEO_PAUSED_SNAP_SEC ? { kind: "end", sec: lastFrameSec } : { kind: "pause" }
   }
 
-  // AQU-2253 (review, Nov 9): the film is the clock. Near the playhead it is
-  // left alone (the playhead takes it up, or waits for it), also while the
-  // transport waits ("loading"). Far from it, the playhead was put somewhere
-  // else: it goes there, with no cooldown, as no later tick would re-issue a
-  // dropped seek. Paused, the rule below still moves it with every scrub.
-  // (This clock never goes back by itself, so one that has was put back, by
-  // Previous line, say: the film goes there however short the step.)
-  if (filmIsClock && kind !== "paused") {
-    const putBack = prevTickSec != null
-      && tickSec < prevTickSec - VIDEO_PAUSED_SNAP_SEC
-      && videoSec > tickSec + VIDEO_PAUSED_SNAP_SEC
-    if (!putBack && Math.abs(videoSec - tickSec) <= videoDriftBarSec(rate)) return { kind: "none" }
-    return { kind: "seek", sec: Math.max(0, tickSec) }
-  }
+  // The film is the clock (see above).
+  if (filmIsClock && kind !== "paused") return filmClockAction(input)
 
   // A cross-clip resolve republishes progress transiently; the queue re-seeds
   // the clock to the landing target synchronously, so chasing it here would

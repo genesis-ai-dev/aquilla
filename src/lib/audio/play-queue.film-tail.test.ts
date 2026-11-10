@@ -176,7 +176,9 @@ let stopRanOut: () => void = () => {}
  * plays; under a line it is kept at the queue's clock; where the film is the
  * clock it is only sent to the queue's second when that is far from its own
  * (a seek), and it reports its own second four times a second, unless it is
- * `stuck` (buffering, or not started).
+ * `stuck` (buffering, or not started). AQU-2253 (review 2, Nov 9): while the
+ * queue listens for a film it gave up waiting on (`filmQuiet`), it reports as
+ * it follows the queue too, so it is heard from again once it plays.
  */
 const film = { sec: 0, stuck: false, reports: 0 }
 let filmTimer: ReturnType<typeof setInterval> | null = null
@@ -186,6 +188,7 @@ function filmBeat(): void {
   if ((kind !== "playing" && kind !== "loading") || !p.programmeClock) return
   if (!p.filmClock) {
     film.sec = p.currentTime
+    if (!film.stuck && p.filmQuiet) tickProgrammeFilm(film.sec)
     return
   }
   if (Math.abs(film.sec - p.currentTime) > 0.85) film.sec = p.currentTime
@@ -789,12 +792,15 @@ describe("where only the film plays, the film is the clock", () => {
     expect(getQueueProgress().currentTime).toBeCloseTo(5, 1)
   })
 
+  // AQU-2253 (review 2, Nov 9): within the patience. Past it (3 s), the rest
+  // of the line is crossed on the queue's own timer, never waited on for good
+  // ("a film that says nothing while it is the clock on a line", below).
   it("nothing recorded: the playhead does not leave the start until the film plays", async () => {
     const cells = unrecorded()
     linkFilm(10, cells)
     film.stuck = true
     startQueue(ctxFor(cells), 0)
-    await wait(4_000)
+    await wait(2_500)
     // Not two lines on, over a film still loading.
     expect(getQueueState()).toMatchObject({ kind: "loading", cellId: "b1" })
     expect(getQueueProgress().currentTime).toBeCloseTo(0, 2)
@@ -1799,5 +1805,131 @@ describe("Play all on a book with a linked film goes on only into a chapter with
       }) as unknown as CellData
     bookWith([line("c1a", 2_000), line("c1b"), withOriginal("c2a"), line("c2b"), line("c3a"), line("c3b")], 600)
     expect(nextChapterForPlayAll({ chapters: CHAPTERS, lines: book, playedKey: "LUK 1" })?.key).toBe("LUK 2")
+  })
+})
+
+// AQU-2253 (review 2, Nov 9), finding 2: where the film is the clock on a line,
+// only a report from the film moves the playhead on. A film whose length never
+// came in was never asked to play by the panel, and Play sat on the first line
+// nobody recorded with a spinner, for good. Now the panel asks such a film to
+// play (video-sync.test.ts), and the queue has a patience limit: a film that
+// has said nothing for 3 s while it is the clock on a line is given up as the
+// clock; the rest of that line is crossed on the queue's own timer with the
+// film following, as under a recorded line, and so are the later lines, until
+// the film is heard from again. The line is never skipped. Over the film's
+// tail there is nothing but the film, and the run still waits for it.
+describe("a film that says nothing while it is the clock on a line is not waited on for good", () => {
+  const unknownFilm = (cells: CellData[]) =>
+    setProgrammeFilm({ endSec: null, cellIds: new Set(cells.map((c) => c.id)) })
+
+  it("the reviewer's probe: b1 recorded, b2 not, b3 recorded, a film with no length that never reports: b3 plays", async () => {
+    // b1 recorded 1 s [0, 1); b2 a stand-in [1, 2.5); b3 recorded 1 s [2.5, 3.5).
+    const cells = [line("b1", 1_000), line("b2"), line("b3", 1_000)]
+    unknownFilm(cells)
+    film.stuck = true
+    startQueue(ctxFor(cells), 0)
+    await wait()
+    el("b1")!.tick(1)
+    await wait()
+    expect(getQueueState()).toMatchObject({ cellId: "b2" })
+    expect(getQueueProgress().filmClock).toBe(true)
+    // Within the patience the playhead waits for the film, as before.
+    await wait(2_500)
+    expect(getQueueState()).toMatchObject({ kind: "loading", cellId: "b2" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(1, 2)
+    // Past it: b2 is crossed on the queue's own timer, from where it waited.
+    await wait(1_000)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    expect(getQueueProgress().filmClock).toBe(false)
+    expect(getQueueProgress().currentTime).toBeGreaterThan(1.2)
+    expect(getQueueProgress().currentTime).toBeLessThan(2)
+    await wait(1_200)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+    expect(el("b3")!.paused).toBe(false)
+  })
+
+  it("the lines after it are crossed on the queue's timer at once, until the film is heard from again; then the film is the clock again", async () => {
+    // Four stand-ins of 1.5 s: [0, 1.5), [1.5, 3), [3, 4.5), [4.5, 6). A 20 s film.
+    const cells = [line("b1"), line("b2"), line("b3"), line("b4")]
+    linkFilm(20, cells)
+    film.stuck = true
+    startQueue(ctxFor(cells), 0)
+    await wait(3_250)
+    // Given up on at 3 s: b1's rest on the timer.
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b1" })
+    expect(getQueueProgress().filmClock).toBe(false)
+    await wait(1_500)
+    // b2 is not waited for: on the timer from its start, no spinner.
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    expect(getQueueProgress().filmClock).toBe(false)
+    expect(getQueueProgress().currentTime).toBeGreaterThan(1.5)
+    // The film plays again (following the playhead) and is heard from.
+    film.stuck = false
+    await wait(1_500)
+    // b3: the film's clock again.
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+    expect(getQueueProgress().filmClock).toBe(true)
+  })
+
+  it("never skips the line: the playhead crosses every line in step, never jumping", async () => {
+    const cells = [line("b1"), line("b2"), line("b3")]
+    unknownFilm(cells)
+    film.stuck = true
+    startQueue(ctxFor(cells), 0)
+    let last = 0
+    const seen = new Set<string>()
+    for (let i = 0; i < 40; i++) {
+      await wait(250)
+      const now = getQueueProgress().currentTime
+      expect(now).toBeGreaterThanOrEqual(last - 0.001)
+      expect(now - last).toBeLessThan(0.6)
+      last = now
+      const id = (getQueueState() as { cellId?: string }).cellId
+      if (id) seen.add(id)
+      if (getQueueState().kind === "idle") break
+    }
+    expect([...seen]).toEqual(["b1", "b2", "b3"])
+    expect(getQueueState().kind).toBe("idle")
+  })
+
+  it("its length arriving is the film heard from again: the next line is the film's clock", async () => {
+    const cells = [line("b1"), line("b2"), line("b3")]
+    unknownFilm(cells)
+    film.stuck = true
+    startQueue(ctxFor(cells), 0)
+    await wait(3_250)
+    expect(getQueueProgress().filmClock).toBe(false)
+    // Its length comes in; the film is still not playing (the panel had it
+    // paused while it was not the clock), so it is not heard from otherwise.
+    linkFilm(20, cells)
+    await wait(1_500)
+    expect(getQueueState()).toMatchObject({ cellId: "b2" })
+    expect(getQueueProgress().filmClock).toBe(true)
+  })
+
+  it("a pause while the film is waited for is a pause: the patience does not run through it", async () => {
+    const cells = [line("b1"), line("b2")]
+    linkFilm(20, cells)
+    film.stuck = true
+    startQueue(ctxFor(cells), 0)
+    await wait(2_000)
+    pauseQueue()
+    await wait(10_000)
+    expect(getQueueState()).toMatchObject({ kind: "paused", cellId: "b1" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(0, 2)
+    // Play again: a fresh wait for the film, then on.
+    await resumeQueue()
+    await wait(2_500)
+    expect(getQueueState()).toMatchObject({ kind: "loading", cellId: "b1" })
+  })
+
+  it("over the film's tail nothing else plays, and the run still waits for the film", async () => {
+    const cells = recorded()
+    linkFilm(12, cells)
+    film.stuck = true
+    await playTheLinesOut(cells)
+    await wait(10_000)
+    expect(getQueueState()).toMatchObject({ kind: "loading", cellId: "b2" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(5, 1)
   })
 })

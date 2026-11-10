@@ -194,10 +194,15 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
   // Item 2 / slice 9: the ⋯ menu's Remove noise and Change the voice, each
   // making a new version (the original is kept).
   const versionNext = versionOf(take) + 1
+  // AQU-2493 (review, Nov 9), finding 13: …never while Record now counts in,
+  // records or finishes. The Station would switch to the new version and the
+  // recording, which belongs to the take open now, would be lost mid-take.
+  const recordingRef = useRef(false)
   useEffect(() => {
     if (!editable) return
     setStationUi({
       removeNoise: () => {
+        if (recordingRef.current) return
         setMessage(t("editor.station.noiseRunning"))
         void host
           .removeNoise(target.cellId, target.audioId)
@@ -206,7 +211,10 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
           })
           .catch((e: unknown) => setMessage(t("editor.station.saveFailed", { message: e instanceof Error ? e.message : String(e) })))
       },
-      changeVoice: () => setMessage(host.changeVoice(target.cellId) ?? t("editor.station.voiceStarted")),
+      changeVoice: () => {
+        if (recordingRef.current) return
+        setMessage(host.changeVoice(target.cellId) ?? t("editor.station.voiceStarted"))
+      },
     })
     return () => setStationUi({ removeNoise: null, changeVoice: null })
   }, [editable, host, target, line, versionNext, t])
@@ -247,6 +255,13 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
   // recording window (StationRecorder.tsx).
   const rec = useStationRecorder(ed, setMessage)
   const recording = rec.phase.kind === "counting" || rec.phase.kind === "recording" || rec.phase.kind === "finishing"
+  recordingRef.current = recording
+  // AQU-2493 (review, Nov 9), finding 13: the ⋯ menu's two new-version items
+  // are greyed meanwhile, with the reason.
+  useEffect(() => {
+    setStationUi({ versionsWait: recording ? t("editor.station.versionsWhileRecording") : null })
+    return () => setStationUi({ versionsWait: null })
+  }, [recording, t])
   const insertRecording = () => {
     setInsertOpen(false)
     if (ed.sel) rec.start(ed.sel.a)

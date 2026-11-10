@@ -51,6 +51,8 @@ vi.mock("@/lib/station/preview", () => ({
 }))
 
 const { StationPanel } = await import("./StationPanel")
+const { StationMenuItems } = await import("./StationHistory")
+const { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } = await import("@/components/ui/dropdown-menu")
 
 const TARGET = { fileId: "f1", cellId: "c331", audioId: "t2.webm" }
 const DRAFT_KEY = "aquilla:stationDraft:f1|c331|t2.webm"
@@ -321,5 +323,51 @@ describe("while Record now is running, Save and the Station's Undo wait (finding
     expect(screen.getByTestId("station-undo").getAttribute("aria-disabled")).toBe("false")
     fireEvent.click(screen.getByTestId("station-save"))
     await waitFor(() => expect(mocks.save).toHaveBeenCalledTimes(1))
+  })
+})
+
+// AQU-2493 (review, Nov 9), finding 13: Remove noise in the Station's ⋯ menu
+// was still offered while Record now ran; when the cleaning finished the
+// Station switched to the cleaned version and the recording went with the
+// take it belonged to, lost mid-take. Change the voice is the same kind of
+// item. Both are greyed from the count-in until Stop, with the reason, as
+// Save is.
+describe("while Record now is running, the ⋯ menu's Remove noise and Change the voice wait (finding 13)", () => {
+  const menu = () =>
+    render(
+      <DropdownMenu open>
+        <DropdownMenuTrigger render={<button type="button">more</button>} />
+        <DropdownMenuContent>
+          <StationMenuItems />
+        </DropdownMenuContent>
+      </DropdownMenu>,
+    )
+  it("are greyed, say to stop the recording first, and do nothing", async () => {
+    mocks.rec = { phase: { kind: "recording", at: 1 }, busy: true }
+    const removeNoise = vi.fn(async () => null)
+    const changeVoice = vi.fn(() => null)
+    await open(makeTake(), { removeNoise, changeVoice })
+    menu()
+    const noise = await screen.findByTestId("station-menu-noise")
+    const voice = screen.getByTestId("station-menu-voice")
+    for (const item of [noise, voice]) {
+      expect(item.getAttribute("aria-disabled")).toBe("true")
+      expect(item.textContent).toMatch(/Stop the recording first/)
+      fireEvent.click(item)
+    }
+    await act(async () => {})
+    expect(removeNoise).not.toHaveBeenCalled()
+    expect(changeVoice).not.toHaveBeenCalled()
+  })
+
+  it("are offered as usual when nothing is recording", async () => {
+    const removeNoise = vi.fn(async () => null)
+    await open(makeTake(), { removeNoise })
+    menu()
+    const noise = await screen.findByTestId("station-menu-noise")
+    expect(noise.getAttribute("aria-disabled")).not.toBe("true")
+    fireEvent.click(noise)
+    await act(async () => {})
+    expect(removeNoise).toHaveBeenCalledTimes(1)
   })
 })

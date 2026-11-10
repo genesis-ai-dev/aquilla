@@ -320,8 +320,11 @@ describe('cell.audio.uncut — undoing a cut (AQU-2492)', () => {
       await gain('take-a', 6, 200, 500)
       await cut('take-a', 2_000, 'take-b')
       await h.pg.query(`DELETE FROM cell_audio_cut_votes`)
+      // Whatever the cut left on the first piece (AQU-2494 moves the fade-out
+      // off it), the Undo of a cut that kept no level changes none of it.
+      const asCut = await level('take-a')
       await uncut('take-a', 'take-b', null)
-      expect(await level('take-a')).toEqual([6, 200, 500])
+      expect(await level('take-a')).toEqual(asCut)
     })
 
     it('a Redo after the joined take\'s level was changed is refused, and changes nothing', async () => {

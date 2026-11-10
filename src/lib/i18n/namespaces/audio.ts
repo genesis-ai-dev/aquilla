@@ -345,6 +345,10 @@ export const audio = defineNamespace({
     "audio.recordingModal.generateButton": "Generate",
     // AQU-2511: which voice the press will spend credits on, before it is spent.
     "audio.recordingModal.generateWithVoice": "Generate with {voice}",
+    // AQU-2510: which voice Generate will speak in, above the button itself.
+    "audio.recordingModal.voicePickAriaLabel": "Choose the voice Generate uses — now {voice}",
+    "audio.recordingModal.voicePickCastNote": "· this line's voice",
+    "audio.recordingModal.voicePickDefaultNote": "· project default",
     "audio.recordingModal.uploadButton": "Upload",
     "audio.recordingModal.takesLabel": "Takes",
     "audio.recordingModal.formatLockedTooltip":
@@ -2097,6 +2101,32 @@ export const audio = defineNamespace({
           "same subtitle got no audio from it — so it reads as a to-do, naming " +
           "what is still silent. Always at least 2, so the plural is safe.",
         placeholders: { count: "How many heard lines perform this subtitle. Always 2 or more." },
+      },
+      // AQU-2510
+      "audio.recordingModal.voicePickAriaLabel": {
+        description:
+          "Accessible name of the voice control above the recorder's Generate " +
+          "button. It opens a list of the project's voices and names the one " +
+          "that will be used if Generate is pressed now. Announced with no " +
+          "layout to lean on, so it says both what the control does and what " +
+          "is currently chosen.",
+        placeholders: { voice: "Name of the voice Generate would use right now, e.g. Narrator." },
+      },
+      "audio.recordingModal.voicePickCastNote": {
+        description:
+          "Suffix after the voice name on that control, shown when the voice " +
+          "comes from this line's own cast assignment (its character) rather " +
+          "than from a pick. Says WHY that voice is the one offered. Starts " +
+          "with a middle dot because it follows the name inline.",
+        maxLength: 24,
+      },
+      "audio.recordingModal.voicePickDefaultNote": {
+        description:
+          "Suffix after the voice name on that control, shown when nothing " +
+          "casts this line and nothing has been picked, so the project's " +
+          "default voice is the one offered. Starts with a middle dot because " +
+          "it follows the name inline.",
+        maxLength: 24,
       },
       "audio.recordingModal.ttsNoLinkedLine": {
         description:

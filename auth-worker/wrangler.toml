@@ -538,6 +538,10 @@ GITLAB_URL = "https://git.genesisrnd.com"
 # own runtime, not a developer laptop. Local dev-stack injects either its
 # optional :8790 container or an explicitly configured remote endpoint.
 # AGENT_SANDBOX_URL = "https://<aquilla-agent-sandbox-dev-url>"
+# Left "true" on purpose. AQU-2470: this Worker skips the emailed admin code in
+# code (adminElevationRequired in src/middleware/platform-admin.ts), because the
+# AQU-2469 access list already closes dev. If that switch ever stops matching
+# this Worker's name, the code comes back rather than the console opening.
 ADMIN_REQUIRE_ELEVATION = "true"
 # Monday.com integration (see top-level [vars] note).
 MONDAY_CLIENT_ID = "552d390bfdeba3893d071979380eff09"

@@ -2,7 +2,7 @@ import type { DaemonDb, ProjectRow } from './db'
 import type { SyncClient } from './http'
 
 const CHECK_MS = 15 * 60_000
-/** Only an authenticated, placement-validated response can park or resume work. */
+/** Authenticated stable identity permits parking; resuming also requires valid placement. */
 export async function admitProject(db: DaemonDb, sync: Pick<SyncClient, 'archiveStatus'>, project: ProjectRow): Promise<boolean> {
   const archived = await sync.archiveStatus(project)
   if (archived) {

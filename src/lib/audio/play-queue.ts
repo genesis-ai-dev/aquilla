@@ -1078,14 +1078,30 @@ function progPlaysThroughSilence(slot: ProgrammeSlot): boolean {
   return slotHasNothingToPlay(slot, progHiddenCellIds, progUnderLayers) && !getSkipSilentLinesPref()
 }
 
+/**
+ * AQU-2432 (review, Nov 9): an unrecorded line whose ROOM was closed to
+ * nothing has no time to play, so it is never a stop for Next or Previous and
+ * never the line playing — whatever sounds under it. A music clip running
+ * across the seam made it a line "held under a layer" for a tick.
+ */
+function progHasNoRoom(slot: ProgrammeSlot): boolean {
+  return slot.naturalLenSec != null && slot.slotLenSec <= HOLD_MIN_SEC
+}
+
+/** Whether playback stops at this verse at all (`progNextPlayable`). */
+function progIsStop(slot: ProgrammeSlot): boolean {
+  if (progHasNoRoom(slot)) return false
+  // AQU-2252: a line a layer sounds in is played, even with nothing of its own.
+  return progSlotHasSound(slot) || progSlotHolds(slot, slot.startSec) || progPlaysThroughSilence(slot)
+}
+
 /** The next verse playback goes to, from `from` onward: one with anything to
  *  play, or — the setting off — any verse at all. -1 when done. Next/previous
  *  line, seeks past the end and the hand-on at a verse's end all ask this. */
 function progNextPlayable(from: number): number {
   const slots = programme?.slots ?? []
   for (let i = Math.max(0, from); i < slots.length; i++) {
-    // AQU-2252: a line a layer sounds in is played, even with nothing of its own.
-    if (progSlotHasSound(slots[i]) || progSlotHolds(slots[i], slots[i].startSec) || progPlaysThroughSilence(slots[i])) return i
+    if (progIsStop(slots[i])) return i
   }
   return -1
 }
@@ -1093,7 +1109,7 @@ function progNextPlayable(from: number): number {
 function progPrevPlayable(from: number): number {
   const slots = programme?.slots ?? []
   for (let i = Math.min(from, slots.length - 1); i >= 0; i--) {
-    if (progSlotHasSound(slots[i]) || progSlotHolds(slots[i], slots[i].startSec) || progPlaysThroughSilence(slots[i])) return i
+    if (progIsStop(slots[i])) return i
   }
   return -1
 }

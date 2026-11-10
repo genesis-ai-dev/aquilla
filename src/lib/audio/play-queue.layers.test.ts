@@ -19,6 +19,8 @@ import {
   setQueueLayerTrackSlots,
   setQueueTargetSlots,
   setQueueTimingMode,
+  skipBack,
+  skipForward,
   startQueue,
   startQueueAtTime,
   stopQueue,
@@ -270,5 +272,46 @@ describe("following the recordings, a take on an added track plays (AQU-2252)", 
     await settle()
     expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
     expect(el("b2-layer")!.paused).toBe(false)
+  })
+})
+
+// AQU-2432 (review, Nov 9): a line whose ROOM was closed to nothing (the next
+// take dragged earlier against it) has no time to play, so it is never a stop
+// for Next or Previous and never the line playing — whatever sounds under it.
+// A music clip running across it used to make it a line "held under a layer".
+describe("a line with no room, under a layer (AQU-2432)", () => {
+  // a: 2 s, with a 20 s music clip on its start · b: no take, no room · c: 2 s.
+  const scored = () => [
+    line("a", 2000, { durationMs: 20_000, targetOffsetMs: 0 }),
+    line("b", null, undefined, { recordingsRoomMs: 0 } as Partial<CellData>),
+    line("c", 2000),
+  ]
+
+  it("Next from the line before goes straight to the line after, and Previous straight back", async () => {
+    startQueue(ctxFor(scored()), 0)
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "a" })
+    skipForward()
+    await settle()
+    expect(getQueueState()).toMatchObject({ cellId: "c" })
+    skipBack()
+    await settle()
+    expect(getQueueState()).toMatchObject({ cellId: "a" })
+  })
+
+  it("Play all: it is never the line playing, not even for an instant", async () => {
+    const playing: string[] = []
+    startQueue(ctxFor(scored()), 0)
+    await settle()
+    el("a")!.tick(2)
+    for (let i = 0; i < 12; i++) {
+      await Promise.resolve()
+      const s = getQueueState()
+      if (s.kind !== "idle" && "cellId" in s) playing.push(s.cellId)
+    }
+    await settle()
+    expect(playing).not.toContain("b")
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "c" })
+    expect(el("a-layer")!.paused).toBe(false)
   })
 })

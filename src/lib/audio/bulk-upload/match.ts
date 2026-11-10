@@ -836,7 +836,7 @@ export function canChooseLine(a: Assignment): boolean {
 const NO_BOOKS = new BookNameIndex({ builtins: false })
 
 /** No name cut short (`cutShortByWord`): outside a Bible book none is. */
-const NOT_CUT: ReadonlyMap<number, string> = new Map()
+const NOT_CUT: ReadonlyMap<number, UnmatchedReason> = new Map()
 
 /**
  * AQU-2496 (review, Nov 9): the names in a Bible book whose reference a word
@@ -855,8 +855,12 @@ const NOT_CUT: ReadonlyMap<number, string> = new Map()
  *   - a number every such name ends with while their chapters differ, which
  *     tells no two files apart ("Ruth 1 rev 2", "Ruth 2 rev 2").
  */
-function cutShortByWord(fi: FileIndex, group: readonly ReadRecording[]): Map<number, string> {
-  const out = new Map<number, string>()
+function cutShortByWord(fi: FileIndex, group: readonly ReadRecording[]): Map<number, UnmatchedReason> {
+  const out = new Map<number, UnmatchedReason>()
+  // AQU-2496 (review, Nov 9): a name with the Digital Bible Platform's shape
+  // that doesn't fit it (read-name.ts `readDbpName`) is unread too, so it is
+  // listed, and the folder's order never places it.
+  for (const r of group) if (r.reading.halfFits) out.set(r.index, { code: "tooManyNumbers" })
   const cut = group.flatMap((r) => {
     const after = r.reading.afterWord
     const read = r.reading.numbers.filter((n) => n.marker !== "take" && n.marker !== "part")
@@ -864,7 +868,7 @@ function cutShortByWord(fi: FileIndex, group: readonly ReadRecording[]): Map<num
     return [{ r, chapter: read[0].value, tail: after.numbers.join(","), word: after.word }]
   })
   const sameTail = cut.length > 1 && cut.every((c) => c.tail === cut[0].tail) && new Set(cut.map((c) => c.chapter)).size > 1
-  if (!sameTail) for (const c of cut) out.set(c.r.index, c.word)
+  if (!sameTail) for (const c of cut) out.set(c.r.index, { code: "wordBeforeNumber", word: c.word })
   return out
 }
 
@@ -951,9 +955,9 @@ export function matchRecordings(
       ? { as: loneReading.as, ms: loneReading.byLengthMs }
       : undefined
     const results = group.map((r) => {
-      const cutWord = cut.get(r.index)
-      if (cutWord != null) {
-        return { r, res: { reason: { code: "wordBeforeNumber", word: cutWord } as UnmatchedReason } as Resolved, interp: null as Interpreted | null }
+      const cutReason = cut.get(r.index)
+      if (cutReason != null) {
+        return { r, res: { reason: cutReason } as Resolved, interp: null as Interpreted | null }
       }
       // In one Bible book, a name of another book is the wrong file.
       if (fi.bible && fi.file.bookCode && r.reading.book && r.reading.book.code !== fi.file.bookCode) {

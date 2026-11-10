@@ -5,7 +5,7 @@
 // and the destination, which is match.ts's job.
 
 import { toWesternDigits } from "../../../../shared/decimal-digits"
-import { BookNameIndex } from "./book-names"
+import { BOOK_CODES, BookNameIndex } from "./book-names"
 
 export type NumberMarker = "chapter" | "verse" | "line" | "part" | "take"
 
@@ -41,6 +41,9 @@ export interface NameReading {
    *  number follows such a word. Whether those numbers mattered is match.ts's
    *  call (`cutShortByWord`). */
   afterWord: { word: string; numbers: number[] } | null
+  /** AQU-2496 (review, Nov 9): the name has the Digital Bible Platform's shape
+   *  but doesn't fit it (`readDbpName`), so nothing in it was read. */
+  halfFits?: true
 }
 
 const DASHES = /^(?:-|–|—|‑|‐|−|~|～|to|through|thru|至|到)$/u
@@ -194,10 +197,42 @@ function findBooks(toks: Tok[], index: BookNameIndex): BookHit[] {
 }
 
 /**
+ * AQU-2496 (review, Nov 9): Faith Comes By Hearing's Digital Bible Platform
+ * (Bible.is) names a chapter's recording "A01___03_Genesis_____ENGESVO2DA": A
+ * for the Old Testament or B for the New and the book's place in it, the
+ * chapter after the first run of underscores, the book's name padded with
+ * underscores, then the fileset's id, whose digits are never a chapter or a
+ * verse. Read word by word, the "2" in "…O2DA" was the only number after the
+ * book, so every chapter of a book landed on chapter 2 (or 1).
+ *
+ * Read whole, when the book's name and its place name the same book. A name
+ * with the shape that doesn't fit it (they disagree, the name is one no table
+ * knows, something follows the id) is not guessed at: nothing in it is read.
+ */
+const DBP_SHAPE = /^[AB]\d{2}_{2,}\d/iu
+const DBP_NAME = /^([AB])(\d{2})_{2,}(\d{1,3})_([\p{L}\p{M}\d_]+?)_+([A-Za-z0-9]+)$/iu
+
+function readDbpName(stem: string, index: BookNameIndex): NameReading | null {
+  if (!DBP_SHAPE.test(stem)) return null
+  const none = { stem, book: null, numbers: [], partWord: null, words: [], unknownBookWord: null, afterWord: null }
+  const m = DBP_NAME.exec(stem)
+  if (!m) return { ...none, halfFits: true }
+  const [, testament, place, chapter, name, fileset] = m
+  const newTestament = testament.toUpperCase() === "B"
+  const at = Number(place)
+  const code = at >= 1 && at <= (newTestament ? 27 : 39) ? BOOK_CODES[(newTestament ? 39 : 0) + at - 1] : undefined
+  const named = index.lookup(name.replace(/_/g, " "), false)
+  if (!code || named?.code !== code) return { ...none, halfFits: true }
+  return { ...none, book: named, numbers: [{ value: Number(chapter), sepBefore: "", marker: "chapter" }], words: [fileset] }
+}
+
+/**
  * Read one name. `index` holds the built-in book names plus the project's own.
  */
 export function readName(fileName: string, index: BookNameIndex): NameReading {
   const stem = nameStem(fileName)
+  const dbp = readDbpName(stem, index)
+  if (dbp) return dbp
   const toks = tokenize(stem)
   const hits = findBooks(toks, index)
   // The book is the one the reference follows; failing that, the first one.

@@ -829,6 +829,66 @@ describe("the review's cases (Oct 29)", () => {
   })
 })
 
+// AQU-2496 (review, Nov 9): Faith Comes By Hearing's Digital Bible Platform
+// names a chapter's recording "A01___03_Genesis_____ENGESVO2DA.mp3": the
+// testament's letter and the book's place in it, the chapter, the book's name
+// padded with underscores, then the fileset's id. Read word by word, the "2"
+// inside "ENGESVO2DA" was the only number after the book: every file of
+// Genesis read as chapter 2, the first landed on Genesis 2 and the other 49
+// were "duplicates".
+describe("Bible audio named the Digital Bible Platform's way", () => {
+  const gen = book("gen", "GEN", "Genesis", [31, 25, 24])
+  const mat = book("mat", "MAT", "Matthew", [25, 23])
+  const chapterOf = (name: string) => {
+    const r = readName(name, new BookNameIndex())
+    return [r.book?.code ?? null, r.numbers.map((n) => n.value)]
+  }
+
+  it("reads the chapter after the underscores, never a digit of the fileset's id", () => {
+    expect(chapterOf("A01___03_Genesis_____ENGESVO2DA.mp3")).toEqual(["GEN", [3]])
+    expect(chapterOf("B01___01_Matthew_____ENGESVN1DA.mp3")).toEqual(["MAT", [1]])
+    expect(chapterOf("B01___12_Matthew_____ENGESVN2DA.mp3")).toEqual(["MAT", [12]])
+  })
+
+  it("reads a three-digit chapter, and a book whose name holds a digit, written either way", () => {
+    expect(chapterOf("A19__119_Psalms______ENGESVO2DA.mp3")).toEqual(["PSA", [119]])
+    expect(chapterOf("A09___01_1Samuel_____ENGESVO2DA.mp3")).toEqual(["1SA", [1]])
+    expect(chapterOf("A09___02_1_Samuel____ENGESVO2DA.mp3")).toEqual(["1SA", [2]])
+    expect(chapterOf("B23___05_1John_______ENGESVN2DA.mp3")).toEqual(["1JN", [5]])
+  })
+
+  it("a book's folder lands each file on its own whole chapter", () => {
+    const files = [1, 2, 3].map((c) => audio(`Genesis/A01___0${c}_Genesis_____ENGESVO2DA.mp3`))
+    const { assignments, jobs } = run(files, [gen], { kind: "file", fileId: "gen" })
+    expect(assignments.map((a) => a.read)).toEqual(["Genesis 1", "Genesis 2", "Genesis 3"])
+    expect(assignments.map((a) => a.cellIds?.length)).toEqual([31, 25, 24])
+    expect(jobs.map((j) => j.kind)).toEqual(["range", "range", "range"])
+  })
+
+  it("a whole project's Old and New Testament files find their books", () => {
+    const files = [audio("A01___02_Genesis_____ENGESVO2DA.mp3"), audio("B01___02_Matthew_____ENGESVN1DA.mp3")]
+    const { assignments } = run(files, [gen, mat], { kind: "project" })
+    expect(assignments.map((a) => a.read)).toEqual(["Genesis 2", "Matthew 2"])
+  })
+
+  it("a name that only half fits is not guessed at", () => {
+    const files = [
+      audio("A02___03_Genesis_____ENGESVO2DA.mp3"), // A02 is Exodus
+      audio("A01___02_Genesis_____ENGESVO2DA (1).mp3"), // a second download
+      audio("A01___01_Gnesis______ENGESVO2DA.mp3"), // a book no table knows
+    ]
+    for (const f of files) expect(chapterOf(f.name)).toEqual([null, []])
+    const { assignments } = run(files, [gen], { kind: "file", fileId: "gen" })
+    // Listed as unread, so the assistant is offered; never placed by folder order.
+    expect(assignments.map((a) => [a.cellIds, a.reason?.code])).toEqual([[undefined, "tooManyNumbers"], [undefined, "tooManyNumbers"], [undefined, "tooManyNumbers"]])
+  })
+
+  it("other names that start with a letter and a number read as before", () => {
+    expect(chapterOf("A01 Genesis 1-3.mp3")).toEqual(["GEN", [1, 3]])
+    expect(chapterOf("B2_Genesis_4.mp3")).toEqual(["GEN", [4]])
+  })
+})
+
 // AQU-2329: a team may name its files in its own script's digits. Every
 // Unicode decimal digit is read as its value, so a name written in Arabic-Indic,
 // Persian, Devanagari, Bengali, Burmese, Thai or any other script's digits

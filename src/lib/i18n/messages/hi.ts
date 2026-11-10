@@ -7093,8 +7093,6 @@ export const hi: Catalog = {
   "workspace.offline.connectivityTooltipOnline": "सर्वर से जुड़ा।",
   "workspace.offline.connectivityTooltipOffline": "कोई कनेक्शन नहीं — ऑफ़लाइन काम हो रहा है। ऑनलाइन लौटने पर बदलाव सिंक होते हैं।",
   "workspace.status.unreachable": "सर्वर तक नहीं पहुँच सकते — आपकी परियोजना अभी भी उपलब्ध हो सकती है।",
-  "workspace.status.forbidden": "इस परियोजना तक आपकी पहुँच नहीं रही। यदि यह अप्रत्याशित है तो किसी अनुरक्षक से फिर आमंत्रण माँगें। {backLink}।",
-  "workspace.status.notFound": "परियोजना नहीं मिली, या आपकी पहुँच नहीं है। {backLink}।",
   "workspace.backToDashboard": "डैशबोर्ड पर वापस",
   "workspace.projectSettingsHook.noSessionError": "कोई सत्र या परियोजना नहीं — साइन इन करें और फिर कोशिश करें।",
   "workspace.forms.requiredField": "{label} ज़रूरी है",

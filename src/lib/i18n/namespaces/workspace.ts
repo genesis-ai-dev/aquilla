@@ -99,9 +99,13 @@ export const workspace = defineNamespace({
     "workspace.offline.connectivityTooltipOnline": "Connected to the server.",
     "workspace.offline.connectivityTooltipOffline": "No connection — working offline. Changes sync once you're back online.",
     "workspace.status.unreachable": "Can't reach the server — your project may still be available.",
-    "workspace.status.forbidden":
-      "You no longer have access to this project. Ask a project maintainer to re-invite you if this is unexpected. {backLink}.",
-    "workspace.status.notFound": "Project not found, or you don't have access. {backLink}.",
+    // AQU-2452: ONE message for every project access rejection — a project that
+    // does not exist, an org member with no grant, a non-member, a removed
+    // member. Telling those apart told the caller whether a project exists,
+    // and "You no longer have access" was simply wrong for someone who never
+    // had any.
+    "workspace.status.noAccess":
+      "Either this project does not exist, or you do not have access. Ask a project manager to invite or re-invite you if this is unexpected. {backLink}.",
     "workspace.backToDashboard": "Back to dashboard",
 
     // -- hooks/useProjectSettings: patch() error fallback when called with no
@@ -798,27 +802,24 @@ export const workspace = defineNamespace({
           "server/network error (as opposed to a genuine 404) — the project may still " +
           "exist. Paired with a 'Retry' button (common.retry).",
       },
-      "workspace.status.forbidden": {
+      "workspace.status.noAccess": {
         description:
-          "Shown instead of the editor when the signed-in user's access to this " +
-          "project was revoked or never granted. {backLink} is a translated 'Back to " +
-          "dashboard' link (workspace.backToDashboard) rendered inline right before " +
-          "the final period — keep it part of the same sentence.",
-        placeholders: { backLink: "The 'Back to dashboard' link, already translated and rendered as a link." },
-      },
-      "workspace.status.notFound": {
-        description:
-          "Shown instead of the editor when no project with this id exists at all. " +
-          "{backLink} is the same translated 'Back to dashboard' link as " +
-          "workspace.status.forbidden, rendered inline right before the final period.",
+          "The one message shown instead of the project (editor or overview) for " +
+          "every refusal: no project with this id, an org member with no grant, a " +
+          "non-member, a member whose access was removed. Deliberately does not " +
+          "say which, so it never reveals whether a project exists — keep both " +
+          "halves of the 'either … or …' and do not split it into two messages. " +
+          "{backLink} is a translated 'Back to dashboard' link " +
+          "(workspace.backToDashboard) rendered inline right before the final " +
+          "period — keep it part of the same sentence.",
         placeholders: { backLink: "The 'Back to dashboard' link, already translated and rendered as a link." },
       },
       "workspace.backToDashboard": {
         description:
           "Link/button text that navigates away from a project error/access screen " +
-          "back to the project list. Reused by the not-on-device, forbidden, not-" +
-          "found and trashed-project screens so every 'return to safety' exit reads " +
-          "identically.",
+          "back to the caller's current org dashboard. Reused by the not-on-device, " +
+          "no-access and trashed-project screens so every 'return to safety' exit " +
+          "reads identically.",
       },
       "workspace.projectSettingsHook.noSessionError": {
         description:

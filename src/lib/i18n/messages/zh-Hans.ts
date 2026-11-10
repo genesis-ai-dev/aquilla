@@ -5911,8 +5911,6 @@ export const zh_Hans: Catalog = {
   "workspace.offline.connectivityTooltipOnline": "已连接到服务器。",
   "workspace.offline.connectivityTooltipOffline": "无连接，正在离线工作。恢复在线后将同步更改。",
   "workspace.status.unreachable": "无法连上服务器 — 您的项目可能仍然可以使用。",
-  "workspace.status.forbidden": "您已不再具有这个项目的访问权。若这出乎意料，请咨询项目维护者重新邀请您。{backLink}。",
-  "workspace.status.notFound": "找不到项目，或您没有访问权。{backLink}。",
   "workspace.backToDashboard": "回到仪表板",
   "workspace.projectSettingsHook.noSessionError": "没有会话或项目 — 请登录后再试一次。",
   "workspace.forms.requiredField": "必须填写{label}",

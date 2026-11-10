@@ -87,7 +87,7 @@ import { playingInSlot, recordTakeAdded } from "@/lib/history/take-steps"
 import { recordingLimitsFor } from "@/lib/audio/recording-limits"
 import { MAX_AUDIO_UPLOAD_BYTES, audioIdSeededWith, buildAudioId, uploadCellAudio, deleteCellAudio, fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { audioCachePutBlob } from "@/lib/audio/bytes-cache"
-import { emitCellAudioAttach, emitCellAudioPlace, emitCellAudioValidate } from "@/lib/sync/events-emit"
+import { emitCellAudioAttach, emitCellAudioMeasure, emitCellAudioPlace, emitCellAudioValidate } from "@/lib/sync/events-emit"
 import { audioValidationScope } from "@/lib/audio/audio-validation-permissions"
 import { shouldAutoValidateFreshRecording } from "@/lib/review/auto-validation"
 import { notifyAudioAttachmentsChanged, injectOptimisticAudioAttachment } from "@/lib/audio/audio-attachments-bus"
@@ -934,9 +934,13 @@ export function AudioRecordingModal({
   // Round 8c: takes recorded before the webm-duration fix attached without a
   // durationMs (Chrome writes no duration header into MediaRecorder blobs), so
   // their chips still fall back to section width. Heal the SELECTED take once
-  // per modal visit: fetch its bytes, decode the real length, re-attach with
-  // it (re-attach re-selects, which is a no-op here — and COALESCE keeps the
-  // name, while passing the trims keeps them).
+  // per modal visit: fetch its bytes, decode the real length, and fill it in.
+  //
+  // AQU-2491 (review, Nov 9): with `cell.audio.measure`, which fills an
+  // unknown length and nothing else, never a re-attach. An attach chooses the
+  // take and brings it back if deleted, and on a slow network this lands late:
+  // after a new take was recorded, or this one deleted, the old one played
+  // again. Its name, trims, place and choice are left as they are.
   const healTriedRef = useRef<Set<string>>(new Set())
   useEffect(() => {
     if (!open || !session?.jwt || !activeCell) return
@@ -959,26 +963,20 @@ export function AudioRecordingModal({
           new Blob([bytes as BlobPart], { type: take.mimeType ?? "audio/webm" }),
         )
         if (durationMs == null) return
-        const healEventId = await emitCellAudioAttach({
+        const healEventId = await emitCellAudioMeasure({
           projectId: project.id, fileId: cell.fileId, cellId: cell.id,
-          // AQU-646: the take's own slot. Provably "recording" today (the find
-          // above filters on it), but this re-attach assigns slot outright, so
-          // it must not be the one place still naming it by hand once
-          // `recordingTakes` is scoped to a target track.
-          audioId: take.audioId, url: take.url, slot: take.slot,
-          mimeType: take.mimeType ?? undefined,
+          audioId: take.audioId,
           durationMs: Math.round(durationMs),
-          label: take.label ?? undefined,
-          trimStartMs: take.trimStartMs ?? undefined,
-          trimEndMs: take.trimEndMs ?? undefined,
           ...(laneTag ? { targetLang: laneTag } : {}),
           author: username,
         })
+        // Painted at its length at once, without claiming the slot.
         injectOptimisticAudioAttachment(
           cell.fileId,
           cell.id,
           { ...take, durationMs: Math.round(durationMs) },
           healEventId,
+          { claimSelection: false },
         )
         notifyAudioAttachmentsChanged(cell.fileId)
       } catch {
@@ -1450,8 +1448,8 @@ export function AudioRecordingModal({
           ...takeTrimWindow,
           label: takeLabel,
           ...(laneTag ? { targetLang: laneTag } : {}),
-          // AQU-1572: the recorder's own save path — the heal re-attach above
-          // passes no origin, so a take counts exactly once.
+          // AQU-1572: the recorder's own save path — the duration heal above
+          // sends no attach at all, so a take counts exactly once.
           audioOrigin: "record",
           surface: "recorder",
           author: username,

@@ -302,12 +302,27 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
         // slot its previous choice back straight after.
         const playingNow = ctx.selectedIn(d.cellId, d.slot)
         for (const id of ids) await ctx.select(d.cellId, d.slot, id)
-        if (!d.wasSelected) await ctx.select(d.cellId, d.slot, playingNow)
+        // AQU-2492 (review, Nov 9): undoing a delete brings the take BACK. It
+        // plays again only if it was the one playing and the slot is still
+        // empty, as the delete left it. A take chosen or recorded since (by
+        // anyone) keeps the slot; so does the rest of a cut take whose piece
+        // this was. The slot is handed back by a take that is live, never by
+        // naming a deleted first piece (choosing it would bring it back).
+        if (d.wasSelected && playingNow === null) return DONE
+        const back = playingNow === null ? null : liveOf(d.cellId, playingNow)
+        if (playingNow === null || back) await ctx.select(d.cellId, d.slot, back)
         return DONE
       },
       async redo(d: TakeRemoveData) {
         const live = [d.audioId, ...(d.pieces ?? [])].filter((id) => ctx.readTake(d.cellId, id))
         if (live.length === 0) return GONE
+        // AQU-2492 (review, Nov 9): someone else approved it after the Undo
+        // brought it back. Deleting it again would throw their approval away,
+        // the same rule as undoing a new take (gap 25).
+        for (const id of live) {
+          const by = ctx.approvedByOthers?.(d.cellId, id)
+          if (by) return { kind: "skipped", reason: "approved", by }
+        }
         for (const id of live) await ctx.remove(d.cellId, id)
         return DONE
       },

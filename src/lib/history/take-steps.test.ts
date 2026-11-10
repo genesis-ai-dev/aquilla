@@ -360,3 +360,117 @@ describe("going back to a take that was deleted since (AQU-2492)", () => {
     expect(ctx.select).not.toHaveBeenCalled()
   })
 })
+
+// AQU-2492 (review, Nov 9), finding 7: undoing a delete brings the take BACK;
+// it only makes it the one that plays when nothing else has taken its place.
+// And redoing a delete does not remove a take someone approved in between.
+describe("undoing and redoing a delete (AQU-2492)", () => {
+  /** A line whose `slot` plays `playing.id`; select and remove update it, as the server would. */
+  function line(takes: Takes, playing: { id: string | null }, slot = "recording") {
+    const groupOf = (id: string) => takes[id]?.pieceOf ?? id
+    return ctxFor(takes, {
+      selectedIn: (_c, s) => (s === slot ? playing.id : null),
+      remove: vi.fn(async (_c, id) => {
+        takes[id] = { ...takes[id], isDeleted: true }
+        const left = Object.keys(takes).some((k) => !takes[k].isDeleted && groupOf(k) === groupOf(id))
+        if (playing.id === groupOf(id) && !left) playing.id = null
+      }),
+      select: vi.fn(async (_c, _s, id) => {
+        if (id) takes[id] = { ...takes[id], isDeleted: false }
+        playing.id = id ? groupOf(id) : null
+      }),
+      approvedByOthers: (_c, id) => (takes[id]?.validators ?? []).find((v) => v !== "asha") ?? null,
+      liveGroup: (_c, id) => Object.keys(takes).filter((k) => !takes[k].isDeleted && groupOf(k) === groupOf(id)),
+    })
+  }
+  const removed = { cellId: "c", audioId: "take1", slot: "recording", wasSelected: true, selectedBefore: null }
+
+  it("the take plays again when nothing has taken its place", async () => {
+    const takes: Takes = { take1: { isDeleted: true } }
+    const playing = { id: null as string | null }
+    const { ctx, handlers } = line(takes, playing)
+    expect(await handlers["take.remove"].undo(removed)).toEqual({ kind: "done" })
+    expect(takes.take1.isDeleted).toBe(false)
+    expect(playing.id).toBe("take1")
+    expect(ctx.select).toHaveBeenCalledTimes(1)
+  })
+
+  it("a take a colleague recorded since keeps playing; the deleted one comes back beside it", async () => {
+    const takes: Takes = { take1: { isDeleted: true }, take9: {} }
+    const playing = { id: "take9" as string | null }
+    const { handlers } = line(takes, playing)
+    expect(await handlers["take.remove"].undo(removed)).toEqual({ kind: "done" })
+    expect(takes.take1.isDeleted).toBe(false)
+    expect(playing.id).toBe("take9")
+  })
+
+  it("the same on an added track", async () => {
+    const takes: Takes = { take1: { isDeleted: true, slot: "track-9" }, take9: { slot: "track-9" } }
+    const playing = { id: "take9" as string | null }
+    const { handlers } = line(takes, playing, "track-9")
+    expect(await handlers["take.remove"].undo({ ...removed, slot: "track-9" })).toEqual({ kind: "done" })
+    expect(takes.take1.isDeleted).toBe(false)
+    expect(playing.id).toBe("take9")
+  })
+
+  it("a cut take deleted whole comes back, every piece, without taking the slot from a take chosen since", async () => {
+    const takes: Takes = { take1: { isDeleted: true }, p2: { isDeleted: true, pieceOf: "take1" }, take9: {} }
+    const playing = { id: "take9" as string | null }
+    const { handlers } = line(takes, playing)
+    expect(await handlers["take.remove"].undo({ ...removed, pieces: ["p2"] })).toEqual({ kind: "done" })
+    expect(takes.take1.isDeleted).toBe(false)
+    expect(takes.p2.isDeleted).toBe(false)
+    expect(playing.id).toBe("take9")
+  })
+
+  it("one piece of the playing cut take comes back and the take keeps playing", async () => {
+    const takes: Takes = { take1: {}, p2: { isDeleted: true, pieceOf: "take1" } }
+    const playing = { id: "take1" as string | null }
+    const { ctx, handlers } = line(takes, playing)
+    expect(await handlers["take.remove"].undo({ ...removed, audioId: "p2" })).toEqual({ kind: "done" })
+    expect(takes.p2.isDeleted).toBe(false)
+    expect(playing.id).toBe("take1")
+    // Giving the slot back never names a deleted take.
+    for (const [, , id] of (ctx.select as ReturnType<typeof vi.fn>).mock.calls) expect(["take1", "p2"]).toContain(id)
+  })
+
+  it("the cut take that plays now has lost its first piece: the slot goes back to a piece that is left", async () => {
+    const takes: Takes = { take1: { isDeleted: true }, other: { isDeleted: true }, o2: { pieceOf: "other" } }
+    const playing = { id: "other" as string | null }
+    const { ctx, handlers } = line(takes, playing)
+    expect(await handlers["take.remove"].undo(removed)).toEqual({ kind: "done" })
+    expect(playing.id).toBe("other")
+    expect(takes.other.isDeleted).toBe(true)
+    expect(ctx.select).toHaveBeenLastCalledWith("c", "recording", "o2")
+  })
+
+  it("a take that was not playing comes back and the slot stays empty", async () => {
+    const takes: Takes = { take1: { isDeleted: true } }
+    const playing = { id: null as string | null }
+    const { handlers } = line(takes, playing)
+    expect(await handlers["take.remove"].undo({ ...removed, wasSelected: false })).toEqual({ kind: "done" })
+    expect(takes.take1.isDeleted).toBe(false)
+    expect(playing.id).toBeNull()
+  })
+
+  it("redo is skipped, naming them, once someone else approved the take in between", async () => {
+    const takes: Takes = { take1: { validators: ["asha", "ben"] } }
+    const { ctx, handlers } = line(takes, { id: "take1" })
+    expect(await handlers["take.remove"].redo(removed)).toEqual({ kind: "skipped", reason: "approved", by: "ben" })
+    expect(ctx.remove).not.toHaveBeenCalled()
+  })
+
+  it("…also when it is a piece of a cut take that they approved", async () => {
+    const takes: Takes = { take1: {}, p2: { pieceOf: "take1", validators: ["ben"] } }
+    const { ctx, handlers } = line(takes, { id: "take1" })
+    expect(await handlers["take.remove"].redo({ ...removed, pieces: ["p2"] })).toEqual({ kind: "skipped", reason: "approved", by: "ben" })
+    expect(ctx.remove).not.toHaveBeenCalled()
+  })
+
+  it("your own approval does not stop your Redo", async () => {
+    const takes: Takes = { take1: { validators: ["asha"] } }
+    const { ctx, handlers } = line(takes, { id: "take1" })
+    expect(await handlers["take.remove"].redo(removed)).toEqual({ kind: "done" })
+    expect(ctx.remove).toHaveBeenCalledWith("c", "take1")
+  })
+})

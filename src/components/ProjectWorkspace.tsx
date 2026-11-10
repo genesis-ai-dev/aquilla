@@ -12519,13 +12519,10 @@ export function ProjectWorkspace() {
   // it can never put a cell in this set. Without that check a subtitle file
   // with one attached video would report itself fully translated. AQU-2411: a
   // take migrated from Codex, whose id carries no line id, does count.
-  // AQU-2426 (browser pass, Nov 9): read off the lane's read, which is fetched
-  // in every view: the workspace's map is empty in the Text view for anyone
-  // who may not restructure lines, and every line read as having no take there.
   const ownTakeCellIds = useMemo(() => {
     const ids = new Set<string>()
-    const shared = sharedSelections(audioValidationByCellId.values())
-    for (const [cellId, entry] of audioValidationByCellId) {
+    const shared = sharedSelections(workspaceAudioByCellId.values())
+    for (const [cellId, entry] of workspaceAudioByCellId) {
       // AQU-490: EVERY slot, not just `recording`.
       //
       // This read `entry.selectedAudioId` — the default track alone — so a
@@ -12545,7 +12542,7 @@ export function ProjectWorkspace() {
       }
     }
     return ids
-  }, [audioValidationByCellId, activeFileId])
+  }, [workspaceAudioByCellId, activeFileId])
   /**
    * Media redesign slice 2: which lines are recorded and approved in the open
    * language, from the lane-scoped read (the one bulk validation uses, loaded

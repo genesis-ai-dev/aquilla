@@ -10,8 +10,6 @@
  *  - "Generate voices for every line" (⋯ menu) counted the lines that already
  *    have a generated voice, and its run generated them again;
  *  - Export found no recordings on a file whose takes are on its own lines;
- *  - in a language that delivers text, a line with only a recording counted
- *    as untranslated in the status bar, progress and the rule engine;
  *  - Undo of a voice generated from an extension did not put back the voice
  *    the line had before;
  *  - an Undo that opens another language first ran before that language's
@@ -21,7 +19,10 @@
  * every view) where the workspace's map does not have the line. The ⋯ menu's
  * "Transcribe all audio" and "Change voice for all" counts are left on the
  * workspace's map: keeping them out of the Text view was Sam's call
- * (AQU-490, Sep 21).
+ * (AQU-490, Sep 21). So does "has a take of its own" (the chapter's
+ * "% translated", Next unfinished, the empty-line rule, the remove-line Undo
+ * guards): counting has its own decided rules, and changing what the Text
+ * view counts is not this bundle's call (review, Nov 9, finding 2).
  *
  * The first half runs the readers' own steps on what the Text view has; the
  * second pins the workspace to them, as nothing renders ProjectWorkspace in
@@ -119,10 +120,11 @@ describe("pins the workspace to those readers", () => {
       .toMatch(/linesWithRecordings\(legacyCells, workspaceAudioByCellId, audioValidationByCellId\)/)
   })
 
-  it("a line with a take of its own is read from the lane's recordings", () => {
+  it("a line with a take of its own is still read from the workspace's map, as before (review, Nov 9, finding 2)", () => {
     const block = between("const ownTakeCellIds = useMemo(", "}, [")
-    expect(block).toMatch(/sharedSelections\(audioValidationByCellId\.values\(\)\)/)
-    expect(block).toMatch(/for \(const \[cellId, entry\] of audioValidationByCellId\)/)
+    expect(block).toMatch(/sharedSelections\(workspaceAudioByCellId\.values\(\)\)/)
+    expect(block).toMatch(/for \(const \[cellId, entry\] of workspaceAudioByCellId\)/)
+    expect(source).toMatch(/\}, \[workspaceAudioByCellId, activeFileId\]\)/)
   })
 
   it("an extension's generated voice names the voice before it from the lane's read when the workspace has none", () => {

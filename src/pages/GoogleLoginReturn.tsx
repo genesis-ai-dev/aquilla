@@ -19,7 +19,7 @@ import { confirmNewAccountAnalytics } from "@/lib/analytics-account"
 import { toast } from "@/components/ui/toast"
 import { loginPath } from "@/lib/navigation/login-path"
 
-export function GoogleLoginReturn() {
+function GoogleSignInReturn() {
   const t = useT(), navigate = useNavigate(), { adopt } = useAccounts()
   const [attempt] = useState(readGoogleAttempt)
   const [choice, setChoice] = useState(attempt?.choice ?? null)
@@ -76,6 +76,37 @@ export function GoogleLoginReturn() {
         {pending.step === "link" && <Button type="button" variant="link" onClick={() => setRecovering(true)}>{t("auth.login.forgotPasswordLink")}</Button>}
       </form>}
       <Link to={loginPath({ next: attempt?.next, add: true })} onClick={clearGoogleAttempt}>{t("auth.google.back")}</Link>
+    </CardContent>
+  </AuthPanel></AuthPage>
+}
+
+export function GoogleLoginReturn() {
+  const [attempt] = useState(readGoogleAttempt)
+  return attempt?.connectUsername ? <GoogleConnectReturn username={attempt.connectUsername} verifier={attempt.verifier} /> : <GoogleSignInReturn />
+}
+function GoogleConnectReturn({ username, verifier }: { username: string; verifier: string }) {
+  const t = useT(), navigate = useNavigate(), { active, loading } = useAccounts()
+  const [password, setPassword] = useState(""), [busy, setBusy] = useState(false), [error, setError] = useState(false)
+  useEffect(() => { setPassword(""); setError(false) }, [active?.username])
+  const code = googleReturn?.get("code")
+  const matching = active?.username === username
+  return <AuthPage><AuthPanel><CardHeader><CardTitle>{t("auth.google.linkTitle")}</CardTitle></CardHeader>
+    <CardContent className="flex flex-col gap-4">
+      {loading ? <Spinner /> : !matching ? <p role="alert">{t("auth.methods.accountChanged")}</p> : !code ? <p role="alert">{t("auth.google.cancelled")}</p> : <form className="flex flex-col gap-4" onSubmit={event => {
+        event.preventDefault(); if (busy || !active || !matching) return
+        setBusy(true); setError(false)
+        void googleRequest("connect", { code, verifier, password }, active.jwt).then(() => {
+          clearGoogleAttempt(); navigate("/preferences/login-methods", { replace: true })
+        }).catch(() => setError(true)).finally(() => { setPassword(""); setBusy(false) })
+      }}>
+        <p>{t("auth.methods.connectNote")}</p>
+        <p>{username}</p>
+        {error && <p role="alert">{t("auth.methods.connectFailed")}</p>}
+        <FieldGroup><Field><FieldLabel htmlFor="connect-google-password">{t("auth.google.passwordLabel")}</FieldLabel>
+          <RevealableInput id="connect-google-password" required autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} /></Field></FieldGroup>
+        <Button type="submit" disabled={busy}>{t("auth.methods.connect")}</Button>
+      </form>}
+      <Link to="/preferences/login-methods" onClick={clearGoogleAttempt}>{t("auth.methods.back")}</Link>
     </CardContent>
   </AuthPanel></AuthPage>
 }

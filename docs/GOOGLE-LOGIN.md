@@ -124,3 +124,26 @@ confirmed the Google migration and tables were absent, so it was renumbered to
 0199 and applied to shared dev; schema and ledger matched afterwards. Existing
 Google test accounts from the previous preview are not assumed to survive a
 shared-dev database refresh. Production was not migrated or configured.
+
+## Managing login methods
+
+Preferences → Account → Login methods reads connection status from the first-party
+`GET /auth/oauth/google/methods` endpoint for the active authenticated account.
+It never queries Google for status. Google-only users are directed to the existing
+email password-reset flow; disconnect stays unavailable until a password exists.
+The server independently requires a valid Aquilla password before disconnecting.
+
+Connecting explicitly starts the same minimal-scope Google redirect, with an
+account-management marker (username, never a JWT or password) in tab-local state.
+The return page requires the same active account and its Aquilla password. Its
+`POST /connect` consumes a verified, single-use Google handoff only if the Google
+email matches the current account, without creating an account, adopting a new
+session or altering analytics consent. A provider identity already owned by
+another account is never transferred. Account switches require restarting.
+
+`POST /disconnect` removes only the authenticated account's Google identity,
+compares the freshly verified password hash in the delete, and cannot remove a
+Google-only account's last login method. Status and disconnect remain available
+if Google configuration is disabled. Management attempts are rate limited.
+Disconnect does not revoke Google-side permissions or sign out existing Aquilla
+sessions; users can log out separately. No Google tokens are stored or revoked.

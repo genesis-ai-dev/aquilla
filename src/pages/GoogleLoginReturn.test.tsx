@@ -3,18 +3,18 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { render, waitFor, cleanup, screen, fireEvent } from "@testing-library/react"
 import type { GoogleAttempt } from "@/lib/frontier/google-login"
 import { MemoryRouter } from "react-router-dom"
-const mocks = vi.hoisted(() => ({ request: vi.fn(), finalize: vi.fn(), adopt: vi.fn(), confirm: vi.fn(), readChoice: vi.fn(), clearChoice: vi.fn(), clearAttempt: vi.fn(), attempt: { verifier: "a".repeat(64), next: "/app", expires: 1e20, choice: { allowed: true, version: "2026-11-04", revision: "choice-a" } } as GoogleAttempt, approve: vi.fn() }))
+const mocks = vi.hoisted(() => ({ active: { username: "alice", jwt: "alice-token" }, request: vi.fn(), finalize: vi.fn(), adopt: vi.fn(), confirm: vi.fn(), readChoice: vi.fn(), clearChoice: vi.fn(), clearAttempt: vi.fn(), attempt: { verifier: "a".repeat(64), next: "/app", expires: 1e20, choice: { allowed: true, version: "2026-11-04", revision: "choice-a" } } as GoogleAttempt, approve: vi.fn() }))
 vi.mock("@/lib/frontier/google-return", () => ({ googleReturn: new URLSearchParams({ code: "b".repeat(64) }) }))
 vi.mock("@/lib/frontier/google-login", () => ({ googleRequest: mocks.request, readGoogleAttempt: () => mocks.attempt, clearGoogleAttempt: mocks.clearAttempt }))
 vi.mock("@/lib/frontier/auth", () => ({ finalizeSession: mocks.finalize }))
-vi.mock("@/hooks/useAccounts", () => ({ useAccounts: () => ({ adopt: mocks.adopt }) }))
+vi.mock("@/hooks/useAccounts", () => ({ useAccounts: () => ({ adopt: mocks.adopt, active: mocks.active, loading: false }) }))
 vi.mock("@/lib/analytics-account", () => ({ confirmNewAccountAnalytics: mocks.confirm }))
 vi.mock("@/lib/signup-analytics-choice", () => ({ readSignupAnalyticsChoice: mocks.readChoice, clearSignupAnalyticsChoice: mocks.clearChoice, confirmSignupAnalyticsChoice: mocks.approve }))
 vi.mock("@/lib/i18n/I18nProvider", () => ({ useT: () => (key: string) => key }))
 vi.mock("@/components/auth/AuthPage", () => ({ AuthPage: ({ children }: { children: React.ReactNode }) => children, AuthPanel: ({ children }: { children: React.ReactNode }) => children }))
 vi.mock("@/components/git-import/FrontierForgotPasswordForm", () => ({ FrontierForgotPasswordForm: () => null }))
 import { GoogleLoginReturn } from "./GoogleLoginReturn"
-beforeEach(() => { vi.clearAllMocks(); mocks.attempt.choice = { allowed: true, version: "2026-11-04", revision: "choice-a" }; mocks.finalize.mockResolvedValue({ jwt: "aquilla-token", username: "alice" }); mocks.adopt.mockResolvedValue(undefined); mocks.confirm.mockResolvedValue(undefined) })
+beforeEach(() => { vi.clearAllMocks(); delete mocks.attempt.connectUsername; mocks.active = { username: "alice", jwt: "alice-token" }; mocks.attempt.choice = { allowed: true, version: "2026-11-04", revision: "choice-a" }; mocks.finalize.mockResolvedValue({ jwt: "aquilla-token", username: "alice" }); mocks.adopt.mockResolvedValue(undefined); mocks.confirm.mockResolvedValue(undefined) })
 afterEach(cleanup)
 it.each([
   { created: false, revision: "choice-a", binds: false },
@@ -60,4 +60,31 @@ it("shows the dev access refusal without adopting a session or sharing analytics
   expect(await screen.findByRole("alert")).toHaveTextContent("auth.login.devAccessRestricted")
   expect(mocks.adopt).not.toHaveBeenCalled()
   expect(mocks.confirm).not.toHaveBeenCalled()
+})
+
+it("connects to the selected account without adopting another session or changing consent", async () => {
+  mocks.attempt.connectUsername = "alice"
+  mocks.request.mockResolvedValueOnce({ connected: true })
+  render(<MemoryRouter><GoogleLoginReturn /></MemoryRouter>)
+  expect(mocks.request).not.toHaveBeenCalled()
+  fireEvent.change(screen.getByLabelText("auth.google.passwordLabel"), { target: { value: "aquilla-password" } })
+  fireEvent.submit(screen.getByRole("button", { name: "auth.methods.connect" }).closest("form")!)
+  await waitFor(() => expect(mocks.clearAttempt).toHaveBeenCalledOnce())
+  expect(mocks.request).toHaveBeenCalledWith("connect", { code: "b".repeat(64), verifier: mocks.attempt.verifier, password: "aquilla-password" }, "alice-token")
+  expect(mocks.finalize).not.toHaveBeenCalled()
+  expect(mocks.adopt).not.toHaveBeenCalled()
+  expect(mocks.confirm).not.toHaveBeenCalled()
+})
+it("refuses to finish a connection when another account became selected", () => {
+  mocks.attempt.connectUsername = "alice"
+  const view = render(<MemoryRouter><GoogleLoginReturn /></MemoryRouter>)
+  fireEvent.change(screen.getByLabelText("auth.google.passwordLabel"), { target: { value: "private-password" } })
+  mocks.active = { username: "bob", jwt: "bob-token" }
+  view.rerender(<MemoryRouter><GoogleLoginReturn /></MemoryRouter>)
+  expect(screen.getByRole("alert")).toHaveTextContent("auth.methods.accountChanged")
+  expect(mocks.request).not.toHaveBeenCalled()
+  expect(screen.queryByRole("button", { name: "auth.methods.connect" })).toBeNull()
+  mocks.active = { username: "alice", jwt: "alice-token" }
+  view.rerender(<MemoryRouter><GoogleLoginReturn /></MemoryRouter>)
+  expect(screen.getByLabelText("auth.google.passwordLabel")).toHaveValue("")
 })

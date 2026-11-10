@@ -5,7 +5,7 @@ import { bodyLimit } from "hono/body-limit"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { createRemoteJWKSet, jwtVerify } from "jose"
-import type { AuthHonoEnv } from "../middleware/auth"
+import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { JWTService } from "../auth/jwt"
 import { sha256Hex } from "../../../db/shared/api-credentials"
 import { countRecentEvents, ipIdentifier, recordAuthEvent } from "../utils/rate-limit"
@@ -30,13 +30,66 @@ const routes = new Hono<AuthHonoEnv>()
 routes.use("*", bodyLimit({ maxSize: 8192 }), async (c, next) => {
   c.header("Cache-Control", "no-store")
   c.header("Referrer-Policy", "no-referrer")
-  if (!c.req.path.endsWith("/config") && !configured(c.env)) return c.json({ error: "unavailable" }, 503)
+  if (!["/config", "/methods", "/disconnect"].some(path => c.req.path.endsWith(path)) && !configured(c.env)) return c.json({ error: "unavailable" }, 503)
   await next()
 })
 function configured(env: AuthHonoEnv["Bindings"]): boolean {
   return !!(env.SECRET_KEY && env.ALGORITHM && env.GOOGLE_LOGIN_CLIENT_ID && env.GOOGLE_LOGIN_CLIENT_SECRET && env.GOOGLE_LOGIN_REDIRECT_URI && env.GOOGLE_LOGIN_APP_ORIGINS)
 }
 routes.get("/config", c => c.json({ enabled: configured(c.env) }))
+// Account management never contacts Google merely to read connection status.
+routes.get("/methods", authMiddleware, async c => {
+  const user = c.get("user")
+  const row = await c.env.AQUILLA_PG.prepare(`SELECT password_hash IS NOT NULL AS password,
+    EXISTS(SELECT 1 FROM provider_identities p WHERE p.user_id=users.id AND p.provider='google') AS google
+    FROM users WHERE id=?`).bind(user.id).first<{ password: boolean; google: boolean }>()
+  if (!row) return c.json({ error: "unavailable" }, 401)
+  return c.json({ ...row, google_available: configured(c.env) })
+})
+const managementProof = z.object({ password: z.string().min(1).max(1024) })
+// Read the password fresh, not from the session cache. Both mutations also
+// compare its hash in their write to reject a concurrent password reset.
+async function managementAccount(c: import("hono").Context<AuthHonoEnv>) {
+  const user = c.get("user")
+  const key = `social-manage:${user.id}`
+  if (await countRecentEvents(c.env.AQUILLA_PG, "social_link", key, { onlyFailures: false }) >= 8) return null
+  await recordAuthEvent(c.env.AQUILLA_PG, "social_link", key, true)
+  return c.env.AQUILLA_PG.prepare("SELECT id, username, email, password_hash FROM users WHERE id=?").bind(user.id).first<Account>()
+}
+routes.post("/disconnect", authMiddleware, zValidator("json", managementProof), async c => {
+  const account = await managementAccount(c)
+  if (!account) return c.json({ error: "rate_limited" }, 429)
+  if (!account.password_hash) return c.json({ error: "last_login_method" }, 409)
+  if (!(await verifyPassword(c.req.valid("json").password, account.password_hash)).isValid) return c.json({ error: "invalid_password" }, 401)
+  const removed = await c.env.AQUILLA_PG.prepare(`DELETE FROM provider_identities p
+    WHERE p.provider='google' AND p.user_id=? AND EXISTS (
+      SELECT 1 FROM users u WHERE u.id=p.user_id AND u.password_hash=?
+    ) RETURNING user_id`).bind(account.id, account.password_hash).first()
+  if (!removed) return c.json({ error: "restart" }, 409)
+  return c.json({ disconnected: true })
+})
+routes.post("/connect", authMiddleware, zValidator("json", proof.merge(managementProof)), async c => {
+  const account = await managementAccount(c)
+  if (!account) return c.json({ error: "rate_limited" }, 429)
+  const { code, verifier, password } = c.req.valid("json")
+  if (!(await verifyPassword(password, account.password_hash)).isValid) return c.json({ error: "invalid_password" }, 401)
+  // The Google proof must belong to this selected account's email. Never adopt
+  // another account or create one as a side effect of managing login methods.
+  try {
+    const linked = await c.env.AQUILLA_PG.prepare(`WITH claimed AS (
+      UPDATE social_login_flows SET status='consumed', code_hash=NULL
+      WHERE code_hash=? AND browser_challenge=? AND status='ready' AND expires_at>now()
+        AND LOWER(email)=LOWER(?) AND EXISTS (
+          SELECT 1 FROM users WHERE id=? AND password_hash=? AND LOWER(email)=LOWER(?)
+        ) RETURNING subject
+    ) INSERT INTO provider_identities(provider,subject,user_id)
+      SELECT 'google',subject,? FROM claimed RETURNING user_id`)
+      .bind(await sha256Hex(code), await pkceChallenge(verifier), account.email,
+        account.id, account.password_hash, account.email, account.id).first()
+    if (!linked) return c.json({ error: "account_mismatch" }, 409)
+    return c.json({ connected: true })
+  } catch { return c.json({ error: "identity_taken" }, 409) }
+})
 // POST avoids prefetch/link scanners starting sign-in. Only exact configured SPA
 // origins may receive a handoff; never accept an arbitrary return URL.
 routes.post("/start", zValidator("json", z.object({ challenge: z.string().regex(/^[A-Za-z0-9_-]{43}$/) })), async c => {

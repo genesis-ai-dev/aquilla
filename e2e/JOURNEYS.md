@@ -625,3 +625,10 @@ normal JWT consumer, plus state/nonce/PKCE, replay and account-proof rejection.
 approval. The existing onboarding/account-switch smoke remains the session
 regression gate. Run the browser matrix with
 `E2E_CONFIG=e2e/config/playwright.config.google-login.ts pnpm exec tsx scripts/e2e-up.ts -- e2e/specs/auth/google-login.spec.ts`.
+
+Google login-method settings are covered in RTL by
+`LoginMethodsSection.test.tsx` and `GoogleLoginReturn.test.tsx`: explicit connect,
+account-switch isolation, password confirmation, unchanged session/consent and
+last-method guidance. The existing Google worker integration test covers actual
+identity linking/disconnection, authorization, password proof, email mismatch
+and the server-enforced last-method guard.

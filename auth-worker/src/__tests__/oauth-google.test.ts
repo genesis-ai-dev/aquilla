@@ -5,6 +5,7 @@ import { env } from "cloudflare:test"
 import { beforeAll, beforeEach, afterEach, describe, expect, it, vi } from "vitest"
 import { generateKeyPair, exportJWK, SignJWT } from "jose"
 import app from "../index"
+import { JWTService } from "../auth/jwt"
 import { pkceChallenge } from "../routes/oauth-google"
 import { hashPasswordWerkzeugScrypt } from "../utils/password"
 import * as legacy from "../services/frontier-d1"
@@ -48,6 +49,50 @@ async function handoff() {
   return code
 }
 describe("Google login boundary", () => {
+  it("manages only the authenticated account, requires password proof and never contacts Google for status or disconnect", async () => {
+    await seedUser(1, "alice")
+    await seedUser(2, "bob")
+    const password = "test-password-123"
+    await env.AQUILLA_PG.prepare("UPDATE users SET password_hash=? WHERE id=1").bind(await hashPasswordWerkzeugScrypt(password)).run()
+    const jwt = (await new JWTService(testEnv).createAccessTokenWithPayload("alice")).token
+    const bobJwt = (await new JWTService(testEnv).createAccessTokenWithPayload("bob")).token
+    const manage = (path: string, body?: object, bearer = jwt) => app.request(`/api/v2/auth/oauth/google/${path}`, {
+      method: body ? "POST" : "GET", headers: { Authorization: `Bearer ${bearer}`, "Content-Type": "application/json" },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    }, testEnv)
+    expect((await manage("methods", undefined, "invalid")).status).toBe(401)
+    expect(await (await manage("methods")).json()).toMatchObject({ password: true, google: false })
+    expect(network).not.toHaveBeenCalled()
+    const code = await handoff()
+    expect((await manage("connect", { code, verifier, password: "wrong" })).status).toBe(401)
+    expect((await manage("connect", { code, verifier, password })).status).toBe(200)
+    expect(await (await manage("methods")).json()).toMatchObject({ google: true })
+    expect(await (await manage("methods", undefined, bobJwt)).json()).toMatchObject({ google: false })
+    network.mockClear()
+    expect((await manage("disconnect", { password: "wrong" })).status).toBe(401)
+    expect(await env.AQUILLA_PG.prepare("SELECT user_id FROM provider_identities").first()).toEqual({ user_id: 1 })
+    expect((await manage("disconnect", { password })).status).toBe(200)
+    expect(await (await manage("methods")).json()).toMatchObject({ password: true, google: false })
+    expect(network).not.toHaveBeenCalled()
+  })
+  it("refuses mismatched Google identities and removal of the last login method", async () => {
+    await seedUser(1, "bob")
+    const password = "test-password-123"
+    await env.AQUILLA_PG.prepare("UPDATE users SET password_hash=? WHERE id=1").bind(await hashPasswordWerkzeugScrypt(password)).run()
+    const jwt = (await new JWTService(testEnv).createAccessTokenWithPayload("bob")).token
+    const manage = (path: string, body: object) => app.request(`/api/v2/auth/oauth/google/${path}`, {
+      method: "POST", headers: { Authorization: `Bearer ${jwt}`, "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }, testEnv)
+    expect((await manage("connect", { code: await handoff(), verifier, password })).status).toBe(409)
+    expect(await env.AQUILLA_PG.prepare("SELECT * FROM provider_identities").first()).toBeNull()
+    await env.AQUILLA_PG.prepare("INSERT INTO provider_identities(provider,subject,user_id) VALUES ('google','google-bob',1)").run()
+    await env.AQUILLA_PG.prepare("UPDATE users SET password_hash=NULL WHERE id=1").run()
+    expect((await manage("disconnect", { password })).status).toBe(409)
+    expect(await env.AQUILLA_PG.prepare("SELECT user_id FROM provider_identities").first()).toEqual({ user_id: 1 })
+    await env.AQUILLA_PG.prepare("UPDATE users SET password_hash=? WHERE id=1").bind(await hashPasswordWerkzeugScrypt(password)).run()
+    expect((await manage("disconnect", { password })).status).toBe(200)
+  })
+
   it("enforces dev access before signup and linked login, including revocation between steps", async () => {
     testEnv.DEPLOYMENT_WORKER_NAME = "aquilla-dev-identity"
     const get = vi.fn().mockResolvedValue(null)

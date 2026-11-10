@@ -11,7 +11,7 @@ export async function googleRequest<T>(path: string, body?: object): Promise<T> 
     ...(body ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {}),
   })
   const data = await response.json()
-  if (!response.ok) throw new Error(typeof data.error === "string" ? data.error : "unavailable")
+  if (!response.ok) throw new Error(data.code === "dev_access_restricted" ? data.code : typeof data.error === "string" ? data.error : "unavailable")
   return data as T
 }
 export async function startGoogleLogin(next: string, signup: boolean): Promise<void> {

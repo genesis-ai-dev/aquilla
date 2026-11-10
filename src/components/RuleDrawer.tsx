@@ -12,6 +12,7 @@ import { RightSidebarPanel } from "./RightSidebarPanel"
 import { FixReviewPanel } from "./FixReviewPanel"
 import { editorReturnFromLocation, withEditorReturn } from "@/lib/navigation/org-paths"
 import { isCompletionConfigured } from "@/lib/completion/completion-service"
+import { ruleAppliesToCell } from "@/lib/rules/rule-engine"
 import {
   buildRegexProposal,
   requestBatchFix,
@@ -128,7 +129,15 @@ export function RuleDrawer({
   const cellMap = new Map(cells.map((c) => [c.id, c]))
   const infractionCells = infractions.map((inf) => ({ infraction: inf, cell: cellMap.get(inf.cellId) })).filter((x) => x.cell)
   const infractionCellIds = new Set(infractions.map((i) => i.cellId))
-  const passingCells = cells.filter((c) => c.status !== "empty" && !infractionCellIds.has(c.id)).slice(0, 10)
+  // AQU-2350: "following this rule" must mean the rule had something to say
+  // about the cell and the cell satisfied it. Everything-not-breaking also
+  // swept in cells the rule cannot reach — a term rule listed cells whose
+  // source never contains the term — so vacuous rows buried the real usage a
+  // reviewer opened the panel to compare, and fed the batch fix "passing"
+  // examples that demonstrate nothing about the rule.
+  const passingCells = cells
+    .filter((c) => c.status !== "empty" && !infractionCellIds.has(c.id) && ruleAppliesToCell(rule, c))
+    .slice(0, 10)
 
   const SeverityIcon = rule.severity === "major" ? AlertTriangle : AlertCircle
   const severityColor = rule.severity === "major" ? "text-red-500" : "text-amber-500"
@@ -152,7 +161,7 @@ export function RuleDrawer({
   }
 
   return (
-    <RightSidebarPanel storageKey="rule" defaultWidth={320} resizeLabel="Resize rule panel">
+    <RightSidebarPanel storageKey="rule" defaultWidth={320} resizeLabel={t("editor.panel.resizeRule")}>
       <div className="flex h-full w-full flex-col border-l bg-card">
       <div className="flex items-center justify-between border-b p-2">
         <div className="flex items-center gap-2">

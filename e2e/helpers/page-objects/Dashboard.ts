@@ -6,6 +6,24 @@ export interface CreateProjectOpts {
   target?: string
 }
 
+/** The New-project wizard's first step (AQU-2105, src/components/ProjectSourceStep.tsx):
+ * where the project comes from. Both answers land on the same details form —
+ * "linked" with the linked-target shape preselected. LangQuest has its own
+ * multi-step panel and is not reachable through this helper. */
+export type CreateProjectOrigin = "scratch" | "linked"
+
+const ORIGIN_TEST_ID: Record<CreateProjectOrigin, string> = {
+  scratch: "project-source-scratch",
+  linked: "project-source-linked",
+}
+
+/** Anchored matcher for a locator `hasText` filter, so a cell whose text merely
+ * *contains* the name does not match. Escapes regex metacharacters because
+ * project names are user data. */
+function exactText(value: string): RegExp {
+  return new RegExp(`^\\s*${value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`)
+}
+
 /** Page object for the dashboard route ("/").
  *
  * Methods are user-intent verbs (createProject, openProject, deleteProject)
@@ -71,12 +89,13 @@ export class Dashboard {
       dialog.getByRole("button", { name: /^Create Project$/i }).click(),
     ])
 
-    // Overview fetch can 5xx under shard load; the page then shows Retry
-    // instead of the project name. Click Retry until the heading lands —
-    // same 15s budget, still waiting on the loaded overview.
-    await expect(dialog).toBeHidden({ timeout: 10_000 })
+    // The project response precedes settings + source/target lane writes.
+    // Their observed sequential latency exceeded 15s under shard load; allow
+    // the supported 30s readiness watchdog for the complete creation flow.
+    await expect(dialog).toBeHidden({ timeout: 30_000 })
+    // Overview fetch can 5xx under shard load; retry the loaded overview below.
     await expect(this.page).toHaveURL(/\/projects\/[^/?#]+(?:[?#].*)?$/, { timeout: 15_000 })
-    const heading = this.page.getByRole("heading", { name, exact: true })
+    const heading = this.projectOverviewHeading(name)
     await expect(async () => {
       // Genuine UI branch: unreachable banner vs loaded overview.
       const retry = this.page.getByRole("button", { name: /^Retry$/i })
@@ -86,7 +105,35 @@ export class Dashboard {
     return name
   }
 
-  async openCreateProjectDialog(): Promise<Locator> {
+  /** The project Overview page's title (`<h1>`, src/components/org/ProjectOverview.tsx).
+   *
+   * AQU-1664: a bare `getByRole("heading", { name })` also matched the
+   * "Created <name> in <destination>" success toast, whose title renders as an
+   * `<h2>` containing the project name — two headings, so Playwright's strict
+   * mode failed before the test could act. Pinning the name to an exact match
+   * *and* the level to 1 names the overview title and nothing else. Selector
+   * lives here so specs cannot re-introduce the loose lookup. */
+  projectOverviewHeading(name: string): Locator {
+    return this.page.getByRole("heading", { name, exact: true, level: 1 })
+  }
+
+  /** A project's name cell in the org Projects table (OrgProjectsDataTable).
+   *
+   * AQU-1664: asserting a project's presence/absence with `getByText(name)`
+   * read the whole page, so the create toast — on screen for several seconds
+   * after a create, and carrying the project name — and the Overview
+   * breadcrumb both counted as "the project is listed". Scoping to the table's
+   * own name cell asks the question the spec means: is there a row for it? */
+  projectRow(name: string): Locator {
+    return this.page.getByTestId("project-table-name").filter({ hasText: exactText(name) })
+  }
+
+  /** Open the New-project dialog and answer its first step, returning the
+   * dialog once the details form (Project name, languages, …) is on screen.
+   *
+   * Dev has AQU-2105's origin wizard; the production release still opens the
+   * details form directly. Both flows must select and prove the requested shape. */
+  async openCreateProjectDialog(origin: CreateProjectOrigin = "scratch"): Promise<Locator> {
     // A freshly-reset org renders three "+ New Project" buttons on /projects:
     // the page header, the empty-state "Create your first project" CTA, and the
     // org setup checklist. They all open the same create dialog, so scope to the
@@ -95,7 +142,22 @@ export class Dashboard {
     // By name, not bare role: AQU-1352's "Created … in …" success toast is also
     // role="dialog", so a bare lookup matches two elements once create succeeds.
     const dialog = this.page.getByRole("dialog", { name: /^Create New Project$/i })
-    await expect(dialog).toBeVisible({ timeout: 5_000 })
+    await expect(dialog).toBeVisible()
+    const originChoice = dialog.getByTestId(ORIGIN_TEST_ID[origin])
+    const fields = dialog.getByTestId("create-project-fields")
+    await expect(originChoice.or(fields).first()).toBeVisible()
+    const shape = dialog.getByTestId(origin === "scratch" ? "create-shape-self-contained" : "create-shape-linked-target")
+    // This is a real released UI branch, not an optional readiness assertion.
+    if (await originChoice.isVisible()) {
+      await originChoice.click()
+    } else {
+      await expect(fields).toBeVisible()
+      await dialog.getByText("Advanced: project shape", { exact: true }).click()
+      await expect(shape).toBeEnabled({ timeout: 30_000 })
+      await shape.click()
+    }
+    await expect(fields).toBeVisible()
+    await expect(shape).toBeChecked()
     return dialog
   }
 

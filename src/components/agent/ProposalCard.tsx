@@ -30,7 +30,8 @@ import { checkRulesForCell } from "@/lib/rules/rule-engine"
 import type { AgentProposal, StagedEvent } from "@/lib/agent/protocol"
 import { applyStagedEvents, type ApplyContext } from "@/lib/agent/apply"
 import { ValidationQueueCard } from "./cards/ValidationQueueCard"
-import { isValidationProposal } from "./cards/registry"
+import { AlternativesCard } from "./cards/AlternativesCard"
+import { isAlternativesProposal, isValidationProposal } from "./cards/registry"
 import { canApply, canApplyStagedEvent, isSupportedApplyKind } from "@/lib/agent/role-floors"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { translateRuleName } from "@/lib/lqa/builtin-resolver"
@@ -279,6 +280,22 @@ export function ProposalCard({
     resolveLastEditor: resolveCell
       ? (cellId: string) => resolveCell(cellId)?.lastEditor
       : undefined,
+  }
+  // AQU-2398: alternative wordings of one cell are a CHOICE, not a set of
+  // changes — apply-all would chain them and leave the last one. The pick-one
+  // card goes first: a proposal cannot be both, and routing it to the generic
+  // card would quietly write every option.
+  if (isAlternativesProposal(proposal)) {
+    return (
+      <AlternativesCard
+        proposal={proposal}
+        rules={rules}
+        resolveCell={resolveCell}
+        applyContext={applyContext}
+        onApplied={onApplied}
+        blockedReason={canApply(t, "target.cell.commit", roleLevel).reason ?? null}
+      />
+    )
   }
   // Tier 2 (testimony): all-validation proposals get the per-item queue —
   // one Confirm per cell, no apply-all (agent-complete design §3/§6).

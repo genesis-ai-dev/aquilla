@@ -1029,6 +1029,7 @@ describe('isChainMutatingKind', () => {
     'file.rename': false,
     'file.delete': false,
     'file.restore': false,
+    'file.revision': false,
     'comment.create': false,
     'comment.edit': false,
     'comment.delete': false,
@@ -1048,6 +1049,8 @@ describe('isChainMutatingKind', () => {
     'assignment.unassign': false,
     'project.link-source': false,
     'cast.assign': false,
+    // AQU-2408: a typed label is one metadata key on the source row; never the chain.
+    'cell.label.set': false,
     'cell.retime': false,
     'cell.audio.rename': false,
     'cell.audio.trim': false,
@@ -1072,6 +1075,8 @@ describe('isChainMutatingKind', () => {
     // AQU-1569: a reorder writes one files.meta key; no cell chain is involved.
     'file.reorder': false,
     'file.track.set': false,
+    'file.milestone.set': false,
+    'file.milestone.remove': false,
     // AQU-476: mirror events replicate an ordering the upstream already
     // arbitrated — see CHAIN_MUTATING_KINDS's doc comment.
     'source.cell.mirror': false,

@@ -2,6 +2,13 @@
 // plain-text export builds (`exportPlainTextStructured`). `?mode=raw` still
 // returns the untouched upload, which the project export's "source documents"
 // folder depends on.
+//
+// AQU-2383: and when there is nothing to export — no translation went in and
+// no cell was hidden or filtered out — the route stops rebuilding altogether
+// and serves the stored upload BYTE for byte, because the rebuild would
+// otherwise rewrite the file's paragraph breaks, line terminators and
+// byte-order mark for a target nobody had touched. Once a translation does
+// exist the rebuild returns, and it carries the upload's envelope with it.
 
 import { describe, it, expect } from "vitest"
 import { handleExportSourceRequest } from "../events/export-route"
@@ -26,6 +33,13 @@ function makeStubBucket() {
 }
 
 const ORIGINAL = "Hello there. How are you?\n\nSecond paragraph.\n\nThird paragraph.\n"
+
+/** Response bytes, not `res.text()`: `text()` decodes UTF-8 with BOM removal,
+ *  so it cannot see the byte-order mark these assertions are about. */
+const responseBytes = async (res: Response): Promise<Uint8Array> =>
+  new Uint8Array(await res.arrayBuffer())
+
+const utf8 = (s: string): Uint8Array => new TextEncoder().encode(s)
 
 interface CellSeed {
   cell_id: string
@@ -73,10 +87,11 @@ const SOURCE_CELLS = [
 async function exportTxt(
   cells: ReturnType<typeof cell>[],
   query = "",
+  original: string = ORIGINAL,
 ): Promise<Response> {
   const SNAPSHOTS = makeStubBucket()
   const key = sourceObjectKey({ R2_KEY_PREFIX: "" }, "p1", "f1", "txt")
-  SNAPSHOTS._seed(key, new TextEncoder().encode(ORIGINAL))
+  SNAPSHOTS._seed(key, new TextEncoder().encode(original))
   const { db } = await makeTestDb({
     projects: [{ id: "p1", name: "Test Project", created_by: 1 }],
     lanes: [
@@ -162,5 +177,74 @@ describe("GET /source — plain text (AQU-1472)", () => {
     expect(res.status).toBe(200)
     expect(res.headers.get("X-Export-Mode")).toBe("raw-original")
     expect(await res.text()).toBe(ORIGINAL)
+  })
+})
+
+describe("GET /source — an untouched .txt target is byte-identical (AQU-2383)", () => {
+  // The upload's own paragraph breaks are the thing at risk: the rebuild
+  // rejoins c1+c2 into one paragraph and re-emits the separators, so even
+  // this LF original comes back subtly different if the rebuild runs.
+  it("returns the stored upload when no cell carries a translation", async () => {
+    const res = await exportTxt(SOURCE_CELLS)
+
+    expect(res.status).toBe(200)
+    expect(res.headers.get("X-Export-Mode")).toBe("raw-original")
+    expect(await responseBytes(res)).toEqual(utf8(ORIGINAL))
+  })
+
+  it("returns the stored upload when the file has no cells at all", async () => {
+    const res = await exportTxt([])
+
+    expect(res.headers.get("X-Export-Mode")).toBe("raw-original")
+    expect(await responseBytes(res)).toEqual(utf8(ORIGINAL))
+  })
+
+  it("keeps a CRLF upload's line endings and byte-order mark", async () => {
+    const crlf = "\uFEFFHello there. How are you?\r\n\r\nSecond paragraph.\r\n"
+    const res = await exportTxt(SOURCE_CELLS, "", crlf)
+
+    expect(res.headers.get("X-Export-Mode")).toBe("raw-original")
+    expect(await responseBytes(res)).toEqual(utf8(crlf))
+  })
+
+  it("rebuilds once a translation exists, and keeps the source's envelope", async () => {
+    const crlf = "\uFEFFHello there. How are you?\r\n\r\nSecond paragraph.\r\n\r\nThird paragraph.\r\n"
+    const res = await exportTxt(
+      [...SOURCE_CELLS, cell({ cell_id: "c1", side: "target", value: "Hola." })],
+      "",
+      crlf,
+    )
+
+    // Not the upload: a translation really did go in.
+    expect(res.headers.get("X-Export-Mode")).toBeNull()
+    // …and the rebuilt body wears the upload's mark and CRLF terminators
+    // rather than the parser's normalized LF.
+    expect(await responseBytes(res)).toEqual(
+      utf8("\uFEFFHola. How are you?\r\n\r\nSecond paragraph.\r\n\r\nThird paragraph.\r\n"),
+    )
+  })
+
+  it("rebuilds when a cell is hidden, because a paragraph is deliberately missing", async () => {
+    // No translation anywhere, but hiding c3 drops "Second paragraph." — the
+    // upload is NOT the faithful export here.
+    const res = await exportTxt(
+      SOURCE_CELLS.map((c) => (c.cell_id === "c3" ? { ...c, hidden_at: 1700000000001 } : c)),
+    )
+
+    expect(res.headers.get("X-Export-Mode")).toBeNull()
+    expect(await res.text()).toBe("Hello there. How are you?\n\nThird paragraph.\n")
+  })
+
+  it("rebuilds under ?validated=1 when nothing is validated, rather than serving the upload", async () => {
+    // Every cell is filtered out, so the honest answer stays an empty export:
+    // an unvalidated draft must not come back looking like approved content,
+    // and the upload would read as exactly that.
+    const res = await exportTxt(
+      [...SOURCE_CELLS, cell({ cell_id: "c1", side: "target", value: "Hola." })],
+      "?validated=1",
+    )
+
+    expect(res.headers.get("X-Export-Mode")).toBeNull()
+    expect(await res.text()).toBe("")
   })
 })

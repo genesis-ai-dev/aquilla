@@ -1,13 +1,20 @@
-import { GrantOriginBadge } from "@/components/access/GrantOriginBadge"
+import { RoleBadge } from "@/components/access/RoleBadge"
+import { PlaceBreadcrumb } from "@/components/access/PlaceBreadcrumb"
 import { UserChip } from "@/components/UserChip"
 import { MemberInspectorTrigger } from "@/components/access/MemberInspectorTrigger"
-import { roleLabel } from "@/components/access/labels"
-import { formatScopePath, scopePathKey } from "@/lib/access/scope-path"
+import { scopePathKey } from "@/lib/access/scope-path"
 import type { ScopeRef } from "@/lib/access/types"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { accessNodeHref } from "./access-anchors"
 import type { OrgAccessPerson } from "./org-access-data"
 
-/** AQU-1352 §3.6: one row per person; chips read "Role @ breadcrumb" + origin. */
+/**
+ * AQU-1352 §3.6: one row per person; each grant is a chip reading
+ * "<role pill> <place breadcrumb>". AQU-2317 made both halves components: the
+ * role is a rung on the ladder and its shape says direct or inherited, and the
+ * place goes through the breadcrumb helper so it reads the same here, in the
+ * tree, in the dialogs and in the CSV.
+ */
 export function AccessPeopleView({ people, org }: { people: OrgAccessPerson[]; org: ScopeRef }) {
   const t = useT()
   return (
@@ -27,8 +34,8 @@ export function AccessPeopleView({ people, org }: { people: OrgAccessPerson[]; o
                 className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs"
                 data-testid="access-chip"
               >
-                <span>{t("org.access.page.chip", { role: roleLabel(t, g.roleLevel), path: formatScopePath(g.scopePath) })}</span>
-                <GrantOriginBadge origin={g.origin} />
+                <RoleBadge roleLevel={g.roleLevel} origin={g.origin} hrefFor={accessNodeHref} />
+                <PlaceBreadcrumb path={g.scopePath} className="text-xs" />
               </li>
             ))}
           </ul>

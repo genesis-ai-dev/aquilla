@@ -50,7 +50,7 @@ export function GoogleLoginReturn() {
     }
     void googleRequest<GooglePending | GoogleSession>("exchange", { code, verifier: attempt.verifier })
       .then(async result => { if ("access_token" in result) await finish(result); else setPending(result) })
-      .catch(() => setError("expired_request")).finally(() => setBusy(false))
+      .catch(err => setError(err instanceof Error ? err.message : "expired_request")).finally(() => setBusy(false))
     // One-time handoff must not be replayed by React StrictMode or re-renders.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -58,7 +58,7 @@ export function GoogleLoginReturn() {
     <CardHeader><CardTitle role="heading" aria-level={1}>{t(pending?.step === "signup" ? "auth.google.chooseUsername" : pending?.step === "link" ? "auth.google.linkTitle" : "auth.google.continue")}</CardTitle></CardHeader>
     <CardContent className="flex flex-col gap-4">
       {busy && <Spinner />}
-      {error && <p role="alert" className="text-sm text-destructive">{t(error === "cancelled" ? "auth.google.cancelled" : error === "invalid_password" ? "auth.google.invalidPassword" : error === "identity_taken" ? "auth.google.identityTaken" : "auth.google.failed")}</p>}
+      {error && <p role="alert" className="text-sm text-destructive">{t(error === "dev_access_restricted" ? "auth.login.devAccessRestricted" : error === "cancelled" ? "auth.google.cancelled" : error === "invalid_password" ? "auth.google.invalidPassword" : error === "identity_taken" ? "auth.google.identityTaken" : "auth.google.failed")}</p>}
       {recovering && <FrontierForgotPasswordForm onBack={() => setRecovering(false)} returnTo={attempt?.next} />}
       {pending?.step === "signup" && !choice && <PrivacyStep onNext={() => setChoice(readSignupAnalyticsChoice())} onBack={() => navigate(loginPath({ next: attempt?.next, add: true }))} />}
       {pending && !recovering && (pending.step !== "signup" || choice) && <form className="flex flex-col gap-4" onSubmit={event => {

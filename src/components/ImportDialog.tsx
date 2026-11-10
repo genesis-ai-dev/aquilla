@@ -235,6 +235,9 @@ export interface RecordingsImportHost {
   languageLabel: string | null
   /** Set when opened from a file's ⋯ menu: recordings for that file only. */
   file: { id: string; name: string } | null
+  /** AQU-2302: a project lead may ask the assistant to work out a folder's
+   *  naming; anyone else who uploads gets the team's saved namings only. */
+  canAskAssistant?: boolean
 }
 
 /**
@@ -1176,16 +1179,42 @@ export function ImportDialog({
       <DialogContent className={cn("flex max-h-[90dvh] flex-col", screen === "recordingsReview" ? "sm:max-w-4xl" : "sm:max-w-2xl")}>
         <DialogHeader>
           <DialogTitle>
-            {reimportTarget && (screen === "upload" || screen === "preview" || screen === "partner") ? (
+            {reimportTarget && (screen === "upload" || screen === "partner" || screen === "gdrive") ? (
               <div className="flex min-w-0 items-center gap-2">
                 <ImportDialogBackButton
-                  onClick={() => onOpenChange(false)}
-                  label={t("common.cancel")}
+                  onClick={() => {
+                    // The file may have been read by the wrong importer. Back
+                    // returns to the chooser; the re-import of this file stays
+                    // in effect for whichever importer is picked next.
+                    setPartnerId(null)
+                    setIntent("source")
+                    setScreen("landing")
+                  }}
+                  label={t("importExport.dialog.backToImportTypes")}
                 />
                 <span className="min-w-0 truncate">
                   {t("importExport.reimport.title", { name: reimportTarget.name })}
                 </span>
               </div>
+            ) : reimportTarget && screen === "preview" ? (
+              <div className="flex min-w-0 items-center gap-2">
+                <ImportDialogBackButton
+                  onClick={() => {
+                    const returnScreen = previewState?.returnScreen ?? "upload"
+                    setPreviewState(null)
+                    setPreviewCommitError(null)
+                    setScreen(returnScreen)
+                  }}
+                  label={t("importExport.dialog.backToFileSelection")}
+                />
+                <span className="min-w-0 truncate">
+                  {t("importExport.reimport.title", { name: reimportTarget.name })}
+                </span>
+              </div>
+            ) : reimportTarget && screen === "landing" ? (
+              <span className="min-w-0 truncate">
+                {t("importExport.reimport.title", { name: reimportTarget.name })}
+              </span>
             ) : screen === "recordingsPick" || screen === "recordingsReview" ? (
               <div className="flex min-w-0 items-center gap-2">
                 <ImportDialogBackButton
@@ -1275,7 +1304,7 @@ export function ImportDialog({
         {screen !== "translationReview" && screen !== "recordingsReview" && (
         <DialogBody>
 
-        {screen === "landing" && translation && (
+        {screen === "landing" && translation && !reimportTarget && (
           <div className="pt-1 pb-4">
             <ImportIntentChoice
               value={intent}
@@ -1530,6 +1559,7 @@ export function ImportDialog({
             excludeFrontMatter={excludeFrontMatter}
             cellUnit={cellUnit}
             alignReimportedIdml={alignReimportedIdml}
+            reimportTarget={reimportTarget}
             onTranslationCheck={translationCheckFor("gdrive")}
           />
         )}
@@ -1908,6 +1938,7 @@ export function ImportDialog({
               languageLabel={recordings.languageLabel}
               username={username}
               chosen={recordingsChosen}
+              canAskAssistant={recordings.canAskAssistant ?? false}
               onStarted={() => {
                 analytics.capture(IMPORT_STARTED, { import_type: "recordings", project_id: projectId, file_count: recordingsChosen.length })
                 onOpenChange(false)
@@ -3617,7 +3648,7 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, targ
           tr.id.toLowerCase().includes(q) ||
           tr.title.toLowerCase().includes(q) ||
           tr.languageNameInEnglish.toLowerCase().includes(q) ||
-          tr.languageName.toLowerCase().includes(q)
+          (tr.languageName ?? "").toLowerCase().includes(q)
       )
       .slice(0, 200)
   }, [translations, query])
@@ -3984,8 +4015,8 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
           tr.id.toLowerCase().includes(q) ||
           tr.name.toLowerCase().includes(q) ||
           tr.englishName.toLowerCase().includes(q) ||
-          tr.languageEnglishName.toLowerCase().includes(q) ||
-          tr.languageName.toLowerCase().includes(q)
+          (tr.languageEnglishName ?? "").toLowerCase().includes(q) ||
+          (tr.languageName ?? "").toLowerCase().includes(q)
       )
       .slice(0, 200)
   }, [translations, query])
@@ -4236,7 +4267,7 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
                   </div>
                   <span className="text-xs text-muted-foreground">
                     {t("importExport.helloao.languageAndBookCount", {
-                      language: tr.languageEnglishName || tr.languageName,
+                      language: tr.languageEnglishName || tr.languageName || tr.language,
                       count: tr.numberOfBooks,
                     })}
                   </span>

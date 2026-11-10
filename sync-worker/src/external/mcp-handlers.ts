@@ -212,6 +212,27 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
         'applies only at confirm_changeset. Prefer it over the deprecated whole-blob ' +
         'UpdateProjectSettings, which can clobber keys you never read.',
     },
+    // AQU-2407: the brief. Named explicitly because it lives INSIDE the
+    // settings blob, so an agent that found patch_settings first would write
+    // the whole translationBrief record by hand — l2Markdown, l1Summary and
+    // provenance included — and nothing checked those agreed with the answers.
+    translationBrief: {
+      writeTool: 'prepare_set_brief',
+      summaryTool: 'regenerate_brief_summary',
+      readVia: 'get_project_settings',
+      note:
+        'Write the brief with prepare_set_brief { projectId, parameters: { <sectionId>: ' +
+        '"answer" }, freeformNotes? } — ANSWERS ONLY: the server merges them into the live ' +
+        'brief, reassembles l2Markdown in the code-owned section order, stamps ' +
+        'version/updatedAt/updatedBy from your credential, and re-renders the L1 summary at ' +
+        'commit. describe_command({ kind: "SetBrief" }) lists the section ids. Do NOT write ' +
+        'the translationBrief key through patch_settings unless you deliberately want a raw ' +
+        'whole-record overwrite (still supported): hand-written l2Markdown/l1Summary are ' +
+        'never checked against the answers. If a receipt reports briefSummary.rendered: ' +
+        'false, the sections are committed but the summary is stale — call ' +
+        'regenerate_brief_summary. The brief reaches prompts only while ' +
+        'translationInstructions is unwritten (get_prompt_preview → parts.instructions).',
+    },
     // AQU-1175: terminology. Named explicitly because the read and the write
     // live on DIFFERENT surfaces (a read tool; the EmitEvents door) and because
     // matching is exact by default — the two things an agent got wrong.
@@ -357,6 +378,32 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
         'audio takes, links or assignment rows. SplitCell requires an explicit `targets` ' +
         '("blank" or "divide"); both halves come out unvalidated either way. MergeCells is ' +
         'NOT available — see docs/AGENT-API.md for why it is deferred.',
+    },
+    membership: {
+      readTool: 'list_members',
+      mcpStagingTool: 'prepare_translations',
+      commitTool: 'confirm_changeset',
+      commandKinds: ['InviteMember', 'SetRole', 'RemoveMember'],
+      note:
+        'Read the roster with list_members, then stage InviteMember / SetRole / RemoveMember ' +
+        'via prepare_translations\'s `commands` argument and commit with confirm_changeset. ' +
+        'Receipt-only (a plain project_members row write, not an event). People are named by ' +
+        'USERNAME, not email, exactly as list_members reports them. Every one of these ' +
+        'requires project role >= MAINTAINER (600) and prepare ALWAYS stages them in ' +
+        'ask-mode regardless of the credential\'s mode — membership is governance, so each ' +
+        'change passes a human at the approvalUrl before it can commit. Caps, all ' +
+        'permission_denied: you cannot grant a role above your own (`role_above_caller`), ' +
+        'act on yourself (`self_target`), or touch anyone whose EFFECTIVE role is >= yours ' +
+        'unless you are OWNER (`target_outranks_caller`). list_members\'s `direct` field ' +
+        'picks the command — InviteMember needs no existing project_members row and is ' +
+        'rejected with conflict `already_member` if there is one; SetRole and RemoveMember ' +
+        'need one and are rejected with conflict `not_a_direct_member` without it. ' +
+        'RemoveMember drops the direct row only: org, team and creator grant paths are ' +
+        'additive (AD-12) and keep conferring access, so check roleSource before promising ' +
+        'that a removal ends somebody\'s access. Membership commands batch with each other ' +
+        '(at most 25, one per person) but never with other command kinds, and each ' +
+        'command\'s projectId must equal the changeset\'s. Receipt shape: { credentialId, ' +
+        'channel, changesetId, command: "Membership", appliedAt, projectId, membership[] }.',
     },
     multiLanguage: {
       note:
@@ -904,6 +951,18 @@ async function listTerms(
   return runQualityRead(env, token, `${encodeURIComponent(projectId)}/terms${qs ? `?${qs}` : ''}`)
 }
 
+/** AQU-2403: the governance roster (MAINTAINER-floored) that the InviteMember /
+ *  SetRole / RemoveMember commands are built from. */
+async function listMembers(
+  env: ExternalEnv,
+  token: string,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const projectId = str(args, 'projectId')
+  if (!projectId) return fail('validation_failed', 'projectId is required')
+  return runRead(env, token, `${encodeURIComponent(projectId)}/members`)
+}
+
 async function readTermConsistency(
   env: ExternalEnv,
   token: string,
@@ -1046,6 +1105,100 @@ async function patchSettings(
     ops: args.ops,
     ifMatchVersion: args.ifMatchVersion,
   }
+  return stageCommands(env, token, projectId, [command], str(args, 'changesetId'), ctx)
+}
+
+// ── translation brief (AQU-2407) ─────────────────────────────────────────────
+
+/**
+ * Resolve the `ifMatchVersion` the brief commands pin. Both tools make it
+ * OPTIONAL — unlike patch_settings, neither asks the agent to read-modify-write
+ * the key, so demanding the version only bought a mandatory extra round trip
+ * (and a hand-written brief record when the agent gave up and reached for
+ * patch_settings instead). Omitted, the live version is read here through the
+ * same delegated settings read `get_project_settings` serves, so the scope,
+ * role and throttle gates are identical; passed, it is honoured verbatim, which
+ * is how a caller asserts the brief has not moved since it read it.
+ */
+async function resolveSettingsVersion(
+  env: ExternalEnv,
+  token: string,
+  projectId: string,
+  args: Record<string, unknown>,
+): Promise<number | McpToolResult> {
+  if (args.ifMatchVersion !== undefined) {
+    if (typeof args.ifMatchVersion !== 'number' || !Number.isInteger(args.ifMatchVersion)) {
+      return fail(
+        'validation_failed',
+        'ifMatchVersion must be an integer settings version from get_project_settings — omit it to pin the live version',
+      )
+    }
+    return args.ifMatchVersion
+  }
+  const req = (env.mcpRequest ?? makeRequest)(
+    `${EXTERNAL_BASE}/${encodeURIComponent(projectId)}/settings`,
+    { headers: bearer(token) },
+  )
+  const res = await handleExternalReadRequest(req, env)
+  if (!res) return fail('not_found', 'read route did not match')
+  if (!res.ok) return delegatedError(res)
+  const body = (await res.json()) as { version?: unknown }
+  if (typeof body.version !== 'number') {
+    return fail('job_failed', 'settings read returned no version to pin')
+  }
+  return body.version
+}
+
+/** prepare_set_brief (AQU-2407): the dedicated MCP door onto SetBrief, so a
+ *  brief can be written as ANSWERS. Only argument marshalling lives here — the
+ *  section-id validation, the MAINTAINER floor, the sole-command rule, the
+ *  server-side merge + l2Markdown reassembly + provenance stamp, and the
+ *  best-effort L1 render all stay in commands-set-brief.ts. */
+async function prepareSetBriefTool(
+  env: ExternalEnv,
+  token: string,
+  args: Record<string, unknown>,
+  ctx?: Pick<ExecutionContext, 'waitUntil'>,
+): Promise<McpToolResult> {
+  const projectId = str(args, 'projectId')
+  if (!projectId) return fail('validation_failed', 'projectId is required')
+  if (args.parameters === undefined && args.freeformNotes === undefined) {
+    return fail(
+      'validation_failed',
+      'pass parameters (section id → answer) and/or freeformNotes — describe_command({ kind: "SetBrief" }) lists the section ids',
+    )
+  }
+
+  const version = await resolveSettingsVersion(env, token, projectId, args)
+  if (typeof version !== 'number') return version
+
+  const command = {
+    kind: 'SetBrief',
+    projectId,
+    ...(args.parameters !== undefined ? { parameters: args.parameters } : {}),
+    ...(args.freeformNotes !== undefined ? { freeformNotes: args.freeformNotes } : {}),
+    ifMatchVersion: version,
+  }
+  return stageCommands(env, token, projectId, [command], str(args, 'changesetId'), ctx)
+}
+
+/** regenerate_brief_summary (AQU-2407): the dedicated MCP door onto
+ *  RegenerateBriefSummary — the agent's equivalent of the in-app "Regenerate
+ *  summary" button. The render, its metering and the empty-brief refusal are
+ *  commands-regenerate-brief.ts's, unchanged. */
+async function regenerateBriefSummaryTool(
+  env: ExternalEnv,
+  token: string,
+  args: Record<string, unknown>,
+  ctx?: Pick<ExecutionContext, 'waitUntil'>,
+): Promise<McpToolResult> {
+  const projectId = str(args, 'projectId')
+  if (!projectId) return fail('validation_failed', 'projectId is required')
+
+  const version = await resolveSettingsVersion(env, token, projectId, args)
+  if (typeof version !== 'number') return version
+
+  const command = { kind: 'RegenerateBriefSummary', projectId, ifMatchVersion: version }
   return stageCommands(env, token, projectId, [command], str(args, 'changesetId'), ctx)
 }
 
@@ -1464,10 +1617,16 @@ export async function callTool(
       return readTermConsistency(env, token, args)
     case 'list_terms':
       return listTerms(env, token, args)
+    case 'list_members':
+      return listMembers(env, token, args)
     case 'prepare_translations':
       return prepareTranslations(env, token, args, ctx)
     case 'patch_settings':
       return patchSettings(env, token, args, ctx)
+    case 'prepare_set_brief':
+      return prepareSetBriefTool(env, token, args, ctx)
+    case 'regenerate_brief_summary':
+      return regenerateBriefSummaryTool(env, token, args, ctx)
     case 'upload_artifact':
       return uploadArtifact(env, token, args)
     case 'preview_import':

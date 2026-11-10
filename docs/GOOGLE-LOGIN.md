@@ -54,7 +54,7 @@ Register the appropriate callback in Google Cloud:
 
 Previews require their own exact callback registration and SPA origin allowlist.
 Do not reuse Google Drive scopes, wildcard preview origins or expose a secret in
-browser configuration. Apply migration 0194 before deploying the worker/client.
+browser configuration. Apply migration 0199 before deploying the worker/client.
 Configure Google branding/consent-screen publication and test users as appropriate.
 Real-provider validation is still required; simulated signed responses prove the
 app's handling, not Google Cloud configuration or live account eligibility.
@@ -109,3 +109,18 @@ removed before the successful live test.
   and refusing to transfer a signup choice to an existing account.
 - The local login UI was inspected with a simulated first-party capability response.
   It is a visual preview, not a configured Google environment.
+
+## Integration refresh (2026-11-10)
+
+Merged current dev, retaining its dependency upgrades and development access
+policy. Google exchange and completion enforce the same dev-only access list
+before issuing sessions, linking identities, or creating accounts. A changed
+allowlist is checked again at completion; missing/unavailable access storage
+fails closed. Previews, local development and production keep their existing
+policy. The client displays the existing translated dev-access refusal.
+
+Migration 0194 conflicted with a newer base migration. Read-only dev status
+confirmed the Google migration and tables were absent, so it was renumbered to
+0199 and applied to shared dev; schema and ledger matched afterwards. Existing
+Google test accounts from the previous preview are not assumed to survive a
+shared-dev database refresh. Production was not migrated or configured.

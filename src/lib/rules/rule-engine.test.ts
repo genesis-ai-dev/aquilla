@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { checkRules, checkRulesForCell, rulesForLane, ruleLaneScope } from "./rule-engine"
+import { checkRules, checkRulesForCell, rulesForLane, ruleLaneScope, ruleAppliesToCell } from "./rule-engine"
 import type { TranslationRule } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { RULE_LINT_PARITY_CASES } from "./__fixtures__/rule-lint-parity"
@@ -54,6 +54,31 @@ describe("checkRules", () => {
     const rules = [makeRule({ id: "r1", check: { type: "target-forbids", targetPattern: "bad" } })]
     const result = checkRules(cells, rules)
     expect(result.has("c1")).toBe(false)
+  })
+
+  // AQU-1712: a forbidden rendering is wrong only as a rendering of its
+  // concept, so the compiled `term:` rule carries a source condition.
+  it.each([
+    { name: "flags when the source bears the term", original: "to baptize them", flagged: true },
+    { name: "does not flag when the source lacks the term", original: "to lower the net", flagged: false },
+  ])("target-forbids with a sourcePattern: $name", ({ original, flagged }) => {
+    const cells = new Map([["f1", [
+      makeCell({ id: "c1", original, translated: "para sumergir", status: "validated" }),
+    ]]])
+    const rules = [makeRule({
+      id: "term:baptize:forbidden:sumergir",
+      check: { type: "target-forbids", targetPattern: "sumergir", sourcePattern: "baptiz" },
+    })]
+    const result = checkRules(cells, rules)
+    expect(result.has("c1")).toBe(flagged)
+  })
+
+  it("target-forbids without a sourcePattern stays unconditional", () => {
+    const cells = new Map([["f1", [
+      makeCell({ id: "c1", original: "to lower the net", translated: "para sumergir", status: "validated" }),
+    ]]])
+    const rules = [makeRule({ id: "r1", check: { type: "target-forbids", targetPattern: "sumergir" } })]
+    expect(checkRules(cells, rules).has("c1")).toBe(true)
   })
 
   it("detects source-requires-target infraction", () => {
@@ -501,5 +526,106 @@ describe("checkRulesForCell — target-language punctuation (AQU-1906)", () => {
   it("still flags a wrong-class mark in the same lane", () => {
     const thai = resolvePunctuation({ language: "Thai" }).conventions
     expect(checkRulesForCell(cell("เขากลับบ้าน?"), "f1", endPunctuationRules(thai))).toHaveLength(1)
+  })
+})
+
+// AQU-2350: `checkRulesForCell` is silent both when a cell satisfies a rule and
+// when the rule never reached it, so a surface that calls everything-not-broken
+// "following this rule" reports vacuous compliance. `ruleAppliesToCell` is the
+// missing half of that partition; every row below also asserts that the cell
+// raises no infraction, which is what makes the predicate necessary rather than
+// derivable from `checkRulesForCell`.
+describe("ruleAppliesToCell — does the rule reach this cell at all (AQU-2350)", () => {
+  const cases: {
+    name: string
+    ruleId?: string
+    check: TranslationRule["check"]
+    source: string
+    target: string
+    applies: boolean
+  }[] = [
+    {
+      name: "source-requires-target: source carries the term",
+      check: { type: "source-requires-target", sourcePattern: "Christian", targetPattern: "Cristão" },
+      source: "a Christian family", target: "uma família Cristão", applies: true,
+    },
+    {
+      name: "source-requires-target: source never mentions the term",
+      check: { type: "source-requires-target", sourcePattern: "Christian", targetPattern: "Cristão" },
+      source: "Advent Season: What Is It", target: "Tempo do Advento: o que é", applies: false,
+    },
+    {
+      name: "source-requires-target: case-insensitive by default",
+      check: { type: "source-requires-target", sourcePattern: "Christian", targetPattern: "Cristão" },
+      source: "a christian family", target: "uma família Cristão", applies: true,
+    },
+    {
+      name: "source-requires-target: caseSensitive means the case must match",
+      check: { type: "source-requires-target", sourcePattern: "Christian", targetPattern: "Cristão", caseSensitive: true },
+      source: "a christian family", target: "uma família Cristão", applies: false,
+    },
+    {
+      name: "source-requires-target: a term rule's \\p{L} pattern compiles under `u`",
+      ruleId: "term:christian",
+      check: { type: "source-requires-target", sourcePattern: "Christian\\p{L}*", targetPattern: "Cristão" },
+      source: "Christians everywhere", target: "Cristão em toda parte", applies: true,
+    },
+    {
+      name: "source-requires-target: an uncompilable pattern reaches nothing",
+      check: { type: "source-requires-target", sourcePattern: "[unclosed", targetPattern: "x" },
+      source: "[unclosed", target: "x", applies: false,
+    },
+    {
+      name: "source-target-match: source carries the pattern",
+      check: { type: "source-target-match", pattern: "\\d+" },
+      source: "in 1995", target: "em 1995", applies: true,
+    },
+    {
+      name: "source-target-match: source does not",
+      check: { type: "source-target-match", pattern: "\\d+" },
+      source: "in the spring", target: "na primavera", applies: false,
+    },
+    {
+      name: "target-forbids without a source condition constrains every translated cell",
+      check: { type: "target-forbids", targetPattern: "Allah" },
+      source: "He went home", target: "Ele foi para casa", applies: true,
+    },
+    {
+      name: "target-forbids with a source condition (AQU-1712) reaches only cells bearing the concept",
+      ruleId: "term:god",
+      check: { type: "target-forbids", targetPattern: "Allah", sourcePattern: "God" },
+      source: "He went home", target: "Ele foi para casa", applies: false,
+    },
+    {
+      name: "target-forbids with a source condition applies where the source bears it",
+      ruleId: "term:god",
+      check: { type: "target-forbids", targetPattern: "Allah", sourcePattern: "God" },
+      source: "God saw", target: "Deus viu", applies: true,
+    },
+    {
+      name: "builtin checks constrain every translated cell",
+      check: { type: "builtin", checkId: "end-punctuation-mismatch" },
+      source: "He went home.", target: "Ele foi para casa.", applies: true,
+    },
+  ]
+
+  it.each(cases)("$name", ({ ruleId, check, source, target, applies }) => {
+    const rule = makeRule({ id: ruleId ?? "r1", check })
+    const cell = makeCell({ id: "c1", original: source, translated: target, status: "unvalidated" })
+    expect(ruleAppliesToCell(rule, cell)).toBe(applies)
+    // None of these rows is an infraction, which is exactly why the drawer
+    // could not tell "satisfied" from "never reached" without this predicate.
+    expect(checkRulesForCell(cell, "f1", [rule])).toEqual([])
+  })
+
+  it("does not leave the cached /g regex advanced between cells", () => {
+    const rule = makeRule({
+      id: "term:christian",
+      check: { type: "source-requires-target", sourcePattern: "Christian", targetPattern: "Cristão" },
+    })
+    const cell = makeCell({ id: "c1", original: "Christian", translated: "Cristão", status: "unvalidated" })
+    expect(ruleAppliesToCell(rule, cell)).toBe(true)
+    // A stale lastIndex would make the second scan start past the only match.
+    expect(ruleAppliesToCell(rule, cell)).toBe(true)
   })
 })

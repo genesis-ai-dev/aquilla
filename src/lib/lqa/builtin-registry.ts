@@ -20,6 +20,8 @@ import * as corruptedCharacters from "./check-functions/corrupted-characters"
 import * as unpairedQuotes from "./check-functions/unpaired-quotes"
 import * as untranslatedFragment from "./check-functions/untranslated-fragment"
 import * as lengthRatio from "./check-functions/length-ratio"
+import * as scriptureReference from "./check-functions/scripture-reference"
+import * as numberFormat from "./check-functions/number-format"
 
 export interface BuiltinCheckDefinition {
   id: BuiltinCheckId
@@ -191,6 +193,26 @@ export const BUILTIN_CHECKS: Record<BuiltinCheckId, BuiltinCheckDefinition> = {
     runsOnEmptyTarget: false,
     run: lengthRatio.runCheck,
     message: lengthRatio.MESSAGE,
+  },
+  // AQU-1735: the References half of Paratext parity. Off by default; reads
+  // the project's book-name table off `context.bookNames`.
+  "scripture-reference": {
+    ...TEXT_CHECK_META["scripture-reference"],
+    description:
+      "Scripture references in the translation use the project's book names and name a chapter the canon has, with one separator throughout. Off by default: it needs the project's book names.",
+    runsOnEmptyTarget: false,
+    run: scriptureReference.runCheck,
+    message: scriptureReference.MESSAGE,
+  },
+  // AQU-2430: the number-format half of the same parity work. Off by default;
+  // reads the target language's conventions off `context.numberFormat`.
+  "number-format": {
+    ...TEXT_CHECK_META["number-format"],
+    description:
+      "Numbers in the translation are written the way the target language writes them — its digits, its thousands separator, its decimal mark. Off by default: it needs the target language, or the project's own answer for it.",
+    runsOnEmptyTarget: false,
+    run: numberFormat.runCheck,
+    message: numberFormat.MESSAGE,
   },
 }
 

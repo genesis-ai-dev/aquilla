@@ -65,6 +65,39 @@ describe("deriveWorkingSet", () => {
     expect(pendingRows(rows).map((r) => r.cellId)).toEqual(["c3"])
   })
 
+  // AQU-2398: rows are keyed by cellId, so if a choice of wordings for ONE
+  // cell were ingested here, the N wordings would collapse into one row and
+  // the LAST one would silently read as "the" draft — the choice gone and the
+  // other wordings invisible. AlternativesCard owns that review.
+  it("ignores a choice of alternative wordings for one cell", () => {
+    const alternatives: AgentRunUi["items"][number] = {
+      id: "i1",
+      kind: "proposal",
+      proposal: {
+        proposalId: "p1",
+        runId: "run-1",
+        summary: "3 wordings of MRK 4:3",
+        alternatives: true,
+        events: ["primera", "segunda", "tercera"].map((after) => ({
+          kind: "target.cell.commit",
+          fileId: "f1",
+          cellId: "c3",
+          payload: { value: after },
+          display: { canonicalRef: "MRK 4:3", before: "", after },
+        })),
+      },
+    }
+    const rows = deriveWorkingSet([
+      run([readItem([{ cellId: "c3", ref: "MRK 4:3", source: "s3", target: "" }]), alternatives]),
+    ])
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ cellId: "c3", source: "s3" })
+    // No overlay at all — and above all not "tercera", the last wording.
+    expect(rows[0].proposed).toBeUndefined()
+    expect(rows[0].stagedEvent).toBeUndefined()
+    expect(pendingRows(rows)).toHaveLength(0)
+  })
+
   it("a proposal for an unseen cell creates its row from display context", () => {
     const rows = deriveWorkingSet([run([proposalItem("p1", "c9", "nuevo")])])
     expect(rows[0]).toMatchObject({ cellId: "c9", ref: "MRK 4:3", proposed: "nuevo", fileId: "f1" })

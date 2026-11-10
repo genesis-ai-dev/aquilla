@@ -55,6 +55,10 @@ export const rules = defineNamespace({
     "rules.infraction.builtin.unpairedQuotes": "Unpaired quotation mark in translation",
     "rules.infraction.builtin.untranslatedFragment": "Source word left untranslated",
     "rules.infraction.builtin.lengthRatio": "Translation is much shorter or longer than the source",
+    "rules.infraction.builtin.scriptureReference":
+      "Scripture reference does not match the project's book names or the canon",
+    "rules.infraction.builtin.numberFormat":
+      "Number is not written the way the target language writes numbers",
     "rules.infraction.builtin.placeholderIntegrity": plural({
       one: "Placeholder {tokens} missing in translation",
       other: "Placeholders {tokens} missing in translation",
@@ -114,6 +118,12 @@ export const rules = defineNamespace({
     "rules.builtin.lengthRatio.name": "Length mismatch",
     "rules.builtin.lengthRatio.description":
       "Translation is under 40% or over 250% of the source's length — a sign of a dropped or added clause. Off by default: normal length varies by language pair.",
+    "rules.builtin.scriptureReference.name": "Scripture references",
+    "rules.builtin.scriptureReference.description":
+      "Scripture references in the translation use the project's book names and name a chapter the canon has, with one separator throughout. Off by default: it needs the project's book names.",
+    "rules.builtin.numberFormat.name": "Number format",
+    "rules.builtin.numberFormat.description":
+      "Numbers in the translation are written the way the target language writes them — its digits, its thousands separator, its decimal mark. Off by default: it needs the target language, or the project's own answer for it.",
 
     // ── Shared vocabulary ───────────────────────────────────────────────────
     "rules.severity.major": "Major",
@@ -164,6 +174,28 @@ export const rules = defineNamespace({
     }),
     "rules.checkDrawer.caseExceptionsLearned":
       "Not flagged — recurring in this text, so treated as the project's own spelling: {forms}",
+    // ── Spelling / project wordlist (AQU-1737) ──
+    "rules.checkDrawer.spelling": "Spelling ({count})",
+    "rules.checkDrawer.spellingSoundsLike": plural({
+      one: 'Sounds like "{suggestion}", which this text writes {suggestionCount} time.',
+      other: 'Sounds like "{suggestion}", which this text writes {suggestionCount} times.',
+    }),
+    "rules.checkDrawer.spellingCloseTo": plural({
+      one: 'Almost "{suggestion}", which this text writes {suggestionCount} time.',
+      other: 'Almost "{suggestion}", which this text writes {suggestionCount} times.',
+    }),
+    "rules.checkDrawer.approveSpelling": "Approve",
+    "rules.checkDrawer.approveSpellingAriaLabel": 'Approve the spelling "{form}" everywhere it occurs',
+    "rules.checkDrawer.spellingApproved": plural({
+      one: "{count} spelling approved — every occurrence cleared.",
+      other: "{count} spellings approved — every occurrence cleared.",
+    }),
+    "rules.checkDrawer.spellingAutoApproved":
+      "Not flagged — written often enough in this text to be treated as correct: {forms}",
+    "rules.checkDrawer.wordlistSize": plural({
+      one: "Wordlist: {count} word form.",
+      other: "Wordlist: {count} word forms.",
+    }),
     "rules.checkDrawer.otherTermsClean": plural({
       one: "{count} other term checked with no issues.",
       other: "{count} other terms checked with no issues.",
@@ -625,6 +657,42 @@ export const rules = defineNamespace({
           "Finding shown on a row when the translation is far shorter or longer than the source, which " +
           "can mean part of the text was dropped or added.",
       },
+      "rules.builtin.scriptureReference.name": {
+        description:
+          "Name of a built-in quality check in the built-in checks list. It flags a scripture " +
+          "reference (like \"John 3:16\") written with a book name the project does not use, or " +
+          "naming a chapter that does not exist. Short, like the other check names.",
+        maxLength: 30,
+      },
+      "rules.builtin.scriptureReference.description": {
+        description:
+          "One-line description under that check's name in the built-in checks list. The check is " +
+          "off by default because it needs the project's own book names.",
+      },
+      "rules.infraction.builtin.scriptureReference": {
+        description:
+          "Finding shown on a row when a scripture reference in the translation uses a book name the " +
+          "project does not use, names a chapter the Bible does not have, or separates chapter and " +
+          "verse differently from the other references in the same row.",
+      },
+      "rules.builtin.numberFormat.name": {
+        description:
+          "Name of a built-in quality check in the built-in checks list. It flags a number written " +
+          "the way another language writes numbers — the wrong thousands separator or decimal mark, " +
+          "or digits from a script the language does not use. Short, like the other check names.",
+        maxLength: 30,
+      },
+      "rules.builtin.numberFormat.description": {
+        description:
+          "One-line description under that check's name in the built-in checks list. The check is " +
+          "off by default because it needs the target language to be known.",
+      },
+      "rules.infraction.builtin.numberFormat": {
+        description:
+          "Finding shown on a row when a number in the translation is written the way another " +
+          "language writes numbers: \"3,5\" where this language would write \"3.5\", or digits from " +
+          "a script this language does not use.",
+      },
       "rules.builtin.numberIntegrityExtra.name": {
         description:
           "Name of a built-in quality check, shown in the built-in checks list on the Rules page. " +
@@ -776,6 +844,50 @@ export const rules = defineNamespace({
         description:
           "Footnote under the mixed-capitalization section naming the word forms the check learned to allow because they recur in the project's own text (a noun-class prefix like 'kiSwahili', a brand name). Lets a reviewer confirm or reject what was let through.",
         placeholders: { forms: "The excepted word forms, comma-joined — raw cell content, never translated." },
+      },
+      "rules.checkDrawer.spelling": {
+        description:
+          "Section heading in the check-file findings drawer, counting suspected misspellings — rare word forms that look or sound like a form the project writes often.",
+        placeholders: { count: "Number of suspected misspellings." },
+      },
+      "rules.checkDrawer.spellingSoundsLike": {
+        description:
+          "Headline of one spelling card, under the suspected word form itself (raw cell content, never translated). Says which spelling the project usually writes, because the two forms fold to the same sound.",
+        placeholders: {
+          suggestion: "The spelling the project usually writes — raw cell content, never translated.",
+          suggestionCount: "How many times the project writes that spelling.",
+        },
+      },
+      "rules.checkDrawer.spellingCloseTo": {
+        description:
+          "Same as rules.checkDrawer.spellingSoundsLike, but for a form that is only a character or two away from the usual spelling rather than a sound-alike of it.",
+        placeholders: {
+          suggestion: "The spelling the project usually writes — raw cell content, never translated.",
+          suggestionCount: "How many times the project writes that spelling.",
+        },
+      },
+      "rules.checkDrawer.approveSpelling": {
+        description:
+          "Button on a spelling card that accepts the suspected form as correct, clearing every occurrence of it at once. Keep it short — it sits inside a narrow card.",
+      },
+      "rules.checkDrawer.approveSpellingAriaLabel": {
+        description: "Accessible label for the spelling card's Approve button.",
+        placeholders: { form: "The word form being approved — raw cell content, never translated." },
+      },
+      "rules.checkDrawer.spellingApproved": {
+        description:
+          "Footnote under the spelling section counting the spellings the reviewer approved during this check, each of which cleared all of its occurrences.",
+        placeholders: { count: "How many spellings the reviewer approved." },
+      },
+      "rules.checkDrawer.spellingAutoApproved": {
+        description:
+          "Footnote under the spelling section naming the word forms the check treated as correct because the text writes them often. Lets a reviewer see what was let through instead of trusting a silent pass.",
+        placeholders: { forms: "The approved word forms, comma-joined — raw cell content, never translated." },
+      },
+      "rules.checkDrawer.wordlistSize": {
+        description:
+          "Footnote under the spelling section stating how many distinct word forms the project wordlist the check built holds.",
+        placeholders: { count: "Number of distinct word forms." },
       },
       "rules.checkDrawer.otherTermsClean": {
         description:

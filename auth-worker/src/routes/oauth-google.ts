@@ -10,10 +10,12 @@ import { JWTService } from "../auth/jwt"
 import { sha256Hex } from "../../../db/shared/api-credentials"
 import { countRecentEvents, ipIdentifier, recordAuthEvent } from "../utils/rate-limit"
 import { verifyPassword } from "../utils/password"
-import { legacyD1Config } from "./auth"
+import { devAccessRefusal, legacyD1Config } from "./auth"
 import { hasLegacyIdentityCollision } from "../services/frontier-d1"
 import { sendWelcomeEmail } from "../services/email"
 import { parseAdminEmails } from "../middleware/platform-admin"
+
+import { checkDevAccess } from "../services/dev-access"
 
 const googleKeys = createRemoteJWKSet(new URL("https://www.googleapis.com/oauth2/v3/certs"), { timeoutDuration: 10_000 })
 const random = () => Array.from(crypto.getRandomValues(new Uint8Array(32)), b => b.toString(16).padStart(2, "0")).join("")
@@ -22,7 +24,7 @@ export async function pkceChallenge(verifier: string): Promise<string> {
   return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
 }
 interface Flow { state_hash: string; browser_challenge: string; google_verifier: string; nonce: string; app_origin: string; subject: string; email: string; authoritative_email: boolean }
-interface Account { id: number; username: string; password_hash: string | null }
+interface Account { id: number; username: string; email: string; password_hash: string | null }
 const proof = z.object({ code: z.string().regex(/^[a-f0-9]{64}$/), verifier: z.string().regex(/^[a-f0-9]{64}$/) })
 const routes = new Hono<AuthHonoEnv>()
 routes.use("*", bodyLimit({ maxSize: 8192 }), async (c, next) => {
@@ -104,9 +106,9 @@ routes.get("/callback", async c => {
   }
 })
 async function accountFor(db: AquillaDb, flow: Flow): Promise<{ account: Account | null; linked: boolean }> {
-  const linked = await db.prepare("SELECT u.id, u.username, u.password_hash FROM provider_identities p JOIN users u ON u.id=p.user_id WHERE p.provider='google' AND p.subject=?").bind(flow.subject).first<Account>()
+  const linked = await db.prepare("SELECT u.id, u.username, u.email, u.password_hash FROM provider_identities p JOIN users u ON u.id=p.user_id WHERE p.provider='google' AND p.subject=?").bind(flow.subject).first<Account>()
   if (linked) return { account: linked, linked: true }
-  const account = await db.prepare("SELECT id, username, password_hash FROM users WHERE LOWER(email)=LOWER(?)").bind(flow.email).first<Account>()
+  const account = await db.prepare("SELECT id, username, email, password_hash FROM users WHERE LOWER(email)=LOWER(?)").bind(flow.email).first<Account>()
   return { account, linked: false }
 }
 async function session(env: AuthHonoEnv["Bindings"], username: string, created: boolean, linked = false) {
@@ -124,6 +126,9 @@ routes.post("/exchange", zValidator("json", proof), async c => {
     .bind(await sha256Hex(nextCode), await sha256Hex(code), await pkceChallenge(verifier)).first<Flow>()
   if (!flow) return c.json({ error: "expired_request" }, 400)
   const { account, linked } = await accountFor(c.env.AQUILLA_PG, flow)
+  // Apply the same dev-only access policy as password login, before writes or JWTs.
+  const access = await checkDevAccess(c.env, account?.email ?? flow.email)
+  if (!access.allowed) return devAccessRefusal(c, access.reason)
   if (linked && account) {
     await c.env.AQUILLA_PG.prepare("UPDATE social_login_flows SET status='consumed', code_hash=NULL WHERE state_hash=?").bind(flow.state_hash).run()
     return c.json(await session(c.env, account.username, false))
@@ -148,6 +153,9 @@ routes.post("/finish", zValidator("json", proof.extend({ username: z.string().tr
   await recordAuthEvent(c.env.AQUILLA_PG, "social_link", ip, true)
   await recordAuthEvent(c.env.AQUILLA_PG, "social_link", ownerKey, true)
   const { account, linked } = await accountFor(c.env.AQUILLA_PG, flow)
+  // Apply the same dev-only access policy as password login, before writes or JWTs.
+  const access = await checkDevAccess(c.env, account?.email ?? flow.email)
+  if (!access.allowed) return devAccessRefusal(c, access.reason)
   if (linked) return c.json({ error: "restart" }, 409)
   if (account) {
     // Require proof of the existing Aquilla account, not merely matching email.

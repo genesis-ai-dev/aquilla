@@ -13,12 +13,14 @@
 // copy in R2 stays as the archive; its key is in the footer.
 
 import type { Env } from "../types"
+import { formatAnswersMarkdown, formatAnswersText, type FeedbackAnswers } from "./feedback-answers"
+import { feedbackPageLink } from "./feedback-link"
 
 /** An in-app feedback submission. The sender is an authenticated user, so
- *  identity comes from the session, not the form — only `description` is typed. */
+ *  identity comes from the session, not the form — only the answers are typed. */
 export interface FeedbackSubmission {
-  /** Free text the user typed. */
-  description: string
+  /** The three answers the user typed (AQU-2467). */
+  answers: FeedbackAnswers
   /** Numeric account id (session-derived). */
   userId: number
   username: string
@@ -31,6 +33,8 @@ export interface FeedbackSubmission {
   projectId?: string | null
   projectName?: string | null
   fileId?: string | null
+  /** Display name of the file, looked up by the server (AQU-2466). */
+  fileName?: string | null
   /** posthog-js session replay URL, when analytics are on. */
   sessionReplayUrl?: string | null
   /** R2 key of the archived screenshot, when one was captured and stored. */
@@ -60,6 +64,22 @@ function orgLine(s: FeedbackSubmission): string {
   return s.orgName?.trim() ? `${s.orgName.trim()} (id ${s.orgId})` : `id ${s.orgId}`
 }
 
+/** Escape text for a Discord masked link so a name holding "]" or "*" cannot
+ *  break the link or restyle the card. */
+function escapeLinkText(value: string): string {
+  return value.replace(/[\\[\]()*_~`|>]/g, (ch) => `\\${ch}`)
+}
+
+/** The page as a masked link to aquilla.app, or the bare route when it is not
+ *  a same-site path. */
+function pageLine(s: FeedbackSubmission): string {
+  const route = s.route.trim()
+  const link = feedbackPageLink(route, s.projectName)
+  if (!link) return route || "(unknown)"
+  // ")" would end the link early; encode it, the browser decodes it back.
+  return `[${escapeLinkText(clip(link.text, 200))}](${link.url.replace(/\)/g, "%29")})`
+}
+
 function projectLine(s: FeedbackSubmission): string | null {
   const id = s.projectId?.trim()
   if (!id) return null
@@ -83,16 +103,18 @@ export function buildFeedbackDiscordPayload(
   ]
   const project = projectLine(s)
   if (project) fields.push({ name: "Project", value: clip(project, FIELD_VALUE_MAX), inline: true })
-  fields.push({ name: "Route", value: clip(s.route.trim() || "(unknown)", FIELD_VALUE_MAX) })
-  const fileId = s.fileId?.trim()
-  if (fileId) fields.push({ name: "File", value: clip(fileId, FIELD_VALUE_MAX), inline: true })
+  fields.push({ name: "Page", value: clip(pageLine(s), FIELD_VALUE_MAX) })
+  // The name when the server found one; the id the client sent otherwise, so a
+  // file the lookup missed is still traceable.
+  const file = s.fileName?.trim() || s.fileId?.trim()
+  if (file) fields.push({ name: "File", value: clip(file, FIELD_VALUE_MAX), inline: true })
   const replay = s.sessionReplayUrl?.trim()
   if (replay) fields.push({ name: "Session replay", value: clip(replay, FIELD_VALUE_MAX) })
   if (s.screenshotDropped) {
     fields.push({ name: "Screenshot", value: "attached, but object storage was unavailable: not archived" })
   }
 
-  const text = s.description.trim()
+  const text = formatAnswersMarkdown(s.answers)
   const embed: Record<string, unknown> = {
     title: clip(`Feedback from ${username}`, 250),
     description: opts.descriptionTruncated
@@ -123,7 +145,7 @@ export async function sendFeedbackToDiscord(
   const url = env.DISCORD_FEEDBACK_WEBHOOK_URL?.trim()
   if (!url) return { delivered: false }
 
-  const descriptionTruncated = submission.description.trim().length > EMBED_DESCRIPTION_MAX
+  const descriptionTruncated = formatAnswersMarkdown(submission.answers).length > EMBED_DESCRIPTION_MAX
   const payload = buildFeedbackDiscordPayload(submission, {
     hasAttachment: screenshot !== null,
     screenshotExt: screenshot?.ext,
@@ -143,7 +165,7 @@ export async function sendFeedbackToDiscord(
   if (descriptionTruncated) {
     form.set(
       `files[${fileIndex}]`,
-      new Blob([submission.description.trim()], { type: "text/plain" }),
+      new Blob([formatAnswersText(submission.answers)], { type: "text/plain" }),
       "description.txt",
     )
   }

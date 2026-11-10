@@ -23,6 +23,13 @@ export interface EmailService {
      *  to a routed inbox (support@…) or a reply lands nowhere. Workers-binding
      *  field is camelCase `replyTo` (REST is `reply_to`). */
     replyTo?: string
+    /** Files sent with the message. The whole message may not pass 5 MiB. */
+    attachments?: {
+      content: string | ArrayBuffer | ArrayBufferView
+      filename: string
+      type: string
+      disposition: "attachment" | "inline"
+    }[]
   }): Promise<{ messageId: string }>
 }
 
@@ -349,6 +356,10 @@ export interface Env {
   /** R2 key prefix, mirroring sync-worker/agent-worker. Unset in every current
    *  env (→ empty prefix), so artifact keys are `artifacts/{projectId}/{id}`. */
   R2_KEY_PREFIX?: string
+  /** AQU-2469: the dev access list (services/dev-access.ts). KV, one key per
+   *  lower-cased email. Bound on the development Worker only; absent there
+   *  means nobody but platform admins gets in (fail closed). */
+  DEV_ACCESS_LIST?: KVNamespace
 
   // AI budget + allowlist controls (AQU-265).
   // AI_ALLOWED_MODELS: comma-separated list of permitted OpenRouter model IDs.

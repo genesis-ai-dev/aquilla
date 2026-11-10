@@ -2,13 +2,22 @@
 //
 //   POST /api/v2/feedback   session JWT required
 //     Body = multipart/form-data
-//       description      (required, ≤ 5000 chars) — what the user typed
+//       whatHappened     (required, ≤ 5000 chars) — "What happened?"
+//       tryingTo         (optional, ≤ 5000 chars) — "What were you trying to do?"
+//       expected         (optional, ≤ 5000 chars) — "What did you expect to happen?"
+//       description      (legacy) — older clients' single box; read as whatHappened
+//                        when whatHappened is absent (AQU-2467)
 //       route            (optional) — SPA pathname they were on
 //       projectId        (optional)
-//       fileId           (optional)
+//       fileId           (optional) — the server looks up its name for the report
 //       sessionReplayUrl (optional) — posthog replay link, when analytics are on
 //       screenshot       (optional) — image/png|jpeg|webp, ≤ MAX_FEEDBACK_SCREENSHOT_BYTES
-//     → { ok, feedbackId, delivered, screenshotKey }
+//     → 201 { ok, feedbackId, delivered, screenshotKey, emailedRoutes }
+//       (`delivered` is Discord only; `emailedRoutes` counts addresses mailed by
+//       the admin-defined feedback routes, services/feedback-routes.ts)
+//     → 502 { error } when Discord or a route email is refused, so the SPA shows
+//       its send-failed message and keeps the typed text (AQU-2467). "No routes
+//       matched" and "no EMAIL binding" (local/e2e) are not failures.
 //
 // WHY the server and not just PostHog: AQU-307 shipped "Report a problem" as a
 // PostHog capture, which means feedback only reaches the team when the user has
@@ -27,16 +36,21 @@
 // The card names the org, project and user id. The browser only sends the
 // project id, and a client-sent org name could be anything, so the server looks
 // the project and org up itself, and only when the reporter can read that
-// project: otherwise a user could probe org names by guessing project ids.
+// project: otherwise a user could probe org names by guessing project ids. The
+// file name comes from the same lookup, under the same rule (AQU-2466).
 //
 // Storage and Discord both degrade rather than fail. A missing SNAPSHOTS binding
 // drops the archive copy and says so on the card; a missing webhook secret
-// (local/e2e) returns `delivered: false` with a 200. The user's message is never
-// lost to a misconfigured side channel — the SPA shows what actually happened.
+// (local/e2e) returns `delivered: false` with a 200. A mail service that refuses
+// a route email is different: that is a 502, never a success (AQU-2467). The
+// user's message is never lost to a misconfigured side channel — the SPA shows
+// what actually happened.
 
 import { Hono } from "hono"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { sendFeedbackToDiscord, type FeedbackAttachment } from "../services/discord-feedback"
+import type { FeedbackAnswers } from "../services/feedback-answers"
+import { emailFeedbackRoutes } from "../services/feedback-routes"
 import { getOrgMemberRole } from "../services/org-permissions"
 import { resolveProjectRole } from "../services/project-permissions"
 import type { AuthUser, Env } from "../types"
@@ -90,6 +104,8 @@ interface ProjectContext {
   orgId: number | null
   orgName: string | null
   projectName: string | null
+  /** Display name of the reported file, when it belongs to that project. */
+  fileName: string | null
 }
 
 /** Project and org names for the card. Best effort: a failed lookup, an
@@ -99,9 +115,10 @@ async function lookupProjectContext(
   env: Env,
   user: AuthUser,
   projectId: string | null,
+  fileId: string | null,
   route: string,
 ): Promise<ProjectContext> {
-  const none: ProjectContext = { orgId: null, orgName: null, projectName: null }
+  const none: ProjectContext = { orgId: null, orgName: null, projectName: null, fileName: null }
   try {
     if (!projectId) {
       // No project: the user may be on an org page (/orgs/:orgId, e.g. stuck
@@ -112,7 +129,7 @@ async function lookupProjectContext(
       const org = await env.AQUILLA_PG.prepare("SELECT name FROM organizations WHERE id = ?")
         .bind(orgId)
         .first<{ name: string | null }>()
-      return { orgId, orgName: org?.name ?? null, projectName: null }
+      return { orgId, orgName: org?.name ?? null, projectName: null, fileName: null }
     }
     const role = await resolveProjectRole(env, user, projectId)
     if (!role) return none
@@ -124,7 +141,19 @@ async function lookupProjectContext(
       .bind(projectId)
       .first<{ project_name: string | null; org_id: number | null; org_name: string | null }>()
     if (!row) return none
-    return { orgId: row.org_id, orgName: row.org_name, projectName: row.project_name }
+    // Scoped to the project the reporter can read, so a guessed file id from
+    // another project names nothing.
+    const file = fileId
+      ? await env.AQUILLA_PG.prepare("SELECT name FROM files WHERE id = ? AND project_id = ?")
+          .bind(fileId, projectId)
+          .first<{ name: string | null }>()
+      : null
+    return {
+      orgId: row.org_id,
+      orgName: row.org_name,
+      projectName: row.project_name,
+      fileName: file?.name?.trim() || null,
+    }
   } catch (err) {
     console.warn("[feedback] project/org lookup failed:", err)
     return none
@@ -149,15 +178,23 @@ feedback.post("/", authMiddleware, async (c) => {
     return c.json({ error: "Expected a multipart/form-data body." }, 400)
   }
 
-  const description = field(body, "description")
-  if (!description) {
-    return c.json({ error: "Description is required." }, 400)
+  // `description` is what clients before AQU-2467 send; it becomes whatHappened.
+  const whatHappened = field(body, "whatHappened") ?? field(body, "description")
+  if (!whatHappened) {
+    return c.json({ error: "Say what happened." }, 400)
   }
-  if (description.length > MAX_FEEDBACK_DESCRIPTION_CHARS) {
-    return c.json(
-      { error: `Description exceeds the ${MAX_FEEDBACK_DESCRIPTION_CHARS}-character limit.` },
-      400,
-    )
+  const answers: FeedbackAnswers = {
+    whatHappened,
+    tryingTo: field(body, "tryingTo"),
+    expected: field(body, "expected"),
+  }
+  for (const [name, value] of Object.entries(answers)) {
+    if (value && value.length > MAX_FEEDBACK_DESCRIPTION_CHARS) {
+      return c.json(
+        { error: `${name} exceeds the ${MAX_FEEDBACK_DESCRIPTION_CHARS}-character limit.` },
+        400,
+      )
+    }
   }
 
   const feedbackId = crypto.randomUUID()
@@ -208,8 +245,9 @@ feedback.post("/", authMiddleware, async (c) => {
   }
 
   const projectId = field(body, "projectId")
+  const fileId = field(body, "fileId")
   const route = field(body, "route") ?? ""
-  const context = await lookupProjectContext(c.env, user, projectId, route)
+  const context = await lookupProjectContext(c.env, user, projectId, fileId, route)
   const attachment: FeedbackAttachment | null =
     screenshotBytes && screenshotExt
       ? {
@@ -219,22 +257,48 @@ feedback.post("/", authMiddleware, async (c) => {
         }
       : null
 
+  const sessionReplayUrl = field(body, "sessionReplayUrl")
+  const screenshotDropped = screenshotBytes !== null && screenshotKey === null
+
+  // Discord and the admin-defined email routes go out together. The email
+  // helper never throws; it reports `failed`, and that becomes a 502 below once
+  // Discord has also been tried, so one refusal never hides the other send.
+  const emailed = emailFeedbackRoutes(
+    c.env,
+    { orgId: context.orgId, projectId: context.orgId !== null ? projectId : null, userId: user.id },
+    {
+      answers,
+      username: user.username,
+      userEmail: user.email,
+      orgName: context.orgName,
+      projectName: context.projectName,
+      route,
+      fileId,
+      fileName: context.fileName,
+      sessionReplayUrl,
+      screenshotKey,
+      screenshotDropped,
+      sentAt: new Date().toISOString(),
+    },
+    attachment,
+  )
+
   let delivered: boolean
   try {
     const result = await sendFeedbackToDiscord(
       c.env,
       {
-        description,
+        answers,
         userId: user.id,
         username: user.username,
         email: user.email,
         route,
         ...context,
         projectId,
-        fileId: field(body, "fileId"),
-        sessionReplayUrl: field(body, "sessionReplayUrl"),
+        fileId,
+        sessionReplayUrl,
         screenshotKey,
-        screenshotDropped: screenshotBytes !== null && screenshotKey === null,
+        screenshotDropped,
       },
       attachment,
     )
@@ -243,10 +307,17 @@ feedback.post("/", authMiddleware, async (c) => {
     // A configured-but-failing post is a real delivery failure: tell the SPA so
     // it can offer the copy-to-clipboard fallback instead of claiming success.
     console.error("[feedback] discord post failed:", err)
+    await emailed
     return c.json({ error: "Feedback could not be delivered — please try again." }, 502)
   }
+  const emailResult = await emailed
+  if (emailResult.status === "failed") {
+    console.error("[feedback] route email refused:", feedbackId)
+    return c.json({ error: "Feedback could not be delivered — please try again." }, 502)
+  }
+  const emailedRoutes = emailResult.count
 
-  return c.json({ ok: true, feedbackId, delivered, screenshotKey }, 201)
+  return c.json({ ok: true, feedbackId, delivered, screenshotKey, emailedRoutes }, 201)
 })
 
 export default feedback

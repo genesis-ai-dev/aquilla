@@ -1,0 +1,6 @@
+# Only the runner scripts enter the image. Everything else in this directory
+# (node_modules, lockfiles, source) would otherwise be shipped to the Docker
+# daemon as build context on every `wrangler dev` / deploy.
+*
+!runner
+!runner/**

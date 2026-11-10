@@ -9,9 +9,62 @@
 // This module runs outside React (plain fetch-helper code, no hooks), so it
 // can't call useT(); it uses the standalone `t()` instead — see AQU-832.
 
-import { t } from "../i18n/standalone"
+import { t, tIfLocalized } from "../i18n/standalone"
 import type { MessageKey } from "../i18n/messages/en"
 import { resolveRoleName } from "../frontier/roles"
+
+/**
+ * AQU-1821: the closed vocabulary of nouns an error sentence may name.
+ *
+ * `context` used to be a free `string`, and every caller passed a bare English
+ * word straight into `error.network.contextSuffix`'s `{context}`. The frame was
+ * translated and the noun was not, so a Burmese 403 read
+ * "ဤအရာကို ပြုလုပ်ရန် ခွင့်ပြုချက် မရှိပါ ဤteam အတွက်။" — a sentence that changes
+ * language halfway through.
+ *
+ * A context is now an IDENTIFIER, not a word: each one names the message key
+ * the catalogues own the noun under, so the noun is translated wherever the
+ * frame is. `"team"` is a key of this map; `"teams"`, `"organization members"`
+ * or any other English phrase is a compile error, which is what keeps a raw
+ * noun from coming back (the acceptance criterion asks for enforcement rather
+ * than convention).
+ *
+ * The three scope nouns reuse `org.access.scope.*`, already translated for the
+ * access surfaces — so the reported Burmese case is now Burmese throughout,
+ * not merely shortened.
+ */
+export const ERROR_CONTEXT_NOUNS = {
+  org: "org.access.scope.org",
+  team: "org.access.scope.team",
+  project: "org.access.scope.project",
+  user: "error.network.context.user",
+  invite: "error.network.context.invite",
+  changeset: "error.network.context.changeset",
+} as const satisfies Record<string, MessageKey>
+
+/** A noun `messageForStatus` / `toUserFacingError` may be asked to name. */
+export type ErrorContext = keyof typeof ERROR_CONTEXT_NOUNS
+
+/**
+ * The rendered `{contextSuffix}` for `context` — `""` when there is none to
+ * render.
+ *
+ * Empty whenever the caller named no object, and whenever this locale has not
+ * translated EITHER half of the clause — the noun or the frame around it. The
+ * five frame sentences read correctly on their own in all three cases. That is
+ * the AQU-1821 rule: `tIfLocalized` returns null exactly where `t()` would fall
+ * back to English, and half an English sentence is worse than a shorter fully
+ * localized one. `locales.ts` (AQU-1306) rules out closing the gap with a
+ * machine translation. Both halves are checked, not just the noun, so a locale
+ * that translates the word but not the clause cannot leak " for this ___"
+ * either.
+ */
+export function contextSuffixFor(context?: ErrorContext): string {
+  if (!context) return ""
+  const noun = tIfLocalized(ERROR_CONTEXT_NOUNS[context])
+  if (noun === null) return ""
+  return tIfLocalized("error.network.contextSuffix", { context: noun }) ?? ""
+}
 
 export type NetworkErrorCategory =
   | "forbidden"
@@ -36,15 +89,16 @@ export interface UserFacingError {
 /**
  * Map an HTTP status code to a human-readable message.
  *
- * The optional `context` string (e.g. "project", "member") is woven into the
- * message where useful to keep it actionable. Callers may pass a short noun.
+ * The optional `context` names what failed (e.g. `"project"`, `"invite"`) and is
+ * woven into the message where useful to keep it actionable. It is one of
+ * `ERROR_CONTEXT_NOUNS` — an identifier for a translated noun, never a word.
  */
 export function messageForStatus(
   status: number,
   rawBody: string,
-  context?: string,
+  context?: ErrorContext,
 ): UserFacingError {
-  const contextSuffix = context ? t("error.network.contextSuffix", { context }) : ""
+  const contextSuffix = contextSuffixFor(context)
   const raw = rawBody.trim()
 
   switch (status) {
@@ -198,9 +252,11 @@ export function isNetworkFailure(err: unknown): boolean {
  * by status; everything else falls through to "unknown".
  *
  * @param err     The raw caught value.
- * @param context Optional noun describing what was being fetched (e.g. "project").
+ * @param context Optional `ERROR_CONTEXT_NOUNS` key naming what was being
+ *                fetched (e.g. `"project"`) — an identifier, not an English
+ *                word; see AQU-1821.
  */
-export function toUserFacingError(err: unknown, context?: string): UserFacingError {
+export function toUserFacingError(err: unknown, context?: ErrorContext): UserFacingError {
   if (isNetworkFailure(err)) {
     const raw = err instanceof Error ? err.message : String(err)
     return {
@@ -242,7 +298,7 @@ export class UserError extends Error {
   readonly status: number
   readonly raw: string
 
-  constructor(status: number, rawBody: string, context?: string) {
+  constructor(status: number, rawBody: string, context?: ErrorContext) {
     const mapped = messageForStatus(status, rawBody, context)
     super(mapped.message)
     this.name = "UserError"

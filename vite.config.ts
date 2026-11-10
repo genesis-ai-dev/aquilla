@@ -86,7 +86,9 @@ export default defineConfig(({ mode }) => ({
       // Worktrees contain their own copies of tsconfig.json; any touch there
       // triggers Vite's "changed tsconfig" path which clears the cache and
       // forces a full reload — that's the white-screen on project click.
-      ignored: ["**/src-tauri/**", "**/.worktrees/**", "**/.claude/worktrees/**"],
+      // Worker mock emails and bundles are runtime output, not SPA source.
+      // Watching their HTML reloads the page in the middle of signup.
+      ignored: ["**/src-tauri/**", "**/.worktrees/**", "**/.claude/worktrees/**", "**/.wrangler/**"],
     },
   },
   plugins: [
@@ -279,6 +281,10 @@ export default defineConfig(({ mode }) => ({
             "scripts/lib/spawn-command.test.ts",
             "scripts/lib/playwright-loader-env.test.ts",
             "scripts/lib/listening-pids.test.ts",
+            "scripts/lib/desktop-bundle.test.ts",
+            // Owned by the "qa-biblica-python" project below: a Node-env test
+            // that shells out to the QA runner's Python suite (AQU-2365).
+            "agents/**",
           ],
         },
       },
@@ -289,6 +295,9 @@ export default defineConfig(({ mode }) => ({
       // vite-plugin-node-polyfills' browser shims reached it regardless of what
       // the inline entry declared (AQU-1431; AQU-1273 had it inline).
       "./scripts/vitest.config.mts",
+      // Runs agents/qa-biblica's stdlib `unittest` suite, so the Biblica QA
+      // runner is covered by `pnpm test` like everything else (AQU-2365).
+      "./agents/qa-biblica/vitest.config.mts",
     ],
   },
 }))

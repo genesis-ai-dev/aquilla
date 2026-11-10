@@ -6,7 +6,10 @@ import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
-import { loadTranslationInstructions } from "../../../db/shared/load-translation-instructions"
+import {
+  legacySystemPromptSetting,
+  loadTranslationInstructions,
+} from "../../../db/shared/load-translation-instructions"
 import { resolveTranslationInstructions } from "../../../db/shared/translation-instructions"
 
 async function seed(projectSettings: Record<string, unknown> = { sourceLanguage: "en" }) {
@@ -159,5 +162,63 @@ describe("project settings GET: legacy brief for the instructions (AQU-2342)", (
       expect(res.status).toBe(403)
     }
     expect((await storedSettings()).translationInstructions).toBe("Plain register.")
+  })
+})
+
+// AQU-2422: ONE lookup decides which stored `systemPrompt` feeds
+// migrate-on-read. Before this, only the Agent API prompt preview fell back to
+// the legacy nested copy in `completionSettings`, so a legacy project's
+// customized prompt appeared in `parts.instructions` and reached no draft call
+// — the preview was more generous than the draft. This pins the LIVE draft
+// path's loader (ai-draft-internal / the agent's draft tool / project-context
+// all go through it) to `legacySystemPromptSetting`; the preview side is
+// pinned in sync-worker/src/__tests__/external-prompt-preview.test.ts.
+describe("legacy systemPrompt lookup (AQU-2422)", () => {
+  it("is one function: the top-level key wins, else the nested copies", () => {
+    expect(legacySystemPromptSetting({ systemPrompt: "top" })).toBe("top")
+    expect(
+      legacySystemPromptSetting({ systemPrompt: "top", completionSettings: { systemPrompt: "nested" } }),
+    ).toBe("top")
+    expect(legacySystemPromptSetting({ completionSettings: { systemPrompt: "nested" } })).toBe("nested")
+    expect(
+      legacySystemPromptSetting({
+        draftingSettings: { systemPrompt: "drafting" },
+        completionSettings: { systemPrompt: "nested" },
+      }),
+    ).toBe("drafting")
+    // Junk resolves to "" rather than throwing on a drafting read.
+    expect(legacySystemPromptSetting({ systemPrompt: 7, completionSettings: "nope" })).toBe("")
+    expect(legacySystemPromptSetting(null)).toBe("")
+  })
+
+  it("the draft path migrates a prompt that only ever lived in the nested copy", async () => {
+    await seed({
+      sourceLanguage: "en",
+      completionSettings: { systemPrompt: "Keep divine names as in the 1999 Bible." },
+    })
+    const loaded = await loadTranslationInstructions(env.AQUILLA_PG, "p1")
+    expect(loaded.stored).toBe(false)
+    expect(loaded.text).toBe("Keep divine names as in the 1999 Bible.")
+  })
+
+  it("the top-level key still wins over the nested copy on the draft path", async () => {
+    await seed({
+      sourceLanguage: "en",
+      systemPrompt: "Plain register throughout.",
+      completionSettings: { systemPrompt: "Keep divine names as in the 1999 Bible." },
+    })
+    expect((await loadTranslationInstructions(env.AQUILLA_PG, "p1")).text).toBe(
+      "Plain register throughout.",
+    )
+  })
+
+  it("stored instructions are authoritative, so neither copy comes back", async () => {
+    await seed({
+      sourceLanguage: "en",
+      translationInstructions: "Ours now.",
+      completionSettings: { systemPrompt: "Keep divine names as in the 1999 Bible." },
+    })
+    const loaded = await loadTranslationInstructions(env.AQUILLA_PG, "p1")
+    expect(loaded).toEqual({ text: "Ours now.", stored: true })
   })
 })

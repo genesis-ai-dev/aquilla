@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 // Bouncy spring matches the reference popout, slightly tamed for desktop.
 // Original: cubic-bezier(.68,-0.75,.27,1.75)
@@ -128,6 +129,7 @@ export function CellActionRail({
   primary, overflowOpen = false, onOverflowOpenChange,
   overflowAttentionDot, overflowLabel = "More actions", children,
 }: CellActionRailProps) {
+  const t = useT()
   const mountActions = revealed || expanded || overflowOpen || import.meta.env.MODE === "test"
 
   return (
@@ -238,7 +240,7 @@ export function CellActionRail({
                 }}
               />
             }
-            tooltip={expanded ? "Close cell details" : "Open cell details"}
+            tooltip={expanded ? t("editor.cell.closeDetails") : t("editor.cell.openDetails")}
             onClick={onToggleExpanded}
             dot={expansionAttentionDot ?? undefined}
             toneClass={expanded

@@ -55,9 +55,9 @@ auth-worker  ── agent.ts + /api/v1/import/parse (OpenRouter)
 - **Harness** (`auth-worker/src/routes/agent.ts` + `auth-worker/src/lib/agent/*`) — unchanged
   transport and run loop; extended with the new tools above.
 - **agent-worker** (new) — sandbox-execution-only. No model keys, no LLM loop, no business
-  logic. Chat uses one Cloudflare Sandbox container per run; a fallback import uses a unique
-  one-request session. Both are destroyed at the end (or idempotently on retry). See contracts
-  §1 for the exact HTTP surface.
+  logic. Chat uses one Cloudflare Container per run, started by a `Sandbox` Durable Object of
+  our own (see "Runtime" below); a fallback import uses a unique one-request session. Both are
+  destroyed at the end (or idempotently on retry). See contracts §1 for the exact HTTP surface.
 - **Import writes** — the sandbox route writes no project state. It stores the upload only under
   a temporary R2 key, validates the normalized output, destroys the session, and deletes that
   object. The browser shows the ordinary Import preview and, only after confirmation, commits
@@ -65,6 +65,43 @@ auth-worker  ── agent.ts + /api/v1/import/parse (OpenRouter)
   same path as every deterministic adapter. General chat intentionally has no import tool.
 - **Memory / brief** (new Postgres tables + auth-worker routes + SPA review UI) — see "Memory
   gating" below.
+
+### Runtime (Sandbox SDK 1.x)
+
+`agent-worker` is on `@cloudflare/sandbox` 1.x, which is not a newer 0.x but a different shape:
+there is no `Sandbox` base class and no `getSandbox()`. The package contributes only `Files`
+(file I/O through the `sandbox-shim` helper baked into the image); everything else is our code
+against the native Container API.
+
+- **`Sandbox` Durable Object** (`agent-worker/src/sandbox-do.ts`, bound in `wrangler.toml` with
+  `scheduling_policy = "durable_object"`) — one instance per session. It starts its container
+  with `ctx.container.start({ image: images.sandbox, instance: "standard-1", enableInternet: false })`,
+  sets the 10-minute inactivity timeout (the old `sleepAfter`; AQU-1848 pool semantics) after
+  `start()` and again in its constructor when a restarted object finds the container running, and
+  exposes `runCode` / `writeFile` / `readFile` / `destroy` over RPC. The Worker reaches it through
+  `env.Sandbox.getByName(sessionId)`; `resolve-sandbox.ts` adapts the stub to the `SandboxLike`
+  seam the routes and their tests are written against. The policy constants live in
+  `src/container-exec.ts`, and `test/runtime-policy.test.ts` asserts them.
+- **`/exec` is one process per call.** 1.x has no code interpreter, so each call runs a fresh
+  `python3` or `node` under GNU `timeout --kill-after=5` — the deadline is enforced *inside* the
+  container and stops everything the code started — with the code on stdin and
+  `cwd=/workspace`. A small runner (`agent-worker/runner/run.py` and `run.mjs`, at `/opt/aquilla`
+  in the image) ends stdout with a sentinel line and one JSON line carrying the last expression's
+  value and the exception, so the wire contract (`ok`, `stdout`, `stderr`, `resultJson`) is
+  unchanged. Nothing but files under `/workspace` carries over between calls; the harness's
+  `run_code` tool and the import route already treat every call as a standalone program.
+- **Image** (`agent-worker/Dockerfile`): `python:3.13-slim-trixie` plus Debian `nodejs`, the pinned
+  Python packages, the runners, and `sandbox-shim` copied from
+  `docker.io/cloudflare/sandbox:<version>` — a donor image that is not runnable on its own. The
+  donor tag must equal the npm package version (the shim protocol is versioned; the runtime-policy
+  test enforces it, and Dependabot bumps both in one PR because the donor is a `FROM … AS` stage).
+- **Deploying the image.** The container application is created by the first
+  `wrangler deploy --env <development|production>` of this configuration (containers config is
+  per-env; the applications are named `aquilla-agent-sandbox-dev-sandbox` and
+  `aquilla-agent-sandbox-sandbox`). Moving a class to the `durable_object` policy is one-way:
+  after that deploy, 0.x code can no longer start containers for it, even via `wrangler rollback`.
+  No agent-sandbox container application had ever been deployed on the account before this
+  migration, so nothing was switched in place.
 
 ### Local and deployed runtime
 
@@ -88,9 +125,9 @@ Workers do not require Docker. Code execution is an optional, separately isolate
   files explicitly pushed to it (`POST /sessions/:id/files`, `fetch-artifact`), and returns
   stdout/stderr/a result value. The harness — outside the container — is the only thing that
   ever holds the ephemeral `aqk_` credential, and it is never passed into the sandbox.
-- **Default-deny egress.** `agent-worker` subclasses the Cloudflare Sandbox Durable Object with
-  `enableInternet = false`, because Cloudflare Containers otherwise permit outbound internet
-  access by default. The sandbox container therefore has no arbitrary network access. It cannot
+- **Default-deny egress.** `agent-worker`'s `Sandbox` Durable Object starts its container with
+  `enableInternet: false` (`src/container-exec.ts`, asserted by `test/runtime-policy.test.ts`),
+  so the container has no outbound network and no DNS resolution at all. It cannot
   exfiltrate data to an external host, cannot fetch a credentialed third-party URL on the
   user's behalf (contrast with the client-side agent pattern in `docs/AGENT-API.md` §5's
   "External-asset wrinkle" — that's a *different*, browser-context agent; the sandbox is
@@ -169,8 +206,11 @@ erroring mid-tool-call or silently truncating output. The SPA renders a running 
   CSV, a hand-built legacy-shaped XLSX + CSV twin, a bilingual timestamped interview transcript)
   with a README documenting each trap and the expected importer behavior.
 - Worker-side: PGlite for the new Postgres tables/routes (`db/shared/agent-memory.ts`,
-  `auth-worker/src/routes/agent-memory.ts`); agent-worker gets its own package test suite
-  (sandbox exec/files/fetch-artifact against a real or mocked Sandbox binding).
+  `auth-worker/src/routes/agent-memory.ts`); agent-worker gets its own package test suite:
+  the routes against an injected fake sandbox (exec/files/fetch-artifact/pool), the runner
+  scripts run with the host's `python3`/`node` (`test/runner.test.ts`), and the policy
+  constants (`test/runtime-policy.test.ts`). The Durable Object itself is exercised by `pnpm dev`
+  against Docker, not in CI.
 
 ## Known gaps (traced, not built in v1)
 

@@ -19,6 +19,8 @@ export const org = defineNamespace({
     "org.access.origin.inherited": "Inherited",
     "org.access.origin.inheritedFrom": "Inherited · {path}",
     "org.access.origin.platform": "Platform admin",
+    "org.access.roleBadge.via": "{role} · via {path}",
+    "org.access.roleBadge.origin": "{role} · {origin}",
     "org.access.effective.direct": "{role} (direct)",
     "org.access.effective.via": "{role} (via {path})",
     "org.access.effective.creator": "{role} (creator)",
@@ -514,6 +516,7 @@ export const org = defineNamespace({
     "org.memberActivityPanel.kindCommentResolve": "Resolved a comment",
     "org.memberActivityPanel.kindCellBacktranslationSet": "Set a back-translation",
     "org.memberActivityPanel.kindCellGlossSet": "Corrected a statistical gloss",
+    "org.memberActivityPanel.kindCellLabelSet": "Labelled a cell",
     "org.memberActivityPanel.kindCellAudioAttach": "Attached audio",
     "org.memberActivityPanel.kindCellAudioSelect": "Selected an audio take",
     "org.memberActivityPanel.kindCellRetime": "Retimed a cell",
@@ -745,16 +748,6 @@ export const org = defineNamespace({
     "org.egressSettings.roleOptionViewer": "{role} — anyone with project access",
     "org.egressSettings.roleOptionOwner": "{role} — default",
     "org.egressSettings.saveFailedFallback": "Couldn't save the egress permission.",
-
-    // -- AddLanguagePopover: "+ Language" quick action on an OrgHome project row --
-    "org.addLanguagePopover.triggerLabel": "Language",
-    // "e.g. Traditional Han" placeholder → projectSettings.create.extraLanguagesPlaceholder (identical text)
-    // "Enter a language name." → projectSettings.create.extraLanguagesEmptyError (identical text)
-    // too-long error → projectSettings.create.extraLanguagesTooLongError (identical text)
-    // already-default error → projectSettings.languages.alreadyDefaultError (identical text)
-    // lane-already-exists error → projectSettings.languages.alreadyExistsError (identical text)
-    "org.addLanguagePopover.conflictError": "Languages changed elsewhere. Reloaded — try adding again.",
-    // generic save-failed error → projectSettings.languages.savingFailedGeneric (identical text)
 
     // -- CreditsPanel: org credits/usage panel --
 
@@ -1841,6 +1834,22 @@ export const org = defineNamespace({
       "org.access.origin.inheritedFrom": {
         description: "Badge on a member row: the role comes from a grant at an ancestor scope.",
         placeholders: { path: "Scope breadcrumb such as \"Biblica ETT › biblica/bsb › Pattani Malay Bible\"; never translated." },
+      },
+      "org.access.roleBadge.via": {
+        description:
+          "AQU-2317: the role pill for a grant inherited from an ancestor place — the role, then the place it is set at. The pill is a link to that place.",
+        placeholders: {
+          role: "Localized role label, e.g. \"Project Lead\".",
+          path: "Scope breadcrumb of the place the grant is set at, such as \"Biblica ETT › biblica/bsb\"; never translated.",
+        },
+      },
+      "org.access.roleBadge.origin": {
+        description:
+          "AQU-2317: the role pill when the grant comes from something that is not a place you can open — creator, platform admin, or an inherited grant whose source the viewer may not see.",
+        placeholders: {
+          role: "Localized role label, e.g. \"Project Lead\".",
+          origin: "Localized origin label from org.access.origin.* / org.accessModelLegend.*, already translated.",
+        },
       },
       "org.access.effective.direct": {
         description: "Direct role shown beside a different effective role.",

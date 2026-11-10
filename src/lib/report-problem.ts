@@ -28,8 +28,19 @@ export interface ReportContext {
   fileId?: string
 }
 
+/** Headings the three answers go under in the copy fallback (the same ones the
+ *  team sees in Discord and email). */
+const ANSWER_HEADINGS = {
+  whatHappened: "What happened?",
+  tryingTo: "What were you trying to do?",
+  expected: "What did you expect to happen?",
+} as const
+
 export interface ReportProblemPayload {
-  description: string
+  /** AQU-2467: the three answers on the form. Only whatHappened is required. */
+  whatHappened: string
+  tryingTo?: string
+  expected?: string
   context: ReportContext
   /** posthog-js session replay URL, if available */
   sessionReplayUrl?: string | null
@@ -51,7 +62,12 @@ export function captureReportProblem(payload: ReportProblemPayload): boolean {
     payload.sessionReplayUrl ?? getSessionReplayUrl()
 
   posthog.capture(REPORT_PROBLEM_EVENT, {
-    description: payload.description,
+    // `description` is kept (= whatHappened) so existing PostHog queries on it
+    // keep working; the optional answers ride in their own properties.
+    description: payload.whatHappened,
+    what_happened: payload.whatHappened,
+    trying_to: payload.tryingTo?.trim() || null,
+    expected: payload.expected?.trim() || null,
     route: payload.context.route,
     project_id: payload.context.projectId ?? null,
     file_id: payload.context.fileId ?? null,
@@ -85,7 +101,10 @@ export function buildReportText(payload: ReportProblemPayload): string {
     payload.context.fileId ? `File: ${payload.context.fileId}` : null,
     payload.hasScreenshot ? `Screenshot: attached (sent to the team, not included here)` : null,
     `---`,
-    payload.description,
+    ...(["whatHappened", "tryingTo", "expected"] as const).flatMap((key) => {
+      const body = payload[key]?.trim()
+      return body ? [`${ANSWER_HEADINGS[key]}\n${body}`] : []
+    }),
   ].filter(Boolean)
   return lines.join("\n")
 }

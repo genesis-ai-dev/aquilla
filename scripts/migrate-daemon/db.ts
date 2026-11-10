@@ -5,7 +5,7 @@ import fs from "node:fs"
 import path from "node:path"
 
 export type JobKind = "content" | "audio"
-export type JobStage = "detected" | "fetched" | "planned" | "pushing" | "done" | "failed"
+export type JobStage = "detected" | "fetched" | "planned" | "pushing" | "done" | "failed" | "skipped_archived"
 export interface JobRow {
   id: number; project_id: number; kind: JobKind; sha: string; stage: JobStage
   attempts: number; next_run_at: number; created_at: number; updated_at: number
@@ -89,10 +89,11 @@ export class DaemonDb {
     const now = Date.now()
     const open = this.d.prepare(`SELECT * FROM jobs WHERE project_id=? AND kind=? AND ${UNFINISHED} ORDER BY id DESC LIMIT 1`).get(projectId, kind) as JobRow | undefined
     if (open) {
-      if (open.sha !== sha) this.d.prepare(`UPDATE jobs SET sha=?, stage='detected', attempts=0, next_run_at=0, error=NULL, plan_path=NULL, updated_at=? WHERE id=?`).run(sha, now, open.id)
+      if (open.sha !== sha) this.d.prepare(`UPDATE jobs SET sha=?, stage=CASE WHEN stage='skipped_archived' THEN 'skipped_archived' ELSE 'detected' END, attempts=0, next_run_at=0, error=CASE WHEN stage='skipped_archived' THEN error ELSE NULL END, plan_path=NULL, updated_at=? WHERE id=?`).run(sha, now, open.id)
       return this.getJob(open.id)!
     }
     const r = this.d.prepare(`INSERT INTO jobs (project_id, kind, sha, stage, created_at, updated_at) VALUES (?,?,?,'detected',?,?)`).run(projectId, kind, sha, now, now)
+    if (this.kvGet(`archived:${projectId}`) === "true") this.advance(Number(r.lastInsertRowid), "skipped_archived")
     return this.getJob(Number(r.lastInsertRowid))!
   }
   advance(jobId: number, to: JobStage, patch: { plan_path?: string } = {}): void {
@@ -107,6 +108,17 @@ export class DaemonDb {
     // Failed jobs retry from 'detected' so fetch/materialize re-run on a clean slate.
     this.d.prepare(`UPDATE jobs SET stage='detected', attempts=?, next_run_at=?, error=?, plan_path=NULL, updated_at=? WHERE id=?`)
       .run(attempts, now + delay, error.slice(0, 2000), now, jobId)
+  }
+  parkArchived(projectId: number): void {
+    this.d.prepare("UPDATE jobs SET stage='skipped_archived',error=NULL,plan_path=NULL,updated_at=? WHERE project_id=? AND stage!='done'").run(Date.now(), projectId)
+    this.kvSet(`archived:${projectId}`, "true")
+  }
+  resumeArchived(projectId: number): void {
+    this.d.prepare("UPDATE jobs SET stage='detected',error=NULL,attempts=0,next_run_at=0,plan_path=NULL,updated_at=? WHERE project_id=? AND stage='skipped_archived'").run(Date.now(), projectId)
+    this.kvSet(`archived:${projectId}`, "false")
+  }
+  archiveCheckError(projectId: number, message: string): void {
+    this.d.prepare("UPDATE jobs SET error=? WHERE project_id=? AND stage='skipped_archived'").run(message.slice(0,2000), projectId)
   }
   getJob(id: number): JobRow | undefined {
     return this.d.prepare(`SELECT * FROM jobs WHERE id=?`).get(id) as JobRow | undefined

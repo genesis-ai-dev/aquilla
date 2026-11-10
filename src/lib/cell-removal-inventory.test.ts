@@ -43,13 +43,27 @@ describe("buildCellRemovalInventory", () => {
         attachments: {
           [ownTake(1)]: { url: "u", type: "audio", createdAt: 1, updatedAt: 1, isDeleted: false },
           [ownTake(2)]: { url: "u", type: "audio", createdAt: 1, updatedAt: 1, isDeleted: false },
-          "file-seeded-clip": { url: "u", type: "audio", createdAt: 1, updatedAt: 1, isDeleted: false },
+          // Seeded the way import seeds it: `audio-<file id>-<time>-<random>`.
+          "audio-file-a-1700000000000-src1": { url: "u", type: "audio", createdAt: 1, updatedAt: 1, isDeleted: false },
         },
       } as Partial<CellData>),
       targetLangs: [],
       commentCount: 0,
     })
     expect(inv.takeCount).toBe(2)
+  })
+
+  it("counts a take migrated from Codex, whose id carries no line id (AQU-2411)", () => {
+    const inv = buildCellRemovalInventory({
+      cell: cell({
+        attachments: {
+          "audio-1719100000000-k3j9x2m1p.webm": { url: "u", type: "audio", createdAt: 1, updatedAt: 1, isDeleted: false },
+        },
+      } as Partial<CellData>),
+      targetLangs: [],
+      commentCount: 0,
+    })
+    expect(inv.takeCount).toBe(1)
   })
 
   it("ignores takes that are already deleted", () => {

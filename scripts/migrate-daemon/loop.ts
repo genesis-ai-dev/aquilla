@@ -1,3 +1,4 @@
+import { admitProject, checkArchived } from "./archive"
 // The daemon's scheduler: it owns the job state machine and nothing else.
 //
 // Each job walks detected → fetched → planned → done, one stage per tick, with
@@ -156,6 +157,7 @@ export class Scheduler {
   /** One scheduling tick. Returns false when no stage had a ready job. */
   private async step(force: boolean): Promise<boolean> {
     if (this.stopping) return false
+    if (!this.ctx.config.dryRun) await checkArchived(this.ctx.db, this.ctx.sync)
     const { fetchConcurrency, materializeConcurrency } = this.ctx.config
     const tasks: Promise<void>[] = []
     const take = (stage: JobStage, limit: number): void => {
@@ -177,6 +179,7 @@ export class Scheduler {
     try {
       const project = this.ctx.db.getProject(job.project_id)
       if (!project) throw new Error(`no project row for gitlab id ${job.project_id}`)
+      if (!this.ctx.config.dryRun && !await admitProject(this.ctx.db, this.ctx.sync, project)) return
       if (stage === "detected") await this.stageFetch(job, project)
       else if (stage === "fetched" && job.kind === "audio") await this.stageAudio(job, project)
       else if (stage === "fetched") await this.stageMaterialize(job, project, force)

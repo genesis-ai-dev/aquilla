@@ -19,23 +19,23 @@ import { zstdDecompressSync } from "node:zlib"
 import fs from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { DEPENDENT_TABLES, SEED_TABLES, TABLE_HEADER_KEY, type IdSet } from "./lib/seed-tables"
+import {
+  DEPENDENT_TABLES,
+  SEED_TABLES,
+  TABLE_HEADER_KEY,
+  seedInsertColumns,
+  type GeneratedColumnsByTable,
+  type IdSet,
+} from "./lib/seed-tables"
 import { assertSeedTargetAllowed } from "./lib/seed-target-guard"
 import { ensureBundle, readMeta } from "./seed-fetch"
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const DEFAULT_LOCAL_PG_URL = "postgresql://aquilla:aquilla@127.0.0.1:5432/aquilla_dev"
-// Never INSERT these. validation_count and value_tsv are still generated.
-// source_language, target_language, and target_lanes were generated until
-// 0156 dropped them; a bundle dumped before that drop still carries the
-// names, and the target schema no longer has the columns.
-const GENERATED_COLS = new Set([
-  "source_language",
-  "target_language",
-  "validation_count",
-  "target_lanes",
-  "value_tsv",
-])
+// Which bundle columns are inserted is decided per table by
+// `seedInsertColumns` (scripts/lib/seed-tables.ts): the target's own GENERATED
+// ALWAYS columns, read off information_schema below, plus the legacy dropped
+// ones, are never written.
 const INSERT_CHUNK = 800
 const IDENTITY_SEQ_TABLES = ["users", "organizations", "groups"] // loaded identity tables with IDENTITY ids
 const OWNER_ROLE = 700 // ROLE.OWNER — see auth-worker/src/types.ts
@@ -71,13 +71,32 @@ function parseBundle(raw: Buffer): Map<string, Record<string, unknown>[]> {
   return sections
 }
 
+/** Columns the target computes itself (GENERATED ALWAYS … STORED), per table. */
+async function generatedColumns(c: Client): Promise<GeneratedColumnsByTable> {
+  const rows = (await c.query<{ table_name: string; column_name: string }>(
+    `SELECT table_name, column_name FROM information_schema.columns
+      WHERE table_schema = 'public' AND is_generated = 'ALWAYS'`,
+  )).rows
+  const byTable = new Map<string, Set<string>>()
+  for (const row of rows) {
+    const set = byTable.get(row.table_name) ?? new Set<string>()
+    set.add(row.column_name)
+    byTable.set(row.table_name, set)
+  }
+  return byTable
+}
+
 /** Fail loud (before any write) if the target is missing columns the bundle carries. */
-async function assertTargetSchema(c: Client, sections: Map<string, Record<string, unknown>[]>) {
+async function assertTargetSchema(
+  c: Client,
+  sections: Map<string, Record<string, unknown>[]>,
+  generated: GeneratedColumnsByTable,
+) {
   const drift: string[] = []
   for (const t of SEED_TABLES) {
     const rows = sections.get(t.name) ?? []
     if (!rows.length) continue
-    const want = Object.keys(rows[0]).filter((k) => !GENERATED_COLS.has(k))
+    const want = seedInsertColumns(t.name, rows[0], generated)
     const have = new Set((await c.query(
       `SELECT column_name FROM information_schema.columns WHERE table_name = $1`, [t.name],
     )).rows.map((r) => r.column_name))
@@ -92,9 +111,14 @@ async function assertTargetSchema(c: Client, sections: Map<string, Record<string
   }
 }
 
-async function insertRows(c: Client, table: string, rows: Record<string, unknown>[]) {
+async function insertRows(
+  c: Client,
+  table: string,
+  rows: Record<string, unknown>[],
+  generated: GeneratedColumnsByTable,
+) {
   if (!rows.length) return
-  const cols = Object.keys(rows[0]).filter((k) => !GENERATED_COLS.has(k))
+  const cols = seedInsertColumns(table, rows[0], generated)
   const colList = cols.map((x) => `"${x}"`).join(", ")
   for (let i = 0; i < rows.length; i += INSERT_CHUNK) {
     const chunk = rows.slice(i, i + INSERT_CHUNK)
@@ -139,7 +163,8 @@ async function main() {
   await c.connect()
   try {
     console.log(`Loading ${meta.projectIds.length} projects into ${host} …`)
-    await assertTargetSchema(c, sections)
+    const generated = await generatedColumns(c)
+    await assertTargetSchema(c, sections, generated)
     await c.query("BEGIN")
     // AQU-1953: rows the seed never carries but that point at seeded rows
     // without ON DELETE CASCADE (agent artifact bindings, contextual runs,
@@ -158,7 +183,7 @@ async function main() {
     // insert forward
     for (const t of SEED_TABLES) {
       const rows = sections.get(t.name) ?? []
-      await insertRows(c, t.name, rows)
+      await insertRows(c, t.name, rows, generated)
     }
     // reset identity sequences so dev-created rows don't collide with seeded ids
     for (const t of IDENTITY_SEQ_TABLES) {

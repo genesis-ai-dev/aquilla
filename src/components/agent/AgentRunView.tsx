@@ -305,7 +305,11 @@ export function AgentRunView({
         </Marker>
       )}
 
-      {run.status === "capped" && (
+      {/* AQU-2313: a run stopped on a SPEND limit is explained by the budget
+          alert below, which names that limit. Showing this marker as well told
+          the customer the run "hit its step/token cap" in the same breath as a
+          credit figure — two different limits, at most one of which applied. */}
+      {run.status === "capped" && !run.budget?.exhausted && (
         <Marker role="status" className="text-amber-700 dark:text-amber-400">
           <MarkerIcon>
             <AlertTriangle />

@@ -53,3 +53,11 @@ it.each([true, false])("new Google signup requires an explicit sharing choice be
   await waitFor(() => expect(mocks.confirm).toHaveBeenCalledWith("aquilla-token", allowed))
   expect(mocks.request).toHaveBeenLastCalledWith("finish", { code: "c".repeat(64), verifier: mocks.attempt.verifier, username: "alice" })
 })
+
+it("shows the dev access refusal without adopting a session or sharing analytics", async () => {
+  mocks.request.mockRejectedValueOnce(new Error("dev_access_restricted"))
+  render(<MemoryRouter><GoogleLoginReturn /></MemoryRouter>)
+  expect(await screen.findByRole("alert")).toHaveTextContent("auth.login.devAccessRestricted")
+  expect(mocks.adopt).not.toHaveBeenCalled()
+  expect(mocks.confirm).not.toHaveBeenCalled()
+})

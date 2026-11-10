@@ -7,7 +7,7 @@
 // covers actually gets from `node scripts/cloudflare-stack-preview.mjs`.
 import { test, expect } from "vitest"
 import { createVerify, generateKeyPairSync } from "node:crypto"
-import { appCredentials, appJwt, commentOnPreview } from "./cloudflare-preview-comment.mjs"
+import { appCredentials, appJwt, commentOnPreview, migrationNotice, pendingMigrations } from "./cloudflare-preview-comment.mjs"
 import { workersBuildPreviewAlias } from "./cloudflare-pr-preview.mjs"
 const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 })
 const pem = privateKey.export({ type: "pkcs1", format: "pem" })
@@ -20,7 +20,7 @@ const env = {
 const INSTALLATION_TOKEN = "ghs_test_installation_token"
 const urls = { web: `https://${workersBuildPreviewAlias(env.WORKERS_CI_BRANCH)}-aquilla-web-preview.blue-darkness-7674.workers.dev` }
 const pr = { number: 628, state: "open", head: { sha: env.WORKERS_CI_COMMIT_SHA, ref: env.WORKERS_CI_BRANCH, repo: { full_name: "genesis-ai-dev/aquilla" } } }
-function harness({ comments = [], current = pr, prs = [pr], error = false } = {}) {
+function harness({ comments = [], current = pr, prs = [pr], error = false, files = [], filesOk = true } = {}) {
   const calls = [], warnings = [], posted = []
   const fetchImpl = async (url, options) => {
     calls.push({ url, options })
@@ -31,6 +31,10 @@ function harness({ comments = [], current = pr, prs = [pr], error = false } = {}
       value = { id: 123, performed_via_github_app: { id: APP_ID }, ...JSON.parse(options.body) }
       posted.push(value)
       comments.splice(0, comments.length, value)
+    } else if (url.includes("/files?")) {
+      // AQU-1435: the PR's file listing, which drives the pending-migration notice.
+      if (!filesOk) return { ok: false, json: async () => ({}) }
+      value = files
     } else if (url.includes("/comments?")) value = comments
     else if (url.includes("/pulls?")) value = prs
     else value = current
@@ -38,6 +42,7 @@ function harness({ comments = [], current = pr, prs = [pr], error = false } = {}
   }
   return { calls, warnings, posted, options: { env, urls, fetchImpl, warn: (s) => warnings.push(s) } }
 }
+const migration = (name, status = "added") => ({ filename: `db/postgres/migrations/${name}`, status })
 test("signs a JWT the App's public key verifies, issued by the App id", () => {
   const jwt = appJwt(appCredentials(env), 1_800_000_000)
   const [header, payload, signature] = jwt.split(".")
@@ -131,4 +136,65 @@ test("rejects unexpected URLs before any GitHub call", async () => {
   await commentOnPreview({ ...h.options, urls: { web: "https://example.com" } })
   expect(h.calls.length).toBe(0)
   expect(h.warnings.length).toBe(1)
+})
+
+// AQU-1435 — a preview runs branch code against shared development Postgres that
+// the preview deploy never migrates, so a PR adding a column used to surface as a
+// bare 500 with nothing naming the cause.
+test("names each Postgres migration the PR carries, and says it is pending", async () => {
+  const h = harness({ files: [migration("0113_cells_hidden_at.sql"), migration("0112_api_credential_access_scope.sql"), { filename: "src/App.tsx", status: "modified" }] })
+  await commentOnPreview(h.options)
+  expect(h.posted.length).toBe(1)
+  const body = h.posted[0].body
+  expect(body.includes("### Postgres migrations — PENDING on this preview")).toBeTruthy()
+  // Sorted by filename, so the comment reads in apply order.
+  expect(body.indexOf("0112_api_credential_access_scope.sql") < body.indexOf("0113_cells_hidden_at.sql")).toBeTruthy()
+  expect(body.includes("pnpm neon:apply:dev")).toBeTruthy()
+  expect(body.includes("src/App.tsx")).toBeFalsy()
+  // The preview link and the Jev section still sit either side of the notice.
+  expect(body.includes(urls.web)).toBeTruthy()
+  expect(body.includes("### Jev smart testing")).toBeTruthy()
+  expect(body.indexOf("### Postgres migrations") < body.indexOf("### Jev smart testing")).toBeTruthy()
+  // And the build log says it too, for whoever reads the build rather than the PR.
+  expect(h.warnings.length).toBe(1)
+  expect(h.warnings[0].includes("0112_api_credential_access_scope.sql, 0113_cells_hidden_at.sql")).toBeTruthy()
+})
+test("says plainly that a PR carrying no migration cannot be failing on pending schema", async () => {
+  const h = harness({ files: [{ filename: "src/App.tsx", status: "modified" }] })
+  await commentOnPreview(h.options)
+  expect(h.posted[0].body.includes("This PR carries none")).toBeTruthy()
+  expect(h.posted[0].body.includes("PENDING")).toBeFalsy()
+  expect(h.warnings.length).toBe(0)
+})
+test("a failed file listing reports unknown and still publishes the preview link", async () => {
+  const h = harness({ filesOk: false })
+  await commentOnPreview(h.options)
+  expect(h.posted.length).toBe(1)
+  expect(h.posted[0].body.includes("pending migrations are **unknown**")).toBeTruthy()
+  expect(h.posted[0].body.includes(urls.web)).toBeTruthy()
+  expect(h.warnings.length).toBe(0)
+})
+test("pendingMigrations keeps only migration SQL, drops deletions, and never guesses on a failed listing", () => {
+  expect(pendingMigrations(null)).toBe(null)
+  expect(pendingMigrations(undefined)).toBe(null)
+  expect(pendingMigrations([])).toStrictEqual([])
+  expect(pendingMigrations([
+    migration("0112_a.sql"),
+    migration("0099_gone.sql", "removed"),
+    migration("0100_renamed.sql", "renamed"),
+    { filename: "db/postgres/migrations/README.md", status: "added" },
+    { filename: "db/postgres/schema.sql", status: "modified" },
+    { filename: "sync-worker/migrations/0001_old.sql", status: "added" },
+    { status: "added" },
+  ])).toStrictEqual([
+    { name: "0100_renamed.sql", status: "renamed" },
+    { name: "0112_a.sql", status: "added" },
+  ])
+  // A missing status still has to read as something, not as "undefined".
+  expect(pendingMigrations([{ filename: "db/postgres/migrations/0112_a.sql" }])).toStrictEqual([{ name: "0112_a.sql", status: "changed" }])
+})
+test("migrationNotice distinguishes unknown from none", () => {
+  expect(migrationNotice(null).includes("**unknown**")).toBeTruthy()
+  expect(migrationNotice([]).includes("This PR carries none")).toBeTruthy()
+  expect(migrationNotice([{ name: "0112_a.sql", status: "added" }]).includes("`0112_a.sql` (added)")).toBeTruthy()
 })

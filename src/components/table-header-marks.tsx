@@ -6,7 +6,9 @@
 // the gutter's select box (20px), 8px, the notices column (20px), 2px, and the
 // number filling the rest; then, before the Target heading, the two 24px
 // validation checks — text, then audio, which a validated line shows as the
-// same green check. The audio check is there only when the rows' is.
+// same green check — and the 24px Play that follows the audio check in every
+// row (AQU-2401), unmarked but reproduced for the width. The audio check and
+// that Play are there only when the rows' are.
 //
 // The two check marks are the chapter picker's text and audio glyphs
 // (`PROGRESS_ICON`, AQU-2139), so one screen carries one icon vocabulary for
@@ -80,6 +82,12 @@ export function CheckMarks({ audioColumn, textColumn = true }: {
           <PROGRESS_ICON.audio className="h-3 w-3" />
         </Mark>
       )}
+      {/* AQU-2401: the row's gutter now ends with a 24px Play beside the audio
+          check. Nothing is marked over it — the glyph in every row says what
+          it is, and the two marks are here to tell the two CHECKS apart — but
+          the width has to be reproduced, or the Target heading would sit 30px
+          to the left of the target boxes it labels. */}
+      {audioColumn !== "off" && <span aria-hidden className="w-6 shrink-0" />}
     </span>
   )
 }

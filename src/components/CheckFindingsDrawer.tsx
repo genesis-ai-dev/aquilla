@@ -7,9 +7,16 @@
  * findings cite their evidence (cell references, rule/concept names) and a
  * cell reference click scrolls/focuses that cell in the editor. The comment
  * affordance reuses the existing CommentsDrawer via onOpenComments.
+ *
+ * AQU-1737 adds the one judgement call in the panel: approving a suspected
+ * spelling. It is session-local for the same reason as the findings, and it is
+ * per FORM, never per cell — a spelling card carries every cell its form
+ * occurs in, so one click clears all of them. Asking the same question once
+ * per cell is how a spell check stops being used.
  */
 
-import { X, AlertTriangle, AlertCircle, BookA, CaseSensitive, MessageSquare, RefreshCw } from "lucide-react"
+import { useState } from "react"
+import { X, AlertTriangle, AlertCircle, BookA, CaseSensitive, MessageSquare, RefreshCw, SpellCheck } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
@@ -21,10 +28,12 @@ import { translateRuleName } from "@/lib/lqa/builtin-resolver"
 import { isBibleCheckInfraction } from "@/lib/bible-data/check-messages"
 import { formatInfractionEvidence, formatInfractionReason } from "@/lib/rules/format-infraction"
 import type { CellData } from "@/hooks/useCells"
+import { approveSpelling, withoutApprovedSpellings } from "@/lib/qa/spelling"
 import type {
   CapitalizationFinding,
   CheckRunResult,
   RuleFindingGroup,
+  SpellingFinding,
   TermConsistencyFinding,
 } from "@/lib/check/deterministic-check"
 import { RightSidebarPanel } from "./RightSidebarPanel"
@@ -296,6 +305,69 @@ function CapitalizationFindingCard({
   )
 }
 
+/**
+ * AQU-1737: one suspected misspelling. Titled by the suspected form (raw cell
+ * content, never translated), with the spelling the project usually writes as
+ * the suggestion, and one Approve button that clears every occurrence.
+ */
+function SpellingFindingCard({
+  finding,
+  cellMap,
+  onNavigateToCell,
+  onOpenComments,
+  onApprove,
+}: {
+  finding: SpellingFinding
+  cellMap: Map<string, CellData>
+  onNavigateToCell: (cellId: string) => void
+  onOpenComments?: (cellId: string) => void
+  onApprove: (form: string) => void
+}) {
+  const t = useT()
+  return (
+    <div className="min-w-0 rounded-md border p-2">
+      <div className="mb-1 flex min-w-0 items-center gap-1.5">
+        <SpellCheck className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+        <span className="min-w-0 truncate text-xs font-semibold">{finding.form}</span>
+        <AppTooltip
+          content={t("rules.checkDrawer.approveSpellingAriaLabel", { form: finding.form })}
+        >
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="ms-auto h-6 shrink-0 px-1.5 text-[10px]"
+            onClick={() => onApprove(finding.form)}
+            aria-label={t("rules.checkDrawer.approveSpellingAriaLabel", { form: finding.form })}
+          >
+            {t("rules.checkDrawer.approveSpelling")}
+          </Button>
+        </AppTooltip>
+      </div>
+      <p className="mb-1.5 break-words text-xs text-muted-foreground">
+        {t(
+          finding.reason === "sound-alike"
+            ? "rules.checkDrawer.spellingSoundsLike"
+            : "rules.checkDrawer.spellingCloseTo",
+          { suggestion: finding.suggestion, suggestionCount: finding.suggestionOccurrences },
+        )}
+      </p>
+      <ul className="min-w-0 space-y-1">
+        {finding.cells.map((fc) => (
+          <CellRefButton
+            key={fc.cellId}
+            cellId={fc.cellId}
+            label={fc.cellLabel ?? findingCellLabel(cellMap.get(fc.cellId), fc.cellId)}
+            cell={cellMap.get(fc.cellId)}
+            onNavigateToCell={onNavigateToCell}
+            onOpenComments={onOpenComments}
+          />
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 export function CheckFindingsDrawer({
   result,
   running,
@@ -317,8 +389,18 @@ export function CheckFindingsDrawer({
   const capitalizationIssueCount = capitalizationFindings.reduce((n, f) => n + f.cells.length, 0)
   const caseExceptions = result?.caseExceptions ?? []
 
+  // AQU-1737. Held here, not in ProjectWorkspace, and deliberately NOT reset
+  // when a new result arrives: a spelling the reviewer has already accepted
+  // must not come back on the next run of the same check.
+  const [approvedSpellings, setApprovedSpellings] = useState<ReadonlySet<string>>(
+    () => new Set<string>(),
+  )
+  const spellingFindings = withoutApprovedSpellings(result?.spellingFindings ?? [], approvedSpellings)
+  const autoApprovedSpellings = result?.approvedSpellings ?? []
+  const wordlistSize = result?.wordlistSize ?? 0
+
   return (
-    <RightSidebarPanel storageKey="check" defaultWidth={320} resizeLabel="Resize file check panel">
+    <RightSidebarPanel storageKey="check" defaultWidth={320} resizeLabel={t("editor.panel.resizeCheck")}>
     <div className="flex h-full min-w-0 w-full flex-col overflow-hidden border-s bg-card">
       <div className="flex shrink-0 items-center justify-between gap-2 border-b p-2">
         {/* Wording tracks the "Check file" button and its "Close file check"
@@ -455,6 +537,50 @@ export function CheckFindingsDrawer({
                     {t("rules.checkDrawer.caseExceptionsLearned", {
                       forms: caseExceptions.map((e) => e.form).join(", "),
                     })}
+                  </p>
+                )}
+              </div>
+
+              {/* AQU-1737: suspected misspellings, from the project's own wordlist. */}
+              <div className="min-w-0">
+                <p className="mb-1 text-xs text-muted-foreground">
+                  {t("rules.checkDrawer.spelling", { count: spellingFindings.length })}
+                </p>
+                {spellingFindings.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">{t("common.none")}</p>
+                ) : (
+                  <div className="min-w-0 space-y-2">
+                    {spellingFindings.map((finding) => (
+                      <SpellingFindingCard
+                        key={finding.form}
+                        finding={finding}
+                        cellMap={cellMap}
+                        onNavigateToCell={onNavigateToCell}
+                        onOpenComments={onOpenComments}
+                        onApprove={(form) =>
+                          setApprovedSpellings((prev) => approveSpelling(prev, form))
+                        }
+                      />
+                    ))}
+                  </div>
+                )}
+                {approvedSpellings.size > 0 && (
+                  <p className="mt-1.5 text-[10px] text-muted-foreground">
+                    {t("rules.checkDrawer.spellingApproved", { count: approvedSpellings.size })}
+                  </p>
+                )}
+                {/* Same contract as the case exceptions above: a form let
+                    through on frequency alone is named, not silently passed. */}
+                {autoApprovedSpellings.length > 0 && (
+                  <p className="mt-1.5 break-words text-[10px] text-muted-foreground">
+                    {t("rules.checkDrawer.spellingAutoApproved", {
+                      forms: autoApprovedSpellings.map((e) => e.form).join(", "),
+                    })}
+                  </p>
+                )}
+                {wordlistSize > 0 && (
+                  <p className="mt-1.5 text-[10px] text-muted-foreground">
+                    {t("rules.checkDrawer.wordlistSize", { count: wordlistSize })}
                   </p>
                 )}
               </div>

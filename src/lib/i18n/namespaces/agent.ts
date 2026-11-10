@@ -360,7 +360,9 @@ export const agent = defineNamespace({
     "agent.aquifer.publishing": "Publishing…",
 
     // ── Run cost-cap meter (BudgetMeter) ────────────────────────────────
-    "agent.budget.exhausted": "Run stopped at its {capCredits} credit cap ({spentCredits} spent).",
+    "agent.budget.exhausted":
+      "Run stopped at this run's own spending limit of {capCredits} ({spentCredits} spent). " +
+      "It limits one run, not your workspace's credit allowance — send a new message to continue.",
     "agent.budget.weeklyExhausted":
       "Run stopped: this workspace has used its weekly AI allowance. Work already staged is kept. " +
       "Usage resets weekly; see Billing.",
@@ -546,6 +548,27 @@ export const agent = defineNamespace({
     // ── Inline passage view (PassageCard) ────────────────────────────────
     "agent.passage.loadingChapterAriaLabel": "Loading chapter",
     "agent.passage.moreShowAll": "{count} more — show all",
+
+    // ── Alternative wordings of one cell (AlternativesCard, AQU-2398). The
+    //    translator compares several AI wordings of ONE line and picks one;
+    //    the rest are thrown away unwritten. Wording must keep that
+    //    throw-away plain, and must never suggest the line was validated —
+    //    the chosen wording lands as an unreviewed AI draft. ──────────────
+    "agent.alternatives.title": plural({
+      one: "{count} wording to choose from",
+      other: "{count} wordings to choose from",
+    }),
+    "agent.alternatives.pickOneNotice":
+      "Pick one wording. It is written to the cell as an AI draft, and the rest are thrown away.",
+    "agent.alternatives.currentText": "In the cell now",
+    "agent.alternatives.option": "Option {number}",
+    "agent.alternatives.use": "Use this",
+    "agent.alternatives.useAriaLabel": "Use option {number}",
+    "agent.alternatives.chosen": "Used",
+    "agent.alternatives.notUsed": "Not used",
+    "agent.alternatives.othersDiscarded": "The wordings you did not pick were thrown away.",
+    "agent.alternatives.discardAll": "Keep none",
+    "agent.alternatives.discarded": "No wording was used — all of them were thrown away.",
 
     // ── Validation queue (ValidationQueueCard) ───────────────────────────
     "agent.validation.preparedCount": plural({
@@ -844,11 +867,14 @@ export const agent = defineNamespace({
       },
       "agent.budget.exhausted": {
         description:
-          "Alert shown once an agent run is stopped because it hit its org credit cap. " +
+          "Alert shown once an agent run is stopped because it reached the spending " +
+          "limit on ONE run (AQU-2313 — never the workspace's credit allowance, which " +
+          "has its own message; an Enterprise workspace has no allowance at all yet " +
+          "still has this per-run limit, so the sentence must not call it a credit cap). " +
           "Both values are already-formatted credit amounts including their unit " +
           "('500 cr') — do not add a second currency/unit word around them.",
         placeholders: {
-          capCredits: "The run's credit cap, already formatted with its unit (e.g. '500 cr').",
+          capCredits: "The spending limit for one run, already formatted with its unit (e.g. '500 cr').",
           spentCredits: "Credits spent when the run stopped, already formatted with its unit.",
         },
       },
@@ -1165,6 +1191,67 @@ export const agent = defineNamespace({
           "its rows, stating how many more rows are hidden. Preceded in the UI by a " +
           "literal ellipsis character that is not part of this key.",
         placeholders: { count: "Number of additional rows hidden below the cap." },
+      },
+      "agent.alternatives.title": {
+        description:
+          "Headline of the card that offers several AI wordings of ONE cell for the "
+          + "translator to compare and choose between. It is a choice, not a list of "
+          + "changes: exactly one wording is written.",
+        placeholders: { count: "How many alternative wordings are offered." },
+      },
+      "agent.alternatives.pickOneNotice": {
+        description:
+          "The rule of the card, stated where the decision is made: choosing a wording "
+          + "writes that one to the cell as an unreviewed AI draft, and the wordings not "
+          + "chosen are never written anywhere. Nothing here validates the cell.",
+      },
+      "agent.alternatives.currentText": {
+        description:
+          "Small label above the cell's existing translation, shown for comparison "
+          + "above the alternative wordings. Not a heading for the options themselves.",
+      },
+      "agent.alternatives.option": {
+        description:
+          "Label of one alternative wording in the list, numbered from 1 in the order "
+          + "the AI offered them (best first, as far as it could judge).",
+        placeholders: { number: "This wording's position in the list, counting from 1." },
+      },
+      "agent.alternatives.use": {
+        description:
+          "Button on one alternative wording that writes THAT wording to the cell and "
+          + "throws the others away. One click commits the choice.",
+      },
+      "agent.alternatives.useAriaLabel": {
+        description:
+          "Accessible name for the button that chooses one alternative wording, naming "
+          + "which numbered option it would use.",
+        placeholders: { number: "This wording's position in the list, counting from 1." },
+      },
+      "agent.alternatives.chosen": {
+        description:
+          "Marker on the one alternative wording the translator chose, after it has "
+          + "been written to the cell. It says the wording was used, NOT that the "
+          + "translation was approved or validated.",
+      },
+      "agent.alternatives.notUsed": {
+        description:
+          "Marker on each alternative wording the translator did not choose, after the "
+          + "choice was made. These were never written anywhere.",
+      },
+      "agent.alternatives.othersDiscarded": {
+        description:
+          "Note below the list after a wording was chosen, confirming that the wordings "
+          + "not chosen were thrown away rather than saved somewhere.",
+      },
+      "agent.alternatives.discardAll": {
+        description:
+          "Button that rejects every offered wording at once, writing nothing. It "
+          + "dismisses the card; it does not change the cell.",
+      },
+      "agent.alternatives.discarded": {
+        description:
+          "What the card is replaced by once the translator rejected every offered "
+          + "wording: nothing was written to the cell.",
       },
       "agent.validation.preparedCount": {
         description:

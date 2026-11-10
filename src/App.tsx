@@ -29,6 +29,7 @@ import { PersonPrefsSyncMount } from "@/components/PersonPrefsSyncMount"
 import { ConflictToast } from "@/components/ConflictToast"
 import { OfflineLeaderWatchdog } from "@/components/OfflineLeaderWatchdog"
 import { DesktopUpdatePrompt } from "@/components/DesktopUpdatePrompt"
+import { HotBundleBoot } from "@/components/HotBundleBoot"
 import { NewerOfflineDataNotice } from "@/components/NewerOfflineDataNotice"
 import { OfflineProjectAccessWatch } from "@/components/OfflineProjectAccessWatch"
 import { OfflineRefusedWritesNotice } from "@/components/OfflineRefusedWritesNotice"
@@ -54,7 +55,7 @@ import { isJwtExpired } from "@/lib/frontier/auth"
 import { SessionHydrationError } from "@/components/SessionHydrationError"
 import { AccountTransitionError } from "@/components/AccountTransitionError"
 import { isSessionHydrationRequiredPath } from "@/lib/navigation/session-routes"
-import { VersionBadge } from "@/components/VersionBadge"
+import { InFlowVersionProvider, VersionBadge } from "@/components/VersionBadge"
 import { UpdateOnNavigate } from "@/components/UpdateIndicator"
 import { hydratePrefetchStatus } from "@/lib/audio/prefetch"
 import { probeOpfsAvailability } from "@/lib/storage/opfs-availability"
@@ -97,6 +98,18 @@ const Signup = lazy(() =>
 )
 const BillingSelection = lazy(() =>
   import("@/pages/BillingSelection").then((m) => ({ default: m.BillingSelection })),
+)
+const ParatextProjectsPage = lazy(() =>
+  import("@/pages/ParatextBridge/ParatextProjectsPage").then((m) => ({ default: m.ParatextProjectsPage })),
+)
+const ParatextBookPage = lazy(() =>
+  import("@/pages/ParatextBridge/ParatextBookPage").then((m) => ({ default: m.ParatextBookPage })),
+)
+const ThisComputerPage = lazy(() =>
+  import("@/pages/ThisComputer/ThisComputerPage").then((m) => ({ default: m.ThisComputerPage })),
+)
+const ParatextOpenPage = lazy(() =>
+  import("@/pages/ParatextBridge/ParatextOpenPage").then((m) => ({ default: m.ParatextOpenPage })),
 )
 const ResetPassword = lazy(() =>
   import("@/pages/ResetPassword").then((m) => ({ default: m.ResetPassword })),
@@ -384,6 +397,7 @@ export default function App() {
       <PersonPrefsSyncMount />
       <TooltipProvider delay={600}>
         <SyncingProvider>
+        <InFlowVersionProvider>
           <PrivateModeBanner />
           {/* AQU-1865: nearly-full origin storage — the caches shed themselves,
               but only the user can free the disk. */}
@@ -391,6 +405,7 @@ export default function App() {
           <ConflictToast />
           <OfflineLeaderWatchdog />
           <DesktopUpdatePrompt />
+          <HotBundleBoot />
           <NewerOfflineDataNotice />
           <OfflineProjectAccessWatch />
           <OfflineRefusedWritesNotice />
@@ -421,6 +436,7 @@ export default function App() {
           <VersionBadge />
           <UpdateOnNavigate />
           <Toaster />
+        </InFlowVersionProvider>
         </SyncingProvider>
       </TooltipProvider>
     </OfflineStoreProvider>
@@ -476,6 +492,11 @@ function AppRoutes() {
         {/* Curated marketing/demo auto-login — see components/MarketingLoginRoute.tsx */}
         <Route path="/__marketing/login" element={<MarketingLoginRoute />} />
 
+        {/* Desktop-only "This computer" workspace: linked folders + Paratext projects on this device. */}
+        <Route path="/this-computer" element={<LazyRoute><ThisComputerPage /></LazyRoute>} />
+        <Route path="/paratext" element={<LazyRoute><ParatextProjectsPage /></LazyRoute>} />
+        <Route path="/paratext/book" element={<LazyRoute><ParatextBookPage /></LazyRoute>} />
+        <Route path="/paratext/open" element={<LazyRoute><ParatextOpenPage /></LazyRoute>} />
         <Route path="/preferences" element={<Preferences />} />
         <Route path="/preferences/:section" element={<Preferences />} />
 

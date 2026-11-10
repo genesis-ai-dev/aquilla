@@ -8,6 +8,7 @@
 // should this viewer see, and what can they still do?" — which is why they
 // take a username and the other does not.
 import type { AudioValidationTake } from "./AudioValidationControl"
+import { isTakeValidated } from "@/lib/sync/cell-audio-read-types"
 
 /** How far along one take is, from the viewer's point of view. */
 type TakeState = "none" | "others" | "self" | "full"
@@ -64,4 +65,19 @@ export function lineState(
     if (STATE_RANK[state] < STATE_RANK[weakest]) weakest = state
   }
   return weakest
+}
+
+/**
+ * How many of a cut take's pieces are approved, out of how many (decision 7,
+ * Sam 2026-10-22). Each piece is voted on by itself, so the take has no vote
+ * of its own to show: it says this instead, read-only. A piece counts once its
+ * own votes reach the project's requirement — the comparison the line's own
+ * "validated" makes (`isTakeValidated`). Null for no pieces.
+ */
+export function piecesApproved(
+  pieces: ReadonlyArray<Pick<AudioValidationTake, "validatorCount">>,
+  requirement: number,
+): { approved: number; total: number } | null {
+  if (pieces.length === 0) return null
+  return { approved: pieces.filter((p) => isTakeValidated(p, requirement)).length, total: pieces.length }
 }

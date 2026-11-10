@@ -92,7 +92,10 @@ export type AgentFrame =
   | { type: 'memory.proposed'; runId: string; memoryId: string; path: string; preview: string }
   | { type: 'brief.proposed'; runId: string; proposalId: string; preview: string }
   | { type: 'budget'; runId: string; spentCredits: number; capCredits: number }
-  | { type: 'budget.exhausted'; runId: string; spentCredits: number; capCredits: number; reason?: 'weekly_allowance' }
+  // AQU-2313: `reason` names the limit that applied — this run's own cost cap
+  // or the workspace's weekly allowance. Absent on a pre-AQU-2313 server,
+  // which sent the frame only for the per-run cap.
+  | { type: 'budget.exhausted'; runId: string; spentCredits: number; capCredits: number; reason?: 'weekly_allowance' | 'run_cost_cap' }
 
 // ── Staged proposal shape ──────────────────────────────────────────────────
 
@@ -101,6 +104,13 @@ export interface AgentProposal {
   runId: string
   events: StagedEvent[]         // resolved: real UUIDs, real parentId/sourceEventId
   summary: string               // human line: "Draft 12 cells in MRK 4"
+  /**
+   * AQU-2398: the events are mutually-exclusive ALTERNATIVE wordings of one
+   * cell, not a set of changes to apply together. The reviewer picks exactly
+   * one and the rest are discarded unwritten (AlternativesCard). Additive and
+   * optional: absent on every ordinary proposal, and on a pre-AQU-2398 server.
+   */
+  alternatives?: boolean
 }
 
 export interface StagedEvent {

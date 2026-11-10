@@ -75,8 +75,8 @@ export async function handleMigrateProjectRequest(
     const db = env.AQUILLA_PG
     const project = await db.prepare('SELECT id, name, org_id, archived_at FROM projects WHERE id = ?')
       .bind(projectId).first<{ id: string; name: string; org_id: number; archived_at: string | null }>()
-    if (project && (Number(project.org_id) !== orgId || project.archived_at !== null)) {
-      return Response.json({ error: 'Target project belongs to another org or is archived' }, { status: 409 })
+    if (project && (Number(project.org_id) !== orgId)) {
+      return Response.json({ error: 'Target project belongs to another org', code: 'TARGET_ORG_MISMATCH' }, { status: 409 })
     }
     if (!project && mustExist === 'true') {
       return Response.json({ error: 'Previously migrated project is missing' }, { status: 409 })
@@ -94,6 +94,13 @@ export async function handleMigrateProjectRequest(
           .bind(projectId, teamId).first()
         if (!grant) return Response.json({ error: 'Existing project lacks expected team grant; reconcile placement explicitly' }, { status: 409 })
       }
+    }
+    if (params.get('archiveStatus') === 'true') {
+      return Response.json({ safetyVersion: 1, projectId, exists: !!project,
+        name: project?.name ?? null, archived: project?.archived_at != null })
+    }
+    if (project?.archived_at != null) {
+      return Response.json({ error: 'Target project is archived', code: 'TARGET_PROJECT_ARCHIVED' }, { status: 409 })
     }
     return Response.json({ safetyVersion: 1, projectId, exists: !!project, name: project?.name ?? null })
   }

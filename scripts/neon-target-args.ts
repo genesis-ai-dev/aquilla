@@ -25,6 +25,7 @@ export const NEON_TARGET_COMMANDS = [
   "backfill-progress",
   "backfill-activity",
   "backfill-book-codes",
+  "backfill-file-kinds",
   "backfill-lanes",
   "backfill-lane-batch",
   "repair-lane-grants",
@@ -48,6 +49,8 @@ export function scriptFor(command: NeonTargetCommand): string {
   if (command === "backfill-progress") return "scripts/neon-backfill-progress.ts"
   if (command === "backfill-activity") return "scripts/neon-backfill-activity.ts"
   if (command === "backfill-book-codes") return "scripts/neon-backfill-book-codes.ts"
+  // AQU-2211: give files the Codex migrator stamped `codex` the type they had in Codex.
+  if (command === "backfill-file-kinds") return "scripts/neon-backfill-file-kinds.ts"
   if (command === "backfill-lanes") return "scripts/neon-backfill-lanes.ts"
   if (command === "backfill-lane-batch") return "scripts/neon-backfill-lane-batch.ts"
   if (command === "repair-lane-grants") return "scripts/neon-repair-lane-grants.ts"

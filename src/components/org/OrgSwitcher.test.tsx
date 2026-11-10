@@ -701,3 +701,81 @@ describe("OrgSwitcher", () => {
     })
   })
 })
+
+// AQU-1489: a project granted directly in an org the caller does not belong to
+// is listed on `/orgs/all` and nowhere else (AQU-417). Someone scoped to a
+// concrete org therefore saw nothing change when they were added to one, and a
+// sign-out was the only thing that surfaced it — signing out writes
+// `org:active = all`, so the next sign-in lands on the portfolio that does list
+// it. The switcher renders on every org surface, so it is where such a grant
+// announces itself after a single page refresh.
+describe("OrgSwitcher — a newly shared project announces itself (AQU-1489)", () => {
+  const OPENED_KEY = "aq.opened-shared.v1"
+
+  function oneMembershipPlusForeignGrant() {
+    listMyOrgs.mockResolvedValue([
+      { id: 1, name: "Biblica", role: { level: 400, name: "contributor" } },
+    ])
+    fetchAccessibleProjects.mockResolvedValue([
+      { id: "own-1", name: "BSB Marathi", orgId: 1, orgName: "Biblica", role: { level: 400, name: "contributor", source: "override" } },
+      {
+        id: "ebl-1",
+        name: "EBL Oromo",
+        orgId: 3,
+        orgName: "EBL",
+        grantedAt: "2026-11-05T10:00:00.000Z",
+        role: { level: 400, name: "contributor", source: "override" },
+      },
+    ])
+  }
+
+  it("marks the trigger and the granting org while the caller is scoped to their own org", async () => {
+    oneMembershipPlusForeignGrant()
+
+    render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+
+    await waitFor(() => expect(screen.getByText("Biblica")).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId("new-shared-org-dot")).toBeInTheDocument())
+
+    await openOrgSwitcher("Organization switcher: Biblica")
+    expect(screen.getByText("EBL")).toBeInTheDocument()
+    expect(screen.getByTestId("new-shared-org-badge")).toBeInTheDocument()
+  })
+
+  it("drops the mark once the caller has opened that project since the grant", async () => {
+    oneMembershipPlusForeignGrant()
+    localStorage.setItem(
+      OPENED_KEY,
+      JSON.stringify([{ userId: "anna", projectId: "ebl-1", openedAt: Date.parse("2026-11-05T12:00:00.000Z") }]),
+    )
+
+    render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+
+    await waitFor(() => expect(screen.getByText("Biblica")).toBeInTheDocument())
+    await openOrgSwitcher("Organization switcher: Biblica")
+    expect(screen.getByText("EBL")).toBeInTheDocument()
+    expect(screen.queryByTestId("new-shared-org-badge")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("new-shared-org-dot")).not.toBeInTheDocument()
+  })
+
+  it("leaves the trigger unmarked when every accessible project is in a membership", async () => {
+    listMyOrgs.mockResolvedValue([
+      { id: 1, name: "Biblica", role: { level: 400, name: "contributor" } },
+    ])
+    fetchAccessibleProjects.mockResolvedValue([
+      {
+        id: "own-1",
+        name: "BSB Marathi",
+        orgId: 1,
+        orgName: "Biblica",
+        grantedAt: "2026-11-05T10:00:00.000Z",
+        role: { level: 400, name: "contributor", source: "override" },
+      },
+    ])
+
+    render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+
+    await waitFor(() => expect(screen.getByText("Biblica")).toBeInTheDocument())
+    expect(screen.queryByTestId("new-shared-org-dot")).not.toBeInTheDocument()
+  })
+})

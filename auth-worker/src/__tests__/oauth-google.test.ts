@@ -26,7 +26,7 @@ const network = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 })
 beforeAll(async () => { keys = await generateKeyPair("RS256"); jwk = { ...await exportJWK(keys.publicKey), kid: "test", alg: "RS256", use: "sig" } })
 beforeEach(() => { network.mockClear(); vi.stubGlobal("fetch", network) })
-afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); for (const key of ["LEGACY_USER_MIGRATION_ENABLED", "FRONTIER_D1_ACCOUNT_ID", "FRONTIER_D1_DATABASE_ID", "FRONTIER_D1_API_TOKEN"]) delete testEnv[key] })
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); for (const key of ["DEPLOYMENT_WORKER_NAME", "DEV_ACCESS_LIST", "LEGACY_USER_MIGRATION_ENABLED", "FRONTIER_D1_ACCOUNT_ID", "FRONTIER_D1_DATABASE_ID", "FRONTIER_D1_API_TOKEN"]) delete testEnv[key] })
 const post = (path: string, body: object, originHeader = origin) => app.request(`/api/v2/auth/oauth/google/${path}`, { method: "POST", headers: { "Content-Type": "application/json", Origin: originHeader }, body: JSON.stringify(body) }, testEnv)
 async function start() {
   const res = await post("start", { challenge: await pkceChallenge(verifier) })
@@ -48,6 +48,28 @@ async function handoff() {
   return code
 }
 describe("Google login boundary", () => {
+  it("enforces dev access before signup and linked login, including revocation between steps", async () => {
+    testEnv.DEPLOYMENT_WORKER_NAME = "aquilla-dev-identity"
+    const get = vi.fn().mockResolvedValue(null)
+    testEnv.DEV_ACCESS_LIST = { get } as unknown as KVNamespace
+    const denied = await post("exchange", { code: await handoff(), verifier })
+    expect(denied.status).toBe(403)
+    expect(await denied.json()).toMatchObject({ code: "dev_access_restricted" })
+    expect(await env.AQUILLA_PG.prepare("SELECT id FROM users").first()).toBeNull()
+    get.mockResolvedValue("{}")
+    const pending = await (await post("exchange", { code: await handoff(), verifier })).json() as { continuation: string }
+    get.mockResolvedValue(null)
+    const body = { code: pending.continuation, verifier, username: "alice" }
+    expect((await post("finish", body)).status).toBe(403)
+    expect(await env.AQUILLA_PG.prepare("SELECT id FROM users").first()).toBeNull()
+    get.mockResolvedValue("{}")
+    expect((await post("finish", body)).status).toBe(200)
+    get.mockResolvedValue(null)
+    expect((await post("exchange", { code: await handoff(), verifier })).status).toBe(403)
+    get.mockRejectedValue(new Error("KV unavailable"))
+    expect((await post("exchange", { code: await handoff(), verifier })).status).toBe(503)
+  })
+
   it("diagnoses provider failures without logging credentials or provider response bodies", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     for (const failure of ["rejected", "redirected", "network"] as const) {
@@ -175,7 +197,7 @@ it("upgrades existing password users without changing their hashes and permits p
   const pg = new PGlite()
   try {
     await pg.exec("CREATE TABLE users (id BIGINT PRIMARY KEY, password_hash TEXT NOT NULL); INSERT INTO users VALUES (1, 'existing-hash')")
-    const migration = readFileSync(new NodeURL("../../../db/postgres/migrations/0194_google_login.sql", import.meta.url), "utf8")
+    const migration = readFileSync(new NodeURL("../../../db/postgres/migrations/0199_google_login.sql", import.meta.url), "utf8")
     await pg.exec(migration)
     await pg.exec(migration)
     await pg.exec("INSERT INTO users VALUES (2, NULL); INSERT INTO provider_identities(provider,subject,user_id) VALUES ('google','subject',2)")

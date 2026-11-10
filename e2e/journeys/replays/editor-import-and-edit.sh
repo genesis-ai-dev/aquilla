@@ -8,6 +8,7 @@ login alice || fail "login"
 ab open "$BASE/orgs/$ORG/projects" >/dev/null && ab wait --load networkidle >/dev/null
 ab find role button click --name "New project" >/dev/null || fail "New project button"
 ab wait --text "Create new project" >/dev/null || fail "dialog"
+ab find testid "project-source-scratch" click >/dev/null || fail "Start from scratch (AQU-2105 source step)"
 ab wait 'input' >/dev/null; ab wait 300 >/dev/null
 ab find label "Project name" fill "$NAME" >/dev/null && ab find label "Source language" fill "en" >/dev/null && ab find label "Language lanes" fill "fr" >/dev/null || fail "fill"
 ab find role button click --name "Create project" >/dev/null || fail "Create project button"

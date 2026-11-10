@@ -57,6 +57,77 @@ describe("GET /api/v2/projects org scoping", () => {
   })
 })
 
+// AQU-2256 item 1: the add-to-projects picker on an org's Members page calls
+// this endpoint with the invite threshold (`?minRole=600`) and the org whose
+// roster is open. Both halves of that call shape are asserted here, because
+// the reported symptom — "the picker lists projects from orgs the actor isn't
+// in, so anyone can be added to any project" — would be a server-side leak if
+// the org filter or the membership predicate ever stopped holding under
+// `minRole`.
+describe("GET /api/v2/projects?minRole=600 — the add-to-projects picker's call", () => {
+  async function seedPickerOrgs() {
+    await seedUser(1, "wendi")    // maintainer in org 1 AND org 3
+    await seedUser(7, "stranger") // owns org 2; wendi is not a member
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'Org A', 1), (2, 'Org B', 7), (3, 'Org C', 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 600, 1), (2, 7, 700, 7), (3, 1, 600, 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES ('a1', 'A1', 1, 1), ('b1', 'B1', 2, 7), ('c1', 'C1', 3, 1)",
+    ).run()
+  }
+
+  it("returns no project from an org the caller is not a member of, scoped to that org", async () => {
+    await seedPickerOrgs()
+    const res = await app.request(
+      "/api/v2/projects?orgId=2&minRole=600",
+      { headers: authHeader(await jwtFor("wendi")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { projects: Array<{ id: string }> }
+    expect(body.projects).toEqual([])
+  })
+
+  it("returns no project from an org the caller is not a member of, unscoped", async () => {
+    await seedPickerOrgs()
+    const res = await app.request(
+      "/api/v2/projects?minRole=600",
+      { headers: authHeader(await jwtFor("wendi")) },
+      env,
+    )
+    const body = (await res.json()) as { projects: Array<{ id: string }> }
+    expect(body.projects.map((p) => p.id)).not.toContain("b1")
+  })
+
+  // The unscoped list is where the client-side half of the defect lived: it
+  // legitimately spans every org the caller maintains, so the picker has to
+  // pass `?orgId=` to keep one org's page to one org's projects.
+  it("spans every org the caller maintains when no orgId is passed", async () => {
+    await seedPickerOrgs()
+    const res = await app.request(
+      "/api/v2/projects?minRole=600",
+      { headers: authHeader(await jwtFor("wendi")) },
+      env,
+    )
+    const body = (await res.json()) as { projects: Array<{ id: string }> }
+    expect(body.projects.map((p) => p.id).sort()).toEqual(["a1", "c1"])
+  })
+
+  it("returns only the named org's projects when orgId is passed", async () => {
+    await seedPickerOrgs()
+    const res = await app.request(
+      "/api/v2/projects?orgId=1&minRole=600",
+      { headers: authHeader(await jwtFor("wendi")) },
+      env,
+    )
+    const body = (await res.json()) as { projects: Array<{ id: string }> }
+    expect(body.projects.map((p) => p.id)).toEqual(["a1"])
+  })
+})
+
 describe("POST /api/v2/projects org gating", () => {
   async function seedOrg() {
     await seedUser(1, "wendi") // org owner

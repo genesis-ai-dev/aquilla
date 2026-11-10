@@ -209,6 +209,22 @@ export function isAlignmentSeedsOnlyPatch(partial: ProjectWideSettings): boolean
 }
 
 /**
+ * The team's default Parallel Bibles versions. A patch that touches only this
+ * key is admitted at project_lead(500)+ — a lead sets them from the panel's
+ * "Make these the project defaults". Mirrors the server carve-out in
+ * auth-worker/src/routes/project-settings.ts, which remains authoritative.
+ */
+export const PARALLEL_BIBLES_EDIT_ROLE_FLOOR = ROLE.PROJECT_LEAD
+
+const PARALLEL_BIBLES_KEY = "parallelBibleVersions"
+
+/** True when a patch changes the default Parallel Bibles versions and nothing else. */
+export function isParallelBiblesOnlyPatch(partial: ProjectWideSettings): boolean {
+  const keys = Object.keys(partial)
+  return keys.length > 0 && keys.every((key) => key === PARALLEL_BIBLES_KEY)
+}
+
+/**
  * AQU-979: the same-tab convergence channel for project-wide settings.
  *
  * Project settings are PATCHed through auth-worker's REST API, not the sync
@@ -1020,8 +1036,8 @@ export function useProjectSettings(
     // single-scope carve-outs — a terminology-only one (org's configured
     // termbaseEditMinRole), a countStructuralCells-only one (project_lead), a
     // language-only one (org's configured languageEditMinRole), an
-    // autopilotEnabled-only one (project_lead), and an alignmentSeeds-only one
-    // (contributor). Deriving it per-patch (rather than loosening the
+    // autopilotEnabled-only one (project_lead), an alignmentSeeds-only one
+    // (contributor), and a parallelBibleVersions-only one (project_lead). Deriving it per-patch (rather than loosening the
     // hook-wide floor) keeps the AQU-255 guarantee intact for all other keys.
 
     if (!projectId || !jwt) return { kind: "error", message: t("workspace.projectSettingsHook.noSessionError") }
@@ -1050,6 +1066,7 @@ export function useProjectSettings(
       : isLanguageOnlyPatch(partial) ? languageEditFloor
       : isAutopilotOnlyPatch(partial) ? AUTOPILOT_EDIT_ROLE_FLOOR
       : isAlignmentSeedsOnlyPatch(partial) ? ALIGNMENT_SEEDS_EDIT_ROLE_FLOOR
+      : isParallelBiblesOnlyPatch(partial) ? PARALLEL_BIBLES_EDIT_ROLE_FLOOR
       : isTtsSettingsOnlyPatch(partial) && serverRef.current?.settings.projectLeadsManageVoices === true
         ? ROLE.PROJECT_LEAD
       : SETTINGS_EDIT_ROLE_FLOOR

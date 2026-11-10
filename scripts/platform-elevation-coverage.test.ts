@@ -351,7 +351,7 @@ type LedgerState = "decides" | "delegates" | "undecided"
  * next pass reads them before re-deciding anything.
  */
 const LEDGER: Record<string, LedgerState> = {
-  // ── decides (13) ───────────────────────────────────────────────────────
+  // ── decides (14) ───────────────────────────────────────────────────────
   "_integration-helpers.ts": "decides", // OPS-49, for all three routers below
   "access-links.ts": "decides",
   "agent-connect.ts": "decides",
@@ -365,6 +365,7 @@ const LEDGER: Record<string, LedgerState> = {
   "projects.ts": "decides", // AQU-1322
   "source-linking.ts": "decides", // OPS-51 (the hard delete, and the link)
   "sync-token.ts": "decides", // OPS-44 (the mint)
+  "termbase-subscriptions.ts": "decides", // OPS-53 (the org's consent flag, and the standing Q19 grant)
 
   // ── delegates to _integration-helpers' guard pair (3) ──────────────────
   "airtable.ts": "delegates",
@@ -373,10 +374,10 @@ const LEDGER: Record<string, LedgerState> = {
 
   // ── undecided (33) — the open queue, not a clean bill ──────────────────
   // OPS-48's ranked remainder, with its write counts. source-linking.ts was
-  // the head of this list and is now decided (OPS-51); these eight are what
-  // OPS-48 left, in its order.
-  "termbase-subscriptions.ts": "undecided", // OPS-48: 7 writes
-  "member-scopes.ts": "undecided", // OPS-48: 2 writes
+  // the head of this list and is now decided (OPS-51), and
+  // termbase-subscriptions.ts was the next head and is now decided (OPS-53);
+  // these seven are what OPS-48 left, in its order.
+  "member-scopes.ts": "undecided", // OPS-48: 2 writes — and its `scopes` array is uncapped (cf. OPS-54)
   "knowledge.ts": "undecided", // OPS-48: 2 writes
   "team-handoffs.ts": "undecided", // OPS-48: 1 write
   "project-settings.ts": "undecided", // OPS-48: 1 write
@@ -402,6 +403,7 @@ const LEDGER: Record<string, LedgerState> = {
   "edit-history.ts": "undecided",
   "feedback.ts": "undecided",
   "import-classify.ts": "undecided",
+  "import-recording-names.ts": "undecided", // #1763 (AQU-2302): resolves project + org roles, decides nothing
   "import-sandbox.ts": "undecided",
   "scene-briefs.ts": "undecided",
   "style-rules.ts": "undecided",
@@ -495,8 +497,10 @@ describe("the platform-elevation census is an assertion, not a document (OPS-52)
     // 10-26 re-measured 13 of 48 covered (deciding, or delegating to a guard
     // that decides) by exactly this method. OPS-51 adds source-linking.ts and
     // the denominator is 49: 16 of 49.
+    // 11-05: #1763 adds import-recording-names.ts (undecided); 16 of 50.
+    // 11-09: OPS-53 promotes termbase-subscriptions.ts; 17 of 50.
     expect({ decides: tally("decides"), delegates: tally("delegates"), undecided: tally("undecided") })
-      .toEqual({ decides: 13, delegates: 3, undecided: 33 })
+      .toEqual({ decides: 14, delegates: 3, undecided: 33 })
     expect(tally("decides") + tally("delegates") + tally("undecided")).toBe(
       Object.keys(LEDGER).length,
     )

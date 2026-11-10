@@ -380,6 +380,11 @@ export const projectSettings = defineNamespace({
     "projectSettings.cellEditing.optionContributor": "Contributor",
     "projectSettings.cellEditing.optionProjectLead": "Project Lead",
     "projectSettings.cellEditing.optionMaintainer": "Maintainer",
+    // AQU-2408: who may type a label on a cell. Sits under the same "Content
+    // structure" heading as the cell-editing tier, and reuses its role options.
+    "projectSettings.cellLabel.label": "Who can label cells",
+    "projectSettings.cellLabel.description":
+      "A label is a short note typed on a line — a section name, a reviewer's mark. It is never a voice or a character. Maintainers can label cells unless you open this to project leads.",
     // model → projectSettings.advancedLlm.modelLabel
     // context window → projectSettings.ai.contextWindowLabel
     // reference example format → projectSettings.ai.referenceExampleFormatLabel
@@ -437,6 +442,21 @@ export const projectSettings = defineNamespace({
     "projectSettings.section.languages": "Languages",
     "projectSettings.section.import": "Import",
     "projectSettings.section.user": "User",
+    // ── AQU-1993: leaving a project (the one self-service control here) ──
+    "projectSettings.section.leaveProject": "Leave project",
+    "projectSettings.leave.rowLabel": "Leave project",
+    "projectSettings.leave.rowDescription":
+      "Give up your own access to this project. An owner or maintainer has to add you back.",
+    "projectSettings.leave.confirmTitle": "Leave {name}?",
+    "projectSettings.leave.confirmBody":
+      "You will lose your access to this project and anything in it. This does not delete the project for anyone else.",
+    "projectSettings.leave.leavingButton": "Leaving…",
+    "projectSettings.leave.leftToast": "You left {name}.",
+    "projectSettings.leave.stillHasAccess":
+      "Your individual access is gone, but your organization or a team still gives you access to this project.",
+    "projectSettings.leave.inheritedOnly":
+      "Your access to this project comes from your organization or a team, so there is nothing here for you to give up. Leave the organization instead, or ask an owner to remove you.",
+    "projectSettings.leave.failed": "Couldn't leave this project.",
     "projectSettings.section.members": "Team members",
     "projectSettings.section.aiInstructions": "AI drafting",
     "projectSettings.section.draftContext": "Draft context",
@@ -955,6 +975,25 @@ export const projectSettings = defineNamespace({
       "into the files whose source you are replacing. Your other files, and every " +
       "translation and validation, are left as they are. Detach later to stop " +
       "following the upstream.",
+    // The IDML placement the workspace runs after a link replaced a file's source
+    // (useAdoptedIdmlAlignment): the same pass a re-import runs, so its progress
+    // line is importExport.upload.aligningIdmlStyles.
+    "projectSettings.linkSource.alignIdmlStarting":
+      "Checking the translations in {fileName} against the linked source…",
+    "projectSettings.linkSource.alignIdmlDone": plural({
+      one: "{count} translation in {fileName} was placed into the linked source.",
+      other: "{count} translations in {fileName} were placed into the linked source.",
+    }),
+    "projectSettings.linkSource.alignIdmlManual": plural({
+      one:
+        "{count} translation in {fileName} could not be placed into the linked source " +
+        "automatically. It is marked for Align styles.",
+      other:
+        "{count} translations in {fileName} could not be placed into the linked source " +
+        "automatically. They are marked for Align styles.",
+    }),
+    "projectSettings.linkSource.alignIdmlFailed":
+      "Couldn't place the translations in {fileName} into the linked source: {message}",
     "projectSettings.linkSource.linkButton": "Link source project",
     "projectSettings.linkSource.linkingButton": "Linking…",
     "projectSettings.linkSource.roleGateNote":
@@ -1570,6 +1609,20 @@ export const projectSettings = defineNamespace({
         "button text.",
     },
     keys: {
+      "projectSettings.leave.confirmTitle": {
+        description:
+          "Title of the confirm dialog a person opens to leave a project themselves "
+          + "(AQU-1993), not to remove someone else.",
+        placeholders: {
+          name: "The project's name — not translated.",
+        },
+      },
+      "projectSettings.leave.leftToast": {
+        description: "Success toast after the person left a project.",
+        placeholders: {
+          name: "The project's name — not translated.",
+        },
+      },
       "projectSettings.timeline.lockInfoAria": {
         description:
           "Accessible name of the (i) beside 'Lock the timings against dragging' in Project settings; " +
@@ -2028,6 +2081,19 @@ export const projectSettings = defineNamespace({
         placeholders: {
           value: "The current temperature value, e.g. '0.3'.",
         },
+      },
+      "projectSettings.cellLabel.label": {
+        description:
+          "Row label for the dropdown in Project settings → Content structure that " +
+          "says which role may type a label on a cell (Maintainer or Project Lead). " +
+          "A question-like noun phrase, matching 'Who can add and remove cells'.",
+      },
+      "projectSettings.cellLabel.description": {
+        description:
+          "Help text under the 'Who can label cells' row. Explains what a cell label " +
+          "is (a short note typed on a line), that it is never a voice or a character, " +
+          "and that maintainers may label cells unless the setting opens it to project " +
+          "leads. Role names as in common.role.*.",
       },
       "projectSettings.cellEditing.optionNone": {
         description:
@@ -3130,6 +3196,43 @@ export const projectSettings = defineNamespace({
           "(source replaced, translations kept) rather than gaining a second copy.",
         placeholders: {
           count: "How many existing files will follow the link; governs the plural form.",
+        },
+      },
+      "projectSettings.linkSource.alignIdmlStarting": {
+        description:
+          "Loading toast in the editor after a link replaced the source of an InDesign " +
+          "(IDML) file the project already had: the existing translations are being " +
+          "checked against the new source before any is placed into its style runs. " +
+          "Progress then continues in importExport.upload.aligningIdmlStyles.",
+        placeholders: { fileName: "Name of the IDML file — not translated." },
+      },
+      "projectSettings.linkSource.alignIdmlDone": {
+        description:
+          "Success toast ending that pass: how many of the file's translations were " +
+          "placed into the linked source's style runs.",
+        placeholders: {
+          count: "How many translations were placed; governs the plural form.",
+          fileName: "Name of the IDML file — not translated.",
+        },
+      },
+      "projectSettings.linkSource.alignIdmlManual": {
+        description:
+          "Warning toast ending that pass when some translations could not be placed " +
+          "without a person: those cells carry an Align styles mark in the editor. " +
+          "'Align styles' is the editor action's name and stays as the interface says it.",
+        placeholders: {
+          count: "How many translations need a manual pass; governs the plural form.",
+          fileName: "Name of the IDML file — not translated.",
+        },
+      },
+      "projectSettings.linkSource.alignIdmlFailed": {
+        description:
+          "Error toast when that pass could not run at all for a file (network or " +
+          "server failure); the translations are unchanged and the pass is retried on " +
+          "the next load.",
+        placeholders: {
+          fileName: "Name of the IDML file — not translated.",
+          message: "The failure's own message, as the system reported it — not translated.",
         },
       },
       "projectSettings.linkSource.clashWarningHeading": {

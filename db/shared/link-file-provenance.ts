@@ -25,12 +25,19 @@
 //     uploaded original while its `artifacts` row exists, and nothing deletes
 //     those rows, so a pointer never outlives its object.
 //
-// Adopted files are the one exclusion: an upstream file the link follows INTO
-// one of the project's own files (`projects.source_link_adopt`, AQU-1679) is
-// that project's own import, with its own type and its own original. Callers
-// never pass those pairs.
+// An adopted file — an upstream file the link follows INTO one of the project's
+// own files (`projects.source_link_adopt`, AQU-1679) — is the project's own
+// import, so the type rule has nothing to do for it (the fill only ever touches
+// NULL columns). Its ORIGINAL is another matter: the join writes the upstream's
+// source onto its cells, locators included, so from then on the cells describe
+// the upstream's package, not the one the file was imported from. An IDML export
+// read against its own original then rejected every mapping ("IDML export
+// rejected N invalid translation mapping(s)"). So once the join has run, an
+// adopted file gets the pointer rule like any copy; while it is still pending
+// its cells are its own and it is left alone.
 
 import type { AquillaDb, AquillaStatement } from "../shim/postgres"
+import type { SourceLinkAdoption } from "./source-link-adopt"
 
 export interface LinkedFilePair {
   upstreamFileId: string
@@ -243,7 +250,7 @@ export function linkedFileProvenanceStmts(
 export interface LinkedFileProvenanceArgs {
   upstreamProjectId: string
   downstreamProjectId: string
-  /** Mirrored copies only — never an adopted file (see the header). */
+  /** Mirrored copies, and adopted files whose join has run (see the header). */
   pairs: readonly LinkedFilePair[]
   now: number
 }
@@ -270,4 +277,163 @@ export async function applyLinkedFileProvenance(
   const { plan, stmts } = await planLinkedFileProvenanceFor(db, args)
   if (!args.dryRun && stmts.length > 0) await db.batch(stmts)
   return plan
+}
+
+// ── The whole-project sweep (AQU-2438) ────────────────────────────────────────
+//
+// The rules above ride each mirror window, applied to the files that window
+// touched (sync-worker link-sync.ts `provenancePairs`). That repairs a copy the
+// next time its upstream file has something to say — and never repairs one
+// whose upstream is finished. Every EBL language project and every linked BSB
+// batch is exactly that: the upstream is stable, so the fold had nothing to
+// mirror, so the copies kept `kind: NULL` and read as `fileType: codex`, and
+// the IDML download stayed hidden behind "Repair" (which re-parses the file
+// into an `idml`-typed sibling and drops the validation — AQU-2380 Finding 6).
+//
+// So the sweep below takes the WHOLE downstream project, pairing every live
+// copy with its upstream file, and runs on every link sync before the fold can
+// decide it has nothing to do. Four project-scoped reads, no id lists, and in
+// the repaired steady state the plan is empty and nothing is written: the same
+// shape the `file_source_blobs` sweep it replaces had (db/shared/link-source-
+// blob.ts, still auth-worker's), now carrying the type rule too. It is also
+// what `POST /admin/link-provenance` runs, so the backfill and the per-sync
+// repair cannot drift apart.
+
+/** `files.meta.upstreamFileId` (AQU-1547), or null. `meta` is a TEXT column, so
+ *  a malformed or non-object legacy blob degrades to "no stamp" rather than
+ *  throwing and failing the sweep over one bad row. */
+function stampedUpstreamFileId(meta: string | null): string | null {
+  if (!meta) return null
+  try {
+    const parsed = JSON.parse(meta) as unknown
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null
+    const value = (parsed as Record<string, unknown>).upstreamFileId
+    return typeof value === "string" && value.length > 0 ? value : null
+  } catch {
+    return null
+  }
+}
+
+export interface ProjectLinkedFileProvenanceArgs {
+  upstreamProjectId: string
+  downstreamProjectId: string
+  /** The downstream id a live mirror gives an upstream file's copy. Pairs rows
+   *  mirrored before the `meta.upstreamFileId` stamp existed (AQU-1547). The
+   *  two workers keep separate copies of the derivation, so the sweep takes it
+   *  rather than picking one. */
+  downstreamFileIdOf: (upstreamFileId: string) => string
+  /** The link's adopted files (`projects.source_link_adopt`, AQU-1679). A file
+   *  whose join has run is paired with the upstream file it now follows, so its
+   *  original is the package its cells describe; one still pending is the
+   *  project's own and is never paired by derivation either. */
+  adoption?: SourceLinkAdoption | null
+  now: number
+  /** Plan only; write nothing. */
+  dryRun?: boolean
+}
+
+export interface ProjectLinkedFileProvenanceResult {
+  plan: LinkedFileProvenancePlan
+  /** Live copies paired with an upstream file. */
+  pairs: LinkedFilePair[]
+  /** Live files that are the project's own — adopted, or its own import. */
+  ownFileIds: string[]
+}
+
+const EMPTY_PROJECT_RESULT: ProjectLinkedFileProvenanceResult = {
+  plan: { typeRepairs: [], blobPointers: [], noUpstreamBlob: [] },
+  pairs: [],
+  ownFileIds: [],
+}
+
+/** Pair every live downstream file with its upstream file, then plan (and,
+ *  unless `dryRun`, write) both rules for the pairs. */
+export async function applyProjectLinkedFileProvenance(
+  db: AquillaDb,
+  args: ProjectLinkedFileProvenanceArgs,
+): Promise<ProjectLinkedFileProvenanceResult> {
+  const { upstreamProjectId, downstreamProjectId } = args
+  if (!upstreamProjectId || !downstreamProjectId) return EMPTY_PROJECT_RESULT
+  if (upstreamProjectId === downstreamProjectId) return EMPTY_PROJECT_RESULT
+
+  const filesSql = (withMeta: boolean) =>
+    `SELECT id, role, kind, book_code${withMeta ? ", meta" : ""} FROM files WHERE project_id = ?`
+  const blobsSql = `SELECT file_id, format, r2_key, size_bytes FROM file_source_blobs WHERE project_id = ?`
+  const [upstreamRows, downstreamRows, upstreamBlobRows, downstreamBlobRows] = await Promise.all([
+    // Every upstream file, Recently deleted included: a copy of a file the
+    // upstream has since set aside is still that file's material, and the
+    // upstream's original row outlives the tombstone.
+    db.prepare(filesSql(false)).bind(upstreamProjectId).all<ProvenanceFileRow>(),
+    db
+      .prepare(`${filesSql(true)} AND deleted_at IS NULL`)
+      .bind(downstreamProjectId)
+      .all<ProvenanceFileRow & { meta: string | null }>(),
+    db.prepare(blobsSql).bind(upstreamProjectId).all<ProvenanceBlobRow>(),
+    db.prepare(blobsSql).bind(downstreamProjectId).all<ProvenanceBlobRow>(),
+  ])
+
+  const upstreamFiles = new Map((upstreamRows.results ?? []).map((r) => [r.id, r]))
+  if (upstreamFiles.size === 0) return EMPTY_PROJECT_RESULT
+  const upstreamOfMirroredId = new Map<string, string>()
+  for (const id of upstreamFiles.keys()) upstreamOfMirroredId.set(args.downstreamFileIdOf(id), id)
+
+  const adoptedFiles = args.adoption?.files ?? {}
+  const pending = new Set(args.adoption?.pending ?? [])
+  const upstreamOfAdoptedId = new Map<string, string>()
+  for (const [upstreamFileId, downstreamFileId] of Object.entries(adoptedFiles)) {
+    upstreamOfAdoptedId.set(downstreamFileId, upstreamFileId)
+  }
+
+  const downstreamFiles = new Map<string, ProvenanceFileRow>()
+  const pairs: LinkedFilePair[] = []
+  const ownFileIds: string[] = []
+  const joinedAdoptedIds = new Set<string>()
+  for (const row of downstreamRows.results ?? []) {
+    downstreamFiles.set(row.id, row)
+    const adoptedUpstream = upstreamOfAdoptedId.get(row.id)
+    if (adoptedUpstream !== undefined) {
+      // Joined: its cells now describe the upstream's package. Pending, or an
+      // upstream file that has since gone: the project's own, left alone.
+      if (!pending.has(adoptedUpstream) && upstreamFiles.has(adoptedUpstream)) {
+        pairs.push({ upstreamFileId: adoptedUpstream, downstreamFileId: row.id })
+        joinedAdoptedIds.add(row.id)
+      } else {
+        ownFileIds.push(row.id)
+      }
+      continue
+    }
+    // The provenance stamp first, the derived mirror id second: the stamp names
+    // the upstream file even after a rename or a random-id snapshot copy, and
+    // the derived id covers rows mirrored before the stamp existed. A file
+    // matching neither is the project's own import.
+    const stamped = stampedUpstreamFileId(row.meta)
+    const upstreamFileId =
+      stamped != null && upstreamFiles.has(stamped) ? stamped : upstreamOfMirroredId.get(row.id)
+    if (!upstreamFileId) {
+      ownFileIds.push(row.id)
+      continue
+    }
+    pairs.push({ upstreamFileId, downstreamFileId: row.id })
+  }
+  if (pairs.length === 0) return { ...EMPTY_PROJECT_RESULT, ownFileIds }
+
+  const planned = planLinkedFileProvenance({
+    pairs,
+    upstreamFiles,
+    downstreamFiles,
+    upstreamBlobs: new Map((upstreamBlobRows.results ?? []).map((r) => [r.file_id, r])),
+    downstreamBlobs: new Map((downstreamBlobRows.results ?? []).map((r) => [r.file_id, r])),
+  })
+  // An adopted file's type is its own import's; only its original follows.
+  const plan: LinkedFileProvenancePlan = {
+    ...planned,
+    typeRepairs: planned.typeRepairs.filter((repair) => !joinedAdoptedIds.has(repair.downstreamFileId)),
+  }
+  const stmts = linkedFileProvenanceStmts(db, plan, {
+    upstreamProjectId,
+    downstreamProjectId,
+    now: args.now,
+  })
+  if (!args.dryRun && stmts.length > 0) await db.batch(stmts)
+  return { plan, pairs, ownFileIds }
 }

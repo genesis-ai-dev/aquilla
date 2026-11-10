@@ -5,6 +5,8 @@
 // so reset/invite emails look the same as before the provider swap.
 
 import type { Env } from "../types"
+import { feedbackAnswerSections, formatAnswersText, type FeedbackAnswers } from "./feedback-answers"
+import { feedbackPageLink } from "./feedback-link"
 
 // Replies to our transactional mail must reach a human. EMAIL_FROM is an
 // unmonitored `noreply@`, so every send sets Reply-To to this (routed) inbox
@@ -665,5 +667,180 @@ export async function sendRetentionReportEmail(
     const message = err instanceof Error ? err.message : String(err)
     console.warn("[retention-report] email failed:", message)
     return false
+  }
+}
+
+/** The whole message, attachments included, may not pass 5 MiB. Base64 adds a
+ *  third, so a screenshot over 3 MiB goes out as its R2 key instead. */
+export const FEEDBACK_EMAIL_MAX_ATTACHMENT_BYTES = 3 * 1024 * 1024
+
+/** A report sent to the inboxes of the feedback routes that match it. */
+export interface FeedbackRouteEmail {
+  /** The three answers, each shown under its own heading (AQU-2467). */
+  answers: FeedbackAnswers
+  username: string
+  displayName?: string | null
+  /** The reporter's account email, "" when none is on file. */
+  userEmail: string
+  orgName?: string | null
+  projectName?: string | null
+  route: string
+  fileId?: string | null
+  /** Display name of the file, looked up by the server (AQU-2466). */
+  fileName?: string | null
+  sessionReplayUrl?: string | null
+  screenshotKey?: string | null
+  /** True when the user attached a screenshot but it was not kept. */
+  screenshotDropped?: boolean
+  /** True when the screenshot was too large to attach to the mail. */
+  screenshotTooLarge?: boolean
+  /** ISO time of the report. */
+  sentAt: string
+}
+
+const NO_USER_EMAIL = "No email on file. Contact this user through their project manager."
+
+/** Accounts made without a real address can carry a stand-in. Only a plausible
+ *  address on a real-looking domain is used as Reply-To. */
+export function isReplyableEmail(value: string | null | undefined): boolean {
+  const email = (value ?? "").trim().toLowerCase()
+  if (!/^[^\s@<>,;]+@[^\s@<>,;]+\.[a-z]{2,}$/.test(email)) return false
+  const domain = email.slice(email.lastIndexOf("@") + 1)
+  if (/\.(invalid|local|localhost|test|example)$/.test(domain)) return false
+  return !/^(no-?email|noreply|no-reply)@/.test(email)
+}
+
+/**
+ * Build the support email for one report (subject, HTML, text). Pure and
+ * exported so the copy can be unit-tested without an EMAIL binding.
+ */
+export function buildFeedbackRouteEmail(r: FeedbackRouteEmail): {
+  subject: string
+  html: string
+  text: string
+} {
+  const org = r.orgName?.trim() || "No org"
+  const project = r.projectName?.trim() || null
+  const firstLine = oneLine(r.answers.whatHappened.split(/\r?\n/).find((l) => l.trim()) ?? "")
+  const snippet = firstLine.length > 60 ? `${firstLine.slice(0, 59).trimEnd()}…` : firstLine
+  const subject = oneLine(
+    `[Aquilla support] ${org}${project ? ` / ${project}` : ""}: ${snippet}`,
+  )
+
+  const email = r.userEmail.trim() || NO_USER_EMAIL
+  // A row's third element, when present, is the URL its value links to.
+  const rows: [string, string, string?][] = [
+    ["User", r.username.trim()],
+  ]
+  if (r.displayName?.trim()) rows.push(["Name", r.displayName.trim()])
+  rows.push(["Email", email], ["Org", org])
+  if (project) rows.push(["Project", project])
+  const page = feedbackPageLink(r.route, project)
+  if (page) rows.push(["Page", page.text, page.url])
+  else rows.push(["Page", r.route.trim() || "(unknown)"])
+  // The name when the server found one; the id the client sent otherwise.
+  const file = r.fileName?.trim() || r.fileId?.trim()
+  if (file) rows.push(["File", file])
+  rows.push(["Sent", r.sentAt])
+  if (r.sessionReplayUrl?.trim()) rows.push(["Session replay", r.sessionReplayUrl.trim()])
+  if (r.screenshotKey) {
+    rows.push([
+      "Screenshot",
+      r.screenshotTooLarge
+        ? `Too large to attach. Stored in R2 at ${r.screenshotKey}`
+        : `Attached. Also stored in R2 at ${r.screenshotKey}`,
+    ])
+  } else if (r.screenshotDropped) {
+    rows.push(["Screenshot", "The user attached one, but it could not be saved."])
+  }
+
+  const sections = feedbackAnswerSections(r.answers)
+  const html = `
+    <html>
+      <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #111;">
+        <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+          <h2 style="color: #2563eb; margin-bottom: 16px;">Report from ${escapeHtml(r.username.trim())}</h2>
+          ${sections
+            .map(
+              (s) =>
+                `<h3 style="margin: 16px 0 4px; font-size: 1rem;">${escapeHtml(s.heading)}</h3>
+          <p style="white-space: pre-wrap; background-color: #f3f4f6; padding: 12px; border-radius: 6px; margin-top: 0;">${escapeHtml(s.body)}</p>`,
+            )
+            .join("\n          ")}
+          <table style="border-collapse: collapse; width: 100%; font-size: 0.9rem;">
+            ${rows
+              .map(
+                ([k, v, href]) =>
+                  `<tr><td style="padding: 4px 12px 4px 0; color: #6b7280; vertical-align: top; white-space: nowrap;">${escapeHtml(k)}</td><td style="padding: 4px 0; word-break: break-word;">${
+                    href
+                      ? `<a href="${escapeHtml(href)}" style="color: #2563eb;">${escapeHtml(v)}</a>`
+                      : escapeHtml(v)
+                  }</td></tr>`,
+              )
+              .join("\n            ")}
+          </table>
+        </div>
+      </body>
+    </html>
+  `.trim()
+  // Plain text cannot hide a URL behind words, so it follows the text.
+  const text = `${formatAnswersText(r.answers)}\n\n${rows
+    .map(([k, v, href]) => (href ? `${k}: ${v} <${href}>` : `${k}: ${v}`))
+    .join("\n")}`
+  return { subject, html, text }
+}
+
+/** What happened to a route email (AQU-2467). `unbound` (no EMAIL binding:
+ *  local/e2e) is not a failure; `failed` (the mail service refused it) is. */
+export type FeedbackEmailOutcome = "sent" | "unbound" | "failed"
+
+/**
+ * Email one report to the inboxes of its matching feedback routes. Reports
+ * `unbound` when EMAIL is absent or there is nobody to send to, `failed` when
+ * the provider rejects it. Reply-To is the reporter when their address looks
+ * real, so a reply reaches the user.
+ */
+export async function sendFeedbackRouteEmail(
+  env: Env,
+  to: string[],
+  report: FeedbackRouteEmail,
+  screenshot: { bytes: Uint8Array; ext: string; contentType: string } | null,
+): Promise<FeedbackEmailOutcome> {
+  if (!env.EMAIL || to.length === 0) return "unbound"
+  const from = env.EMAIL_FROM || "noreply@support.aquilla.app"
+  const replyTo = isReplyableEmail(report.userEmail)
+    ? report.userEmail.trim()
+    : env.EMAIL_REPLY_TO || DEFAULT_REPLY_TO
+  const attach = screenshot !== null && screenshot.bytes.byteLength <= FEEDBACK_EMAIL_MAX_ATTACHMENT_BYTES
+  const { subject, html, text } = buildFeedbackRouteEmail({
+    ...report,
+    screenshotTooLarge: screenshot !== null && !attach,
+  })
+  try {
+    await env.EMAIL.send({
+      from,
+      replyTo,
+      to,
+      subject,
+      html,
+      text,
+      ...(attach && screenshot
+        ? {
+            attachments: [
+              {
+                content: screenshot.bytes,
+                filename: `screenshot.${screenshot.ext}`,
+                type: screenshot.contentType,
+                disposition: "attachment" as const,
+              },
+            ],
+          }
+        : {}),
+    })
+    return "sent"
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.warn("[feedback-routes] email failed:", message)
+    return "failed"
   }
 }

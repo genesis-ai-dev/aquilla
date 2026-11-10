@@ -163,6 +163,28 @@ describe("DenoiseButton", () => {
     expect(steps[0]).toMatchObject({ data: { cellId: "c1", slot: "track-2", before: "dn-a1.webm", after: "a1.webm" } })
   })
 
+  // AQU-2492 (review, Nov 9), finding 6: a whole take on an added track is
+  // chosen on ITS track. Choosing the original on the main track unchose the
+  // line's main-track recording, and left two takes playing on the added one.
+  it("a whole take on an added track goes back to the original on that track, and its step names that track", async () => {
+    render(
+      <DenoiseButton
+        {...base}
+        selectedAudioId="dn-audio-t.webm"
+        selectedUrl="frontier-audio://dn-audio-t.webm"
+        referenceAudioId="audio-t.webm"
+        originalUrl="frontier-audio://audio-t.webm"
+        originalDurationMs={1500}
+        source={{ slot: "track-narrator" }}
+      />,
+    )
+    fireEvent.click(screen.getByText("Revert"))
+    await waitFor(() => expect(steps).toHaveLength(1))
+    expect(emitSelect).toHaveBeenCalledWith(expect.objectContaining({ audioId: "audio-t.webm", slot: "track-narrator" }))
+    expect(inject).toHaveBeenCalledWith("f1", "c1", expect.objectContaining({ audioId: "audio-t.webm", slot: "track-narrator" }), expect.anything())
+    expect(steps[0]).toMatchObject({ data: { cellId: "c1", slot: "track-narrator", before: "dn-audio-t.webm", after: "audio-t.webm" } })
+  })
+
   it("a refused revert records nothing", async () => {
     emitSelect.mockRejectedValueOnce(new Error("offline"))
     render(

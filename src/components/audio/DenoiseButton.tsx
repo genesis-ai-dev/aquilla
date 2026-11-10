@@ -118,7 +118,10 @@ export function DenoiseButton(props: Props) {
     // so ⌘Z after it undid something else. It is a choice of take: Undo plays
     // the cleaned take again while the original still plays. Both are named
     // as their whole takes (a split take by its group), read before the try.
-    const slot = split?.[0]?.slot ?? "recording"
+    // Finding 6 (same review): a whole take is chosen on ITS track too — on
+    // an added track, choosing on the main one unchose the line's main-track
+    // recording and left two takes playing on the added track.
+    const slot = split?.[0]?.slot ?? source?.slot ?? "recording"
     const cleaned = split ? (split[0].pieceOf ?? split[0].audioId) : selectedAudioId
     const original = originalTake?.pieceOf ?? referenceAudioId
     try {
@@ -128,7 +131,7 @@ export function DenoiseButton(props: Props) {
       const revertP = emitCellAudioSelect({
         projectId, fileId, cellId,
         audioId: referenceAudioId,
-        // A split take may sit on an added track: choose on its own slot.
+        // A take may sit on an added track: choose on its own slot.
         slot,
         ...(targetLang ? { targetLang } : {}),
         author,
@@ -142,7 +145,7 @@ export function DenoiseButton(props: Props) {
         injectOptimisticAudioAttachment(fileId, cellId, {
           audioId: referenceAudioId,
           url: originalUrl,
-          slot: "recording",
+          slot,
           mimeType: null,
           voiceId: null,
           referenceAudioId: null,
@@ -166,7 +169,7 @@ export function DenoiseButton(props: Props) {
     } finally {
       setReverting(false)
     }
-  }, [referenceAudioId, reverting, originalUrl, originalDurationMs, projectId, fileId, cellId, author, targetLang, split, originalTake, selectedAudioId])
+  }, [referenceAudioId, reverting, originalUrl, originalDurationMs, projectId, fileId, cellId, author, targetLang, split, originalTake, selectedAudioId, source?.slot])
 
   if (isDenoised) {
     return (

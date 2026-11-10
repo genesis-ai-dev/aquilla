@@ -13483,7 +13483,12 @@ export function ProjectWorkspace() {
         return res.audioId
       },
       changeVoice: (cellId, audioId) => {
-        // AQU-2499 (review, Nov 9): the take open here, not the main track's.
+        // AQU-2499 (review, Nov 9): the take open here, not the main track's;
+        // never a layer's clip (music, effects), as on the timeline's menu.
+        const slot = resolveTakeCellRef.current(cellId)?.cell.attachments?.[audioId]?.slot
+        const onLayer = slot != null && deriveTracksForFile(project.files.find((f) => f.id === activeFileId))
+          .some((tr) => tr.kind === "audio" && tr.setsLineLengths === false && slotForTrack(tr.id) === slot)
+        if (onLayer) return t("editor.station.voiceUnavailable")
         const state = timelineChangeVoiceState(cellId, audioId)
         // AQU-2291: one conversion, no quality to pick — it runs when nothing
         // blocks it, else the Station says why not.

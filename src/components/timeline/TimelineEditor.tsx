@@ -2825,12 +2825,14 @@ export function TimelineEditor({
   }, [canCut, onCutTargets])
   // AQU-1767 (Sam, 2026-10-14): a take's right-click menu, per track slot.
   const [renamingTake, setRenamingTake] = useState<{ cellId: string; audioId: string; label: string } | null>(null)
-  const takeMenuFor = (slot: string): TakeMenuActions | undefined =>
+  // AQU-2499 (review, Nov 9): `layer`, a track made a layer (music, effects):
+  // its clips are no line's voice, so Change voice is left out there.
+  const takeMenuFor = (slot: string, layer = false): TakeMenuActions | undefined =>
     editable
       ? {
           ...(onOpenRecording ? { reRecord: (cellId: string) => onOpenRecording(cellId, slot) } : {}),
           ...(onRegenerateVoice ? { regenerate: (cellId: string) => onRegenerateVoice(cellId, slot) } : {}),
-          ...(onChangeVoice && changeVoiceStateFor
+          ...(onChangeVoice && changeVoiceStateFor && !layer
             ? { changeVoice: (cellId: string, audioId: string) => onChangeVoice(cellId, { audioId }), changeVoiceState: changeVoiceStateFor }
             : {}),
           ...(onTrainFromTake ? { trainFromTake: onTrainFromTake } : {}),
@@ -4402,7 +4404,7 @@ export function TimelineEditor({
             onTrimTarget={onTrimTarget}
             bladeActive={bladeActive}
             onCutTarget={cutOne}
-            takeMenu={takeMenuFor(slotForTrack(track.id))}
+            takeMenu={takeMenuFor(slotForTrack(track.id), track.setsLineLengths === false)}
             takeVoiceFor={takeVoiceFor}
             getPlayheadSec={getPlayheadSec}
             emptyCells={own.empty}

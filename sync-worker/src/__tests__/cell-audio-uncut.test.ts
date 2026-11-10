@@ -53,6 +53,13 @@ afterAll(async () => {
 })
 
 async function run(event: PersistedEvent): Promise<void> {
+  // The event's row in the log, as the live route writes it first (AQU-2492,
+  // review, Nov 9: undoing a cut asks the log which cut made the piece).
+  await h.pg.query(
+    `INSERT INTO events (id, schema_version, project_id, file_id, cell_id, kind, author, payload, client_ts, server_ts, parent_id, server_seq)
+     VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8, $9, NULL, $10) ON CONFLICT (id) DO NOTHING`,
+    [event.id, event.projectId, event.fileId, event.cellId, event.kind, event.author, JSON.stringify(event.payload), event.clientTs, event.serverTs, event.serverSeq ?? 0],
+  )
   const stmts: AquillaStatement[] = []
   buildEventProjectionStmts(h.db, event, stmts)
   await h.db.batch(stmts)
@@ -280,6 +287,56 @@ describe('cell.audio.uncut — undoing a cut (AQU-2492)', () => {
     for (const event of [...log]) await run(event)
     expect({ rows: await rows(), votes: await votes() }).toEqual(live)
     expect((await h.pg.query(`SELECT * FROM cell_audio_cut_votes ORDER BY event_id`)).rows).toEqual(archives)
+  })
+
+  // AQU-2492 (review, Nov 9), finding 16: the two pieces must be the two
+  // halves of one recorded cut of one take, on that line, in that language.
+  describe('refuses a pair that is not one cut', () => {
+    const snapshot = async () => ({
+      rows: await rows(),
+      votes: await votes(),
+      archives: (await h.pg.query(`SELECT event_id FROM cell_audio_cut_votes ORDER BY event_id`)).rows,
+    })
+
+    it('the take and the piece of a later cut of its second half: nothing changes', async () => {
+      await attach('take-a')
+      await cut('take-a', 2_000, 'take-b')
+      await cut('take-b', 4_000, 'take-c')
+      await vote('take-a', 'rosa')
+      const before = await snapshot()
+      await uncut('take-a', 'take-c', null)
+      expect(await snapshot()).toEqual(before)
+    })
+
+    it('a piece put into the take\'s group by hand, never cut from it: nothing changes', async () => {
+      await attach('take-a')
+      await cut('take-a', 2_000, 'take-b')
+      await vote('take-a', 'rosa')
+      await project('cell.audio.attach', { audioId: 'take-x', url: 'https://r2.invalid/take-a', slot: 'recording', durationMs: 6_000, pieceOf: 'take-a', trimStartMs: 2_000 })
+      const before = await snapshot()
+      await uncut('take-a', 'take-x', null)
+      expect(await snapshot()).toEqual(before)
+    })
+
+    it('a piece of another take on the line: nothing changes', async () => {
+      await attach('take-a')
+      await attach('take-z', { slot: 'track-9' })
+      await cut('take-z', 2_000, 'take-y')
+      await cut('take-a', 2_000, 'take-b')
+      await vote('take-a', 'rosa')
+      const before = await snapshot()
+      await uncut('take-a', 'take-y', null)
+      expect(await snapshot()).toEqual(before)
+    })
+
+    it('the right pair still joins', async () => {
+      await attach('take-a')
+      await cut('take-a', 2_000, 'take-b')
+      await cut('take-b', 4_000, 'take-c')
+      await uncut('take-b', 'take-c', null, 2_000)
+      const r = await rows()
+      expect([r['take-c'].deleted, n(r['take-b'].trim_start_ms), n(r['take-b'].trim_end_ms)]).toEqual([1, 2_000, null])
+    })
   })
 
   it('names its old label back when the cut renamed the first piece', async () => {

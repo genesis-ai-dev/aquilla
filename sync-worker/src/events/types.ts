@@ -820,8 +820,13 @@ export interface EventPayloads {
    * take had before the cut come back from the cut's archive — the voters'
    * own rows, as they were, and only while it still plays the audio they
    * were given to. The approvals move only while `pieceAudioId` is a live
-   * piece of `audioId`'s take; the window and the name are set either way,
-   * as the three events always did.
+   * piece of `audioId`'s take.
+   *
+   * AQU-2492 (review, Nov 9), finding 16: nothing at all happens unless the
+   * two are the halves of one recorded cut of one take — a `cell.audio.cut`
+   * in the log naming exactly this `audioId` and `pieceAudioId`, the take
+   * live, the piece still in its group, on the same track and in the same
+   * language. Any other pair is refused (no statement changes a row).
    */
   'cell.audio.uncut': {
     audioId: string

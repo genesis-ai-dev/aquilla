@@ -51,6 +51,38 @@ const EVENT_SEQ_SQL = `COALESCE(?::bigint, (SELECT e.server_seq FROM events e WH
 const eventSeqBinds = (event: ArchivingEvent) => [event.serverSeq ?? null, event.id]
 
 /**
+ * AQU-2492 (review, Nov 9), finding 16: an undo of a cut names a real cut.
+ * `pieceId` must be the second half of a cut OF `audioId` that the log holds
+ * (a `cell.audio.cut` on this line, written before this event, naming exactly
+ * these two), and both must still be one take's pieces: the take live, the
+ * piece in its group, on the same track and in the same language (`lane_id`;
+ * the event's own tag is not trusted for a dub, AQU-1978). Any other pair —
+ * a piece of a later cut of the second half, a piece of another take, a piece
+ * put in the group by hand — changes nothing at all.
+ *
+ * The piece may have been removed since (by anyone): it is still that cut's.
+ * An SQL condition, `AND`-joined; binds from {@link recordedCutPairBinds}.
+ */
+export const RECORDED_CUT_PAIR_SQL = `EXISTS (SELECT 1 FROM cell_audio t
+    JOIN cell_audio b ON b.project_id = t.project_id AND b.file_id = t.file_id AND b.cell_id = t.cell_id
+   WHERE t.project_id = ? AND t.file_id = ? AND t.cell_id = ? AND t.audio_id = ?
+     AND t.deleted = 0 AND t.role = 'dub'
+     AND b.audio_id = ? AND b.role = 'dub'
+     AND b.piece_of = COALESCE(t.piece_of, t.audio_id)
+     AND b.slot IS NOT DISTINCT FROM t.slot
+     AND b.lane_id IS NOT DISTINCT FROM t.lane_id
+     AND EXISTS (SELECT 1 FROM events c
+                  WHERE c.project_id = t.project_id AND c.file_id = t.file_id AND c.cell_id = t.cell_id
+                    AND c.kind = 'cell.audio.cut'
+                    AND c.payload::jsonb->>'audioId' = t.audio_id
+                    AND c.payload::jsonb->>'newAudioId' = b.audio_id
+                    AND c.server_seq < ${EVENT_SEQ_SQL}))`
+
+export function recordedCutPairBinds(event: ArchivingEvent, audioId: string, pieceId: string): unknown[] {
+  return [event.projectId, event.fileId, event.cellId, audioId, pieceId, ...eventSeqBinds(event)]
+}
+
+/**
  * Archive the live votes on `audioId` (the piece the cut was made in) under
  * this event, as `kind`, with the audio they were given to. Runs only when
  * `gate` holds (an SQL condition, `AND`-joined).

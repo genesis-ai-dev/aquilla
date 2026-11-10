@@ -48,7 +48,7 @@ import { visibleCellIdSql, visibleSourceSql } from './hidden-cells-scope'
 import { liveCellIdSql, liveSourceSql } from './tombstoned-cells-scope'
 import { coerceExternalIds } from '../../../src/lib/terminology/external-ids'
 import { buildRemovedCellArchiveStmt, buildRemovedCellRestoreStmts } from './removed-cell-archive'
-import { cutVoteArchiveStmt, cutVoteRestoreStmt } from './cut-vote-archive'
+import { cutVoteArchiveStmt, cutVoteRestoreStmt, RECORDED_CUT_PAIR_SQL, recordedCutPairBinds } from './cut-vote-archive'
 
 export { laneIdResolveBinds, laneIdResolveSql } from './lane-id-sql'
 import { buildFileRevisionIndexStmts } from './file-revision-sql'
@@ -2587,8 +2587,10 @@ case 'cell.audio.attach': {
       //        the first piece's votes with this undo (for a Redo), take them
       //        off, and give the take back the votes the cut archived.
       //   4.   Remove the piece (soft: its votes stay on it, for a Redo).
-      //   5-6. Give the first piece its whole window (and name) back — as the
-      //        trim and rename this event replaces always did, gate or not.
+      //   5-6. Give the first piece its whole window (and name) back.
+      // AQU-2492 (review, Nov 9), finding 16: all of it only when the two are
+      // the halves of one recorded cut of this take (RECORDED_CUT_PAIR_SQL);
+      // any other pair changes nothing.
       const p = event.payload as EventPayloads['cell.audio.uncut']
       if (!event.fileId || !event.cellId) {
         throw new Error(`cell.audio.uncut event ${event.id} is missing fileId or cellId`)
@@ -2608,41 +2610,52 @@ case 'cell.audio.attach': {
                            AND b.piece_of = COALESCE(t.piece_of, t.audio_id))`
       const pieceLiveBinds = [event.projectId, event.fileId, event.cellId, p.pieceAudioId, p.audioId]
       const uncutEvent = { id: event.id, projectId: event.projectId, fileId: event.fileId, cellId: event.cellId, serverTs: event.serverTs, serverSeq: event.serverSeq }
-      stmts.push(cutVoteArchiveStmt(db, uncutEvent, { pieceId: p.pieceAudioId, audioId: p.audioId, kind: 'first', gate: pieceLive, gateBinds: pieceLiveBinds }))
+      // AQU-2492 (review, Nov 9), finding 16: every statement below runs only
+      // when the two are the halves of one recorded cut of this take. Checked
+      // afresh by each statement; none of them changes what it reads (the
+      // piece may be removed, and the take stays live).
+      const cutPair = RECORDED_CUT_PAIR_SQL
+      const cutPairBinds = recordedCutPairBinds(uncutEvent, p.audioId, p.pieceAudioId)
+      const votesGate = `${pieceLive} AND ${cutPair}`
+      const votesGateBinds = [...pieceLiveBinds, ...cutPairBinds]
+      stmts.push(cutVoteArchiveStmt(db, uncutEvent, { pieceId: p.pieceAudioId, audioId: p.audioId, kind: 'first', gate: votesGate, gateBinds: votesGateBinds }))
       stmts.push(
         db
           .prepare(
             `DELETE FROM cell_audio_validators
               WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?
-                AND ${pieceLive}`,
+                AND ${votesGate}`,
           )
-          .bind(event.projectId, event.fileId, event.cellId, p.audioId, ...pieceLiveBinds),
+          .bind(event.projectId, event.fileId, event.cellId, p.audioId, ...votesGateBinds),
       )
-      stmts.push(cutVoteRestoreStmt(db, uncutEvent, { pieceId: p.pieceAudioId, audioId: p.audioId, kind: 'whole', gate: pieceLive, gateBinds: pieceLiveBinds }))
+      stmts.push(cutVoteRestoreStmt(db, uncutEvent, { pieceId: p.pieceAudioId, audioId: p.audioId, kind: 'whole', gate: votesGate, gateBinds: votesGateBinds }))
       stmts.push(
         db
           .prepare(
             `UPDATE cell_audio SET deleted = 1, selected = 0
-              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?
+                AND ${cutPair}`,
           )
-          .bind(event.projectId, event.fileId, event.cellId, p.pieceAudioId),
+          .bind(event.projectId, event.fileId, event.cellId, p.pieceAudioId, ...cutPairBinds),
       )
       stmts.push(
         db
           .prepare(
             `UPDATE cell_audio SET trim_start_ms = ?, trim_end_ms = ?
-              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?
+                AND ${cutPair}`,
           )
-          .bind(p.trimStartMs ?? null, p.trimEndMs ?? null, event.projectId, event.fileId, event.cellId, p.audioId),
+          .bind(p.trimStartMs ?? null, p.trimEndMs ?? null, event.projectId, event.fileId, event.cellId, p.audioId, ...cutPairBinds),
       )
       if (p.rename) {
         stmts.push(
           db
             .prepare(
               `UPDATE cell_audio SET label = ?
-                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?
+                  AND ${cutPair}`,
             )
-            .bind(p.rename.label ?? null, event.projectId, event.fileId, event.cellId, p.audioId),
+            .bind(p.rename.label ?? null, event.projectId, event.fileId, event.cellId, p.audioId, ...cutPairBinds),
         )
       }
       stmts.push(audioValidatorCountRecomputeStmt(db, event.projectId, event.fileId, event.cellId, p.audioId))

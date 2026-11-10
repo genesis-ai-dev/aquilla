@@ -8,7 +8,7 @@ import { ANALYTICS_CONSENT_KEY, ANALYTICS_DISCLOSURE_VERSION, parseAnalyticsDeci
 // Neon is authoritative. AQU-713 adds a one-way, read-only bridge for a legacy
 // identity only when no case-insensitive Neon identity exists.
 
-import { Hono } from "hono"
+import { Hono, type Context } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import type {
@@ -41,6 +41,11 @@ import {
 } from "../utils/rate-limit"
 import { revokeSessionFamily, revokeToken } from "../utils/token-revocation"
 import { parseAdminEmails } from "../middleware/platform-admin"
+import {
+  checkDevAccess,
+  DEV_ACCESS_RESTRICTED,
+  DEV_ACCESS_RESTRICTED_MESSAGE,
+} from "../services/dev-access"
 import { evictUserSessions } from "../lib/session-cache"
 import { withPostResponseDb } from "../lib/post-response-db"
 import {
@@ -168,6 +173,22 @@ function legacyMigrationRuntime(env: AuthHonoEnv["Bindings"]): LegacyMigrationRu
   }
 }
 
+/** AQU-2469: the sign-in / sign-up answer for an account dev does not admit.
+ *  `detail` as well as `error`, because the SPA's sign-up path reads `detail`. */
+function devAccessRefusal(
+  c: Context<AuthHonoEnv>,
+  reason: "not_listed" | "unavailable",
+): Response {
+  if (reason === "unavailable") {
+    const message = "Unable to check dev access right now. Please retry."
+    return c.json({ error: message, detail: message, code: DEV_ACCESS_RESTRICTED }, 503)
+  }
+  return c.json(
+    { error: DEV_ACCESS_RESTRICTED_MESSAGE, detail: DEV_ACCESS_RESTRICTED_MESSAGE, code: DEV_ACCESS_RESTRICTED },
+    403,
+  )
+}
+
 auth.post("/register", zValidator("json", registerSchema), async (c) => {
   const { username, email, password } = c.req.valid("json")
 
@@ -214,6 +235,13 @@ auth.post("/register", zValidator("json", registerSchema), async (c) => {
       if (reserved.has(email.trim().toLowerCase()) || reserved.has(username.trim().toLowerCase())) {
         return c.json({ detail: "User already exists", error: "Registration failed" }, 409)
       }
+    }
+
+    // AQU-2469: on dev, only listed emails may create an account. Without
+    // this the account would be created and then refused on its first request.
+    const devAccess = await checkDevAccess(c.env, email)
+    if (!devAccess.allowed) {
+      return devAccessRefusal(c, devAccess.reason)
     }
 
     // Uniqueness is case-insensitive (AQU-340): reject `ryan` when `Ryan`
@@ -575,6 +603,15 @@ auth.post("/token", async (c) => {
         logActivity(c.env.AQUILLA_PG, user.id, "login_failed", "Incorrect password"),
       ])
       return c.json({ error: "Incorrect username/email or password" }, 401)
+    }
+
+    // AQU-2469: on dev, refuse a correct password from an account that is
+    // neither a platform admin nor on the dev access list. Checked only after
+    // the password, so the answer never tells a stranger who is on the list.
+    // resolveSession enforces the same rule on every later request.
+    const devAccess = await checkDevAccess(c.env, user.email)
+    if (!devAccess.allowed) {
+      return devAccessRefusal(c, devAccess.reason)
     }
 
     await Promise.all([

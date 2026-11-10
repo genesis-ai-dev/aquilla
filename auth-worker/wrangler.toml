@@ -441,6 +441,20 @@ id = "53581197ff7a4202a5ed0ef08537d4a6"
 binding = "SNAPSHOTS"
 bucket_name = "aquilla-snapshots-dev"
 
+# AQU-2469: the dev access list (src/services/dev-access.ts). One key per
+# lower-cased email; platform admins edit it under Admin → Platform → Dev
+# access. KV, not Postgres, because the nightly refresh restores the whole Neon
+# dev branch from prod. Development ONLY: production and previews must never
+# bind it. If this binding goes missing, dev refuses everyone but platform
+# admins (fail closed), and the deploy verifier refuses the version
+# (config/cloudflare-deployments.json requiredBindings).
+#
+# ONE-TIME PROVISIONING (Frontier account), then paste the id below:
+#   npx wrangler kv namespace create aquilla-dev-access-list
+[[env.development.kv_namespaces]]
+binding = "DEV_ACCESS_LIST"
+id = "9763251a3c84471bac48032d44bf3ea8"
+
 [[env.development.send_email]]
 name = "EMAIL"
 

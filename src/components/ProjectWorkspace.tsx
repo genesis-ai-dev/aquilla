@@ -274,7 +274,7 @@ import { getTtsStatus, ttsStatusKey } from "@/lib/audio/tts"
 import { injectOptimisticAudioTrim,
   injectOptimisticAudioPlace, injectOptimisticAudioAttachment, injectOptimisticAudioRemove, injectOptimisticAudioDeselect,
   notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
-import { attachmentOutFrom, canCutAt, newPieceAudioId, pieceLabels } from "@/lib/audio/cut-take"
+import { attachmentOutFrom, canCutAt, levelsAfterCut, newPieceAudioId, pieceLabels } from "@/lib/audio/cut-take"
 import { recordGroup, recordStep, registerStepKinds, setHistoryRemote, setHistoryScope, setLaneSwitcher, setFileNamer, setOpenFileProbe, withGroup, type LaneSwitch } from "@/lib/history/history"
 import { httpHistoryRemote } from "@/lib/history/history-remote"
 import { laneAccessFor, laneShownReady, waitUntilReady, type LaneAccess } from "@/lib/history/lane-switch"
@@ -4449,8 +4449,13 @@ export function ProjectWorkspace() {
       // cut, the new one starts there, both unvalidated. The new piece claims
       // no selection — it rides its group's, through `pieceOf`.
       const shared = attachmentOutFrom(audioId, att, slot)
+      // AQU-2494 (review, Nov 9): …and the take's volume and fades split as
+      // the server splits them: the volume on both, the fade-in on the first
+      // piece, the fade-out on the new one.
+      const levels = levelsAfterCut(att, atMs)
       injectOptimisticAudioTrim(takeFileId, cellId, {
         ...shared,
+        ...levels.first,
         trimEndMs: Math.round(atMs),
         validatorCount: 0,
         validators: [],
@@ -4458,6 +4463,7 @@ export function ProjectWorkspace() {
       }, cutP)
       injectOptimisticAudioAttachment(takeFileId, cellId, {
         ...shared,
+        ...levels.second,
         audioId: newAudioId,
         trimStartMs: Math.round(atMs),
         validatorCount: 0,
@@ -4484,6 +4490,11 @@ export function ProjectWorkspace() {
       const slot = cur.att.slot ?? (c.audioId === cur.owner.cell.selectedAudioId ? "recording" : "generatedVoice")
       const piece = readTake(c.cellId, c.newAudioId)
       const trimStartMs = cur.att.trimStartMs ?? null
+      // AQU-2494 (review, Nov 9): the cut moved the take's fade-out to the new
+      // piece (and may have shortened its fade-in); the whole take gets its
+      // level back, in the same write. Nothing to write when it never changed.
+      const was = c.before.level
+      const level = was && ((cur.att.gainDb ?? null) !== was.gainDb || (cur.att.fadeInMs ?? null) !== was.fadeInMs || (cur.att.fadeOutMs ?? null) !== was.fadeOutMs) ? was : undefined
       const batchP = emitCellAudioUncut({
         projectId: project.id,
         fileId,
@@ -4493,6 +4504,7 @@ export function ProjectWorkspace() {
         trimStartMs,
         trimEndMs: c.before.trimEndMs,
         ...(c.renamed ? { rename: { label: c.before.label } } : {}),
+        ...(level ? { level } : {}),
         ...(activeLane ? { targetLang: activeLane } : {}),
         author: currentUsername,
       })
@@ -4501,6 +4513,7 @@ export function ProjectWorkspace() {
       }
       injectOptimisticAudioTrim(fileId, c.cellId, {
         ...attachmentOutFrom(c.audioId, cur.att, slot),
+        ...(level ?? {}),
         trimStartMs,
         trimEndMs: c.before.trimEndMs,
         ...(c.renamed ? { label: c.before.label } : {}),
@@ -4567,6 +4580,8 @@ export function ProjectWorkspace() {
             label: cur.att.label ?? null,
             targetOffsetMs: cur.att.targetOffsetMs ?? null,
             recordingsOffsetMs: cur.att.recordingsOffsetMs ?? null,
+            // AQU-2494 (review, Nov 9): its volume and fades, for the undo.
+            level: { gainDb: cur.att.gainDb ?? null, fadeInMs: cur.att.fadeInMs ?? null, fadeOutMs: cur.att.fadeOutMs ?? null },
           },
           renamed: pieceLabels(cut.audioId, cur.owner.cell.attachments).firstLabel != null,
         })

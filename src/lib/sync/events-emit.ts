@@ -1389,6 +1389,10 @@ export async function emitCellAudioUncut(input: {
   trimEndMs: number | null
   /** Set when the cut renamed the first piece ("Take 1" → "Take 1 · 1"). */
   rename?: { label: string | null }
+  /** AQU-2494 (review, Nov 9): the take's volume and fades before the cut,
+   *  when the cut split them over the pieces. Queued LAST, so the remove's
+   *  and the trim's ids keep their places in the result. */
+  level?: { gainDb: number | null; fadeInMs: number | null; fadeOutMs: number | null }
   targetLang?: string
   laneId?: string
   author: string
@@ -1410,6 +1414,9 @@ export async function emitCellAudioUncut(input: {
     },
     ...(input.rename
       ? [{ ...base, kind: "cell.audio.rename" as const, payload: { audioId: input.audioId, label: input.rename.label, ...lane } }]
+      : []),
+    ...(input.level
+      ? [{ ...base, kind: "cell.audio.gain" as const, payload: { audioId: input.audioId, ...input.level, ...lane } }]
       : []),
   ] as BuildEventInput<OutboxEventKind>[]
   const queued = await enqueueEvents(inputs)

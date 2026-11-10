@@ -222,4 +222,21 @@ describe("emitCellAudioUncut (AQU-1767)", () => {
     })
     expect((batch.mock.calls[0]![0] as any[]).map((e) => e.kind)).toEqual(["cell.audio.remove", "cell.audio.trim"])
   })
+
+  // AQU-2494 (review, Nov 9): the cut moved the take's fade-out to the new
+  // piece; the undo gives the whole take its level back in the same write.
+  it("gives the take its volume and fades back in the same write, after the trim", async () => {
+    const batch = enqueueOutboxEvents as unknown as ReturnType<typeof vi.fn>
+    batch.mockClear()
+    const ids = await emitCellAudioUncut({
+      projectId: "p1", fileId: "f1", cellId: "c1",
+      removeAudioId: "piece.wav", audioId: "a1.wav", trimStartMs: null, trimEndMs: null,
+      rename: { label: "Take 1" }, level: { gainDb: 6, fadeInMs: null, fadeOutMs: 500 }, author: "u",
+    })
+    const events = batch.mock.calls[0]![0] as any[]
+    expect(events.map((e) => e.kind)).toEqual(["cell.audio.remove", "cell.audio.trim", "cell.audio.rename", "cell.audio.gain"])
+    expect(events[3].payload).toEqual({ audioId: "a1.wav", gainDb: 6, fadeInMs: null, fadeOutMs: 500 })
+    // The remove's and the trim's ids keep their places for the callers that read them.
+    expect(ids.slice(0, 2)).toEqual([events[0].id, events[1].id])
+  })
 })

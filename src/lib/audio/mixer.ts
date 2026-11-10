@@ -51,8 +51,42 @@ export function clipLevelOf(att: {
   return { gainDb, fadeInSec, fadeOutSec, startSec: (att.trimStartMs ?? 0) / 1000, endSec: end != null ? end / 1000 : null }
 }
 
-/** The level at a moment of the clip: volume, then the fades inside the kept part. */
-export function levelAt(t: number, l: ClipLevel): number {
+/**
+ * AQU-2494 (review, Nov 9): a clip made of several takes' kept parts back to
+ * back — a cut take joined into one copy for playback following the
+ * recordings. One level per part, in order, each on the COPY's clock (where
+ * that part starts and ends in it). A single take is still one ClipLevel.
+ */
+export type ClipLevels = ClipLevel | readonly ClipLevel[]
+
+const isParts = (l: ClipLevels): l is readonly ClipLevel[] => Array.isArray(l)
+
+/**
+ * The levels of a joined copy from its pieces: each piece's window on the
+ * recording's clock, the silence left before it, and its take's stored level.
+ * Null when every piece plays as recorded.
+ */
+export function joinedLevelsOf(
+  pieces: readonly { start: number; end: number; gapBeforeSec?: number; att: Parameters<typeof clipLevelOf>[0] }[],
+): readonly ClipLevel[] | null {
+  let at = 0
+  let any = false
+  const out = pieces.map((p) => {
+    at += p.gapBeforeSec != null && p.gapBeforeSec > 0 ? p.gapBeforeSec : 0
+    const own = clipLevelOf(p.att)
+    if (own) any = true
+    const level: ClipLevel = { ...(own ?? FLAT_LEVEL), startSec: at, endSec: at + (p.end - p.start) }
+    at = level.endSec as number
+    return level
+  })
+  return any ? out : null
+}
+
+/** The level at a moment of the clip: volume, then the fades inside the kept
+ *  part. For a joined copy, the level of the part that moment falls in. */
+export function levelAt(t: number, levels: ClipLevels): number {
+  const l = isParts(levels) ? (levels.find((s) => s.endSec != null && t < s.endSec) ?? levels[levels.length - 1]) : levels
+  if (!l) return 1
   let g = Math.pow(10, (l.gainDb || 0) / 20)
   if (l.fadeInSec > 0 && t < l.startSec + l.fadeInSec) g *= Math.max(0, Math.min(1, (t - l.startSec) / l.fadeInSec))
   if (l.fadeOutSec > 0 && l.endSec != null && t > l.endSec - l.fadeOutSec) g *= Math.max(0, Math.min(1, (l.endSec - t) / l.fadeOutSec))
@@ -71,7 +105,7 @@ interface Graph {
 interface Route {
   source: MediaElementAudioSourceNode
   clip: GainNode
-  level: ClipLevel | null
+  level: ClipLevels | null
 }
 
 let graph: Graph | null = null
@@ -153,10 +187,18 @@ function schedule(el: HTMLMediaElement, r: Route, ctx: AudioContext): void {
   const rate = el.playbackRate || 1
   p.setValueAtTime(levelAt(pos, l), now)
   if (el.paused) return
-  const keys = [l.startSec, l.startSec + l.fadeInSec, ...(l.endSec != null ? [l.endSec - l.fadeOutSec, l.endSec] : [])]
-    .filter((k) => k > pos)
-    .sort((a, b) => a - b)
-  for (const k of keys) p.linearRampToValueAtTime(levelAt(k, l), now + (k - pos) / rate)
+  // AQU-2494 (review, Nov 9): part by part for a joined copy. A later part
+  // starts at its own level — a step where it begins, never a ramp across
+  // from the part before it.
+  const parts = isParts(l) ? l : [l]
+  for (const s of parts) {
+    if (s.endSec != null && s.endSec <= pos) continue
+    if (parts.length > 1 && s.startSec > pos) p.setValueAtTime(levelAt(s.startSec, s), now + (s.startSec - pos) / rate)
+    const keys = [s.startSec, s.startSec + s.fadeInSec, ...(s.endSec != null ? [s.endSec - s.fadeOutSec, s.endSec] : [])]
+      .filter((k) => k > pos)
+      .sort((a, b) => a - b)
+    for (const k of keys) p.linearRampToValueAtTime(levelAt(k, s), now + (k - pos) / rate)
+  }
 }
 
 /**
@@ -166,7 +208,7 @@ function schedule(el: HTMLMediaElement, r: Route, ctx: AudioContext): void {
  * An element can feed only one source node ever, so this is once per element;
  * calling it again just changes the level.
  */
-export function mixElement(el: HTMLMediaElement, trackKey: string, level: ClipLevel | null): boolean {
+export function mixElement(el: HTMLMediaElement, trackKey: string, level: ClipLevels | null): boolean {
   const existing = routes.get(el)
   if (existing) {
     existing.level = level

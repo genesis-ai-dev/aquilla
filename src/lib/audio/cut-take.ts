@@ -48,6 +48,30 @@ export function canCutAt(att: CuttableTake | undefined, atMs: number): boolean {
   return atMs >= win.startMs + CUT_MIN_PIECE_MS && atMs <= win.endMs - CUT_MIN_PIECE_MS
 }
 
+/** A take's volume (dB) and fades (ms), as stored (null = none). */
+export interface PieceLevel { gainDb: number | null; fadeInMs: number | null; fadeOutMs: number | null }
+
+/**
+ * AQU-2494 (review, Nov 9): what a cut at `atMs` gives each piece of a take
+ * that has a volume change or fades — the mirror of the projection's rule
+ * (sync-worker event-projection.ts, `cell.audio.cut`). Both pieces keep the
+ * volume. The fade-in stays on the piece that holds the take's start and the
+ * fade-out moves to the piece that holds its end, each no longer than its
+ * piece. So a cut take plays as the whole take did.
+ */
+export function levelsAfterCut(
+  att: { gainDb?: number | null; fadeInMs?: number | null; fadeOutMs?: number | null; trimStartMs?: number | null; trimEndMs?: number | null; durationMs?: number | null },
+  atMs: number,
+): { first: PieceLevel; second: PieceLevel } {
+  const at = Math.round(atMs)
+  const gainDb = att.gainDb ?? null
+  const endMs = att.trimEndMs ?? att.durationMs ?? null
+  return {
+    first: { gainDb, fadeInMs: att.fadeInMs == null ? null : Math.min(att.fadeInMs, at - (att.trimStartMs ?? 0)), fadeOutMs: null },
+    second: { gainDb, fadeInMs: null, fadeOutMs: att.fadeOutMs == null ? null : endMs == null ? att.fadeOutMs : Math.min(att.fadeOutMs, endMs - at) },
+  }
+}
+
 /**
  * The second piece's id. Seeded with the CELL (buildAudioId), so every reader
  * that still tells a take from the source clip by its seed reads a piece as

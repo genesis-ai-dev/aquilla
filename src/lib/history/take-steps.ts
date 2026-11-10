@@ -12,6 +12,7 @@
 import { recordStep, type StepHandler, type StepOutcome } from "./history"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import { clearTakeUndone, markTakeUndone } from "@/lib/audio/undone-takes"
+import { levelsAfterCut } from "@/lib/audio/cut-take"
 
 export type TakeWindow = { trimStartMs?: number; trimEndMs?: number }
 
@@ -33,6 +34,13 @@ export interface CutRecord {
     targetOffsetMs: number | null
     /** AQU-2267: absent on a cut recorded before it (read as null). */
     recordingsOffsetMs?: number | null
+    /**
+     * AQU-2494 (review, Nov 9): the take's volume and fades before the cut,
+     * which splits them over the pieces (the fade-out moves to the new one).
+     * Undo gives them back. Absent on a cut recorded before levels went with
+     * a cut: its undo leaves the first piece's level alone, as it always did.
+     */
+    level?: TakeLevel
   }
   /** Whether the cut renamed the first piece ("Take 3" → "Take 3 · 1"). */
   renamed: boolean
@@ -173,8 +181,19 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
       second.trimStartMs === c.atMs &&
       (second.trimEndMs ?? null) === c.before.trimEndMs &&
       (second.targetOffsetMs ?? null) === c.before.targetOffsetMs &&
-      (second.recordingsOffsetMs ?? null) === (c.before.recordingsOffsetMs ?? null)
+      (second.recordingsOffsetMs ?? null) === (c.before.recordingsOffsetMs ?? null) &&
+      levelsIntact(c, first, second)
     )
+  }
+  // AQU-2494 (review, Nov 9): …and each still has the volume and fades the cut
+  // gave it. A level changed on either piece since is work the join would
+  // throw away (the new piece goes, and the first gets the old level back).
+  const sameLevel = (att: CodexCellAttachment, l: TakeLevel) =>
+    (att.gainDb ?? null) === l.gainDb && (att.fadeInMs ?? null) === l.fadeInMs && (att.fadeOutMs ?? null) === l.fadeOutMs
+  const levelsIntact = (c: CutRecord, first: CodexCellAttachment, second: CodexCellAttachment): boolean => {
+    if (!c.before.level) return true
+    const cut = levelsAfterCut({ ...c.before.level, trimStartMs: first.trimStartMs, trimEndMs: c.before.trimEndMs, durationMs: first.durationMs }, c.atMs)
+    return sameLevel(first, cut.first) && sameLevel(second, cut.second)
   }
   const whole = (c: CutRecord): boolean | null => {
     const first = ctx.readTake(c.cellId, c.audioId)

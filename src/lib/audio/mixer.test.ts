@@ -1,7 +1,7 @@
 // AQU-2327 slice 8: the one mixer's level arithmetic, and that nothing is
 // routed where there is no AudioContext (every element keeps its volume).
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { __resetMixerForTests, clipLevelOf, levelAt, mixElement, mixerInput, isMixed } from "./mixer"
+import { __resetMixerForTests, clipLevelOf, joinedLevelsOf, levelAt, mixElement, mixerInput, isMixed } from "./mixer"
 import { resetOutputContextForTests } from "./output-context"
 import { applyClipLevelPcm, guardPeak, hasClipLevel } from "@/lib/export/clip-level"
 
@@ -43,6 +43,32 @@ describe("a take's level", () => {
     const el = { src: "blob:x", currentSrc: "blob:x" } as unknown as HTMLMediaElement
     expect(mixElement(el, "recording", null)).toBe(false)
     expect(isMixed(el)).toBe(false)
+  })
+})
+
+// AQU-2494 (review, Nov 9): a cut take joined into one copy is levelled piece
+// by piece, each where it sits in the copy.
+describe("a joined copy's levels", () => {
+  it("puts each piece's level on the copy's clock, after the silence left before it", () => {
+    const levels = joinedLevelsOf([
+      { start: 1, end: 2.5, att: { gainDb: 6, fadeInMs: 500, trimStartMs: 1000, trimEndMs: 2500 } },
+      { start: 2.5, end: 5, gapBeforeSec: 0.5, att: { fadeOutMs: 500, trimStartMs: 2500, durationMs: 5000 } },
+    ])
+    expect(levels).toEqual([
+      { gainDb: 6, fadeInSec: 0.5, fadeOutSec: 0, startSec: 0, endSec: 1.5 },
+      { gainDb: 0, fadeInSec: 0, fadeOutSec: 0.5, startSec: 2, endSec: 4.5 },
+    ])
+    const g = Math.pow(10, 6 / 20)
+    expect(levelAt(0.25, levels!)).toBeCloseTo(g / 2, 5)
+    expect(levelAt(1.4, levels!)).toBeCloseTo(g, 5)
+    // The second piece starts at its own level, where it begins.
+    expect(levelAt(2, levels!)).toBe(1)
+    expect(levelAt(4.25, levels!)).toBeCloseTo(0.5, 5)
+    expect(levelAt(4.5, levels!)).toBe(0)
+  })
+
+  it("is absent when every piece plays as recorded", () => {
+    expect(joinedLevelsOf([{ start: 0, end: 1, att: {} }, { start: 1, end: 2, att: undefined }])).toBeNull()
   })
 })
 

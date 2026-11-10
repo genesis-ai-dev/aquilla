@@ -25,7 +25,7 @@ import { audioMimeForExt } from "./mime"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { claimActiveAudio, clearActiveAudioIf, getActiveAudio, type ActiveAudioController } from "./audio-coordinator"
 import { t } from "@/lib/i18n/standalone"
-import { clipLevelOf, isMixed, mixElement, setMixerVolume } from "./mixer"
+import { clipLevelOf, isMixed, joinedLevelsOf, mixElement, setMixerVolume } from "./mixer"
 import { selectQueueForFile, type QueueForFile } from "./queue-scope"
 import { isHiddenCell } from "@/lib/cells/hidden"
 
@@ -386,6 +386,10 @@ interface OverlayEntry {
   stopAtClipSec: number | null
   /** AQU-1767: dubbing's timer aimed at `stopAtClipSec`, between timeupdate ticks. */
   endStopTimer?: ReturnType<typeof setTimeout> | null
+  /** AQU-2494 (review, Nov 9): a cut take played as ONE joined copy (following
+   *  the recordings): its pieces, so each is mixed at its own volume and fades
+   *  where it sits in the copy. Absent on every other entry. */
+  joinedPieces?: readonly { audioId: string; start: number; end: number; gapBeforeSec?: number }[]
   /**
    * AQU-2252: a LAYER — a take on an added track, sounding on its own while
    * the file follows its recordings — and the programme second it was fired
@@ -3345,8 +3349,13 @@ function wireOverlayElement(
   audio.muted = !slotAudible(audibility, entry.slot)
   // AQU-2327: the take's volume and fades, through the app's one mixer.
   {
-    const att = activeContext?.cells.find((c) => c.id === entry.cellId)?.attachments?.[entry.audioId]
-    if (mixElement(audio, entry.slot, clipLevelOf(att))) audio.volume = 1
+    const atts = activeContext?.cells.find((c) => c.id === entry.cellId)?.attachments
+    // AQU-2494 (review, Nov 9): a joined copy is levelled piece by piece on
+    // its own clock, not by its first piece's level on the recording's clock.
+    const level = entry.joinedPieces
+      ? joinedLevelsOf(entry.joinedPieces.map((p) => ({ ...p, att: atts?.[p.audioId] })))
+      : clipLevelOf(atts?.[entry.audioId])
+    if (mixElement(audio, entry.slot, level)) audio.volume = 1
   }
   const applySeek = () => {
     const d = audio.duration
@@ -3620,6 +3629,7 @@ function progCueTarget(
     element: null,
     url: null,
     stopAtClipSec: win.end,
+    ...(slot.targetPieces ? { joinedPieces: slot.targetPieces } : {}),
   }
   overlayPool.push(entry)
   const startAtClipSec = win.start + into

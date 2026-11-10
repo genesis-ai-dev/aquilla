@@ -2459,6 +2459,14 @@ case 'cell.audio.attach': {
       //   2-4. ONLY IF step 1's row exists with THIS event's id: shorten the
       //      original to [old start, atMs], drop its votes, recount them.
       //      Gating on the new row means a refused cut changes nothing at all.
+      // AQU-2494 (review, Nov 9): the take's volume and fades (AQU-2327) go
+      // with the cut. Both pieces keep the volume; the fade-in stays on the
+      // piece that holds the take's start and the fade-out moves to the piece
+      // that holds its end, each no longer than its piece. Before, the copy
+      // left all three on the first piece: the second played at the recorded
+      // volume and the fade-out landed at the cut. A replay of the same cut is
+      // safe: step 1 does nothing on its conflict, and step 2 clears a
+      // fade-out already cleared and re-clamps a fade-in to the same length.
       const p = event.payload as EventPayloads['cell.audio.cut']
       if (!event.fileId || !event.cellId) {
         throw new Error(`cell.audio.cut event ${event.id} is missing fileId or cellId`)
@@ -2481,13 +2489,17 @@ case 'cell.audio.attach': {
               project_id, file_id, cell_id, audio_id, slot, url, mime_type, voice_id,
               reference_audio_id, duration_ms, timings_json, selected, deleted, event_id,
               created_ts, lane_id, trim_start_ms, trim_end_ms, label, validator_count,
-              created_by, role, target_offset_ms, recordings_offset_ms, piece_of
+              created_by, role, target_offset_ms, recordings_offset_ms, piece_of,
+              gain_db, fade_in_ms, fade_out_ms
             )
             SELECT a.project_id, a.file_id, a.cell_id, ?, a.slot, a.url, a.mime_type, a.voice_id,
                    a.reference_audio_id, a.duration_ms, a.timings_json, a.selected, 0, ?,
                    ?, a.lane_id, ?, a.trim_end_ms, COALESCE(?, a.label), 0,
                    a.created_by, a.role, a.target_offset_ms, a.recordings_offset_ms,
-                   COALESCE(a.piece_of, a.audio_id)
+                   COALESCE(a.piece_of, a.audio_id),
+                   a.gain_db, NULL,
+                   CASE WHEN a.fade_out_ms IS NULL THEN NULL
+                        ELSE LEAST(a.fade_out_ms, COALESCE(a.trim_end_ms, a.duration_ms) - ?) END
               FROM cell_audio a
              WHERE a.project_id = ? AND a.file_id = ? AND a.cell_id = ? AND a.audio_id = ?
                AND a.deleted = 0 AND a.role = 'dub'
@@ -2501,6 +2513,7 @@ case 'cell.audio.attach': {
             event.serverTs,
             atMs,
             p.newLabel ?? null,
+            atMs,
             event.projectId,
             event.fileId,
             event.cellId,
@@ -2516,13 +2529,17 @@ case 'cell.audio.attach': {
       stmts.push(
         db
           .prepare(
-            `UPDATE cell_audio SET trim_end_ms = ?, label = COALESCE(?, label)
+            `UPDATE cell_audio SET trim_end_ms = ?, label = COALESCE(?, label),
+                    fade_out_ms = NULL,
+                    fade_in_ms = CASE WHEN fade_in_ms IS NULL THEN NULL
+                                      ELSE LEAST(fade_in_ms, ? - COALESCE(trim_start_ms, 0)) END
               WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?
                 AND ${cutLanded}`,
           )
           .bind(
             atMs,
             p.firstLabel ?? null,
+            atMs,
             event.projectId,
             event.fileId,
             event.cellId,

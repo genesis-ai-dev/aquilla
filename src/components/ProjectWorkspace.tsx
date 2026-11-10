@@ -13085,7 +13085,8 @@ export function ProjectWorkspace() {
         ...(activeLane ? { targetLang: activeLane } : {}),
         author: currentUsername,
         // A take on the timeline is one that plays: Undo chooses it again.
-        history: { wasSelected: true },
+        // AQU-2492 (review, Nov 9), finding 8: and who had approved it.
+        history: { wasSelected: true, approvedBy: cur.att.validators ?? [] },
       }
       let removed = false
       try {

@@ -49,6 +49,9 @@ export interface VersionPlacement {
   pieceOf?: string | null
   /** Its volume and fades (AQU-2327), carried over to the new take. */
   level?: { gainDb: number | null; fadeInMs: number | null; fadeOutMs: number | null }
+  /** AQU-2492 (review, Nov 9), finding 8: who had approved the take it
+   *  replaces, for the step that removes it ("over"). */
+  approvedBy?: readonly string[]
 }
 
 export interface SaveVersionArgs {
@@ -179,7 +182,10 @@ export async function saveStationVersion(args: SaveVersionArgs): Promise<SavedVe
             await emitCellAudioRemove({ projectId: args.projectId, fileId: p.fileId, cellId: p.cellId, audioId: p.fromAudioId, ...lane, author: args.author })
             recordStep<TakeRemoveData>({
               kind: "take.remove",
-              data: { cellId: p.cellId, audioId: p.fromAudioId, slot: p.slot, wasSelected: true, selectedBefore: p.selectedBefore },
+              data: {
+                cellId: p.cellId, audioId: p.fromAudioId, slot: p.slot, wasSelected: true, selectedBefore: p.selectedBefore,
+                ...(p.approvedBy ? { approvedBy: { [p.fromAudioId]: [...p.approvedBy] } } : {}),
+              },
               labelKey: "editor.history.stepDeleteTake",
               fileId: p.fileId,
             })

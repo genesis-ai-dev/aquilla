@@ -93,6 +93,13 @@ export interface TakeRemoveData {
   selectedBefore: string | null
   /** AQU-1767: the take's other pieces, deleted with it in the same step. */
   pieces?: string[]
+  /**
+   * AQU-2492 (review, Nov 9), finding 8: who had approved the take, and each
+   * piece, when it was deleted (by audio id). A deleted take keeps its
+   * approvals and the Undo gives them back with it, so only an approval given
+   * since stops the Redo. Absent on a delete recorded before it: no check.
+   */
+  approvedBy?: Record<string, string[]>
 }
 export interface TakeRenameData { cellId: string; audioId: string; before: string | null; after: string | null }
 /**
@@ -384,10 +391,15 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
         if (live.length === 0) return GONE
         // AQU-2492 (review, Nov 9): someone else approved it after the Undo
         // brought it back. Deleting it again would throw their approval away,
-        // the same rule as undoing a new take (gap 25).
-        for (const id of live) {
-          const by = ctx.approvedByOthers?.(d.cellId, id)
-          if (by) return { kind: "skipped", reason: "approved", by }
+        // the same rule as undoing a new take (gap 25). Finding 8: the
+        // approvals it had when it was deleted came back with it and are not
+        // new (as the cut's Redo); a delete recorded before they were noted
+        // redoes as it did then.
+        if (d.approvedBy) {
+          for (const id of live) {
+            const by = ctx.approvedByOthers?.(d.cellId, id, d.approvedBy[id] ?? [])
+            if (by) return { kind: "skipped", reason: "approved", by }
+          }
         }
         for (const id of live) await ctx.remove(d.cellId, id)
         return DONE

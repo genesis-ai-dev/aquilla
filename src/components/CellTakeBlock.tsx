@@ -381,9 +381,12 @@ function CellTakeBlockView({
     setDeleting(true)
     const slot = attachment.slot ?? (selectedAudioId === owner.selectedGeneratedVoiceAudioId ? GENERATED_VOICE_SLOT : RECORDING_SLOT)
     const lane = targetLang ? { targetLang } : {}
-    const removal = { projectId: project.id, fileId: owner.fileId, cellId: owner.id, audioId: selectedAudioId, slot, ...lane, author: username, history: { wasSelected: true } }
+    // AQU-2492 (review, Nov 9), finding 8: with who had approved it (each
+    // piece of a split take), so only an approval given after its Undo stops
+    // the Redo.
+    const removal = { projectId: project.id, fileId: owner.fileId, cellId: owner.id, audioId: selectedAudioId, slot, ...lane, author: username, history: { wasSelected: true, approvedBy: attachment.validators ?? [] } }
     // A split take goes whole, every piece in one step (Sam, 2026-10-14).
-    const removing = split ? split.map((piece) => ({ audioId: piece.audioId, slot: piece.slot ?? slot })) : null
+    const removing = split ? split.map((piece) => ({ audioId: piece.audioId, slot: piece.slot ?? slot, validators: piece.validators ?? [] })) : null
     const remove = removing
       ? () => removeWholeTake({ ...removal, pieces: removing })
       : () => removeTake(removal)

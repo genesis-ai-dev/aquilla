@@ -514,7 +514,7 @@ describe("undoing and redoing a delete (AQU-2492)", () => {
         if (id) takes[id] = { ...takes[id], isDeleted: false }
         playing.id = id ? groupOf(id) : null
       }),
-      approvedByOthers: (_c, id) => (takes[id]?.validators ?? []).find((v) => v !== "asha") ?? null,
+      approvedByOthers: (_c, id, except) => (takes[id]?.validators ?? []).find((v) => v !== "asha" && !except?.includes(v)) ?? null,
       liveGroup: (_c, id) => Object.keys(takes).filter((k) => !takes[k].isDeleted && groupOf(k) === groupOf(id)),
     })
   }
@@ -591,15 +591,46 @@ describe("undoing and redoing a delete (AQU-2492)", () => {
   it("redo is skipped, naming them, once someone else approved the take in between", async () => {
     const takes: Takes = { take1: { validators: ["asha", "ben"] } }
     const { ctx, handlers } = line(takes, { id: "take1" })
-    expect(await handlers["take.remove"].redo(removed)).toEqual({ kind: "skipped", reason: "approved", by: "ben" })
+    expect(await handlers["take.remove"].redo({ ...removed, approvedBy: { take1: ["asha"] } })).toEqual({ kind: "skipped", reason: "approved", by: "ben" })
     expect(ctx.remove).not.toHaveBeenCalled()
   })
 
   it("…also when it is a piece of a cut take that they approved", async () => {
     const takes: Takes = { take1: {}, p2: { pieceOf: "take1", validators: ["ben"] } }
     const { ctx, handlers } = line(takes, { id: "take1" })
-    expect(await handlers["take.remove"].redo({ ...removed, pieces: ["p2"] })).toEqual({ kind: "skipped", reason: "approved", by: "ben" })
+    expect(await handlers["take.remove"].redo({ ...removed, pieces: ["p2"], approvedBy: { take1: [], p2: [] } })).toEqual({ kind: "skipped", reason: "approved", by: "ben" })
     expect(ctx.remove).not.toHaveBeenCalled()
+  })
+
+  // AQU-2492 (review, Nov 9), finding 8: the Undo gave the take back WITH
+  // the approvals it had when it was deleted. Only an approval given since
+  // stops the Redo, the same rule as the cut's.
+  it("an approval the take had before it was deleted does not stop the Redo", async () => {
+    const takes: Takes = { take1: { validators: ["ben"] } }
+    const { ctx, handlers } = line(takes, { id: "take1" })
+    expect(await handlers["take.remove"].redo({ ...removed, approvedBy: { take1: ["ben"] } })).toEqual({ kind: "done" })
+    expect(ctx.remove).toHaveBeenCalledWith("c", "take1")
+  })
+
+  it("…but one given after the Undo, beside it, does", async () => {
+    const takes: Takes = { take1: { validators: ["ben", "cal"] } }
+    const { ctx, handlers } = line(takes, { id: "take1" })
+    expect(await handlers["take.remove"].redo({ ...removed, approvedBy: { take1: ["ben"] } })).toEqual({ kind: "skipped", reason: "approved", by: "cal" })
+    expect(ctx.remove).not.toHaveBeenCalled()
+  })
+
+  it("…piece by piece for a cut take", async () => {
+    const takes: Takes = { take1: { validators: ["ben"] }, p2: { pieceOf: "take1", validators: ["remi"] } }
+    const { ctx, handlers } = line(takes, { id: "take1" })
+    expect(await handlers["take.remove"].redo({ ...removed, pieces: ["p2"], approvedBy: { take1: ["ben"], p2: ["remi"] } })).toEqual({ kind: "done" })
+    expect(ctx.remove).toHaveBeenCalledTimes(2)
+  })
+
+  it("a delete recorded before it (who had approved it unknown) redoes as before", async () => {
+    const takes: Takes = { take1: { validators: ["ben"] } }
+    const { ctx, handlers } = line(takes, { id: "take1" })
+    expect(await handlers["take.remove"].redo(removed)).toEqual({ kind: "done" })
+    expect(ctx.remove).toHaveBeenCalledWith("c", "take1")
   })
 
   it("your own approval does not stop your Redo", async () => {

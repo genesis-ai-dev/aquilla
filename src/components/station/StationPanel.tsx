@@ -315,6 +315,8 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
             ? { gainDb: ed.level.gainDb || null, fadeInMs: ed.level.fadeIn > 0 ? Math.round(ed.level.fadeIn * 1000) : null, fadeOutMs: ed.level.fadeOut > 0 ? Math.round(ed.level.fadeOut * 1000) : null }
             : { gainDb: p.att.gainDb ?? null, fadeInMs: p.att.fadeInMs ?? null, fadeOutMs: p.att.fadeOutMs ?? null },
           ...(isOpen && isPiece ? { pieceOf: pieceRoot } : {}),
+          // AQU-2492 (review, Nov 9), finding 8: who had approved the take it replaces.
+          approvedBy: p.att.validators ?? [],
         }
       })
       const res = await saveStationVersion({

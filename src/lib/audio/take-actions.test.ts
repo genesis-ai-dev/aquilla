@@ -18,7 +18,7 @@ vi.mock("@/lib/history/history", () => ({
   recordStep: vi.fn((step: Record<string, unknown>) => { recorded.steps.push(step) }),
 }))
 
-import { enqueueTakeRemovals, hasOwnRecordingLeft, removeWholeTake } from "./take-actions"
+import { enqueueTakeRemovals, hasOwnRecordingLeft, removeTake, removeWholeTake } from "./take-actions"
 import { getOptimisticShadows, subscribeOptimisticAudioAttachment } from "./audio-attachments-bus"
 
 describe("enqueueTakeRemovals", () => {
@@ -73,6 +73,27 @@ describe("removeWholeTake", () => {
       kind: "take.remove",
       data: { cellId: "c1", audioId: "t1", slot: "recording", wasSelected: true, pieces: ["p2"] },
     })
+  })
+
+  // AQU-2492 (review, Nov 9), finding 8: the step notes who had approved
+  // each piece, which its Undo gives back with them, so only an approval
+  // given after the Undo stops the Redo.
+  it("notes who had approved each piece when it was deleted", async () => {
+    recorded.steps = []
+    await removeWholeTake({
+      projectId: "p", fileId: "f", cellId: "c1", author: "tester", history: { wasSelected: true },
+      pieces: [{ audioId: "t1", slot: "recording", validators: ["ben"] }, { audioId: "p2", slot: "recording" }],
+    })
+    expect(recorded.steps[0]).toMatchObject({ data: { approvedBy: { t1: ["ben"], p2: [] } } })
+  })
+
+  it("…and for a take in one piece", async () => {
+    recorded.steps = []
+    await removeTake({
+      projectId: "p", fileId: "f", cellId: "c1", audioId: "t1", slot: "recording", author: "tester",
+      history: { wasSelected: true, approvedBy: ["ben", "cal"] },
+    })
+    expect(recorded.steps[0]).toMatchObject({ kind: "take.remove", data: { audioId: "t1", approvedBy: { t1: ["ben", "cal"] } } })
   })
 })
 

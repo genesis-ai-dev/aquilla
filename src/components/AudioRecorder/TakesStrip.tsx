@@ -488,7 +488,8 @@ export function TakesStrip({
       const groupOf = (id: string | null | undefined) => (id ? takes.find((t) => t.audioId === id)?.pieceOf ?? id : null)
       await removeTake({
         projectId, fileId, cellId, audioId, slot, author, ...(targetLang ? { targetLang } : {}),
-        history: { wasSelected: groupOf(playingNow) === groupOf(audioId) },
+        // AQU-2492 (review, Nov 9), finding 8: and who had approved it.
+        history: { wasSelected: groupOf(playingNow) === groupOf(audioId), approvedBy: takes.find((t) => t.audioId === audioId)?.validators ?? [] },
       })
       // Was that the cell's last recording? `takes` still holds the pre-removal
       // list, so the survivors are everything else that is a take OF THIS CELL.
@@ -515,7 +516,7 @@ export function TakesStrip({
         takes.some((t) => t.audioId === playingNow && pieceGroupOf(t, t.audioId) === group)
       await removeWholeTake({
         projectId, fileId, cellId, author, ...(targetLang ? { targetLang } : {}),
-        pieces: pieces.map((p) => ({ audioId: p.audioId, slot: p.slot ?? RECORDING_SLOT })),
+        pieces: pieces.map((p) => ({ audioId: p.audioId, slot: p.slot ?? RECORDING_SLOT, validators: p.validators ?? [] })),
         history: { wasSelected },
       })
       const gone = new Set(pieces.map((p) => p.audioId))

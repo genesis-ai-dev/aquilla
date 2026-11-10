@@ -57,6 +57,8 @@ export const rules = defineNamespace({
     "rules.infraction.builtin.lengthRatio": "Translation is much shorter or longer than the source",
     "rules.infraction.builtin.scriptureReference":
       "Scripture reference does not match the project's book names or the canon",
+    "rules.infraction.builtin.numberFormat":
+      "Number is not written the way the target language writes numbers",
     "rules.infraction.builtin.placeholderIntegrity": plural({
       one: "Placeholder {tokens} missing in translation",
       other: "Placeholders {tokens} missing in translation",
@@ -119,6 +121,9 @@ export const rules = defineNamespace({
     "rules.builtin.scriptureReference.name": "Scripture references",
     "rules.builtin.scriptureReference.description":
       "Scripture references in the translation use the project's book names and name a chapter the canon has, with one separator throughout. Off by default: it needs the project's book names.",
+    "rules.builtin.numberFormat.name": "Number format",
+    "rules.builtin.numberFormat.description":
+      "Numbers in the translation are written the way the target language writes them — its digits, its thousands separator, its decimal mark. Off by default: it needs the target language, or the project's own answer for it.",
 
     // ── Shared vocabulary ───────────────────────────────────────────────────
     "rules.severity.major": "Major",
@@ -669,6 +674,24 @@ export const rules = defineNamespace({
           "Finding shown on a row when a scripture reference in the translation uses a book name the " +
           "project does not use, names a chapter the Bible does not have, or separates chapter and " +
           "verse differently from the other references in the same row.",
+      },
+      "rules.builtin.numberFormat.name": {
+        description:
+          "Name of a built-in quality check in the built-in checks list. It flags a number written " +
+          "the way another language writes numbers — the wrong thousands separator or decimal mark, " +
+          "or digits from a script the language does not use. Short, like the other check names.",
+        maxLength: 30,
+      },
+      "rules.builtin.numberFormat.description": {
+        description:
+          "One-line description under that check's name in the built-in checks list. The check is " +
+          "off by default because it needs the target language to be known.",
+      },
+      "rules.infraction.builtin.numberFormat": {
+        description:
+          "Finding shown on a row when a number in the translation is written the way another " +
+          "language writes numbers: \"3,5\" where this language would write \"3.5\", or digits from " +
+          "a script this language does not use.",
       },
       "rules.builtin.numberIntegrityExtra.name": {
         description:

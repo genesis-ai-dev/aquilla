@@ -19,6 +19,8 @@ import {
   joinList,
   kinTermsDraft,
   kinTermsValue,
+  numberFormatDraft,
+  numberFormatValue,
   numberWordsDraft,
   numberWordsValue,
   pronounsDraft,
@@ -37,6 +39,7 @@ import {
   readLanguageProfile,
   type LanguageProfile,
   type LanguageProfileSlot,
+  type NumberFormatProfile,
   type PunctuationProfile,
 } from "../../../../db/shared/language-profile"
 import { ProfileSlotRow } from "./ProfileSlotRow"
@@ -45,6 +48,7 @@ import {
   DivineNamesEditor,
   KinTermsEditor,
   ListEditor,
+  NumberFormatEditor,
   NumberWordsEditor,
   PolicyEditor,
   PronounsEditor,
@@ -61,6 +65,13 @@ export interface LanguageProfileSlotsProps {
    * for a language the table says nothing about — the row then opens blank.
    */
   punctuationPrefill?: PunctuationProfile | null
+  /**
+   * AQU-2430: CLDR's number-format answer for this project's target language,
+   * pre-filling the Number separators row while its slot is empty. Null for a
+   * language CLDR has no data for — the row then opens blank, and filling it
+   * is the only way that language gets the number-format check.
+   */
+  numberFormatPrefill?: NumberFormatProfile | null
   canEdit: boolean
   disabledTooltip: ReactNode
   patch: (partial: ProjectWideSettings) => Promise<PatchOutcome>
@@ -118,6 +129,11 @@ const COPY: Readonly<Record<RowSlot, { title: MessageKey; description: MessageKe
     description: "languageProfile.numberWords.description",
     example: "languageProfile.numberWords.example",
   },
+  numberFormat: {
+    title: "languageProfile.numberFormat.title",
+    description: "languageProfile.numberFormat.description",
+    example: "languageProfile.numberFormat.example",
+  },
   speechVerbs: {
     title: "languageProfile.speechVerbs.title",
     description: "languageProfile.speechVerbs.description",
@@ -161,6 +177,7 @@ const listValue = (draft: string) => {
 export function LanguageProfileSlots({
   value,
   punctuationPrefill,
+  numberFormatPrefill,
   canEdit,
   disabledTooltip,
   patch,
@@ -235,6 +252,13 @@ export function LanguageProfileSlots({
       </ProfileSlotRow>
       <ProfileSlotRow {...row("numberWords")} toDraft={numberWordsDraft} toValue={numberWordsValue}>
         {(draft, setDraft, disabled) => <NumberWordsEditor draft={draft} setDraft={setDraft} disabled={disabled} />}
+      </ProfileSlotRow>
+      <ProfileSlotRow
+        {...row("numberFormat")}
+        toDraft={(held) => numberFormatDraft(held, numberFormatPrefill)}
+        toValue={numberFormatValue}
+      >
+        {(draft, setDraft, disabled) => <NumberFormatEditor draft={draft} setDraft={setDraft} disabled={disabled} />}
       </ProfileSlotRow>
       {listRow("speechVerbs")}
       <ProfileSlotRow {...row("kinTerms")} toDraft={kinTermsDraft} toValue={kinTermsValue}>

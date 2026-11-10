@@ -37,6 +37,7 @@ import {
   type LanguageProfile,
   type QuoteContinuationStyle,
 } from "../../../db/shared/language-profile"
+import { numberFormatProfileForLanguage } from "../../../db/shared/number-format"
 import { punctuationProfileForLanguage } from "../../../db/shared/punctuation-conventions"
 import { DisabledFieldTooltip } from "./DisabledFieldTooltip"
 import { LanguageProfileSlots } from "./language-profile/LanguageProfileSlots"
@@ -238,6 +239,8 @@ export function LanguageProfileSection({ value, targetLanguage, canEdit, disable
         // AQU-1906: the Punctuation row opens pre-filled from the project's
         // target language, the same source "Use defaults for …" above reads.
         punctuationPrefill={punctuationProfileForLanguage(targetLanguage)}
+        // AQU-2430: and the Number separators row from CLDR's answer for it.
+        numberFormatPrefill={numberFormatProfileForLanguage(targetLanguage)}
         canEdit={canEdit}
         disabledTooltip={disabledTooltip}
         patch={patch}

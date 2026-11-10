@@ -325,7 +325,13 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
         // before saving stays a trim, as Keep is.
         const startWasMs = p.att.trimStartMs ?? 0
         const startNowMs = Math.round(mapWindow({ start: startWasMs / 1000, end: startWasMs / 1000 }, ed.ops).start * 1000)
-        const held = placeHoldingStart(p.cell, isOpen ? target.audioId : fromAudioId, startNowMs - startWasMs, host.takeIsLayer(p.fileId, p.att.slot))
+        // (Review, Nov 9, finding 7) The open clip's Start can be moved by hand
+        // between the edits: its shift is the one the draft kept as they were
+        // made, each from where Start was then. The other lines' clips are not
+        // trimmed here, so theirs is their stored Start's, carried through.
+        const shift = ed.draft.startShiftSec
+        const movedMs = isOpen && shift != null ? Math.round(shift * 1000) : startNowMs - startWasMs
+        const held = placeHoldingStart(p.cell, isOpen ? target.audioId : fromAudioId, movedMs, host.takeIsLayer(p.fileId, p.att.slot))
         return {
           fileId: p.fileId,
           cellId: p.cell.id,

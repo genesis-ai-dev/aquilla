@@ -261,6 +261,33 @@ describe("a Station save holds the take's place when its Start moved with the ed
     await open(placedTake())
     expect(await saved()).toMatchObject({ trimStartMs: 1000, targetOffsetMs: 10_000, recordingsOffsetMs: 500 })
   })
+
+  // AQU-2493 (review, Nov 9), finding 7: the shift was worked out from the
+  // STORED Start carried through every edit, with no record of when Start was
+  // moved. Start moved to 0 by hand (a trim, the take then sounds from 10.0 s),
+  // and then a delete at 0.1 s — after Start, so it moves nothing — made the
+  // save shift the clip as if Start had still been at 0.2 s: 0.1 s late.
+  const keepAll = (lane: HTMLElement) => {
+    selectRange(lane, 0, 5)
+    fireEvent.keyDown(screen.getByTestId("station"), { key: "k", code: "KeyK" })
+  }
+  it("an edit made after Start was moved by hand is measured from where Start was then: it moves nothing", async () => {
+    const { lane } = await open(placedTake())
+    deleteRange(lane, 3, 3.2)
+    keepAll(lane)
+    await act(async () => {})
+    deleteRange(lane, 0.1, 0.2)
+    expect(await saved()).toMatchObject({ trimStartMs: null, targetOffsetMs: 10_000, recordingsOffsetMs: 500 })
+  })
+
+  it("an unsaved edit undone takes its shift back with it", async () => {
+    const { lane } = await open(placedTake())
+    deleteRange(lane, 0, 0.8)
+    fireEvent.click(screen.getByTestId("station-undo"))
+    await act(async () => {})
+    deleteRange(lane, 2, 3)
+    expect(await saved()).toMatchObject({ trimStartMs: 200, targetOffsetMs: 10_000, recordingsOffsetMs: 500 })
+  })
 })
 
 describe("while Record now is running, Save and the Station's Undo wait (finding 15)", () => {

@@ -21,7 +21,7 @@ import {
 } from "@/lib/station/edit-list"
 import { audioCacheGet } from "@/lib/audio/bytes-cache"
 import { decodeToMono48k } from "@/lib/audio/decode-mono"
-import { draftKey, EMPTY_DRAFT, pushDraft, readDraft, undoDraft, writeDraft, type DraftSource, type StationDraft } from "@/lib/station/drafts"
+import { draftKey, EMPTY_DRAFT, pushDraft, readDraft, startShiftAfter, undoDraft, writeDraft, type DraftSource, type StationDraft } from "@/lib/station/drafts"
 import { loadStationPcm, putStationPcm, type StationPcm } from "@/lib/station/load"
 import { previewCanMix, StationPreview } from "@/lib/station/preview"
 import { mixWhole, renderSegments, type PcmSource } from "@/lib/station/render"
@@ -367,7 +367,8 @@ export function useStationEditor(host: StationHost, take: StationTake, target: S
     pause()
     const op: EditOp = { kind: "del", a: round3(sel.a), b: round3(sel.b) }
     const tr = shiftTrim(op, trimA, trimB, atEdge)
-    setDraft(pushDraft(draft, { ops: [...ops, op], trim: tr }))
+    // AQU-2493 (review, Nov 9): how far this moved Start, from where it is now.
+    setDraft(pushDraft(draft, { ops: [...ops, op], trim: tr, startShiftSec: startShiftAfter(draft, op, trimA) }))
     setSel({ a: op.a, b: op.a })
   }, [atEdge, draft, ops, pause, sel, setDraft, trimA, trimB])
 
@@ -379,7 +380,7 @@ export function useStationEditor(host: StationHost, take: StationTake, target: S
       const op: EditOp = { kind: "ins", at: round3(sel.a), src: id, len, label: meta.label }
       setSources((m) => ({ ...m, [id]: src }))
       const tr = shiftTrim(op, trimA, trimB, atEdge)
-      setDraft(pushDraft(draft, { ops: [...ops, op], trim: tr, sources: { ...draft.sources, [id]: meta } }))
+      setDraft(pushDraft(draft, { ops: [...ops, op], trim: tr, sources: { ...draft.sources, [id]: meta }, startShiftSec: startShiftAfter(draft, op, trimA) }))
       setSel({ a: op.at, b: op.at + len })
     },
     [atEdge, draft, ops, pause, sel, setDraft, trimA, trimB],

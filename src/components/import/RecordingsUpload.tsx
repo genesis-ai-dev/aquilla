@@ -819,6 +819,10 @@ function ReviewBody({
     return m
   }, [targets])
   const recordedCount = [...lineIds].filter((id) => lineById.get(id)?.line.hasRecording).length
+  // AQU-2496 (review, Nov 9): what the "can't be undone" note says: files over
+  // several lines, and lines whose main-track take the upload replaces.
+  const rangeCount = matched.filter((a) => a.cellIds!.length > 1).length
+  const replacedCount = [...lineIds].filter((id) => lineById.get(id)?.line.mainTake).length
 
   // Parts: how many a verse has, for "part 2 of 3".
   const partsOf = useMemo(() => {
@@ -951,7 +955,11 @@ function ReviewBody({
             line's earlier one back into play, so that is said where it applies. */}
         {uploadCount > 0 && (
           <p className="text-xs text-muted-foreground" data-testid="recordings-no-undo-note">
-            {t(recordedCount > 0 ? "recordingsUpload.preview.noUndoRecorded" : "recordingsUpload.preview.noUndo")}
+            {[
+              t("recordingsUpload.preview.noUndo", { count: uploadCount }),
+              rangeCount > 0 ? t("recordingsUpload.preview.noUndoRange") : null,
+              replacedCount > 0 ? t("recordingsUpload.preview.noUndoRecorded", { count: fmt(replacedCount) }) : null,
+            ].filter(Boolean).join(" ")}
           </p>
         )}
         <p className="text-xs text-muted-foreground">

@@ -63,6 +63,11 @@ export interface TargetLine {
   /** A heading, book title or chapter label — never given a recording by
    *  number or by order, though the person may choose one by hand. */
   structural: boolean
+  /** AQU-2496 (review, Nov 9): its recording (`hasRecording`) is the main
+   *  track's own chosen take, which a bulk upload's new take replaces there
+   *  (every bulk take goes on the main track). False where it plays on an
+   *  added track or a layer. */
+  mainTake?: boolean
   /** The line already has a recording that plays in this language. */
   hasRecording: boolean
 }

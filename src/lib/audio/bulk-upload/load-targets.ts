@@ -6,7 +6,9 @@ import { fetchAllFileCells, fetchFileCells } from "@/lib/sync/cells-read"
 import type { CellRow } from "@/lib/sync/cells-read-types"
 import { fetchFileAudioAttachments } from "@/lib/sync/cell-audio-read"
 import { cellHasOwnTake } from "@/lib/progress/audio-progress-cells"
-import { sharedSelections } from "@/lib/audio/own-take"
+import { isOwnSelection, sharedSelections } from "@/lib/audio/own-take"
+import { slotSelections } from "@/lib/sync/cell-audio-read-types"
+import { RECORDING_SLOT } from "@/lib/timeline/track-slots"
 import { isStructuralCell } from "@/lib/cells/structural"
 import { bookCodeFromFileName, isKnownBookCode } from "@/lib/file-labeling/bible-book-names"
 import { usfmDisplayText } from "@/lib/parsers/usfm-display"
@@ -100,11 +102,15 @@ export async function loadTargetFile(
   for (const row of source) {
     if (row.hidden) continue
     if (row.startMs != null && !isStructuralCell(row.type)) timed = true
+    const entry = audio?.cells[row.cellId]
+    const main = entry ? slotSelections(entry)[RECORDING_SLOT] : undefined
     lines.push({
       cellId: row.cellId,
       ref: row.canonicalRef,
       text: lineText(row, targetById.get(row.cellId)),
       structural: isStructuralCell(row.type),
+      // AQU-2496 (review, Nov 9): the take a bulk upload replaces, if any.
+      mainTake: main != null && isOwnSelection({ id: row.cellId, fileId: file.fileId }, main, entry?.attachments[main], shared),
       hasRecording: cellHasOwnTake({ id: row.cellId, fileId: file.fileId }, audio?.cells[row.cellId], shared),
     })
   }

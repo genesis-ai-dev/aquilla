@@ -722,6 +722,56 @@ describe("smaller review items (review, Oct 30)", () => {
   })
 })
 
+// AQU-2496 (review, Nov 9): the "can't be undone" note said "the recordings"
+// for one file, didn't say a file over several lines adds a take to each, and
+// said to choose the earlier recording again on lines where it never stopped
+// playing (it plays on an added track or a layer; every bulk take goes on the
+// main track).
+describe("the can't-be-undone note is true for every kind of upload", () => {
+  const note = () => screen.getByTestId("recordings-no-undo-note")
+  const withLines = (patch: Record<string, Partial<TargetLine>>) => {
+    const file = matthew()
+    file.lines = file.lines.map((line) => (patch[line.cellId] ? { ...line, ...patch[line.cellId] } : line))
+    vi.mocked(loadTargetFile).mockResolvedValueOnce(file)
+  }
+
+  it("says the recording, for one file", async () => {
+    review(["Matthew 19-1.ogg"])
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(1))
+    expect(note()).toHaveTextContent(/^This can't be undone with Undo\. To take it back, delete the recording it adds\.$/)
+  })
+
+  it("says a file over several lines adds a take to each of them", async () => {
+    review(["Matthew 19.ogg"])
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(1))
+    expect(note()).toHaveTextContent(
+      "This can't be undone with Undo. To take it back, delete the recording it adds. A file that covers several lines adds a take to each of those lines; delete that take on each line.",
+    )
+  })
+
+  it("leaves out choosing again where the earlier recording plays on another track and never stopped", async () => {
+    withLines({ "mat:19:2": { hasRecording: true, mainTake: false } })
+    review(["Matthew 19-1.ogg", "Matthew 19-2.ogg"])
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(2))
+    expect(screen.getByTestId("recordings-recorded-note")).toBeInTheDocument()
+    expect(note()).not.toHaveTextContent("earlier")
+  })
+
+  it("says where the new recordings take over from earlier ones, one line or several", async () => {
+    withLines({ "mat:19:1": { hasRecording: true, mainTake: true }, "mat:19:2": { hasRecording: true, mainTake: true } })
+    review(["Matthew 19-1.ogg", "Matthew 19-2.ogg"])
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(2))
+    expect(note()).toHaveTextContent(
+      "This can't be undone with Undo. To take it back, delete the recordings it adds. On 2 lines the new recordings take over from earlier ones; after deleting them, choose the earlier recording again on each.",
+    )
+    cleanup()
+    withLines({ "mat:19:1": { hasRecording: true, mainTake: true } })
+    review(["Matthew 19-1.ogg"])
+    await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(1))
+    expect(note()).toHaveTextContent("On 1 line the new recording takes over from an earlier one; after deleting it, choose the earlier recording again there.")
+  })
+})
+
 // Sam, Oct 30: "Forget this naming for the team" only for someone the server
 // will let forget it, and a plain word when it didn't go through.
 describe("forgetting a team's naming", () => {
@@ -864,13 +914,13 @@ describe("the preview says a bulk upload can't be undone", () => {
 
   it("adds what else it takes on a line that already had a recording: choosing the earlier one again", async () => {
     const recorded = matthew()
-    recorded.lines = recorded.lines.map((line) => (line.cellId === "mat:19:2" ? { ...line, hasRecording: true } : line))
+    recorded.lines = recorded.lines.map((line) => (line.cellId === "mat:19:2" ? { ...line, hasRecording: true, mainTake: true } : line))
     vi.mocked(loadTargetFile).mockResolvedValueOnce(recorded)
     review(PLACED)
     await waitFor(() => expect(screen.getAllByTestId("recordings-row")).toHaveLength(2))
     expect(screen.getByTestId("recordings-recorded-note")).toBeInTheDocument()
     expect(screen.getByTestId("recordings-no-undo-note")).toHaveTextContent(
-      "This can't be undone with Undo. To take it back, delete the recordings it adds, and choose the earlier recording again on each line that had one.",
+      "This can't be undone with Undo. To take it back, delete the recordings it adds. On 1 line the new recording takes over from an earlier one; after deleting it, choose the earlier recording again there.",
     )
   })
 

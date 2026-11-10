@@ -1875,7 +1875,15 @@ export function TimelineEditor({
   // file-timeline seconds for imported media (one shared clip); the cellIdSet
   // guard keeps a stale singleton queue (playing another file) from hijacking
   // this timeline's playhead.
-  const cellIdSet = useMemo(() => new Set(cells.map((c) => c.id)), [cells])
+  // AQU-2253 (browser pass, Nov 9): …and following the recordings, a file with
+  // an audio cue file plays its HEARD LINES (the workspace's `playbackCells`),
+  // whose ids are not its subtitle lines'. Scoped to the subtitle lines alone,
+  // the queue playing them read as another file's: the playhead stood where it
+  // was clicked while the film, its caption and the bottom strip ran on.
+  const cellIdSet = useMemo(
+    () => new Set([...cells, ...recordingsLines<CellData[]>([], audioCues ? targetCells : null, audioFirst)].map((c) => c.id)),
+    [cells, audioCues, targetCells, audioFirst],
+  )
   // AQU-928: what "from here to there" means for a Shift-click — the file's own
   // cell order, i.e. the order the text table below shows, not lane order.
   const orderedIds = useMemo(() => cells.map((c) => c.id), [cells])

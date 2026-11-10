@@ -527,6 +527,37 @@ describe("the same rule everywhere (siblings)", () => {
     expect(c.layers?.[0].atSec).toBe(0.5)
   })
 
+  // AQU-2432 (review, Nov 9): DELIBERATE. The room belongs to the empty LINE,
+  // so closing it moves everything on the line after it up together, the
+  // other voices included. Against a recorded line only the dragged take
+  // moves (an overlap is the take's own place).
+  it("dragging one voice's take against an empty line moves the other voice's take on its line with it; against a recorded line it does not", () => {
+    const opts = { ...BOOK, layerSlots: [VOICE] }
+    const line = (bRecorded: boolean) => [
+      bookLine("a", { take: { durationMs: 5_000 } }),
+      bookLine("b", bRecorded ? { take: { durationMs: 4_000 } } : {}),
+      // The narrator on the main track at the line's start, Boaz 2 s in.
+      bookLine("c", { take: { durationMs: 6_000 }, others: { [VOICE]: { durationMs: 3_000, recordingsOffsetMs: 2_000 } } }),
+    ]
+    const narratorAt = (cells: CellData[]) => buildProgramme(cells, opts).slots[2].startSec + (buildProgramme(cells, opts).slots[2].targetLeadSec ?? 0)
+    const boaz = trackTakeId("c", VOICE)
+
+    // b empty: Boaz dragged 3 s earlier closes his own 2 s pause, then 1 s of b's room.
+    const empty = line(false)
+    expect(narratorAt(empty)).toBe(9)
+    const { rooms, place } = drag(empty, "c", 8, opts, boaz)
+    expect(rooms).toEqual([{ cellId: "b", roomMs: 3_000 }])
+    expect(place?.recordingsOffsetMs).toBe(0)
+    const closed = withRooms(empty, rooms!).map((c) =>
+      c.id === "c" ? bookLine("c", { take: { durationMs: 6_000 }, others: { [VOICE]: { durationMs: 3_000, recordingsOffsetMs: 0 } } }) : c)
+    expect(narratorAt(closed)).toBe(8) // the narrator moved up with the line
+
+    // b recorded: Boaz alone moves; the narrator stays.
+    const recorded = line(true)
+    expect(narratorAt(recorded)).toBe(9)
+    expect(drag(recorded, "c", 8, opts, boaz).rooms).toBeNull()
+  })
+
   it("a take on a track made a layer never changes a room", () => {
     const opts = { ...BOOK, layerSlots: [MUSIC], layerTrackSlots: [MUSIC] }
     const cells = [bookLine("a", { take: { durationMs: 5_000 } }), bookLine("b"), bookLine("c", { take: { durationMs: 6_000 }, others: { [MUSIC]: { durationMs: 3_000 } } })]

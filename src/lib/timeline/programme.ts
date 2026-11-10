@@ -1172,6 +1172,13 @@ export function roomFloorSec(prog: Programme, slot: ProgrammeSlot): number | nul
  * what its marker says ("drag the next take later to give it room") is true
  * of the next drag. Null when the move changes no room (the line before is
  * recorded, or the move is under the wobble): the move is the take's alone.
+ *
+ * AQU-2432 (review, Nov 9): DELIBERATE — a room is the empty LINE's, so the
+ * share of a drag the rooms take moves the whole of the take's line: its takes
+ * on every other track move up (or back) with it. Dragging Boaz's voice take
+ * against an empty line moves the narrator's take on the same line too; only
+ * against a recorded line does the dragged take move alone (its pull-back is
+ * its own place). line-room.test.ts pins both.
  */
 export function roomsForMove(
   prog: Programme,

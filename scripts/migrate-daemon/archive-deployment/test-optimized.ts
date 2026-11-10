@@ -1,5 +1,6 @@
 // Run with tsx from the repository; argument is the staged optimized daemon directory.
 import assert from 'node:assert/strict'
+import type { JobRow } from '../db'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -30,6 +31,6 @@ try {
   assert.equal(db.listJobs('skipped_archived').length, 2)
   db.resumeArchived(1)
   assert.equal(db.listJobs('detected').length, 2)
-  assert.ok(db.listJobs().every(j => j.sha === 'newest' && j.error === null))
+  assert.ok(db.listJobs().every((j: JobRow) => j.sha === 'newest' && j.error === null))
   console.log('PASS optimized claim/release, restart, latest SHA, archive errors and unarchive')
 } finally { db.close(); rmSync(home, { recursive: true, force: true }) }

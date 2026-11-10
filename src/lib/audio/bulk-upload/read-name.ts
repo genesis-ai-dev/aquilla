@@ -212,7 +212,7 @@ export function readName(fileName: string, index: BookNameIndex): NameReading {
   let stopped = false
   const startAt = hit ? hit.end + 1 : 0
   let unknownBookWord: string | null = null
-  let afterWord: NameReading["afterWord"] = null
+  const afterStop: number[] = []
   let stopWord = ""
 
   for (let i = 0; i < toks.length; i++) {
@@ -273,7 +273,7 @@ export function readName(fileName: string, index: BookNameIndex): NameReading {
     }
     // A number.
     if (stopped) {
-      afterWord = { word: stopWord, numbers: [...(afterWord?.numbers ?? []), t.value] }
+      afterStop.push(t.value)
       continue
     }
     const sep = pendingSep.trim().length > 0 ? pendingSep.trim() : pendingSep.length > 0 ? " " : ""
@@ -295,7 +295,7 @@ export function readName(fileName: string, index: BookNameIndex): NameReading {
     partWord,
     words,
     unknownBookWord: hit ? null : unknownBookWord,
-    afterWord,
+    afterWord: afterStop.length > 0 ? { word: stopWord, numbers: afterStop } : null,
   }
 }
 

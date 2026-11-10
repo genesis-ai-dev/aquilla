@@ -645,6 +645,44 @@ longer sets `ADMIN_EMAILS`. Deploying first locks everyone out of the console
 until the rows exist. If the table is missing the Worker treats nobody as a
 table admin and logs `platform_admins read failed`; it does not fail requests.
 
+## Who can use dev.aquilla.app (AQU-2469)
+
+Dev runs untested code on a nightly copy of prod data, so the dev identity
+Worker (`aquilla-dev-identity`) admits only:
+
+- every platform admin (the `platform_admins` table, which the nightly refresh
+  copies from prod), and
+- the emails on the dev access list.
+
+Everyone else is refused at sign-in and sign-up with a plain message, and every
+API request they make answers `403` with `code: "dev_access_restricted"`.
+Production, the per-branch previews, local dev and e2e are never gated: the
+check keys on `DEPLOYMENT_WORKER_NAME` being the development identity Worker
+named in `config/cloudflare-deployments.json`.
+
+The list lives in the KV namespace `aquilla-dev-access-list`, bound as
+`DEV_ACCESS_LIST` on the development profile only. KV sits outside the Neon
+restore, so the nightly refresh never touches it. One key per lower-cased email.
+
+To change it, open **Admin → Platform → Dev access** on dev.aquilla.app. It
+takes effect on that person's next request; no deploy. From the command line,
+as a backup:
+
+```sh
+cd auth-worker
+npx wrangler kv key put --binding=DEV_ACCESS_LIST --env=development --remote "someone@example.com" "{}"
+npx wrangler kv key list --binding=DEV_ACCESS_LIST --env=development --remote
+npx wrangler kv key delete --binding=DEV_ACCESS_LIST --env=development --remote "someone@example.com"
+```
+
+It fails closed. If the binding is missing or KV cannot be read, dev refuses
+everyone but platform admins (`503`), and the deploy verifier refuses a dev
+version without the binding.
+
+Known gap: Agent API keys (`aqk_…`) and MCP OAuth tokens are checked by the
+sync Worker straight from Postgres, which does not read this list. Minting a
+new key on dev is gated; keys copied from prod by the nightly refresh are not.
+
 ## Change checklist
 
 An environment change is one atomic contract change. Update and verify all of:

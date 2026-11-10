@@ -22,6 +22,8 @@
 //   PATCH /credits/org/:orgId  — update per-org credit config (org_settings.credits)
 //   GET|POST /feedback-routes, PATCH|DELETE /feedback-routes/:id
 //                              — email routes for "Report a problem"
+//   GET|POST /dev-access, DELETE /dev-access/:email
+//                              — who may use dev.aquilla.app (admin-dev-access.ts)
 
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
@@ -34,6 +36,7 @@ import { loadPlatformSettings, savePlatformSettings } from "../lib/platform-sett
 import { getAllowedModels } from "../lib/ai-budget"
 import { aggregateAbResults } from "../lib/model-ab"
 import adminBillingRoutes from "./admin-billing"
+import adminDevAccessRoutes from "./admin-dev-access"
 import { sendAdminElevationCodeEmail, sendRetentionReportEmail } from "../services/email"
 import { FEEDBACK_ROUTE_MAX_EMAILS, rowToRoute, type FeedbackRoute } from "../services/feedback-routes"
 import { hashPasswordWerkzeugScrypt, verifyPasswordWerkzeugScrypt } from "../utils/password"
@@ -1235,6 +1238,8 @@ admin.get("/ab-results", async (c) => {
 })
 
 admin.route("/", adminBillingRoutes)
+// AQU-2469: the dev.aquilla.app access list (routes/admin-dev-access.ts).
+admin.route("/", adminDevAccessRoutes)
 
 /**
  * GET /api/v2/admin/retention — active-user + retention metrics computed from

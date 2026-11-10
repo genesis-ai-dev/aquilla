@@ -349,6 +349,10 @@ export interface Env {
   /** R2 key prefix, mirroring sync-worker/agent-worker. Unset in every current
    *  env (→ empty prefix), so artifact keys are `artifacts/{projectId}/{id}`. */
   R2_KEY_PREFIX?: string
+  /** AQU-2469: the dev access list (services/dev-access.ts). KV, one key per
+   *  lower-cased email. Bound on the development Worker only; absent there
+   *  means nobody but platform admins gets in (fail closed). */
+  DEV_ACCESS_LIST?: KVNamespace
 
   // AI budget + allowlist controls (AQU-265).
   // AI_ALLOWED_MODELS: comma-separated list of permitted OpenRouter model IDs.

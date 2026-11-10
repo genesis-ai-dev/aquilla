@@ -647,6 +647,56 @@ export function lineWithRecordings(
 }
 
 /**
+ * AQU-2426 (browser pass, Nov 9): a file's lines with their recordings merged
+ * in, line by line by `lineWithRecordings`'s fallback, for a reader that runs
+ * in the Text view too, where the workspace's audio map is not fetched unless
+ * the person may restructure lines.
+ */
+export function linesWithRecordings(
+  lines: CellData[],
+  workspaceAudio: Map<string, CellAudioEntry>,
+  laneAudio: Map<string, CellAudioEntry>,
+): CellData[] {
+  if (laneAudio.size === 0) return mergeCellsWithAudio(lines, workspaceAudio)
+  return lines.map((c) => lineWithRecordings(c, workspaceAudio, laneAudio) ?? c)
+}
+
+/**
+ * AQU-2426 (browser pass, Nov 9): the rows a transcription run a reload stopped
+ * still has to do, and the rows that failed before the reload, as this page has
+ * them: the file's heard lines where its takes live on those, else its own
+ * lines with their recordings merged in (`lineWithRecordings`).
+ *
+ * The page carrying a run on built its rows from the workspace's audio map
+ * alone, which the Text view does not fetch unless the person may restructure
+ * lines (by default nobody may). There every row came without its recording,
+ * nothing needed transcribing, and the run was ended and forgotten with no
+ * request sent: a take recorded over the hourly limit was never transcribed.
+ */
+export function carryOnRunCells(
+  run: { cellIds: readonly string[]; doneIds: readonly string[]; failed: ReadonlyArray<{ cellId: string }> },
+  from: {
+    heardLines: CellData[] | null
+    lines: CellData[]
+    workspaceAudio: Map<string, CellAudioEntry>
+    laneAudio: Map<string, CellAudioEntry>
+  },
+): { cells: CellData[]; failedCells: CellData[] } {
+  const pool = from.heardLines ?? linesWithRecordings(from.lines, from.workspaceAudio, from.laneAudio)
+  const byId = new Map(pool.map((c) => [c.id, c]))
+  const settled = new Set([...run.doneIds, ...run.failed.map((f) => f.cellId)])
+  const cells = run.cellIds.filter((id) => !settled.has(id)).flatMap((id) => {
+    const cell = byId.get(id)
+    return cell ? [cell] : []
+  })
+  const failedCells = run.failed.flatMap((f) => {
+    const cell = byId.get(f.cellId)
+    return cell ? [cell] : []
+  })
+  return { cells, failedCells }
+}
+
+/**
  * AQU-2079: the sync-token fetcher a project-scoped read mints through when it
  * must not wait for the project-details response.
  *

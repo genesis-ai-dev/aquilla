@@ -4577,6 +4577,23 @@ describe("TimelineEditor — an added track finds its takes where they actually 
       expect(parseFloat(screen.getByTestId("tl-target-cue2").style.left)).toBeCloseTo(5 * 38, 0)
     })
 
+    // AQU-2253 (browser pass, Nov 9): Play on such a file plays its heard
+    // lines (the workspace's `playbackCells`), and the playhead has to follow
+    // them. Scoped to the subtitle lines, the queue on a heard line read as
+    // another file's: the playhead stood where the timeline was clicked while
+    // the film and the bottom strip's time ran on.
+    it("the playhead follows the queue while it plays the heard lines", () => {
+      mockQueueState = { kind: "playing", cellIndex: 1, cellId: "cue2" }
+      mockProgress = { currentTime: 7, duration: 8, rate: 1, volume: 1, programmeClock: true }
+      try {
+        renderAt("audioFirst")
+        expect(parseFloat(screen.getByTestId("tl-playhead").style.left)).toBeCloseTo(7 * 38, 0)
+      } finally {
+        mockQueueState = { kind: "idle" }
+        mockProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1, programmeClock: false }
+      }
+    })
+
     // AQU-2227 (review, Nov 9): the same file with recording lines of its own
     // (an uploaded recording cut into lines beside a linked film, or an
     // imported film whose heard lines already hold takes). Laid out from the

@@ -3,6 +3,11 @@ import { describe, expect, it } from "vitest"
 import {
   forgetStallSample,
   IDLE_STALL_STATE,
+  browserPlaysHls,
+  IDLE_SEEK_WATCH,
+  seekTargetLoaded,
+  watchSeek,
+  type SeekWatch,
   stallStep,
   STALL_FROZEN_TICKS,
   STALL_SETTLED_TICKS,
@@ -172,5 +177,65 @@ describe("forgetStallSample", () => {
     const after = forgetStallSample(state)
     const { actions } = run(frozen(6, 12), after)
     expect(actions).toEqual([{ kind: "recover", rung: "rebuild" }, { kind: "giveUp" }])
+  })
+})
+
+// AQU-2253 (browser pass, Nov 9; review, Nov 9): WebKit left a seek past what
+// had loaded unfinished for good, though the film went on to load all of it.
+// Such a seek is stuck only after SEEK_STUCK_MS over loaded film, with no
+// newer seek asked for; and it is never seeked again on top of itself.
+describe("a seek that never lands", () => {
+  const ranges = (...r: Array<[number, number]>) => ({ length: r.length, start: (i: number) => r[i]![0], end: (i: number) => r[i]![1] })
+  const loadedAt = (currentTime: number, buffered: ReturnType<typeof ranges> | null, duration = 60) =>
+    seekTargetLoaded({ currentTime, duration, buffered })
+
+  it("its place has loaded only with one range from it to a second past it", () => {
+    expect(loadedAt(26, ranges([0, 21.5]))).toBe(false)
+    expect(loadedAt(26, ranges([0, 26.4]))).toBe(false)
+    expect(loadedAt(26, ranges([0, 21.5], [26.5, 40]))).toBe(false)
+    expect(loadedAt(26, null)).toBe(false)
+    expect(loadedAt(26, ranges([0, 28.2]))).toBe(true)
+    expect(loadedAt(26, ranges([0, 3.2], [22.6, 28.2]))).toBe(true)
+    // Near the end, loaded to the end is enough.
+    expect(loadedAt(59.5, ranges([0, 60]))).toBe(true)
+  })
+
+  const step = (w: SeekWatch, now: number, over: Partial<{ seeking: boolean; sec: number; loaded: boolean; askedAt: number | null }> = {}) =>
+    watchSeek(w, { seeking: true, sec: 26, loaded: true, now, askedAt: null, ...over })
+
+  it("is stuck after five seconds seeking over loaded film, and not a moment before", () => {
+    let w = IDLE_SEEK_WATCH
+    for (let now = 1_000; now < 6_000; now += 1_000) {
+      const r = step(w, now)
+      expect(r.stuck, String(now)).toBe(false)
+      w = r.watch
+    }
+    expect(step(w, 6_000).stuck).toBe(true)
+  })
+
+  it("starts again for a new target, a newer seek asked for, a film not loaded there, or a seek that landed", () => {
+    let w = step(IDLE_SEEK_WATCH, 1_000).watch
+    w = step(w, 5_000, { sec: 30 }).watch // a new target
+    expect(step(w, 9_000, { sec: 30 }).stuck).toBe(false)
+    w = step(IDLE_SEEK_WATCH, 1_000).watch
+    expect(step(w, 6_000, { askedAt: 4_000 }).stuck).toBe(false) // a seek asked for at 4 s
+    expect(step(w, 9_000, { askedAt: 4_000 }).stuck).toBe(true)
+    w = step(IDLE_SEEK_WATCH, 1_000).watch
+    w = step(w, 3_000, { loaded: false }).watch
+    expect(step(w, 6_000).stuck).toBe(false)
+    w = step(IDLE_SEEK_WATCH, 1_000).watch
+    w = step(w, 3_000, { seeking: false }).watch
+    expect(step(w, 6_000).stuck).toBe(false)
+  })
+
+  it("its ladder starts past the nudge, which would seek again on top of it", () => {
+    const { actions } = run(Array.from({ length: 1 + STALL_FROZEN_TICKS }, () => running(26, { seekStuck: true })))
+    expect(actions).toEqual([{ kind: "recover", rung: "recover" }])
+  })
+
+  it("only Safari's own player plays a stream", () => {
+    expect(browserPlaysHls({ canPlayType: () => "maybe" })).toBe(true)
+    expect(browserPlaysHls({ canPlayType: () => "" })).toBe(false)
+    expect(browserPlaysHls({})).toBe(false)
   })
 })

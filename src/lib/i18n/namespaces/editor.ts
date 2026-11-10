@@ -1303,17 +1303,21 @@ export const editor = defineNamespace({
     "editor.timeline.linkVideoTitleNew": "Link a film",
     // D#17 (import map, Nov 2): one short line, the rest behind a click (i).
     // The film's sound: a linked film plays with its own sound; with an
-    // uploaded recording beside it, that recording is what plays while the
-    // file follows its source (MediaVideoPane), and following the recordings
-    // the film's own sound plays straight through (AQU-2253).
+    // uploaded recording beside it, that recording is what plays and the film
+    // is muted, in both timings (MediaVideoPane, `recordingDrivesPlayback`),
+    // except that a YouTube film keeps its own sound until the recording is
+    // picked from its Sound menu.
+    // AQU-2253 (browser pass, Nov 9): the last sentence said that following the
+    // recordings the film plays with its own sound. Since the review's film
+    // fix 1 that is wrong beside an uploaded recording, which plays there too.
     "editor.timeline.linkVideoLead": "Paste the address of the film this file was dubbed from.",
     "editor.timeline.linkVideoMoreLabel": "About linking a film",
     "editor.timeline.linkVideoMore":
       "It plays beside the text, in step with the timeline, with its own sound. A YouTube link or " +
       "a direct link to a video file both work. When the file also has an uploaded recording of its " +
-      "source, you hear that recording while the file follows its source and the film is muted; a " +
-      "film on YouTube keeps its own sound until you pick the recording from its Sound menu. " +
-      "Following the recordings, the film plays with its own sound.",
+      "source, you hear that recording and the film is muted, whether the file follows its source " +
+      "or its recordings; a film on YouTube keeps its own sound until you pick the recording from " +
+      "its Sound menu.",
     // D#13: not the empty-file card's placeholder, which takes a different link.
     "editor.timeline.linkVideoPlaceholder": "A YouTube link, or a link to a video file",
     "editor.timeline.linkVideoAddressLabel": "Film address",
@@ -1853,8 +1857,11 @@ export const editor = defineNamespace({
     // between languages. The `{placeholder}` names say what each hole holds.
 
     // — Import audio VTT dialog ————————————————————————————————
-    "editor.timeline.audioVttTitleReplace": "Replace the audio VTT",
-    "editor.timeline.audioVttTitleNew": "Import an audio VTT",
+    // AQU-2253 (browser pass, Nov 9): the dialog's title and its Remove button
+    // name the track as the Sources menu and the toasts do, "Source cues" (Sam,
+    // Oct 30). "Audio VTT" stays where it names the file you pick.
+    "editor.timeline.audioVttTitleReplace": "Replace the Source cues",
+    "editor.timeline.audioVttTitleNew": "Import Source cues",
     "editor.timeline.audioVttDescription":
       "The cues become a read-only Source cues track on this file's timeline — " +
       "the transcript of what is said in the film, on the film's own timings. The " +
@@ -1924,7 +1931,7 @@ export const editor = defineNamespace({
       "The track goes to Recently deleted, so a project lead can put it back — or " +
       "you can import an audio VTT again afterwards.",
     "editor.timeline.audioVttRemoveGo": "Remove the cues",
-    "editor.timeline.audioVttRemove": "Remove audio cues",
+    "editor.timeline.audioVttRemove": "Remove the Source cues",
     "editor.timeline.audioVttImport": "Import cues",
     "editor.timeline.audioVttNothingToUpdate": "Nothing to update",
     "editor.timeline.audioVttUpdateCues": plural({ one: "Update {count} cue", other: "Update {count} cues" }),

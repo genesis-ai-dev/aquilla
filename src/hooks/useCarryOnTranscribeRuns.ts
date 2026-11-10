@@ -6,7 +6,7 @@
 // whose file is not open is said once, in a toast that says where it stopped
 // and that it carries on when that file is opened.
 
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import { getBatchProgress } from "@/lib/audio/batch-progress"
 import {
   claimStoredTranscribeRun,
@@ -57,6 +57,13 @@ export interface CarryOnTranscribeRunsArgs {
    */
   username?: string | null
   lane?: string
+  /**
+   * AQU-2426 (review, Nov 9): the open file's recordings could not be read,
+   * and the read's own retries are spent. `ready` is then false (a failed
+   * read is no answer), so a run kept for this file waits for a Retry
+   * rather than being carried on over rows with no recordings and ended.
+   */
+  recordingsFailed?: boolean
   /** Carry the run on in this page. `handle` is this page's claim on it. */
   carryOn: (run: StoredTranscribeRun, handle: TranscribeRunHandle) => void
   /** The run can't be carried on here yet: say where it stopped. Once per run
@@ -65,8 +72,12 @@ export interface CarryOnTranscribeRunsArgs {
   announce: (run: StoredTranscribeRun, why: "file" | "lane") => void
 }
 
-export function useCarryOnTranscribeRuns(args: CarryOnTranscribeRunsArgs): void {
-  const { projectId, activeFileId, ready, version, username, lane } = args
+export function useCarryOnTranscribeRuns(args: CarryOnTranscribeRunsArgs): {
+  /** AQU-2426 (review, Nov 9): a run kept for the open file is waiting on
+   *  recordings that could not be read: offer the Retry. */
+  waitingOnRecordings: boolean
+} {
+  const { projectId, activeFileId, ready, version, username, lane, recordingsFailed } = args
   const announced = useRef(new Set<string>())
   const announcedLane = useRef(new Set<string>())
   const handled = useRef(new Set<string>())
@@ -138,4 +149,22 @@ export function useCarryOnTranscribeRuns(args: CarryOnTranscribeRunsArgs): void 
       if (timer !== null) clearTimeout(timer)
     }
   }, [projectId, activeFileId, ready, version, username, lane])
+
+  // AQU-2426 (review, Nov 9): is a run this page would carry on held up by
+  // recordings that could not be read? Then the person gets a Retry.
+  const [waitingOnRecordings, setWaitingOnRecordings] = useState(false)
+  useEffect(() => {
+    if (!projectId || !activeFileId || !recordingsFailed) {
+      setWaitingOnRecordings(false)
+      return
+    }
+    let gone = false
+    void interruptedTranscribeRuns(projectId).then((runs) => {
+      if (gone) return
+      setWaitingOnRecordings(runs.some((r) => r.fileId === activeFileId && transcribeRunFits(r, { username, lane }) === "ok"))
+    })
+    return () => { gone = true }
+  }, [projectId, activeFileId, recordingsFailed, username, lane])
+
+  return { waitingOnRecordings }
 }

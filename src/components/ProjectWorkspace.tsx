@@ -189,6 +189,8 @@ import {
   canRestructureTracks,
   resolveTakeLine,
   lineWithRecordings,
+  linesWithRecordings,
+  carryOnRunCells,
   historyFileName,
   buildRouteScopedTokenFetcher,
 } from "./project-workspace-helpers"
@@ -283,7 +285,7 @@ import { injectOptimisticAudioTrim,
 import { attachmentOutFrom, canCutAt, newPieceAudioId, pieceLabels } from "@/lib/audio/cut-take"
 import { newestMatchingStep, recordGroup, recordStep, registerStepKinds, undoStepById, setHistoryRemote, setHistoryScope, setLaneSwitcher, setFileNamer, setOpenFileProbe, withGroup, type LaneSwitch } from "@/lib/history/history"
 import { httpHistoryRemote } from "@/lib/history/history-remote"
-import { laneAccessFor, laneShownReady, waitUntilReady, type LaneAccess } from "@/lib/history/lane-switch"
+import { laneAccessFor, laneShownReady, stepReadsRecordings, waitUntilReady, type LaneAccess } from "@/lib/history/lane-switch"
 import { CastStepBuilder, castValueOf, filmNow, mediaStepHandlers, type CastValue, type CueLinksData, type CueLinkWrite, type PendingFilm } from "@/lib/history/media-steps"
 import { cellLabelStepHandlers, recordCellLabelStep } from "@/lib/history/label-steps"
 import { sourceStepHandlers } from "@/lib/history/source-steps"
@@ -2161,7 +2163,11 @@ export function ProjectWorkspace() {
    * project/file at module level, so this, the gated map and EditorTable's own
    * read share one fetch.
    */
-  const { byCellId: audioValidationByCellId, hasLoaded: audioValidationLoaded } = useFileAudioAttachments(
+  const {
+    byCellId: audioValidationByCellId, hasLoaded: audioValidationLoaded,
+    // AQU-2426 (review, Nov 9): whether the read answered, for the carry-on.
+    answered: audioValidationAnswered, failed: audioValidationFailed, revalidate: revalidateAudioValidation,
+  } = useFileAudioAttachments(
     project?.id ?? null,
     activeFileId,
     // AQU-1591: bulk audio validation votes on the takes of the lane you are
@@ -4992,7 +4998,11 @@ export function ProjectWorkspace() {
   // is a one-shot read — they are a transcript of a finished film and no event
   // ever edits them). Only their ATTACHMENTS are live, which is exactly what
   // this second per-file read gives us.
-  const { byCellId: cueAudioByCellId, hasLoaded: cueAudioLoaded } = useFileAudioAttachments(
+  const {
+    byCellId: cueAudioByCellId, hasLoaded: cueAudioLoaded,
+    // AQU-2426 (review, Nov 9): whether the read answered, for the carry-on.
+    answered: cueAudioAnswered, failed: cueAudioFailed, revalidate: revalidateCueAudio,
+  } = useFileAudioAttachments(
     project?.id ?? null,
     // AQU-1326: deferred behind the first cell page (see `editorFirstPaint`).
     editorFirstPaint ? (audioCueSibling?.id ?? null) : null,
@@ -12437,13 +12447,24 @@ export function ProjectWorkspace() {
   // by itself, once its file is open and that file's rows and recordings have
   // loaded (before then, a row still to do can't be told from a row with
   // nothing on it). A run on another file is said once, with where it stopped.
-  useCarryOnTranscribeRuns({
+  const { waitingOnRecordings: carryOnWaitingOnRecordings } = useCarryOnTranscribeRuns({
     projectId: project?.id,
     activeFileId,
     // AQU-2375 (review, Nov 9): …and ALL its rows, not just the first page.
     // (A load that failed has not brought them all in either.)
-    ready: carryOnReady({ firstPaint: editorFirstPaint, rowsLoading: cellsLoading || Boolean(cellsError), recordingsLoaded: workspaceAudioLoaded, heardLinesLoading }),
-    version: [workspaceAudioByCellId, audioCueCells, cellStoreVersion],
+    // AQU-2426 (browser pass, Nov 9): the recordings are the lane's read, which
+    // every view fetches; the workspace's is not fetched in the Text view, and
+    // a run carried on there found no recording on any row (`carryOnRunCells`).
+    // AQU-2426 (review, Nov 9): …and a read that failed is no answer, as a
+    // failed load of the lines is not: the run waits for one that answers.
+    ready: carryOnReady({
+      firstPaint: editorFirstPaint,
+      rowsLoading: cellsLoading || Boolean(cellsError),
+      recordingsLoaded: audioValidationLoaded && audioValidationAnswered,
+      heardLinesLoading: heardLinesLoading || (audioCueSibling != null && !cueAudioAnswered),
+    }),
+    recordingsFailed: audioValidationFailed || (audioCueSibling != null && cueAudioFailed),
+    version: [workspaceAudioByCellId, audioValidationByCellId, audioCueCells, cellStoreVersion],
     // AQU-2375 (review, Nov 9): only the person who started a run carries it
     // on, and a run over takes only in the language it was started in.
     username: frontierSession?.username ?? null,
@@ -12454,16 +12475,11 @@ export function ProjectWorkspace() {
         carryOnLineWords(run, handle)
         return
       }
-      const pool = audioCueCells ?? mergeCellsWithAudio(getActiveCells(), workspaceAudioByCellIdRef.current)
-      const byId = new Map(pool.map((c) => [c.id, c]))
-      const settled = new Set([...run.doneIds, ...run.failed.map((f) => f.cellId)])
-      const cells = run.cellIds.filter((id) => !settled.has(id)).flatMap((id) => {
-        const cell = byId.get(id)
-        return cell ? [cell] : []
-      })
-      const failedCells = run.failed.flatMap((f) => {
-        const cell = byId.get(f.cellId)
-        return cell ? [cell] : []
+      const { cells, failedCells } = carryOnRunCells(run, {
+        heardLines: audioCueCells,
+        lines: getActiveCells(),
+        workspaceAudio: workspaceAudioByCellIdRef.current,
+        laneAudio: audioValidationByCellIdRef.current,
       })
       void runTranscriptionReported({
         cells,
@@ -12485,6 +12501,14 @@ export function ProjectWorkspace() {
       })
     },
   })
+  // AQU-2426 (review, Nov 9): a run kept for this file waits on recordings
+  // that could not be read; the person gets the Retry a failed load of the
+  // lines gives (below the rows), and it reads the recordings again too.
+  const retryCellsAndRecordings = useCallback(() => {
+    if (cellsError) retryCells()
+    if (audioValidationFailed) revalidateAudioValidation()
+    if (cueAudioFailed) revalidateCueAudio()
+  }, [cellsError, retryCells, audioValidationFailed, revalidateAudioValidation, cueAudioFailed, revalidateCueAudio])
 
   // AQU-646: tell the cell store which lines carry a recording of their OWN, so
   // a dub with no text counts as translated work in the status bar, file
@@ -12771,10 +12795,22 @@ export function ProjectWorkspace() {
     ? mergeCellsWithAudio(readAtVersion(cellStoreVersion, getActiveCells), workspaceAudioByCellId)
     : EMPTY_CELL_DATA,
   [activeFileId, cellStoreVersion, getActiveCells, workspaceAudioByCellId])
+  // AQU-2426 (browser pass, Nov 9): Generate voices for every line is offered
+  // in the Text view, where the map above is not fetched unless the person may
+  // restructure lines: every line looked unvoiced, so it counted lines already
+  // voiced and generated them again. Its lines take the lane's recordings
+  // there. (The Transcribe all and Change voice for all counts below stay on
+  // the map above: keeping them out of the Text view was Sam's call, AQU-490.)
+  const textViewAudioCells = useMemo(() => !activeFileId
+    ? EMPTY_CELL_DATA
+    : workspaceAudioByCellId.size > 0 || audioValidationByCellId.size === 0
+      ? batchAudioCells
+      : linesWithRecordings(readAtVersion(cellStoreVersion, getActiveCells), workspaceAudioByCellId, audioValidationByCellId),
+  [activeFileId, batchAudioCells, cellStoreVersion, getActiveCells, workspaceAudioByCellId, audioValidationByCellId])
   const synthTargets = useMemo(() => activeFileId
-    ? resolveSynthTargets(batchAudioCells, cueLinkArgs)
+    ? resolveSynthTargets(textViewAudioCells, cueLinkArgs)
     : [],
-  [activeFileId, batchAudioCells, cueLinkArgs])
+  [activeFileId, textViewAudioCells, cueLinkArgs])
   synthTargetsRef.current = synthTargets
 
   // AQU-646: real counts for the "Transcribe all" / "Synth all" menu items,
@@ -14017,6 +14053,16 @@ export function ProjectWorkspace() {
   const audioMergedCells = useMemo(
     () => mergeCellsWithAudio(legacyCells, workspaceAudioByCellId),
     [legacyCells, workspaceAudioByCellId],
+  )
+  // AQU-2426 (browser pass, Nov 9): Export's recordings on a file whose takes
+  // are on its own lines. Export opens from the Text view too, where the map
+  // above is not fetched unless the person may restructure lines, and it found
+  // no recordings there. There they come from the lane's read.
+  const exportAudioCells = useMemo(
+    () => (workspaceAudioByCellId.size > 0 || audioValidationByCellId.size === 0
+      ? audioMergedCells
+      : linesWithRecordings(legacyCells, workspaceAudioByCellId, audioValidationByCellId)),
+    [audioMergedCells, legacyCells, workspaceAudioByCellId, audioValidationByCellId],
   )
   // AQU-2461 (review, Nov 9): Change film names the film itself. A video
   // dropped on an empty file is not named after the file; the upload's name is
@@ -15964,10 +16010,14 @@ export function ProjectWorkspace() {
   // Gap 24: the change happens where the person can see it. The switch is the
   // switcher's own; the step runs once that language's lines and takes have
   // loaded and the handlers below have re-registered with it.
-  const laneReadyRef = useRef({ lane: activeLane, ready: false })
+  const laneReadyRef = useRef({ lane: activeLane, ready: false, recordingsLoaded: false })
   laneReadyRef.current = {
     lane: activeLane,
     ready: !cellsLoading && workspaceAudioLoaded && timelineAudioLoaded && (!audioCueSibling || cueAudioLoaded),
+    // AQU-2426 (review, Nov 9): the lane's own read, which a step's take is
+    // found in when the workspace's map is not fetched (the Text view). Waited
+    // for only by a step that reads recordings (the switch below).
+    recordingsLoaded: audioValidationLoaded && audioValidationAnswered,
   }
   // Read through a ref: the switch may first wait for the languages to load,
   // and must then judge by the loaded list, not the one it started with.
@@ -15979,8 +16029,8 @@ export function ProjectWorkspace() {
     canSwitch: canSwitchLanes(project?.syncRole?.level),
     loaded: project?.lanes != null,
   }
-  const laneSwitchRef = useRef<(lane: string) => Promise<LaneSwitch>>(async () => "blocked")
-  laneSwitchRef.current = async (lane: string) => {
+  const laneSwitchRef = useRef<(lane: string, kinds: readonly string[]) => Promise<LaneSwitch>>(async () => "blocked")
+  laneSwitchRef.current = async (lane: string, kinds: readonly string[]) => {
     // Cmd+Z pressed as the project opens: let its languages load first.
     if (!laneAccessRef.current.loaded && (await waitUntilReady(() => laneAccessRef.current.loaded)) !== "ready") return "blocked"
     const access = laneAccessFor(lane, laneAccessRef.current)
@@ -15988,12 +16038,20 @@ export function ProjectWorkspace() {
     setActiveLane(lane)
     // The store is read live: it sorts its rows for the language one effect
     // pass after the render that opened it.
+    // AQU-2426 (review, Nov 9): its recordings too, only when the step reads
+    // them; a text edit never waits for them.
+    const needsRecordings = stepReadsRecordings(kinds)
     return waitUntilReady(() =>
-      laneShownReady(lane, { open: laneReadyRef.current.lane, storeLane: cellStore.viewLane, loaded: laneReadyRef.current.ready }),
+      laneShownReady(lane, {
+        open: laneReadyRef.current.lane,
+        storeLane: cellStore.viewLane,
+        loaded: laneReadyRef.current.ready,
+        recordingsLoaded: laneReadyRef.current.recordingsLoaded,
+      }, needsRecordings),
     )
   }
   useEffect(() => {
-    setLaneSwitcher((lane) => laneSwitchRef.current(lane))
+    setLaneSwitcher((lane, kinds) => laneSwitchRef.current(lane, kinds))
     return () => setLaneSwitcher(null)
   }, [])
 
@@ -17127,7 +17185,9 @@ export function ProjectWorkspace() {
       ...(activeLane ? { targetLang: activeLane } : {}),
       surface: "cell",
       // Decision 11: an Undo step, naming what played in that slot before.
-      history: { selectedBefore: playingInSlot(workspaceAudioByCellIdRef.current.get(cell.id), GENERATED_VOICE_SLOT) },
+      // AQU-2426 (browser pass, Nov 9): …from the lane's read where the
+      // workspace's map is not fetched (the Text view).
+      history: { selectedBefore: playingInSlot(workspaceAudioByCellIdRef.current.get(cell.id) ?? audioValidationByCellIdRef.current.get(cell.id), GENERATED_VOICE_SLOT) },
     }).catch((e: unknown) => {
       throw new Error(categorizeAiError(e instanceof Error ? e.message : String(e)).body, { cause: e })
     })
@@ -19406,7 +19466,7 @@ export function ProjectWorkspace() {
           />
               )}
               </div>
-              <CellRowsLoadStatus progress={cellLoadProgress} loading={cellsLoading} error={cellsError} onRetryClick={retryCells} />
+              <CellRowsLoadStatus progress={cellLoadProgress} loading={cellsLoading} error={cellsError || carryOnWaitingOnRecordings} onRetryClick={retryCellsAndRecordings} />
               </>,
                     dock.hosts.text,
                   )
@@ -20135,7 +20195,7 @@ export function ProjectWorkspace() {
           // active file's OWN merged cells rather than `legacyCells`, because a
           // file with no cue sibling at all — an audio-first import, say —
           // carries its takes directly and would otherwise be unexportable.
-          audioCells={audioCueCells ?? audioMergedCells}
+          audioCells={audioCueCells ?? exportAudioCells}
           reportFiles={reportFiles}
           characterResolutions={tts.settings?.characterResolutions}
           // Whether there is a SECOND file to export — the heard lines as their

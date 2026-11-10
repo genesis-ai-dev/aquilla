@@ -34,6 +34,26 @@ vi.mock("@/lib/audio/audio-attachments-bus", () => ({
   injectOptimisticAudioDeselect: (...args: unknown[]) => injectDeselect(...args),
 }))
 
+// AQU-2492 (review, Nov 9): the Undo steps the strip records; a group's parts
+// are kept under it.
+const steps = vi.hoisted(() => [] as Array<Record<string, unknown>>)
+vi.mock("@/lib/history/history", async (orig) => {
+  const real = await orig<typeof import("@/lib/history/history")>()
+  let group: Array<Record<string, unknown>> | null = null
+  return {
+    ...real,
+    recordStep: (step: Record<string, unknown>) => { (group ?? steps).push(step) },
+    withGroup: async (label: Record<string, unknown>, fn: () => Promise<unknown>) => {
+      const parts: Array<Record<string, unknown>> = []
+      group = parts
+      const out = await fn()
+      group = null
+      steps.push({ kind: "group", label, parts })
+      return out
+    },
+  }
+})
+
 // AQU-464: the strip resolves each take against the cell's text history. That
 // read is the hook's own concern (covered by src/lib/audio/text-drift.test.ts);
 // here we drive its RESULT so the strip's rendering is tested without a fetch.
@@ -401,6 +421,72 @@ describe("TakesStrip — generated (TTS) takes (round 8c)", () => {
   beforeEach(() => {
     emitSelect.mockClear()
     injectOptimistic.mockClear()
+    steps.length = 0
+  })
+
+  // AQU-2492 (review, Nov 9): choosing an AI voice over a recording on the
+  // main track also hands the recording slot back, and that was no Undo step
+  // at all, so ⌘Z after it undid something else. It is one step of both
+  // slot choices.
+  it("choosing an AI voice over a recording is ONE Undo step that gives both slots back", async () => {
+    render(
+      <TakesStrip
+        {...common}
+        takes={[namedTake("audio-c1-1-t.webm", "Take 1"), genTake("audio-c1-2-g.wav")]}
+        selectedAudioId="audio-c1-1-t.webm"
+        selectedGeneratedAudioId="audio-c1-0-oldg.wav"
+        sourceClip={SOURCE_CLIP}
+      />,
+    )
+    const useButtons = screen.getAllByRole("button", { name: "Use this take" })
+    fireEvent.click(useButtons[useButtons.length - 1])
+    await waitFor(() => expect(steps).toHaveLength(1))
+    expect(steps[0]).toMatchObject({ kind: "group", label: { labelKey: "editor.history.stepChooseTake", fileId: "f1" } })
+    expect(steps[0].parts).toEqual([
+      expect.objectContaining({ kind: "take.select", fileId: "f1",
+        data: { cellId: "c1", slot: "generatedVoice", before: "audio-c1-0-oldg.wav", after: "audio-c1-2-g.wav" } }),
+      expect.objectContaining({ kind: "take.select", fileId: "f1",
+        data: { cellId: "c1", slot: "recording", before: "audio-c1-1-t.webm", after: SOURCE_CLIP.audioId } }),
+    ])
+  })
+
+  it("with no source clip, the recording slot's part empties it and Undo gives the recording back", async () => {
+    render(
+      <TakesStrip
+        {...common}
+        takes={[namedTake("audio-c1-1-t.webm", "Take 1"), genTake("audio-c1-2-g.wav")]}
+        selectedAudioId="audio-c1-1-t.webm"
+        selectedGeneratedAudioId={null}
+        sourceClip={null}
+      />,
+    )
+    const useButtons = screen.getAllByRole("button", { name: "Use this take" })
+    fireEvent.click(useButtons[useButtons.length - 1])
+    await waitFor(() => expect(steps).toHaveLength(1))
+    expect((steps[0].parts as Array<{ data: unknown }>).map((p) => p.data)).toEqual([
+      { cellId: "c1", slot: "generatedVoice", before: null, after: "audio-c1-2-g.wav" },
+      { cellId: "c1", slot: "recording", before: "audio-c1-1-t.webm", after: null },
+    ])
+  })
+
+  // The sibling: choosing a recording while the AI voice sounds named the AI
+  // voice as what the RECORDING slot held, and Undo chose it into that slot.
+  it("choosing a recording while the AI voice sounds names the recording slot's own choice as before", async () => {
+    render(
+      <TakesStrip
+        {...common}
+        takes={[namedTake("audio-c1-1-t.webm", "Take 1"), genTake("audio-c1-2-g.wav")]}
+        selectedAudioId={SOURCE_CLIP.audioId}
+        selectedGeneratedAudioId="audio-c1-2-g.wav"
+        sourceClip={SOURCE_CLIP}
+      />,
+    )
+    fireEvent.click(screen.getAllByRole("button", { name: "Use this take" })[0])
+    await waitFor(() => expect(steps).toHaveLength(1))
+    expect(steps[0]).toMatchObject({
+      kind: "take.select",
+      data: { cellId: "c1", slot: "recording", before: SOURCE_CLIP.audioId, after: "audio-c1-1-t.webm" },
+    })
   })
 
   it("marks the generated take active when the recording slot holds the source clip", () => {

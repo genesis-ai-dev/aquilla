@@ -26,6 +26,7 @@ import { alignChunks, tokenizeWords } from "@/lib/audio/timings"
 import {
   emitCellAudioAttach, emitCellAudioTrim, emitCellRetime, emitSourceCellCreate, emitSourceCellReorder,
 } from "@/lib/sync/events-emit"
+import type { CellData } from "@/hooks/useCells"
 
 /** A source line of shared recording, as the split needs it. */
 export interface RecordingLine {
@@ -214,7 +215,7 @@ export function textsForSplit(args: {
   kept: { words: readonly { text: string; start: number; end: number }[]; text: string } | null
   /** The transcript's stored word timings (seconds from the stretch's start). */
   timings: readonly { word: string; t0: number; t1: number }[] | undefined
-}): { texts: string[] | null; stayed: boolean } {
+}): { texts: string[] | null; stayed: TextStayed } {
   const { pieces, lo } = args
   const text = args.lineText.trim()
   if (args.kept && args.kept.words.length > 0) {
@@ -227,7 +228,75 @@ export function textsForSplit(args: {
     const shared = shareTextByWordTimes(pieces, lo, text, args.timings.map((w) => ({ text: w.word, start: w.t0, end: w.t1 })))
     if (shared) return { texts: shared, stayed: false }
   }
-  return { texts: null, stayed: true }
+  // AQU-2426 (browser pass, Nov 9): why it stayed, so the toast tells the
+  // truth. Word times that were there but no longer fit the text are not "no
+  // word times".
+  const hadTimes = Boolean((args.kept && args.kept.words.length > 0) || (args.timings && args.timings.length > 0))
+  return { texts: null, stayed: hadTimes ? "noMatch" : "noTimes" }
+}
+
+/**
+ * Whether a line's text stayed whole on the first line of a split, and why:
+ * `noTimes`, it has no word times to share it out by; `noMatch`, it has them,
+ * but the text has changed too much since for them to say where its words are.
+ */
+export type TextStayed = false | "noTimes" | "noMatch"
+
+/** What a split will write, worked out from the line as it is now. */
+export interface SplitPlan {
+  /** The pieces, each with its text when the line's text is shared out. */
+  pieces: LinePiece[]
+  /** The words those texts were made from. */
+  heard?: LineHeard
+  /** The text stayed whole on the first line, and why (the toast says so). */
+  stayed: TextStayed
+  /** The line's text before the split, for Undo. */
+  before: { text: string }
+}
+
+/**
+ * AQU-2426 (browser pass, Nov 9): what Split into lines… and the notice's
+ * Split at pauses write, from the line as the page has it now.
+ *
+ * `cell` must have the line's recordings merged in (lineWithRecordings):
+ * its stored word times ride the recording, not the line. Read from a map the
+ * Text view never loads, a split there found no word times and left the whole
+ * transcript on the first line; see project-workspace-helpers.ts.
+ */
+export function planLineSplit(args: {
+  line: RecordingLine
+  pieces: readonly LinePiece[]
+  /** The line now, with its recordings merged in. */
+  cell: Pick<CellData, "transcription" | "audioTimings" | "attachments"> | null
+  /** Words a words run found for this stretch and kept in this browser. */
+  kept: { words: TimedWord[]; text: string; model?: string } | null
+  /** The words the pieces' texts were made from (a split by words). */
+  given?: LineHeard
+}): SplitPlan {
+  const { line, cell } = args
+  const lo = line.trimStartMs ?? 0
+  const stored = cell?.audioTimings?.[line.audioId]
+  const before: SplitPlan["before"] = { text: cell?.transcription ?? "" }
+  // A split at pauses on a line that already has its words: each new line
+  // gets the text in its own stretch, never the first line all of it (from a
+  // kept words run, or else the transcript's own stored word times).
+  if (!args.pieces.every((p) => p.text === undefined)) {
+    return { pieces: [...args.pieces], ...(args.given ? { heard: args.given } : {}), stayed: false, before }
+  }
+  const kept = args.kept && args.kept.words.length > 0 ? args.kept : null
+  const shared = textsForSplit({ pieces: args.pieces, lo, lineText: before.text, kept, timings: stored })
+  if (!shared.texts) return { pieces: [...args.pieces], stayed: shared.stayed, before }
+  const texts = shared.texts
+  // The times the text was shared out by go with it to each line.
+  const heard: LineHeard | undefined = kept
+    ? kept
+    : stored?.length ? { words: stored.map((w) => ({ text: w.word, start: w.t0, end: w.t1 })) } : undefined
+  return {
+    pieces: args.pieces.map((p, i) => ({ ...p, text: texts[i] ?? "" })),
+    ...(heard ? { heard } : {}),
+    stayed: false,
+    before,
+  }
 }
 
 /** What the line was before the split, for Undo. */

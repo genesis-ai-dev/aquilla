@@ -625,6 +625,28 @@ export function resolveTakeLine(args: {
 }
 
 /**
+ * AQU-2426 (browser pass, Nov 9): the line Split into lines… (and the notice's
+ * Split at pauses, and their Undo) reads, with its recordings merged in, by
+ * the same fallback as `resolveTakeLine` above.
+ *
+ * It merged only the workspace's audio map, which is not fetched in the Text
+ * view unless the person may restructure lines, and by default nobody may. So
+ * in the Text view a split found none of the word times stored with the
+ * recording: Split at pauses left the whole transcript on the first line and
+ * said there were no word times, and its Undo could not find the recording to
+ * write the text back to.
+ */
+export function lineWithRecordings(
+  raw: CellData | null | undefined,
+  workspaceAudio: Map<string, CellAudioEntry>,
+  laneAudio: Map<string, CellAudioEntry>,
+): CellData | null {
+  if (!raw) return null
+  const audio = workspaceAudio.has(raw.id) ? workspaceAudio : laneAudio
+  return mergeCellsWithAudio([raw], audio)[0] ?? raw
+}
+
+/**
  * AQU-2079: the sync-token fetcher a project-scoped read mints through when it
  * must not wait for the project-details response.
  *

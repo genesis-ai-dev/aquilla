@@ -209,7 +209,16 @@ describe("textsForSplit: where a split at pauses gets each line's text", () => {
   })
 
   it("text with no word times at all stays on the first line, and that is known", () => {
-    expect(textsForSplit({ pieces, lo: 0, lineText: "Typed by hand.", kept: null, timings: [] })).toEqual({ texts: null, stayed: true })
+    expect(textsForSplit({ pieces, lo: 0, lineText: "Typed by hand.", kept: null, timings: [] })).toEqual({ texts: null, stayed: "noTimes" })
+  })
+
+  // AQU-2426 (browser pass, Nov 9): the toast said "there were no word times"
+  // when there were, but the text no longer matched them.
+  it("text that no longer matches its word times stays too, and that is told apart from having none", () => {
+    const rewritten = "Something else entirely, typed over the whole of what was heard, with many more words in it than were timed."
+    expect(textsForSplit({ pieces, lo: 0, lineText: rewritten, kept: null, timings: stored })).toEqual({ texts: null, stayed: "noMatch" })
+    expect(textsForSplit({ pieces, lo: 0, lineText: rewritten, kept: { words: timed, text: "In the beginning. Ruth went." }, timings: undefined }))
+      .toEqual({ texts: null, stayed: "noMatch" })
   })
 
   it("no text: nothing to share and nothing stayed", () => {

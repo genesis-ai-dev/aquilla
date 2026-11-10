@@ -188,6 +188,7 @@ import {
   pushedRollupProgress,
   canRestructureTracks,
   resolveTakeLine,
+  lineWithRecordings,
   historyFileName,
   buildRouteScopedTokenFetcher,
 } from "./project-workspace-helpers"
@@ -426,7 +427,7 @@ import type { TranscribeChoiceInfo } from "@/components/import/recording-choice-
 import { RecordingImportChoiceDialog } from "@/components/import/RecordingImportChoiceDialog"
 import { measureByDecodingMs, probeMediaDurationMs } from "@/lib/import"
 import { needsSplitNotice, sourceRecordingLine, uploadedFilmName } from "@/lib/timeline/recording-line"
-import { piecesFromCuts, splitRecordingLine, textsForSplit, writeLineWindow, writeLineWords, type LineHeard, type LinePiece, type RecordingLine } from "@/lib/timeline/split-recording-line"
+import { piecesFromCuts, planLineSplit, splitRecordingLine, writeLineWindow, writeLineWords, type LineHeard, type LinePiece, type RecordingLine } from "@/lib/timeline/split-recording-line"
 import { cutsFromWords, loadLinePcm, pauseCuts, type LineAudio } from "@/lib/audio/recording-split"
 import { transcribeBlock } from "@/lib/audio/transcribe-access"
 import { estimateTranscriptionCost } from "@/lib/audio/transcription-cost"
@@ -10746,10 +10747,11 @@ export function ProjectWorkspace() {
   /** The open file's line, as a split writes it. */
   // Store cells carry no recordings (see the Fortify note on getActiveCell):
   // merge the line's own before reading its source recording.
-  const cellWithAudio = useCallback((cellId: string): CellData | null => {
-    const raw = getActiveCell(cellId)
-    return raw ? mergeCellsWithAudio([raw], workspaceAudioByCellIdRef.current)[0] ?? raw : null
-  }, [getActiveCell])
+  // AQU-2426 (browser pass, Nov 9): …from the lane's always-loaded read when
+  // the workspace's map doesn't have the line (the Text view): a split there
+  // found no stored word times, and its Undo no recording to write text to.
+  const cellWithAudio = useCallback((cellId: string): CellData | null =>
+    lineWithRecordings(getActiveCell(cellId), workspaceAudioByCellIdRef.current, audioValidationByCellIdRef.current), [getActiveCell])
   const recordingLineFor = useCallback((cellId: string, given?: CellData): RecordingLine | null => {
     if (!project?.id) return null
     const cell = given ?? cellWithAudio(cellId)
@@ -10807,33 +10809,17 @@ export function ProjectWorkspace() {
       // transcript's own stored word times (textsForSplit), so text that came
       // from Transcribe all or another device is shared out too, and a
       // correction typed since is kept.
-      let toWrite = pieces
-      let textStayed = false
-      let heard = given
-      const lineNow = cellWithAudio(line.cellId)
-      if (pieces.every((p) => p.text === undefined)) {
-        const lo = line.trimStartMs ?? 0
-        const hi = line.trimEndMs ?? line.durationMs ?? lo + (line.endMs - line.startMs)
-        const kept = findLineWordsRun({ projectId: line.projectId, fileId: line.fileId, cellId: line.cellId, audioId: line.audioId, lo, hi })
-        const keptWords = kept?.line ? wordsOf(kept.line) : null
-        const timings = lineNow?.audioTimings?.[line.audioId]
-        const shared = textsForSplit({ pieces, lo, lineText: lineNow?.transcription ?? "", kept: keptWords, timings })
-        if (shared.texts) {
-          const texts = shared.texts
-          toWrite = pieces.map((p, i) => ({ ...p, text: texts[i] ?? "" }))
-          // The times the text was shared out by go with it to each line.
-          heard = keptWords && keptWords.words.length > 0
-            ? keptWords
-            : timings?.length ? { words: timings.map((w) => ({ text: w.word, start: w.t0, end: w.t1 })) } : undefined
-        }
-        textStayed = shared.stayed
-      }
-      // AQU-2426 (review, Nov 9): the line's text as it is now, for Undo. A
-      // split by words leaves only the first sentence on it; Undo used to give
-      // it the whole recording back with that one sentence. The kept words are
-      // no longer dropped here either, so splitting again after Undo is free.
-      const textBefore = lineNow?.transcription ?? ""
-      const result = await splitRecordingLine({ line, pieces: toWrite, author: currentUsername, ...(heard ? { heard } : {}) })
+      // AQU-2426 (browser pass, Nov 9): worked out by planLineSplit from the
+      // line with its recordings merged in (cellWithAudio). The line's text as
+      // it is now goes into the Undo step; the kept words are not dropped, so
+      // splitting again after Undo is free.
+      const lo = line.trimStartMs ?? 0
+      const hi = line.trimEndMs ?? line.durationMs ?? lo + (line.endMs - line.startMs)
+      const kept = pieces.every((p) => p.text === undefined)
+        ? findLineWordsRun({ projectId: line.projectId, fileId: line.fileId, cellId: line.cellId, audioId: line.audioId, lo, hi })
+        : null
+      const plan = planLineSplit({ line, pieces, cell: cellWithAudio(line.cellId), kept: kept?.line ? wordsOf(kept.line) : null, ...(given ? { given } : {}) })
+      const result = await splitRecordingLine({ line, pieces: plan.pieces, author: currentUsername, ...(plan.heard ? { heard: plan.heard } : {}) })
       if (!result) return false
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       revalidateCells()
@@ -10844,7 +10830,7 @@ export function ProjectWorkspace() {
           before: result.before,
           after: { startMs: result.first.startMs, endMs: result.first.endMs, trimStartMs: result.first.trimStartMs, trimEndMs: result.first.trimEndMs },
           lines: result.created,
-          ...(result.first.text !== undefined ? { text: { before: textBefore, after: result.first.text } } : {}),
+          ...(result.first.text !== undefined ? { text: { before: plan.before.text, after: result.first.text } } : {}),
         },
         labelKey: "editor.history.stepSplitLines",
         fileId: line.fileId,
@@ -10853,8 +10839,8 @@ export function ProjectWorkspace() {
       toast.add({
         type: "success",
         title: t(titleKey, { name: line.name, count: pieces.length }),
-        // Text with no word times to share it out by: said, not left to be found.
-        ...(textStayed ? { description: t("editor.splitLines.textStayed") } : {}),
+        // Text that could not be shared out: said, and why, not left to be found.
+        ...(plan.stayed ? { description: t(plan.stayed === "noMatch" ? "editor.splitLines.textStayedNoMatch" : "editor.splitLines.textStayed") } : {}),
         timeout: 10_000,
         actionProps: {
           children: t("editor.splitLines.undo"),

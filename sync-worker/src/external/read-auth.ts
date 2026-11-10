@@ -15,6 +15,16 @@
 //      required) — never trusts a role baked into the credential itself.
 //
 // Nothing here is new behavior beyond that — it is read-routes.ts's gate, moved.
+//
+// AQU-2504 adds one fallback to step 3: when the live role resolves to nothing,
+// a credential carrying live SUPPORT ACCESS (a platform admin inside their
+// time-boxed window — see db/shared/api-credentials.ts) resolves to owner-level
+// on the `platform` path instead of being refused, and the access is written to
+// `admin_audit_log`. It is a FALLBACK, not an override: an operator who is a
+// genuine member of the project resolves on their genuine grant, keeps that
+// attribution, and is not audited, because reading your own org through the
+// connector is ordinary use. Steps 1 and 2 are untouched — support access never
+// widens the credential's own org/project scope.
 
 import { credentialAllowsOrganization } from '../../../db/shared/api-credentials'
 import { sign } from "hono/jwt"
@@ -25,6 +35,7 @@ import { READ_WALL_MAINTAINER, laneReadWallEnabled } from "../../../src/lib/lane
 import { externalError } from "./errors"
 import { AUTH_HINT } from "./discovery-route"
 import { validateApiCredentialRequest, type ApiCredentialContext } from "../../../db/shared/api-credentials"
+import { auditSupportAccessRead } from "../../../db/shared/support-access-audit"
 import { resolveProjectRoleShared } from "../../../db/shared/project-roles"
 import { enforceRateLimit, userRateLimitIdentifier } from "../../../db/shared/rate-limit"
 
@@ -70,17 +81,30 @@ export async function authenticateCredential(
   return { ok: true, credential }
 }
 
+/** Owner-level, the contribution resolveProjectRoleShared gives the `platform`
+ *  path (AQU-2504). Mirrors ROLE.OWNER / db/shared/project-roles.ts. Exported
+ *  for callers that resolve the project role themselves — see
+ *  {@link claimSupportAccess}. */
+export const PLATFORM_ROLE_LEVEL = 700
+
 export interface AuthedContext {
   credential: ApiCredentialContext
   /** Live-resolved role level (>= ROLE.VIEWER), NOT the credential's own
    *  (nonexistent) role field — the credential only carries autonomy/scope. */
   role: number
+  /** AQU-2504: true when the ONLY thing granting this project was support
+   *  access — i.e. the caller has no genuine grant here. Write surfaces refuse
+   *  the credential anyway (it is minted `access: 'read'`); this says the
+   *  access was cross-tenant, which is what the audit trail records. */
+  viaSupportAccess?: boolean
 }
 
 export async function authenticateAndScope(
   request: Request,
   env: ExternalReadsEnv,
   projectId: string,
+  /** AQU-2504: the tool or route asking, for the support-access audit row. */
+  tool?: string,
 ): Promise<{ ok: true; ctx: AuthedContext } | { ok: false; response: Response }> {
   if (!env.SYNC_SECRET_KEY) {
     return { ok: false, response: new Response("SYNC_SECRET_KEY not configured", { status: 500 }) }
@@ -92,7 +116,12 @@ export async function authenticateAndScope(
   const credentialed = await authenticateCredential(request, env)
   if (!credentialed.ok) return credentialed
 
-  return scopeCredentialToProject(env, credentialed.credential, projectId)
+  return scopeCredentialToProject(
+    env,
+    credentialed.credential,
+    projectId,
+    tool ?? `${request.method} ${new URL(request.url).pathname}`,
+  )
 }
 
 /**
@@ -106,6 +135,8 @@ export async function scopeCredentialToProject(
   env: ExternalReadsEnv,
   credential: ApiCredentialContext,
   projectId: string,
+  /** AQU-2504: the tool or route asking, for the support-access audit row. */
+  tool = "external read",
 ): Promise<{ ok: true; ctx: AuthedContext } | { ok: false; response: Response }> {
   if (!env.AQUILLA_PG) {
     return { ok: false, response: new Response("AQUILLA_PG binding not configured", { status: 500 }) }
@@ -134,11 +165,53 @@ export async function scopeCredentialToProject(
 
   const resolved = await resolveProjectRoleShared(env.AQUILLA_PG, { id: credential.userId }, projectId)
   const role = resolved?.level ?? null
-  if (role === null || role < ROLE.VIEWER) {
-    return { ok: false, response: externalError("permission_denied", "no project membership", 403) }
+  if (role !== null && role >= ROLE.VIEWER) {
+    return { ok: true, ctx: { credential, role } }
   }
 
-  return { ok: true, ctx: { credential, role } }
+  if (await claimSupportAccess(env.AQUILLA_PG, credential, projectId, tool, projectOrgId)) {
+    return { ok: true, ctx: { credential, role: PLATFORM_ROLE_LEVEL, viaSupportAccess: true } }
+  }
+
+  return { ok: false, response: externalError("permission_denied", "no project membership", 403) }
+}
+
+/**
+ * AQU-2504: may this credential open `projectId` on SUPPORT ACCESS alone, and
+ * if so, record it?
+ *
+ * Call it only AFTER the live role has resolved to nothing — support access is
+ * the last path tried, never the first, so an operator who is a genuine member
+ * keeps their own attribution and is not audited for reading their own org.
+ * Returns false (and writes nothing) for every credential without live support
+ * access, which is every credential but a platform admin's inside their window.
+ *
+ * Exported because `get_project` (mcp-handlers.ts) resolves the project role
+ * itself rather than through {@link scopeCredentialToProject}, and the MCP and
+ * REST adapters must not disagree about who can open a project — the same
+ * drift the orgs-list / projects-list pairing exists to prevent.
+ *
+ * Deliberately NOT implemented by passing the platform-admin allowlist into
+ * `resolveProjectRoleShared`: that would hand every connector credential of
+ * every platform admin cross-tenant reach, which is exactly the blanket
+ * elevation this ticket replaces with an opt-in, time-boxed grant.
+ */
+export async function claimSupportAccess(
+  db: AquillaDb,
+  credential: ApiCredentialContext,
+  projectId: string,
+  tool: string,
+  orgId: string | null,
+): Promise<boolean> {
+  if (credential.supportAccess !== true) return false
+  await auditSupportAccessRead(db, credential.userId, {
+    action: "connector.project.read",
+    credentialId: credential.credentialId,
+    tool,
+    orgId,
+    projectId,
+  })
+  return true
 }
 
 /** Mint a short-lived (30s) internal sync-token JWT so we can call the

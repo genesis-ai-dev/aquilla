@@ -140,6 +140,9 @@ describe("consent → token → Agent API credential", () => {
     const described = await consent("request", await authorizeParams(), jwt)
     expect(await described.json()).toEqual({
       clientName: "ChatGPT", clientHost: "chatgpt.com", redirectHost: "chatgpt.com", mode: "act", scopeChoices: false, organizations: [{ id: "10", name: "Alpha" }],
+      // AQU-2504: the page is told whether support access may be offered. False
+      // for an ordinary user, which is what this consent describes.
+      supportAccessAvailable: false,
     })
     const { redirect, code } = await approveFor(jwt)
     expect(`${redirect.origin}${redirect.pathname}`).toBe(REDIRECT)
@@ -501,6 +504,9 @@ describe("pre-registered Zapier client", () => {
     expect(await described.json()).toEqual({
       clientName: "Zapier", clientHost: "zapier.com", redirectHost: "zapier.com",
       mode: "ask", scopeChoices: true, organizations: [{ id: "10", name: "Alpha" }],
+      // AQU-2504: support access is a platform-admin option, so an ordinary
+      // user's consent — pre-registered client or not — is told it is off.
+      supportAccessAvailable: false,
     })
     expect(fetchSpy).not.toHaveBeenCalled()
   })
@@ -553,5 +559,204 @@ describe("pre-registered Zapier client", () => {
     const jwt = await seed()
     const response = await consent("request", await zapierParams(), jwt)
     expect(((await response.json()) as { error: string }).error).toBe("invalid_client")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AQU-2504 — connector support access
+// ---------------------------------------------------------------------------
+//
+// The three cases the ticket asks for, from the consent side: an elevated
+// platform admin can approve support access and the minted credential carries a
+// live, time-boxed, read-only grant; a non-admin (or an admin who has not
+// stepped up) cannot; and nothing about ordinary consent changes.
+//
+// Identity for this grant is a `platform_admins` ROW, not the ADMIN_EMAILS
+// bootstrap — db/shared/api-credentials.ts `isPlatformAdminUser` is what both
+// this worker and sync-worker consult, so the two halves agree about who has it.
+
+describe("AQU-2504 connector support access", () => {
+  const SUPPORT_PARAMS = { support_access: true } as const
+
+  /** Put `username`'s account email on the platform-admin allowlist TABLE. */
+  const makePlatformAdmin = (username: string) =>
+    env.AQUILLA_PG.prepare("INSERT INTO platform_admins (email) VALUES (?)")
+      .bind(`${username}@example.com`)
+      .run()
+
+  /** Drive the admin console's emailed step-up to completion on `jwt`. */
+  async function elevate(jwt: string): Promise<void> {
+    const requested = await app.request(
+      "/api/v2/admin/elevation/request",
+      { method: "POST", headers: authHeader(jwt) },
+      oauthEnv,
+    )
+    expect(requested.status).toBe(200)
+    const { devCode } = (await requested.json()) as { devCode?: string }
+    const verified = await app.request(
+      "/api/v2/admin/elevation/verify",
+      { method: "POST", headers: authHeader(jwt), body: JSON.stringify({ code: devCode }) },
+      oauthEnv,
+    )
+    expect(verified.status).toBe(200)
+  }
+
+  /** Approve with support access instead of an org picker. */
+  async function approveSupport(jwt: string) {
+    const response = await consent(
+      "decision",
+      { ...(await authorizeParams()), approve: true, ...SUPPORT_PARAMS },
+      jwt,
+    )
+    return response
+  }
+
+  const credentialRow = (id: string) =>
+    env.AQUILLA_PG.prepare(
+      `SELECT access, support_access, org_ids, org_id, project_id,
+              support_access_until > now() AS window_open
+         FROM api_credentials WHERE id = ?`,
+    )
+      .bind(id)
+      .first<{
+        access: string
+        support_access: boolean
+        org_ids: unknown
+        org_id: string | null
+        project_id: string | null
+        window_open: boolean
+      }>()
+
+  // Step-up is only a real gate when it is required; the base test env leaves
+  // it off, in which case every platform admin counts as elevated.
+  beforeEach(() => {
+    env.ADMIN_REQUIRE_ELEVATION = "true"
+  })
+  afterEach(() => {
+    env.ADMIN_REQUIRE_ELEVATION = undefined
+  })
+
+  it("offers the option only to a platform admin who has already stepped up", async () => {
+    const jwt = await seed()
+    await makePlatformAdmin("alice")
+
+    // Admin, but not yet elevated: the option is not on the page.
+    const before = await consent("request", await authorizeParams(), jwt)
+    expect(before.status).toBe(200)
+    expect((await before.json()) as { supportAccessAvailable: boolean }).toMatchObject({
+      supportAccessAvailable: false,
+    })
+
+    await elevate(jwt)
+    const after = await consent("request", await authorizeParams(), jwt)
+    expect((await after.json()) as { supportAccessAvailable: boolean }).toMatchObject({
+      supportAccessAvailable: true,
+    })
+  })
+
+  it("never offers it to a non-admin, however elevated the session claims to be", async () => {
+    await seed()
+    const bob = await jwtFor("bob") // bob@example.com is on no allowlist
+    const described = await consent("request", await authorizeParams(), bob)
+    expect(described.status).toBe(200)
+    expect((await described.json()) as { supportAccessAvailable: boolean }).toMatchObject({
+      supportAccessAvailable: false,
+    })
+  })
+
+  it("refuses a posted support_access from a non-admin (403), even though the page never showed it", async () => {
+    await seed()
+    const response = await approveSupport(await jwtFor("bob"))
+    expect(response.status).toBe(403)
+    expect((await response.json()) as { error: string }).toMatchObject({ error: "scope_denied" })
+  })
+
+  it("refuses a posted support_access from an admin who has not stepped up (403)", async () => {
+    const jwt = await seed()
+    await makePlatformAdmin("alice")
+    const response = await approveSupport(jwt)
+    expect(response.status).toBe(403)
+    expect((await response.json()) as { error: string }).toMatchObject({ error: "scope_denied" })
+  })
+
+  it("mints a read-only, time-boxed, allowlist-free credential for an elevated admin", async () => {
+    const jwt = await seed()
+    await makePlatformAdmin("alice")
+    await elevate(jwt)
+
+    const approved = await approveSupport(jwt)
+    expect(approved.status).toBe(200)
+    const code = new URL(((await approved.json()) as { redirect: string }).redirect).searchParams.get("code") ?? ""
+
+    // The code itself carries the choice and NO org selection — support access
+    // replaces the org picker rather than narrowing it.
+    const codeRow = await env.AQUILLA_PG.prepare(
+      "SELECT support_access, org_ids, org_id, project_id, access FROM mcp_oauth_codes WHERE support_access = true",
+    ).first<{ support_access: boolean; org_ids: unknown; org_id: string | null; project_id: string | null; access: string }>()
+    expect(codeRow).toMatchObject({ support_access: true, org_ids: null, org_id: null, project_id: null })
+
+    const redeemed = await redeem(tokenFields(code))
+    expect(redeemed.status).toBe(200)
+    const token = ((await redeemed.json()) as { access_token: string }).access_token
+
+    const cred = await validateApiCredential(env.AQUILLA_PG, token, undefined, RESOURCE)
+    expect(cred).not.toBeNull()
+    // The whole point: support access is live on this credential…
+    expect(cred?.supportAccess).toBe(true)
+    // …and it is read-only, so there is no cross-tenant WRITE path at all.
+    expect(cred?.access).toBe("read")
+    // …and it carries no org/project scope to intersect against.
+    expect(cred?.orgIds).toBeUndefined()
+    expect(cred?.orgId).toBeNull()
+    expect(cred?.projectId).toBeNull()
+
+    const row = await credentialRow(cred?.credentialId as string)
+    expect(row).toMatchObject({ access: "read", support_access: true, window_open: true })
+  })
+
+  it("refuses the mint when the admin left the allowlist between consent and redemption", async () => {
+    const jwt = await seed()
+    await makePlatformAdmin("alice")
+    await elevate(jwt)
+    const approved = await approveSupport(jwt)
+    const code = new URL(((await approved.json()) as { redirect: string }).redirect).searchParams.get("code") ?? ""
+
+    // The live re-check at mint time is the same discipline the org allowlist
+    // already gets: consent may have happened minutes ago.
+    await env.AQUILLA_PG.prepare("DELETE FROM platform_admins").run()
+
+    const redeemed = await redeem(tokenFields(code))
+    expect(redeemed.status).toBe(400)
+    expect((await redeemed.json()) as { error: string }).toMatchObject({ error: "invalid_grant" })
+  })
+
+  it("leaves the credential ordinary once the window closes — the grant outlives the time box", async () => {
+    const jwt = await seed()
+    await makePlatformAdmin("alice")
+    await elevate(jwt)
+    const approved = await approveSupport(jwt)
+    const code = new URL(((await approved.json()) as { redirect: string }).redirect).searchParams.get("code") ?? ""
+    const token = ((await (await redeem(tokenFields(code))).json()) as { access_token: string }).access_token
+
+    await env.AQUILLA_PG.prepare(
+      "UPDATE api_credentials SET support_access_until = now() - interval '1 minute'",
+    ).run()
+
+    const cred = await validateApiCredential(env.AQUILLA_PG, token, undefined, RESOURCE)
+    // Still a valid credential — it just stopped being a cross-tenant one.
+    expect(cred).not.toBeNull()
+    expect(cred?.supportAccess).toBeUndefined()
+  })
+
+  it("leaves ordinary consent untouched: no support access, and the org picker still required", async () => {
+    const jwt = await seed()
+    const { code } = await approveFor(jwt)
+    const token = ((await (await redeem(tokenFields(code))).json()) as { access_token: string }).access_token
+    const cred = await validateApiCredential(env.AQUILLA_PG, token, undefined, RESOURCE)
+    expect(cred?.supportAccess).toBeUndefined()
+    expect(cred?.orgIds).toEqual(["10"])
+
+    const withoutOrgs = await consent("decision", { ...(await authorizeParams()), approve: true }, jwt)
+    expect(withoutOrgs.status).toBe(400)
   })
 })

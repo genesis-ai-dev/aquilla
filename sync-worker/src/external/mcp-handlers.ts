@@ -34,6 +34,7 @@ import { handleExternalTranscriptionRequest } from './transcription-route'
 import { listProjectsForCredential } from './projects-list'
 import { loadProjectDetail } from './project-detail'
 import { listOrgsForCredential } from './orgs-list'
+import { claimSupportAccess, PLATFORM_ROLE_LEVEL } from './read-auth'
 import { MAX_SEARCH_PROJECTS } from './search-reads'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { COMMAND_CATALOG } from '../../../db/shared/command-catalog'
@@ -489,7 +490,9 @@ function getIdentityAndScope(cred: ApiCredentialContext): McpToolResult {
 async function listOrgs(env: ExternalEnv, cred: ApiCredentialContext): Promise<McpToolResult> {
   if (!env.AQUILLA_PG) return fail('job_failed', 'AQUILLA_PG not configured')
   // Shared with REST GET /api/v1/external/orgs (orgs-list.ts) — AQU-1236.
-  const orgs = await listOrgsForCredential(env.AQUILLA_PG, cred)
+  // The tool name is passed so an AQU-2504 support-access audit row names the
+  // MCP tool rather than the REST route the REST adapter would report.
+  const orgs = await listOrgsForCredential(env.AQUILLA_PG, cred, 'list_orgs')
   return ok({ orgs })
 }
 
@@ -511,7 +514,7 @@ async function listProjects(
   const projects = await listProjectsForCredential(
     env.AQUILLA_PG,
     cred,
-    orgId !== undefined ? { orgId } : {},
+    { ...(orgId !== undefined ? { orgId } : {}), tool: 'list_projects' },
   )
   return ok({ projects })
 }
@@ -523,20 +526,29 @@ async function getProject(
 ): Promise<McpToolResult> {
   if (!env.AQUILLA_PG) return fail('job_failed', 'AQUILLA_PG not configured')
   const db = env.AQUILLA_PG
+  let scopedOrgId: string | null
   try {
-    await assertCredentialScope(db, cred, projectId)
+    scopedOrgId = (await assertCredentialScope(db, cred, projectId)).orgId
   } catch (err) {
     if (err instanceof ExternalError) return fail(err.code, err.message)
     throw err
   }
   const resolved = await resolveProjectRoleShared(db, { id: cred.userId }, projectId)
-  if (!resolved || resolved.level < ROLE.VIEWER) {
-    return fail('permission_denied', 'no project membership (VIEWER role required)')
+  // AQU-2504: with no genuine grant, live support access is the one remaining
+  // path, and claiming it writes the audit row. Shared with
+  // scopeCredentialToProject (read-auth.ts) so this adapter and the REST one
+  // cannot disagree about who may open a project.
+  let level = resolved && resolved.level >= ROLE.VIEWER ? resolved.level : null
+  if (level === null) {
+    if (!(await claimSupportAccess(db, cred, projectId, 'get_project', scopedOrgId))) {
+      return fail('permission_denied', 'no project membership (VIEWER role required)')
+    }
+    level = PLATFORM_ROLE_LEVEL
   }
   // AQU-1222: shared with the REST GET /projects/:projectId route so the two
   // adapters cannot drift — and so both carry settingsVersion, the number
   // PatchSettings.ifMatchVersion has to match.
-  const detail = await loadProjectDetail(db, projectId, resolved.level, {
+  const detail = await loadProjectDetail(db, projectId, level, {
     flag: env.LANE_READ_WALL,
     userId: Number(cred.userId),
   })

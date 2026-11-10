@@ -108,6 +108,7 @@ import {
 } from "@/lib/timeline/tracks"
 import { computeFollowScroll } from "@/lib/timeline/follow"
 import { secToPx, pxToSec, clampScrollLeft, ZOOM_MIN, ZOOM_MAX, ZOOM_DEFAULT } from "@/lib/timeline/scale"
+import { cellIdNearestStart, resumeScrollLeft } from "@/lib/timeline/resume-place"
 import { timeSlices } from "@/lib/timeline/horizontal-slices"
 import {
   chipHeightPx,
@@ -532,6 +533,9 @@ export interface TimelineEditorProps {
   initialSelectedCellId?: string | null
   /** AQU-646 round 3 (media→text trace): mirrors every selection change up. */
   onSelectedCellChange?(cellId: string | null): void
+  /** The line under the middle of the timeline after the reader scrolls it.
+   *  A reload opens the file on this line. */
+  onResumePlace?(cellId: string): void
   /** 2026-08-07 (wire a): fires on USER chip clicks only — the workspace
    *  scrolls the text table to the matching row. Programmatic selection
    *  (activateRequest, the mount trace) stays silent to avoid echo loops. */
@@ -539,8 +543,17 @@ export interface TimelineEditorProps {
   /** 2026-08-07 (wire b): a text-table row click, as a nonce'd request —
    *  selects the chip and centers/cues exactly like a chip click.
    *  AQU-1117: `play` marks the one sender that means "and roll from there"
-   *  ("Play from this cue"); absent/false keeps the row-click cue-only rule. */
-  activateRequest?: { cellId: string; nonce: number; play?: boolean } | null
+   *  ("Play from this cue"); absent/false keeps the row-click cue-only rule.
+   *  A chapter pick passes `smooth` and `align: "start"`: the same move the
+   *  chapter navigator makes in the text, eased, with the chapter's first
+   *  line at the start of the view. */
+  activateRequest?: {
+    cellId: string
+    nonce: number
+    play?: boolean
+    smooth?: boolean
+    align?: "start" | "center"
+  } | null
   /** SUB-53: which job this FILE is for (pre-merge round: per-file, resolved
    *  via resolveFileTimingMode). "dubbing" (the default) draws the track
    *  against the imported recording's clock; "audioFirst" lays the verses out
@@ -1278,6 +1291,7 @@ export function TimelineEditor({
   recordingSlot = null,
   initialSelectedCellId,
   onSelectedCellChange,
+  onResumePlace,
   onChipActivated,
   activateRequest,
   timingMode = "dubbing",
@@ -1747,8 +1761,41 @@ export function TimelineEditor({
   /** Programmatic scrolls stamp this; the onScroll handler treats scroll
    *  events within 150ms of a stamp as our own, not a user disengage. */
   const lastProgrammaticScrollAt = useRef(0)
+  const resumeGestureRef = useRef(false)
+  const resumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  /** A chapter pick eases the column. The animation lasts longer than the
+   *  150ms stamp, and its scroll events are still ours. */
+  const smoothScrollingRef = useRef(false)
+  const smoothScrollCleanupRef = useRef<(() => void) | null>(null)
+  /** The restored line, and how far it sits from the left edge. A later clock
+   *  change keeps that spot instead of sliding the view backward. */
+  const traceHoldRef = useRef<{ id: string; at: number; offsetPx: number } | null>(null)
+  const traceWatchRef = useRef(0)
+  useEffect(() => {
+    resumeGestureRef.current = false
+    smoothScrollCleanupRef.current?.()
+    smoothScrollCleanupRef.current = null
+    smoothScrollingRef.current = false
+    traceHoldRef.current = null
+    traceWatchRef.current += 1
+    return () => {
+      if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current)
+    }
+  }, [fileId])
   /** The track in the air, so it cannot be hidden mid-drag. */
   const [draggedTrackId, setDraggedTrackId] = useState<string | null>(null)
+  useEffect(() => () => {
+  }, [])
+  // The preview stays up through the write. Once the tracks themselves show
+  // the same place, the indent is the row's own and the preview can go.
+  useEffect(() => {
+    if (!preview) return
+    const track = tracks.find((item) => item.id === preview.trackId)
+    if (!track) return
+    const arrived = preview.kind === "enter"
+    if (arrived) {
+    }
+  }, [tracks])
   /** Lane copies of each row's slide. A ref, painted onto the lane nodes:
    *  storing it in state re-rendered every time column on each pointer move. */
   const editorRef = useRef<HTMLDivElement>(null)
@@ -3072,7 +3119,18 @@ export function TimelineEditor({
     session: session ?? null,
   })
 
-  function scrollTrackTo(requested: number) {
+  function endSmoothScroll() {
+    smoothScrollCleanupRef.current?.()
+    smoothScrollCleanupRef.current = null
+    smoothScrollingRef.current = false
+  }
+
+  /** True while a scroll we started is still moving the column. */
+  function scrollIsProgrammatic() {
+    return smoothScrollingRef.current || performance.now() - lastProgrammaticScrollAt.current < 150
+  }
+
+  function scrollTrackTo(requested: number, smooth = false) {
     const el = scrollRef.current
     if (!el) return
     // Only as far as the column can actually scroll. The browser clamps the
@@ -3083,6 +3141,22 @@ export function TimelineEditor({
     // `clampScrollLeft`).
     const left = clampScrollLeft(requested, el.scrollWidth, el.clientWidth)
     lastProgrammaticScrollAt.current = performance.now()
+    endSmoothScroll()
+    // A chapter pick eases, the way the text navigator eases a row into
+    // place. The ruler follows the scroll events, so it stays with the chips
+    // instead of jumping to the destination on the first frame.
+    if (smooth && Math.abs(el.scrollLeft - left) > 1) {
+      smoothScrollingRef.current = true
+      const finish = () => endSmoothScroll()
+      el.addEventListener("scrollend", finish)
+      const backup = window.setTimeout(finish, 1200)
+      smoothScrollCleanupRef.current = () => {
+        el.removeEventListener("scrollend", finish)
+        window.clearTimeout(backup)
+      }
+      el.scrollTo({ left, behavior: "smooth" })
+      return
+    }
     el.scrollLeft = left
     // Belt and braces for the axis test in handleTrackScroll: the scroll event
     // this write provokes already knows where we put it. (If the browser clamps
@@ -3090,6 +3164,15 @@ export function TimelineEditor({
     // real number wins — which is exactly what should happen.)
     lastScrollLeft.current = left
     scrollBus.set(left, el.clientWidth)
+  }
+
+  /** The reader grabbed the column. An ease still in flight stops where it is. */
+  function handScrollToReader() {
+    resumeGestureRef.current = true
+    if (!smoothScrollingRef.current) return
+    const el = scrollRef.current
+    endSmoothScroll()
+    if (el) el.scrollTo({ left: el.scrollLeft, behavior: "auto" })
   }
 
   /**
@@ -3122,9 +3205,35 @@ export function TimelineEditor({
     // A MANUAL scroll while playback runs means "stop following me". Our own
     // programmatic scrolls fire this handler too — the 150ms stamp window
     // filters them out.
-    if (transportPlaying && performance.now() - lastProgrammaticScrollAt.current > 150) {
+    if (transportPlaying && !scrollIsProgrammatic()) {
       setFollowReleased(true)
     }
+    scheduleResumePlace()
+  }
+
+  /** The line under the middle of the view, written once the scroll settles.
+   *  The column's own first layout sits at 0 and is not a place the reader
+   *  chose; a gesture, or a scroll we just performed, is. */
+  function scheduleResumePlace() {
+    if (!onResumePlace) return
+    const el = scrollRef.current
+    if (!el) return
+    if (scrollIsProgrammatic()) return
+    if (el.scrollLeft < 1 && !resumeGestureRef.current) return
+    if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current)
+    const left = el.scrollLeft
+    const width = el.clientWidth
+    const rate = pxPerSec
+    resumeTimerRef.current = setTimeout(() => {
+      resumeTimerRef.current = null
+      const starts: { id: string; startSec: number }[] = []
+      for (const cell of cells) {
+        const startSec = layout.seekSecFor(cell)
+        if (startSec != null) starts.push({ id: cell.id, startSec })
+      }
+      const id = cellIdNearestStart(starts, pxToSec(left + width / 2, rate))
+      if (id) onResumePlace(id)
+    }, 400)
   }
 
   /**
@@ -3621,7 +3730,7 @@ export function TimelineEditor({
   // Center the track on a clip and cue playback (paused) at its start —
   // identical to a clean card click. Reads the live clientWidth (viewportPx
   // state can still be 0 pre-measurement). Untimed cells: no timecode, no-op.
-  function centerAndCue(cellId: string, opts?: { play?: boolean }) {
+  function centerAndCue(cellId: string, opts?: { play?: boolean; smooth?: boolean; align?: "start" | "center" }) {
     // Searches the AUDIO CUES too. A cue is a legitimate destination now — the
     // pairing drawer navigates to one — and looking only in `cells` meant every
     // such request found nothing and silently returned, so the track never
@@ -3630,17 +3739,65 @@ export function TimelineEditor({
     const at = cell ? layout.seekSecFor(cell) : null
     if (at == null) return
     const viewport = scrollRef.current?.clientWidth ?? 0
-    scrollTrackTo(Math.max(0, secToPx(at, pxPerSec) - viewport / 2))
+    // "start" matches the chapter navigator, which puts the chapter's first
+    // row at the top of the text. The line's start sits at the left edge.
+    const origin = opts?.align === "start" ? 0 : viewport / 2
+    scrollTrackTo(Math.max(0, secToPx(at, pxPerSec) - origin), opts?.smooth === true)
     if (opts?.play) playFromTime(at)
     else seekTo(at)
   }
 
-  // AQU-646 round 3: consume the text→media trace once on mount (the seed
-  // alone already selected the cell via the useState initializer).
+  // A reload paints the column where the reader left it. Centering the saved
+  // line on top of that slides the view backward — a chapter, or more once
+  // the programme grows and the line's clock moves. Keep the line where it
+  // already sits. If the column is still at the start, center the line. If
+  // its clock later moves, keep the same spot in the view.
+  function placeRestoredCell(cellId: string | null | undefined, cue: boolean) {
+    if (!cellId || resumeGestureRef.current) return
+    const el = scrollRef.current
+    if (!el) return
+    const cell = cells.find((c) => c.id === cellId) ?? audioCues?.find((c) => c.id === cellId)
+    const at = cell ? layout.seekSecFor(cell) : null
+    if (at == null) return
+    const hold = traceHoldRef.current
+    // No measured view yet: the column cannot show a restored scroll. Cue the
+    // line the way a fresh open always has. A measured view that already
+    // shows the line is left where the reload put it.
+    if (el.clientWidth <= 0) {
+      if (hold?.id === cellId) return
+      centerAndCue(cellId)
+      traceHoldRef.current = { id: cellId, at, offsetPx: 0 }
+      return
+    }
+    const heldOffset = hold?.id === cellId ? hold.offsetPx : null
+    const decision = resumeScrollLeft({
+      atPx: secToPx(at, pxPerSec),
+      scrollLeft: el.scrollLeft,
+      viewportPx: el.clientWidth,
+      heldOffsetPx: heldOffset,
+    })
+    traceHoldRef.current = { id: cellId, at, offsetPx: decision.offsetPx }
+    if (decision.move) scrollTrackTo(decision.left)
+    if (cue && hold?.id !== cellId) seekTo(at)
+  }
   useEffect(() => {
-    if (initialSelectedCellId) centerAndCue(initialSelectedCellId)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only trace consume
-  }, [])
+    if (!initialSelectedCellId) return
+    const token = ++traceWatchRef.current
+    let tries = 0
+    const tick = () => {
+      if (traceWatchRef.current !== token || resumeGestureRef.current) return
+      placeRestoredCell(initialSelectedCellId, true)
+      tries += 1
+      // The horizontal list mounts after the scrollport is measured and can
+      // put the column back toward 0 a frame later. A few frames is enough
+      // to put the line back; a later clock change re-runs this effect.
+      if (tries < 6) requestAnimationFrame(tick)
+    }
+    tick()
+    return () => { traceWatchRef.current += 1 }
+    // placeRestoredCell reads the live column, the line, and its clock.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialSelectedCellId, viewportPx, cells, layout, audioCues])
 
   // 2026-08-07 (wire b): a text-table row click arrives as an activate
   // request — select the chip and center/cue exactly like a chip click, but
@@ -3651,7 +3808,11 @@ export function TimelineEditor({
     setSelectedId(activateRequest.cellId)
     // AQU-928: a row click is a plain selection, so it replaces the batch scope.
     setExtraIds([])
-    centerAndCue(activateRequest.cellId, { play: activateRequest.play })
+    centerAndCue(activateRequest.cellId, {
+      play: activateRequest.play,
+      smooth: activateRequest.smooth,
+      align: activateRequest.align,
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- consumed per nonce
   }, [activateRequest?.nonce])
 
@@ -5338,6 +5499,8 @@ export function TimelineEditor({
             data-testid="tl-scroll"
             className="overflow-auto overscroll-contain"
             onScroll={handleTrackScroll}
+            onPointerDown={handScrollToReader}
+            onWheel={handScrollToReader}
           >
             <TimelineScrollBusContext.Provider value={scrollBus}>
             <div className="relative" data-testid="tl-canvas" data-file-px={trackWidthPx} style={{ width: `${canvasWidthPx}px` }}>

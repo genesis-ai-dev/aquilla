@@ -957,6 +957,9 @@ interface EditorTableProps {
    *  suggested passage) jumped to, so the workspace can remember it as where
    *  the user is in this file. */
   onNavigateToCell?: (cellId: string) => void
+  /** The row at the top of the text after the reader scrolls. A reload puts
+   *  this row back at the top, which is the place they were reading. */
+  onPlaceChange?: (cellId: string) => void
   onTargetPresenceSelection?: (cellId: string, selection: TargetPresenceSelection | null) => void
   /** Drop the "remote-changed-while-editing" flag for a cell. */
   onAckRemoteChange?: (cellId: string) => void
@@ -1211,7 +1214,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   cellLockHolders,
   presenceStore,
   cellsWithRemoteChange,
-  onClaimCell, onReleaseCell, onViewCell, onNavigateToCell, onTargetPresenceSelection, onAckRemoteChange,
+  onClaimCell, onReleaseCell, onViewCell, onNavigateToCell, onPlaceChange, onTargetPresenceSelection, onAckRemoteChange,
   staleCellIds,
   upstreamStaleCellIds,
   getTokenForFile,
@@ -1552,6 +1555,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
    *  emits events for hundreds of ms) is in flight — handleListScroll
    *  re-stamps the truce for every event that arrives inside the window. */
   const programmaticInFlightRef = useRef(0)
+  /** The reader moved the text themselves (wheel, keys, or the scrollbar).
+   *  A click on a row is not this: that row is remembered on its own, and the
+   *  list's own layout scroll must not overwrite it with row 0. */
+  const userScrolledRef = useRef(false)
+  const onPlaceChangeRef = useRef(onPlaceChange)
+  onPlaceChangeRef.current = onPlaceChange
   /** EVERY code-driven list scroll goes through here. Stamping only inside
    *  one caller left the rest (navigator picks, focus scrolls, jumps) reading
    *  as user scrolls — which silently killed following (2026-08-08 forensics). */
@@ -1886,9 +1895,20 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       chapterScrollFrameRef.current = requestAnimationFrame(() => {
         chapterScrollFrameRef.current = null
         updateChapterVisibleIndex()
+        if (!userScrolledRef.current) return
+        const report = onPlaceChangeRef.current
+        const viewport = listRootRef.current
+        if (!report || !viewport) return
+        const index = firstActuallyVisibleIndex(
+          measureRowBounds(),
+          viewport.getBoundingClientRect().top,
+          -1,
+        )
+        const cellId = index < 0 ? null : displayCellIdsRef.current[index] ?? null
+        if (cellId) report(cellId)
       })
     })
-  }, [updateChapterVisibleIndex])
+  }, [updateChapterVisibleIndex, measureRowBounds])
 
   useEffect(() => () => {
     if (chapterScrollFrameRef.current !== null) {
@@ -2514,6 +2534,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     if (event.pointerType !== "mouse" || event.target === parentRef.current) {
       clearChapterNavigationSelection()
     }
+    if (event.target === parentRef.current) userScrolledRef.current = true
   }, [clearChapterNavigationSelection])
 
   const handleChapterListKeyDownCapture = useCallback((event: React.KeyboardEvent) => {
@@ -2529,8 +2550,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       || event.key === "PageDown"
       || event.key === "Home"
       || event.key === "End"
-      || event.key === " "
+      ||       event.key === " "
     ) {
+      userScrolledRef.current = true
       clearChapterNavigationSelection()
     }
   }, [clearChapterNavigationSelection])
@@ -3552,7 +3574,10 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           ref={listRootRef}
           className="flex min-h-0 flex-1"
           onPointerDownCapture={handleChapterListPointerDownCapture}
-          onWheelCapture={clearChapterNavigationSelection}
+          onWheelCapture={() => {
+            userScrolledRef.current = true
+            clearChapterNavigationSelection()
+          }}
           onKeyDownCapture={handleChapterListKeyDownCapture}
         >
           {mediaSyncActive && (

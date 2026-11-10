@@ -1258,6 +1258,61 @@ describe("TimelineEditor", () => {
     expect(onChipActivated).toHaveBeenCalledWith("m2")
   })
 
+  it("a chapter pick eases the timeline so the chapter starts at the left edge", () => {
+    localStorage.removeItem("aquilla:timelineZoom:f1")
+    const onSeekToTime = vi.fn()
+    const viewPx = 200
+    const isColumn = (el: Element) => el.getAttribute("data-testid") === "tl-scroll"
+    const lefts = new WeakMap<Element, number>()
+    const trackPx = (el: Element) => parseFloat((el.firstElementChild as HTMLElement | null)?.style.width ?? "") || 0
+    const rangeOf = (el: Element) => Math.max(viewPx, trackPx(el)) - viewPx
+    const patches: Array<[object, string, PropertyDescriptor]> = []
+    const patch = (proto: object, key: string, make: (orig: PropertyDescriptor) => PropertyDescriptor) => {
+      const orig = Object.getOwnPropertyDescriptor(proto, key)!
+      patches.push([proto, key, orig])
+      Object.defineProperty(proto, key, { configurable: true, enumerable: orig.enumerable, ...make(orig) })
+    }
+    patch(HTMLElement.prototype, "clientWidth", (orig) => ({
+      get(this: HTMLElement) { return isColumn(this) ? viewPx : orig.get!.call(this) },
+    }))
+    patch(Element.prototype, "scrollWidth", (orig) => ({
+      get(this: Element) { return isColumn(this) ? viewPx + rangeOf(this) : orig.get!.call(this) },
+    }))
+    patch(Element.prototype, "scrollLeft", (orig) => ({
+      get(this: Element) { return isColumn(this) ? (lefts.get(this) ?? 0) : orig.get!.call(this) },
+      set(this: Element, v: number) {
+        if (isColumn(this)) lefts.set(this, Math.max(0, Math.min(v, rangeOf(this))))
+        else orig.set!.call(this, v)
+      },
+    }))
+    const scrollTo = vi.spyOn(HTMLElement.prototype, "scrollTo").mockImplementation(function (this: HTMLElement, arg) {
+      const opts = typeof arg === "object" && arg ? arg : null
+      if (isColumn(this) && opts && "left" in opts && typeof opts.left === "number") this.scrollLeft = opts.left
+    })
+    try {
+      const { rerender } = render(
+        <TimelineEditor
+          fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
+          onRetimeSubtitle={() => {}} onSeekToTime={onSeekToTime} activateRequest={null}
+        />,
+      )
+      rerender(
+        <TimelineEditor
+          fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
+          onRetimeSubtitle={() => {}} onSeekToTime={onSeekToTime}
+          activateRequest={{ cellId: "m2", nonce: 1, smooth: true, align: "start" }}
+        />,
+      )
+      // The text navigator puts the chapter's first row at the top and eases
+      // there. Here the line's start (10s) sits at the left edge, eased.
+      expect(scrollTo).toHaveBeenCalledWith({ left: 10 * ZOOM_DEFAULT, behavior: "smooth" })
+      expect(onSeekToTime).toHaveBeenCalledWith(10)
+    } finally {
+      scrollTo.mockRestore()
+      for (const [proto, key, orig] of patches.reverse()) Object.defineProperty(proto, key, orig)
+    }
+  })
+
   it("wire b: an activateRequest selects + cues WITHOUT echoing onChipActivated", () => {
     const onChipActivated = vi.fn()
     const onSeekToTime = vi.fn()

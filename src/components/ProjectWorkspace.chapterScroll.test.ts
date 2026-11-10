@@ -44,6 +44,16 @@ describe("scrolling a book's table into another chapter (AQU-1758)", () => {
     expect(line).not.toContain("scopeCells")
   })
 
+  it("a chapter pick eases the open media timeline the way the text eases", () => {
+    const start = source.indexOf("const handleNavigatorCell = useCallback(")
+    expect(start).toBeGreaterThan(-1)
+    const body = source.slice(start, source.indexOf("\n  }, [rememberCell])", start))
+    expect(body).toContain("timelinePaneOpenRef.current")
+    expect(body).toContain("smooth: true")
+    expect(body).toContain('align: "start"')
+    expect(source).toContain("onNavigateToCell={handleNavigatorCell}")
+  })
+
   it("a row of another chapter clicked still ends a paused playback", () => {
     const start = source.indexOf("showChapterOfCellRef.current = (cellId) => {")
     expect(start).toBeGreaterThan(-1)

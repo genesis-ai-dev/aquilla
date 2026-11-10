@@ -35,7 +35,7 @@ import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { EmptyState, NotFoundIcon } from "@/components/ui/empty"
 import { TabStrip } from "./TabStrip"
 import { useWorkspaceTabs, readLastActiveFileId } from "@/hooks/useWorkspaceTabs"
-import { clearLastLocation, readLastCell, readLastLocation, writeLastCell, writeLastLocation } from "@/lib/frontier/last-location-store"
+import { clearLastLocation, readLastCell, readLastCellPlace, readLastLocation, writeLastCell, writeLastLocation } from "@/lib/frontier/last-location-store"
 import { ROLE } from "@/lib/frontier/roles"
 import { languagesEqual } from "@/lib/language-normalize"
 import { importLanguageDecision } from "@/lib/import-language"
@@ -459,7 +459,7 @@ import { LangQuestLinkBadge } from "@/components/langquest/LangQuestLinkBadge"
 import { useEditorLensPreference } from "@/hooks/useEditorLensPreference"
 import type { EditorLens } from "@/components/EditorModeToggle"
 import { TranscribeEditor, type TranscribeEditorHandle } from "@/components/transcribe/TranscribeEditor"
-import { createViewScrollMemory, viewSwitchRebuilds } from "@/lib/editor/view-scroll-memory"
+import { cellIdForMediaTrace, createViewScrollMemory, viewSwitchRebuilds } from "@/lib/editor/view-scroll-memory"
 import { SelectionBar } from "./SelectionBar"
 import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
 import { ExpandableFileList } from "./ExpandableFileList"
@@ -1613,6 +1613,14 @@ export function ProjectWorkspace() {
     })
   }, [location, navigate, projectId])
   const editorRef = useRef<EditorTableHandle>(null)
+  // The restore effect can run before the table commits. This flips when the
+  // handle attaches, so a remembered row is scrolled to once the list exists
+  // instead of waiting for the next keystroke.
+  const [textEditorReady, setTextEditorReady] = useState(false)
+  const bindEditorRef = useCallback((node: EditorTableHandle | null) => {
+    editorRef.current = node
+    setTextEditorReady(node != null)
+  }, [])
   // The section highlighted on the Dialogue timeline. Lifted here so the bottom
   // playback bar (a sibling of the timeline) can start playback from it (AQU-666).
   const [timelineSelectedCellId, setTimelineSelectedCellId] = useState<string | null>(null)
@@ -8189,6 +8197,7 @@ export function ProjectWorkspace() {
   // not state — no workspace re-render per card click); mediaTraceCellId seeds
   // the timeline's selection on mount (state — must be render-visible then).
   const timelineSelectedCellIdRef = useRef<string | null>(null)
+  const rememberCellRef = useRef<(cellId: string, align?: "top" | "center") => void>(() => {})
   const handleTimelineSelectedCell = useCallback(
     (cellId: string | null) => {
       // Media → Text scrolls to whatever is parked here, so a CUE id would
@@ -8197,10 +8206,23 @@ export function ProjectWorkspace() {
         cellId && cueLinks.textForCue.has(cellId)
           ? (cueLinks.textForCue.get(cellId) ?? [])[0] ?? null
           : cellId
+      const lineId = timelineSelectedCellIdRef.current
+      if (lineId) rememberCellRef.current(lineId)
     },
     [cueLinks],
   )
   const [mediaTraceCellId, setMediaTraceCellId] = useState<string | null>(null)
+  // The place to open this file on, read once per file. Later scrolls write a
+  // new place, but this stays put so the timeline does not jump back to it
+  // while the reader is still moving.
+  const fileResumeRef = useRef<{ key: string; cellId: string | null }>({ key: "", cellId: null })
+  const resumeKey = `${currentUsername}|${projectId ?? ""}|${activeFileId ?? ""}`
+  if (fileResumeRef.current.key !== resumeKey) {
+    fileResumeRef.current = {
+      key: resumeKey,
+      cellId: projectId && activeFileId ? readLastCell(currentUsername, projectId, activeFileId) : null,
+    }
+  }
 
   // AQU-2153: where each view of each file was scrolled to, so a switch that
   // rebuilds the surface can put it back. Session-only, keyed by file + view —
@@ -8223,10 +8245,15 @@ export function ProjectWorkspace() {
     // made before the detour.
     if (next !== lens && timeOrdered) {
       if (next === "audio" && lens === "text") {
-        // TEXT → MEDIA: the row the user is on (last-active editor cell when
-        // visible, else the first visible row).
-        const idx = editorRef.current?.getCurrentIndex?.() ?? -1
-        setMediaTraceCellId(idx >= 0 ? cellStore.getAllSummaries()[idx]?.id ?? null : null)
+        // TEXT → MEDIA: the row at the top of the text. That is the chapter
+        // on screen. The virtualizer index is only a fallback — unmeasured
+        // rows look like row 0, and seeding that opens the book at chapter 1.
+        const summaries = cellStore.getAllSummaries()
+        setMediaTraceCellId(cellIdForMediaTrace(
+          editorRef.current?.getTopVisibleCellId?.() ?? null,
+          editorRef.current?.getCurrentIndex?.() ?? -1,
+          (index) => summaries[index]?.id,
+        ))
       } else if (next === "text" && lens === "audio" && timelineSelectedCellIdRef.current) {
         // MEDIA → TEXT: park for the consume effect — scroll + brief flash,
         // no edit-focus change. The trace is always within the open file (the
@@ -8429,9 +8456,15 @@ export function ProjectWorkspace() {
     if (pendingPresenceJumpRef.current?.fileId === activeFileId) return
     if (pendingScopeScrollRef.current?.fileId === activeFileId) return
     if (!restoreMayPark(pendingCellScrollRef.current)) return
-    const cellId = readLastCell(currentUsernameRef.current, projectId, activeFileId)
-    if (!cellId) return
-    pendingCellScrollRef.current = { cellId, flash: false, fileId: activeFileId, source: "restore" }
+    const place = readLastCellPlace(currentUsernameRef.current, projectId, activeFileId)
+    if (!place) return
+    pendingCellScrollRef.current = {
+      cellId: place.cellId,
+      flash: false,
+      fileId: activeFileId,
+      source: "restore",
+      align: place.align,
+    }
   }, [projectId, activeFileId, centerSurface])
 
   // ── last-location: scroll to remembered cell once cells are loaded ────────
@@ -8482,7 +8515,7 @@ export function ProjectWorkspace() {
   // `centerSurface`: coming back from comments/agent/memory remounts the
   // editor without touching the cell store or the file, so without it the
   // per-file last-cell park sat unconsumed until the next keystroke.
-  }, [activeFileId, cellStore, cellStoreVersion, lens, centerSurface])
+  }, [activeFileId, cellStore, cellStoreVersion, lens, centerSurface, textEditorReady])
 
   const drawerRule = rules.find((r) => r.id === drawerRuleId) || null
   const drawerInfractions = drawerRuleId
@@ -9346,17 +9379,38 @@ export function ProjectWorkspace() {
   useEffect(() => { focusLockClaimRef.current = focusLockState.claim }, [focusLockState.claim])
 
   const writeLocTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  // Remember `cellId` as where the user is in the open file — on a claim, and
-  // on a jump from the section dropdown. Debounced (500 ms) so rapid focus
-  // events don't hammer localStorage.
-  const rememberCell = useCallback((cellId: string) => {
+  const pendingPlaceRef = useRef<{ cellId: string; align: "top" | "center" } | null>(null)
+  // Remember where the user is in the open file. A click remembers that cell,
+  // centered on the way back. A scroll remembers the row at the top. The write
+  // waits out a burst of movement, and is flushed when the page goes away, so
+  // a reload in that moment still returns here.
+  const rememberCell = useCallback((cellId: string, align: "top" | "center" = "center") => {
+    pendingPlaceRef.current = { cellId, align }
     if (writeLocTimerRef.current !== null) clearTimeout(writeLocTimerRef.current)
     writeLocTimerRef.current = setTimeout(() => {
       writeLocTimerRef.current = null
-      if (!projectId || !activeFileId) return
-      writeLastLocation(currentUsername, projectId, { fileId: activeFileId, cellId })
-      writeLastCell(currentUsername, projectId, activeFileId, cellId)
+      const pending = pendingPlaceRef.current
+      pendingPlaceRef.current = null
+      if (!pending || !projectId || !activeFileId) return
+      writeLastLocation(currentUsername, projectId, { fileId: activeFileId, cellId: pending.cellId })
+      writeLastCell(currentUsername, projectId, activeFileId, pending.cellId, pending.align)
     }, 500)
+  }, [projectId, activeFileId, currentUsername])
+  rememberCellRef.current = rememberCell
+  useEffect(() => {
+    const flush = () => {
+      if (writeLocTimerRef.current !== null) {
+        clearTimeout(writeLocTimerRef.current)
+        writeLocTimerRef.current = null
+      }
+      const pending = pendingPlaceRef.current
+      pendingPlaceRef.current = null
+      if (!pending || !projectId || !activeFileId) return
+      writeLastLocation(currentUsername, projectId, { fileId: activeFileId, cellId: pending.cellId })
+      writeLastCell(currentUsername, projectId, activeFileId, pending.cellId, pending.align)
+    }
+    window.addEventListener("pagehide", flush)
+    return () => window.removeEventListener("pagehide", flush)
   }, [projectId, activeFileId, currentUsername])
   const handleClaimCell = useCallback((cellId: string) => {
     focusedCellIdRef.current = cellId
@@ -14076,6 +14130,24 @@ export function ProjectWorkspace() {
     })
     return applyChapterPick(plan, { lines: run?.cells ?? [], ...chapterPickRunRef.current })
   }, [])
+  // The chapter navigator eases the text so the chapter's first row is at the
+  // top. When the Media timeline is open, the same pick eases the timeline so
+  // that line is at the left edge. A folded timeline, or the Text lens, has
+  // nothing on screen to move.
+  const timelinePaneOpenRef = useRef(false)
+  timelinePaneOpenRef.current = timelineStacked && dock.view.isOpen("tl")
+  const handleNavigatorCell = useCallback((cellId: string) => {
+    rememberCell(cellId)
+    if (!timelinePaneOpenRef.current) return
+    showChapterOfCellRef.current(cellId)
+    activateNonceRef.current += 1
+    setTimelineActivateRequest({
+      cellId,
+      nonce: activateNonceRef.current,
+      smooth: true,
+      align: "start",
+    })
+  }, [rememberCell])
   // Play all carries on into the next chapter: when a run of this file's
   // chapter plays out, the next chapter with anything to play starts.
   useLayoutEffect(() => {
@@ -17712,8 +17784,9 @@ export function ProjectWorkspace() {
                     // AQU-1758: a book's text has no times to drag it to.
                     sequenceOrdered={!activeFileTimeOrdered}
                     showSources={filmAndSourcesOn}
-                    initialSelectedCellId={mediaTraceCellId}
+                    initialSelectedCellId={mediaTraceCellId ?? fileResumeRef.current.cellId}
                     onSelectedCellChange={handleTimelineSelectedCell}
+                    onResumePlace={(cellId) => rememberCell(cellId, "center")}
                     onChipActivated={jumpToCellIdFollowing}
                     onCueActivated={handleCueActivated}
                     activateRequest={timelineActivateRequest}
@@ -18024,7 +18097,7 @@ export function ProjectWorkspace() {
                   choice={extensionEditorChoice}
                   file={{ fileId: activeFileId, name: activeFile.name }}
                   bar={null}
-                  handleRef={editorRef}
+                  handleRef={bindEditorRef}
                   services={extensionEditorServices}
                   revealCellId={searchParams.get("cellId")}
                   {...(!timelineStacked && fileChapterToolbar ? { toolbarTrailing: fileChapterToolbar } : {})}
@@ -18033,7 +18106,7 @@ export function ProjectWorkspace() {
                 </>
               ) : (
               <EditorTable
-            ref={editorRef} project={editorProject ?? project} cellStore={cellStore}
+            ref={bindEditorRef} project={editorProject ?? project} cellStore={cellStore}
             fileType={activeFile?.type}
             bibleOpen={parallelBiblesPanelActive}
             onSaveVoiceOverride={bibleDataShown ? saveVoiceOverride : undefined}
@@ -18163,7 +18236,8 @@ export function ProjectWorkspace() {
             onClaimCell={handleClaimCell}
             onReleaseCell={handleReleaseCell}
             onViewCell={handleViewCell}
-            onNavigateToCell={rememberCell}
+            onNavigateToCell={handleNavigatorCell}
+            onPlaceChange={(cellId) => rememberCell(cellId, "top")}
             onTargetPresenceSelection={handleTargetPresenceSelection}
             onAckRemoteChange={handleAckRemoteChange}
             staleCellIds={staleCellIds}

@@ -720,6 +720,95 @@ export function linesUnderLayers(prog: Programme): ReadonlySet<string> {
 }
 
 /**
+ * AQU-2253 (Sam, Nov 9): following the recordings, a LINKED film playing
+ * behind the lines, as the workspace tells the queue (play-queue's
+ * `setProgrammeFilm`). Its picture and its own sound run on the programme's
+ * clock, so it is the lines' source: see `whatSlotPlays`.
+ */
+export interface ProgrammeFilm {
+  /** The film's length: its end on its own clock, which following the
+   *  recordings is the programme's. Null while it is not known yet. */
+  endSec: number | null
+  /** Every line of the film's file that Play plays: on a book, every
+   *  chapter's, so a chapter that Play all or a pick starts is the film's at
+   *  once, before the workspace's next word. */
+  cellIds: ReadonlySet<string>
+  /** False on one chapter of a book: Play ends with the chapter's lines and
+   *  Play all goes on into the next one. Otherwise a run of the file's whole
+   *  list carries on past its last line to the film's end. */
+  runsOn?: boolean
+}
+
+/** What a film is to a run of lines: how far it plays behind them, on the
+ *  run's clock (`coverSec`: its length, Infinity while that is not known
+ *  yet, 0 when it is not behind them); and where Play runs on to after the
+ *  last line (`runsOnToSec`, 0 for none). */
+export interface FilmOverRun {
+  coverSec: number
+  runsOnToSec: number
+}
+
+const NO_FILM_OVER_RUN: FilmOverRun = { coverSec: 0, runsOnToSec: 0 }
+
+/**
+ * AQU-2253 (Sam, Nov 9): what the film is to a run of these lines (by id).
+ * Behind them when every one is a line of its file; Play runs on past them
+ * only for the file's whole list (one line played on its own, a selection or
+ * a book's chapter ends where its lines end), and only once its length is
+ * known. One answer for the queue, the bottom strip and the timeline's ⋯.
+ */
+export function filmOverRun(film: ProgrammeFilm | null | undefined, ids: Iterable<string>): FilmOverRun {
+  if (!film) return NO_FILM_OVER_RUN
+  let count = 0
+  for (const id of ids) {
+    if (!film.cellIds.has(id)) return NO_FILM_OVER_RUN
+    count++
+  }
+  if (count === 0) return NO_FILM_OVER_RUN
+  const whole = count === film.cellIds.size
+  return {
+    coverSec: film.endSec ?? Infinity,
+    runsOnToSec: whole && film.runsOn !== false && film.endSec != null ? film.endSec : 0,
+  }
+}
+
+/** A line starting this close to the film's end has no film left behind it. */
+const FILM_COVER_MIN_SEC = 0.02
+
+/**
+ * What a line of the programme has to play, following the recordings:
+ *  - "sound": its own take or original, a take of its own on another track,
+ *    or a take from another line running on over it (AQU-2252, `underLayers`);
+ *  - "film": nothing of its own, but a linked film is playing behind it
+ *    (AQU-2253, Sam, Nov 9: "the rule 'skip lines with nothing to play'
+ *    should only land when there is literally nothing to play: recorded or
+ *    source", and the film is the source). It plays: the playhead crosses it
+ *    in real time with the film running, whatever the setting says. A
+ *    film whose sound is off still counts, its picture is running. Past the
+ *    film's end there is no film; before its length is known it may cover the
+ *    line, so it counts (`coverSec` Infinity). A hidden line there is crossed
+ *    too, its takes silent, as following the source (Sam, Oct 29): jumping it
+ *    would cut the film forward;
+ *  - "hidden": a hidden line with nothing left to play, which the playhead
+ *    jumps whichever way the setting is (Sam, Oct 29);
+ *  - "nothing": nothing at all, the lines "Skip lines with nothing to play"
+ *    decides about: a verse of a book with no reading nobody has recorded, a
+ *    line of a subtitle file with no audio.
+ */
+export type SlotPlays = "sound" | "film" | "hidden" | "nothing"
+
+export function whatSlotPlays(
+  slot: ProgrammeSlot,
+  hiddenCellIds: ReadonlySet<string>,
+  underLayers: ReadonlySet<string> = new Set(),
+  filmCoverSec = 0,
+): SlotPlays {
+  if (slotHasOwnSound(slot) || underLayers.has(slot.cellId)) return "sound"
+  if (slot.startSec < filmCoverSec - FILM_COVER_MIN_SEC) return "film"
+  return hiddenCellIds.has(slot.cellId) ? "hidden" : "nothing"
+}
+
+/**
  * AQU-2251: a verse "Skip lines with nothing to play" decides about — nothing
  * to hear (no original, no take the programme can play) and not hidden. A
  * hidden line is skipped whichever way the setting is: following the
@@ -728,13 +817,17 @@ export function linesUnderLayers(prog: Programme): ReadonlySet<string> {
  *
  * AQU-2252: a take on another track is the line's to play too, and a line a
  * take from another line runs on over (`underLayers`) is held under it.
+ *
+ * AQU-2253 (Sam, Nov 9): …and a line a linked film plays behind
+ * (`filmCoverSec`, from `filmOverRun`) has the film to play (`whatSlotPlays`).
  */
 export function slotHasNothingToPlay(
   slot: ProgrammeSlot,
   hiddenCellIds: ReadonlySet<string>,
   underLayers: ReadonlySet<string> = new Set(),
+  filmCoverSec = 0,
 ): boolean {
-  return !slotHasOwnSound(slot) && !underLayers.has(slot.cellId) && !hiddenCellIds.has(slot.cellId)
+  return whatSlotPlays(slot, hiddenCellIds, underLayers, filmCoverSec) === "nothing"
 }
 
 /** The slot a programme second falls in. Times past the end return null. */

@@ -408,7 +408,7 @@ export function MediaVideoPane({
     : queueClockIsFileTime(soundingCell)
   /**
    * AQU-2253 (review, Nov 9): following the recordings, where only the film
-   * plays (its tail, and the lines while nothing is recorded) the FILM is the
+   * plays (its tail, and a line it plays behind with nothing of its own) the FILM is the
    * clock, as it is following the source; the queue says where. There the
    * pane reports the film's second instead of chasing the queue's, keeps the
    * film wanted while the transport waits on it, and runs the stall watchdog.

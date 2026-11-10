@@ -22,16 +22,20 @@ import { act, renderHook } from "@testing-library/react"
 import {
   getQueueProgress,
   getQueueState,
+  linesHaveAnythingToPlay,
   onQueueRanOut,
   pauseQueue,
   resumeQueue,
   seekQueueToTime,
   setProgrammeFilm,
+  setQueueAudibility,
   setQueueLayerTrackSlots,
   setQueueRate,
   setQueueTargetSlots,
   setQueueTimingMode,
+  setQueueVolume,
   skipBack,
+  skipForward,
   startQueue,
   startQueueAtTime,
   stopQueue,
@@ -660,22 +664,32 @@ describe("nothing recorded yet, Skip lines with nothing to play ON (the default)
     expect(getQueueState().kind).toBe("idle")
   })
 
-  it("once a line is recorded, lines with nothing to play are skipped as before, and the film's tail still plays", async () => {
+  // AQU-2253 (Sam, Nov 9): this test pinned the jump ("once a line is
+  // recorded, lines with nothing to play are skipped as before"). The film is
+  // the lines' source, so with a line recorded they are played all the same.
+  it("once a line is recorded, the lines with nothing of their own still play with the film: nothing is skipped", async () => {
     // b1 a stand-in [0, 1.5); b2 recorded 3 s [1.5, 4.5); b3 a stand-in [4.5, 6).
     const cells = [line("b1"), line("b2", 3_000), line("b3")]
     linkFilm(10, cells)
     startQueue(ctxFor(cells), 0)
     await wait()
-    // Straight to the recorded line.
+    // Not straight to the recorded line: b1 plays, on the film's clock.
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b1" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(0, 2)
+    expect(getQueueProgress().filmClock).toBe(true)
+    await wait(1_600)
     expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
-    expect(getQueueProgress().currentTime).toBeCloseTo(1.5, 2)
+    expect(el("b2")!.paused).toBe(false)
     el("b2")!.tick(3)
     await wait()
-    // b3 is skipped: on to the film after the lines' end, at 6 s.
+    // b3 is crossed in real time with the film, from 4.5 s, not jumped to 6 s.
     expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
-    expect(getQueueProgress().currentTime).toBeCloseTo(6, 2)
-    await wait(4_050)
+    expect(getQueueProgress().currentTime).toBeCloseTo(4.5, 1)
+    await wait(1_000)
+    expect(getQueueProgress().currentTime).toBeCloseTo(5.5, 1)
+    await wait(4_550)
     expect(getQueueState().kind).toBe("idle")
+    expect(ranOut).toBe(1)
   })
 })
 
@@ -841,18 +855,41 @@ describe("where only the film plays, the film is the clock", () => {
     expect(getQueueState().kind).toBe("idle")
   })
 
-  it("a take landing while the film carries the lines does not leave the run waiting on the film", async () => {
+  // AQU-2253 (Sam, Nov 9): this test pinned the jump ("b2 has nothing and is
+  // skipped" once b3 was recorded). b2 has the film behind it, so it plays.
+  it("a take landing while the film carries the lines: the lines with nothing go on playing with the film, then the take", async () => {
     const cells = unrecorded()
     linkFilm(10, cells)
     startQueue(ctxFor(cells), 0)
     await wait(500)
     expect(getQueueProgress().filmClock).toBe(true)
-    // b3 is recorded now: the film no longer carries the lines.
+    // b3 is recorded now.
     updateQueueCells([line("b1"), line("b2"), line("b3", 2_000)])
     await wait(1_100)
-    // The rest of b1 was crossed; b2 has nothing and is skipped; b3 plays.
+    // b1 and b2 are still the film's to play: on, not skipped.
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    expect(getQueueProgress().currentTime).toBeGreaterThanOrEqual(1.5)
+    expect(getQueueProgress().filmClock).toBe(true)
+    // b3 plays at its own place, 3 s.
+    await wait(1_500)
     expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
     expect(el("b3")!.paused).toBe(false)
+    expect(getQueueProgress().filmClock).toBe(false)
+  })
+
+  it("a take landing on the very line the film is carrying: the rest of that line is crossed on the queue's own clock", async () => {
+    const cells = unrecorded()
+    linkFilm(10, cells)
+    startQueue(ctxFor(cells), 0)
+    await wait(500)
+    updateQueueCells([line("b1", 2_000), line("b2"), line("b3")])
+    await wait(300)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b1" })
+    expect(getQueueProgress().filmClock).toBe(false)
+    // Not left waiting on the film: b1 (2 s now) ends, b2 plays with the film.
+    film.stuck = true
+    await wait(1_300)
+    expect(getQueueState()).toMatchObject({ cellId: "b2" })
   })
 
   it("a take on another track still playing out after the last line keeps its own clock, then the film's takes over", async () => {
@@ -927,8 +964,10 @@ describe("a change of speed in the middle of a line with nothing to play", () =>
     expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
   })
 
-  it("a silent line between recorded ones, under a film that follows the queue, takes the new speed at once", async () => {
-    setSkipSilentLinesPref(false)
+  // AQU-2253 (Sam, Nov 9): this test pinned the film following the queue's
+  // timer over a line with nothing between recorded ones. Only the film plays
+  // there, so the film is the clock, as across the lines with nothing recorded.
+  it("a line with nothing between recorded ones, under a film: the film is the clock there, so it is at the new speed at once", async () => {
     // b1 recorded 2 s [0, 2); b2 a stand-in [2, 3.5); b3 recorded 1 s [3.5, 4.5).
     const cells = [line("b1", 2_000), line("b2"), line("b3", 1_000)]
     linkFilm(10, cells)
@@ -937,11 +976,11 @@ describe("a change of speed in the middle of a line with nothing to play", () =>
     el("b1")!.tick(2)
     await wait(500)
     expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
-    expect(getQueueProgress().filmClock).toBe(false)
+    expect(getQueueProgress().filmClock).toBe(true)
     expect(getQueueProgress().currentTime).toBeCloseTo(2.5, 1)
     setQueueRate(2)
-    await wait(300)
-    expect(getQueueProgress().currentTime).toBeCloseTo(3.1, 1)
+    await wait(500)
+    expect(getQueueProgress().currentTime).toBeCloseTo(3.5, 1)
   })
 })
 
@@ -1190,5 +1229,367 @@ describe("the lines table over the film's tail", () => {
     })
     expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
     expect(shownPlaying.result.current).toBe(true)
+  })
+})
+
+// AQU-2253 (Sam, Nov 9): "the rule 'skip lines with nothing to play' should
+// only land when there is literally nothing to play: recorded or source." On
+// a file with a linked film, the film is the source. A browser pass showed a
+// partly recorded file with Skip on: lines 1 and 2 played, then the playhead
+// jumped from 10.2 s to 24.9 s and the film cut forward with it. Now a line
+// with nothing of its own that the film plays behind is played: the playhead
+// crosses it in real time with the film running, and nothing is jumped.
+describe("Skip lines with nothing to play lands only where there is nothing at all (Sam, Nov 9)", () => {
+  // b1 recorded 2 s [0, 2); b2 recorded 3 s [2, 5); b3..b6 not recorded, 1.5 s
+  // stand-ins: [5, 6.5), [6.5, 8), [8, 9.5), [9.5, 11). The film is 20 s.
+  const partly = () => [...recorded(), line("b3"), line("b4"), line("b5"), line("b6")]
+
+  describe("1. a line is skipped only when it has no recording and no source", () => {
+    it("with no film, a line with nothing between two recorded ones is still skipped (Skip on)", async () => {
+      // b1 [0, 2); b2 a stand-in [2, 3.5); b3 recorded 1 s [3.5, 4.5).
+      startQueue(ctxFor([line("b1", 2_000), line("b2"), line("b3", 1_000)]), 0)
+      await wait()
+      el("b1")!.tick(2)
+      await wait()
+      expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+      expect(getQueueProgress().currentTime).toBeCloseTo(3.5, 2)
+    })
+  })
+
+  describe("2. on a file with a linked film, the film is the source: Skip never jumps there", () => {
+    it("the lines recorded play, the ones not recorded are crossed in real time with the film, on to the film's end", async () => {
+      const cells = partly()
+      linkFilm(20, cells)
+      await playTheLinesOut(cells)
+      // b2 is over at 5 s: no jump to 11 s.
+      expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+      expect(getQueueProgress().currentTime).toBeCloseTo(5, 1)
+      expect(getQueueProgress().filmClock).toBe(true)
+      expect(getQueueProgress().filmTail).toBe(false)
+      // Only the film plays there.
+      expect(anythingSounding()).toBe(false)
+      await wait(1_000)
+      expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+      expect(getQueueProgress().currentTime).toBeCloseTo(6, 1)
+      await wait(1_500)
+      expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b4" })
+      expect(getQueueProgress().currentTime).toBeCloseTo(7.5, 1)
+      await wait(3_750)
+      // 11.25 s: past the last line, the film's tail.
+      expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b6" })
+      expect(getQueueProgress().filmTail).toBe(true)
+      expect(getQueueProgress().duration).toBeCloseTo(20, 5)
+      expect(ranOut).toBe(0)
+      await wait(8_800)
+      expect(getQueueState().kind).toBe("idle")
+      expect(ranOut).toBe(1)
+    })
+
+    it("the playhead never goes backwards or jumps across the whole run", async () => {
+      const cells = partly()
+      linkFilm(20, cells)
+      startQueue(ctxFor(cells), 0)
+      await wait()
+      el("b1")!.tick(2)
+      await wait()
+      el("b2")!.tick(3)
+      let last = getQueueProgress().currentTime
+      for (let i = 0; i < 60; i++) {
+        await wait(250)
+        const now = getQueueProgress().currentTime
+        expect(now).toBeGreaterThanOrEqual(last - 0.001)
+        expect(now - last).toBeLessThan(0.6)
+        last = now
+        if (getQueueState().kind === "idle") break
+      }
+    })
+
+    it("a click on a line with nothing recorded, then Play, plays from there (it is not jumped)", async () => {
+      const cells = partly()
+      linkFilm(20, cells)
+      startQueueAtTime(ctxFor(cells), 7, { play: false })
+      await wait()
+      expect(getQueueState()).toMatchObject({ kind: "paused", cellId: "b4" })
+      expect(getQueueProgress().currentTime).toBeCloseTo(7, 5)
+      await resumeQueue()
+      await wait(500)
+      expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b4" })
+      expect(getQueueProgress().currentTime).toBeCloseTo(7.5, 1)
+    })
+
+    it("Next line goes to the next line, recorded or not; Previous line back to the one before", async () => {
+      const cells = partly()
+      linkFilm(20, cells)
+      startQueue(ctxFor(cells), 0)
+      await wait()
+      el("b1")!.tick(1)
+      skipForward()
+      await wait()
+      expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+      skipForward()
+      await wait()
+      expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+      expect(getQueueProgress().currentTime).toBeCloseTo(5, 1)
+      skipForward()
+      await wait()
+      expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b4" })
+      skipBack()
+      await wait()
+      expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+    })
+
+    it("the line crossed is the line shown as playing", async () => {
+      const cells = partly()
+      linkFilm(20, cells)
+      const shownPlaying = renderHook(() => useIsQueueCurrentCell("b3"))
+      await act(async () => {
+        await playTheLinesOut(cells)
+        await wait(500)
+      })
+      expect(shownPlaying.result.current).toBe(true)
+      expect(getQueueProgress().filmTail).toBe(false)
+    })
+
+    it("whichever way the setting is, the run is the same", async () => {
+      const trace = async (skip: boolean): Promise<string[]> => {
+        setSkipSilentLinesPref(skip)
+        const cells = partly()
+        linkFilm(20, cells)
+        await playTheLinesOut(cells)
+        const seen: string[] = []
+        for (let i = 0; i < 8; i++) {
+          seen.push(`${getQueueState().kind}:${(getQueueState() as { cellId?: string }).cellId}:${getQueueProgress().currentTime.toFixed(1)}`)
+          await wait(1_000)
+        }
+        stopQueue()
+        film.sec = 0
+        return seen
+      }
+      const on = await trace(true)
+      const off = await trace(false)
+      expect(off).toEqual(on)
+      expect(on[1]).toBe("playing:b3:6.0")
+    })
+  })
+
+  describe("3. a film whose sound is off still counts: its picture is running", () => {
+    it("with the film's sound row muted and the strip at no volume, the lines with nothing are still crossed, not jumped", async () => {
+      setQueueAudibility({ source: false, target: true })
+      setQueueVolume(0)
+      try {
+        const cells = partly()
+        linkFilm(20, cells)
+        await playTheLinesOut(cells)
+        expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+        expect(getQueueProgress().currentTime).toBeCloseTo(5, 1)
+        await wait(1_000)
+        expect(getQueueProgress().currentTime).toBeCloseTo(6, 1)
+      } finally {
+        setQueueAudibility({ source: true, target: true })
+        setQueueVolume(1)
+      }
+    })
+  })
+
+  describe("4. in the middle of the file too", () => {
+    it("a line with nothing between two recorded ones is crossed with the film, then the next one plays", async () => {
+      // b1 recorded 2 s [0, 2); b2 a stand-in [2, 3.5); b3 recorded 1 s [3.5, 4.5).
+      const cells = [line("b1", 2_000), line("b2"), line("b3", 1_000)]
+      linkFilm(10, cells)
+      startQueue(ctxFor(cells), 0)
+      await wait()
+      el("b1")!.tick(2)
+      await wait()
+      expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+      expect(getQueueProgress().currentTime).toBeCloseTo(2, 1)
+      await wait(1_000)
+      expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+      expect(getQueueProgress().currentTime).toBeCloseTo(3, 1)
+      await wait(750)
+      expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+      expect(el("b3")!.paused).toBe(false)
+      expect(getQueueProgress().filmClock).toBe(false)
+    })
+
+    it("a hidden line with nothing left to play there is crossed with the film too, its take silent", async () => {
+      const hidden = { ...line("b2", 4_000), hidden: true } as CellData
+      const cells = [line("b1", 2_000), hidden, line("b3", 1_000)]
+      linkFilm(12, cells)
+      startQueue(ctxFor(cells), 0)
+      await wait()
+      el("b1")!.tick(2)
+      await wait()
+      expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+      expect(getQueueProgress().currentTime).toBeCloseTo(2, 1)
+      await wait(1_000)
+      expect(getQueueProgress().currentTime).toBeCloseTo(3, 1)
+      expect(el("b2")).toBeUndefined()
+    })
+
+    it("a line only a take on another track sounds in is that take's, on the queue's own clock; the line after it is the film's", async () => {
+      setQueueTargetSlots(["recording", TRACK])
+      setQueueLayerTrackSlots([TRACK])
+      // b1 recorded 2 s [0, 2); b2 only a 1 s Track 1 take, a stand-in [2, 3.5); b3 a stand-in [3.5, 5).
+      const cells = [line("b1", 2_000), line("b2", undefined, 1_000), line("b3")]
+      linkFilm(10, cells)
+      startQueue(ctxFor(cells), 0)
+      await wait()
+      el("b1")!.tick(2)
+      await wait()
+      expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+      expect(el("b2-track")!.paused).toBe(false)
+      expect(getQueueProgress().filmClock).toBe(false)
+      await wait(1_750)
+      expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+      expect(getQueueProgress().filmClock).toBe(true)
+    })
+  })
+
+  describe("5. what is still skipped: a line with no recording, no original and no film behind it", () => {
+    it("a film shorter than the lines: the lines past its end with nothing of their own are skipped, and Play ends with the lines", async () => {
+      // The film ends at 6 s, inside b3 [5, 6.5); b4..b6 start after it.
+      const cells = partly()
+      linkFilm(6, cells)
+      await playTheLinesOut(cells)
+      expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+      await wait(1_600)
+      expect(getQueueState().kind).toBe("idle")
+      expect(ranOut).toBe(1)
+    })
+
+    it("a film that could not be loaded is not something to play: the lines with nothing are skipped, as with no film", async () => {
+      const cells = partly()
+      linkFilm(20, cells)
+      startQueue(ctxFor(cells), 0)
+      await wait()
+      // The film pane reports it could not be loaded.
+      setProgrammeFilm(null)
+      el("b1")!.tick(2)
+      await wait()
+      el("b2")!.tick(3)
+      await wait()
+      expect(getQueueState().kind).toBe("idle")
+      expect(ranOut).toBe(1)
+    })
+
+    it("the film failing while it carries a line: the rest of that line is crossed, the lines after it are skipped", async () => {
+      const cells = partly()
+      linkFilm(20, cells)
+      await playTheLinesOut(cells)
+      await wait(500)
+      expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+      setProgrammeFilm(null)
+      await wait(1_100)
+      expect(getQueueState().kind).toBe("idle")
+    })
+
+    it("with the setting off, the lines past a shorter film's end are played through in silence, as before", async () => {
+      setSkipSilentLinesPref(false)
+      const cells = partly()
+      linkFilm(6, cells)
+      await playTheLinesOut(cells)
+      await wait(3_000)
+      // 8 s: b5, on the queue's own clock (no film there).
+      expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b5" })
+      expect(getQueueProgress().filmClock).toBe(false)
+    })
+  })
+
+  describe("6. nothing recorded is the same rule, not a case of its own", () => {
+    it("a file's first line recorded later changes nothing about the lines with nothing: they play with the film", async () => {
+      for (const cells of [[line("b1"), line("b2"), line("b3")], [line("b1", 1_500), line("b2"), line("b3")]]) {
+        linkFilm(10, cells)
+        startQueue(ctxFor(cells), 0)
+        await wait(1_000)
+        el("b1")?.tick(1.5)
+        await wait(1_000)
+        expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+        expect(getQueueProgress().filmClock).toBe(true)
+        stopQueue()
+        film.sec = 0
+      }
+    })
+  })
+
+  describe("the film's length not known yet", () => {
+    const unknownFilm = (cells: CellData[]) =>
+      setProgrammeFilm({ endSec: null, cellIds: new Set(cells.map((c) => c.id)) })
+
+    it("lines with nothing are not skipped (the film may cover them); Play ends with the lines, and the length is the lines'", async () => {
+      const cells = partly()
+      unknownFilm(cells)
+      startQueue(ctxFor(cells), 0)
+      await wait()
+      expect(getQueueProgress().duration).toBeCloseTo(11, 5)
+      el("b1")!.tick(2)
+      await wait()
+      el("b2")!.tick(3)
+      await wait()
+      expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+      await wait(6_100)
+      expect(getQueueState().kind).toBe("idle")
+      expect(ranOut).toBe(1)
+    })
+
+    it("with nothing recorded, Play runs the film across the lines", async () => {
+      const cells = [line("b1"), line("b2")]
+      unknownFilm(cells)
+      startQueue(ctxFor(cells), 0)
+      await wait(2_000)
+      expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+      expect(getQueueProgress().filmClock).toBe(true)
+    })
+
+    it("its length arriving while the film carries a line: the run goes on to the film's end", async () => {
+      const cells = partly()
+      unknownFilm(cells)
+      await playTheLinesOut(cells)
+      await wait(1_000)
+      linkFilm(20, cells)
+      expect(getQueueProgress().duration).toBeCloseTo(20, 5)
+      await wait(6_000)
+      expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b6" })
+      expect(getQueueProgress().filmTail).toBe(true)
+    })
+  })
+
+  describe("one chapter of a book with a linked film", () => {
+    // Chapter 1: b1 recorded 2 s, b2 not. Chapter 2: b3 not, b4 recorded 1 s.
+    const chapterOne = () => [line("b1", 2_000), line("b2")]
+    const chapterTwo = () => [line("b3"), line("b4", 1_000)]
+    /** The workspace's word on a book: every chapter's lines, no run-on past a chapter. */
+    const bookFilm = (endSec: number | null) =>
+      setProgrammeFilm({ endSec, runsOn: false, cellIds: new Set([...chapterOne(), ...chapterTwo()].map((c) => c.id)) })
+
+    it("a line with nothing is crossed with the film; Play ends with the chapter's lines, and the length is the chapter's", async () => {
+      bookFilm(60)
+      startQueue(ctxFor(chapterOne()), 0)
+      await wait()
+      expect(getQueueProgress().duration).toBeCloseTo(3.5, 5)
+      el("b1")!.tick(2)
+      await wait()
+      expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+      expect(getQueueProgress().filmClock).toBe(true)
+      await wait(1_600)
+      expect(getQueueState().kind).toBe("idle")
+      expect(ranOut).toBe(1)
+    })
+
+    it("the next chapter is the film's at once, before the workspace's next word", async () => {
+      bookFilm(60)
+      startQueue(ctxFor(chapterTwo()), 0)
+      await wait()
+      expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+      expect(getQueueProgress().currentTime).toBeCloseTo(0, 2)
+    })
+
+    it("Play all's run into the next chapter: a chapter with nothing recorded has the film to play", () => {
+      const unrecordedChapter = [line("b3"), line("b4")]
+      expect(linesHaveAnythingToPlay(unrecordedChapter, null)).toBe(false)
+      bookFilm(60)
+      expect(linesHaveAnythingToPlay(unrecordedChapter)).toBe(true)
+      // Another file's film does not count.
+      expect(linesHaveAnythingToPlay([line("x1")])).toBe(false)
+    })
   })
 })

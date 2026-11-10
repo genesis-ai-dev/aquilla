@@ -222,7 +222,7 @@ import { CloneVoiceModalHost } from "./voice/CloneVoiceModalHost"
 import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
 import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
   setQueueTargetSlots, setQueueLayerTrackSlots, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying,
-  hasAnyPlayableAudio, onQueueRanOut, stopQueue, setProgrammeSourceVoicedByFilm, setProgrammeFilm } from "@/lib/audio/play-queue"
+  linesHaveAnythingToPlay, onQueueRanOut, stopQueue, setProgrammeSourceVoicedByFilm, setProgrammeFilm } from "@/lib/audio/play-queue"
 import {
   chapterOfCell, nextPlayableChapter, resolveTimelineChapter, scopeCells, sequenceTimelineCells,
   timelineChaptersOf, type TimelineChapter,
@@ -360,7 +360,7 @@ import {
 } from "@/lib/audio/linked-takes"
 import { deriveSourceRegions, insertSlotsByCell, EMPTY_INSERT_SLOTS } from "@/lib/timeline/source-regions"
 import { deriveTracksForFile } from "@/lib/timeline/tracks"
-import { filmKindOf, filmPiecesFor, filmVoicesProgramme, linkedFilmRunOnSec, programmeFilmFor, stripLinesFor } from "@/lib/timeline/film-pieces"
+import { filmKindOf, filmPiecesFor, filmVoicesProgramme, linkedFilmBehindLines, programmeFilmFor, stripLinesFor } from "@/lib/timeline/film-pieces"
 import { layOutProgramme, playsHeardLines, recordingsLines } from "@/lib/timeline/programme"
 import { nextFolderName } from "@/lib/timeline/track-names"
 import { applyPendingOrders, renormaliseOrders, settledPendingOrders } from "@/lib/timeline/track-reorder"
@@ -15144,22 +15144,35 @@ export function ProjectWorkspace() {
   // The queue is told how long the film is and which lines are this file's,
   // and keeps its clock running past the last line to the film's end; the
   // picture, already following that clock, carries on with its own sound.
-  // Null wherever Play ends with the lines as before (`linkedFilmRunOnSec`):
-  // following the source, an imported film, a film that could not be loaded.
-  const filmRunOnSec = linkedFilmRunOnSec({
-    kind: filmKind,
-    paneOnScreen: showVideoPane,
-    followsRecordings: timingMode === "audioFirst",
-    filmFailed,
-    durationSec: videoDurationForTable,
-    chapterOfABook: timelineScopes.length > 0,
-  })
+  // And the film is the lines' source: a line with nothing of its own that it
+  // plays behind is played, never skipped. Null wherever no film plays behind
+  // the lines (`linkedFilmBehindLines`): following the source, an imported
+  // film, a film that could not be loaded.
+  const filmChapterOfABook = timelineScopes.length > 0
+  const filmBehind = useMemo(
+    () => linkedFilmBehindLines({
+      kind: filmKind,
+      paneOnScreen: showVideoPane,
+      followsRecordings: timingMode === "audioFirst",
+      filmFailed,
+      durationSec: videoDurationForTable,
+      chapterOfABook: filmChapterOfABook,
+    }),
+    [filmKind, showVideoPane, timingMode, filmFailed, videoDurationForTable, filmChapterOfABook],
+  )
   // AQU-2253 (review, Nov 9): the film's lines and the lists Space, a click on
   // the timeline and the bottom strip start the queue with must be the same
   // lines (`programmeFilmFor`; ProjectWorkspace.filmRunLines.test.ts).
+  // AQU-2253 (Sam, Nov 9): every line of the file Play plays: on a book every
+  // chapter's (each chapter's lines are among them), the file's own lines
+  // (`playbackCells`) on any other file.
+  const filmLines = useMemo(
+    () => recordingsLines(timelineLines, audioCueCells, timingMode === "audioFirst"),
+    [timelineLines, audioCueCells, timingMode],
+  )
   const programmeFilm = useMemo(
-    () => programmeFilmFor(filmRunOnSec, playbackCells),
-    [filmRunOnSec, playbackCells],
+    () => programmeFilmFor(filmBehind, filmLines),
+    [filmBehind, filmLines],
   )
   // No cleanup between changes: taking the film away for a beat would end a
   // run that is playing over its tail. It is taken away when the workspace goes.
@@ -15233,7 +15246,8 @@ export function ProjectWorkspace() {
     const played = chapterOfCell(run.chapters, ctx.cells[0]?.id)
     if (!played) return
     const linesOf = (chapter: TimelineChapter) => scopeCells(run.cells, chapter)
-    const next = nextPlayableChapter(run.chapters, played.key, (chapter) => hasAnyPlayableAudio(linesOf(chapter)))
+    // AQU-2253 (Sam, Nov 9): a take, an original, or a linked film behind its lines.
+    const next = nextPlayableChapter(run.chapters, played.key, (chapter) => linesHaveAnythingToPlay(linesOf(chapter)))
     if (!next) return
     setChosenScopeKey(next.key)
     // After the queue's own bookkeeping for the run that ended.
@@ -16570,8 +16584,10 @@ export function ProjectWorkspace() {
         slots: targetSlots,
         // AQU-2252: laid out with the tracks the queue plays them with.
         tracks: programmeTracks,
+        // AQU-2253 (Sam, Nov 9): and the linked film behind the lines, their source.
+        film: programmeFilm,
       }),
-    [timingMode, timelineScopes, timelineLines, playbackCells, timelineCells, virtualIsTransport, dubDriverCells, targetSlots, programmeTracks],
+    [timingMode, timelineScopes, timelineLines, playbackCells, timelineCells, virtualIsTransport, dubDriverCells, targetSlots, programmeTracks, programmeFilm],
   )
 
   // Smooth-playback layer 1: while the Media lens is open, quietly stock the

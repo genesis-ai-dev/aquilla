@@ -87,23 +87,34 @@ export function filmVoicesProgramme(args: {
 
 /**
  * AQU-2253 (Sam, Nov 9): following the recordings, a LINKED film plays on its
- * own clock, so Play runs to whichever ends later: the lines or the film.
- * This is the film's length where that holds, for the queue to run its clock
- * on to (play-queue's `setProgrammeFilm`), and null wherever Play ends with
- * the lines as it always did:
+ * own clock, so Play runs to whichever ends later: the lines or the film. And
+ * it is the lines' source: a line with nothing of its own that the film plays
+ * behind has something to play, so "Skip lines with nothing to play" never
+ * jumps it (lib/timeline/programme's `whatSlotPlays`).
  *
- *   - following the source (the film or the recording is the transport);
- *   - an imported film, which is cut into its lines and lasts as long as they;
+ * This is the film as the queue is told it (play-queue's `setProgrammeFilm`):
+ * its length, null while it is not known yet (the film may cover any line, so
+ * none is skipped; Play ends with the lines until it is known), and whether
+ * Play runs on past the lines to its end. Null, no film behind the lines,
+ * wherever there is no film playing there:
+ *
+ *   - following the source (the film or the recording is the transport, and
+ *     nothing there is skipped under a film);
+ *   - an imported film, which is cut into its lines: its sound is their
+ *     originals, so a line that has its original plays it and one that has
+ *     none has nothing to play;
  *   - a film that could not be loaded, so nothing waits on a dead film;
- *   - a film that is not on screen, or whose length is not known yet;
- *   - one chapter of a book on the timeline: the lines there are a chapter's,
- *     and Play all goes on into the next chapter when they end.
+ *   - a film that is not on screen.
  *
- * The sound pick does not count here. It decides what is HEARD over the
- * lines (`filmVoicesProgramme`) and whether the film is muted; the picture
- * runs on to its end either way, with whichever sound was picked for it.
+ * One chapter of a book on the timeline: the film is behind its lines, but
+ * Play does not run on past them (`runsOn` false): the lines there are a
+ * chapter's, and Play all goes on into the next chapter when they end.
+ *
+ * The sound pick does not count here, nor whether the film's sound is off. It
+ * decides what is HEARD over the lines (`filmVoicesProgramme`) and whether the
+ * film is muted; the picture runs on either way, and it is something playing.
  */
-export function linkedFilmRunOnSec(args: {
+export function linkedFilmBehindLines(args: {
   kind: FilmKind | null
   paneOnScreen: boolean
   followsRecordings: boolean
@@ -113,31 +124,39 @@ export function linkedFilmRunOnSec(args: {
   durationSec: number | null | undefined
   /** The timeline shows one chapter of a book. */
   chapterOfABook?: boolean
-}): number | null {
-  if (args.kind !== "linked" || !args.paneOnScreen || !args.followsRecordings) return null
-  if (args.filmFailed || args.chapterOfABook) return null
+}): { endSec: number | null; runsOn: boolean } | null {
+  if (args.kind !== "linked" || !args.paneOnScreen || !args.followsRecordings || args.filmFailed) return null
   const sec = args.durationSec
-  return typeof sec === "number" && Number.isFinite(sec) && sec > 0 ? sec : null
+  return {
+    endSec: typeof sec === "number" && Number.isFinite(sec) && sec > 0 ? sec : null,
+    runsOn: !args.chapterOfABook,
+  }
 }
 
 /**
  * AQU-2253 (review, Nov 9): the film as the queue is told it (play-queue's
- * `setProgrammeFilm`): its length, and the ids of the lines Play plays on its
- * file. Null where Play ends with the lines (`linkedFilmRunOnSec` said null).
+ * `setProgrammeFilm`): its length, whether Play runs on past the lines, and
+ * the ids of the lines Play plays on its file. Null where no film plays
+ * behind the lines (`linkedFilmBehindLines` said null).
  *
- * The whole of "Play runs on to the film's end" hangs on one equality: these
- * ids must be exactly the ids of the list each caller starts the queue with.
- * Those are Space and a click on the timeline (`lines` itself) and the bottom
- * strip (`stripLinesFor(lines, …)`). A list that differs by one line switches
- * the feature off without a sign: Play ends with the lines again and, with
- * nothing recorded, the strip's Play goes off. So the three take their lists
- * from here, and ProjectWorkspace.filmRunLines.test.ts holds them to it.
+ * "Play runs on to the film's end" hangs on one equality: these ids must be
+ * exactly the ids of the list each caller starts the queue with. Those are
+ * Space and a click on the timeline (`lines` itself) and the bottom strip
+ * (`stripLinesFor(lines, …)`). A list with one line more is not the film's
+ * at all: no line is played under it and, with nothing recorded, the strip's
+ * Play goes off; one line fewer is still under the film but no longer runs
+ * on past its lines. So the three take their lists from here, and
+ * ProjectWorkspace.filmRunLines.test.ts holds them to it.
+ *
+ * AQU-2253 (Sam, Nov 9): on a book, `lines` is every chapter's (the file's
+ * lines Play plays), so a chapter Play all or a pick starts is under the film
+ * at once; Play does not run on past a chapter (`runsOn` false).
  */
 export function programmeFilmFor(
-  runOnSec: number | null,
+  film: { endSec: number | null; runsOn: boolean } | null,
   lines: readonly { id: string }[],
-): { endSec: number; cellIds: Set<string> } | null {
-  return runOnSec != null ? { endSec: runOnSec, cellIds: new Set(lines.map((c) => c.id)) } : null
+): { endSec: number | null; runsOn: boolean; cellIds: Set<string> } | null {
+  return film ? { endSec: film.endSec, runsOn: film.runsOn, cellIds: new Set(lines.map((c) => c.id)) } : null
 }
 
 /**

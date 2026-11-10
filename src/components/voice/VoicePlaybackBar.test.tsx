@@ -531,4 +531,25 @@ describe("VoicePlaybackBar: a linked film following the recordings (AQU-2253)", 
     filmFor(RECORDED, 30)
     expect(screen.getByTestId("transport-time")).toHaveTextContent("0:00 / 1:28")
   })
+
+  // AQU-2253 (Sam, Nov 9): the film is the lines' source, so Play is offered
+  // wherever it plays behind the lines, not only where Play runs on past them.
+  it("the film's length not known yet: Play is offered with nothing recorded, and the length shown is the lines'", () => {
+    render(strip(UNRECORDED))
+    act(() => setProgrammeFilm({ endSec: null, cellIds: new Set(UNRECORDED.map((c) => c.id)) }))
+    expect((screen.getByTestId("transport-play") as HTMLButtonElement).disabled).toBe(false)
+    render(strip(RECORDED))
+    act(() => setProgrammeFilm({ endSec: null, cellIds: new Set(RECORDED.map((c) => c.id)) }))
+    expect(screen.getAllByTestId("transport-time")[1]).toHaveTextContent("0:00 / 1:28")
+  })
+
+  it("one chapter of a book under the film: Play is offered with nothing recorded, and the length shown is the chapter's", () => {
+    // The film is named with every chapter's lines, and runs on past none.
+    const otherChapter = [cell({ id: "u9", original: "Nine" })]
+    render(strip(UNRECORDED))
+    act(() => setProgrammeFilm({ endSec: 2700, runsOn: false, cellIds: new Set([...UNRECORDED, ...RECORDED, ...otherChapter].map((c) => c.id)) }))
+    expect((screen.getByTestId("transport-play") as HTMLButtonElement).disabled).toBe(false)
+    render(strip(RECORDED))
+    expect(screen.getAllByTestId("transport-time")[1]).toHaveTextContent("0:00 / 1:28")
+  })
 })

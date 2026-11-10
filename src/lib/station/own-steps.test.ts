@@ -1,6 +1,8 @@
 // AQU-2493 (review, Nov 9): which Undo steps the Station's own button acts on.
-import { describe, expect, it } from "vitest"
-import { stationStepMatch } from "./own-steps"
+import { beforeEach, describe, expect, it } from "vitest"
+import { historyReady, recordGroup, recordStep, registerStepKinds, resetHistoryForTests, setHistoryScope, type StepHandler } from "@/lib/history/history"
+import { clearHistoryStoreForTests } from "@/lib/history/history-store"
+import { newestStationStep, stationStepMatch } from "./own-steps"
 
 describe("the Station's own Undo steps", () => {
   const mine = stationStepMatch("c331", "t2.webm")
@@ -30,5 +32,54 @@ describe("the Station's own Undo steps", () => {
     // A non-take step that happens to carry the same ids.
     expect(mine("comment.create", { cellId: "c331", audioId: "t2.webm" })).toBe(false)
     expect(mine("take.gain", null)).toBe(false)
+  })
+})
+
+// AQU-2493 (review, Nov 9), finding 6: a step made of several parts counted
+// for the Station when any one part named the open take, so approving thirty
+// lines' audio from the selection bar (one step) was taken back whole by the
+// Station's Undo when one of them was the open take. A bulk change made
+// outside the Station is never the Station's to undo.
+describe("the Station's own Undo and a step made of several parts", () => {
+  const noop = { undo: async () => ({ kind: "done" }), redo: async () => ({ kind: "done" }) } as unknown as StepHandler<never>
+  beforeEach(async () => {
+    resetHistoryForTests()
+    await clearHistoryStoreForTests()
+    registerStepKinds({ "take.window": noop, "vote.audio": noop, "take.add": noop, "take.remove": noop })
+    setHistoryScope("p1", "sam")
+    await historyReady()
+  })
+  const trim = () => recordStep({ kind: "take.window", data: { cellId: "c12", audioId: "t12.webm", before: {}, after: { trimEndMs: 900 } }, labelKey: "editor.history.stepTrimTake", lane: null })
+
+  it("passes over a bulk approval that includes the open take, to the Station's own last change", () => {
+    trim()
+    recordGroup(
+      { labelKey: "editor.history.stepValidateAudioMany", labelParams: { count: 3 }, fileId: "f1" },
+      ["c1", "c12", "c30"].map((cellId) => ({
+        kind: "vote.audio",
+        data: { cellId, audioId: cellId === "c12" ? "t12.webm" : `${cellId}.webm`, voted: true },
+        labelKey: "editor.history.stepValidateAudio",
+        fileId: "f1",
+      })),
+    )
+    expect(newestStationStep("c12", "t12.webm")?.labelKey).toBe("editor.history.stepTrimTake")
+  })
+
+  it("still counts a Station save, which writes copies on the other lines that use the recording", () => {
+    trim()
+    recordGroup({ labelKey: "editor.history.stepStationSaveOver", fileId: "f1" }, [
+      { kind: "take.add", data: { cellId: "c12", audioId: "v2.wav", slot: "recording" }, labelKey: "editor.history.stepAddTake", fileId: "f1" },
+      { kind: "take.remove", data: { cellId: "c12", audioId: "t12.webm", slot: "recording" }, labelKey: "editor.history.stepDeleteTake", fileId: "f1" },
+      { kind: "take.add", data: { cellId: "c30", audioId: "v2-30.wav", slot: "recording" }, labelKey: "editor.history.stepAddTake", fileId: "f1" },
+      { kind: "take.remove", data: { cellId: "c30", audioId: "t30.webm", slot: "recording" }, labelKey: "editor.history.stepDeleteTake", fileId: "f1" },
+    ])
+    expect(newestStationStep("c12", "v2.wav")?.labelKey).toBe("editor.history.stepStationSaveOver")
+    expect(newestStationStep("c12", "t12.webm")?.labelKey).toBe("editor.history.stepStationSaveOver")
+  })
+
+  it("an approval of the open take alone, made anywhere, is still its own", () => {
+    trim()
+    recordStep({ kind: "vote.audio", data: { cellId: "c12", audioId: "t12.webm", voted: true }, labelKey: "editor.history.stepValidateAudio", lane: null })
+    expect(newestStationStep("c12", "t12.webm")?.labelKey).toBe("editor.history.stepValidateAudio")
   })
 })

@@ -1178,14 +1178,19 @@ export function newestStepAt(): number | null {
  * open, even when you have changed other things since; ⌘Z stays the
  * project's newest step.
  */
-export function newestMatchingStep(match: (kind: string, data: unknown) => boolean): StepSummary | null {
+export function newestMatchingStep(
+  match: (kind: string, data: unknown) => boolean,
+  // AQU-2493 (review, Nov 9): whether a group counts, given its parts. By
+  // default when any part does; the Station passes its own rule (own-steps.ts).
+  groupCounts: (parts: ReadonlyArray<{ kind: string; data: unknown }>) => boolean = (parts) => parts.some((p) => match(p.kind, p.data)),
+): StepSummary | null {
   const s = activeScope ? stacks.get(activeScope) : undefined
   if (!s) return null
   for (let i = s.undo.length - 1; i >= 0; i--) {
     const r = s.undo[i]
     const hit =
       r.kind === GROUP_KIND
-        ? ((r.data as { steps?: ReadonlyArray<{ kind: string; data: unknown }> }).steps ?? []).some((p) => match(p.kind, p.data))
+        ? groupCounts((r.data as { steps?: ReadonlyArray<{ kind: string; data: unknown }> }).steps ?? [])
         : match(r.kind, r.data)
     if (hit) return summary(r)
   }

@@ -14,12 +14,12 @@ import { Button } from "@/components/ui/button"
 import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { castNameOf } from "@/lib/audio/voices"
-import { historyView, newestMatchingStep, subscribeHistory, undoLast, undoStepById } from "@/lib/history/history"
+import { historyView, subscribeHistory, undoLast, undoStepById } from "@/lib/history/history"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { audioIdSeededWith } from "@/lib/audio/upload"
 import { isGeneratedTake } from "@/lib/audio/track-audio"
 import { placeHoldingStart } from "@/lib/station/hold-place"
-import { stationStepMatch } from "@/lib/station/own-steps"
+import { newestStationStep } from "@/lib/station/own-steps"
 import { levelsShown, STATION_PICKS } from "@/lib/station/picks"
 import { setStationUi } from "@/lib/station/ui"
 import { audioCachePutBlob } from "@/lib/audio/bytes-cache"
@@ -648,8 +648,8 @@ export function StationHeader({
   const view = useSyncExternalStore(subscribeHistory, historyView, historyView)
   // AQU-2493 (review, Nov 9): only steps that change or approve THIS take;
   // the line's text, timing and visibility are not the Station's to undo.
-  const mine = useMemo(() => stationStepMatch(cellId, audioId), [cellId, audioId])
-  const step = STATION_PICKS.undoButton === "project" ? (view.nextUndo ?? null) : view.canUndo ? newestMatchingStep(mine) : null
+  // AQU-2493 (review, Nov 9): …and a bulk change made elsewhere is not its own.
+  const step = STATION_PICKS.undoButton === "project" ? (view.nextUndo ?? null) : view.canUndo ? newestStationStep(cellId, audioId) : null
   const canUndo = !recording && (unsaved || step != null)
   const undoTip = recording
     ? t("editor.station.undoWhileRecording")

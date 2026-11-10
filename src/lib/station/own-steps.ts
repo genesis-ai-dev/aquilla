@@ -9,6 +9,8 @@
 // change to a take (trim, volume and fades, move, rename, a saved or cleaned
 // version, a delete) or an approval of one, and it names this take.
 
+import { newestMatchingStep, type StepSummary } from "@/lib/history/history"
+
 /** Step kinds that change or approve one take, named by `audioId`. */
 const isTakeStep = (kind: string): boolean => kind === "vote.audio" || (kind.startsWith("take.") && kind !== "take.select" && kind !== "take.cut")
 
@@ -21,4 +23,24 @@ export function stationStepMatch(cellId: string, audioId: string): (kind: string
     // A version made of a cut take names its other pieces beside the first.
     return d.audioId === audioId || (Array.isArray(d.pieces) && d.pieces.includes(audioId))
   }
+}
+
+/**
+ * AQU-2493 (review, Nov 9): a step made of several parts is the Station's when
+ * one part changes the open take and no part approves (or takes back the
+ * approval of) any other take. Approving or un-approving audio from the
+ * selection bar, or "Validate all audio", records the whole selection as one
+ * step; counting it whenever one of its lines was the open take let the
+ * Station's Undo take back thirty approvals. A bulk change made outside the
+ * Station is never the Station's to undo. Its own groups — a save, which also
+ * writes copies on the other lines that use the recording — approve nothing.
+ */
+export function stationGroupCounts(cellId: string, audioId: string): (parts: ReadonlyArray<{ kind: string; data: unknown }>) => boolean {
+  const mine = stationStepMatch(cellId, audioId)
+  return (parts) => parts.some((p) => mine(p.kind, p.data)) && !parts.some((p) => p.kind === "vote.audio" && !mine(p.kind, p.data))
+}
+
+/** The step the Station's own Undo takes back while `audioId` on `cellId` is open. */
+export function newestStationStep(cellId: string, audioId: string): StepSummary | null {
+  return newestMatchingStep(stationStepMatch(cellId, audioId), stationGroupCounts(cellId, audioId))
 }

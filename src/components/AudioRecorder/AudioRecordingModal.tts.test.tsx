@@ -922,6 +922,9 @@ describe("AudioRecordingModal — the Generate voice (AQU-2510)", () => {
     expect(screen.getByTestId("rec-generate-voice-name")).toHaveTextContent("Test Arabic Chip")
     // A pick needs no explaining — the note is the DEFAULT, said out loud.
     expect(screen.queryByTestId("rec-generate-voice-note")).toBeNull()
+    // AQU-2511: the button names the voice the press will really use — the
+    // pick, not the cast voice it overrides.
+    expect(screen.getByTestId("rec-generate-tts")).toHaveTextContent("Generate with Test Arabic Chip")
     fireEvent.click(screen.getByTestId("rec-generate-tts"))
     await waitFor(() => expect(generateCellVoice).toHaveBeenCalledTimes(1))
     expect(generateCellVoice).toHaveBeenCalledWith(expect.objectContaining({ voiceId: clone.id }))

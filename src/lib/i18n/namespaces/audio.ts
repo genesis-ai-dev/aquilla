@@ -343,6 +343,8 @@ export const audio = defineNamespace({
     "audio.recordingModal.takesExpand": "Show all takes",
     "audio.recordingModal.takesCollapse": "Put the takes back",
     "audio.recordingModal.generateButton": "Generate",
+    // AQU-2511: which voice the press will spend credits on, before it is spent.
+    "audio.recordingModal.generateWithVoice": "Generate with {voice}",
     // AQU-2510: which voice Generate will speak in, above the button itself.
     "audio.recordingModal.voicePickAriaLabel": "Choose the voice Generate uses — now {voice}",
     "audio.recordingModal.voicePickCastNote": "· this line's voice",
@@ -1686,6 +1688,19 @@ export const audio = defineNamespace({
           "Accessible name of the same arrow once the takes list is pulled up: puts " +
           "the list back at the bottom of the window.",
         maxLength: 32,
+      },
+      "audio.recordingModal.generateWithVoice": {
+        description:
+          "Label of the button that generates a spoken take for this line, naming " +
+          "the voice it will be read in — {voice} is a voice's name, which the user " +
+          "typed or picked (do not translate it). Shown instead of the plain " +
+          "'Generate' when the line's voice is known, so the user can see which " +
+          "voice their credits will be spent on before pressing. Short; the button " +
+          "is about half a panel wide and longer text is truncated.",
+        placeholders: {
+          voice: "The name of the voice this line will be read in, e.g. 'Narrator' — a name the user typed or picked, never translated.",
+        },
+        maxLength: 40,
       },
       "audio.recordingModal.trimHint": {
         description:

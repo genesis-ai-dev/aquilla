@@ -425,15 +425,17 @@ fn registered_user() -> Option<RegisteredUser> {
 
 fn paratext_running_now() -> bool {
     use sysinfo::{ProcessesToUpdate, System};
-    let mut sys = System::new();
-    sys.refresh_processes(ProcessesToUpdate::All, true);
-    let via_sysinfo = sys.processes().values().any(|p| {
-        let name = p.name().to_string_lossy().to_ascii_lowercase();
-        name.contains("paratext.exe")
-            || p
-                .cmd()
-                .iter()
-                .any(|a| a.to_string_lossy().to_ascii_lowercase().contains("paratext.exe"))
+    // sysinfo >= 0.40 makes `System::new()` fallible; on failure fall through to `ps`.
+    let via_sysinfo = System::new().is_ok_and(|mut sys| {
+        sys.refresh_processes(ProcessesToUpdate::All, true);
+        sys.processes().values().any(|p| {
+            let name = p.name().to_string_lossy().to_ascii_lowercase();
+            name.contains("paratext.exe")
+                || p
+                    .cmd()
+                    .iter()
+                    .any(|a| a.to_string_lossy().to_ascii_lowercase().contains("paratext.exe"))
+        })
     });
     if via_sysinfo {
         return true;

@@ -62,6 +62,8 @@ import { useActiveLane } from "@/hooks/useActiveLane"
 import { useActiveTargetLane } from "@/hooks/useActiveTargetLane"
 import { useImportCellRefs } from "@/hooks/useImportCellRefs"
 import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
+import { useAdoptedIdmlAlignment } from "@/hooks/useAdoptedIdmlAlignment"
+import type { IdmlReimportAlignHost } from "@/lib/idml/align-reimported-targets"
 import { triggerLinkSync } from "@/lib/sync/archive"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import {
@@ -7463,6 +7465,37 @@ export function ProjectWorkspace() {
       },
     }
   }, [isConfigured, project?.id, askAlignStyles, alignStylesModel, getTokenForProjectFile])
+
+  // Without a configured model, the placement passes that need no model call
+  // (one-run cells, pinned references) still run; a cell that would need one is
+  // marked for a manual Align styles pass instead.
+  const idmlAlignFallbackHost = useMemo<IdmlReimportAlignHost>(() => ({
+    ask: async () => {
+      throw new Error(t("editor.idml.alignStylesUnavailable"))
+    },
+    author: currentUsername,
+    model: "unavailable",
+    provider: "none",
+    flush: async (eventIds) => {
+      await flushOutboxUntilSettled([...eventIds], {
+        getTokenForFile: getTokenForProjectFile,
+      }, { maxRounds: Math.max(6, Math.ceil(eventIds.length / 100) + 2) })
+    },
+  }), [t, currentUsername, getTokenForProjectFile])
+
+  // A source link that replaced the source of an IDML file this project already
+  // had leaves the file's translations shaped for the OLD source; this is the
+  // same placement a re-import runs, for the files the link flows recorded.
+  useAdoptedIdmlAlignment({
+    projectId: project?.id,
+    files: project ? projectFiles : undefined,
+    jwt: frontierSession?.jwt,
+    lane: activeLane,
+    getToken: getTokenForFile,
+    host: alignReimportedIdml ?? idmlAlignFallbackHost,
+    sourceLanguage: activeSourceLanguage || "",
+    targetLanguage: activeLaneTargetLanguage || "",
+  })
 
   // Translation agent (chat dock Agent mode): live cell lookup for proposal
   // lint + chain heads, and the post-apply flush/revalidate sequence — the
@@ -19386,19 +19419,7 @@ export function ProjectWorkspace() {
               sourceLanguage: activeSourceLanguage,
               targetLanguage: activeLaneTargetLanguage,
               getToken: getTokenForFile,
-              align: alignReimportedIdml ?? {
-                ask: async () => {
-                  throw new Error(t("editor.idml.alignStylesUnavailable"))
-                },
-                author: currentUsername,
-                model: "unavailable",
-                provider: "none",
-                flush: async (eventIds) => {
-                  await flushOutboxUntilSettled([...eventIds], {
-                    getTokenForFile: getTokenForProjectFile,
-                  }, { maxRounds: Math.max(6, Math.ceil(eventIds.length / 100) + 2) })
-                },
-              },
+              align: alignReimportedIdml ?? idmlAlignFallbackHost,
               onProgress,
             })
             await handleImported([repaired.ref])

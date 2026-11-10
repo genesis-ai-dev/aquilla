@@ -7,21 +7,28 @@ import config from "../vite.config"
 
 it("watches application HTML but excludes generated worker email HTML", async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "aquilla-watch-")))
-  const emails = join(root, "auth-worker/.wrangler/tmp/email/email-html")
+  const worker = join(root, "auth-worker")
+  const emails = join(worker, ".wrangler/tmp/email/email-html")
   mkdirSync(emails, { recursive: true })
   writeFileSync(join(emails, "signup.html"), "generated email")
   writeFileSync(join(root, "index.html"), "application")
+  writeFileSync(join(worker, "source.ts"), "export default {}")
   const server = await createServer({
     configFile: false, root, logLevel: "silent",
     server: { middlewareMode: true, watch: (config as UserConfigFnObject)({ command: "serve", mode: "development" }).server?.watch },
   })
   try {
-    await new Promise<void>((resolve, reject) => {
-      const watchdog = setTimeout(() => reject(new Error("Vite watcher did not become ready")), 30_000)
-      server.watcher.once("ready", () => { clearTimeout(watchdog); resolve() })
-    })
+    // Vite 8 starts its bundled Chokidar scan before createServer resolves.
+    // Its ready event can already have fired on Linux. Observe the same latch
+    // that emits ready so absence assertions run only after the complete scan.
+    // Keep this explicit: a watcher upgrade must fail here, not skip the proof.
+    const watcher = server.watcher as typeof server.watcher & { _readyEmitted: boolean }
+    expect(typeof watcher._readyEmitted).toBe("boolean")
+    await expect.poll(() => watcher._readyEmitted, { timeout: 30_000 }).toBe(true)
     const watched = server.watcher.getWatched()
     expect(watched[root]).toContain("index.html")
+    expect(watched[worker]).toContain("source.ts")
+    expect(watched[worker]).not.toContain(".wrangler")
     expect(Object.keys(watched).filter(directory => directory.includes(".wrangler"))).toEqual([])
     expect(Object.values(watched).flat()).not.toContain("signup.html")
   } finally {

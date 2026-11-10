@@ -316,8 +316,19 @@ export const nav = defineNamespace({
     "nav.report.thanks": "Thanks — report received.",
     "nav.report.replayLinked": "Session replay linked to the report.",
     "nav.report.descriptionFieldLabel": "Description",
-    "nav.report.placeholder": "What went wrong?",
-    "nav.report.descriptionRequired": "Description is required",
+    "nav.report.whatHappenedLabel": "What happened?",
+    "nav.report.tryingToLabel": "What were you trying to do?",
+    "nav.report.expectedLabel": "What did you expect to happen?",
+    "nav.report.optional": "Optional",
+    "nav.report.whatHappenedRequired": "Say what happened before sending.",
+    "nav.report.takeScreenshot": "Take a screenshot",
+    "nav.report.attachImage": "Attach an image",
+    "nav.report.imageTooLarge": "This image is larger than 8 MB. Choose a smaller one or crop it.",
+    "nav.report.imageWrongType": "Choose a PNG, JPEG, or WebP image.",
+    "nav.report.cropHint": "Drag across the image to keep only part of it.",
+    "nav.report.keepWholeImage": "Keep whole image",
+    "nav.report.useSelection": "Use selected area",
+    "nav.report.cropAlt": "The screenshot you just took",
     "nav.report.capturedContext": "Captured context:",
     "nav.report.analyticsOffNotice":
       "Usage data collection is off, so this report carries no session replay. Enable it in Preferences if you'd like future reports to include one.",
@@ -327,9 +338,6 @@ export const nav = defineNamespace({
       "Couldn't send your report. Check your connection and try again, or copy it to share another way.",
     "nav.report.notDelivered":
       "Report received, but this environment has no mail delivery configured — the team won't be emailed.",
-    "nav.report.attachScreenshot": "Attach a screenshot",
-    "nav.report.capturingScreenshot": "Choose what to share…",
-    "nav.report.retakeScreenshot": "Retake",
     "nav.report.removeScreenshot": "Remove screenshot",
     "nav.report.screenshotAttached": "Screenshot attached",
     "nav.report.screenshotAlt": "Screenshot attached to this report",
@@ -1286,15 +1294,91 @@ export const nav = defineNamespace({
       },
       "nav.report.descriptionFieldLabel": {
         description:
-          "Screen-reader-only label for the free-text textarea (visually hidden; the " +
-          "placeholder text carries the visible prompt).",
+          "Screen-reader-only label for a free-text description textarea. Originally " +
+          "the Report a problem box; now only reused by the team settings forms " +
+          "(identical text), so keep it a plain 'Description'.",
       },
-      "nav.report.placeholder": {
-        description: "Placeholder text inside the empty report textarea.",
+      "nav.report.whatHappenedLabel": {
+        description:
+          "Visible label above the first, required field of the 'Report a problem' " +
+          "form. A plain question: the user says what went wrong, in their own words.",
         screenshot: "confirm-dialog",
       },
-      "nav.report.descriptionRequired": {
-        description: "Validation error shown under the textarea when submitted empty.",
+      "nav.report.tryingToLabel": {
+        description:
+          "Visible label above the optional second field: what the user was trying " +
+          "to get done when the problem appeared. A plain question.",
+        screenshot: "confirm-dialog",
+      },
+      "nav.report.expectedLabel": {
+        description:
+          "Visible label above the optional third field: what the user thought " +
+          "would happen instead. A plain question.",
+        screenshot: "confirm-dialog",
+      },
+      "nav.report.optional": {
+        description:
+          "Small muted tag after the label of a field the user may leave empty, e.g. " +
+          "'What were you trying to do? Optional'.",
+        screenshot: "confirm-dialog",
+        maxLength: 16,
+      },
+      "nav.report.whatHappenedRequired": {
+        description:
+          "Validation error under the first field when the user tries to send or copy " +
+          "the report with it empty.",
+        screenshot: "confirm-dialog",
+      },
+      "nav.report.takeScreenshot": {
+        description:
+          "Button that hides the dialog, opens the browser's screen picker (screen, " +
+          "window or tab) and brings the dialog back with one captured frame to crop.",
+        screenshot: "confirm-dialog",
+        maxLength: 24,
+      },
+      "nav.report.attachImage": {
+        description:
+          "Button that opens the device's file picker to attach an existing PNG, JPEG " +
+          "or WebP image to the report. Always shown, also where screen capture is " +
+          "not supported.",
+        screenshot: "confirm-dialog",
+        maxLength: 24,
+      },
+      "nav.report.imageTooLarge": {
+        description:
+          "Error under the attach buttons when the chosen image is over the 8 MB " +
+          "limit. Nothing is sent. Keep '8 MB' as a number plus unit.",
+        screenshot: "confirm-dialog",
+      },
+      "nav.report.imageWrongType": {
+        description:
+          "Error under the attach buttons when the chosen file is not a PNG, JPEG or " +
+          "WebP image. Nothing is sent. Keep the three format names as they are.",
+        screenshot: "confirm-dialog",
+      },
+      "nav.report.cropHint": {
+        description:
+          "Instruction above the captured screenshot: the user can drag a box over " +
+          "it to keep only that part.",
+        screenshot: "confirm-dialog",
+      },
+      "nav.report.keepWholeImage": {
+        description:
+          "Button under the captured screenshot that attaches the whole picture, " +
+          "without cropping.",
+        screenshot: "confirm-dialog",
+        maxLength: 24,
+      },
+      "nav.report.useSelection": {
+        description:
+          "Button under the captured screenshot that attaches only the box the user " +
+          "dragged. Disabled until a box has been drawn.",
+        screenshot: "confirm-dialog",
+        maxLength: 24,
+      },
+      "nav.report.cropAlt": {
+        description:
+          "Alt text for the large screenshot shown while the user chooses what to keep.",
         screenshot: "confirm-dialog",
       },
       "nav.report.capturedContext": {
@@ -1343,28 +1427,6 @@ export const nav = defineNamespace({
           "Shown after a successful submit in an environment whose worker has no mail " +
           "binding (local dev, E2E): the report was stored but no email was sent.",
         screenshot: "confirm-dialog",
-      },
-      "nav.report.attachScreenshot": {
-        description:
-          "Button that starts a screen capture to attach to the report. Opens the " +
-          "browser's own share-picker, so the label promises an attachment, not an " +
-          "instant grab.",
-        screenshot: "confirm-dialog",
-        maxLength: 24,
-      },
-      "nav.report.capturingScreenshot": {
-        description:
-          "Disabled label on the attach button while the browser's screen-share picker " +
-          "is open and the user has not chosen a surface yet.",
-        screenshot: "confirm-dialog",
-        maxLength: 24,
-      },
-      "nav.report.retakeScreenshot": {
-        description:
-          "Button next to the attached screenshot thumbnail that discards it and starts " +
-          "a fresh capture.",
-        screenshot: "confirm-dialog",
-        maxLength: 12,
       },
       "nav.report.removeScreenshot": {
         description:

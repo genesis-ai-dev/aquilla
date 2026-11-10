@@ -196,7 +196,11 @@ function markClipMissing(cellId: string, audioId: string): void {
   const cell = activeContext?.cells.find((c) => c.id === cellId)
   if (cell?.attachments?.[audioId]?.pendingSync) return // saving, not missing
   // The pieces of a cut take are one file: gone for one, gone for all.
-  const pieces = selectedPieceIds(cell?.attachments, audioId)
+  // AQU-2495 (review, Nov 9): …the pieces cut from the SAME file. A piece
+  // saved in the Station, or cleaned, is a file of its own in that take, and
+  // is marked only when its own file is gone.
+  const url = cell?.attachments?.[audioId]?.url
+  const pieces = selectedPieceIds(cell?.attachments, audioId).filter((id) => id === audioId || (url != null && cell?.attachments?.[id]?.url === url))
   for (const id of pieces.length > 0 ? pieces : [audioId]) missingClips.set(missingTakeKey(cellId, id), { cellId, audioId: id })
   notifyMissing()
 }

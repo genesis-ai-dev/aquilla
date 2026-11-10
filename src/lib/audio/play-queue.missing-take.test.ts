@@ -215,4 +215,46 @@ describe("the pieces of a cut take share its file (AQU-2495)", () => {
     expect(marked("v1", p2)).toBe(true)
     expect(marked("v1", voiceId("v1"))).toBe(false)
   })
+
+  // AQU-2495 (review, Nov 9): a piece saved in the Station (or a cleaned one)
+  // is a NEW file in the same take. Only the pieces whose own file is gone
+  // carry the mark; the healthy piece plays and is not marked.
+  it("a piece with a file of its own keeps no mark when another piece's file is gone, and the other way round", async () => {
+    setQueueTimingMode("dubbing")
+    const p1 = mainId("v1")
+    const p2 = "audio-v1-1700000001-piece.webm"
+    const cut = line("v1", 0, "main")
+    const cells = [{
+      ...cut,
+      attachments: {
+        ...cut.attachments,
+        [p1]: { ...cut.attachments![p1], trimEndMs: 1500 },
+        // Saved in the Station: its own, healthy recording.
+        [p2]: { type: "audio", slot: "recording", durationMs: 1600, pieceOf: p1, url: "http://audio.test/v1-station.wav" },
+      },
+    } as unknown as CellData]
+    startQueue(ctxFor(cells), 0)
+    await settle()
+    expect(marked("v1", p1)).toBe(true)
+    expect(marked("v1", p2)).toBe(false)
+
+    // The reverse: the Station's piece is the one whose file is gone. It was
+    // dragged to the line's start, so it is the piece the line plays first;
+    // the healthy first piece sits 2 s in.
+    stopQueue()
+    resetMissingClipsForTests()
+    const p2Gone = "audio-v1-1700000002-piece.webm"
+    const reverse = [{
+      ...cut,
+      attachments: {
+        ...cut.attachments,
+        [p1]: { ...cut.attachments![p1], url: "http://audio.test/v1-main.webm", trimEndMs: 1500, targetOffsetMs: 2000 },
+        [p2Gone]: { type: "audio", slot: "recording", durationMs: 1600, pieceOf: p1, url: frontier(p2Gone), targetOffsetMs: 0 },
+      },
+    } as unknown as CellData]
+    startQueue(ctxFor(reverse), 0)
+    await settle()
+    expect(marked("v1", p2Gone)).toBe(true)
+    expect(marked("v1", p1)).toBe(false)
+  })
 })

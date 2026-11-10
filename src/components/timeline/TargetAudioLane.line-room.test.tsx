@@ -106,6 +106,19 @@ describe("dragging a take against a line nobody has recorded (AQU-2432, Nov 9)",
     expect(move.take.place.recordingsOffsetMs).toBe(2_000)
   })
 
+  // AQU-2432 (review, Nov 9): an old pull-back on the dragged take reads as
+  // none while the line before is empty, but stays stored and would come back
+  // as an overlap once that line is recorded. The drag clears it, in its step.
+  it("a take still holding an old pull-back is put back on its line's start in the same step", () => {
+    const onMoveTakeRooms = vi.fn()
+    renderLane(book({}, { recordingsOffsetMs: -1_000 }), { onMoveTakeRooms, onRetimeTarget: vi.fn() })
+    dragBy(screen.getByTestId("tl-target-c"), -2)
+    expect(onMoveTakeRooms).toHaveBeenCalledTimes(1)
+    const move = onMoveTakeRooms.mock.calls[0]![0]
+    expect(move.rooms).toEqual([{ cellId: "b", roomMs: 2_000 }])
+    expect(move.take.place.recordingsOffsetMs).toBe(0)
+  })
+
   it("a take whose line before is recorded moves exactly as before", () => {
     const onMoveTakeRooms = vi.fn()
     const onRetimeTarget = vi.fn()

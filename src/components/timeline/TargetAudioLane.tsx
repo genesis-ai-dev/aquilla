@@ -52,7 +52,7 @@ import {
   MIN_TARGET_LEN_SEC,
   type TargetChipGeom,
 } from "@/lib/timeline/lane-timing"
-import { clampMoveStart, movedTakePlace, pieceLeadInTakeSec, type TakePlace } from "@/lib/timeline/take-place"
+import { clampMoveStart, movedTakePlace, pieceLeadInTakeSec, placeAfterRoomMove, type TakePlace } from "@/lib/timeline/take-place"
 import type { LineRoomChange } from "@/lib/timeline/line-room"
 import { emptyLineMarkers } from "@/lib/timeline/line-markers"
 import { EmptyLineMarker } from "./EmptyLineMarker"
@@ -920,17 +920,15 @@ function TargetAudioChip({
         // sets THAT LINE'S ROOM. The rooms take their share of the move first
         // (`roomsForMove`); the take's own place is read from what is left,
         // and when the rooms took all of it nothing is stored on the take.
+        // AQU-2432 (review, Nov 9): …but an old pull-back still stored on it
+        // is put back on its line's start in the same step (`placeAfterRoomMove`).
         const roomMove = onMoveTakeRooms
           ? (layout?.roomsForMove(cell, chipAtt, chip.item.audioId, geom.start, s.start) ?? null)
           : null
-        const moved = movedTakePlace({
-          here: layout,
-          other: getOtherLayout?.(),
-          track,
-          take: chip.item,
-          fromStartSec: geom.start,
-          toStartSec: roomMove ? roomMove.takeStartSec : s.start,
-        })
+        const moveArgs = { here: layout, other: getOtherLayout?.(), track, take: chip.item, fromStartSec: geom.start }
+        const moved = roomMove
+          ? placeAfterRoomMove({ ...moveArgs, takeStartSec: roomMove.takeStartSec })
+          : movedTakePlace({ ...moveArgs, toStartSec: s.start })
         if (roomMove) {
           onMoveTakeRooms?.({
             cellId: cell.id,

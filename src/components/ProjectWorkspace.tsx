@@ -290,7 +290,8 @@ import { readProjectSettingsFor, writeProjectSettingsFor } from "@/lib/history/s
 import { useHistoryShortcuts } from "@/lib/history/useHistory"
 import { useHistoryReporter } from "@/components/history/useHistoryReporter"
 import { useSettingsStepKinds } from "@/components/ProjectSettings/useSettingsStepKinds"
-import { playingInSlot, takeStepHandlers, type CutRecord, type StoredTakePlace, type TakeLevel } from "@/lib/history/take-steps"
+import { playingInSlot, setTakeAddedHeals, takeStepHandlers, type CutRecord, type StoredTakePlace, type TakeAddData, type TakeLevel, type TakePlaceData } from "@/lib/history/take-steps"
+import { pullBacksWokenBy } from "@/lib/timeline/programme"
 import type { TakePlace } from "@/lib/timeline/take-place"
 import { lineRoomStepHandlers, type LineRoomStepData } from "@/lib/history/line-room-steps"
 import { lineRoomKey, type LineRoomChange } from "@/lib/timeline/line-room"
@@ -15889,6 +15890,33 @@ export function ProjectWorkspace() {
   useEffect(() => {
     setQueueLayerTrackSlots(layerTrackSlotsKey ? layerTrackSlotsKey.split("\u0000") : [])
   }, [layerTrackSlotsKey])
+
+  // AQU-2432 (review, Nov 9): RECORDING AN EMPTY LINE NEVER BRINGS BACK AN OLD
+  // OVERLAP. When a take fills a line that had none, the next line's takes
+  // that still hold a pull-back (read as none while the line was empty) are put
+  // back on their line's start — where they are drawn and heard now — in the
+  // recording's own step (lib/history/take-steps, `setTakeAddedHeals`). Only a
+  // take that filled an empty slot can do it; a new version of a take that was
+  // already there never does. Laid out from the lines the file plays: a heard
+  // line's take lives in the cue file.
+  const takeAddedHealsRef = useRef<(data: TakeAddData, where: { fileId: string }) => TakePlaceData[]>(() => [])
+  takeAddedHealsRef.current = (data, where) => {
+    if (data.selectedBefore != null) return []
+    const cells = audioCueSibling && where.fileId === audioCueSibling.id
+      ? (audioCueCells ?? [])
+      : where.fileId === activeFileId ? audioMergedCells : []
+    return pullBacksWokenBy(cells, data.cellId, [data.audioId, ...(data.pieces ?? [])], programmeTracks).flatMap(({ cellId, audioId }) => {
+      const att = cells.find((c) => c.id === cellId)?.attachments?.[audioId]
+      if (!att) return []
+      const targetOffsetMs = att.targetOffsetMs ?? null
+      void applyTakePlace(cellId, audioId, { targetOffsetMs, recordingsOffsetMs: 0 })
+      return [{ cellId, audioId, before: targetOffsetMs, after: targetOffsetMs, recordingsBefore: att.recordingsOffsetMs ?? null, recordingsAfter: 0 }]
+    })
+  }
+  useEffect(() => {
+    setTakeAddedHeals((data, where) => takeAddedHealsRef.current(data, where))
+    return () => setTakeAddedHeals(null)
+  }, [])
 
   // AQU-2251: with "Skip lines with nothing to play" on, the built-in clock
   // jumps from the end of one line with a take to the start of the next one.

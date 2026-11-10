@@ -17,13 +17,14 @@ import {
   isUnrecordedSlot,
   layOutProgramme,
   playedProgramme,
+  pullBacksWokenBy,
   roomFloorSec,
   roomsForMove,
   slotHasNothingToPlay,
   type BuildProgrammeOptions,
 } from "./programme"
 import { buildTimelineLayout } from "./layout"
-import { movedStartSec, movedTakePlace } from "./take-place"
+import { movedStartSec, movedTakePlace, placeAfterRoomMove } from "./take-place"
 import { lineRoomKey, lineRoomMsFromMetadata, type LineRoomChange } from "./line-room"
 import type { CellData } from "@/hooks/useCells"
 
@@ -82,10 +83,10 @@ function drag(cells: CellData[], id: string, toSec: number, opts: BuildProgramme
   const bounds = layout.moveBounds(cell, att, audioId)!
   const to = Math.max(toSec, bounds.roomFloorSec ?? bounds.floorSec)
   const rooms = layout.roomsForMove(cell, att, audioId, from, to)
-  const moved = movedTakePlace({
-    here: layout, other: null, track: [{ cell, audioId }], take: { cell, audioId },
-    fromStartSec: from, toStartSec: rooms ? rooms.takeStartSec : to,
-  })
+  const args = { here: layout, other: null, track: [{ cell, audioId }], take: { cell, audioId }, fromStartSec: from }
+  const moved = rooms
+    ? placeAfterRoomMove({ ...args, takeStartSec: rooms.takeStartSec })
+    : movedTakePlace({ ...args, toStartSec: to })
   return { rooms: rooms?.rooms ?? null, place: moved?.place ?? null, from, to }
 }
 
@@ -320,6 +321,88 @@ describe("5. an old pull-back on a take whose line before is empty reads as none
     const [a, b] = buildProgramme(over, BOOK).slots
     expect(b.pulledBackSec).toBe(1)
     expect(a.slotLenSec).toBe(4)
+  })
+})
+
+// AQU-2432 (review, Nov 9): an old pull-back must never come back as an
+// overlap when the empty line before it is recorded. The number that reads as
+// none while the line before is empty is cleared — by the drag against that
+// line, and by the recording that fills it.
+describe("5b. an old pull-back never comes back when the empty line is recorded", () => {
+  /** Review scenario A, after b's take was deleted: c still holds the 1 s it
+   *  was pulled back over b's old take. */
+  const afterDelete = () => [
+    bookLine("a", { take: { durationMs: 5_000 } }),
+    bookLine("b"),
+    bookLine("c", { take: { durationMs: 6_000, recordingsOffsetMs: -1_000 } }),
+  ]
+  const recordB = (cells: CellData[]) =>
+    cells.map((c) => (c.id === "b" ? bookLine("b", { take: { durationMs: 3_000 }, ...(c.recordingsRoomMs != null ? { roomMs: c.recordingsRoomMs } : {}) }) : c))
+  const withPlace = (cells: CellData[], id: string, recordingsOffsetMs: number) =>
+    cells.map((c) => (c.id === id ? bookLine(id, { take: { durationMs: 6_000, recordingsOffsetMs } }) : c))
+
+  it("scenario A: the drag against the empty line puts the take back on its line's start in the same step, so recording b lays a, b, c end to end", () => {
+    const { rooms, place } = drag(afterDelete(), "c", 1)
+    expect(rooms).toEqual([{ cellId: "b", roomMs: 0 }])
+    expect(place?.recordingsOffsetMs).toBe(0)
+    const dragged = withPlace(withRooms(afterDelete(), rooms!), "c", place!.recordingsOffsetMs)
+    expect(spans(recordB(dragged))).toEqual([[0, 5], [5, 8], [8, 14]])
+  })
+
+  it("…and a drag LATER that the room takes whole heals it too", () => {
+    const closed = withRooms(afterDelete(), [{ cellId: "b", roomMs: 1_000 }])
+    const { rooms, place } = drag(closed, "c", 8)
+    expect(rooms).toEqual([{ cellId: "b", roomMs: 3_000 }])
+    expect(place?.recordingsOffsetMs).toBe(0)
+  })
+
+  it("scenario A with no drag at all: recording b clears c's old pull-back, and nothing overlaps", () => {
+    const cells = afterDelete()
+    const takeB = takeId("b")
+    expect(pullBacksWokenBy(recordB(cells), "b", [takeB], BOOK)).toEqual([{ cellId: "c", audioId: takeId("c") }])
+    // Before b's take has even reached the cells, the answer is the same.
+    expect(pullBacksWokenBy(cells, "b", [takeB], BOOK)).toEqual([{ cellId: "c", audioId: takeId("c") }])
+    expect(spans(withPlace(recordB(cells), "c", 0))).toEqual([[0, 5], [5, 8], [8, 14]])
+  })
+
+  it("scenario B (a pull-back stored against the empty line by an older build) is cleared the same way", () => {
+    const old = [bookLine("a", { take: { durationMs: 5_000 } }), bookLine("b"), bookLine("c", { take: { durationMs: 6_000, recordingsOffsetMs: -4_000 } })]
+    expect(pullBacksWokenBy(recordB(old), "b", [takeId("b")], BOOK)).toEqual([{ cellId: "c", audioId: takeId("c") }])
+  })
+
+  it("a line that was already recorded is not filled by a new take: an overlap made over it is left alone", () => {
+    const recorded = [
+      bookLine("a", { take: { durationMs: 5_000 } }),
+      bookLine("b", { take: { durationMs: 3_000 } }),
+      bookLine("c", { take: { durationMs: 6_000, recordingsOffsetMs: -1_000 } }),
+    ]
+    expect(pullBacksWokenBy(recorded, "b", ["audio-b-1700009999-again.wav"], BOOK)).toEqual([])
+    // …and one recorded on a voice track is recorded too.
+    const voiced = [bookLine("a", { take: { durationMs: 5_000 } }), bookLine("b", { others: { [VOICE]: { durationMs: 2_000 } } }), afterDelete()[2]]
+    expect(pullBacksWokenBy(voiced, "b", [takeId("b")], { ...BOOK, layerSlots: [VOICE] })).toEqual([])
+  })
+
+  it("every take of the next line that sets its length is cleared; a take on a layer track keeps its own place", () => {
+    const opts = { ...BOOK, layerSlots: [VOICE, MUSIC], layerTrackSlots: [MUSIC] }
+    const cells = [
+      bookLine("a", { take: { durationMs: 5_000 } }),
+      bookLine("b"),
+      bookLine("c", {
+        take: { durationMs: 6_000, recordingsOffsetMs: -1_000 },
+        others: { [VOICE]: { durationMs: 2_000, recordingsOffsetMs: -500 }, [MUSIC]: { durationMs: 9_000, recordingsOffsetMs: -2_000 } },
+      }),
+    ]
+    expect(pullBacksWokenBy(cells, "b", [takeId("b")], opts)).toEqual([
+      { cellId: "c", audioId: takeId("c") },
+      { cellId: "c", audioId: trackTakeId("c", VOICE) },
+    ])
+  })
+
+  it("nothing to clear: a take that starts on or after its line, a last line, a line not laid out", () => {
+    const fine = [bookLine("a", { take: { durationMs: 5_000 } }), bookLine("b"), bookLine("c", { take: { durationMs: 6_000, recordingsOffsetMs: 400 } })]
+    expect(pullBacksWokenBy(fine, "b", [takeId("b")], BOOK)).toEqual([])
+    expect(pullBacksWokenBy(afterDelete(), "c", [takeId("c")], BOOK)).toEqual([])
+    expect(pullBacksWokenBy(afterDelete(), "nope", ["x"], BOOK)).toEqual([])
   })
 })
 

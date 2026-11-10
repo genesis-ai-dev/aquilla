@@ -90,6 +90,14 @@ export interface TakeAddData {
   pieces?: string[]
   /** The window it was born with, when the action set one. */
   window?: TakeWindow
+  /**
+   * AQU-2432 (review, Nov 9): the takes of the NEXT line whose old pull-back
+   * the take cleared — a place before their line's start that read as none
+   * while this line was empty, and would have come back as an overlap over
+   * the new take (`setTakeAddedHeals`). Undo puts them back, Redo clears
+   * them again. Absent: none.
+   */
+  heals?: TakePlaceData[]
 }
 
 export interface TakeStepContext {
@@ -157,6 +165,14 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
     ({ targetOffsetMs: d.before, recordingsOffsetMs: d.recordingsBefore ?? null })
   const placeAfter = (d: TakePlaceData): StoredTakePlace =>
     ({ targetOffsetMs: d.after, recordingsOffsetMs: d.recordingsAfter ?? null })
+  // AQU-2432 (review, Nov 9): the next line's places a recording cleared go
+  // with it. One moved since is someone's work, and is left as it is; that
+  // never holds the recording's own undo back.
+  const healsTo = async (heals: readonly TakePlaceData[] | undefined, side: "before" | "after"): Promise<void> => {
+    for (const h of heals ?? []) {
+      await placeFlip(h, side === "before" ? placeAfter(h) : placeBefore(h), side === "before" ? placeBefore(h) : placeAfter(h))
+    }
+  }
 
   // A cut can be joined back only while both halves are exactly as the cut
   // left them — the first ends at the cut, the second starts there, runs to
@@ -211,6 +227,7 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
           await ctx.select(d.cellId, d.slot, d.selectedBefore)
         }
         ctx.takeRemoved?.(d.cellId, ids)
+        await healsTo(d.heals, "before")
         return DONE
       },
       async redo(d: TakeAddData) {
@@ -224,6 +241,7 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
           await ctx.select(d.cellId, d.slot, id)
         }
         ctx.takeRestored?.(d.cellId)
+        await healsTo(d.heals, "after")
         return DONE
       },
     } as StepHandler<never>,
@@ -352,6 +370,21 @@ export const TAKE_ADD_LABELS = {
 } as const
 
 /**
+ * AQU-2432 (review, Nov 9): what the open workspace does when a take is added,
+ * before the step is recorded — clear the old pull-backs of the next line's
+ * takes when the take fills a line that was empty (lib/timeline/programme,
+ * `pullBacksWokenBy`), and say which places it changed, so they ride the
+ * recording's own step. Every way a take is added comes through
+ * `recordTakeAdded`, which is why the hook lives here rather than in each of
+ * them. Null (no workspace open): nothing is cleared.
+ */
+type TakeAddedHeals = (data: TakeAddData, where: { fileId: string }) => TakePlaceData[]
+let takeAddedHeals: TakeAddedHeals | null = null
+export function setTakeAddedHeals(fn: TakeAddedHeals | null): void {
+  takeAddedHeals = fn
+}
+
+/**
  * Record that an action added a take (decision 11). Called by each action
  * once its attach is queued; `fileId` is the file the CELL lives in (a heard
  * line's take is the cue sibling's).
@@ -361,9 +394,10 @@ export function recordTakeAdded(
   data: TakeAddData,
   where: { fileId: string; fileName?: string | null },
 ): void {
+  const heals = takeAddedHeals?.(data, { fileId: where.fileId }) ?? []
   recordStep<TakeAddData>({
     kind: "take.add",
-    data,
+    data: heals.length > 0 ? { ...data, heals } : data,
     labelKey: TAKE_ADD_LABELS[how],
     fileId: where.fileId,
     ...(where.fileName ? { fileName: where.fileName } : {}),

@@ -287,3 +287,34 @@ export function movedTakePlace(args: {
       : { targetOffsetMs: otherMs, recordingsOffsetMs: hereMs },
   }
 }
+
+/**
+ * AQU-2432 (Sam, Nov 9): the take's own place after a drag against the
+ * unrecorded lines before it, once their ROOMS have taken their share
+ * (`TimelineLayout.roomsForMove`): `movedTakePlace` to `takeStartSec`, which
+ * is null when the rooms took all of the drag.
+ *
+ * AQU-2432 (review, Nov 9): …except for a take that still holds a place
+ * before its line's start, an old pull-back. Against an unrecorded line it
+ * reads as none (`pullFloorSec`), but it stays stored, and the day that line
+ * is recorded it would read again — an overlap over a take nobody pulled it
+ * over. A drag against the line touches it, so the same step puts it on its
+ * line's start, where it is drawn now; following the source it stays put.
+ */
+export function placeAfterRoomMove(args: {
+  here: TimelineLayout | null | undefined
+  other: TimelineLayout | null | undefined
+  track: readonly PlacedTake[]
+  take: PlacedTake
+  fromStartSec: number
+  takeStartSec: number
+}): MovedTake | null {
+  const { takeStartSec, ...rest } = args
+  const moved = movedTakePlace({ ...rest, toStartSec: takeStartSec })
+  if (moved) return moved
+  const { cell, audioId } = args.take
+  const ms = cell.attachments?.[audioId]?.recordingsOffsetMs
+  if (typeof ms !== "number" || !(ms < 0)) return null
+  const lineStart = typeof cell.startTime === "number" && Number.isFinite(cell.startTime) ? cell.startTime : 0
+  return { anchorSec: lineStart, place: { targetOffsetMs: placeNowMs(cell, audioId, "source"), recordingsOffsetMs: 0 } }
+}

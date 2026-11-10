@@ -1210,3 +1210,52 @@ export function roomsForMove(
   }
   return rooms.length > 0 ? { rooms, takeStartSec: fromStartSec + Math.max(0, give) } : null
 }
+
+/**
+ * AQU-2432 (review, Nov 9): RECORDING AN EMPTY LINE NEVER BRINGS BACK AN OLD
+ * OVERLAP. A take's own place before its line's start (a pull-back, Nov 6)
+ * reads as none while the line before it is unrecorded (`pullFloorSec`), but
+ * the number stays on the take — and the moment that line gets a take it
+ * would read again, starting the take over the NEW take: an overlap nobody
+ * asked for (it was made over a take since deleted, or against the empty line
+ * by an earlier build of this rule).
+ *
+ * So when a take lands on line `cellId`, these are the takes of the line after
+ * it whose own place is before their line's start — on the main track and
+ * every track that sets line lengths; a cut take's first piece carries the
+ * take's place — provided `cellId` was unrecorded until then: nothing but
+ * `newAudioIds` (the take that landed, and its pieces) records it, whether or
+ * not they have reached `cells` yet. The caller puts each back on its line's
+ * start, which is where it is drawn and heard now, in the recording's step.
+ * A line that was already recorded is left alone: an overlap made over it was
+ * asked for.
+ */
+export function pullBacksWokenBy(
+  cells: readonly CellData[],
+  cellId: string,
+  newAudioIds: readonly string[],
+  opts?: Pick<BuildProgrammeOptions, "layerSlots" | "layerTrackSlots">,
+): { cellId: string; audioId: string }[] {
+  const fresh = new Set(newAudioIds)
+  const before = cells.map((c) => {
+    if (c.id !== cellId || !c.attachments) return c
+    const kept = Object.entries(c.attachments).filter(([id, a]) => !fresh.has(id) && !fresh.has(a?.pieceOf ?? ""))
+    return { ...c, attachments: Object.fromEntries(kept) }
+  })
+  const { programme, lines } = layOutProgramme(before, opts)
+  const at = slotIndex(programme, cellId)
+  if (at < 0 || at + 1 >= programme.slots.length || !isUnrecordedSlot(programme.slots[at])) return []
+  const nextId = programme.slots[at + 1].cellId
+  const next = lines.find((c) => c.id === nextId)
+  if (!next) return []
+  const layers = new Set(opts?.layerTrackSlots ?? [])
+  const tracks = [undefined, ...[...new Set(opts?.layerSlots ?? Object.keys(next.selectedBySlot ?? {}))]
+    .filter((slot) => !isDefaultTrackSlot(slot) && !layers.has(slot))]
+  const out: { cellId: string; audioId: string }[] = []
+  for (const track of tracks) {
+    const first = resolveTargetPieces(next, track)[0]
+    const ms = first ? next.attachments?.[first.audioId]?.recordingsOffsetMs : undefined
+    if (typeof ms === "number" && ms < 0) out.push({ cellId: nextId, audioId: first!.audioId })
+  }
+  return out
+}

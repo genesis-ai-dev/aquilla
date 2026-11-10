@@ -290,6 +290,63 @@ describe('cell.audio.uncut — undoing a cut (AQU-2492)', () => {
     expect((await h.pg.query(`SELECT * FROM cell_audio_cut_votes ORDER BY event_id`)).rows).toEqual(archives)
   })
 
+  // AQU-2492 (review, Nov 9), finding 7: a take's volume and fades go with
+  // the cut's archive, the way its approvals do. Undo gives the whole take the
+  // level it had before the cut (AQU-2494 moves the fade-out to the second
+  // piece, so the first piece's is not the take's); a Redo after the joined
+  // take's level was changed is a change since, and is refused.
+  describe('the take\'s volume and fades', () => {
+    const level = async (id: string) => {
+      const r = (await h.pg.query<{ gain_db: number | null; fade_in_ms: string | number | null; fade_out_ms: string | number | null }>(
+        `SELECT gain_db, fade_in_ms, fade_out_ms FROM cell_audio WHERE audio_id = $1`, [id],
+      )).rows[0]
+      return [r.gain_db == null ? null : Number(r.gain_db), n(r.fade_in_ms), n(r.fade_out_ms)]
+    }
+    const gain = (audioId: string, gainDb: number | null, fadeInMs: number | null, fadeOutMs: number | null) =>
+      project('cell.audio.gain', { audioId, gainDb, fadeInMs, fadeOutMs })
+
+    it('Undo gives the joined take the level it had before the cut', async () => {
+      await attach('take-a')
+      await gain('take-a', 6, 200, 500)
+      await cut('take-a', 2_000, 'take-b')
+      // As AQU-2494's cut leaves it: the fade-out moved off the first piece.
+      await gain('take-a', 6, 200, null)
+      await uncut('take-a', 'take-b', null)
+      expect(await level('take-a')).toEqual([6, 200, 500])
+    })
+
+    it('a cut made before this worker kept no level: Undo leaves the first piece\'s alone', async () => {
+      await attach('take-a')
+      await gain('take-a', 6, 200, 500)
+      await cut('take-a', 2_000, 'take-b')
+      await h.pg.query(`DELETE FROM cell_audio_cut_votes`)
+      await uncut('take-a', 'take-b', null)
+      expect(await level('take-a')).toEqual([6, 200, 500])
+    })
+
+    it('a Redo after the joined take\'s level was changed is refused, and changes nothing', async () => {
+      await attach('take-a')
+      await gain('take-a', 6, null, 500)
+      await cut('take-a', 2_000, 'take-b')
+      await uncut('take-a', 'take-b', null)
+      await gain('take-a', -3, null, 800)
+      const before = { rows: await rows(), votes: await votes() }
+      await cut('take-a', 2_000, 'take-b')
+      expect({ rows: await rows(), votes: await votes() }).toEqual(before)
+      expect(await level('take-a')).toEqual([-3, null, 800])
+    })
+
+    it('a Redo with the level as the Undo left it brings the piece back', async () => {
+      await attach('take-a')
+      await gain('take-a', 6, null, 500)
+      await cut('take-a', 2_000, 'take-b')
+      await uncut('take-a', 'take-b', null)
+      await cut('take-a', 2_000, 'take-b')
+      const r = await rows()
+      expect([r['take-b'].deleted, n(r['take-a'].trim_end_ms)]).toEqual([0, 2_000])
+    })
+  })
+
   // AQU-2492 (review, Nov 9), finding 12: a rebuild replays the log over
   // today's rows. A cut made before this worker archived nothing (the old one
   // deleted the take's votes), so its replay must not archive TODAY's votes —

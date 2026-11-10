@@ -4514,6 +4514,8 @@ export function ProjectWorkspace() {
       const wholeVoters = c.before.validators ?? []
       injectOptimisticAudioTrim(fileId, c.cellId, {
         ...attachmentOutFrom(c.audioId, cur.att, slot),
+        // Finding 7: and the volume and fades it had before the cut.
+        ...(c.before.level ?? {}),
         trimStartMs,
         trimEndMs: c.before.trimEndMs,
         validatorCount: wholeVoters.length,
@@ -4584,6 +4586,9 @@ export function ProjectWorkspace() {
             recordingsOffsetMs: cur.att.recordingsOffsetMs ?? null,
             // AQU-2492: who had approved it, which its Undo gives back.
             validators: [...(cur.att.validators ?? [])],
+            // AQU-2492 (review, Nov 9), finding 7: its volume and fades, which
+            // the server keeps with the cut and gives back on Undo.
+            level: { gainDb: cur.att.gainDb ?? null, fadeInMs: cur.att.fadeInMs ?? null, fadeOutMs: cur.att.fadeOutMs ?? null },
           },
           renamed: pieceLabels(cut.audioId, cur.owner.cell.attachments).firstLabel != null,
         })

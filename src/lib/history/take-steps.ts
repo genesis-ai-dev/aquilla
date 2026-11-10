@@ -40,6 +40,14 @@ export interface CutRecord {
     /** AQU-2492: who had approved the take when it was cut. Absent on a cut
      *  recorded before AQU-2492. */
     validators?: string[]
+    /**
+     * AQU-2492 (review, Nov 9), finding 7: the take's volume and fades before
+     * the cut. The server keeps them with the cut and gives them back to the
+     * joined take on Undo; the Redo is skipped once the joined take's level
+     * changed since. Absent on a cut recorded before it: no level is checked.
+     * (The same field, and meaning, as AQU-2494's.)
+     */
+    level?: TakeLevel
   }
   /** Whether the cut renamed the first piece ("Take 3" → "Take 3 · 1"). */
   renamed: boolean
@@ -192,12 +200,27 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
       second.trimStartMs === c.atMs &&
       (second.trimEndMs ?? null) === c.before.trimEndMs &&
       (second.targetOffsetMs ?? null) === c.before.targetOffsetMs &&
-      (second.recordingsOffsetMs ?? null) === (c.before.recordingsOffsetMs ?? null)
+      (second.recordingsOffsetMs ?? null) === (c.before.recordingsOffsetMs ?? null) &&
+      levelsIntact(c, first, second)
     )
+  }
+  // AQU-2492 (review, Nov 9), finding 7: …and each still has the volume and
+  // fades the cut left it — the first piece the take's, the second none (this
+  // server's cut gives it no level). A level changed on either since is work
+  // the join would throw away: the server gives the joined take the level it
+  // had before the cut.
+  const sameLevel = (att: CodexCellAttachment, l: TakeLevel) =>
+    (att.gainDb ?? null) === l.gainDb && (att.fadeInMs ?? null) === l.fadeInMs && (att.fadeOutMs ?? null) === l.fadeOutMs
+  const levelsIntact = (c: CutRecord, first: CodexCellAttachment, second: CodexCellAttachment): boolean => {
+    if (!c.before.level) return true
+    return sameLevel(first, c.before.level) && sameLevel(second, { gainDb: null, fadeInMs: null, fadeOutMs: null })
   }
   const whole = (c: CutRecord): boolean | null => {
     const first = ctx.readTake(c.cellId, c.audioId)
     if (!first) return null
+    // Finding 7: the joined take's level changed since the Undo gave it back:
+    // cutting it again would bring the second piece back at the old level.
+    if (c.before.level && !sameLevel(first, c.before.level)) return false
     return (first.trimEndMs ?? null) === c.before.trimEndMs
   }
 

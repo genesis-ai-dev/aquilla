@@ -26,6 +26,11 @@
 --   archived_seq  the archiving event's server_seq: a restore takes the
 --                 newest archive written BEFORE its own event, so a rebuild
 --                 picks the one the live write did.
+--   gain_db, fade_in_ms, fade_out_ms
+--                 the piece's volume and fades (0193) as they were, read
+--                 before the cut changed anything: undoing a cut gives the
+--                 whole take its level back, and a Redo is refused once the
+--                 joined take's level changed since (review finding 7).
 --
 -- Written ONCE (ON CONFLICT DO NOTHING), and only by the live write: a
 -- projection rebuild replays these events against today's state, writes no
@@ -47,8 +52,17 @@ CREATE TABLE IF NOT EXISTS cell_audio_cut_votes (
     url           TEXT,
     votes         JSONB NOT NULL DEFAULT '[]'::jsonb,
     archived_seq  BIGINT,
-    archived_ts   BIGINT NOT NULL
+    archived_ts   BIGINT NOT NULL,
+    gain_db       REAL,
+    fade_in_ms    BIGINT,
+    fade_out_ms   BIGINT
 );
+
+-- The level columns arrived after the first draft of this file: a database
+-- that created the table from that draft gets them here.
+ALTER TABLE cell_audio_cut_votes ADD COLUMN IF NOT EXISTS gain_db REAL;
+ALTER TABLE cell_audio_cut_votes ADD COLUMN IF NOT EXISTS fade_in_ms BIGINT;
+ALTER TABLE cell_audio_cut_votes ADD COLUMN IF NOT EXISTS fade_out_ms BIGINT;
 
 CREATE INDEX IF NOT EXISTS idx_cell_audio_cut_votes_cut
     ON cell_audio_cut_votes (project_id, file_id, cell_id, piece_id, kind);

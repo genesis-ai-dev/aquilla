@@ -33,6 +33,14 @@
 // the audio it was given to: an archive comes back only while the take still
 // plays the same recording (AQU-1571: a take whose audio was swapped loses its
 // votes).
+//
+// AQU-2492 (review, Nov 9), finding 7: the take's volume and fades (AQU-2327)
+// are kept with the same rows, read off the take BEFORE the cut changes
+// anything on it. AQU-2494 splits them over the pieces (the fade-out moves to
+// the second piece), so the first piece's level is not the take's: the Undo
+// gives the whole take back the level it had before the cut
+// ({@link cutLevelRestoreStmt}), and a Redo is refused once the joined take's
+// level has changed since ({@link CUT_LEVEL_UNCHANGED_SQL}).
 
 import type { AquillaDb, AquillaStatement } from '../../../db/shim/postgres'
 
@@ -98,12 +106,14 @@ export function cutVoteArchiveStmt(
   return db
     .prepare(
       `INSERT INTO cell_audio_cut_votes
-         (event_id, project_id, file_id, cell_id, piece_id, audio_id, kind, url, votes, archived_seq, archived_ts)
+         (event_id, project_id, file_id, cell_id, piece_id, audio_id, kind, url, votes, archived_seq, archived_ts,
+          gain_db, fade_in_ms, fade_out_ms)
        SELECT ?, a.project_id, a.file_id, a.cell_id, ?, a.audio_id, ?, a.url,
               COALESCE((SELECT jsonb_agg(to_jsonb(v)) FROM cell_audio_validators v
                          WHERE v.project_id = a.project_id AND v.file_id = a.file_id
                            AND v.cell_id = a.cell_id AND v.audio_id = a.audio_id), '[]'::jsonb),
-              ${EVENT_SEQ_SQL}, ?
+              ${EVENT_SEQ_SQL}, ?,
+              a.gain_db, a.fade_in_ms, a.fade_out_ms
          FROM cell_audio a
         WHERE a.project_id = ? AND a.file_id = ? AND a.cell_id = ? AND a.audio_id = ?
           AND ${opts.gate}
@@ -124,6 +134,71 @@ export function cutVoteArchiveStmt(
 }
 
 /**
+ * The newest `kind` archive of the cut named by `pieceId` in `audioId`,
+ * written before this event — the one a restore reads. A row source (`FROM`).
+ * Binds from {@link newestArchiveBinds}.
+ */
+const NEWEST_ARCHIVE_SQL = `(SELECT x.* FROM cell_audio_cut_votes x
+    WHERE x.project_id = ? AND x.file_id = ? AND x.cell_id = ?
+      AND x.piece_id = ? AND x.audio_id = ? AND x.kind = ?
+      AND COALESCE(x.archived_seq < ${EVENT_SEQ_SQL}, x.archived_ts < ?)
+    ORDER BY x.archived_seq DESC NULLS LAST, x.archived_ts DESC, x.event_id DESC
+    LIMIT 1)`
+const newestArchiveBinds = (event: ArchivingEvent, pieceId: string, audioId: string, kind: CutVoteKind) => [
+  event.projectId, event.fileId, event.cellId, pieceId, audioId, kind, ...eventSeqBinds(event), event.serverTs,
+]
+
+/**
+ * Finding 7: give `audioId` back the volume and fades of the newest `kind`
+ * archive of this cut written before this event — only while the take still
+ * plays the audio the archive was of, and only when `gate` holds. No archive
+ * (a cut made before this worker kept none) leaves the level alone.
+ */
+export function cutLevelRestoreStmt(
+  db: AquillaDb,
+  event: ArchivingEvent,
+  opts: { pieceId: string; audioId: string; kind: CutVoteKind; gate: string; gateBinds: readonly unknown[] },
+): AquillaStatement {
+  return db
+    .prepare(
+      `UPDATE cell_audio a
+          SET gain_db = arch.gain_db, fade_in_ms = arch.fade_in_ms, fade_out_ms = arch.fade_out_ms
+         FROM ${NEWEST_ARCHIVE_SQL} arch
+        WHERE a.project_id = ? AND a.file_id = ? AND a.cell_id = ? AND a.audio_id = ?
+          AND a.url IS NOT DISTINCT FROM arch.url
+          AND ${opts.gate}`,
+    )
+    .bind(
+      ...newestArchiveBinds(event, opts.pieceId, opts.audioId, opts.kind),
+      event.projectId,
+      event.fileId,
+      event.cellId,
+      opts.audioId,
+      ...opts.gateBinds,
+    )
+}
+
+/**
+ * Finding 7: the take `a` (an alias in scope) still has the volume and fades
+ * the Undo gave it back — the newest 'whole' archive of the cut named by the
+ * piece `b` (an alias in scope), written before this event. True when there
+ * is no such archive. An SQL condition; binds from {@link cutLevelUnchangedBinds}.
+ */
+export const CUT_LEVEL_UNCHANGED_SQL = `COALESCE((SELECT x.gain_db IS NOT DISTINCT FROM a.gain_db
+        AND x.fade_in_ms IS NOT DISTINCT FROM a.fade_in_ms
+        AND x.fade_out_ms IS NOT DISTINCT FROM a.fade_out_ms
+      FROM cell_audio_cut_votes x
+     WHERE x.project_id = a.project_id AND x.file_id = a.file_id AND x.cell_id = a.cell_id
+       AND x.piece_id = b.audio_id AND x.audio_id = a.audio_id AND x.kind = 'whole'
+       AND COALESCE(x.archived_seq < ${EVENT_SEQ_SQL}, x.archived_ts < ?)
+     ORDER BY x.archived_seq DESC NULLS LAST, x.archived_ts DESC, x.event_id DESC
+     LIMIT 1), TRUE)`
+
+export function cutLevelUnchangedBinds(event: ArchivingEvent): unknown[] {
+  return [...eventSeqBinds(event), event.serverTs]
+}
+
+/**
  * Put back on `audioId` the votes of the newest `kind` archive of this cut
  * (named by `pieceId`) written before this event — only while the take still
  * plays the audio they were given to, and only when `gate` holds. A vote the
@@ -138,12 +213,7 @@ export function cutVoteRestoreStmt(
     .prepare(
       `INSERT INTO cell_audio_validators (project_id, file_id, cell_id, audio_id, username, decided_ts, lane_id)
        SELECT r.project_id, r.file_id, r.cell_id, r.audio_id, r.username, r.decided_ts, r.lane_id
-         FROM (SELECT x.votes, x.url FROM cell_audio_cut_votes x
-                WHERE x.project_id = ? AND x.file_id = ? AND x.cell_id = ?
-                  AND x.piece_id = ? AND x.audio_id = ? AND x.kind = ?
-                  AND COALESCE(x.archived_seq < ${EVENT_SEQ_SQL}, x.archived_ts < ?)
-                ORDER BY x.archived_seq DESC NULLS LAST, x.archived_ts DESC, x.event_id DESC
-                LIMIT 1) arch
+         FROM ${NEWEST_ARCHIVE_SQL} arch
          JOIN cell_audio a
            ON a.project_id = ? AND a.file_id = ? AND a.cell_id = ? AND a.audio_id = ?
           AND a.url IS NOT DISTINCT FROM arch.url
@@ -154,14 +224,7 @@ export function cutVoteRestoreStmt(
        ON CONFLICT (project_id, file_id, cell_id, audio_id, username) DO NOTHING`,
     )
     .bind(
-      event.projectId,
-      event.fileId,
-      event.cellId,
-      opts.pieceId,
-      opts.audioId,
-      opts.kind,
-      ...eventSeqBinds(event),
-      event.serverTs,
+      ...newestArchiveBinds(event, opts.pieceId, opts.audioId, opts.kind),
       event.projectId,
       event.fileId,
       event.cellId,

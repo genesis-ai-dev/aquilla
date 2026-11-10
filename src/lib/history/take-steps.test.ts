@@ -117,6 +117,54 @@ describe("take.cut", () => {
   })
 })
 
+// AQU-2492 (review, Nov 9), finding 7: the cut keeps the take's volume and
+// fades, and the server gives them back to the joined take on Undo. Work on a
+// piece's level since stops the Undo (it would be thrown away); a level change
+// on the joined take since stops the Redo (the pieces would come back split
+// at the old level).
+describe("take.cut and the take's volume and fades (AQU-2492)", () => {
+  const level = { gainDb: 6, fadeInMs: null, fadeOutMs: 500 }
+  const record = (): CutRecord => ({
+    cellId: "c1", audioId: "a", atMs: 1500, newAudioId: "b",
+    before: { trimEndMs: null, label: "Take 1", targetOffsetMs: null, level },
+    renamed: true,
+  })
+
+  it("undo joins the halves while each has the level the cut left it", async () => {
+    const { ctx, handlers } = ctxFor({ a: { trimEndMs: 1500, ...level }, b: { trimStartMs: 1500, pieceOf: "a" } })
+    expect(await handlers["take.cut"].undo({ cuts: [record()] })).toEqual({ kind: "done" })
+    expect(ctx.uncut).toHaveBeenCalledTimes(1)
+  })
+
+  it("undo is skipped once someone changed a piece's volume or fades since", async () => {
+    const first = ctxFor({ a: { trimEndMs: 1500, gainDb: -3, fadeOutMs: 500 }, b: { trimStartMs: 1500, pieceOf: "a" } })
+    expect(await first.handlers["take.cut"].undo({ cuts: [record()] })).toEqual({ kind: "skipped", reason: "changed" })
+    const second = ctxFor({ a: { trimEndMs: 1500, ...level }, b: { trimStartMs: 1500, pieceOf: "a", fadeOutMs: 300 } })
+    expect(await second.handlers["take.cut"].undo({ cuts: [record()] })).toEqual({ kind: "skipped", reason: "changed" })
+    expect(first.ctx.uncut).not.toHaveBeenCalled()
+    expect(second.ctx.uncut).not.toHaveBeenCalled()
+  })
+
+  it("redo is skipped once the joined take's volume or fades changed after the Undo", async () => {
+    const { ctx, handlers } = ctxFor({ a: { gainDb: -3, fadeOutMs: 800 } })
+    expect(await handlers["take.cut"].redo({ cuts: [record()] })).toEqual({ kind: "skipped", reason: "changed" })
+    expect(ctx.cut).not.toHaveBeenCalled()
+  })
+
+  it("redo cuts again while the joined take has the level the Undo gave it back", async () => {
+    const { ctx, handlers } = ctxFor({ a: { ...level } })
+    expect(await handlers["take.cut"].redo({ cuts: [record()] })).toEqual({ kind: "done" })
+    expect(ctx.cut).toHaveBeenCalledTimes(1)
+  })
+
+  it("a cut recorded before levels were kept checks no level", async () => {
+    const old = { ...record(), before: { trimEndMs: null, label: "Take 1", targetOffsetMs: null } }
+    const { ctx, handlers } = ctxFor({ a: { trimEndMs: 1500, gainDb: -3 }, b: { trimStartMs: 1500, pieceOf: "a" } })
+    expect(await handlers["take.cut"].undo({ cuts: [old] })).toEqual({ kind: "done" })
+    expect(ctx.uncut).toHaveBeenCalledTimes(1)
+  })
+})
+
 // AQU-2492 (review, Nov 9; Sam's call the same day): "I would like an
 // approved cut to still be undoable. We just need to remember the approval for
 // if the cut is redone (not manually, but with a redo button)."

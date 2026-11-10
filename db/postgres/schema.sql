@@ -697,8 +697,9 @@ CREATE INDEX IF NOT EXISTS idx_removed_cell_archive_cell
 
 -- AQU-2492 (migration 0199): the approvals a cut, or the undo of a cut, took
 -- off a take, keyed by that event, so undoing the cut gives the take its
--- approvals back and redoing it gives them to its pieces again. Written once
--- by the projection; see the migration for the full rules.
+-- approvals back and redoing it gives them to its pieces again — and the
+-- take's volume and fades as they were. Written once by the projection's live
+-- write; see the migration for the full rules.
 CREATE TABLE IF NOT EXISTS cell_audio_cut_votes (
     event_id      TEXT PRIMARY KEY,
     project_id    TEXT NOT NULL,
@@ -710,7 +711,10 @@ CREATE TABLE IF NOT EXISTS cell_audio_cut_votes (
     url           TEXT,
     votes         JSONB NOT NULL DEFAULT '[]'::jsonb,
     archived_seq  BIGINT,
-    archived_ts   BIGINT NOT NULL
+    archived_ts   BIGINT NOT NULL,
+    gain_db       REAL,
+    fade_in_ms    BIGINT,
+    fade_out_ms   BIGINT
 );
 CREATE INDEX IF NOT EXISTS idx_cell_audio_cut_votes_cut
     ON cell_audio_cut_votes (project_id, file_id, cell_id, piece_id, kind);

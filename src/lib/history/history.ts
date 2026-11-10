@@ -57,7 +57,9 @@ export type StepOutcome =
   | { kind: "done"; partial?: { skipped: number } }
   | { kind: "skipped"; reason: SkipReason; by?: string }
   // `elsewhere`: its file is not open. `language`: its language could not be opened.
-  | { kind: "blocked"; reason: "elsewhere" | "language" }
+  // `offline` (AQU-2492, review Nov 9): it can only be written online, like the
+  // change itself (a file's timing).
+  | { kind: "blocked"; reason: "elsewhere" | "language" | "offline" }
   // Another device of the same person undid or redid it first (decision 11):
   // nothing was written here, and the history now shows where it stands.
   | { kind: "moved" }

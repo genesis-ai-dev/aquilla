@@ -1,10 +1,11 @@
 // Decision 11 (P13.5): linking a film, pairing heard lines and assigning
 // characters can be undone — and someone else's change since is left alone.
-import { describe, it, expect, vi } from "vitest"
+import { beforeEach, describe, it, expect, vi } from "vitest"
 import {
   CastStepBuilder,
   filmNow,
   mediaStepHandlers,
+  recordTimingSwitch,
   timingNow,
   timingStepHandlers,
   voiceEntryChanges,
@@ -14,7 +15,18 @@ import {
   type MediaStepContext,
   type TimingStepContext,
 } from "./media-steps"
-import type { StepHandler } from "./history"
+import {
+  historyReady,
+  historyView,
+  recordStep,
+  redoLast,
+  registerStepKinds,
+  resetHistoryForTests,
+  setHistoryScope,
+  undoLast,
+  type StepHandler,
+} from "./history"
+import { clearHistoryStoreForTests } from "./history-store"
 import { stepLane } from "./step-lane"
 
 function ctxFor(state: {
@@ -276,5 +288,85 @@ describe("timingNow", () => {
     expect(timingNow("dubbing", pending)).toEqual({ mode: "audioFirst", settled: false })
     expect(timingNow("audioFirst", pending)).toEqual({ mode: "audioFirst", settled: true })
     expect(timingNow("dubbing", undefined)).toEqual({ mode: "dubbing", settled: true })
+  })
+})
+
+// AQU-2492 (review, Nov 9), finding 5: the switch's step is recorded when the
+// switch STARTS, waiting on its write. ⌘Z pressed while it saves waits for it
+// and undoes the switch — never an older, unrelated step, whose Redo the
+// switch's late step would then have cleared. And offline, an Undo or Redo of
+// a switch is refused the way the switch itself is, and kept for later.
+describe("file.timing while the switch saves, and offline (AQU-2492)", () => {
+  beforeEach(async () => {
+    resetHistoryForTests()
+    await clearHistoryStoreForTests()
+    setHistoryScope("p1", "sam")
+    await historyReady()
+  })
+
+  function register(state: { timing: Record<string, FileTiming>; online?: boolean }, log: string[]) {
+    registerStepKinds({
+      "test.move": {
+        undo: async () => { log.push("undo move"); return { kind: "done" } },
+        redo: async () => { log.push("redo move"); return { kind: "done" } },
+      } as StepHandler<never>,
+      ...timingStepHandlers({
+        readTiming: (fileId) => state.timing[fileId],
+        mayChangeTiming: () => true,
+        offersTiming: () => true,
+        online: () => state.online ?? true,
+        writeTiming: async (fileId, mode) => {
+          log.push(`write ${mode}`)
+          state.timing[fileId] = mode
+          return true
+        },
+      }),
+    })
+  }
+
+  it("⌘Z pressed while the switch is saving waits for it and undoes the switch, and the older step keeps its place", async () => {
+    const state = { timing: { f1: "dubbing" as FileTiming } }
+    const log: string[] = []
+    register(state, log)
+    recordStep({ kind: "test.move", data: {}, labelKey: "move" })
+    let land: (ok: boolean) => void = () => {}
+    const write = new Promise<boolean>((r) => { land = r })
+    recordTimingSwitch({ fileId: "f1", before: "dubbing", after: "audioFirst" }, { fileName: "Ch 1" }, write)
+    const press = undoLast()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(log).toEqual([]) // waiting on the switch, not reaching past it
+    state.timing.f1 = "audioFirst"
+    land(true)
+    expect((await press)?.step.labelKey).toBe("editor.history.stepTimingFollowsRecordings")
+    expect(log).toEqual(["write dubbing"])
+    expect(historyView().nextUndo?.labelKey).toBe("move")
+    expect(historyView().nextRedo?.labelKey).toBe("editor.history.stepTimingFollowsRecordings")
+  })
+
+  it("a refused switch leaves no step: ⌘Z then undoes the older one", async () => {
+    const state = { timing: { f1: "dubbing" as FileTiming } }
+    const log: string[] = []
+    register(state, log)
+    recordStep({ kind: "test.move", data: {}, labelKey: "move" })
+    recordTimingSwitch({ fileId: "f1", before: "dubbing", after: "audioFirst" }, {}, Promise.resolve(false))
+    await new Promise((r) => setTimeout(r, 0))
+    expect((await undoLast())?.step.labelKey).toBe("move")
+    expect(log).toEqual(["undo move"])
+  })
+
+  it("offline, Undo and Redo of a switch are refused and the step is kept", async () => {
+    const state = { timing: { f1: "audioFirst" as FileTiming }, online: false }
+    const log: string[] = []
+    register(state, log)
+    recordTimingSwitch({ fileId: "f1", before: "dubbing", after: "audioFirst" }, {}, Promise.resolve(true))
+    await new Promise((r) => setTimeout(r, 0))
+    expect((await undoLast())?.outcome).toEqual({ kind: "blocked", reason: "offline" })
+    expect(log).toEqual([])
+    expect(historyView().nextUndo?.labelKey).toBe("editor.history.stepTimingFollowsRecordings")
+    state.online = true
+    expect((await undoLast())?.outcome).toEqual({ kind: "done" })
+    state.online = false
+    expect((await redoLast())?.outcome).toEqual({ kind: "blocked", reason: "offline" })
+    expect(historyView().nextRedo?.labelKey).toBe("editor.history.stepTimingFollowsRecordings")
   })
 })

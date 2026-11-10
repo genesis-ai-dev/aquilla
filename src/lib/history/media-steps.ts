@@ -14,7 +14,7 @@
  * entries it changed in those maps and puts back each one nobody has changed
  * since. Voices an import added to the library stay there.
  */
-import type { StepHandler, StepOutcome } from "./history"
+import { recordStep, type StepHandler, type StepOutcome } from "./history"
 
 const DONE: StepOutcome = { kind: "done" }
 const GONE: StepOutcome = { kind: "skipped", reason: "gone" }
@@ -82,10 +82,40 @@ export interface TimingStepContext {
   offersTiming(fileId: string, mode: FileTiming): boolean
   /** Write it; false when the write was refused. */
   writeTiming(fileId: string, mode: FileTiming): Promise<boolean>
+  /**
+   * AQU-2492 (review, Nov 9), finding 5: whether a switch can be written now.
+   * The switch itself is refused offline (a queued mode leaves the toolbar on
+   * the old one until the connection is back), and so are its Undo and Redo:
+   * the step is kept, for when the person is back online.
+   */
+  online?(): boolean
+}
+
+/**
+ * AQU-2492 (review, Nov 9), finding 5: record a switch the moment it STARTS,
+ * waiting on its write (`write` resolves false when it was refused, which
+ * drops the step). ⌘Z pressed while it saves waits for it and undoes the
+ * switch; it never reaches past it to an older step, whose Redo the switch's
+ * step, landing late, would then have cleared.
+ */
+export function recordTimingSwitch(d: FileTimingData, where: { fileName?: string | null }, write: Promise<boolean>): void {
+  recordStep(
+    {
+      kind: "file.timing",
+      data: d,
+      labelKey: d.after === "audioFirst" ? "editor.history.stepTimingFollowsRecordings" : "editor.history.stepTimingFollowsSource",
+      fileId: d.fileId,
+      ...(where.fileName ? { fileName: where.fileName } : {}),
+    },
+    undefined,
+    { pending: write },
+  )
 }
 
 export function timingStepHandlers(ctx: TimingStepContext): Record<string, StepHandler<never>> {
   const flip = async (d: FileTimingData, from: FileTiming, to: FileTiming): Promise<StepOutcome> => {
+    // Finding 5: offline, refused the way the switch is, and kept.
+    if (ctx.online && !ctx.online()) return { kind: "blocked", reason: "offline" }
     // Who may: the switch's own rule, asked now (gap 29).
     if (!ctx.mayChangeTiming()) return { kind: "skipped", reason: "notAllowed" }
     const now = ctx.readTiming(d.fileId)

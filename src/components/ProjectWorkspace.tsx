@@ -278,7 +278,7 @@ import { attachmentOutFrom, canCutAt, newPieceAudioId, pieceLabels } from "@/lib
 import { recordGroup, recordStep, registerStepKinds, setHistoryRemote, setHistoryScope, setLaneSwitcher, setFileNamer, setOpenFileProbe, withGroup, type LaneSwitch } from "@/lib/history/history"
 import { httpHistoryRemote } from "@/lib/history/history-remote"
 import { laneAccessFor, laneShownReady, waitUntilReady, type LaneAccess } from "@/lib/history/lane-switch"
-import { CastStepBuilder, castValueOf, filmNow, mediaStepHandlers, timingNow, timingStepHandlers, type CastValue, type CueLinksData, type CueLinkWrite, type PendingFilm, type PendingTiming } from "@/lib/history/media-steps"
+import { CastStepBuilder, castValueOf, filmNow, mediaStepHandlers, recordTimingSwitch, timingNow, timingStepHandlers, type CastValue, type CueLinksData, type CueLinkWrite, type PendingFilm, type PendingTiming } from "@/lib/history/media-steps"
 import { cellLabelStepHandlers, recordCellLabelStep } from "@/lib/history/label-steps"
 import { sourceStepHandlers } from "@/lib/history/source-steps"
 import { recordingLinesStepHandlers } from "@/lib/history/recording-lines-steps"
@@ -14676,19 +14676,16 @@ export function ProjectWorkspace() {
       }
       // AQU-2492 (review, Nov 9; Sam's call the same day): switching is an
       // Undo step, naming what the file followed before the write went out.
+      // Finding 5 (same review): recorded as the switch STARTS, waiting on its
+      // write, so ⌘Z pressed while it saves undoes the switch, never an older
+      // step (a refused switch drops it).
       const fileId = activeFileId
-      const fileName = activeFileNameRef.current
       const before = readTimingMode(fileId)
-      void applyTimingMode(mode, fileId).then((ok) => {
-        if (!ok || before === undefined || before === mode) return
-        recordStep({
-          kind: "file.timing",
-          data: { fileId, before, after: mode },
-          labelKey: mode === "audioFirst" ? "editor.history.stepTimingFollowsRecordings" : "editor.history.stepTimingFollowsSource",
-          fileId,
-          fileName,
-        })
-      })
+      const write = applyTimingMode(mode, fileId)
+      if (before !== undefined && before !== mode) {
+        recordTimingSwitch({ fileId, before, after: mode }, { fileName: activeFileNameRef.current }, write)
+      }
+      void write
     },
     [activeFileId, timingFilmTimed, timingNothingToFollow, applyTimingMode, readTimingMode],
   )
@@ -15622,6 +15619,8 @@ export function ProjectWorkspace() {
         offersTiming: (_fileId, mode) =>
           !(mode === "audioFirst" && timingFilmTimed) && !(mode === "dubbing" && timingNothingToFollow),
         writeTiming: (fileId, mode) => applyTimingMode(mode, fileId),
+        // Finding 5: refused offline, as the switch is (handleChangeTimingMode).
+        online: () => navigator.onLine,
       }),
     })
   }, [readFilmLink, writeFilmLink, writeCueLinks, getTokenForProjectFile, readCastValue, writeCastValues,

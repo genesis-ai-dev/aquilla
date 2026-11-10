@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 const uploads: Array<{ fileId: string; audioId: string; ext: string; size: number }> = []
 const attaches: Array<Record<string, unknown>> = []
 const cuts: Array<Record<string, unknown>> = []
+const events: string[] = []
+const places: Array<Record<string, unknown>> = []
 let uploadFailures: Array<Error> = []
 let attachFailures: Array<Error | undefined> = []
 let cutFailures: Array<Error | undefined> = []
@@ -24,12 +26,19 @@ vi.mock("@/lib/sync/events-emit", () => ({
     const fail = attachFailures.shift()
     if (fail) throw fail
     attaches.push(input)
+    events.push(`attach ${input.audioId as string}`)
     return `ev-${attaches.length}`
+  }),
+  emitCellAudioPlace: vi.fn(async (input: Record<string, unknown>) => {
+    places.push(input)
+    events.push(`place ${input.audioId as string}`)
+    return `place-${places.length}`
   }),
   emitCellAudioCut: vi.fn(async (input: Record<string, unknown>) => {
     const fail = cutFailures.shift()
     if (fail) throw fail
     cuts.push(input)
+    events.push(`cut ${input.audioId as string}`)
     return `cut-${cuts.length}`
   }),
 }))
@@ -62,6 +71,7 @@ import {
   type BulkUploadRequest,
 } from "./engine"
 import type { UploadJob } from "./match"
+import { bornTakePlace } from "../new-take-place"
 
 const session = { jwt: "jwt", username: "dev", createdAt: "" } as unknown as BulkUploadRequest["session"]
 
@@ -77,6 +87,8 @@ beforeEach(() => {
   uploads.length = 0
   attaches.length = 0
   cuts.length = 0
+  events.length = 0
+  places.length = 0
   uploadFailures = []
   attachFailures = []
   cutFailures = []
@@ -241,5 +253,40 @@ describe("bulk upload engine", () => {
     }))
     expect(getBulkUploadState()).toMatchObject({ finished: true })
     expect(isBulkUploadRunning()).toBe(false)
+  })
+})
+
+// AQU-2491 (review, Nov 9): a line recorded before AQU-2491 holds the
+// recorder's pre-roll as its place, and a take with no place of its own reads
+// that one. Every take a bulk upload adds on a line with times is given its own
+// place, the line's start, so a folder of finished takes lands on its cues.
+describe("bulk upload: each new take's own place (AQU-2491)", () => {
+  const timedLines = new Set(["c1", "c2", "c3"])
+  const placeOf: BulkUploadRequest["placeOf"] = (_fileId, cellId) => (timedLines.has(cellId) ? bornTakePlace({ startTime: 1 }) : null)
+
+  it("one file onto one line: placed on the line's start, right after its attach", async () => {
+    await startBulkUpload(request([{ kind: "single", fileId: "f1", cellId: "c1", files: [0] }], [file("one.wav")], { placeOf }))
+    expect(places).toEqual([expect.objectContaining({ fileId: "f1", cellId: "c1", audioId: attaches[0].audioId, targetOffsetMs: 0, recordingsOffsetMs: null, targetLang: "za", author: "dev" })])
+    expect(events).toEqual([`attach ${attaches[0].audioId as string}`, `place ${attaches[0].audioId as string}`])
+  })
+
+  it("a range: each line's take is placed on its own line's start", async () => {
+    await startBulkUpload(request([{ kind: "range", fileId: "f1", cellIds: ["c1", "c2"], files: [0] }], [file("range.wav")], { placeOf }))
+    expect(places.map((p) => [p.cellId, p.audioId, p.targetOffsetMs])).toEqual([
+      ["c1", attaches[0].audioId, 0],
+      ["c2", attaches[1].audioId, 0],
+    ])
+  })
+
+  it("a verse in parts: the take is placed before it is cut, so every piece keeps that place", async () => {
+    await startBulkUpload(request([{ kind: "pieces", fileId: "f1", cellId: "c1", files: [0, 1] }], [file("a.wav", 300), file("b.wav", 500)], { placeOf }))
+    const root = attaches[0].audioId as string
+    expect(events).toEqual([`attach ${root}`, `place ${root}`, `cut ${root}`])
+  })
+
+  it("a line with no times gets no place, as before", async () => {
+    await startBulkUpload(request([{ kind: "single", fileId: "f1", cellId: "untimed", files: [0] }], [file("one.wav")], { placeOf }))
+    expect(attaches).toHaveLength(1)
+    expect(places).toEqual([])
   })
 })

@@ -4,6 +4,7 @@
 // and "Generate all" flows so every cell synthesizes identically.
 
 import { generateAndAttachCellVoice } from "./generate-voice"
+import { bornTakePlace } from "./new-take-place"
 import { resolveCastVoice } from "./voices"
 import { effectiveSourceText } from "@/lib/cell-text"
 import { laneLanguageForTag, sourceLaneLanguage } from "@/lib/lanes/lane-language"
@@ -136,6 +137,8 @@ export async function generateCellVoice(args: GenerateCellVoiceArgs): Promise<bo
       onProgress,
       ...(args.surface ? { surface: args.surface } : {}),
       ...(args.history ? { history: args.history } : {}),
+      // AQU-2491 (review, Nov 9): its own place, the line's start.
+      place: bornTakePlace(cell),
     })
     setTtsStatus(statusKey, { kind: "idle" })
     return true

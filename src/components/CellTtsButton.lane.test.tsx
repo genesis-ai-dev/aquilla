@@ -89,3 +89,23 @@ describe("CellTtsButton generates into the open lane (AQU-1978)", () => {
     expect(generated[1]).toMatchObject({ cellId: "c-twin", targetLang: "a3f09c1e" })
   })
 })
+
+// AQU-2491 (review, Nov 9): a line recorded before AQU-2491 holds the
+// recorder's pre-roll as its place. The voice this button makes is given its
+// own place, the line's start, on the line it lands on and on every heard line
+// it is voiced onto too, so none of them reads that old place and starts early.
+describe("CellTtsButton places each new voice on its own line's start (AQU-2491)", () => {
+  it("each line it voices gets its own place on a line with times, and none on a line with no times", async () => {
+    press({
+      cellId: "cue-p1",
+      lineStartTime: 12,
+      alsoAttachTo: [{ cellId: "cue-p2", fileId: "cues", startTime: 15 }, { cellId: "cue-p3", fileId: "cues", startTime: null }],
+    })
+    await waitFor(() => expect(generated).toHaveLength(3))
+    expect(generated.map((g) => [g.cellId, g.place ?? null])).toEqual([
+      ["cue-p1", { targetOffsetMs: 0, recordingsOffsetMs: null }],
+      ["cue-p2", { targetOffsetMs: 0, recordingsOffsetMs: null }],
+      ["cue-p3", null],
+    ])
+  })
+})

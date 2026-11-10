@@ -26,6 +26,7 @@ import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { convertToLibraryVoice } from "./voice-clone"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { recordTakeAdded } from "@/lib/history/take-steps"
+import { placeNewTake, placedFields, type TakePlace } from "./new-take-place"
 import { injectOptimisticAudioAttachment, notifyAudioAttachmentsChanged } from "./audio-attachments-bus"
 import { probeDurationMsSafe } from "@/lib/import"
 import { synthesizeServerTts } from "./server-tts"
@@ -67,6 +68,23 @@ export interface GenerateAndAttachArgs {
   /** Decision 11: record an Undo step for the new take, naming the take that
    *  played in its slot before. Omitted by bulk runs, which record none. */
   history?: { selectedBefore: string | null }
+  /** AQU-2491 (review, Nov 9): the voice's own place, `bornTakePlace(line)`:
+   *  its line's start on a line with times, so a place an older recording left
+   *  on the line can't pull it early. */
+  place?: TakePlace | null
+}
+
+/** AQU-2491 (review, Nov 9): the new voice's own place, right after its attach. */
+function placeGenerated(args: GenerateAndAttachArgs, audioId: string): Promise<string | null> {
+  return placeNewTake({
+    projectId: args.projectId,
+    fileId: args.fileId,
+    cellId: args.cellId,
+    audioId,
+    place: args.place,
+    ...(args.targetLang ? { targetLang: args.targetLang } : {}),
+    author: args.username,
+  })
 }
 
 export interface GenerateAndAttachResult {
@@ -145,6 +163,7 @@ export async function generateAndAttachCellVoice(
       surface: args.surface,
       author: args.username,
     })
+    const placeEventId = await placeGenerated(args, objectName)
     // Round 8: shadow-inject so the sparkle chip appears at its real length
     // instantly — the notify's refetch would otherwise read pre-flush state.
     injectOptimisticAudioAttachment(args.fileId, args.cellId, {
@@ -158,7 +177,8 @@ export async function generateAndAttachCellVoice(
       label: args.label ?? null,
       trimStartMs: null,
       trimEndMs: null,
-    }, attachEventId)
+      ...placedFields(args.place, placeEventId),
+    }, placeEventId ?? attachEventId)
     notifyAudioAttachmentsChanged(args.fileId)
     // The take that was attached: the re-voiced clip for a character voice,
     // or the server-synthesized ElevenLabs take.
@@ -307,6 +327,7 @@ export async function generateAndAttachCellVoice(
     surface: args.surface,
     author: args.username,
   })
+  const placeEventId = await placeGenerated(args, objectName)
   // Round 8: shadow-inject (see the hosted-TTS branch's comment).
   injectOptimisticAudioAttachment(args.fileId, args.cellId, {
     audioId: objectName,
@@ -319,7 +340,8 @@ export async function generateAndAttachCellVoice(
     label: args.label ?? null,
     trimStartMs: null,
     trimEndMs: null,
-  }, attachEventId)
+    ...placedFields(args.place, placeEventId),
+  }, placeEventId ?? attachEventId)
   notifyAudioAttachmentsChanged(args.fileId)
   recordGenerated(args, objectName)
 

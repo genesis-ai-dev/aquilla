@@ -82,6 +82,7 @@ import { SegmentTabs } from "@/components/ui/tabs"
 import { setRecordingFormatPref, useRecordingFormatPref } from "@/lib/store/recording-format-pref"
 import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
 import { ACCEPT, OFFLINE_MESSAGE, attachAudioFileToCell, validateAudioFile } from "@/lib/audio/attach-file"
+import { bornTakePlace } from "@/lib/audio/new-take-place"
 import { playingInSlot, recordTakeAdded } from "@/lib/history/take-steps"
 import { recordingLimitsFor } from "@/lib/audio/recording-limits"
 import { MAX_AUDIO_UPLOAD_BYTES, audioIdSeededWith, buildAudioId, uploadCellAudio, deleteCellAudio, fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
@@ -1684,6 +1685,9 @@ export function AudioRecordingModal({
         surface: "recorder",
         // Decision 11: uploading is an Undo step too.
         history: { selectedBefore: playingInSlot(audioEntry, targetSlot) },
+        // AQU-2491 (review, Nov 9): its own place, the line's start, as a
+        // recorded take with no pre-roll has.
+        place: bornTakePlace(activeCell),
       })
       onTakeSaved?.(activeCell.id)
       returnToReady(`${label} added`)

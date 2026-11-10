@@ -12,6 +12,7 @@ import { bookCodeFromFileName, isKnownBookCode } from "@/lib/file-labeling/bible
 import { usfmDisplayText } from "@/lib/parsers/usfm-display"
 import type { ProjectFileInfo, TargetFile, TargetLine } from "./match"
 import type { BookNameIndex } from "./book-names"
+import { bornTakePlace, type TakePlace } from "@/lib/audio/new-take-place"
 
 export interface ProjectFileLike {
   id: string
@@ -106,7 +107,23 @@ export async function loadTargetFile(
       text: lineText(row, targetById.get(row.cellId)),
       structural: isStructuralCell(row.type),
       hasRecording: cellHasOwnTake({ id: row.cellId, fileId: file.fileId }, audio?.cells[row.cellId], shared),
+      // AQU-2491 (review, Nov 9): where a take uploaded onto it is placed.
+      startMs: row.startMs ?? targetById.get(row.cellId)?.startMs ?? null,
     })
   }
   return { fileId: file.fileId, name: file.name, bookCode: file.bookCode, lines, timed }
+}
+
+/**
+ * AQU-2491 (review, Nov 9): each take a bulk upload adds is given its own
+ * place, its line's start when the line has one (`bornTakePlace`), so it never
+ * reads a place an older recording left on the line.
+ */
+export function takePlacesOf(targets: Iterable<TargetFile>): (fileId: string, cellId: string) => TakePlace | null {
+  const startMs = new Map<string, number | null>()
+  for (const file of targets) for (const line of file.lines) startMs.set(`${file.fileId}\u0000${line.cellId}`, line.startMs ?? null)
+  return (fileId, cellId) => {
+    const ms = startMs.get(`${fileId}\u0000${cellId}`)
+    return bornTakePlace({ startTime: ms != null ? ms / 1000 : undefined })
+  }
 }

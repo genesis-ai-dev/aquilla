@@ -9916,6 +9916,8 @@ function EditorRow({
                   disabled={!editable}
                   onTakeSaved={onTakeSaved}
                   targetLang={activeLane || undefined}
+                  // AQU-2491 (review, Nov 9): the take is placed on the line's start.
+                  lineStartTime={cell.startTime}
                 />
               )}
 
@@ -9971,7 +9973,10 @@ function EditorRow({
                 // played back; the rest are generated alongside it.
                 alsoAttachTo={audioHomes
                   ?.slice(1)
-                  .map((c) => ({ cellId: c.id, fileId: c.fileId }))}
+                  .map((c) => ({ cellId: c.id, fileId: c.fileId, startTime: c.startTime }))}
+                // AQU-2491 (review, Nov 9): each voice is placed on the start
+                // of the line it lands on.
+                lineStartTime={(audioHome ?? cell).startTime}
                 // A cue sibling exists but nothing performs this line — about
                 // ten an episode. There is nowhere to put a voice, and writing
                 // it to the subtitle is exactly the bug above.

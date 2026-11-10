@@ -134,3 +134,26 @@ describe("generateCellVoice — speaks in the lane's language (AQU-1978)", () =>
     expect(contextOf().targetLanguage).toBe("Swahili")
   })
 })
+
+// AQU-2491 (review, Nov 9): a line recorded before AQU-2491 holds the
+// recorder's pre-roll as its place. Every voice generated through this helper
+// (the voice panel, regenerate in the recorder, batch voice, Voice Studio) is
+// given its own place on the line's start, so it never reads that one.
+describe("generateCellVoice — the new voice's own place (AQU-2491)", () => {
+  it("a voice generated onto a line with times sits on the line's start", async () => {
+    await generateCellVoice({
+      project,
+      cell: makeCell("c-timed", { startTime: 4, endTime: 6, metadata: { target_offset_ms: -200 } } as Partial<CellData>),
+      session,
+      username: "alice",
+    })
+    const args = (generateAndAttachCellVoice.mock.calls[0] as unknown[])[0] as { place?: unknown }
+    expect(args.place).toEqual({ targetOffsetMs: 0, recordingsOffsetMs: null })
+  })
+
+  it("a line with no times gets no place, as before", async () => {
+    await generateCellVoice({ project, cell: makeCell("c-untimed"), session, username: "alice" })
+    const args = (generateAndAttachCellVoice.mock.calls[0] as unknown[])[0] as { place?: unknown }
+    expect(args.place ?? null).toBeNull()
+  })
+})

@@ -411,6 +411,52 @@ describe("take.add of a Voice together clip (AQU-2492)", () => {
   })
 })
 
+// AQU-2492 (review, Nov 9), finding 4: undoing a Station Save over the
+// playing whole take, on a slow network. The server holds the truth; the
+// app's copy catches up only when it is read again, and choosing a take the
+// copy does not list changes nothing on screen.
+describe("undoing a Station Save over a take, before the app's copy catches up (AQU-2492)", () => {
+  function slowLine(playing = "t2") {
+    const server: { deleted: Record<string, boolean>; playing: string | null } = { deleted: { t1: true, t2: false, t3: false }, playing }
+    const copy = { listed: new Set(["t2", "t3"]), playing: playing as string | null }
+    const ctx: TakeStepContext = {
+      readTake: (_c, id) => (copy.listed.has(id) ? ({ slot: "recording" } as CodexCellAttachment) : null),
+      selectedIn: () => copy.playing,
+      applyTrim: vi.fn(), applyPlace: vi.fn(), cut: vi.fn(), uncut: vi.fn(), rename: vi.fn(),
+      select: vi.fn(async (_c, _s, id) => {
+        if (id) server.deleted[id] = false
+        server.playing = id
+        if (!id || copy.listed.has(id)) copy.playing = id
+      }),
+      remove: vi.fn(async (_c, id) => {
+        server.deleted[id] = true
+        if (server.playing === id) server.playing = null
+        copy.listed.delete(id)
+        if (copy.playing === id) copy.playing = null
+      }),
+    }
+    return { server, handlers: takeStepHandlers(ctx) as Record<string, StepHandler<unknown>> }
+  }
+  // The Save's step, as save.ts records it: the new version added, the take it replaced deleted.
+  const added = { cellId: "c", audioId: "t2", slot: "recording", selectedBefore: "t1" }
+  const deleted = { cellId: "c", audioId: "t1", slot: "recording", wasSelected: true, selectedBefore: "t1", replacedBy: "t2" }
+
+  it("the old take plays again, though the app has not read it back yet", async () => {
+    const { server, handlers } = slowLine()
+    // A group undoes newest first: the delete, then the add.
+    expect(await handlers["take.remove"].undo(deleted)).toEqual({ kind: "done" })
+    expect(await handlers["take.add"].undo(added)).toEqual({ kind: "done" })
+    expect(server).toEqual({ deleted: { t1: false, t2: true, t3: false }, playing: "t1" })
+  })
+
+  it("a take a colleague chose since the Save keeps the slot; the old one comes back beside it", async () => {
+    const { server, handlers } = slowLine("t3")
+    expect(await handlers["take.remove"].undo(deleted)).toEqual({ kind: "done" })
+    expect(await handlers["take.add"].undo(added)).toEqual({ kind: "done" })
+    expect(server).toEqual({ deleted: { t1: false, t2: true, t3: false }, playing: "t3" })
+  })
+})
+
 describe("take.select that emptied a slot", () => {
   it("undo plays the old take again; redo empties the slot again", async () => {
     const select = vi.fn(async () => {})

@@ -14,7 +14,7 @@ vi.mock("@/lib/sync/events-emit", () => ({
   emitCellAudioRemove: vi.fn(async (x: unknown) => (calls.remove.push(x), "ev")),
 }))
 
-import { historyView, resetHistoryForTests, setHistoryScope } from "@/lib/history/history"
+import { historyView, matchingSteps, resetHistoryForTests, setHistoryScope } from "@/lib/history/history"
 import { saveStationVersion, type VersionPlacement } from "./save"
 
 const base: VersionPlacement = {
@@ -122,6 +122,31 @@ describe("Save as new version", () => {
     expect(historyView().nextUndo?.labelKey).toBe("editor.history.stepStationSaveOver")
     await saveStationVersion({ ...args, placements: [base, { ...base, cellId: "c316" }], mode: "new" })
     expect(historyView().nextUndo?.labelKey).toBe("editor.history.stepStationVersion")
+    resetHistoryForTests()
+  })
+
+  // AQU-2492 (review, Nov 9), findings 4 and 8: the step that removes the
+  // take Save replaced names the new version (its Undo never hands the slot
+  // back to it) and who had approved the old take (only an approval given
+  // after the Undo stops the Redo).
+  it("the removal in Save's step names the new version and who had approved the old take", async () => {
+    resetHistoryForTests()
+    setHistoryScope("p", "ana")
+    const res = await saveStationVersion({
+      projectId: "p",
+      samples: new Float32Array(4800),
+      rate: 48000,
+      placements: [{ ...base, approvedBy: ["ben"] }],
+      author: "ana",
+      getSyncToken: async () => "jwt",
+      where: { fileId: "f" },
+      mode: "over",
+    })
+    const named = matchingSteps((kind, data) => {
+      const d = data as { audioId?: string; replacedBy?: string; approvedBy?: Record<string, string[]> }
+      return kind === "take.remove" && d.audioId === "t2.webm" && d.replacedBy === res.audioIds[0] && d.approvedBy?.["t2.webm"]?.join() === "ben"
+    })
+    expect(named.undo).toHaveLength(1)
     resetHistoryForTests()
   })
 

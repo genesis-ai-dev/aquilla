@@ -185,6 +185,9 @@ export async function saveStationVersion(args: SaveVersionArgs): Promise<SavedVe
               data: {
                 cellId: p.cellId, audioId: p.fromAudioId, slot: p.slot, wasSelected: true, selectedBefore: p.selectedBefore,
                 ...(p.approvedBy ? { approvedBy: { [p.fromAudioId]: [...p.approvedBy] } } : {}),
+                // AQU-2492 (review, Nov 9), finding 4: its Undo never hands
+                // the slot back to the new version, which the same Undo removes.
+                replacedBy: audioId,
               },
               labelKey: "editor.history.stepDeleteTake",
               fileId: p.fileId,

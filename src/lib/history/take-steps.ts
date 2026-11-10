@@ -100,6 +100,14 @@ export interface TakeRemoveData {
    * since stops the Redo. Absent on a delete recorded before it: no check.
    */
   approvedBy?: Record<string, string[]>
+  /**
+   * AQU-2492 (review, Nov 9), finding 4: the take that replaced it in the
+   * same step (the Station's Save over it). The Undo never hands the slot
+   * back to that one: the same step's Undo takes it away, and handing it back
+   * left the line playing nothing whenever the app had not read the old take
+   * back yet.
+   */
+  replacedBy?: string
 }
 export interface TakeRenameData { cellId: string; audioId: string; before: string | null; after: string | null }
 /**
@@ -382,6 +390,8 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
         // this was. The slot is handed back by a take that is live, never by
         // naming a deleted first piece (choosing it would bring it back).
         if (d.wasSelected && playingNow === null) return DONE
+        // Finding 4: nor to the take that replaced it in this step.
+        if (d.wasSelected && d.replacedBy && playingNow === d.replacedBy) return DONE
         const back = playingNow === null ? null : liveOf(d.cellId, playingNow)
         if (playingNow === null || back) await ctx.select(d.cellId, d.slot, back)
         return DONE

@@ -35,9 +35,9 @@ function AccountLoginMethods({ jwt, username }: { jwt: string; username: string 
         <SettingsRow
           className="flex-wrap items-center"
           label={t(methods.password ? "auth.methods.passwordSet" : "auth.methods.passwordMissing")}
-          control={!methods.password && <Button size="sm" variant="outline" onClick={() => setRecovering(true)}>{t("auth.methods.setPassword")}</Button>}
+          control={<Button size="sm" variant="outline" onClick={() => setRecovering(true)}>{t(methods.password ? "auth.methods.resetPassword" : "auth.methods.setPassword")}</Button>}
         />
-        {recovering && <SettingsBlock><div className="max-w-md"><FrontierForgotPasswordForm onBack={() => setRecovering(false)} returnTo="/preferences/login-methods" /></div></SettingsBlock>}
+        {recovering && <SettingsBlock><div className="max-w-md"><FrontierForgotPasswordForm backLabel={t("auth.methods.back")} onBack={() => setRecovering(false)} returnTo="/preferences/login-methods" /></div></SettingsBlock>}
         <SettingsRow
           className="flex-wrap items-center"
           label={t(methods.google ? "auth.methods.connected" : "auth.methods.notConnected")}

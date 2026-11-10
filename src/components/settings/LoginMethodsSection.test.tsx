@@ -36,3 +36,11 @@ it("clears account-specific status and password when switching accounts", async 
   expect(screen.queryByLabelText("auth.google.passwordLabel")).toBeNull()
   expect(screen.queryByDisplayValue("alice-secret")).toBeNull()
 })
+
+it("offers email password reset even when a password is already set", async () => {
+  mocks.request.mockResolvedValue({ password: true, google: true, google_available: true })
+  render(<LoginMethodsSection />)
+  fireEvent.click(await screen.findByRole("button", { name: "auth.methods.resetPassword" }))
+  expect(screen.getByText("email-reset")).toBeVisible()
+  expect(mocks.start).not.toHaveBeenCalled()
+})

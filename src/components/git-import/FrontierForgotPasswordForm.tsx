@@ -20,8 +20,10 @@ import { RichMessage } from "@/lib/i18n/RichMessage"
 export function FrontierForgotPasswordForm({
   onBack,
   returnTo,
+  backLabel,
 }: {
   onBack: (returnTo?: string) => void
+  backLabel?: string
   /** Retained on Back; supported invitation paths also travel in the reset email. */
   returnTo?: string
 }) {
@@ -65,7 +67,7 @@ export function FrontierForgotPasswordForm({
           />
         </p>
         <Button variant="outline" onClick={() => onBack(returnTo)} className="w-full">
-          {t("auth.resetPassword.backToLogin")}
+          {backLabel ?? t("auth.resetPassword.backToLogin")}
         </Button>
       </div>
     )
@@ -115,7 +117,7 @@ export function FrontierForgotPasswordForm({
           : t("auth.resetPassword.submitSendLink")}
       </Button>
       <Button type="button" variant="ghost" onClick={() => onBack(returnTo)} className="w-full">
-        {t("auth.resetPassword.backToLogin")}
+        {backLabel ?? t("auth.resetPassword.backToLogin")}
       </Button>
     </form>
   )

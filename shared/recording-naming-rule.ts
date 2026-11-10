@@ -352,7 +352,12 @@ function parse(value: unknown): NamingRule | null {
 /** A book word the rule maps, read without case or Unicode form; own keys only. */
 export function bookForWord(rule: NamingRule, word: string): string | undefined {
   const key = normalizeName(word).toLowerCase()
-  return rule.books && Object.hasOwn(rule.books, key) ? rule.books[key] : undefined
+  if (!rule.books) return undefined
+  if (Object.hasOwn(rule.books, key)) return rule.books[key]
+  // AQU-2496 (review, Nov 9): with or without the marks that are optional in
+  // writing (Arabic vowels, Hebrew points, joiners), as book names compare.
+  const loose = bookKey(word)
+  return Object.entries(rule.books).find(([mapped]) => bookKey(mapped) === loose)?.[1]
 }
 
 /**

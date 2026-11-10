@@ -666,6 +666,31 @@ describe("a rule's {book} reads a name written with marks on its letters", () =>
   })
 })
 
+// AQU-2496 (review, Nov 9): the rule's book words were compared exactly, so a
+// rule worked out from names written with Arabic vowel marks or Hebrew points
+// placed none of the files typed without them, and the reverse.
+describe("a rule's book word with or without the marks that are optional in writing", () => {
+  const PLAIN = "التكوين" // التكوين
+  const MARKED = "التَّكْوِين" // with fatha, shadda, sukun, kasra
+  const HEBREW = "בראשית" // בראשית
+  const POINTED = "בְּרֵאשִׁית"
+
+  it.each([
+    [PLAIN, MARKED],
+    [MARKED, PLAIN],
+    [HEBREW, POINTED],
+    [POINTED, HEBREW],
+  ])("a rule that maps %s reads a name written %s", (word, written) => {
+    const rule = parseNamingRule({ templates: [{ pattern: "{book} {chapter}-{verse}" }], books: { [word]: "GEN" } })!
+    expect(applyNamingRule(rule, `${written} 1-2.mp3`)).toBe("GEN 1:2.mp3")
+  })
+
+  it("names the project's book either way, so such a rule can be kept", () => {
+    expect(shared.bookWordNames(MARKED, "GEN", [{ name: PLAIN, code: "GEN" }])).toBe(true)
+    expect(shared.bookWordNames(PLAIN, "GEN", [{ name: MARKED, code: "GEN" }])).toBe(true)
+  })
+})
+
 // AQU-2496 (review, Nov 9): names an unknown word cut short were placed or
 // called duplicates, both of which never go to the assistant.
 describe("a name an unknown word cut short goes to the assistant", () => {

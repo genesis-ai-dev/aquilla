@@ -988,6 +988,43 @@ describe("a verse's name after a word the app doesn't know never lands on the wh
   })
 })
 
+// AQU-2496 (review, Nov 9): Arabic vowel marks, Hebrew points and the Persian
+// zero-width non-joiner are often left out when typing. A project whose
+// Genesis is "التكوين" read no book in "التَّكْوِين 1-1.mp3", nor the reverse.
+describe("a book's name with or without the marks that are optional in writing", () => {
+  const gen = book("gen", "GEN", "Genesis", [31, 25])
+  const mic = book("mic", "MIC", "Micah", [16, 13])
+  // Escaped, so each mark is plain to see: \u064E fatha, \u0651 shadda, \u0652
+  // sukun, \u0650 kasra; \u05BC dagesh, \u05B0 sheva, \u05B5 tsere, \u05C1 shin
+  // dot, \u05B4 hiriq, \u0596 tipeha; \u200C the zero-width non-joiner.
+  const PAIRS: [script: string, project: string, file: string, code: "GEN" | "MIC"][] = [
+    ["Arabic vowel marks", "\u0627\u0644\u062A\u0643\u0648\u064A\u0646", "\u0627\u0644\u062A\u064E\u0651\u0643\u0652\u0648\u0650\u064A\u0646", "GEN"],
+    ["Hebrew points", "\u05D1\u05E8\u05D0\u05E9\u05D9\u05EA", "\u05D1\u05BC\u05B0\u05E8\u05B5\u05D0\u05E9\u05C1\u05B4\u05D9\u05EA", "GEN"],
+    ["Hebrew cantillation", "\u05D1\u05E8\u05D0\u05E9\u05D9\u05EA", "\u05D1\u05BC\u05B0\u05E8\u05B5\u05D0\u05E9\u05C1\u05B4\u0596\u05D9\u05EA", "GEN"],
+    ["the Persian zero-width non-joiner", "\u0645\u06CC\u06A9\u0627\u0647", "\u0645\u06CC\u200C\u06A9\u0627\u0647", "MIC"],
+  ]
+  const indexWith = (name: string, code: string) => {
+    const index = new BookNameIndex()
+    index.addProjectName(name, code)
+    return index
+  }
+
+  it.each(PAIRS)("%s: either way round, in a file's name and a folder's", (_what, plain, marked, code) => {
+    for (const [project, file] of [[plain, marked], [marked, plain]]) {
+      expect(readName(`${file} 1-2.mp3`, indexWith(project, code)).book).toEqual({ code, fromProject: true })
+      const files = [audio(`${file} 2-3.mp3`), audio(`${file}/1-4.mp3`)]
+      const { assignments } = run(files, [gen, mic], { kind: "project" }, indexWith(project, code))
+      const id = code.toLowerCase()
+      expect(assignments.map((a) => a.cellIds?.[0] ?? a.reason?.code)).toEqual([`${id}:2:3`, `${id}:1:4`])
+    }
+  })
+
+  it("Hindi's vowel signs are part of the spelling and still count", () => {
+    expect(bookKey("उत्पत्ति")).not.toBe(bookKey("उतपतत"))
+    expect(bookKey(PAIRS[0][2])).toBe(bookKey(PAIRS[0][1]))
+  })
+})
+
 // AQU-2329: a team may name its files in its own script's digits. Every
 // Unicode decimal digit is read as its value, so a name written in Arabic-Indic,
 // Persian, Devanagari, Bengali, Burmese, Thai or any other script's digits

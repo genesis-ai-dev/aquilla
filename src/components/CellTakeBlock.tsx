@@ -43,6 +43,7 @@ import { keptWindowSec, piecesWindowSec, type KeptWindow } from "@/lib/audio/kep
 import { takeTrackVars } from "@/lib/timeline/take-colors"
 import { TRACK_DOT_CLASS } from "@/lib/timeline/track-colors"
 import { persistTakeTrim, trimMs } from "@/lib/audio/persist-trim"
+import { recordStep } from "@/lib/history/history"
 import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
 import { transcribeTake } from "@/lib/audio/transcribe-take"
 import { isGeneratedTake } from "@/lib/audio/track-audio"
@@ -272,6 +273,19 @@ function CellTakeBlockView({
   // that HOLDS the take — a linked heard-line take writes to its cue.
   const commitTrim = useCallback((start: number | null, end: number | null) => {
     if (!selectedAudioId || !attachment) return
+    // AQU-2492 (review, Nov 9): the same trim on the timeline is an Undo step,
+    // and here it was none, so ⌘Z straight after it undid something else
+    // (possibly on another line). The step and its guard are the timeline's.
+    const before = { trimStartMs: attachment.trimStartMs ?? undefined, trimEndMs: attachment.trimEndMs ?? undefined }
+    const after = { trimStartMs: trimMs(start) ?? undefined, trimEndMs: trimMs(end) ?? undefined }
+    if (before.trimStartMs !== after.trimStartMs || before.trimEndMs !== after.trimEndMs) {
+      recordStep({
+        kind: "take.window",
+        data: { cellId: owner.id, audioId: selectedAudioId, before, after },
+        labelKey: "editor.history.stepTrim",
+        fileId: owner.fileId,
+      })
+    }
     void persistTakeTrim({
       projectId: project.id,
       fileId: owner.fileId,

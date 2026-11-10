@@ -16,6 +16,10 @@
 //     and nothing a drag could give it.
 //   - Only while the room is narrower than the marker's own tab; wider, its
 //     usual box fits and is drawn as always.
+//   - AQU-2432 (review, Nov 9): and only when the squeeze is why: a room of
+//     none, or one under the tab where its natural length would fill it.
+//     Zoomed out so far that even its natural length would not, it is drawn
+//     as its untouched neighbours are.
 //   - Never a line the person has hidden.
 
 import type { CellData } from "@/hooks/useCells"
@@ -57,7 +61,13 @@ export function emptyLineMarkers(args: {
     const slot = programme.byCellId.get(cell.id)
     // `naturalLenSec` is only on an unrecorded line whose room was made smaller.
     if (!slot || slot.naturalLenSec == null || isHiddenCell(cell)) continue
-    if (slot.slotLenSec * pxPerSec >= LINE_MARKER_TAB_PX) continue
+    // AQU-2432 (review, Nov 9): only when the SQUEEZE, not the zoom, is why
+    // its box cannot be drawn — no room at all, or a room too narrow for the
+    // tab where its natural length would be wide enough. Zoomed far out, a
+    // line narrowed a little is drawn as its untouched neighbours are.
+    const squeezed = slot.slotLenSec <= 0 ||
+      (slot.slotLenSec * pxPerSec < LINE_MARKER_TAB_PX && slot.naturalLenSec * pxPerSec >= LINE_MARKER_TAB_PX)
+    if (!squeezed) continue
     const endSec = slot.startSec + slot.slotLenSec
     if (endSec + padSec < viewStartSec || slot.startSec - padSec > viewEndSec) continue
     positions ??= new Map(programme.slots.map((s, i) => [s.cellId, i + 1]))

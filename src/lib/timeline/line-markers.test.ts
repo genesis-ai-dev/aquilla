@@ -63,6 +63,20 @@ describe("which lines get a marker", () => {
     expect(markers(closed, 2_000)).toHaveLength(1)
   })
 
+  // AQU-2432 (review, Nov 9): the marker stands in for the box only when the
+  // SQUEEZE, not the zoom, is why the box cannot be drawn.
+  it("zoomed far out, a line narrowed a little is drawn like its untouched neighbours, not as a marker", () => {
+    const cells = [bookLine("a", { takeMs: 5_000 }), bookLine("b", { roomMs: 3_500 }), bookLine("b2"), bookLine("c", { takeMs: 6_000 })]
+    // At 2 px a second: b's 3.5 s is 7 px, and its natural 4 s would be 8 px —
+    // too narrow for the tab either way, like b2 beside it.
+    expect(markers(cells, 2)).toEqual([])
+    // At 3 px a second its natural length would be 12 px and its room is
+    // 10.5 px: now the squeeze is why, so it is a marker.
+    expect(markers(cells, 3).map((m) => m.cell.id)).toEqual(["b"])
+    // No room at all is a marker at every zoom.
+    expect(markers([bookLine("a", { takeMs: 5_000 }), bookLine("b", { roomMs: 0 }), bookLine("c", { takeMs: 6_000 })], 0.5)).toHaveLength(1)
+  })
+
   it("a line at its natural length never gets one, however far out the timeline is zoomed", () => {
     const cells = [bookLine("a", { takeMs: 5_000 }), bookLine("b"), bookLine("c", { takeMs: 6_000 })]
     expect(markers(cells, 1)).toEqual([])

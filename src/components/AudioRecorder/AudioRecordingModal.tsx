@@ -57,6 +57,8 @@ import { TakeWaveform } from "@/components/audio/TakeWaveform"
 import type { CodexCell, CodexCellAttachment } from "@/lib/codex-editor/types"
 import { probeDurationMsSafe } from "@/lib/import"
 import { regenerateVoiceTake } from "./regenerate-voice"
+import { laneVoiceSettings } from "@/lib/audio/lane-voice-view"
+import { resolveCastVoice } from "@/lib/audio/voices"
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { COUNTDOWN_FROM, useCountdown } from "./useCountdown"
@@ -604,6 +606,22 @@ export function AudioRecordingModal({
   // being recorded — see `readAloudFor`. Falls back to the cell's own
   // translation, which is what every arrangement without audio cues does.
   const readAloud = activeCell && readAloudFor ? readAloudFor(activeCell.id) : null
+  /**
+   * AQU-2511: the voice Generate will speak in, named on the button before the
+   * credits are spent.
+   *
+   * Resolved through the SAME lane view the generate path itself uses
+   * (`laneVoiceSettings`, from the open lane's tag), and off the same subject —
+   * the linked subtitle's assignment on a cue file, this line's own otherwise.
+   * That is the point of reading it here rather than naming the project
+   * default: this button used to generate in one voice while the picker on the
+   * row had just assigned another.
+   */
+  const ttsVoiceName = useMemo(() => {
+    if (!activeCell) return null
+    const view = laneVoiceSettings(project.ttsSettings, project.lanes, laneTag)
+    return resolveCastVoice(view, readAloud?.voiceCellId ?? activeCell, activeCell.ttsSettings?.voiceId).name
+  }, [project.ttsSettings, project.lanes, laneTag, activeCell, readAloud?.voiceCellId])
   // Media redesign slice 2 (gap 8): an Audio language has no translation to
   // read, so the performer reads the source where the translation shows today
   // — the heard line's own words on a dubbing file.
@@ -2696,7 +2714,9 @@ export function AudioRecordingModal({
                               : t("audio.recordingModal.generateButton")
                           : ttsShowFailure
                             ? t("audio.recordingModal.ttsFailedButton")
-                            : t("audio.recordingModal.generateButton")}
+                            : ttsVoiceName
+                              ? t("audio.recordingModal.generateWithVoice", { voice: ttsVoiceName })
+                              : t("audio.recordingModal.generateButton")}
                       </span>
                     </Button>
                 </AppTooltip>

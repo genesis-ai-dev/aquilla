@@ -13319,7 +13319,9 @@ export function ProjectWorkspace() {
       const voiceName = (opts?.voiceId ? findVoice(tts.laneSettings, opts.voiceId)?.name : undefined)
         ?? resolveCastVoice(tts.laneSettings, owner.cell, owner.cell.ttsSettings?.voiceId).name
       const ok = await whileVoicingAs(cellId, voiceName, () => regenerateVoiceTake({
-        project,
+        // AQU-2511: the lane's own voices and cast — the same view `voiceName`
+        // above is read from, so the take comes back in the voice just named.
+        project: audioProject ?? project,
         cell: owner.cell,
         entry: timelineAudioByCellId.get(cellId),
         session: frontierSession,
@@ -13335,7 +13337,7 @@ export function ProjectWorkspace() {
         ? { type: "success", title: t("editor.timeline.regenerateDone") }
         : { type: "error", title: t("editor.timeline.regenerateFailed") })
     },
-    [project, frontierSession, audioCueCells, resolveCueReadAloud, timelineAudioByCellId, currentUsername, activeLane, tts.laneSettings, t],
+    [project, audioProject, frontierSession, audioCueCells, resolveCueReadAloud, timelineAudioByCellId, currentUsername, activeLane, tts.laneSettings, t],
   )
 
   /**
@@ -19221,7 +19223,13 @@ export function ProjectWorkspace() {
       {project && (
         <AudioRecordingModal
           open={recordingCellId !== null}
-          project={project}
+          /* AQU-2511: `audioProject` — `project` with the OPEN LANE's voices,
+             cast and default voice (and the local overlay `tts` holds, which
+             the server record may not have yet). The dialog's Generate button
+             resolves the line's voice off `project.ttsSettings`, so handed the
+             bare record it generated in the project default while the picker
+             beside it had just assigned another voice on this lane. */
+          project={audioProject ?? project}
           // Stage 4: with an audio VTT imported, the recorder walks the CUES —
           // the units the picture wants recorded — and Next/Prev, the count-in
           // and the take's window all follow the cue's own timing.

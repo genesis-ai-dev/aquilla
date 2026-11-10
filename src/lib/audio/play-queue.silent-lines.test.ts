@@ -16,7 +16,8 @@ import {
   getQueueProgress,
   getQueueState,
   hasAnyPlayableAudio,
-  linesHaveAnythingToPlay,
+  linesHaveAnythingOfTheirOwnToPlay,
+  linesHaveAnythingToPlayCountingFilm,
   onQueueRanOut,
   pauseQueue,
   resumeQueue,
@@ -428,12 +429,15 @@ describe("a line with only its original is never skipped (Sam, Nov 9)", () => {
       expect(getQueueState()).toMatchObject({ cellId: "s2" })
       // Only originals, nothing recorded: still something to play.
       expect(hasAnyPlayableAudio([section("s1", 0, 3, selected), section("s2", 3, 6, selected)])).toBe(true)
-      expect(linesHaveAnythingToPlay([section("s1", 0, 3, selected)], null)).toBe(true)
+      expect(linesHaveAnythingToPlayCountingFilm([section("s1", 0, 3, selected)], null)).toBe(true)
+      // …and something of its own, for Play all's move into its chapter.
+      expect(linesHaveAnythingOfTheirOwnToPlay([section("s1", 0, 3, selected)])).toBe(true)
     })
   }
 
   it("a line with no recording and no original is still nothing to play", () => {
     expect(hasAnyPlayableAudio([bookLine("b1"), bookLine("b2")])).toBe(false)
-    expect(linesHaveAnythingToPlay([bookLine("b1"), bookLine("b2")], null)).toBe(false)
+    expect(linesHaveAnythingToPlayCountingFilm([bookLine("b1"), bookLine("b2")], null)).toBe(false)
+    expect(linesHaveAnythingOfTheirOwnToPlay([bookLine("b1"), bookLine("b2")])).toBe(false)
   })
 })

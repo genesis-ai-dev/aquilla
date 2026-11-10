@@ -22,7 +22,8 @@ import { act, renderHook } from "@testing-library/react"
 import {
   getQueueProgress,
   getQueueState,
-  linesHaveAnythingToPlay,
+  linesHaveAnythingOfTheirOwnToPlay,
+  linesHaveAnythingToPlayCountingFilm,
   onQueueRanOut,
   pauseQueue,
   resumeQueue,
@@ -47,6 +48,8 @@ import {
   type PlayContext,
 } from "./play-queue"
 import { resetSkipSilentLinesPrefCacheForTests, setSkipSilentLinesPref } from "@/lib/store/skip-silent-lines-pref"
+import { nextChapterForPlayAll } from "@/lib/timeline/chapter-pick"
+import { chapterOfCell, scopeCells, type TimelineChapter } from "@/lib/timeline/sequence-timeline"
 import type { CellData } from "@/hooks/useCells"
 
 class FakeAudio {
@@ -1583,13 +1586,17 @@ describe("Skip lines with nothing to play lands only where there is nothing at a
       expect(getQueueProgress().currentTime).toBeCloseTo(0, 2)
     })
 
-    it("Play all's run into the next chapter: a chapter with nothing recorded has the film to play", () => {
+    // AQU-2253 (review 2, Nov 9): two questions. Played by hand, a chapter
+    // with nothing recorded has the film to play; Play all's own move into
+    // it asks for something of the chapter's own, which it has not.
+    it("a chapter with nothing recorded: the film to play when someone asks for it, nothing of its own for Play all", () => {
       const unrecordedChapter = [line("b3"), line("b4")]
-      expect(linesHaveAnythingToPlay(unrecordedChapter, null)).toBe(false)
+      expect(linesHaveAnythingToPlayCountingFilm(unrecordedChapter, null)).toBe(false)
       bookFilm(60)
-      expect(linesHaveAnythingToPlay(unrecordedChapter)).toBe(true)
+      expect(linesHaveAnythingToPlayCountingFilm(unrecordedChapter)).toBe(true)
+      expect(linesHaveAnythingOfTheirOwnToPlay(unrecordedChapter)).toBe(false)
       // Another file's film does not count.
-      expect(linesHaveAnythingToPlay([line("x1")])).toBe(false)
+      expect(linesHaveAnythingToPlayCountingFilm([line("x1")])).toBe(false)
     })
   })
 })
@@ -1671,5 +1678,126 @@ describe("a short take between two lines the film carries is played, however the
     expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
     await wait(400)
     expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+  })
+})
+
+// AQU-2253 (review 2, Nov 9), finding 1: on a book with a linked film every
+// chapter had the film to play, so Play all ran the whole book, recorded or
+// not, and each chapter, running on its own clock from 0:00, put the film back
+// to its opening. Play all's own move into the next chapter now goes on only
+// into a chapter with something of its own to play (a take or an original);
+// a chapter only the film could play ends Play all there, as before. Playing
+// a chapter by hand is unchanged: the film is behind its lines.
+describe("Play all on a book with a linked film goes on only into a chapter with something of its own", () => {
+  // Three chapters of two 1.5 s stand-ins each, unless recorded.
+  const CHAPTERS: TimelineChapter[] = [
+    { key: "LUK 1", cellIds: ["c1a", "c1b"] },
+    { key: "LUK 2", cellIds: ["c2a", "c2b"] },
+    { key: "LUK 3", cellIds: ["c3a", "c3b"] },
+  ]
+  let book: CellData[] = []
+  let chaptersStarted: string[] = []
+  let stopPlayAll: () => void = () => {}
+
+  /** The book, and the workspace's word: the film named with every chapter's
+   *  lines, running on past none. */
+  function bookWith(lines: CellData[], filmSec: number): void {
+    book = lines
+    setProgrammeFilm({ endSec: filmSec, runsOn: false, cellIds: new Set(lines.map((c) => c.id)) })
+  }
+  const chapter = (key: string) => scopeCells(book, CHAPTERS.find((c) => c.key === key)!)
+
+  beforeEach(() => {
+    chaptersStarted = []
+    // What ProjectWorkspace's `onQueueRanOut` does when a chapter's run plays out.
+    stopPlayAll = onQueueRanOut((ctx) => {
+      const played = chapterOfCell(CHAPTERS, ctx.cells[0]?.id)
+      if (!played) return
+      const next = nextChapterForPlayAll({ chapters: CHAPTERS, lines: book, playedKey: played.key })
+      if (!next) return
+      chaptersStarted.push(next.key)
+      queueMicrotask(() => startQueue({ ...ctx, cells: scopeCells(book, next) }, 0))
+    })
+  })
+  afterEach(() => stopPlayAll())
+
+  it("A. nothing recorded: the chapter Play was pressed on plays with the film, and Play all stops after it", async () => {
+    bookWith(["c1a", "c1b", "c2a", "c2b", "c3a", "c3b"].map((id) => line(id)), 600)
+    // Play is offered on the chapter: the film is behind its lines.
+    expect(linesHaveAnythingToPlayCountingFilm(chapter("LUK 1"))).toBe(true)
+    startQueue(ctxFor(chapter("LUK 1")), 0)
+    await wait(1_000)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "c1a" })
+    expect(getQueueProgress().filmClock).toBe(true)
+    await wait(2_500)
+    // Chapter 1's 3 s are over: no chapter 2 from 0:00 of the film again.
+    expect(getQueueState().kind).toBe("idle")
+    expect(chaptersStarted).toEqual([])
+    await wait(10_000)
+    expect(getQueueState().kind).toBe("idle")
+  })
+
+  it("A. …and pressed on a later chapter, that one plays and Play all stops after it", async () => {
+    bookWith(["c1a", "c1b", "c2a", "c2b", "c3a", "c3b"].map((id) => line(id)), 600)
+    startQueue(ctxFor(chapter("LUK 2")), 0)
+    await wait(1_000)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "c2a" })
+    await wait(2_500)
+    expect(getQueueState().kind).toBe("idle")
+    expect(chaptersStarted).toEqual([])
+  })
+
+  it("B. a film shorter than the chapter, nothing recorded: the chapter plays to the film's end, its lines past it skipped, and Play all stops", async () => {
+    // A 1 s film: c1a [0, 1.5) starts under it, c1b [1.5, 3) after its end.
+    bookWith(["c1a", "c1b", "c2a", "c2b", "c3a", "c3b"].map((id) => line(id)), 1)
+    startQueue(ctxFor(chapter("LUK 1")), 0)
+    await wait(500)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "c1a" })
+    await wait(1_100)
+    expect(getQueueState().kind).toBe("idle")
+    expect(chaptersStarted).toEqual([])
+    await wait(10_000)
+    expect(getQueueState().kind).toBe("idle")
+  })
+
+  it("C. chapter 1 recorded, the rest not: Play all stops after chapter 1", async () => {
+    bookWith([line("c1a", 2_000), line("c1b", 1_000), ...["c2a", "c2b", "c3a", "c3b"].map((id) => line(id))], 600)
+    startQueue(ctxFor(chapter("LUK 1")), 0)
+    await wait()
+    el("c1a")!.tick(2)
+    await wait()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "c1b" })
+    el("c1b")!.tick(1)
+    await wait()
+    expect(getQueueState().kind).toBe("idle")
+    expect(chaptersStarted).toEqual([])
+    await wait(10_000)
+    expect(getQueueState().kind).toBe("idle")
+  })
+
+  it("a later chapter with a recording of its own is still gone on into, over one with nothing (as before)", async () => {
+    bookWith([line("c1a", 2_000), line("c1b"), line("c2a"), line("c2b"), line("c3a", 1_000), line("c3b")], 600)
+    startQueue(ctxFor(chapter("LUK 1")), 0)
+    await wait()
+    el("c1a")!.tick(2)
+    await wait()
+    // c1b has nothing of its own: crossed with the film, not jumped.
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "c1b" })
+    expect(getQueueProgress().filmClock).toBe(true)
+    await wait(1_600)
+    expect(chaptersStarted).toEqual(["LUK 3"])
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "c3a" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(0, 1)
+  })
+
+  it("a chapter whose lines have only their originals is gone on into (the originals rule stays)", () => {
+    const SOURCE_ID = "audio-f1-1690000000-shared.mp3"
+    const withOriginal = (id: string): CellData =>
+      ({
+        ...line(id), medium: "media", startTime: 0, endTime: 3,
+        attachments: { [SOURCE_ID]: { type: "audio", url: "http://audio.test/clip.mp3" } },
+      }) as unknown as CellData
+    bookWith([line("c1a", 2_000), line("c1b"), withOriginal("c2a"), line("c2b"), line("c3a"), line("c3b")], 600)
+    expect(nextChapterForPlayAll({ chapters: CHAPTERS, lines: book, playedKey: "LUK 1" })?.key).toBe("LUK 2")
   })
 })

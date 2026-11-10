@@ -472,7 +472,7 @@ export function setProgrammeFilm(film: ProgrammeFilm | null, fileId: string | nu
  * The workspace's word about the linked film (see `setProgrammeFilm`), for a
  * surface showing lines: the bottom strip reads it with `filmOverRun` (the
  * length shown before anything plays reaches the film's end where Play runs
- * on to it) and `linesHaveAnythingToPlay` (Play is offered).
+ * on to it) and `linesHaveAnythingToPlayCountingFilm` (Play is offered).
  */
 export function useProgrammeFilm(): ProgrammeFilm | null {
   return useSyncExternalStore(
@@ -5096,15 +5096,43 @@ export function hasAnyPlayableAudio(cells: CellData[]): boolean {
   return cells.some((c) => masterAudioForCell(c) !== undefined)
 }
 
+// ── AQU-2253 (review 2, Nov 9): "is there anything to play in these lines?" ──
+//
+// Two questions, asked by different callers, so they have two names:
+//
+//  - `linesHaveAnythingToPlayCountingFilm`: a take, an original, OR a linked
+//    film playing behind the lines (the workspace's word, `setProgrammeFilm`;
+//    following the recordings the film is their source, `whatSlotPlays`).
+//    Asked where a PERSON picks the lines to play: the bottom strip's Play
+//    (is it offered), and a chapter picked in the chapter picker while Play
+//    all plays (lib/timeline/chapter-pick's `planChapterPick`). A chapter
+//    only the film can play is played when someone asks for it: the film is
+//    behind its lines and the lines nobody recorded are crossed with it.
+//
+//  - `linesHaveAnythingOfTheirOwnToPlay`: a take or an original, the film
+//    NOT counted. Asked by Play all's own move into the next chapter when a
+//    chapter plays out (lib/timeline/chapter-pick's `nextChapterForPlayAll`,
+//    from ProjectWorkspace's `onQueueRanOut`). On a book each chapter runs on
+//    its own clock from 0:00, so the film behind a chapter nobody has
+//    recorded is the film's opening again, under that chapter's verses:
+//    counting it, Play all ran the whole book through the film's first
+//    minutes. So Play all goes on only into a chapter with something of its
+//    own, and a chapter only the film could play ends it there, as before.
+
 /**
- * AQU-2253 (Sam, Nov 9): is there anything to play in these lines: a take,
- * an original, or a linked film playing behind them (the workspace's word,
- * `setProgrammeFilm`; following the recordings it is their source). One
- * answer for the bottom strip's Play and for Play all's run into the next
- * chapter, the same the queue plays by (`whatSlotPlays`).
+ * A take, an original, or a linked film behind these lines: what a person
+ * pressing Play (or picking the chapter) gets played. See above.
  */
-export function linesHaveAnythingToPlay(cells: CellData[], film: ProgrammeFilm | null = progFilm): boolean {
-  return hasAnyPlayableAudio(cells) || filmOverRun(film, cells.map((c) => c.id)).coverSec > 0
+export function linesHaveAnythingToPlayCountingFilm(cells: CellData[], film: ProgrammeFilm | null = progFilm): boolean {
+  return linesHaveAnythingOfTheirOwnToPlay(cells) || filmOverRun(film, cells.map((c) => c.id)).coverSec > 0
+}
+
+/**
+ * A take or an original of the lines' own, the film not counted: what Play
+ * all asks of the next chapter before it goes on into it. See above.
+ */
+export function linesHaveAnythingOfTheirOwnToPlay(cells: CellData[]): boolean {
+  return hasAnyPlayableAudio(cells)
 }
 
 // ── Dubs over a linked picture (AQU-646 round 5) ────────────────────────────

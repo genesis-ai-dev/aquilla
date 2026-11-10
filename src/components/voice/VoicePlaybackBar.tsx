@@ -18,7 +18,7 @@ import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
 import { cn } from "@/lib/utils"
 import {
   hasAnyPlayableAudio, pauseQueue, queueClockIsFileTime, resumeQueue, seekQueueToTime,
-  setQueueRate, setQueueVolume, skipBack, skipForward, startQueue, updateQueueCells, useProgrammeFilm, linesHaveAnythingToPlay,
+  setQueueRate, setQueueVolume, skipBack, skipForward, startQueue, updateQueueCells, useProgrammeFilm, linesHaveAnythingToPlayCountingFilm,
 } from "@/lib/audio/play-queue"
 import { toggleAudibility, useQueueAudibility } from "@/lib/audio/audibility"
 import { useTransportForFile } from "@/hooks/useTransportForFile"
@@ -193,10 +193,11 @@ export function VoicePlaybackBar({
   // virtual clock to the queue. A press in that window went to the engine that
   // was about to lose the file, so nothing sounded (AQU-1643).
   // AQU-2253 (Sam, Nov 9): …or a linked film playing behind the lines, their
-  // source (`linesHaveAnythingToPlay`, the queue's own answer): with nothing
-  // recorded yet, Play was off here and the film could not be watched.
+  // source (`linesHaveAnythingToPlayCountingFilm`, the queue's own answer for
+  // a person pressing Play): with nothing recorded yet, Play was off here and
+  // the film could not be watched.
   const canPlay = useMemo(
-    () => audioLoaded && (drivesVideo || (filmCounts ? linesHaveAnythingToPlay(cells, film) : hasAnyPlayableAudio(cells))),
+    () => audioLoaded && (drivesVideo || (filmCounts ? linesHaveAnythingToPlayCountingFilm(cells, film) : hasAnyPlayableAudio(cells))),
     [audioLoaded, drivesVideo, filmCounts, film, cells],
   )
   const activeIndex = transport.cellId ? cells.findIndex((c) => c.id === transport.cellId) : -1

@@ -34,7 +34,7 @@ import {
   startQueue,
   startQueueAtTime,
   stopQueue,
-  linesHaveAnythingToPlay,
+  linesHaveAnythingToPlayCountingFilm,
   useProgrammeFilm,
   type PlayContext,
 } from "@/lib/audio/play-queue"
@@ -116,7 +116,7 @@ describe("the film's lines are the lines each caller starts the queue with (AQU-
         setProgrammeFilm(film, "f1")
         const cells = asTheStripStartsIt(strip)
         const word = renderHook(() => useProgrammeFilm())
-        expect(linesHaveAnythingToPlay(cells, word.result.current)).toBe(true)
+        expect(linesHaveAnythingToPlayCountingFilm(cells, word.result.current)).toBe(true)
         // The length the strip shows: the film's, except on a book's chapter.
         expect(filmOverRun(word.result.current, cells.map((c) => c.id)).runsOnToSec).toBe(chapterOfABook ? 0 : FILM_SEC)
         startQueue(ctxFor(cells), 0, false)
@@ -152,7 +152,7 @@ describe("the film's lines are the lines each caller starts the queue with (AQU-
     setProgrammeFilm(film, "f1")
     // One line more than the film was named with.
     const drifted = [...plain, line("l4")]
-    expect(linesHaveAnythingToPlay(drifted)).toBe(false)
+    expect(linesHaveAnythingToPlayCountingFilm(drifted)).toBe(false)
     startQueue(ctxFor(drifted), 0, false)
     expect(getQueueState().kind).toBe("idle")
     // One line fewer: under the film, but it ends with its lines.
@@ -195,6 +195,17 @@ describe("the workspace and the strip take their lists from those helpers (AQU-2
     }
   })
 
+  // AQU-2253 (review 2, Nov 9): Play all's own move into the next chapter asks
+  // for something of the chapter's own (lib/timeline/chapter-pick's
+  // `nextChapterForPlayAll`, play-queue.film-tail.test.ts), never the film.
+  it("Play all's move into the next chapter asks the chapter planner, not the film", () => {
+    const start = workspace.indexOf("useEffect(() => onQueueRanOut((ctx) => {")
+    expect(start).toBeGreaterThan(-1)
+    const body = workspace.slice(start, workspace.indexOf("}), [])", start))
+    expect(body).toContain("nextChapterForPlayAll({ chapters: run.chapters, lines: run.cells, playedKey: played.key })")
+    expect(body).not.toContain("CountingFilm")
+  })
+
   it("the bottom strip is handed those lines", () => {
     expect(workspace).toContain("() => stripLinesFor(playbackCells, timelineCells, audioMergedCells, legacyCells),")
     expect(workspace).toMatch(/<VoicePlaybackBar\s+variant="strip"\s+(?:\/\/[^\n]*\s+)*cells=\{timelineBarCells\}/)
@@ -205,7 +216,7 @@ describe("the workspace and the strip take their lists from those helpers (AQU-2
     expect(strip).toContain("const cellIds = useMemo(() => new Set(cells.map((c) => c.id)), [cells])")
     expect(strip).toContain("const film = useProgrammeFilm()")
     expect(strip).toContain("filmOverRun(film, cellIds)")
-    expect(strip).toContain("linesHaveAnythingToPlay(cells, film)")
+    expect(strip).toContain("linesHaveAnythingToPlayCountingFilm(cells, film)")
     expect(strip).toContain("startQueue({ cells, projectId, session,")
   })
 

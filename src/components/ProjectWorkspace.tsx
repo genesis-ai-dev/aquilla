@@ -222,13 +222,13 @@ import { CloneVoiceModalHost } from "./voice/CloneVoiceModalHost"
 import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
 import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
   setQueueTargetSlots, setQueueLayerTrackSlots, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying,
-  linesHaveAnythingToPlay, onQueueRanOut, stopQueue, setProgrammeSourceVoicedByFilm, setProgrammeFilm } from "@/lib/audio/play-queue"
+  onQueueRanOut, stopQueue, setProgrammeSourceVoicedByFilm, setProgrammeFilm } from "@/lib/audio/play-queue"
 import {
-  chapterOfCell, nextPlayableChapter, resolveTimelineChapter, scopeCells, sequenceTimelineCells,
+  chapterOfCell, resolveTimelineChapter, scopeCells, sequenceTimelineCells,
   timelineChaptersOf, type TimelineChapter,
 } from "@/lib/timeline/sequence-timeline"
 import { filmAndSourcesShown } from "@/lib/media/film-and-sources"
-import { applyChapterPick, planChapterPick, rowEndsPlayback } from "@/lib/timeline/chapter-pick"
+import { applyChapterPick, nextChapterForPlayAll, planChapterPick, rowEndsPlayback } from "@/lib/timeline/chapter-pick"
 import { pauseAllTransports } from "@/lib/audio/transport-pause"
 import { useTransportForFile } from "@/hooks/useTransportForFile"
 import { usePauseAudioWhenHidden } from "@/hooks/usePauseAudioWhenHidden"
@@ -15246,8 +15246,9 @@ export function ProjectWorkspace() {
     const played = chapterOfCell(run.chapters, ctx.cells[0]?.id)
     if (!played) return
     const linesOf = (chapter: TimelineChapter) => scopeCells(run.cells, chapter)
-    // AQU-2253 (Sam, Nov 9): a take, an original, or a linked film behind its lines.
-    const next = nextPlayableChapter(run.chapters, played.key, (chapter) => linesHaveAnythingToPlay(linesOf(chapter)))
+    // AQU-2253 (review 2, Nov 9): the next chapter with a take or an original
+    // of its own; one only a linked film could play ends Play all here.
+    const next = nextChapterForPlayAll({ chapters: run.chapters, lines: run.cells, playedKey: played.key })
     if (!next) return
     setChosenScopeKey(next.key)
     // After the queue's own bookkeeping for the run that ended.

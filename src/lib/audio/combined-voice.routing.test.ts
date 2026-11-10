@@ -291,9 +291,13 @@ describe("generateCombinedVoice routing", () => {
     })
     expect(groups).toHaveLength(1)
     expect(groups[0].label).toMatchObject({ labelKey: "editor.history.stepVoiceTogether", fileId: "f" })
+    // AQU-2492 (review, Nov 9), finding 13: each line's step names the
+    // window the clip was attached with (none: the whole clip), so once the
+    // line's slice is set the Undo is skipped as "changed since" and never
+    // takes the voice off over it.
     expect(groups[0].parts).toEqual([
-      expect.objectContaining({ kind: "take.add", fileId: "f", data: { cellId: "c1", audioId: result.audioId, slot: "generatedVoice", selectedBefore: "old-voice.wav" } }),
-      expect.objectContaining({ kind: "take.add", fileId: "f", data: { cellId: "c2", audioId: result.audioId, slot: "generatedVoice", selectedBefore: null } }),
+      expect.objectContaining({ kind: "take.add", fileId: "f", data: { cellId: "c1", audioId: result.audioId, slot: "generatedVoice", selectedBefore: "old-voice.wav", window: {} } }),
+      expect.objectContaining({ kind: "take.add", fileId: "f", data: { cellId: "c2", audioId: result.audioId, slot: "generatedVoice", selectedBefore: null, window: {} } }),
     ])
   })
 })

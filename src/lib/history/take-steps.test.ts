@@ -392,6 +392,25 @@ describe("take.add", () => {
   })
 })
 
+// AQU-2492 (review, Nov 9), finding 13: "Voice together" attaches one clip,
+// whole, to every line; the divider editor then sets each line's slice. A
+// line's slice set since is a change: its Undo is skipped, never applied over it.
+describe("take.add of a Voice together clip (AQU-2492)", () => {
+  const step = (cellId: string) => ({ cellId, audioId: "clip.wav", slot: "generatedVoice", selectedBefore: null, window: {} })
+
+  it("undo takes the clip away while the line still plays all of it", async () => {
+    const { ctx, handlers } = ctxFor({ "clip.wav": {} })
+    expect(await handlers["take.add"].undo(step("c1"))).toEqual({ kind: "done" })
+    expect(ctx.remove).toHaveBeenCalledWith("c1", "clip.wav")
+  })
+
+  it("undo is skipped as changed once the line's slice was set, and the clip stays", async () => {
+    const { ctx, handlers } = ctxFor({ "clip.wav": { trimStartMs: 1200, trimEndMs: 2600 } })
+    expect(await handlers["take.add"].undo(step("c1"))).toEqual({ kind: "skipped", reason: "changed" })
+    expect(ctx.remove).not.toHaveBeenCalled()
+  })
+})
+
 describe("take.select that emptied a slot", () => {
   it("undo plays the old take again; redo empties the slot again", async () => {
     const select = vi.fn(async () => {})

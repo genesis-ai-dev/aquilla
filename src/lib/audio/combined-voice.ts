@@ -238,6 +238,10 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
           audioId: objectName,
           slot: GENERATED_VOICE_SLOT,
           selectedBefore: playingInSlot(c, GENERATED_VOICE_SLOT),
+          // AQU-2492 (review, Nov 9), finding 13: attached whole. Once the
+          // divider editor (or anyone) sets the line's slice, the Undo is
+          // skipped as "changed since" — never applied over the slices.
+          window: {},
         } satisfies TakeAddData,
         labelKey: TAKE_ADD_LABELS.generate,
         fileId,

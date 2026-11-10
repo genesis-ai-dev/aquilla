@@ -28,6 +28,9 @@ import { audioCachePutBlob } from "./bytes-cache"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { notifyAudioAttachmentsChanged } from "./audio-attachments-bus"
+import { recordGroup } from "@/lib/history/history"
+import { playingInSlot, TAKE_ADD_LABELS, type TakeAddData } from "@/lib/history/take-steps"
+import { GENERATED_VOICE_SLOT } from "@/lib/timeline/track-slots"
 import { synthesizeServerTts } from "./server-tts"
 import { effectiveSourceText } from "@/lib/cell-text"
 import { laneLanguageForTag, sourceLaneLanguage } from "@/lib/lanes/lane-language"
@@ -221,6 +224,25 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
       })
     }
     notifyAudioAttachmentsChanged(fileId)
+    // AQU-2492 (review, Nov 9): voicing lines together left no Undo step, so
+    // ⌘Z after it undid something else. It is ONE step: on every line the
+    // clip is an added voice, and Undo takes it away again and gives the line
+    // back the voice that played before it, with the added-voice rules (a
+    // line whose voice someone has approved or worked on since keeps it).
+    recordGroup(
+      { labelKey: "editor.history.stepVoiceTogether", fileId },
+      chosen.map((c) => ({
+        kind: "take.add",
+        data: {
+          cellId: c.id,
+          audioId: objectName,
+          slot: GENERATED_VOICE_SLOT,
+          selectedBefore: playingInSlot(c, GENERATED_VOICE_SLOT),
+        } satisfies TakeAddData,
+        labelKey: TAKE_ADD_LABELS.generate,
+        fileId,
+      })),
+    )
     setAll({ kind: "idle" })
     return {
       audioId: objectName,

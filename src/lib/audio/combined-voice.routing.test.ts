@@ -245,4 +245,55 @@ describe("generateCombinedVoice routing", () => {
     })
     expect(synthCellTts.mock.calls[0][0]).toMatchObject({ language: "fr" })
   })
+
+  // AQU-2492 (review, Nov 9): voicing lines together left no Undo step, so ⌘Z
+  // after it undid something else. It is one step: the clip is an added voice
+  // on every line, and each line names the voice that played before it.
+  it("records one Undo step, an added voice on every line it voiced", async () => {
+    vi.resetModules()
+    const groups: Array<{ label: Record<string, unknown>; parts: Array<Record<string, unknown>> }> = []
+    vi.doMock("@/lib/history/history", async (orig) => ({
+      ...(await orig<typeof import("@/lib/history/history")>()),
+      recordGroup: (label: Record<string, unknown>, parts: Array<Record<string, unknown>>) => { groups.push({ label, parts }) },
+    }))
+    vi.doMock("@/lib/sync/tts", () => ({
+      synthesizeCellTts: vi.fn(async () => ({ audioId: "a", durationSeconds: 1, objectName: "a.wav", url: "frontier-audio://a.wav" })),
+    }))
+    vi.doMock("./tts", () => ({ synthesizeForCell: vi.fn(), setTtsStatus: vi.fn(), ttsStatusKey: (s: string) => s }))
+    vi.doMock("./voices", () => ({
+      resolveCastVoice: () => ({ id: "v", name: "N", provider: "inworld", voiceName: "Dennis", referenceAudioId: "ref-n.webm" }),
+    }))
+    vi.doMock("./upload", () => ({ buildAudioId: () => "id", uploadCellAudio: vi.fn(), fetchCellAudio: vi.fn(async () => new ArrayBuffer(4)) }))
+    vi.doMock("./sync-token-fetcher", () => ({ audioSyncTokenFetcherForSession: () => async () => "tok" }))
+    vi.doMock("./voice-clone", () => ({ convertToLibraryVoice: vi.fn() }))
+    vi.doMock("@/lib/sync/events-emit", () => ({ emitCellAudioAttach: vi.fn(async () => {}) }))
+    vi.doMock("./audio-attachments-bus", () => ({ notifyAudioAttachmentsChanged: vi.fn() }))
+    const { generateCombinedVoice } = await import("./combined-voice")
+    const makeCell = (id: string, extra: Record<string, unknown> = {}) => ({
+      id, fileId: "f", type: "text", translated: "hi", original: "", context: "",
+      cellLabel: "", group: "", status: "unvalidated" as const,
+      validationStatus: "none" as const, activeValidators: [],
+      validationHistory: [], history: [], threads: [], ...extra,
+    })
+    const result = await generateCombinedVoice({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      project: { id: "p" } as any,
+      fileId: "f",
+      cells: [
+        // c1 already had a generated voice playing; c2 had none.
+        makeCell("c1", { selectedBySlot: { generatedVoice: "old-voice.wav" }, attachments: { "old-voice.wav": { url: "x", slot: "generatedVoice" } } }),
+        makeCell("c2"),
+      ],
+      settings: {},
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      session: { jwt: "j", username: "u" } as any,
+      username: "u",
+    })
+    expect(groups).toHaveLength(1)
+    expect(groups[0].label).toMatchObject({ labelKey: "editor.history.stepVoiceTogether", fileId: "f" })
+    expect(groups[0].parts).toEqual([
+      expect.objectContaining({ kind: "take.add", fileId: "f", data: { cellId: "c1", audioId: result.audioId, slot: "generatedVoice", selectedBefore: "old-voice.wav" } }),
+      expect.objectContaining({ kind: "take.add", fileId: "f", data: { cellId: "c2", audioId: result.audioId, slot: "generatedVoice", selectedBefore: null } }),
+    ])
+  })
 })

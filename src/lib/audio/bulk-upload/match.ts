@@ -539,36 +539,6 @@ export function needsLength(assignments: readonly Assignment[]): number[] {
   return assignments.flatMap((a) => (a.reason?.code === "chapterOrVerse" && a.reason.lengthMs == null ? [a.index] : []))
 }
 
-/**
- * AQU-2496 (review, Nov 9): the names in a Bible book whose reference a word
- * the app doesn't know cut short, each with that word. "Ruthu sura 2 mstari 5"
- * (Swahili: chapter 2, verse 5) was read as far as "2", so a folder of Ruth's
- * verses landed as four whole-chapter recordings and 81 "duplicates". Such a
- * name is not guessed at: it is listed with the word, unread, so the
- * assistant is offered and the person can choose its line.
- *
- * A name is cut short when it gave ONE number, a word ended the reference,
- * and the number after that word is a verse of the chapter the name gave.
- * What was read right stays read:
- *   - a name that already gave its chapter and verse ("Genesis 1-1 ENGESV
- *     2023"): two numbers were read;
- *   - a number that is no verse of the chapter ("Genesis 3 ESV 2023");
- *   - a number every such name ends with while their chapters differ, which
- *     tells no two files apart ("Ruth 1 rev 2", "Ruth 2 rev 2").
- */
-function cutShortByWord(fi: FileIndex, group: readonly ReadRecording[]): Map<number, string> {
-  const out = new Map<number, string>()
-  const cut = group.flatMap((r) => {
-    const after = r.reading.afterWord
-    const read = r.reading.numbers.filter((n) => n.marker !== "take" && n.marker !== "part")
-    if (!after || read.length !== 1 || !fi.verses.has(`${read[0].value}:${after.numbers[0]}`)) return []
-    return [{ r, chapter: read[0].value, tail: after.numbers.join(","), word: after.word }]
-  })
-  const sameTail = cut.length > 1 && cut.every((c) => c.tail === cut[0].tail) && new Set(cut.map((c) => c.chapter)).size > 1
-  if (!sameTail) for (const c of cut) out.set(c.r.index, c.word)
-  return out
-}
-
 function interpretBible(r: ReadRecording, nums: NameNumber[], singleChapter: boolean, lone?: LoneReading): Interpreted {
   const reading = r.reading
   const take = reading.numbers.find((n) => n.marker === "take")?.value
@@ -867,6 +837,36 @@ const NO_BOOKS = new BookNameIndex({ builtins: false })
 
 /** No name cut short (`cutShortByWord`): outside a Bible book none is. */
 const NOT_CUT: ReadonlyMap<number, string> = new Map()
+
+/**
+ * AQU-2496 (review, Nov 9): the names in a Bible book whose reference a word
+ * the app doesn't know cut short, each with that word. "Ruthu sura 2 mstari 5"
+ * (Swahili: chapter 2, verse 5) was read as far as "2", so a folder of Ruth's
+ * verses landed as four whole-chapter recordings and 81 "duplicates". Such a
+ * name is not guessed at: it is listed with the word, unread, so the
+ * assistant is offered and the person can choose its line.
+ *
+ * A name is cut short when it gave ONE number, a word ended the reference,
+ * and the number after that word is a verse of the chapter the name gave.
+ * What was read right stays read:
+ *   - a name that already gave its chapter and verse ("Genesis 1-1 ENGESV
+ *     2023"): two numbers were read;
+ *   - a number that is no verse of the chapter ("Genesis 3 ESV 2023");
+ *   - a number every such name ends with while their chapters differ, which
+ *     tells no two files apart ("Ruth 1 rev 2", "Ruth 2 rev 2").
+ */
+function cutShortByWord(fi: FileIndex, group: readonly ReadRecording[]): Map<number, string> {
+  const out = new Map<number, string>()
+  const cut = group.flatMap((r) => {
+    const after = r.reading.afterWord
+    const read = r.reading.numbers.filter((n) => n.marker !== "take" && n.marker !== "part")
+    if (!after || read.length !== 1 || !fi.verses.has(`${read[0].value}:${after.numbers[0]}`)) return []
+    return [{ r, chapter: read[0].value, tail: after.numbers.join(","), word: after.word }]
+  })
+  const sameTail = cut.length > 1 && cut.every((c) => c.tail === cut[0].tail) && new Set(cut.map((c) => c.chapter)).size > 1
+  if (!sameTail) for (const c of cut) out.set(c.r.index, c.word)
+  return out
+}
 
 export interface MatchOptions {
   /** Moves an order run's start: +1 starts it one line later, −1 one earlier. */

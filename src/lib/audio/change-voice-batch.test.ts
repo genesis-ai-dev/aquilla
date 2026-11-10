@@ -56,7 +56,7 @@ describe("planChangeVoiceAll", () => {
     )
     expect(plan.targets.map((t) => [t.cell.id, t.voice.id])).toEqual([["c1", "v-anna"], ["c2", "v-ben"]])
     // c3 speaks the stock default: a plain TTS voice has no model to convert into.
-    expect(plan.skipped).toEqual({ "no-take": 1, "not-trained": 1, "up-to-date": 1, busy: 0 })
+    expect(plan.skipped).toEqual({ "no-take": 1, "not-trained": 1, "up-to-date": 1, shared: 0, busy: 0 })
   })
 
   it("re-targets a converted take when the cell is reassigned to another voice", () => {
@@ -83,6 +83,55 @@ describe("planChangeVoiceAll", () => {
     const plan = planChangeVoiceAll([recorded("c5")], settings)
     expect(plan.targets).toEqual([])
     expect(plan.skipped.busy).toBe(1)
+  })
+})
+
+// AQU-2499 (review, Nov 9): a chapter uploaded as one file sits on every
+// verse over one recording. The run converted the whole chapter once per
+// verse, each one paid; such lines are now skipped and counted.
+describe("the whole-file run and a recording several lines share", () => {
+  const URL = "frontier-audio://audio-c1-1-range.mp3"
+  function onRange(id: string, first = false): CellData {
+    const audioId = first ? "audio-c1-1-range.mp3" : `audio-${id}-1-range.mp3`
+    return {
+      id, fileId: "f1", type: "text", translated: "x",
+      selectedAudioId: audioId,
+      attachments: { [audioId]: { url: URL, type: "audio/mpeg", slot: "recording" } },
+    } as unknown as CellData
+  }
+  function cutTake(id: string): CellData {
+    const whole = `audio-${id}-1-cut.webm`
+    const url = `frontier-audio://${whole}`
+    return {
+      id, fileId: "f1", type: "text", translated: "x",
+      selectedAudioId: whole,
+      attachments: {
+        [whole]: { url, type: "audio/webm", slot: "recording", trimEndMs: 1500 },
+        [`audio-${id}-2-cut.webm`]: { url, type: "audio/webm", slot: "recording", trimStartMs: 1500, pieceOf: whole },
+      },
+    } as unknown as CellData
+  }
+
+  it("skips every line of the shared recording and counts them", () => {
+    const plan = planChangeVoiceAll([onRange("c1", true), onRange("c4"), onRange("c5"), recorded("c2")], settings)
+    expect(plan.targets.map((t) => t.cell.id)).toEqual(["c2"])
+    expect(plan.skipped.shared).toBe(3)
+  })
+
+  it("still converts a cut take's line: its pieces are that one line's recording", () => {
+    const plan = planChangeVoiceAll([cutTake("c1"), cutTake("c4")], settings)
+    expect(plan.targets.map((t) => t.cell.id)).toEqual(["c1", "c4"])
+    expect(plan.skipped.shared).toBe(0)
+  })
+
+  it("spends no conversion on them, and reports them rather than failing", async () => {
+    vi.mocked(changeCellVoice).mockReset().mockResolvedValue(true)
+    const result = await runChangeVoiceAll({
+      projectId: "p1", cells: [onRange("c1", true), onRange("c4"), recorded("c2")], settings, session: null, author: "tester",
+    })
+    expect(vi.mocked(changeCellVoice).mock.calls.map(([a]) => a.cell.id)).toEqual(["c2"])
+    expect(result).toMatchObject({ converted: 1, failed: 0 })
+    expect(result.skipped.shared).toBe(2)
   })
 })
 

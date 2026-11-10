@@ -468,6 +468,11 @@ export const audio = defineNamespace({
       one: "{count} cell was skipped because its voice has no trained voice model.",
       other: "{count} cells were skipped because their voice has no trained voice model.",
     }),
+    // AQU-2499 (review, Nov 9): lines that share one recording with others.
+    "audio.changeVoice.batchSkippedShared": plural({
+      one: "{count} line was skipped because it shares its recording with other lines, and Change voice can't re-voice one line of a shared recording yet.",
+      other: "{count} lines were skipped because each shares its recording with other lines, and Change voice can't re-voice one line of a shared recording yet.",
+    }),
     // AQU-1681: hosted transcription allows 60 requests per 15 minutes; a
     // batch that reaches it waits and carries on by itself.
     "audio.bulkProgress.waitingForLimit": "Transcription limit reached, continuing at {time}",
@@ -2677,6 +2682,15 @@ export const audio = defineNamespace({
           "Toast detail after the bulk run when some conversions failed. Each failed " +
           "cell shows its own error badge with the reason.",
         placeholders: { count: "How many conversions failed." },
+      },
+      "audio.changeVoice.batchSkippedShared": {
+        description:
+          "Toast detail after the bulk 'Change voice of existing audio' run (also the " +
+          "confirmation's notice): lines whose recording is also used by other lines " +
+          "(for example a whole chapter uploaded as one file and placed on each verse) " +
+          "were left alone, because re-voicing one line would re-voice the whole " +
+          "recording. 'Change voice' is the name of the action.",
+        placeholders: { count: "How many lines were skipped." },
       },
       "audio.changeVoice.batchSkippedNotTrained": {
         description:

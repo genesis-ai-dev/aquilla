@@ -324,6 +324,8 @@ export interface ChangeVoiceMenuState {
   voiceName: string
   /** Why Change voice can't run; null when it can. */
   blocker: ChangeVoiceMenuBlocker | null
+  /** AQU-2499 (review, Nov 9): on "shared", how many lines hold the recording. */
+  sharedLines?: number
 }
 
 function TargetAudioChip({
@@ -1796,7 +1798,9 @@ function TargetAudioChip({
     ? t("editor.voice.changeVoiceCantRevoice", { name: changeVoice?.voiceName ?? "" })
     : changeVoiceBlocked === "up-to-date"
       ? t("editor.voice.changeVoiceUpToDate", { name: changeVoice?.voiceName ?? "" })
-      : null
+      : changeVoiceBlocked === "shared" // AQU-2499 (review, Nov 9)
+        ? t("editor.voice.changeVoiceShared", { count: changeVoice?.sharedLines ?? 2 })
+        : null
   const canSplit = Boolean(onCutTarget) && editable
   return (
     <>

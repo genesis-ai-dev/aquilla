@@ -327,6 +327,29 @@ describe("TargetAudioLane — per-line Change voice (AQU-2026)", () => {
   })
 })
 
+// AQU-2499 (review, Nov 9): Change voice on a line whose recording other lines
+// share converted the whole recording, paid, once per line. It is refused,
+// and the item says why in one sentence.
+describe("TargetAudioLane — Change voice on a recording several lines share", () => {
+  it("greys the item and says how many lines share the recording", async () => {
+    const actions = menuActions({ changeVoiceState: vi.fn(() => changeVoiceState({ blocker: "shared", sharedLines: 24 })) })
+    render(
+      <TargetAudioLane
+        {...base}
+        items={[{ cell: oneTake(), kind: "take", audioId: TAKE }]}
+        onCutTarget={vi.fn()}
+        takeMenu={actions}
+      />,
+    )
+    rightClick("tl-target-c1", 80)
+    const item = await screen.findByTestId("tl-take-menu-change-voice")
+    expect(item.getAttribute("aria-disabled") === "true" || item.hasAttribute("data-disabled")).toBe(true)
+    expect(item.textContent).toContain("This recording is shared by 24 lines, so Change voice can't re-voice one line of it yet.")
+    fireEvent.click(item)
+    expect(actions.changeVoice).not.toHaveBeenCalled()
+  })
+})
+
 // Sam's decision: a hidden line is not recorded onto from its take.
 describe("TargetAudioLane — a hidden line's take menu", () => {
   it("offers no re-record", async () => {

@@ -32,6 +32,8 @@ const {
   generateSlotOverVoiceChange,
   isVoiceChangedAudioId,
   originalTakeId,
+  recordingLinesOf,
+  recordingSharedBy,
   voiceChangedWithReference,
   voiceConversionKey,
   voiceReferenceFingerprint,
@@ -281,6 +283,72 @@ describe("changeVoiceBlocker", () => {
       selectedAudioId: legacy,
       attachments: { [legacy]: att({ slot: "recording", voiceId: "v-hearth" }) },
     }), hearth)).toBe("up-to-date")
+  })
+})
+
+// AQU-2499 (review, Nov 9): Change voice converts the whole stored recording
+// a take plays. When other lines play that recording too (a chapter uploaded
+// as one file and put on each verse, a Station version saved over several
+// lines), it converted all of it once per line, each one paid, and every line
+// then played the whole thing. It is refused there; the pieces of a cut take
+// on one line are one line's recording and still convert.
+describe("a recording shared by several lines", () => {
+  const OBJECT = "audio-GEN_1_1-1-range.mp3"
+  const URL = `frontier-audio://${OBJECT}`
+  /** Bulk upload's range shape: the first line's take is the object, every
+   *  other line's take its own id over the same url. */
+  const verse = (n: number) => {
+    const id = n === 1 ? OBJECT : `audio-GEN_1_${n}-1-range.mp3`
+    return cell({ id: `GEN 1:${n}`, selectedAudioId: id, attachments: { [id]: att({ slot: "recording", url: URL }) } })
+  }
+  const chapter = [verse(1), verse(2), verse(3)]
+  const lines = recordingLinesOf(chapter.map((c) => [c.id, c] as const))
+
+  it("counts every line that holds the recording, this one included", () => {
+    expect(chapter.map((c) => recordingSharedBy(c, undefined, lines))).toEqual([3, 3, 3])
+    expect(chapter.map((c) => changeVoiceBlocker(c, hearth, undefined, lines))).toEqual(["shared", "shared", "shared"])
+  })
+
+  it("refuses a Station version saved over several lines, from any of them", () => {
+    const first = "audio-GEN_1_1-5-st.wav"
+    const station = `frontier-audio://${first}`
+    const one = cell({ attachments: { [first]: att({ slot: "recording", url: station, trimEndMs: 4000 }) } })
+    const two = cell({ id: "GEN 1:2", attachments: { "audio-GEN_1_2-5-st.wav": att({ slot: "recording", url: station, trimStartMs: 4000 }) } })
+    const held = recordingLinesOf([one, two].map((c) => [c.id, c] as const))
+    expect(changeVoiceBlocker(two, hearth, "audio-GEN_1_2-5-st.wav", held)).toBe("shared")
+    expect(recordingSharedBy(two, "audio-GEN_1_2-5-st.wav", held)).toBe(2)
+  })
+
+  it("judges a re-voiced take by the recording it would be converted from", () => {
+    const vc = `vc-${HEARTH_FP}-audio-GEN_1_2-9-q.wav`
+    const v2 = verse(2)
+    v2.selectedAudioId = vc
+    v2.attachments![vc] = att({ slot: "recording", voiceId: "v-hearth", referenceAudioId: "audio-GEN_1_2-1-range.mp3", url: `frontier-audio://${vc}` })
+    expect(changeVoiceBlocker(v2, anna, undefined, lines)).toBe("shared")
+  })
+
+  it("lets the pieces of a cut take on one line through: they are that line's own recording", () => {
+    const whole = "audio-GEN_1_1-1-abc.webm"
+    const piece = "audio-GEN_1_1-2-def.webm"
+    const cut = cell({
+      attachments: {
+        [whole]: att({ slot: "recording", url: `frontier-audio://${whole}`, trimEndMs: 2000 }),
+        [piece]: att({ slot: "recording", url: `frontier-audio://${whole}`, trimStartMs: 2000, pieceOf: whole }),
+      },
+    })
+    const other = cell({ id: "GEN 1:2", selectedAudioId: "audio-GEN_1_2-1-x.webm", attachments: { "audio-GEN_1_2-1-x.webm": att({ slot: "recording", url: "frontier-audio://audio-GEN_1_2-1-x.webm" }) } })
+    const held = recordingLinesOf([cut, other].map((c) => [c.id, c] as const))
+    expect(recordingSharedBy(cut, piece, held)).toBe(1)
+    expect(changeVoiceBlocker(cut, hearth, piece, held)).toBeNull()
+    expect(changeVoiceBlocker(cut, hearth, undefined, held)).toBeNull()
+  })
+
+  it("does not count a deleted take, or a line no longer holding it", () => {
+    const v2 = verse(2)
+    v2.attachments![v2.selectedAudioId!] = { ...v2.attachments![v2.selectedAudioId!], isDeleted: true }
+    const held = recordingLinesOf([verse(1), v2].map((c) => [c.id, c] as const))
+    expect(recordingSharedBy(verse(1), undefined, held)).toBe(1)
+    expect(changeVoiceBlocker(verse(1), hearth, undefined, held)).toBeNull()
   })
 })
 

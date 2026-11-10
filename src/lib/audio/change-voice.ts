@@ -161,16 +161,63 @@ export function originalTakeId(
   return current
 }
 
-/** Why Change voice can't run on a cell, or null when it can. */
-export type ChangeVoiceBlocker = "no-take" | "not-trained" | "up-to-date"
+/**
+ * AQU-2499 (review, Nov 9): which lines hold a take of each stored recording,
+ * by the `frontier-audio://` url the worker reads it from. Built once for a
+ * file and handed to `recordingSharedBy`. Lines, not takes: the pieces of a
+ * cut take all sit on one line, so they count once.
+ */
+export type RecordingLines = ReadonlyMap<string, ReadonlySet<string>>
 
-/** `audioId`: the take the person picked (AQU-2499); else the line's own. */
-export function changeVoiceBlocker(cell: CellData, voice: Voice, audioId?: string): ChangeVoiceBlocker | null {
+type HeldTake = { url: string; isDeleted?: boolean; role?: string | null }
+
+export function recordingLinesOf(
+  lines: Iterable<readonly [lineId: string, line: { attachments?: Record<string, HeldTake> | null } | undefined]>,
+): RecordingLines {
+  const out = new Map<string, Set<string>>()
+  for (const [lineId, line] of lines) {
+    for (const att of Object.values(line?.attachments ?? {})) {
+      if (att.isDeleted || att.role === "source" || !parseFrontierAudioUrl(att.url)) continue
+      const held = out.get(att.url) ?? new Set<string>()
+      held.add(lineId)
+      out.set(att.url, held)
+    }
+  }
+  return out
+}
+
+/**
+ * AQU-2499 (review, Nov 9): how many lines hold the stored recording Change
+ * voice would convert for this take, this line included; 0 with no take.
+ *
+ * The worker converts the WHOLE recording a take plays. On one line that is
+ * right: a whole take, or the pieces of a cut take, which are one line's
+ * recording (1). Above 1 the recording is shared by several lines — a chapter
+ * uploaded as one file and put on each verse, a Station version saved over
+ * several lines — and re-voicing one of them would convert all of it, paid,
+ * once per line, and put the whole of it on each line. That is refused.
+ */
+export function recordingSharedBy(cell: CellData, audioId: string | undefined, lines: RecordingLines): number {
+  const take = changeVoiceSourceTake(cell, audioId)
+  if (!take) return 0
+  const url = cell.attachments?.[originalTakeId(cell.attachments, take.audioId)]?.url ?? ""
+  const held = parseFrontierAudioUrl(url) ? lines.get(url) : undefined
+  return held ? new Set([cell.id, ...held]).size : 1
+}
+
+/** Why Change voice can't run on a cell, or null when it can. AQU-2499:
+ *  "shared", its recording is shared by several lines (`recordingSharedBy`). */
+export type ChangeVoiceBlocker = "no-take" | "not-trained" | "up-to-date" | "shared"
+
+/** `audioId`: the take the person picked (AQU-2499); else the line's own.
+ *  `lines`: the file's `recordingLinesOf`, to refuse a shared recording. */
+export function changeVoiceBlocker(cell: CellData, voice: Voice, audioId?: string, lines?: RecordingLines): ChangeVoiceBlocker | null {
   const take = changeVoiceSourceTake(cell, audioId)
   if (!take) return "no-take"
   const key = voiceConversionKey(voice)
   if (!key) return "not-trained"
   if (take.attachment.voiceId === voice.id && voiceChangedWithReference(take.audioId, key)) return "up-to-date"
+  if (lines && recordingSharedBy(cell, audioId, lines) > 1) return "shared"
   return null
 }
 

@@ -2102,6 +2102,11 @@ export const editor = defineNamespace({
     "editor.voice.changeVoiceCantRevoice":
       "{name} can read text but can't re-voice recordings — Change voice works with character, trained and ElevenLabs voices.",
     "editor.voice.changeVoiceUpToDate": "This take is already in {name}'s voice",
+    // AQU-2499 (review, Nov 9): one recording several lines play.
+    "editor.voice.changeVoiceShared": plural({
+      one: "This recording is shared by {count} line, so Change voice can't re-voice one line of it yet.",
+      other: "This recording is shared by {count} lines, so Change voice can't re-voice one line of it yet.",
+    }),
     "editor.voice.voicing": "Voicing…",
     "editor.voice.choose": "Choose a voice",
     "editor.voice.activeVoice": "Voice: {name}. Choose a voice",
@@ -8109,6 +8114,15 @@ export const editor = defineNamespace({
         placeholders: {
           name: "The assigned voice's name from the project's cast — user data, never translate it.",
         },
+      },
+      "editor.voice.changeVoiceShared": {
+        description:
+          "Shown on the disabled 'Change voice' menu item, in the Station, and as a " +
+          "message, when the take's recording is also used by other lines (a whole " +
+          "chapter uploaded as one file and placed on each verse, or one saved version " +
+          "used on several lines). Change voice would have to re-voice all of it, so " +
+          "for now it is not offered there. 'Change voice' is the name of the action.",
+        placeholders: { count: "How many lines use this one recording, this line included (2 or more)." },
       },
       "editor.voice.changeVoiceUpToDate": {
         description:

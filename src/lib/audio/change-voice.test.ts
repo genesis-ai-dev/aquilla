@@ -56,7 +56,7 @@ function cell(over: Partial<CellData> = {}): CellData {
     fileId: "f1",
     selectedAudioId: "audio-GEN_1_1-1-abc.webm",
     attachments: {
-      "audio-GEN_1_1-1-abc.webm": att({ slot: "recording", label: "Take 1" }),
+      "audio-GEN_1_1-1-abc.webm": att({ slot: "recording", label: "Take 1", url: "frontier-audio://audio-GEN_1_1-1-abc.webm" }),
     },
     ...over,
   } as CellData
@@ -217,7 +217,7 @@ describe("changeVoiceForCell", () => {
     const c = cell({
       selectedAudioId: prior,
       attachments: {
-        "rec.webm": att({ slot: "recording", label: "Take 1" }),
+        "rec.webm": att({ slot: "recording", label: "Take 1", url: "frontier-audio://rec.webm" }),
         [prior]: att({ slot: "recording", voiceId: "v-old", referenceAudioId: "rec.webm" }),
       },
     })
@@ -245,6 +245,48 @@ describe("changeVoiceForCell", () => {
       "f1", "GEN 1:1", expect.objectContaining({ slot: "recording", voiceId: "v-hearth" }), "evt-1",
     )
     expect(res.audioId).toBe("vc-a8dcd319-audio-GEN_1_1-9-q.wav")
+  })
+
+  // AQU-2499 (review, Nov 9): the worker reads storage by the name it is
+  // sent, and a take that shares another take's recording has no object of
+  // its own — it answered "source audio not found".
+  it("sends the stored recording a piece of a cut take plays, not the piece's own id", async () => {
+    convertToLibraryVoice.mockResolvedValue({
+      audioId: `vc-${HEARTH_FP}-audio-GEN_1_1-9-q`, ext: "wav", url: `frontier-audio://vc-${HEARTH_FP}-audio-GEN_1_1-9-q.wav`, bytes: 3,
+    })
+    const first = "audio-GEN_1_1-1-abc.webm"
+    const piece = "audio-GEN_1_1-2-def.webm"
+    const c = cell({
+      selectedAudioId: piece,
+      attachments: {
+        // The first piece was deleted; the second still plays its recording.
+        [first]: att({ slot: "recording", label: "Take 1 · 1", url: `frontier-audio://${first}`, isDeleted: true }),
+        [piece]: att({ slot: "recording", label: "Take 1 · 2", url: `frontier-audio://${first}`, pieceOf: first }),
+      },
+    })
+
+    await changeVoiceForCell({ projectId: "p1", cell: c, voice: hearth, session, author: "dev" })
+
+    expect(convertToLibraryVoice.mock.calls[0][0]).toMatchObject({ sourceAudioId: first })
+    // The new take still names the take it was made from.
+    expect(emitCellAudioAttach).toHaveBeenCalledWith(expect.objectContaining({ referenceAudioId: piece, label: "Take 1 · 2 → Hearth" }))
+  })
+
+  it("sends the first line's recording for a later line of a range uploaded as one file", async () => {
+    const rachel = { id: "v-rachel", name: "Rachel", provider: "elevenlabs", elevenLabs: { voiceId: "el123" } } as Voice
+    convertElevenLabsSpeech.mockResolvedValue({ audioId: "vc-x-audio-GEN_1_2-9-r", ext: "mp3", url: "frontier-audio://vc-x-audio-GEN_1_2-9-r.mp3", bytes: 3 })
+    const shared = "audio-GEN_1_1-1-range.mp3"
+    const own = "audio-GEN_1_2-1-range.mp3"
+    const c = cell({
+      id: "GEN 1:2",
+      selectedAudioId: own,
+      attachments: { [own]: att({ slot: "recording", url: `frontier-audio://${shared}` }) },
+    })
+
+    await changeVoiceForCell({ projectId: "p1", cell: c, voice: rachel, session, author: "dev" })
+
+    expect(convertElevenLabsSpeech.mock.calls[0][0]).toMatchObject({ cellId: "GEN 1:2", sourceAudioId: shared })
+    expect(emitCellAudioAttach).toHaveBeenCalledWith(expect.objectContaining({ referenceAudioId: own }))
   })
 
   it("refuses a voice with no trained model before calling the worker", async () => {

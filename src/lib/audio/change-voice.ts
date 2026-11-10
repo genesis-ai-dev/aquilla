@@ -28,7 +28,7 @@ import { injectOptimisticAudioAttachment, notifyAudioAttachmentsChanged } from "
 import { audioCachePutBlob } from "./bytes-cache"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { setTtsStatus, ttsStatusKey } from "./tts"
-import { fetchCellAudio, audioIdSeededWith } from "./upload"
+import { fetchCellAudio, audioIdSeededWith, parseFrontierAudioUrl } from "./upload"
 import { convertToLibraryVoice, type ConvertToLibraryVoiceResult } from "./voice-clone"
 import { convertElevenLabsSpeech } from "@/lib/sync/elevenlabs"
 import { elevenLabsConversionKey, elevenLabsSettingsOf, isElevenLabsVoice, ELEVENLABS_STS_MODEL } from "./elevenlabs/settings"
@@ -192,6 +192,13 @@ export async function changeVoiceForCell(args: ChangeVoiceArgs): Promise<ChangeV
 
   const sourceAudioId = originalTakeId(cell.attachments, take.audioId)
   const label = args.label ?? changeVoiceLabel(cell.attachments?.[sourceAudioId]?.label, voice.name)
+  // AQU-2499 (review, Nov 9): the worker reads the stored recording by name,
+  // and a take can play another take's recording (a piece of a cut take, a
+  // later line of a range uploaded as one file, a Station version used on
+  // several lines), so send the object its url names, as Remove noise does.
+  // The new take still links back to the take itself.
+  const stored = parseFrontierAudioUrl(cell.attachments?.[sourceAudioId]?.url ?? "")
+  const storedAudioId = stored ? `${stored.audioId}.${stored.ext}` : sourceAudioId
   const getSyncToken = audioSyncTokenFetcherForSession(session)
   let conv: ConvertToLibraryVoiceResult
   if (voice.libraryVoiceId || !elevenLabs) {
@@ -200,7 +207,7 @@ export async function changeVoiceForCell(args: ChangeVoiceArgs): Promise<ChangeV
       fileId: cell.fileId,
       cellId: cell.id,
       libraryVoiceId: voice.libraryVoiceId ?? "",
-      sourceAudioId,
+      sourceAudioId: storedAudioId,
       getSyncToken,
     })
   } else {
@@ -211,7 +218,7 @@ export async function changeVoiceForCell(args: ChangeVoiceArgs): Promise<ChangeV
       fileId: cell.fileId,
       cellId: cell.id,
       voiceId: elevenLabs.voiceId,
-      sourceAudioId,
+      sourceAudioId: storedAudioId,
       modelId: ELEVENLABS_STS_MODEL,
       voiceSettings: elevenLabsSettingsOf(voice),
     }, getSyncToken)

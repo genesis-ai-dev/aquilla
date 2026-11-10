@@ -844,6 +844,12 @@ export const editor = defineNamespace({
       "Leave this off to review each one yourself. Turn it on to sign them off together, under your name.",
     "editor.batchFile.aiDraftsLocked":
       "A translator reviews these one at a time. A reviewer or a project lead can include them here.",
+    "editor.batchFile.flagged": plural({
+      one: "{count} cell with an open check flag",
+      other: "{count} cells with open check flags",
+    }),
+    "editor.batchFile.flaggedHelp":
+      "Checks and rules flagged these. Turn this on to sign them off anyway — your check overrules the flag.",
     "editor.batchFile.empty": plural({
       one: "{count} empty cell",
       other: "{count} empty cells",
@@ -898,6 +904,15 @@ export const editor = defineNamespace({
       one: "{count} left for the next run",
       other: "{count} left for the next run",
     }),
+    // AQU-2507: flagged cells are REPORTED, never silently dropped, and the
+    // modal's opt-in is how a reviewer takes them anyway.
+    "editor.batchValidate.skip.flagged": plural({
+      one: "{count} has an open check flag",
+      other: "{count} have open check flags",
+    }),
+    // AQU-2507: one action validates the whole file, so the run says where it
+    // has got to rather than stopping at a chunk boundary.
+    "editor.batchValidate.progress": "Validating… {done} of {total} cells signed off.",
     "editor.batchValidate.nothingEligibleTitle": "Nothing was validated",
     "editor.batchValidate.nothingEligibleNoReason":
       "None of these cells is eligible for bulk validation.",
@@ -7302,6 +7317,18 @@ export const editor = defineNamespace({
           "Help under that checkbox when the reader is a contributor and cannot "
           + "bulk-validate untouched AI drafts.",
       },
+      "editor.batchFile.flagged": {
+        description:
+          "Checkbox label for cells a check or rule has flagged. Off by "
+          + "default: including them is the reader deliberately overruling the "
+          + "flags with their own sign-off.",
+        placeholders: {
+          count: "How many flagged cells are in the open file. Selects the plural form.",
+        },
+      },
+      "editor.batchFile.flaggedHelp": {
+        description: "Help under that checkbox.",
+      },
       "editor.batchFile.empty": {
         description: "Checkbox label for cells with source text and no translation.",
         placeholders: {
@@ -7410,6 +7437,27 @@ export const editor = defineNamespace({
         placeholders: {
           count: "How many eligible cells the batch limit deferred. Selects the plural form.",
         },
+      },
+      "editor.batchValidate.skip.flagged": {
+        description:
+          "One clause inside {reasons}: cells a check or a terminology/style "
+          + "rule has flagged, which a file-wide validation leaves out unless "
+          + "the reader ticks the include box. NOT a refusal — their sign-off "
+          + "would overrule the flag. A fragment, not a sentence.",
+        placeholders: {
+          count: "How many cells carry an open check flag. Selects the plural form.",
+        },
+      },
+      "editor.batchValidate.progress": {
+        description:
+          "Toast shown WHILE a file-wide validation runs, updated as each batch "
+          + "is saved. The run finishes on its own — this must not read as a "
+          + "prompt to click again.",
+        placeholders: {
+          done: "How many cells have been signed off so far.",
+          total: "How many cells the run will sign off in all.",
+        },
+        maxLength: 80,
       },
       "editor.batchValidate.nothingEligibleTitle": {
         description:

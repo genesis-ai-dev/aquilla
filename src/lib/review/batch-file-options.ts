@@ -74,6 +74,12 @@ export interface DraftRunChoices {
 export interface ValidateRunChoices {
   includeReadyCells: boolean
   includeUntouchedAiDrafts: boolean
+  /**
+   * AQU-2507: cells a check or rule has flagged. Off by default — a reviewer
+   * overruling a mechanical flag says so — and the choice rides the run's
+   * telemetry so "we accepted the flagged lines too" is on the record.
+   */
+  includeFlaggedCells: boolean
 }
 
 function alreadyReviewed(cell: DraftChoiceCell): boolean {

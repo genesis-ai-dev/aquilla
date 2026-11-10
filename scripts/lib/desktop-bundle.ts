@@ -3,7 +3,7 @@
 // docs/superpowers/specs/2026-11-05-desktop-hot-bundle.md; keep them in step with
 // src-tauri/src/hot_bundle.rs, which verifies what this produces.
 
-import { createHash, generateKeyPairSync, sign, verify, type KeyObject } from "node:crypto"
+import { createHash, createPrivateKey, generateKeyPairSync, sign, verify, type KeyObject } from "node:crypto"
 import { createReadStream, statSync } from "node:fs"
 
 export const DESKTOP_BUNDLE_ENVS = ["production", "development"] as const
@@ -43,19 +43,24 @@ export interface PublishArgs {
   env: DesktopBundleEnv
   dryRun: boolean
   dist: string
+  /** Check what the publish will need — the signing key first — and stop before any build. */
+  preflight: boolean
 }
 
 export const DESKTOP_BUNDLE_USAGE =
-  "usage: tsx scripts/desktop-bundle-publish.ts <production|development> [--dry-run] [--dist <dir>]"
+  "usage: tsx scripts/desktop-bundle-publish.ts <production|development> [--preflight] [--dry-run] [--dist <dir>]"
 
 export function parseDesktopBundleArgs(argv: string[]): PublishArgs {
   let env: DesktopBundleEnv | undefined
   let dryRun = false
   let dist = "dist"
+  let preflight = false
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
     if (arg === "--dry-run") {
       dryRun = true
+    } else if (arg === "--preflight") {
+      preflight = true
     } else if (arg === "--dist") {
       const value = argv[++i]
       if (!value) throw new Error(`--dist needs a directory\n${DESKTOP_BUNDLE_USAGE}`)
@@ -68,7 +73,7 @@ export function parseDesktopBundleArgs(argv: string[]): PublishArgs {
     }
   }
   if (!env) throw new Error(`missing environment\n${DESKTOP_BUNDLE_USAGE}`)
-  return { env, dryRun, dist }
+  return { env, dryRun, dist, preflight }
 }
 
 export function bundleObjectKey(env: DesktopBundleEnv, version: string): string {
@@ -173,25 +178,75 @@ export function generateBundleKeypair(): Ed25519Keypair {
 }
 
 export type SigningKeyDecision =
-  | { kind: "provided"; privateKeyPem: string }
-  | { kind: "ephemeral"; privateKeyPem: string; publicKeyHex: string }
+  | { kind: "provided"; privateKey: KeyObject }
+  | { kind: "ephemeral"; privateKey: KeyObject; publicKeyHex: string }
   | { kind: "skip"; warning: string }
+  | { kind: "invalid"; error: string }
+
+export type SigningKeyParse = { ok: true; key: KeyObject } | { ok: false; reason: string }
+
+/**
+ * Parses the secret's value as the ed25519 PKCS#8 PEM `pnpm desktop:bundle:keygen`
+ * prints, or says what the value looks like instead. OpenSSL reports every
+ * malformed input with the same `error:1E08010C:DECODER routines::unsupported`,
+ * which is all the five production deploys 2026.11.06.04 … 2026.11.09.01 had to
+ * go on when the secret, set once on 2026-11-05, turned out not to be a PEM —
+ * each time after the web release was live. The cases below are how a PEM gets
+ * mangled in a paste; the OpenSSL message is the fallback for anything else.
+ */
+export function parseSigningKey(value: string): SigningKeyParse {
+  const text = value.trim()
+  if (/^[0-9a-f]{64}$/i.test(text)) {
+    return { ok: false, reason: "is 64 hex digits — the raw public key (AQUILLA_BUNDLE_PUBKEY), not the private key" }
+  }
+  if (text.includes("\\n")) {
+    return { ok: false, reason: "contains literal \\n sequences; the PEM needs real line breaks" }
+  }
+  if (!/^-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(text)) {
+    return { ok: false, reason: "does not start with a BEGIN PRIVATE KEY line, so it is not a PEM" }
+  }
+  if (!text.includes("\n")) {
+    return { ok: false, reason: "is on a single line; the PEM's line breaks were lost in the paste" }
+  }
+  let key: KeyObject
+  try {
+    key = createPrivateKey(text)
+  } catch (error) {
+    return { ok: false, reason: `does not decode: ${error instanceof Error ? error.message : String(error)}` }
+  }
+  if (key.asymmetricKeyType !== "ed25519") {
+    return { ok: false, reason: `is a ${key.asymmetricKeyType ?? "non-ed25519"} key; the shell verifies ed25519 only` }
+  }
+  return { ok: true, key }
+}
 
 /**
  * Who signs. A missing secret must not fail the hourly web release before the
  * key exists, so without `--dry-run` it is a GitHub warning and a clean exit;
  * a dry run signs with a throwaway key so the manifest shape can still be checked.
+ * A secret that is set but does not parse is a configuration error, named with
+ * what the value looks like; `--preflight` asks this before anything deploys.
  */
 export function resolveSigningKey(
   envValue: string | undefined,
   dryRun: boolean,
   makeKeypair: () => Ed25519Keypair = generateBundleKeypair,
 ): SigningKeyDecision {
-  const pem = envValue?.trim()
-  if (pem) return { kind: "provided", privateKeyPem: pem }
+  const value = envValue?.trim()
+  if (value) {
+    const parsed = parseSigningKey(value)
+    if (parsed.ok) return { kind: "provided", privateKey: parsed.key }
+    return {
+      kind: "invalid",
+      error:
+        `${SIGNING_KEY_ENV} is set but ${parsed.reason}. `
+        + "Set the repo secret to the whole multi-line PKCS#8 PEM `pnpm desktop:bundle:keygen` prints, "
+        + "from its BEGIN PRIVATE KEY line to its END PRIVATE KEY line.",
+    }
+  }
   if (dryRun) {
     const { privateKeyPem, publicKeyHex } = makeKeypair()
-    return { kind: "ephemeral", privateKeyPem, publicKeyHex }
+    return { kind: "ephemeral", privateKey: createPrivateKey(privateKeyPem), publicKeyHex }
   }
   return {
     kind: "skip",

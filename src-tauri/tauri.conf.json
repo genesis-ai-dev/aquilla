@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Aquilla",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "identifier": "com.frontierrnd.aquilla",
   "build": {
     "frontendDist": "../dist",
@@ -16,7 +16,7 @@
       "capabilities": ["default"],
       "csp": {
         "default-src": "'self'",
-        "script-src": "'self'",
+        "script-src": "'self' 'wasm-unsafe-eval'",
         "style-src": "'self' 'unsafe-inline'",
         "img-src": "'self' data: blob: https:",
         "font-src": "'self' data:",

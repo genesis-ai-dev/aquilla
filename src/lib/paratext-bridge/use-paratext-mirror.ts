@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { emitTargetCellCommits, type CellCommitInput } from "../sync/events-emit"
 import { fetchAllFileCells } from "../sync/cells-read"
+import { subscribeToOutbox } from "../sync/outbox"
 import type { CellRow } from "../sync/cells-read-types"
 import type { UnitSet } from "./units"
 import type { WriteBackConflict } from "./write-back"
@@ -41,6 +42,9 @@ export interface MirrorState {
   onHold: boolean
   /** Cells whose reference no unit in the file carries (last write attempt). */
   unmapped: number
+  /** Cells whose text differs from what the Paratext file holds: what "Write
+   *  to Paratext" would send now. */
+  pending: number
   error: string | null
 }
 
@@ -60,7 +64,7 @@ interface CommitTarget extends MirrorCell {
   sourceEventId: string | null
 }
 
-const IDLE: MirrorState = { link: null, book: null, busy: null, conflicts: [], refusals: [], onHold: false, unmapped: 0, error: null }
+const IDLE: MirrorState = { link: null, book: null, busy: null, conflicts: [], refusals: [], onHold: false, unmapped: 0, pending: 0, error: null }
 
 async function loadCells(host: MirrorHost): Promise<CommitTarget[]> {
   if (!host.projectId || !host.fileId) return []
@@ -143,6 +147,24 @@ export function useParatextMirror(host: MirrorHost): [MirrorState, MirrorActions
     return inputs.length
   }, [])
 
+  /** Recount the edits waiting to be written. Reads the server's cells, so an
+   *  edit counts once its commit has left the outbox. */
+  const pendingSeqRef = useRef(0)
+  const refreshPending = useCallback(async () => {
+    const loc = location()
+    const book = bookRef.current
+    if (!loc || !book) return
+    const seq = ++pendingSeqRef.current
+    try {
+      const [cells, base] = await Promise.all([loadCells(hostRef.current), bridgeStore.lastSeen(loc.guid, book.code)])
+      if (seq !== pendingSeqRef.current || bookRef.current !== book) return
+      const pending = base ? diffCellsAgainstUnits(cells, base).edits.length : 0
+      setState((s) => (s.pending === pending ? s : { ...s, pending }))
+    } catch {
+      /* the count is a hint; the write itself reports real failures */
+    }
+  }, [location])
+
   /** Inbound: read the file, classify against last-seen, land Paratext-only
    *  changes in the cells, hold the rest for the user. */
   const sync = useCallback(async () => {
@@ -158,6 +180,7 @@ export function useParatextMirror(host: MirrorHost): [MirrorState, MirrorActions
         await bridgeStore.setLastSeen(loc.guid, r.units.book, r.units)
         lastBlobRef.current = r.units.blobHash
         setState((s) => ({ ...s, busy: null, onHold: r.onHold }))
+        void refreshPending()
         return
       }
       const pending = diffCellsAgainstUnits(cells, lastSeen).edits
@@ -171,10 +194,22 @@ export function useParatextMirror(host: MirrorHost): [MirrorState, MirrorActions
         pendingUnitsRef.current = r.units
       }
       setState((s) => ({ ...s, busy: null, conflicts: r.conflicts, onHold: r.onHold }))
+      void refreshPending()
     } catch (e) {
       setState((s) => ({ ...s, busy: null, error: e instanceof Error ? e.message : String(e) }))
     }
-  }, [location, commitTheirs])
+  }, [location, commitTheirs, refreshPending])
+
+  // A local edit entering or leaving the outbox changes what is unwritten.
+  useEffect(() => {
+    if (!supported || !state.link || !state.book) return
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const unsubscribe = subscribeToOutbox(() => {
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => void refreshPending(), 1000)
+    })
+    return () => { unsubscribe(); if (timer) clearTimeout(timer) }
+  }, [supported, state.link, state.book, refreshPending])
 
   // First contact + folder watch. Re-runs when the mirrored book changes.
   useEffect(() => {
@@ -214,6 +249,7 @@ export function useParatextMirror(host: MirrorHost): [MirrorState, MirrorActions
       }
       if (r.after) lastBlobRef.current = r.after.blobHash
       setState((s) => ({ ...s, busy: null, refusals: r.conflicts, unmapped: unmapped.length }))
+      void refreshPending()
       // The file moved under us: classify so the user sees what Paratext did.
       if (r.conflicts.some((c) => c.reason === "base-mismatch")) void sync()
       return { written: r.applied.length, file: loc.fileName }
@@ -222,7 +258,7 @@ export function useParatextMirror(host: MirrorHost): [MirrorState, MirrorActions
       setState((s) => ({ ...s, busy: null, error: msg }))
       return { refused: msg }
     }
-  }, [location, sync])
+  }, [location, sync, refreshPending])
 
   const finishResolutions = useCallback(async (remaining: ClassifiedUnit[]) => {
     const loc = location()
@@ -231,7 +267,8 @@ export function useParatextMirror(host: MirrorHost): [MirrorState, MirrorActions
       pendingUnitsRef.current = null
     }
     setState((s) => ({ ...s, conflicts: remaining }))
-  }, [location])
+    void refreshPending()
+  }, [location, refreshPending])
 
   const resolveMany = useCallback(async (picks: { c: ClassifiedUnit; choice: "mine" | "theirs" }[]) => {
     // "Theirs" lands Paratext's text in the cell; "mine" leaves the cell as it

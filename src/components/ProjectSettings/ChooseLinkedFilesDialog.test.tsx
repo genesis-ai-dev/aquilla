@@ -24,6 +24,10 @@ import userEvent from "@testing-library/user-event"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import { UserError } from "@/lib/errors/user-error"
 import { SourceLinkSection, type SourceLinkSectionProps } from "./SourceLinkSection"
+import {
+  adoptedFilesAwaitingIdmlAlignment,
+  resetAdoptedIdmlAlignmentForTests,
+} from "@/lib/idml/link-adopted-align"
 
 const addLinkedSourceFiles = vi.fn()
 const stopLinkedSourceFiles = vi.fn()
@@ -614,6 +618,10 @@ describe("'Choose files' — replacing the source of a file already here (AQU-16
       { upstreamFileId: "up-LUK", fileId: "own-luk" },
     ])
     await waitFor(() => expect(onFilesAdded).toHaveBeenCalledTimes(1))
+    // The file now takes its source from the link; the workspace places an IDML
+    // file's kept translations into that source (useAdoptedIdmlAlignment).
+    expect(adoptedFilesAwaitingIdmlAlignment(PROJECT_ID)).toEqual(["own-luk"])
+    resetAdoptedIdmlAlignmentForTests()
   })
 
   // WHY: sharing a name is not sharing content; and turning the option off must

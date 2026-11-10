@@ -104,6 +104,13 @@ export interface AgentProposal {
   runId: string
   events: StagedEvent[]         // resolved: real UUIDs, real parentId/sourceEventId
   summary: string               // human line: "Draft 12 cells in MRK 4"
+  /**
+   * AQU-2398: the events are mutually-exclusive ALTERNATIVE wordings of one
+   * cell, not a set of changes to apply together. The reviewer picks exactly
+   * one and the rest are discarded unwritten (AlternativesCard). Additive and
+   * optional: absent on every ordinary proposal, and on a pre-AQU-2398 server.
+   */
+  alternatives?: boolean
 }
 
 export interface StagedEvent {

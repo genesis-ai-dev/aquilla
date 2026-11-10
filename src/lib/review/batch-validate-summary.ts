@@ -27,6 +27,19 @@
  * untouched, so a second pass includes it either way. `notChosen` is the
  * same kind of account for the "ready for your check" box left unticked.
  *
+ * AQU-2507: `cap` is no longer a per-CLICK ceiling on the file-wide run. It is
+ * the size of one chunk, and the run loops over `chunksOf(…)` until the file is
+ * done, so a reviewer accepting five pretranslated books clicks once per file
+ * rather than once per 500 cells. `cappedOut` therefore only ever fills for a
+ * caller that still asks to stop at a cap; `workspaceBatchValidateOptions` no
+ * longer does, and the confirmation dialog promises the whole eligible count.
+ *
+ * AQU-2507 also adds the `flagged` bucket: cells a check or rule has flagged
+ * are left out by default and offered as an explicit opt-in, because
+ * validation is human authority — a reviewer signing off text that was
+ * approved outside Aquilla may overrule a mechanical flag — but it has to be a
+ * choice they make, not one the batch makes for them.
+ *
  * So the eligibility split and the reason each cell was skipped are computed
  * once, here, as plain data: both surfaces render the same words and emit the
  * same telemetry, and the guard branches are unit-testable without React.
@@ -60,6 +73,7 @@ export interface BatchValidateCandidate {
 export type BatchValidateSkipReason =
   | "needsTranslation"
   | "aiDraft"
+  | "flagged"
   | "alreadyMine"
   | "ownEdit"
   | "outOfScope"
@@ -69,6 +83,7 @@ export type BatchValidateSkipReason =
 export const BATCH_VALIDATE_SKIP_REASONS: readonly BatchValidateSkipReason[] = [
   "needsTranslation",
   "aiDraft",
+  "flagged",
   "alreadyMine",
   "ownEdit",
   "outOfScope",
@@ -98,9 +113,13 @@ export interface BatchValidateSummary {
   skips: BatchValidateSkips
   skippedTotal: number
   /**
-   * Cells dropped purely by the per-run cap rather than by eligibility. Capped
-   * cells are still validatable — the user just has to run again — so they are
-   * deliberately NOT a skip reason.
+   * Cells dropped purely by a caller-requested cap rather than by eligibility.
+   * Capped cells are still validatable — the user just has to run again — so
+   * they are deliberately NOT a skip reason.
+   *
+   * AQU-2507: the file-wide run no longer asks for a cap. It chunks instead
+   * (`chunksOf`) and loops to completion, so this is 0 on that path and the
+   * dialog can promise the number the whole run will deliver.
    */
   cappedOut: number
   outcome: BatchValidateOutcome
@@ -119,6 +138,7 @@ function emptySkips(): BatchValidateSkips {
   return {
     needsTranslation: 0,
     aiDraft: 0,
+    flagged: 0,
     alreadyMine: 0,
     ownEdit: 0,
     outOfScope: 0,
@@ -158,7 +178,10 @@ export interface SummarizeOptions {
   myScopes: MemberScope[]
   activeLane: string
   /**
-   * AQU-586: the project's per-run cap on eligible cells. 0/undefined = no cap.
+   * AQU-586: a hard ceiling on how many eligible cells this summary returns.
+   * 0/undefined = no cap. AQU-2507: the file-wide run stopped asking for one —
+   * it chunks and loops instead — so this is only for a caller that genuinely
+   * wants one summary to stop short.
    */
   cap?: number | null
   /** False when the caller cannot validate text at all: their role, or the
@@ -185,6 +208,18 @@ export interface SummarizeOptions {
    * Unticked cells are `notChosen`, not a refusal.
    */
   includeReadyCells?: boolean
+  /**
+   * AQU-2507: does this cell carry an open (non-waived) check or rule flag?
+   * Absent means "ask nothing" — the selection toolbar does not, so a reviewer
+   * who picked flagged lines by hand still signs them off.
+   */
+  hasOpenFlags?: (cellId: string) => boolean
+  /**
+   * AQU-2507: the "Also validate N cells with open check flags" opt-in.
+   * Default (absent/false) leaves them out and REPORTS them, because
+   * overruling a check is a decision a reviewer makes deliberately.
+   */
+  includeFlaggedCells?: boolean
 }
 
 export function summarizeBatchValidate(
@@ -196,6 +231,8 @@ export function summarizeBatchValidate(
     noPermissionReason = "role",
     includeUntouchedAiDrafts = true,
     includeReadyCells = true,
+    hasOpenFlags,
+    includeFlaggedCells = false,
   } = options
   const skips = emptySkips()
 
@@ -220,6 +257,13 @@ export function summarizeBatchValidate(
     }
     if (!untouched && !includeReadyCells) {
       skips.notChosen++
+      continue
+    }
+    // AQU-2507: asked last of the choices, so a cell that is both an untouched
+    // AI draft and flagged is reported under the box the reader can see rather
+    // than under a second one explaining the same cell twice.
+    if (!includeFlaggedCells && hasOpenFlags?.(cell.id)) {
+      skips.flagged++
       continue
     }
     eligible.push(cell)
@@ -266,7 +310,10 @@ export function workspaceBatchValidateOptions(args: {
     username,
     myScopes,
     activeLane,
-    cap: project?.completionSettings?.validationBatchSize,
+    // AQU-2507: no `cap`. The project's `validationBatchSize` is the run's
+    // CHUNK size now (`batchValidateChunkSize`), not a ceiling that strands the
+    // rest of the file for another click, so the summary this builds describes
+    // every eligible cell in the file.
     // The server enforces the project's minimum role and named-validator list
     // on every vote; a reader they exclude gets the no-permission outcome
     // instead of a batch of refusals.
@@ -277,6 +324,41 @@ export function workspaceBatchValidateOptions(args: {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Chunking — one user action, as many writes as the file needs (AQU-2507)
+// ---------------------------------------------------------------------------
+
+/**
+ * The chunk size a run falls back to when the project configures none.
+ *
+ * The reported ceiling was ~500 and the event pipeline handled it, so 500 is
+ * kept as the batch the run writes and flushes at a time. The difference is
+ * that reaching it is no longer the end of the run.
+ */
+export const BATCH_VALIDATE_CHUNK_FALLBACK = 500
+
+/** The project's batch size as a CHUNK size: a positive integer, always. */
+export function batchValidateChunkSize(size: number | null | undefined): number {
+  if (typeof size !== "number" || !Number.isFinite(size) || size <= 0) {
+    return BATCH_VALIDATE_CHUNK_FALLBACK
+  }
+  return Math.max(1, Math.floor(size))
+}
+
+/**
+ * The run's writes, split into chunks of `size` in candidate order.
+ *
+ * Every cell appears in exactly one chunk, so looping over the result does the
+ * whole of `cells` — the property the old per-click cap broke. An empty input
+ * yields no chunks, so a caller's `for` loop body never runs on nothing.
+ */
+export function chunksOf<T>(cells: readonly T[], size: number): T[][] {
+  const step = batchValidateChunkSize(size)
+  const chunks: T[][] = []
+  for (let at = 0; at < cells.length; at += step) chunks.push(cells.slice(at, at + step))
+  return chunks
+}
+
 /**
  * The properties every batch-validate attempt reports, whatever its outcome.
  * A no-op attempt is exactly the case this surface could not previously prove,
@@ -285,6 +367,12 @@ export function workspaceBatchValidateOptions(args: {
 export function batchValidateTelemetry(
   summary: BatchValidateSummary,
   source: "selection" | "workspace-action",
+  /**
+   * AQU-2507: how the run actually went — the eligible total it set out to do,
+   * the chunk size it wrote in, how many chunks that took, and whether the
+   * reader opted flagged cells in. Absent on a surface that does not chunk.
+   */
+  run?: { chunks: number; chunkSize: number; includedFlagged: boolean },
 ): Record<string, string | number> {
   return {
     source,
@@ -292,6 +380,15 @@ export function batchValidateTelemetry(
     validated_count: summary.validatable.length,
     skipped_count: summary.skippedTotal,
     capped_out_count: summary.cappedOut,
+    skipped_flagged: summary.skips.flagged,
+    ...(run
+      ? {
+        eligible_total: summary.validatable.length,
+        chunk_count: run.chunks,
+        chunk_size: run.chunkSize,
+        included_flagged: run.includedFlagged ? 1 : 0,
+      }
+      : {}),
     skipped_needs_translation: summary.skips.needsTranslation,
     skipped_already_mine: summary.skips.alreadyMine,
     skipped_own_edit: summary.skips.ownEdit,
@@ -334,6 +431,7 @@ type JoinList = (items: readonly string[]) => string
 const SKIP_MESSAGE_KEY: Record<BatchValidateSkipReason, MessageKey> = {
   needsTranslation: "editor.batchValidate.skip.needsTranslation",
   aiDraft: "editor.batchValidate.skip.aiDraft",
+  flagged: "editor.batchValidate.skip.flagged",
   alreadyMine: "editor.batchValidate.skip.alreadyMine",
   ownEdit: "editor.batchValidate.skip.ownEdit",
   outOfScope: "editor.batchValidate.skip.outOfScope",
@@ -447,15 +545,17 @@ export function batchValidateToast(
  *
  *     validatable.length + skippedTotal + cappedOut === candidates.length
  *
- * `cap` is passed separately from the summary because the cap NOTE has to
- * appear whenever the project configures a cap — explaining why a second run
- * may be needed — even on a run the cap happens not to trim.
+ * AQU-2507: the trailing note used to say "at most {cap} per run; run again to
+ * continue", which is the behavior this ticket removes. `chunkSize` is passed
+ * separately from the summary so the note can say the opposite — that the run
+ * saves in batches of that size and keeps going — on exactly the runs big
+ * enough for the reader to wonder.
  */
 export function batchValidateConfirmDescription(
   summary: BatchValidateSummary,
   t: Translate,
   joinList: JoinList,
-  cap?: number | null,
+  chunkSize?: number | null,
 ): string {
   // The dead-end outcomes borrow the toast's wording rather than mint a second
   // phrasing for "your role cannot do this" in the nav namespace.
@@ -470,9 +570,9 @@ export function batchValidateConfirmDescription(
       break
   }
 
-  // Cells the CAP held back are left out of this clause and accounted for by
-  // the cap note below instead — they are deferred, not skipped, and the note
-  // is where the dialog explains that running again picks them up.
+  // `includeCappedOut: false` because a cap the file-wide run no longer asks
+  // for cannot hold anything back here; a caller that does ask for one explains
+  // it in its own words.
   const clauses = batchValidateSkipClauses(summary, t, BATCH_VALIDATE_SKIP_REASONS, false)
   const skippedClause =
     clauses.length > 0
@@ -486,18 +586,20 @@ export function batchValidateConfirmDescription(
       : ""
 
   if (summary.outcome === "nothing-eligible") {
-    // No cap note here: a cap that trims nothing from an empty eligible set is
-    // not why this run will do nothing, and saying so would read as the reason.
+    // No chunk note here: how a run would be written is not why it will do
+    // nothing, and saying so would read as the reason.
     return t("nav.workspaceActions.batchValidate.nothingToValidate") + skippedClause
   }
 
-  const capNote =
-    typeof cap === "number" && cap > 0
-      ? t("nav.workspaceActions.batchValidate.capNote", { cap })
-      : ""
+  // AQU-2507: only on a run that will take more than one chunk. On a 40-cell
+  // file the sentence would raise a question the reader did not have.
+  const chunk = batchValidateChunkSize(chunkSize)
+  const chunkNote = summary.validatable.length > chunk
+    ? t("nav.workspaceActions.batchValidate.runsToCompletion", { cap: chunk })
+    : ""
   return (
     t("nav.workspaceActions.batchValidate.willValidate", { count: summary.validatable.length })
     + skippedClause
-    + capNote
+    + chunkNote
   )
 }

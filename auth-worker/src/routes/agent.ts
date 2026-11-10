@@ -266,6 +266,7 @@ function buildTools(bibleResourcesEnabled: boolean) {
             cellIds: { type: "array", items: { type: "string" }, description: "Draft exactly these cells (ids or #c-aliases) instead of every untranslated cell in scope." },
             limit: { type: "number", description: "Max cells this call (default 10, cap 10)." },
             instructions: { type: "string", description: "Directions for this run only (tone, term choices, fixes from lint) — on top of the project instructions, which every draft already carries." },
+            alternatives: { type: "number", description: "Draft 2-5 ALTERNATIVE wordings of ONE cell for the user to compare and pick from, instead of one draft each for a batch. Use it when they ask for options/versions/another way to word a line. Needs a single cell: pass that one cell in cellIds (or a ref that resolves to it). The user picks one in the app and the rest are discarded, so do not tell them the cell is drafted." },
           },
         },
       },

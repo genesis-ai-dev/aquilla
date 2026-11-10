@@ -31,6 +31,7 @@ import {
   kinTermsProblem,
   measuresProblem,
   negatorsProblem,
+  numberFormatProblem,
   numberWordsProblem,
   pronounsProblem,
   punctuationProblem,
@@ -41,6 +42,7 @@ import {
   type HeadingPolicy,
   type KinTermsProfile,
   type MeasuresStrategy,
+  type NumberFormatProfile,
   type NumberWordsProfile,
   type PronounsProfile,
   type PunctuationProfile,
@@ -53,6 +55,7 @@ export type {
   HeadingPolicy,
   KinTermsProfile,
   MeasuresStrategy,
+  NumberFormatProfile,
   NumberWordsProfile,
   PronounsProfile,
   PunctuationProfile,
@@ -95,6 +98,8 @@ export interface LanguageProfile {
   pronouns?: PronounsProfile
   negators?: string[]
   numberWords?: NumberWordsProfile
+  /** AQU-2430: the separators this language groups and fractions numbers with. */
+  numberFormat?: NumberFormatProfile
   speechVerbs?: string[]
   kinTerms?: KinTermsProfile
   divineNames?: DivineNamesProfile
@@ -145,6 +150,7 @@ const SLOT_PROBLEMS: Readonly<Record<LanguageProfileSlot, (value: unknown) => st
   pronouns: pronounsProblem,
   negators: negatorsProblem,
   numberWords: numberWordsProblem,
+  numberFormat: numberFormatProblem,
   speechVerbs: speechVerbsProblem,
   kinTerms: kinTermsProblem,
   divineNames: divineNamesProblem,

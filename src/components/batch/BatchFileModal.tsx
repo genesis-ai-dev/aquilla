@@ -4,6 +4,9 @@
  * The counts are this file. The reader ticks what the run should touch.
  * Untouched AI drafts stay out of validation unless a reviewer or project
  * lead includes them; a contributor sees that box disabled and the reason.
+ *
+ * AQU-2507: cells with an open check flag get the same treatment — counted,
+ * named, left out by default, and taken only when the reader ticks the box.
  */
 import { useEffect, useMemo, useState } from "react"
 import { Button } from "@/components/ui/button"
@@ -43,6 +46,9 @@ interface BatchFileModalProps {
   canIncludeUntouchedAi: boolean
   validateCandidates: readonly BatchValidateCandidate[]
   validateOptions: SummarizeOptions
+  /** AQU-2507: how many cells one batch of the run saves. Drives the note that
+   *  tells the reader the single click finishes the file. */
+  chunkSize: number
   draftCells: readonly DraftChoiceCell[]
   onConfirmValidate: (choices: ValidateRunChoices) => void
   onConfirmDraft: (choices: DraftRunChoices) => void
@@ -53,6 +59,7 @@ export function BatchFileModal({
   onOpenChange,
   request,
   batchSize,
+  chunkSize,
   canIncludeUntouchedAi,
   validateCandidates,
   validateOptions,
@@ -64,6 +71,7 @@ export function BatchFileModal({
   const { list } = useFormat()
   const [includeReady, setIncludeReady] = useState(true)
   const [includeAi, setIncludeAi] = useState(false)
+  const [includeFlagged, setIncludeFlagged] = useState(false)
   const [includeEmpty, setIncludeEmpty] = useState(true)
   const [refreshAi, setRefreshAi] = useState(false)
   const [scope, setScope] = useState<"next" | "all">(request.kind === "draft" ? request.scope : "all")
@@ -72,21 +80,29 @@ export function BatchFileModal({
     if (!open) return
     setIncludeReady(true)
     setIncludeAi(false)
+    setIncludeFlagged(false)
     setIncludeEmpty(true)
     setRefreshAi(false)
     setScope(request.kind === "draft" ? request.scope : "all")
   }, [open, request])
 
   const validateGroups = useMemo(() => {
+    // AQU-2507: `includeFlaggedCells: true` here so the GROUPS see every
+    // eligible cell. The boxes below are built from this open set; counting
+    // them with the default (flagged excluded) would hide the very cells the
+    // flagged box exists to offer.
     const openSet = summarizeBatchValidate(validateCandidates, {
       ...validateOptions,
       cap: undefined,
       includeReadyCells: true,
       includeUntouchedAiDrafts: true,
+      includeFlaggedCells: true,
     })
+    const isFlagged = validateOptions.hasOpenFlags
     return {
       ready: openSet.validatable.filter((cell) => !isUntouchedAiDraft(cell)),
       untouched: openSet.validatable.filter((cell) => isUntouchedAiDraft(cell)),
+      flagged: isFlagged ? openSet.validatable.filter((cell) => isFlagged(cell.id)) : [],
       blocked: openSet.outcome === "no-permission" || openSet.outcome === "no-target",
       blockedSummary: openSet,
     }
@@ -96,7 +112,8 @@ export function BatchFileModal({
     ...validateOptions,
     includeReadyCells: includeReady,
     includeUntouchedAiDrafts: canIncludeUntouchedAi && includeAi,
-  }), [validateCandidates, validateOptions, includeReady, includeAi, canIncludeUntouchedAi])
+    includeFlaggedCells: includeFlagged,
+  }), [validateCandidates, validateOptions, includeReady, includeAi, canIncludeUntouchedAi, includeFlagged])
 
   const draftGroups = useMemo(() => classifyBatchDraft(draftCells), [draftCells])
   const draftChoices = useMemo<DraftRunChoices>(() => ({
@@ -123,8 +140,10 @@ export function BatchFileModal({
       ? noPermissionMessage(validateGroups.blockedSummary, t)
       : t("editor.batchValidate.noTarget")
   } else if (request.kind === "validate") {
+    // AQU-2507: the fourth argument is the run's CHUNK size, not a ceiling —
+    // the note it drives says the run finishes the file.
     description = batchValidateConfirmDescription(
-      validatePreview, t, list, validateOptions.cap,
+      validatePreview, t, list, chunkSize,
     )
     canConfirm = validatePreview.validatable.length > 0
   } else if (draftSelected.length === 0) {
@@ -165,6 +184,15 @@ export function BatchFileModal({
                 help={canIncludeUntouchedAi
                   ? t("editor.batchFile.aiDraftsHelp")
                   : t("editor.batchFile.aiDraftsLocked")}
+              />
+            )}
+            {validateGroups.flagged.length > 0 && (
+              <OptionRow
+                id="batch-file-flagged"
+                checked={includeFlagged}
+                onCheckedChange={setIncludeFlagged}
+                label={t("editor.batchFile.flagged", { count: validateGroups.flagged.length })}
+                help={t("editor.batchFile.flaggedHelp")}
               />
             )}
           </FieldSet>
@@ -235,6 +263,7 @@ export function BatchFileModal({
                   onConfirmValidate({
                     includeReadyCells: includeReady,
                     includeUntouchedAiDrafts: canIncludeUntouchedAi && includeAi,
+                    includeFlaggedCells: includeFlagged,
                   })
                 } else {
                   onConfirmDraft(draftChoices)

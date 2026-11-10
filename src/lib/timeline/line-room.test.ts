@@ -656,6 +656,44 @@ describe("the same rule everywhere (siblings)", () => {
     expect(moved.targetPieces?.map((p) => p.atSec)).toEqual([0, 2])
   })
 
+  // AQU-2432 (review, Nov 9): a hidden line stays hidden — no marker — so a
+  // drag must not be able to change it silently: looking for the empty line
+  // to narrow, it passes over hidden lines. A room a hidden line already has
+  // stored still lays it out exactly as before (it keeps its place and
+  // length, faded, like any hidden line).
+  describe("hidden lines", () => {
+    const hide = (c: CellData) => ({ ...c, hidden: true }) as CellData
+
+    it("a drag against a hidden empty line changes no room: the take stops at its own line's start", () => {
+      const cells = [bookLine("a", { take: { durationMs: 5_000 } }), hide(bookLine("b")), bookLine("c", { take: { durationMs: 6_000 } })]
+      const layout = layoutOf(cells)
+      expect(layout.moveBounds(cells[2], cells[2].attachments?.[takeId("c")], takeId("c"))?.roomFloorSec).toBeUndefined()
+      const { rooms, to } = drag(cells, "c", 6)
+      expect(to).toBe(9)
+      expect(rooms).toBeNull()
+    })
+
+    it("past a hidden empty line, the empty line before it is the one narrowed, and the hidden one keeps its width", () => {
+      const cells = [bookLine("a", { take: { durationMs: 5_000 } }), bookLine("b"), hide(bookLine("h")), bookLine("c", { take: { durationMs: 6_000 } })]
+      expect(spans(cells)).toEqual([[0, 5], [5, 9], [9, 13], [13, 19]])
+      expect(drag(cells, "c", 11).rooms).toEqual([{ cellId: "b", roomMs: 2_000 }])
+      const all = drag(cells, "c", 0)
+      expect(all.to).toBe(9) // a's end, plus the hidden line's 4 s
+      expect(all.rooms).toEqual([{ cellId: "b", roomMs: 0 }])
+      expect(spans(withRooms(cells, all.rooms!))).toEqual([[0, 5], [5, 5], [5, 9], [9, 15]])
+      // Giving room back passes over it too.
+      expect(drag(withRooms(cells, all.rooms!), "c", 11).rooms).toEqual([{ cellId: "b", roomMs: 2_000 }])
+    })
+
+    it("a room a hidden line already has still lays it out as it did; a drag neither changes nor clears it", () => {
+      const cells = [bookLine("a", { take: { durationMs: 5_000 } }), hide(bookLine("h", { roomMs: 1_000 })), bookLine("c", { take: { durationMs: 6_000 } })]
+      expect(spans(cells)).toEqual([[0, 5], [5, 6], [6, 12]])
+      expect(drag(cells, "c", 9).rooms).toBeNull()
+      const stale = [bookLine("a", { take: { durationMs: 5_000 } }), hide(bookLine("h", { roomMs: 60_000 })), bookLine("c", { take: { durationMs: 6_000 } })]
+      expect(drag(stale, "c", 11).rooms).toBeNull()
+    })
+  })
+
   it("a line with nothing at all (no words, no original) has a room like any other", () => {
     const cells = [bookLine("a", { take: { durationMs: 5_000 } }), bookLine("b", { words: "" }), bookLine("c", { take: { durationMs: 6_000 } })]
     const natural = layOutProgramme(cells).programme.slots[1].slotLenSec

@@ -1144,6 +1144,8 @@ export interface RoomMove {
   takeStartSec: number
 }
 
+const NO_HIDDEN: ReadonlySet<string> = new Set()
+
 /** AQU-2432: the unrecorded lines directly before `slot`, nearest first. */
 function unrecordedRunBefore(prog: Programme, slot: ProgrammeSlot): ProgrammeSlot[] {
   const run: ProgrammeSlot[] = []
@@ -1159,9 +1161,19 @@ function unrecordedRunBefore(prog: Programme, slot: ProgrammeSlot): ProgrammeSlo
  * overlap that recorded take across the empty lines. Null when the line
  * before is recorded (or there is none): no room to close.
  */
-export function roomFloorSec(prog: Programme, slot: ProgrammeSlot): number | null {
+export function roomFloorSec(
+  prog: Programme,
+  slot: ProgrammeSlot,
+  hiddenCellIds: ReadonlySet<string> = NO_HIDDEN,
+): number | null {
   const run = unrecordedRunBefore(prog, slot)
-  return run.length > 0 ? run[run.length - 1].startSec : null
+  // AQU-2432 (review, Nov 9): a hidden line is never narrowed by a drag (it
+  // has no marker to show it), so it keeps its width; with nothing but hidden
+  // lines before the take there is no room to close.
+  if (!run.some((line) => !hiddenCellIds.has(line.cellId))) return null
+  let floor = run[run.length - 1].startSec
+  for (const line of run) if (hiddenCellIds.has(line.cellId)) floor += line.slotLenSec
+  return floor
 }
 
 /**
@@ -1194,8 +1206,11 @@ export function roomsForMove(
   slot: ProgrammeSlot,
   fromStartSec: number,
   toStartSec: number,
+  /** AQU-2432 (review, Nov 9): the lines the person has hidden. A drag passes
+   *  over them, looking for the empty line to narrow (`roomFloorSec`). */
+  hiddenCellIds: ReadonlySet<string> = NO_HIDDEN,
 ): RoomMove | null {
-  const run = unrecordedRunBefore(prog, slot)
+  const run = unrecordedRunBefore(prog, slot).filter((line) => !hiddenCellIds.has(line.cellId))
   if (run.length === 0) return null
   const delta = toStartSec - fromStartSec
   // A nudge under the wobble writes nothing at all.

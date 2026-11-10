@@ -30,6 +30,7 @@ import {
 } from "./programme"
 import { isDefaultTrackSlot } from "./track-slots"
 import type { CellData } from "@/hooks/useCells"
+import { isHiddenCell } from "@/lib/cells/hidden"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import type { AudioTimingMode } from "@/lib/parsers/types"
 
@@ -192,6 +193,9 @@ function audioFirstLayout(
 ): TimelineLayout {
   const programme = buildProgramme(dialogue, opts)
   const slotOf = (cell: CellData): ProgrammeSlot | null => programme.byCellId.get(cell.id) ?? null
+  /** AQU-2432 (review, Nov 9): the hidden lines, which a drag never narrows. */
+  let hiddenIds: ReadonlySet<string> | null = null
+  const hiddenOf = (): ReadonlySet<string> => (hiddenIds ??= new Set(dialogue.filter(isHiddenCell).map((c) => c.id)))
   /** AQU-2432: the line before a line, for the start of the take before it. */
   let indexById: Map<string, number> | null = null
   const prevSlotOf = (slot: ProgrammeSlot): ProgrammeSlot | null => {
@@ -429,7 +433,7 @@ function audioFirstLayout(
       if (at > 0) return { floorSec: slot.startSec + placed[at - 1].atSec, ceilSec: after }
       // AQU-2432 (Sam, Nov 9): against an unrecorded line the take's own place
       // stops at its line's start; the drag may go on, closing that line's room.
-      const roomFloor = roomFloorSec(programme, slot)
+      const roomFloor = roomFloorSec(programme, slot, hiddenOf())
       return {
         floorSec: pullFloorSec(prevSlotOf(slot), layer ? layer.slot : null),
         ceilSec: after,
@@ -445,7 +449,7 @@ function audioFirstLayout(
       // the pieces either side of it, inside its own line.
       const at = layer ? trackPiecesOf(slot, layer).indexOf(layer) : pieceIndexOf(slot, trimStartOf(att))
       if (at > 0) return null
-      return roomsForMove(programme, slot, fromStartSec, toStartSec)
+      return roomsForMove(programme, slot, fromStartSec, toStartSec, hiddenOf())
     },
   }
 }

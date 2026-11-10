@@ -1857,8 +1857,11 @@ export const editor = defineNamespace({
     // between languages. The `{placeholder}` names say what each hole holds.
 
     // — Import audio VTT dialog ————————————————————————————————
-    "editor.timeline.audioVttTitleReplace": "Replace the audio VTT",
-    "editor.timeline.audioVttTitleNew": "Import an audio VTT",
+    // AQU-2253 (browser pass, Nov 9): the dialog's title and its Remove button
+    // name the track as the Sources menu and the toasts do, "Source cues" (Sam,
+    // Oct 30). "Audio VTT" stays where it names the file you pick.
+    "editor.timeline.audioVttTitleReplace": "Replace the Source cues",
+    "editor.timeline.audioVttTitleNew": "Import Source cues",
     "editor.timeline.audioVttDescription":
       "The cues become a read-only Source cues track on this file's timeline — " +
       "the transcript of what is said in the film, on the film's own timings. The " +
@@ -1928,7 +1931,7 @@ export const editor = defineNamespace({
       "The track goes to Recently deleted, so a project lead can put it back — or " +
       "you can import an audio VTT again afterwards.",
     "editor.timeline.audioVttRemoveGo": "Remove the cues",
-    "editor.timeline.audioVttRemove": "Remove audio cues",
+    "editor.timeline.audioVttRemove": "Remove the Source cues",
     "editor.timeline.audioVttImport": "Import cues",
     "editor.timeline.audioVttNothingToUpdate": "Nothing to update",
     "editor.timeline.audioVttUpdateCues": plural({ one: "Update {count} cue", other: "Update {count} cues" }),

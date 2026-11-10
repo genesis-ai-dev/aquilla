@@ -37,4 +37,18 @@ describe("sentences that match the app (AQU-2259)", () => {
     expect(description).not.toMatch(/Following the recordings, the film plays with its own sound/)
     expect(description).toMatch(/you hear that recording and the film is muted, whether the file follows its source or its recordings/)
   })
+
+  it("the Source cues dialog names the track as the Sources menu and its toasts do (AQU-2253, browser pass Nov 9)", () => {
+    // The menu row (Sam, Oct 30) and the import and removal toasts say
+    // "Source cues"; the dialog they open still said "Import an audio VTT",
+    // "Replace the audio VTT" and "Remove audio cues".
+    const track = t("editor.timeline.menuAudioCues")
+    expect(t("editor.timeline.audioCuesRemoving")).toContain(track)
+    const words = (["editor.timeline.audioVttTitleNew", "editor.timeline.audioVttTitleReplace", "editor.timeline.audioVttRemove"] as const)
+      .map((key) => t(key))
+    for (const said of words) {
+      expect(said).toContain(track)
+      expect(said).not.toMatch(/audio VTT|audio cues/)
+    }
+  })
 })

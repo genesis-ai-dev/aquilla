@@ -27,4 +27,14 @@ describe("sentences that match the app (AQU-2259)", () => {
     expect(description).toMatch(/uploaded recording/)
     expect(description).toMatch(/film on YouTube keeps its own sound/)
   })
+
+  it("Link a film's (i) says an uploaded recording is what plays in both timings (AQU-2253, browser pass Nov 9)", () => {
+    // Since the review's film fix 1, following the recordings a streamed film
+    // beside an uploaded recording is silent and the recording plays, as it
+    // does following the source. The (i) still said the film's own sound
+    // played there.
+    const description = t("editor.timeline.linkVideoMore")
+    expect(description).not.toMatch(/Following the recordings, the film plays with its own sound/)
+    expect(description).toMatch(/you hear that recording and the film is muted, whether the file follows its source or its recordings/)
+  })
 })

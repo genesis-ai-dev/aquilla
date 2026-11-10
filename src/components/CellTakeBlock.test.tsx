@@ -287,6 +287,25 @@ describe("trimming in place", () => {
     })
   })
 
+  // AQU-2495 (review, Nov 9): a take's clip may now start before 0:00, but
+  // its sound may not (playback skips it, and the audio exports pull it to
+  // 0:00). The start line comes back only as far as the file's start, as the
+  // timeline's left trim handle does.
+  it("the start line stops where the take's sound would start before the file", () => {
+    const owner = { ...cueOwner(), startTime: 1, endTime: 3 } as CellData
+    const id = owner.selectedAudioId!
+    // Its clip starts 1 s before 0:00 (1 s - 2 s); 1.5 s trimmed off, so it sounds from 0:00.5.
+    owner.attachments![id] = { ...owner.attachments![id], durationMs: 3000, trimStartMs: 1500, targetOffsetMs: -2000 } as never
+    draw({ owner })
+    sized()
+    const line = screen.getByRole("slider", { name: /start of the kept audio/i })
+    // From where it is (1.5 s, 200px) back to 0.3 s: it stops at 1 s, 0:00 in the file.
+    fireEvent.pointerDown(line, { clientX: 200, buttons: 1 })
+    fireEvent.pointerMove(line, { clientX: 40, buttons: 1 })
+    fireEvent.pointerUp(line, { clientX: 40 })
+    expect(trimEmits.at(-1)).toMatchObject({ audioId: id, trimStartMs: 1000 })
+  })
+
   it("saves nothing when a line is clicked but not moved", () => {
     draw()
     sized()

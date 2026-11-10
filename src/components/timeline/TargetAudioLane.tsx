@@ -47,6 +47,7 @@ import {
   chipOverlaps,
   chipTrespass,
   dualFaultMeetSec,
+  earliestSoundSec,
   maxAudibleStartSec,
   minAudibleEndSec,
   MIN_TARGET_LEN_SEC,
@@ -605,10 +606,10 @@ function TargetAudioChip({
       // line's main take; a layer's sample zero can sit before its line, and
       // its head trim comes back off only as far as the line's start.
       // AQU-2495 (review, Nov 9): …nor back past the start of the file — the
-      // clip's start can sit before it now, and its sound must not.
+      // clip's start can sit before it now, and its sound must not. The
+      // Station's Start and the Recording tab hold to the same rule.
       const lo = Math.max(
-        geom.anchor,
-        0,
+        earliestSoundSec(geom.anchor),
         freeRules ? section.start : -Infinity,
         prevChip?.start ?? -Infinity,
         pieceLimits?.minStartMs != null ? geom.anchor + pieceLimits.minStartMs / 1000 : -Infinity,

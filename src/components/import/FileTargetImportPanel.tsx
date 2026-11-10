@@ -391,7 +391,7 @@ const ReviewRow = memo(function ReviewRow({
         {/* Everything to check about a row sits in its corner. "Contested"
             opens the comparison below; a timing pill means only the line's
             own timing is kept. */}
-        {(rivals || m.flag === "sharedTiming" || m.flag === "sourceDiffers" || m.cellRef) && (
+        {(rivals || m.flag === "sharedTiming" || m.flag === "sourceDiffers" || m.flag === "bridged" || m.cellRef) && (
           <div className="flex shrink-0 flex-wrap justify-end gap-1">
             {rivals && (
               <Badge
@@ -428,6 +428,21 @@ const ReviewRow = memo(function ReviewRow({
               <NoteOnClick note={t("importExport.review.rowSourceDiffers")}>
                 <Badge className={AMBER_PILL}>
                   {t("importExport.review.rowSourceDiffersPill")}
+                </Badge>
+              </NoteOnClick>
+            )}
+            {/* A bridge the file keeps apart: the whole bridged text goes on
+                the range's first line, and the note names the range so the
+                anchoring is never silent (AQU-2508). */}
+            {m.flag === "bridged" && m.bridgedOver && (
+              <NoteOnClick
+                note={t("importExport.review.rowBridged", {
+                  first: m.bridgedOver.first,
+                  last: m.bridgedOver.last,
+                })}
+              >
+                <Badge className={AMBER_PILL}>
+                  {t("importExport.review.rowBridgedPill")}
                 </Badge>
               </NoteOnClick>
             )}
@@ -712,7 +727,9 @@ export function FileTargetImportPanel({
         : result.matched
           // A same-timing pair whose cues all found a line is a heads-up, not
           // a decision: ticked, with its pill and a Swap (Sam, 09-23).
-          .filter((m) => !m.hasConflict && !m.alreadyThere && m.flag !== "contested" && m.flag !== "sourceDiffers" && !m.sharedTimingUnpaired)
+          // A bridged row (AQU-2508) is an anchoring decision, not a plain
+          // pairing: it starts unticked like a contest or a differing source.
+          .filter((m) => !m.hasConflict && !m.alreadyThere && m.flag !== "contested" && m.flag !== "sourceDiffers" && m.flag !== "bridged" && !m.sharedTimingUnpaired)
           .map((m) => m.cellId),
     ))
     setStep("review")
@@ -1157,7 +1174,12 @@ export function FileTargetImportPanel({
     // vanishes while being worked on. "Timing differs" alone is not a reason:
     // the pairing still holds, and on a shifted file every row has it.
     const toCheck = matched.filter(
-      (m) => m.flag === "contested" || m.flag === "sharedTiming" || m.flag === "sourceDiffers" || m.hasConflict,
+      (m) =>
+        m.flag === "contested" ||
+        m.flag === "sharedTiming" ||
+        m.flag === "sourceDiffers" ||
+        m.flag === "bridged" ||
+        m.hasConflict,
     )
     // The counts above the list split the pairings the same way (AQU-1375):
     // "matched" are the ones that need no decision, then those to check, then

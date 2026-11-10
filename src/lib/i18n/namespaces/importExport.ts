@@ -1476,6 +1476,10 @@ export const importExport = defineNamespace({
     "importExport.review.rowTimingDiffers": "Timing differs",
     "importExport.review.rowSourceDiffersPill": "Source differs",
     "importExport.review.rowSourceDiffers": "This row's source text doesn't match the line it was paired with",
+    "importExport.review.rowBridgedPill": "Bridged verses",
+    "importExport.review.rowBridged": "The uploaded file joins verses {first}-{last} into one translation, " +
+      "but this file keeps them as separate lines. The whole text goes on verse {first}; " +
+      "the rest of the range gets no text of its own",
     "importExport.review.rowIncomingSource": "Source in this row: {text}",
     "importExport.review.rowWrittenAs": "as written: {ref}",
     "importExport.review.sourceAligned": "Paired with lines by source text. Rows whose source doesn't match their " +
@@ -4387,6 +4391,26 @@ export const importExport = defineNamespace({
           "Tooltip on the 'Source differs' pill of one row of the match-review list: " +
           "the uploaded row's original (source) text doesn't match the source text of " +
           "the line it was paired with. One sentence, no closing full stop.",
+      },
+      "importExport.review.rowBridgedPill": {
+        description:
+          "Small amber pill in the top-right corner of one row of the match-review " +
+          "list, shown when the uploaded Scripture file bridged two or more verses " +
+          "into one combined translation (Paratext writes that as '\\v 27-28') while " +
+          "the open file keeps those verses as separate lines. The row is left " +
+          "unticked. Two words, no closing full stop.",
+      },
+      "importExport.review.rowBridged": {
+        description:
+          "Tooltip on the 'Bridged verses' pill of one row of the match-review list: " +
+          "the uploaded file translated a range of verses as one piece of text, the " +
+          "open file keeps those verses apart, so the combined text is put on the " +
+          "first verse of the range and the later verses of the range are left " +
+          "without text of their own. Two or three sentences, no closing full stop.",
+        placeholders: {
+          first: "The first verse number of the bridged range, such as '27'.",
+          last: "The last verse number of the bridged range, such as '28'.",
+        },
       },
       "importExport.review.rowWrittenAs": {
         description:

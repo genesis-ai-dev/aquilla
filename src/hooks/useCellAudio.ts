@@ -28,12 +28,12 @@ import {
   subscribeActiveAudio,
 } from "@/lib/audio/audio-coordinator"
 import {
-  clipLevelOf, isMixed, joinedLevelsOf, mixElement, mixerVolume, mixerWakeWait, mixIfAwake, playUnmixed, setPlayerMuted, wakeMixer,
+  isMixed, mixElement, mixerVolume, mixerWakeWait, mixIfAwake, playUnmixed, setPlayerMuted, wakeMixer,
   type ClipLevels,
 } from "@/lib/audio/mixer"
+import { takeLevelsOf, type LevelledTake } from "@/lib/audio/take-level"
 import { getOutputContext } from "@/lib/audio/output-context"
 import { micIsHeld } from "@/lib/audio/mic-hold"
-import { selectedPieceIds } from "@/lib/sync/cell-audio-read-types"
 import type { CodexCell } from "@/lib/codex-editor/types"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
@@ -119,28 +119,12 @@ export function toRecordingSec(j: JoinedClock, x: number): number {
   return j.spans.length > 0 ? j.spans[j.spans.length - 1].end : 0
 }
 
-/** The stored fields a take's level is read from (CodexCellAttachment's). */
-interface LevelledTake {
-  gainDb?: number | null
-  fadeInMs?: number | null
-  fadeOutMs?: number | null
-  trimStartMs?: number | null
-  trimEndMs?: number | null
-  durationMs?: number | null
-  pieceOf?: string | null
-  slot?: string
-  isDeleted?: boolean
-  role?: string | null
-}
-
 /**
- * AQU-2494 (review, Nov 9): a take's volume and fades as this player plays it,
- * built by the timeline's own level code (mixer.ts), never a copy of its
- * maths. A whole take is levelled on its recording's clock. A cut take is
- * levelled piece by piece, each at its own volume and fades: on the
- * recording's clock, or on the joined clip's when its pieces play joined.
- * Null = it plays as recorded: no level set, or the imported source
- * recording, which the timeline mixes as recorded too.
+ * AQU-2494 (review, Nov 9): a take's volume and fades as this player plays it
+ * (take-level.ts, shared with the timeline's main player): a whole take on
+ * its recording's clock, a cut take piece by piece, each at its own volume
+ * and fades — on the recording's clock, or on the joined clip's when its
+ * pieces play joined. Null = it plays as recorded.
  */
 export function takeLevelFor(
   attachments: Record<string, LevelledTake> | undefined,
@@ -148,26 +132,7 @@ export function takeLevelFor(
   joined: JoinedClock | null,
   recordingSec: number,
 ): ClipLevels | null {
-  const att = audioId ? attachments?.[audioId] : undefined
-  if (!attachments || !att || att.role === "source") return null
-  const ids = selectedPieceIds(attachments, audioId)
-  if (ids.length <= 1) return clipLevelOf(att)
-  const ends = ids.map((id) => {
-    const ms = attachments[id].trimEndMs ?? attachments[id].durationMs ?? null
-    return ms != null ? ms / 1000 : recordingSec
-  })
-  // Unmeasured (a cut always has a length): as recorded, as before.
-  if (ends.some((e) => !(e > 0))) return null
-  // Each piece where it sits on the clock this player runs on.
-  const on = (sec: number) => (joined ? toJoinedSec(joined, sec) : sec)
-  let prevEnd = 0
-  return joinedLevelsOf(ids.map((id, i) => {
-    const start = on((attachments[id].trimStartMs ?? 0) / 1000)
-    const end = on(ends[i])
-    const gapBeforeSec = start - prevEnd
-    prevEnd = end
-    return { start, end, gapBeforeSec, att: attachments[id] }
-  }))
+  return takeLevelsOf(attachments, audioId, recordingSec, joined ? (sec) => toJoinedSec(joined, sec) : undefined)
 }
 
 /** AQU-1767: where playback resumes when `t` lies in a gap that does not play, or null. */

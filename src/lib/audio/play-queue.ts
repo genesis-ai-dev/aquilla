@@ -26,6 +26,7 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import { claimActiveAudio, clearActiveAudioIf, getActiveAudio, type ActiveAudioController } from "./audio-coordinator"
 import { t } from "@/lib/i18n/standalone"
 import { clipLevelOf, joinedLevelsOf, mixElement, playUnmixed, setMixerVolume, setPlayerVolume } from "./mixer"
+import { takeLevelsOf } from "./take-level"
 import { selectQueueForFile, type QueueForFile } from "./queue-scope"
 import { isHiddenCell } from "@/lib/cells/hidden"
 
@@ -691,10 +692,15 @@ export function setQueueVolume(vol: number): void {
  * Unroutable elements (a cross-origin stream, no AudioContext) keep `volume`.
  */
 function mixLineElement(audio: HTMLAudioElement, cell: CellData | undefined, url: string | null, slot?: string): void {
-  const att = cell && url
-    ? Object.values(cell.attachments ?? {}).find((a) => a.url === url && !a.isDeleted && a.role !== "source")
+  const found = cell && url
+    ? Object.entries(cell.attachments ?? {}).find(([, a]) => a.url === url && !a.isDeleted && a.role !== "source")
     : undefined
-  const level = clipLevelOf(att)
+  const att = found?.[1]
+  // AQU-2494 (review, Nov 9): every piece of a cut take shares its URL, so
+  // the take is levelled with all its pieces, each at its own volume and
+  // fades on the recording's clock (take-level.ts) — not by whichever piece
+  // is listed first.
+  const level = found ? takeLevelsOf(cell?.attachments, found[0], 0) : null
   if (mixElement(audio, slot ?? att?.slot ?? (att ? RECORDING_SLOT : "source"), level)) audio.volume = 1
   // AQU-2494 (review, Nov 9): a stream (a take not on this device) cannot go
   // through the mixer; it carries its level on the player, as far as a

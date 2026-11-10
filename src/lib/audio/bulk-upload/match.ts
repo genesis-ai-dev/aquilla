@@ -840,20 +840,26 @@ const NOT_CUT: ReadonlyMap<number, UnmatchedReason> = new Map()
 
 /**
  * AQU-2496 (review, Nov 9): the names in a Bible book whose reference a word
- * the app doesn't know cut short, each with that word. "Ruthu sura 2 mstari 5"
- * (Swahili: chapter 2, verse 5) was read as far as "2", so a folder of Ruth's
- * verses landed as four whole-chapter recordings and 81 "duplicates". Such a
- * name is not guessed at: it is listed with the word, unread, so the
- * assistant is offered and the person can choose its line.
+ * the app doesn't know cut short, each with why it isn't read. "Ruthu sura 2
+ * mstari 5" (Swahili: chapter 2, verse 5) was read as far as "2", so a folder
+ * of Ruth's verses landed as four whole-chapter recordings and 81
+ * "duplicates". Such a name is not guessed at: it is listed with the word,
+ * unread, so the assistant is offered and the person can choose its line.
  *
  * A name is cut short when it gave ONE number, a word ended the reference,
- * and the number after that word is a verse of the chapter the name gave.
+ * and a number follows that word. It never lands on the whole chapter:
+ *   - when that number is a verse of the chapter, the name is unread;
+ *   - when it is past the chapter's end but a verse of another chapter could
+ *     be that long ("mstari 23" in Ruth 1, which has 22), it is no such verse.
  * What was read right stays read:
  *   - a name that already gave its chapter and verse ("Genesis 1-1 ENGESV
  *     2023"): two numbers were read;
- *   - a number that is no verse of the chapter ("Genesis 3 ESV 2023");
- *   - a number every such name ends with while their chapters differ, which
- *     tells no two files apart ("Ruth 1 rev 2", "Ruth 2 rev 2").
+ *   - a number no verse of the book has ("Ruth 3 ESV 2023"): a year or an
+ *     edition, so the name is the chapter;
+ *   - a version's code with its number run on ("RVR60"), or a take or a
+ *     version word and its number ("toma 2"): read-name.ts reads those.
+ * A folder of every chapter's verse 1 ends every name with the same number,
+ * so how many names share it says nothing: each is judged alone.
  */
 function cutShortByWord(fi: FileIndex, group: readonly ReadRecording[]): Map<number, UnmatchedReason> {
   const out = new Map<number, UnmatchedReason>()
@@ -861,14 +867,16 @@ function cutShortByWord(fi: FileIndex, group: readonly ReadRecording[]): Map<num
   // that doesn't fit it (read-name.ts `readDbpName`) is unread too, so it is
   // listed, and the folder's order never places it.
   for (const r of group) if (r.reading.halfFits) out.set(r.index, { code: "tooManyNumbers" })
-  const cut = group.flatMap((r) => {
+  const longest = Math.max(0, ...fi.chapterLengths.map(([, verses]) => verses))
+  for (const r of group) {
     const after = r.reading.afterWord
     const read = r.reading.numbers.filter((n) => n.marker !== "take" && n.marker !== "part")
-    if (!after || read.length !== 1 || !fi.verses.has(`${read[0].value}:${after.numbers[0]}`)) return []
-    return [{ r, chapter: read[0].value, tail: after.numbers.join(","), word: after.word }]
-  })
-  const sameTail = cut.length > 1 && cut.every((c) => c.tail === cut[0].tail) && new Set(cut.map((c) => c.chapter)).size > 1
-  if (!sameTail) for (const c of cut) out.set(c.r.index, { code: "wordBeforeNumber", word: c.word })
+    if (!after || read.length !== 1) continue
+    const chapter = read[0].value
+    const verse = after.numbers[0]
+    if (fi.verses.has(`${chapter}:${verse}`)) out.set(r.index, { code: "wordBeforeNumber", word: after.word })
+    else if (fi.chapters.has(chapter) && verse >= 1 && verse <= longest) out.set(r.index, { code: "noSuchVerse", ref: refLabel(fi, chapter, verse) })
+  }
   return out
 }
 

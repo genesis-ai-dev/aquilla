@@ -952,6 +952,42 @@ describe("a whole chapter's name with a version code, a take or a version after 
   })
 })
 
+// AQU-2496 (review, Nov 9): two kinds of verse name still landed silently as
+// whole chapters: a folder holding only verse 1 of each chapter (every name
+// ended in the same number, which read as "tells no two files apart"), and a
+// verse past its chapter's end ("mstari 23" in Ruth 1, which has 22).
+describe("a verse's name after a word the app doesn't know never lands on the whole chapter", () => {
+  const ruth = book("rut", "RUT", "Ruth", [...LAST_VERSES.RUT])
+  const swahili = () => {
+    const index = new BookNameIndex()
+    index.addProjectName("Ruthu", "RUT")
+    return index
+  }
+  const inRuth: MatchScope = { kind: "file", fileId: "rut" }
+
+  it("a folder of each chapter's first verse is listed as unread", () => {
+    const files = [1, 2, 3, 4].map((c) => audio(`Ruthu/Ruthu sura ${c} mstari 1.mp3`))
+    const { assignments, jobs } = run(files, [ruth], inRuth, swahili())
+    expect(assignments.map((a) => a.reason)).toEqual(files.map(() => ({ code: "wordBeforeNumber", word: "mstari" })))
+    expect(jobs).toEqual([])
+  })
+
+  it("a verse past its chapter's end is no such verse, in a folder and alone", () => {
+    const files = [audio("Ruthu/Ruthu sura 1 mstari 22.mp3"), audio("Ruthu/Ruthu sura 1 mstari 23.mp3")]
+    const { assignments } = run(files, [ruth], inRuth, swahili())
+    expect(assignments.map((a) => a.reason)).toEqual([
+      { code: "wordBeforeNumber", word: "mstari" },
+      { code: "noSuchVerse", ref: "Ruth 1:23" },
+    ])
+    expect(run([audio("Ruthu sura 3 mstari 19.mp3")], [ruth], inRuth, swahili()).assignments[0].reason).toEqual({ code: "noSuchVerse", ref: "Ruth 3:19" })
+  })
+
+  it("a number no verse of the book has is still not a verse: the chapter lands", () => {
+    expect(run([audio("Ruth 3 ESV 2023.mp3")], [ruth], inRuth).assignments[0].cellIds).toHaveLength(18)
+    expect(run([audio("Ruth 3 rec 24.mp3")], [ruth], inRuth).assignments[0].cellIds).toHaveLength(18)
+  })
+})
+
 // AQU-2329: a team may name its files in its own script's digits. Every
 // Unicode decimal digit is read as its value, so a name written in Arabic-Indic,
 // Persian, Devanagari, Bengali, Burmese, Thai or any other script's digits

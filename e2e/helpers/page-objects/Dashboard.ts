@@ -89,10 +89,11 @@ export class Dashboard {
       dialog.getByRole("button", { name: /^Create Project$/i }).click(),
     ])
 
-    // Overview fetch can 5xx under shard load; the page then shows Retry
-    // instead of the project name. Click Retry until the heading lands —
-    // same 15s budget, still waiting on the loaded overview.
-    await expect(dialog).toBeHidden({ timeout: 10_000 })
+    // The project response precedes settings + source/target lane writes.
+    // Their observed sequential latency exceeded 15s under shard load; allow
+    // the supported 30s readiness watchdog for the complete creation flow.
+    await expect(dialog).toBeHidden({ timeout: 30_000 })
+    // Overview fetch can 5xx under shard load; retry the loaded overview below.
     await expect(this.page).toHaveURL(/\/projects\/[^/?#]+(?:[?#].*)?$/, { timeout: 15_000 })
     const heading = this.projectOverviewHeading(name)
     await expect(async () => {

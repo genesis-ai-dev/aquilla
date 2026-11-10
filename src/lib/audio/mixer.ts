@@ -555,12 +555,23 @@ export function setPlayerMuted(el: HTMLMediaElement, muted: boolean): void {
 export function setMixerVolume(v: number): void {
   masterVolume = Math.max(0, Math.min(1, v))
   if (graph) graph.master.gain.setValueAtTime(masterVolume, graph.ctx.currentTime)
+  for (const l of [...volumeListeners]) l(masterVolume)
 }
 
 /** AQU-2494 (review, Nov 9): the main volume as the playback bar last set it,
  *  for a player outside the queue that goes straight to the output. */
 export function mixerVolume(): number {
   return masterVolume
+}
+
+const volumeListeners = new Set<(v: number) => void>()
+
+/** AQU-2494 (review, Nov 9): the main volume changed — a player outside the
+ *  queue that goes straight to the output follows it (the queue sets its own
+ *  players in setQueueVolume). Returns the unsubscribe. */
+export function onMixerVolume(listener: (v: number) => void): () => void {
+  volumeListeners.add(listener)
+  return () => { volumeListeners.delete(listener) }
 }
 
 /** A track's own volume in dB (the audio-levels plan's track fader). */

@@ -21,7 +21,7 @@ import { act, renderHook } from "@testing-library/react"
 import type { CodexCell } from "@/lib/codex-editor/types"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { encodeWavPcm16 } from "@/lib/audio/wav-encode"
-import { __resetMixerForTests, MIXER_WAKE_WAIT_MS } from "@/lib/audio/mixer"
+import { __resetMixerForTests, MIXER_WAKE_WAIT_MS, setMixerVolume } from "@/lib/audio/mixer"
 import { getOutputContext, resetOutputContextForTests } from "@/lib/audio/output-context"
 import { __resetMicHoldForTests, setMicHeld } from "@/lib/audio/mic-hold"
 
@@ -425,5 +425,44 @@ describe("finding 11: in the recording window, with the microphone held", () => 
     expect(made.currentTime).toBeCloseTo(2)
     expect(made.paused).toBe(false)
     expect(made.volume).toBeCloseTo(dB(-6), 5)
+  })
+})
+
+// AQU-2494 (review, Nov 9), finding 10 (a call the owner can overrule): a take
+// with a level followed the playback bar's volume and mute from the text table
+// (through the mixer, the bar's volume is the mixer's), while a take without
+// one played at full volume. Every take played from these players now follows
+// the bar's volume and mute, as the timeline does.
+describe("finding 10: every take follows the playback bar's volume and mute", () => {
+  it("a take as recorded plays at the bar's volume, and is muted at 0", async () => {
+    setMixerVolume(0.2)
+    const cell = cellOf({ a1: take({}) }, "a1")
+    const { result } = renderHook(() => useCellAudio(project, cell, "f1"))
+    await press(() => result.current.play())
+    await flush()
+    const a = FakeAudio.instances[0]
+    expect(a.paused).toBe(false)
+    expect(a.volume).toBeCloseTo(0.2, 5)
+    expect(a.muted).toBe(false)
+    act(() => setMixerVolume(0))
+    expect(a.muted).toBe(true)
+    act(() => setMixerVolume(0.6))
+    expect(a.muted).toBe(false)
+    expect(a.volume).toBeCloseTo(0.6, 5)
+  })
+
+  it("a take with a level straight to the output follows the bar as it moves", async () => {
+    cache.bytes = null
+    net.download = () => new Promise(() => {})
+    const cell = cellOf({ a1: take({ gainDb: -6 }) }, "a1")
+    const { result } = renderHook(() => useCellAudio(project, cell, "f1"))
+    await press(() => result.current.play())
+    await flush()
+    const a = FakeAudio.instances[0]
+    expect(a.volume).toBeCloseTo(dB(-6), 5)
+    act(() => setMixerVolume(0.5))
+    expect(a.volume).toBeCloseTo(0.5 * dB(-6), 5)
+    act(() => setMixerVolume(0))
+    expect(a.muted).toBe(true)
   })
 })

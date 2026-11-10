@@ -28,7 +28,7 @@ import {
   subscribeActiveAudio,
 } from "@/lib/audio/audio-coordinator"
 import {
-  isMixed, mixElement, mixerVolume, mixerWakeWait, mixIfAwake, playUnmixed, setPlayerMuted, wakeMixer,
+  isMixed, mixElement, mixerVolume, mixerWakeWait, mixIfAwake, onMixerVolume, playUnmixed, setPlayerMuted, setPlayerVolume, wakeMixer,
   type ClipLevels,
 } from "@/lib/audio/mixer"
 import { takeLevelsOf, type LevelledTake } from "@/lib/audio/take-level"
@@ -560,7 +560,8 @@ export function useCellAudio(
    * recorded level; and it is muted while the main volume is 0. A player is
    * never re-wired while it plays: it finishes the way it started, and the
    * next play goes through the mixer. A streamed take's bytes are fetched
-   * behind it for that. A take with no level set stays off the mixer.
+   * behind it for that. A take with no level set stays off the mixer, at
+   * the playback bar's volume.
    *
    * Never into the mixer while the recording window holds the microphone
    * (finding 11: see `play`).
@@ -570,8 +571,11 @@ export function useCellAudio(
     if (isMixed(a)) { mixElement(a, slot, level); return }
     // Paused (just made, or between plays): it may go into the mixer now.
     if (level && a.paused && !micIsHeld() && mixElement(a, slot, level, { unlessAsleep: true })) return
-    if (level) setPlayerMuted(a, false)
-    playUnmixed(a, level, volumeRef.current * (level ? mixerVolume() : 1))
+    // AQU-2494 (review, Nov 9), finding 10: every take, with a level or not,
+    // at the playback bar's volume and muted while it is 0 — as a take
+    // through the mixer is (there the bar's volume is the mixer's).
+    setPlayerMuted(a, false)
+    playUnmixed(a, level, volumeRef.current * mixerVolume())
     if (level && streamedRef.current && !bytesRef.current) void ensureBytes().catch(() => { /* it plays streamed */ })
   }, [ensureBytes])
   // A level changed while the take is loaded (in the Station, by a colleague)
@@ -579,6 +583,11 @@ export function useCellAudio(
   useEffect(() => {
     if (audioRef.current) applyLevel(audioRef.current)
   }, [levelAttachments, selectedAudioId, applyLevel])
+  // …and so does the playback bar's volume, for a player straight to the output.
+  useEffect(() => onMixerVolume((v) => {
+    const a = audioRef.current
+    if (a && !isMixed(a)) setPlayerVolume(a, volumeRef.current * v)
+  }), [])
 
   const play = useCallback(async () => {
     // The take was last played from another of its copies: resume it THERE,

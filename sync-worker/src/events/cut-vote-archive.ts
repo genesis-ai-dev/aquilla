@@ -23,8 +23,11 @@
 // rows that really were in `cell_audio_validators` are archived, by the
 // projection itself, and a restore re-inserts them exactly — the voter's own
 // username, the time they voted, the lane. No client sends a vote here.
-// Written ONCE (ON CONFLICT DO NOTHING): a projection rebuild replays these
-// events against today's state, and the live copy is the truth. A restore
+// Written ONCE (ON CONFLICT DO NOTHING), and ONLY by the live write: a
+// projection rebuild replays these events against today's state, and the live
+// copy is the truth (AQU-2492 review, finding 12: a rebuild writes no archive,
+// so a cut made before this worker, which archived nothing, gives nothing
+// back on Undo — never today's votes as the take's from before). A restore
 // reads the newest archive written BEFORE its own event (by `server_seq`), so
 // a rebuild picks the same archive the live write did. And a vote is pinned to
 // the audio it was given to: an archive comes back only while the take still

@@ -14,6 +14,7 @@
 // Asserted on the ROWS (real Postgres via PGlite), like cell-audio-cut.test.ts.
 import { describe, it, expect, beforeEach, afterAll } from 'vitest'
 import { buildEventProjectionStmts, type PersistedEvent } from '../events/event-projection'
+import { handleRebuildProjectionRequest } from '../events/rebuild'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
 import { AUDIO_CTE_SQL } from '../../../db/shared/audio-progress'
 import type { EventKind } from '../events/types'
@@ -52,7 +53,7 @@ afterAll(async () => {
   await h?.close()
 })
 
-async function run(event: PersistedEvent): Promise<void> {
+async function run(event: PersistedEvent, opts?: { rebuild?: boolean }): Promise<void> {
   // The event's row in the log, as the live route writes it first (AQU-2492,
   // review, Nov 9: undoing a cut asks the log which cut made the piece).
   await h.pg.query(
@@ -61,7 +62,7 @@ async function run(event: PersistedEvent): Promise<void> {
     [event.id, event.projectId, event.fileId, event.cellId, event.kind, event.author, JSON.stringify(event.payload), event.clientTs, event.serverTs, event.serverSeq ?? 0],
   )
   const stmts: AquillaStatement[] = []
-  buildEventProjectionStmts(h.db, event, stmts)
+  buildEventProjectionStmts(h.db, event, stmts, opts)
   await h.db.batch(stmts)
 }
 
@@ -284,9 +285,50 @@ describe('cell.audio.uncut — undoing a cut (AQU-2492)', () => {
     await project('cell.audio.unvalidate', { audioId: 'take-a' }, { author: 'ravi' })
     const live = { rows: await rows(), votes: await votes() }
     const archives = (await h.pg.query(`SELECT * FROM cell_audio_cut_votes ORDER BY event_id`)).rows
-    for (const event of [...log]) await run(event)
+    for (const event of [...log]) await run(event, { rebuild: true })
     expect({ rows: await rows(), votes: await votes() }).toEqual(live)
     expect((await h.pg.query(`SELECT * FROM cell_audio_cut_votes ORDER BY event_id`)).rows).toEqual(archives)
+  })
+
+  // AQU-2492 (review, Nov 9), finding 12: a rebuild replays the log over
+  // today's rows. A cut made before this worker archived nothing (the old one
+  // deleted the take's votes), so its replay must not archive TODAY's votes —
+  // the first half's among them — as "the take before the cut".
+  it('a rebuild after deploy never records a first-half approval as the whole take\'s: undoing a pre-deploy cut restores nothing', async () => {
+    await attach('take-a')
+    await vote('take-a', 'rita')
+    await cut('take-a', 2_000, 'take-b')
+    // The old worker: the cut deleted Rita's vote and kept nothing.
+    await h.pg.query(`DELETE FROM cell_audio_cut_votes`)
+    await vote('take-a', 'rosa') // the first half
+    const rebuilt = await handleRebuildProjectionRequest(
+      new Request(`https://worker/admin/projects/${P}/rebuild-projection`, { method: 'POST', headers: { Authorization: 'Bearer shared-secret' } }),
+      { AQUILLA_PG: h.db, SYNC_SECRET_KEY: 'shared-secret' },
+    ) as Response
+    expect(rebuilt.status).toBe(200)
+    expect((await h.pg.query(`SELECT event_id FROM cell_audio_cut_votes`)).rows).toEqual([])
+    expect(await votes()).toEqual({ 'take-a': ['rosa'] })
+    await uncut('take-a', 'take-b', null)
+    // The whole take was never approved as far as anything kept says: nobody.
+    expect(await votes()).toEqual({})
+    expect((await rows())['take-a'].validator_count).toBe(0)
+  })
+
+  it('a rebuild keeps the archives a live write made, and lands on the same approvals', async () => {
+    await approvedCutWithApprovedPieces()
+    await uncut('take-a', 'take-b', null)
+    await vote('take-a', 'rafa')
+    const live = await votes()
+    const archives = (await h.pg.query(`SELECT * FROM cell_audio_cut_votes ORDER BY event_id`)).rows
+    const rebuilt = await handleRebuildProjectionRequest(
+      new Request(`https://worker/admin/projects/${P}/rebuild-projection`, { method: 'POST', headers: { Authorization: 'Bearer shared-secret' } }),
+      { AQUILLA_PG: h.db, SYNC_SECRET_KEY: 'shared-secret' },
+    ) as Response
+    expect(rebuilt.status).toBe(200)
+    expect(await votes()).toEqual(live)
+    expect((await h.pg.query(`SELECT * FROM cell_audio_cut_votes ORDER BY event_id`)).rows).toEqual(archives)
+    await cut('take-a', 2_000, 'take-b') // and its Redo still gives the pieces theirs
+    expect(await votes()).toEqual({ 'take-a': ['rosa'], 'take-b': ['remi'] })
   })
 
   // AQU-2492 (review, Nov 9), finding 3: the joined take gets exactly the

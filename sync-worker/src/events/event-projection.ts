@@ -734,6 +734,13 @@ export function buildEventProjectionStmts(
      * current-head validators. Default 1 (N=1 projects: byte-identical behavior).
      */
     validationCount?: number
+    /**
+     * AQU-2492 (review, Nov 9), finding 12: this is a projection rebuild's
+     * replay (rebuild.ts) — the event happened live already, over the rows as
+     * they were then. What only its live write may keep (a cut's vote archive,
+     * cut-vote-archive.ts) is not written again from today's rows.
+     */
+    rebuild?: boolean
   },
 ): ProjectionTouches[] {
   // AQU-927: one un-rounded ms value would otherwise reject the whole batch.
@@ -2563,7 +2570,14 @@ case 'cell.audio.attach': {
       // approved was the whole take, and neither half is that any more.
       // AQU-2492: kept with the cut, for its Undo — then taken off.
       const cutEvent = { id: event.id, projectId: event.projectId, fileId: event.fileId, cellId: event.cellId, serverTs: event.serverTs, serverSeq: event.serverSeq }
-      stmts.push(cutVoteArchiveStmt(db, cutEvent, { pieceId: p.newAudioId, audioId: p.audioId, kind: 'whole', gate: cutLanded, gateBinds: cutLandedBinds }))
+      // Finding 12 (same review): never on a rebuild. A cut the live write
+      // archived has its row already; a cut made before this worker archived
+      // nothing, and archiving it now would keep TODAY's votes on the first
+      // piece (its first half's among them) as the take's from before the
+      // cut. Its Undo then gives back nothing, which is what was kept.
+      if (!opts?.rebuild) {
+        stmts.push(cutVoteArchiveStmt(db, cutEvent, { pieceId: p.newAudioId, audioId: p.audioId, kind: 'whole', gate: cutLanded, gateBinds: cutLandedBinds }))
+      }
       stmts.push(
         db
           .prepare(
@@ -2617,7 +2631,10 @@ case 'cell.audio.attach': {
       const cutPairBinds = recordedCutPairBinds(uncutEvent, p.audioId, p.pieceAudioId)
       const votesGate = cutPair
       const votesGateBinds = cutPairBinds
-      stmts.push(cutVoteArchiveStmt(db, uncutEvent, { pieceId: p.pieceAudioId, audioId: p.audioId, kind: 'first', gate: votesGate, gateBinds: votesGateBinds }))
+      // Finding 12: the live write's archive only, never a rebuild's (see the cut).
+      if (!opts?.rebuild) {
+        stmts.push(cutVoteArchiveStmt(db, uncutEvent, { pieceId: p.pieceAudioId, audioId: p.audioId, kind: 'first', gate: votesGate, gateBinds: votesGateBinds }))
+      }
       stmts.push(
         db
           .prepare(

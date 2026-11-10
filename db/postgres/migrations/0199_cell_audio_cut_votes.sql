@@ -27,9 +27,10 @@
 --                 newest archive written BEFORE its own event, so a rebuild
 --                 picks the one the live write did.
 --
--- Written ONCE (ON CONFLICT DO NOTHING): a projection rebuild replays these
--- events against today's state, and the live copy is the truth. Written and
--- read only by the sync-worker's projection; no app read path touches it.
+-- Written ONCE (ON CONFLICT DO NOTHING), and only by the live write: a
+-- projection rebuild replays these events against today's state, writes no
+-- archive, and the live copy is the truth. Written and read only by the
+-- sync-worker's projection; no app read path touches it.
 -- Idempotent; a database loaded from schema.sql already has it.
 --
 -- Numbered 0199: 0197 is the newest on dev, and 0198 is taken on two

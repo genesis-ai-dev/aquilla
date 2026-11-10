@@ -124,7 +124,7 @@ function StationNote({ children }: { children: ReactNode }) {
 }
 
 /** Item 3: the message line under the strip. */
-export function StationMessage({ text, onClose }: { text: string; onClose(): void }) {
+export function StationMessage({ text, onClose, action }: { text: string; onClose(): void; action?: { label: string; onClick(): void } }) {
   const t = useT()
   return (
     <div
@@ -133,10 +133,21 @@ export function StationMessage({ text, onClose }: { text: string; onClose(): voi
       className="flex shrink-0 items-start gap-2 border-b border-sky-200 bg-sky-50 px-2.5 py-[7px] text-xs leading-[1.4] text-sky-900 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-200"
     >
       <span className="min-w-0">{text}</span>
+      {/* AQU-2493 (review, Nov 9): what the message offers to do ("Try again"). */}
+      {action ? (
+        <button
+          type="button"
+          data-testid="station-message-action"
+          onClick={action.onClick}
+          className="ms-auto h-6 shrink-0 px-1 text-xs font-semibold text-sky-700 dark:text-sky-400"
+        >
+          {action.label}
+        </button>
+      ) : null}
       <button
         type="button"
         onClick={onClose}
-        className="ms-auto h-6 shrink-0 px-1 text-xs font-semibold text-sky-700 dark:text-sky-400"
+        className={`${action ? "" : "ms-auto "}h-6 shrink-0 px-1 text-xs font-semibold text-sky-700 dark:text-sky-400`}
       >
         {t("common.close")}
       </button>
@@ -173,6 +184,9 @@ interface OpenProps {
 function StationOpen({ host, take, target, visible, initialMessage }: OpenProps) {
   const t = useT()
   const [message, setMessage] = useState<string | null>(initialMessage ?? null)
+  // AQU-2493 (review, Nov 9): an action offered with one message, shown only
+  // while that message is the one on screen.
+  const [messageAction, setMessageAction] = useState<{ text: string; label: string; run(): void } | null>(null)
   const ed = useStationEditor(host, take, target, visible)
   // Q10 (Sam, Oct 30): the imported source recording is everyone's timing
   // reference — it opens to listen, select and loop, its tools hidden, with a
@@ -302,7 +316,21 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
     // and says why.
     if (ed.insertsMissing) {
       setSaveMenu(false)
-      setMessage(t(ed.insertsMissing === "lost" ? "editor.station.insertLost" : "editor.station.insertLoading"))
+      // (Review, Nov 9, finding 14) What is true: gone from this device, or
+      // not loaded this time (offered again), and that deleting the silent
+      // stretch clears it and keeps the edits made after it.
+      if (ed.insertsMissing === "failed") {
+        const text = t("editor.station.insertFailed")
+        setMessage(text)
+        setMessageAction({
+          text,
+          label: t("editor.station.insertRetry"),
+          run: () => {
+            ed.retryInserts()
+            setMessage(t("editor.station.insertLoading"))
+          },
+        })
+      } else setMessage(t(ed.insertsMissing === "lost" ? "editor.station.insertLost" : "editor.station.insertLoading"))
       return
     }
     setSaving(true)
@@ -507,6 +535,7 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
       {message ? (
         <StationMessage
           text={message}
+          {...(messageAction && messageAction.text === message ? { action: { label: messageAction.label, onClick: messageAction.run } } : {})}
           onClose={() => {
             setMessage(null)
             clearStationMessage()

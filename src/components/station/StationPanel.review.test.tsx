@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   slow: new Set<string>(),
   /** Record now, as the Station's recorder reports it. */
   rec: { phase: { kind: "idle" } as { kind: string; at?: number }, busy: false },
+  /** Recordings that can't be loaded over the network right now (offline). */
+  unreachable: new Set<string>(),
 }))
 vi.mock("./StationRecorder", () => ({
   useStationRecorder: () => ({ ...mocks.rec, recording: mocks.rec.phase.kind === "recording", count: null, elapsedMs: 0, start() {}, stop() {}, keep() {}, again() {}, drop() {} }),
@@ -21,7 +23,8 @@ vi.mock("./StationRecorder", () => ({
 }))
 vi.mock("@/lib/station/load", () => ({
   // Five seconds of a ramp, so every sample says where it came from.
-  loadStationPcm: async () => {
+  loadStationPcm: async ({ url }: { url: string }) => {
+    if (mocks.unreachable.has(url)) throw new Error("offline")
     const data = new Float32Array(48000 * 5)
     for (let i = 0; i < data.length; i++) data[i] = i / data.length
     return { data, rate: 48000, peak: 1, duration: 5 }
@@ -117,6 +120,7 @@ beforeEach(() => {
   localStorage.clear()
   mocks.cached.clear()
   mocks.slow.clear()
+  mocks.unreachable.clear()
   mocks.rec = { phase: { kind: "idle" }, busy: false }
   mocks.save.mockClear()
 })
@@ -154,6 +158,62 @@ describe("the Station's Save with inserted audio that can't be loaded again (fin
     await act(async () => {})
     expect(mocks.save).not.toHaveBeenCalled()
     expect(screen.getByTestId("station-message").textContent).toMatch(/still loading/)
+  })
+
+  // AQU-2493 (review, Nov 9), finding 14: the message said a part of another
+  // recording "is no longer on this device" when it had only failed to load
+  // once, offline (it was never on the device, and loads again online), and
+  // it offered only Undo, which also takes back every edit made after it.
+  it("a file that is gone from this device: says so, and that deleting the silent stretch clears it and keeps the later edits", async () => {
+    draftWithInsert()
+    await open(makeTake())
+    fireEvent.click(screen.getByTestId("station-save"))
+    await act(async () => {})
+    const text = screen.getByTestId("station-message").textContent ?? ""
+    expect(text).toMatch(/no longer on this device/)
+    expect(text).toMatch(/delete it/i)
+    expect(text).toMatch(/keeps your later edits/)
+  })
+
+  const draftWithTakeInsert = () =>
+    localStorage.setItem(
+      DRAFT_KEY,
+      JSON.stringify({
+        ops: [{ kind: "ins", at: 1, src: "station-insert-t", len: 2, label: "Take 1 · line 12" }],
+        trim: null,
+        sources: { "station-insert-t": { kind: "take", url: "frontier-audio://t1.webm", fileId: "f1", label: "Take 1 · line 12" } },
+        undo: [{ ops: [], trim: null }],
+        scope: "clip",
+      }),
+    )
+
+  it("part of another recording that couldn't be loaded (offline): says it couldn't be loaded, and offers to try again", async () => {
+    draftWithTakeInsert()
+    mocks.unreachable.add("frontier-audio://t1.webm")
+    await open(makeTake())
+    fireEvent.click(screen.getByTestId("station-save"))
+    await act(async () => {})
+    const text = screen.getByTestId("station-message").textContent ?? ""
+    expect(text).toMatch(/couldn.t be loaded/)
+    expect(text).not.toMatch(/no longer on this device/)
+    expect(text).toMatch(/keeps your later edits/)
+    expect(mocks.save).not.toHaveBeenCalled()
+    // Back online: Try again loads it, and Save saves its sound.
+    mocks.unreachable.clear()
+    fireEvent.click(screen.getByTestId("station-message-action"))
+    await act(async () => {})
+    fireEvent.click(screen.getByTestId("station-save"))
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledTimes(1))
+  })
+
+  it("deleting the silent stretch clears it, keeping the edits made after it", async () => {
+    draftWithInsert()
+    const { lane } = await open(makeTake())
+    // The edited recording is 7 s long (2 s inserted): 1000/7 px a second.
+    selectRange(lane, (1 * 5) / 7, (3 * 5) / 7)
+    fireEvent.keyDown(screen.getByTestId("station"), { key: "Delete", code: "Delete" })
+    fireEvent.click(screen.getByTestId("station-save"))
+    await waitFor(() => expect(mocks.save).toHaveBeenCalledTimes(1))
   })
 
   it("saves as usual once the inserted audio has loaded again", async () => {

@@ -106,24 +106,42 @@ export function useStationEditor(host: StationHost, take: StationTake, target: S
   // which drops its oldest entries) is remembered as lost, so Save can refuse
   // to write silence in its place.
   const restoring = useRef(new Set<string>())
-  const [lost, setLost] = useState<ReadonlySet<string>>(() => new Set())
+  // (Review, Nov 9, finding 14) Why each could not be loaded: "gone" — a file
+  // or a recording made here that is no longer in this device's cache;
+  // "failed" — it could not be loaded this time (part of another recording,
+  // fetched over the network, offline say), so it can be tried again.
+  const [lost, setLost] = useState<ReadonlyMap<string, "gone" | "failed">>(() => new Map())
+  const lostRef = useRef(lost)
+  lostRef.current = lost
   useEffect(() => {
     for (const [id, meta] of Object.entries(draft.sources)) {
       if (sources[id] || restoring.current.has(id)) continue
       restoring.current.add(id)
-      const done = (p: PcmSource | null) => {
+      const done = (p: PcmSource | null, why: "gone" | "failed" = "failed") => {
         if (p) setSources((m) => ({ ...m, [id]: p }))
-        else setLost((m) => new Set(m).add(id))
+        else setLost((m) => new Map(m).set(id, why))
       }
       if (meta.kind === "take") {
-        loadStationPcm({ url: meta.url, projectId: project.id, fileId: meta.fileId, getSyncToken }).then(done, () => done(null))
+        loadStationPcm({ url: meta.url, projectId: project.id, fileId: meta.fileId, getSyncToken }).then((p) => done(p), () => done(null))
       } else {
         void audioCacheGet(meta.cacheId, meta.ext)
           .then((bytes) => (bytes ? decodeToMono48k(bytes) : null))
-          .then((data) => done(data ? putStationPcm(id, data) : null), () => done(null))
+          .then((data) => done(data ? putStationPcm(id, data) : null, "gone"), () => done(null))
       }
     }
-  }, [draft.sources, sources, project.id, getSyncToken])
+  }, [draft.sources, sources, project.id, getSyncToken, lost])
+  /** AQU-2493 (review, Nov 9), finding 14: try loading again the inserted
+   *  audio that could not be loaded last time. */
+  const retryInserts = useCallback(() => {
+    const failed = [...lostRef.current].filter(([, why]) => why === "failed").map(([id]) => id)
+    if (failed.length === 0) return
+    for (const id of failed) restoring.current.delete(id)
+    setLost((m) => {
+      const next = new Map(m)
+      for (const id of failed) next.delete(id)
+      return next
+    })
+  }, [])
 
   const placed: PlacedSegment[] = useMemo(() => {
     const shown: EditOp[] = live ? [...ops, { kind: "ins", at: live.at, src: LIVE_SRC, len: live.src.data.length / live.src.rate, label: "" }] : [...ops]
@@ -133,9 +151,12 @@ export function useStationEditor(host: StationHost, take: StationTake, target: S
   // AQU-2493 (review, Nov 9): inserted audio still in the recording that has
   // no samples here: "loading" while it is being loaded again, "lost" when it
   // can't be. Either way a save would write silence where it sits.
-  const insertsMissing = useMemo((): "loading" | "lost" | null => {
+  // (Finding 14) "failed" when one could not be loaded this time, and may load
+  // if tried again.
+  const insertsMissing = useMemo((): "loading" | "lost" | "failed" | null => {
     const without = placed.filter((g) => g.src !== BASE_SRC && g.src !== LIVE_SRC && !sources[g.src])
     if (without.length === 0) return null
+    if (without.some((g) => lost.get(g.src) === "failed")) return "failed"
     return without.some((g) => lost.has(g.src)) ? "lost" : "loading"
   }, [placed, sources, lost])
 
@@ -418,6 +439,7 @@ export function useStationEditor(host: StationHost, take: StationTake, target: S
     setSources,
     placed,
     insertsMissing,
+    retryInserts,
     length,
     trimA,
     trimB,

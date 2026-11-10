@@ -1460,7 +1460,9 @@ export const editor = defineNamespace({
     "editor.station.savedEverywhere": "Saved as version {n}, used everywhere ({lines}). The original recording is kept.",
     "editor.station.saveFailed": "The new version couldn’t be saved: {message}",
     "editor.station.notAudio": "“{name}” isn’t an audio file the browser can read.",
-    "editor.station.insertLost": "Not saved: audio you inserted is no longer on this device, so it would be saved as silence. Undo to take it out, then insert it again.",
+    "editor.station.insertLost": "Not saved: audio you inserted is no longer on this device, so it would be saved as silence. Select the silent stretch and delete it: that clears it and keeps your later edits.",
+    "editor.station.insertFailed": "Not saved: audio you inserted couldn't be loaded, so it would be saved as silence. Try again, or select the silent stretch and delete it: that clears it and keeps your later edits.",
+    "editor.station.insertRetry": "Try again",
     "editor.station.insertLoading": "Not saved yet: the audio you inserted is still loading. Try Save again in a moment.",
     "editor.station.keptForLater": "Your changes to {name} are kept until you save or undo them.",
     "editor.station.undoUnsaved": "Undo the last unsaved change",
@@ -3608,7 +3610,13 @@ export const editor = defineNamespace({
         },
       },
       "editor.station.insertLost": {
-        description: "Message when Save is pressed in the Station while audio inserted before a reload (a file, or a recording made there) can no longer be loaded on this device. Nothing is saved; 'Undo' is the Station's Undo button.",
+        description: "Message when Save is pressed in the Station while audio inserted before a reload (a file, or a recording made there) is no longer on this device. Nothing is saved. The inserted audio shows as a silent stretch in the waveform; deleting that stretch removes it without undoing the edits made after it.",
+      },
+      "editor.station.insertFailed": {
+        description: "Message when Save is pressed in the Station while audio inserted before a reload could not be loaded this time (for example part of another recording, fetched over the network while offline). Nothing is saved. 'Try again' is the button beside the message; the inserted audio shows as a silent stretch in the waveform, and deleting that stretch removes it without undoing the edits made after it.",
+      },
+      "editor.station.insertRetry": {
+        description: "Button beside the Station's 'couldn't be loaded' message: loads the inserted audio again.",
       },
       "editor.station.insertLoading": {
         description: "Message when Save is pressed in the Station before audio inserted earlier has finished loading again after a reload. Nothing is saved yet.",

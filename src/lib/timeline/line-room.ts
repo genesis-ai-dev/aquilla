@@ -54,3 +54,56 @@ export interface LineRoomChange {
   cellId: string
   roomMs: number | null
 }
+
+/**
+ * AQU-2432 (review, Nov 9): THE ROOM IS WRITTEN TO THE FILE THAT OWNS THE
+ * LINE. A film with an audio cue file is laid out, following its recordings,
+ * from its heard lines, and those live in the cue file, not the file that is
+ * open: aimed at the open file, the event changed no row and the drag sprang
+ * back. Each room is shown at once and sent in its line's own file, and each
+ * file written is re-read once everything is sent.
+ */
+export interface LineRoomWriter {
+  /** The file the line lives in (a heard line's: the cue file), or null when
+   *  no file holds it any more — nothing is written for it then. */
+  fileOf(cellId: string): string | null
+  /** Show the room at once, in that file. */
+  paint(fileId: string, cellId: string, roomMs: number | null): void
+  /** Queue the line's room event, aimed at that file. */
+  emit(fileId: string, cellId: string, roomMs: number | null): Promise<unknown>
+  /** Send what is queued, then re-read these files. */
+  flush(fileIds: readonly string[]): Promise<void>
+}
+
+export async function writeLineRooms(w: LineRoomWriter, rooms: readonly LineRoomChange[]): Promise<void> {
+  const owned = rooms.flatMap((r) => {
+    const fileId = w.fileOf(r.cellId)
+    return fileId ? [{ ...r, fileId }] : []
+  })
+  if (owned.length === 0) return
+  for (const r of owned) w.paint(r.fileId, r.cellId, r.roomMs)
+  for (const r of owned) await w.emit(r.fileId, r.cellId, r.roomMs)
+  await w.flush([...new Set(owned.map((r) => r.fileId))])
+}
+
+/**
+ * AQU-2432 (review, Nov 9): lines read OUTSIDE the cell store — a film's heard
+ * lines, read once from its cue file — with the room the store would stamp on
+ * them for `lane` (`CellStore` does it for the open file's), and any room
+ * written here since that read (`written`; null: cleared).
+ */
+export function stampLineRooms<C extends CellData>(
+  cells: readonly C[],
+  lane: string | null | undefined,
+  written: ReadonlyMap<string, number | null>,
+): C[] {
+  return cells.map((c) => {
+    const roomMs = written.has(c.id) ? written.get(c.id) : lineRoomMsFromMetadata(c.metadata, lane)
+    if (roomMs == null) {
+      if (c.recordingsRoomMs === undefined) return c
+      const { recordingsRoomMs: _gone, ...rest } = c
+      return rest as C
+    }
+    return c.recordingsRoomMs === roomMs ? c : { ...c, recordingsRoomMs: roomMs }
+  })
+}

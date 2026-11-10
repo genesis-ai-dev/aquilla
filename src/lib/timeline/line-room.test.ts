@@ -25,7 +25,7 @@ import {
 } from "./programme"
 import { buildTimelineLayout } from "./layout"
 import { movedStartSec, movedTakePlace, placeAfterRoomMove } from "./take-place"
-import { lineRoomKey, lineRoomMsFromMetadata, type LineRoomChange } from "./line-room"
+import { lineRoomKey, lineRoomMsFromMetadata, stampLineRooms, writeLineRooms, type LineRoomChange } from "./line-room"
 import type { CellData } from "@/hooks/useCells"
 
 const VOICE = "01a17e67-ef58-74f7-a093-be935876197b"
@@ -100,6 +100,55 @@ describe("the room is stored per language, beside the line's other timeline stat
     expect(lineRoomMsFromMetadata(meta, "ar")).toBeUndefined()
     expect(lineRoomMsFromMetadata({ recordings_room_ms: "soon" }, "")).toBeUndefined()
     expect(lineRoomMsFromMetadata(null, "")).toBeUndefined()
+  })
+})
+
+// AQU-2432 (review, Nov 9): a film with an audio cue file is laid out, following
+// its recordings, from its HEARD lines, which live in the cue file — not the
+// file that is open. A room belongs to its line, so it is written, shown and
+// read back in the file that owns the line.
+describe("the room is written to the file that owns its line", () => {
+  function writer(owners: Record<string, string | null>) {
+    const calls: string[] = []
+    return {
+      calls,
+      w: {
+        fileOf: (cellId: string) => owners[cellId] ?? null,
+        paint: (fileId: string, cellId: string, roomMs: number | null) => { calls.push(`paint ${fileId} ${cellId} ${roomMs}`) },
+        emit: async (fileId: string, cellId: string, roomMs: number | null) => { calls.push(`emit ${fileId} ${cellId} ${roomMs}`) },
+        flush: async (fileIds: readonly string[]) => { calls.push(`flush ${fileIds.join(",")}`) },
+      },
+    }
+  }
+
+  it("a heard line of the cue file is painted, sent and re-read there; a line of the open file in the open file", async () => {
+    const { calls, w } = writer({ "cue-2": "f-cues", b: "f1" })
+    await writeLineRooms(w, [{ cellId: "cue-2", roomMs: 0 }, { cellId: "b", roomMs: 1_200 }])
+    expect(calls).toEqual([
+      "paint f-cues cue-2 0",
+      "paint f1 b 1200",
+      "emit f-cues cue-2 0",
+      "emit f1 b 1200",
+      "flush f-cues,f1",
+    ])
+  })
+
+  it("a line no file holds any more is left out: nothing is sent for it", async () => {
+    const { calls, w } = writer({ b: "f1" })
+    await writeLineRooms(w, [{ cellId: "gone", roomMs: 0 }, { cellId: "b", roomMs: null }])
+    expect(calls).toEqual(["paint f1 b null", "emit f1 b null", "flush f1"])
+  })
+
+  it("lines read outside the cell store (a cue file's) carry the room the store would give them, and one just written", () => {
+    const cue = (id: string, metadata: Record<string, unknown>) => ({ ...bookLine(id), fileId: "f-cues", metadata }) as CellData
+    const cells = [
+      cue("cue-1", { recordings_room_ms: 900, "recordings_room_ms:fr": 300 }),
+      cue("cue-2", {}),
+      cue("cue-3", { "recordings_room_ms:fr": 0 }),
+    ]
+    const fr = stampLineRooms(cells, "fr", new Map([["cue-2", 1_500], ["cue-3", null]]))
+    expect(fr.map((c) => c.recordingsRoomMs)).toEqual([300, 1_500, undefined])
+    expect(stampLineRooms(cells, "", new Map()).map((c) => c.recordingsRoomMs)).toEqual([900, undefined, undefined])
   })
 })
 

@@ -54,6 +54,10 @@ import type { CellData } from "@/hooks/useCells"
 
 class FakeAudio {
   static instances: FakeAudio[] = []
+  /** AQU-2253 (review 2): takes whose bytes never arrive (never ready)… */
+  static cold = new Set<string>()
+  /** …and takes that fail to load. */
+  static failing = new Set<string>()
   private _t = 0
   get currentTime(): number {
     return this._t
@@ -69,7 +73,7 @@ class FakeAudio {
   playbackRate = 1
   readyState = 4
   preload = ""
-  error = null
+  error: { code: number } | null = null
   src: string
   onended: (() => void) | null = null
   onerror: (() => void) | null = null
@@ -81,7 +85,19 @@ class FakeAudio {
   constructor(src: string) {
     this.src = src
     FakeAudio.instances.push(this)
+    if (FakeAudio.cold.has(src)) this.readyState = 0
+    if (FakeAudio.failing.has(src)) {
+      this.error = { code: 4 }
+      queueMicrotask(() => this.onerror?.())
+      return
+    }
     queueMicrotask(() => this.onloadedmetadata?.())
+  }
+  /** The take dies where it is (an expired stream, a decode fault). */
+  fail(): void {
+    this.error = { code: 2 }
+    this.paused = true
+    this.onerror?.()
   }
   async play(): Promise<void> {
     this.paused = false
@@ -200,6 +216,8 @@ function filmBeat(): void {
 
 beforeEach(() => {
   FakeAudio.instances = []
+  FakeAudio.cold.clear()
+  FakeAudio.failing.clear()
   vi.stubGlobal("Audio", FakeAudio)
   localStorage.removeItem("aq.skip-silent-lines.v1")
   resetSkipSilentLinesPrefCacheForTests()
@@ -1931,5 +1949,135 @@ describe("a film that says nothing while it is the clock on a line is not waited
     await wait(10_000)
     expect(getQueueState()).toMatchObject({ kind: "loading", cellId: "b2" })
     expect(getQueueProgress().currentTime).toBeCloseTo(5, 1)
+  })
+})
+
+// AQU-2253 (review 2, Nov 9), finding 5: under the film, a recorded line whose
+// take would not load (a slow connection, offline, a take deleted since the
+// list loaded) waited the readiness gate's 6 s with the film paused, then the
+// playhead jumped to the next line and the film was cut forward by that
+// line's length: the one jump left on a film file, though the film is behind
+// the line. Now a line under the film that gives up on its take is crossed as
+// a line with nothing of its own, on the film's clock, the film running on.
+// (The 6 s wait itself is the gate's own rule, and stays: see the report.)
+describe("a line under the film whose take gives up is crossed with the film, never jumped", () => {
+  // b1 recorded 1 s [0, 1); b2 recorded 2 s [1, 3); b3 recorded 1 s [3, 4).
+  const three = () => [line("b1", 1_000), line("b2", 2_000), line("b3", 1_000)]
+
+  it("the reviewer's probe: b2's take never becomes ready: after the gate's wait b2 is crossed on the film's clock, then b3 plays", async () => {
+    FakeAudio.cold.add("http://audio.test/b2.webm")
+    const cells = three()
+    linkFilm(10, cells)
+    startQueue(ctxFor(cells), 0)
+    await wait()
+    el("b1")!.tick(1)
+    await wait()
+    expect(getQueueState()).toMatchObject({ kind: "loading", cellId: "b2" })
+    await wait(5_900)
+    expect(getQueueState()).toMatchObject({ kind: "loading", cellId: "b2" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(1, 2)
+    await wait(200)
+    // Not on to b3 at 3 s: b2 is crossed, from where it waited, with the film.
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    expect(getQueueProgress().filmClock).toBe(true)
+    expect(getQueueProgress().currentTime).toBeLessThan(1.3)
+    await wait(1_000)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    expect(getQueueProgress().currentTime).toBeCloseTo(2, 0)
+    await wait(1_100)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+    expect(el("b3")!.paused).toBe(false)
+  })
+
+  it("a take that fails to load: crossed with the film at once", async () => {
+    FakeAudio.failing.add("http://audio.test/b2.webm")
+    const cells = three()
+    linkFilm(10, cells)
+    startQueue(ctxFor(cells), 0)
+    await wait()
+    el("b1")!.tick(1)
+    await wait(500)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    expect(getQueueProgress().filmClock).toBe(true)
+    expect(getQueueProgress().currentTime).toBeCloseTo(1.5, 1)
+  })
+
+  it("a take dying in the middle of its line: the rest of the line is crossed with the film", async () => {
+    const cells = three()
+    linkFilm(10, cells)
+    startQueue(ctxFor(cells), 0)
+    await wait()
+    el("b1")!.tick(1)
+    await wait()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    el("b2")!.tick(0.5)
+    el("b2")!.fail()
+    await wait(500)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    expect(getQueueProgress().filmClock).toBe(true)
+    expect(getQueueProgress().currentTime).toBeCloseTo(2, 1)
+    await wait(1_100)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+  })
+
+  it("the film's length not known yet: the same", async () => {
+    FakeAudio.failing.add("http://audio.test/b2.webm")
+    const cells = three()
+    setProgrammeFilm({ endSec: null, cellIds: new Set(cells.map((c) => c.id)) })
+    startQueue(ctxFor(cells), 0)
+    await wait()
+    el("b1")!.tick(1)
+    await wait(500)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    expect(getQueueProgress().filmClock).toBe(true)
+  })
+
+  it("a take on another track sounding in the line keeps the queue's own clock there", async () => {
+    setQueueTargetSlots(["recording", TRACK])
+    setQueueLayerTrackSlots([TRACK])
+    FakeAudio.failing.add("http://audio.test/b2.webm")
+    // b2's own take fails; its 2 s Track 1 take plays from the line's start.
+    const cells = [line("b1", 1_000), line("b2", 2_000, 2_000), line("b3", 1_000)]
+    linkFilm(10, cells)
+    startQueue(ctxFor(cells), 0)
+    await wait()
+    el("b1")!.tick(1)
+    await wait(500)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    expect(getQueueProgress().filmClock).toBe(false)
+    expect(el("b2-track")!.paused).toBe(false)
+  })
+
+  it("with no film, a take that never loads is still stepped past after the wait, and one that fails at once (as before)", async () => {
+    FakeAudio.cold.add("http://audio.test/b2.webm")
+    startQueue(ctxFor(three()), 0)
+    await wait()
+    el("b1")!.tick(1)
+    await wait(6_100)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+    stopQueue()
+
+    FakeAudio.cold.clear()
+    FakeAudio.failing.add("http://audio.test/b2.webm")
+    startQueue(ctxFor(three()), 0)
+    await wait()
+    el("b1")!.tick(1)
+    await wait(50)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
+  })
+
+  it("a film that says nothing either: the gave-up line is crossed on the queue's own timer after the patience", async () => {
+    FakeAudio.failing.add("http://audio.test/b2.webm")
+    const cells = three()
+    linkFilm(10, cells)
+    startQueue(ctxFor(cells), 0)
+    await wait()
+    el("b1")!.tick(1)
+    film.stuck = true
+    await wait(3_300)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
+    expect(getQueueProgress().filmClock).toBe(false)
+    await wait(2_000)
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
   })
 })

@@ -775,6 +775,12 @@ export function filmOverRun(film: ProgrammeFilm | null | undefined, ids: Iterabl
 /** A line starting this close to the film's end has no film left behind it. */
 const FILM_COVER_MIN_SEC = 0.02
 
+/** AQU-2253: is the linked film playing behind this line (`filmCoverSec`, from
+ *  `filmOverRun`), whatever the line has of its own? */
+export function filmIsBehindSlot(slot: ProgrammeSlot, filmCoverSec: number): boolean {
+  return slot.startSec < filmCoverSec - FILM_COVER_MIN_SEC
+}
+
 /**
  * What a line of the programme has to play, following the recordings:
  *  - "sound": its own take or original, a take of its own on another track,
@@ -804,7 +810,7 @@ export function whatSlotPlays(
   filmCoverSec = 0,
 ): SlotPlays {
   if (slotHasOwnSound(slot) || underLayers.has(slot.cellId)) return "sound"
-  if (slot.startSec < filmCoverSec - FILM_COVER_MIN_SEC) return "film"
+  if (filmIsBehindSlot(slot, filmCoverSec)) return "film"
   return hiddenCellIds.has(slot.cellId) ? "hidden" : "nothing"
 }
 

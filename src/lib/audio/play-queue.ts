@@ -11,7 +11,7 @@ import { activeTargetForCell, resolveTargetAudio, resolveTargetPieces, sourceCli
 import { isDefaultTrackSlot, RECORDING_SLOT, slotAudible } from "@/lib/timeline/track-slots"
 import { selectedPieceIds } from "@/lib/sync/cell-audio-read-types"
 import { effectiveAttachmentDurationMs, targetChipGeom, targetDueSec } from "@/lib/timeline/lane-timing"
-import { filmOverRun, playedProgramme, slotAtProgrammeSec, whatSlotPlays, type Programme, type ProgrammeFilm, type ProgrammeSlot } from "@/lib/timeline/programme"
+import { filmIsBehindSlot, filmOverRun, playedProgramme, slotAtProgrammeSec, whatSlotPlays, type Programme, type ProgrammeFilm, type ProgrammeSlot } from "@/lib/timeline/programme"
 import { buildLayerSchedule, layerIndexAfter, layersDueAt, layersSoundIn, NO_LAYERS, type LayerSchedule, type ProgLayerRef } from "./play-queue-layers"
 import type { AudioTimingMode } from "@/lib/parsers/types"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
@@ -545,6 +545,13 @@ function progFilmIsClockAt(sec: number): boolean {
   if (progFilmQuiet) return false
   const slot = programme ? slotAtProgrammeSec(programme, sec) : null
   return slot != null && progFilmPlaysUnder(slot)
+}
+
+/** AQU-2253 (review 2, Nov 9): could the film be the clock of a line at this
+ *  second: its picture runs there (not its last moment), and it has not gone
+ *  quiet. */
+function progFilmCanCarryLineAt(sec: number): boolean {
+  return !progFilmQuiet && progFilmCoverSec - sec > FILM_END_GUARD_SEC
 }
 
 /** How long the run is: the programme, or a linked film that outlasts it. */
@@ -1829,7 +1836,8 @@ function progFilmLineRecheck(): void {
   if (!lead?.film || lead.then !== "next" || !slot || !progRunning()) return
   const now = progLeadNowSec(lead)
   const lineEnd = slot.startSec + slot.slotLenSec
-  if (progFilmIsClockAt(now)) {
+  // (AQU-2253, review 2: a line whose own take gave up stays the film's too.)
+  if (progFilmIsClockAt(now) || (lead.gaveUpTake && progFilmCanCarryLineAt(now))) {
     lead.endSec = Math.min(lineEnd, progFilmCoverSec - FILM_END_GUARD_SEC)
     return
   }
@@ -1847,8 +1855,10 @@ function progFilmClockDone(lead: ProgLead, sec: number, over: boolean): void {
   const prog = programme
   const on = progCurrentSlot()
   if (!prog || !on) return
-  if (over) {
-    // The film ran out under a line: the rest is crossed as with no film.
+  // The film ran out under a line (or, AQU-2253 review 2, reached its last
+  // moment inside a line whose own take gave up): the rest is crossed as
+  // with no film.
+  if (over || (lead.gaveUpTake && slotAtProgrammeSec(prog, sec) === on)) {
     setState({ kind: "playing", ...progStateCell() })
     progArmLead(on, lead.atSec, lead.explicit, "next")
     return
@@ -2011,6 +2021,9 @@ interface ProgLead {
    *  reports. `sec`: the film's last report; `heardAt`: when it last moved;
    *  `onEnd`: what the film's tail ends in (null: a line, then the next). */
   film?: { sec: number | null; heardAt: number; moving: boolean; onEnd: (() => void) | null }
+  /** AQU-2253 (review 2, Nov 9): this line has a take of its own that gave up
+   *  (`progCrossRestWithFilm`): the film carries it as a line with nothing. */
+  gaveUpTake?: boolean
 }
 let progLead: ProgLead | null = null
 
@@ -2193,6 +2206,39 @@ function classifyTargetFailure(
 }
 
 /**
+ * AQU-2253 (review 2, Nov 9): a line under the linked film whose own take gave
+ * up (the readiness gate's patience ran out, the take failed to load or died
+ * on the way, or could not be resolved) is crossed from `atSec` as a line with
+ * nothing of its own: on the film's clock, the film running on. Moving on to
+ * the next line instead cut the film forward by the rest of this one, the one
+ * jump left on a film file. A take on another track sounding there keeps the
+ * queue's own clock (`progArmHold`), and a film that has gone quiet or is at
+ * its last moment the queue's timer. False where no film is behind the line,
+ * or nothing of it is left: the caller moves on, as it always did.
+ */
+function progCrossRestWithFilm(slot: ProgrammeSlot, atSec: number, explicit: boolean): boolean {
+  if (!filmIsBehindSlot(slot, progFilmCoverSec)) return false
+  const lineEnd = slot.startSec + slot.slotLenSec
+  const at = Math.min(Math.max(atSec, slot.startSec), lineEnd)
+  if (lineEnd - at <= HOLD_MIN_SEC) return false
+  progQuiet(currentAudio)
+  setState({ kind: "playing", ...progStateCell() })
+  if (progSlotHolds(slot, at)) {
+    progArmHold(slot, at, explicit)
+  } else if (progFilmCanCarryLineAt(at)) {
+    progArmFilmClock(slot, at, explicit, "next", Math.min(lineEnd, progFilmCoverSec - FILM_END_GUARD_SEC), null)
+    progLead!.gaveUpTake = true
+  } else {
+    progArmLead(slot, at, explicit, "next")
+  }
+  // After the lead: the transport says whose clock it is (the film panel
+  // reports the film's second only where the film is the clock).
+  setProgress({ currentTime: at })
+  progLayersSync(at)
+  return true
+}
+
+/**
  * The gate is open: start every due side TOGETHER, or advance when the verse
  * has nothing left to play. Sets the transport state itself — a dub-only verse
  * has no source `onplay` to do it (and the stamp must come from the CURRENT
@@ -2236,6 +2282,8 @@ function progStartSides(gate: ProgGate): void {
     return
   }
   if (!dubEl && !srcEl) {
+    // AQU-2253 (review 2, Nov 9): under the film, crossed with it instead.
+    if (progCrossRestWithFilm(slot, slot.startSec + into, gate.explicit)) return
     progAdvance()
     return
   }
@@ -2400,7 +2448,11 @@ function progOnTargetFinished(entry: OverlayEntry, reason: "ended" | "error", ca
   const takeEndIntoSec = (slot.targetLeadSec ?? 0) + slot.targetLenSec
   const sourceHasMore = slot.sourceLenSec - takeEndIntoSec > HOLD_MIN_SEC
   if (sourceCanCarry && (slot.clock !== "target" || sourceHasMore)) return
-  progLineEnded(progTakeStoppedAt(slot, entry, slot.startSec + takeEndIntoSec))
+  const stoppedAt = progTakeStoppedAt(slot, entry, slot.startSec + takeEndIntoSec)
+  // AQU-2253 (review 2, Nov 9): a take dying on its way under the film: the
+  // rest of its line is crossed with the film, never jumped.
+  if (reason === "error" && progCrossRestWithFilm(slot, stoppedAt, false)) return
+  progLineEnded(stoppedAt)
 }
 
 /**
@@ -2748,6 +2800,8 @@ async function progPlaySlot(
     }
     // Nothing in this verse can sound from here (both sides already spent,
     // or neither loadable) — don't sit in silence.
+    // AQU-2253 (review 2, Nov 9): …but under the film the film plays there.
+    if (progCrossRestWithFilm(slot, at, explicit)) return
     progAdvance()
     return
   }

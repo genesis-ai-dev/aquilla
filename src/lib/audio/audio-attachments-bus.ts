@@ -697,6 +697,12 @@ export async function rehydrateShadowsFromOutbox(projectId: string, fileId: stri
       // only matters for which selection the remove shadow clears, and the
       // read-side prune keys removes by audioId — recording covers both.
       injectOptimisticAudioRemove(fileId, cellId, audioId, "recording", record.id)
+    } else if (event.kind === "cell.audio.uncut") {
+      // AQU-2492: an undo of a cut removes the piece the cut made, as the
+      // remove it replaces did (pending only, for the same reason).
+      const pieceAudioId = payload.pieceAudioId
+      if (typeof pieceAudioId !== "string" || record.status !== "pending") continue
+      injectOptimisticAudioRemove(fileId, cellId, pieceAudioId, "recording", record.id)
     } else if (event.kind === "cell.audio.select" && payload.audioId === null) {
       // A queued "nothing selected" (2026-09-28) — pending only, like removes:
       // a stuck one asserts nothing the server holds.

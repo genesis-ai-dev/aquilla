@@ -63,6 +63,7 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     'cell.audio.gain': { audioId: 'audio-1.wav', gainDb: -3, fadeInMs: 300, fadeOutMs: null },
     'cell.audio.place': { audioId: 'audio-1.wav', targetOffsetMs: -250 },
     'cell.audio.cut': { audioId: 'audio-1.wav', atMs: 1500, newAudioId: 'audio-2.wav' },
+    'cell.audio.uncut': { audioId: 'audio-1.wav', pieceAudioId: 'audio-2.wav', trimStartMs: null, trimEndMs: null },
     'cell.link.set': {
       kind: 'text-audio',
       toFileId: 'file-audio-cues',

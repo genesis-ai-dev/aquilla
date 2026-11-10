@@ -19,7 +19,6 @@ function ctxFor(takes: Takes, overrides: Partial<TakeStepContext> = {}) {
     }),
     cut: vi.fn(async () => true),
     uncut: vi.fn(async () => {}),
-    newPieceId: () => "fresh",
     select: vi.fn(async () => {}),
     remove: vi.fn(async () => {}),
     rename: vi.fn(async () => {}),
@@ -107,12 +106,81 @@ describe("take.cut", () => {
     expect(ctx.uncut).not.toHaveBeenCalled()
   })
 
-  it("redo cuts again with a fresh id, only while the take is whole", async () => {
+  // AQU-2492 (review, Nov 9; Sam's call the same day): the Redo names the
+  // piece the Undo removed, which the server brings back with its approvals.
+  it("redo cuts again naming the same piece, only while the take is whole", async () => {
     const { ctx, handlers } = ctxFor({ a: {} })
     const rec = record()
     expect(await handlers["take.cut"].redo({ cuts: [rec] })).toEqual({ kind: "done" })
-    expect(ctx.cut).toHaveBeenCalledWith(rec, "fresh")
-    expect(rec.newAudioId).toBe("fresh")
+    expect(ctx.cut).toHaveBeenCalledWith(rec, "b")
+    expect(rec.newAudioId).toBe("b")
+  })
+})
+
+// AQU-2492 (review, Nov 9; Sam's call the same day): "I would like an
+// approved cut to still be undoable. We just need to remember the approval for
+// if the cut is redone (not manually, but with a redo button)."
+describe("take.cut and approvals (AQU-2492)", () => {
+  const record = (validators?: string[]): CutRecord => ({
+    cellId: "c1", audioId: "a", atMs: 1500, newAudioId: "b",
+    before: { trimEndMs: null, label: "Take 1", targetOffsetMs: null, ...(validators ? { validators } : {}) },
+    renamed: true,
+  })
+  const others = (takes: Takes) => (_c: string, id: string, except?: readonly string[]) =>
+    ((takes[id]?.validators as string[] | undefined) ?? []).find((v) => v !== "me" && !except?.includes(v)) ?? null
+
+  it("undo works when the pieces were approved since, and notes who approved each piece with the step", async () => {
+    const takes: Takes = { a: { trimEndMs: 1500, validators: ["rosa"] }, b: { trimStartMs: 1500, pieceOf: "a", validators: ["remi", "me"] } }
+    const { ctx, handlers } = ctxFor(takes, { approvedByOthers: others(takes) })
+    const rec = record(["rita"])
+    expect(await handlers["take.cut"].undo({ cuts: [rec] })).toEqual({ kind: "done" })
+    expect(ctx.uncut).toHaveBeenCalledWith(rec)
+    expect(rec.pieceVoters).toEqual({ first: ["rosa"], second: ["remi", "me"] })
+    // Saved with the step after the handler runs: it lasts a reload.
+    expect(JSON.parse(JSON.stringify({ cuts: [rec] })).cuts[0].pieceVoters).toEqual({ first: ["rosa"], second: ["remi", "me"] })
+  })
+
+  it("redo is not stopped by the approvals the take had before the cut (the Undo gave those back)", async () => {
+    const takes: Takes = { a: { validators: ["rita", "ravi"] } }
+    const { ctx, handlers } = ctxFor(takes, { approvedByOthers: others(takes) })
+    expect(await handlers["take.cut"].redo({ cuts: [record(["rita", "ravi"])] })).toEqual({ kind: "done" })
+    expect(ctx.cut).toHaveBeenCalledTimes(1)
+  })
+
+  it("redo notes the take's approvals as they are now: what the next Undo gives back", async () => {
+    const takes: Takes = { a: { validators: ["rita", "me"] } }
+    const { handlers } = ctxFor(takes, { approvedByOthers: others(takes) })
+    const rec = record(["rita"])
+    expect(await handlers["take.cut"].redo({ cuts: [rec] })).toEqual({ kind: "done" })
+    expect(rec.before.validators).toEqual(["rita", "me"])
+  })
+
+  it("redo is skipped, naming them, when someone else approved the joined take after the Undo", async () => {
+    const takes: Takes = { a: { validators: ["rita", "rafa"] } }
+    const { ctx, handlers } = ctxFor(takes, { approvedByOthers: others(takes) })
+    expect(await handlers["take.cut"].redo({ cuts: [record(["rita"])] })).toEqual({ kind: "skipped", reason: "approved", by: "rafa" })
+    expect(ctx.cut).not.toHaveBeenCalled()
+  })
+
+  it("your own approval of the joined take does not stop the redo", async () => {
+    const takes: Takes = { a: { validators: ["me"] } }
+    const { handlers } = ctxFor(takes, { approvedByOthers: others(takes) })
+    expect(await handlers["take.cut"].redo({ cuts: [record([])] })).toEqual({ kind: "done" })
+  })
+
+  it("redo after someone changed or deleted the take in between is skipped", async () => {
+    const trimmed: Takes = { a: { trimEndMs: 5000 } }
+    expect(await ctxFor(trimmed).handlers["take.cut"].redo({ cuts: [record([])] })).toEqual({ kind: "skipped", reason: "changed" })
+    expect(await ctxFor({}).handlers["take.cut"].redo({ cuts: [record([])] })).toEqual({ kind: "skipped", reason: "gone" })
+    // The removed piece was brought back by someone since.
+    const back: Takes = { a: {}, b: { trimStartMs: 1500, pieceOf: "a" } }
+    expect(await ctxFor(back).handlers["take.cut"].redo({ cuts: [record([])] })).toEqual({ kind: "skipped", reason: "changed" })
+  })
+
+  it("a cut recorded before AQU-2492 (who approved it unknown) redoes as before", async () => {
+    const takes: Takes = { a: { validators: ["rafa"] } }
+    const { handlers } = ctxFor(takes, { approvedByOthers: others(takes) })
+    expect(await handlers["take.cut"].redo({ cuts: [record()] })).toEqual({ kind: "done" })
   })
 })
 

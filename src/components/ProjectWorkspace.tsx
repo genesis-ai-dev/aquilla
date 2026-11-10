@@ -4426,7 +4426,14 @@ export function ProjectWorkspace() {
   // (one chip, where it was clicked) or "cut at the playhead" (every dub chip
   // under it). One user action is one history step, however many cuts it made.
   const applyTakeCut = useCallback(
-    async (cellId: string, audioId: string, atMs: number, newAudioId: string): Promise<boolean> => {
+    async (
+      cellId: string,
+      audioId: string,
+      atMs: number,
+      newAudioId: string,
+      /** AQU-2492: a Redo's pieces come back with the approvals they had at the Undo. */
+      pieceVoters?: { first: string[]; second: string[] },
+    ): Promise<boolean> => {
       if (!project?.id) return false
       const cur = readTake(cellId, audioId)
       if (!cur || !canCutAt(cur.att, atMs)) return false
@@ -4448,20 +4455,23 @@ export function ProjectWorkspace() {
       // The picture of what the server will make: the first piece ends at the
       // cut, the new one starts there, both unvalidated. The new piece claims
       // no selection — it rides its group's, through `pieceOf`.
+      // AQU-2492: on a Redo, each with the approvals it had at the Undo.
       const shared = attachmentOutFrom(audioId, att, slot)
+      const firstVoters = pieceVoters?.first ?? []
+      const secondVoters = pieceVoters?.second ?? []
       injectOptimisticAudioTrim(takeFileId, cellId, {
         ...shared,
         trimEndMs: Math.round(atMs),
-        validatorCount: 0,
-        validators: [],
+        validatorCount: firstVoters.length,
+        validators: firstVoters,
         ...(labels.firstLabel ? { label: labels.firstLabel } : {}),
       }, cutP)
       injectOptimisticAudioAttachment(takeFileId, cellId, {
         ...shared,
         audioId: newAudioId,
         trimStartMs: Math.round(atMs),
-        validatorCount: 0,
-        validators: [],
+        validatorCount: secondVoters.length,
+        validators: secondVoters,
         pieceOf: att.pieceOf ?? audioId,
         ...(labels.newLabel ? { label: labels.newLabel } : {}),
       }, cutP, { claimSelection: false })
@@ -4497,14 +4507,19 @@ export function ProjectWorkspace() {
         author: currentUsername,
       })
       if (piece) {
-        injectOptimisticAudioRemove(fileId, c.cellId, c.newAudioId, piece.att.slot ?? slot, batchP.then((ids) => ids[0]!))
+        injectOptimisticAudioRemove(fileId, c.cellId, c.newAudioId, piece.att.slot ?? slot, batchP)
       }
+      // AQU-2492: the joined take shows the approvals it had before the cut,
+      // which the server gives back — never the first piece's.
+      const wholeVoters = c.before.validators ?? []
       injectOptimisticAudioTrim(fileId, c.cellId, {
         ...attachmentOutFrom(c.audioId, cur.att, slot),
         trimStartMs,
         trimEndMs: c.before.trimEndMs,
+        validatorCount: wholeVoters.length,
+        validators: wholeVoters,
         ...(c.renamed ? { label: c.before.label } : {}),
-      }, batchP.then((ids) => ids[1]!))
+      }, batchP)
       await batchP
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       notifyAudioAttachmentsChanged(fileId)
@@ -4567,6 +4582,8 @@ export function ProjectWorkspace() {
             label: cur.att.label ?? null,
             targetOffsetMs: cur.att.targetOffsetMs ?? null,
             recordingsOffsetMs: cur.att.recordingsOffsetMs ?? null,
+            // AQU-2492: who had approved it, which its Undo gives back.
+            validators: [...(cur.att.validators ?? [])],
           },
           renamed: pieceLabels(cut.audioId, cur.owner.cell.attachments).firstLabel != null,
         })
@@ -15717,9 +15734,8 @@ export function ProjectWorkspace() {
         applyTrim: (cellId, audioId, w) => applyTakeTrim(cellId, audioId, w),
         applyGain: (cellId, audioId, level) => applyTakeGain(cellId, audioId, level),
         applyPlace: (cellId, audioId, place) => applyTakePlace(cellId, audioId, place),
-        cut: (c, newAudioId) => applyTakeCut(c.cellId, c.audioId, c.atMs, newAudioId),
+        cut: (c, newAudioId) => applyTakeCut(c.cellId, c.audioId, c.atMs, newAudioId, c.pieceVoters),
         uncut: applyTakeUncut,
-        newPieceId: (c) => newPieceAudioId(c.cellId, c.audioId),
         select: applyTakeSelect,
         remove: (cellId, audioId) => applyTakeRemove(cellId, audioId),
         rename: async (cellId, audioId, label) => {
@@ -15728,8 +15744,8 @@ export function ProjectWorkspace() {
           if (owner) notifyAudioAttachmentsChanged(owner.fileId)
         },
         // Decision 11: a take that was added (recorded, uploaded, generated…).
-        approvedByOthers: (cellId, audioId) =>
-          (readAtt(cellId, audioId)?.validators ?? []).find((v) => v !== currentUsername) ?? null,
+        approvedByOthers: (cellId, audioId, except) =>
+          (readAtt(cellId, audioId)?.validators ?? []).find((v) => v !== currentUsername && !except?.includes(v)) ?? null,
         liveGroup: (cellId, audioId) => {
           const atts = resolveTakeCellRef.current(cellId)?.cell.attachments ?? {}
           const group = atts[audioId]?.pieceOf ?? audioId

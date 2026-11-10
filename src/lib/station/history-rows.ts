@@ -93,6 +93,9 @@ export function historyRowsFromEvents(
           )
         } else rows.push({ key: "editor.station.hRecorded", ...who })
         break
+      // AQU-2492: undoing a cut gives the take its whole window back, and
+      // reads as the trim that it always was here.
+      case "cell.audio.uncut":
       case "cell.audio.trim": {
         // An open end is THAT version's edge: an earlier version's trim must
         // not read the open version's length (found in the browser walk:

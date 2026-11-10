@@ -25,7 +25,11 @@ export interface CutRecord {
   /** The piece that was cut (it keeps the first half). */
   audioId: string
   atMs: number
-  /** The second half's id. A redo mints a fresh one and stores it here. */
+  /**
+   * The second half's id. AQU-2492: a Redo names it again, and the server
+   * brings that piece back as the Undo left it, approvals and all (a step
+   * redone before AQU-2492 stored the fresh id it minted here).
+   */
   newAudioId: string
   before: {
     trimEndMs: number | null
@@ -33,9 +37,18 @@ export interface CutRecord {
     targetOffsetMs: number | null
     /** AQU-2267: absent on a cut recorded before it (read as null). */
     recordingsOffsetMs?: number | null
+    /** AQU-2492: who had approved the take when it was cut. Absent on a cut
+     *  recorded before AQU-2492. */
+    validators?: string[]
   }
   /** Whether the cut renamed the first piece ("Take 3" → "Take 3 · 1"). */
   renamed: boolean
+  /**
+   * AQU-2492: who had approved each piece when the cut was undone, noted by
+   * the Undo, so the Redo paints them at once. The approvals themselves are
+   * kept by the server (`cell.audio.uncut`), which the Redo gives back.
+   */
+  pieceVoters?: { first: string[]; second: string[] }
 }
 
 export interface TakeWindowData { cellId: string; audioId: string; before: TakeWindow; after: TakeWindow }
@@ -102,17 +115,19 @@ export interface TakeStepContext {
   applyGain?(cellId: string, audioId: string, level: TakeLevel): Promise<void>
   /** AQU-2267: both places, in one write. */
   applyPlace(cellId: string, audioId: string, place: StoredTakePlace): Promise<void>
-  /** Cut `c.audioId` at `c.atMs` into a new piece `newAudioId`. */
+  /** Cut `c.audioId` at `c.atMs` into a piece `newAudioId` (AQU-2492: on a
+   *  Redo, the piece the Undo removed, which comes back as it was). */
   cut(c: CutRecord, newAudioId: string): Promise<boolean>
-  /** Join a cut back: remove the second piece, give the first its end (and name) back. */
+  /** Join a cut back: remove the second piece, give the first its end (and
+   *  name) back, and (AQU-2492) the take its approvals from before the cut. */
   uncut(c: CutRecord): Promise<void>
-  newPieceId(c: CutRecord): string
   /** Choose a take (null empties the slot). Choosing a deleted take un-deletes it. */
   select(cellId: string, slot: string, audioId: string | null): Promise<void>
   remove(cellId: string, audioId: string): Promise<void>
   rename(cellId: string, audioId: string, label: string | null): Promise<void>
-  /** Someone other than you who has approved the take, or null (gap 25). */
-  approvedByOthers?(cellId: string, audioId: string): string | null
+  /** Someone other than you who has approved the take, or null (gap 25).
+   *  AQU-2492: `except` names approvals that do not count as new. */
+  approvedByOthers?(cellId: string, audioId: string, except?: readonly string[]): string | null
   /** Every live take in the take's group (a cut take's pieces), itself included. */
   liveGroup?(cellId: string, audioId: string): string[]
   /** A line lost (or got back) a recording of its own: the workspace keeps the
@@ -161,9 +176,13 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
   // A cut can be joined back only while both halves are exactly as the cut
   // left them — the first ends at the cut, the second starts there, runs to
   // the old end and has not been moved. Anything else means someone has worked
-  // on the pieces since, and joining them would throw that work away. Votes
-  // are NOT restored on undo: the cut reset them, and putting back someone
-  // else's vote would be casting it for them.
+  // on the pieces since, and joining them would throw that work away.
+  // AQU-2492 (review, Nov 9; Sam's call the same day): approvals never stop
+  // it. "I would like an approved cut to still be undoable. We just need to
+  // remember the approval for if the cut is redone." The server keeps them:
+  // the Undo gives the take back the approvals it had before the cut and keeps
+  // the pieces' approvals, and the Redo gives those back — the voters' own,
+  // as they were, never cast for them.
   const intact = (c: CutRecord): boolean | null => {
     const first = ctx.readTake(c.cellId, c.audioId)
     const second = ctx.readTake(c.cellId, c.newAudioId)
@@ -258,16 +277,40 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
         const checks = d.cuts.map(intact)
         if (checks.some((x) => x == null)) return GONE
         if (checks.some((x) => !x)) return CHANGED
-        for (const c of d.cuts) await ctx.uncut(c)
+        for (const c of d.cuts) {
+          // AQU-2492: who approved each piece now, noted with the step (it is
+          // saved after this runs, so it lasts a reload) for the Redo.
+          c.pieceVoters = {
+            first: [...(ctx.readTake(c.cellId, c.audioId)?.validators ?? [])],
+            second: [...(ctx.readTake(c.cellId, c.newAudioId)?.validators ?? [])],
+          }
+          await ctx.uncut(c)
+        }
         return DONE
       },
       async redo(d: TakeCutData) {
         const checks = d.cuts.map(whole)
         if (checks.some((x) => x == null)) return GONE
         if (checks.some((x) => !x)) return CHANGED
+        // AQU-2492: the piece the Undo removed was brought back since, by
+        // someone: the take is no longer as the Undo left it.
+        if (d.cuts.some((c) => ctx.readTake(c.cellId, c.newAudioId))) return CHANGED
+        // AQU-2492 (review, Nov 9): someone else approved the joined take
+        // after the Undo. Cutting it again would take their approval off it,
+        // the same rule as redoing a delete. The approvals the take had before
+        // the cut are not new: the Undo gave those back.
         for (const c of d.cuts) {
-          const id = ctx.newPieceId(c)
-          if (await ctx.cut(c, id)) c.newAudioId = id
+          if (!c.before.validators) continue
+          const by = ctx.approvedByOthers?.(c.cellId, c.audioId, c.before.validators)
+          if (by) return { kind: "skipped", reason: "approved", by }
+        }
+        // AQU-2492: the piece the Undo removed is named again, and comes back
+        // as it was, with its approvals; the first piece gets back the
+        // approvals it had at the Undo. A cut by hand mints a new piece. The
+        // take's approvals now are what the next Undo gives back.
+        for (const c of d.cuts) {
+          c.before.validators = [...(ctx.readTake(c.cellId, c.audioId)?.validators ?? [])]
+          await ctx.cut(c, c.newAudioId)
         }
         return DONE
       },

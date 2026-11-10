@@ -103,6 +103,8 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   'cell.audio.place': ROLE.CONTRIBUTOR,
   // AQU-1767: cutting a take needs exactly what trimming it needs (Sam, 2026-10-12).
   'cell.audio.cut': ROLE.CONTRIBUTOR,
+  // AQU-2492: undoing a cut needs what cutting it needed.
+  'cell.audio.uncut': ROLE.CONTRIBUTOR,
   'cell.audio.measure': ROLE.CONTRIBUTOR,
 
   // AQU-777: per-cell file attachments. Same floor as the other per-cell blob

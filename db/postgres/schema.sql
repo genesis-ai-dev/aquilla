@@ -695,6 +695,26 @@ CREATE TABLE IF NOT EXISTS removed_cell_archive (
 CREATE INDEX IF NOT EXISTS idx_removed_cell_archive_cell
     ON removed_cell_archive (project_id, file_id, cell_id, deleted_ts DESC);
 
+-- AQU-2492 (migration 0199): the approvals a cut, or the undo of a cut, took
+-- off a take, keyed by that event, so undoing the cut gives the take its
+-- approvals back and redoing it gives them to its pieces again. Written once
+-- by the projection; see the migration for the full rules.
+CREATE TABLE IF NOT EXISTS cell_audio_cut_votes (
+    event_id      TEXT PRIMARY KEY,
+    project_id    TEXT NOT NULL,
+    file_id       TEXT NOT NULL,
+    cell_id       TEXT NOT NULL,
+    piece_id      TEXT NOT NULL,
+    audio_id      TEXT NOT NULL,
+    kind          TEXT NOT NULL CHECK (kind IN ('whole', 'first')),
+    url           TEXT,
+    votes         JSONB NOT NULL DEFAULT '[]'::jsonb,
+    archived_seq  BIGINT,
+    archived_ts   BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cell_audio_cut_votes_cut
+    ON cell_audio_cut_votes (project_id, file_id, cell_id, piece_id, kind);
+
 -- Decision 11 (migration 0191): each person's undo history for a project, so
 -- it follows them between devices. One row per (project, person); `history`
 -- is the client's JSON document and `revision` the compare-and-swap counter a

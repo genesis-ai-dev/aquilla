@@ -1374,8 +1374,11 @@ export async function emitCellAudioRemove(input: CellAudioRemoveInput): Promise<
  * AQU-1767: undo a cut — remove the new piece, give the first piece its old
  * end back, and (when the cut renamed it) its old name — as ONE outbox write.
  * Queued one at a time, a tab closed in between kept the removal and lost the
- * trim, leaving the take's tail missing. Returns the three event ids in order
- * (the rename's only when there is one).
+ * trim, leaving the take's tail missing.
+ *
+ * AQU-2492 (review, Nov 9): as ONE event, `cell.audio.uncut`, so the server
+ * can also give the take back the approvals it had before the cut and keep
+ * the pieces' approvals for a Redo. Returns its event id.
  */
 export async function emitCellAudioUncut(input: {
   projectId: string
@@ -1392,28 +1395,24 @@ export async function emitCellAudioUncut(input: {
   targetLang?: string
   laneId?: string
   author: string
-}): Promise<string[]> {
-  const base = {
+}): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.audio.uncut",
     projectId: input.projectId,
     fileId: input.fileId,
     cellId: input.cellId,
     parentId: null,
     author: input.author,
-  }
-  const lane = targetLaneFields(input)
-  const inputs: BuildEventInput<OutboxEventKind>[] = [
-    { ...base, kind: "cell.audio.remove", payload: { audioId: input.removeAudioId, ...lane } },
-    {
-      ...base,
-      kind: "cell.audio.trim",
-      payload: { audioId: input.audioId, trimStartMs: input.trimStartMs, trimEndMs: input.trimEndMs, ...lane },
+    payload: {
+      audioId: input.audioId,
+      pieceAudioId: input.removeAudioId,
+      trimStartMs: input.trimStartMs,
+      trimEndMs: input.trimEndMs,
+      ...(input.rename ? { rename: { label: input.rename.label } } : {}),
+      ...targetLaneFields(input),
     },
-    ...(input.rename
-      ? [{ ...base, kind: "cell.audio.rename" as const, payload: { audioId: input.audioId, label: input.rename.label, ...lane } }]
-      : []),
-  ] as BuildEventInput<OutboxEventKind>[]
-  const queued = await enqueueEvents(inputs)
-  return queued.map((q) => q.eventId)
+  })
+  return eventId
 }
 
 // ── Audio validation (AQU-490) ────────────────────────────────────────────

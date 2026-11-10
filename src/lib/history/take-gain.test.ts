@@ -13,7 +13,6 @@ function ctxWith(att: Record<string, unknown> | null) {
     applyPlace: async () => {},
     cut: async () => true,
     uncut: async () => {},
-    newPieceId: () => "x",
     select: async () => {},
     remove: async () => {},
     rename: async () => {},

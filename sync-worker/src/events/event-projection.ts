@@ -48,6 +48,7 @@ import { visibleCellIdSql, visibleSourceSql } from './hidden-cells-scope'
 import { liveCellIdSql, liveSourceSql } from './tombstoned-cells-scope'
 import { coerceExternalIds } from '../../../src/lib/terminology/external-ids'
 import { buildRemovedCellArchiveStmt, buildRemovedCellRestoreStmts } from './removed-cell-archive'
+import { cutVoteArchiveStmt, cutVoteRestoreStmt } from './cut-vote-archive'
 
 export { laneIdResolveBinds, laneIdResolveSql } from './lane-id-sql'
 import { buildFileRevisionIndexStmts } from './file-revision-sql'
@@ -2459,6 +2460,10 @@ case 'cell.audio.attach': {
       //   2-4. ONLY IF step 1's row exists with THIS event's id: shorten the
       //      original to [old start, atMs], drop its votes, recount them.
       //      Gating on the new row means a refused cut changes nothing at all.
+      // AQU-2492 (review, Nov 9): the votes are ARCHIVED, not thrown away
+      // (cut-vote-archive.ts), and a cut naming the piece an undo of it
+      // removed is that cut's Redo: the piece comes back (step 0) and the
+      // first piece gets back the votes it had when the cut was undone.
       const p = event.payload as EventPayloads['cell.audio.cut']
       if (!event.fileId || !event.cellId) {
         throw new Error(`cell.audio.cut event ${event.id} is missing fileId or cellId`)
@@ -2474,6 +2479,30 @@ case 'cell.audio.attach': {
         throw new Error(`cell.audio.cut event ${event.id} has a malformed payload`)
       }
       const atMs = Math.round(p.atMs)
+      // 0. AQU-2492: the Redo. The piece is a removed piece of this take,
+      //    over the same bytes, starting at the cut and running to the take's
+      //    end — exactly as the undo left it — and the cut is one this take
+      //    can take now. It comes back as it was (name, places, level, its
+      //    own votes), chosen as the take is, and owned by this event, so
+      //    the gate below reads it as landed.
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cell_audio b SET deleted = 0, selected = a.selected, event_id = ?
+               FROM cell_audio a
+              WHERE b.project_id = ? AND b.file_id = ? AND b.cell_id = ? AND b.audio_id = ?
+                AND b.deleted = 1
+                AND a.project_id = b.project_id AND a.file_id = b.file_id AND a.cell_id = b.cell_id
+                AND a.audio_id = ? AND a.deleted = 0 AND a.role = 'dub'
+                AND b.piece_of = COALESCE(a.piece_of, a.audio_id)
+                AND b.url = a.url
+                AND b.trim_start_ms = ?
+                AND b.trim_end_ms IS NOT DISTINCT FROM a.trim_end_ms
+                AND ? >= COALESCE(a.trim_start_ms, 0) + ${CUT_MIN_PIECE_MS}
+                AND ? <= COALESCE(a.trim_end_ms, a.duration_ms) - ${CUT_MIN_PIECE_MS}`,
+          )
+          .bind(event.id, event.projectId, event.fileId, event.cellId, p.newAudioId, p.audioId, atMs, atMs, atMs),
+      )
       stmts.push(
         db
           .prepare(
@@ -2532,6 +2561,9 @@ case 'cell.audio.attach': {
       )
       // Both halves start unvalidated (Sam, 2026-10-12): what a reviewer
       // approved was the whole take, and neither half is that any more.
+      // AQU-2492: kept with the cut, for its Undo — then taken off.
+      const cutEvent = { id: event.id, projectId: event.projectId, fileId: event.fileId, cellId: event.cellId, serverTs: event.serverTs, serverSeq: event.serverSeq }
+      stmts.push(cutVoteArchiveStmt(db, cutEvent, { pieceId: p.newAudioId, audioId: p.audioId, kind: 'whole', gate: cutLanded, gateBinds: cutLandedBinds }))
       stmts.push(
         db
           .prepare(
@@ -2541,6 +2573,78 @@ case 'cell.audio.attach': {
           )
           .bind(event.projectId, event.fileId, event.cellId, p.audioId, ...cutLandedBinds),
       )
+      // AQU-2492: a Redo gives the first piece the votes it had when the cut
+      // was undone. A new cut has no such archive, so its halves start bare.
+      stmts.push(cutVoteRestoreStmt(db, cutEvent, { pieceId: p.newAudioId, audioId: p.audioId, kind: 'first', gate: cutLanded, gateBinds: cutLandedBinds }))
+      stmts.push(audioValidatorCountRecomputeStmt(db, event.projectId, event.fileId, event.cellId, p.audioId))
+      return ['cell_audio', 'cell_audio_validators']
+    }
+
+    case 'cell.audio.uncut': {
+      // AQU-2492 (review, Nov 9; Sam's call the same day): undo a cut, as ONE
+      // event. See the payload doc in types.ts and cut-vote-archive.ts.
+      //   1-3. ONLY while the cut's piece is a live piece of this take: keep
+      //        the first piece's votes with this undo (for a Redo), take them
+      //        off, and give the take back the votes the cut archived.
+      //   4.   Remove the piece (soft: its votes stay on it, for a Redo).
+      //   5-6. Give the first piece its whole window (and name) back — as the
+      //        trim and rename this event replaces always did, gate or not.
+      const p = event.payload as EventPayloads['cell.audio.uncut']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`cell.audio.uncut event ${event.id} is missing fileId or cellId`)
+      }
+      if (
+        typeof p.audioId !== 'string' ||
+        typeof p.pieceAudioId !== 'string' ||
+        p.pieceAudioId === '' ||
+        p.pieceAudioId === p.audioId
+      ) {
+        throw new Error(`cell.audio.uncut event ${event.id} has a malformed payload`)
+      }
+      const pieceLive = `EXISTS (SELECT 1 FROM cell_audio b
+                          JOIN cell_audio t ON t.project_id = b.project_id AND t.file_id = b.file_id AND t.cell_id = b.cell_id
+                         WHERE b.project_id = ? AND b.file_id = ? AND b.cell_id = ? AND b.audio_id = ?
+                           AND b.deleted = 0 AND t.audio_id = ? AND t.deleted = 0
+                           AND b.piece_of = COALESCE(t.piece_of, t.audio_id))`
+      const pieceLiveBinds = [event.projectId, event.fileId, event.cellId, p.pieceAudioId, p.audioId]
+      const uncutEvent = { id: event.id, projectId: event.projectId, fileId: event.fileId, cellId: event.cellId, serverTs: event.serverTs, serverSeq: event.serverSeq }
+      stmts.push(cutVoteArchiveStmt(db, uncutEvent, { pieceId: p.pieceAudioId, audioId: p.audioId, kind: 'first', gate: pieceLive, gateBinds: pieceLiveBinds }))
+      stmts.push(
+        db
+          .prepare(
+            `DELETE FROM cell_audio_validators
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?
+                AND ${pieceLive}`,
+          )
+          .bind(event.projectId, event.fileId, event.cellId, p.audioId, ...pieceLiveBinds),
+      )
+      stmts.push(cutVoteRestoreStmt(db, uncutEvent, { pieceId: p.pieceAudioId, audioId: p.audioId, kind: 'whole', gate: pieceLive, gateBinds: pieceLiveBinds }))
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cell_audio SET deleted = 1, selected = 0
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+          )
+          .bind(event.projectId, event.fileId, event.cellId, p.pieceAudioId),
+      )
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cell_audio SET trim_start_ms = ?, trim_end_ms = ?
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+          )
+          .bind(p.trimStartMs ?? null, p.trimEndMs ?? null, event.projectId, event.fileId, event.cellId, p.audioId),
+      )
+      if (p.rename) {
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cell_audio SET label = ?
+                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+            )
+            .bind(p.rename.label ?? null, event.projectId, event.fileId, event.cellId, p.audioId),
+        )
+      }
       stmts.push(audioValidatorCountRecomputeStmt(db, event.projectId, event.fileId, event.cellId, p.audioId))
       return ['cell_audio', 'cell_audio_validators']
     }

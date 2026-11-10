@@ -147,6 +147,22 @@ describe("AQU-924 — a failed audio attach survives a reload", () => {
     expect(shadows![0].kind).toBe("remove")
   })
 
+  // AQU-2492 (review, Nov 9): undoing a cut is one event now, not a remove, a
+  // trim and a rename; a queued one still takes the cut's piece off the screen.
+  it("rehydrates a PENDING undo of a cut as the removal of the piece the cut made", async () => {
+    await enqueueOutboxEvent(
+      attachEvent({
+        id: "evt-uncut",
+        kind: "cell.audio.uncut",
+        payload: { audioId: AUDIO_ID, pieceAudioId: "piece-b.wav", trimStartMs: null, trimEndMs: null },
+      }),
+    )
+    await rehydrateShadowsFromOutbox(PROJECT, FILE)
+    const shadows = getOptimisticShadows(FILE).get(CELL)
+    expect(shadows).toHaveLength(1)
+    expect(shadows![0]).toMatchObject({ kind: "remove", audioId: "piece-b.wav", eventId: "evt-uncut" })
+  })
+
   it("retryFailedAudioSync puts the clip's stuck attach back on the queue", async () => {
     await enqueueOutboxEvent(attachEvent())
     await quarantineOutboxEvents(["evt-attach-1"], { status: 403, reason: "HTTP 403" })

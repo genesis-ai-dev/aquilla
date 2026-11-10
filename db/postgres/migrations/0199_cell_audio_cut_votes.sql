@@ -1,0 +1,53 @@
+-- 0199_cell_audio_cut_votes.sql — AQU-2492: undoing a cut keeps the approvals.
+--
+-- A cut keeps the take's id on its first piece, and an audio vote is keyed by
+-- take id, so the take's approvals and its first piece's approvals cannot both
+-- live in `cell_audio_validators`. `cell.audio.cut` used to DELETE the take's
+-- votes, and undoing the cut gave nothing back (Sam, Nov 9: "I would like an
+-- approved cut to still be undoable. We just need to remember the approval for
+-- if the cut is redone").
+--
+-- Each swap now archives the votes it takes off the piece here, keyed by the
+-- event that took them, the way `removed_cell_archive` (0178) keeps what a row
+-- removal took:
+--   - `cell.audio.cut` archives the take's votes as kind 'whole';
+--   - `cell.audio.uncut` (its Undo) archives the first piece's votes as kind
+--     'first' and puts the newest 'whole' archive of that cut back;
+--   - the Redo (a cut naming the piece the undo removed) archives 'whole'
+--     again and puts the newest 'first' archive back.
+-- The cut's second piece needs no row: an undo soft-deletes it, and a removed
+-- take keeps its votes until it is brought back.
+--
+--   piece_id      the cut's second piece: names the cut.
+--   audio_id      the piece the cut was made in (it keeps the first half).
+--   url           the audio the votes were given to; an archive comes back
+--                 only while the take still plays it (AQU-1571).
+--   votes         the `cell_audio_validators` rows, as to_jsonb, exactly.
+--   archived_seq  the archiving event's server_seq: a restore takes the
+--                 newest archive written BEFORE its own event, so a rebuild
+--                 picks the one the live write did.
+--
+-- Written ONCE (ON CONFLICT DO NOTHING): a projection rebuild replays these
+-- events against today's state, and the live copy is the truth. Written and
+-- read only by the sync-worker's projection; no app read path touches it.
+-- Idempotent; a database loaded from schema.sql already has it.
+--
+-- Numbered 0199: 0197 is the newest on dev, and 0198 is taken on two
+-- unlanded branches (AQU-2253, AQU-2459).
+
+CREATE TABLE IF NOT EXISTS cell_audio_cut_votes (
+    event_id      TEXT PRIMARY KEY,
+    project_id    TEXT NOT NULL,
+    file_id       TEXT NOT NULL,
+    cell_id       TEXT NOT NULL,
+    piece_id      TEXT NOT NULL,
+    audio_id      TEXT NOT NULL,
+    kind          TEXT NOT NULL CHECK (kind IN ('whole', 'first')),
+    url           TEXT,
+    votes         JSONB NOT NULL DEFAULT '[]'::jsonb,
+    archived_seq  BIGINT,
+    archived_ts   BIGINT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_cell_audio_cut_votes_cut
+    ON cell_audio_cut_votes (project_id, file_id, cell_id, piece_id, kind);

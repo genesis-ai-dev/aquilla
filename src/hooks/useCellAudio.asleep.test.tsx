@@ -23,6 +23,7 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 import { encodeWavPcm16 } from "@/lib/audio/wav-encode"
 import { __resetMixerForTests, MIXER_WAKE_WAIT_MS } from "@/lib/audio/mixer"
 import { getOutputContext, resetOutputContextForTests } from "@/lib/audio/output-context"
+import { __resetMicHoldForTests, setMicHeld } from "@/lib/audio/mic-hold"
 
 vi.mock("@/hooks/useFrontierSession", () => ({ useFrontierSession: () => ({ session: { jwt: "j", username: "u" } }) }))
 vi.mock("@/lib/offline/connectivity", () => ({ isOnline: async () => null }))
@@ -137,6 +138,7 @@ beforeEach(async () => {
 })
 afterEach(() => {
   vi.unstubAllGlobals()
+  __resetMicHoldForTests()
   __resetMixerForTests()
   resetOutputContextForTests()
 })
@@ -366,5 +368,62 @@ describe("one take at a time, and nothing starts after you have moved on", () =>
     await act(async () => { held.resolve("https://sync.example/audio/a1.wav?t=x"); download.resolve(bytes5); await held.promise })
     await flush()
     expect(FakeAudio.instances.every((x) => x.paused)).toBe(true)
+  })
+})
+
+// AQU-2494 (review, Nov 9), finding 11: the recording window holds the
+// microphone for as long as it is open (mic-hold.ts), and creating or first
+// waking the audio context then reconfigures the device — on a headset that
+// reached the microphone and ate the head of a take. The timeline's preview
+// button refuses to open a context while the mic is held; these players now
+// never touch the context at all then: a take with a level plays straight to
+// the output, at its level on the player.
+describe("finding 11: in the recording window, with the microphone held", () => {
+  it("a take with a level opens no audio context: it plays straight to the output at its level", async () => {
+    setMicHeld(true)
+    const cell = cellOf({ a1: take({ gainDb: -6 }) }, "a1")
+    const { result } = renderHook(() => useCellAudio(project, cell, "f1"))
+    await press(() => result.current.play())
+    await flush()
+    expect(StubCtx.made).toHaveLength(0)
+    const a = FakeAudio.instances[0]
+    expect(a.paused).toBe(false)
+    expect(a.volume).toBeCloseTo(dB(-6), 5)
+  })
+
+  it("an asleep context is not woken, and nothing goes into it", async () => {
+    const ctx = getOutputContext() as unknown as StubCtx
+    setMicHeld(true)
+    const cell = cellOf({ a1: take({ gainDb: -6 }) }, "a1")
+    const { result } = renderHook(() => useCellAudio(project, cell, "f1"))
+    await press(() => result.current.play())
+    await flush()
+    expect(ctx.resumes).toBe(0)
+    expect(ctx.routed).toEqual([])
+    expect(FakeAudio.instances[0].paused).toBe(false)
+  })
+
+  it("a player already through the mixer is made again straight to the output, where it was", async () => {
+    const cell = cellOf({ a1: take({ gainDb: -6 }) }, "a1")
+    const { result } = renderHook(() => useCellAudio(project, cell, "f1"))
+    await press(() => result.current.play())
+    await flush()
+    const [ctx] = StubCtx.made
+    const first = FakeAudio.instances[0]
+    expect(ctx.routed).toEqual([first])
+    act(() => result.current.pause())
+    first.currentTime = 2
+    ctx.state = "suspended"
+    setMicHeld(true)
+    await press(() => result.current.play())
+    await flush()
+    expect(FakeAudio.instances).toHaveLength(2)
+    const made = FakeAudio.instances[1]
+    expect(ctx.routed).toEqual([first])
+    expect(ctx.resumes).toBe(0)
+    act(() => made.onloadedmetadata?.())
+    expect(made.currentTime).toBeCloseTo(2)
+    expect(made.paused).toBe(false)
+    expect(made.volume).toBeCloseTo(dB(-6), 5)
   })
 })

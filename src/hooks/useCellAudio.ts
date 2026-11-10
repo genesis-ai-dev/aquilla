@@ -32,6 +32,7 @@ import {
   type ClipLevels,
 } from "@/lib/audio/mixer"
 import { getOutputContext } from "@/lib/audio/output-context"
+import { micIsHeld } from "@/lib/audio/mic-hold"
 import { selectedPieceIds } from "@/lib/sync/cell-audio-read-types"
 import type { CodexCell } from "@/lib/codex-editor/types"
 import type { ProjectRecord } from "@/lib/parsers/types"
@@ -595,12 +596,15 @@ export function useCellAudio(
    * never re-wired while it plays: it finishes the way it started, and the
    * next play goes through the mixer. A streamed take's bytes are fetched
    * behind it for that. A take with no level set stays off the mixer.
+   *
+   * Never into the mixer while the recording window holds the microphone
+   * (finding 11: see `play`).
    */
   const applyLevel = useCallback((a: HTMLAudioElement): void => {
     const { slot, level } = takeLevelRef.current(joinedRef.current)
     if (isMixed(a)) { mixElement(a, slot, level); return }
     // Paused (just made, or between plays): it may go into the mixer now.
-    if (level && a.paused && mixElement(a, slot, level, { unlessAsleep: true })) return
+    if (level && a.paused && !micIsHeld() && mixElement(a, slot, level, { unlessAsleep: true })) return
     if (level) setPlayerMuted(a, false)
     playUnmixed(a, level, volumeRef.current * (level ? mixerVolume() : 1))
     if (level && streamedRef.current && !bytesRef.current) void ensureBytes().catch(() => { /* it plays streamed */ })
@@ -622,15 +626,23 @@ export function useCellAudio(
     // and opens it here when the page has none yet, so a take with a volume or
     // fades can go through the mixer from the first press after a load.
     const levelled = takeLevelRef.current(null).level != null
-    if (levelled) {
+    // AQU-2494 (review, Nov 9), finding 11: …except while the recording
+    // window holds the microphone (mic-hold.ts). Creating or first waking the
+    // context then reconfigures the audio device, and on a headset that
+    // reaches the microphone: it ate the head of a take twice. The timeline's
+    // preview button refuses to open one then (clip-preview.ts); these players
+    // do not touch the context at all: the take plays straight to the output.
+    const micHeldNow = micIsHeld()
+    if (levelled && !micHeldNow) {
       getOutputContext()
       wakeMixer()
     }
     // A take that started streamed finished that way. Once its bytes are on
     // this device, the next play makes it again from them, where it was, so
-    // it goes through the mixer.
+    // it goes through the mixer. And with the mic held, a player that went
+    // through the mixer before is made again straight to the output.
     const stale = audioRef.current
-    if (stale && stale.paused && levelled && streamedRef.current && bytesRef.current) {
+    if (stale && stale.paused && ((levelled && !micHeldNow && streamedRef.current && bytesRef.current) || (micHeldNow && isMixed(stale)))) {
       pendingStartRef.current = stale.ended ? null : elTime(stale)
       letGo(stale)
     }
@@ -648,7 +660,7 @@ export function useCellAudio(
       // AQU-2494 (review, Nov 9): a player sent straight to the output while
       // the context slept goes into the mixer now, paused, once the context
       // this press woke is running (given its moment, as on the timeline).
-      if (levelled && !isMixed(a)) {
+      if (levelled && !micHeldNow && !isMixed(a)) {
         const wait = mixerWakeWait(a.currentSrc || a.src)
         if (wait) {
           await wait
@@ -852,7 +864,7 @@ export function useCellAudio(
       // moment before the player is wired, as the timeline's players are —
       // never more than MIXER_WAKE_WAIT_MS — so the take goes through the
       // mixer; still asleep then, it plays straight to the output.
-      if (levelled && !streamingSrc) {
+      if (levelled && !streamingSrc && !micIsHeld()) {
         const wait = mixerWakeWait(src)
         if (wait) await wait
       }

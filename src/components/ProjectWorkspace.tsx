@@ -278,7 +278,7 @@ import { attachmentOutFrom, canCutAt, newPieceAudioId, pieceLabels } from "@/lib
 import { recordGroup, recordStep, registerStepKinds, setHistoryRemote, setHistoryScope, setLaneSwitcher, setFileNamer, setOpenFileProbe, withGroup, type LaneSwitch } from "@/lib/history/history"
 import { httpHistoryRemote } from "@/lib/history/history-remote"
 import { laneAccessFor, laneShownReady, waitUntilReady, type LaneAccess } from "@/lib/history/lane-switch"
-import { CastStepBuilder, castValueOf, filmNow, mediaStepHandlers, type CastValue, type CueLinksData, type CueLinkWrite, type PendingFilm } from "@/lib/history/media-steps"
+import { CastStepBuilder, castValueOf, filmNow, mediaStepHandlers, timingNow, timingStepHandlers, type CastValue, type CueLinksData, type CueLinkWrite, type PendingFilm, type PendingTiming } from "@/lib/history/media-steps"
 import { cellLabelStepHandlers, recordCellLabelStep } from "@/lib/history/label-steps"
 import { sourceStepHandlers } from "@/lib/history/source-steps"
 import { recordingLinesStepHandlers } from "@/lib/history/recording-lines-steps"
@@ -14566,6 +14566,21 @@ export function ProjectWorkspace() {
       recordingCellId === null,
   })
   timingAckOwnWriteRef.current = { note: timingAck.noteOwnWrite, clear: timingAck.clearOwnWrite }
+  // AQU-2492 (review, Nov 9): what the open file follows as far as this tab
+  // knows: the timing written here until the project read answers (the
+  // film's rule), for the switch's Undo step and its "changed since?" guard.
+  const timingWrittenRef = useRef<Map<string, PendingTiming>>(new Map())
+  const timingReadRef = useRef(timingChoiceMode)
+  timingReadRef.current = timingChoiceMode
+  const readTimingMode = useCallback(
+    (fileId: string): AudioTimingMode | undefined => {
+      if (fileId !== activeFileId) return undefined
+      const now = timingNow(timingReadRef.current, timingWrittenRef.current.get(fileId))
+      if (now.settled) timingWrittenRef.current.delete(fileId)
+      return now.mode
+    },
+    [activeFileId],
+  )
   // Apply THIS FILE's mode: register the change as our own first (so the
   // changer never gets the "timing mode changed" modal for their own click),
   // then emit + flush + refresh — the same shape as applyLinkVideo, and the
@@ -14573,9 +14588,11 @@ export function ProjectWorkspace() {
   // On failure the own-write registration is withdrawn: leaving it standing
   // would make the abandoned attempt resurface later as somebody else's.
   const applyTimingMode = useCallback(
-    async (mode: AudioTimingMode, forFileId: string) => {
-      if (!project?.id) return
+    async (mode: AudioTimingMode, forFileId: string): Promise<boolean> => {
+      if (!project?.id) return false
       timingAck.noteOwnWrite(mode)
+      const readBefore = timingReadRef.current
+      let refused = false
       try {
         await emitFileTimingSet({
           projectId: project.id,
@@ -14583,7 +14600,14 @@ export function ProjectWorkspace() {
           timingMode: mode,
           author: currentUsername,
         })
-        await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+        // AQU-2492: a refused switch is no switch (and no Undo step).
+        const mine = (entries: ReadonlyArray<{ kind: string; fileId: string | null }>) =>
+          entries.some((r) => r.kind === "file.timing.set" && r.fileId === forFileId)
+        await flushOutboxBatch({
+          getTokenForFile: getTokenForProjectFile,
+          onRejected: (entries) => { refused ||= mine(entries) },
+          onForbidden: (entries) => { refused ||= mine(entries) },
+        })
         refresh()
       } catch (e) {
         timingAck.clearOwnWrite()
@@ -14592,7 +14616,14 @@ export function ProjectWorkspace() {
           priority: "high",
           title: e instanceof Error ? `Couldn't change the timing mode: ${e.message}` : "Couldn't change the timing mode.",
         })
+        return false
       }
+      if (refused) {
+        timingAck.clearOwnWrite()
+        return false
+      }
+      timingWrittenRef.current.set(forFileId, { mode, readBefore })
+      return true
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the ack callbacks are stable (useCallback([]))
     [project?.id, currentUsername, getTokenForProjectFile, refresh, timingAck.noteOwnWrite, timingAck.clearOwnWrite],
@@ -14617,9 +14648,23 @@ export function ProjectWorkspace() {
         })
         return
       }
-      void applyTimingMode(mode, activeFileId)
+      // AQU-2492 (review, Nov 9; Sam's call the same day): switching is an
+      // Undo step, naming what the file followed before the write went out.
+      const fileId = activeFileId
+      const fileName = activeFileNameRef.current
+      const before = readTimingMode(fileId)
+      void applyTimingMode(mode, fileId).then((ok) => {
+        if (!ok || before === undefined || before === mode) return
+        recordStep({
+          kind: "file.timing",
+          data: { fileId, before, after: mode },
+          labelKey: mode === "audioFirst" ? "editor.history.stepTimingFollowsRecordings" : "editor.history.stepTimingFollowsSource",
+          fileId,
+          fileName,
+        })
+      })
     },
-    [activeFileId, timingFilmTimed, timingNothingToFollow, applyTimingMode],
+    [activeFileId, timingFilmTimed, timingNothingToFollow, applyTimingMode, readTimingMode],
   )
   // AQU-1767 phase 2: one track action is one history step. Each change keeps
   // the fields its verb wrote, as they were before and as they are after;
@@ -15524,8 +15569,8 @@ export function ProjectWorkspace() {
     [project?.id, currentUsername, getTokenForProjectFile, refreshAudioCues, revalidateCells],
   )
   useEffect(() => {
-    return registerStepKinds(
-      mediaStepHandlers({
+    return registerStepKinds({
+      ...mediaStepHandlers({
         readFilm: readFilmLink,
         writeFilm: async (_fileId, url) => writeFilmLink(url),
         readCueLink: (textCellId, cueCellId) => {
@@ -15543,8 +15588,18 @@ export function ProjectWorkspace() {
         readVoiceSettings: () => (ttsRef.current.settings as Record<string, unknown> | undefined) ?? null,
         writeVoiceSettings: (patch) => ttsRef.current.saveTts(patch as Partial<ProjectTtsSettings>),
       }),
-    )
-  }, [readFilmLink, writeFilmLink, writeCueLinks, getTokenForProjectFile, readCastValue, writeCastValues])
+      // AQU-2492 (review, Nov 9): a file's timing, with the switch's own rules
+      // (project lead and above; a mode the file can't follow is not offered).
+      ...timingStepHandlers({
+        readTiming: readTimingMode,
+        mayChangeTiming: () => canEditTimingMode,
+        offersTiming: (_fileId, mode) =>
+          !(mode === "audioFirst" && timingFilmTimed) && !(mode === "dubbing" && timingNothingToFollow),
+        writeTiming: (fileId, mode) => applyTimingMode(mode, fileId),
+      }),
+    })
+  }, [readFilmLink, writeFilmLink, writeCueLinks, getTokenForProjectFile, readCastValue, writeCastValues,
+    readTimingMode, canEditTimingMode, timingFilmTimed, timingNothingToFollow, applyTimingMode])
   // AQU-2408: a cell's label, undone by writing the previous one back. Only the
   // open file's rows can be read, so a step held for another file is blocked
   // as "elsewhere" rather than guessed at.

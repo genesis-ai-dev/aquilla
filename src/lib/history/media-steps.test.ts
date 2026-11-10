@@ -5,12 +5,17 @@ import {
   CastStepBuilder,
   filmNow,
   mediaStepHandlers,
+  timingNow,
+  timingStepHandlers,
   voiceEntryChanges,
   voiceSettingsPatch,
   type CastValue,
+  type FileTiming,
   type MediaStepContext,
+  type TimingStepContext,
 } from "./media-steps"
 import type { StepHandler } from "./history"
+import { stepLane } from "./step-lane"
 
 function ctxFor(state: {
   film?: Record<string, string | null>
@@ -202,5 +207,74 @@ describe("voice settings entries", () => {
     const { patch: undo, applied } = voiceSettingsPatch(now, changes, "undo")
     expect(applied).toBe(1)
     expect(undo).toEqual({ laneCastAssignments: { sw: { a: "v9" } } })
+  })
+})
+
+// AQU-2492 (review, Nov 9; Sam's call the same day): switching a file's timing
+// is an Undo step. Undo puts the file back on the timing it had, Redo switches
+// it again; the switch's own role rule applies, and a switch someone else made
+// in between is left alone.
+describe("file.timing", () => {
+  function timingCtx(state: { timing: Record<string, FileTiming>; may?: boolean; filmTimed?: boolean }) {
+    const ctx: TimingStepContext = {
+      readTiming: (fileId) => state.timing[fileId],
+      mayChangeTiming: () => state.may ?? true,
+      offersTiming: (_fileId, mode) => !(mode === "audioFirst" && state.filmTimed),
+      writeTiming: vi.fn(async (fileId, mode) => {
+        state.timing[fileId] = mode
+        return true
+      }),
+    }
+    return { ctx, handlers: timingStepHandlers(ctx) as Record<string, StepHandler<unknown>> }
+  }
+  const step = { fileId: "f1", before: "dubbing" as const, after: "audioFirst" as const }
+
+  it("undo puts the file back on the timing it had, and redo switches it again", async () => {
+    const state = { timing: { f1: "audioFirst" as FileTiming } }
+    const { ctx, handlers } = timingCtx(state)
+    expect(await handlers["file.timing"].undo(step)).toEqual({ kind: "done" })
+    expect(state.timing.f1).toBe("dubbing")
+    expect(await handlers["file.timing"].redo(step)).toEqual({ kind: "done" })
+    expect(state.timing.f1).toBe("audioFirst")
+    expect(ctx.writeTiming).toHaveBeenCalledTimes(2)
+  })
+
+  it("is skipped as changed when someone else switched the file's timing in between", async () => {
+    const state = { timing: { f1: "dubbing" as FileTiming } }
+    const { ctx, handlers } = timingCtx(state)
+    expect(await handlers["file.timing"].undo(step)).toEqual({ kind: "skipped", reason: "changed" })
+    expect(ctx.writeTiming).not.toHaveBeenCalled()
+  })
+
+  it("is skipped as not allowed when the person may no longer switch timing", async () => {
+    const state = { timing: { f1: "audioFirst" as FileTiming }, may: false }
+    const { ctx, handlers } = timingCtx(state)
+    expect(await handlers["file.timing"].undo(step)).toEqual({ kind: "skipped", reason: "notAllowed" })
+    expect(ctx.writeTiming).not.toHaveBeenCalled()
+  })
+
+  it("redo is skipped as changed when the file can no longer follow its recordings (a film was linked since)", async () => {
+    const state = { timing: { f1: "dubbing" as FileTiming }, filmTimed: true }
+    const { ctx, handlers } = timingCtx(state)
+    expect(await handlers["file.timing"].redo(step)).toEqual({ kind: "skipped", reason: "changed" })
+    expect(ctx.writeTiming).not.toHaveBeenCalled()
+  })
+
+  it("is skipped as gone when the file can't be read", async () => {
+    const { handlers } = timingCtx({ timing: {} })
+    expect(await handlers["file.timing"].undo(step)).toEqual({ kind: "skipped", reason: "gone" })
+  })
+
+  it("belongs to every language", () => {
+    expect(stepLane("file.timing", step, "fr")).toBeUndefined()
+  })
+})
+
+describe("timingNow", () => {
+  it("reads the switch written here until the project read answers, then the read", () => {
+    const pending = { mode: "audioFirst" as const, readBefore: "dubbing" as const }
+    expect(timingNow("dubbing", pending)).toEqual({ mode: "audioFirst", settled: false })
+    expect(timingNow("audioFirst", pending)).toEqual({ mode: "audioFirst", settled: true })
+    expect(timingNow("dubbing", undefined)).toEqual({ mode: "dubbing", settled: true })
   })
 })

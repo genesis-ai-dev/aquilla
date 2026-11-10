@@ -1,6 +1,7 @@
 /**
  * History steps for what a file's media hangs on: its film, which heard line
  * performs which subtitle, and who speaks each line. (Decision 11, slice 13.)
+ * AQU-2492: and what its timing follows (`file.timing.set`).
  *
  * All three belong to every language (step-lane.ts), and all three are plain
  * values that an existing event sets — `file.video.set`, `cell.link.set`,
@@ -42,6 +43,63 @@ export function filmNow(read: string | null, pending: PendingFilm | undefined): 
   if (!pending) return { film: read, settled: true }
   if (pending.url === read || read !== pending.readBefore) return { film: read, settled: true }
   return { film: pending.url, settled: false }
+}
+
+// ── Timing ──────────────────────────────────────────────────────────────────
+
+/** What a file follows: its source ("dubbing") or its recordings ("audioFirst"). */
+export type FileTiming = "dubbing" | "audioFirst"
+
+/**
+ * AQU-2492 (review, Nov 9; Sam's call the same day): switching a file between
+ * Follows source and Follows recordings. The modes are what the file
+ * FOLLOWED, as its own choice resolves (a film or a project default included),
+ * so Undo puts the file back on the timing it had.
+ */
+export interface FileTimingData { fileId: string; before: FileTiming; after: FileTiming }
+
+/** A timing written from here that the project read has not answered yet. */
+export interface PendingTiming {
+  mode: FileTiming
+  /** What the read said when it was written. */
+  readBefore: FileTiming
+}
+
+/** The timing a file has now, as far as this tab knows: the film's rule (`filmNow`). */
+export function timingNow(read: FileTiming, pending: PendingTiming | undefined): { mode: FileTiming; settled: boolean } {
+  if (!pending) return { mode: read, settled: true }
+  if (pending.mode === read || read !== pending.readBefore) return { mode: read, settled: true }
+  return { mode: pending.mode, settled: false }
+}
+
+export interface TimingStepContext {
+  /** What the file follows now; undefined when the file can't be read (not open). */
+  readTiming(fileId: string): FileTiming | undefined
+  /** The switch's own role rule: whether this person may switch a file's timing. */
+  mayChangeTiming(): boolean
+  /** Whether the file can follow `mode` now (a film-timed file always follows
+   *  its source; a file with nothing to follow, its recordings). */
+  offersTiming(fileId: string, mode: FileTiming): boolean
+  /** Write it; false when the write was refused. */
+  writeTiming(fileId: string, mode: FileTiming): Promise<boolean>
+}
+
+export function timingStepHandlers(ctx: TimingStepContext): Record<string, StepHandler<never>> {
+  const flip = async (d: FileTimingData, from: FileTiming, to: FileTiming): Promise<StepOutcome> => {
+    // Who may: the switch's own rule, asked now (gap 29).
+    if (!ctx.mayChangeTiming()) return { kind: "skipped", reason: "notAllowed" }
+    const now = ctx.readTiming(d.fileId)
+    if (now === undefined) return GONE
+    // Someone else switched it since, or the file can no longer follow it.
+    if (now !== from || !ctx.offersTiming(d.fileId, to)) return CHANGED
+    return (await ctx.writeTiming(d.fileId, to)) ? DONE : { kind: "failed", error: new Error("timing refused") }
+  }
+  return {
+    "file.timing": {
+      undo: (d: FileTimingData) => flip(d, d.after, d.before),
+      redo: (d: FileTimingData) => flip(d, d.before, d.after),
+    } as StepHandler<never>,
+  }
 }
 
 // ── Cue links ───────────────────────────────────────────────────────────────

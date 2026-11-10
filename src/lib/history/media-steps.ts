@@ -15,6 +15,7 @@
  * since. Voices an import added to the library stay there.
  */
 import { recordStep, type StepHandler, type StepOutcome } from "./history"
+import { resolveFileTimingMode } from "@/lib/parsers/types"
 
 const DONE: StepOutcome = { kind: "done" }
 const GONE: StepOutcome = { kind: "skipped", reason: "gone" }
@@ -70,6 +71,25 @@ export function timingNow(read: FileTiming, pending: PendingTiming | undefined):
   if (!pending) return { mode: read, settled: true }
   if (pending.mode === read || read !== pending.readBefore) return { mode: read, settled: true }
   return { mode: pending.mode, settled: false }
+}
+
+/**
+ * AQU-2492 (review, Nov 9), finding 11: may this file follow `mode`? Asked of
+ * THE resolver the file's timing is resolved by, with the file's own choice
+ * set to `mode`: it may when choosing it is what the file would then follow.
+ * The switch (no caller writes a mode the resolver would ignore) and its Undo
+ * both ask this, so the rule lives in the resolver alone — whatever it says
+ * about films and files with nothing to follow, both follow it. `opts` are
+ * the resolver's own; with a choice stated, only these two can override it.
+ */
+export function fileMayFollowTiming(
+  file: Parameters<typeof resolveFileTimingMode>[0],
+  project: Parameters<typeof resolveFileTimingMode>[1],
+  opts: { hasAudioCues?: boolean; nothingToFollow?: boolean },
+  mode: FileTiming,
+): boolean {
+  const chosen = (file ? { ...file, timingMode: mode } : { timingMode: mode }) as Parameters<typeof resolveFileTimingMode>[0]
+  return resolveFileTimingMode(chosen, project, opts) === mode
 }
 
 export interface TimingStepContext {

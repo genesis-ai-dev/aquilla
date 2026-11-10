@@ -278,7 +278,7 @@ import { attachmentOutFrom, canCutAt, newPieceAudioId, pieceLabels } from "@/lib
 import { recordGroup, recordStep, registerStepKinds, setHistoryRemote, setHistoryScope, setLaneSwitcher, setFileNamer, setOpenFileProbe, withGroup, type LaneSwitch } from "@/lib/history/history"
 import { httpHistoryRemote } from "@/lib/history/history-remote"
 import { laneAccessFor, laneShownReady, waitUntilReady, type LaneAccess } from "@/lib/history/lane-switch"
-import { CastStepBuilder, castValueOf, filmNow, mediaStepHandlers, recordTimingSwitch, timingNow, timingStepHandlers, type CastValue, type CueLinksData, type CueLinkWrite, type PendingFilm, type PendingTiming } from "@/lib/history/media-steps"
+import { CastStepBuilder, castValueOf, filmNow, fileMayFollowTiming, mediaStepHandlers, recordTimingSwitch, timingNow, timingStepHandlers, type CastValue, type CueLinksData, type CueLinkWrite, type PendingFilm, type PendingTiming } from "@/lib/history/media-steps"
 import { cellLabelStepHandlers, recordCellLabelStep } from "@/lib/history/label-steps"
 import { sourceStepHandlers } from "@/lib/history/source-steps"
 import { recordingLinesStepHandlers } from "@/lib/history/recording-lines-steps"
@@ -14655,15 +14655,23 @@ export function ProjectWorkspace() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the ack callbacks are stable (useCallback([]))
     [project?.id, currentUsername, getTokenForProjectFile, refresh, timingAck.noteOwnWrite, timingAck.clearOwnWrite],
   )
+  // AQU-2492 (review, Nov 9), finding 11: may the open file follow `mode`?
+  // Asked of the resolver the file's timing is resolved by (fileMayFollowTiming),
+  // by the switch and by its Undo alike.
+  const timingOffered = useCallback(
+    (mode: AudioTimingMode) =>
+      fileMayFollowTiming(activeFile, project ?? undefined, { hasAudioCues: fileHasAudioCues, nothingToFollow: timingNothingToFollow }, mode),
+    [activeFile, project, fileHasAudioCues, timingNothingToFollow],
+  )
   const handleChangeTimingMode = useCallback(
     (mode: AudioTimingMode) => {
-      // AQU-646, rescoped by AQU-1704 and AQU-2204: a file timed to a film has
-      // no "Follows recordings" to switch to, and the control offers none.
-      // Silent because it is unreachable from the UI; this exists so no
-      // programmatic caller can write a mode the resolver would then ignore.
-      if (mode === "audioFirst" && timingFilmTimed) return
-      // AQU-2204 (board 24): with nothing to follow, Follows source isn't offered.
-      if (mode === "dubbing" && timingNothingToFollow) return
+      // AQU-646, rescoped by AQU-1704 and AQU-2204: a mode the file can't
+      // follow (a film-timed file's "Follows recordings"; with nothing to
+      // follow, "Follows source") is not offered by the control. Silent
+      // because it is unreachable from the UI; this exists so no programmatic
+      // caller can write a mode the resolver would then ignore. AQU-2492
+      // (review, Nov 9), finding 11: the resolver itself is asked.
+      if (!timingOffered(mode)) return
       if (!activeFileId) return
       // The mode rides the outbox, so offline it would sit queued while the
       // toolbar kept reading the old value — say so instead of half-doing it.
@@ -14688,7 +14696,7 @@ export function ProjectWorkspace() {
       }
       void write
     },
-    [activeFileId, timingFilmTimed, timingNothingToFollow, applyTimingMode, readTimingMode],
+    [activeFileId, timingOffered, applyTimingMode, readTimingMode],
   )
   // AQU-1767 phase 2: one track action is one history step. Each change keeps
   // the fields its verb wrote, as they were before and as they are after;
@@ -15617,19 +15625,19 @@ export function ProjectWorkspace() {
         writeVoiceSettings: (patch) => ttsRef.current.saveTts(patch as Partial<ProjectTtsSettings>),
       }),
       // AQU-2492 (review, Nov 9): a file's timing, with the switch's own rules
-      // (project lead and above; a mode the file can't follow is not offered).
+      // (project lead and above; a mode the file can't follow is not offered,
+      // finding 11: as the resolver says, the same question the switch asks).
       ...timingStepHandlers({
         readTiming: readTimingMode,
         mayChangeTiming: () => canEditTimingMode,
-        offersTiming: (_fileId, mode) =>
-          !(mode === "audioFirst" && timingFilmTimed) && !(mode === "dubbing" && timingNothingToFollow),
+        offersTiming: (_fileId, mode) => timingOffered(mode),
         writeTiming: (fileId, mode) => applyTimingMode(mode, fileId),
         // Finding 5: refused offline, as the switch is (handleChangeTimingMode).
         online: () => navigator.onLine,
       }),
     })
   }, [readFilmLink, writeFilmLink, writeCueLinks, getTokenForProjectFile, readCastValue, writeCastValues,
-    readTimingMode, canEditTimingMode, timingFilmTimed, timingNothingToFollow, applyTimingMode])
+    readTimingMode, canEditTimingMode, timingOffered, applyTimingMode])
   // AQU-2408: a cell's label, undone by writing the previous one back. Only the
   // open file's rows can be read, so a step held for another file is blocked
   // as "elsewhere" rather than guessed at.

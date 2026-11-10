@@ -4,6 +4,7 @@ import { beforeEach, describe, it, expect, vi } from "vitest"
 import {
   CastStepBuilder,
   filmNow,
+  fileMayFollowTiming,
   mediaStepHandlers,
   recordTimingSwitch,
   timingNow,
@@ -27,6 +28,7 @@ import {
   type StepHandler,
 } from "./history"
 import { clearHistoryStoreForTests } from "./history-store"
+import { resolveFileTimingMode } from "@/lib/parsers/types"
 import { stepLane } from "./step-lane"
 
 function ctxFor(state: {
@@ -368,5 +370,42 @@ describe("file.timing while the switch saves, and offline (AQU-2492)", () => {
     state.online = false
     expect((await redoLast())?.outcome).toEqual({ kind: "blocked", reason: "offline" })
     expect(historyView().nextRedo?.labelKey).toBe("editor.history.stepTimingFollowsRecordings")
+  })
+})
+
+// AQU-2492 (review, Nov 9), finding 11: "may this file follow that timing?"
+// is asked of THE resolver the file's timing is resolved by, with the file's
+// choice set to it. The switch and its Undo both ask it, so the rule (here: a
+// film-timed file always follows its source; a file with nothing to follow,
+// its recordings) lives in one place, and a branch that changes the resolver
+// changes both.
+describe("fileMayFollowTiming (AQU-2492)", () => {
+  const plain = { type: "source", timingMode: null, coreMediaUrl: undefined } as const
+  const film = { type: "source", timingMode: null, coreMediaUrl: "https://media.invalid/film.m3u8" } as const
+
+  it("a plain file may follow either", () => {
+    expect(fileMayFollowTiming(plain, undefined, {}, "audioFirst")).toBe(true)
+    expect(fileMayFollowTiming(plain, undefined, {}, "dubbing")).toBe(true)
+  })
+
+  it("asks the resolver: a mode is offered when choosing it is what the file would follow", () => {
+    for (const file of [plain, film]) {
+      for (const opts of [{}, { hasAudioCues: true }, { nothingToFollow: true }]) {
+        for (const mode of ["audioFirst", "dubbing"] as const) {
+          expect(fileMayFollowTiming(file, undefined, opts, mode)).toBe(
+            resolveFileTimingMode({ ...file, timingMode: mode }, undefined, opts) === mode,
+          )
+        }
+      }
+    }
+  })
+
+  it("a file with nothing to follow may not follow its source", () => {
+    expect(fileMayFollowTiming(plain, undefined, { nothingToFollow: true }, "dubbing")).toBe(false)
+  })
+
+  it("under this resolver, a film-timed file may not follow its recordings", () => {
+    expect(fileMayFollowTiming(film, undefined, {}, "audioFirst")).toBe(false)
+    expect(fileMayFollowTiming(plain, undefined, { hasAudioCues: true }, "audioFirst")).toBe(false)
   })
 })

@@ -285,7 +285,7 @@ import { injectOptimisticAudioTrim,
 import { attachmentOutFrom, canCutAt, newPieceAudioId, pieceLabels } from "@/lib/audio/cut-take"
 import { newestMatchingStep, recordGroup, recordStep, registerStepKinds, undoStepById, setHistoryRemote, setHistoryScope, setLaneSwitcher, setFileNamer, setOpenFileProbe, withGroup, type LaneSwitch } from "@/lib/history/history"
 import { httpHistoryRemote } from "@/lib/history/history-remote"
-import { laneAccessFor, laneShownReady, waitUntilReady, type LaneAccess } from "@/lib/history/lane-switch"
+import { laneAccessFor, laneShownReady, stepReadsRecordings, waitUntilReady, type LaneAccess } from "@/lib/history/lane-switch"
 import { CastStepBuilder, castValueOf, filmNow, mediaStepHandlers, type CastValue, type CueLinksData, type CueLinkWrite, type PendingFilm } from "@/lib/history/media-steps"
 import { cellLabelStepHandlers, recordCellLabelStep } from "@/lib/history/label-steps"
 import { sourceStepHandlers } from "@/lib/history/source-steps"
@@ -15995,12 +15995,14 @@ export function ProjectWorkspace() {
   // Gap 24: the change happens where the person can see it. The switch is the
   // switcher's own; the step runs once that language's lines and takes have
   // loaded and the handlers below have re-registered with it.
-  const laneReadyRef = useRef({ lane: activeLane, ready: false })
+  const laneReadyRef = useRef({ lane: activeLane, ready: false, recordingsLoaded: false })
   laneReadyRef.current = {
     lane: activeLane,
-    // AQU-2426 (browser pass, Nov 9): and the lane's read, which a step's take
-    // is found in when the workspace's map is not fetched (the Text view).
-    ready: !cellsLoading && workspaceAudioLoaded && audioValidationLoaded && timelineAudioLoaded && (!audioCueSibling || cueAudioLoaded),
+    ready: !cellsLoading && workspaceAudioLoaded && timelineAudioLoaded && (!audioCueSibling || cueAudioLoaded),
+    // AQU-2426 (review, Nov 9): the lane's own read, which a step's take is
+    // found in when the workspace's map is not fetched (the Text view). Waited
+    // for only by a step that reads recordings (the switch below).
+    recordingsLoaded: audioValidationLoaded && audioValidationAnswered,
   }
   // Read through a ref: the switch may first wait for the languages to load,
   // and must then judge by the loaded list, not the one it started with.
@@ -16012,8 +16014,8 @@ export function ProjectWorkspace() {
     canSwitch: canSwitchLanes(project?.syncRole?.level),
     loaded: project?.lanes != null,
   }
-  const laneSwitchRef = useRef<(lane: string) => Promise<LaneSwitch>>(async () => "blocked")
-  laneSwitchRef.current = async (lane: string) => {
+  const laneSwitchRef = useRef<(lane: string, kinds: readonly string[]) => Promise<LaneSwitch>>(async () => "blocked")
+  laneSwitchRef.current = async (lane: string, kinds: readonly string[]) => {
     // Cmd+Z pressed as the project opens: let its languages load first.
     if (!laneAccessRef.current.loaded && (await waitUntilReady(() => laneAccessRef.current.loaded)) !== "ready") return "blocked"
     const access = laneAccessFor(lane, laneAccessRef.current)
@@ -16021,12 +16023,20 @@ export function ProjectWorkspace() {
     setActiveLane(lane)
     // The store is read live: it sorts its rows for the language one effect
     // pass after the render that opened it.
+    // AQU-2426 (review, Nov 9): its recordings too, only when the step reads
+    // them; a text edit never waits for them.
+    const needsRecordings = stepReadsRecordings(kinds)
     return waitUntilReady(() =>
-      laneShownReady(lane, { open: laneReadyRef.current.lane, storeLane: cellStore.viewLane, loaded: laneReadyRef.current.ready }),
+      laneShownReady(lane, {
+        open: laneReadyRef.current.lane,
+        storeLane: cellStore.viewLane,
+        loaded: laneReadyRef.current.ready,
+        recordingsLoaded: laneReadyRef.current.recordingsLoaded,
+      }, needsRecordings),
     )
   }
   useEffect(() => {
-    setLaneSwitcher((lane) => laneSwitchRef.current(lane))
+    setLaneSwitcher((lane, kinds) => laneSwitchRef.current(lane, kinds))
     return () => setLaneSwitcher(null)
   }, [])
 

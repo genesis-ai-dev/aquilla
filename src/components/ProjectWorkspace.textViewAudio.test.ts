@@ -12,8 +12,9 @@
  *  - Export found no recordings on a file whose takes are on its own lines;
  *  - Undo of a voice generated from an extension did not put back the voice
  *    the line had before;
- *  - an Undo that opens another language first ran before that language's
- *    recordings had loaded.
+ *  - an Undo of a take step that opens another language first ran before
+ *    that language's recordings had loaded (a text edit never waits for
+ *    them: review, Nov 9, finding 3; lane-switch.test.ts).
  *
  * They now read the lane's own read of the file's recordings (fetched in
  * every view) where the workspace's map does not have the line. The ⋯ menu's
@@ -131,7 +132,7 @@ describe("pins the workspace to those readers", () => {
     expect(source).toMatch(/selectedBefore: playingInSlot\(workspaceAudioByCellIdRef\.current\.get\(cell\.id\) \?\? audioValidationByCellIdRef\.current\.get\(cell\.id\), GENERATED_VOICE_SLOT\)/)
   })
 
-  it("an Undo that opens another language waits for that language's recordings", () => {
-    expect(between("laneReadyRef.current = {", "}")).toMatch(/audioValidationLoaded/)
+  it("an Undo that opens another language can wait for that language's recordings (when the step reads them)", () => {
+    expect(between("laneReadyRef.current = {", "}")).toMatch(/recordingsLoaded: audioValidationLoaded && audioValidationAnswered/)
   })
 })

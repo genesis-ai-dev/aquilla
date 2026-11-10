@@ -27,7 +27,11 @@ import {
   playingElsewhere,
   subscribeActiveAudio,
 } from "@/lib/audio/audio-coordinator"
-import { clipLevelOf, isMixed, joinedLevelsOf, mixElement, type ClipLevels } from "@/lib/audio/mixer"
+import {
+  clipLevelOf, isMixed, joinedLevelsOf, mixElement, mixerVolume, mixerWakeWait, mixIfAwake, playUnmixed, setPlayerMuted, wakeMixer,
+  type ClipLevels,
+} from "@/lib/audio/mixer"
+import { getOutputContext } from "@/lib/audio/output-context"
 import { selectedPieceIds } from "@/lib/sync/cell-audio-read-types"
 import type { CodexCell } from "@/lib/codex-editor/types"
 import type { ProjectRecord } from "@/lib/parsers/types"
@@ -362,9 +366,16 @@ export function useCellAudio(
   })
   // Whether the player plays a stream (which can't go through the mixer).
   const streamedRef = useRef(false)
+  // AQU-2494 (review, Nov 9): whether the press that is making a player still
+  // wants it to sound (pause pressed meanwhile: no), and which take and mount
+  // it is being made for — so a player that finishes loading after another
+  // take started, or after its row is gone, never starts on its own.
+  const wantRef = useRef(false)
+  const genRef = useRef(0)
 
   useEffect(() => {
     return () => {
+      genRef.current++
       if (rafRef.current != null) {
         cancelAnimationFrame(rafRef.current)
         rafRef.current = null
@@ -571,17 +582,29 @@ export function useCellAudio(
   }, [stopTicking])
 
   /**
-   * AQU-2494 (review, Nov 9): the take's volume and fades on its player,
-   * through the app's one mixer, as the timeline plays it. A take with no
-   * level set stays off the mixer, exactly as before. False when the take has
-   * a level this player can't take: a stream from another origin, which would
-   * play silence once routed.
+   * AQU-2494 (review, Nov 9): the take's volume and fades on its player, by
+   * the timeline's rule (mixer.ts). Through the app's one mixer, exact to the
+   * sample, when the player can go there: its sound is on this device (a blob)
+   * and the mixer's audio context is RUNNING. Wired into a context that is
+   * asleep (Safari outside a tap, an iPad after a call) a player says it is
+   * playing and is silent; a stream from another origin is silent once routed.
+   * So otherwise it plays straight to the output with the level on its own
+   * volume (`playUnmixed`): that turns a take down and steps along its fades,
+   * but a player's volume stops at 1, so it CANNOT RAISE a take above its
+   * recorded level; and it is muted while the main volume is 0. A player is
+   * never re-wired while it plays: it finishes the way it started, and the
+   * next play goes through the mixer. A streamed take's bytes are fetched
+   * behind it for that. A take with no level set stays off the mixer.
    */
-  const applyLevel = useCallback((a: HTMLAudioElement): boolean => {
+  const applyLevel = useCallback((a: HTMLAudioElement): void => {
     const { slot, level } = takeLevelRef.current(joinedRef.current)
-    if (!level && !isMixed(a)) return true
-    return mixElement(a, slot, level)
-  }, [])
+    if (isMixed(a)) { mixElement(a, slot, level); return }
+    // Paused (just made, or between plays): it may go into the mixer now.
+    if (level && a.paused && mixElement(a, slot, level, { unlessAsleep: true })) return
+    if (level) setPlayerMuted(a, false)
+    playUnmixed(a, level, volumeRef.current * (level ? mixerVolume() : 1))
+    if (level && streamedRef.current && !bytesRef.current) void ensureBytes().catch(() => { /* it plays streamed */ })
+  }, [ensureBytes])
   // A level changed while the take is loaded (in the Station, by a colleague)
   // reaches its player at once.
   useEffect(() => {
@@ -594,20 +617,45 @@ export function useCellAudio(
     const self = coordinatorControllerRef.current
     const other = self ? otherCopyOf(self, copyKeyRef.current()) : null
     if (other && !(audioRef.current && !audioRef.current.paused)) { await other.play(); return }
-    // AQU-2494 (review, Nov 9): a player streamed before its take had a volume
-    // or fades can't take them; it is made again from the take's bytes, where
-    // it was.
+    // AQU-2494 (review, Nov 9): Play wakes the audio context NOW, inside the
+    // press — the only moment Safari, or an iPad after a call, lets it wake —
+    // and opens it here when the page has none yet, so a take with a volume or
+    // fades can go through the mixer from the first press after a load.
+    const levelled = takeLevelRef.current(null).level != null
+    if (levelled) {
+      getOutputContext()
+      wakeMixer()
+    }
+    // A take that started streamed finished that way. Once its bytes are on
+    // this device, the next play makes it again from them, where it was, so
+    // it goes through the mixer.
     const stale = audioRef.current
-    if (stale && streamedRef.current && !applyLevel(stale)) {
+    if (stale && stale.paused && levelled && streamedRef.current && bytesRef.current) {
       pendingStartRef.current = stale.ended ? null : elTime(stale)
       letGo(stale)
     }
     // CLAIM, not just record: whatever else is sounding stops — another take,
     // or another copy of this one (Sam, 2026-09-29: the Audio view card and
     // the Recording tab under it played the same take on top of each other).
-    if (coordinatorControllerRef.current) claimActiveAudio(coordinatorControllerRef.current)
+    if (self) claimActiveAudio(self)
+    wantRef.current = true
+    // Still the one to sound after a wait: nothing else was started, pause was
+    // not pressed, and the row is still there.
+    const gen = genRef.current
+    const wanted = () => wantRef.current && genRef.current === gen && (!self || getActiveAudio() === self)
     if (audioRef.current) {
       const a = audioRef.current
+      // AQU-2494 (review, Nov 9): a player sent straight to the output while
+      // the context slept goes into the mixer now, paused, once the context
+      // this press woke is running (given its moment, as on the timeline).
+      if (levelled && !isMixed(a)) {
+        const wait = mixerWakeWait(a.currentSrc || a.src)
+        if (wait) {
+          await wait
+          if (audioRef.current !== a || !wanted()) return
+        }
+        if (mixIfAwake(a)) applyLevel(a)
+      }
       const { start, end } = trimRef.current
       // Restart from the window start if we're outside it (e.g. ended at
       // trimEnd). `ended` covers a take trimmed only at its head that played to
@@ -667,7 +715,7 @@ export function useCellAudio(
               urlRef.current = blobSrc
               const next = makeElement(blobSrc, false)
               setState("ready")
-              await next.play()
+              if (wanted()) await next.play()
             } catch (e) {
               const err = (e && typeof e === "object" && "kind" in e)
                 ? (e as AudioError)
@@ -763,9 +811,9 @@ export function useCellAudio(
           bytes = await audioCacheGet(frontier.audioId, frontier.ext)
           if (bytes) bytesRef.current = bytes
         }
-        // AQU-2494 (review, Nov 9): a take with a volume or fades plays from
-        // its bytes, not a stream, so the mixer can apply them.
-        if (!bytes && takeLevelRef.current(null).level) bytes = await ensureBytes()
+        // AQU-2494 (review, Nov 9): a take with a volume or fades that is not
+        // on this device streams too, at once, with its level on the player
+        // (applyLevel); its bytes are fetched behind it for the next play.
         if (bytes) {
           src = URL.createObjectURL(new Blob([bytes as BlobPart], blobOpts()))
           urlRef.current = src
@@ -800,6 +848,19 @@ export function useCellAudio(
         src = URL.createObjectURL(new Blob([fetched as BlobPart], blobOpts()))
         urlRef.current = src
       }
+      // AQU-2494 (review, Nov 9): a context this press woke is given its
+      // moment before the player is wired, as the timeline's players are —
+      // never more than MIXER_WAKE_WAIT_MS — so the take goes through the
+      // mixer; still asleep then, it plays straight to the output.
+      if (levelled && !streamingSrc) {
+        const wait = mixerWakeWait(src)
+        if (wait) await wait
+      }
+      // The take changed, or its row went, while this loaded: not this one's.
+      if (genRef.current !== gen) {
+        if (urlRef.current === src) { URL.revokeObjectURL(src); urlRef.current = null }
+        return
+      }
       const audio = makeElement(src, streamingSrc)
       setState("ready")
       // A click asked for a place: be there before the first sound, not after.
@@ -809,6 +870,9 @@ export function useCellAudio(
           audio.addEventListener("error", () => resolve(), { once: true })
         })
       }
+      // AQU-2494 (review, Nov 9): one take at a time. Another take started
+      // while this one loaded, or pause was pressed: it is ready, not playing.
+      if (!wanted()) return
       try {
         await audio.play()
       } catch (e) {
@@ -831,6 +895,8 @@ export function useCellAudio(
   }, [attachmentUrl, project.id, fileId, getSyncToken, ensureBytes, startTicking, stopTicking, t, publishTime, setCurrentTime, analytics, applyLevel, letGo]) // elTime reads refs only
 
   const pause = useCallback(() => {
+    // AQU-2494 (review, Nov 9): pause while the take loads: it does not start.
+    wantRef.current = false
     const own = audioRef.current
     if (own && !own.paused) { own.pause(); return }
     // Sounding from another copy of this take: stop it there.
@@ -841,8 +907,9 @@ export function useCellAudio(
   const setVolume = useCallback((v: number) => {
     const clamped = Math.max(0, Math.min(1, v))
     volumeRef.current = clamped
-    if (audioRef.current) audioRef.current.volume = clamped
-  }, [])
+    // AQU-2494 (review, Nov 9): with the take's level, not over it.
+    if (audioRef.current) applyLevel(audioRef.current)
+  }, [applyLevel])
 
   const setTrim = useCallback((start: number | null, end: number | null, gaps?: readonly { start: number; end: number }[]) => {
     const next = gaps && gaps.length > 0 ? { start, end, gaps } : { start, end }

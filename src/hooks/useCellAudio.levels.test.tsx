@@ -154,14 +154,18 @@ describe("useCellAudio plays a take at its volume and fades", () => {
     expect(mixer.calls).toHaveLength(0)
   })
 
-  it("a take with a level, not on this device yet, plays from its bytes so the level can be applied", async () => {
+  // AQU-2494 (review, Nov 9), finding 2: it no longer waits for a whole
+  // download. It streams at once with its level on the player, and its bytes
+  // are fetched behind it, so the next play goes through the mixer.
+  it("a take with a level, not on this device yet, streams at once with its level on the player", async () => {
     cache.bytes = null
     const cell = cellOf({ "a1.wav": take({ gainDb: -6 }) }, "a1.wav")
     const { result } = renderHook(() => useCellAudio(project, cell, "f1"))
     await act(async () => { await result.current.play() })
+    expect(instances[0].src.startsWith("https://")).toBe(true)
+    expect(instances[0].paused).toBe(false)
+    expect(instances[0].volume).toBeCloseTo(dB(-6))
     expect(net.fetched).toBe(1)
-    expect(instances[0].src.startsWith("blob:")).toBe(true)
-    expect(levelAt(1, mixer.calls[0].level!)).toBeCloseTo(dB(-6))
   })
 
   it("…while one with no level still streams, as before", async () => {
@@ -185,7 +189,7 @@ describe("useCellAudio plays a take at its volume and fades", () => {
     expect(levelAt(4.5, last.level!)).toBeCloseTo(dB(9) * 0.5)
   })
 
-  it("a player streamed before the take had a level is made again from its bytes, where it was", async () => {
+  it("a player streamed before the take had a level is made again from its bytes once they are here, where it was", async () => {
     cache.bytes = null
     let cell = cellOf({ "a1.wav": take({}) }, "a1.wav")
     const { result, rerender } = renderHook(() => useCellAudio(project, cell, "f1"))
@@ -194,9 +198,11 @@ describe("useCellAudio plays a take at its volume and fades", () => {
     expect(streamed.src.startsWith("https://")).toBe(true)
     act(() => result.current.pause())
     streamed.currentTime = 1.2
-    // Raised 9 dB in the Station.
+    // Raised 9 dB in the Station: its bytes are fetched behind the stream.
     cell = cellOf({ "a1.wav": take({ gainDb: 9 }) }, "a1.wav")
     rerender()
+    await flush()
+    expect(net.fetched).toBe(1)
     await act(async () => { await result.current.play() })
     expect(instances).toHaveLength(2)
     const made = instances[1]

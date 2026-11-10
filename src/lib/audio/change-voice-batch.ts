@@ -66,6 +66,8 @@ export interface ChangeVoiceAllArgs {
   settings: ProjectTtsSettings | undefined
   session: FrontierSession | null
   author: string
+  /** AQU-1462: lane the member is working in. Omitted for the default lane. */
+  targetLang?: string
 }
 
 export interface ChangeVoiceAllResult {
@@ -89,6 +91,10 @@ export async function runChangeVoiceAll(args: ChangeVoiceAllArgs): Promise<Chang
         voice,
         session: args.session,
         author: args.author,
+        // AQU-2499 (review, Nov 9): each new take goes in the open language,
+        // as a one-line Change voice does; without it a second language's
+        // takes were filed under the default one.
+        ...(args.targetLang ? { targetLang: args.targetLang } : {}),
       })
       if (ok) result.converted++
       else result.failed++

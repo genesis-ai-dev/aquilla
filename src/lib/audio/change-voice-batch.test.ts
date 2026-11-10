@@ -109,6 +109,22 @@ describe("runChangeVoiceAll", () => {
     expect(getBatchProgress()).toBeNull()
   })
 
+  // AQU-2499 (review, Nov 9): a whole-file run in a second language filed
+  // every re-voiced take under the default language.
+  it("files each re-voiced take in the open language", async () => {
+    vi.mocked(changeCellVoice).mockResolvedValue(true)
+    await runChangeVoiceAll({
+      projectId: "p1", cells: [recorded("c1")], settings, session: null, author: "tester", targetLang: "fr",
+    })
+    expect(vi.mocked(changeCellVoice).mock.calls[0][0]).toMatchObject({ cell: { id: "c1" }, targetLang: "fr" })
+  })
+
+  it("leaves the language off in the default language", async () => {
+    vi.mocked(changeCellVoice).mockResolvedValue(true)
+    await runChangeVoiceAll({ projectId: "p1", cells: [recorded("c1")], settings, session: null, author: "tester" })
+    expect(vi.mocked(changeCellVoice).mock.calls[0][0]).not.toHaveProperty("targetLang")
+  })
+
   it("does nothing, and shows no banner, when no cell qualifies", async () => {
     const result = await runChangeVoiceAll({
       projectId: "p1", cells: [recorded("c3")], settings, session: null, author: "tester",

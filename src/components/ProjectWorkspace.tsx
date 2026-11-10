@@ -12705,6 +12705,7 @@ export function ProjectWorkspace() {
         settings: tts.laneSettings,
         session: frontierSession ?? null,
         author: currentUsername,
+        ...(activeLane ? { targetLang: activeLane } : {}), // AQU-2499 (review, Nov 9)
       }).then(({ converted, failed, skipped }) => {
         const notTrained = skipped["not-trained"]
         toast.add({

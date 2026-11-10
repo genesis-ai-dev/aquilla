@@ -303,6 +303,8 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
           fileId: p.fileId,
           cellId: p.cell.id,
           fromAudioId: isOpen ? target.audioId : fromAudioId,
+          // AQU-2494 (review, Nov 9): an AI voice's new version is still one.
+          voiceId: p.att.voiceId ?? null,
           slot,
           label: p.att.label ?? null,
           trimStartMs: w.start > 0.0005 ? Math.round(w.start * 1000) : null,

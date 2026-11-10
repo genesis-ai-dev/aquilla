@@ -138,6 +138,25 @@ describe("take.cut", () => {
       expect(await b.handlers["take.cut"].undo({ cuts: [withLevel()] })).toEqual({ kind: "skipped", reason: "changed" })
     })
 
+    // AQU-2494 (review, Nov 9), finding 5: with the web app deployed before
+    // the sync worker, an old worker stores a fresh cut the old way — every
+    // level left on the first piece, none on the new one. Its undo was
+    // skipped as "changed since" and lost for good.
+    it("a cut stored by a worker from before levels went with a cut (all on the first piece) is joined too", async () => {
+      const oldWorker: Takes = {
+        a: { durationMs: 5000, trimEndMs: 2500, gainDb: 6, fadeInMs: 300, fadeOutMs: 500 },
+        b: { durationMs: 5000, trimStartMs: 2500, pieceOf: "a" },
+      }
+      const { ctx, handlers } = ctxFor(structuredClone(oldWorker))
+      expect(await handlers["take.cut"].undo({ cuts: [withLevel()] })).toEqual({ kind: "done" })
+      expect(ctx.uncut).toHaveBeenCalledWith(withLevel())
+      // …and still skipped once a piece's level was changed since.
+      const changed = structuredClone(oldWorker)
+      changed.b = { ...changed.b, gainDb: 3 }
+      const c = ctxFor(changed)
+      expect(await c.handlers["take.cut"].undo({ cuts: [withLevel()] })).toEqual({ kind: "skipped", reason: "changed" })
+    })
+
     it("a cut recorded before levels went with it is joined as it always was, whatever the pieces' levels", async () => {
       const { ctx, handlers } = ctxFor({ a: { trimEndMs: 1500, gainDb: 6, fadeOutMs: 500 }, b: { trimStartMs: 1500, pieceOf: "a" } })
       expect(await handlers["take.cut"].undo({ cuts: [record()] })).toEqual({ kind: "done" })

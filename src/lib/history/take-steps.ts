@@ -193,7 +193,12 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
   const levelsIntact = (c: CutRecord, first: CodexCellAttachment, second: CodexCellAttachment): boolean => {
     if (!c.before.level) return true
     const cut = levelsAfterCut({ ...c.before.level, trimStartMs: first.trimStartMs, trimEndMs: c.before.trimEndMs, durationMs: first.durationMs }, c.atMs)
-    return sameLevel(first, cut.first) && sameLevel(second, cut.second)
+    if (sameLevel(first, cut.first) && sameLevel(second, cut.second)) return true
+    // AQU-2494 (review, Nov 9), finding 5: or as a sync worker from before
+    // levels went with a cut stores it — the take's whole level left on the
+    // first piece, none on the new one — when the web app is deployed first.
+    // The join then needs no level of its own: the first piece already has it.
+    return sameLevel(first, c.before.level) && sameLevel(second, { gainDb: null, fadeInMs: null, fadeOutMs: null })
   }
   const whole = (c: CutRecord): boolean | null => {
     const first = ctx.readTake(c.cellId, c.audioId)

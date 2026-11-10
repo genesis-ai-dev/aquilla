@@ -5,7 +5,7 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { RevealableInput } from "@/components/ui/revealable-input"
-import { SettingsGroup } from "@/components/ui/page"
+import { SettingsGroup, SettingsRow, SettingsBlock } from "@/components/ui/page"
 import { FrontierForgotPasswordForm } from "@/components/git-import/FrontierForgotPasswordForm"
 import { googleRequest, startGoogleLogin } from "@/lib/frontier/google-login"
 
@@ -27,40 +27,47 @@ function AccountLoginMethods({ jwt, username }: { jwt: string; username: string 
       .catch(() => { if (current) setError(true) })
     return () => { current = false }
   }, [jwt, revision])
-  return <SettingsGroup label={t("auth.methods.title")}>
-    <div className="flex flex-col gap-4">
-      <p>{t("auth.methods.description")}</p>
-      {error && <p role="alert">{t("auth.methods.failed")}</p>}
-      {!methods && !error && <Spinner />}
-      {!methods && error && <Button variant="outline" onClick={() => setRevision(n => n + 1)}>{t("auth.methods.refresh")}</Button>}
+  return <SettingsGroup>
+      {error && <SettingsBlock><p role="alert" className="text-sm text-destructive">{t("auth.methods.failed")}</p></SettingsBlock>}
+      {!methods && !error && <SettingsBlock><Spinner /></SettingsBlock>}
+      {!methods && error && <SettingsBlock><Button size="sm" variant="outline" onClick={() => setRevision(n => n + 1)}>{t("auth.methods.refresh")}</Button></SettingsBlock>}
       {methods && <>
-        <p>{t(methods.password ? "auth.methods.passwordSet" : "auth.methods.passwordMissing")}</p>
-        <p>{t(methods.google ? "auth.methods.connected" : "auth.methods.notConnected")}</p>
-        {methods.google && !methods.password && <p>{t("auth.methods.lastMethod")}</p>}
-        {methods.google && methods.password && !disconnecting && <Button variant="outline" onClick={() => setDisconnecting(true)}>{t("auth.methods.disconnect")}</Button>}
-        {disconnecting && <form className="flex flex-col gap-3" onSubmit={event => {
+        <SettingsRow
+          className="flex-wrap items-center"
+          label={t(methods.password ? "auth.methods.passwordSet" : "auth.methods.passwordMissing")}
+          control={!methods.password && <Button size="sm" variant="outline" onClick={() => setRecovering(true)}>{t("auth.methods.setPassword")}</Button>}
+        />
+        {recovering && <SettingsBlock><div className="max-w-md"><FrontierForgotPasswordForm onBack={() => setRecovering(false)} returnTo="/preferences/login-methods" /></div></SettingsBlock>}
+        <SettingsRow
+          className="flex-wrap items-center"
+          label={t(methods.google ? "auth.methods.connected" : "auth.methods.notConnected")}
+          description={methods.google && !methods.password ? t("auth.methods.lastMethod") : !methods.google && !methods.google_available ? t("auth.methods.unavailable") : undefined}
+          control={<>
+            {methods.google && methods.password && !disconnecting && <Button size="sm" variant="outline" onClick={() => setDisconnecting(true)}>{t("auth.methods.disconnect")}</Button>}
+            {!methods.google && methods.google_available && <Button size="sm" variant="outline" disabled={busy} onClick={() => {
+              setBusy(true); setError(false)
+              void startGoogleLogin("/preferences/login-methods", false, username).catch(() => { setError(true); setBusy(false) })
+            }}>{t("auth.methods.connect")}</Button>}
+          </>}
+        />
+        {disconnecting && <SettingsBlock><form className="flex max-w-md flex-col gap-4" onSubmit={event => {
           event.preventDefault(); if (busy) return
           setBusy(true); setError(false)
           void googleRequest("disconnect", { password }, jwt).then(() => {
             setDisconnecting(false); setRevision(n => n + 1)
           }).catch(() => setError(true)).finally(() => { setPassword(""); setBusy(false) })
         }}>
-          <p>{t("auth.methods.disconnectNote")}</p>
+          <p className="text-sm text-muted-foreground">{t("auth.methods.disconnectNote")}</p>
           <FieldGroup><Field><FieldLabel htmlFor="disconnect-google-password">{t("auth.google.passwordLabel")}</FieldLabel>
             <RevealableInput id="disconnect-google-password" autoComplete="current-password" required value={password} onChange={e => setPassword(e.target.value)} /></Field></FieldGroup>
-          <Button type="submit" disabled={busy}>{t("auth.methods.disconnect")}</Button>
+          <div className="flex flex-wrap gap-2"><Button type="submit" disabled={busy}>{t("auth.methods.disconnect")}</Button>
           <Button type="button" variant="ghost" disabled={busy} onClick={() => { setDisconnecting(false); setPassword("") }}>{t("common.cancel")}</Button>
-        </form>}
-        {!methods.google && methods.google_available && <Button variant="outline" disabled={busy} onClick={() => {
-          setBusy(true); setError(false)
-          void startGoogleLogin("/preferences/login-methods", false, username).catch(() => { setError(true); setBusy(false) })
-        }}>{t("auth.methods.connect")}</Button>}
-        {!methods.google && !methods.google_available && <p>{t("auth.methods.unavailable")}</p>}
-        <p className="text-sm text-muted-foreground">{t("auth.google.privacy")}</p>
-        {!methods.password && <Button variant="outline" onClick={() => setRecovering(true)}>{t("auth.methods.setPassword")}</Button>}
-        {recovering && <FrontierForgotPasswordForm onBack={() => setRecovering(false)} returnTo="/preferences/login-methods" />}
-        <Button variant="ghost" onClick={() => setRevision(n => n + 1)}>{t("auth.methods.refresh")}</Button>
+          </div>
+        </form></SettingsBlock>}
+        <SettingsBlock className="flex flex-col items-start gap-3">
+          <p className="text-xs text-muted-foreground">{t("auth.google.privacy")}</p>
+          <Button size="sm" variant="ghost" onClick={() => setRevision(n => n + 1)}>{t("auth.methods.refresh")}</Button>
+        </SettingsBlock>
       </>}
-    </div>
   </SettingsGroup>
 }

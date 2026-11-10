@@ -131,7 +131,7 @@ function makeScheduler(over: {
   const ctx: SchedulerCtx = {
     config,
     db,
-    sync: {} as SyncClient,
+    sync: { archiveStatus: async () => false } as unknown as SyncClient,
     gitlab: { project: async () => GL_PROJECT, headSha: async () => "abc" } as unknown as GitLabClient,
     creds: { gitlabUrl: "https://git", gitlabToken: "t", accessToken: "", source: "direct-token" } as GitLabCredentials,
     pacer: new Pacer({ eventsPerSec: 1e9, chunkStart: 500, chunkMin: 50, chunkMax: 2500 }),
@@ -392,6 +392,7 @@ describe("Scheduler.runForever", () => {
       config,
       db,
       sync: {
+        archiveStatus: async () => false,
         inbox: async () => { polls++; return { items: [], last: undefined } },
         orgTeamMaps: async () => ({ orgMap: new Map(), teamMap: new Map() }),
       } as unknown as SyncClient,
@@ -444,7 +445,7 @@ describe("Scheduler.runForever", () => {
     const ctx: SchedulerCtx = {
       config,
       db,
-      sync: {} as SyncClient,
+      sync: { archiveStatus: async () => false } as unknown as SyncClient,
       gitlab: { project: async () => GL_PROJECT } as unknown as GitLabClient,
       creds: { gitlabUrl: "https://git", gitlabToken: "t", accessToken: "", source: "direct-token" } as GitLabCredentials,
       pacer: new Pacer({ eventsPerSec: 1e9, chunkStart: 500, chunkMin: 50, chunkMax: 2500 }),

@@ -189,6 +189,7 @@ import {
   canRestructureTracks,
   resolveTakeLine,
   lineWithRecordings,
+  carryOnRunCells,
   historyFileName,
   buildRouteScopedTokenFetcher,
 } from "./project-workspace-helpers"
@@ -12442,8 +12443,11 @@ export function ProjectWorkspace() {
     activeFileId,
     // AQU-2375 (review, Nov 9): …and ALL its rows, not just the first page.
     // (A load that failed has not brought them all in either.)
-    ready: carryOnReady({ firstPaint: editorFirstPaint, rowsLoading: cellsLoading || Boolean(cellsError), recordingsLoaded: workspaceAudioLoaded, heardLinesLoading }),
-    version: [workspaceAudioByCellId, audioCueCells, cellStoreVersion],
+    // AQU-2426 (browser pass, Nov 9): the recordings are the lane's read, which
+    // every view fetches; the workspace's is not fetched in the Text view, and
+    // a run carried on there found no recording on any row (`carryOnRunCells`).
+    ready: carryOnReady({ firstPaint: editorFirstPaint, rowsLoading: cellsLoading || Boolean(cellsError), recordingsLoaded: audioValidationLoaded, heardLinesLoading }),
+    version: [workspaceAudioByCellId, audioValidationByCellId, audioCueCells, cellStoreVersion],
     // AQU-2375 (review, Nov 9): only the person who started a run carries it
     // on, and a run over takes only in the language it was started in.
     username: frontierSession?.username ?? null,
@@ -12454,16 +12458,11 @@ export function ProjectWorkspace() {
         carryOnLineWords(run, handle)
         return
       }
-      const pool = audioCueCells ?? mergeCellsWithAudio(getActiveCells(), workspaceAudioByCellIdRef.current)
-      const byId = new Map(pool.map((c) => [c.id, c]))
-      const settled = new Set([...run.doneIds, ...run.failed.map((f) => f.cellId)])
-      const cells = run.cellIds.filter((id) => !settled.has(id)).flatMap((id) => {
-        const cell = byId.get(id)
-        return cell ? [cell] : []
-      })
-      const failedCells = run.failed.flatMap((f) => {
-        const cell = byId.get(f.cellId)
-        return cell ? [cell] : []
+      const { cells, failedCells } = carryOnRunCells(run, {
+        heardLines: audioCueCells,
+        lines: getActiveCells(),
+        workspaceAudio: workspaceAudioByCellIdRef.current,
+        laneAudio: audioValidationByCellIdRef.current,
       })
       void runTranscriptionReported({
         cells,

@@ -11,7 +11,7 @@ import { activeTargetForCell, resolveTargetAudio, resolveTargetPieces, sourceCli
 import { isDefaultTrackSlot, RECORDING_SLOT, slotAudible } from "@/lib/timeline/track-slots"
 import { selectedPieceIds } from "@/lib/sync/cell-audio-read-types"
 import { effectiveAttachmentDurationMs, targetChipGeom, targetDueSec } from "@/lib/timeline/lane-timing"
-import { playedProgramme, slotAtProgrammeSec, slotHasNothingToPlay, type Programme, type ProgrammeSlot } from "@/lib/timeline/programme"
+import { filmIsBehindSlot, filmOverRun, playedProgramme, slotAtProgrammeSec, whatSlotPlays, type Programme, type ProgrammeFilm, type ProgrammeSlot } from "@/lib/timeline/programme"
 import { buildLayerSchedule, layerIndexAfter, layersDueAt, layersSoundIn, NO_LAYERS, type LayerSchedule, type ProgLayerRef } from "./play-queue-layers"
 import type { AudioTimingMode } from "@/lib/parsers/types"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
@@ -274,10 +274,16 @@ export interface QueueProgress {
    */
   filmTail?: boolean
   /** AQU-2253 (review, Nov 9): true where the linked FILM is the clock (its
-   *  tail, and the lines while nothing is recorded): the clock is the film's
+   *  tail, and a line it plays behind with nothing of its own, Sam, Nov 9):
+   *  the clock is the film's
    *  own second, reported by the film panel, and waits when the film does.
    *  False under a line the queue plays, where the film follows the queue. */
   filmClock?: boolean
+  /** AQU-2253 (review 2, Nov 9): true while the queue has given up waiting on
+   *  the film as a line's clock (it said nothing for 3 s) and is listening for
+   *  it: the panel reports the film's second while it follows the playhead,
+   *  and once it is heard moving it is the clock again on the next line. */
+  filmQuiet?: boolean
 }
 
 let progress: QueueProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1, programmeClock: false }
@@ -300,6 +306,7 @@ function setProgress(patch: Partial<QueueProgress>): void {
     filmTail: programmeClock && (progLead?.filmTail === true || progOverFilmTail(next.currentTime)),
     // …or the clock in hand IS the film's, whatever the lines under it do.
     filmClock: programmeClock && (progLead?.film != null || progFilmIsClockAt(next.currentTime)),
+    filmQuiet: programmeClock && progFilmQuiet,
   }
   notifyProgress()
 }
@@ -402,26 +409,43 @@ export function setProgrammeSourceVoicedByFilm(on: boolean): void {
 // The workspace says how long the film is and whose it is (`setProgrammeFilm`),
 // and says nothing (null) wherever Play must end with the lines as it always
 // did: following the source, an imported film (cut into its lines), a film
-// that could not be loaded, one that is not on screen, a length not known yet.
-// The lines are named so that only a run of that file's whole list runs on
-// over its film: one line played on its own, a run of some of the lines (a
-// selection) and another file's lines all end where their lines end.
-export interface ProgrammeFilm {
-  /** The film's length: its end on its own clock, which following the
-   *  recordings is the programme's. */
-  endSec: number
-  /** The lines Play plays on the film's file. */
-  cellIds: ReadonlySet<string>
-}
+// that could not be loaded, one that is not on screen. The lines are named so
+// that only a run of that file's whole list runs on over its film: one line
+// played on its own, a run of some of the lines (a selection), a book's
+// chapter and another file's lines all end where their lines end.
+//
+// AQU-2253 (Sam, Nov 9): the film is also the lines' SOURCE. "Skip lines with
+// nothing to play" lands only where there is literally nothing to play,
+// recorded or source, so a line with nothing of its own that the film plays
+// behind is played: the playhead crosses it in real time with the film
+// running, on the film's clock, whatever the setting says. One rule, in the
+// middle of the file as after the last recorded line, with something recorded
+// or nothing (lib/timeline/programme's `whatSlotPlays`, `filmOverRun`). Its
+// length not known yet still counts (the film may cover the line); past its
+// end there is no film.
+export type { ProgrammeFilm }
 let progFilm: ProgrammeFilm | null = null
 const progFilmListeners = new Set<() => void>()
-/** The film's end for the run the programme is laid out for; 0 when the run
- *  has no film to run on over. Worked out when either changes
- *  (`progFilmResolve`), never per line. */
+/** The film's end for the run the programme is laid out for, where Play runs
+ *  on past the last line to it; 0 when the run has no film to run on over.
+ *  Worked out when either changes (`progFilmResolve`), never per line. */
 let progFilmEndSec = 0
-/** Nothing in the run has anything to play, and it has a film: see
- *  `progPlaysThroughSilence`. */
-let progFilmCarriesLines = false
+/** AQU-2253 (Sam, Nov 9): how far the film plays behind the run's lines, on
+ *  its clock (Infinity while its length is not known yet; 0 with no film
+ *  behind them). A line with nothing of its own that starts before it has the
+ *  film to play (`progFilmPlaysUnder`). */
+let progFilmCoverSec = 0
+/** AQU-2253 (review 2, Nov 9): the film said nothing for 3 s while it was a
+ *  line's clock (`FILM_CLOCK_PATIENCE_MS`): a film whose length never came in,
+ *  a YouTube player that never loaded, a seek that never landed. Until it is
+ *  heard from again, a line it plays behind with nothing of its own is crossed
+ *  on the queue's own timer with the film following, as under a recorded
+ *  line, and never skipped. Over the film's tail there is nothing but the
+ *  film, and the run still waits for it. */
+let progFilmQuiet = false
+/** The film's last second heard while it was quiet: it is back once a later
+ *  report has moved on from it. */
+let progFilmQuietSec: number | null = null
 
 /** AQU-2253 (review, Nov 9): the file the workspace's last word was about:
  *  the one on screen. */
@@ -439,7 +463,13 @@ export function setProgrammeFilm(film: ProgrammeFilm | null, fileId: string | nu
     if (progLead?.film && progRunning()) progFinish()
   }
   if (progFilm === film) return
-  if (progFilm && film && progFilm.endSec === film.endSec && progFilm.cellIds === film.cellIds) return
+  if (
+    progFilm && film && progFilm.endSec === film.endSec && progFilm.cellIds === film.cellIds &&
+    (progFilm.runsOn !== false) === (film.runsOn !== false)
+  ) return
+  // AQU-2253 (review 2, Nov 9): its length come in (or changed), or the film
+  // gone or back: a film that went quiet gets a fresh chance.
+  if (!film || !progFilm || film.endSec !== progFilm.endSec) progForgetFilmQuiet()
   progFilm = film
   progFilmResolve()
   if (timingMode === "audioFirst" && programme && progIndex >= 0) {
@@ -449,22 +479,23 @@ export function setProgrammeFilm(film: ProgrammeFilm | null, fileId: string | nu
     // rather than wait out a film that is not playing. A film whose lines
     // are for the moment not the run's (a line added, and the run's own list
     // arriving a beat later) changes nothing: the next word settles it.
-    if (!film || progFilmEndSec > 0) {
-      progReenterFilmTail()
-      progFilmLineRecheck()
-    }
+    if (!film || progFilmEndSec > 0) progReenterFilmTail()
+    // AQU-2253 (Sam, Nov 9): …and under a line the film plays behind, the
+    // same: its clock is held to the film's new end, or, with no film, the
+    // rest of the line is crossed on the queue's own.
+    if (!film || progFilmCoverSec > 0) progFilmLineRecheck()
   }
   for (const l of progFilmListeners) l()
 }
 
 /**
- * The length of the linked film Play runs on over, for the surface showing
- * these lines; null when there is none (see `setProgrammeFilm`). The bottom
- * strip reads it: Play is offered while there is a film to run, and the length
- * shown before anything plays reaches the film's end.
+ * The workspace's word about the linked film (see `setProgrammeFilm`), for a
+ * surface showing lines: the bottom strip reads it with `filmOverRun` (the
+ * length shown before anything plays reaches the film's end where Play runs
+ * on to it) and `linesHaveAnythingToPlayCountingFilm` (Play is offered).
  */
-export function useProgrammeFilmEndSec(cellIds: ReadonlySet<string>): number | null {
-  const film = useSyncExternalStore(
+export function useProgrammeFilm(): ProgrammeFilm | null {
+  return useSyncExternalStore(
     (l) => {
       progFilmListeners.add(l)
       return () => { progFilmListeners.delete(l) }
@@ -472,28 +503,16 @@ export function useProgrammeFilmEndSec(cellIds: ReadonlySet<string>): number | n
     () => progFilm,
     () => progFilm,
   )
-  return useMemo(() => {
-    if (!film || film.cellIds.size === 0 || film.cellIds.size !== cellIds.size) return null
-    for (const id of cellIds) if (!film.cellIds.has(id)) return null
-    return film.endSec
-  }, [film, cellIds])
-}
-
-/** Whether the run in hand is the film's: the whole list of its file's lines. */
-function progRunIsTheFilms(film: ProgrammeFilm, ctx: PlayContext): boolean {
-  if (ctx.snapshot || ctx.cells.length === 0 || ctx.cells.length !== film.cellIds.size) return false
-  return ctx.cells.every((c) => film.cellIds.has(c.id))
 }
 
 function progFilmResolve(): void {
-  const film = progFilm
   const ctx = activeContext
   const prog = programme
-  const applies = Boolean(
-    timingMode === "audioFirst" && film && ctx && prog && prog.slots.length > 0 && progRunIsTheFilms(film, ctx),
-  )
-  progFilmEndSec = applies && film ? film.endSec : 0
-  progFilmCarriesLines = applies && progNextWithSound(0) < 0 && progUnderLayers.size === 0
+  const over = timingMode === "audioFirst" && ctx && !ctx.snapshot && prog && prog.slots.length > 0
+    ? filmOverRun(progFilm, ctx.cells.map((c) => c.id))
+    : null
+  progFilmEndSec = over?.runsOnToSec ?? 0
+  progFilmCoverSec = over?.coverSec ?? 0
 }
 
 /** Is this programme second past the last line, on a run with a film to run
@@ -507,14 +526,32 @@ function progOverFilmTail(sec: number): boolean {
   return progFilmEndSec - linesEnd > HOLD_MIN_SEC && sec >= linesEnd - 0.001
 }
 
+/** AQU-2253 (Sam, Nov 9): a line with nothing of its own that the film plays
+ *  behind: the film is its source, so it is played, on the film's clock. */
+function progFilmPlaysUnder(slot: ProgrammeSlot): boolean {
+  return whatSlotPlays(slot, progHiddenCellIds, progUnderLayers, progFilmCoverSec) === "film"
+}
+
 /** AQU-2253 (review, Nov 9): is the FILM the clock at this programme second?
- *  Where only the film plays: across the lines while nothing is recorded, and
+ *  Where only the film plays: across a line it plays behind with nothing of
+ *  its own (Sam, Nov 9: anywhere in the file, recorded lines or none), and
  *  after the last line once no take on another track still plays out there.
  *  Not in the film's last moment, a still frame (`progArmFilmClock`). */
 function progFilmIsClockAt(sec: number): boolean {
-  if (progFilmEndSec <= 0 || progFilmEndSec - sec <= FILM_END_GUARD_SEC) return false
-  if (progFilmCarriesLines) return true
-  return progOverFilmTail(sec) && !layersSoundIn(progLayers, sec + HOLD_MIN_SEC, Infinity)
+  if (progFilmCoverSec - sec <= FILM_END_GUARD_SEC) return false
+  if (progOverFilmTail(sec)) return !layersSoundIn(progLayers, sec + HOLD_MIN_SEC, Infinity)
+  // AQU-2253 (review 2, Nov 9): a film that went quiet as a line's clock is
+  // not one until it is heard from again (`progFilmGoneQuiet`).
+  if (progFilmQuiet) return false
+  const slot = programme ? slotAtProgrammeSec(programme, sec) : null
+  return slot != null && progFilmPlaysUnder(slot)
+}
+
+/** AQU-2253 (review 2, Nov 9): could the film be the clock of a line at this
+ *  second: its picture runs there (not its last moment), and it has not gone
+ *  quiet. */
+function progFilmCanCarryLineAt(sec: number): boolean {
+  return !progFilmQuiet && progFilmCoverSec - sec > FILM_END_GUARD_SEC
 }
 
 /** How long the run is: the programme, or a linked film that outlasts it. */
@@ -1266,15 +1303,21 @@ function progSlotHasSound(slot: ProgrammeSlot): boolean {
  * planTargetOverlay holds back only its take (play-queue.hidden-lines.test.ts).
  */
 function progPlaysThroughSilence(slot: ProgrammeSlot): boolean {
-  if (!slotHasNothingToPlay(slot, progHiddenCellIds, progUnderLayers)) return false
-  if (!getSkipSilentLinesPref()) return true
-  // AQU-2253 (Sam, Nov 9): nothing recorded yet on a file with a linked film.
-  // The film plays on its own clock, so Play runs the film: with no line that
-  // has anything to play there is nothing to skip TO, and skipping every line
-  // meant Play did nothing at all. The clock runs across the lines the film
-  // is still running under, and on over its tail. Once any line has something
-  // to play, lines with nothing are skipped again, as the setting says.
-  return progFilmCarriesLines && slot.startSec < progFilmEndSec - HOLD_MIN_SEC
+  switch (whatSlotPlays(slot, progHiddenCellIds, progUnderLayers, progFilmCoverSec)) {
+    // AQU-2253 (Sam, Nov 9): "the rule 'skip lines with nothing to play'
+    // should only land when there is literally nothing to play: recorded or
+    // source." A linked film playing behind the line is its source, so the
+    // line is played whatever the setting says: the playhead crosses it in
+    // real time with the film running (on the film's clock), and nothing is
+    // jumped. Anywhere in the file, with lines recorded or none: past the
+    // film's end there is no film, and the setting decides again.
+    case "film":
+      return true
+    case "nothing":
+      return !getSkipSilentLinesPref()
+    default:
+      return false
+  }
 }
 
 /** The next verse playback goes to, from `from` onward: one with anything to
@@ -1310,6 +1353,7 @@ function progNextWithSound(from: number): number {
 function progFinish(): void {
   progClearGate()
   progClearLead()
+  progForgetFilmQuiet() // AQU-2253 (review 2): the next run gives the film a fresh chance
   progClearLayerTimer()
   progLayerFailed.clear()
   progStopEndStop()
@@ -1671,8 +1715,9 @@ function progEnterTail(atSec: number, autoplay: boolean, explicit: boolean): boo
 
 // ── AQU-2253 (review, Nov 9): where only the film plays, the film is the clock
 //
-// Over a linked film's tail, and across the lines while nothing is recorded,
-// nothing of the queue's own sounds, and a timer there ran the playhead on
+// Over a linked film's tail, and across the lines while nothing is recorded
+// (AQU-2253, Sam, Nov 9: across any line the film plays behind with nothing
+// of its own), nothing of the queue's own sounds, and a timer there ran the playhead on
 // whatever the film was doing: past a film that was buffering, and to the end
 // behind "Click to start" on one the browser would not start.
 //
@@ -1690,6 +1735,30 @@ const FILM_CLOCK_WAIT_MS = 800
 /** The film's clock ends this far short of the film's end: the panel holds
  *  the last quarter second as a still frame (video-sync's end guard). */
 const FILM_END_GUARD_SEC = 0.3
+/** AQU-2253 (review 2, Nov 9): no word from the film for this long while it is
+ *  the clock on a LINE, and it is given up as the clock (`progFilmGoneQuiet`).
+ *  The queue has no stall figure of its own for a film to reuse (800 ms above
+ *  only says "loading"; the readiness gate's 6 s is a take's patience), so 3 s:
+ *  well past an ordinary film start or rebuffer, and before the panel's stall
+ *  ladder would give up and ask for a click (about 8 s and more). */
+const FILM_CLOCK_PATIENCE_MS = 3_000
+
+/** The film is the clock no longer: the line in hand is crossed on. */
+function progFilmGoneQuiet(): void {
+  progFilmQuiet = true
+  progFilmQuietSec = null
+  progFilmLineRecheck()
+  setProgress({})
+}
+
+/** A fresh chance for the film: heard from again, its length come in or
+ *  changed, or a new run. */
+function progForgetFilmQuiet(): void {
+  if (!progFilmQuiet) return
+  progFilmQuiet = false
+  progFilmQuietSec = null
+  setProgress({})
+}
 
 /** Hold the clock on the FILM from `atSec`: over the rest of a line with
  *  nothing to play ("next", then the line the film has reached) or over the
@@ -1705,8 +1774,15 @@ function progArmFilmClock(
     film: { sec: null, heardAt: now, moving: false, onEnd },
   }
   lead.ticker = setInterval(() => {
-    if (progLead !== lead || state.kind !== "playing") return
-    if (performance.now() - lead.film!.heardAt < FILM_CLOCK_WAIT_MS) return
+    if (progLead !== lead || (state.kind !== "playing" && state.kind !== "loading")) return
+    const quietMs = performance.now() - lead.film!.heardAt
+    // AQU-2253 (review 2, Nov 9): on a line, waited for long enough: the rest
+    // of the line is crossed on the queue's own timer (never skipped).
+    if (lead.then === "next" && quietMs >= FILM_CLOCK_PATIENCE_MS) {
+      progFilmGoneQuiet()
+      return
+    }
+    if (state.kind !== "playing" || quietMs < FILM_CLOCK_WAIT_MS) return
     lead.film!.moving = false
     setState({ kind: "loading", ...progStateCell() })
   }, FILM_TAIL_TICK_MS)
@@ -1721,6 +1797,13 @@ function progArmFilmClock(
  * behind is waited for.
  */
 export function tickProgrammeFilm(sec: number, over = false): void {
+  // AQU-2253 (review 2, Nov 9): a film given up as a line's clock is heard
+  // from again once it reports moving on (the panel reports it while it
+  // follows the playhead too); the next line it carries is its clock again.
+  if (progFilmQuiet && progRunning() && Number.isFinite(sec)) {
+    if (progFilmQuietSec != null && sec > progFilmQuietSec + 0.001) progForgetFilmQuiet()
+    else progFilmQuietSec = sec
+  }
   const lead = progLead
   const film = lead?.film
   if (!lead || !film || !progRunning() || !Number.isFinite(sec)) return
@@ -1753,8 +1836,9 @@ function progFilmLineRecheck(): void {
   if (!lead?.film || lead.then !== "next" || !slot || !progRunning()) return
   const now = progLeadNowSec(lead)
   const lineEnd = slot.startSec + slot.slotLenSec
-  if (progFilmIsClockAt(now)) {
-    lead.endSec = Math.min(lineEnd, progFilmEndSec - FILM_END_GUARD_SEC)
+  // (AQU-2253, review 2: a line whose own take gave up stays the film's too.)
+  if (progFilmIsClockAt(now) || (lead.gaveUpTake && progFilmCanCarryLineAt(now))) {
+    lead.endSec = Math.min(lineEnd, progFilmCoverSec - FILM_END_GUARD_SEC)
     return
   }
   setState({ kind: "playing", ...progStateCell() })
@@ -1771,8 +1855,10 @@ function progFilmClockDone(lead: ProgLead, sec: number, over: boolean): void {
   const prog = programme
   const on = progCurrentSlot()
   if (!prog || !on) return
-  if (over) {
-    // The film ran out under a line: the rest is crossed as with no film.
+  // The film ran out under a line (or, AQU-2253 review 2, reached its last
+  // moment inside a line whose own take gave up): the rest is crossed as
+  // with no film.
+  if (over || (lead.gaveUpTake && slotAtProgrammeSec(prog, sec) === on)) {
     setState({ kind: "playing", ...progStateCell() })
     progArmLead(on, lead.atSec, lead.explicit, "next")
     return
@@ -1781,6 +1867,22 @@ function progFilmClockDone(lead: ProgLead, sec: number, over: boolean): void {
   // playhead does not step back to the line's start at every line.
   const slot = slotAtProgrammeSec(prog, sec)
   const index = slot ? prog.slots.indexOf(slot) : -1
+  // AQU-2253 (review 2, Nov 9): …but never past a line with sound of its own.
+  // The film reports about four times a second, so one report can land past
+  // a short take between two lines it carries (a "Yes", a laugh: under about
+  // a quarter of a second at 1x, half a second at 2x). The first such line it
+  // passed plays, from its start; the film then follows it, as under any take.
+  // (Past the last line: every line after this one was passed. A line with
+  // no time of its own to play is no stop, whatever sounds across it.)
+  const reached = slot ? index : prog.slots.length
+  for (let i = progIndex + 1; i < reached; i++) {
+    const passed = prog.slots[i]
+    if (passed.slotLenSec <= HOLD_MIN_SEC) continue
+    if (progSlotHasSound(passed) || progSlotHolds(passed, passed.startSec)) {
+      void progPlaySlot(i, null, true, false, true)
+      return
+    }
+  }
   if (slot && index >= progIndex && progPlaysThroughSilence(slot)) {
     void progPlaySlot(index, sec, true, false)
     return
@@ -1919,6 +2021,9 @@ interface ProgLead {
    *  reports. `sec`: the film's last report; `heardAt`: when it last moved;
    *  `onEnd`: what the film's tail ends in (null: a line, then the next). */
   film?: { sec: number | null; heardAt: number; moving: boolean; onEnd: (() => void) | null }
+  /** AQU-2253 (review 2, Nov 9): this line has a take of its own that gave up
+   *  (`progCrossRestWithFilm`): the film carries it as a line with nothing. */
+  gaveUpTake?: boolean
 }
 let progLead: ProgLead | null = null
 
@@ -2101,6 +2206,39 @@ function classifyTargetFailure(
 }
 
 /**
+ * AQU-2253 (review 2, Nov 9): a line under the linked film whose own take gave
+ * up (the readiness gate's patience ran out, the take failed to load or died
+ * on the way, or could not be resolved) is crossed from `atSec` as a line with
+ * nothing of its own: on the film's clock, the film running on. Moving on to
+ * the next line instead cut the film forward by the rest of this one, the one
+ * jump left on a film file. A take on another track sounding there keeps the
+ * queue's own clock (`progArmHold`), and a film that has gone quiet or is at
+ * its last moment the queue's timer. False where no film is behind the line,
+ * or nothing of it is left: the caller moves on, as it always did.
+ */
+function progCrossRestWithFilm(slot: ProgrammeSlot, atSec: number, explicit: boolean): boolean {
+  if (!filmIsBehindSlot(slot, progFilmCoverSec)) return false
+  const lineEnd = slot.startSec + slot.slotLenSec
+  const at = Math.min(Math.max(atSec, slot.startSec), lineEnd)
+  if (lineEnd - at <= HOLD_MIN_SEC) return false
+  progQuiet(currentAudio)
+  setState({ kind: "playing", ...progStateCell() })
+  if (progSlotHolds(slot, at)) {
+    progArmHold(slot, at, explicit)
+  } else if (progFilmCanCarryLineAt(at)) {
+    progArmFilmClock(slot, at, explicit, "next", Math.min(lineEnd, progFilmCoverSec - FILM_END_GUARD_SEC), null)
+    progLead!.gaveUpTake = true
+  } else {
+    progArmLead(slot, at, explicit, "next")
+  }
+  // After the lead: the transport says whose clock it is (the film panel
+  // reports the film's second only where the film is the clock).
+  setProgress({ currentTime: at })
+  progLayersSync(at)
+  return true
+}
+
+/**
  * The gate is open: start every due side TOGETHER, or advance when the verse
  * has nothing left to play. Sets the transport state itself — a dub-only verse
  * has no source `onplay` to do it (and the stamp must come from the CURRENT
@@ -2144,6 +2282,8 @@ function progStartSides(gate: ProgGate): void {
     return
   }
   if (!dubEl && !srcEl) {
+    // AQU-2253 (review 2, Nov 9): under the film, crossed with it instead.
+    if (progCrossRestWithFilm(slot, slot.startSec + into, gate.explicit)) return
     progAdvance()
     return
   }
@@ -2308,7 +2448,11 @@ function progOnTargetFinished(entry: OverlayEntry, reason: "ended" | "error", ca
   const takeEndIntoSec = (slot.targetLeadSec ?? 0) + slot.targetLenSec
   const sourceHasMore = slot.sourceLenSec - takeEndIntoSec > HOLD_MIN_SEC
   if (sourceCanCarry && (slot.clock !== "target" || sourceHasMore)) return
-  progLineEnded(progTakeStoppedAt(slot, entry, slot.startSec + takeEndIntoSec))
+  const stoppedAt = progTakeStoppedAt(slot, entry, slot.startSec + takeEndIntoSec)
+  // AQU-2253 (review 2, Nov 9): a take dying on its way under the film: the
+  // rest of its line is crossed with the film, never jumped.
+  if (reason === "error" && progCrossRestWithFilm(slot, stoppedAt, false)) return
+  progLineEnded(stoppedAt)
 }
 
 /**
@@ -2633,10 +2777,11 @@ async function progPlaySlot(
     progQuiet(currentAudio)
     setState({ kind: "playing", ...progStateCell() })
     // AQU-2253 (review, Nov 9): …on the film's own clock where the film is
-    // what plays (nothing recorded), to the line's end or the film's.
-    if (progFilmCarriesLines && progFilmIsClockAt(at)) {
+    // what plays (Sam, Nov 9: a line it plays behind with nothing of its
+    // own), to the line's end or the film's.
+    if (progFilmIsClockAt(at)) {
       const lineEnd = slot.startSec + slot.slotLenSec
-      progArmFilmClock(slot, at, explicit, "next", Math.min(lineEnd, progFilmEndSec - FILM_END_GUARD_SEC), null)
+      progArmFilmClock(slot, at, explicit, "next", Math.min(lineEnd, progFilmCoverSec - FILM_END_GUARD_SEC), null)
     } else {
       progArmLead(slot, at, explicit, "next")
     }
@@ -2655,6 +2800,8 @@ async function progPlaySlot(
     }
     // Nothing in this verse can sound from here (both sides already spent,
     // or neither loadable) — don't sit in silence.
+    // AQU-2253 (review 2, Nov 9): …but under the film the film plays there.
+    if (progCrossRestWithFilm(slot, at, explicit)) return
     progAdvance()
     return
   }
@@ -4555,6 +4702,7 @@ export function startQueue(ctx: PlayContext, fromIndex: number, explicit = false
   activeContext = ctx
   if (timingMode === "audioFirst" && progEngageForContext()) {
     progLayersPurge() // AQU-2252: a fresh start
+    progForgetFilmQuiet()
     const start = progStartIndexFor(ctx.cells, fromIndex)
     if (start < 0) {
       // FORTIFY: exit through progFinish so the gate/interval/prefetch die
@@ -4892,6 +5040,7 @@ export async function resumeQueue(): Promise<void> {
 export function stopQueue(): void {
   progClearGate()
   progClearLead()
+  progForgetFilmQuiet()
   progClearLayerTimer()
   progLayerFailed.clear()
   progStopEndStop()
@@ -5054,9 +5203,54 @@ export function updateQueueCells(cells: CellData[]): void {
 }
 
 /** Whether any cell in the list has playable audio. Drives the bar's
- *  Play button enablement. */
+ *  Play button enablement.
+ *
+ *  AQU-2253 (Sam, Nov 9): "recorded or source". What the queue plays for a
+ *  line (`masterAudioForCell`): a section of an imported recording plays its
+ *  original whether or not that is the line's selected audio, so a line with
+ *  only its original is something to play here too, as it is to the queue,
+ *  which never skips it. */
 export function hasAnyPlayableAudio(cells: CellData[]): boolean {
-  return cells.some((c) => pickPlayableAudio(c) !== undefined)
+  return cells.some((c) => masterAudioForCell(c) !== undefined)
+}
+
+// ── AQU-2253 (review 2, Nov 9): "is there anything to play in these lines?" ──
+//
+// Two questions, asked by different callers, so they have two names:
+//
+//  - `linesHaveAnythingToPlayCountingFilm`: a take, an original, OR a linked
+//    film playing behind the lines (the workspace's word, `setProgrammeFilm`;
+//    following the recordings the film is their source, `whatSlotPlays`).
+//    Asked where a PERSON picks the lines to play: the bottom strip's Play
+//    (is it offered), and a chapter picked in the chapter picker while Play
+//    all plays (lib/timeline/chapter-pick's `planChapterPick`). A chapter
+//    only the film can play is played when someone asks for it: the film is
+//    behind its lines and the lines nobody recorded are crossed with it.
+//
+//  - `linesHaveAnythingOfTheirOwnToPlay`: a take or an original, the film
+//    NOT counted. Asked by Play all's own move into the next chapter when a
+//    chapter plays out (lib/timeline/chapter-pick's `nextChapterForPlayAll`,
+//    from ProjectWorkspace's `onQueueRanOut`). On a book each chapter runs on
+//    its own clock from 0:00, so the film behind a chapter nobody has
+//    recorded is the film's opening again, under that chapter's verses:
+//    counting it, Play all ran the whole book through the film's first
+//    minutes. So Play all goes on only into a chapter with something of its
+//    own, and a chapter only the film could play ends it there, as before.
+
+/**
+ * A take, an original, or a linked film behind these lines: what a person
+ * pressing Play (or picking the chapter) gets played. See above.
+ */
+export function linesHaveAnythingToPlayCountingFilm(cells: CellData[], film: ProgrammeFilm | null = progFilm): boolean {
+  return linesHaveAnythingOfTheirOwnToPlay(cells) || filmOverRun(film, cells.map((c) => c.id)).coverSec > 0
+}
+
+/**
+ * A take or an original of the lines' own, the film not counted: what Play
+ * all asks of the next chapter before it goes on into it. See above.
+ */
+export function linesHaveAnythingOfTheirOwnToPlay(cells: CellData[]): boolean {
+  return hasAnyPlayableAudio(cells)
 }
 
 // ── Dubs over a linked picture (AQU-646 round 5) ────────────────────────────

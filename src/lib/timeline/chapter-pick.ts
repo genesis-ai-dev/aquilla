@@ -5,6 +5,8 @@
 // chapter picked and keeps playing, from its first line, in either timing —
 // the same start Play all makes when it carries on into the next chapter. A
 // chapter with nothing to play cannot carry it on, so playback stops there.
+// (AQU-2253: following the recordings, a linked film behind a chapter's lines
+// is something to play for a pick, as for the strip's Play.)
 //
 // Paused on another chapter: that playback ends, as it always has, and the
 // timeline shows the chapter picked. Picking the chapter that is playing, or
@@ -17,13 +19,38 @@
 
 import type { CellData } from "@/hooks/useCells"
 import {
-  hasAnyPlayableAudio,
+  linesHaveAnythingOfTheirOwnToPlay,
+  linesHaveAnythingToPlayCountingFilm,
   startQueue,
   stopQueue,
   type PlayContext,
   type QueueState,
 } from "@/lib/audio/play-queue"
-import { scopeCells, type TimelineChapter } from "./sequence-timeline"
+import { nextPlayableChapter, scopeCells, type TimelineChapter } from "./sequence-timeline"
+
+/**
+ * AQU-2253 (review 2, Nov 9): where Play all goes when a run of one chapter
+ * plays out (ProjectWorkspace's `onQueueRanOut`): the next chapter with
+ * something of its OWN to play, a take or an original, or null, and Play all
+ * ends there. A linked film behind a chapter does not count here: on a book
+ * each chapter runs on its own clock from 0:00, so the film behind a chapter
+ * nobody has recorded is only the film's opening again. (A chapter picked by
+ * hand counts the film, `planChapterPick`; play-queue's "anything to play"
+ * questions say which caller asks which and why.)
+ */
+export function nextChapterForPlayAll({
+  chapters,
+  lines,
+  playedKey,
+}: {
+  chapters: readonly TimelineChapter[]
+  /** The lines the book's timeline may draw, before any chapter. */
+  lines: readonly CellData[]
+  /** The chapter whose run just played out. */
+  playedKey: string
+}): TimelineChapter | null {
+  return nextPlayableChapter(chapters, playedKey, (chapter) => linesHaveAnythingOfTheirOwnToPlay(scopeCells(lines, chapter)))
+}
 
 export type ChapterPickPlan =
   | { kind: "show" }
@@ -48,7 +75,10 @@ export function planChapterPick({
   if (!playingKey || playingKey === pickedKey) return { kind: "show" }
   if (queueKind !== "playing" && queueKind !== "loading") return { kind: "stop" }
   const chapter = chapters.find((c) => c.key === pickedKey)
-  if (!chapter || !hasAnyPlayableAudio(scopeCells(lines, chapter))) return { kind: "stop" }
+  // AQU-2253 (review 2, Nov 9): a pick is someone asking for that chapter, so
+  // it asks what pressing Play on it asks: a take, an original, or a linked
+  // film behind its lines (Play all's own move asks for the chapter's own).
+  if (!chapter || !linesHaveAnythingToPlayCountingFilm(scopeCells(lines, chapter))) return { kind: "stop" }
   return { kind: "play", chapter }
 }
 

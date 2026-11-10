@@ -7,6 +7,12 @@
  * itself off without a sign: Play ends with the lines again and, with nothing
  * recorded, does nothing. Nothing held that.
  *
+ * AQU-2253 (Sam, Nov 9): the film is also the lines' source, so a run whose
+ * lines are all the film's file's has the film behind it (a line with nothing
+ * of its own plays with the film, never skipped); only a run of the whole list
+ * runs on past its lines. On a book the film is named with every chapter's
+ * lines and runs on past none.
+ *
  * Two halves, because nothing renders ProjectWorkspace in tests:
  *  - the lists, built by the same helpers the workspace builds them with, are
  *    handed to the REAL queue the way each caller hands them over, on a file
@@ -28,12 +34,13 @@ import {
   startQueue,
   startQueueAtTime,
   stopQueue,
-  useProgrammeFilmEndSec,
+  linesHaveAnythingToPlayCountingFilm,
+  useProgrammeFilm,
   type PlayContext,
 } from "@/lib/audio/play-queue"
 import { mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
 import { programmeFilmFor, stripLinesFor } from "@/lib/timeline/film-pieces"
-import { recordingsLines } from "@/lib/timeline/programme"
+import { filmOverRun, recordingsLines } from "@/lib/timeline/programme"
 import { resetSkipSilentLinesPrefCacheForTests } from "@/lib/store/skip-silent-lines-pref"
 import type { CellData } from "@/hooks/useCells"
 
@@ -60,7 +67,10 @@ function workspaceLists(over: { timelineIds?: string[]; heard?: CellData[] | nul
   const plain = [line("l1"), line("l2"), line("l3")]
   // Other objects, the same lines: what merging the file's audio in gives.
   const merged = plain.map((c) => ({ ...c }))
-  const timeline = over.timelineIds ? merged.filter((c) => over.timelineIds!.includes(c.id)) : merged
+  // `timelineLines`, and the timeline's (`timelineCells`): a book's chapter.
+  const timelineLines = merged
+  const chapterOfABook = over.timelineIds != null
+  const timeline = chapterOfABook ? merged.filter((c) => over.timelineIds!.includes(c.id)) : merged
   const playback = recordingsLines(timeline, over.heard ?? null, true)
   return {
     plain,
@@ -68,8 +78,10 @@ function workspaceLists(over: { timelineIds?: string[]; heard?: CellData[] | nul
     playback,
     /** What the bottom strip is handed… */
     strip: stripLinesFor(playback, timeline, merged, plain),
-    /** …and the word the workspace gives the queue about the film. */
-    film: programmeFilmFor(FILM_SEC, playback),
+    /** …and the word the workspace gives the queue about the film: named
+     *  with every line of the file Play plays (`filmLines`). */
+    film: programmeFilmFor({ endSec: FILM_SEC, runsOn: !chapterOfABook }, recordingsLines(timelineLines, over.heard ?? null, true)),
+    chapterOfABook,
   }
 }
 
@@ -100,11 +112,13 @@ describe("the film's lines are the lines each caller starts the queue with (AQU-
   for (const [name, lists] of CASES) {
     describe(name, () => {
       it("the bottom strip's Play runs the film, and the strip is offered Play", () => {
-        const { strip, film } = lists()
+        const { strip, film, chapterOfABook } = lists()
         setProgrammeFilm(film, "f1")
         const cells = asTheStripStartsIt(strip)
-        const offered = renderHook(() => useProgrammeFilmEndSec(new Set(cells.map((c) => c.id))))
-        expect(offered.result.current).toBe(FILM_SEC)
+        const word = renderHook(() => useProgrammeFilm())
+        expect(linesHaveAnythingToPlayCountingFilm(cells, word.result.current)).toBe(true)
+        // The length the strip shows: the film's, except on a book's chapter.
+        expect(filmOverRun(word.result.current, cells.map((c) => c.id)).runsOnToSec).toBe(chapterOfABook ? 0 : FILM_SEC)
         startQueue(ctxFor(cells), 0, false)
         expect(filmIsRunning()).toBe(true)
       })
@@ -130,18 +144,23 @@ describe("the film's lines are the lines each caller starts the queue with (AQU-
     })
   }
 
-  it("a list that differs by one line switches it all off: this is what the wiring must never do", () => {
+  // AQU-2253 (Sam, Nov 9): one line fewer used to switch it off too. Those
+  // lines are all the film's file's, so the film is behind them now; what one
+  // line fewer still loses is Play running on past them.
+  it("a list one line longer switches it all off, and one line shorter loses the run on: this is what the wiring must never do", () => {
     const { plain, playback, film } = workspaceLists()
     setProgrammeFilm(film, "f1")
     // One line more than the film was named with.
     const drifted = [...plain, line("l4")]
-    const offered = renderHook(() => useProgrammeFilmEndSec(new Set(drifted.map((c) => c.id))))
-    expect(offered.result.current).toBeNull()
+    expect(linesHaveAnythingToPlayCountingFilm(drifted)).toBe(false)
     startQueue(ctxFor(drifted), 0, false)
     expect(getQueueState().kind).toBe("idle")
-    // One line fewer.
-    startQueueAtTime(ctxFor(playback.slice(1)), 0, { play: true })
-    expect(getQueueState().kind).toBe("idle")
+    // One line fewer: under the film, but it ends with its lines.
+    const fewer = playback.slice(1)
+    expect(filmOverRun(film, fewer.map((c) => c.id))).toEqual({ coverSec: FILM_SEC, runsOnToSec: 0 })
+    startQueueAtTime(ctxFor(fewer), 0, { play: true })
+    expect(filmIsRunning()).toBe(true)
+    expect(getQueueProgress().duration).toBeLessThan(FILM_SEC)
   })
 })
 
@@ -158,7 +177,11 @@ describe("the workspace and the strip take their lists from those helpers (AQU-2
   }
 
   it("the film is named with the lines Play plays, and for the file on screen", () => {
-    expect(workspace).toContain("() => programmeFilmFor(filmRunOnSec, playbackCells),")
+    // Every line of the file Play plays: `playbackCells` built from the whole
+    // of `timelineLines` rather than one chapter's `timelineCells`.
+    expect(workspace).toContain("() => recordingsLines(timelineCells, audioCueCells, timingMode === \"audioFirst\"),")
+    expect(workspace).toContain("() => recordingsLines(timelineLines, audioCueCells, timingMode === \"audioFirst\"),")
+    expect(workspace).toContain("() => programmeFilmFor(filmBehind, filmLines),")
     expect(workspace).toContain("setProgrammeFilm(programmeFilm, programmeFilmFileId)")
   })
 
@@ -172,6 +195,17 @@ describe("the workspace and the strip take their lists from those helpers (AQU-2
     }
   })
 
+  // AQU-2253 (review 2, Nov 9): Play all's own move into the next chapter asks
+  // for something of the chapter's own (lib/timeline/chapter-pick's
+  // `nextChapterForPlayAll`, play-queue.film-tail.test.ts), never the film.
+  it("Play all's move into the next chapter asks the chapter planner, not the film", () => {
+    const start = workspace.indexOf("useEffect(() => onQueueRanOut((ctx) => {")
+    expect(start).toBeGreaterThan(-1)
+    const body = workspace.slice(start, workspace.indexOf("}), [])", start))
+    expect(body).toContain("nextChapterForPlayAll({ chapters: run.chapters, lines: run.cells, playedKey: played.key })")
+    expect(body).not.toContain("CountingFilm")
+  })
+
   it("the bottom strip is handed those lines", () => {
     expect(workspace).toContain("() => stripLinesFor(playbackCells, timelineCells, audioMergedCells, legacyCells),")
     expect(workspace).toMatch(/<VoicePlaybackBar\s+variant="strip"\s+(?:\/\/[^\n]*\s+)*cells=\{timelineBarCells\}/)
@@ -180,7 +214,9 @@ describe("the workspace and the strip take their lists from those helpers (AQU-2
   it("the strip starts the queue with the lines it was handed, and asks about the film for the same ones", () => {
     expect(strip).toContain("() => mergeCellsWithAudio(rawCells, audioByCellId),")
     expect(strip).toContain("const cellIds = useMemo(() => new Set(cells.map((c) => c.id)), [cells])")
-    expect(strip).toContain("const filmEndSec = useProgrammeFilmEndSec(cellIds)")
+    expect(strip).toContain("const film = useProgrammeFilm()")
+    expect(strip).toContain("filmOverRun(film, cellIds)")
+    expect(strip).toContain("linesHaveAnythingToPlayCountingFilm(cells, film)")
     expect(strip).toContain("startQueue({ cells, projectId, session,")
   })
 

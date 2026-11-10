@@ -9,7 +9,7 @@ import {
   filmMomentAt,
   filmPiecesFor,
   filmVoicesProgramme,
-  linkedFilmRunOnSec,
+  linkedFilmBehindLines,
   programmeFilmFor,
   stripLinesFor,
   pieceHeldSec,
@@ -128,38 +128,48 @@ describe("filmVoicesProgramme — whose sound plays following the recordings", (
 
 // AQU-2253 (Sam, Nov 9): following the recordings a LINKED film plays on its
 // own clock, so Play runs to whichever ends later: the lines or the film.
-describe("linkedFilmRunOnSec: the film Play runs on over, following the recordings", () => {
+describe("linkedFilmBehindLines: the film behind the lines, following the recordings", () => {
   const linked = { kind: "linked", paneOnScreen: true, followsRecordings: true, durationSec: 2700 } as const
 
-  it("a linked film on screen: its length", () => {
-    expect(linkedFilmRunOnSec(linked)).toBe(2700)
+  it("a linked film on screen: its length, and Play runs on past the lines to it", () => {
+    expect(linkedFilmBehindLines(linked)).toEqual({ endSec: 2700, runsOn: true })
   })
 
   it("following the source: nothing, the film or the recording is the transport there", () => {
-    expect(linkedFilmRunOnSec({ ...linked, followsRecordings: false })).toBeNull()
+    expect(linkedFilmBehindLines({ ...linked, followsRecordings: false })).toBeNull()
   })
 
-  it("an imported film: nothing, it is cut into its lines and ends with them", () => {
-    expect(linkedFilmRunOnSec({ ...linked, kind: "imported" })).toBeNull()
+  it("an imported film: nothing, it is cut into its lines and its sound is their originals", () => {
+    expect(linkedFilmBehindLines({ ...linked, kind: "imported" })).toBeNull()
   })
 
-  it("a film that could not be loaded: nothing, Play ends where the lines end", () => {
-    expect(linkedFilmRunOnSec({ ...linked, filmFailed: true })).toBeNull()
+  it("a film that could not be loaded: nothing, it is not something to play", () => {
+    expect(linkedFilmBehindLines({ ...linked, filmFailed: true })).toBeNull()
   })
 
   it("no film, or none on screen: nothing", () => {
-    expect(linkedFilmRunOnSec({ ...linked, kind: null })).toBeNull()
-    expect(linkedFilmRunOnSec({ ...linked, paneOnScreen: false })).toBeNull()
+    expect(linkedFilmBehindLines({ ...linked, kind: null })).toBeNull()
+    expect(linkedFilmBehindLines({ ...linked, paneOnScreen: false })).toBeNull()
   })
 
-  it("a length not known yet, or not a length: nothing", () => {
-    expect(linkedFilmRunOnSec({ ...linked, durationSec: null })).toBeNull()
-    expect(linkedFilmRunOnSec({ ...linked, durationSec: 0 })).toBeNull()
-    expect(linkedFilmRunOnSec({ ...linked, durationSec: Number.NaN })).toBeNull()
+  // AQU-2253 (Sam, Nov 9): these two said "nothing" while Play only ran on
+  // past the lines. The film is the lines' source too, so it is behind them
+  // before its length is known, and on one chapter of a book.
+  it("a length not known yet, or not a length: still behind the lines, its length unknown", () => {
+    expect(linkedFilmBehindLines({ ...linked, durationSec: null })).toEqual({ endSec: null, runsOn: true })
+    expect(linkedFilmBehindLines({ ...linked, durationSec: 0 })).toEqual({ endSec: null, runsOn: true })
+    expect(linkedFilmBehindLines({ ...linked, durationSec: Number.NaN })).toEqual({ endSec: null, runsOn: true })
   })
 
-  it("one chapter of a book on the timeline: nothing, Play all goes on into the next chapter", () => {
-    expect(linkedFilmRunOnSec({ ...linked, chapterOfABook: true })).toBeNull()
+  it("one chapter of a book on the timeline: behind its lines, but Play does not run on (Play all goes on into the next chapter)", () => {
+    expect(linkedFilmBehindLines({ ...linked, chapterOfABook: true })).toEqual({ endSec: 2700, runsOn: false })
+  })
+
+  it("a film whose sound is not what plays is still behind the lines: its picture is running", () => {
+    // The uploaded recording picked as the sound: the film is the quiet one…
+    expect(filmVoicesProgramme({ kind: "linked", paneOnScreen: true, followsRecordings: true, recordingIsTheSound: true })).toBe(false)
+    // …and still the lines' source.
+    expect(linkedFilmBehindLines(linked)).toEqual({ endSec: 2700, runsOn: true })
   })
 })
 
@@ -319,10 +329,12 @@ describe("programmeFilmFor and stripLinesFor: one list of lines, by id", () => {
     expect(programmeFilmFor(null, plain)).toBeNull()
   })
 
-  it("names the film's length and exactly the lines Play plays", () => {
-    const film = programmeFilmFor(2700, merged)
+  it("names the film's length, whether Play runs on, and exactly the lines Play plays", () => {
+    const film = programmeFilmFor({ endSec: 2700, runsOn: true }, merged)
     expect(film?.endSec).toBe(2700)
+    expect(film?.runsOn).toBe(true)
     expect([...(film?.cellIds ?? [])]).toEqual(["a", "b", "c"])
+    expect(programmeFilmFor({ endSec: null, runsOn: false }, merged)).toMatchObject({ endSec: null, runsOn: false })
   })
 
   it("the strip gets the file's lines plain when the timeline draws them all", () => {
@@ -345,7 +357,7 @@ describe("programmeFilmFor and stripLinesFor: one list of lines, by id", () => {
     const chapter = [merged[1]]
     const cases: [{ id: string }[], { id: string }[]][] = [[merged, merged], [chapter, chapter], [[{ id: "h1" }], merged]]
     for (const [playback, timeline] of cases) {
-      const film = programmeFilmFor(60, playback)
+      const film = programmeFilmFor({ endSec: 60, runsOn: true }, playback)
       expect(ids(stripLinesFor(playback, timeline, merged, plain)).sort()).toEqual([...(film?.cellIds ?? [])].sort())
     }
   })

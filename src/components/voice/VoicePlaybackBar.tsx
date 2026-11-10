@@ -18,7 +18,7 @@ import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
 import { cn } from "@/lib/utils"
 import {
   hasAnyPlayableAudio, pauseQueue, queueClockIsFileTime, resumeQueue, seekQueueToTime,
-  setQueueRate, setQueueVolume, skipBack, skipForward, startQueue, updateQueueCells, useProgrammeFilmEndSec,
+  setQueueRate, setQueueVolume, skipBack, skipForward, startQueue, updateQueueCells, useProgrammeFilm, linesHaveAnythingToPlayCountingFilm,
 } from "@/lib/audio/play-queue"
 import { toggleAudibility, useQueueAudibility } from "@/lib/audio/audibility"
 import { useTransportForFile } from "@/hooks/useTransportForFile"
@@ -28,7 +28,7 @@ import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
 import { isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { resolveCastVoice } from "@/lib/audio/voices"
 import { useFileAudioAttachments, mergeCellsWithAudio } from "@/hooks/useFileAudioAttachments"
-import { layOutProgramme, playedProgramme, type BuildProgrammeOptions } from "@/lib/timeline/programme"
+import { filmOverRun, layOutProgramme, playedProgramme, type BuildProgrammeOptions } from "@/lib/timeline/programme"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -176,23 +176,29 @@ export function VoicePlaybackBar({
   )
   // AQU-2253 (Sam, Nov 9): following the recordings a LINKED film plays on its
   // own clock, so Play runs to whichever ends later: the lines or the film.
-  // The film's length where these lines have one to run on over (the
-  // workspace's word, through the queue), else null. Before play the length
-  // shown reaches the film's end, as the queue's own does once it plays.
-  const filmEndSec = useProgrammeFilmEndSec(cellIds)
-  const filmRunsOn = freeTiming && transport.source === "queue" && filmEndSec != null
-  const shownLengthSec = showsLaidOut ? Math.max(laidOutSec, filmRunsOn ? filmEndSec : 0) : duration
+  // The workspace's word about the film, through the queue: where Play runs on
+  // past these lines to the film's end, the length shown before play reaches
+  // it, as the queue's own does once it plays.
+  const film = useProgrammeFilm()
+  const filmCounts = freeTiming && transport.source === "queue"
+  const filmRunsOnToSec = useMemo(
+    () => (filmCounts ? filmOverRun(film, cellIds).runsOnToSec : 0),
+    [filmCounts, film, cellIds],
+  )
+  const shownLengthSec = showsLaidOut ? Math.max(laidOutSec, filmRunsOnToSec) : duration
 
   // A picture is always playable; the queue needs a clip to play. Neither is
   // knowable before the file's attachments are read: a source clip arriving
   // makes the cells file-timed, which hands the file from the picture or the
   // virtual clock to the queue. A press in that window went to the engine that
   // was about to lose the file, so nothing sounded (AQU-1643).
-  // AQU-2253 (Sam, Nov 9): …or a linked film to run: with nothing recorded
-  // yet, Play was off here and the film could not be watched in this timing.
+  // AQU-2253 (Sam, Nov 9): …or a linked film playing behind the lines, their
+  // source (`linesHaveAnythingToPlayCountingFilm`, the queue's own answer for
+  // a person pressing Play): with nothing recorded yet, Play was off here and
+  // the film could not be watched.
   const canPlay = useMemo(
-    () => audioLoaded && (drivesVideo || filmRunsOn || hasAnyPlayableAudio(cells)),
-    [audioLoaded, drivesVideo, filmRunsOn, cells],
+    () => audioLoaded && (drivesVideo || (filmCounts ? linesHaveAnythingToPlayCountingFilm(cells, film) : hasAnyPlayableAudio(cells))),
+    [audioLoaded, drivesVideo, filmCounts, film, cells],
   )
   const activeIndex = transport.cellId ? cells.findIndex((c) => c.id === transport.cellId) : -1
   const activeCell = activeIndex >= 0 ? cells[activeIndex] : undefined

@@ -6,7 +6,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { applyChapterPick, planChapterPick, rowEndsPlayback } from "./chapter-pick"
 import type { TimelineChapter } from "./sequence-timeline"
-import { getQueueState, setQueueTimingMode, startQueue, stopQueue, type PlayContext } from "@/lib/audio/play-queue"
+import {
+  getQueueProgress, getQueueState, setProgrammeFilm, setQueueTimingMode, startQueue, stopQueue, type PlayContext,
+} from "@/lib/audio/play-queue"
 import type { CellData } from "@/hooks/useCells"
 
 class FakeAudio {
@@ -155,5 +157,57 @@ describe("a row of another chapter, while playback is paused (AQU-1758)", () => 
     await settle()
     expect(getQueueState()).toMatchObject({ kind: "paused", cellId: "r1v2" })
     expect(rowEndsPlayback({ rowKey: "RUT 2", playingKey: "RUT 1", queueKind: getQueueState().kind })).toBe(true)
+  })
+})
+
+// AQU-2253 (review 2, Nov 9), finding 4: on a book with a linked film, a chapter
+// nobody has recorded plays with the film when someone asks for it (the
+// strip's Play, Space). Picking it in the chapter picker while Play all plays
+// is asking for it too, so it plays, the same answer; only Play all's own move
+// into the next chapter asks for something of the chapter's own.
+describe("picking a chapter nobody has recorded, on a book with a linked film", () => {
+  const unrecorded = (id: string) => ({ ...verse(id), selectedAudioId: undefined, attachments: {} }) as unknown as CellData
+  /** Ruth 1 recorded, Ruth 2 not. */
+  const book = [verse("r1v1"), verse("r1v2"), unrecorded("r2v1"), unrecorded("r2v2")]
+  /** The workspace's word on a book: the film named with every chapter's lines. */
+  const bookFilm = () => setProgrammeFilm({ endSec: 600, runsOn: false, cellIds: new Set(book.map((c) => c.id)) })
+  const pickRuth2 = () =>
+    planChapterPick({ chapters: CHAPTERS, lines: book, pickedKey: "RUT 2", playingKey: "RUT 1", queueKind: "playing" })
+
+  beforeEach(() => {
+    FakeAudio.instances = []
+    vi.stubGlobal("Audio", FakeAudio)
+    vi.useFakeTimers()
+    setQueueTimingMode("audioFirst")
+  })
+  afterEach(() => {
+    stopQueue()
+    setProgrammeFilm(null)
+    setQueueTimingMode("dubbing")
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+  })
+
+  it("with the film behind its lines: play it", () => {
+    bookFilm()
+    expect(pickRuth2()).toEqual({ kind: "play", chapter: CHAPTERS[1] })
+  })
+
+  it("with no film: stop, as before", () => {
+    expect(pickRuth2()).toEqual({ kind: "stop" })
+  })
+
+  it("during Play all of Ruth 1, the pick plays Ruth 2 with the film", async () => {
+    bookFilm()
+    startQueue({ cells: book.slice(0, 2), projectId: "p1", session }, 0)
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "r1v1" })
+    applyChapterPick(
+      planChapterPick({ chapters: CHAPTERS, lines: book, pickedKey: "RUT 2", playingKey: "RUT 1", queueKind: getQueueState().kind }),
+      { lines: book, projectId: "p1", session },
+    )
+    await settle()
+    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "r2v1" })
+    expect(getQueueProgress().filmClock).toBe(true)
   })
 })

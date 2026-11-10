@@ -183,5 +183,23 @@ describe("videoSyncAction", () => {
       expect(videoSyncAction(input({ filmIsClock: true, duration: 10, tickSec: 9.9, videoSec: 9.9 }))).toEqual({ kind: "pause" })
       expect(videoSyncAction(input({ filmIsClock: true, kind: "idle" }))).toEqual({ kind: "pause" })
     })
+
+    // AQU-2253 (review 2, Nov 9), finding 2: the transport waits for the film
+    // where it is the clock, so a film whose length has not come in yet was
+    // never asked to play there and the wait never ended. Its length is not
+    // needed to play it: it is asked to (left alone, or sent to the playhead),
+    // and only paused, stopped or not the clock is it paused as before.
+    it("its length not known yet: asked to play all the same, playing or waiting", () => {
+      for (const duration of [Number.NaN, 0]) {
+        const unknown = { filmIsClock: true, duration }
+        expect(videoSyncAction(input({ ...unknown, videoSec: 10.1 }))).toEqual({ kind: "none" })
+        expect(videoSyncAction(input({ ...unknown, kind: "loading", videoSec: 10.1 }))).toEqual({ kind: "none" })
+        expect(videoSyncAction(input({ ...unknown, kind: "loading", videoSec: 0 }))).toEqual({ kind: "seek", sec: 10.25 })
+        expect(videoSyncAction(input({ ...unknown, kind: "paused" }))).toEqual({ kind: "pause" })
+        expect(videoSyncAction(input({ ...unknown, kind: "idle" }))).toEqual({ kind: "pause" })
+        // Not the clock (under a recorded line): paused until it has a length, as before.
+        expect(videoSyncAction(input({ duration }))).toEqual({ kind: "pause" })
+      }
+    })
   })
 })

@@ -408,12 +408,15 @@ export function MediaVideoPane({
     : queueClockIsFileTime(soundingCell)
   /**
    * AQU-2253 (review, Nov 9): following the recordings, where only the film
-   * plays (its tail, and the lines while nothing is recorded) the FILM is the
+   * plays (its tail, and a line it plays behind with nothing of its own) the FILM is the
    * clock, as it is following the source; the queue says where. There the
    * pane reports the film's second instead of chasing the queue's, keeps the
    * film wanted while the transport waits on it, and runs the stall watchdog.
    */
   const filmIsClock = followsRecordings && queue.active && queue.progress.filmClock === true
+  /** AQU-2253 (review 2, Nov 9): the queue gave up waiting on the film as a
+   *  line's clock (it said nothing for 3 s) and listens for it again. */
+  const filmListenedFor = followsRecordings && queue.active && queue.progress.filmQuiet === true
   const filmIsClockRef = useRef(false)
   useEffect(() => {
     filmIsClockRef.current = filmIsClock
@@ -1488,7 +1491,10 @@ export function MediaVideoPane({
           onTimeUpdate={
             slaved
               // AQU-2253 (review, Nov 9): the film's second is the clock.
-              ? (filmIsClock ? (e) => reportFilmClock(e.currentTarget) : undefined)
+              // AQU-2253 (review 2, Nov 9): …or the queue gave up waiting on
+              // it as a line's clock and listens for it while it follows the
+              // playhead: heard moving, it is the clock again.
+              ? (filmIsClock || filmListenedFor ? (e) => reportFilmClock(e.currentTarget) : undefined)
               : (e) => publishPosition(e.currentTarget.currentTime)
           }
           // Round 6: a seek's own landing. `timeupdate` is silent for the whole

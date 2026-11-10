@@ -4474,7 +4474,11 @@ export function ProjectWorkspace() {
         validators: secondVoters,
         pieceOf: att.pieceOf ?? audioId,
         ...(labels.newLabel ? { label: labels.newLabel } : {}),
-      }, cutP, { claimSelection: false })
+        // AQU-2492 (review, Nov 9), finding 1: the cut brings this piece to
+        // life, so it outranks a pending removal of it — a Redo names the
+        // piece its Undo just removed, and dropping this paint hid the second
+        // half for the removal's 12 s grace (an Undo then read it as gone).
+      }, cutP, { claimSelection: false, revive: true })
       await cutP
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       notifyAudioAttachmentsChanged(takeFileId)

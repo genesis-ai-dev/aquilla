@@ -265,6 +265,16 @@ export interface UseFileAudioAttachmentsResult {
    *  empty map means "not read yet", not "no recordings"; a refetch never
    *  turns it false again. */
   hasLoaded: boolean
+  /**
+   * AQU-2426 (review, Nov 9): this file's read has come back WITH an answer
+   * (or there is nothing to read). `hasLoaded` also turns true on a read that
+   * failed, so nothing waits forever; a reader that must not take "no answer"
+   * for "no recordings" (carrying on a kept transcription) waits on this.
+   */
+  answered: boolean
+  /** AQU-2426 (review, Nov 9): this file's read has failed and its automatic
+   *  retries are spent; only `revalidate` (a Retry) reads it again. */
+  failed: boolean
   revalidate: () => void
 }
 
@@ -315,6 +325,10 @@ export function useFileAudioAttachments(
   // The project/file whose read last came back. Keyed rather than a boolean so
   // a file switch reads as "not loaded" at once, with no reset to forget.
   const [settledKey, setSettledKey] = useState<string | null>(null)
+  // AQU-2426 (review, Nov 9): the read key that last came back with an
+  // answer, and the one whose read failed with its retries spent.
+  const [answeredKey, setAnsweredKey] = useState<string | null>(null)
+  const [failedKey, setFailedKey] = useState<string | null>(null)
   const laneKey = lane ?? "\u0000all"
   const readKey = projectId && fileId ? `${projectId}/${fileId}/${laneKey}` : null
   /**
@@ -342,6 +356,8 @@ export function useFileAudioAttachments(
    */
   const nothingToRead = !fileId || (!jwt && !sessionLoading)
   const hasLoaded = nothingToRead || (readKey !== null && settledKey === readKey)
+  const answered = nothingToRead || (readKey !== null && answeredKey === readKey)
+  const failed = !answered && readKey !== null && failedKey === readKey
   const generationRef = useRef(0)
   // One-shot sweep so a settled overlay still prunes when nothing else pokes.
   const sweepRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -403,7 +419,10 @@ export function useFileAudioAttachments(
     const failRead = (): void => {
       if (answeredKeyRef.current !== key) setByCellId(EMPTY)
       const attempt = retryAttemptsRef.current
-      if (attempt >= READ_RETRY_DELAYS_MS.length) return
+      if (attempt >= READ_RETRY_DELAYS_MS.length) {
+        setFailedKey(key)
+        return
+      }
       retryAttemptsRef.current = attempt + 1
       retryRef.current = setTimeout(() => {
         retryRef.current = null
@@ -463,6 +482,8 @@ export function useFileAudioAttachments(
       }
       setByCellId(map)
       answeredKeyRef.current = key
+      setAnsweredKey(key)
+      setFailedKey(null)
       retryAttemptsRef.current = 0
       // Re-arm a sweep for the EARLIEST grace deadline still outstanding.
       // Arming only on a fresh transition was wrong: two overlays settling a
@@ -563,7 +584,7 @@ export function useFileAudioAttachments(
     })
   }, [fileId, lane])
 
-  return { byCellId, isLoading, hasLoaded, revalidate: doFetch }
+  return { byCellId, isLoading, hasLoaded, answered, failed, revalidate: doFetch }
 }
 
 // Fold the per-file audio read (`byCellId`) into a cell list, populating the

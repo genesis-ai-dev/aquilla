@@ -2163,7 +2163,11 @@ export function ProjectWorkspace() {
    * project/file at module level, so this, the gated map and EditorTable's own
    * read share one fetch.
    */
-  const { byCellId: audioValidationByCellId, hasLoaded: audioValidationLoaded } = useFileAudioAttachments(
+  const {
+    byCellId: audioValidationByCellId, hasLoaded: audioValidationLoaded,
+    // AQU-2426 (review, Nov 9): whether the read answered, for the carry-on.
+    answered: audioValidationAnswered, failed: audioValidationFailed, revalidate: revalidateAudioValidation,
+  } = useFileAudioAttachments(
     project?.id ?? null,
     activeFileId,
     // AQU-1591: bulk audio validation votes on the takes of the lane you are
@@ -4994,7 +4998,11 @@ export function ProjectWorkspace() {
   // is a one-shot read — they are a transcript of a finished film and no event
   // ever edits them). Only their ATTACHMENTS are live, which is exactly what
   // this second per-file read gives us.
-  const { byCellId: cueAudioByCellId, hasLoaded: cueAudioLoaded } = useFileAudioAttachments(
+  const {
+    byCellId: cueAudioByCellId, hasLoaded: cueAudioLoaded,
+    // AQU-2426 (review, Nov 9): whether the read answered, for the carry-on.
+    answered: cueAudioAnswered, failed: cueAudioFailed, revalidate: revalidateCueAudio,
+  } = useFileAudioAttachments(
     project?.id ?? null,
     // AQU-1326: deferred behind the first cell page (see `editorFirstPaint`).
     editorFirstPaint ? (audioCueSibling?.id ?? null) : null,
@@ -12439,7 +12447,7 @@ export function ProjectWorkspace() {
   // by itself, once its file is open and that file's rows and recordings have
   // loaded (before then, a row still to do can't be told from a row with
   // nothing on it). A run on another file is said once, with where it stopped.
-  useCarryOnTranscribeRuns({
+  const { waitingOnRecordings: carryOnWaitingOnRecordings } = useCarryOnTranscribeRuns({
     projectId: project?.id,
     activeFileId,
     // AQU-2375 (review, Nov 9): …and ALL its rows, not just the first page.
@@ -12447,7 +12455,15 @@ export function ProjectWorkspace() {
     // AQU-2426 (browser pass, Nov 9): the recordings are the lane's read, which
     // every view fetches; the workspace's is not fetched in the Text view, and
     // a run carried on there found no recording on any row (`carryOnRunCells`).
-    ready: carryOnReady({ firstPaint: editorFirstPaint, rowsLoading: cellsLoading || Boolean(cellsError), recordingsLoaded: audioValidationLoaded, heardLinesLoading }),
+    // AQU-2426 (review, Nov 9): …and a read that failed is no answer, as a
+    // failed load of the lines is not: the run waits for one that answers.
+    ready: carryOnReady({
+      firstPaint: editorFirstPaint,
+      rowsLoading: cellsLoading || Boolean(cellsError),
+      recordingsLoaded: audioValidationLoaded && audioValidationAnswered,
+      heardLinesLoading: heardLinesLoading || (audioCueSibling != null && !cueAudioAnswered),
+    }),
+    recordingsFailed: audioValidationFailed || (audioCueSibling != null && cueAudioFailed),
     version: [workspaceAudioByCellId, audioValidationByCellId, audioCueCells, cellStoreVersion],
     // AQU-2375 (review, Nov 9): only the person who started a run carries it
     // on, and a run over takes only in the language it was started in.
@@ -12485,6 +12501,14 @@ export function ProjectWorkspace() {
       })
     },
   })
+  // AQU-2426 (review, Nov 9): a run kept for this file waits on recordings
+  // that could not be read; the person gets the Retry a failed load of the
+  // lines gives (below the rows), and it reads the recordings again too.
+  const retryCellsAndRecordings = useCallback(() => {
+    if (cellsError) retryCells()
+    if (audioValidationFailed) revalidateAudioValidation()
+    if (cueAudioFailed) revalidateCueAudio()
+  }, [cellsError, retryCells, audioValidationFailed, revalidateAudioValidation, cueAudioFailed, revalidateCueAudio])
 
   // AQU-646: tell the cell store which lines carry a recording of their OWN, so
   // a dub with no text counts as translated work in the status bar, file
@@ -19418,7 +19442,7 @@ export function ProjectWorkspace() {
           />
               )}
               </div>
-              <CellRowsLoadStatus progress={cellLoadProgress} loading={cellsLoading} error={cellsError} onRetryClick={retryCells} />
+              <CellRowsLoadStatus progress={cellLoadProgress} loading={cellsLoading} error={cellsError || carryOnWaitingOnRecordings} onRetryClick={retryCellsAndRecordings} />
               </>,
                     dock.hosts.text,
                   )

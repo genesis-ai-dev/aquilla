@@ -28,6 +28,7 @@ import { trackPatchRequiresExisting } from './track-editing-authority'
 import { usableCorpusMarker } from './corpus-marker'
 import { assignDeclaredLanguages } from '../../../db/shared/file-declared-languages'
 import { usableSortIndex } from './sort-index'
+import { lineRoomToStore } from './line-room-authority'
 import { commentAuthorLabel } from './comment-authorship'
 import {
   audioLaneDualReadBinds,
@@ -666,6 +667,8 @@ const INTEGER_MS_PAYLOAD_KEYS = [
   'subtitleStartMs',
   'subtitleEndMs',
   'targetStartMs',
+  // AQU-2432 (review, Nov 9): an unrecorded line's room.
+  'recordingsRoomMs',
 ] as const
 
 /**
@@ -3511,10 +3514,14 @@ case 'cell.audio.attach': {
       // written into the SQL: a language tag is a string someone chose.
       // Number (≥ 0, 0 included: "no room" is not "no room stored") sets;
       // null clears, back to the natural length; anything else is skipped.
-      const room = p.recordingsRoomMs
+      // AQU-2432 (review, Nov 9): refused for that field only — negative, not
+      // a number, or above a day (which failed the bigint cast, and with it the
+      // whole batch) is skipped, and the keys above still land
+      // (line-room-authority.ts).
+      const room = lineRoomToStore(p.recordingsRoomMs)
       if (room !== undefined) {
         const roomKey = lineRoomMetadataKey(laneOfAudioEvent(event.payload))
-        if (typeof room === 'number' && Number.isFinite(room) && room >= 0) {
+        if (room !== null) {
           stmts.push(
             db
               .prepare(
@@ -3522,9 +3529,9 @@ case 'cell.audio.attach': {
                  SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(?::text, ?::bigint)
                  WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
               )
-              .bind(roomKey, Math.round(room), event.projectId, event.fileId, event.cellId),
+              .bind(roomKey, room, event.projectId, event.fileId, event.cellId),
           )
-        } else if (room === null) {
+        } else {
           stmts.push(
             db
               .prepare(

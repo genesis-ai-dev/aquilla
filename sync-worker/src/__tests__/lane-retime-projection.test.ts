@@ -8,9 +8,11 @@
 import { describe, it, expect } from 'vitest'
 import {
   buildEventProjectionStmts,
+  coerceIntegerMsPayload,
   isChainMutatingKind,
   type PersistedEvent,
 } from '../events/event-projection'
+import { LINE_ROOM_MAX_MS } from '../events/line-room-authority'
 import { REQUIRED_ROLE } from '../events/role-policy'
 import { isLockedTimingEvent } from '../events/timing-authority'
 
@@ -237,5 +239,39 @@ describe('cell.lane.retime — recordingsRoomMs', () => {
     buildEventProjectionStmts(db, makeEvent({ subtitleStartMs: 100 }), [])
     expect(recorded).toHaveLength(1)
     expect(recorded[0].sql).not.toContain('?::text')
+  })
+})
+
+// AQU-2432 (review, Nov 9): a bad room is refused for that field only. A
+// number too large for the column used to fail the cast, and with it the whole
+// batch of events it was flushed in; now it is skipped like a negative one,
+// and the event's other keys still land.
+describe('cell.lane.retime — recordingsRoomMs, refused for that field only', () => {
+  it('an absurdly large room is skipped, not sent to the database', () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(db, makeEvent({ recordingsRoomMs: 1e30 }), [])
+    buildEventProjectionStmts(db, makeEvent({ recordingsRoomMs: 9e15 }), [])
+    buildEventProjectionStmts(db, makeEvent({ recordingsRoomMs: LINE_ROOM_MAX_MS + 1 }), [])
+    expect(recorded).toHaveLength(0)
+  })
+
+  it('a day is the most a room can be, and is stored', () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(db, makeEvent({ recordingsRoomMs: LINE_ROOM_MAX_MS }), [])
+    expect(recorded).toHaveLength(1)
+    expect(recorded[0].args.slice(0, 2)).toEqual(['recordings_room_ms', LINE_ROOM_MAX_MS])
+  })
+
+  it("a bad room leaves the event's other keys to land", () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(db, makeEvent({ subtitleStartMs: 100, recordingsRoomMs: 1e30 }), [])
+    buildEventProjectionStmts(db, makeEvent({ subtitleStartMs: 100, recordingsRoomMs: Number.NaN }), [])
+    expect(recorded).toHaveLength(2)
+    for (const r of recorded) expect(r.sql).toContain("'subtitle_start_ms'")
+  })
+
+  it('a fractional room is rounded on the way in, with the other ms keys', () => {
+    const ev = coerceIntegerMsPayload(makeEvent({ recordingsRoomMs: 1234.6 }))
+    expect((ev.payload as { recordingsRoomMs: number }).recordingsRoomMs).toBe(1235)
   })
 })

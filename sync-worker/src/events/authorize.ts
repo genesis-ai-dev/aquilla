@@ -9,6 +9,7 @@ import { verifyTokenForDoc, verifyTokenForProject, type SyncTokenClaims } from '
 import { resolveAssignmentAuthority } from './assignment-authority'
 import { isLockedTimingEvent, isUserInsertedCell, resolveTimingLocked } from './timing-authority'
 import { isOwnUntouchedRecordingLine } from './recording-line-authority'
+import { lineRoomRefusal } from './line-room-authority'
 import { isBindingTermWrite, resolveTermbaseFloor } from './termbase-authority'
 import { resolveImportFloor } from './import-authority'
 import { isGatedTrackPatch, resolveAllowTrackEditing } from './track-editing-authority'
@@ -770,6 +771,16 @@ export async function authorize<K extends EventKind>(
         }
       }
     }
+  }
+
+  // AQU-2432 (review, Nov 9): an unrecorded line's ROOM is written to the
+  // line's row in the file the event names; one aimed at another file than
+  // the line's own changed no row and was silently lost, so it is refused
+  // (line-room-authority.ts). An absent `db` skips the check, like the
+  // carve-outs above.
+  if (db != null) {
+    const roomRefusal = await lineRoomRefusal(db, raw)
+    if (roomRefusal) return { ok: false, status: 422, reason: roomRefusal }
   }
 
   // AQU-1565 follow-up: marking a clip as the file's SOURCE audio needs

@@ -457,6 +457,45 @@ describe("undoing a Station Save over a take, before the app's copy catches up (
   })
 })
 
+// AQU-2492 (review, Nov 9), finding 9: choose Take 2 over Take 1, delete
+// Take 1, then press ⌘Z twice quickly. The first Undo brings Take 1 back,
+// but the app has not read it back yet; the second must still choose it.
+describe("two quick Undos: chose a take, then deleted the old one (AQU-2492)", () => {
+  function slowLine(noteBroughtBack: boolean) {
+    const server = { deleted: { t1: true, t2: false } as Record<string, boolean>, playing: "t2" as string | null }
+    const copy = { listed: new Set(["t2"]), playing: "t2" as string | null }
+    const broughtBack = new Set<string>()
+    const ctx: TakeStepContext = {
+      readTake: (_c, id) => (copy.listed.has(id) ? ({ slot: "recording" } as CodexCellAttachment) : null),
+      selectedIn: () => copy.playing,
+      applyTrim: vi.fn(), applyPlace: vi.fn(), cut: vi.fn(), uncut: vi.fn(), rename: vi.fn(), remove: vi.fn(),
+      select: vi.fn(async (_c, _s, id) => {
+        if (id && server.deleted[id]) broughtBack.add(id)
+        if (id) server.deleted[id] = false
+        server.playing = id
+        if (!id || copy.listed.has(id)) copy.playing = id
+      }),
+      ...(noteBroughtBack ? { broughtBack: (_c: string, id: string) => broughtBack.has(id) } : {}),
+    }
+    return { server, handlers: takeStepHandlers(ctx) as Record<string, StepHandler<unknown>> }
+  }
+  const chose = { cellId: "c", slot: "recording", before: "t1", after: "t2" }
+  const deleted = { cellId: "c", audioId: "t1", slot: "recording", wasSelected: false, selectedBefore: null }
+
+  it("the second Undo chooses the take the first brought back, and Take 1 plays", async () => {
+    const { server, handlers } = slowLine(true)
+    expect(await handlers["take.remove"].undo(deleted)).toEqual({ kind: "done" })
+    expect(await handlers["take.select"].undo(chose)).toEqual({ kind: "done" })
+    expect(server).toEqual({ deleted: { t1: false, t2: false }, playing: "t1" })
+  })
+
+  it("a take deleted by someone else, never brought back here, is still left alone", async () => {
+    const { server, handlers } = slowLine(true)
+    expect(await handlers["take.select"].undo(chose)).toEqual({ kind: "skipped", reason: "gone" })
+    expect(server.playing).toBe("t2")
+  })
+})
+
 describe("take.select that emptied a slot", () => {
   it("undo plays the old take again; redo empties the slot again", async () => {
     const select = vi.fn(async () => {})

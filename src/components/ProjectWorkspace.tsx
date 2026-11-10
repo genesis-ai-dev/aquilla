@@ -15425,11 +15425,17 @@ export function ProjectWorkspace() {
   // plain apply — none of them records a step of its own.
 
   /** Choose a take in a slot (null empties it), the way the takes list does. */
+  // AQU-2492 (review, Nov 9), finding 9: deleted takes this tab chose again
+  // (choosing one brings it back) that the read has not listed yet, for a
+  // minute: the next step sees them as live, not "gone".
+  const broughtBackRef = useRef<Map<string, number>>(new Map())
   const applyTakeSelect = useCallback(
     async (cellId: string, slot: string, audioId: string | null) => {
       if (!project?.id) return
       const owner = resolveTakeCellRef.current(cellId)
       if (!owner) return
+      const listed = audioId ? owner.cell.attachments?.[audioId] : undefined
+      if (audioId && (!listed || listed.isDeleted)) broughtBackRef.current.set(`${cellId}\u0000${audioId}`, Date.now() + 60_000)
       const where = {
         projectId: project.id,
         fileId: owner.fileId,
@@ -15755,6 +15761,8 @@ export function ProjectWorkspace() {
         // Decision 11: a take that was added (recorded, uploaded, generated…).
         approvedByOthers: (cellId, audioId, except) =>
           (readAtt(cellId, audioId)?.validators ?? []).find((v) => v !== currentUsername && !except?.includes(v)) ?? null,
+        // AQU-2492 (review, Nov 9), finding 9.
+        broughtBack: (cellId, audioId) => (broughtBackRef.current.get(`${cellId}\u0000${audioId}`) ?? 0) > Date.now(),
         liveGroup: (cellId, audioId) => {
           const atts = resolveTakeCellRef.current(cellId)?.cell.attachments ?? {}
           const group = atts[audioId]?.pieceOf ?? audioId

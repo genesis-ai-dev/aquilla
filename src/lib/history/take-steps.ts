@@ -153,6 +153,13 @@ export interface TakeStepContext {
   approvedByOthers?(cellId: string, audioId: string, except?: readonly string[]): string | null
   /** Every live take in the take's group (a cut take's pieces), itself included. */
   liveGroup?(cellId: string, audioId: string): string[]
+  /**
+   * AQU-2492 (review, Nov 9), finding 9: a deleted take this tab chose again
+   * (which brings it back) that the app's copy does not list yet. It counts
+   * as live: two quick Undos — the first bringing a take back — must not
+   * throw the second away as "gone".
+   */
+  broughtBack?(cellId: string, audioId: string): boolean
   /** A line lost (or got back) a recording of its own: the workspace keeps the
    *  target row its recordings justify in step (onLastTakeRemoved / onTakeSaved). */
   takeRemoved?(cellId: string, removedIds: readonly string[]): void
@@ -246,7 +253,8 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
   // left. A step never chooses a deleted take: that is how the server brings
   // one back, and it would silently reverse whoever deleted it.
   const liveOf = (cellId: string, id: string): string | null => {
-    if (ctx.readTake(cellId, id)) return id
+    // Finding 9: …or one this tab just brought back, not read back yet.
+    if (ctx.readTake(cellId, id) || ctx.broughtBack?.(cellId, id)) return id
     return (ctx.liveGroup?.(cellId, id) ?? []).find((piece) => ctx.readTake(cellId, piece)) ?? null
   }
 

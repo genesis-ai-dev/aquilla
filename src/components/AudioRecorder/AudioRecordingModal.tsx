@@ -82,7 +82,7 @@ import { SegmentTabs } from "@/components/ui/tabs"
 import { setRecordingFormatPref, useRecordingFormatPref } from "@/lib/store/recording-format-pref"
 import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
 import { ACCEPT, OFFLINE_MESSAGE, attachAudioFileToCell, validateAudioFile } from "@/lib/audio/attach-file"
-import { bornTakePlace } from "@/lib/audio/new-take-place"
+import { bornTakePlace, recordedTakePlaceMs } from "@/lib/audio/new-take-place"
 import { playingInSlot, recordTakeAdded } from "@/lib/history/take-steps"
 import { recordingLimitsFor } from "@/lib/audio/recording-limits"
 import { MAX_AUDIO_UPLOAD_BYTES, audioIdSeededWith, buildAudioId, uploadCellAudio, deleteCellAudio, fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
@@ -1409,8 +1409,7 @@ export function AudioRecordingModal({
       // timed line with no pre-roll to undo, the take's first sample is the
       // line's start, said outright so a place an older save left on the line
       // can't pull it early. A line with no times gets no place, as before.
-      const cueTimed = typeof activeCell.startTime === "number" && Number.isFinite(activeCell.startTime)
-      const takePlaceMs = laneOffsetMs ?? (cueTimed ? 0 : null)
+      const takePlaceMs = recordedTakePlaceMs(laneOffsetMs, activeCell)
       const audioId = buildAudioId(activeCell.id)
       // Warm the OPFS byte cache BEFORE upload (FRO-355), keyed exactly as
       // transcribeCell/useCellAudio look bytes up (audioId+ext of the
@@ -1909,9 +1908,10 @@ export function AudioRecordingModal({
         : null,
       durationMs: previewDurationMs,
     })
-    return laneOffsetMs != null
-      ? activeCell.startTime + laneOffsetMs / 1000
-      : targetChipGeom(activeCell, undefined)?.anchor ?? activeCell.startTime
+    // AQU-2491 (review, Nov 9): Save's own rule, so a take with no pre-roll
+    // plays against its line's start, where Save puts it, and never against a
+    // place an older recording left on the line.
+    return activeCell.startTime + (recordedTakePlaceMs(laneOffsetMs, activeCell) ?? 0) / 1000
   })()
   // A split take plays from its first piece, so the film follows that piece.
   const readyAnchorAtt = readySplit?.[0] ?? readyAtt

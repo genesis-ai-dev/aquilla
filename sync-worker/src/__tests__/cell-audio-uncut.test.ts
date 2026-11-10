@@ -289,6 +289,25 @@ describe('cell.audio.uncut — undoing a cut (AQU-2492)', () => {
     expect((await h.pg.query(`SELECT * FROM cell_audio_cut_votes ORDER BY event_id`)).rows).toEqual(archives)
   })
 
+  // AQU-2492 (review, Nov 9), finding 3: the joined take gets exactly the
+  // approvals the whole take had before the cut, never a piece's — also when
+  // a colleague deleted the second half just before the Undo landed.
+  it('a colleague deleted the second half first: the joined take still gets its own approvals back, not the first half\'s', async () => {
+    await attach('take-a')
+    await vote('take-a', 'rita')
+    await cut('take-a', 2_000, 'take-b')
+    await vote('take-a', 'rosa') // the first half
+    await project('cell.audio.remove', { audioId: 'take-b' }, { author: 'cole' })
+    await uncut('take-a', 'take-b', null)
+    const r = await rows()
+    expect([n(r['take-a'].trim_start_ms), n(r['take-a'].trim_end_ms), r['take-b'].deleted]).toEqual([null, null, 1])
+    expect(await votes()).toEqual({ 'take-a': ['rita'] })
+    expect(r['take-a'].validator_count).toBe(1)
+    // Rosa's approval of the first half is kept with the undo, for a Redo.
+    await cut('take-a', 2_000, 'take-b')
+    expect(await votes()).toEqual({ 'take-a': ['rosa'] })
+  })
+
   // AQU-2492 (review, Nov 9), finding 16: the two pieces must be the two
   // halves of one recorded cut of one take, on that line, in that language.
   describe('refuses a pair that is not one cut', () => {

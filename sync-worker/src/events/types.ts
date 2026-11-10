@@ -819,8 +819,9 @@ export interface EventPayloads {
    * as the first piece are archived (kind 'first'), and the approvals the
    * take had before the cut come back from the cut's archive — the voters'
    * own rows, as they were, and only while it still plays the audio they
-   * were given to. The approvals move only while `pieceAudioId` is a live
-   * piece of `audioId`'s take.
+   * were given to. Finding 3 (same review): the approvals move whenever the
+   * window does, also when `pieceAudioId` was removed since (by anyone): the
+   * joined take never keeps an approval given to its first half.
    *
    * AQU-2492 (review, Nov 9), finding 16: nothing at all happens unless the
    * two are the halves of one recorded cut of one take — a `cell.audio.cut`

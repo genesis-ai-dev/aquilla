@@ -2583,9 +2583,8 @@ case 'cell.audio.attach': {
     case 'cell.audio.uncut': {
       // AQU-2492 (review, Nov 9; Sam's call the same day): undo a cut, as ONE
       // event. See the payload doc in types.ts and cut-vote-archive.ts.
-      //   1-3. ONLY while the cut's piece is a live piece of this take: keep
-      //        the first piece's votes with this undo (for a Redo), take them
-      //        off, and give the take back the votes the cut archived.
+      //   1-3. Keep the first piece's votes with this undo (for a Redo), take
+      //        them off, and give the take back the votes the cut archived.
       //   4.   Remove the piece (soft: its votes stay on it, for a Redo).
       //   5-6. Give the first piece its whole window (and name) back.
       // AQU-2492 (review, Nov 9), finding 16: all of it only when the two are
@@ -2603,21 +2602,21 @@ case 'cell.audio.attach': {
       ) {
         throw new Error(`cell.audio.uncut event ${event.id} has a malformed payload`)
       }
-      const pieceLive = `EXISTS (SELECT 1 FROM cell_audio b
-                          JOIN cell_audio t ON t.project_id = b.project_id AND t.file_id = b.file_id AND t.cell_id = b.cell_id
-                         WHERE b.project_id = ? AND b.file_id = ? AND b.cell_id = ? AND b.audio_id = ?
-                           AND b.deleted = 0 AND t.audio_id = ? AND t.deleted = 0
-                           AND b.piece_of = COALESCE(t.piece_of, t.audio_id))`
-      const pieceLiveBinds = [event.projectId, event.fileId, event.cellId, p.pieceAudioId, p.audioId]
       const uncutEvent = { id: event.id, projectId: event.projectId, fileId: event.fileId, cellId: event.cellId, serverTs: event.serverTs, serverSeq: event.serverSeq }
       // AQU-2492 (review, Nov 9), finding 16: every statement below runs only
       // when the two are the halves of one recorded cut of this take. Checked
       // afresh by each statement; none of them changes what it reads (the
       // piece may be removed, and the take stays live).
+      // Finding 3: and the approvals move whenever the window does. They used
+      // to move only while the piece was live, so a colleague's delete of it
+      // just before the Undo landed joined the take with its FIRST HALF's
+      // approval on it and none of its own back. The joined take is the audio
+      // the whole take's reviewers heard: it gets their approvals back, and
+      // the first half's are kept with this undo, for a Redo.
       const cutPair = RECORDED_CUT_PAIR_SQL
       const cutPairBinds = recordedCutPairBinds(uncutEvent, p.audioId, p.pieceAudioId)
-      const votesGate = `${pieceLive} AND ${cutPair}`
-      const votesGateBinds = [...pieceLiveBinds, ...cutPairBinds]
+      const votesGate = cutPair
+      const votesGateBinds = cutPairBinds
       stmts.push(cutVoteArchiveStmt(db, uncutEvent, { pieceId: p.pieceAudioId, audioId: p.audioId, kind: 'first', gate: votesGate, gateBinds: votesGateBinds }))
       stmts.push(
         db

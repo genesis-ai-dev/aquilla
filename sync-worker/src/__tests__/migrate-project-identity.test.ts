@@ -52,7 +52,14 @@ it.each<Record<string, string>>([{ orgId: '2' }, { teamId: '4' }, { teamId: '5' 
 
 it('blocks archived projects', async () => {
   await t.db.prepare('UPDATE projects SET archived_at=CURRENT_TIMESTAMP WHERE id=?').bind(projectId).run()
-  try { expect((await get())?.status).toBe(409) }
+  try {
+    expect((await get())?.status).toBe(409)
+    const before = await t.snapshot()
+    expect(await (await get({ archiveStatus: 'true' }))?.json()).toMatchObject({ archived: true, projectId })
+    expect((await get({ archiveStatus: 'true', orgId: '2' }))?.status).toBe(409)
+    expect((await get({ archiveStatus: 'true', teamId: '5' }))?.status).toBe(409)
+    expect(await t.snapshot()).toEqual(before)
+  }
   finally { await t.db.prepare('UPDATE projects SET archived_at=NULL WHERE id=?').bind(projectId).run() }
 })
 
@@ -82,4 +89,25 @@ it('retains the running daemon POST contract, renamed title and lane initializat
   expect((await t.db.prepare('SELECT role FROM lanes WHERE project_id=? ORDER BY role').bind(next).all()).results)
     .toEqual([{ role: 'source' }])
   expect((await get({ gitlabId: '124', projectId: next }))?.status).toBe(200)
+})
+
+it('serves the daemon archive contract and never treats placement rejection as archive status', async () => {
+  const { SyncClient } = await import('../../../scripts/migrate-daemon/http')
+  const { vi } = await import('vitest')
+  const client = new SyncClient('https://sync.test', 'test-secret', 'test', { attempts: 1 })
+  const p = { gitlab_id: 122, aquilla_id: projectId, org_id: 1, team_id: 3, project_upserted: 1 }
+  const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+    const response = await handleMigrateProjectRequest(new Request(String(url), init), env())
+    if (!response) throw new Error('route missing')
+    return response
+  })
+  try {
+    expect(await client.archiveStatus(p)).toBe(false)
+    await t.db.prepare('UPDATE projects SET archived_at=CURRENT_TIMESTAMP WHERE id=?').bind(projectId).run()
+    expect(await client.archiveStatus(p)).toBe(true)
+    await expect(client.archiveStatus({ ...p, org_id: 2 })).rejects.toThrow('409')
+  } finally {
+    fetch.mockRestore()
+    await t.db.prepare('UPDATE projects SET archived_at=NULL WHERE id=?').bind(projectId).run()
+  }
 })

@@ -42,6 +42,21 @@ export interface LineRoomStepContext {
   applyPlace(cellId: string, audioId: string, place: StoredTakePlace): Promise<void>
 }
 
+/**
+ * AQU-2432 (review, Nov 9): a drag's rooms and the take's own place, shown
+ * TOGETHER. Both writes paint before they wait for anything, so both are
+ * started before either is waited for: waiting for the room's save first left
+ * the take a pause away from where it was dropped for as long as the server
+ * took to answer. The drag, its Undo and its Redo all write through here.
+ */
+export async function applyLineRoomMove(
+  ctx: Pick<LineRoomStepContext, "applyRooms" | "applyPlace">,
+  rooms: readonly LineRoomChange[],
+  take: { cellId: string; audioId: string; place: StoredTakePlace } | null | undefined,
+): Promise<void> {
+  await Promise.all([ctx.applyRooms(rooms), take ? ctx.applyPlace(take.cellId, take.audioId, take.place) : undefined])
+}
+
 export function lineRoomStepHandlers(ctx: LineRoomStepContext): Record<string, StepHandler<never>> {
   // Everything the drag changed is checked before anything is written: a room
   // or a place changed since is someone else's work, and the step leaves all
@@ -61,8 +76,11 @@ export function lineRoomStepHandlers(ctx: LineRoomStepContext): Record<string, S
       if ((att.targetOffsetMs ?? null) !== was.targetOffsetMs) return CHANGED
       if ((att.recordingsOffsetMs ?? null) !== was.recordingsOffsetMs) return CHANGED
     }
-    await ctx.applyRooms(d.rooms.map((r) => ({ cellId: r.cellId, roomMs: r[to] })))
-    if (take) await ctx.applyPlace(take.cellId, take.audioId, placeOf(to))
+    await applyLineRoomMove(
+      ctx,
+      d.rooms.map((r) => ({ cellId: r.cellId, roomMs: r[to] })),
+      take ? { cellId: take.cellId, audioId: take.audioId, place: placeOf(to) } : null,
+    )
     return DONE
   }
   return {

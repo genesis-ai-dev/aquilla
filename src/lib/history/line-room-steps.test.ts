@@ -2,7 +2,7 @@
 // room of the unrecorded lines before a take — every room it changed, and the
 // take's own place when the drag changed that too, as ONE step.
 import { describe, it, expect, vi } from "vitest"
-import { lineRoomStepHandlers, type LineRoomStepContext, type LineRoomStepData } from "./line-room-steps"
+import { applyLineRoomMove, lineRoomStepHandlers, type LineRoomStepContext, type LineRoomStepData } from "./line-room-steps"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import type { StepHandler } from "./history"
 
@@ -88,6 +88,38 @@ describe("line.room (AQU-2432)", () => {
       expect(await step.undo(withTake)).toEqual({ kind: "skipped", reason: "changed" })
       expect(ctx.applyRooms).not.toHaveBeenCalled()
       expect(ctx.applyPlace).not.toHaveBeenCalled()
+    })
+
+    // AQU-2432 (review, Nov 9): the room and the take's pause land together.
+    // Waiting for the room's save before the take's put the take in the
+    // wrong place for as long as the server took to answer.
+    it("the take's place is shown at once with the room, not after the room's save has come back", async () => {
+      const rooms: Rooms = { b: null }
+      const takes: Takes = { a: { targetOffsetMs: 2_000, recordingsOffsetMs: 2_000 } }
+      const { ctx, step } = ctxFor(rooms, takes)
+      // A save on a slow network, never back — but the room is painted.
+      ctx.applyRooms = vi.fn((changes) => {
+        for (const c of changes) rooms[c.cellId] = c.roomMs
+        return new Promise<void>(() => {})
+      })
+      void step.undo(withTake)
+      await Promise.resolve()
+      expect(ctx.applyRooms).toHaveBeenCalledTimes(1)
+      expect(ctx.applyPlace).toHaveBeenCalledWith("c", "a", { targetOffsetMs: 0, recordingsOffsetMs: null })
+      // …and Redo the same way.
+      void step.redo(withTake)
+      await Promise.resolve()
+      expect(ctx.applyRooms).toHaveBeenCalledTimes(2)
+      expect(ctx.applyPlace).toHaveBeenLastCalledWith("c", "a", { targetOffsetMs: 2_000, recordingsOffsetMs: 2_000 })
+    })
+
+    it("the drag itself shows both at once too (applyLineRoomMove)", async () => {
+      const applyRooms = vi.fn(() => new Promise<void>(() => {}))
+      const applyPlace = vi.fn(async () => {})
+      void applyLineRoomMove({ applyRooms, applyPlace }, [{ cellId: "b", roomMs: 0 }], { cellId: "c", audioId: "a", place: { targetOffsetMs: 0, recordingsOffsetMs: 0 } })
+      await Promise.resolve()
+      expect(applyRooms).toHaveBeenCalledWith([{ cellId: "b", roomMs: 0 }])
+      expect(applyPlace).toHaveBeenCalledWith("c", "a", { targetOffsetMs: 0, recordingsOffsetMs: 0 })
     })
 
     it("is skipped as gone when the take was deleted since", async () => {

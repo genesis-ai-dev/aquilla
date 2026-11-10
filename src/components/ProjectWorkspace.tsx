@@ -293,7 +293,7 @@ import { useSettingsStepKinds } from "@/components/ProjectSettings/useSettingsSt
 import { playingInSlot, setTakeAddedHeals, takeStepHandlers, type CutRecord, type StoredTakePlace, type TakeAddData, type TakeLevel, type TakePlaceData } from "@/lib/history/take-steps"
 import { pullBacksWokenBy } from "@/lib/timeline/programme"
 import type { TakePlace } from "@/lib/timeline/take-place"
-import { lineRoomStepHandlers, type LineRoomStepData } from "@/lib/history/line-room-steps"
+import { applyLineRoomMove, lineRoomStepHandlers, type LineRoomStepData } from "@/lib/history/line-room-steps"
 import { lineRoomKey, stampLineRooms, writeLineRooms, type LineRoomChange } from "@/lib/timeline/line-room"
 import type { TakeRoomsMove } from "@/components/timeline/TargetAudioLane"
 import { enqueueTakeRemovals, hasOwnRecordingLeft, removeTake, renameTake } from "@/lib/audio/take-actions"
@@ -4511,8 +4511,12 @@ export function ProjectWorkspace() {
         fileId: activeFileId,
         fileName: activeFileNameRef.current,
       })
-      await applyLineRooms(move.rooms)
-      if (move.take) await applyTakePlace(move.cellId, move.audioId, move.take.place)
+      // AQU-2432 (review, Nov 9): both shown at once, together.
+      await applyLineRoomMove(
+        { applyRooms: applyLineRooms, applyPlace: applyTakePlace },
+        move.rooms,
+        move.take ? { cellId: move.cellId, audioId: move.audioId, place: move.take.place } : null,
+      )
     },
     [applyLineRooms, applyTakePlace, readLineRoom, activeFileId],
   )

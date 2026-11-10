@@ -191,6 +191,7 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
 import { readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import type { MessageKey } from "@/lib/i18n/messages/en"
+import { dragSlopPx } from "@/lib/timeline/drag-slop"
 
 export interface TimelineEditorProps {
   cells: CellData[]
@@ -3415,9 +3416,11 @@ export function TimelineEditor({
     // it the row does not follow and a release commits nothing, so a click that
     // wobbles by a pixel cannot silently reorder the timeline.
     let moved = false
+    // AQU-2491 (review, Nov 9): a finger's tap wanders further than a mouse's.
+    const slopPx = dragSlopPx(e.pointerType)
     const onMove = (ev: PointerEvent) => {
       const dy = ev.clientY - startY
-      if (Math.abs(dy) > 3) {
+      if (Math.abs(dy) > slopPx) {
         moved = true
         // AQU-646 stage 2b: tell the row's `click` that this was a DRAG. The
         // browser fires `click` after `pointerup` regardless, and without this

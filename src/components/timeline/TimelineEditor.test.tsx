@@ -4414,6 +4414,27 @@ describe("TimelineEditor — the drop indicator during a track drag", () => {
     // The gesture is over, so the line goes with it.
     expect(dropLineAt()).toEqual([])
   })
+
+  // AQU-2491 (review, Nov 9): a fingertip's tap often wanders 8–10 px, so on
+  // a phone or an iPad the 3px threshold read a tap on a track's row as a
+  // drag: the row lifted, and the tap's click was swallowed, so the track was
+  // never selected. A finger or a pen needs to travel further.
+  it("a finger's tap on a row that wanders 8px is still a tap: it selects the track", () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+        onRetimeSubtitle={() => {}} onReorderTrack={() => {}}
+      />,
+    )
+    const gutter = screen.getByTestId("tl-scroll").previousElementSibling as HTMLElement
+    const rows = Array.from(gutter.querySelectorAll("[data-tl-track-row]"))
+    stubRows(rows)
+    fireEvent.pointerDown(rows[1], { button: 0, pointerId: 1, clientX: 8, clientY: 50, pointerType: "touch" })
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 8, clientY: 58, pointerType: "touch" })
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 8, clientY: 58, pointerType: "touch" })
+    fireEvent.click(rows[1])
+    expect(rows[1].hasAttribute("data-selected")).toBe(true)
+  })
 })
 
 // ── AQU-646 stage 3c ─────────────────────────────────────────────────────────

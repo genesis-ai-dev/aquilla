@@ -32,6 +32,7 @@ import { DragTimeChip } from "./DragTimeChip"
 import type { CellData } from "@/hooks/useCells"
 import { isHiddenCell } from "@/lib/cells/hidden"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { dragSlopPx } from "@/lib/timeline/drag-slop"
 
 const MIN_DUR_SEC = 0.2
 
@@ -288,6 +289,8 @@ export function TimelineCard({
     if (e.button !== 0 || e.ctrlKey) return
     e.stopPropagation()
     const startX = e.clientX
+    // AQU-2491 (review, Nov 9): a finger's tap wanders further than a mouse's.
+    const slopPx = dragSlopPx(e.pointerType)
     try {
       ;(e.currentTarget as Element).setPointerCapture?.(e.pointerId)
     } catch {
@@ -296,7 +299,7 @@ export function TimelineCard({
     setDrag({ mode, dx: 0 })
     movedRef.current = false
     const onMove = (ev: PointerEvent) => {
-      if (Math.abs(ev.clientX - startX) > 3) movedRef.current = true
+      if (Math.abs(ev.clientX - startX) > slopPx) movedRef.current = true
       setDrag((d) => (d ? { ...d, dx: ev.clientX - startX } : d))
     }
     const onUp = (ev: PointerEvent) => {

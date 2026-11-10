@@ -91,6 +91,24 @@ describe("TimelineCard", () => {
     expect(onRetime).not.toHaveBeenCalled()
   })
 
+  // AQU-2491 (review, Nov 9): a fingertip's tap often wanders 8–10 px, so on a
+  // phone or an iPad a tap on a cue retimed it. A finger or a pen needs to
+  // travel further before its press is a drag; a mouse keeps its 3px.
+  it("a finger's tap that wanders 8px retimes nothing; a real drag does", () => {
+    const onRetime = vi.fn()
+    render(<TimelineCard cell={cell()} {...base} variant="subtitle" selected onSelect={() => {}} onRetime={onRetime} />)
+    const el = screen.getByTestId("tl-card-c1")
+    const press = (pointerType: string, dx: number) => {
+      fireEvent.pointerDown(el, { clientX: 100, pointerId: 1, pointerType })
+      fireEvent.pointerMove(window, { clientX: 100 + dx, pointerType })
+      fireEvent.pointerUp(window, { clientX: 100 + dx, pointerType })
+    }
+    press("touch", 8)
+    expect(onRetime).not.toHaveBeenCalled()
+    press("touch", 40)
+    expect(onRetime).toHaveBeenCalledTimes(1)
+  })
+
   // AQU-646 stage 2. This is a REGRESSION TEST FOR A LIVE BUG, not hardening:
   // before the guard, a right-press began a real drag and `pointerup` emitted,
   // so right-dragging across a card rewrote its timing. It surfaced because

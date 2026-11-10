@@ -536,6 +536,28 @@ describe("a click on a take does not move it (AQU-2491)", () => {
     expect(onRetimeTarget).not.toHaveBeenCalled()
   })
 
+  // AQU-2491 (review, Nov 9): a fingertip's tap often wanders 8–10 px, so on
+  // a phone or an iPad the 3px threshold let a tap move the take. A finger or
+  // a pen needs to travel further before its press is a drag.
+  it("on a phone or an iPad, a tap that wanders 8px moves nothing; a finger's real drag still moves", () => {
+    const onRetimeTarget = vi.fn()
+    render(<TargetAudioLane {...base} items={[item({ durationMs: 4000 })]} onRetimeTarget={onRetimeTarget} />)
+    const name = screen.getByTestId("tl-target-c1-name")
+    const tap = (pointerType: string, dx: number) => {
+      fireEvent.pointerDown(name, { button: 0, clientX: 100, pointerId: 1, pointerType })
+      fireEvent.pointerMove(window, { clientX: 100 + dx, pointerType })
+      fireEvent.pointerUp(window, { clientX: 100 + dx, pointerType })
+    }
+    tap("touch", 8)
+    tap("pen", -8)
+    expect(onRetimeTarget).not.toHaveBeenCalled()
+    tap("touch", 40)
+    expect(onRetimeTarget).toHaveBeenCalledTimes(1)
+    // A mouse keeps its 3px: 8px is a drag.
+    tap("mouse", 8)
+    expect(onRetimeTarget).toHaveBeenCalledTimes(2)
+  })
+
   it("a press on a trim handle let go 2px away trims nothing", () => {
     const onTrimTarget = vi.fn()
     render(<TargetAudioLane {...base} masterHonorsTrims items={[item({ durationMs: 4000 })]} onTrimTarget={onTrimTarget} />)

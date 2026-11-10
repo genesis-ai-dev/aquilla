@@ -79,6 +79,7 @@ import { takeBadgeState } from "@/components/cell/audio-validation-state"
 import { isHiddenCell } from "@/lib/cells/hidden"
 import { chipPlaylineClass } from "@/components/audio/chip-classes"
 import type { TakeVoiceNote } from "@/lib/audio/take-voice"
+import { dragSlopPx } from "@/lib/timeline/drag-slop"
 
 /** AQU-2235: a glyph in the name bar's right end — record, ⋯, play. No
  *  button is drawn around it (board 54); the bar's height is its target. */
@@ -799,6 +800,8 @@ function TargetAudioChip({
     if (e.button !== 0 || e.ctrlKey) return
     e.stopPropagation()
     const startX = e.clientX
+    // AQU-2491 (review, Nov 9): a finger's tap wanders further than a mouse's.
+    const slopPx = dragSlopPx(e.pointerType)
     try {
       ;(e.currentTarget as Element).setPointerCapture?.(e.pointerId)
     } catch {
@@ -808,7 +811,7 @@ function TargetAudioChip({
     movedRef.current = false
 
     const onMove = (ev: PointerEvent) => {
-      if (Math.abs(ev.clientX - startX) > 3) {
+      if (Math.abs(ev.clientX - startX) > slopPx) {
         // ON THE THRESHOLD, NOT ON POINTERDOWN. A press that never becomes a
         // drag must stay exactly the click it always was — including that it
         // does not stop the film.

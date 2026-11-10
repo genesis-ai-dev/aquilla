@@ -95,6 +95,50 @@ export interface StallSample {
   pendingPlay: boolean
 }
 
+/** AQU-2253 (browser pass, Nov 9): how far past a seek's target the film must
+ *  have loaded before a seek that has still not landed counts as stuck. */
+export const SEEK_LOADED_AHEAD_SEC = 1
+
+/** The slice of `TimeRanges` read here. */
+export interface LoadedRanges {
+  readonly length: number
+  start(index: number): number
+  end(index: number): number
+}
+
+/**
+ * AQU-2253 (browser pass, Nov 9): is the element's seek still on its way, so
+ * that its still clock belongs to the network and not to us
+ * (`StallSample.seeking`)?
+ *
+ * Only while the film has not loaded where it was sent. WebKit was seen to
+ * leave a seek past what had loaded unfinished for good, though the film went
+ * on to load all of it: the element said it was seeking, not paused, with
+ * enough data, and its time never moved. "Seeking" kept the watchdog out of
+ * it, so nothing ever noticed: following the recordings the button showed a
+ * spinner for good, following the source "Pause" over a still picture. Once
+ * the film has loaded a second past where it was sent (or to its end), a seek
+ * that still has not landed is a stall like any other.
+ */
+export function seekStillLoading(video: {
+  seeking: boolean
+  currentTime: number
+  duration: number
+  buffered?: LoadedRanges | null
+}): boolean {
+  if (!video.seeking) return false
+  const loaded = video.buffered
+  if (!loaded) return true
+  const at = video.currentTime
+  const end = Number.isFinite(video.duration) && video.duration > 0
+    ? Math.min(at + SEEK_LOADED_AHEAD_SEC, video.duration)
+    : at + SEEK_LOADED_AHEAD_SEC
+  for (let i = 0; i < loaded.length; i++) {
+    if (loaded.start(i) <= at + STALL_MOTION_EPS && loaded.end(i) >= end - 0.1) return false
+  }
+  return true
+}
+
 /**
  * Forget the baseline without forgetting the episode.
  *

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import {
   forgetStallSample,
   IDLE_STALL_STATE,
+  seekStillLoading,
   stallStep,
   STALL_FROZEN_TICKS,
   STALL_SETTLED_TICKS,
@@ -172,5 +173,45 @@ describe("forgetStallSample", () => {
     const after = forgetStallSample(state)
     const { actions } = run(frozen(6, 12), after)
     expect(actions).toEqual([{ kind: "recover", rung: "rebuild" }, { kind: "giveUp" }])
+  })
+})
+
+// AQU-2253 (browser pass, Nov 9): WebKit left a seek past what had loaded
+// unfinished for good, though the film went on to load all of it. A seek is
+// the network's business only while its place has not loaded.
+describe("seekStillLoading", () => {
+  const ranges = (...r: Array<[number, number]>) => ({ length: r.length, start: (i: number) => r[i]![0], end: (i: number) => r[i]![1] })
+  const at = (currentTime: number, buffered: ReturnType<typeof ranges> | null, over: { seeking?: boolean; duration?: number } = {}) =>
+    seekStillLoading({ seeking: over.seeking ?? true, currentTime, duration: over.duration ?? 60, buffered })
+
+  it("a film that is not seeking is not waiting on a seek", () => {
+    expect(at(26, ranges([0, 21.5]), { seeking: false })).toBe(false)
+  })
+
+  it("a seek past what has loaded is still on its way", () => {
+    expect(at(26, ranges([0, 21.5]))).toBe(true)
+    // Loaded up to its target, but not a second past it.
+    expect(at(26, ranges([0, 26.4]))).toBe(true)
+    // Loaded around it, in a range that starts after it.
+    expect(at(26, ranges([0, 21.5], [26.5, 40]))).toBe(true)
+  })
+
+  it("a seek whose place has loaded and that has still not landed is not (WebKit, 3-10a)", () => {
+    expect(at(26, ranges([0, 28.2]))).toBe(false)
+    expect(at(26, ranges([0, 3.2], [22.6, 28.2]))).toBe(false)
+  })
+
+  it("near the film's end, loaded to the end is enough", () => {
+    expect(at(59.5, ranges([0, 60]), { duration: 60 })).toBe(false)
+  })
+
+  it("with nothing said about what has loaded, a seek is still on its way", () => {
+    expect(at(26, null)).toBe(true)
+  })
+
+  it("the watchdog then counts a still clock under it as a stall", () => {
+    const stuck = !at(26, ranges([0, 28.2]))
+    const { actions } = run(Array.from({ length: 1 + STALL_FROZEN_TICKS }, () => running(26, { seeking: !stuck })))
+    expect(actions).toEqual([{ kind: "recover", rung: "nudge" }])
   })
 })

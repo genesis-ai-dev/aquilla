@@ -1498,6 +1498,41 @@ describe("a stalled picture is noticed, and gets out of it", () => {
     expect(getVideoBuffering()).toBe(false)
   })
 
+  /** What the element says it has loaded, as `TimeRanges`. */
+  const loaded = (...ranges: Array<[number, number]>) => ({
+    length: ranges.length,
+    start: (i: number) => ranges[i]![0],
+    end: (i: number) => ranges[i]![1],
+  })
+
+  // AQU-2253 (browser pass, Nov 9): in WebKit, a click ahead of what the film
+  // had loaded and then Play left the seek unfinished for good while the film
+  // went on to load all of it: seeking, not paused, enough data, a still clock.
+  // Read as a seek still landing, the watchdog never looked, and the button
+  // said Pause over a still picture for as long as anyone watched.
+  it("treats a seek that never lands, though the film has loaded where it was sent, as a stall", () => {
+    const { video, press } = mount()
+    press(1)
+    Object.defineProperty(video, "seeking", { value: true, configurable: true })
+    Object.defineProperty(video, "buffered", { value: loaded([0, 40]), configurable: true })
+    const before = (video.play as ReturnType<typeof vi.fn>).mock.calls.length
+    tick(STALL_TICKS)
+    expect(getVideoBuffering()).toBe(true)
+    // …and climbs the ladder like any other: first a nudge where it is.
+    expect((video.play as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(before)
+    expect(video.currentTime).toBe(12)
+  })
+
+  it("still waits on a seek whose place in the film has not loaded yet", () => {
+    const { video, press } = mount()
+    press(1)
+    Object.defineProperty(video, "seeking", { value: true, configurable: true })
+    Object.defineProperty(video, "buffered", { value: loaded([0, 5]), configurable: true })
+    tick(10)
+    expect(getVideoBuffering()).toBe(false)
+    expect(video.load).not.toHaveBeenCalled()
+  })
+
   it("says nothing at the end of the film", () => {
     const { video, press } = mount()
     press(1)

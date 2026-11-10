@@ -67,6 +67,7 @@ import { nextScrubSeek } from "./video-seek-coalesce"
 import {
   forgetStallSample,
   IDLE_STALL_STATE,
+  seekStillLoading,
   stallStep,
   STALL_TICK_MS,
   type StallState,
@@ -657,7 +658,9 @@ export function MediaVideoPane({
         wantPlay: wantPlayRef.current,
         paused: video.paused,
         ended: video.ended,
-        seeking: video.seeking,
+        // AQU-2253 (browser pass, Nov 9): a seek that has not landed though
+        // the film has loaded where it was sent is a stall, not a seek.
+        seeking: seekStillLoading(video),
         // AQU-2253 (review, Nov 9): …or, where the film is the clock (no
         // readiness wait there), a film still opening: the same patience.
         pendingPlay: pendingPlayRef.current != null

@@ -647,6 +647,21 @@ export function lineWithRecordings(
 }
 
 /**
+ * AQU-2426 (browser pass, Nov 9): a file's lines with their recordings merged
+ * in, line by line by `lineWithRecordings`'s fallback, for a reader that runs
+ * in the Text view too, where the workspace's audio map is not fetched unless
+ * the person may restructure lines.
+ */
+export function linesWithRecordings(
+  lines: CellData[],
+  workspaceAudio: Map<string, CellAudioEntry>,
+  laneAudio: Map<string, CellAudioEntry>,
+): CellData[] {
+  if (laneAudio.size === 0) return mergeCellsWithAudio(lines, workspaceAudio)
+  return lines.map((c) => lineWithRecordings(c, workspaceAudio, laneAudio) ?? c)
+}
+
+/**
  * AQU-2426 (browser pass, Nov 9): the rows a transcription run a reload stopped
  * still has to do, and the rows that failed before the reload, as this page has
  * them: the file's heard lines where its takes live on those, else its own
@@ -667,8 +682,7 @@ export function carryOnRunCells(
     laneAudio: Map<string, CellAudioEntry>
   },
 ): { cells: CellData[]; failedCells: CellData[] } {
-  const pool = from.heardLines
-    ?? from.lines.map((c) => lineWithRecordings(c, from.workspaceAudio, from.laneAudio) ?? c)
+  const pool = from.heardLines ?? linesWithRecordings(from.lines, from.workspaceAudio, from.laneAudio)
   const byId = new Map(pool.map((c) => [c.id, c]))
   const settled = new Set([...run.doneIds, ...run.failed.map((f) => f.cellId)])
   const cells = run.cellIds.filter((id) => !settled.has(id)).flatMap((id) => {

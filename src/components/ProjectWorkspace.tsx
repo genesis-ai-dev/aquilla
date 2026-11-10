@@ -189,6 +189,7 @@ import {
   canRestructureTracks,
   resolveTakeLine,
   lineWithRecordings,
+  linesWithRecordings,
   carryOnRunCells,
   historyFileName,
   buildRouteScopedTokenFetcher,
@@ -12494,10 +12495,13 @@ export function ProjectWorkspace() {
   // it can never put a cell in this set. Without that check a subtitle file
   // with one attached video would report itself fully translated. AQU-2411: a
   // take migrated from Codex, whose id carries no line id, does count.
+  // AQU-2426 (browser pass, Nov 9): read off the lane's read, which is fetched
+  // in every view: the workspace's map is empty in the Text view for anyone
+  // who may not restructure lines, and every line read as having no take there.
   const ownTakeCellIds = useMemo(() => {
     const ids = new Set<string>()
-    const shared = sharedSelections(workspaceAudioByCellId.values())
-    for (const [cellId, entry] of workspaceAudioByCellId) {
+    const shared = sharedSelections(audioValidationByCellId.values())
+    for (const [cellId, entry] of audioValidationByCellId) {
       // AQU-490: EVERY slot, not just `recording`.
       //
       // This read `entry.selectedAudioId` — the default track alone — so a
@@ -12517,7 +12521,7 @@ export function ProjectWorkspace() {
       }
     }
     return ids
-  }, [workspaceAudioByCellId, activeFileId])
+  }, [audioValidationByCellId, activeFileId])
   /**
    * Media redesign slice 2: which lines are recorded and approved in the open
    * language, from the lane-scoped read (the one bulk validation uses, loaded
@@ -12770,10 +12774,22 @@ export function ProjectWorkspace() {
     ? mergeCellsWithAudio(readAtVersion(cellStoreVersion, getActiveCells), workspaceAudioByCellId)
     : EMPTY_CELL_DATA,
   [activeFileId, cellStoreVersion, getActiveCells, workspaceAudioByCellId])
+  // AQU-2426 (browser pass, Nov 9): Generate voices for every line is offered
+  // in the Text view, where the map above is not fetched unless the person may
+  // restructure lines: every line looked unvoiced, so it counted lines already
+  // voiced and generated them again. Its lines take the lane's recordings
+  // there. (The Transcribe all and Change voice for all counts below stay on
+  // the map above: keeping them out of the Text view was Sam's call, AQU-490.)
+  const textViewAudioCells = useMemo(() => !activeFileId
+    ? EMPTY_CELL_DATA
+    : workspaceAudioByCellId.size > 0 || audioValidationByCellId.size === 0
+      ? batchAudioCells
+      : linesWithRecordings(readAtVersion(cellStoreVersion, getActiveCells), workspaceAudioByCellId, audioValidationByCellId),
+  [activeFileId, batchAudioCells, cellStoreVersion, getActiveCells, workspaceAudioByCellId, audioValidationByCellId])
   const synthTargets = useMemo(() => activeFileId
-    ? resolveSynthTargets(batchAudioCells, cueLinkArgs)
+    ? resolveSynthTargets(textViewAudioCells, cueLinkArgs)
     : [],
-  [activeFileId, batchAudioCells, cueLinkArgs])
+  [activeFileId, textViewAudioCells, cueLinkArgs])
   synthTargetsRef.current = synthTargets
 
   // AQU-646: real counts for the "Transcribe all" / "Synth all" menu items,
@@ -14016,6 +14032,16 @@ export function ProjectWorkspace() {
   const audioMergedCells = useMemo(
     () => mergeCellsWithAudio(legacyCells, workspaceAudioByCellId),
     [legacyCells, workspaceAudioByCellId],
+  )
+  // AQU-2426 (browser pass, Nov 9): Export's recordings on a file whose takes
+  // are on its own lines. Export opens from the Text view too, where the map
+  // above is not fetched unless the person may restructure lines, and it found
+  // no recordings there. There they come from the lane's read.
+  const exportAudioCells = useMemo(
+    () => (workspaceAudioByCellId.size > 0 || audioValidationByCellId.size === 0
+      ? audioMergedCells
+      : linesWithRecordings(legacyCells, workspaceAudioByCellId, audioValidationByCellId)),
+    [audioMergedCells, legacyCells, workspaceAudioByCellId, audioValidationByCellId],
   )
   // AQU-2461 (review, Nov 9): Change film names the film itself. A video
   // dropped on an empty file is not named after the file; the upload's name is
@@ -15951,7 +15977,9 @@ export function ProjectWorkspace() {
   const laneReadyRef = useRef({ lane: activeLane, ready: false })
   laneReadyRef.current = {
     lane: activeLane,
-    ready: !cellsLoading && workspaceAudioLoaded && timelineAudioLoaded && (!audioCueSibling || cueAudioLoaded),
+    // AQU-2426 (browser pass, Nov 9): and the lane's read, which a step's take
+    // is found in when the workspace's map is not fetched (the Text view).
+    ready: !cellsLoading && workspaceAudioLoaded && audioValidationLoaded && timelineAudioLoaded && (!audioCueSibling || cueAudioLoaded),
   }
   // Read through a ref: the switch may first wait for the languages to load,
   // and must then judge by the loaded list, not the one it started with.
@@ -17109,7 +17137,9 @@ export function ProjectWorkspace() {
       ...(activeLane ? { targetLang: activeLane } : {}),
       surface: "cell",
       // Decision 11: an Undo step, naming what played in that slot before.
-      history: { selectedBefore: playingInSlot(workspaceAudioByCellIdRef.current.get(cell.id), GENERATED_VOICE_SLOT) },
+      // AQU-2426 (browser pass, Nov 9): …from the lane's read where the
+      // workspace's map is not fetched (the Text view).
+      history: { selectedBefore: playingInSlot(workspaceAudioByCellIdRef.current.get(cell.id) ?? audioValidationByCellIdRef.current.get(cell.id), GENERATED_VOICE_SLOT) },
     }).catch((e: unknown) => {
       throw new Error(categorizeAiError(e instanceof Error ? e.message : String(e)).body, { cause: e })
     })
@@ -20117,7 +20147,7 @@ export function ProjectWorkspace() {
           // active file's OWN merged cells rather than `legacyCells`, because a
           // file with no cue sibling at all — an audio-first import, say —
           // carries its takes directly and would otherwise be unexportable.
-          audioCells={audioCueCells ?? audioMergedCells}
+          audioCells={audioCueCells ?? exportAudioCells}
           reportFiles={reportFiles}
           characterResolutions={tts.settings?.characterResolutions}
           // Whether there is a SECOND file to export — the heard lines as their

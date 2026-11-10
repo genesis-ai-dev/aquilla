@@ -285,7 +285,7 @@ import { recordingLinesStepHandlers } from "@/lib/history/recording-lines-steps"
 import { rowStepHandlers } from "@/lib/history/row-steps"
 import { HistoryPanel } from "./history/HistoryPanel"
 import { editStepHandlers } from "@/lib/history/edit-steps"
-import { noteTrackWrite, trackNow, trackStepHandlers, trackFieldsOf, type PendingTrack, type TrackFields, type TrackTake } from "@/lib/history/track-steps"
+import { TrackWriteNotes, trackStepHandlers, trackFieldsOf, type TrackFields, type TrackTake } from "@/lib/history/track-steps"
 import { readProjectSettingsFor, writeProjectSettingsFor } from "@/lib/history/settings-access"
 import { useHistoryShortcuts } from "@/lib/history/useHistory"
 import { useHistoryReporter } from "@/components/history/useHistoryReporter"
@@ -14697,7 +14697,9 @@ export function ProjectWorkspace() {
   // project read has not shown yet. The Undo guard and a step's "before" read
   // a track THROUGH them, so ⌘Z straight after deleting (renaming, moving,
   // recolouring) a track sees what was just written, not the read from before.
-  const trackWrittenRef = useRef<Map<string, PendingTrack>>(new Map())
+  // Finding 10 (same review): kept per FILE — the built-in rows have the same
+  // ids in every file, and this workspace stays open across files.
+  const trackNotesRef = useRef(new TrackWriteNotes())
   const serverTracksRef = useRef(serverTimelineTracks)
   serverTracksRef.current = serverTimelineTracks
   const readTrackSettled = useCallback((trackId: string): TrackFields | null => {
@@ -14706,22 +14708,18 @@ export function ProjectWorkspace() {
   }, [])
   /** The track as far as this tab knows (null: it does not exist). */
   const readTrackNow = useCallback((trackId: string): TrackFields | null => {
-    const now = trackNow(readTrackSettled(trackId), trackWrittenRef.current.get(trackId))
-    if (now.pending) trackWrittenRef.current.set(trackId, now.pending)
-    else trackWrittenRef.current.delete(trackId)
-    return now.track
+    const fileId = activeFileIdRef.current
+    return fileId ? trackNotesRef.current.read(fileId, trackId, readTrackSettled(trackId)) : readTrackSettled(trackId)
   }, [readTrackSettled])
-  const noteTrackWrites = useCallback((changes: ReadonlyArray<{ trackId: string; patch: unknown }>) => {
-    for (const c of changes) {
-      trackWrittenRef.current.set(
-        c.trackId,
-        noteTrackWrite(readTrackSettled(c.trackId), trackWrittenRef.current.get(c.trackId), c.patch as TrackFields | null),
-      )
-    }
+  /** Note writes to `fileId`'s tracks. A file no longer open needs none: its
+   *  steps wait until it is open again, and its read has caught up by then. */
+  const noteTrackWrites = useCallback((changes: ReadonlyArray<{ trackId: string; patch: unknown }>, fileId: string | null) => {
+    if (!fileId || fileId !== activeFileIdRef.current) return
+    for (const c of changes) trackNotesRef.current.note(fileId, c.trackId, readTrackSettled(c.trackId), c.patch as TrackFields | null)
   }, [readTrackSettled])
   /** A write that was refused never shows in a read: stop expecting it. */
-  const forgetTrackWrites = useCallback((trackIds: readonly string[]) => {
-    for (const id of trackIds) trackWrittenRef.current.delete(id)
+  const forgetTrackWrites = useCallback((trackIds: readonly string[], fileId: string | null) => {
+    if (fileId) trackNotesRef.current.forget(fileId, trackIds)
   }, [])
   const recordTrackChanges = useCallback(
     (
@@ -14767,11 +14765,11 @@ export function ProjectWorkspace() {
     async (forFileId: string, changes: Array<{ trackId: string; order: number }>) => {
       if (!project?.id || changes.length === 0) return
       setPendingTrackOrders({ fileId: forFileId, orders: new Map(changes.map((c) => [c.trackId, c.order])) })
-      noteTrackWrites(changes.map((c) => ({ trackId: c.trackId, patch: { order: c.order } })))
+      noteTrackWrites(changes.map((c) => ({ trackId: c.trackId, patch: { order: c.order } })), forFileId)
       // Bound to the file the drag was made on, so a refresh that arrives after
       // the user has moved on cannot revert a different file's overlay.
       const revert = () => {
-        forgetTrackWrites(changes.map((c) => c.trackId))
+        forgetTrackWrites(changes.map((c) => c.trackId), forFileId)
         setPendingTrackOrders((current) => (current && current.fileId === forFileId ? null : current))
       }
       try {
@@ -14893,7 +14891,7 @@ export function ProjectWorkspace() {
   const applyTrackPatch = useCallback(
     async (trackId: string, patch: Parameters<typeof emitFileTrackSet>[0]["patch"], failure: string) => {
       if (!project?.id || !activeFileId) return
-      noteTrackWrites([{ trackId, patch }])
+      noteTrackWrites([{ trackId, patch }], activeFileId)
       try {
         await emitFileTrackSet({
           projectId: project.id,
@@ -14911,14 +14909,14 @@ export function ProjectWorkspace() {
           onRejected: (entries) => {
             const mine = entries.filter((r) => r.kind === "file.track.set" && r.fileId === activeFileId)
             if (mine.length === 0) return
-            forgetTrackWrites([trackId])
+            forgetTrackWrites([trackId], activeFileId)
             toast.add({ type: "error", title: `${failure} ${mine[0].reason}` })
           },
-          onForbidden: () => forgetTrackWrites([trackId]),
+          onForbidden: () => forgetTrackWrites([trackId], activeFileId),
         })
         refresh()
       } catch (e) {
-        forgetTrackWrites([trackId])
+        forgetTrackWrites([trackId], activeFileId)
         toast.add({ type: "error", title: e instanceof Error ? `${failure} ${e.message}` : failure })
       }
     },
@@ -14941,8 +14939,8 @@ export function ProjectWorkspace() {
       failure: string,
     ) => {
       if (!project?.id || !activeFileId || changes.length === 0) return
-      noteTrackWrites(changes)
-      const forget = () => forgetTrackWrites(changes.map((c) => c.trackId))
+      noteTrackWrites(changes, activeFileId)
+      const forget = () => forgetTrackWrites(changes.map((c) => c.trackId), activeFileId)
       try {
         await enqueueEvents(
           changes.map((c) => ({
@@ -15324,7 +15322,7 @@ export function ProjectWorkspace() {
           noteTrackWrites([
             ...members.map((member, i) => ({ trackId: member.id, patch: { groupId: null, order: firstFreeOrder + i } })),
             ...doomed.map((t) => ({ trackId: t.id, patch: null })),
-          ])
+          ], activeFileId)
 
           // ── PHASE 2: the recordings, now that the row is really gone ──────
           if (removals.length > 0) {

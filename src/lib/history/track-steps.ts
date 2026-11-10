@@ -143,6 +143,38 @@ export function trackNow(
   return { track: read, pending: undefined }
 }
 
+/**
+ * AQU-2492 (review, Nov 9), finding 10: the notes above, kept PER FILE. The
+ * built-in rows (the main Recordings row and its kin) have the same ids in
+ * every file, and the workspace stays open across files, so notes keyed by
+ * the track alone carried a change made in one chapter into the Undo of the
+ * same row in another. A step belongs to the file it was made in; so does
+ * what it reads.
+ */
+export class TrackWriteNotes {
+  private readonly notes = new Map<string, PendingTrack>()
+  private key(fileId: string, trackId: string): string {
+    return `${fileId}\u0000${trackId}`
+  }
+  /** The track in `fileId` as far as this tab knows, given its settled read. */
+  read(fileId: string, trackId: string, settled: TrackFields | null): TrackFields | null {
+    const key = this.key(fileId, trackId)
+    const now = trackNow(settled, this.notes.get(key))
+    if (now.pending) this.notes.set(key, now.pending)
+    else this.notes.delete(key)
+    return now.track
+  }
+  /** A write to the track in `fileId` (`patch` null deletes it). */
+  note(fileId: string, trackId: string, settled: TrackFields | null, patch: TrackFields | null): void {
+    const key = this.key(fileId, trackId)
+    this.notes.set(key, noteTrackWrite(settled, this.notes.get(key), patch))
+  }
+  /** Writes that were refused never show in a read: stop expecting them. */
+  forget(fileId: string, trackIds: readonly string[]): void {
+    for (const id of trackIds) this.notes.delete(this.key(fileId, id))
+  }
+}
+
 export function trackStepHandlers(ctx: TrackStepContext): Record<string, StepHandler<never>> {
   const flip = async (d: TrackStepData, which: "undo" | "redo"): Promise<StepOutcome> => {
     for (const c of d.changes) {

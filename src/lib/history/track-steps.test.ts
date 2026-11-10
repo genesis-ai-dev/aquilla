@@ -9,6 +9,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
   noteTrackWrite,
+  TrackWriteNotes,
   trackNow,
   trackStepHandlers,
   type PendingTrack,
@@ -152,5 +153,53 @@ describe("undoing a track change before the project read comes back (AQU-2492)",
     expect(await ws.undo(deleted())).toEqual({ kind: "skipped", reason: "changed" })
     expect(ws.server.has("t9")).toBe(false)
     expect(ws.restoreTakes).not.toHaveBeenCalled()
+  })
+})
+
+// AQU-2492 (review, Nov 9), finding 10: the built-in rows (the main
+// Recordings row and its kin) have the same ids in every file, and the
+// workspace stays open across files. A change written in chapter 1 must not
+// be read as the same row's state in chapter 2: a step belongs to the file
+// and chapter it was made in.
+describe("track notes belong to the file they were written in (AQU-2492)", () => {
+  const ROW = "recording"
+  it("a colour written in chapter 1 is not chapter 2's row, so chapter 2's Undo puts back no colour", async () => {
+    const settled: Record<string, TrackFields> = {
+      ch1: { kind: "audio", name: "Recordings", color: null },
+      ch2: { kind: "audio", name: "Recordings", color: null },
+    }
+    const notes = new TrackWriteNotes()
+    let open = "ch1"
+    const readTrack = (trackId: string) => notes.read(open, trackId, settled[open] ?? null)
+    // Chapter 1: recolour the main row teal (the read has not caught up).
+    notes.note("ch1", ROW, settled.ch1, { color: "teal" })
+    expect(readTrack(ROW)).toMatchObject({ color: "teal" })
+    // Chapter 2: the same row, as chapter 2 has it, is recoloured violet.
+    open = "ch2"
+    const before = readTrack(ROW)
+    expect(before).toMatchObject({ color: null })
+    notes.note("ch2", ROW, settled.ch2, { color: "violet" })
+    const patched: Array<{ trackId: string; patch: TrackFields | null }> = []
+    const handlers = trackStepHandlers({
+      readTrack,
+      patchTracks: async (changes) => { patched.push(...changes) },
+      restoreTakes: vi.fn(),
+      removeTakes: vi.fn(),
+    }) as unknown as Record<string, { undo(d: TrackStepData): Promise<StepOutcome> }>
+    const step: TrackStepData = { changes: [{ trackId: ROW, before: { color: before?.color ?? null }, after: { color: "violet" } }] }
+    expect(await handlers["track.patch"].undo(step)).toEqual({ kind: "done" })
+    expect(patched).toEqual([{ trackId: ROW, patch: { color: null } }])
+    // And chapter 1 still has its own note when the person goes back.
+    open = "ch1"
+    expect(readTrack(ROW)).toMatchObject({ color: "teal" })
+  })
+
+  it("forgetting a refused write forgets it in its own file only", () => {
+    const notes = new TrackWriteNotes()
+    notes.note("ch1", ROW, null, { color: "teal" })
+    notes.note("ch2", ROW, null, { color: "violet" })
+    notes.forget("ch2", [ROW])
+    expect(notes.read("ch2", ROW, null)).toBeNull()
+    expect(notes.read("ch1", ROW, null)).toMatchObject({ color: "teal" })
   })
 })

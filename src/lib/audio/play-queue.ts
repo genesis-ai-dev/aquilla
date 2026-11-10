@@ -25,7 +25,7 @@ import { audioMimeForExt } from "./mime"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { claimActiveAudio, clearActiveAudioIf, getActiveAudio, type ActiveAudioController } from "./audio-coordinator"
 import { t } from "@/lib/i18n/standalone"
-import { clipLevelOf, isMixed, joinedLevelsOf, mixElement, setMixerVolume } from "./mixer"
+import { clipLevelOf, joinedLevelsOf, mixElement, playUnmixed, setMixerVolume, setPlayerVolume } from "./mixer"
 import { selectQueueForFile, type QueueForFile } from "./queue-scope"
 import { isHiddenCell } from "@/lib/cells/hidden"
 
@@ -678,8 +678,10 @@ export function setQueueRate(rate: number): void {
 export function setQueueVolume(vol: number): void {
   const v = Math.max(0, Math.min(1, vol))
   setMixerVolume(v)
-  if (currentAudio) currentAudio.volume = isMixed(currentAudio) ? 1 : v
-  for (const e of overlayPool) if (e.element) e.element.volume = isMixed(e.element) ? 1 : v
+  // AQU-2494 (review, Nov 9): a player straight to the output carries its
+  // take's own level on its volume too (mixLineElement, wireOverlayElement).
+  if (currentAudio) setPlayerVolume(currentAudio, v)
+  for (const e of overlayPool) if (e.element) setPlayerVolume(e.element, v)
   setProgress({ volume: v })
 }
 
@@ -692,7 +694,12 @@ function mixLineElement(audio: HTMLAudioElement, cell: CellData | undefined, url
   const att = cell && url
     ? Object.values(cell.attachments ?? {}).find((a) => a.url === url && !a.isDeleted && a.role !== "source")
     : undefined
-  if (mixElement(audio, slot ?? att?.slot ?? (att ? RECORDING_SLOT : "source"), clipLevelOf(att))) audio.volume = 1
+  const level = clipLevelOf(att)
+  if (mixElement(audio, slot ?? att?.slot ?? (att ? RECORDING_SLOT : "source"), level)) audio.volume = 1
+  // AQU-2494 (review, Nov 9): a stream (a take not on this device) cannot go
+  // through the mixer; it carries its level on the player, as far as a
+  // player's volume goes (it cannot raise a take above as recorded).
+  else playUnmixed(audio, level, progress.volume)
 }
 
 // ── Per-cell audio resolution ───────────────────────────────────────────────
@@ -3356,6 +3363,7 @@ function wireOverlayElement(
       ? joinedLevelsOf(entry.joinedPieces.map((p) => ({ ...p, att: atts?.[p.audioId] })))
       : clipLevelOf(atts?.[entry.audioId])
     if (mixElement(audio, entry.slot, level)) audio.volume = 1
+    else playUnmixed(audio, level, progress.volume) // AQU-2494 (review, Nov 9): as mixLineElement
   }
   const applySeek = () => {
     const d = audio.duration

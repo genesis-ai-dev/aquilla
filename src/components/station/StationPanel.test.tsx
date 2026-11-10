@@ -3,7 +3,7 @@ import { useState } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { historyReady, recordStep, registerStepKinds, resetHistoryForTests, setHistoryScope, type StepHandler } from "@/lib/history/history"
+import { historyReady, recordStep, registerStepKinds, resetHistoryForTests, setHistoryScope, undoLast, type StepHandler } from "@/lib/history/history"
 import { clearHistoryStoreForTests } from "@/lib/history/history-store"
 import { __resetStationTargetForTests, getStationTarget, openInStation } from "@/lib/station/target"
 import { StationSave } from "./StationEdits"
@@ -143,6 +143,35 @@ describe("the Station", () => {
       expect(greyed()).toBe(false)
       fireEvent.click(screen.getByTestId("station-undo"))
       await waitFor(() => expect(undone).toEqual(["take.gain"]))
+    })
+
+    // AQU-2493 (review, Nov 9), finding 12 (a call the owner can overrule): a
+    // cut made on the timeline is not the Station's to undo, so its Undo went
+    // past it to the Station's own earlier trim, found the take changed by the
+    // cut, and dropped that trim for good without a word. Now it says so, in
+    // one sentence, and leaves the trim where it is.
+    it("after a cut made on the timeline, says the take was cut since and that the cut is undone first, and throws nothing away", async () => {
+      await history()
+      registerStepKinds({ "take.cut": handler })
+      step("take.window", { cellId: "c331", audioId: "t2.webm" })
+      recordStep({ kind: "take.cut", data: { name: "take.cut", cuts: [{ cellId: "c331", audioId: "t2.webm", atMs: 1500, newAudioId: "t2-2.webm" }] }, labelKey: "x", lane: null })
+      const said: string[] = []
+      const take = makeTake()
+      render(<StationHeader host={makeHost(take)} take={take} target={target} onMessage={(m) => said.push(m)} />)
+      const undo = screen.getByTestId("station-undo")
+      expect(greyed()).toBe(false)
+      expect(undo.getAttribute("aria-label")).toMatch(/cut on the timeline/)
+      fireEvent.click(undo)
+      await act(async () => {})
+      expect(undone).toEqual([])
+      expect(said).toHaveLength(1)
+      expect(said[0]).toMatch(/cut on the timeline since/)
+      expect(said[0]).toMatch(/Z/)
+      // ⌘Z takes the cut back; then the Station's Undo reaches its trim.
+      await act(async () => { await undoLast() })
+      expect(undone).toEqual(["take.cut"])
+      fireEvent.click(screen.getByTestId("station-undo"))
+      await waitFor(() => expect(undone).toEqual(["take.cut", "take.window"]))
     })
 
     it("counts a trim, a save and an approval of this recording as its own", async () => {

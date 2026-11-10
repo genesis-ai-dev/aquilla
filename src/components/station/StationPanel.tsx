@@ -19,7 +19,7 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { audioIdSeededWith } from "@/lib/audio/upload"
 import { isGeneratedTake } from "@/lib/audio/track-audio"
 import { placeHoldingStart } from "@/lib/station/hold-place"
-import { newestStationStep } from "@/lib/station/own-steps"
+import { cutSinceStationStep, newestStationStep } from "@/lib/station/own-steps"
 import { levelsShown, STATION_PICKS } from "@/lib/station/picks"
 import { setStationUi } from "@/lib/station/ui"
 import { audioCachePutBlob } from "@/lib/audio/bytes-cache"
@@ -508,6 +508,7 @@ function StationOpen({ host, take, target, visible, initialMessage }: OpenProps)
         recording={recording}
         isSource={isSource}
         controlsInfo={editable}
+        onMessage={setMessage}
         {...(unsaved
           ? {
               notSaved: changedText(changedKinds(ed.ops)),
@@ -601,6 +602,7 @@ export function StationHeader({
   notSaved,
   save,
   controlsInfo = false,
+  onMessage,
 }: {
   host: StationHost
   take: StationTake
@@ -622,6 +624,8 @@ export function StationHeader({
   save?: ReactNode
   /** The (i) beside the name that explains the controls (Sam, Nov 2). */
   controlsInfo?: boolean
+  /** AQU-2493 (review, Nov 9): a sentence for the Station's message line. */
+  onMessage?(text: string): void
 }) {
   const t = useT()
   const [infoOpen, toggleInfo] = useInfoOpen()
@@ -657,17 +661,26 @@ export function StationHeader({
   // AQU-2493 (review, Nov 9): …and a bulk change made elsewhere is not its own.
   const step = STATION_PICKS.undoButton === "project" ? (view.nextUndo ?? null) : view.canUndo ? newestStationStep(cellId, audioId) : null
   const canUndo = !recording && (unsaved || step != null)
+  // AQU-2493 (review, Nov 9), finding 12: the take was cut on the timeline
+  // since the Station's last change. A cut is not the Station's to undo, and
+  // undoing the change past it would drop it as "changed since": say so.
+  const cutSince = !unsaved && step != null && STATION_PICKS.undoButton !== "project" && cutSinceStationStep(cellId, audioId, step.id)
+  const cutTip = cutSince ? t("editor.station.undoAfterCut", { mod: modKey() }) : null
   const undoTip = recording
     ? t("editor.station.undoWhileRecording")
     : unsaved
       ? t("editor.station.undoUnsaved")
       : step
-        ? t("editor.station.undoTip")
+        ? (cutTip ?? t("editor.station.undoTip"))
         : t("editor.station.nothingToUndo")
   const undo = () => {
     if (recording) return
     if (unsaved && undoUnsaved?.()) return
     if (!step) return
+    if (cutTip) {
+      onMessage?.(cutTip)
+      return
+    }
     void (STATION_PICKS.undoButton === "project" ? undoLast() : undoStepById(step.id)).then((r) => {
       if (r) host.reportHistory("undo", r)
     })

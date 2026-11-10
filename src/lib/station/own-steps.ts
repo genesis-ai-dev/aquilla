@@ -9,7 +9,7 @@
 // change to a take (trim, volume and fades, move, rename, a saved or cleaned
 // version, a delete) or an approval of one, and it names this take.
 
-import { newestMatchingStep, type StepSummary } from "@/lib/history/history"
+import { historyView, matchingSteps, newestMatchingStep, type StepSummary } from "@/lib/history/history"
 
 /** Step kinds that change or approve one take, named by `audioId`. */
 const isTakeStep = (kind: string): boolean => kind === "vote.audio" || (kind.startsWith("take.") && kind !== "take.select" && kind !== "take.cut")
@@ -43,4 +43,24 @@ export function stationGroupCounts(cellId: string, audioId: string): (parts: Rea
 /** The step the Station's own Undo takes back while `audioId` on `cellId` is open. */
 export function newestStationStep(cellId: string, audioId: string): StepSummary | null {
   return newestMatchingStep(stationStepMatch(cellId, audioId), stationGroupCounts(cellId, audioId))
+}
+
+/**
+ * AQU-2493 (review, Nov 9), finding 12: whether the open take was cut since
+ * the Station's step `stepId` — a cut sits above it in Undo. A cut is made on
+ * the timeline and is not the Station's to undo, but it changes the take, so
+ * the Station's step would be judged "changed since" and dropped for good.
+ * The Station's Undo then says so instead, and ⌘Z takes the cut back first.
+ */
+export function cutSinceStationStep(cellId: string, audioId: string, stepId: string): boolean {
+  const isCut = (kind: string, data: unknown): boolean =>
+    kind === "take.cut" &&
+    ((data as { cuts?: ReadonlyArray<{ cellId?: string; audioId?: string; newAudioId?: string }> } | null)?.cuts ?? []).some(
+      (c) => c.cellId === cellId && (c.audioId === audioId || c.newAudioId === audioId),
+    )
+  const cuts = matchingSteps(isCut).undo
+  if (cuts.length === 0) return false
+  const order = historyView().undoSteps.map((s) => s.id)
+  const at = order.indexOf(stepId)
+  return cuts.some((c) => order.indexOf(c.id) > at)
 }

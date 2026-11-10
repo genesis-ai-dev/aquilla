@@ -44,6 +44,7 @@ import { takeTrackVars } from "@/lib/timeline/take-colors"
 import { TRACK_DOT_CLASS } from "@/lib/timeline/track-colors"
 import { persistTakeTrim, trimMs } from "@/lib/audio/persist-trim"
 import { recordStep } from "@/lib/history/history"
+import { playingInSlot } from "@/lib/history/take-steps"
 import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
 import { transcribeTake } from "@/lib/audio/transcribe-take"
 import { isGeneratedTake } from "@/lib/audio/track-audio"
@@ -344,6 +345,9 @@ function CellTakeBlockView({
     const trackTakes = Object.entries(owner.attachments ?? {})
       .filter(([id, a]) => !a.isDeleted && ownSlots.has(a.slot ?? RECORDING_SLOT) && !audioIdSeededWith(id, owner.fileId))
       .map(([audioId, a]) => ({ audioId, label: a.label ?? null, pieceOf: a.pieceOf ?? null, trimStartMs: a.trimStartMs ?? null }))
+    // AQU-2492 (review, Nov 9): an Undo step, naming what played in the slot
+    // before (the take in pieces), read outside the try for the compiler.
+    const history = { selectedBefore: playingInSlot(owner, slot) }
     try {
       await joinTakePieces({
         session,
@@ -355,6 +359,7 @@ function CellTakeBlockView({
         label: nextTakeLabel(trackTakes),
         ...(targetLang ? { targetLang } : {}),
         username,
+        history,
       })
     } catch (e) {
       failed = toUserFacingError(e).message

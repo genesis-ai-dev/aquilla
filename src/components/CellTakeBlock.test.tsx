@@ -760,6 +760,16 @@ describe("Join into one recording", () => {
     await waitFor(() => expect(joinCalls).toHaveLength(1))
     expect(joinCalls[0]).toMatchObject({ cellId: "c1", slot: "recording", label: "Take 3" })
   })
+
+  // AQU-2492 (review, Nov 9): joining left no Undo step. The join records one,
+  // naming the take in pieces that played before, so Undo plays it again.
+  it("asks for an Undo step that names the take in pieces as what played before", async () => {
+    joinCalls.length = 0
+    draw({ owner, audioId: "audio-c1-1-a.wav", pieces: pieces as never })
+    fireEvent.click(screen.getByTestId("cell-take-join"))
+    await waitFor(() => expect(joinCalls).toHaveLength(1))
+    expect(joinCalls[0]).toMatchObject({ history: { selectedBefore: "audio-c1-1-a.wav" } })
+  })
 })
 
 // AQU-2260 (Sam, Oct 29): a hover may only NAME an icon-only button. "New

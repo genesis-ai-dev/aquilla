@@ -19,6 +19,12 @@ vi.mock("@/lib/sync/events-emit", () => ({
   emitCellAudioAttach: vi.fn(async (input: Record<string, unknown>) => { attaches.push(input); return "ev" }),
 }))
 vi.mock("@/lib/audio/audio-attachments-bus", () => ({ injectOptimisticAudioAttachment: vi.fn(), notifyAudioAttachmentsChanged: vi.fn() }))
+// AQU-2492 (review, Nov 9): the Undo steps a join records.
+const steps = vi.hoisted(() => [] as Array<Record<string, unknown>>)
+vi.mock("@/lib/history/history", async (orig) => ({
+  ...(await orig<typeof import("@/lib/history/history")>()),
+  recordStep: (step: Record<string, unknown>) => { steps.push(step) },
+}))
 vi.mock("@/lib/audio/sync-token-fetcher", () => ({ audioSyncTokenFetcherForSession: () => async () => "token" }))
 vi.mock("@/lib/audio/decode-mono", () => ({
   TARGET_RATE: 1000,
@@ -43,6 +49,7 @@ const URL_A = "frontier-audio://audio-c1-1700000000000-a.wav"
 beforeEach(() => {
   uploads.length = 0
   attaches.length = 0
+  steps.length = 0
 })
 
 describe("wholeRecordingOf", () => {
@@ -96,5 +103,34 @@ describe("joinTakePieces", () => {
     // 200 ms + 400 ms of a 1 kHz "recording".
     expect(uploads).toEqual([expect.objectContaining({ ext: "wav", size: 600 })])
     expect(attaches).toEqual([expect.objectContaining({ durationMs: 600, mimeType: "audio/wav", url: expect.stringMatching(/^frontier-audio:\/\/audio-c1-/) })])
+  })
+
+  // AQU-2492 (review, Nov 9): joining left no Undo step, so ⌘Z after it undid
+  // something else. Both ways of joining record the joined take as added:
+  // Undo takes it away and the take in pieces plays again.
+  it("records the joined take as an Undo step, on both ways of joining", async () => {
+    const history = { selectedBefore: "a.wav" }
+    const tiled = await joinTakePieces({ ...args, history, pieces: [
+      { audioId: "a.wav", url: URL_A, trimStartMs: null, trimEndMs: 300, durationMs: 1200 },
+      { audioId: "b.wav", url: URL_A, trimStartMs: 300, trimEndMs: null, durationMs: 1200 },
+    ] })
+    const uploaded = await joinTakePieces({ ...args, history, pieces: [
+      { audioId: "a.wav", url: URL_A, trimStartMs: 100, trimEndMs: 300 },
+      { audioId: "b.wav", url: URL_A, trimStartMs: 500, trimEndMs: 900 },
+    ] })
+    expect(steps).toEqual([tiled, uploaded].map((audioId) => expect.objectContaining({
+      kind: "take.add",
+      labelKey: "editor.history.stepJoinTake",
+      fileId: "f1",
+      data: { cellId: "c1", audioId, slot: "recording", selectedBefore: "a.wav" },
+    })))
+  })
+
+  it("records nothing when no step is asked for", async () => {
+    await joinTakePieces({ ...args, pieces: [
+      { audioId: "a.wav", url: URL_A, trimStartMs: null, trimEndMs: 300, durationMs: 1200 },
+      { audioId: "b.wav", url: URL_A, trimStartMs: 300, trimEndMs: null, durationMs: 1200 },
+    ] })
+    expect(steps).toEqual([])
   })
 })

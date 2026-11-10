@@ -383,6 +383,8 @@ export const TAKE_ADD_LABELS = {
   denoise: "editor.history.stepRemoveNoise",
   // AQU-2327: the Station saved an edited recording as a new version.
   station: "editor.history.stepStationVersion",
+  // AQU-2492 (review, Nov 9): "Join into one recording" adds the joined take.
+  join: "editor.history.stepJoinTake",
 } as const
 
 /**

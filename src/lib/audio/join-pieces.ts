@@ -18,6 +18,7 @@ import { audioCacheGet } from "@/lib/audio/bytes-cache"
 import { attachUploadedTake, OFFLINE_MESSAGE } from "@/lib/audio/attach-file"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
+import { recordTakeAdded } from "@/lib/history/take-steps"
 
 export interface JoinPiece {
   audioId: string
@@ -66,6 +67,19 @@ export interface JoinPiecesArgs {
    *  new take — the caller works it out with `nextTakeLabel` over the line's
    *  takes on this track. */
   label?: string
+  /** AQU-2492 (review, Nov 9): record an Undo step for the joined take,
+   *  naming the take that played in its slot before (the take in pieces). */
+  history?: { selectedBefore: string | null }
+}
+
+/** The joined take is an added take: Undo takes it away and plays the pieces again. */
+function recordJoined(args: JoinPiecesArgs, audioId: string): void {
+  if (!args.history) return
+  recordTakeAdded(
+    "join",
+    { cellId: args.cellId, audioId, slot: args.slot, selectedBefore: args.history.selectedBefore },
+    { fileId: args.fileId },
+  )
 }
 
 async function bytesOf(url: string, args: JoinPiecesArgs, getSyncToken: ReturnType<typeof audioSyncTokenFetcherForSession>): Promise<Uint8Array> {
@@ -107,6 +121,7 @@ export async function joinTakePieces(args: JoinPiecesArgs): Promise<string> {
       durationMs: last.durationMs ?? last.trimEndMs ?? undefined,
     })
     notifyAudioAttachmentsChanged(args.fileId)
+    recordJoined(args, audioId)
     return audioId
   }
 
@@ -136,5 +151,6 @@ export async function joinTakePieces(args: JoinPiecesArgs): Promise<string> {
     durationMs: Math.round((joined.length / TARGET_RATE) * 1000),
   })
   notifyAudioAttachmentsChanged(args.fileId)
+  recordJoined(args, audioId)
   return audioId
 }

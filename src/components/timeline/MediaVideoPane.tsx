@@ -65,11 +65,15 @@ import { VIDEO_END_GUARD_SEC, VIDEO_PAUSED_SNAP_SEC, videoDriftBarSec, videoSync
 import { filmMomentAt, type FilmPiece } from "@/lib/timeline/film-pieces"
 import { nextScrubSeek } from "./video-seek-coalesce"
 import {
+  browserPlaysHls,
   forgetStallSample,
+  IDLE_SEEK_WATCH,
   IDLE_STALL_STATE,
-  seekStillLoading,
+  seekTargetLoaded,
   stallStep,
   STALL_TICK_MS,
+  watchSeek,
+  type SeekWatch,
   type StallState,
 } from "./video-stall"
 import { DEFAULT_VIDEO_ASPECT, fitPictureRect, intrinsicAspect } from "./video-frame"
@@ -619,6 +623,10 @@ export function MediaVideoPane({
    * a different decoder. Then stop, and offer the click that does work.
    */
   const stallRef = useRef<StallState>(IDLE_STALL_STATE)
+  /** AQU-2253 (review, Nov 9): the seek in flight, for `watchSeek`, and when a
+   *  seek was last asked for (held back or not). */
+  const seekWatchRef = useRef<SeekWatch>(IDLE_SEEK_WATCH)
+  const seekAskedAtRef = useRef<number | null>(null)
   /** Where to put the picture back after a reload or a rebuild. */
   const resumeAtRef = useRef<number | null>(null)
   /** Props reached from inside the interval, which must not re-arm on every
@@ -651,6 +659,17 @@ export function MediaVideoPane({
     const id = window.setInterval(() => {
       const video = videoRef.current
       if (!video) return
+      // AQU-2253 (review, Nov 9): a seek is the network's business unless it
+      // is stuck: five seconds over film that has loaded, no `seeked`, no
+      // newer seek asked for.
+      const seek = watchSeek(seekWatchRef.current, {
+        seeking: video.seeking,
+        sec: video.currentTime,
+        loaded: seekTargetLoaded(video),
+        now: Date.now(),
+        askedAt: Math.max(lastSeekAtRef.current ?? 0, seekAskedAtRef.current ?? 0) || null,
+      })
+      seekWatchRef.current = seek.watch
       const step = stallStep(stallRef.current, {
         sec: video.currentTime,
         // What the TRANSPORT wants. The element's own flag is the thing that
@@ -658,9 +677,8 @@ export function MediaVideoPane({
         wantPlay: wantPlayRef.current,
         paused: video.paused,
         ended: video.ended,
-        // AQU-2253 (browser pass, Nov 9): a seek that has not landed though
-        // the film has loaded where it was sent is a stall, not a seek.
-        seeking: seekStillLoading(video),
+        seeking: video.seeking && !seek.stuck,
+        seekStuck: seek.stuck,
         // AQU-2253 (review, Nov 9): …or, where the film is the clock (no
         // readiness wait there), a film still opening: the same patience.
         pendingPlay: pendingPlayRef.current != null
@@ -723,7 +741,10 @@ export function MediaVideoPane({
       // decoder, which for this wedge is the thing that is broken.
       resumeAtRef.current = at
       stallRef.current = forgetStallSample(stallRef.current)
-      if (stream.pipeline === "hls") stream.fallbackToNative()
+      // AQU-2253 (review, Nov 9): to the browser's own player only where it can
+      // play a stream (Safari). Chromium and Firefox cannot, and the film was
+      // left unplayable; there the streaming player is rebuilt instead.
+      if (stream.pipeline === "hls" && browserPlaysHls(video)) stream.fallbackToNative()
       setLoadAttempt((n) => n + 1)
     }, STALL_TICK_MS)
     return () => window.clearInterval(id)
@@ -1046,6 +1067,9 @@ export function MediaVideoPane({
     //
     // This guards EVERY seek, not just a scrub — the playback bar's own
     // scrubber fires an uncapped stream of them too, and it costs nothing here.
+    // AQU-2253 (review, Nov 9): a seek asked for, even one held back, is not
+    // a seek stuck (`watchSeek`).
+    seekAskedAtRef.current = Date.now()
     const decided = nextScrubSeek({
       seeking: video.seeking,
       pendingSec: pendingScrubSeekRef.current,
@@ -1501,6 +1525,7 @@ export function MediaVideoPane({
           // through the same nonce path and needs the same protection — while
           // publishing stays standalone-only, as it always was.
           onSeeked={(e) => {
+            seekWatchRef.current = IDLE_SEEK_WATCH
             drainScrubSeek()
             if (!slaved) publishPosition(e.currentTarget.currentTime)
           }}

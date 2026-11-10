@@ -93,11 +93,27 @@ export interface StallSample {
   /** True while the readiness gate is holding a start. That wait owns its own
    *  patience and its own spinner; two owners would fight over both. */
   pendingPlay: boolean
+  /** AQU-2253 (review, Nov 9): the still clock is a seek that never landed
+   *  (`watchSeek`). Its ladder starts past the nudge, which seeks again: a
+   *  second seek in flight is what wedges the streaming player
+   *  (video-seek-coalesce.ts). */
+  seekStuck?: boolean
 }
 
 /** AQU-2253 (browser pass, Nov 9): how far past a seek's target the film must
- *  have loaded before a seek that has still not landed counts as stuck. */
+ *  have loaded before a seek that has still not landed can count as stuck. */
 export const SEEK_LOADED_AHEAD_SEC = 1
+
+/**
+ * AQU-2253 (review, Nov 9): how long a seek over film that has already loaded
+ * may go on before it counts as stuck. Such a seek normally lands in a fraction
+ * of a second, and even a slow one (a busy iPad, Safari with the streaming
+ * player, a seek right after a quality switch) within a second or two; the
+ * WebKit wedge it is for never lands. Five seconds is well past any healthy
+ * seek of this kind, so it never judges one, and short of the point where
+ * someone looking at a still picture gives up.
+ */
+export const SEEK_STUCK_MS = 5_000
 
 /** The slice of `TimeRanges` read here. */
 export interface LoadedRanges {
@@ -107,36 +123,72 @@ export interface LoadedRanges {
 }
 
 /**
- * AQU-2253 (browser pass, Nov 9): is the element's seek still on its way, so
- * that its still clock belongs to the network and not to us
- * (`StallSample.seeking`)?
- *
- * Only while the film has not loaded where it was sent. WebKit was seen to
- * leave a seek past what had loaded unfinished for good, though the film went
- * on to load all of it: the element said it was seeking, not paused, with
- * enough data, and its time never moved. "Seeking" kept the watchdog out of
- * it, so nothing ever noticed: following the recordings the button showed a
- * spinner for good, following the source "Pause" over a still picture. Once
- * the film has loaded a second past where it was sent (or to its end), a seek
- * that still has not landed is a stall like any other.
+ * AQU-2253 (browser pass, Nov 9): has the film loaded where it was sent: one
+ * loaded range from the target to a second past it (or to the film's end)?
  */
-export function seekStillLoading(video: {
-  seeking: boolean
+export function seekTargetLoaded(video: {
   currentTime: number
   duration: number
   buffered?: LoadedRanges | null
 }): boolean {
-  if (!video.seeking) return false
   const loaded = video.buffered
-  if (!loaded) return true
+  if (!loaded) return false
   const at = video.currentTime
   const end = Number.isFinite(video.duration) && video.duration > 0
     ? Math.min(at + SEEK_LOADED_AHEAD_SEC, video.duration)
     : at + SEEK_LOADED_AHEAD_SEC
   for (let i = 0; i < loaded.length; i++) {
-    if (loaded.start(i) <= at + STALL_MOTION_EPS && loaded.end(i) >= end - 0.1) return false
+    if (loaded.start(i) <= at + STALL_MOTION_EPS && loaded.end(i) >= end - 0.1) return true
   }
-  return true
+  return false
+}
+
+/** Since when the element has been seeking to `target` with it loaded. */
+export interface SeekWatch {
+  since: number | null
+  target: number | null
+}
+
+export const IDLE_SEEK_WATCH: SeekWatch = { since: null, target: null }
+
+/**
+ * AQU-2253 (review, Nov 9): one sample of a seek. WebKit was seen to leave a
+ * seek past what had loaded unfinished for good, though the film went on to
+ * load all of it: seeking, not paused, enough data, a still clock. A seeking
+ * film is the network's business, so the watchdog never looked, and the
+ * picture stayed still for good.
+ *
+ * A seek counts as STUCK only when all of these hold: the element has been
+ * seeking for `SEEK_STUCK_MS`; the film has been loaded a second past the
+ * target for all of that time; no `seeked` came (the pane resets the watch on
+ * one); and nobody asked for another seek meanwhile (`askedAt`, the newest
+ * seek the person or the app asked for, even one held back while this one is
+ * in flight). Scrubbing, Previous line and the film following the queue all
+ * ask for seeks, so they never trip it; a seek into film that has not loaded
+ * is waited on however long it takes.
+ */
+export function watchSeek(
+  watch: SeekWatch,
+  sample: { seeking: boolean; sec: number; loaded: boolean; now: number; askedAt: number | null },
+): { watch: SeekWatch; stuck: boolean } {
+  if (!sample.seeking || !sample.loaded) return { watch: IDLE_SEEK_WATCH, stuck: false }
+  const same = watch.since != null && watch.target != null && Math.abs(watch.target - sample.sec) <= STALL_MOTION_EPS
+  let since = same ? watch.since! : sample.now
+  if (sample.askedAt != null && sample.askedAt > since) since = sample.askedAt
+  return { watch: { since, target: sample.sec }, stuck: sample.now - since >= SEEK_STUCK_MS }
+}
+
+/**
+ * AQU-2253 (review, Nov 9): can this browser play a stream (HLS) with its own
+ * player? Safari can; Chromium and Firefox cannot, and a streamed film handed
+ * to their own player does not play at all.
+ */
+export function browserPlaysHls(video: { canPlayType?: (type: string) => string }): boolean {
+  try {
+    return Boolean(video.canPlayType?.("application/vnd.apple.mpegurl"))
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -214,7 +266,9 @@ export function stallStep(
   // away rather than firing on the very next sample.
   const next = { ...base, frozenTicks: 0, healthyTicks: 0, stalled: true }
   if (state.gaveUp) return { state: next, action: { kind: "none" } }
-  const rung = RUNGS[state.spent]
-  if (rung) return { state: { ...next, spent: state.spent + 1 }, action: { kind: "recover", rung } }
+  // AQU-2253 (review, Nov 9): never a re-seek on top of a seek in flight.
+  const spent = sample.seekStuck && RUNGS[state.spent] === "nudge" ? state.spent + 1 : state.spent
+  const rung = RUNGS[spent]
+  if (rung) return { state: { ...next, spent: spent + 1 }, action: { kind: "recover", rung } }
   return { state: { ...next, gaveUp: true }, action: { kind: "giveUp" } }
 }

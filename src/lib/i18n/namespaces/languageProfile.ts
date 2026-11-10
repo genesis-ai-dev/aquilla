@@ -85,6 +85,15 @@ export const languageProfile = defineNamespace({
     "languageProfile.numberWords.words": "Numbers and words",
     "languageProfile.numberWords.wordsHint": "One on each line, as number = word. For example, 12 = twelve",
 
+    // ── Number separators (AQU-2430) ──
+    "languageProfile.numberFormat.title": "Number separators",
+    "languageProfile.numberFormat.description":
+      "The characters your translation groups thousands with and marks a decimal fraction with. Leave this alone unless your language writes them differently from the standard for it.",
+    "languageProfile.numberFormat.example": "German groups with a dot and fractions with a comma: 1.234,56",
+    "languageProfile.numberFormat.group": "Thousands separator",
+    "languageProfile.numberFormat.decimal": "Decimal mark",
+    "languageProfile.numberFormat.hint": "Type the character itself. A space counts.",
+
     // ── Kin terms ──
     "languageProfile.kinTerms.title": "Kin terms",
     "languageProfile.kinTerms.description": "Whether words for brother, sister and other relatives say who is older.",
@@ -242,6 +251,24 @@ export const languageProfile = defineNamespace({
       "languageProfile.numberWords.description": { description: "Explains the row." },
       "languageProfile.numberWords.example": {
         description: "Example: digits and the words for them. Translate the words; keep the digits.",
+      },
+      "languageProfile.numberFormat.title": {
+        description: "Row title: the characters used inside a number. Short.",
+        maxLength: 30,
+      },
+      "languageProfile.numberFormat.description": { description: "Explains the row." },
+      "languageProfile.numberFormat.example": {
+        description:
+          "Example naming German's separators. Translate the sentence; keep the number 1.234,56 as written.",
+      },
+      "languageProfile.numberFormat.group": {
+        description: "Field label: the character between groups of three digits, e.g. the comma in 1,000.",
+      },
+      "languageProfile.numberFormat.decimal": {
+        description: "Field label: the character before the fraction, e.g. the dot in 3.5.",
+      },
+      "languageProfile.numberFormat.hint": {
+        description: "Hint under both fields: type the character, and a space is a valid answer.",
       },
       "languageProfile.numberWords.source": { description: "Label of a choice between the two options below." },
       "languageProfile.numberWords.cldr": {

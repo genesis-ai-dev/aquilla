@@ -1,10 +1,24 @@
-import type { SandboxLike } from "./sandbox"
+import type { SandboxLike, SandboxRunResult } from "./sandbox"
 
 /** stdout/stderr are each capped at 64KB (contract §1). */
 export const OUTPUT_CAP_BYTES = 64 * 1024
 /** Default / max execution timeout (contract §1). */
 export const DEFAULT_TIMEOUT_MS = 60_000
 export const MAX_TIMEOUT_MS = 300_000
+
+/**
+ * The container enforces the deadline itself: the code runs under GNU
+ * `timeout` (container-exec.ts), which stops it and everything it started and
+ * reports a `TimeoutError`. The Worker-side race in `execCode` is only a
+ * backstop for a container or RPC that hangs, so it allows for the cold start a
+ * first `/exec` pays before the deadline even begins. The allowance is bounded
+ * by the timeout itself so a 20 ms test timeout still fails fast.
+ */
+export const START_GRACE_MS = 30_000
+
+export function backstopMs(timeoutMs: number): number {
+  return timeoutMs + Math.min(timeoutMs, START_GRACE_MS)
+}
 
 export interface ExecInput {
   language: "js" | "python"
@@ -59,50 +73,55 @@ function pickResultJson(results: Array<Record<string, unknown>>): string | undef
 
 /**
  * Run js/python in the sandbox, shaping the interpreter result to the wire
- * contract with output caps and timeout semantics. On timeout the container
- * signal fires and we return `{ ok: false, stderr: "timeout" }`.
+ * contract with output caps and timeout semantics. A run the container stopped
+ * at its deadline comes back as `{ ok: false, stderr: "timeout" }` with
+ * whatever it printed first; a hung container hits the backstop with no output.
  */
 export async function execCode(sandbox: SandboxLike, input: ExecInput): Promise<ExecOutput> {
   const timeout = clampTimeout(input.timeoutMs)
   const language = input.language === "python" ? "python" : "javascript"
   const started = Date.now()
 
-  const controller = new AbortController()
-  const timer = new Promise<"__timeout__">((resolve) => {
-    setTimeout(() => {
-      controller.abort()
-      resolve("__timeout__")
-    }, timeout)
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const backstop = new Promise<"__timeout__">((resolve) => {
+    timer = setTimeout(() => resolve("__timeout__"), backstopMs(timeout))
   })
 
-  let result: Awaited<ReturnType<SandboxLike["runCode"]>> | "__timeout__"
+  let result: SandboxRunResult | "__timeout__"
   try {
-    result = await Promise.race([
-      sandbox.runCode(input.code, { language, timeout, signal: controller.signal }),
-      timer,
-    ])
+    result = await Promise.race([sandbox.runCode(input.code, { language, timeout }), backstop])
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     const durationMs = Date.now() - started
     if (/timeout|abort/i.test(message)) return { ok: false, stdout: "", stderr: "timeout", durationMs }
     return { ok: false, stdout: "", stderr: message, durationMs }
+  } finally {
+    clearTimeout(timer)
   }
 
   if (result === "__timeout__") {
     return { ok: false, stdout: "", stderr: "timeout", durationMs: Date.now() - started }
   }
 
-  // SWARM-TODO(aqu-agent): joins interpreter output chunks with "" assuming
-  // each OutputMessage already carries its own newline. If live-container
-  // output looks concatenated across print() calls, switch to "\n".
-  const stdoutRaw = (result.logs?.stdout ?? []).join("")
+  // The Durable Object hands back one string per stream (the whole captured
+  // output), so joining with "" is exact; the 0.x interpreter's per-message
+  // chunks carried their own newlines and joined the same way.
+  const stdout = cap((result.logs?.stdout ?? []).join(""))
+
+  if (result.error?.name === "TimeoutError") {
+    return {
+      ok: false,
+      stdout: stdout.value,
+      stderr: "timeout",
+      durationMs: Date.now() - started,
+      truncated: stdout.truncated,
+    }
+  }
+
   const errorTail = result.error
     ? `${result.error.name}: ${result.error.message}\n${(result.error.traceback ?? []).join("\n")}`
     : ""
-  const stderrRaw = (result.logs?.stderr ?? []).join("") + errorTail
-
-  const stdout = cap(stdoutRaw)
-  const stderr = cap(stderrRaw)
+  const stderr = cap((result.logs?.stderr ?? []).join("") + errorTail)
 
   return {
     ok: !result.error,

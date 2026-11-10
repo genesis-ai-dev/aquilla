@@ -70,9 +70,11 @@ export interface AdmitRequest {
 }
 
 export const DEFAULT_LIMITS: PoolLimits = {
-  // Matches `max_instances` in wrangler.toml. Kept as an explicit number rather
-  // than read from the container config because the Worker has no way to query
-  // it at runtime — if one moves, move the other.
+  // The `durable_object` container scheduling policy (Sandbox SDK 1.x) has no
+  // `max_instances`, so this ledger is the only cap on concurrent containers;
+  // running instances also count toward the account's container limits. Sized
+  // to the old `max_instances = 20`; SANDBOX_MAX_TOTAL in wrangler.toml sets
+  // it per environment.
   maxTotal: 20,
   // Three concurrent containers is more than any single UI flow needs (an agent
   // run plus a couple of imports) and still leaves 17 slots for everyone else

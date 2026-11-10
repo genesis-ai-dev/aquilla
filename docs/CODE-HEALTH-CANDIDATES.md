@@ -188,17 +188,22 @@ reopen without a *new* `rules.*` orphan.
 ## `terminology.*` i18n keys — orphaned by the `TerminologyPage.tsx` deletion (2026-09-21)
 
 > **Status: `terminology.page.*` (16 keys) swept on 2026-10-16, `candidates.*` (11) on
-> 2026-10-19, `libraryStats.*` (7) + `conceptDialog.*` (2) on 2026-10-26** — see those runs'
-> entries at the bottom of this file for the proof and the per-slice recipe. **15 of the 51
-> remain**: `reviewQueue.*` (6), `importDialog.*` (6), `common.*` (3), plus the 6
+> 2026-10-19, `libraryStats.*` (7) + `conceptDialog.*` (2) on 2026-10-26, `reviewQueue.*` (6)
+> on 2026-11-09** — see those runs' entries at the bottom of this file for the proof and the
+> per-slice recipe. **9 of the 51 remain**: `importDialog.*` (6), `common.*` (3), plus the 6
 > already-orphaned keys listed below. Three of the four `duplicate-exceptions.ts` entries
 > went with the 2026-10-26 slice; **the fourth, `terminology.common.statusLabel`, is still
-> there and its key is still orphaned**, so the remaining slice still has to touch that file.
+> there and its key is still orphaned**, so the `common.*` slice still has to touch that file
+> (its pair, `org.orgHome.projectsPanel.statusLabel`, carries no exception of its own —
+> re-confirmed 2026-11-09 — so that is the two-key check the 2026-10-26 entry predicted).
 > The swept lists below are kept as the record of what went; do not re-derive them. Note
 > `candidates.ngramLength` was NOT one of the 11 — it is live in `CellTranscribeBadge.tsx`;
-> see the 2026-10-19 entry. **The catalog is 11 locales now, not 9** (`es`, `pt` joined), so
-> budget ~30 lines per key, not ~25 — the 15-key remainder is ~450 lines and wants splitting
-> in two.
+> see the 2026-10-19 entry. **The catalog is 18 locales now, not 11** (`fr`, `ru`, `sw`,
+> `hi`, `ha`, `bn`, `am`, `pa`, `id` joined since 2026-10-26), so budget **~40 lines per
+> key**, not ~30 — `importDialog.*` is ~240 lines and `common.*` ~130, which is why they
+> must stay two separate runs. Every slice touches **20 files** minimum (1 namespace + 18
+> locales + `source-hashes.json`) regardless of key count; that is catalog breadth, and the
+> line budget is the binding one.
 
 - **Found**: deleting `TerminologyPage.tsx` and the modules only it reached (see the
   component-cleanup entry above) left 65 of the 239 keys in
@@ -3663,3 +3668,145 @@ Four steps, three of them new to this ledger. Worth following verbatim next run.
   load is unlikely to be the whole story.
 - **Proof needed**: a `/diagnose` pass on one variant with the trace on
   (`--trace on`), which this routine deliberately leaves to a human or a debug run.
+## 2026-11-09 — dead-key run: the `terminology.reviewQueue.*` slice (6 of the queued 15)
+
+**Done this run** (theme 1, dead-code deletion applied to the message catalog; 20 files, no
+test file touched): the 6 orphaned keys under `terminology.reviewQueue.*` — `approveAria`,
+`rejectAria`, `readOnlyTooltip`, `emptyTitle`, `emptyDescription`, `awaitingReviewCount` —
+orphaned since the 2026-09-21 deletion of `TerminologyReviewQueue.tsx`. **9 of the 15
+remain**: `importDialog.*` (6) and `common.*` (3, including the one
+`duplicate-exceptions.ts` entry still outstanding), plus the 6 already-orphaned keys the
+2026-09-21 plan entry lists separately.
+
+- **The `── TerminologyReviewQueue.tsx ──` section header went whole**, section and all —
+  every key under it was in the slice, so no survivor needed re-pointing (the 2026-10-26
+  precedent, not the `rules.ts` re-point one). The inline `// "Read-only" permission badge →
+  common.readOnly (identical text)` note above `readOnlyTooltip` went with it.
+- **`duplicate-exceptions.ts` is untouched this slice.** None of the 6 strings collides with
+  anything in the catalog — simulated, not argued (table below). The one exception the
+  2026-09-21 plan still owes (`terminology.common.statusLabel`, paired with
+  `org.orgHome.projectsPanel.statusLabel`, which carries no exception of its own) belongs to
+  the `common.*` slice, not this one.
+- **3 of the 6 keys carry a per-key `context.keys` entry** (`approveAria`, `rejectAria`,
+  `awaitingReviewCount` — the two `{term}` placeholder keys and the plural). The other three
+  are placeholder-free plain strings that inherit the namespace `_context`. This again
+  confirms the 2026-10-26 warning: **the per-key context-entry ratio in this namespace is not
+  predictable — find the entries, don't assume one per key.**
+- **The catalog is 18 locales now, not 11.** `fr`, `ru`, `sw`, `hi`, `ha`, `bn`, `am`, `pa`
+  and `id` joined `src/lib/i18n/messages/` since the 2026-10-26 slice (`am ar bn es fr ha hi
+  id ms my pa pt ru sw th ur zh-Hans zh-Hant`), so one key now costs **36** generated lines
+  (18 catalog + 18 `source-hashes.json`) instead of 22, and the per-key cost is **~40 lines**,
+  not the ~30 the 2026-10-26 entry measured. Consequences for the two remaining slices:
+  - **`importDialog.*` (6 keys) ≈ 240 lines and `common.*` (3 keys) ≈ 130 lines — they must
+    stay two separate runs.** Taken together they are ~370 lines, well over budget.
+  - **Every i18n key slice now touches 20 files minimum** (1 namespace + 18 locales +
+    `source-hashes.json`), over this routine's ≤~8-file guideline no matter how few keys it
+    drops. That is catalog breadth, not scope creep; the line budget is the binding one.
+    A future run should say so up front rather than re-discovering it.
+
+**Proof** (all of it run, none argued):
+
+- **Orphan status verified per key**, with the recipe the four prior slices used: the full
+  dotted key, plus the bare suffix and the `reviewQueue.`-prefixed suffix in all three quote
+  styles, across `src e2e scripts worker auth-worker/src sync-worker/src agent-worker/src
+  parity packages` outside `src/lib/i18n/`. All 6 miss on every form. The only suffix hit in
+  the whole sweep was `` `managed` `` — two prose comments about a *variable* named `managed`
+  (`EquivalentsPanel.tsx:21`, `lib/terminology/candidates.ts:186`), which is why the bare
+  suffix has to be eyeballed rather than counted. No `` `terminology.…${ `` template exists
+  anywhere, so a literal search is sufficient.
+- **The English strings themselves are unreferenced too**, not just the keys: "Approve
+  concept", "Reject concept", "approve/reject concepts", "No concepts awaiting review",
+  "promoted from candidates will appear", "awaiting review" over the same roots plus `docs/`.
+  The only hits are `docs/swarm/UI-QA-PUNCHLIST.md:21` (a dated PASS log for AQU-327/328/329,
+  a historical record — left alone) and `living-memory/StyleChecks` (its own unrelated
+  "1 awaiting review", which does not use this key — confirmed: zero `awaitingReviewCount`
+  mentions in that component).
+- **`reviewQueue` as a bare identifier is live elsewhere and is not these keys**: it is a
+  `ReactNode` prop on `living-memory/StyleChecks.tsx:92`, read by `RulesSurface.tsx:584`. A
+  `reviewQueue` grep is therefore not proof of key liveness in either direction.
+- **The i18n hard guards were simulated before the edit** — a scratchpad `tsx` script
+  importing the real `NAMESPACES`, `DUPLICATE_EXCEPTIONS` and `plurals` and re-implementing
+  `no-duplicates.test.ts`'s three hard assertions against the catalog with the 6 keys removed
+  **in memory**:
+
+  | | before | after |
+  | --- | --- | --- |
+  | catalog keys (plural forms flattened) | 9711 | 9705 |
+  | unexcused duplicate groups | 344 | **344** |
+  | `DUPLICATE_EXCEPTIONS` entries | 126 | **126** |
+  | exceptions for a missing key | 0 | **0** |
+  | exceptions whose key no longer collides | 0 | **0** |
+  | groups left with ≥2 unexcused keys beside an excused one | 0 | **0** |
+
+  **None of the 6 is in a collision group at all** (the simulation prints each doomed key's
+  group and printed nothing), so the warning count does not move. `LEGACY_CONTEXT_GAPS` is
+  still `[]` on trunk, so there was no carve-out to re-check.
+- **No surviving context entry cites a deleted key**, and the whole `terminology` namespace
+  still declares no `screenshot`, so no screenshot surface loses its only linker
+  (`screenshot-manifest.ts` / `screenshots.ts` mention neither the keys nor a review-queue
+  surface).
+- **`source-hashes.json` was rewritten with Python's `json.dumps(…, indent=2,
+  ensure_ascii=False) + "\n"`, asserted byte-identical to the sidecar's own writer** on the
+  untouched 7,845,208-byte file **before any key was dropped** (an assertion inside the strip
+  script, not an eyeball) — `scripts/i18n-catalog.ts:132` writes
+  `JSON.stringify(all, null, 2) + "\n"`. All 18 locales carried all 6 keys, so the diff is a
+  clean 108 deleted lines there and 108 in the catalogs, zero added.
+- **Every locale line was proven self-contained before deleting it**: a regex asserted each
+  of the 18 catalogs holds exactly 6 matching lines, each a complete `"key": value,` on one
+  line (the plural's `{"forms":{…},"countVar":"count"}` included), so a line-filter cannot
+  truncate a multi-line value. The namespace edits are two exact-match block replacements
+  with `count == 1` assertions, then an assertion that `terminology.reviewQueue.` no longer
+  appears in the file at all.
+- **`src/lib/i18n/` is not an input to the shipped Door43 importer bundle** — the 2026-11-06
+  trap re-checked against `shared/tools/first-party/door43-importer.bundle.ts`, which
+  mentions no i18n path, so no generated artifact needed rebuilding.
+
+### Baseline 2026-11-09 (`origin/dev` `5ab9c702`) — one pre-existing failure, reproducible
+
+| gate | result |
+| --- | --- |
+| `pnpm lint` | **exit 0** — 971 problems, 0 errors |
+| `pnpm build` | **exit 0** (`tsc -b` + `vite build` + brand check) |
+| `pnpm test` | **exit 1** — 1 failed / 2359 passed / 2 skipped (2362 files); 1 failed / 27149 passed / 1 expected fail / 23 skipped (27174 tests), 1460s |
+
+The final gate reproduced those numbers **exactly** — same file counts, same test counts,
+same single failure.
+
+**`scripts/release-cut.test.ts > buildReleaseBranch against a scratch repo > fails loud when
+the pick cannot commit, and leaves nothing in progress` — pre-existing, out of scope, and
+NOT a flake.** It sets `commit.gpgsign=true` with `gpg.program` pointed at a non-existent
+binary and expects `buildReleaseBranch()` to throw; in a cloud sandbox the commit succeeds
+anyway, so `expect(…).toThrow()` gets `undefined`. Reproduced in isolation on a clean tree
+(`pnpm test scripts/release-cut.test.ts` → 1 failed / 16 passed), so a future run should
+expect a red `pnpm test` on trunk from this one test and re-baseline rather than assume
+green. That file is frozen by the routine's own rule. Listed for Ryder rather than filed:
+it is a test-environment assumption, not a product bug, and the fix (assert on the signing
+precondition, or skip when git will not sign) has to touch the test file.
+
+**Two sandbox-only environment findings from this run**, recorded because each one presents
+as a product bug and cost this run three failed e2e attempts to tell apart from one:
+
+- **`pnpm test:e2e:smoke` cannot boot in a cloud sandbox without three fixes**, none of them
+  repo changes: (1) the harness resolves `/opt/pw-browsers/chromium-1248` while the image
+  ships `chromium-1243` — symlink it plus the matching `chromium_headless_shell`;
+  (2) specs that record video want `/opt/pw-browsers/ffmpeg-1013/ffmpeg-linux` against a
+  shipped `ffmpeg-1011` — this accounted for **7 of 10** failures in the first real run, all
+  in auth/session/onboarding specs, surfacing as `browserContext.newPage: Executable doesn't
+  exist`, which reads like an auth regression and is not one; (3) no Docker, so start the
+  image's own Postgres 16 (`pg_ctlcluster 16 main start`), create the `aquilla` superuser and
+  export `E2E_PG_ADMIN_URL` — the repo already documents this path
+  (`scripts/e2e-pg-native.sh`, AQU-1820).
+- **`auth-worker`'s own `npm ci` fails on a peer conflict** and only succeeds with
+  `--legacy-peer-deps`: its lockfile pins `vitest@5` while
+  `@cloudflare/vitest-pool-workers@0.23.0` peers on `vitest@^4`. Pre-existing on `dev`,
+  unrelated to this diff, and it blocks the e2e stack's identity worker from booting at all
+  (the mock legacy-migration service dies on `Cannot find package 'bcryptjs'`). Worth a
+  ticket if a human confirms CI is not quietly papering over it.
+
+**The 3 smoke failures that survived all three fixes are also pre-existing**, proven rather
+than argued: `editor/import-and-edit.smoke.spec.ts:339` ("alice imports YouTube srt/vtt/sbv
+captions, persists across reload, and downloads original") times out at line 365 waiting for
+the `Play all` media-playback button. `origin/dev` was checked out detached in the same
+sandbox and the same spec run against it — **the same 3 fail with the same timeout at the
+same line** (3 failed / 6 passed). Shards 2 and 3 of the final smoke run were fully green
+(37 and 33 passed); shard 1 was 42 passed / 3 failed.

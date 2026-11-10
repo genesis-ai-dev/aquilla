@@ -37,6 +37,15 @@
  *     holds the wordlist, the sound-alike fold and the suspicion rules; this
  *     module only scopes them to the checked cells.
  *
+ *  5. Quotation continuity (AQU-1733) — a quotation that opens in one cell
+ *     and is never closed. File-scoped by necessity: each cell on its own
+ *     looks balanced-enough, and the per-cell `unpaired-quotes` check goes
+ *     quiet whenever the source carries the same imbalance, which a source
+ *     that marks no quotations always does. The marks come from the Language
+ *     profile's `quoteMarks` slot, or are inferred from the checked cells'
+ *     own text, so the check needs no configuration and no feature flag. The
+ *     findings join the rule pass under the `unpaired-quotes` built-in.
+ *
  * Glosser drift is deferred (stretch goal in the spec): the bt-glosser builds
  * its alignment model from validated pairs at run time and a deterministic
  * "drift" verdict isn't specified yet.
@@ -48,6 +57,9 @@ import type { TranslationRule, RuleInfraction } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { checkRulesForCell, type CellCheckContext } from "@/lib/rules/rule-engine"
 import { bibleScanInfractions, type BibleFileScanInput } from "@/lib/rules/bible-check-rules"
+import { quoteContinuityCells, reconcileQuoteInfractions } from "@/lib/rules/quote-continuity-rules"
+import { inferQuoteMarks } from "../../../db/shared/quote-marks-inference"
+import type { LanguageProfile, QuoteMarksProfile } from "../../../db/shared/language-profile"
 import { semanticSourceText } from "@/lib/semantic-source-text"
 import {
   findMixedCaseWords,
@@ -392,6 +404,32 @@ export interface CheckRunInput {
    * reviewer has already approved (their findings are cleared outright).
    */
   spelling?: SpellingScanOptions
+  /**
+   * AQU-1733: the project's Language profile. Its `quoteMarks` slot decides
+   * the marks the cross-cell quotation pass reads; with the slot empty the
+   * pass infers them from the checked cells' own text, so a project that has
+   * never filled the slot still gets the check.
+   */
+  languageProfile?: LanguageProfile | null
+}
+
+/**
+ * The quotation marks the cross-cell pass reads: the project's recorded system
+ * if it has one, otherwise the system its own text shows. Validated cells
+ * decide when any of them quote anything — the same preference
+ * `inferQuoteMarks` applies on the Language profile card. Null when the slot
+ * is empty AND nothing in the file quotes anything: there is no system to
+ * check against, and a guessed one would fire on marks the project never used.
+ */
+export function resolveQuoteMarks(input: CheckRunInput): QuoteMarksProfile | null {
+  const slot = input.languageProfile?.quoteMarks
+  if (slot && slot.levels.length > 0) return slot
+  const translated = input.cells.filter((c) => c.status !== "empty" && c.translated.trim().length > 0)
+  if (translated.length === 0) return null
+  return inferQuoteMarks(
+    translated.map((c) => c.translated),
+    { validatedTexts: translated.filter((c) => c.status === "validated").map((c) => c.translated) },
+  )
 }
 
 const CHUNK_SIZE = 100
@@ -412,7 +450,7 @@ export async function runDeterministicCheck(
   const activeConcepts = input.concepts.filter((c) => c.status === "active")
 
   // Rule pass, chunked.
-  const infractions: RuleInfraction[] = []
+  let infractions: RuleInfraction[] = []
   for (let i = 0; i < input.cells.length; i += CHUNK_SIZE) {
     const chunk = input.cells.slice(i, i + CHUNK_SIZE)
     for (const cell of chunk) {
@@ -422,6 +460,21 @@ export async function runDeterministicCheck(
   }
   // AQU-1697: the Bible data scans that need the whole file in order.
   infractions.push(...bibleScanInfractions(input.cells, enabledRules, input.bibleScan))
+  // AQU-1733: the quotation a cell opens and no later cell closes — and, the
+  // other way round, the per-cell `unpaired-quotes` alarm on a verse that
+  // holds only a closing mark, which the file pairs perfectly well. Both need
+  // the whole file in order.
+  // Reading the project's quotation system costs a pass over the file's text,
+  // so yield first, as the term and capitalization passes below do. Reassigned
+  // rather than spliced: spreading a whole Bible's infractions into `push`
+  // would be one call with that many arguments.
+  await nextTick()
+  infractions = reconcileQuoteInfractions(
+    quoteContinuityCells(input.cells),
+    enabledRules,
+    resolveQuoteMarks(input),
+    infractions,
+  )
 
   // Term pass (regex over short strings; one pass is cheap, but yield first
   // so the rule pass's last chunk paints).

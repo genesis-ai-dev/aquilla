@@ -54,6 +54,10 @@ const rule: TranslationRule = {
   severity: "major",
   enabled: true,
   source: "manual",
+  // AQU-2350: a real check, because the drawer now asks whether the rule
+  // reaches a cell before calling it compliant — a `check`-less fixture would
+  // only prove the predicate was never consulted.
+  check: { type: "source-requires-target", sourcePattern: "God", targetPattern: "Allah" },
 } as unknown as TranslationRule
 
 const project = { id: "p1" } as unknown as ProjectRecord
@@ -64,7 +68,10 @@ const settings = { provider: "frontier", endpoint: "", model: "", maxTokens: 102
 const session = { jwt: "jwt-abc" } as unknown as FrontierSession
 
 const breaking = [makeCell("c1", "God said", "allah said"), makeCell("c2", "God saw", "allah saw")]
-const passing = makeCell("c3", "He went", "he went")
+const passing = makeCell("c3", "God is good", "Allah is good")
+// AQU-2350: the rule has nothing to say about this cell — its source never
+// mentions "God" — so it belongs in neither list.
+const outOfScope = makeCell("c4", "He went", "he went")
 
 const infractions: RuleInfraction[] = [
   { ruleId: rule.id, cellId: "c1" } as unknown as RuleInfraction,
@@ -80,7 +87,7 @@ function renderDrawer(props: Partial<React.ComponentProps<typeof RuleDrawer>> = 
       <RuleDrawer
         rule={rule}
         infractions={infractions}
-        cells={[...breaking, passing]}
+        cells={[...breaking, passing, outOfScope]}
         onClose={vi.fn()}
         onNavigateToCell={onNavigateToCell}
         project={project}
@@ -244,9 +251,47 @@ describe("RuleDrawer — no regression on a rule nothing breaks (AQU-1805)", () 
 
   it("still lists the cells that follow the rule", () => {
     renderDrawer({ infractions: [] })
-    // With nothing flagged, every non-empty cell passes.
+    // With nothing flagged, every non-empty cell the rule REACHES passes.
     for (const id of ["c1", "c2", "c3"]) {
       expect(screen.getByLabelText(en("rules.drawer.openCellAriaLabel", { cellId: id }))).toBeTruthy()
     }
+    expect(screen.queryByLabelText(en("rules.drawer.openCellAriaLabel", { cellId: "c4" }))).toBeNull()
+  })
+})
+
+// AQU-2350 (Joel, screenshot 2026-11-02): the term panel listed cells whose
+// source never contains the term under "Following this rule" — a Brazilian
+// Portuguese project showed "Advent Season: What Is It…" as following a
+// `Christian → Cristão` rule. `checkRulesForCell` is silent both for a cell
+// that satisfies a rule and for one the rule never reached, so the drawer's
+// everything-not-breaking partition could not tell them apart.
+describe("RuleDrawer — only cells the rule reaches count as following it (AQU-2350)", () => {
+  it("leaves a cell the rule never reaches out of both lists", () => {
+    renderDrawer()
+    expect(screen.queryByLabelText(en("rules.drawer.openCellAriaLabel", { cellId: "c4" }))).toBeNull()
+    // and the cell that really does demonstrate the rule is still there
+    expect(screen.getByLabelText(en("rules.drawer.openCellAriaLabel", { cellId: "c3" }))).toBeTruthy()
+  })
+
+  it("counts both headers off the filtered lists", () => {
+    renderDrawer()
+    expect(screen.getByText(en("rules.drawer.followingThisRule", { count: "1" }))).toBeTruthy()
+    expect(screen.getByText(en("rules.drawer.breakingThisRule", { count: 2 }))).toBeTruthy()
+  })
+
+  it("keeps the breaking list exactly as flagged", () => {
+    renderDrawer()
+    for (const id of ["c1", "c2"]) {
+      expect(screen.getByLabelText(en("rules.drawer.openCellAriaLabel", { cellId: id }))).toBeTruthy()
+    }
+  })
+
+  it("does not hand vacuous cells to the batch fix as passing examples", async () => {
+    vi.mocked(requestBatchFix).mockResolvedValue({ kind: "none", reason: "nothing to do" })
+    renderDrawer()
+    fireEvent.click(screen.getByRole("button", { name: en("rules.surface.tryToFixAllButton") }))
+    await waitFor(() => expect(requestBatchFix).toHaveBeenCalled())
+    const call = vi.mocked(requestBatchFix).mock.calls[0][0]
+    expect(call.passingCells.map((c) => c.id)).toEqual(["c3"])
   })
 })

@@ -20,6 +20,8 @@
 import { describe, it, expect, beforeEach } from "vitest"
 import { handleExternalReadRequest } from "../external/read-routes"
 import { mintApiToken } from "../../../db/shared/api-credentials"
+import { loadTranslationInstructions } from "../../../db/shared/load-translation-instructions"
+import { instructionsPromptBlock } from "../../../db/shared/translation-instructions"
 import { makeTestDb, type TestDb } from "./helpers/pg-test-db"
 import { buildPrompt, DEFAULT_SYSTEM_PROMPT, type ChatMessage } from "../../../src/lib/completion/prompt-build"
 import { compileConceptsToRulesCore } from "../../../src/lib/terminology/compile-core"
@@ -329,6 +331,29 @@ describe("external prompt preview", () => {
         "Project instructions (follow these):\nAimed at oral communities.\n\nTranslate tersely.",
       )
       expect(body.messages[0].content.split("Translate tersely.").length - 1).toBe(1)
+    })
+
+    // AQU-2422: the preview must not resolve a `systemPrompt` from a source
+    // the real draft call cannot see. It used to decide the top-level/nested
+    // fallback itself and hand `loadTranslationInstructions` a pre-chewed
+    // blob; the live drafting paths pass the blob raw, so the two could
+    // disagree. Both now go through `legacySystemPromptSetting` inside the
+    // loader — this pins the preview side of that (the draft side is pinned in
+    // auth-worker/src/__tests__/project-settings-drafting.test.ts).
+    it("resolves the same instructions as the draft path for a nested-only prompt", async () => {
+      await putSettings(testDb, "proj-a", {
+        sourceLanguage: "English",
+        targetLanguage: "French",
+        completionSettings: { systemPrompt: "Keep divine names as in the 1999 Bible." },
+      })
+      // Exactly what POST /api/v1/ai/agent/internal/draft-cells loads.
+      const draft = await loadTranslationInstructions(testDb.db, "proj-a")
+      expect(draft.stored).toBe(false)
+      expect(draft.text).toBe("Keep divine names as in the 1999 Bible.")
+
+      const { body } = await preview(testDb, token)
+      expect(body.parts.instructions).toBe(instructionsPromptBlock(draft.text))
+      expect(body.messages[0].content).toContain("Keep divine names as in the 1999 Bible.")
     })
 
     // AQU-2404: the role text is fixed, so a stored `systemPrompt` changes no

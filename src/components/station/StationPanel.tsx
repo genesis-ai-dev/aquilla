@@ -8,7 +8,7 @@
 // selection brings its own actions; the rest appears where and when it is
 // needed.
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react"
+import { useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react"
 import { AudioWaveform, Check, Undo2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { InfoReveal, InfoToggle, useInfoOpen } from "@/components/ui/info-tip"

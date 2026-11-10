@@ -30,7 +30,7 @@ import type { CellData } from "@/hooks/useCells"
 import { isHiddenCell } from "@/lib/cells/hidden"
 import { standInEstimator } from "./stand-in"
 import { isDefaultTrackSlot } from "./track-slots"
-import { storedRoomSec, type LineRoomChange } from "./line-room"
+import { roomMsToStore, storedRoomSec, type LineRoomChange } from "./line-room"
 
 /** A window on some clock, in seconds. */
 export interface Window {
@@ -1197,7 +1197,8 @@ export function roomsForMove(
     for (const line of run) {
       const by = Math.min(line.slotLenSec, close)
       if (by <= 0) continue
-      rooms.push({ cellId: line.cellId, roomMs: Math.max(0, Math.round((line.slotLenSec - by) * 1000)) })
+      // AQU-2432 (review, Nov 9): a sliver under MIN_ROOM_SEC is none.
+      rooms.push({ cellId: line.cellId, roomMs: roomMsToStore(Math.max(0, line.slotLenSec - by)) })
       close -= by
       if (close <= ROOM_EPS_SEC) break
     }
@@ -1210,8 +1211,11 @@ export function roomsForMove(
     const by = Math.min(natural - line.slotLenSec, give)
     if (by <= 0) continue
     const room = line.slotLenSec + by
-    // Back at its natural length: nothing is stored.
-    rooms.push({ cellId: line.cellId, roomMs: room >= natural - ROOM_EPS_SEC ? null : Math.round(room * 1000) })
+    // Back at its natural length: nothing is stored. AQU-2432 (review,
+    // Nov 9): a sliver under MIN_ROOM_SEC is none, and a line with none
+    // already is left as it is.
+    const roomMs = room >= natural - ROOM_EPS_SEC ? null : roomMsToStore(room)
+    if (!(roomMs === 0 && line.slotLenSec === 0)) rooms.push({ cellId: line.cellId, roomMs })
     give -= by
     if (give <= ROOM_EPS_SEC) break
   }

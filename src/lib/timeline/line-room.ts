@@ -42,10 +42,25 @@ export function lineRoomMsFromMetadata(
   return typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined
 }
 
-/** The line's stored room in seconds, or null when none is stored. */
+/**
+ * AQU-2432 (review, Nov 9): a room under this is NO room — what the marker
+ * calls it ("It has no room here"), so it is stored as 0 and read as 0. A drag
+ * that stopped a pixel short of closing the room left a few hundredths, which
+ * played a click of the line's original between the two takes.
+ */
+export const MIN_ROOM_SEC = 0.05
+
+/** A room as it is stored: whole ms, and none (0) under `MIN_ROOM_SEC`. */
+export function roomMsToStore(sec: number): number {
+  return sec < MIN_ROOM_SEC ? 0 : Math.round(sec * 1000)
+}
+
+/** The line's stored room in seconds, or null when none is stored. One under
+ *  `MIN_ROOM_SEC` (stored before that rule) reads as none: 0. */
 export function storedRoomSec(cell: Pick<CellData, "recordingsRoomMs">): number | null {
   const ms = cell.recordingsRoomMs
-  return typeof ms === "number" && Number.isFinite(ms) && ms >= 0 ? ms / 1000 : null
+  if (typeof ms !== "number" || !Number.isFinite(ms) || ms < 0) return null
+  return ms / 1000 < MIN_ROOM_SEC ? 0 : ms / 1000
 }
 
 /** One line's room as a move leaves it: ms, or null for its natural length

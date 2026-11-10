@@ -22,12 +22,12 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import type { CellData } from "@/hooks/useCells"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { LINE_MARKER_TAB_PX, type EmptyLineMarkerSpec } from "@/lib/timeline/line-markers"
+// AQU-2432 (review, Nov 9): under it a room is none, here and in the layout.
+import { MIN_ROOM_SEC } from "@/lib/timeline/line-room"
 import { TRACK_DASH_CLASS } from "@/lib/timeline/track-colors"
 import { parseScriptureReference } from "@/lib/scripture-reference"
 import { cn } from "@/lib/utils"
 
-/** A room under this reads "no room": it would print as 0.0 s. */
-const NO_ROOM_SEC = 0.05
 
 /** What the marker calls its line: its own label, its reference, else its
  *  number among the timeline's lines. */
@@ -64,7 +64,7 @@ export function EmptyLineMarker({
   const t = useT()
   const { cell, atPx, tabLeftPx, roomSec, position } = marker
   const line = markerLineName(cell, position, t)
-  const says = roomSec < NO_ROOM_SEC
+  const says = roomSec < MIN_ROOM_SEC
     ? t("editor.timeline.lineMarkerNoRoom", { line })
     : t("editor.timeline.lineMarkerNarrowRoom", { line, seconds: roomSec.toFixed(1) })
   return (

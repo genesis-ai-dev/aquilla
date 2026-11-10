@@ -483,6 +483,35 @@ describe("6. a line with an original to hear: a room shorter than the original c
     expect(l3.startSec).toBe(3.5)
   })
 
+  // AQU-2432 (review, Nov 9): the marker calls a room under 0.05 s "no room",
+  // so it is none — stored as 0 and read as 0 — and never a click of the
+  // line's original between the two takes.
+  it("a room of a few hundredths of a second is no room: it is stored as none, and read as none", () => {
+    const cells = [heard("l1", 0, 3, { take: { durationMs: 2_000 } }), heard("l2", 3, 7), heard("l3", 7, 9, { take: { durationMs: 2_000 } })]
+    const prog = buildProgramme(cells)
+    // l3's take is at 6; dragged to 2.01, a pixel short of closing l2's room.
+    expect(roomsForMove(prog, prog.slots[2], 6, 2.01)?.rooms).toEqual([{ cellId: "l2", roomMs: 0 }])
+    const old = [heard("l1", 0, 3, { take: { durationMs: 2_000 } }), heard("l2", 3, 7, { roomMs: 10 }), heard("l3", 7, 9, { take: { durationMs: 2_000 } })]
+    const [, l2, l3] = buildProgramme(old).slots
+    expect(l2.slotLenSec).toBe(0)
+    expect(l2.sourceWindow).toBeNull()
+    expect(l3.startSec).toBe(2)
+    // A room of 0.05 s or more is a room.
+    expect(buildProgramme(withRooms(cells, [{ cellId: "l2", roomMs: 50 }])).slots[1].slotLenSec).toBe(0.05)
+  })
+
+  it("giving back a few hundredths spread past the line before leaves no sliver of room on the one further back", () => {
+    const cells = [
+      bookLine("a", { take: { durationMs: 5_000 } }),
+      bookLine("b", { roomMs: 0 }),
+      bookLine("c", { roomMs: 0 }),
+      bookLine("d", { take: { durationMs: 6_000 } }),
+    ]
+    const prog = buildProgramme(cells, BOOK)
+    // d's take is at 5; dragged 4.02 s later: c gets its 4 s, b 0.02 s (none).
+    expect(roomsForMove(prog, prog.slots[3], 5, 9.02)?.rooms).toEqual([{ cellId: "c", roomMs: null }])
+  })
+
   it("with no room at all there is none of the original left to hear", () => {
     const cells = [heard("l1", 0, 3, { take: { durationMs: 2_000 } }), heard("l2", 3, 7, { roomMs: 0 }), heard("l3", 7, 9, { take: { durationMs: 2_000 } })]
     const [, l2] = buildProgramme(cells).slots

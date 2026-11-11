@@ -1,5 +1,5 @@
 import { sessionClaims as jwtClaims } from "./session-claims"
-import { orgInviteReturnTo } from "../../../shared/org-invite-return-to"
+import { passwordResetReturnTo } from "../../../shared/password-reset-return-to"
 // Workspace auth module — wraps the aquilla-identity (/api/v2/auth/*).
 //
 // History: this file previously fetched /api/v1/auth/* against the legacy
@@ -259,7 +259,7 @@ export async function requestPasswordReset(email: string, returnTo?: string): Pr
   const res = await fetch(`${AUTH_BASE}/api/v2/auth/password-reset/request`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, return_to: orgInviteReturnTo(returnTo) }),
+    body: JSON.stringify({ email, return_to: passwordResetReturnTo(returnTo) }),
   });
   if (!res.ok) {
     // AQU-820: dropped body.detail/body.error — showing it here would both
@@ -267,6 +267,15 @@ export async function requestPasswordReset(email: string, returnTo?: string): Pr
     // response that varies by whether the address has an account).
     throw new FrontierAuthError(t("auth.resetPassword.failedToSend"), res.status);
   }
+}
+
+/** Send a reset only to the authenticated account's server-stored address. */
+export async function requestAccountPasswordReset(jwt: string): Promise<void> {
+  const res = await fetch(`${AUTH_BASE}/api/v2/auth/me/password-reset/request`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${jwt}` },
+  });
+  if (!res.ok) throw new FrontierAuthError(t("auth.resetPassword.failedToSend"), res.status);
 }
 
 /**
@@ -418,7 +427,7 @@ export async function hydrateSessionEmails(): Promise<void> {
   await patchSessionEmails(updates);
 }
 
-async function finalizeSession(
+export async function finalizeSession(
   loginIdentifier: string,
   data: AuthResponse,
   emailHint?: string,

@@ -27,7 +27,7 @@ import {
 // email-verification tokens are bearer credentials of the same kind and had
 // no reason to be the only ones kept in plaintext at rest.
 import { sha256Hex } from "../../../db/shared/api-credentials"
-import { orgInviteReturnTo } from "../../../shared/org-invite-return-to"
+import { passwordResetReturnTo } from "../../../shared/password-reset-return-to"
 import {
   countRecentEvents,
   ipIdentifier,
@@ -132,7 +132,7 @@ interface ResetTokenRow {
   expires_at: string
 }
 
-function legacyD1Config(
+export function legacyD1Config(
   env: AuthHonoEnv["Bindings"],
 ): FrontierD1Config | null {
   if (String(env.LEGACY_USER_MIGRATION_ENABLED).toLowerCase() !== "true") {
@@ -175,7 +175,7 @@ function legacyMigrationRuntime(env: AuthHonoEnv["Bindings"]): LegacyMigrationRu
 
 /** AQU-2469: the sign-in / sign-up answer for an account dev does not admit.
  *  `detail` as well as `error`, because the SPA's sign-up path reads `detail`. */
-function devAccessRefusal(
+export function devAccessRefusal(
   c: Context<AuthHonoEnv>,
   reason: "not_listed" | "unavailable",
 ): Response {
@@ -1025,27 +1025,30 @@ auth.get("/me/analytics-consent", authMiddleware, async (c) => {
 auth.put("/me/analytics-consent", authMiddleware, zValidator("json", analyticsChoiceSchema), async (c) => {
   const user = c.get("user")
   const choice = c.req.valid("json")
-  const row = await c.env.AQUILLA_PG.prepare("SELECT preferences FROM users WHERE id = ?")
-    .bind(user.id).first<{ preferences: string }>()
-  if (!row) return c.json({ error: "user not found" }, 404)
-  const stored = parseStoredPreferences(row.preferences)
-  const current = parseAnalyticsDecision(stored[ANALYTICS_CONSENT_KEY])
-  if ((current?.revision ?? null) !== choice.expectedRevision) return c.json({ error: "choice changed; reload before confirming" }, 409)
   const decision = {
     allowed: choice.allowed, disclosureVersion: ANALYTICS_DISCLOSURE_VERSION,
     source: choice.source, decidedAt: new Date().toISOString(), revision: crypto.randomUUID(),
   }
-  // Compare the whole previously-read blob atomically. A concurrent preference
-  // write causes a conflict rather than silently overwriting any newer choice.
-  const nextPreferences = JSON.stringify({ ...stored, [ANALYTICS_CONSENT_KEY]: decision })
-  if (new TextEncoder().encode(nextPreferences).length > PREFERENCES_STORED_MAX_BYTES) return c.json({ error: "preferences are full" }, 413)
-  const updated = await c.env.AQUILLA_PG.prepare(
-    "UPDATE users SET preferences = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND preferences = ? RETURNING id",
-  ).bind(nextPreferences, user.id, row.preferences).first<{ id: number }>()
-  if (!updated) return c.json({ error: "preferences changed; reload before confirming" }, 409)
-  evictUserSessions(user.id)
-  c.header("Cache-Control", "no-store")
-  return c.json({ accountId: String(user.id), decision })
+  // Retry unrelated preference writes, but never overwrite a newer consent
+  // decision. Every attempt compares both the consent revision and full blob.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const row = await c.env.AQUILLA_PG.prepare("SELECT preferences FROM users WHERE id = ?")
+      .bind(user.id).first<{ preferences: string }>()
+    if (!row) return c.json({ error: "user not found" }, 404)
+    const stored = parseStoredPreferences(row.preferences)
+    const current = parseAnalyticsDecision(stored[ANALYTICS_CONSENT_KEY])
+    if ((current?.revision ?? null) !== choice.expectedRevision) return c.json({ error: "choice changed; reload before confirming" }, 409)
+    const nextPreferences = JSON.stringify({ ...stored, [ANALYTICS_CONSENT_KEY]: decision })
+    if (new TextEncoder().encode(nextPreferences).length > PREFERENCES_STORED_MAX_BYTES) return c.json({ error: "preferences are full" }, 413)
+    const updated = await c.env.AQUILLA_PG.prepare(
+      "UPDATE users SET preferences = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND preferences = ? RETURNING id",
+    ).bind(nextPreferences, user.id, row.preferences).first<{ id: number }>()
+    if (!updated) continue
+    evictUserSessions(user.id)
+    c.header("Cache-Control", "no-store")
+    return c.json({ accountId: String(user.id), decision })
+  }
+  return c.json({ error: "preferences changed; reload before confirming" }, 409)
 })
 
 const verifyEmailSchema = z.object({ token: z.string().min(8) })
@@ -1134,11 +1137,21 @@ function safeParseJson(raw: string): unknown {
   }
 }
 
-auth.post(
-  "/password-reset/request",
-  zValidator("json", passwordResetRequestSchema),
-  async (c) => {
-    const { email, return_to } = c.req.valid("json")
+auth.post("/password-reset/request", zValidator("json", passwordResetRequestSchema), async c => {
+  const { email, return_to } = c.req.valid("json")
+  return deliverPasswordReset(c, email, return_to)
+})
+
+// Settings never accepts a destination email from the client. Resolve the
+// selected authenticated account afresh, rather than trusting a JWT email claim.
+auth.post("/me/password-reset/request", authMiddleware, async c => {
+  const user = await c.env.AQUILLA_PG.prepare("SELECT email FROM users WHERE id=?")
+    .bind(c.get("user").id).first<{ email: string }>()
+  if (!user) return c.json({ error: "Unauthorized" }, 401)
+  return deliverPasswordReset(c, user.email, "/preferences/login-methods")
+})
+
+async function deliverPasswordReset(c: Context<AuthHonoEnv>, email: string, return_to?: string) {
     // The one response every outcome below returns. Whether the address is
     // registered, whether it was throttled, and whether the token mint or the
     // send failed must all be indistinguishable from here — see the
@@ -1247,7 +1260,7 @@ auth.post(
 
           const encodedUsername = encodeURIComponent(user.username)
           const baseUrl = c.env.BASE_URL || "https://aquilla.app"
-          const returnTo = orgInviteReturnTo(return_to)
+          const returnTo = passwordResetReturnTo(return_to)
           const resetUrl = `${baseUrl}/reset-password?token=${token}&username=${encodedUsername}`
             + (returnTo ? `&returnTo=${encodeURIComponent(returnTo)}` : "")
           // [Pen test] Auth & session mgmt (2026-07-20): a delivery failure here
@@ -1278,8 +1291,7 @@ auth.post(
     }
 
     return c.json(genericResponse)
-  },
-)
+}
 
 auth.post(
   "/password-reset/verify",

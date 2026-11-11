@@ -301,6 +301,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.share.laneChoiceLegend": "Language lanes",
     "projectSettings.share.laneChoiceAll": "Every current language lane",
     "projectSettings.share.laneChoiceSome": "Only selected language lanes",
+    "projectSettings.share.laneChoiceAllCurrent": "All current language lanes",
     "projectSettings.share.laneChoiceRequired": "Choose the language lanes before adding this person.",
     "projectSettings.share.laneChoiceLeadNote": "A maintainer sees every language lane.",
     "projectSettings.share.laneChoiceNoneNote":

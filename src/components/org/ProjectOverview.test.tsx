@@ -1838,7 +1838,7 @@ describe("ProjectOverview Members card (AQU-1171)", () => {
 
     await screen.findByRole("button", { name: "Open project" })
     expect(screen.queryByTestId("overview-members-card")).not.toBeInTheDocument()
-    expect(screen.queryByRole("heading", { name: "Team" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "Team assignments" })).not.toBeInTheDocument()
     expect(screen.queryByText(/maintainers & owners/i)).not.toBeInTheDocument()
   })
 
@@ -2190,7 +2190,7 @@ describe("ProjectOverview member activity detail (AQU-498)", () => {
     // to a below-floor viewer.
     expect(screen.queryByTestId("overview-team-card")).not.toBeInTheDocument()
     expect(screen.queryByTestId("overview-team-toggle")).not.toBeInTheDocument()
-    expect(screen.queryByRole("heading", { name: "Team" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "Team assignments" })).not.toBeInTheDocument()
   })
 })
 
@@ -2228,6 +2228,69 @@ describe("ProjectOverview Team card when the server refuses the read (AQU-1771)"
     renderOverview()
 
     expect(await screen.findByText("No open assignments in this project yet.")).toBeInTheDocument()
+  })
+})
+
+// AQU-2479: the card was titled "Team", so an empty assignment list read as
+// "this project has no team" — but access can arrive through an attached team
+// with nothing assigned yet, and Members showed those people the whole time.
+// The title must name what the card lists, and the empty state must point at
+// the roster rather than stand alone.
+describe("ProjectOverview Team card titling + empty state (AQU-2479)", () => {
+  const withFile = (level: number) =>
+    projectRecord({ level, files: [{ id: "f1", name: "GEN", type: "usfm", createdAt: "x", cellCount: 10 }] })
+
+  beforeEach(async () => {
+    const { getProjectTeamProgress } = await import("@/lib/sync/assignments")
+    vi.mocked(getProjectTeamProgress).mockResolvedValue({ roster: [], validations: [] })
+  })
+
+  it("titles the card for the assignments it lists, not for the roster", async () => {
+    useProject.mockReturnValue({ project: withFile(700), status: "ready", refresh })
+    renderOverview()
+
+    const card = await screen.findByTestId("overview-team-card")
+    expect(within(card).getByRole("heading", { name: "Team assignments" })).toBeInTheDocument()
+    // The bare "Team" title is what made the empty state read as "no team".
+    expect(within(card).queryByRole("heading", { name: "Team" })).not.toBeInTheDocument()
+  })
+
+  it("points the empty state at Members, and opens that card when followed", async () => {
+    useProject.mockReturnValue({ project: withFile(700), status: "ready", refresh })
+    renderOverview()
+
+    expect(await screen.findByText("No open assignments in this project yet.")).toBeInTheDocument()
+    const membersCard = await screen.findByTestId("overview-members-card")
+    expect(membersCard).toHaveAttribute("data-expanded", "false")
+
+    const pointer = screen.getByTestId("overview-team-empty-members")
+    expect(pointer).toHaveTextContent("See who has access under Members")
+    fireEvent.click(pointer)
+
+    expect(membersCard).toHaveAttribute("data-expanded", "true")
+    expect(screen.getByTestId("overview-members-toggle")).toHaveAttribute("aria-expanded", "true")
+  })
+
+  it("drops the pointer for a viewer with no Members card to be pointed at", async () => {
+    // Floors low enough that a project lead still sees the Team card, but 500
+    // is below the maintainer floor that renders Members — so the pointer
+    // would lead nowhere.
+    useProject.mockReturnValue({
+      project: withFile(500),
+      status: "ready",
+      refresh,
+      projectSettings: projectSettingsMock({ rosterOrg: ROLE.CONTRIBUTOR, progressOrg: ROLE.CONTRIBUTOR }),
+    })
+    useOrgSettingsMock.mockReturnValue({
+      ...defaultOrgSettingsMock(),
+      rosterViewMinRole: ROLE.CONTRIBUTOR,
+      memberProgressViewMinRole: ROLE.CONTRIBUTOR,
+    })
+    renderOverview()
+
+    expect(await screen.findByText("No open assignments in this project yet.")).toBeInTheDocument()
+    expect(screen.queryByTestId("overview-members-card")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("overview-team-empty-members")).not.toBeInTheDocument()
   })
 })
 
@@ -2340,7 +2403,7 @@ describe("ProjectOverview Team card collapse (AQU-1172)", () => {
     const card = await screen.findByTestId("overview-team-card")
     expect(card).toHaveAttribute("data-expanded", "true")
     expect(screen.getByTestId("overview-team-toggle")).toHaveAttribute("aria-expanded", "true")
-    expect(within(card).getByRole("heading", { name: "Team" })).toBeInTheDocument()
+    expect(within(card).getByRole("heading", { name: "Team assignments" })).toBeInTheDocument()
     expect(within(card).getByTestId("section-visibility-badge")).toBeInTheDocument()
     expect(await screen.findByRole("button", { name: "View activity for alice" })).toBeInTheDocument()
     expect(screen.getByText("alice")).toBeInTheDocument()
@@ -2349,7 +2412,7 @@ describe("ProjectOverview Team card collapse (AQU-1172)", () => {
 
     expect(card).toHaveAttribute("data-expanded", "false")
     expect(screen.getByTestId("overview-team-toggle")).toHaveAttribute("aria-expanded", "false")
-    expect(within(card).getByRole("heading", { name: "Team" })).toBeInTheDocument()
+    expect(within(card).getByRole("heading", { name: "Team assignments" })).toBeInTheDocument()
     expect(within(card).getByTestId("section-visibility-badge")).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "View activity for alice" })).not.toBeInTheDocument()
     expect(screen.queryByText("alice")).not.toBeInTheDocument()

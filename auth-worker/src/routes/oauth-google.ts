@@ -1,0 +1,295 @@
+import { googleLoginSchemaReady } from "../lib/google-login-schema"
+// Google is contacted only after the SPA's explicit button action. No GIS SDK,
+// cookies, automatic prompts, profile images, or provider tokens are persisted.
+import { Hono } from "hono"
+import { bodyLimit } from "hono/body-limit"
+import { zValidator } from "@hono/zod-validator"
+import { z } from "zod"
+import { createRemoteJWKSet, jwtVerify } from "jose"
+import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
+import { JWTService } from "../auth/jwt"
+import { sha256Hex } from "../../../db/shared/api-credentials"
+import { countRecentEvents, ipIdentifier, recordAuthEvent } from "../utils/rate-limit"
+import { verifyPassword } from "../utils/password"
+import { devAccessRefusal, legacyD1Config } from "./auth"
+import { hasLegacyIdentityCollision } from "../services/frontier-d1"
+import { withPostResponseDb } from "../lib/post-response-db"
+import { sendWelcomeEmail } from "../services/email"
+import { parseAdminEmails } from "../middleware/platform-admin"
+
+import { checkDevAccess } from "../services/dev-access"
+
+const googleKeys = createRemoteJWKSet(new URL("https://www.googleapis.com/oauth2/v3/certs"), { timeoutDuration: 10_000 })
+const random = () => Array.from(crypto.getRandomValues(new Uint8Array(32)), b => b.toString(16).padStart(2, "0")).join("")
+export async function pkceChallenge(verifier: string): Promise<string> {
+  const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)))
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
+}
+interface Flow { state_hash: string; browser_challenge: string; google_verifier: string; nonce: string; app_origin: string; subject: string; email: string; authoritative_email: boolean }
+interface Account { id: number; username: string; email: string; password_hash: string | null }
+const proof = z.object({ code: z.string().regex(/^[a-f0-9]{64}$/), verifier: z.string().regex(/^[a-f0-9]{64}$/) })
+const routes = new Hono<AuthHonoEnv>()
+routes.use("*", bodyLimit({ maxSize: 8192 }), async (c, next) => {
+  c.header("Cache-Control", "no-store")
+  c.header("Referrer-Policy", "no-referrer")
+  if (!["/config", "/methods", "/disconnect"].some(path => c.req.path.endsWith(path)) && !configured(c.env)) return c.json({ error: "unavailable" }, 503)
+  await next()
+})
+function configured(env: AuthHonoEnv["Bindings"]): boolean {
+  return !!(env.SECRET_KEY && env.ALGORITHM && env.GOOGLE_LOGIN_CLIENT_ID && env.GOOGLE_LOGIN_CLIENT_SECRET && env.GOOGLE_LOGIN_REDIRECT_URI && env.GOOGLE_LOGIN_APP_ORIGINS)
+}
+routes.get("/config", async c => {
+  if (!configured(c.env)) return c.json({ enabled: false })
+  if (!await googleLoginSchemaReady(c.env.AQUILLA_PG)) return c.json({ error: "unavailable" }, 503)
+  return c.json({ enabled: true })
+})
+// Account management never contacts Google merely to read connection status.
+routes.get("/methods", authMiddleware, async c => {
+  const user = c.get("user")
+  const row = await c.env.AQUILLA_PG.prepare(`SELECT email, password_hash IS NOT NULL AS password,
+    EXISTS(SELECT 1 FROM provider_identities p WHERE p.user_id=users.id AND p.provider='google') AS google
+    FROM users WHERE id=?`).bind(user.id).first<{ email: string; password: boolean; google: boolean }>()
+  if (!row) return c.json({ error: "unavailable" }, 401)
+  return c.json({ ...row, google_available: configured(c.env) })
+})
+const managementProof = z.object({ password: z.string().min(1).max(1024) })
+// Read the password fresh, not from the session cache. Both mutations also
+// compare its hash in their write to reject a concurrent password reset.
+async function managementAccount(c: import("hono").Context<AuthHonoEnv>) {
+  const user = c.get("user")
+  const key = `social-manage:${user.id}`
+  if (await countRecentEvents(c.env.AQUILLA_PG, "social_link", key, { onlyFailures: false }) >= 8) return null
+  await recordAuthEvent(c.env.AQUILLA_PG, "social_link", key, true)
+  return c.env.AQUILLA_PG.prepare("SELECT id, username, email, password_hash FROM users WHERE id=?").bind(user.id).first<Account>()
+}
+routes.post("/disconnect", authMiddleware, zValidator("json", managementProof), async c => {
+  const account = await managementAccount(c)
+  if (!account) return c.json({ error: "rate_limited" }, 429)
+  if (!account.password_hash) return c.json({ error: "last_login_method" }, 409)
+  if (!(await verifyPassword(c.req.valid("json").password, account.password_hash)).isValid) return c.json({ error: "invalid_password" }, 401)
+  const removed = await c.env.AQUILLA_PG.prepare(`DELETE FROM provider_identities p
+    WHERE p.provider='google' AND p.user_id=? AND EXISTS (
+      SELECT 1 FROM users u WHERE u.id=p.user_id AND u.password_hash=?
+    ) RETURNING user_id`).bind(account.id, account.password_hash).first()
+  if (!removed) return c.json({ error: "restart" }, 409)
+  return c.json({ disconnected: true })
+})
+routes.post("/connect", authMiddleware, zValidator("json", proof.merge(managementProof)), async c => {
+  const account = await managementAccount(c)
+  if (!account) return c.json({ error: "rate_limited" }, 429)
+  const { code, verifier, password } = c.req.valid("json")
+  if (!(await verifyPassword(password, account.password_hash)).isValid) return c.json({ error: "invalid_password" }, 401)
+  // The Google proof must belong to this selected account's email. Never adopt
+  // another account or create one as a side effect of managing login methods.
+  try {
+    const linked = await c.env.AQUILLA_PG.prepare(`WITH claimed AS (
+      UPDATE social_login_flows SET status='consumed', code_hash=NULL
+      WHERE code_hash=? AND browser_challenge=? AND status='ready' AND expires_at>now()
+        AND LOWER(email)=LOWER(?) AND EXISTS (
+          SELECT 1 FROM users WHERE id=? AND password_hash=? AND LOWER(email)=LOWER(?)
+        ) RETURNING subject
+    ) INSERT INTO provider_identities(provider,subject,user_id)
+      SELECT 'google',subject,? FROM claimed RETURNING user_id`)
+      .bind(await sha256Hex(code), await pkceChallenge(verifier), account.email,
+        account.id, account.password_hash, account.email, account.id).first()
+    if (!linked) return c.json({ error: "account_mismatch" }, 409)
+    return c.json({ connected: true })
+  } catch { return c.json({ error: "identity_taken" }, 409) }
+})
+// POST avoids prefetch/link scanners starting sign-in. Only exact configured SPA
+// origins may receive a handoff; never accept an arbitrary return URL.
+routes.post("/start", zValidator("json", z.object({ challenge: z.string().regex(/^[A-Za-z0-9_-]{43}$/) })), async c => {
+  if (!await googleLoginSchemaReady(c.env.AQUILLA_PG)) return c.json({ error: "unavailable" }, 503)
+  if (!configured(c.env)) return c.json({ error: "unavailable" }, 503)
+  const origin = c.req.header("Origin") ?? ""
+  const allowed = c.env.GOOGLE_LOGIN_APP_ORIGINS!.split(",").map(s => s.trim())
+  if (!allowed.includes(origin)) return c.json({ error: "invalid_origin" }, 400)
+  const ip = ipIdentifier(c.req.header("CF-Connecting-IP") || "unknown")
+  if (await countRecentEvents(c.env.AQUILLA_PG, "social_login", ip, { onlyFailures: false }) >= 30) return c.json({ error: "rate_limited" }, 429)
+  await recordAuthEvent(c.env.AQUILLA_PG, "social_login", ip, true)
+  const state = random(), verifier = random(), nonce = random()
+  await c.env.AQUILLA_PG.prepare("DELETE FROM social_login_flows WHERE expires_at < now()").run()
+  await c.env.AQUILLA_PG.prepare(`INSERT INTO social_login_flows
+    (state_hash, browser_challenge, google_verifier, nonce, app_origin, status) VALUES (?, ?, ?, ?, ?, 'started')`)
+    .bind(await sha256Hex(state), c.req.valid("json").challenge, verifier, nonce, origin).run()
+  const url = new URL("https://accounts.google.com/o/oauth2/v2/auth")
+  url.search = new URLSearchParams({ client_id: c.env.GOOGLE_LOGIN_CLIENT_ID!, redirect_uri: c.env.GOOGLE_LOGIN_REDIRECT_URI!, response_type: "code", scope: "openid email", state, nonce, code_challenge: await pkceChallenge(verifier), code_challenge_method: "S256", prompt: "select_account" }).toString()
+  return c.json({ authorization_url: url.href })
+})
+routes.get("/callback", async c => {
+  const state = c.req.query("state") ?? ""
+  if (!configured(c.env) || !/^[a-f0-9]{64}$/.test(state)) return c.json({ error: "invalid_request" }, 400)
+  // Consume state atomically before any provider contact. Callback replay cannot
+  // exchange a second Google code, even on concurrent Worker instances.
+  const flow = await c.env.AQUILLA_PG.prepare(`UPDATE social_login_flows SET status = 'callback'
+    WHERE state_hash = ? AND status = 'started' AND expires_at > now() RETURNING *`).bind(await sha256Hex(state)).first<Flow>()
+  if (!flow) return c.json({ error: "expired_request" }, 400)
+  const back = new URL("/auth/google/return", flow.app_origin)
+  const fail = (error: string) => { back.hash = new URLSearchParams({ error }).toString(); return c.redirect(back.href, 303) }
+  if (c.req.query("error")) return fail("cancelled")
+  const code = c.req.query("code")
+  if (!code || code.length > 4096) return fail("invalid_request")
+  let stage = "token_exchange"
+  try {
+    const response = await fetch("https://oauth2.googleapis.com/token", {
+      // Workers does not support redirect: "error". Return redirects untouched
+      // and reject their non-2xx status below so credentials never follow them.
+      method: "POST", redirect: "manual", signal: AbortSignal.timeout(15_000),
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ client_id: c.env.GOOGLE_LOGIN_CLIENT_ID!, client_secret: c.env.GOOGLE_LOGIN_CLIENT_SECRET!, code, code_verifier: flow.google_verifier, redirect_uri: c.env.GOOGLE_LOGIN_REDIRECT_URI!, grant_type: "authorization_code" }),
+    })
+    if (!response.ok) {
+      // Only a fixed category and HTTP status: never log provider bodies,
+      // authorization codes, tokens, email addresses or the client secret.
+      console.warn("[social-login] token exchange rejected", response.status)
+      return fail("provider_failed")
+    }
+    stage = "token_body"
+    const data = await response.json() as { id_token?: unknown }
+    if (typeof data.id_token !== "string") return fail("provider_failed")
+    stage = "token_verification"
+    const { payload } = await jwtVerify(data.id_token, googleKeys, {
+      issuer: ["https://accounts.google.com", "accounts.google.com"], audience: c.env.GOOGLE_LOGIN_CLIENT_ID!, algorithms: ["RS256"], requiredClaims: ["exp", "iat", "sub", "nonce", "email", "email_verified"], maxTokenAge: "10m",
+    })
+    if (payload.nonce !== flow.nonce || payload.email_verified !== true || typeof payload.sub !== "string" || !payload.sub || payload.sub.length > 255 || typeof payload.email !== "string" || !z.string().email().max(320).safeParse(payload.email).success || (payload.azp !== undefined && payload.azp !== c.env.GOOGLE_LOGIN_CLIENT_ID)) return fail("provider_failed")
+    const handoff = random()
+    stage = "handoff_storage"
+    await c.env.AQUILLA_PG.prepare(`UPDATE social_login_flows SET status='ready', code_hash=?, google_verifier=NULL, subject=?, email=?, authoritative_email=?, expires_at=now()+interval '5 minutes' WHERE state_hash=? AND status='callback'`)
+      .bind(await sha256Hex(handoff), payload.sub, payload.email, payload.email.toLowerCase().endsWith("@gmail.com") || (typeof payload.hd === "string" && payload.hd.length > 0), flow.state_hash).run()
+    // Fragment isn't sent in HTTP requests/referrers. The SPA removes it before
+    // rendering and requires its tab-local verifier to redeem it.
+    back.hash = new URLSearchParams({ code: handoff }).toString()
+    return c.redirect(back.href, 303)
+  } catch {
+    console.warn("[social-login] callback failed", stage)
+    return fail("provider_failed")
+  }
+})
+async function accountFor(db: AquillaDb, flow: Flow): Promise<{ account: Account | null; linked: boolean }> {
+  const linked = await db.prepare("SELECT u.id, u.username, u.email, u.password_hash FROM provider_identities p JOIN users u ON u.id=p.user_id WHERE p.provider='google' AND p.subject=?").bind(flow.subject).first<Account>()
+  if (linked) return { account: linked, linked: true }
+  const account = await db.prepare("SELECT id, username, email, password_hash FROM users WHERE LOWER(email)=LOWER(?)").bind(flow.email).first<Account>()
+  return { account, linked: false }
+}
+async function session(env: AuthHonoEnv["Bindings"], username: string, accountId: number, created: boolean, linked = false) {
+  const { token } = await new JWTService(env).createAccessTokenWithPayload(username, undefined, undefined, accountId)
+  try { await env.AQUILLA_PG.prepare("INSERT INTO activity_logs (user_id, activity_type, description) SELECT id, ?, ? FROM users WHERE username=?")
+    .bind(created ? "register" : "login", created ? "Account created with Google" : linked ? "Google linked and signed in" : "Signed in with Google", username).run()
+  } catch { console.warn("[social-login] activity log insert failed (non-fatal)") }
+  return { access_token: token, token_type: "bearer", username, created }
+}
+routes.post("/exchange", zValidator("json", proof), async c => {
+  const { code, verifier } = c.req.valid("json")
+  const nextCode = random()
+  const flow = await c.env.AQUILLA_PG.prepare(`UPDATE social_login_flows SET status='pending', code_hash=?
+    WHERE code_hash=? AND browser_challenge=? AND status='ready' AND expires_at>now() RETURNING *`)
+    .bind(await sha256Hex(nextCode), await sha256Hex(code), await pkceChallenge(verifier)).first<Flow>()
+  if (!flow) return c.json({ error: "expired_request" }, 400)
+  const { account, linked } = await accountFor(c.env.AQUILLA_PG, flow)
+  // Apply the same dev-only access policy as password login, before writes or JWTs.
+  const access = await checkDevAccess(c.env, account?.email ?? flow.email)
+  if (!access.allowed) return devAccessRefusal(c, access.reason)
+  if (linked && account) {
+    await c.env.AQUILLA_PG.prepare("UPDATE social_login_flows SET status='consumed', code_hash=NULL WHERE state_hash=?").bind(flow.state_hash).run()
+    try { return c.json(await session(c.env, account.username, account.id, false)) }
+    catch { return c.json({ error: "session_failed" }, 503) }
+  }
+  return c.json({ continuation: nextCode, step: account ? "link" : "signup", email: flow.email, ...(account ? { username: account.username } : {}) })
+})
+
+export async function pruneSocialLoginFlows(db: AquillaDb): Promise<void> {
+  try { await db.prepare("DELETE FROM social_login_flows WHERE expires_at < now()").run() }
+  catch { console.warn("[social-login] expired flow cleanup failed") }
+}
+
+routes.post("/finish", zValidator("json", proof.extend({ username: z.string().trim().min(3).max(50).optional(), password: z.string().max(1024).optional() })), async c => {
+  const { code, verifier, username, password } = c.req.valid("json")
+  const hash = await sha256Hex(code), challenge = await pkceChallenge(verifier)
+  const flow = await c.env.AQUILLA_PG.prepare("SELECT * FROM social_login_flows WHERE code_hash=? AND browser_challenge=? AND status='pending' AND expires_at>now()")
+    .bind(hash, challenge).first<Flow>()
+  if (!flow) return c.json({ error: "expired_request" }, 400)
+  const ip = ipIdentifier(c.req.header("CF-Connecting-IP") || "unknown")
+  const ownerKey = `social:${await sha256Hex(flow.email.toLowerCase())}`
+  if (await countRecentEvents(c.env.AQUILLA_PG, "social_link", ip, { onlyFailures: false }) >= 20 || await countRecentEvents(c.env.AQUILLA_PG, "social_link", ownerKey, { onlyFailures: false }) >= 8) return c.json({ error: "rate_limited" }, 429)
+  await recordAuthEvent(c.env.AQUILLA_PG, "social_link", ip, true)
+  await recordAuthEvent(c.env.AQUILLA_PG, "social_link", ownerKey, true)
+  const { account, linked } = await accountFor(c.env.AQUILLA_PG, flow)
+  // Apply the same dev-only access policy as password login, before writes or JWTs.
+  const access = await checkDevAccess(c.env, account?.email ?? flow.email)
+  if (!access.allowed) return devAccessRefusal(c, access.reason)
+  if (linked) return c.json({ error: "restart" }, 409)
+  if (account) {
+    // Require proof of the existing Aquilla account, not merely matching email.
+    if (!password || !(await verifyPassword(password, account.password_hash)).isValid) return c.json({ error: "invalid_password" }, 401)
+    // The single SQL statement atomically claims the continuation and links.
+    // Compare the password hash too: a concurrent reset invalidates this proof.
+    let result: { id: number; username: string } | null
+    try { result = await c.env.AQUILLA_PG.prepare(`WITH claimed AS (
+      UPDATE social_login_flows SET status='consumed', code_hash=NULL
+      WHERE code_hash=? AND browser_challenge=? AND status='pending' AND expires_at>now()
+      AND EXISTS (SELECT 1 FROM users WHERE id=? AND password_hash=? AND LOWER(email)=LOWER(?))
+      RETURNING subject
+    ), linked AS (
+      INSERT INTO provider_identities (provider, subject, user_id) SELECT 'google', subject, ? FROM claimed RETURNING user_id
+    ) SELECT u.id, u.username FROM users u JOIN linked l ON u.id=l.user_id`)
+      .bind(hash, challenge, account.id, account.password_hash, flow.email, account.id).first<{ id: number; username: string }>()
+    } catch { return c.json({ error: "restart" }, 409) }
+    if (!result) return c.json({ error: "restart" }, 409)
+    try { return c.json(await session(c.env, result.username, result.id, false, true)) }
+    catch { return c.json({ error: "session_failed" }, 503) }
+  }
+  if (!username) return c.json({ error: "username_required" }, 400)
+  if (c.env.ENVIRONMENT !== "production") {
+    const reserved = parseAdminEmails(c.env)
+    if (reserved.has(flow.email.toLowerCase()) || reserved.has(username.toLowerCase())) return c.json({ error: "identity_taken" }, 409)
+  }
+  const existing = await c.env.AQUILLA_PG.prepare("SELECT id FROM users WHERE LOWER(username)=LOWER(?) OR LOWER(email)=LOWER(?) OR LOWER(email)=LOWER(?) OR LOWER(username)=LOWER(?)")
+    .bind(username, flow.email, username, flow.email).first()
+  if (existing) return c.json({ error: "identity_taken" }, 409)
+  try {
+    const d1 = legacyD1Config(c.env)
+    if (d1 && await hasLegacyIdentityCollision(d1, username, flow.email)) return c.json({ error: "identity_taken" }, 409)
+  } catch { return c.json({ error: "unavailable" }, 503) }
+  let result: { id: number; username: string } | null
+  try {
+    result = await c.env.AQUILLA_PG.prepare(`WITH claimed AS (
+      UPDATE social_login_flows SET status='consumed', code_hash=NULL
+      WHERE code_hash=? AND browser_challenge=? AND status='pending' AND expires_at>now() RETURNING subject, email, authoritative_email
+    ), created AS (
+      INSERT INTO users (username, email, password_hash, email_verified_at)
+      SELECT ?, email, NULL, CASE WHEN authoritative_email THEN now() ELSE NULL END FROM claimed RETURNING id, username
+    ), linked AS (
+      INSERT INTO provider_identities (provider, subject, user_id)
+      SELECT 'google', c.subject, u.id FROM claimed c CROSS JOIN created u RETURNING user_id
+    ) SELECT u.id, u.username FROM created u JOIN linked l ON u.id=l.user_id`)
+      .bind(hash, challenge, username).first<{ id: number; username: string }>()
+  } catch {
+    // The creation transaction rolled back; no account was committed.
+    return c.json({ error: "signup_failed" }, 409)
+  }
+  if (!result) return c.json({ error: "expired_request" }, 400)
+  const created = result
+  // Preserve the ordinary signup verification path for addresses for which
+  // Google is not authoritative. Email delivery must not strand a new account.
+  const welcome = () => withPostResponseDb(c.env, async db => {
+    let verifyUrl: string | undefined
+    if (!flow.authoritative_email) {
+      const verifyToken = random()
+      await db.prepare(`INSERT INTO email_verification_tokens (user_id, token_hash, expires_at)
+        SELECT id, ?, now()+interval '7 days' FROM users WHERE id=?`)
+        .bind(await sha256Hex(verifyToken), created.id).run()
+      verifyUrl = `${c.env.BASE_URL || "https://aquilla.app"}/verify-email?token=${verifyToken}`
+    }
+    await sendWelcomeEmail(c.env, flow.email, created.username, verifyUrl)
+  })
+  const delivery = welcome().catch(() => { console.warn("[social-login] welcome delivery failed (non-fatal)") })
+  try { c.executionCtx.waitUntil(delivery) } catch { await delivery }
+  try { return c.json(await session(c.env, created.username, created.id, true)) }
+  catch {
+    // The account and provider link exist. Restarting Google login recovers
+    // them; never misreport this as a failed/rolled-back signup.
+    return c.json({ error: "session_failed" }, 503)
+  }
+})
+
+export default routes

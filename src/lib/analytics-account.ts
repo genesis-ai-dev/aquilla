@@ -1,3 +1,4 @@
+import { sessionKey } from "./frontier/session-store"
 import { onAnalyticsBoundary } from "./analytics-boundary"
 import { AUTH_BASE, isJwtExpired } from "@/lib/frontier/auth"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -45,6 +46,8 @@ export class AnalyticsAccount {
   eligible = () => this.state.ready && !this.state.saving && !!this.state.accountId &&
     this.state.decision?.allowed === true && !!this.session && !isJwtExpired(this.session.jwt) &&
     navigator.onLine && !document.hidden && Date.now() - this.verifiedAt < 75_000
+
+  storageOwner = () => this.session ? sessionKey(this.session) : null
 
   eligibleForSession = (jwt: string) => this.session?.jwt === jwt && this.eligible()
 

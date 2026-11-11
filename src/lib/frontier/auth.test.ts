@@ -424,3 +424,39 @@ describe("logout deadline", () => {
     } finally { vi.useRealTimers(); vi.restoreAllMocks(); }
   });
 });
+
+it.each([true, false])("uses the authenticated ownership proof before claiming legacy local data: %s", async sameAccount => {
+  const { saveSession, _resetDbForTesting } = await import("./session-store")
+  await _resetDbForTesting()
+  await saveSession({username:"reuse",jwt:"expired-old-proof",createdAt:"2020-01-01T00:00:00Z"})
+  const token = `e30.${btoa(JSON.stringify({sub:"reuse",uid:"902",email:"reuse@example.com"}))}.signature`
+  const fetchSpy = vi.spyOn(globalThis,"fetch").mockImplementation(async (input, init) => {
+    if (String(input).endsWith("/auth/token")) return Response.json({access_token:token,token_type:"bearer"})
+    expect(String(input)).toBe(`${AUTH_BASE}/api/v2/auth/me/local-data-owner`)
+    expect(init?.headers).toMatchObject({Authorization:`Bearer ${token}`})
+    expect(JSON.parse(String(init?.body))).toEqual({previousToken:"expired-old-proof"})
+    return Response.json({sameAccount})
+  })
+  try {
+    const session = await login({username:"reuse",password:"unused-test-password"})
+    if (sameAccount) expect(session.storageKey).toBe("reuse")
+    else expect(session.storageKey).toMatch(/^account:902:/)
+    expect((await loadSession())?.accountId).toBe("902")
+  } finally { fetchSpy.mockRestore() }
+})
+
+
+it.each(["unavailable", "malformed"])("preserves legacy credentials when ownership proof is %s", async failure => {
+  const { saveSession, _resetDbForTesting } = await import("./session-store")
+  await _resetDbForTesting()
+  await saveSession({username:"reuse",jwt:"old-proof",createdAt:"2020-01-01"})
+  const token = `e30.${btoa(JSON.stringify({sub:"reuse",uid:"902",email:"reuse@example.com"}))}.signature`
+  const fetchSpy = vi.spyOn(globalThis,"fetch").mockImplementation(async input => {
+    if (String(input).endsWith("/auth/token")) return Response.json({access_token:token,token_type:"bearer"})
+    return failure === "unavailable" ? new Response(null,{status:503}) : Response.json({})
+  })
+  try {
+    await expect(login({username:"reuse",password:"unused-test-password"})).rejects.toThrow()
+    expect((await loadSession())?.jwt).toBe("old-proof")
+  } finally { fetchSpy.mockRestore() }
+})

@@ -205,11 +205,38 @@ export async function sandboxReadFile(
   const res = out.data
   if (res.status === 404) return { available: false, reason: `not_found: ${path}` }
   if (!res.ok) return readError(res)
-  const buf = new Uint8Array(await res.arrayBuffer())
-  const truncated = buf.byteLength > maxBytes
-  const slice = truncated ? buf.subarray(0, maxBytes) : buf
-  const text = new TextDecoder("utf-8").decode(slice)
+  const { bytes, truncated } = await readPrefix(res, maxBytes)
+  const text = new TextDecoder("utf-8").decode(bytes)
   return { available: true, data: { text, truncated } }
+}
+
+/**
+ * The first `maxBytes` of a response body, and whether there was more. The
+ * file's size is set by code running in the sandbox, so the body is counted as
+ * it arrives and the stream is cancelled at the cap rather than buffered whole
+ * and then sliced: only the prefix the caller asked for ever reaches this
+ * isolate's memory.
+ */
+export async function readPrefix(
+  res: Response,
+  maxBytes: number,
+): Promise<{ bytes: Uint8Array; truncated: boolean }> {
+  const out = new Uint8Array(maxBytes)
+  if (!res.body) return { bytes: out.subarray(0, 0), truncated: false }
+  const reader = res.body.getReader()
+  let filled = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) return { bytes: out.subarray(0, filled), truncated: false }
+    const room = maxBytes - filled
+    if (value.byteLength > room) {
+      out.set(value.subarray(0, room), filled)
+      await reader.cancel().catch(() => {})
+      return { bytes: out, truncated: true }
+    }
+    out.set(value, filled)
+    filled += value.byteLength
+  }
 }
 
 /** DELETE /sessions/:sessionId — destroy the container (idempotent, best-effort). */

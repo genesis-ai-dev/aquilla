@@ -1,3 +1,4 @@
+import { GoogleLoginButton } from "@/components/auth/GoogleLoginButton"
 import { useEffect, useRef, useState } from "react"
 import { useForm } from "@tanstack/react-form"
 import { z } from "zod"
@@ -103,6 +104,7 @@ export function FrontierLoginForm({
           {t("auth.login.offlineNotice")}
         </p>
       )}
+      <GoogleLoginButton next={returnTo} />
       <FieldGroup className="gap-4">
         <form.Field
           name="username"

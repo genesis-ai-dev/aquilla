@@ -2,16 +2,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { act, render, screen, waitFor } from "@testing-library/react"
 import { OutboxProvider } from "./OutboxContext"
 import type { SyncTokenCallbacks } from "@/lib/sync/sync-token"
+import type { FrontierSession } from "@/lib/frontier/types"
 import { addSession, clearSession, listSessions, saveSession } from "@/lib/frontier/session-store"
 import { clearSessionExpired, onSessionExpired } from "@/lib/errors/session-expired-signal"
 import type { OutboxFlushTarget, UseOutboxFlusherOptions } from "@/hooks/useOutboxFlusher"
 
+let currentSession: FrontierSession = { jwt: "jwt-active", username: "alice", createdAt: "x" }
 let callbacks: SyncTokenCallbacks | null = null
 let flusherOptions: UseOutboxFlusherOptions | null = null
 
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({
-    session: { jwt: "jwt-active", username: "alice", createdAt: "x" },
+    session: currentSession,
     loading: false,
   }),
 }))
@@ -47,6 +49,7 @@ vi.mock("@/hooks/usePendingOutboxRecords", () => ({
 }))
 
 beforeEach(async () => {
+  currentSession = { jwt: "jwt-active", username: "alice", createdAt: "x" }
   callbacks = null
   flusherOptions = null
   clearSessionExpired()
@@ -56,6 +59,16 @@ beforeEach(async () => {
 })
 
 describe("OutboxProvider unauthorized session handling", () => {
+  it("surfaces active upload errors using the account namespace rather than username", async () => {
+    currentSession = {...currentSession, accountId:"891"}
+    await saveSession(currentSession)
+    render(<OutboxProvider><span>scoped</span></OutboxProvider>)
+    const targets = await flusherOptions!.getFlushTargets!()
+    const active = targets.find(target => target.authEpoch === "jwt-active")!
+    expect(active.ownerKey).toMatch(/^account:891:/)
+    expect(active.shouldSurface()).toBe(true)
+  })
+
   it("requests scoped re-auth without deleting the active or other account", async () => {
     const expired = vi.fn()
     const unsubscribe = onSessionExpired(expired)

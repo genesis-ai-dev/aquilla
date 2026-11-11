@@ -461,7 +461,7 @@ export async function flushOutboxUntilSettled(
 }
 
 async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutboxResult> {
-  const analytics = posthog.scope(undefined, deps.ownerScope?.ownerKey ?? undefined)
+  const analytics = posthog.scope(undefined, deps.ownerScope?.ownerKey ?? undefined, "storage")
   const ownerVersion = deps.ownerScope ? null : getActiveOutboxOwnerVersion()
   const outboxScope: OutboxOwnerScope | undefined = deps.ownerScope
     ? { ownerKey: deps.ownerScope.ownerKey }

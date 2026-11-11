@@ -98,7 +98,7 @@ function useAccountsState(enabled = true) {
     // Until this point consumers either see the prior account or the global
     // neutral loading boundary; they can never pair the new JWT with old data.
     try {
-      await activateClientDataScope(key, { claimLegacy: snapshot.dataOwner === undefined })
+      await activateClientDataScope(key, { claimLegacy: snapshot.dataOwner === undefined && (!nextActive?.accountId || key === nextActive.username) })
     } catch (error) {
       throw new AccountTransitionFailure(error)
     }
@@ -180,7 +180,7 @@ function useAccountsState(enabled = true) {
           if (refreshRequestRef.current !== requestId) return
         }
       }
-      await activateClientDataScope(key, { claimLegacy: previousKey === undefined })
+      await activateClientDataScope(key, { claimLegacy: previousKey === undefined && (!session.accountId || key === session.username) })
       const published = await publishDataOwner(key)
       if (!published || refreshRequestRef.current !== requestId) return
       prevKeyRef.current = key

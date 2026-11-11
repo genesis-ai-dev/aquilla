@@ -1,11 +1,22 @@
 import { test, expect } from "@playwright/test"
 import { resetBackend } from "../../helpers/seed"
-import { ensureAuthState } from "../../helpers/auth"
+import { ensureAuthState, injectSession } from "../../helpers/auth"
 
 // Provider-boundary simulation. The worker suite separately uses signed Google
 // claims against real Postgres; this suite verifies browser intent, navigation,
 // and adoption of a real Aquilla JWT. It does not claim live Google verification.
 test.beforeEach(async () => { await resetBackend() })
+test("invalidated login-method session offers reauthentication with its settings destination", async ({ page }) => {
+  await page.goto("/login")
+  await injectSession(page, await ensureAuthState("alice"))
+  await page.route("**/api/v2/auth/oauth/google/methods", route => route.fulfill({status:401,json:{error:"Password changed"}}))
+  await page.goto("/preferences/login-methods")
+  await expect(page.getByRole("alert")).toContainText("Your session expired.")
+  await page.getByRole("link",{name:"Log in again",exact:true}).click()
+  await expect(page.getByRole("button",{name:"Log in",exact:true})).toBeVisible()
+  expect(new URL(page.url()).searchParams.get("next")).toBe("/preferences/login-methods")
+  expect(new URL(page.url()).searchParams.get("add")).toBe("1")
+})
 test("Google is silent before activation and its handoff preserves the destination and ordinary session", async ({ page }) => {
   const session = await ensureAuthState("alice")
   const googleRequests: string[] = []

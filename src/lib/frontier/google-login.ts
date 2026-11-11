@@ -14,6 +14,9 @@ export async function googleRequest<T>(path: string, body?: object, jwt?: string
     ...(body ? { body: JSON.stringify(body) } : {}),
   })
   } catch { throw new Error("unavailable") }
+  // Only this read endpoint's 401 unambiguously means the session is invalid.
+  // Link/disconnect can also return 401 for an incorrect password proof.
+  if (path === "methods" && jwt && response.status === 401) throw new Error("session_expired")
   let data
   try { data = await response.json() } catch { throw new Error("unavailable") }
   if (!data || typeof data !== "object") throw new Error("unavailable")

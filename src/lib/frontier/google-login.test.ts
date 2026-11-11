@@ -4,6 +4,11 @@ import { googleRequest, startGoogleLogin, readGoogleAttempt, clearGoogleAttempt,
 import { confirmSignupAnalyticsChoice, clearSignupAnalyticsChoice } from "../signup-analytics-choice"
 beforeEach(() => { sessionStorage.clear(); clearSignupAnalyticsChoice(); vi.spyOn(navigator, "onLine", "get").mockReturnValue(true) })
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
+it("distinguishes invalid sessions from incorrect Google-link password proofs", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => Response.json({error:"Unauthorized"},{status:401})))
+  await expect(googleRequest("methods",undefined,"expired-jwt")).rejects.toThrow("session_expired")
+  await expect(googleRequest("disconnect",{password:"incorrect"},"valid-jwt")).rejects.toThrow("Unauthorized")
+})
 describe("Google login intent", () => {
   it("does not fetch on import or reading state; fails before provider contact when storage is denied or offline", async () => {
     const fetcher = vi.fn(); vi.stubGlobal("fetch", fetcher)

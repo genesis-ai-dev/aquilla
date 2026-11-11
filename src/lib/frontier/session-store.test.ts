@@ -446,3 +446,29 @@ describe("atomic renewal replacement", () => {
     }
   })
 })
+
+// A replacement account must neither inherit ownership nor drain the old outbox.
+it("isolates reused usernames, preserves verified legacy ownership and keeps renewal in the same namespace", async () => {
+  const { _resetDbForTesting } = await import("./session-store")
+  await _resetDbForTesting()
+  const old = mkSession({ username: "reuse", jwt: "legacy" })
+  await saveSession(old)
+  await publishDataOwner("reuse")
+  const upgraded = mkSession({ username: "reuse", jwt: "first-id", accountId: "701" })
+  await saveSession(upgraded, {key:"reuse",jwt:"legacy"})
+  expect(sessionKey(upgraded)).toBe("reuse")
+  const nextToken = `e30.${btoa(JSON.stringify({sub:"reuse",uid:"701"}))}.signature`
+  expect(await replaceActiveSessionJwt("first-id", nextToken)).toBe(true)
+  expect((await loadActiveSession())?.storageKey).toBe("reuse")
+  const replacement = mkSession({username:"reuse",jwt:"replacement",accountId:"702"})
+  await saveSession(replacement)
+  const replacementKey = sessionKey(replacement)
+  expect(replacementKey).toMatch(/^account:702:/)
+  expect((await loadAccountsSnapshot()).dataOwner).toBe("reuse")
+  expect(await isStoredSessionCurrent("reuse",nextToken)).toBe(false)
+  expect(await isStoredSessionCurrent(replacementKey,"replacement")).toBe(true)
+  // Logout removes credentials, not the immutable namespace binding.
+  await clearSession()
+  await saveSession(mkSession({username:"reuse",jwt:"again",accountId:"702"}))
+  expect((await loadActiveSession())?.storageKey).toBe(replacementKey)
+})

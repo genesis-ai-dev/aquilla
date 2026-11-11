@@ -663,7 +663,14 @@ export const org = defineNamespace({
     "org.projectOverview.visibilitySaveOffline": "You're offline. Reconnect, then change it again.",
     "org.projectOverview.visibilitySaveForbidden":
       "Only people who can change this project's settings can change who sees this.",
+    // AQU-2479: the card's own title. NOT editor.navTitle.team ("Team") —
+    // that read like the project's roster, while the card only ever lists
+    // open assignments. The roster is the Members card below it.
+    "org.projectOverview.teamAssignmentsTitle": "Team assignments",
     "org.projectOverview.noOpenAssignments": "No open assignments in this project yet.",
+    // AQU-2479: under that empty state, so "no assignments" is never read as
+    // "no team". Opens the Members card, which is the actual roster.
+    "org.projectOverview.noOpenAssignmentsMembersLink": "See who has access under Members",
     "org.projectOverview.openAssignmentsStat": "{count} open · {percent}",
     "org.projectOverview.viewActivityAria": "View activity for {username}",
     "org.projectOverview.hide": "Hide",

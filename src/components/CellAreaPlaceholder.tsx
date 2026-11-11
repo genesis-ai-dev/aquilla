@@ -12,6 +12,7 @@ import { EmptyState } from "@/components/ui/page"
 import { LoadingCursor } from "@/components/ui/loading-cursor"
 import type { CellAreaState } from "@/lib/editor/cell-area-state"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { roleNameKey } from "@/lib/frontier/roles"
 
 interface CellAreaPlaceholderProps {
   state: CellAreaState
@@ -26,6 +27,10 @@ interface CellAreaPlaceholderProps {
    *  spurious "Import" click on a project that already has files. */
   filesLoaded?: boolean
   onImportClick?: () => void
+  /** AQU-2475: role level of this project's resolved source-import floor. Used
+   *  only when `onImportClick` is absent, to name who may import instead of
+   *  leaving the reader an empty state that tells them to do it themselves. */
+  importFloorRole?: number
   onRetryClick?: () => void
 }
 
@@ -36,6 +41,7 @@ export function CellAreaPlaceholder({
   hasFiles,
   filesLoaded,
   onImportClick,
+  importFloorRole,
   onRetryClick,
 }: CellAreaPlaceholderProps) {
   if (state.kind === "ready") return null
@@ -44,6 +50,7 @@ export function CellAreaPlaceholder({
       hasFiles={hasFiles}
       filesLoaded={filesLoaded}
       onImportClick={onImportClick}
+      importFloorRole={importFloorRole}
     />
   )
   if (state.kind === "ready-empty") {
@@ -169,10 +176,12 @@ function NoFileEmpty({
   hasFiles,
   filesLoaded,
   onImportClick,
+  importFloorRole,
 }: {
   hasFiles?: boolean
   filesLoaded?: boolean
   onImportClick?: () => void
+  importFloorRole?: number
 }) {
   const t = useT()
   // AQU-149: while the file list hasn't loaded yet, show the neutral "No file
@@ -196,13 +205,28 @@ function NoFileEmpty({
   // When the project has no files at all the sidebar is empty, so "pick a
   // file from the sidebar" is wrong. Instead offer a direct import CTA.
   if (!hasFiles) {
+    // AQU-2475: below the import floor there is no CTA (AQU-481 already
+    // withholds it), and "Import a file to get started" was then an
+    // instruction the reader cannot act on, with nothing saying why — the
+    // state read as broken. Name the role that may import instead, from the
+    // floor the caller resolved (the org can raise it, so this is not a
+    // constant). The role noun comes from the catalog's plural form rather
+    // than a hand-built "s", like every other role sentence.
+    const floorKey =
+      onImportClick || importFloorRole == null
+        ? undefined
+        : roleNameKey(importFloorRole)
     return (
       <EmptyState
         variant="inline"
         className="h-full p-8"
         icon={Upload}
         title={t("editor.file.noFilesTitle")}
-        description={t("editor.file.noFilesBody")}
+        description={
+          floorKey
+            ? t("editor.file.noFilesImportFloor", { role: t(floorKey, { count: 2 }) })
+            : t("editor.file.noFilesBody")
+        }
         action={
           onImportClick ? (
             <Button onClick={onImportClick}>

@@ -1,5 +1,6 @@
 const PUBLIC_EXACT_PATHS = new Set([
   "/login",
+  "/auth/google/return",
   "/signup",
   "/reset-password",
   "/verify-email",

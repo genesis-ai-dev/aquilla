@@ -1,3 +1,4 @@
+import { LoginMethodsSection } from "@/components/settings/LoginMethodsSection"
 import { Button } from "@/components/ui/button"
 import { useState } from "react"
 import { Navigate, useLocation, useNavigate, useParams, type Location } from "react-router-dom"
@@ -408,6 +409,7 @@ interface PreferenceSection {
 const INLINE_PREFERENCE_SLUGS = new Set(["appearance", "language", "privacy"])
 
 const PREFERENCE_SECTIONS: PreferenceSection[] = [
+  { slug: "login-methods", titleKey: "auth.methods.title", descriptionKey: "auth.methods.description", group: "Account", icon: KeyRound, render: () => <LoginMethodsSection /> },
   {
     slug: "workspace",
     // Title text is identical to onboarding.preferences.workspace.groupLabel

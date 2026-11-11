@@ -1141,11 +1141,21 @@ function safeParseJson(raw: string): unknown {
   }
 }
 
-auth.post(
-  "/password-reset/request",
-  zValidator("json", passwordResetRequestSchema),
-  async (c) => {
-    const { email, return_to } = c.req.valid("json")
+auth.post("/password-reset/request", zValidator("json", passwordResetRequestSchema), async c => {
+  const { email, return_to } = c.req.valid("json")
+  return deliverPasswordReset(c, email, return_to)
+})
+
+// Settings never accepts a destination email from the client. Resolve the
+// selected authenticated account afresh, rather than trusting a JWT email claim.
+auth.post("/me/password-reset/request", authMiddleware, async c => {
+  const user = await c.env.AQUILLA_PG.prepare("SELECT email FROM users WHERE id=?")
+    .bind(c.get("user").id).first<{ email: string }>()
+  if (!user) return c.json({ error: "Unauthorized" }, 401)
+  return deliverPasswordReset(c, user.email)
+})
+
+async function deliverPasswordReset(c: Context<AuthHonoEnv>, email: string, return_to?: string) {
     // The one response every outcome below returns. Whether the address is
     // registered, whether it was throttled, and whether the token mint or the
     // send failed must all be indistinguishable from here — see the
@@ -1285,8 +1295,7 @@ auth.post(
     }
 
     return c.json(genericResponse)
-  },
-)
+}
 
 auth.post(
   "/password-reset/verify",

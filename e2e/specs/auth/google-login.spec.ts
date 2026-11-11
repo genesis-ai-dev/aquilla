@@ -55,3 +55,45 @@ test("cancelled Google login returns to a usable password login without retrying
   await expect(page.getByLabel("Username or email")).toBeVisible()
   expect(requests).toEqual([])
 })
+
+test("Google signup sharing choice only opens the username form without submitting or showing an error", async ({ page }) => {
+  const googleRequests: string[] = []
+  const starts: object[] = []
+  await page.route("**/api/v2/auth/oauth/google/config", route => route.fulfill({ json: { enabled: true } }))
+  await page.route("**/api/v2/auth/oauth/google/start", async route => {
+    starts.push(route.request().postDataJSON())
+    await route.fulfill({ json: { authorization_url: "https://accounts.google.com/o/oauth2/v2/auth?test=explicit-click" } })
+  })
+  await page.route(/https:\/\/[^/]*(?:google\.com|googleapis\.com|gstatic\.com)\//, async route => {
+    googleRequests.push(route.request().url())
+    const back = new URL(`/auth/google/return#code=${"c".repeat(64)}`, page.url()).href
+    // WebKit cannot fulfill an intercepted request with a redirect status.
+    // A provider page navigation exercises the same cross-origin return.
+    await route.fulfill({ contentType: "text/html", body: `<script>location.replace(${JSON.stringify(back)})</script>` })
+  })
+  let finishes = 0
+  await page.route("**/api/v2/auth/oauth/google/finish", async route => {
+    finishes += 1
+    await route.fulfill({ status: 400, json: { error: "unexpected_finish" } })
+  })
+  let proof: { code: string; verifier: string } | undefined
+  await page.route("**/api/v2/auth/oauth/google/exchange", async route => {
+    proof = route.request().postDataJSON()
+    await route.fulfill({ json: { continuation: "d".repeat(64), step: "signup", email: "alice@example.com" } })
+  })
+  await page.goto("/login?next=%2Forgs%2F1%2Fmembers")
+  const google = page.getByRole("button", { name: "Continue with Google", exact: true })
+  await expect(google).toBeVisible()
+  await google.hover(); await google.focus()
+  await expect(page.getByLabel("Username or email")).toBeVisible()
+  expect(googleRequests).toEqual([]); expect(starts).toEqual([])
+  expect(await page.locator('script[src*="google"],iframe[src*="google"],link[href*="google"]').count()).toBe(0)
+  await google.click()
+  await page.getByRole("button", { name: "Agree and continue", exact: true }).click()
+  await expect(page.getByLabel("Username", { exact: true })).toBeVisible()
+  await page.getByLabel("Username", { exact: true }).fill("new-google-user")
+  await expect(page.getByRole("button", { name: "Create account", exact: true })).toBeEnabled()
+  await expect(page.getByRole("alert")).toHaveCount(0)
+  expect(finishes).toBe(0)
+  expect(proof).toBeDefined()
+})

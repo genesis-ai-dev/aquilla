@@ -15,7 +15,7 @@ export function LoginMethodsSection() {
 }
 function AccountLoginMethods({ jwt, username }: { jwt: string; username: string }) {
   const t = useT()
-  const [methods, setMethods] = useState<{ password: boolean; google: boolean; google_available: boolean } | null>(null)
+  const [methods, setMethods] = useState<{ email: string; password: boolean; google: boolean; google_available: boolean } | null>(null)
   const [error, setError] = useState(false), [busy, setBusy] = useState(false)
   const [disconnecting, setDisconnecting] = useState(false), [password, setPassword] = useState("")
   const [recovering, setRecovering] = useState(false), [revision, setRevision] = useState(0)
@@ -37,7 +37,7 @@ function AccountLoginMethods({ jwt, username }: { jwt: string; username: string 
           label={t(methods.password ? "auth.methods.passwordSet" : "auth.methods.passwordMissing")}
           control={<Button size="sm" variant="outline" onClick={() => setRecovering(true)}>{t(methods.password ? "auth.methods.resetPassword" : "auth.methods.setPassword")}</Button>}
         />
-        {recovering && <SettingsBlock><div className="max-w-md"><FrontierForgotPasswordForm backLabel={t("auth.methods.back")} onBack={() => setRecovering(false)} returnTo="/preferences/login-methods" /></div></SettingsBlock>}
+        {recovering && <SettingsBlock><div className="max-w-md"><FrontierForgotPasswordForm account={{ email: methods.email, jwt }} backLabel={t("auth.methods.back")} onBack={() => setRecovering(false)} returnTo="/preferences/login-methods" /></div></SettingsBlock>}
         <SettingsRow
           className="flex-wrap items-center"
           label={t(methods.google ? "auth.methods.connected" : "auth.methods.notConnected")}

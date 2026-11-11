@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
-import { requestPasswordReset, FrontierAuthError } from "@/lib/frontier/auth"
+import { requestPasswordReset, requestAccountPasswordReset, FrontierAuthError } from "@/lib/frontier/auth"
 import { isFieldInvalid } from "@/lib/forms/field-state"
 import { useSubmitError } from "@/lib/forms/submit-error"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -21,8 +21,10 @@ export function FrontierForgotPasswordForm({
   onBack,
   returnTo,
   backLabel,
+  account,
 }: {
   onBack: (returnTo?: string) => void
+  account?: { email: string; jwt: string }
   backLabel?: string
   /** Retained on Back; supported invitation paths also travel in the reset email. */
   returnTo?: string
@@ -44,12 +46,13 @@ export function FrontierForgotPasswordForm({
   })
 
   const form = useForm({
-    defaultValues: { email: "" },
+    defaultValues: { email: account?.email ?? "" },
     validators: { onSubmit: formSchema },
     onSubmit: async ({ value }) => {
       clearSubmitError()
       try {
-        await requestPasswordReset(value.email.trim(), returnTo)
+        if (account) await requestAccountPasswordReset(account.jwt)
+        else await requestPasswordReset(value.email.trim(), returnTo)
         setSentEmail(value.email.trim())
       } catch (err) {
         setSubmitError(err instanceof FrontierAuthError ? err.message : t("auth.resetPassword.failedToSend"))
@@ -94,6 +97,7 @@ export function FrontierForgotPasswordForm({
                   id="r-email"
                   name={field.name}
                   type="email"
+                  readOnly={!!account}
                   value={field.state.value}
                   onBlur={field.handleBlur}
                   onChange={(e) => field.handleChange(e.target.value)}

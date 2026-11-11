@@ -267,6 +267,15 @@ export async function requestPasswordReset(email: string, returnTo?: string): Pr
   }
 }
 
+/** Send a reset only to the authenticated account's server-stored address. */
+export async function requestAccountPasswordReset(jwt: string): Promise<void> {
+  const res = await fetch(`${AUTH_BASE}/api/v2/auth/me/password-reset/request`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${jwt}` },
+  });
+  if (!res.ok) throw new FrontierAuthError(t("auth.resetPassword.failedToSend"), res.status);
+}
+
 /**
  * Verify a password-reset token before showing the new-password form.
  * Returns normally on success; throws FrontierAuthError on invalid/expired.

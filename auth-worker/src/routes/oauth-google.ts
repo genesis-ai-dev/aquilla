@@ -40,9 +40,9 @@ routes.get("/config", c => c.json({ enabled: configured(c.env) }))
 // Account management never contacts Google merely to read connection status.
 routes.get("/methods", authMiddleware, async c => {
   const user = c.get("user")
-  const row = await c.env.AQUILLA_PG.prepare(`SELECT password_hash IS NOT NULL AS password,
+  const row = await c.env.AQUILLA_PG.prepare(`SELECT email, password_hash IS NOT NULL AS password,
     EXISTS(SELECT 1 FROM provider_identities p WHERE p.user_id=users.id AND p.provider='google') AS google
-    FROM users WHERE id=?`).bind(user.id).first<{ password: boolean; google: boolean }>()
+    FROM users WHERE id=?`).bind(user.id).first<{ email: string; password: boolean; google: boolean }>()
   if (!row) return c.json({ error: "unavailable" }, 401)
   return c.json({ ...row, google_available: configured(c.env) })
 })

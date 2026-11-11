@@ -407,3 +407,22 @@ describe("password reset — request deferred past the response (executionCtx)",
     expect(activity.results).toHaveLength(1)
   })
 })
+
+describe("authenticated settings password reset", () => {
+  it("rejects signed-out requests", async () => {
+    expect((await reqJson("/api/v2/auth/me/password-reset/request", {})).status).toBe(401)
+  })
+  it("ignores a supplied recipient and sends only to the authenticated account", async () => {
+    const response = await register("settingsreset", "settingsreset@example.com", "old-password-1")
+    const { access_token } = await response.json() as { access_token: string }
+    const send = vi.fn(async (_message: { to?: string[]; text?: string }) => ({ messageId: "test-reset" }))
+    const result = await app.request("/api/v2/auth/me/password-reset/request", {
+      method: "POST", headers: { Authorization: `Bearer ${access_token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "someone-else@example.com" }),
+    }, { ...env, EMAIL: { send } })
+    expect(result.status).toBe(200)
+    expect(send).toHaveBeenCalledOnce()
+    expect(send.mock.calls[0][0].to).toEqual(["settingsreset@example.com"])
+    expect(send.mock.calls[0][0].text).toContain("username=settingsreset")
+  })
+})

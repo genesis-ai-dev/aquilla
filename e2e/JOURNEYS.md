@@ -595,6 +595,14 @@ UI chrome that used to be one smoke file per click is covered under
 - In-app feedback (AQU-1028, moved to the Help menu by AQU-1548): the Help ("?") menu's **Feedback** item opens the report dialog, the report is submitted to the team whether or not analytics consent is on, and the optional screen capture attaches / is dismissed / fails — covered in RTL (`ReportProblemButton/ReportProblemDialog.test.tsx`, `HelpMenu.test.tsx` for the entry point, `lib/feedback.test.ts`). The worker side (multipart route, R2 key, mail body, throttle, and the degradations when storage or mail is unbound) is covered against real Postgres in `auth-worker/src/__tests__/feedback.test.ts`.
 - A translation note shows the original-language phrase it is about, in its own script and direction, with the occurrence marker and support article — covered in RTL (`TranslationNotesSidebar.originalPhrase.test.tsx`); the producer→panel metadata contract is pinned in `src/lib/notes/note-metadata.test.ts`, `src/lib/parsers/translation-notes.test.ts` and `src/lib/dcs/routes/tsv-notes.test.ts`.
 
+- The no-files empty state below the project's import floor (AQU-2475): no Import
+  button, and the body replaced by the role that may import, read from the floor the
+  workspace resolved so a raised org floor names Maintainer rather than Project Lead.
+  Covered in RTL (`src/components/CellAreaPlaceholder.test.tsx`). No smoke, per the
+  rules above: it is an empty state in a single component, nothing is lost if it
+  breaks, and the import journey behind it is already walked by
+  `e2e/specs/editor/import-and-edit.smoke.spec.ts`.
+
 When you change one of these surfaces, update the matching `*.test.tsx`. If RTL
 is missing, add it — then delete any leftover smoke, do not park it as non-smoke.
 
@@ -612,3 +620,23 @@ positive controls, account-specific identities and recordings, masking, stale
 callbacks, withdrawal, offline recovery and cross-tab refusal in Chromium,
 Firefox and WebKit. `projects/onboarding.smoke.spec.ts` checks the initially
 checked draft, explicit confirmation, Back/login navigation and denied storage.
+
+### Google login (AQU-1057)
+
+`auth/google-login.spec.ts` covers click-only provider contact, cancellation,
+return destination and normal session adoption in Chromium/Firefox/WebKit using
+a simulated provider boundary and a real Aquilla JWT. It does not claim live
+Google Cloud verification. `auth-worker/src/__tests__/oauth-google.test.ts`
+verifies signed provider claims through real Postgres creation/linking and the
+normal JWT consumer, plus state/nonce/PKCE, replay and account-proof rejection.
+`src/pages/GoogleLoginReturn.test.tsx` covers separate account-bound analytics
+approval. The existing onboarding/account-switch smoke remains the session
+regression gate. Run the browser matrix with
+`E2E_CONFIG=e2e/config/playwright.config.google-login.ts pnpm exec tsx scripts/e2e-up.ts -- e2e/specs/auth/google-login.spec.ts`.
+
+Google login-method settings are covered in RTL by
+`LoginMethodsSection.test.tsx` and `GoogleLoginReturn.test.tsx`: explicit connect,
+account-switch isolation, password confirmation, unchanged session/consent and
+last-method guidance. The existing Google worker integration test covers actual
+identity linking/disconnection, authorization, password proof, email mismatch
+and the server-enforced last-method guard.

@@ -166,8 +166,28 @@ export function humanOriginalDownloadName(
   return originalDownloadName("original", format)
 }
 
-/** Deduplicate zip entry names: `Matthew.docx`, `Matthew (2).docx`, … */
-export function uniqueZipEntryName(name: string, used: Set<string>): string {
+/**
+ * A file's display name as a single zip path segment.
+ *
+ * `files.name` is free text any contributor can set (`file.rename`), and a zip
+ * entry name is a path: `../../x` or `C:\x` in a bundle a maintainer downloads
+ * is an instruction to an extractor to write outside the folder it was pointed
+ * at. Every bundle here is flat, so separators, drive colons and control
+ * characters become `_`, and a name that is only dots (`.`, `..`) gets one too.
+ */
+export function safeZipEntryName(name: string): string {
+  // eslint-disable-next-line no-control-regex
+  const flat = name.replace(/[\\/:\u0000-\u001f\u007f]/g, "_")
+  return /^\.*$/.test(flat) ? `_${flat}` : flat
+}
+
+/**
+ * Deduplicate zip entry names: `Matthew.docx`, `Matthew (2).docx`, … The name
+ * is flattened to one path segment first (`safeZipEntryName`), so no caller
+ * can put a path into an archive by way of a file's display name.
+ */
+export function uniqueZipEntryName(rawName: string, used: Set<string>): string {
+  const name = safeZipEntryName(rawName)
   if (!used.has(name)) {
     used.add(name)
     return name

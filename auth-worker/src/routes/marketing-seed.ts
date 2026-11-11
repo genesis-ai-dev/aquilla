@@ -243,7 +243,7 @@ marketing.post("/login", async (c) => {
   try {
     const ids = await seedMarketing(c.env.AQUILLA_PG)
     const jwt = new JWTService(c.env)
-    const accessToken = await jwt.createAccessToken(M_USERNAME)
+    const accessToken = await jwt.createAccessToken(M_USERNAME, undefined, ids.userId)
     return c.json({
       access_token: accessToken,
       token_type: "bearer",

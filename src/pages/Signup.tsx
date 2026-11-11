@@ -80,7 +80,7 @@ export function Signup() {
     </h1>
     <div className="flex flex-col gap-6">
       {billing.kind === "invalid" && <p role="alert">{t("onboarding.wizard.billingInvalid")}</p>}
-      {mode === "signup" && <FrontierSignupForm onSuccess={complete} onSwitchToLogin={(value) => {
+      {mode === "signup" && <FrontierSignupForm returnTo={next} onSuccess={complete} onSwitchToLogin={(value) => {
         setIdentifier(value)
         setMode("login")
       }} />}

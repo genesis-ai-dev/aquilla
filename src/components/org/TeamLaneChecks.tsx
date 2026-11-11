@@ -3,8 +3,12 @@ import type { TargetLaneOption } from "@/hooks/useCurrentTargetLanes"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 
 /**
- * Checkbox per target lane, plus All. All checks the lanes that exist now.
- * It does not mean "also every lane created later."
+ * Checkbox per language lane, plus "All current language lanes". That box
+ * checks the lanes that exist now and nothing more — the grant is saved as the
+ * explicit list of those lane ids (`lanes_explicit`), so a lane added to the
+ * project later is NOT granted. AQU-2481: the box used to borrow the status
+ * filter's bare "All", which read as "every lane, forever"; it now has its own
+ * key that says "current" out loud. Behaviour is unchanged.
  */
 export function TeamLaneChecks({
   lanes,
@@ -46,7 +50,7 @@ export function TeamLaneChecks({
           checked={allChecked}
           onChange={(event) => onChange(event.target.checked ? lanes.map((lane) => lane.id) : [])}
         />
-        {t("org.orgHome.statusFilter.all")}
+        {t("projectSettings.share.laneChoiceAllCurrent")}
       </label>
       {lanes.map((lane) => (
         <label key={lane.id} className="flex items-center gap-2 text-xs">

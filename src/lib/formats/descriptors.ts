@@ -10,9 +10,10 @@
 // Implementations hang off these descriptors in `./registry.ts`, which is the
 // browser/test layer. Keeping the TABLE here and the CODE there is what makes
 // "one registry" true rather than aspirational: `runtime.parse` is the single
-// declaration of which formats a server can parse, and
-// `./descriptors.test.ts` fails if the routing sets in the parse core or the
-// sync-worker ever disagree with it.
+// declaration of which formats a server can parse: `./registry.test.ts` fails
+// if the parse core's routing set disagrees with it, and
+// `sync-worker/src/__tests__/format-descriptors-drift.test.ts` fails if the
+// sync-worker's two tables do.
 
 import type { FormatRuntimes, RoundTripFidelity } from "./contract"
 
@@ -144,7 +145,7 @@ export function descriptorById(id: string): FormatDescriptor | undefined {
 /**
  * Formats whose PARSE needs no DOM — the ones a Cloudflare Worker or the parse
  * Web Worker may run. The sync-worker's server-parseable table is checked
- * against this in `./descriptors.test.ts`.
+ * against this in `sync-worker/src/__tests__/format-descriptors-drift.test.ts`.
  */
 export function universallyParseableFormatIds(): readonly string[] {
   return FORMAT_DESCRIPTORS.filter((d) => d.runtime.parse === "universal").map((d) => d.id)

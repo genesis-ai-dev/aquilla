@@ -175,6 +175,22 @@ export class JWTService {
     }
   }
 
+  /** Ownership proof only, never authentication. The caller must already be
+   * authenticated as `user`. Expired credentials can identify local work but
+   * cannot grant a session, permissions or access to any other account. */
+  async ownsHistoricalToken(token: string, user: AuthUser): Promise<boolean> {
+    if (!this.env.SECRET_KEY || !this.env.ALGORITHM) return false
+    try {
+      const payload = await verify(token, this.env.SECRET_KEY, { alg: this.env.ALGORITHM as "HS256", exp: false })
+      if (typeof payload.sub !== "string" || payload.sub.toLowerCase() !== user.username.toLowerCase() ||
+          typeof payload.exp !== "number" || typeof payload.iat !== "number") return false
+      if (payload.uid !== undefined) return payload.uid === String(user.id)
+      const started = typeof payload.sst === "number" ? payload.sst : payload.iat
+      const created = Math.floor(new Date(user.created_at).getTime()/1000)
+      return Number.isFinite(created) && Number.isFinite(started) && started > created && payload.iat > created
+    } catch { return false }
+  }
+
   /**
    * Lenient parser for the Authorization header. Accepts the canonical
    * `Bearer <jwt>`, a bare JWT, and a few non-standard schemes seen in the

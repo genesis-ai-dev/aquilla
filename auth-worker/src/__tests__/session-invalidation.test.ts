@@ -144,3 +144,26 @@ it("never transfers old credentials to a recreated username, including legacy ti
   expect((await app.request("/api/v2/auth/me",{headers:authHeader(fresh)},env)).status).toBe(200)
   expect((await jwt.verifyToken(fresh))?.uid).toBe("71002")
 })
+
+it("uses expired credentials only as local ownership proof for an authenticated matching account", async () => {
+  await seedUser(72001,"ownerproof")
+  const service = new JWTService(env)
+  const current = await service.createAccessToken("ownerproof")
+  const old = {sub:"ownerproof",iat:1609459200,exp:1640995200}
+  const endpoint = "/api/v2/auth/me/local-data-owner"
+  expect((await app.request(endpoint,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({previousToken:"x"})},env)).status).toBe(401)
+  for (const [claims, secret, expected] of [
+    [old,env.SECRET_KEY,true], [{...old,uid:"72001"},env.SECRET_KEY,true],
+    [{...old,uid:"72002"},env.SECRET_KEY,false], [old,"not-the-secret",false],
+    [{...old,sub:"another-user"},env.SECRET_KEY,false],
+  ] as const) {
+    const previousToken = await sign(claims,secret,"HS256")
+    const res = await app.request(endpoint,{method:"POST",headers:authHeader(current),body:JSON.stringify({previousToken})},env)
+    expect(await res.json()).toEqual({sameAccount:expected})
+    expect((await app.request("/api/v2/auth/me",{headers:authHeader(previousToken)},env)).status).toBe(401)
+  }
+  await env.AQUILLA_PG.prepare("UPDATE users SET created_at=now() WHERE id=72001").run()
+  clearSessionCache()
+  const res = await app.request(endpoint,{method:"POST",headers:authHeader(current),body:JSON.stringify({previousToken:await sign(old,env.SECRET_KEY,"HS256")})},env)
+  expect(await res.json()).toEqual({sameAccount:false})
+})

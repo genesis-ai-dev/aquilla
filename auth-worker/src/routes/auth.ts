@@ -1021,6 +1021,13 @@ const analyticsChoiceSchema = z.object({
   expectedRevision: z.string().nullable(),
 }).strict()
 
+// AQU-2534: historical proof can only associate local data with this already
+// authenticated account. It never issues a token or enables expired sessions.
+auth.post("/me/local-data-owner", authMiddleware, zValidator("json", z.object({ previousToken: z.string().min(1).max(8192) }).strict()), async c => {
+  c.header("Cache-Control", "no-store")
+  return c.json({ sameAccount: await new JWTService(c.env).ownsHistoricalToken(c.req.valid("json").previousToken, c.get("user")) })
+})
+
 auth.get("/me/analytics-consent", authMiddleware, async (c) => {
   const user = c.get("user")
   const row = await c.env.AQUILLA_PG.prepare("SELECT preferences FROM users WHERE id = ?")

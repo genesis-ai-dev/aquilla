@@ -7383,8 +7383,6 @@ export const bn: Catalog = {
   "workspace.offline.connectivityTooltipOnline": "সার্ভারের সাথে সংযুক্ত।",
   "workspace.offline.connectivityTooltipOffline": "কোনো সংযোগ নেই — অফলাইনে কাজ। আপনি অনলাইনে ফিরলে পরিবর্তন সিঙ্ক হয়।",
   "workspace.status.unreachable": "সার্ভারে পৌঁছানো যায় না — আপনার প্রকল্প তবু থাকতে পারে।",
-  "workspace.status.forbidden": "এই প্রকল্পে আর আপনার প্রবেশ নেই। এটি অপ্রত্যাশিত হলে আবার আমন্ত্রণ করতে একজন প্রকল্প রক্ষণাবেক্ষককে বলুন। {backLink}।",
-  "workspace.status.notFound": "প্রকল্প পাওয়া যায়নি, অথবা আপনার প্রবেশ নেই। {backLink}।",
   "workspace.backToDashboard": "ড্যাশবোর্ডে ফিরুন",
   "workspace.projectSettingsHook.noSessionError": "কোনো সেশন বা প্রকল্প নেই — সাইন ইন করে আবার চেষ্টা করুন।",
   "workspace.forms.requiredField": "{label} দরকার",

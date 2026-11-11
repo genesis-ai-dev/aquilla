@@ -5941,8 +5941,6 @@ export const fr: Catalog = {
   "workspace.offline.connectivityTooltipOnline": "Connecté au serveur.",
   "workspace.offline.connectivityTooltipOffline": "Aucune connexion : travail hors ligne. Les modifications se synchroniseront une fois la connexion rétablie.",
   "workspace.status.unreachable": "Impossible de joindre le serveur : votre projet est peut-être toujours disponible.",
-  "workspace.status.forbidden": "Vous n'avez plus accès à ce projet. Si cela est inattendu, demandez à un mainteneur du projet de vous réinviter. {backLink}.",
-  "workspace.status.notFound": "Projet introuvable, ou vous n'y avez pas accès. {backLink}.",
   "workspace.backToDashboard": "Retour au tableau de bord",
   "workspace.projectSettingsHook.noSessionError": "Aucune session ou aucun projet : connectez-vous et réessayez.",
   "workspace.forms.requiredField": "{label} est obligatoire",

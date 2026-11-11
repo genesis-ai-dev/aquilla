@@ -5891,8 +5891,6 @@ export const my: Catalog = {
   "workspace.offline.connectivityTooltipOnline": "ဆာဗာနှင့် ချိတ်ဆက်ထားသည်။",
   "workspace.offline.connectivityTooltipOffline": "ချိတ်ဆက်မှု မရှိပါ — အော့ဖ်လိုင်းလုပ်ကိုင်နေသည်။ အွန်လိုင်းပြန်ရောက်သည်နှင့် ပြောင်းလဲမှုများ ထပ်တူပြုမည်။",
   "workspace.status.unreachable": "Server သို့ ရောက်နိုင်မည် မဟုတ်ပါ — သင်၏ ပရောဂျက် အဆိုပြုခံ ရှိနိုင်သည်။",
-  "workspace.status.forbidden": "သင်သည် ယခုလောက် ဤ ပရောဂျက်သို့ ဝင်ခွင့်မရှိသည်။ ၎င်းကို မျှော်လင့်မထားလျှင် ပရောဂျက် အစိုးအရ အကြီးအကဲထံ ပြန်လည်တင်ဆက်ရန် တောင်းဆိုပါ။ {backLink}။",
-  "workspace.status.notFound": "ပရောဂျက် မတွေ့ရှိခဲ့သည်၊ သို့မဟုတ် သင်သည် ဝင်ခွင့်မရှိသည်။ {backLink}။",
   "workspace.backToDashboard": "dashboard သို့ ပြန်သွားပါ",
   "workspace.projectSettingsHook.noSessionError": "အုပ်စုလူမှုအုပ်စုမည်သည်သို့မဟုတ်ပရောဂျက် — လက်ခြင်းဝင်ပြီးထပ်မံကြည့်စေ။",
   "workspace.forms.requiredField": "{label} လိုအပ်သည်",

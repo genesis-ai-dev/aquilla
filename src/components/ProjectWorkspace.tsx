@@ -13,7 +13,6 @@ import { useParams, useNavigate, useSearchParams, useLocation } from "react-rout
 import { useRememberLastWorkspace } from "@/hooks/useRememberLastWorkspace"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useFormat } from "@/lib/i18n/format"
-import { RichMessage } from "@/lib/i18n/RichMessage"
 import { repairIdmlFileAsCopy } from "@/lib/idml/repair-idml-copy"
 import { useProject } from "@/hooks/useProject"
 import { useProjectLaneStaffing } from "@/hooks/useProjectLaneStaffing"
@@ -34,7 +33,7 @@ import { CellAreaPlaceholder, CellRowsLoadStatus } from "./CellAreaPlaceholder"
 import { WorkspaceMainSkeleton } from "./WorkspaceSkeleton"
 import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
-import { EmptyState, NotFoundIcon } from "@/components/ui/empty"
+import { ProjectNoAccess } from "@/components/ProjectNoAccess"
 import { TabStrip } from "./TabStrip"
 import { useWorkspaceTabs, readLastActiveFileId } from "@/hooks/useWorkspaceTabs"
 import { clearLastLocation, readLastCell, readLastLocation, writeLastCell, writeLastLocation } from "@/lib/frontier/last-location-store"
@@ -17022,45 +17021,12 @@ export function ProjectWorkspace() {
       </div>
     )
   }
-  // FRO-346: revoked / never-granted access gets its own clean state — the
-  // project exists, so "not found" would be misleading (and after a member
-  // removal the removed user must land here on reload, not in the editor).
-  if (status === "forbidden") {
-    return (
-      <div className="p-8 text-muted-foreground" data-testid="project-no-access">
-        <RichMessage
-          k="workspace.status.forbidden"
-          values={{
-            backLink: (
-              <button className="underline" onClick={goToProjects}>
-                {t("workspace.backToDashboard")}
-              </button>
-            ),
-          }}
-        />
-      </div>
-    )
-  }
-  if (status === "not-found" || !project) {
-    return (
-      <div className="p-8">
-        <EmptyState
-          icon={NotFoundIcon}
-          title={
-            <RichMessage
-              k="workspace.status.notFound"
-              values={{
-                backLink: (
-                  <button className="underline" onClick={goToProjects}>
-                    {t("workspace.backToDashboard")}
-                  </button>
-                ),
-              }}
-            />
-          }
-        />
-      </div>
-    )
+  // FRO-346 / AQU-2452: a refused project and a missing one land on the same
+  // screen (ProjectNoAccess). They used to carry different messages, which
+  // told the caller whether a project exists — and after a member removal the
+  // removed user must land here on reload, not in the editor.
+  if (status === "forbidden" || status === "not-found" || !project) {
+    return <ProjectNoAccess />
   }
 
   if (project.deletedAt) {

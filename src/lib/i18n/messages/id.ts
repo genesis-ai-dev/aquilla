@@ -5984,8 +5984,6 @@ export const id: Catalog = {
   "workspace.offline.connectivityTooltipOnline": "Tersambung ke server.",
   "workspace.offline.connectivityTooltipOffline": "Tidak ada koneksi — bekerja secara luring. Perubahan tersinkron begitu Anda daring kembali.",
   "workspace.status.unreachable": "Tidak dapat menghubungi server — proyek Anda mungkin masih tersedia.",
-  "workspace.status.forbidden": "Anda sudah tidak punya akses ke proyek ini. Mintalah pengelola proyek mengundang Anda kembali bila ini tidak Anda duga. {backLink}.",
-  "workspace.status.notFound": "Proyek tidak ditemukan, atau Anda tidak punya akses. {backLink}.",
   "workspace.backToDashboard": "Kembali ke dasbor",
   "workspace.projectSettingsHook.noSessionError": "Tidak ada sesi atau proyek — masuk lalu coba lagi.",
   "workspace.forms.requiredField": "{label} wajib diisi",

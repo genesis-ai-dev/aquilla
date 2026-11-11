@@ -7368,8 +7368,6 @@ export const am: Catalog = {
   "workspace.offline.connectivityTooltipOnline": "ከአገልጋዩ ጋር ተገናኝቷል።",
   "workspace.offline.connectivityTooltipOffline": "ግንኙነት የለም — ከመስመር ውጭ በመሥራት ላይ። ወደ መስመር ሲመለሱ ለውጦች ይመሳሰላሉ።",
   "workspace.status.unreachable": "አገልጋዩን መድረስ አይቻልም — ፕሮጀክትዎ አሁንም ሊገኝ ይችላል።",
-  "workspace.status.forbidden": "ከእንግዲህ ወደዚህ ፕሮጀክት መዳረሻ የለዎትም። ይህ ያልተጠበቀ ከሆነ እንደገና እንዲጋብዝዎ የፕሮጀክት ጠባቂ ይጠይቁ። {backLink}።",
-  "workspace.status.notFound": "ፕሮጀክት አልተገኘም፣ ወይም መዳረሻ የለዎትም። {backLink}።",
   "workspace.backToDashboard": "ወደ ዳሽቦርድ ይመለሱ",
   "workspace.projectSettingsHook.noSessionError": "ክፍለ ጊዜ ወይም ፕሮጀክት የለም — ይግቡ እና እንደገና ይሞክሩ።",
   "workspace.forms.requiredField": "{label} ያስፈልጋል",

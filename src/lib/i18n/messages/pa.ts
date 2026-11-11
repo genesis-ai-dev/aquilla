@@ -7363,8 +7363,6 @@ export const pa: Catalog = {
   "workspace.offline.connectivityTooltipOnline": "ਸਰਵਰ ਨਾਲ ਜੁੜਿਆ.",
   "workspace.offline.connectivityTooltipOffline": "ਕੋਈ ਕਨੈਕਸ਼ਨ ਨਹੀਂ — ਆਫ਼ਲਾਈਨ ਕੰਮ. ਤੁਹਾਡੇ ਮੁੜ ਔਨਲਾਈਨ ਹੋਣ ਤੇ ਬਦਲਾਅ ਸਿੰਕ ਹੁੰਦੇ ਹਨ.",
   "workspace.status.unreachable": "ਸਰਵਰ ਤੱਕ ਨਹੀਂ ਪਹੁੰਚ ਸਕਦੇ — ਤੁਹਾਡਾ ਪ੍ਰੋਜੈਕਟ ਹਾਲੇ ਉਪਲਬਧ ਹੋ ਸਕਦਾ ਹੈ.",
-  "workspace.status.forbidden": "ਤੁਹਾਡੇ ਕੋਲ ਹੁਣ ਇਸ ਪ੍ਰੋਜੈਕਟ ਦੀ ਪਹੁੰਚ ਨਹੀਂ. ਜੇ ਇਹ ਅਚਾਨਕ ਹੈ ਤਾਂ ਮੁੜ ਸੱਦੇ ਲਈ ਪ੍ਰੋਜੈਕਟ ਸੰਭਾਲਕ ਨੂੰ ਕਹੋ. {backLink}.",
-  "workspace.status.notFound": "ਪ੍ਰੋਜੈਕਟ ਨਹੀਂ ਮਿਲਿਆ, ਜਾਂ ਤੁਹਾਡੇ ਕੋਲ ਪਹੁੰਚ ਨਹੀਂ. {backLink}.",
   "workspace.backToDashboard": "ਡੈਸ਼ਬੋਰਡ ਵੱਲ ਪਿੱਛੇ",
   "workspace.projectSettingsHook.noSessionError": "ਕੋਈ ਸੈਸ਼ਨ ਜਾਂ ਪ੍ਰੋਜੈਕਟ ਨਹੀਂ — ਦਾਖਲ ਹੋਵੋ ਅਤੇ ਦੁਬਾਰਾ ਕੋਸ਼ਿਸ਼ ਕਰੋ.",
   "workspace.forms.requiredField": "{label} ਲਾਜ਼ਮੀ ਹੈ",

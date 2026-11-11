@@ -7369,8 +7369,6 @@ export const sw: Catalog = {
   "workspace.offline.connectivityTooltipOnline": "Imeunganishwa na seva.",
   "workspace.offline.connectivityTooltipOffline": "Hakuna muunganisho — unafanya kazi nje ya mtandao. Mabadiliko yatalandanishwa utakapounganishwa tena.",
   "workspace.status.unreachable": "Haiwezekani kufikia seva — mradi wako bado unaweza kupatikana.",
-  "workspace.status.forbidden": "Huna tena ufikiaji wa mradi huu. Uliza Mtunzaji wa mradi akualike tena ikiwa hili halikutarajiwa. {backLink}.",
-  "workspace.status.notFound": "Mradi haujapatikana, au huna ufikiaji. {backLink}.",
   "workspace.backToDashboard": "Rudi kwenye dashibodi",
   "workspace.projectSettingsHook.noSessionError": "Hakuna kipindi wala mradi — ingia na ujaribu tena.",
   "workspace.forms.requiredField": "{label} inahitajika",

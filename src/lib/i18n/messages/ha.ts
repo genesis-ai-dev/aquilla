@@ -7368,8 +7368,6 @@ export const ha: Catalog = {
   "workspace.offline.connectivityTooltipOnline": "An haɗa da sabar.",
   "workspace.offline.connectivityTooltipOffline": "Babu haɗi — ana aiki ba tare da layi ba. Canje-canje suna daidaitawa da zarar kun koma kan layi.",
   "workspace.status.unreachable": "Ba za a iya kaiwa sabar ba — aikinku watakila har yanzu yana samuwa.",
-  "workspace.status.forbidden": "Ba ku da shiga wannan aiki. Ku tambayi mai kula da aiki ya sake gayyata ku idan wannan bai zata ba. {backLink}.",
-  "workspace.status.notFound": "Ba a sami aiki ba, ko ba ku da shiga. {backLink}.",
   "workspace.backToDashboard": "Ku koma allon gida",
   "workspace.projectSettingsHook.noSessionError": "Babu zama ko aiki — ku shiga kuma ku sake gwadawa.",
   "workspace.forms.requiredField": "Ana buƙatar {label}",

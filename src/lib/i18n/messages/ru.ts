@@ -6028,8 +6028,6 @@ export const ru: Catalog = {
   "workspace.offline.connectivityTooltipOnline": "Подключено к серверу.",
   "workspace.offline.connectivityTooltipOffline": "Нет соединения — работа без сети. Изменения синхронизируются, когда вы снова будете в сети.",
   "workspace.status.unreachable": "Не удаётся связаться с сервером — ваш проект, возможно, всё же доступен.",
-  "workspace.status.forbidden": "У вас больше нет доступа к этому проекту. Если это неожиданно, попросите куратора проекта пригласить вас снова. {backLink}.",
-  "workspace.status.notFound": "Проект не найден либо у вас нет доступа. {backLink}.",
   "workspace.backToDashboard": "Вернуться на панель",
   "workspace.projectSettingsHook.noSessionError": "Нет сессии или проекта — войдите и попробуйте снова.",
   "workspace.forms.requiredField": "Заполните поле «{label}»",

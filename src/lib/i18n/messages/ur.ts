@@ -7355,8 +7355,6 @@ export const ur: Catalog = {
   "workspace.offline.connectivityTooltipOnline": "سرور سے جڑا۔",
   "workspace.offline.connectivityTooltipOffline": "کوئی کنکشن نہیں — آف لائن کام۔ آن لائن لوٹتے ہی تبدیلیاں ہم وقت ہوتی ہیں۔",
   "workspace.status.unreachable": "سرور تک نہیں پہنچ سکتے — آپ کا منصوبہ پھر بھی دستیاب ہو سکتا ہے۔",
-  "workspace.status.forbidden": "اس منصوبے تک آپ کی رسائی نہیں رہی۔ اگر غیر متوقع ہو تو نگہدار سے دوبارہ دعوت کہیں۔ {backLink}۔",
-  "workspace.status.notFound": "منصوبہ نہیں ملا، یا آپ کی رسائی نہیں۔ {backLink}۔",
   "workspace.backToDashboard": "ڈیش بورڈ پر واپس",
   "workspace.projectSettingsHook.noSessionError": "کوئی سیشن یا منصوبہ نہیں — لاگ ان کر کے دوبارہ کوشش کریں۔",
   "workspace.forms.requiredField": "{label} درکار ہے",

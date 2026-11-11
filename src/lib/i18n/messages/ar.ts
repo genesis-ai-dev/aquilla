@@ -5903,8 +5903,6 @@ export const ar: Catalog = {
   "workspace.offline.connectivityTooltipOnline": "متصل بالخادم.",
   "workspace.offline.connectivityTooltipOffline": "لا اتصال — تعمل دون اتصال. تتم مزامنة التغييرات بعد عودة الاتصال.",
   "workspace.status.unreachable": "لا يمكن الوصول إلى الخادم — قد يكون مشروعك متاحًا بعد.",
-  "workspace.status.forbidden": "لم يعد لديك وصول إلى هذا المشروع. اطلب من مدير المشروع إعادة دعوتك إذا كان هذا غير متوقع. {backLink}.",
-  "workspace.status.notFound": "لم يتم العثور على المشروع، أو أنت لا تملك وصولاً إليه. {backLink}.",
   "workspace.backToDashboard": "العودة إلى لوحة التحكم",
   "workspace.projectSettingsHook.noSessionError": "لا توجد جلسة أو مشروع — قم بتسجيل الدخول وحاول مرة أخرى.",
   "workspace.forms.requiredField": "{label} مطلوب",

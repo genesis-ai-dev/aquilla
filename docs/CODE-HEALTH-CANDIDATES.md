@@ -4035,3 +4035,18 @@ touch the test file.
 `auth-worker/`, `sync-worker/`, `agent-worker/` or `worker/`. The two sync-worker paths this
 run *mentions* (`__tests__/format-descriptors-drift.test.ts`,
 `external/import-parse-core.ts`) appear only inside comments in `src/`.
+
+**`pnpm test:e2e:smoke` — the same 3 pre-existing failures, and the sandbox needed the same
+three environment fixes the 2026-11-09 entry lists** (chromium/headless-shell `1243→1248`
+and ffmpeg `1011→1013` symlinks under `/opt/pw-browsers`, plus
+`bash scripts/e2e-pg-native.sh` for a native Postgres and its `E2E_PG_ADMIN_URL`; with those
+in place the 3-shard stack booted first try, and `auth-worker`'s `npm ci` again needed
+`--legacy-peer-deps`). Result: **shard 2 33 passed, shard 3 37 passed, shard 1 42 passed /
+3 failed** — numerically identical to that run, and the same three tests:
+`editor/import-and-edit.smoke.spec.ts:339` for srt, vtt and sbv ("alice imports YouTube …
+captions, persists across reload, and downloads original"), each a 15s `locator.click`
+timeout. The 2026-11-09 run proved these reproduce on a detached clean `origin/dev` in this
+same sandbox; this run did not re-prove it by re-running trunk, because it has a stronger
+mechanical proof that the failures are not this diff's: **`git diff -U0 -- '*.ts' '*.tsx'`
+filtered to lines that do not begin `//`, `*` or `/*` is empty** — the diff contains zero
+changed non-comment source lines, so there is nothing in it that any spec could execute.

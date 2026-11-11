@@ -1213,6 +1213,173 @@ describe("executeDraft", () => {
     expect(out.data?.candidates).toContainEqual({ id: FILE, name: "Mark" })
     expect(fetchSpy).not.toHaveBeenCalled()
   })
+
+  // AQU-2398: N wordings of ONE cell, for the translator to compare. A
+  // different shape of work from one wording of N cells, and it must not
+  // disturb that path.
+  describe("alternatives", () => {
+    /** Research reply, then whatever the generation pass should answer. */
+    function mockDraftModel(generation: string) {
+      const requests: { messages: { role: string; content: string }[] }[] = []
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+        requests.push(JSON.parse(String(init?.body)))
+        const content = requests.length === 1 ? "compact evidence [E1]" : generation
+        return new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+      })
+      return requests
+    }
+
+    it("stages N distinct wordings of the one named cell and flags the proposal as a choice", async () => {
+      await seedWorld()
+      const requests = mockDraftModel(
+        JSON.stringify([
+          { i: 1, t: "¡Escuchad! Un sembrador salió a sembrar" },
+          { i: 2, t: "¡Oíd! He aquí, el sembrador salió a sembrar" },
+          { i: 3, t: "Presten atención: un sembrador fue a sembrar" },
+        ]),
+      )
+      const { ctx } = draftCtx()
+      const out = await executeDraft(
+        env.AQUILLA_PG,
+        { cellIds: [cellId("c3")], alternatives: 3 },
+        ctx,
+        { model: "m", apiKey: "k", url: "https://mock/x" },
+      )
+
+      expect(out.ok).toBe(true)
+      expect(out.proposal!.alternatives).toBe(true)
+      // Three commits, all on the SAME cell: mutually exclusive by
+      // construction, since each pins the same current head.
+      expect(out.proposal!.events).toHaveLength(3)
+      expect(new Set(out.proposal!.events.map((e) => e.cellId))).toEqual(new Set([cellId("c3")]))
+      expect(out.proposal!.events.every((e) => e.kind === "target.cell.commit")).toBe(true)
+      expect(out.proposal!.events.map((e) => (e.payload as { value: string }).value)).toEqual([
+        "¡Escuchad! Un sembrador salió a sembrar",
+        "¡Oíd! He aquí, el sembrador salió a sembrar",
+        "Presten atención: un sembrador fue a sembrar",
+      ])
+      // Each option records which one it was, so the picked draft's
+      // provenance says it came out of a choice of three.
+      expect(
+        out.proposal!.events.map((e) => (e.payload as { ai_draft: { alternative?: unknown } }).ai_draft.alternative),
+      ).toEqual([{ index: 1, of: 3 }, { index: 2, of: 3 }, { index: 3, of: 3 }])
+      // Nothing is validated by drafting: a choice of wording asserts nothing.
+      expect(out.proposal!.events.some((e) => e.kind === "cell.validate")).toBe(false)
+      // The orchestrator must not report the cell as drafted — the user still
+      // has to pick.
+      expect(out.text).toContain("alternative wordings")
+      expect(out.text).toContain("discarded unwritten")
+      // The generation pass asked for a choice; the research pass is unchanged.
+      expect(requests).toHaveLength(2)
+      expect(requests[1].messages[0].content).toContain("exactly 3 alternative translations")
+      expect(requests[1].messages[1].content).toContain("Give exactly 3 alternative translations")
+    })
+
+    it("drops a repeated wording rather than offering the same text twice", async () => {
+      await seedWorld()
+      mockDraftModel(
+        JSON.stringify([
+          { i: 1, t: "Un sembrador salió a sembrar" },
+          { i: 2, t: "Un sembrador salió a sembrar" },
+          { i: 3, t: "Un labrador fue a sembrar" },
+        ]),
+      )
+      const { ctx } = draftCtx()
+      const out = await executeDraft(
+        env.AQUILLA_PG,
+        { cellIds: [cellId("c3")], alternatives: 3 },
+        ctx,
+        { model: "m", apiKey: "k", url: "https://mock/x" },
+      )
+      expect(out.proposal!.events.map((e) => (e.payload as { value: string }).value)).toEqual([
+        "Un sembrador salió a sembrar",
+        "Un labrador fue a sembrar",
+      ])
+      expect(
+        out.proposal!.events.map((e) => (e.payload as { ai_draft: { alternative?: unknown } }).ai_draft.alternative),
+      ).toEqual([{ index: 1, of: 2 }, { index: 2, of: 2 }])
+    })
+
+    it("one surviving wording is an ordinary draft, not a choice of one", async () => {
+      await seedWorld()
+      mockDraftModel(JSON.stringify([{ i: 1, t: "Un sembrador salió a sembrar" }, { i: 2, t: "   " }]))
+      const { ctx } = draftCtx()
+      const out = await executeDraft(
+        env.AQUILLA_PG,
+        { cellIds: [cellId("c3")], alternatives: 2 },
+        ctx,
+        { model: "m", apiKey: "k", url: "https://mock/x" },
+      )
+      expect(out.ok).toBe(true)
+      expect(out.proposal!.events).toHaveLength(1)
+      expect(out.proposal!.alternatives).toBeUndefined()
+      expect((out.proposal!.events[0].payload as { ai_draft: { alternative?: unknown } }).ai_draft.alternative).toBeUndefined()
+    })
+
+    it("refuses an ambiguous scope instead of offering wordings of a cell the user did not name", async () => {
+      await seedWorld()
+      const fetchSpy = vi.spyOn(globalThis, "fetch")
+      const { ctx } = draftCtx()
+      // MRK 4 has two untranslated cells (c3, c10) — which one is a choice
+      // only the user can make, and it must cost no model call to say so.
+      const out = await executeDraft(
+        env.AQUILLA_PG,
+        { ref: "MRK 4", alternatives: 3 },
+        ctx,
+        { model: "m", apiKey: "k", url: "https://mock/x" },
+      )
+      expect(out.ok).toBe(false)
+      expect(out.text).toContain("alternatives drafts several wordings of ONE cell")
+      expect(out.text).toContain("2 cells")
+      expect(fetchSpy).not.toHaveBeenCalled()
+    })
+
+    it("leaves the single-draft path alone for an absent, non-numeric or 1 alternatives arg", async () => {
+      await seedWorld()
+      for (const args of [
+        { ref: "MRK 4" },
+        { ref: "MRK 4", alternatives: 1 },
+        { ref: "MRK 4", alternatives: "three" },
+      ] as const) {
+        vi.restoreAllMocks()
+        const requests = mockDraftModel('[{"i":1,"t":"uno"},{"i":2,"t":"dos"}]')
+        const { ctx } = draftCtx()
+        const out = await executeDraft(
+          env.AQUILLA_PG,
+          args,
+          ctx,
+          { model: "m", apiKey: "k", url: "https://mock/x" },
+        )
+        expect(out.ok, JSON.stringify(args)).toBe(true)
+        expect(out.proposal!.alternatives, JSON.stringify(args)).toBeUndefined()
+        // Both untranslated cells drafted once each — the batch path.
+        expect(out.proposal!.events.map((e) => e.cellId), JSON.stringify(args)).toEqual([
+          cellId("c3"),
+          cellId("c10"),
+        ])
+        expect(requests[1].messages[1].content, JSON.stringify(args)).toContain("Translate these 2 segments")
+      }
+    })
+
+    it("caps the ask at 5 wordings", async () => {
+      await seedWorld()
+      const requests = mockDraftModel(
+        JSON.stringify([1, 2, 3, 4, 5, 6, 7].map((i) => ({ i, t: `wording ${i}` }))),
+      )
+      const { ctx } = draftCtx()
+      const out = await executeDraft(
+        env.AQUILLA_PG,
+        { cellIds: [cellId("c3")], alternatives: 12 },
+        ctx,
+        { model: "m", apiKey: "k", url: "https://mock/x" },
+      )
+      expect(requests[1].messages[0].content).toContain("exactly 5 alternative translations")
+      expect(out.proposal!.events).toHaveLength(5)
+    })
+  })
 })
 
 describe("Lane plumbing (AQU-1447)", () => {

@@ -7,8 +7,9 @@
  * the workbench pick it up through the same seams.
  *
  * Current coverage: passages (PassageCard), drafts (working set / receipt /
- * ProposalCard), validation (ValidationQueueCard). Next: comments, flags,
- * history, assignments.
+ * ProposalCard), alternative wordings of one cell (AlternativesCard, AQU-2398),
+ * validation (ValidationQueueCard). Next: comments, flags, history,
+ * assignments.
  */
 
 import type { AgentProposal, PassageRow } from "@/lib/agent/protocol"
@@ -54,3 +55,14 @@ export function passageRowsFor(item: ToolItem): PassageRow[] | null {
 export function isValidationProposal(proposal: AgentProposal): boolean {
   return proposal.events.length > 0 && proposal.events.every((ev) => ev.kind === "cell.validate")
 }
+
+/**
+ * AQU-2398: several mutually-exclusive wordings of ONE cell → AlternativesCard,
+ * which offers a choice of one instead of Apply-all.
+ *
+ * The predicate itself lives in `@/lib/agent/alternatives` because the
+ * non-card review surfaces (the working set, the workbench receipt) must route
+ * past their own per-cell treatment on it too. Re-exported here so this file
+ * stays the enumerable checklist of what renders what.
+ */
+export { isAlternativesProposal } from "@/lib/agent/alternatives"

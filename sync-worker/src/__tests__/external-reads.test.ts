@@ -266,6 +266,61 @@ describe("external read surface", () => {
         expect(Object.keys((await readChecks(true)).builtinChecksByLane)).toEqual(["es"])
         expect(Object.keys((await readChecks(false)).builtinChecksByLane).sort()).toEqual(["es", "fr"])
       })
+
+      // AQU-2205: the RAW blob beside the resolved view. Both keys that carry a
+      // lane tag — the per-lane check overrides and the lane-scoped rules —
+      // used to pass the wall untouched, so a caller below Maintainer read
+      // every lane's tag, its overrides, and its rule text.
+      it("trims the raw blob's per-lane overrides and lane-scoped rules under the wall", async () => {
+        const frRule = {
+          id: "rule-fr", name: "French only", description: "", severity: "minor", source: "user",
+          scope: "lane", lane: "fr", check: { type: "target-forbids", targetPattern: "oui" },
+          enabled: true, createdAt: "2026-10-01T00:00:00.000Z",
+        }
+        const esRule = {
+          ...frRule, id: "rule-es", name: "Spanish only", lane: "es",
+          check: { type: "target-forbids", targetPattern: "claro" },
+        }
+        const projectRule = {
+          id: "rule-all", name: "Everywhere", description: "", severity: "major", source: "user",
+          scope: "project", check: { type: "target-forbids", targetPattern: "xx" },
+          enabled: true, createdAt: "2026-10-01T00:00:00.000Z",
+        }
+        await seedSettings(
+          {
+            algorithmicChecksByLane: {
+              fr: { capitalization: { enabled: false } },
+              es: { capitalization: { enabled: false } },
+            },
+            rules: [projectRule, frRule, esRule],
+          },
+          5,
+        )
+        await testDb.pg.query(
+          `INSERT INTO lanes (id, project_id, role, name, legacy_tag) VALUES
+            ('frlane01', 'proj-a', 'target', 'French', 'fr'),
+            ('eslane01', 'proj-a', 'target', 'Spanish', 'es')`,
+        )
+        await testDb.pg.query(
+          `INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level)
+           VALUES ('proj-a', 2, 'eslane01', 400)`,
+        )
+
+        const walled = await readChecks(true)
+        expect(Object.keys(walled.settings.algorithmicChecksByLane as Record<string, unknown>)).toEqual(["es"])
+        expect(walled.settings.rules).toEqual([projectRule, esRule])
+        // The hidden lane's tag and its rule text are nowhere in the response.
+        const json = JSON.stringify(walled)
+        expect(json).not.toContain("rule-fr")
+        expect(json).not.toContain("oui")
+        // The version stays the live one, so PatchSettings' ifMatchVersion matches.
+        expect((walled as unknown as { version: number }).version).toBe(5)
+
+        // Wall off: the blob is whole, exactly as today.
+        const open = await readChecks(false)
+        expect(Object.keys(open.settings.algorithmicChecksByLane as Record<string, unknown>).sort()).toEqual(["es", "fr"])
+        expect(open.settings.rules).toEqual([projectRule, frRule, esRule])
+      })
     })
 
     it("a project with no settings row reads as {} at version 0", async () => {

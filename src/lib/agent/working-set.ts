@@ -10,6 +10,7 @@
  * needs no extra state and is unit-testable.
  */
 
+import { isAlternativesProposal } from "./alternatives"
 import type { PassageRow, StagedEvent } from "./protocol"
 import type { AgentRunUi } from "./run-state"
 
@@ -85,6 +86,12 @@ export function deriveWorkingSet(
         }
       }
       if (item.kind === "proposal") {
+        // AQU-2398: a choice of wordings for ONE cell is not working-set work.
+        // Rows here are keyed by cellId, so N wordings of one cell would
+        // collapse into one row and the LAST wording would silently become
+        // "the" draft — the choice gone, and the other wordings invisible.
+        // AlternativesCard owns that review.
+        if (isAlternativesProposal(item.proposal)) continue
         for (const ev of item.proposal.events) {
           if (ev.kind !== "target.cell.commit" || !ev.cellId) continue
           const decision = decided.get(proposalRowKey(item.proposal.proposalId, ev.cellId))

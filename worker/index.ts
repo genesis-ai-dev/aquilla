@@ -76,6 +76,61 @@ export default {
   },
 }
 
+// Known SPA route patterns. Paths matching these should get the SPA shell with
+// a 200. Everything else gets a real 404. This fixes the soft-404 SEO issue
+// where crawlers see 200 for nonexistent paths (docs/specs/2026-07-31-marketing-app-namespace-design.md
+// lines 96-97, 182).
+//
+// Derived from src/App.tsx route table. Update this list when app routes change.
+// Note: /settings is NOT a top-level route (settings live under /orgs/:orgId/settings).
+const SPA_ROUTE_PATTERNS = [
+  "/",
+  "/app",
+  "/onboarding",
+  "/login",
+  "/signup",
+  "/reset-password",
+  "/verify-email",
+  "/connect-agent",
+  "/oauth/consent",
+  "/oauth/callback",
+  "/projects",
+  "/shared",
+  "/preferences",
+  "/billing/select",
+  "/admin",
+  "/debug",
+  "/this-computer",
+  "/paratext",
+  // Parametric routes
+  /^\/join\//,
+  /^\/join-org\//,
+  /^\/check\//,
+  /^\/link\//,
+  /^\/approve\//,
+  /^\/projects\//,
+  /^\/project\//,
+  /^\/orgs\//,
+  /^\/preferences\//,
+  /^\/billing\//,
+  /^\/paratext\//,
+  // Dev/marketing routes (includes both login and logout)
+  /^\/__dev\//,
+  /^\/__marketing\//,
+]
+
+function isKnownSpaRoute(pathname: string): boolean {
+  // Normalize: strip trailing slash except for root "/"
+  const normalized = pathname === "/" ? "/" : pathname.replace(/\/$/, "")
+  
+  return SPA_ROUTE_PATTERNS.some(pattern => {
+    if (typeof pattern === "string") {
+      return normalized === pattern
+    }
+    return pattern.test(normalized)
+  })
+}
+
 async function route(req: Request, env: Env): Promise<Response> {
   const url = new URL(req.url)
 
@@ -119,8 +174,42 @@ async function route(req: Request, env: Env): Promise<Response> {
     })
   }
 
-  // Everything else: hand off to the static-asset binding.
+  // Soft-404 fix: for paths that are not known SPA routes, check if a real
+  // static file exists. If the asset binding returns a genuine file (not the
+  // SPA fallback), serve it. Only return 404 when the binding has applied
+  // the SPA fallback (index.html) for a path that shouldn't get it.
+  //
+  // This handles public files not under /assets/ like /aquilla-invite-og-1200x630.png,
+  // /favicon.svg, /icons.svg, /character-voices/*, and /google*.html (Search
+  // Console verification).
+  if (!isKnownSpaRoute(url.pathname)) {
+    const asset = await env.ASSETS.fetch(req)
+    const contentType = asset.headers.get("Content-Type") ?? ""
+    
+    // If the asset binding returned the SPA shell (index.html), this is an
+    // unknown path that shouldn't get the 200 fallback — return 404 instead.
+    // Detect the SPA shell by a stable content marker rather than size: the
+    // shell always contains the comment "This file is the APP shell" (line 9
+    // of index.html). Real verification HTML files don't have this marker.
+    if (asset.ok && contentType.includes("text/html")) {
+      const html = await asset.text()
+      // The SPA shell has a distinctive comment that no real public HTML file has.
+      if (html.includes("This file is the APP shell")) {
+        return new Response("Page not found", {
+          status: 404,
+          headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
+        })
+      }
+      // Real public HTML file (e.g., google*.html) — serve it.
+      return new Response(html, asset)
+    }
+    
+    // Real static file (image, audio, etc.) — serve it.
+    return asset
+  }
+
+  // Known SPA routes: hand off to the static-asset binding.
   // Workers `not_found_handling = "single-page-application"` rewrites
-  // unknown paths to index.html — React Router handles the rest.
+  // these to index.html — React Router handles the rest.
   return env.ASSETS.fetch(req)
 }

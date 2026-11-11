@@ -21,7 +21,10 @@
 // From then on the forward fold resolves an upstream cell of that file through
 // the mapping (`loadAdoptedCellIds`) and writes onto the project's cell. The
 // target side is never touched: translations, validations, comments and
-// recordings are keyed on cell ids this module does not change.
+// recordings are keyed on cell ids this module does not change. (An IDML
+// file's kept translations do have to be re-placed into the new source's style
+// runs, as after a re-import; the workspace does that, not this worker — see
+// src/lib/idml/link-adopted-align.ts.)
 //
 // Only `consumes: 'source'` links adopt. A chain link's source is the
 // upstream's TRANSLATION, which an independently imported file cannot match.

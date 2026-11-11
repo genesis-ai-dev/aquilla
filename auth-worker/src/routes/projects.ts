@@ -1669,7 +1669,10 @@ const projectMemberSingle = z.object({
   role: roleLevelSchema,
   /** AQU-1808: explicit "every current target lane". Omitted is not that choice. */
   allCurrentLanes: z.literal(true).optional(),
-  /** AQU-1808: the lanes this person may use. Absent is not "every lane". */
+  /**
+   * AQU-1808: the lanes this person may use. Absent is not "every lane".
+   * AQU-2358: the reserved value `__no_lanes__`, alone, means no lanes at all.
+   */
   scopeLanes: z
     .array(z.string().max(MAX_LANE_VALUE_LENGTH))
     .max(MAX_INVITE_SCOPE_LANES)
@@ -2172,6 +2175,7 @@ const createInviteSchema = z.object({
    * AQU-528 / AQU-1808: lanes to auto-grant on join. Naming lanes limits the
    * joiner to those. Omitting them is not "every lane" — send allCurrentLanes
    * for that. A value is a lane id or a legacy tag that names exactly one lane.
+   * AQU-2358: the reserved value `__no_lanes__`, alone, grants no lanes at all.
    */
   scopeLanes: z
     .array(z.string().max(MAX_LANE_VALUE_LENGTH))

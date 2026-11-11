@@ -22,6 +22,8 @@ export const MAX_HONORIFIC_LEVELS = 8
 export const MAX_NUMBER_WORDS = 200
 /** Most marks in one punctuation class. A class with more than a handful is a mistake. */
 export const MAX_PUNCTUATION_MARKS = 12
+/** Most separators in one number-format role (AQU-2430). */
+export const MAX_NUMBER_SEPARATORS = 4
 
 /**
  * AQU-1906: the marks this language uses where the source uses "?", "!", ".",
@@ -30,6 +32,15 @@ export const MAX_PUNCTUATION_MARKS = 12
  * lead's override of it.
  */
 export type { PunctuationProfile } from './punctuation-conventions'
+
+/**
+ * AQU-2430: the characters this language groups thousands with and marks a
+ * decimal fraction with. Shape and resolution (CLDR answers both by itself;
+ * this slot is the project lead's override, and the only way to get the
+ * number-format check in a language CLDR has no data for) live with
+ * ./number-format.ts.
+ */
+export type { NumberFormatProfile } from './number-format'
 
 /** How the language marks a question besides a question mark. */
 export interface QuestionMarkersProfile {
@@ -126,6 +137,24 @@ const markList: FieldCheck = (value, path) => {
     if (!isMarkCharacter(item)) return `${path}[${index}] must be one punctuation character`
   }
   if (new Set(value).size !== value.length) return `${path} lists a mark twice`
+  return null
+}
+
+/**
+ * A list of distinct single separator characters, possibly empty. Unlike
+ * `markList` this admits whitespace: French and Russian group thousands with a
+ * narrow no-break space, which is a real answer here and not a mark.
+ */
+const separatorList: FieldCheck = (value, path) => {
+  if (!Array.isArray(value) || value.length > MAX_NUMBER_SEPARATORS) {
+    return `${path} must be a list of at most ${MAX_NUMBER_SEPARATORS} separators`
+  }
+  for (const [index, item] of value.entries()) {
+    if (typeof item !== 'string' || Array.from(item).length !== 1 || /[\p{L}\p{N}]/u.test(item)) {
+      return `${path}[${index}] must be one character that is not a letter or a digit`
+    }
+  }
+  if (new Set(value).size !== value.length) return `${path} lists a separator twice`
   return null
 }
 
@@ -286,6 +315,15 @@ export function punctuationProblem(value: unknown): string | null {
   return Object.keys(value as Record<string, unknown>).length === 0 ? 'punctuation needs at least one field' : null
 }
 
+/** `{}` is not an answer: the slot exists to state at least one separator. */
+export function numberFormatProblem(value: unknown): string | null {
+  const problem = fields('numberFormat', value, { group: separatorList, decimal: separatorList })
+  if (problem) return problem
+  return Object.keys(value as Record<string, unknown>).length === 0
+    ? 'numberFormat needs at least one field'
+    : null
+}
+
 export function measuresProblem(value: unknown): string | null {
   return oneOf(MEASURES_STRATEGIES)(value, 'measures')
 }
@@ -314,6 +352,7 @@ export const SLOT_TYPE_NAMES = {
     '{ question?, exclamation?, statement?, colon?, semicolon?: string[] ' +
     '(one punctuation character each), noTerminalMark?: boolean }',
   numberWords: '"cldr" | { [number: string]: string }',
+  numberFormat: '{ group?, decimal?: string[] (one non-letter, non-digit character each) }',
   speechVerbs: 'string[]',
   kinTerms: '{ relativeAgeDistinction: boolean, notes?: string }',
   divineNames: '{ yhwh?: string, deityPronounCapitalization?: boolean, kyriosJesus?: string, kyriosGod?: string }',

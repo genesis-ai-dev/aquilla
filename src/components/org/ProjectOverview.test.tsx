@@ -1576,12 +1576,36 @@ describe("ProjectOverview project-only invitee access (AQU-474)", () => {
     expect(orgIds).toContain(99)
   })
 
-  it("still redirects to / when the user genuinely has no access (status = not-found)", async () => {
-    useProject.mockReturnValue({ project: null, status: "not-found", refresh })
+  // AQU-2452: a refusal is SHOWN, not navigated away from. The overview used
+  // to replace the URL with "/" on 403/404, so an org member who opened a
+  // project they hold no grant on watched the page start to load and then sit
+  // back on the dashboard with nothing said at all. Both refusals now render
+  // the same ProjectNoAccess screen the workspace shows.
+  it.each(["not-found", "forbidden"] as const)(
+    "shows the no-access screen instead of silently redirecting (status = %s)",
+    async (status) => {
+      useProject.mockReturnValue({ project: null, status, refresh })
+
+      renderOverview()
+
+      await screen.findByTestId("project-no-access")
+      expect(navigate).not.toHaveBeenCalled()
+    },
+  )
+
+  // "Back to dashboard" is the only way out of that screen, and it has to go
+  // to the dashboard the caller is actually on — org 1 here (the default
+  // single-org mock), not the all-orgs portfolio.
+  it("the no-access screen's Back to dashboard goes to the caller's current org dashboard", async () => {
+    useProject.mockReturnValue({ project: null, status: "forbidden", refresh })
 
     renderOverview()
 
-    await waitFor(() => expect(navigate).toHaveBeenCalledWith("/", { replace: true }))
+    const back = await screen.findByRole("button", { name: "Back to dashboard" })
+    await waitFor(() => expect(screen.getByTestId("project-no-access")).toBeInTheDocument())
+    fireEvent.click(back)
+
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith("/orgs/1"))
   })
 
   // AQU-416: the overview rendering (no redirect) is necessary but not

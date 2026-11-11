@@ -81,11 +81,17 @@ export function OrgRouteGate() {
   }
 
   // AQU-790: a guest has project-level access only — the org's member-only tool
-  // routes (members/settings/teams/archived/assigned) don't apply. Keep them
-  // out of the guest overview even via a typed URL. `/projects` is the guest
-  // org's real home, matching a member org's projects table.
+  // routes (members/settings/teams/archived) don't apply. Keep them out of the
+  // guest overview even via a typed URL. `/projects` is the guest org's real
+  // home, matching a member org's projects table.
+  //
+  // AQU-2458: `/assigned` is the exception. It lists only the caller's OWN
+  // open assignments in this org's projects, so it describes their work rather
+  // than the org — and it is the only cross-project view of it a project-only
+  // member has. The server answers them there too, filtered to the projects
+  // they still reach.
   const rest = parseOrgPath(location.pathname)?.rest ?? ""
-  if (isGuest && rest !== "" && rest !== "/projects") {
+  if (isGuest && rest !== "" && rest !== "/projects" && rest !== "/assigned") {
     return <Navigate to={orgProjectsPath(orgKey)} replace />
   }
 

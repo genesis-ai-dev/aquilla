@@ -121,7 +121,11 @@ it('runs sandbox checkout on an allowlisted development deployment and nowhere e
     BASE_URL: 'https://dev.aquilla.app', SYNC_WORKER_URL: 'https://api.dev.aquilla.app/sync',
     DEPLOYMENT_WORKER_NAME: 'aquilla-dev-identity',
     CF_VERSION_METADATA: { id: 'dev-version', tag: 'aquilla-dev-identity-development-abc123', timestamp: '2026-09-17T00:00:00Z' },
-    BILLING_SANDBOX_HOSTS: 'api.dev.aquilla.app,dev.aquilla.app' } as unknown as Env
+    BILLING_SANDBOX_HOSTS: 'api.dev.aquilla.app,dev.aquilla.app',
+    // AQU-2469: dev admits only admins and its access list. List both users so
+    // the refusals below come from the billing guard, not the dev gate.
+    DEV_ACCESS_LIST: { get: async (key: string) =>
+      (['alice@example.com', 'bob@example.com'].includes(key) ? '{}' : null) } } as unknown as Env
   const started = await checkout(input, 'alice', deployed, 'https://api.dev.aquilla.app')
   expect(started.status).toBe(200)
   expect(new URLSearchParams(stripe.requests[0]!.body).get('success_url'))

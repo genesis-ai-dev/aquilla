@@ -48,6 +48,12 @@ export interface DraftArgs {
   cellIds?: unknown
   limit?: unknown
   instructions?: unknown
+  /**
+   * AQU-2398: ask for N mutually-exclusive wordings of ONE cell instead of one
+   * draft each for a batch of cells. 2-5; anything else (absent, 1, not a
+   * number) is the ordinary single-draft path, untouched.
+   */
+  alternatives?: unknown
 }
 
 export interface DraftModelConfig {
@@ -138,6 +144,14 @@ export type DraftGeneration =
       empty: boolean
       /** AQU-1455: set when a failed ref widened the scope to the whole file. */
       notice?: string
+      /**
+       * AQU-2398: set when `emits` are mutually-exclusive ALTERNATIVE wordings
+       * of this one cell rather than one draft per cell. The reviewer picks
+       * exactly one; the rest are discarded unwritten. Absent (and so falsy)
+       * on every ordinary draft, including an alternatives request the model
+       * answered with only one distinct wording.
+       */
+      alternativesCellId?: string
     }
 
 // Keep agent proposals in the same human-review package used by the editor.
@@ -145,6 +159,11 @@ const DEFAULT_LIMIT = 10
 const MAX_LIMIT = 10
 const PRECEDING_CONTEXT = 5
 const EXAMPLES_N = 10
+/** AQU-2398: how many alternative wordings of one cell may be asked for. Two
+ *  is the least that is a choice; five is as many as a person can weigh side
+ *  by side, and bounds the one generation call's output. */
+const ALTERNATIVES_MIN = 2
+const ALTERNATIVES_MAX = 5
 const RESEARCH_RECORD_MAX_CHARS = 12_000
 // v5 (AQU-2342 phase 2): checks hint + matching terms, one shared section order.
 const PROMPT_VERSION = "agent-draft-v5-guidance"
@@ -194,6 +213,45 @@ For each numbered source segment:
 5. End with concise constraints for the drafting pass.
 
 Do not produce final translated segments in this pass.`)
+}
+
+/**
+ * AQU-2398: how many alternatives this call asks for, or null for the
+ * ordinary one-draft-per-cell path.
+ *
+ * Deliberately strict rather than coercive: only a real number in range turns
+ * the alternatives path on, so `alternatives: "lots"` or `alternatives: 1`
+ * drafts normally instead of silently becoming a different feature. A number
+ * above the cap is clamped, because "give me 10 wordings" is a clear ask that
+ * five answers.
+ */
+export function resolveAlternativeCount(raw: unknown): number | null {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return null
+  const n = Math.floor(raw)
+  if (n < ALTERNATIVES_MIN) return null
+  return Math.min(n, ALTERNATIVES_MAX)
+}
+
+/** The GENERATION pass when the ask is N wordings of ONE segment. Same
+ *  standing guidance and the same strict [{i,t}] contract as a batch draft —
+ *  `i` numbers the ALTERNATIVE here, not the segment. */
+export function alternativesSystemPrompt(
+  ctx: DraftGenerationContext,
+  guidance: DraftGuidance,
+  count: number,
+): string {
+  return passSystemPrompt(ctx, guidance, `You are the GENERATION pass. Use the separate evidence record supplied by the user as a decision aid, while treating the project evidence above as authoritative.
+
+You are given ONE source segment. Produce exactly ${count} alternative translations of that one segment, for a human translator to compare and choose between.
+
+Rules:
+1. Every alternative must be a complete, faithful translation of the whole segment on its own. Do not split the segment across alternatives, and do not translate only part of it.
+2. The alternatives must DIFFER from each other in wording, phrasing or register — never return the same text twice, and never pad an alternative out with a comment about it.
+3. Every alternative must obey the project evidence above: render every listed term with an approved rendering, satisfy every listed check, and keep names, numbers and punctuation conventions consistent with the pairs. The choice offered is between defensible renderings, not between a good one and a deliberately worse one.
+4. Prefer directly attested, repeated constructions over inference. Where the attested evidence allows only one rendering of a phrase, keep that rendering in every alternative and vary what the evidence leaves open.
+5. Check each alternative preserves every proposition, participant, semantic role, relation, polarity, quantity and name, with none omitted or added.
+6. Order them best first, as far as you can judge by the project's own evidence.
+7. Output STRICT JSON only: an array like [{"i":1,"t":"<first alternative>"},{"i":2,"t":"<second alternative>"}] with exactly ${count} objects, i running 1 to ${count}. No prose, no code fences.`)
 }
 
 export function draftSystemPrompt(ctx: DraftGenerationContext, guidance: DraftGuidance): string {
@@ -372,7 +430,13 @@ export async function generateDrafts(
   })
   if (!scope.ok) return { ok: false, error: scope.error, ...(scope.candidates ? { candidates: scope.candidates } : {}) }
   const maxCells = Math.max(1, Math.floor(ctx.maxCells ?? MAX_LIMIT))
-  const limit = Math.min(Math.max(Number(args.limit) || DEFAULT_LIMIT, 1), maxCells)
+  // AQU-2398: N wordings of ONE cell is a different shape of work from one
+  // wording of N cells, so the alternatives path takes one cell and caps the
+  // work list at one regardless of `limit`.
+  const alternativeCount = resolveAlternativeCount(args.alternatives)
+  const limit = alternativeCount
+    ? 1
+    : Math.min(Math.max(Number(args.limit) || DEFAULT_LIMIT, 1), maxCells)
 
   const resolvedLane = await resolveLaneIdOrTag(db, ctx.projectId, ctx.lane)
   const all = await selectCellPairs(db, ctx.projectId, { fileId: scope.fileId, range: scope.range, laneId: resolvedLane.laneId })
@@ -434,6 +498,19 @@ export async function generateDrafts(
       }
     }
     return { ok: true, fileId: scope.fileId, emits: [], missed: [], remaining, drafted: [], empty: true, notice: scope.notice }
+  }
+
+  // AQU-2398: alternatives are a choice about ONE line, so the cell has to be
+  // unambiguous. `remaining > 0` means the scope held more cells and the slice
+  // above picked the first — say so rather than quietly offering wordings of a
+  // cell the user did not name.
+  if (alternativeCount && remaining > 0) {
+    return {
+      ok: false,
+      error:
+        `alternatives drafts several wordings of ONE cell, and this scope has ${remaining + 1} cells to draft. `
+        + "Call draft again with cellIds set to the single cell the user means (or drop alternatives to draft the whole scope once each).",
+    }
   }
 
   // Discourse left-context: committed pairs immediately before the batch.
@@ -517,17 +594,28 @@ export async function generateDrafts(
   if (!evidenceRecord) {
     return { ok: false, error: "drafting research returned no evidence record — retry or draft fewer cells" }
   }
-  ctx.sendProgress(`Drafting ${work.length} cells (pass 2 of 2)`)
+  ctx.sendProgress(
+    alternativeCount
+      ? `Drafting ${alternativeCount} alternatives (pass 2 of 2)`
+      : `Drafting ${work.length} cells (pass 2 of 2)`,
+  )
   const generated = await callPaidPass(
     ctx,
     modelCfg,
     [
-      { role: "system", content: draftSystemPrompt(ctx, guidance) },
+      {
+        role: "system",
+        content: alternativeCount
+          ? alternativesSystemPrompt(ctx, guidance, alternativeCount)
+          : draftSystemPrompt(ctx, guidance),
+      },
       {
         role: "user",
         content:
           `Evidence record from the completed research pass:\n<evidence>\n${evidenceRecord}\n</evidence>\n\n` +
-          `Translate these ${work.length} segments:\n${numbered}`,
+          (alternativeCount
+            ? `Give exactly ${alternativeCount} alternative translations of this one segment:\n${numbered}`
+            : `Translate these ${work.length} segments:\n${numbered}`),
       },
     ],
   )
@@ -541,51 +629,105 @@ export async function generateDrafts(
 
   const generatedAt = Date.now()
   const exampleIds = examplePairs.flatMap((example) => example.cellId ? [example.cellId] : [])
-  const emits: DraftEmit[] = []
-  const missed: string[] = []
-  const draftedIdx = new Set<number>()
-  work.forEach((p, i) => {
-    const reply = stripTrailingBareMarkers((drafts.get(i + 1) ?? "").trim())
-    // AQU-2385, rungs 2-4: put the real tags back, then detect -> repair ->
-    // quarantine. A quarantined draft is NOT dropped: it is staged like any
-    // other AI draft and a human approves or rejects it, which is exactly the
-    // review this changeset gate exists for.
-    const ladder = reply ? settleTagLadder(stripTrailingBareMarkers(p.source), reply, tagMask) : null
+
+  /**
+   * One reply entry → the text to stage, or null when it is not a translation.
+   *
+   * AQU-2385, rungs 2-4: put the real tags back, then detect -> repair ->
+   * quarantine. A quarantined draft is NOT dropped: it is staged like any
+   * other AI draft and a human approves or rejects it, which is exactly the
+   * review this changeset gate exists for.
+   *
+   * AQU-2217: the drafting model can fill a well-formed {"i","t"} entry with a
+   * refusal ("I'm sorry, but I cannot assist with that request."). That is not
+   * a translation, so it must never reach stageEvents and become a reviewable
+   * changeset entry — the caller reports it as missed instead.
+   */
+  const settleReply = (pair: CellPair, raw: string | undefined): string | null => {
+    const reply = stripTrailingBareMarkers((raw ?? "").trim())
+    const ladder = reply ? settleTagLadder(stripTrailingBareMarkers(pair.source), reply, tagMask) : null
     if (ladder && ladder.status !== "clean" && ladder.reason) {
       console.warn(
-        `[draft] inline tags ${ladder.status} for cell ${p.cellId}: ` +
+        `[draft] inline tags ${ladder.status} for cell ${pair.cellId}: ` +
         describeTagFailure(ladder.reason, ladder.detail),
       )
     }
     const t = ladder ? ladder.value : reply
-    // AQU-2217: the drafting model can fill a well-formed {"i","t"} entry with
-    // a refusal ("I'm sorry, but I cannot assist with that request."). That is
-    // not a translation, so it must never reach stageEvents and become a
-    // reviewable changeset entry — it joins `missed` like an absent entry, and
-    // the orchestrator is told to re-run those cells.
-    if (t && !isRefusalReply(t)) {
-      draftedIdx.add(i)
-      emits.push({
-        kind: "target.cell.commit",
-        fileId: scope.fileId,
-        cellId: p.cellId,
-        payload: {
-          value: t,
-          ai_draft: {
-            model: modelCfg.model,
-            provider: "platform",
-            promptVersion: PROMPT_VERSION,
-            exampleIds,
-            generatedAt,
-            mode: "agent",
-            projectState: {
-              sourceLanguage: ctx.sourceLanguage ?? "",
-              targetLanguage: ctx.targetLanguage ?? "",
-              approvedExampleCount: examplePairs.length,
-            },
-          },
+    return t && !isRefusalReply(t) ? t : null
+  }
+
+  const draftEmit = (pair: CellPair, value: string, alternative?: { index: number; of: number }): DraftEmit => ({
+    kind: "target.cell.commit",
+    fileId: scope.fileId,
+    cellId: pair.cellId,
+    payload: {
+      value,
+      ai_draft: {
+        model: modelCfg.model,
+        provider: "platform",
+        promptVersion: PROMPT_VERSION,
+        exampleIds,
+        generatedAt,
+        mode: "agent",
+        ...(alternative ? { alternative } : {}),
+        projectState: {
+          sourceLanguage: ctx.sourceLanguage ?? "",
+          targetLanguage: ctx.targetLanguage ?? "",
+          approvedExampleCount: examplePairs.length,
         },
-      })
+      },
+    },
+  })
+
+  // AQU-2398: N wordings of the one cell in `work`. Each is a separate staged
+  // commit on the SAME cell pinned to the SAME current head, so they are
+  // mutually exclusive by construction — the reviewer picks one and the head
+  // compare-and-swap would reject a second anyway.
+  if (alternativeCount) {
+    const pair = work[0]
+    // Distinct wordings only: an identical repeat is not a choice, so it is
+    // dropped rather than shown twice. Comparison is on the settled text.
+    const seen = new Set<string>()
+    const values: string[] = []
+    for (let i = 1; i <= alternativeCount; i++) {
+      const value = settleReply(pair, drafts.get(i))
+      if (!value) continue
+      const key = value.trim()
+      if (seen.has(key)) continue
+      seen.add(key)
+      values.push(value)
+    }
+    if (values.length === 0) {
+      return {
+        ok: false,
+        error: "the drafting model returned no usable alternative for that cell — retry, or draft it without alternatives",
+      }
+    }
+    return {
+      ok: true,
+      fileId: scope.fileId,
+      emits: values.map((value, i) =>
+        // A single surviving wording is an ordinary draft, not a choice, so it
+        // carries no alternative provenance and sets no alternativesCellId.
+        values.length > 1 ? draftEmit(pair, value, { index: i + 1, of: values.length }) : draftEmit(pair, value),
+      ),
+      missed: [],
+      remaining: 0,
+      drafted: [pair],
+      empty: false,
+      notice: scope.notice,
+      ...(values.length > 1 ? { alternativesCellId: pair.cellId } : {}),
+    }
+  }
+
+  const emits: DraftEmit[] = []
+  const missed: string[] = []
+  const draftedIdx = new Set<number>()
+  work.forEach((p, i) => {
+    const t = settleReply(p, drafts.get(i + 1))
+    if (t) {
+      draftedIdx.add(i)
+      emits.push(draftEmit(p, t))
     } else {
       missed.push(p.canonicalRef ?? ctx.aliases.alias(p.cellId, "c"))
     }
@@ -636,6 +778,18 @@ export async function executeDraft(
   const lines = gen.notice ? [gen.notice, modelVerdictBlock] : [modelVerdictBlock]
   if (gen.missed.length > 0) lines.push(`No draft returned for: ${gen.missed.join(", ")} — re-run draft with their cellIds.`)
   if (gen.remaining > 0) lines.push(`${gen.remaining} more untranslated cells remain in scope — call draft again to continue.`)
+  // AQU-2398: mark the frame so the client renders the pick-one card instead
+  // of an Apply-all diff, and tell the orchestrator what the user will see, so
+  // it does not report "staged N changes" for what is one change with N
+  // candidate wordings. Staging can reject or drop events, so the flag follows
+  // what actually survived.
+  if (gen.alternativesCellId && proposal && proposal.events.length > 1) {
+    proposal.alternatives = true
+    lines.push(
+      `Staged ${proposal.events.length} alternative wordings of that one cell. The user picks ONE in the app and the rest `
+      + "are discarded unwritten — tell them to compare the options and choose; do not say the cell was drafted.",
+    )
+  }
 
   // Working-set rows carry the cells' CURRENT committed state — the drafted
   // values ride the proposal frame as the pending overlay. Echoing the draft

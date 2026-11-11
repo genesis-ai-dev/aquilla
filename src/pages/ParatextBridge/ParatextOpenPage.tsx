@@ -21,6 +21,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useActiveOrgOptional } from "@/context/OrgContext"
 import { useParatextDiscovery } from "@/lib/paratext-bridge/use-paratext-discovery"
 import { bridgeStore } from "@/lib/paratext-bridge/store"
+import { setMirrorBase } from "@/lib/paratext-bridge/book-sync"
 import { paratextTauri } from "@/lib/paratext-bridge/tauri"
 import { decodeUtf8Strict } from "@/lib/paratext-bridge/units"
 import type { ProjectEntry } from "@/lib/parsers/paratext-project"
@@ -52,6 +53,8 @@ export function ParatextOpenPage() {
   const org = useActiveOrgOptional()
   const [phase, setPhase] = useState<Phase>({ kind: "reading" })
   const started = useRef(false)
+  /** The book bytes the import read, by file name: the mirror's base. */
+  const importedBytes = useRef(new Map<string, Uint8Array>())
 
   useEffect(() => {
     if (!project || !raw || !session || started.current) return
@@ -76,6 +79,7 @@ export function ParatextOpenPage() {
       for (const b of project.books) {
         const bytes = await paratextTauri.readFile(project.path, b.fileName)
         const text = decodeUtf8Strict(bytes)
+        importedBytes.current.set(b.fileName, bytes)
         entries.push({ name: b.fileName, text: async () => text })
       }
       if (cancelled) return
@@ -118,6 +122,8 @@ export function ParatextOpenPage() {
       const file = code ? project.books.find((b) => b.code === code) : undefined
       if (code && file) books[code] = { fileId: ref.id, fileName: file.fileName }
     }
+    const mirrored = Object.values(books).flatMap((b) => importedBytes.current.get(b.fileName) ?? [])
+    await setMirrorBase(project.guid, mirrored)
     await bridgeStore.putLink({
       projectGuid: project.guid, projectPath: project.path, projectId: phase.projectId,
       books, targetLang: phase.targetLang, createdAt: Date.now(),

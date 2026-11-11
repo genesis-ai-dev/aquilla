@@ -10,6 +10,8 @@ vi.mock("@/lib/i18n/I18nProvider", () => ({
         "projectSettings.share.laneChoiceLegend": "Target lanes",
         "projectSettings.share.laneChoiceAll": "Every current target lane",
         "projectSettings.share.laneChoiceSome": "Only selected lanes",
+        "projectSettings.share.laneChoiceNoneNote":
+          "No language lanes selected — this person will see the project and its source text, and no translation.",
       })[key] ?? key,
     locale: "en",
   }),
@@ -45,5 +47,30 @@ describe("LaneAccessFields", () => {
     fireEvent.click(screen.getByRole("radio", { name: "Only selected lanes" }))
     fireEvent.click(screen.getByRole("checkbox", { name: "Spanish" }))
     expect(seen.at(-1)).toEqual({ kind: "lanes", laneIds: ["ln-es"] })
+  })
+
+  // AQU-2358: an empty selection is a real choice, so it says what it grants
+  // instead of looking like an unfinished form.
+  it("says what an empty selection grants, and stops saying it once a lane is checked", () => {
+    const { rerender } = render(
+      <LaneAccessFields lanes={lanes} value={{ kind: "lanes", laneIds: [] }} onChange={() => {}} />,
+    )
+    expect(screen.getByTestId("lane-access-no-lanes-note")).toHaveTextContent(
+      "will see the project and its source text, and no translation",
+    )
+
+    rerender(
+      <LaneAccessFields
+        lanes={lanes}
+        value={{ kind: "lanes", laneIds: ["ln-es"] }}
+        onChange={() => {}}
+      />,
+    )
+    expect(screen.queryByTestId("lane-access-no-lanes-note")).toBeNull()
+  })
+
+  it("shows no such note before any choice is made", () => {
+    render(<LaneAccessFields lanes={lanes} value={null} onChange={() => {}} />)
+    expect(screen.queryByTestId("lane-access-no-lanes-note")).toBeNull()
   })
 })

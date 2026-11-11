@@ -15,9 +15,15 @@
  * no rows. Below Viewer (100) gets none. No lane scopes means today's
  * behavior (every current target lane) and is preserved with one row per
  * lane. A later lane does not pick those rows up.
+ *
+ * AQU-2358: the reserved scope `NO_LANE_SCOPE` means the opposite — the
+ * sharer chose NO lanes — and plans no rows at all. It is checked before the
+ * empty-list rule so the two cannot be confused, and before lane resolution so
+ * it can never be read as a lane's name.
  */
 
 import type { LaneIdentity } from './read-wall'
+import { grantsNoLaneScopes } from './no-lane-access'
 import { resolveLaneScopeValue } from './scope-ids'
 
 const MAINTAINER = 600
@@ -44,6 +50,9 @@ export function planLaneGrants(input: {
   lanes: readonly LaneIdentity[]
 }): LaneGrantPlan {
   if (input.roleLevel >= MAINTAINER || input.roleLevel < VIEWER) {
+    return { grants: [], skipped: [] }
+  }
+  if (grantsNoLaneScopes(input.laneScopes)) {
     return { grants: [], skipped: [] }
   }
   if (input.laneScopes.length === 0) {

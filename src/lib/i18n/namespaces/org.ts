@@ -1272,12 +1272,14 @@ export const org = defineNamespace({
     // AQU-2289: an org role below Maintainer opens no project (AQU-1107).
     "org.grantScope.scope.organizationOnly": "of the organization — no projects until added to one",
     "org.grantScope.scope.projectAllLanes": "on {project} — every language lane",
+    "org.grantScope.scope.projectNoLanes": "on {project} — no language lanes",
     "org.grantScope.scope.project": "on {project}",
     "org.grantScope.scope.laneOnly": "on {project}, {lane} language lane only",
     "org.grantScope.scope.lanesOnly": "on {project}, {lanes} language lanes only",
     "org.grantScope.echo.organization": "every project",
     "org.grantScope.echo.organizationOnly": "organization only",
     "org.grantScope.echo.allLanes": "every language lane",
+    "org.grantScope.echo.noLanes": "no language lanes",
     "org.grantScope.echo.laneOnly": "{lane} language lane only",
     "org.grantScope.echo.lanesOnly": "{lanes} language lanes only",
     "org.grantScope.button": "{action} — {scope}",
@@ -3314,6 +3316,11 @@ export const org = defineNamespace({
           "Scope phrase for a project grant with no lane restriction. Begins with 'on'. The em dash clause says the grant is not limited to one lane.",
         placeholders: { project: "The project's display name — not translated." },
       },
+      "org.grantScope.scope.projectNoLanes": {
+        description:
+          "Scope phrase for a project grant that includes no language lane at all (AQU-2358): the person can see the project and its source text, and no translation. Begins with 'on'. The em dash clause says the grant covers no lane.",
+        placeholders: { project: "The project's display name — not translated." },
+      },
       "org.grantScope.scope.project": {
         description:
           "Scope phrase when the grant is on one project but the lane list is not known yet, so the sentence does not claim every lane or one lane.",
@@ -3344,6 +3351,10 @@ export const org = defineNamespace({
       },
       "org.grantScope.echo.allLanes": {
         description: "Short scope echo appended to a button that grants a whole project, every lane.",
+      },
+      "org.grantScope.echo.noLanes": {
+        description:
+          "Short scope echo appended to a button that grants a project with no language lane at all — the person sees the project and its source, no translation.",
       },
       "org.grantScope.echo.laneOnly": {
         description: "Short scope echo appended to a button that grants one lane.",

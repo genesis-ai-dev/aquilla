@@ -26,6 +26,7 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable"
 import { useIsLgUp } from "@/hooks/useIsLgUp"
+import { TRAFFIC_LIGHTS_WIDTH, useMacTitlebarOverlay } from "@/hooks/useMacTitlebarOverlay"
 
 export { useIsLgUp } from "@/hooks/useIsLgUp"
 
@@ -178,7 +179,10 @@ export function AppShell({
   // ~20 page-level tests that don't wrap I18nProvider, so this reads null
   // there instead of throwing — the switcher just doesn't render.
   const i18n = useI18nOptional()
-  const resolvedLogo = logoSlot ?? (brand ? (
+  // macOS desktop: the top strip doubles as the window's title bar.
+  const titlebar = useMacTitlebarOverlay()
+  const dragRegion = titlebar.overlay ? { "data-tauri-drag-region": "deep" } : undefined
+  const brandLogo = logoSlot ?? (brand ? (
     <Link
       to="/"
       aria-label={`${brand.app.name} — home`}
@@ -204,6 +208,26 @@ export function AppShell({
   }, [dockOpenRequest, mobileNav])
   const openSidebarLabel = i18n?.t("nav.shell.openSidebar") ?? "Open sidebar"
   const navigationLabel = i18n?.t("nav.shell.navigation") ?? "Navigation"
+  // Where the traffic lights land depends on the layout under them:
+  //  - expanded sidebar: its chrome row — the brand mark gives up its slot
+  //    (a native app's window already says whose it is) and the row's start
+  //    is pushed past the lights;
+  //  - collapsed 48px rail: too narrow to hold them, so the rail's icon stack
+  //    drops below them and the header band clears the overhang;
+  //  - no in-flow sidebar (narrow window): the header band starts at x=0.
+  // The mobile sheet is a separate overlay, so its copy of the aside is left
+  // alone.
+  const sidebarInFlow = !mobileNav
+  const insetSidebarRow = titlebar.inset && sidebarInFlow && !chromeCollapsed
+  const insetRail = titlebar.inset && sidebarInFlow && chromeCollapsed
+  const headerInset = !titlebar.inset
+    ? 0
+    : !sidebarInFlow
+      ? TRAFFIC_LIGHTS_WIDTH
+      : chromeCollapsed
+        ? TRAFFIC_LIGHTS_WIDTH - DOCK_COLLAPSED_WIDTH
+        : 0
+  const resolvedLogo = insetSidebarRow ? null : brandLogo
 
   // A pick inside the sheet can navigate by query alone — choosing an Agent
   // conversation while already on /agent only changes ?conversation=. The
@@ -321,9 +345,11 @@ export function AppShell({
         chromeCollapsed && "ps-2",
       )}
     >
-      {(resolvedLogo || logoAccessory) && (
+      {(brandLogo || logoAccessory) && (
         <div
           data-slot="app-shell-sidebar-chrome"
+          {...(!mobileNav ? dragRegion : undefined)}
+          style={insetSidebarRow ? { paddingInlineStart: TRAFFIC_LIGHTS_WIDTH } : undefined}
           className={cn(
             // Align every chrome child on the same vertical midline — no fixed
             // height; natural content size with items-center.
@@ -334,6 +360,8 @@ export function AppShell({
             chromeCollapsed
               ? "w-10 flex-col items-center gap-1"
               : "justify-between px-2",
+            // Lights sit at y≈20–34; start the rail's stack below them.
+            insetRail && "pt-10",
           )}
         >
           <div className="flex items-center">
@@ -426,7 +454,12 @@ export function AppShell({
     <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
       {/* Every route gets the same fixed header band. File tabs are a
           separate row below it and must not move the breadcrumb baseline. */}
-      <div data-slot="app-shell-header" className="flex h-[52px] min-h-[52px] shrink-0 items-center">
+      <div
+        data-slot="app-shell-header"
+        {...dragRegion}
+        style={headerInset > 0 ? { paddingInlineStart: headerInset } : undefined}
+        className="flex h-[52px] min-h-[52px] shrink-0 items-center"
+      >
         {mobileNav ? (
           <div className="flex shrink-0 items-center pl-2" data-slot="app-shell-sidebar-trigger">
             <AppTooltip content={openSidebarLabel} side="bottom">

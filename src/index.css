@@ -607,6 +607,10 @@
   html[data-app-frame] body {
     overflow: hidden;
   }
+  /* macOS desktop: AppShell's header is the drag handle while it is mounted. */
+  html[data-app-frame] [data-slot="titlebar-drag-strip"] {
+    display: none;
+  }
   html.dark {
     color-scheme: dark;
   }

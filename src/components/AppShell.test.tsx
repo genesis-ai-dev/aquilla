@@ -13,6 +13,13 @@ import userEvent from "@testing-library/user-event"
 import { AppShell } from "./AppShell"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import { NavHistoryProvider } from "@/context/NavHistoryContext"
+import type { MacTitlebarOverlay } from "@/hooks/useMacTitlebarOverlay"
+
+const titlebar = vi.hoisted(() => ({ value: { overlay: false, inset: false } as MacTitlebarOverlay }))
+vi.mock("@/hooks/useMacTitlebarOverlay", async (importActual) => ({
+  ...(await importActual<typeof import("@/hooks/useMacTitlebarOverlay")>()),
+  useMacTitlebarOverlay: () => titlebar.value,
+}))
 
 const originalMatchMedia = window.matchMedia
 
@@ -509,5 +516,57 @@ describe("AppShell mobile sidebar sheet", () => {
     // The modal sheet hides the page from the a11y tree while open — read the
     // trigger regardless, and assert on its expanded state.
     expect(screen.getByRole("button", { name: "Open sidebar", hidden: true })).toHaveAttribute("aria-expanded", "false")
+  })
+})
+
+describe("AppShell macOS overlay title bar", () => {
+  afterEach(() => {
+    window.matchMedia = originalMatchMedia
+    titlebar.value = { overlay: false, inset: false }
+  })
+
+  // Traffic lights float over x≈16–68, y≈20–34 of the window. Whatever layout
+  // sits under them must leave that corner clear, and the top strip must be a
+  // drag region so the window can still be moved.
+  it.each([
+    // [layout, lgUp, railCollapsed, inset, header padding, sidebar row padding, rail pushed down, logo shown]
+    ["expanded sidebar", true, false, true, "", "76px", false, false],
+    ["collapsed rail", true, true, true, "28px", "", true, true],
+    ["narrow window, sidebar in sheet", false, false, true, "76px", null, false, null],
+    ["native fullscreen (lights hidden)", true, false, false, "", "", false, true],
+  ] as const)("keeps the traffic-light corner clear: %s", (_, lgUp, railCollapsed, inset, headerPad, rowPad, railDown, logoShown) => {
+    stubLgUp(lgUp)
+    titlebar.value = { overlay: true, inset }
+    render(
+      <MemoryRouter initialEntries={["/project/p1/editor"]}>
+        <AppShell
+          logoSlot={<span data-testid="logo">Aquilla</span>}
+          header={<div>header</div>}
+          statusBar={null}
+          leftDock={<div>dock</div>}
+          railCollapsed={railCollapsed}
+          main={<div />}
+        />
+      </MemoryRouter>,
+    )
+    const header = document.querySelector<HTMLElement>('[data-slot="app-shell-header"]')!
+    expect(header).toHaveAttribute("data-tauri-drag-region", "deep")
+    expect(header.style.paddingInlineStart).toBe(headerPad)
+
+    const row = document.querySelector<HTMLElement>('[data-slot="app-shell-sidebar-chrome"]')
+    if (rowPad === null) {
+      expect(row).toBeNull()
+      return
+    }
+    expect(row).toHaveAttribute("data-tauri-drag-region", "deep")
+    expect(row!.style.paddingInlineStart).toBe(rowPad)
+    expect(row!.classList.contains("pt-10")).toBe(railDown)
+    expect(screen.queryByTestId("logo") !== null).toBe(logoShown)
+  })
+
+  it("adds no drag regions outside the macOS desktop app", () => {
+    stubLgUp(true)
+    renderShell(<div />)
+    expect(document.querySelector("[data-tauri-drag-region]")).toBeNull()
   })
 })

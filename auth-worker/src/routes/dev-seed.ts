@@ -569,7 +569,7 @@ devSeed.post("/login", async (c) => {
       return c.json({ error: "seed user missing after seed", username: requested }, 500)
     }
     const jwt = new JWTService(c.env)
-    const accessToken = await jwt.createAccessToken(userRow.username)
+    const accessToken = await jwt.createAccessToken(userRow.username, undefined, userRow.id)
     return c.json({
       access_token: accessToken,
       token_type: "bearer",

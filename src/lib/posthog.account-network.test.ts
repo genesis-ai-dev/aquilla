@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest"
 const control = vi.hoisted(() => ({ state: { generation: 0, accountId: null as string | null }, allowed: false, listeners: new Set<() => void>() }))
 vi.mock("./analytics-account", () => ({ analyticsAccount: {
+  storageOwner: () => control.state.accountId ? `scope:${control.state.accountId}` : null,
   getSnapshot: () => control.state, eligible: () => control.allowed,
   subscribe: (fn: () => void) => { control.listeners.add(fn) },
 } }))
@@ -42,6 +43,8 @@ it("the real SDK sends nothing before approval or after revocation, including fa
   expect(Object.keys(localStorage).filter(k => k.startsWith("ph_"))).toEqual([])
   select("a", true)
   await vi.waitFor(() => expect(analytics.get_session_replay_url()).toBeDefined())
+  expect(analytics.scope(undefined, "scope:a", "storage").enabled()).toBe(true)
+  expect(analytics.scope(undefined, "scope:b", "storage").enabled()).toBe(false)
   vi.useFakeTimers()
   analytics.capture("approved sentinel", {}, { send_instantly: true })
   await vi.advanceTimersByTimeAsync(10_000)

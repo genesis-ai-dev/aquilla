@@ -4237,8 +4237,6 @@ export const my: Catalog = {
   "projectSettings.permission.reconnectToEdit": "မျှဝေထားသော ဆက်တင်များကို ပြင်ဆင်ရန် ပြန်လည်ချိတ်ဆက်ပါ။",
   "projectSettings.permission.onlyRoleCanModify": "{role} သာ ပြင်ဆင်နိုင်သည်",
   "projectSettings.permission.viewPrivilegedMembers": "{role} ကြည့်ရန်",
-  "projectSettings.permission.privilegedDialogTitle": "ပရောဂျက် {role}",
-  "projectSettings.permission.privilegedDialogDescription": "{role} သည် မျှဝေထားသော ဆက်တင်များ၊ အဖွဲ့ဝင်များနှင့် အခြား ပရောဂျက် ပြင်ဆင်မှုများကို ပြောင်းနိုင်သည်။",
   "projectSettings.permission.privilegedDialogEmpty": "ဤပရောဂျက်တွင် {role} မရှိပါ။",
   "projectSettings.permission.privilegedDialogError": "{role} တင်၍မရပါ။",
   "projectSettings.create.trigger": "ပရောဂျက်အသစ်",

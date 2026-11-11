@@ -5102,8 +5102,6 @@ export const ha: Catalog = {
   "projectSettings.permission.reconnectToEdit": "Ku sake haɗawa don gyara saitunan da aka raba.",
   "projectSettings.permission.onlyRoleCanModify": "{role} kawai zai iya gyarawa",
   "projectSettings.permission.viewPrivilegedMembers": "Ku duba {role}",
-  "projectSettings.permission.privilegedDialogTitle": "{role} na aiki",
-  "projectSettings.permission.privilegedDialogDescription": "{role} zai iya canza saitunan da aka raba, membobi, da sauran tsarin aiki.",
   "projectSettings.permission.privilegedDialogEmpty": "Babu {role} a wannan aiki.",
   "projectSettings.permission.privilegedDialogError": "An kasa loda {role}.",
   "projectSettings.create.trigger": "Sabon aiki",

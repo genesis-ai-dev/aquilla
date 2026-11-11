@@ -5109,8 +5109,6 @@ export const bn: Catalog = {
   "projectSettings.permission.reconnectToEdit": "শেয়ার করা সেটিংস সম্পাদনা করতে আবার সংযোগ করুন।",
   "projectSettings.permission.onlyRoleCanModify": "শুধু {role} বদলাতে পারেন",
   "projectSettings.permission.viewPrivilegedMembers": "{role} দেখুন",
-  "projectSettings.permission.privilegedDialogTitle": "প্রকল্প {role}",
-  "projectSettings.permission.privilegedDialogDescription": "{role} শেয়ার করা সেটিংস, সদস্য, ও প্রকল্পের অন্য কনফিগারেশন বদলাতে পারেন।",
   "projectSettings.permission.privilegedDialogEmpty": "এই প্রকল্পে কোনো {role} নেই।",
   "projectSettings.permission.privilegedDialogError": "{role} লোড হয়নি।",
   "projectSettings.create.trigger": "নতুন প্রকল্প",

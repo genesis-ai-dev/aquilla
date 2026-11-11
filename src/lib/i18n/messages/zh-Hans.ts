@@ -4253,8 +4253,6 @@ export const zh_Hans: Catalog = {
   "projectSettings.permission.reconnectToEdit": "请重新连接以编辑共用设置。",
   "projectSettings.permission.onlyRoleCanModify": "只有{role}可以修改",
   "projectSettings.permission.viewPrivilegedMembers": "查看{role}",
-  "projectSettings.permission.privilegedDialogTitle": "项目{role}",
-  "projectSettings.permission.privilegedDialogDescription": "{role}可以变更共用设置、成员以及其他项目组态。",
   "projectSettings.permission.privilegedDialogEmpty": "这个项目没有任何{role}。",
   "projectSettings.permission.privilegedDialogError": "无法加载{role}。",
   "projectSettings.create.trigger": "添加项目",

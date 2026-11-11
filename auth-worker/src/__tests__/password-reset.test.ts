@@ -283,6 +283,21 @@ describe("password reset — request (AQU-675: never creates an account)", () =>
 })
 
 describe("password reset — verify", () => {
+  it("reports a database outage as retryable without consuming a valid link", async () => {
+    await register("verifyretry", "verifyretry@example.com", "old-password-1")
+    const credentials = { token: "retrytoken1234567890", username: "verifyretry" }
+    await seedToken(credentials.username, credentials.token, soon())
+    const prepare = env.AQUILLA_PG.prepare.bind(env.AQUILLA_PG)
+    const spy = vi.spyOn(env.AQUILLA_PG, "prepare").mockImplementation(sql => {
+      if (sql.includes("SELECT expires_at FROM password_reset_tokens")) throw new Error("simulated database outage")
+      return prepare(sql)
+    })
+    try {
+      expect((await reqJson("/api/v2/auth/password-reset/verify", credentials)).status).toBe(503)
+    } finally { spy.mockRestore() }
+    expect((await reqJson("/api/v2/auth/password-reset/verify", credentials)).status).toBe(200)
+  })
+
   it("accepts a valid token", async () => {
     await register("ruser", "ruser@example.com", "old-password-1")
     await seedToken("ruser", "validtoken1234567890", soon())

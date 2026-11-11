@@ -228,6 +228,13 @@ export interface Env {
    *  so streaming routes can open a connection that outlives the Response. */
   PG_CONNECTION_STRING?: string
 
+  // Google login: optional, disabled until all four values are configured.
+  GOOGLE_LOGIN_CLIENT_ID?: string
+  GOOGLE_LOGIN_CLIENT_SECRET?: string
+  GOOGLE_LOGIN_REDIRECT_URI?: string
+  /** Exact SPA origins permitted to receive OAuth handoffs, comma separated. */
+  GOOGLE_LOGIN_APP_ORIGINS?: string
+
   // ── Monday.com integration (routes/monday.ts, lib/monday/*) ──────────────
   /** Monday OAuth app client id (plain var, [vars] in wrangler.toml). */
   MONDAY_CLIENT_ID?: string
@@ -475,7 +482,7 @@ export interface UserRow {
   id: number
   username: string
   email: string
-  password_hash: string
+  password_hash: string | null
   preferences: string
   created_at: string
   updated_at: string
@@ -488,7 +495,7 @@ export interface AuthUser {
   id: number
   username: string
   email: string
-  password_hash: string
+  password_hash: string | null
   preferences: Record<string, unknown>
   created_at: string
   updated_at: string

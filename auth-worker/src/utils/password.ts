@@ -198,8 +198,12 @@ export type PasswordVerificationResult = {
 
 export async function verifyPassword(
   password: string,
-  stored: string,
+  stored: string | null,
 ): Promise<PasswordVerificationResult> {
+  if (stored === null) {
+    await absorbPasswordVerificationCost(password)
+    return { isValid: false, shouldRehashToWerkzeugScrypt: false }
+  }
   if (isWerkzeugScryptHash(stored)) {
     const ok = await verifyPasswordWerkzeugScrypt(password, stored)
     return { isValid: ok, shouldRehashToWerkzeugScrypt: false }

@@ -20,7 +20,7 @@ import { v7 as uuidv7 } from "uuid"
 import { enqueueEvent, enqueueEvents, type BuildEventInput } from "@/lib/sync/events-emit"
 import type { OutboxPayloadFor } from "@/lib/sync/outbox-types"
 import type { StagedEvent } from "./protocol"
-import { isSupportedApplyKind } from "./role-floors"
+import { isSupportedApplyKind, type SupportedApplyKind } from "./role-floors"
 import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
 import { captureCellValidation } from "@/lib/cell-telemetry"
 
@@ -56,16 +56,9 @@ export interface ApplyContext {
   } | undefined
 }
 
-type AppliedKind =
-  | "target.cell.commit"
-  | "source.cell.create"
-  | "target.cell.create"
-  | "comment.create"
-  | "cell.validate"
-
 /** One staged event as a write, plus what to report once it's queued. */
 interface AppliedEvent {
-  input: BuildEventInput<AppliedKind> & { id: string }
+  input: BuildEventInput<SupportedApplyKind> & { id: string }
   afterEnqueue?: () => void
 }
 
@@ -239,7 +232,9 @@ function headSideFor(kind: string): "targetEventId" | "sourceEventId" | null {
  * second's parentId is the first's event id), so later events see earlier
  * ones through the head map. Queued together so a chapter-sized proposal is
  * one write, not one per edit — and an event that can't be built refuses the
- * whole proposal instead of leaving it half-applied.
+ * whole proposal before anything is queued. On desktop the batch can span
+ * IndexedDB and the offline queue; IndexedDB is written first, so a failed
+ * write there still queues nothing (see enqueueOutboxEvents).
  *
  * AQU-890: creates seed that map too, per side — a `target.cell.create` +
  * `target.cell.commit` pair in one proposal chains the commit onto the create,

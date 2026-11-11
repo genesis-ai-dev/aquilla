@@ -760,6 +760,57 @@ describe("Tauri offline routing", () => {
     expect(store.query(offlineTables.eventQueue.count())).toBe(1_201)
   })
 
+  it("enqueueOutboxEvents keeps a commit with the create it chains on, in IndexedDB", async () => {
+    setTauriRuntime(true)
+    markProjectOfflineReady("proj1")
+    const create = {
+      ...commitEvent, id: "create1", kind: "target.cell.create", parentId: null,
+      payload: { value: "", cellId: "cell1", anchorCellId: null },
+    } as unknown as CqrsRawEvent
+    const chained = { ...commitEvent, id: "tc-chained", parentId: "create1" }
+    const validate = {
+      ...commitEvent, id: "val1", kind: "cell.validate", parentId: null,
+      payload: { editEventId: "tc-chained" },
+    } as unknown as CqrsRawEvent
+    const unrelated = { ...commitEvent, id: "tc-other", cellId: "cell2" }
+
+    await enqueueOutboxEvents([create, chained, validate, unrelated])
+
+    // The two queues flush independently: a commit must not race its parent.
+    expect((await peekOutboxBatch(10)).map((r) => r.id).sort()).toEqual(["create1", "tc-chained", "val1"])
+    expect(currentOfflineStore!.query(offlineTables.eventQueue.select("id"))).toEqual(["tc-other"])
+  })
+
+  it("enqueueOutboxEvents queues nothing offline when its IndexedDB write fails", async () => {
+    localStorage.clear()
+    setActiveOutboxOwner("alice")
+    setTauriRuntime(true)
+    markProjectOfflineReady("proj1")
+    const comment = {
+      ...commitEvent, id: "cm1", kind: "comment.create", cellId: undefined, parentId: null,
+      payload: { body: "note" },
+    } as unknown as CqrsRawEvent
+    await outboxPendingCount() // open the connection before failing its writes
+    const original = IDBDatabase.prototype.transaction
+    const transaction = vi.spyOn(IDBDatabase.prototype, "transaction").mockImplementation(function (
+      this: IDBDatabase, ...args: Parameters<IDBDatabase["transaction"]>
+    ) {
+      // Only the outbox is full; the quota recovery's cache purge still runs.
+      if (this.name === "aquilla-cqrs-outbox") throw new DOMException("disk full", "QuotaExceededError")
+      return original.apply(this, args)
+    })
+    try {
+      await expect(enqueueOutboxEvents([commitEvent, comment])).rejects.toThrow(/disk full/)
+    } finally {
+      transaction.mockRestore()
+    }
+
+    expect(currentOfflineStore!.query(offlineTables.eventQueue.count())).toBe(0)
+    // Still journaled, and only there: the next boot recovers it once.
+    expect(localStorage.getItem("aquilla:outbox-recovery:v1:tc1")).not.toBeNull()
+    localStorage.clear()
+  })
+
   it("a routed row round-trips into the exact OutboxRawEvent shape sync-adapter.ts's toRawEvent() expects", async () => {
     setTauriRuntime(true)
     markProjectOfflineReady("proj1")

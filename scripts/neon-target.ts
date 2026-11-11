@@ -287,7 +287,7 @@ async function main() {
   // AQU-1941: which database the child is actually pointed at. A script holding
   // raw NEON_PG_* credentials cannot tell, so a child that gates its own writes
   // on "is this production?" reads this instead of guessing
-  // (scripts/phantom-voice-prune-gate.ts).
+  // (scripts/phantom-voice-prune.ts).
   env.AQUILLA_NEON_TARGET = target
   const args = childArgs(command, passthrough)
   console.log(`neon-target ${target} ${command}${passthrough.length ? " " + passthrough.join(" ") : ""} -> ${target === "local" ? "local Postgres" : env.NEON_PG_HOST}`)

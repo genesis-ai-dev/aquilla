@@ -136,3 +136,40 @@ export function makeAuthorRemap(
 }
 
 export const TABLE_HEADER_KEY = "__table__"
+
+// ── insert column selection ──────────────────────────────────────────────
+
+/**
+ * Columns a bundle may carry that no target can take: generated columns the
+ * schema has since dropped (source_language, target_language and target_lanes
+ * were generated until 0156), plus two the loader always skipped by name. A
+ * bundle dumped before a drop still carries the name; the target has no such
+ * column, so it is neither inserted nor counted as drift.
+ */
+export const LEGACY_GENERATED_COLS: ReadonlySet<string> = new Set([
+  "source_language",
+  "target_language",
+  "validation_count",
+  "target_lanes",
+  "value_tsv",
+])
+
+/** The target's GENERATED ALWAYS columns, by table — read off information_schema at load time. */
+export type GeneratedColumnsByTable = ReadonlyMap<string, ReadonlySet<string>>
+
+/**
+ * The columns of a bundle row to INSERT into `table`: every key except what the
+ * target computes itself. Generated columns are a property of the TARGET, not
+ * of the bundle — `SELECT *` on the source carries them all (project_settings
+ * alone has a dozen: validation_count_audio, agent_authorship, wp_* …), and a
+ * fixed list went stale the moment a migration added one, failing every fresh
+ * bundle with "cannot insert a non-DEFAULT value into column".
+ */
+export function seedInsertColumns(
+  table: string,
+  row: Record<string, unknown>,
+  generated: GeneratedColumnsByTable,
+): string[] {
+  const targetGenerated = generated.get(table)
+  return Object.keys(row).filter((col) => !LEGACY_GENERATED_COLS.has(col) && !(targetGenerated?.has(col) ?? false))
+}

@@ -69,6 +69,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useReplaceFileChoices } from "@/hooks/useReplaceFileChoices"
 import { addLinkedSourceFiles, loadLinkedSourceFileState, stopLinkedSourceFiles } from "@/lib/sync/archive"
 import { loadLinkSourcePreview, type LinkSourcePreview } from "@/lib/sync/link-source-preview"
+import { markAdoptedFilesForIdmlAlignment } from "@/lib/idml/link-adopted-align"
 import { toUserFacingError } from "@/lib/errors/user-error"
 import { useT } from "@/lib/i18n/I18nProvider"
 
@@ -308,6 +309,11 @@ export function ChooseLinkedFilesDialog({
           setError(t("projectSettings.sourceLink.chooseFilesIncomplete"))
           if (stoppedAnything) onApplied()
           return
+        }
+        // The pairs are recorded server-side; the workspace places each IDML
+        // file's kept translations into its new source once the join has run.
+        if (pairs.length > 0) {
+          markAdoptedFilesForIdmlAlignment(projectId, pairs.map((pair) => pair.fileId))
         }
       }
       close()

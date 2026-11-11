@@ -177,3 +177,47 @@ function replaceSlotContent(slot: HTMLElement, text: string): void {
     slot.append(document.createTextNode(parts[index] ?? ""))
   }
 }
+
+/**
+ * Whether a target carries translated words at all, read off the HTML's own
+ * attributes rather than the cell's metadata.
+ *
+ * The question comes up when the two disagree: a linked file took its source
+ * from an upstream whose IDML changed, or a re-import changed which runs are
+ * editable, and the stored target is still the shell of the old source. Such
+ * a shell cannot be validated — the slot it marks editable is locked now, or
+ * the other way round — but when nothing was ever typed into it there is no
+ * translation to carry over, and the paragraph exports as the publisher set it.
+ *
+ * Text inside a slot the HTML leaves editable is a translation. Locked slots
+ * hold the source's own literal text (a verse number, a label) and say nothing.
+ * Markup that is not a slot document at all is read as plain text, so a target
+ * this function does not understand still blocks the export when it has words.
+ */
+export function idmlTargetHoldsTranslation(html: string | undefined): boolean {
+  if (!html?.trim()) return false
+  if (typeof document !== "undefined") {
+    const template = document.createElement("template")
+    template.innerHTML = html
+    const slots = template.content.querySelectorAll<HTMLElement>("span[data-idml-protected=\"slot\"]")
+    if (slots.length === 0) return hasVisibleText(template.content.textContent)
+    for (const slot of slots) {
+      if (slot.getAttribute("contenteditable") === "false") continue
+      if (slot.querySelector("br")) return true
+      if (hasVisibleText(slot.textContent)) return true
+    }
+    return false
+  }
+  // No DOM (a worker, a test without happy-dom): drop every locked span and
+  // protected token, then look for words in what remains.
+  const withoutLocked = html.replace(
+    /<span\b[^>]*\bcontenteditable="false"[^>]*>[\s\S]*?<\/span>/gi,
+    "",
+  )
+  if (/<br\b/i.test(withoutLocked)) return true
+  return hasVisibleText(withoutLocked.replace(/<[^>]+>/g, ""))
+}
+
+function hasVisibleText(text: string | null): boolean {
+  return (text ?? "").replace(/\u200b/g, "").trim().length > 0
+}

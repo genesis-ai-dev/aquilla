@@ -110,6 +110,8 @@ const FULL: LanguageProfile = {
   // AQU-1906
   punctuation: { question: ['؟'], semicolon: ['؛'], noTerminalMark: false },
   numberWords: { '1': 'one', '12': 'twelve' },
+  // AQU-2430
+  numberFormat: { group: ['.'], decimal: [','] },
   speechVerbs: ['said', 'asked'],
   kinTerms: { relativeAgeDistinction: true, notes: 'kakak / adik' },
   divineNames: { yhwh: 'the LORD', deityPronounCapitalization: false, kyriosJesus: 'Lord', kyriosGod: 'the Lord' },
@@ -144,6 +146,11 @@ describe('the AQU-1691 slots', () => {
     [{ punctuation: { noTerminalMark: 'yes' } }, /punctuation\.noTerminalMark must be true or false/],
     [{ punctuation: { terminal: ['.'] } }, /punctuation has an unknown field "terminal"/],
     [{ numberWords: 'spellout' }, /numberWords must be "cldr" or a map/],
+    [{ numberFormat: {} }, /numberFormat needs at least one field/],
+    [{ numberFormat: { group: ['..'] } }, /numberFormat\.group\[0\] must be one character/],
+    [{ numberFormat: { decimal: ['a'] } }, /numberFormat\.decimal\[0\] must be one character/],
+    [{ numberFormat: { group: ['.', '.'] } }, /numberFormat\.group lists a separator twice/],
+    [{ numberFormat: { thousands: ['.'] } }, /numberFormat has an unknown field "thousands"/],
     [{ numberWords: { twelve: '12' } }, /not a whole number/],
     [{ speechVerbs: [''] }, /speechVerbs\[0\] must be trimmed text/],
     [{ kinTerms: { notes: 'x' } }, /kinTerms\.relativeAgeDistinction is required/],

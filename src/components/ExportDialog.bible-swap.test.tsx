@@ -22,6 +22,7 @@ vi.mock("@/lib/export/exporters/idml", () => ({
     blob: new Blob(["idml"]),
     report: { translated: 1, missing: 0, rejected: 0 },
     diagnostics: [],
+    omitted: [],
   })),
 }))
 vi.mock("@/lib/posthog", () => ({

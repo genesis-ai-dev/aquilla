@@ -171,6 +171,10 @@ export interface AiDraftProvenance {
   /** AQU-1656: the ai_interventions row holding this draft's prompt and raw
    *  output. A row is current while the cell's draft still carries its id. */
   interventionId?: string
+  /** AQU-2398: set when the agent offered several wordings of this cell and a
+   *  person chose this one — which option it was, out of how many. Absent on
+   *  an ordinary single draft. */
+  alternative?: { index: number; of: number }
   projectState: {
     sourceLanguage: string
     targetLanguage: string

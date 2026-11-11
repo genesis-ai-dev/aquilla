@@ -121,6 +121,30 @@ export const editor = defineNamespace({
 
     // — Per-cell action rail ————————————————————————————————————————
     "editor.rail.moreActions": "More actions",
+    "editor.cell.openDetails": "Open cell details",
+    "editor.panel.resizeDefault": "Resize panel",
+    "editor.panel.resizeHistory": "Resize history panel",
+    "editor.panel.resizeComments": "Resize comments panel",
+    "editor.panel.resizeRule": "Resize rule panel",
+    "editor.panel.resizeCheck": "Resize file check panel",
+    "editor.panel.resizeTranslationNotes": "Resize translation notes panel",
+    "editor.panel.resizeParallelBibles": "Resize parallel bibles panel",
+    "editor.panel.resizeVerseResources": "Resize verse resources panel",
+    "editor.translationNotes.loadFailed": "Failed to load translation notes",
+    "editor.bookHealth.scoreSuffix": " · health {score}",
+    "editor.bookHealth.showFewerCells": "Show fewer cells",
+    "editor.bookHealth.showMoreCells": plural({
+      one: "Show {count} more cell",
+      other: "Show {count} more cells",
+    }),
+    "editor.health.estimatePending": "Automatic estimate pending",
+    "editor.health.estimate": "Automatic estimate {raw}%",
+    "editor.health.estimateTrend": "Automatic estimate {raw}% · local trend {trend}%",
+    "editor.health.evidenceUnavailable": "Pre-translation source evidence unavailable",
+    "editor.health.evidence": "Source evidence {raw}%",
+    "editor.health.evidenceTrend": "Source evidence {raw}% · local trend {trend}%",
+    "editor.ai.copyError": "Copy error",
+    "editor.ai.copyErrorDone": "Copied",
 
     // — Per-cell audio: record / upload / playback ——————————————————
     "editor.audio.record": "Record audio",
@@ -699,6 +723,9 @@ export const editor = defineNamespace({
     "editor.selection.actions": "Selection actions",
     "editor.selection.count": "{count} selected",
     "editor.selection.needTranslation": "({count} need translation)",
+    "editor.selection.playSelected": "Play selected",
+    "editor.selection.playSelectedNoAudio": "None of the selected lines has audio yet",
+    "editor.selection.playSelectedUnavailable": "Playback isn't available here",
     "editor.selection.voiceTogether": "Voice together",
     "editor.selection.voiceUnavailable": "Voicing isn't available here",
     "editor.selection.voiceNeedTwo": "Select at least two translated lines",
@@ -817,6 +844,12 @@ export const editor = defineNamespace({
       "Leave this off to review each one yourself. Turn it on to sign them off together, under your name.",
     "editor.batchFile.aiDraftsLocked":
       "A translator reviews these one at a time. A reviewer or a project lead can include them here.",
+    "editor.batchFile.flagged": plural({
+      one: "{count} cell with an open check flag",
+      other: "{count} cells with open check flags",
+    }),
+    "editor.batchFile.flaggedHelp":
+      "Checks and rules flagged these. Turn this on to sign them off anyway — your check overrules the flag.",
     "editor.batchFile.empty": plural({
       one: "{count} empty cell",
       other: "{count} empty cells",
@@ -871,6 +904,15 @@ export const editor = defineNamespace({
       one: "{count} left for the next run",
       other: "{count} left for the next run",
     }),
+    // AQU-2507: flagged cells are REPORTED, never silently dropped, and the
+    // modal's opt-in is how a reviewer takes them anyway.
+    "editor.batchValidate.skip.flagged": plural({
+      one: "{count} has an open check flag",
+      other: "{count} have open check flags",
+    }),
+    // AQU-2507: one action validates the whole file, so the run says where it
+    // has got to rather than stopping at a chunk boundary.
+    "editor.batchValidate.progress": "Validating… {done} of {total} cells signed off.",
     "editor.batchValidate.nothingEligibleTitle": "Nothing was validated",
     "editor.batchValidate.nothingEligibleNoReason":
       "None of these cells is eligible for bulk validation.",
@@ -4182,6 +4224,89 @@ export const editor = defineNamespace({
           "button. A noun phrase naming what is inside, not an imperative.",
         maxLength: 20,
       },
+      "editor.cell.openDetails": {
+        description:
+          "Tooltip and screen-reader name of the button on a cell's action rail that expands the cell's detail tabs. " +
+          "Pairs with 'Close cell details'. Imperative.",
+        maxLength: 30,
+      },
+      "editor.panel.resizeDefault": {
+        description:
+          "Screen-reader name of the drag handle on the edge of a right-hand sidebar panel, used when the panel gives no name of its own. Imperative.",
+      },
+      "editor.panel.resizeHistory": {
+        description: "Screen-reader name of the drag handle that resizes the cell history panel. Imperative.",
+      },
+      "editor.panel.resizeComments": {
+        description: "Screen-reader name of the drag handle that resizes the comments panel. Imperative.",
+      },
+      "editor.panel.resizeRule": {
+        description: "Screen-reader name of the drag handle that resizes the rule details panel. Imperative.",
+      },
+      "editor.panel.resizeCheck": {
+        description: "Screen-reader name of the drag handle that resizes the file check findings panel. Imperative.",
+      },
+      "editor.panel.resizeTranslationNotes": {
+        description: "Screen-reader name of the drag handle that resizes the translation notes panel. Imperative.",
+      },
+      "editor.panel.resizeParallelBibles": {
+        description: "Screen-reader name of the drag handle that resizes the parallel Bibles panel. Imperative.",
+      },
+      "editor.panel.resizeVerseResources": {
+        description: "Screen-reader name of the drag handle that resizes the verse resources (Helps) panel. Imperative.",
+      },
+      "editor.translationNotes.loadFailed": {
+        description:
+          "Error line in the translation notes sidebar when the notes could not be fetched and the server gave no message.",
+      },
+      "editor.bookHealth.scoreSuffix": {
+        description:
+          "Small grey suffix after a chapter's progress words in the left book list, giving its health percentage. " +
+          "Starts with a middle dot separator and a space; keep it.",
+        placeholders: { score: "Chapter health score, 0–99, a whole number." },
+        maxLength: 16,
+      },
+      "editor.bookHealth.showFewerCells": {
+        description: "Small text button under an expanded chapter in the left book list that collapses its cell list.",
+        maxLength: 24,
+      },
+      "editor.bookHealth.showMoreCells": {
+        description: "Small text button under a long chapter in the left book list that reveals the remaining cells.",
+        placeholders: { count: "Number of cells currently hidden." },
+        maxLength: 28,
+      },
+      "editor.health.estimatePending": {
+        description: "First line of the health-ribbon tooltip when the automatic health estimate has not been computed yet.",
+      },
+      "editor.health.estimate": {
+        description: "First line of the health-ribbon tooltip for a chapter's automatic health estimate.",
+        placeholders: { raw: "Estimate as a whole-number percentage." },
+      },
+      "editor.health.estimateTrend": {
+        description:
+          "Same as the automatic estimate line, with the local trend (a smoothed figure from this device) after a middle dot.",
+        placeholders: { raw: "Estimate as a whole-number percentage.", trend: "Local trend as a whole-number percentage." },
+      },
+      "editor.health.evidenceUnavailable": {
+        description:
+          "First line of the health-ribbon tooltip when no source-evidence score exists yet for the pre-translation stage.",
+      },
+      "editor.health.evidence": {
+        description: "First line of the health-ribbon tooltip for the pre-translation source-evidence score.",
+        placeholders: { raw: "Score as a whole-number percentage." },
+      },
+      "editor.health.evidenceTrend": {
+        description: "Same as the source evidence line, with the local trend after a middle dot.",
+        placeholders: { raw: "Score as a whole-number percentage.", trend: "Local trend as a whole-number percentage." },
+      },
+      "editor.ai.copyError": {
+        description: "Small button in the AI status popover that copies the raw error text to the clipboard. Imperative.",
+        maxLength: 20,
+      },
+      "editor.ai.copyErrorDone": {
+        description: "Label that replaces 'Copy error' for a moment after the raw error text is copied. Past tense.",
+        maxLength: 20,
+      },
       "editor.audio.record": {
         description:
           "Tooltip and screen-reader name of the microphone button in a cell's " +
@@ -6821,6 +6946,25 @@ export const editor = defineNamespace({
           "before it.",
         placeholders: { count: "Number of selected cells with no translation yet." },
       },
+      "editor.selection.playSelected": {
+        description:
+          "Button in the selection toolbar (Audio only) that plays the selected " +
+          "lines' audio one after another, in the order the table shows them, and " +
+          "stops after the last one. 'Play' is a verb. A number beside it counts " +
+          "the selected lines that have audio to play.",
+        maxLength: 22,
+      },
+      "editor.selection.playSelectedNoAudio": {
+        description:
+          "Tooltip when the play-selected button is disabled because not one of " +
+          "the selected lines has any audio recorded or generated yet, so there " +
+          "is nothing to play.",
+      },
+      "editor.selection.playSelectedUnavailable": {
+        description:
+          "Tooltip when the play-selected button is disabled because this project " +
+          "is not signed in to the audio service, so no clip can be fetched.",
+      },
       "editor.selection.voiceTogether": {
         description:
           "Button in the selection toolbar (Media only) that synthesizes the " +
@@ -7180,6 +7324,18 @@ export const editor = defineNamespace({
           "Help under that checkbox when the reader is a contributor and cannot "
           + "bulk-validate untouched AI drafts.",
       },
+      "editor.batchFile.flagged": {
+        description:
+          "Checkbox label for cells a check or rule has flagged. Off by "
+          + "default: including them is the reader deliberately overruling the "
+          + "flags with their own sign-off.",
+        placeholders: {
+          count: "How many flagged cells are in the open file. Selects the plural form.",
+        },
+      },
+      "editor.batchFile.flaggedHelp": {
+        description: "Help under that checkbox.",
+      },
       "editor.batchFile.empty": {
         description: "Checkbox label for cells with source text and no translation.",
         placeholders: {
@@ -7288,6 +7444,27 @@ export const editor = defineNamespace({
         placeholders: {
           count: "How many eligible cells the batch limit deferred. Selects the plural form.",
         },
+      },
+      "editor.batchValidate.skip.flagged": {
+        description:
+          "One clause inside {reasons}: cells a check or a terminology/style "
+          + "rule has flagged, which a file-wide validation leaves out unless "
+          + "the reader ticks the include box. NOT a refusal — their sign-off "
+          + "would overrule the flag. A fragment, not a sentence.",
+        placeholders: {
+          count: "How many cells carry an open check flag. Selects the plural form.",
+        },
+      },
+      "editor.batchValidate.progress": {
+        description:
+          "Toast shown WHILE a file-wide validation runs, updated as each batch "
+          + "is saved. The run finishes on its own — this must not read as a "
+          + "prompt to click again.",
+        placeholders: {
+          done: "How many cells have been signed off so far.",
+          total: "How many cells the run will sign off in all.",
+        },
+        maxLength: 80,
       },
       "editor.batchValidate.nothingEligibleTitle": {
         description:

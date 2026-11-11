@@ -9,7 +9,7 @@
 // preview/retake step between stop and upload.
 
 import { type ChangeEvent, cloneElement, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { AlertCircle, Check, ChevronLeft, ChevronRight, ChevronsRight, ChevronUp, Lock, Maximize2, Mic, Minimize2, PanelBottom, Pencil, RefreshCw, RotateCcw, Settings2, Sparkles, Square, Timer, TimerOff, Upload, Volume2, VolumeX, X } from "lucide-react"
+import { AlertCircle, Check, ChevronLeft, ChevronRight, ChevronsRight, ChevronsUpDown, ChevronUp, Lock, Maximize2, Mic, Minimize2, PanelBottom, Pencil, RefreshCw, RotateCcw, Settings2, Sparkles, Square, Timer, TimerOff, Upload, Volume2, VolumeX, X } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -57,6 +57,18 @@ import { TakeWaveform } from "@/components/audio/TakeWaveform"
 import type { CodexCell, CodexCellAttachment } from "@/lib/codex-editor/types"
 import { probeDurationMsSafe } from "@/lib/import"
 import { regenerateVoiceTake } from "./regenerate-voice"
+import { laneVoiceSettings } from "@/lib/audio/lane-voice-view"
+import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
+import { VoicePickerContent } from "@/components/voice/VoiceCombobox"
+import { getVoiceLibrary, resolveCastVoice } from "@/lib/audio/voices"
+import {
+  recorderVoiceChoice,
+  recorderVoiceOverride,
+  recorderVoicePicks,
+  rememberRecorderVoicePicks,
+  withRecorderVoicePick,
+  type RecorderVoicePicks,
+} from "@/lib/audio/recorder-voice"
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { COUNTDOWN_FROM, useCountdown } from "./useCountdown"
@@ -604,6 +616,22 @@ export function AudioRecordingModal({
   // being recorded — see `readAloudFor`. Falls back to the cell's own
   // translation, which is what every arrangement without audio cues does.
   const readAloud = activeCell && readAloudFor ? readAloudFor(activeCell.id) : null
+  /**
+   * AQU-2511: the voice Generate will speak in, named on the button before the
+   * credits are spent.
+   *
+   * Resolved through the SAME lane view the generate path itself uses
+   * (`laneVoiceSettings`, from the open lane's tag), and off the same subject —
+   * the linked subtitle's assignment on a cue file, this line's own otherwise.
+   * That is the point of reading it here rather than naming the project
+   * default: this button used to generate in one voice while the picker on the
+   * row had just assigned another.
+   */
+  const ttsVoiceName = useMemo(() => {
+    if (!activeCell) return null
+    const view = laneVoiceSettings(project.ttsSettings, project.lanes, laneTag)
+    return resolveCastVoice(view, readAloud?.voiceCellId ?? activeCell, activeCell.ttsSettings?.voiceId).name
+  }, [project.ttsSettings, project.lanes, laneTag, activeCell, readAloud?.voiceCellId])
   // Media redesign slice 2 (gap 8): an Audio language has no translation to
   // read, so the performer reads the source where the translation shows today
   // — the heard line's own words on a dubbing file.
@@ -1279,6 +1307,52 @@ export function AudioRecordingModal({
    * outranks the error it is trying to replace.
    */
   const ttsShowFailure = ttsFailure != null && !ttsWorking
+  /**
+   * AQU-2510: WHICH VOICE Generate speaks in — the pick, and what it defaults
+   * to. The resolution order and why only some answers are passed on as an
+   * override live in `@/lib/audio/recorder-voice`.
+   *
+   * The picks are React state so the panel re-renders on a pick, and written
+   * through to the session memory so reopening the modal on the next line
+   * still knows what was picked on the last one. The modal stays mounted while
+   * the active line changes, so that memory only earns its keep across a
+   * close/reopen — which is most of a session.
+   */
+  const [voicePicks, setVoicePicks] = useState<RecorderVoicePicks>(() => recorderVoicePicks(project.id))
+  const [voicePickerOpen, setVoicePickerOpen] = useState(false)
+  // Plain reads and a plain handler: these are pure and cheap, and the React
+  // Compiler memoizes them for us. Hand-written `useMemo`/`useCallback` here
+  // only made it bail ("existing memoization could not be preserved").
+  const voiceLibrary = getVoiceLibrary(project.ttsSettings)
+  // The line whose cast assignment applies: on a cue file the linked subtitle,
+  // exactly as `generateCellVoice` resolves it (a cue carries none of its own).
+  const voiceSubject = readAloud?.voiceCellId ?? activeCell
+  const voiceChoice = voiceSubject
+    ? recorderVoiceChoice({
+        settings: project.ttsSettings,
+        subject: voiceSubject,
+        cellVoiceId: activeCell?.ttsSettings?.voiceId,
+        picks: voicePicks,
+      })
+    : null
+  // One voice in the library is no choice at all — the control would only
+  // restate the project default, so it collapses (the ticket's last criterion).
+  const showVoicePicker = !deliversAudioOnly && voiceChoice != null && voiceLibrary.length > 1
+  const pickVoice = (voiceId: string) => {
+    setVoicePickerOpen(false)
+    if (!voiceSubject) return
+    setVoicePicks((prev) => {
+      const next = withRecorderVoicePick(prev, voiceSubject, voiceId)
+      rememberRecorderVoicePicks(project.id, next)
+      return next
+    })
+  }
+  const voiceOverride = recorderVoiceOverride(voiceChoice)
+  // AQU-2511 × AQU-2510: the button names the voice the press will REALLY use.
+  // A session pick (or the carried one) is handed to the generator as an
+  // override, so it outranks the lane's cast answer here exactly as it does
+  // there — otherwise the button would name one voice and generate another.
+  const generateVoiceName = voiceOverride && voiceChoice ? voiceChoice.voice.name : ttsVoiceName
   const generateTts = useCallback(async () => {
     if (!online) return // the disabled button + tooltip carry the message
     if (!activeCell || !session || ttsBusy) return
@@ -1294,12 +1368,16 @@ export function AudioRecordingModal({
         laneTag,
         text: ttsText,
         voiceCellId: readAloud?.voiceCellId ?? undefined,
+        // AQU-2510: only a pick overrides; a cast or default answer is left for
+        // `generateCellVoice` to resolve, so a session that never opens the
+        // picker generates through exactly the path it always did.
+        ...(voiceOverride ? { voiceId: voiceOverride } : {}),
       })
       if (ok) setTtsDone(true)
     } finally {
       setTtsBusy(false)
     }
-  }, [online, activeCell, session, ttsBusy, project, username, audioEntry, targetSlot, laneTag, ttsText, readAloud?.voiceCellId])
+  }, [online, activeCell, session, ttsBusy, project, username, audioEntry, targetSlot, laneTag, ttsText, readAloud?.voiceCellId, voiceOverride])
 
   // Settle on the next line after a brief success indication. The RECORDED path
   // only: this used to be shared with the uploaded one so that keeping a take
@@ -2640,6 +2718,55 @@ export function AudioRecordingModal({
               // anchor above while the explanation stays tucked under the
               // button it belongs to.
               <div className="space-y-1.5">
+              {/* AQU-2510: WHO SPEAKS, above the button that spends the
+                  credits. On a dubbing project the cloned voice IS the point,
+                  and this panel used to generate in the project default with
+                  no way to say otherwise and no mention of which voice ran.
+
+                  It sits above the row rather than inside it: Generate and
+                  Upload already share that row at half a panel each, and a
+                  third control there would crop every voice name to an
+                  initial. Full width here, the name reads in full.
+
+                  The note after the name is the DEFAULT, said out loud — the
+                  line's own cast voice, or the project's. A pick replaces it
+                  with nothing, because a pick needs no explaining. */}
+              {showVoicePicker && voiceChoice && (
+                <Popover open={voicePickerOpen} onOpenChange={setVoicePickerOpen}>
+                  <PopoverTrigger
+                    render={
+                      <button
+                        type="button"
+                        data-testid="rec-generate-voice"
+                        data-voice-source={voiceChoice.source}
+                        aria-label={t("audio.recordingModal.voicePickAriaLabel", { voice: voiceChoice.voice.name })}
+                        className="flex w-full items-center gap-1.5 rounded-md border border-border bg-muted/20 px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                      />
+                    }
+                  >
+                    <VoiceAvatar voice={voiceChoice.voice} size={16} />
+                    <span data-testid="rec-generate-voice-name" className="min-w-0 truncate font-medium text-foreground/80">
+                      {voiceChoice.voice.name}
+                    </span>
+                    {(voiceChoice.source === "cast" || voiceChoice.source === "default") && (
+                      <span data-testid="rec-generate-voice-note" className="min-w-0 truncate text-muted-foreground/70">
+                        {t(voiceChoice.source === "cast"
+                          ? "audio.recordingModal.voicePickCastNote"
+                          : "audio.recordingModal.voicePickDefaultNote")}
+                      </span>
+                    )}
+                    <ChevronsUpDown className="ms-auto h-3 w-3 shrink-0 opacity-60" />
+                  </PopoverTrigger>
+                  <PopoverContent align="start" className="w-60 p-2">
+                    <VoicePickerContent
+                      voices={voiceLibrary}
+                      activeId={voiceChoice.voice.id}
+                      showLanguageBadge
+                      onPick={pickVoice}
+                    />
+                  </PopoverContent>
+                </Popover>
+              )}
               <div className="flex gap-2">
                 {!deliversAudioOnly && (
                 // Only why it is greyed out, on a click (AQU-2260): enabled, its
@@ -2696,7 +2823,9 @@ export function AudioRecordingModal({
                               : t("audio.recordingModal.generateButton")
                           : ttsShowFailure
                             ? t("audio.recordingModal.ttsFailedButton")
-                            : t("audio.recordingModal.generateButton")}
+                            : generateVoiceName
+                              ? t("audio.recordingModal.generateWithVoice", { voice: generateVoiceName })
+                              : t("audio.recordingModal.generateButton")}
                       </span>
                     </Button>
                 </AppTooltip>

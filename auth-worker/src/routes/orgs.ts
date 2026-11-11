@@ -609,15 +609,45 @@ orgs.get("/:orgId/assignments/workload", async (c) => {
  * GET /api/v2/orgs/:orgId/assignments/mine — the caller's open assignments
  * across ALL the org's active projects, in ONE request (replaces the client's
  * per-project /:projectId/assignments/mine fan-out). Any org member.
+ *
+ * AQU-2458: and any project-only member. The query is keyed to
+ * `assignee_user_id = caller`, so it can never return another person's work —
+ * what org membership was gating was the caller's own list. A translator added
+ * directly to one shared project (a guest org, no `org_members` row) was
+ * therefore 403'd out of the only cross-project view of their own
+ * assignments.
+ *
+ * So a caller with no org role is admitted on PROJECT access instead: they
+ * must reach at least one live project in the org, and the list is filtered to
+ * the projects they reach, so revoking a grant stops listing that project's
+ * work while the `assignments` row itself survives. Reaching the org's
+ * projects but holding nothing is an empty list, not an error — that is the
+ * guest who opens the page before any work has been handed out. A true
+ * outsider, who reaches nothing here, still gets 403.
  */
 orgs.get("/:orgId/assignments/mine", async (c) => {
   const user = c.get("user")
   const orgId = parseInt(c.req.param("orgId"), 10)
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
   const role = await getEffectiveOrgRole(c.env, orgId, user)
-  if (role == null) return c.json({ error: "not an org member" }, 403)
+  if (role != null) {
+    const assignments = await getMyAssignmentsAcrossOrg(c.env, orgId, user.id)
+    return c.json({ assignments })
+  }
+
+  const live = await c.env.AQUILLA_PG.prepare(
+    "SELECT id FROM projects WHERE org_id = ? AND archived_at IS NULL",
+  )
+    .bind(orgId)
+    .all<{ id: string }>()
+  const liveIds = (live.results ?? []).map((r) => r.id)
+  if (liveIds.length === 0) return c.json({ error: "not an org member" }, 403)
+  const projectRoles = await resolveProjectRoles(c.env, user, liveIds)
+  const reachable = new Set(liveIds.filter((id) => projectRoles.get(id) != null))
+  if (reachable.size === 0) return c.json({ error: "not an org member" }, 403)
+
   const assignments = await getMyAssignmentsAcrossOrg(c.env, orgId, user.id)
-  return c.json({ assignments })
+  return c.json({ assignments: assignments.filter((a) => reachable.has(a.projectId)) })
 })
 
 /**

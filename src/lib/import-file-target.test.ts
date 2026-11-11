@@ -105,11 +105,12 @@ describe("matchTargetRowsByRef — why a row found no line (AQU-1375)", () => {
     ])
   })
 
-  it("a bridge over verses the file keeps as separate lines, naming the bridge", () => {
+  // AQU-2508 made such a bridge LAND on the range's first line rather than be
+  // explained away, so it is no longer an orphan here. The reason code stays
+  // for the bridge that cannot be anchored — see the AQU-2508 block below.
+  it("a bridge over verses the file keeps as separate lines now lands, so it is no orphan", () => {
     const rows = usfmToTargetRows("\\id GEN\n\\c 1\n\\v 1-2 In the beginning, and the earth\n\\v 3 Light\n")
-    expect(why(rows)).toEqual([
-      { ref: "GEN 1:1-2", reason: "bridgeOverSeparateLines", verses: { first: "1", last: "2" } },
-    ])
+    expect(why(rows)).toEqual([])
   })
 
   it("a single verse the file holds inside a bridged line, naming that line's bridge", () => {
@@ -121,6 +122,94 @@ describe("matchTargetRowsByRef — why a row found no line (AQU-1375)", () => {
   it("a spreadsheet row whose reference cell is blank — no label of its own, only its place", () => {
     const result = matchTargetRowsByRef([{ ref: "GEN 1:1", text: "one" }, { ref: undefined, text: "no ref" }], cells)
     expect(result.orphans).toEqual([{ ref: "", text: "no ref", reason: "noReference", rowIndex: 1 }])
+  })
+})
+
+// AQU-2508: Paratext bridges verses (`\v 27-28`) and gives the range ONE
+// translation. Against a file that keeps those verses apart, the whole bridged
+// text was dropped as an orphan, so every bridge imported as two empty cells
+// and the translation was lost to the project (Anita Beniston's Luke 5:27-28).
+describe("matchTargetRowsByRef — a bridged row lands on the range's first line (AQU-2508)", () => {
+  const separate = [26, 27, 28, 29].map((v) => cell({ cellId: `c${v}`, canonicalRef: `LUK 5:${v}` }))
+  const bridged = usfmToTargetRows(
+    "\\id LUK\n\\c 5\n\\v 26 Amazed.\n\\v 27-28 He saw a publican, and he followed him.\n\\v 29 A great feast.\n",
+  )
+
+  it("carries the whole bridged text, names the bridge, and leaves nothing stranded", () => {
+    const result = matchTargetRowsByRef(bridged, separate)
+    expect(result.orphans).toEqual([])
+    const bridge = result.matched.find((m) => m.flag === "bridged")
+    expect(bridge).toMatchObject({
+      cellId: "c27",
+      ref: "LUK 5:27",
+      writtenAs: "LUK 5:27-28",
+      incomingText: "He saw a publican, and he followed him.",
+      bridgedOver: { first: "27", last: "28" },
+    })
+    // The plain verses either side are untouched by the bridge rule.
+    expect(result.matched.filter((m) => m.flag === undefined).map((m) => m.cellId)).toEqual(["c26", "c29"])
+  })
+
+  it("leaves the rest of the range without text of its own — nothing is duplicated or merged", () => {
+    const result = matchTargetRowsByRef(bridged, separate)
+    expect(result.matched.map((m) => m.cellId)).not.toContain("c28")
+    expect(result.uncovered.map((u) => u.cellId)).toEqual(["c28"])
+  })
+
+  it("still explains a bridge it cannot anchor: the file has no line for the first verse", () => {
+    const from28 = [28, 29].map((v) => cell({ cellId: `c${v}`, canonicalRef: `LUK 5:${v}` }))
+    const result = matchTargetRowsByRef(bridged, from28)
+    expect(result.orphans.find((o) => o.ref === "LUK 5:27-28")).toEqual({
+      ref: "LUK 5:27-28",
+      text: "He saw a publican, and he followed him.",
+      reason: "bridgeOverSeparateLines",
+      verses: { first: "27", last: "28" },
+      rowIndex: 1,
+    })
+    // The bridge took no line at all — not verse 28, which is inside it.
+    expect(result.matched.map((m) => m.cellId)).toEqual(["c29"])
+  })
+
+  it("does not take a line an earlier row already holds", () => {
+    const result = matchTargetRowsByRef(
+      [
+        { ref: "LUK 5:27", text: "plain 27" },
+        { ref: "LUK 5:27-28", text: "bridged 27-28" },
+      ],
+      separate,
+    )
+    expect(result.matched.map((m) => m.incomingText)).toEqual(["plain 27"])
+    expect(result.orphans).toMatchObject([{ ref: "LUK 5:27-28", reason: "bridgeOverSeparateLines" }])
+  })
+
+  it("prefers a line that carries the bridge itself over anchoring on its first verse", () => {
+    const withBridge = [
+      cell({ cellId: "c26", canonicalRef: "LUK 5:26" }),
+      cell({ cellId: "c2728", canonicalRef: "LUK 5:27-28" }),
+      cell({ cellId: "c29", canonicalRef: "LUK 5:29" }),
+    ]
+    const result = matchTargetRowsByRef(bridged, withBridge)
+    expect(result.orphans).toEqual([])
+    const exact = result.matched.find((m) => m.cellId === "c2728")
+    expect(exact).toMatchObject({
+      ref: "LUK 5:27-28",
+      incomingText: "He saw a publican, and he followed him.",
+    })
+    // An exact ranged match is not an anchoring decision: no flag, no pill,
+    // and the row stays ticked by default.
+    expect(exact?.flag).toBeUndefined()
+    expect(exact?.bridgedOver).toBeUndefined()
+  })
+
+  it("a non-bridged file is matched exactly as before", () => {
+    const plain = usfmToTargetRows("\\id LUK\n\\c 5\n\\v 26 Amazed.\n\\v 27 Saw.\n\\v 28 Followed.\n")
+    const result = matchTargetRowsByRef(plain, separate)
+    expect(result.orphans).toEqual([])
+    expect(result.matched.map((m) => [m.cellId, m.flag])).toEqual([
+      ["c26", undefined],
+      ["c27", undefined],
+      ["c28", undefined],
+    ])
   })
 })
 

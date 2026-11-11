@@ -400,7 +400,7 @@ export function CheckFindingsDrawer({
   const wordlistSize = result?.wordlistSize ?? 0
 
   return (
-    <RightSidebarPanel storageKey="check" defaultWidth={320} resizeLabel="Resize file check panel">
+    <RightSidebarPanel storageKey="check" defaultWidth={320} resizeLabel={t("editor.panel.resizeCheck")}>
     <div className="flex h-full min-w-0 w-full flex-col overflow-hidden border-s bg-card">
       <div className="flex shrink-0 items-center justify-between gap-2 border-b p-2">
         {/* Wording tracks the "Check file" button and its "Close file check"

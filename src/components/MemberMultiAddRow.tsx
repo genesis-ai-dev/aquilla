@@ -1,7 +1,10 @@
 import { useState } from "react";
 import { LaneAccessFields } from "@/components/LaneAccessFields";
+import { NoLaneAccessConfirm } from "@/components/NoLaneAccessConfirm";
 import { ROLE } from "@/lib/frontier/roles";
 import {
+  grantsNoLanes,
+  initialLaneChoice,
   laneChoiceReady,
   needsLaneChoice,
   toMemberLaneAccess,
@@ -141,9 +144,17 @@ export function MemberMultiAddRow({
   // or pressing Enter accumulates people here so they survive new searches.
   const [staged, setStaged] = useState<StagedRecipient[]>([]);
   const [role, setRole] = useState(defaultRole);
-  const [laneChoice, setLaneChoice] = useState<LaneAccessChoice | null>(null);
+  // Null until the sharer answers. AQU-2358: a one-lane project behaves as if
+  // its lane were already checked, so `laneChoice` is the answer DERIVED from
+  // that default — the lanes arrive from a fetch, so seeding the state in an
+  // effect would mean a cascading render. Any answer the sharer makes,
+  // including emptying the selection, is non-null and overrides the default.
+  const [pickedLanes, setPickedLanes] = useState<LaneAccessChoice | null>(null);
+  const laneChoice = pickedLanes ?? initialLaneChoice(targetLanes, role);
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
+  // AQU-2358: true while the no-lane warning is open.
+  const [confirmNoLanes, setConfirmNoLanes] = useState(false);
 
   function stageOne(person: StagedRecipient) {
     setStaged((prev) =>
@@ -187,13 +198,23 @@ export function MemberMultiAddRow({
     return name ? [{ username: name }] : [];
   }
 
-  async function handleAdd() {
+  /**
+   * AQU-2358: `confirmedNoLanes` is set only by the warning dialog's "Add
+   * without lanes". Without it, a choice that grants no lane opens the warning
+   * instead of adding.
+   */
+  async function handleAdd(confirmedNoLanes = false) {
     const toAdd = effectiveStaged();
     if (toAdd.length === 0) return;
     const submittedRole = role;
     const askingLanes = needsLaneChoice(submittedRole, targetLanes.length);
     if (askingLanes && !laneChoiceReady(laneChoice, submittedRole, targetLanes.length)) {
       setAddError(t("projectSettings.share.laneChoiceRequired"));
+      return;
+    }
+    if (!confirmedNoLanes && grantsNoLanes(laneChoice, submittedRole, targetLanes.length)) {
+      setAddError(null);
+      setConfirmNoLanes(true);
       return;
     }
     const laneAccess = askingLanes && laneChoice ? toMemberLaneAccess(laneChoice) : undefined;
@@ -327,7 +348,7 @@ export function MemberMultiAddRow({
         <LaneAccessFields
           lanes={targetLanes}
           value={laneChoice}
-          onChange={setLaneChoice}
+          onChange={setPickedLanes}
           disabled={adding || searchDisabled}
         />
       )}
@@ -335,6 +356,15 @@ export function MemberMultiAddRow({
         <p className="text-[10px] text-muted-foreground">{t("projectSettings.share.laneChoiceLeadNote")}</p>
       )}
       {addError && <p className="text-xs text-destructive">{addError}</p>}
+      <NoLaneAccessConfirm
+        open={confirmNoLanes}
+        kind="add"
+        onBack={() => setConfirmNoLanes(false)}
+        onProceed={() => {
+          setConfirmNoLanes(false);
+          void handleAdd(true);
+        }}
+      />
     </div>
   );
 }
@@ -353,6 +383,8 @@ function liveGrantScope(
   if (scope.kind !== "project" || !needsLaneChoice(role, lanes.length)) return scope;
   if (!choice) return { ...scope, lanes: "unknown" };
   if (choice.kind === "all") return { ...scope, lanes: "all" };
+  // AQU-2358: an empty selection is "no lanes", not an unresolved label list.
+  if (choice.laneIds.length === 0) return { ...scope, lanes: "none" };
   const labels = lanes.filter((lane) => choice.laneIds.includes(lane.id)).map((lane) => lane.label);
   return { ...scope, lanes: labels };
 }

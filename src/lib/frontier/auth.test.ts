@@ -39,6 +39,23 @@ describe("login", () => {
     expect((await loadSession())?.jwt).toBe("jwt-1");
   });
 
+  it("explains a dev access refusal instead of the generic failure (AQU-2469)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: "restricted", code: "dev_access_restricted" }), { status: 403 }),
+    );
+    const err = await login({ username: "wendi", password: "pw" }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(FrontierAuthError);
+    expect((err as FrontierAuthError).status).toBe(403);
+    expect((err as Error).message).toMatch(/dev\.aquilla\.app is restricted/);
+    expect(await loadSession()).toBeNull();
+  });
+
+  it("keeps the generic failure for any other 403", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 403 }));
+    const err = await login({ username: "wendi", password: "pw" }).catch((e: unknown) => e);
+    expect((err as Error).message).not.toMatch(/dev\.aquilla\.app/);
+  });
+
   it("announces a confirmed migration before continuing login", async () => {
     const onMigrationRequired = vi.fn();
     const fetchSpy = vi.spyOn(globalThis, "fetch")

@@ -95,6 +95,9 @@
             "MONDAY_TOKEN_KEY",
             "OMNI_SHARED_SECRET"
           ],
+          "requiredBindings": {
+            "DEV_ACCESS_LIST": "kv_namespace"
+          },
           "plainText": {
             "ENVIRONMENT": "development",
             "BASE_URL": "https://dev.aquilla.app",

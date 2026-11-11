@@ -118,33 +118,43 @@ export async function findMatchingFeedbackRoutes(
   return selectMatchingRoutes((results ?? []).map(rowToRoute), { ...ctx, memberOrgIds })
 }
 
+/** How the email side of a report went (AQU-2467). Only `failed` is an error:
+ *  `none` (no route matched) and `unbound` (no EMAIL binding: local/e2e) mean
+ *  there was nothing to send or nowhere to send it from. */
+export interface FeedbackEmailResult {
+  status: "sent" | "none" | "unbound" | "failed"
+  /** Addresses mailed; 0 unless `sent`. */
+  count: number
+}
+
 /**
- * Email a report to every matching route. Never throws: a failure here must
- * not cost the user their report or the Discord post. Resolves to the number
- * of addresses mailed, 0 when nothing matched or the send failed.
+ * Email a report to every matching route. Never throws, so the caller can still
+ * post to Discord first, but it reports `failed` instead of hiding a refusal:
+ * the mail service rejecting the message, or the route lookup erroring (the
+ * admin asked for these inboxes to hear about the report, and we cannot tell
+ * whether any did). The route turns `failed` into a 502.
  */
 export async function emailFeedbackRoutes(
   env: Env,
   ctx: { orgId: number | null; projectId: string | null; userId: number },
   report: Omit<FeedbackRouteEmail, "displayName">,
   screenshot: FeedbackAttachment | null,
-): Promise<number> {
+): Promise<FeedbackEmailResult> {
   try {
     const routes = await findMatchingFeedbackRoutes(env, ctx)
     const recipients = collectRecipients(routes)
-    if (recipients.length === 0) return 0
-    const row = await env.AQUILLA_PG.prepare("SELECT display_name FROM users WHERE id = ?")
+    if (recipients.length === 0) return { status: "none", count: 0 }
+    // The display name is a nicety on the mail; losing it must not fail the send.
+    const displayName = await env.AQUILLA_PG.prepare("SELECT display_name FROM users WHERE id = ?")
       .bind(ctx.userId)
       .first<{ display_name: string | null }>()
-    const sent = await sendFeedbackRouteEmail(
-      env,
-      recipients,
-      { ...report, displayName: row?.display_name ?? null },
-      screenshot,
-    )
-    return sent ? recipients.length : 0
+      .then((row) => row?.display_name ?? null)
+      .catch(() => null)
+    const outcome = await sendFeedbackRouteEmail(env, recipients, { ...report, displayName }, screenshot)
+    if (outcome === "sent") return { status: "sent", count: recipients.length }
+    return { status: outcome, count: 0 }
   } catch (err) {
     console.warn("[feedback-routes] could not email routes:", err)
-    return 0
+    return { status: "failed", count: 0 }
   }
 }

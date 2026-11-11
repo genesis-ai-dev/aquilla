@@ -27,8 +27,11 @@ import { roleChoices as projectRoleChoices } from "@/lib/frontier/role-choices"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { LaneAccessFields } from "@/components/LaneAccessFields"
+import { NoLaneAccessConfirm } from "@/components/NoLaneAccessConfirm"
 import { useCurrentTargetLanes, type TargetLaneOption } from "@/hooks/useCurrentTargetLanes"
 import {
+  grantsNoLanes,
+  initialLaneChoice,
   laneChoiceReady,
   needsLaneChoice,
   toMemberLaneAccess,
@@ -236,6 +239,8 @@ export function MultiProjectInviteDialog({
   const [perProjectError, setPerProjectError] = useState<Record<string, string>>({})
   const [topError, setTopError] = useState<string | null>(null)
   const [done, setDone] = useState<Record<string, "ok"> | null>(null)
+  // AQU-2358: true while the no-lane warning is open.
+  const [confirmNoLanes, setConfirmNoLanes] = useState(false)
 
   const selectedIds = useMemo(() => Object.keys(selections), [selections])
   // AQU-1150: the filter is presentational only — it narrows which rows are
@@ -290,7 +295,25 @@ export function MultiProjectInviteDialog({
     setLaneChoices((prev) => ({ ...prev, [projectId]: choice }))
   }, [])
 
-  async function handleInvite() {
+  /**
+   * One project's answer. AQU-2358: a project with exactly one lane behaves as
+   * if that lane were already checked, derived here rather than seeded into
+   * state by an effect (the lanes arrive per row, from a fetch). An answer the
+   * operator made — emptying the selection included — is non-null and wins.
+   */
+  const choiceFor = useCallback(
+    (projectId: string): LaneAccessChoice | null =>
+      laneChoices[projectId] ??
+      initialLaneChoice(lanesByProject[projectId] ?? [], selections[projectId]),
+    [laneChoices, lanesByProject, selections],
+  )
+
+  /**
+   * AQU-2358: `confirmedNoLanes` comes only from the warning dialog's "Add
+   * without lanes". One confirmation covers the batch: it is shown when ANY
+   * selected project's choice grants no lane.
+   */
+  async function handleInvite(confirmedNoLanes = false) {
     if (!session?.jwt) {
       setTopError("Sign in to invite collaborators.")
       return
@@ -307,14 +330,29 @@ export function MultiProjectInviteDialog({
     const grantIds = selectedIds.filter((projectId) => {
       const role = selections[projectId]
       const lanes = lanesByProject[projectId] ?? []
-      if (laneChoiceReady(laneChoices[projectId] ?? null, role, lanes.length)) return true
+      if (laneChoiceReady(choiceFor(projectId), role, lanes.length)) return true
       blocked[projectId] = t("projectSettings.share.laneChoiceRequired")
       return false
     })
+    if (
+      !confirmedNoLanes &&
+      grantIds.some((projectId) =>
+        grantsNoLanes(
+          choiceFor(projectId),
+          selections[projectId],
+          (lanesByProject[projectId] ?? []).length,
+        ),
+      )
+    ) {
+      setTopError(null)
+      setPerProjectError(blocked)
+      setConfirmNoLanes(true)
+      return
+    }
     function accessFor(projectId: string) {
       const role = selections[projectId]
       const lanes = lanesByProject[projectId] ?? []
-      const choice = laneChoices[projectId] ?? null
+      const choice = choiceFor(projectId)
       if (!needsLaneChoice(role, lanes.length) || !choice) return undefined
       return toMemberLaneAccess(choice)
     }
@@ -451,13 +489,13 @@ export function MultiProjectInviteDialog({
         roleChoices={roleChoices}
         onToggle={toggleProject}
         onRoleChange={setProjectRole}
-        laneChoice={laneChoices[project.id] ?? null}
+        laneChoice={choiceFor(project.id)}
         onLaneChoice={(choice) => setProjectLaneChoice(project.id, choice)}
         onLanes={setProjectLanes}
         className={className}
       />
     ),
-    [selections, laneChoices, perProjectError, done, busy, isEmailMode, roleChoices, toggleProject, setProjectRole, setProjectLaneChoice, setProjectLanes],
+    [selections, choiceFor, perProjectError, done, busy, isEmailMode, roleChoices, toggleProject, setProjectRole, setProjectLaneChoice, setProjectLanes],
   )
 
   // Everything a row reads out of dialog state has to travel in `extraData`:
@@ -465,8 +503,11 @@ export function MultiProjectInviteDialog({
   // value left out of here would leave a checked row looking unchecked (or a
   // failed row without its error) until it scrolled out of view and back.
   const listExtraData = useMemo(
-    () => ({ selections, laneChoices, perProjectError, done, busy, isEmailMode }),
-    [selections, laneChoices, perProjectError, done, busy, isEmailMode],
+    // AQU-2358: `lanesByProject` is in here because a row's lane boxes are now
+    // derived from it (the one-lane default), so a row mounted before its lanes
+    // arrived has to re-render when they do.
+    () => ({ selections, laneChoices, lanesByProject, perProjectError, done, busy, isEmailMode }),
+    [selections, laneChoices, lanesByProject, perProjectError, done, busy, isEmailMode],
   )
 
   const renderVirtualRow = useCallback(
@@ -608,7 +649,7 @@ export function MultiProjectInviteDialog({
             <Button variant="outline" onClick={handleClose} disabled={busy}>
               {done ? "Close" : "Cancel"}
             </Button>
-            <Button onClick={handleInvite} disabled={!canSubmit}>
+            <Button onClick={() => void handleInvite()} disabled={!canSubmit}>
               {busy ? (
                 <>
                   <Spinner className="me-1" />
@@ -622,6 +663,15 @@ export function MultiProjectInviteDialog({
             </Button>
           </div>
         </div>
+        <NoLaneAccessConfirm
+          open={confirmNoLanes}
+          kind={isEmailMode ? "invite" : "add"}
+          onBack={() => setConfirmNoLanes(false)}
+          onProceed={() => {
+            setConfirmNoLanes(false)
+            void handleInvite(true)
+          }}
+        />
       </DialogContent>
     </Dialog>
   )

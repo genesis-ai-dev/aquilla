@@ -218,7 +218,7 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
   }
 
   return (
-    <RightSidebarPanel storageKey="comments" defaultWidth={384} resizeLabel="Resize comments panel">
+    <RightSidebarPanel storageKey="comments" defaultWidth={384} resizeLabel={t("editor.panel.resizeComments")}>
     <div className="bg-card relative z-10 flex h-full w-full flex-col border-s" data-testid="comments-drawer">
       <div className="flex items-center justify-between border-b p-2">
         <h3 className="text-sm font-semibold">

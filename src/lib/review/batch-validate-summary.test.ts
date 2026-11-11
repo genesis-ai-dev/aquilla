@@ -15,12 +15,15 @@
  */
 import { describe, expect, it } from "vitest"
 import {
+  BATCH_VALIDATE_CHUNK_FALLBACK,
   BATCH_VALIDATE_SKIP_REASONS,
+  batchValidateChunkSize,
   batchValidateConfirmDescription,
   batchValidateSkipClauses,
   batchValidateSkipReason,
   batchValidateToast,
   batchValidateTelemetry,
+  chunksOf,
   noPermissionMessage,
   summarizeBatchValidate,
   workspaceBatchValidateOptions,
@@ -371,10 +374,10 @@ describe("summarizeBatchValidate — the caller's own latest change", () => {
     ]
     const summary = summarizeBatchValidate(candidates, { ...off, myScopes: scopes })
     expect(summary.skips).toEqual({
-      needsTranslation: 1, aiDraft: 0, alreadyMine: 1, ownEdit: 1, outOfScope: 1, notCommitted: 1, notChosen: 0,
+      needsTranslation: 1, aiDraft: 0, flagged: 0, alreadyMine: 1, ownEdit: 1, outOfScope: 1, notCommitted: 1, notChosen: 0,
     })
     const bucketed = BATCH_VALIDATE_SKIP_REASONS.reduce((n, r) => n + summary.skips[r], 0)
-    expect(BATCH_VALIDATE_SKIP_REASONS).toHaveLength(7)
+    expect(BATCH_VALIDATE_SKIP_REASONS).toHaveLength(8)
     expect(bucketed).toBe(summary.skippedTotal)
     expect(summary.validatable.map((c) => c.id)).toEqual(["ok"])
     expect(summary.validatable.length + bucketed).toBe(candidates.length)
@@ -382,7 +385,7 @@ describe("summarizeBatchValidate — the caller's own latest change", () => {
 
   it("reads its clause after already-mine and before out-of-scope", () => {
     expect(BATCH_VALIDATE_SKIP_REASONS).toEqual([
-      "needsTranslation", "aiDraft", "alreadyMine", "ownEdit", "outOfScope", "notCommitted", "notChosen",
+      "needsTranslation", "aiDraft", "flagged", "alreadyMine", "ownEdit", "outOfScope", "notCommitted", "notChosen",
     ])
     const scopes: MemberScope[] = [{ kind: "file", value: "file-1" }]
     const summary = summarizeBatchValidate(
@@ -476,14 +479,32 @@ describe("workspaceBatchValidateOptions — the project's rules reach the run", 
     expect(o).toMatchObject({ canValidate: false, noPermissionReason: "role" })
   })
 
-  it("lets a listed reader with the role through, with the project's cap", () => {
+  it("lets a listed reader with the role through", () => {
     const o = opts(project({
       validationNamedUsers: [ME],
       validationRoleFloor: "reviewer",
       syncRole: { level: ROLE.REVIEWER, name: "reviewer", source: "project" },
       completionSettings: { validationBatchSize: 5 },
     }))
-    expect(o).toMatchObject({ canValidate: true, cap: 5, hasTarget: true })
+    expect(o).toMatchObject({ canValidate: true, hasTarget: true })
+  })
+
+  // AQU-2507: the project's batch size used to come back as `cap`, which made
+  // the file-wide summary — and therefore the dialog's promise and the run —
+  // stop at 500 cells and say "535 left for the next run". It is the run's
+  // CHUNK size now, read separately by the caller, so this builder must NOT
+  // reintroduce a ceiling: a pretranslated book validates from one click.
+  it("asks for no cap, so a file-wide run describes the whole file (AQU-2507)", () => {
+    const o = opts(project({
+      syncRole: { level: ROLE.REVIEWER, name: "reviewer", source: "project" },
+      completionSettings: { validationBatchSize: 500 },
+    }))
+    expect(o.cap).toBeUndefined()
+    const candidates = Array.from({ length: 879 }, (_, i) => cell({ id: `c${i}` }))
+    const summary = summarizeBatchValidate(candidates, o)
+    expect(summary.validatable).toHaveLength(879)
+    expect(summary.cappedOut).toBe(0)
+    expect(summary.outcome).toBe("validated")
   })
 
   it("has no target with no file open", () => {
@@ -497,5 +518,198 @@ describe("noPermissionMessage", () => {
     expect(noPermissionMessage({ noPermissionReason: "role" }, t)).toBe("editor.batchValidate.noPermission")
     expect(noPermissionMessage({}, t)).toBe("editor.batchValidate.noPermission")
     expect(noPermissionMessage({ noPermissionReason: "allowlist" }, t)).toBe("editor.batchValidate.notNamedValidator")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AQU-2507 — one action validates the whole file
+// ---------------------------------------------------------------------------
+
+/**
+ * The reported defect, in Anita Beniston's words via Joel (2026-11-10): she
+ * imported five pretranslated books (Mark, Luke, John, Titus, James) whose text
+ * was already approved outside Aquilla, and "Validate all" on John (879 cells)
+ * came back "Validated 363 cells. Skipped 616 — 81 still need a translation,
+ * 535 left for the next run." Accepting five books meant clicking until the
+ * toast stopped saying that.
+ *
+ * So these guards are about the WHOLE file: the run's chunking must partition
+ * the eligible cells, never truncate them, and the dialog must promise
+ * completion rather than another click.
+ */
+describe("chunksOf — the chunk partitions the work, it does not truncate it", () => {
+  it("covers every cell exactly once, in order", () => {
+    const cells = Array.from({ length: 879 }, (_, i) => `c${i}`)
+    const chunks = chunksOf(cells, 500)
+    expect(chunks).toHaveLength(2)
+    expect(chunks.map((c) => c.length)).toEqual([500, 379])
+    expect(chunks.flat()).toEqual(cells)
+  })
+
+  it("covers a 2,870-cell file from one action", () => {
+    const cells = Array.from({ length: 2870 }, (_, i) => i)
+    const chunks = chunksOf(cells, 500)
+    expect(chunks.flat()).toHaveLength(2870)
+    expect(new Set(chunks.flat()).size).toBe(2870)
+  })
+
+  it("yields no chunks for no work, so a caller's loop body never runs on nothing", () => {
+    expect(chunksOf([], 500)).toEqual([])
+  })
+
+  it("falls back to a usable chunk rather than looping forever on a bad size", () => {
+    expect(batchValidateChunkSize(0)).toBe(BATCH_VALIDATE_CHUNK_FALLBACK)
+    expect(batchValidateChunkSize(null)).toBe(BATCH_VALIDATE_CHUNK_FALLBACK)
+    expect(batchValidateChunkSize(undefined)).toBe(BATCH_VALIDATE_CHUNK_FALLBACK)
+    expect(batchValidateChunkSize(-5)).toBe(BATCH_VALIDATE_CHUNK_FALLBACK)
+    expect(batchValidateChunkSize(Number.NaN)).toBe(BATCH_VALIDATE_CHUNK_FALLBACK)
+    expect(batchValidateChunkSize(0.5)).toBe(1)
+    expect(batchValidateChunkSize(20)).toBe(20)
+    expect(chunksOf([1, 2, 3], 0)).toEqual([[1, 2, 3]])
+  })
+})
+
+describe("batchValidateConfirmDescription — the dialog promises completion (AQU-2507)", () => {
+  it("tells a multi-batch run it finishes the file, and never to run again", () => {
+    const candidates = Array.from({ length: 879 }, (_, i) => cell({ id: `c${i}` }))
+    const body = batchValidateConfirmDescription(
+      summarizeBatchValidate(candidates, base), t, joinList, 500,
+    )
+    expect(body).toContain("willValidate")
+    expect(body).toContain('"count":879')
+    expect(body).toContain("runsToCompletion")
+    expect(body).not.toContain("capNote")
+  })
+
+  it("says nothing about batches when one batch covers the file", () => {
+    const body = batchValidateConfirmDescription(
+      summarizeBatchValidate([cell({ id: "a" })], base), t, joinList, 500,
+    )
+    expect(body).not.toContain("runsToCompletion")
+  })
+
+  it("keeps the batch note off a run that will validate nothing", () => {
+    const body = batchValidateConfirmDescription(
+      summarizeBatchValidate([cell({ id: "a", translated: "" })], base), t, joinList, 1,
+    )
+    expect(body).toContain("nothingToValidate")
+    expect(body).not.toContain("runsToCompletion")
+  })
+})
+
+describe("summarizeBatchValidate — open check flags are a choice (AQU-2507)", () => {
+  const flagged = (...ids: string[]) => ({
+    ...base,
+    hasOpenFlags: (cellId: string) => ids.includes(cellId),
+  })
+
+  it("leaves flagged cells out by default and reports them in their own bucket", () => {
+    const summary = summarizeBatchValidate(
+      [cell({ id: "clean" }), cell({ id: "dirty" })],
+      flagged("dirty"),
+    )
+    expect(summary.validatable.map((c) => c.id)).toEqual(["clean"])
+    expect(summary.skips.flagged).toBe(1)
+    expect(summary.outcome).toBe("partial")
+    expect(batchValidateSkipClauses(summary, t).join(" ")).toContain("skip.flagged")
+  })
+
+  it("validates them when the reader opts in — their check overrules the flag", () => {
+    const summary = summarizeBatchValidate(
+      [cell({ id: "clean" }), cell({ id: "dirty" })],
+      { ...flagged("dirty"), includeFlaggedCells: true },
+    )
+    expect(summary.validatable.map((c) => c.id)).toEqual(["clean", "dirty"])
+    expect(summary.skips.flagged).toBe(0)
+    expect(summary.outcome).toBe("validated")
+  })
+
+  it("asks nothing of a surface that does not supply the predicate", () => {
+    const summary = summarizeBatchValidate([cell({ id: "a" })], base)
+    expect(summary.validatable.map((c) => c.id)).toEqual(["a"])
+    expect(summary.skips.flagged).toBe(0)
+  })
+
+  it("never validates an empty cell, flagged or not, and still counts it", () => {
+    const summary = summarizeBatchValidate(
+      [cell({ id: "empty", translated: "  " })],
+      flagged("empty"),
+    )
+    expect(summary.validatable).toEqual([])
+    expect(summary.skips.needsTranslation).toBe(1)
+    expect(summary.skips.flagged).toBe(0)
+  })
+
+  it("reports a flagged untouched AI draft under the AI-draft box, not twice", () => {
+    const summary = summarizeBatchValidate(
+      [cell({ id: "ai", aiDrafted: true })],
+      { ...flagged("ai"), includeUntouchedAiDrafts: false },
+    )
+    expect(summary.skips.aiDraft).toBe(1)
+    expect(summary.skips.flagged).toBe(0)
+    const bucketed = BATCH_VALIDATE_SKIP_REASONS.reduce((n, r) => n + summary.skips[r], 0)
+    expect(bucketed).toBe(summary.skippedTotal)
+  })
+})
+
+describe("batchValidateTelemetry — the chunked run is on the record (AQU-2507)", () => {
+  it("carries the eligible total, the chunk count and the flagged choice", () => {
+    const candidates = Array.from({ length: 879 }, (_, i) => cell({ id: `c${i}` }))
+    const summary = summarizeBatchValidate(candidates, base)
+    const props = batchValidateTelemetry(summary, "workspace-action", {
+      chunks: chunksOf(summary.validatable, 500).length,
+      chunkSize: 500,
+      includedFlagged: true,
+    })
+    expect(props).toMatchObject({
+      outcome: "validated",
+      validated_count: 879,
+      eligible_total: 879,
+      chunk_count: 2,
+      chunk_size: 500,
+      included_flagged: 1,
+      skipped_flagged: 0,
+    })
+  })
+
+  it("omits the run properties on a surface that does not chunk", () => {
+    const props = batchValidateTelemetry(summarizeBatchValidate([cell()], base), "selection")
+    expect(props.chunk_count).toBeUndefined()
+    expect(props.included_flagged).toBeUndefined()
+    expect(props.skipped_flagged).toBe(0)
+  })
+})
+
+/**
+ * AQU-2507 acceptance: "interruption resumable (re-run continues, idempotent)".
+ *
+ * The run flushes each chunk before starting the next, so a closed tab or a
+ * lost connection leaves the chunks it finished durably validated. What makes
+ * re-running safe is that eligibility is recomputed from live cell state: a
+ * cell this reader has already signed off comes back as `alreadyMine` and is
+ * never voted on twice, and the next run picks up exactly the remainder.
+ */
+describe("summarizeBatchValidate — re-running resumes rather than restarts (AQU-2507)", () => {
+  it("skips what the interrupted run already signed off and validates only the rest", () => {
+    const file = Array.from({ length: 879 }, (_, i) => cell({ id: `c${i}` }))
+    const first = summarizeBatchValidate(file, base)
+    expect(first.validatable).toHaveLength(879)
+
+    // The tab closed after the first chunk of 500 landed.
+    const done = new Set(chunksOf(first.validatable, 500)[0].map((c) => c.id))
+    const afterInterruption = file.map((c) =>
+      done.has(c.id) ? { ...c, activeValidators: [ME] } : c)
+
+    const second = summarizeBatchValidate(afterInterruption, base)
+    expect(second.validatable).toHaveLength(379)
+    expect(second.skips.alreadyMine).toBe(500)
+    expect(second.validatable.some((c) => done.has(c.id))).toBe(false)
+
+    // And a third run, once nothing is left, is a no-op that still says so.
+    const allDone = file.map((c) => ({ ...c, activeValidators: [ME] }))
+    const third = summarizeBatchValidate(allDone, base)
+    expect(third.validatable).toEqual([])
+    expect(third.outcome).toBe("nothing-eligible")
+    expect(batchValidateToast(third, t, joinList).title).toContain("nothingEligibleTitle")
   })
 })

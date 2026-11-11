@@ -130,6 +130,14 @@ export type TargetMatchFlag =
    *  (AQU-1375): the text couldn't settle the pairing, so it fell back to
    *  position. Left unticked, with the row's source shown beside the line's. */
   | "sourceDiffers"
+  /** The row is a Paratext/USFM bridge (`\v 27-28`) over verses the open file
+   *  keeps as separate lines, and its combined text landed on the FIRST verse
+   *  of the range (AQU-2508). The later verses of the range keep no text of
+   *  their own — the translation of all of them is the one text on the anchor
+   *  line. Nothing is merged, split or renumbered: the file's own structure is
+   *  untouched. Left unticked so a person confirms the anchoring (AQU-911 is
+   *  what happens when a range decision lands silently). */
+  | "bridged"
 
 export interface FileTargetMatchedCell extends EBibleMatchedCell {
   /** The matched cell's source text — review-screen context only. */
@@ -157,6 +165,9 @@ export interface FileTargetMatchedCell extends EBibleMatchedCell {
   alreadyThere?: boolean
   /** For a `sourceDiffers` row: the source text the uploaded row carries. */
   incomingSource?: string
+  /** For a `bridged` row: the bridge the uploaded file wrote, first and last
+   *  verse. The anchor line it landed on is the `first` one. */
+  bridgedOver?: { first: string; last: string }
   /** For a reference match: the row's reference as the file wrote it, when
    *  that differs from the line's own (`gen 1:2` for `GEN 1:2`). The review
    *  names the row by the line's reference and shows this beside it
@@ -187,8 +198,10 @@ export type TargetOrphanReason =
   /** An earlier row already took this reference's line (AQU-1375). */
   | "refRepeated"
   /** A bridge (`\v 1-2`) over verses the open file keeps as separate lines
-   *  (AQU-1375). How it should land is AQU-1289's call; this only says why it
-   *  didn't. `verses` names the bridge. */
+   *  that could not be anchored (AQU-1375). Since AQU-2508 such a row normally
+   *  LANDS, on the range's first verse, flagged `bridged`; it stays an orphan
+   *  only when that anchor line is absent from the file or an earlier row
+   *  already took it. `verses` names the bridge. */
   | "bridgeOverSeparateLines"
   /** A single verse the open file holds inside one bridged line (AQU-1375).
    *  `verses` names that line's bridge. */
@@ -432,7 +445,12 @@ function whyNoLineHasRef(
  *  matches exactly first; failing that, a verse ref matches whichever way it
  *  is spelled — `Genesis 1:4`, `gen 1:4` and `GEN 1.4` all find `GEN 1:4`
  *  (AQU-1375). Rows with empty text are ignored — a blank spreadsheet cell
- *  must never clear an existing translation. */
+ *  must never clear an existing translation.
+ *
+ *  A Paratext/USFM bridge (`\v 27-28`) over verses the open file keeps as
+ *  separate lines lands on the range's FIRST line, flagged `bridged`
+ *  (AQU-2508) — before that the whole bridged translation was dropped as an
+ *  orphan and both verses of every bridge imported empty. */
 export function matchTargetRowsByRef(
   rows: TargetRow[],
   cells: FileTargetCellRef[],
@@ -452,6 +470,17 @@ export function matchTargetRowsByRef(
     const verse = canonicalVerseRef(ref)
     return verse ? byVerse.get(verse) : undefined
   }
+  /** The line a bridge (`\v 27-28`) anchors on when the file keeps those
+   *  verses apart: the range's FIRST verse (AQU-2508). USFM itself writes the
+   *  bridge as one verse span whose number begins at that verse, and the
+   *  combined text is one translation of the whole range, so it belongs on
+   *  that line rather than nowhere. Returns undefined for a non-bridge ref or
+   *  when the file has no line for the first verse. */
+  const bridgeAnchor = (ref: string) => {
+    const row = parseVerseReference(ref)
+    if (!row?.toVerse) return undefined
+    return byVerse.get(formatVerseReference({ ...row, toVerse: null }))
+  }
 
   const matched: FileTargetMatchedCell[] = []
   const orphans: TargetOrphan[] = []
@@ -464,10 +493,21 @@ export function matchTargetRowsByRef(
       orphans.push({ ref: "", text: row.text, reason: "noReference", rowIndex: index })
       return
     }
-    const cell = cellForRef(row.ref)
+    let cell = cellForRef(row.ref)
+    let bridgedOver: { first: string; last: string } | undefined
     if (!cell) {
-      orphans.push({ ref: row.ref, text: row.text, ...whyNoLineHasRef(row.ref, lineVerses), rowIndex: index })
-      return
+      const why = whyNoLineHasRef(row.ref, lineVerses)
+      // A bridge the file keeps apart is not an orphan: it lands on the
+      // range's first line, carrying the whole bridged text, flagged so the
+      // review says so and leaves the row for a person to tick (AQU-2508).
+      const anchor = why.reason === "bridgeOverSeparateLines" ? bridgeAnchor(row.ref) : undefined
+      if (anchor && why.verses && !matchedCellIds.has(anchor.cellId)) {
+        cell = anchor
+        bridgedOver = why.verses
+      } else {
+        orphans.push({ ref: row.ref, text: row.text, ...why, rowIndex: index })
+        return
+      }
     }
     if (matchedCellIds.has(cell.cellId)) {
       // A later row targeting an already-matched ref is an orphan, not a
@@ -479,9 +519,10 @@ export function matchTargetRowsByRef(
     // Named by the line's own reference, not however the file spelled it.
     const lineRef = cell.canonicalRef || row.ref
     matched.push({
-      ...toMatchedCell(cell, row.text, lineRef),
+      ...toMatchedCell(cell, row.text, lineRef, bridgedOver ? "bridged" : undefined),
       rowIndex: index,
       ...(row.ref !== lineRef ? { writtenAs: row.ref } : {}),
+      ...(bridgedOver ? { bridgedOver } : {}),
     })
   })
 

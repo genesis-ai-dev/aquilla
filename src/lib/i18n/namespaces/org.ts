@@ -19,6 +19,8 @@ export const org = defineNamespace({
     "org.access.origin.inherited": "Inherited",
     "org.access.origin.inheritedFrom": "Inherited · {path}",
     "org.access.origin.platform": "Platform admin",
+    "org.access.roleBadge.via": "{role} · via {path}",
+    "org.access.roleBadge.origin": "{role} · {origin}",
     "org.access.effective.direct": "{role} (direct)",
     "org.access.effective.via": "{role} (via {path})",
     "org.access.effective.creator": "{role} (creator)",
@@ -1270,12 +1272,14 @@ export const org = defineNamespace({
     // AQU-2289: an org role below Maintainer opens no project (AQU-1107).
     "org.grantScope.scope.organizationOnly": "of the organization — no projects until added to one",
     "org.grantScope.scope.projectAllLanes": "on {project} — every language lane",
+    "org.grantScope.scope.projectNoLanes": "on {project} — no language lanes",
     "org.grantScope.scope.project": "on {project}",
     "org.grantScope.scope.laneOnly": "on {project}, {lane} language lane only",
     "org.grantScope.scope.lanesOnly": "on {project}, {lanes} language lanes only",
     "org.grantScope.echo.organization": "every project",
     "org.grantScope.echo.organizationOnly": "organization only",
     "org.grantScope.echo.allLanes": "every language lane",
+    "org.grantScope.echo.noLanes": "no language lanes",
     "org.grantScope.echo.laneOnly": "{lane} language lane only",
     "org.grantScope.echo.lanesOnly": "{lanes} language lanes only",
     "org.grantScope.button": "{action} — {scope}",
@@ -1832,6 +1836,22 @@ export const org = defineNamespace({
       "org.access.origin.inheritedFrom": {
         description: "Badge on a member row: the role comes from a grant at an ancestor scope.",
         placeholders: { path: "Scope breadcrumb such as \"Biblica ETT › biblica/bsb › Pattani Malay Bible\"; never translated." },
+      },
+      "org.access.roleBadge.via": {
+        description:
+          "AQU-2317: the role pill for a grant inherited from an ancestor place — the role, then the place it is set at. The pill is a link to that place.",
+        placeholders: {
+          role: "Localized role label, e.g. \"Project Lead\".",
+          path: "Scope breadcrumb of the place the grant is set at, such as \"Biblica ETT › biblica/bsb\"; never translated.",
+        },
+      },
+      "org.access.roleBadge.origin": {
+        description:
+          "AQU-2317: the role pill when the grant comes from something that is not a place you can open — creator, platform admin, or an inherited grant whose source the viewer may not see.",
+        placeholders: {
+          role: "Localized role label, e.g. \"Project Lead\".",
+          origin: "Localized origin label from org.access.origin.* / org.accessModelLegend.*, already translated.",
+        },
       },
       "org.access.effective.direct": {
         description: "Direct role shown beside a different effective role.",
@@ -3296,6 +3316,11 @@ export const org = defineNamespace({
           "Scope phrase for a project grant with no lane restriction. Begins with 'on'. The em dash clause says the grant is not limited to one lane.",
         placeholders: { project: "The project's display name — not translated." },
       },
+      "org.grantScope.scope.projectNoLanes": {
+        description:
+          "Scope phrase for a project grant that includes no language lane at all (AQU-2358): the person can see the project and its source text, and no translation. Begins with 'on'. The em dash clause says the grant covers no lane.",
+        placeholders: { project: "The project's display name — not translated." },
+      },
       "org.grantScope.scope.project": {
         description:
           "Scope phrase when the grant is on one project but the lane list is not known yet, so the sentence does not claim every lane or one lane.",
@@ -3326,6 +3351,10 @@ export const org = defineNamespace({
       },
       "org.grantScope.echo.allLanes": {
         description: "Short scope echo appended to a button that grants a whole project, every lane.",
+      },
+      "org.grantScope.echo.noLanes": {
+        description:
+          "Short scope echo appended to a button that grants a project with no language lane at all — the person sees the project and its source, no translation.",
       },
       "org.grantScope.echo.laneOnly": {
         description: "Short scope echo appended to a button that grants one lane.",

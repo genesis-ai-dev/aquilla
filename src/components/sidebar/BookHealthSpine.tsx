@@ -511,7 +511,7 @@ export function BookHealthSpine({
                   <span className="mt-0.5 block truncate text-[9px] text-muted-foreground/80">
                     {chapterProgressWords(chapter, t)}
                     {visual.measured && visual.score !== undefined && visual.score < 100
-                      ? ` · health ${Math.round(visual.score)}`
+                      ? t("editor.bookHealth.scoreSuffix", { score: Math.round(visual.score) })
                       : ""}
                   </span>
                 )}
@@ -546,8 +546,8 @@ export function BookHealthSpine({
                   }}
                 >
                   {isExpanded
-                    ? "Show fewer cells"
-                    : `Show ${chapterCells.length - COLLAPSED_CELL_LIMIT} more cells`}
+                    ? t("editor.bookHealth.showFewerCells")
+                    : t("editor.bookHealth.showMoreCells", { count: chapterCells.length - COLLAPSED_CELL_LIMIT })}
                 </button>
               )}
             </div>

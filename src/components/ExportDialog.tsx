@@ -1531,6 +1531,15 @@ export function ExportDialog({
         let msg = result.report.translated === 0
           ? t("importExport.status.downloadedIdmlUnchanged", { fileName })
           : t("importExport.status.downloadedParagraphsTranslated", { fileName, count: result.report.translated })
+        // Lines only this file has, after a link replaced its source: their
+        // paragraphs are not in the linked package, so they stayed out — said
+        // beside the download rather than silently.
+        if (result.omitted.length > 0) {
+          msg = `${msg} ${t("importExport.status.idmlLinesLeftOut", {
+            count: result.omitted.length,
+            labels: result.omitted.slice(0, 8).map((line) => line.cellLabel).join(", "),
+          })}`
+        }
         if (idmlTransform) {
           setStatus({ kind: "busy", msg: idmlTransform.busyMessage })
           try {

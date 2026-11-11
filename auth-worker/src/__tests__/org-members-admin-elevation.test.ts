@@ -15,6 +15,8 @@ import { env } from "cloudflare:test"
 import { describe, it, expect, afterEach } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
+import deploymentManifest from "../../../config/cloudflare-deployments.json"
+import { DEV_IDENTITY_WORKER } from "../services/dev-access"
 
 async function seedForeignOrg() {
   await seedUser(1, "wendi")
@@ -121,5 +123,49 @@ describe("org membership writes via the platform-admin fallback", () => {
 
     const res = await addMember(await jwtFor("outsider"), 1, "target", 700)
     expect(res.status).toBe(403)
+  })
+})
+
+// AQU-2470: on the dev identity Worker the AQU-2469 access list does the
+// gatekeeping, so a platform admin's cross-tenant write needs no emailed code.
+// The audit row is still written. Prod and the previews keep the code.
+describe("org membership writes by deployment (AQU-2470)", () => {
+  afterEach(() => {
+    env.ADMIN_REQUIRE_ELEVATION = undefined
+    env.DEPLOYMENT_WORKER_NAME = undefined
+  })
+
+  it("on dev, an un-elevated platform admin adds a member and the audit row is written", async () => {
+    env.ADMIN_REQUIRE_ELEVATION = "true"
+    env.DEPLOYMENT_WORKER_NAME = DEV_IDENTITY_WORKER
+    await seedForeignOrg()
+    await seedUser(7, "root")
+    await seedUser(9, "helper")
+
+    const res = await addMember(await jwtFor("root"), 1, "helper", 400)
+    expect(res.status).toBe(200)
+
+    const audit = await env.AQUILLA_PG.prepare(
+      "SELECT action FROM admin_audit_log WHERE user_id = 7 AND action = 'org.member.add'",
+    ).first<{ action: string }>()
+    expect(audit?.action).toBe("org.member.add")
+  })
+
+  it.each([
+    ["production", deploymentManifest.surfaces.identity.environments.production.worker],
+    ["the per-branch preview", "aquilla-auth-preview"],
+  ])("on %s, the same write still needs the code", async (_label, workerName) => {
+    env.ADMIN_REQUIRE_ELEVATION = "true"
+    env.DEPLOYMENT_WORKER_NAME = workerName
+    await seedForeignOrg()
+    await seedUser(7, "root")
+    await seedUser(9, "helper")
+
+    const res = await addMember(await jwtFor("root"), 1, "helper", 400)
+    expect(res.status).toBe(403)
+    const row = await env.AQUILLA_PG.prepare(
+      "SELECT 1 FROM org_members WHERE org_id = 1 AND user_id = 9",
+    ).first()
+    expect(row).toBeNull()
   })
 })

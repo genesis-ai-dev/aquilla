@@ -41,6 +41,7 @@ export function TargetDraftActions({
   onDragEnter,
   onConfirmOpenChange,
 }: TargetDraftActionsProps) {
+  const t = useT()
   const [confirmOpen, setConfirmOpenState] = useState(false)
   const isValidated = status === "validated"
 
@@ -75,16 +76,16 @@ export function TargetDraftActions({
         icon={<Sparkles className="h-3.5 w-3.5" />}
         tooltip={
           isAnonymous
-            ? "Sign in for AI translations"
+            ? t("editor.ai.signInForTranslations")
             : !editable
-              ? "Read-only (imported from git)"
+              ? t("common.readOnlyGit")
               : !isCompletionConfigured
-                ? "Set up AI to enable"
+                ? t("editor.ai.setUpToEnable")
                 : !isCompletionAvailable
-                  ? "AI service unavailable — try again shortly"
+                  ? t("editor.ai.serviceUnavailable")
                   : isLoading
-                    ? "Generating…"
-                    : "Translate with AI"
+                    ? t("editor.ai.generating")
+                    : t("editor.ai.translateWithAi")
         }
         onClick={requestDraft}
         disabled={
@@ -104,12 +105,12 @@ export function TargetDraftActions({
           icon={<RefreshCw className="h-3.5 w-3.5" />}
           tooltip={
             !isCompletionConfigured
-              ? "Set up AI to enable"
+              ? t("editor.ai.setUpToEnable")
               : !isCompletionAvailable
-                ? "AI service unavailable — try again shortly"
+                ? t("editor.ai.serviceUnavailable")
                 : isLoading
-                  ? "Generating…"
-                  : "Regenerate — another AI variation"
+                  ? t("editor.ai.generating")
+                  : t("editor.ai.regenerate")
           }
           onClick={() => {
             if (isLoading) return
@@ -163,8 +164,8 @@ export function TargetReferenceActions({
         <RailButton
           icon={<MessageCircle className="h-3.5 w-3.5" />}
           tooltip={openCommentCount > 0
-            ? `${openCommentCount} open comment${openCommentCount !== 1 ? "s" : ""}`
-            : "Add comment"}
+            ? t("editor.comments.open", { count: openCommentCount })
+            : t("editor.cell.addComment")}
           onClick={() => onOpenComments(cellId)}
           toneClass={openCommentCount > 0 ? "text-primary hover:text-primary" : undefined}
           dot={openCommentCount > 0 ? "primary" : undefined}

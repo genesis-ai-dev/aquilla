@@ -25,12 +25,19 @@
 //     uploaded original while its `artifacts` row exists, and nothing deletes
 //     those rows, so a pointer never outlives its object.
 //
-// Adopted files are the one exclusion: an upstream file the link follows INTO
-// one of the project's own files (`projects.source_link_adopt`, AQU-1679) is
-// that project's own import, with its own type and its own original. Callers
-// never pass those pairs.
+// An adopted file — an upstream file the link follows INTO one of the project's
+// own files (`projects.source_link_adopt`, AQU-1679) — is the project's own
+// import, so the type rule has nothing to do for it (the fill only ever touches
+// NULL columns). Its ORIGINAL is another matter: the join writes the upstream's
+// source onto its cells, locators included, so from then on the cells describe
+// the upstream's package, not the one the file was imported from. An IDML export
+// read against its own original then rejected every mapping ("IDML export
+// rejected N invalid translation mapping(s)"). So once the join has run, an
+// adopted file gets the pointer rule like any copy; while it is still pending
+// its cells are its own and it is left alone.
 
 import type { AquillaDb, AquillaStatement } from "../shim/postgres"
+import type { SourceLinkAdoption } from "./source-link-adopt"
 
 export interface LinkedFilePair {
   upstreamFileId: string
@@ -243,7 +250,7 @@ export function linkedFileProvenanceStmts(
 export interface LinkedFileProvenanceArgs {
   upstreamProjectId: string
   downstreamProjectId: string
-  /** Mirrored copies only — never an adopted file (see the header). */
+  /** Mirrored copies, and adopted files whose join has run (see the header). */
   pairs: readonly LinkedFilePair[]
   now: number
 }
@@ -315,10 +322,11 @@ export interface ProjectLinkedFileProvenanceArgs {
    *  two workers keep separate copies of the derivation, so the sweep takes it
    *  rather than picking one. */
   downstreamFileIdOf: (upstreamFileId: string) => string
-  /** Downstream ids the link adopted (`projects.source_link_adopt`, AQU-1679).
-   *  Those are the project's OWN imports, with their own type and their own
-   *  original, and are never paired. */
-  adoptedDownstreamFileIds?: ReadonlySet<string>
+  /** The link's adopted files (`projects.source_link_adopt`, AQU-1679). A file
+   *  whose join has run is paired with the upstream file it now follows, so its
+   *  original is the package its cells describe; one still pending is the
+   *  project's own and is never paired by derivation either. */
+  adoption?: SourceLinkAdoption | null
   now: number
   /** Plan only; write nothing. */
   dryRun?: boolean
@@ -369,13 +377,29 @@ export async function applyProjectLinkedFileProvenance(
   const upstreamOfMirroredId = new Map<string, string>()
   for (const id of upstreamFiles.keys()) upstreamOfMirroredId.set(args.downstreamFileIdOf(id), id)
 
+  const adoptedFiles = args.adoption?.files ?? {}
+  const pending = new Set(args.adoption?.pending ?? [])
+  const upstreamOfAdoptedId = new Map<string, string>()
+  for (const [upstreamFileId, downstreamFileId] of Object.entries(adoptedFiles)) {
+    upstreamOfAdoptedId.set(downstreamFileId, upstreamFileId)
+  }
+
   const downstreamFiles = new Map<string, ProvenanceFileRow>()
   const pairs: LinkedFilePair[] = []
   const ownFileIds: string[] = []
+  const joinedAdoptedIds = new Set<string>()
   for (const row of downstreamRows.results ?? []) {
     downstreamFiles.set(row.id, row)
-    if (args.adoptedDownstreamFileIds?.has(row.id)) {
-      ownFileIds.push(row.id)
+    const adoptedUpstream = upstreamOfAdoptedId.get(row.id)
+    if (adoptedUpstream !== undefined) {
+      // Joined: its cells now describe the upstream's package. Pending, or an
+      // upstream file that has since gone: the project's own, left alone.
+      if (!pending.has(adoptedUpstream) && upstreamFiles.has(adoptedUpstream)) {
+        pairs.push({ upstreamFileId: adoptedUpstream, downstreamFileId: row.id })
+        joinedAdoptedIds.add(row.id)
+      } else {
+        ownFileIds.push(row.id)
+      }
       continue
     }
     // The provenance stamp first, the derived mirror id second: the stamp names
@@ -393,13 +417,18 @@ export async function applyProjectLinkedFileProvenance(
   }
   if (pairs.length === 0) return { ...EMPTY_PROJECT_RESULT, ownFileIds }
 
-  const plan = planLinkedFileProvenance({
+  const planned = planLinkedFileProvenance({
     pairs,
     upstreamFiles,
     downstreamFiles,
     upstreamBlobs: new Map((upstreamBlobRows.results ?? []).map((r) => [r.file_id, r])),
     downstreamBlobs: new Map((downstreamBlobRows.results ?? []).map((r) => [r.file_id, r])),
   })
+  // An adopted file's type is its own import's; only its original follows.
+  const plan: LinkedFileProvenancePlan = {
+    ...planned,
+    typeRepairs: planned.typeRepairs.filter((repair) => !joinedAdoptedIds.has(repair.downstreamFileId)),
+  }
   const stmts = linkedFileProvenanceStmts(db, plan, {
     upstreamProjectId,
     downstreamProjectId,

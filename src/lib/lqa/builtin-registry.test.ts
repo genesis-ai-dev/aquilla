@@ -23,6 +23,7 @@ describe("builtin-registry", () => {
       "untranslated-fragment",
       "length-ratio",
       "scripture-reference",
+      "number-format",
     ])
   })
 
@@ -43,9 +44,11 @@ describe("builtin-registry", () => {
 
   // length-ratio is off because normal length varies too much by language pair;
   // scripture-reference (AQU-1735) because its book-name half needs the
-  // project's own book names first.
-  it("only abbreviation-mismatch, length-ratio and scripture-reference are off by default", () => {
-    const off = new Set(["abbreviation-mismatch", "length-ratio", "scripture-reference"])
+  // project's own book names first; number-format (AQU-2430) because it needs
+  // the target language, and because a language whose own digits CLDR records
+  // may still write Western ones on purpose.
+  it("only abbreviation-mismatch, length-ratio, scripture-reference and number-format are off by default", () => {
+    const off = new Set(["abbreviation-mismatch", "length-ratio", "scripture-reference", "number-format"])
     for (const id of BUILTIN_CHECK_IDS) {
       const def = BUILTIN_CHECKS[id]
       expect(def.defaultEnabled).toBe(!off.has(id))

@@ -598,8 +598,10 @@ export function createOfflineSyncAdapter(options: OfflineSyncAdapterOptions): Of
   // while a flush is in flight — runFlush() reschedules from the outcome, and
   // letting its own pending→flushing→pending churn arm timers here would
   // defeat the retry backoff (and, on a persistently failing flush, spin).
+  // Statuses, not whole rows: enough to see an insert, a dequeue or a retry
+  // (failed → pending), without decoding every queued payload per commit.
   const unsubscribeQueue = store.subscribe(
-    tables.eventQueue.select().where({ projectId }),
+    tables.eventQueue.select("status").where({ projectId }),
     () => {
       if (flushInFlight) return
       armFlush(flushDebounceMs)

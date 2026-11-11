@@ -456,6 +456,9 @@ const events = {
 
 export { events }
 
+const queueRow = (row: typeof QueuedEvent.Type) =>
+  tables.eventQueue.insert({ ...row, status: "pending" }).onConflict("id", "ignore")
+
 const materializers = State.SQLite.materializers(events, {
   "v1.LocalCheckpoint": () => [],
   "v1.ProjectSynced": ({ id, name, orgId, settings, syncedAt }) =>
@@ -518,8 +521,10 @@ const materializers = State.SQLite.materializers(events, {
       tables.cells.delete().where({ id: cellRowId(projectId, fileId, cellId, side, DEFAULT_LANE_KEY) }),
     ),
 
-  "v1.EventQueued": (row) => tables.eventQueue.insert({ ...row, status: "pending" }),
-  "v1.EventsQueued": ({ rows }) => rows.map((row) => tables.eventQueue.insert({ ...row, status: "pending" })),
+  // An id already queued is left as it is: a plain insert would fail the
+  // materializer, which shuts the whole store down.
+  "v1.EventQueued": (row) => queueRow(row),
+  "v1.EventsQueued": ({ rows }) => rows.map(queueRow),
   "v1.EventQueueStatusSet": ({ id, status }) => tables.eventQueue.update({ status }).where({ id }),
   "v1.EventDequeued": ({ id }) => tables.eventQueue.delete().where({ id }),
   "v1.EventsDequeued": ({ ids }) => ids.map((id) => tables.eventQueue.delete().where({ id })),

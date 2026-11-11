@@ -689,6 +689,21 @@ describe("Tauri offline routing", () => {
     expect((await peekOutboxBatch(10)).map((r) => r.id)).toEqual(["other1"])
   })
 
+  it("splits a very large bulk batch into bounded batch events, still in one commit", async () => {
+    setTauriRuntime(true)
+    markProjectOfflineReady("proj1")
+    const edits = Array.from({ length: 1_201 }, (_, i) => ({ ...commitEvent, id: `tc${i}`, cellId: `cell${i}` }))
+    const store = currentOfflineStore!
+    const commit = vi.spyOn(store, "commit")
+
+    await enqueueOutboxEvents(edits)
+
+    expect(commit).toHaveBeenCalledTimes(1)
+    const batches = commit.mock.calls[0] as unknown as { args: { rows: unknown[] } }[]
+    expect(batches.map((batch) => batch.args.rows.length)).toEqual([500, 500, 201])
+    expect(store.query(offlineTables.eventQueue.count())).toBe(1_201)
+  })
+
   it("a routed row round-trips into the exact OutboxRawEvent shape sync-adapter.ts's toRawEvent() expects", async () => {
     setTauriRuntime(true)
     markProjectOfflineReady("proj1")

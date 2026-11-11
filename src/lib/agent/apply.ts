@@ -17,7 +17,7 @@ import posthog from "@/lib/posthog"
  */
 
 import { v7 as uuidv7 } from "uuid"
-import { enqueueEvent } from "@/lib/sync/events-emit"
+import { enqueueEvent, enqueueEvents, type BuildEventInput } from "@/lib/sync/events-emit"
 import type { OutboxPayloadFor } from "@/lib/sync/outbox-types"
 import type { StagedEvent } from "./protocol"
 import { isSupportedApplyKind } from "./role-floors"
@@ -56,6 +56,19 @@ export interface ApplyContext {
   } | undefined
 }
 
+type AppliedKind =
+  | "target.cell.commit"
+  | "source.cell.create"
+  | "target.cell.create"
+  | "comment.create"
+  | "cell.validate"
+
+/** One staged event as a write, plus what to report once it's queued. */
+interface AppliedEvent {
+  input: BuildEventInput<AppliedKind> & { id: string }
+  afterEnqueue?: () => void
+}
+
 /**
  * Enqueue one staged event through the normal write path. Returns the
  * client-generated event id (the outbox handle / next chain parent).
@@ -64,8 +77,21 @@ export async function applyStagedEvent(
   ev: StagedEvent,
   ctx: ApplyContext,
 ): Promise<string> {
+  const { input, afterEnqueue } = buildAppliedEvent(ev, ctx)
+  const { eventId } = await enqueueEvent(input)
+  afterEnqueue?.()
+  return eventId
+}
+
+/**
+ * Turn one staged event into the write that applies it. The id is minted
+ * here, not by the envelope builder, so a later event in the same proposal can
+ * chain on it before anything is queued.
+ */
+function buildAppliedEvent(ev: StagedEvent, ctx: ApplyContext): AppliedEvent {
   const analytics = posthog.scope(undefined, ctx.author)
   if (!isSupportedApplyKind(ev.kind)) throw new UnsupportedAgentEventError(ev.kind)
+  const id = uuidv7()
 
   switch (ev.kind) {
     case "target.cell.commit": {
@@ -80,7 +106,8 @@ export async function applyStagedEvent(
         pending: [live?.targetEventId, ev.parentId],
         sourceEventId: live?.sourceEventId,
       })
-      const { eventId } = await enqueueEvent({
+      return { input: {
+        id,
         kind: "target.cell.commit",
         projectId: ctx.projectId,
         fileId: ev.fileId,
@@ -90,8 +117,7 @@ export async function applyStagedEvent(
         // Verbatim passthrough: keeps ai_suggestion / agent_run_id /
         // sourceEventId exactly as the server staged them.
         payload: ev.payload as OutboxPayloadFor<"target.cell.commit">,
-      })
-      return eventId
+      } }
     }
 
     case "source.cell.create":
@@ -108,7 +134,8 @@ export async function applyStagedEvent(
       if (typeof ev.payload.value !== "string") {
         throw new Error(`agent apply: ${ev.kind} needs a string value`)
       }
-      const { eventId } = await enqueueEvent({
+      return { input: {
+        id,
         kind: ev.kind,
         projectId: ctx.projectId,
         fileId: ev.fileId,
@@ -122,8 +149,7 @@ export async function applyStagedEvent(
           cellId,
           anchorCellId: (ev.payload.anchorCellId as string | null | undefined) ?? null,
         } as OutboxPayloadFor<"source.cell.create" | "target.cell.create">,
-      })
-      return eventId
+      } }
     }
 
     case "comment.create": {
@@ -145,15 +171,15 @@ export async function applyStagedEvent(
               ? { kind: "file", fileId: ev.fileId }
               : { kind: "project" }),
       }
-      const { eventId } = await enqueueEvent({
+      return { input: {
+        id,
         kind: "comment.create",
         projectId: ctx.projectId,
         fileId: ev.fileId ?? PROJECT_SENTINEL_FILE_ID,
         parentId: null,
         author: ctx.author,
         payload: payload as OutboxPayloadFor<"comment.create">,
-      })
-      return eventId
+      } }
     }
 
     case "cell.validate": {
@@ -169,29 +195,33 @@ export async function applyStagedEvent(
       if (!editEventId) {
         throw new Error("agent apply: cell.validate needs an editEventId")
       }
-      const { eventId } = await enqueueEvent({
-        kind: "cell.validate",
-        projectId: ctx.projectId,
-        fileId: ev.fileId,
-        cellId: ev.cellId,
-        parentId: null,
-        author: ctx.author,
-        payload: { ...ev.payload, editEventId } as OutboxPayloadFor<"cell.validate">,
-      })
-      // AQU-1572: this path enqueues the event itself rather than through
-      // `emitCellValidate`, so the emit seam never sees it and it reports its
-      // own line here, after the enqueue, in the seam's shape. The person
-      // approved it, but the agent chose the line, so `source: "agent"`.
-      captureCellValidation(true, {
-        medium: "text",
-        projectId: ctx.projectId,
-        fileId: ev.fileId,
-        cellId: ev.cellId,
-        lane: typeof ev.payload.targetLang === "string" ? ev.payload.targetLang : "",
-        source: "agent",
-        surface: "proposal",
-      }, analytics)
-      return eventId
+      const { fileId, cellId } = ev
+      return {
+        input: {
+          id,
+          kind: "cell.validate",
+          projectId: ctx.projectId,
+          fileId,
+          cellId,
+          parentId: null,
+          author: ctx.author,
+          payload: { ...ev.payload, editEventId } as OutboxPayloadFor<"cell.validate">,
+        },
+        // AQU-1572: this path enqueues the event itself rather than through
+        // `emitCellValidate`, so the emit seam never sees it and it reports its
+        // own line, after the enqueue, in the seam's shape. The person
+        // approved it, but the agent chose the line, so `source: "agent"`.
+        afterEnqueue: () =>
+          captureCellValidation(true, {
+            medium: "text",
+            projectId: ctx.projectId,
+            fileId,
+            cellId,
+            lane: typeof ev.payload.targetLang === "string" ? ev.payload.targetLang : "",
+            source: "agent",
+            surface: "proposal",
+          }, analytics),
+      }
     }
   }
 }
@@ -204,9 +234,12 @@ function headSideFor(kind: string): "targetEventId" | "sourceEventId" | null {
 }
 
 /**
- * Apply a proposal's events in order. Sequential on purpose: two commits to
- * the SAME cell within one proposal must chain (the second's parentId is the
- * first's event id), so later events see earlier ones through the head map.
+ * Apply a proposal's events in order, as ONE outbox write. Built in order on
+ * purpose: two commits to the SAME cell within one proposal must chain (the
+ * second's parentId is the first's event id), so later events see earlier
+ * ones through the head map. Queued together so a chapter-sized proposal is
+ * one write, not one per edit — and an event that can't be built refuses the
+ * whole proposal instead of leaving it half-applied.
  *
  * AQU-890: creates seed that map too, per side — a `target.cell.create` +
  * `target.cell.commit` pair in one proposal chains the commit onto the create,
@@ -217,7 +250,6 @@ export async function applyStagedEvents(
   events: StagedEvent[],
   ctx: ApplyContext,
 ): Promise<string[]> {
-  const ids: string[] = []
   // Heads minted within this apply — overlays ctx.resolveCell.
   const localHeads = new Map<string, { targetEventId?: string; sourceEventId?: string }>()
   const resolveCell: ApplyContext["resolveCell"] = (cellId) => {
@@ -225,15 +257,17 @@ export async function applyStagedEvents(
     const local = localHeads.get(cellId)
     return local ? { ...base, ...local } : base
   }
-  for (const ev of events) {
-    const id = await applyStagedEvent(ev, { ...ctx, resolveCell })
-    ids.push(id)
+  const applied = events.map((ev) => {
+    const built = buildAppliedEvent(ev, { ...ctx, resolveCell })
     const side = headSideFor(ev.kind)
     const cellId =
       (typeof ev.payload.cellId === "string" && ev.payload.cellId) || ev.cellId
     if (side && cellId) {
-      localHeads.set(cellId, { ...localHeads.get(cellId), [side]: id })
+      localHeads.set(cellId, { ...localHeads.get(cellId), [side]: built.input.id })
     }
-  }
-  return ids
+    return built
+  })
+  const queued = await enqueueEvents(applied.map(({ input }) => input))
+  for (const { afterEnqueue } of applied) afterEnqueue?.()
+  return queued.map(({ eventId }) => eventId)
 }

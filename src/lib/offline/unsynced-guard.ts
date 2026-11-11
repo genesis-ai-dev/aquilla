@@ -20,6 +20,10 @@ import { useEffect, useState } from "react"
 import type { Store } from "@livestore/livestore"
 import { tables, type schema } from "./schema"
 
+// A count, not the rows: this re-runs on every queue commit, and selecting
+// rows decodes every queued payload each time.
+const queueDepth = tables.eventQueue.count()
+
 /**
  * True iff any project has local writes not yet confirmed synced
  * (`event_queue` has rows in ANY status — `pending`/`flushing`/stuck
@@ -28,7 +32,7 @@ import { tables, type schema } from "./schema"
  * leaves a partial local copy, not just a redownload-later inconvenience).
  */
 export function hasUnsyncedOfflineWork(store: Store<typeof schema>): boolean {
-  if (store.query(tables.eventQueue.select()).length > 0) return true
+  if (store.query(queueDepth) > 0) return true
   return store.query(tables.offlineProjects.select().where({ status: "downloading" })).length > 0
 }
 
@@ -47,7 +51,7 @@ export function useUnsyncedOfflineWorkGuard(store: Store<typeof schema> | null):
     }
     const recheck = () => setUnsynced(hasUnsyncedOfflineWork(store))
     recheck()
-    const unsubQueue = store.subscribe(tables.eventQueue.select(), recheck)
+    const unsubQueue = store.subscribe(queueDepth, recheck)
     const unsubProjects = store.subscribe(tables.offlineProjects.select(), recheck)
     return () => {
       unsubQueue()

@@ -9,7 +9,7 @@
  *
  * Tauri desktop offline routing (Phase 4): `enqueueOutboxEvent(s)` first check
  * whether the event should instead land in LiveStore's local `event_queue`
- * (src/lib/offline/schema.ts) — see `routeToOfflineQueueIfEligible` below.
+ * (src/lib/offline/schema.ts) — see `routeToOfflineQueue` below.
  * This is a no-op everywhere except the Tauri desktop app, so the browser
  * SPA's write path (the vast majority of real traffic) is unaffected.
  */
@@ -242,21 +242,6 @@ const OFFLINE_ROUTABLE_KINDS: ReadonlySet<OutboxEventKind> = new Set<OutboxEvent
   "cell.unvalidate",
 ])
 
-/**
- * Tauri-only: if `event` is one of the offline-routable kinds AND its project
- * has a ready local LiveStore copy, commit it straight into LiveStore's
- * `event_queue` (Phase 3's sync adapter owns flushing those to the server) and
- * return true — the caller must NOT also write it to IndexedDB.
- *
- * The LiveStore-backed modules (store.ts, offline-reads.ts, schema.ts) are
- * dynamically imported here rather than statically at the top of this file:
- * this file is on every web-build code path, and is-tauri.ts's whole reason
- * for existing separately is to let modules like this one check the runtime
- * without pulling LiveStore/OPFS/wa-sqlite into the plain browser SPA bundle.
- * Checking the kind first (a synchronous Set lookup) also means the common
- * case — an event kind that never routes offline — never pays for the import
- * or a store round-trip at all.
- */
 let warnedOfflineStoreUnavailable = false
 // A booted store answers at once; past this, the edit goes to IndexedDB.
 const OFFLINE_STORE_WAIT_MS = 3_000
@@ -306,21 +291,29 @@ function toQueuedRow(event: CqrsRawEvent) {
   }
 }
 
-async function routeToOfflineQueueIfEligible(event: CqrsRawEvent): Promise<boolean> {
-  if (!OFFLINE_ROUTABLE_KINDS.has(event.kind)) return false
-  const queue = await openOfflineQueue()
-  if (!queue || !queue.isReady(event.projectId)) return false
-  queue.store.commit(queue.offlineEvents.eventQueued(toQueuedRow(event)))
-  return true
-}
+// Rows per v1.EventsQueued. One commit for a whole replace-all would put every
+// edit's payload in one eventlog row, re-parsed whole on every rebuild.
+const OFFLINE_QUEUE_CHUNK = 500
 
 /**
- * Batch form of `routeToOfflineQueueIfEligible`: commits every eligible event
- * in ONE v1.EventsQueued and returns the rest, in order, for IndexedDB. One
- * commit per event re-ran every query on the queue each time — a 200-edit
- * batch took seconds, longer the more was already queued.
+ * Tauri-only: commits every event that is one of the offline-routable kinds
+ * AND whose project has a ready local LiveStore copy straight into LiveStore's
+ * `event_queue` (Phase 3's sync adapter owns flushing those to the server),
+ * and returns the rest, in order — the caller must write only those to
+ * IndexedDB. All routed events go in one `store.commit`: one commit per event
+ * re-ran every query on the queue each time, so a 200-edit batch took
+ * seconds, longer the more was already queued.
+ *
+ * The LiveStore-backed modules (store.ts, offline-reads.ts, schema.ts) are
+ * dynamically imported rather than statically at the top of this file: this
+ * file is on every web-build code path, and is-tauri.ts's whole reason for
+ * existing separately is to let modules like this one check the runtime
+ * without pulling LiveStore/OPFS/wa-sqlite into the plain browser SPA bundle.
+ * Checking the kinds first (a synchronous Set lookup) also means the common
+ * case — event kinds that never route offline — never pays for the import or
+ * a store round-trip at all.
  */
-async function routeBatchToOfflineQueue(events: CqrsRawEvent[]): Promise<CqrsRawEvent[]> {
+async function routeToOfflineQueue(events: CqrsRawEvent[]): Promise<CqrsRawEvent[]> {
   if (!events.some((event) => OFFLINE_ROUTABLE_KINDS.has(event.kind))) return events
   const queue = await openOfflineQueue()
   if (!queue) return events
@@ -339,7 +332,15 @@ async function routeBatchToOfflineQueue(events: CqrsRawEvent[]): Promise<CqrsRaw
     if (OFFLINE_ROUTABLE_KINDS.has(event.kind) && isReady(event.projectId)) routed.push(event)
     else rest.push(event)
   }
-  if (routed.length > 0) queue.store.commit(queue.offlineEvents.eventsQueued({ rows: routed.map(toQueuedRow) }))
+  if (routed.length === 1) {
+    queue.store.commit(queue.offlineEvents.eventQueued(toQueuedRow(routed[0])))
+  } else if (routed.length > 1) {
+    const batches = []
+    for (let i = 0; i < routed.length; i += OFFLINE_QUEUE_CHUNK) {
+      batches.push(queue.offlineEvents.eventsQueued({ rows: routed.slice(i, i + OFFLINE_QUEUE_CHUNK).map(toQueuedRow) }))
+    }
+    queue.store.commit(...batches)
+  }
   return rest
 }
 
@@ -385,7 +386,7 @@ export async function enqueueOutboxEvent(event: CqrsRawEvent, scope?: OutboxOwne
   // these. `isTauriRuntime()` is a zero-cost check on the web, so this branch
   // adds no overhead to the browser SPA's write path.
   // A scoped (guest) write never takes the signed-in desktop's offline queue.
-  if (!scope && isTauriRuntime() && (await routeToOfflineQueueIfEligible(event))) {
+  if (!scope && isTauriRuntime() && (await routeToOfflineQueue([event])).length === 0) {
     clearJournalRecord(event.id)
     return
   }
@@ -406,14 +407,14 @@ export async function enqueueOutboxEvent(event: CqrsRawEvent, scope?: OutboxOwne
  *  re-enqueue of already-queued events is a no-op (idempotent).
  *
  *  Tauri desktop offline routing (Phase 4): the batch is partitioned first —
- *  events eligible for offline routing (see `routeToOfflineQueueIfEligible`)
+ *  events eligible for offline routing (see `routeToOfflineQueue`)
  *  are committed together into LiveStore's event_queue and never touch
  *  IndexedDB; the remainder still go through the one-transaction/one-notify
  *  IndexedDB write below, unchanged. */
 export async function enqueueOutboxEvents(events: CqrsRawEvent[]): Promise<void> {
   if (events.length === 0) return
 
-  const remaining = isTauriRuntime() ? await routeBatchToOfflineQueue(events) : events
+  const remaining = isTauriRuntime() ? await routeToOfflineQueue(events) : events
   if (remaining.length === 0) return
 
   const ownerKey = activeOwnerKey

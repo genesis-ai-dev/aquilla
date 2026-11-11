@@ -159,7 +159,10 @@ describe("planReplaySkip", () => {
           row(11, 0, "v1.EventDequeued", { id: "a" }),
           row(12, 0, "v1.LocalCheckpoint", {}),
         ]
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
         expect(names(rows, planReplaySkip(eventlog(rows, 20)))).toEqual([])
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining("row ids couldn't be read"))
+        warn.mockRestore()
       })
     })
   })

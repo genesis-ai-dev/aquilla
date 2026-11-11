@@ -116,7 +116,8 @@ export function DesktopUpdatePrompt({
     if (!store) return
     const recheck = () => setQueue(readOfflineQueue(store))
     recheck()
-    return store.subscribe(tables.eventQueue.select(), recheck)
+    // Statuses only — all readOfflineQueue reads; whole rows would decode every payload per commit.
+    return store.subscribe(tables.eventQueue.select("status"), recheck)
   }, [store])
 
   useEffect(() => {

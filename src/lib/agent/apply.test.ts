@@ -8,14 +8,20 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import type { StagedEvent } from "./protocol"
 
-vi.mock("@/lib/sync/events-emit", () => ({ enqueueEvent: vi.fn() }))
+vi.mock("@/lib/sync/events-emit", () => ({ enqueueEvent: vi.fn(), enqueueEvents: vi.fn() }))
 const { captureCellValidation } = vi.hoisted(() => ({ captureCellValidation: vi.fn() }))
 vi.mock("@/lib/cell-telemetry", () => ({ captureCellValidation }))
 
-import { enqueueEvent } from "@/lib/sync/events-emit"
+import { enqueueEvent, enqueueEvents } from "@/lib/sync/events-emit"
 import { applyStagedEvent, applyStagedEvents, UnsupportedAgentEventError } from "./apply"
 
 const mockEnqueue = vi.mocked(enqueueEvent)
+const mockEnqueueMany = vi.mocked(enqueueEvents)
+/** The inputs of the one batch write applyStagedEvents makes. */
+const batch = () => {
+  expect(mockEnqueueMany).toHaveBeenCalledTimes(1)
+  return mockEnqueueMany.mock.calls[0][0]
+}
 
 const CTX = { projectId: "proj-1", author: "anna" }
 
@@ -43,6 +49,9 @@ beforeEach(() => {
     n++
     return { event: { ...input, id: `evt-${n}` }, eventId: `evt-${n}` }
   }) as unknown as typeof enqueueEvent)
+  mockEnqueueMany.mockReset()
+  mockEnqueueMany.mockImplementation((async (inputs: { id: string }[]) =>
+    inputs.map((input) => ({ event: input, eventId: input.id }))) as unknown as typeof enqueueEvents)
 })
 
 describe("applyStagedEvent — target.cell.commit", () => {
@@ -324,11 +333,14 @@ describe("applyStagedEvents", () => {
       [commitEvent(), commitEvent({ payload: { value: "second draft", ai_suggestion: true } })],
       CTX,
     )
-    expect(ids).toEqual(["evt-1", "evt-2"])
+    const inputs = batch()
+    expect(ids).toEqual(inputs.map((input) => input.id))
+    expect(new Set(ids).size).toBe(2)
     // Second commit's parent must be the FIRST commit's freshly-minted id,
     // not the (now stale) staged parentId — otherwise the server sees a
     // losing sibling and dead-letters it.
-    expect(mockEnqueue.mock.calls[1][0].parentId).toBe("evt-1")
+    expect(inputs[1].parentId).toBe(ids[0])
+    expect(mockEnqueue).not.toHaveBeenCalled()
   })
 
   it("chains a target commit onto a target create for the SAME new cell (AQU-890)", async () => {
@@ -345,11 +357,11 @@ describe("applyStagedEvents", () => {
       ],
       CTX,
     )
-    expect(ids).toEqual(["evt-1", "evt-2"])
-    expect(mockEnqueue.mock.calls[0][0].parentId).toBeNull()
+    const inputs = batch()
+    expect(inputs[0].parentId).toBeNull()
     // The commit must chain onto the create it just minted — otherwise the
     // server sees a genesis sibling on an occupied slot.
-    expect(mockEnqueue.mock.calls[1][0].parentId).toBe("evt-1")
+    expect(inputs[1].parentId).toBe(ids[0])
   })
 
   it("gives a target commit its AD-9 source fallback from a source create in the same proposal", async () => {
@@ -368,7 +380,16 @@ describe("applyStagedEvents", () => {
     )
     // No target head exists, so the commit falls through to the source genesis
     // the previous event minted rather than enqueuing with a null parent.
-    expect(mockEnqueue.mock.calls[1][0].parentId).toBe("evt-1")
+    const inputs = batch()
+    expect(inputs[1].parentId).toBe(inputs[0].id)
+  })
+
+  it("queues nothing when any event in the proposal can't be applied", async () => {
+    await expect(
+      applyStagedEvents([commitEvent(), commitEvent({ cellId: undefined })], CTX),
+    ).rejects.toThrow(/needs fileId and cellId/)
+    expect(mockEnqueueMany).not.toHaveBeenCalled()
+    expect(mockEnqueue).not.toHaveBeenCalled()
   })
 
   it("throws UnsupportedAgentEventError for kinds the card cannot apply", async () => {

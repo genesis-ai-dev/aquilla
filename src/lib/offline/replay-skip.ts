@@ -183,6 +183,9 @@ export function planReplaySkip(eventlog: ReplayEventlog): ((row: ReplayRow) => b
       if (allDequeued && compare(seq, last) !== 0) skippableBatches.add(seqKey(seq))
       else for (const id of ids) replayedRows.add(id)
     }
+    if (unreadableBatch) {
+      console.warn("[offline] Replaying every queue event: a batch enqueue's row ids couldn't be read")
+    }
 
     return (row) => {
       try {

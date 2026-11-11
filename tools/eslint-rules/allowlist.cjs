@@ -88,6 +88,7 @@ const TRANSLATABLE_ATTRS = new Set([
   'submitLabel',
   'helperText',
   'errorText',
+  'resizeLabel', // <RightSidebarPanel resizeLabel="…"> — a drag handle's screen-reader name
   'content', // <AppTooltip content="…">
 ])
 

@@ -122,6 +122,7 @@ import {
   type LinkSourcePreview,
 } from "@/lib/sync/link-source-preview"
 import { markLinkSeedFailed } from "@/lib/sync/link-seed-status"
+import { markAdoptedFilesForIdmlAlignment } from "@/lib/idml/link-adopted-align"
 import { announceProjectRecordChanged } from "@/lib/sync/project-record-changed"
 import { toUserFacingError } from "@/lib/errors/user-error"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -370,6 +371,9 @@ export function LinkSourceFlow({
     if (nothingSelected || replaceUnresolved) return
     setLinking(true)
     setError(null)
+    // Captured before the state below is reset: the workspace reads this list
+    // to place an IDML file's kept translations into its new source.
+    const adoptedFileIds = replacing.map((f) => f.clashFileId as string)
     try {
       const result = await linkProjectSource(jwt, projectId, {
         sourceProjectId: reviewing,
@@ -400,6 +404,10 @@ export function LinkSourceFlow({
             }
           : {}),
       })
+      // The link is saved, adopted files included. Whether its first sync has
+      // landed the join yet or not, the workspace syncs before it places
+      // anything, so this is recorded on the request's success, not the seed's.
+      if (adoptedFileIds.length > 0) markAdoptedFilesForIdmlAlignment(projectId, adoptedFileIds)
       // AQU-476/QA-BUG-1: the server seeds inside the same call; `false` means
       // that trigger did not run, so self-heal before the user sees an empty
       // file list. Same fallback ProjectCreateDialog does.

@@ -52,7 +52,22 @@ it.each<Record<string, string>>([{ orgId: '2' }, { teamId: '4' }, { teamId: '5' 
 
 it('blocks archived projects', async () => {
   await t.db.prepare('UPDATE projects SET archived_at=CURRENT_TIMESTAMP WHERE id=?').bind(projectId).run()
-  try { expect((await get())?.status).toBe(409) }
+  try {
+    expect((await get())?.status).toBe(409)
+    const before = await t.snapshot()
+    expect(await (await get({ archiveStatus: 'true' }))?.json()).toMatchObject({ archived: true, projectId })
+    const placements: Record<string, string>[] = [{ orgId: '2' }, { orgId: '999' }, { teamId: '4' }, { teamId: '5' }, { teamId: '999' }]
+    for (const placement of placements) {
+      expect(await (await get({ archiveStatus: 'true', ...placement }))?.json())
+        .toMatchObject({ archived: true, placementDeferred: true })
+      // The read-only skip must not change legacy admission or disclose state
+      // without credentials / with a different deterministic project identity.
+      expect((await get(placement))?.status).toBe(409)
+    }
+    expect((await get({ archiveStatus: 'true' }, false))?.status).toBe(401)
+    expect((await get({ archiveStatus: 'true', gitlabId: '123' }))?.status).toBe(400)
+    expect(await t.snapshot()).toEqual(before)
+  }
   finally { await t.db.prepare('UPDATE projects SET archived_at=NULL WHERE id=?').bind(projectId).run() }
 })
 
@@ -82,4 +97,47 @@ it('retains the running daemon POST contract, renamed title and lane initializat
   expect((await t.db.prepare('SELECT role FROM lanes WHERE project_id=? ORDER BY role').bind(next).all()).results)
     .toEqual([{ role: 'source' }])
   expect((await get({ gitlabId: '124', projectId: next }))?.status).toBe(200)
+})
+
+it('parks archived jobs despite placement drift, then blocks resume until active placement is valid', async () => {
+  const { SyncClient } = await import('../../../scripts/migrate-daemon/http')
+  const { vi } = await import('vitest')
+  const client = new SyncClient('https://sync.test', 'test-secret', 'test', { attempts: 1 })
+  const p = { gitlab_id: 122, aquilla_id: projectId, org_id: 1, team_id: 3, project_upserted: 1 as const }
+  const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+    const response = await handleMigrateProjectRequest(new Request(String(url), init), env())
+    if (!response) throw new Error('route missing')
+    return response
+  })
+  try {
+    expect(await client.archiveStatus(p)).toBe(false)
+    await t.db.prepare('UPDATE projects SET archived_at=CURRENT_TIMESTAMP WHERE id=?').bind(projectId).run()
+    expect(await client.archiveStatus(p)).toBe(true)
+    const { DaemonDb } = await import('../../../scripts/migrate-daemon/db')
+    const { admitProject, checkArchived } = await import('../../../scripts/migrate-daemon/archive')
+    const queue = new DaemonDb(':memory:')
+    try {
+      queue.upsertProject({ ...p, name: 'p', namespace: 'archived-projects', owner_user_id: 9, last_activity_at: '', org_id: 2 })
+      queue.enqueue(122, 'content', 'old'); queue.enqueue(122, 'audio', 'old')
+      expect(await admitProject(queue, client, queue.getProject(122)!)).toBe(false)
+      expect(queue.listJobs().every(j => j.stage === 'skipped_archived' && j.error === null)).toBe(true)
+      queue.enqueue(122, 'content', 'new')
+      await t.db.prepare('UPDATE projects SET archived_at=NULL WHERE id=?').bind(projectId).run()
+      queue.kvSet('archive_check:122', '0')
+      await checkArchived(queue, client)
+      expect(queue.listJobs().every(j => j.stage === 'skipped_archived' && j.error?.includes('TARGET_ORG_MISMATCH'))).toBe(true)
+      queue.upsertProject({ ...p, team_id: 5, name: 'p', namespace: 'active', owner_user_id: 9, last_activity_at: '' })
+      queue.kvSet('archive_check:122', '0')
+      await checkArchived(queue, client)
+      expect(queue.listJobs().every(j => j.stage === 'skipped_archived' && j.error?.includes('team grant'))).toBe(true)
+      queue.upsertProject({ ...p, name: 'p', namespace: 'active', owner_user_id: 9, last_activity_at: '' })
+      queue.kvSet('archive_check:122', '0')
+      await checkArchived(queue, client)
+      expect(queue.listJobs().every(j => j.stage === 'detected' && j.error === null)).toBe(true)
+      expect(queue.listJobs().find(j => j.kind === 'content')?.sha).toBe('new')
+    } finally { queue.close() }
+  } finally {
+    fetch.mockRestore()
+    await t.db.prepare('UPDATE projects SET archived_at=NULL WHERE id=?').bind(projectId).run()
+  }
 })

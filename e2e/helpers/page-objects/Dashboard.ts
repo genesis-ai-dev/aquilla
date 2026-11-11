@@ -89,10 +89,11 @@ export class Dashboard {
       dialog.getByRole("button", { name: /^Create Project$/i }).click(),
     ])
 
-    // Overview fetch can 5xx under shard load; the page then shows Retry
-    // instead of the project name. Click Retry until the heading lands —
-    // same 15s budget, still waiting on the loaded overview.
-    await expect(dialog).toBeHidden({ timeout: 10_000 })
+    // The project response precedes settings + source/target lane writes.
+    // Their observed sequential latency exceeded 15s under shard load; allow
+    // the supported 30s readiness watchdog for the complete creation flow.
+    await expect(dialog).toBeHidden({ timeout: 30_000 })
+    // Overview fetch can 5xx under shard load; retry the loaded overview below.
     await expect(this.page).toHaveURL(/\/projects\/[^/?#]+(?:[?#].*)?$/, { timeout: 15_000 })
     const heading = this.projectOverviewHeading(name)
     await expect(async () => {
@@ -130,9 +131,8 @@ export class Dashboard {
   /** Open the New-project dialog and answer its first step, returning the
    * dialog once the details form (Project name, languages, …) is on screen.
    *
-   * AQU-2105 made the dialog a wizard that always opens on "Where does this
-   * project come from?" (the wizard starts there and resets to it on close),
-   * so the details fields do not exist until an origin is picked. */
+   * Dev has AQU-2105's origin wizard; the production release still opens the
+   * details form directly. Both flows must select and prove the requested shape. */
   async openCreateProjectDialog(origin: CreateProjectOrigin = "scratch"): Promise<Locator> {
     // A freshly-reset org renders three "+ New Project" buttons on /projects:
     // the page header, the empty-state "Create your first project" CTA, and the
@@ -142,10 +142,22 @@ export class Dashboard {
     // By name, not bare role: AQU-1352's "Created … in …" success toast is also
     // role="dialog", so a bare lookup matches two elements once create succeeds.
     const dialog = this.page.getByRole("dialog", { name: /^Create New Project$/i })
-    await expect(dialog).toBeVisible({ timeout: 5_000 })
-    await dialog.getByTestId(ORIGIN_TEST_ID[origin]).click()
-    // The fieldset wraps every details field for both origins.
-    await expect(dialog.getByTestId("create-project-fields")).toBeVisible({ timeout: 5_000 })
+    await expect(dialog).toBeVisible()
+    const originChoice = dialog.getByTestId(ORIGIN_TEST_ID[origin])
+    const fields = dialog.getByTestId("create-project-fields")
+    await expect(originChoice.or(fields).first()).toBeVisible()
+    const shape = dialog.getByTestId(origin === "scratch" ? "create-shape-self-contained" : "create-shape-linked-target")
+    // This is a real released UI branch, not an optional readiness assertion.
+    if (await originChoice.isVisible()) {
+      await originChoice.click()
+    } else {
+      await expect(fields).toBeVisible()
+      await dialog.getByText("Advanced: project shape", { exact: true }).click()
+      await expect(shape).toBeEnabled({ timeout: 30_000 })
+      await shape.click()
+    }
+    await expect(fields).toBeVisible()
+    await expect(shape).toBeChecked()
     return dialog
   }
 

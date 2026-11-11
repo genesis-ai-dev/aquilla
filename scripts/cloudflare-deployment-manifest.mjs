@@ -30,6 +30,11 @@ export function deploymentExpectation(surface, environment) {
       ...surfaceConfig.requiredSecrets,
       ...(environmentConfig.requiredSecrets ?? []),
     ],
-    requiredBindings: surfaceConfig.requiredBindings,
+    // An environment may require bindings the others must not have (AQU-2469:
+    // the dev access list KV exists on development only).
+    requiredBindings: {
+      ...surfaceConfig.requiredBindings,
+      ...(environmentConfig.requiredBindings ?? {}),
+    },
   }
 }

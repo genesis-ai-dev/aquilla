@@ -17,9 +17,18 @@
 // project lead does not reveal a lane. A choice that IS named on the add of
 // an existing member replaces their lanes, and a fresh membership starts from
 // no lane rows — the rows of a removed membership are not inherited.
+//
+// AQU-2358 adds a third answer: the reserved `NO_LANE_SCOPE` value, alone in
+// `scopeLanes`, means NO lanes. It is stored as that one scope value rather
+// than as zero rows, because zero rows is how "every current lane" is already
+// stored; see src/lib/lanes/no-lane-access.ts. It applies at every role below
+// maintainer, a project lead included — an explicit choice is never replaced
+// by the lane snapshot — and mixing it with real lanes or with
+// `allCurrentLanes` is refused rather than guessed at.
 
 import { ROLE, type Env } from "../types"
 import { loadCurrentTargetLanes } from "../../../db/shared/lane-visibility"
+import { NO_LANE_SCOPE, grantsNoLaneScopes } from "../../../src/lib/lanes/no-lane-access"
 import { resolveInviteLaneScopes } from "./invite-scopes"
 
 export const LANE_CHOICE_REQUIRED = "lane_choice_required"
@@ -49,7 +58,19 @@ export async function resolveExplicitLaneChoice(
 ): Promise<ExplicitLaneChoice> {
   const requested = input.scopeLanes ?? []
   const wantsAll = input.allCurrentLanes === true
+  // AQU-2358: "no lanes" is a whole answer, so it travels alone.
+  const noLanes = grantsNoLaneScopes(requested)
+  if (noLanes && (wantsAll || requested.length > 1)) {
+    return {
+      ok: false,
+      code: LANE_CHOICE_CONFLICT,
+      error: "Choose no lanes, every current target lane, or specific lanes — not a mixture.",
+    }
+  }
   if (input.role >= ROLE.MAINTAINER) return { ok: true, kind: "skip" }
+  // Below maintainer every role honours it, a project lead included: an
+  // explicit choice is never overwritten by the lead snapshot below.
+  if (noLanes) return { ok: true, kind: "lanes", laneIds: [NO_LANE_SCOPE] }
   if (input.role >= ROLE.PROJECT_LEAD) {
     if (wantsAll && requested.length > 0) {
       return {

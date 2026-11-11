@@ -61,6 +61,17 @@ function requestLogin(args: LoginArgs, continueMigration = false): Promise<Respo
   });
 }
 
+/** The `code` field of an error body, or null. Reads a clone, so the caller
+ *  can still read the body. */
+async function readErrorCode(res: Response): Promise<string | null> {
+  try {
+    const body = (await res.clone().json()) as { code?: unknown };
+    return typeof body.code === "string" ? body.code : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function login(
   args: LoginArgs,
   options: LoginOptions = {},
@@ -76,6 +87,10 @@ export async function login(
   }
   if (res.status === 401) {
     throw new FrontierAuthError(t("auth.login.invalidCredentials"), 401);
+  }
+  // AQU-2469: dev.aquilla.app admits only platform admins and its access list.
+  if (res.status === 403 && (await readErrorCode(res)) === "dev_access_restricted") {
+    throw new FrontierAuthError(t("auth.login.devAccessRestricted"), 403);
   }
   if (!res.ok) {
     // The status stays on the error object for diagnostics; it isn't in the

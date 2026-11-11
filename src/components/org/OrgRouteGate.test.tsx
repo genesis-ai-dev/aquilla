@@ -63,6 +63,7 @@ function renderGate(initialEntry: string) {
           <Route index element={<div>ORG INDEX</div>} />
           <Route path="projects" element={<div>ORG PROJECTS</div>} />
           <Route path="settings" element={<div>ORG SETTINGS</div>} />
+          <Route path="assigned" element={<div>ORG ASSIGNED</div>} />
         </Route>
       </Routes>
       <LocationProbe />
@@ -107,6 +108,16 @@ describe("OrgRouteGate (AQU-790 guest orgs)", () => {
     expect(screen.queryByText("ORG SETTINGS")).not.toBeInTheDocument()
     expect(screen.getByTestId("location")).toHaveTextContent("/orgs/2/projects")
     expect(screen.getByText("ORG PROJECTS")).toBeInTheDocument()
+  })
+
+  // AQU-2458: `/assigned` lists only the caller's own open assignments, so it
+  // is their work rather than the org's — and the only cross-project view of
+  // it a project-only member has. It is the one sub-route a guest keeps.
+  it("admits a guest org's assigned route", () => {
+    orgContext.guestOrgs = [{ id: 2, name: "Guest Org" }]
+    renderGate("/orgs/2/assigned")
+    expect(screen.getByText("ORG ASSIGNED")).toBeInTheDocument()
+    expect(screen.getByTestId("location")).toHaveTextContent("/orgs/2/assigned")
   })
 
   it("keeps a member's own sub-routes reachable", () => {

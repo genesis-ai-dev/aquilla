@@ -1937,7 +1937,9 @@ export async function mirrorSync(
         downstreamProjectId,
         downstreamFileIdOf: (upstreamFileId) =>
           deterministicDownstreamFileId(downstreamProjectId, upstreamFileId),
-        adoptedDownstreamFileIds: new Set(Object.values(adoption?.files ?? {})),
+        // Read at call time: after the join below runs, the record's pending
+        // list is empty and the adopted files take the pointer rule too.
+        adoption,
         now: Date.now(),
       })
     } catch (err) {
@@ -1998,6 +2000,10 @@ export async function mirrorSync(
       total.more = true
       return total
     }
+    // The join just addressed the adopted files' cells to the upstream's
+    // package; point their originals at it in this same sync, so an export
+    // right after linking reads the package the cells describe.
+    await sweepFileProvenance()
   }
   const adopted: ReadonlyMap<string, string> | null = adoption
     ? new Map(Object.entries(adoption.files))

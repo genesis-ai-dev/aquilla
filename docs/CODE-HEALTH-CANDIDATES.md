@@ -4007,3 +4007,31 @@ declaration.
   806, every one not in the list above is **called inside its own file**, so there is no
   additional dead function hiding in the worker export surface. A pure "drop the keyword"
   slice over the workers deletes nothing; it only narrows. Do the 23 first.
+
+### Gates recorded 2026-11-11 (`origin/dev` `60d6662b`)
+
+| gate | baseline | after |
+| --- | --- | --- |
+| `pnpm lint` | exit 0 — 972 problems, 0 errors | exit 0 — 972 problems, 0 errors, output **byte-identical** (`diff` of the two runs is empty) |
+| `pnpm build` | exit 0 (`tsc -b` + `vite build` + brand check) | exit 0 |
+| `pnpm run check:doc-pins` | ✓ 83 pins across 394 docs | ✓ 83 pins across 394 docs |
+| `pnpm test` | exit 1 — 1 failed / 2383 passed / 2 skipped (2386 files); 1 failed / 27442 passed / 1 expected fail / 23 skipped (27467 tests), 1227.63s | **exit 1 — identical counts**, same single failure, 1146.68s |
+
+The byte-identical lint output was again made comparable by `rm -rf packages/*/dist` before
+the final run (sixth consecutive run — the baseline lint runs before any build in a fresh
+container, so it never sees the git-ignored `packages/idml-roundtrip/dist` the baseline
+`pnpm build` then generates; see the nested-`dist` entry near the top of this file).
+
+**The one failure is the same pre-existing one the 2026-11-09 entry documents** —
+`scripts/release-cut.test.ts > buildReleaseBranch against a scratch repo > fails loud when
+the pick cannot commit, and leaves nothing in progress`. It sets `commit.gpgsign=true` with
+`gpg.program` pointing at a binary that does not exist and expects a throw; in a cloud
+sandbox the commit succeeds anyway. Unchanged by this diff (which touches no test file and no
+file that test imports), out of scope by the routine's "a file whose tests are already red is
+frozen" rule, and still owed to Ryder rather than filed, for the same reason: the fix has to
+touch the test file.
+
+**No worker suite was run, and none was required**: the diff touches no file under
+`auth-worker/`, `sync-worker/`, `agent-worker/` or `worker/`. The two sync-worker paths this
+run *mentions* (`__tests__/format-descriptors-drift.test.ts`,
+`external/import-parse-core.ts`) appear only inside comments in `src/`.

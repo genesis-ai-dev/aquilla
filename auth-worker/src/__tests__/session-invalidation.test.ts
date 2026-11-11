@@ -1,4 +1,7 @@
 import { env } from "cloudflare:test"
+import { sign } from "hono/jwt"
+import { JWTService } from "../auth/jwt"
+import { seedUser } from "./helpers/db"
 import { describe, it, expect } from "vitest"
 import app from "../index"
 import { sha256Hex } from "../../../db/shared/api-credentials"
@@ -113,4 +116,31 @@ describe("password-reset/reset end to end", () => {
     const afterFresh = await app.request("/api/v2/auth/me", { headers: authHeader(freshToken) }, env)
     expect(afterFresh.status).toBe(200)
   })
+})
+
+// AQU-2530: real issuer → middleware → refresh, not a claims-only unit check.
+it("never transfers old credentials to a recreated username, including legacy timestamps and refresh", async () => {
+  await seedUser(71001, "reused")
+  await env.AQUILLA_PG.prepare("UPDATE users SET created_at=now()-interval '1 day' WHERE id=71001").run()
+  const jwt = new JWTService(env)
+  const {token} = await jwt.createAccessTokenWithPayload("reused")
+  const now = Math.floor(Date.now()/1000)
+  const legacy = await sign({sub:"reused",iat:now,exp:now+3600}, env.SECRET_KEY,"HS256")
+  for (const credential of [token, legacy]) {
+    expect((await app.request("/api/v2/auth/me",{headers:authHeader(credential)},env)).status).toBe(200)
+  }
+  await env.AQUILLA_PG.prepare("DELETE FROM users WHERE id=71001").run()
+  await seedUser(71002,"reused")
+  // Force same-second replacement: rounding must not let a legacy token in.
+  await env.AQUILLA_PG.prepare("UPDATE users SET created_at=? WHERE id=71002").bind(new Date(now*1000).toISOString()).run()
+  await expect(jwt.createAccessTokenWithPayload("reused",undefined,undefined,71001)).rejects.toThrow("identity changed")
+  clearSessionCache()
+  for (const credential of [token, legacy]) {
+    for (const path of ["me","refresh"]) {
+      expect((await app.request(`/api/v2/auth/${path}`,{method:path==="refresh"?"POST":"GET",headers:authHeader(credential)},env)).status).toBe(401)
+    }
+  }
+  const fresh = await jwt.createAccessToken("reused",undefined,71002)
+  expect((await app.request("/api/v2/auth/me",{headers:authHeader(fresh)},env)).status).toBe(200)
+  expect((await jwt.verifyToken(fresh))?.uid).toBe("71002")
 })

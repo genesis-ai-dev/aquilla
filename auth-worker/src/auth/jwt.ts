@@ -74,10 +74,13 @@ export class JWTService {
   async createAccessToken(
     username: string,
     sessionStartedAt?: number,
+    expectedUserId?: number,
   ): Promise<string> {
     const { token } = await this.createAccessTokenWithPayload(
       username,
       sessionStartedAt,
+      undefined,
+      expectedUserId,
     )
     return token
   }
@@ -94,6 +97,7 @@ export class JWTService {
     username: string,
     sessionStartedAt?: number,
     sessionId?: string,
+    expectedUserId?: number,
   ): Promise<{ token: string; payload: JWTPayload }> {
     if (!this.env.SECRET_KEY) {
       throw new Error("SECRET_KEY is not configured for JWT signing")
@@ -101,12 +105,19 @@ export class JWTService {
     if (!this.env.ALGORITHM) {
       throw new Error("ALGORITHM is not configured for JWT signing")
     }
+    // Keep sub compatible with existing clients, but never let a username
+    // lookup during refresh or login transfer proof to a replacement account.
+    const user = await this.getUserByUsername(username)
+    if (!user || (expectedUserId !== undefined && user.id !== expectedUserId)) {
+      throw new Error("Account identity changed; log in again")
+    }
     const now = Math.floor(Date.now() / 1000)
     const expiresIn =
       parseInt(this.env.ACCESS_TOKEN_EXPIRE_MINUTES || "43200", 10) * 60
 
     const payload: JWTPayload = {
-      sub: username,
+      sub: user.username,
+      uid: String(user.id),
       iat: now,
       exp: now + expiresIn,
       // [Pen test] Auth & session mgmt (2026-08-03): unique id so a logged-out

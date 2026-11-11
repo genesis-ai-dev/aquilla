@@ -10,6 +10,7 @@ import { pkceChallenge } from "../routes/oauth-google"
 import { hashPasswordWerkzeugScrypt } from "../utils/password"
 import * as legacy from "../services/frontier-d1"
 import { ipIdentifier } from "../utils/rate-limit"
+import * as postResponse from "../lib/post-response-db"
 import { seedUser } from "./helpers/db"
 const origin = "https://app.example.com", verifier = "a".repeat(64)
 const testEnv = Object.assign(Object.create(env), { GOOGLE_LOGIN_CLIENT_ID: "test-client", GOOGLE_LOGIN_CLIENT_SECRET: "test-secret", GOOGLE_LOGIN_REDIRECT_URI: "https://identity.example.com/api/v2/auth/oauth/google/callback", GOOGLE_LOGIN_APP_ORIGINS: origin })
@@ -49,6 +50,65 @@ async function handoff() {
   return code
 }
 describe("Google login boundary", () => {
+  it("writes welcome verification using the task-owned database handle", async () => {
+    const original = postResponse.withPostResponseDb
+    const close = vi.fn(async () => {})
+    const prepare = vi.fn(env.AQUILLA_PG.prepare.bind(env.AQUILLA_PG))
+    const ownDb = new Proxy(env.AQUILLA_PG,{get(target,key) { return key === "prepare" ? prepare : Reflect.get(target,key) }})
+    const task = vi.spyOn(postResponse,"withPostResponseDb").mockImplementation((taskEnv,work) => original(taskEnv,work,() => ({db:ownDb,close})))
+    const response = await callback(await start(),{hd:undefined})
+    const code = new URLSearchParams(new URL(response.headers.get("location")!).hash.slice(1)).get("code")!
+    const pending = await (await post("exchange",{code,verifier})).json() as {continuation:string}
+    expect((await post("finish",{code:pending.continuation,verifier,username:"alice"})).status).toBe(200)
+    expect(task).toHaveBeenCalledOnce()
+    expect(prepare.mock.calls.some(([sql]) => sql.includes("INSERT INTO email_verification_tokens"))).toBe(true)
+    expect(close).toHaveBeenCalledOnce()
+    expect(await env.AQUILLA_PG.prepare("SELECT count(*)::int AS n FROM email_verification_tokens").first()).toEqual({n:1})
+  })
+
+  it("reports post-commit session failure accurately and recovers with a fresh Google login", async () => {
+    const pending = await (await post("exchange", {code:await handoff(),verifier})).json() as {continuation:string}
+    const mint = vi.spyOn(JWTService.prototype,"createAccessTokenWithPayload").mockRejectedValueOnce(new Error("signer unavailable"))
+    const failed = await post("finish",{code:pending.continuation,verifier,username:"alice"})
+    expect(failed.status).toBe(503)
+    expect(await failed.json()).toEqual({error:"session_failed"})
+    expect(await env.AQUILLA_PG.prepare("SELECT username FROM users").first()).toEqual({username:"alice"})
+    expect(await env.AQUILLA_PG.prepare("SELECT count(*)::int AS n FROM provider_identities").first()).toEqual({n:1})
+    mint.mockRestore()
+    const recovered = await post("exchange",{code:await handoff(),verifier})
+    expect(recovered.status).toBe(200)
+    const body = await recovered.json() as {access_token:string;created:boolean}
+    expect(body.created).toBe(false)
+    expect((await app.request("/api/v2/auth/me",{headers:{Authorization:`Bearer ${body.access_token}`}},testEnv)).status).toBe(200)
+    expect((await post("finish",{code:pending.continuation,verifier,username:"alice"})).status).toBe(400)
+  })
+
+  it.each([true,false])("persists explicit Google-signup sharing only for the newly authenticated account: %s", async allowed => {
+    await seedUser(900,"other")
+    const pending = await (await post("exchange",{code:await handoff(),verifier})).json() as {continuation:string}
+    const result = await (await post("finish",{code:pending.continuation,verifier,username:"alice"})).json() as {access_token:string}
+    const headers = {Authorization:`Bearer ${result.access_token}`,"Content-Type":"application/json"}
+    const endpoint = "/api/v2/auth/me/analytics-consent"
+    expect(await (await app.request(endpoint,{headers},testEnv)).json()).toMatchObject({decision:null})
+    const { ANALYTICS_DISCLOSURE_VERSION } = await import("../../../shared/analytics-consent")
+    const saved = await app.request(endpoint,{method:"PUT",headers,body:JSON.stringify({allowed,source:"signup",disclosureVersion:ANALYTICS_DISCLOSURE_VERSION,expectedRevision:null})},testEnv)
+    expect(saved.status).toBe(200)
+    expect(await (await app.request(endpoint,{headers},testEnv)).json()).toMatchObject({decision:{allowed,source:"signup"}})
+    expect(await env.AQUILLA_PG.prepare("SELECT preferences FROM users WHERE id=900").first()).toEqual({preferences:"{}"})
+  })
+
+  it("refuses provider navigation when the database is incompatible, and recovers after repair", async () => {
+    expect((await app.request("/api/v2/auth/oauth/google/config",{},testEnv)).status).toBe(200)
+    await env.AQUILLA_PG.prepare("ALTER TABLE users ALTER COLUMN password_hash SET NOT NULL").run()
+    try {
+      expect((await app.request("/api/v2/auth/oauth/google/config",{},testEnv)).status).toBe(503)
+      expect((await post("start",{challenge:await pkceChallenge(verifier)})).status).toBe(503)
+      expect(network).not.toHaveBeenCalled()
+      expect(await env.AQUILLA_PG.prepare("SELECT count(*)::int AS n FROM social_login_flows").first()).toEqual({n:0})
+    } finally { await env.AQUILLA_PG.prepare("ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL").run() }
+    expect((await post("start",{challenge:await pkceChallenge(verifier)})).status).toBe(200)
+  })
+
   it("manages only the authenticated account, requires password proof and never contacts Google for status or disconnect", async () => {
     await seedUser(1, "alice")
     await seedUser(2, "bob")

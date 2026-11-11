@@ -44,6 +44,8 @@ describe("password reset — invitation context (AQU-2298)", () => {
   it.each([
     ["invited", "/join-org/invite-token", "/join-org/invite-token"],
     ["ordinary", undefined, null],
+    ["settings", "/preferences/login-methods", "/preferences/login-methods"],
+    ["settingsquery", "/preferences/login-methods?next=https://evil.test", null],
     ["external", "https://example.com/join-org/invite-token", null],
     ["relativehost", "//example.com/join-org/invite-token", null],
     ["dotpath", "/join-org/../settings", null],
@@ -424,5 +426,7 @@ describe("authenticated settings password reset", () => {
     expect(send).toHaveBeenCalledOnce()
     expect(send.mock.calls[0][0].to).toEqual(["settingsreset@example.com"])
     expect(send.mock.calls[0][0].text).toContain("username=settingsreset")
+    const url = new URL(send.mock.calls[0][0].text!.match(/https?:\/\/\S+\/reset-password\?\S+/)![0])
+    expect(url.searchParams.get("returnTo")).toBe("/preferences/login-methods")
   })
 })

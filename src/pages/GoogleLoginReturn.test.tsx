@@ -88,3 +88,16 @@ it("refuses to finish a connection when another account became selected", () => 
   view.rerender(<MemoryRouter><GoogleLoginReturn /></MemoryRouter>)
   expect(screen.getByLabelText("auth.google.passwordLabel")).toHaveValue("")
 })
+
+it.each(["session_failed","expired_request","unavailable"])("requires a fresh login after terminal completion failure %s", async error => {
+  mocks.request.mockResolvedValueOnce({continuation:"c".repeat(64),step:"signup",email:"alice@example.com"})
+    .mockRejectedValueOnce(new Error(error))
+  render(<MemoryRouter><GoogleLoginReturn /></MemoryRouter>)
+  fireEvent.change(await screen.findByLabelText("auth.signup.usernameLabel"),{target:{value:"alice"}})
+  fireEvent.submit(screen.getByRole("button",{name:"auth.signup.submitDefault"}).closest("form")!)
+  await screen.findByRole("alert")
+  expect(screen.queryByRole("button",{name:"auth.signup.submitDefault"})).toBeNull()
+  expect(screen.getByRole("link",{name:"auth.google.back"})).toHaveAttribute("href","/login?next=%2Fapp&add=1")
+  expect(mocks.adopt).not.toHaveBeenCalled()
+  expect(mocks.confirm).not.toHaveBeenCalled()
+})

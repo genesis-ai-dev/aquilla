@@ -147,3 +147,31 @@ Google-only account's last login method. Status and disconnect remain available
 if Google configuration is disabled. Management attempts are rate limited.
 Disconnect does not revoke Google-side permissions or sign out existing Aquilla
 sessions; users can log out separately. No Google tokens are stored or revoked.
+
+
+## Audit recovery safeguards (AQU-2531–2533)
+
+The first-party capability check and start endpoint verify the target database
+before provider navigation: password hashes must be nullable and the Google
+flow/identity tables and identity constraints must exist. A configured but
+incompatible database returns 503, with a first-party retry on the login page.
+This is read-only and never repairs or applies migrations automatically. After
+applying migration 0199 and deploying identity, verify the configured preview's
+`/api/v2/auth/oauth/google/config` returns 200 with `enabled: true` before the
+live-provider walkthrough. A green SPA build alone is insufficient evidence.
+
+If account creation/linking committed but session issuance failed, the response
+is `session_failed` (503), not `signup_failed`. The UI removes the consumed form
+and asks for a fresh, user-initiated Google login, which finds the existing link.
+An uncertain network result also requires a fresh login rather than replaying a
+consumed handoff. No background retry navigates to Google.
+
+Consent writes retry up to three unrelated preference races while preserving
+any newer consent revision. This addresses a reproducible race, not proof of the
+cause of every historical warning screenshot. Optional analytics remains off
+when approval cannot be saved. Welcome-email verification uses a task-owned
+database connection. Settings password-reset emails carry the exact allowlisted
+`/preferences/login-methods` destination through reset and subsequent login.
+
+AQU-2530 and AQU-2534 bind sessions and browser data to immutable account IDs.
+Merge those dependency PRs first; never merge this PR around an open parent.

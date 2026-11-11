@@ -6,12 +6,16 @@ export interface GoogleAttempt { verifier: string; next: string; expires: number
 export interface GooglePending { continuation: string; step: "signup" | "link"; email: string; username?: string }
 export interface GoogleSession { access_token: string; token_type: string; username: string; created: boolean }
 export async function googleRequest<T>(path: string, body?: object, jwt?: string): Promise<T> {
-  const response = await fetch(`${AUTH_BASE}/api/v2/auth/oauth/google/${path}`, {
+  let response: Response
+  try { response = await fetch(`${AUTH_BASE}/api/v2/auth/oauth/google/${path}`, {
     method: body ? "POST" : "GET", credentials: "omit", cache: "no-store", signal: AbortSignal.timeout(20_000),
     headers: { ...(body ? { "Content-Type": "application/json" } : {}), ...(jwt ? { Authorization: `Bearer ${jwt}` } : {}) },
     ...(body ? { body: JSON.stringify(body) } : {}),
   })
-  const data = await response.json()
+  } catch { throw new Error("unavailable") }
+  let data
+  try { data = await response.json() } catch { throw new Error("unavailable") }
+  if (!data || typeof data !== "object") throw new Error("unavailable")
   if (!response.ok) throw new Error(data.code === "dev_access_restricted" ? data.code : typeof data.error === "string" ? data.error : "unavailable")
   return data as T
 }

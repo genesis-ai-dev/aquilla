@@ -18,5 +18,17 @@ it.each([true, false, "unavailable"])("only explicit activation can start Google
     await screen.findByRole("alert")
     expect(mocks.start).toHaveBeenCalledExactlyOnceWith("/join/invitation", true)
     expect(button).toBeEnabled()
-  } else expect(screen.queryByRole("button")).toBeNull()
+  } else if (enabled === false) expect(screen.queryByRole("button")).toBeNull()
+  else expect(await screen.findByRole("button",{name:"Retry Google login availability"})).toBeEnabled()
+})
+
+it.each(["button","online"])("recovers capability without provider contact via %s", async trigger => {
+  mocks.request.mockRejectedValueOnce(new Error("offline")).mockResolvedValue({enabled:true})
+  render(<GoogleLoginButton />)
+  const retry = await screen.findByRole("button",{name:"Retry Google login availability"})
+  if (trigger === "button") fireEvent.click(retry)
+  else fireEvent(window,new Event("online"))
+  await screen.findByRole("button",{name:"Continue with Google"})
+  expect(mocks.request).toHaveBeenCalledTimes(2)
+  expect(mocks.start).not.toHaveBeenCalled()
 })

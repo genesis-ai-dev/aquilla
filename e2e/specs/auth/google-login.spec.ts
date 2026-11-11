@@ -56,7 +56,7 @@ test("cancelled Google login returns to a usable password login without retrying
   expect(requests).toEqual([])
 })
 
-test("Google signup sharing choice only opens the username form without submitting or showing an error", async ({ page }) => {
+test("Google signup waits for explicit submission and offers recovery after post-commit session failure", async ({ page }) => {
   const googleRequests: string[] = []
   const starts: object[] = []
   await page.route("**/api/v2/auth/oauth/google/config", route => route.fulfill({ json: { enabled: true } }))
@@ -74,7 +74,7 @@ test("Google signup sharing choice only opens the username form without submitti
   let finishes = 0
   await page.route("**/api/v2/auth/oauth/google/finish", async route => {
     finishes += 1
-    await route.fulfill({ status: 400, json: { error: "unexpected_finish" } })
+    await route.fulfill({ status: 503, json: { error: "session_failed" } })
   })
   let proof: { code: string; verifier: string } | undefined
   await page.route("**/api/v2/auth/oauth/google/exchange", async route => {
@@ -96,4 +96,29 @@ test("Google signup sharing choice only opens the username form without submitti
   await expect(page.getByRole("alert")).toHaveCount(0)
   expect(finishes).toBe(0)
   expect(proof).toBeDefined()
+  await page.getByRole("button", { name: "Create account", exact: true }).click()
+  await expect(page.getByRole("alert")).toContainText("Your Google connection was saved")
+  await expect(page.getByRole("button", { name: "Create account", exact: true })).toHaveCount(0)
+  expect(finishes).toBe(1)
+  expect(googleRequests).toHaveLength(1)
+  await page.getByRole("link", {name:"Back to login"}).click()
+  await expect(page.getByLabel("Username or email")).toBeVisible()
+  expect(new URL(page.url()).searchParams.get("next")).toBe("/orgs/1/members")
+  expect(googleRequests).toHaveLength(1)
+})
+
+
+test("first-party availability retry recovers without contacting Google", async ({page}) => {
+  const providerRequests: string[] = []
+  page.on("request", request => {if (/google(?:apis)?\.com|gstatic\.com/.test(request.url())) providerRequests.push(request.url())})
+  let checks = 0
+  await page.route("**/api/v2/auth/oauth/google/config", route => {
+    checks++
+    return route.fulfill(checks === 1 ? {status:503,json:{error:"unavailable"}} : {json:{enabled:true}})
+  })
+  await page.goto("/login")
+  await page.getByRole("button",{name:"Retry Google login availability"}).click()
+  await expect(page.getByRole("button",{name:"Continue with Google",exact:true})).toBeVisible()
+  expect(checks).toBe(2)
+  expect(providerRequests).toEqual([])
 })

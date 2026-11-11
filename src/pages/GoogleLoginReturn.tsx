@@ -29,6 +29,16 @@ function GoogleSignInReturn() {
   const [recovering, setRecovering] = useState(false)
   const [username, setUsername] = useState(""), [password, setPassword] = useState("")
   const started = useRef(false)
+  const terminal = !!error && !["invalid_password", "identity_taken", "rate_limited", "signup_failed", "username_required", "dev_access_restricted"].includes(error)
+  const errorKey = error === "dev_access_restricted" ? "auth.login.devAccessRestricted"
+    : error === "cancelled" ? "auth.google.cancelled"
+    : error === "invalid_password" ? "auth.google.invalidPassword"
+    : error === "identity_taken" ? "auth.google.identityTaken"
+    : error === "rate_limited" ? "auth.google.rateLimited"
+    : error === "session_failed" ? "auth.google.sessionFailed"
+    : error === "expired_request" || error === "restart" ? "auth.google.expired"
+    : error === "unavailable" ? "auth.google.unavailableRestart"
+    : "auth.google.failed"
   const finish = async (result: GoogleSession) => {
     const session = await finalizeSession(result.username, result)
     await adopt(session)
@@ -58,10 +68,10 @@ function GoogleSignInReturn() {
     <CardHeader><CardTitle role="heading" aria-level={1}>{t(pending?.step === "signup" ? "auth.google.chooseUsername" : pending?.step === "link" ? "auth.google.linkTitle" : "auth.google.continue")}</CardTitle></CardHeader>
     <CardContent className="flex flex-col gap-4">
       {busy && <Spinner />}
-      {error && <p role="alert" className="text-sm text-destructive">{t(error === "dev_access_restricted" ? "auth.login.devAccessRestricted" : error === "cancelled" ? "auth.google.cancelled" : error === "invalid_password" ? "auth.google.invalidPassword" : error === "identity_taken" ? "auth.google.identityTaken" : "auth.google.failed")}</p>}
+      {error && <p role="alert" className="text-sm text-destructive">{t(errorKey)}</p>}
       {recovering && <FrontierForgotPasswordForm onBack={() => setRecovering(false)} returnTo={attempt?.next} />}
-      {pending?.step === "signup" && !choice && <PrivacyStep onNext={() => setChoice(readSignupAnalyticsChoice())} onBack={() => navigate(loginPath({ next: attempt?.next, add: true }))} />}
-      {pending && !recovering && (pending.step !== "signup" || choice) && <form className="flex flex-col gap-4" onSubmit={event => {
+      {!terminal && pending?.step === "signup" && !choice && <PrivacyStep onNext={() => setChoice(readSignupAnalyticsChoice())} onBack={() => navigate(loginPath({ next: attempt?.next, add: true }))} />}
+      {pending && !terminal && !recovering && (pending.step !== "signup" || choice) && <form className="flex flex-col gap-4" onSubmit={event => {
         event.preventDefault(); if (!attempt || busy) return
         setBusy(true); setError("")
         void googleRequest<GoogleSession>("finish", { code: pending.continuation, verifier: attempt.verifier, ...(pending.step === "signup" ? { username } : { password }) })

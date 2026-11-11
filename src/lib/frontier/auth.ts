@@ -1,5 +1,5 @@
 import { sessionClaims as jwtClaims } from "./session-claims"
-import { orgInviteReturnTo } from "../../../shared/org-invite-return-to"
+import { passwordResetReturnTo } from "../../../shared/password-reset-return-to"
 // Workspace auth module — wraps the aquilla-identity (/api/v2/auth/*).
 //
 // History: this file previously fetched /api/v1/auth/* against the legacy
@@ -259,7 +259,7 @@ export async function requestPasswordReset(email: string, returnTo?: string): Pr
   const res = await fetch(`${AUTH_BASE}/api/v2/auth/password-reset/request`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, return_to: orgInviteReturnTo(returnTo) }),
+    body: JSON.stringify({ email, return_to: passwordResetReturnTo(returnTo) }),
   });
   if (!res.ok) {
     // AQU-820: dropped body.detail/body.error — showing it here would both

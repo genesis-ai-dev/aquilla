@@ -1,3 +1,4 @@
+import { googleLoginSchemaReady } from "../lib/google-login-schema"
 // Google is contacted only after the SPA's explicit button action. No GIS SDK,
 // cookies, automatic prompts, profile images, or provider tokens are persisted.
 import { Hono } from "hono"
@@ -12,6 +13,7 @@ import { countRecentEvents, ipIdentifier, recordAuthEvent } from "../utils/rate-
 import { verifyPassword } from "../utils/password"
 import { devAccessRefusal, legacyD1Config } from "./auth"
 import { hasLegacyIdentityCollision } from "../services/frontier-d1"
+import { withPostResponseDb } from "../lib/post-response-db"
 import { sendWelcomeEmail } from "../services/email"
 import { parseAdminEmails } from "../middleware/platform-admin"
 
@@ -36,7 +38,11 @@ routes.use("*", bodyLimit({ maxSize: 8192 }), async (c, next) => {
 function configured(env: AuthHonoEnv["Bindings"]): boolean {
   return !!(env.SECRET_KEY && env.ALGORITHM && env.GOOGLE_LOGIN_CLIENT_ID && env.GOOGLE_LOGIN_CLIENT_SECRET && env.GOOGLE_LOGIN_REDIRECT_URI && env.GOOGLE_LOGIN_APP_ORIGINS)
 }
-routes.get("/config", c => c.json({ enabled: configured(c.env) }))
+routes.get("/config", async c => {
+  if (!configured(c.env)) return c.json({ enabled: false })
+  if (!await googleLoginSchemaReady(c.env.AQUILLA_PG)) return c.json({ error: "unavailable" }, 503)
+  return c.json({ enabled: true })
+})
 // Account management never contacts Google merely to read connection status.
 routes.get("/methods", authMiddleware, async c => {
   const user = c.get("user")
@@ -93,6 +99,7 @@ routes.post("/connect", authMiddleware, zValidator("json", proof.merge(managemen
 // POST avoids prefetch/link scanners starting sign-in. Only exact configured SPA
 // origins may receive a handoff; never accept an arbitrary return URL.
 routes.post("/start", zValidator("json", z.object({ challenge: z.string().regex(/^[A-Za-z0-9_-]{43}$/) })), async c => {
+  if (!await googleLoginSchemaReady(c.env.AQUILLA_PG)) return c.json({ error: "unavailable" }, 503)
   if (!configured(c.env)) return c.json({ error: "unavailable" }, 503)
   const origin = c.req.header("Origin") ?? ""
   const allowed = c.env.GOOGLE_LOGIN_APP_ORIGINS!.split(",").map(s => s.trim())
@@ -184,7 +191,8 @@ routes.post("/exchange", zValidator("json", proof), async c => {
   if (!access.allowed) return devAccessRefusal(c, access.reason)
   if (linked && account) {
     await c.env.AQUILLA_PG.prepare("UPDATE social_login_flows SET status='consumed', code_hash=NULL WHERE state_hash=?").bind(flow.state_hash).run()
-    return c.json(await session(c.env, account.username, account.id, false))
+    try { return c.json(await session(c.env, account.username, account.id, false)) }
+    catch { return c.json({ error: "session_failed" }, 503) }
   }
   return c.json({ continuation: nextCode, step: account ? "link" : "signup", email: flow.email, ...(account ? { username: account.username } : {}) })
 })
@@ -227,7 +235,8 @@ routes.post("/finish", zValidator("json", proof.extend({ username: z.string().tr
       .bind(hash, challenge, account.id, account.password_hash, flow.email, account.id).first<{ id: number; username: string }>()
     } catch { return c.json({ error: "restart" }, 409) }
     if (!result) return c.json({ error: "restart" }, 409)
-    return c.json(await session(c.env, result.username, result.id, false, true))
+    try { return c.json(await session(c.env, result.username, result.id, false, true)) }
+    catch { return c.json({ error: "session_failed" }, 503) }
   }
   if (!username) return c.json({ error: "username_required" }, 400)
   if (c.env.ENVIRONMENT !== "production") {
@@ -241,8 +250,9 @@ routes.post("/finish", zValidator("json", proof.extend({ username: z.string().tr
     const d1 = legacyD1Config(c.env)
     if (d1 && await hasLegacyIdentityCollision(d1, username, flow.email)) return c.json({ error: "identity_taken" }, 409)
   } catch { return c.json({ error: "unavailable" }, 503) }
+  let result: { id: number; username: string } | null
   try {
-    const result = await c.env.AQUILLA_PG.prepare(`WITH claimed AS (
+    result = await c.env.AQUILLA_PG.prepare(`WITH claimed AS (
       UPDATE social_login_flows SET status='consumed', code_hash=NULL
       WHERE code_hash=? AND browser_challenge=? AND status='pending' AND expires_at>now() RETURNING subject, email, authoritative_email
     ), created AS (
@@ -253,26 +263,32 @@ routes.post("/finish", zValidator("json", proof.extend({ username: z.string().tr
       SELECT 'google', c.subject, u.id FROM claimed c CROSS JOIN created u RETURNING user_id
     ) SELECT u.id, u.username FROM created u JOIN linked l ON u.id=l.user_id`)
       .bind(hash, challenge, username).first<{ id: number; username: string }>()
-    if (!result) return c.json({ error: "expired_request" }, 400)
-    // Preserve the ordinary signup verification path for addresses for which
-    // Google is not authoritative. Email delivery must not strand a new account.
-    const welcome = async () => {
-      let verifyUrl: string | undefined
-      if (!flow.authoritative_email) {
-        const verifyToken = random()
-        await c.env.AQUILLA_PG.prepare(`INSERT INTO email_verification_tokens (user_id, token_hash, expires_at)
-          SELECT id, ?, now()+interval '7 days' FROM users WHERE username=?`)
-          .bind(await sha256Hex(verifyToken), result.username).run()
-        verifyUrl = `${c.env.BASE_URL || "https://aquilla.app"}/verify-email?token=${verifyToken}`
-      }
-      await sendWelcomeEmail(c.env, flow.email, result.username, verifyUrl)
-    }
-    const delivery = welcome().catch(() => { console.warn("[social-login] welcome delivery failed (non-fatal)") })
-    try { c.executionCtx.waitUntil(delivery) } catch { await delivery }
-    return c.json(await session(c.env, result.username, result.id, true))
   } catch {
-    // Uniqueness races roll back the entire CTE, never leaving an orphan account.
+    // The creation transaction rolled back; no account was committed.
     return c.json({ error: "signup_failed" }, 409)
+  }
+  if (!result) return c.json({ error: "expired_request" }, 400)
+  const created = result
+  // Preserve the ordinary signup verification path for addresses for which
+  // Google is not authoritative. Email delivery must not strand a new account.
+  const welcome = () => withPostResponseDb(c.env, async db => {
+    let verifyUrl: string | undefined
+    if (!flow.authoritative_email) {
+      const verifyToken = random()
+      await db.prepare(`INSERT INTO email_verification_tokens (user_id, token_hash, expires_at)
+        SELECT id, ?, now()+interval '7 days' FROM users WHERE id=?`)
+        .bind(await sha256Hex(verifyToken), created.id).run()
+      verifyUrl = `${c.env.BASE_URL || "https://aquilla.app"}/verify-email?token=${verifyToken}`
+    }
+    await sendWelcomeEmail(c.env, flow.email, created.username, verifyUrl)
+  })
+  const delivery = welcome().catch(() => { console.warn("[social-login] welcome delivery failed (non-fatal)") })
+  try { c.executionCtx.waitUntil(delivery) } catch { await delivery }
+  try { return c.json(await session(c.env, created.username, created.id, true)) }
+  catch {
+    // The account and provider link exist. Restarting Google login recovers
+    // them; never misreport this as a failed/rolled-back signup.
+    return c.json({ error: "session_failed" }, 503)
   }
 })
 

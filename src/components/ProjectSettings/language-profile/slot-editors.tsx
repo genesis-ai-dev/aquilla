@@ -16,9 +16,11 @@ import {
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import {
+  NUMBER_FORMAT_ROLES,
   PUNCTUATION_MARK_CLASSES,
   type DivineNamesDraft,
   type KinTermsDraft,
+  type NumberFormatDraft,
   type NumberWordsDraft,
   type PronounsDraft,
   type PunctuationDraft,
@@ -172,6 +174,31 @@ export function PunctuationEditor({ draft, setDraft, disabled }: EditorProps<Pun
         onChange={(noTerminalMark) => setDraft({ ...draft, noTerminalMark })}
         disabled={disabled}
       />
+    </>
+  )
+}
+
+/** AQU-2430: one field per number-format role, each holding its character. */
+const NUMBER_FORMAT_LABELS: Readonly<Record<(typeof NUMBER_FORMAT_ROLES)[number], MessageKey>> = {
+  group: "languageProfile.numberFormat.group",
+  decimal: "languageProfile.numberFormat.decimal",
+}
+
+export function NumberFormatEditor({ draft, setDraft, disabled }: EditorProps<NumberFormatDraft>) {
+  const t = useT()
+  return (
+    <>
+      {NUMBER_FORMAT_ROLES.map((role) => (
+        <TextField
+          key={role}
+          id={`profile-number-format-${role}`}
+          label={t(NUMBER_FORMAT_LABELS[role])}
+          hint={t("languageProfile.numberFormat.hint")}
+          value={draft[role]}
+          onChange={(value) => setDraft({ ...draft, [role]: value })}
+          disabled={disabled}
+        />
+      ))}
     </>
   )
 }

@@ -30,6 +30,26 @@ describe("parseTextFormat (worker-safe DOM-free parse core)", () => {
     expect(results[0].strings.some((s) => s.original.includes("In the beginning"))).toBe(true)
   })
 
+  // AQU-2508: Paratext bridges verses (`\v 27-28`) and gives the range one
+  // combined translation. The importer must mint ONE cell for the bridge,
+  // keeping the range in the ref — never a cell per verse with the text in
+  // neither, which strands the translation.
+  it("AQU-2508: a bridged verse imports as one ranged cell carrying the combined text", () => {
+    const usfm =
+      "\\id LUK\n\\c 5\n\\v 26 And they were all amazed.\n" +
+      "\\v 27-28 And he saw a publican, and he left all, and followed him.\n" +
+      "\\v 29 And Levi made him a great feast.\n"
+    const [book] = parseTextFormat({ fileType: "usfm", text: usfm, name: "luk.usfm" })
+
+    expect(book.strings.map((str) => str.group)).toEqual(["LUK 5:26", "LUK 5:27-28", "LUK 5:29"])
+    const bridge = book.strings.find((str) => str.group === "LUK 5:27-28")
+    expect(bridge?.original).toBe("And he saw a publican, and he left all, and followed him.")
+    // The failure this guards: an empty cell per bridged verse.
+    expect(book.strings.some((str) => str.original.trim() === "")).toBe(false)
+    expect(book.strings.map((str) => str.group)).not.toContain("LUK 5:27")
+    expect(book.strings.map((str) => str.group)).not.toContain("LUK 5:28")
+  })
+
   it("AQU-634: imports USFM front matter by default, excludes it when opted out", () => {
     const usfm =
       "\\id GEN\n\\h Genesis\n\\mt1 Genesis\n\\ip An introduction.\n" +

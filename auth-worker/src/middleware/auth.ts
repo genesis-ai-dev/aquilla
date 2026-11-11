@@ -18,6 +18,11 @@ import type { AuthUser, Env, JWTPayload, Variables } from "../types"
 import { JWTService } from "../auth/jwt"
 import { isSessionFamilyRevoked, isTokenRevoked } from "../utils/token-revocation"
 import { getCachedSession, sessionCacheKey, setCachedSession } from "../lib/session-cache"
+import {
+  checkDevAccess,
+  DEV_ACCESS_RESTRICTED,
+  DEV_ACCESS_RESTRICTED_MESSAGE,
+} from "../services/dev-access"
 
 export type AuthHonoEnv = { Bindings: Env; Variables: Variables }
 
@@ -38,6 +43,11 @@ export type SessionRejection =
   | "session_expired"
   /** Lookup failed (DB unreachable), as opposed to "no such user" — AQU-994. */
   | "hydration_error"
+  /** AQU-2469: a valid session on dev for an account that is neither a
+   *  platform admin nor on the dev access list (services/dev-access.ts). */
+  | "dev_access_restricted"
+  /** AQU-2469: the dev access list could not be read, so dev fails closed. */
+  | "dev_access_unavailable"
 
 export type SessionResolution =
   | { ok: true; user: AuthUser; payload: JWTPayload; sessionKey: string }
@@ -165,6 +175,17 @@ export async function resolveSession(
     }
   }
 
+  // AQU-2469: dev.aquilla.app is closed to accounts off the access list. A
+  // no-op on every other deployment. Checked on every request, after the
+  // session cache, so removing someone from the list takes effect at once.
+  const devAccess = await checkDevAccess(env, user.email)
+  if (!devAccess.allowed) {
+    return {
+      ok: false,
+      reason: devAccess.reason === "unavailable" ? "dev_access_unavailable" : "dev_access_restricted",
+    }
+  }
+
   return { ok: true, user, payload, sessionKey: cacheKey }
 }
 
@@ -228,6 +249,13 @@ export const authMiddleware = async (
             code: "session_expired",
           },
           401,
+        )
+      case "dev_access_restricted":
+        return c.json({ error: DEV_ACCESS_RESTRICTED_MESSAGE, code: DEV_ACCESS_RESTRICTED }, 403)
+      case "dev_access_unavailable":
+        return c.json(
+          { error: "Unable to check dev access right now. Please retry.", code: DEV_ACCESS_RESTRICTED },
+          503,
         )
     }
   }

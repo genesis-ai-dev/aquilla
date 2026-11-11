@@ -13,13 +13,14 @@
 // copy in R2 stays as the archive; its key is in the footer.
 
 import type { Env } from "../types"
+import { formatAnswersMarkdown, formatAnswersText, type FeedbackAnswers } from "./feedback-answers"
 import { feedbackPageLink } from "./feedback-link"
 
 /** An in-app feedback submission. The sender is an authenticated user, so
- *  identity comes from the session, not the form — only `description` is typed. */
+ *  identity comes from the session, not the form — only the answers are typed. */
 export interface FeedbackSubmission {
-  /** Free text the user typed. */
-  description: string
+  /** The three answers the user typed (AQU-2467). */
+  answers: FeedbackAnswers
   /** Numeric account id (session-derived). */
   userId: number
   username: string
@@ -113,7 +114,7 @@ export function buildFeedbackDiscordPayload(
     fields.push({ name: "Screenshot", value: "attached, but object storage was unavailable: not archived" })
   }
 
-  const text = s.description.trim()
+  const text = formatAnswersMarkdown(s.answers)
   const embed: Record<string, unknown> = {
     title: clip(`Feedback from ${username}`, 250),
     description: opts.descriptionTruncated
@@ -144,7 +145,7 @@ export async function sendFeedbackToDiscord(
   const url = env.DISCORD_FEEDBACK_WEBHOOK_URL?.trim()
   if (!url) return { delivered: false }
 
-  const descriptionTruncated = submission.description.trim().length > EMBED_DESCRIPTION_MAX
+  const descriptionTruncated = formatAnswersMarkdown(submission.answers).length > EMBED_DESCRIPTION_MAX
   const payload = buildFeedbackDiscordPayload(submission, {
     hasAttachment: screenshot !== null,
     screenshotExt: screenshot?.ext,
@@ -164,7 +165,7 @@ export async function sendFeedbackToDiscord(
   if (descriptionTruncated) {
     form.set(
       `files[${fileIndex}]`,
-      new Blob([submission.description.trim()], { type: "text/plain" }),
+      new Blob([formatAnswersText(submission.answers)], { type: "text/plain" }),
       "description.txt",
     )
   }

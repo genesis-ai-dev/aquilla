@@ -4600,10 +4600,18 @@ export function updateQueueCells(cells: CellData[]): void {
   armEarlyDub()
 }
 
+/** Whether THIS cell has playable audio. AQU-2123: the selection toolbar's
+ *  "Play selected" states how many of the chosen lines a range run will
+ *  actually sound, so it needs the per-cell answer the list predicate below
+ *  was already computing one cell at a time. */
+export function hasPlayableAudio(cell: CellData): boolean {
+  return pickPlayableAudio(cell) !== undefined
+}
+
 /** Whether any cell in the list has playable audio. Drives the bar's
  *  Play button enablement. */
 export function hasAnyPlayableAudio(cells: CellData[]): boolean {
-  return cells.some((c) => pickPlayableAudio(c) !== undefined)
+  return cells.some(hasPlayableAudio)
 }
 
 // ── Dubs over a linked picture (AQU-646 round 5) ────────────────────────────

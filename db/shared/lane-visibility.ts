@@ -125,8 +125,10 @@ export async function visibleTagsForMember(
 
 /**
  * Settings blob a member may be shown. Wall off, and maintainer and above,
- * return the blob unchanged. Below that, `targetLanes` /
- * `archivedLanes` / `targetLanguage` keep only the granted lanes.
+ * return the blob unchanged. Below that, every key that names a lane keeps
+ * only the granted lanes: `targetLanes` / `archivedLanes` / `targetLanguage`,
+ * the per-lane voice maps (AQU-2043), and — AQU-2205 — the
+ * `algorithmicChecksByLane` keys and the `scope: "lane"` entries of `rules`.
  */
 export async function filterSettingsBlobForMember(
   db: AquillaDb,

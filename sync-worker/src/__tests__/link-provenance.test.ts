@@ -6,8 +6,9 @@
 // stamp, else by the deterministic id the live mirror gives its copies — and
 // writes the upstream's type where the copy's is NULL and a pointer at the
 // upstream's original. It touches no cell, no translation and no validation,
-// and leaves the project's own files (its imports, and files adopted under the
-// link) alone.
+// and leaves the project's own imports alone. A file adopted under the link
+// keeps its own type but, once joined, points at the upstream's original: the
+// join addressed its cells to the upstream's package.
 
 import { describe, expect, it } from "vitest"
 import { deterministicDownstreamFileId } from "../events/link-sync"
@@ -110,11 +111,10 @@ async function snapshot(t: TestDb): Promise<{ files: unknown[]; blobs: unknown[]
 }
 
 describe("repairLinkedFileProvenance (AQU-2345)", () => {
-  it("gives every copy its upstream's type and a pointer at its original, and leaves the project's own files alone", async () => {
+  it("gives every copy its upstream's type and a pointer at its original, points a joined file at the upstream's original, and leaves the project's own import alone", async () => {
     const t = await makeTestDb()
     try {
       await seedLinkedProjects(t)
-      const own = await blobOf(t, OWN_MRK)
 
       const report = await repairLinkedFileProvenance(t.db, DOWNSTREAM, { now: 2000 })
 
@@ -123,12 +123,12 @@ describe("repairLinkedFileProvenance (AQU-2345)", () => {
         upstreamProjectId: UPSTREAM,
         mode: "live",
         dryRun: false,
-        filesPaired: 3,
+        filesPaired: 4,
         typeRepaired: 3,
-        blobPointersWritten: 2,
+        blobPointersWritten: 3,
         noUpstreamBlob: 1,
       })
-      expect([...(report?.ownFiles ?? [])].sort()).toEqual([OWN_MRK, OWN_NOTES].sort())
+      expect(report?.ownFiles).toEqual([OWN_NOTES])
 
       expect(await fileType(t, MIRRORED_FG)).toEqual({ kind: "idml", book_code: null })
       expect(await fileType(t, CLONED_WB)).toEqual({ kind: "idml", book_code: "WB" })
@@ -136,8 +136,11 @@ describe("repairLinkedFileProvenance (AQU-2345)", () => {
       expect(await blobOf(t, MIRRORED_FG)).toEqual({ project_id: DOWNSTREAM, ...FG_BLOB })
       expect(await blobOf(t, CLONED_WB)).toEqual({ project_id: DOWNSTREAM, ...WB_BLOB })
       expect(await blobOf(t, MIRRORED_COVER)).toBeNull()
-      // The adopted file keeps its own original; the own import is untouched.
-      expect(await blobOf(t, OWN_MRK)).toEqual(own)
+      // The adopted file keeps its own type, but its cells now describe the
+      // upstream's package, so its original follows the upstream's; the own
+      // import is untouched.
+      expect(await fileType(t, OWN_MRK)).toEqual({ kind: "usfm", book_code: null })
+      expect(await blobOf(t, OWN_MRK)).toEqual({ project_id: DOWNSTREAM, ...MRK_UP_BLOB })
       expect(await fileType(t, OWN_NOTES)).toEqual({ kind: "md", book_code: null })
       // The copy's meta is not rewritten: a mirrored row stays unstamped.
       const meta = await t.pg.query<{ meta: string }>(`SELECT meta FROM files WHERE id = $1`, [MIRRORED_FG])
@@ -145,7 +148,7 @@ describe("repairLinkedFileProvenance (AQU-2345)", () => {
 
       // Idempotent: a second run finds nothing to do.
       expect(await repairLinkedFileProvenance(t.db, DOWNSTREAM, { now: 3000 })).toMatchObject({
-        filesPaired: 3,
+        filesPaired: 4,
         typeRepaired: 0,
         blobPointersWritten: 0,
       })
@@ -162,7 +165,7 @@ describe("repairLinkedFileProvenance (AQU-2345)", () => {
 
       const report = await repairLinkedFileProvenance(t.db, DOWNSTREAM, { dryRun: true })
 
-      expect(report).toMatchObject({ dryRun: true, filesPaired: 3, typeRepaired: 3, blobPointersWritten: 2 })
+      expect(report).toMatchObject({ dryRun: true, filesPaired: 4, typeRepaired: 3, blobPointersWritten: 3 })
       expect(await snapshot(t)).toEqual(before)
     } finally {
       await t.close()
@@ -173,7 +176,7 @@ describe("repairLinkedFileProvenance (AQU-2345)", () => {
     const t = await makeTestDb()
     try {
       await seedLinkedProjects(t, "clone")
-      expect(await repairLinkedFileProvenance(t.db, DOWNSTREAM)).toMatchObject({ mode: "clone", typeRepaired: 3, blobPointersWritten: 2 })
+      expect(await repairLinkedFileProvenance(t.db, DOWNSTREAM)).toMatchObject({ mode: "clone", typeRepaired: 3, blobPointersWritten: 3 })
       expect(await blobOf(t, CLONED_WB)).toMatchObject({ r2_key: WB_BLOB.r2_key })
     } finally {
       await t.close()

@@ -62,7 +62,7 @@ describe("selectMatchingRoutes", () => {
 describe("feedback email copy", () => {
   it("builds the subject and falls back when the user has no email", () => {
     const built = buildFeedbackRouteEmail({
-      description: `${"x".repeat(80)}\nsecond line`,
+      answers: { whatHappened: `${"x".repeat(80)}\nsecond line`, tryingTo: "Open it", expected: "   " },
       username: "u",
       userEmail: "",
       orgName: "Org",
@@ -73,6 +73,13 @@ describe("feedback email copy", () => {
     expect(built.subject.startsWith("[Aquilla support] Org / Proj: xxx")).toBe(true)
     expect(built.subject.length).toBeLessThan(120)
     expect(built.text).toContain("No email on file. Contact this user through their project manager.")
+    // AQU-2467: each answer sits under its own heading, in text and HTML; an
+    // empty answer gets no heading.
+    expect(built.text).toContain("What happened?\nxxx")
+    expect(built.text).toContain("What were you trying to do?\nOpen it")
+    expect(built.text).not.toContain("What did you expect to happen?")
+    expect(built.html).toContain("What were you trying to do?")
+    expect(built.html).not.toContain("What did you expect to happen?")
   })
 
   it("only real-looking addresses become Reply-To", () => {
@@ -200,7 +207,13 @@ describe("POST /api/v2/feedback with routes", () => {
 
     const res = await sendFeedback(
       await jwtFor("fr-reporter"),
-      { description: "Cannot save my work", projectId: "fr-m1", route: "/project/fr-m1" },
+      {
+        whatHappened: "Cannot save my work",
+        tryingTo: "Save a chapter",
+        expected: "A saved chapter",
+        projectId: "fr-m1",
+        route: "/project/fr-m1",
+      },
       { EMAIL: { send } as unknown as Env["EMAIL"], DISCORD_FEEDBACK_WEBHOOK_URL: "https://discord.example/hook" },
     )
     expect(res.status).toBe(201)
@@ -209,7 +222,10 @@ describe("POST /api/v2/feedback with routes", () => {
     expect(body.emailedRoutes).toBe(3)
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(send).toHaveBeenCalledTimes(1)
-    const msg = send.mock.calls[0][0] as { to: string[]; subject: string; replyTo: string }
+    const msg = send.mock.calls[0][0] as { to: string[]; subject: string; replyTo: string; text: string }
+    expect(msg.text).toContain("What happened?\nCannot save my work")
+    expect(msg.text).toContain("What were you trying to do?\nSave a chapter")
+    expect(msg.text).toContain("What did you expect to happen?\nA saved chapter")
     expect(msg.to).toEqual(["desk@example.com", "x@example.com", "y@example.com"])
     expect(msg.subject).toBe("[Aquilla support] Mail Org / Mail Project: Cannot save my work")
     expect(msg.replyTo).toBe("fr-reporter@example.com")
@@ -234,7 +250,7 @@ describe("POST /api/v2/feedback with routes", () => {
     expect((send.mock.calls[0][0] as { to: string[] }).to).toEqual(["home@example.com"])
   })
 
-  it("an email failure still returns 201 with Discord delivered", async () => {
+  it("a refused route email is a 502 after Discord was still tried, never a success", async () => {
     await seedUser(7, "root")
     const adminJwt = await jwtFor("root")
     await seedUser(841, "fr-fail")
@@ -243,20 +259,44 @@ describe("POST /api/v2/feedback with routes", () => {
       "INSERT INTO org_members (org_id, user_id, role_level) VALUES (?, ?, 100)",
     ).bind(8401, 841).run()
     await adminReq(adminJwt, "POST", "", { orgId: 8401, emails: ["fail@example.com"] })
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 204 })))
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }))
+    vi.stubGlobal("fetch", fetchMock)
     vi.spyOn(console, "warn").mockImplementation(() => {})
+    vi.spyOn(console, "error").mockImplementation(() => {})
     const send = vi.fn(async (_msg: unknown) => {
       throw new Error("provider down")
     })
 
-    const res = await sendFeedback(await jwtFor("fr-fail"), { description: "Hello", route: "/" }, {
+    const res = await sendFeedback(await jwtFor("fr-fail"), { whatHappened: "Hello", route: "/" }, {
       EMAIL: { send } as unknown as Env["EMAIL"],
       DISCORD_FEEDBACK_WEBHOOK_URL: "https://discord.example/hook",
     })
-    expect(res.status).toBe(201)
-    const body = (await res.json()) as { delivered: boolean; emailedRoutes: number }
-    expect(body.delivered).toBe(true)
-    expect(body.emailedRoutes).toBe(0)
+    expect(res.status).toBe(502)
+    expect(((await res.json()) as { error: string }).error).toMatch(/could not be delivered/)
     expect(send).toHaveBeenCalled()
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("an unbound EMAIL or no matching route is not a failure", async () => {
+    await seedUser(7, "root")
+    const adminJwt = await jwtFor("root")
+    await seedUser(851, "fr-unbound")
+    await seedOrg(8501, "Unbound Org", 7)
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_members (org_id, user_id, role_level) VALUES (?, ?, 100)",
+    ).bind(8501, 851).run()
+    await adminReq(adminJwt, "POST", "", { orgId: 8501, emails: ["u@example.com"] })
+    await seedUser(852, "fr-nomatch")
+
+    const unbound = await sendFeedback(await jwtFor("fr-unbound"), { whatHappened: "Hi", route: "/" }, {
+      EMAIL: undefined,
+    })
+    expect(unbound.status).toBe(201)
+    expect(((await unbound.json()) as { emailedRoutes: number }).emailedRoutes).toBe(0)
+
+    const none = await sendFeedback(await jwtFor("fr-nomatch"), { whatHappened: "Hi", route: "/" }, {
+      EMAIL: { send: vi.fn() } as unknown as Env["EMAIL"],
+    })
+    expect(none.status).toBe(201)
   })
 })

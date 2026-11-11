@@ -4,7 +4,7 @@
  * (translate = contributor 400, validate = reviewer 300). Mirrors the
  * CommentsDrawer AQU-427 role-gating test pattern.
  */
-import { describe, it, expect, vi } from "vitest"
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, act } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { renderWithTooltips, expectClickNote, expectDisabledNote } from "@/test-utils/tooltip"
@@ -31,6 +31,8 @@ import type { CellAuditStats } from "@/hooks/useCellsAuditStats"
 import { ROLE } from "@/lib/frontier/roles"
 import type { MemberScope } from "@/lib/sync/member-scopes"
 import * as selectionModule from "@/lib/audio/selection"
+import { startQueue } from "@/lib/audio/play-queue"
+import type { FrontierSession } from "@/lib/frontier/types"
 import { toast } from "@/components/ui/toast"
 import posthog from "@/lib/posthog"
 import { BATCH_VALIDATE_ATTEMPTED } from "@/lib/event-names"
@@ -55,6 +57,14 @@ vi.mock("@/lib/sync/events-emit", async (importActual) => ({
   emitCellUnvalidate: vi.fn(() => Promise.resolve("unvalidate-event")),
   emitCellAudioValidate: vi.fn(() => Promise.resolve("audio-validate-event")),
   emitCellAudioUnvalidate: vi.fn(() => Promise.resolve("audio-unvalidate-event")),
+}))
+
+// AQU-2123: spy on startQueue while keeping the rest of the play queue real —
+// `hasPlayableAudio` decides the Play-selected button's own enablement, so a
+// blanket mock would prove nothing about which lines it found.
+vi.mock("@/lib/audio/play-queue", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/audio/play-queue")>()),
+  startQueue: vi.fn(),
 }))
 
 function makeProject(roleLevel: number | null): ProjectRecord {
@@ -1218,5 +1228,90 @@ describe("SelectionBar — no hover on text buttons (AQU-2260)", () => {
     renderBar(makeProject(ROLE.REVIEWER), CELLS, [], "", { audioByCellId: audioMap() })
     await expectNoHover(screen.getByRole("button", { name: /^validate audio/i }))
     vi.restoreAllMocks()
+  })
+})
+
+describe("SelectionBar — Play selected (AQU-2123)", () => {
+  const THREE = [makeCell({ id: "cell-1" }), makeCell({ id: "cell-2" }), makeCell({ id: "cell-3" })]
+  const SESSION = { jwt: "t", username: "alice", createdAt: "" } as FrontierSession
+
+  /** `audioMap()` covers one hardcoded cell; a range needs several. */
+  function audioMapFor(ids: string[]): Map<string, CellAudioEntry> {
+    const one = audioMap()
+    return new Map(ids.map((id) => [id, one.get("cell-1")!]))
+  }
+
+  const playButton = () => screen.getByRole("button", { name: /Play selected/ })
+
+  beforeEach(() => { vi.mocked(startQueue).mockClear() })
+  afterEach(() => { vi.restoreAllMocks() })
+
+  it("plays the selected lines in the TABLE's order, not the order they were clicked", async () => {
+    // Picked bottom-up: verse 3, then 1, then 2.
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-3", "cell-1", "cell-2"]))
+    renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
+      audioMode: true, session: SESSION, audioByCellId: audioMapFor(["cell-1", "cell-2", "cell-3"]),
+    })
+
+    await userEvent.setup().click(playButton())
+
+    expect(startQueue).toHaveBeenCalledTimes(1)
+    const [ctx, fromIndex, explicit] = vi.mocked(startQueue).mock.calls[0]
+    expect(ctx.cells.map((c) => c.id)).toEqual(["cell-1", "cell-2", "cell-3"])
+    expect(fromIndex).toBe(0)
+    expect(explicit).toBe(true)
+  })
+
+  it("bounds the run to the selection: a snapshot context, so it cannot run on past the last line", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2"]))
+    renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
+      audioMode: true, session: SESSION, audioByCellId: audioMapFor(["cell-1", "cell-2", "cell-3"]),
+    })
+
+    await userEvent.setup().click(playButton())
+
+    const [ctx] = vi.mocked(startQueue).mock.calls[0]
+    // `snapshot` is what keeps ProjectWorkspace's ran-out listener from rolling
+    // into the next chapter and keeps updateQueueCells from swapping the whole
+    // file back in. Without it the run would not stop at the chosen range.
+    expect(ctx.snapshot).toBe(true)
+    expect(ctx.cells.map((c) => c.id)).toEqual(["cell-1", "cell-2"])
+    expect(ctx.projectId).toBe("proj-1")
+  })
+
+  it("counts only the lines that have audio, but still hands the queue every selected line so a silent one is skipped mid-run", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2", "cell-3"]))
+    // Verse 2 was never recorded.
+    renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
+      audioMode: true, session: SESSION, audioByCellId: audioMapFor(["cell-1", "cell-3"]),
+    })
+
+    const btn = playButton()
+    expect(btn).not.toBeDisabled()
+    expect(btn.textContent).toContain("2")
+
+    await userEvent.setup().click(btn)
+
+    const [ctx] = vi.mocked(startQueue).mock.calls[0]
+    expect(ctx.cells.map((c) => c.id)).toEqual(["cell-1", "cell-2", "cell-3"])
+  })
+
+  it("is disabled, and says why, when not one selected line has audio", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2"]))
+    renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
+      audioMode: true, session: SESSION, audioByCellId: new Map(),
+    })
+
+    await expectDisabledNote(playButton(), "None of the selected lines has audio yet")
+    expect(startQueue).not.toHaveBeenCalled()
+  })
+
+  it("stays out of the text lens — a selection there offers Translate, not playback", () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2"]))
+    renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
+      session: SESSION, audioByCellId: audioMapFor(["cell-1", "cell-2"]),
+    })
+
+    expect(screen.queryByRole("button", { name: /Play selected/ })).toBeNull()
   })
 })

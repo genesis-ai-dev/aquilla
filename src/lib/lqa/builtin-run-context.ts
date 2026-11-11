@@ -1,3 +1,4 @@
+import type { NumberFormatConventions } from "../../../db/shared/number-format"
 import type { PunctuationConventions } from "../../../db/shared/punctuation-conventions"
 
 /**
@@ -35,4 +36,13 @@ export interface BuiltinCheckRunContext {
    * invents a "correct" spelling of its own.
    */
   bookNames?: readonly ProjectBookName[] | null
+  /**
+   * AQU-2430: how the target language writes numbers — its group and decimal
+   * separators, its grouping, and its own digits — from
+   * `resolveNumberFormat` (db/shared/number-format.ts). Absent or null leaves
+   * the number-format check silent: with no recorded language and no Language
+   * profile slot there is nothing to judge the number against, and judging it
+   * by some other language's format would report correct typography.
+   */
+  numberFormat?: NumberFormatConventions | null
 }

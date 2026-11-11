@@ -510,6 +510,8 @@ export interface AuthResponse {
 export interface JWTPayload {
   /** Username — sub claim. */
   sub: string
+  /** Immutable database account ID. Absent only on legacy credentials. */
+  uid?: string
   exp: number
   iat: number
   /** Unique token id, checked against revoked_tokens on logout (migration

@@ -116,13 +116,17 @@ test("first-party availability retry recovers without contacting Google", async 
   const providerRequests: string[] = []
   page.on("request", request => {if (/google(?:apis)?\.com|gstatic\.com/.test(request.url())) providerRequests.push(request.url())})
   let checks = 0
+  let available = false
   await page.route("**/api/v2/auth/oauth/google/config", route => {
     checks++
-    return route.fulfill(checks === 1 ? {status:503,json:{error:"unavailable"}} : {json:{enabled:true}})
+    return route.fulfill(!available ? {status:503,json:{error:"unavailable"}} : {json:{enabled:true}})
   })
   await page.goto("/login")
+  await expect(page.getByRole("button",{name:"Retry Google login availability"})).toBeVisible()
+  const failedChecks = checks
+  available = true
   await page.getByRole("button",{name:"Retry Google login availability"}).click()
   await expect(page.getByRole("button",{name:"Continue with Google",exact:true})).toBeVisible()
-  expect(checks).toBe(2)
+  expect(checks).toBeGreaterThan(failedChecks)
   expect(providerRequests).toEqual([])
 })

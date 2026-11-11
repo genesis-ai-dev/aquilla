@@ -597,9 +597,9 @@ auth.post("/token", async (c) => {
         try {
           const newHash = await hashPasswordWerkzeugScrypt(password)
           await c.env.AQUILLA_PG.prepare(
-            "UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            "UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND password_hash = ?",
           )
-            .bind(newHash, user.id)
+            .bind(newHash, user.id, user.password_hash)
             .run()
           user.password_hash = newHash
         } catch (rehashError) {
@@ -641,6 +641,7 @@ auth.post("/token", async (c) => {
       token_type: "bearer",
     })
   } catch (error) {
+    if (error instanceof SessionInvalidatedError) return c.json({ error: "Session invalidated. Please log in again." }, 401)
     console.error("Login error:", error)
     return c.json({ error: "Login failed" }, 500)
   }

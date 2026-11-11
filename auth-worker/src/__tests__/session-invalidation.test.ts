@@ -1,8 +1,9 @@
+import * as passwordUtil from "../utils/password"
 import { env } from "cloudflare:test"
 import { sign } from "hono/jwt"
 import { JWTService } from "../auth/jwt"
 import { seedUser } from "./helpers/db"
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import app from "../index"
 import { sha256Hex } from "../../../db/shared/api-credentials"
 import { jwtFor, authHeader } from "./helpers/db"
@@ -193,4 +194,19 @@ it("never renews a cached pre-reset session and fences a reset between validatio
   expect((await app.request("/api/v2/auth/me",{headers:authHeader(token)},env)).status).toBe(401)
   const fresh=await new JWTService(env).createAccessToken("auditcache")
   expect((await app.request("/api/v2/auth/me",{headers:authHeader(fresh)},env)).status).toBe(200)
+})
+
+
+it("does not overwrite a concurrent reset during legacy password rehash", async () => {
+  await seedUser(81804,"rehashrace")
+  const newHash=await passwordUtil.hashPasswordWerkzeugScrypt("new-password-123")
+  const verify=vi.spyOn(passwordUtil,"verifyPassword").mockResolvedValueOnce({isValid:true,shouldRehashToWerkzeugScrypt:true})
+  const rehash=vi.spyOn(passwordUtil,"hashPasswordWerkzeugScrypt").mockImplementationOnce(async () => {
+    await env.AQUILLA_PG.prepare("UPDATE users SET password_hash=?,password_changed_at=now(),session_version=1 WHERE id=81804").bind(newHash).run()
+    return "obsolete-rehash"
+  })
+  try {
+    expect((await reqJson("/api/v2/auth/token",{username:"rehashrace",password:"old-password-123"})).status).toBe(401)
+    expect(await env.AQUILLA_PG.prepare("SELECT password_hash,session_version FROM users WHERE id=81804").first()).toEqual({password_hash:newHash,session_version:1})
+  } finally { verify.mockRestore();rehash.mockRestore() }
 })

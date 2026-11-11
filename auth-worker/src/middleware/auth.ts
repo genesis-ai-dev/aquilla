@@ -187,11 +187,11 @@ export async function resolveSession(
   if (payload.sv !== undefined && (!Number.isSafeInteger(payload.sv) || payload.sv !== (user.session_version ?? 0))) {
     return { ok: false, reason: "password_changed" }
   }
-  if (payload.sv === undefined && user.password_changed_at) {
+  if (user.password_changed_at) {
     const changedAtSeconds = Math.floor(
       new Date(user.password_changed_at).getTime() / 1000,
     )
-    if (payload.iat <= changedAtSeconds) {
+    if (payload.iat < changedAtSeconds || (payload.sv === undefined && payload.iat === changedAtSeconds)) {
       return { ok: false, reason: "password_changed" }
     }
   }

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import { vi } from "vitest"
 
 import { CellAreaPlaceholder, CellRowsLoadStatus } from "./CellAreaPlaceholder"
+import { ROLE } from "@/lib/sync/role-policy"
 
 describe("CellAreaPlaceholder", () => {
   it("puts changing download progress inside the cloud-loading status and removes it on completion", () => {
@@ -83,6 +84,58 @@ describe("CellAreaPlaceholder", () => {
 
     expect(screen.queryByText(/sync/i)).not.toBeInTheDocument()
     expect(screen.getByRole("status")).toHaveAccessibleName(/^Loading\b/)
+  })
+
+  // AQU-2475: an empty project seen from below the import floor. AQU-481
+  // already withheld the CTA; the body still said "Import a file to get
+  // started", which a Contributor cannot act on and nothing explained.
+  it("names the role that may import when the reader cannot, with no Import button", () => {
+    render(
+      <CellAreaPlaceholder
+        state={{ kind: "no-file" }}
+        hasFiles={false}
+        filesLoaded
+        importFloorRole={ROLE.PROJECT_LEAD}
+      />,
+    )
+
+    expect(screen.getByText("No files yet")).toBeInTheDocument()
+    expect(screen.getByText("Project Leads can import files.")).toBeInTheDocument()
+    expect(screen.queryByText("Import a file to get started.")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Import a file" })).not.toBeInTheDocument()
+  })
+
+  // The line reads the project's resolved floor, so an org that raised import
+  // to Maintainer must not keep telling people to ask a project lead.
+  it("names the raised floor when the org lifted it", () => {
+    render(
+      <CellAreaPlaceholder
+        state={{ kind: "no-file" }}
+        hasFiles={false}
+        filesLoaded
+        importFloorRole={ROLE.MAINTAINER}
+      />,
+    )
+
+    expect(screen.getByText("Maintainers can import files.")).toBeInTheDocument()
+  })
+
+  it("keeps the import CTA and its copy for someone who may import", () => {
+    const openImport = vi.fn()
+    render(
+      <CellAreaPlaceholder
+        state={{ kind: "no-file" }}
+        hasFiles={false}
+        filesLoaded
+        importFloorRole={ROLE.PROJECT_LEAD}
+        onImportClick={openImport}
+      />,
+    )
+
+    expect(screen.getByText("Import a file to get started.")).toBeInTheDocument()
+    expect(screen.queryByText(/can import files/)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Import a file" }))
+    expect(openImport).toHaveBeenCalledOnce()
   })
 
   it("shows a recoverable load error instead of claiming the file is empty", () => {

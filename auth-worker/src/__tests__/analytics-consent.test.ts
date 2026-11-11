@@ -25,3 +25,41 @@ it("stores server-stamped consent for only the authenticated user and rejects st
   expect(await (await app.request(url, { headers: b }, env)).json()).toEqual({ accountId: "2", decision: null })
   expect((await put({ ...choice, allowed: false, expectedRevision: parsed?.revision })).status).toBe(200)
 })
+
+it.each([false,true])("retries unrelated preference races but preserves a newer consent choice: %s", async consentRace => {
+  await seedUser(77,"racing")
+  const headers = authHeader(await jwtFor("racing"))
+  const original = env.AQUILLA_PG.prepare.bind(env.AQUILLA_PG)
+  let collided = false
+  const newer = {allowed:false,source:"settings",disclosureVersion:ANALYTICS_DISCLOSURE_VERSION,decidedAt:new Date().toISOString(),revision:crypto.randomUUID()}
+  const { vi } = await import("vitest")
+  const spy = vi.spyOn(env.AQUILLA_PG,"prepare").mockImplementation(sql => {
+    const statement = original(sql)
+    if (!sql.startsWith("UPDATE users SET preferences = ?, updated_at = CURRENT_TIMESTAMP")) return statement
+    return new Proxy(statement,{get(target,property) {
+      if (property !== "bind") return Reflect.get(target,property)
+      return (...values: Parameters<typeof statement.bind>) => {
+        const bound = statement.bind(...values)
+        return new Proxy(bound,{get(inner,key) {
+          if (key !== "first") return Reflect.get(inner,key)
+          return async () => {
+            if (!collided) {
+              collided = true
+              await original("UPDATE users SET preferences=? WHERE id=77")
+                .bind(JSON.stringify({theme:"dark",...(consentRace ? {"privacy.analytics.v1":newer} : {})})).run()
+            }
+            return bound.first()
+          }
+        }})
+      }
+    }})
+  })
+  try {
+    const response = await app.request("/api/v2/auth/me/analytics-consent",{method:"PUT",headers,body:JSON.stringify({allowed:true,source:"signup",disclosureVersion:ANALYTICS_DISCLOSURE_VERSION,expectedRevision:null})},env)
+    expect(collided).toBe(true)
+    expect(response.status).toBe(consentRace ? 409 : 200)
+    const saved = await original("SELECT preferences FROM users WHERE id=77").first<{preferences:string}>()
+    expect(JSON.parse(saved!.preferences)).toMatchObject({theme:"dark","privacy.analytics.v1":{allowed:!consentRace}})
+    if (consentRace) expect(JSON.parse(saved!.preferences)["privacy.analytics.v1"].revision).toBe(newer.revision)
+  } finally { spy.mockRestore() }
+})

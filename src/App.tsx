@@ -10,6 +10,7 @@ import { OrgRouteGate } from "@/components/org/OrgRouteGate"
 import { ProductTourProvider } from "@/context/ProductTourContext"
 import { ProjectOverview } from "@/components/org/ProjectOverview"
 import { resumeOrgPath, projectMemoryPath } from "@/lib/navigation/org-paths"
+import { GoogleLoginReturn } from "@/pages/GoogleLoginReturn"
 import { Login } from "@/pages/Login"
 import { NotFound } from "@/pages/NotFound"
 import { DevLoginRoute } from "@/components/DevLoginRoute"
@@ -481,6 +482,7 @@ function AppRoutes() {
         <Route path="/onboarding" element={<Signup />} />
         {/* AQU-282: dedicated login — eagerly loaded (public, no auth required) */}
         <Route path="/login" element={<Login />} />
+        <Route path="/auth/google/return" element={<GoogleLoginReturn />} />
         <Route path="/billing/select" element={<BillingSelection />} />
         {/* AQU-270: account recovery — public, no auth required */}
         <Route path="/reset-password" element={<ResetPassword />} />

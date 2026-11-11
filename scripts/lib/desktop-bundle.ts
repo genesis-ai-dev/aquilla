@@ -1,7 +1,7 @@
 // Pure helpers for the desktop hot-bundle publisher (scripts/desktop-bundle-publish.ts).
 // The manifest format and the signing string are normative in
 // docs/superpowers/specs/2026-11-05-desktop-hot-bundle.md; keep them in step with
-// src-tauri/src/hot_bundle.rs, which verifies what this produces.
+// src-tauri/src/hot_bundle/manifest.rs, which verifies what this produces.
 
 import { createHash, createPrivateKey, generateKeyPairSync, sign, verify, type KeyObject } from "node:crypto"
 import { createReadStream, statSync } from "node:fs"

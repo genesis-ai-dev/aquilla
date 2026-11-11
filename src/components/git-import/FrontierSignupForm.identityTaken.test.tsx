@@ -109,3 +109,10 @@ describe("FrontierSignupForm identity-taken redirection (AQU-1345)", () => {
     await waitFor(() => expect(screen.queryByTestId("signup-identity-taken")).toBeNull())
   })
 })
+
+// Password-form contracts do not depend on the optional provider configuration.
+// GoogleLoginButton and the browser journey cover its separate capability/intent path.
+vi.mock("@/lib/frontier/google-login", () => ({
+  googleRequest: async () => ({ enabled: false }),
+  startGoogleLogin: vi.fn(),
+}))

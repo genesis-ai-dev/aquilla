@@ -16,7 +16,10 @@
 // v1.EventsDequeued has deleted queue row X, every earlier event about X (its
 // v1.EventQueued, status changes, and a single-row dequeue) nets out to
 // nothing. Batch dequeues are always replayed — deleting rows that were never
-// inserted is a no-op — so they never have to be split.
+// inserted is a no-op — so they never have to be split. A batch enqueue
+// (v1.EventsQueued) is skipped only when every row in it has been dequeued
+// since; otherwise it's replayed, and so is every queue event about its rows —
+// skipping a row's single-row dequeue then would bring the row back.
 //
 // Deliberately kept, whatever comes after them: file events. Files are keyed
 // by the server's file id, and an upsert can move a row between projects, so
@@ -65,6 +68,22 @@ const WIPE_EVENT = "v1.OfflineCopyRemoved"
 /** Queue events about one row, by its id: all skippable up to that row's last confirmed dequeue. */
 const QUEUE_ROW_EVENTS = new Set(["v1.EventQueued", "v1.EventQueueStatusSet", "v1.EventDequeued"])
 
+/** Queues many rows at once; see the header for when it can be skipped. */
+const BATCH_QUEUE_EVENT = "v1.EventsQueued"
+
+/** The queue row ids of a v1.EventsQueued, or undefined if they can't be read. */
+const batchRowIds = (args: Record<string, unknown>): string[] | undefined => {
+  const rows = args.rows
+  if (!Array.isArray(rows)) return undefined
+  const ids: string[] = []
+  for (const row of rows) {
+    const id = typeof row === "object" && row !== null ? (row as { id?: unknown }).id : undefined
+    if (typeof id !== "string") return undefined
+    ids.push(id)
+  }
+  return ids
+}
+
 export interface ReplayRow {
   name: string
   argsJson: string
@@ -91,6 +110,8 @@ const stringField = (args: Record<string, unknown>, field: string): string | und
   const value = args[field]
   return typeof value === "string" ? value : undefined
 }
+
+const seqKey = (seq: Seq): string => `${seq.global}.${seq.client}`
 
 const seqOf = (row: Record<string, unknown>): Seq => ({ global: Number(row.seqNumGlobal), client: Number(row.seqNumClient) })
 
@@ -140,18 +161,43 @@ export function planReplaySkip(eventlog: ReplayEventlog): ((row: ReplayRow) => b
     if (all.length === 0) return undefined
     const latest = all.reduce((a, b) => (compare(a, b) >= 0 ? a : b))
 
+    // Batch enqueues: skippable ones by seq, and the rows of the rest.
+    const skippableBatches = new Set<string>()
+    const replayedRows = new Set<string>()
+    // A batch whose row ids can't be read: replay every queue event.
+    let unreadableBatch = false
+    const batches = eventlog.select(
+      `SELECT seqNumGlobal, seqNumClient, argsJson FROM ${eventlog.eventlogTable} WHERE name = '${BATCH_QUEUE_EVENT}'`,
+    )
+    for (const batch of batches) {
+      const seq = seqOf(batch)
+      const ids = batchRowIds(argsOf({ argsJson: String(batch.argsJson) }))
+      if (ids === undefined) {
+        unreadableBatch = true
+        continue
+      }
+      const allDequeued = ids.every((id) => {
+        const dequeued = lastDequeue.get(id)
+        return dequeued !== undefined && compare(seq, dequeued) < 0
+      })
+      if (allDequeued && compare(seq, last) !== 0) skippableBatches.add(seqKey(seq))
+      else for (const id of ids) replayedRows.add(id)
+    }
+
     return (row) => {
       try {
+        const seq = { global: row.seqNumGlobal, client: row.seqNumClient }
+        if (row.name === BATCH_QUEUE_EVENT) return skippableBatches.has(seqKey(seq))
         const field = PROJECT_FIELD[row.name]
         const queueRow = QUEUE_ROW_EVENTS.has(row.name)
         if (field === undefined && !queueRow) return false
-        const seq = { global: row.seqNumGlobal, client: row.seqNumClient }
         // Most of a log after the last removal: no need to parse anything.
         if (compare(seq, latest) > 0 || compare(seq, last) === 0) return false
         const args = argsOf(row)
         if (queueRow) {
           const id = stringField(args, "id")
-          const dequeued = id === undefined ? undefined : lastDequeue.get(id)
+          if (id === undefined || unreadableBatch || replayedRows.has(id)) return false
+          const dequeued = lastDequeue.get(id)
           return dequeued !== undefined && compare(seq, dequeued) <= 0
         }
         const projectId = field === undefined ? undefined : stringField(args, field)

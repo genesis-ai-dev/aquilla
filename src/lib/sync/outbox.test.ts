@@ -670,6 +670,25 @@ describe("Tauri offline routing", () => {
     expect(queuedRows.map((r) => r.id)).toEqual(["tc1"])
   })
 
+  it("enqueueOutboxEvents queues a bulk batch in one commit, and only for offline-ready projects", async () => {
+    setTauriRuntime(true)
+    markProjectOfflineReady("proj1")
+    const edits = Array.from({ length: 50 }, (_, i) => ({ ...commitEvent, id: `tc${i}`, cellId: `cell${i}` }))
+    const elsewhere = { ...commitEvent, id: "other1", projectId: "proj2" }
+    const store = currentOfflineStore!
+    const commit = vi.spyOn(store, "commit")
+
+    await enqueueOutboxEvents([...edits.slice(0, 25), elsewhere, ...edits.slice(25)])
+
+    expect(commit).toHaveBeenCalledTimes(1)
+    expect(getOfflineStoreMock).toHaveBeenCalledTimes(1)
+    const queued = store.query(offlineTables.eventQueue.select())
+    expect(queued.map((r) => r.id).sort()).toEqual(edits.map((e) => e.id).sort())
+    expect(queued.every((r) => r.status === "pending")).toBe(true)
+    // proj2 has no offline copy: its edit takes the IndexedDB outbox.
+    expect((await peekOutboxBatch(10)).map((r) => r.id)).toEqual(["other1"])
+  })
+
   it("a routed row round-trips into the exact OutboxRawEvent shape sync-adapter.ts's toRawEvent() expects", async () => {
     setTauriRuntime(true)
     markProjectOfflineReady("proj1")

@@ -113,6 +113,55 @@ describe("planReplaySkip", () => {
       // e11.0 is confirmed, e11.1 (b's batch dequeue) is not.
       expect(names(queue, partly)).toEqual(["10.1", "10.4", "11.0"])
     })
+
+    describe("batch enqueues", () => {
+      const batch = (global: number, client: number, ids: string[]) =>
+        row(global, client, "v1.EventsQueued", { rows: ids.map((id) => ({ id, projectId: P })) })
+
+      it("skips a batch once every row in it is dequeued, with its rows' events", () => {
+        const rows = [
+          batch(10, 1, ["a", "b"]),
+          row(10, 2, "v1.EventQueueStatusSet", { id: "a", status: "flushing" }),
+          row(11, 0, "v1.EventDequeued", { id: "a" }),
+          row(11, 1, "v1.EventsDequeued", { ids: ["b"] }),
+          row(12, 0, "v1.LocalCheckpoint", {}),
+        ]
+        expect(names(rows, planReplaySkip(eventlog(rows, 20)))).toEqual(["10.1", "10.2", "11.0"])
+      })
+
+      it("replays a batch with a row still queued, and every event about its rows", () => {
+        const rows = [
+          batch(10, 1, ["a", "b"]),
+          row(10, 2, "v1.EventQueued", { id: "c" }),
+          row(11, 0, "v1.EventDequeued", { id: "a" }),
+          row(11, 1, "v1.EventDequeued", { id: "c" }),
+          row(12, 0, "v1.LocalCheckpoint", {}),
+        ]
+        // Skipping a's dequeue would bring it back: the batch re-inserts it.
+        expect(names(rows, planReplaySkip(eventlog(rows, 20)))).toEqual(["10.2", "11.1"])
+      })
+
+      it("replays a batch whose dequeue isn't confirmed yet", () => {
+        const rows = [
+          batch(10, 1, ["a"]),
+          row(11, 0, "v1.EventDequeued", { id: "a" }),
+          row(12, 0, "v1.EventDequeued", { id: "x" }),
+          row(13, 0, "v1.LocalCheckpoint", {}),
+        ]
+        expect(names(rows, planReplaySkip(eventlog(rows, 11)))).toEqual(["10.1", "11.0"])
+        expect(names(rows, planReplaySkip(eventlog(rows, 10)))).toEqual([])
+      })
+
+      it("replays every queue event when a batch's rows can't be read", () => {
+        const rows = [
+          row(10, 1, "v1.EventsQueued", { rows: "garbled" }),
+          row(10, 2, "v1.EventQueued", { id: "a" }),
+          row(11, 0, "v1.EventDequeued", { id: "a" }),
+          row(12, 0, "v1.LocalCheckpoint", {}),
+        ]
+        expect(names(rows, planReplaySkip(eventlog(rows, 20)))).toEqual([])
+      })
+    })
   })
 
   it("never skips the eventlog's last event, so the rebuilt state db ends on the eventlog's head", () => {

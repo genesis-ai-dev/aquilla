@@ -261,8 +261,8 @@ let warnedOfflineStoreUnavailable = false
 // A booted store answers at once; past this, the edit goes to IndexedDB.
 const OFFLINE_STORE_WAIT_MS = 3_000
 
-async function routeToOfflineQueueIfEligible(event: CqrsRawEvent): Promise<boolean> {
-  if (!OFFLINE_ROUTABLE_KINDS.has(event.kind)) return false
+/** The booted offline store and its events, or null when writes must go to IndexedDB. */
+async function openOfflineQueue() {
   const [{ getOfflineStore }, { isProjectOfflineReady }, { events: offlineEvents }] = await Promise.all([
     import("@/lib/offline/store"),
     import("@/lib/offline/offline-reads"),
@@ -286,23 +286,61 @@ async function routeToOfflineQueueIfEligible(event: CqrsRawEvent): Promise<boole
     }),
     bootTimedOut,
   ]).finally(() => clearTimeout(timer))
-  if (!store || !isProjectOfflineReady(store, event.projectId)) return false
-  store.commit(
-    offlineEvents.eventQueued({
-      id: event.id,
-      projectId: event.projectId,
-      fileId: event.fileId ?? null,
-      cellId: event.cellId ?? null,
-      kind: event.kind,
-      payload: event.payload,
-      parentId: event.parentId ?? null,
-      author: event.author,
-      schemaVersion: event.schemaVersion,
-      clientTs: new Date(event.clientTs),
-      createdAt: new Date(),
-    }),
-  )
+  if (!store) return null
+  return { store, offlineEvents, isReady: (projectId: string) => isProjectOfflineReady(store, projectId) }
+}
+
+function toQueuedRow(event: CqrsRawEvent) {
+  return {
+    id: event.id,
+    projectId: event.projectId,
+    fileId: event.fileId ?? null,
+    cellId: event.cellId ?? null,
+    kind: event.kind,
+    payload: event.payload,
+    parentId: event.parentId ?? null,
+    author: event.author,
+    schemaVersion: event.schemaVersion,
+    clientTs: new Date(event.clientTs),
+    createdAt: new Date(),
+  }
+}
+
+async function routeToOfflineQueueIfEligible(event: CqrsRawEvent): Promise<boolean> {
+  if (!OFFLINE_ROUTABLE_KINDS.has(event.kind)) return false
+  const queue = await openOfflineQueue()
+  if (!queue || !queue.isReady(event.projectId)) return false
+  queue.store.commit(queue.offlineEvents.eventQueued(toQueuedRow(event)))
   return true
+}
+
+/**
+ * Batch form of `routeToOfflineQueueIfEligible`: commits every eligible event
+ * in ONE v1.EventsQueued and returns the rest, in order, for IndexedDB. One
+ * commit per event re-ran every query on the queue each time — a 200-edit
+ * batch took seconds, longer the more was already queued.
+ */
+async function routeBatchToOfflineQueue(events: CqrsRawEvent[]): Promise<CqrsRawEvent[]> {
+  if (!events.some((event) => OFFLINE_ROUTABLE_KINDS.has(event.kind))) return events
+  const queue = await openOfflineQueue()
+  if (!queue) return events
+  const readiness = new Map<string, boolean>()
+  const isReady = (projectId: string) => {
+    let ready = readiness.get(projectId)
+    if (ready === undefined) {
+      ready = queue.isReady(projectId)
+      readiness.set(projectId, ready)
+    }
+    return ready
+  }
+  const routed: CqrsRawEvent[] = []
+  const rest: CqrsRawEvent[] = []
+  for (const event of events) {
+    if (OFFLINE_ROUTABLE_KINDS.has(event.kind) && isReady(event.projectId)) routed.push(event)
+    else rest.push(event)
+  }
+  if (routed.length > 0) queue.store.commit(queue.offlineEvents.eventsQueued({ rows: routed.map(toQueuedRow) }))
+  return rest
 }
 
 /**
@@ -369,20 +407,13 @@ export async function enqueueOutboxEvent(event: CqrsRawEvent, scope?: OutboxOwne
  *
  *  Tauri desktop offline routing (Phase 4): the batch is partitioned first —
  *  events eligible for offline routing (see `routeToOfflineQueueIfEligible`)
- *  are committed individually into LiveStore's event_queue and never touch
+ *  are committed together into LiveStore's event_queue and never touch
  *  IndexedDB; the remainder still go through the one-transaction/one-notify
  *  IndexedDB write below, unchanged. */
 export async function enqueueOutboxEvents(events: CqrsRawEvent[]): Promise<void> {
   if (events.length === 0) return
 
-  let remaining = events
-  if (isTauriRuntime()) {
-    const toIndexedDb: CqrsRawEvent[] = []
-    for (const event of events) {
-      if (!(await routeToOfflineQueueIfEligible(event))) toIndexedDb.push(event)
-    }
-    remaining = toIndexedDb
-  }
+  const remaining = isTauriRuntime() ? await routeBatchToOfflineQueue(events) : events
   if (remaining.length === 0) return
 
   const ownerKey = activeOwnerKey

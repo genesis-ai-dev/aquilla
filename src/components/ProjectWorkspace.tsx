@@ -191,6 +191,7 @@ import {
   resolveTakeLine,
   historyFileName,
   buildRouteScopedTokenFetcher,
+  archivedProjectNotice,
 } from "./project-workspace-helpers"
 import type { PaintGate } from "./project-workspace-helpers"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
@@ -410,7 +411,7 @@ import { useComments } from "@/hooks/useComments"
 import { useFileAttachments } from "@/hooks/useFileAttachments"
 import { removeAttachmentFromCell } from "@/lib/attachments/attach-file"
 import type { CellAttachmentRecord } from "@/lib/sync/cell-attachments-read-types"
-import { MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download, SplitSquareVertical, BarChart3, Blocks, Loader2, RefreshCw } from "lucide-react"
+import { Archive, MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download, SplitSquareVertical, BarChart3, Blocks, Loader2, RefreshCw } from "lucide-react"
 import { toast } from "@/components/ui/toast"
 import { setMicHeld } from "@/lib/audio/mic-hold"
 import { startOutputDeviceWatch } from "@/lib/audio/output-device-watch"
@@ -17031,7 +17032,7 @@ export function ProjectWorkspace() {
 
   if (project.deletedAt) {
     return (
-      <TrashedProjectScreen
+      <ArchivedProjectScreen
         project={project}
         onClose={goToProjects}
         onRestore={async () => {
@@ -20144,34 +20145,35 @@ function MoveToCorpusDialog({
   )
 }
 
-interface TrashedProjectScreenProps {
+interface ArchivedProjectScreenProps {
   project: ProjectRecord
   onClose: () => void
   onRestore: () => void | Promise<void>
 }
 
-function TrashedProjectScreen({ project, onClose, onRestore }: TrashedProjectScreenProps) {
+/**
+ * AQU-2453: shown instead of the editor when the open project is archived.
+ * The wording and the Restore gate both come from `archivedProjectNotice`, so
+ * a reader is never told to take an action whose button they are not given.
+ */
+function ArchivedProjectScreen({ project, onClose, onRestore }: ArchivedProjectScreenProps) {
   const t = useT()
   const { session } = useFrontierSession()
-  const canRestore =
-    (project.syncRole?.level ?? 0) >= 700 ||
-    (!project.origin && !project.syncRole) ||
-    session == null
+  const { canRestore, bodyKey, hintKey } = archivedProjectNotice({
+    project,
+    hasSession: session != null,
+  })
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-6">
         <div className="bg-card max-w-md rounded-lg p-8 text-center">
         <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-muted">
-          <Trash2 className="h-6 w-6 text-muted-foreground" />
+          <Archive className="h-6 w-6 text-muted-foreground" aria-hidden />
         </div>
-        <h1 className="mb-2 text-lg font-semibold">{t("workspace.trashedProject.title")}</h1>
+        <h1 className="mb-2 text-lg font-semibold">{t("workspace.archivedProject.title")}</h1>
         <p className="mb-6 text-sm text-muted-foreground">
-          {project.deletedBy
-            ? t("workspace.trashedProject.movedByMessage", {
-                name: project.name,
-                deletedBy: project.deletedBy,
-              })
-            : t("workspace.trashedProject.movedMessage", { name: project.name })}
+          {t(bodyKey, { name: project.name, deletedBy: project.deletedBy ?? "" })}{" "}
+          {t(hintKey)}
         </p>
         <div className="flex items-center justify-center gap-2">
           <Button variant="outline" onClick={onClose}>

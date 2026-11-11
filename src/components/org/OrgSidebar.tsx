@@ -130,25 +130,35 @@ export function OrgSidebar() {
             {t("editor.navTitle.overview")}
           </OrgNavLink>
         )}
-        {isMemberOrg && activeOrgId != null && <>
+        {isMemberOrg && activeOrgId != null && (
           <OrgNavLink to={orgPath(activeOrgId, "/teams")} className={link}>
             <NavIcon icon={NAV_PAGE_ICONS.teams} />
             {t("editor.navTitle.teams")}
           </OrgNavLink>
+        )}
+        {/* AQU-2458: "Assigned to me" lists only the caller's OWN open
+            assignments, so unlike the member-scoped nav above it is not a
+            window into an org the caller cannot operate on — it is the only
+            cross-project view of their own work. A project-only member (a
+            guest org, no org membership) is exactly the person who needs it:
+            without it a translator handed work in one shared project has no
+            list of what they owe anywhere. So this one entry is shown for a
+            guest org too, narrowing AQU-790's blanket hide. */}
+        {!isAllOrgs && activeOrgId != null && (
           <OrgNavLink to={orgPath(activeOrgId, "/assigned")} className={link} data-tour="nav-assigned">
             <NavIcon icon={NAV_PAGE_ICONS.assigned} />
             {t("editor.navTitle.assignedToMe")}
           </OrgNavLink>
-          {/* AQU-1958: comments across the org's projects. Maintainer+, the
-              same floor the page itself applies — editorial leads review
-              feedback across projects, contributors work inside one. */}
-          {isAdmin && (
-            <OrgNavLink to={orgPath(activeOrgId, "/comments")} className={link}>
-              <NavIcon icon={MessageSquare} />
-              {t("comments.org.title")}
-            </OrgNavLink>
-          )}
-        </>}
+        )}
+        {/* AQU-1958: comments across the org's projects. Maintainer+, the
+            same floor the page itself applies — editorial leads review
+            feedback across projects, contributors work inside one. */}
+        {isAdmin && activeOrgId != null && (
+          <OrgNavLink to={orgPath(activeOrgId, "/comments")} className={link}>
+            <NavIcon icon={MessageSquare} />
+            {t("comments.org.title")}
+          </OrgNavLink>
+        )}
         {isMemberOrg && activeOrgId != null && (showMembersNav || isAdmin) && (
           <div className="my-1 border-t" />
         )}

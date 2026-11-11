@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { planLaneGrants } from './grant-backfill'
+import { NO_LANE_SCOPE } from './no-lane-access'
 import type { LaneIdentity } from './read-wall'
 
 const lanes: LaneIdentity[] = [
@@ -72,5 +73,25 @@ describe('planLaneGrants', () => {
       lanes,
     })
     expect(plan.grants).toEqual([{ laneId: 'lane-yo', level: 400 }])
+  })
+
+  // ── AQU-2358 ──
+  it('plans no grant at all for the reserved no-lane scope', () => {
+    const plan = planLaneGrants({ roleLevel: 400, laneScopes: [NO_LANE_SCOPE], lanes })
+    expect(plan.grants).toEqual([])
+    // Not a scope that failed to resolve — a deliberate answer.
+    expect(plan.skipped).toEqual([])
+  })
+
+  it('never widens the no-lane scope back to every lane when it is mixed in', () => {
+    const plan = planLaneGrants({ roleLevel: 400, laneScopes: [NO_LANE_SCOPE, 'fr'], lanes })
+    expect(plan.grants).toEqual([])
+  })
+
+  it('keeps reading an EMPTY scope list as every current lane', () => {
+    // The legacy shape: flipping it would strip lanes from every member and
+    // unused invite minted before AQU-2358.
+    const plan = planLaneGrants({ roleLevel: 400, laneScopes: [], lanes })
+    expect(plan.grants).toHaveLength(3)
   })
 })

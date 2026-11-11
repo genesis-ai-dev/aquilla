@@ -1,6 +1,12 @@
 /**
- * AQU-307 / AQU-1028: the in-app feedback dialog — free text, auto-captured
- * context, and an optional screenshot.
+ * AQU-307 / AQU-1028: the in-app feedback dialog — three short answers,
+ * auto-captured context, and an optional image.
+ *
+ * AQU-2467 split the one text box into "What happened?" (required), "What were
+ * you trying to do?" and "What did you expect to happen?", and replaced the
+ * one-click page grab with a screenshot the user controls: the dialog hides,
+ * the browser's picker opens, and the captured frame comes back in a crop view.
+ * "Attach an image" takes a file from the device instead, sent as-is.
  *
  * Opened from HelpMenu's Feedback item (AQU-1548 folded the shell footer's
  * standalone FeedbackButton back into that menu).
@@ -17,9 +23,9 @@
  * than as the consent-off branch.
  */
 
-import { useCallback, useState } from "react"
+import { useCallback, useRef, useState } from "react"
 import { useLocation, useParams } from "react-router-dom"
-import { Camera, Loader2, X } from "lucide-react"
+import { Camera, ImagePlus, X } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -40,12 +46,17 @@ import {
   type ReportContext,
 } from "@/lib/report-problem"
 import {
+  ATTACHABLE_IMAGE_TYPES,
   ScreenshotCancelled,
-  captureViewportScreenshot,
+  captureScreenFrame,
+  cropImage,
   isScreenshotCaptureSupported,
   submitFeedback,
+  validateAttachedImage,
 } from "@/lib/feedback"
+import type { Rect } from "@/lib/screenshot-crop"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { ScreenshotCropper } from "./ScreenshotCropper"
 
 interface Props {
   open: boolean
@@ -61,7 +72,9 @@ export function ReportProblemDialog({ open, onOpenChange }: Props) {
   const params = useParams<{ id?: string; fileId?: string }>()
   const { enabled: analyticsEnabled } = useAnalyticsConsent()
 
-  const [description, setDescription] = useState("")
+  const [whatHappened, setWhatHappened] = useState("")
+  const [tryingTo, setTryingTo] = useState("")
+  const [expected, setExpected] = useState("")
   const [state, setState] = useState<State>("idle")
   const [attempted, setAttempted] = useState(false)
   const [sendError, setSendError] = useState(false)
@@ -69,15 +82,22 @@ export function ReportProblemDialog({ open, onOpenChange }: Props) {
 
   const [screenshot, setScreenshot] = useState<Blob | null>(null)
   const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null)
+  // True while the dialog is hidden for the screen picker. It hides through the
+  // `open` prop, not handleClose, so the typed answers survive.
   const [capturing, setCapturing] = useState(false)
   const [captureFailed, setCaptureFailed] = useState(false)
+  // The full-resolution frame waiting in the crop view.
+  const [frame, setFrameState] = useState<{ blob: Blob; url: string } | null>(null)
+  const [cropping, setCropping] = useState(false)
+  const [imageError, setImageError] = useState<"tooLarge" | "wrongType" | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const context: ReportContext = {
     route: pathname,
     projectId: params.id,
     fileId: params.fileId,
   }
-  const descriptionError = !description.trim() ? t("nav.report.descriptionRequired") : null
+  const whatHappenedError = !whatHappened.trim() ? t("nav.report.whatHappenedRequired") : null
   const canCapture = isScreenshotCaptureSupported()
 
   const dropScreenshot = useCallback(() => {
@@ -88,25 +108,78 @@ export function ReportProblemDialog({ open, onOpenChange }: Props) {
     })
   }, [])
 
-  const handleCapture = useCallback(async () => {
-    setCaptureFailed(false)
-    setCapturing(true)
-    try {
-      const blob = await captureViewportScreenshot()
+  const frameUrlRef = useRef<string | null>(null)
+  const setFrame = useCallback((blob: Blob | null) => {
+    if (frameUrlRef.current) URL.revokeObjectURL(frameUrlRef.current)
+    frameUrlRef.current = blob ? URL.createObjectURL(blob) : null
+    setFrameState(blob && frameUrlRef.current ? { blob, url: frameUrlRef.current } : null)
+  }, [])
+
+  const keepImage = useCallback(
+    (blob: Blob) => {
       dropScreenshot()
       setScreenshot(blob)
       setScreenshotUrl(URL.createObjectURL(blob))
+    },
+    [dropScreenshot],
+  )
+
+  const handleCapture = useCallback(async () => {
+    setCaptureFailed(false)
+    setImageError(null)
+    // Hide the dialog first, then let two frames paint so it is gone before the
+    // picker opens. The picker call stays inside the click's user-activation window.
+    setCapturing(true)
+    await new Promise<void>((resolve) =>
+      typeof requestAnimationFrame === "function"
+        ? requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+        : resolve(),
+    )
+    try {
+      setFrame(await captureScreenFrame())
     } catch (err) {
       // A dismissed share-picker is a decision, not a fault — say nothing.
       if (!(err instanceof ScreenshotCancelled)) setCaptureFailed(true)
     } finally {
       setCapturing(false)
     }
-  }, [dropScreenshot])
+  }, [setFrame])
+
+  const handleCropConfirm = useCallback(
+    async (rect: Rect | null) => {
+      if (!frame) return
+      setCropping(true)
+      try {
+        keepImage(await cropImage(frame.blob, rect))
+        setFrame(null)
+      } catch {
+        setFrame(null)
+        setCaptureFailed(true)
+      } finally {
+        setCropping(false)
+      }
+    },
+    [frame, keepImage, setFrame],
+  )
+
+  function handleFileChosen(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    // Reset so choosing the same file again after an error still fires.
+    e.target.value = ""
+    if (!file) return
+    setCaptureFailed(false)
+    const verdict = validateAttachedImage(file)
+    if (verdict !== "ok") {
+      setImageError(verdict)
+      return
+    }
+    setImageError(null)
+    keepImage(file)
+  }
 
   async function handleSubmit() {
     setAttempted(true)
-    if (descriptionError || state === "sending") return
+    if (whatHappenedError || state === "sending") return
 
     const replayUrl = getSessionReplayUrl()
     setSendError(false)
@@ -118,7 +191,9 @@ export function ReportProblemDialog({ open, onOpenChange }: Props) {
       // shell depend on a QueryClientProvider just to keep a closed dialog alive.
       const session = await loadActiveSession()
       const result = await submitFeedback(session?.jwt ?? "", {
-        description: description.trim(),
+        whatHappened: whatHappened.trim(),
+        tryingTo: tryingTo.trim(),
+        expected: expected.trim(),
         route: context.route,
         projectId: context.projectId,
         fileId: context.fileId,
@@ -129,7 +204,9 @@ export function ReportProblemDialog({ open, onOpenChange }: Props) {
       // Secondary signal only — the report already reached the team above, so a
       // consent-off user is no longer a silent one.
       captureReportProblem({
-        description: description.trim(),
+        whatHappened: whatHappened.trim(),
+        tryingTo: tryingTo.trim(),
+        expected: expected.trim(),
         context,
         sessionReplayUrl: replayUrl,
         hasScreenshot: screenshot !== null,
@@ -143,9 +220,11 @@ export function ReportProblemDialog({ open, onOpenChange }: Props) {
 
   function handleCopy() {
     setAttempted(true)
-    if (descriptionError) return
+    if (whatHappenedError) return
     const text = buildReportText({
-      description: description.trim(),
+      whatHappened: whatHappened.trim(),
+      tryingTo: tryingTo.trim(),
+      expected: expected.trim(),
       context,
       hasScreenshot: screenshot !== null,
     })
@@ -155,7 +234,11 @@ export function ReportProblemDialog({ open, onOpenChange }: Props) {
 
   function handleClose() {
     // Reset state on close so the dialog is fresh next time
-    setDescription("")
+    setWhatHappened("")
+    setTryingTo("")
+    setExpected("")
+    setFrame(null)
+    setImageError(null)
     setState("idle")
     setAttempted(false)
     setSendError(false)
@@ -166,8 +249,8 @@ export function ReportProblemDialog({ open, onOpenChange }: Props) {
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-md">
+    <Dialog open={open && !capturing} onOpenChange={handleClose}>
+      <DialogContent className={frame ? "max-w-3xl" : "max-w-md"}>
         <DialogHeader>
           <DialogTitle>{t("nav.report.title")}</DialogTitle>
           <DialogDescription>
@@ -189,76 +272,129 @@ export function ReportProblemDialog({ open, onOpenChange }: Props) {
               </p>
             )}
           </div>
+        ) : frame ? (
+          <ScreenshotCropper
+            imageUrl={frame.url}
+            busy={cropping}
+            onConfirm={(rect) => void handleCropConfirm(rect)}
+            onDiscard={() => setFrame(null)}
+          />
         ) : (
           <>
             <div className="flex flex-col gap-2 py-1">
-              <Field data-invalid={attempted && !!descriptionError}>
-                <FieldLabel htmlFor="report-problem-description" className="sr-only">
-                  {t("nav.report.descriptionFieldLabel")}
+              <Field data-invalid={attempted && !!whatHappenedError}>
+                <FieldLabel htmlFor="report-problem-what-happened">
+                  {t("nav.report.whatHappenedLabel")}
                 </FieldLabel>
                 <Textarea
-                  id="report-problem-description"
-                  placeholder={t("nav.report.placeholder")}
-                  rows={4}
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
+                  id="report-problem-what-happened"
+                  rows={3}
+                  value={whatHappened}
+                  onChange={(e) => setWhatHappened(e.target.value)}
                   className="resize-none"
-                  aria-invalid={attempted && !!descriptionError}
+                  aria-invalid={attempted && !!whatHappenedError}
                 />
-                {attempted && descriptionError && <FieldError>{descriptionError}</FieldError>}
+                {attempted && whatHappenedError && <FieldError>{whatHappenedError}</FieldError>}
               </Field>
 
-              {canCapture && (
-                <div className="flex flex-col gap-2">
-                  {screenshotUrl ? (
-                    <div className="flex items-center gap-3 rounded-md border p-2">
-                      <img
-                        src={screenshotUrl}
-                        alt={t("nav.report.screenshotAlt")}
-                        className="h-14 w-24 shrink-0 rounded border object-cover"
-                      />
-                      <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-                        {t("nav.report.screenshotAttached")}
-                      </span>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => void handleCapture()}
-                        disabled={capturing}
-                      >
-                        {t("nav.report.retakeScreenshot")}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label={t("nav.report.removeScreenshot")}
-                        onClick={dropScreenshot}
-                      >
-                        <X />
-                      </Button>
-                    </div>
-                  ) : (
+              <Field>
+                <FieldLabel htmlFor="report-problem-trying-to">
+                  {t("nav.report.tryingToLabel")}
+                  <span className="font-normal text-muted-foreground">
+                    {" "}
+                    {t("nav.report.optional")}
+                  </span>
+                </FieldLabel>
+                <Textarea
+                  id="report-problem-trying-to"
+                  rows={2}
+                  value={tryingTo}
+                  onChange={(e) => setTryingTo(e.target.value)}
+                  className="resize-none"
+                />
+              </Field>
+
+              <Field>
+                <FieldLabel htmlFor="report-problem-expected">
+                  {t("nav.report.expectedLabel")}
+                  <span className="font-normal text-muted-foreground">
+                    {" "}
+                    {t("nav.report.optional")}
+                  </span>
+                </FieldLabel>
+                <Textarea
+                  id="report-problem-expected"
+                  rows={2}
+                  value={expected}
+                  onChange={(e) => setExpected(e.target.value)}
+                  className="resize-none"
+                />
+              </Field>
+
+              <div className="flex flex-col gap-2">
+                {screenshotUrl && (
+                  <div className="flex items-center gap-3 rounded-md border p-2">
+                    <img
+                      src={screenshotUrl}
+                      alt={t("nav.report.screenshotAlt")}
+                      className="h-14 w-24 shrink-0 rounded border object-cover"
+                    />
+                    <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+                      {t("nav.report.screenshotAttached")}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={t("nav.report.removeScreenshot")}
+                      onClick={dropScreenshot}
+                    >
+                      <X />
+                    </Button>
+                  </div>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  {canCapture && (
                     <Button
                       type="button"
                       variant="secondary"
                       size="sm"
-                      className="self-start"
                       onClick={() => void handleCapture()}
-                      disabled={capturing}
                     >
-                      {capturing ? <Loader2 className="animate-spin" /> : <Camera />}
-                      {capturing
-                        ? t("nav.report.capturingScreenshot")
-                        : t("nav.report.attachScreenshot")}
+                      <Camera />
+                      {t("nav.report.takeScreenshot")}
                     </Button>
                   )}
-                  {captureFailed && (
-                    <p className="text-xs text-destructive">{t("nav.report.screenshotFailed")}</p>
-                  )}
+                  {/* Always offered, also where screen capture is unsupported. */}
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <ImagePlus />
+                    {t("nav.report.attachImage")}
+                  </Button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept={ATTACHABLE_IMAGE_TYPES.join(",")}
+                    className="hidden"
+                    data-testid="report-image-input"
+                    onChange={handleFileChosen}
+                  />
                 </div>
-              )}
+                {captureFailed && (
+                  <p className="text-xs text-destructive">{t("nav.report.screenshotFailed")}</p>
+                )}
+                {imageError && (
+                  <p className="text-xs text-destructive" role="alert">
+                    {imageError === "tooLarge"
+                      ? t("nav.report.imageTooLarge")
+                      : t("nav.report.imageWrongType")}
+                  </p>
+                )}
+              </div>
 
               <p className="text-xs text-muted-foreground">
                 {t("nav.report.capturedContext")} <span className="font-mono">{pathname}</span>

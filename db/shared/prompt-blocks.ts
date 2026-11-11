@@ -102,6 +102,7 @@ const PROFILE_SLOT_LABELS: Readonly<Record<LanguageProfileSlot, string>> = {
   pronouns: 'Pronoun distinctions',
   negators: 'Negators',
   numberWords: 'Number words',
+  numberFormat: 'Number separators (grouping and decimal)',
   speechVerbs: 'Speech verbs for quote margins',
   kinTerms: 'Kin terms',
   divineNames: 'Divine names',

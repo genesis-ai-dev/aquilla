@@ -1,13 +1,17 @@
 /**
  * feedback.ts — in-app feedback capture (AQU-1028).
  *
- * Two jobs, both deliberately free of React so they can be unit-tested and
+ * Three jobs, all deliberately free of React so they can be unit-tested and
  * reused from any surface:
  *
- *  1. `captureViewportScreenshot()` — one frame of what the user is looking at,
- *     as a downscaled JPEG.
- *  2. `submitFeedback()` — POST the message (+ that frame) to the identity
- *     worker's `/api/v2/feedback`, which posts it to the team's private Discord channel.
+ *  1. `captureScreenFrame()` — one full-resolution frame of the surface the user
+ *     picks. AQU-2467: the dialog hides itself first, then shows the frame in a
+ *     crop view; `cropImage()` turns the kept part into the downscaled JPEG.
+ *  2. `validateAttachedImage()` — the type and size check for a file the user
+ *     attaches from their device (sent as-is, never re-encoded).
+ *  3. `submitFeedback()` — POST the answers (+ the image) to the identity
+ *     worker's `/api/v2/feedback`, which posts them to the team's private Discord
+ *     channel and the admin-defined email routes.
  *
  * WHY `getDisplayMedia` and not a DOM-rasteriser (html2canvas & co.): the bugs
  * people report are the ones a rasteriser reproduces worst — a mis-painted
@@ -97,14 +101,37 @@ function waitForFrame(video: HTMLVideoElement): Promise<void> {
   })
 }
 
+/** Resolve after `count` animation frames, so a just-hidden dialog has painted. */
+function nextFrames(count: number): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const step = (left: number) => {
+      if (left <= 0 || typeof requestAnimationFrame !== "function") resolve()
+      else requestAnimationFrame(() => step(left - 1))
+    }
+    step(count)
+  })
+}
+
+/** How long after the stream starts before the frame is grabbed. The picker
+ *  closing and the page repainting without the dialog are not instant, and a
+ *  frame taken too early shows the dialog the user just hid. */
+export const SCREENSHOT_SETTLE_MS = 300
+
 /**
- * Grab one frame of the surface the user picks (defaulting to the current tab
- * where Chromium supports `preferCurrentTab`) as a downscaled JPEG.
+ * Grab one full-resolution frame of the surface the user picks (defaulting to
+ * the current tab where Chromium supports `preferCurrentTab`) as a PNG.
+ *
+ * The caller hides its own dialog BEFORE calling this, so the click that
+ * started the capture still counts as the user gesture `getDisplayMedia` needs.
+ * AQU-2467: no downscale here; `cropImage()` does that after the user has
+ * chosen the part that matters.
  *
  * Throws `ScreenshotCancelled` when the user dismisses the picker; any other
  * failure throws a plain Error the caller reports as "couldn't capture".
  */
-export async function captureViewportScreenshot(): Promise<Blob> {
+export async function captureScreenFrame(
+  opts: { settleMs?: number } = {},
+): Promise<Blob> {
   if (!isScreenshotCaptureSupported()) {
     throw new Error("screen capture is not available in this browser")
   }
@@ -136,18 +163,17 @@ export async function captureViewportScreenshot(): Promise<Blob> {
       /* autoplay rejection still leaves a decodable frame; waitForFrame decides */
     })
     await waitForFrame(video)
+    await new Promise<void>((resolve) => setTimeout(resolve, opts.settleMs ?? SCREENSHOT_SETTLE_MS))
+    await nextFrames(2)
 
-    const { width, height } = scaleToFit(video.videoWidth, video.videoHeight)
     const canvas = document.createElement("canvas")
-    canvas.width = width
-    canvas.height = height
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
     const ctx = canvas.getContext("2d")
     if (!ctx) throw new Error("screen capture could not be rendered")
-    ctx.drawImage(video, 0, 0, width, height)
+    ctx.drawImage(video, 0, 0)
 
-    const blob = await new Promise<Blob | null>((resolve) =>
-      canvas.toBlob(resolve, "image/jpeg", SCREENSHOT_JPEG_QUALITY),
-    )
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"))
     if (!blob) throw new Error("screen capture could not be encoded")
     return blob
   } finally {
@@ -158,8 +184,72 @@ export async function captureViewportScreenshot(): Promise<Blob> {
   }
 }
 
+function loadImage(blob: Blob): Promise<{ image: HTMLImageElement; revoke: () => void }> {
+  const url = URL.createObjectURL(blob)
+  return new Promise((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => resolve({ image, revoke: () => URL.revokeObjectURL(url) })
+    image.onerror = () => {
+      URL.revokeObjectURL(url)
+      reject(new Error("image could not be read"))
+    }
+    image.src = url
+  })
+}
+
+/**
+ * Cut `rect` (natural pixels; null keeps the whole image) out of a captured
+ * frame, downscale it to `SCREENSHOT_MAX_EDGE_PX` on the long edge and encode
+ * it as a JPEG.
+ */
+export async function cropImage(
+  source: Blob,
+  rect: { x: number; y: number; width: number; height: number } | null,
+): Promise<Blob> {
+  const { image, revoke } = await loadImage(source)
+  try {
+    const area = rect ?? { x: 0, y: 0, width: image.naturalWidth, height: image.naturalHeight }
+    const { width, height } = scaleToFit(area.width, area.height)
+    const canvas = document.createElement("canvas")
+    canvas.width = Math.max(width, 1)
+    canvas.height = Math.max(height, 1)
+    const ctx = canvas.getContext("2d")
+    if (!ctx) throw new Error("screenshot could not be rendered")
+    ctx.drawImage(image, area.x, area.y, area.width, area.height, 0, 0, canvas.width, canvas.height)
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, "image/jpeg", SCREENSHOT_JPEG_QUALITY),
+    )
+    if (!blob) throw new Error("screenshot could not be encoded")
+    return blob
+  } finally {
+    revoke()
+  }
+}
+
+/** Image types the server accepts (and stores under a matching extension). */
+export const ATTACHABLE_IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"] as const
+
+/** Check an image the user chose from their device before anything is sent.
+ *  The file goes up as-is, so the 8 MB limit applies to it directly. */
+export function validateAttachedImage(file: Blob): "ok" | "wrongType" | "tooLarge" {
+  if (!(ATTACHABLE_IMAGE_TYPES as readonly string[]).includes(file.type)) return "wrongType"
+  if (file.size > MAX_FEEDBACK_SCREENSHOT_BYTES) return "tooLarge"
+  return "ok"
+}
+
+const IMAGE_EXTENSIONS: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/webp": "webp",
+}
+
 export interface FeedbackSubmission {
-  description: string
+  /** "What happened?" (required). */
+  whatHappened: string
+  /** "What were you trying to do?" */
+  tryingTo?: string
+  /** "What did you expect to happen?" */
+  expected?: string
   route: string
   projectId?: string
   fileId?: string
@@ -184,22 +274,35 @@ export async function submitFeedback(
   jwt: string,
   submission: FeedbackSubmission,
 ): Promise<FeedbackResult> {
-  const description = submission.description.trim()
-  if (!description) {
-    throw new FeedbackSubmitError("description is required", 400)
+  const whatHappened = submission.whatHappened.trim()
+  const tryingTo = submission.tryingTo?.trim() ?? ""
+  const expected = submission.expected?.trim() ?? ""
+  if (!whatHappened) {
+    throw new FeedbackSubmitError("what happened is required", 400)
+  }
+  if (
+    [whatHappened, tryingTo, expected].some((text) => text.length > MAX_FEEDBACK_DESCRIPTION_CHARS)
+  ) {
+    throw new FeedbackSubmitError("an answer is too long to send", 400)
   }
   if (submission.screenshot && submission.screenshot.size > MAX_FEEDBACK_SCREENSHOT_BYTES) {
     throw new FeedbackSubmitError("screenshot is too large to send", 413)
   }
 
   const form = new FormData()
-  form.set("description", description)
+  form.set("whatHappened", whatHappened)
+  if (tryingTo) form.set("tryingTo", tryingTo)
+  if (expected) form.set("expected", expected)
   form.set("route", submission.route)
   if (submission.projectId) form.set("projectId", submission.projectId)
   if (submission.fileId) form.set("fileId", submission.fileId)
   if (submission.sessionReplayUrl) form.set("sessionReplayUrl", submission.sessionReplayUrl)
   if (submission.screenshot) {
-    form.set("screenshot", submission.screenshot, "screenshot.jpg")
+    const name =
+      submission.screenshot instanceof File
+        ? submission.screenshot.name
+        : `screenshot.${IMAGE_EXTENSIONS[submission.screenshot.type] ?? "jpg"}`
+    form.set("screenshot", submission.screenshot, name)
   }
 
   const res = await fetchWithTimeout(

@@ -133,8 +133,33 @@ describe("OrgSidebar in a guest org (AQU-790)", () => {
     expect(screen.queryByRole("link", { name: "Organization settings" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Archived projects" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Teams" })).not.toBeInTheDocument()
-    expect(screen.queryByRole("link", { name: "Assigned to me" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Access audit" })).not.toBeInTheDocument()
+  })
+
+  // AQU-2458: the one exception to AQU-790's hide. "Assigned to me" lists only
+  // the caller's OWN open assignments, so it is not a window into an org they
+  // cannot operate on — and for a project-only member it is their only
+  // cross-project view of the work they have been handed.
+  it("keeps Assigned to me for this guest org — it is the member's own work, not the org's", async () => {
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "Acme", role: { level: 700, name: "owner" } }])
+    fetchAccessibleProjects.mockResolvedValue([
+      { id: "pg", name: "Shared Proj", orgId: 2, orgName: "Guest Org", role: { level: 400, name: "contributor", source: "override" } },
+    ])
+
+    render(
+      <MemoryRouter initialEntries={["/orgs/2"]}>
+        <OrgProvider>
+          <OrgSidebar />
+        </OrgProvider>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole("link", { name: "Assigned to me" })).toHaveAttribute(
+        "href",
+        "/orgs/2/assigned",
+      ),
+    )
   })
 })
 

@@ -189,7 +189,7 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
   }, [hasAnyStale])
 
   return (
-    <RightSidebarPanel storageKey="history" defaultWidth={384} resizeLabel="Resize history panel">
+    <RightSidebarPanel storageKey="history" defaultWidth={384} resizeLabel={t("editor.panel.resizeHistory")}>
     <div className="flex h-full w-full flex-col border-s bg-card">
       <div className="flex items-center justify-between border-b p-2">
         <h3 className="text-sm font-semibold">

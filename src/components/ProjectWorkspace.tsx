@@ -13,7 +13,6 @@ import { useParams, useNavigate, useSearchParams, useLocation } from "react-rout
 import { useRememberLastWorkspace } from "@/hooks/useRememberLastWorkspace"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useFormat } from "@/lib/i18n/format"
-import { RichMessage } from "@/lib/i18n/RichMessage"
 import { repairIdmlFileAsCopy } from "@/lib/idml/repair-idml-copy"
 import { useProject } from "@/hooks/useProject"
 import { useProjectLaneStaffing } from "@/hooks/useProjectLaneStaffing"
@@ -34,7 +33,7 @@ import { CellAreaPlaceholder, CellRowsLoadStatus } from "./CellAreaPlaceholder"
 import { WorkspaceMainSkeleton } from "./WorkspaceSkeleton"
 import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
-import { EmptyState, NotFoundIcon } from "@/components/ui/empty"
+import { ProjectNoAccess } from "@/components/ProjectNoAccess"
 import { TabStrip } from "./TabStrip"
 import { useWorkspaceTabs, readLastActiveFileId } from "@/hooks/useWorkspaceTabs"
 import { clearLastLocation, readLastCell, readLastLocation, writeLastCell, writeLastLocation } from "@/lib/frontier/last-location-store"
@@ -62,6 +61,8 @@ import { useActiveLane } from "@/hooks/useActiveLane"
 import { useActiveTargetLane } from "@/hooks/useActiveTargetLane"
 import { useImportCellRefs } from "@/hooks/useImportCellRefs"
 import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
+import { useAdoptedIdmlAlignment } from "@/hooks/useAdoptedIdmlAlignment"
+import type { IdmlReimportAlignHost } from "@/lib/idml/align-reimported-targets"
 import { triggerLinkSync } from "@/lib/sync/archive"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import {
@@ -190,6 +191,7 @@ import {
   resolveTakeLine,
   historyFileName,
   buildRouteScopedTokenFetcher,
+  archivedProjectNotice,
 } from "./project-workspace-helpers"
 import type { PaintGate } from "./project-workspace-helpers"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
@@ -409,7 +411,7 @@ import { useComments } from "@/hooks/useComments"
 import { useFileAttachments } from "@/hooks/useFileAttachments"
 import { removeAttachmentFromCell } from "@/lib/attachments/attach-file"
 import type { CellAttachmentRecord } from "@/lib/sync/cell-attachments-read-types"
-import { MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download, SplitSquareVertical, BarChart3, Blocks, Loader2, RefreshCw } from "lucide-react"
+import { Archive, MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download, SplitSquareVertical, BarChart3, Blocks, Loader2, RefreshCw } from "lucide-react"
 import { toast } from "@/components/ui/toast"
 import { setMicHeld } from "@/lib/audio/mic-hold"
 import { startOutputDeviceWatch } from "@/lib/audio/output-device-watch"
@@ -628,8 +630,10 @@ import { isInMemberScope } from "@/lib/sync/member-scopes"
 import { buildRepetitionCounts } from "@/lib/workflow/repetition-propagation"
 import { showBulkValidateToast, useRepetitionValidation, type BulkRepetitionOutcome, type UseRepetitionValidation } from "@/hooks/useRepetitionValidation"
 import {
+  batchValidateChunkSize,
   batchValidateTelemetry,
   batchValidateToast,
+  chunksOf,
   summarizeBatchValidate,
   workspaceBatchValidateOptions,
   type BatchValidateSummary,
@@ -715,6 +719,8 @@ const EMPTY_CELL_DATA: CellData[] = []
 const EMPTY_TIMELINE_CHAPTERS: readonly TimelineChapter[] = []
 const EMPTY_CHAPTER_HEALTH: BookHealthChapter[] = []
 const EMPTY_SCORED_PAIRS: ScoredPair[] = []
+/** AQU-2507: the "no cell carries a check flag" answer, allocated once. */
+const EMPTY_FLAGGED_CELL_IDS: ReadonlySet<string> = new Set<string>()
 
 type PreparedCompletionDraft = {
   index: number
@@ -7464,6 +7470,37 @@ export function ProjectWorkspace() {
     }
   }, [isConfigured, project?.id, askAlignStyles, alignStylesModel, getTokenForProjectFile])
 
+  // Without a configured model, the placement passes that need no model call
+  // (one-run cells, pinned references) still run; a cell that would need one is
+  // marked for a manual Align styles pass instead.
+  const idmlAlignFallbackHost = useMemo<IdmlReimportAlignHost>(() => ({
+    ask: async () => {
+      throw new Error(t("editor.idml.alignStylesUnavailable"))
+    },
+    author: currentUsername,
+    model: "unavailable",
+    provider: "none",
+    flush: async (eventIds) => {
+      await flushOutboxUntilSettled([...eventIds], {
+        getTokenForFile: getTokenForProjectFile,
+      }, { maxRounds: Math.max(6, Math.ceil(eventIds.length / 100) + 2) })
+    },
+  }), [t, currentUsername, getTokenForProjectFile])
+
+  // A source link that replaced the source of an IDML file this project already
+  // had leaves the file's translations shaped for the OLD source; this is the
+  // same placement a re-import runs, for the files the link flows recorded.
+  useAdoptedIdmlAlignment({
+    projectId: project?.id,
+    files: project ? projectFiles : undefined,
+    jwt: frontierSession?.jwt,
+    lane: activeLane,
+    getToken: getTokenForFile,
+    host: alignReimportedIdml ?? idmlAlignFallbackHost,
+    sourceLanguage: activeSourceLanguage || "",
+    targetLanguage: activeLaneTargetLanguage || "",
+  })
+
   // Translation agent (chat dock Agent mode): live cell lookup for proposal
   // lint + chain heads, and the post-apply flush/revalidate sequence — the
   // same steps commitCompletedCell runs after its own enqueue.
@@ -12188,27 +12225,57 @@ export function ProjectWorkspace() {
   }, [project, cellSummaries.length, cellStoreVersion, frontierSession, getActiveCells])
 
   /**
+   * AQU-2507: the open file's cells that carry an OPEN (non-waived) check or
+   * rule flag — the set the "Also validate N cells with open check flags" box
+   * offers and that a default run leaves alone.
+   *
+   * A thunk, not a memo: it walks every cell view for its waivers, and the
+   * surfaces that ask (the action menu's confirmation and the batch modal) ask
+   * at click time, not on every render of this workspace. Empty when the rule
+   * engine has found nothing, which is the common case.
+   */
+  const flaggedCellIds = useCallback((): ReadonlySet<string> => {
+    if (infractions.size === 0) return EMPTY_FLAGGED_CELL_IDS
+    const flagged = new Set<string>()
+    for (const cell of readAtVersion(cellStoreVersion, getActiveCells)) {
+      if (activeFileId && cell.fileId !== activeFileId) continue
+      const found = infractions.get(cell.id)
+      if (!found || found.length === 0) continue
+      if (partitionInfractions(found, cell.waivers).active.length > 0) flagged.add(cell.id)
+    }
+    return flagged
+  }, [infractions, cellStoreVersion, getActiveCells, activeFileId])
+
+  /** AQU-2507: the size of one chunk of this project's batch validation. */
+  const batchValidateChunk = batchValidateChunkSize(project?.completionSettings?.validationBatchSize)
+
+  /**
    * AQU-1507: the eligibility split for the OPEN file, computed exactly as
    * `runBatchValidate` computes it, so the confirmation dialog promises the
    * number the run will deliver. Lazy on purpose — it walks every cell, and the
    * dialog it feeds is opened far less often than this context is rebuilt.
    */
-  const batchValidateSummary = useCallback((choices?: ValidateRunChoices) => summarizeBatchValidate(
-    project?.id && activeFileId ? cellSummaries.filter((c) => c.fileId === activeFileId) : [],
-    // AQU-1571: the project's text rules, pinned by a unit test of the builder.
-    // AQU-983: the file modal passes which groups this run includes. A call
-    // with no choices keeps the selection-toolbar defaults (include both).
-    {
-      ...workspaceBatchValidateOptions({
-        project,
-        activeFileId,
-        username: currentUsername,
-        myScopes,
-        activeLane,
-      }),
-      ...choices,
-    },
-  ), [project, activeFileId, cellSummaries, currentUsername, myScopes, activeLane])
+  const batchValidateSummary = useCallback((choices?: ValidateRunChoices) => {
+    const flagged = flaggedCellIds()
+    return summarizeBatchValidate(
+      project?.id && activeFileId ? cellSummaries.filter((c) => c.fileId === activeFileId) : [],
+      // AQU-1571: the project's text rules, pinned by a unit test of the builder.
+      // AQU-983: the file modal passes which groups this run includes. A call
+      // with no choices keeps the selection-toolbar defaults (include both).
+      {
+        ...workspaceBatchValidateOptions({
+          project,
+          activeFileId,
+          username: currentUsername,
+          myScopes,
+          activeLane,
+        }),
+        // AQU-2507: flagged cells are left out unless the modal ticked them in.
+        hasOpenFlags: (cellId: string) => flagged.has(cellId),
+        ...choices,
+      },
+    )
+  }, [project, activeFileId, cellSummaries, currentUsername, myScopes, activeLane, flaggedCellIds])
 
   // AQU-1759: whether this person may split this file's lines at their quotes.
   // Settled further down (it needs the add/remove-rows tier and the file's
@@ -12358,8 +12425,10 @@ export function ProjectWorkspace() {
       summary: BatchValidateSummary,
       source: "selection" | "workspace-action",
       repetitions: BulkRepetitionOutcome | null = null,
+      /** AQU-2507: how the chunked run went, for the batch-validate funnel. */
+      run?: { chunks: number; chunkSize: number; includedFlagged: boolean },
     ) => {
-      analytics.capture(BATCH_VALIDATE_ATTEMPTED, batchValidateTelemetry(summary, source))
+      analytics.capture(BATCH_VALIDATE_ATTEMPTED, batchValidateTelemetry(summary, source, run))
       const message = batchValidateToast(summary, t, formatLocaleList)
       // AQU-1486: still ONE message. AQU-2177: when the run reached repeated
       // rows that message is the dialog naming them, not a toast counting them.
@@ -12376,6 +12445,8 @@ export function ProjectWorkspace() {
   const batchValidateChoicesRef = useRef<ValidateRunChoices>({
     includeReadyCells: true,
     includeUntouchedAiDrafts: false,
+    // AQU-2507: a check flag is overruled only on purpose.
+    includeFlaggedCells: false,
   })
   const draftChoicesRef = useRef<DraftRunChoices>({
     includeEmpty: true,
@@ -12432,13 +12503,34 @@ export function ProjectWorkspace() {
       // AQU-1507: the run and the confirmation dialog now call the SAME thunk,
       // so the number the dialog promised is by construction the number this
       // loop validates — the divergence was the rest of the reported bug.
+      //
+      // AQU-2507: and that number is now the WHOLE file. The project's
+      // `validationBatchSize` used to trim the summary, so a 2,870-cell
+      // pretranslated book took six clicks and reported "535 left for the next
+      // run" in between; Sabariya imported five such books. The size is the
+      // chunk this loop writes and flushes at a time — the event pipeline keeps
+      // the protection it was given in AQU-586 — and the loop runs over every
+      // chunk, reporting progress, before the one closing message.
       const summary = batchValidateSummary(batchValidateChoicesRef.current)
       const projectId = project?.id
       if (summary.validatable.length === 0 || !projectId) {
         reportBatchValidate(summary, "workspace-action")
         return
       }
+      const chunks = chunksOf(summary.validatable, batchValidateChunk)
+      const total = summary.validatable.length
       void (async () => {
+        // A run of more than one chunk takes long enough to need saying so.
+        // `timeout: 0` keeps it up until this run replaces it with its own
+        // closing message; a single-chunk run keeps the old silence-then-toast.
+        const progressToastId = chunks.length > 1
+          ? toast.add({
+            type: "loading",
+            title: t("editor.batchValidate.progress", { done: 0, total }),
+            timeout: 0,
+          })
+          : null
+        const closeProgress = () => { if (progressToastId != null) toast.close(progressToastId) }
         try {
           // AQU-1486: ask what the run's repetitions get BEFORE anything is
           // written, so the dialog's counts are a promise, not a report.
@@ -12447,31 +12539,49 @@ export function ProjectWorkspace() {
             { cap: project?.completionSettings?.validationBatchSize },
           ) ?? null
           const repetitionRun = asking ? await asking : null
-          // AQU-1767 phase 2: the whole run is ONE history step.
+          // AQU-1767 phase 2: the whole run is ONE history step — across every
+          // chunk, so Undo takes back the action the user took rather than
+          // whichever batch it happened to end on.
           await withGroup(
             {
               labelKey: "editor.history.stepValidateMany",
-              labelParams: { count: summary.validatable.length },
+              labelParams: { count: total },
               fileId: activeFileId,
               fileName: activeFileNameRef.current,
             },
             async () => {
-              for (const cell of summary.validatable) {
-                await emitCellValidate({
-                  projectId,
-                  fileId: cell.fileId,
-                  cellId: cell.id,
-                  editEventId: cell.targetEventId!,
-                  author: currentUsername,
-                  targetLang: activeLane, // AQU-538: '' omitted on the wire by the emit
-                  surface: "batch", // AQU-1572
-                })
-                recordStep({
-                  kind: "vote.text",
-                  data: { cellId: cell.id, lane: activeLane, voted: true, editEventId: cell.targetEventId! },
-                  labelKey: "editor.history.stepValidate",
-                  fileId: cell.fileId,
-                })
+              let done = 0
+              for (const chunk of chunks) {
+                for (const cell of chunk) {
+                  await emitCellValidate({
+                    projectId,
+                    fileId: cell.fileId,
+                    cellId: cell.id,
+                    editEventId: cell.targetEventId!,
+                    author: currentUsername,
+                    targetLang: activeLane, // AQU-538: '' omitted on the wire by the emit
+                    surface: "batch", // AQU-1572
+                  })
+                  recordStep({
+                    kind: "vote.text",
+                    data: { cellId: cell.id, lane: activeLane, voted: true, editEventId: cell.targetEventId! },
+                    labelKey: "editor.history.stepValidate",
+                    fileId: cell.fileId,
+                  })
+                }
+                done += chunk.length
+                // Flushed per chunk, not once at the end: an interrupted run
+                // (closed tab, lost connection) then leaves the chunks it got
+                // through durably validated, and re-running picks up exactly
+                // where it stopped — a cell this reader has already signed off
+                // comes back as `alreadyMine`, never a second vote.
+                await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+                if (progressToastId != null) {
+                  toast.update(progressToastId, {
+                    type: "loading",
+                    title: t("editor.batchValidate.progress", { done, total }),
+                  })
+                }
               }
             },
             { alwaysGroup: true, owns: { cells: summary.validatable.map((cell) => cell.id), kinds: ["vote.text"] } },
@@ -12488,11 +12598,21 @@ export function ProjectWorkspace() {
           revalidateAuditStats()
           if (repetitions) revalidateCells()
           else for (const cell of summary.validatable) revalidateCell(cell.id)
-          reportBatchValidate(summary, "workspace-action", repetitions)
+          closeProgress()
+          reportBatchValidate(summary, "workspace-action", repetitions, {
+            chunks: chunks.length,
+            chunkSize: batchValidateChunk,
+            includedFlagged: batchValidateChoicesRef.current.includeFlaggedCells,
+          })
         } catch {
           // A throw part-way leaves SOME cells queued, so the message says the
           // run may be partial rather than inviting a blind retry.
-          reportBatchValidate({ ...summary, outcome: "failed" }, "workspace-action")
+          closeProgress()
+          reportBatchValidate({ ...summary, outcome: "failed" }, "workspace-action", null, {
+            chunks: chunks.length,
+            chunkSize: batchValidateChunk,
+            includedFlagged: batchValidateChoicesRef.current.includeFlaggedCells,
+          })
         }
       })()
     },
@@ -12722,7 +12842,7 @@ export function ProjectWorkspace() {
     // own path — one read, one optimistic apply, one batch.
     runSplitAtQuotes: () => { void handleSplitAtQuotes(quoteSplitFileCandidates().cellIds) },
     navigate,
-  }), [handleSplitAtQuotes, quoteSplitFileCandidates, activeFileId, completeBatch, getActiveCells, cellSummaries, project, audioProject, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, revalidateCells, workspaceAudioByCellId, audioValidationByCellId, audioCueCells, myScopes, t, reportBatchValidate, batchValidateSummary, tts.settings, tts.laneSettings, activeSourceLanguage, activeLaneTargetLanguage])
+  }), [handleSplitAtQuotes, quoteSplitFileCandidates, activeFileId, completeBatch, getActiveCells, cellSummaries, project, audioProject, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, revalidateCells, workspaceAudioByCellId, audioValidationByCellId, audioCueCells, myScopes, t, reportBatchValidate, batchValidateSummary, batchValidateChunk, tts.settings, tts.laneSettings, activeSourceLanguage, activeLaneTargetLanguage])
 
   // AQU-661: the dynamic primary-action button was removed; its actions now live
   // in the ⋯ overflow menu. This preserves the button's confirmation flow —
@@ -12734,6 +12854,17 @@ export function ProjectWorkspace() {
     return planChangeVoiceAll(audioCueCells ?? batchAudioCells, tts.laneSettings)
   }, [pendingActionConfirm, audioCueCells, batchAudioCells, tts.laneSettings])
   const [batchFileModal, setBatchFileModal] = useState<BatchFileModalRequest | null>(null)
+  /**
+   * AQU-2507: the open-check-flag predicate the batch modal renders its
+   * "Also validate N cells with open check flags" box from — the SAME question
+   * `batchValidateSummary` then asks of the run. Computed only while that modal
+   * is open, because it walks the file's cell views for their waivers.
+   */
+  const batchModalOpenFlags = useMemo(() => {
+    if (!batchFileModal) return undefined
+    const flagged = flaggedCellIds()
+    return (cellId: string) => flagged.has(cellId)
+  }, [batchFileModal, flaggedCellIds])
   const handleWorkspaceAction = useCallback((action: WorkspaceAction) => {
     if (action.comingSoon) return
     // AQU-983: drafting and text validation open the file modal. The plain
@@ -13188,7 +13319,9 @@ export function ProjectWorkspace() {
       const voiceName = (opts?.voiceId ? findVoice(tts.laneSettings, opts.voiceId)?.name : undefined)
         ?? resolveCastVoice(tts.laneSettings, owner.cell, owner.cell.ttsSettings?.voiceId).name
       const ok = await whileVoicingAs(cellId, voiceName, () => regenerateVoiceTake({
-        project,
+        // AQU-2511: the lane's own voices and cast — the same view `voiceName`
+        // above is read from, so the take comes back in the voice just named.
+        project: audioProject ?? project,
         cell: owner.cell,
         entry: timelineAudioByCellId.get(cellId),
         session: frontierSession,
@@ -13204,7 +13337,7 @@ export function ProjectWorkspace() {
         ? { type: "success", title: t("editor.timeline.regenerateDone") }
         : { type: "error", title: t("editor.timeline.regenerateFailed") })
     },
-    [project, frontierSession, audioCueCells, resolveCueReadAloud, timelineAudioByCellId, currentUsername, activeLane, tts.laneSettings, t],
+    [project, audioProject, frontierSession, audioCueCells, resolveCueReadAloud, timelineAudioByCellId, currentUsername, activeLane, tts.laneSettings, t],
   )
 
   /**
@@ -16893,50 +17026,17 @@ export function ProjectWorkspace() {
       </div>
     )
   }
-  // FRO-346: revoked / never-granted access gets its own clean state — the
-  // project exists, so "not found" would be misleading (and after a member
-  // removal the removed user must land here on reload, not in the editor).
-  if (status === "forbidden") {
-    return (
-      <div className="p-8 text-muted-foreground" data-testid="project-no-access">
-        <RichMessage
-          k="workspace.status.forbidden"
-          values={{
-            backLink: (
-              <button className="underline" onClick={goToProjects}>
-                {t("workspace.backToDashboard")}
-              </button>
-            ),
-          }}
-        />
-      </div>
-    )
-  }
-  if (status === "not-found" || !project) {
-    return (
-      <div className="p-8">
-        <EmptyState
-          icon={NotFoundIcon}
-          title={
-            <RichMessage
-              k="workspace.status.notFound"
-              values={{
-                backLink: (
-                  <button className="underline" onClick={goToProjects}>
-                    {t("workspace.backToDashboard")}
-                  </button>
-                ),
-              }}
-            />
-          }
-        />
-      </div>
-    )
+  // FRO-346 / AQU-2452: a refused project and a missing one land on the same
+  // screen (ProjectNoAccess). They used to carry different messages, which
+  // told the caller whether a project exists — and after a member removal the
+  // removed user must land here on reload, not in the editor.
+  if (status === "forbidden" || status === "not-found" || !project) {
+    return <ProjectNoAccess />
   }
 
   if (project.deletedAt) {
     return (
-      <TrashedProjectScreen
+      <ArchivedProjectScreen
         project={project}
         onClose={goToProjects}
         onRestore={async () => {
@@ -19090,7 +19190,13 @@ export function ProjectWorkspace() {
       {project && (
         <AudioRecordingModal
           open={recordingCellId !== null}
-          project={project}
+          /* AQU-2511: `audioProject` — `project` with the OPEN LANE's voices,
+             cast and default voice (and the local overlay `tts` holds, which
+             the server record may not have yet). The dialog's Generate button
+             resolves the line's voice off `project.ttsSettings`, so handed the
+             bare record it generated in the project default while the picker
+             beside it had just assigned another voice on this lane. */
+          project={audioProject ?? project}
           // Stage 4: with an audio VTT imported, the recorder walks the CUES —
           // the units the picture wants recorded — and Next/Prev, the count-in
           // and the take's window all follow the cue's own timing.
@@ -19386,19 +19492,7 @@ export function ProjectWorkspace() {
               sourceLanguage: activeSourceLanguage,
               targetLanguage: activeLaneTargetLanguage,
               getToken: getTokenForFile,
-              align: alignReimportedIdml ?? {
-                ask: async () => {
-                  throw new Error(t("editor.idml.alignStylesUnavailable"))
-                },
-                author: currentUsername,
-                model: "unavailable",
-                provider: "none",
-                flush: async (eventIds) => {
-                  await flushOutboxUntilSettled([...eventIds], {
-                    getTokenForFile: getTokenForProjectFile,
-                  }, { maxRounds: Math.max(6, Math.ceil(eventIds.length / 100) + 2) })
-                },
-              },
+              align: alignReimportedIdml ?? idmlAlignFallbackHost,
               onProgress,
             })
             await handleImported([repaired.ref])
@@ -19483,17 +19577,23 @@ export function ProjectWorkspace() {
           onOpenChange={(open) => { if (!open) setBatchFileModal(null) }}
           request={batchFileModal}
           batchSize={completionBatchSizeFor(project)}
+          chunkSize={batchValidateChunk}
           canIncludeUntouchedAi={canIncludeUntouchedAiDrafts(project.syncRole?.level ?? null)}
           validateCandidates={activeFileId
             ? cellSummaries.filter((cell) => cell.fileId === activeFileId)
             : []}
-          validateOptions={workspaceBatchValidateOptions({
-            project,
-            activeFileId,
-            username: currentUsername,
-            myScopes,
-            activeLane,
-          })}
+          validateOptions={{
+            ...workspaceBatchValidateOptions({
+              project,
+              activeFileId,
+              username: currentUsername,
+              myScopes,
+              activeLane,
+            }),
+            // AQU-2507: the modal counts the flagged cells it offers from the
+            // same predicate the run then applies.
+            hasOpenFlags: batchModalOpenFlags,
+          }}
           draftCells={batchFileModal.kind === "draft" && activeFileId
             ? getActiveCells().filter((cell) => cell.fileId === activeFileId)
             : []}
@@ -20049,34 +20149,35 @@ function MoveToCorpusDialog({
   )
 }
 
-interface TrashedProjectScreenProps {
+interface ArchivedProjectScreenProps {
   project: ProjectRecord
   onClose: () => void
   onRestore: () => void | Promise<void>
 }
 
-function TrashedProjectScreen({ project, onClose, onRestore }: TrashedProjectScreenProps) {
+/**
+ * AQU-2453: shown instead of the editor when the open project is archived.
+ * The wording and the Restore gate both come from `archivedProjectNotice`, so
+ * a reader is never told to take an action whose button they are not given.
+ */
+function ArchivedProjectScreen({ project, onClose, onRestore }: ArchivedProjectScreenProps) {
   const t = useT()
   const { session } = useFrontierSession()
-  const canRestore =
-    (project.syncRole?.level ?? 0) >= 700 ||
-    (!project.origin && !project.syncRole) ||
-    session == null
+  const { canRestore, bodyKey, hintKey } = archivedProjectNotice({
+    project,
+    hasSession: session != null,
+  })
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-6">
         <div className="bg-card max-w-md rounded-lg p-8 text-center">
         <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-muted">
-          <Trash2 className="h-6 w-6 text-muted-foreground" />
+          <Archive className="h-6 w-6 text-muted-foreground" aria-hidden />
         </div>
-        <h1 className="mb-2 text-lg font-semibold">{t("workspace.trashedProject.title")}</h1>
+        <h1 className="mb-2 text-lg font-semibold">{t("workspace.archivedProject.title")}</h1>
         <p className="mb-6 text-sm text-muted-foreground">
-          {project.deletedBy
-            ? t("workspace.trashedProject.movedByMessage", {
-                name: project.name,
-                deletedBy: project.deletedBy,
-              })
-            : t("workspace.trashedProject.movedMessage", { name: project.name })}
+          {t(bodyKey, { name: project.name, deletedBy: project.deletedBy ?? "" })}{" "}
+          {t(hintKey)}
         </p>
         <div className="flex items-center justify-center gap-2">
           <Button variant="outline" onClick={onClose}>

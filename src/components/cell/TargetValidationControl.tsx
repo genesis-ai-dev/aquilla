@@ -335,7 +335,7 @@ export function TargetValidationControl({
                   ) : displayedValidators.map((validator) => (
                     <li key={validator} className="flex items-start justify-between gap-2 rounded px-1 py-1 text-xs hover:bg-muted/50">
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate">{validator}{validator === currentUsername ? " (you)" : ""}</span>
+                        <span className="block truncate">{validator}{validator === currentUsername ? ` ${t("editor.validation.you")}` : ""}</span>
                         {/* AQU-2296: when they validated THIS cell, on a second
                             muted line — the audio list's twin. */}
                         <ValidatedOnLine value={displayedDecidedTs[validator]} />

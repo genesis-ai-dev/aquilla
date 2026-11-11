@@ -5,7 +5,7 @@ import type { GoogleAttempt } from "@/lib/frontier/google-login"
 import { MemoryRouter } from "react-router-dom"
 const mocks = vi.hoisted(() => ({ active: { username: "alice", jwt: "alice-token" }, request: vi.fn(), finalize: vi.fn(), adopt: vi.fn(), confirm: vi.fn(), readChoice: vi.fn(), clearChoice: vi.fn(), clearAttempt: vi.fn(), attempt: { verifier: "a".repeat(64), next: "/app", expires: 1e20, choice: { allowed: true, version: "2026-11-04", revision: "choice-a" } } as GoogleAttempt, approve: vi.fn() }))
 vi.mock("@/lib/frontier/google-return", () => ({ googleReturn: new URLSearchParams({ code: "b".repeat(64) }) }))
-vi.mock("@/lib/frontier/google-login", () => ({ googleRequest: mocks.request, readGoogleAttempt: () => mocks.attempt, clearGoogleAttempt: mocks.clearAttempt }))
+vi.mock("@/lib/frontier/google-login", () => ({ googleRequest: mocks.request, saveGoogleProgress: vi.fn(), readGoogleAttempt: () => mocks.attempt, clearGoogleAttempt: mocks.clearAttempt }))
 vi.mock("@/lib/frontier/auth", () => ({ finalizeSession: mocks.finalize }))
 vi.mock("@/hooks/useAccounts", () => ({ useAccounts: () => ({ adopt: mocks.adopt, active: mocks.active, loading: false }) }))
 vi.mock("@/lib/analytics-account", () => ({ confirmNewAccountAnalytics: mocks.confirm }))
@@ -14,7 +14,7 @@ vi.mock("@/lib/i18n/I18nProvider", () => ({ useT: () => (key: string) => key }))
 vi.mock("@/components/auth/AuthPage", () => ({ AuthPage: ({ children }: { children: React.ReactNode }) => children, AuthPanel: ({ children }: { children: React.ReactNode }) => children }))
 vi.mock("@/components/git-import/FrontierForgotPasswordForm", () => ({ FrontierForgotPasswordForm: () => null }))
 import { GoogleLoginReturn } from "./GoogleLoginReturn"
-beforeEach(() => { vi.clearAllMocks(); delete mocks.attempt.connectUsername; mocks.active = { username: "alice", jwt: "alice-token" }; mocks.attempt.choice = { allowed: true, version: "2026-11-04", revision: "choice-a" }; mocks.finalize.mockResolvedValue({ jwt: "aquilla-token", username: "alice" }); mocks.adopt.mockResolvedValue(undefined); mocks.confirm.mockResolvedValue(undefined) })
+beforeEach(() => { vi.clearAllMocks(); delete mocks.attempt.connectUsername; delete mocks.attempt.pending; mocks.active = { username: "alice", jwt: "alice-token" }; mocks.attempt.choice = { allowed: true, version: "2026-11-04", revision: "choice-a" }; mocks.finalize.mockResolvedValue({ jwt: "aquilla-token", username: "alice" }); mocks.adopt.mockResolvedValue(undefined); mocks.confirm.mockResolvedValue(undefined) })
 afterEach(cleanup)
 it.each([
   { created: false, revision: "choice-a", binds: false },
@@ -100,4 +100,16 @@ it.each(["session_failed","expired_request","unavailable"])("requires a fresh lo
   expect(screen.getByRole("link",{name:"auth.google.back"})).toHaveAttribute("href","/login?next=%2Fapp&add=1")
   expect(mocks.adopt).not.toHaveBeenCalled()
   expect(mocks.confirm).not.toHaveBeenCalled()
+})
+
+it("resumes a saved username step without replaying the exchanged handoff", async () => {
+  mocks.attempt.pending={continuation:"c".repeat(64),step:"signup",email:"alice@example.com"}
+  mocks.request.mockResolvedValue({access_token:"aquilla-token",username:"alice",created:true})
+  render(<MemoryRouter><GoogleLoginReturn /></MemoryRouter>)
+  expect(screen.getByLabelText("auth.signup.usernameLabel")).toBeVisible()
+  expect(mocks.request).not.toHaveBeenCalled()
+  fireEvent.change(screen.getByLabelText("auth.signup.usernameLabel"),{target:{value:"alice"}})
+  fireEvent.submit(screen.getByRole("button",{name:"auth.signup.submitDefault"}).closest("form")!)
+  await waitFor(()=>expect(mocks.finalize).toHaveBeenCalledOnce())
+  expect(mocks.request).toHaveBeenCalledExactlyOnceWith("finish",{code:"c".repeat(64),verifier:mocks.attempt.verifier,username:"alice"})
 })

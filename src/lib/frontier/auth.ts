@@ -255,8 +255,17 @@ export async function redeemAccessLink(token: string, pin: string): Promise<Acce
   return { session, projectId: data.project_id };
 }
 
+/** Recovery must settle even when the connection never answers. */
+async function recoveryFetch(url: string, init: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15_000);
+  try { return await fetch(url, { ...init, signal: controller.signal }); }
+  catch { throw new FrontierAuthError(t("auth.resetPassword.networkRetry"), 0); }
+  finally { clearTimeout(timer); }
+}
+
 export async function requestPasswordReset(email: string, returnTo?: string): Promise<void> {
-  const res = await fetch(`${AUTH_BASE}/api/v2/auth/password-reset/request`, {
+  const res = await recoveryFetch(`${AUTH_BASE}/api/v2/auth/password-reset/request`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, return_to: passwordResetReturnTo(returnTo) }),
@@ -271,7 +280,7 @@ export async function requestPasswordReset(email: string, returnTo?: string): Pr
 
 /** Send a reset only to the authenticated account's server-stored address. */
 export async function requestAccountPasswordReset(jwt: string): Promise<void> {
-  const res = await fetch(`${AUTH_BASE}/api/v2/auth/me/password-reset/request`, {
+  const res = await recoveryFetch(`${AUTH_BASE}/api/v2/auth/me/password-reset/request`, {
     method: "POST",
     headers: { Authorization: `Bearer ${jwt}` },
   });
@@ -287,7 +296,7 @@ export async function requestAccountPasswordReset(jwt: string): Promise<void> {
  *   400 → { error: "Invalid token" | "Token expired" }
  */
 export async function verifyResetToken(token: string, username: string): Promise<void> {
-  const res = await fetch(`${AUTH_BASE}/api/v2/auth/password-reset/verify`, {
+  const res = await recoveryFetch(`${AUTH_BASE}/api/v2/auth/password-reset/verify`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ token, username }),
@@ -334,7 +343,7 @@ export async function resetPassword(
   username: string,
   newPassword: string,
 ): Promise<void> {
-  const res = await fetch(`${AUTH_BASE}/api/v2/auth/password-reset/reset`, {
+  const res = await recoveryFetch(`${AUTH_BASE}/api/v2/auth/password-reset/reset`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ token, username, new_password: newPassword }),

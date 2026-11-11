@@ -1366,7 +1366,7 @@ auth.post(
       return c.json({ message: "Token is valid" })
     } catch (error) {
       console.error("Token verification error:", error)
-      return c.json({ error: "Invalid token" }, 400)
+      return c.json({ error: "Verification temporarily unavailable" }, 503)
     }
   },
 )

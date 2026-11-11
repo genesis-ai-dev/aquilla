@@ -295,6 +295,10 @@ function toQueuedRow(event: CqrsRawEvent) {
 // edit's payload in one eventlog row, re-parsed whole on every rebuild.
 const OFFLINE_QUEUE_CHUNK = 500
 
+// Most target commits one batch enqueue will journal for pagehide recovery.
+// Covers any single chapter (Psalm 119 is 176 verses).
+const JOURNAL_BATCH_LIMIT = 200
+
 /**
  * Tauri-only: commits every event that is one of the offline-routable kinds
  * AND whose project has a ready local LiveStore copy straight into LiveStore's
@@ -414,31 +418,47 @@ export async function enqueueOutboxEvent(event: CqrsRawEvent, scope?: OutboxOwne
 export async function enqueueOutboxEvents(events: CqrsRawEvent[]): Promise<void> {
   if (events.length === 0) return
 
-  const remaining = isTauriRuntime() ? await routeToOfflineQueue(events) : events
-  if (remaining.length === 0) return
-
+  // Capture before any await, as enqueueOutboxEvent does: routing can wait
+  // seconds for the offline store, and an account switch in that window must
+  // not reassign these edits to the next account.
   const ownerKey = activeOwnerKey
-  const db = await openDb()
   const now = Date.now()
+  const records = events.map((event): OutboxRecord => ({
+    id: event.id,
+    enqueuedAt: now,
+    event,
+    attempts: 0,
+    lastAttemptAt: null,
+    lastError: null,
+    status: "pending",
+    ownerKey,
+  }))
+  // A small batch (an approved agent proposal, a handful of edits) gets the
+  // same pagehide journal as a single edit. Large ones (replace-all, import)
+  // stay out of localStorage, which they could fill.
+  const journaled = ownerKey !== undefined
+    && records.filter((rec) => rec.event.kind === "target.cell.commit").length <= JOURNAL_BATCH_LIMIT
+  if (journaled) for (const rec of records) journalTargetCommit(rec)
+  const clearJournal = () => {
+    if (journaled) for (const rec of records) clearJournalRecord(rec.id)
+  }
+
+  const remaining = isTauriRuntime() ? new Set(await routeToOfflineQueue(events)) : null
+  const toWrite = remaining ? records.filter((rec) => remaining.has(rec.event)) : records
+  if (toWrite.length === 0) {
+    clearJournal()
+    return
+  }
+
+  const db = await openDb()
   await withOutboxQuotaRecovery(() => new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE, "readwrite")
     tx.onerror = () => reject(tx.error ?? new Error("bulk enqueue tx failed"))
     tx.oncomplete = () => resolve()
     const store = tx.objectStore(STORE)
-    for (const event of remaining) {
-      const rec: OutboxRecord = {
-        id: event.id,
-        enqueuedAt: now,
-        event,
-        attempts: 0,
-        lastAttemptAt: null,
-        lastError: null,
-        status: "pending",
-        ownerKey,
-      }
-      store.put(rec)
-    }
+    for (const rec of toWrite) store.put(rec)
   }))
+  clearJournal()
   notifyOutboxChanged()
 }
 

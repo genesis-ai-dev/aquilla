@@ -430,6 +430,40 @@ describe("cqrs outbox", () => {
     expect(notifications).toBe(1)
   })
 
+  it("enqueueOutboxEvents journals a small batch's target commits before IndexedDB can finish", async () => {
+    setActiveOutboxOwner("alice")
+    const pending = enqueueOutboxEvents([ev("b1", "c1"), ev("b2", "c2")])
+    for (const id of ["b1", "b2"]) {
+      expect(JSON.parse(localStorage.getItem(`aquilla:outbox-recovery:v1:${id}`)!)).toMatchObject({
+        ownerKey: "alice", event: { id },
+      })
+    }
+    await pending
+    expect(localStorage.getItem("aquilla:outbox-recovery:v1:b1")).toBeNull()
+    expect(localStorage.getItem("aquilla:outbox-recovery:v1:b2")).toBeNull()
+    expect(await outboxPendingCount()).toBe(2)
+  })
+
+  it("enqueueOutboxEvents leaves a large batch out of the journal", async () => {
+    setActiveOutboxOwner("alice")
+    const events = Array.from({ length: 201 }, (_, i) => ev(`big${i}`, `c${i}`))
+    const pending = enqueueOutboxEvents(events)
+    expect(Object.keys(localStorage).filter((k) => k.startsWith("aquilla:outbox-recovery:v1:"))).toEqual([])
+    await pending
+    expect(await outboxPendingCount()).toBe(201)
+  })
+
+  it("enqueueOutboxEvents keeps a batch in the owner scope that initiated it", async () => {
+    setActiveOutboxOwner("alice")
+    const enqueuing = enqueueOutboxEvents([ev("o1", "c1")])
+    setActiveOutboxOwner("bob")
+    await enqueuing
+
+    expect(await peekOutboxBatch(10)).toEqual([])
+    setActiveOutboxOwner("alice")
+    expect((await peekOutboxBatch(10)).map((record) => record.id)).toEqual(["o1"])
+  })
+
   it("enqueueOutboxEvents is idempotent on duplicate ids (same-id put overwrites)", async () => {
     await enqueueOutboxEvents([ev("dup", "c1")])
     await enqueueOutboxEvents([ev("dup", "c1")])
@@ -612,6 +646,28 @@ describe("Tauri offline routing", () => {
     expect(localStorage.getItem(key)).toBeNull()
     expect(currentOfflineStore!.query(offlineTables.eventQueue.select()).map((r) => r.id)).toEqual(["tc1"])
     expect(await outboxPendingCount()).toBe(0)
+  })
+
+  it("enqueueOutboxEvents keeps the initiating owner while waiting on a booting offline store", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    try {
+      setActiveOutboxOwner("alice")
+      setTauriRuntime(true)
+      markProjectOfflineReady("proj1")
+      getOfflineStoreMock.mockReturnValueOnce(new Promise<never>(() => {}))
+
+      const pending = enqueueOutboxEvents([commitEvent])
+      setActiveOutboxOwner("bob")
+      await vi.advanceTimersByTimeAsync(3_000)
+      await pending
+
+      expect(localStorage.getItem("aquilla:outbox-recovery:v1:tc1")).toBeNull()
+      expect(await outboxPendingCount()).toBe(0)
+      setActiveOutboxOwner("alice")
+      expect((await peekOutboxBatch(10)).map((r) => r.id)).toEqual(["tc1"])
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("a non-routable kind always goes to IndexedDB regardless of Tauri/offline-ready state", async () => {

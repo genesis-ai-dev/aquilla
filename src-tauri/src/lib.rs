@@ -59,15 +59,24 @@ pub fn run() {
             // Decide which bundle the `app://` scheme serves before any window asks for it.
             hot_bundle::prepare(app)?;
             // Label stays "main" so capabilities/default.json keeps applying.
-            WebviewWindowBuilder::new(app, "main", hot_bundle::window_url(app)?)
+            let main_window = WebviewWindowBuilder::new(app, "main", hot_bundle::window_url(app)?)
                 .title("Aquilla")
                 // Desktop-first default: fits a 13" laptop (1440x900 logical) with
                 // room to spare, and sits above the SPA's tablet breakpoint.
                 .inner_size(1280.0, 820.0)
                 .min_inner_size(900.0, 600.0)
                 .center()
-                .resizable(true)
-                .build()?;
+                .resizable(true);
+            // macOS: drop the native title strip and let the SPA's top row be the
+            // title bar, traffic lights floating over it. y=20 centres them on
+            // AppShell's 52px header band; the SPA keeps that corner clear and
+            // marks the drag regions (src/hooks/useMacTitlebarOverlay.ts).
+            #[cfg(target_os = "macos")]
+            let main_window = main_window
+                .title_bar_style(tauri::TitleBarStyle::Overlay)
+                .hidden_title(true)
+                .traffic_light_position(tauri::LogicalPosition::new(16.0, 20.0));
+            main_window.build()?;
             hot_bundle::start(app.handle());
 
             connectivity::start_connectivity_loop(app.handle().clone());

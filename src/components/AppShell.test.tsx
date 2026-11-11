@@ -8,11 +8,23 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { MemoryRouter, useLocation, useNavigate } from "react-router-dom"
-import { render, screen, fireEvent, within } from "@testing-library/react"
+import { render, screen, fireEvent, within, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { AppShell } from "./AppShell"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import { NavHistoryProvider } from "@/context/NavHistoryContext"
+import type { MacTitlebarOverlay } from "@/hooks/useMacTitlebarOverlay"
+
+const titlebar = vi.hoisted(() => ({ value: { overlay: false, inset: false } as MacTitlebarOverlay }))
+const tauriWindow = vi.hoisted(() => ({
+  startDragging: vi.fn(async () => {}),
+  toggleMaximize: vi.fn(async () => {}),
+}))
+vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => tauriWindow }))
+vi.mock("@/hooks/useMacTitlebarOverlay", async (importActual) => ({
+  ...(await importActual<typeof import("@/hooks/useMacTitlebarOverlay")>()),
+  useMacTitlebarOverlay: () => titlebar.value,
+}))
 
 const originalMatchMedia = window.matchMedia
 
@@ -509,5 +521,133 @@ describe("AppShell mobile sidebar sheet", () => {
     // The modal sheet hides the page from the a11y tree while open — read the
     // trigger regardless, and assert on its expanded state.
     expect(screen.getByRole("button", { name: "Open sidebar", hidden: true })).toHaveAttribute("aria-expanded", "false")
+  })
+})
+
+describe("AppShell macOS overlay title bar", () => {
+  afterEach(() => {
+    window.matchMedia = originalMatchMedia
+    titlebar.value = { overlay: false, inset: false }
+    tauriWindow.startDragging.mockClear()
+    tauriWindow.toggleMaximize.mockClear()
+  })
+
+  const renderOverlayShell = (props: { railCollapsed?: boolean; leftDock?: boolean; header?: React.ReactNode } = {}) =>
+    render(
+      <MemoryRouter initialEntries={["/project/p1/editor"]}>
+        <AppShell
+          logoSlot={<span data-testid="logo">Aquilla</span>}
+          header={props.header ?? <div>header</div>}
+          statusBar={null}
+          sidebar={props.leftDock === false ? <div>org sidebar</div> : undefined}
+          leftDock={props.leftDock === false ? undefined : <div>dock</div>}
+          railCollapsed={props.railCollapsed}
+          main={<div />}
+        />
+      </MemoryRouter>,
+    )
+
+  // Traffic lights float over x≈16–68, y≈20–34 of the window. Whatever layout
+  // sits under them must leave that corner clear.
+  it.each([
+    // [layout, lgUp, railCollapsed, inset, header padding, sidebar row padding, rail top padding, logo shown]
+    ["expanded sidebar", true, false, true, "", "76px", "", false],
+    ["collapsed rail", true, true, true, "28px", "", "40px", true],
+    ["narrow window, sidebar in sheet", false, false, true, "76px", null, null, null],
+    ["native fullscreen (lights hidden)", true, false, false, "", "", "", true],
+  ] as const)("keeps the traffic-light corner clear: %s", (_, lgUp, railCollapsed, inset, headerPad, rowPad, railTop, logoShown) => {
+    stubLgUp(lgUp)
+    titlebar.value = { overlay: true, inset }
+    renderOverlayShell({ railCollapsed })
+    const header = document.querySelector<HTMLElement>('[data-slot="app-shell-header"]')!
+    expect(header.style.paddingInlineStart).toBe(headerPad)
+
+    const row = document.querySelector<HTMLElement>('[data-slot="app-shell-sidebar-chrome"]')
+    if (rowPad === null) {
+      expect(row).toBeNull()
+      return
+    }
+    expect(row!.style.paddingInlineStart).toBe(rowPad)
+    expect(row!.style.paddingTop).toBe(railTop)
+    expect(screen.queryByTestId("logo") !== null).toBe(logoShown)
+  })
+
+  it("drops the beta chip beside the traffic lights so the row fits a 200px dock", () => {
+    stubLgUp(true)
+    titlebar.value = { overlay: true, inset: true }
+    renderOverlayShell()
+    const row = document.querySelector<HTMLElement>('[data-slot="app-shell-sidebar-chrome"]')!
+    expect(within(row).queryByText(/beta/i)).toBeNull()
+  })
+
+  it("does not pad the header for a collapsed org aside, which stays full width", () => {
+    stubLgUp(true)
+    titlebar.value = { overlay: true, inset: true }
+    renderOverlayShell({ railCollapsed: true, leftDock: false })
+    const header = document.querySelector<HTMLElement>('[data-slot="app-shell-header"]')!
+    expect(header.style.paddingInlineStart).toBe("")
+  })
+
+  it("drags the window from empty header space without swallowing the press", () => {
+    stubLgUp(true)
+    titlebar.value = { overlay: true, inset: true }
+    renderOverlayShell()
+    const onDocMouseDown = vi.fn()
+    document.addEventListener("mousedown", onDocMouseDown)
+    try {
+      const header = document.querySelector<HTMLElement>('[data-slot="app-shell-header"]')!
+      fireEvent.mouseDown(header, { button: 0, detail: 1 })
+      // Outside-click closers registered on document still hear it.
+      expect(onDocMouseDown).toHaveBeenCalledTimes(1)
+    } finally {
+      document.removeEventListener("mousedown", onDocMouseDown)
+    }
+    return waitFor(() => expect(tauriWindow.startDragging).toHaveBeenCalledTimes(1))
+  })
+
+  it("leaves controls in the header alone, including clickable non-buttons", async () => {
+    stubLgUp(true)
+    titlebar.value = { overlay: true, inset: true }
+    renderOverlayShell({
+      header: (
+        <div>
+          <button type="button">Real button</button>
+          <div data-testid="clicky" style={{ cursor: "pointer" }} onClick={() => {}}>
+            <span data-testid="clicky-child">Badge</span>
+          </div>
+          <span data-testid="plain-text">Title</span>
+        </div>
+      ),
+    })
+    fireEvent.mouseDown(screen.getByRole("button", { name: "Real button" }), { button: 0, detail: 1 })
+    fireEvent.mouseDown(screen.getByTestId("clicky-child"), { button: 0, detail: 1 })
+    await Promise.resolve()
+    expect(tauriWindow.startDragging).not.toHaveBeenCalled()
+    // Plain text in the band is still part of the title bar.
+    fireEvent.mouseDown(screen.getByTestId("plain-text"), { button: 0, detail: 1 })
+    await waitFor(() => expect(tauriWindow.startDragging).toHaveBeenCalledTimes(1))
+  })
+
+  it("zooms on a still double click, like the native title bar", async () => {
+    stubLgUp(true)
+    titlebar.value = { overlay: true, inset: true }
+    renderOverlayShell()
+    const header = document.querySelector<HTMLElement>('[data-slot="app-shell-header"]')!
+    fireEvent.mouseDown(header, { button: 0, detail: 2, clientX: 300, clientY: 20 })
+    fireEvent.mouseUp(header, { button: 0, detail: 2, clientX: 300, clientY: 20 })
+    await waitFor(() => expect(tauriWindow.toggleMaximize).toHaveBeenCalledTimes(1))
+    // Moved between press and release: no zoom.
+    fireEvent.mouseDown(header, { button: 0, detail: 2, clientX: 300, clientY: 20 })
+    fireEvent.mouseUp(header, { button: 0, detail: 2, clientX: 340, clientY: 20 })
+    await Promise.resolve()
+    expect(tauriWindow.toggleMaximize).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not make anything a drag handle outside the macOS desktop app", async () => {
+    stubLgUp(true)
+    renderShell(<div />)
+    fireEvent.mouseDown(document.querySelector<HTMLElement>('[data-slot="app-shell-header"]')!, { button: 0, detail: 1 })
+    await Promise.resolve()
+    expect(tauriWindow.startDragging).not.toHaveBeenCalled()
   })
 })

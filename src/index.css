@@ -607,6 +607,23 @@
   html[data-app-frame] body {
     overflow: hidden;
   }
+  /* macOS desktop, pages outside AppShell: reserve a title-bar band so the
+     traffic lights and the drag strip (TitlebarDragStrip) sit above the page
+     rather than over it. Full-height pages shrink by the band so it doesn't
+     turn into a scroll. AppShell's header is the drag handle while it is
+     mounted, so the band and strip go away under `data-app-frame`. */
+  html[data-mac-titlebar]:not([data-app-frame]) body {
+    padding-top: var(--mac-titlebar-h);
+  }
+  html[data-mac-titlebar]:not([data-app-frame]) body .min-h-screen {
+    min-height: calc(100vh - var(--mac-titlebar-h));
+  }
+  html[data-mac-titlebar]:not([data-app-frame]) body .h-screen {
+    height: calc(100vh - var(--mac-titlebar-h));
+  }
+  html[data-app-frame] [data-slot="titlebar-drag-strip"] {
+    display: none;
+  }
   html.dark {
     color-scheme: dark;
   }

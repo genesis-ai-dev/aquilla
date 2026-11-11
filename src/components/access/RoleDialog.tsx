@@ -37,6 +37,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { GrantScopeNotice } from "@/components/GrantScopeNotice"
 import { LaneAccessFields } from "@/components/LaneAccessFields"
+import { NoLaneAccessConfirm } from "@/components/NoLaneAccessConfirm"
 import { MemberMultiAddRow, type MemberMultiAddRowProps } from "@/components/MemberMultiAddRow"
 import { RoleSelect, roleSelectOptionFromLevel } from "@/components/RoleSelect"
 import type { TargetLaneOption } from "@/hooks/useCurrentTargetLanes"
@@ -46,6 +47,8 @@ import { roleChoices, type RoleChoiceLevel } from "@/lib/frontier/role-choices"
 import { ROLE } from "@/lib/frontier/roles"
 import {
   chosenLaneLabels,
+  grantsNoLanes,
+  initialLaneChoice,
   laneChoiceReady,
   needsLaneChoice,
   toMemberLaneAccess,
@@ -186,12 +189,20 @@ function ChangeBody({
   const [picked, setPicked] = useState<number | null>(
     currentLevel ?? (options.some((o) => o.level === ROLE.CONTRIBUTOR) ? ROLE.CONTRIBUTOR : options[0]?.level ?? null),
   )
-  const [laneChoice, setLaneChoice] = useState<LaneAccessChoice | null>(null)
+  // Null until the operator answers; AQU-2358 derives the one-lane default
+  // below, once `picked` and the project's lanes are known.
+  const [pickedLanes, setPickedLanes] = useState<LaneAccessChoice | null>(null)
+  // AQU-2358: true while the no-lane warning is open.
+  const [confirmNoLanes, setConfirmNoLanes] = useState(false)
   const [busy, setBusy] = useState<"save" | "remove" | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [warningInfoOpen, toggleWarningInfo] = useInfoOpen()
 
   const lanes = adding ? targetLanes ?? [] : []
+  // AQU-2358: a one-lane project behaves as if its lane were already checked.
+  // Derived, not seeded by an effect — the lanes arrive from a fetch. Any
+  // answer the operator makes, emptying the selection included, overrides it.
+  const laneChoice = pickedLanes ?? (picked === null ? null : initialLaneChoice(lanes, picked))
   const asksLanes = picked !== null && needsLaneChoice(picked, lanes.length)
   const lanesReady = picked === null || laneChoiceReady(laneChoice, picked, lanes.length)
   // A role the list does not offer (an organization Commenter left from
@@ -216,8 +227,16 @@ function ChangeBody({
       }).sentence
     : null
 
-  async function save() {
+  /**
+   * AQU-2358: `confirmedNoLanes` comes only from the warning dialog's "Add
+   * without lanes"; otherwise an add that grants no lane opens the warning.
+   */
+  async function save(confirmedNoLanes = false) {
     if (picked === null) return
+    if (!confirmedNoLanes && grantsNoLanes(laneChoice, picked, lanes.length)) {
+      setConfirmNoLanes(true)
+      return
+    }
     setBusy("save")
     setError(null)
     try {
@@ -272,7 +291,7 @@ function ChangeBody({
             name={`role-dialog-lanes-${name}`}
             lanes={lanes}
             value={laneChoice}
-            onChange={setLaneChoice}
+            onChange={setPickedLanes}
             disabled={busy !== null}
           />
         )}
@@ -330,6 +349,15 @@ function ChangeBody({
           </Button>
         </div>
       </DialogFooter>
+      <NoLaneAccessConfirm
+        open={confirmNoLanes}
+        kind="add"
+        onBack={() => setConfirmNoLanes(false)}
+        onProceed={() => {
+          setConfirmNoLanes(false)
+          void save(true)
+        }}
+      />
     </>
   )
 }

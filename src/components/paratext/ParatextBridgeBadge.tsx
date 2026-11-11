@@ -5,7 +5,6 @@
 // mirrored book. Mounting it is what keeps the file following Paratext.
 
 import { Save } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverDescription, PopoverHeader, PopoverTitle, PopoverTrigger } from "@/components/ui/popover"
 import { Spinner } from "@/components/ui/spinner"
@@ -37,14 +36,36 @@ export function ParatextBridgeBadge(host: MirrorHost) {
   }
 
   const busy = m.busy !== null
+  const hasPending = m.pending > 0
+  const badgeLabel = t("paratextBridge.mirror.badge", { book: m.book.code })
+  const pendingLabel = t("paratextBridge.book.pending", { count: m.pending })
   return (
     <>
       <Popover>
+        {/* Same outline icon button as the header's Settings cog; the dot says
+            this file has edits the Paratext file does not hold yet. */}
         <PopoverTrigger
-          render={<Badge variant="outline" data-testid="paratext-badge" render={<button type="button" aria-label={t("paratextBridge.mirror.badgeAria")} />} />}
+          render={
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="relative bg-card shadow-xs"
+              aria-label={hasPending ? `${t("paratextBridge.mirror.badgeAria")}: ${pendingLabel}` : t("paratextBridge.mirror.badgeAria")}
+              title={hasPending ? pendingLabel : badgeLabel}
+              data-testid="paratext-badge"
+              data-pending={m.pending}
+            />
+          }
         >
-          {busy ? <Spinner className="size-3.5" /> : <Save className="size-3.5" aria-hidden />}
-          {t("paratextBridge.mirror.badge", { book: m.book.code })}
+          {busy ? <Spinner className="h-4 w-4" /> : <Save className="h-4 w-4" aria-hidden />}
+          {hasPending ? (
+            <span
+              aria-hidden
+              data-testid="paratext-unsaved-dot"
+              className="absolute -top-1 -end-1 size-2.5 rounded-full bg-primary ring-2 ring-background"
+            />
+          ) : null}
         </PopoverTrigger>
         <PopoverContent align="end" side="bottom" sideOffset={6} className="w-80 space-y-3 p-3 text-sm">
           <PopoverHeader>
@@ -57,6 +78,7 @@ export function ParatextBridgeBadge(host: MirrorHost) {
               <Button size="sm" variant="outline" onClick={() => void act.releaseHold()}>{t("paratextBridge.book.releaseHold")}</Button>
             </div>
           ) : null}
+          {hasPending ? <p className="font-medium" data-testid="paratext-pending">{pendingLabel}</p> : null}
           {m.unmapped > 0 ? <p className="text-muted-foreground">{t("paratextBridge.mirror.unmapped", { count: m.unmapped })}</p> : null}
           {m.refusals.length > 0 ? (
             <div className="space-y-2 rounded-md border border-border p-2">

@@ -194,6 +194,7 @@ describe("ExportDialog — native download is the primary action", () => {
         warnings: [],
       },
       diagnostics: [],
+    omitted: [],
     })
 
     render(

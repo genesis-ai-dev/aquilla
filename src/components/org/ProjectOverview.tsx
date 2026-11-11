@@ -21,6 +21,7 @@ import { useProject } from "@/hooks/useProject"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useActiveOrg } from "@/context/OrgContext"
+import { ProjectNoAccess } from "@/components/ProjectNoAccess"
 import { useNavHistoryTitle } from "@/context/NavHistoryContext"
 import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
 import { archiveProjectRemote, unarchiveProjectRemote } from "@/lib/sync/archive"
@@ -747,18 +748,17 @@ export function ProjectOverview() {
     void loadRow()
   }, [loadRow, archivedSince])
 
-  // Only redirect when the user genuinely has no access to this project.
-  // `useProject` is server-verified per-project (not org-scoped): a
-  // project-only invitee (no org membership, or org mismatch) still resolves
-  // to "ready" here when they hold a direct grant. Redirecting on org
-  // mismatch alone (pre-AQU-474 behavior) sent guests right back to "/".
-  useEffect(() => {
-    // AQU-346: "forbidden" (access revoked) leaves the overview the same way
-    // a missing project does — back to the dashboard.
-    if (status === "not-found" || status === "forbidden") {
-      navigate("/", { replace: true })
-    }
-  }, [status, navigate])
+  // AQU-2452: a refusal is SHOWN, never navigated away from. This used to
+  // replace the URL with "/" on 403/404, so an org member who opened a
+  // project they have no grant on watched the page start to load and then sit
+  // back on the dashboard with nothing said. The refusal now renders the same
+  // ProjectNoAccess screen the workspace shows (see `nonReadyContent`).
+  //
+  // A refusal is the only case that reaches it: `useProject` is
+  // server-verified per-project (not org-scoped), so a project-only invitee
+  // (no org membership, or an org mismatch) still resolves to "ready" when
+  // they hold a direct grant. Redirecting on org mismatch alone (pre-AQU-474
+  // behavior) sent guests right back to "/".
 
   // Load per-project assignment roster for the Team card (maintainer+)
   // AQU-495: extracted into a callback so a fresh assignment (onAssigned) can
@@ -1881,6 +1881,9 @@ export function ProjectOverview() {
           {t("common.retry")}
         </Button>
       </div>
+    ) : status === "forbidden" || status === "not-found" ? (
+      // AQU-2452: one message for every refusal, the workspace's screen.
+      <ProjectNoAccess />
     ) : null
 
   return (

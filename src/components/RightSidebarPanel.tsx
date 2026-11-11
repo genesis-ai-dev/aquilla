@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from "react"
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 const DEFAULT_MIN_WIDTH = 240
 const DEFAULT_MAX_WIDTH = 640
@@ -62,8 +63,9 @@ export function RightSidebarPanel({
   maxWidth = DEFAULT_MAX_WIDTH,
   children,
   className,
-  resizeLabel = "Resize panel",
+  resizeLabel,
 }: RightSidebarPanelProps) {
+  const t = useT()
   const [width, setWidth] = useState(() =>
     readStoredWidth(storageKey, defaultWidth, minWidth, maxWidth),
   )
@@ -125,7 +127,7 @@ export function RightSidebarPanel({
       <div
         role="separator"
         aria-orientation="vertical"
-        aria-label={resizeLabel}
+        aria-label={resizeLabel ?? t("editor.panel.resizeDefault")}
         aria-valuenow={Math.round(width)}
         aria-valuemin={minWidth}
         aria-valuemax={maxWidth}

@@ -15,7 +15,7 @@ import type {
   AuthHonoEnv,
 } from "../middleware/auth"
 import { authMiddleware } from "../middleware/auth"
-import { JWTService, isPastHalfLife } from "../auth/jwt"
+import { JWTService, SessionInvalidatedError, isPastHalfLife } from "../auth/jwt"
 import { sendPasswordResetEmail, sendWelcomeEmail } from "../services/email"
 import {
   absorbPasswordVerificationCost,
@@ -582,9 +582,9 @@ auth.post("/token", async (c) => {
         try {
           const newHash = await hashPasswordWerkzeugScrypt(password)
           await c.env.AQUILLA_PG.prepare(
-            "UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            "UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND password_hash = ?",
           )
-            .bind(newHash, user.id)
+            .bind(newHash, user.id, user.password_hash)
             .run()
           user.password_hash = newHash
         } catch (rehashError) {
@@ -620,12 +620,13 @@ auth.post("/token", async (c) => {
       logActivity(c.env.AQUILLA_PG, user.id, "login", "Signed in"),
     ])
 
-    const accessToken = await jwtService.createAccessToken(user.username, undefined, user.id)
+    const accessToken = await jwtService.createAccessToken(user.username, undefined, user.id, user.session_version ?? 0)
     return c.json({
       access_token: accessToken,
       token_type: "bearer",
     })
   } catch (error) {
+    if (error instanceof SessionInvalidatedError) return c.json({ error: "Session invalidated. Please log in again." }, 401)
     console.error("Login error:", error)
     return c.json({ error: "Login failed" }, 500)
   }
@@ -688,18 +689,24 @@ auth.post("/refresh", authMiddleware, async (c) => {
 
   // user.username (not payload.sub) is the canonical record — sub may differ in
   // case, since login resolves the user case-insensitively.
-  const { token, payload: minted } = await jwtService.createAccessTokenWithPayload(
-    user.username,
-    typeof payload.sst === "number" ? payload.sst : payload.iat,
-    typeof payload.sid === "string" ? payload.sid : undefined,
-    user.id,
-  )
-  return c.json({
-    access_token: token,
-    token_type: "bearer",
-    refreshed: true,
-    expires_at: minted.exp,
-  })
+  try {
+    const { token, payload: minted } = await jwtService.createAccessTokenWithPayload(
+      user.username,
+      typeof payload.sst === "number" ? payload.sst : payload.iat,
+      typeof payload.sid === "string" ? payload.sid : undefined,
+      user.id,
+      user.session_version ?? 0,
+    )
+    return c.json({
+      access_token: token,
+      token_type: "bearer",
+      refreshed: true,
+      expires_at: minted.exp,
+    })
+  } catch (error) {
+    if (error instanceof SessionInvalidatedError) return c.json({ error: "Session invalidated. Please log in again." }, 401)
+    throw error
+  }
 })
 
 // [Pen test] Auth & session mgmt (2026-08-03): there was previously no
@@ -1431,7 +1438,7 @@ auth.post(
       // this reset — including one an attacker stole — stops working
       // immediately instead of remaining valid for up to 30 more days.
       await c.env.AQUILLA_PG.prepare(
-        "UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP, password_changed_at = CURRENT_TIMESTAMP WHERE id = ?",
+        "UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP, password_changed_at = CURRENT_TIMESTAMP, session_version = session_version + 1 WHERE id = ?",
       )
         .bind(passwordHash, user.id)
         .run()

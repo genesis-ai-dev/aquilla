@@ -134,3 +134,84 @@ describe("generateCellVoice — speaks in the lane's language (AQU-1978)", () =>
     expect(contextOf().targetLanguage).toBe("Swahili")
   })
 })
+
+// AQU-2511: THE LANE'S OWN CAST IS WHAT GENERATE SPEAKS WITH.
+//
+// A voice picked for one line is stored per lane
+// (`laneCastAssignments[laneTag][cellId]`, AQU-2038) and every surface that
+// NAMES a voice reads the lane projection. This path did not: it resolved
+// against the project-wide blob, so Generate in the cell dialog came back in
+// the project default — or in the character's voice — while the row beside it
+// had just been assigned another. Joel, 2026-11-10, prod project a7fe47ff.
+describe("generateCellVoice — the lane's cast, not the project blob (AQU-2511)", () => {
+  const voices = [
+    { id: "v-chip", name: "Chip Ingram Voice Test" },
+    { id: "v-narr", name: "Narrator" },
+    { id: "v-other", name: "Other lane's voice", laneId: "other-lane" },
+  ]
+  // The prod shape: the character and the project default both name Chip, and
+  // the line's own pick on this lane names the Narrator.
+  const settings = {
+    voices,
+    defaultVoiceId: "v-chip",
+    castAssignments: { "character:Chip Ingram": "v-chip" },
+    laneDefaultVoiceId: { "": "v-chip" },
+    laneCastAssignments: { "": { "cell-picked": "v-narr" } },
+  }
+  const lanes = [
+    { id: "src00001", role: "source", language: "English", name: null, langCode: null, legacyTag: null, position: 0, archivedAt: null },
+    { id: "lane0001", role: "target", language: "Arabic", name: null, langCode: null, legacyTag: "", position: 0, archivedAt: null },
+  ]
+  const castProject = { id: "p1", sourceLanguage: "en", targetLanguage: "ar", ttsSettings: settings, lanes } as unknown as ProjectRecord
+  const chipLine = (id: string) => makeCell(id, { metadata: { cast_name: "Chip Ingram" } } as Partial<CellData>)
+
+  it("generates in the voice picked for THAT line, over its character's voice", async () => {
+    await generateCellVoice({ project: castProject, cell: chipLine("cell-picked"), session, username: "alice" })
+    expect(calledWithVoiceId()).toBe("v-narr")
+  })
+
+  it("a line with no pick of its own still speaks with its character's voice", async () => {
+    await generateCellVoice({ project: castProject, cell: chipLine("cell-plain"), session, username: "alice" })
+    expect(calledWithVoiceId()).toBe("v-chip")
+  })
+
+  it("the lane's own default outranks the project default for an uncast line", async () => {
+    const laned = {
+      ...castProject,
+      ttsSettings: { ...settings, laneDefaultVoiceId: { "": "v-narr" }, castAssignments: {} },
+    } as unknown as ProjectRecord
+    await generateCellVoice({ project: laned, cell: makeCell("cell-free"), session, username: "alice" })
+    expect(calledWithVoiceId()).toBe("v-narr")
+  })
+
+  it("reads the pick of the lane being generated, not another lane's", async () => {
+    const twoLanes = {
+      ...castProject,
+      ttsSettings: { ...settings, laneCastAssignments: { "": { "cell-picked": "v-narr" }, Spanish: { "cell-picked": "v-chip" } } },
+      lanes: [...lanes, { id: "lane0002", role: "target", language: "Spanish", name: null, langCode: null, legacyTag: "Spanish", position: 1, archivedAt: null }],
+    } as unknown as ProjectRecord
+    await generateCellVoice({ project: twoLanes, cell: chipLine("cell-picked"), session, username: "alice", targetLang: "Spanish" })
+    expect(calledWithVoiceId()).toBe("v-chip")
+  })
+
+  it("an explicit caller voiceId wins and stays findable even when it is not this lane's voice", async () => {
+    await generateCellVoice({
+      project: castProject, cell: chipLine("cell-picked"), session, username: "alice", voiceId: "v-other",
+    })
+    expect(calledWithVoiceId()).toBe("v-other")
+    const passed = (generateAndAttachCellVoice.mock.calls[0] as unknown[])[0] as {
+      projectTtsSettings?: { voices?: { id: string }[] }
+    }
+    expect(passed.projectTtsSettings?.voices?.map((v) => v.id)).toContain("v-other")
+  })
+
+  it("passes the generator the lane's library, so the resolved voice is in it", async () => {
+    await generateCellVoice({ project: castProject, cell: chipLine("cell-picked"), session, username: "alice" })
+    const passed = (generateAndAttachCellVoice.mock.calls[0] as unknown[])[0] as {
+      projectTtsSettings?: { voices?: { id: string }[] }
+    }
+    const ids = passed.projectTtsSettings?.voices?.map((v) => v.id) ?? []
+    expect(ids).toContain("v-narr")
+    expect(ids).not.toContain("v-other")
+  })
+})

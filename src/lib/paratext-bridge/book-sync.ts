@@ -63,6 +63,27 @@ export async function reconcileBook(loc: BookLocation, opts: { pending?: Pending
   return { units, lastSeen, pending: storedPending, conflicts, theirs, onHold }
 }
 
+/**
+ * A mirror was just created from these book bytes: make them the base. The
+ * cells hold exactly this text, so the first sync must compare the file with
+ * it, not with a unit set an earlier session (the per-book page, or a mirror
+ * since removed) left under the same project GUID. Against such a stale base
+ * every verse Paratext changed in between reads as edited on both sides, and
+ * the user is asked to pick between two identical texts.
+ *
+ * A book whose units cannot be derived keeps whatever base it had.
+ */
+export async function setMirrorBase(guid: string, books: readonly Uint8Array[]): Promise<void> {
+  for (const bytes of books) {
+    try {
+      const units = await deriveUnits(bytes)
+      await bridgeStore.setLastSeen(guid, units.book, units)
+    } catch {
+      /* first sync falls back to its own first-contact rule */
+    }
+  }
+}
+
 export type WriteBookResult =
   | { kind: "written"; after: UnitSet | null; applied: string[]; conflicts: WriteBackConflict[] }
   | { kind: "refused"; reason: "hold" | "hash" | `proof:${string}` | string }

@@ -254,6 +254,46 @@ describe("mirrorSync — replacing the source of a file the project already has 
     }
   })
 
+  // WHY: the join writes the upstream's source — locators included — onto the
+  // file's own cells, so from then on they describe the upstream's package. An
+  // IDML export read against the file's own original then rejected every
+  // mapping. The original must follow the join, in the same sync, so an export
+  // right after linking reads the package the cells describe.
+  it("points a joined file's original at the upstream's, in the same sync as the join", async () => {
+    const t = await makeTestDb()
+    try {
+      seq = 0
+      await seedProjects(t)
+      await seedEstablished(t)
+      await seedUpstream(t)
+      const ownBlob = { format: "idml", r2_key: `artifacts/${ESTABLISHED}/own/original.idml`, size_bytes: 111 }
+      const upstreamBlob = { format: "idml", r2_key: `artifacts/${UPSTREAM}/up/original.idml`, size_bytes: 222 }
+      for (const [fileId, projectId, blob] of [[OWN_MRK, ESTABLISHED, ownBlob], [UP_MRK, UPSTREAM, upstreamBlob]] as const) {
+        await t.pg.query(
+          `INSERT INTO file_source_blobs (file_id, project_id, format, raw_source, r2_key, size_bytes, created_at)
+           VALUES ($1, $2, $3, NULL, $4, $5, 1000)`,
+          [fileId, projectId, blob.format, blob.r2_key, blob.size_bytes],
+        )
+      }
+
+      await linkReplacingMark(t)
+      expect((await mirrorSync(t.db, ESTABLISHED)).more).toBe(false)
+
+      const pointer = await t.pg.query<{ format: string; r2_key: string; size_bytes: string | number }>(
+        `SELECT format, r2_key, size_bytes FROM file_source_blobs WHERE file_id = $1 AND project_id = $2`,
+        [OWN_MRK, ESTABLISHED],
+      )
+      expect(pointer.rows.map((r) => ({ ...r, size_bytes: Number(r.size_bytes) }))).toEqual([upstreamBlob])
+      // The upstream's own row is untouched; the pointer is a second row at the same object.
+      const upstreamRows = await t.pg.query<{ n: string | number }>(
+        `SELECT COUNT(*) AS n FROM file_source_blobs WHERE r2_key = $1`, [upstreamBlob.r2_key],
+      )
+      expect(Number(upstreamRows.rows[0]?.n)).toBe(2)
+    } finally {
+      await t.close()
+    }
+  })
+
   it("writes later upstream edits and deletes onto the project's own cells", async () => {
     const t = await makeTestDb()
     try {
@@ -499,10 +539,12 @@ describe("mirrorSync — replacing the source of a file the project already has 
 
 // AQU-2345: a mirrored copy takes the upstream file's type and points at its
 // original (link-sync-file-provenance.test.ts). An ADOPTED file is not a copy —
-// it is the project's own import, with its own type and its own original — and
-// the mirror must leave both alone even as it writes the upstream's source onto
-// its lines.
-describe("mirrorSync — an adopted file keeps its own type and original (AQU-2345)", () => {
+// it is the project's own import, and its TYPE stays its own. Its ORIGINAL does
+// not: the join writes the upstream's source, locators included, onto its lines,
+// so from then on they describe the upstream's package, and an export read
+// against the file's own original rejected every mapping. Once joined, the
+// pointer follows the upstream's like the plain copy's does.
+describe("mirrorSync — an adopted file keeps its own type; its original follows the join (AQU-2345)", () => {
   async function seedOriginal(t: TestDb, projectId: string, fileId: string, key: string): Promise<void> {
     await t.pg.query(
       `INSERT INTO file_source_blobs (file_id, project_id, format, raw_source, r2_key, size_bytes, created_at)
@@ -519,7 +561,7 @@ describe("mirrorSync — an adopted file keeps its own type and original (AQU-23
     return r.rows[0]!
   }
 
-  it("leaves the adopted file's type and original alone while the plain copy beside it takes the upstream's", async () => {
+  it("keeps the adopted file's own type but points its original at the upstream's, like the plain copy beside it", async () => {
     const t = await makeTestDb()
     try {
       seq = 0
@@ -536,7 +578,7 @@ describe("mirrorSync — an adopted file keeps its own type and original (AQU-23
       await linkReplacingMark(t)
       expect((await mirrorSync(t.db, ESTABLISHED)).ranSync).toBe(true)
 
-      expect(await typeAndOriginal(t, OWN_MRK)).toEqual({ kind: "codex", r2_key: `artifacts/${ESTABLISHED}/own/original.usfm` })
+      expect(await typeAndOriginal(t, OWN_MRK)).toEqual({ kind: "codex", r2_key: `artifacts/${UPSTREAM}/mrk/original.usfm` })
       expect(await typeAndOriginal(t, deterministicDownstreamFileId(ESTABLISHED, UP_GEN))).toEqual({
         kind: "usfm",
         r2_key: `artifacts/${UPSTREAM}/gen/original.usfm`,

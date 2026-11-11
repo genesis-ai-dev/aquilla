@@ -72,7 +72,7 @@ export async function repairLinkedFileProvenance(
     downstreamProjectId,
     downstreamFileIdOf: (upstreamFileId) =>
       deterministicDownstreamFileId(downstreamProjectId, upstreamFileId),
-    adoptedDownstreamFileIds: new Set(Object.values(adoption?.files ?? {})),
+    adoption,
     now,
     dryRun,
   })

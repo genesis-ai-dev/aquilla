@@ -22,6 +22,7 @@ import {
 import {
   chooseIdmlHtmlMatchingTranslation,
   idmlEditableSlotText,
+  idmlTargetHoldsTranslation,
 } from "@/lib/idml/protected-html"
 import { normalizePartnerIdmlTargetHtml } from "@/lib/partners/registry"
 
@@ -31,6 +32,21 @@ export interface IdmlExportResult {
   blob: Blob
   report: IdmlExportReport
   diagnostics: readonly IdmlDiagnostic[]
+  /** Translated cells left out because their paragraph is not in this package. */
+  omitted: readonly IdmlOmittedTranslation[]
+}
+
+/**
+ * A translated cell whose locator names a paragraph this IDML package does not
+ * have. A file whose source a link replaced keeps the lines only it had
+ * ("lines only your file has will stay as they are"); their locators still
+ * point into the package the file was imported from, so the upstream's
+ * package has nowhere to put them.
+ */
+export interface IdmlOmittedTranslation {
+  readonly cellId: string
+  readonly cellLabel: string
+  readonly text: string
 }
 
 export interface IdmlExportExecutor {
@@ -65,7 +81,16 @@ export async function exportIdml(
   // strict export can still transfer the exact original without cloning it a
   // second time.
   const parsed = await worker.parse(rawIdmlBytes.slice(0))
-  const translations = buildTranslations(cells, parsed.units)
+  const { translations, omitted } = buildTranslations(cells, parsed.units)
+  // A few kept lines after a source replace are expected; most translations
+  // having no paragraph means the package is not the one the cells describe
+  // (the file's original pointer is wrong), and a download with a handful of
+  // translations in it would hide that.
+  if (omitted.length > 0 && omitted.length > translations.length) {
+    throw new IdmlWebExportError(
+      `${omitted.length} of ${omitted.length + translations.length} translated cells are not part of this IDML package; the file's original does not match its cells. Re-import the original IDML to repair it.`,
+    )
+  }
   const exported = await worker.export(rawIdmlBytes, translations)
   const validationBytes = exactArrayBuffer(exported.bytes)
   const diagnostics = await worker.validate(validationBytes, parsed.manifest)
@@ -89,6 +114,7 @@ export async function exportIdml(
     blob: new Blob([exactArrayBuffer(repaired)], { type: IDML_MIME }),
     report: exported.report,
     diagnostics,
+    omitted,
   }
 }
 
@@ -125,8 +151,9 @@ interface CellContract {
 function buildTranslations(
   cells: readonly CellData[],
   units: readonly IdmlTranslationUnit[],
-): readonly IdmlTranslation[] {
+): { translations: readonly IdmlTranslation[]; omitted: readonly IdmlOmittedTranslation[] } {
   const translations: IdmlTranslation[] = []
+  const omitted: IdmlOmittedTranslation[] = []
   const groups = new Map<string, CellContract[]>()
 
   for (const cell of cells) {
@@ -152,6 +179,10 @@ function buildTranslations(
       continue
     }
     if (!contract.hasTranslation) continue
+    if (!packageParagraph(contract.locator, units)) {
+      omitted.push(omittedTranslation(contract))
+      continue
+    }
     translations.push({
       unitId: contract.cell.id,
       locator: contract.locator,
@@ -162,10 +193,41 @@ function buildTranslations(
   }
 
   for (const group of groups.values()) {
+    const first = group[0]
+    if (first && !packageParagraph(first.locator, units)) {
+      for (const sibling of group) {
+        if (sibling.hasTranslation) omitted.push(omittedTranslation(sibling))
+      }
+      continue
+    }
     const merged = mergeSlicedUnit(group, units)
     if (merged) translations.push(merged)
   }
-  return translations
+  return { translations, omitted }
+}
+
+function omittedTranslation(contract: CellContract): IdmlOmittedTranslation {
+  const { cell } = contract
+  // Named the way the editor shows the line: its label, or its source text
+  // when it has none — a raw locator says nothing to the person reading it.
+  const source = cell.original.replace(/\s+/g, " ").trim()
+  return {
+    cellId: cell.id,
+    cellLabel: cell.cellLabel ?? (source.length > 48 ? `${source.slice(0, 47)}…` : source || cell.id),
+    text: cell.translated,
+  }
+}
+
+/** The package paragraph a locator addresses, if the package has it. */
+function packageParagraph(
+  locator: IdmlLocator,
+  units: readonly IdmlTranslationUnit[],
+): IdmlTranslationUnit | undefined {
+  return units.find((unit) => (
+    unit.locator.memberPath === locator.memberPath
+    && unit.locator.elementPath === locator.elementPath
+    && (!locator.elementId || unit.locator.elementId === locator.elementId)
+  ))
 }
 
 /**
@@ -235,11 +297,7 @@ function ownerUnit(
   units: readonly IdmlTranslationUnit[],
   label: string,
 ): IdmlTranslationUnit {
-  const paragraph = units.find((unit) => (
-    unit.locator.memberPath === locator.memberPath
-    && unit.locator.elementPath === locator.elementPath
-    && (!locator.elementId || unit.locator.elementId === locator.elementId)
-  ))
+  const paragraph = packageParagraph(locator, units)
   const owner = paragraph ? projectIdmlUnitToLocator(paragraph, locator) : undefined
   if (!owner) {
     throw new IdmlWebExportError(
@@ -275,7 +333,20 @@ function cellContract(cell: CellData): CellContract {
       `Cell ${cellLabel(cell)} is missing protected source HTML. Re-import the original IDML to repair it.`,
     )
   }
+  const rejoin = readIdmlRejoinMetadata(cell.metadata)
+  // A cell nobody has translated contributes nothing to the package, whatever
+  // state its target is in. A file a source link brought in has no target rows
+  // at all until someone types; a file whose source a link replaced, or a
+  // re-import changed, still holds the empty shell of the OLD source, which
+  // marks a slot editable that is locked now (or the reverse) and so cannot
+  // validate. Neither is a translation to export or a reason to refuse one —
+  // the paragraph stays as the publisher set it, exactly as an untouched cell
+  // of a fresh import does. A target with words in it is still held to the
+  // full proof below.
+  const untranslated = cell.translated.trim().length === 0
+    && !idmlTargetHoldsTranslation(cell.translatedHtml)
   if (!cell.translatedHtml) {
+    if (untranslated) return untranslatedContract(cell, locator, metadata, rejoin)
     throw new IdmlWebExportError(
       `Cell ${cellLabel(cell)} is missing protected target HTML. Re-import the original IDML to repair it.`,
     )
@@ -287,6 +358,7 @@ function cellContract(cell: CellData): CellContract {
     metadata,
   )
   if (!validation.valid) {
+    if (untranslated) return untranslatedContract(cell, locator, metadata, rejoin)
     throw new IdmlWebExportError(
       `Cell ${cellLabel(cell)} changed a protected IDML anchor.`,
       validation.diagnostics,
@@ -326,7 +398,6 @@ function cellContract(cell: CellData): CellContract {
       `Cell ${cellLabel(cell)} has translated plain text but no text inside its protected IDML slots. Re-open the cell or re-import the original IDML to repair it.`,
     )
   }
-  const rejoin = readIdmlRejoinMetadata(cell.metadata)
   return {
     cell,
     locator,
@@ -335,6 +406,25 @@ function cellContract(cell: CellData): CellContract {
     targetHtml,
     targetSlots,
     hasTranslation,
+    ...(rejoin ? { rejoin } : {}),
+  }
+}
+
+/** The contract of a cell with nothing to export: the unit keeps its source text. */
+function untranslatedContract(
+  cell: CellData,
+  locator: IdmlLocator,
+  metadata: IdmlFormatMetadataV2,
+  rejoin: IdmlRejoinMetadata | undefined,
+): CellContract {
+  return {
+    cell,
+    locator,
+    metadata,
+    sourceHtml: cell.originalHtml ?? "",
+    targetHtml: "",
+    targetSlots: [],
+    hasTranslation: false,
     ...(rejoin ? { rejoin } : {}),
   }
 }

@@ -13,6 +13,7 @@ import type {
   KinTermsProfile,
   NumberWordsProfile,
   PronounsProfile,
+  NumberFormatProfile,
   PunctuationProfile,
   QuestionMarkersProfile,
 } from "../../../db/shared/language-profile"
@@ -294,6 +295,42 @@ export function punctuationDraft(stored: unknown, prefill?: PunctuationProfile |
   const out = { noTerminalMark: tri(value.noTerminalMark) } as PunctuationDraft
   for (const key of PUNCTUATION_MARK_CLASSES) out[key] = marksDraft(value[key])
   return out
+}
+
+/**
+ * AQU-2430: the two number-format roles, each typed as the characters
+ * themselves. Separators are single characters, so this reads them the way the
+ * punctuation row does — except that a SPACE is a real answer here (French and
+ * Russian group thousands with one), so only the roles are split on, never the
+ * typed characters.
+ */
+export const NUMBER_FORMAT_ROLES = ["group", "decimal"] as const
+
+export type NumberFormatRole = (typeof NUMBER_FORMAT_ROLES)[number]
+
+export type NumberFormatDraft = Record<NumberFormatRole, string>
+
+/**
+ * The stored slot, or — while the slot is empty — CLDR's answer for the lane's
+ * language, so the row opens PRE-FILLED rather than blank (the same courtesy
+ * the punctuation row does). The draft keeps one character per role, since a
+ * language groups and fractions with one character each.
+ */
+export function numberFormatDraft(stored: unknown, prefill?: NumberFormatProfile | null): NumberFormatDraft {
+  const value = isRecord(stored) ? stored : ((prefill ?? {}) as Record<string, unknown>)
+  const out = {} as NumberFormatDraft
+  for (const role of NUMBER_FORMAT_ROLES) out[role] = (strings(value[role]) ?? []).join("")
+  return out
+}
+
+/** Null while the row holds no answer at all — the slot needs at least one field. */
+export function numberFormatValue(draft: NumberFormatDraft): NumberFormatProfile | null {
+  const out: NumberFormatProfile = {}
+  for (const role of NUMBER_FORMAT_ROLES) {
+    const chars = [...new Set(Array.from(draft[role]))]
+    if (chars.length > 0) out[role] = chars
+  }
+  return Object.keys(out).length > 0 ? out : null
 }
 
 /** Null while the row holds no answer at all — the slot needs at least one field. */

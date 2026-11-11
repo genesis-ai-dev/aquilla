@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest"
-import { googleRequest, startGoogleLogin, readGoogleAttempt, clearGoogleAttempt } from "./google-login"
+import { googleRequest, startGoogleLogin, readGoogleAttempt, clearGoogleAttempt, saveGoogleProgress } from "./google-login"
 import { confirmSignupAnalyticsChoice, clearSignupAnalyticsChoice } from "../signup-analytics-choice"
 beforeEach(() => { sessionStorage.clear(); clearSignupAnalyticsChoice(); vi.spyOn(navigator, "onLine", "get").mockReturnValue(true) })
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
@@ -38,4 +38,20 @@ describe("Google login intent", () => {
     expect(fetcher.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal)
     expect(document.querySelector('script[src*="google"]')).toBeNull()
   })
+})
+
+it("keeps only a bounded tab-local continuation, preserving consent across reload without provider contact", async () => {
+  const fetcher=vi.fn().mockResolvedValue(Response.json({authorization_url:"https://wrong.example"}));vi.stubGlobal("fetch",fetcher)
+  confirmSignupAnalyticsChoice(false)
+  await expect(startGoogleLogin("/app",true)).rejects.toThrow("invalid_request")
+  const attempt=readGoogleAttempt()!
+  const pending={continuation:"c".repeat(64),step:"signup" as const,email:"alice@example.com"}
+  saveGoogleProgress(attempt.verifier,{pending})
+  expect(readGoogleAttempt()).toMatchObject({pending,choice:{allowed:false}})
+  expect(fetcher).toHaveBeenCalledOnce()
+  expect(()=>saveGoogleProgress("b".repeat(64),{pending})).toThrow("expired_request")
+  const expires=readGoogleAttempt()!.expires
+  vi.spyOn(Date,"now").mockReturnValue(expires+1)
+  expect(readGoogleAttempt()).toBeNull()
+  expect(fetcher).toHaveBeenCalledOnce()
 })

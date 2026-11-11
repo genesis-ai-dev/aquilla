@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 import { AccountsProvider, SESSION_LOAD_TIMEOUT_MS, useAccounts } from "./useAccounts"
 import * as sessionStore from "@/lib/frontier/session-store"
+import * as dataBoundary from "@/lib/frontier/account-data-boundary"
 import * as projectIndex from "@/lib/store/project-index"
 import {
   _resetDbForTesting, addSession, sessionKey,
@@ -22,6 +23,15 @@ describe("useAccounts", () => {
     await projectIndex.clearAllLocalData()
   })
   afterEach(() => vi.restoreAllMocks())
+
+  it("does not claim ambiguous unscoped legacy data for a new immutable identity", async () => {
+    const scope = vi.spyOn(dataBoundary, "activateClientDataScope")
+    const session = {username:"recreated",jwt:"new",accountId:"998",createdAt:"2026-11-11"}
+    await saveSession(session)
+    const { result } = renderHook(() => useAccounts(), { wrapper })
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(scope).toHaveBeenCalledWith(sessionKey(session), {claimLegacy:false})
+  })
 
   it("returns empty state initially", async () => {
     const { result } = renderHook(() => useAccounts(), { wrapper })

@@ -1,0 +1,33 @@
+/* Self-hosted: rendering the button must never contact Google. */
+@font-face {
+  font-family: "Aquilla Google Sans";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../../assets/google-login/google-sans-medium.woff2") format("woff2");
+}
+
+.google-login-button {
+  font-family: "Aquilla Google Sans", sans-serif;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+  min-height: 40px;
+  padding-inline: 12px;
+  gap: 10px;
+  background: #fff;
+  color: #1f1f1f;
+  border: 1px solid #747775;
+}
+
+.google-login-button img {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.dark .google-login-button {
+  background: #131314;
+  color: #e3e3e3;
+  border-color: #8e918f;
+}

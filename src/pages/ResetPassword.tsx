@@ -1,4 +1,4 @@
-import { orgInviteReturnTo } from "../../shared/org-invite-return-to"
+import { passwordResetReturnTo } from "../../shared/password-reset-return-to"
 /**
  * AQU-270: /reset-password page
  *
@@ -224,7 +224,7 @@ export function ResetPassword() {
 
   const token = searchParams.get("token") ?? ""
   const username = searchParams.get("username") ?? ""
-  const returnTo = orgInviteReturnTo(searchParams.get("returnTo"))
+  const returnTo = passwordResetReturnTo(searchParams.get("returnTo"))
 
   const [verifyState, setVerifyState] = useState<VerifyState>("loading")
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()

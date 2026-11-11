@@ -217,6 +217,10 @@ export const editor = defineNamespace({
     "editor.file.noneSelectedBody": "Pick a file from the sidebar to start translating.",
     "editor.file.noFilesTitle": "No files yet",
     "editor.file.noFilesBody": "Import a file to get started.",
+    // AQU-2475: the same empty state for someone below the import floor. The
+    // body above is an instruction they cannot follow, so it is replaced by the
+    // role that can, and no Import button is offered.
+    "editor.file.noFilesImportFloor": "{role} can import files.",
     "editor.file.importFile": "Import a file",
     "editor.file.emptyNamedTitle": "{fileName} is empty",
     "editor.file.emptyTitle": "This file has no cells yet",
@@ -4636,6 +4640,19 @@ export const editor = defineNamespace({
         description:
           "Body under editor.file.noFilesTitle. 'Import' means bringing an existing " +
           "document (USFM, docx, subtitles, audio…) into the project.",
+      },
+      "editor.file.noFilesImportFloor": {
+        description:
+          "Replaces editor.file.noFilesBody for a member whose role is below the " +
+          "project's import floor, where the empty state offers no Import button. " +
+          "It names the role that may import instead, so the state is never a dead " +
+          "end. One short sentence; {role} is already a plural role noun, so the " +
+          "sentence takes a plural verb.",
+        placeholders: {
+          role: "Plural name of the lowest role that may import a source file in " +
+            "this project, e.g. \"Project Leads\" or \"Maintainers\" — read from " +
+            "the organization's configured import floor, so it varies per project.",
+        },
       },
       "editor.file.importFile": {
         description:

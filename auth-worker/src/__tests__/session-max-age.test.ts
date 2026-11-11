@@ -17,7 +17,7 @@ const DAY = 24 * 60 * 60
 const TOKEN_LIFETIME = 30 * DAY
 
 async function register(username: string, email: string, password: string): Promise<Response> {
-  return app.request(
+  const response = await app.request(
     "/api/v2/auth/register",
     {
       method: "POST",
@@ -26,6 +26,9 @@ async function register(username: string, email: string, password: string): Prom
     },
     env,
   )
+  // This fixture models an established account with older legacy sessions.
+  await env.AQUILLA_PG.prepare("UPDATE users SET created_at='2020-01-01T00:00:00Z' WHERE username=?").bind(username).run()
+  return response
 }
 
 /** A live (unexpired) token whose *session* started `sessionAgeSeconds` ago,

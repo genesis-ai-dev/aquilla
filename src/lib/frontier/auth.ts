@@ -1,3 +1,4 @@
+import { sessionClaims as jwtClaims } from "./session-claims"
 import { orgInviteReturnTo } from "../../../shared/org-invite-return-to"
 // Workspace auth module — wraps the aquilla-identity (/api/v2/auth/*).
 //
@@ -21,6 +22,7 @@ export const FRONTIER_BASE = AUTH_BASE;
 
 import type { FrontierSession } from "./types";
 import {
+  listStoredSessions,
   listSessionsNeedingEmail,
   patchSessionEmails,
   saveSession,
@@ -352,28 +354,6 @@ export async function resetPassword(
 }
 
 /**
- * Decode the `sub` claim from a JWT (base64url payload, no signature
- * verification needed here — the server already verified the password before
- * issuing it). Returns null if the token is malformed.
- */
-function jwtClaims(token: string): { sub?: string; email?: string } {
-  try {
-    const parts = token.split(".");
-    if (parts.length !== 3) return {};
-    // atob requires standard base64; JWT uses base64url — swap - and _
-    const padded = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-    const json = atob(padded);
-    const payload = JSON.parse(json) as { sub?: unknown; email?: unknown };
-    return {
-      sub: typeof payload.sub === "string" ? payload.sub : undefined,
-      email: typeof payload.email === "string" ? payload.email : undefined,
-    };
-  } catch {
-    return {};
-  }
-}
-
-/**
  * True only when a JWT's `exp` claim is provably in the past. Lets the client
  * detect an expired session WITHOUT a network round-trip so flows like the
  * invite JoinPage can re-prompt login instead of mistaking an auth-expiry for
@@ -466,9 +446,27 @@ export async function finalizeSession(
     jwt: data.access_token,
     username: resolvedUsername,
     createdAt: new Date().toISOString(),
+    ...(claims.uid ? { accountId: claims.uid } : {}),
     ...(email ? { email } : {}),
   };
-  await saveSession(session);
+  let legacyOwner: { key: string; jwt: string } | undefined;
+  if (claims.uid) {
+    const previous = (await listStoredSessions()).find(({ session: old }) => old.username === resolvedUsername && !old.accountId);
+    if (previous) {
+      // Even an expired historical credential can prove which account owns
+      // existing local work. It grants no access: the new JWT authenticates.
+      const response = await fetch(`${AUTH_BASE}/api/v2/auth/me/local-data-owner`, {
+        method: "POST", cache: "no-store", signal: AbortSignal.timeout(15_000),
+        headers: { Authorization: `Bearer ${session.jwt}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ previousToken: previous.session.jwt }),
+      });
+      if (!response.ok) throw new FrontierAuthError(t("auth.login.failed"), response.status);
+      const proof = await response.json() as { sameAccount: boolean };
+      if (typeof proof?.sameAccount !== "boolean") throw new FrontierAuthError(t("auth.login.failed"), 502);
+      if (proof.sameAccount === true) legacyOwner = { key: previous.key, jwt: previous.session.jwt };
+    }
+  }
+  await saveSession(session, legacyOwner);
   // AQU-884: every successful auth path funnels through here, so this is the
   // one place that has to lower the session-expired flag — otherwise the
   // banner (which no longer clears on navigation) would outlive the re-login.

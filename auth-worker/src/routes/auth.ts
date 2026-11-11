@@ -314,11 +314,11 @@ auth.post("/register", zValidator("json", registerSchema), async (c) => {
 
     const result = await c.env.AQUILLA_PG.prepare(
       `INSERT INTO users (username, email, password_hash)
-       VALUES (?, ?, ?)`,
+       VALUES (?, ?, ?) RETURNING id`,
     )
       .bind(username, email, passwordHash)
-      .run()
-    if (!result.success) {
+      .first<{ id: number }>()
+    if (!result) {
       throw new Error("Failed to create user in database")
     }
 
@@ -369,7 +369,7 @@ auth.post("/register", zValidator("json", registerSchema), async (c) => {
     }
 
     const jwtService = new JWTService(c.env)
-    const accessToken = await jwtService.createAccessToken(username)
+    const accessToken = await jwtService.createAccessToken(username, undefined, result.id)
     return c.json({
       access_token: accessToken,
       token_type: "bearer",
@@ -635,7 +635,7 @@ auth.post("/token", async (c) => {
       logActivity(c.env.AQUILLA_PG, user.id, "login", "Signed in"),
     ])
 
-    const accessToken = await jwtService.createAccessToken(user.username)
+    const accessToken = await jwtService.createAccessToken(user.username, undefined, user.id)
     return c.json({
       access_token: accessToken,
       token_type: "bearer",
@@ -707,6 +707,7 @@ auth.post("/refresh", authMiddleware, async (c) => {
     user.username,
     typeof payload.sst === "number" ? payload.sst : payload.iat,
     typeof payload.sid === "string" ? payload.sid : undefined,
+    user.id,
   )
   return c.json({
     access_token: token,
@@ -1019,6 +1020,13 @@ const analyticsChoiceSchema = z.object({
   source: z.enum(["signup", "settings"]),
   expectedRevision: z.string().nullable(),
 }).strict()
+
+// AQU-2534: historical proof can only associate local data with this already
+// authenticated account. It never issues a token or enables expired sessions.
+auth.post("/me/local-data-owner", authMiddleware, zValidator("json", z.object({ previousToken: z.string().min(1).max(8192) }).strict()), async c => {
+  c.header("Cache-Control", "no-store")
+  return c.json({ sameAccount: await new JWTService(c.env).ownsHistoricalToken(c.req.valid("json").previousToken, c.get("user")) })
+})
 
 auth.get("/me/analytics-consent", authMiddleware, async (c) => {
   const user = c.get("user")

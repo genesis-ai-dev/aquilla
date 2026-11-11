@@ -14,6 +14,9 @@ export type GrantTranslator = (key: MessageKey, vars?: TVars) => string
  * - organization: the org. Every project only from Maintainer up (AQU-1107);
  *   below that the person sees a project once they're added to it.
  * - project + lanes "all": the named project, every lane (no lane scope).
+ * - project + lanes "none": the named project, NO lane (AQU-2358) — the person
+ *   sees the project and its source text and no translation. Distinct from an
+ *   empty label list, which still means "lane scope not known / every lane".
  * - project + lanes "unknown": the named project, lane list not loaded yet.
  * - project + lane labels: those lanes only.
  */
@@ -22,7 +25,7 @@ export type GrantScope =
   | {
       kind: "project"
       projectName: string
-      lanes: "all" | "unknown" | readonly string[]
+      lanes: "all" | "none" | "unknown" | readonly string[]
     }
 
 export interface GrantScopeCopy {
@@ -86,6 +89,14 @@ function scopeParts(
     return {
       scope: t("org.grantScope.scope.projectAllLanes", { project }),
       echo: t("org.grantScope.echo.allLanes"),
+    }
+  }
+  // AQU-2358: an explicit no-lane grant must not read as the every-lane
+  // fallback an empty label list lands on below.
+  if (scope.lanes === "none") {
+    return {
+      scope: t("org.grantScope.scope.projectNoLanes", { project }),
+      echo: t("org.grantScope.echo.noLanes"),
     }
   }
   const labels = scope.lanes.map((lane) => lane.trim()).filter(Boolean)

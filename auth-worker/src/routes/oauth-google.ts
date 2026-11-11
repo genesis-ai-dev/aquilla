@@ -164,8 +164,8 @@ async function accountFor(db: AquillaDb, flow: Flow): Promise<{ account: Account
   const account = await db.prepare("SELECT id, username, email, password_hash FROM users WHERE LOWER(email)=LOWER(?)").bind(flow.email).first<Account>()
   return { account, linked: false }
 }
-async function session(env: AuthHonoEnv["Bindings"], username: string, created: boolean, linked = false) {
-  const { token } = await new JWTService(env).createAccessTokenWithPayload(username)
+async function session(env: AuthHonoEnv["Bindings"], username: string, accountId: number, created: boolean, linked = false) {
+  const { token } = await new JWTService(env).createAccessTokenWithPayload(username, undefined, undefined, accountId)
   try { await env.AQUILLA_PG.prepare("INSERT INTO activity_logs (user_id, activity_type, description) SELECT id, ?, ? FROM users WHERE username=?")
     .bind(created ? "register" : "login", created ? "Account created with Google" : linked ? "Google linked and signed in" : "Signed in with Google", username).run()
   } catch { console.warn("[social-login] activity log insert failed (non-fatal)") }
@@ -184,7 +184,7 @@ routes.post("/exchange", zValidator("json", proof), async c => {
   if (!access.allowed) return devAccessRefusal(c, access.reason)
   if (linked && account) {
     await c.env.AQUILLA_PG.prepare("UPDATE social_login_flows SET status='consumed', code_hash=NULL WHERE state_hash=?").bind(flow.state_hash).run()
-    return c.json(await session(c.env, account.username, false))
+    return c.json(await session(c.env, account.username, account.id, false))
   }
   return c.json({ continuation: nextCode, step: account ? "link" : "signup", email: flow.email, ...(account ? { username: account.username } : {}) })
 })
@@ -215,7 +215,7 @@ routes.post("/finish", zValidator("json", proof.extend({ username: z.string().tr
     if (!password || !(await verifyPassword(password, account.password_hash)).isValid) return c.json({ error: "invalid_password" }, 401)
     // The single SQL statement atomically claims the continuation and links.
     // Compare the password hash too: a concurrent reset invalidates this proof.
-    let result: { username: string } | null
+    let result: { id: number; username: string } | null
     try { result = await c.env.AQUILLA_PG.prepare(`WITH claimed AS (
       UPDATE social_login_flows SET status='consumed', code_hash=NULL
       WHERE code_hash=? AND browser_challenge=? AND status='pending' AND expires_at>now()
@@ -223,11 +223,11 @@ routes.post("/finish", zValidator("json", proof.extend({ username: z.string().tr
       RETURNING subject
     ), linked AS (
       INSERT INTO provider_identities (provider, subject, user_id) SELECT 'google', subject, ? FROM claimed RETURNING user_id
-    ) SELECT u.username FROM users u JOIN linked l ON u.id=l.user_id`)
-      .bind(hash, challenge, account.id, account.password_hash, flow.email, account.id).first<{ username: string }>()
+    ) SELECT u.id, u.username FROM users u JOIN linked l ON u.id=l.user_id`)
+      .bind(hash, challenge, account.id, account.password_hash, flow.email, account.id).first<{ id: number; username: string }>()
     } catch { return c.json({ error: "restart" }, 409) }
     if (!result) return c.json({ error: "restart" }, 409)
-    return c.json(await session(c.env, result.username, false, true))
+    return c.json(await session(c.env, result.username, result.id, false, true))
   }
   if (!username) return c.json({ error: "username_required" }, 400)
   if (c.env.ENVIRONMENT !== "production") {
@@ -251,8 +251,8 @@ routes.post("/finish", zValidator("json", proof.extend({ username: z.string().tr
     ), linked AS (
       INSERT INTO provider_identities (provider, subject, user_id)
       SELECT 'google', c.subject, u.id FROM claimed c CROSS JOIN created u RETURNING user_id
-    ) SELECT u.username FROM created u JOIN linked l ON u.id=l.user_id`)
-      .bind(hash, challenge, username).first<{ username: string }>()
+    ) SELECT u.id, u.username FROM created u JOIN linked l ON u.id=l.user_id`)
+      .bind(hash, challenge, username).first<{ id: number; username: string }>()
     if (!result) return c.json({ error: "expired_request" }, 400)
     // Preserve the ordinary signup verification path for addresses for which
     // Google is not authoritative. Email delivery must not strand a new account.
@@ -269,7 +269,7 @@ routes.post("/finish", zValidator("json", proof.extend({ username: z.string().tr
     }
     const delivery = welcome().catch(() => { console.warn("[social-login] welcome delivery failed (non-fatal)") })
     try { c.executionCtx.waitUntil(delivery) } catch { await delivery }
-    return c.json(await session(c.env, result.username, true))
+    return c.json(await session(c.env, result.username, result.id, true))
   } catch {
     // Uniqueness races roll back the entire CTE, never leaving an orphan account.
     return c.json({ error: "signup_failed" }, 409)

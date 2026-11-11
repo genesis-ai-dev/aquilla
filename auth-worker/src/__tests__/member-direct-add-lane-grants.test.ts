@@ -2,6 +2,7 @@ import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
+import { NO_LANE_SCOPE } from "../../../src/lib/lanes/no-lane-access"
 
 // AQU-1782: direct add (POST /projects/:id/members) wrote the membership row
 // and nothing else, so under the lane read/write wall a below-Maintainer
@@ -318,5 +319,70 @@ describe("POST /api/v2/projects/:id/members — the lane choice replaces what an
     expect(await laneScopesFor(2)).toEqual(["lane0002"])
     // The grant set is what a later demotion through this route restores.
     expect(await grantsFor(2)).toEqual([{ lane: "lane0002", level: 500 }])
+  })
+})
+
+// AQU-2358: adding someone with NO lanes grants no lanes. Before this ticket
+// the add was simply refused (`lane_choice_required`), so "see that the project
+// exists, and none of its translation" was not expressible.
+describe("POST /api/v2/projects/:id/members — adding someone with no lanes (AQU-2358)", () => {
+  async function laneScopesFor(userId: number): Promise<string[]> {
+    const { results } = await env.AQUILLA_PG.prepare(
+      `SELECT value FROM project_member_scopes
+        WHERE project_id = 'p1' AND user_id = ? AND kind = 'lane' ORDER BY value`,
+    )
+      .bind(userId)
+      .all<{ value: string }>()
+    return (results ?? []).map((row) => row.value)
+  }
+
+  it("writes no lane grant, and records the choice as the reserved scope", async () => {
+    await seedOrg()
+    const res = await addMember(300, "bob", { scopeLanes: [NO_LANE_SCOPE] })
+    expect(res.status).toBe(200)
+    expect(await grantsFor(2)).toEqual([])
+    // Stored as one reserved scope row, NOT as zero rows: zero rows is how
+    // "every current lane" is stored, and it is what lane creation reads as
+    // "grant them the new lane too".
+    expect(await laneScopesFor(2)).toEqual([NO_LANE_SCOPE])
+  })
+
+  it("does not widen back to every lane when the member's role changes later", async () => {
+    await seedOrg()
+    expect((await addMember(300, "bob", { scopeLanes: [NO_LANE_SCOPE] })).status).toBe(200)
+    // A role change names no lanes, so grants are re-planned from the stored
+    // scopes. Zero stored scopes would re-plan to every lane.
+    expect((await addMember(400, "bob", null)).status).toBe(200)
+    expect(await grantsFor(2)).toEqual([])
+    expect(await laneScopesFor(2)).toEqual([NO_LANE_SCOPE])
+  })
+
+  it("is replaced by a real lane list on a later add", async () => {
+    await seedOrg()
+    expect((await addMember(300, "bob", { scopeLanes: [NO_LANE_SCOPE] })).status).toBe(200)
+    expect((await addMember(300, "bob", { scopeLanes: ["lane0002"] })).status).toBe(200)
+    expect(await laneScopesFor(2)).toEqual(["lane0002"])
+    expect(await grantsFor(2)).toEqual([{ lane: "lane0002", level: 300 }])
+  })
+
+  it("applies to a project lead too — an explicit choice beats the lane snapshot", async () => {
+    await seedOrg()
+    expect((await addMember(500, "bob", { scopeLanes: [NO_LANE_SCOPE] })).status).toBe(200)
+    expect(await grantsFor(2)).toEqual([])
+    expect(await laneScopesFor(2)).toEqual([NO_LANE_SCOPE])
+  })
+
+  it("refuses the reserved value mixed with a real lane, rather than guessing", async () => {
+    await seedOrg()
+    const res = await addMember(300, "bob", { scopeLanes: [NO_LANE_SCOPE, "lane0002"] })
+    expect(res.status).toBe(400)
+    expect(await grantsFor(2)).toEqual([])
+    expect(await laneScopesFor(2)).toEqual([])
+  })
+
+  it("still refuses an add that names no lanes at all — that is a blank form", async () => {
+    await seedOrg()
+    expect((await addMember(300, "bob", null)).status).toBe(400)
+    expect(await laneScopesFor(2)).toEqual([])
   })
 })

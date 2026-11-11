@@ -301,8 +301,18 @@ export const projectSettings = defineNamespace({
     "projectSettings.share.laneChoiceLegend": "Language lanes",
     "projectSettings.share.laneChoiceAll": "Every current language lane",
     "projectSettings.share.laneChoiceSome": "Only selected language lanes",
+    "projectSettings.share.laneChoiceAllCurrent": "All current language lanes",
     "projectSettings.share.laneChoiceRequired": "Choose the language lanes before adding this person.",
     "projectSettings.share.laneChoiceLeadNote": "A maintainer sees every language lane.",
+    "projectSettings.share.laneChoiceNoneNote":
+      "No language lanes selected — this person will see the project and its source text, and no translation.",
+    "projectSettings.share.noLanesConfirmTitle": "No language lanes selected",
+    "projectSettings.share.noLanesConfirmInvite":
+      "This invitation does not include permission for any language lanes, so the recipient will not be able to see any translation. Are you sure you want to proceed? You can tick the boxes above to grant permission for language lanes.",
+    "projectSettings.share.noLanesConfirmAdd":
+      "This does not include permission for any language lanes, so this person will not be able to see any translation. Are you sure you want to proceed? You can tick the boxes above to grant permission for language lanes.",
+    "projectSettings.share.noLanesConfirmBack": "Go back and choose language lanes",
+    "projectSettings.share.noLanesConfirmProceed": "Add without language lanes",
     "projectSettings.share.laneChoiceAdminHint":
       "To limit someone to some language lanes, use Project settings → Members on that project.",
     "projectSettings.share.copyUrlLabel": "Copy URL",

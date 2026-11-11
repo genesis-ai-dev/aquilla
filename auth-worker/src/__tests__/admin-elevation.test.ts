@@ -10,6 +10,8 @@ import { sign } from "hono/jwt"
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
+import deploymentManifest from "../../../config/cloudflare-deployments.json"
+import { DEV_IDENTITY_WORKER } from "../services/dev-access"
 
 /** A second, DIFFERENT credential for the same account. `jwtFor` is keyed by
  *  (sub, iat), so a backdated `iat` is enough to get a distinct token — and,
@@ -55,6 +57,7 @@ beforeEach(() => {
 })
 afterEach(() => {
   env.ADMIN_REQUIRE_ELEVATION = undefined
+  env.DEPLOYMENT_WORKER_NAME = undefined
 })
 
 describe("admin identity is by email", () => {
@@ -284,5 +287,63 @@ describe("OPS-36 — elevation codes are hashed at rest", () => {
     const res = await verifyCode(jwt, "654321")
     expect(res.status).toBe(400)
     expect((await res.json()) as { error: string }).toMatchObject({ error: "invalid_code" })
+  })
+})
+
+// AQU-2470: dev.aquilla.app is closed by the AQU-2469 access list, so the
+// emailed code comes off there. Everywhere else, including the per-branch
+// previews (which also say ENVIRONMENT=development), it stays on.
+describe("step-up by deployment (AQU-2470)", () => {
+  const PROD_IDENTITY_WORKER =
+    deploymentManifest.surfaces.identity.environments.production.worker
+
+  it("the dev identity Worker opens the console without a code", async () => {
+    env.DEPLOYMENT_WORKER_NAME = DEV_IDENTITY_WORKER
+    await seedUser(7, "root")
+    const jwt = await jwtFor("root")
+
+    expect((await (await me(jwt)).json()) as Record<string, unknown>).toMatchObject({
+      hardened: false,
+      elevated: true,
+    })
+    expect((await overview(jwt)).status).toBe(200)
+  })
+
+  it("dev still refuses a non-admin; only the step-up comes off", async () => {
+    env.DEPLOYMENT_WORKER_NAME = DEV_IDENTITY_WORKER
+    // wendi is on the access list, so the request gets past AQU-2469 and
+    // reaches the platform-admin check, which must still refuse it.
+    env.DEV_ACCESS_LIST = {
+      get: async (key: string) => (key === "wendi@example.com" ? "{}" : null),
+    } as unknown as KVNamespace
+    await seedUser(1, "wendi")
+    try {
+      const res = await overview(await jwtFor("wendi"))
+      expect(res.status).toBe(403)
+      expect((await res.json()) as { error: string }).toMatchObject({
+        error: "platform admin required",
+      })
+    } finally {
+      env.DEV_ACCESS_LIST = undefined
+    }
+  })
+
+  it.each([
+    ["production", PROD_IDENTITY_WORKER],
+    ["the per-branch preview", "aquilla-auth-preview"],
+    ["an unset Worker name", undefined],
+    ["an unknown Worker name", "aquilla-dev-identity-copy"],
+  ])("%s still asks for the code", async (_label, workerName) => {
+    env.DEPLOYMENT_WORKER_NAME = workerName
+    await seedUser(7, "root")
+    const jwt = await jwtFor("root")
+
+    expect((await (await me(jwt)).json()) as Record<string, unknown>).toMatchObject({
+      hardened: true,
+      elevated: false,
+    })
+    const res = await overview(jwt)
+    expect(res.status).toBe(403)
+    expect((await res.json()) as { error: string }).toMatchObject({ error: "elevation required" })
   })
 })

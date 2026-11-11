@@ -1,3 +1,4 @@
+import { sessionKey } from "@/lib/frontier/session-store"
 // Default singleton fetcher (re-exported below) used by call sites that
 // don't have a React-scoped session in hand — synth-and-attach, bulk-audio.
 //
@@ -36,9 +37,9 @@ interface CachedToken {
 // happens without a full page reload. Without a session-identity component in
 // the key, a token minted under user A's role could be served back to user B
 // after an account switch — a real authorization leak, since sync-tokens are
-// role-scoped per project. We key on `session.username`, the same field
-// session-store.ts already uses as the canonical per-account identity
-// (`sessionKey(s) = s.username`), so switching the active session naturally
+// role-scoped per project. We key on the immutable account storage namespace
+// and exact credential, so replacement accounts and renewed credentials
+// cannot inherit tokens from a previous session. Switching sessions naturally
 // partitions the cache instead of leaking across it.
 const cache = new Map<string, CachedToken>()
 
@@ -76,14 +77,14 @@ export function makeAudioSyncTokenFetcher(
   getSession: () => FrontierSession | null,
 ): SyncTokenForFile {
   return async (projectId, fileId) => {
-    // Resolve the session first: the cache key is scoped by username, so we
+    // Resolve the session first: the cache key is scoped by session, so we
     // need it before we can even look up a hit (see module-level comment on
     // `cache` for why identity must be part of the key). This also means a
     // logged-out call (no session) can never accidentally serve a token that
     // was cached under a still-active session.
     const session = getSession()
     if (!session?.jwt) return null
-    const key = `${session.username}::${projectId}::${fileId}`
+    const key = JSON.stringify([sessionKey(session), session.jwt, projectId, fileId])
     const now = Date.now()
     const cached = cache.get(key)
     if (cached && cached.expiresAtMs > now + REFRESH_SAFETY_MS) {

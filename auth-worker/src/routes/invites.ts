@@ -82,7 +82,8 @@ const createMultiInviteSchema = z.object({
    * AQU-528: lane scopes auto-granted on join. The same set applies to every
    * project on the token. AQU-1808: omitting this is not every current lane —
    * send allCurrentLanes, or name the lanes, when any project has current
-   * target lanes.
+   * target lanes. AQU-2358: the reserved value `__no_lanes__`, alone, grants
+   * no lanes at all.
    */
   scopeLanes: z
     .array(z.string().max(MAX_LANE_VALUE_LENGTH))

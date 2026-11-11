@@ -1,10 +1,12 @@
 import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
 import { sign } from "hono/jwt"
+import { seedUser } from "./helpers/db"
 import { JWTService } from "../auth/jwt"
 
 describe("JWTService.createAccessToken / verifyToken", () => {
   it("round-trips a token signed with HS256", async () => {
+    await seedUser(1, "alice")
     const svc = new JWTService(env)
     const token = await svc.createAccessToken("alice")
     const payload = await svc.verifyToken(token)

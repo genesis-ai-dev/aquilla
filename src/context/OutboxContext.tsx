@@ -5,6 +5,7 @@ import { useOutboxFlusher } from "@/hooks/useOutboxFlusher"
 import { usePendingOutboxRecords } from "@/hooks/usePendingOutboxRecords"
 import { buildProjectAwareMinter } from "@/lib/sync/cqrs-bridge"
 import {
+  sessionKey,
   isStoredSessionCurrent,
   listStoredSessions,
   subscribeSession,
@@ -55,7 +56,7 @@ export function OutboxProvider({ children }: { children: ReactNode }) {
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const activeIdentityRef = useRef<{ ownerKey: string; jwt: string } | null>(null)
-  activeIdentityRef.current = session ? { ownerKey: session.username, jwt: session.jwt } : null
+  activeIdentityRef.current = session ? { ownerKey: sessionKey(session), jwt: session.jwt } : null
 
   const minter = useMemo(
     () =>

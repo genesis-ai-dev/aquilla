@@ -21,6 +21,7 @@ import {
 } from "./backfill-plan"
 import { resolveEventLane } from "./event-lane"
 import { isLaneId } from "./lane-id"
+import { isNoLaneScope } from "./no-lane-access"
 import { lanesForRequestedTag, type LaneIdentity } from "./read-wall"
 import { legacyEmptyLaneId, stampRenderingLanes } from "../terminology/rendering-lane"
 import { resolveLaneScopeValue } from "./scope-ids"
@@ -746,6 +747,12 @@ export function planLaneBatch(
       const pending: { from: string; to: string }[] = []
       for (const scope of scopes) {
         counts.scopes.examined += 1
+        // AQU-2358: the reserved "no lanes" value names no lane on purpose.
+        // It is already an id-shaped final value, not an unconverted tag.
+        if (isNoLaneScope(scope.value)) {
+          counts.scopes.alreadyId += 1
+          continue
+        }
         const match = scopeMatch(identities, scope.value)
         if (!match.ok) {
           const row: ScopeTagMatch = {
@@ -816,6 +823,16 @@ export function planLaneBatch(
       const next: string[] = []
       const seen = new Set<string>()
       for (const value of invite.scopeLanes) {
+        // AQU-2358: carried through untouched — an invite that grants no lanes
+        // must not be reported as an unconverted tag, and must never lose the
+        // value, since dropping it would read as unscoped (= every lane).
+        if (isNoLaneScope(value)) {
+          if (!seen.has(value)) {
+            seen.add(value)
+            next.push(value)
+          }
+          continue
+        }
         const match = scopeMatch(identities, value)
         if (!match.ok) {
           const row: ScopeTagMatch = {

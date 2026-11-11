@@ -13,7 +13,6 @@ import { useParams, useNavigate, useSearchParams, useLocation } from "react-rout
 import { useRememberLastWorkspace } from "@/hooks/useRememberLastWorkspace"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useFormat } from "@/lib/i18n/format"
-import { RichMessage } from "@/lib/i18n/RichMessage"
 import { repairIdmlFileAsCopy } from "@/lib/idml/repair-idml-copy"
 import { useProject } from "@/hooks/useProject"
 import { useProjectLaneStaffing } from "@/hooks/useProjectLaneStaffing"
@@ -34,7 +33,7 @@ import { CellAreaPlaceholder, CellRowsLoadStatus } from "./CellAreaPlaceholder"
 import { WorkspaceMainSkeleton } from "./WorkspaceSkeleton"
 import { LoadingCursor } from "@/components/ui/loading-cursor"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
-import { EmptyState, NotFoundIcon } from "@/components/ui/empty"
+import { ProjectNoAccess } from "@/components/ProjectNoAccess"
 import { TabStrip } from "./TabStrip"
 import { useWorkspaceTabs, readLastActiveFileId } from "@/hooks/useWorkspaceTabs"
 import { clearLastLocation, readLastCell, readLastLocation, writeLastCell, writeLastLocation } from "@/lib/frontier/last-location-store"
@@ -192,6 +191,7 @@ import {
   resolveTakeLine,
   historyFileName,
   buildRouteScopedTokenFetcher,
+  archivedProjectNotice,
 } from "./project-workspace-helpers"
 import type { PaintGate } from "./project-workspace-helpers"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
@@ -411,7 +411,7 @@ import { useComments } from "@/hooks/useComments"
 import { useFileAttachments } from "@/hooks/useFileAttachments"
 import { removeAttachmentFromCell } from "@/lib/attachments/attach-file"
 import type { CellAttachmentRecord } from "@/lib/sync/cell-attachments-read-types"
-import { MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download, SplitSquareVertical, BarChart3, Blocks, Loader2, RefreshCw } from "lucide-react"
+import { Archive, MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download, SplitSquareVertical, BarChart3, Blocks, Loader2, RefreshCw } from "lucide-react"
 import { toast } from "@/components/ui/toast"
 import { setMicHeld } from "@/lib/audio/mic-hold"
 import { startOutputDeviceWatch } from "@/lib/audio/output-device-watch"
@@ -13319,7 +13319,9 @@ export function ProjectWorkspace() {
       const voiceName = (opts?.voiceId ? findVoice(tts.laneSettings, opts.voiceId)?.name : undefined)
         ?? resolveCastVoice(tts.laneSettings, owner.cell, owner.cell.ttsSettings?.voiceId).name
       const ok = await whileVoicingAs(cellId, voiceName, () => regenerateVoiceTake({
-        project,
+        // AQU-2511: the lane's own voices and cast — the same view `voiceName`
+        // above is read from, so the take comes back in the voice just named.
+        project: audioProject ?? project,
         cell: owner.cell,
         entry: timelineAudioByCellId.get(cellId),
         session: frontierSession,
@@ -13335,7 +13337,7 @@ export function ProjectWorkspace() {
         ? { type: "success", title: t("editor.timeline.regenerateDone") }
         : { type: "error", title: t("editor.timeline.regenerateFailed") })
     },
-    [project, frontierSession, audioCueCells, resolveCueReadAloud, timelineAudioByCellId, currentUsername, activeLane, tts.laneSettings, t],
+    [project, audioProject, frontierSession, audioCueCells, resolveCueReadAloud, timelineAudioByCellId, currentUsername, activeLane, tts.laneSettings, t],
   )
 
   /**
@@ -17024,50 +17026,17 @@ export function ProjectWorkspace() {
       </div>
     )
   }
-  // FRO-346: revoked / never-granted access gets its own clean state — the
-  // project exists, so "not found" would be misleading (and after a member
-  // removal the removed user must land here on reload, not in the editor).
-  if (status === "forbidden") {
-    return (
-      <div className="p-8 text-muted-foreground" data-testid="project-no-access">
-        <RichMessage
-          k="workspace.status.forbidden"
-          values={{
-            backLink: (
-              <button className="underline" onClick={goToProjects}>
-                {t("workspace.backToDashboard")}
-              </button>
-            ),
-          }}
-        />
-      </div>
-    )
-  }
-  if (status === "not-found" || !project) {
-    return (
-      <div className="p-8">
-        <EmptyState
-          icon={NotFoundIcon}
-          title={
-            <RichMessage
-              k="workspace.status.notFound"
-              values={{
-                backLink: (
-                  <button className="underline" onClick={goToProjects}>
-                    {t("workspace.backToDashboard")}
-                  </button>
-                ),
-              }}
-            />
-          }
-        />
-      </div>
-    )
+  // FRO-346 / AQU-2452: a refused project and a missing one land on the same
+  // screen (ProjectNoAccess). They used to carry different messages, which
+  // told the caller whether a project exists — and after a member removal the
+  // removed user must land here on reload, not in the editor.
+  if (status === "forbidden" || status === "not-found" || !project) {
+    return <ProjectNoAccess />
   }
 
   if (project.deletedAt) {
     return (
-      <TrashedProjectScreen
+      <ArchivedProjectScreen
         project={project}
         onClose={goToProjects}
         onRestore={async () => {
@@ -18819,8 +18788,12 @@ export function ProjectWorkspace() {
             filesLoaded={status === "ready"}
             /* AQU-481: no empty-state "Import" CTA below the file.create floor —
                the placeholder renders without one when it's absent, so a viewer
-               gets the explanatory empty state rather than a dead button. */
+               gets the explanatory empty state rather than a dead button.
+               AQU-2475: and with the floor's role, so the body names who can
+               import instead of telling a Contributor to do it. Same floor the
+               header button's denial names, org override included. */
             onImportClick={canImportSource ? openImportFlow : undefined}
+            importFloorRole={importDenialFloor(orgImportMinRole)}
             onRetryClick={retryCells}
           />
         )}
@@ -19221,7 +19194,13 @@ export function ProjectWorkspace() {
       {project && (
         <AudioRecordingModal
           open={recordingCellId !== null}
-          project={project}
+          /* AQU-2511: `audioProject` — `project` with the OPEN LANE's voices,
+             cast and default voice (and the local overlay `tts` holds, which
+             the server record may not have yet). The dialog's Generate button
+             resolves the line's voice off `project.ttsSettings`, so handed the
+             bare record it generated in the project default while the picker
+             beside it had just assigned another voice on this lane. */
+          project={audioProject ?? project}
           // Stage 4: with an audio VTT imported, the recorder walks the CUES —
           // the units the picture wants recorded — and Next/Prev, the count-in
           // and the take's window all follow the cue's own timing.
@@ -20174,34 +20153,35 @@ function MoveToCorpusDialog({
   )
 }
 
-interface TrashedProjectScreenProps {
+interface ArchivedProjectScreenProps {
   project: ProjectRecord
   onClose: () => void
   onRestore: () => void | Promise<void>
 }
 
-function TrashedProjectScreen({ project, onClose, onRestore }: TrashedProjectScreenProps) {
+/**
+ * AQU-2453: shown instead of the editor when the open project is archived.
+ * The wording and the Restore gate both come from `archivedProjectNotice`, so
+ * a reader is never told to take an action whose button they are not given.
+ */
+function ArchivedProjectScreen({ project, onClose, onRestore }: ArchivedProjectScreenProps) {
   const t = useT()
   const { session } = useFrontierSession()
-  const canRestore =
-    (project.syncRole?.level ?? 0) >= 700 ||
-    (!project.origin && !project.syncRole) ||
-    session == null
+  const { canRestore, bodyKey, hintKey } = archivedProjectNotice({
+    project,
+    hasSession: session != null,
+  })
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-6">
         <div className="bg-card max-w-md rounded-lg p-8 text-center">
         <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-muted">
-          <Trash2 className="h-6 w-6 text-muted-foreground" />
+          <Archive className="h-6 w-6 text-muted-foreground" aria-hidden />
         </div>
-        <h1 className="mb-2 text-lg font-semibold">{t("workspace.trashedProject.title")}</h1>
+        <h1 className="mb-2 text-lg font-semibold">{t("workspace.archivedProject.title")}</h1>
         <p className="mb-6 text-sm text-muted-foreground">
-          {project.deletedBy
-            ? t("workspace.trashedProject.movedByMessage", {
-                name: project.name,
-                deletedBy: project.deletedBy,
-              })
-            : t("workspace.trashedProject.movedMessage", { name: project.name })}
+          {t(bodyKey, { name: project.name, deletedBy: project.deletedBy ?? "" })}{" "}
+          {t(hintKey)}
         </p>
         <div className="flex items-center justify-center gap-2">
           <Button variant="outline" onClick={onClose}>

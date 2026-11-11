@@ -864,3 +864,42 @@ export async function deleteAdminFeedbackRoute(jwt: string, id: number): Promise
   })
   if (!res.ok) throw new UserError(res.status, await readError(res))
 }
+
+// --- Dev access (AQU-2469): who may use dev.aquilla.app ---
+
+export interface AdminDevAccessEntry {
+  email: string
+  /** Email of the admin who added it; null for keys written from the command line. */
+  addedBy: string | null
+  addedAt: string | null
+}
+
+export interface AdminDevAccessList {
+  /** False everywhere but dev, where the list does nothing. */
+  enabled: boolean
+  entries: AdminDevAccessEntry[]
+}
+
+export async function getAdminDevAccess(jwt: string): Promise<AdminDevAccessList> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/dev-access`, { headers: authHeaders(jwt) })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+  return (await res.json()) as AdminDevAccessList
+}
+
+export async function addAdminDevAccess(jwt: string, email: string): Promise<AdminDevAccessEntry> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/dev-access`, {
+    method: "POST",
+    headers: { ...authHeaders(jwt), "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+  return ((await res.json()) as { entry: AdminDevAccessEntry }).entry
+}
+
+export async function removeAdminDevAccess(jwt: string, email: string): Promise<void> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/dev-access/${encodeURIComponent(email)}`, {
+    method: "DELETE",
+    headers: authHeaders(jwt),
+  })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+}

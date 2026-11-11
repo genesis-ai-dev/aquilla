@@ -1,0 +1,5 @@
+{
+  "scripts/migrate-daemon/http.ts": "b4f176479c2bbf571d577124e1b26769428b4f942e3f95668fda450bde875a94",
+  "scripts/migrate-daemon/db.ts": "5d33c52e521ffb08d2227830c524876bcfb482d4c0418d449b21be15fb1963ce",
+  "scripts/migrate-daemon/loop.ts": "565fb07c42b034de8e52f179c1cc0bf1723b825d50faf2e2ac1dd357e9a44728"
+}

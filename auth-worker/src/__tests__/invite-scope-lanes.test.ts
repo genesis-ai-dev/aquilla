@@ -10,6 +10,7 @@ import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
+import { NO_LANE_SCOPE } from "../../../src/lib/lanes/no-lane-access"
 
 async function seedProject(id: string, createdBy: number): Promise<void> {
   await env.AQUILLA_PG.prepare(
@@ -433,5 +434,110 @@ describe("AQU-1808: accepting an invite after an earlier membership was removed"
     await mintAndAccept({ role: 400, scopeLanes: ["lane-fr"] })
     expect(await laneScopesFor("p1", 2)).toEqual(["lane-fr"])
     expect(await grantsFor("p1", 2)).toEqual(["lane-fr"])
+  })
+})
+
+// AQU-2358: an invite that grants NO lanes. Before this ticket the only two
+// answers were "every current lane" and "these lanes", and an invite minted
+// with neither was refused — so "see that the project exists, and none of its
+// translation" could not be shared at all.
+describe("AQU-2358: an invite that grants no lanes", () => {
+  async function seedLane(projectId: string, id: string, name: string) {
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO lanes (id, project_id, role, name, legacy_tag, position) VALUES (?, ?, 'target', ?, NULL, 0)`,
+    )
+      .bind(id, projectId, name)
+      .run()
+  }
+
+  async function grantsFor(projectId: string, userId: number): Promise<string[]> {
+    const { results } = await env.AQUILLA_PG.prepare(
+      `SELECT lane FROM project_member_lane_roles WHERE project_id = ? AND user_id = ? ORDER BY lane`,
+    )
+      .bind(projectId, userId)
+      .all<{ lane: string }>()
+    return (results ?? []).map((row) => row.lane)
+  }
+
+  async function seedTwoLaneProject() {
+    await seedUser(1, "alice")
+    await seedUser(2, "bob")
+    await seedProject("p1", 1)
+    await seedLane("p1", "lane-es", "Spanish")
+    await seedLane("p1", "lane-fr", "French")
+  }
+
+  async function mint(body: Record<string, unknown>) {
+    return app.request(
+      "/api/v2/projects/p1/invites",
+      { method: "POST", headers: authHeader(await jwtFor("alice")), body: JSON.stringify(body) },
+      env,
+    )
+  }
+
+  async function acceptAs(username: string, token: string) {
+    return app.request(
+      "/api/v2/projects/accept-invite",
+      { method: "POST", headers: authHeader(await jwtFor(username)), body: JSON.stringify({ token }) },
+      env,
+    )
+  }
+
+  it("stores the reserved value on the invite, not an empty list", async () => {
+    await seedTwoLaneProject()
+    const res = await mint({ role: 400, scopeLanes: [NO_LANE_SCOPE] })
+    expect(res.status).toBe(200)
+    const { token } = (await res.json()) as { token: string }
+    const stored = await env.AQUILLA_PG.prepare(
+      "SELECT scope_lanes FROM project_invites WHERE token = ?",
+    )
+      .bind(token)
+      .first<{ scope_lanes: string | null }>()
+    // NULL would mean "every lane that exists when it is accepted".
+    expect(JSON.parse(stored?.scope_lanes ?? "null")).toEqual([NO_LANE_SCOPE])
+  })
+
+  it("grants the joiner no lane at all on accept", async () => {
+    await seedTwoLaneProject()
+    const { token } = (await (await mint({ role: 400, scopeLanes: [NO_LANE_SCOPE] })).json()) as {
+      token: string
+    }
+    const accepted = await acceptAs("bob", token)
+    expect(accepted.status).toBe(200)
+    expect(await grantsFor("p1", 2)).toEqual([])
+    // The reserved scope row is what keeps a later re-plan — and a lane
+    // created afterwards — from handing them every lane.
+    expect(await laneScopesFor("p1", 2)).toEqual([NO_LANE_SCOPE])
+  })
+
+  it("refuses the reserved value mixed with a real lane", async () => {
+    await seedTwoLaneProject()
+    const res = await mint({ role: 400, scopeLanes: [NO_LANE_SCOPE, "lane-es"] })
+    expect(res.status).toBe(400)
+  })
+
+  it("refuses the reserved value together with every-current-lane", async () => {
+    await seedTwoLaneProject()
+    const res = await mint({ role: 400, scopeLanes: [NO_LANE_SCOPE], allCurrentLanes: true })
+    expect(res.status).toBe(400)
+  })
+
+  it("leaves an invite minted before this change granting every current lane", async () => {
+    // A link already in someone's inbox: scope_lanes NULL, which has always
+    // meant "every lane that exists when it is accepted". Nothing re-reads
+    // those rows, so an unused old link keeps the behavior it was created
+    // with rather than silently becoming a no-lane link.
+    await seedTwoLaneProject()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_invites (token, project_id, role_level, created_by, expires_at, scope_lanes)
+       VALUES ('legacytoken0001', 'p1', 400, 1, ?, NULL)`,
+    )
+      .bind(new Date(Date.now() + 86400_000).toISOString())
+      .run()
+
+    const accepted = await acceptAs("bob", "legacytoken0001")
+    expect(accepted.status).toBe(200)
+    expect(await laneScopesFor("p1", 2)).toEqual([])
+    expect(await grantsFor("p1", 2)).toEqual(["lane-es", "lane-fr"])
   })
 })

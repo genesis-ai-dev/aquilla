@@ -71,6 +71,17 @@ export class SyncClient {
     const res = await retryingFetch(`${this.base}${path}`, { ...init, headers: this.headers() }, this.retry)
     return (await res.json()) as T
   }
+  async archiveStatus(p: { gitlab_id: number; aquilla_id: string; org_id: number | null; team_id: number | null; project_upserted: number }): Promise<boolean> {
+    if (p.org_id === null) throw new Error("Project has no organization")
+    const query = new URLSearchParams({ gitlabId: String(p.gitlab_id), projectId: p.aquilla_id,
+      orgId: String(p.org_id), mustExist: String(!!p.project_upserted), archiveStatus: "true" })
+    if (p.team_id !== null) query.set("teamId", String(p.team_id))
+    const result = await this.json<{ safetyVersion: number; projectId: string; archived: boolean }>(`/migrate/project?${query}`)
+    if (result.safetyVersion !== 1 || result.projectId !== p.aquilla_id || typeof result.archived !== "boolean") {
+      throw new Error("Archive status contract unavailable; refusing transfer")
+    }
+    return result.archived
+  }
   upsertProject(b: { projectId: string; name: string; orgId: number; ownerUserId: number; teamId: number | null }): Promise<void> {
     return this.json<unknown>("/migrate/project", { method: "POST", body: JSON.stringify(b) }).then(() => undefined)
   }

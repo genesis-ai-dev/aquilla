@@ -47,6 +47,8 @@ export const auth = defineNamespace({
     "auth.login.createAccountLink": "Create an account",
     "auth.login.invalidCredentials": "Invalid username or password",
     "auth.login.failed": "Couldn't sign you in. Please try again.",
+    "auth.login.devAccessRestricted":
+      "Access to dev.aquilla.app is restricted. Ask the Aquilla team to add you to the dev access list.",
     "auth.login.accountTransitionFailed":
       "We signed you in, but couldn't safely finish switching accounts. Your previous account's data is still isolated. Retry to finish the switch.",
     "auth.login.onboardingMigrationFailed":
@@ -206,6 +208,12 @@ export const auth = defineNamespace({
       screenshot: "auth",
     },
     keys: {
+      "auth.login.devAccessRestricted": {
+        description:
+          "Shown under the sign-in form when the password was right but the account " +
+          "may not use the team's internal test site. 'dev.aquilla.app' is a web " +
+          "address: never translate it. 'The Aquilla team' means the people who run Aquilla.",
+      },
       "auth.login.title": {
         description:
           "Heading of the sign-in form. Short imperative/label phrase naming the " +

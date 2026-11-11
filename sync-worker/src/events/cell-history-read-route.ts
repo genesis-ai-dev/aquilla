@@ -11,10 +11,12 @@
 // Auth: sync-token JWT scoped to `projectId`; minimum role viewer (100).
 
 import { verifyTokenForProject } from "../auth"
+import { visibleLanesForRead } from "./lane-read-wall"
 
 export interface CellHistoryReadEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
+  LANE_READ_WALL?: string
 }
 
 interface EventRowRaw {
@@ -100,7 +102,25 @@ export async function handleCellHistoryReadRequest(
     .bind(projectId, fileId, cellId, limit)
     .all<EventRowRaw>()
 
-  const events: CellHistoryEvent[] = result.results.map((row) => ({
+  // AQU-730 read wall: a member walled to some target lanes must not read the
+  // other lanes' text through the audit trail. Source events are never hidden;
+  // a target event is kept only when its payload names a granted lane. An
+  // unstamped target event fails closed.
+  const visibleLanes = visibleLanesForRead(env.LANE_READ_WALL, auth.claims)
+  const rows =
+    visibleLanes === null
+      ? result.results
+      : result.results.filter((row) => {
+          if (row.kind.startsWith("source.")) return true
+          try {
+            const laneId = (JSON.parse(row.payload) as { laneId?: unknown } | null)?.laneId
+            return typeof laneId === "string" && visibleLanes.has(laneId)
+          } catch {
+            return false
+          }
+        })
+
+  const events: CellHistoryEvent[] = rows.map((row) => ({
     id: row.id,
     parentId: row.parent_id,
     kind: row.kind,

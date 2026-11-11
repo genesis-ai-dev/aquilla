@@ -343,7 +343,7 @@ function VerseResourcesSidebarBody({
       defaultWidth={320}
       minWidth={300}
       className={cn("hidden sm:flex", className)}
-      resizeLabel="Resize verse resources panel"
+      resizeLabel={t("editor.panel.resizeVerseResources")}
     >
       <div className="flex h-full w-full flex-col border-l bg-card text-sm">
         {/* Header — p-2 matches the other side panels' header strip. */}

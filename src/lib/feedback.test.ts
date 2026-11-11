@@ -6,7 +6,7 @@
  * team simply never learns which project the user was in. So the assertions
  * read the FormData the client actually builds, not a summary of it.
  *
- * `captureViewportScreenshot` is gesture-gated and cancellable. Two behaviours
+ * `captureScreenFrame` is gesture-gated and cancellable. Two behaviours
  * matter and neither is visible in the happy path: a dismissed share-picker must
  * surface as `ScreenshotCancelled` (the dialog stays quiet) rather than an
  * error, and every exit must stop the MediaStream tracks — a leaked track leaves
@@ -19,10 +19,11 @@ import {
   MAX_FEEDBACK_SCREENSHOT_BYTES,
   SCREENSHOT_MAX_EDGE_PX,
   ScreenshotCancelled,
-  captureViewportScreenshot,
+  captureScreenFrame,
   isScreenshotCaptureSupported,
   scaleToFit,
   submitFeedback,
+  validateAttachedImage,
 } from "./feedback"
 
 function okResponse(body: unknown): Response {
@@ -86,26 +87,26 @@ describe("isScreenshotCaptureSupported", () => {
   })
 })
 
-describe("captureViewportScreenshot", () => {
+describe("captureScreenFrame", () => {
   it("maps a dismissed share-picker to ScreenshotCancelled, not an error", async () => {
     stubDisplayMedia(async () => {
       throw new DOMException("denied", "NotAllowedError")
     })
-    await expect(captureViewportScreenshot()).rejects.toBeInstanceOf(ScreenshotCancelled)
+    await expect(captureScreenFrame()).rejects.toBeInstanceOf(ScreenshotCancelled)
   })
 
   it("maps an aborted picker to ScreenshotCancelled too", async () => {
     stubDisplayMedia(async () => {
       throw new DOMException("aborted", "AbortError")
     })
-    await expect(captureViewportScreenshot()).rejects.toBeInstanceOf(ScreenshotCancelled)
+    await expect(captureScreenFrame()).rejects.toBeInstanceOf(ScreenshotCancelled)
   })
 
   it("surfaces any other capture failure as a real error", async () => {
     stubDisplayMedia(async () => {
       throw new DOMException("no screens", "NotFoundError")
     })
-    await expect(captureViewportScreenshot()).rejects.not.toBeInstanceOf(ScreenshotCancelled)
+    await expect(captureScreenFrame()).rejects.not.toBeInstanceOf(ScreenshotCancelled)
   })
 
   it("stops every track even when rendering the frame fails", async () => {
@@ -113,7 +114,7 @@ describe("captureViewportScreenshot", () => {
     stubDisplayMedia(async () => ({ getTracks: () => [{ stop }] }) as unknown as MediaStream)
     // happy-dom has no 2D canvas context, so the draw step throws — which is
     // exactly the path that must still release the capture.
-    await expect(captureViewportScreenshot()).rejects.toBeTruthy()
+    await expect(captureScreenFrame({ settleMs: 0 })).rejects.toBeTruthy()
     expect(stop).toHaveBeenCalledTimes(1)
   })
 })
@@ -124,7 +125,9 @@ describe("submitFeedback", () => {
     vi.stubGlobal("fetch", fetchMock)
 
     const result = await submitFeedback("jwt-123", {
-      description: "  editor drops keystrokes  ",
+      whatHappened: "  editor drops keystrokes  ",
+      tryingTo: "  type a verse ",
+      expected: "",
       route: "/project/p1/file/f1",
       projectId: "p1",
       fileId: "f1",
@@ -139,7 +142,11 @@ describe("submitFeedback", () => {
     expect((init.headers as Record<string, string>)["Content-Type"]).toBeUndefined()
 
     const form = init.body as FormData
-    expect(form.get("description")).toBe("editor drops keystrokes")
+    expect(form.get("whatHappened")).toBe("editor drops keystrokes")
+    expect(form.get("tryingTo")).toBe("type a verse")
+    // An unanswered optional field is left out, and the legacy field is not sent.
+    expect(form.get("expected")).toBeNull()
+    expect(form.get("description")).toBeNull()
     expect(form.get("route")).toBe("/project/p1/file/f1")
     expect(form.get("projectId")).toBe("p1")
     expect(form.get("fileId")).toBe("f1")
@@ -153,7 +160,7 @@ describe("submitFeedback", () => {
 
     const screenshot = new Blob([new Uint8Array([1, 2, 3])], { type: "image/jpeg" })
     const result = await submitFeedback("jwt", {
-      description: "look",
+      whatHappened: "look",
       route: "/org",
       screenshot,
     })
@@ -166,10 +173,23 @@ describe("submitFeedback", () => {
   it("refuses an empty description without a round trip", async () => {
     const fetchMock = vi.fn()
     vi.stubGlobal("fetch", fetchMock)
-    await expect(submitFeedback("jwt", { description: "   ", route: "/" })).rejects.toBeInstanceOf(
+    await expect(submitFeedback("jwt", { whatHappened: "   ", route: "/" })).rejects.toBeInstanceOf(
       FeedbackSubmitError,
     )
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it("sends an attached file under its own name and type, untouched", async () => {
+    const fetchMock = vi.fn(async () => okResponse({ feedbackId: "f4", delivered: true, screenshotKey: null }))
+    vi.stubGlobal("fetch", fetchMock)
+    const file = new File([new Uint8Array([9, 9, 9])], "bug.png", { type: "image/png" })
+    await submitFeedback("jwt", { whatHappened: "see image", route: "/", screenshot: file })
+    const sent = ((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as FormData).get(
+      "screenshot",
+    ) as File
+    expect(sent.name).toBe("bug.png")
+    expect(sent.type).toBe("image/png")
+    expect(sent.size).toBe(3)
   })
 
   it("refuses an oversize screenshot without a round trip", async () => {
@@ -177,14 +197,14 @@ describe("submitFeedback", () => {
     vi.stubGlobal("fetch", fetchMock)
     const huge = { size: MAX_FEEDBACK_SCREENSHOT_BYTES + 1, type: "image/jpeg" } as Blob
     await expect(
-      submitFeedback("jwt", { description: "big", route: "/", screenshot: huge }),
+      submitFeedback("jwt", { whatHappened: "big", route: "/", screenshot: huge }),
     ).rejects.toMatchObject({ status: 413 })
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it("surfaces the server's error message and status", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => errorResponse(429, { error: "Too many feedback submissions" })))
-    await expect(submitFeedback("jwt", { description: "again", route: "/" })).rejects.toMatchObject({
+    await expect(submitFeedback("jwt", { whatHappened: "again", route: "/" })).rejects.toMatchObject({
       status: 429,
       message: "Too many feedback submissions",
     })
@@ -192,8 +212,25 @@ describe("submitFeedback", () => {
 
   it("treats a missing delivered flag as not delivered rather than assuming success", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => okResponse({ feedbackId: "f3" })))
-    const result = await submitFeedback("jwt", { description: "x", route: "/" })
+    const result = await submitFeedback("jwt", { whatHappened: "x", route: "/" })
     expect(result.delivered).toBe(false)
     expect(result.screenshotKey).toBeNull()
+  })
+})
+
+describe("validateAttachedImage (AQU-2467)", () => {
+  it("accepts PNG, JPEG and WebP within the limit", () => {
+    for (const type of ["image/png", "image/jpeg", "image/webp"]) {
+      expect(validateAttachedImage({ type, size: 10 } as Blob)).toBe("ok")
+    }
+    expect(validateAttachedImage({ type: "image/png", size: MAX_FEEDBACK_SCREENSHOT_BYTES } as Blob)).toBe("ok")
+  })
+
+  it("refuses the wrong type and an image over 8 MB", () => {
+    expect(validateAttachedImage({ type: "image/gif", size: 10 } as Blob)).toBe("wrongType")
+    expect(validateAttachedImage({ type: "application/pdf", size: 10 } as Blob)).toBe("wrongType")
+    expect(
+      validateAttachedImage({ type: "image/png", size: MAX_FEEDBACK_SCREENSHOT_BYTES + 1 } as Blob),
+    ).toBe("tooLarge")
   })
 })

@@ -1,3 +1,4 @@
+import { GoogleLoginButton } from "@/components/auth/GoogleLoginButton"
 import { useEffect, useRef, useState } from "react"
 import { useForm } from "@tanstack/react-form"
 import { z } from "zod"
@@ -130,6 +131,7 @@ function buildSignupSchema(t: TFunction) {
 }
 
 interface FrontierSignupFormProps {
+  returnTo?: string
   onSuccess: (session: FrontierSession) => void | Promise<void>
   /** Prefills invite-bound signup forms without overriding user edits. */
   initialEmail?: string | null
@@ -141,7 +143,7 @@ interface FrontierSignupFormProps {
   onSwitchToLogin?: (identifier: string) => void
 }
 
-export function FrontierSignupForm({ onSuccess, initialEmail, onSwitchToLogin }: FrontierSignupFormProps) {
+export function FrontierSignupForm({ onSuccess, initialEmail, onSwitchToLogin, returnTo }: FrontierSignupFormProps) {
   const { register } = useFrontierSession()
   const t = useT()
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
@@ -212,6 +214,7 @@ export function FrontierSignupForm({ onSuccess, initialEmail, onSwitchToLogin }:
           {t("auth.login.offlineNotice")}
         </p>
       )}
+      <GoogleLoginButton signup next={returnTo} />
       <FieldGroup>
         <form.Field
           name="username"

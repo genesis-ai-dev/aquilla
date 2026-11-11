@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
-import { sandboxAdapter, type SandboxRpc } from "../src/resolve-sandbox"
-import type { SandboxRunResult } from "../src/sandbox"
+import { readCapped, sandboxAdapter, type SandboxRpc } from "../src/resolve-sandbox"
+import { SandboxFileTooLargeError, type SandboxRunResult } from "../src/sandbox"
 import type { RunCodeOptions } from "../src/sandbox-do"
 
 // The adapter between the route layer's SandboxLike (base64 strings, 0.x
@@ -85,5 +85,36 @@ describe("sandboxAdapter", () => {
     const stub = new FakeStub()
     await sandboxAdapter(stub).destroy()
     expect(stub.destroyed).toBe(1)
+  })
+})
+
+// The file a read carries out is whatever the code in the container wrote, so
+// the drain is counted and abandoned at the cap instead of buffered whole.
+describe("readCapped", () => {
+  const streamOf = (chunks: Uint8Array[], onCancel?: () => void) =>
+    new ReadableStream<Uint8Array>({
+      pull(controller) {
+        const next = chunks.shift()
+        if (next) controller.enqueue(next)
+        else controller.close()
+      },
+      cancel() {
+        onCancel?.()
+      },
+    })
+
+  it("returns every byte of a file at the cap", async () => {
+    const bytes = await readCapped(streamOf([utf8("abc"), utf8("def")]), 6)
+    expect(new TextDecoder().decode(bytes)).toBe("abcdef")
+  })
+
+  it("refuses a file one byte over the cap and stops reading it", async () => {
+    let cancelled = false
+    const chunks = [utf8("abc"), utf8("defg"), utf8("never read")]
+    await expect(readCapped(streamOf(chunks, () => (cancelled = true)), 6)).rejects.toBeInstanceOf(
+      SandboxFileTooLargeError,
+    )
+    expect(cancelled).toBe(true)
+    expect(chunks).toHaveLength(1)
   })
 })

@@ -160,6 +160,23 @@ export async function resolveSession(
     user = setCachedSession(cacheKey, hydrated)
   }
 
+  // AQU-2530: usernames can be reused after deletion. A signed credential
+  // must never authenticate the replacement account, including on cache hits.
+  if (payload.uid !== undefined) {
+    if (typeof payload.uid !== "string" || payload.uid !== String(user.id)) {
+      return { ok: false, reason: "invalid_token" }
+    }
+  } else {
+    // Legacy credentials lack an immutable ID. Preserve only sessions that
+    // clearly began AFTER this row existed. JWT timestamps have second
+    // precision, so equality is ambiguous and deliberately requires re-login.
+    const createdSeconds = Math.floor(new Date(user.created_at).getTime() / 1000)
+    if (!Number.isFinite(createdSeconds) || !Number.isFinite(sessionStartedAt) ||
+        sessionStartedAt <= createdSeconds || payload.iat <= createdSeconds) {
+      return { ok: false, reason: "invalid_token" }
+    }
+  }
+
   // [Pen test] Auth & session mgmt (2026-07-20): access tokens are stateless
   // and long-lived (ACCESS_TOKEN_EXPIRE_MINUTES, 30 days by default) with no
   // other revocation path, so a token minted before a password reset would

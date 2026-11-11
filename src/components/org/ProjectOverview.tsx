@@ -596,6 +596,9 @@ export function ProjectOverview() {
   // AQU-1171: the Members card starts collapsed on every mount. The open
   // state lives only in this render — a reload always returns to the header.
   const [membersOpen, setMembersOpen] = useState(false)
+  // AQU-2479: the Team-assignments empty state points at the Members card
+  // (the actual roster), so it opens it and brings it into view.
+  const membersCardRef = useRef<HTMLDivElement>(null)
 
   // AQU-500: transient "copied" feedback for the CSV-export control, mirroring
   // the copy-affordance pattern used elsewhere (e.g. ChatMarkdown's code-block
@@ -2860,7 +2863,11 @@ export function ProjectOverview() {
                           {teamOpen
                             ? <ChevronDown className="size-3.5 shrink-0" aria-hidden />
                             : <ChevronRight className="size-3.5 shrink-0" aria-hidden />}
-                          {t("editor.navTitle.team")}
+                          {/* AQU-2479: "Team assignments", not "Team" — this card
+                              lists open assignments, never the project's roster.
+                              A project can have a full team through an attached
+                              team and still have nothing assigned. */}
+                          {t("org.projectOverview.teamAssignmentsTitle")}
                         </button>
                       </h2>
                       <SectionVisibilityBadge
@@ -2956,7 +2963,34 @@ export function ProjectOverview() {
                     {teamOpen && (
                       <div id="overview-team-panel">
                         {workload.length === 0 && validations.length === 0 ? (
-                          <p className="text-sm text-muted-foreground">{t("org.projectOverview.noOpenAssignments")}</p>
+                          /* AQU-2479: an empty assignment list must not read as
+                             "this project has no team" — access can come from an
+                             attached team with nothing assigned yet. So point at
+                             the Members card, which is the roster. The pointer is
+                             gated on canManage because that is what renders the
+                             Members card below. */
+                          <div className="space-y-1.5" data-testid="overview-team-empty">
+                            <p className="text-sm text-muted-foreground">{t("org.projectOverview.noOpenAssignments")}</p>
+                            {canManage && (
+                              <button
+                                type="button"
+                                data-testid="overview-team-empty-members"
+                                className="rounded-sm text-xs font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                                onClick={() => {
+                                  setMembersOpen(true)
+                                  // Same reduced-motion courtesy as the
+                                  // settings deep-link scroll (useSettingHighlight).
+                                  const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+                                  membersCardRef.current?.scrollIntoView?.({
+                                    block: "nearest",
+                                    behavior: reduceMotion ? "auto" : "smooth",
+                                  })
+                                }}
+                              >
+                                {t("org.projectOverview.noOpenAssignmentsMembersLink")}
+                              </button>
+                            )}
+                          </div>
                         ) : workload.length === 0 ? null : (
                           <ul className="space-y-2">
                             {workload.map((w) => {
@@ -3070,6 +3104,7 @@ export function ProjectOverview() {
                   ready={projectPolicy.ready}
                 >
                   <div
+                    ref={membersCardRef}
                     className={cn(
                       "relative rounded-lg border bg-card px-5",
                       membersOpen ? "py-5" : "py-3",

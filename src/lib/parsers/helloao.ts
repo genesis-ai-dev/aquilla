@@ -12,6 +12,17 @@ import type { TranslatableString } from "./types"
 // transparent no-op when VITE_RESOURCES_BASE is unset.
 const API_BASE = `${proxyOrigin("https://bible.helloao.org")}/api`
 
+/**
+ * One URL path segment. A translation id can come from a project's stored
+ * Parallel Bibles defaults, which a project lead sets for the whole team, so it
+ * is encoded rather than trusted: `../x?` stays the name of a translation that
+ * does not exist instead of becoming a different URL on the same origin.
+ */
+const seg = (part: string): string =>
+  // `.` and `..` survive percent-encoding as dot segments, so they get a name
+  // that cannot resolve to anything.
+  /^\.+$/.test(part) ? "_" : encodeURIComponent(part)
+
 export interface HelloaoTranslation {
   id: string // e.g. "BSB"
   name: string
@@ -86,7 +97,7 @@ export async function fetchHelloaoBooks(
   translationId: string,
   signal?: AbortSignal
 ): Promise<HelloaoBook[]> {
-  const res = await fetch(`${API_BASE}/${translationId}/books.json`, { signal })
+  const res = await fetch(`${API_BASE}/${seg(translationId)}/books.json`, { signal })
   if (!res.ok) {
     throw new Error(`Failed to fetch book list for '${translationId}' (${res.status})`)
   }
@@ -102,7 +113,7 @@ export async function fetchHelloaoComplete(
   signal?: AbortSignal,
   onRawSource?: (raw: string) => void,
 ): Promise<HelloaoComplete> {
-  const res = await fetch(`${API_BASE}/${translationId}/complete.json`, { signal })
+  const res = await fetch(`${API_BASE}/${seg(translationId)}/complete.json`, { signal })
   if (!res.ok) {
     throw new Error(`Failed to download translation '${translationId}' (${res.status})`)
   }
@@ -166,7 +177,7 @@ export function fetchHelloaoChapter(
   if (cached) return cached
 
   const promise = (async () => {
-    const res = await fetch(`${API_BASE}/${translationId}/${book}/${chapter}.json`, { signal })
+    const res = await fetch(`${API_BASE}/${seg(translationId)}/${seg(book)}/${chapter}.json`, { signal })
     if (res.status === 404) {
       throw new HelloaoChapterNotFoundError(key)
     }

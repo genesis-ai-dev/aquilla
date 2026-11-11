@@ -5,7 +5,7 @@ import { resolveWorkspacePath } from "./paths"
 import { execCode, MAX_TIMEOUT_MS } from "./exec"
 import { decodeBase64, encodeBase64 } from "./base64"
 import { shipLog, shipErrorResponse } from "./posthog-logs"
-import type { ResolveSandbox, SandboxLike } from "./sandbox"
+import { SandboxFileTooLargeError, type ResolveSandbox, type SandboxLike } from "./sandbox"
 import { admitWithWait, ANONYMOUS_TENANT, POOL_DO_NAME, type PoolGate, type WaitedAdmitResult } from "./pool"
 import type { Env } from "./types"
 
@@ -311,6 +311,7 @@ export function createApp(deps: AppDeps): Hono<{ Bindings: Env }> {
         headers: { "content-type": "application/octet-stream" },
       })
     } catch (err) {
+      if (err instanceof SandboxFileTooLargeError) return jsonError(c, "too_large", err.message)
       if (isNotFound(err)) return jsonError(c, "not_found", "file not found")
       return jsonError(c, "exec_failed", err instanceof Error ? err.message : String(err))
     }

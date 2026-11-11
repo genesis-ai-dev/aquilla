@@ -88,8 +88,8 @@ test("explicit add-account login preserves both accounts and activates the new o
       const request = open.result.transaction("session", "readonly").objectStore("session").get("envelope")
       request.onerror = () => reject(request.error)
       request.onsuccess = () => resolve({
-        active: request.result?.active ?? null,
-        usernames: Object.keys(request.result?.sessions ?? {}).sort(),
+        active: request.result?.sessions?.[request.result?.active]?.username ?? null,
+        usernames: Object.values(request.result?.sessions ?? {}).map((session) => (session as { username: string }).username).sort(),
       })
     }
   }))

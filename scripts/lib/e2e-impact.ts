@@ -6,6 +6,7 @@ const CORE_SENTINELS = [
 ]
 
 const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
+  { source: /(?:oauth-google|google-login|GoogleLogin|google-return|0194_google_login)/, sentinels: ["e2e/specs/auth/google-login.spec.ts", "e2e/specs/projects/onboarding.smoke.spec.ts"] },
   { source: /^src\/(?:pages\/Signup|lib\/navigation\/login-path)/, sentinels: ["e2e/specs/projects/onboarding.smoke.spec.ts"] },
   {
     source: /^(?:src\/(?:components|lib)\/checking\/|sync-worker\/src\/checking\/|db\/postgres\/migrations\/0162_community_checking)/,

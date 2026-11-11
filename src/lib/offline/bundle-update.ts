@@ -1,4 +1,4 @@
-// Typed wrappers for the desktop hot-bundle channel (src-tauri/src/hot_bundle.rs;
+// Typed wrappers for the desktop hot-bundle channel (src-tauri/src/hot_bundle/mod.rs;
 // docs/superpowers/specs/2026-11-05-desktop-hot-bundle.md). Every wrapper is a
 // no-op / null outside Tauri, and `@tauri-apps/api/*` is imported dynamically so
 // nothing Tauri reaches the browser bundle — same convention as connectivity.ts.

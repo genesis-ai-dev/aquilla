@@ -5,6 +5,12 @@ import type { TargetLaneOption } from "@/hooks/useCurrentTargetLanes"
 /**
  * AQU-1808: the sharer picks every current target lane, or names the ones
  * this person may use. Nothing is selected until they say so.
+ *
+ * AQU-2358: naming NO lane is a legal choice — the person sees the project and
+ * its source text and no translation — so the empty selection says what it
+ * will do instead of looking like an unfinished form. The surface confirms it
+ * once before saving (`NoLaneAccessConfirm`). A one-lane project arrives here
+ * with that lane already checked (`initialLaneChoice`).
  */
 export function LaneAccessFields({
   lanes,
@@ -64,6 +70,11 @@ export function LaneAccessFields({
               {lane.label}
             </label>
           ))}
+          {selected.size === 0 && (
+            <p data-testid="lane-access-no-lanes-note" className="text-[10px] text-muted-foreground">
+              {t("projectSettings.share.laneChoiceNoneNote")}
+            </p>
+          )}
         </div>
       )}
     </fieldset>

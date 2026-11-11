@@ -122,6 +122,33 @@ describe("roster visibility — default (no org policy configured)", () => {
     expect(body.members.every((m) => m.role.level >= 600)).toBe(true)
   })
 
+  // AQU-2457: project settings do not share one write floor, so the "view
+  // admins" bypass cannot be Maintainer-only. The Languages card gates on the
+  // org's languageEditMinRole (Project Lead by default); the contributor who
+  // reads "Only Project Leads can change these settings" must be able to see
+  // who those people are.
+  it("project members ?minRole=500: a below-floor member sees Project Lead and above, without emails", async () => {
+    await seedOrgAndProject()
+    await seedUser(5, "lena")
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES
+        ('proj1', 3, 400, 1),
+        ('proj1', 5, 500, 1)`,
+    ).run()
+    const res = await app.request(
+      "/api/v2/projects/proj1/members?minRole=500",
+      { headers: authHeader(await jwtFor("tom")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      members: Array<{ username: string; email?: string; role: { level: number } }>
+    }
+    expect(body.members.map((m) => m.username).sort()).toEqual(["anna", "lena", "wendi"])
+    expect(body.members.every((m) => m.role.level >= 500)).toBe(true)
+    expect(body.members.every((m) => m.email === undefined)).toBe(true)
+  })
+
   it("project members ?minRole=400 does not bypass the roster hide", async () => {
     await seedOrgAndProject()
     await env.AQUILLA_PG.prepare(

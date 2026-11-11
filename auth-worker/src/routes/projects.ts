@@ -1499,15 +1499,27 @@ projects.get("/:projectId/files/:fileId/chapters", authMiddleware, async (c) => 
 })
 
 /**
- * Parse `?minRole=` for the privileged-members bypass. Only a settings-write
- * floor (Maintainer+) is accepted — a lower floor would leak the full roster
- * to callers the org has hidden it from. Invalid / absent → unfiltered list
- * under the normal AQU-485 roster gate.
+ * Lowest `?minRole=` that bypasses the AQU-485 roster hide. A settings-write
+ * floor still, but Project Lead rather than Maintainer (AQU-2457): project
+ * settings do not share one floor — Languages gates on the org's
+ * `languageEditMinRole` (Project Lead by default) and "Count headings" on
+ * Project Lead — and the lock line already names that role to the caller, so
+ * the "view admins" list it opens has to be able to name the same people.
+ * Below this, `?minRole=` filters but grants nothing: a lower floor would
+ * leak the roster to callers the org has hidden it from.
+ */
+const PRIVILEGED_MIN_ROLE_BYPASS_FLOOR = ROLE.PROJECT_LEAD
+
+/**
+ * Parse `?minRole=` for the privileged-members list. Any point on the role
+ * ladder filters the list; only a settings-write floor
+ * (`PRIVILEGED_MIN_ROLE_BYPASS_FLOOR`+) also bypasses the roster hide.
+ * Invalid / absent → unfiltered list under the normal AQU-485 roster gate.
  */
 function parsePrivilegedMinRole(raw: string | undefined): number | null {
   if (raw == null || raw === "") return null
   const n = Number.parseInt(raw, 10)
-  if (!Number.isInteger(n) || n < ROLE.MAINTAINER || n > ROLE.OWNER) return null
+  if (!Number.isInteger(n) || n < ROLE.VIEWER || n > ROLE.OWNER) return null
   return n
 }
 
@@ -1519,10 +1531,11 @@ function parsePrivilegedMinRole(raw: string | undefined): number | null {
  * 403 rather than the member list — the response must not leak the roster
  * or its size.
  *
- * Exception: `?minRole=` at Maintainer or Owner returns only members at that
- * floor or above, even when the full roster is hidden. That is the GitHub
- * "view admins" contract — a contributor still needs to see who can change
- * settings, without learning who else is on the project.
+ * Exception: `?minRole=` at a settings-write floor (Project Lead and above,
+ * AQU-2457) returns only members at that floor or above, even when the full
+ * roster is hidden. That is the GitHub "view admins" contract — a contributor
+ * still needs to see who can change a setting they cannot, without learning
+ * who else is on the project.
  *
  * AQU-1308: the floor applied here is `getProjectRosterViewMinRole` — the
  * lower of the org's `rosterViewMinRole` and its `assignmentMinRole` — so a
@@ -1550,7 +1563,7 @@ projects.get("/:projectId/members", authMiddleware, async (c) => {
 
   const privilegedMinRole = parsePrivilegedMinRole(c.req.query("minRole"))
 
-  if (privilegedMinRole == null) {
+  if (privilegedMinRole == null || privilegedMinRole < PRIVILEGED_MIN_ROLE_BYPASS_FLOOR) {
     const rosterMinRole = await getProjectRosterListFloor(c.env, projectId, project.org_id)
     if (rosterMinRole != null && !canViewRoster(role.level, rosterMinRole)) {
       return c.json({ error: "roster hidden by org policy", rosterHidden: true }, 403)
@@ -1595,7 +1608,14 @@ projects.get("/:projectId/members", authMiddleware, async (c) => {
     }
   }
 
-  const hideEmails = privilegedMinRole != null && role.level < ROLE.MAINTAINER
+  // Emails are withheld on the bypass path only: there the caller is being
+  // served a list the org's roster policy would otherwise have denied them.
+  // A `?minRole=` below the bypass floor is a plain filter over a roster the
+  // caller may already read, so it hides nothing it did not hide before.
+  const hideEmails =
+    privilegedMinRole != null &&
+    privilegedMinRole >= PRIVILEGED_MIN_ROLE_BYPASS_FLOOR &&
+    role.level < ROLE.MAINTAINER
 
   return c.json({
     members: members.map((m) => ({

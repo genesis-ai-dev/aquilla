@@ -11,6 +11,7 @@
     "opener:default",
     "dialog:allow-open",
     "mcp-bridge:default",
-    "core:window:allow-start-dragging"
+    "core:window:allow-start-dragging",
+    "core:window:allow-toggle-maximize"
   ]
 }

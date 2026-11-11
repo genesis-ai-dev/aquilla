@@ -26,7 +26,12 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable"
 import { useIsLgUp } from "@/hooks/useIsLgUp"
-import { TRAFFIC_LIGHTS_WIDTH, useMacTitlebarOverlay } from "@/hooks/useMacTitlebarOverlay"
+import {
+  TRAFFIC_LIGHTS_HEIGHT,
+  TRAFFIC_LIGHTS_WIDTH,
+  useMacTitlebarOverlay,
+  useTitlebarDrag,
+} from "@/hooks/useMacTitlebarOverlay"
 
 export { useIsLgUp } from "@/hooks/useIsLgUp"
 
@@ -181,7 +186,7 @@ export function AppShell({
   const i18n = useI18nOptional()
   // macOS desktop: the top strip doubles as the window's title bar.
   const titlebar = useMacTitlebarOverlay()
-  const dragRegion = titlebar.overlay ? { "data-tauri-drag-region": "deep" } : undefined
+  const titlebarDrag = useTitlebarDrag(titlebar.overlay)
   const brandLogo = logoSlot ?? (brand ? (
     <Link
       to="/"
@@ -210,21 +215,25 @@ export function AppShell({
   const navigationLabel = i18n?.t("nav.shell.navigation") ?? "Navigation"
   // Where the traffic lights land depends on the layout under them:
   //  - expanded sidebar: its chrome row — the brand mark gives up its slot
-  //    (a native app's window already says whose it is) and the row's start
-  //    is pushed past the lights;
-  //  - collapsed 48px rail: too narrow to hold them, so the rail's icon stack
-  //    drops below them and the header band clears the overhang;
+  //    (a native app's window already says whose it is; the org breadcrumb
+  //    in the header still links home) and the row's start is pushed past
+  //    the lights. The beta chip is dropped too, so the row still fits at
+  //    the dock's 200px minimum;
+  //  - collapsed rail: its icon stack drops below the lights. Only the
+  //    resizable dock actually narrows to DOCK_COLLAPSED_WIDTH (the org
+  //    aside stays w-56), so only then does the header clear the overhang;
   //  - no in-flow sidebar (narrow window): the header band starts at x=0.
   // The mobile sheet is a separate overlay, so its copy of the aside is left
   // alone.
   const sidebarInFlow = !mobileNav
   const insetSidebarRow = titlebar.inset && sidebarInFlow && !chromeCollapsed
   const insetRail = titlebar.inset && sidebarInFlow && chromeCollapsed
+  const railIsNarrow = chromeCollapsed && useDockResize
   const headerInset = !titlebar.inset
     ? 0
     : !sidebarInFlow
       ? TRAFFIC_LIGHTS_WIDTH
-      : chromeCollapsed
+      : railIsNarrow
         ? TRAFFIC_LIGHTS_WIDTH - DOCK_COLLAPSED_WIDTH
         : 0
   const resolvedLogo = insetSidebarRow ? null : brandLogo
@@ -348,8 +357,14 @@ export function AppShell({
       {(brandLogo || logoAccessory) && (
         <div
           data-slot="app-shell-sidebar-chrome"
-          {...(!mobileNav ? dragRegion : undefined)}
-          style={insetSidebarRow ? { paddingInlineStart: TRAFFIC_LIGHTS_WIDTH } : undefined}
+          {...(!mobileNav ? titlebarDrag : undefined)}
+          style={
+            insetSidebarRow
+              ? { paddingInlineStart: TRAFFIC_LIGHTS_WIDTH }
+              : insetRail
+                ? { paddingTop: TRAFFIC_LIGHTS_HEIGHT }
+                : undefined
+          }
           className={cn(
             // Align every chrome child on the same vertical midline — no fixed
             // height; natural content size with items-center.
@@ -360,8 +375,6 @@ export function AppShell({
             chromeCollapsed
               ? "w-10 flex-col items-center gap-1"
               : "justify-between px-2",
-            // Lights sit at y≈20–34; start the rail's stack below them.
-            insetRail && "pt-10",
           )}
         >
           <div className="flex items-center">
@@ -370,12 +383,13 @@ export function AppShell({
           {/* History cluster, then sidebar collapse on the far right. */}
           <div
             className={cn(
-              "flex items-center gap-1.5",
+              "flex min-w-0 items-center gap-1.5",
               chromeCollapsed && "flex-col gap-1",
             )}
           >
-            {/* Text chip — hide in the 40px icon rail so it can't clip. */}
-            {!chromeCollapsed && <BetaBadge />}
+            {/* Text chip — hide in the 40px icon rail so it can't clip, and
+                beside the traffic lights so the row fits a 200px dock. */}
+            {!chromeCollapsed && !insetSidebarRow && <BetaBadge />}
             <NavHistoryControls orientation={chromeCollapsed ? "vertical" : "horizontal"} />
             {logoAccessory && !mobileNav ? (
               <div className="flex shrink-0 items-center">{logoAccessory}</div>
@@ -456,7 +470,7 @@ export function AppShell({
           separate row below it and must not move the breadcrumb baseline. */}
       <div
         data-slot="app-shell-header"
-        {...dragRegion}
+        {...titlebarDrag}
         style={headerInset > 0 ? { paddingInlineStart: headerInset } : undefined}
         className="flex h-[52px] min-h-[52px] shrink-0 items-center"
       >

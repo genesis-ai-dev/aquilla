@@ -5913,8 +5913,6 @@ export const zh_Hant: Catalog = {
   "workspace.offline.connectivityTooltipOnline": "已連線至伺服器。",
   "workspace.offline.connectivityTooltipOffline": "未連線，正以離線模式作業。恢復連線後會同步變更。",
   "workspace.status.unreachable": "無法連上伺服器 — 您的專案可能仍然可以使用。",
-  "workspace.status.forbidden": "您已不再具有這個專案的存取權。若這出乎意料，請洽詢專案維護者重新邀請您。{backLink}。",
-  "workspace.status.notFound": "找不到專案，或您沒有存取權。{backLink}。",
   "workspace.backToDashboard": "回到儀表板",
   "workspace.projectSettingsHook.noSessionError": "沒有工作階段或專案 — 請登入後再試一次。",
   "workspace.forms.requiredField": "必須填寫{label}",

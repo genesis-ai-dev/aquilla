@@ -5870,8 +5870,6 @@ export const ms: Catalog = {
   "workspace.offline.connectivityTooltipOnline": "Disambungkan ke pelayan.",
   "workspace.offline.connectivityTooltipOffline": "Tiada sambungan — bekerja di luar talian. Perubahan disegerakkan sebaik anda kembali dalam talian.",
   "workspace.status.unreachable": "Tidak dapat menjangkau server — projek Anda mungkin masih tersedia.",
-  "workspace.status.forbidden": "Anda tidak lagi memiliki akses ke projek ini. Tanya pemelihara projek untuk mengundang Anda kembali jika ini tidak terduga. {backLink}.",
-  "workspace.status.notFound": "Projek tidak ditemukan, atau Anda tidak memiliki akses. {backLink}.",
   "workspace.backToDashboard": "Kembali ke dasbor",
   "workspace.projectSettingsHook.noSessionError": "Tiada sesi atau projek — log masuk dan cuba selepas.",
   "workspace.forms.requiredField": "{label} diperlukan",

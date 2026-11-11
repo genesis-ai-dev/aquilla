@@ -5896,8 +5896,6 @@ export const th: Catalog = {
   "workspace.offline.connectivityTooltipOnline": "เชื่อมต่อกับเซิร์ฟเวอร์แล้ว",
   "workspace.offline.connectivityTooltipOffline": "ไม่มีการเชื่อมต่อ — ทำงานแบบออฟไลน์ การเปลี่ยนแปลงจะซิงก์เมื่อคุณกลับมาออนไลน์",
   "workspace.status.unreachable": "ไม่สามารถเข้าถึงเซิร์ฟเวอร์ — โครงการของคุณอาจยังคงพร้อมใช้งาน",
-  "workspace.status.forbidden": "คุณไม่มีสิทธิ์เข้าถึงโครงการนี้อีกต่อไป ขอให้ผู้ดูแลโครงการเชิญคุณอีกครั้งหากไม่คาดคิด {backLink}",
-  "workspace.status.notFound": "ไม่พบโครงการ หรือคุณไม่มีสิทธิ์เข้าถึง {backLink}",
   "workspace.backToDashboard": "กลับไปที่แดชบอร์ด",
   "workspace.projectSettingsHook.noSessionError": "ไม่มีเซสชันหรือโครงการ — ลงชื่อเข้าและลองอีกครั้ง",
   "workspace.forms.requiredField": "{label} จำเป็นต้องมี",

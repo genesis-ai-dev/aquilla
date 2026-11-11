@@ -7058,8 +7058,6 @@ export const es: Catalog = {
   "workspace.offline.connectivityTooltipOnline": "Conectado al servidor.",
   "workspace.offline.connectivityTooltipOffline": "Sin conexión — trabajando sin conexión. Los cambios se sincronizan cuando vuelvas a estar en línea.",
   "workspace.status.unreachable": "No se alcanza el servidor — tu proyecto puede seguir disponible.",
-  "workspace.status.forbidden": "Ya no tienes acceso a este proyecto. Si no lo esperabas, pide a un mantenedor del proyecto que te vuelva a invitar. {backLink}.",
-  "workspace.status.notFound": "Proyecto no encontrado, o no tienes acceso. {backLink}.",
   "workspace.backToDashboard": "Volver al panel",
   "workspace.projectSettingsHook.noSessionError": "Sin sesión o sin proyecto — inicia sesión e inténtalo de nuevo.",
   "workspace.forms.requiredField": "{label} es obligatorio",

@@ -674,3 +674,53 @@ export function historyFileName(
   if (!isHiddenTimelineFile(file)) return file.name
   return file.anchorFileId ? files.find((f) => f.id === file.anchorFileId)?.name ?? null : null
 }
+
+/** What the archived-project screen says and offers, for one reader. */
+export interface ArchivedProjectNotice {
+  /** True when this reader may restore the project themselves. */
+  canRestore: boolean
+  /** The sentence naming the state — with who archived it, when that is known. */
+  bodyKey:
+    | "workspace.archivedProject.archivedMessage"
+    | "workspace.archivedProject.archivedByMessage"
+  /** The follow-on sentence: restore it yourself, or ask someone who can. */
+  hintKey: "workspace.archivedProject.restoreHint" | "workspace.archivedProject.askHint"
+}
+
+/**
+ * AQU-2453: what a reader who opens an archived project is told.
+ *
+ * Two rules the old screen broke. It called the state "Trash" although the
+ * only action that reaches it is Project settings → Archive project, and it
+ * told every reader to "restore it to continue editing" — including the
+ * Contributor who has no Restore button, because restoring is Maintainer+.
+ * So the hint is chosen by the same predicate that draws the button: whoever
+ * cannot restore is pointed at someone who can instead of at an action they
+ * do not have.
+ *
+ * `ROLE.MAINTAINER` is the floor auth-worker itself enforces on
+ * `DELETE /api/v2/projects/:id/archive` (AQU-1070), not the owner-only one
+ * this screen used to guess — a Maintainer was shown "ask someone else" for
+ * a call that would have succeeded. The two escape hatches stay: a purely
+ * local project (no server row, so no role to read) and a session-less
+ * local-first runtime both restore from IDB alone.
+ */
+export function archivedProjectNotice(args: {
+  project: Pick<ProjectRecord, "syncRole" | "origin" | "deletedBy">
+  hasSession: boolean
+}): ArchivedProjectNotice {
+  const { project, hasSession } = args
+  const canRestore =
+    (project.syncRole?.level ?? 0) >= ROLE.MAINTAINER ||
+    (!project.origin && !project.syncRole) ||
+    !hasSession
+  return {
+    canRestore,
+    bodyKey: project.deletedBy
+      ? "workspace.archivedProject.archivedByMessage"
+      : "workspace.archivedProject.archivedMessage",
+    hintKey: canRestore
+      ? "workspace.archivedProject.restoreHint"
+      : "workspace.archivedProject.askHint",
+  }
+}

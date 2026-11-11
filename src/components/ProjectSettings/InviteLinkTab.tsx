@@ -13,7 +13,16 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { cn } from "@/lib/utils"
 import { useCurrentTargetLanes } from "@/hooks/useCurrentTargetLanes"
 import { LaneAccessFields } from "@/components/LaneAccessFields"
-import { chosenLaneLabels, laneChoiceReady, needsLaneChoice, toMemberLaneAccess, type LaneAccessChoice } from "@/lib/lanes/lane-access-choice"
+import {
+  chosenLaneLabels,
+  grantsNoLanes,
+  initialLaneChoice,
+  laneChoiceReady,
+  needsLaneChoice,
+  toMemberLaneAccess,
+  type LaneAccessChoice,
+} from "@/lib/lanes/lane-access-choice"
+import { NoLaneAccessConfirm } from "@/components/NoLaneAccessConfirm"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { createServerInviteWithChoice } from "@/lib/sync/invite-with-choice"
 import { GrantScopeNotice } from "@/components/GrantScopeNotice"
@@ -64,7 +73,14 @@ export function InviteLinkTab({
   const [copied, setCopied] = useState(false)
   const [serverError, setServerError] = useState<string | null>(null)
   const { lanes: targetLanes } = useCurrentTargetLanes(projectId)
-  const [laneChoice, setLaneChoice] = useState<LaneAccessChoice | null>(null)
+  // Null until the lead answers. AQU-2358: a one-lane project behaves as if its
+  // lane were already checked, so the answer is DERIVED from that default
+  // rather than seeded into state by an effect (the lanes arrive from a fetch).
+  // Any answer the lead makes, emptying the selection included, overrides it.
+  const [pickedLanes, setPickedLanes] = useState<LaneAccessChoice | null>(null)
+  const laneChoice = pickedLanes ?? initialLaneChoice(targetLanes, inviteRole)
+  // AQU-2358: true while the no-lane warning is open.
+  const [confirmNoLanes, setConfirmNoLanes] = useState(false)
   const choiceReady = laneChoiceReady(laneChoice, inviteRole, targetLanes.length)
   const wrapClass = embedded ? "space-y-4" : "mx-auto max-w-lg space-y-4"
   const inviteCopy = describeGrant(t, {
@@ -79,7 +95,11 @@ export function InviteLinkTab({
     locale,
   })
 
-  async function handleCreate() {
+  /**
+   * AQU-2358: `confirmedNoLanes` comes only from the warning dialog's "Add
+   * without lanes"; otherwise a link that grants no lane opens the warning.
+   */
+  async function handleCreate(confirmedNoLanes = false) {
     setEmailError(null)
     setServerError(null)
     setIssuedUrl(null)
@@ -94,6 +114,10 @@ export function InviteLinkTab({
     }
     if (!choiceReady) {
       setServerError(t("projectSettings.share.laneChoiceRequired"))
+      return
+    }
+    if (!confirmedNoLanes && grantsNoLanes(laneChoice, inviteRole, targetLanes.length)) {
+      setConfirmNoLanes(true)
       return
     }
     const laneAccess = needsLaneChoice(inviteRole, targetLanes.length) && laneChoice
@@ -133,7 +157,7 @@ export function InviteLinkTab({
     setInviteEmail("")
     setInviteRole(DEFAULT_INVITE_ROLE)
     setExpiresInDays(DEFAULT_EXPIRY_DAYS)
-    setLaneChoice(null)
+    setPickedLanes(null)
   }
 
   if (issuedUrl) {
@@ -274,7 +298,7 @@ export function InviteLinkTab({
           <LaneAccessFields
             lanes={targetLanes}
             value={laneChoice}
-            onChange={setLaneChoice}
+            onChange={setPickedLanes}
             disabled={!session?.jwt || busy}
           />
         )}
@@ -288,6 +312,15 @@ export function InviteLinkTab({
             ? t("common.creating")
             : grantButtonLabel(t, t("projectSettings.share.createInviteLinkButton"), inviteCopy.scopeEcho)}
         </Button>
+        <NoLaneAccessConfirm
+          open={confirmNoLanes}
+          kind="invite"
+          onBack={() => setConfirmNoLanes(false)}
+          onProceed={() => {
+            setConfirmNoLanes(false)
+            void handleCreate(true)
+          }}
+        />
       </div>
     </div>
   )

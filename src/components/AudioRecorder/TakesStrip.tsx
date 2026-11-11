@@ -24,6 +24,8 @@ import { fetchCellAudio, isDenoisedAudioId, parseFrontierAudioUrl } from "@/lib/
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { audioMimeForExt } from "@/lib/audio/mime"
 import { isGeneratedTake } from "@/lib/audio/track-audio"
+import { findVoice } from "@/lib/audio/voices"
+import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
 import { claimActiveAudio, clearActiveAudioIf, type ActiveAudioController } from "@/lib/audio/audio-coordinator"
 import { emitCellAudioDeselect, emitCellAudioSelect, emitCellAudioRename } from "@/lib/sync/events-emit"
 import {
@@ -798,6 +800,16 @@ export function TakesStrip({
     // an added track's single slot holds both kinds. AQU-2235: the one rule
     // every surface that draws the sparkle asks.
     const isGenerated = isGeneratedTake({ selectedGeneratedVoiceAudioId: selectedGeneratedAudioId }, att.audioId, att)
+          // AQU-2510: WHICH VOICE made this take. Two takes generated minutes
+          // apart in two different voices were indistinguishable here — the
+          // row named the date and the author, and the sparkle said only "a
+          // machine", which is the half of the answer nobody needed. The take
+          // has carried its `voiceId` since AQU-1758; this says it.
+          //
+          // Nothing is shown when that voice has since been removed from the
+          // project (`findVoice` misses), for the same reason `takeVoiceNote`
+          // says nothing then: a bare id is not a name, and a guess is worse.
+          const takeVoice = isGenerated && !isPiece ? findVoice(project.ttsSettings, att.voiceId ?? undefined) : undefined
           // AQU-1372: when this take was made and who made it. Absent — never
           // guessed — while the history read is still in flight, or when the
           // 200-event window does not reach back to this take's attach.
@@ -1047,6 +1059,21 @@ export function TakesStrip({
                         </span>
                       )
                     })()}
+                    {/* AQU-2510: the voice that made this take, beside when
+                        it was made. A generated take only — a recording is a
+                        person's, and the row already names them. Never on a
+                        split take's row either, and a generated take is never
+                        split, so this never competes with the Slice 3A fit
+                        measurement (which only runs on `isSplit` rows). */}
+                    {takeVoice && (
+                      <span
+                        data-testid={`take-voice-${att.audioId}`}
+                        className="inline-flex min-w-0 shrink items-center gap-1 text-[10px] text-muted-foreground/60"
+                      >
+                        <VoiceAvatar voice={takeVoice} size={12} />
+                        <span className="min-w-0 truncate">{takeVoice.name}</span>
+                      </span>
+                    )}
                     {/* AQU-464: this take speaks wording the line no longer
                         carries. Advisory, not an error — reviewing audio
                         against its own older text is the point.

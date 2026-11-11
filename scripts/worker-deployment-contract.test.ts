@@ -19,6 +19,8 @@ const deploymentManifest = JSON.parse(
       apiHost?: string
       routes: string[]
       requiredSecrets?: string[]
+      /** Bindings only this environment must have (AQU-2469). */
+      requiredBindings?: Record<string, string>
       plainText: Record<string, string>
       hyperdrives: Record<string, string>
       r2Buckets: Record<string, string>
@@ -561,7 +563,11 @@ describe("worker deployment environment contract", () => {
           expect(section).toContain(`binding = "${name}"`)
           expect(section).toContain(`bucket_name = "${bucket}"`)
         }
-        for (const [name, type] of Object.entries(surfaceConfig.requiredBindings)) {
+        const requiredBindings: Record<string, string> = {
+          ...surfaceConfig.requiredBindings,
+          ...(expected.requiredBindings ?? {}),
+        }
+        for (const [name, type] of Object.entries(requiredBindings)) {
           const declaration = type === "send_email" || type === "durable_object_namespace"
             ? `name = "${name}"`
             : `binding = "${name}"`
@@ -569,6 +575,16 @@ describe("worker deployment environment contract", () => {
         }
       }
     }
+  })
+
+  it("binds the dev access list on the development identity Worker only (AQU-2469)", () => {
+    const config = readRepoFile("auth-worker", "wrangler.toml")
+    expect(environmentSection(config, "development")).toContain('binding = "DEV_ACCESS_LIST"')
+    expect(environmentSection(config, "production")).not.toContain("DEV_ACCESS_LIST")
+    const identity = deploymentManifest.surfaces.identity
+    expect(identity.requiredBindings).not.toHaveProperty("DEV_ACCESS_LIST")
+    expect(identity.environments.production).not.toHaveProperty("requiredBindings")
+    expect(identity.environments.development.requiredBindings).toEqual({ DEV_ACCESS_LIST: "kv_namespace" })
   })
 
   it("keeps retired staging outside the executable deployment contract", () => {

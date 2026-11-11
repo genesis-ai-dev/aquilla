@@ -10,6 +10,7 @@ import { describe, expect, it, vi } from "vitest"
 
 import { formatScopePath } from "@/lib/access/scope-path"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { accessNodeId } from "./access-anchors"
 import { orgAccessCsv, type OrgAccessPayload } from "./org-access-data"
 
 const org = { type: "org" as const, id: "1", name: "Biblica ETT" }
@@ -56,12 +57,20 @@ describe("OrgAccessPage", () => {
     const node = screen.getByTestId("access-node-project-p1")
     expect(node.textContent).toContain("Naladda")
     expect(node.textContent).not.toMatch(/\b500\b/)
+    // AQU-2317: the node carries the id an inherited pill's link lands on.
+    expect(screen.getByTestId(accessNodeId(team)).id).toBe(accessNodeId(team))
 
     fireEvent.click(screen.getByRole("tab", { name: "People" }))
     await screen.findByTestId("access-people")
     const chips = screen.getAllByTestId("access-chip")
-    expect(chips[0].textContent).toContain(`@ ${formatScopePath([org, team, project])}`)
-    expect(chips[0].querySelector("[data-origin]")?.getAttribute("data-origin")).toBe("inherited")
+    // AQU-2317: the chip is a role pill plus the place, both from the shared
+    // helpers — the place still reads byte-identical to the CSV column.
+    expect(chips[0].textContent).toContain(formatScopePath([org, team, project]))
+    const pill = chips[0].querySelector("[data-origin]")
+    expect(pill?.getAttribute("data-origin")).toBe("inherited")
+    // Inherited, so the pill names where the grant is set and links to that node.
+    expect(pill?.textContent).toContain(`via ${formatScopePath([org, team])}`)
+    expect(pill?.getAttribute("href")).toBe(`#${accessNodeId(team)}`)
   })
 
   it("exports a CSV blob named after the org", async () => {

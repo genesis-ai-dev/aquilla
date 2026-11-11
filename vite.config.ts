@@ -86,7 +86,9 @@ export default defineConfig(({ mode }) => ({
       // Worktrees contain their own copies of tsconfig.json; any touch there
       // triggers Vite's "changed tsconfig" path which clears the cache and
       // forces a full reload — that's the white-screen on project click.
-      ignored: ["**/src-tauri/**", "**/.worktrees/**", "**/.claude/worktrees/**"],
+      // Worker mock emails and bundles are runtime output, not SPA source.
+      // Watching their HTML reloads the page in the middle of signup.
+      ignored: ["**/src-tauri/**", "**/.worktrees/**", "**/.claude/worktrees/**", "**/.wrangler/**"],
     },
   },
   plugins: [

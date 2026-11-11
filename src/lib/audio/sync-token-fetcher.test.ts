@@ -45,6 +45,16 @@ beforeEach(() => {
 })
 
 describe("makeAudioSyncTokenFetcher — shared module-level cache", () => {
+  it("does not reuse audio credentials after a same-name account replacement or renewal", async () => {
+    let current = makeSession({storageKey:"account:1:a"})
+    const fetcher = makeAudioSyncTokenFetcher(() => current)
+    expect(await fetcher("p","f")).toBe("minted-1")
+    current = makeSession({storageKey:"account:2:b",jwt:"replacement"})
+    expect(await fetcher("p","f")).toBe("minted-2")
+    current = {...current,jwt:"renewed"}
+    expect(await fetcher("p","f")).toBe("minted-3")
+  })
+
   it("shares a single mint across independent fetcher instances for the same session", async () => {
     // Simulates two useCellAudio instances on the same row (recorded +
     // generated voice), each building its own fetcher via useMemo, both

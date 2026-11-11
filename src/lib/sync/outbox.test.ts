@@ -82,6 +82,22 @@ describe("cqrs outbox", () => {
     })
   })
 
+  it("keeps old queued edits inaccessible to a recreated username while preserving them", async () => {
+    const sessions = await import("../frontier/session-store")
+    await sessions._resetDbForTesting()
+    await sessions.saveSession({username: "reused", jwt: "old", createdAt: "2020-01-01"})
+    setActiveOutboxOwner("reused")
+    await enqueueOutboxEvent(sample)
+    const replacement = {username: "reused", jwt: "new", accountId: "997", createdAt: "2026-11-11"}
+    await sessions.saveSession(replacement)
+    setActiveOutboxOwner(sessions.sessionKey(replacement))
+    expect(await peekPendingOutboxBatch(10)).toEqual([])
+    expect(await sessions.isStoredSessionCurrent("reused", "old")).toBe(false)
+    expect(await outboxRecordCountAllOwners()).toBe(1)
+    // The queue is preserved for recovery, never relabelled to the new user.
+    expect((await peekPendingOutboxBatch(10, {ownerKey: "reused"})).map(r => r.id)).toEqual([sample.id])
+  })
+
   it("enqueue, peek, remove", async () => {
     expect(await outboxPendingCount()).toBe(0)
     await enqueueOutboxEvent(sample)

@@ -34,7 +34,9 @@ import type { CellUnit, TranslatableString } from "../parsers/core-types"
  * Declared as DATA on the descriptor so the routing tables in
  * `../parsers/parse-text-formats.ts` and
  * `sync-worker/src/external/import-parse-core.ts` can be checked against it
- * instead of drifting from it — see `./descriptors.test.ts`.
+ * instead of drifting from it — see `./registry.test.ts` for the parse core's
+ * side and `sync-worker/src/__tests__/format-descriptors-drift.test.ts` for the
+ * route's.
  */
 export type FormatRuntime = "universal" | "dom"
 

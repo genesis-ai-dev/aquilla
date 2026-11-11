@@ -350,3 +350,10 @@ it("keeps a paid selection when switching from sign-in to account creation", () 
   render(<MemoryRouter initialEntries={["/login?next=" + encodeURIComponent("/billing/select?offer=team&interval=year&quantity=1")]}><Login /></MemoryRouter>)
   expect(screen.getByRole("link", { name: /create an account/i })).toHaveAttribute("href", "/signup?offer=team&interval=year&quantity=1")
 })
+
+// Password-form contracts do not depend on the optional provider configuration.
+// GoogleLoginButton and the browser journey cover its separate capability/intent path.
+vi.mock("@/lib/frontier/google-login", () => ({
+  googleRequest: async () => ({ enabled: false }),
+  startGoogleLogin: vi.fn(),
+}))

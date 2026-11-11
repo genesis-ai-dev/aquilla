@@ -18784,8 +18784,12 @@ export function ProjectWorkspace() {
             filesLoaded={status === "ready"}
             /* AQU-481: no empty-state "Import" CTA below the file.create floor —
                the placeholder renders without one when it's absent, so a viewer
-               gets the explanatory empty state rather than a dead button. */
+               gets the explanatory empty state rather than a dead button.
+               AQU-2475: and with the floor's role, so the body names who can
+               import instead of telling a Contributor to do it. Same floor the
+               header button's denial names, org override included. */
             onImportClick={canImportSource ? openImportFlow : undefined}
+            importFloorRole={importDenialFloor(orgImportMinRole)}
             onRetryClick={retryCells}
           />
         )}

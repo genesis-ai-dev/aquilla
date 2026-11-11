@@ -1447,32 +1447,30 @@ auth.post(
       await recordAuthEvent(c.env.AQUILLA_PG, "password_reset_attempt", identifier, true)
 
       const passwordHash = await hashPasswordWerkzeugScrypt(new_password)
-      // [Pen test] Auth & session mgmt (2026-07-20): stamp password_changed_at
-      // alongside the hash. authMiddleware rejects any access token whose
-      // `iat` predates this timestamp, so every access token issued before
-      // this reset — including one an attacker stole — stops working
-      // immediately instead of remaining valid for up to 30 more days.
-      await c.env.AQUILLA_PG.prepare(
-        "UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP, password_changed_at = CURRENT_TIMESTAMP, session_version = session_version + 1 WHERE id = ?",
-      )
-        .bind(passwordHash, user.id)
-        .run()
-      // Same-isolate eviction so the password_changed_at cutoff bites at once.
+      // AQU-2536: claim once and commit all recovery effects together. A
+      // competing request waits on the same token rows, then claims nothing.
+      // Failure in any CTE rolls back the password, generation and token claim.
+      const changed = await c.env.AQUILLA_PG.prepare(`WITH claimed AS (
+        DELETE FROM password_reset_tokens
+        WHERE user_id=? AND EXISTS (
+          SELECT 1 FROM password_reset_tokens proof
+          WHERE proof.user_id=? AND proof.token_hash=? AND proof.expires_at>now()
+        ) RETURNING user_id
+      ), changed AS (
+        UPDATE users SET password_hash=?, updated_at=now(),
+          password_changed_at=now(), session_version=session_version+1
+        WHERE id IN (SELECT user_id FROM claimed) RETURNING id
+      ), revoked AS (
+        UPDATE api_credentials SET revoked_at=COALESCE(revoked_at,now())
+        WHERE user_id IN (SELECT id::text FROM changed) RETURNING id
+      ), logged AS (
+        INSERT INTO activity_logs(user_id,activity_type,description)
+        SELECT id,'password_reset_completed','Password changed via reset link' FROM changed
+      ) SELECT id FROM changed`)
+        .bind(user.id, user.id, await sha256Hex(token), passwordHash)
+        .first<{ id: number }>()
+      if (!changed) return c.json({ error: "Invalid or expired token" }, 400)
       evictUserSessions(user.id)
-      // [Pen test] Account recovery must also kill long-lived Agent API / MCP
-      // tokens (PATs default to no expiry); otherwise a stolen aqk_ token
-      // survives the reset. Owners can mint new ones with the new password.
-      await c.env.AQUILLA_PG.prepare(
-        "UPDATE api_credentials SET revoked_at = COALESCE(revoked_at, now()) WHERE user_id = ?",
-      )
-        .bind(String(user.id))
-        .run()
-      await c.env.AQUILLA_PG.prepare(
-        "DELETE FROM password_reset_tokens WHERE user_id = ?",
-      )
-        .bind(user.id)
-        .run()
-      await logActivity(c.env.AQUILLA_PG, user.id, "password_reset_completed", "Password changed via reset link")
 
       return c.json({ message: "Password reset successful" })
     } catch (error) {

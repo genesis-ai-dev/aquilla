@@ -145,17 +145,42 @@ describe("Join into one recording keeps the take's volume and fades", () => {
     expect(levelOf(id)).toEqual({ gainDb: 6, fadeInMs: 300, fadeOutMs: 500 })
   })
 
-  // The pieces no longer agree: the second piece was made quieter after the
-  // cut. Undoing the cut is refused then ("changed since": it would throw that
-  // change away); the join throws nothing away (the pieces stay), so it reads
-  // the pieces the one way: the first piece's volume and fade-in, the last
-  // piece's fade-out.
+  // The pieces no longer agree: the first piece was made quieter after the
+  // cut, the second kept +6 dB. Undoing the cut is refused then ("changed
+  // since": it would throw that change away); the join throws nothing away
+  // (the pieces stay), so it reads the pieces the one way: the first piece's
+  // volume and fade-in, the last piece's fade-out — never the louder one.
   it("a piece's volume changed since the cut: the joined take has the first piece's volume, and the fades", async () => {
     const pieces = cutAt(1700)
-    pieces[1] = { ...pieces[1], gainDb: 0 }
-    takes["b.wav"].gainDb = 0
+    pieces[0] = { ...pieces[0], gainDb: -6 }
+    takes["a.wav"].gainDb = -6
+    const id = await joinTakePieces({ ...args, pieces })
+    expect(levelOf(id)).toEqual({ gainDb: -6, fadeInMs: 300, fadeOutMs: 500 })
+  })
+
+  it("a cut stored the old way (the first piece holding all three, the second none): the take's level, as its Undo gives", async () => {
+    const pieces: JoinPiece[] = [
+      { audioId: "a.wav", url: URL_A, trimStartMs: null, trimEndMs: 1700, durationMs: 3400, gainDb: 6, fadeInMs: 300, fadeOutMs: 500 },
+      { audioId: "b.wav", url: URL_A, trimStartMs: 1700, trimEndMs: null, durationMs: 3400 },
+    ]
     const id = await joinTakePieces({ ...args, pieces })
     expect(levelOf(id)).toEqual({ gainDb: 6, fadeInMs: 300, fadeOutMs: 500 })
+  })
+
+  // Cut twice (at 1.0 s and 2.0 s), then the first piece deleted: the Recording
+  // tab hands Join the two that are left. The joined take plays as they did:
+  // the second piece's volume, no fade-in (the deleted piece held it), the
+  // last piece's fade-out.
+  it("the first piece deleted: the pieces left, as they played", async () => {
+    const once = levelsAfterCut(TAKE, 2000)
+    const twice = levelsAfterCut({ ...once.first, durationMs: 3400, trimEndMs: 2000 }, 1000)
+    expect(twice.first.fadeInMs).toBe(300)
+    const pieces: JoinPiece[] = [
+      { audioId: "b.wav", url: URL_A, trimStartMs: 1000, trimEndMs: 2000, durationMs: 3400, ...twice.second },
+      { audioId: "c.wav", url: URL_A, trimStartMs: 2000, trimEndMs: null, durationMs: 3400, ...once.second },
+    ]
+    const id = await joinTakePieces({ ...args, pieces })
+    expect(levelOf(id)).toEqual({ gainDb: 6, fadeInMs: null, fadeOutMs: 500 })
   })
 
   it("a take with no volume or fades: no level is written", async () => {

@@ -412,7 +412,7 @@ export async function exportDocx(
       })
       return null
     }
-    const rebuilt = rebuildParagraphIn(part, span, translationSpans(translation.parts))
+    const rebuilt = rebuildParagraphIn(part, span, (line) => translationSpans(translation.parts, line))
     if (rebuilt === null) return null
     // Fidelity report: the source paragraph carried more than one run look
     // and some of it may come back in the base look (the export dialog says so).
@@ -535,10 +535,10 @@ function addFidelity(total: DocxExportFidelity, stats: RebuildResult): void {
 function rebuildParagraphIn(
   part: PartContext,
   span: DocxParagraphSpan,
-  spans: Span[],
+  spansFor: (lineText: string) => Span[],
   leadingSpace = false,
 ): RebuiltParagraph | null {
-  if (span.selfClosing || spans.length === 0) return null
+  if (span.selfClosing) return null
   const { xml } = part
   const doc = parseXmlLite(xml.slice(span.start, span.end), { offsets: true })
   const p = doc.children.find(isElement)
@@ -547,6 +547,8 @@ function rebuildParagraphIn(
   const items = walkDocxParagraph(p, part.walkContext)
   const line = docxLine(items)
   if (!line.hasWords) return null
+  const spans = spansFor(line.text)
+  if (spans.length === 0) return null
 
   const flat = flattenPieces(items)
   const inLine = linePieceFlags(flat)
@@ -641,7 +643,7 @@ function rebuildFootnotes(
       fidelity.notesLeft++
       continue
     }
-    const rebuilt = rebuildParagraphIn(part, withWords[0], [{ text: translated, marks: new Set() }], true)
+    const rebuilt = rebuildParagraphIn(part, withWords[0], () => [{ text: translated, marks: new Set() }], true)
     if (rebuilt === null) continue
     edits.push({ start: withWords[0].start, end: withWords[0].end, xml: rebuilt.xml })
     fidelity.notesWritten++
@@ -672,13 +674,35 @@ function plainSpans(text: string): Span[] {
 
 /** A paragraph's translation as marked spans, segments joined by one space.
  *  Each segment uses its own HTML when the editor wrote one, else its plain text. */
-function translationSpans(parts: readonly { plain: string; html: string }[]): Span[] {
+/**
+ * A paragraph's translation as marked spans. Each segment uses its own HTML
+ * when the editor wrote one, else its plain text. Segments are joined by the
+ * whitespace the SOURCE had between them (AQU-2539): a line break or tab where
+ * the paragraph was cut into lines stays a line break or tab, anything else is
+ * one space — every translation is trimmed, so the break is not in it.
+ */
+function translationSpans(
+  parts: readonly { plain: string; html: string; source?: string }[],
+  lineText = "",
+): Span[] {
   const out: Span[] = []
+  let cursor = 0
+  let previousEnd = -1
   for (const part of parts) {
+    // Where this segment's source sits in the paragraph's line, if it does.
+    const source = (part.source ?? "").trim()
+    const at = source ? lineText.indexOf(source, cursor) : -1
+    const gap = at >= 0 && previousEnd >= 0 ? lineText.slice(previousEnd, at) : ""
+    if (at >= 0) {
+      previousEnd = at + source.length
+      cursor = previousEnd
+    } else {
+      previousEnd = -1
+    }
     const spans = part.html ? htmlToSpans(part.html) : []
     const segment = spans.length > 0 ? spans : plainSpans(part.plain)
     if (segment.length === 0) continue
-    if (out.length > 0) out.push({ text: " ", marks: new Set(NO_MARKS) })
+    if (out.length > 0) out.push({ text: gap.replace(/[^\t\n]/g, "") || " ", marks: new Set(NO_MARKS) })
     out.push(...segment)
   }
   return out

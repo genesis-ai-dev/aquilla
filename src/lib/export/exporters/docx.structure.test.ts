@@ -438,3 +438,16 @@ describe("exportDocx — translated footnote text (AQU-2539)", () => {
     expect(result.fidelity.notesLeft).toBe(1)
   })
 })
+
+describe("exportDocx — a paragraph cut into several lines (AQU-2539)", () => {
+  it("joins the lines with the line break or tab the source had between them", async () => {
+    const long = "word ".repeat(30).trim()
+    const body = para(`<w:r><w:t xml:space="preserve">${long}. </w:t><w:br/><w:t xml:space="preserve">${long} end.</w:t></w:r>`)
+    const strings = docxPartsToStrings({ documentXml: documentXml(body) })
+    expect(strings.length).toBe(2)
+    // The second line starts at the break; translations are always trimmed.
+    expect(strings[1].original.startsWith("\n")).toBe(true)
+    const { xml } = await exportedXml(body, importedCells(strings, (s) => `FR ${s.original.trim()}`))
+    expect(xml).toMatch(/FR word[^<]*<\/w:t><w:br\/><w:t xml:space="preserve">FR word/)
+  })
+})

@@ -85,12 +85,12 @@ describe("full-stack Cloudflare previews", () => {
 
   it("binds the shared dev access list only to auth previews", () => {
     const auth = previewConfig("auth", { cwd: "/repo" })
-    const bindings = auth.previews.kv_namespaces
+    const bindings = auth.previews.kv_namespaces ?? []
     expect(bindings).toEqual([{ binding: "DEV_ACCESS_LIST", id: "9763251a3c84471bac48032d44bf3ea8" }])
     const toml = readFileSync(join(import.meta.dirname, "..", "auth-worker", "wrangler.toml"), "utf8")
     expect(toml).toContain(`binding = "DEV_ACCESS_LIST"\nid = "${bindings[0].id}"`)
     expect(previewConfig("sync", { cwd: "/repo" }).previews).not.toHaveProperty("kv_namespaces")
-    expect(auth.previews.vars.ADMIN_REQUIRE_ELEVATION).toBe("true")
+    expect(auth.previews.vars?.ADMIN_REQUIRE_ELEVATION).toBe("true")
   })
 
   // AQU-1353: the QA bots could not walk /admin at all, because a preview named

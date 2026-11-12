@@ -133,7 +133,7 @@ describe("exportDocx — paragraphs nested in text boxes (AQU-2539)", () => {
 })
 
 describe("exportDocx — what is not text is kept (AQU-2539)", () => {
-  it("keeps pictures, page breaks, bookmarks and field codes by the one placement rule", async () => {
+  it("keeps pictures, page breaks and bookmarks by the one placement rule", async () => {
     const body = para(
       `<w:bookmarkStart w:id="1" w:name="_Toc1"/>` +
         `<w:r><w:br w:type="page"/></w:r>` +
@@ -145,14 +145,47 @@ describe("exportDocx — what is not text is kept (AQU-2539)", () => {
     )
     const { xml } = await exportedXml(body, [cellAt(1, "Figure 1 : la légende")])
     const inner = xml.slice(xml.indexOf("<w:p>"), xml.indexOf("</w:p>"))
+    const firstWord = inner.indexOf(">Figure ")
     // Before the first word: the bookmark start and the page break stay in front.
-    expect(inner.indexOf('w:name="_Toc1"')).toBeLessThan(inner.indexOf("Figure 1 : la légende"))
-    expect(inner.indexOf('w:type="page"')).toBeLessThan(inner.indexOf("Figure 1 : la légende"))
+    expect(inner.indexOf('w:name="_Toc1"')).toBeLessThan(firstWord)
+    expect(inner.indexOf('w:type="page"')).toBeLessThan(firstWord)
     // Everything else follows the translation, in its original order.
-    for (const kept of ['w:fldCharType="begin"', "SEQ Figure", 'w:fldCharType="end"', "<w:drawing>", "<w:bookmarkEnd"]) {
-      expect(inner.indexOf(kept)).toBeGreaterThan(inner.indexOf("la légende"))
-    }
+    expect(inner.indexOf("<w:drawing>")).toBeGreaterThan(inner.indexOf("la légende"))
+    expect(inner.indexOf("<w:bookmarkEnd")).toBeGreaterThan(inner.indexOf("<w:drawing>"))
     expect(inner).not.toContain("the caption")
+  })
+
+  it("rebuilds a field around its result when the translation keeps that text", async () => {
+    const field = complexField("SEQ Figure \\* ARABIC", "1")
+    const body = para(run("Figure ") + field + run(": the caption"))
+    const { xml } = await exportedXml(body, [cellAt(1, "Figure 1 : la légende")])
+    // The whole field, result included, byte for byte where "1" is.
+    expect(xml).toContain(`<w:t xml:space="preserve">Figure </w:t></w:r>${field}<w:r><w:t xml:space="preserve"> : la légende</w:t>`)
+  })
+
+  it("keeps a field's code with an empty result when its result is not in the translation", async () => {
+    const body = para(run("See page ") + complexField("PAGEREF _Ref1 \\h", "12") + run(" for more."))
+    const { xml } = await exportedXml(body, [cellAt(1, "Voir plus loin.")])
+    expect(xml).toMatch(/Voir plus loin\.<\/w:t><\/w:r><w:r><w:fldChar w:fldCharType="begin"\/><\/w:r><w:r><w:instrText[^>]*> PAGEREF _Ref1 \\h <\/w:instrText><\/w:r><w:r><w:fldChar w:fldCharType="separate"\/><\/w:r><w:r><w:fldChar w:fldCharType="end"\/><\/w:r>/)
+    expect(xml).not.toContain(">12<")
+  })
+
+  it("rebuilds a simple field around its result, or keeps it emptied", async () => {
+    const simple = `<w:fldSimple w:instr=" SEQ Figure \\* ARABIC ">${run("3")}</w:fldSimple>`
+    const kept = await exportedXml(para(run("Figure ") + simple + run(": Meaning")), [cellAt(1, "Figure 3 : Sens")])
+    expect(kept.xml).toContain(`Figure </w:t></w:r>${simple}<w:r><w:t xml:space="preserve"> : Sens</w:t>`)
+    const emptied = await exportedXml(para(run("Figure ") + simple + run(": Meaning")), [cellAt(1, "Figure trois : Sens")])
+    expect(emptied.xml).toContain(`Figure trois : Sens</w:t></w:r><w:fldSimple w:instr=" SEQ Figure \\* ARABIC "></w:fldSimple>`)
+  })
+
+  it("rebuilds a link around its text when the translation keeps it, and drops it otherwise", async () => {
+    const link = `<w:hyperlink r:id="rId9" w:history="1">${run("training@twftw.org", '<w:rPr><w:rStyle w:val="Hyperlink"/></w:rPr>')}</w:hyperlink>`
+    const body = para(run("Email: ") + link)
+    const kept = await exportedXml(body, [cellAt(1, "Courriel : training@twftw.org")])
+    expect(kept.xml).toContain(`Courriel : </w:t></w:r>${link}`)
+    const lost = await exportedXml(para(run("See ") + `<w:hyperlink r:id="rId9">${run("this page")}</w:hyperlink>`), [cellAt(1, "Voir cette page")])
+    expect(lost.xml).not.toContain("<w:hyperlink")
+    expect(lost.xml).toContain("Voir cette page")
   })
 
   it("writes tabs and line breaks back as Word's own elements", async () => {
@@ -272,5 +305,43 @@ describe("exportDocx — hidden text (AQU-2539)", () => {
     const note = run("[do not translate]", V)
     const { xml } = await exportedXml(para(run("Visible ") + note + run("words")), [cellAt(1, "Mots visibles")])
     expect(xml).toMatch(/Mots visibles<\/w:t><\/w:r><w:r><w:rPr><w:vanish\/><\/w:rPr><w:t xml:space="preserve">\[do not translate\]/)
+  })
+})
+
+describe("exportDocx — unchanged text keeps its own look (AQU-2539)", () => {
+  const HEB_A = '<w:rPr><w:rFonts w:ascii="SBL Hebrew" w:cs="SBL Hebrew"/><w:rtl/><w:lang w:bidi="he-IL"/></w:rPr>'
+  const HEB_B = '<w:rPr><w:rFonts w:ascii="SBL Hebrew" w:cs="SBL Hebrew"/><w:rtl/><w:sz w:val="26"/><w:lang w:bidi="he-IL"/></w:rPr>'
+  const GREEK = '<w:rPr><w:rFonts w:ascii="SBL Greek"/><w:i/></w:rPr>'
+  const SUP = '<w:rPr><w:vertAlign w:val="superscript"/></w:rPr>'
+
+  it("writes a Hebrew word split over several runs back with each run's own look", async () => {
+    const body = para(run("The word ") + run("ש", HEB_A) + run("ָּׁ", HEB_B) + run("נה", HEB_A) + run(" means year."))
+    const { xml } = await exportedXml(body, [cellAt(1, "Le mot שָּׁנה signifie année.")])
+    expect(xml).toContain(
+      `<w:r><w:t xml:space="preserve">Le mot </w:t></w:r><w:r>${HEB_A}<w:t xml:space="preserve">ש</w:t></w:r>` +
+        `<w:r>${HEB_B}<w:t xml:space="preserve">ָּׁ</w:t></w:r><w:r>${HEB_A}<w:t xml:space="preserve">נה</w:t></w:r>` +
+        `<w:r><w:t xml:space="preserve"> signifie année.</w:t></w:r>`,
+    )
+  })
+
+  it("joins Greek words in their own look across the spaces between them", async () => {
+    const body = para(run("He reads ") + run("τον", GREEK) + run(" ") + run("υιον", GREEK) + run(" here."))
+    const { xml } = await exportedXml(body, [cellAt(1, "Il lit τον υιον ici.")])
+    expect(xml).toContain(`<w:r>${GREEK}<w:t xml:space="preserve">τον</w:t></w:r><w:r><w:t xml:space="preserve"> </w:t></w:r><w:r>${GREEK}<w:t xml:space="preserve">υιον</w:t></w:r>`)
+  })
+
+  it("does not let a short Latin stretch grab a word of the translation", async () => {
+    const body = para(run("the 4") + run("th", SUP) + run(" century, Codex a") + run("a", SUP))
+    const { xml } = await exportedXml(body, [cellAt(1, "le IVe siècle, il a th")])
+    expect(xml).not.toContain("superscript")
+  })
+
+  it("keeps a look only on whole words and in source order", async () => {
+    const MT = '<w:rPr><w:smallCaps/></w:rPr>'
+    const body = para(run("The ") + run("LXX", MT) + run(" and the ") + run("MT", '<w:rPr><w:caps/></w:rPr>') + run(" differ."))
+    // "LXXI" is not the word LXX; the real one comes later.
+    const { xml } = await exportedXml(body, [cellAt(1, "LXXI : la LXX et le TM diffèrent.")])
+    expect(xml).toContain(`la </w:t></w:r><w:r>${MT}<w:t xml:space="preserve">LXX</w:t></w:r>`)
+    expect(xml).toContain('<w:t xml:space="preserve">LXXI : la </w:t>')
   })
 })

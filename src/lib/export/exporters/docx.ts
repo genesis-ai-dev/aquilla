@@ -69,6 +69,7 @@
 import JSZip from "jszip"
 import type { CellData } from "@/hooks/useCells"
 import { htmlToSpans, rPrWithMarks, textRunXml, type Mark, type Span } from "./docx-runs"
+import { markKey, rebuildParagraphInner, type RebuildIo } from "./docx-rebuild"
 import {
   packageBlockKey,
   translationsByPackageBlock,
@@ -97,9 +98,6 @@ const DOCUMENT_PART = "word/document.xml"
 const FOOTNOTES_PART = "word/footnotes.xml"
 const STYLES_PART = "word/styles.xml"
 
-/** A full USFM footnote span, as the importer inlines one (footnotes/insert.ts). */
-const FOOTNOTE_SPAN_RE = /\\f\s+[^\s\\]+[\s\S]*?\\f\*/g
-
 export interface DocxExportResult {
   blob: Blob
   /** Number of paragraphs that received a translation. */
@@ -114,6 +112,20 @@ export interface DocxExportResult {
    *  had MIXED run formatting keep only the dominant run's styling as the base —
    *  surfaced so users know the output was simplified (additive field). */
   warnings: { segment: string; detail: string }[]
+  /** AQU-2539: what the rebuild of translated paragraphs kept and lost, over
+   *  the whole file (see docx-rebuild.ts). Additive field. */
+  fidelity: DocxExportFidelity
+}
+
+export interface DocxExportFidelity {
+  /** Stretches with their own look found unchanged in a translation. */
+  keptLooks: number
+  /** Fields and links rebuilt around their unchanged text. */
+  keptFields: number
+  keptLinks: number
+  /** Fields written with an empty result; links dropped (their words stay). */
+  emptiedFields: number
+  droppedLinks: number
 }
 
 /** One paragraph's translation: its segments in order. */
@@ -189,7 +201,9 @@ export async function exportDocx(
   cells: CellData[],
   options: DocxExportOptions = {},
 ): Promise<DocxExportResult> {
-  const zip = await JSZip.loadAsync(rawDocxBytes)
+  // createFolders: false — JSZip otherwise adds a "word/" folder entry the
+  // client's package never had (AQU-2539: the export had one part too many).
+  const zip = await JSZip.loadAsync(rawDocxBytes, { createFolders: false })
 
   const xml = await zip.file(DOCUMENT_PART)?.async("string")
   if (!xml) {
@@ -246,6 +260,7 @@ export async function exportDocx(
   let removed = 0
   let inserted = 0
   const warnings: { segment: string; detail: string }[] = []
+  const fidelity: DocxExportFidelity = { keptLooks: 0, keptFields: 0, keptLinks: 0, emptiedFields: 0, droppedLinks: 0 }
 
   /** Index into `spans` of the first paragraph starting at or after `offset`. */
   const firstSpanAtOrAfter = (offset: number): number => {
@@ -362,65 +377,14 @@ export async function exportDocx(
       target = { el: only.el, items: only.items }
     }
 
-    const elementXml = (el: XmlElement) => renderRange(at(el.start), at(el.end))
-    const runOpenTag = (run: XmlElement) => xml!.slice(at(run.start), at(run.openEnd))
     const runRprXml = (run: XmlElement): string => {
       const rPr = run.children.find((c) => isElement(c) && c.tagName === "w:rPr") as XmlElement | undefined
       return rPr ? xml!.slice(at(rPr.start), at(rPr.end)) : ""
     }
 
-    // Split the target's own pieces (wrappers inside it opened up) into what
-    // stays in front of the translation and what follows it.
-    const front: string[] = []
-    const back: string[] = []
-    const footnoteRuns: string[] = []
-    let seenWord = false
-    let openRun: { run: XmlElement; xml: string; side: string[] } | null = null
-    const closeRun = () => {
-      if (openRun) openRun.side.push(`${openRun.xml}</w:r>`)
-      openRun = null
-    }
-    const keepInRun = (run: XmlElement, children: XmlElement[], side: string[]) => {
-      if (!openRun || openRun.run !== run || openRun.side !== side) {
-        closeRun()
-        openRun = { run, xml: runOpenTag(run) + runRprXml(run), side }
-      }
-      for (const child of children) openRun.xml += elementXml(child)
-    }
-    for (const piece of flattenPieces(target.items)) {
-      const side = seenWord ? back : front
-      if (lineSet.has(piece)) {
-        if (piece.kind === "footnote") {
-          closeRun()
-          footnoteRuns.push(elementXml(piece.run))
-        } else if (piece.kind === "text" && piece.source === "t" && piece.text.trim() !== "") {
-          seenWord = true
-        }
-        continue
-      }
-      switch (piece.kind) {
-        case "keep":
-          closeRun()
-          side.push(elementXml(piece.el))
-          break
-        case "footnote":
-          closeRun()
-          side.push(elementXml(piece.run))
-          break
-        case "keepInRun":
-          keepInRun(piece.run, piece.children, side)
-          break
-        case "text":
-          // A tab or line break before the first word or after the last.
-          keepInRun(piece.run, [piece.el], side)
-          break
-      }
-    }
-    closeRun()
-
     const base = baseRunLook(line.chunks, runRprXml)
-    // Fidelity report: the source paragraph carried more than one run look,
-    // and the translation is written in one base look (plus its own marks).
+    // Fidelity report: the source paragraph carried more than one run look
+    // and some of it may come back in the base look (the export dialog says so).
     const looks = new Set(
       line.chunks
         .filter((c) => c.piece.kind === "text" && c.piece.source === "t" && c.text.trim())
@@ -432,8 +396,31 @@ export async function exportDocx(
         detail: "paragraph had mixed inline formatting; translation takes the look of most of its plain text",
       })
     }
-    const { runs, unusedFootnotes } = translationRuns(spans, base, footnoteRuns)
-    const inner = front.join("") + runs + unusedFootnotes.join("") + back.join("")
+
+    const text = spans.map((s) => s.text).join("")
+    const marks: ReadonlySet<Mark>[] = []
+    for (const s of spans) for (let i = 0; i < s.text.length; i++) marks.push(s.marks)
+    const io: RebuildIo = {
+      elementXml: (el) => renderRange(at(el.start), at(el.end), span),
+      openTag: (el) => xml!.slice(at(el.start), at(el.openEnd)),
+      closeTag: (el) => xml!.slice(at(el.closeStart), at(el.end)),
+      rPrXml: runRprXml,
+    }
+    const rebuilt = rebuildParagraphInner({
+      items: target.items,
+      lineSet,
+      text,
+      marks,
+      baseRpr: base ?? "",
+      markLooks: markLooksOf(line.chunks, runRprXml),
+      io,
+    })
+    const inner = rebuilt.xml
+    fidelity.keptLooks += rebuilt.keptLooks
+    fidelity.keptFields += rebuilt.keptFields
+    fidelity.keptLinks += rebuilt.keptLinks
+    fidelity.emptiedFields += rebuilt.emptiedFields
+    fidelity.droppedLinks += rebuilt.droppedLinks
     const before = renderRange(span.start, at(target.el.openEnd), span)
     const after = renderRange(at(target.el.closeStart), span.end, span)
     return before + inner + after
@@ -458,6 +445,7 @@ export async function exportDocx(
       removed,
       inserted,
       warnings,
+      fidelity,
     }
   }
 
@@ -476,7 +464,7 @@ export async function exportDocx(
   }
 
   // Write modified XML back — only word/document.xml changes; all other parts untouched.
-  zip.file(DOCUMENT_PART, rebuilt)
+  zip.file(DOCUMENT_PART, rebuilt, { createFolders: false })
 
   // AQU-889: DEFLATE, not JSZip's default STORE. A re-zipped package that
   // stores every part uncompressed balloons an ~10KB Word document to ~200KB
@@ -488,7 +476,7 @@ export async function exportDocx(
     compression: "DEFLATE",
     compressionOptions: { level: 6 },
   })
-  return { blob, injected, untouched, removed, inserted, warnings }
+  return { blob, injected, untouched, removed, inserted, warnings, fidelity }
 }
 
 /** Does this piece hold any of the line (directly, or inside a wrapper)? */
@@ -555,6 +543,30 @@ function baseRunLook(
   return look ? look : null
 }
 
+/**
+ * For each set of marks the source's text carries, the run look it carries
+ * them in — when that is ONE look. A translated stretch with the same marks
+ * (the translator's bold over "Terme :") then takes the source's own look for
+ * them, font and size included, instead of base-plus-a-bold-toggle.
+ */
+function markLooksOf(
+  chunks: ReturnType<typeof docxLine>["chunks"],
+  runRprXml: (run: XmlElement) => string,
+): Map<string, string> {
+  const byKey = new Map<string, Set<string>>()
+  for (const chunk of chunks) {
+    if (chunk.piece.kind !== "text" || chunk.piece.source !== "t" || !chunk.text.trim()) continue
+    const key = markKey(chunk.marks as ReadonlySet<Mark>)
+    if (key === "") continue
+    const set = byKey.get(key) ?? new Set<string>()
+    set.add(runRprXml(chunk.piece.run))
+    byKey.set(key, set)
+  }
+  const out = new Map<string, string>()
+  for (const [key, set] of byKey) if (set.size === 1) out.set(key, [...set][0])
+  return out
+}
+
 function runsForSpans(spans: readonly Span[], baseRprXml: string | null): string {
   // Neighbouring stretches with the same look are one run.
   let out = ""
@@ -570,46 +582,6 @@ function runsForSpans(spans: readonly Span[], baseRprXml: string | null): string
     pendingText += span.text
   }
   if (pendingRpr !== null) out += textRunXml(pendingText, pendingRpr)
-  return out
-}
-
-/**
- * The translation as runs. A USFM footnote marker in it becomes the source's
- * footnote reference run at that place — the k-th marker takes the paragraph's
- * k-th footnote reference — and its text is never written into the body. A
- * reference left without a marker is returned to follow the translation.
- */
-function translationRuns(
-  spans: readonly Span[],
-  baseRprXml: string | null,
-  footnoteRuns: readonly string[],
-): { runs: string; unusedFootnotes: string[] } {
-  const text = spans.map((s) => s.text).join("")
-  const markers = [...text.matchAll(FOOTNOTE_SPAN_RE)].map((m) => ({ start: m.index!, end: m.index! + m[0].length }))
-  let out = ""
-  let cursor = 0
-  let used = 0
-  for (const marker of markers) {
-    out += runsForSpans(sliceSpans(spans, cursor, marker.start), baseRprXml)
-    if (used < footnoteRuns.length) out += footnoteRuns[used++]
-    cursor = marker.end
-  }
-  out += runsForSpans(sliceSpans(spans, cursor, text.length), baseRprXml)
-  return { runs: out, unusedFootnotes: footnoteRuns.slice(used) }
-}
-
-/** The characters [from, to) of a span list, marks kept. */
-function sliceSpans(spans: readonly Span[], from: number, to: number): Span[] {
-  const out: Span[] = []
-  let offset = 0
-  for (const span of spans) {
-    const start = offset
-    const end = offset + span.text.length
-    offset = end
-    if (end <= from || start >= to) continue
-    const text = span.text.slice(Math.max(0, from - start), Math.min(span.text.length, to - start))
-    if (text) out.push({ text, marks: span.marks })
-  }
   return out
 }
 

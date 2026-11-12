@@ -126,10 +126,16 @@ export interface DocxExportResult {
   removed: number
   /** AQU-1068: new paragraphs written for cells added in the app. */
   inserted: number
-  /** Per-paragraph inline-style warnings: translated paragraphs whose source
-   *  had MIXED run formatting keep only the dominant run's styling as the base —
-   *  surfaced so users know the output was simplified (additive field). */
+  /** What the export could not write and a re-import of the file would fix
+   *  (an old import's text boxes), each naming its paragraph by first words. */
   warnings: { segment: string; detail: string }[]
+  /** AQU-2539: translated paragraphs where words with a look of their own
+   *  (bold, italic, a colour…) are not in the translation, so the translation
+   *  took the paragraph's main look there: each paragraph by its first words,
+   *  with the first words of each such stretch as the source has them. A
+   *  paragraph whose every such stretch is found unchanged keeps its looks and
+   *  is not listed. */
+  lostLooks: { segment: string; words: string[] }[]
   /** AQU-2539: what the rebuild of translated paragraphs kept and lost, over
    *  the whole file (see docx-rebuild.ts). Additive field. */
   fidelity: DocxExportFidelity
@@ -316,7 +322,7 @@ export async function exportDocx(
   let untouched = 0
   let removed = 0
   let inserted = 0
-  const warnings: { segment: string; detail: string }[] = []
+  const lostLooks: { segment: string; words: string[] }[] = []
   const fidelity: DocxExportFidelity = {
     keptLooks: 0, keptFields: 0, keptLinks: 0, emptiedFields: 0, droppedLinks: 0, notesWritten: 0, notesLeft: 0,
     staleTextBoxHolders: 0, textBoxCellsAdopted: 0, textBoxCellsNotSplit: 0, unplacedFootnoteMarkers: 0,
@@ -434,7 +440,7 @@ export async function exportDocx(
     const p = parseXmlLite(xml!.slice(s.start, s.end)).children.find(isElement)
     return p ? docxLine(walkDocxParagraph(p, walkContext)).text : ""
   }
-  /** Warnings that ask for a re-import come first: the dialog shows six. */
+  /** The result's warnings: each asks for a re-import of the file. */
   const reimportWarnings: { segment: string; detail: string }[] = []
 
   const occurrences = (hay: string, needle: string) => hay.split(needle).length - 1
@@ -529,13 +535,10 @@ export async function exportDocx(
       restoreLineSeparators(translationSpans(translation.parts, line), line, translation.source))
     if (rebuilt === null) return null
     if (!counted) return rebuilt.xml
-    // Fidelity report: the source paragraph carried more than one run look
-    // and some of it may come back in the base look (the export dialog says so).
-    if (rebuilt.mixedLooks) {
-      warnings.push({
-        segment: translation.label,
-        detail: "paragraph had mixed inline formatting; translation takes the look of most of its plain text",
-      })
+    // Fidelity report: words with a look of their own that the translation
+    // changed (the export dialog lists the paragraph).
+    if (rebuilt.stats.lostLooks.length > 0) {
+      lostLooks.push({ segment: firstWords(lineTextOf(span)), words: [...new Set(rebuilt.stats.lostLooks.map(firstWords))] })
     }
     addFidelity(fidelity, rebuilt.stats)
     for (const note of rebuilt.stats.footnotes) noteTranslations.set(note.id, note.marker)
@@ -550,7 +553,7 @@ export async function exportDocx(
   // gets that text written into word/footnotes.xml, in its own paragraph, by
   // the same rules as the body (its number and everything not text kept).
   const rebuiltFootnotes = footnotesXml
-    ? rebuildFootnotes(footnotesXml, noteTranslations, walkContext, writeText, translatedLook, fidelity)
+    ? rebuildFootnotes(footnotesXml, noteTranslations, walkContext, writeText, translatedLook, fidelity, lostLooks)
     : null
 
   // AQU-2383: the surgical scan spliced nothing, so `word/document.xml` is
@@ -560,7 +563,6 @@ export async function exportDocx(
   // otherwise come back as a different file than the upload — which is the
   // whole complaint behind the untouched-export rule. The counts are already
   // final here, so the result still reports the walk honestly.
-  const allWarnings = [...reimportWarnings, ...warnings]
   if (rebuilt === xml && rebuiltFootnotes === null) {
     return {
       blob: new Blob([rawDocxBytes], { type: DOCX_MIME }),
@@ -568,7 +570,8 @@ export async function exportDocx(
       untouched,
       removed,
       inserted,
-      warnings: allWarnings,
+      warnings: reimportWarnings,
+      lostLooks,
       fidelity,
     }
   }
@@ -613,7 +616,7 @@ export async function exportDocx(
     compression: "DEFLATE",
     compressionOptions: { level: 6 },
   })
-  return { blob, injected, untouched, removed, inserted, warnings: allWarnings, fidelity }
+  return { blob, injected, untouched, removed, inserted, warnings: reimportWarnings, lostLooks, fidelity }
 }
 
 /** A paragraph's first words, to name it in a warning. */
@@ -650,7 +653,6 @@ interface PartContext {
 interface RebuiltParagraph {
   xml: string
   stats: RebuildResult
-  mixedLooks: boolean
 }
 
 function addFidelity(total: DocxExportFidelity, stats: RebuildResult): void {
@@ -707,11 +709,6 @@ function rebuildParagraphIn(
     return rPr ? xml.slice(at(rPr.start), at(rPr.end)) : ""
   }
   const base = baseRunLook(line.chunks, runRprXml)
-  const looks = new Set(
-    line.chunks
-      .filter((c) => c.piece.kind === "text" && c.piece.source === "t" && c.text.trim())
-      .map((c) => runRprXml((c.piece as Extract<DocxPiece, { kind: "text" }>).run)),
-  )
 
   const lead = leadingSpace ? /^\s*/.exec(line.text)![0] : ""
   const all = lead ? [{ text: lead, marks: new Set<Mark>() }, ...spans] : spans
@@ -736,7 +733,7 @@ function rebuildParagraphIn(
   })
   const before = part.renderRange(span.start, at(target.el.openEnd), span)
   const after = part.renderRange(at(target.el.closeStart), span.end, span)
-  return { xml: before + stats.xml + after, stats, mixedLooks: looks.size > 1 }
+  return { xml: before + stats.xml + after, stats }
 }
 
 /**
@@ -753,6 +750,7 @@ function rebuildFootnotes(
   writeText: (text: string) => string,
   translatedLook: (rPr: string) => string,
   fidelity: DocxExportFidelity,
+  lostLooks: { segment: string; words: string[] }[],
 ): string | null {
   if (noteTranslations.size === 0) return null
   const doc = parseXmlLite(footnotesXml, { offsets: true })
@@ -788,6 +786,7 @@ function rebuildFootnotes(
     if (rebuilt === null) continue
     edits.push({ start: withWords[0].start, end: withWords[0].end, xml: rebuilt.xml })
     fidelity.notesWritten++
+    if (rebuilt.stats.lostLooks.length > 0) lostLooks.push({ segment: firstWords(sourceNote), words: [...new Set(rebuilt.stats.lostLooks.map(firstWords))] })
   }
   if (edits.length === 0) return null
   let out = ""

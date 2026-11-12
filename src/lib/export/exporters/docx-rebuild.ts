@@ -30,7 +30,7 @@
 
 import { isElement, type XmlElement } from "@/lib/parsers/xml-lite"
 import type { DocxPiece } from "@/lib/parsers/docx-structure"
-import { rPrWithMarks, textRunXml, type Mark } from "./docx-runs"
+import { directRprChild, rPrWithMarks, textRunXml, type Mark } from "./docx-runs"
 
 type Leaf = Exclude<DocxPiece, { kind: "container" }>
 type TextPiece = Extract<DocxPiece, { kind: "text" }>
@@ -92,6 +92,29 @@ export interface RebuildResult {
   /** Footnote markers in the translation with no reference in the source
    *  paragraph to put there (a note the translator added): not written. */
   unplacedMarkers: number
+  /** The source words of each stretch with a look of its own that a reader
+   *  sees (see `seenDifferently`) and that the translation does not hold, so
+   *  they were written in the paragraph's main look (or the translation's own
+   *  marks). */
+  lostLooks: string[]
+}
+
+/** What a reader sees of a run's look. Language, proofing, character spacing
+ *  and the complex-script twins of bold, italic and size are left out. */
+const SEEN_LOOK = [
+  "rStyle", "rFonts", "b", "i", "caps", "smallCaps", "strike", "dstrike", "outline", "shadow", "emboss",
+  "imprint", "vanish", "color", "w", "position", "sz", "highlight", "u", "effect", "bdr", "shd", "vertAlign", "em",
+]
+/** A toggle switched off reads as the toggle left out. */
+const OFF = /\sw:val="(0|false|none)"/
+
+/** Does a reader see these two run looks differently? */
+export function seenDifferently(a: string, b: string): boolean {
+  const seen = (rPr: string, name: string) => {
+    const el = rPr ? directRprChild(rPr, name) : null
+    return el === null || OFF.test(el) ? null : el
+  }
+  return SEEN_LOOK.some((name) => seen(a, name) !== seen(b, name))
 }
 
 const FOOTNOTE_SPAN_RE = /\\f\s+[^\s\\]+[\s\S]*?\\f\*/g
@@ -107,7 +130,7 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
   const { io } = input
   const result: RebuildResult = {
     xml: "", keptLooks: 0, keptFields: 0, keptLinks: 0, emptiedFields: 0, droppedLinks: 0, footnotes: [],
-    unplacedMarkers: 0,
+    unplacedMarkers: 0, lostLooks: [],
   }
 
   // Footnote markers in the translation, and the reference runs they take.
@@ -129,7 +152,9 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
   // Match, then open up what did not match, until nothing changes.
   let matches: Map<RNode, Match>
   for (;;) {
-    matches = matchAnchors(nodes, masked, input.baseRpr, io)
+    const lost: { text: string; look: string }[] = []
+    matches = matchAnchors(nodes, masked, input.baseRpr, io, lost)
+    result.lostLooks = lost.filter((l) => seenDifferently(l.look, input.baseRpr)).map((l) => l.text)
     let changed = false
     const next: RNode[] = []
     for (const node of nodes) {
@@ -419,8 +444,10 @@ function trimmed(text: string): { lead: number; text: string } {
   return { lead, text: text.trim() }
 }
 
-function anchorsOf(nodes: readonly RNode[], baseRpr: string, io: RebuildIo): { anchors: Anchor[]; text: string } {
+function anchorsOf(nodes: readonly RNode[], baseRpr: string, io: RebuildIo): { anchors: Anchor[]; text: string; unsought: LostStretch[] } {
   const anchors: Anchor[] = []
+  /** Look stretches with a letter or digit too short to be looked for. */
+  const unsought: LostStretch[] = []
   let offset = 0
   let levelText = ""
   // Look stretches: runs of the line's own characters in ONE look other than
@@ -499,6 +526,10 @@ function anchorsOf(nodes: readonly RNode[], baseRpr: string, io: RebuildIo): { a
       const openedUp = words.length === 1 && whole?.needle === words[0].needle ? [] : words
       if (whole) anchors.push({ node: owner[unit.start], ...whole, words: openedUp })
       else for (const word of words) anchors.push({ node: owner[unit.start], ...word, words: [] })
+      const raw = slice.map((c) => c.ch).join("").trim()
+      if (!whole && words.length === 0 && HAS_LETTER_OR_DIGIT.test(raw)) {
+        unsought.push({ text: raw, look: slice.find((c) => c.special)!.look })
+      }
     }
     chars = []
     owner = []
@@ -531,14 +562,21 @@ function anchorsOf(nodes: readonly RNode[], baseRpr: string, io: RebuildIo): { a
     levelText += text
   }
   flushStretches()
-  return { anchors: anchors.sort((a, b) => a.order - b.order), text: levelText }
+  return { anchors: anchors.sort((a, b) => a.order - b.order), text: levelText, unsought }
 }
 
-function matchAnchors(nodes: readonly RNode[], masked: string, baseRpr: string, io: RebuildIo): Map<RNode, Match> {
+/** A look stretch the translation does not hold: its words and its look. */
+interface LostStretch {
+  text: string
+  look: string
+}
+
+function matchAnchors(nodes: readonly RNode[], masked: string, baseRpr: string, io: RebuildIo, lost: LostStretch[]): Map<RNode, Match> {
   const out = new Map<RNode, Match>()
   const lookMatches: Match[] = []
   let cursor = 0
-  const { anchors, text: sourceText } = anchorsOf(nodes, baseRpr, io)
+  const { anchors, text: sourceText, unsought } = anchorsOf(nodes, baseRpr, io)
+  lost.push(...unsought)
   // In source order; when the translation holds the text as often as the
   // source paragraph does, the source's n-th occurrence takes the n-th.
   const find = (needle: string, order: number) => {
@@ -561,13 +599,21 @@ function matchAnchors(nodes: readonly RNode[], masked: string, baseRpr: string, 
       cursor = match.end
       continue
     }
-    // Not found whole: open it up into its words.
+    // Not found whole: open it up into its words. What is not found of a
+    // look stretch is lost: the whole stretch when none of its words is found.
+    const missing: LostStretch[] = []
     for (const word of anchor.words ?? []) {
       const wordFound = find(word.needle, word.order)
-      if (wordFound === null) continue
+      if (wordFound === null) {
+        missing.push({ text: word.needle, look: word.looks[0] })
+        continue
+      }
       lookMatches.push({ ...wordFound, looks: word.looks, text: word.needle })
       cursor = wordFound.end
     }
+    if (!anchor.looks) continue
+    if (missing.length === (anchor.words?.length ?? 0)) lost.push({ text: anchor.needle, look: anchor.looks[0] })
+    else lost.push(...missing)
   }
   // Look stretches are keyed by synthetic nodes so one text node may hold several.
   for (const match of lookMatches) out.set({ kind: "keep", piece: { kind: "keep", el: LOOK_MARK } } as RNode, match)

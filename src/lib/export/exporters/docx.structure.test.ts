@@ -880,14 +880,12 @@ describe("exportDocx — an old import's cell for the paragraph holding a text b
     expect(result.fidelity.staleTextBoxHolders).toBe(1)
   })
 
-  it("lists the warnings that ask for a re-import before any other", async () => {
+  it("keeps the warnings that ask for a re-import apart from words that lost their look", async () => {
     const mixed = para(run("Plain ") + run("bold", "<w:rPr><w:b/></w:rPr>") + run(" words"))
     const cells = [cellAt(1, "Clair gras mots", { original: "Plain bold words" }), cellAt(2, `${french} autre`, { original: `${caption}${caption}` })]
     const { result } = await exportedXml(mixed + body, cells)
-    expect(result.warnings.map((w) => [w.segment, w.detail.includes("re-import")])).toEqual([
-      [caption, true],
-      ["word/document.xml:w:p[1]", false],
-    ])
+    expect(result.warnings.map((w) => [w.segment, w.detail.includes("re-import")])).toEqual([[caption, true]])
+    expect(result.lostLooks).toEqual([{ segment: "Plain bold words", words: ["bold"] }])
   })
 
   it("gives the text box its copy's translation on an import from before locators too", async () => {
@@ -959,5 +957,36 @@ describe("exportDocx — a fresh import's caption in a text box (AQU-2539)", () 
     const { xml } = await exportedXml(body, importedCells(strings, () => "Figure 1 : Capture d’écran de l’outil"))
     const box = `<w:t xml:space="preserve">Figure </w:t></w:r>${seq}<w:r><w:t xml:space="preserve"> : Capture d’écran de l’outil</w:t></w:r>`
     expect(xml.split(box)).toHaveLength(3) // in the Choice and in the Fallback
+  })
+})
+
+describe("exportDocx — which paragraphs lost a look (AQU-2539)", () => {
+  const italic = "<w:rPr><w:i/></w:rPr>"
+
+  it("lists no paragraph when every word with its own look is in the translation", async () => {
+    const body = para(run("The text of the ") + run("Textus Receptus", italic) + run(" is late."))
+    const { result } = await exportedXml(body, [cellAt(1, "Le texte du Textus Receptus est tardif.", { original: "The text of the Textus Receptus is late." })])
+    expect(result.lostLooks).toEqual([])
+    expect(result.warnings).toEqual([])
+  })
+
+  it("lists no paragraph whose words differ only in what a reader does not see", async () => {
+    // Character spacing, proofing language and the complex-script size: no look.
+    const quiet = '<w:rPr><w:spacing w:val="-2"/><w:lang w:val="en-GB"/><w:szCs w:val="20"/></w:rPr>'
+    const body = para(run("Some ") + run("words here", quiet) + run(" and more"))
+    const { result } = await exportedXml(body, [cellAt(1, "Quelques mots ici et plus", { original: "Some words here and more" })])
+    expect(result.lostLooks).toEqual([])
+  })
+
+  it("names the one paragraph whose words with their own look the translation changed, by its first words", async () => {
+    const body =
+      para(run("Kept ") + run("Codex Bezae", italic) + run(" here.")) +
+      para(run("For the scribes of that time, the ") + run("more difficult", italic) + run(" reading was the one to fix first."))
+    const cells = [
+      cellAt(1, "Gardé Codex Bezae ici.", { original: "Kept Codex Bezae here." }),
+      cellAt(2, "Pour les scribes de ce temps, la leçon plus difficile était celle à corriger d’abord.", { original: "For the scribes of that time, the more difficult reading was the one to fix first." }),
+    ]
+    const { result } = await exportedXml(body, cells)
+    expect(result.lostLooks).toEqual([{ segment: "For the scribes of that time, the more…", words: ["more difficult"] }])
   })
 })

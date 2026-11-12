@@ -21,7 +21,7 @@ import type { SyncTokenFetcher } from "@/lib/audio/peaks-loader"
 import { buildAudioId, deleteCellAudio, uploadCellAudio } from "@/lib/audio/upload"
 import { encodeWavPcm16 } from "@/lib/audio/wav-encode"
 import { recordStep, withGroup } from "@/lib/history/history"
-import { recordTakeAdded, type TakeRemoveData } from "@/lib/history/take-steps"
+import { recordTakeAdded, type PieceStretch, type TakeRemoveData } from "@/lib/history/take-steps"
 import { emitCellAudioAttach, emitCellAudioGain, emitCellAudioPlace, emitCellAudioRemove } from "@/lib/sync/events-emit"
 import type { VersionChanges } from "@/lib/sync/outbox-types"
 
@@ -52,6 +52,9 @@ export interface VersionPlacement {
   /** AQU-2492 (review, Nov 9), finding 8: who had approved the take it
    *  replaces, for the step that removes it ("over"). */
   approvedBy?: readonly string[]
+  /** AQU-2492 (review, round 2): the stretch of its recording the take it
+   *  replaces plays, for the step's Undo and Redo (`PieceStretch`). */
+  replacedStretch?: PieceStretch
 }
 
 export interface SaveVersionArgs {
@@ -173,7 +176,14 @@ export async function saveStationVersion(args: SaveVersionArgs): Promise<SavedVe
           )
           recordTakeAdded(
             "station",
-            { cellId: p.cellId, audioId, slot: p.slot, selectedBefore: p.selectedBefore },
+            {
+              cellId: p.cellId, audioId, slot: p.slot, selectedBefore: p.selectedBefore,
+              // AQU-2492 (review, round 2): a new piece stands for the stretch
+              // of the piece it replaces, which its Redo takes away again.
+              ...(p.pieceOf && p.replacedStretch
+                ? { replaces: p.fromAudioId, stretches: { [audioId]: { ...p.replacedStretch, pieceOf: p.pieceOf } } }
+                : {}),
+            },
             { fileId: p.fileId },
           )
           if (p.pieceOf || over) {
@@ -185,6 +195,8 @@ export async function saveStationVersion(args: SaveVersionArgs): Promise<SavedVe
               data: {
                 cellId: p.cellId, audioId: p.fromAudioId, slot: p.slot, wasSelected: true, selectedBefore: p.selectedBefore,
                 ...(p.approvedBy ? { approvedBy: { [p.fromAudioId]: [...p.approvedBy] } } : {}),
+                // AQU-2492 (review, round 2): and where it sat in its take.
+                ...(p.replacedStretch ? { stretches: { [p.fromAudioId]: p.replacedStretch } } : {}),
                 // AQU-2492 (review, Nov 9), finding 4: its Undo never hands
                 // the slot back to the new version, which the same Undo removes.
                 replacedBy: audioId,

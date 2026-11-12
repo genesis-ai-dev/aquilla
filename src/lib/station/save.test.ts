@@ -150,6 +150,37 @@ describe("Save as new version", () => {
     resetHistoryForTests()
   })
 
+  // AQU-2492 (review, round 2): Save over a piece of a cut take notes, on
+  // both halves of its step, the stretch of its recording the replaced piece
+  // played, which the new piece stands for: its Undo and Redo are then held
+  // to the rule that no two pieces of a take play one stretch.
+  it("Save over a piece notes the stretch it replaced, for its Undo and its Redo", async () => {
+    resetHistoryForTests()
+    setHistoryScope("p", "bob")
+    const stretch = { pieceOf: "t1.webm", url: "frontier-audio://t1.webm", startMs: 1000, endMs: 4000 }
+    const res = await saveStationVersion({
+      projectId: "p",
+      samples: new Float32Array(4800),
+      rate: 48000,
+      placements: [{ ...base, fromAudioId: "p2.webm", pieceOf: "t1.webm", replacedStretch: stretch }],
+      author: "bob",
+      getSyncToken: async () => "jwt",
+      where: { fileId: "f" },
+      mode: "over",
+    })
+    const added = matchingSteps((kind, data) => {
+      const d = data as { audioId?: string; replaces?: string; stretches?: Record<string, unknown> }
+      return kind === "take.add" && d.audioId === res.audioIds[0] && d.replaces === "p2.webm" && JSON.stringify(d.stretches?.[res.audioIds[0]]) === JSON.stringify(stretch)
+    })
+    const removed = matchingSteps((kind, data) => {
+      const d = data as { audioId?: string; stretches?: Record<string, unknown> }
+      return kind === "take.remove" && d.audioId === "p2.webm" && JSON.stringify(d.stretches?.["p2.webm"]) === JSON.stringify(stretch)
+    })
+    expect(added.undo).toHaveLength(1)
+    expect(removed.undo).toHaveLength(1)
+    resetHistoryForTests()
+  })
+
   it("Save as new version keeps the original", async () => {
     await saveStationVersion({
       projectId: "p",

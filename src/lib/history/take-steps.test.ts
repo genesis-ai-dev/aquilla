@@ -1,12 +1,13 @@
 // AQU-1767: undo and redo of trims, moves, cuts — and (phase 2) choosing,
 // deleting and renaming takes — with the "changed since" guard.
 import { beforeEach, describe, it, expect, vi } from "vitest"
-import { recordTakeWindowRun, takeStepHandlers, type CutRecord, type TakeStepContext } from "./take-steps"
+import { recordTakeWindowRun, takeStepHandlers, type CutRecord, type PieceStretch, type TakeAddData, type TakeRemoveData, type TakeStepContext } from "./take-steps"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import {
   historyReady,
   historyView,
   matchingSteps,
+  recordGroup,
   recordStep,
   registerStepKinds,
   resetHistoryForTests,
@@ -188,6 +189,7 @@ describe("an Undo or Redo never leaves two pieces of one take over one stretch (
       return Object.entries(takes).filter(([k, t]) => !t.isDeleted && (t.pieceOf ?? k) === group).map(([k]) => k)
     },
   })
+  const ORIG = "frontier-audio://take.wav"
   const cutAt1s = (): CutRecord => ({
     cellId: "c1", audioId: "T", atMs: 1000, newAudioId: "P2",
     before: { trimEndMs: null, label: "Take 1", targetOffsetMs: null, validators: ["alice"] },
@@ -195,7 +197,7 @@ describe("an Undo or Redo never leaves two pieces of one take over one stretch (
   })
 
   it("the decided case still joins: a colleague deleted the second half, and nothing else plays it", async () => {
-    const { ctx, handlers } = withGroups({ T: { trimEndMs: 1000, durationMs: 4000 }, P2: { trimStartMs: 1000, durationMs: 4000, pieceOf: "T", isDeleted: true } })
+    const { ctx, handlers } = withGroups({ T: { url: ORIG, trimEndMs: 1000, durationMs: 4000 }, P2: { url: ORIG, trimStartMs: 1000, durationMs: 4000, pieceOf: "T", isDeleted: true } })
     expect(await handlers["take.cut"].undo({ cuts: [cutAt1s()] })).toEqual({ kind: "done" })
     expect(ctx.uncut).toHaveBeenCalledTimes(1)
   })
@@ -204,9 +206,9 @@ describe("an Undo or Redo never leaves two pieces of one take over one stretch (
   // middle piece. Joining would play 2 s to the end twice.
   it("skips the Undo when a colleague cut the second half again and deleted the middle piece", async () => {
     const { ctx, handlers } = withGroups({
-      T: { trimEndMs: 1000, durationMs: 4000 },
-      P2: { trimStartMs: 1000, trimEndMs: 2000, durationMs: 4000, pieceOf: "T", isDeleted: true },
-      P3: { trimStartMs: 2000, durationMs: 4000, pieceOf: "T" },
+      T: { url: ORIG, trimEndMs: 1000, durationMs: 4000 },
+      P2: { url: ORIG, trimStartMs: 1000, trimEndMs: 2000, durationMs: 4000, pieceOf: "T", isDeleted: true },
+      P3: { url: ORIG, trimStartMs: 2000, durationMs: 4000, pieceOf: "T" },
     })
     expect(await handlers["take.cut"].undo({ cuts: [cutAt1s()] })).toEqual({ kind: "skipped", reason: "changed" })
     expect(ctx.uncut).not.toHaveBeenCalled()
@@ -216,8 +218,8 @@ describe("an Undo or Redo never leaves two pieces of one take over one stretch (
   // put the edited recording in its place, as a piece of the same take.
   it("skips the Undo when a colleague saved the second half over in the Station", async () => {
     const { ctx, handlers } = withGroups({
-      T: { trimEndMs: 1000, durationMs: 4000 },
-      P2: { trimStartMs: 1000, durationMs: 4000, pieceOf: "T", isDeleted: true },
+      T: { url: ORIG, trimEndMs: 1000, durationMs: 4000 },
+      P2: { url: ORIG, trimStartMs: 1000, durationMs: 4000, pieceOf: "T", isDeleted: true },
       S2: { trimStartMs: 1000, durationMs: 4200, pieceOf: "T", url: "frontier-audio://station.wav", referenceAudioId: "P2" },
     })
     expect(await handlers["take.cut"].undo({ cuts: [cutAt1s()] })).toEqual({ kind: "skipped", reason: "changed" })
@@ -227,11 +229,11 @@ describe("an Undo or Redo never leaves two pieces of one take over one stretch (
   // Review, finding 2: dev's Undo joined the take (as decided); bob then
   // undoes his own delete of the second half, which would play twice.
   it("skips the colleague's Undo of his delete once the take was joined, and allows it while it was not", async () => {
-    const deleted = { cellId: "c1", audioId: "P2", slot: "recording", wasSelected: true, selectedBefore: null, stretches: { P2: { pieceOf: "T", startMs: 1000, endMs: 4000 } } }
-    const joinedTake = withGroups({ T: { durationMs: 4000 } })
+    const deleted = { cellId: "c1", audioId: "P2", slot: "recording", wasSelected: true, selectedBefore: null, stretches: { P2: { url: ORIG, pieceOf: "T", startMs: 1000, endMs: 4000 } } }
+    const joinedTake = withGroups({ T: { url: ORIG, durationMs: 4000 } })
     expect(await joinedTake.handlers["take.remove"].undo(deleted)).toEqual({ kind: "skipped", reason: "changed" })
     expect(joinedTake.ctx.select).not.toHaveBeenCalled()
-    const stillCut = withGroups({ T: { trimEndMs: 1000, durationMs: 4000 } })
+    const stillCut = withGroups({ T: { url: ORIG, trimEndMs: 1000, durationMs: 4000 } })
     expect(await stillCut.handlers["take.remove"].undo(deleted)).toEqual({ kind: "done" })
     expect(stillCut.ctx.select).toHaveBeenCalledWith("c1", "recording", "P2")
   })
@@ -239,8 +241,8 @@ describe("an Undo or Redo never leaves two pieces of one take over one stretch (
   // The Station's own Save over a piece is one step: its Undo brings the old
   // piece back and takes away the version that replaced it.
   it("the Undo of a Station Save over a piece still brings the old piece back", async () => {
-    const { ctx, handlers } = withGroups({ T: { trimEndMs: 1000, durationMs: 4000 }, S2: { trimStartMs: 1000, durationMs: 4200, pieceOf: "T" } })
-    const savedOver = { cellId: "c1", audioId: "P2", slot: "recording", wasSelected: true, selectedBefore: null, replacedBy: "S2", stretches: { P2: { pieceOf: "T", startMs: 1000, endMs: 4000 } } }
+    const { ctx, handlers } = withGroups({ T: { url: ORIG, trimEndMs: 1000, durationMs: 4000 }, S2: { url: "frontier-audio://station.wav", trimStartMs: 1000, durationMs: 4200, pieceOf: "T", referenceAudioId: "P2" } })
+    const savedOver = { cellId: "c1", audioId: "P2", slot: "recording", wasSelected: true, selectedBefore: null, replacedBy: "S2", stretches: { P2: { url: ORIG, pieceOf: "T", startMs: 1000, endMs: 4000 } } }
     expect(await handlers["take.remove"].undo(savedOver)).toEqual({ kind: "done" })
     expect(ctx.select).toHaveBeenCalledWith("c1", "recording", "P2")
   })
@@ -248,15 +250,135 @@ describe("an Undo or Redo never leaves two pieces of one take over one stretch (
   // The Redo would bring the second half back over a stretch another piece
   // plays by then: the server's cut would land on nothing, yet say "Redid".
   it("skips a Redo that another piece's stretch would turn into a cut of nothing", async () => {
-    const { ctx, handlers } = withGroups({ T: { durationMs: 4000 }, Q: { trimStartMs: 2000, durationMs: 4000, pieceOf: "T" } })
+    const { ctx, handlers } = withGroups({ T: { url: ORIG, durationMs: 4000 }, Q: { url: ORIG, trimStartMs: 2000, durationMs: 4000, pieceOf: "T" } })
     expect(await handlers["take.cut"].redo({ cuts: [cutAt1s()] })).toEqual({ kind: "skipped", reason: "changed" })
     expect(ctx.cut).not.toHaveBeenCalled()
   })
 
   it("a Redo with nothing else over the take cuts it again", async () => {
-    const { ctx, handlers } = withGroups({ T: { durationMs: 4000 } })
+    const { ctx, handlers } = withGroups({ T: { url: ORIG, durationMs: 4000 } })
     expect(await handlers["take.cut"].redo({ cuts: [cutAt1s()] })).toEqual({ kind: "done" })
     expect(ctx.cut).toHaveBeenCalledTimes(1)
+  })
+})
+
+// AQU-2492 (review, round 2): pieces the Station saved. Such a piece is a
+// part of a new, edited recording; it stands for the stretch of the piece it
+// was made from (`referenceAudioId`), never for its own numbers against the
+// original's, and the Station's Save notes that stretch on both halves of its
+// step so its Undo and Redo are held to the same rule.
+describe("pieces the Station saved (AQU-2492, review round 2)", () => {
+  const ORIG = "frontier-audio://take.wav"
+  const STN = "frontier-audio://station.wav"
+  type Take = Partial<CodexCellAttachment> & { isDeleted?: boolean }
+  // A take whose writes land, so a sequence of steps can run on it.
+  function sequence(takes: Record<string, Take>) {
+    const live = (id: string) => (takes[id] && !takes[id].isDeleted ? (takes[id] as CodexCellAttachment) : null)
+    const ctx: TakeStepContext = {
+      readTake: (_c, id) => live(id),
+      selectedIn: () => null,
+      applyTrim: vi.fn(async () => {}),
+      applyPlace: vi.fn(async () => {}),
+      cut: vi.fn(async (c: CutRecord) => {
+        takes[c.audioId] = { ...takes[c.audioId], trimEndMs: c.atMs }
+        takes[c.newAudioId] = { ...(takes[c.newAudioId] ?? {}), url: takes[c.audioId].url, trimStartMs: c.atMs, trimEndMs: c.before.trimEndMs ?? undefined, pieceOf: c.audioId, isDeleted: false }
+        return true
+      }),
+      uncut: vi.fn(async (c: CutRecord) => {
+        takes[c.audioId] = { ...takes[c.audioId], trimEndMs: c.before.trimEndMs ?? undefined }
+        if (takes[c.newAudioId]) takes[c.newAudioId] = { ...takes[c.newAudioId], isDeleted: true }
+      }),
+      select: vi.fn(async (_c, _s, id) => { if (id && takes[id]) takes[id] = { ...takes[id], isDeleted: false } }),
+      remove: vi.fn(async (_c, id) => { if (takes[id]) takes[id] = { ...takes[id], isDeleted: true } }),
+      rename: vi.fn(async () => {}),
+      liveGroup: (_c, id) => {
+        const group = live(id)?.pieceOf ?? id
+        return Object.entries(takes).filter(([k, t]) => !t.isDeleted && (t.pieceOf ?? k) === group).map(([k]) => k)
+      },
+    }
+    return { takes, ctx, h: takeStepHandlers(ctx) as Record<string, StepHandler<unknown>> }
+  }
+  const cutAt1s: CutRecord = {
+    cellId: "c1", audioId: "T", atMs: 1000, newAudioId: "P2",
+    before: { trimEndMs: null, label: "Take 1", targetOffsetMs: null, validators: ["alice", "carol"] },
+    renamed: true,
+  }
+  const P2_STRETCH: PieceStretch = { pieceOf: "T", url: ORIG, startMs: 1000, endMs: 4000 }
+  // bob's Save over the second half in the Station, as save.ts records it.
+  const stationAdd: TakeAddData = { cellId: "c1", audioId: "S2", slot: "recording", selectedBefore: "T", replaces: "P2", stretches: { S2: P2_STRETCH } }
+  const stationRemove: TakeRemoveData = { cellId: "c1", audioId: "P2", slot: "recording", wasSelected: true, selectedBefore: "T", replacedBy: "S2", stretches: { P2: P2_STRETCH } }
+  const DONE = { kind: "done" }
+  const CHANGED = { kind: "skipped", reason: "changed" }
+  const S2: Take = { url: STN, trimStartMs: 1000, durationMs: 4200, pieceOf: "T", referenceAudioId: "P2" }
+
+  beforeEach(async () => {
+    resetHistoryForTests()
+    await clearHistoryStoreForTests()
+    setHistoryScope("p1", "bob")
+    await historyReady()
+    recordGroup({ labelKey: "editor.history.stepStationSaveOver", fileId: "f1" }, [
+      { kind: "take.add", data: stationAdd, labelKey: "editor.history.stepStationVersion", fileId: "f1" },
+      { kind: "take.remove", data: stationRemove, labelKey: "editor.history.stepDeleteTake", fileId: "f1" },
+    ])
+  })
+
+  it("its own Undo and Redo, with nothing else in between: the old piece comes back and goes again", async () => {
+    const { takes, h } = sequence({ T: { url: ORIG, trimEndMs: 1000, durationMs: 4000 }, P2: { url: ORIG, trimStartMs: 1000, durationMs: 4000, pieceOf: "T", isDeleted: true }, S2 })
+    // Undo, newest part first: the old piece back, then the version gone
+    // (that half's own Undo of a piece is AQU-2493's, `joined`; here it is
+    // done as it does it).
+    expect(await h["take.remove"].undo(stationRemove)).toEqual(DONE)
+    takes.S2 = { ...takes.S2, isDeleted: true }
+    expect(takes.P2.isDeleted).toBe(false)
+    // Redo, oldest part first: the version back, then the old piece gone.
+    expect(await h["take.add"].redo(stationAdd)).toEqual(DONE)
+    expect(await h["take.remove"].redo(stationRemove)).toEqual(DONE)
+  })
+
+  // Review, round 2, item 1: dev cut; bob saved the second half over and then
+  // deleted his saved piece; dev's Undo joined the take. Neither of bob's two
+  // Undos may bring a second half back over the joined take.
+  it("after a join, neither the Undo of deleting the saved piece nor the Undo of the Save brings a half back", async () => {
+    const { ctx, h } = sequence({ T: { url: ORIG, trimEndMs: 1000, durationMs: 4000 }, P2: { url: ORIG, trimStartMs: 1000, durationMs: 4000, pieceOf: "T", isDeleted: true }, S2: { ...S2, isDeleted: true } })
+    expect(await h["take.cut"].undo({ cuts: [{ ...cutAt1s }] })).toEqual(DONE)
+    // bob's delete noted the saved piece's own numbers, on its own recording.
+    const deletedSaved: TakeRemoveData = { cellId: "c1", audioId: "S2", slot: "recording", wasSelected: true, selectedBefore: null, stretches: { S2: { pieceOf: "T", url: STN, startMs: 1000, endMs: 4200 } } }
+    expect(await h["take.remove"].undo(deletedSaved)).toEqual(CHANGED)
+    expect(await h["take.remove"].undo(stationRemove)).toEqual(CHANGED)
+    expect(ctx.select).not.toHaveBeenCalled()
+  })
+
+  // Review, round 2, item 2 (the older path): dev cut; bob saved the second
+  // half over and undid it; dev's Undo joined the take; bob redoes his Save.
+  it("after a join, the Save's Redo does not bring its piece back over the whole take", async () => {
+    const { ctx, h } = sequence({ T: { url: ORIG, trimEndMs: 1000, durationMs: 4000 }, P2: { url: ORIG, trimStartMs: 1000, durationMs: 4000, pieceOf: "T" }, S2: { ...S2, isDeleted: true } })
+    expect(await h["take.cut"].undo({ cuts: [{ ...cutAt1s }] })).toEqual(DONE)
+    expect(await h["take.add"].redo(stationAdd)).toEqual(CHANGED)
+    expect(ctx.select).not.toHaveBeenCalled()
+  })
+
+  // Review, round 2, item 3, A: dev cut at 1 s and deleted the first half; bob
+  // deleted 0.8 s at the start of the recording in the Station and saved the
+  // second half (the original 1.0-4.0 s, 0.2-3.2 s of the new recording).
+  // Nothing would play twice: dev's Undo of his delete goes ahead.
+  it("audio deleted before a saved piece does not stop the Undo of deleting the piece before it", async () => {
+    const { h } = sequence({ T: { url: ORIG, trimEndMs: 1000, durationMs: 4000, isDeleted: true }, P2: { url: ORIG, trimStartMs: 1000, durationMs: 4000, pieceOf: "T", isDeleted: true }, S2: { ...S2, trimStartMs: 200, trimEndMs: 3200, durationMs: 3200 } })
+    const deletedFirst: TakeRemoveData = { cellId: "c1", audioId: "T", slot: "recording", wasSelected: true, selectedBefore: null, stretches: { T: { pieceOf: "T", url: ORIG, startMs: 0, endMs: 1000 } } }
+    expect(await h["take.remove"].undo(deletedFirst)).toEqual(DONE)
+  })
+
+  // Item 3, B: a take cut at 1 s and 4 s; bob inserted a 1 s pause inside the
+  // middle piece and saved it (1.0-5.0 s of the new recording); dev deleted
+  // the last piece and undoes that.
+  it("a pause inserted inside a saved piece does not stop the Undo of deleting the piece after it", async () => {
+    const { h } = sequence({
+      T: { url: ORIG, trimEndMs: 1000, durationMs: 6000 },
+      P2: { url: ORIG, trimStartMs: 1000, trimEndMs: 4000, durationMs: 6000, pieceOf: "T", isDeleted: true },
+      S2: { ...S2, trimStartMs: 1000, trimEndMs: 5000, durationMs: 7000 },
+      P3: { url: ORIG, trimStartMs: 4000, durationMs: 6000, pieceOf: "T", isDeleted: true },
+    })
+    const deletedLast: TakeRemoveData = { cellId: "c1", audioId: "P3", slot: "recording", wasSelected: true, selectedBefore: null, stretches: { P3: { pieceOf: "T", url: ORIG, startMs: 4000, endMs: 6000 } } }
+    expect(await h["take.remove"].undo(deletedLast)).toEqual(DONE)
   })
 })
 

@@ -9,7 +9,7 @@
  * testable without a component, and lets a step saved yesterday be undone
  * today by whatever workspace is open now.
  */
-import { completeStep, historyView, recordStep, type StepHandler, type StepOutcome } from "./history"
+import { completeStep, historyView, matchingSteps, recordStep, type StepHandler, type StepOutcome } from "./history"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import { clearTakeUndone, markTakeUndone } from "@/lib/audio/undone-takes"
 
@@ -118,23 +118,44 @@ export interface TakeRemoveData {
   stretches?: Record<string, PieceStretch>
 }
 /**
- * AQU-2492 (review, Nov 12): the stretch of its recording a piece of a take
- * plays — its kept part, ms; `endMs` null runs to the recording's end — and
- * the take it is a piece of (its first piece's id). A piece the Station saved
- * is a part of the edited recording, whose clock the Station maps from the
- * original's, so it is weighed on the same clock.
+ * AQU-2492 (review, Nov 12): the stretch of a recording a piece of a take
+ * plays — `url`, the recording; its kept part there, ms (`endMs` null runs to
+ * the recording's end) — and the take it is a piece of (its first piece's id).
+ *
+ * Review, round 2: only stretches of ONE recording can double. A piece the
+ * Station saved is a part of a new, edited recording, whose clock may differ
+ * from the original's (audio deleted or inserted before or inside it), so it
+ * is never weighed by its own numbers against the original's: it stands for
+ * the stretch of the piece it was made from (`referenceAudioId`) whenever
+ * that is known, and otherwise against nothing.
  */
-export interface PieceStretch { pieceOf: string; startMs: number; endMs: number | null }
+export interface PieceStretch { pieceOf: string; url: string | null; startMs: number; endMs: number | null }
 export function pieceStretchOf(
   audioId: string,
-  att: { pieceOf?: string | null; trimStartMs?: number | null; trimEndMs?: number | null; durationMs?: number | null },
+  att: { url?: string | null; pieceOf?: string | null; trimStartMs?: number | null; trimEndMs?: number | null; durationMs?: number | null },
 ): PieceStretch {
-  return { pieceOf: att.pieceOf ?? audioId, startMs: att.trimStartMs ?? 0, endMs: att.trimEndMs ?? att.durationMs ?? null }
+  return { pieceOf: att.pieceOf ?? audioId, url: att.url ?? null, startMs: att.trimStartMs ?? 0, endMs: att.trimEndMs ?? att.durationMs ?? null }
 }
-/** Two stretches share more than the rounding a cut leaves at its seam. */
+/**
+ * The stretch a piece the Station saved stands for, as its Save noted it
+ * (`TakeAddData.stretches`) in this person's History; undefined when the
+ * History no longer holds that Save. A delete of such a piece can note only
+ * the piece's own numbers, on its own recording, since the piece it was made
+ * from is never sent to the browser again.
+ */
+function savedStandIn(audioId: string): PieceStretch | undefined {
+  let found: PieceStretch | undefined
+  matchingSteps((kind, data) => {
+    if (!found && kind === "take.add") found = (data as TakeAddData).stretches?.[audioId]
+    return false
+  })
+  return found
+}
+/** Two stretches of one recording share more than the rounding a cut leaves
+ *  at its seam. */
 const SEAM_MS = 2
 const sharesStretch = (a: PieceStretch, b: PieceStretch) =>
-  Math.min(a.endMs ?? Infinity, b.endMs ?? Infinity) - Math.max(a.startMs, b.startMs) > SEAM_MS
+  a.url === b.url && Math.min(a.endMs ?? Infinity, b.endMs ?? Infinity) - Math.max(a.startMs, b.startMs) > SEAM_MS
 export interface TakeRenameData { cellId: string; audioId: string; before: string | null; after: string | null }
 /**
  * A take an action ADDED (decision 11): recorded, uploaded, generated, voice-
@@ -150,6 +171,15 @@ export interface TakeAddData {
   selectedBefore: string | null
   /** Its other pieces, when the action added a cut take (cleaning a split take). */
   pieces?: string[]
+  /**
+   * AQU-2492 (review, round 2): a piece the Station saved over another piece
+   * of a cut take: `replaces`, the piece it replaced in the same step (its
+   * Redo takes that one away again), and `stretches`, the stretch the new
+   * piece stands for — the replaced piece's, in its recording. Its Redo is
+   * then held to the same rule as every step that brings a piece back.
+   */
+  replaces?: string
+  stretches?: Record<string, PieceStretch>
   /** The window it was born with, when the action set one. */
   window?: TakeWindow
 }
@@ -300,28 +330,55 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
   // would play twice. `after` is what the step will leave — a piece's stretch,
   // or null for a piece it removes — and every other live piece of the take
   // stays as it reads now. A step that would break it is skipped as changed.
-  const doublesUp = (cellId: string, take: string, after: ReadonlyMap<string, PieceStretch | null>): boolean => {
+  // `known`: stretches the step knows of pieces the browser no longer has
+  // (a cut's second half, a deleted piece), for a live piece the Station made
+  // from one of them to stand for.
+  const doublesUp = (
+    cellId: string,
+    take: string,
+    after: ReadonlyMap<string, PieceStretch | null>,
+    known: ReadonlyMap<string, PieceStretch> = new Map(),
+  ): boolean => {
     const changed = [...after.values()].filter((x): x is PieceStretch => x != null)
-    const others: PieceStretch[] = []
-    for (const id of ctx.liveGroup?.(cellId, take) ?? []) {
-      const att = after.has(id) ? null : ctx.readTake(cellId, id)
-      if (att) others.push(pieceStretchOf(id, att))
-    }
+    const live = (ctx.liveGroup?.(cellId, take) ?? []).filter((id) => !after.has(id))
+      .map((id) => [id, ctx.readTake(cellId, id)] as const)
+      .filter((x): x is readonly [string, CodexCellAttachment] => x[1] != null)
+    const own = new Map<string, PieceStretch>([...known, ...live.map(([id, att]) => [id, pieceStretchOf(id, att)] as const)])
+    for (const [id, x] of after) if (x) own.set(id, x)
+    const others = live.map(([id, att]) => {
+      const from = att.referenceAudioId ? own.get(att.referenceAudioId) : undefined
+      return from && from.url !== (att.url ?? null) ? from : (own.get(id) as PieceStretch)
+    })
     return changed.some((x, i) => [...changed.slice(i + 1), ...others].some((y) => sharesStretch(x, y)))
+  }
+  // A step that brings pieces back as they were noted (a delete's Undo, a
+  // Station Save's Redo); `gone`, the piece the same step takes away.
+  const bringsBackDouble = (cellId: string, ids: readonly string[], notes: Record<string, PieceStretch> | undefined, gone?: string) => {
+    // A piece the Station saved comes back as the stretch it stands for.
+    const noted = notes && Object.fromEntries(Object.entries(notes).map(([id, x]) => [id, savedStandIn(id) ?? x]))
+    const returning = new Map<string, PieceStretch | null>()
+    for (const id of ids) if (noted?.[id]) returning.set(id, noted[id])
+    if (gone) returning.set(gone, null)
+    const takeOf = ids.map((id) => noted?.[id]?.pieceOf).find(Boolean)
+    return takeOf != null && doublesUp(cellId, takeOf, returning, new Map(Object.entries(noted ?? {})))
   }
   // What a cut's Undo leaves (the first piece whole again, the second gone)
   // and its Redo (both halves, as the cut made them).
-  const joined = (c: CutRecord, first: CodexCellAttachment) => new Map([
-    [c.audioId, { pieceOf: first.pieceOf ?? c.audioId, startMs: first.trimStartMs ?? 0, endMs: c.before.trimEndMs ?? first.durationMs ?? null }],
-    [c.newAudioId, null],
-  ])
-  const cutAgain = (c: CutRecord, first: CodexCellAttachment) => {
-    const take = first.pieceOf ?? c.audioId
-    return new Map([
-      [c.audioId, { pieceOf: take, startMs: first.trimStartMs ?? 0, endMs: c.atMs }],
-      [c.newAudioId, { pieceOf: take, startMs: c.atMs, endMs: c.before.trimEndMs ?? first.durationMs ?? null }],
-    ])
+  const halves = (c: CutRecord, first: CodexCellAttachment) => {
+    const at = { pieceOf: first.pieceOf ?? c.audioId, url: first.url ?? null }
+    return {
+      whole: { ...at, startMs: first.trimStartMs ?? 0, endMs: c.before.trimEndMs ?? first.durationMs ?? null },
+      first: { ...at, startMs: first.trimStartMs ?? 0, endMs: c.atMs },
+      second: { ...at, startMs: c.atMs, endMs: c.before.trimEndMs ?? first.durationMs ?? null },
+    }
   }
+  const joined = (c: CutRecord, first: CodexCellAttachment) =>
+    new Map<string, PieceStretch | null>([[c.audioId, halves(c, first).whole], [c.newAudioId, null]])
+  const cutAgain = (c: CutRecord, first: CodexCellAttachment) =>
+    new Map<string, PieceStretch | null>([[c.audioId, halves(c, first).first], [c.newAudioId, halves(c, first).second]])
+  // The cut's second half as the cut made it, for a piece the Station made
+  // from it to stand for.
+  const secondHalf = (c: CutRecord, first: CodexCellAttachment) => new Map([[c.newAudioId, halves(c, first).second]])
   const firstOf = (c: CutRecord) => ctx.readTake(c.cellId, c.audioId) as CodexCellAttachment
 
   const handlers: Record<string, StepHandler<never>> = {
@@ -362,6 +419,10 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
         const ids = [d.audioId, ...(d.pieces ?? [])]
         // Somebody brought it back already.
         if (ids.some((id) => ctx.readTake(d.cellId, id))) return CHANGED
+        // AQU-2492 (review, round 2): a piece the Station saved never comes
+        // back over a stretch another piece of its take plays now; the piece
+        // it replaced goes again in this same step.
+        if (bringsBackDouble(d.cellId, ids, d.stretches, d.replaces)) return CHANGED
         // Choosing a removed take is how it comes back, playing, as the action
         // left it (a cut take's pieces are chosen one by one).
         for (const id of ids) {
@@ -392,7 +453,7 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
         // Another piece of the take plays part of what the join would give
         // back: a colleague cut the second half again, or saved it in the
         // Station.
-        if (d.cuts.some((c) => doublesUp(c.cellId, c.audioId, joined(c, firstOf(c))))) return CHANGED
+        if (d.cuts.some((c) => doublesUp(c.cellId, c.audioId, joined(c, firstOf(c)), secondHalf(c, firstOf(c))))) return CHANGED
         for (const c of d.cuts) {
           // AQU-2492: who approved each piece now, noted with the step (it is
           // saved after this runs, so it lasts a reload) for the Redo.
@@ -413,7 +474,7 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
         if (d.cuts.some((c) => ctx.readTake(c.cellId, c.newAudioId))) return CHANGED
         // …or another piece of the take plays part of what the cut would
         // bring back: the cut would land on nothing.
-        if (d.cuts.some((c) => doublesUp(c.cellId, c.audioId, cutAgain(c, firstOf(c))))) return CHANGED
+        if (d.cuts.some((c) => doublesUp(c.cellId, c.audioId, cutAgain(c, firstOf(c)), secondHalf(c, firstOf(c))))) return CHANGED
         // AQU-2492 (review, Nov 9): someone else approved the joined take
         // after the Undo. Cutting it again would take their approval off it,
         // the same rule as redoing a delete. The approvals the take had before
@@ -461,11 +522,7 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
         // AQU-2492 (review, Nov 12): a piece never comes back over a stretch
         // another piece of its take plays now (the take was joined since).
         // The take that replaced it in this same step goes with this Undo.
-        const returning = new Map<string, PieceStretch | null>()
-        for (const id of ids) if (d.stretches?.[id]) returning.set(id, d.stretches[id])
-        if (d.replacedBy) returning.set(d.replacedBy, null)
-        const takeOf = ids.map((id) => d.stretches?.[id]?.pieceOf).find(Boolean)
-        if (takeOf && doublesUp(d.cellId, takeOf, returning)) return CHANGED
+        if (bringsBackDouble(d.cellId, ids, d.stretches, d.replacedBy)) return CHANGED
         // Choosing a deleted take is how it comes back (the projection
         // un-deletes on select) — and only the piece named, so a split take's
         // pieces are chosen one by one. If it was not the one playing, give the

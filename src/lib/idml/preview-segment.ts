@@ -34,8 +34,18 @@ export function readIdmlMetadataV2(
 }
 
 /**
- * True when every editable run is still empty. Missing HTML is an untranslated
- * cell. HTML that is not a slot document is left to the IDML editor.
+ * True when no editable run holds the translation yet. Missing HTML is an
+ * untranslated cell, and so is a blank copy of the source runs.
+ *
+ * HTML with no run markup at all is a preview too: a translation typed as a
+ * plain sentence before the cell had its IDML contract. A file a source link
+ * mirrored before the link carried the import envelope was translated that
+ * way, and received the contract later (sync-worker link-envelope.ts). Its
+ * `<p>Qajeelfama Leenjisaa</p>` has no run for the IDML editor to open — handed
+ * to it, the words vanished and there was no caret, on a line that was a
+ * perfectly good, often validated, translation. As a preview it stays a
+ * sentence the translator can read and edit, and passes into the runs like any
+ * other preview.
  */
 export function idmlTargetIsPreview(
   html: string | undefined,
@@ -49,7 +59,7 @@ export function idmlTargetIsPreview(
   const container = document.createElement("div")
   container.innerHTML = sanitizeIdmlEditorHtml(html)
   const slots = container.querySelectorAll<HTMLElement>("span[data-idml-protected=\"slot\"]")
-  if (slots.length === 0) return false
+  if (slots.length === 0) return true
 
   const editable = new Set(idml.editableSlotIndexes)
   let sawEditable = false

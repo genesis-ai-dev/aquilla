@@ -720,8 +720,11 @@ function indexFile(file: TargetFile): FileIndex {
   }
 }
 
+/** What the preview calls the file a recording goes into: a Bible book by its
+ *  name ("Jonah"), any other file by its own name in quotes ("“chapter one”"),
+ *  so a file's name never reads as a book's (AQU-2487, browser pass, Nov 12). */
 function bookLabel(fi: FileIndex): string {
-  return fi.file.bookCode ? englishBookName(fi.file.bookCode) : fi.file.name
+  return fi.file.bookCode ? englishBookName(fi.file.bookCode) : `“${fi.file.name}”`
 }
 
 function refLabel(fi: FileIndex, chapter: number, verse: number | string): string {

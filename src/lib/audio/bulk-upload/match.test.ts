@@ -573,6 +573,23 @@ describe("a number alone in a Bible book, decided by the count", () => {
     expect(five.cellIds).toEqual(["j:1:5"])
   })
 
+  // AQU-2487 (browser pass, Nov 12): that sheet read "chapter one 1" in the
+  // preview and "chapter one has no chapter 2 in this project.", as if
+  // "chapter one" were a book. A file that isn't a Bible book is named as a
+  // file, in quotes; a Bible book keeps its own name.
+  it("names a file with no book code as a file, in quotes, in its label and its reasons", () => {
+    const sheet: TargetFile = { ...book("sheet", "JON", "chapter one", [17]), bookCode: null }
+    const sheetScope: MatchScope = { kind: "file", fileId: "sheet" }
+    expect(run([audio("rec/Jonah 1.wav")], [sheet], sheetScope).assignments[0].read).toBe("“chapter one” 1")
+    expect(run([audio("rec/Jonah 2.wav")], [sheet], sheetScope).assignments[0].reason)
+      .toEqual({ code: "noSuchChapter", book: "“chapter one”", chapter: 2 })
+    const jonah = book("jon", "JON", "Jonah", [17])
+    const jonahScope: MatchScope = { kind: "file", fileId: "jon" }
+    expect(run([audio("rec/Jonah 1.wav")], [jonah], jonahScope).assignments[0].read).toBe("Jonah 1")
+    expect(run([audio("rec/Jonah 2.wav")], [jonah], jonahScope).assignments[0].reason)
+      .toEqual({ code: "noSuchChapter", book: "Jonah", chapter: 2 })
+  })
+
   it("when both counts fit, it can't tell", () => {
     // Three chapters of one verse each: three files fit both.
     const tiny = book("gen", "GEN", "Genesis", [1, 1, 1])

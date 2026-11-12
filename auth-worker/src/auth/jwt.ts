@@ -64,6 +64,8 @@ export function isPastHalfLife(
   return nowSeconds - payload.iat >= lifetime / 2
 }
 
+export class SessionInvalidatedError extends Error {}
+
 export class JWTService {
   private env: Env
 
@@ -75,12 +77,14 @@ export class JWTService {
     username: string,
     sessionStartedAt?: number,
     expectedUserId?: number,
+    expectedSessionVersion?: number,
   ): Promise<string> {
     const { token } = await this.createAccessTokenWithPayload(
       username,
       sessionStartedAt,
       undefined,
       expectedUserId,
+      expectedSessionVersion,
     )
     return token
   }
@@ -98,6 +102,7 @@ export class JWTService {
     sessionStartedAt?: number,
     sessionId?: string,
     expectedUserId?: number,
+    expectedSessionVersion?: number,
   ): Promise<{ token: string; payload: JWTPayload }> {
     if (!this.env.SECRET_KEY) {
       throw new Error("SECRET_KEY is not configured for JWT signing")
@@ -111,6 +116,9 @@ export class JWTService {
     if (!user || (expectedUserId !== undefined && user.id !== expectedUserId)) {
       throw new Error("Account identity changed; log in again")
     }
+    if (expectedSessionVersion !== undefined && (user.session_version ?? 0) !== expectedSessionVersion) {
+      throw new SessionInvalidatedError("Session invalidated; log in again")
+    }
     const now = Math.floor(Date.now() / 1000)
     const expiresIn =
       parseInt(this.env.ACCESS_TOKEN_EXPIRE_MINUTES || "43200", 10) * 60
@@ -118,6 +126,7 @@ export class JWTService {
     const payload: JWTPayload = {
       sub: user.username,
       uid: String(user.id),
+      sv: user.session_version ?? 0,
       iat: now,
       exp: now + expiresIn,
       // [Pen test] Auth & session mgmt (2026-08-03): unique id so a logged-out
@@ -271,5 +280,6 @@ export function rowToUser(row: UserRow): AuthUser {
     created_at: row.created_at,
     updated_at: row.updated_at,
     password_changed_at: row.password_changed_at ?? null,
+    session_version: row.session_version ?? 0,
   }
 }

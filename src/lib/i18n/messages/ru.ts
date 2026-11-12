@@ -4369,8 +4369,6 @@ export const ru: Catalog = {
   "projectSettings.permission.reconnectToEdit": "Подключитесь снова, чтобы изменять общие настройки.",
   "projectSettings.permission.onlyRoleCanModify": "Изменять может только {role}",
   "projectSettings.permission.viewPrivilegedMembers": "Посмотреть: {role}",
-  "projectSettings.permission.privilegedDialogTitle": "Проект: {role}",
-  "projectSettings.permission.privilegedDialogDescription": "{role} может изменять общие настройки, состав участников и другую конфигурацию проекта.",
   "projectSettings.permission.privilegedDialogEmpty": "В этом проекте нет роли {role}.",
   "projectSettings.permission.privilegedDialogError": "Не удалось загрузить: {role}.",
   "projectSettings.create.trigger": "Новый проект",

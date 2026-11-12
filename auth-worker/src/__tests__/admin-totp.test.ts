@@ -1,5 +1,5 @@
 import { env } from "cloudflare:test"
-import { beforeEach, afterEach, describe, it, expect } from "vitest"
+import { beforeEach, afterEach, describe, it, expect, vi } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 import { base32, totp, matchingStep } from "../lib/admin-totp"
@@ -46,6 +46,8 @@ async function enroll() {
   return { ...s, recoveryCodes }
 }
 beforeEach(async () => {
+  // Keep replay assertions within one TOTP step, independent of wall-clock boundaries.
+  vi.spyOn(Date, "now").mockReturnValue(Date.now())
   env.ADMIN_REQUIRE_ELEVATION = "true"
   env.ADMIN_TOTP_KEY = "test-only-unique-encryption-material-123456789"
   env.DEPLOYMENT_WORKER_NAME = "totp-test"
@@ -53,6 +55,7 @@ beforeEach(async () => {
   jwt = await jwtFor("root")
 })
 afterEach(() => {
+  vi.restoreAllMocks()
   delete env.ADMIN_REQUIRE_ELEVATION
   delete env.ADMIN_TOTP_KEY
   delete env.DEPLOYMENT_WORKER_NAME

@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto"
 import { readFile, readdir } from "node:fs/promises"
 import { BillingSettingsPage } from "../../helpers/page-objects/BillingSettings"
 import { test, expect } from "../../helpers/multi-user"
@@ -50,7 +51,15 @@ test("admin weekly capacity persists and reaches the owning organization billing
 test("admin authenticator enrollment keeps email until activation and supports recovery removal", async ({
   alice,
 }) => {
-  const { totp } = await import("../../../auth-worker/src/lib/admin-totp")
+  // Independent Node implementation: don't import Worker-only types into the SPA build.
+  const totp = async (secret: string, step: number) => {
+    const bits = [...secret].map(c => "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567".indexOf(c).toString(2).padStart(5, "0")).join("")
+    const key = Buffer.from(bits.match(/.{8}/g)!.map(b => parseInt(b, 2)))
+    const counter = Buffer.alloc(8)
+    counter.writeBigUInt64BE(BigInt(step))
+    const digest = createHmac("sha1", key).update(counter).digest()
+    return String((digest.readUInt32BE(digest[19] & 15) & 0x7fffffff) % 1000000).padStart(6, "0")
+  }
   await alice.goto("/admin?tab=platform&platform=security")
   await alice
     .getByRole("button", { name: "Verify and set up authenticator" })

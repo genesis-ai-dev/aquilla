@@ -292,7 +292,7 @@ import { readProjectSettingsFor, writeProjectSettingsFor } from "@/lib/history/s
 import { useHistoryShortcuts } from "@/lib/history/useHistory"
 import { useHistoryReporter } from "@/components/history/useHistoryReporter"
 import { useSettingsStepKinds } from "@/components/ProjectSettings/useSettingsStepKinds"
-import { playingInSlot, takeStepHandlers, type CutRecord, type StoredTakePlace, type TakeLevel } from "@/lib/history/take-steps"
+import { pieceStretchOf, playingInSlot, takeStepHandlers, type CutRecord, type StoredTakePlace, type TakeLevel } from "@/lib/history/take-steps"
 import type { TakePlace } from "@/lib/timeline/take-place"
 import { enqueueTakeRemovals, hasOwnRecordingLeft, removeTake, renameTake } from "@/lib/audio/take-actions"
 import { pieceNameIn } from "@/lib/audio/take-groups"
@@ -13217,7 +13217,8 @@ export function ProjectWorkspace() {
         author: currentUsername,
         // A take on the timeline is one that plays: Undo chooses it again.
         // AQU-2492 (review, Nov 9), finding 8: and who had approved it.
-        history: { wasSelected: true, approvedBy: cur.att.validators ?? [] },
+        // AQU-2492 (review, Nov 12): and where it sat in its take.
+        history: { wasSelected: true, approvedBy: cur.att.validators ?? [], stretch: pieceStretchOf(audioId, cur.att) },
       }
       let removed = false
       try {

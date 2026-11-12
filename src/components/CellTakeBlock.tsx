@@ -43,7 +43,7 @@ import { keptWindowSec, piecesWindowSec, type KeptWindow } from "@/lib/audio/kep
 import { takeTrackVars } from "@/lib/timeline/take-colors"
 import { TRACK_DOT_CLASS } from "@/lib/timeline/track-colors"
 import { persistTakeTrim, trimMs } from "@/lib/audio/persist-trim"
-import { playingInSlot, recordTakeWindowRun } from "@/lib/history/take-steps"
+import { pieceStretchOf, playingInSlot, recordTakeWindowRun } from "@/lib/history/take-steps"
 import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
 import { transcribeTake } from "@/lib/audio/transcribe-take"
 import { isGeneratedTake } from "@/lib/audio/track-audio"
@@ -380,7 +380,7 @@ function CellTakeBlockView({
     // AQU-2492 (review, Nov 9), finding 8: with who had approved it (each
     // piece of a split take), so only an approval given after its Undo stops
     // the Redo.
-    const removal = { projectId: project.id, fileId: owner.fileId, cellId: owner.id, audioId: selectedAudioId, slot, ...lane, author: username, history: { wasSelected: true, approvedBy: attachment.validators ?? [] } }
+    const removal = { projectId: project.id, fileId: owner.fileId, cellId: owner.id, audioId: selectedAudioId, slot, ...lane, author: username, history: { wasSelected: true, approvedBy: attachment.validators ?? [], stretch: pieceStretchOf(selectedAudioId, attachment) } }
     // A split take goes whole, every piece in one step (Sam, 2026-10-14).
     const removing = split ? split.map((piece) => ({ audioId: piece.audioId, slot: piece.slot ?? slot, validators: piece.validators ?? [] })) : null
     const remove = removing

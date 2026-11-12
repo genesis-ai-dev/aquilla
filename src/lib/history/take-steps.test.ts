@@ -172,18 +172,91 @@ describe("take.cut after a colleague deleted its second half (AQU-2492, Nov 11)"
     expect(trimmed.ctx.uncut).not.toHaveBeenCalled()
     expect(louder.ctx.uncut).not.toHaveBeenCalled()
   })
+})
 
-  it("the take it was cut from is gone: skipped as gone", async () => {
-    const { ctx, handlers } = ctxFor({ b: { trimStartMs: 1700, pieceOf: "a" } })
-    expect(await handlers["take.cut"].undo({ cuts: [record()] })).toEqual({ kind: "skipped", reason: "gone" })
+// AQU-2492 (review, Nov 12): ONE RULE for every Undo or Redo that joins a cut
+// take, cuts it again or brings a deleted piece back: it never leaves two
+// pieces of one take over the same stretch of its recording (it would play
+// twice). Read from the take's live pieces; skipped as changed since.
+describe("an Undo or Redo never leaves two pieces of one take over one stretch (AQU-2492, Nov 12)", () => {
+  type Live = Takes
+  // The workspace's own reading: a take's live pieces are its first piece and
+  // every live piece naming it.
+  const withGroups = (takes: Live) => ctxFor(takes, {
+    liveGroup: (_c, id) => {
+      const group = takes[id]?.pieceOf ?? id
+      return Object.entries(takes).filter(([k, t]) => !t.isDeleted && (t.pieceOf ?? k) === group).map(([k]) => k)
+    },
+  })
+  const cutAt1s = (): CutRecord => ({
+    cellId: "c1", audioId: "T", atMs: 1000, newAudioId: "P2",
+    before: { trimEndMs: null, label: "Take 1", targetOffsetMs: null, validators: ["alice"] },
+    renamed: true,
+  })
+
+  it("the decided case still joins: a colleague deleted the second half, and nothing else plays it", async () => {
+    const { ctx, handlers } = withGroups({ T: { trimEndMs: 1000, durationMs: 4000 }, P2: { trimStartMs: 1000, durationMs: 4000, pieceOf: "T", isDeleted: true } })
+    expect(await handlers["take.cut"].undo({ cuts: [cutAt1s()] })).toEqual({ kind: "done" })
+    expect(ctx.uncut).toHaveBeenCalledTimes(1)
+  })
+
+  // Review, case A: bob cut the second half again at 2 s and deleted the
+  // middle piece. Joining would play 2 s to the end twice.
+  it("skips the Undo when a colleague cut the second half again and deleted the middle piece", async () => {
+    const { ctx, handlers } = withGroups({
+      T: { trimEndMs: 1000, durationMs: 4000 },
+      P2: { trimStartMs: 1000, trimEndMs: 2000, durationMs: 4000, pieceOf: "T", isDeleted: true },
+      P3: { trimStartMs: 2000, durationMs: 4000, pieceOf: "T" },
+    })
+    expect(await handlers["take.cut"].undo({ cuts: [cutAt1s()] })).toEqual({ kind: "skipped", reason: "changed" })
     expect(ctx.uncut).not.toHaveBeenCalled()
   })
 
-  it("Redo then brings that half back", async () => {
-    const { ctx, handlers } = ctxFor({ a: { validators: ["alice", "carol"] } })
-    const rec = record()
-    expect(await handlers["take.cut"].redo({ cuts: [rec] })).toEqual({ kind: "done" })
-    expect(ctx.cut).toHaveBeenCalledWith(rec, "b")
+  // Review, case B: the Station's Save over the second half removed it and
+  // put the edited recording in its place, as a piece of the same take.
+  it("skips the Undo when a colleague saved the second half over in the Station", async () => {
+    const { ctx, handlers } = withGroups({
+      T: { trimEndMs: 1000, durationMs: 4000 },
+      P2: { trimStartMs: 1000, durationMs: 4000, pieceOf: "T", isDeleted: true },
+      S2: { trimStartMs: 1000, durationMs: 4200, pieceOf: "T", url: "frontier-audio://station.wav", referenceAudioId: "P2" },
+    })
+    expect(await handlers["take.cut"].undo({ cuts: [cutAt1s()] })).toEqual({ kind: "skipped", reason: "changed" })
+    expect(ctx.uncut).not.toHaveBeenCalled()
+  })
+
+  // Review, finding 2: dev's Undo joined the take (as decided); bob then
+  // undoes his own delete of the second half, which would play twice.
+  it("skips the colleague's Undo of his delete once the take was joined, and allows it while it was not", async () => {
+    const deleted = { cellId: "c1", audioId: "P2", slot: "recording", wasSelected: true, selectedBefore: null, stretches: { P2: { pieceOf: "T", startMs: 1000, endMs: 4000 } } }
+    const joinedTake = withGroups({ T: { durationMs: 4000 } })
+    expect(await joinedTake.handlers["take.remove"].undo(deleted)).toEqual({ kind: "skipped", reason: "changed" })
+    expect(joinedTake.ctx.select).not.toHaveBeenCalled()
+    const stillCut = withGroups({ T: { trimEndMs: 1000, durationMs: 4000 } })
+    expect(await stillCut.handlers["take.remove"].undo(deleted)).toEqual({ kind: "done" })
+    expect(stillCut.ctx.select).toHaveBeenCalledWith("c1", "recording", "P2")
+  })
+
+  // The Station's own Save over a piece is one step: its Undo brings the old
+  // piece back and takes away the version that replaced it.
+  it("the Undo of a Station Save over a piece still brings the old piece back", async () => {
+    const { ctx, handlers } = withGroups({ T: { trimEndMs: 1000, durationMs: 4000 }, S2: { trimStartMs: 1000, durationMs: 4200, pieceOf: "T" } })
+    const savedOver = { cellId: "c1", audioId: "P2", slot: "recording", wasSelected: true, selectedBefore: null, replacedBy: "S2", stretches: { P2: { pieceOf: "T", startMs: 1000, endMs: 4000 } } }
+    expect(await handlers["take.remove"].undo(savedOver)).toEqual({ kind: "done" })
+    expect(ctx.select).toHaveBeenCalledWith("c1", "recording", "P2")
+  })
+
+  // The Redo would bring the second half back over a stretch another piece
+  // plays by then: the server's cut would land on nothing, yet say "Redid".
+  it("skips a Redo that another piece's stretch would turn into a cut of nothing", async () => {
+    const { ctx, handlers } = withGroups({ T: { durationMs: 4000 }, Q: { trimStartMs: 2000, durationMs: 4000, pieceOf: "T" } })
+    expect(await handlers["take.cut"].redo({ cuts: [cutAt1s()] })).toEqual({ kind: "skipped", reason: "changed" })
+    expect(ctx.cut).not.toHaveBeenCalled()
+  })
+
+  it("a Redo with nothing else over the take cuts it again", async () => {
+    const { ctx, handlers } = withGroups({ T: { durationMs: 4000 } })
+    expect(await handlers["take.cut"].redo({ cuts: [cutAt1s()] })).toEqual({ kind: "done" })
+    expect(ctx.cut).toHaveBeenCalledTimes(1)
   })
 })
 

@@ -9,6 +9,7 @@ import { audioIdSeededWith } from "@/lib/audio/upload"
 import { isOwnTake, type TakeLine } from "@/lib/audio/own-take"
 import { recordStep, withGroup } from "@/lib/history/history"
 import { wholeTakeRenames } from "@/lib/audio/take-groups"
+import type { PieceStretch } from "@/lib/history/take-steps"
 
 /**
  * Remove one take. SUB-48: the remove gets its own overlay, so the take leaves
@@ -30,8 +31,10 @@ export async function removeTake(args: {
   /** AQU-1767 phase 2: whether this was the take that played, so Undo can
    *  choose it again. Omit to record no history step (a bulk removal records
    *  its own). AQU-2492 (review, Nov 9), finding 8: `approvedBy`, who had
-   *  approved it, so only an approval given after its Undo stops the Redo. */
-  history?: { wasSelected: boolean; approvedBy?: readonly string[] }
+   *  approved it, so only an approval given after its Undo stops the Redo.
+   *  AQU-2492 (review, Nov 12): `stretch`, where it sat in its take, so its
+   *  Undo never brings it back over a stretch another piece plays by then. */
+  history?: { wasSelected: boolean; approvedBy?: readonly string[]; stretch?: PieceStretch }
 }): Promise<void> {
   const { projectId, fileId, cellId, audioId, slot, author, targetLang } = args
   const removeP = emitCellAudioRemove({ projectId, fileId, cellId, audioId, author, ...(targetLang ? { targetLang } : {}) })
@@ -44,6 +47,7 @@ export async function removeTake(args: {
       data: {
         cellId, audioId, slot, wasSelected: args.history.wasSelected, selectedBefore: null,
         ...(args.history.approvedBy ? { approvedBy: { [audioId]: [...args.history.approvedBy] } } : {}),
+        ...(args.history.stretch ? { stretches: { [audioId]: args.history.stretch } } : {}),
       },
       labelKey: "editor.history.stepDeleteTake",
       fileId,

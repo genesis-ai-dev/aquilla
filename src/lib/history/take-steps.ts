@@ -108,7 +108,33 @@ export interface TakeRemoveData {
    * back yet.
    */
   replacedBy?: string
+  /**
+   * AQU-2492 (review, Nov 12): where each deleted piece sat in its take's
+   * recording, by audio id. The browser is never sent a deleted take, so the
+   * Undo reads it from here to keep a piece from coming back over a stretch
+   * another piece of its take plays now (`PieceStretch`). Absent on a delete
+   * recorded before it: no check.
+   */
+  stretches?: Record<string, PieceStretch>
 }
+/**
+ * AQU-2492 (review, Nov 12): the stretch of its recording a piece of a take
+ * plays — its kept part, ms; `endMs` null runs to the recording's end — and
+ * the take it is a piece of (its first piece's id). A piece the Station saved
+ * is a part of the edited recording, whose clock the Station maps from the
+ * original's, so it is weighed on the same clock.
+ */
+export interface PieceStretch { pieceOf: string; startMs: number; endMs: number | null }
+export function pieceStretchOf(
+  audioId: string,
+  att: { pieceOf?: string | null; trimStartMs?: number | null; trimEndMs?: number | null; durationMs?: number | null },
+): PieceStretch {
+  return { pieceOf: att.pieceOf ?? audioId, startMs: att.trimStartMs ?? 0, endMs: att.trimEndMs ?? att.durationMs ?? null }
+}
+/** Two stretches share more than the rounding a cut leaves at its seam. */
+const SEAM_MS = 2
+const sharesStretch = (a: PieceStretch, b: PieceStretch) =>
+  Math.min(a.endMs ?? Infinity, b.endMs ?? Infinity) - Math.max(a.startMs, b.startMs) > SEAM_MS
 export interface TakeRenameData { cellId: string; audioId: string; before: string | null; after: string | null }
 /**
  * A take an action ADDED (decision 11): recorded, uploaded, generated, voice-
@@ -218,7 +244,9 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
   // page had heard of a colleague's delete yet (Safari's engine usually had,
   // Chrome's not yet). The server's undo joins the take on what is left and
   // gives back the whole take's approvals either way, so the cut is undone
-  // whenever the take it was made on is still there as the cut left it.
+  // whenever the take it was made on is still there as the cut left it (and,
+  // as for every step that joins or brings back a piece, `doublesUp` below:
+  // no other piece of the take plays part of what the join gives back).
   const intact = (c: CutRecord): boolean | null => {
     const first = ctx.readTake(c.cellId, c.audioId)
     if (!first) return null
@@ -265,6 +293,36 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
     if (ctx.readTake(cellId, id) || ctx.broughtBack?.(cellId, id)) return id
     return (ctx.liveGroup?.(cellId, id) ?? []).find((piece) => ctx.readTake(cellId, piece)) ?? null
   }
+
+  // AQU-2492 (review, Nov 12): ONE RULE for the steps that join a cut take,
+  // cut it again or bring a deleted piece back: an Undo or Redo never leaves
+  // two pieces of one take over the same stretch of its recording, which
+  // would play twice. `after` is what the step will leave — a piece's stretch,
+  // or null for a piece it removes — and every other live piece of the take
+  // stays as it reads now. A step that would break it is skipped as changed.
+  const doublesUp = (cellId: string, take: string, after: ReadonlyMap<string, PieceStretch | null>): boolean => {
+    const changed = [...after.values()].filter((x): x is PieceStretch => x != null)
+    const others: PieceStretch[] = []
+    for (const id of ctx.liveGroup?.(cellId, take) ?? []) {
+      const att = after.has(id) ? null : ctx.readTake(cellId, id)
+      if (att) others.push(pieceStretchOf(id, att))
+    }
+    return changed.some((x, i) => [...changed.slice(i + 1), ...others].some((y) => sharesStretch(x, y)))
+  }
+  // What a cut's Undo leaves (the first piece whole again, the second gone)
+  // and its Redo (both halves, as the cut made them).
+  const joined = (c: CutRecord, first: CodexCellAttachment) => new Map([
+    [c.audioId, { pieceOf: first.pieceOf ?? c.audioId, startMs: first.trimStartMs ?? 0, endMs: c.before.trimEndMs ?? first.durationMs ?? null }],
+    [c.newAudioId, null],
+  ])
+  const cutAgain = (c: CutRecord, first: CodexCellAttachment) => {
+    const take = first.pieceOf ?? c.audioId
+    return new Map([
+      [c.audioId, { pieceOf: take, startMs: first.trimStartMs ?? 0, endMs: c.atMs }],
+      [c.newAudioId, { pieceOf: take, startMs: c.atMs, endMs: c.before.trimEndMs ?? first.durationMs ?? null }],
+    ])
+  }
+  const firstOf = (c: CutRecord) => ctx.readTake(c.cellId, c.audioId) as CodexCellAttachment
 
   const handlers: Record<string, StepHandler<never>> = {
     "take.add": {
@@ -331,6 +389,10 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
         const checks = d.cuts.map(intact)
         if (checks.some((x) => x == null)) return GONE
         if (checks.some((x) => !x)) return CHANGED
+        // Another piece of the take plays part of what the join would give
+        // back: a colleague cut the second half again, or saved it in the
+        // Station.
+        if (d.cuts.some((c) => doublesUp(c.cellId, c.audioId, joined(c, firstOf(c))))) return CHANGED
         for (const c of d.cuts) {
           // AQU-2492: who approved each piece now, noted with the step (it is
           // saved after this runs, so it lasts a reload) for the Redo.
@@ -349,6 +411,9 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
         // AQU-2492: the piece the Undo removed was brought back since, by
         // someone: the take is no longer as the Undo left it.
         if (d.cuts.some((c) => ctx.readTake(c.cellId, c.newAudioId))) return CHANGED
+        // …or another piece of the take plays part of what the cut would
+        // bring back: the cut would land on nothing.
+        if (d.cuts.some((c) => doublesUp(c.cellId, c.audioId, cutAgain(c, firstOf(c))))) return CHANGED
         // AQU-2492 (review, Nov 9): someone else approved the joined take
         // after the Undo. Cutting it again would take their approval off it,
         // the same rule as redoing a delete. The approvals the take had before
@@ -393,6 +458,14 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
         // "not live". Somebody who brought it back already wins.
         const ids = [d.audioId, ...(d.pieces ?? [])]
         if (ids.some((id) => ctx.readTake(d.cellId, id))) return CHANGED
+        // AQU-2492 (review, Nov 12): a piece never comes back over a stretch
+        // another piece of its take plays now (the take was joined since).
+        // The take that replaced it in this same step goes with this Undo.
+        const returning = new Map<string, PieceStretch | null>()
+        for (const id of ids) if (d.stretches?.[id]) returning.set(id, d.stretches[id])
+        if (d.replacedBy) returning.set(d.replacedBy, null)
+        const takeOf = ids.map((id) => d.stretches?.[id]?.pieceOf).find(Boolean)
+        if (takeOf && doublesUp(d.cellId, takeOf, returning)) return CHANGED
         // Choosing a deleted take is how it comes back (the projection
         // un-deletes on select) — and only the piece named, so a split take's
         // pieces are chosen one by one. If it was not the one playing, give the

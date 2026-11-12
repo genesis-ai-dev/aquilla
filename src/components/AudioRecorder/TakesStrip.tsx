@@ -35,6 +35,7 @@ import {
   retryFailedAudioSync,
 } from "@/lib/audio/audio-attachments-bus"
 import { hasOwnRecordingLeft, removeTake, removeWholeTake, renameTake } from "@/lib/audio/take-actions"
+import { pieceStretchOf } from "@/lib/history/take-steps"
 import { originalRecordingId, pieceNames, splitTakeName, takeBaseLabel, takeRows } from "@/lib/audio/take-groups"
 import { pieceGroupOf } from "@/lib/sync/cell-audio-read-types"
 import { useRecordingTextDrift } from "@/hooks/useRecordingTextDrift"
@@ -488,10 +489,16 @@ export function TakesStrip({
       const slot = takes.find((t) => t.audioId === audioId)?.slot ?? RECORDING_SLOT
       const playingNow = optimisticSelectedId ?? activeTakeId
       const groupOf = (id: string | null | undefined) => (id ? takes.find((t) => t.audioId === id)?.pieceOf ?? id : null)
+      const deleted = takes.find((t) => t.audioId === audioId)
       await removeTake({
         projectId, fileId, cellId, audioId, slot, author, ...(targetLang ? { targetLang } : {}),
         // AQU-2492 (review, Nov 9), finding 8: and who had approved it.
-        history: { wasSelected: groupOf(playingNow) === groupOf(audioId), approvedBy: takes.find((t) => t.audioId === audioId)?.validators ?? [] },
+        // AQU-2492 (review, Nov 12): and where it sat in its take.
+        history: {
+          wasSelected: groupOf(playingNow) === groupOf(audioId),
+          approvedBy: takes.find((t) => t.audioId === audioId)?.validators ?? [],
+          ...(deleted ? { stretch: pieceStretchOf(audioId, deleted) } : {}),
+        },
       })
       // Was that the cell's last recording? `takes` still holds the pre-removal
       // list, so the survivors are everything else that is a take OF THIS CELL.

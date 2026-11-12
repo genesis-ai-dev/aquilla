@@ -516,6 +516,11 @@ export const audio = defineNamespace({
       one: "{count} couldn't be transcribed: {reason}",
       other: "{count} couldn't be transcribed. The first one said: {reason}",
     }),
+    // Sam, Nov 12: AQU-2521's reason, in the one closing message.
+    "audio.transcribeRun.heardNothing": plural({
+      one: "{count} had nothing to transcribe.",
+      other: "{count} had nothing to transcribe.",
+    }),
     "audio.transcribeRun.retry": plural({
       one: "Retry {count}",
       other: "Retry the {count}",
@@ -2929,6 +2934,13 @@ export const audio = defineNamespace({
           "Line under a transcription toast: how many sections or recordings could not be " +
           "transcribed, and the error the first of them gave.",
         placeholders: { count: "How many failed.", reason: "The first error, as the service gave it." },
+      },
+      "audio.transcribeRun.heardNothing": {
+        description:
+          "One reason in the line under a transcription toast, before any failures: the " +
+          "audio of some sections or recordings held no speech (music, silence), so there " +
+          "were no words to keep. Not an error. The toast's count above leaves them out.",
+        placeholders: { count: "How many sections or recordings had no speech in their audio." },
       },
       "audio.transcribeRun.retry": {
         description:

@@ -5,6 +5,11 @@
 // rule holds everywhere: a run where some rows failed never ends on a flat
 // "Transcribed N". It says how many landed, how many did not and why, and
 // offers to retry just those.
+//
+// Sam, Nov 12: this is the ONE closing message, Transcribe all's from the file
+// menu too (AQU-2521). Its reasons are every reason a run knows: the rows that
+// failed, and the rows that had nothing to transcribe where the run counts
+// them (`TranscribeRunReport.heardNothing`).
 
 import { t } from "@/lib/i18n/standalone"
 import type { TranscribeRunReport } from "./batch-audio"
@@ -33,18 +38,26 @@ export function transcribeRunToast(
   const name = opts.fileName ?? ""
   const failed = report.failed.length
   const firstReason = report.failed[0]?.message ?? ""
-  const failedLine = failed > 0 ? t("audio.transcribeRun.failedSome", { count: failed, reason: firstReason }) : undefined
   const retryLabel = failed > 0 ? t("audio.transcribeRun.retry", { count: failed }) : undefined
+  // Sam, Nov 12: one closing message for every run, with every reason the run
+  // knows. A row that heard nothing (`heardNothing`, where the run counts it)
+  // had no words to keep, so it is not counted as transcribed: it is a reason.
+  const heardNothing = Math.min(report.heardNothing ?? 0, report.transcribed)
+  const done = report.transcribed - heardNothing
+  const reasons = [
+    heardNothing > 0 ? t("audio.transcribeRun.heardNothing", { count: heardNothing }) : null,
+    failed > 0 ? t("audio.transcribeRun.failedSome", { count: failed, reason: firstReason }) : null,
+  ].filter(Boolean).join(" ")
 
   if (report.cancelled) {
     return {
       type: "info",
-      title: t("audio.transcribeRun.stopped", { done: report.transcribed, count: report.total }),
-      ...(failedLine ? { description: failedLine } : {}),
+      title: t("audio.transcribeRun.stopped", { done, count: report.total }),
+      ...(reasons ? { description: reasons } : {}),
       ...(retryLabel ? { retryLabel } : {}),
     }
   }
-  if (failed === 0 && report.transcribed >= report.total) {
+  if (failed === 0 && done >= report.total) {
     return {
       type: "success",
       title: sections
@@ -62,13 +75,14 @@ export function transcribeRunToast(
     }
   }
   // Some landed and some did not, or some were never reached (a row with no
-  // recording any more): never a flat success.
+  // recording any more), or some had nothing to transcribe: never a flat
+  // success.
   return {
     type: failed > 0 ? "error" : "info",
     title: sections
-      ? t("audio.transcribeRun.partialSections", { done: report.transcribed, count: report.total, name })
-      : t("audio.transcribeRun.partialRecordings", { done: report.transcribed, count: report.total }),
-    ...(failedLine ? { description: failedLine } : {}),
+      ? t("audio.transcribeRun.partialSections", { done, count: report.total, name })
+      : t("audio.transcribeRun.partialRecordings", { done, count: report.total }),
+    ...(reasons ? { description: reasons } : {}),
     ...(retryLabel ? { retryLabel } : {}),
   }
 }

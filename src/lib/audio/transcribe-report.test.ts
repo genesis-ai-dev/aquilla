@@ -53,6 +53,38 @@ describe("transcribeRunToast", () => {
     expect(said!.title).toBe("Transcribed 40 of 45 recordings.")
   })
 
+  // Sam, Nov 12: one closing message, this one, with the file menu build's
+  // reasons added (AQU-2521): a run that counts the rows whose audio held no
+  // speech says how many, and does not count them as transcribed.
+  it("says how many had nothing to transcribe, and leaves them out of the count", () => {
+    expect(transcribeRunToast(report({ total: 12, transcribed: 12, heardNothing: 3 }), { kind: "all" })).toEqual({
+      type: "info",
+      title: "Transcribed 9 of 12 recordings.",
+      description: "3 had nothing to transcribe.",
+    })
+    expect(transcribeRunToast(report({ transcribed: 45, heardNothing: 1 }), { kind: "import", fileName: "Session 4.mp3" })).toEqual({
+      type: "info",
+      title: 'Transcribed 44 of 45 sections of "Session 4.mp3".',
+      description: "1 had nothing to transcribe.",
+    })
+  })
+
+  it("gives every reason it knows in one line, nothing heard first, with the Retry for the failed", () => {
+    const said = transcribeRunToast(report({ total: 12, transcribed: 10, heardNothing: 3, failed: failures(2) }), { kind: "all" })
+    expect(said).toEqual({
+      type: "error",
+      title: "Transcribed 7 of 12 recordings.",
+      description: "3 had nothing to transcribe. 2 couldn't be transcribed. The first one said: HTTP 500",
+      retryLabel: "Retry the 2",
+    })
+  })
+
+  it("a stopped run counts only what it transcribed, and says what had nothing", () => {
+    const said = transcribeRunToast(report({ transcribed: 20, heardNothing: 1, notRun: 25, cancelled: true }), { kind: "all" })
+    expect(said!.title).toBe("Transcription stopped — 19 of 45 done.")
+    expect(said!.description).toBe("1 had nothing to transcribe.")
+  })
+
   it("says a cancelled run stopped, and still counts its failures", () => {
     const said = transcribeRunToast(report({ transcribed: 20, failed: failures(2), notRun: 23, cancelled: true }), { kind: "all" })
     expect(said!.type).toBe("info")

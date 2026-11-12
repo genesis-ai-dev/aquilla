@@ -237,6 +237,13 @@ export interface TranscribeRunReport {
    *  failed and the run is still kept, for the next page to carry on; callers
    *  say nothing. */
   interrupted?: boolean
+  /**
+   * Of the rows counted in `transcribed`, those whose audio held no speech
+   * (music, silence), so there were no words to keep (Sam, Nov 12: the one
+   * closing message, with AQU-2521's reasons added). Said by a run that counts
+   * them; absent, they count as transcribed.
+   */
+  heardNothing?: number
 }
 
 const NOTHING_RAN: TranscribeRunReport = { total: 0, transcribed: 0, failed: [], notRun: 0, cancelled: false, started: false }

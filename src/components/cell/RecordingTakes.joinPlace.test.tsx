@@ -49,7 +49,7 @@ const P1 = "audio-c2-1.webm", P2 = "audio-c2-2.webm"
 
 /** Line 2 (5 s to 9 s), its 4 s take placed 0.5 s after the line's start and
  *  cut at 1.5 s: both pieces keep the take's place, as the server stores them. */
-function lineAsTheTableHasIt(): CellData {
+function lineAsTheTableHasIt(place: { targetOffsetMs: number | null; recordingsOffsetMs: number | null } = { targetOffsetMs: 500, recordingsOffsetMs: null }): CellData {
   const line = {
     id: "c2", fileId: "f1", original: "", translated: "", context: "", group: "", type: "text",
     status: "unvalidated", validationStatus: "none", activeValidators: [], validationHistory: [],
@@ -57,7 +57,7 @@ function lineAsTheTableHasIt(): CellData {
   } as unknown as CellData
   const piece = (audioId: string, over: Record<string, unknown>) => ({
     audioId, url: URL, slot: "recording", mimeType: "audio/webm", voiceId: null, referenceAudioId: null,
-    durationMs: 4000, trimStartMs: null, trimEndMs: null, targetOffsetMs: 500, recordingsOffsetMs: null, ...over,
+    durationMs: 4000, trimStartMs: null, trimEndMs: null, ...place, ...over,
   })
   const entry = {
     attachments: {
@@ -84,5 +84,20 @@ describe("Join from the Recording tab keeps the place of the take it was made fr
     fireEvent.click(screen.getByTestId("cell-take-join"))
     await waitFor(() => expect(attached.calls).toHaveLength(1))
     expect(attached.calls[0]).toMatchObject({ cellId: "c2", url: URL, place: { targetOffsetMs: 500, recordingsOffsetMs: null } })
+  })
+
+  // Following the recordings a take's place is its own pause before its line
+  // (`recordingsOffsetMs`), which the joined take keeps the same way.
+  it("following the recordings, the joined take keeps the take's pause before its line", async () => {
+    attached.calls.length = 0
+    render(
+      <RecordingTakes
+        project={project} cell={lineAsTheTableHasIt({ targetOffsetMs: null, recordingsOffsetMs: 700 })} cellText="Hola" editable username="dev"
+        session={{ jwt: "j", username: "dev" } as never} onOpenRecording={vi.fn()} onUseAsCellText={vi.fn()}
+      />,
+    )
+    fireEvent.click(screen.getByTestId("cell-take-join"))
+    await waitFor(() => expect(attached.calls).toHaveLength(1))
+    expect(attached.calls[0]).toMatchObject({ cellId: "c2", place: { targetOffsetMs: null, recordingsOffsetMs: 700 } })
   })
 })

@@ -9,6 +9,14 @@
 // credential's org/project scope. Archived projects are excluded. Capped at
 // 100 rows.
 //
+// AQU-2504: a credential carrying live SUPPORT ACCESS (a platform admin inside
+// their time-boxed window — see db/shared/api-credentials.ts) drops the
+// created-by / membership / org-Maintainer predicate and sees every project,
+// reported as role_source 'platform'. That is the one widening here, and it
+// widens WHO counts as a member, never the credential's own org/project scope
+// or `opts.orgId`, both of which still narrow the result. The enumeration is
+// written to `admin_audit_log`, once per call. Archived projects stay excluded.
+//
 // AQU-1236: `opts.orgId` narrows the result to ONE org on top of the credential
 // scope — it is a filter, never a widening. Callers that accept an org id from
 // the client must first assert it is inside the credential's scope (see
@@ -17,13 +25,14 @@
 // loudly at the perimeter is the contract.
 
 import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
+import { auditSupportAccessRead } from '../../../db/shared/support-access-audit'
 import { ROLE } from '../events/role-policy'
 
 export interface ExternalProjectListItem {
   id: string
   name: string
   org_id: string | null
-  /** How access is granted: creator | member | org. */
+  /** How access is granted: creator | member | org | platform (AQU-2504). */
   role_source: string
 }
 
@@ -32,6 +41,8 @@ export interface ListProjectsOptions {
   orgId?: string
   /** 'created' = newest first, for "new project" pollers. Default: by name. */
   sort?: 'name' | 'created'
+  /** AQU-2504: the tool or route asking, for the support-access audit row. */
+  tool?: string
 }
 
 interface ProjectListRow {
@@ -47,9 +58,15 @@ export async function listProjectsForCredential(
   opts: ListProjectsOptions = {},
 ): Promise<ExternalProjectListItem[]> {
   const uid = String(cred.userId)
-  const binds: unknown[] = [uid, uid, uid, uid, uid]
-  let sql =
-    `SELECT p.id, p.name, p.org_id,
+  const support = cred.supportAccess === true
+  // The support branch binds nothing of its own — there is no membership to
+  // match — so the scope clauses below append to either shape unchanged.
+  const binds: unknown[] = support ? [] : [uid, uid, uid, uid, uid]
+  let sql = support
+    ? `SELECT p.id, p.name, p.org_id, 'platform' AS role_source
+     FROM projects p
+     WHERE p.archived_at IS NULL`
+    : `SELECT p.id, p.name, p.org_id,
        CASE
          WHEN p.created_by::text = ? THEN 'creator'
          WHEN EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = p.id AND pm.user_id::text = ?) THEN 'member'
@@ -87,10 +104,20 @@ export async function listProjectsForCredential(
     : ` ORDER BY p.name LIMIT 100`
 
   const result = await db.prepare(sql).bind(...binds).all<ProjectListRow>()
-  return result.results.map((r) => ({
+  const projects = result.results.map((r) => ({
     id: r.id,
     name: r.name,
     org_id: r.org_id == null ? null : String(r.org_id),
     role_source: r.role_source,
   }))
+  if (support) {
+    await auditSupportAccessRead(db, uid, {
+      action: 'connector.projects.list',
+      credentialId: cred.credentialId,
+      tool: opts.tool ?? 'list_projects',
+      orgId: opts.orgId ?? null,
+      projectIds: projects.map((p) => p.id),
+    })
+  }
+  return projects
 }

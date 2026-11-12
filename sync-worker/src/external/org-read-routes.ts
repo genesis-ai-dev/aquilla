@@ -73,7 +73,13 @@ async function handleExternalOrgs(request: Request, env: ExternalReadsEnv): Prom
   if (!authed.ok) return authed.response
   const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.credential)
   if (limited) return limited
-  const orgs = await listOrgsForCredential(env.AQUILLA_PG, authed.credential)
+  // AQU-2504: the route name, so a support-access audit row says which adapter
+  // the operator used rather than defaulting to the MCP tool's name.
+  const orgs = await listOrgsForCredential(
+    env.AQUILLA_PG,
+    authed.credential,
+    "GET /api/v1/external/orgs",
+  )
   return Response.json({ data: orgs, nextCursor: null })
 }
 
@@ -95,7 +101,10 @@ async function handleExternalOrgProjects(
   const denied = await assertOrgInCredentialScope(env.AQUILLA_PG, authed.credential, orgId)
   if (denied) return denied
 
-  const projects = await listProjectsForCredential(env.AQUILLA_PG, authed.credential, { orgId })
+  const projects = await listProjectsForCredential(env.AQUILLA_PG, authed.credential, {
+    orgId,
+    tool: "GET /api/v1/external/orgs/:orgId/projects",
+  })
   return Response.json({ data: projects, nextCursor: null })
 }
 

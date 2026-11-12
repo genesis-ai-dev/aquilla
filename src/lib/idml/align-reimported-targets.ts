@@ -5,7 +5,12 @@ import {
 import posthog from "@/lib/posthog"
 import type { CellRow } from "@/lib/sync/cells-read-types"
 import { fetchFileCells } from "@/lib/sync/cells-read"
-import { emitTargetCellCommits, type CellCommitInput } from "@/lib/sync/events-emit"
+import {
+  emitIdmlTargetMarkup,
+  emitTargetCellCommits,
+  type CellCommitInput,
+  type IdmlTargetMarkupInput,
+} from "@/lib/sync/events-emit"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import {
   alignIdmlStyles,
@@ -38,6 +43,8 @@ export interface IdmlReimportAlignCell extends AlignStylesCell {
   readonly sourceEventId?: string
   readonly targetEventId?: string
   readonly laneId?: string | null
+  /** The translation is validated as it stands. */
+  readonly validated?: boolean
 }
 
 /** What a re-import that keeps translations should do with one IDML target. */
@@ -101,6 +108,7 @@ export function pairedCellsForIdmlAlignment(
       sourceEventId: source.eventId,
       targetEventId: target?.eventId,
       laneId: target?.laneId ?? null,
+      validated: target?.validated === true,
     })
   }
   return cells
@@ -123,6 +131,21 @@ export function idmlReimportPlacement(cell: IdmlReimportAlignCell): IdmlReimport
   if (metadata.editableSlotIndexes.length >= 2) return "align"
   if (metadata.editableSlotIndexes.length === 1) return "single"
   return "skip"
+}
+
+/**
+ * How many of a file's translations a placement pass would move: words that
+ * are not inside the source's style runs yet. An IDML export refuses each of
+ * them ("changed a protected IDML anchor"), so the export dialog counts them to
+ * offer the placement instead of only the error.
+ */
+export function unplacedIdmlTranslationCount(cells: readonly IdmlReimportAlignCell[]): number {
+  let count = 0
+  for (const cell of cells) {
+    const placement = idmlReimportPlacement(cell)
+    if (placement === "align" || placement === "single") count += 1
+  }
+  return count
 }
 
 export async function alignReimportedIdmlTargets(
@@ -243,6 +266,42 @@ export function commitsForAlignedIdmlTargets(
   return commits
 }
 
+/**
+ * Split placed translations by how they are saved.
+ *
+ * A placement moves a translation's words into the source's style runs. Saved
+ * as a commit, that resets the line to unvalidated — right when a reviewer has
+ * something new to read, and a pure loss when the words are the very ones a
+ * validator approved. So with `keepValidated`, a VALIDATED line whose wording
+ * the placement left alone is saved as markup only (`emitIdmlTargetMarkup`):
+ * its text, history and validation do not move. Everything else — a line
+ * nobody validated, a placement that changed a word, a lane other than the
+ * default one, which the markup event cannot address — is a commit as before.
+ */
+export function splitAlignedIdmlTargets(
+  aligned: readonly AlignedIdmlReimport[],
+  options: { keepValidated: boolean; lane: string },
+): { markupOnly: AlignedIdmlReimport[]; commits: AlignedIdmlReimport[] } {
+  const markupOnly: AlignedIdmlReimport[] = []
+  const commits: AlignedIdmlReimport[] = []
+  const eligible = options.keepValidated && options.lane === ""
+  for (const entry of aligned) {
+    const html = entry.completion.valueHtml
+    // The words a validator approved are the stored plain text, so that is
+    // what the placement is held to — not `translationWording`, which reads
+    // the old HTML with every tag turned into a space and so calls
+    // "<strong>Key idea</strong>: …" a different wording from "Key idea: …".
+    const stored = idmlWordingKey(entry.cell.translated ?? "")
+    const sameWords = stored.length > 0 && idmlWordingKey(entry.completion.value) === stored
+    if (eligible && entry.cell.validated && html !== undefined && sameWords) {
+      markupOnly.push(entry)
+    } else {
+      commits.push(entry)
+    }
+  }
+  return { markupOnly, commits }
+}
+
 export async function alignReimportedIdmlFile(args: {
   projectId: string
   fileId: string
@@ -253,6 +312,13 @@ export async function alignReimportedIdmlFile(args: {
   targetLanguage: string
   signal?: AbortSignal
   onProgress?: (done: number, total: number) => void
+  /**
+   * Save a validated line's placement as markup only, so it stays validated
+   * (see splitAlignedIdmlTargets). Pass it only for a project lead or above:
+   * that is the floor of the markup event, and below it the outbox's role gate
+   * refuses the save.
+   */
+  keepValidated?: boolean
 }): Promise<IdmlReimportAlignOutcome> {
   const analytics = posthog.scope()
   const empty: IdmlReimportAlignOutcome = { aligned: [], unchanged: 0, failed: 0, skipped: 0, manual: [] }
@@ -266,7 +332,18 @@ export async function alignReimportedIdmlFile(args: {
     signal: args.signal,
     onProgress: args.onProgress,
   })
-  const commits = commitsForAlignedIdmlTargets(outcome.aligned, {
+  const split = splitAlignedIdmlTargets(outcome.aligned, {
+    keepValidated: args.keepValidated === true,
+    lane: args.lane ?? "",
+  })
+  const markup: IdmlTargetMarkupInput[] = split.markupOnly.map(({ cell, completion }) => ({
+    projectId: args.projectId,
+    fileId: args.fileId,
+    cellId: cell.id,
+    targetHtml: completion.valueHtml!,
+    author: args.host.author,
+  }))
+  const commits = commitsForAlignedIdmlTargets(split.commits, {
     projectId: args.projectId,
     fileId: args.fileId,
     author: args.host.author,
@@ -278,6 +355,11 @@ export async function alignReimportedIdmlFile(args: {
   })
   const eventIds: string[] = []
   try {
+    for (let offset = 0; offset < markup.length; offset += COMMIT_CHUNK) {
+      if (args.signal?.aborted) break
+      const ids = await emitIdmlTargetMarkup(markup.slice(offset, offset + COMMIT_CHUNK))
+      eventIds.push(...ids)
+    }
     for (let offset = 0; offset < commits.length; offset += COMMIT_CHUNK) {
       if (args.signal?.aborted) break
       const ids = await emitTargetCellCommits(commits.slice(offset, offset + COMMIT_CHUNK))

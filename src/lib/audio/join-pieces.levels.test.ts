@@ -23,6 +23,7 @@ type Stored = {
 const takes: Record<string, Stored> = {}
 const playing: Record<string, string | null> = {}
 const events: Array<{ kind: string; audioId: string }> = []
+const gainInputs: Array<Record<string, unknown>> = []
 const painted: Array<{ att: Record<string, unknown>; eventId: unknown }> = []
 
 vi.mock("@/lib/audio/upload", async (orig) => {
@@ -44,6 +45,7 @@ vi.mock("@/lib/sync/events-emit", () => ({
   }),
   emitCellAudioGain: vi.fn(async (input: { audioId: string; gainDb: number | null; fadeInMs: number | null; fadeOutMs: number | null }) => {
     events.push({ kind: "gain", audioId: input.audioId })
+    gainInputs.push(input)
     takes[input.audioId] = { ...takes[input.audioId], gainDb: input.gainDb, fadeInMs: input.fadeInMs, fadeOutMs: input.fadeOutMs }
     return `ev-gain-${input.audioId}`
   }),
@@ -61,6 +63,8 @@ vi.mock("@/lib/audio/decode-mono", () => ({
 vi.mock("@/lib/audio/wav-encode", () => ({ encodeWavPcm16: (samples: Float32Array) => new Blob([new Uint8Array(samples.length)]) }))
 
 import { joinTakePieces, type JoinPiece } from "./join-pieces"
+import { attachUploadedTake } from "./attach-file"
+import { emitCellAudioGain } from "@/lib/sync/events-emit"
 import { levelBeforeCut, levelsAfterCut } from "./cut-take"
 import { takeStepHandlers, type TakeAddData } from "@/lib/history/take-steps"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
@@ -88,6 +92,7 @@ beforeEach(() => {
   for (const k of Object.keys(takes)) delete takes[k]
   for (const k of Object.keys(playing)) delete playing[k]
   events.length = 0
+  gainInputs.length = 0
   painted.length = 0
 })
 
@@ -128,6 +133,11 @@ describe("Join into one recording keeps the take's volume and fades", () => {
     expect(levelOf("b.wav")).toEqual({ gainDb: 6, fadeInMs: null, fadeOutMs: 500 })
   })
 
+  it("on a lane, the level is written on that lane", async () => {
+    await joinTakePieces({ ...args, targetLang: "za", pieces: cutAt(1700) })
+    expect(gainInputs).toEqual([expect.objectContaining({ gainDb: 6, fadeInMs: 300, fadeOutMs: 500, targetLang: "za", author: "dev" })])
+  })
+
   it("trimmed pieces (joined by decoding them): the same level", async () => {
     const pieces = cutAt(1700).map((p, i) => (i === 0 ? { ...p, trimStartMs: 100 } : { ...p, trimEndMs: 3300 }))
     const id = await joinTakePieces({ ...args, pieces })
@@ -152,6 +162,20 @@ describe("Join into one recording keeps the take's volume and fades", () => {
     const id = await joinTakePieces({ ...args, pieces: cutAt(1700, { gainDb: null, fadeInMs: null, fadeOutMs: null, durationMs: 3400 }) })
     expect(events).toEqual([{ kind: "attach", audioId: id }])
     expect(painted[0].eventId).toBe(`ev-attach-${id}`)
+  })
+
+  // The level is its own write, after the attach (AQU-2525's field). When that
+  // write fails, the attach is already queued: the caller hears of it, but
+  // the bytes stay — `onEmitFailed` is only for an attach that was not queued.
+  it("a level write that fails: the error reaches the caller, and the bytes are not given up", async () => {
+    vi.mocked(emitCellAudioGain).mockRejectedValueOnce(new Error("idb write failed"))
+    const onEmitFailed = vi.fn()
+    await expect(attachUploadedTake({
+      projectId: "p1", fileId: "f1", cellId: "c1", audioId: "j.wav", url: URL_A, slot: "recording",
+      mimeType: "audio/wav", durationMs: 3400, surface: "recording-tab", username: "dev",
+      level: { gainDb: 6, fadeInMs: 300, fadeOutMs: 500 }, onEmitFailed,
+    })).rejects.toThrow("idb write failed")
+    expect(onEmitFailed).not.toHaveBeenCalled()
   })
 })
 

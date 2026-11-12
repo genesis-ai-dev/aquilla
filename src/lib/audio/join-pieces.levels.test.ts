@@ -209,14 +209,16 @@ describe("Join into one recording keeps the take's volume and fades", () => {
 // pieces again, Redo brings the joined take back.
 describe("Undo and Redo of the Join", () => {
   function handlers() {
-    return takeStepHandlers({
-      readTake: (_c, id) => (takes[id] && !takes[id].isDeleted ? (takes[id] as unknown as CodexCellAttachment) : null),
-      selectedIn: (_c, slot) => playing[slot] ?? null,
-      select: async (_c, slot, id) => {
+    // Typed loosely on purpose: AQU-2492 drops `newPieceId` from this context,
+    // and the test must compile on either side of that merge.
+    const ctx = {
+      readTake: (_c: string, id: string) => (takes[id] && !takes[id].isDeleted ? (takes[id] as unknown as CodexCellAttachment) : null),
+      selectedIn: (_c: string, slot: string) => playing[slot] ?? null,
+      select: async (_c: string, slot: string, id: string | null) => {
         if (id && takes[id]) takes[id].isDeleted = false
         playing[slot] = id
       },
-      remove: async (_c, id) => {
+      remove: async (_c: string, id: string) => {
         takes[id].isDeleted = true
         if (playing[takes[id].slot] === id) playing[takes[id].slot] = null
       },
@@ -226,7 +228,8 @@ describe("Undo and Redo of the Join", () => {
       uncut: async () => {},
       newPieceId: () => "fresh",
       rename: async () => {},
-    })
+    }
+    return takeStepHandlers(ctx as unknown as Parameters<typeof takeStepHandlers>[0])
   }
 
   it("Undo plays the pieces again, each at its own level; Redo brings the joined take back at the take's", async () => {

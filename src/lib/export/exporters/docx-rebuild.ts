@@ -406,6 +406,7 @@ const HAS_LETTER_OR_DIGIT = /[\p{L}\p{N}]/u
  *  "a", a superscript "3") it is a different word in the translation more
  *  often than not, so it is only ever kept as part of its word. */
 const LONE_LATIN = /^[A-Za-z0-9]$/
+const LATIN_LETTER = /[A-Za-z]/
 
 /** The guard against silly matches (see the header): a look stretch counts
  *  when it holds a letter or digit and is not a lone Latin letter or digit. */
@@ -489,7 +490,9 @@ function anchorsOf(nodes: readonly RNode[], baseRpr: string, io: RebuildIo): { a
         while (from < to && !isWordChar(from)) from++
         while (to > from && !isWordChar(to - 1)) to--
         const word = part(from, to)
-        if (word) words.push(word)
+        // A word taken OUT of a stretch must be at least 3 characters or not
+        // Latin: alone, "de" of an italic "de facto" would take the French "de".
+        if (word && (word.needle.length >= 3 || !LATIN_LETTER.test(word.needle))) words.push(word)
         k = end
       }
       const whole = part(0, slice.length)

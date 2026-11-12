@@ -4,10 +4,16 @@
 // in db/shared/link-file-provenance.ts; every link sync runs that sweep
 // (AQU-2438), and this module is the on-demand way to run it for one project
 // or for all of them — `POST /admin/link-provenance` (admin.ts), the backfill
-// for a project nobody has opened since. Nothing here touches a cell, a
-// translation or a validation: it writes `files.kind`, `files.role` and
-// `files.book_code` where they are NULL, and `file_source_blobs` rows, and it
-// reports what it did.
+// for a project nobody has opened since. Nothing here touches a translation or
+// a validation: it writes `files.kind`, `files.role` and `files.book_code`
+// where they are NULL, and `file_source_blobs` rows, and it reports what it
+// did.
+//
+// It also gives the copies' SOURCE cells the import envelope a link did not
+// carry before AQU-1520 (link-envelope.ts) — the third thing an IDML copy needs
+// before it can be exported, and the one the first two made reachable. That
+// one is an event per cell (`source.cell.metadata.patch`), filling only cells
+// whose `metadata` is NULL.
 //
 // The pairing (in the shared sweep) is the one the detach snapshot uses
 // (auth-worker snapshotSourceFiles): `meta.upstreamFileId`, the stamp every
@@ -20,7 +26,8 @@ import { makePostgres } from '../../../db/shim/postgres'
 import { parseSourceLinkAdoption } from '../../../db/shared/source-link-adopt'
 import { applyProjectLinkedFileProvenance } from '../../../db/shared/link-file-provenance'
 import { scheduledDeploymentEnvironmentError } from '../environment-guard'
-import { deterministicDownstreamFileId, loadLink } from './link-sync'
+import { repairMirroredCellEnvelopes } from './link-envelope'
+import { deterministicDownstreamFileId, deterministicMirrorEventId, loadLink } from './link-sync'
 
 export interface LinkProvenanceReport {
   projectId: string
@@ -35,10 +42,17 @@ export interface LinkProvenanceReport {
   blobPointersWritten: number
   /** Copies whose upstream file has no original of its own to point at. */
   noUpstreamBlob: number
+  /** Cells of those copies given (or, dry, lacking) the upstream's import
+   *  envelope — copies mirrored before AQU-1520 (link-envelope.ts). */
+  envelopesRepaired: number
   /** Live files that are the project's own — adopted under the link, or
    *  imported by the project itself. Left alone. */
   ownFiles: string[]
 }
+
+/** Rounds of the envelope repair one project gets per run: 200,000 cells, a
+ *  ceiling on a runaway rather than a size anything real reaches. */
+const MAX_ENVELOPE_ROUNDS = 200
 
 export interface LinkProvenanceOptions {
   dryRun?: boolean
@@ -76,11 +90,32 @@ export async function repairLinkedFileProvenance(
     now,
     dryRun,
   })
+  // The cells of those copies: the import envelope a link did not carry before
+  // AQU-1520. Not for a link that consumes the upstream's TARGET, whose source
+  // text the upstream's envelope does not describe. Bounded per call like the
+  // per-sync repair, so a project is finished over a few rounds.
+  let envelopesRepaired = 0
+  if (link.source_link_consumes !== 'target') {
+    for (let round = 0; round < MAX_ENVELOPE_ROUNDS; round++) {
+      const envelopes = await repairMirroredCellEnvelopes(db, {
+        upstreamProjectId,
+        downstreamProjectId,
+        pairs,
+        eventId: (key) => deterministicMirrorEventId(downstreamProjectId, key),
+        author: 'link-sync',
+        now,
+        dryRun,
+      })
+      envelopesRepaired += envelopes.repaired
+      if (!envelopes.more) break
+    }
+  }
   return {
     projectId: downstreamProjectId,
     upstreamProjectId,
     mode: link.source_link_mode,
     dryRun,
+    envelopesRepaired,
     filesPaired: pairs.length,
     typeRepaired: plan.typeRepairs.length,
     blobPointersWritten: plan.blobPointers.length,
@@ -122,6 +157,7 @@ export function formatLinkProvenanceSweep(report: LinkProvenanceSweepReport): st
     `${report.dryRun ? 'dry run: ' : ''}projects=${report.projects.length} ` +
     `paired=${sum((r) => r.filesPaired)} typeRepaired=${sum((r) => r.typeRepaired)} ` +
     `pointers=${sum((r) => r.blobPointersWritten)} noUpstreamBlob=${sum((r) => r.noUpstreamBlob)} ` +
+    `envelopes=${sum((r) => r.envelopesRepaired)} ` +
     `own=${sum((r) => r.ownFiles.length)} errors=${report.errors.length}`
   )
 }

@@ -125,6 +125,27 @@ describe("useStaleSourceCells", () => {
     expect((triggerCall![1] as RequestInit).method).toBe("POST")
   })
 
+  it("says when the lazy-pull sync gave linked cells their import envelope", async () => {
+    // The open file was read before that sync finished: its cells have to be
+    // read again before an IDML export of them can find a locator.
+    fetchMock.mockResolvedValue(makeResponse([]))
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ ranSync: true, envelopesRepaired: 1032 }), { status: 200 }),
+    )
+    const onEnvelopesRepaired = vi.fn()
+    renderHook(() => useStaleSourceCells({ projectId: "p1", fileId: "f1", getToken, onEnvelopesRepaired }))
+    await waitFor(() => expect(onEnvelopesRepaired).toHaveBeenCalledTimes(1))
+  })
+
+  it("stays quiet after a sync that repaired nothing", async () => {
+    fetchMock.mockResolvedValue(makeResponse([]))
+    const onEnvelopesRepaired = vi.fn()
+    renderHook(() => useStaleSourceCells({ projectId: "p1", fileId: "f1", getToken, onEnvelopesRepaired }))
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled())
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(onEnvelopesRepaired).not.toHaveBeenCalled()
+  })
+
   it("retries on null token without surfacing isError, then falls back quietly", async () => {
     const { result } = renderHook(() =>
       useStaleSourceCells({

@@ -14,25 +14,34 @@ import {
   fetchPrivilegedProjectMembers,
   type ProjectMember,
 } from "@/lib/frontier/members"
+import { ROLE, resolveRoleName } from "@/lib/frontier/roles"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { PERMISSION_DOCS_URL } from "@/components/PermissionDeniedAlert"
 
 /**
- * GitHub "Workspace admins" modal: people who can change shared settings,
+ * GitHub "Workspace admins" modal: people who can change a locked setting,
  * not the full roster. Opened from the per-control lock hint.
+ *
+ * AQU-2457: `minRole` is the floor of the section that opened it — the
+ * dialog names that role and lists only members at it or above. A single
+ * dialog serves every lock line, so it has to be told which one asked;
+ * before this it always said (and listed) Maintainers, contradicting the
+ * Languages and "Count headings" lines that name Project Leads.
  */
 export function PrivilegedMembersDialog({
   open,
   onOpenChange,
   projectId,
-  roleLabel,
+  minRole = ROLE.MAINTAINER,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   projectId: string | null
-  roleLabel: string
+  /** Role floor of the section that opened the dialog. */
+  minRole?: number
 }) {
   const t = useT()
+  const roleLabel = resolveRoleName(t, minRole, { plural: true })
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const [members, setMembers] = useState<ProjectMember[]>([])
@@ -45,7 +54,7 @@ export function PrivilegedMembersDialog({
     setLoading(true)
     setFailed(false)
     setMembers([])
-    void fetchPrivilegedProjectMembers(jwt, projectId)
+    void fetchPrivilegedProjectMembers(jwt, projectId, minRole)
       .then((result) => {
         if (!alive) return
         if (result.kind === "ok") {
@@ -72,17 +81,23 @@ export function PrivilegedMembersDialog({
     return () => {
       alive = false
     }
-  }, [open, projectId, jwt])
+  }, [open, projectId, jwt, minRole])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-sm" aria-busy={loading || undefined}>
         <DialogHeader>
-          <DialogTitle>
-            {t("projectSettings.permission.privilegedDialogTitle", { role: roleLabel })}
-          </DialogTitle>
+          {/* The role itself is the title. The old "Project {role}" template
+              stuttered the moment the floor stopped always being Maintainer
+              ("Project Project Leads"), in English and in every locale that
+              appends the project noun. */}
+          <DialogTitle>{roleLabel}</DialogTitle>
           <DialogDescription>
-            {t("projectSettings.permission.privilegedDialogDescription", { role: roleLabel })}
+            {/* The lock line's own sentence, so the dialog cannot contradict
+                it: "Only Project Leads can change these settings." reads true
+                at every floor, where the Maintainer-shaped copy it replaced
+                ("… members, and other project configuration") did not. */}
+            {t("settings.locked.section", { role: roleLabel })}
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="pb-1">

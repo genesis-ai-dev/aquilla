@@ -193,3 +193,12 @@ vi.mock("@/lib/frontier/google-login", () => ({
   googleRequest: async () => ({ enabled: false }),
   startGoogleLogin: vi.fn(),
 }))
+
+it("retries an unavailable verification without claiming the link expired", async () => {
+  mockVerifyResetToken.mockRejectedValueOnce(new Error("network unavailable")).mockResolvedValueOnce(undefined)
+  renderReset()
+  expect(await screen.findByRole("alert")).toHaveTextContent("Check your connection")
+  fireEvent.click(screen.getByRole("button",{name:"Retry"}))
+  await waitFor(()=>expect(mockVerifyResetToken).toHaveBeenCalledTimes(2))
+  expect(await screen.findByLabelText(/New password/i)).toBeVisible()
+})

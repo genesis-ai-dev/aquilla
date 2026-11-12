@@ -71,10 +71,12 @@ export const loadPlatformAdminEmails = (env: Env): Promise<Set<string>> =>
  * access on every org/project — see resolveProjectRole / getEffectiveOrgRole.
  * One primary-key lookup, plus the env bootstrap.
  */
-export const isPlatformAdminEmail = async (env: Env, email: string): Promise<boolean> => {
+export const isPlatformAdminEmail = async (
+  env: Env, email: string, options: { includeBootstrap?: boolean } = {},
+): Promise<boolean> => {
   const normalized = email.trim().toLowerCase()
   if (!normalized) return false
-  if (parseAdminEmails(env).has(normalized)) return true
+  if (options.includeBootstrap !== false && parseAdminEmails(env).has(normalized)) return true
   return memoize(env.requestMemo, `platform-admin:${normalized}`, async () => {
     try {
       const row = await env.AQUILLA_PG.prepare(

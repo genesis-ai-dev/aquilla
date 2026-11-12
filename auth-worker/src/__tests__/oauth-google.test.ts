@@ -50,6 +50,18 @@ async function handoff() {
   return code
 }
 describe("Google login boundary", () => {
+  it("keeps linked Google login on the same account after its Aquilla email changes", async () => {
+    await seedUser(1,"alice")
+    await env.AQUILLA_PG.prepare("INSERT INTO provider_identities(provider,subject,user_id) VALUES('google','google-alice',1)").run()
+    await env.AQUILLA_PG.prepare("UPDATE users SET email='changed@example.com',password_hash=NULL WHERE id=1").run()
+    const response = await post("exchange",{code:await handoff(),verifier})
+    expect(response.status).toBe(200)
+    const result = await response.json() as {username:string;created:boolean;access_token:string}
+    expect(result).toMatchObject({username:"alice",created:false})
+    expect((await app.request("/api/v2/auth/me",{headers:{Authorization:`Bearer ${result.access_token}`}},testEnv)).status).toBe(200)
+    expect(await env.AQUILLA_PG.prepare("SELECT count(*)::int n FROM users").first()).toEqual({n:1})
+  })
+
   it("writes welcome verification using the task-owned database handle", async () => {
     const original = postResponse.withPostResponseDb
     const close = vi.fn(async () => {})

@@ -237,8 +237,8 @@ export const authMiddleware = async (
   c: Context<AuthHonoEnv>,
   next: Next,
 ): Promise<Response | void> => {
-  // Renewal must never extend a credential using a stale isolate cache.
-  const resolved = await resolveSession(c.env, c.req.header("Authorization"), { fresh: c.req.path.endsWith("/auth/refresh") })
+  // Renewal and identity changes must never accept a stale isolate cache.
+  const resolved = await resolveSession(c.env, c.req.header("Authorization"), { fresh: c.req.path.endsWith("/auth/refresh") || c.req.path.includes("/auth/email-change/") })
 
   if (!resolved.ok) {
     switch (resolved.reason) {

@@ -190,7 +190,13 @@ async function handleExternalProjects(request: Request, env: ExternalReadsEnv): 
   const projects = await listProjectsForCredential(
     env.AQUILLA_PG,
     cred,
-    { ...(orgId !== null ? { orgId } : {}), ...(sort ? { sort } : {}) },
+    {
+      ...(orgId !== null ? { orgId } : {}),
+      ...(sort ? { sort } : {}),
+      // AQU-2504: name this route, not the MCP tool, in any support-access
+      // audit row — the trail should say which adapter the operator used.
+      tool: "GET /api/v1/external/projects",
+    },
   )
   return Response.json({ data: projects, nextCursor: null })
 }

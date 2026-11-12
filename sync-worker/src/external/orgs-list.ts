@@ -17,11 +17,22 @@
 //      project (nothing at all when the project is personal/org-less). A
 //      credential can never enumerate orgs outside its scope.
 //
+// AQU-2504 adds ONE deliberate exception to difference 2: a credential carrying
+// live SUPPORT ACCESS (a platform admin, inside their time-boxed window — see
+// db/shared/api-credentials.ts) drops the membership filter and sees every org,
+// because looking at the customer's workspace they are messaging you about is
+// the entire point. Its `role` reads 700 / `platform`, the same owner-level
+// contribution resolveProjectRoleShared gives a platform operator on the web.
+// The credential's own org/project scope still narrows the result — support
+// access widens WHO is a member, never what the token was scoped to. The
+// enumeration is written to `admin_audit_log`, once per call.
+//
 // PII: id, name, and the caller's own role level only. No member lists, emails,
 // or owner identities — the portal's org-member surfaces stay off this tier.
 // Capped at 100 rows, matching listProjectsForCredential.
 
 import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
+import { auditSupportAccessRead } from '../../../db/shared/support-access-audit'
 
 /** Role level granted to the row owner of an organization (org-permissions.ts). */
 const OWNER_ROLE_LEVEL = 700
@@ -31,7 +42,7 @@ export interface ExternalOrgListItem {
   name: string | null
   /** The calling user's live role level in this org. */
   role: number
-  /** How access is granted: owner | member. */
+  /** How access is granted: owner | member | platform (AQU-2504). */
   role_source: string
 }
 
@@ -45,11 +56,22 @@ interface OrgListRow {
 export async function listOrgsForCredential(
   db: AquillaDb,
   cred: ApiCredentialContext,
+  /** The tool or route asking, for the support-access audit row. */
+  tool = 'list_orgs',
 ): Promise<ExternalOrgListItem[]> {
   const uid = String(cred.userId)
-  const binds: unknown[] = [uid, uid, uid, uid, uid]
-  let sql =
-    `SELECT o.id, o.name,
+  const support = cred.supportAccess === true
+  // Support access replaces the membership predicate with `true` and reports
+  // owner-level / 'platform'; everyone else keeps the owner-or-member rule and
+  // their real level. The support branch binds nothing of its own (there is no
+  // membership to match), so the scope clauses below append to either shape
+  // unchanged — they are positional and go on the end in both.
+  const binds: unknown[] = support ? [] : [uid, uid, uid, uid, uid]
+  let sql = support
+    ? `SELECT o.id, o.name, ${OWNER_ROLE_LEVEL} AS role, 'platform' AS role_source
+       FROM organizations o
+       WHERE true`
+    : `SELECT o.id, o.name,
        GREATEST(
          CASE WHEN o.owner_user_id::text = ? THEN ${OWNER_ROLE_LEVEL} ELSE 0 END,
          COALESCE((SELECT om.role_level FROM org_members om
@@ -80,10 +102,19 @@ export async function listOrgsForCredential(
   sql += ` ORDER BY LOWER(COALESCE(o.name, '')), o.id LIMIT 100`
 
   const result = await db.prepare(sql).bind(...binds).all<OrgListRow>()
-  return result.results.map((r) => ({
+  const orgs = result.results.map((r) => ({
     id: String(r.id),
     name: r.name,
     role: Number(r.role),
     role_source: r.role_source,
   }))
+  if (support) {
+    await auditSupportAccessRead(db, uid, {
+      action: 'connector.orgs.list',
+      credentialId: cred.credentialId,
+      tool,
+      orgIds: orgs.map((o) => o.id),
+    })
+  }
+  return orgs
 }

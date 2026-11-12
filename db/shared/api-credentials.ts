@@ -73,6 +73,24 @@ export interface ApiCredentialContext {
   orgIds?: string[]
   projectId: string | null
   /**
+   * AQU-2504: is connector SUPPORT ACCESS live on this call — the platform
+   * admin's time-boxed, read-only reach into orgs and projects they are not a
+   * member of?
+   *
+   * OPTIONAL, and absent means NO, for the same reason `pii` is: the safe value
+   * has to be the one you get by forgetting the field. True requires all three
+   * of the credential's `support_access` grant, an unexpired
+   * `support_access_until`, and a live `platform_admins` row for `userId` — so
+   * the window lapsing, or the operator leaving the allowlist, silently returns
+   * the credential to ordinary member scope rather than failing loudly.
+   *
+   * It widens READS only (orgs-list.ts, projects-list.ts,
+   * sync-worker/src/external/read-auth.ts). A support credential is minted
+   * `access: 'read'`, so every write surface refuses it exactly as it refuses
+   * any read-only token — there is no cross-tenant write path to audit.
+   */
+  supportAccess?: boolean
+  /**
    * AQU-1180: may this credential see real human identities in agent-facing
    * responses? OPTIONAL, and absent means NO — the safe default has to be the
    * one you get by forgetting the field, not the one you get by remembering
@@ -144,6 +162,44 @@ export async function mintApiToken(): Promise<MintedApiToken> {
  */
 export const OAUTH_ORG_ALLOWLIST_FLOOR = 600
 
+/**
+ * AQU-2504: is this user on the platform-admin allowlist *right now*, by a row
+ * in `platform_admins` matched to their account email?
+ *
+ * The `platform_admins` TABLE only — deliberately not the `ADMIN_EMAILS`
+ * bootstrap that `auth-worker/src/middleware/platform-admin.ts` also honours.
+ * That var exists so a local dev, e2e run or self-hoster can have an admin
+ * before any row exists (AQU-1239); hanging a cross-tenant read grant off an
+ * environment variable is a different proposition, and db/shared is handed no
+ * env on this path anyway. A deployment that wants connector support access
+ * writes the row, which is what docs/DEPLOYMENT-ENVIRONMENTS.md already tells
+ * operators to do.
+ *
+ * Its own try/catch, rather than a subquery inside the credential SELECT: a
+ * missing or unreadable `platform_admins` (migration not yet applied) must cost
+ * one credential its support access, not break authentication for every token
+ * the Agent API is handed. Fails CLOSED, like every other read of this table.
+ *
+ * Only reached for a credential that already carries the grant and an open
+ * window, so an ordinary credential pays nothing for it.
+ */
+export async function isPlatformAdminUser(db: AquillaDb, userId: string): Promise<boolean> {
+  try {
+    const row = await db
+      .prepare(
+        `SELECT 1 AS ok FROM platform_admins pa
+           JOIN users u ON lower(u.email) = lower(pa.email)
+          WHERE u.id::text = ?`,
+      )
+      .bind(String(userId))
+      .first<{ ok: number }>()
+    return row != null
+  } catch (err) {
+    console.error("[api-credentials] platform_admins lookup failed; failing closed:", err)
+    return false
+  }
+}
+
 interface CredentialRow {
   id: string
   oauth_resource: string | null
@@ -158,6 +214,10 @@ interface CredentialRow {
   last_used_at: string | null
   username: string
   pii: boolean | null
+  support_access: boolean | null
+  /** True when `support_access_until` is still in the future (computed in SQL
+   *  so the window is judged by the database's clock, not the Worker's). */
+  support_window_open: boolean | null
 }
 
 /**
@@ -208,7 +268,9 @@ export async function validateApiCredential(
               ac.org_id AS org_id, ac.project_id AS project_id,
               ac.expires_at AS expires_at, ac.revoked_at AS revoked_at,
               ac.last_used_at AS last_used_at, u.username AS username,
-              ac.pii AS pii,
+              ac.pii AS pii, ac.support_access AS support_access,
+              (ac.support_access_until IS NOT NULL
+                 AND ac.support_access_until > now()) AS support_window_open,
               CASE WHEN ac.org_ids IS NULL THEN NULL ELSE COALESCE((
                 SELECT jsonb_agg(o.id::text ORDER BY o.id)
                 FROM organizations o
@@ -250,6 +312,15 @@ export async function validateApiCredential(
     console.warn("[validateApiCredential] last_used_at bump failed (non-fatal):", err)
   }
 
+  // AQU-2504: the grant and its window are necessary but not sufficient — the
+  // owner must ALSO still be on the platform-admin allowlist, which is a
+  // separate guarded read so a missing `platform_admins` table can never break
+  // ordinary credential validation (see isPlatformAdminUser).
+  const supportAccess =
+    row.support_access === true &&
+    row.support_window_open === true &&
+    (await isPlatformAdminUser(db, row.user_id))
+
   return {
     credentialId: row.id,
     ...(row.oauth_resource != null ? { oauthResource: row.oauth_resource } : {}),
@@ -265,6 +336,8 @@ export async function validateApiCredential(
     projectId: row.project_id,
     // Only an explicit true opts in — a NULL (pre-0091 row) stays scrubbed.
     pii: row.pii === true,
+    // Only an explicit true opts in, exactly like `pii` above.
+    ...(supportAccess ? { supportAccess: true } : {}),
   }
 }
 

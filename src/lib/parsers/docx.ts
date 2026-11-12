@@ -19,6 +19,8 @@ import {
   readDocxStyleSheet,
   scanDocxParagraphs,
   walkDocxParagraph,
+  type DocxLineChunk,
+  type DocxMark,
   type DocxWalkContext,
 } from "./docx-structure"
 
@@ -177,8 +179,10 @@ export function docxPartsToStrings(
     // the first branch (the same text box stored for old readers): no line.
     if (spans[i].isCopy) continue
     const p = paragraphs[i]
-    const { plain, html, hasFormatting, hasFootnote, hasWords } = extractRuns(p, walkContext)
-    if (!hasWords) continue
+    const line = docxLine(walkDocxParagraph(p, walkContext))
+    if (!line.hasWords) continue
+    const plain = line.text
+    const hasFootnote = line.chunks.some((chunk) => chunk.piece.kind === "footnote")
 
     const style = getParaStyle(p)
     const context = style || "Paragraph"
@@ -191,16 +195,19 @@ export function docxPartsToStrings(
       blockPath: `w:p[${i + 1}]`,
     }
 
+    // AQU-2539: every line of the paragraph carries its own inline marks, so a
+    // paragraph split into several lines keeps them too. A footnote is carried
+    // as an inline USFM marker in the plain text and rendered by the plain-text
+    // footnote decoration; the source's HTML display has no footnote
+    // representation, so a footnoted paragraph still has no HTML.
+    const htmls = hasFootnote ? segments.map(() => undefined) : segmentHtml(plain, line.chunks, segments)
+
     for (let i = 0; i < segments.length; i++) {
       const seg = segments[i]
       results.push({
         id: uuid(),
         original: seg.text,
-        // A footnote is carried as an inline USFM marker in the plain text and
-        // rendered by the plain-text footnote decoration; the run-formatting
-        // HTML path has no footnote representation, so disable it for footnoted
-        // paragraphs rather than drop the note from display.
-        originalHtml: segments.length === 1 && hasFormatting && !hasFootnote ? html : undefined,
+        originalHtml: htmls[i],
         translated: "",
         context,
         group: seg.group,
@@ -279,33 +286,65 @@ export function loadFootnotes(footnotesXml: string): Map<string, string> {
   return map
 }
 
-function extractRuns(
-  p: XmlElement,
-  ctx: DocxWalkContext,
-): { plain: string; html: string; hasFormatting: boolean; hasFootnote: boolean; hasWords: boolean } {
-  // AQU-2539: only the paragraph's OWN content. A text box's paragraphs are
-  // their own lines, so their words no longer join the paragraph holding the box.
-  const line = docxLine(walkDocxParagraph(p, ctx))
-  let html = ""
-  let hasFormatting = false
-  let hasFootnote = false
-
-  for (const chunk of line.chunks) {
-    if (chunk.piece.kind === "footnote") {
-      html += chunk.text
-      hasFootnote = true
-      continue
+/**
+ * Each segment's inline-mark HTML, or undefined when it carries no mark. The
+ * splitter may rejoin a cut with one space where the paragraph had other
+ * whitespace, so each segment is aligned to the paragraph's characters, any
+ * whitespace run matching any whitespace run; a character takes the marks of
+ * the run it came from. Text is HTML-escaped.
+ */
+function segmentHtml(
+  plain: string,
+  chunks: readonly DocxLineChunk[],
+  segments: readonly { text: string }[],
+): (string | undefined)[] {
+  const marks: ReadonlySet<DocxMark>[] = []
+  for (const chunk of chunks) for (let k = 0; k < chunk.text.length; k++) marks.push(chunk.marks)
+  if (!marks.some((m) => m.size > 0)) return segments.map(() => undefined)
+  const isSpace = (ch: string | undefined) => ch !== undefined && /\s/.test(ch)
+  let cursor = 0
+  return segments.map(({ text }) => {
+    while (cursor < plain.length && isSpace(plain[cursor]) && !isSpace(text[0])) cursor++
+    // at[k]: the paragraph character that segment character k came from.
+    const at: number[] = []
+    let k = 0
+    while (k < text.length) {
+      if (isSpace(text[k]) && isSpace(plain[cursor])) {
+        // A whitespace run in the segment matches the paragraph's whole run.
+        const from = cursor
+        while (cursor < plain.length && isSpace(plain[cursor])) cursor++
+        while (k < text.length && isSpace(text[k])) {
+          at.push(from)
+          k++
+        }
+        continue
+      }
+      at.push(Math.min(cursor, plain.length - 1))
+      cursor++
+      k++
     }
-    let htmlText = chunk.text
-    if (chunk.marks.has("b")) { htmlText = `<b>${htmlText}</b>`; hasFormatting = true }
-    if (chunk.marks.has("i")) { htmlText = `<i>${htmlText}</i>`; hasFormatting = true }
-    if (chunk.marks.has("u")) { htmlText = `<u>${htmlText}</u>`; hasFormatting = true }
-    if (chunk.marks.has("s")) { htmlText = `<s>${htmlText}</s>`; hasFormatting = true }
-    html += htmlText
-  }
-
-  return { plain: line.text, html, hasFormatting, hasFootnote, hasWords: line.hasWords }
+    let html = ""
+    let any = false
+    let start = 0
+    const keyAt = (k: number) => markKeyOf(marks[at[k]])
+    for (let k = 1; k <= text.length; k++) {
+      if (k < text.length && keyAt(k) === keyAt(start)) continue
+      const set = marks[at[start]] ?? NO_DOCX_MARKS
+      let piece = escapeHtml(text.slice(start, k))
+      if (set.has("b")) { piece = `<b>${piece}</b>`; any = true }
+      if (set.has("i")) { piece = `<i>${piece}</i>`; any = true }
+      if (set.has("u")) { piece = `<u>${piece}</u>`; any = true }
+      if (set.has("s")) { piece = `<s>${piece}</s>`; any = true }
+      html += piece
+      start = k
+    }
+    return any ? html : undefined
+  })
 }
+
+const NO_DOCX_MARKS: ReadonlySet<DocxMark> = new Set()
+const markKeyOf = (set: ReadonlySet<DocxMark> | undefined) => (set ? [...set].sort().join("+") : "")
+const escapeHtml = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 
 function getParaStyle(p: XmlElement): string | null {
   // The paragraph's OWN pPr: a descendant search would read a text box's style.

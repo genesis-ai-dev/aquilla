@@ -187,3 +187,35 @@ describe("hidden text (AQU-2539)", () => {
     expect(lines(para(run("x", '<w:rPr><w:rStyle w:val="C"/></w:rPr>'), "P"), sheet)).toEqual([["w:p[1]", "x"]])
   })
 })
+
+describe("inline marks on every line (AQU-2539)", () => {
+  const B = "<w:rPr><w:b/></w:rPr>"
+  const I = "<w:rPr><w:i/></w:rPr>"
+  const strings = (body: string, footnotes?: string) =>
+    docxPartsToStrings({ documentXml: documentXml(body), ...(footnotes ? { footnotesXml: footnotes } : {}) })
+
+  it("gives each line of a split paragraph its own marks", () => {
+    const filler = "plain words ".repeat(20).trim()
+    const result = strings(para(run(`${filler}. Then `) + run("Textus Receptus", I) + run(" and ") + run("bold", B) + run(" end.")))
+    expect(result.length).toBeGreaterThan(1)
+    const marked = result.find((s) => s.original.includes("Textus"))!
+    expect(marked.original).toBe("Then Textus Receptus and bold end.")
+    expect(marked.originalHtml).toBe("Then <i>Textus Receptus</i> and <b>bold</b> end.")
+    for (const other of result.filter((s) => s !== marked)) expect(other.originalHtml).toBeUndefined()
+  })
+
+  it("escapes the text inside the HTML", () => {
+    expect(strings(para(run("a &lt; b ") + run("&amp; c", B)))[0].originalHtml).toBe("a &lt; b <b>&amp; c</b>")
+  })
+
+  it("keeps marks across tabs and line breaks", () => {
+    const result = strings(para(`<w:r><w:rPr><w:b/></w:rPr><w:t>ASV</w:t></w:r><w:r><w:tab/><w:t>American</w:t><w:br/><w:t>Version</w:t></w:r>`))
+    expect(result[0].original).toBe("ASV\tAmerican\nVersion")
+    expect(result[0].originalHtml).toBe("<b>ASV</b>\tAmerican\nVersion")
+  })
+
+  it("still gives a footnoted line no HTML (the source display has no footnote in HTML)", () => {
+    const result = strings(para(run("Bold", B) + footnoteRefRun(2)), footnotesXml({ 2: "Note." }))
+    expect(result[0].originalHtml).toBeUndefined()
+  })
+})

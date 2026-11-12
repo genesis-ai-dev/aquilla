@@ -52,6 +52,7 @@ export function htmlToSpans(html: string): Span[] {
 }
 
 // Characters XML 1.0 cannot hold at all; one in a w:t makes the part unreadable.
+// eslint-disable-next-line no-control-regex -- matching control characters is the point
 const XML_INVALID_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g
 
 export function escapeXml(s: string): string {

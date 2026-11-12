@@ -50,7 +50,8 @@ export interface CarryOnTranscribeRunsArgs {
   /** Changes whenever the open file's rows or recordings change. */
   version: unknown
   /**
-   * AQU-2375 (review, Nov 9): who is signed in (null = nobody) and the
+   * AQU-2375 (review, Nov 9): who is signed in (the account's `sessionKey`,
+   * as the run keeps it; null = nobody) and the
    * language lane that is open. A run someone else started is left for them,
    * unsaid; a run over takes started in another language waits for that
    * language. Not given: not checked.

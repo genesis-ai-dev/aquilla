@@ -104,6 +104,7 @@ export async function runBatchJobs<T>(
 
 import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
+import { sessionKey } from "@/lib/frontier/session-store"
 import { transcribeCellOutcome, type TranscribeRowOutcome, type TranscriptionResult } from "./transcribe"
 import { planTranscriptionChunks, transcribeChunk, type TranscriptionChunk } from "./transcribe-chunked"
 import { sourceClipWindowSeconds } from "./transcribe-hosted"
@@ -331,8 +332,9 @@ export async function runTranscribeAll(args: TranscribeAllArgs): Promise<Transcr
         kind: args.keep.kind,
         cellIds: targets.map((c) => c.id),
         force: Boolean(args.force),
-        // AQU-2375 (review, Nov 9): whose run, and in which language.
-        ...(session?.username ? { username: session.username } : {}),
+        // AQU-2375 (review, Nov 9): whose run (the account's key, as dev keeps
+        // local data), and in which language.
+        ...(session?.username ? { username: sessionKey(session) } : {}),
         lane: args.targetLang ?? "",
         ...(forceAutoModel ? { forceAutoModel } : {}),
         ...(args.sourceLanguage ? { sourceLanguage: args.sourceLanguage } : {}),

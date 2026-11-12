@@ -110,13 +110,20 @@ export interface StoredTranscribeRun {
   /** That page's id. */
   tab: string
   /**
-   * AQU-2375 (review, Nov 9): who started it (their sign-in name), and the
+   * AQU-2375 (review, Nov 9): who started it, and the
    * language lane it was started in ("" = the default lane). A run is carried
    * on only by that person, and a run over takes only with that language
    * open: carried on by whoever opened the file next, it ran under their
    * account and limit, and in another language it transcribed that
    * language's takes as this one's. Absent on a run kept before this, or
    * started signed out: carried on as before.
+   *
+   * "Who" is the account's key in this browser (`sessionKey`, AQU-2534), the
+   * one dev keeps queued edits and local values under, not the sign-in name:
+   * a deleted name taken again by a new account gets a new key, so it never
+   * carries on the old account's run. An account still signed in from before
+   * AQU-2534 keeps its sign-in name as its key, so a run it kept then is
+   * still its own.
    */
   username?: string
   lane?: string

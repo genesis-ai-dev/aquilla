@@ -542,6 +542,24 @@ describe("runTranscribeAll reports each row (AQU-2375)", () => {
     expect(kept).toMatchObject({ username: "amina", lane: "fr" })
   })
 
+  // AQU-2534 on dev: an account is known by its key in this browser, not its
+  // sign-in name, which a new account can take once the old one is deleted.
+  it("keeps the run under the account's key, not its sign-in name", async () => {
+    const { transcribeCellOutcome } = await import("./transcribe")
+    const { __storedTranscribeRuns } = await import("./transcribe-runs")
+    let kept: { username?: string } | undefined
+    vi.mocked(transcribeCellOutcome).mockImplementation(async () => {
+      kept = __storedTranscribeRuns()[0]
+      return { kind: "done", words: 1 }
+    })
+    await runTranscribeAll({
+      cells: [take("c1")], projectId: "p1",
+      session: { username: "amina", jwt: "j", accountId: "7", storageKey: "account:7:abc" } as never,
+      keep: { fileId: "f1", fileName: "Session 4.mp3", kind: "all" },
+    })
+    expect(kept).toMatchObject({ username: "account:7:abc" })
+  })
+
   it("carries a stopped run on: counts what landed before, and reports the whole run", async () => {
     const { transcribeCellOutcome } = await import("./transcribe")
     vi.mocked(transcribeCellOutcome).mockResolvedValue({ kind: "done", words: 2 })

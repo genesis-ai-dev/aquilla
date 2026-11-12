@@ -271,6 +271,7 @@ import { useTargetKeyTermHighlightPreference } from "@/hooks/useTargetKeyTermHig
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
+import { sessionKey } from "@/lib/frontier/session-store"
 import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
 import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll, needsTranscription, takesNeedingMeasure, runMeasureAll, type SynthTarget, type TranscribeRunReport } from "@/lib/audio/batch-audio"
 import { lineWordsToast, transcribeRunProgressTitle, transcribeRunToast } from "@/lib/audio/transcribe-report"
@@ -12503,8 +12504,9 @@ export function ProjectWorkspace() {
     recordingsFailed: audioValidationFailed || (audioCueSibling != null && cueAudioFailed),
     version: [workspaceAudioByCellId, audioValidationByCellId, audioCueCells, cellStoreVersion],
     // AQU-2375 (review, Nov 9): only the person who started a run carries it
-    // on, and a run over takes only in the language it was started in.
-    username: frontierSession?.username ?? null,
+    // on (by the account's key, AQU-2534), and a run over takes only in the
+    // language it was started in.
+    username: frontierSession ? sessionKey(frontierSession) : null,
     lane: activeLane,
     carryOn: (run, handle) => {
       // AQU-2426: one line's words, carried on window by window.

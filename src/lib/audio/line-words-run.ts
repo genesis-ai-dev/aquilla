@@ -18,6 +18,7 @@
 //     same stretch) sends only the windows still without words.
 
 import type { FrontierSession } from "@/lib/frontier/types"
+import { sessionKey } from "@/lib/frontier/session-store"
 import { windowStarts } from "./asr-windows"
 import { joinWords, type TimedWord } from "./lines-from-words"
 import { loadLinePcm, PCM_RATE, transcribeLineWords, type LineAudio } from "./recording-split"
@@ -199,8 +200,9 @@ export async function runLineWords(args: RunLineWordsArgs): Promise<LineWordsRun
         kind: "lineWords",
         cellIds: line.windows.map((_, i) => lineWindowKey(i)),
         force: false,
-        // AQU-2375 (review, Nov 9): whose run; only they carry it on.
-        ...(args.session?.username ? { username: args.session.username } : {}),
+        // AQU-2375 (review, Nov 9): whose run (the account's key); only they
+        // carry it on.
+        ...(args.session?.username ? { username: sessionKey(args.session) } : {}),
         line,
       })
     }

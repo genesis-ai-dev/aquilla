@@ -351,13 +351,14 @@ type LedgerState = "decides" | "delegates" | "undecided"
  * next pass reads them before re-deciding anything.
  */
 const LEDGER: Record<string, LedgerState> = {
-  // ── decides (14) ───────────────────────────────────────────────────────
+  // ── decides (15) ───────────────────────────────────────────────────────
   "_integration-helpers.ts": "decides", // OPS-49, for all three routers below
   "access-links.ts": "decides",
   "agent-connect.ts": "decides",
   "changeset-approvals.ts": "decides", // OPS-47
   "credentials.ts": "decides", // OPS-44 (a PAT outlives the session)
   "invites.ts": "decides",
+  "mcp-oauth.ts": "decides", // AQU-2504 (connector support access, a cross-tenant READ grant on a long-lived token)
   "merge-sibling.ts": "decides", // OPS-44 (irreversible fold)
   "org-settings.ts": "decides", // D7 (the org's live vendor keys)
   "orgs.ts": "decides",
@@ -499,8 +500,12 @@ describe("the platform-elevation census is an assertion, not a document (OPS-52)
     // the denominator is 49: 16 of 49.
     // 11-05: #1763 adds import-recording-names.ts (undecided); 16 of 50.
     // 11-09: OPS-53 promotes termbase-subscriptions.ts; 17 of 50.
+    // 11-10: AQU-2504 adds mcp-oauth.ts, already deciding on arrival — it is
+    // where connector support access is granted, so it gates on
+    // hasActiveElevation at consent rather than joining the undecided queue;
+    // 18 of 51.
     expect({ decides: tally("decides"), delegates: tally("delegates"), undecided: tally("undecided") })
-      .toEqual({ decides: 14, delegates: 3, undecided: 33 })
+      .toEqual({ decides: 15, delegates: 3, undecided: 33 })
     expect(tally("decides") + tally("delegates") + tally("undecided")).toBe(
       Object.keys(LEDGER).length,
     )

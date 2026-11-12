@@ -33,6 +33,13 @@ export type OutboxEventKind =
   | "source.cell.visibility.set"
   // AQU-1767 phase 2: undo a removal — restore the cell as the removal found it.
   | "source.cell.restore"
+  // Markup-only repair of one cell: merges into the source row's metadata and
+  // may replace the protected source and/or target HTML. Never moves an
+  // `event_id`, so no translation goes stale and no validation is dropped. The
+  // server has emitted it since the IDML v2 upgrade; the client sends it for
+  // one thing only — placing a validated IDML translation into its style runs
+  // (`emitIdmlTargetMarkup`).
+  | "source.cell.metadata.patch"
   // Target-side cell events (translator).
   | "target.cell.create"
   | "target.cell.commit"
@@ -236,6 +243,17 @@ export interface OutboxEventPayloads {
   "source.cell.restore": {
     /** The removal to undo; absent = the cell's newest unrestored removal. */
     deleteEventId?: string
+  }
+  "source.cell.metadata.patch": {
+    /** Payload contract version; 1 is the only one the server projects. */
+    version: 1
+    /** Shallow merge into `cells.metadata`. `{}` changes nothing. */
+    metadata: Record<string, unknown>
+    /** Protected source HTML, when it is being replaced too. */
+    valueHtml?: string
+    /** The default lane's target HTML. Its text, history, chain head and
+     *  validation stay exactly as they were. */
+    targetHtml?: string
   }
 
   "target.cell.create": {

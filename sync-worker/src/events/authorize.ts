@@ -460,6 +460,8 @@ export async function authorize<K extends EventKind>(
       fileId: PROJECT_SENTINEL_FILE_ID,
       roleLevel: tokenClaims.role,
       ...(tokenClaims.src ? { src: tokenClaims.src } : {}),
+      // AQU-2504: see the non-sentinel construction below.
+      ...(tokenClaims.support === true ? { support: true } : {}),
     }
     return { ok: true, event: new AuthorizedEvent(claims, raw) }
   }
@@ -992,6 +994,9 @@ export async function authorize<K extends EventKind>(
     fileId: tokenClaims.fileId,
     roleLevel: tokenClaims.role,
     ...(tokenClaims.src ? { src: tokenClaims.src } : {}),
+    // AQU-2504: carried through so the write perimeter's membership gate can
+    // see it. Only token-bridge.ts ever sets it.
+    ...(tokenClaims.support === true ? { support: true } : {}),
   }
 
   return { ok: true, event: new AuthorizedEvent(claims, raw) }

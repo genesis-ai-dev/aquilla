@@ -133,7 +133,12 @@ production tip does not carry (by `(cherry picked from commit …)`
 provenance or PR number), classifies each by the files its merge touched,
 and reads its walk verdict and the `release:approved` label from GitHub.
 A PR is *held* when a holding area it touches has no green gate (below)
-or its walk is not `PASS`/`none`; the label clears both. A walk may be
+or its walk is not `PASS`/`none`; the label clears both. The walk is read
+from the bot's comment in either shape it posts (the `## Bot walk — PR <n> @
+<sha>` heading, or the `<!-- aquilla-qa-walk <sha> -->` marker it has opened
+with since 2026-11-06). A PASS the bot qualified, such as `**PASS (test level
+only)**`, is `partial`: it ran tests and never opened a preview, so the PR
+holds until a real walk or the label. A walk may be
 posted after the merge: the planner takes the newest walk that names the
 PR's head sha, which is how a dev re-walk (`e2e/journeys/PR-BOT.md`,
 *Re-walk on dev after merge*, for a PR whose preview walk a pending

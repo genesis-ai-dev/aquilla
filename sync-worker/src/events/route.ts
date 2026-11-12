@@ -1032,6 +1032,18 @@ export async function handleEventsWriteRequest(
   // `src: "platform"` tokens (ADMIN_EMAILS operators) are exempt — they have
   // no membership rows to re-check. See events/membership.ts for the full
   // enforcement contract.
+  //
+  // AQU-2504 adds the second, narrower exemption: a connector SUPPORT-ACCESS
+  // write token (`support: true`, still `src: "external"`). A platform admin
+  // doing support work in a customer's project deliberately has no membership
+  // rows there, so this check's "revoked" is the right answer to the wrong
+  // question. The grant it should be judged against is the support window, and
+  // that IS re-checked live on every call — `validateApiCredential` recomputes
+  // all three of the grant, the window and the `platform_admins` row before
+  // token-bridge.ts will mint this token at all, so the revocation story the
+  // check exists to enforce is preserved, not dropped: revoking the row or
+  // letting the window close stops the next write just as deleting a
+  // membership row does.
   const membershipCache = new Map<string, Promise<MembershipDetail>>()
   const membershipFor = (projectId: string, userId: number): Promise<MembershipDetail> => {
     const key = `${projectId}\0${userId}`
@@ -1078,7 +1090,8 @@ export async function handleEventsWriteRequest(
     }
 
     // FRO-346: revoked-membership gate (see membershipFor above).
-    if (authResult.event.claims.src !== 'platform') {
+    // AQU-2504: `support: true` is the second exemption, scoped to this gate.
+    if (authResult.event.claims.src !== 'platform' && authResult.event.claims.support !== true) {
       const membership = await membershipFor(
         authResult.event.claims.projectId,
         authResult.event.claims.userId,

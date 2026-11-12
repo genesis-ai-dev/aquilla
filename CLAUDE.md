@@ -150,7 +150,11 @@ retained only as a historical D1 record (sync-worker has no migrations directory
   `src/events/link-provenance.ts`) that gives files a source link brought in their
   upstream type and a `file_source_blobs` pointer at the upstream's original (the
   rules: `db/shared/link-file-provenance.ts`; every mirror window applies them to
-  the files it touches, this is the backfill) — and the external
+  the files it touches, this is the backfill), and their source cells the import
+  envelope a link did not carry before AQU-1520 (`src/events/link-envelope.ts`: one
+  `source.cell.metadata.patch` per cell whose `metadata` is NULL; every link sync
+  does the same once its fold has caught up, `envelopes=N` in the log line) — and
+  the external
   **Agent API** under `/api/v1/external/*`
   (changeset engine + apply gate, artifacts, tools-only MCP server, self-describing
   discovery — see `docs/AGENT-API.md`). Every PR DOES get its own per-branch sync-worker and

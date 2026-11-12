@@ -14,6 +14,9 @@ import {
   verifyAdminElevation,
 } from "@/lib/frontier/admin"
 
+import { cn } from "@/lib/utils"
+import { CopySecurityCode } from "./CopySecurityCode"
+
 const CODE_LENGTH = 6
 
 const CONSOLE_DESCRIPTION =
@@ -31,6 +34,7 @@ export function AdminElevationGate(props: {
   email: string | null
   onElevated: () => void
   description?: string
+  compact?: boolean
 }) {
   return <ElevationGate key={props.jwt} {...props} />
 }
@@ -40,12 +44,14 @@ function ElevationGate({
   email,
   onElevated,
   description = CONSOLE_DESCRIPTION,
+  compact = false,
 }: {
   jwt: string
   email: string | null
   onElevated: () => void
   /** Override the intro line (the global step-up dialog words it for a single change). */
   description?: string
+  compact?: boolean
 }) {
   const [method, setMethod] = useState<
     "loading" | "email" | "totp" | "recovery" | "error"
@@ -53,6 +59,7 @@ function ElevationGate({
   const [phase, setPhase] = useState<"request" | "verify">("request")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [developmentCode, setDevelopmentCode] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [code, setCode] = useState("")
   const alive = useRef(true)
@@ -79,11 +86,13 @@ function ElevationGate({
     setBusy(true)
     setError(null)
     setNotice(null)
+    setDevelopmentCode(null)
     setCode("")
     try {
       const { sent, devCode } = await requestAdminElevation(jwt)
       if (!alive.current) return
       setPhase("verify")
+      setDevelopmentCode(devCode ?? null)
       // Dev/e2e: no mail binding → the server hands back the code so the flow
       // is testable. Never happens in production.
       setNotice(
@@ -123,10 +132,20 @@ function ElevationGate({
   )
 
   return (
-    <div className="ph-no-capture mx-auto mt-10 max-w-md rounded-lg border bg-card p-6 text-center">
-      <div className="mx-auto mb-3 flex size-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
-        <ShieldCheck className="size-6" />
-      </div>
+    <div
+      data-ph-mask
+      className={cn(
+        "ph-no-capture max-w-md",
+        compact
+          ? "flex flex-col gap-3"
+          : "mx-auto mt-10 rounded-lg border bg-card p-6 text-center",
+      )}
+    >
+      {!compact && (
+        <div className="mx-auto mb-3 flex size-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
+          <ShieldCheck className="size-6" />
+        </div>
+      )}
       <h2 className="font-heading text-lg font-medium">
         Admin verification required
       </h2>
@@ -144,7 +163,7 @@ function ElevationGate({
 
       {method === "loading" || method === "error" ? null : phase ===
         "request" ? (
-        <div className="mt-6 space-y-3">
+        <div className={cn("flex flex-col gap-3", !compact && "mt-6")}>
           <Button
             type="button"
             onClick={sendCode}
@@ -156,9 +175,20 @@ function ElevationGate({
           {error && <p className="text-xs text-destructive">{error}</p>}
         </div>
       ) : (
-        <div className="mt-6 space-y-4">
-          {notice && <p className="text-xs text-muted-foreground">{notice}</p>}
-          <div className="flex justify-center">
+        <div className={cn("flex flex-col gap-4", !compact && "mt-6")}>
+          {notice && (
+            <p className="select-text text-xs text-muted-foreground">
+              {notice}
+            </p>
+          )}
+          {developmentCode && (
+            <CopySecurityCode
+              key={developmentCode}
+              value={developmentCode}
+              label="Copy code"
+            />
+          )}
+          <div className={cn("flex", !compact && "justify-center")}>
             {method === "recovery" ? (
               <div>
                 <Input
@@ -217,7 +247,12 @@ function ElevationGate({
                 : "Use a recovery code"}
             </Button>
           ) : (
-            <div className="flex items-center justify-center gap-2 text-xs">
+            <div
+              className={cn(
+                "flex items-center gap-2 text-xs",
+                !compact && "justify-center",
+              )}
+            >
               <button
                 type="button"
                 onClick={sendCode}

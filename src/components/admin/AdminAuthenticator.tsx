@@ -3,6 +3,7 @@ import QRCode from "qrcode"
 import { adminTotp } from "@/lib/frontier/admin"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { CopySecurityCode } from "./CopySecurityCode"
 import { AdminElevationGate } from "./AdminElevationGate"
 
 /** Keying by credential discards secrets and codes on account/session changes. */
@@ -56,12 +57,17 @@ function Authenticator({ jwt }: { jwt: string }) {
     }
   }
   return (
-    <section className="max-w-xl space-y-4 ph-no-capture" data-ph-mask>
+    <section
+      className="max-w-xl flex flex-col gap-4 ph-no-capture"
+      data-ph-mask
+    >
       <h2 className="text-lg font-medium">Admin authenticator</h2>
-      <p className="text-sm text-muted-foreground">
-        Use Apple Passwords or another authenticator for admin verification.
-        This does not change your login methods or admin permissions.
-      </p>
+      {!fresh && !setup && !codes && (
+        <p className="text-sm text-muted-foreground">
+          Use Apple Passwords or another authenticator for admin verification.
+          This does not change your login methods or admin permissions.
+        </p>
+      )}
       {error && (
         <p role="alert" className="text-destructive">
           {error}
@@ -120,35 +126,52 @@ function Authenticator({ jwt }: { jwt: string }) {
         </>
       ) : (
         <>
-          <p>
-            Email verification stays available until you finish every setup
-            step.
-          </p>
-          {!setup && !codes && (
-            <Button disabled={busy} onClick={() => setFresh(true)}>
+          {!fresh && !setup && !codes && (
+            <p>
+              Email verification stays available until you finish every setup
+              step.
+            </p>
+          )}
+          {!fresh && !setup && !codes && (
+            <Button
+              className="self-start"
+              disabled={busy}
+              onClick={() => setFresh(true)}
+            >
               Verify and set up authenticator
             </Button>
           )}
           {fresh && (
-            <AdminElevationGate
-              jwt={jwt}
-              email={null}
-              onElevated={() => {
-                setFresh(false)
-                void run(async () => {
-                  const s = await adminTotp<{
-                    generation: string
-                    secret: string
-                    uri: string
-                  }>(jwt, "setup", {})
-                  setGeneration(s.generation)
-                  setSetup({
-                    secret: s.secret,
-                    qr: await QRCode.toDataURL(s.uri),
+            <>
+              <AdminElevationGate
+                jwt={jwt}
+                email={null}
+                compact
+                description="Confirm it’s you before setting up your authenticator. Request a one-time email code to continue."
+                onElevated={() => {
+                  setFresh(false)
+                  void run(async () => {
+                    const s = await adminTotp<{
+                      generation: string
+                      secret: string
+                      uri: string
+                    }>(jwt, "setup", {})
+                    setGeneration(s.generation)
+                    setSetup({
+                      secret: s.secret,
+                      qr: await QRCode.toDataURL(s.uri),
+                    })
                   })
-                })
-              }}
-            />
+                }}
+              />
+              <Button
+                variant="ghost"
+                className="self-start"
+                onClick={() => setFresh(false)}
+              >
+                Back
+              </Button>
+            </>
           )}
           {setup && !codes && (
             <>
@@ -161,7 +184,10 @@ function Authenticator({ jwt }: { jwt: string }) {
                 alt="Authenticator setup QR code"
                 className="size-48"
               />
-              <code className="block break-all select-all">{setup.secret}</code>
+              <code className="block break-all select-text">
+                {setup.secret}
+              </code>
+              <CopySecurityCode value={setup.secret} label="Copy setup key" />
               <label className="block">
                 Authenticator code
                 <Input
@@ -197,9 +223,13 @@ function Authenticator({ jwt }: { jwt: string }) {
                 will not be shown again. Email still works until you select
                 Enable TOTP.
               </p>
-              <pre className="select-all whitespace-pre-wrap rounded border p-4">
+              <pre className="select-text whitespace-pre-wrap rounded border p-4">
                 {codes.join("\n")}
               </pre>
+              <CopySecurityCode
+                value={codes.join("\n")}
+                label="Copy recovery codes"
+              />
               <label className="flex gap-2">
                 <input
                   type="checkbox"

@@ -84,6 +84,26 @@ describe("specialty import durability", () => {
     expect(published).toBe(true)
   })
 
+  // AQU-2487 (browser pass, Nov 12): "tn_GEN_rev.tsv" was refused with the
+  // sentence about the first three columns, which sends the person to the
+  // wrong place. The refusal names the books in the name instead; a file whose
+  // name gives no book at all keeps the columns sentence.
+  it("refuses a Translation Notes file whose name holds two books by naming them", async () => {
+    const current = "Reference\tID\tNote\n1:1\tabc1\tA note.\n1:2\tabc2\tAnother."
+    const fetchMock = vi.fn()
+    vi.stubGlobal("fetch", fetchMock)
+    const ctx = { projectId: "p1", author: "alice", getToken: async () => "tok" }
+
+    await expect(importTranslationNotes(new File([current], "tn_GEN_rev.tsv"), ctx)).rejects.toThrow(
+      "The file name holds more than one book (GEN, REV), so the notes can't be filed under one. " +
+        "Rename the file so it names one book, such as tn_GEN.tsv.",
+    )
+    await expect(importTranslationNotes(new File([current], "my_new_notes.tsv"), ctx)).rejects.toThrow(
+      /check that the first three columns are book, chapter, and verse\. \(2 rows skipped/,
+    )
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   // AQU-527 seam: the notes sidebar only reads files `isTranslationNotesFile`
   // accepts. The importer sends `fileType: "tsv"` AND `kind: "translation-notes"`;
   // the server stores `kind ?? fileType` and the files read route answers

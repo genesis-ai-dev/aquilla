@@ -62,6 +62,11 @@ export interface TnParseResult {
   strings: TranslatableString[]
   /** Rows that were skipped because no canonical_ref could be assembled */
   skippedCount: number
+  /** AQU-2487 (browser pass, Nov 12): every book the file name holds, the one
+   *  read where unfoldingWord puts it first, when the name holds more than one
+   *  and rows that give only "chapter:verse" were skipped because of it. The
+   *  refusal names them instead of pointing at the columns. */
+  fileNameBooks?: string[]
 }
 
 /**
@@ -91,9 +96,13 @@ const TN_BOOKS: ReadonlySet<string> = new Set([...BOOK_CODES_BY_NUMBER.slice(0, 
  * `notes_job.tsv` under Job. A name that holds a second, different book, or
  * holds its book anywhere else, is not guessed at: null, and the rows are
  * refused as having no book.
+ *
+ * `books` is every book the name holds, the one in unfoldingWord's place
+ * first, so a name with more than one can be refused by naming them.
  */
-function bookFromTnFileName(fileName: string | undefined): string | null {
-  if (!fileName) return null
+function bookFromTnFileName(fileName: string | undefined): { book: string | null; books: string[] } {
+  const none = { book: null, books: [] }
+  if (!fileName) return none
   const base = (fileName.split(/[\\/]/).pop() ?? fileName).replace(/\.tsv$/i, "")
   const words = base.split(/[^A-Za-z0-9]+/).filter(Boolean)
   const asBook = (word: string | undefined): string | null => {
@@ -103,13 +112,13 @@ function bookFromTnFileName(fileName: string | undefined): string | null {
   const isNumber = (word: string | undefined): boolean => word != null && /^\d+$/.test(word)
   const tn = words.findIndex((w) => w.toLowerCase() === "tn")
   // Without "tn", only the numbered form at the very start.
-  if (tn === -1 && !isNumber(words[0])) return null
+  if (tn === -1 && !isNumber(words[0])) return none
   let at = tn + 1
   if (isNumber(words[at])) at++
   const book = asBook(words[at])
-  if (!book) return null
-  const other = words.some((w, i) => i !== at && asBook(w) != null && asBook(w) !== book)
-  return other ? null : book
+  if (!book) return none
+  const books = [...new Set([book, ...words.map(asBook).filter((b): b is string => b != null)])]
+  return { book: books.length === 1 ? book : null, books }
 }
 
 export function parseTnTsv(tsvText: string, fileName?: string): TnParseResult {
@@ -151,11 +160,13 @@ export function parseTnTsv(tsvText: string, fileName?: string): TnParseResult {
   const iOccurrence = col(["occurrence", "occurrences"])
 
   const threeCol = iBook !== -1 && iChapter !== -1 && iVerse !== -1
-  const fileBook = bookFromTnFileName(fileName)
+  const { book: fileBook, books: fileNameBooks } = bookFromTnFileName(fileName)
 
   const notes: TranslationNote[] = []
   const strings: TranslatableString[] = []
   let skippedCount = 0
+  // Rows that give only "chapter:verse" and found no one book in the name.
+  let wantedFileBook = 0
 
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i]
@@ -182,6 +193,7 @@ export function parseTnTsv(tsvText: string, fileName?: string): TnParseResult {
         // used to be skipped, so the whole file was refused here while the
         // same file imported through Door43.
         canonicalRef = raw.includes(" ") ? raw : fileBook ? `${fileBook} ${raw}` : null
+        if (!canonicalRef) wantedFileBook++
       }
     }
 
@@ -264,5 +276,10 @@ export function parseTnTsv(tsvText: string, fileName?: string): TnParseResult {
     throw new Error("TN TSV: no note rows found after parsing")
   }
 
-  return { notes, strings, skippedCount }
+  return {
+    notes,
+    strings,
+    skippedCount,
+    ...(wantedFileBook > 0 && fileNameBooks.length > 1 ? { fileNameBooks } : {}),
+  }
 }

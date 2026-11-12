@@ -1091,6 +1091,9 @@ export const importExport = defineNamespace({
         "TN file parsed but no valid note rows were found — check that the first three columns are " +
         "book, chapter, and verse. ({count} rows skipped due to missing canonical reference)",
     }),
+    "importExport.errors.tnFileNameHoldsBooks":
+      "The file name holds more than one book ({books}), so the notes can't be filed under one. " +
+      "Rename the file so it names one book, such as {example}.",
     "importExport.errors.biblicaExpectsIdml": "Biblica study notes import expects an InDesign .idml package.",
     "importExport.errors.biblicaNoStudyNotes":
       "{fileName} parsed successfully but contained no study notes. Biblica notes live in `intro:*` " +
@@ -2879,6 +2882,14 @@ export const importExport = defineNamespace({
       "importExport.errors.tnNoValidRowsWithSkipped": {
         description: "Thrown when a Translation Notes TSV parsed to zero valid rows, and some rows were skipped for a known reason (missing reference).",
         placeholders: { count: "Number of rows skipped for missing a canonical reference." },
+      },
+      "importExport.errors.tnFileNameHoldsBooks": {
+        description:
+          "Thrown when a Translation Notes file gives its rows only chapter and verse (as unfoldingWord's files do) and its file name holds more than one book code, so the book can't be read from the name (for example tn_GEN_rev.tsv). Shown instead of the 'no valid note rows' message.",
+        placeholders: {
+          books: "The book codes found in the file name, comma-separated (e.g. 'GEN, REV') — not translated.",
+          example: "A file name naming one book the person could rename to (e.g. 'tn_GEN.tsv') — not translated.",
+        },
       },
       "importExport.errors.biblicaNoStudyNotes": {
         description: "Thrown when a Biblica IDML package parses successfully but contains no study-note paragraphs.",

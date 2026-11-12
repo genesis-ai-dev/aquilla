@@ -1416,13 +1416,20 @@ export async function importTranslationNotes(
   assertSourceUploadByteLength(file.size)
   const rawBytes = await file.arrayBuffer()
   const text = decodeImportText(rawBytes, file.name)
-  const { strings, skippedCount } = parseTnTsv(text, file.name)
+  const { strings, skippedCount, fileNameBooks } = parseTnTsv(text, file.name)
 
   if (strings.length === 0) {
+    // AQU-2487 (browser pass, Nov 12): when the name's books are why the rows
+    // have none, say so; the columns sentence sent people to the wrong place.
     throw new Error(
-      skippedCount > 0
-        ? t("importExport.errors.tnNoValidRowsWithSkipped", { count: skippedCount })
-        : t("importExport.errors.tnNoValidRows"),
+      fileNameBooks
+        ? t("importExport.errors.tnFileNameHoldsBooks", {
+            books: fileNameBooks.join(", "),
+            example: `tn_${fileNameBooks[0]}.tsv`,
+          })
+        : skippedCount > 0
+          ? t("importExport.errors.tnNoValidRowsWithSkipped", { count: skippedCount })
+          : t("importExport.errors.tnNoValidRows"),
     )
   }
 

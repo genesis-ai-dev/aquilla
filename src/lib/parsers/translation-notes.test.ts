@@ -250,6 +250,21 @@ front:intro\tabc0\t\t\t\t0\t# Introduction to Genesis
       expect(parseTnTsv(CURRENT, name), name).toMatchObject({ notes: [], skippedCount: 3 })
     }
   })
+
+  // AQU-2487 (browser pass, Nov 12): the refusal names the books, so the
+  // parser hands them on, the one in unfoldingWord's place first.
+  it("names the books when the name holds more than one", () => {
+    expect(parseTnTsv(CURRENT, "tn_GEN_rev.tsv").fileNameBooks).toEqual(["GEN", "REV"])
+    expect(parseTnTsv(CURRENT, "rev_tn_GEN.tsv").fileNameBooks).toEqual(["GEN", "REV"])
+    expect(parseTnTsv(CURRENT, "57-TIT_act.tsv").fileNameBooks).toEqual(["TIT", "ACT"])
+    for (const name of ["titus-notes-rev.tsv", "notes_job.tsv", "GEN_tn.tsv", "tn_GEN.tsv", "tn_GEN_GEN.tsv"]) {
+      expect(parseTnTsv(CURRENT, name).fileNameBooks, name).toBeUndefined()
+    }
+    // Rows that name their own book never needed the file name.
+    const own = parseTnTsv("Reference\tID\tNote\nMAT 5:3\tx\tBlessed.", "tn_GEN_rev.tsv")
+    expect(own.notes[0].canonicalRef).toBe("MAT 5:3")
+    expect(own.fileNameBooks).toBeUndefined()
+  })
 })
 
 // AQU-2487 (review, Nov 9): the tile left the file's "\n" marks in the note as

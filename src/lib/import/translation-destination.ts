@@ -13,6 +13,7 @@
 
 import { decodeImportText } from "@/lib/import/ai-recipe"
 import { parseCsvRows, parseXlsxToSheets } from "@/lib/parsers/spreadsheet"
+import { FILE_TYPE_BY_EXTENSION, type FileType } from "@/lib/parsers/types"
 import { parseVerseReference } from "@/lib/scripture-reference"
 import { fileBookCode, type GroupableFile } from "@/lib/sidebar/group-by-corpus"
 
@@ -25,8 +26,43 @@ export interface TranslationDestination extends GroupableFile {
 
 const USFM_EXTENSIONS = new Set(["usfm", "sfm", "usf"])
 
-/** The formats the translation review (FileTargetImportPanel) reads. */
-export const FILE_TARGET_EXTENSIONS = ["usfm", "sfm", "usf", "csv", "tsv", "xlsx", "vtt", "srt", "sbv"] as const
+/** The formats the translation review (FileTargetImportPanel) reads with a
+ *  reader of its own — USFM by verse, spreadsheets through column mapping,
+ *  subtitles by timing — and the extensions it picks them by. */
+const OWN_READER_TYPES: ReadonlySet<FileType> = new Set<FileType>(["usfm", "csv", "tsv", "xlsx", "vtt", "srt", "sbv"])
+const OWN_READER_EXTENSIONS = ["usfm", "sfm", "usf", "csv", "tsv", "xlsx", "vtt", "srt", "sbv"]
+
+/**
+ * File types the source import reads that the translation review refuses
+ * (AQU-2544). Every other file is read exactly as the source import reads it,
+ * so its lines line up with the lines that import made. These can't be: the
+ * source import asks a question before it makes their lines (which JSON keys
+ * hold text; which EPUB parts to bring in), and the answer given then is not
+ * known here. Media holds no text.
+ */
+const NOT_READ_AS_TRANSLATION: ReadonlySet<FileType> = new Set<FileType>(["json", "epub", "audio", "video"])
+
+/** True when the review reads this type with a reader of its own. */
+export function hasOwnTranslationReader(type: FileType): boolean {
+  return OWN_READER_TYPES.has(type)
+}
+
+/** True for a file type the review reads the way the source import does
+ *  (`readTranslationFile`): every type the source import reads, except those
+ *  with a reader of their own here and those refused above. A .usx is typed
+ *  USFM, so it is neither: USFM's own reader reads USFM text, not USX. */
+export function readsAsTranslationLines(type: FileType): boolean {
+  return !OWN_READER_TYPES.has(type) && !NOT_READ_AS_TRANSLATION.has(type)
+}
+
+/** Every format the translation review reads: its own readers', then the
+ *  rest of the source import's. */
+export const FILE_TARGET_EXTENSIONS: readonly string[] = [
+  ...OWN_READER_EXTENSIONS,
+  ...Object.entries(FILE_TYPE_BY_EXTENSION)
+    .filter(([, type]) => readsAsTranslationLines(type))
+    .map(([ext]) => ext),
+]
 
 /** The same, as an `<input accept>` list. */
 export const FILE_TARGET_ACCEPT = FILE_TARGET_EXTENSIONS.map((ext) => `.${ext}`).join(",")
@@ -34,7 +70,7 @@ export const FILE_TARGET_ACCEPT = FILE_TARGET_EXTENSIONS.map((ext) => `.${ext}`)
 /** True when the translation review can read this file. */
 export function isFileTargetFileName(fileName: string): boolean {
   const dot = fileName.lastIndexOf(".")
-  return dot >= 0 && (FILE_TARGET_EXTENSIONS as readonly string[]).includes(fileName.slice(dot + 1).toLowerCase())
+  return dot >= 0 && FILE_TARGET_EXTENSIONS.includes(fileName.slice(dot + 1).toLowerCase())
 }
 
 export function isUsfmFileName(fileName: string): boolean {

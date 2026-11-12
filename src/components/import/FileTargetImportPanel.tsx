@@ -1,7 +1,8 @@
 /**
  * File-scoped target import: populate the OPEN file's target column from a
- * USFM file, a spreadsheet (CSV/TSV/XLSX) or a subtitle file (SRT/SBV).
- * Target-only — source cells are never created or modified.
+ * USFM file, a spreadsheet (CSV/TSV/XLSX), a subtitle file (SRT/SBV), or any
+ * other file the source import reads (AQU-2544). Target-only — source cells
+ * are never created or modified.
  *
  * Opened from the Import dialog's "A translation" path (AQU-1365), which picks
  * the destination file, opens it, and hands the dropped file over as
@@ -14,6 +15,8 @@
  *      order (cue N → cell N) because cue cells carry no canonical refs
  *      Spreadsheet → [sheet selector] → column mapping (target required,
  *      ref optional; no ref column → rows match cells by order)
+ *      Anything else accepted → read by the source import's own parsers
+ *      (readTranslationFile), straight to review, its lines in order
  *   3. Review: each incoming row beside the matched cell's source text;
  *      conflicts (cells that already have a translation) need an explicit tick
  *   4. Apply via the shared eBible-target pipeline (target.cell.commit, AD-2)
@@ -61,7 +64,9 @@ import {
   type ColumnMapping,
 } from "@/lib/parsers/spreadsheet"
 import { targetSheetRows } from "@/lib/import/target-sheet-rows"
-import { FILE_TARGET_ACCEPT } from "@/lib/import/translation-destination"
+import { FILE_TARGET_ACCEPT, isFileTargetFileName } from "@/lib/import/translation-destination"
+import { readTranslationFile } from "@/lib/import/translation-file"
+import type { SourceArtifactFormat } from "../../../shared/import-contract"
 import { ColumnMappingPanel } from "./ColumnMappingPanel"
 import { FileTargetLanePicker } from "./FileTargetLanePicker"
 import type { LaneComboboxOption } from "@/components/LaneCombobox"
@@ -179,10 +184,10 @@ const SHEET_EXTENSIONS = new Set(["csv", "tsv", "xlsx"])
 const VTT_EXTENSIONS = new Set(["vtt"])
 
 /** Format tag for the uploaded file's source artifact (SOURCE_ARTIFACT_FORMATS
- *  in shared/import-contract). Spreadsheets fall through to "csv" because
- *  that branch also covers the ".txt-as-delimited" cases parseCsvToSheet
- *  accepts. */
-function sourceArtifactFormat(fileName: string) {
+ *  in shared/import-contract), for a file one of this panel's own readers
+ *  read; anything else carries the tag the source import gave it. A .csv is
+ *  what falls through to "csv". */
+function sourceArtifactFormat(fileName: string): SourceArtifactFormat {
   const ext = fileName.split(".").pop()?.toLowerCase() ?? ""
   if (USFM_EXTENSIONS.has(ext)) return "usfm" as const
   if (VTT_EXTENSIONS.has(ext)) return "vtt" as const
@@ -607,6 +612,9 @@ export function FileTargetImportPanel({
   const [sheets, setSheets] = useState<SpreadsheetSheet[]>([])
   const [selectedSheet, setSelectedSheet] = useState<SpreadsheetSheet | null>(null)
   const [sourceFile, setSourceFile] = useState<File | null>(null)
+  // The format tag the source import gave a file read through it, for the
+  // artifact kept beside the translation; null for the panel's own readers.
+  const [readAsFormat, setReadAsFormat] = useState<SourceArtifactFormat | null>(null)
   const [matchResult, setMatchResult] = useState<FileTargetMatchResult | null>(null)
   const [matchedByOrder, setMatchedByOrder] = useState(false)
   // A subtitle file's parsed cues, kept so the review's shift tickbox can
@@ -838,6 +846,7 @@ export function FileTargetImportPanel({
     setError(null)
     setFrameRows(null)
     setSourceFile(file)
+    setReadAsFormat(null)
     const ext = file.name.split(".").pop()?.toLowerCase() ?? ""
     try {
       assertSourceUploadByteLength(file.size)
@@ -899,6 +908,21 @@ export function FileTargetImportPanel({
         setSheets([sheet])
         setSelectedSheet(sheet)
         setStep("mapping")
+      } else if (isFileTargetFileName(file.name)) {
+        // AQU-2544: any other file is read as the source import reads it, so
+        // its lines are the lines a source import of it makes, and they fill
+        // the open file's lines in order (by source text, when the file
+        // carries its own).
+        if (!(await showMatching())) return
+        const run = matchRun.current
+        // A read that ends after the person moved on is dropped, failure too.
+        const read = await readTranslationFile(file, { projectId }).catch((err: unknown) => {
+          if (run === matchRun.current) throw err
+          return null
+        })
+        if (!read || run !== matchRun.current) return
+        setReadAsFormat(read.format)
+        showReview(matchTargetRowsByOrder(read.rows, cells), true)
       } else {
         setError(t("importExport.fileTarget.unsupportedFileType"))
       }
@@ -908,7 +932,7 @@ export function FileTargetImportPanel({
       setStep("file")
       onError?.(message, "parse")
     }
-  }, [cells, showReview, showMatching, onError, excludeFrontMatter, t])
+  }, [cells, showReview, showMatching, onError, excludeFrontMatter, projectId, t])
 
   // AQU-1365: the host's file is read once. The ref, not the effect's deps,
   // makes it once: StrictMode re-runs mount effects, and a later `cells`
@@ -1008,7 +1032,7 @@ export function FileTargetImportPanel({
           sourceArtifact: {
             name: sourceFile.name,
             bytes: await sourceFile.arrayBuffer(),
-            format: sourceArtifactFormat(sourceFile.name),
+            format: readAsFormat ?? sourceArtifactFormat(sourceFile.name),
           },
         },
       )

@@ -368,7 +368,7 @@ describe("AQU-1365: Is this a translation?", () => {
     const check = await screen.findByTestId("translation-check")
     expect(check).toHaveTextContent("JON-tatar.usx is for Jonah, and Jonah is already in this project.")
     expect(check).toHaveTextContent(
-      "A translation can only be imported from USFM, a spreadsheet or subtitles, so this file can only come in as source text.",
+      "A translation can't be imported from this type of file, so it can only come in as source text.",
     )
     expect(check).not.toHaveTextContent("What is it?")
     expect(cards().map((card) => card.dataset.testid)).toEqual(["translation-check-separate", "translation-check-update"])

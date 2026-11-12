@@ -1464,52 +1464,56 @@ export interface ProjectPermissions {
   accessLevel?: number
 }
 
+/** The file type an import reads a file as, by its extension (lowercase, no
+ *  dot). Exported so the translation import's accept list follows it
+ *  (AQU-2544) instead of keeping a second list. */
+export const FILE_TYPE_BY_EXTENSION: Readonly<Record<string, FileType>> = {
+  md: "md",
+  markdown: "md",
+  docx: "docx",
+  pptx: "pptx",
+  idml: "idml",
+  xlsx: "xlsx",
+  txt: "txt",
+  html: "html",
+  htm: "html",
+  epub: "epub",
+  json: "json",
+  arb: "json",
+  po: "po",
+  pot: "po",
+  properties: "properties",
+  vtt: "vtt",
+  srt: "srt",
+  sbv: "sbv",
+  usfm: "usfm",
+  sfm: "usfm",
+  usx: "usfm",
+  xlf: "xliff",
+  xliff: "xliff",
+  tmx: "tmx",
+  csv: "csv",
+  tsv: "tsv",
+  // Timeline-segment-model: audio/video files import as a single media
+  // segment on a time-ordered file (no text parser — opaque media blob).
+  mp3: "audio",
+  wav: "audio",
+  m4a: "audio",
+  aac: "audio",
+  flac: "audio",
+  ogg: "audio",
+  oga: "audio",
+  opus: "audio",
+  mp4: "video",
+  m4v: "video",
+  mov: "video",
+  webm: "video",
+  mkv: "video",
+}
+
 export function detectFileType(fileName: string): FileType | null {
   const ext = fileName.split(".").pop()?.toLowerCase()
-  const map: Record<string, FileType> = {
-    md: "md",
-    markdown: "md",
-    docx: "docx",
-    pptx: "pptx",
-    idml: "idml",
-    xlsx: "xlsx",
-    txt: "txt",
-    html: "html",
-    htm: "html",
-    epub: "epub",
-    json: "json",
-    arb: "json",
-    po: "po",
-    pot: "po",
-    properties: "properties",
-    vtt: "vtt",
-    srt: "srt",
-    sbv: "sbv",
-    usfm: "usfm",
-    sfm: "usfm",
-    usx: "usfm",
-    xlf: "xliff",
-    xliff: "xliff",
-    tmx: "tmx",
-    csv: "csv",
-    tsv: "tsv",
-    // Timeline-segment-model: audio/video files import as a single media
-    // segment on a time-ordered file (no text parser — opaque media blob).
-    mp3: "audio",
-    wav: "audio",
-    m4a: "audio",
-    aac: "audio",
-    flac: "audio",
-    ogg: "audio",
-    oga: "audio",
-    opus: "audio",
-    mp4: "video",
-    m4v: "video",
-    mov: "video",
-    webm: "video",
-    mkv: "video",
-  }
-  return map[ext || ""] || null
+  return FILE_TYPE_BY_EXTENSION[ext || ""] || null
 }
 
 /** True for file types that are opaque media blobs (no text parser). */

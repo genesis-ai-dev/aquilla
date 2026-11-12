@@ -1,6 +1,8 @@
 // File-scoped target import: populate the open file's target column from a
-// USFM file, a spreadsheet (CSV/TSV/XLSX) or a subtitle file (VTT — AQU-1142;
-// SRT/SBV — AQU-1144). Two match modes:
+// USFM file, a spreadsheet (CSV/TSV/XLSX), a subtitle file (VTT — AQU-1142;
+// SRT/SBV — AQU-1144), or any other file the source import reads, read by the
+// source import's own parsers (AQU-2544, `parsedLinesToTargetRows`). Two
+// match modes:
 //
 //   - by ref:   incoming rows carry canonical refs ("GEN 1:1") matched against
 //               the file's cells (CellData.group) — same mechanism as the
@@ -1625,6 +1627,27 @@ export function usfmToTargetRows(
     // projection's own — that keeps a plain verse's edge whitespace handled the
     // way it was before AQU-1363.
     .map(({ ref, text }) => ({ ref, text: usfmContentOnly(text).text.trim() }))
+}
+
+/** A parsed line as the source import's parsers give it (`TranslatableString`). */
+export interface ParsedLine {
+  original: string
+  translated: string
+}
+
+/** Target rows from the lines a source-import parser read out of a file
+ *  (AQU-2544), one row per line, in file order.
+ *
+ *  A file is bilingual when any of its lines carries a translation of its own
+ *  (a PO msgstr, an XLIFF or TMX target). Its rows are then those
+ *  translations, each with the line's own text as its `source`, so they pair
+ *  with the open file's lines by source text rather than by position; a line
+ *  left untranslated keeps its place in that pairing and fills nothing.
+ *  Otherwise the file IS the translation, and each line's text is a row. */
+export function parsedLinesToTargetRows(lines: readonly ParsedLine[]): TargetRow[] {
+  const bilingual = lines.some((line) => line.translated.trim())
+  if (bilingual) return lines.map((line) => ({ text: line.translated.trim(), source: line.original }))
+  return lines.map((line) => ({ text: line.original.trim() })).filter((row) => row.text)
 }
 
 /** Subtitle formats whose cues this module can turn into target rows. */

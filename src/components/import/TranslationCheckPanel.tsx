@@ -69,8 +69,8 @@ export function TranslationCheckPanel({ layout, fileCount, canImportTranslation,
   // another lane's language must not be handed over to fill this one
   // (AQU-1365 review).
   const otherLane = language !== null && !language.active
-  // The review reads USFM, spreadsheets and subtitles; another format can
-  // only be imported as source text.
+  // A format the review can't read (a .usx, a JSON file) can only be
+  // imported as source text.
   const readable = signal !== null && isFileTargetFileName(signal.fileName)
   const canHandOff = canImportTranslation && readable && !otherLane
   const languageLine = !language

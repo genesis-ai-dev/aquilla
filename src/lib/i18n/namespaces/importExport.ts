@@ -1351,11 +1351,12 @@ export const importExport = defineNamespace({
       "by their source. With none of these, rows match lines in order.",
     "importExport.columnMapping.typeColumnLabel": "Content type",
     "importExport.errors.failedToParseFile": "Failed to parse file",
-    "importExport.fileTarget.acceptedFormats": "USFM, CSV, TSV, XLSX, VTT, SRT, or SBV",
+    "importExport.fileTarget.acceptedFormats": "TXT, DOCX, MD, HTML, PPTX, IDML, USFM, PO, XLIFF, TMX, CSV, TSV, " +
+      "XLSX, VTT, SRT, or SBV",
     "importExport.fileTarget.backToColumnMapping": "Back to column mapping",
     "importExport.fileTarget.backToSheetList": "Back to sheet list",
-    "importExport.fileTarget.description": "Fills this file's target column from a USFM file, spreadsheet, or " +
-      "subtitle file. Source text is never changed. You'll review every match " +
+    "importExport.fileTarget.description": "Fills this file's target column from a translation: a text or Word " +
+      "file, USFM, a spreadsheet, subtitles, and more. Source text is never changed. You'll review every match " +
       "before anything is saved.",
     "importExport.fileTarget.dropZoneHint": "Drop a file here, or",
     "importExport.fileTarget.laneLabel": "Fill which language lane",
@@ -1366,6 +1367,8 @@ export const importExport = defineNamespace({
     "importExport.fileTarget.noCuesInSubtitle": "No subtitle cues found in this file.",
     "importExport.fileTarget.noCuesInVtt": "No cues found in this VTT file.",
     "importExport.fileTarget.noVersesInUsfm": "No verses found in this USFM file.",
+    "importExport.fileTarget.renameToReadAs": "This file holds {format}. Rename it to end in .{extension}, then " +
+      "import it again.",
     "importExport.fileTarget.title": "Import target translations into \"{fileName}\"",
     // AQU-1673 — "Import as proposals": the same mapping/review flow, but the
     // values land as staged proposals behind the approval gate.
@@ -1387,8 +1390,8 @@ export const importExport = defineNamespace({
       one: "{count} row skipped — already matches the current translation.",
       other: "{count} rows skipped — already match the current translation.",
     }),
-    "importExport.fileTarget.unsupportedFileType": "Unsupported file type. Use USFM (.usfm/.sfm), a spreadsheet " +
-      "(.csv/.tsv/.xlsx), or a subtitle file (.vtt/.srt/.sbv).",
+    "importExport.fileTarget.unsupportedFileType": "Unsupported file type. Use a text or Word file, USFM, a " +
+      "spreadsheet, subtitles, or another type listed above.",
     "importExport.paired.applyingTargets": "Applying target translations to cells.",
     "importExport.paired.description": "Upload a CSV or XLSX file where each row has both source and target " +
       "text. Rows are matched to existing source cells by canonical reference.",
@@ -1660,7 +1663,7 @@ export const importExport = defineNamespace({
     // translation review (format, another lane), and a Contributor's empty project.
     "importExport.translationCheck.sameBookPlain": "{fileName} is for {book}, and {book} is already in this project.",
     "importExport.translationCheck.severalSameBookPlain": "{fileName} is for {book}, and this project already has more than one {book}.",
-    "importExport.translationCheck.formatSourceOnly": "A translation can only be imported from USFM, a spreadsheet or subtitles, so this file can only come in as source text.",
+    "importExport.translationCheck.formatSourceOnly": "A translation can't be imported from this type of file, so it can only come in as source text.",
     "importExport.translationCheck.otherLane":
       "It says it's in {language}, which this project translates into in another language lane. To " +
       "import it as that translation, switch to that language lane in the editor, then start again " +
@@ -3759,8 +3762,8 @@ export const importExport = defineNamespace({
         description:
           "Caption in small grey text under the drag-and-drop area of the panel " +
           "that fills in the open file's translations, listing the file kinds it " +
-          "accepts. Only the conjunction joining the format names is " +
-          "translated; the format names themselves stay as they are.",
+          "accepts, named by their usual file endings. Only the conjunction joining " +
+          "the format names is translated; the format names themselves stay as they are.",
       },
       "importExport.fileTarget.backToColumnMapping": {
         description:
@@ -3836,6 +3839,19 @@ export const importExport = defineNamespace({
           "read successfully but contained no verses, so there is nothing to fill " +
           "in. Single short statement of fact.",
       },
+      "importExport.fileTarget.renameToReadAs": {
+        description:
+          "Error shown in red under the drop area when a file named like plain text " +
+          "(for example a .txt) turns out to hold scripture markup or subtitles. " +
+          "Those are read by their own reader, picked by the file's ending, so the " +
+          "message tells the person to rename the file and import it again. A " +
+          "statement of what the file holds, then one instruction.",
+        placeholders: {
+          format: "Name of the format the file holds, such as 'USFM' or 'SRT' — do not translate.",
+          extension: "The file ending to use, without its dot, such as 'usfm' or 'srt' — do not translate; " +
+            "keep the dot written before it.",
+        },
+      },
       "importExport.fileTarget.title": {
         description:
           "Heading of the panel that fills in the translations of the file the user " +
@@ -3851,8 +3867,9 @@ export const importExport = defineNamespace({
         description:
           "Error shown in red under the drop area when the chosen file is of a kind " +
           "this panel cannot read. A short statement followed by an imperative " +
-          "sentence naming the acceptable alternatives. The bracketed file " +
-          "extensions are literal and stay untranslated.",
+          "sentence naming the most common kinds it can read, then pointing to the " +
+          "full list of file types printed above, inside the drop area. 'Word' is " +
+          "the word processor and 'USFM' a scripture format name; keep both as they are.",
       },
       "importExport.paired.applyingTargets": {
         description:
@@ -5102,7 +5119,7 @@ export const importExport = defineNamespace({
       },
       "importExport.translationCheck.formatSourceOnly": {
         description:
-          "Extra sentence on the 'Is this a translation?' screens when the uploaded file's format (for example USX) can't be imported as a translation, so only the source-text answers are offered. One sentence; USFM is a file format name, do not translate it.",
+          "Extra sentence on the 'Is this a translation?' screens when the uploaded file's format (for example USX) can't be imported as a translation, so only the source-text answers are offered. One sentence.",
       },
       "importExport.translationCheck.otherLane": {
         description:

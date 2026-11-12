@@ -3260,3 +3260,6 @@ CREATE TABLE email_change_requests (
  token_hash TEXT NOT NULL,
  expires_at TIMESTAMPTZ NOT NULL
 );
+
+ALTER TABLE users ADD COLUMN email_changed_at TIMESTAMPTZ;
+ALTER TABLE password_reset_tokens ADD COLUMN email_at_issue TEXT;

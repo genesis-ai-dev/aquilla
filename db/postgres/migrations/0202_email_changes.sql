@@ -7,3 +7,8 @@ CREATE TABLE email_change_requests (
  token_hash TEXT NOT NULL,
  expires_at TIMESTAMPTZ NOT NULL
 );
+
+-- Bind delayed reset deliveries to their original mailbox. Legacy unbound tokens
+-- are accepted only on accounts whose email has never been changed.
+ALTER TABLE users ADD COLUMN email_changed_at TIMESTAMPTZ;
+ALTER TABLE password_reset_tokens ADD COLUMN email_at_issue TEXT;

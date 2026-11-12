@@ -163,10 +163,3 @@ export async function listAllLegacyUsers(
     afterId = page[page.length - 1].id
   }
 }
-
-/** Reserve unmigrated legacy mailbox identities during verified email changes. */
-export async function hasLegacyEmailCollision(config: FrontierD1Config, email: string): Promise<boolean> {
-  const rows = await queryFrontierD1<{id: unknown}>(config,
-    "SELECT id FROM users WHERE LOWER(email)=LOWER(?) LIMIT 1", [email.trim()])
-  return rows.length > 0
-}

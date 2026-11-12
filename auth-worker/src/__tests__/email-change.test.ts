@@ -206,4 +206,32 @@ describe("verified email changes", () => {
     expect(send).not.toHaveBeenCalled()
   })
 
+  it("rejects an email that is another account's username", async () => {
+    await seedUser(2,"new@example.com")
+    expect((await request()).status).toBe(403)
+    expect(send).not.toHaveBeenCalled()
+  })
+
+  it.each(["alice@example.com",null])("rejects delayed old-mailbox reset proof: %s", async (emailAtIssue) => {
+    await request()
+    expect((await post("confirm",{token:code()})).status).toBe(200)
+    const token="delayed-reset-token"
+    await env.AQUILLA_PG.prepare("INSERT INTO password_reset_tokens(user_id,token_hash,expires_at,email_at_issue) VALUES(1,?,now()+interval '1 day',?)").bind(await sha256Hex(token),emailAtIssue).run()
+    const response=await app.request("/api/v2/auth/password-reset/reset",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:"alice",token,new_password:"a replacement password"})},testEnv)
+    expect(response.status).toBe(400)
+    expect(await env.AQUILLA_PG.prepare("SELECT session_version FROM users WHERE id=1").first()).toEqual({session_version:1})
+  })
+
+  it("accepts password recovery issued to the newly verified email", async () => {
+    await request()
+    expect((await post("confirm",{token:code()})).status).toBe(200)
+    send.mockClear()
+    expect((await app.request("/api/v2/auth/password-reset/request",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email:"new@example.com"})},testEnv)).status).toBe(200)
+    const mail=send.mock.calls.at(-1)![0].text
+    const token=new URL(mail.replace("Reset your password: ","")).searchParams.get("token")
+    expect(token).toBeTruthy()
+    const response=await app.request("/api/v2/auth/password-reset/reset",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:"alice",token,new_password:"a replacement password"})},testEnv)
+    expect(response.status).toBe(200)
+  })
+
 })

@@ -1,5 +1,5 @@
 import { legacyD1Config } from "./auth"
-import { hasLegacyEmailCollision } from "../services/frontier-d1"
+import { hasLegacyIdentityCollision } from "../services/frontier-d1"
 import { Hono, type Context } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
@@ -47,7 +47,7 @@ async function guard(
   email: string,
 ) {
   const legacy = legacyD1Config(c.env)
-  if (legacy && await hasLegacyEmailCollision(legacy,email)) return "email_unavailable"
+  if (legacy && await hasLegacyIdentityCollision(legacy,email,email)) return "email_unavailable"
   const bootstrap = parseAdminEmails(c.env)
   if (bootstrap.has(old.email.toLowerCase()) || bootstrap.has(email))
     return "administrator_coordination_required"
@@ -55,9 +55,9 @@ async function guard(
     return "admin_verification_required"
   if (
     await c.env.AQUILLA_PG.prepare(
-      "SELECT 1 FROM users WHERE LOWER(email)=? AND id<>?",
+      "SELECT 1 FROM users WHERE (LOWER(email)=? OR LOWER(username)=?) AND id<>?",
     )
-      .bind(email, old.id)
+      .bind(email, email, old.id)
       .first()
   )
     return "email_unavailable"
@@ -185,12 +185,13 @@ routes.post(
     try {
       const changed = await c.env.AQUILLA_PG.prepare(
         `WITH changed AS (
-      UPDATE users u SET email=r.new_email,email_verified_at=now(),updated_at=now(),
+      UPDATE users u SET email=r.new_email,email_verified_at=now(),email_changed_at=now(),updated_at=now(),
         password_changed_at=now(),session_version=u.session_version+1
       FROM email_change_requests r WHERE u.id=? AND r.user_id=u.id AND r.token_hash=? AND r.expires_at>now()
         AND u.email=r.old_email AND u.session_version=r.session_version
         AND EXISTS(SELECT 1 FROM platform_admins WHERE email=LOWER(u.email))=?
         AND NOT EXISTS(SELECT 1 FROM platform_admins WHERE email=r.new_email)
+        AND NOT EXISTS(SELECT 1 FROM users other WHERE other.id<>u.id AND LOWER(other.username)=r.new_email)
       RETURNING u.id,u.email
     ), grants AS (UPDATE platform_admins SET email=(SELECT email FROM changed)
       WHERE email=LOWER(?) AND EXISTS(SELECT 1 FROM changed) RETURNING email),

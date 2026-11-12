@@ -530,6 +530,35 @@ describe("external read surface", () => {
       const body = (await res!.json()) as { data: Array<{ id: string; serverSeq: number }>; nextCursor: string | null }
       expect(body.data.map((e) => e.id)).toEqual(["evt-2", "evt-1"])
     })
+
+    // AQU-730: a PAT reads as its owner, so the wall follows it here too.
+    it("hides other lanes' events from a walled member's credential", async () => {
+      await testDb.pg.query(
+        `INSERT INTO events (id, schema_version, project_id, file_id, cell_id, kind, author, payload, client_ts, server_ts, parent_id, server_seq) VALUES
+          ('evt-es', 1, 'proj-a', 'file-x', 'cell-1', 'target.cell.commit', 'alice', '{"value":"mio","laneId":"eslane01"}', 300, 300, NULL, 3),
+          ('evt-fr', 1, 'proj-a', 'file-x', 'cell-1', 'target.cell.commit', 'alice', '{"value":"secret","laneId":"frlane01"}', 400, 400, NULL, 4)`,
+      )
+      await testDb.pg.query(
+        `INSERT INTO lanes (id, project_id, role, name, legacy_tag) VALUES
+          ('frlane01', 'proj-a', 'target', 'French', 'fr'),
+          ('eslane01', 'proj-a', 'target', 'Spanish', 'es')`,
+      )
+      await testDb.pg.query(
+        `INSERT INTO project_member_lane_roles (project_id, user_id, lane, role_level)
+         VALUES ('proj-a', 2, 'eslane01', 400)`,
+      )
+      const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
+      const ids = async (wall: string | undefined) => {
+        const res = await handleExternalReadRequest(
+          req("/api/v1/external/projects/proj-a/cells/cell-1/history", token),
+          { ...env(testDb), LANE_READ_WALL: wall },
+        )
+        return ((await res!.json()) as { data: Array<{ id: string }> }).data.map((e) => e.id)
+      }
+      // evt-2 predates lane ids and fails closed, as on the in-app route.
+      expect(await ids("1")).toEqual(["evt-es", "evt-1"])
+      expect(await ids(undefined)).toEqual(["evt-fr", "evt-es", "evt-2", "evt-1"])
+    })
   })
 
   // [Pen test] API security & data exposure (2026-08-27): /me, /projects,

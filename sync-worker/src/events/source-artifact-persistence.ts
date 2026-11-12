@@ -100,7 +100,7 @@ export async function buildSourceArtifactPersistenceStatements(
       input.fidelity,
       JSON.stringify(input.manifest),
       input.recipe ? JSON.stringify(input.recipe) : null,
-      // AQU-1240 slice 8: source role -> source lane; else target lane by tag.
+      // AQU-2554: a target binding -> its target lane by tag; source and support -> the source lane.
       ...laneIdResolveBindingBinds(input.projectId, input.bindingRole, input.targetLang),
     ),
   )

@@ -207,7 +207,7 @@ async function handleSourceBindingRequest(
          profile_version = EXCLUDED.profile_version,
          fidelity = EXCLUDED.fidelity,
          updated_at = now()`,
-      // AQU-1240 slice 8: 'support'/'target' role -> target lane by tag.
+      // AQU-2554: a 'target' binding -> its target lane by tag; 'support' -> the source lane.
     ).bind(crypto.randomUUID(), projectId, artifactId, fileId, bindingRole, memberPath, profileId, profileVersion, fidelity, ...laneIdResolveBindingBinds(projectId, bindingRole, targetLang)).run()
   } catch (error) {
     console.error("[source-upload] artifact binding failed:", error)

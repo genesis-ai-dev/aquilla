@@ -9,6 +9,8 @@ export interface PackageBlockTranslation {
    *  only holds the segments that HAVE html, so a reader that wants every
    *  segment's words must read these (AQU-2539, the DOCX exporter). */
   parts: { plain: string; html: string; source: string }[]
+  /** Every segment's source text, translated or not, in order. */
+  source: string
 }
 
 interface PackageBlockLocator {
@@ -81,6 +83,7 @@ export function translationsByPackageBlock(
       html,
       label: `${entries[0].locator.memberPath}:${entries[0].locator.blockPath}`,
       parts,
+      source: entries.map(({ cell }) => cell.original ?? "").join(" "),
     })
   }
   return translations

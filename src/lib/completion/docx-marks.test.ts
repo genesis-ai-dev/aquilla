@@ -62,12 +62,22 @@ describe("normalizeMarkedReply", () => {
   })
 
   it("falls back to the plain translation, losing no words, when the answer is not valid", () => {
-    expect(normalizeMarkedReply(cell, "<b>Terme :</i> la définition")).toEqual({ value: "Terme : la définition" })
-    expect(normalizeMarkedReply(cell, '<span class="x">Terme :</span> la définition')).toEqual({ value: "Terme : la définition" })
+    const plain = { value: "Terme : la définition", valueHtml: "Terme : la définition" }
+    expect(normalizeMarkedReply(cell, "<b>Terme :</i> la définition")).toEqual(plain)
+    expect(normalizeMarkedReply(cell, '<span class="x">Terme :</span> la définition')).toEqual(plain)
   })
 
   it("saves an answer without marks as its plain text", () => {
-    expect(normalizeMarkedReply(cell, "Terme : la définition")).toEqual({ value: "Terme : la définition" })
+    expect(normalizeMarkedReply(cell, "Terme : la définition")).toEqual({ value: "Terme : la définition", valueHtml: "Terme : la définition" })
+  })
+
+  it("gives the same result when the commit runs it again on what it returned", () => {
+    for (const answer of ["Utilisez la balise &lt;b&gt; ici", "<b>A &amp;amp; B</b>", "<i>x</b> &lt;y&gt;", "a\n<b>b</b>"]) {
+      const once = normalizeMarkedReply(cell, answer)
+      const twice = normalizeMarkedReply(cell, once.valueHtml ?? once.value)
+      expect(twice).toEqual(once)
+    }
+    expect(normalizeMarkedReply(cell, "Utilisez la balise &lt;b&gt; ici").value).toBe("Utilisez la balise <b> ici")
   })
 
   it("passes every other cell's answer through untouched, tags and all", () => {

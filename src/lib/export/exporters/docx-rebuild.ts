@@ -39,8 +39,13 @@ type RNode =
   | { kind: "keep"; piece: Leaf }
   | { kind: "wrapper"; piece: ContainerPiece; children: RNode[] }
   | { kind: "field"; open: RNode[]; result: RNode[]; close: RNode }
-  /** A simple field whose result was not found: kept, emptied of its text. */
+  /** A wrapper whose text was not found (a simple field, a content control,
+   *  a tracked insertion…): kept with its own tags, emptied of its text. */
   | { kind: "emptyField"; piece: ContainerPiece; children: RNode[] }
+  /** A field whose result was not found: its code kept as one unit with an
+   *  empty result, so it closes before or after the translation, never
+   *  around it. */
+  | { kind: "emptied"; nodes: RNode[] }
 
 export interface RebuildIo {
   /** The source bytes of an element, nested paragraphs rendered. */
@@ -82,6 +87,9 @@ export interface RebuildResult {
   droppedLinks: number
   /** Each footnote reference written at a marker, with that marker's text. */
   footnotes: { id: string; marker: string }[]
+  /** Footnote markers in the translation with no reference in the source
+   *  paragraph to put there (a note the translator added): not written. */
+  unplacedMarkers: number
 }
 
 const FOOTNOTE_SPAN_RE = /\\f\s+[^\s\\]+[\s\S]*?\\f\*/g
@@ -97,6 +105,7 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
   const { io } = input
   const result: RebuildResult = {
     xml: "", keptLooks: 0, keptFields: 0, keptLinks: 0, emptiedFields: 0, droppedLinks: 0, footnotes: [],
+    unplacedMarkers: 0,
   }
 
   // Footnote markers in the translation, and the reference runs they take.
@@ -128,17 +137,23 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
       }
       if (node.kind === "wrapper") {
         changed = true
-        if (node.piece.el.tagName === "w:fldSimple") {
-          result.emptiedFields++
-          next.push({ kind: "emptyField", piece: node.piece, children: node.children })
-        } else {
-          if (node.piece.el.tagName === "w:hyperlink") result.droppedLinks++
+        const tag = node.piece.el.tagName
+        if (!holdsText(node)) {
+          // Nothing of it is translated (a picture content control, an
+          // insertion around a picture): kept as it is.
+          next.push({ kind: "keep", piece: { kind: "keep", el: node.piece.el } })
+        } else if (tag === "w:hyperlink") {
+          // A link whose words changed: the link goes, its words stay.
+          result.droppedLinks++
           next.push(...node.children)
+        } else {
+          if (tag === "w:fldSimple") result.emptiedFields++
+          next.push({ kind: "emptyField", piece: node.piece, children: node.children })
         }
       } else if (node.kind === "field") {
         changed = true
-        result.emptiedFields++
-        next.push(...node.open, ...node.result, node.close)
+        if (node.result.some(holdsText)) result.emptiedFields++
+        next.push({ kind: "emptied", nodes: [...node.open, ...node.result, node.close] })
       } else {
         next.push(node)
       }
@@ -179,7 +194,18 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
     }
   }
   for (const [node, match] of ordered) {
-    plain(cursor, match.start)
+    let start = match.start
+    let end = match.end
+    if (node.kind === "wrapper" || node.kind === "field") {
+      // The frame is copied with its own edge spaces; the translation's spaces
+      // next to it are not written a second time.
+      const text = textOf(node)
+      const lead = text.length - text.trimStart().length
+      const trail = text.length - text.trimEnd().length
+      for (let n = 0; n < lead && start > cursor && /\s/.test(input.text[start - 1]); n++) start--
+      for (let n = 0; n < trail && end < input.text.length && /\s/.test(input.text[end]); n++) end++
+    }
+    plain(cursor, start)
     if (node.kind === "wrapper" || node.kind === "field") {
       stream += renderVerbatim(node.kind === "wrapper" ? [node] : [...node.open, ...node.result, node.close], io)
       if (node.kind === "field") result.keptFields++
@@ -190,9 +216,10 @@ export function rebuildParagraphInner(input: RebuildInput): RebuildResult {
       stream += runsByLook(input.text, match.start, match.end, (i) => looks[i - match.start])
       result.keptLooks++
     }
-    cursor = match.end
+    cursor = end
   }
   plain(cursor, input.text.length)
+  result.unplacedMarkers = Math.max(0, markers.length - refRuns.length)
 
   result.xml = renderLeaves(front, io) + stream + refRuns.slice(usedRefs).join("") + renderLeaves(back, io)
   return result
@@ -306,6 +333,26 @@ function holdsWord(node: RNode): boolean {
       return node.children.some(holdsWord)
     case "field":
       return node.result.some(holdsWord)
+    case "emptied":
+      return node.nodes.some(holdsWord)
+    default:
+      return false
+  }
+}
+
+/** Does this node hold any of the line (text or a footnote marker)? */
+function holdsText(node: RNode): boolean {
+  switch (node.kind) {
+    case "text":
+    case "marker":
+      return true
+    case "wrapper":
+    case "emptyField":
+      return node.children.some(holdsText)
+    case "field":
+      return node.result.some(holdsText)
+    case "emptied":
+      return node.nodes.some(holdsText)
     default:
       return false
   }
@@ -316,6 +363,7 @@ function collectMarkers(nodes: readonly RNode[], visit: (piece: FootnotePiece) =
     if (node.kind === "marker") visit(node.piece)
     else if (node.kind === "wrapper" || node.kind === "emptyField") collectMarkers(node.children, visit)
     else if (node.kind === "field") collectMarkers(node.result, visit)
+    else if (node.kind === "emptied") collectMarkers(node.nodes, visit)
   }
 }
 
@@ -439,14 +487,28 @@ function matchAnchors(nodes: readonly RNode[], masked: string, baseRpr: string, 
 /** A placeholder element for look-stretch matches (they own no source element). */
 const LOOK_MARK: XmlElement = { tagName: "#look", attributes: {}, children: [] }
 
+/** The whole character (code point) ending just before `index`, or "". */
+function charBefore(text: string, index: number): string {
+  if (index <= 0) return ""
+  const low = text.charCodeAt(index - 1)
+  if (low >= 0xdc00 && low <= 0xdfff && index >= 2) return text.slice(index - 2, index)
+  return text[index - 1]
+}
+
+/** The whole character (code point) starting at `index`, or "". */
+function charAt(text: string, index: number): string {
+  const code = text.codePointAt(index)
+  return code === undefined ? "" : String.fromCodePoint(code)
+}
+
 /** First whole-word occurrence of `needle` in `hay` at or after `from`. */
 function findWhole(hay: string, needle: string, from: number): number {
+  const first = charAt(needle, 0)
+  const last = charBefore(needle, needle.length)
   let at = hay.indexOf(needle, from)
   while (at !== -1) {
-    const before = at > 0 ? hay[at - 1] : ""
-    const after = hay[at + needle.length] ?? ""
-    const okStart = !WORD_CHAR.test(needle[0]) || !WORD_CHAR.test(before)
-    const okEnd = !WORD_CHAR.test(needle[needle.length - 1]) || !WORD_CHAR.test(after)
+    const okStart = !WORD_CHAR.test(first) || !WORD_CHAR.test(charBefore(hay, at))
+    const okEnd = !WORD_CHAR.test(last) || !WORD_CHAR.test(charAt(hay, at + needle.length))
     if (okStart && okEnd) return at
     at = hay.indexOf(needle, at + 1)
   }
@@ -487,21 +549,38 @@ function renderLeaves(nodes: readonly RNode[], io: RebuildIo): string {
         return
       }
       case "emptyField":
+      case "emptied":
+        visitNonText(node)
+        return
+      default:
+        return
+    }
+  }
+  // Everything but the text, wrappers keeping their own tags.
+  const visitNonText = (node: RNode): void => {
+    switch (node.kind) {
+      case "keep":
+        visit(node)
+        return
+      case "wrapper":
+      case "emptyField":
         close()
         out += io.openTag(node.piece.el)
         node.children.forEach(visitNonText)
         close()
         out += io.closeTag(node.piece.el)
         return
+      case "field":
+        ;[...node.open, ...node.result, node.close].forEach(visitNonText)
+        return
+      case "emptied":
+        node.nodes.forEach(visitNonText)
+        return
       default:
+        // Text goes to the translation; a footnote marker's reference run is
+        // written where the translation puts the marker.
         return
     }
-  }
-  // Inside an emptied field: everything but its text.
-  const visitNonText = (node: RNode) => {
-    if (node.kind === "keep") visit(node)
-    else if (node.kind === "wrapper" || node.kind === "emptyField") node.children.forEach(visitNonText)
-    else if (node.kind === "field") [...node.open, ...node.result, node.close].forEach(visitNonText)
   }
   nodes.forEach(visit)
   close()
@@ -536,6 +615,9 @@ function renderVerbatim(nodes: readonly RNode[], io: RebuildIo): string {
         return
       case "field":
         ;[...node.open, ...node.result, node.close].forEach(visit)
+        return
+      case "emptied":
+        node.nodes.forEach(visit)
         return
     }
   }

@@ -219,3 +219,12 @@ describe("inline marks on every line (AQU-2539)", () => {
     expect(result[0].originalHtml).toBeUndefined()
   })
 })
+
+describe("hidden text through an unknown style (AQU-2539)", () => {
+  it("falls back to the default paragraph style when the paragraph's style is not in styles.xml", () => {
+    const stylesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">` +
+      `<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:rPr><w:vanish/></w:rPr></w:style></w:styles>`
+    const strings = docxPartsToStrings({ documentXml: documentXml(para(run("x"), "Missing")), stylesXml })
+    expect(strings).toEqual([])
+  })
+})

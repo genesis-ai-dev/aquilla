@@ -68,10 +68,11 @@
 
 import JSZip from "jszip"
 import type { CellData } from "@/hooks/useCells"
-import { htmlToSpans, rPrWithLanguage, rPrWithMarks, textRunXml, type Mark, type Span } from "./docx-runs"
+import { htmlToSpans, rPrWithLanguage, rPrWithMarks, setRprChild, textRunXml, type Mark, type Span } from "./docx-runs"
 import { frenchSpacing, isFrenchLanguage } from "./french-spacing"
 import { markKey, rebuildParagraphInner, type RebuildIo, type RebuildResult } from "./docx-rebuild"
 import { extractUsfmFootnotes } from "@/lib/footnotes/extract"
+import { createUsfmFootnoteMarker } from "@/lib/footnotes/insert"
 import {
   packageBlockKey,
   translationsByPackageBlock,
@@ -142,12 +143,24 @@ export interface DocxExportFidelity {
   /** Paragraphs holding a text box whose cell (from before AQU-2539) also
    *  holds the box's words: left as they are, with a warning to re-import. */
   staleTextBoxHolders: number
+  /** Footnote markers the translation added where the source had no
+   *  footnote: not written (the marker text never reaches the body). */
+  unplacedFootnoteMarkers: number
 }
 
 /** One paragraph's translation: its segments in order, with their sources. */
 interface ParagraphTranslation {
   parts: { plain: string; html: string; source?: string }[]
   label: string
+  /** Every segment's source, translated or not. */
+  source: string
+}
+
+interface LegacyGroup {
+  html: string
+  plain: string
+  parts: { plain: string; html: string; source: string }[]
+  source: string
 }
 
 /**
@@ -161,10 +174,10 @@ interface ParagraphTranslation {
  */
 export function buildLegacyGroups(cells: CellData[]): {
   groups: string[]
-  groupToData: Map<string, { html: string; plain: string; parts: { plain: string; html: string; source: string }[] }>
+  groupToData: Map<string, LegacyGroup>
 } {
   const groups: string[] = []
-  const groupToData = new Map<string, { html: string; plain: string; parts: { plain: string; html: string; source: string }[] }>()
+  const groupToData = new Map<string, LegacyGroup>()
   for (const cell of cells) {
     // AQU-1068: a line somebody ADDED here has no paragraph in the original
     // package, so letting it consume a slot shifts every mapping after it and
@@ -175,7 +188,7 @@ export function buildLegacyGroups(cells: CellData[]): {
     const legacyGroup = cell.group || cell.id
     if (!groupToData.has(legacyGroup)) {
       groups.push(legacyGroup)
-      groupToData.set(legacyGroup, { html: "", plain: "", parts: [] })
+      groupToData.set(legacyGroup, { html: "", plain: "", parts: [], source: "" })
     }
     const data = groupToData.get(legacyGroup)!
     const plain = cell.translated?.trim() ?? ""
@@ -183,6 +196,7 @@ export function buildLegacyGroups(cells: CellData[]): {
     if (plain) data.plain = data.plain ? `${data.plain} ${plain}` : plain
     if (html) data.html = data.html ? `${data.html} ${html}` : html
     if (plain || html) data.parts.push({ plain, html, source: cell.original ?? "" })
+    data.source = data.source ? `${data.source} ${cell.original ?? ""}` : (cell.original ?? "")
   }
   return { groups, groupToData }
 }
@@ -208,9 +222,9 @@ export interface DocxExportOptions {
 function hasAnyText(xml: string, span: DocxParagraphSpan): boolean {
   if (span.selfClosing) return false
   const re = /<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>/g
-  re.lastIndex = span.start
+  const slice = xml.slice(span.start, span.end)
   let m: RegExpExecArray | null
-  while ((m = re.exec(xml)) !== null && m.index < span.end) {
+  while ((m = re.exec(slice)) !== null) {
     if (m[1].trim().length > 0) return true
   }
   return false
@@ -265,7 +279,7 @@ export async function exportDocx(
   if (hasLocatedTranslations) {
     for (const span of spans) {
       const located = locatedTranslations.get(blockKeyOf(span.index))
-      if (located) translations.set(span.index, { parts: located.parts, label: located.label })
+      if (located) translations.set(span.index, { parts: located.parts, label: located.label, source: located.source })
     }
   } else {
     // Positional fallback for cells imported before locators: the k-th group
@@ -276,7 +290,7 @@ export async function exportDocx(
       const group = groups[slot++]
       if (group === undefined) continue
       const data = groupToData.get(group)!
-      translations.set(span.index, { parts: data.parts, label: group })
+      translations.set(span.index, { parts: data.parts, label: group, source: data.source })
     }
   }
 
@@ -287,7 +301,7 @@ export async function exportDocx(
   const warnings: { segment: string; detail: string }[] = []
   const fidelity: DocxExportFidelity = {
     keptLooks: 0, keptFields: 0, keptLinks: 0, emptiedFields: 0, droppedLinks: 0, notesWritten: 0, notesLeft: 0,
-    staleTextBoxHolders: 0,
+    staleTextBoxHolders: 0, unplacedFootnoteMarkers: 0,
   }
 
   /** Index into `spans` of the first paragraph starting at or after `offset`. */
@@ -333,30 +347,37 @@ export async function exportDocx(
 
     // AQU-1068: this paragraph's cell was REMOVED. Emit nothing at all — the
     // paragraph leaves the document. Indices come from the INPUT scan, so
-    // every later locator still resolves; nothing shifts.
+    // every later locator still resolves; nothing shifts. Inside a text box
+    // the paragraph is emptied instead (pPr kept): a text box must keep at
+    // least one paragraph to stay valid.
     if (nonEmpty && removedKeys.has(key)) {
-      removed++
-      return ""
+      if (!span.isCopy) removed++
+      if (span.parent === 0) return ""
+      const open = anchorXml.slice(0, anchorXml.indexOf(">") + 1)
+      const inner = anchorXml.slice(open.length, anchorXml.lastIndexOf("</w:p>"))
+      return `${open}${extractPPr(inner)}</w:p>`
     }
 
+    // A copy is rendered like its twin but not counted a second time.
+    const counted = !span.isCopy
     const translation = translations.get(driver)
-    const rebuilt = translation ? rebuildParagraph(span, translation) : null
+    const rebuilt = translation ? rebuildParagraph(span, translation, counted) : null
     let out: string
     if (rebuilt === null) {
       out = verbatim()
-      if (nonEmpty) untouched++
+      if (nonEmpty && counted) untouched++
     } else {
       out = rebuilt
-      injected++
+      if (counted) injected++
     }
-    return out + renderInsertions(key, anchorXml)
+    return out + renderInsertions(key, anchorXml, counted)
   }
 
   /**
    * AQU-1068: write out any cells added UNDER this paragraph, as new
    * paragraphs of their own in the anchor's style.
    */
-  function renderInsertions(blockKey: string, anchorXml: string): string {
+  function renderInsertions(blockKey: string, anchorXml: string, counted = true): string {
     const texts = insertions.get(blockKey)
     if (!texts || texts.length === 0) return ""
     const selfClosing = !anchorXml.includes("</w:p>")
@@ -368,36 +389,48 @@ export async function exportDocx(
     for (const text of texts) {
       const spans = plainSpans(writeText(text))
       out += `${openTag}${pPrXml}${runsForSpans(spans, baseRprXml, translatedLook)}</w:p>`
-      inserted++
+      if (counted) inserted++
     }
     return out
   }
 
   const part: PartContext = { xml, walkContext, renderRange, writeText, translatedLook }
 
+  // Paragraphs nested directly in each paragraph (its text boxes' lines).
+  const nestedIn = new Map<number, DocxParagraphSpan[]>()
+  for (const s of spans) {
+    if (s.parent === 0 || s.isCopy || s.selfClosing) continue
+    const list = nestedIn.get(s.parent) ?? []
+    list.push(s)
+    nestedIn.set(s.parent, list)
+  }
+
   /** Does this translation's source hold the words of a text box inside the
-   *  paragraph (see rebuildParagraph)? */
+   *  paragraph (see rebuildParagraph)? Every segment's source counts, and the
+   *  box's words must occur more often in it than in the paragraph's own line
+   *  (a paragraph may well repeat its box's words). */
   function sourceSwallowedTextBox(span: DocxParagraphSpan, translation: ParagraphTranslation): boolean {
-    const nested = spans.filter((s) => s.parent === span.index && !s.isCopy && !s.selfClosing)
-    if (nested.length === 0) return false
+    const nested = nestedIn.get(span.index)
+    if (!nested) return false
     const squash = (text: string) => text.replace(/\s+/g, "")
     const lineOf = (s: DocxParagraphSpan) => {
       const p = parseXmlLite(xml!.slice(s.start, s.end)).children.find(isElement)
       return p ? squash(docxLine(walkDocxParagraph(p, walkContext)).text) : ""
     }
-    const source = squash(translation.parts.map((p) => p.source ?? "").join(""))
+    const source = squash(translation.source)
     const own = lineOf(span)
     // A paragraph with no words of its own is never written anyway; a cell made
     // by today's importer holds exactly the paragraph's own line.
     if (!source || !own || source === own) return false
+    const occurrences = (hay: string, needle: string) => hay.split(needle).length - 1
     return nested.some((inner) => {
       const words = lineOf(inner)
-      return words.length > 0 && source.includes(words)
+      return words.length > 0 && occurrences(source, words) > occurrences(own, words)
     })
   }
   const noteTranslations = new Map<string, string>()
 
-  function rebuildParagraph(span: DocxParagraphSpan, translation: ParagraphTranslation): string | null {
+  function rebuildParagraph(span: DocxParagraphSpan, translation: ParagraphTranslation, counted: boolean): string | null {
     // A project imported before AQU-2539 read a text box's words into the
     // paragraph holding the box. Its translation holds them too and cannot be
     // split back, so writing it would put the box's words into the body. Such
@@ -405,6 +438,7 @@ export async function exportDocx(
     // while containing the box's words; the paragraph keeps its own words and
     // the box is translated by its own cells.
     if (sourceSwallowedTextBox(span, translation)) {
+      if (!counted) return null
       fidelity.staleTextBoxHolders++
       warnings.push({
         segment: translation.label,
@@ -414,6 +448,7 @@ export async function exportDocx(
     }
     const rebuilt = rebuildParagraphIn(part, span, (line) => translationSpans(translation.parts, line))
     if (rebuilt === null) return null
+    if (!counted) return rebuilt.xml
     // Fidelity report: the source paragraph carried more than one run look
     // and some of it may come back in the base look (the export dialog says so).
     if (rebuilt.mixedLooks) {
@@ -522,6 +557,7 @@ function addFidelity(total: DocxExportFidelity, stats: RebuildResult): void {
   total.keptLinks += stats.keptLinks
   total.emptiedFields += stats.emptiedFields
   total.droppedLinks += stats.droppedLinks
+  total.unplacedFootnoteMarkers += stats.unplacedMarkers
 }
 
 /**
@@ -594,7 +630,7 @@ function rebuildParagraphIn(
     marks,
     translatedLook: part.translatedLook,
     baseRpr: base ?? "",
-    markLooks: markLooksOf(line.chunks, runRprXml),
+    markLooks: markLooksOf(line.chunks, runRprXml, base ?? ""),
     io,
   })
   const before = part.renderRange(span.start, at(target.el.openEnd), span)
@@ -633,7 +669,11 @@ function rebuildFootnotes(
     const marker = id === null ? undefined : noteTranslations.get(id)
     if (marker === undefined) continue
     const translated = extractUsfmFootnotes(marker)[0]?.text.replace(/\\(?:bd|it|ul)\*?\s?/g, "").trim() ?? ""
-    if (!translated || translated === walkContext.footnotes.get(id!)) continue
+    // Compared in the marker's own form (whitespace collapsed, backslashes
+    // dropped), so a note nobody translated is never rewritten.
+    const sourceNote = walkContext.footnotes.get(id!) ?? ""
+    const sourceAsMarker = extractUsfmFootnotes(createUsfmFootnoteMarker({ caller: "+", text: sourceNote }))[0]?.text ?? ""
+    if (!translated || translated === sourceAsMarker.replace(/\\(?:bd|it|ul)\*?\s?/g, "").trim()) continue
     const inside = spans.filter((s) => s.start >= note.start! && s.end <= note.end!)
     const withWords = inside.filter((s) => {
       const p = parseXmlLite(footnotesXml.slice(s.start, s.end)).children.find(isElement)
@@ -753,19 +793,36 @@ function baseRunLook(
 function markLooksOf(
   chunks: ReturnType<typeof docxLine>["chunks"],
   runRprXml: (run: XmlElement) => string,
+  baseRprXml: string,
 ): Map<string, string> {
+  // A source look qualifies only when, its marks taken away, it IS the base
+  // look: the source's bold "Term:" does, a bold Hebrew word (its own font,
+  // right-to-left) does not.
+  const plainBase = withoutMarks(baseRprXml)
   const byKey = new Map<string, Set<string>>()
   for (const chunk of chunks) {
     if (chunk.piece.kind !== "text" || chunk.piece.source !== "t" || !chunk.text.trim()) continue
     const key = markKey(chunk.marks as ReadonlySet<Mark>)
     if (key === "") continue
+    const look = runRprXml(chunk.piece.run)
+    if (withoutMarks(look) !== plainBase) continue
     const set = byKey.get(key) ?? new Set<string>()
-    set.add(runRprXml(chunk.piece.run))
+    set.add(look)
     byKey.set(key, set)
   }
   const out = new Map<string, string>()
   for (const [key, set] of byKey) if (set.size === 1) out.set(key, [...set][0])
   return out
+}
+
+/** A run look with its bold/italic/underline/strike/super-sub toggles taken
+ *  out, for comparing looks; "" and an empty rPr are the same look. */
+function withoutMarks(rPrXml: string): string {
+  let rPr = rPrXml
+  for (const name of ["b", "bCs", "i", "iCs", "u", "strike", "dstrike", "vertAlign"]) {
+    if (rPr) rPr = setRprChild(rPr, name, null)
+  }
+  return rPr.replace(/<w:rPr\b[^>]*>\s*<\/w:rPr>|<w:rPr\b[^>]*\/>/, "")
 }
 
 function runsForSpans(

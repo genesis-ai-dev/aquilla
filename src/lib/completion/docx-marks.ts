@@ -11,7 +11,8 @@
 //     those marks, properly nested, with no attributes. Then the plain
 //     translation is the answer's text and `translatedHtml` is the answer.
 //     Otherwise the answer's text, tags removed, is the plain translation and
-//     no HTML is saved — nothing of the translation is lost.
+//     `translatedHtml` is just that text, escaped — nothing of the translation
+//     is lost, and no mark is invented.
 //
 // Every other cell — any other format, a Word line with no marks, a Word line
 // whose source was edited after import — is untouched: same prompt source, the
@@ -122,7 +123,11 @@ export function normalizeMarkedReply(
   generated: string,
 ): { value: string; valueHtml?: string } {
   if (markedSource(cell, cell.original ?? "") === null) return { value: generated }
+  // The answer is read as HTML exactly once. Its HTML form is always returned,
+  // because the commit runs this again on what it is handed (the HTML when
+  // there is one): HTML reads back to the same text, decoded text would not.
   const parsed = parseMarkedHtml(generated.trim())
-  if (parsed) return parsed.marked ? { value: parsed.text, valueHtml: parsed.html } : { value: parsed.text }
-  return { value: decodeEntities(generated.replace(/<[^<>]*>/g, "")).trim() }
+  if (parsed) return { value: parsed.text, valueHtml: parsed.html }
+  const plain = decodeEntities(generated.replace(/<[^<>]*>/g, "")).trim()
+  return { value: plain, valueHtml: escapeHtml(plain) }
 }

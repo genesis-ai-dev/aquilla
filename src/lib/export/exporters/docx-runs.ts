@@ -193,30 +193,62 @@ export function setRprChild(rPrXml: string, name: string, elementXml: string | n
  * changes; an existing `w:eastAsia` or `w:bidi` is kept.
  */
 export function rPrWithLanguage(rPrXml: string, lang: string): string {
-  const code = lang.replace(/[^A-Za-z0-9-]/g, "")
+  const code = lang.replace(/_/g, "-").replace(/[^A-Za-z0-9-]/g, "")
   if (!code) return rPrXml
-  const existing = /<w:lang\b[^>]*\/>/.exec(rPrXml)
-  if (existing) {
-    const el = existing[0]
-    const next = /\sw:val="[^"]*"/.test(el)
+  // The run's OWN w:lang (an older one inside w:rPrChange is history).
+  const existing = rPrXml ? directRprChild(rPrXml, "lang") : null
+  const el = existing && /^<w:lang\b[^>]*\/>$/.test(existing) ? existing : null
+  const next = el
+    ? /\sw:val="[^"]*"/.test(el)
       ? el.replace(/\sw:val="[^"]*"/, ` w:val="${code}"`)
       : el.replace(/^<w:lang\b/, `<w:lang w:val="${code}"`)
-    return rPrXml.replace(el, next)
-  }
-  return setRprChild(rPrXml || "<w:rPr></w:rPr>", "lang", `<w:lang w:val="${code}"/>`)
+    : `<w:lang w:val="${code}"/>`
+  return setRprChild(rPrXml || "<w:rPr></w:rPr>", "lang", next)
+}
+
+/** The verbatim XML of one direct child of a `<w:rPr>` string, or null. */
+export function directRprChild(rPrXml: string, name: string): string | null {
+  const rPr = rPrXml.trim()
+  const openEnd = rPr.indexOf(">") + 1
+  const closeStart = rPr.lastIndexOf("</w:rPr>")
+  if (openEnd <= 0 || closeStart < openEnd) return null
+  const inner = rPr.slice(openEnd, closeStart)
+  let depth = 0
+  let found: string | null = null
+  let start = -1
+  scanXmlTags(inner, {
+    open(body, at, end, selfClosing) {
+      if (depth === 0 && found === null && startTagName(body) === `w:${name}`) {
+        if (selfClosing) found = inner.slice(at, end)
+        else start = at
+      }
+      if (!selfClosing) depth++
+    },
+    close(_tag, _at, end) {
+      depth--
+      if (depth === 0 && start !== -1 && found === null) {
+        found = inner.slice(start, end)
+        start = -1
+      }
+    },
+  })
+  return found
 }
 
 /**
- * One run of translated text (AQU-2539). A tab becomes `<w:tab/>` and a line
- * break `<w:br/>`, the elements Word reads them from, so a tab-separated list
- * or a broken line comes back as it went in. Returns "" for empty text.
+ * One run of translated text (AQU-2539). A tab becomes `<w:tab/>`, a line
+ * break `<w:br/>`, a non-breaking hyphen `<w:noBreakHyphen/>` and a soft hyphen
+ * `<w:softHyphen/>` — the elements Word reads them from — so they come back as
+ * they went in. Returns "" for empty text.
  */
 export function textRunXml(text: string, rPrXml: string): string {
   let inner = ""
-  for (const part of text.split(/(\t|\r\n|\n|\r)/)) {
+  for (const part of text.split(/(\t|\r\n|\n|\r|\u2011|\u00AD)/)) {
     if (part === "") continue
     if (part === "\t") inner += "<w:tab/>"
     else if (part === "\n" || part === "\r" || part === "\r\n") inner += "<w:br/>"
+    else if (part === "\u2011") inner += "<w:noBreakHyphen/>"
+    else if (part === "\u00AD") inner += "<w:softHyphen/>"
     else {
       const escaped = escapeXml(part)
       if (escaped) inner += `<w:t xml:space="preserve">${escaped}</w:t>`

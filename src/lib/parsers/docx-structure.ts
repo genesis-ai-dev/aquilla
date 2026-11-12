@@ -291,6 +291,11 @@ function runChildText(child: XmlElement): { value: string; source: "t" | "tab" |
       return { value: textContent(child), source: "t" }
     case "w:tab":
       return { value: "\t", source: "tab" }
+    // Hyphens Word stores as elements are characters of the word they sit in.
+    case "w:noBreakHyphen":
+      return { value: "\u2011", source: "t" }
+    case "w:softHyphen":
+      return { value: "\u00AD", source: "t" }
     case "w:cr":
       return { value: "\n", source: "break" }
     case "w:br": {
@@ -521,7 +526,9 @@ export function hiddenRunTest(sheet: DocxStyleSheet): (run: XmlElement, paragrap
   const paragraphStyleOf = (p: XmlElement): string | null => {
     const pPr = directChild(p, "w:pPr")
     const pStyle = pPr ? directChild(pPr, "w:pStyle") : undefined
-    return pStyle ? getAttribute(pStyle, "w:val") : sheet.defaultParagraphStyle
+    const id = pStyle ? getAttribute(pStyle, "w:val") : null
+    // Word uses the default paragraph style for a style it does not know.
+    return id !== null && sheet.styles.has(id) ? id : sheet.defaultParagraphStyle
   }
   return (run, p) => {
     const rPr = directChild(run, "w:rPr")

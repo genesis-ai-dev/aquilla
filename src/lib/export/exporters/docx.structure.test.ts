@@ -451,3 +451,81 @@ describe("exportDocx — a paragraph cut into several lines (AQU-2539)", () => {
     expect(xml).toMatch(/FR word[^<]*<\/w:t><w:br\/><w:t xml:space="preserve">FR word/)
   })
 })
+
+describe("exportDocx — review findings (AQU-2539)", () => {
+  it("a field holding the first word, its result not found, closes before the translation", async () => {
+    const body = para(complexField("PAGE", "12") + run(" pages in total."))
+    const { xml } = await exportedXml(body, [cellAt(1, "Douze pages au total.")])
+    const end = xml.indexOf('w:fldCharType="end"')
+    expect(end).toBeGreaterThan(-1)
+    expect(end).toBeLessThan(xml.indexOf("Douze pages au total."))
+    expect(xml).not.toContain(">12<")
+  })
+
+  it("a content control whose text changed keeps its own tags, emptied", async () => {
+    const sdt = `<w:sdt><w:sdtPr><w:alias w:val="Name"/></w:sdtPr><w:sdtContent>${run("Sam")}</w:sdtContent></w:sdt>`
+    const { xml } = await exportedXml(para(run("Welcome, ") + sdt + run(".")), [cellAt(1, "Bienvenue, Samuel.")])
+    expect(xml).toContain('<w:sdt><w:sdtPr><w:alias w:val="Name"/></w:sdtPr><w:sdtContent></w:sdtContent></w:sdt>')
+    // Never an sdtPr loose in the paragraph.
+    expect(xml).not.toMatch(/<\/w:r><w:sdtPr>/)
+  })
+
+  it("a wrapper with no text (a tracked insertion around a picture) is kept as it is", async () => {
+    const ins = `<w:ins w:id="5" w:author="a" w:date="2026-01-01T00:00:00Z">${pictureRun}</w:ins>`
+    const { xml } = await exportedXml(para(run("Before ") + ins + run("after.")), [cellAt(1, "Avant après.")])
+    expect(xml).toContain(ins)
+  })
+
+  it("a kept link's own space is not written twice", async () => {
+    const link = `<w:hyperlink r:id="rId3">${run("Google ")}</w:hyperlink>`
+    const { xml } = await exportedXml(para(run("Use ") + link + run("now.")), [cellAt(1, "Utilisez Google maintenant.")])
+    expect(xml).toContain(`Utilisez </w:t></w:r>${link}<w:r><w:t xml:space="preserve">maintenant.</w:t>`)
+  })
+
+  it("keeps a non-breaking hyphen in its word, both ways", async () => {
+    const body = para(`<w:r><w:t>John 3:16</w:t><w:noBreakHyphen/><w:t>18 says</w:t></w:r>`)
+    const strings = docxPartsToStrings({ documentXml: documentXml(body) })
+    expect(strings[0].original).toBe("John 3:16‑18 says")
+    const { xml } = await exportedXml(body, importedCells(strings, () => "Jean 3:16‑18 dit"))
+    expect(xml).toContain('Jean 3:16</w:t><w:noBreakHyphen/><w:t xml:space="preserve">18 dit</w:t>')
+  })
+
+  it("a translator's bold does not borrow a Hebrew look", async () => {
+    const HEB_BOLD = '<w:rPr><w:rFonts w:ascii="SBL Hebrew"/><w:b/><w:rtl/></w:rPr>'
+    const body = para(run("The word ") + run("שלום", HEB_BOLD) + run(" means peace."))
+    const html = "<p>Le mot <strong>shalom</strong> signifie paix.</p>"
+    const { xml } = await exportedXml(body, [cellAt(1, "Le mot shalom signifie paix.", { translatedHtml: html })])
+    expect(xml).toContain('<w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">shalom</w:t></w:r>')
+    expect(xml).not.toContain("SBL Hebrew</w:t>")
+  })
+
+  it("a removed paragraph inside a text box is emptied, never dropped, so the box stays valid", async () => {
+    const body = para(run("Holder ") + textBoxRun(para(run("Only line"), "Caption")))
+    const removedCells = [{ metadata: { aquillaImport: { sourceLocator: { kind: "package-block", memberPath: "word/document.xml", blockPath: "w:p[2]", segment: 1 } } } }]
+    const result = await exportDocx(await makeDocx(body), [cellAt(1, "Porteur")], { removedCells })
+    const xml = await (await JSZip.loadAsync(await result.blob.arrayBuffer())).file("word/document.xml")!.async("string")
+    expectWellFormed(xml)
+    expect(xml.match(/<w:txbxContent><w:p><w:pPr><w:pStyle w:val="Caption"\/><\/w:pPr><\/w:p><\/w:txbxContent>/g)).toHaveLength(2)
+    expect(result.removed).toBe(1)
+  })
+
+  it("a fresh two-line paragraph that repeats its text box's words is written, even with one line translated", async () => {
+    const long = "word ".repeat(30).trim()
+    const repeat = para(run(`As Figure 5 shows, ${long}. And again ${long}.`) + textBoxRun(para(run("Figure 5"))))
+    const strings = docxPartsToStrings({ documentXml: documentXml(repeat) })
+    const cells = importedCells(strings, (s) => (s.original.startsWith("As") ? "Comme le montre la figure 5" : ""))
+    const { xml, result } = await exportedXml(repeat, cells)
+    expect(result.fidelity.staleTextBoxHolders).toBe(0)
+    expect(xml).toContain("Comme le montre la figure 5")
+  })
+
+  it("leaves a note alone whose text only differs in spacing the marker collapsed", async () => {
+    const body = para(run("Text") + footnoteRefRun(1) + run(" more."))
+    const notes = footnotesXml({ 1: "See  John 3." })
+    const strings = docxPartsToStrings({ documentXml: documentXml(body), footnotesXml: notes })
+    const result = await exportDocx(await makeDocx(body, notes), importedCells(strings, (s) => s.original.replace("Text", "Texte")))
+    const fn = await (await JSZip.loadAsync(await result.blob.arrayBuffer())).file("word/footnotes.xml")!.async("string")
+    expect(fn).toBe(notes)
+    expect(result.fidelity.notesWritten).toBe(0)
+  })
+})

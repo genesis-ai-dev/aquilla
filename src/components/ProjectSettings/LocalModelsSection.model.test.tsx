@@ -1,6 +1,10 @@
 // The hosted model picker: Automatic by default, each named model saying
 // whether it knows the project's language, zero-shot only by opt-in and only
 // where the org allows it, and choosing zero-shot starts the slow model early.
+//
+// AQU-2052: the language is read from the project's LANE row, not from the
+// project-level `targetLanguage` the create dialog fills with a language NAME,
+// so the fixture carries the lane that names it.
 
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { render, screen, within } from "@testing-library/react"
@@ -20,7 +24,17 @@ vi.mock("@/hooks/useOrgSettings", () => ({ useOrgSettings: () => ({ settings: or
 vi.mock("@/context/OrgContext", () => ({ useActiveOrgOptional: () => ({ activeOrgId: 1, activeOrg: null }) }))
 vi.mock("@/hooks/useProject", () => ({
   useProject: (id: string) => ({
-    project: id ? { id, targetLanguage: "tpi", files: [{ id: "f1" }] } : null,
+    project: id
+      ? {
+          id,
+          targetLanguage: "tpi",
+          lanes: [{
+            id: "aaaa0001", role: "target", language: "tpi",
+            name: null, langCode: null, legacyTag: "", position: 1, archivedAt: null,
+          }],
+          files: [{ id: "f1" }],
+        }
+      : null,
   }),
 }))
 vi.mock("@/lib/audio/omni-warmup", () => ({ warmZeroShot: warm }))

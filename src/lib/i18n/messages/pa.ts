@@ -4535,7 +4535,6 @@ export const pa: Catalog = {
   "importExport.format.txt.description": "ਸਾਦੀ ਲਿਖਤ ਰਾਊਂਡ-ਟ੍ਰਿਪ: ਪੈਰਾ ਢਾਂਚਾ ਰਹਿੰਦਾ ਹੈ; ਅਣ-ਅਨੁਵਾਦਿਤ ਪੈਰੇ ਸਰੋਤ ਰੱਖਦੇ ਹਨ (ਮੀਡੀਆ ਕਤਾਰਾਂ ਆਪਣਾ ਲਿਪੀਅੰਤਰ ਵਰਤਦੀਆਂ ਹਨ).",
   "importExport.format.md.description": "Markdown ਰਾਊਂਡ-ਟ੍ਰਿਪ: ਸਿਰਲੇਖ, ਕ੍ਰਮਬੱਧ/ਬਿਨਾਂ ਕ੍ਰਮ ਸੂਚੀਆਂ ਅਤੇ ਹਵਾਲੇ ਮੁੜ ਬਣਦੇ ਹਨ; ਅਣ-ਅਨੁਵਾਦਿਤ ਬਲਾਕ ਸਰੋਤ ਰੱਖਦੇ ਹਨ (ਮੀਡੀਆ ਕਤਾਰਾਂ ਆਪਣਾ ਲਿਪੀਅੰਤਰ ਵਰਤਦੀਆਂ ਹਨ).",
   "importExport.format.html.label": "ਵੈੱਬ ਪੰਨਾ",
-  "importExport.format.html.description": "ਇੱਕ ਸਵੈ-ਨਿਰਭਰ ਫ਼ਾਈਲ ਵਿੱਚ ਕਿਤਾਬ ਦਾ ਪੜ੍ਹਨਯੋਗ ਪੰਨਾ: ਅਧਿਆਇ ਸੂਚੀ, ਨੰਬਰਦਾਰ ਆਇਤਾਂ ਅਤੇ ਭਾਗ ਸਿਰਲੇਖ, ਸਮੀਖਿਅਕਾਂ ਅਤੇ ਛਪਾਈ ਲਈ. ਅਣ-ਅਨੁਵਾਦਿਤ ਕਤਾਰਾਂ ਆਪਣੀ ਸਰੋਤ ਲਿਖਤ ਵਿਖਾਉਂਦੀਆਂ ਹਨ, ਨਿਸ਼ਾਨਬੱਧ. ਮੁੜ ਇੰਪੋਰਟ ਲਈ ਨਹੀਂ; ਪੈਰਾ ਖਾਕਾ ਅਤੇ ਫੁਟਨੋਟ ਹਾਲੇ ਨਹੀਂ ਰੱਖੇ ਜਾਂਦੇ.",
   "importExport.format.tsv.label": "ਦੋ-ਭਾਸ਼ਾਈ TSV",
   "importExport.format.tsv.description": "id/source/target ਟੈਬ-ਵੱਖ, ਹਰ ਹਿੱਸੇ ਲਈ ਇੱਕ ਕਤਾਰ.",
   "importExport.format.csv.label": "ਦੋ-ਭਾਸ਼ਾਈ CSV",

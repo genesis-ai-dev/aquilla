@@ -418,9 +418,10 @@ function trimmed(text: string): { lead: number; text: string } {
   return { lead, text: text.trim() }
 }
 
-function anchorsOf(nodes: readonly RNode[], baseRpr: string, io: RebuildIo): Anchor[] {
+function anchorsOf(nodes: readonly RNode[], baseRpr: string, io: RebuildIo): { anchors: Anchor[]; text: string } {
   const anchors: Anchor[] = []
   let offset = 0
+  let levelText = ""
   // Look stretches: runs of the line's own characters in ONE look other than
   // the base look. A stretch whose edge falls inside a word grows to that whole
   // word (stretches meeting in one word become one), so a superscript letter
@@ -436,8 +437,20 @@ function anchorsOf(nodes: readonly RNode[], baseRpr: string, io: RebuildIo): Anc
         k++
         continue
       }
+      // One look, joined across whitespace whatever look the whitespace has
+      // (in a real file most spaces carry their own spacing value).
+      const look = chars[k].look
       let end = k + 1
-      while (end < chars.length && chars[end].special && chars[end].look === chars[k].look) end++
+      for (;;) {
+        while (end < chars.length && chars[end].special && chars[end].look === look) end++
+        let gap = end
+        while (gap < chars.length && /\s/.test(chars[gap].ch)) gap++
+        if (gap > end && gap < chars.length && chars[gap].special && chars[gap].look === look) {
+          end = gap
+          continue
+        }
+        break
+      }
       let start = k
       while (isWordAt(start - 1) && isWordAt(start)) start--
       let grown = end
@@ -497,6 +510,7 @@ function anchorsOf(nodes: readonly RNode[], baseRpr: string, io: RebuildIo): Anc
         owner.push(node)
         offset++
       }
+      levelText += text
       continue
     }
     if (node.kind === "keep") continue
@@ -511,19 +525,32 @@ function anchorsOf(nodes: readonly RNode[], baseRpr: string, io: RebuildIo): Anc
       }
     }
     offset += text.length
+    levelText += text
   }
   flushStretches()
-  return anchors.sort((a, b) => a.order - b.order)
+  return { anchors: anchors.sort((a, b) => a.order - b.order), text: levelText }
 }
 
 function matchAnchors(nodes: readonly RNode[], masked: string, baseRpr: string, io: RebuildIo): Map<RNode, Match> {
   const out = new Map<RNode, Match>()
   const lookMatches: Match[] = []
   let cursor = 0
-  for (const anchor of anchorsOf(nodes, baseRpr, io)) {
+  const { anchors, text: sourceText } = anchorsOf(nodes, baseRpr, io)
+  // In source order; when the translation holds the text as often as the
+  // source paragraph does, the source's n-th occurrence takes the n-th.
+  const find = (needle: string, order: number) => {
+    const inSource = wholeOccurrences(sourceText, needle)
+    const inTarget = wholeOccurrences(masked, needle)
+    const n = inSource.indexOf(order)
+    if (n !== -1 && inSource.length === inTarget.length && inTarget[n] >= cursor) {
+      return { start: inTarget[n], end: inTarget[n] + needle.length }
+    }
+    return findWhole(masked, needle, cursor)
+  }
+  for (const anchor of anchors) {
     // A look stretch's node may carry several stretches; frames carry one.
     if (anchor.looks === undefined && out.has(anchor.node)) continue
-    const found = findWhole(masked, anchor.needle, cursor)
+    const found = find(anchor.needle, anchor.order)
     if (found !== null) {
       const match = { ...found, ...(anchor.looks ? { looks: anchor.looks, text: anchor.needle } : {}) }
       if (anchor.looks) lookMatches.push(match)
@@ -533,7 +560,7 @@ function matchAnchors(nodes: readonly RNode[], masked: string, baseRpr: string, 
     }
     // Not found whole: open it up into its words.
     for (const word of anchor.words ?? []) {
-      const wordFound = findWhole(masked, word.needle, cursor)
+      const wordFound = find(word.needle, word.order)
       if (wordFound === null) continue
       lookMatches.push({ ...wordFound, looks: word.looks, text: word.needle })
       cursor = wordFound.end
@@ -613,6 +640,13 @@ function buildNormalizedMap(text: string): { text: string; starts: number[]; off
     out += m[0].normalize("NFC")
   }
   return { text: out, starts, offsets }
+}
+
+/** Where `needle` occurs in `hay` as a whole word, in order. */
+function wholeOccurrences(hay: string, needle: string): number[] {
+  const out: number[] = []
+  for (let at = findWholeExact(hay, needle, 0); at !== -1; at = findWholeExact(hay, needle, at + 1)) out.push(at)
+  return out
 }
 
 /** First whole-word occurrence of `needle` in `hay` at or after `from`. */

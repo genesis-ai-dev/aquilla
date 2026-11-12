@@ -2211,16 +2211,18 @@ describe("an unrecorded line under the film is a line: Play selected, and the qu
     expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b4" })
   })
 
-  it("a run of lines on their own (no film follows it) still crosses the unrecorded line, on the queue's own timer", async () => {
+  // The review (Nov 12), N9: a run of lines on their own has no film behind
+  // it. Its clock starts at 0:00 wherever its lines are, so the film panel
+  // keeps the picture still under it; crossing an unrecorded line there was
+  // silence over a still picture. "Play selected" on a film file is always a
+  // run of the lines Play plays (`only`), so such a run is the old one.
+  it("a run of lines on their own has no film behind it: an unrecorded line is skipped, as with no film", async () => {
     const cells = chosen()
     linkFilm(10, cells)
     startQueue(ctxFor(cells, { snapshot: true }), 0, true)
     await wait()
     el("b1")!.tick(2)
     await wait()
-    expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b2" })
-    expect(film.reports).toBe(0)
-    await wait(1_750)
     expect(getQueueState()).toMatchObject({ kind: "playing", cellId: "b3" })
   })
 

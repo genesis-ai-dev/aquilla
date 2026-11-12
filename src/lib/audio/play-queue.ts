@@ -506,33 +506,33 @@ export function useProgrammeFilm(): ProgrammeFilm | null {
 }
 
 /**
- * Sam, Nov 12 (question 44): the film is behind every run of the film's
- * lines: a line of it nobody has recorded is a line, played, not skipped, as
- * Play and Play all play it. A run of lines on their own (`snapshot`) or of
- * chosen lines (`only`) still ends with its lines: no run on to the film's
- * end.
+ * Sam, Nov 12 (question 44): the film is behind every run on the file's clock
+ * of the film's lines: a line of it nobody has recorded is a line, played,
+ * not skipped, as Play and Play all play it. A run of chosen lines (`only`)
+ * still ends with its lines: no run on to the film's end. A run of lines on
+ * their own (`snapshot`) has no film behind it (the review, Nov 12): its
+ * clock starts at 0:00 wherever its lines are, so the film panel keeps the
+ * picture still under it.
  */
 function progFilmResolve(): void {
   const ctx = activeContext
   const prog = programme
-  const over = timingMode === "audioFirst" && ctx && prog && prog.slots.length > 0
+  const over = timingMode === "audioFirst" && ctx && !ctx.snapshot && prog && prog.slots.length > 0
     ? filmOverRun(progFilm, ctx.cells.map((c) => c.id))
     : null
-  progFilmEndSec = ctx?.snapshot || ctx?.only ? 0 : over?.runsOnToSec ?? 0
+  progFilmEndSec = ctx?.only ? 0 : over?.runsOnToSec ?? 0
   progFilmCoverSec = over?.coverSec ?? 0
 }
 
 /**
  * May the film be this run's clock where only the film plays? Only on a run
- * of the file's lines played through (Play, Play all, Space, a click). Never
- * on a run of lines on their own (`snapshot`): its clock starts at 0:00
- * wherever its lines are, so the film panel leaves the film still under it.
- * Nor on a run of chosen lines (`only`): the film follows its clock, the
- * file's, as under a recorded line. On those a line only the film plays is
- * crossed on the queue's own timer.
+ * of the file's lines played through (Play, Play all, Space, a click). Not on
+ * a run of chosen lines (`only`): the film follows its clock, the file's, as
+ * under a recorded line, and a line only the film plays is crossed on the
+ * queue's own timer.
  */
 function progFilmMayBeClock(): boolean {
-  return activeContext?.snapshot !== true && !activeContext?.only
+  return !activeContext?.only
 }
 
 /** Is this programme second past the last line, on a run with a film to run

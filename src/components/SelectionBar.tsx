@@ -370,15 +370,20 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
   // the film is its to play; a line laid out past the film's end does not.
   // The workspace's word about the film is read here so the count follows it.
   const film = useProgrammeFilm()
+  // The review (Nov 12), N9: on a film file it is a run of the chosen lines
+  // among the lines Play plays, whichever chosen lines are not among them (a
+  // book's other chapters): the old run of lines on their own has no film.
   const selectionRun = useMemo(() => {
     const ids = playbackRange.map((c) => c.id)
-    const from = playbackLines?.findIndex((c) => c.id === ids[0]) ?? -1
-    if (playbackLines && from >= 0 && ids.every((id) => playbackLines.some((c) => c.id === id))
-      && filmOverRun(film, playbackLines.map((c) => c.id)).coverSec > 0) {
-      const stops = linesPlaybackStopsAt(playbackLines, undefined, film)
-      return { cells: playbackLines, from, only: new Set(ids), stopCount: ids.filter((id) => stops.has(id)).length }
+    if (playbackLines && filmOverRun(film, playbackLines.map((c) => c.id)).coverSec > 0) {
+      const inList = ids.filter((id) => playbackLines.some((c) => c.id === id))
+      const from = playbackLines.findIndex((c) => c.id === inList[0])
+      if (from >= 0) {
+        const stops = linesPlaybackStopsAt(playbackLines, undefined, film)
+        return { cells: playbackLines, from, only: new Set(inList), stopCount: inList.filter((id) => stops.has(id)).length }
+      }
     }
-    return { cells: playbackRange, from: 0, only: null, stopCount: linesPlaybackStopsAt(playbackRange, undefined, film).size }
+    return { cells: playbackRange, from: 0, only: null, stopCount: linesPlaybackStopsAt(playbackRange, undefined, null).size }
   }, [playbackRange, playbackLines, film])
   const playableSelectedCount = selectionRun.stopCount
 

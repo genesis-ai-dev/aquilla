@@ -1364,6 +1364,29 @@ describe("SelectionBar — Play selected (AQU-2123)", () => {
     expect(explicit).toBe(true)
   })
 
+  // The review (Nov 12), N9: a selection with a line that is not among the
+  // lines Play plays (another chapter of a book, say) is still a run of those
+  // lines on a film file, over the chosen ones among them, never the old run
+  // with the picture still.
+  it("on a film file, a selection with a line outside the lines Play plays runs over the chosen ones among them", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-2", "cell-3"]))
+    const audio = audioMapFor(["cell-1"])
+    // The chapter on the timeline holds cell-1 and cell-2; cell-3 is in another.
+    const lines = filmFile(audio, 60).slice(0, 2)
+    renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
+      audioMode: true, session: SESSION, audioByCellId: audio, playbackLines: lines,
+    })
+    expect(playButton().textContent).toContain("2")
+
+    await userEvent.setup().click(playButton())
+
+    const [ctx, fromIndex] = vi.mocked(startQueue).mock.calls[0]
+    expect(ctx.cells).toBe(lines)
+    expect(ctx.snapshot).toBeUndefined()
+    expect([...(ctx.only ?? [])]).toEqual(["cell-1", "cell-2"])
+    expect(fromIndex).toBe(0)
+  })
+
   it("with no film, Play selected is still a run of the chosen lines on their own", async () => {
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-3"]))
     renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {

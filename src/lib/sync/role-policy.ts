@@ -63,6 +63,9 @@ const REQUIRED_ROLE: Record<string, number> = {
   // the server then 403s — the row would vanish optimistically and come back on
   // reload, which reads as data loss rather than as a refusal.
   "source.cell.visibility.set": ROLE.PROJECT_LEAD,
+  // In lock-step with the server (sync-worker role-policy.ts): rewriting a
+  // cell's markup under its translation is a lead's call.
+  "source.cell.metadata.patch": ROLE.PROJECT_LEAD,
   // AQU-1767 phase 2: undo of a removal; the server adds "only who removed it, or a maintainer".
   "source.cell.restore": ROLE.COMMENTER,
 

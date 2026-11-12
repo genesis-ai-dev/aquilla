@@ -30,6 +30,7 @@
 // for provisioning instructions.
 
 import { verifyTokenForProject } from "../auth"
+import { canReadRequestedLane, visibleLanesForRead } from "./lane-read-wall"
 import { branchingSearch } from "../lib/branching-search/algorithm"
 import { loadCorpus, resolveUpstreamProjectId } from "../lib/branching-search/corpus"
 import {
@@ -46,6 +47,7 @@ import {
 export interface BranchingSearchEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
+  LANE_READ_WALL?: string
   /** Optional. When bound, GET responses are cached by
    *  `(projectId, corpusEventMax, queryHash)` with a 60s TTL. Absence
    *  disables the cache; behavior is otherwise identical. */
@@ -132,6 +134,22 @@ export async function handleBranchingSearchRequest(
   // AQU-1025: lane tag, not the Settings display name. Missing param → ""
   // so pre-lanes clients keep the default-lane corpus.
   const targetLang = url.searchParams.get("targetLang") ?? ""
+
+  // AQU-730 read wall: the corpus pairs source text with one lane's target
+  // text, and the lane is the caller's choice. A lane the caller is not
+  // granted answers as an empty corpus. Checked before the cache, whose key
+  // does not carry the caller.
+  const visibleLanes = visibleLanesForRead(env.LANE_READ_WALL, auth.claims)
+  if (!(await canReadRequestedLane(env.AQUILLA_PG, projectId, visibleLanes, targetLang))) {
+    const empty: BranchingSearchResponse = {
+      results: [],
+      provenance: {},
+      upstreamProjectId: null,
+      corpusEventMax: null,
+      corpusSize: 0,
+    }
+    return Response.json(empty)
+  }
 
   // Cache lookup. Build the key from a cheap MAX(event_id) query — we
   // can't use the corpus loader's corpusEventMax here because the corpus

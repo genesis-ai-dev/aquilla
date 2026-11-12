@@ -445,6 +445,30 @@ interface ExportDialogProps {
     onProgress?: (label: string) => void
   }) => Promise<{ name: string; unmatched: number }>
   /**
+   * Places the file's translations into its IDML style runs — the pass a
+   * re-import runs (`alignReimportedIdmlFile`). Offered when an InDesign export
+   * stops on translations that are not in the runs yet: a file a source link
+   * mirrored before it carried the IDML contract was translated as plain text.
+   */
+  onPlaceIdmlTranslations?: (args: {
+    fileId: string
+    fileName: string
+    onProgress?: (done: number, total: number) => void
+  }) => Promise<{
+    /** Validated lines placed as markup only: still validated. */
+    keptValidated: number
+    /** Lines saved as commits: drafts to check. */
+    drafts: number
+    /** Lines left for the editor's Align styles action. */
+    manual: number
+  }>
+  /**
+   * `onPlaceIdmlTranslations` will keep validated lines validated (a project
+   * lead, on the default lane). False: every placed line becomes a draft, and
+   * the dialog says so before the button is pressed.
+   */
+  idmlPlacementKeepsValidation?: boolean
+  /**
    * AQU-654: count of outstanding (non-waived) LQA/validation "health"
    * infractions on the active file. Export NEVER hard-blocks on these — the
    * only export gate is org policy (`canExport`). When there are outstanding
@@ -549,6 +573,8 @@ export function ExportDialog({
   getToken,
   orgId,
   onRepairIdmlCopy,
+  onPlaceIdmlTranslations,
+  idmlPlacementKeepsValidation = false,
   outstandingInfractionCount = 0,
   audioValidationRequirement = 1,
   onJumpToAudioLine,
@@ -1142,6 +1168,57 @@ export function ExportDialog({
     downloadName: string
   } | null>(null)
   const [repairingCopy, setRepairingCopy] = useState(false)
+  // Translations the failed InDesign export found outside the file's style
+  // runs. Non-zero offers the placement beside the error.
+  const [idmlUnplacedCount, setIdmlUnplacedCount] = useState(0)
+  const [placingTranslations, setPlacingTranslations] = useState(false)
+
+  const placeTranslations = async () => {
+    if (!activeFileId || !activeFileName || !onPlaceIdmlTranslations || placingTranslations) return
+    const fileName = activeFileName
+    setPlacingTranslations(true)
+    setStatus({ kind: "busy", msg: t("importExport.dialog.placingIdmlTranslations", { fileName }) })
+    try {
+      const result = await onPlaceIdmlTranslations({
+        fileId: activeFileId,
+        fileName,
+        onProgress: (done, total) => setStatus({
+          kind: "busy",
+          msg: t("importExport.upload.aligningIdmlStyles", {
+            fileName,
+            count: done.toLocaleString(),
+            total: total.toLocaleString(),
+          }),
+        }),
+      })
+      setIdmlRecovery(null)
+      setIdmlUnplacedCount(0)
+      setStatus({
+        kind: "ok",
+        msg: result.manual > 0
+          ? t("importExport.dialog.placedIdmlTranslationsManual", { fileName, count: result.manual })
+          : result.drafts === 0
+            ? t("importExport.dialog.placedIdmlTranslationsKept", { fileName, count: result.keptValidated })
+            : result.keptValidated === 0
+              ? t("importExport.dialog.placedIdmlTranslations", { fileName, count: result.drafts })
+              : t("importExport.dialog.placedIdmlTranslationsMixed", {
+                  fileName,
+                  kept: result.keptValidated.toLocaleString(),
+                  drafts: result.drafts.toLocaleString(),
+                }),
+      })
+    } catch (error) {
+      setStatus({
+        kind: "error",
+        msg: t("importExport.dialog.placeIdmlTranslationsFailed", {
+          fileName,
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      })
+    } finally {
+      setPlacingTranslations(false)
+    }
+  }
 
   const repairCopy = async () => {
     if (!activeFileId || !activeFileName || !onRepairIdmlCopy || repairingCopy) return
@@ -1396,6 +1473,7 @@ export function ExportDialog({
     setStatus({ kind: "busy", msg: t("importExport.status.exporting") })
     setFidelityWarnings([])
     setIdmlRecovery(null)
+    setIdmlUnplacedCount(0)
     let recoverableIdmlOriginal: { bytes: ArrayBuffer; downloadName: string } | null = null
     let idmlTelemetryStartedAt: number | null = null
     try {
@@ -2077,6 +2155,19 @@ export function ExportDialog({
       }
     } catch (e) {
       if (recoverableIdmlOriginal) setIdmlRecovery(recoverableIdmlOriginal)
+      // An InDesign export that stopped may have stopped on translations that
+      // are not in the file's style runs yet. Counted here, over the same cells
+      // the export read, so the error can offer the placement.
+      let unplaced = 0
+      if (recoverableIdmlOriginal && onPlaceIdmlTranslations) {
+        try {
+          const { unplacedIdmlTranslationCount } = await import("@/lib/idml/align-reimported-targets")
+          unplaced = unplacedIdmlTranslationCount(scopeRoundTripCells(cells, contentMode))
+        } catch {
+          unplaced = 0
+        }
+      }
+      setIdmlUnplacedCount(unplaced)
       if (idmlTelemetryStartedAt !== null) {
         analytics.capture("idml export blocked", idmlTelemetryProperties({
           cells,
@@ -2088,7 +2179,14 @@ export function ExportDialog({
           durationMs: performance.now() - idmlTelemetryStartedAt,
         }))
       }
-      const msg = (e as Error).message || t("importExport.status.exportFailed")
+      const msg = unplaced > 0
+        ? t(
+            idmlPlacementKeepsValidation
+              ? "importExport.dialog.idmlTranslationsNotPlacedKeep"
+              : "importExport.dialog.idmlTranslationsNotPlaced",
+            { count: unplaced },
+          )
+        : (e as Error).message || t("importExport.status.exportFailed")
       setStatus({ kind: "error", msg })
       // Never leave a spinning toast behind: this catch covers the whole run,
       // including the long audio export, and an orphaned loading toast sits
@@ -2105,6 +2203,7 @@ export function ExportDialog({
       setStatus({ kind: "idle" })
       setFidelityWarnings([])
       setIdmlRecovery(null)
+      setIdmlUnplacedCount(0)
     }
     onOpenChange(next)
   }
@@ -3178,6 +3277,15 @@ export function ExportDialog({
               {/* i18n-exempt "error" is an export-status kind tag, not copy */}
               {status.kind === "error" && idmlRecovery && (
                 <span className="flex flex-wrap items-center gap-2 pt-1">
+                  {idmlUnplacedCount > 0 && onPlaceIdmlTranslations && (
+                    <Button
+                      type="button"
+                      onClick={() => { void placeTranslations() }}
+                      disabled={placingTranslations}
+                    >
+                      {t("importExport.dialog.placeIdmlTranslations")}
+                    </Button>
+                  )}
                   <Button
                     type="button"
                     variant="outline"

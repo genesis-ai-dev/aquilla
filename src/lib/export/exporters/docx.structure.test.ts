@@ -608,3 +608,30 @@ describe("exportDocx — a mostly right-to-left line (AQU-2539)", () => {
     expect(xml).toContain(`<w:r>${HEB}<w:t xml:space="preserve">${hebrew}</w:t></w:r>`)
   })
 })
+
+describe("exportDocx — removing the last paragraph of a container (AQU-2539)", () => {
+  const removedAt = (...ps: number[]) =>
+    ps.map((p) => ({ metadata: { aquillaImport: { sourceLocator: { kind: "package-block", memberPath: "word/document.xml", blockPath: `w:p[${p}]`, segment: 1 } } } }))
+  const cellOf = (inner: string) => `<w:tbl><w:tr><w:tc><w:tcPr/>${inner}</w:tc></w:tr></w:tbl>`
+
+  async function exportRemoving(body: string, removed: number[]) {
+    const result = await exportDocx(await makeDocx(body), [], { removedCells: removedAt(...removed) })
+    const xml = await (await JSZip.loadAsync(await result.blob.arrayBuffer())).file("word/document.xml")!.async("string")
+    expectWellFormed(xml)
+    return { xml, result }
+  }
+
+  it("empties the only paragraph of a table cell instead of leaving the cell without one", async () => {
+    const { xml, result } = await exportRemoving(para(run("Before")) + cellOf(para(run("Only line"), "TableParagraph")) + para(run("After")), [2])
+    expect(xml).toContain('<w:tc><w:tcPr/><w:p><w:pPr><w:pStyle w:val="TableParagraph"/></w:pPr></w:p></w:tc>')
+    expect(result.removed).toBe(1)
+  })
+
+  it("drops a paragraph that is not its container's last, empties the one that is", async () => {
+    const both = await exportRemoving(cellOf(para(run("One")) + para(run("Two"))) + para(run("After")), [1, 2])
+    expect(both.xml).toContain("<w:tc><w:tcPr/><w:p></w:p></w:tc>")
+    expect(both.xml).not.toContain("One")
+    const first = await exportRemoving(cellOf(para(run("One")) + para(run("Two"))) + para(run("After")), [1])
+    expect(first.xml).toContain(`<w:tc><w:tcPr/>${para(run("Two"))}</w:tc>`)
+  })
+})

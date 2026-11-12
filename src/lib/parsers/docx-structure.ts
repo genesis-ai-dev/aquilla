@@ -58,7 +58,17 @@ export interface DocxParagraphSpan {
   /** For a copy: the index of the paragraph it copies (always a non-copy), or
    *  0 when the branches do not line up and no pairing is safe. */
   copyOf: number
+  /** Which container holds it (a table cell, a text box, a note, the body…),
+   *  as an id shared by the paragraphs directly in that container; 0 for none. */
+  container: number
 }
+
+/** Elements that hold paragraphs and must keep at least one (a table cell
+ *  ends with one; an empty text box or note is not valid Word). */
+const PARAGRAPH_CONTAINERS = new Set([
+  "w:body", "w:tc", "w:txbxContent", "w:footnote", "w:endnote", "w:comment",
+  "w:hdr", "w:ftr", "w:sdtContent", "w:docPartBody",
+])
 
 interface AlternateFrame {
   branches: number[][]
@@ -84,6 +94,8 @@ export function scanDocxParagraphs(xml: string): DocxParagraphSpan[] {
   // Branch elements nest inside frames; track which frame a closing branch ends.
   const branchStack: AlternateFrame[] = []
   let copyDepth = 0
+  const containers: number[] = []
+  let containerCount = 0
 
   scanXmlTags(xml, {
     open(body, start, end, selfClosing) {
@@ -97,12 +109,17 @@ export function scanDocxParagraphs(xml: string): DocxParagraphSpan[] {
           parent: openParagraphs.length > 0 ? openParagraphs[openParagraphs.length - 1].index : 0,
           isCopy: copyDepth > 0,
           copyOf: 0,
+          container: containers.length > 0 ? containers[containers.length - 1] : 0,
         }
         spans.push(span)
         // A paragraph belongs to the current branch of EVERY open frame, so an
         // outer Choice/Fallback pairing also covers paragraphs nested deeper.
         for (const frame of frameStack) frame.openBranch?.push(span.index)
         if (!selfClosing) openParagraphs.push(span)
+        return
+      }
+      if (PARAGRAPH_CONTAINERS.has(name) && !selfClosing) {
+        containers.push(++containerCount)
         return
       }
       if (name === ALTERNATE && !selfClosing) {
@@ -124,6 +141,10 @@ export function scanDocxParagraphs(xml: string): DocxParagraphSpan[] {
       if (name === PARAGRAPH) {
         const span = openParagraphs.pop()
         if (span) span.end = end
+        return
+      }
+      if (PARAGRAPH_CONTAINERS.has(name)) {
+        containers.pop()
         return
       }
       if (name === ALTERNATE) {

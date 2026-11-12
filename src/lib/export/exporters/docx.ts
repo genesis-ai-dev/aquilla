@@ -356,12 +356,12 @@ export async function exportDocx(
 
     // AQU-1068: this paragraph's cell was REMOVED. Emit nothing at all — the
     // paragraph leaves the document. Indices come from the INPUT scan, so
-    // every later locator still resolves; nothing shifts. Inside a text box
-    // the paragraph is emptied instead (pPr kept): a text box must keep at
-    // least one paragraph to stay valid.
+    // every later locator still resolves; nothing shifts. The last paragraph
+    // of its container (a table cell, a text box, a note) is emptied instead,
+    // pPr kept: Word needs a cell or a box to keep a paragraph.
     if (nonEmpty && removedKeys.has(key)) {
       if (!span.isCopy) removed++
-      if (span.parent === 0) return ""
+      if (lastInContainer.get(span.container) !== span.index) return ""
       const open = anchorXml.slice(0, anchorXml.indexOf(">") + 1)
       const inner = anchorXml.slice(open.length, anchorXml.lastIndexOf("</w:p>"))
       return `${open}${extractPPr(inner)}</w:p>`
@@ -404,6 +404,10 @@ export async function exportDocx(
   }
 
   const part: PartContext = { xml, walkContext, renderRange, writeText, translatedLook }
+
+  // The last paragraph directly in each container (see renderParagraph).
+  const lastInContainer = new Map<number, number>()
+  for (const s of spans) if (s.container !== 0) lastInContainer.set(s.container, s.index)
 
   // Paragraphs nested directly in each paragraph (its text boxes' lines).
   const nestedIn = new Map<number, DocxParagraphSpan[]>()

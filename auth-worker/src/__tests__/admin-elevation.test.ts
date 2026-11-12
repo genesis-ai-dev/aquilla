@@ -335,6 +335,8 @@ describe("step-up by deployment (AQU-2470)", () => {
     ["an unknown Worker name", "aquilla-dev-identity-copy"],
   ])("%s still asks for the code", async (_label, workerName) => {
     env.DEPLOYMENT_WORKER_NAME = workerName
+    if (workerName === "aquilla-auth-preview")
+      await env.AQUILLA_PG.prepare("INSERT INTO platform_admins(email) VALUES ('root@example.com')").run()
     await seedUser(7, "root")
     const jwt = await jwtFor("root")
 

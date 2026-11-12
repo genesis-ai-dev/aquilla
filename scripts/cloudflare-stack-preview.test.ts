@@ -83,6 +83,16 @@ describe("full-stack Cloudflare previews", () => {
     expect(JSON.stringify(config)).not.toContain("api.aquilla.app")
   })
 
+  it("binds the shared dev access list only to auth previews", () => {
+    const auth = previewConfig("auth", { cwd: "/repo" })
+    const bindings = auth.previews.kv_namespaces
+    expect(bindings).toEqual([{ binding: "DEV_ACCESS_LIST", id: "9763251a3c84471bac48032d44bf3ea8" }])
+    const toml = readFileSync(join(import.meta.dirname, "..", "auth-worker", "wrangler.toml"), "utf8")
+    expect(toml).toContain(`binding = "DEV_ACCESS_LIST"\nid = "${bindings[0].id}"`)
+    expect(previewConfig("sync", { cwd: "/repo" }).previews).not.toHaveProperty("kv_namespaces")
+    expect(auth.previews.vars.ADMIN_REQUIRE_ELEVATION).toBe("true")
+  })
+
   // AQU-1353: the QA bots could not walk /admin at all, because a preview named
   // no platform admin — every claim about an admin surface came back NOT CHECKED.
   // The fixture that fixed that is also the one thing in this config that hands

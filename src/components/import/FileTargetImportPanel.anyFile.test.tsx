@@ -148,14 +148,26 @@ describe("a .txt translation", () => {
     expect(onImported).toHaveBeenCalledWith(3)
   })
 
-  it("reads the file the way the source was read: on Sentence, three short lines are one line", async () => {
+  it("lines up a file written one sentence per line with its translation on Sentence, line for line", async () => {
     const cells = await importedLines(new File(["In the beginning\nAnd the earth\nAnd God said\n"], "a.txt"))
-    expect(cells).toHaveLength(1)
+    expect(cells).toHaveLength(3)
     renderPanel({ cells })
     await selectFile(new File(["Au commencement\nEt la terre\nEt Dieu dit\n"], "a-fr.txt"))
     expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
-    expect(screen.getByText("1 matched")).toBeInTheDocument()
-    expect(screen.queryByText(/didn't find a line/)).not.toBeInTheDocument()
+    expect(screen.getByText("3 matched")).toBeInTheDocument()
+    expect(rowOf("Et Dieu dit")).toHaveAttribute("data-review-cell", "line-3")
+    // Numbered as the person counts the file's lines.
+    expect(within(rowOf("Et Dieu dit")).getByText("Row 3")).toBeInTheDocument()
+    expect(screen.queryByText("Shared out")).not.toBeInTheDocument()
+  })
+
+  it("names a row by its place, never by an old import's generated paragraph id", async () => {
+    const id = "3f2a1c9e-7b6d-4e21-9a0b-5c8d7e6f1a2b"
+    renderPanel({ cells: lines("In the beginning").map((line) => ({ ...line, canonicalRef: id })), cellUnit: "paragraph" })
+    await selectFile(new File(["Au commencement\n"], "a-fr.txt"))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(within(rowOf("Au commencement")).getByText("Row 1")).toBeInTheDocument()
+    expect(screen.queryByText(id)).not.toBeInTheDocument()
   })
 
   it("says how many paragraphs each side has when one is missing", async () => {
@@ -249,13 +261,65 @@ describe("the file's content picks its reader", () => {
     expect(screen.queryByText(/review matches/i)).not.toBeInTheDocument()
   })
 
-  it("won't pair a document by position with lines that are verses, and says what will", async () => {
+  it("won't pair a document by position with a file whose lines are all verses, and says what will", async () => {
     renderPanel({ cells: VERSES })
     await selectFile(new File([await docx(["Au commencement", "Et la terre"])], "genese.docx"))
     expect(await screen.findByText(
-      "This file's lines are verses, which a translation fills by reference. Import it as USFM, or as a spreadsheet with a reference column.",
+      "The open file's lines are verses, which a translation fills by reference. Import the translation as USFM, or as a spreadsheet with a reference column.",
     )).toBeInTheDocument()
     expect(screen.queryByText(/review matches/i)).not.toBeInTheDocument()
+  })
+
+  it("does pair a document with a file that holds one verse among other lines", async () => {
+    renderPanel({ cells: [VERSES[0], ...lines("Not a verse", "Nor this").slice(1)], cellUnit: "paragraph" })
+    await selectFile(new File(["Au commencement\nPas un verset\n"], "a.txt"))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+  })
+
+  it("pairs an XLIFF by its own source text onto verses, as a round trip through a translation tool does", async () => {
+    renderPanel({ cells: VERSES })
+    const xliff = `<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2"><file source-language="en" target-language="fr"><body>
+<trans-unit id="a"><source>In the beginning</source><target>Au commencement</target></trans-unit>
+<trans-unit id="b"><source>And the earth was formless</source><target>Et la terre</target></trans-unit>
+</body></file></xliff>`
+    await selectFile(new File([xliff], "gen-fr.xlf"))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(rowOf("Et la terre")).toHaveAttribute("data-review-cell", "line-2")
+  })
+
+  it("reads a real USX file with the USFM reader, by verse, and keeps it tagged as USX", async () => {
+    const usx = `<?xml version="1.0" encoding="utf-8"?>
+<usx version="3.0">
+  <book code="GEN" style="id">Genèse</book>
+  <chapter number="1" style="c" sid="GEN 1" />
+  <para style="p">
+    <verse number="1" style="v" sid="GEN 1:1" />Au <char style="nd">commencement</char>.<verse eid="GEN 1:1" />
+    <verse number="2" style="v" sid="GEN 1:2" />Et la terre.<verse eid="GEN 1:2" />
+  </para>
+</usx>`
+    renderPanel({ cells: VERSES })
+    await selectFile(new File([usx], "GEN-fr.usx"))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    // Converted and read as USFM: markers resolved, matched by reference.
+    expect(rowOf("Au commencement.")).toHaveAttribute("data-review-cell", "line-1")
+    expect(rowOf("Et la terre.")).toHaveAttribute("data-review-cell", "line-2")
+    await importNow(/import 2/i)
+    const ctx = vi.mocked(applyEBibleTargetImport).mock.calls[0][2] as { sourceArtifact: { format: string } }
+    expect(ctx.sourceArtifact.format).toBe("usx")
+  })
+
+  it("still reads a .vtt with no WEBVTT line as WebVTT", async () => {
+    renderPanel({ cells: lines("Hello", "Goodbye") })
+    await selectFile(new File(["1\n00:00:01.000 --> 00:00:02.000\nHola\n\n2\n00:00:03.000 --> 00:00:04.000\nAdiós\n"], "ep.vtt"))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(rowOf("Adiós")).toHaveAttribute("data-review-cell", "line-2")
+  })
+
+  it("refuses an old .xls workbook and says what to save it as", async () => {
+    renderPanel()
+    await selectFile(new File(["x"], "old.xls"))
+    expect(await screen.findByText(/^Legacy \.xls workbooks are not supported\./)).toBeInTheDocument()
   })
 })
 
@@ -290,6 +354,16 @@ describe("a Word translation", () => {
     await expectClickNote(within(first).getByText("Shared out"), "Shared out over this paragraph's lines")
     expect(screen.getByRole("button", { name: "Import 4 cells" })).toBeInTheDocument()
     expect(screen.queryByText(/in this file:/)).not.toBeInTheDocument()
+  })
+
+  it("leaves a paragraph whose translation ran out before its lines did unticked", async () => {
+    const cells = lines("The very end of it all.", "Truly it was.", "Finally.").map((line, i) => (i === 0 ? { ...line, paragraphStart: true } : line))
+    renderPanel({ cells })
+    await selectFile(new File([await docx(["Fin."])], "fin.docx"))
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    const row = rowOf("Fin.")
+    expect(checkboxIn(row).checked).toBe(false)
+    await expectClickNote(within(row).getByText("Shared out"), "the translation is shorter than its lines")
   })
 })
 

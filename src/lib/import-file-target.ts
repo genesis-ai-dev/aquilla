@@ -31,6 +31,7 @@ import {
 import { extractSbvStrings } from "./parsers/sbv"
 import { frameRateScalesNear, snapToFrameRatio } from "./import/timebase"
 import { resolveTargetCommitParent } from "@/lib/sync/target-commit-parent"
+import { isScriptureAddress } from "@/lib/import/normalized-manifest"
 import { formatVerseReference, parseVerseReference, type VerseReference } from "./scripture-reference"
 
 /** Cell descriptor for file-scoped matching — SourceCellRef plus the source
@@ -53,6 +54,9 @@ export interface FileTargetCellRef extends SourceCellRef {
    *  file paragraph by paragraph when both sides carry it (AQU-2544). Absent
    *  on a paragraph's later lines, and on every line of an older import. */
   paragraphStart?: boolean
+  /** A PO entry's context (msgctxt), stored with the line
+   *  (`metadata.po.msgctxt`): two entries with the same msgid pair by it. */
+  sourceContext?: string
 }
 
 /** The slice of an editor cell summary the file-scoped target import reads.
@@ -73,6 +77,7 @@ export interface FileTargetCellSource {
   startTime?: number
   endTime?: number
   paragraphStart?: boolean
+  msgctxt?: string
 }
 
 /** One open-file cell as the matchers want it.
@@ -98,6 +103,7 @@ export function toFileTargetCell(c: FileTargetCellSource): FileTargetCellRef {
       : {}),
     ...(c.context ? { cueRef: c.context } : {}),
     ...(c.paragraphStart ? { paragraphStart: true } : {}),
+    ...(c.msgctxt ? { sourceContext: c.msgctxt } : {}),
   }
 }
 
@@ -398,10 +404,11 @@ function lineLabel(cell: FileTargetCellRef): string {
   return GENERATED_ID.test(ref) ? "" : ref
 }
 
-/** True when the open file's lines are verses: some line's group reads as a
- *  verse reference. A translation fills those by reference (AQU-2544). */
+/** True when every line of the open file is a verse, or a heading among the
+ *  verses: a scripture file, which a translation fills by reference, never
+ *  by position (AQU-2544). */
 export function linesAreVerses(cells: readonly FileTargetCellRef[]): boolean {
-  return cells.some((cell) => canonicalVerseRef(cell.canonicalRef) !== null)
+  return cells.length > 0 && cells.every((cell) => isScriptureAddress(cell.canonicalRef))
 }
 
 /** A ref in the app's own spelling when it reads as a verse (`Genesis 1:4`,
@@ -1458,13 +1465,6 @@ function pairStretch(
   return pairs.reverse()
 }
 
-/** The gettext context in an identity written `msgid\u0004msgctxt`, the way
- *  the PO parser writes a line's group (gettext's own separator). */
-export function gettextContext(identity: string | null | undefined): string | undefined {
-  const at = identity?.indexOf("\u0004") ?? -1
-  return identity && at >= 0 ? identity.slice(at + 1) : undefined
-}
-
 function withContext(key: string, context: string | undefined): string {
   return context ? `${key}\u0004${context}` : key
 }
@@ -1478,7 +1478,7 @@ function matchRowsBySource(rows: TargetRow[], cells: FileTargetCellRef[]): FileT
   // A PO entry's msgctxt rides with its text on both sides, so two entries
   // with the same msgid ("Open" the menu, "Open" the door) each find their own.
   const rowKeys = taking.map(({ row }) => withContext(sourceKey(row.source ?? ""), row.sourceContext))
-  const cellKeys = cells.map((cell) => withContext(sourceKey(cell.original), gettextContext(cell.canonicalRef)))
+  const cellKeys = cells.map((cell) => withContext(sourceKey(cell.original), cell.sourceContext))
   const similarity = makeSimilarity(rowKeys, cellKeys)
 
   const lineForRow = new Map<number, number>()
@@ -1565,10 +1565,11 @@ const CLAUSE_MARK = /[,;:،؛、，；：՝፣፤၊]/
 const UNSPACED_MARK = /[。！？、，；：]/
 /** Closing quotes and brackets, which stay with the sentence before them. */
 const CLOSER = /["'”’»)\]」』）]/
-/** What a cut after a clause mark, or between words, costs next to one after
- *  a sentence end: it must land this much closer to where the source's line
- *  ends, as a share of the paragraph's length, to be taken instead. */
-const CUT_PENALTY = [0, 0.1, 0.25] as const
+/** Opening quotes and brackets, and the Spanish ¿ ¡: written apart (French
+ *  spacing), they stay with the word after them. */
+const OPENER = /[«“‘([¿¡「『（]/
+const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u
+const SPACE = /\s/
 
 interface Cut {
   /** The cut falls before this character. */
@@ -1577,67 +1578,102 @@ interface Cut {
   rank: 0 | 1 | 2
 }
 
-/** Every place a paragraph can be cut. */
+/** Every place a paragraph can be cut, in order. A mark written apart from
+ *  its word ("Viens !", "» Puis", "« Viens") is part of that word: a piece
+ *  never starts with a closing mark, nor ends with an opening one. */
 function cutsOf(text: string): Cut[] {
+  /** The mark a cut at `at` follows: the last character before it, past
+   *  closing marks and the spaces French sets before them. */
   const markBefore = (at: number): string => {
     let i = at - 1
-    while (i > 0 && CLOSER.test(text[i])) i--
+    while (i > 0 && (CLOSER.test(text[i]) || SPACE.test(text[i]))) i--
     return text[i]
   }
   const rankOf = (mark: string): Cut["rank"] => (SENTENCE_END.test(mark) ? 0 : CLAUSE_MARK.test(mark) ? 1 : 2)
-  const cuts: Cut[] = []
-  for (let at = 1; at < text.length; at++) {
-    const space = /\s/.test(text[at])
-    if (/\s/.test(text[at - 1])) continue
-    if (space) cuts.push({ at, rank: rankOf(markBefore(at)) })
-    else if (!CLOSER.test(text[at]) && UNSPACED_MARK.test(markBefore(at))) cuts.push({ at, rank: rankOf(markBefore(at)) })
+  // Each word's place, and what it is made of; the words themselves aren't kept.
+  const words: Array<{ start: number; end: number; marksOnly: boolean; opens: boolean; unspaced: boolean }> = []
+  for (const match of text.matchAll(/\S+/g)) {
+    const word = match[0]
+    const marksOnly = !LETTER_OR_DIGIT.test(word)
+    words.push({
+      start: match.index,
+      end: match.index + word.length,
+      marksOnly,
+      opens: marksOnly && OPENER.test(word),
+      unspaced: UNSPACED_MARK.test(word),
+    })
   }
+  const cuts: Cut[] = []
+  words.forEach(({ start, end, marksOnly, opens, unspaced }, w) => {
+    // Inside a word: after a mark written with no space after it (CJK).
+    if (unspaced) {
+      for (let at = start + 1; at < end; at++) {
+        if (CLOSER.test(text[at])) continue
+        const mark = markBefore(at)
+        if (UNSPACED_MARK.test(mark)) cuts.push({ at, rank: rankOf(mark) })
+      }
+    }
+    // Between this word and the next: not before a closing mark written
+    // apart, nor after an opening one.
+    const next = words[w + 1]
+    if (!next || (next.marksOnly && !next.opens) || (marksOnly && opens)) return
+    cuts.push({ at: end, rank: rankOf(markBefore(end)) })
+  })
   return cuts
+}
+
+/** The better of two cuts for a line ending at `target`: the one after a
+ *  sentence end, else after a clause mark, else between words; the nearer
+ *  of two of a kind. */
+function betterCut(a: Cut, b: Cut, target: number): boolean {
+  return a.rank < b.rank || (a.rank === b.rank && Math.abs(a.at - target) < Math.abs(b.at - target))
 }
 
 /** A paragraph's text cut into one piece per line, in order: at its own
  *  sentence ends where it can, then at clause marks, then between words,
  *  each line's piece about as long, in proportion, as its source line. Fewer
- *  pieces than lines only when the text has fewer words than that. */
+ *  pieces than lines only when the text has fewer places to cut than that.
+ *
+ *  One walk over the lines (AQU-2544 review: a search over every line and
+ *  every cut froze the tab on a big paragraph). Each line gets the best cut
+ *  in its own stretch of the text — from halfway after the previous line's
+ *  target to halfway before the next one's — never before the previous
+ *  cut, and always leaving one for every line after it. */
 export function shareOut(text: string, lineLengths: readonly number[]): string[] {
   const n = lineLengths.length
-  const cuts = cutsOf(text)
-  let chosen = n > 1 ? cuts : []
-  if (n > 1 && cuts.length > n - 1) {
+  const cuts = n > 1 ? cutsOf(text) : []
+  let chosen = cuts
+  if (cuts.length > n - 1) {
     const total = lineLengths.reduce((sum, length) => sum + length, 0)
+    const targets: number[] = []
     let before = 0
-    const targets = lineLengths.slice(0, -1).map((length, k) => {
-      before += length
-      return text.length * (total > 0 ? before / total : (k + 1) / n)
-    })
-    const cost = (k: number, cut: Cut) => Math.abs(cut.at - targets[k]) / text.length + CUT_PENALTY[cut.rank]
-    // Fewest total cost over n−1 cuts in order: best[k][j] is the best way to
-    // make cut k at cuts[j]; from[k][j] the cut k−1 it follows.
-    let best = cuts.map((cut) => cost(0, cut))
-    const from: number[][] = [cuts.map(() => -1)]
-    for (let k = 1; k < n - 1; k++) {
-      const next = cuts.map(() => Infinity)
-      const back = cuts.map(() => -1)
-      let low = Infinity
-      let lowAt = -1
-      for (let j = 1; j < cuts.length; j++) {
-        if (best[j - 1] < low) {
-          low = best[j - 1]
-          lowAt = j - 1
-        }
-        if (lowAt >= 0) {
-          next[j] = low + cost(k, cuts[j])
-          back[j] = lowAt
-        }
-      }
-      best = next
-      from.push(back)
+    for (let k = 0; k < n - 1; k++) {
+      before += lineLengths[k]
+      targets.push(text.length * (total > 0 ? before / total : (k + 1) / n))
     }
-    let j = best.reduce((low, cost, at) => (cost < best[low] ? at : low), 0)
     chosen = []
-    for (let k = n - 2; k >= 0; k--) {
-      chosen.unshift(cuts[j])
-      j = from[k][j]
+    let previous = -1
+    let scan = 0
+    for (let k = 0; k < n - 1; k++) {
+      const first = previous + 1
+      const last = cuts.length - (n - 1 - k)
+      const stretchEnd = k + 1 < n - 1 ? (targets[k] + targets[k + 1]) / 2 : text.length
+      let best = -1
+      let i = Math.max(first, scan)
+      for (; i <= last && cuts[i].at <= stretchEnd; i++) {
+        if (best < 0 || betterCut(cuts[i], cuts[best], targets[k])) best = i
+      }
+      scan = i
+      if (best < 0) {
+        // Nothing in this line's stretch: the nearest cut either side of it.
+        const after = Math.min(Math.max(first, scan), last)
+        const beforeIt = after - 1 >= first ? after - 1 : -1
+        best = beforeIt >= 0 && Math.abs(cuts[beforeIt].at - targets[k]) < Math.abs(cuts[after].at - targets[k])
+          ? beforeIt
+          : after
+      }
+      chosen.push(cuts[best])
+      previous = best
     }
   }
   const pieces: string[] = []
@@ -1668,16 +1704,19 @@ export function shareOut(text: string, lineLengths: readonly number[]): string[]
  */
 function fillParagraph(
   lines: FileTargetCellRef[],
-  pieces: ReadonlyArray<{ row: TargetRow; rowIndex: number }>,
+  pieces: readonly TargetRow[],
+  /** The paragraph's place in the uploaded file, from 0: what its rows are
+   *  numbered by, the way the person counts the file ("Row 4" is the 4th
+   *  paragraph, however the splitter cut it). */
+  rowIndex: number,
 ): FileTargetMatchedCell[] {
   if (pieces.length === lines.length) {
     return lines.map((cell, i) => ({
-      ...toMatchedCell(cell, pieces[i].row.text, pieces[i].row.ref ?? lineLabel(cell)),
-      rowIndex: pieces[i].rowIndex,
+      ...toMatchedCell(cell, pieces[i].text, pieces[i].ref ?? lineLabel(cell)),
+      rowIndex,
     }))
   }
-  const whole = pieces.map(({ row }) => row.text.trim()).join(" ")
-  const rowIndex = pieces[0].rowIndex
+  const whole = pieces.map((row) => row.text.trim()).join(" ")
   if (lines.length === 1) return [{ ...toMatchedCell(lines[0], whole, lineLabel(lines[0])), rowIndex }]
   const shares = shareOut(whole, lines.map((cell) => cell.original.length))
   const short = shares.length < lines.length
@@ -1690,15 +1729,14 @@ function fillParagraph(
 
 /** Order matching paragraph by paragraph — see above. */
 function matchRowsByParagraph(rows: TargetRow[], cells: FileTargetCellRef[]): FileTargetMatchResult {
-  const pieces = rows.map((row, rowIndex) => ({ row, rowIndex })).filter(({ row }) => row.text.trim())
-  const incoming = paragraphsOf(pieces, ({ row }) => row.paragraphStart === true)
+  const incoming = paragraphsOf(rows.filter((row) => row.text.trim()), (row) => row.paragraphStart === true)
   const open = paragraphsOf(cells, (cell) => cell.paragraphStart === true)
   const matched: FileTargetMatchedCell[] = []
   const orphans: TargetOrphan[] = []
   incoming.forEach((paragraph, at) => {
     const lines = open[at]
-    if (lines) matched.push(...fillParagraph(lines, paragraph))
-    else for (const { row, rowIndex } of paragraph) orphans.push({ ref: row.ref ?? "", text: row.text, rowIndex })
+    if (lines) matched.push(...fillParagraph(lines, paragraph, at))
+    else for (const row of paragraph) orphans.push({ ref: row.ref ?? "", text: row.text, rowIndex: at })
   })
   const uncovered = uncoveredLines(cells, matched)
   return {
@@ -1879,8 +1917,9 @@ export function usfmToTargetRows(
 export interface ParsedLine {
   original: string
   translated: string
-  /** The line's identity in its format; a PO entry's carries its msgctxt. */
-  group?: string
+  /** The parser's own data for the line; a PO entry's holds its msgctxt
+   *  (`po.msgctxt`), stored with the line the same way on import. */
+  metadata?: Record<string, unknown>
   /** First line of a paragraph (docx, txt, md). */
   paragraphStart?: boolean
 }
@@ -1899,7 +1938,8 @@ export function parsedLinesToTargetRows(lines: readonly ParsedLine[]): TargetRow
   const bilingual = lines.some((line) => line.translated.trim())
   if (bilingual) {
     return lines.map((line) => {
-      const context = gettextContext(line.group)
+      const po = line.metadata?.po as { msgctxt?: unknown } | undefined
+      const context = typeof po?.msgctxt === "string" && po.msgctxt ? po.msgctxt : undefined
       return { text: line.translated.trim(), source: line.original, ...(context ? { sourceContext: context } : {}) }
     })
   }

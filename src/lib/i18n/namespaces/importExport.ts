@@ -1367,8 +1367,8 @@ export const importExport = defineNamespace({
     "importExport.fileTarget.noCuesInSubtitle": "No subtitle cues found in this file.",
     "importExport.fileTarget.noCuesInVtt": "No cues found in this VTT file.",
     "importExport.fileTarget.noVersesInUsfm": "No verses found in this USFM file.",
-    "importExport.fileTarget.versesNeedReferences": "This file's lines are verses, which a translation fills by " +
-      "reference. Import it as USFM, or as a spreadsheet with a reference column.",
+    "importExport.fileTarget.versesNeedReferences": "The open file's lines are verses, which a translation fills by " +
+      "reference. Import the translation as USFM, or as a spreadsheet with a reference column.",
     "importExport.fileTarget.title": "Import target translations into \"{fileName}\"",
     // AQU-1673 — "Import as proposals": the same mapping/review flow, but the
     // values land as staged proposals behind the approval gate.
@@ -1540,8 +1540,8 @@ export const importExport = defineNamespace({
       "the rest of the range gets no text of its own",
     "importExport.review.rowSharedOutPill": "Shared out",
     "importExport.review.rowSharedOut": "Shared out over this paragraph's lines: check where the sentences fall",
-    "importExport.review.rowSharedOutShort": "Shared out over this paragraph's lines, but it has fewer words than " +
-      "lines, so its last lines stay empty: check it",
+    "importExport.review.rowSharedOutShort": "Shared out over this paragraph's lines, but the translation is " +
+      "shorter than its lines, so the last ones stay empty: check it",
     "importExport.review.rowSameAsSource": "Same as the source",
     "importExport.review.rowIncomingSource": "Source in this row: {text}",
     "importExport.review.rowWrittenAs": "as written: {ref}",
@@ -3849,11 +3849,11 @@ export const importExport = defineNamespace({
       "importExport.fileTarget.versesNeedReferences": {
         description:
           "Error shown in red under the drop area when a document (a text or Word " +
-          "file, for example) is chosen as the translation of a scripture file. " +
-          "Scripture lines are verses, matched by their reference (book, chapter " +
-          "and verse), which such a document doesn't carry. The second sentence " +
-          "names the two kinds of file that do. 'USFM' is a scripture format name; " +
-          "keep it as it is.",
+          "file, for example) is chosen as the translation of a file whose lines " +
+          "are all verses. The first sentence is about the OPEN file, the one being " +
+          "filled: verses are matched by their reference (book, chapter and verse), " +
+          "which such a document doesn't carry. The second names the two kinds of " +
+          "file that do. 'USFM' is a scripture format name; keep it as it is.",
       },
       "importExport.fileTarget.title": {
         description:
@@ -4564,7 +4564,7 @@ export const importExport = defineNamespace({
           "list. A paragraph of the uploaded translation came in a different number " +
           "of pieces than the open file's paragraph has lines, so its text was " +
           "divided among those lines; this row holds one part. The row stays " +
-          "ticked. One or two words, no closing full stop.",
+          "ticked unless the translation ran short. One or two words, no closing full stop.",
       },
       "importExport.review.rowSharedOut": {
         description:
@@ -4574,9 +4574,10 @@ export const importExport = defineNamespace({
       },
       "importExport.review.rowSharedOutShort": {
         description:
-          "The same note as for 'Shared out', when the paragraph's translation has " +
-          "fewer words than the paragraph has lines, so the paragraph's last lines " +
-          "get no text. One sentence, no closing full stop.",
+          "The same note as for 'Shared out', when the paragraph's translation is " +
+          "too short to give every line of the paragraph some text, so the last " +
+          "lines get none and the row starts unticked. True for any script, with or " +
+          "without spaces between words. One sentence, no closing full stop.",
       },
       "importExport.review.rowSameAsSource": {
         description:

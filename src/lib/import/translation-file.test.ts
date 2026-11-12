@@ -22,15 +22,20 @@
 
 import { describe, expect, it } from "vitest"
 import JSZip from "jszip"
-import { prepareImportFile } from "@/lib/import"
+import { getHeapStatistics } from "node:v8"
+import { buildBulkCellsWithSpeakers, prepareImportFile } from "@/lib/import"
+import { CellStore } from "@/hooks/useActiveCellStore"
+import type { CellRow } from "@/lib/sync/cells-read-types"
 import { plainTextStructuredBody } from "@/lib/export/plaintext-structured"
 import {
+  linesAreVerses,
   matchTargetRowsByOrder,
   parsedLinesToTargetRows,
   shareOut,
   type FileTargetCellRef,
   type FileTargetMatchResult,
 } from "@/lib/import-file-target"
+import { fileTargetCellRef } from "./cell-refs"
 import { FILE_TARGET_EXTENSIONS, isFileTargetFileName } from "./translation-destination"
 import { readTranslationFile, translationFileType } from "./translation-file"
 
@@ -42,20 +47,25 @@ function file(content: BlobPart, name: string): File {
   return new File([content], name)
 }
 
-/** The open file's lines, as the source import makes them from `source`,
- *  carrying the paragraph starts the editor stores with them. */
+/** The open file's lines as the app has them after importing `source`: the
+ *  cells the import sends (`buildBulkCellsWithSpeakers`), stored, and read
+ *  back by the real cell store, the way the review is handed them. So a line
+ *  has only what the app stores: its paragraph start and a PO entry's context
+ *  from its metadata, and a group only when it is a scripture address. */
 async function sourceLines(source: File, cellUnit?: "sentence" | "paragraph"): Promise<FileTargetCellRef[]> {
   const prepared = await prepareImportFile(source, { ...PROJECT, cellUnit })
-  return prepared.results.flatMap((result) => result.strings).map((s, i) => ({
-    cellId: `line-${i + 1}`,
-    fileId: "open-file",
-    sourceEventId: `se-${i + 1}`,
-    targetEventId: undefined,
-    translated: "",
-    canonicalRef: s.group,
-    original: s.original,
-    ...(s.paragraphStart ? { paragraphStart: true } : {}),
-  }))
+  const { cells } = buildBulkCellsWithSpeakers(prepared.results.flatMap((result) => result.strings), {
+    fileName: source.name,
+    fileType: prepared.fileType,
+  })
+  const store = new CellStore()
+  store.setRuntime({ projectId: PROJECT.projectId, fileId: "open-file", username: "tester", requiredValidations: 1, auditStats: new Map() })
+  store.replaceRows(cells.map((cell, i): CellRow => ({
+    cellId: `line-${i + 1}`, side: "source", value: cell.value, valueHtml: cell.valueHtml ?? null, type: cell.type ?? "text",
+    canonicalRef: cell.canonicalRef ?? null, anchorCellId: i === 0 ? null : `line-${i}`, eventId: `se-${i + 1}`,
+    sourceEventId: null, lastEditor: "tester", lastEditAt: 1, validated: false, wordCount: 1, metadata: cell.metadata ?? null,
+  })))
+  return store.getAllSummaries().map(fileTargetCellRef)
 }
 
 /** The pieces the source import cuts a file into. */
@@ -147,6 +157,31 @@ describe("a Word translation on the Sentence setting", () => {
     // Cut at the translation's own sentence ends.
     expect(got["line-6"]).toBe("En el río, el barquero dormía.")
     expect(result.countMismatch).toBeUndefined()
+    // Rows are numbered by the file's paragraphs, as the person counts them:
+    // the 4th paragraph is "Row 4", not the splitter's 6th piece.
+    expect(result.matched.map((m) => m.rowIndex)).toEqual([0, 1, 1, 1, 2, 3, 3, 4])
+  })
+
+  it("puts a paragraph cut into more pieces than its one line back together on that line, unflagged", async () => {
+    const lines = await sourceLines(file(await docx(["Morning came early.", "They walked on."]), "a.docx"), SENTENCE)
+    const translation = file(await docx(["La mañana llegó temprano.", ES_LONG2]), "b.docx")
+    expect(await piecesOf(translation, SENTENCE)).toHaveLength(3)
+    const result = await translate(translation, lines, SENTENCE)
+    expect(filled(result)["line-2"]).toBe(ES_LONG2)
+    expect(result.matched.every((m) => !m.flag)).toBe(true)
+  })
+
+  it("lines up a .txt written one paragraph per line with a Word source, paragraph for paragraph", async () => {
+    const lines = await sourceLines(file(await docx(EN_DOC), "road.docx"), SENTENCE)
+    const translation = file(ES_DOC.map((p) => p.replace(/^# /, "")).join("\n") + "\n", "camino.txt")
+    const result = await translate(translation, lines, SENTENCE)
+    expect(result.countMismatch).toBeUndefined()
+    // Each paragraph's lines hold that paragraph's translation, in order.
+    const byLine = filled(result)
+    expect(byLine["line-1"]).toBe("El camino al norte")
+    expect(["line-3", "line-4", "line-5"].map((id) => byLine[id]).join(" ")).toBe(ES_LONG1)
+    expect(["line-7", "line-8"].map((id) => byLine[id]).join(" ")).toBe(ES_LONG2)
+    expect(byLine["line-9"]).toBe("Fin.")
   })
 
   it("says how many paragraphs each side has when one is missing", async () => {
@@ -187,19 +222,35 @@ describe("a .txt translation", () => {
     "Y llamó Dios a la luz Día, y a las tinieblas llamó Noche.",
   ]
 
-  it("fills the 2 lines an 8-sentence file was joined into on the Sentence setting", async () => {
+  // Question 51: on Sentence, a .txt with no blank lines is one paragraph per
+  // line, so a file written one sentence per line and its translation written
+  // the same way line up line for line.
+  it("lines up a one-sentence-per-line file and its translation 1:1 on Sentence, nothing shared out", async () => {
     const lines = await sourceLines(file(EN8.join("\n") + "\n", "genesis.txt"), SENTENCE)
-    expect(lines).toHaveLength(2)
+    expect(lines).toHaveLength(8)
     const result = await translate(file(ES8.join("\n") + "\n", "genesis-es.txt"), lines, SENTENCE)
-    expect(filled(result)).toEqual({ "line-1": ES8.slice(0, 4).join(" "), "line-2": ES8.slice(4).join(" ") })
-    expect(result.orphans).toEqual([])
+    expect(Object.values(filled(result))).toEqual(ES8)
+    expect(result.matched.some((m) => m.flag)).toBe(false)
+
+    const three = await sourceLines(file("In the beginning\nAnd the earth\nAnd God said\n", "a.txt"), SENTENCE)
+    expect(filled(await translate(file("Au commencement\nEt la terre\nEt Dieu dit\n", "a-fr.txt"), three, SENTENCE)))
+      .toEqual({ "line-1": "Au commencement", "line-2": "Et la terre", "line-3": "Et Dieu dit" })
   })
 
-  it("fills the 1 line a 3-line file became on the Sentence setting", async () => {
-    const lines = await sourceLines(file("In the beginning\nAnd the earth\nAnd God said\n", "a.txt"), SENTENCE)
-    expect(lines).toHaveLength(1)
-    const result = await translate(file("Au commencement\nEt la terre\nEt Dieu dit\n", "a-fr.txt"), lines, SENTENCE)
-    expect(filled(result)).toEqual({ "line-1": "Au commencement\nEt la terre\nEt Dieu dit" })
+  it("lines up 300 sentences 1:1 on Sentence, however their lengths drift", async () => {
+    const words = (n: number, tag: string) => Array.from({ length: n }, (_, i) => `${tag}${i}`).join(" ")
+    const en: string[] = []
+    const es: string[] = []
+    for (let i = 0; i < 300; i++) {
+      en.push(`S${i} ${words(5 + (i * 7) % 12, "e")}.`)
+      // The translation runs shorter, then longer, than its source.
+      es.push(`S${i} ${words(Math.max(2, Math.round((5 + (i * 7) % 12) * (i < 150 ? 0.8 : 1.5))), "s")}.`)
+    }
+    const lines = await sourceLines(file(en.join("\n") + "\n", "long.txt"), SENTENCE)
+    expect(lines).toHaveLength(300)
+    const result = await translate(file(es.join("\n") + "\n", "long-es.txt"), lines, SENTENCE)
+    expect(Object.values(filled(result))).toEqual(es)
+    expect(result.matched.some((m) => m.flag)).toBe(false)
   })
 
   it("fills line 1, 2, 3 from one translation per line on the Paragraph setting", async () => {
@@ -324,6 +375,31 @@ describe("sharing a paragraph out over its lines", () => {
     expect(shareOut("Fin total", lengths)).toEqual(["Fin", "total"])
   })
 
+  // AQU-2544 review round 2: the first search kept a number for every line and
+  // every cut point (200 KB took 4.2 s and ~47 million numbers; 1 MB would
+  // take minutes and several GB). It walks the lines once now.
+  it("shares a 1 MB paragraph over 2,000 lines in under a second, without growing memory", () => {
+    const sentence = "Y dijo Dios que la luz era buena y separó la luz de las tinieblas para siempre."
+    const text = Array(Math.ceil((1024 * 1024) / (sentence.length + 1))).fill(sentence).join(" ")
+    const lines = Array(2000).fill(text.length / 2000)
+    const heapBefore = getHeapStatistics().used_heap_size
+    const started = performance.now()
+    const pieces = shareOut(text, lines)
+    const took = performance.now() - started
+    const grew = getHeapStatistics().used_heap_size - heapBefore
+    expect(took).toBeLessThan(1000)
+    expect(grew).toBeLessThan(150 * 1024 * 1024)
+    expect(pieces).toHaveLength(2000)
+    expect(pieces.join(" ")).toBe(text)
+    expect(pieces.every((piece) => piece.endsWith("."))).toBe(true)
+  })
+
+  it("never starts a piece with closing punctuation written apart, as French spacing does", () => {
+    const pieces = shareOut("« Viens ! » Puis il partit . Elle resta ; il revint !", [12, 12, 12])
+    expect(pieces).toEqual(["« Viens ! »", "Puis il partit .", "Elle resta ; il revint !"])
+    expect(pieces.every((piece) => /^[\p{L}\p{N}«]/u.test(piece))).toBe(true)
+  })
+
   it("flags the short paragraph's rows when its last lines stay empty", async () => {
     const lines: FileTargetCellRef[] = ["The very end of it all.", "Truly.", "Finally."].map((original, i) => ({
       cellId: `line-${i + 1}`, fileId: "f", sourceEventId: `se-${i}`, targetEventId: undefined, translated: "", original,
@@ -334,6 +410,25 @@ describe("sharing a paragraph out over its lines", () => {
       ["line-1", "Fin.", "sharedOut", true],
     ])
     expect(result.uncovered.map((u) => u.cellId)).toEqual(["line-2", "line-3"])
+  })
+})
+
+describe("lines that are verses, and how rows are named", () => {
+  const line = (canonicalRef: string | undefined, i: number): FileTargetCellRef => ({
+    cellId: `line-${i + 1}`, fileId: "f", sourceEventId: `se-${i}`, targetEventId: undefined, translated: "",
+    original: `Line ${i + 1}`, canonicalRef,
+  })
+
+  it("calls a file verses only when every line is a verse or a heading among them", () => {
+    expect(linesAreVerses(["GEN 1:1", "GEN 1:s1:1", "GEN 1:2"].map(line))).toBe(true)
+    expect(linesAreVerses(["GEN 1:1", undefined, undefined].map(line))).toBe(false)
+    expect(linesAreVerses([])).toBe(false)
+  })
+
+  it("never names a row by a line's generated paragraph id, as imports before July 21 stored it", () => {
+    const lines = ["3f2a1c9e-7b6d-4e21-9a0b-5c8d7e6f1a2b", "GEN 1:2"].map(line)
+    const result = matchTargetRowsByOrder([{ text: "Un" }, { text: "Deux" }], lines)
+    expect(result.matched.map((m) => m.ref)).toEqual(["", "GEN 1:2"])
   })
 })
 

@@ -5,7 +5,8 @@
  * source import does: the type its extension names, unless its text says it
  * is something else (the source import's own content sniffing), so a USFM
  * file saved as .txt goes to the USFM reader and a .txt holding JSON is
- * refused like a .json. One step the source import leaves to AI-assisted
+ * refused like a .json. The text only overrules an extension the review has
+ * no reader of its own for (.txt, .md, .html…). One step the source import leaves to AI-assisted
  * reading is taken here without it: a .txt of records — tab-separated, or
  * comma-separated under a header row naming its columns — is a spreadsheet,
  * and goes to the column mapping.
@@ -35,6 +36,10 @@ import type { CellUnit, FileType } from "@/lib/parsers/types"
 import { isTranslationType, translationTypeByName } from "@/lib/import/translation-destination"
 import type { SourceArtifactFormat } from "../../../shared/import-contract"
 
+/** The formats the review reads with a reader of its own: USFM by verse,
+ *  subtitles by timing, spreadsheets through the column mapping. */
+const OWN_READER_TYPES: ReadonlySet<FileType> = new Set<FileType>(["usfm", "vtt", "srt", "sbv", "csv", "tsv", "xlsx"])
+
 export interface TranslationFileType {
   /** What the file is read as; null for a file of no type the import knows. */
   type: FileType | null
@@ -53,6 +58,9 @@ export async function translationFileType(file: File): Promise<TranslationFileTy
     // A package (Word, PowerPoint, a workbook…): its extension says what it is.
     return { type: byName }
   }
+  // An extension the review has a reader of its own for is that format, as
+  // it always was: a .vtt without its WEBVTT line is still WebVTT.
+  if (OWN_READER_TYPES.has(byName)) return { type: byName, text }
   const sniffed = sniffKnownTextFile(text)
   if (sniffed) return { type: sniffed, text }
   if (byName === "txt") {

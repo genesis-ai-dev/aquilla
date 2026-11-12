@@ -745,9 +745,11 @@ export function FileTargetImportPanel({
           // a decision: ticked, with its pill and a Swap (Sam, 09-23).
           // A bridged row (AQU-2508) is an anchoring decision, not a plain
           // pairing: it starts unticked like a contest or a differing source.
-          // So does a row that is only its line's source text (AQU-2544); a
-          // paragraph shared out over its lines is a heads-up, and stays ticked.
-          .filter((m) => !m.hasConflict && !m.alreadyThere && !m.sameAsSource && m.flag !== "contested" && m.flag !== "sourceDiffers" && m.flag !== "bridged" && !m.sharedTimingUnpaired)
+          // So does a row that is only its line's source text (AQU-2544). A
+          // paragraph shared out over its lines is a heads-up and stays
+          // ticked, unless its text ran out before its lines did: that is
+          // almost always a mispairing or missing text.
+          .filter((m) => !m.hasConflict && !m.alreadyThere && !m.sameAsSource && !m.sharedOutShort && m.flag !== "contested" && m.flag !== "sourceDiffers" && m.flag !== "bridged" && !m.sharedTimingUnpaired)
           .map((m) => m.cellId),
     ))
     setStep("review")
@@ -935,12 +937,7 @@ export function FileTargetImportPanel({
       } else if (isTranslationType(type)) {
         // AQU-2544: any other file is read as the source import reads it, and
         // its lines fill the open file's paragraph by paragraph (by source
-        // text, when the file carries its own). Not onto verses: those are
-        // filled by reference, which a document can't give.
-        if (linesAreVerses(cells)) {
-          setError(t("importExport.fileTarget.versesNeedReferences"))
-          return
-        }
+        // text, when the file carries its own).
         if (!(await showMatching())) return
         const run = matchRun.current
         // A read that ends after the person moved on is dropped, failure too.
@@ -949,6 +946,14 @@ export function FileTargetImportPanel({
           return null
         })
         if (!read || run !== matchRun.current) return
+        // Verses are filled by reference. A file with no source text of its
+        // own could only fill them by position, so it isn't put on a file
+        // whose every line is a verse.
+        if (!read.rows.some((row) => row.source?.trim()) && linesAreVerses(cells)) {
+          setError(t("importExport.fileTarget.versesNeedReferences"))
+          setStep("file")
+          return
+        }
         setReadAs({ type, format: read.format })
         showReview(matchTargetRowsByOrder(read.rows, cells), true)
       } else {

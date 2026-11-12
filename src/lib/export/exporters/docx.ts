@@ -139,11 +139,14 @@ export interface DocxExportFidelity {
    *  translated notes left in the source language (several paragraphs). */
   notesWritten: number
   notesLeft: number
+  /** Paragraphs holding a text box whose cell (from before AQU-2539) also
+   *  holds the box's words: left as they are, with a warning to re-import. */
+  staleTextBoxHolders: number
 }
 
-/** One paragraph's translation: its segments in order. */
+/** One paragraph's translation: its segments in order, with their sources. */
 interface ParagraphTranslation {
-  parts: { plain: string; html: string }[]
+  parts: { plain: string; html: string; source?: string }[]
   label: string
 }
 
@@ -158,10 +161,10 @@ interface ParagraphTranslation {
  */
 export function buildLegacyGroups(cells: CellData[]): {
   groups: string[]
-  groupToData: Map<string, { html: string; plain: string; parts: { plain: string; html: string }[] }>
+  groupToData: Map<string, { html: string; plain: string; parts: { plain: string; html: string; source: string }[] }>
 } {
   const groups: string[] = []
-  const groupToData = new Map<string, { html: string; plain: string; parts: { plain: string; html: string }[] }>()
+  const groupToData = new Map<string, { html: string; plain: string; parts: { plain: string; html: string; source: string }[] }>()
   for (const cell of cells) {
     // AQU-1068: a line somebody ADDED here has no paragraph in the original
     // package, so letting it consume a slot shifts every mapping after it and
@@ -179,7 +182,7 @@ export function buildLegacyGroups(cells: CellData[]): {
     const html = cell.translatedHtml?.trim() ?? ""
     if (plain) data.plain = data.plain ? `${data.plain} ${plain}` : plain
     if (html) data.html = data.html ? `${data.html} ${html}` : html
-    if (plain || html) data.parts.push({ plain, html })
+    if (plain || html) data.parts.push({ plain, html, source: cell.original ?? "" })
   }
   return { groups, groupToData }
 }
@@ -284,6 +287,7 @@ export async function exportDocx(
   const warnings: { segment: string; detail: string }[] = []
   const fidelity: DocxExportFidelity = {
     keptLooks: 0, keptFields: 0, keptLinks: 0, emptiedFields: 0, droppedLinks: 0, notesWritten: 0, notesLeft: 0,
+    staleTextBoxHolders: 0,
   }
 
   /** Index into `spans` of the first paragraph starting at or after `offset`. */
@@ -370,9 +374,44 @@ export async function exportDocx(
   }
 
   const part: PartContext = { xml, walkContext, renderRange, writeText, translatedLook }
+
+  /** Does this translation's source hold the words of a text box inside the
+   *  paragraph (see rebuildParagraph)? */
+  function sourceSwallowedTextBox(span: DocxParagraphSpan, translation: ParagraphTranslation): boolean {
+    const nested = spans.filter((s) => s.parent === span.index && !s.isCopy && !s.selfClosing)
+    if (nested.length === 0) return false
+    const squash = (text: string) => text.replace(/\s+/g, "")
+    const lineOf = (s: DocxParagraphSpan) => {
+      const p = parseXmlLite(xml!.slice(s.start, s.end)).children.find(isElement)
+      return p ? squash(docxLine(walkDocxParagraph(p, walkContext)).text) : ""
+    }
+    const source = squash(translation.parts.map((p) => p.source ?? "").join(""))
+    const own = lineOf(span)
+    // A paragraph with no words of its own is never written anyway; a cell made
+    // by today's importer holds exactly the paragraph's own line.
+    if (!source || !own || source === own) return false
+    return nested.some((inner) => {
+      const words = lineOf(inner)
+      return words.length > 0 && source.includes(words)
+    })
+  }
   const noteTranslations = new Map<string, string>()
 
   function rebuildParagraph(span: DocxParagraphSpan, translation: ParagraphTranslation): string | null {
+    // A project imported before AQU-2539 read a text box's words into the
+    // paragraph holding the box. Its translation holds them too and cannot be
+    // split back, so writing it would put the box's words into the body. Such
+    // a cell is recognised by its source NOT being the paragraph's own line
+    // while containing the box's words; the paragraph keeps its own words and
+    // the box is translated by its own cells.
+    if (sourceSwallowedTextBox(span, translation)) {
+      fidelity.staleTextBoxHolders++
+      warnings.push({
+        segment: translation.label,
+        detail: "imported before text boxes were read separately; re-import the file to translate this paragraph",
+      })
+      return null
+    }
     const rebuilt = rebuildParagraphIn(part, span, translationSpans(translation.parts))
     if (rebuilt === null) return null
     // Fidelity report: the source paragraph carried more than one run look

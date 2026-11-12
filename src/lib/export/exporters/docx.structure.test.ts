@@ -106,21 +106,41 @@ describe("exportDocx — paragraphs nested in text boxes (AQU-2539)", () => {
     expect(xml.match(/FR Box caption/g)).toHaveLength(2)
   })
 
-  it("exports an OLD import without shifting: swallowed text and copy cells are ignored", async () => {
-    // Before AQU-2539 the importer gave w:p[2] the box's words too, and gave
-    // the Fallback copy (w:p[4]) its own cell.
+  it("exports an OLD import without shifting: copy cells are ignored, a swallowed-text cell leaves its paragraph alone", async () => {
+    // Before AQU-2539 the importer gave w:p[2] the box's words too (Choice and
+    // Fallback), and gave the Fallback copy (w:p[4]) its own cell.
     const cells = [
-      cellAt(1, "Titre"),
-      cellAt(2, "Porteur Légende Légende mots"),
-      cellAt(3, "Légende"),
-      cellAt(4, "Légende (copie)"),
-      cellAt(5, "Titre suivant"),
-      cellAt(6, "Corps"),
+      cellAt(1, "Titre", { original: "Heading text" }),
+      cellAt(2, "Porteur Légende Légende mots", { original: "Holder Box captionBox captionwords" }),
+      cellAt(3, "Légende", { original: "Box caption" }),
+      cellAt(4, "Légende (copie)", { original: "Box caption" }),
+      cellAt(5, "Titre suivant", { original: "Next heading" }),
+      cellAt(6, "Corps", { original: "Body after" }),
     ]
-    const { xml } = await exportedXml(body, cells)
+    const { xml, result } = await exportedXml(body, cells)
     const after = docxPartsToStrings({ documentXml: xml }).map((s) => s.original)
-    expect(after).toEqual(["Titre", "Porteur Légende Légende mots", "Légende", "Titre suivant", "Corps"])
+    // w:p[2] keeps its own words; its box is translated by its own cell.
+    expect(after).toEqual(["Titre", "Holder words", "Légende", "Titre suivant", "Corps"])
     expect(xml).not.toContain("Légende (copie)")
+    expect(xml).not.toContain("Porteur")
+    expect(result.fidelity.staleTextBoxHolders).toBe(1)
+    expect(result.warnings.map((w) => w.detail)).toContain(
+      "imported before text boxes were read separately; re-import the file to translate this paragraph",
+    )
+  })
+
+  it("still writes a paragraph holding a text box when its cell holds only its own words", async () => {
+    const cells = [cellAt(2, "Porteur mots", { original: "Holder words (edited)" })]
+    const { xml } = await exportedXml(body, cells)
+    expect(docxPartsToStrings({ documentXml: xml }).map((s) => s.original)).toContain("Porteur mots")
+  })
+
+  it("writes a fresh cell even when the paragraph's own words repeat its text box's words", async () => {
+    const repeat = para(run("Box caption, as the box says ") + textBoxRun(para(run("Box caption"))))
+    const strings = docxPartsToStrings({ documentXml: documentXml(repeat) })
+    const { xml, result } = await exportedXml(repeat, importedCells(strings, (s) => `FR ${s.original}`))
+    expect(result.fidelity.staleTextBoxHolders).toBe(0)
+    expect(docxPartsToStrings({ documentXml: xml }).map((s) => s.original)).toEqual(["FR Box caption, as the box says", "FR Box caption"])
   })
 
   it("leaves a paragraph that only holds a text box alone, even when an old cell targets it", async () => {

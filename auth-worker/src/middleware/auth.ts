@@ -64,6 +64,7 @@ export type SessionResolution =
 export async function resolveSession(
   env: Env,
   authHeader: string | null | undefined,
+  options: { fresh?: boolean } = {},
 ): Promise<SessionResolution> {
   if (!authHeader) return { ok: false, reason: "missing_header" }
 
@@ -130,7 +131,7 @@ export async function resolveSession(
   // replayable secret (a `jti` is already denylisted in the clear in
   // `revoked_tokens`; the fallback is a hash).
   const cacheKey = await sessionCacheKey(payload, token)
-  let user = getCachedSession(cacheKey)
+  let user = options.fresh ? null : getCachedSession(cacheKey)
 
   if (!user) {
     // [Pen test] Auth & session mgmt (2026-08-03): reject tokens the caller
@@ -183,11 +184,14 @@ export async function resolveSession(
   // otherwise keep authenticating for up to 30 more days after the reset —
   // defeating the point of resetting a compromised password. Reject any
   // token issued before the account's last reset.
+  if (payload.sv !== undefined && (!Number.isSafeInteger(payload.sv) || payload.sv !== (user.session_version ?? 0))) {
+    return { ok: false, reason: "password_changed" }
+  }
   if (user.password_changed_at) {
     const changedAtSeconds = Math.floor(
       new Date(user.password_changed_at).getTime() / 1000,
     )
-    if (payload.iat < changedAtSeconds) {
+    if (payload.iat < changedAtSeconds || (payload.sv === undefined && payload.iat === changedAtSeconds)) {
       return { ok: false, reason: "password_changed" }
     }
   }
@@ -233,7 +237,8 @@ export const authMiddleware = async (
   c: Context<AuthHonoEnv>,
   next: Next,
 ): Promise<Response | void> => {
-  const resolved = await resolveSession(c.env, c.req.header("Authorization"))
+  // Renewal must never extend a credential using a stale isolate cache.
+  const resolved = await resolveSession(c.env, c.req.header("Authorization"), { fresh: c.req.path.endsWith("/auth/refresh") })
 
   if (!resolved.ok) {
     switch (resolved.reason) {

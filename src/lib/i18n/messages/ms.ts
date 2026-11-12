@@ -4220,8 +4220,6 @@ export const ms: Catalog = {
   "projectSettings.permission.reconnectToEdit": "Sambung semula untuk mengubah tetapan dikongsi.",
   "projectSettings.permission.onlyRoleCanModify": "Hanya {role} boleh mengubah",
   "projectSettings.permission.viewPrivilegedMembers": "Lihat {role}",
-  "projectSettings.permission.privilegedDialogTitle": "{role} projek",
-  "projectSettings.permission.privilegedDialogDescription": "{role} boleh mengubah tetapan dikongsi, ahli, dan konfigurasi projek yang lain.",
   "projectSettings.permission.privilegedDialogEmpty": "Tiada {role} pada projek ini.",
   "projectSettings.permission.privilegedDialogError": "Tidak dapat memuatkan {role}.",
   "projectSettings.create.trigger": "Projek Baharu",

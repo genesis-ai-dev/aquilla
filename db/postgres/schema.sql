@@ -42,7 +42,8 @@ CREATE TABLE users (
     -- the gap where a 30-day-lived JWT would otherwise outlive the "fix".
     -- NULL means "never reset" (no floor — all tokens for the account verify
     -- normally). See migrations/0066_password_changed_at.sql.
-    password_changed_at TIMESTAMPTZ
+    password_changed_at TIMESTAMPTZ,
+    session_version INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE UNIQUE INDEX idx_users_username_ci ON users (LOWER(username));

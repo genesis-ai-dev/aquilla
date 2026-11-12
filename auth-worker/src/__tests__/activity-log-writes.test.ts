@@ -1,3 +1,4 @@
+import { JWTService } from "../auth/jwt"
 import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
 import app from "../index"
@@ -73,7 +74,7 @@ describe("auth events populate activity_logs", () => {
       "password_reset_completed",
     ])
 
-    const token = await jwtFor("act2")
+    const token = await new JWTService(env).createAccessToken("act2")
     const res = await app.request("/api/v2/auth/activity-log", { headers: authHeader(token) }, env)
     expect(res.status).toBe(200)
     const body = (await res.json()) as Array<{ activity_type: string }>

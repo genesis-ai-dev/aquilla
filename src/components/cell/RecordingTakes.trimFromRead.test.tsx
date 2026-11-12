@@ -88,11 +88,14 @@ beforeEach(() => {
 })
 
 /** The audio read with the trim's overlay applied, as the app reads it while
- *  the trim is on its way (the overlay replaces the take). */
+ *  the trim is on its way: an overlay of its own fields paints those over the
+ *  take as read (Nov 12), any other replaces the take. */
 function readWithOverlay(base: CellAudioEntry): CellAudioEntry {
   const shadow = getOptimisticShadows("f1").get("c2")?.find((s) => s.kind === "attach")
   if (!shadow || shadow.kind !== "attach") throw new Error("the trim painted nothing")
-  return { ...base, attachments: { ...base.attachments, [shadow.att.audioId]: shadow.att } }
+  const row = base.attachments[shadow.att.audioId]
+  const painted = shadow.only && row ? { ...row, ...Object.fromEntries(shadow.only.map((f) => [f, shadow.att[f]])) } : shadow.att
+  return { ...base, attachments: { ...base.attachments, [shadow.att.audioId]: painted } }
 }
 
 describe("the Recording tab's trim, on a take as the text table hands it (AQU-2495)", () => {

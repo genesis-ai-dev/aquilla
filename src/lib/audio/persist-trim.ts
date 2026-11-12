@@ -47,18 +47,19 @@ export function persistTakeTrim(input: PersistTakeTrimInput): Promise<string> {
     projectId, fileId, cellId, audioId, trimStartMs, trimEndMs, author,
     ...(input.targetLang ? { targetLang: input.targetLang } : {}),
   })
-  // AQU-490: the overlay REPLACES the attachment rather than merging into it,
-  // so a field left out here is one the editor stops seeing while the shadow
-  // lives. AQU-2495 (browser pass, Nov 11): so it is the whole take with the
-  // new window, built as the timeline's trim builds it (`attachmentOutFrom`).
-  // A hand-picked list left out the take's name, place, level and piece link:
-  // a Recording-tab trim renamed "Music bed" to "Take 1" (the takes list names
-  // a take with no name), and the next trim's floor read no place.
+  // AQU-2495 (review, Nov 12): the overlay holds the new window alone,
+  // painted over the take as the read has it, and yields as soon as the read
+  // carries the window. A copy of the whole take stood in for it before: a
+  // hand-picked one left out the name and place (a Recording-tab trim renamed
+  // "Music bed" to "Take 1", and the next trim's floor read no place), and a
+  // full one (Nov 11) hid a rename, move or level change made meanwhile for
+  // up to 12 s. The whole take (`attachmentOutFrom`) is painted only while no
+  // read has it yet.
   injectOptimisticAudioTrim(fileId, cellId, {
     ...attachmentOutFrom(audioId, { type: "audio", ...att }, slot),
     trimStartMs,
     trimEndMs,
-  }, trimP)
+  }, trimP, { ownFields: true })
   notifyAudioAttachmentsChanged(fileId)
   return trimP
 }

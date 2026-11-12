@@ -25,7 +25,8 @@ export { classifyFiles }
 // whose gate check passed on the PR's head, from release-plan-walk.mjs),
 // or its walk is not proven: FAIL, FLAKY and BLOCKED all mean the bot
 // could not prove the outcome, and `unknown` (no matching walk comment
-// yet) holds too. The `release:approved` label is a person's sign-off
+// yet) and `partial` (a PASS the bot qualified as test level only: no
+// live preview walk) hold too. The `release:approved` label is a person's sign-off
 // after the manual QA path, and clears both: once a person has signed,
 // the line picks the PR like any other.
 export function prHolds(pr) {

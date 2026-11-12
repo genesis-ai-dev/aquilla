@@ -62,7 +62,11 @@ import { useActiveTargetLane } from "@/hooks/useActiveTargetLane"
 import { useImportCellRefs } from "@/hooks/useImportCellRefs"
 import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
 import { useAdoptedIdmlAlignment } from "@/hooks/useAdoptedIdmlAlignment"
-import type { IdmlReimportAlignHost } from "@/lib/idml/align-reimported-targets"
+import {
+  alignReimportedIdmlFile,
+  splitAlignedIdmlTargets,
+  type IdmlReimportAlignHost,
+} from "@/lib/idml/align-reimported-targets"
 import { triggerLinkSync } from "@/lib/sync/archive"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
 import {
@@ -2539,6 +2543,10 @@ export function ProjectWorkspace() {
     fileId: activeFileId,
     getToken: getTokenForFile,
     enabled: Boolean(project?.id && activeFileId && frontierSession?.jwt),
+    // The sync just gave this project's linked cells their import envelope;
+    // the open file was read before it finished. `revalidateCells` is declared
+    // below, hence the ref.
+    onEnvelopesRepaired: () => revalidateCellsRef.current(),
   })
   // The outbox warning is an immediate, provisional signal from the write
   // response. Clear it once the authoritative content-aware read for this
@@ -7486,6 +7494,13 @@ export function ProjectWorkspace() {
       }, { maxRounds: Math.max(6, Math.ceil(eventIds.length / 100) + 2) })
     },
   }), [t, currentUsername, getTokenForProjectFile])
+
+  // Placing a validated translation's words into its IDML style runs can be
+  // saved as markup only, which keeps the validation — on the default lane, by
+  // a project lead (the floor of `source.cell.metadata.patch`). Anyone else's
+  // placement is a commit, and the export dialog says what that costs.
+  const idmlPlacementKeepsValidation =
+    activeLane === "" && (project?.syncRole?.level ?? 0) >= ROLE.PROJECT_LEAD
 
   // A source link that replaced the source of an IDML file this project already
   // had leaves the file's translations shaped for the OLD source; this is the
@@ -19502,6 +19517,34 @@ export function ProjectWorkspace() {
             await handleImported([repaired.ref])
             return { name: repaired.ref.name, unmatched: repaired.unmatched }
           } : undefined}
+          /* The placement a re-import runs, for an InDesign export that
+             stopped on translations typed as plain text. The link is synced
+             first so a file still waiting for its import envelope has it. */
+          idmlPlacementKeepsValidation={idmlPlacementKeepsValidation}
+          onPlaceIdmlTranslations={async ({ fileId, onProgress }) => {
+            if (frontierSession?.jwt) await triggerLinkSync(frontierSession.jwt, project.id)
+            const outcome = await alignReimportedIdmlFile({
+              projectId: project.id,
+              fileId,
+              lane: activeLane,
+              getToken: getTokenForFile,
+              host: alignReimportedIdml ?? idmlAlignFallbackHost,
+              sourceLanguage: activeSourceLanguage || "",
+              targetLanguage: activeLaneTargetLanguage || "",
+              onProgress,
+              keepValidated: idmlPlacementKeepsValidation,
+            })
+            revalidateCellsRef.current()
+            const saved = splitAlignedIdmlTargets(outcome.aligned, {
+              keepValidated: idmlPlacementKeepsValidation,
+              lane: activeLane,
+            })
+            return {
+              keptValidated: saved.markupOnly.length,
+              drafts: saved.commits.length,
+              manual: outcome.manual.length,
+            }
+          }}
           outstandingInfractionCount={activeFileInfractionCount}
         />
       </Suspense>

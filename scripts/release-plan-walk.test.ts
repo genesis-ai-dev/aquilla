@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { fillWalks, lookupPr, lookupWalk, normalizeVerdict, parseWalkComment } from "./release-plan-walk.mjs"
+import { fillWalks, lookupPr, lookupWalk, normalizeVerdict, parseWalkComment, walkOf } from "./release-plan-walk.mjs"
 
 const HEAD_SHA = "a".repeat(40)
 const OTHER_SHA = "b".repeat(40)
@@ -50,6 +50,83 @@ describe("parseWalkComment", () => {
   it("returns null for a non-string body", () => {
     expect(parseWalkComment(undefined)).toBeNull()
     expect(parseWalkComment(null)).toBeNull()
+  })
+})
+
+// The shapes aquilla-bot has posted since 2026-11-06, copied from merged
+// PRs. None carries the "## Bot walk — PR" heading, and for six days every
+// one of them read as no walk at all.
+describe("parseWalkComment, marker comments", () => {
+  const short = HEAD_SHA.slice(0, 8)
+
+  it("reads the sha off the marker and the verdict off the line after it", () => {
+    const body = `<!-- aquilla-qa-walk ${HEAD_SHA} -->\n**PASS** · claim walks 4/4 · replays: none (no journey slug for this surface)\n\nHEAD \`${HEAD_SHA}\` · preview MATCH`
+    expect(parseWalkComment(body)).toEqual({ prNumber: null, sha: HEAD_SHA, verdict: "PASS" })
+    expect(parseWalkComment(`<!-- aquilla-qa-walk ${HEAD_SHA} -->\n**FAIL** · claim walks 2/3`)?.verdict).toBe("FAIL")
+  })
+
+  it("reads the QA walk heading under a marker for the PR number", () => {
+    const body = `<!-- aquilla-qa-walk ${HEAD_SHA} -->\n## QA walk — #1960 @ ${short}\n\n**PASS** · claim walks 2/2 · replays: none`
+    expect(parseWalkComment(body)).toEqual({ prNumber: 1960, sha: HEAD_SHA, verdict: "PASS" })
+  })
+
+  it("accepts the sha= marker, and a bare marker when the heading names the sha", () => {
+    expect(parseWalkComment(`<!-- aquilla-qa-walk sha=${HEAD_SHA} -->\n**PASS** · claim walks 1/1`)?.sha).toBe(HEAD_SHA)
+    expect(parseWalkComment(`<!-- aquilla-qa-walk -->\n## QA walk — #1971 @ ${short}\n\n**PASS** · claim walks 4/4`)).toEqual({
+      prNumber: 1971,
+      sha: short,
+      verdict: "PASS",
+    })
+  })
+
+  it("reads the QA walk heading with no marker at all", () => {
+    expect(parseWalkComment(`## QA walk — #1981 @ ${short}\n\n**PASS** · claim walks 3/3`)).toEqual({ prNumber: 1981, sha: short, verdict: "PASS" })
+  })
+
+  it("returns null for a bare marker with no heading: nothing names a commit", () => {
+    expect(parseWalkComment("<!-- aquilla-qa-walk -->\n**PASS** · claim walks 1/1")).toBeNull()
+  })
+
+  it("returns null when the marker and the heading name different commits", () => {
+    expect(parseWalkComment(`<!-- aquilla-qa-walk ${HEAD_SHA} -->\n## QA walk — #1 @ ${OTHER_SHA.slice(0, 8)}\n\n**PASS**`)).toBeNull()
+  })
+
+  it("returns null when the line under the marker is not a status line", () => {
+    const body = `<!-- aquilla-qa-walk sha=${HEAD_SHA} -->\n### Bot walk · #1957 @ ${short} · **PASS (component level only)**\nClaim (PR words): the control is a button`
+    expect(parseWalkComment(body)).toBeNull()
+  })
+
+  it("does not read a status line with neither marker nor heading, even one naming the sha", () => {
+    expect(parseWalkComment(`**PASS** · claim walks 2/6 · 4 NOT CHECKED\n\nHEAD \`${HEAD_SHA}\``)).toBeNull()
+  })
+})
+
+describe("parseWalkComment, qualified PASS", () => {
+  it("captures a qualifier inside the bold or right after it", () => {
+    const inside = `<!-- aquilla-qa-walk ${HEAD_SHA} -->\n## QA walk — #1973 @ ${HEAD_SHA.slice(0, 8)}\n\n**PASS (test level only)** · claim walks 3/3 · replays: none`
+    expect(parseWalkComment(inside)).toEqual({ prNumber: 1973, sha: HEAD_SHA, verdict: "PASS", qualifier: "test level only" })
+    const after = `<!-- aquilla-qa-walk ${HEAD_SHA} -->\n**PASS** (test level only) · claim walks 3/3 walked on first pass`
+    expect(parseWalkComment(after)?.qualifier).toBe("test level only")
+    expect(parseWalkComment(`## Bot walk — PR 5 @ ${HEAD_SHA}\n\n**PASS (CI + code read only)** · claim walks 2/4`)?.qualifier).toBe("CI + code read only")
+  })
+
+  it("leaves a parenthesis later on the status line alone", () => {
+    const parsed = parseWalkComment(`## Bot walk — PR 1838 @ ${HEAD_SHA}\n\n**PASS** · claim walks 6/6 (walkable surface only) · replays 3/3`)
+    expect(parsed).toEqual({ prNumber: 1838, sha: HEAD_SHA, verdict: "PASS" })
+  })
+
+  it("still does not read a qualified verdict other than PASS", () => {
+    expect(parseWalkComment(`## Bot walk — PR 1 @ ${HEAD_SHA}\n\n**NOT CHECKED (scripts only)** · no UI`)).toBeNull()
+    expect(parseWalkComment(`## Bot walk — PR 1 @ ${HEAD_SHA}\n\n**FAIL (claim 2)** · 1/2`)).toBeNull()
+  })
+})
+
+describe("walkOf", () => {
+  it("is partial for a qualified PASS and the normalized verdict otherwise", () => {
+    expect(walkOf({ prNumber: 1, sha: HEAD_SHA, verdict: "PASS", qualifier: "test level only" })).toBe("partial")
+    expect(walkOf({ prNumber: 1, sha: HEAD_SHA, verdict: "PASS" })).toBe("PASS")
+    expect(walkOf({ prNumber: null, sha: HEAD_SHA, verdict: "BLOCKED" })).toBe("fail")
+    expect(walkOf({ prNumber: null, sha: HEAD_SHA, verdict: "NOT CHECKED" })).toBe("none")
   })
 })
 
@@ -153,6 +230,60 @@ describe("lookupWalk", () => {
       ],
     })
     expect(await lookupWalk({ mergeSha: MERGE_SHA, token: "t", fetchImpl })).toBe("none")
+  })
+
+  it("reads a marker comment against the head sha, with no PR number to match", async () => {
+    const pass = fakeGitHub({
+      associatedPrs: [{ number: 1887, head: { sha: HEAD_SHA }, merge_commit_sha: MERGE_SHA }],
+      comments: [{ body: `<!-- aquilla-qa-walk ${HEAD_SHA} -->\n**PASS** · claim walks 4/4 · replays: none` }],
+    })
+    expect(await lookupWalk({ mergeSha: MERGE_SHA, token: "t", fetchImpl: pass.fetchImpl })).toBe("PASS")
+    const stale = fakeGitHub({
+      associatedPrs: [{ number: 1887, head: { sha: HEAD_SHA }, merge_commit_sha: MERGE_SHA }],
+      comments: [{ body: `<!-- aquilla-qa-walk ${OTHER_SHA} -->\n**PASS** · claim walks 4/4` }],
+    })
+    expect(await lookupWalk({ mergeSha: MERGE_SHA, token: "t", fetchImpl: stale.fetchImpl })).toBe("unknown")
+  })
+
+  it("ignores a QA walk heading that names another PR", async () => {
+    const { fetchImpl } = fakeGitHub({
+      associatedPrs: [{ number: 771, head: { sha: HEAD_SHA }, merge_commit_sha: MERGE_SHA }],
+      comments: [{ body: `<!-- aquilla-qa-walk ${HEAD_SHA} -->\n## QA walk — #770 @ ${HEAD_SHA.slice(0, 8)}\n\n**PASS** · claim walks 1/1` }],
+    })
+    expect(await lookupWalk({ mergeSha: MERGE_SHA, token: "t", fetchImpl })).toBe("unknown")
+  })
+
+  it("lets a marker FAIL replace an earlier heading PASS on the same head", async () => {
+    const { fetchImpl } = fakeGitHub({
+      associatedPrs: [{ number: 771, head: { sha: HEAD_SHA }, merge_commit_sha: MERGE_SHA }],
+      comments: [{ body: walkComment(771, HEAD_SHA, "PASS") }, { body: `<!-- aquilla-qa-walk ${HEAD_SHA} -->\n**FAIL** · claim walks 1/2` }],
+    })
+    expect(await lookupWalk({ mergeSha: MERGE_SHA, token: "t", fetchImpl })).toBe("fail")
+  })
+
+  // "PASS (test level only)" is the bot passing what it ran without opening
+  // a preview. It must never ship a PR on its own, and never change what a
+  // real walk of the same commit already said.
+  it("reads a qualified PASS as partial, which is not a PASS", async () => {
+    const { fetchImpl } = fakeGitHub({
+      associatedPrs: [{ number: 1973, head: { sha: HEAD_SHA }, merge_commit_sha: MERGE_SHA }],
+      comments: [{ body: `<!-- aquilla-qa-walk ${HEAD_SHA} -->\n## QA walk — #1973 @ ${HEAD_SHA.slice(0, 8)}\n\n**PASS (test level only)** · claim walks 3/3` }],
+    })
+    expect(await lookupWalk({ mergeSha: MERGE_SHA, token: "t", fetchImpl })).toBe("partial")
+  })
+
+  it("keeps a plain verdict on the head over a qualified PASS, whichever came first", async () => {
+    const qualified = { body: `<!-- aquilla-qa-walk ${HEAD_SHA} -->\n**PASS (test level only)** · claim walks 3/3` }
+    const cases: Array<[FakeComment[], string]> = [
+      [[{ body: walkComment(771, HEAD_SHA, "PASS") }, qualified], "PASS"],
+      [[{ body: walkComment(771, HEAD_SHA, "FAIL") }, qualified], "fail"],
+      [[qualified, { body: walkComment(771, HEAD_SHA, "PASS") }], "PASS"],
+      [[qualified, { body: walkComment(771, HEAD_SHA, "FAIL") }], "fail"],
+    ]
+    for (const [comments, walk] of cases) {
+      const { fetchImpl } = fakeGitHub({ associatedPrs: [{ number: 771, head: { sha: HEAD_SHA }, merge_commit_sha: MERGE_SHA }], comments })
+      expect(await lookupWalk({ mergeSha: MERGE_SHA, token: "t", fetchImpl })).toBe(walk)
+    }
   })
 
   it("returns unknown when no PR is associated with the commit", async () => {

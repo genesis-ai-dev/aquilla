@@ -84,6 +84,7 @@ import type {
 } from './types'
 import { validateApiCredentialRequest, type ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
+import { resolveCallerProjectRoleForGate } from './support-access'
 import {
   createProjectShared,
   loadProjectSettings,
@@ -358,10 +359,20 @@ export async function commitChangesetCore(
   const requiredRole = Math.max(
     ...cs.commands.map((command) => requiredRoleForCommand(command, assignmentMinRole)),
   )
-  const resolvedRole = await resolveProjectRoleShared(db, { id: cred.userId }, projectId)
+  // AQU-2504: support access tried last (see prepare's note). `viaSupportAccess`
+  // is carried from here into every provenance envelope this commit stamps, so
+  // the org's own members can see a platform admin made the change.
+  const resolvedRole = await resolveCallerProjectRoleForGate(
+    db,
+    cred,
+    projectId,
+    'changeset commit',
+    resolveProjectRoleShared,
+  )
   if (!resolvedRole || resolvedRole.level < requiredRole) {
     return errorResponse('permission_denied', 'insufficient project role to commit this changeset')
   }
+  const viaSupportAccess = resolvedRole.viaSupportAccess
 
   // ── First-attempt gates (staged only) ─────────────────────────────────────
   // Expiry, one-time ask-mode approval, and precondition drift are checked ONCE,
@@ -498,7 +509,7 @@ export async function commitChangesetCore(
   if (structure) {
     return commitStructure(
       request, env, db, cred, cs, structure, confirmationId, channel,
-      cs.status === 'staged', ctx,
+      cs.status === 'staged', ctx, viaSupportAccess,
     )
   }
 
@@ -507,7 +518,7 @@ export async function commitChangesetCore(
     (c): c is PlanImportCommand => c.kind === 'PlanImport',
   )
   if (planImport) {
-    return commitPlanImport(request, env, db, cred, cs, planImport, confirmationId, channel, ctx)
+    return commitPlanImport(request, env, db, cred, cs, planImport, confirmationId, channel, ctx, viaSupportAccess)
   }
 
   // ── LinkMedia takes its own compile/commit path ───────────────────────────
@@ -515,7 +526,7 @@ export async function commitChangesetCore(
     (c): c is LinkMediaCommand => c.kind === 'LinkMedia',
   )
   if (linkMedia.length > 0) {
-    return commitLinkMedia(request, env, db, cred, cs, linkMedia, confirmationId, channel, ctx)
+    return commitLinkMedia(request, env, db, cred, cs, linkMedia, confirmationId, channel, ctx, viaSupportAccess)
   }
 
   // ── EmitEvents takes its own compile/commit path (AQU-926) ────────────────
@@ -528,7 +539,7 @@ export async function commitChangesetCore(
   if (emitEvents) {
     return commitEmitEvents(
       request, env, db, cred, cs, emitEvents, confirmationId, channel,
-      cs.status === 'staged', ctx,
+      cs.status === 'staged', ctx, viaSupportAccess,
     )
   }
 
@@ -541,7 +552,7 @@ export async function commitChangesetCore(
   if (cellFields.length > 0) {
     return commitCellFields(
       request, env, db, cred, cs, cellFields, confirmationId, channel,
-      cs.status === 'staged', ctx,
+      cs.status === 'staged', ctx, viaSupportAccess,
     )
   }
 
@@ -639,7 +650,7 @@ export async function commitChangesetCore(
           // A mint that fails partway (membership revoked mid-apply) must not
           // strand the changeset either — record what landed, then surface it.
           const applied = allEventIds.filter((eid) => acceptedIds.has(eid))
-          await stampProvenance(db, buildProvenance(request, cs, confirmationId, channel), applied)
+          await stampProvenance(db, buildProvenance(request, cs, confirmationId, channel, viaSupportAccess), applied)
           await recordPartialApply(db, id, applied, cs.summary.warnings, 'could not refresh the internal write token')
           return toErrorResponse(err)
         }
@@ -664,7 +675,7 @@ export async function commitChangesetCore(
             ? (out as { error: string }).error
             : `events perimeter refused the batch (HTTP ${res.status})`
         const applied = allEventIds.filter((eid) => acceptedIds.has(eid))
-        await stampProvenance(db, buildProvenance(request, cs, confirmationId, channel), applied)
+        await stampProvenance(db, buildProvenance(request, cs, confirmationId, channel, viaSupportAccess), applied)
         await recordPartialApply(db, id, applied, cs.summary.warnings, reason)
         return errorResponse('job_failed', `apply stopped partway: ${reason}`, {
           appliedCount: applied.length,
@@ -694,7 +705,7 @@ export async function commitChangesetCore(
   }
 
   // ── Stamp the server-verified provenance envelope on applied events ───────
-  const provenance = buildProvenance(request, cs, confirmationId, channel)
+  const provenance = buildProvenance(request, cs, confirmationId, channel, viaSupportAccess)
   const appliedIds = allEventIds.filter((eid) => acceptedIds.has(eid))
   await stampProvenance(db, provenance, appliedIds)
 
@@ -836,6 +847,11 @@ export async function applyPlanImport(
   confirmationId: string | null,
   channel: ProvenanceChannel,
   ctx: Pick<ExecutionContext, 'waitUntil'> | undefined,
+  /** AQU-2504: see commitChangesetCore's role gate — true when this project
+   *  resolved ONLY on the caller's connector support access, which the
+   *  provenance envelope records so the org's members see a platform admin
+   *  made the change. */
+  viaSupportAccess: boolean,
 ): Promise<ApplyPlanImportOutcome> {
   const projectId = cs.projectId
   const clientTs = Date.now()
@@ -1138,7 +1154,7 @@ export async function applyPlanImport(
 
   // Stamp server-verified provenance on everything that did land, including a
   // partial hidden import. This keeps crash investigation fully auditable.
-  const provenance = buildProvenance(request, cs, confirmationId, channel)
+  const provenance = buildProvenance(request, cs, confirmationId, channel, viaSupportAccess)
   const appliedIds = allEventIds.filter((eventId) => acceptedIds.has(eventId))
   if (appliedIds.length > 0) {
     const placeholders = appliedIds.map(() => '?').join(', ')
@@ -1181,6 +1197,11 @@ async function commitPlanImport(
   confirmationId: string | null,
   channel: ProvenanceChannel,
   ctx: Pick<ExecutionContext, 'waitUntil'> | undefined,
+  /** AQU-2504: see commitChangesetCore's role gate — true when this project
+   *  resolved ONLY on the caller's connector support access, which the
+   *  provenance envelope records so the org's members see a platform admin
+   *  made the change. */
+  viaSupportAccess: boolean,
 ): Promise<Response> {
   const outcome = await applyPlanImport(
     request,
@@ -1193,6 +1214,7 @@ async function commitPlanImport(
     confirmationId,
     channel,
     ctx,
+    viaSupportAccess,
   )
   if (outcome.error) return outcome.error
   const receipt = outcome.receipt as ChangesetReceipt
@@ -1423,6 +1445,11 @@ async function commitLinkMedia(
   confirmationId: string | null,
   channel: ProvenanceChannel,
   ctx: Pick<ExecutionContext, 'waitUntil'> | undefined,
+  /** AQU-2504: see commitChangesetCore's role gate — true when this project
+   *  resolved ONLY on the caller's connector support access, which the
+   *  provenance envelope records so the org's members see a platform admin
+   *  made the change. */
+  viaSupportAccess: boolean,
 ): Promise<Response> {
   if (!env.SNAPSHOTS) return errorResponse('job_failed', 'SNAPSHOTS bucket not configured')
   const projectId = cs.projectId
@@ -1610,7 +1637,7 @@ async function commitLinkMedia(
   }
 
   // Stamp the server-verified provenance envelope on applied events.
-  const provenance = buildProvenance(request, cs, confirmationId, channel)
+  const provenance = buildProvenance(request, cs, confirmationId, channel, viaSupportAccess)
   const appliedIds = allEventIds.filter((eid) => acceptedIds.has(eid))
   if (appliedIds.length > 0) {
     const placeholders = appliedIds.map(() => '?').join(', ')

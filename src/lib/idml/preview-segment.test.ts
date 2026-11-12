@@ -50,6 +50,16 @@ describe("IDML preview segment", () => {
     expect(idmlTargetIsPreview(empty, {})).toBe(false)
   })
 
+  it("treats a translation typed as a plain sentence as a preview", () => {
+    // A file linked before the link carried the IDML contract was translated in
+    // the plain editor. Once the contract arrives, these have no run for the
+    // IDML editor to open: it showed nothing and gave no caret.
+    expect(idmlTargetIsPreview("<p>Qajeelfama Leenjisaa</p>", meta)).toBe(true)
+    expect(idmlTargetIsPreview("<p><strong>Dubbii</strong>: geggeessaa</p>", meta)).toBe(true)
+    // Not an IDML cell: never a preview, whatever its HTML.
+    expect(idmlTargetIsPreview("<p>Qajeelfama Leenjisaa</p>", {})).toBe(false)
+  })
+
   it("clears editable runs and keeps a locked run when building the preview shell", () => {
     const runs = metadata([
       { index: 0, characterStyleId: PLAIN, editable: true },

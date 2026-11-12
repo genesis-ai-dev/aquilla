@@ -231,6 +231,15 @@ function externalErrorText(status: number, body: unknown): string {
   }
 }
 
+/** Reach sync-worker for changeset staging. Prefers the SYNC_WORKER service
+ *  binding: a same-zone global fetch to SYNC_WORKER_URL is answered by the zone
+ *  origin instead of the Worker (AQU-2216), so staging never arrived and the
+ *  agent saw a failure. Falls back to the URL where no binding is configured
+ *  (local dev). */
+function syncWorkerFetch(env: Env, url: string, init: RequestInit): Promise<Response> {
+  return env.SYNC_WORKER ? env.SYNC_WORKER.fetch(url, init) : fetch(url, init)
+}
+
 export async function proposeCommandTool(
   args: ProposeCommandArgs,
   ctx: CommandToolCtx,
@@ -284,7 +293,7 @@ export async function proposeCommandTool(
 
   let res: Response
   try {
-    res = await fetch(`${base}/api/v1/changesets/${encodeURIComponent(ctx.projectId)}`, {
+    res = await syncWorkerFetch(ctx.env, `${base}/api/v1/changesets/${encodeURIComponent(ctx.projectId)}`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${mint.token}`,

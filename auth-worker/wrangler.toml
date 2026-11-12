@@ -294,6 +294,12 @@ id = "69bcc10e67464f2eaf4fe91a9141e7cd"
 binding = "SNAPSHOTS"
 bucket_name = "aquilla-snapshots"
 
+# In-app agent changeset staging (propose_command) reaches sync-worker through
+# this binding, not the zone URL: same-zone global fetch never reaches the Worker.
+[[env.production.services]]
+binding = "SYNC_WORKER"
+service = "aquilla-sync-worker"
+
 [[env.production.send_email]]
 name = "EMAIL"
 
@@ -440,6 +446,10 @@ id = "53581197ff7a4202a5ed0ef08537d4a6"
 [[env.development.r2_buckets]]
 binding = "SNAPSHOTS"
 bucket_name = "aquilla-snapshots-dev"
+
+[[env.development.services]]
+binding = "SYNC_WORKER"
+service = "aquilla-sync-worker-dev"
 
 [[env.development.send_email]]
 name = "EMAIL"

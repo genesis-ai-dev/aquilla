@@ -77,6 +77,12 @@ export interface Env {
   /** aquilla-sync-worker base URL for archive / file-delete notifications. */
   SYNC_WORKER_URL?: string
 
+  /** Service binding to aquilla-sync-worker (wrangler.toml [[env.<env>.services]]).
+   *  Same-zone global fetch to SYNC_WORKER_URL is answered by the zone origin,
+   *  not the Worker (AQU-2216), so in-app agent staging must go through this
+   *  binding when it is present. Unset in local dev, which uses SYNC_WORKER_URL. */
+  SYNC_WORKER?: { fetch: (input: string, init?: RequestInit) => Promise<Response> }
+
   /** PostHog project token (phc_…) — when set, 4xx/5xx responses are shipped
    *  to PostHog Logs (see posthog-logs.ts). Unset locally/e2e. */
   POSTHOG_KEY?: string

@@ -12,7 +12,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useAccounts } from "@/hooks/useAccounts"
 import { googleReturn } from "@/lib/frontier/google-return"
-import { clearGoogleAttempt, googleRequest, readGoogleAttempt, type GooglePending, type GoogleSession } from "@/lib/frontier/google-login"
+import { clearGoogleAttempt, saveGoogleProgress, googleRequest, readGoogleAttempt, type GooglePending, type GoogleSession } from "@/lib/frontier/google-login"
 import { finalizeSession } from "@/lib/frontier/auth"
 import { clearSignupAnalyticsChoice, readSignupAnalyticsChoice } from "@/lib/signup-analytics-choice"
 import { confirmNewAccountAnalytics } from "@/lib/analytics-account"
@@ -23,9 +23,9 @@ function GoogleSignInReturn() {
   const t = useT(), navigate = useNavigate(), { adopt } = useAccounts()
   const [attempt] = useState(readGoogleAttempt)
   const [choice, setChoice] = useState(attempt?.choice ?? null)
-  const [pending, setPending] = useState<GooglePending | null>(null)
-  const initialError = !attempt || !googleReturn?.get("code") || googleReturn?.get("error") ? (googleReturn?.get("error") === "cancelled" ? "cancelled" : "expired_request") : ""
-  const [busy, setBusy] = useState(!initialError), [error, setError] = useState(initialError)
+  const [pending, setPending] = useState<GooglePending | null>(attempt?.pending ?? null)
+  const initialError = !attempt || (!attempt.pending && !googleReturn?.get("code")) || googleReturn?.get("error") ? (googleReturn?.get("error") === "cancelled" ? "cancelled" : "expired_request") : ""
+  const [busy, setBusy] = useState(!initialError && !pending), [error, setError] = useState(initialError)
   const [recovering, setRecovering] = useState(false)
   const [username, setUsername] = useState(""), [password, setPassword] = useState("")
   const started = useRef(false)
@@ -55,22 +55,27 @@ function GoogleSignInReturn() {
     if (started.current) return
     started.current = true
     const code = googleReturn?.get("code")
-    if (!attempt || !code || googleReturn?.get("error")) {
+    if (pending || !attempt || !code || googleReturn?.get("error")) {
       return
     }
     void googleRequest<GooglePending | GoogleSession>("exchange", { code, verifier: attempt.verifier })
-      .then(async result => { if ("access_token" in result) await finish(result); else setPending(result) })
+      .then(async result => { if ("access_token" in result) await finish(result); else { saveGoogleProgress(attempt.verifier, { pending: result }); setPending(result) } })
       .catch(err => setError(err instanceof Error ? err.message : "expired_request")).finally(() => setBusy(false))
     // One-time handoff must not be replayed by React StrictMode or re-renders.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+  useEffect(() => { if (terminal) clearGoogleAttempt() }, [terminal])
   return <AuthPage><AuthPanel>
     <CardHeader><CardTitle role="heading" aria-level={1}>{t(pending?.step === "signup" ? "auth.google.chooseUsername" : pending?.step === "link" ? "auth.google.linkTitle" : "auth.google.continue")}</CardTitle></CardHeader>
     <CardContent className="flex flex-col gap-4">
       {busy && <Spinner />}
       {error && <p role="alert" className="text-sm text-destructive">{t(errorKey)}</p>}
       {recovering && <FrontierForgotPasswordForm onBack={() => setRecovering(false)} returnTo={attempt?.next} />}
-      {!terminal && pending?.step === "signup" && !choice && <PrivacyStep onNext={() => setChoice(readSignupAnalyticsChoice())} onBack={() => navigate(loginPath({ next: attempt?.next, add: true }))} />}
+      {!terminal && pending?.step === "signup" && !choice && <PrivacyStep onNext={() => {
+        const confirmed = readSignupAnalyticsChoice()
+        try { if (attempt) saveGoogleProgress(attempt.verifier, { choice: confirmed }); setChoice(confirmed) }
+        catch { setError("unavailable") }
+      }} onBack={() => navigate(loginPath({ next: attempt?.next, add: true }))} />}
       {pending && !terminal && !recovering && (pending.step !== "signup" || choice) && <form className="flex flex-col gap-4" onSubmit={event => {
         event.preventDefault(); if (!attempt || busy) return
         setBusy(true); setError("")
@@ -98,7 +103,11 @@ function GoogleConnectReturn({ username, verifier }: { username: string; verifie
   const t = useT(), navigate = useNavigate(), { active, loading } = useAccounts()
   const [password, setPassword] = useState(""), [busy, setBusy] = useState(false), [error, setError] = useState(false)
   useEffect(() => { setPassword(""); setError(false) }, [active?.username])
-  const code = googleReturn?.get("code")
+  const [saved] = useState(readGoogleAttempt)
+  const code = googleReturn?.get("code") ?? saved?.connectCode
+  useEffect(() => {
+    if (code) { try { saveGoogleProgress(verifier, { connectCode: code }) } catch { setError(true) } }
+  }, [code, verifier])
   const matching = active?.username === username
   return <AuthPage><AuthPanel><CardHeader><CardTitle>{t("auth.google.linkTitle")}</CardTitle></CardHeader>
     <CardContent className="flex flex-col gap-4">

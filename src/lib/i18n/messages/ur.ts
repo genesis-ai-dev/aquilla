@@ -5094,8 +5094,6 @@ export const ur: Catalog = {
   "projectSettings.permission.reconnectToEdit": "شیئر ترتیبات ترمیم کے لیے دوبارہ جڑیں۔",
   "projectSettings.permission.onlyRoleCanModify": "صرف {role} بدل سکتا ہے",
   "projectSettings.permission.viewPrivilegedMembers": "{role} دیکھیں",
-  "projectSettings.permission.privilegedDialogTitle": "منصوبہ {role}",
-  "projectSettings.permission.privilegedDialogDescription": "{role} شیئر ترتیبات، ارکان، اور منصوبے کی دیگر سیٹنگ بدل سکتا ہے۔",
   "projectSettings.permission.privilegedDialogEmpty": "اس منصوبے پر کوئی {role} نہیں۔",
   "projectSettings.permission.privilegedDialogError": "{role} لوڈ نہیں ہو سکا۔",
   "projectSettings.create.trigger": "نیا منصوبہ",

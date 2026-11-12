@@ -4334,8 +4334,6 @@ export const id: Catalog = {
   "projectSettings.permission.reconnectToEdit": "Sambungkan kembali untuk mengubah pengaturan bersama.",
   "projectSettings.permission.onlyRoleCanModify": "Hanya {role} yang dapat mengubahnya",
   "projectSettings.permission.viewPrivilegedMembers": "Lihat {role}",
-  "projectSettings.permission.privilegedDialogTitle": "{role} proyek",
-  "projectSettings.permission.privilegedDialogDescription": "{role} dapat mengubah pengaturan bersama, anggota, dan konfigurasi proyek lainnya.",
   "projectSettings.permission.privilegedDialogEmpty": "Tidak ada {role} pada proyek ini.",
   "projectSettings.permission.privilegedDialogError": "Tidak dapat memuat {role}.",
   "projectSettings.create.trigger": "Proyek Baru",

@@ -487,6 +487,7 @@ export interface UserRow {
   created_at: string
   updated_at: string
   /** Stamped on a successful password-reset; null if never reset. See authMiddleware. */
+  session_version?: number
   password_changed_at: string | null
 }
 
@@ -499,6 +500,7 @@ export interface AuthUser {
   preferences: Record<string, unknown>
   created_at: string
   updated_at: string
+  session_version?: number
   password_changed_at: string | null
 }
 
@@ -519,6 +521,8 @@ export interface JWTPayload {
   sub: string
   /** Immutable database account ID. Absent only on legacy credentials. */
   uid?: string
+  /** Password-reset generation; absent on legacy tokens. */
+  sv?: number
   exp: number
   iat: number
   /** Unique token id, checked against revoked_tokens on logout (migration

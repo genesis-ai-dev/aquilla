@@ -4,6 +4,11 @@ export interface PackageBlockTranslation {
   plain: string
   html: string
   label: string
+  /** The block's segments in order, each with its own plain text and (when
+   *  the translator's editor wrote one) its own HTML. The joined `html` above
+   *  only holds the segments that HAVE html, so a reader that wants every
+   *  segment's words must read these (AQU-2539, the DOCX exporter). */
+  parts: { plain: string; html: string }[]
 }
 
 interface PackageBlockLocator {
@@ -64,10 +69,14 @@ export function translationsByPackageBlock(
     )
     const plain = entries.map(({ cell }) => cell.translated.trim()).filter(Boolean).join(" ")
     const html = entries.map(({ cell }) => cell.translatedHtml?.trim()).filter(Boolean).join(" ")
+    const parts = entries
+      .map(({ cell }) => ({ plain: cell.translated.trim(), html: cell.translatedHtml?.trim() ?? "" }))
+      .filter((part) => part.plain !== "" || part.html !== "")
     translations.set(key, {
       plain,
       html,
       label: `${entries[0].locator.memberPath}:${entries[0].locator.blockPath}`,
+      parts,
     })
   }
   return translations

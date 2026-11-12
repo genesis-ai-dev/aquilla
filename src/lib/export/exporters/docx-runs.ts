@@ -1,10 +1,12 @@
+import { scanXmlTags, startTagName } from "@/lib/parsers/xml-lite"
+
 const W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-export type Mark = "b" | "i" | "u" | "s" | "code"
+export type Mark = "b" | "i" | "u" | "s" | "sup" | "sub" | "code"
 export interface Span { text: string; marks: Set<Mark> }
 
 const TAG_TO_MARK: Record<string, Mark> = {
   b: "b", strong: "b", i: "i", em: "i", u: "u",
-  s: "s", strike: "s", del: "s", code: "code",
+  s: "s", strike: "s", del: "s", sup: "sup", sub: "sub", code: "code",
 }
 
 export function htmlToSpans(html: string): Span[] {
@@ -12,13 +14,32 @@ export function htmlToSpans(html: string): Span[] {
   const doc = new DOMParser().parseFromString(html, "text/html")
   const root = doc.body
   const spans: Span[] = []
+  const push = (text: string, marks: Set<Mark>) => {
+    if (text) spans.push({ text, marks: new Set(marks) })
+  }
+  let blocks = 0
   const walk = (node: Node, marks: Set<Mark>) => {
     for (const child of Array.from(node.childNodes)) {
       if (child.nodeType === Node.TEXT_NODE) {
-        const text = child.textContent ?? ""
-        if (text) spans.push({ text, marks: new Set(marks) })
+        push(child.textContent ?? "", marks)
       } else if (child.nodeType === Node.ELEMENT_NODE) {
-        const tag = (child as Element).tagName.toLowerCase()
+        const el = child as Element
+        const tag = el.tagName.toLowerCase()
+        // AQU-2539: what the translation editor writes. A hard break is a line
+        // break; a footnote is an atom whose USFM text lives in an attribute;
+        // a second paragraph starts on a new line.
+        if (tag === "br") {
+          push("\n", marks)
+          continue
+        }
+        if (el.hasAttribute("data-usfm-footnote")) {
+          push(el.getAttribute("data-usfm-footnote") ?? "", new Set())
+          continue
+        }
+        if (tag === "p" || tag === "div") {
+          if (blocks > 0) push("\n", new Set())
+          blocks++
+        }
         const mark = TAG_TO_MARK[tag]
         const next = mark ? new Set(marks).add(mark) : marks
         walk(child, next)
@@ -30,16 +51,27 @@ export function htmlToSpans(html: string): Span[] {
   return spans.filter(s => s.text.length > 0)
 }
 
-function escapeXml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+// Characters XML 1.0 cannot hold at all; one in a w:t makes the part unreadable.
+const XML_INVALID_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g
+
+export function escapeXml(s: string): string {
+  return s
+    .replace(XML_INVALID_RE, "")
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 }
 
 const MARK_TO_TAG: Partial<Record<Mark, string>> = {
-  b: "<w:b/>", i: "<w:i/>", u: '<w:u w:val="single"/>', s: "<w:strike/>", // code → none
+  b: "<w:b/>", i: "<w:i/>", u: '<w:u w:val="single"/>', s: "<w:strike/>",
+  sup: '<w:vertAlign w:val="superscript"/>', sub: '<w:vertAlign w:val="subscript"/>', // code → none
 }
 
 /** OOXML element name behind each inline mark (`code` has no run property). */
-const MARK_TO_ELEMENT: Partial<Record<Mark, string>> = { b: "b", i: "i", u: "u", s: "strike" }
+const MARK_TO_ELEMENT: Partial<Record<Mark, string>> = {
+  b: "b", i: "i", u: "u", s: "strike", sup: "vertAlign", sub: "vertAlign",
+}
+
+/** The marks a run can carry, in the order their toggles are written. */
+const RUN_MARKS: Mark[] = ["b", "i", "u", "s", "sup", "sub"]
 
 /**
  * Remove a toggle element from a verbatim `<w:rPr>` string (AQU-1719).
@@ -50,7 +82,7 @@ const MARK_TO_ELEMENT: Partial<Record<Mark, string>> = { b: "b", i: "i", u: "u",
  * one so the toggle we emit is the only one. Toggles the translator did not
  * set are left alone, so the source run's own formatting still carries over.
  */
-function stripToggleElement(rPrXml: string, name: string): string {
+export function stripToggleElement(rPrXml: string, name: string): string {
   const re = new RegExp(`<w:${name}(?:\\s[^>]*)?/>|<w:${name}(?:\\s[^>]*)?>[\\s\\S]*?</w:${name}>`, "g")
   return rPrXml.replace(re, "")
 }
@@ -66,23 +98,111 @@ function stripToggleElement(rPrXml: string, name: string): string {
  *   or null. Translator toggles are spliced in before `</w:rPr>`.
  */
 export function spansToRunXml(spans: Span[], baseRprXml: string | null): string {
-  return spans.map((span) => {
-    const applied = (["b", "i", "u", "s"] as Mark[]).filter((m) => span.marks.has(m))
-    const toggles = applied.map((m) => MARK_TO_TAG[m]).join("")
-    let rPr = ""
-    if (baseRprXml) {
-      // splice toggles in just before the closing </w:rPr> (or expand a self-closed base),
-      // after dropping any same-property flag the base already carries (AQU-1719)
-      const base = applied.reduce(
-        (xml, m) => stripToggleElement(xml, MARK_TO_ELEMENT[m] as string), baseRprXml)
-      rPr = base.includes("</w:rPr>")
-        ? base.replace("</w:rPr>", `${toggles}</w:rPr>`)
-        : `<w:rPr>${toggles}</w:rPr>` // base was <w:rPr/> or empty
-    } else if (toggles) {
-      rPr = `<w:rPr>${toggles}</w:rPr>`
+  return spans.map((span) => textRunXml(span.text, rPrWithMarks(baseRprXml, span.marks))).join("")
+}
+
+/**
+ * The `<w:rPr>` for a stretch of translation: the base run look with the
+ * stretch's marks switched on. Returns "" when there is nothing to write.
+ */
+export function rPrWithMarks(baseRprXml: string | null, marks: ReadonlySet<Mark>): string {
+  const applied = RUN_MARKS.filter((m) => marks.has(m))
+  if (!baseRprXml) {
+    return applied.length > 0 ? `<w:rPr>${applied.map((m) => MARK_TO_TAG[m]).join("")}</w:rPr>` : ""
+  }
+  // Replace any same-property flag the base already carries (AQU-1719); a
+  // self-closed base (<w:rPr/>) is expanded.
+  let rPr = baseRprXml
+  for (const m of applied) rPr = setRprChild(rPr, MARK_TO_ELEMENT[m] as string, MARK_TO_TAG[m] as string)
+  return /<w:rPr\b[^>]*\/>$/.test(rPr.trim()) ? "<w:rPr></w:rPr>" : rPr
+}
+
+/**
+ * ECMA-376 order of `w:rPr` children (CT_RPr). Word reads children out of
+ * order in practice, but a property is written where the schema puts it.
+ */
+const RPR_ORDER = [
+  "rStyle", "rFonts", "b", "bCs", "i", "iCs", "caps", "smallCaps", "strike", "dstrike",
+  "outline", "shadow", "emboss", "imprint", "noProof", "snapToGrid", "vanish", "webHidden",
+  "color", "spacing", "w", "kern", "position", "sz", "szCs", "highlight", "u", "effect",
+  "bdr", "shd", "fitText", "vertAlign", "rtl", "cs", "em", "lang", "eastAsianLayout",
+  "specVanish", "oMath", "rPrChange",
+]
+
+/**
+ * Set (or with `elementXml === null`, remove) one direct child of a verbatim
+ * `<w:rPr>` string, written at its schema position; every other byte of the
+ * rPr is kept. `name` is the local name (`b`, `lang`, `vertAlign`).
+ */
+export function setRprChild(rPrXml: string, name: string, elementXml: string | null): string {
+  let rPr = rPrXml.trim()
+  const selfClosed = /^<w:rPr\b[^>]*\/>$/.exec(rPr)
+  if (selfClosed) rPr = `${rPr.slice(0, -2)}></w:rPr>`
+  const openEnd = rPr.indexOf(">") + 1
+  const closeStart = rPr.lastIndexOf("</w:rPr>")
+  if (openEnd <= 0 || closeStart < openEnd) return rPrXml
+  const inner = rPr.slice(openEnd, closeStart)
+  // Direct children only: `w:rPrChange` holds a whole older rPr inside it.
+  const children: { name: string; start: number; end: number }[] = []
+  let depth = 0
+  let current: { name: string; start: number } | null = null
+  scanXmlTags(inner, {
+    open(body, start, end, selfClosing) {
+      if (depth === 0) {
+        const local = startTagName(body).replace(/^w:/, "")
+        if (selfClosing) children.push({ name: local, start, end })
+        else current = { name: local, start }
+      }
+      if (!selfClosing) depth++
+    },
+    close(_name, _start, end) {
+      depth--
+      if (depth === 0 && current) {
+        children.push({ ...current, end })
+        current = null
+      }
+    },
+  })
+  const rank = (local: string) => {
+    const i = RPR_ORDER.indexOf(local)
+    return i === -1 ? RPR_ORDER.length : i
+  }
+  let out = ""
+  let cursor = 0
+  let placed = elementXml === null
+  for (const child of children) {
+    if (!placed && rank(child.name) > rank(name)) {
+      out += inner.slice(cursor, child.start) + elementXml
+      cursor = child.start
+      placed = true
     }
-    return `<w:r>${rPr}<w:t xml:space="preserve">${escapeXml(span.text)}</w:t></w:r>`
-  }).join("")
+    if (child.name === name) {
+      out += inner.slice(cursor, child.start)
+      cursor = child.end
+    }
+  }
+  out += inner.slice(cursor)
+  if (!placed) out += elementXml
+  return rPr.slice(0, openEnd) + out + "</w:rPr>"
+}
+
+/**
+ * One run of translated text (AQU-2539). A tab becomes `<w:tab/>` and a line
+ * break `<w:br/>`, the elements Word reads them from, so a tab-separated list
+ * or a broken line comes back as it went in. Returns "" for empty text.
+ */
+export function textRunXml(text: string, rPrXml: string): string {
+  let inner = ""
+  for (const part of text.split(/(\t|\r\n|\n|\r)/)) {
+    if (part === "") continue
+    if (part === "\t") inner += "<w:tab/>"
+    else if (part === "\n" || part === "\r" || part === "\r\n") inner += "<w:br/>"
+    else {
+      const escaped = escapeXml(part)
+      if (escaped) inner += `<w:t xml:space="preserve">${escaped}</w:t>`
+    }
+  }
+  return inner ? `<w:r>${rPrXml}${inner}</w:r>` : ""
 }
 
 export function spansToRuns(doc: Document, spans: Span[], baseRpr: Element | null): Element[] {

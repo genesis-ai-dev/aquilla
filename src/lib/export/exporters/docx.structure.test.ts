@@ -6,6 +6,7 @@ import JSZip from "jszip"
 import { exportDocx } from "./docx"
 import { docxPartsToStrings } from "@/lib/parsers/docx"
 import { assertWellFormedXml } from "@/lib/parsers/xml-lite"
+import { structuralProblems } from "./__fixtures__/docx-structure-check"
 import type { CellData } from "@/hooks/useCells"
 import type { TranslatableString } from "@/lib/parsers/types"
 import {
@@ -67,8 +68,26 @@ async function exportedXml(body: string, cells: CellData[], footnotes?: string):
   const result = await exportDocx(await makeDocx(body, footnotes), cells)
   const zip = await JSZip.loadAsync(await result.blob.arrayBuffer())
   const xml = await zip.file("word/document.xml")!.async("string")
+  const outNotes = await zip.file("word/footnotes.xml")?.async("string")
   expectWellFormed(xml)
+  expectNoNewStructuralProblems(documentXml(body), xml, footnotes, outNotes)
   return { xml, result }
+}
+
+/** The export adds no structural problem its source did not have (Word's
+ *  needs beyond well-formed XML: see __fixtures__/docx-structure-check.ts). */
+function expectNoNewStructuralProblems(sourceXml: string, exportXml: string, sourceNotes?: string, exportNotes?: string): void {
+  const count = (list: string[]) => list.reduce((m, p) => m.set(p, (m.get(p) ?? 0) + 1), new Map<string, number>())
+  const before = count(structuralProblems(sourceXml, sourceNotes))
+  const added = structuralProblems(exportXml, exportNotes).filter((p) => {
+    const left = before.get(p) ?? 0
+    if (left > 0) {
+      before.set(p, left - 1)
+      return false
+    }
+    return true
+  })
+  expect(added).toEqual([])
 }
 
 /** Two independent checks: happy-dom's XML parser and the exporter's guard. */
@@ -376,6 +395,7 @@ describe("exportDocx — the target language (AQU-2539)", () => {
     const zip = await JSZip.loadAsync(await result.blob.arrayBuffer())
     const xml = await zip.file("word/document.xml")!.async("string")
     expectWellFormed(xml)
+    expectNoNewStructuralProblems(documentXml(body), xml)
     return xml
   }
   const body = para(run("The word ", EN) + run("שנה", HEB) + run(" means: year!", EN))
@@ -414,6 +434,7 @@ describe("exportDocx — translated footnote text (AQU-2539)", () => {
     const fn = await zip.file("word/footnotes.xml")!.async("string")
     expectWellFormed(doc)
     expectWellFormed(fn)
+    expectNoNewStructuralProblems(documentXml(body), doc, notes, fn)
     return { doc, fn, result }
   }
   const body = para(run("Text") + footnoteRefRun(1) + run(" more."))
@@ -618,6 +639,7 @@ describe("exportDocx — removing the last paragraph of a container (AQU-2539)",
     const result = await exportDocx(await makeDocx(body), [], { removedCells: removedAt(...removed) })
     const xml = await (await JSZip.loadAsync(await result.blob.arrayBuffer())).file("word/document.xml")!.async("string")
     expectWellFormed(xml)
+    expectNoNewStructuralProblems(documentXml(body), xml)
     return { xml, result }
   }
 
@@ -633,5 +655,55 @@ describe("exportDocx — removing the last paragraph of a container (AQU-2539)",
     expect(both.xml).not.toContain("One")
     const first = await exportRemoving(cellOf(para(run("One")) + para(run("Two"))) + para(run("After")), [1])
     expect(first.xml).toContain(`<w:tc><w:tcPr/>${para(run("Two"))}</w:tc>`)
+  })
+})
+
+describe("the structural check itself (AQU-2539)", () => {
+  it("finds what Word would reject", () => {
+    const bad = documentXml(
+      `<w:tbl><w:tr><w:tc><w:tcPr/></w:tc></w:tr></w:tbl>` +
+        para(`<w:bookmarkStart w:id="1" w:name="a"/>${run("x")}`) +
+        para(`<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText> REF missing </w:instrText></w:r>${footnoteRefRun(9)}`) +
+        para(`<w:hyperlink r:id="rId1"></w:hyperlink><w:r><w:rPr><w:i/><w:b/></w:rPr><w:t>y</w:t></w:r>`),
+    )
+    expect(structuralProblems(bad, footnotesXml({ 2: "A note." })).sort()).toEqual([
+      "REF to a missing bookmark: missing",
+      "bookmarkStart with no end: 1",
+      "field begin without end (1)",
+      "footnoteReference to a missing note: 9",
+      "w:hyperlink with no run",
+      "w:rPr children out of order: i,b",
+      "w:tc not ending in w:p",
+    ])
+  })
+})
+
+describe("exportDocx — the well-formedness guard (AQU-2539)", () => {
+  it("refuses to hand back a document.xml that does not parse", async () => {
+    // A source broken outside any paragraph: the rebuilt part copies it, and
+    // the guard stops the export instead of handing Word a corrupt file.
+    const zip = new JSZip()
+    zip.file("word/document.xml", documentXml(para(run("Hello"))) + "</w:extra>")
+    const raw = await zip.generateAsync({ type: "arraybuffer" })
+    await expect(exportDocx(raw, [cellAt(1, "Bonjour")])).rejects.toThrow(/Word export stopped: the rebuilt word\/document\.xml is not well-formed/)
+  })
+})
+
+describe("exportDocx — footnotes the translation reorders (AQU-2539)", () => {
+  it("gives each reference, in order, the note text of the marker at its place", async () => {
+    const body = para(run("First") + footnoteRefRun(1) + run(" and second") + footnoteRefRun(2) + run("."))
+    const notes = footnotesXml({ 1: "Note one.", 2: "Note two." })
+    // The French puts the second note's marker first.
+    const translated = "D'abord la seconde\\f + \\ft Note deux.\\f* puis la première\\f + \\ft Note un.\\f*."
+    const result = await exportDocx(await makeDocx(body, notes), [cellAt(1, translated)])
+    const zip = await JSZip.loadAsync(await result.blob.arrayBuffer())
+    const xml = await zip.file("word/document.xml")!.async("string")
+    const fn = await zip.file("word/footnotes.xml")!.async("string")
+    expectNoNewStructuralProblems(documentXml(body), xml, notes, fn)
+    // References stay in document order (Word numbers them 1, 2 by position);
+    // each note gets the text written at its place in the translation.
+    expect(xml.indexOf('w:footnoteReference w:id="1"')).toBeLessThan(xml.indexOf('w:footnoteReference w:id="2"'))
+    expect(fn).toContain('<w:footnote w:id="1"><w:p><w:r><w:footnoteRef/></w:r><w:r><w:t xml:space="preserve"> Note deux.</w:t></w:r></w:p></w:footnote>')
+    expect(fn).toContain('<w:footnote w:id="2"><w:p><w:r><w:footnoteRef/></w:r><w:r><w:t xml:space="preserve"> Note un.</w:t></w:r></w:p></w:footnote>')
   })
 })

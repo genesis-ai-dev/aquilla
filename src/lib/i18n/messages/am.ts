@@ -5104,8 +5104,6 @@ export const am: Catalog = {
   "projectSettings.permission.reconnectToEdit": "የተጋሩ ቅንብሮችን ለማረም እንደገና ይገናኙ።",
   "projectSettings.permission.onlyRoleCanModify": "{role} ብቻ መቀየር ይችላል",
   "projectSettings.permission.viewPrivilegedMembers": "{role}ን ይመልከቱ",
-  "projectSettings.permission.privilegedDialogTitle": "የፕሮጀክት {role}",
-  "projectSettings.permission.privilegedDialogDescription": "{role} የተጋሩ ቅንብሮችን፣ አባላትን እና ሌላ የፕሮጀክት ውቅር መቀየር ይችላል።",
   "projectSettings.permission.privilegedDialogEmpty": "በዚህ ፕሮጀክት ላይ {role} የለም።",
   "projectSettings.permission.privilegedDialogError": "{role}ን መጫን አልተቻለም።",
   "projectSettings.create.trigger": "አዲስ ፕሮጀክት",

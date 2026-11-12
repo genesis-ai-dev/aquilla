@@ -4,6 +4,7 @@
 import { describe, it, expect } from "vitest"
 import JSZip from "jszip"
 import { exportDocx } from "./docx"
+import { scopeRoundTripCells } from "../validation-scope"
 import { docxPartsToStrings } from "@/lib/parsers/docx"
 import { assertWellFormedXml } from "@/lib/parsers/xml-lite"
 import { structuralProblems } from "./__fixtures__/docx-structure-check"
@@ -125,7 +126,7 @@ describe("exportDocx — paragraphs nested in text boxes (AQU-2539)", () => {
     expect(xml.match(/FR Box caption/g)).toHaveLength(2)
   })
 
-  it("exports an OLD import without shifting: copy cells are ignored, a swallowed-text cell leaves its paragraph alone", async () => {
+  it("exports an OLD import without shifting: a copy's cell gives way to its box's own, a swallowed-text cell leaves its paragraph alone", async () => {
     // Before AQU-2539 the importer gave w:p[2] the box's words too (Choice and
     // Fallback), and gave the Fallback copy (w:p[4]) its own cell.
     const cells = [
@@ -776,20 +777,150 @@ describe("exportDocx — an old import's cell for the paragraph holding a text b
   const body = para(textBoxRun(para(run(caption), "Caption")) + pictureRun, "Caption") + para(run("Next"))
   const captionsIn = (xml: string) => xml.match(/>Figure 1 : Capture d’écran de l’outil</g)?.length ?? 0
 
+  // As dev's importer made it: the caption four times, cut into two segments.
+  const holderCells = (translate = true) => [
+    cellAt(1, translate ? `${french}${french}${french.slice(0, 11)}` : "", { original: `${caption}${caption}${caption.slice(0, 10)}` }, 1),
+    cellAt(1, translate ? `${french.slice(11).trim()}${french}` : "", { original: `${caption.slice(10)}${caption}` }, 2),
+  ]
+
   it("writes the holder's cell to the text-box caption when its words are the caption repeated", async () => {
-    // As dev's importer made it: the caption four times, cut into two segments.
     const cells = [
-      cellAt(1, `${french}${french}${french.slice(0, 11)}`, { original: `${caption}${caption}${caption.slice(0, 10)}` }, 1),
-      cellAt(1, `${french.slice(11).trim()}${french}`, { original: `${caption.slice(10)}${caption}` }, 2),
+      ...holderCells(),
       cellAt(2, "", { original: caption }),
-      cellAt(3, "Copie ignorée", { original: caption }),
+      cellAt(3, "", { original: caption }),
       cellAt(4, "Suivant", { original: "Next" }),
     ]
     const { xml, result } = await exportedXml(body, cells)
     expect(captionsIn(xml)).toBe(2) // the caption and its Fallback copy
-    expect(xml).not.toContain("Copie ignorée")
     expect(result.fidelity.textBoxCellsAdopted).toBe(1)
     expect(result.warnings).toEqual([])
+  })
+
+  it("gives the text box its stored copy's own translation ahead of the holder's", async () => {
+    // The partner's project: the Fallback copy's own cell is translated.
+    const cells = [...holderCells(), cellAt(2, "", { original: caption }), cellAt(3, "Figure 1 : Traduction de la copie", { original: caption })]
+    const { xml, result } = await exportedXml(body, cells)
+    expect(xml.match(/>Figure 1 : Traduction de la copie</g)).toHaveLength(2) // the box and its copy
+    expect(captionsIn(xml)).toBe(0)
+    expect(result.fidelity.textBoxCellsAdopted).toBe(1)
+    expect(result.warnings).toEqual([])
+  })
+
+  it("says nothing about a holder whose cell has no translation", async () => {
+    const cells = [...holderCells(false), cellAt(2, "", { original: caption }), cellAt(3, "", { original: caption })]
+    const { xml, result } = await exportedXml(body, cells)
+    expect(xml).toBe(documentXml(body))
+    expect(result.warnings).toEqual([])
+    expect(result.fidelity.textBoxCellsNotSplit).toBe(0)
+  })
+
+  it("says nothing about a holder left unvalidated in a validated-only export", async () => {
+    // A drafted cell can carry its marks (translatedHtml) as well as its text.
+    const drafted = holderCells().map((c) => ({ ...c, translatedHtml: `<p>${c.translated}</p>` }))
+    const cells = scopeRoundTripCells([...drafted, cellAt(2, "", { original: caption })], "validated-only")
+    const { xml, result } = await exportedXml(body, cells)
+    expect(captionsIn(xml)).toBe(0)
+    expect(result.warnings).toEqual([])
+    expect(result.fidelity.textBoxCellsAdopted).toBe(0)
+  })
+
+  it("takes nothing from a translation of the right length that is not a clean repetition, and says so", async () => {
+    // Exactly as long as the caption's French twice over, so only comparing
+    // the repeats can tell: the second "repeat" ends in another word.
+    const twice = `${french}${french.replace("l’outil", "l’objet")}`
+    const letters = (t: string) => t.replace(/\s/g, "").length
+    expect(letters(twice)).toBe(2 * letters(french))
+    const cells = [cellAt(1, twice, { original: `${caption}${caption}` })]
+    const { xml, result } = await exportedXml(body, cells)
+    expect(captionsIn(xml)).toBe(0)
+    expect(result.warnings.map((w) => w.segment)).toEqual([caption])
+  })
+
+  it("takes nothing from a cell that holds the caption's words among others, even when its translation repeats", async () => {
+    // "Figure 1" and "Tables 2" have the same letter count: the source is twice
+    // that long and contains the caption, but is not the caption repeated.
+    const short = para(textBoxRun(para(run("Figure 1"), "Caption")) + pictureRun, "Caption")
+    const cells = [cellAt(1, "Fig. 1Fig. 1", { original: "Figure 1Tables 2" })]
+    const { xml, result } = await exportedXml(short, cells)
+    expect(xml).not.toContain("Fig. 1")
+    expect(result.warnings.map((w) => w.segment)).toEqual(["Figure 1"])
+  })
+
+  it("gives two text boxes with the same words nothing from one old cell, and names them", async () => {
+    // w:p[1] holder; w:p[2], w:p[4] the two boxes; w:p[3], w:p[5] their copies.
+    const two = para(textBoxRun(para(run(caption), "Caption")) + textBoxRun(para(run(caption), "Caption")), "Caption")
+    const cells = [cellAt(1, `${french}${french}${french}${french}`, { original: `${caption}${caption}${caption}${caption}` })]
+    const { xml, result } = await exportedXml(two, cells)
+    expect(captionsIn(xml)).toBe(0)
+    expect(result.warnings).toEqual([{ segment: caption, detail: expect.stringContaining("2 text boxes") }])
+    expect(result.fidelity.textBoxCellsNotSplit).toBe(2)
+  })
+
+  it("gives the old cell to the one text box with those words still without a translation", async () => {
+    const two = para(textBoxRun(para(run(caption), "Caption")) + textBoxRun(para(run(caption), "Caption")), "Caption")
+    const cells = [
+      cellAt(1, `${french}${french}${french}${french}`, { original: `${caption}${caption}${caption}${caption}` }),
+      cellAt(2, "Figure 1 : La sienne", { original: caption }),
+    ]
+    const { xml, result } = await exportedXml(two, cells)
+    expect(xml.match(/>Figure 1 : La sienne</g)).toHaveLength(2)
+    expect(captionsIn(xml)).toBe(2) // the second box and its copy
+    expect(result.warnings).toEqual([])
+  })
+
+  it("never gives a holder's cell to its box when the holder has words of its own; names both", async () => {
+    // The cell's source is the caption twice over, but the paragraph has words
+    // of its own: the cell is the holder's, stale, and the box is named too.
+    const own = "See the screenshot below of the tool as it looks in this version"
+    const withOwn = para(run(own) + textBoxRun(para(run(caption), "Caption")), "Caption")
+    const cells = [cellAt(1, `${french}${french}`, { original: `${caption}${caption}` })]
+    const { xml, result } = await exportedXml(withOwn, cells)
+    expect(captionsIn(xml)).toBe(0)
+    expect(result.warnings.map((w) => w.segment)).toEqual(["See the screenshot below of the tool as…", caption])
+    expect(result.fidelity.staleTextBoxHolders).toBe(1)
+  })
+
+  it("lists the warnings that ask for a re-import before any other", async () => {
+    const mixed = para(run("Plain ") + run("bold", "<w:rPr><w:b/></w:rPr>") + run(" words"))
+    const cells = [cellAt(1, "Clair gras mots", { original: "Plain bold words" }), cellAt(2, `${french} autre`, { original: `${caption}${caption}` })]
+    const { result } = await exportedXml(mixed + body, cells)
+    expect(result.warnings.map((w) => [w.segment, w.detail.includes("re-import")])).toEqual([
+      [caption, true],
+      ["word/document.xml:w:p[1]", false],
+    ])
+  })
+
+  it("gives the text box its copy's translation on an import from before locators too", async () => {
+    // No locators: the k-th group fills the k-th paragraph with any text
+    // (holder, box, copy, next), as that importer made them.
+    const positional = ["", "", "Figure 1 : Traduction de la copie", "Suivant"].map((translated, k) =>
+      ({ ...cellAt(k + 1, translated, { original: k === 3 ? "Next" : caption }), metadata: {} }) as CellData)
+    const { xml, result } = await exportedXml(body, positional)
+    expect(xml.match(/>Figure 1 : Traduction de la copie</g)).toHaveLength(2)
+    expect(xml).toContain(">Suivant<")
+    expect(result.fidelity.textBoxCellsAdopted).toBe(1)
+  })
+
+  it("names a text-box paragraph once, however many old cells held its words", async () => {
+    // w:p[1] holder; w:p[2] the outer box ("Outer", holding the inner box
+    // w:p[3], copy w:p[4]); w:p[5]..[7] the outer box's copy.
+    const nested = para(textBoxRun(para(run("Outer ") + textBoxRun(para(run("Inner caption"))))))
+    const cells = [
+      cellAt(1, "Extérieur Légende intérieure", { original: "Outer Inner captionInner captionOuter Inner captionInner caption" }),
+      cellAt(2, "Extérieur Légende", { original: "Outer Inner captionInner caption" }),
+    ]
+    const { result } = await exportedXml(nested, cells)
+    expect(result.warnings.map((w) => w.segment)).toEqual(["Inner caption", "Outer"])
+
+    // The outer box holding nothing but the inner one: both old cells held
+    // the inner caption's words.
+    const bare = para(textBoxRun(para(textBoxRun(para(run("Inner caption"))))))
+    const bareCells = [
+      cellAt(1, "Légende intérieure et plus", { original: "Inner captionInner captionInner captionInner caption" }),
+      cellAt(2, "Légende intérieure, encore", { original: "Inner captionInner caption" }),
+    ]
+    const { result: bareResult } = await exportedXml(bare, bareCells)
+    expect(bareResult.warnings.map((w) => w.segment)).toEqual(["Inner caption"])
   })
 
   it("leaves the holder's cell alone when the caption has a translation of its own", async () => {

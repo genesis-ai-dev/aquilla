@@ -148,14 +148,16 @@ export interface DocxExportFidelity {
    *  translated notes left in the source language (several paragraphs). */
   notesWritten: number
   notesLeft: number
-  /** Paragraphs holding a text box whose cell (from before AQU-2539) also
-   *  holds the box's words: left as they are, with a warning to re-import. */
+  /** Paragraphs with words of their own holding a text box whose cell (from
+   *  before AQU-2539) also holds the box's words: left as they are, with a
+   *  warning to re-import. */
   staleTextBoxHolders: number
-  /** Old cells of a paragraph holding a text box whose words were one text-box
-   *  paragraph's repeated: written to that text-box paragraph. */
+  /** Text-box paragraphs with no translation of their own that took an old
+   *  cell's: their stored copy's, or the holder's when it was their words
+   *  repeated. */
   textBoxCellsAdopted: number
   /** Text-box paragraphs left without a translation because an old cell held
-   *  their words with others' (each named in a warning). */
+   *  their words and could not be given to them (each named in a warning). */
   textBoxCellsNotSplit: number
   /** Footnote markers the translation added where the source had no
    *  footnote: not written (the marker text never reaches the body). */
@@ -288,12 +290,14 @@ export async function exportDocx(
   const spans = scanDocxParagraphs(xml)
   const blockKeyOf = (index: number) => packageBlockKey(DOCUMENT_PART, `w:p[${index}]`)
 
-  // Which translation drives each paragraph, by paragraph index.
+  // Which translation drives each paragraph, by paragraph index. A cell with
+  // no translation (untranslated, or cleared by a validated-only export) gives
+  // its paragraph none: the paragraph keeps its own words.
   const translations = new Map<number, ParagraphTranslation>()
   if (hasLocatedTranslations) {
     for (const span of spans) {
       const located = locatedTranslations.get(blockKeyOf(span.index))
-      if (located) translations.set(span.index, { parts: located.parts, label: located.label, source: located.source })
+      if (located && located.parts.length > 0) translations.set(span.index, { parts: located.parts, label: located.label, source: located.source })
     }
   } else {
     // Positional fallback for cells imported before locators: the k-th group
@@ -304,7 +308,7 @@ export async function exportDocx(
       const group = groups[slot++]
       if (group === undefined) continue
       const data = groupToData.get(group)!
-      translations.set(span.index, { parts: data.parts, label: group, source: data.source })
+      if (data.parts.length > 0) translations.set(span.index, { parts: data.parts, label: group, source: data.source })
     }
   }
 
@@ -433,86 +437,94 @@ export async function exportDocx(
   /** Warnings that ask for a re-import come first: the dialog shows six. */
   const reimportWarnings: { segment: string; detail: string }[] = []
 
-  /** Does this translation's source hold the words of a text box inside the
-   *  paragraph (see rebuildParagraph)? Every segment's source counts, and the
-   *  box's words must occur more often in it than in the paragraph's own line
-   *  (a paragraph may well repeat its box's words). */
-  function sourceSwallowedTextBox(span: DocxParagraphSpan, translation: ParagraphTranslation): boolean {
-    const nested = nestedIn.get(span.index)
-    if (!nested) return false
-    const source = squash(translation.source)
-    const own = squash(lineTextOf(span))
-    // A paragraph with no words of its own is never written anyway; a cell made
-    // by today's importer holds exactly the paragraph's own line.
-    if (!source || !own || source === own) return false
-    const occurrences = (hay: string, needle: string) => hay.split(needle).length - 1
-    return nested.some((inner) => {
-      const words = squash(lineTextOf(inner))
-      return words.length > 0 && occurrences(source, words) > occurrences(own, words)
-    })
+  const occurrences = (hay: string, needle: string) => hay.split(needle).length - 1
+  /** The paragraphs inside a paragraph's text boxes (at any depth), with words. */
+  const boxLinesIn = (holder: DocxParagraphSpan) =>
+    spans
+      .filter((s) => s.start > holder.start && s.end <= holder.end && !s.isCopy && !s.selfClosing)
+      .map((s) => {
+        const text = lineTextOf(s)
+        return { span: s, text, words: squash(text) }
+      })
+      .filter((box) => box.words.length > 0)
+
+  // AQU-2539, OLD IMPORTS. Before text boxes were read separately, a text box's
+  // words were read three times: into the paragraph holding the box, into the
+  // box's own paragraph, and into its stored copy (the Fallback an old reader
+  // shows), each line with a cell of its own. A text-box paragraph on an old
+  // import takes the first translation found among the lines that held its
+  // words: its own, its stored copy's, then the holder's if it is the same
+  // words repeated. A fresh import gives copies and word-less holders no
+  // cells, so none of this can fire on one.
+  //
+  // Its stored copy's: a text box and its copy share one translation.
+  for (const copy of spans) {
+    if (!copy.isCopy || copy.copyOf === 0 || translations.has(copy.copyOf)) continue
+    const own = translations.get(copy.index)
+    if (!own) continue
+    translations.set(copy.copyOf, own)
+    fidelity.textBoxCellsAdopted++
   }
 
-  // AQU-2539, OLD IMPORTS ONLY: before text boxes were read separately, the
-  // paragraph that holds a text box got a cell of its own with the box's words
-  // in it — several times over, from the box's two stored copies. When that
-  // paragraph has no words of its own and the cell's source is ONE text-box
-  // paragraph's words repeated (whitespace ignored), the cell belongs to that
-  // text-box paragraph: its translation, the same repetition taken out, is
-  // written there if the text-box paragraph has no translation of its own (its
-  // Fallback copy mirrors it as always). A translation that is not a clean
-  // repetition, or a cell holding several text-box paragraphs' words, cannot
-  // be split: the export says so, naming the text-box paragraphs left without
-  // a translation, instead of leaving them in English silently.
-  if (hasLocatedTranslations) {
-    const hasOwn = (index: number) => translations.get(index)?.parts.some((part) => part.plain || part.html) === true
-    for (const holder of spans) {
-      const translation = translations.get(holder.index)
-      if (holder.isCopy || !translation || !nestedIn.has(holder.index)) continue
-      const source = squash(translation.source)
-      if (!source || squash(lineTextOf(holder))) continue
-      const boxes = spans
-        .filter((s) => s.start > holder.start && s.end <= holder.end && !s.isCopy && !s.selfClosing)
-        .map((s) => ({ span: s, text: lineTextOf(s) }))
-        .filter((box) => squash(box.text))
-      const untranslated = boxes.filter((box) => !hasOwn(box.span.index))
-      if (untranslated.length === 0) continue
-      const one = untranslated.find((box) => {
-        const words = squash(box.text)
-        return source.length % words.length === 0 && words.repeat(source.length / words.length) === source
+  // The holder's. A holder's cell that held its boxes' words cannot be written
+  // into the body (they would land there), so it is left alone. When the
+  // holder has no words of its own and the cell's source is ONE untranslated
+  // box paragraph's words repeated (whitespace ignored), the cell is that box
+  // paragraph's: its translation, the same repetition taken out, is written
+  // there (its copy mirrors it). Otherwise every box paragraph the cell held
+  // that is left without a translation is named in a warning, once, instead of
+  // staying English silently; so is a holder with words of its own.
+  const staleHolders = new Set<number>()
+  const named = new Set<number>()
+  const notSplit = "this text box was imported before text boxes were read separately and its words cannot be told apart in the old translation; re-import the file to translate it"
+  const nameBoxes = (boxes: { span: DocxParagraphSpan; text: string }[], detail = notSplit) => {
+    const fresh = boxes.filter((box) => !named.has(box.span.index))
+    if (fresh.length === 0) return
+    for (const box of fresh) named.add(box.span.index)
+    fidelity.textBoxCellsNotSplit += fresh.length
+    reimportWarnings.push({ segment: firstWords(fresh[0].text), detail })
+  }
+  for (const holder of spans) {
+    const translation = translations.get(holder.index)
+    if (holder.isCopy || !translation || !nestedIn.has(holder.index)) continue
+    const source = squash(translation.source)
+    const own = squash(lineTextOf(holder))
+    // A cell made by today's importer holds exactly the paragraph's own line;
+    // an old one held the words of the boxes inside too.
+    if (!source || source === own) continue
+    const held = boxLinesIn(holder).filter((box) => occurrences(source, box.words) > occurrences(own, box.words))
+    if (held.length === 0) continue
+    const untranslated = held.filter((box) => !translations.has(box.span.index))
+    if (own) {
+      staleHolders.add(holder.index)
+      fidelity.staleTextBoxHolders++
+      reimportWarnings.push({
+        segment: firstWords(lineTextOf(holder)),
+        detail: "imported before text boxes were read separately; re-import the file to translate this paragraph",
       })
-      const derived = one ? withoutRepetition(translation.parts.map((part) => part.plain).join(" "), source.length / squash(one.text).length) : null
-      if (one && derived) {
-        translations.set(one.span.index, { parts: [{ plain: derived, html: "" }], label: translation.label, source: one.text })
-        fidelity.textBoxCellsAdopted++
-        continue
-      }
-      for (const box of untranslated) {
-        fidelity.textBoxCellsNotSplit++
-        reimportWarnings.push({
-          segment: firstWords(box.text),
-          detail: "this text box was imported before text boxes were read separately and its words cannot be told apart in the old translation; re-import the file to translate it",
-        })
-      }
+      for (const box of untranslated) nameBoxes([box])
+      continue
     }
+    const fits = untranslated.filter((box) =>
+      source.length % box.words.length === 0 && box.words.repeat(source.length / box.words.length) === source)
+    const one = fits.length === 1 ? fits[0] : null
+    const derived = one ? withoutRepetition(translation.parts.map((part) => part.plain).join(" "), source.length / one.words.length) : null
+    if (one && derived) {
+      translations.set(one.span.index, { parts: [{ plain: derived, html: "" }], label: translation.label, source: one.text })
+      fidelity.textBoxCellsAdopted++
+      continue
+    }
+    if (fits.length > 1) {
+      nameBoxes(fits, `${fits.length} text boxes with these words were imported before text boxes were read separately, and the old translation cannot say which one it belongs to; re-import the file to translate them`)
+    }
+    for (const box of untranslated) nameBoxes([box])
   }
   const noteTranslations = new Map<string, string>()
 
   function rebuildParagraph(span: DocxParagraphSpan, translation: ParagraphTranslation, counted: boolean): string | null {
-    // A project imported before AQU-2539 read a text box's words into the
-    // paragraph holding the box. Its translation holds them too and cannot be
-    // split back, so writing it would put the box's words into the body. Such
-    // a cell is recognised by its source NOT being the paragraph's own line
-    // while containing the box's words; the paragraph keeps its own words and
-    // the box is translated by its own cells.
-    if (sourceSwallowedTextBox(span, translation)) {
-      if (!counted) return null
-      fidelity.staleTextBoxHolders++
-      reimportWarnings.push({
-        segment: firstWords(lineTextOf(span)),
-        detail: "imported before text boxes were read separately; re-import the file to translate this paragraph",
-      })
-      return null
-    }
+    // A holder whose old cell held its text boxes' words keeps its own words
+    // (see above), and so does its copy.
+    if (staleHolders.has(span.isCopy ? span.copyOf : span.index)) return null
     const rebuilt = rebuildParagraphIn(part, span, (line) =>
       restoreLineSeparators(translationSpans(translation.parts, line), line, translation.source))
     if (rebuilt === null) return null

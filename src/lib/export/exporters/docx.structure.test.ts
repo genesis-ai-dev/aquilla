@@ -721,3 +721,49 @@ describe("exportDocx — unchanged text in another Unicode form (AQU-2539)", () 
     expect(xml).not.toContain(other)
   })
 })
+
+describe("exportDocx — repeated words, joined stretches, short words, base look (AQU-2539)", () => {
+  const I = "<w:rPr><w:i/></w:rPr>"
+  const B = "<w:rPr><w:b/></w:rPr>"
+
+  it("gives the look to the occurrence it belongs to when the word occurs as often in both", async () => {
+    const body = para(run("But my people have changed ") + run("my", I) + run(" glory."))
+    const { xml } = await exportedXml(body, [cellAt(1, "But my people have changed my glory.")])
+    expect(xml).toContain(`<w:r><w:t xml:space="preserve">But my people have changed </w:t></w:r><w:r>${I}<w:t xml:space="preserve">my</w:t></w:r>`)
+    const quoted = para(run("Before Abraham was, the text says; and later ") + run("Abraham", I) + run(" believed."))
+    const fr = await exportedXml(quoted, [cellAt(1, "Avant Abraham, dit le texte ; et plus tard Abraham crut.")])
+    expect(fr.xml).toContain(`plus tard </w:t></w:r><w:r>${I}<w:t xml:space="preserve">Abraham</w:t></w:r>`)
+  })
+
+  it("joins a stretch of one look across a space that has a look of its own", async () => {
+    const body = para(run("Then he came ") + run("to", B) + run(" ", '<w:rPr><w:b/><w:spacing w:val="-1"/></w:rPr>') + run("him", B) + run(" and spoke to him."))
+    const { xml } = await exportedXml(body, [cellAt(1, "Then he came to him and spoke to him.")])
+    expect(xml).toContain(`came </w:t></w:r><w:r>${B}<w:t xml:space="preserve">to</w:t></w:r>`)
+    expect(xml).toContain(`<w:t xml:space="preserve"> and spoke to him.</w:t>`)
+  })
+
+  it("never lets a short word taken out of a stretch take a look (italic de facto, French de)", async () => {
+    const body = para(run("It became the ") + run("de facto", I) + run(" standard of the field."))
+    const { xml } = await exportedXml(body, [cellAt(1, "Il est devenu la norme de fait du domaine.")])
+    expect(xml).not.toContain("<w:i/>")
+  })
+
+  it("counts superscript like a mark for the base look (a cell of sigla)", async () => {
+    const SZ = '<w:rPr><w:sz w:val="24"/></w:rPr>'
+    const SUP = '<w:rPr><w:sz w:val="24"/><w:vertAlign w:val="superscript"/></w:rPr>'
+    const body = para(run("p", SZ) + run("66,75", SUP) + run(" a", SZ) + run(" B ", SZ) + run("L ", SZ) + run("33,", SZ))
+    const { xml } = await exportedXml(body, [cellAt(1, "p66,75 a B L 33,")])
+    expect(xml).toContain(`<w:r>${SUP}<w:t xml:space="preserve">66,75</w:t></w:r>`)
+    expect(xml).toContain(`<w:r>${SZ}<w:t xml:space="preserve"> a B L 33,</w:t></w:r>`)
+  })
+
+  it("counts letters, not characters, for the base look (accents are not letters)", async () => {
+    const A = '<w:rPr><w:sz w:val="20"/></w:rPr>'
+    const W2 = '<w:rPr><w:sz w:val="22"/></w:rPr>'
+    // Four Greek letters carrying two combining marks each: 12 UTF-16 units.
+    const greek = "ἄἔἤἴ"
+    const body = para(run(greek, A) + run(" words", W2))
+    const { xml } = await exportedXml(body, [cellAt(1, "mots")])
+    expect(xml).toContain(`<w:r>${W2}<w:t xml:space="preserve">mots</w:t></w:r>`)
+  })
+})

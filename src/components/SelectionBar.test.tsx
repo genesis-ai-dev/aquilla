@@ -1387,6 +1387,23 @@ describe("SelectionBar — Play selected (AQU-2123)", () => {
     expect(fromIndex).toBe(0)
   })
 
+  // The review (Nov 12), N11: the run starts at the first chosen line in the
+  // order Play plays them, which need not be the table's.
+  it("on a film file, starts at the first chosen line in the order Play plays the lines", async () => {
+    vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-3"]))
+    const audio = audioMapFor(["cell-1", "cell-3"])
+    // Play plays cell-3 first (a file laid out by time, say).
+    const lines = [...filmFile(audio, 60)].reverse()
+    renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {
+      audioMode: true, session: SESSION, audioByCellId: audio, playbackLines: lines,
+    })
+
+    await userEvent.setup().click(playButton())
+
+    const [ctx, fromIndex] = vi.mocked(startQueue).mock.calls[0]
+    expect(ctx.cells[fromIndex as number]?.id).toBe("cell-3")
+  })
+
   it("with no film, Play selected is still a run of the chosen lines on their own", async () => {
     vi.spyOn(selectionModule, "useSelectedIds").mockReturnValue(new Set(["cell-1", "cell-3"]))
     renderBar(makeProject(ROLE.CONTRIBUTOR), THREE, [], "", {

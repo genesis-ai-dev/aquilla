@@ -374,13 +374,15 @@ export function SelectionBar({ project, cellStore, session, username, activeLane
   // among the lines Play plays, whichever chosen lines are not among them (a
   // book's other chapters): the old run of lines on their own has no film.
   const selectionRun = useMemo(() => {
-    const ids = playbackRange.map((c) => c.id)
     if (playbackLines && filmOverRun(film, playbackLines.map((c) => c.id)).coverSec > 0) {
-      const inList = ids.filter((id) => playbackLines.some((c) => c.id === id))
-      const from = playbackLines.findIndex((c) => c.id === inList[0])
+      // N11: membership by a Set, and the run starts at the first chosen line
+      // in the order Play plays them, not the table's.
+      const chosen = new Set(playbackRange.map((c) => c.id))
+      const only = new Set(playbackLines.filter((c) => chosen.has(c.id)).map((c) => c.id))
+      const from = playbackLines.findIndex((c) => only.has(c.id))
       if (from >= 0) {
         const stops = linesPlaybackStopsAt(playbackLines, undefined, film)
-        return { cells: playbackLines, from, only: new Set(inList), stopCount: inList.filter((id) => stops.has(id)).length }
+        return { cells: playbackLines, from, only, stopCount: [...only].filter((id) => stops.has(id)).length }
       }
     }
     return { cells: playbackRange, from: 0, only: null, stopCount: linesPlaybackStopsAt(playbackRange, undefined, null).size }

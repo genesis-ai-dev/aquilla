@@ -4,10 +4,12 @@
 // (viewer level is sufficient for reading history).
 
 import { verifyTokenForFile } from "../auth"
+import { eventRowsForVisibleLanes, visibleLanesForRead } from "./lane-read-wall"
 
 export interface EventsReadEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
+  LANE_READ_WALL?: string
 }
 
 /**
@@ -140,7 +142,15 @@ export async function handleEventsReadRequest(
     .bind(...binds)
     .all<EventRowRaw>()
 
-  const events = result.results.map((row) => ({
+  // AQU-730 read wall: this is the same log the per-cell history route reads,
+  // for a whole file. A member walled to some target lanes gets source events
+  // and their own lanes' events only.
+  const rows = eventRowsForVisibleLanes(
+    result.results,
+    visibleLanesForRead(env.LANE_READ_WALL, authResult.claims),
+  )
+
+  const events = rows.map((row) => ({
     id: row.id,
     schemaVersion: row.schema_version,
     kind: row.kind,

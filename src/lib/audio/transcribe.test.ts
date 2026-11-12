@@ -16,6 +16,8 @@ import { getTranscribeStatus, clearTranscribeStatus } from "./transcribe-status"
 import { buildFrontierAudioUrl } from "./upload"
 import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
+import { InsufficientRoleError } from "@/lib/sync/events-emit"
+import { ROLE } from "@/lib/frontier/roles"
 
 // fetchCellAudio is the network path; mock it, keep the real URL parse/build.
 const fetchCellAudio = vi.fn()
@@ -25,7 +27,8 @@ vi.mock("./upload", async (importOriginal) => {
 })
 // The timings emit hits the outbox — irrelevant here; stub it.
 const emitCellAudioAttach = vi.fn(async (_input: unknown) => "evt-1")
-vi.mock("@/lib/sync/events-emit", () => ({
+vi.mock("@/lib/sync/events-emit", async (importOriginal) => ({
+  InsufficientRoleError: (await importOriginal<typeof import("@/lib/sync/events-emit")>()).InsufficientRoleError,
   emitCellAudioAttach: (input: unknown) => emitCellAudioAttach(input),
 }))
 
@@ -159,6 +162,19 @@ describe("transcribeCellOutcome", () => {
       .toEqual({ kind: "failed", message: "Reviewers cannot perform this action" })
     const status = getTranscribeStatus(FULL_ID)
     expect(status.kind === "error" && status.message).toBe("Reviewers cannot perform this action")
+  })
+
+  // The review (Nov 12), SHOULD 3: a save the role gate refused says so in
+  // the app's plain role sentence, as Change voice does (AQU-2522), never the
+  // gate's own "role 300 below required 400 for cell.audio.attach".
+  it("a save the role gate refused says why in plain words", async () => {
+    fetchCellAudio.mockResolvedValue(new Uint8Array([9, 9, 9]))
+    __setTranscribeAudioForTests(fakeTranscribe(["hola"]))
+    emitCellAudioAttach.mockRejectedValueOnce(new InsufficientRoleError("cell.audio.attach", ROLE.REVIEWER, ROLE.CONTRIBUTOR))
+    const outcome = await transcribeCellOutcome({ cell: makeCell(), session, projectId: "proj-1" })
+    expect(outcome).toEqual({ kind: "failed", message: "Reviewers cannot perform this action — you need at least Contributor access." })
+    const status = getTranscribeStatus(FULL_ID)
+    expect(status.kind === "error" && status.message).toBe("Reviewers cannot perform this action — you need at least Contributor access.")
   })
 
   it("says skipped for a row with no recording", async () => {

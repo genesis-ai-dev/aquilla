@@ -19,7 +19,8 @@ import { makeAudioSyncTokenFetcher } from "./sync-token-fetcher"
 import { keepSpans, resolvePcmWindow, type KeepSpan, type PcmTrimWindow } from "./pcm-window"
 import { hasSharedClipPcm, sharedClipWindow } from "./shared-clip-pcm"
 import { decodeSharedClipPcm } from "./shared-clip-decode"
-import { emitCellAudioAttach } from "@/lib/sync/events-emit"
+import { emitCellAudioAttach, InsufficientRoleError } from "@/lib/sync/events-emit"
+import { denialMessage } from "@/lib/permissions/denial"
 import type { WordTiming } from "@/lib/codex-editor/types"
 import { wasTakeUndone } from "./undone-takes"
 import { t } from "@/lib/i18n/standalone"
@@ -697,7 +698,13 @@ export async function transcribeCellOutcome(args: TranscribeCellArgs): Promise<T
         author: session?.username ?? "local",
       }).catch((err) => {
         console.warn("[transcribe] emitCellAudioAttach failed (timings not persisted):", err)
-        saveRefused = { message: err instanceof Error ? err.message : String(err) }
+        // The review (Nov 12): a role refusal in the app's plain role
+        // sentence, as Change voice says it (AQU-2522), not the gate's text.
+        saveRefused = {
+          message: err instanceof InsufficientRoleError
+            ? denialMessage(t, err.required, err.roleLevel)
+            : err instanceof Error ? err.message : String(err),
+        }
       })
     }
 

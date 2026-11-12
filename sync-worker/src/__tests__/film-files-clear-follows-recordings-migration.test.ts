@@ -12,6 +12,9 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { afterEach, describe, expect, it } from "vitest"
 import { makeTestDb, type TestDb } from "./helpers/pg-test-db"
+import { makeTestToken } from "./helpers/auth"
+import { buildFileTimingSetStmt } from "../events/event-projection"
+import { handleFilesReadRequest } from "../events/files-read-route"
 
 const MIGRATION = readFileSync(
   path.resolve(
@@ -94,5 +97,33 @@ describe("migration 0194", () => {
 
     await td.pg.exec(MIGRATION)
     expect(await snapshot(td)).toEqual(after)
+  })
+})
+
+// Sam, Nov 12 (question 44): a film file may follow its recordings; nothing
+// ever locks. The fix above is one-off: the migration ledger
+// (schema_migrations, scripts/neon-migrate.ts) runs it once, by name. After
+// it, choosing Follows recordings on a film file is a choice like any other:
+// stored, and read back with the film after a reload.
+describe("after migration 0198, a film file switched to Follows recordings stays switched", () => {
+  const SECRET = "film-follows-recordings-secret"
+
+  it("the switch is stored beside the film and the file read (a reload) returns it", async () => {
+    const td = (t = await makeTestDb())
+    await seed(td)
+    await td.pg.exec(MIGRATION)
+    expect(JSON.parse((await snapshot(td))["sub-film-free"].meta)).not.toHaveProperty("timingMode")
+
+    // A project lead chooses Follows recordings (file.timing.set's projection).
+    await buildFileTimingSetStmt(td.db, PROJECT, "sub-film-free", "ev-switch", "audioFirst").run()
+
+    const token = await makeTestToken(SECRET, { projectId: PROJECT, fileId: "sub-film-free" })
+    const res = (await handleFilesReadRequest(new Request(
+      `https://w/api/v1/projects/${PROJECT}/files/sub-film-free`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    ), { AQUILLA_PG: td.db, SYNC_SECRET_KEY: SECRET }))!
+    expect(res.status).toBe(200)
+    const body = await res.json() as { file: { timingMode: string | null; coreMediaUrl: string | null } }
+    expect(body.file).toMatchObject({ timingMode: "audioFirst", coreMediaUrl: FILM })
   })
 })

@@ -360,17 +360,29 @@ describe("pieces the Station saved (AQU-2492, review round 2)", () => {
   // Review, round 2, item 3, A: dev cut at 1 s and deleted the first half; bob
   // deleted 0.8 s at the start of the recording in the Station and saved the
   // second half (the original 1.0-4.0 s, 0.2-3.2 s of the new recording).
-  // Nothing would play twice: dev's Undo of his delete goes ahead.
-  it("audio deleted before a saved piece does not stop the Undo of deleting the piece before it", async () => {
-    const { h } = sequence({ T: { url: ORIG, trimEndMs: 1000, durationMs: 4000, isDeleted: true }, P2: { url: ORIG, trimStartMs: 1000, durationMs: 4000, pieceOf: "T", isDeleted: true }, S2: { ...S2, trimStartMs: 200, trimEndMs: 3200, durationMs: 3200 } })
-    const deletedFirst: TakeRemoveData = { cellId: "c1", audioId: "T", slot: "recording", wasSelected: true, selectedBefore: null, stretches: { T: { pieceOf: "T", url: ORIG, startMs: 0, endMs: 1000 } } }
-    expect(await h["take.remove"].undo(deletedFirst)).toEqual(DONE)
+  // Nothing would play twice. Round 3: the saved piece stands for the half
+  // dev's own cut made, read from his History; dev's Undo goes ahead.
+  const deletedFirst: TakeRemoveData = { cellId: "c1", audioId: "T", slot: "recording", wasSelected: true, selectedBefore: null, stretches: { T: { pieceOf: "T", url: ORIG, startMs: 0, endMs: 1000 } } }
+  const afterDeletingTheFirstHalf = () => sequence({ T: { url: ORIG, trimEndMs: 1000, durationMs: 4000, isDeleted: true }, P2: { url: ORIG, trimStartMs: 1000, durationMs: 4000, pieceOf: "T", isDeleted: true }, S2: { ...S2, trimStartMs: 200, trimEndMs: 3200, durationMs: 3200 } })
+  it("audio deleted before a saved piece does not stop the Undo of deleting the piece before it, when this person made the cut", async () => {
+    recordStep({ kind: "take.cut", data: { cuts: [cutAt1s] }, labelKey: "editor.history.stepCut", fileId: "f1" })
+    expect(await afterDeletingTheFirstHalf().h["take.remove"].undo(deletedFirst)).toEqual(DONE)
+  })
+  // Round 3, when in doubt, refuse: without the cut in this person's History
+  // nothing says what the saved piece stands for, so the Undo is skipped.
+  it("…and is skipped when nothing says what the saved piece stands for", async () => {
+    expect(await afterDeletingTheFirstHalf().h["take.remove"].undo(deletedFirst)).toEqual(CHANGED)
   })
 
   // Item 3, B: a take cut at 1 s and 4 s; bob inserted a 1 s pause inside the
   // middle piece and saved it (1.0-5.0 s of the new recording); dev deleted
-  // the last piece and undoes that.
-  it("a pause inserted inside a saved piece does not stop the Undo of deleting the piece after it", async () => {
+  // the last piece and undoes that. Nothing would play twice, but the stretch
+  // learned from the cut that made the middle piece runs to the take's end (a
+  // later cut of it is not followed), so the Undo is skipped: one a perfect
+  // rule would allow.
+  it("a pause inserted inside a saved piece: the Undo of deleting the piece after it is skipped (known)", async () => {
+    recordStep({ kind: "take.cut", data: { cuts: [cutAt1s] }, labelKey: "editor.history.stepCut", fileId: "f1" })
+    recordStep({ kind: "take.cut", data: { cuts: [{ ...cutAt1s, audioId: "P2", atMs: 4000, newAudioId: "P3" }] }, labelKey: "editor.history.stepCut", fileId: "f1" })
     const { h } = sequence({
       T: { url: ORIG, trimEndMs: 1000, durationMs: 6000 },
       P2: { url: ORIG, trimStartMs: 1000, trimEndMs: 4000, durationMs: 6000, pieceOf: "T", isDeleted: true },
@@ -378,7 +390,52 @@ describe("pieces the Station saved (AQU-2492, review round 2)", () => {
       P3: { url: ORIG, trimStartMs: 4000, durationMs: 6000, pieceOf: "T", isDeleted: true },
     })
     const deletedLast: TakeRemoveData = { cellId: "c1", audioId: "P3", slot: "recording", wasSelected: true, selectedBefore: null, stretches: { P3: { pieceOf: "T", url: ORIG, startMs: 4000, endMs: 6000 } } }
-    expect(await h["take.remove"].undo(deletedLast)).toEqual(DONE)
+    expect(await h["take.remove"].undo(deletedLast)).toEqual(CHANGED)
+  })
+
+  // Review, round 3, REGRESSION: dev cut at 1 s; bob cut the second half at
+  // 2 s, saved its tail in the Station and deleted the middle piece. Joining
+  // would run the take to its end under bob's Station tail: 2 s to the end
+  // twice. Nothing in dev's History says what that tail stands for: skipped.
+  it("a Station piece made from a piece this person did not make: dev's Undo of his cut is skipped", async () => {
+    const { ctx, h } = sequence({
+      T: { url: ORIG, trimEndMs: 1000, durationMs: 4000 },
+      P2: { url: ORIG, trimStartMs: 1000, trimEndMs: 2000, pieceOf: "T", isDeleted: true },
+      P3: { url: ORIG, trimStartMs: 2000, pieceOf: "T", isDeleted: true },
+      S3: { url: STN, trimStartMs: 2000, durationMs: 4000, pieceOf: "T", referenceAudioId: "P3" },
+    })
+    expect(await h["take.cut"].undo({ cuts: [{ ...cutAt1s }] })).toEqual(CHANGED)
+    expect(ctx.uncut).not.toHaveBeenCalled()
+  })
+
+  // Round 3: carol deletes bob's Station piece; dev's Undo joins the take;
+  // carol's ⌘Z would bring the piece back over the whole take. Her History
+  // holds no Save of it, so nothing says what it stands for: skipped.
+  it("someone who did not save a Station piece undoes deleting it after a join: skipped", async () => {
+    resetHistoryForTests()
+    await clearHistoryStoreForTests()
+    setHistoryScope("p1", "carol")
+    await historyReady()
+    const { ctx, h } = sequence({ T: { url: ORIG, trimEndMs: 1000, durationMs: 4000 }, P2: { url: ORIG, trimStartMs: 1000, durationMs: 4000, pieceOf: "T", isDeleted: true }, S2: { ...S2, isDeleted: true } })
+    expect(await h["take.cut"].undo({ cuts: [{ ...cutAt1s }] })).toEqual(DONE)
+    const carolDeleted: TakeRemoveData = { cellId: "c1", audioId: "S2", slot: "recording", wasSelected: true, selectedBefore: null, stretches: { S2: { pieceOf: "T", url: STN, startMs: 1000, endMs: 4200 } } }
+    expect(await h["take.remove"].undo(carolDeleted)).toEqual(CHANGED)
+    expect(ctx.select).not.toHaveBeenCalled()
+  })
+
+  // Still allowed with a Station piece in the take and nothing to fear.
+  it("the decided case, a plain cut and Undo, and three pieces undone newest first still go ahead", async () => {
+    const told = sequence({ T: { url: ORIG, trimEndMs: 1000, durationMs: 4000 }, P2: { url: ORIG, trimStartMs: 1000, durationMs: 4000, pieceOf: "T", isDeleted: true } })
+    expect(await told.h["take.cut"].undo({ cuts: [{ ...cutAt1s }] })).toEqual(DONE)
+    const plain = sequence({ T: { url: ORIG, trimEndMs: 1000, durationMs: 4000 }, P2: { url: ORIG, trimStartMs: 1000, durationMs: 4000, pieceOf: "T" } })
+    expect(await plain.h["take.cut"].undo({ cuts: [{ ...cutAt1s }] })).toEqual(DONE)
+    const three = sequence({
+      T: { url: ORIG, trimEndMs: 1000, durationMs: 4000 },
+      P2: { url: ORIG, trimStartMs: 1000, trimEndMs: 2000, durationMs: 4000, pieceOf: "T" },
+      P3: { url: ORIG, trimStartMs: 2000, durationMs: 4000, pieceOf: "T" },
+    })
+    expect(await three.h["take.cut"].undo({ cuts: [{ ...cutAt1s, audioId: "P2", atMs: 2000, newAudioId: "P3" }] })).toEqual(DONE)
+    expect(await three.h["take.cut"].undo({ cuts: [{ ...cutAt1s }] })).toEqual(DONE)
   })
 })
 

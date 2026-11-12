@@ -127,7 +127,7 @@ export interface TakeRemoveData {
  * from the original's (audio deleted or inserted before or inside it), so it
  * is never weighed by its own numbers against the original's: it stands for
  * the stretch of the piece it was made from (`referenceAudioId`) whenever
- * that is known, and otherwise against nothing.
+ * that is known; a step that cannot tell (review, round 3) is skipped.
  */
 export interface PieceStretch { pieceOf: string; url: string | null; startMs: number; endMs: number | null }
 export function pieceStretchOf(
@@ -147,6 +147,24 @@ function savedStandIn(audioId: string): PieceStretch | undefined {
   let found: PieceStretch | undefined
   matchingSteps((kind, data) => {
     if (!found && kind === "take.add") found = (data as TakeAddData).stretches?.[audioId]
+    return false
+  })
+  return found
+}
+/**
+ * …or the stretch one of this person's own cuts gave the second half it made
+ * (review, round 3): from where it cut to where the piece it cut ended, on that
+ * piece's recording (`urlOf`; undefined when it is not known). A later cut of
+ * that half only made it shorter, so this is never less than it covered.
+ */
+function cutStandIn(audioId: string, urlOf: (id: string) => string | null | undefined): PieceStretch | undefined {
+  let found: PieceStretch | undefined
+  matchingSteps((kind, data) => {
+    if (found || kind !== "take.cut") return false
+    for (const c of (data as TakeCutData).cuts) {
+      const url = c.newAudioId === audioId ? urlOf(c.audioId) : undefined
+      if (url !== undefined) found = { pieceOf: c.audioId, url, startMs: c.atMs, endMs: c.before.trimEndMs }
+    }
     return false
   })
   return found
@@ -340,15 +358,30 @@ export function takeStepHandlers(ctx: TakeStepContext): Record<string, StepHandl
     known: ReadonlyMap<string, PieceStretch> = new Map(),
   ): boolean => {
     const changed = [...after.values()].filter((x): x is PieceStretch => x != null)
+    if (changed.length === 0) return false
     const live = (ctx.liveGroup?.(cellId, take) ?? []).filter((id) => !after.has(id))
       .map((id) => [id, ctx.readTake(cellId, id)] as const)
       .filter((x): x is readonly [string, CodexCellAttachment] => x[1] != null)
     const own = new Map<string, PieceStretch>([...known, ...live.map(([id, att]) => [id, pieceStretchOf(id, att)] as const)])
     for (const [id, x] of after) if (x) own.set(id, x)
-    const others = live.map(([id, att]) => {
-      const from = att.referenceAudioId ? own.get(att.referenceAudioId) : undefined
-      return from && from.url !== (att.url ?? null) ? from : (own.get(id) as PieceStretch)
-    })
+    const urlOf = (id: string) => own.get(id)?.url ?? (ctx.readTake(cellId, id) ? (ctx.readTake(cellId, id)?.url ?? null) : undefined)
+    const recordings = new Set(changed.map((x) => x.url))
+    const others: PieceStretch[] = []
+    for (const [id, att] of live) {
+      const mine = own.get(id) as PieceStretch
+      if (recordings.has(mine.url)) {
+        others.push(mine)
+        continue
+      }
+      // A piece of another recording (one the Station saved) is weighed as
+      // the piece it was made from. Review, round 3: when in doubt, refuse. A
+      // step that cannot tell what such a piece stands for is skipped: a wrong
+      // skip costs an Undo, doubled audio is damage.
+      const ref = att.referenceAudioId
+      const from = ref ? (own.get(ref) ?? cutStandIn(ref, urlOf)) : undefined
+      if (!from || !recordings.has(from.url)) return true
+      others.push(from)
+    }
     return changed.some((x, i) => [...changed.slice(i + 1), ...others].some((y) => sharesStretch(x, y)))
   }
   // A step that brings pieces back as they were noted (a delete's Undo, a

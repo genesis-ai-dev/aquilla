@@ -34,6 +34,14 @@ export interface UseStaleSourceCellsOptions {
   getToken?: (fileId: string) => Promise<string | null>
   /** Disable the fetch (e.g. before identity loads). */
   enabled?: boolean
+  /**
+   * The lazy-pull sync gave this project's linked cells their import envelope
+   * (sync-worker link-envelope.ts — copies mirrored before the link carried
+   * one). The open file was read before that sync finished, so its cells are
+   * still the envelope-less ones: an IDML export of them stops on "no supported
+   * IDML v2 locator" until they are read again. Called once the sync settles.
+   */
+  onEnvelopesRepaired?: () => void
 }
 
 export interface UseStaleSourceCellsResult {
@@ -113,12 +121,26 @@ export interface UseStaleSourceCellsResult {
  *  respect to the stale-source READ (never delays that GET). Resolves with
  *  whether the sync request succeeded. */
 function triggerLinkSync(projectId: string, jwt: string): Promise<boolean> {
+  return runLinkSync(projectId, jwt).then((outcome) => outcome.ok)
+}
+
+/** `triggerLinkSync`, also saying whether the sync gave linked cells their
+ *  import envelope (`envelopesRepaired` on the route's answer). */
+function runLinkSync(
+  projectId: string,
+  jwt: string,
+): Promise<{ ok: boolean; envelopesRepaired: boolean }> {
   const url = `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}/link/sync`
   return fetch(url, { method: "POST", headers: { Authorization: `Bearer ${jwt}` } })
-    .then((res) => res.ok)
+    .then(async (res) => {
+      if (!res.ok) return { ok: false, envelopesRepaired: false }
+      const body = (await res.json().catch(() => null)) as { envelopesRepaired?: unknown } | null
+      const repaired = typeof body?.envelopesRepaired === "number" && body.envelopesRepaired > 0
+      return { ok: true, envelopesRepaired: repaired }
+    })
     .catch(() => {
       /* best-effort; the next lazy-pull trigger or manual sync catches it */
-      return false
+      return { ok: false, envelopesRepaired: false }
     })
 }
 
@@ -135,6 +157,8 @@ export function useStaleSourceCells(
   opts: UseStaleSourceCellsOptions,
 ): UseStaleSourceCellsResult {
   const { projectId, fileId, getToken, enabled = true } = opts
+  const envelopesRepairedRef = useRef(opts.onEnvelopesRepaired)
+  envelopesRepairedRef.current = opts.onEnvelopesRepaired
   const [staleCellIds, setStaleCellIds] =
     useState<ReadonlySet<string>>(EMPTY)
   const [tombstonedCellIds, setTombstonedCellIds] =
@@ -229,7 +253,10 @@ export function useStaleSourceCells(
         // That delayed re-fetch passes triggerSync=false so it doesn't
         // re-trigger + re-schedule itself into a perpetual chain.
         if (postSyncRefetchRef.current) clearTimeout(postSyncRefetchRef.current)
-        void triggerLinkSync(pid, jwt).then(() => {
+        void runLinkSync(pid, jwt).then((outcome) => {
+          // Only for the project still open: the cells this would refresh are
+          // the open file's.
+          if (outcome.envelopesRepaired && projectRef.current === pid) envelopesRepairedRef.current?.()
           postSyncRefetchRef.current = setTimeout(() => {
             postSyncRefetchRef.current = null
             if (generationRef.current === gen) void doFetchRef.current(false)

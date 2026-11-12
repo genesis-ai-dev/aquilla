@@ -15,6 +15,15 @@
 // device flow (agent-connect.ts), so a connected host keeps working until the
 // human revokes it under Preferences → API tokens.
 //
+// AQU-2504 adds one opt-in beside the org picker: a platform admin with an
+// active step-up elevation may approve SUPPORT ACCESS instead of choosing orgs.
+// That credential carries no org allowlist at all and is minted with a
+// time-boxed `support_access_until`; while that window is open the connector can
+// list, read AND WRITE in any org and project (sync-worker external/orgs-list.ts,
+// projects-list.ts, read-auth.ts, support-access.ts), every cross-tenant access
+// writes an `admin_audit_log` row, and every support write is attributed to the
+// admin in the event's provenance. Everyday connector consent is untouched.
+//
 // Clients register by URL (Client ID Metadata Documents, see
 // lib/mcp-oauth/client-metadata.ts); there is no dynamic registration
 // endpoint. Those clients are public. The one exception is Zapier, a
@@ -23,12 +32,18 @@
 // instead of MCP, and its consent page offers ask/act and read/write.
 // PKCE S256 is mandatory for every client.
 
-import { Hono, type MiddlewareHandler } from "hono"
+import { Hono, type Context, type MiddlewareHandler } from "hono"
 import { bodyLimit } from "hono/body-limit"
 import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
+import { hasActiveElevation } from "../middleware/platform-admin"
 import { ROLE, type AuthUser } from "../types"
-import { mintApiToken, REST_OAUTH_RESOURCE_SUFFIX, sha256Hex } from "../../../db/shared/api-credentials"
+import {
+  isPlatformAdminUser,
+  mintApiToken,
+  REST_OAUTH_RESOURCE_SUFFIX,
+  sha256Hex,
+} from "../../../db/shared/api-credentials"
 import { countRecentEvents, recordAuthEvent, userIdentifier } from "../utils/rate-limit"
 import { scopeLevel } from "./agent-connect"
 import { pinnedClientFetcher, resolveClient, type Fetcher, type ResolvedClient } from "../lib/mcp-oauth/client-metadata"
@@ -90,6 +105,37 @@ export function restResourceFor(env: Pick<Bindings, "SYNC_WORKER_URL">, issuer: 
 
 export function isAcceptableResource(resource: string, issuer: string, expected?: string): boolean {
   return resource === (expected ?? oauthResourceFor({}, issuer))
+}
+
+/**
+ * AQU-2504: how long a connector support-access window stays open, in hours.
+ * The same `ELEVATION_SESSION_HOURS` the admin console's step-up uses (6 by
+ * default, routes/admin.ts), because this grant IS that step-up carried onto a
+ * connector token: an operator who has to re-enter an emailed code every six
+ * hours on the web should not get an indefinite one through MCP. Renewing it
+ * means running connector consent again, elevated.
+ */
+export function supportAccessHours(env: Pick<Bindings, "ELEVATION_SESSION_HOURS">): number {
+  const hours = Number(env.ELEVATION_SESSION_HOURS ?? 6)
+  return Number.isFinite(hours) && hours > 0 ? hours : 6
+}
+
+/**
+ * AQU-2504: may this user approve connector support access right now?
+ *
+ * Both halves of the web console's own gate, in the same order: identity (a
+ * live `platform_admins` row — the TABLE, matching what sync-worker re-checks
+ * on every call, not the `ADMIN_EMAILS` bootstrap) and then an active step-up
+ * elevation on this very session (`hasActiveElevation`, which is bound to the
+ * credential that redeemed the emailed code, per OPS-35). A non-admin, or an
+ * admin who has not stepped up, simply never sees the option and is refused if
+ * they post it anyway.
+ */
+export async function maySupportAccess(c: Context<AuthHonoEnv>): Promise<boolean> {
+  const user = c.get("user")
+  if (!user) return false
+  if (!(await isPlatformAdminUser(c.env.AQUILLA_PG, String(user.id)))) return false
+  return hasActiveElevation(c)
 }
 
 /** Eligible organizations, without platform-admin elevation or lazy creation. */
@@ -271,6 +317,7 @@ interface CodeRow {
   project_id: string | null
   org_id: string | null
   org_ids: string[] | null
+  support_access: boolean | null
   status: "issued" | "consumed"
   credential_id: string | null
   expired: boolean
@@ -290,7 +337,7 @@ mcpOAuthPublicRoutes.post("/oauth/token", bodyLimit({ maxSize: 8192 }), noStore,
   const db = c.env.AQUILLA_PG
   const row = await db.prepare(
     `SELECT client_id, redirect_uri, code_challenge, resource, user_id, mode, access, project_id, org_id,
-            status, credential_id, org_ids, expires_at <= now() AS expired
+            status, credential_id, org_ids, support_access, expires_at <= now() AS expired
      FROM mcp_oauth_codes WHERE code_hash = ?`,
   ).bind(codeHash).first<CodeRow>()
   const invalidGrant = () => c.json({ error: "invalid_grant" }, 400)
@@ -323,7 +370,16 @@ mcpOAuthPublicRoutes.post("/oauth/token", bodyLimit({ maxSize: 8192 }), noStore,
   // Live role at mint time, not just at consent: it may have been lowered.
   const user = await db.prepare("SELECT * FROM users WHERE id::text = ?").bind(row.user_id).first<AuthUser>()
   if (!user) return invalidGrant()
-  if (row.org_ids !== null) {
+  const supportAccess = row.support_access === true
+  if (supportAccess) {
+    // AQU-2504: live platform-admin re-check at mint time, the same way the
+    // org allowlist is re-checked below — consent may have happened minutes
+    // ago, and the allowlist row may be gone. Elevation is NOT re-checked here:
+    // /oauth/token is a back-channel call from the MCP host carrying a code, not
+    // a session, so there is nothing to ask. Elevation gated the CONSENT, and
+    // `support_access_until` is what bounds the grant from here on.
+    if (!(await isPlatformAdminUser(c.env.AQUILLA_PG, row.user_id))) return invalidGrant()
+  } else if (row.org_ids !== null) {
     const eligible = new Set((await eligibleOrganizations(c.env, row.user_id)).map((org) => org.id))
     if (!row.org_ids.length || row.org_ids.some((id) => !eligible.has(id))) return invalidGrant()
   } else {
@@ -336,16 +392,31 @@ mcpOAuthPublicRoutes.post("/oauth/token", bodyLimit({ maxSize: 8192 }), noStore,
   const credentialId = crypto.randomUUID()
   // Consume and mint in ONE statement: a concurrent redemption finds the code
   // already consumed and mints nothing.
+  // AQU-2504: a support-access token is minted with its window already ticking,
+  // from the database's clock rather than the Worker's.
+  //
+  // It carries the code's own `access` — WRITES INCLUDED. The read-only slice
+  // forced 'read' here; Ryder's 2026-11-09 decision made writes a requirement,
+  // so the ceiling is gone and the cross-tenant write path is gated instead by
+  // the three live conditions (grant, open window, `platform_admins` row,
+  // re-checked on every call in validateApiCredential), audited fail-closed
+  // before the write token is minted, and attributed to the admin in the
+  // event's provenance. See sync-worker/src/external/support-access.ts and
+  // docs/decisions/0009-connector-support-access.md.
   const credential = await db.prepare(
     `WITH claimed AS (
        UPDATE mcp_oauth_codes SET status = 'consumed', credential_id = ?
        WHERE code_hash = ? AND status = 'issued' AND expires_at > now()
-       RETURNING user_id, client_name, mode, access, org_id, project_id, org_ids, resource
+       RETURNING user_id, client_name, mode, access, org_id, project_id, org_ids, resource, support_access
      ) INSERT INTO api_credentials
-       (id, user_id, name, token_prefix, token_hash, mode, access, org_id, project_id, expires_at, org_ids, oauth_resource)
-       SELECT ?, user_id, client_name, ?, ?, mode, access, org_id, project_id, NULL, org_ids, COALESCE(resource, ?)
+       (id, user_id, name, token_prefix, token_hash, mode, access, org_id, project_id, expires_at, org_ids,
+        oauth_resource, support_access, support_access_until)
+       SELECT ?, user_id, client_name, ?, ?, mode, access,
+              org_id, project_id, NULL, org_ids, COALESCE(resource, ?), support_access,
+              CASE WHEN support_access THEN now() + (? || ' hours')::interval ELSE NULL END
        FROM claimed RETURNING id`,
-  ).bind(credentialId, codeHash, credentialId, minted.tokenPrefix, minted.tokenHash, oauthResourceFor(c.env, issuer)).first()
+  ).bind(credentialId, codeHash, credentialId, minted.tokenPrefix, minted.tokenHash,
+    oauthResourceFor(c.env, issuer), String(supportAccessHours(c.env))).first()
   if (!credential) return invalidGrant()
   return c.json({ access_token: minted.token, token_type: "Bearer", scope: row.mode })
 })
@@ -381,6 +452,9 @@ mcpOAuthConsentRoutes.post("/request", async (c) => {
     /** The page shows ask/act and read/write choices only for these. */
     scopeChoices: v.preRegistered,
     organizations: await eligibleOrganizations(c.env, String(c.get("user").id)),
+    /** AQU-2504: offer the support-access option only to a platform admin who
+     *  has already stepped up. Everyone else never learns the option exists. */
+    supportAccessAvailable: await maySupportAccess(c),
   })
 })
 
@@ -389,6 +463,8 @@ const decisionSchema = authorizeSchema.extend({
   org_ids: z.array(z.string().regex(/^[1-9][0-9]*$/)).min(1).max(1000).optional(),
   mode: z.enum(["ask", "act"]).optional(),
   access: z.enum(["read", "write"]).optional(),
+  /** AQU-2504: platform-admin support access instead of an org selection. */
+  support_access: z.boolean().optional(),
 })
 
 /** Approve or deny. Returns the URL the browser must navigate to; the code is
@@ -417,20 +493,40 @@ mcpOAuthConsentRoutes.post("/decision", async (c) => {
   // only a pre-registered client's consent page offers the choices.
   const mode: Mode = v.preRegistered ? input.mode ?? "ask" : "act"
   const access: Access = v.preRegistered ? input.access ?? "write" : "write"
-  const orgIds = [...new Set(input.org_ids ?? [])]
-  if (!orgIds.length) {
+  // AQU-2504: support access REPLACES the org picker rather than extending it —
+  // the grant is "every org", so selecting some would be a narrower, confusing
+  // second answer. Re-checked here from scratch (admin row + active elevation);
+  // the browser saying `supportAccessAvailable` was true is not evidence.
+  const supportAccess = input.support_access === true
+  if (supportAccess && !(await maySupportAccess(c))) {
+    return c.json(
+      { error: "scope_denied", error_description: "support access requires a platform admin with an active elevation" },
+      403,
+    )
+  }
+  const orgIds = supportAccess ? [] : [...new Set(input.org_ids ?? [])]
+  if (!supportAccess && !orgIds.length) {
     return c.json({ error: "invalid_request", error_description: "choose at least one organization" }, 400)
   }
-  const eligible = new Set((await eligibleOrganizations(c.env, String(user.id))).map((org) => org.id))
-  if (orgIds.some((id) => !eligible.has(id))) return c.json({ error: "scope_denied" }, 403)
+  if (!supportAccess) {
+    const eligible = new Set((await eligibleOrganizations(c.env, String(user.id))).map((org) => org.id))
+    if (orgIds.some((id) => !eligible.has(id))) return c.json({ error: "scope_denied" }, 403)
+  }
   const code = base64url(crypto.getRandomValues(new Uint8Array(32)))
   await c.env.AQUILLA_PG.prepare(
     `INSERT INTO mcp_oauth_codes
        (code_hash, client_id, client_name, redirect_uri, code_challenge, resource,
-        user_id, mode, access, org_ids, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::text::jsonb, now() + interval '${CODE_TTL}')`,
+        user_id, mode, access, org_ids, support_access, expires_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::text::jsonb, ?, now() + interval '${CODE_TTL}')`,
   ).bind(await sha256Hex(code), v.client.clientId, v.client.clientName, input.redirect_uri,
-    input.code_challenge ?? "", v.resource, String(user.id), mode, access, JSON.stringify(orgIds)).run()
+    input.code_challenge ?? "", v.resource, String(user.id), mode,
+    // AQU-2504 (writes): support access no longer forces 'read'. Writes are
+    // required — support often needs to change things — and a support engineer
+    // connecting an MCP host gets the same read-write access any host gets.
+    // The cross-tenant reach is bounded by the support window and the live
+    // `platform_admins` row, not by a read-only ceiling.
+    access,
+    supportAccess ? null : JSON.stringify(orgIds), supportAccess).run()
   // Bounded retention; codes are useless minutes after issue.
   await c.env.AQUILLA_PG.prepare("DELETE FROM mcp_oauth_codes WHERE expires_at < now() - interval '1 day'").run()
   return c.json({ redirect: buildRedirect(input.redirect_uri, { code, state: input.state, iss: issuer }) })

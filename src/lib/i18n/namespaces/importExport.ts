@@ -673,10 +673,15 @@ export const importExport = defineNamespace({
       "Round-trip markdown: headings, ordered/unordered lists and quotes reconstructed; untranslated " +
       "blocks keep source (media lines use their transcription).",
     "importExport.format.html.label": "Web page",
+    // AQU-2224: AQU-2184 taught the page the book's layout, so the description no
+    // longer says it is dropped. Wording approved by Ryder on the ticket
+    // (2026-11-03). The format is offered for a Bible book only (ExportDialog's
+    // `offersHtmlPage`), so there is no sentence for non-scripture files.
     "importExport.format.html.description":
       "A readable page of the book in one self-contained file: chapter index, numbered verses and " +
-      "section headings, for reviewers and printing. Untranslated lines show their source text, " +
-      "marked. Not for re-import; paragraph layout and footnotes are not kept yet.",
+      "section headings, with paragraphs and poetry lines as the book lays them out and each " +
+      "chapter's footnotes listed at its end. For reviewers and printing. Untranslated lines show " +
+      "their source text, marked. Not for re-import.",
     "importExport.format.tsv.label": "Bilingual TSV",
     "importExport.format.tsv.description": "id/source/target tab-separated, one row per segment.",
     "importExport.format.csv.label": "Bilingual CSV",
@@ -934,6 +939,59 @@ export const importExport = defineNamespace({
       other: "Created {fileName}. {count} translations could not be paired and stayed on the original file.",
     }),
     "importExport.dialog.repairIdmlCopyNeedsOriginal": "This file has no original IDML package to repair from.",
+    // An InDesign export that stopped on translations typed as plain text (a
+    // linked file translated before it carried the IDML contract). The progress
+    // line while the placement runs is importExport.upload.aligningIdmlStyles.
+    "importExport.dialog.idmlTranslationsNotPlaced": plural({
+      one:
+        "{count} translation in this file is not in the InDesign style runs yet, so the " +
+        "translated file cannot be built. Placing it saves it as a draft: if it was validated, " +
+        "it will need validating again.",
+      other:
+        "{count} translations in this file are not in the InDesign style runs yet, so the " +
+        "translated file cannot be built. Placing them saves each one as a draft: validated " +
+        "lines will need validating again.",
+    }),
+    "importExport.dialog.idmlTranslationsNotPlacedKeep": plural({
+      one:
+        "{count} translation in this file is not in the InDesign style runs yet, so the " +
+        "translated file cannot be built. Placing it moves the same words into the runs: " +
+        "a validated line stays validated.",
+      other:
+        "{count} translations in this file are not in the InDesign style runs yet, so the " +
+        "translated file cannot be built. Placing them moves the same words into the runs: " +
+        "validated lines stay validated.",
+    }),
+    "importExport.dialog.placeIdmlTranslations": "Place translations",
+    "importExport.dialog.placingIdmlTranslations": "Checking the translations in {fileName}…",
+    "importExport.dialog.placedIdmlTranslations": plural({
+      one:
+        "{count} translation in {fileName} was placed into the style runs and is a draft to " +
+        "check again. Download the file again.",
+      other:
+        "{count} translations in {fileName} were placed into the style runs and are drafts to " +
+        "check again. Download the file again.",
+    }),
+    "importExport.dialog.placedIdmlTranslationsKept": plural({
+      one:
+        "{count} translation in {fileName} was placed into the style runs. Its validation is " +
+        "unchanged. Download the file again.",
+      other:
+        "{count} translations in {fileName} were placed into the style runs. Their validation " +
+        "is unchanged. Download the file again.",
+    }),
+    "importExport.dialog.placedIdmlTranslationsMixed":
+      "The translations in {fileName} were placed into the style runs: {kept} stay validated, " +
+      "and {drafts} were saved as drafts to check. Download the file again.",
+    "importExport.dialog.placedIdmlTranslationsManual": plural({
+      one:
+        "{count} translation in {fileName} could not be placed automatically and is marked " +
+        "for Align styles. Align it, then download again.",
+      other:
+        "{count} translations in {fileName} could not be placed automatically and are marked " +
+        "for Align styles. Align them, then download again.",
+    }),
+    "importExport.dialog.placeIdmlTranslationsFailed": "Could not place the translations in {fileName}: {message}",
     "importExport.dialog.lossyVerseCount": plural({
       one: "{count} verse contained footnotes, poetry, or character markers in the source USFM — its structure is replaced by plain translated text.",
       other: "{count} verses contained footnotes, poetry, or character markers in the source USFM — their structure is replaced by plain translated text.",
@@ -2359,6 +2417,67 @@ export const importExport = defineNamespace({
       },
       "importExport.dialog.repairIdmlCopyNeedsOriginal": {
         description: "Error when the file being repaired has no stored IDML package to re-parse.",
+      },
+      "importExport.dialog.idmlTranslationsNotPlaced": {
+        description:
+          "Error in the Export dialog when an InDesign (IDML) download stops because translations " +
+          "were typed as plain text and are not inside the file's style runs. A 'Place translations' button follows; " +
+          "the second sentence says what pressing it costs (the lines lose their validated state).",
+        placeholders: { count: "Number of translations that are not in the style runs, already locale-formatted." },
+      },
+      "importExport.dialog.idmlTranslationsNotPlacedKeep": {
+        description:
+          "Same error as importExport.dialog.idmlTranslationsNotPlaced, shown to a project lead, " +
+          "for whom pressing 'Place translations' keeps each line's validated state.",
+        placeholders: { count: "Number of translations that are not in the style runs, already locale-formatted." },
+      },
+      "importExport.dialog.placedIdmlTranslationsKept": {
+        description: "Success message after 'Place translations' when every placed line kept its validated state.",
+        placeholders: {
+          fileName: "Display name of the IDML file — not translated.",
+          count: "Number of translations placed, already locale-formatted.",
+        },
+      },
+      "importExport.dialog.placedIdmlTranslationsMixed": {
+        description:
+          "Success message after 'Place translations' when validated lines kept their state and the rest " +
+          "(lines nobody had validated, or whose words the placement had to change) were saved as drafts.",
+        placeholders: {
+          fileName: "Display name of the IDML file — not translated.",
+          kept: "Number of lines that stay validated, already locale-formatted.",
+          drafts: "Number of lines saved as drafts, already locale-formatted.",
+        },
+      },
+      "importExport.dialog.placeIdmlTranslations": {
+        description:
+          "Button beside that error. Moves each translation's words into the InDesign style runs of its paragraph.",
+      },
+      "importExport.dialog.placingIdmlTranslations": {
+        description: "Progress label in the Export dialog when the 'Place translations' pass starts.",
+        placeholders: { fileName: "Display name of the IDML file — not translated." },
+      },
+      "importExport.dialog.placedIdmlTranslations": {
+        description:
+          "Success message after 'Place translations' when the placed lines were saved as drafts (none of them kept a validated state).",
+        placeholders: {
+          fileName: "Display name of the IDML file — not translated.",
+          count: "Number of translations placed, already locale-formatted.",
+        },
+      },
+      "importExport.dialog.placedIdmlTranslationsManual": {
+        description:
+          "Message after 'Place translations' when some lines need the editor's Align styles action before the file can be downloaded.",
+        placeholders: {
+          fileName: "Display name of the IDML file — not translated.",
+          count: "Number of translations left for a manual Align styles pass, already locale-formatted.",
+        },
+      },
+      "importExport.dialog.placeIdmlTranslationsFailed": {
+        description: "Error when the 'Place translations' pass could not run.",
+        placeholders: {
+          fileName: "Display name of the IDML file — not translated.",
+          message: "The technical reason, as reported by the app — not translated.",
+        },
       },
       "importExport.upload.cellsProgress": {
         description: "Upload progress detail line on the main Upload files panel.",

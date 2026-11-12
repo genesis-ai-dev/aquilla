@@ -15,6 +15,13 @@ import { leaveForClient, mcpOAuthCall, type McpOAuthClient } from "@/lib/sync/ag
 // client's request in the query string; every decision is re-validated by the
 // server, so this page only describes the request and collects the choice.
 // The authorization code travels in the redirect URL and is never stored.
+//
+// AQU-2504: when the server says `supportAccessAvailable` (a platform admin who
+// has already stepped up in the admin console), the page also offers SUPPORT
+// ACCESS. It REPLACES the org picker rather than adding to it — the grant is
+// every org — so the picker and its maintainer-scope hint are hidden while it
+// is on, and no org selection is sent. The server re-checks both halves of the
+// eligibility on the decision, so this toggle only decides what to ask for.
 
 /** The OAuth parameters the server needs back; anything else is dropped. */
 const AUTHORIZE_PARAMS = [
@@ -43,6 +50,7 @@ function OAuthConsentContent() {
   const [selectedOrgs, setSelectedOrgs] = useState<string[]>([])
   const [mode, setMode] = useState<"ask" | "act">("ask")
   const [access, setAccess] = useState<"read" | "write">("write")
+  const [supportAccess, setSupportAccess] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(false)
   const [leaving, setLeaving] = useState(false)
@@ -75,7 +83,11 @@ function OAuthConsentContent() {
     inFlight.current = true; setBusy(true); setError(false)
     try {
       const result = await mcpOAuthCall<{ redirect: string }>(jwt, "decision", {
-        ...params, approve, ...(approve ? { org_ids: selectedOrgs } : {}),
+        ...params, approve,
+        // Support access replaces the org selection; sending both would ask for
+        // two different scopes at once.
+        ...(approve && !supportAccess ? { org_ids: selectedOrgs } : {}),
+        ...(approve && supportAccess ? { support_access: true } : {}),
         ...(approve && client.scopeChoices ? { mode, access } : {}),
       })
       const redirect = result.ok ? result.data.redirect : result.redirect
@@ -128,9 +140,24 @@ function OAuthConsentContent() {
                 </>}
               </fieldset>
             </> : <p>{t("onboarding.oauth.act")}</p>}
-            <fieldset disabled={busy} className="flex flex-col gap-3">
+            {client.supportAccessAvailable ? (
+              <fieldset disabled={busy} className="flex flex-col gap-2">
+                <legend className="mb-2 font-medium">{t("onboarding.oauth.supportAccessLegend")}</legend>
+                <label className="flex items-start gap-2">
+                  <input type="checkbox" className="mt-1" checked={supportAccess}
+                    onChange={(event) => setSupportAccess(event.target.checked)} />
+                  <span>
+                    <strong>{t("onboarding.oauth.supportAccessLabel")}</strong>:{" "}
+                    {t("onboarding.oauth.supportAccessHint")}
+                  </span>
+                </label>
+              </fieldset>
+            ) : null}
+            <fieldset disabled={busy || supportAccess} className="flex flex-col gap-3">
               <legend className="mb-2 font-medium">{t("onboarding.oauth.organizations")}</legend>
-              {client.organizations.length === 0 ? (
+              {supportAccess ? (
+                <p className="text-sm text-muted-foreground">{t("onboarding.oauth.supportAccessReplacesOrgs")}</p>
+              ) : client.organizations.length === 0 ? (
                 <p>{t("onboarding.connect.noOrgs")}</p>
               ) : <>
                 <label className="flex items-center gap-2">
@@ -150,13 +177,15 @@ function OAuthConsentContent() {
                 ))}
               </>}
             </fieldset>
-            <p className="text-sm text-muted-foreground">{t("onboarding.oauth.scopeHint")}</p>
+            {supportAccess ? null : (
+              <p className="text-sm text-muted-foreground">{t("onboarding.oauth.scopeHint")}</p>
+            )}
             <p className="text-sm text-muted-foreground">{t("onboarding.oauth.validation")}</p>
             <p className="text-sm text-muted-foreground">{t("onboarding.connect.expiry")}</p>
             <p className="text-sm text-muted-foreground">{t("onboarding.oauth.return", { host: client.redirectHost })}</p>
           </FieldGroup>
           <div className="flex gap-2">
-            <Button disabled={busy || selectedOrgs.length === 0} onClick={() => void decide(true)}>{t("onboarding.oauth.approve")}</Button>
+            <Button disabled={busy || (!supportAccess && selectedOrgs.length === 0)} onClick={() => void decide(true)}>{t("onboarding.oauth.approve")}</Button>
             <Button variant="outline" disabled={busy} onClick={() => void decide(false)}>{t("onboarding.connect.deny")}</Button>
           </div>
         </>}

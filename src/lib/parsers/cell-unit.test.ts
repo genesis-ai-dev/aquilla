@@ -164,6 +164,41 @@ describe("plaintext — cellUnit: paragraph", () => {
   })
 })
 
+// AQU-2544, question 51 for Sam: a .txt with no blank line anywhere is one
+// paragraph per line on the Sentence setting too. Joined into 200-character
+// cells, a file written one sentence per line could never line up with its
+// translation written the same way.
+describe("plaintext — a file with no blank lines, on the Sentence setting", () => {
+  const sentence = (text: string) => extractPlaintextStrings(text)
+
+  it("makes each line its own paragraph", () => {
+    const cells = sentence("In the beginning.\nAnd the earth.\nAnd God said.\n")
+    expect(cells.map((cell) => cell.original)).toEqual(["In the beginning.", "And the earth.", "And God said."])
+    expect(cells.every((cell) => cell.paragraphStart)).toBe(true)
+    expect(new Set(cells.map((cell) => cell.group)).size).toBe(3)
+  })
+
+  it("still cuts a long line into sentences inside its own paragraph", () => {
+    const cells = sentence(`${LONG_PARAGRAPH}\nSecond block.`)
+    const long = cells.slice(0, -1)
+    expect(long.length).toBeGreaterThan(1)
+    expect(new Set(long.map((cell) => cell.group)).size).toBe(1)
+    expect(long.map((cell) => cell.original).join(" ")).toBe(LONG_PARAGRAPH)
+    expect(cells.at(-1)).toMatchObject({ original: "Second block.", paragraphStart: true })
+  })
+
+  it("makes a hard-wrapped paragraph with no blank line one line per wrapped line, on both settings", () => {
+    const wrapped = "This is one paragraph that was\nhard-wrapped across\nthree lines.\n"
+    for (const cells of [sentence(wrapped), extractPlaintextStrings(wrapped, { cellUnit: "paragraph" })]) {
+      expect(cells.map((cell) => cell.original)).toEqual(["This is one paragraph that was", "hard-wrapped across", "three lines."])
+    }
+  })
+
+  it("leaves a file with blank lines as it was", () => {
+    expect(sentence("A wrapped\nline.\n\nB.").map((cell) => cell.original)).toEqual(["A wrapped\nline.", "B."])
+  })
+})
+
 describe("markdown — cellUnit: paragraph", () => {
   it("emits one cell per block with no sentence split", () => {
     const md = `# A heading\n\n${LONG_PARAGRAPH}\n\nAnother block.`

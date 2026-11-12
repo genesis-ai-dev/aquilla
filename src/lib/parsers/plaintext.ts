@@ -40,7 +40,16 @@ export function extractPlaintextStrings(
   // Normalize CRLF/CR so Windows-authored files split into paragraphs instead
   // of importing as one giant block (blank-line detection needs plain \n).
   const normalized = content.replace(/\r\n?/g, "\n")
-  const paragraphs = cellUnit === "paragraph"
+  // Question 51 (AQU-2544, Sam to confirm; revert this one condition to undo
+  // it): a file with no blank line anywhere is one paragraph per line on the
+  // Sentence setting too, as Paragraph already reads it (`paragraphBlocks`).
+  // A long line is still cut into sentences inside its own paragraph. Before,
+  // Sentence joined such a file's lines into cells of up to 200 characters,
+  // so a file written one sentence per line, and its translation written the
+  // same way, could never line up. The cost is Paragraph's: a hard-wrapped
+  // paragraph with no blank line comes in one cell per wrapped line.
+  const linePerParagraph = !/\n[ \t]*\n/.test(normalized)
+  const paragraphs = cellUnit === "paragraph" || linePerParagraph
     ? paragraphBlocks(normalized)
     : normalized.split(/\n\n+/).filter((p) => p.trim().length > 0)
   const results: TranslatableString[] = []

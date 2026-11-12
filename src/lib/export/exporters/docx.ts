@@ -70,7 +70,7 @@ import JSZip from "jszip"
 import type { CellData } from "@/hooks/useCells"
 import { htmlToSpans, rPrWithLanguage, rPrWithMarks, setRprChild, textRunXml, type Mark, type Span } from "./docx-runs"
 import { frenchSpacing, isFrenchLanguage } from "./french-spacing"
-import { markKey, rebuildParagraphInner, type RebuildIo, type RebuildResult } from "./docx-rebuild"
+import { anchorCounts, markKey, rebuildParagraphInner, type RebuildIo, type RebuildResult } from "./docx-rebuild"
 import { extractUsfmFootnotes } from "@/lib/footnotes/extract"
 import { createUsfmFootnoteMarker } from "@/lib/footnotes/insert"
 import {
@@ -446,7 +446,8 @@ export async function exportDocx(
       })
       return null
     }
-    const rebuilt = rebuildParagraphIn(part, span, (line) => translationSpans(translation.parts, line))
+    const rebuilt = rebuildParagraphIn(part, span, (line) =>
+      restoreLineSeparators(translationSpans(translation.parts, line), line, translation.source))
     if (rebuilt === null) return null
     if (!counted) return rebuilt.xml
     // Fidelity report: the source paragraph carried more than one run look
@@ -745,6 +746,89 @@ function translationSpans(
     if (out.length > 0) out.push({ text: gap.replace(/[^\t\n]/g, "") || " ", marks: new Set(NO_MARKS) })
     out.push(...segment)
   }
+  return out
+}
+
+const WORD_CHAR_RE = /[\p{L}\p{N}\p{M}]/u
+
+/**
+ * Unchanged text keeps what it had — including the tab or line break that
+ * separated it from the rest of its line (AQU-2539). A project imported before
+ * tabs and breaks were read has translations without them ("KJVVersion King
+ * James" for "KJV⇥King James Version"). When the translation carries none of
+ * its own, the line's first stretch (up to its first tab or break) found
+ * unchanged at the start of the translation gets that separator after it, and
+ * the line's last stretch found unchanged at the end gets the separator before
+ * it. Where the translation runs straight on from that text, it is split there
+ * only if the cell's own source ran on there too (the old import glued them),
+ * so a translation that merely begins with the same letters is never split.
+ * The stretch counts by the same guard as a look stretch (not a lone letter).
+ */
+function restoreLineSeparators(spans: Span[], lineText: string, source: string): Span[] {
+  if (!/[\t\n]/.test(lineText)) return spans
+  const text = spans.map((s) => s.text).join("")
+  if (/[\t\n]/.test(text)) return spans
+  const pieces = lineText.split(/([\t\n]+)/)
+  if (pieces.length < 3) return spans
+  const isWord = (ch: string | undefined) => ch !== undefined && WORD_CHAR_RE.test(ch)
+  const src = source.trim()
+  const edits: { at: number; remove: number; insert: string }[] = []
+
+  const first = pieces[0].trim()
+  const lead = text.length - text.trimStart().length
+  if (anchorCounts(first) && text.startsWith(first, lead)) {
+    const end = lead + first.length
+    const spaces = /^[ \u00A0]*/.exec(text.slice(end))![0].length
+    const runsOn = isWord(first[first.length - 1]) && isWord(text[end])
+    const sourceRanOn = src.startsWith(first) && /\S/.test(src[first.length] ?? "")
+    if (end < text.length && (spaces > 0 || !runsOn || sourceRanOn)) {
+      edits.push({ at: end, remove: spaces, insert: pieces[1] })
+    }
+  }
+  const last = pieces[pieces.length - 1].trim()
+  const trail = text.length - text.trimEnd().length
+  const lastStart = text.length - trail - last.length
+  const sameSeparator = pieces.length === 3 && edits.length > 0
+  if (anchorCounts(last) && !sameSeparator && lastStart > 0 && text.startsWith(last, lastStart)) {
+    const spaces = /[ \u00A0]*$/.exec(text.slice(0, lastStart))![0].length
+    const runsOn = isWord(text[lastStart - 1]) && isWord(last[0])
+    const sourceRanOn = src.endsWith(last) && /\S/.test(src[src.length - last.length - 1] ?? "")
+    if (lastStart - spaces > 0 && (spaces > 0 || !runsOn || sourceRanOn)) {
+      edits.push({ at: lastStart - spaces, remove: spaces, insert: pieces[pieces.length - 2] })
+    }
+  }
+  let out = spans
+  for (const edit of edits.sort((a, b) => b.at - a.at)) out = spliceSpans(out, edit.at, edit.remove, edit.insert)
+  return out
+}
+
+/** Spans with `remove` characters at `at` replaced by unmarked `insert`. */
+function spliceSpans(spans: readonly Span[], at: number, remove: number, insert: string): Span[] {
+  const out: Span[] = []
+  let offset = 0
+  let inserted = false
+  for (const span of spans) {
+    const start = offset
+    const end = offset + span.text.length
+    offset = end
+    const keepBefore = span.text.slice(0, Math.max(0, Math.min(span.text.length, at - start)))
+    const keepAfter = span.text.slice(Math.max(0, Math.min(span.text.length, at + remove - start)))
+    if (end <= at || start >= at + remove) {
+      if (!inserted && start >= at) {
+        out.push({ text: insert, marks: new Set(NO_MARKS) })
+        inserted = true
+      }
+      out.push(span)
+      continue
+    }
+    if (keepBefore) out.push({ text: keepBefore, marks: span.marks })
+    if (!inserted) {
+      out.push({ text: insert, marks: new Set(NO_MARKS) })
+      inserted = true
+    }
+    if (keepAfter && end > at + remove) out.push({ text: keepAfter, marks: span.marks })
+  }
+  if (!inserted) out.push({ text: insert, marks: new Set(NO_MARKS) })
   return out
 }
 

@@ -561,3 +561,38 @@ describe("exportDocx — kept looks on a translation that differs from the sourc
     expect(other.xml).not.toContain("superscript")
   })
 })
+
+describe("exportDocx — tabs and breaks of an old import (AQU-2539)", () => {
+  const listLine = para(`<w:r><w:t>KJV</w:t><w:tab/><w:t>King James Version</w:t></w:r>`)
+
+  it("puts the tab back after the unchanged first word, where the old cell had glued them", async () => {
+    // dev's importer dropped the tab: the old cell's source is "KJVKing James Version".
+    const { xml } = await exportedXml(listLine, [cellAt(1, "KJVVersion King James", { original: "KJVKing James Version" })])
+    expect(xml).toContain('KJV</w:t><w:tab/><w:t xml:space="preserve">Version King James</w:t>')
+  })
+
+  it("replaces the space the translation put there with the tab", async () => {
+    const { xml } = await exportedXml(listLine, [cellAt(1, "KJV Version King James", { original: "KJVKing James Version" })])
+    expect(xml).toContain('KJV</w:t><w:tab/><w:t xml:space="preserve">Version King James</w:t>')
+  })
+
+  it("puts a line break back before an unchanged last stretch", async () => {
+    const body = para(`<w:r><w:t xml:space="preserve">Most manuscripts read: </w:t><w:br/><w:t>πας ο αρνουμενος</w:t></w:r>`)
+    const { xml } = await exportedXml(body, [cellAt(1, "La plupart des manuscrits ont : πας ο αρνουμενος", { original: "Most manuscripts read: πας ο αρνουμενος" })])
+    expect(xml).toContain('ont :</w:t><w:br/><w:t xml:space="preserve">πας ο αρνουμενος</w:t>')
+  })
+
+  it("never splits a word that only begins with the same letters, nor uses a lone letter", async () => {
+    const glued = para(`<w:r><w:t>REB</w:t><w:tab/><w:t>Revised English Bible</w:t></w:r>`)
+    const fresh = await exportedXml(glued, [cellAt(1, "REBELLE Bible", { original: "REB\tRevised English Bible" })])
+    expect(fresh.xml).not.toContain("<w:tab/>")
+    const letter = para(`<w:r><w:t>A</w:t><w:tab/><w:t>first item</w:t></w:r>`)
+    const lone = await exportedXml(letter, [cellAt(1, "Avant-premier élément", { original: "Afirst item" })])
+    expect(lone.xml).not.toContain("<w:tab/>")
+  })
+
+  it("leaves a translation that carries its own tabs alone", async () => {
+    const { xml } = await exportedXml(listLine, [cellAt(1, "KJV\tVersion King James", { original: "KJV\tKing James Version" })])
+    expect(xml.match(/<w:tab\/>/g)).toHaveLength(1)
+  })
+})

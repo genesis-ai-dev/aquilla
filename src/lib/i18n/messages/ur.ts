@@ -4534,7 +4534,6 @@ export const ur: Catalog = {
   "importExport.format.txt.description": "راؤنڈ ٹرپ سادہ متن: پیراگراف ساخت رہتی ہے; غیر ترجمہ پیراگراف ماخذ رکھتے ہیں (میڈیا سطریں اپنی نقل نویسی استعمال کرتی ہیں)۔",
   "importExport.format.md.description": "راؤنڈ ٹرپ markdown: سرخیاں، ترتیب وار/بغیر ترتیب فہرستیں اور اقتباس دوبارہ بنتے ہیں; غیر ترجمہ بلاک ماخذ رکھتے ہیں (میڈیا سطریں اپنی نقل نویسی استعمال کرتی ہیں)۔",
   "importExport.format.html.label": "ویب صفحہ",
-  "importExport.format.html.description": "کتاب کا پڑھنے کے قابل صفحہ ایک خود مکتفی فائل میں: باب فہرست، نمبر والی آیات اور حصے کی سرخیاں، جائزہ کاروں اور چھپائی کے لیے۔ غیر ترجمہ سطریں اپنا ماخذ متن دکھاتی ہیں، نشان زد۔ دوبارہ درآمد کے لیے نہیں; پیراگراف ترتیب اور حواشی ابھی نہیں رہتے۔",
   "importExport.format.tsv.label": "دو لسانی TSV",
   "importExport.format.tsv.description": "id/ماخذ/ہدف ٹیب سے الگ، فی قطعہ ایک قطار۔",
   "importExport.format.csv.label": "دو لسانی CSV",

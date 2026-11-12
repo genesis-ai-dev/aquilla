@@ -673,10 +673,15 @@ export const importExport = defineNamespace({
       "Round-trip markdown: headings, ordered/unordered lists and quotes reconstructed; untranslated " +
       "blocks keep source (media lines use their transcription).",
     "importExport.format.html.label": "Web page",
+    // AQU-2224: AQU-2184 taught the page the book's layout, so the description no
+    // longer says it is dropped. Wording approved by Ryder on the ticket
+    // (2026-11-03). The format is offered for a Bible book only (ExportDialog's
+    // `offersHtmlPage`), so there is no sentence for non-scripture files.
     "importExport.format.html.description":
       "A readable page of the book in one self-contained file: chapter index, numbered verses and " +
-      "section headings, for reviewers and printing. Untranslated lines show their source text, " +
-      "marked. Not for re-import; paragraph layout and footnotes are not kept yet.",
+      "section headings, with paragraphs and poetry lines as the book lays them out and each " +
+      "chapter's footnotes listed at its end. For reviewers and printing. Untranslated lines show " +
+      "their source text, marked. Not for re-import.",
     "importExport.format.tsv.label": "Bilingual TSV",
     "importExport.format.tsv.description": "id/source/target tab-separated, one row per segment.",
     "importExport.format.csv.label": "Bilingual CSV",

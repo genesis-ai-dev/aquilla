@@ -35,6 +35,7 @@ vi.mock("@/lib/history/history", () => ({ recordStep: vi.fn(), withGroup: async 
 
 import { RecordingTakes } from "./RecordingTakes"
 import { applyRowOverlays } from "@/components/EditorTable"
+import { clearOptimisticShadows, getOptimisticShadows } from "@/lib/audio/audio-attachments-bus"
 import type { CellData } from "@/hooks/useCells"
 import type { CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
 import type { ProjectRecord } from "@/lib/parsers/types"
@@ -83,7 +84,16 @@ function sized() {
 beforeEach(() => {
   emitted.trims.length = 0
   emitted.renames.length = 0
+  clearOptimisticShadows("f1")
 })
+
+/** The audio read with the trim's overlay applied, as the app reads it while
+ *  the trim is on its way (the overlay replaces the take). */
+function readWithOverlay(base: CellAudioEntry): CellAudioEntry {
+  const shadow = getOptimisticShadows("f1").get("c2")?.find((s) => s.kind === "attach")
+  if (!shadow || shadow.kind !== "attach") throw new Error("the trim painted nothing")
+  return { ...base, attachments: { ...base.attachments, [shadow.att.audioId]: shadow.att } }
+}
 
 describe("the Recording tab's trim, on a take as the text table hands it (AQU-2495)", () => {
   it("the start line stops where the clip's sound would start before 0:00", () => {
@@ -95,5 +105,38 @@ describe("the Recording tab's trim, on a take as the text table hands it (AQU-24
     fireEvent.pointerMove(start, { clientX: 20, buttons: 1 })
     fireEvent.pointerUp(start, { clientX: 20 })
     expect(emitted.trims.map((t) => t.trimStartMs).filter((ms) => (ms as number) < 3_000)).toEqual([])
+  })
+
+  // A trim's overlay stands in for the take until the trim is read back. It
+  // was a hand-picked copy without the take's name or place: the takes list
+  // named the now-nameless take "Take 1" for good (a rename event), and the
+  // next trim's floor read the clip as sitting on its line's start.
+  it("a trim keeps the take's name and its floor while it is on its way", () => {
+    const base = entry()
+    base.attachments[BED] = { ...base.attachments[BED], trimStartMs: 4_000, gainDb: -6, fadeOutMs: 800 } as never
+    const view = draw(applyRowOverlays(line, { audioEntry: base }))
+    sized()
+    // From 4 s (80 px) to 3.5 s (70 px): above the floor, so it saves.
+    let start = screen.getByRole("slider", { name: /start of the kept audio/i })
+    fireEvent.pointerDown(start, { clientX: 80, buttons: 1 })
+    fireEvent.pointerMove(start, { clientX: 70, buttons: 1 })
+    fireEvent.pointerUp(start, { clientX: 70 })
+    expect(emitted.trims.at(-1)).toMatchObject({ audioId: BED, trimStartMs: 3_500 })
+    // The tab now shows the take through the trim's overlay.
+    const shown = readWithOverlay(base)
+    expect(shown.attachments[BED]).toMatchObject({ label: "Music bed", targetOffsetMs: -8_000, gainDb: -6, fadeOutMs: 800 })
+    view.rerender(
+      <RecordingTakes
+        project={project} cell={applyRowOverlays(line, { audioEntry: shown })} cellText="" editable username="dev"
+        session={{ jwt: "j", username: "dev" } as never} onOpenRecording={vi.fn()} onUseAsCellText={vi.fn()}
+      />,
+    )
+    expect(emitted.renames).toEqual([])
+    sized()
+    start = screen.getByRole("slider", { name: /start of the kept audio/i })
+    fireEvent.pointerDown(start, { clientX: 70, buttons: 1 })
+    fireEvent.pointerMove(start, { clientX: 20, buttons: 1 })
+    fireEvent.pointerUp(start, { clientX: 20 })
+    expect(emitted.trims.at(-1)).toMatchObject({ audioId: BED, trimStartMs: 3_000 })
   })
 })
